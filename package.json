@@ -34,6 +34,7 @@
     "validate-schemas": "node tooling/validation/schema-validator.js",
     "codegen": "pnpm --filter nexus-codegen run build && pnpm --filter nexus-codegen run codegen && pnpm --filter @42ch/nexus-contracts run build",
     "codegen:watch": "pnpm --filter nexus-codegen run build && pnpm --filter nexus-codegen run dev",
-    "publish:contracts": "cd packages/nexus-contracts && pnpm run publish:public"
+    "publish:contracts": "cd packages/nexus-contracts && pnpm run publish:public",
+    "sidecar": "bash scripts/fetch-sidecar.sh"
   }
 }

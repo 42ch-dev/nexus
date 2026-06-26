@@ -8,6 +8,7 @@
 
 use crate::api::errors::NexusApiError;
 use crate::api::handlers::works::{read_active_creator_id, read_active_workspace_slug, WorkApiDto};
+use crate::api::path_guard::resolve_guarded_path;
 use crate::capability_registry::host_tool_registry;
 use crate::workspace::WorkspaceState;
 use nexus_kb::KbStore;
@@ -1377,7 +1378,21 @@ async fn execute_manuscript_chapter_update(
                 let wr = work_record.work_ref.as_deref().unwrap_or(work_id);
                 format!("Works/{wr}/Stories/{ch_nn}-{ch_nn}.md")
             });
-        let body_file = Path::new(&workspace_root).join(&canonical_path);
+
+        // W-002: defense-in-depth path guard — ensure the resolved body path
+        // stays inside the workspace root before any FS op. Mirrors the chapter
+        // PUT handler's resolve_guarded_path behavior.
+        let body_file = resolve_guarded_path(Path::new(&workspace_root), &canonical_path, false)
+            .map_err(|e| match e {
+                NexusApiError::BadRequest { code, .. } if code == "CHAPTER_PATH_FORBIDDEN" => {
+                    NexusApiError::InvalidInput {
+                        field: "body_path".into(),
+                        reason: "body path outside workspace root".into(),
+                    }
+                }
+                other => other,
+            })?;
+
         if let Some(parent) = body_file.parent() {
             // C-002: use tokio::fs to avoid blocking the async runtime.
             tokio::fs::create_dir_all(parent)
@@ -1397,6 +1412,21 @@ async fn execute_manuscript_chapter_update(
                 code: "FILE_WRITE_FAILED".into(),
                 message: format!("failed to write chapter body: {e}"),
             })?;
+        // Durability: fsync temp file before the atomic rename.
+        let tmp_handle =
+            tokio::fs::File::open(&tmp_file)
+                .await
+                .map_err(|e| NexusApiError::Internal {
+                    code: "FILE_SYNC_FAILED".into(),
+                    message: format!("failed to open temp file for fsync: {e}"),
+                })?;
+        tmp_handle
+            .sync_all()
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "FILE_SYNC_FAILED".into(),
+                message: format!("failed to fsync temp file: {e}"),
+            })?;
         // W-003: store the relative canonical path in the DB, matching
         // the seed_chapters convention (Works/{work_ref}/Stories/{slug}.md).
         Some(canonical_path)
@@ -1409,13 +1439,25 @@ async fn execute_manuscript_chapter_update(
     // DB row is only updated when the final file is in place.
     if let Some(ref bp) = body_path {
         // W-003: bp is a relative canonical path; resolve to absolute for FS ops.
+        // W-002: re-apply the path guard before the FS rename so the tx block
+        // cannot be reached with an escaped path even if the earlier guard were
+        // bypassed.
         let workspace_root = state
             .workspace_path()
             .ok_or_else(|| NexusApiError::Internal {
                 code: "WORKSPACE_PATH_ERROR".to_string(),
                 message: "workspace path not available".to_string(),
             })?;
-        let abs_body = Path::new(&workspace_root).join(bp);
+        let abs_body =
+            resolve_guarded_path(Path::new(&workspace_root), bp, false).map_err(|e| match e {
+                NexusApiError::BadRequest { code, .. } if code == "CHAPTER_PATH_FORBIDDEN" => {
+                    NexusApiError::InvalidInput {
+                        field: "body_path".into(),
+                        reason: "body path outside workspace root".into(),
+                    }
+                }
+                other => other,
+            })?;
         let abs_tmp = abs_body.with_extension("md.tmp");
         let word_count = req.parameters["content"]
             .as_str()
@@ -1455,6 +1497,22 @@ async fn execute_manuscript_chapter_update(
                 message: format!("failed to finalize chapter file: {e}"),
             }
         })?;
+        // Durability: fsync the final file after the atomic rename so a crash
+        // after rename() returns does not leave the rename unflushed.
+        let final_handle =
+            tokio::fs::File::open(&abs_body)
+                .await
+                .map_err(|e| NexusApiError::Internal {
+                    code: "FILE_SYNC_FAILED".into(),
+                    message: format!("failed to open final file for fsync: {e}"),
+                })?;
+        final_handle
+            .sync_all()
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "FILE_SYNC_FAILED".into(),
+                message: format!("failed to fsync final file: {e}"),
+            })?;
         tx.commit().await.map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
             message: format!("chapter update tx commit: {e}"),
@@ -2170,42 +2228,20 @@ async fn execute_manuscript_write(
             message: "workspace path not available".to_string(),
         })?;
     let workspace_root_path = Path::new(&workspace_root);
-    let abs_body = workspace_root_path.join(&body_path);
 
     // W-002: defense-in-depth path guard — ensure body_path (DB-sourced) resolves
-    // within the workspace root before any FS op. Mirrors the fs/* guard in
-    // `validate_file_path`: canonicalize both when the target exists, otherwise
-    // fall back to a lexical check on the absolute joined path. (A future shared
-    // helper is tracked as qc2 S-001/S-002; intentionally inlined here.)
-    if abs_body.exists() {
-        let canonical_body = abs_body
-            .canonicalize()
-            .map_err(|e| NexusApiError::InvalidInput {
-                field: "body_path".into(),
-                reason: format!("body path cannot be resolved: {e}"),
-            })?;
-        let canonical_workspace =
-            workspace_root_path
-                .canonicalize()
-                .map_err(|e| NexusApiError::Internal {
-                    code: "WORKSPACE_PATH_INVALID".into(),
-                    message: format!("workspace root cannot be resolved: {e}"),
-                })?;
-        if !canonical_body.starts_with(&canonical_workspace) {
-            return Err(NexusApiError::InvalidInput {
-                field: "body_path".into(),
-                reason: "body path outside workspace root".into(),
-            });
-        }
-    } else {
-        let abs_body_str = abs_body.display().to_string();
-        if !abs_body_str.starts_with(&workspace_root) {
-            return Err(NexusApiError::InvalidInput {
-                field: "body_path".into(),
-                reason: "body path outside workspace root".into(),
-            });
-        }
-    }
+    // within the workspace root before any FS op. Uses the same canonicalize +
+    // component-wise prefix-check helper as the chapter PUT handler.
+    let abs_body =
+        resolve_guarded_path(workspace_root_path, &body_path, false).map_err(|e| match e {
+            NexusApiError::BadRequest { code, .. } if code == "CHAPTER_PATH_FORBIDDEN" => {
+                NexusApiError::InvalidInput {
+                    field: "body_path".into(),
+                    reason: "body path outside workspace root".into(),
+                }
+            }
+            other => other,
+        })?;
 
     // Ensure parent directory exists.
     if let Some(parent) = abs_body.parent() {
@@ -2224,6 +2260,21 @@ async fn execute_manuscript_write(
         .map_err(|e| NexusApiError::Internal {
             code: "FILE_WRITE_FAILED".into(),
             message: format!("failed to write manuscript body: {e}"),
+        })?;
+    // Durability: fsync temp file before the atomic rename.
+    let tmp_handle =
+        tokio::fs::File::open(&tmp_file)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "FILE_SYNC_FAILED".into(),
+                message: format!("failed to open temp file for fsync: {e}"),
+            })?;
+    tmp_handle
+        .sync_all()
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "FILE_SYNC_FAILED".into(),
+            message: format!("failed to fsync temp file: {e}"),
         })?;
 
     // W-001: wrap the DB word-count update + atomic rename in a single
@@ -2268,6 +2319,22 @@ async fn execute_manuscript_write(
             message: format!("failed to finalize manuscript file: {e}"),
         }
     })?;
+    // Durability: fsync the final file after the atomic rename so a crash
+    // after rename() returns does not leave the rename unflushed.
+    let final_handle =
+        tokio::fs::File::open(&abs_body)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "FILE_SYNC_FAILED".into(),
+                message: format!("failed to open final file for fsync: {e}"),
+            })?;
+    final_handle
+        .sync_all()
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "FILE_SYNC_FAILED".into(),
+            message: format!("failed to fsync final file: {e}"),
+        })?;
     tx.commit().await.map_err(|e| NexusApiError::Internal {
         code: "DATABASE_ERROR".to_string(),
         message: format!("manuscript.write tx commit: {e}"),

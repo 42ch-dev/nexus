@@ -1,0 +1,12 @@
+# Tauri build artifacts (standalone crate — NOT in the root Cargo workspace).
+/target
+/gen
+
+# P1 sidecar binaries (target-triple-suffixed). The placeholder README stays.
+/binaries/*
+!/binaries/README.md
+
+# Generated icons are checked in for V1.66 P1 unsigned dev builds so CI can
+# bundle the .app without a designer asset pipeline. Replace with real artwork
+# before the first public release.
+# If you regenerate locally, commit the resulting set.

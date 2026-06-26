@@ -32,6 +32,7 @@ use crate::api::errors::NexusApiError;
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
 use axum::Json;
+use nexus_contracts::PaginationInfo;
 use nexus_home_layout::validate_entry_id_safe;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -65,13 +66,6 @@ pub struct KbEntrySummary {
 pub struct ListKbEntriesResponse {
     pub items: Vec<KbEntrySummary>,
     pub pagination: PaginationInfo,
-}
-
-#[derive(Debug, Serialize)]
-pub struct PaginationInfo {
-    pub limit: usize,
-    pub next_cursor: Option<String>,
-    pub has_more: bool,
 }
 
 #[derive(Debug, Deserialize)]
@@ -416,7 +410,7 @@ pub async fn list_entries(
     Ok(Json(ListKbEntriesResponse {
         items,
         pagination: PaginationInfo {
-            limit,
+            limit: i64::try_from(limit).unwrap_or(i64::MAX),
             has_more: next_cursor.is_some(),
             next_cursor,
         },

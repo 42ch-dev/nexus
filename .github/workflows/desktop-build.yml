@@ -1,0 +1,101 @@
+name: Desktop Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/web/**'
+      - 'apps/desktop/**'
+      - 'packages/nexus-contracts/**'
+      - 'crates/**'
+      - 'pnpm-lock.yaml'
+      - 'package.json'
+      - 'pnpm-workspace.yaml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/web/**'
+      - 'apps/desktop/**'
+      - 'packages/nexus-contracts/**'
+      - 'crates/**'
+      - 'pnpm-lock.yaml'
+      - 'package.json'
+      - 'pnpm-workspace.yaml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - '.github/workflows/**'
+
+concurrency:
+  group: desktop-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  SQLX_OFFLINE: "true"
+
+jobs:
+  desktop-build:
+    name: Build unsigned macOS desktop app
+    runs-on: macos-14
+    # F1: single-arch native aarch64 build fits the 6h Actions budget; fail fast
+    # if something hangs. macos-13 (Intel) is deprecated and no longer provisions,
+    # which caused the previous x86_64 job to hang at "Waiting for a runner...".
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      - uses: pnpm/action-setup@eae0cfeb286e66ffb5155f1a79b90583a127a68b  # v2
+        with:
+          version: 9
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        with:
+          # F1: native aarch64 on macos-14 (Apple Silicon runner). Intel-Mac
+          # support is a V1.67+ multi-arch concern; V1.66 ships an unsigned
+          # aarch64-native dev build for the developer/contributor audience.
+          # wasm32-unknown-unknown is required because nexus42 embeds the
+          # `basic-combat` WASM module via nexus-wasm-host's build script.
+          targets: aarch64-apple-darwin, wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+        with:
+          key: desktop-macos-aarch64
+          workspaces: |
+            .
+            apps/desktop/src-tauri
+
+      - name: Install pnpm dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build contracts package
+        run: pnpm --filter @42ch/nexus-contracts run build
+
+      - name: Build Tauri desktop bundle (native aarch64 — macos-14 host)
+        # No explicit `--target`: macos-14 IS aarch64 (Apple Silicon), so a
+        # host-arch build produces the aarch64 .app natively AND lands the
+        # binary at target/release/ where Tauri's bundler expects it. Passing
+        # `--target aarch64-apple-darwin` on the host arch confuses Tauri's
+        # bundler path lookup (binary at target/<triple>/release/ but bundler
+        # looks at target/release/ → "can't open main binary").
+        run: pnpm --filter desktop tauri build
+
+      - name: Upload unsigned .app + .dmg artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: nexus-desktop-macos-aarch64
+          path: |
+            apps/desktop/src-tauri/target/release/bundle/macos/Nexus.app
+            apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg
+          retention-days: 90
