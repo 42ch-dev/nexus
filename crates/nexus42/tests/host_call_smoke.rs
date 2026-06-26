@@ -133,10 +133,10 @@ mod tests {
             Err(e) => {
                 let msg = e.to_string();
                 assert!(
-                    msg.contains("FORBIDDEN")
-                        || msg.contains("INVALID_INPUT")
-                        || msg.contains("POLICY_BLOCKED")
-                        || msg.contains("NOT_FOUND"),
+                    msg.contains("forbidden")
+                        || msg.contains("invalid_input")
+                        || msg.contains("policy_blocked")
+                        || msg.contains("not_found"),
                     "unexpected error: {msg}"
                 );
             }
@@ -160,9 +160,9 @@ mod tests {
             Err(e) => {
                 let msg = e.to_string();
                 assert!(
-                    msg.contains("POLICY_BLOCKED")
-                        || msg.contains("FORBIDDEN")
-                        || msg.contains("NOT_SUPPORTED"),
+                    msg.contains("policy_blocked")
+                        || msg.contains("forbidden")
+                        || msg.contains("not_supported"),
                     "unexpected error: {msg}"
                 );
             }

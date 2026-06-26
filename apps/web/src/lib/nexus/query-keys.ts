@@ -25,7 +25,7 @@ export const queryKeys = {
   },
   capabilities: {
     all: ['capabilities'] as const,
-    list: () => [...queryKeys.capabilities.all, 'list'] as const,
+    list: (query?: object) => [...queryKeys.capabilities.all, 'list', query ?? {}] as const,
   },
   findings: {
     all: ['findings'] as const,

@@ -17,6 +17,7 @@ import type {
   CreateWorkRequest,
   CreateWorkResponse,
   InspectScheduleResponse,
+  ListCapabilitiesQuery,
   ListCapabilitiesResponse,
   ListChaptersQuery,
   ListChaptersResponse,
@@ -125,8 +126,8 @@ export class BrowserClient implements NexusClient {
   }
 
   // ── Capabilities ───────────────────────────────────────────────────────────
-  listCapabilities(): Promise<ListCapabilitiesResponse> {
-    return this.get<ListCapabilitiesResponse>('/v1/local/orchestration/capabilities');
+  listCapabilities(query?: ListCapabilitiesQuery): Promise<ListCapabilitiesResponse> {
+    return this.get<ListCapabilitiesResponse>('/v1/local/orchestration/capabilities', query);
   }
 
   // ── Findings ───────────────────────────────────────────────────────────────

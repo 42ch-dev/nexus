@@ -27,12 +27,12 @@ pub fn encode_offset_cursor(offset: u32) -> String {
 /// Decode an opaque cursor token into the underlying row offset.
 ///
 /// Returns `Ok(0)` when `cursor` is `None` (first page). Returns
-/// `NexusApiError::BadRequest { code: "INVALID_INPUT" }` (HTTP 400) when the
+/// `NexusApiError::BadRequest { code: "invalid_input" }` (HTTP 400) when the
 /// token is malformed — callers surface this as the canonical
-/// `<resource>_cursor_invalid` / `INVALID_INPUT` error per convention §3.2.
+/// `<resource>_cursor_invalid` / `invalid_input` error per convention §3.2.
 ///
 /// # Errors
-/// - `NexusApiError::BadRequest` (`INVALID_INPUT`) if the cursor is present
+/// - `NexusApiError::BadRequest` (`invalid_input`) if the cursor is present
 ///   but not a `v1:`-prefixed non-negative integer.
 pub fn decode_offset_cursor(cursor: &Option<String>) -> Result<u32, NexusApiError> {
     match cursor {
@@ -42,7 +42,7 @@ pub fn decode_offset_cursor(cursor: &Option<String>) -> Result<u32, NexusApiErro
                 raw.strip_prefix(CURSOR_PREFIX)
                     .ok_or_else(|| {
                         NexusApiError::BadRequest {
-                    code: "INVALID_INPUT".to_string(),
+                    code: "invalid_input".to_string(),
                     message:
                         "invalid pagination cursor; pass the `next_cursor` value returned by the \
                          previous response unchanged"
@@ -52,7 +52,7 @@ pub fn decode_offset_cursor(cursor: &Option<String>) -> Result<u32, NexusApiErro
             stripped
                 .parse::<u32>()
                 .map_err(|_| NexusApiError::BadRequest {
-                    code: "INVALID_INPUT".to_string(),
+                    code: "invalid_input".to_string(),
                     message:
                         "invalid pagination cursor; pass the `next_cursor` value returned by the \
                      previous response unchanged"

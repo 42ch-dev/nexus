@@ -1,23 +1,41 @@
 //! Capabilities listing handler.
 
+use crate::api::errors::NexusApiError;
+use crate::api::pagination::{decode_offset_cursor, encode_offset_cursor};
+use crate::api::sort::parse_sort_terms;
 use crate::workspace::WorkspaceState;
-use axum::{extract::State, http::StatusCode, Json};
-use nexus_contracts::local::orchestration::http::{CapabilityInfo, ListCapabilitiesResponse};
+use axum::{
+    extract::{Query, State},
+    Json,
+};
+use nexus_contracts::local::orchestration::http::{
+    CapabilityInfo, ListCapabilitiesQuery, ListCapabilitiesResponse,
+};
+use nexus_contracts::PaginationInfo;
 
 /// `GET /v1/local/orchestration/capabilities`
+///
+/// # Errors
+/// Returns `NexusApiError::BadRequest` if `sort` contains an unsupported key
+/// or invalid syntax.
 pub async fn list_capabilities(
     State(state): State<WorkspaceState>,
-) -> (StatusCode, Json<ListCapabilitiesResponse>) {
+    Query(query): Query<ListCapabilitiesQuery>,
+) -> Result<Json<ListCapabilitiesResponse>, NexusApiError> {
+    let sort_terms = parse_sort_terms(query.sort.as_deref(), &["name"], "capability")?;
+
     let Some(registry) = state.capability_registry() else {
-        return (
-            StatusCode::SERVICE_UNAVAILABLE,
-            Json(ListCapabilitiesResponse {
-                capabilities: Vec::new(),
-            }),
-        );
+        return Ok(Json(ListCapabilitiesResponse {
+            items: Vec::new(),
+            pagination: PaginationInfo {
+                limit: i64::from(query.limit.unwrap_or(100).min(500)),
+                next_cursor: None,
+                has_more: false,
+            },
+        }));
     };
 
-    let capabilities: Vec<CapabilityInfo> = registry
+    let mut capabilities: Vec<CapabilityInfo> = registry
         .iter()
         .map(|cap| CapabilityInfo {
             name: cap.name().to_string(),
@@ -26,8 +44,41 @@ pub async fn list_capabilities(
         })
         .collect();
 
-    (
-        StatusCode::OK,
-        Json(ListCapabilitiesResponse { capabilities }),
-    )
+    capabilities.sort_by(|a, b| {
+        for (key, ascending) in &sort_terms {
+            let ord = match key.as_str() {
+                "name" => a.name.cmp(&b.name),
+                _ => std::cmp::Ordering::Equal,
+            };
+            let ord = if *ascending { ord } else { ord.reverse() };
+            if ord != std::cmp::Ordering::Equal {
+                return ord;
+            }
+        }
+        std::cmp::Ordering::Equal
+    });
+
+    let offset = decode_offset_cursor(&query.cursor)?;
+    let limit = query.limit.unwrap_or(100).min(500);
+    let total = capabilities.len();
+    let start = usize::try_from(offset).unwrap_or(0).min(total);
+    let end = start
+        .saturating_add(usize::try_from(limit).unwrap_or(total))
+        .min(total);
+    let page_items: Vec<CapabilityInfo> = capabilities.drain(start..end).collect();
+    let has_more = end < total;
+    let next_cursor = if has_more {
+        Some(encode_offset_cursor(offset.saturating_add(limit)))
+    } else {
+        None
+    };
+
+    Ok(Json(ListCapabilitiesResponse {
+        items: page_items,
+        pagination: PaginationInfo {
+            limit: i64::from(limit),
+            next_cursor,
+            has_more,
+        },
+    }))
 }
