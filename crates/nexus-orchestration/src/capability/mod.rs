@@ -191,6 +191,8 @@ impl CapabilityRegistry {
             Box::new(builtins::ScriptProjectScaffold::new()),
             // V1.56 P-last R-V155P2-F002: game_bible.section_status.update
             Box::new(builtins::GameBibleSectionStatusUpdate::new()),
+            // V1.67 P2 (R-V160P1-QC1-W001): script.section_status.update
+            Box::new(builtins::ScriptSectionStatusUpdate::new()),
             // V1.58 P1: nexus.reference.refresh (pool-less; returns WorkerUnavailable)
             Box::new(builtins::ReferenceRefresh::new()),
             // V1.60 P0: DF-46 local parity — 5 orchestration-scope capabilities
@@ -258,6 +260,8 @@ impl CapabilityRegistry {
             Box::new(builtins::ScriptProjectScaffold::with_pool(pool.clone())),
             // V1.56 P-last R-V155P2-F002: game_bible.section_status.update
             Box::new(builtins::GameBibleSectionStatusUpdate::new()),
+            // V1.67 P2 (R-V160P1-QC1-W001): script.section_status.update
+            Box::new(builtins::ScriptSectionStatusUpdate::new()),
             // V1.58 P1: nexus.reference.refresh with pool
             Box::new(builtins::ReferenceRefresh::with_pool(pool.clone())),
             // V1.60 P0: DF-46 local parity — 5 orchestration-scope capabilities.
@@ -480,6 +484,8 @@ impl CapabilityRegistry {
             ),
             // V1.56 P-last R-V155P2-F002: game_bible.section_status.update
             Box::new(builtins::GameBibleSectionStatusUpdate::new()),
+            // V1.67 P2 (R-V160P1-QC1-W001): script.section_status.update
+            Box::new(builtins::ScriptSectionStatusUpdate::new()),
             // V1.58 P1: nexus.reference.refresh with pool from runtime deps
             Box::new(
                 deps.pool
