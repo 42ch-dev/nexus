@@ -3,8 +3,8 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-06-26-v1.67-local-api-surface-convergence"
-verdict: "Request Changes"
-generated_at: "2026-06-26T13:39:03Z"
+verdict: "Approve"
+generated_at: "2026-06-26T14:54:21Z"
 focus: "performance_reliability"
 ---
 # Code Review Report
@@ -79,3 +79,40 @@ focus: "performance_reliability"
 | 🟢 Suggestion | 1 |
 
 **Verdict**: Request Changes
+
+## Revalidation (fix-wave-1)
+
+### Scope
+- plan_id: 2026-06-26-v1.67-local-api-surface-convergence
+- Review range / Diff basis: P0 fix-wave-1 (`24b5914b`+`d9102609`) at `6d0624e7`. `git log 3b9d14a1..6d0624e7`.
+- Working branch (verified): iteration/v1.67
+- Review cwd (verified): /Users/bibi/workspace/organizations/42ch/nexus
+- Revalidation focus: prior QC3 findings W-QC3-001, W-QC3-002, W-QC3-003 only.
+
+### Evidence reviewed
+- `git rev-parse --show-toplevel` → `/Users/bibi/workspace/organizations/42ch/nexus`
+- `git branch --show-current` → `iteration/v1.67`
+- `git rev-parse HEAD` → `6d0624e7091abcf48c1c5ec38e3adc9565a0cc49`
+- `git log --oneline 3b9d14a1..6d0624e7` includes fix-wave commits `24b5914b` and `d9102609`, plus merge commit `3fc4d283` at the reviewed integration line.
+- `crates/nexus-local-db/src/works.rs:560-639` now executes `list_and_count_works` through `list_works_inner` with SQL `ORDER BY {order_sql} LIMIT ? OFFSET ?`; sort columns are allowlisted and `work_id ASC` is appended as a deterministic tie-breaker.
+- `crates/nexus-daemon-runtime/src/api/handlers/orchestration/schedules.rs:646-718` now builds dynamic SQL with WHERE filters, allowlisted `ORDER BY`, `LIMIT ? OFFSET ?`, a matching `COUNT(*)` query, and maps only the returned page rows to `ScheduleSummary`.
+- `crates/nexus-daemon-runtime/src/api/errors.rs:220-233` now exposes `BadRequest` codes ending in `_sort_invalid` instead of collapsing them to `bad_request`.
+- Sort regression coverage exists in `crates/nexus-daemon-runtime/tests/works_api.rs:249-307`, `crates/nexus-daemon-runtime/tests/fl_e_schedule_api.rs:496-563`, `crates/nexus-daemon-runtime/tests/sort_contract.rs:60-132`, and parser unit tests in `crates/nexus-daemon-runtime/src/api/sort.rs:52-119`.
+
+### Per-finding disposition
+- **W-QC3-001 — Resolved.** Works and schedules no longer materialize the full filtered DB-backed list for sort+pagination. Works now passes parsed sort terms, `limit`, and `offset` into the local-db layer, where the selected page is produced by SQL `ORDER BY ... LIMIT ... OFFSET`. Schedules likewise uses SQL ordering/pagination plus a separate count query. The remaining in-memory sorting paths are sessions and capabilities (`sessions.rs`, `capabilities.rs`), which are bounded/in-memory resources and acceptable under the assignment.
+- **W-QC3-002 — Resolved.** Resource-specific `<resource>_sort_invalid` codes are now public on the wire via the `_sort_invalid` suffix passthrough in `NexusApiError::error_code()`. Endpoint tests assert `work_sort_invalid` and `schedule_sort_invalid`; `sort_contract.rs` covers `session_sort_invalid` and `capability_sort_invalid`.
+- **W-QC3-003 — Resolved.** Executable sort coverage now verifies Works and Schedules ordering, cursor pagination under sorted pages, and invalid-key response codes. `sort_contract.rs` adds coverage for the bounded in-memory resources, and `api::sort` unit tests cover parser edge cases and multi-key precedence.
+
+### Validation commands
+- `cargo test -p nexus-daemon-runtime list_works_sort --test works_api` → 2 passed.
+- `cargo test -p nexus-daemon-runtime schedule_list_sort --test fl_e_schedule_api` → 2 passed.
+- `cargo test -p nexus-daemon-runtime --test sort_contract` → 4 passed.
+- `cargo test -p nexus-daemon-runtime api::sort` → 8 parser tests passed; integration binaries selected 0 tests for the filter. Existing unrelated warnings were emitted from `agent_tool_api`, `workspace_occ_concurrent`, and `findings_api` test targets during compilation.
+- `cargo test -p nexus-daemon-runtime sort_key --test works_api` → 1 passed.
+- `cargo test -p nexus-daemon-runtime sort_key --test fl_e_schedule_api` → 1 passed.
+
+### Revalidation verdict
+All three prior QC3 warnings targeted in fix-wave-1 are resolved. No new performance/reliability blocker was found in the revalidated scope.
+
+**Verdict**: Approve
