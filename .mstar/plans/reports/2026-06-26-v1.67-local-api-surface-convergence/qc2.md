@@ -83,3 +83,28 @@ generated_at: "2026-06-26"
 **Verdict**: Request Changes
 
 (The sort-invalid wire code mismatch is a spec non-conformance that must be fixed before merge. The CASING internal classification finding is acceptable with the evidence above; no action required on that item.)
+
+## Revalidation (fix-wave-1)
+
+**plan_id**: 2026-06-26-v1.67-local-api-surface-convergence  
+**Review range / Diff basis**: P0 fix-wave-1 (24b5914b + d9102609) at 6d0624e7  
+**Revalidated**: W-1 (F-F1 unknown sort-key emits generic `bad_request`)
+
+### Verification performed
+- Verified cwd: `/Users/bibi/workspace/organizations/42ch/nexus`, branch: `iteration/v1.67`, HEAD: `6d0624e7`.
+- Inspected fix-wave diff (24b5914b): `crates/nexus-daemon-runtime/src/api/errors.rs` now contains:
+  - Comment: `// V1.67 F-F1: resource-specific sort-invalid codes are also public.`
+  - Passthrough arm: `_ if code.ends_with("_sort_invalid") => code.as_str(),`
+- Confirmed `sort.rs:39` (and call sites in handlers) still constructs `NexusApiError::BadRequest { code: format!("{resource}_sort_invalid"), ... }`.
+- Integration assertions (post-fix):
+  - `tests/sort_contract.rs:92`: `body["error"]["code"] == "session_sort_invalid"`
+  - `tests/sort_contract.rs:131`: `body["error"]["code"] == "capability_sort_invalid"`
+  - `tests/works_api.rs:306`: `body["error"]["code"] == "work_sort_invalid"`
+  - `tests/fl_e_schedule_api.rs:562`: `body["error"]["code"] == "schedule_sort_invalid"`
+- Ran: `cargo test -p nexus-daemon-runtime --test sort_contract` → 4/4 passed (including the two invalid-key cases).
+- Confirmed wire path: `to_response_body()` → `error_code()` → `ApiErrorDetail.code` now returns the resource-specific string (e.g. `work_sort_invalid`), not `bad_request`.
+
+### Conclusion
+W-1 (F-F1) is **Resolved**. Unknown sort keys now emit the resource-specific code on the wire (`*_sort_invalid`) as specified. The prior blocking Warning is closed. The CASING item (non-blocking) remains acceptable.
+
+**Updated Verdict**: Approve
