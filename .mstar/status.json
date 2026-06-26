@@ -168,8 +168,10 @@
         "V1.66": 1,
         "V1.66+": 1
       },
-      "refreshed_at": "2026-06-25T19:05:28Z",
-      "refreshed_reason": "P-last closeout: post-QC+QA; 10 V1.66 QC Suggestions registered as deferred V1.67+ residuals"
+    "refreshed_at": "2026-06-25T19:05:28Z",
+    "refreshed_reason": "P-last closeout: post-QC+QA; 10 V1.66 QC Suggestions registered as deferred V1.67+ residuals",
+    "inaccurate_as_of": "2026-06-26",
+    "inaccurate_reason": "total_open=4 but actual open=30; V1.67 P-last AC2 refreshes/retires this rollup"
     },
     "updated_at": "2026-06-26T00:00:00Z",
     "spec_integration_branch": "iteration/v1.67",

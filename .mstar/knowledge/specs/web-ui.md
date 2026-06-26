@@ -315,7 +315,7 @@ A Tauri v2 desktop wrapper layered around the transport-unchanged V1.65 SPA, plu
 
 ### 14.3 Non-goals for V1.66 (durable V1.67+ roadmap)
 
-- **Body full-text editor + per-chapter edit lock** — **V1.67 lead authoring slice**. Lock design + MD round-trip + frontmatter sync + conflict policy. V1.66 renders body read-only.
+- **Body full-text editor + per-chapter edit lock** — **V1.67 lead authoring slice**. Lock design + MD round-trip + frontmatter sync + conflict policy. V1.66 renders body read-only. *(2026-06-26 update: V1.67 was re-scoped to hygiene-lead; body editor implement is now V1.68 — see §15.3.)*
 - **UI productivity wave** — **V1.67**. Drag-reorder, bulk ops, reconcile trigger, outline templates.
 - **Windows + Linux + signing + notarization + GitHub Releases + auto-update** — **V1.67+**. The unsigned `.app` is the V1.66 deliverable. (Until signing lands, the no-Gatekeeper-friction author win is not realized — V1.66's user is the developer/contributor; see §14.4.)
 - **In-process `nexus-daemon-runtime` lib link; system tray / menu-bar / hotkeys / notifications; mobile** — **V1.67+ / post-V1.67**.

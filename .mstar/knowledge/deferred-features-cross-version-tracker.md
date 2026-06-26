@@ -88,7 +88,7 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 **Active iteration**: V1.67 Active prepare (2026-06-26) — Local API Surface Convergence & De-risk (hygiene-lead); next: V1.68 (body full-text editor + per-chapter lock implement + UI productivity + desktop distribution v2)
 
-**Latest shipped**: [V1.63](../iterations/v1.63-essay-profile-and-local-api-foundation-delivery-compass-v1.md) (Essay Profile Closure & Local API Foundation, PR #86)
+**Latest shipped**: [V1.66](../iterations/v1.66-tauri-desktop-shell-delivery-compass-v1.md) (Tauri Desktop Shell, PR #90 — 2026-06-26)
 
 **Full iteration index**: [iterations/README.md](../iterations/README.md)
 
