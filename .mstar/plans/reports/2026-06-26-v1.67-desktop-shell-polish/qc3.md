@@ -3,8 +3,8 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-06-26-v1.67-desktop-shell-polish"
-verdict: "Request Changes"
-generated_at: "2026-06-26T13:41:20Z"
+verdict: "Approve"
+generated_at: "2026-06-26T14:56:08Z"
 ---
 
 # Code Review Report
@@ -80,3 +80,27 @@ None.
 | 🟢 Suggestion | 1 |
 
 **Verdict**: Request Changes
+
+## Revalidation (fix-wave-1)
+
+### Scope
+- plan_id: `2026-06-26-v1.67-desktop-shell-polish`
+- Review range / Diff basis: P-sec fix-wave-1 (`feature/v1.67-psec-fixwave1` commits `501d39ad`+`30da2856`+`628b92c1`) at `6d0624e7`. `git log 3b9d14a1..6d0624e7`.
+- Working branch (verified): `iteration/v1.67`
+- Review cwd (verified): `/Users/bibi/workspace/organizations/42ch/nexus`
+- Current HEAD during revalidation: `5a037e16` (includes assigned fix-wave-1 merge commit `6d0624e7` plus later QC/report commits)
+- Files re-reviewed: `apps/web/src/components/layout/daemon-status-bar.tsx`, `apps/web/src/components/layout/daemon-status-bar.test.tsx`, `apps/desktop/src-tauri/src/sidecar.rs`, `apps/desktop/src-tauri/src/lib.rs`
+- Tools run: env bootstrap; `pwd`; `git rev-parse --show-toplevel`; `git branch --show-current`; `git rev-parse --short=8 HEAD`; `git status --short`; `git log --oneline 3b9d14a1..6d0624e7`; `git show --stat --oneline 501d39ad 30da2856 628b92c1`; `git diff --stat 3b9d14a1..6d0624e7 -- apps/desktop/src-tauri/src/sidecar.rs apps/web/src/components/layout/daemon-status-bar.tsx apps/web/src/components/layout/daemon-status-bar.test.tsx`; focused `grep` / `read`; `cargo test --lib` in `apps/desktop/src-tauri`; `pnpm --filter web test -- --run src/components/layout/daemon-status-bar.test.tsx`
+
+### Prior Findings
+
+- **W-001 — Resolved.** `DaemonStatusBar` now defines `STATUS_SYNC_INTERVAL_MS = 10_000`, performs the initial `getDaemonStatus()`, subscribes to `onDaemonStatusChanged()` for primary event-driven updates, then starts a low-frequency `setInterval(() => void refresh(), STATUS_SYNC_INTERVAL_MS)` fallback. The cleanup calls `unlisten?.()` and `clearInterval(syncInterval)`, so the fallback is calm, bounded to the component lifetime, and does not reintroduce the old hot 5s poll loop. The targeted web test `falls back to periodic health re-sync when no event is received` verifies the initial call plus one 10s fallback tick.
+- **W-002 — Resolved.** `SidecarManager` now splits manual `start_daemon()` from automatic `start()`: manual calls route through `start_with_budget(app, true)` and reset `restart_count`; app-launch / monitor-driven automatic starts route through `start_with_budget(app, false)` and preserve the crash budget. `handle_crash()` still gates on `attempts >= MAX_RESTART_ATTEMPTS` before restart, increments the budget only on a crash restart attempt, and calls automatic `self.start(app).await`, so repeated crash cycles can reach the cap. Regression tests `start_daemon_resets_crash_budget` and `crash_restart_stops_when_budget_exhausted` exist and passed.
+
+### Validation Evidence
+- `apps/desktop/src-tauri`: `cargo test --lib` — **PASS** (18 passed; includes `start_daemon_resets_crash_budget` and `crash_restart_stops_when_budget_exhausted`).
+- repo root: `pnpm --filter web test -- --run src/components/layout/daemon-status-bar.test.tsx` — **PASS** (8 tests passed; includes the fallback re-sync test). React Router future-flag warnings were emitted but are unrelated to this fix-wave.
+
+### Revalidation Verdict
+
+**Verdict**: Approve
