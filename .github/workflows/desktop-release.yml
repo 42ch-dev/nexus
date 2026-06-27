@@ -1,9 +1,6 @@
 name: Desktop Release
 
 on:
-  push:
-    tags:
-      - 'v*'
   release:
     types: [published]
 
@@ -64,27 +61,12 @@ jobs:
           cd apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle
           zip -r "Nexus-macos-universal.app.zip" "macos/Nexus.app"
 
-      - name: Upload release assets (tag push)
-        if: github.event_name == 'push'
+      - name: Upload release assets
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           cd apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle
-          gh release create "$GITHUB_REF_NAME" \
-            --title "Nexus ${GITHUB_REF_NAME}" \
-            --generate-notes \
+          gh release upload "${{ github.event.release.tag_name }}" \
             "Nexus-macos-universal.app.zip" \
             dmg/*.dmg
-
-      - name: Upload release assets (release published)
-        if: github.event_name == 'release'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          cd apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle
-          gh release upload "$GITHUB_REF_NAME" \
-            "Nexus-macos-universal.app.zip" \
-            dmg/*.dmg \
-            --clobber
