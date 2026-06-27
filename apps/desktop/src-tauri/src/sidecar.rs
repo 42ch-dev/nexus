@@ -118,6 +118,15 @@ impl SidecarManager {
     /// Store the app handle so the manager can emit lifecycle events to the SPA.
     /// Synchronous so it can be called from the Tauri `setup` hook before any
     /// async tasks run.
+    ///
+    /// # Implementation note (R-V167PSEC-QC1-S-BLOCKINGLOCK)
+    ///
+    /// This uses `blocking_lock()` because `setup` runs on the main thread
+    /// before the Tauri async runtime has spawned any tasks that could hold
+    /// the manager's async `Mutex`. Calling this after async tasks are running
+    /// would risk a deadlock; the only valid call site is the `setup` closure
+    /// (see `lib.rs`). The value is stored as `Option<AppHandle>` so a missing
+    /// handle is handled gracefully downstream rather than panicking.
     pub fn set_app_handle(&self, app_handle: tauri::AppHandle<tauri::Wry>) {
         self.0.blocking_lock().app_handle = Some(app_handle);
     }
@@ -434,7 +443,15 @@ fn backoff(attempt: u32) -> Duration {
     let jitter_percent = fastrand::u32(75..=125);
     let base_millis = capped.as_millis() as u64;
     let jittered_millis = base_millis * u64::from(jitter_percent) / 100;
-    Duration::from_millis(jittered_millis).min(RESTART_BACKOFF_MAX)
+    let delay = Duration::from_millis(jittered_millis).min(RESTART_BACKOFF_MAX);
+    tracing::info!(
+        attempt = attempt,
+        base_millis = base_millis,
+        jitter_percent = jitter_percent,
+        delay_millis = delay.as_millis() as u64,
+        "sidecar restart backoff computed"
+    );
+    delay
 }
 
 async fn probe_health(port: u16) -> Option<DaemonHealth> {
