@@ -1,10 +1,10 @@
 # Local Web UI (Control Room + Setup → Content-Authoring) — Specification v1
 
-**Status**: Shipped (V1.65) — Control Room + Setup MVP (V1.64) **+ Content-Authoring UI stage (V1.65, §13)**: outline rich-text editor + chapter structure table + structure CRUD (slug/wc/volume/status; title display-only) + body read-only render + browser "Copy path" context menu. Tauri desktop shell + body full-text editor + "open-with" → **V1.66** (compass §0 Q5). QC tri-review Approve (fix-wave-1) + QA Pass.
+**Status**: Shipped (V1.65) — Control Room + Setup MVP (V1.64) **+ Content-Authoring UI stage (V1.65, §13)**: outline rich-text editor + chapter structure table + structure CRUD (slug/wc/volume/status; title display-only) + body read-only render + browser "Copy path" context menu. Tauri desktop shell + body full-text editor + "open-with" → **V1.66** (compass §0 Q5). QC tri-review Approve (fix-wave-1) + QA Pass. **+ V1.67 Surface Convergence & De-risk (§15)** + **V1.69 Design System Maturation & Canvas Draft** (`apps/web/DESIGN.md` Production + Canvas Draft) + **V1.70 Canvas Strategy Implement α (§16)** + **CI/desktop-build optimization** (parallel ops track; PR path filter narrowed + release-gated full build). V1.70 QC 3/3 Approve + QA Pass; `wire_contracts_changed: FALSE`.
 **Document class**: Feature line  
 **Created**: 2026-06-24  
 **Scope**: Nexus local Web UI product contract — placement (`apps/web`), stack, daemon-served model, `tauri-api` adapter boundary, MVP surface (Control Room + Setup), Content-Authoring stage (V1.65), Tauri / body-editor roadmap (V1.66), and strict separation from the private cloud SaaS  
-**Iteration compass**: [v1.64-local-web-ui-kickoff-delivery-compass-v1.md](../../iterations/v1.64-local-web-ui-kickoff-delivery-compass-v1.md) (V1.64 ship) · [v1.65-outline-and-structure-authoring-delivery-compass-v1.md](../../iterations/v1.65-outline-and-structure-authoring-delivery-compass-v1.md) (V1.65 Content-Authoring stage) · [v1.69-design-system-maturation-and-canvas-draft-compass-v1.md](../../iterations/v1.69-design-system-maturation-and-canvas-draft-compass-v1.md) (V1.69 Design System Maturation & Canvas Draft — DESIGN.md Production migration + Canvas Exploration → Draft)
+**Iteration compass**: [v1.64-local-web-ui-kickoff-delivery-compass-v1.md](../../iterations/v1.64-local-web-ui-kickoff-delivery-compass-v1.md) (V1.64 ship) · [v1.65-outline-and-structure-authoring-delivery-compass-v1.md](../../iterations/v1.65-outline-and-structure-authoring-delivery-compass-v1.md) (V1.65 Content-Authoring stage) · [v1.69-design-system-maturation-and-canvas-draft-compass-v1.md](../../iterations/v1.69-design-system-maturation-and-canvas-draft-compass-v1.md) (V1.69 Design System Maturation & Canvas Draft — DESIGN.md Production migration + Canvas Exploration → Draft) · [v1.70-canvas-strategy-implement-and-ci-optimization-compass-v1.md](../../iterations/v1.70-canvas-strategy-implement-and-ci-optimization-compass-v1.md) (V1.70 Canvas Strategy Implement α + CI/desktop-build optimization — the first canvas surface ships)
 
 **Coordinates with**:
 
@@ -197,7 +197,8 @@ Explicitly deferred with durable tracking (compass §1.2 + §6; satisfies the Du
 | **V1.66** | **Tauri desktop shell** (`apps/desktop`) — loads `apps/web/dist`, system webview, `TauriClient` impl, daemon hosting (sidecar `nexus42 daemon start`); per-OS webview deps / signing / CI matrix. **"Open with" / "Reveal in file manager"** desktop integration (Tauri `shell.open`/`openWith`). Body full-text editor direction **rejected** (2026-06-26 — see §15.3); UI productivity deferred to V1.68. |
 | **V1.67 (§15 stage)** | **Surface Convergence & De-risk**: Local API `items` array-key convergence + error-envelope consolidation (FE1-ORCH) + error-code casing + sort params (all transparent to the author); work_profile selector in Create-Work dialog; preset **TS-client promotion** (preset **management UI deferred to V1.68 canvas**). **Canvas Strategy Surface Exploration** authored (de-risk V1.68). Body editor direction **rejected** (§15.3). |
 | **V1.69** | **Design System Maturation & Canvas Draft** (calm hygiene + V1.70 de-risk; no new UI screens, no wire change): `apps/web/DESIGN.md` migrated to **Production** completeness (YAML frontmatter SSOT + new `apps/web/DESIGN.dark.md` + body reshaped to rule-type docs + Level 3); **Canvas Exploration → Draft** (interface contracts + structured write-boundary + canvas→DESIGN.md token contract); 4 V1.67 frontend refactor residuals closed (work_profile literal union, `WORK_PROFILES` SSOT module, adapter-contract parity, preset query keys). Token names preserved verbatim → zero `index.css`/`tailwind.config.ts` consumer changes. |
-| **V1.70+** | **Canvas Strategy Surface implement** (lead) — Strategy/outline+timeline/World-KB infinite-canvas graphs on React Flow; "AI owns prose, human steers via canvas"; no-raw-file-editing structured writes; TipTap as in-node editor; Preset→Strategy terminology. Preset-management UI folds into the canvas. Desktop distribution v2 (Windows + Linux + signing + notarization + auto-update); Mobile (Tauri v2 mobile targets). |
+| **V1.70 (§16 stage)** | **Canvas Strategy Implement (α)** — the first canvas surface ships: shared Canvas Shell (`@xyflow/react`, route-split behind `/strategy`) + Strategy (Preset) graph read projection (preset YAML → outer state-machine nodes + inner-DAG sub-flows + Converge join nodes per Draft §3.2) + live execution overlay (session-level status, 5 s poll) + Idea-input affordance + Run/Resume/Steer verbs (reuse existing schedule/orchestration endpoints; `wire_contracts_changed: FALSE` — A5 verdict: option a, client-side YAML parse from existing `getPreset(id).yaml`; no new backend route). DESIGN.md canvas tokens filled with concrete light + dark values. Accessibility baseline (keyboard-first, non-spatial alt view, ARIA live-region summary, focus management). UI copy adopts **Strategy** terminology; persisted identifiers remain `preset`. **`R-V167PSEC-QC1-S-UNMOUNT`** closed (daemon-status-bar subscription-cleanup race fix alongside overlay work). **Parallel ops track**: `desktop-build.yml` PR path filter narrowed (Rust-only PRs skip the 75 min macOS packaging build; main + tag/release triggers retain full coverage); new `desktop-release.yml` for distributable artifacts; **`R-V167PSEC-QC1-S-CI-SETUO`** closed (`set -euo pipefail`); `ci.yml` untouched. |
+| **V1.71+** | **Canvas Strategy write-boundary + structured node-granular edits** (Draft §3.5 operation DTOs promoted to schema-backed Local API contracts; `wire_contracts_changed: TRUE`); **Canvas outline+timeline surface** (Draft §3.3 surface 2); **Canvas World KB surface** (Draft §3.3 surface 3). Desktop distribution v2 (Windows + Linux + signing + notarization + auto-update); Mobile (Tauri v2 mobile targets). |
 
 The Tauri-ready boundary (§5) is what keeps the V1.66 shell a thin wrap rather than a rewrite. The V1.68 canvas adds new screens (graph surfaces) on the unchanged transport boundary — not a re-architecture.
 
@@ -395,4 +396,69 @@ Explicitly deferred with rationale (compass §0 Q2/Q3, §1.2; satisfies the Dura
 
 ---
 
-*Local-first Web UI product contract. V1.64 Shipped (Control Room + Setup) → V1.65 §13 Content-Authoring → V1.66 §14 Desktop Shell → V1.67 §15 Surface Convergence & De-risk → V1.68 §TBD Canvas Strategy Surface. Design tokens: `apps/web/DESIGN.md` (V1.65 Standard+ + V1.66 desktop supplement; no V1.67 increment — no new styled surfaces).*
+*Local-first Web UI product contract. V1.64 Shipped (Control Room + Setup) → V1.65 §13 Content-Authoring → V1.66 §14 Desktop Shell → V1.67 §15 Surface Convergence & De-risk → V1.69 Design System Maturation & Canvas Draft → V1.70 §16 Canvas Strategy Implement (α) + CI/desktop-build optimization → V1.71 §TBD Canvas write-boundary + outline/timeline + World KB. Design tokens: `apps/web/DESIGN.md` (V1.65 Standard+ + V1.66 desktop supplement + V1.69 Production migration + V1.70 canvas-token fill).*
+
+---
+
+## 16. Next stage — Canvas Strategy Implement (α) + CI/desktop-build optimization (V1.70)
+
+V1.69 shipped the **Canvas Strategy Surface Draft** (interface contracts + structured write-boundary + canvas→DESIGN.md token contract) and the Design System Production migration. V1.70 turns the Draft into the **first human-steerable Canvas surface** at α depth, and runs a parallel **CI/desktop-build optimization** ops track that unblocks the PR feedback loop (Rust-only PRs stop triggering a 75 min macOS packaging build; distributable release packages move to a release-gated workflow).
+
+> **Scope and roadmap SSOT**: [v1.70-canvas-strategy-implement-and-ci-optimization-compass-v1.md](../../iterations/v1.70-canvas-strategy-implement-and-ci-optimization-compass-v1.md) §0 (grill decisions Q1–Q3) + §1.1 (Tracks A+B) + §1.2 (V1.71+ roadmap) + §5 (locked design items). This section records the product contract; the compass is authoritative for scope, batching, and residual tracking. Architectural detail: [canvas-strategy-surface.md](canvas-strategy-surface.md) (V1.70 Shipped α — write-boundary + outline/timeline + World KB remain Draft V1.71+).
+
+### 16.1 What ships in V1.70 (Track A — Canvas α)
+
+The **Strategy (Preset) surface** ships at **α depth** — read + visualization + live overlay + Idea-steer. The human *sees* the Strategy as a graph and *steers* execution with an Idea; the AI owns prose.
+
+- **Shared Canvas Shell** (`@xyflow/react`, route-split behind `/strategy`): React Flow provider, pan/zoom, minimap, dot-grid, selection model, side inspector, validation panel (read-only), keyboard shortcuts, screen-reader graph summary, `NexusClient` transport injection. **Route-split verified**: `strategy-page-*.js` is a separate 305 kB chunk; React Flow is excluded from the Control Room bootstrap.
+- **Strategy graph adapter (read projection)**: preset YAML → React Flow `nodes`/`edges` per Draft §3.2 — outer state-machine states → top-level nodes; `inner_graph` states → group/sub-flow nodes (`parentId` + `extent:parent`); Converge merge-point states → join nodes (`wait_for_all` / `first_completed` / `any`); linear `next` / labeled `branches` / default → edges with condition labels. **10 unit tests** in `strategy-graph.test.ts` cover the Draft §3.2 mapping.
+- **Live execution overlay (bounded)**: session `current_task_id` + `status` → node highlight + status ring, polled at 5 s. **Bounded to session-level per A5 verdict** — completed-path history + child-session hierarchy are V1.71.
+- **Idea-input affordance + Run/Resume/Steer**: persistent canvas affordance for Idea input (global entry + contextual node action). Submitting an Idea enqueues/resumes via **existing** `addSchedule` / `editCoreContext` + `signalSchedule` (promoted onto `NexusClient`, V1.67 G2 pattern). Verbs: **Steer / Run / Resume / Ask Nexus to revise**. Idea submissions land as visible steering artifacts.
+- **Canvas → DESIGN.md token fill**: the 11 LEVEL placeholder canvas tokens (`canvas-surface`, `canvas-grid`, `canvas-node-fill/-hover/-border/-border-selected`, `canvas-edge/-hover`, `canvas-port`, `canvas-minimap`, `canvas-strategy-accent`) filled with concrete light + dark values in `apps/web/DESIGN.md` + `apps/web/DESIGN.dark.md`. Token *names* preserved (V1.69 invariant continues). `canvas-strategy-accent` derives from the purple family.
+- **Accessibility baseline**: keyboard-focusable nodes/edges, non-spatial alternate view (Strategy states in execution-order list + transition table), ARIA live-region graph summary, focus-visible rings, read-only inspector. Closes the Draft §4.4 a11y requirements as product requirements, not just tech checkboxes.
+
+### 16.2 The steering loop this enables
+
+V1.70 does not ship a full authoring loop; it ships the **steering surface** that V1.71 will make editable:
+
+1. **Read the Strategy as a graph** — *As an author*, I see my Strategy (preset) rendered as a state-machine graph with visible join/wait nodes, so I understand how Nexus will execute my Work before it runs.
+2. **Steer by Idea** — *As an author*, I express an Idea (Work-level or on a specific node) and choose **Steer / Run / Resume / Ask Nexus to revise**, then Nexus executes — drafting prose, advancing the chapter, updating the KB — so I direct the work without typing the body myself.
+3. **Review AI execution on the canvas** — *As an author*, after Nexus executes, I see what changed on the canvas (node status, generated-output links, pending instructions) and review the result read-only, so I stay in command of an autonomous process.
+
+(The outline+timeline and World KB surfaces, plus structured node-granular *edits* of the Strategy graph, are V1.71+. V1.70 is read + overlay + Idea-steer only.)
+
+### 16.3 Parallel ops track — CI/desktop-build optimization (Track B)
+
+The desktop packaging CI was wasteful on PRs: any `crates/**` change triggered a 75 min macOS Tauri universal build, even though sidecar compilation is already covered by `ci.yml` (clippy + rust-tests on ubuntu). V1.70 fixes this without changing the test gate:
+
+- **`desktop-build.yml` PR path filter narrowed** to `apps/desktop/**`, `apps/web/**`, `.github/workflows/**` — Rust-only PRs no longer trigger the macOS packaging build. `push:main` retains broad coverage as the integration safety net.
+- **New `desktop-release.yml`** triggers on `release.published` only (single-source per release; QC3 W1 double-run fix), produces distributable `.app.zip` + `.dmg` artifacts for GitHub Releases.
+- **`set -euo pipefail`** added to desktop-build universal + fallback blocks (closes `R-V167PSEC-QC1-S-CI-SETUO`).
+- **`ci.yml` untouched** — the test gate stays as-is.
+
+### 16.4 Wire contracts (V1.70)
+
+**`wire_contracts_changed: FALSE`** (LOCKED by PM; `@architect` Phase 2b countersigned). No schemas/codegen/`@42ch/nexus-contracts`/DTO change. The Idea-steer path explicitly reuses existing schedule input/core-context/signal surfaces. The A5 read-endpoint question (Draft §3.2: "promote read endpoints such as 'get Strategy graph projection' if existing endpoints are too YAML/raw") was **resolved in favor of option (a)**: `GET /v1/local/presets/{id}` returns `GetPresetResponse { id, source, path?, yaml }` sufficient for client-side Strategy graph projection; `GET /v1/local/orchestration/sessions/{session_id}` returns `SessionDetailResponse { session: SessionSummary }` bounding the V1.70 live overlay to current-node/status highlighting plus session-level state. Rich overlay data (completed-path history, child-session hierarchy) is deferred to the V1.71 write-boundary/overlay-contract plan rather than adding a V1.70 read route.
+
+### 16.5 Non-goals for V1.70 (durable V1.71+ roadmap)
+
+Explicitly deferred with rationale (compass §1.2; satisfies the Durable Roadmap Gate):
+
+- **Structured node-granular *edits*** — rename state, rewire edge, patch prompt template (Draft §3.5 operation DTOs) — **V1.71**. V1.70 Strategy canvas is read + overlay + Idea-steer only.
+- **Canvas outline+timeline surface** (Draft §3.3 surface 2) — **V1.71+**.
+- **Canvas World KB surface** (Draft §3.3 surface 3) — **V1.71+**.
+- **CLI / schema rename of `preset` → `strategy`** — breaking; deferred. V1.70 adopts **Strategy** terminology in UI copy only (Draft §4.2).
+- **Desktop distribution v2** (signing / tri-OS / auto-update) — depends on external signing cert; remains V1.71+ backlog. V1.70 CI work is trigger/path optimization only, not signing.
+- **Rich live overlay** (completed-path history, child-session hierarchy) — **V1.71** with the write-boundary contract.
+- **Tauri WKWebView runtime smoke** — implementer documented they could not run Tauri locally; QA ran `cargo check` only. Full gesture/keyboard/pan-zoom validation inside actual WKWebView is a V1.71 follow-up if deeper runtime validation is needed.
+
+### 16.6 User stories (V1.70 α slice)
+
+- **Read the Strategy as a graph** — *As an author*, I see my Strategy (preset) rendered as a state-machine graph with visible join/wait nodes, so I understand how Nexus will execute my Work before it runs — and I can rewire a branch or adjust a gate on the canvas *(rewire/edit deferred to V1.71; V1.70 ships the read + overlay)*.
+- **Steer by Idea** — *As an author*, I express an Idea (Work-level or on a specific node) and choose **Steer / Run / Resume / Ask Nexus to revise**, then Nexus executes — drafting prose, advancing the chapter, updating the KB — so I direct the work without typing the body myself.
+
+(Outline chapters, World KB entities, and full graph editing live in V1.71+ stories.)
+
+---
+
+*Local-first Web UI product contract. V1.64 Shipped (Control Room + Setup) → V1.65 §13 Content-Authoring → V1.66 §14 Desktop Shell → V1.67 §15 Surface Convergence & De-risk → V1.69 Design System Maturation & Canvas Draft → V1.70 §16 Canvas Strategy Implement (α) + CI/desktop-build optimization → V1.71 §TBD Canvas write-boundary + outline/timeline + World KB. Design tokens: `apps/web/DESIGN.md` (V1.65 Standard+ + V1.66 desktop supplement + V1.69 Production migration + V1.70 canvas-token fill).*
