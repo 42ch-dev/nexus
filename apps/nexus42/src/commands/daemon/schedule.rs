@@ -110,7 +110,7 @@ pub enum ScheduleCommand {
 
         /// Sort by key(s); prefix with `-` for descending.
         ///
-        /// Allowed keys: created_at, updated_at, status, preset_id, label.
+        /// Allowed keys: `created_at`, `updated_at`, `status`, `preset_id`, `label`.
         #[arg(long)]
         sort: Option<String>,
     },
