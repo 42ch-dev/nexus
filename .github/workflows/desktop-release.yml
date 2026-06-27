@@ -1,0 +1,90 @@
+name: Desktop Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  release:
+    types: [published]
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  actions: read
+
+env:
+  SQLX_OFFLINE: "true"
+
+jobs:
+  desktop-release:
+    name: Build and release macOS desktop app
+    runs-on: macos-14
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      - uses: pnpm/action-setup@eae0cfeb286e66ffb5155f1a79b90583a127a68b  # v2
+        with:
+          version: 9
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        with:
+          targets: aarch64-apple-darwin, x86_64-apple-darwin, wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+        with:
+          key: desktop-release-macos-universal
+          workspaces: |
+            .
+            apps/desktop/src-tauri
+
+      - name: Install pnpm dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build contracts package
+        run: pnpm --filter @42ch/nexus-contracts run build
+
+      - name: Build Tauri desktop bundle (universal)
+        run: |
+          set -euo pipefail
+          SIDECAR_TARGETS="aarch64-apple-darwin x86_64-apple-darwin" \
+            pnpm --filter desktop tauri build --target universal-apple-darwin
+
+      - name: Package release assets
+        run: |
+          set -euo pipefail
+          cd apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle
+          zip -r "Nexus-macos-universal.app.zip" "macos/Nexus.app"
+
+      - name: Upload release assets (tag push)
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle
+          gh release create "$GITHUB_REF_NAME" \
+            --title "Nexus ${GITHUB_REF_NAME}" \
+            --generate-notes \
+            "Nexus-macos-universal.app.zip" \
+            dmg/*.dmg
+
+      - name: Upload release assets (release published)
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cd apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle
+          gh release upload "$GITHUB_REF_NAME" \
+            "Nexus-macos-universal.app.zip" \
+            dmg/*.dmg \
+            --clobber
