@@ -11,7 +11,8 @@ This document separates **Cargo dependency wiring** (what compiles and links) fr
 | Wire contracts (truth source) | `schemas/` | JSON Schema → codegen |
 | Generated Rust types | `crates/nexus-contracts/` | Workspace-internal library |
 | Generated TypeScript | `packages/nexus-contracts/` | npm `@42ch/nexus-contracts` for `nexus-platform` |
-| CLI + libraries | `crates/*` | Rust workspace (see below) |
+| Product surfaces | `apps/*` | Polyglot product binaries + clients (`nexus42`, `desktop`, `web`) |
+| Rust libraries | `crates/*` | Workspace library crates (see below) |
 | Codegen / validation | `tooling/` | `pnpm run codegen`, schema checks |
 | Normative OSS specs | `.mstar/knowledge/specs/` | CLI, daemon, orchestration, sync contracts |
 | End-user docs | `docs/` | Install, contributing, this file. Author happy path: [`novel-writing/author-experience.md`](../.mstar/knowledge/specs/novel-writing/author-experience.md) §3; CLI workflows: [`creator-run-preset-entry.md`](../.mstar/knowledge/specs/creator-run-preset-entry.md) |
@@ -114,7 +115,7 @@ CLI `nexus42 creator kb` and daemon `/v1/local/kb/entries` implement the **CLI l
 
 | Artifact | Crate | Notes |
 | --- | --- | --- |
-| **`nexus42`** | `crates/nexus42` | Sole user-facing binary; ACP **client** only |
+| **`nexus42`** | `apps/nexus42` | Sole user-facing binary; ACP **client** only |
 | Daemon runtime | (library) `nexus-daemon-runtime` | Started via `nexus42 daemon start` / hidden `daemon-run` — not a separate product binary |
 | ACP worker | `nexus42 acp-worker` (hidden) | Subprocess; uses `nexus-acp-host` |
 

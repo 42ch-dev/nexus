@@ -184,7 +184,7 @@ describe('CreateWorkDialog work_profile wire contract (C1)', () => {
   // handlers at crates/nexus-daemon-runtime/src/api/handlers/works.rs:576,623,
   // 678,733. The daemon HTTP API stores req.work_profile verbatim (no
   // normalization), so the UI MUST emit a member of this set. (The CLI
-  // bootstrap at crates/nexus42/src/commands/creator/bootstrap.rs:140-143
+  // bootstrap at apps/nexus42/src/commands/creator/bootstrap.rs:140-143
   // accepts both game-bible/game_bible and normalizes — that path is NOT
   // used by the Web UI.)
   const BACKEND_ACCEPTED_WORK_PROFILES = new Set(['novel', 'essay', 'game_bible', 'script']);

@@ -15,11 +15,16 @@ cargo build --release
 ./target/release/nexus42 daemon start
 ```
 
-## Components
+## Monorepo Layout
 
-| Component | Description |
-|-----------|-------------|
-| `nexus42` | CLI client with integrated daemon runtime |
+| Directory | Contents |
+|-----------|----------|
+| `apps/` | Product surfaces — `nexus42` (Rust CLI + daemon), `desktop` (Tauri client), `web` (browser SPA) |
+| `crates/` | Reusable Rust libraries (daemon runtime, orchestration, local DB, contracts, etc.) |
+| `packages/` | npm packages — `@42ch/nexus-contracts` generated from `schemas/` |
+| `modules/` | Domain content (embedded presets, WASM modules, reference data) |
+| `tooling/` | Codegen pipeline and CI helpers |
+| `schemas/` | JSON Schema wire contracts — single truth source for Rust + TypeScript types |
 
 ## License
 

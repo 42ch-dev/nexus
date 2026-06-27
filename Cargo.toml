@@ -13,7 +13,7 @@ members = [
     "crates/nexus-narrative",
     "crates/nexus-orchestration",
     "crates/nexus-wasm-host",
-    "crates/nexus42",
+    "apps/nexus42",
     "crates/nexus-cloud-sync",
     "crates/nexus-cloud-domain",
     "crates/nexus-local-db",

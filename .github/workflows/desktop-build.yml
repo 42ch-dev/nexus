@@ -7,6 +7,7 @@ on:
     paths:
       - 'apps/web/**'
       - 'apps/desktop/**'
+      - 'apps/nexus42/**'
       - 'packages/nexus-contracts/**'
       - 'crates/**'
       - 'pnpm-lock.yaml'
@@ -20,6 +21,7 @@ on:
     paths:
       - 'apps/web/**'
       - 'apps/desktop/**'
+      - 'apps/nexus42/**'
       - 'packages/nexus-contracts/**'
       - 'crates/**'
       - 'pnpm-lock.yaml'
