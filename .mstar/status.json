@@ -32,7 +32,7 @@
     {
       "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
       "iteration_id": "V1.71",
-      "status": "Todo",
+      "status": "InProgress",
       "owner": "ops-engineer + fullstack-dev + frontend-dev",
       "effort": "M",
       "type": "implement",
@@ -40,7 +40,8 @@
       "merge_target": "iteration/v1.71",
       "task_category": "ops",
       "wire_contracts_changed": false,
-      "wire_contracts_note": "Track B only: surgical residual closures + desktop sign infrastructure; no schema/codegen/DTO change"
+      "wire_contracts_note": "Track B only: surgical residual closures + desktop sign infrastructure; no schema/codegen/DTO change",
+      "started_at": "2026-06-27T19:54:37Z"
     },
     {
       "plan_id": "2026-06-27-v1.71-closure",
@@ -4244,7 +4245,13 @@
         "target": "V1.68+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-local-api-surface-convergence][R-V167P0-QC1-S-COMPARE]",
         "note": "QC Suggestion, non-blocking; deferred.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-27",
+        "closure_note": "Closed in commit 51597f0d.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+          "commit": "51597f0d"
+        }
       },
       {
         "id": "R-V167P0-QC1-S-DOCS",
@@ -4257,7 +4264,13 @@
         "target": "V1.68+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-local-api-surface-convergence][R-V167P0-QC1-S-DOCS]",
         "note": "QC Suggestion, non-blocking; deferred.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-27",
+        "closure_note": "Closed in commit 044aa53c.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+          "commit": "044aa53c"
+        }
       },
       {
         "id": "R-V167P0-QC1-S-CLI",
@@ -4270,7 +4283,13 @@
         "target": "V1.68+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-local-api-surface-convergence][R-V167P0-QC1-S-CLI]",
         "note": "QC Suggestion, non-blocking; deferred.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-27",
+        "closure_note": "Closed in commit 79509cf2.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+          "commit": "79509cf2"
+        }
       },
       {
         "id": "R-V167P0-QC1-S-AGENTS",
@@ -4283,7 +4302,13 @@
         "target": "V1.68+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-local-api-surface-convergence][R-V167P0-QC1-S-AGENTS]",
         "note": "QC Suggestion, non-blocking; deferred.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-27",
+        "closure_note": "Closed in commit 1020af69.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+          "commit": "1020af69"
+        }
       },
       {
         "id": "R-V167P0-QC1-ENVELOPE-E2E",
@@ -4296,7 +4321,13 @@
         "target": "V1.68+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-local-api-surface-convergence][R-V167P0-QC1-ENVELOPE-E2E]",
         "note": "QC Suggestion, non-blocking; deferred.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-27",
+        "closure_note": "Closed in commit daba28f3.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+          "commit": "daba28f3"
+        }
       }
     ],
     "2026-06-26-v1.67-desktop-shell-polish": [
@@ -4330,7 +4361,13 @@
         "target": "V1.68+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-desktop-shell-polish][R-V167PSEC-QC1-S-BLOCKINGLOCK]",
         "note": "QC Suggestion, non-blocking; deferred.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-27",
+        "closure_note": "Closed in commit e6e77fd4.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+          "commit": "e6e77fd4"
+        }
       },
       {
         "id": "R-V167PSEC-QC1-S-BACKOFFOBS",
@@ -4343,7 +4380,13 @@
         "target": "V1.68+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-desktop-shell-polish][R-V167PSEC-QC1-S-BACKOFFOBS]",
         "note": "QC Suggestion, non-blocking; deferred.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-27",
+        "closure_note": "Closed in commit e6e77fd4.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+          "commit": "e6e77fd4"
+        }
       },
       {
         "id": "R-V167PSEC-QC1-S-CI-SETUO",
@@ -4455,7 +4498,13 @@
         "target": "V1.68+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-overdue-debt-closure][R-V167P2-QC1-S1]",
         "note": "QC Suggestion, non-blocking; deferred.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-27",
+        "closure_note": "Closed in commit 7a9809ad.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+          "commit": "7a9809ad"
+        }
       },
       {
         "id": "R-V167P2-QC1-S2",
@@ -4468,7 +4517,13 @@
         "target": "V1.68+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-overdue-debt-closure][R-V167P2-QC1-S2]",
         "note": "QC Suggestion, non-blocking; deferred.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-27",
+        "closure_note": "Closed in commit 100e6050.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+          "commit": "100e6050"
+        }
       },
       {
         "id": "R-V167P2-QC1-S4",
@@ -4481,7 +4536,13 @@
         "target": "V1.68+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-overdue-debt-closure][R-V167P2-QC1-S4]",
         "note": "QC Suggestion, non-blocking; deferred.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-27",
+        "closure_note": "Deferred: no third frontmatter-edit capability ships in V1.71, so extracting helpers is not justified.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+          "commit": null
+        }
       },
       {
         "id": "R-V167P2-QC3-S1",
@@ -4494,7 +4555,13 @@
         "target": "V1.68+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-overdue-debt-closure][R-V167P2-QC3-S1]",
         "note": "QC Suggestion, non-blocking; deferred.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-27",
+        "closure_note": "Closed in commit 1675369f.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+          "commit": "1675369f"
+        }
       }
     ]
   }
