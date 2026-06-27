@@ -105,7 +105,7 @@ function CanvasShellInner({
 }
 
 /** Controlled-state helper: a minimal `onNodesChange` applier for read-only α. */
-export function makeNodeChangeHandler(
+export function useNodeChangeHandler(
   setNodes: React.Dispatch<React.SetStateAction<Node[]>>,
 ): OnNodesChange {
   return useCallback(

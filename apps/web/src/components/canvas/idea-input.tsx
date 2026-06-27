@@ -52,14 +52,15 @@ export function IdeaInput({ presetId, creatorId, scheduleId, onArtifact }: IdeaI
   const steer = useSteerStrategy();
   const resume = useResumeStrategy();
 
-  const canRun = verb === 'run' && Boolean(creatorId) && text.trim().length > 0;
-  const canSteer = verb === 'steer' && Boolean(scheduleId) && text.trim().length > 0;
-  const canResume = verb === 'resume' && Boolean(scheduleId);
-  const canSubmit = canRun || canSteer || canResume;
   const pending = run.isPending || steer.isPending || resume.isPending;
 
   // Default verb follows availability: steer when a schedule is active, else run.
   const effectiveVerb: IdeaVerb = scheduleId && verb === 'run' ? 'steer' : verb;
+
+  const canSubmit =
+    (effectiveVerb === 'run' && Boolean(creatorId) && text.trim().length > 0) ||
+    (effectiveVerb === 'steer' && Boolean(scheduleId) && text.trim().length > 0) ||
+    (effectiveVerb === 'resume' && Boolean(scheduleId));
 
   const handleSubmit = async () => {
     if (pending || !canSubmit) return;
