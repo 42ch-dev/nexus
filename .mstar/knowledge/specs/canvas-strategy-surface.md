@@ -2,7 +2,7 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | **Draft (V1.69)** — design/specification input for a future V1.70+ canvas implementation; paper contracts only, no schema/codegen lock and no React Flow code authority in V1.69 |
+| **Status** | **Shipped α (V1.70)** — Strategy read + visualization + live overlay + Idea-steer shipped; write-boundary operation DTOs + node-granular edits remain **Draft (V1.71)** |
 | **Document class** | Draft overlay |
 | **Scope** | Product vision + Draft architecture for the human-facing **Canvas** control surfaces: Strategy (Preset) orchestration graph, Work outline + timeline graph, World KB graph; React Flow rendering; the "AI owns prose, human steers via Canvas" thesis; node-granular write boundaries; canvas token contract for DESIGN.md placeholders |
 | **Coordinates with** | [orchestration-engine.md](orchestration-engine.md) (strategy = graph-of-graphs), [web-ui.md](web-ui.md) (§15 V1.67 stage + V1.68 canvas roadmap), [local-api-surface-conventions.md](local-api-surface-conventions.md), [chapter-content-local-api.md](chapter-content-local-api.md), [daemon-runtime.md](daemon-runtime.md) |
@@ -10,6 +10,8 @@
 | **Authored** | V1.67 Phase 2b re-discussion — **@architect** (architecture + React Flow feasibility + DAG↔canvas mapping + write boundary) + **@product-manager** (product thesis + canvas UX + Strategy terminology); PM-scaffolded stub pending authoring |
 
 > **Promoted to Draft (2026-06-27 V1.69 P0).** The V1.67 Exploration was promoted to Draft by `@architect` for interface contracts, structured write boundary, and canvas-token contract. Product/UX thesis from the original `@product-manager` contribution remains in §4. This Draft intentionally stops short of schema/codegen or React Flow implementation authority.
+
+> **Promoted to Shipped α (V1.70).** The V1.70 compass ([`v1.70-canvas-strategy-implement-and-ci-optimization-compass-v1.md`](../../iterations/v1.70-canvas-strategy-implement-and-ci-optimization-compass-v1.md)) shipped the first Strategy Canvas slice: read-only Strategy graph projection, canvas visualization, live execution overlay, and Idea-steer affordance. Implementation provenance: parent `079f687f`; feature commits `81cb4256`, `f82bcdd3`, `10edf22f`, `dad35736` on `feature/v1.70-canvas-strategy-read`, merged into `iteration/v1.70`. This promotion is scoped to the α read/overlay/steer slice only; structured write-boundary DTOs, node-granular editing, outline+timeline canvas, and World KB canvas remain Draft for V1.71+.
 
 ## 1. Product thesis (LOCKED from user re-discussion, 2026-06-26)
 
@@ -22,6 +24,16 @@ The human steers through three **Canvas (infinite-canvas) surfaces**, not docume
 3. **World KB canvas** — browse and steer the World Knowledge Base (entities, events, rules, relationships) as a graph.
 
 **Renderer**: [React Flow](https://reactflow.dev/learn) (`@xyflow/react`) — chosen because a Strategy **is** already a graph/DAG at runtime (states + edges + converge merge points), so React Flow's node/edge model is a natural projection, not a forced fit.
+
+### 1.1 V1.70 α shipped slice
+
+V1.70 promoted only the **Strategy Canvas α** subset from design input to shipped product behavior:
+
+- **Read + visualization**: Strategy/preset graph data is projected into a canvas surface for author comprehension.
+- **Live overlay**: runtime/session status is visualized over the Strategy graph so the author can see current, completed, waiting, and error states in context.
+- **Idea-steer**: the author can use an Idea-oriented steering affordance to direct Nexus without turning the canvas into a manual prose editor.
+
+The shipped α slice does **not** promote canvas writes. Rewiring Strategy edges, patching Strategy state fields, node-granular outline/timeline editing, and World KB graph edits remain V1.71+ Draft scope until schema/codegen-backed DTOs and daemon-side persistence contracts are explicitly promoted.
 
 ## 2. Core architectural principle (LOCKED)
 
@@ -80,9 +92,9 @@ All three surfaces should share a **Canvas Shell** and specialize by data adapte
 | **Work outline + timeline** | Work, volume, chapter, scene/beat, timeline event, foreshadowing/index item | Contains/ordered-after, references, foreshadows, belongs-to-volume, event→chapter realization | Volume lane, chapter card, event node, dependency/foreshadow node, in-node TipTap outline editor | Work/detail, chapter list/detail, outline read/structured patch, structure patch, timeline/index read/patch. The shipped V1.65 outline is a linear rich-text document (`web-ui.md` §13); the canvas projection turns headings/chapters/events into addressable graph nodes instead of replacing the underlying Work model. |
 | **World KB** | World, KeyBlock/entity, event, rule, location, organization, computable block, pending extraction candidate | Relationship/reference, source-anchor, timeline membership, rule-applies-to, promotion candidate→confirmed KeyBlock | Entity card, relationship edge, pending-candidate node, source-anchor node, computable-state badge | World detail; KB query/list/detail; pending/confirmed/rejected promotion state; adopt/reject/merge/update. Grounding: `entity-scope-model.md` §1–§2 defines World-owned narrative KB assets; §5.5 defines the World KB promotion state machine. |
 
-### 3.4 Draft interface contracts (B2)
+### 3.4 Draft interface contracts (B2) — α read projection shipped; operation DTOs remain illustrative
 
-The V1.70 implementation should treat React Flow as a presentation and interaction model over domain-owned graph projections. These contracts are **paper contracts**: they define naming, ownership, and shape constraints for implement planning, but they do not authorize new JSON Schemas, generated DTOs, or Local API routes in V1.69.
+The V1.70 α implementation treats React Flow as a presentation and interaction model over domain-owned graph projections for the shipped Strategy read/overlay/Idea-steer slice. The graph-document shape below remains useful as the design language for projections, but these contracts are still **paper contracts** for write promotion: operation names such as `strategy.patch_state`, `strategy.patch_transition`, `strategy.patch_prompt_template`, `work.patch_outline_graph`, and `world_kb.patch_relationship` are illustrative until a V1.71 wire-contract plan promotes schema/codegen-backed DTOs and Local API routes.
 
 #### Shared React Flow document shape
 
@@ -165,7 +177,7 @@ The same mechanism can group volumes/chapters in Work and entity clusters in Wor
 
 The canvas must run in both the daemon-served browser SPA and the Tauri macOS shell that embeds the same `apps/web/dist`. V1.70 smoke tests must cover drag, pan/zoom, wheel/pinch gestures, keyboard focus movement, clipboard shortcuts, and inspector focus return in Chromium-like browsers and WKWebView. Any desktop-only filesystem action still routes through Tauri/native capabilities and structured daemon operations; the canvas webview never reads or writes raw local files directly.
 
-### 3.5 Structured write boundary (B3)
+### 3.5 Structured write boundary (B3) — **V1.71+ Draft — NOT shipped at α**
 
 The locked rule in §2 becomes this implementation principle: **canvas edits produce structured domain operations; the daemon applies them atomically; the UI never mutates raw files.**
 
@@ -180,7 +192,7 @@ React Flow draft edit
           → UI refetches canonical graph projection
 ```
 
-Examples (operation names are illustrative until a future wire-contract plan promotes them):
+Examples (operation names are illustrative until a V1.71+ wire-contract plan promotes them):
 
 | User action | Structured operation shape | Daemon persistence target |
 | --- | --- | --- |
@@ -295,13 +307,16 @@ The author **directs an autonomous executor**; they do not write alongside an as
 - **Steer World KB continuity** — *As an author*, I browse entities/events/rules as a relationship graph with promotion-state badges, and adopt/reject/merge from the canvas, so continuity constraints stay coherent as the Work grows.
 - **Review AI execution on the canvas** — *As an author*, after Nexus executes, I see what changed on the canvas (node status, generated-output links, pending instructions) and review the result read-only, so I stay in command of an autonomous process.
 
-## 5. Non-goals (V1.69 Draft)
+## 5. Non-goals (V1.70 α)
 
-- No canvas **implement** in V1.69. This Draft is the V1.70+ implementation input.
-- No schema/codegen/DTO lock in V1.69. Operation names and TypeScript-like interfaces above are illustrative paper contracts.
-- No removal/regression of the shipped V1.65 outline editor (canvas-pivot is V1.70+).
-- No CLI/spec rename of `preset` → `strategy` (breaking; deferred). V1.69 adopts the terminology in UI/spec wording only.
+- No promotion of canvas **writes** in V1.70 α. The shipped slice is read + visualization + live overlay + Idea-steer only.
+- No schema/codegen/DTO lock for write operations in V1.70 α. Operation names and TypeScript-like interfaces above remain illustrative paper contracts until V1.71.
+- No promotion of the outline+timeline canvas or World KB canvas in V1.70 α; both remain V1.71+ Draft surfaces.
+- No removal/regression of the shipped V1.65 outline editor; canvas-pivot and node-granular outline edits are V1.71+ Draft scope.
+- No CLI/spec rename of `preset` → `strategy` (breaking; deferred). V1.70 α adopts the terminology in UI/spec wording only.
 
 ## 6. Roadmap (durable tracking)
 
-- **V1.70 lead**: Canvas Strategy Surface implement from this Draft. May split across iterations (3 surfaces is XL). This is the successor to the retired body-editor roadmap.
+- **V1.70 α — shipped**: Strategy Canvas read projection + visualization + live overlay + Idea-steer. This is the shipped successor slice to the retired body-editor roadmap, not the full three-surface canvas program.
+- **V1.71 — Draft target**: promote the structured write boundary and node-granular Strategy edits (`strategy.patch_state`, `strategy.patch_transition`, prompt-template patching, validation/conflict DTOs) through real schemas/codegen and daemon-owned persistence contracts.
+- **V1.71+ — Draft target**: outline+timeline canvas and World KB canvas remain future surfaces. They should reuse the Canvas Shell and the structured operation boundary only after their domain DTOs, validation rules, and persistence ownership are explicitly promoted.
