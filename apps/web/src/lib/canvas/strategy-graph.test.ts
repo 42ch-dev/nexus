@@ -161,3 +161,34 @@ describe('buildStrategyGraph', () => {
     expect(done.position.y).toBeGreaterThan(gathering.position.y);
   });
 });
+
+describe('buildStrategyGraph — validation tolerance', () => {
+  it('does not crash on a dangling `next` target (validation surfaces it instead)', () => {
+    // Typo'd target — `outlinig` does not exist. The BFS should skip the
+    // dangling id at dequeue time and the ValidationPanel surfaces the
+    // warning. Before the fix this threw TypeError mid-BFS, which TanStack
+    // Query surfaced as "Could not load the Strategy preset" and hid the
+    // graph + validation panel entirely.
+    const yaml = `
+preset:
+  id: typo-preset
+  version: 1
+  kind: creator
+  initial: gathering
+  terminal: done
+states:
+  - id: gathering
+    next: outlinig
+  - id: done
+`;
+    const parsed = parsePresetYaml(yaml);
+    expect(() => buildStrategyGraph(parsed)).not.toThrow();
+    const { nodes, edges, danglingTargets } = buildStrategyGraph(parsed);
+    expect(nodes.find((n) => n.id === 'gathering')).toBeDefined();
+    expect(danglingTargets.length).toBeGreaterThan(0);
+    expect(danglingTargets[0]).toContain('outlinig');
+    // The dangling edge is NOT pushed (pushOuterEdge drops missing targets),
+    // so the edges array has no synthetic edge for the dangling next.
+    expect(edges.length).toBe(0);
+  });
+});

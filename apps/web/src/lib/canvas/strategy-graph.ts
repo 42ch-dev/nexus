@@ -83,8 +83,13 @@ export function buildStrategyGraph(parsed: ParsedPreset): StrategyGraph {
     layerOf.set(initialId, 0);
     while (queue.length > 0) {
       const id = queue.shift()!;
+      // Skip dangling ids — they may have been queued before we realized the
+      // target doesn't exist in byId. The ValidationPanel surfaces these as
+      // warnings; crashing here would hide that affordance entirely.
+      const state = byId.get(id);
+      if (!state) continue;
       const layer = layerOf.get(id)!;
-      for (const target of nextTargets(byId.get(id)!)) {
+      for (const target of nextTargets(state)) {
         if (!layerOf.has(target)) {
           layerOf.set(target, layer + 1);
           queue.push(target);
