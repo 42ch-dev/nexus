@@ -1,4 +1,4 @@
-import { RefreshCw } from 'lucide-react';
+import { Info, RefreshCw } from 'lucide-react';
 import { useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
@@ -13,8 +13,8 @@ import { useCapabilities } from '@/api/queries';
  *
  * Lists every `nexus.*` capability the runtime exposes with its I/O schemas.
  * Surfaces the V1.34 agent tool bridge so authors can see what presets can
- * invoke. Note: CapabilityInfo carries name + input/output schemas only;
- * admission-gate data is not exposed in the list response (residual).
+ * invoke. Admission-gate details are enforced at invocation time and are not
+ * included in the list response; the UI surfaces that limitation explicitly.
  */
 export function CapabilitiesPage() {
   const caps = useCapabilities();
@@ -74,6 +74,13 @@ export function CapabilitiesPage() {
                 <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
                   <SchemaBlock title="Input schema" value={c.input_schema} />
                   <SchemaBlock title="Output schema" value={c.output_schema} />
+                </div>
+                <div className="mt-3 flex items-start gap-2 rounded-control bg-background-300 p-3 text-copy-13 text-gray-800">
+                  <Info className="mt-0.5 h-4 w-4 shrink-0 text-gray-700" aria-hidden />
+                  <p>
+                    Admission gates are enforced by the daemon when this capability is invoked.
+                    Gate details are not exposed in the registry list response.
+                  </p>
                 </div>
               </li>
             ))}
