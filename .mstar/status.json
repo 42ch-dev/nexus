@@ -101,7 +101,14 @@
         "owner": "@fullstack-dev",
         "target": "V1.68 P0 fix wave",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.68-cli-relocation-and-product-surface-formalization][R-V168P0-QC1-W001]",
-        "note": "Regression introduced by V1.68 (CLI moved out of crates/** glob into unfiltered apps/nexus42/**). Fix: add 'apps/nexus42/**' to both push.paths and pull_request.paths. ci.yml unaffected (paths-ignore). qc1+qc3 targeted re-review after fix."
+        "note": "Regression introduced by V1.68 (CLI moved out of crates/** glob into unfiltered apps/nexus42/**). Fix: add 'apps/nexus42/**' to both push.paths and pull_request.paths. ci.yml unaffected (paths-ignore). qc1+qc3 targeted re-review after fix.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-27 (P0 fix wave)",
+        "closure_note": "Fixed in commit 630df3af: added 'apps/nexus42/**' to push.paths + pull_request.paths in desktop-build.yml. qc1 + qc3 targeted re-review both flipped to Approve (W-001 + S-02 verified resolved, no new issue).",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization",
+          "commit": "630df3af"
+        }
       }
     ],
     "2026-06-23-v1.61-compute-capability-and-preset": [
