@@ -581,12 +581,18 @@ pub async fn patch_chapter(
         })?
         .ok_or_else(|| NexusApiError::NotFound(format!("chapter {chapter} volume {volume}")))?;
 
-    // Reject display-only title writes in V1.65.
+    // Reject display-only title writes in V1.65 with a 422 + field_errors so
+    // the UI can highlight the offending field instead of a generic 400.
     if req.title.is_some() {
-        return Err(NexusApiError::BadRequest {
-            code: "chapter_title_unsupported".to_string(),
-            message: "title is display-only in V1.65; use outline frontmatter or slug instead"
-                .to_string(),
+        return Err(NexusApiError::PresetGatesFailed {
+            details: serde_json::json!({
+                "field_errors": [
+                    {
+                        "field": "title",
+                        "reason": "title is display-only in V1.65; use outline frontmatter or slug instead",
+                    }
+                ]
+            }),
         });
     }
 
@@ -1096,6 +1102,43 @@ mod tests {
         .await
         .expect("patch with volume change must not 404 after the write");
         assert_eq!(resp.volume, 2);
+    }
+
+    /// Regression: writing `title` used to return a plain 400. It now returns
+    /// 422 with a `field_errors` array so the UI can highlight the field.
+    #[tokio::test]
+    async fn patch_chapter_title_returns_422_field_error() {
+        let (state, _tmp, work_id) = setup_chapter_work().await;
+        let req = PatchChapterRequest {
+            title: Some("New Title".to_string()),
+            slug: None,
+            planned_word_count: None,
+            volume: None,
+            status: None,
+            confirm_structural_edit: None,
+            transition_reason: None,
+        };
+
+        let result = patch_chapter(
+            AxumState(state),
+            AxumPath((work_id, "1".to_string())),
+            AxumQuery(ChapterContentQuery { volume: None }),
+            axum::Json(req),
+        )
+        .await;
+
+        let err = result.expect_err("title patch should fail");
+        match err {
+            NexusApiError::PresetGatesFailed { details } => {
+                let field_errors = details
+                    .get("field_errors")
+                    .and_then(|v| v.as_array())
+                    .expect("details should contain field_errors array");
+                assert_eq!(field_errors.len(), 1);
+                assert_eq!(field_errors[0]["field"], "title");
+            }
+            other => panic!("expected PresetGatesFailed, got {other:?}"),
+        }
     }
 
     #[tokio::test]
