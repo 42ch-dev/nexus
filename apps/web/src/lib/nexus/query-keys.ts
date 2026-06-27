@@ -22,6 +22,8 @@ export const queryKeys = {
   schedules: {
     all: ['schedules'] as const,
     list: (query?: object) => [...queryKeys.schedules.all, 'list', query ?? {}] as const,
+    details: () => [...queryKeys.schedules.all, 'detail'] as const,
+    detail: (scheduleId: string) => [...queryKeys.schedules.details(), scheduleId] as const,
   },
   capabilities: {
     all: ['capabilities'] as const,

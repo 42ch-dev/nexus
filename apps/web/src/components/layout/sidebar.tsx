@@ -7,6 +7,7 @@ import {
   ListChecks,
   NotebookText,
   Sparkles,
+  Workflow,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -34,6 +35,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/capabilities', label: 'Capabilities', icon: Boxes },
   { to: '/findings', label: 'Findings', icon: AlertTriangle },
   { to: '/presets', label: 'Presets', icon: Sparkles },
+  { to: '/strategy', label: 'Strategy', icon: Workflow },
 ];
 
 export function Sidebar() {

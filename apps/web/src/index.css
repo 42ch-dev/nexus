@@ -85,6 +85,19 @@
     --color-pink-900: #9d174d;
     --color-pink-1000: #831843;
 
+    /* Canvas surface — DESIGN.md §Canvas Surface (V1.70) */
+    --color-canvas-surface: #ebebeb;
+    --color-canvas-grid: rgba(0, 0, 0, 0.05);
+    --color-canvas-node-fill: #ffffff;
+    --color-canvas-node-fill-hover: #f5f5f5;
+    --color-canvas-node-border: rgba(0, 0, 0, 0.14);
+    --color-canvas-node-border-selected: #006bff;
+    --color-canvas-edge: #a3a3a3;
+    --color-canvas-edge-hover: #4a4a4a;
+    --color-canvas-port: #666666;
+    --color-canvas-minimap: rgba(0, 0, 0, 0.24);
+    --color-canvas-strategy-accent: #7c3aed;
+
     /* Elevation — DESIGN.md §Elevation */
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04);
     --shadow-popover: 0 1px 1px rgba(0, 0, 0, 0.03), 0 8px 24px -12px rgba(0, 0, 0, 0.18);
@@ -152,6 +165,19 @@
     --color-pink-800: #ffa6d0;
     --color-pink-900: #ffc4df;
     --color-pink-1000: #ffe3f0;
+
+    /* Canvas surface — DESIGN.dark.md §Canvas Surface (V1.70) */
+    --color-canvas-surface: #141414;
+    --color-canvas-grid: rgba(255, 255, 255, 0.05);
+    --color-canvas-node-fill: #1a1a1a;
+    --color-canvas-node-fill-hover: #2a2a2a;
+    --color-canvas-node-border: rgba(255, 255, 255, 0.18);
+    --color-canvas-node-border-selected: #52a8ff;
+    --color-canvas-edge: #525252;
+    --color-canvas-edge-hover: #c7c7c7;
+    --color-canvas-port: #a3a3a3;
+    --color-canvas-minimap: rgba(255, 255, 255, 0.22);
+    --color-canvas-strategy-accent: #b794ff;
 
     /* Elevation */
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);

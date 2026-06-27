@@ -183,19 +183,19 @@ components:
     stopped-bg: "rgba(229,72,77,0.12)"
     stopped-text: "{colors.red-1000}"
 
-  # LEVEL PLACEHOLDER — V1.70 canvas implement (see canvas-strategy-surface.md Draft §3.6 / B4)
-  # canvas:
-  #   canvas-surface: "<V1.70>"
-  #   canvas-grid: "<V1.70>"
-  #   canvas-node-fill: "<V1.70>"
-  #   canvas-node-fill-hover: "<V1.70>"
-  #   canvas-node-border: "<V1.70>"
-  #   canvas-node-border-selected: "<V1.70>"
-  #   canvas-edge: "<V1.70>"
-  #   canvas-edge-hover: "<V1.70>"
-  #   canvas-port: "<V1.70>"
-  #   canvas-minimap: "<V1.70>"
-  #   canvas-strategy-accent: "<V1.70>"
+  # V1.70 canvas implement — concrete light values (canvas-strategy-surface.md Draft §3.6 / B4)
+  canvas:
+    canvas-surface: "#ebebeb"
+    canvas-grid: "rgba(0,0,0,0.05)"
+    canvas-node-fill: "#ffffff"
+    canvas-node-fill-hover: "#f5f5f5"
+    canvas-node-border: "rgba(0,0,0,0.14)"
+    canvas-node-border-selected: "{colors.blue-700}"
+    canvas-edge: "{colors.gray-500}"
+    canvas-edge-hover: "{colors.gray-800}"
+    canvas-port: "{colors.gray-700}"
+    canvas-minimap: "{colors.gray-alpha-600}"
+    canvas-strategy-accent: "{colors.purple-700}"
 ---
 
 # Nexus Local Web UI Design System
