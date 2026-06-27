@@ -90,6 +90,20 @@
     "wave1_merged_at": "2026-06-25T15:49:19Z"
   },
   "residual_findings": {
+    "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization": [
+      {
+        "id": "R-V168P0-QC1-W001",
+        "title": "desktop-build.yml path filter omits apps/nexus42/** — CLI-only PRs no longer trigger desktop-bundle CI after relocation (regression)",
+        "severity": "low",
+        "source": "qc1 W-001 (cross-confirmed qc3)",
+        "scope": ".github/workflows/desktop-build.yml push.paths + pull_request.paths (filter has crates/** + apps/web/** + apps/desktop/** but not apps/nexus42/**)",
+        "decision": "fix-in-wave",
+        "owner": "@fullstack-dev",
+        "target": "V1.68 P0 fix wave",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.68-cli-relocation-and-product-surface-formalization][R-V168P0-QC1-W001]",
+        "note": "Regression introduced by V1.68 (CLI moved out of crates/** glob into unfiltered apps/nexus42/**). Fix: add 'apps/nexus42/**' to both push.paths and pull_request.paths. ci.yml unaffected (paths-ignore). qc1+qc3 targeted re-review after fix."
+      }
+    ],
     "2026-06-23-v1.61-compute-capability-and-preset": [
       {
         "id": "R-V161P3-ARCH-001",
