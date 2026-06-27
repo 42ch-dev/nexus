@@ -33,7 +33,7 @@ See linked AGENTS.md files for per-directory decision rules and invariants:
 |-----------|-------|-----------|
 | `schemas/` | JSON Schema wire contracts | [`schemas/AGENTS.md`](schemas/AGENTS.md) |
 | `tooling/` | Codegen pipeline & CI | [`tooling/AGENTS.md`](tooling/AGENTS.md) |
-| `crates/nexus42/` | CLI executable | [`crates/nexus42/AGENTS.md`](crates/nexus42/AGENTS.md) |
+| `apps/nexus42/` | CLI executable (polyglot product-surfaces dir) | [`apps/nexus42/AGENTS.md`](apps/nexus42/AGENTS.md) |
 | `crates/nexus-acp-host/` | ACP client adapter | [`crates/nexus-acp-host/AGENTS.md`](crates/nexus-acp-host/AGENTS.md) |
 | `crates/nexus-agent-host/` | Agent host adapter | [`crates/nexus-agent-host/AGENTS.md`](crates/nexus-agent-host/AGENTS.md) |
 | `crates/nexus-contracts/` | Generated Rust wire types | [`crates/nexus-contracts/AGENTS.md`](crates/nexus-contracts/AGENTS.md) |
@@ -51,6 +51,8 @@ See linked AGENTS.md files for per-directory decision rules and invariants:
 | `crates/nexus-moment-context-assembly/` | Per-moment context assembly | [`crates/nexus-moment-context-assembly/AGENTS.md`](crates/nexus-moment-context-assembly/AGENTS.md) |
 | `.mstar/` | Harness infrastructure | [`.mstar/AGENTS.md`](.mstar/AGENTS.md) |
 | `.agents/` | Code-agent skills only (ACP workspace skill root) | [`.agents/AGENTS.md`](.agents/AGENTS.md) |
+
+**`apps/` is the polyglot product-surfaces directory.** Any product surface — regardless of language (Rust CLI, Tauri desktop shell, web SPA, etc.) — lives under `apps/`. Reusable Rust libraries live under `crates/`. See [`apps/AGENTS.md`](apps/AGENTS.md) for the durable placement rule.
 
 **Directory split:** `{HARNESS_DIR}` = `.mstar/`. `.agents/` holds optional `.agents/skills/` for IDE/ACP — not harness SSOT.
 

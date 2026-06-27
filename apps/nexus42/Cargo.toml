@@ -19,19 +19,19 @@ name = "nexus42"
 path = "src/main.rs"
 
 [dependencies]
-nexus-contracts = { path = "../nexus-contracts" }
-nexus-orchestration = { path = "../nexus-orchestration" }
-nexus-moment-context-assembly = { path = "../nexus-moment-context-assembly", features = ["cloud-stage"] }
-nexus-creator-memory = { path = "../nexus-creator-memory" }
-nexus-creator = { path = "../nexus-creator" }
-nexus-cloud-sync = { path = "../nexus-cloud-sync", features = ["legacy-sync"] }
-nexus-home-layout = { path = "../nexus-home-layout" }
-nexus-local-db = { path = "../nexus-local-db" }
-nexus-acp-host = { path = "../nexus-acp-host" }
-nexus-daemon-runtime = { path = "../nexus-daemon-runtime" }
-nexus-narrative = { path = "../nexus-narrative" }
-nexus-kb = { path = "../nexus-kb" }
-nexus-knowledge = { path = "../nexus-knowledge" }
+nexus-contracts = { path = "../../crates/nexus-contracts" }
+nexus-orchestration = { path = "../../crates/nexus-orchestration" }
+nexus-moment-context-assembly = { path = "../../crates/nexus-moment-context-assembly", features = ["cloud-stage"] }
+nexus-creator-memory = { path = "../../crates/nexus-creator-memory" }
+nexus-creator = { path = "../../crates/nexus-creator" }
+nexus-cloud-sync = { path = "../../crates/nexus-cloud-sync", features = ["legacy-sync"] }
+nexus-home-layout = { path = "../../crates/nexus-home-layout" }
+nexus-local-db = { path = "../../crates/nexus-local-db" }
+nexus-acp-host = { path = "../../crates/nexus-acp-host" }
+nexus-daemon-runtime = { path = "../../crates/nexus-daemon-runtime" }
+nexus-narrative = { path = "../../crates/nexus-narrative" }
+nexus-kb = { path = "../../crates/nexus-kb" }
+nexus-knowledge = { path = "../../crates/nexus-knowledge" }
 clap = { workspace = true }
 clap_complete = { workspace = true }
 tokio = { workspace = true }

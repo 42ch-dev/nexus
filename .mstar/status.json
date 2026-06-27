@@ -24,7 +24,7 @@
       "title": "V1.68 P0 — Relocate CLI to apps/ + Product-Surface Formalization",
       "iteration": "V1.68",
       "slot": "P0",
-      "status": "InProgress",
+      "status": "InReview",
       "effort": "S",
       "owner": "@fullstack-dev",
       "review": "QC tri-review pending (after implement)",

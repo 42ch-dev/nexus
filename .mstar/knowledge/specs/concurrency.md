@@ -287,7 +287,7 @@ The daemon cron-fire enqueue path (`cron_supervisor::try_fire_role`) wraps `enqu
 | `FileLockError::Locked` | `E_LOCK` | 75 | Temporary file-lock contention; retry later. |
 | `FileLockError::Io` | `E_LOCK_IO` | 78 | Persistent I/O failure; operator intervention required. |
 
-All three codes are mapped in `crates/nexus42/src/main.rs` §Exit mapping.
+All three codes are mapped in `apps/nexus42/src/main.rs` §Exit mapping.
 
 ### 7.7 Anti-Patterns
 

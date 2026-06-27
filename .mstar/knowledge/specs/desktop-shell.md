@@ -96,7 +96,7 @@ Window chrome / app menu / native dialogs / desktop context menu / daemon-status
 
 - **macOS-only** in V1.66 (`aarch64-apple-darwin` + `x86_64-apple-darwin`).
 - **Unsigned** `.app` + `.dmg` (T1 DoD). No signing, no notarization, no auto-update, no GitHub Releases.
-- CI `desktop-build` job: `macos-13` x86_64 runner, both Rust targets installed, `--target universal-apple-darwin` if stable (else separate arch artifacts; no hand-rolled `lipo` first), 90-day retention, path filter (`apps/**`, `crates/nexus42/**`, `crates/nexus-daemon-runtime/**`, `packages/nexus-contracts/**`, lockfiles, workflows).
+- CI `desktop-build` job: `macos-13` x86_64 runner, both Rust targets installed, `--target universal-apple-darwin` if stable (else separate arch artifacts; no hand-rolled `lipo` first), 90-day retention, path filter (`apps/**`, `apps/nexus42/**`, `crates/nexus-daemon-runtime/**`, `packages/nexus-contracts/**`, lockfiles, workflows).
 
 ## 12. Verification matrix
 

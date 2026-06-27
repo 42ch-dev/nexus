@@ -73,7 +73,7 @@ impl Serialize for PathGuardError {
 
 /// Cached active workspace root, resolved once at startup from
 /// `~/.nexus42/config.toml` (`workspace_path`) — the same source of truth the
-/// daemon uses at boot (`crates/nexus42/src/config.rs`). `None` when no
+/// daemon uses at boot (`apps/nexus42/src/config.rs`). `None` when no
 /// workspace is configured; every path-guard call then denies by default.
 #[derive(Debug, Clone, Default)]
 struct WorkspaceRoot(Option<PathBuf>);
