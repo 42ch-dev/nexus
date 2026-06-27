@@ -9,6 +9,21 @@ and local API transport. It is a **library crate only** — no standalone binary
 - **This is NOT an ACP Agent/Server** — the runtime is a local supervisor only, client-side.
 - **Contract types:** shares generated types from `crates/nexus-contracts`. Do NOT hand-write duplicate DTOs.
 
+## Error envelope single-source rule (R-V167P0-QC1-S-AGENTS)
+
+`NexusApiError` in `src/api/errors.rs` is the **single source of truth** for the canonical Local API error envelope:
+
+```json
+{ "success": false, "error": { "code": "...", "message": "...", "details": {...}, "request_id": "..." } }
+```
+
+All handlers MUST return `NexusApiError` (or a type that converts `Into<NexusApiError>`) so the central `IntoResponse` implementation emits the canonical shape. Do not construct ad-hoc JSON error bodies in individual handlers, and do not duplicate the envelope structure in other modules.
+
+- Existing variants cover most cases: `BadRequest` for validation errors, `Internal` for 500-class failures, `ServiceUnavailable` for 503, `PresetGatesFailed` for 422 semantic validation, etc.
+- Add a new variant only when no existing variant can carry the required public `error_code()` and HTTP `status_code()`.
+- Internal classification strings (e.g. `"DATABASE_ERROR"`) live in `Internal { code, ... }` and are intentionally **not** exposed as the public wire `code`; the public `error_code()` always returns lowercase `snake_case`.
+- Strategy conflict errors and other domain errors reuse existing variants rather than inventing a second envelope type.
+
 ## Architecture Reference
 
 See `.mstar/knowledge/specs/daemon-runtime.md` — Sections 2.2, 3.1, 3.3

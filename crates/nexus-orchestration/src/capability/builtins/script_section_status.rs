@@ -140,6 +140,22 @@ impl Capability for ScriptSectionStatusUpdate {
             )));
         }
 
+        // Acquire the per-Work advisory file lock to serialize this
+        // read-modify-write against concurrent manual edits or other CLI
+        // processes (R-V167P2-QC3-S1). On non-Unix platforms the lock is a
+        // no-op at compile time because the crate is macOS-only in V1.66+.
+        #[cfg(unix)]
+        {
+            let work_dir = scripts_dir_canonical
+                .parent()
+                .ok_or_else(|| CapabilityError::Internal("missing work dir".into()))?;
+            let _lock = nexus_local_db::file_lock::try_acquire(
+                work_dir,
+                "capability:script.section_status.update",
+            )
+            .map_err(|e| CapabilityError::TransientExternal(format!("work file lock: {e}")))?;
+        }
+
         info!(
             work_ref = %work_ref,
             section_path = %inp.section_path,
@@ -237,6 +253,13 @@ mod tests {
         let updated = std::fs::read_to_string(&section_path).unwrap();
         assert!(updated.contains("section_status: reviewed"));
         assert!(!updated.contains("section_status: draft"));
+
+        // R-V167P2-QC3-S1: the update must acquire the per-Work advisory lock.
+        #[cfg(unix)]
+        assert!(
+            works_root.join("my-screenplay").join(".lock").exists(),
+            ".lock file should be created in the work directory"
+        );
     }
 
     #[tokio::test]

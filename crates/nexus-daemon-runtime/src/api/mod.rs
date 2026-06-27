@@ -313,22 +313,23 @@ fn works_routes() -> Router<WorkspaceState> {
             post(handlers::works::reconcile_chapters),
         )
         // ── Chapter content sub-routes (V1.65 P0) ────────────────────────
-        .route(
+        // Nest chapter routes under /v1/local/works/{work_id}/chapters so the
+        // work_id prefix is shared and future Works sub-resources cannot
+        // accidentally interleave with chapter paths (qc1 S-5).
+        .nest(
             "/v1/local/works/{work_id}/chapters",
-            get(handlers::chapters::list_chapters),
-        )
-        .route(
-            "/v1/local/works/{work_id}/chapters/{n}",
-            get(handlers::chapters::get_chapter).patch(handlers::chapters::patch_chapter),
-        )
-        .route(
-            "/v1/local/works/{work_id}/chapters/{n}/outline",
-            get(handlers::chapters::get_chapter_outline)
-                .put(handlers::chapters::put_chapter_outline),
-        )
-        .route(
-            "/v1/local/works/{work_id}/chapters/{n}/body",
-            get(handlers::chapters::get_chapter_body),
+            Router::new()
+                .route("/", get(handlers::chapters::list_chapters))
+                .route(
+                    "/{n}",
+                    get(handlers::chapters::get_chapter).patch(handlers::chapters::patch_chapter),
+                )
+                .route(
+                    "/{n}/outline",
+                    get(handlers::chapters::get_chapter_outline)
+                        .put(handlers::chapters::put_chapter_outline),
+                )
+                .route("/{n}/body", get(handlers::chapters::get_chapter_body)),
         )
         // ── Findings sub-routes (V1.39 P1) ───────────────────────────
         .route(

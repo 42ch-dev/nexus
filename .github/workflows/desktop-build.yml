@@ -34,10 +34,12 @@ permissions:
 
 env:
   SQLX_OFFLINE: "true"
+  # Sign when the secret is present; otherwise build unsigned (local dev / PRs).
+  APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
 
 jobs:
   desktop-build:
-    name: Build unsigned macOS desktop app
+    name: Build macOS desktop app
     runs-on: macos-14
     # F1: single-arch native aarch64 build fits the 6h Actions budget; fail fast
     # if something hangs. macos-13 (Intel) is deprecated and no longer provisions,
@@ -79,6 +81,14 @@ jobs:
       - name: Build contracts package
         run: pnpm --filter @42ch/nexus-contracts run build
 
+      - name: Report signing mode
+        run: |
+          if [ -n "$APPLE_SIGNING_IDENTITY" ]; then
+            echo "Signing identity configured; bundle will be signed."
+          else
+            echo "No signing identity configured; bundle will be unsigned."
+          fi
+
       - name: Build Tauri desktop bundle (universal, fallback per-arch)
         run: |
           set -euo pipefail
@@ -98,3 +108,39 @@ jobs:
       # not an artifact-production pipeline. Distributable .app/.dmg assets are
       # produced by .github/workflows/desktop-release.yml on `release.published`
       # (which builds independently and uploads via `gh release upload`).
+
+  served-ui-smoke:
+    name: Served UI smoke test
+    runs-on: macos-14
+    needs: desktop-build
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+
+      - uses: pnpm/action-setup@eae0cfeb286e66ffb5155f1a79b90583a127a68b  # v2
+        with:
+          version: 9
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+        with:
+          targets: aarch64-apple-darwin, wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+        with:
+          key: served-ui-smoke-macos-aarch64
+          workspaces: |
+            .
+
+      - name: Install pnpm dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build contracts package
+        run: pnpm --filter @42ch/nexus-contracts run build
+
+      - name: Run served-UI smoke test
+        run: ./scripts/served-ui-smoke.sh
