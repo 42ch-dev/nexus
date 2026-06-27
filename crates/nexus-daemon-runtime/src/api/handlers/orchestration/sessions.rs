@@ -4,7 +4,7 @@
 
 use crate::api::errors::NexusApiError;
 use crate::api::pagination::{decode_offset_cursor, encode_offset_cursor};
-use crate::api::sort::parse_sort_terms;
+use crate::api::sort::{compare_by_terms, parse_sort_terms};
 use crate::workspace::WorkspaceState;
 use axum::{
     extract::{Path, Query, State},
@@ -92,7 +92,15 @@ pub async fn list_sessions(
         .collect();
 
     // F-F1: apply server-side sort (in-memory; active-session lists are small).
-    mapped.sort_by(|a, b| compare_session_summary(a, b, &sort_terms));
+    mapped.sort_by(|a, b| {
+        compare_by_terms(a, b, &sort_terms, |key, a, b| match key {
+            "session_id" => Some(a.session_id.cmp(&b.session_id)),
+            "creator_id" => Some(a.creator_id.cmp(&b.creator_id)),
+            "preset_id" => Some(a.preset_id.cmp(&b.preset_id)),
+            "status" => Some(a.status.cmp(&b.status)),
+            _ => None,
+        })
+    });
 
     // F-P1/F-P3: cursor pagination.
     let offset = decode_offset_cursor(&query.cursor)?;
@@ -118,27 +126,6 @@ pub async fn list_sessions(
             has_more,
         },
     }))
-}
-
-fn compare_session_summary(
-    a: &SessionSummary,
-    b: &SessionSummary,
-    terms: &[(String, bool)],
-) -> std::cmp::Ordering {
-    for (key, ascending) in terms {
-        let ord = match key.as_str() {
-            "session_id" => a.session_id.cmp(&b.session_id),
-            "creator_id" => a.creator_id.cmp(&b.creator_id),
-            "preset_id" => a.preset_id.cmp(&b.preset_id),
-            "status" => a.status.cmp(&b.status),
-            _ => std::cmp::Ordering::Equal,
-        };
-        let ord = if *ascending { ord } else { ord.reverse() };
-        if ord != std::cmp::Ordering::Equal {
-            return ord;
-        }
-    }
-    std::cmp::Ordering::Equal
 }
 
 /// `GET /v1/local/orchestration/sessions/{session_id}`
