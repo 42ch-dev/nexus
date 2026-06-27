@@ -2558,6 +2558,80 @@ mod tests {
         assert!(verdict.go, "expected GO, got: {verdict:?}");
     }
 
+    // R-V152TA-S006 / R-V167P2-QC1-S1: regression test confirming that a NOGO
+    // verdict emits a structured info log carrying every dimension score. The
+    // log is the primary operator observability for why the heuristic gate
+    // blocked draft generation.
+    #[test]
+    fn outline_five_q_nogo_info_logs_dimensions() {
+        use std::sync::{Arc, Mutex};
+
+        #[derive(Clone)]
+        struct CaptureLayer {
+            messages: Arc<Mutex<Vec<String>>>,
+        }
+        impl<S: tracing::Subscriber> tracing_subscriber::Layer<S> for CaptureLayer {
+            fn on_event(
+                &self,
+                event: &tracing::Event<'_>,
+                _ctx: tracing_subscriber::layer::Context<'_, S>,
+            ) {
+                if event.metadata().level() == &tracing::Level::INFO {
+                    let mut visitor = CaptureVisitor(String::new());
+                    event.record(&mut visitor);
+                    self.messages.lock().unwrap().push(visitor.0);
+                }
+            }
+        }
+        struct CaptureVisitor(String);
+        impl tracing::field::Visit for CaptureVisitor {
+            fn record_debug(&mut self, field: &tracing::field::Field, value: &dyn std::fmt::Debug) {
+                use std::fmt::Write;
+                let _ = write!(&mut self.0, "{}={:?} ", field.name(), value);
+            }
+        }
+
+        let captured: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        let layer = CaptureLayer {
+            messages: captured.clone(),
+        };
+        let subscriber =
+            <tracing_subscriber::Registry as tracing_subscriber::layer::SubscriberExt>::with(
+                tracing_subscriber::registry::Registry::default(),
+                layer,
+            );
+
+        tracing::subscriber::with_default(subscriber, || {
+            // Structured and paced, but lacks arc, foreshadow, and hook.
+            let outline = "## Scene 1\n\
+                - The party walks through the ancient forest in the late afternoon light.\n\
+                - They see many trees, some fallen, and a narrow path winding east toward the river.\n\
+                - Moss covers the stones and the air smells of rain.\n\
+                - Birds call overhead as the travellers continue in silence.\n";
+            let verdict = outline_five_q_check(outline);
+            assert!(!verdict.go, "expected NOGO, got: {verdict:?}");
+            assert!(verdict.dimensions.structure);
+            assert!(!verdict.dimensions.arc);
+            assert!(!verdict.dimensions.foreshadow);
+            assert!(verdict.dimensions.pacing);
+            assert!(!verdict.dimensions.hook);
+        });
+
+        let msgs = captured.lock().unwrap();
+        let found = msgs.iter().any(|m| {
+            m.contains("NOGO")
+                && m.contains("structure=")
+                && m.contains("arc=")
+                && m.contains("foreshadow=")
+                && m.contains("pacing=")
+                && m.contains("hook=")
+        });
+        assert!(
+            found,
+            "expected NOGO info log with per-dimension scores, got: {msgs:?}"
+        );
+    }
+
     // R-V152TA-S001: regression test confirming the single shared LLM→KbCandidate
     // parser (`candidate_from_llm_json_for_profile`) is used by both extraction
     // pathways. If the two call sites ever diverge, this test still guards the

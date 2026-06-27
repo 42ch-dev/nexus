@@ -6,7 +6,7 @@
  * react-markdown + remark-gfm with frontmatter header strip; right-click
  * context menu offering "Copy path" only.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -67,19 +67,25 @@ export function ChapterPage() {
   const [saveState, setSaveState] = useState<SaveState>('clean');
   const [saveError, setSaveError] = useState<string | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
+  const canEditOutline = chapter.data?.can_edit_outline ?? true;
   // V1.66 desktop right-click menu on the outline editor surface
   // (web-ui-design-requirements §6.4). Shares the same component as the body
   // view; acts on the chapter's outline_path.
   const outlineMenu = useContextMenu();
 
+  // Pin TipTap editor dependencies so `useEditor` does not re-initialize the
+  // ProseMirror instance on every render (qc3 S-1).
+  const editorExtensions = useMemo(() => [StarterKit, Markdown], []);
+  const handleEditorUpdate = useCallback(() => {
+    setSaveState('dirty');
+    setSaveError(null);
+  }, []);
+
   const editor = useEditor({
-    extensions: [StarterKit, Markdown],
+    extensions: editorExtensions,
     content: outline.data?.content ?? '',
-    editable: true,
-    onUpdate: () => {
-      setSaveState('dirty');
-      setSaveError(null);
-    },
+    editable: canEditOutline,
+    onUpdate: handleEditorUpdate,
   });
 
   // Reset editor when outline loads or changes externally.
@@ -174,6 +180,7 @@ export function ChapterPage() {
               </div>
             </CardHeader>
             <CardContent className="pt-4">
+              {!canEditOutline && <ProtectedEditBanner reason={ch.protection?.reason} />}
               {showSoftConcurrency && <SoftConcurrencyBanner />}
               <div className="mt-2 overflow-hidden rounded-card border border-gray-alpha-400 bg-background-100 focus-within:border-blue-700 focus-within:ring-2 focus-within:ring-blue-700/20">
                 <EditorToolbar editor={editor} />
@@ -193,7 +200,7 @@ export function ChapterPage() {
                       variant="tertiary"
                       size="small"
                       onClick={handleReset}
-                      disabled={saveState === 'clean'}
+                      disabled={!canEditOutline || saveState === 'clean'}
                     >
                       <RotateCcw className="h-4 w-4" aria-hidden />Reset
                     </Button>
@@ -202,7 +209,7 @@ export function ChapterPage() {
                       variant="primary"
                       size="small"
                       onClick={handleSave}
-                      disabled={saveState !== 'dirty' && saveState !== 'saved-error'}
+                      disabled={!canEditOutline || (saveState !== 'dirty' && saveState !== 'saved-error')}
                     >
                       {saveState === 'saving' && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
                       Save Outline
@@ -241,7 +248,11 @@ function SaveStateIndicator({ state, error }: { state: SaveState; error: string 
   };
   const { dot, label } = config[state];
   return (
-    <div className="flex items-center gap-2 text-label-12 text-gray-900" aria-live="polite">
+    <div
+      className="flex items-center gap-2 text-label-12 text-gray-900"
+      aria-live="polite"
+      aria-label="Save state"
+    >
       <span className={`h-2 w-2 rounded-pill ${dot}`} aria-hidden />
       <span className="max-w-[200px] truncate">{label}</span>
     </div>
@@ -257,6 +268,18 @@ function SoftConcurrencyBanner() {
         <p className="mt-1">
           Editing the outline will not re-draft it — the orchestration engine re-drafts only when the chapter transitions to draft status. To trigger a re-draft after saving: reverse the chapter status to outlined in the structure table, then advance it back to draft.
         </p>
+      </div>
+    </div>
+  );
+}
+
+function ProtectedEditBanner({ reason }: { reason?: string }) {
+  return (
+    <div className="mb-4 flex items-start gap-3 rounded-card border border-blue-700/30 bg-[color-mix(in_srgb,var(--color-blue-700)_8%,transparent)] p-4 text-copy-14 text-blue-1000">
+      <span aria-hidden className="mt-0.5">🔒</span>
+      <div>
+        <p className="font-medium">Outline editing is disabled for this chapter.</p>
+        {reason && <p className="mt-1">{reason}</p>}
       </div>
     </div>
   );

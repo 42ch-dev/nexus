@@ -82,18 +82,21 @@ function renderChapter(workId = 'w-123', chapter = 1) {
   );
 }
 
-function chapterDetail(status: string) {
-  return http.get('/v1/local/works/:workId/chapters/:n', ({ params }) =>    HttpResponse.json({
+function chapterDetail(status: string, canEditOutline = true) {
+  return http.get('/v1/local/works/:workId/chapters/:n', ({ params }) =>
+    HttpResponse.json({
       work_id: params.workId,
       chapter: Number(params.n),
       volume: 1,
       slug: 'ch01',
       planned_word_count: 4000,
       status,
-      can_edit_outline: true,
+      can_edit_outline: canEditOutline,
       can_edit_structure: true,
       body_read_only: true,
-      protection: { level: 'none', reason: '' },
+      protection: canEditOutline
+        ? { level: 'none', reason: '' }
+        : { level: 'status', reason: 'Chapter is locked by the orchestration engine.' },
       created_at: '2026-06-25T00:00:00Z',
       updated_at: '2026-06-25T00:00:00Z',
     }),
@@ -395,5 +398,83 @@ describe('ChapterPage', () => {
 
     addListener.mockRestore();
     removeListener.mockRestore();
+  });
+
+  it('shows the save error indicator when the outline PUT fails', async () => {
+    useHandlers(
+      chapterDetail('not_started'),
+      http.get('/v1/local/works/:workId/chapters/:n/outline', () =>
+        HttpResponse.json({
+          work_id: 'w-123',
+          chapter: 1,
+          volume: 1,
+          outline_path: 'Works/WRK/Outlines/chapters/ch01-outline.md',
+          content: '# Chapter 1',
+          updated_at: '2026-06-25T00:00:00Z',
+        }),
+      ),
+      http.put('/v1/local/works/:workId/chapters/:n/outline', () =>
+        HttpResponse.json(
+          { success: false, error: { code: 'conflict', message: 'Outline is locked' } },
+          { status: 409 },
+        ),
+      ),
+      http.get('/v1/local/works/:workId/chapters/:n/body', () =>
+        HttpResponse.json({
+          work_id: 'w-123',
+          chapter: 1,
+          volume: 1,
+          body_path: 'Works/WRK/Stories/ch01-ch01.md',
+          content: 'Body prose.',
+          read_only: true,
+          updated_at: '2026-06-25T00:00:00Z',
+        }),
+      ),
+    );
+
+    renderChapter();
+    await screen.findByText('Saved');
+    const editor = screen.getByRole('textbox');
+    await userEvent.type(editor, ' edited');
+    await waitFor(() => expect(screen.getByText(/Unsaved changes/i)).toBeInTheDocument());
+    await userEvent.click(screen.getByRole('button', { name: /Save Outline/i }));
+    await waitFor(() =>
+      expect(screen.getByLabelText('Save state')).toHaveTextContent(/Outline is locked/i),
+    );
+  });
+
+  it('disables outline editing when can_edit_outline is false', async () => {
+    useHandlers(
+      chapterDetail('draft', false),
+      http.get('/v1/local/works/:workId/chapters/:n/outline', () =>
+        HttpResponse.json({
+          work_id: 'w-123',
+          chapter: 1,
+          volume: 1,
+          outline_path: 'Works/WRK/Outlines/chapters/ch01-outline.md',
+          content: '# Chapter 1',
+          updated_at: '2026-06-25T00:00:00Z',
+        }),
+      ),
+      http.get('/v1/local/works/:workId/chapters/:n/body', () =>
+        HttpResponse.json({
+          work_id: 'w-123',
+          chapter: 1,
+          volume: 1,
+          body_path: 'Works/WRK/Stories/ch01-ch01.md',
+          content: 'Body prose.',
+          read_only: true,
+          updated_at: '2026-06-25T00:00:00Z',
+        }),
+      ),
+    );
+
+    renderChapter();
+    expect(
+      await screen.findByText(/Outline editing is disabled for this chapter/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/Chapter is locked by the orchestration engine/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Save Outline/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Reset/i })).toBeDisabled();
   });
 });

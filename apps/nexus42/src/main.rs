@@ -74,6 +74,7 @@ async fn main() {
         Some(Commands::System { command }) => {
             nexus42::commands::system::run(command, &config).await
         }
+        Some(Commands::Desktop { command }) => nexus42::commands::desktop::run(command).await,
         Some(Commands::Platform { command }) => {
             nexus42::commands::platform::run(command, &config, &output_format).await
         }

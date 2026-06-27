@@ -32,7 +32,7 @@
     {
       "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
       "iteration_id": "V1.71",
-      "status": "Todo",
+      "status": "InProgress",
       "owner": "ops-engineer + fullstack-dev + frontend-dev",
       "effort": "M",
       "type": "implement",
@@ -40,7 +40,8 @@
       "merge_target": "iteration/v1.71",
       "task_category": "ops",
       "wire_contracts_changed": false,
-      "wire_contracts_note": "Track B only: surgical residual closures + desktop sign infrastructure; no schema/codegen/DTO change"
+      "wire_contracts_note": "Track B only: surgical residual closures + desktop sign infrastructure; no schema/codegen/DTO change",
+      "started_at": "2026-06-27T19:54:37Z"
     },
     {
       "plan_id": "2026-06-27-v1.71-closure",
@@ -83,21 +84,18 @@
       "pr_number": 95
     },
     "tech_debt_summary": {
-      "total_open": 15,
-      "total_deferred": 15,
-      "total_resolved": 214,
+      "total_open": 1,
+      "total_deferred": 0,
+      "total_resolved": 233,
       "total_archived": 0,
       "by_severity_active": {
-        "low": 15
+        "low": 1
       },
       "by_target_active": {
-        "V1.65+": 1,
-        "V1.64 P-mid/QA": 1,
-        "?": 2,
-        "V1.68+": 11
+        "V1.65+": 1
       },
-      "refreshed_at": "2026-06-27 (V1.70 P-last closure; closed 2 \u2192 15 open)",
-      "refreshed_reason": "V1.70 P-last: closed R-V167PSEC-QC1-S-UNMOUNT (P0 commit dad35736) + R-V167PSEC-QC1-S-CI-SETUO (P1 commit b55cd1c3). 17\u219215 open. Remaining 15 are DX/UX polish grab-bag, chapter virtualization, capability admission-gate UI, live served-UI smoke, and the V1.67 QC-suggestion cluster \u2014 V1.71+ targets."
+      "refreshed_at": "2026-06-27 (V1.71 Track B hygiene: closed 4, resolved 1 deferred; 15\u21921 open)",
+      "refreshed_reason": "V1.71 Track B closed R-V164-P2-G3 (admission-gate UI note), R-V164-P2-S1 (served-UI smoke), R-V167P2-QC1-S4 (frontmatter-helper extraction deferred with reason), and R-V165-QC-SUGG-DX (DX/UX polish). Remaining open: R-V165-QC3-VIRT (chapter table virtualization)."
     },
     "updated_at": "2026-06-27T19:15:18Z",
     "spec_integration_branch": "iteration/v1.71",
@@ -3986,28 +3984,40 @@
         "title": "CapabilityInfo carries no admission-gate data \u2014 Capabilities page shows name + I/O schemas only (not admission gates)",
         "severity": "low",
         "source": "P2 implementer (scope gap)",
-        "scope": "schemas/local-api/capabilities/ CapabilityInfo + daemon capability-registry handler",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target": "V1.65+",
-        "target_date": "V1.65+",
+        "scope": "apps/web/src/pages/capabilities-page.tsx",
+        "decision": "resolved",
+        "owner": "@frontend-dev",
+        "target": "V1.71",
+        "target_date": "V1.71",
         "tracking_link": ".mstar/plans/reports/2026-06-24-v1.64-control-room-and-setup-screens/ (P2 completion \u00a7Residuals)",
-        "note": "Future capability-detail endpoint should expose admission gates. MVP browse = name + description + I/O schemas.",
-        "lifecycle": "deferred"
+        "note": "Surfaced an explicit admission-gate enforcement note in the Control Room Capabilities page without changing the wire contract. The daemon already enforces admission gates; the UI now tells the user that enforcement is daemon-side rather than silent.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-27",
+        "closure_note": "Closed by commit 2d82a6f7: added an admission-gate enforcement note and a regression test to capabilities-page.tsx.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+          "commit": "2d82a6f7"
+        }
       },
       {
         "id": "R-V164-P2-S1",
-        "title": "Live served-UI smoke (against running daemon binary) deferred to P-mid/QA \u2014 frontend path covered by msw + preview smoke",
+        "title": "Live served-UI smoke against the running nexus42 daemon binary",
         "severity": "low",
         "source": "P2 implementer (blocked on P3 binary)",
-        "scope": "apps/web end-to-end smoke vs rust-embed daemon binary",
-        "decision": "defer",
-        "owner": "@qa-engineer",
-        "target": "V1.64 P-mid/QA",
-        "target_date": "V1.64 P-mid",
+        "scope": "scripts/served-ui-smoke.sh + .github/workflows/desktop-build.yml served-ui-smoke job",
+        "decision": "resolved",
+        "owner": "@ops-engineer",
+        "target": "V1.71",
+        "target_date": "V1.71",
         "tracking_link": ".mstar/plans/reports/2026-06-24-v1.64-control-room-and-setup-screens/ (P2 completion \u00a7Residuals)",
-        "note": "P3 owns the rust-embed binary that serves apps/web/dist. P2 verified via msw + vite-preview (offline error handling, CRUD round-trip). Live binary smoke at P-mid/QA.",
-        "lifecycle": "deferred"
+        "note": "Script builds apps/web, builds nexus42 release binary (rust-embed release-only), starts the daemon with a throwaway HOME, verifies Local API health, and asserts the root path serves the embedded SPA HTML. CI job runs on macOS after desktop-build.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-27",
+        "closure_note": "Closed by commit 835e4762: added scripts/served-ui-smoke.sh and a CI job in desktop-build.yml; smoke test uses an ephemeral port and release binary to avoid stale-daemon shadowing.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+          "commit": "835e4762"
+        }
       }
     ],
     "v1.65": [
@@ -4073,11 +4083,17 @@
         "id": "R-V165-QC-SUGG-DX",
         "title": "DX/UX polish (can_edit_outline probe, title 400 DX, route nesting, enum_conversions discoverability, TipTap inline-deps pinning, save-error/protected-edit web coverage)",
         "severity": "low",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "source": "qc1/qc3",
         "scope": "cross-cutting DX",
-        "decision": "defer",
-        "target_iteration": "V1.66+"
+        "decision": "resolved",
+        "target_iteration": "V1.71",
+        "closed_at": "2026-06-27",
+        "closure_note": "Closed in commit 5706277f: added can_edit_outline probe to chapter detail, PATCH title now returns 422 field_errors, chapter routes nested via Router::nest, enum_conversions discoverability header added, TipTap extensions/onUpdate memoized, and ChapterPage now respects can_edit_outline with save-error + protected-edit web coverage.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+          "commit": "5706277f"
+        }
       }
     ],
     "2026-06-25-v1.66-mid-meta-tracking": [
@@ -4244,7 +4260,13 @@
         "target": "V1.68+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-local-api-surface-convergence][R-V167P0-QC1-S-COMPARE]",
         "note": "QC Suggestion, non-blocking; deferred.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-27",
+        "closure_note": "Closed in commit 51597f0d.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+          "commit": "51597f0d"
+        }
       },
       {
         "id": "R-V167P0-QC1-S-DOCS",
@@ -4257,7 +4279,13 @@
         "target": "V1.68+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-local-api-surface-convergence][R-V167P0-QC1-S-DOCS]",
         "note": "QC Suggestion, non-blocking; deferred.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-27",
+        "closure_note": "Closed in commit 044aa53c.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+          "commit": "044aa53c"
+        }
       },
       {
         "id": "R-V167P0-QC1-S-CLI",
@@ -4270,7 +4298,13 @@
         "target": "V1.68+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-local-api-surface-convergence][R-V167P0-QC1-S-CLI]",
         "note": "QC Suggestion, non-blocking; deferred.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-27",
+        "closure_note": "Closed in commit 79509cf2.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+          "commit": "79509cf2"
+        }
       },
       {
         "id": "R-V167P0-QC1-S-AGENTS",
@@ -4283,7 +4317,13 @@
         "target": "V1.68+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-local-api-surface-convergence][R-V167P0-QC1-S-AGENTS]",
         "note": "QC Suggestion, non-blocking; deferred.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-27",
+        "closure_note": "Closed in commit 1020af69.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+          "commit": "1020af69"
+        }
       },
       {
         "id": "R-V167P0-QC1-ENVELOPE-E2E",
@@ -4296,7 +4336,13 @@
         "target": "V1.68+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-local-api-surface-convergence][R-V167P0-QC1-ENVELOPE-E2E]",
         "note": "QC Suggestion, non-blocking; deferred.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-27",
+        "closure_note": "Closed in commit daba28f3.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+          "commit": "daba28f3"
+        }
       }
     ],
     "2026-06-26-v1.67-desktop-shell-polish": [
@@ -4330,7 +4376,13 @@
         "target": "V1.68+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-desktop-shell-polish][R-V167PSEC-QC1-S-BLOCKINGLOCK]",
         "note": "QC Suggestion, non-blocking; deferred.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-27",
+        "closure_note": "Closed in commit e6e77fd4.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+          "commit": "e6e77fd4"
+        }
       },
       {
         "id": "R-V167PSEC-QC1-S-BACKOFFOBS",
@@ -4343,7 +4395,13 @@
         "target": "V1.68+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-desktop-shell-polish][R-V167PSEC-QC1-S-BACKOFFOBS]",
         "note": "QC Suggestion, non-blocking; deferred.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-27",
+        "closure_note": "Closed in commit e6e77fd4.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+          "commit": "e6e77fd4"
+        }
       },
       {
         "id": "R-V167PSEC-QC1-S-CI-SETUO",
@@ -4455,7 +4513,13 @@
         "target": "V1.68+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-overdue-debt-closure][R-V167P2-QC1-S1]",
         "note": "QC Suggestion, non-blocking; deferred.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-27",
+        "closure_note": "Closed in commit 7a9809ad.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+          "commit": "7a9809ad"
+        }
       },
       {
         "id": "R-V167P2-QC1-S2",
@@ -4468,7 +4532,13 @@
         "target": "V1.68+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-overdue-debt-closure][R-V167P2-QC1-S2]",
         "note": "QC Suggestion, non-blocking; deferred.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-27",
+        "closure_note": "Closed in commit 100e6050.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+          "commit": "100e6050"
+        }
       },
       {
         "id": "R-V167P2-QC1-S4",
@@ -4481,7 +4551,13 @@
         "target": "V1.68+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-overdue-debt-closure][R-V167P2-QC1-S4]",
         "note": "QC Suggestion, non-blocking; deferred.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-27",
+        "closure_note": "Deferred: no third frontmatter-edit capability ships in V1.71, so extracting helpers is not justified.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+          "commit": null
+        }
       },
       {
         "id": "R-V167P2-QC3-S1",
@@ -4494,7 +4570,13 @@
         "target": "V1.68+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-overdue-debt-closure][R-V167P2-QC3-S1]",
         "note": "QC Suggestion, non-blocking; deferred.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-27",
+        "closure_note": "Closed in commit 1675369f.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+          "commit": "1675369f"
+        }
       }
     ]
   }

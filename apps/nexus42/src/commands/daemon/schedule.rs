@@ -107,6 +107,12 @@ pub enum ScheduleCommand {
         /// Filter by status (pending|running|paused|completed|cancelled|failed)
         #[arg(long)]
         status: Option<String>,
+
+        /// Sort by key(s); prefix with `-` for descending.
+        ///
+        /// Allowed keys: `created_at`, `updated_at`, `status`, `preset_id`, `label`.
+        #[arg(long)]
+        sort: Option<String>,
     },
 
     /// Inspect a schedule's details
@@ -243,7 +249,11 @@ pub async fn run(cmd: ScheduleCommand, config: &CliConfig) -> Result<()> {
             .await
         }
         ScheduleCommand::Remove { id } => remove_schedule(&client, &id).await,
-        ScheduleCommand::List { creator, status } => list_schedules(&client, creator, status).await,
+        ScheduleCommand::List {
+            creator,
+            status,
+            sort,
+        } => list_schedules(&client, creator, status, sort).await,
         ScheduleCommand::Inspect { id } => inspect_schedule(&client, &id).await,
         ScheduleCommand::Context { id } => get_context(&client, &id).await,
         ScheduleCommand::ContextHistory {
@@ -387,13 +397,14 @@ async fn list_schedules(
     client: &crate::api::DaemonClient,
     creator: Option<String>,
     status: Option<String>,
+    sort: Option<String>,
 ) -> Result<()> {
     let query = ListSchedulesQuery {
         creator_id: creator,
         status,
         cursor: None,
         limit: None,
-        sort: None,
+        sort,
     };
     // Build query string manually for GET
     let mut path = SCHEDULE_BASE.to_string();
@@ -403,6 +414,9 @@ async fn list_schedules(
     }
     if let Some(ref s) = query.status {
         params.push(format!("status={s}"));
+    }
+    if let Some(ref sort) = query.sort {
+        params.push(format!("sort={sort}"));
     }
     if !params.is_empty() {
         path = format!("{path}?{}", params.join("&"));
@@ -723,9 +737,14 @@ mod tests {
         .expect("parse command");
 
         match cmd.command {
-            ScheduleCommand::List { creator, status } => {
+            ScheduleCommand::List {
+                creator,
+                status,
+                sort,
+            } => {
                 assert_eq!(creator, Some("c1".to_string()));
                 assert_eq!(status, Some("pending".to_string()));
+                assert_eq!(sort, None);
             }
             other => panic!("expected List, got: {other:?}"),
         }

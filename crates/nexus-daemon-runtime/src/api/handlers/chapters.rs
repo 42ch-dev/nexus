@@ -167,7 +167,19 @@ fn to_summary(r: &WorkChapterRecord) -> ChapterSummary {
 }
 
 /// Map a DB record to a `ChapterDetail` contract DTO.
-fn to_detail(r: &WorkChapterRecord) -> ChapterDetail {
+///
+/// `workspace_root` is used to probe whether the stored `outline_path` is still
+/// inside the active workspace; if the root is unavailable (uninitialized
+/// daemon), the outline is reported as non-editable rather than failing the
+/// whole detail request.
+fn to_detail(r: &WorkChapterRecord, workspace_root: Option<&StdPath>) -> ChapterDetail {
+    let can_edit_outline = r
+        .outline_path
+        .as_deref()
+        .filter(|s| !s.is_empty())
+        .and_then(|path| workspace_root.map(|root| resolve_guarded_path(root, path, false).is_ok()))
+        .unwrap_or(false);
+
     ChapterDetail {
         work_id: r.work_id.clone(),
         chapter: i64::from(r.chapter),
@@ -181,7 +193,7 @@ fn to_detail(r: &WorkChapterRecord) -> ChapterDetail {
         body_path: r.body_path.clone(),
         created_at: r.created_at.clone(),
         updated_at: r.updated_at.clone(),
-        can_edit_outline: r.outline_path.as_deref().is_some_and(|s| !s.is_empty()),
+        can_edit_outline,
         can_edit_structure: true,
         body_read_only: true,
         protection: chapter_protection(&r.status),
@@ -398,7 +410,12 @@ pub async fn get_chapter(
         })?
         .ok_or_else(|| NexusApiError::NotFound(format!("chapter {chapter} volume {volume}")))?;
 
-    Ok(Json(to_detail(&record)))
+    let root = state
+        .workspace_path()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from);
+
+    Ok(Json(to_detail(&record, root.as_deref())))
 }
 
 /// `GET /v1/local/works/{work_id}/chapters/{n}/outline` — read outline markdown.
@@ -564,12 +581,18 @@ pub async fn patch_chapter(
         })?
         .ok_or_else(|| NexusApiError::NotFound(format!("chapter {chapter} volume {volume}")))?;
 
-    // Reject display-only title writes in V1.65.
+    // Reject display-only title writes in V1.65 with a 422 + field_errors so
+    // the UI can highlight the offending field instead of a generic 400.
     if req.title.is_some() {
-        return Err(NexusApiError::BadRequest {
-            code: "chapter_title_unsupported".to_string(),
-            message: "title is display-only in V1.65; use outline frontmatter or slug instead"
-                .to_string(),
+        return Err(NexusApiError::PresetGatesFailed {
+            details: serde_json::json!({
+                "field_errors": [
+                    {
+                        "field": "title",
+                        "reason": "title is display-only in V1.65; use outline frontmatter or slug instead",
+                    }
+                ]
+            }),
         });
     }
 
@@ -644,7 +667,12 @@ pub async fn patch_chapter(
     .await;
 
     lock.release().await;
-    Ok(Json(to_detail(&updated?)))
+    let record = updated?;
+    let root = state
+        .workspace_path()
+        .filter(|s| !s.is_empty())
+        .map(PathBuf::from);
+    Ok(Json(to_detail(&record, root.as_deref())))
 }
 
 /// `GET /v1/local/works/{work_id}/chapters/{n}/body` — read body markdown (read-only).
@@ -924,6 +952,39 @@ mod tests {
         assert!(resp.slug.as_deref().is_some_and(|s| s.starts_with("ch01")));
     }
 
+    /// Regression: a stored `outline_path` that escapes the workspace root must
+    /// be reported as non-editable so the UI cannot attempt a write through it.
+    /// Covers the V1.65 UI cluster residual on `can_edit_outline` path-guard
+    /// probing.
+    #[tokio::test]
+    async fn get_chapter_can_edit_outline_rejects_escape_path() {
+        let (state, _tmp, work_id) = setup_chapter_work().await;
+        let now = chrono::Utc::now().to_rfc3339();
+        work_chapters::update_outline_path(
+            state.pool(),
+            &work_id,
+            1,
+            1,
+            Some("../evil-escape.md"),
+            &now,
+        )
+        .await
+        .expect("update outline path");
+
+        let resp = get_chapter(
+            AxumState(state),
+            AxumPath((work_id, "1".to_string())),
+            AxumQuery(ChapterContentQuery { volume: None }),
+        )
+        .await
+        .expect("get chapter");
+
+        assert!(
+            !resp.can_edit_outline,
+            "an outline_path that escapes the workspace root must not be editable"
+        );
+    }
+
     // Both outline-PUT tests share the global `TEST_UPDATE_OUTLINE_PATH_FAIL`
     // failpoint (one sets it, the other is vulnerable to it). Serialize them so
     // the flag cannot leak across threads under the default multi-threaded test
@@ -1041,6 +1102,43 @@ mod tests {
         .await
         .expect("patch with volume change must not 404 after the write");
         assert_eq!(resp.volume, 2);
+    }
+
+    /// Regression: writing `title` used to return a plain 400. It now returns
+    /// 422 with a `field_errors` array so the UI can highlight the field.
+    #[tokio::test]
+    async fn patch_chapter_title_returns_422_field_error() {
+        let (state, _tmp, work_id) = setup_chapter_work().await;
+        let req = PatchChapterRequest {
+            title: Some("New Title".to_string()),
+            slug: None,
+            planned_word_count: None,
+            volume: None,
+            status: None,
+            confirm_structural_edit: None,
+            transition_reason: None,
+        };
+
+        let result = patch_chapter(
+            AxumState(state),
+            AxumPath((work_id, "1".to_string())),
+            AxumQuery(ChapterContentQuery { volume: None }),
+            axum::Json(req),
+        )
+        .await;
+
+        let err = result.expect_err("title patch should fail");
+        match err {
+            NexusApiError::PresetGatesFailed { details } => {
+                let field_errors = details
+                    .get("field_errors")
+                    .and_then(|v| v.as_array())
+                    .expect("details should contain field_errors array");
+                assert_eq!(field_errors.len(), 1);
+                assert_eq!(field_errors[0]["field"], "title");
+            }
+            other => panic!("expected PresetGatesFailed, got {other:?}"),
+        }
     }
 
     #[tokio::test]

@@ -2,7 +2,7 @@
 
 use crate::api::errors::NexusApiError;
 use crate::api::pagination::{decode_offset_cursor, encode_offset_cursor};
-use crate::api::sort::parse_sort_terms;
+use crate::api::sort::{compare_by_terms, parse_sort_terms};
 use crate::workspace::WorkspaceState;
 use axum::{
     extract::{Query, State},
@@ -45,17 +45,10 @@ pub async fn list_capabilities(
         .collect();
 
     capabilities.sort_by(|a, b| {
-        for (key, ascending) in &sort_terms {
-            let ord = match key.as_str() {
-                "name" => a.name.cmp(&b.name),
-                _ => std::cmp::Ordering::Equal,
-            };
-            let ord = if *ascending { ord } else { ord.reverse() };
-            if ord != std::cmp::Ordering::Equal {
-                return ord;
-            }
-        }
-        std::cmp::Ordering::Equal
+        compare_by_terms(a, b, &sort_terms, |key, a, b| match key {
+            "name" => Some(a.name.cmp(&b.name)),
+            _ => None,
+        })
     });
 
     let offset = decode_offset_cursor(&query.cursor)?;
