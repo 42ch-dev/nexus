@@ -1,16 +1,62 @@
 {
   "version": 1,
   "updated_at": "2026-06-27",
-  "plans": [],
+  "plans": [
+    {
+      "plan_id": "2026-06-27-v1.70-compass-and-plan",
+      "title": "V1.70 Compass and Plan Stubs (P-1 Prepare)",
+      "status": "InProgress",
+      "owner": "@project-manager",
+      "effort": "S",
+      "working_branch": "iteration/v1.70",
+      "merge_target": "iteration/v1.70",
+      "depends_on": [],
+      "iteration": "V1.70"
+    },
+    {
+      "plan_id": "2026-06-27-v1.70-canvas-strategy-surface-implement",
+      "title": "Canvas Strategy Surface Implement (α: read + overlay + Idea-steer)",
+      "status": "Todo",
+      "owner": "@fullstack-dev + @frontend-dev",
+      "effort": "L",
+      "working_branch": "feature/v1.70-canvas-strategy-read",
+      "merge_target": "iteration/v1.70",
+      "depends_on": ["2026-06-27-v1.70-compass-and-plan"],
+      "iteration": "V1.70",
+      "wire_contracts_changed": false
+    },
+    {
+      "plan_id": "2026-06-27-v1.70-ci-desktop-build-optimization",
+      "title": "CI / Desktop-Build Optimization",
+      "status": "Todo",
+      "owner": "@ops-engineer",
+      "effort": "S",
+      "working_branch": "feature/v1.70-ci-desktop-build-optimize",
+      "merge_target": "iteration/v1.70",
+      "depends_on": ["2026-06-27-v1.70-compass-and-plan"],
+      "iteration": "V1.70"
+    },
+    {
+      "plan_id": "2026-06-27-v1.70-closure",
+      "title": "V1.70 Closure",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "effort": "S",
+      "working_branch": "iteration/v1.70",
+      "merge_target": "iteration/v1.70",
+      "depends_on": ["2026-06-27-v1.70-canvas-strategy-surface-implement", "2026-06-27-v1.70-ci-desktop-build-optimization"],
+      "iteration": "V1.70"
+    }
+  ],
   "metadata": {
-    "integration_branch": null,
-    "integration_branch_retired": true,
+    "integration_branch": "iteration/v1.70",
+    "integration_branch_retired": false,
     "last_integration_branch": "iteration/v1.69",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.69 (shipped via integration branch iteration/v1.69; PR to main pending)",
-    "latest_active_compass": "v1.69-design-system-maturation-and-canvas-draft-compass-v1.md",
+    "latest_active_iteration": "V1.70 (Canvas Strategy Implement α + CI Optimization — Prepare in progress)",
+    "latest_active_compass": "v1.70-canvas-strategy-implement-and-ci-optimization-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": "n/a (V1.69 shipped; V1.70 pending)",
+    "pre_implement_gate": "pending (V1.70 Prepare — compass drafted, review chain pending)",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
@@ -32,24 +78,24 @@
       "merge_commit": "pending (PR to main)"
     },
     "tech_debt_summary": {
-      "total_open": 21,
-      "total_deferred": 21,
-      "total_resolved": 210,
+      "total_open": 17,
+      "total_deferred": 17,
+      "total_resolved": 212,
       "total_archived": 0,
       "by_severity_active": {
-        "low": 21
+        "low": 17
       },
       "by_target_active": {
         "V1.65+": 1,
         "V1.64 P-mid/QA": 1,
         "?": 2,
-        "V1.68+": 17
+        "V1.68+": 13
       },
-      "refreshed_at": "2026-06-26T... (V1.67 P-last closeout)",
-      "refreshed_reason": "V1.67 P-last: post Wave1+Wave2 QC+QA; all V1.67 closures done; 21 open are V1.67 QC-suggestions deferred V1.68+ (all low)"
+      "refreshed_at": "2026-06-27T... (V1.70 Prepare — post-V1.69 closeout; 4 V1.69 closures reflected)",
+      "refreshed_reason": "V1.70 Prepare: refreshed after V1.69 shipped (4 frontend residuals closed). 17 open remain (all low). V1.70 targets closing 2 (R-V167PSEC-QC1-S-CI-SETUO + R-V167PSEC-QC1-S-UNMOUNT); 15 will remain V1.71+."
     },
     "updated_at": "2026-06-27",
-    "spec_integration_branch": null,
+    "spec_integration_branch": "iteration/v1.70",
     "wave1_merged_at": "2026-06-25T15:49:19Z"
   },
   "residual_findings": {
