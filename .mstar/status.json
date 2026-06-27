@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-27T19:15:18Z",
+  "updated_at": "2026-06-27T21:02:58Z",
   "plans": [
     {
       "plan_id": "2026-06-27-v1.71-compass-and-plan",
@@ -19,7 +19,7 @@
     {
       "plan_id": "2026-06-27-v1.71-canvas-strategy-write-boundary",
       "iteration_id": "V1.71",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "frontend-dev + fullstack-dev",
       "effort": "L",
       "type": "implement",
@@ -27,12 +27,13 @@
       "merge_target": "iteration/v1.71",
       "task_category": "visual",
       "wire_contracts_changed": true,
-      "wire_contracts_note": "V1.71 Track A: new Local API DTOs for strategy.patch_state/transition/prompt_template + graphRevision + conflict error; @42ch/nexus-contracts 0.6.0 \u2192 0.7.0"
+      "wire_contracts_note": "V1.71 Track A: new Local API DTOs for strategy.patch_state/transition/prompt_template + graphRevision + conflict error; @42ch/nexus-contracts 0.6.0 \u2192 0.7.0",
+      "merged_to_integration_at": "2026-06-27T21:02:58Z"
     },
     {
       "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
       "iteration_id": "V1.71",
-      "status": "InProgress",
+      "status": "InReview",
       "owner": "ops-engineer + fullstack-dev + frontend-dev",
       "effort": "M",
       "type": "implement",
@@ -41,7 +42,8 @@
       "task_category": "ops",
       "wire_contracts_changed": false,
       "wire_contracts_note": "Track B only: surgical residual closures + desktop sign infrastructure; no schema/codegen/DTO change",
-      "started_at": "2026-06-27T19:54:37Z"
+      "started_at": "2026-06-27T19:54:37Z",
+      "merged_to_integration_at": "2026-06-27T21:02:58Z"
     },
     {
       "plan_id": "2026-06-27-v1.71-closure",
@@ -85,19 +87,19 @@
     },
     "tech_debt_summary": {
       "total_open": 1,
-      "total_deferred": 0,
+      "total_deferred": 1,
       "total_resolved": 233,
       "total_archived": 0,
       "by_severity_active": {
         "low": 1
       },
       "by_target_active": {
-        "V1.65+": 1
+        "V1.72": 1
       },
-      "refreshed_at": "2026-06-27 (V1.71 Track B hygiene: closed 4, resolved 1 deferred; 15\u21921 open)",
-      "refreshed_reason": "V1.71 Track B closed R-V164-P2-G3 (admission-gate UI note), R-V164-P2-S1 (served-UI smoke), R-V167P2-QC1-S4 (frontmatter-helper extraction deferred with reason), and R-V165-QC-SUGG-DX (DX/UX polish). Remaining open: R-V165-QC3-VIRT (chapter table virtualization)."
+      "refreshed_at": "2026-06-27",
+      "refreshed_reason": "V1.71 Track B hygiene: 12 residuals closed + 1 deferred (R-V167P2-QC1-S4 frontmatter-helper extraction) + R-V165-QC3-VIRT chapter virtualization deferred to V1.72. Total open: 1."
     },
-    "updated_at": "2026-06-27T19:15:18Z",
+    "updated_at": "2026-06-27T21:02:58Z",
     "spec_integration_branch": "iteration/v1.71",
     "wave1_merged_at": null
   },
@@ -4077,7 +4079,9 @@
         "source": "qc3.md",
         "scope": "apps/web chapters-page",
         "decision": "defer",
-        "target_iteration": "V1.66"
+        "target_iteration": "V1.72",
+        "target": "V1.72",
+        "notes": "Deferred from V1.71 Track B: chapter virtualization requires @tanstack/react-virtual dependency + table restructuring; no real large-chapter dataset available in V1.71 to validate. Scheduled for V1.72 hygiene or outline+timeline canvas pivot."
       },
       {
         "id": "R-V165-QC-SUGG-DX",
