@@ -1,0 +1,11 @@
+{
+  "plan_id": "2026-06-27-v1.70-compass-and-plan",
+  "title": "V1.70 Compass and Plan Stubs (P-1 Prepare)",
+  "status": "Done",
+  "owner": "@project-manager",
+  "effort": "S",
+  "working_branch": "iteration/v1.70",
+  "merge_target": "iteration/v1.70",
+  "depends_on": [],
+  "iteration": "V1.70"
+}

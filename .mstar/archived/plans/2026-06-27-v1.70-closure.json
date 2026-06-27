@@ -1,0 +1,15 @@
+{
+  "plan_id": "2026-06-27-v1.70-closure",
+  "title": "V1.70 Closure",
+  "status": "Done",
+  "owner": "@project-manager",
+  "effort": "S",
+  "working_branch": "iteration/v1.70",
+  "merge_target": "iteration/v1.70",
+  "depends_on": [
+    "2026-06-27-v1.70-canvas-strategy-surface-implement",
+    "2026-06-27-v1.70-ci-desktop-build-optimization"
+  ],
+  "iteration": "V1.70",
+  "merge_commit": "merged into iteration/v1.70 (P0: 33ad167e; P1: 33ad167e)"
+}
