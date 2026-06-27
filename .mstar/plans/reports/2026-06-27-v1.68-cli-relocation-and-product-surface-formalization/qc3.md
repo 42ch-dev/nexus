@@ -3,8 +3,8 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization"
-verdict: "Request Changes"
-generated_at: "2026-06-27"
+verdict: "Approve"
+generated_at: "2026-06-27T10:04:56Z"
 ---
 # Code Review Report
 
@@ -113,7 +113,36 @@ generated_at: "2026-06-27"
 | Severity | Count |
 |----------|-------|
 | 🔴 Critical | 0 |
-| 🟡 Warning | 1 |
-| 🟢 Suggestion | 1 |
+| 🟡 Warning | 0 |
+| 🟢 Suggestion | 0 |
 
-**Verdict**: Request Changes
+**Verdict**: Approve
+
+## Revalidation
+
+### Fix-wave scope
+- **QC re-review**: targeted re-review for @qc-specialist-3; same report file updated in place.
+- **Fix-wave Review range / Diff basis**: `2a4e5577..630df3af` (W-001 fix commit `630df3af`; full plan scope remains `4606395e..630df3af`).
+- **Working branch (verified)**: `iteration/v1.68`.
+- **Review cwd (verified)**: `/Users/bibi/workspace/organizations/42ch/nexus`.
+- **Report Timestamp**: 2026-06-27T10:04:56Z.
+
+### Checks and evidence
+- Checkout alignment verified with `git rev-parse --show-toplevel` -> `/Users/bibi/workspace/organizations/42ch/nexus` and `git branch --show-current` -> `iteration/v1.68`.
+- Workflow inventory verified with `glob .github/workflows/*.yml`: exactly two workflow files, `.github/workflows/ci.yml` and `.github/workflows/desktop-build.yml`.
+- **W-001 resolved**: `.github/workflows/desktop-build.yml` now includes `- 'apps/nexus42/**'` under both `push.paths` (`desktop-build.yml:7-12`) and `pull_request.paths` (`desktop-build.yml:21-26`). YAML indentation matches adjacent path entries and is syntactically consistent.
+- **No equivalent workflow glob gap found**: `.github/workflows/ci.yml` still uses `paths-ignore` for docs/metadata-only files (`ci.yml:7-18`) rather than a positive `paths` allowlist, so `apps/nexus42/**` CLI changes are not excluded there. Grep across the two workflows found only the expected `paths-ignore` in `ci.yml` and the fixed `paths` entries in `desktop-build.yml`.
+- **S-001 / S-02 resolved**: `git diff --check 2a4e5577..630df3af -- apps/AGENTS.md` and `git diff --check 4606395e..630df3af -- apps/AGENTS.md` both exited cleanly with no trailing-whitespace warnings.
+- **No new scope creep from fix commit**: `git show --stat --oneline 630df3af` reports exactly two files changed: `.github/workflows/desktop-build.yml` and `apps/AGENTS.md` (4 insertions, 2 deletions). `git show --name-status --oneline 630df3af` confirms only those two paths were modified.
+- **No wire-contract change introduced**: `git diff --name-only 2a4e5577..630df3af -- schemas/ packages/nexus-contracts/ crates/nexus-contracts/` and the same check over `4606395e..630df3af` returned no output; `wire_contracts_changed: FALSE` remains supported.
+- **Historical-record boundary**: fix commit `630df3af` did not edit `.mstar/iterations/`, plan markdown, or report markdown; later targeted review/consolidation report commits are separate review artifacts, not implementation fix scope.
+
+### Finding disposition
+- **W-001**: Resolved. The CLI-only PR -> desktop-build coverage gap is closed by adding `apps/nexus42/**` to both desktop-build trigger allowlists.
+- **S-001 / S-02**: Resolved. The durable-placement-rule block no longer carries trailing whitespace.
+- **New Critical/Warning**: None identified in the targeted fix-wave scope.
+
+### Refreshed verdict
+- With W-001 and S-001/S-02 resolved and no new blocking issue found, qc3 verdict is refreshed from **Request Changes** to **Approve**.
+
+**Verdict**: Approve
