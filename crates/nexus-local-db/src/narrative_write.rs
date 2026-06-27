@@ -525,6 +525,38 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_is_world_owned_checks_ownership() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_creator(&pool).await;
+
+        let world = create_world(
+            &pool,
+            "ctr_test",
+            "Owned World",
+            "owned-world",
+            "private",
+            "manual",
+        )
+        .await
+        .unwrap();
+
+        // Same creator owns the world.
+        assert!(is_world_owned(&pool, "ctr_test", &world.world_id)
+            .await
+            .unwrap());
+
+        // A different creator does not own it.
+        assert!(!is_world_owned(&pool, "ctr_other", &world.world_id)
+            .await
+            .unwrap());
+
+        // A non-existent world returns false.
+        assert!(!is_world_owned(&pool, "ctr_test", "wld_nonexistent")
+            .await
+            .unwrap());
+    }
+
+    #[tokio::test]
     async fn test_append_event_success() {
         let (pool, _dir) = fresh_pool().await;
         seed_creator(&pool).await;
