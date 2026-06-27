@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-27"
 ---
 
@@ -264,3 +264,183 @@ No unresolved findings require `{HARNESS_DIR}/status.json` root-level `residual_
 
 - W-001 is a single-line CI config fix that should land in this same PR before merge; it does not need a long-lived residual.
 - If PM prefers a tracked residual for the desktop-build path filter for completeness, the entry would be `id: R-V168-P0-CI-001`, `severity: medium`, `source: qc1.md#W-001`, `scope: .github/workflows/desktop-build.yml`, `decision: defer-to-fix-round`, `owner: pm→fullstack-dev`, `target: same PR`. PM owns residual lifecycle per `mstar-plan-artifacts`; this report does not modify `status.json`.
+
+---
+
+## Revalidation (2026-06-27, fix wave)
+
+### Reviewer Metadata
+- Reviewer: @qc-specialist
+- Runtime Agent ID: qc-specialist
+- Runtime Model: minimax-cn-coding-plan/MiniMax-M3
+- Review Perspective: build correctness, reference completeness, behavioral equivalence (qc1 emphasis) — **targeted re-review**
+- Report Timestamp: 2026-06-27
+
+### Scope
+- plan_id: `2026-06-27-v1.68-cli-relocation-and-product-surface-formalization`
+- Re-review range (fix wave): `2a4e5577..630df3af` (W-001 fix commit `630df3af`; full plan scope remains `4606395e..630df3af`)
+- Working branch (verified): `iteration/v1.68`
+- Review cwd (verified): `/Users/bibi/workspace/organizations/42ch/nexus` (`git rev-parse --show-toplevel` and `git branch --show-current`)
+- Re-review mode: **Targeted** — qc1 (this report) + qc3 only; qc2 is Approve and out of scope for the CI-YAML fix
+- Files reviewed in fix wave: 2 (`git show --stat 630df3af` = exactly 2 files, 4 insertions / 2 deletions)
+- Tools run:
+  - `git rev-parse --show-toplevel`, `git branch --show-current`
+  - `git log --oneline -5` (confirm branch HEAD = `630df3af`)
+  - `git show --stat 630df3af` (fix-wave file list)
+  - `git show 630df3af -- .github/workflows/desktop-build.yml apps/AGENTS.md` (full diff)
+  - `git diff --check 2a4e5577..630df3af -- apps/AGENTS.md` (targeted whitespace lint)
+  - `grep -n ' $' apps/AGENTS.md` (current trailing-whitespace sweep, must be empty)
+  - Python regex extraction of both `on.push.paths` and `on.pull_request.paths` from `desktop-build.yml` (YAML-list parse sanity check)
+  - `git diff --name-status 2a4e5577..630df3af` (full fix-wave file list — includes the QC review wave reports and `status.json` from the consolidated review, which are out of scope for this re-review)
+
+### What was re-checked
+
+1. **W-001 resolved?** The fix-wave commit `630df3af` adds `- 'apps/nexus42/**'` to **both** the `push.paths` and `pull_request.paths` lists in `.github/workflows/desktop-build.yml`, with correct YAML list-item syntax (`- '...'` single-quoted) and matching 6-space indentation that aligns with its neighbors (`apps/web/**`, `apps/desktop/**`, `packages/nexus-contracts/**`, `crates/**`).
+
+   Evidence (full diff hunks for `desktop-build.yml`):
+   ```diff
+   @@ -7,6 +7,7 @@ on:
+        paths:
+          - 'apps/web/**'
+          - 'apps/desktop/**'
+   +      - 'apps/nexus42/**'
+          - 'packages/nexus-contracts/**'
+          - 'crates/**'
+          - 'pnpm-lock.yaml'
+   @@ -20,6 +21,7 @@ on:
+        paths:
+          - 'apps/web/**'
+          - 'apps/desktop/**'
+   +      - 'apps/nexus42/**'
+          - 'packages/nexus-contracts/**'
+          - 'crates/**'
+          - 'pnpm-lock.yaml'
+   ```
+
+   Post-fix path inventory (extracted by Python regex on the live file):
+   ```
+   ===  push  ===
+     - apps/web/**
+     - apps/desktop/**
+     - apps/nexus42/**        ← W-001 fix (line 10)
+     - packages/nexus-contracts/**
+     - crates/**
+     - pnpm-lock.yaml
+     - package.json
+     - pnpm-workspace.yaml
+     - Cargo.toml
+     - Cargo.lock
+     - .github/workflows/**
+   ===  pull_request  ===
+     - apps/web/**
+     - apps/desktop/**
+     - apps/nexus42/**        ← W-001 fix (line 24)
+     - packages/nexus-contracts/**
+     - crates/**
+     - pnpm-lock.yaml
+     - package.json
+     - pnpm-workspace.yaml
+     - Cargo.toml
+     - Cargo.lock
+     - .github/workflows/**
+   ```
+   **Disposition: RESOLVED.** A CLI-only PR touching only `apps/nexus42/**` will now trigger the desktop-build job via both `push` (after merge) and `pull_request` (during PR) events. The regression identified in wave 1 is closed. YAML list-item syntax (`- '...'`), quoting, and indentation all match the surrounding entries — no new YAML formatting risk introduced.
+
+2. **S-02 (`apps/AGENTS.md` trailing whitespace) — also addressed in the same fix wave.** The original qc3 S-001 finding (apps/AGENTS.md:13-14 had trailing 2-space Markdown hard-break whitespace, contributing to `git diff --check` noise) was stripped in the same commit. The fix is surgical: exactly 2 lines had their trailing whitespace removed (the `apps/` and `crates/` bullet lines of the durable-placement rule); other content is byte-identical.
+
+   Evidence:
+   ```diff
+   @@ -10,8 +10,8 @@
+
+    ## Durable placement rule
+
+   -> `apps/` = **product surfaces** — runnable things you install or use, any language.
+   -> `crates/` = **reusable Rust libraries** — building blocks.
+   +> `apps/` = **product surfaces** — runnable things you install or use, any language.
+   +> `crates/` = **reusable Rust libraries** — building blocks.
+    > `packages/` = **publishable npm libraries** — wire contracts.
+    >
+    > A new product surface of *any* language → `apps/`. A new reusable Rust library → `crates/`.
+   ```
+
+   Post-fix verification:
+   - `git diff --check 2a4e5577..630df3af -- apps/AGENTS.md` → empty (clean)
+   - `grep -n ' $' apps/AGENTS.md` → no trailing whitespace in the live file
+   **Disposition: RESOLVED.** The durable-placement-rule block is now whitespace-clean.
+
+3. **No new issue introduced?** The fix is **2 files / 4 insertions / 2 deletions** — exactly the surgical scope PM described in the Assignment. `git show --stat 630df3af` confirms the file list:
+   ```
+   .github/workflows/desktop-build.yml | 2 ++
+   apps/AGENTS.md                      | 4 ++--
+   2 files changed, 4 insertions(+), 2 deletions(-)
+   ```
+   No neighboring files touched, no incidental edits, no whitespace noise introduced elsewhere in either file. Both edits are precisely scoped to the W-001 regression and the qc3 S-001 trailing-whitespace finding — no piggybacking.
+
+4. **No regression in original wave-1 review surface.** The substantive implementation commit `2a4e5577` is unchanged by the fix wave (the fix wave only adds 2 lines of YAML + strips 2 trailing-whitespace runs from a Markdown block). All wave-1 evidence still holds:
+   - `cargo build --all` / `cargo clippy --all -- -D warnings` / `cargo test --workspace` / `cargo +nightly-2026-06-26 fmt --all --check` / `bash tooling/check-schema-drift.sh` — all remain green (no source changes).
+   - Zero `.rs` source code changes, byte-identical `apps/nexus42/src/**` content vs. pre-relocation `crates/nexus42/**`, sidecar resolution by name, wire contracts untouched, all 12 live `crates/nexus42` references migrated.
+   - Historical `.mstar/` audit-trail references intentionally preserved.
+
+   No new CI, lint, or test surfaces were affected. No CI re-run was required for the YAML-only + whitespace-only fix.
+
+### Findings
+### 🔴 Critical
+(none)
+
+### 🟡 Warning
+(none — W-001 from wave 1 is resolved in this fix wave)
+
+### 🟢 Suggestion
+(none from qc1 in this re-review; the qc3 S-001 trailing-whitespace is resolved in the same commit and is no longer open)
+
+### Per-finding disposition (vs. wave 1)
+
+| Finding | Wave 1 | Re-review | Evidence |
+|---------|--------|-----------|----------|
+| **W-001** desktop-build.yml path filter omits `apps/nexus42/**` (Warning) | raised | **RESOLVED** | Lines 10 and 24 of `.github/workflows/desktop-build.yml` now contain `- 'apps/nexus42/**'` in both `push.paths` and `pull_request.paths`; YAML syntax, quoting, and indentation match neighbors. CLI-only PRs will trigger the desktop-build job. |
+| **S-001** (qc3-raised) `apps/AGENTS.md:13-14` trailing whitespace | not raised by qc1 (out of scope) | **RESOLVED** (verified) | `git diff --check 2a4e5577..630df3af -- apps/AGENTS.md` is empty; `grep -n ' $' apps/AGENTS.md` is empty. Two-line strip, byte-identical content otherwise. |
+| All other wave-1 items (build/clippy/fmt/test/drift gate, zero `.rs` changes, 12 live refs migrated, binary/sidecar/wire-contract equivalence, documentation/placement-rule artifacts) | raised or confirmed | **UNCHANGED** — no regression introduced | Fix wave touches only `.github/workflows/desktop-build.yml` (YAML add) and `apps/AGENTS.md` (trailing-whitespace strip). No implementation files affected. |
+
+### Source Trace (re-review)
+- **W-001 disposition**:
+  - Source Type: git-diff + manual-reasoning
+  - Source Reference: `git show 630df3af -- .github/workflows/desktop-build.yml`; live file `.github/workflows/desktop-build.yml:7-18,21-32`
+  - Confidence: High
+- **S-02 (`apps/AGENTS.md` whitespace) disposition**:
+  - Source Type: git-diff + linter
+  - Source Reference: `git show 630df3af -- apps/AGENTS.md`; `git diff --check 2a4e5577..630df3af -- apps/AGENTS.md`; `grep -n ' $' apps/AGENTS.md`
+  - Confidence: High
+
+### Summary (re-review)
+
+| Severity | Wave 1 | Re-review |
+|----------|--------|-----------|
+| 🔴 Critical | 0 | 0 |
+| 🟡 Warning | 1 (W-001) | 0 (resolved) |
+| 🟢 Suggestion | 0 (qc1) | 0 (qc1; qc3 S-001 also resolved) |
+
+### Cross-Reviewer Convergence (re-review)
+
+| Concern | qc1 (this report) | qc2 | qc3 | Consensus |
+|---------|-------------------|-----|-----|-----------|
+| W-001 resolved | ✅ verified | (Approve; out of scope) | (targeted re-review seat; expected to confirm) | qc1 verified this round |
+| S-02 apps/AGENTS.md trailing whitespace | ✅ verified clean | (out of scope) | (targeted re-review seat; expected to confirm) | qc1 verified this round |
+| No new regression | ✅ fix wave is 2 files / 4 insertions / 2 deletions, surgical | (Approve) | (targeted re-review) | qc1 verified this round |
+
+### Pre-merge Checklist (re-checked)
+- [x] `status.json` updated (P0 plan registration present; consolidated review wave added structured entries; not modified by this re-review)
+- [x] Wire contracts unchanged → no `pnpm run codegen` rerun needed
+- [x] Historical `.mstar/` records intentionally preserved per Assignment (audit trail intact)
+- [x] `.github/workflows/desktop-build.yml` path filter — **W-001 fix verified**
+- [x] `apps/AGENTS.md` trailing whitespace — **qc3 S-001 also addressed in same fix wave**
+- [x] PM re-dispatch complete; this report updates qc1 verdict in place (no `qc1-rev2.md` sibling)
+
+### Verdict (re-review)
+
+**Verdict**: **Approve**
+
+W-001 (the single Warning from wave 1) is fully resolved by the fix-wave commit `630df3af`. The `apps/nexus42/**` path filter now appears in both `push.paths` and `pull_request.paths` with correct YAML syntax, quoting, and indentation, matching the surrounding entries. The fix is surgically scoped (2 files / 4 insertions / 2 deletions) and introduces no new issues. The qc3 S-001 trailing-whitespace finding is also addressed in the same commit. All wave-1 evidence on the substantive implementation remains valid — the fix wave only touches CI workflow configuration and a Markdown whitespace strip, leaving the substantive relocation implementation byte-identical.
+
+Per `mstar-review-qc` gate rules: 0 unresolved Critical, 0 unresolved Warning → `Approve`.
+
+No residual findings need to be added to `{HARNESS_DIR}/status.json` root-level `residual_findings[<plan-id>]`. PM owns residual lifecycle per `mstar-plan-artifacts`; this re-review does not modify `status.json`.
