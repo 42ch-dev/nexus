@@ -3,8 +3,8 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-06-27-v1.70-ci-desktop-build-optimization"
-verdict: "Request Changes"
-generated_at: "2026-06-27"
+verdict: "Approve"
+generated_at: "2026-06-28"
 ---
 
 # Code Review Report
@@ -72,12 +72,40 @@ generated_at: "2026-06-27"
 - `ci.yml` is unchanged in the assigned workflow diff, so the normal CI/test gate remains in place.
 - YAML parsing of the changed desktop workflow files succeeded; `git diff --check` reported no whitespace errors.
 
+## Revalidation
+
+- Revalidation timestamp: 2026-06-27T16:09:33Z
+- Revalidation type: targeted QC3 re-review for W1 / F-QC3-001.
+- Review range / Diff basis: focused on `.github/workflows/desktop-release.yml` fix commit `f7394062` (single-commit diff vs HEAD~1).
+- Working branch (verified): `iteration/v1.70`.
+- Review cwd (verified): `/Users/bibi/workspace/organizations/42ch/nexus`.
+- Evidence reviewed:
+  - `git branch --show-current` returned `iteration/v1.70`.
+  - `git show --no-ext-diff --unified=80 f7394062 -- .github/workflows/desktop-release.yml` shows the `push.tags` trigger removed, the tag-push upload/create path removed, the `release.published` upload path retained, and `--clobber` removed.
+  - Current `.github/workflows/desktop-release.yml` has only `on.release.types: [published]`.
+  - `git grep -n -E "push:|tags:|github\.event_name|--clobber" -- .github/workflows/desktop-release.yml` returned no matches.
+  - `git grep -n -E "github\.event\.release\.tag_name|Nexus-macos-universal\.app\.zip|dmg/\*\.dmg|tauri build --target universal-apple-darwin" -- .github/workflows/desktop-release.yml` confirmed the workflow still builds the universal Tauri bundle, uploads with `${{ github.event.release.tag_name }}`, and includes both `Nexus-macos-universal.app.zip` and `dmg/*.dmg` assets.
+  - `apps/desktop/src-tauri/tauri.conf.json` still declares `bundle.targets: ["app", "dmg"]`, supporting the `.app` bundle and DMG outputs consumed by the packaging/upload steps.
+  - `git diff --check f7394062~1..f7394062 -- .github/workflows/desktop-release.yml` passed with no whitespace errors.
+  - `ruby -e 'require "yaml"; YAML.load_file(".github/workflows/desktop-release.yml"); puts "parsed .github/workflows/desktop-release.yml"'` parsed the workflow successfully. `actionlint` was not installed, so YAML parsing plus `git diff --check` was used as the available syntax fallback.
+- Checklist disposition:
+  1. `push.tags` is removed entirely from the workflow trigger: **resolved**.
+  2. `github.event_name` conditionals are removed: **resolved**.
+  3. `--clobber` is removed: **resolved**.
+  4. Upload logic is correct for the single `release.published` trigger and uses `${{ github.event.release.tag_name }}`: **resolved**.
+  5. The workflow still produces distributable artifacts: **resolved**; Tauri still builds `targets: ["app", "dmg"]`, then packages `macos/Nexus.app` as `Nexus-macos-universal.app.zip` and uploads that ZIP plus `dmg/*.dmg`.
+  6. YAML is syntactically valid under available local checks: **resolved**.
+
+**W1 / F-QC3-001 disposition:** Resolved. The release workflow now has a single source of truth (`release.published`) and no longer has the duplicate tag-push path or destructive `--clobber` retry behavior that caused the original reliability risk.
+
+**Revalidation Verdict**: Approve
+
 ## Summary
 
 | Severity | Count |
 |----------|-------|
 | 🔴 Critical | 0 |
-| 🟡 Warning | 1 |
-| 🟢 Suggestion | 1 |
+| 🟡 Warning | 0 |
+| 🟢 Suggestion | 0 |
 
-**Verdict**: Request Changes
+**Verdict**: Approve
