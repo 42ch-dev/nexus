@@ -120,6 +120,26 @@ impl Capability for ScriptSectionStatusUpdate {
         let scripts_dir = work_dir.join("Scripts");
         let section_full_path = scripts_dir.join(&inp.section_path);
 
+        // Guard against path-traversal in section_path (e.g. "../../.ssh/authorized_keys").
+        // canonicalize resolves symlinks + ".." segments; the starts_with check ensures
+        // the resolved path is within Scripts/. This also subsumes the existence check
+        // (canonicalize fails on non-existent paths).
+        let scripts_dir_canonical = std::fs::canonicalize(&scripts_dir).map_err(|e| {
+            CapabilityError::InputInvalid(format!("cannot resolve scripts dir: {e}"))
+        })?;
+        let section_canonical = std::fs::canonicalize(&section_full_path).map_err(|_| {
+            CapabilityError::InputInvalid(format!(
+                "section not found: Scripts/{} under work '{work_ref}'",
+                inp.section_path
+            ))
+        })?;
+        if !section_canonical.starts_with(&scripts_dir_canonical) {
+            return Err(CapabilityError::InputInvalid(format!(
+                "section_path '{}' must be within the Scripts directory",
+                inp.section_path
+            )));
+        }
+
         info!(
             work_ref = %work_ref,
             section_path = %inp.section_path,
@@ -128,16 +148,8 @@ impl Capability for ScriptSectionStatusUpdate {
             "script.section_status.update: start"
         );
 
-        // Check section file exists
-        if !section_full_path.exists() {
-            return Err(CapabilityError::InputInvalid(format!(
-                "section not found: Scripts/{} under work '{work_ref}'",
-                inp.section_path
-            )));
-        }
-
-        // Read current content
-        let content = std::fs::read_to_string(&section_full_path).map_err(|e| {
+        // Read current content (use canonical path to close TOCTOU)
+        let content = std::fs::read_to_string(&section_canonical).map_err(|e| {
             CapabilityError::Internal(format!(
                 "read section file {}: {e}",
                 section_full_path.display()
@@ -154,8 +166,8 @@ impl Capability for ScriptSectionStatusUpdate {
         let updated_content =
             replace_frontmatter_field(&content, "section_status", &inp.new_status)?;
 
-        // Atomic write via temp+rename
-        atomic_write(&section_full_path, &updated_content)?;
+        // Atomic write via temp+rename (use canonical path)
+        atomic_write(&section_canonical, &updated_content)?;
 
         info!(
             work_ref = %work_ref,
@@ -168,7 +180,7 @@ impl Capability for ScriptSectionStatusUpdate {
         let output = SectionStatusOutput {
             updated: true,
             new_section_status: inp.new_status,
-            section_path: section_full_path.display().to_string(),
+            section_path: section_canonical.display().to_string(),
         };
 
         serde_json::to_value(output).map_err(|e| {
