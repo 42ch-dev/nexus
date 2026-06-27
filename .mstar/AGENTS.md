@@ -17,6 +17,15 @@ This repo follows the **[Morning Star (mstar-harness)](https://github.com/btspoo
 
 **Load order (harness work):** Read `mstar-harness-core`, then `mstar-plan-conventions` (+ `mstar-review-qc` when touching `InReview` or QC reports). State machine, QC triple-review timing, and multi-batch rules are **not** duplicated here.
 
+### Editing this file
+
+This file defines **rules and invariants** — it is not a changelog, incident postmortem, or audit trail. When adding or editing a section:
+
+- **Use generic placeholders** in examples (e.g. `<plan-id>`, `{ver}`) — not specific version numbers, plan IDs, or commit SHAs.
+- **State the rule**, not the story of how we learned it. Git history preserves provenance; `notes.json` preserves incident narrative.
+- **Never record** "first observed in Vx.yz", "fixed on YYYY-MM-DD", "occurred after PR #N", or residual IDs as inline justification. If a section's rationale is non-obvious without context, write a concise one-line rationale in the section body — not an embedded incident report.
+- **Anti-patterns** describe the mistake generically — not "one occurrence in Vx.yz P-last script".
+
 ## Plans & Reports Layout Invariant
 
 Each plan is a **single `.md` file** under `plans/` — **never** a directory. QC/QA reports live under `plans/reports/<plan-id>/`, **never** as a side-by-side `reports/` subdirectory of a plan-named directory.
@@ -26,9 +35,7 @@ Each plan is a **single `.md` file** under `plans/` — **never** a directory. Q
 | `plans/<plan-id>-<name>.md` | `plans/<plan-id>/…` (plan as a directory) |
 | `plans/reports/<plan-id>/qc1.md` … `qc3.md` | `plans/<plan-id>/reports/qc1.md` … `qc3.md` |
 
-**Rule**: `plans/reports/` is the **single** reports root. A `plans/<plan-id>/` directory must not exist — the plan itself is the `.md` file, and the empty parent directory underneath it is not part of the layout.
-
-(This covers a recurring agent mistake first observed with the 2026-06-15 v1.47 batch, where four plan-named stub directories containing `reports/` were created alongside the plan `.md` files. Fixed 2026-06-27 — reports moved into `plans/reports/`, empty stubs removed.)
+**Rule**: `plans/reports/` is the **single** reports root. A `plans/<plan-id>/` directory must not exist — the plan itself is the `.md` file.
 
 ## Reachability
 
@@ -65,8 +72,6 @@ Git-tracked docs and plans must be openable after a fresh `git clone`: no `.giti
 
 **Audit trail preservation**: removing a forbidden narrative field never loses information — the underlying facts remain in `plans[]` (structured), `residual_findings` (per-finding lifecycle), `archived/plans/` (per-plan snapshots), and `notes.json` (timeline). Record the removal in `notes.json` for traceability.
 
-This rule was originally established 2026-04-14 (see `notes.json` entry of that date); promoted to `AGENTS.md` 2026-06-23 after `v1_62_plan_registration_note` violated it because the rule lived in a write-mostly log agents don't read.
-
 ### Multi-plan iteration branches (harness convention)
 
 When an active delivery compass has **two or more** locked implement plans in the **same repo**, this project uses a **two-tier branch model** (aligned with Morning Star `mstar-branch-worktree` — plan integration branch + per-plan topic branches):
@@ -81,8 +86,8 @@ When an active delivery compass has **two or more** locked implement plans in th
 **Naming**:
 
 - Integration: `iteration/{ver}` (e.g. `iteration/v1.51`)
-- Topic: `feature/{ver}-{plan-slug}` where `<plan-slug>` is the plan title slug without date prefix (e.g. `feature/v1.51-llm-extraction`)
-- Hotfix: `fix/{short-name}` (e.g. `fix/v1.42.1-preset-gate-bypass` per V1.42.1 hotfix pattern)
+- Topic: `feature/{ver}-{plan-slug}` where `<plan-slug>` is the plan title slug without date prefix
+- Hotfix: `fix/{short-name}`
 
 **PM / implement rules:**
 
@@ -121,16 +126,16 @@ When an active delivery compass has **two or more** locked implement plans in th
 
 **Anti-patterns**:
 
-- ❌ Appending the full plan object to `plans-done.json` (one occurrence in V1.45 P-last script; fixed 2026-06-14)
-- ❌ Forgetting the per-file JSON (one occurrence in V1.45 P-1 closeout; backfilled 2026-06-14)
+- ❌ Appending the full plan object to `plans-done.json` (must be plain `plan_id` strings only)
+- ❌ Forgetting the per-file JSON in `archived/plans/<plan-id>.json`
 - ❌ Mixing strings and dicts in the same `plans` array
-- ❌ Editing `archived/plans-done.json` directly when adding a single plan mid-iteration (use the same pattern even for one-off additions)
+- ❌ Editing `archived/plans-done.json` directly when adding a single plan mid-iteration
 
 ### Residual detail prose (`plans/residuals/`)
 
 Optional Markdown under `plans/residuals/<plan-id>/`, named `<finding-id>-<short-label>.md`; supplements root `residual_findings` (see upstream `mstar-plan-conventions`). Archive prose with structured JSON to `archived/residuals/<plan-id>.json` when closed.
 
-### Post-merge hotfix pattern (V1.42.1)
+### Post-merge hotfix pattern
 
 When a PR is merged to `main` and post-merge CI exposes a regression, the
 canonical recovery flow is:
@@ -142,11 +147,8 @@ canonical recovery flow is:
    is now retired). Use the `fix/<short-name>` naming convention (no
    `feature/<ver>-` prefix; hotfixes are version-pinned to current main).
 3. Surgical fixes only — pattern-match the bug class, do not refactor
-   unrelated code, do not piggyback V1.43 work.
-4. Add at least one regression test per bug-class instance. Use
-   `handler_state()` (fresh DB) for handler-level tests; pre/post
-   `sqlx::query_scalar` to assert on lock state for paths where the
-   subject row does not exist.
+   unrelated code, do not piggyback other in-flight work.
+4. Add at least one regression test per bug-class instance.
 5. Verify: `cargo test -p <crate> --test <file>` (full file, not just
    one test) + `cargo clippy --all -- -D warnings` (CI command) +
    `cargo +nightly fmt --all --check`.
@@ -177,11 +179,4 @@ against **current `main` HEAD**, not against a stale base commit:
 | 3 | If the test **passes on current main** → the "pre-existing" claim is **FALSE**; the failure is attributable to the iteration under review |
 | 4 | If the test **fails on current main** → the "pre-existing" claim is **TRUE**; document the failure base SHA + reproduce command, then proceed with the PM-override |
 | 5 | If the test is **flaky** → use a fixed seed or document the flake rate, do not claim "pre-existing" without a deterministic reproduction |
-
-This protocol was added after the V1.42 P-last PM-override incorrectly
-cited `R-V141P0-W2` ("pre-existing works_api failures on c249c902 base")
-when the same tests pass on `origin/main` (`e69d2a65`) post-V1.41 merge.
-The actual cause was V1.42 P0 T2 wiring (`e8993870`), and the regression
-was caught in V1.42 CI (`c0f6cd62`) → fixed in V1.42.1 (`279ec7b3`).
-Residual: `R-V142-MERGE-CI-002`.
 
