@@ -943,7 +943,7 @@ Every Work that opts in to cron-driven staging has a `works.schedule_json` (TEXT
 }
 ```
 
-Defaults (`crates/nexus42/src/commands/creator/works/cron.rs::DEFAULT_SCHEDULE`):
+Defaults (`apps/nexus42/src/commands/creator/works/cron.rs::DEFAULT_SCHEDULE`):
 
 | Role | Cron expression | Local time (author TZ) |
 | --- | --- | --- |

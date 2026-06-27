@@ -1,0 +1,18 @@
+{
+  "plan_id": "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization",
+  "title": "V1.68 P0 — Relocate CLI to apps/ + Product-Surface Formalization",
+  "iteration": "V1.68",
+  "slot": "P0",
+  "status": "Done",
+  "effort": "S",
+  "owner": "@fullstack-dev",
+  "review": "QC tri-review pending (after implement)",
+  "wave": 1,
+  "dependency": "P-1 (compass Locked)",
+  "working_branch": "iteration/v1.68",
+  "merge_target": "iteration/v1.68",
+  "file": ".mstar/plans/2026-06-27-v1.68-cli-relocation-and-product-surface-formalization.md",
+  "wire_contracts_changed": false,
+  "completed_at": "2026-06-27 (QA Pass)",
+  "completion_summary": "QA Pass: all 6 gate commands green (build/clippy/test/fmt/schema-drift/pnpm-build); 7/7 acceptance criteria met; W-001 fix verified in desktop-build.yml (apps/nexus42/** in both paths); zero source edits (pure renames); wire_contracts_changed: FALSE; 12 live refs clean, historical ~978 untouched; QC 3/3 Approve post fix-wave; branch clean and pushed. Merge-ready."
+}

@@ -1,38 +1,32 @@
 {
   "version": 1,
-  "updated_at": "2026-06-26T00:00:00Z",
+  "updated_at": "2026-06-27T00:00:00Z",
   "plans": [],
   "metadata": {
-    "integration_branch": null,
-    "integration_branch_retired": true,
+    "integration_branch": "iteration/v1.68",
+    "integration_branch_retired": false,
     "last_integration_branch": "iteration/v1.67",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.68 (pending)",
-    "latest_active_compass": null,
+    "latest_active_iteration": "V1.68 (shipped — pending PR merge to main)",
+    "latest_active_compass": "v1.68-cli-to-apps-product-surface-unification-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": "pending (V1.68)",
+    "pre_implement_gate": "pending (V1.69)",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.67",
-      "compass": "v1.67-local-api-surface-convergence-and-derisk-delivery-compass-v1.md",
-      "shipped_at": "2026-06-26T... ",
-      "plan_count": 8,
-      "plan_count_done": 8,
-      "wire_contracts_changed": true,
-      "wire_contracts_note": "V1.67: @42ch/nexus-contracts 0.5.0->0.6.0. Two breaking changes: F-P3 array-key -> items (works/schedules/sessions/capabilities) + error-code casing global UPPER->lower snake_case. F-F1 sort additive; G1/G2 frontend-only.",
+      "iteration": "V1.68",
+      "compass": "v1.68-cli-to-apps-product-surface-unification-compass-v1.md",
+      "shipped_at": "2026-06-27 (pending PR merge)",
+      "plan_count": 2,
+      "plan_count_done": 2,
+      "wire_contracts_changed": false,
+      "wire_contracts_note": "V1.68: pure relocation + docs, no schema/codegen/contract change.",
       "profile_b_compaction": "done",
       "plan_ids": [
-        "2026-06-26-v1.67-compass-and-plan-stubs",
-        "2026-06-26-v1.67-canvas-strategy-exploration",
-        "2026-06-26-v1.67-local-api-surface-convergence",
-        "2026-06-26-v1.67-desktop-shell-polish",
-        "2026-06-26-v1.67-frontend-scope-gaps",
-        "2026-06-26-v1.67-overdue-debt-closure",
-        "2026-06-26-v1.67-mid-meta-tracking",
-        "2026-06-26-v1.67-residual-convergence-and-closeout"
+        "2026-06-27-v1.68-compass-and-plan",
+        "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization"
       ],
-      "note": "V1.67 hygiene-lead: Local API surface convergence (FE1-ORCH+CASING+F-P3+F-F1) + 10 V1.66 desktop QC + work_profile selector + preset TS-client + 9 overdue V1.52/V1.60 + Canvas Strategy Surface Exploration (de-risk V1.68; body-editor rejected). 26 residuals closed; 21 V1.67 QC-suggestions open (V1.68+). QC tri-review both waves Approve after fix-waves; QA Pass. Platform paused. PR iteration/v1.67 -> main."
+      "note": "Structural hygiene: relocated crates/nexus42 -> apps/nexus42 so apps/ is the polyglot product-surfaces dir and crates/ returns to pure Rust libs. Zero source changes (Cargo resolves by crate name); CI-invisible. 12 live refs updated; ~978 historical .mstar records left as-is. 1 regression R-V168P0-QC1-W001 (desktop-build path filter omitted apps/nexus42/**) caught by QC tri-review + fixed in-wave (630df3af). QC 3/3 Approve after fix wave; QA Pass. Single-plan iteration on iteration/v1.68."
     },
     "tech_debt_summary": {
       "total_open": 21,
@@ -51,11 +45,32 @@
       "refreshed_at": "2026-06-26T... (V1.67 P-last closeout)",
       "refreshed_reason": "V1.67 P-last: post Wave1+Wave2 QC+QA; all V1.67 closures done; 21 open are V1.67 QC-suggestions deferred V1.68+ (all low)"
     },
-    "updated_at": "2026-06-26 (V1.67 ship)",
+    "updated_at": "2026-06-27 (V1.68 ship — pending PR merge)",
     "spec_integration_branch": null,
     "wave1_merged_at": "2026-06-25T15:49:19Z"
   },
   "residual_findings": {
+    "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization": [
+      {
+        "id": "R-V168P0-QC1-W001",
+        "title": "desktop-build.yml path filter omits apps/nexus42/** — CLI-only PRs no longer trigger desktop-bundle CI after relocation (regression)",
+        "severity": "low",
+        "source": "qc1 W-001 (cross-confirmed qc3)",
+        "scope": ".github/workflows/desktop-build.yml push.paths + pull_request.paths (filter has crates/** + apps/web/** + apps/desktop/** but not apps/nexus42/**)",
+        "decision": "fix-in-wave",
+        "owner": "@fullstack-dev",
+        "target": "V1.68 P0 fix wave",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.68-cli-relocation-and-product-surface-formalization][R-V168P0-QC1-W001]",
+        "note": "Regression introduced by V1.68 (CLI moved out of crates/** glob into unfiltered apps/nexus42/**). Fix: add 'apps/nexus42/**' to both push.paths and pull_request.paths. ci.yml unaffected (paths-ignore). qc1+qc3 targeted re-review after fix.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-27 (P0 fix wave)",
+        "closure_note": "Fixed in commit 630df3af: added 'apps/nexus42/**' to push.paths + pull_request.paths in desktop-build.yml. qc1 + qc3 targeted re-review both flipped to Approve (W-001 + S-02 verified resolved, no new issue).",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization",
+          "commit": "630df3af"
+        }
+      }
+    ],
     "2026-06-23-v1.61-compute-capability-and-preset": [
       {
         "id": "R-V161P3-ARCH-001",

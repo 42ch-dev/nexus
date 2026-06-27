@@ -49,7 +49,7 @@
 5. **V1.0 Priority**: We need a working integration, not the most advanced API. Stability > feature completeness for V1.0.
 
 **Risk Mitigation**:
-- Wrap all SDK usage behind a `NexusAcpClient` trait in `crates/nexus42/src/acp/client.rs` (adapter pattern).
+- Wrap all SDK usage behind a `NexusAcpClient` trait in `apps/nexus42/src/acp/client.rs` (adapter pattern).
 - Pin exact version in `Cargo.toml`: `agent-client-protocol = "=0.10.4"`.
 - If the SDK becomes unmaintained or the v1.0 `sacp` rename happens before our GA, the adapter layer limits the migration surface.
 
@@ -103,10 +103,10 @@ If `agent-client-protocol` v0.10.4 lacks a critical feature (e.g., missing `sess
 
 ### 2.2 Module Layout
 
-All ACP-related code lives in `crates/nexus42/src/acp/`:
+All ACP-related code lives in `apps/nexus42/src/acp/`:
 
 ```
-crates/nexus42/src/acp/
+apps/nexus42/src/acp/
 ├── mod.rs          # Public API, re-exports
 ├── client.rs       # NexusAcpClient trait + AcpSdkAdapter impl
 ├── registry.rs     # Registry manifest fetcher + local cache
@@ -117,7 +117,7 @@ crates/nexus42/src/acp/
 
 New CLI command module:
 ```
-crates/nexus42/src/commands/
+apps/nexus42/src/commands/
 └── agent.rs        # agent list/show/install/run/probe subcommands
 ```
 
@@ -313,7 +313,7 @@ For V1.0, installation is **lazy** — agents are launched on demand. No pre-ins
 
 **Decision: Option A for V1.0.**
 
-The ACP protocol is designed for direct stdio communication. The existing `DaemonClient` in `crates/nexus42/src/api/daemon_client.rs` provides HTTP access to the daemon for CLI-internal use (health checks, sync, etc.), but agents do NOT talk to the daemon in V1.0.
+The ACP protocol is designed for direct stdio communication. The existing `DaemonClient` in `apps/nexus42/src/api/daemon_client.rs` provides HTTP access to the daemon for CLI-internal use (health checks, sync, etc.), but agents do NOT talk to the daemon in V1.0.
 
 ### 4.2 V1.0 Local API Additions (Minimal)
 
@@ -516,10 +516,10 @@ nexus42 agent probe --agent claude-acp
 The new `Agent` command follows the exact pattern of existing commands (`DaemonCommand`, `SyncCommand`, etc.):
 
 ```rust
-// In crates/nexus42/src/commands/mod.rs — add:
+// In apps/nexus42/src/commands/mod.rs — add:
 pub mod agent;
 
-// In crates/nexus42/src/main.rs — add to Commands enum:
+// In apps/nexus42/src/main.rs — add to Commands enum:
 /// Agent management (ACP integration)
 Agent {
     #[command(subcommand)]
@@ -620,7 +620,7 @@ File: `schemas/acp-runtime/registry-manifest.schema.json`
 
 ### 7.2 Codegen Impact
 
-After creating the schema, run `pnpm run codegen` to generate Rust types in `crates/nexus-contracts/src/generated/` and TypeScript types in `packages/nexus-contracts/src/generated/`. The generated Rust types should be used in `crates/nexus42/src/acp/registry.rs`.
+After creating the schema, run `pnpm run codegen` to generate Rust types in `crates/nexus-contracts/src/generated/` and TypeScript types in `packages/nexus-contracts/src/generated/`. The generated Rust types should be used in `apps/nexus42/src/acp/registry.rs`.
 
 ### 7.3 No New Local API Schema for V1.0
 
@@ -636,7 +636,7 @@ As decided in §4, no new Local API endpoint schema is needed for V1.0. The exis
 
 **Resolution**: §5.2 defines the frozen capability IDs that nexus42 will declare during ACP `initialize`. The capability set is intentionally minimal for V1.0 (6 capabilities) and can be expanded in V1.1+.
 
-**Implementation action**: The `skills.rs` module in `crates/nexus42/src/acp/` must export these constants and use them when constructing the `initialize` request.
+**Implementation action**: The `skills.rs` module in `apps/nexus42/src/acp/` must export these constants and use them when constructing the `initialize` request.
 
 ### 8.2 ACP-R2: Missing `nexus42 acp probe` Command
 
@@ -656,19 +656,19 @@ As decided in §4, no new Local API endpoint schema is needed for V1.0. The exis
 
 | Component | Tests | Location |
 |-----------|-------|----------|
-| `registry.rs` | Cache hit/miss/expiry, parsing, offline fallback | `crates/nexus42/src/acp/registry.rs` (#[cfg(test)]) |
-| `skills.rs` | Capability constant correctness, manifest generation | `crates/nexus42/src/acp/skills.rs` (#[cfg(test)]) |
-| `transport.rs` | Command construction, platform detection for binary dist | `crates/nexus42/src/acp/transport.rs` (#[cfg(test)]) |
-| `error.rs` | Error variant display, conversion | `crates/nexus42/src/acp/error.rs` (#[cfg(test)]) |
+| `registry.rs` | Cache hit/miss/expiry, parsing, offline fallback | `apps/nexus42/src/acp/registry.rs` (#[cfg(test)]) |
+| `skills.rs` | Capability constant correctness, manifest generation | `apps/nexus42/src/acp/skills.rs` (#[cfg(test)]) |
+| `transport.rs` | Command construction, platform detection for binary dist | `apps/nexus42/src/acp/transport.rs` (#[cfg(test)]) |
+| `error.rs` | Error variant display, conversion | `apps/nexus42/src/acp/error.rs` (#[cfg(test)]) |
 
 ### 9.2 Integration Tests
 
 | Test | Description | Location |
 |------|-------------|----------|
-| Registry fetch | Fetch from CDN, parse, verify schema conformance | `crates/nexus42/tests/acp_registry.rs` |
-| Cache roundtrip | Write cache, read back, verify expiry logic | `crates/nexus42/tests/acp_cache.rs` |
-| Agent subprocess spawn | Spawn `echo` as fake agent, verify stdio pipe works | `crates/nexus42/tests/acp_transport.rs` |
-| CLI command output | `nexus42 agent list --format json`, parse output | `crates/nexus42/tests/cli_agent.rs` |
+| Registry fetch | Fetch from CDN, parse, verify schema conformance | `apps/nexus42/tests/acp_registry.rs` |
+| Cache roundtrip | Write cache, read back, verify expiry logic | `apps/nexus42/tests/acp_cache.rs` |
+| Agent subprocess spawn | Spawn `echo` as fake agent, verify stdio pipe works | `apps/nexus42/tests/acp_transport.rs` |
+| CLI command output | `nexus42 agent list --format json`, parse output | `apps/nexus42/tests/cli_agent.rs` |
 
 ### 9.3 Test Constraints
 
@@ -704,14 +704,14 @@ cat ~/.nexus42/registry/cache_meta.json
 **Scope**: Add `agent-client-protocol` crate, implement `NexusAcpClient` adapter trait.
 
 **Files to create:**
-- `crates/nexus42/src/acp/mod.rs`
-- `crates/nexus42/src/acp/client.rs`
-- `crates/nexus42/src/acp/error.rs`
+- `apps/nexus42/src/acp/mod.rs`
+- `apps/nexus42/src/acp/client.rs`
+- `apps/nexus42/src/acp/error.rs`
 
 **Files to modify:**
-- `crates/nexus42/Cargo.toml` — add `agent-client-protocol = "=0.10.4"` dependency
-- `crates/nexus42/src/main.rs` — add `mod acp;` and `Agent` command variant
-- `crates/nexus42/src/commands/mod.rs` — add `pub mod agent;`
+- `apps/nexus42/Cargo.toml` — add `agent-client-protocol = "=0.10.4"` dependency
+- `apps/nexus42/src/main.rs` — add `mod acp;` and `Agent` command variant
+- `apps/nexus42/src/commands/mod.rs` — add `pub mod agent;`
 
 **Acceptance criteria:**
 - [ ] `cargo build -p nexus42` succeeds with the ACP SDK dependency
@@ -729,7 +729,7 @@ cat ~/.nexus42/registry/cache_meta.json
 **Scope**: Fetch registry from CDN, parse manifests, implement local caching with stale-while-revalidate.
 
 **Files to create:**
-- `crates/nexus42/src/acp/registry.rs`
+- `apps/nexus42/src/acp/registry.rs`
 - `schemas/acp-runtime/registry-manifest.schema.json`
 
 **Acceptance criteria:**
@@ -749,7 +749,7 @@ cat ~/.nexus42/registry/cache_meta.json
 **Scope**: Implement `nexus42 agent list`, `nexus42 agent show <ref>`, `nexus42 agent probe`. Resolves ACP-R2.
 
 **Files to create:**
-- `crates/nexus42/src/commands/agent.rs`
+- `apps/nexus42/src/commands/agent.rs`
 
 **Acceptance criteria:**
 - [ ] `nexus42 agent list` displays table of 16 agents
@@ -768,7 +768,7 @@ cat ~/.nexus42/registry/cache_meta.json
 **Scope**: Implement subprocess spawning, stdio pipe management, and the `nexus42 agent run` command.
 
 **Files to create:**
-- `crates/nexus42/src/acp/transport.rs`
+- `apps/nexus42/src/acp/transport.rs`
 
 **Acceptance criteria:**
 - [ ] `nexus42 agent run claude-acp` spawns agent subprocess via npx
@@ -787,7 +787,7 @@ cat ~/.nexus42/registry/cache_meta.json
 **Scope**: Define frozen capability IDs, declare them during ACP `initialize`. Resolves ACP-R1.
 
 **Files to create:**
-- `crates/nexus42/src/acp/skills.rs`
+- `apps/nexus42/src/acp/skills.rs`
 
 **Acceptance criteria:**
 - [ ] `capabilities` module exports frozen IDs

@@ -317,7 +317,9 @@
     "2026-06-26-v1.67-frontend-scope-gaps",
     "2026-06-26-v1.67-overdue-debt-closure",
     "2026-06-26-v1.67-mid-meta-tracking",
-    "2026-06-26-v1.67-residual-convergence-and-closeout"
+    "2026-06-26-v1.67-residual-convergence-and-closeout",
+    "2026-06-27-v1.68-compass-and-plan",
+    "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization"
   ],
   "iteration_summaries": {
     "v1.45": {

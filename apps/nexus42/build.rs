@@ -33,6 +33,8 @@ fn main() {
     let manifest_dir = env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR");
     let embedded_dir = Path::new(&manifest_dir)
         .join("..")
+        .join("..")
+        .join("crates")
         .join("nexus-orchestration")
         .join("embedded-presets");
 
@@ -66,5 +68,5 @@ fn main() {
     fs::write(&dest_path, code).expect("failed to write embedded_preset_ids.rs");
 
     // Rerun if the embedded presets directory changes.
-    println!("cargo:rerun-if-changed=../nexus-orchestration/embedded-presets");
+    println!("cargo:rerun-if-changed=../../crates/nexus-orchestration/embedded-presets");
 }
