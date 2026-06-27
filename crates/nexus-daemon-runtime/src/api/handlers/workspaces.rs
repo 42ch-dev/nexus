@@ -780,6 +780,6 @@ mod tests {
     async fn conflict_error_maps_correctly() {
         let err = NexusApiError::Conflict("already exists".to_string());
         assert_eq!(err.status_code(), axum::http::StatusCode::CONFLICT);
-        assert_eq!(err.error_code(), "CONFLICT");
+        assert_eq!(err.error_code(), "conflict");
     }
 }

@@ -24,16 +24,18 @@ use nexus_kb::KbStore;
 use nexus_narrative::NarrativeGateway;
 use serde::Deserialize;
 use serde_json::{json, Value};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 // ─── Shared admission gate ─────────────────────────────────────────────────
 
 /// Verify that `creator_id` owns `world_id`.
 ///
-/// Mirrors `ensure_world_accessible_for_creator` from the daemon host-tool
-/// layer (`host_tool_handlers.rs:825`). The orchestration crate cannot depend
-/// on `nexus-daemon-runtime`, so the one-line ownership check is duplicated
-/// here. `world_id` must exist AND `owner_creator_id` must match the caller.
+/// V1.67 P2 (R-V160P0-QC2-W001): delegates to the shared
+/// [`nexus_local_db::narrative_write::is_world_owned`] gate so the ownership
+/// check is no longer duplicated between the orchestration capabilities and the
+/// daemon host-tool layer. `world_id` must exist AND `owner_creator_id` must
+/// match the caller.
 ///
 /// # Errors
 ///
@@ -44,22 +46,15 @@ pub async fn ensure_world_owned(
     creator_id: &str,
     world_id: &str,
 ) -> Result<(), CapabilityError> {
-    // SAFETY: simple EXISTS-style SELECT against known narrative_worlds schema.
-    let owned: Option<String> = sqlx::query_scalar(
-        "SELECT world_id FROM narrative_worlds WHERE world_id = ? AND owner_creator_id = ?",
-    )
-    .bind(world_id)
-    .bind(creator_id)
-    .fetch_optional(pool)
-    .await
-    .map_err(|e| CapabilityError::Internal(format!("world ownership check: {e}")))?;
-
-    if owned.is_none() {
-        return Err(CapabilityError::Forbidden(
+    match nexus_local_db::narrative_write::is_world_owned(pool, creator_id, world_id).await {
+        Ok(true) => Ok(()),
+        Ok(false) => Err(CapabilityError::Forbidden(
             "world not found or not owned by creator".into(),
-        ));
+        )),
+        Err(e) => Err(CapabilityError::Internal(format!(
+            "world ownership check: {e}"
+        ))),
     }
-    Ok(())
 }
 
 /// Resolve the workspace slug for a world (diagnostics / audit context).
@@ -427,6 +422,11 @@ impl Default for WorldDeltaApply {
     }
 }
 
+/// Maximum number of `key_block_id` values to bind in a single pre-fetch
+/// IN-list. `SQLite` supports far more, but a fixed cap keeps the generated
+/// SQL and bind-count bounded regardless of caller input size.
+const KB_PREFETCH_CHUNK_SIZE: usize = 500;
+
 #[async_trait]
 impl Capability for WorldDeltaApply {
     fn name(&self) -> &'static str {
@@ -488,6 +488,54 @@ impl Capability for WorldDeltaApply {
         let mut results: Vec<Value> = Vec::with_capacity(parsed.proposed_changes.len());
         let mut all_applied = true;
 
+        // V1.67 P2 (R-V160P0-QC3-W001 / W-002): pre-fetch current body_json
+        // for all kb_key_block update targets in chunked, deduplicated
+        // IN-lists, replacing the per-change SELECT + UPDATE N+1 pattern
+        // while bounding the SQL size regardless of caller input.
+        let update_kids: Vec<&str> = parsed
+            .proposed_changes
+            .iter()
+            .filter_map(|ch| {
+                if ch.entity == "kb_key_block" && ch.entity_id.is_some() {
+                    ch.entity_id.as_deref()
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        let mut live_body_map: HashMap<String, Option<String>> = HashMap::new();
+        if !update_kids.is_empty() {
+            // Dedupe ids so duplicate entity_id entries do not inflate bind
+            // counts or generate redundant IN-list chunks.
+            let mut seen = HashSet::with_capacity(update_kids.len());
+            let unique_update_kids: Vec<&str> = update_kids
+                .into_iter()
+                .filter(|kid| seen.insert(*kid))
+                .collect();
+
+            for chunk in unique_update_kids.chunks(KB_PREFETCH_CHUNK_SIZE) {
+                // SAFETY: column/table names are string literals; key_block_id
+                // values are bound as parameters. Dynamic IN-list length is the
+                // only non-static aspect.
+                let placeholders = chunk.iter().map(|_| "?").collect::<Vec<_>>().join(", ");
+                let sql = format!(
+                    "SELECT key_block_id, body_json FROM kb_key_blocks WHERE key_block_id IN ({placeholders})"
+                );
+                let mut q = sqlx::query_as::<_, (String, Option<String>)>(&sql);
+                for kid in chunk {
+                    q = q.bind(*kid);
+                }
+                let rows = q
+                    .fetch_all(&mut *tx)
+                    .await
+                    .map_err(|e| CapabilityError::Internal(format!("kb batch read (tx): {e}")))?;
+                for (kid, body) in rows {
+                    live_body_map.insert(kid, body);
+                }
+            }
+        }
+
         for ch in parsed.proposed_changes {
             // Capture the rationale for the audit trail before `ch` is consumed.
             let rationale = ch.rationale.clone();
@@ -495,18 +543,11 @@ impl Capability for WorldDeltaApply {
                 ("kb_key_block", Some(kid)) => {
                     // Update path with lost-update guard.
                     // body_json is a nullable column → scalar type is Option<String>.
-                    // SAFETY: SELECT against known kb_key_blocks schema.
-                    let live_body: Option<Option<String>> =
-                        sqlx::query_scalar::<_, Option<String>>(
-                            "SELECT body_json FROM kb_key_blocks WHERE key_block_id = ?",
-                        )
-                        .bind(kid)
-                        .fetch_optional(&mut *tx)
-                        .await
-                        .map_err(|e| CapabilityError::Internal(format!("kb read (tx): {e}")))?;
+                    // V1.67 P2 (R-V160P0-QC3-W001): value was pre-fetched in
+                    // bulk above instead of issuing one SELECT per change.
+                    let live_body = live_body_map.get(kid).cloned().unwrap_or(None);
 
                     let live = live_body
-                        .flatten()
                         .and_then(|s| serde_json::from_str::<Value>(&s).ok())
                         .unwrap_or(Value::Null);
 
@@ -1046,5 +1087,180 @@ mod tests {
             "body_json should carry the summary, got {body}"
         );
         assert!(body.contains("protagonist"));
+    }
+
+    // V1.67 P2 (R-V160P0-QC3-W001): regression test for the N+1 SELECT fix.
+    // Applies 4 kb_key_block updates in one delta package and asserts both
+    // successful applies and conflict detection still work, while using the
+    // bulk pre-fetch path instead of one SELECT per change.
+    #[tokio::test]
+    async fn world_delta_apply_batch_kb_updates_prefetch() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_creator(&pool, "ctr_a").await;
+        seed_world(&pool, "ctr_a", "wld_a").await;
+
+        // Seed two key blocks via the create path.
+        let cap = WorldDeltaApply::with_pool(pool.clone());
+        let out = cap
+            .run(json!({
+                "policy_context": {
+                    "world_id": "wld_a",
+                    "creator_id": "ctr_a",
+                    "source_work_id": "wrk_local"
+                },
+                "proposed_changes": [
+                    {
+                        "entity": "kb_key_block",
+                        "field": "canonical_name",
+                        "new_value": {
+                            "canonical_name": "Hero",
+                            "block_type": "character",
+                            "body_json": {"attributes": {"hp": 10}}
+                        },
+                        "rationale": "create hero"
+                    },
+                    {
+                        "entity": "kb_key_block",
+                        "field": "canonical_name",
+                        "new_value": {
+                            "canonical_name": "Villain",
+                            "block_type": "character",
+                            "body_json": {"attributes": {"hp": 20}}
+                        },
+                        "rationale": "create villain"
+                    }
+                ],
+                "atomic": true
+            }))
+            .await
+            .unwrap();
+
+        let hero_id = out["applied"][0]["entity_id"].as_str().unwrap();
+        let villain_id = out["applied"][1]["entity_id"].as_str().unwrap();
+
+        // Apply two body_json updates and one stale conflict in one package.
+        let out2 = cap
+            .run(json!({
+                "policy_context": {
+                    "world_id": "wld_a",
+                    "creator_id": "ctr_a",
+                    "source_work_id": "wrk_local"
+                },
+                "proposed_changes": [
+                    {
+                        "entity": "kb_key_block",
+                        "entity_id": hero_id,
+                        "field": "body_json",
+                        "old_value": {"attributes": {"hp": 10}},
+                        "new_value": {"attributes": {"hp": 15}},
+                        "rationale": "level up hero"
+                    },
+                    {
+                        "entity": "kb_key_block",
+                        "entity_id": villain_id,
+                        "field": "body_json",
+                        "old_value": {"attributes": {"hp": 999}},
+                        "new_value": {"attributes": {"hp": 25}},
+                        "rationale": "wrong old value"
+                    }
+                ],
+                "atomic": true
+            }))
+            .await
+            .unwrap();
+
+        assert_eq!(out2["applied"][0]["status"], "applied");
+        assert_eq!(out2["applied"][1]["status"], "conflict");
+        assert_eq!(out2["atomic_applied"], false);
+
+        // The successful update must have persisted; the conflict must not.
+        let hero_body: Option<String> =
+            sqlx::query_scalar("SELECT body_json FROM kb_key_blocks WHERE key_block_id = ?")
+                .bind(hero_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(hero_body.unwrap().contains("15"));
+
+        let villain_body: Option<String> =
+            sqlx::query_scalar("SELECT body_json FROM kb_key_blocks WHERE key_block_id = ?")
+                .bind(villain_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert!(villain_body.unwrap().contains("20"));
+    }
+
+    // V1.67 P2 fix-wave 1 (W-002): regression test for chunked/deduped
+    // kb_key_block pre-fetch. Applies body_json updates for more ids than
+    // one IN-list chunk can hold, verifying the handler still returns correct
+    // results and does not construct an oversized SQL statement.
+    #[tokio::test]
+    async fn world_delta_apply_batch_kb_updates_prefetch_chunks() {
+        let (pool, _dir) = fresh_pool().await;
+        seed_creator(&pool, "ctr_a").await;
+        seed_world(&pool, "ctr_a", "wld_a").await;
+
+        let chunk_size = KB_PREFETCH_CHUNK_SIZE;
+        let total = chunk_size + 5;
+        let mut ids = Vec::with_capacity(total);
+        for i in 0..total {
+            let kid = format!("kb_chunk_{i:05}");
+            ids.push(kid.clone());
+            // SAFETY: test-only direct insert into kb_key_blocks.
+            sqlx::query(
+                "INSERT INTO kb_key_blocks \
+                 (key_block_id, world_id, block_type, canonical_name, status, body_json) \
+                 VALUES (?, ?, 'character', ?, 'provisional', ?)",
+            )
+            .bind(&kid)
+            .bind("wld_a")
+            .bind(format!("block_{i}"))
+            .bind("{\"hp\":1}")
+            .execute(&pool)
+            .await
+            .unwrap();
+        }
+
+        let changes: Vec<Value> = ids
+            .iter()
+            .map(|kid| {
+                json!({
+                    "entity": "kb_key_block",
+                    "entity_id": kid,
+                    "field": "body_json",
+                    "old_value": {"hp": 1},
+                    "new_value": {"hp": 2},
+                    "rationale": "bulk level up"
+                })
+            })
+            .collect();
+
+        let cap = WorldDeltaApply::with_pool(pool.clone());
+        let out = cap
+            .run(json!({
+                "policy_context": {
+                    "world_id": "wld_a",
+                    "creator_id": "ctr_a",
+                    "source_work_id": "wrk_local"
+                },
+                "proposed_changes": changes,
+                "atomic": true
+            }))
+            .await
+            .unwrap();
+
+        assert_eq!(out["applied"].as_array().unwrap().len(), total);
+        for result in out["applied"].as_array().unwrap() {
+            assert_eq!(result["status"], "applied");
+        }
+
+        let applied_count: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM kb_key_blocks WHERE body_json LIKE '%\"hp\":2%'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert_eq!(applied_count as usize, total);
     }
 }

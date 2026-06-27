@@ -41,13 +41,13 @@ export function healthOk(version = '0.1.0'): RequestHandler {
 
 // ── Works ────────────────────────────────────────────────────────────────────
 
-/** `GET /v1/local/works` → 200 `{ works, pagination }` (F-P3 `works` key). */
+/** `GET /v1/local/works` → 200 `{ items, pagination }` (F-P3 canonical `items` key). */
 export function worksList(
   rows: unknown[],
   over: Partial<PaginationInfo> = {},
 ): RequestHandler {
   return http.get('/v1/local/works', () =>
-    HttpResponse.json({ works: rows, pagination: pagination(over) }),
+    HttpResponse.json({ items: rows, pagination: pagination(over) }),
   );
 }
 

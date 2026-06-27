@@ -168,7 +168,7 @@ async fn schedule_create_with_correct_dto_shape() {
     list_resp.assert_status(StatusCode::OK);
 
     let list_body: Value = list_resp.json();
-    let schedules = list_body["schedules"].as_array().unwrap();
+    let schedules = list_body["items"].as_array().unwrap();
     assert_eq!(schedules.len(), 1, "Should find one schedule for ctr_test");
     let sched = &schedules[0];
     assert_eq!(sched["creator_id"], "ctr_test");
@@ -228,7 +228,7 @@ async fn schedule_create_seeds_core_context_from_preset_input() {
         .get("/v1/local/orchestration/schedules?creator_id=ctr_ctx")
         .await;
     let list_body: Value = list_resp.json();
-    let schedules = list_body["schedules"].as_array().unwrap();
+    let schedules = list_body["items"].as_array().unwrap();
     assert_eq!(schedules.len(), 1);
     assert_eq!(schedules[0]["preset_id"], "research");
     assert_eq!(schedules[0]["creator_id"], "ctr_ctx");
@@ -285,7 +285,7 @@ async fn schedule_list_isolation_by_creator() {
     // List all schedules
     let all_resp = ctx.server.get("/v1/local/orchestration/schedules").await;
     let all_body: Value = all_resp.json();
-    let all_schedules = all_body["schedules"].as_array().unwrap();
+    let all_schedules = all_body["items"].as_array().unwrap();
     assert_eq!(all_schedules.len(), 2, "Should have 2 schedules total");
 
     // Filter by creator_alpha — only their schedule appears
@@ -294,7 +294,7 @@ async fn schedule_list_isolation_by_creator() {
         .get("/v1/local/orchestration/schedules?creator_id=ctr_alpha")
         .await;
     let alpha_body: Value = alpha_resp.json();
-    let alpha_schedules = alpha_body["schedules"].as_array().unwrap();
+    let alpha_schedules = alpha_body["items"].as_array().unwrap();
     assert_eq!(alpha_schedules.len(), 1, "Only ctr_alpha schedules");
     assert_eq!(alpha_schedules[0]["creator_id"], "ctr_alpha");
     assert_eq!(alpha_schedules[0]["preset_id"], "research");
@@ -344,7 +344,7 @@ async fn schedule_create_without_seed_no_core_context() {
         .get("/v1/local/orchestration/schedules?creator_id=ctr_noseed")
         .await;
     let list_body: Value = list_resp.json();
-    let schedules = list_body["schedules"].as_array().unwrap();
+    let schedules = list_body["items"].as_array().unwrap();
     assert_eq!(schedules.len(), 1);
     assert_eq!(schedules[0]["preset_id"], "memory-augmented");
 }
@@ -417,7 +417,7 @@ async fn schedule_with_empty_creator_id_is_isolated_from_legitimate_creators() {
         .await;
     list_resp.assert_status(StatusCode::OK);
     let list_body: Value = list_resp.json();
-    let schedules = list_body["schedules"].as_array().unwrap();
+    let schedules = list_body["items"].as_array().unwrap();
     assert_eq!(schedules.len(), 1, "Only ctr_real schedule should appear");
     assert_eq!(schedules[0]["creator_id"], "ctr_real");
 
@@ -426,7 +426,7 @@ async fn schedule_with_empty_creator_id_is_isolated_from_legitimate_creators() {
     // the schedule was never created). Pre-fix this assertion expected 2.
     let all_resp = ctx.server.get("/v1/local/orchestration/schedules").await;
     let all_body: Value = all_resp.json();
-    let all_schedules = all_body["schedules"].as_array().unwrap();
+    let all_schedules = all_body["items"].as_array().unwrap();
     assert_eq!(
         all_schedules.len(),
         1,
@@ -468,6 +468,98 @@ async fn gated_preset_without_work_id_is_rejected() {
         .json(&req)
         .await;
     resp.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
+}
+
+// ── F-F1 sort tests ─────────────────────────────────────────────────────────
+
+async fn create_schedule_with_label(server: &TestServer, creator_id: &str, label: &str) {
+    let req = AddScheduleRequest {
+        creator_id: creator_id.to_string(),
+        preset_id: "memory-augmented".to_string(),
+        seed: None,
+        label: Some(label.to_string()),
+        depends_on: None,
+        concurrency: None,
+        scheduled_at: None,
+        input: None,
+        force_gates: false,
+        reason: None,
+    };
+    let resp = server
+        .post("/v1/local/orchestration/schedules")
+        .json(&req)
+        .await;
+    resp.assert_status(StatusCode::CREATED);
+}
+
+#[tokio::test]
+async fn schedule_list_sort_by_label_ascending() {
+    let ctx = test_ctx().await;
+    create_schedule_with_label(&ctx.server, "ctr_sort", "Beta").await;
+    create_schedule_with_label(&ctx.server, "ctr_sort", "Alpha").await;
+    create_schedule_with_label(&ctx.server, "ctr_sort", "Charlie").await;
+
+    let resp = ctx
+        .server
+        .get("/v1/local/orchestration/schedules?creator_id=ctr_sort&sort=label")
+        .await;
+    resp.assert_status(StatusCode::OK);
+    let body: Value = resp.json();
+    let items = body["items"].as_array().unwrap();
+    let labels: Vec<String> = items
+        .iter()
+        .map(|i| i["label"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(labels, vec!["Alpha", "Beta", "Charlie"]);
+}
+
+#[tokio::test]
+async fn schedule_list_sort_descending_and_pagination() {
+    let ctx = test_ctx().await;
+    create_schedule_with_label(&ctx.server, "ctr_sort2", "Alpha").await;
+    create_schedule_with_label(&ctx.server, "ctr_sort2", "Beta").await;
+    create_schedule_with_label(&ctx.server, "ctr_sort2", "Charlie").await;
+
+    let resp = ctx
+        .server
+        .get("/v1/local/orchestration/schedules?creator_id=ctr_sort2&sort=-label&limit=2")
+        .await;
+    resp.assert_status(StatusCode::OK);
+    let body: Value = resp.json();
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0]["label"], "Charlie");
+    assert_eq!(items[1]["label"], "Beta");
+    assert_eq!(body["pagination"]["has_more"], true);
+
+    let next_cursor = body["pagination"]["next_cursor"].as_str().unwrap();
+    let resp2 = ctx
+        .server
+        .get(&format!(
+            "/v1/local/orchestration/schedules?creator_id=ctr_sort2&sort=-label&limit=2&cursor={next_cursor}"
+        ))
+        .await;
+    resp2.assert_status(StatusCode::OK);
+    let body2: Value = resp2.json();
+    let items2 = body2["items"].as_array().unwrap();
+    assert_eq!(items2.len(), 1);
+    assert_eq!(items2[0]["label"], "Alpha");
+    assert_eq!(body2["pagination"]["has_more"], false);
+}
+
+#[tokio::test]
+async fn schedule_list_invalid_sort_key_returns_schedule_sort_invalid() {
+    let ctx = test_ctx().await;
+    create_schedule_with_label(&ctx.server, "ctr_sort3", "Alpha").await;
+
+    let resp = ctx
+        .server
+        .get("/v1/local/orchestration/schedules?creator_id=ctr_sort3&sort=unknown_key")
+        .await;
+    resp.assert_status(StatusCode::BAD_REQUEST);
+    let body: Value = resp.json();
+    assert_eq!(body["success"], false);
+    assert_eq!(body["error"]["code"], "schedule_sort_invalid");
 }
 
 // ── Test 6: Force-gates audit row is written and queryable (V1.37 T5/T6) ──
@@ -613,11 +705,14 @@ async fn gate_failure_returns_422_with_structured_body() {
     }
     assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
 
-    assert_eq!(body["error"], "preset_gates_failed", "body: {body}");
-    assert_eq!(body["preset_id"], "novel-writing");
-    assert_eq!(body["work_id"], "wrk_gate_test");
+    let error = &body["error"];
+    assert_eq!(error["code"], "preset_gates_failed", "body: {body}");
+    assert_eq!(error["details"]["preset_id"], "novel-writing");
+    assert_eq!(error["details"]["work_id"], "wrk_gate_test");
 
-    let failed_gates = body["failed_gates"].as_array().expect("failed_gates array");
+    let failed_gates = error["details"]["failed_gates"]
+        .as_array()
+        .expect("failed_gates array");
     assert!(
         !failed_gates.is_empty(),
         "Should have at least one failed gate"

@@ -381,8 +381,8 @@ mod tests {
         let body: Value = response.json();
         assert_eq!(body["success"], false, "success should be false");
         assert_eq!(
-            body["error"]["code"], "UNINITIALIZED",
-            "error code should be UNINITIALIZED"
+            body["error"]["code"], "uninitialized",
+            "error code should be uninitialized"
         );
         assert!(
             !body["error"]["message"].as_str().unwrap_or("").is_empty(),

@@ -219,15 +219,15 @@ async fn unknown_tool_rejected_on_all_3_paths() {
 
     assert_eq!(
         err_code_from_execute(&http_result).as_deref(),
-        Some("NOT_SUPPORTED")
+        Some("not_supported")
     );
     assert_eq!(
         err_code_from_worker(&worker_result).as_deref(),
-        Some("NOT_SUPPORTED")
+        Some("not_supported")
     );
     assert_eq!(
         err_code_from_schedule(&schedule_result).as_deref(),
-        Some("NOT_SUPPORTED")
+        Some("not_supported")
     );
 }
 
@@ -282,17 +282,17 @@ async fn all_18_ids_admission_equivalent_across_3_paths() {
         // NOT_SUPPORTED must NOT appear for any registered tool
         assert_ne!(
             http_err.as_deref(),
-            Some("NOT_SUPPORTED"),
+            Some("not_supported"),
             "{tool_id}: HTTP path must not return NOT_SUPPORTED for registered tool"
         );
         assert_ne!(
             worker_err.as_deref(),
-            Some("NOT_SUPPORTED"),
+            Some("not_supported"),
             "{tool_id}: Worker path must not return NOT_SUPPORTED for registered tool"
         );
         assert_ne!(
             sched_err.as_deref(),
-            Some("NOT_SUPPORTED"),
+            Some("not_supported"),
             "{tool_id}: Schedule path must not return NOT_SUPPORTED for registered tool"
         );
 
@@ -542,17 +542,17 @@ async fn not_supported_equivalence_all_3_paths() {
 
         assert_eq!(
             err_code_from_execute(&http).as_deref(),
-            Some("NOT_SUPPORTED"),
+            Some("not_supported"),
             "{unknown_id}: HTTP"
         );
         assert_eq!(
             err_code_from_worker(&worker).as_deref(),
-            Some("NOT_SUPPORTED"),
+            Some("not_supported"),
             "{unknown_id}: Worker"
         );
         assert_eq!(
             err_code_from_schedule(&schedule).as_deref(),
-            Some("NOT_SUPPORTED"),
+            Some("not_supported"),
             "{unknown_id}: Schedule"
         );
     }

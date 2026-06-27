@@ -4,13 +4,13 @@ import type { SchemaVersion } from '../../common/CommonTypes';
 /**
  * Nexus ListWorksResponse
  *
- * Response for GET /v1/local/works (cursor-based pagination, F-P1). The legacy `total` field is removed; array field name `works` is retained (the `works` -> `items` rename is deferred to F-P3).
+ * Response for GET /v1/local/works (cursor-based pagination, F-P3). The array field is `items`; the legacy `works` key was removed in `@42ch/nexus-contracts` 0.6.0.
  *
- * @schema_version 1
+ * @schema_version 2
  * @source list-works-response.schema.json
  */
-/** Response for GET /v1/local/works (cursor-based pagination, F-P1). The legacy `total` field is removed; array field name `works` is retained (the `works` -> `items` rename is deferred to F-P3). */
+/** Response for GET /v1/local/works (cursor-based pagination, F-P3). The array field is `items`; the legacy `works` key was removed in `@42ch/nexus-contracts` 0.6.0. */
 export interface ListWorksResponse {
-  works: WorkSummary[];
+  items: WorkSummary[];
   pagination: PaginationInfo;
 }

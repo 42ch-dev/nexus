@@ -47,6 +47,7 @@ export * from './local-api/kb/ListKbEntriesQuery';
 export * from './local-api/kb/ListKbEntriesResponse';
 export * from './local-api/kb/PaginationInfo';
 export * from './local-api/orchestration/capabilities/CapabilityInfo';
+export * from './local-api/orchestration/capabilities/ListCapabilitiesQuery';
 export * from './local-api/orchestration/capabilities/ListCapabilitiesResponse';
 export * from './local-api/orchestration/sessions/ListSessionsQuery';
 export * from './local-api/orchestration/sessions/ListSessionsResponse';
@@ -186,9 +187,10 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   ListKbEntriesResponse: 1,
   PaginationInfo: 1,
   CapabilityInfo: 1,
-  ListCapabilitiesResponse: 1,
-  ListSessionsQuery: 1,
-  ListSessionsResponse: 1,
+  ListCapabilitiesQuery: 2,
+  ListCapabilitiesResponse: 2,
+  ListSessionsQuery: 2,
+  ListSessionsResponse: 2,
   SessionDetailResponse: 1,
   SessionSummary: 1,
   GetPresetResponse: 1,
@@ -210,8 +212,8 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   EditCoreContextRequest: 1,
   EditCoreContextResponse: 1,
   InspectScheduleResponse: 1,
-  ListSchedulesQuery: 1,
-  ListSchedulesResponse: 1,
+  ListSchedulesQuery: 2,
+  ListSchedulesResponse: 2,
   ScheduleConcurrencyRequest: 1,
   ScheduleSummary: 1,
   SignalScheduleRequest: 1,
@@ -231,8 +233,8 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   PutChapterOutlineRequest: 1,
   CreateWorkRequest: 1,
   CreateWorkResponse: 1,
-  ListWorksQuery: 1,
-  ListWorksResponse: 1,
+  ListWorksQuery: 2,
+  ListWorksResponse: 2,
   PatchWorkRequest: 1,
   ReleaseCompletionLockRequest: 1,
   WorkDetailResponse: 1,
@@ -288,4 +290,4 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
 };
 
 // Highest schema_version among emitted contract schemas
-export const LATEST_SCHEMA_VERSION = 1;
+export const LATEST_SCHEMA_VERSION = 2;

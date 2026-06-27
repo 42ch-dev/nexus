@@ -129,6 +129,26 @@ fn make_create_body() -> Value {
     })
 }
 
+fn make_create_body_with_title(title: &str) -> Value {
+    json!({
+        "title": title,
+        "long_term_goal": "Write a great novel",
+        "initial_idea": "A sci-fi thriller",
+        "world_id": "wld_test_world"
+    })
+}
+
+/// Create a work via HTTP and return its work_id.
+async fn create_work_with_title(server: &TestServer, title: &str) -> String {
+    let resp = server
+        .post("/v1/local/works")
+        .json(&make_create_body_with_title(title))
+        .await;
+    resp.assert_status(axum::http::StatusCode::CREATED);
+    let body: Value = resp.json();
+    body["work_id"].as_str().unwrap().to_string()
+}
+
 /// Build a fresh WorkspaceState for handler-level testing.
 async fn handler_state() -> (WorkspaceState, TestTempRoot) {
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
@@ -210,8 +230,8 @@ async fn list_works_returns_200() {
     let resp = ctx.server.get("/v1/local/works").await;
     resp.assert_status(axum::http::StatusCode::OK);
     let body: Value = resp.json();
-    assert!(body["works"].is_array());
-    assert!(!body["works"].as_array().unwrap().is_empty());
+    assert!(body["items"].is_array());
+    assert!(!body["items"].as_array().unwrap().is_empty());
     // F-P1 (V1.64): `total` removed; cursor `pagination` envelope present.
     assert!(body["pagination"].is_object());
     assert_eq!(body["pagination"]["has_more"], false);
@@ -223,6 +243,67 @@ async fn list_works_returns_401_without_creator() {
     let ctx = test_ctx_no_creator().await;
     let resp = ctx.server.get("/v1/local/works").await;
     resp.assert_status(axum::http::StatusCode::UNAUTHORIZED);
+}
+
+#[tokio::test]
+async fn list_works_sort_by_title_ascending() {
+    let ctx = test_ctx().await;
+    let wid_a = create_work_with_title(&ctx.server, "Alpha").await;
+    let wid_b = create_work_with_title(&ctx.server, "Beta").await;
+    let wid_c = create_work_with_title(&ctx.server, "Charlie").await;
+
+    let resp = ctx.server.get("/v1/local/works?sort=title").await;
+    resp.assert_status(axum::http::StatusCode::OK);
+    let body: Value = resp.json();
+    let items = body["items"].as_array().unwrap();
+    let ids: Vec<String> = items
+        .iter()
+        .map(|i| i["work_id"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(ids, vec![wid_a, wid_b, wid_c]);
+}
+
+#[tokio::test]
+async fn list_works_sort_descending_and_pagination() {
+    let ctx = test_ctx().await;
+    let wid_a = create_work_with_title(&ctx.server, "Alpha").await;
+    let _wid_b = create_work_with_title(&ctx.server, "Beta").await;
+    let _wid_c = create_work_with_title(&ctx.server, "Charlie").await;
+
+    let resp = ctx.server.get("/v1/local/works?sort=-title&limit=2").await;
+    resp.assert_status(axum::http::StatusCode::OK);
+    let body: Value = resp.json();
+    let items = body["items"].as_array().unwrap();
+    assert_eq!(items.len(), 2);
+    assert_eq!(items[0]["title"], "Charlie");
+    assert_eq!(items[1]["title"], "Beta");
+    assert_eq!(body["pagination"]["has_more"], true);
+
+    let next_cursor = body["pagination"]["next_cursor"].as_str().unwrap();
+    let resp2 = ctx
+        .server
+        .get(&format!(
+            "/v1/local/works?sort=-title&limit=2&cursor={next_cursor}"
+        ))
+        .await;
+    resp2.assert_status(axum::http::StatusCode::OK);
+    let body2: Value = resp2.json();
+    let items2 = body2["items"].as_array().unwrap();
+    assert_eq!(items2.len(), 1);
+    assert_eq!(items2[0]["work_id"], wid_a);
+    assert_eq!(body2["pagination"]["has_more"], false);
+}
+
+#[tokio::test]
+async fn list_works_invalid_sort_key_returns_work_sort_invalid() {
+    let ctx = test_ctx().await;
+    let _ = create_work_with_title(&ctx.server, "Alpha").await;
+
+    let resp = ctx.server.get("/v1/local/works?sort=unknown_key").await;
+    resp.assert_status(axum::http::StatusCode::BAD_REQUEST);
+    let body: Value = resp.json();
+    assert_eq!(body["success"], false);
+    assert_eq!(body["error"]["code"], "work_sort_invalid");
 }
 
 #[tokio::test]

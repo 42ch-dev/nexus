@@ -106,6 +106,14 @@ fn resolve_workspace_root() -> Option<PathBuf> {
 /// lie within the workspace root prefix. Relative paths (the daemon stores
 /// `body_path`/`outline_path` workspace-relative, e.g. `Works/<ref>/Stories/…`)
 /// are resolved against the workspace root first.
+///
+/// # TOCTOU note
+///
+/// There is a small race window between canonicalizing the workspace root and
+/// canonicalizing the requested path: a local attacker with filesystem access
+/// could replace either path during that window. This guard is authoritative
+/// for the single-user local desktop context; adversarial multi-user FS access
+/// is out of V1.66/V1.67 scope and tracked by `R-V166-QC2-TOCTOU`.
 fn guard_path(requested: &str, workspace_root: &WorkspaceRoot) -> Result<PathBuf, PathGuardError> {
     let root = workspace_root
         .0
@@ -191,7 +199,7 @@ async fn start_daemon(
     manager: State<'_, sidecar::SidecarManager>,
     app: AppHandle,
 ) -> Result<(), String> {
-    manager.start(&app).await
+    manager.start_daemon(&app).await
 }
 
 /// `stop_daemon` — graceful stop of the owned sidecar.
@@ -231,6 +239,7 @@ pub fn run() {
         .manage(workspace_root)
         .manage(sidecar_manager.clone())
         .setup(move |app| {
+            setup_manager.set_app_handle(app.handle().clone());
             let manager = setup_manager.clone();
             let handle = app.handle().clone();
             tauri::async_runtime::spawn(async move {
@@ -250,26 +259,11 @@ pub fn run() {
         ])
         .build(tauri::generate_context!())
         .expect("error while building Nexus desktop shell")
+        // Tauri v2 idiomatic app-lifecycle hook: `RunEvent::ExitRequested` runs
+        // before the async runtime shuts down, so we can gracefully stop the
+        // owned sidecar. The previous "trailing" cleanup pattern that ran after
+        // `run()` returned raced with tokio teardown (qc1 S-5).
         .run(move |_app_handle, event| {
-            // Gracefully stop the owned sidecar *before* the Tauri async runtime
-            // shuts down. Running this cleanup after `run()` returns races with
-            // tokio teardown and can panic with "Cannot start a runtime from
-            // within a runtime" (Greptile P1; qc1 S-5). The SIGTERM → bounded
-            // timeout → SIGKILL path in `SidecarManager::stop()` still fires.
-            //
-            // Concurrency-verification note (Greptile "ExitRequested during
-            // active restart"): `stop()` sets `stop_requested = true` even when
-            // the sidecar child is already `None` (e.g. mid-restart in the
-            // Degraded/backoff window), so an in-flight `handle_crash` re-checks
-            // `stop_requested` after its backoff sleep and lands in `Stopped`
-            // instead of spawning a new process. This path is covered by the
-            // regression test `sidecar::tests::stop_requested_during_backoff_honors_stop`.
-            // The remaining live-concurrent transitions (e.g. ExitRequested
-            // arriving in the narrow window between backoff-sleep and `start()`)
-            // are intentionally deferred to interactive QA — they cannot be
-            // deterministically reproduced in a unit test, and the state machine
-            // is fail-closed (`stop_requested` is re-checked, never cleared by
-            // the monitor).
             if let tauri::RunEvent::ExitRequested { .. } = event {
                 let _ = tauri::async_runtime::block_on(sidecar_manager.stop());
             }

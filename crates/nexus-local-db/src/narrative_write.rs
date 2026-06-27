@@ -10,7 +10,7 @@
 //! The `NarrativeGateway` trait in `nexus-narrative` remains **read-only**;
 //! writes go through this module, not through the gateway trait.
 
-use sqlx::SqlitePool;
+use sqlx::{Sqlite, SqlitePool};
 
 /// Error type for narrative write operations.
 #[derive(Debug)]
@@ -252,6 +252,33 @@ pub async fn create_world(
     })
 }
 
+/// Shared admission gate: verify that `creator_id` owns `world_id`.
+///
+/// V1.67 P2 (R-V160P0-QC2-W001): deduplicates the ownership check that was
+/// previously inlined in both `nexus-orchestration` capabilities and the daemon
+/// host-tool handlers. Returns `true` only when `world_id` exists in
+/// `narrative_worlds` and its `owner_creator_id` matches the caller.
+///
+/// # Errors
+///
+/// Returns `NarrativeWriteError::Database` on SQL errors.
+pub async fn is_world_owned(
+    pool: &SqlitePool,
+    creator_id: &str,
+    world_id: &str,
+) -> Result<bool, NarrativeWriteError> {
+    // SAFETY: simple EXISTS-style SELECT against known narrative_worlds schema.
+    let owned: Option<String> = sqlx::query_scalar(
+        "SELECT world_id FROM narrative_worlds WHERE world_id = ? AND owner_creator_id = ?",
+    )
+    .bind(world_id)
+    .bind(creator_id)
+    .fetch_optional(pool)
+    .await?;
+
+    Ok(owned.is_some())
+}
+
 /// Append a timeline event to a world's branch.
 ///
 /// Allocates the next `sequence_no` for `(world_id, branch_id)` automatically
@@ -302,6 +329,92 @@ pub async fn append_event(
 
     let sequence_no = max_seq.unwrap_or(-1) + 1;
 
+    append_event_core(
+        pool,
+        world_id,
+        branch_id,
+        event_type,
+        title,
+        summary,
+        sequence_no,
+    )
+    .await
+}
+
+/// Append a timeline event inside an existing transaction.
+///
+/// V1.67 P2 (R-V160P0-QC2-W002): transaction-aware variant of [`append_event`]
+/// so callers can perform the insert (and any follow-up rename) atomically.
+///
+/// # Errors
+///
+/// Returns [`NarrativeWriteError::InvalidId`] for a malformed `world_id`,
+/// [`NarrativeWriteError::FkNotFound`] when the world does not exist, or
+/// [`NarrativeWriteError::Database`] on any `SQLite` failure.
+pub async fn append_event_in_tx(
+    tx: &mut sqlx::Transaction<'_, Sqlite>,
+    world_id: &str,
+    branch_id: &str,
+    event_type: &str,
+    title: Option<&str>,
+    summary: Option<&str>,
+) -> Result<AppendEventResult, NarrativeWriteError> {
+    // Validate world_id prefix
+    validate_id_prefix(world_id, "wld_", "world_id")?;
+
+    // Validate world FK exists
+    // SAFETY: simple EXISTS query against known table schema
+    let world_exists: i64 =
+        sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM narrative_worlds WHERE world_id = ?)")
+            .bind(world_id)
+            .fetch_one(&mut **tx)
+            .await?;
+
+    if world_exists == 0 {
+        return Err(NarrativeWriteError::FkNotFound {
+            table: "world".to_string(),
+            id: world_id.to_string(),
+        });
+    }
+
+    // Allocate next sequence_no
+    // SAFETY: MAX aggregate query against known table schema
+    let max_seq: Option<i64> = sqlx::query_scalar(
+        "SELECT MAX(sequence_no) FROM narrative_timeline_events WHERE world_id = ? AND branch_id = ?",
+    )
+    .bind(world_id)
+    .bind(branch_id)
+    .fetch_one(&mut **tx)
+    .await?;
+
+    let sequence_no = max_seq.unwrap_or(-1) + 1;
+
+    append_event_core(
+        &mut **tx,
+        world_id,
+        branch_id,
+        event_type,
+        title,
+        summary,
+        sequence_no,
+    )
+    .await
+}
+
+/// Shared INSERT logic for [`append_event`] and [`append_event_in_tx`].
+///
+/// `executor` must be an object that can run a single sqlx query (e.g. `&Pool`
+/// or `&mut Transaction`). Only one query is issued here, so the generic
+/// executor is safe.
+async fn append_event_core<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
+    executor: E,
+    world_id: &str,
+    branch_id: &str,
+    event_type: &str,
+    title: Option<&str>,
+    summary: Option<&str>,
+    sequence_no: i64,
+) -> Result<AppendEventResult, NarrativeWriteError> {
     let event_id = generate_event_id();
     let created_at = chrono::Utc::now().to_rfc3339();
 
@@ -320,7 +433,7 @@ pub async fn append_event(
     .bind(title)
     .bind(summary)
     .bind(&created_at)
-    .execute(pool)
+    .execute(executor)
     .await;
 
     match result {

@@ -1,3 +1,6 @@
 [submodule ".agents/skills/greptile"]
 	path = .agents/skills/greptile
 	url = https://github.com/greptileai/skills.git
+[submodule ".agents/skills/react-flow"]
+	path = .agents/skills/react-flow
+	url = https://github.com/framara/react-flow-skill.git

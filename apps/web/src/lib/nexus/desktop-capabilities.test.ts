@@ -16,13 +16,25 @@ import { describe, expect, it, vi } from 'vitest';
 
 import { TauriDesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
 
-/** Install a fake Tauri global capturing the command + args. */
-function mockTauri(invoke: (cmd: string, args?: Record<string, unknown>) => unknown) {
+/** Install a fake Tauri global capturing the command + args and event listeners. */
+function mockTauri(
+  invoke: (cmd: string, args?: Record<string, unknown>) => unknown,
+  listen?: (event: string, handler: (event: { payload: unknown }) => void) => Promise<() => void>,
+) {
   (window as unknown as { __TAURI__: unknown }).__TAURI__ = {
     core: { invoke: vi.fn(invoke) },
+    event: {
+      listen: vi.fn(
+        listen ?? (() => Promise.resolve(() => {})),
+      ),
+    },
   };
-  return (window as unknown as { __TAURI__: { core: { invoke: ReturnType<typeof vi.fn> } } })
-    .__TAURI__.core.invoke;
+  return {
+    invoke: (window as unknown as { __TAURI__: { core: { invoke: ReturnType<typeof vi.fn> } } })
+      .__TAURI__.core.invoke,
+    listen: (window as unknown as { __TAURI__: { event: { listen: ReturnType<typeof vi.fn> } } })
+      .__TAURI__.event.listen,
+  };
 }
 
 function restoreTauri() {
@@ -31,7 +43,7 @@ function restoreTauri() {
 
 describe('TauriDesktopCapabilities', () => {
   it('openWith invokes the open_with command with the path payload', async () => {
-    const invoke = mockTauri(() => Promise.resolve(undefined));
+    const { invoke } = mockTauri(() => Promise.resolve(undefined));
     const caps = new TauriDesktopCapabilities();
     await caps.openWith('Works/WRK/Stories/ch01.md');
     expect(invoke).toHaveBeenCalledWith('open_with', { path: 'Works/WRK/Stories/ch01.md' });
@@ -39,7 +51,7 @@ describe('TauriDesktopCapabilities', () => {
   });
 
   it('revealInFinder invokes the reveal_in_finder command with the path payload', async () => {
-    const invoke = mockTauri(() => Promise.resolve(undefined));
+    const { invoke } = mockTauri(() => Promise.resolve(undefined));
     const caps = new TauriDesktopCapabilities();
     await caps.revealInFinder('Works/WRK/Stories/ch01.md');
     expect(invoke).toHaveBeenCalledWith('reveal_in_finder', { path: 'Works/WRK/Stories/ch01.md' });
@@ -75,7 +87,7 @@ describe('TauriDesktopCapabilities', () => {
   });
 
   it('startDaemon invokes start_daemon', async () => {
-    const invoke = mockTauri(() => Promise.resolve(undefined));
+    const { invoke } = mockTauri(() => Promise.resolve(undefined));
     const caps = new TauriDesktopCapabilities();
     await caps.startDaemon();
     expect(invoke).toHaveBeenCalledWith('start_daemon', undefined);
@@ -83,10 +95,30 @@ describe('TauriDesktopCapabilities', () => {
   });
 
   it('stopDaemon invokes stop_daemon', async () => {
-    const invoke = mockTauri(() => Promise.resolve(undefined));
+    const { invoke } = mockTauri(() => Promise.resolve(undefined));
     const caps = new TauriDesktopCapabilities();
     await caps.stopDaemon();
     expect(invoke).toHaveBeenCalledWith('stop_daemon', undefined);
+    restoreTauri();
+  });
+
+  it('onDaemonStatusChanged listens for nexus://daemon-status-changed events', async () => {
+    const handler = vi.fn();
+    const listen = vi.fn().mockImplementation((event, cb) => {
+      if (event === 'nexus://daemon-status-changed') {
+        cb({ payload: { state: 'running', version: '1.0.0', port: 8420 } });
+      }
+      return Promise.resolve(() => {});
+    });
+    mockTauri(() => Promise.resolve(undefined), listen);
+    const caps = new TauriDesktopCapabilities();
+    const unlisten = await caps.onDaemonStatusChanged(handler);
+    expect(typeof unlisten).toBe('function');
+    expect(listen).toHaveBeenCalledWith(
+      'nexus://daemon-status-changed',
+      expect.any(Function),
+    );
+    expect(handler).toHaveBeenCalledWith({ state: 'running', version: '1.0.0', port: 8420 });
     restoreTauri();
   });
 

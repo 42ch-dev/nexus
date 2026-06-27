@@ -652,8 +652,8 @@ async fn findings_lifecycle_rejects_illegal_transitions_with_422() {
     );
     assert_eq!(
         err.error_code(),
-        "INVALID_TRANSITION",
-        "illegal transition must surface the stable INVALID_TRANSITION code"
+        "invalid_transition",
+        "illegal transition must surface the stable invalid_transition code"
     );
 
     // (b) Seed an `in_review` finding and attempt a reverse-edge back to
@@ -673,7 +673,7 @@ async fn findings_lifecycle_rejects_illegal_transitions_with_422() {
         err.status_code(),
         axum::http::StatusCode::UNPROCESSABLE_ENTITY
     );
-    assert_eq!(err.error_code(), "INVALID_TRANSITION");
+    assert_eq!(err.error_code(), "invalid_transition");
 
     // (c) Self-loop on a fresh `open` finding: rejected (callers must omit
     // the patch field to refresh).
@@ -685,7 +685,7 @@ async fn findings_lifecycle_rejects_illegal_transitions_with_422() {
         err.status_code(),
         axum::http::StatusCode::UNPROCESSABLE_ENTITY
     );
-    assert_eq!(err.error_code(), "INVALID_TRANSITION");
+    assert_eq!(err.error_code(), "invalid_transition");
 
     // The rejected transitions must leave the rows unchanged.
     assert_eq!(
@@ -722,8 +722,8 @@ async fn findings_lifecycle_rejects_unknown_status_with_invalid_input() {
     );
     assert_eq!(
         err.error_code(),
-        "INVALID_INPUT",
-        "unknown status membership must surface INVALID_INPUT, not INVALID_TRANSITION"
+        "invalid_input",
+        "unknown status membership must surface invalid_input, not invalid_transition"
     );
     // The public message is structured from the typed variant: it names the
     // field, echoes the rejected value, and lists the allowed members.
@@ -795,7 +795,7 @@ async fn findings_lifecycle_distinguishes_invalid_transition_from_invalid_enum()
         err.status_code(),
         axum::http::StatusCode::UNPROCESSABLE_ENTITY
     );
-    assert_eq!(err.error_code(), "INVALID_INPUT");
+    assert_eq!(err.error_code(), "invalid_input");
     let msg = err.to_string();
     assert!(
         msg.contains("severity"),
@@ -817,7 +817,7 @@ async fn findings_lifecycle_distinguishes_invalid_transition_from_invalid_enum()
         err.status_code(),
         axum::http::StatusCode::UNPROCESSABLE_ENTITY
     );
-    assert_eq!(err.error_code(), "INVALID_INPUT");
+    assert_eq!(err.error_code(), "invalid_input");
     let msg = err.to_string();
     assert!(
         msg.contains("target_executor"),
@@ -833,7 +833,7 @@ async fn findings_lifecycle_distinguishes_invalid_transition_from_invalid_enum()
         err.status_code(),
         axum::http::StatusCode::UNPROCESSABLE_ENTITY
     );
-    assert_eq!(err.error_code(), "INVALID_INPUT");
+    assert_eq!(err.error_code(), "invalid_input");
     assert!(
         err.to_string().contains("status"),
         "message should name the field: {}",
@@ -860,7 +860,7 @@ async fn findings_lifecycle_distinguishes_invalid_transition_from_invalid_enum()
         err.status_code(),
         axum::http::StatusCode::UNPROCESSABLE_ENTITY
     );
-    assert_eq!(err.error_code(), "INVALID_TRANSITION");
+    assert_eq!(err.error_code(), "invalid_transition");
     let msg = err.to_string();
     assert!(
         msg.contains("resolved") && msg.contains("open"),
@@ -886,7 +886,7 @@ async fn findings_lifecycle_rejects_sql_injection_style_status() {
         err.status_code(),
         axum::http::StatusCode::UNPROCESSABLE_ENTITY
     );
-    assert_eq!(err.error_code(), "INVALID_INPUT");
+    assert_eq!(err.error_code(), "invalid_input");
 
     // The table must still exist and the seeded row still queryable —
     // proving the membership check ran before any SQL reached the DB.
