@@ -34,6 +34,21 @@ function statusFromSession(status: string | undefined): NodeStatus {
   return undefined;
 }
 
+/**
+ * Resolve a node's effective status for the live overlay.
+ *
+ * The canvas patches `data.status` onto the current execution node with the
+ * sentinel `'__current__'` (or one of the raw session status strings when the
+ * overlay poll catches an in-flight update). All node types must route
+ * through this helper so the `'__current__'` → `'current'` translation is
+ * applied uniformly; otherwise inner-graph / join / terminal / inner-child
+ * nodes silently drop the indicator at session start and during poll gaps.
+ */
+function effectiveStatus(rawStatus: string | undefined): NodeStatus {
+  if (rawStatus === '__current__') return 'current';
+  return statusFromSession(rawStatus);
+}
+
 const STATUS_RING: Record<NonNullable<NodeStatus>, string> = {
   current: 'ring-2 ring-blue-700',
   running: 'ring-2 ring-green-700',
@@ -112,13 +127,12 @@ export const StrategyStateNode = memo(function StrategyStateNode({
   selected,
 }: NodeProps) {
   const d = data as StrategyNodeData;
-  const status = statusFromSession(d.status);
-  const isCurrent = d.status !== undefined && statusFromSession(d.status) !== undefined;
-  const effectiveStatus = d.status === '__current__' ? 'current' : status;
+  const status = effectiveStatus(d.status);
+  const isCurrent = status !== undefined;
   return (
-    <NodeShell selected={!!selected} status={effectiveStatus} accent>
+    <NodeShell selected={!!selected} status={status} accent>
       <Handle type="target" position={Position.Top} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
-      <NodeHeader label={d.label} status={effectiveStatus} />
+      <NodeHeader label={d.label} status={status} />
       <KindTag kind={d.stateKind} />
       {d.description ? <p className="mt-1 text-copy-13 text-gray-900 line-clamp-2">{d.description}</p> : null}
       {d.isInitial ? <span className="mt-1 inline-block text-label-12 text-purple-700">Start</span> : null}
@@ -134,7 +148,7 @@ export const StrategyGroupNode = memo(function StrategyGroupNode({
   selected,
 }: NodeProps) {
   const d = data as StrategyNodeData;
-  const status = statusFromSession(d.status);
+  const status = effectiveStatus(d.status);
   return (
     <NodeShell
       selected={!!selected}
@@ -156,7 +170,7 @@ export const StrategyJoinNode = memo(function StrategyJoinNode({
   selected,
 }: NodeProps) {
   const d = data as StrategyNodeData;
-  const status = statusFromSession(d.status);
+  const status = effectiveStatus(d.status);
   return (
     <NodeShell selected={!!selected} status={status} className="min-w-[176px]">
       <Handle type="target" position={Position.Top} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
@@ -175,7 +189,7 @@ export const StrategyTerminalNode = memo(function StrategyTerminalNode({
   selected,
 }: NodeProps) {
   const d = data as StrategyNodeData;
-  const status = statusFromSession(d.status);
+  const status = effectiveStatus(d.status);
   return (
     <NodeShell selected={!!selected} status={status} className="min-w-[140px]">
       <Handle type="target" position={Position.Top} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
@@ -191,7 +205,7 @@ export const StrategyInnerNode = memo(function StrategyInnerNode({
   selected,
 }: NodeProps) {
   const d = data as StrategyNodeData;
-  const status = statusFromSession(d.status);
+  const status = effectiveStatus(d.status);
   return (
     <NodeShell selected={!!selected} status={status} className="min-w-[150px]">
       <Handle type="target" position={Position.Left} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
