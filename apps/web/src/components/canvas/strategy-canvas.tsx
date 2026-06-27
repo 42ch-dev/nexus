@@ -104,11 +104,13 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
   // Pick the schedule most likely to back the active session. The wire schema
 // does not expose a direct session ↔ schedule link (SessionSummary and
 // ScheduleSummary both lack the cross-reference id), so the best heuristic
-// is "most recently updated schedule for this preset." Sessions are already
-// filtered to this preset via usePresetSchedules' by-preset filter, so any
-// `find(... s.preset_id === presetId)` is redundant — pick the freshest.
-const activeScheduleId = [...(schedules.data ?? [])]
-  .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]?.schedule_id;
+// is "most recently updated schedule for this preset, if any active session
+// exists." Without an active session, return undefined so Steer/Resume
+// disable cleanly (live banner hidden, helper text explains why).
+const activeScheduleId = activeSession
+  ? [...(schedules.data ?? [])].sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
+      ?.schedule_id
+  : undefined;
 
   return (
     <div className="flex flex-col gap-4">

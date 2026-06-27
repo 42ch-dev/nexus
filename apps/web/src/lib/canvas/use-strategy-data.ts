@@ -79,15 +79,24 @@ export function usePresetSchedules(presetId: string | undefined) {
   });
 }
 
-/** The most recently active session for a preset (drives the live overlay). */
+/**
+ * The most recently active session for a preset (drives the live overlay).
+ *
+ * Returns `undefined` if every session for this preset is completed — in
+ * that case the canvas should hide the Live banner and disable Steer/Resume
+ * rather than presenting a misleading "active" state that targets a
+ * completed schedule. The wire schema does not yet expose a direct
+ * session ↔ schedule link (SessionSummary + ScheduleSummary both lack the
+ * cross-reference id), so a real "is this schedule actively running?" answer
+ * is a V1.71 wire-contract concern; for the α scope, no-active-session
+ * cleanly disables the steering surface.
+ */
 export function useActiveSession(presetId: string | undefined) {
   const sessions = usePresetSessions(presetId);
   return useMemo(() => {
     const items = sessions.data ?? [];
     if (items.length === 0) return undefined;
-    // Prefer a non-completed session; fall back to the most recent.
-    const active = items.find((s) => !s.status.toLowerCase().includes('complete'));
-    return active ?? items[0];
+    return items.find((s) => !s.status.toLowerCase().includes('complete'));
   }, [sessions.data]);
 }
 
