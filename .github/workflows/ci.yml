@@ -93,6 +93,11 @@ jobs:
     needs: verify-codegen
     env:
       SQLX_OFFLINE: "true"
+      # Pin the fmt nightly so CI matches local rustfmt exactly. rustfmt
+      # formatting rules drift across nightly versions, so an unpinned
+      # `nightly` makes CI's `fmt --check` fail on code formatted by a
+      # different local nightly. Bump this (and AGENTS.md) when updating.
+      FMT_NIGHTLY: "nightly-2026-06-26"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
@@ -101,8 +106,8 @@ jobs:
           # nexus-wasm-host's build.rs compiles embedded modules from source
           # (see crates/nexus-wasm-host/build.rs).
           targets: wasm32-unknown-unknown
-      - name: Install nightly rustfmt (for workspace .rustfmt.toml `ignore` on codegen output)
-        run: rustup toolchain install nightly --component rustfmt --no-self-update
+      - name: Install pinned nightly rustfmt (for workspace .rustfmt.toml `ignore` on codegen output)
+        run: rustup toolchain install "${FMT_NIGHTLY}" --component rustfmt --no-self-update
       - uses: actions/download-artifact@v4
         with:
           name: generated-types
@@ -116,7 +121,7 @@ jobs:
         with:
           shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}
       - name: Check formatting
-        run: cargo +nightly fmt --all -- --check
+        run: cargo +"${FMT_NIGHTLY}" fmt --all -- --check
       - name: Run clippy
         run: cargo clippy --all -- -D warnings
 
