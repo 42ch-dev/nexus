@@ -737,9 +737,14 @@ mod tests {
         .expect("parse command");
 
         match cmd.command {
-            ScheduleCommand::List { creator, status } => {
+            ScheduleCommand::List {
+                creator,
+                status,
+                sort,
+            } => {
                 assert_eq!(creator, Some("c1".to_string()));
                 assert_eq!(status, Some("pending".to_string()));
+                assert_eq!(sort, None);
             }
             other => panic!("expected List, got: {other:?}"),
         }
