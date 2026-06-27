@@ -13,9 +13,10 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 import { BrowserClient } from '@/lib/nexus';
+import { WORK_PROFILES } from '@/lib/work-profiles';
 import { useHandlers } from '@/test/msw-server';
 import { renderInApp } from '@/test/test-providers';
-import { CreateWorkDialog, WORK_PROFILES } from '@/pages/dialogs/create-work-dialog';
+import { CreateWorkDialog } from '@/pages/dialogs/create-work-dialog';
 
 function renderDialog() {
   const onCreated = vi.fn();
