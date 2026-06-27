@@ -21,6 +21,7 @@ on:
     paths:
       - 'apps/web/**'
       - 'apps/desktop/**'
+      - 'packages/nexus-contracts/**'
       - '.github/workflows/**'
 
 concurrency:

@@ -101,9 +101,14 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
   const parsed = graphQuery.data?.parsed;
   const problems = parsed?.problems ?? [];
   const dangling = graphQuery.data?.graph.danglingTargets ?? [];
-  const activeScheduleId = activeSession
-    ? schedules.data?.find((s) => s.preset_id === presetId)?.schedule_id
-    : schedules.data?.[0]?.schedule_id;
+  // Pick the schedule most likely to back the active session. The wire schema
+// does not expose a direct session ↔ schedule link (SessionSummary and
+// ScheduleSummary both lack the cross-reference id), so the best heuristic
+// is "most recently updated schedule for this preset." Sessions are already
+// filtered to this preset via usePresetSchedules' by-preset filter, so any
+// `find(... s.preset_id === presetId)` is redundant — pick the freshest.
+const activeScheduleId = [...(schedules.data ?? [])]
+  .sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]?.schedule_id;
 
   return (
     <div className="flex flex-col gap-4">
