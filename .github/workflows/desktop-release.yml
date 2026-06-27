@@ -67,6 +67,10 @@ jobs:
         run: |
           set -euo pipefail
           cd apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle
-          gh release upload "${{ github.event.release.tag_name }}" \
+          # --clobber: lets a retry safely overwrite any partially-uploaded
+          # assets (e.g. .app.zip landed but DMG upload failed mid-run).
+          # Safe here because this workflow is single-source on
+          # release.published (no double-run risk; QC3 W1).
+          gh release upload --clobber "${{ github.event.release.tag_name }}" \
             "Nexus-macos-universal.app.zip" \
             dmg/*.dmg
