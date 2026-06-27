@@ -642,7 +642,7 @@ pub async fn list_schedules(
     )?;
 
     let offset = decode_offset_cursor(&query.cursor)?;
-    let limit = query.limit.unwrap_or(100).min(500);
+    let limit: u32 = query.limit.unwrap_or(100).min(500);
 
     // SAFETY: dynamic WHERE clause and ORDER BY — filters/sort are appended
     // conditionally at runtime. User inputs are bound as parameters; only
@@ -683,13 +683,10 @@ pub async fn list_schedules(
     // Wrap the list SELECT and the COUNT in one transaction so both see the
     // same snapshot — avoids TOCTOU on `has_more` under concurrent add/delete
     // of schedules (consistent with list_works' list_and_count_works tx).
-    let mut tx = pool
-        .begin()
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: format!("database error: {e}"),
-        })?;
+    let mut tx = pool.begin().await.map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".into(),
+        message: format!("database error: {e}"),
+    })?;
 
     // SAFETY: dynamic query — see list_schedules SAFETY comment above.
     let mut q = sqlx::query_as::<_, ListRow>(&sql);
@@ -727,12 +724,10 @@ pub async fn list_schedules(
         .get("cnt");
     let total = u32::try_from(total).unwrap_or(0);
 
-    tx.commit()
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: format!("database error: {e}"),
-        })?;
+    tx.commit().await.map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".into(),
+        message: format!("database error: {e}"),
+    })?;
 
     let items: Vec<ScheduleSummary> = rows.into_iter().map(ListRow::into_summary).collect();
 
