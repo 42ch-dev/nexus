@@ -3,53 +3,52 @@
   "updated_at": "2026-06-27",
   "plans": [],
   "metadata": {
-    "integration_branch": null,
-    "integration_branch_retired": true,
+    "integration_branch": "iteration/v1.70",
+    "integration_branch_retired": false,
     "last_integration_branch": "iteration/v1.69",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.69 (shipped via integration branch iteration/v1.69; PR to main pending)",
-    "latest_active_compass": "v1.69-design-system-maturation-and-canvas-draft-compass-v1.md",
+    "latest_active_iteration": "V1.70 (Shipped 2026-06-27; PR to main pending)",
+    "latest_active_compass": "v1.70-canvas-strategy-implement-and-ci-optimization-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": "n/a (V1.69 shipped; V1.70 pending)",
+    "pre_implement_gate": "n/a (V1.70 shipped; P-last closure in progress)",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.69",
-      "compass": "v1.69-design-system-maturation-and-canvas-draft-compass-v1.md",
-      "shipped_at": "2026-06-27 (pending PR to main)",
+      "iteration": "V1.70",
+      "compass": "v1.70-canvas-strategy-implement-and-ci-optimization-compass-v1.md",
+      "shipped_at": "2026-06-27",
       "plan_count": 4,
       "plan_count_done": 4,
       "wire_contracts_changed": false,
-      "wire_contracts_note": "V1.69: DESIGN.md format migration + Canvas Draft + frontend TS refactors. No schema/codegen/contract/DTO change.",
-      "profile_b_compaction": "done",
+      "wire_contracts_note": "V1.70: Canvas Strategy Surface α implement (read + overlay + Idea-steer) + parallel CI/desktop-build optimization (PR path filter narrowed + release-gated build added). A5 verdict: option (a) — existing endpoints suffice; no schema/codegen/DTO change. Closed 2 residuals (R-V167PSEC-QC1-S-UNMOUNT, R-V167PSEC-QC1-S-CI-SETUO). QC 3/3 Approve per plan + QA Pass.",
+      "profile_b_compaction": "pending (P-last will run)",
       "plan_ids": [
-        "2026-06-27-v1.69-compass-and-plan",
-        "2026-06-27-v1.69-design-md-and-canvas-draft",
-        "2026-06-27-v1.69-frontend-residuals",
-        "2026-06-27-v1.69-closure"
+        "2026-06-27-v1.70-compass-and-plan",
+        "2026-06-27-v1.70-canvas-strategy-surface-implement",
+        "2026-06-27-v1.70-ci-desktop-build-optimization",
+        "2026-06-27-v1.70-closure"
       ],
-      "note": "Design System Maturation & Canvas Draft. P0 (docs/spec): apps/web/DESIGN.md migrated to YAML frontmatter SSOT (Level 3 Production) + apps/web/DESIGN.dark.md created + canvas-strategy-surface.md Exploration->Draft (B1-B4). P1 (code): 4 V1.67 frontend refactor residuals closed. P0 QC skipped (docs-only, validation green); P1 QC 3/3 Approve + QA Pass. Token names preserved verbatim -> zero consumer breakage.",
-      "merge_commit": "pending (PR to main)"
+      "merge_commit": "pending (PR to main will be opened at P-last)"
     },
     "tech_debt_summary": {
-      "total_open": 21,
-      "total_deferred": 21,
-      "total_resolved": 210,
+      "total_open": 15,
+      "total_deferred": 15,
+      "total_resolved": 214,
       "total_archived": 0,
       "by_severity_active": {
-        "low": 21
+        "low": 15
       },
       "by_target_active": {
         "V1.65+": 1,
         "V1.64 P-mid/QA": 1,
         "?": 2,
-        "V1.68+": 17
+        "V1.68+": 11
       },
-      "refreshed_at": "2026-06-26T... (V1.67 P-last closeout)",
-      "refreshed_reason": "V1.67 P-last: post Wave1+Wave2 QC+QA; all V1.67 closures done; 21 open are V1.67 QC-suggestions deferred V1.68+ (all low)"
+      "refreshed_at": "2026-06-27 (V1.70 P-last closure; closed 2 → 15 open)",
+      "refreshed_reason": "V1.70 P-last: closed R-V167PSEC-QC1-S-UNMOUNT (P0 commit dad35736) + R-V167PSEC-QC1-S-CI-SETUO (P1 commit b55cd1c3). 17→15 open. Remaining 15 are DX/UX polish grab-bag, chapter virtualization, capability admission-gate UI, live served-UI smoke, and the V1.67 QC-suggestion cluster — V1.71+ targets."
     },
     "updated_at": "2026-06-27",
-    "spec_integration_branch": null,
+    "spec_integration_branch": "iteration/v1.70",
     "wave1_merged_at": "2026-06-25T15:49:19Z"
   },
   "residual_findings": {
@@ -4260,7 +4259,13 @@
         "target": "V1.68+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-desktop-shell-polish][R-V167PSEC-QC1-S-UNMOUNT]",
         "note": "QC Suggestion, non-blocking; deferred.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-27 (V1.70 P0)",
+        "closure_note": "V1.70 P0 (dad35736): fixed async-setup/cleanup race in apps/web/src/components/layout/daemon-status-bar.tsx with a cancelled flag guarding post-await subscription teardown + early detach + clearInterval. Closed alongside A3 live-overlay subscription hygiene. QC1+QC2+QC3 all Approve.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.70-canvas-strategy-surface-implement",
+          "commit": "dad35736"
+        }
       },
       {
         "id": "R-V167PSEC-QC1-S-BLOCKINGLOCK",
@@ -4299,7 +4304,13 @@
         "target": "V1.68+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-desktop-shell-polish][R-V167PSEC-QC1-S-CI-SETUO]",
         "note": "QC Suggestion, non-blocking; deferred.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-27 (V1.70 P1)",
+        "closure_note": "V1.70 P1 (b55cd1c3): added set -euo pipefail to desktop-build.yml tauri_build run block (covers universal + fallback paths). ci.yml untouched; PR path filter narrowed + new desktop-release.yml added. QC1+QC2+QC3 all Approve.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.70-ci-desktop-build-optimization",
+          "commit": "b55cd1c3"
+        }
       }
     ],
     "2026-06-26-v1.67-frontend-scope-gaps": [

@@ -75,7 +75,7 @@ Also: [schemas-external-consumer-boundary.md](../schemas-external-consumer-bound
 | [daemon-runtime.md](daemon-runtime.md) | Master | Normative — V1.64 amendment (bundled local Web UI static serving) |
 | [local-db-schema.md](local-db-schema.md) | Master | Normative — V1.40 Shipped §4.1.2 (KB validation + narrative_worlds + kb_extract_jobs artifact locator) |
 | [concurrency.md](concurrency.md) | Master | **Normative — V1.51 Shipped (T-B P0/P1)** — advisory lock + heartbeat + OCC + zombie detection |
-| [canvas-strategy-surface.md](canvas-strategy-surface.md) | Exploration | **Exploration (V1.67)** — Canvas product vision (Nexus = AI-autonomous executor; human steers via Canvas, AI owns prose) + 3 surfaces (Strategy/outline+timeline/World KB) on React Flow + no-raw-file-editing principle + TipTap-as-in-node + Preset→Strategy terminology; V1.68 promotes Draft |
+| [canvas-strategy-surface.md](canvas-strategy-surface.md) | Draft overlay | **Shipped α (V1.70)** — Canvas product vision (Nexus = AI-autonomous executor; human steers via Canvas, AI owns prose) + 3 surfaces (Strategy/outline+timeline/World KB) on React Flow + no-raw-file-editing principle + TipTap-as-in-node + Preset→Strategy terminology. **V1.70** shipped the Strategy read/overlay/Idea-steer α slice; write-boundary + node-granular edits + outline/timeline + World KB remain Draft for V1.71+. |
 | [body-editor.md](body-editor.md) | Archived (pointer stub) | **Superseded (2026-06-26)** — body-editor direction rejected; pointer to `canvas-strategy-surface.md`; full text archived at [../../archived/knowledge/body-editor.md](../../archived/knowledge/body-editor.md) |
 | [reference-store-layout.md](reference-store-layout.md) | Master | Normative |
 
@@ -113,8 +113,8 @@ Also: [schemas-external-consumer-boundary.md](../schemas-external-consumer-bound
 | [creator-workflow.md](creator-workflow.md) | Feature line | Shipped (V1.34; V1.40 Shipped — DF-63 W5 `novel-review-master sync_world_kb` extract binding) |
 | **[novel-writing/](novel-writing/README.md)** | Feature subtree | **`work_profile: novel`** — see [novel-writing/README.md](novel-writing/README.md) for per-file index (workflow-profile, quality-loop, author-experience, overlays, …) |
 | [essay-profile.md](essay-profile.md) | Feature line | Draft (V1.52) — `work_profile: essay` first non-novel profile |
-| [web-ui.md](web-ui.md) | Feature line | **Shipped (V1.65)** — local Web UI product contract (`apps/web` React/Vite SPA, daemon-served, Tauri-ready); Control Room + Setup (V1.64) + Content-Authoring UI stage (V1.65 §13) + Desktop Shell stage (V1.66 §14, Shipped) + Surface Convergence & De-risk stage (V1.67 §15, Active prepare) |
-| [desktop-shell.md](desktop-shell.md) | Feature line | Draft (V1.66) — Tauri v2 desktop shell contract (`apps/desktop` wrapper, `TauriClient`, sidecar lifecycle, port discovery, native file actions + path guard); macOS-first unsigned dev build |
+| [web-ui.md](web-ui.md) | Feature line | **Shipped (V1.65)** — local Web UI product contract (`apps/web` React/Vite SPA, daemon-served, Tauri-ready); Control Room + Setup (V1.64) + Content-Authoring UI stage (V1.65 §13) + Desktop Shell stage (V1.66 §14, Shipped) + Surface Convergence & De-risk stage (V1.67 §15, Shipped) + V1.69 Design System Maturation & Canvas Draft + **V1.70 Canvas Strategy Implement (α) stage (V1.70 §16, Shipped)** + CI/desktop-build optimization (parallel ops track). |
+| [desktop-shell.md](desktop-shell.md) | Feature line | **Shipped (V1.66)** — Tauri v2 desktop shell contract (`apps/desktop` wrapper, `TauriClient`, sidecar lifecycle, port discovery, native file actions + path guard); macOS-first unsigned dev build |
 | [creator-run-preset-entry.md](creator-run-preset-entry.md) | Master | **Shipped (V1.45)** — `creator run <preset_id>` generic entry; wave 0 for V1.45 CLI IA (promoted P-last) |
 | [creator-challenge-solver.md](creator-challenge-solver.md) | Master | Normative |
 

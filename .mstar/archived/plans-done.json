@@ -323,7 +323,11 @@
     "2026-06-27-v1.69-compass-and-plan",
     "2026-06-27-v1.69-design-md-and-canvas-draft",
     "2026-06-27-v1.69-frontend-residuals",
-    "2026-06-27-v1.69-closure"
+    "2026-06-27-v1.69-closure",
+    "2026-06-27-v1.70-compass-and-plan",
+    "2026-06-27-v1.70-canvas-strategy-surface-implement",
+    "2026-06-27-v1.70-ci-desktop-build-optimization",
+    "2026-06-27-v1.70-closure"
   ],
   "iteration_summaries": {
     "v1.45": {

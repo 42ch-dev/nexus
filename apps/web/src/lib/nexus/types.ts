@@ -22,6 +22,8 @@
  * is deferred to the V1.68 canvas (compass §0 Q6).
  */
 import type {
+  AddScheduleRequest,
+  AddScheduleResponse,
   CapabilityInfo,
   ChapterBody,
   ChapterContentQuery,
@@ -29,6 +31,8 @@ import type {
   ChapterOutline,
   CreateWorkRequest,
   CreateWorkResponse,
+  EditCoreContextRequest,
+  EditCoreContextResponse,
   FindingDetailResponse,
   GetPresetResponse,
   InspectScheduleResponse,
@@ -52,6 +56,8 @@ import type {
   ScaffoldPresetRequest,
   ScaffoldPresetResponse,
   SessionDetailResponse,
+  SignalScheduleRequest,
+  SignalScheduleResponse,
   UpdatePresetRequest,
   UpdatePresetResponse,
   ValidatePresetRequest,
@@ -103,6 +109,31 @@ export interface NexusClient {
   listSchedules(query?: ListSchedulesQuery): Promise<ListSchedulesResponse>;
   /** `GET /v1/local/orchestration/schedules/{schedule_id}`. */
   inspectSchedule(scheduleId: string): Promise<InspectScheduleResponse>;
+  /**
+   * `POST /v1/local/orchestration/schedules` — create a new schedule (run a
+   * Strategy). V1.70 canvas Idea→Run promotion: the generated TS type + daemon
+   * route already existed (V1.67 G2 pattern); only the TS client surface was
+   * missing. No schema/codegen change (`wire_contracts_changed: FALSE`).
+   */
+  addSchedule(request: AddScheduleRequest): Promise<AddScheduleResponse>;
+  /**
+   * `POST /v1/local/orchestration/schedules/{schedule_id}/signal` — send a
+   * lifecycle signal (resume / advance / pause). V1.70 canvas Idea→Resume
+   * steering promotion.
+   */
+  signalSchedule(
+    scheduleId: string,
+    request: SignalScheduleRequest,
+  ): Promise<SignalScheduleResponse>;
+  /**
+   * `PATCH /v1/local/orchestration/schedules/{schedule_id}/core-context` —
+   * append/merge steering context (an Idea) into a running schedule's core
+   * context. V1.70 canvas Idea→Steer promotion.
+   */
+  editCoreContext(
+    scheduleId: string,
+    request: EditCoreContextRequest,
+  ): Promise<EditCoreContextResponse>;
 
   // ── Capabilities ──────────────────────────────────────────────────────────
   /** `GET /v1/local/orchestration/capabilities` — cursor list (F-P3/F-F1; canonical `items` key). */

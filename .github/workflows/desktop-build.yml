@@ -21,14 +21,7 @@ on:
     paths:
       - 'apps/web/**'
       - 'apps/desktop/**'
-      - 'apps/nexus42/**'
       - 'packages/nexus-contracts/**'
-      - 'crates/**'
-      - 'pnpm-lock.yaml'
-      - 'package.json'
-      - 'pnpm-workspace.yaml'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
       - '.github/workflows/**'
 
 concurrency:
@@ -87,36 +80,21 @@ jobs:
         run: pnpm --filter @42ch/nexus-contracts run build
 
       - name: Build Tauri desktop bundle (universal, fallback per-arch)
-        id: tauri_build
         run: |
+          set -euo pipefail
           # QC1-S4: attempt a universal build first; if Tauri's bundler or the
           # cross-arch sidecar build fails, fall back to the proven native
           # aarch64 path so CI stays green.
           if SIDECAR_TARGETS="aarch64-apple-darwin x86_64-apple-darwin" \
              pnpm --filter desktop tauri build --target universal-apple-darwin; then
-            echo "target=universal-apple-darwin" >> "$GITHUB_OUTPUT"
+            echo "Built universal-apple-darwin bundle."
           else
-            echo "Universal build failed; falling back to per-arch (aarch64 host) artifact."
+            echo "Universal build failed; falling back to per-arch (aarch64 host) bundle."
             pnpm --filter desktop tauri build
-            echo "target=aarch64-apple-darwin" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Upload universal artifacts
-        if: steps.tauri_build.outputs.target == 'universal-apple-darwin'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
-        with:
-          name: nexus-desktop-macos-universal
-          path: |
-            apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/macos/Nexus.app
-            apps/desktop/src-tauri/target/universal-apple-darwin/release/bundle/dmg/*.dmg
-          retention-days: 90
-
-      - name: Upload aarch64 fallback artifacts
-        if: steps.tauri_build.outputs.target == 'aarch64-apple-darwin'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
-        with:
-          name: nexus-desktop-macos-aarch64
-          path: |
-            apps/desktop/src-tauri/target/release/bundle/macos/Nexus.app
-            apps/desktop/src-tauri/target/release/bundle/dmg/*.dmg
-          retention-days: 90
+      # Note: build artifacts are intentionally NOT uploaded here. This workflow
+      # is a build-verification gate (does the Tauri bundle assemble on macOS?),
+      # not an artifact-production pipeline. Distributable .app/.dmg assets are
+      # produced by .github/workflows/desktop-release.yml on `release.published`
+      # (which builds independently and uploads via `gh release upload`).
