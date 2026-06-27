@@ -17,6 +17,19 @@ This repo follows the **[Morning Star (mstar-harness)](https://github.com/btspoo
 
 **Load order (harness work):** Read `mstar-harness-core`, then `mstar-plan-conventions` (+ `mstar-review-qc` when touching `InReview` or QC reports). State machine, QC triple-review timing, and multi-batch rules are **not** duplicated here.
 
+## Plans & Reports Layout Invariant
+
+Each plan is a **single `.md` file** under `plans/` — **never** a directory. QC/QA reports live under `plans/reports/<plan-id>/`, **never** as a side-by-side `reports/` subdirectory of a plan-named directory.
+
+| ✅ Correct | ❌ Wrong — never do this |
+|---|---|
+| `plans/<plan-id>-<name>.md` | `plans/<plan-id>/…` (plan as a directory) |
+| `plans/reports/<plan-id>/qc1.md` … `qc3.md` | `plans/<plan-id>/reports/qc1.md` … `qc3.md` |
+
+**Rule**: `plans/reports/` is the **single** reports root. A `plans/<plan-id>/` directory must not exist — the plan itself is the `.md` file, and the empty parent directory underneath it is not part of the layout.
+
+(This covers a recurring agent mistake first observed with the 2026-06-15 v1.47 batch, where four plan-named stub directories containing `reports/` were created alongside the plan `.md` files. Fixed 2026-06-27 — reports moved into `plans/reports/`, empty stubs removed.)
+
 ## Reachability
 
 Git-tracked docs and plans must be openable after a fresh `git clone`: no `.gitignore`-d paths, machine-specific absolute paths, or untracked sibling directories as sole authorities. Use repo-relative paths or stable public URLs.
