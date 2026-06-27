@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-27T21:02:58Z",
+  "updated_at": "2026-06-28T05:12:00Z",
   "plans": [
     {
       "plan_id": "2026-06-27-v1.71-compass-and-plan",
@@ -4581,6 +4581,149 @@
           "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
           "commit": "1675369f"
         }
+      }
+    ],
+    "2026-06-27-v1.71-canvas-strategy-write-boundary": [
+      {
+        "id": "R-V171P0-QC1-001",
+        "title": "Conflict modal does not implement the specified UX contract",
+        "severity": "critical",
+        "source": "qc1 (architecture/maintainability) C-001",
+        "scope": "apps/web/src/components/canvas/strategy-canvas.tsx ConflictModal; canvas-strategy-surface.md §3.5; compass §6.3",
+        "decision": "fix-in-wave",
+        "owner": "@frontend-dev",
+        "target": "V1.71 P0 fix-wave",
+        "target_date": "2026-06-28",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.71-canvas-strategy-write-boundary][R-V171P0-QC1-001]",
+        "note": "Current modal is a simplified two-button dialog. Missing required headline, What changed/What you were about to do summaries, Use current/Reapply my edit/Review side-by-side actions, disabled-when-unsafe logic, and A8 accessibility behavior (ARIA live region, focus trap, return focus, reduced-motion).",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V171P0-QC1-002",
+        "title": "Missing integration/regression tests for the Strategy patch routes",
+        "severity": "critical",
+        "source": "qc1 (architecture/maintainability) C-002",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/strategy.rs; missing crates/nexus-daemon-runtime/tests/strategy_patch.rs",
+        "decision": "fix-in-wave",
+        "owner": "@fullstack-dev + @qa-engineer",
+        "target": "V1.71 P0 fix-wave",
+        "target_date": "2026-06-28",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.71-canvas-strategy-write-boundary][R-V171P0-QC1-002]",
+        "note": "Acceptance A9 requires unit, integration, e2e, and regression tests including concurrent daemon-write 409 scenario. Only inline unit tests exist in the handler file.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V171P0-QC1-003",
+        "title": "Prompt-template patch writes the file before domain validation",
+        "severity": "warning",
+        "source": "qc1 (architecture/maintainability) W-003",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/strategy.rs::patch_prompt_template",
+        "decision": "fix-in-wave",
+        "owner": "@fullstack-dev",
+        "target": "V1.71 P0 fix-wave",
+        "target_date": "2026-06-28",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.71-canvas-strategy-write-boundary][R-V171P0-QC1-003]",
+        "note": "File is written before validate_preset_yaml runs. A 422 validation failure leaves the bundle with a mutated prompt-template but unchanged preset.yaml/revision, producing a partial/inconsistent state.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V171P0-QC1-004",
+        "title": "handleSave chains non-atomic state/transition/prompt mutations",
+        "severity": "warning",
+        "source": "qc1 (architecture/maintainability) W-004",
+        "scope": "apps/web/src/components/canvas/strategy-canvas.tsx::handleSave",
+        "decision": "fix-in-wave",
+        "owner": "@frontend-dev",
+        "target": "V1.71 P0 fix-wave",
+        "target_date": "2026-06-28",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.71-canvas-strategy-write-boundary][R-V171P0-QC1-004]",
+        "note": "Up to three sequential mutateAsync calls. Early success + later failure leaves the graph partially persisted with no rollback or unified transaction boundary.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V171P0-QC1-005",
+        "title": "No serialization around the read-modify-write of preset.yaml",
+        "severity": "warning",
+        "source": "qc1 (architecture/maintainability) W-005",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/strategy.rs write path",
+        "decision": "fix-in-wave",
+        "owner": "@fullstack-dev",
+        "target": "V1.71 P0 fix-wave",
+        "target_date": "2026-06-28",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.71-canvas-strategy-write-boundary][R-V171P0-QC1-005]",
+        "note": "Concurrent requests with the same base_revision can both pass the precondition, compute the same new_revision, and rename their temp files, resulting in last-write-wins with duplicate revision numbers.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V171P0-QC1-006",
+        "title": "strategy-canvas.tsx mixes multiple concerns in one file",
+        "severity": "warning",
+        "source": "qc1 (architecture/maintainability) W-006",
+        "scope": "apps/web/src/components/canvas/strategy-canvas.tsx (~568 lines)",
+        "decision": "fix-in-wave",
+        "owner": "@frontend-dev",
+        "target": "V1.71 P0 fix-wave",
+        "target_date": "2026-06-28",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.71-canvas-strategy-write-boundary][R-V171P0-QC1-006]",
+        "note": "File contains graph sync, live overlay, edit-form state, validation panel, conflict modal, artifacts list, and helper components. Extract InspectorOverlay, ConflictModal, ValidationPanel, and ArtifactsList into focused modules.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V171P0-QC1-007",
+        "title": "canvas-write-stale-bg uses a raw rgba literal instead of a DESIGN.md color reference",
+        "severity": "low",
+        "source": "qc1 (architecture/maintainability) S-007",
+        "scope": "apps/web/DESIGN.md lines 199-202; apps/web/DESIGN.dark.md lines 199-202",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.71 P0 fix-wave",
+        "target_date": "2026-06-28",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.71-canvas-strategy-write-boundary][R-V171P0-QC1-007]",
+        "note": "Raw rgba(183,110,0,...) hardcoded in both themes. Prefer a reference-based token or explicit amber-alpha component token.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V171P0-QC1-008",
+        "title": "Add a UI e2e/component test for edit-save-refetch",
+        "severity": "low",
+        "source": "qc1 (architecture/maintainability) S-008",
+        "scope": "apps/web/src/components/canvas/strategy-canvas.tsx; apps/web/src/lib/nexus/browser-client.test.ts",
+        "decision": "defer",
+        "owner": "@frontend-dev + @qa-engineer",
+        "target": "V1.71 P0 fix-wave",
+        "target_date": "2026-06-28",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.71-canvas-strategy-write-boundary][R-V171P0-QC1-008]",
+        "note": "Web coverage is currently limited to BrowserClient msw tests. Add a component or e2e test that submits a patch and verifies query invalidation/refetch.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V171P0-QC1-009",
+        "title": "Route registration and generated-artifact discipline is otherwise solid",
+        "severity": "low",
+        "source": "qc1 (architecture/maintainability) S-009",
+        "scope": "crates/nexus-daemon-runtime/src/api/mod.rs; crates/nexus-daemon-runtime/src/api/errors.rs; crates/nexus-contracts/tests/schema_drift_detection.rs",
+        "decision": "closed-in-report",
+        "owner": "@qc-specialist",
+        "target": "V1.71 P0",
+        "target_date": "2026-06-28",
+        "tracking_link": ".mstar/plans/reports/2026-06-27-v1.71-canvas-strategy-write-boundary/qc1.md §S-009",
+        "note": "Positive finding: routes registered under protected routes, error variants canonical, all new schemas in Strict drift-detection mode, package version bumped to 0.7.0.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28"
+      },
+      {
+        "id": "R-V171P0-QC1-010",
+        "title": "Clarify the apps/web/src/api-types/ codegen target",
+        "severity": "low",
+        "source": "qc1 (architecture/maintainability) S-010",
+        "scope": ".mstar/plans/2026-06-27-v1.71-canvas-strategy-write-boundary.md A1; packages/nexus-contracts/src/generated/local-api/canvas/strategy/",
+        "decision": "defer",
+        "owner": "@project-manager or @architect",
+        "target": "V1.71 P0 fix-wave",
+        "target_date": "2026-06-28",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.71-canvas-strategy-write-boundary][R-V171P0-QC1-010]",
+        "note": "Plan mentions TS output in apps/web/src/api-types/canvas/, but generated TS lives in packages/nexus-contracts and is consumed via workspace package. Confirm intended architecture and update plan/spec if the apps/web path is no longer used.",
+        "lifecycle": "open"
       }
     ]
   }
