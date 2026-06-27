@@ -96,7 +96,7 @@ pub async fn list_sessions(
 
     // F-P1/F-P3: cursor pagination.
     let offset = decode_offset_cursor(&query.cursor)?;
-    let limit = query.limit.unwrap_or(100).min(500);
+    let limit: u32 = query.limit.unwrap_or(100).min(500);
     let total = mapped.len();
     let start = usize::try_from(offset).unwrap_or(0).min(total);
     let end = start
