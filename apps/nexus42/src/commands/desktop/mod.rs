@@ -27,6 +27,11 @@ pub enum DesktopCommand {
 }
 
 /// Run a desktop shell command.
+///
+/// # Errors
+///
+/// Returns a [`CliError::Io`] if the underlying `pnpm`/`cargo tauri` build
+/// fails, or a [`CliError::Config`] if the repository root cannot be resolved.
 pub async fn run(command: DesktopCommand) -> Result<()> {
     match command {
         DesktopCommand::Bundle { sign_identity } => bundle_desktop(sign_identity).await,
@@ -35,6 +40,12 @@ pub async fn run(command: DesktopCommand) -> Result<()> {
 
 /// Build the desktop Tauri bundle, optionally signing with the provided
 /// Apple Developer ID identity.
+///
+/// # Errors
+///
+/// Returns a [`CliError::Io`] if the bundle command cannot be spawned or exits
+/// with a non-zero status, or a [`CliError::Config`] if the repository root
+/// cannot be resolved.
 async fn bundle_desktop(sign_identity: Option<String>) -> Result<()> {
     let sign_identity = sign_identity
         .or_else(|| std::env::var("APPLE_SIGNING_IDENTITY").ok())
@@ -43,10 +54,7 @@ async fn bundle_desktop(sign_identity: Option<String>) -> Result<()> {
 
     match sign_identity.as_deref() {
         Some(identity) if !identity.is_empty() => {
-            eprintln!(
-                "nexus42 desktop bundle: signing with identity '{}'",
-                identity
-            );
+            eprintln!("nexus42 desktop bundle: signing with identity '{identity}'");
         }
         _ => {
             eprintln!(
@@ -69,14 +77,13 @@ async fn bundle_desktop(sign_identity: Option<String>) -> Result<()> {
 
     let status = tokio::task::spawn_blocking(move || cmd.status())
         .await
-        .map_err(|e| CliError::Io(std::io::Error::new(std::io::ErrorKind::Other, e)))?
+        .map_err(|e| CliError::Io(std::io::Error::other(e)))?
         .map_err(CliError::Io)?;
 
     if !status.success() {
-        return Err(CliError::Io(std::io::Error::new(
-            std::io::ErrorKind::Other,
-            format!("desktop bundle build failed with status {status}"),
-        )));
+        return Err(CliError::Io(std::io::Error::other(format!(
+            "desktop bundle build failed with status {status}"
+        ))));
     }
 
     println!("Desktop bundle built successfully.");
