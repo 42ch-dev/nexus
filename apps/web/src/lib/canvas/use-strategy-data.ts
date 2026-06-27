@@ -151,7 +151,18 @@ export interface SteerIdeaArgs {
   idea: string;
 }
 
-/** Idea → Steer: append the Idea to a running schedule's core context, then signal resume. */
+/**
+ * Idea → Steer: signal resume first, then append the Idea to the schedule's
+ * core context.
+ *
+ * Signal-then-append ordering avoids partial-failure duplication: if the
+ * signal call fails, no context was changed and a retry is safe (the signal
+ * is idempotent). If the signal succeeds and the append fails, the run
+ * resumed without the idea — the user retries; the signal is a no-op
+ * (already resumed), and the single append lands cleanly. With the previous
+ * append-then-signal order, a signal failure left the idea appended; a retry
+ * would append the same idea a second time before signaling.
+ */
 export function useSteerStrategy() {
   const client = useNexusClient();
   const qc = useQueryClient();
@@ -159,11 +170,11 @@ export function useSteerStrategy() {
   const { toast } = useToast();
   return useMutation({
     mutationFn: async (args: SteerIdeaArgs) => {
-      await client.editCoreContext(args.scheduleId, {
+      await client.signalSchedule(args.scheduleId, { signal: 'resume' });
+      return client.editCoreContext(args.scheduleId, {
         op: 'append',
         body: args.idea,
       });
-      return client.signalSchedule(args.scheduleId, { signal: 'resume' });
     },
     onSuccess: (_data, args) => {
       toast({ variant: 'success', title: 'Idea sent to Strategy', description: args.scheduleId });
