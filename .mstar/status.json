@@ -86,20 +86,22 @@
       "pr_number": 95
     },
     "tech_debt_summary": {
-      "total_open": 1,
+      "total_open": 4,
       "total_deferred": 1,
       "total_resolved": 233,
       "total_archived": 0,
       "by_severity_active": {
-        "low": 1
+        "low": 3,
+        "nit": 1
       },
       "by_target_active": {
-        "V1.72": 1
+        "V1.65+": 1,
+        "V1.72 or V1.71 P-last cleanup": 3
       },
-      "refreshed_at": "2026-06-27",
-      "refreshed_reason": "V1.71 Track B hygiene: 12 residuals closed + 1 deferred (R-V167P2-QC1-S4 frontmatter-helper extraction) + R-V165-QC3-VIRT chapter virtualization deferred to V1.72. Total open: 1."
+      "refreshed_at": "2026-06-27T21:37:35Z",
+      "refreshed_reason": "V1.71 P1 qc1 review: approved with 3 non-blocking suggestions registered as R-V171P1-QC1-001..003. Active open residuals: R-V165-QC3-VIRT (low, V1.65+) plus the three new qc1 items; one deferred item (R-V167P2-QC1-S4) unchanged."
     },
-    "updated_at": "2026-06-27T21:02:58Z",
+    "updated_at": "2026-06-27T21:37:35Z",
     "spec_integration_branch": "iteration/v1.71",
     "wave1_merged_at": null
   },
@@ -4723,6 +4725,50 @@
         "target_date": "2026-06-28",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.71-canvas-strategy-write-boundary][R-V171P0-QC1-010]",
         "note": "Plan mentions TS output in apps/web/src/api-types/canvas/, but generated TS lives in packages/nexus-contracts and is consumed via workspace package. Confirm intended architecture and update plan/spec if the apps/web path is no longer used.",
+        "lifecycle": "open"
+      }
+    ],
+    "2026-06-27-v1.71-hygiene-and-sign-groundwork": [
+      {
+        "id": "R-V171P1-QC1-001",
+        "title": "tauri.conf.json signingIdentity:null is misleading next to env-var signing override",
+        "severity": "low",
+        "source": "qc1 S-001",
+        "scope": "apps/desktop/src-tauri/tauri.conf.json line 45; apps/desktop/SIGNING.md",
+        "decision": "defer",
+        "owner": "@ops-engineer",
+        "target": "V1.72 or V1.71 P-last cleanup",
+        "target_date": "V1.72",
+        "tracking_link": ".mstar/plans/reports/2026-06-27-v1.71-hygiene-and-sign-groundwork/qc1.md",
+        "note": "Tauri docs say APPLE_SIGNING_IDENTITY overwrites tauri.conf.json > bundle > macOS > signingIdentity, so the env-var path works. However, explicitly setting signingIdentity:null reads as 'signing disabled' and may confuse maintainers. Either omit the key or add a comment explaining the env-var override. Non-blocking; signed build still functions when secrets are present.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V171P1-QC1-002",
+        "title": "Stale '__internal daemon-run' references remain in daemon_run.rs and boot.rs comments after spawn path changed",
+        "severity": "nit",
+        "source": "qc1 S-002",
+        "scope": "apps/nexus42/src/commands/daemon_run.rs module doc; crates/nexus-daemon-runtime/src/boot.rs try_init comment",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.72 or V1.71 P-last cleanup",
+        "target_date": "V1.72",
+        "tracking_link": ".mstar/plans/reports/2026-06-27-v1.71-hygiene-and-sign-groundwork/qc1.md",
+        "note": "start_daemon now spawns 'daemon-run' directly (commit 835e4762). The module-level comments in daemon_run.rs and boot.rs still describe the old '__internal daemon-run' invocation. Pure doc drift; no runtime impact.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V171P1-QC1-003",
+        "title": "ChapterPage defaults can_edit_outline to true when the field is absent",
+        "severity": "low",
+        "source": "qc1 S-003",
+        "scope": "apps/web/src/pages/chapter-page.tsx line 70",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.72 or V1.71 P-last cleanup",
+        "target_date": "V1.72",
+        "tracking_link": ".mstar/plans/reports/2026-06-27-v1.71-hygiene-and-sign-groundwork/qc1.md",
+        "note": "const canEditOutline = chapter.data?.can_edit_outline ?? true; falls back to editable if the API omits the field. Backend always populates it today, but defense-in-depth would default to false or validate the contract shape at the API boundary. Non-blocking for P1 approval.",
         "lifecycle": "open"
       }
     ]
