@@ -606,6 +606,32 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             UpdatePresetResponse
         ),
+        // ── local-api/canvas/strategy/ (V1.71) ────────────────────────────
+        entry!(
+            "schemas/local-api/canvas/strategy/strategy-patch-state-request.schema.json",
+            Strict,
+            StrategyPatchStateRequest
+        ),
+        entry!(
+            "schemas/local-api/canvas/strategy/strategy-patch-transition-request.schema.json",
+            Strict,
+            StrategyPatchTransitionRequest
+        ),
+        entry!(
+            "schemas/local-api/canvas/strategy/strategy-patch-prompt-template-request.schema.json",
+            Strict,
+            StrategyPatchPromptTemplateRequest
+        ),
+        entry!(
+            "schemas/local-api/canvas/strategy/strategy-patch-response.schema.json",
+            Strict,
+            StrategyPatchResponse
+        ),
+        entry!(
+            "schemas/local-api/canvas/strategy/strategy-conflict-error.schema.json",
+            Strict,
+            StrategyConflictError
+        ),
         // ── platform/http-bff/ ───────────────────────────────────────────
         // V1.62 reorganization: platform HTTP bodies moved here from platform/.
         entry!(

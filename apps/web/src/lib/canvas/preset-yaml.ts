@@ -71,6 +71,8 @@ export interface PresetManifest {
 
 export interface ParsedPreset {
   manifest: PresetManifest;
+  /** Bundle revision from the YAML `revision:` header (used for patch consistency). */
+  revision?: number;
   /** Non-fatal parse/validation problems (empty when clean). */
   problems: string[];
 }
@@ -121,6 +123,8 @@ export function parsePresetYaml(yaml: string): ParsedPreset {
 
   const innerGraphs = coerceInnerGraphs(obj.inner_graphs);
 
+  const revision = typeof obj.revision === 'number' ? obj.revision : undefined;
+
   const manifest: PresetManifest = {
     preset: {
       id,
@@ -138,7 +142,7 @@ export function parsePresetYaml(yaml: string): ParsedPreset {
     problems.push(`preset.initial references unknown state "${manifest.preset.initial}".`);
   }
 
-  return { manifest, problems };
+  return { manifest, revision, problems };
 }
 
 function coerceState(raw: unknown, index: number, problems: string[]): PresetState | null {

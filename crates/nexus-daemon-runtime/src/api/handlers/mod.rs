@@ -16,6 +16,7 @@ pub mod permissions;
 pub mod preset_management;
 pub mod references;
 pub mod runtime;
+pub mod strategy;
 pub mod works;
 pub mod workspace;
 pub mod workspaces;
