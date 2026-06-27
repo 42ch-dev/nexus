@@ -1,20 +1,17 @@
 /**
- * Strategy canvas — the α-scope Strategy (Preset) surface
- * (canvas-strategy-surface.md Draft §3.2/§3.3/§3.7).
+ * Strategy canvas — the β-scope Strategy (Preset) write surface
+ * (canvas-strategy-surface.md §3.2/§3.3/§3.5/§3.7).
  *
  * Composes: shared Canvas Shell (A1) + Strategy graph adapter (A2) + bounded
- * live overlay (A3) + Idea-input steering (A4) + read-only side inspector +
+ * live overlay (A3) + Idea-input steering (A4) + editable side inspector (A6)
+ * + conflict modal (A7) + graph-revision freshness indicator (A7) +
  * validation panel + accessibility alternate view (A8).
  *
- * Read + overlay + steer only — no structured node edits (V1.71). UI label is
- * "Strategy"; persisted identifiers remain "preset" (Draft §4.2).
- * `wire_contracts_changed: FALSE`.
+ * UI label is "Strategy"; persisted identifiers remain "preset" (Draft §4.2).
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useEdgesState, useNodesState, type Edge, type Node } from '@xyflow/react';
-// `useCallback` is not needed: React Flow tracks selection via node.selected
-// patches delivered through onNodesChange.
-import { AlertTriangle, Info, ScrollText } from 'lucide-react';
+import { AlertTriangle, Info, Pencil, RefreshCw, Save, ScrollText, X } from 'lucide-react';
 
 import { CanvasShell } from '@/components/canvas/canvas-shell';
 import { IdeaInput, type IdeaArtifact } from '@/components/canvas/idea-input';
@@ -23,14 +20,28 @@ import { StrategyAltView } from '@/components/canvas/strategy-alt-view';
 import {
   useActiveSession,
   useDerivedCreatorId,
+  usePatchStrategyPromptTemplate,
+  usePatchStrategyState,
+  usePatchStrategyTransition,
   usePresetGraph,
   usePresetSchedules,
+  isStrategyConflictError,
+  type PatchStrategyStateArgs,
+  type PatchStrategyTransitionArgs,
 } from '@/lib/canvas/use-strategy-data';
 import type { StrategyNodeData } from '@/lib/canvas/strategy-graph';
+import type { PresetState } from '@/lib/canvas/preset-yaml';
 import { ErrorState, LoadingState } from '@/components/ui/states';
 
 export interface StrategyCanvasProps {
   presetId: string;
+}
+
+interface EditForm {
+  label: string;
+  description: string;
+  nextTarget: string;
+  promptBody: string;
 }
 
 export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
@@ -39,10 +50,24 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
   const schedules = usePresetSchedules(presetId);
   const creatorId = useDerivedCreatorId(presetId);
 
+  const patchState = usePatchStrategyState();
+  const patchTransition = usePatchStrategyTransition();
+  const patchPrompt = usePatchStrategyPromptTemplate();
+
   const [nodes, setNodes, onNodesChange] = useNodesState<Node>([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState<Edge>([]);
   const [artifacts, setArtifacts] = useState<IdeaArtifact[]>([]);
   const [showAlt, setShowAlt] = useState(false);
+
+  const [isEditing, setIsEditing] = useState(false);
+  const [form, setForm] = useState<EditForm>({
+    label: '',
+    description: '',
+    nextTarget: '',
+    promptBody: '',
+  });
+  const [dirty, setDirty] = useState(false);
+  const [conflict, setConflict] = useState<{ currentRevision: number } | null>(null);
 
   // Sync the built graph into React Flow state when the preset changes.
   useEffect(() => {
@@ -74,10 +99,40 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
     );
   }, [activeSession, setNodes]);
 
-  const selected = useMemo(
-    () => nodes.find((n) => n.selected) ?? null,
-    [nodes],
-  );
+  const selected = useMemo(() => nodes.find((n) => n.selected) ?? null, [nodes]);
+
+  const selectedState = useMemo<PresetState | undefined>(() => {
+    if (!selected || !graphQuery.data) return undefined;
+    const stateId = (selected.data as StrategyNodeData).stateId;
+    return graphQuery.data.parsed.manifest.states.find((s) => s.id === stateId);
+  }, [selected, graphQuery.data]);
+
+  const baseRevision = graphQuery.data?.revision ?? 0;
+  const promptTemplateRef = useMemo(() => templateRefOf(selectedState), [selectedState]);
+
+  // Initialise the edit form when the user opens edit mode or selects a node.
+  useEffect(() => {
+    if (!isEditing || !selectedState) {
+      setForm({ label: '', description: '', nextTarget: '', promptBody: '' });
+      setDirty(false);
+      return;
+    }
+    const next = selectedState.next;
+    setForm({
+      label: selectedState.id,
+      description: selectedState.description ?? '',
+      nextTarget: typeof next === 'string' ? next : '',
+      promptBody: '',
+    });
+    setDirty(false);
+  }, [isEditing, selectedState]);
+
+  // Clear conflict when the graph is refetched.
+  useEffect(() => {
+    if (conflict && graphQuery.data && graphQuery.data.revision !== conflict.currentRevision) {
+      setConflict(null);
+    }
+  }, [graphQuery.data, conflict]);
 
   const statusByState = useMemo(() => {
     const map: Record<string, string> = {};
@@ -95,30 +150,99 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
     return `Strategy graph: ${count} states, ${edgeCount} transitions.${live}${sel}`;
   }, [nodes.length, edges.length, selected, activeSession]);
 
+  async function handleSave() {
+    if (!selectedState || !graphQuery.data) return;
+
+    const original: EditForm = {
+      label: selectedState.id,
+      description: selectedState.description ?? '',
+      nextTarget: typeof selectedState.next === 'string' ? selectedState.next : '',
+      promptBody: '',
+    };
+
+    const renamedStateId =
+      form.label !== original.label ? form.label : selectedState.id;
+
+    try {
+      if (form.label !== original.label || form.description !== original.description) {
+        const args: PatchStrategyStateArgs = {
+          strategyId: presetId,
+          stateId: selectedState.id,
+          baseRevision,
+        };
+        if (form.label !== original.label) args.label = form.label;
+        if (form.description !== original.description) args.description = form.description;
+        await patchState.mutateAsync(args);
+      }
+
+      if (form.nextTarget !== original.nextTarget && typeof selectedState.next === 'string') {
+        const args: PatchStrategyTransitionArgs = {
+          strategyId: presetId,
+          sourceStateId: renamedStateId,
+          baseRevision,
+          oldTarget: original.nextTarget,
+          newTarget: form.nextTarget,
+          transitionKind: 'next',
+        };
+        await patchTransition.mutateAsync(args);
+      }
+
+      if (form.promptBody && promptTemplateRef) {
+        await patchPrompt.mutateAsync({
+          strategyId: presetId,
+          stateId: selectedState.id,
+          baseRevision,
+          templateRef: promptTemplateRef,
+          body: form.promptBody,
+        });
+      }
+
+      setIsEditing(false);
+    } catch (error) {
+      if (isStrategyConflictError(error)) {
+        const currentRevision =
+          typeof error.details === 'object' && error.details !== null
+            ? (error.details as { current_revision?: number }).current_revision ?? 0
+            : 0;
+        setConflict({ currentRevision });
+      }
+      // Other errors are surfaced by the mutation's onError toast.
+    }
+  }
+
+  function updateField<K extends keyof EditForm>(field: K, value: EditForm[K]) {
+    setForm((prev) => ({ ...prev, [field]: value }));
+    setDirty(true);
+  }
+
   if (graphQuery.isLoading) return <LoadingState label="Loading Strategy…" />;
   if (graphQuery.isError) return <ErrorState description="Could not load the Strategy preset." onRetry={() => graphQuery.refetch()} />;
 
   const parsed = graphQuery.data?.parsed;
   const problems = parsed?.problems ?? [];
   const dangling = graphQuery.data?.graph.danglingTargets ?? [];
-  // Pick the schedule most likely to back the active session. The wire schema
-// does not expose a direct session ↔ schedule link (SessionSummary and
-// ScheduleSummary both lack the cross-reference id), so the best heuristic
-// is "most recently updated schedule for this preset, if any active session
-// exists." Without an active session, return undefined so Steer/Resume
-// disable cleanly (live banner hidden, helper text explains why).
-const activeScheduleId = activeSession
-  ? [...(schedules.data ?? [])].sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
-      ?.schedule_id
-  : undefined;
+
+  const activeScheduleId = activeSession
+    ? [...(schedules.data ?? [])].sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]
+        ?.schedule_id
+    : undefined;
+
+  const revisionStatus = conflict
+    ? 'conflict'
+    : dirty
+      ? 'dirty'
+      : 'clean';
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h2 className="text-heading-20 font-heading text-gray-1000">Strategy</h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-heading-20 font-heading text-gray-1000">Strategy</h2>
+            <RevisionBadge revision={baseRevision} status={revisionStatus} />
+          </div>
           <p className="text-copy-13 text-gray-700">
-            Preset <span className="font-mono">{presetId}</span> as a state-machine graph. Steer execution with an Idea — Nexus owns the prose.
+            Preset <span className="font-mono">{presetId}</span> as a state-machine graph. Select a state to edit it; the revision badge shows graph freshness.
           </p>
         </div>
         <button
@@ -150,12 +274,34 @@ const activeScheduleId = activeSession
           summaryText={summaryText}
           ariaLabel="Strategy state-machine graph"
         >
-          {/* Side inspector (read-only at α) */}
-          <InspectorOverlay selected={selected} />
-          {/* Validation panel (read-only) */}
+          {/* Side inspector (editable at β) */}
+          <InspectorOverlay
+            selected={selected}
+            selectedState={selectedState}
+            isEditing={isEditing}
+            setIsEditing={setIsEditing}
+            form={form}
+            onChange={updateField}
+            dirty={dirty}
+            onSave={handleSave}
+            saving={patchState.isPending || patchTransition.isPending || patchPrompt.isPending}
+            promptTemplateRef={promptTemplateRef}
+          />
+          {/* Validation panel */}
           <ValidationPanel problems={problems} dangling={dangling} />
         </CanvasShell>
       )}
+
+      {conflict ? (
+        <ConflictModal
+          currentRevision={conflict.currentRevision}
+          onRefetch={() => {
+            setConflict(null);
+            void graphQuery.refetch();
+          }}
+          onDismiss={() => setConflict(null)}
+        />
+      ) : null}
 
       <div className="grid gap-4 lg:grid-cols-[1fr_320px]">
         <IdeaInput
@@ -170,30 +316,208 @@ const activeScheduleId = activeSession
   );
 }
 
-function InspectorOverlay({ selected }: { selected: Node | null }) {
-  if (!selected) return null;
+function RevisionBadge({ revision, status }: { revision: number; status: 'clean' | 'dirty' | 'conflict' }) {
+  const color =
+    status === 'conflict'
+      ? 'border-canvas-write-conflict text-canvas-write-conflict bg-canvas-write-conflict/10'
+      : status === 'dirty'
+        ? 'border-canvas-write-dirty text-canvas-write-dirty bg-canvas-write-dirty/10'
+        : 'border-gray-alpha-400 text-gray-700 bg-background-100';
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-pill border px-2 py-0.5 text-label-12 ${color}`}
+      title={status === 'conflict' ? 'Revision conflict — refetch before editing' : undefined}
+    >
+      {status === 'conflict' ? <AlertTriangle className="h-3 w-3" aria-hidden /> : null}
+      rev {revision}
+    </span>
+  );
+}
+
+function templateRefOf(state: PresetState | undefined): string | undefined {
+  if (!state) return undefined;
+  const task = state.enter?.find((e) => e.kind === 'acp_prompt');
+  return task?.name;
+}
+
+interface InspectorOverlayProps {
+  selected: Node | null;
+  selectedState: PresetState | undefined;
+  isEditing: boolean;
+  setIsEditing: (v: boolean) => void;
+  form: EditForm;
+  onChange: <K extends keyof EditForm>(field: K, value: EditForm[K]) => void;
+  dirty: boolean;
+  onSave: () => void;
+  saving: boolean;
+  promptTemplateRef: string | undefined;
+}
+
+function InspectorOverlay({
+  selected,
+  selectedState,
+  isEditing,
+  setIsEditing,
+  form,
+  onChange,
+  dirty,
+  onSave,
+  saving,
+  promptTemplateRef,
+}: InspectorOverlayProps) {
+  if (!selected || !selectedState) return null;
   const d = selected.data as StrategyNodeData;
+  const hasScalarNext = typeof selectedState.next === 'string';
+
   return (
     <aside
-      className="absolute right-3 top-3 w-[260px] rounded-card border border-gray-alpha-400 bg-background-100 p-3 shadow-popover"
+      className="absolute right-3 top-3 w-[280px] rounded-card border border-gray-alpha-400 bg-background-100 p-3 shadow-popover"
       aria-label="Selected node details"
     >
-      <div className="flex items-center gap-2">
-        <Info className="h-4 w-4 text-purple-700" aria-hidden />
-        <h3 className="text-heading-16 font-heading text-gray-1000">{d.label}</h3>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Info className="h-4 w-4 text-purple-700" aria-hidden />
+          <h3 className="text-heading-16 font-heading text-gray-1000">{d.label}</h3>
+        </div>
+        {!isEditing ? (
+          <button
+            type="button"
+            onClick={() => setIsEditing(true)}
+            className="rounded-control p-1 text-gray-700 hover:bg-gray-alpha-100"
+            aria-label="Edit state"
+          >
+            <Pencil className="h-4 w-4" aria-hidden />
+          </button>
+        ) : (
+          <div className="flex gap-1">
+            <button
+              type="button"
+              onClick={onSave}
+              disabled={!dirty || saving}
+              className="rounded-control p-1 text-canvas-write-success hover:bg-gray-alpha-100 disabled:text-gray-500"
+              aria-label="Save changes"
+            >
+              <Save className="h-4 w-4" aria-hidden />
+            </button>
+            <button
+              type="button"
+              onClick={() => setIsEditing(false)}
+              className="rounded-control p-1 text-gray-700 hover:bg-gray-alpha-100"
+              aria-label="Cancel editing"
+            >
+              <X className="h-4 w-4" aria-hidden />
+            </button>
+          </div>
+        )}
       </div>
-      <dl className="mt-2 flex flex-col gap-1 text-copy-13">
-        <div className="flex justify-between"><dt className="text-gray-700">Kind</dt><dd className="font-mono text-gray-1000">{d.stateKind}</dd></div>
-        <div className="flex justify-between"><dt className="text-gray-700">State id</dt><dd className="font-mono text-gray-1000">{d.stateId}</dd></div>
-        {d.innerGraphId ? <div className="flex justify-between"><dt className="text-gray-700">Inner graph</dt><dd className="font-mono text-gray-1000">{d.innerGraphId}</dd></div> : null}
-        {d.convergeStrategy ? <div className="flex justify-between"><dt className="text-gray-700">Converge</dt><dd className="font-mono text-gray-1000">{d.convergeStrategy}</dd></div> : null}
-        {d.isInitial ? <div className="text-purple-700">Initial state</div> : null}
-        {d.isTerminal ? <div className="text-gray-700">Terminal state</div> : null}
-        {d.status ? <div className="flex justify-between"><dt className="text-gray-700">Status</dt><dd className="text-blue-700">{d.status}</dd></div> : null}
-      </dl>
-      {d.description ? <p className="mt-2 text-copy-13 text-gray-900">{d.description}</p> : null}
-      <p className="mt-2 text-copy-13 text-gray-700">Read-only at α. Node-granular edits arrive in V1.71.</p>
+
+      {isEditing ? (
+        <div className="mt-3 flex flex-col gap-2">
+          <label className="flex flex-col gap-1 text-copy-13">
+            <span className="text-gray-700">Label / state id</span>
+            <input
+              type="text"
+              value={form.label}
+              onChange={(e) => onChange('label', e.target.value)}
+              className="rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-gray-1000 focus:border-blue-700"
+            />
+          </label>
+          <label className="flex flex-col gap-1 text-copy-13">
+            <span className="text-gray-700">Description</span>
+            <textarea
+              value={form.description}
+              onChange={(e) => onChange('description', e.target.value)}
+              rows={3}
+              className="rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-gray-1000 focus:border-blue-700"
+            />
+          </label>
+          {hasScalarNext ? (
+            <label className="flex flex-col gap-1 text-copy-13">
+              <span className="text-gray-700">Transition target</span>
+              <input
+                type="text"
+                value={form.nextTarget}
+                onChange={(e) => onChange('nextTarget', e.target.value)}
+                className="rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-gray-1000 focus:border-blue-700"
+              />
+            </label>
+          ) : null}
+          {promptTemplateRef ? (
+            <label className="flex flex-col gap-1 text-copy-13">
+              <span className="text-gray-700">Prompt template</span>
+              <span className="text-copy-13-mono text-gray-700">{promptTemplateRef}</span>
+              <textarea
+                value={form.promptBody}
+                onChange={(e) => onChange('promptBody', e.target.value)}
+                rows={4}
+                placeholder="Enter new prompt body…"
+                className="rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-gray-1000 focus:border-blue-700"
+              />
+            </label>
+          ) : null}
+        </div>
+      ) : (
+        <dl className="mt-2 flex flex-col gap-1 text-copy-13">
+          <div className="flex justify-between"><dt className="text-gray-700">Kind</dt><dd className="font-mono text-gray-1000">{d.stateKind}</dd></div>
+          <div className="flex justify-between"><dt className="text-gray-700">State id</dt><dd className="font-mono text-gray-1000">{d.stateId}</dd></div>
+          {d.innerGraphId ? <div className="flex justify-between"><dt className="text-gray-700">Inner graph</dt><dd className="font-mono text-gray-1000">{d.innerGraphId}</dd></div> : null}
+          {d.convergeStrategy ? <div className="flex justify-between"><dt className="text-gray-700">Converge</dt><dd className="font-mono text-gray-1000">{d.convergeStrategy}</dd></div> : null}
+          {d.isInitial ? <div className="text-purple-700">Initial state</div> : null}
+          {d.isTerminal ? <div className="text-gray-700">Terminal state</div> : null}
+          {d.status ? <div className="flex justify-between"><dt className="text-gray-700">Status</dt><dd className="text-blue-700">{d.status}</dd></div> : null}
+        </dl>
+      )}
+      {!isEditing && d.description ? <p className="mt-2 text-copy-13 text-gray-900">{d.description}</p> : null}
+      {promptTemplateRef && !isEditing ? (
+        <p className="mt-2 text-copy-13 text-gray-700">Prompt: <span className="font-mono">{promptTemplateRef}</span></p>
+      ) : null}
     </aside>
+  );
+}
+
+function ConflictModal({
+  currentRevision,
+  onRefetch,
+  onDismiss,
+}: {
+  currentRevision: number;
+  onRefetch: () => void;
+  onDismiss: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-center bg-gray-1000/40 p-4"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="conflict-title"
+    >
+      <div className="w-full max-w-md rounded-popover border border-canvas-write-conflict bg-background-100 p-6 shadow-modal">
+        <h3 id="conflict-title" className="text-heading-20 font-heading text-canvas-write-conflict">
+          Strategy changed elsewhere
+        </h3>
+        <p className="mt-2 text-copy-14 text-gray-900">
+          The Strategy preset was modified while you were editing. Server revision is now{' '}
+          <span className="font-mono">{currentRevision}</span>. Refetch the latest graph, then reapply your edit.
+        </p>
+        <div className="mt-4 flex justify-end gap-2">
+          <button
+            type="button"
+            onClick={onDismiss}
+            className="rounded-control border border-gray-alpha-400 px-4 py-2 text-button-12 text-gray-900 hover:bg-gray-alpha-100"
+          >
+            Keep editing
+          </button>
+          <button
+            type="button"
+            onClick={onRefetch}
+            className="rounded-control bg-canvas-write-conflict px-4 py-2 text-button-12 text-white hover:bg-red-800"
+          >
+            <RefreshCw className="mr-1.5 inline h-4 w-4" aria-hidden />
+            Refetch graph
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

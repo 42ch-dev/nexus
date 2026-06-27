@@ -1,0 +1,42 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/canvas/strategy/strategy-patch-transition-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus StrategyPatchTransitionRequest",
+  "description": "Request body for POST /v1/local/strategies/{strategy_id}/transitions/patch (V1.71). Rewires an outer transition (linear next, conditional branch, or default target) and/or updates its condition label.",
+  "type": "object",
+  "required": ["strategy_id", "base_revision", "source_state_id", "old_target"],
+  "properties": {
+    "strategy_id": {
+      "type": "string",
+      "description": "Preset / Strategy identifier from the URL path. Must match the path parameter."
+    },
+    "base_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Revision observed by the client on the last canonical read."
+    },
+    "source_state_id": {
+      "type": "string",
+      "description": "State whose outgoing transition is being modified."
+    },
+    "old_target": {
+      "type": "string",
+      "description": "Current target state identifier of the transition to replace."
+    },
+    "new_target": {
+      "type": "string",
+      "description": "New target state identifier. Required when rewiring the transition."
+    },
+    "condition": {
+      "type": "string",
+      "description": "For conditional / labeled branches, identifies the branch to update. When present, the branch's condition is also updated to this value."
+    },
+    "transition_kind": {
+      "type": "string",
+      "enum": ["next", "branch", "default"],
+      "description": "Optional disambiguator for the transition form being edited."
+    }
+  },
+  "additionalProperties": false
+}

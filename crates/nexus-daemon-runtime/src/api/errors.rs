@@ -151,6 +151,26 @@ pub enum NexusApiError {
     /// Preset gate evaluation failed (semantic validation; HTTP 422).
     #[error("Preset gates failed")]
     PresetGatesFailed { details: serde_json::Value },
+
+    /// Strategy canvas patch conflict (HTTP 409).
+    ///
+    /// Emitted when the client `base_revision` does not match the current
+    /// on-disk revision, allowing the UI to fetch the latest graph and offer
+    /// merge/retry affordances.
+    #[error("Strategy conflict: {conflicting_path}")]
+    StrategyConflict {
+        current_revision: u64,
+        node_id: String,
+        conflicting_path: String,
+        recovery_hint: String,
+    },
+
+    /// Strategy canvas patch validation failure (HTTP 422).
+    ///
+    /// Carries the same `validation_summary` shape as a successful patch so
+    /// the canvas can surface per-field diagnostics.
+    #[error("Strategy validation failed")]
+    StrategyValidationFailed { details: serde_json::Value },
 }
 
 impl NexusApiError {
@@ -161,11 +181,15 @@ impl NexusApiError {
     #[must_use]
     pub fn status_code(&self) -> StatusCode {
         match self {
-            Self::Uninitialized | Self::Conflict(_) => StatusCode::CONFLICT,
+            Self::Uninitialized | Self::Conflict(_) | Self::StrategyConflict { .. } => {
+                StatusCode::CONFLICT
+            }
             Self::Locked { .. } => StatusCode::LOCKED,
             Self::InvalidInput { .. } | Self::InvalidApiKeyFormat => StatusCode::BAD_REQUEST,
             Self::ServiceUnavailable { .. } => StatusCode::SERVICE_UNAVAILABLE,
-            Self::PresetGatesFailed { .. } => StatusCode::UNPROCESSABLE_ENTITY,
+            Self::PresetGatesFailed { .. } | Self::StrategyValidationFailed { .. } => {
+                StatusCode::UNPROCESSABLE_ENTITY
+            }
             Self::BadRequest { code, .. } => {
                 match code.as_str() {
                     "policy_blocked" => StatusCode::FORBIDDEN,
@@ -233,6 +257,8 @@ impl NexusApiError {
                     _ => "bad_request",
                 }
             }
+            Self::StrategyConflict { .. } => "strategy_conflict",
+            Self::StrategyValidationFailed { .. } => "strategy_validation_failed",
             Self::SessionExpired => "session_expired",
             Self::Conflict(_) => "conflict",
             Self::Locked { .. } => "locked",
@@ -257,7 +283,20 @@ impl NexusApiError {
                     "reason": reason,
                 }))
             }
-            Self::PresetGatesFailed { details } => Some(details.clone()),
+            Self::PresetGatesFailed { details } | Self::StrategyValidationFailed { details } => {
+                Some(details.clone())
+            }
+            Self::StrategyConflict {
+                current_revision,
+                node_id,
+                conflicting_path,
+                recovery_hint,
+            } => Some(serde_json::json!({
+                "current_revision": current_revision,
+                "node_id": node_id,
+                "conflicting_path": conflicting_path,
+                "recovery_hint": recovery_hint,
+            })),
             _ => None,
         }
     }
@@ -267,6 +306,32 @@ impl NexusApiError {
     pub fn service_unavailable(message: impl Into<String>) -> Self {
         Self::ServiceUnavailable {
             message: message.into(),
+        }
+    }
+
+    /// Build a `strategy_conflict` error with structured recovery details.
+    #[must_use]
+    pub fn strategy_conflict(
+        current_revision: u64,
+        node_id: impl Into<String>,
+        conflicting_path: impl Into<String>,
+        recovery_hint: impl Into<String>,
+    ) -> Self {
+        Self::StrategyConflict {
+            current_revision,
+            node_id: node_id.into(),
+            conflicting_path: conflicting_path.into(),
+            recovery_hint: recovery_hint.into(),
+        }
+    }
+
+    /// Build a `strategy_validation_failed` error from a validation summary.
+    #[must_use]
+    pub fn strategy_validation_failed(errors: &[String], warnings: &[String]) -> Self {
+        Self::StrategyValidationFailed {
+            details: serde_json::json!({
+                "validation_summary": { "errors": errors, "warnings": warnings },
+            }),
         }
     }
 

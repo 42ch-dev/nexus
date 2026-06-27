@@ -196,6 +196,10 @@ components:
     canvas-port: "{colors.gray-700}"
     canvas-minimap: "{colors.gray-alpha-500}"
     canvas-strategy-accent: "{colors.purple-700}"
+    canvas-write-dirty: "{colors.amber-700}"
+    canvas-write-conflict: "{colors.red-700}"
+    canvas-write-success: "{colors.green-700}"
+    canvas-write-stale-bg: "rgba(183,110,0,0.12)"
 ---
 
 # Nexus Local Web UI Design System — Dark Theme
