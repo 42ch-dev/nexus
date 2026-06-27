@@ -109,6 +109,14 @@ export function DaemonStatusBar() {
 
   useEffect(() => {
     mounted.current = true;
+    // R-V167PSEC-QC1-S-UNMOUNT: `setup()` is async, but the cleanup closure
+    // runs synchronously on unmount. If the component unmounts *during* an
+    // `await` (before `unlisten`/`syncInterval` are assigned), the cleanup
+    // would see both as `undefined` and the subscription/interval created
+    // afterwards would leak (interval keeps firing refresh() on a dead
+    // component; listener never detached). The `cancelled` flag is checked
+    // after each await so a late-resolving setup cleans up immediately.
+    let cancelled = false;
     let unlisten: (() => void) | undefined;
     let syncInterval: ReturnType<typeof setInterval> | undefined;
 
@@ -117,9 +125,16 @@ export function DaemonStatusBar() {
       // Fetch initial status immediately, then subscribe to Rust-side events
       // for live updates (QC1-S1 replaces the 5 s React poll loop).
       await refresh();
+      if (cancelled) return;
       unlisten = await desktop.onDaemonStatusChanged((next) => {
         if (mounted.current) setStatus(next);
       });
+      if (cancelled) {
+        // Unmounted while subscribing — detach the listener we just opened.
+        unlisten();
+        unlisten = undefined;
+        return;
+      }
       // Calm fallback re-sync: if an event is missed, the next tick refreshes
       // from the health endpoint without competing with the event path.
       syncInterval = setInterval(() => {
@@ -129,6 +144,7 @@ export function DaemonStatusBar() {
 
     void setup();
     return () => {
+      cancelled = true;
       mounted.current = false;
       unlisten?.();
       if (syncInterval) clearInterval(syncInterval);
