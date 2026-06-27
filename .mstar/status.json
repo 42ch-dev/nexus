@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "updated_at": "2026-06-27T18:47:23Z",
+  "updated_at": "2026-06-27T19:15:18Z",
   "plans": [
     {
       "plan_id": "2026-06-27-v1.71-compass-and-plan",
       "iteration_id": "V1.71",
-      "status": "InProgress",
+      "status": "Done",
       "owner": "project-manager",
       "effort": "S",
       "type": "prepare",
@@ -13,7 +13,8 @@
       "merge_target": "iteration/v1.71",
       "metadata": {
         "compass": "v1.71-canvas-strategy-write-boundary-and-hygiene-compass-v1.md"
-      }
+      },
+      "completed_at": "2026-06-27T19:15:18Z"
     },
     {
       "plan_id": "2026-06-27-v1.71-canvas-strategy-write-boundary",
@@ -60,7 +61,7 @@
     "latest_active_iteration": "V1.71 (Prepare active \u2014 2026-06-28)",
     "latest_active_compass": "v1.71-canvas-strategy-write-boundary-and-hygiene-compass-v1.md",
     "platform_integration": "paused \u2014 local-only until further notice",
-    "pre_implement_gate": "pending",
+    "pre_implement_gate": "GO",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
@@ -98,7 +99,7 @@
       "refreshed_at": "2026-06-27 (V1.70 P-last closure; closed 2 \u2192 15 open)",
       "refreshed_reason": "V1.70 P-last: closed R-V167PSEC-QC1-S-UNMOUNT (P0 commit dad35736) + R-V167PSEC-QC1-S-CI-SETUO (P1 commit b55cd1c3). 17\u219215 open. Remaining 15 are DX/UX polish grab-bag, chapter virtualization, capability admission-gate UI, live served-UI smoke, and the V1.67 QC-suggestion cluster \u2014 V1.71+ targets."
     },
-    "updated_at": "2026-06-27T18:47:23Z",
+    "updated_at": "2026-06-27T19:15:18Z",
     "spec_integration_branch": "iteration/v1.71",
     "wave1_merged_at": null
   },
