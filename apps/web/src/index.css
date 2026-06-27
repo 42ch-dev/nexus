@@ -2,8 +2,9 @@
  * Nexus local Web UI — global styles.
  *
  * All design tokens below are transcribed verbatim from apps/web/DESIGN.md
- * (Standard completeness, light + dark). DESIGN.md is the SSOT; this file is
- * the CSS-variable projection. Do not invent tokens here — if a token is
+ * (Production completeness, light) and apps/web/DESIGN.dark.md (dark).
+ * DESIGN.md/DESIGN.dark.md are the SSOT; this file is the CSS-variable
+ * projection. Do not invent tokens here — if a token is
  * missing, report it (see apps/web/AGENTS.md).
  */
 

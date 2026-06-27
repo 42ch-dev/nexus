@@ -1,16 +1,216 @@
+---
+version: 0.1.0
+name: "Nexus Local Web UI"
+description: "Nexus Local Web UI is the light/default theme for the local-first Control Room, Setup, and Authoring SPA. YAML frontmatter is the light-token SSOT; the dark theme uses the same token names with dark values in DESIGN.dark.md."
+
+colors:
+  background-100: "#ffffff"
+  background-200: "#fafafa"
+  background-300: "#f5f5f5"
+  gray-100: "#f5f5f5"
+  gray-200: "#eeeeee"
+  gray-300: "#e0e0e0"
+  gray-400: "#c7c7c7"
+  gray-500: "#a3a3a3"
+  gray-600: "#8a8a8a"
+  gray-700: "#666666"
+  gray-800: "#4a4a4a"
+  gray-900: "#333333"
+  gray-1000: "#111111"
+  gray-alpha-100: "rgba(0,0,0,0.04)"
+  gray-alpha-200: "rgba(0,0,0,0.06)"
+  gray-alpha-300: "rgba(0,0,0,0.08)"
+  gray-alpha-400: "rgba(0,0,0,0.12)"
+  gray-alpha-500: "rgba(0,0,0,0.18)"
+  gray-alpha-600: "rgba(0,0,0,0.24)"
+  blue-700: "#006bff"
+  blue-800: "#0057d9"
+  blue-900: "#0046ad"
+  blue-1000: "#003680"
+  red-700: "#e5484d"
+  red-800: "#d11f2a"
+  red-900: "#a91520"
+  red-1000: "#7f1018"
+  amber-700: "#b76e00"
+  amber-800: "#935800"
+  amber-900: "#704300"
+  amber-1000: "#4d2d00"
+  green-700: "#1f8f4d"
+  green-800: "#18753e"
+  green-900: "#125a30"
+  green-1000: "#0d4023"
+  teal-700: "#008577"
+  teal-800: "#006b60"
+  teal-900: "#00524a"
+  teal-1000: "#003b35"
+  purple-700: "#7c3aed"
+  purple-800: "#6d28d9"
+  purple-900: "#581cbd"
+  purple-1000: "#3b1686"
+  pink-700: "#db2777"
+  pink-800: "#be185d"
+  pink-900: "#9d174d"
+  pink-1000: "#831843"
+
+typography:
+  heading-32: { fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif", fontSize: "32px", fontWeight: 650, lineHeight: 1.18, letterSpacing: "-0.025em" }
+  heading-24: { fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif", fontSize: "24px", fontWeight: 650, lineHeight: 1.25, letterSpacing: "-0.02em" }
+  heading-20: { fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif", fontSize: "20px", fontWeight: 600, lineHeight: 1.3, letterSpacing: "-0.015em" }
+  heading-16: { fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif", fontSize: "16px", fontWeight: 600, lineHeight: 1.4, letterSpacing: "-0.01em" }
+  label-14: { fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif", fontSize: "14px", fontWeight: 500, lineHeight: 1.35, letterSpacing: "0" }
+  label-12: { fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif", fontSize: "12px", fontWeight: 600, lineHeight: 1.35, letterSpacing: "0.02em" }
+  copy-16: { fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif", fontSize: "16px", fontWeight: 400, lineHeight: 1.6, letterSpacing: "0" }
+  copy-14: { fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif", fontSize: "14px", fontWeight: 400, lineHeight: 1.55, letterSpacing: "0" }
+  copy-13: { fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif", fontSize: "13px", fontWeight: 400, lineHeight: 1.5, letterSpacing: "0" }
+  button-14: { fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif", fontSize: "14px", fontWeight: 550, lineHeight: 1, letterSpacing: "0" }
+  button-12: { fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif", fontSize: "12px", fontWeight: 600, lineHeight: 1, letterSpacing: "0.01em" }
+  label-12-mono: { fontFamily: "\"SFMono-Regular\", \"Cascadia Code\", \"Roboto Mono\", Consolas, monospace", fontSize: "12px", fontWeight: 500, lineHeight: 1.4, letterSpacing: "0" }
+  copy-13-mono: { fontFamily: "\"SFMono-Regular\", \"Cascadia Code\", \"Roboto Mono\", Consolas, monospace", fontSize: "13px", fontWeight: 400, lineHeight: 1.5, letterSpacing: "0" }
+
+spacing:
+  base: "4px"
+  space-1: "4px"
+  space-2: "8px"
+  space-3: "12px"
+  space-4: "16px"
+  space-6: "24px"
+  space-8: "32px"
+  space-10: "40px"
+  space-16: "64px"
+  space-24: "96px"
+
+rounded:
+  control: "6px"
+  card: "8px"
+  popover: "12px"
+  fullscreen: "16px"
+  pill: "9999px"
+
+components:
+  button:
+    primary: { backgroundColor: "{colors.blue-700}", textColor: "#ffffff", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.blue-800}", activeBackgroundColor: "{colors.blue-900}" }
+    secondary: { backgroundColor: "{colors.background-100}", textColor: "{colors.gray-1000}", borderColor: "{colors.gray-alpha-400}", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.background-200}", hoverBorderColor: "{colors.gray-alpha-500}" }
+    tertiary: { backgroundColor: "transparent", textColor: "{colors.gray-1000}", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.gray-alpha-100}" }
+    destructive: { backgroundColor: "{colors.red-800}", textColor: "#ffffff", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.red-700}", activeBackgroundColor: "{colors.red-900}" }
+    sizes:
+      small: { height: "32px", typography: "{typography.button-12}" }
+      default: { height: "40px", typography: "{typography.button-14}" }
+      large: { height: "48px", typography: "{typography.button-14}" }
+    disabled: { backgroundColor: "{colors.gray-100}", textColor: "{colors.gray-700}", cursor: "not-allowed" }
+  input-select-textarea:
+    default: { backgroundColor: "{colors.background-100}", textColor: "{colors.gray-1000}", borderColor: "{colors.gray-alpha-400}", rounded: "{rounded.control}", height: "40px" }
+    error: { backgroundColor: "{colors.background-100}", textColor: "{colors.gray-1000}", borderColor: "{colors.red-700}", rounded: "{rounded.control}", height: "40px" }
+    disabled: { backgroundColor: "{colors.gray-100}", textColor: "{colors.gray-700}", borderColor: "{colors.gray-alpha-300}", rounded: "{rounded.control}", height: "40px" }
+    textarea: { minHeight: "96px" }
+    placeholder: { textColor: "{colors.gray-700}" }
+    helperText: { typography: "{typography.copy-13}" }
+    errorHelperText: { textColor: "{colors.red-700}", typography: "{typography.copy-13}" }
+  card:
+    default: { backgroundColor: "{colors.background-100}", borderColor: "{colors.gray-alpha-400}", rounded: "{rounded.card}", padding: "{spacing.space-6}", shadow: "shadow-card" }
+    compact: { padding: "{spacing.space-4}" }
+    hero: { padding: "{spacing.space-8}" }
+  table:
+    header: { backgroundColor: "{colors.background-200}", typography: "{typography.label-12}", textColor: "{colors.gray-900}", borderBottomColor: "{colors.gray-alpha-400}" }
+    row: { typography: "{typography.copy-14}", textColor: "{colors.gray-1000}", secondaryTextColor: "{colors.gray-900}", hoverBackgroundColor: "{colors.background-200}", selectedBackgroundColor: "{colors.background-300}" }
+    idText: { typography: "{typography.label-12-mono}" }
+  badge-status-pill:
+    neutral: { backgroundColor: "{colors.gray-alpha-100}", textColor: "{colors.gray-900}", borderColor: "{colors.gray-alpha-300}" }
+    running: { backgroundColor: "rgba(31,143,77,0.10)", textColor: "{colors.green-1000}", borderColor: "rgba(31,143,77,0.30)" }
+    queued: { backgroundColor: "rgba(0,133,119,0.10)", textColor: "{colors.teal-1000}", borderColor: "rgba(0,133,119,0.30)" }
+    warning: { backgroundColor: "rgba(183,110,0,0.12)", textColor: "{colors.amber-1000}", borderColor: "rgba(183,110,0,0.30)" }
+    error: { backgroundColor: "rgba(229,72,77,0.12)", textColor: "{colors.red-1000}", borderColor: "rgba(229,72,77,0.30)" }
+    preset: { backgroundColor: "rgba(124,58,237,0.10)", textColor: "{colors.purple-1000}", borderColor: "rgba(124,58,237,0.30)" }
+    base: { height: "24px", paddingInline: "8px", rounded: "{rounded.pill}", typography: "{typography.label-12}" }
+  toast: { backgroundColor: "{colors.background-100}", borderColor: "{colors.gray-alpha-400}", shadow: "shadow-popover", rounded: "{rounded.popover}", maxWidth: "360px", titleTypography: "{typography.label-14}", bodyTypography: "{typography.copy-13}" }
+  sidebar-nav: { width: "248px", backgroundColor: "{colors.background-100}", dividerColor: "{colors.gray-alpha-400}", itemHeight: "36px", itemRounded: "{rounded.control}", itemTypography: "{typography.label-14}", activeBackgroundColor: "{colors.gray-alpha-100}", activeTextColor: "{colors.gray-1000}", activeBarColor: "{colors.blue-700}" }
+  dialog: { backgroundColor: "{colors.background-100}", rounded: "{rounded.popover}", shadow: "shadow-modal", maxWidth: "560px", padding: "{spacing.space-6}" }
+  popover: { backgroundColor: "{colors.background-100}", borderColor: "{colors.gray-alpha-400}", shadow: "shadow-popover", rounded: "{rounded.popover}", itemHeight: "36px" }
+  editor:
+    surface: "{colors.background-100}"
+    surface-muted: "{colors.background-200}"
+    border: "{colors.gray-alpha-400}"
+    border-active: "{colors.blue-700}"
+    toolbar-control-bg: "transparent"
+    toolbar-control-hover: "{colors.gray-alpha-100}"
+    toolbar-control-active: "{colors.gray-alpha-200}"
+    save-clean: "{colors.green-700}"
+    save-dirty: "{colors.amber-700}"
+    save-error: "{colors.red-700}"
+    selection: "rgba(0,107,255,0.14)"
+  data-table:
+    row-hover: "{colors.background-200}"
+    row-selected: "{colors.background-300}"
+    row-edited: "rgba(183,110,0,0.08)"
+    row-protected: "rgba(124,58,237,0.06)"
+    cell-edit-bg: "{colors.background-100}"
+    cell-edit-border: "{colors.blue-700}"
+    column-divider: "{colors.gray-alpha-200}"
+  context-menu:
+    bg: "{colors.background-100}"
+    border: "{colors.gray-alpha-400}"
+    item-hover: "{colors.gray-alpha-100}"
+    item-active: "{colors.gray-alpha-200}"
+    item-disabled: "{colors.gray-700}"
+    shortcut: "{colors.gray-700}"
+    native-action: "{colors.gray-1000}"
+    native-icon: "{colors.gray-900}"
+    native-disabled: "{colors.gray-700}"
+    native-danger: "{colors.red-700}"
+  desktop-window-chrome:
+    window-bg: "{colors.background-100}"
+    window-border: "{colors.gray-alpha-400}"
+    titlebar-safe-area: "28px"
+    window-radius: "{rounded.card}"
+    window-drag-region-height: "0px"
+  app-menu:
+    label: "{colors.gray-1000}"
+    secondary: "{colors.gray-700}"
+    disabled: "{colors.gray-700}"
+    danger: "{colors.red-700}"
+  native-dialogs:
+    title: "{typography.heading-20}"
+    body: "{typography.copy-14}"
+    secondary: "{colors.gray-900}"
+    danger: "{colors.red-700}"
+    warning: "{colors.amber-700}"
+  daemon-status-indicator:
+    healthy-bg: "rgba(31,143,77,0.10)"
+    healthy-text: "{colors.green-1000}"
+    starting-bg: "rgba(0,133,119,0.10)"
+    starting-text: "{colors.teal-1000}"
+    degraded-bg: "rgba(183,110,0,0.12)"
+    degraded-text: "{colors.amber-1000}"
+    stopped-bg: "rgba(229,72,77,0.12)"
+    stopped-text: "{colors.red-1000}"
+
+  # LEVEL PLACEHOLDER — V1.70 canvas implement (see canvas-strategy-surface.md Draft §3.6 / B4)
+  # canvas:
+  #   canvas-surface: "<V1.70>"
+  #   canvas-grid: "<V1.70>"
+  #   canvas-node-fill: "<V1.70>"
+  #   canvas-node-fill-hover: "<V1.70>"
+  #   canvas-node-border: "<V1.70>"
+  #   canvas-node-border-selected: "<V1.70>"
+  #   canvas-edge: "<V1.70>"
+  #   canvas-edge-hover: "<V1.70>"
+  #   canvas-port: "<V1.70>"
+  #   canvas-minimap: "<V1.70>"
+  #   canvas-strategy-accent: "<V1.70>"
+---
+
 # Nexus Local Web UI Design System
 
-<!-- COMPLETENESS_LEVEL: 2 — Standard+, last audited 2026-06-25 -->
+<!-- COMPLETENESS_LEVEL: 3 — Production, last audited 2026-06-27 -->
 
 Nexus Local Web UI is a restrained, author-focused design system for the local-first **Control Room + Setup + Authoring** SPA. It should feel calm and trustworthy: quiet surfaces, dense but readable data, explicit status language, and high-confidence controls for local creative runtime work without making writers feel like they are operating infrastructure.
 
-This file is the light/default theme and the token-name SSOT. Dark values are listed beside light values below using the **same token names** so P1 can map both themes to CSS custom properties or Tailwind tokens from one source. A separate `DESIGN.dark.md` can be split out in V1.66 if the UI graduates to Production completeness.
+This file is the light/default theme and the token-value SSOT through the YAML frontmatter above. The Dark theme lives at [`DESIGN.dark.md`](DESIGN.dark.md) with the same token names and dark values. The Markdown body below is supplementary documentation: usage intent, interaction rules, content rules, and implementation mapping.
 
 Product inputs from `.mstar/knowledge/specs/web-ui-design-requirements.md`:
 
 - Primary persona: writers/authors, not engineers; calm and focused over dashboard anxiety.
 - Control Room screens are data-dense; Setup screens are form-dense with first-class validation and destructive-action confirmation.
-- V1.65 Authoring screens add outline editing, chapter structure tables, and a body read-only context menu. Product-manager design requirements are being amended in parallel; this Standard+ increment assumes browser V1.65 ships `Copy path` only, while `Open with` / `Reveal in file manager` wait for the V1.66 Tauri shell.
+- V1.65 Authoring screens add outline editing, chapter structure tables, and a body read-only context menu. Browser V1.65 ships `Copy path` only, while `Open with` / `Reveal in file manager` wait for the V1.66 Tauri shell.
 - WCAG 2.1 AA is the floor in both light and dark; focus rings, keyboard paths, status text, and reduced motion are non-negotiable.
 - Brand voice: helpful, plain, local-first, and consistent with CLI terms (`Work`, `preset`, `stage`, `finding`, `capability`).
 
@@ -18,74 +218,12 @@ Product inputs from `.mstar/knowledge/specs/web-ui-design-requirements.md`:
 
 ## Colors
 
-Color tokens follow the Geist-style intent scale: `100` background/quiet, `400` border, `700` solid fill, `900` secondary text, `1000` primary text. Use color for state and hierarchy, not decoration.
+Color values live in frontmatter `colors:`. Color tokens follow the Geist-style intent scale: `100` background/quiet, `400` border, `700` solid fill, `900` secondary text, `1000` primary text. Use color for state and hierarchy, not decoration.
 
-### Background
-
-| Token | Light | Dark | Use |
-| --- | --- | --- | --- |
-| `background-100` | `#ffffff` | `#0a0a0a` | App/page background, card fill |
-| `background-200` | `#fafafa` | `#111111` | Subtle panels, table header |
-| `background-300` | `#f5f5f5` | `#1a1a1a` | Hover/selected row background |
-
-### Gray (solid)
-
-| Token | Light | Dark | Use |
-| --- | --- | --- | --- |
-| `gray-100` | `#f5f5f5` | `#1f1f1f` | Disabled fill |
-| `gray-200` | `#eeeeee` | `#2a2a2a` | Subtle fill hover |
-| `gray-300` | `#e0e0e0` | `#3a3a3a` | Active subtle fill |
-| `gray-400` | `#c7c7c7` | `#525252` | Default border fallback |
-| `gray-500` | `#a3a3a3` | `#737373` | Hover border fallback |
-| `gray-600` | `#8a8a8a` | `#8a8a8a` | Active border fallback |
-| `gray-700` | `#666666` | `#a3a3a3` | Disabled/tertiary text |
-| `gray-800` | `#4a4a4a` | `#c7c7c7` | Strong secondary text |
-| `gray-900` | `#333333` | `#e0e0e0` | Secondary text/icons |
-| `gray-1000` | `#111111` | `#f5f5f5` | Primary text/icons |
-
-### Gray Alpha
-
-| Token | Light | Dark | Use |
-| --- | --- | --- | --- |
-| `gray-alpha-100` | `rgba(0,0,0,0.04)` | `rgba(255,255,255,0.06)` | Hover wash |
-| `gray-alpha-200` | `rgba(0,0,0,0.06)` | `rgba(255,255,255,0.08)` | Subtle separator |
-| `gray-alpha-300` | `rgba(0,0,0,0.08)` | `rgba(255,255,255,0.10)` | Active wash |
-| `gray-alpha-400` | `rgba(0,0,0,0.12)` | `rgba(255,255,255,0.16)` | Default border |
-| `gray-alpha-500` | `rgba(0,0,0,0.18)` | `rgba(255,255,255,0.22)` | Hover border |
-| `gray-alpha-600` | `rgba(0,0,0,0.24)` | `rgba(255,255,255,0.30)` | Active border / divider |
-
-### Accent Scales
-
-| Token | Light | Dark | Use |
-| --- | --- | --- | --- |
-| `blue-700` | `#006bff` | `#52a8ff` | Primary action, links, focus ring |
-| `blue-800` | `#0057d9` | `#7bbdff` | Primary hover |
-| `blue-900` | `#0046ad` | `#a8d3ff` | Secondary blue text |
-| `blue-1000` | `#003680` | `#d6ebff` | Strong blue text |
-| `red-700` | `#e5484d` | `#ff6b6b` | Error text, destructive icon |
-| `red-800` | `#d11f2a` | `#ff8585` | Destructive fill |
-| `red-900` | `#a91520` | `#ffb3b3` | Error secondary text |
-| `red-1000` | `#7f1018` | `#ffd6d6` | Error strong text |
-| `amber-700` | `#b76e00` | `#ffc043` | Warning text |
-| `amber-800` | `#935800` | `#ffd06a` | Warning fill/hover |
-| `amber-900` | `#704300` | `#ffe0a3` | Warning secondary text |
-| `amber-1000` | `#4d2d00` | `#fff0d0` | Warning strong text |
-| `green-700` | `#1f8f4d` | `#54d58a` | Healthy/running status |
-| `green-800` | `#18753e` | `#7ae0a3` | Healthy fill hover |
-| `green-900` | `#125a30` | `#a6ebc0` | Healthy secondary text |
-| `green-1000` | `#0d4023` | `#d4f7df` | Healthy strong text |
-| `teal-700` | `#008577` | `#4cd8c8` | Informational status |
-| `teal-800` | `#006b60` | `#75e4d7` | Informational hover |
-| `teal-900` | `#00524a` | `#a2eee6` | Informational secondary text |
-| `teal-1000` | `#003b35` | `#d2f8f4` | Informational strong text |
-| `purple-700` | `#7c3aed` | `#b794ff` | Capability/preset accent |
-| `purple-800` | `#6d28d9` | `#c5a8ff` | Capability/preset hover |
-| `purple-900` | `#581cbd` | `#d8c6ff` | Capability/preset secondary text |
-| `purple-1000` | `#3b1686` | `#eee5ff` | Capability/preset strong text |
-| `pink-700` | `#db2777` | `#ff8ac2` | Rare highlight, not primary state |
-| `pink-800` | `#be185d` | `#ffa6d0` | Highlight hover |
-| `pink-900` | `#9d174d` | `#ffc4df` | Highlight secondary text |
-| `pink-1000` | `#831843` | `#ffe3f0` | Highlight strong text |
+- Background values: see frontmatter `colors.background-*`. Background scale encodes surface hierarchy: `100` default, `200` subtle panel/table header, `300` hover/selected.
+- Gray values: see frontmatter `colors.gray-*`. Solid gray carries text, icons, disabled fills, and opaque border fallback.
+- Gray-alpha values: see frontmatter `colors.gray-alpha-*`. Alpha gray carries hover wash, separators, active wash, borders, and dividers over either theme.
+- Accent values: see frontmatter `colors.blue-*`, `red-*`, `amber-*`, `green-*`, `teal-*`, `purple-*`, and `pink-*`. Accent color carries semantic state and should not be decorative.
 
 ### Semantic Mapping
 
@@ -102,32 +240,20 @@ Color tokens follow the Geist-style intent scale: `100` background/quiet, `400` 
 
 ## Typography
 
-Use a system stack by default so the UI works without webfont fetch. If a future build bundles Geist, map `font-sans` to Geist Sans and `font-mono` to Geist Mono with the same token names. Prioritize long-session readability over visual novelty.
+Typography values live in frontmatter `typography:`. Use a system stack by default so the UI works without webfont fetch. If a future build bundles Geist, map `font-sans` to Geist Sans and `font-mono` to Geist Mono with the same token names. Prioritize long-session readability over visual novelty.
 
-### Font Families
+Font families:
 
-| Token | Value | Use |
-| --- | --- | --- |
-| `font-sans` | `Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif` | UI and prose |
-| `font-mono` | `"SFMono-Regular", "Cascadia Code", "Roboto Mono", Consolas, monospace` | IDs, ports, code-like values, tabular metrics |
+- `font-sans`: `Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif` for UI and prose.
+- `font-mono`: `"SFMono-Regular", "Cascadia Code", "Roboto Mono", Consolas, monospace` for IDs, ports, code-like values, and tabular metrics.
 
-### Type Scale
+Role intent:
 
-| Token | Font | Size | Weight | Line | Spacing | Use |
-| --- | --- | --- | --- | --- | --- | --- |
-| `heading-32` | `font-sans` | `32px` | `650` | `1.18` | `-0.025em` | Page title |
-| `heading-24` | `font-sans` | `24px` | `650` | `1.25` | `-0.02em` | View title / detail header |
-| `heading-20` | `font-sans` | `20px` | `600` | `1.3` | `-0.015em` | Card section title |
-| `heading-16` | `font-sans` | `16px` | `600` | `1.4` | `-0.01em` | Dense section title |
-| `label-14` | `font-sans` | `14px` | `500` | `1.35` | `0` | Form labels, nav labels |
-| `label-12` | `font-sans` | `12px` | `600` | `1.35` | `0.02em` | Table headers, badge labels |
-| `copy-16` | `font-sans` | `16px` | `400` | `1.6` | `0` | Primary body copy |
-| `copy-14` | `font-sans` | `14px` | `400` | `1.55` | `0` | Default UI copy |
-| `copy-13` | `font-sans` | `13px` | `400` | `1.5` | `0` | Dense helper text |
-| `button-14` | `font-sans` | `14px` | `550` | `1` | `0` | Default buttons |
-| `button-12` | `font-sans` | `12px` | `600` | `1` | `0.01em` | Compact buttons |
-| `label-12-mono` | `font-mono` | `12px` | `500` | `1.4` | `0` | IDs, schema versions, cursor values |
-| `copy-13-mono` | `font-mono` | `13px` | `400` | `1.5` | `0` | Code-like inline values |
+- `heading-*`: page titles, view titles, card section titles, and dense section titles.
+- `label-*`: form labels, nav labels, table headers, and badge labels.
+- `copy-*`: primary body copy, default UI copy, and dense helper text.
+- `button-*`: default and compact buttons.
+- `*-mono`: IDs, schema versions, cursor values, and code-like inline values.
 
 Numeric columns use `font-variant-numeric: tabular-nums`.
 
@@ -135,21 +261,7 @@ Numeric columns use `font-variant-numeric: tabular-nums`.
 
 ## Spacing & Layout
 
-Base unit: **4px**. Prefer mechanical spacing over bespoke values.
-
-### Spacing Scale
-
-| Token | Value | Use |
-| --- | --- | --- |
-| `space-1` | `4px` | Icon/text nudge |
-| `space-2` | `8px` | Inside a control group |
-| `space-3` | `12px` | Compact row gap |
-| `space-4` | `16px` | Related groups |
-| `space-6` | `24px` | Card padding default |
-| `space-8` | `32px` | Section spacing |
-| `space-10` | `40px` | Major view spacing |
-| `space-16` | `64px` | Page vertical rhythm |
-| `space-24` | `96px` | Empty-state breathing room |
+Spacing values live in frontmatter `spacing:`. Base unit: **4px**. Prefer mechanical spacing over bespoke values.
 
 ### Rhythm
 
@@ -208,50 +320,27 @@ Always honor `prefers-reduced-motion: reduce` by dropping nonessential transform
 
 ## Shapes
 
-Radii stay tight and utility-oriented.
+Radius values live in frontmatter `rounded:`. The previous `radius-*` semantic identity is preserved as `rounded.control/card/popover/fullscreen/pill`.
 
-| Token | Value | Use |
-| --- | --- | --- |
-| `radius-control` | `6px` | Buttons, inputs, select triggers |
-| `radius-card` | `8px` | Cards, table containers |
-| `radius-popover` | `12px` | Menus, dropdowns, modals |
-| `radius-fullscreen` | `16px` | Fullscreen panels or large sheets |
-| `radius-pill` | `9999px` | Badges, status pills, avatars |
-
-Do not mix very rounded and sharp corners in a single view.
+Radii stay tight and utility-oriented. Do not mix very rounded and sharp corners in a single view.
 
 ---
 
 ## Component Primitives
 
-All components must expose visible `:focus-visible` styles using a two-layer ring: `0 0 0 2px var(--color-background-100), 0 0 0 4px var(--color-blue-700)`.
+Component token values live in frontmatter `components:`. All components must expose visible `:focus-visible` styles using a two-layer ring: `0 0 0 2px var(--color-background-100), 0 0 0 4px var(--color-blue-700)`.
 
 ### Button
 
-| Variant | Background | Text | Border | Radius | Height | States |
-| --- | --- | --- | --- | --- | --- | --- |
-| `primary` | `blue-700` | `#ffffff` | none | `radius-control` | `40px` | hover `blue-800`, active `blue-900` |
-| `secondary` | `background-100` | `gray-1000` | `gray-alpha-400` | `radius-control` | `40px` | hover `background-200` + `gray-alpha-500` |
-| `tertiary` | `transparent` | `gray-1000` | none | `radius-control` | `40px` | hover `gray-alpha-100` |
-| `destructive` | `red-800` | `#ffffff` | none | `radius-control` | `40px` | hover `red-700`, active `red-900` |
-
-Sizes: `small` = `32px` height + `button-12`; `default` = `40px` + `button-14`; `large` = `48px` + `button-14`. Disabled: `gray-100` fill, `gray-700` text, not-allowed cursor.
-
-The preset `Validate` action uses `primary` when it is the main form action, or `secondary` with a `blue-700` leading icon when paired with a separate save action. It must read as reassurance (“is this safe?”), not as a debug-only tool.
+Variants and sizes: see frontmatter `components.button`. The preset `Validate` action uses `primary` when it is the main form action, or `secondary` with a `blue-700` leading icon when paired with a separate save action. It must read as reassurance (“is this safe?”), not as a debug-only tool.
 
 ### Input / Select / Textarea
 
-| Variant | Background | Text | Border | Radius | Height |
-| --- | --- | --- | --- | --- | --- |
-| `default` | `background-100` | `gray-1000` | `gray-alpha-400` | `radius-control` | `40px` |
-| `error` | `background-100` | `gray-1000` | `red-700` | `radius-control` | `40px` |
-| `disabled` | `gray-100` | `gray-700` | `gray-alpha-300` | `radius-control` | `40px` |
-
-Textarea min height: `96px`. Placeholder uses `gray-700`. Helper text uses `copy-13`; error helper uses `red-700`.
+Variants: see frontmatter `components.input-select-textarea`. Textarea min height: `96px`. Placeholder uses `gray-700`. Helper text uses `copy-13`; error helper uses `red-700`.
 
 ### Card
 
-Default card: `background-100`, `gray-alpha-400` border, `radius-card`, `space-6` padding, optional `shadow-card`. Compact card uses `space-4`; hero/status cards can use `space-8`.
+Default, compact, and hero/status card values: see frontmatter `components.card`.
 
 ### Table
 
@@ -262,52 +351,31 @@ Default card: `background-100`, `gray-alpha-400` border, `radius-card`, `space-6
 
 ### Badge / Status Pill
 
-| Variant | Background | Text | Border |
-| --- | --- | --- | --- |
-| `neutral` | `gray-alpha-100` | `gray-900` | `gray-alpha-300` |
-| `running` | `green-700` at 10% alpha | `green-1000` | `green-700` at 30% alpha |
-| `queued` | `teal-700` at 10% alpha | `teal-1000` | `teal-700` at 30% alpha |
-| `warning` | `amber-700` at 12% alpha | `amber-1000` | `amber-700` at 30% alpha |
-| `error` | `red-700` at 12% alpha | `red-1000` | `red-700` at 30% alpha |
-| `preset` | `purple-700` at 10% alpha | `purple-1000` | `purple-700` at 30% alpha |
-
-Height `24px`, horizontal padding `8px`, `radius-pill`, label token `label-12`.
+Variant values: see frontmatter `components.badge-status-pill`.
 
 ### Toast
 
-Toast: `background-100`, border `gray-alpha-400`, `shadow-popover`, `radius-popover`, width `360px` max. Title uses `label-14`; body uses `copy-13`. Variants use the semantic accent on the leading icon/bar. Toasts name the changed object; no trailing period.
+Toast values: see frontmatter `components.toast`. Variants use the semantic accent on the leading icon/bar. Toasts name the changed object; no trailing period.
 
 ### Sidebar Nav
 
-Sidebar width: `248px`. Background `background-100`; divider `gray-alpha-400`. Nav item height `36px`, radius `radius-control`, `label-14`. Active item uses `gray-alpha-100` fill + `gray-1000` text + optional left bar `blue-700`. Collapsed/mobile nav must keep labels accessible via text, not icon-only navigation.
+Sidebar values: see frontmatter `components.sidebar-nav`. Collapsed/mobile nav must keep labels accessible via text, not icon-only navigation.
 
 ### Dialog / Popover
 
-Dialog: `background-100`, `radius-popover`, `shadow-modal`, max width `560px`, `space-6` padding. Popover/menu: `background-100`, border `gray-alpha-400`, `shadow-popover`, `radius-popover`, item height `36px`.
+Dialog/popover values: see frontmatter `components.dialog` and `components.popover`.
 
 ### Editor (V1.65 Standard+)
 
 The outline editor is a planning surface, not the body manuscript editor. It should feel closer to an intentional note/workbench than a document processor: compact toolbar, clear save state, and no hidden background writes.
 
-| Token | Light | Dark | Use |
-| --- | --- | --- | --- |
-| `editor-surface` | `background-100` | `background-100` | Main editor panel |
-| `editor-surface-muted` | `background-200` | `background-200` | Toolbar and footer strip |
-| `editor-border` | `gray-alpha-400` | `gray-alpha-400` | Editor frame and toolbar divider |
-| `editor-border-active` | `blue-700` | `blue-700` | Focused editor frame |
-| `editor-toolbar-control-bg` | `transparent` | `transparent` | Default toolbar button |
-| `editor-toolbar-control-hover` | `gray-alpha-100` | `gray-alpha-100` | Toolbar button hover |
-| `editor-toolbar-control-active` | `gray-alpha-200` | `gray-alpha-200` | Active mark/block button |
-| `editor-save-clean` | `green-700` | `green-700` | Saved indicator dot/icon |
-| `editor-save-dirty` | `amber-700` | `amber-700` | Unsaved changes indicator |
-| `editor-save-error` | `red-700` | `red-700` | Save failed indicator |
-| `editor-selection` | `rgba(0,107,255,0.14)` | `rgba(82,168,255,0.24)` | Text selection in editor |
+Editor token values: see frontmatter `components.editor`.
 
 | Element | Token use | Size / rhythm | States |
 | --- | --- | --- | --- |
-| Editor frame | `editor-surface`, `editor-border`, `radius-card` | Min height `360px`; padding `space-6` | `:focus-within` swaps border to `editor-border-active` and uses global focus ring |
+| Editor frame | `editor-surface`, `editor-border`, `rounded.card` | Min height `360px`; padding `space-6` | `:focus-within` swaps border to `editor-border-active` and uses global focus ring |
 | Toolbar | `editor-surface-muted`, bottom border `editor-border` | Height `44px`; gap `space-1`; horizontal padding `space-2` | Sticky within editor panel if content scrolls |
-| Toolbar button | `button-12`, `radius-control` | `32px` square or min-width `32px` | hover `editor-toolbar-control-hover`; active `editor-toolbar-control-active` |
+| Toolbar button | `button-12`, `rounded.control` | `32px` square or min-width `32px` | hover `editor-toolbar-control-hover`; active `editor-toolbar-control-active` |
 | Save-state indicator | `label-12`, semantic dot | Dot `8px`; gap `space-2` | `Saved` green, `Unsaved` amber, `Save failed` red; always include text, not color alone |
 | Markdown helper | `copy-13`, `gray-900` | Footer padding `space-3` | Explain that body writing is read-only/deferred when relevant |
 
@@ -315,22 +383,12 @@ Editor content typography:
 
 - Prose defaults to `copy-16`; headings use `heading-24` / `heading-20` / `heading-16` in descending order.
 - Lists use `space-2` vertical rhythm and `space-6` indentation.
-- Inline code uses `copy-13-mono`, `gray-alpha-100` background, `radius-control`, horizontal padding `4px`.
+- Inline code uses `copy-13-mono`, `gray-alpha-100` background, `rounded.control`, horizontal padding `4px`.
 - Unknown markdown/frontmatter preservation warnings use `amber-700` icon + `copy-13` text.
 
 ### Data Table (V1.65 Standard+)
 
-Chapter structure tables extend the base `Table` primitive with inline-edit and chapter-status semantics.
-
-| Token | Light | Dark | Use |
-| --- | --- | --- | --- |
-| `table-row-hover` | `background-200` | `background-200` | Row hover |
-| `table-row-selected` | `background-300` | `background-300` | Selected/focused chapter row |
-| `table-row-edited` | `rgba(183,110,0,0.08)` | `rgba(255,192,67,0.14)` | Row with unsaved inline edits |
-| `table-row-protected` | `rgba(124,58,237,0.06)` | `rgba(183,148,255,0.12)` | Finalized/published protected row emphasis |
-| `table-cell-edit-bg` | `background-100` | `background-100` | Inline edit control background |
-| `table-cell-edit-border` | `blue-700` | `blue-700` | Active inline edit border |
-| `table-column-divider` | `gray-alpha-200` | `gray-alpha-200` | Optional dense-column separator |
+Chapter structure tables extend the base `Table` primitive with inline-edit and chapter-status semantics. Token values: see frontmatter `components.data-table`.
 
 Chapter status badge mapping:
 
@@ -352,20 +410,11 @@ Inline edit rules:
 
 ### Context Menu (V1.65 Standard+)
 
-The V1.65 browser context menu is intentionally narrow: **Copy path** only for body/outline path affordances. Native `Open with` and `Reveal in file manager` are V1.66 Tauri-shell capabilities.
-
-| Token | Light | Dark | Use |
-| --- | --- | --- | --- |
-| `context-menu-bg` | `background-100` | `background-100` | Menu surface |
-| `context-menu-border` | `gray-alpha-400` | `gray-alpha-400` | Menu border |
-| `context-menu-item-hover` | `gray-alpha-100` | `gray-alpha-100` | Item hover/focus |
-| `context-menu-item-active` | `gray-alpha-200` | `gray-alpha-200` | Pressed item |
-| `context-menu-item-disabled` | `gray-700` | `gray-700` | Disabled future native actions if shown as roadmap hints |
-| `context-menu-shortcut` | `gray-700` | `gray-700` | Shortcut hint text |
+The V1.65 browser context menu is intentionally narrow: **Copy path** only for body/outline path affordances. Native `Open with` and `Reveal in file manager` are V1.66 Tauri-shell capabilities. Token values: see frontmatter `components.context-menu`.
 
 | Element | Token use | Size / rhythm | States |
 | --- | --- | --- | --- |
-| Menu surface | `context-menu-bg`, `context-menu-border`, `shadow-popover`, `radius-popover` | Min width `180px`; padding `space-1` | Opens near pointer/focused row; closes on Escape |
+| Menu surface | `context-menu-bg`, `context-menu-border`, `shadow-popover`, `rounded.popover` | Min width `180px`; padding `space-1` | Opens near pointer/focused row; closes on Escape |
 | Menu item | `copy-14`, `gray-1000` | Height `36px`; horizontal padding `space-3`; gap `space-2` | hover/focus `context-menu-item-hover`; active `context-menu-item-active` |
 | Path preview | `copy-13-mono`, `gray-900` | Max width `320px`, truncates middle when needed | Read-only; never expose absolute path unless API returns it intentionally |
 
@@ -374,6 +423,14 @@ Copy-path behavior:
 - The action label is `Copy Path`; success toast is `Path copied`.
 - If clipboard write fails, show `Path not copied. Copy it manually from the details panel.`
 - Menu items must be keyboard reachable from the row/body read-only surface.
+
+---
+
+## Canvas Surface (V1.70 placeholder)
+
+Canvas token names are stubbed in frontmatter `components.canvas` as commented LEVEL placeholders. They are not consumed in V1.69. The canonical Draft list lives in `.mstar/knowledge/specs/canvas-strategy-surface.md` §3.6 / B4 and gives V1.70 a reviewed target for infinite-canvas surfaces.
+
+Minimal placeholder set: `canvas-surface`, `canvas-grid`, `canvas-node-fill`, `canvas-node-fill-hover`, `canvas-node-border`, `canvas-node-border-selected`, `canvas-edge`, `canvas-edge-hover`, `canvas-port`, `canvas-minimap`, `canvas-strategy-accent`.
 
 ---
 
@@ -400,9 +457,9 @@ Nexus UI copy should sound like a careful CLI message translated into a local da
 
 - Map color tokens to CSS variables: `--color-background-100`, `--color-gray-1000`, etc.
 - Tailwind should reference CSS variables, not hard-coded hex values inside components.
-- Shadcn component defaults should read from the component primitive tables above.
+- Shadcn component defaults should read from the component primitive entries above.
 - `data-theme="dark"` or a root class may swap values; token names must remain identical.
-- Production-level split into `DESIGN.dark.md`, richer component specs, and rendered visual QA are deferred to V1.67+.
+- Production-level split is now active: `DESIGN.md` holds light frontmatter values; `DESIGN.dark.md` holds dark frontmatter values.
 
 ---
 
@@ -423,13 +480,7 @@ The V1.66 Tauri desktop shell ([desktop-shell.md](../.mstar/knowledge/specs/desk
 
 ### Desktop Window Chrome
 
-| Token | Light | Dark | Use |
-| --- | --- | --- | --- |
-| `desktop-window-bg` | `background-100` | `background-100` | Main desktop window content background |
-| `desktop-window-border` | `gray-alpha-400` | `gray-alpha-400` | Internal separators below OS chrome |
-| `desktop-titlebar-safe-area` | `28px` | `28px` | Minimum vertical reserve when content approaches the native traffic-light region |
-| `desktop-window-radius` | `radius-card` | `radius-card` | In-app panels only; do not override native window corner radius |
-| `desktop-window-drag-region-height` | `0px` | `0px` | V1.66 uses native OS chrome; custom drag regions deferred |
+Desktop token values: see frontmatter `components.desktop-window-chrome`.
 
 Rules:
 - Do not implement a custom title bar in V1.66.
@@ -447,22 +498,11 @@ Rules:
 | `Window` | Minimize, Zoom, Bring All to Front | Native defaults |
 | `Help` | Open Logs Folder, Copy Diagnostics | Keep author-facing copy; avoid protocol jargon |
 
-| Token | Light | Dark | Use |
-| --- | --- | --- | --- |
-| `desktop-menu-label` | `gray-1000` | `gray-1000` | Menu item text |
-| `desktop-menu-secondary` | `gray-700` | `gray-700` | Shortcut/help text |
-| `desktop-menu-disabled` | `gray-700` | `gray-700` | Disabled roadmap items |
-| `desktop-menu-danger` | `red-700` | `red-700` | Destructive menu items, if any |
+App menu token values: see frontmatter `components.app-menu`.
 
 ### Native Dialogs
 
-| Token | Light | Dark | Use |
-| --- | --- | --- | --- |
-| `native-dialog-title` | `heading-20` | `heading-20` | Dialog title |
-| `native-dialog-body` | `copy-14` | `copy-14` | Dialog body copy |
-| `native-dialog-secondary` | `gray-900` | `gray-900` | Recovery/help text |
-| `native-dialog-danger` | `red-700` | `red-700` | Irreversible action emphasis |
-| `native-dialog-warning` | `amber-700` | `amber-700` | Daemon degraded/restart warnings |
+Native dialog token values: see frontmatter `components.native-dialogs`.
 
 Copy rules:
 - Sentence case in dialog bodies.
@@ -471,14 +511,7 @@ Copy rules:
 
 ### Desktop Context Menu
 
-Desktop mode extends the V1.65 context-menu tokens with native file actions.
-
-| Token | Light | Dark | Use |
-| --- | --- | --- | --- |
-| `context-menu-native-action` | `gray-1000` | `gray-1000` | `Open With…`, `Reveal in Finder` |
-| `context-menu-native-icon` | `gray-900` | `gray-900` | Leading native-action icon |
-| `context-menu-native-disabled` | `gray-700` | `gray-700` | Native action unavailable or path outside workspace |
-| `context-menu-native-danger` | `red-700` | `red-700` | Reserved for future destructive file actions |
+Desktop mode extends the V1.65 context-menu tokens with native file actions. Token values: see frontmatter `components.context-menu`.
 
 Behavior rules:
 - Browser mode shows `Copy Path` only.
@@ -489,16 +522,7 @@ Behavior rules:
 
 ### Daemon Status Indicator
 
-| Token | Light | Dark | Use |
-| --- | --- | --- | --- |
-| `daemon-status-healthy-bg` | `rgba(31,143,77,0.10)` | `rgba(84,213,138,0.14)` | Healthy daemon pill background |
-| `daemon-status-healthy-text` | `green-1000` | `green-1000` | Healthy daemon text |
-| `daemon-status-starting-bg` | `rgba(0,133,119,0.10)` | `rgba(76,216,200,0.14)` | Starting/probing background |
-| `daemon-status-starting-text` | `teal-1000` | `teal-1000` | Starting/probing text |
-| `daemon-status-degraded-bg` | `rgba(183,110,0,0.12)` | `rgba(255,192,67,0.16)` | Degraded/retrying background |
-| `daemon-status-degraded-text` | `amber-1000` | `amber-1000` | Degraded/retrying text |
-| `daemon-status-stopped-bg` | `rgba(229,72,77,0.12)` | `rgba(255,107,107,0.16)` | Stopped/error background |
-| `daemon-status-stopped-text` | `red-1000` | `red-1000` | Stopped/error text |
+Daemon status token values: see frontmatter `components.daemon-status-indicator`.
 
 Status labels:
 
