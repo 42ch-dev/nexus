@@ -14,10 +14,10 @@
  *    primitives (`fetch` / `window.__TAURI__`).
  *
  * 2. **TauriClient transport parity (V1.66 §5 #1).** `TauriClient` is thin-over-
- *    `BrowserClient`: the 21 data methods reuse the identical HTTP transport to
- *    the resolved desktop loopback origin. This pins that contract — every data
- *    method hits the same `/v1/local/*` path as `BrowserClient`, just against
- *    `http://127.0.0.1:<port>`.
+ *    `BrowserClient`: the 24 `NexusClient` methods reuse the identical HTTP
+ *    transport to the resolved desktop loopback origin. This pins that contract
+ *    — every data method hits the same `/v1/local/*` path as `BrowserClient`,
+ *    just against `http://127.0.0.1:<port>`.
  *
  * 3. **Adapter contract enforcement.** The success/envelope/network paths are
  *    covered in browser-client.test.ts; here we pin the *contract* edges those
@@ -28,7 +28,7 @@
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 
-import { BrowserClient, NexusClientError } from '@/lib/nexus';
+import { BrowserClient, NexusClientError, type NexusClient } from '@/lib/nexus';
 import { TauriClient, resolveDesktopPort } from '@/lib/nexus/tauri-client';
 import { useHandlers } from '@/test/msw-server';
 import { createWorkCreated, healthOk, worksList } from '@/test/handlers';
@@ -123,7 +123,10 @@ describe('TauriClient transport parity (thin-over-BrowserClient)', () => {
     };
     const client = new TauriClient({ fetchImpl });
     const workId = 'w1';
-    // Exercise all 21 NexusClient methods (health + 20 data).
+    // Exercise all 24 NexusClient methods (health + 23 data). The three
+    // preset methods (getPreset/updatePreset/deletePreset) were promoted in
+    // V1.67 G2 (R-V167P1-QC3-S1) — they must hit the same transport as the
+    // rest of the surface, not silently no-op.
     await client.health();
     await client.listWorks();
     await client.getWork(workId);
@@ -139,6 +142,9 @@ describe('TauriClient transport parity (thin-over-BrowserClient)', () => {
     await client.scaffoldPreset({ name: 'foo' });
     await client.validatePreset({ path: '/p.yaml' });
     await client.reloadPreset('foo');
+    await client.getPreset('foo');
+    await client.updatePreset('foo', { yaml: 'name: foo\n' });
+    await client.deletePreset('foo');
     await client.listChapters(workId);
     await client.getChapter(workId, 1);
     await client.getChapterOutline(workId, 1);
@@ -151,10 +157,14 @@ describe('TauriClient transport parity (thin-over-BrowserClient)', () => {
     // stub did — its path would be missing and this set would be smaller.
     const paths = [...seen].sort();
     expect(paths.every((p) => p.includes('/v1/local/'))).toBe(true);
-    expect(seen.size).toBe(21);
+    expect(seen.size).toBe(24);
     // Spot-check the chapter surface (the Q5 action target).
     expect(seen).toContain('GET /v1/local/works/w1/chapters/1/body');
     expect(seen).toContain('GET /v1/local/works/w1/chapters/1/outline');
+    // Spot-check the V1.67 G2 preset-promotion surface.
+    expect(seen).toContain('GET /v1/local/presets/foo');
+    expect(seen).toContain('PATCH /v1/local/presets/foo');
+    expect(seen).toContain('DELETE /v1/local/presets/foo');
   });
 });
 
@@ -292,6 +302,44 @@ describe('BrowserClient adapter contract', () => {
     expect(reloaded.reloaded).toBe('foo');
   });
 
+  it('routes the V1.67 G2 preset methods to the {id} path with the right verb (get/update/delete)', async () => {
+    // Contract edge: the three promoted preset methods (getPreset/updatePreset/
+    // deletePreset) target `/v1/local/presets/{id}` with GET/PATCH/DELETE and
+    // URL-encode the id into the path. Pinned here via the `fetchImpl` seam
+    // (this file owns the adapter boundary — fetchImpl injection + path
+    // serialization + 204 handling) rather than in browser-client.test.ts,
+    // which owns the behavioral response shapes. R-V167P1-QC3-S1.
+    const seen: { method: string; url: string; body?: unknown }[] = [];
+    const fetchImpl: typeof fetch = async (input, init) => {
+      seen.push({
+        method: init?.method ?? 'GET',
+        url: String(input),
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      });
+      if ((init?.method ?? 'GET') === 'DELETE') {
+        return new Response(null, { status: 204 });
+      }
+      return new Response(
+        JSON.stringify({ id: 'user/foo', source: 'user', path: 'p.yaml', yaml: 'name: x\n', updated: true }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    };
+
+    const client = new BrowserClient({ fetchImpl });
+    await client.getPreset('user/foo');
+    await client.updatePreset('user/foo', { yaml: 'name: x\n' });
+    // deletePreset returns void on 204 — resolves without throwing.
+    await expect(client.deletePreset('user/foo')).resolves.toBeUndefined();
+
+    // The id (`user/foo`) is encoded into the path as `user%2Ffoo`; PATCH
+    // carries the YAML body; DELETE emits no body.
+    expect(seen).toEqual([
+      { method: 'GET', url: '/v1/local/presets/user%2Ffoo' },
+      { method: 'PATCH', url: '/v1/local/presets/user%2Ffoo', body: { yaml: 'name: x\n' } },
+      { method: 'DELETE', url: '/v1/local/presets/user%2Ffoo' },
+    ]);
+  });
+
   it('sends a PATCH with a JSON body for patchWork', async () => {
     let receivedMethod = '';
     let receivedBody: unknown = null;
@@ -322,5 +370,52 @@ describe('NexusClientError contract (adapter surface)', () => {
     expect(err).toBeInstanceOf(NexusClientError);
     expect(err).toBeInstanceOf(Error);
     expect(err.name).toBe('NexusClientError');
+  });
+});
+
+// ── 4. Preset-method parity guard (R-V167P1-QC3-S1) ─────────────────────────
+
+/**
+ * The V1.67 G2 preset promotion (getPreset/updatePreset/deletePreset) added
+ * three methods to the `NexusClient` interface. This guard fails — at compile
+ * time or runtime — if the interface and either adapter implementation drift
+ * on those methods:
+ *  - Compile-time: the `satisfies readonly (keyof NexusClient)[]` constraint
+ *    makes a future interface removal/rename a type error in this file.
+ *  - Runtime: the tests below make a missing adapter implementation a test
+ *    failure. (`class BrowserClient implements NexusClient` already enforces
+ *    presence at compile time; the runtime check pins it against this curated
+ *    list so a future override that drops a method is caught by the suite, not
+ *    just tsc.)
+ */
+const PRESET_METHODS = [
+  'getPreset',
+  'updatePreset',
+  'deletePreset',
+] as const satisfies readonly (keyof NexusClient)[];
+
+describe('NexusClient preset-method parity guard (R-V167P1-QC3-S1)', () => {
+  it('BrowserClient implements every preset method on the NexusClient interface', () => {
+    const client = new BrowserClient();
+    for (const method of PRESET_METHODS) {
+      expect(typeof client[method], `BrowserClient.${method} must be a function`).toBe('function');
+    }
+  });
+
+  it('TauriClient implements every preset method on the NexusClient interface', () => {
+    // TauriClient is thin-over-BrowserClient (extends it); the guard pins that
+    // the inheritance is not accidentally broken by a future override that
+    // drops a preset method. The methods are never invoked here, so the
+    // fetchImpl is a defensive stub only.
+    const client = new TauriClient({
+      fetchImpl: async () =>
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    });
+    for (const method of PRESET_METHODS) {
+      expect(typeof client[method], `TauriClient.${method} must be a function`).toBe('function');
+    }
   });
 });
