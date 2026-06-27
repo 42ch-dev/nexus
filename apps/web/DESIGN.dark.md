@@ -183,19 +183,19 @@ components:
     stopped-bg: "rgba(255,107,107,0.16)"
     stopped-text: "{colors.red-1000}"
 
-  # LEVEL PLACEHOLDER — V1.70 canvas implement (same token names as DESIGN.md)
-  # canvas:
-  #   canvas-surface: "<V1.70>"
-  #   canvas-grid: "<V1.70>"
-  #   canvas-node-fill: "<V1.70>"
-  #   canvas-node-fill-hover: "<V1.70>"
-  #   canvas-node-border: "<V1.70>"
-  #   canvas-node-border-selected: "<V1.70>"
-  #   canvas-edge: "<V1.70>"
-  #   canvas-edge-hover: "<V1.70>"
-  #   canvas-port: "<V1.70>"
-  #   canvas-minimap: "<V1.70>"
-  #   canvas-strategy-accent: "<V1.70>"
+  # V1.70 canvas implement — concrete dark values (same token names as DESIGN.md)
+  canvas:
+    canvas-surface: "#141414"
+    canvas-grid: "rgba(255,255,255,0.05)"
+    canvas-node-fill: "#1a1a1a"
+    canvas-node-fill-hover: "#2a2a2a"
+    canvas-node-border: "rgba(255,255,255,0.18)"
+    canvas-node-border-selected: "{colors.blue-700}"
+    canvas-edge: "{colors.gray-400}"
+    canvas-edge-hover: "{colors.gray-800}"
+    canvas-port: "{colors.gray-700}"
+    canvas-minimap: "{colors.gray-alpha-500}"
+    canvas-strategy-accent: "{colors.purple-700}"
 ---
 
 # Nexus Local Web UI Design System — Dark Theme

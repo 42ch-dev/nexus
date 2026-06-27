@@ -109,6 +109,22 @@ const config: Config = {
           900: cv('pink-900'),
           1000: cv('pink-1000'),
         },
+        // Canvas surface — DESIGN.md §Canvas Surface (V1.70). Infinite-canvas
+        // graph primitives (background, grid, node fill/border, edges, ports,
+        // minimap, Strategy accent). Theme-dependent → CSS vars in index.css.
+        canvas: {
+          surface: cv('canvas-surface'),
+          grid: cv('canvas-grid'),
+          'node-fill': cv('canvas-node-fill'),
+          'node-fill-hover': cv('canvas-node-fill-hover'),
+          'node-border': cv('canvas-node-border'),
+          'node-border-selected': cv('canvas-node-border-selected'),
+          edge: cv('canvas-edge'),
+          'edge-hover': cv('canvas-edge-hover'),
+          port: cv('canvas-port'),
+          minimap: cv('canvas-minimap'),
+          'strategy-accent': cv('canvas-strategy-accent'),
+        },
       },
       fontFamily: {
         sans: 'var(--font-sans)',

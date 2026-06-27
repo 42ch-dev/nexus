@@ -13,6 +13,7 @@ const ROUTE_TITLES: Record<string, string> = {
   '/capabilities': 'Capabilities',
   '/findings': 'Findings',
   '/presets': 'Presets',
+  '/strategy': 'Strategy',
 };
 
 /** Resolve the header title from the active top-level route. */
