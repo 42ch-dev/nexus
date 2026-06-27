@@ -64,8 +64,8 @@ const VALID_STATUSES: &[&str] = &["draft", "reviewed", "accepted"];
 
 /// Validate that `from → to` is a legal transition.
 ///
-/// Returns the new status string on success.
-fn validate_transition(from: &str, to: &str) -> Result<&'static str, CapabilityError> {
+/// V1.67 P2 (R-V160P1-QC1-W001): shared with `script.section_status.update`.
+pub fn validate_transition(from: &str, to: &str) -> Result<&'static str, CapabilityError> {
     // Validate status values are known
     if !VALID_STATUSES.contains(&from) {
         return Err(CapabilityError::InputInvalid(format!(
@@ -103,7 +103,9 @@ fn validate_transition(from: &str, to: &str) -> Result<&'static str, CapabilityE
 /// Parse YAML frontmatter from a file's content.
 ///
 /// Returns the frontmatter lines (between `---` delimiters) and the body content.
-fn parse_frontmatter(content: &str) -> Result<(Vec<String>, usize, usize), CapabilityError> {
+///
+/// V1.67 P2 (R-V160P1-QC1-W001): shared with `script.section_status.update`.
+pub fn parse_frontmatter(content: &str) -> Result<(Vec<String>, usize, usize), CapabilityError> {
     let lines: Vec<&str> = content.lines().collect();
     if lines.is_empty() || lines[0].trim() != "---" {
         return Err(CapabilityError::InputInvalid(
@@ -132,7 +134,9 @@ fn parse_frontmatter(content: &str) -> Result<(Vec<String>, usize, usize), Capab
 ///
 /// Uses line-based matching: finds `key:` lines and replaces the value.
 /// Preserves all other frontmatter fields and body content.
-fn replace_frontmatter_field(
+///
+/// V1.67 P2 (R-V160P1-QC1-W001): shared with `script.section_status.update`.
+pub fn replace_frontmatter_field(
     content: &str,
     key: &str,
     new_value: &str,
@@ -226,7 +230,9 @@ fn replace_frontmatter_field(
 }
 
 /// Write a file atomically using temp+rename.
-fn atomic_write(path: &Path, content: &str) -> Result<(), CapabilityError> {
+///
+/// V1.67 P2 (R-V160P1-QC1-W001): shared with `script.section_status.update`.
+pub fn atomic_write(path: &Path, content: &str) -> Result<(), CapabilityError> {
     let tmp = path.with_extension("tmp");
     std::fs::write(&tmp, content)
         .map_err(|e| CapabilityError::Internal(format!("write tmp {}: {e}", tmp.display())))?;
@@ -301,6 +307,23 @@ impl Capability for GameBibleSectionStatusUpdate {
         let design_dir = work_dir.join("Design");
         let section_full_path = design_dir.join(&inp.section_path);
 
+        // Guard against path-traversal in section_path (e.g. "../../.ssh/authorized_keys").
+        let design_dir_canonical = std::fs::canonicalize(&design_dir).map_err(|e| {
+            CapabilityError::InputInvalid(format!("cannot resolve design dir: {e}"))
+        })?;
+        let section_canonical = std::fs::canonicalize(&section_full_path).map_err(|_| {
+            CapabilityError::InputInvalid(format!(
+                "section not found: Design/{} under work '{work_ref}'",
+                inp.section_path
+            ))
+        })?;
+        if !section_canonical.starts_with(&design_dir_canonical) {
+            return Err(CapabilityError::InputInvalid(format!(
+                "section_path '{}' must be within the Design directory",
+                inp.section_path
+            )));
+        }
+
         info!(
             work_ref = %work_ref,
             section_path = %inp.section_path,
@@ -309,16 +332,8 @@ impl Capability for GameBibleSectionStatusUpdate {
             "game_bible.section_status.update: start"
         );
 
-        // Check section file exists
-        if !section_full_path.exists() {
-            return Err(CapabilityError::InputInvalid(format!(
-                "section not found: Design/{} under work '{work_ref}'",
-                inp.section_path
-            )));
-        }
-
-        // Read current content
-        let content = std::fs::read_to_string(&section_full_path).map_err(|e| {
+        // Read current content (use canonical path to close TOCTOU)
+        let content = std::fs::read_to_string(&section_canonical).map_err(|e| {
             CapabilityError::Internal(format!(
                 "read section file {}: {e}",
                 section_full_path.display()
@@ -335,8 +350,8 @@ impl Capability for GameBibleSectionStatusUpdate {
         let updated_content =
             replace_frontmatter_field(&content, "section_status", &inp.new_status)?;
 
-        // Atomic write via temp+rename
-        atomic_write(&section_full_path, &updated_content)?;
+        // Atomic write via temp+rename (use canonical path)
+        atomic_write(&section_canonical, &updated_content)?;
 
         info!(
             work_ref = %work_ref,
@@ -349,7 +364,7 @@ impl Capability for GameBibleSectionStatusUpdate {
         let output = SectionStatusOutput {
             updated: true,
             new_section_status: inp.new_status,
-            section_path: section_full_path.display().to_string(),
+            section_path: section_canonical.display().to_string(),
         };
 
         serde_json::to_value(output).map_err(|e| {
@@ -359,7 +374,9 @@ impl Capability for GameBibleSectionStatusUpdate {
 }
 
 /// Extract a frontmatter field value from YAML frontmatter content.
-fn extract_frontmatter_field(content: &str, key: &str) -> Result<String, CapabilityError> {
+///
+/// V1.67 P2 (R-V160P1-QC1-W001): shared with `script.section_status.update`.
+pub fn extract_frontmatter_field(content: &str, key: &str) -> Result<String, CapabilityError> {
     let parsed = parse_frontmatter(content)?;
     let fm_lines = parsed.0;
 

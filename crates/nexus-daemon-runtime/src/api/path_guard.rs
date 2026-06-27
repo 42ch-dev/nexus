@@ -19,6 +19,14 @@ use std::path::{Path, PathBuf};
 /// intermediate directories are accepted as long as they would be created
 /// inside the root.
 ///
+/// # TOCTOU note
+///
+/// There is a small race window between canonicalizing the workspace root and
+/// canonicalizing the requested path: a local attacker with filesystem access
+/// could replace either path during that window. This guard is authoritative
+/// for the single-user local daemon context; adversarial multi-user FS access
+/// is out of V1.66/V1.67 scope and tracked by `R-V166-QC2-TOCTOU`.
+///
 /// # Errors
 ///
 /// Returns `NexusApiError::BadRequest` with `CHAPTER_PATH_*` codes when the
@@ -31,7 +39,7 @@ pub fn resolve_guarded_path(
 ) -> Result<PathBuf, NexusApiError> {
     if rel_path.is_empty() {
         return Err(NexusApiError::BadRequest {
-            code: "CHAPTER_PATH_EMPTY".to_string(),
+            code: "chapter_path_empty".to_string(),
             message: "chapter path is empty".to_string(),
         });
     }
@@ -46,7 +54,7 @@ pub fn resolve_guarded_path(
         let canonical_target = joined
             .canonicalize()
             .map_err(|e| NexusApiError::BadRequest {
-                code: "CHAPTER_PATH_UNRESOLVABLE".to_string(),
+                code: "chapter_path_unresolvable".to_string(),
                 message: format!("cannot resolve chapter path '{rel_path}': {e}"),
             })?;
         // Component-wise comparison (Path::starts_with). A plain string prefix
@@ -54,7 +62,7 @@ pub fn resolve_guarded_path(
         // root because the string starts with "/home/user".
         if !canonical_target.starts_with(&canonical_root) {
             return Err(NexusApiError::BadRequest {
-                code: "CHAPTER_PATH_FORBIDDEN".to_string(),
+                code: "chapter_path_forbidden".to_string(),
                 message: format!("chapter path '{rel_path}' escapes workspace root"),
             });
         }
@@ -70,7 +78,7 @@ pub fn resolve_guarded_path(
                 // Component-wise comparison (Path::starts_with) — see read branch.
                 if !canonical.starts_with(&canonical_root) {
                     return Err(NexusApiError::BadRequest {
-                        code: "CHAPTER_PATH_FORBIDDEN".to_string(),
+                        code: "chapter_path_forbidden".to_string(),
                         message: format!("chapter path '{rel_path}' escapes workspace root"),
                     });
                 }
@@ -80,7 +88,7 @@ pub fn resolve_guarded_path(
                 Some(parent) => probe = parent,
                 None => {
                     return Err(NexusApiError::BadRequest {
-                        code: "CHAPTER_PATH_FORBIDDEN".to_string(),
+                        code: "chapter_path_forbidden".to_string(),
                         message: format!(
                             "chapter path '{rel_path}' has no parent inside workspace root"
                         ),

@@ -190,7 +190,7 @@ describe('BrowserClient adapter contract', () => {
     useHandlers(
       http.get('/v1/local/works', ({ request }) => {
         requestedUrl = request.url;
-        return HttpResponse.json({ works: [], pagination: { limit: 5, has_more: false } });
+        return HttpResponse.json({ items: [], pagination: { limit: 5, has_more: false } });
       }),
     );
 
@@ -206,7 +206,7 @@ describe('BrowserClient adapter contract', () => {
     useHandlers(
       http.get('/v1/local/works', ({ request }) => {
         captured.url = request.url;
-        return HttpResponse.json({ works: [], pagination: { limit: 20, has_more: false } });
+        return HttpResponse.json({ items: [], pagination: { limit: 20, has_more: false } });
       }),
     );
 
@@ -251,7 +251,7 @@ describe('BrowserClient adapter contract', () => {
     expect(health).toEqual({ status: 'ok', version: '0.9.9' });
 
     const works = await client.listWorks();
-    expect(works.works).toEqual([{ work_id: 'w1' }]);
+    expect(works.items).toEqual([{ work_id: 'w1' }]);
 
     const created = await client.createWork({ title: 'Hello', long_term_goal: '', initial_idea: '' });
     expect(created.work_id).toBe('w-new');

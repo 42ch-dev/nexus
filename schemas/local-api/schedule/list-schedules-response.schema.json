@@ -1,17 +1,18 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://nexus42.invalid/schemas/local-api/schedule/list-schedules-response.schema.json",
-  "schema_version": 1,
+  "schema_version": 2,
   "title": "Nexus ListSchedulesResponse",
-  "description": "Response for GET /v1/local/orchestration/schedules.",
+  "description": "Response for GET /v1/local/orchestration/schedules (cursor-based pagination, F-P3). The array field is `items`; the legacy `schedules` key was removed in `@42ch/nexus-contracts` 0.6.0.",
   "type": "object",
-  "required": ["schedules"],
+  "required": ["items", "pagination"],
   "properties": {
-    "schedules": {
+    "items": {
       "type": "array",
       "items": { "$ref": "https://nexus42.invalid/schemas/local-api/schedule/schedule-summary.schema.json" },
       "description": "List of schedule summaries."
-    }
+    },
+    "pagination": { "$ref": "https://nexus42.invalid/schemas/local-api/kb/pagination-info.schema.json" }
   },
   "additionalProperties": false
 }

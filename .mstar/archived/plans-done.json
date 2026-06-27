@@ -309,7 +309,15 @@
     "2026-06-25-v1.66-hygiene-residuals",
     "2026-06-25-v1.66-sidecar-lifecycle-and-ci",
     "2026-06-25-v1.66-mid-meta-tracking",
-    "2026-06-25-v1.66-residual-convergence-and-closeout"
+    "2026-06-25-v1.66-residual-convergence-and-closeout",
+    "2026-06-26-v1.67-compass-and-plan-stubs",
+    "2026-06-26-v1.67-canvas-strategy-exploration",
+    "2026-06-26-v1.67-local-api-surface-convergence",
+    "2026-06-26-v1.67-desktop-shell-polish",
+    "2026-06-26-v1.67-frontend-scope-gaps",
+    "2026-06-26-v1.67-overdue-debt-closure",
+    "2026-06-26-v1.67-mid-meta-tracking",
+    "2026-06-26-v1.67-residual-convergence-and-closeout"
   ],
   "iteration_summaries": {
     "v1.45": {

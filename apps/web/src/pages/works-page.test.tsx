@@ -26,7 +26,7 @@ describe('WorksPage', () => {
     useHandlers(
       http.get('/v1/local/works', () =>
         HttpResponse.json({
-          works: [
+          items: [
             {
               work_id: 'w-123',
               title: 'Galaxy Novel',
@@ -53,7 +53,7 @@ describe('WorksPage', () => {
   it('renders the empty state when there are no works', async () => {
     useHandlers(
       http.get('/v1/local/works', () =>
-        HttpResponse.json({ works: [], pagination: { limit: 20, has_more: false } }),
+        HttpResponse.json({ items: [], pagination: { limit: 20, has_more: false } }),
       ),
     );
 
@@ -83,7 +83,7 @@ describe('WorksPage', () => {
   it('offers a Create Work action that opens the create dialog', async () => {
     useHandlers(
       http.get('/v1/local/works', () =>
-        HttpResponse.json({ works: [], pagination: { limit: 20, has_more: false } }),
+        HttpResponse.json({ items: [], pagination: { limit: 20, has_more: false } }),
       ),
     );
 

@@ -64,7 +64,7 @@ Spec files live **flat** in this directory except **`novel-writing/`** — the n
 | [entity-scope-model.md](entity-scope-model.md) | Master | Normative — V1.40 Shipped §5.1.1; V1.51 Shipped §5.5.6; **V1.62 Shipped** §5.5.9 (computable-flag + structured validation) |
 | [local-runtime-boundary.md](local-runtime-boundary.md) | Master | Normative |
 | [schemas-directory-layout.md](schemas-directory-layout.md) | Master | Normative — V1.64 Shipped (local-api common + findings list-response) |
-| [local-api-surface-conventions.md](local-api-surface-conventions.md) | Master | Normative — V1.64 Shipped |
+| [local-api-surface-conventions.md](local-api-surface-conventions.md) | Master | Normative — **V1.67 amended** (§3.2 casing ratification, §4 `items` enforcement, §5 sort-param contract; 0.5.0→0.6.0) |
 
 Also: [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md) (knowledge root).
 
@@ -75,6 +75,8 @@ Also: [schemas-external-consumer-boundary.md](../schemas-external-consumer-bound
 | [daemon-runtime.md](daemon-runtime.md) | Master | Normative — V1.64 amendment (bundled local Web UI static serving) |
 | [local-db-schema.md](local-db-schema.md) | Master | Normative — V1.40 Shipped §4.1.2 (KB validation + narrative_worlds + kb_extract_jobs artifact locator) |
 | [concurrency.md](concurrency.md) | Master | **Normative — V1.51 Shipped (T-B P0/P1)** — advisory lock + heartbeat + OCC + zombie detection |
+| [canvas-strategy-surface.md](canvas-strategy-surface.md) | Exploration | **Exploration (V1.67)** — Canvas product vision (Nexus = AI-autonomous executor; human steers via Canvas, AI owns prose) + 3 surfaces (Strategy/outline+timeline/World KB) on React Flow + no-raw-file-editing principle + TipTap-as-in-node + Preset→Strategy terminology; V1.68 promotes Draft |
+| [body-editor.md](body-editor.md) | Archived (pointer stub) | **Superseded (2026-06-26)** — body-editor direction rejected; pointer to `canvas-strategy-surface.md`; full text archived at [../../archived/knowledge/body-editor.md](../../archived/knowledge/body-editor.md) |
 | [reference-store-layout.md](reference-store-layout.md) | Master | Normative |
 
 ### Compute and WASM
@@ -111,7 +113,7 @@ Also: [schemas-external-consumer-boundary.md](../schemas-external-consumer-bound
 | [creator-workflow.md](creator-workflow.md) | Feature line | Shipped (V1.34; V1.40 Shipped — DF-63 W5 `novel-review-master sync_world_kb` extract binding) |
 | **[novel-writing/](novel-writing/README.md)** | Feature subtree | **`work_profile: novel`** — see [novel-writing/README.md](novel-writing/README.md) for per-file index (workflow-profile, quality-loop, author-experience, overlays, …) |
 | [essay-profile.md](essay-profile.md) | Feature line | Draft (V1.52) — `work_profile: essay` first non-novel profile |
-| [web-ui.md](web-ui.md) | Feature line | **Shipped (V1.65)** — local Web UI product contract (`apps/web` React/Vite SPA, daemon-served, Tauri-ready); Control Room + Setup (V1.64) + Content-Authoring UI stage (V1.65 §13); Desktop Shell stage (V1.66 §14, Draft) |
+| [web-ui.md](web-ui.md) | Feature line | **Shipped (V1.65)** — local Web UI product contract (`apps/web` React/Vite SPA, daemon-served, Tauri-ready); Control Room + Setup (V1.64) + Content-Authoring UI stage (V1.65 §13) + Desktop Shell stage (V1.66 §14, Shipped) + Surface Convergence & De-risk stage (V1.67 §15, Active prepare) |
 | [desktop-shell.md](desktop-shell.md) | Feature line | Draft (V1.66) — Tauri v2 desktop shell contract (`apps/desktop` wrapper, `TauriClient`, sidecar lifecycle, port discovery, native file actions + path guard); macOS-first unsigned dev build |
 | [creator-run-preset-entry.md](creator-run-preset-entry.md) | Master | **Shipped (V1.45)** — `creator run <preset_id>` generic entry; wave 0 for V1.45 CLI IA (promoted P-last) |
 | [creator-challenge-solver.md](creator-challenge-solver.md) | Master | Normative |
@@ -132,7 +134,7 @@ Also: [schemas-external-consumer-boundary.md](../schemas-external-consumer-bound
 | Document | Class | Status |
 | --- | --- | --- |
 | [canonical-hash.md](canonical-hash.md) | Companion | Normative (OSS notes; platform ADR-006 authoritative) |
-| [non-novel-profiles-roadmap.md](non-novel-profiles-roadmap.md) | Exploration | V1.52 roadmap for game-bible + script profiles (V1.53+) |
+| [non-novel-profiles-roadmap.md](non-novel-profiles-roadmap.md) | Archived (pointer stub) | **Superseded (2026-06-26)** — all 3 targets shipped (game-bible/script/essay); pointer to archive; normative content in the 3 Feature line specs |
 
 *Novel-writing sync module contract: [novel-writing/sync-contract.md](novel-writing/sync-contract.md).*
 
@@ -211,6 +213,10 @@ Cite **`nexus-platform`** `v1-spec/` for cloud product, shared ADRs, and archite
 | `agent-host-architecture.md` | [agent-host.md](agent-host.md) §8 |
 | [fl-d-conditional-routing-exploration-v1.35-prepare.md](../../archived/knowledge/fl-d-conditional-routing-exploration-v1.35-prepare.md) | [preset-conditional-routing.md](preset-conditional-routing.md) |
 | [archived/knowledge/novel-findings-maturity.md](../../archived/knowledge/novel-findings-maturity.md) | [novel-writing/quality-loop.md](novel-writing/quality-loop.md) §9 |
+| [archived/knowledge/body-editor.md](../../archived/knowledge/body-editor.md) | [canvas-strategy-surface.md](canvas-strategy-surface.md) (2026-06-26 — body-editor direction rejected) |
+| [archived/knowledge/non-novel-profiles-roadmap.md](../../archived/knowledge/non-novel-profiles-roadmap.md) | [game-bible-profile.md](game-bible-profile.md) + [script-profile.md](script-profile.md) + [essay-profile.md](essay-profile.md) (all targets shipped) |
+| [archived/knowledge/novel-writing/findings-lifecycle.md](../../archived/knowledge/novel-writing/findings-lifecycle.md) | [novel-writing/quality-loop.md](novel-writing/quality-loop.md) §2 |
+| [archived/knowledge/novel-writing/narrative-indexes.md](../../archived/knowledge/novel-writing/narrative-indexes.md) | [novel-writing/workflow-profile.md](novel-writing/workflow-profile.md) §4.6 |
 
 **Former filename:** `local-platform-isolation-and-crate-architecture.md` → `local-cloud-crate-architecture.md` (2026-05-20).
 

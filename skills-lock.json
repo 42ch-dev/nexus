@@ -1,10 +1,16 @@
 {
   "version": 1,
   "skills": {
+    "react-flow": {
+      "source": "framara/react-flow-skill",
+      "sourceType": "github",
+      "skillPath": ".agents/skills/react-flow/SKILL.md",
+      "computedHash": "75278f1efd93f093248e0ed5eaee0cfd477dd1ae321b52b0a12664d2f0bc5d13"
+    },
     "tauri-v2": {
       "source": "nodnarbnitram/claude-code-extensions",
       "sourceType": "github",
-      "skillPath": ".claude/skills/tauri-v2/SKILL.md",
+      "skillPath": ".agents/skills/tauri-v2/SKILL.md",
       "computedHash": "377c61c46cf48c35b942042bc8abb9a039049a47f37d7f12b4f491d012777490"
     }
   }

@@ -1,0 +1,17 @@
+{
+  "plan_id": "2026-06-26-v1.67-mid-meta-tracking",
+  "title": "V1.67 P-mid — Meta Tracking",
+  "iteration": "V1.67",
+  "slot": "P-mid",
+  "status": "Done",
+  "effort": "S",
+  "owner": "@project-manager",
+  "review": "N/A (PM meta)",
+  "wave": 3,
+  "dependency": "P1 + P2 merged",
+  "working_branch": "(no branch — PM meta)",
+  "merge_target": "—",
+  "file": ".mstar/plans/2026-06-26-v1.67-mid-meta-tracking.md",
+  "completion_summary": "P-mid Done. PM meta: verified iteration/v1.67 HEAD carries all Wave1 (P0+P-sec) + Wave2 (P1+P2) merges; per-plan QC tri-review + QA done per-wave (not a combined P-mid QC). Review N/A (PM meta).",
+  "completed_at": "2026-06-26 (Wave 3 closeout)"
+}

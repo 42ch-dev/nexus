@@ -27,7 +27,7 @@ function renderChapters(workId = 'w-123') {
 function worksHandler() {
   return http.get('/v1/local/works', () =>
     HttpResponse.json({
-      works: [{ work_id: 'w-123', title: 'Galaxy Novel', status: 'active', updated_at: '2026-06-25T00:00:00Z' }],
+      items: [{ work_id: 'w-123', title: 'Galaxy Novel', status: 'active', updated_at: '2026-06-25T00:00:00Z' }],
       pagination: { limit: 20, has_more: false },
     }),
   );

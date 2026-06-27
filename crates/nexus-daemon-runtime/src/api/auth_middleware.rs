@@ -451,7 +451,7 @@ mod tests {
         let body: Value = response.json();
         assert_eq!(body["success"], false, "success should be false");
         assert_eq!(
-            body["error"]["code"], "AUTH_REQUIRED",
+            body["error"]["code"], "auth_required",
             "error code should be AUTH_REQUIRED"
         );
         assert!(

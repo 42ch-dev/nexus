@@ -17,7 +17,14 @@ import { useDesktopCapabilities } from '@/lib/client-context';
 import type { DaemonStatus } from '@/lib/nexus/desktop-capabilities';
 import { useToast } from '@/lib/use-toast';
 
-const POLL_MS = 5_000;
+/** Low-frequency fallback re-sync for missed Tauri lifecycle events.
+ *
+ * V1.66 removed the 5 s React poll loop in favor of Rust→JS events. A missed
+ * event (e.g. listener registered after the transition, or emit failure) can
+ * leave the footer stale indefinitely. This calm interval self-heals those
+ * cases without competing with the primary event path (qc3 W-1).
+ */
+const STATUS_SYNC_INTERVAL_MS = 10_000;
 
 interface StateDisplay {
   label: string;
@@ -96,25 +103,37 @@ export function DaemonStatusBar() {
       const next = await desktop.getDaemonStatus();
       if (mounted.current) setStatus(next);
     } catch {
-      // Leave last-known status; the next poll will retry.
+      // Leave last-known status; the fallback re-sync will retry.
     }
   }, [desktop]);
 
   useEffect(() => {
     mounted.current = true;
-    let timer: ReturnType<typeof setTimeout> | undefined;
+    let unlisten: (() => void) | undefined;
+    let syncInterval: ReturnType<typeof setInterval> | undefined;
 
-    const tick = async () => {
+    const setup = async () => {
+      if (!desktop) return;
+      // Fetch initial status immediately, then subscribe to Rust-side events
+      // for live updates (QC1-S1 replaces the 5 s React poll loop).
       await refresh();
-      if (mounted.current) timer = setTimeout(tick, POLL_MS);
+      unlisten = await desktop.onDaemonStatusChanged((next) => {
+        if (mounted.current) setStatus(next);
+      });
+      // Calm fallback re-sync: if an event is missed, the next tick refreshes
+      // from the health endpoint without competing with the event path.
+      syncInterval = setInterval(() => {
+        void refresh();
+      }, STATUS_SYNC_INTERVAL_MS);
     };
 
-    void tick();
+    void setup();
     return () => {
       mounted.current = false;
-      if (timer) clearTimeout(timer);
+      unlisten?.();
+      if (syncInterval) clearInterval(syncInterval);
     };
-  }, [refresh]);
+  }, [desktop, refresh]);
 
   if (!desktop) return null;
 

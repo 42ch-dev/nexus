@@ -1,12 +1,15 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://nexus42.invalid/schemas/local-api/orchestration/sessions/list-sessions-query.schema.json",
-  "schema_version": 1,
+  "schema_version": 2,
   "title": "Nexus ListOrchestrationSessionsQuery",
-  "description": "Query parameters for GET /v1/local/orchestration/sessions.",
+  "description": "Query parameters for GET /v1/local/orchestration/sessions (cursor-based pagination + sort, F-F1).",
   "type": "object",
   "additionalProperties": false,
   "properties": {
-    "creator_id": { "type": "string" }
+    "creator_id": { "type": "string" },
+    "limit": { "type": "integer", "description": "Maximum number of items to return." },
+    "cursor": { "type": "string", "description": "Opaque pagination cursor returned by the previous response's `pagination.next_cursor`." },
+    "sort": { "type": "string", "description": "Comma-separated sort terms. Allowed keys: `session_id` (default), `creator_id`, `preset_id`, `status`. Prefix `-` for descending." }
   }
 }

@@ -1,0 +1,17 @@
+{
+  "plan_id": "2026-06-26-v1.67-local-api-surface-convergence",
+  "title": "V1.67 P0 — Local API Surface Convergence (FE1-ORCH + CASING + F-P3 + F-F1)",
+  "iteration": "V1.67",
+  "slot": "P0",
+  "status": "Done",
+  "effort": "XL",
+  "owner": "@fullstack-dev + @frontend-dev",
+  "review": "tri-review",
+  "wave": 1,
+  "dependency": "P-1 + Phase 2b (§5 #1-#4 LOCKED)",
+  "working_branch": "feature/v1.67-local-api-surface-convergence",
+  "merge_target": "iteration/v1.67",
+  "file": ".mstar/plans/2026-06-26-v1.67-local-api-surface-convergence.md",
+  "completion_summary": "P0 Done. Local API surface convergence shipped: FE1-ORCH orchestration error-envelope (schedules/sessions/presets/capabilities onto canonical ApiErrorResponse + minimal 503/422); CASING ratified global lowercase snake_case on wire (qc2 confirmed internal codes never wire-visible); F-P3 items rename (works/schedules/sessions/capabilities -> items, @42ch/nexus-contracts 0.5.0->0.6.0); F-F1 ?sort=-updated_at,name grammar + DB push-down for works/schedules + resource-specific _sort_invalid. fix-wave-1: works.rs DTO dedup, sort_invalid wire code, sort push-down, sort tests. QC 3/3 Approve after fix-wave-1; QA Pass (cargo test --all + clippy --all + drift + web 110 + desktop green). Closes R-V164-FE1-ORCH/CASING/SURF-003/SURF-005/QC1-S3-P1. 5 QC Suggestions -> residuals (V1.68+).",
+  "completed_at": "2026-06-26 (Wave 1 closeout)"
+}

@@ -8,22 +8,34 @@
  *   - A stopped/error daemon shows "Start Daemon" and calls startDaemon only.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { screen } from '@testing-library/react';
+import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { DaemonStatusBar } from '@/components/layout/daemon-status-bar';
 import { renderInApp } from '@/test/test-providers';
-import type { DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
+import type { DesktopCapabilities, DaemonStatus } from '@/lib/nexus/desktop-capabilities';
 
-function makeDesktop(status: { state: string }, impl: Partial<DesktopCapabilities> = {}): DesktopCapabilities {
+function makeDesktop(
+  status: { state: string },
+  impl: Partial<DesktopCapabilities> = {},
+): DesktopCapabilities {
+  const listeners = new Set<(status: DaemonStatus) => void>();
+  const trigger = (next: DaemonStatus) => listeners.forEach((cb) => cb(next));
+
   return {
     openWith: vi.fn().mockResolvedValue(undefined),
     revealInFinder: vi.fn().mockResolvedValue(undefined),
     getDaemonStatus: vi.fn().mockResolvedValue(status),
+    onDaemonStatusChanged: vi.fn().mockImplementation((cb) => {
+      listeners.add(cb);
+      return Promise.resolve(() => listeners.delete(cb));
+    }),
     startDaemon: vi.fn().mockResolvedValue(undefined),
     stopDaemon: vi.fn().mockResolvedValue(undefined),
     ...impl,
-  };
+    // Expose a test-only trigger so event-driven updates can be simulated.
+    _triggerStatusChange: trigger,
+  } as DesktopCapabilities;
 }
 
 describe('DaemonStatusBar lifecycle action', () => {
@@ -118,5 +130,50 @@ describe('DaemonStatusBar lifecycle action', () => {
 
     expect(stopDaemon).not.toHaveBeenCalled();
     expect(startDaemon).toHaveBeenCalled();
+  });
+
+  it('updates status when the Rust side emits a status event', async () => {
+    const desktop = makeDesktop({ state: 'starting' });
+
+    renderInApp(<DaemonStatusBar />, { desktop });
+    await screen.findByRole('button', { name: /Start Daemon/i });
+
+    await act(async () => {
+      (
+        desktop as unknown as {
+          _triggerStatusChange: (status: DaemonStatus) => void;
+        }
+      )._triggerStatusChange({
+        state: 'running',
+        version: '1.0.0',
+        port: 8420,
+      });
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText(/Daemon running/i)).toBeInTheDocument();
+    });
+  });
+
+  it('falls back to periodic health re-sync when no event is received', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const getDaemonStatus = vi.fn().mockResolvedValue({ state: 'running' });
+
+    renderInApp(<DaemonStatusBar />, {
+      desktop: makeDesktop({ state: 'starting' }, { getDaemonStatus }),
+    });
+
+    // Initial fetch on mount.
+    await waitFor(() => expect(getDaemonStatus).toHaveBeenCalledTimes(1));
+
+    // Advance past the fallback interval.
+    await act(async () => {
+      vi.advanceTimersByTime(10_000);
+    });
+
+    expect(getDaemonStatus).toHaveBeenCalledTimes(2);
+
+    // Cleanup.
+    vi.useRealTimers();
   });
 });

@@ -17,7 +17,7 @@ V1.65 exposes the existing `work_chapters` metadata and file-backed chapter cont
 The surface is intentionally split:
 
 - **Structure and outline are writable** in V1.65.
-- **Body markdown is read-only** in V1.65 because orchestration already writes `body_path` through the host-tool path and there is no per-chapter edit lock yet.
+- **Body markdown is read-only** — the AI owns prose writing via orchestration through the host-tool path; there is **no manual body editor** (the body-editor direction was rejected 2026-06-26 — Nexus is an AI-autonomous executor; see [canvas-strategy-surface.md](canvas-strategy-surface.md)). Any future human body interaction is a V1.68 canvas concern (structured/node-granular, no-raw-file-editing), not a per-chapter manual write route.
 - All routes stay under the Local API and are consumed through the frontend `NexusClient` interface; no browser-only filesystem assumptions are part of the contract.
 
 ## 2. Existing implementation facts this contract builds on

@@ -194,10 +194,11 @@ Explicitly deferred with durable tracking (compass §1.2 + §6; satisfies the Du
 | --- | --- |
 | **V1.64** | Control Room + Setup MVP (browser SPA), daemon-served via `rust-embed`, `tauri-api` adapter boundary frozen. |
 | **V1.65 (§13 stage)** | **Content-Authoring UI** (lead slice): outline rich-text editor + chapter structure table + structure CRUD + body read-only render + browser "Copy path"; **Track B** API hardening (chapter-content surface, `work_profile`, preset full CRUD, `items`+cursor). Tauri shell deliberately deferred to V1.66 (compass §0 Q1/Q5). |
-| **V1.66** | (a) **Tauri desktop shell** (`apps/desktop`) — loads `apps/web/dist`, system webview, `TauriClient` impl, daemon hosting (sidecar `nexus42 daemon start` first; in-process lib link V1.67+); per-OS webview deps / signing / CI matrix. (b) **"Open with" / "Reveal in file manager"** desktop integration (Tauri `shell.open`/`openWith`). (c) **Body full-text editor + per-chapter edit lock** (coordinates with orchestration's host-tool write path). (d) Drag-to-reorder / bulk chapter ops / outline template library. |
-| **V1.67+** | Mobile (Tauri v2 mobile targets); **F-P3** array-rename structural closure; **F-F1** server-side sort; remaining V1.64 Track-B carry-forwards; `apps/web/DESIGN.md` → **Production** completeness level. |
+| **V1.66** | **Tauri desktop shell** (`apps/desktop`) — loads `apps/web/dist`, system webview, `TauriClient` impl, daemon hosting (sidecar `nexus42 daemon start`); per-OS webview deps / signing / CI matrix. **"Open with" / "Reveal in file manager"** desktop integration (Tauri `shell.open`/`openWith`). Body full-text editor direction **rejected** (2026-06-26 — see §15.3); UI productivity deferred to V1.68. |
+| **V1.67 (§15 stage)** | **Surface Convergence & De-risk**: Local API `items` array-key convergence + error-envelope consolidation (FE1-ORCH) + error-code casing + sort params (all transparent to the author); work_profile selector in Create-Work dialog; preset **TS-client promotion** (preset **management UI deferred to V1.68 canvas**). **Canvas Strategy Surface Exploration** authored (de-risk V1.68). Body editor direction **rejected** (§15.3). |
+| **V1.68+** | **Canvas Strategy Surface implement** (lead) — Strategy/outline+timeline/World-KB infinite-canvas graphs on React Flow; "AI owns prose, human steers via canvas"; no-raw-file-editing structured writes; TipTap as in-node editor; Preset→Strategy terminology. Preset-management UI folds into the canvas. Desktop distribution v2 (Windows + Linux + signing + notarization + auto-update); Mobile (Tauri v2 mobile targets); `apps/web/DESIGN.md` → **Production** completeness level. |
 
-The Tauri-ready boundary (§5) is what keeps the V1.66 shell a thin wrap rather than a rewrite, and keeps the V1.66 body-editor a new screen rather than a re-architecture.
+The Tauri-ready boundary (§5) is what keeps the V1.66 shell a thin wrap rather than a rewrite. The V1.68 canvas adds new screens (graph surfaces) on the unchanged transport boundary — not a re-architecture.
 
 ---
 
@@ -314,7 +315,7 @@ A Tauri v2 desktop wrapper layered around the transport-unchanged V1.65 SPA, plu
 
 ### 14.3 Non-goals for V1.66 (durable V1.67+ roadmap)
 
-- **Body full-text editor + per-chapter edit lock** — **V1.67 lead authoring slice**. Lock design + MD round-trip + frontmatter sync + conflict policy. V1.66 renders body read-only.
+- **Body full-text editor + per-chapter edit lock** — **rejected** (2026-06-26 V1.67 re-discussion). Nexus is an AI-autonomous executor — the AI owns prose; a manual rich-text body editor is the wrong direction. The V1.68 lead is the **Canvas Strategy Surface**. See §15.3.
 - **UI productivity wave** — **V1.67**. Drag-reorder, bulk ops, reconcile trigger, outline templates.
 - **Windows + Linux + signing + notarization + GitHub Releases + auto-update** — **V1.67+**. The unsigned `.app` is the V1.66 deliverable. (Until signing lands, the no-Gatekeeper-friction author win is not realized — V1.66's user is the developer/contributor; see §14.4.)
 - **In-process `nexus-daemon-runtime` lib link; system tray / menu-bar / hotkeys / notifications; mobile** — **V1.67+ / post-V1.67**.
@@ -342,3 +343,55 @@ A Tauri v2 desktop wrapper layered around the transport-unchanged V1.65 SPA, plu
 | `copyPath(path)` | browser + desktop | clipboard write (V1.65 reuse) | Unchanged. |
 
 All other `NexusClient` methods = identical HTTP transport to the localhost daemon (reuse of V1.64/V1.65 `BrowserClient` paths). Detail: [desktop-shell.md](desktop-shell.md).
+
+---
+
+## 15. Next stage — Surface Convergence & De-risk (V1.67)
+
+V1.66 shipped the Tauri desktop shell. V1.67 is a **hygiene-lead consolidation & de-risk** iteration: it converges the Local API surface to one error envelope + one array-key convention + casing discipline, closes ~26 residuals, polishes the just-shipped desktop shell, closes the work-profile selector gap, and authors the **Canvas Strategy Surface Exploration** that de-risks the V1.68 lead. **No new author-facing features ship** — the only user-visible change is a work-profile selector in the Create-Work dialog. The canvas *implement* is V1.68; V1.67 authors its *design* only (see §15.3). *(Revised 2026-06-26: the prior body-editor lead was rejected — Nexus is an AI-autonomous executor; the AI owns prose, the human steers via Canvas.)*
+
+> **Scope and roadmap SSOT**: [v1.67-local-api-surface-convergence-and-derisk-delivery-compass-v1.md](../../iterations/v1.67-local-api-surface-convergence-and-derisk-delivery-compass-v1.md) §0 (grill decisions + 2026-06-26 re-discussion Q4–Q6) + §1.1 (Tracks A–F) + §1.2 (V1.68 roadmap) + §5 (locked design items). This section records the product contract; the compass is authoritative for scope, batching, and residual tracking.
+
+### 15.1 What ships in V1.67 (author-visible surface)
+
+One small but unlocking UI change, a transport-only client promotion, plus a transparent API convergence the author never sees.
+
+- **Work-profile selector in the Create-Work dialog** (G1): when an author creates a new Work, the dialog now includes a profile selector offering `novel`, `essay`, `game-bible`, and `script`. The wire contract already carried `work_profile` since V1.65 (additive optional field); V1.67 surfaces it in the UI. An author who skips the selector gets the default (`novel`) — no behavior change from V1.66. This is a prerequisite for the V1.68 canvas, which will tailor the steering surface per profile.
+- **Preset CRUD TS-client promotion** (G2, transport half only): the daemon already ships `GET/PATCH/DELETE /v1/local/presets/{id}` + contracts; V1.67 promotes the 3 methods on the TS `NexusClient` interface (21 → 24) so the V1.68 canvas Strategy surface can consume them. **No form-based preset-management UI is built in V1.67** — the canvas Strategy surface supersedes a form UI (§0 Q6); building one now would be throwaway.
+- **`items` array-key convergence** (transparent to authors): all schema-backed list responses now use `items` (previously `works`/`schedules`/`sessions`/`capabilities`). Pre-1.0 breaking wire change (see §15.5), but the author experiences nothing — the UI data layer adapts internally.
+
+### 15.2 The de-risk loop this enables
+
+V1.67 does not add an authoring loop; it *unblocks* the V1.68 canvas loop and *cleans* the foundation it builds on:
+
+1. **Profile up-front** — an author starting a Work picks its profile at creation time, so the V1.68 canvas can tailor the steering surface per profile without a retrofit.
+2. **Preset transport ready** — the TS client can already get/update/delete presets, so the V1.68 canvas Strategy editor wires directly to the daemon surface (no transport gap to close mid-canvas-build).
+3. **Consistent API surface** — the V1.68 canvas (a heavy Local API consumer — graph nodes bind to lists/details) builds on a Local API with one error envelope, one array-key convention, and casing discipline — not the ad-hoc shapes V1.64 left behind.
+
+### 15.3 Non-goals for V1.67 (durable V1.68 roadmap)
+
+Explicitly deferred with rationale (compass §0 Q2/Q3, §1.2; satisfies the Durable Roadmap Gate):
+
+- **Canvas Strategy Surface *implement*** — **V1.68 lead** (revised 2026-06-26; replaces the rejected body-editor lead). V1.67 ships the *Exploration* only ([canvas-strategy-surface.md](canvas-strategy-surface.md)): product thesis (Nexus = AI-autonomous executor; human inputs Idea + steers via Canvas; AI owns prose) + 3 canvas surfaces (Strategy/outline+timeline/World KB) on React Flow + no-raw-file-editing principle + TipTap-as-in-node. V1.68 promotes Exploration → implement.
+- **Body full-text editor** — **rejected direction** (2026-06-26 product-vision correction). Nexus is an AI-autonomous executor; the AI owns prose. `body-editor.md` archived. The shipped V1.65 whole-document outline editor's canvas-pivot is part of V1.68 canvas work.
+- **Preset-management form UI** (`R-V164-P2-G2` UI half) — **V1.68 canvas** (the canvas Strategy surface supersedes a form UI; the TS-client transport half ships in V1.67).
+- **UI productivity wave** — **V1.68** (largely subsumed by the canvas graph model; re-evaluate at V1.68 Prepare). Drag-reorder, bulk ops, reconcile trigger, outline templates.
+- **Desktop distribution v2** — **V1.68 (or its own iteration)**. Windows + Linux + signing + notarization + auto-update + in-process lib link. Decision point at V1.67 P-last.
+- **CapabilityInfo admission-gate UI** (`R-V164-P2-G3`) — V1.68.
+- **Live served-UI smoke** (`R-V164-P2-S1`) — V1.68.
+- **Chapter table virtualization** (`R-V165-QC3-VIRT`) — V1.68.
+- **DX/UX polish grab-bag (UI subset)** (`R-V165-QC-SUGG-DX`) — V1.68.
+
+### 15.4 User stories (V1.67 slice)
+
+- **Work-profile selector** — *As an author*, when I create a new Work I can choose its profile (novel, essay, game-bible, or script) from a selector in the Create-Work dialog, so the runtime and the future canvas can tailor the steering experience to the kind of thing I am writing.
+
+(The preset-management stories — inspect/edit/delete in a form UI — are **deferred to the V1.68 canvas Strategy surface**, where preset/strategy editing is a graph operation, not a form. V1.67 only makes the TS transport capable of those operations.)
+
+### 15.5 Wire contracts (V1.67)
+
+**`wire_contracts_changed: TRUE`** (`@42ch/nexus-contracts` 0.5.0 → 0.6.0; compass §1.3 + §5 LOCKED). Two breaking changes: F-P3 array-key rename → `items` (4 schema-backed endpoints) + error-code casing ratification (global UPPER→lower snake_case). F-F1 sort is additive; G1 is frontend-only; G2 is frontend-only (TS-client promotion; no UI). `pnpm run codegen` regenerates TS + Rust. The 2026-06-26 canvas re-discussion changes **no** wire contracts (canvas is V1.68 implement; V1.67 ships no canvas code).
+
+---
+
+*Local-first Web UI product contract. V1.64 Shipped (Control Room + Setup) → V1.65 §13 Content-Authoring → V1.66 §14 Desktop Shell → V1.67 §15 Surface Convergence & De-risk → V1.68 §TBD Canvas Strategy Surface. Design tokens: `apps/web/DESIGN.md` (V1.65 Standard+ + V1.66 desktop supplement; no V1.67 increment — no new styled surfaces).*

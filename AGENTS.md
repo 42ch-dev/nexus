@@ -58,7 +58,7 @@ See linked AGENTS.md files for per-directory decision rules and invariants:
 
 ## Development Policy
 
-**Formatting:** `cargo fmt` must use the **nightly** toolchain: `cargo +nightly fmt --all`. Stable `cargo fmt` ignores `.rustfmt.toml`'s `ignore` field and will **incorrectly reformat** generated code under `crates/nexus-contracts/src/generated/`.
+**Formatting:** `cargo fmt` must use a **pinned nightly** toolchain so local matches CI exactly (rustfmt formatting rules drift across nightly versions; CI's `Rust fmt & clippy` job pins `FMT_NIGHTLY` in `.github/workflows/ci.yml`). Current pin: **`nightly-2026-06-26`**. Install + use it: `rustup toolchain install nightly-2026-06-26 --component rustfmt` then `cargo +nightly-2026-06-26 fmt --all` (and `--check` to verify). Stable `cargo fmt` ignores `.rustfmt.toml`'s `ignore` field and will **incorrectly reformat** generated code under `crates/nexus-contracts/src/generated/`. When bumping the pin, update both CI and this line.
 
 **Clippy:** Workspace-level config in root `Cargo.toml` enables `pedantic` + `nursery` as `warn`, inherited by all crates. CI runs `cargo clippy --all -- -D warnings`. When fixing clippy errors, auto-fix first (`cargo clippy --fix --allow-dirty --allow-staged`), then handle residual manually. **Do not suppress** with `#[allow(...)]` without a brief justification comment. **Do not change runtime behavior** when fixing lint errors.
 
@@ -110,7 +110,7 @@ Breaking changes are expected and allowed — API shapes, CLI flags, on-disk pat
 <!-- gitnexus:start -->
 # GitNexus — Code Intelligence
 
-This project is indexed by GitNexus as **nexus** (15547 symbols, 37628 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
+This project is indexed by GitNexus as **nexus** (18370 symbols, 44086 relationships, 300 execution flows). Use the GitNexus MCP tools to understand code, assess impact, and navigate safely.
 
 > If any GitNexus tool warns the index is stale, run `npx gitnexus analyze` in terminal first.
 

@@ -14,7 +14,7 @@ import { BrowserClient, NexusClientError } from '@/lib/nexus';
 import { useHandlers } from '@/test/msw-server';
 
 describe('BrowserClient cursor list', () => {
-  it('returns { works, pagination } and threads the cursor into the next request', async () => {
+  it('returns { items, pagination } and threads the cursor into the next request', async () => {
     let firstCalled = false;
     let secondCalledWithCursor: string | null = null;
     useHandlers(
@@ -24,13 +24,13 @@ describe('BrowserClient cursor list', () => {
         if (!cursor) {
           firstCalled = true;
           return HttpResponse.json({
-            works: [{ work_id: 'w1', title: 'A' }],
+            items: [{ work_id: 'w1', title: 'A' }],
             pagination: { limit: 1, has_more: true, next_cursor: 'cur-2' },
           });
         }
         secondCalledWithCursor = cursor;
         return HttpResponse.json({
-          works: [{ work_id: 'w2', title: 'B' }],
+          items: [{ work_id: 'w2', title: 'B' }],
           pagination: { limit: 1, has_more: false },
         });
       }),
@@ -39,7 +39,7 @@ describe('BrowserClient cursor list', () => {
     const client = new BrowserClient();
     const page1 = await client.listWorks({ limit: 1 });
     expect(firstCalled).toBe(true);
-    expect(page1.works).toEqual([{ work_id: 'w1', title: 'A' }]);
+    expect(page1.items).toEqual([{ work_id: 'w1', title: 'A' }]);
     expect(page1.pagination.next_cursor).toBe('cur-2');
     expect(page1.pagination.has_more).toBe(true);
 
@@ -227,5 +227,50 @@ describe('BrowserClient chapter content routes (V1.65)', () => {
     const res = await client.getChapterBody('w1', 1);
     expect(res.content).toBe('Body prose.');
     expect(res.read_only).toBe(true);
+  });
+});
+
+describe('BrowserClient preset CRUD (V1.67 G2 promotion)', () => {
+  it('fetches a preset manifest as raw YAML via getPreset', async () => {
+    useHandlers(
+      http.get('/v1/local/presets/:id', ({ params }) =>
+        HttpResponse.json({
+          id: params.id,
+          source: 'user',
+          path: 'presets/my-strategy/preset.yaml',
+          yaml: 'name: my-strategy\n',
+        }),
+      ),
+    );
+
+    const client = new BrowserClient();
+    const res = await client.getPreset('my-strategy');
+    expect(res.id).toBe('my-strategy');
+    expect(res.source).toBe('user');
+    expect(res.yaml).toContain('name: my-strategy');
+  });
+
+  it('replaces user preset YAML via updatePreset and echoes { id, updated }', async () => {
+    let receivedBody: unknown = null;
+    useHandlers(
+      http.patch('/v1/local/presets/:id', async ({ request, params }) => {
+        receivedBody = await request.json();
+        return HttpResponse.json({ id: params.id, updated: true });
+      }),
+    );
+
+    const client = new BrowserClient();
+    const res = await client.updatePreset('my-strategy', { yaml: 'name: edited\n' });
+    expect(receivedBody).toEqual({ yaml: 'name: edited\n' });
+    expect(res).toEqual({ id: 'my-strategy', updated: true });
+  });
+
+  it('resolves void when deletePreset returns 204 No Content', async () => {
+    useHandlers(
+      http.delete('/v1/local/presets/:id', () => new HttpResponse(null, { status: 204 })),
+    );
+
+    const client = new BrowserClient();
+    await expect(client.deletePreset('my-strategy')).resolves.toBeUndefined();
   });
 });

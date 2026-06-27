@@ -187,6 +187,9 @@ pub struct WorkListFilters {
     pub limit: Option<u32>,
     /// Pagination offset.
     pub offset: Option<u32>,
+    /// F-F1 (V1.67): ordered sort terms `(column, ascending)`.
+    /// Only whitelisted column names are emitted into SQL.
+    pub order_by: Vec<(String, bool)>,
 }
 
 /// Fields that can be patched on a Work.
@@ -573,6 +576,11 @@ async fn list_works_inner<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
     workspace_slug: &str,
     filters: &WorkListFilters,
 ) -> Result<Vec<WorkRecord>, LocalDbError> {
+    // F-F1 (V1.67): push validated sort terms into SQL. Keys are caller-
+    // validated column names; the whitelist below is defense-in-depth.
+    const ALLOWED_ORDER_COLUMNS: &[&str] =
+        &["updated_at", "title", "status", "intake_status", "work_id"];
+
     let mut where_clauses = vec![
         "creator_id = ?".to_string(),
         "workspace_slug = ?".to_string(),
@@ -590,11 +598,28 @@ async fn list_works_inner<'e, E: sqlx::Executor<'e, Database = Sqlite>>(
     let limit = filters.limit.unwrap_or(100);
     let offset = filters.offset.unwrap_or(0);
 
-    // SAFETY: Dynamic SQL required for optional WHERE filters.
-    // All user inputs are passed as bound parameters, not interpolated.
+    let mut order_clauses = Vec::new();
+    for (key, ascending) in &filters.order_by {
+        if ALLOWED_ORDER_COLUMNS.contains(&key.as_str()) {
+            let dir = if *ascending { "ASC" } else { "DESC" };
+            order_clauses.push(format!("{key} {dir}"));
+        }
+    }
+    // Deterministic tie-breaker when the query supplies no sort or equal keys.
+    if order_clauses.is_empty() {
+        order_clauses.push("updated_at DESC".to_string());
+    }
+    if !order_clauses.iter().any(|c| c.starts_with("work_id ")) {
+        order_clauses.push("work_id ASC".to_string());
+    }
+    let order_sql = order_clauses.join(", ");
+
+    // SAFETY: Dynamic SQL required for optional WHERE filters and ORDER BY.
+    // All user inputs are passed as bound parameters; only whitelisted column
+    // identifiers are interpolated into the ORDER BY clause.
     let sql = format!(
         "SELECT {WORKS_COLUMNS} FROM works WHERE {where_sql}
-         ORDER BY updated_at DESC
+         ORDER BY {order_sql}
          LIMIT ? OFFSET ?"
     );
 

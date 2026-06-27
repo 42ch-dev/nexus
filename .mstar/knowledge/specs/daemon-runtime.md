@@ -158,7 +158,13 @@ All outline/body file routes MUST apply the same W-002-style workspace path
 guard used by host-tool body reads before reading or writing. Outline PUT uses a
 sibling temp file + flush + atomic rename and updates `outline_path`/`updated_at`
 through the same finalization path. The body writer remains the orchestration
-host-tool path until the V1.66 per-chapter body-editor lock design lands.
+host-tool path — the AI owns prose writing; there is no manual body editor
+(the body-editor direction was rejected 2026-06-26; see
+[canvas-strategy-surface.md](canvas-strategy-surface.md)). If a future canvas
+surface flushes structured node-edits to chapter files, the write coordination
+(no-raw-file-editing principle; structured/node-granular operations) will be
+designed in the V1.68 canvas context; until then orchestration remains the
+sole body writer and the host-tool path is unchanged.
 
 ---
 

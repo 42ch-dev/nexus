@@ -1,56 +1,57 @@
 {
   "version": 1,
-  "updated_at": "2026-06-25T19:00:00Z",
+  "updated_at": "2026-06-26T00:00:00Z",
   "plans": [],
   "metadata": {
     "integration_branch": null,
     "integration_branch_retired": true,
-    "last_integration_branch": "iteration/v1.66",
+    "last_integration_branch": "iteration/v1.67",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.67+ (pending)",
+    "latest_active_iteration": "V1.68 (pending)",
     "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": "pending (V1.67+)",
+    "pre_implement_gate": "pending (V1.68)",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.66",
-      "compass": "v1.66-tauri-desktop-shell-delivery-compass-v1",
-      "shipped_at": "2026-06-25T19:08:40Z",
-      "plan_count": 6,
-      "plan_count_done": 6,
-      "wire_contracts_changed": false,
-      "wire_contracts_note": "V1.66: wire_contracts_changed: false. Tauri shell is a packaging/delivery layer — TauriClient reuses V1.64/V1.65 HTTP transport; desktop-only methods (openWith/revealInFinder/daemon-lifecycle) are Tauri IPC, not Local API; the 3 P-sec residuals are test/refactor/hardening (PaginationInfo dedup serialized-form identical). @42ch/nexus-contracts version unaffected.",
+      "iteration": "V1.67",
+      "compass": "v1.67-local-api-surface-convergence-and-derisk-delivery-compass-v1.md",
+      "shipped_at": "2026-06-26T... ",
+      "plan_count": 8,
+      "plan_count_done": 8,
+      "wire_contracts_changed": true,
+      "wire_contracts_note": "V1.67: @42ch/nexus-contracts 0.5.0->0.6.0. Two breaking changes: F-P3 array-key -> items (works/schedules/sessions/capabilities) + error-code casing global UPPER->lower snake_case. F-F1 sort additive; G1/G2 frontend-only.",
       "profile_b_compaction": "done",
       "plan_ids": [
-        "2026-06-25-v1.66-compass-and-plan-stubs",
-        "2026-06-25-v1.66-desktop-shell-core",
-        "2026-06-25-v1.66-hygiene-residuals",
-        "2026-06-25-v1.66-sidecar-lifecycle-and-ci",
-        "2026-06-25-v1.66-mid-meta-tracking",
-        "2026-06-25-v1.66-residual-convergence-and-closeout"
+        "2026-06-26-v1.67-compass-and-plan-stubs",
+        "2026-06-26-v1.67-canvas-strategy-exploration",
+        "2026-06-26-v1.67-local-api-surface-convergence",
+        "2026-06-26-v1.67-desktop-shell-polish",
+        "2026-06-26-v1.67-frontend-scope-gaps",
+        "2026-06-26-v1.67-overdue-debt-closure",
+        "2026-06-26-v1.67-mid-meta-tracking",
+        "2026-06-26-v1.67-residual-convergence-and-closeout"
       ],
-      "predecessor_merge_commit": "6e1f18e0",
-      "note": "V1.66 ships Tauri Desktop Shell (apps/desktop wrapper + TauriClient + Q5 open-with/reveal + bundled sidecar + macOS CI) + Track B 3-residual hygiene. Body editor + UI productivity + signing/tri-OS/auto-update deferred V1.67. Platform paused (PD-05). QC tri-review Approve after fix-wave-1 (F1 port-exposure correctness + 7 more); QA Pass."
+      "note": "V1.67 hygiene-lead: Local API surface convergence (FE1-ORCH+CASING+F-P3+F-F1) + 10 V1.66 desktop QC + work_profile selector + preset TS-client + 9 overdue V1.52/V1.60 + Canvas Strategy Surface Exploration (de-risk V1.68; body-editor rejected). 26 residuals closed; 21 V1.67 QC-suggestions open (V1.68+). QC tri-review both waves Approve after fix-waves; QA Pass. Platform paused. PR iteration/v1.67 -> main."
     },
     "tech_debt_summary": {
-      "total_open": 4,
-      "total_deferred": 46,
-      "total_resolved": 368,
+      "total_open": 21,
+      "total_deferred": 21,
+      "total_resolved": 210,
       "total_archived": 0,
       "by_severity_active": {
-        "high": 0,
-        "medium": 0,
-        "low": 4
+        "low": 21
       },
       "by_target_active": {
-        "V1.66": 1,
-        "V1.66+": 1
+        "V1.65+": 1,
+        "V1.64 P-mid/QA": 1,
+        "?": 2,
+        "V1.68+": 17
       },
-      "refreshed_at": "2026-06-25T19:05:28Z",
-      "refreshed_reason": "P-last closeout: post-QC+QA; 10 V1.66 QC Suggestions registered as deferred V1.67+ residuals"
+      "refreshed_at": "2026-06-26T... (V1.67 P-last closeout)",
+      "refreshed_reason": "V1.67 P-last: post Wave1+Wave2 QC+QA; all V1.67 closures done; 21 open are V1.67 QC-suggestions deferred V1.68+ (all low)"
     },
-    "updated_at": "2026-06-25T19:08:40Z",
+    "updated_at": "2026-06-26 (V1.67 ship)",
     "spec_integration_branch": null,
     "wave1_merged_at": "2026-06-25T15:49:19Z"
   },
@@ -1661,11 +1662,17 @@
         "owner": "@fullstack-dev",
         "target": "V1.61+",
         "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc1.md §Suggestions",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
         "deferral_note": "T-A P0 tri-review verdict Approve; 11 Suggestions carry-forward to V1.52 P-last WL-A.",
         "target_date": "V1.61+",
-        "_v1_60_plast_defer_note": "Pathway unified in V1.55 P2 F-001 (both extract paths share run_llm_extract). True cross-invocation drift detection requires stateful tracking beyond surgical scope. Defer to V1.61+."
+        "_v1_60_plast_defer_note": "Pathway unified in V1.55 P2 F-001 (both extract paths share run_llm_extract). True cross-invocation drift detection requires stateful tracking beyond surgical scope. Defer to V1.61+.",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P2 (overdue debt closure).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-overdue-debt-closure",
+          "commit": "ab3ea216"
+        }
       },
       {
         "id": "R-V152TA-S002",
@@ -1757,10 +1764,16 @@
         "owner": "@fullstack-dev",
         "target": "V1.61+",
         "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc3.md §Suggestions",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
         "target_date": "V1.61+",
-        "_v1_60_plast_defer_note": "outline_five_q_check is pub but only invoked from #[cfg(test)]. No production NOGO log to enhance — the 五问 gate is enforced via YAML preset llm_judge, not the Rust heuristic. Defer until heuristic is wired into production or removed."
+        "_v1_60_plast_defer_note": "outline_five_q_check is pub but only invoked from #[cfg(test)]. No production NOGO log to enhance — the 五问 gate is enforced via YAML preset llm_judge, not the Rust heuristic. Defer until heuristic is wired into production or removed.",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P2 (overdue debt closure).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-overdue-debt-closure",
+          "commit": "ab3ea216"
+        }
       },
       {
         "id": "R-V152TA-S007",
@@ -3492,8 +3505,14 @@
         "target_date": "V1.61+",
         "tracking_link": ".mstar/plans/reports/2026-06-22-v1.60-df46-local-parity/qc1.md §W-002",
         "note": "WL-A. Pre-1.0 acceptable; future schema-column insertion risk. Consider named-column parsing instead of positional.",
-        "lifecycle": "deferred",
-        "_plan_id": "2026-06-22-v1.60-df46-local-parity"
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-22-v1.60-df46-local-parity",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P2 (overdue debt closure).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-overdue-debt-closure",
+          "commit": "ab3ea216"
+        }
       },
       {
         "id": "R-V160P0-QC2-W001",
@@ -3507,8 +3526,14 @@
         "target_date": "V1.61+",
         "tracking_link": ".mstar/plans/reports/2026-06-22-v1.60-df46-local-parity/qc2.md §W-001",
         "note": "WL-A. Architectural constraint (orchestration crate cannot depend on daemon crate). Future: extract shared admission-gate utility into a lower crate.",
-        "lifecycle": "deferred",
-        "_plan_id": "2026-06-22-v1.60-df46-local-parity"
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-22-v1.60-df46-local-parity",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P2 (overdue debt closure).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-overdue-debt-closure",
+          "commit": "ab3ea216"
+        }
       },
       {
         "id": "R-V160P0-QC2-W002",
@@ -3522,8 +3547,14 @@
         "target_date": "V1.61+",
         "tracking_link": ".mstar/plans/reports/2026-06-22-v1.60-df46-local-parity/qc2.md §W-002",
         "note": "WL-A. Edge case: rename failure (e.g., ID collision) leaves orphan event under auto-id. Low practical risk (local single-writer). Future: wrap append+rename in single transaction.",
-        "lifecycle": "deferred",
-        "_plan_id": "2026-06-22-v1.60-df46-local-parity"
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-22-v1.60-df46-local-parity",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P2 (overdue debt closure).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-overdue-debt-closure",
+          "commit": "ab3ea216"
+        }
       },
       {
         "id": "R-V160P0-QC3-W001",
@@ -3537,8 +3568,14 @@
         "target_date": "V1.61+",
         "tracking_link": ".mstar/plans/reports/2026-06-22-v1.60-df46-local-parity/qc3.md §F3",
         "note": "WL-A. Acceptable for V1.60 local-first use case with small delta sizes. Future minor release: batched optimization for large deltas.",
-        "lifecycle": "deferred",
-        "_plan_id": "2026-06-22-v1.60-df46-local-parity"
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-22-v1.60-df46-local-parity",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P2 (overdue debt closure).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-overdue-debt-closure",
+          "commit": "ab3ea216"
+        }
       }
     ],
     "2026-06-22-v1.60-script-depth-35": [
@@ -3554,8 +3591,14 @@
         "target_date": "V1.61+",
         "tracking_link": ".mstar/plans/reports/2026-06-22-v1.60-script-depth-35/qc1.md §W-001",
         "note": "Cross-track drift. The capability is not used in any preset state (P1 implementer correctly omitted from requires_capabilities). Spec references are aspirational. V1.61+: implement the handler (mirrors game_bible.section_status.update 727-line pattern) + register in CapabilityRegistry + spec cleanup.",
-        "lifecycle": "deferred",
-        "_plan_id": "2026-06-22-v1.60-script-depth-35"
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-22-v1.60-script-depth-35",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P2 (overdue debt closure).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-overdue-debt-closure",
+          "commit": "ab3ea216"
+        }
       },
       {
         "id": "R-V160P1-QC2-W001",
@@ -3569,8 +3612,14 @@
         "target_date": "V1.61+",
         "tracking_link": ".mstar/plans/reports/2026-06-22-v1.60-script-depth-35/qc2.md §W-001",
         "note": "WL-A. Same pattern as game-bible V1.55 P2. Pre-1.0 local-first acceptable. Future: canonicalize at the boundary (caller responsibility is already established).",
-        "lifecycle": "deferred",
-        "_plan_id": "2026-06-22-v1.60-script-depth-35"
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-22-v1.60-script-depth-35",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P2 (overdue debt closure).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-overdue-debt-closure",
+          "commit": "ab3ea216"
+        }
       },
       {
         "id": "R-V160P1-QC2-W002",
@@ -3584,8 +3633,14 @@
         "target_date": "V1.61+",
         "tracking_link": ".mstar/plans/reports/2026-06-22-v1.60-script-depth-35/qc2.md §W-002",
         "note": "WL-A. Migration is widening-only (CHECK constraint adds 'script'); data copy is SELECT *. Low risk. Future: add PRAGMA foreign_key_check as belt-and-suspenders for all table-recreate migrations.",
-        "lifecycle": "deferred",
-        "_plan_id": "2026-06-22-v1.60-script-depth-35"
+        "lifecycle": "resolved",
+        "_plan_id": "2026-06-22-v1.60-script-depth-35",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P2 (overdue debt closure).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-overdue-debt-closure",
+          "commit": "ab3ea216"
+        }
       }
     ],
     "2026-06-24-v1.63-local-api-orchestration-and-preset-dtos": [
@@ -3641,8 +3696,14 @@
         "target_date": "V1.65+",
         "tracking_link": ".mstar/plans/reports/2026-06-24-v1.63-local-api-orchestration-and-preset-dtos/surface-audit.md §F-P3",
         "note": "Works uses 'works', Schedule uses 'schedules', Sessions uses 'sessions', Capabilities uses 'capabilities'. Cursor-based resources (Creators, KB, Workspaces) use 'items'. Standardize on 'items' for list response arrays. Breaking change requiring handler migration; coordinate with web-ui iteration.",
-        "lifecycle": "deferred",
-        "deferral_note": "V1.64 P0 closed the pagination half (SURF-001) but explicitly deferred the array rename to V1.65+ per compass §5 item #2; the V1.64 Web UI (P2) covers via a thin TanStack Query transformer adapter."
+        "lifecycle": "resolved",
+        "deferral_note": "V1.64 P0 closed the pagination half (SURF-001) but explicitly deferred the array rename to V1.65+ per compass §5 item #2; the V1.64 Web UI (P2) covers via a thin TanStack Query transformer adapter.",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P0 (local API surface convergence).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-local-api-surface-convergence",
+          "commit": "ea94b028"
+        }
       },
       {
         "id": "R-V163P3-SURF-004",
@@ -3676,8 +3737,14 @@
         "target_date": "V1.65+",
         "tracking_link": ".mstar/plans/reports/2026-06-24-v1.63-local-api-orchestration-and-preset-dtos/surface-audit.md §F-F1",
         "note": "No resource supports sort_by/order/direction query parameters. When sort is added, standardize on sort_by: string + sort_order: 'asc' | 'desc'. Defer to V1.64+.",
-        "lifecycle": "deferred",
-        "deferral_note": "V1.64 Web UI (P2) covers via client-side sort for small lists; structural server-side sort deferred to V1.65+ per compass §5 item #1 (Track C)."
+        "lifecycle": "resolved",
+        "deferral_note": "V1.64 Web UI (P2) covers via client-side sort for small lists; structural server-side sort deferred to V1.65+ per compass §5 item #1 (Track C).",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P0 (local API surface convergence).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-local-api-surface-convergence",
+          "commit": "ea94b028"
+        }
       },
       {
         "id": "R-V163P1-T6-001",
@@ -3713,7 +3780,13 @@
         "target_date": "V1.65+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-24-v1.64-local-api-hardening][R-V164-FE1-ORCH]",
         "note": "F-E1 schema-level standardization (ErrorResponse schema + core CRUD handlers) is complete. Migrating orchestration handlers to NexusApiError is an independent refactor (large surface, L-item risk); deferred to V1.65+. Non-blocking for V1.64 Web UI data layer (UI parses the shared ErrorResponse where emitted; orchestration endpoints are READ-only in the MVP). qc1 W-1 corroborated: orchestration handlers (schedules/sessions/presets) ALL return ad-hoc (StatusCode,String); MVP Sessions/Schedule/Capabilities/Presets toasts lose stable code/message until migrated. The client-side envelope fix (Wave-1 fix-wave) parses the wrapped shape where emitted; full migration remains V1.65+.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P0 (local API surface convergence).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-local-api-surface-convergence",
+          "commit": "ea94b028"
+        }
       },
       {
         "id": "R-V164-QC1-S1-P0",
@@ -3747,7 +3820,13 @@
         "target_date": "V1.65+",
         "tracking_link": ".mstar/plans/reports/2026-06-24-v1.64-local-api-hardening/qc1.md (W-1 fix-wave note)",
         "note": "Structural W-1 (envelope layering) fixed in Wave-1 fix-wave; casing drift is a separate latent doc-vs-runtime mismatch. Architect reconciles §3.2 against actual emitted codes at V1.65+ (or aligns runtime to lowercase per convention).",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P0 (local API surface convergence).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-local-api-surface-convergence",
+          "commit": "ea94b028"
+        }
       }
     ],
     "2026-06-24-v1.64-web-app-scaffold": [
@@ -3783,7 +3862,13 @@
         "target_date": "V1.64 P2",
         "tracking_link": ".mstar/plans/reports/2026-06-24-v1.64-web-app-scaffold/qc1.md S-3",
         "note": "P2 data hooks should own the F-P3 normalization adapter (thin TanStack Query transformer). P-last verifies the F-P3 deferral boundary holds against the live UI.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P0 (local API surface convergence).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-local-api-surface-convergence",
+          "commit": "ea94b028"
+        }
       }
     ],
     "2026-06-24-v1.64-control-room-and-setup-screens": [
@@ -3799,7 +3884,13 @@
         "target_date": "V1.65+",
         "tracking_link": ".mstar/plans/reports/2026-06-24-v1.64-control-room-and-setup-screens/ (P2 completion §Residuals)",
         "note": "Profile-aware create contract needed for full Work-CRUD parity with CLI. V1.64 MVP creates with daemon-default profile; patch status/stage works.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P1 (frontend scope gaps).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-frontend-scope-gaps",
+          "commit": "963fa1ed"
+        }
       },
       {
         "id": "R-V164-P2-G2",
@@ -3813,7 +3904,13 @@
         "target_date": "V1.65+",
         "tracking_link": ".mstar/plans/reports/2026-06-24-v1.64-control-room-and-setup-screens/ (P2 completion §Residuals)",
         "note": "Preset management MVP = list/scaffold/validate/reload (validate dry-run is the high-trust affordance shipped). Full CRUD (get/update/delete routes) deferred to a future preset-CRUD plan.",
-        "lifecycle": "deferred"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P1 (frontend scope gaps).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-frontend-scope-gaps",
+          "commit": "963fa1ed"
+        }
       },
       {
         "id": "R-V164-P2-G3",
@@ -3920,90 +4017,379 @@
         "title": "Event-driven daemon-status (replace Rust 100ms + React 5s dual poll loops with Tauri AppHandle::emit)",
         "severity": "low",
         "source": "qc1.md S-1",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_iteration": "V1.67+",
-        "scope": "apps/desktop/src-tauri/src/sidecar.rs + apps/web/src/components/layout/daemon-status-bar.tsx"
+        "scope": "apps/desktop/src-tauri/src/sidecar.rs + apps/web/src/components/layout/daemon-status-bar.tsx",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P-sec (desktop shell polish).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
+          "commit": "cf48a8f1"
+        }
       },
       {
         "id": "R-V166-QC1-S2",
         "title": "sidecar.rs:198 robust unwrap (unwrap_or_else fallback message)",
         "severity": "low",
         "source": "qc1.md S-2",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_iteration": "V1.67+",
-        "scope": "apps/desktop/src-tauri/src/sidecar.rs"
+        "scope": "apps/desktop/src-tauri/src/sidecar.rs",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P-sec (desktop shell polish).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
+          "commit": "cf48a8f1"
+        }
       },
       {
         "id": "R-V166-QC1-S4",
         "title": "desktop-build.yml §5 #10 conditional fallback to per-arch artifacts when universal unstable",
         "severity": "low",
         "source": "qc1.md S-4",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_iteration": "V1.67+",
-        "scope": ".github/workflows/desktop-build.yml"
+        "scope": ".github/workflows/desktop-build.yml",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P-sec (desktop shell polish).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
+          "commit": "cf48a8f1"
+        }
       },
       {
         "id": "R-V166-QC1-S5",
         "title": "Idiomatic Tauri exit hook (on_window_event/RunEvent::ExitRequested) vs trailing block_on(stop)",
         "severity": "low",
         "source": "qc1.md S-5",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_iteration": "V1.67+",
-        "scope": "apps/desktop/src-tauri/src/lib.rs"
+        "scope": "apps/desktop/src-tauri/src/lib.rs",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P-sec (desktop shell polish).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
+          "commit": "cf48a8f1"
+        }
       },
       {
         "id": "R-V166-QC3-S1",
         "title": "Reset restart_count on manual startDaemon (currently stays at cap after give-up)",
         "severity": "low",
         "source": "qc3.md S-1",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_iteration": "V1.67+",
-        "scope": "apps/desktop/src-tauri/src/sidecar.rs"
+        "scope": "apps/desktop/src-tauri/src/sidecar.rs",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P-sec (desktop shell polish).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
+          "commit": "cf48a8f1"
+        }
       },
       {
         "id": "R-V166-QC3-S2",
         "title": "Reuse single reqwest::Client in probe_health (currently allocates per call)",
         "severity": "low",
         "source": "qc3.md S-2",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_iteration": "V1.67+",
-        "scope": "apps/desktop/src-tauri/src/sidecar.rs"
+        "scope": "apps/desktop/src-tauri/src/sidecar.rs",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P-sec (desktop shell polish).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
+          "commit": "cf48a8f1"
+        }
       },
       {
         "id": "R-V166-QC3-S3",
         "title": "Directory fsync after atomic rename (full crash durability)",
         "severity": "low",
         "source": "qc3.md S-3",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_iteration": "V1.67+",
-        "scope": "crates/nexus-daemon-runtime/src/api/handlers/{chapters,host_tool_handlers}.rs"
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/{chapters,host_tool_handlers}.rs",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P-sec (desktop shell polish).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
+          "commit": "cf48a8f1"
+        }
       },
       {
         "id": "R-V166-QC3-S4",
         "title": "RuntimeLockGuard doc comment misleading (says releases-on-drop; actually explicit release())",
         "severity": "low",
         "source": "qc3.md S-4",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_iteration": "V1.67+",
-        "scope": "crates/nexus-daemon-runtime/src/api/runtime_lock.rs"
+        "scope": "crates/nexus-daemon-runtime/src/api/runtime_lock.rs",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P-sec (desktop shell polish).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
+          "commit": "cf48a8f1"
+        }
       },
       {
         "id": "R-V166-QC3-S5",
         "title": "Restart backoff lacks jitter (pure 500ms×2^n)",
         "severity": "low",
         "source": "qc3.md S-5",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_iteration": "V1.67+",
-        "scope": "apps/desktop/src-tauri/src/sidecar.rs"
+        "scope": "apps/desktop/src-tauri/src/sidecar.rs",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P-sec (desktop shell polish).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
+          "commit": "cf48a8f1"
+        }
       },
       {
         "id": "R-V166-QC2-TOCTOU",
         "title": "TOCTOU comment in both path guards (desktop guard_path + daemon resolve_guarded_path) referencing the residual if adversarial local FS in scope",
         "severity": "low",
         "source": "qc2.md Suggestion",
-        "lifecycle": "deferred",
+        "lifecycle": "resolved",
         "target_iteration": "V1.67+",
-        "scope": "apps/desktop/src-tauri/src/lib.rs + crates/nexus-daemon-runtime/src/api/path_guard.rs"
+        "scope": "apps/desktop/src-tauri/src/lib.rs + crates/nexus-daemon-runtime/src/api/path_guard.rs",
+        "closed_at": "2026-06-26",
+        "closure_note": "Closed by V1.67 P-sec (desktop shell polish).",
+        "resolution": {
+          "plan_id": "2026-06-26-v1.67-desktop-shell-polish",
+          "commit": "cf48a8f1"
+        }
+      }
+    ],
+    "2026-06-26-v1.67-local-api-surface-convergence": [
+      {
+        "id": "R-V167P0-QC1-S-COMPARE",
+        "title": "Triplicate compare_* sort closures — extract shared comparator",
+        "severity": "low",
+        "source": "qc1 S-1",
+        "scope": "see reports/2026-06-26-v1.67-local-api-surface-convergence/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-local-api-surface-convergence][R-V167P0-QC1-S-COMPARE]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V167P0-QC1-S-DOCS",
+        "title": "ACP SDK mirror-type naming doc-comment",
+        "severity": "low",
+        "source": "qc1 S-2",
+        "scope": "see reports/2026-06-26-v1.67-local-api-surface-convergence/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-local-api-surface-convergence][R-V167P0-QC1-S-DOCS]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V167P0-QC1-S-CLI",
+        "title": "--sort flag in nexus42 schedule list CLI",
+        "severity": "low",
+        "source": "qc1 S-3",
+        "scope": "see reports/2026-06-26-v1.67-local-api-surface-convergence/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-local-api-surface-convergence][R-V167P0-QC1-S-CLI]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V167P0-QC1-S-AGENTS",
+        "title": "Error-envelope single-source rule in nexus-daemon-runtime/AGENTS.md",
+        "severity": "low",
+        "source": "qc1 S-4",
+        "scope": "see reports/2026-06-26-v1.67-local-api-surface-convergence/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-local-api-surface-convergence][R-V167P0-QC1-S-AGENTS]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V167P0-QC1-ENVELOPE-E2E",
+        "title": "503/422 IntoResponse->canonical-envelope e2e test",
+        "severity": "low",
+        "source": "qc1 W-3 (deferred)",
+        "scope": "see reports/2026-06-26-v1.67-local-api-surface-convergence/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-local-api-surface-convergence][R-V167P0-QC1-ENVELOPE-E2E]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      }
+    ],
+    "2026-06-26-v1.67-desktop-shell-polish": [
+      {
+        "id": "R-V167PSEC-QC1-S-UNMOUNT",
+        "title": "daemon-status-bar.tsx subscription-cleanup race on unmount during async setup",
+        "severity": "low",
+        "source": "qc1 S-1",
+        "scope": "see reports/2026-06-26-v1.67-desktop-shell-polish/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-desktop-shell-polish][R-V167PSEC-QC1-S-UNMOUNT]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V167PSEC-QC1-S-BLOCKINGLOCK",
+        "title": "set_app_handle blocking_lock() from sync context — fragile vs Tauri timing",
+        "severity": "low",
+        "source": "qc1 S-2",
+        "scope": "see reports/2026-06-26-v1.67-desktop-shell-polish/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-desktop-shell-polish][R-V167PSEC-QC1-S-BLOCKINGLOCK]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V167PSEC-QC1-S-BACKOFFOBS",
+        "title": "Backoff jitter choice not logged (observability)",
+        "severity": "low",
+        "source": "qc1 S-3",
+        "scope": "see reports/2026-06-26-v1.67-desktop-shell-polish/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-desktop-shell-polish][R-V167PSEC-QC1-S-BACKOFFOBS]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V167PSEC-QC1-S-CI-SETUO",
+        "title": "desktop-build CI fallback block lacks set -euo pipefail",
+        "severity": "low",
+        "source": "qc1 S-4",
+        "scope": "see reports/2026-06-26-v1.67-desktop-shell-polish/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev-2",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-desktop-shell-polish][R-V167PSEC-QC1-S-CI-SETUO]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      }
+    ],
+    "2026-06-26-v1.67-frontend-scope-gaps": [
+      {
+        "id": "R-V167P1-QC1-S1",
+        "title": "Narrow useState<string> to work_profile literal union",
+        "severity": "low",
+        "source": "qc1 S1",
+        "scope": "see reports/2026-06-26-v1.67-frontend-scope-gaps/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-frontend-scope-gaps][R-V167P1-QC1-S1]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V167P1-QC1-S2",
+        "title": "Extract WORK_PROFILES to a SSOT module",
+        "severity": "low",
+        "source": "qc1 S2",
+        "scope": "see reports/2026-06-26-v1.67-frontend-scope-gaps/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-frontend-scope-gaps][R-V167P1-QC1-S2]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V167P1-QC3-S1",
+        "title": "adapter-contract.test.ts 21->24 + preset-method parity guard",
+        "severity": "low",
+        "source": "qc3 S1",
+        "scope": "see reports/2026-06-26-v1.67-frontend-scope-gaps/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-frontend-scope-gaps][R-V167P1-QC3-S1]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V167P1-QC3-S2",
+        "title": "preset query keys + invalidation when V1.68 canvas UI lands",
+        "severity": "low",
+        "source": "qc3 S2",
+        "scope": "see reports/2026-06-26-v1.67-frontend-scope-gaps/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-frontend-scope-gaps][R-V167P1-QC3-S2]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      }
+    ],
+    "2026-06-26-v1.67-overdue-debt-closure": [
+      {
+        "id": "R-V167P2-QC1-S1",
+        "title": "outline_five_q NOGO dimension-scores regression test (R-V152TA-S006 promise gap)",
+        "severity": "low",
+        "source": "qc1 S1",
+        "scope": "see reports/2026-06-26-v1.67-overdue-debt-closure/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-overdue-debt-closure][R-V167P2-QC1-S1]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V167P2-QC1-S2",
+        "title": "Direct unit test for is_world_owned",
+        "severity": "low",
+        "source": "qc1 S2",
+        "scope": "see reports/2026-06-26-v1.67-overdue-debt-closure/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-overdue-debt-closure][R-V167P2-QC1-S2]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V167P2-QC1-S4",
+        "title": "Extract frontmatter helpers to frontmatter.rs if 3rd frontmatter-edit capability ships",
+        "severity": "low",
+        "source": "qc1 S4",
+        "scope": "see reports/2026-06-26-v1.67-overdue-debt-closure/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-overdue-debt-closure][R-V167P2-QC1-S4]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V167P2-QC3-S1",
+        "title": "script.section_status.update file-level OCC/lock vs concurrent manual edits",
+        "severity": "low",
+        "source": "qc3 S-001",
+        "scope": "see reports/2026-06-26-v1.67-overdue-debt-closure/qc-consolidated.md",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.68+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-overdue-debt-closure][R-V167P2-QC3-S1]",
+        "note": "QC Suggestion, non-blocking; deferred.",
+        "lifecycle": "open"
       }
     ]
   }

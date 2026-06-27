@@ -86,9 +86,9 @@ pub async fn run_or_exit(args: HostCallArgs, config: &CliConfig) {
     match run(args, config).await {
         Ok(()) => process::exit(0),
         Err(e) => {
-            let code = if e.to_string().contains("NOT_SUPPORTED")
-                || e.to_string().contains("FORBIDDEN")
-                || e.to_string().contains("POLICY_BLOCKED")
+            let code = if e.to_string().contains("not_supported")
+                || e.to_string().contains("forbidden")
+                || e.to_string().contains("policy_blocked")
             {
                 1
             } else {

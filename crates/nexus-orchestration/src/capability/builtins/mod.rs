@@ -25,6 +25,7 @@ mod outbox;
 mod reference_refresh;
 pub mod registry;
 mod script_scaffold;
+mod script_section_status;
 mod soul_experience_aggregate;
 mod sync;
 mod timeline;
@@ -58,6 +59,7 @@ pub use registry::{
     CdnError, RegistryRefresh,
 };
 pub use script_scaffold::ScriptProjectScaffold;
+pub use script_section_status::ScriptSectionStatusUpdate;
 pub use soul_experience_aggregate::SoulExperienceAggregate;
 pub use sync::{SyncPull, SyncPush};
 pub use timeline::TimelineEventAppend;

@@ -16,7 +16,9 @@ import type {
   ChapterOutline,
   CreateWorkRequest,
   CreateWorkResponse,
+  GetPresetResponse,
   InspectScheduleResponse,
+  ListCapabilitiesQuery,
   ListCapabilitiesResponse,
   ListChaptersQuery,
   ListChaptersResponse,
@@ -36,6 +38,8 @@ import type {
   ScaffoldPresetRequest,
   ScaffoldPresetResponse,
   SessionDetailResponse,
+  UpdatePresetRequest,
+  UpdatePresetResponse,
   ValidatePresetRequest,
   ValidatePresetResponse,
   WorkDetailResponse,
@@ -125,8 +129,8 @@ export class BrowserClient implements NexusClient {
   }
 
   // ── Capabilities ───────────────────────────────────────────────────────────
-  listCapabilities(): Promise<ListCapabilitiesResponse> {
-    return this.get<ListCapabilitiesResponse>('/v1/local/orchestration/capabilities');
+  listCapabilities(query?: ListCapabilitiesQuery): Promise<ListCapabilitiesResponse> {
+    return this.get<ListCapabilitiesResponse>('/v1/local/orchestration/capabilities', query);
   }
 
   // ── Findings ───────────────────────────────────────────────────────────────
@@ -151,6 +155,18 @@ export class BrowserClient implements NexusClient {
     return this.post<ReloadPresetResponse>(
       `/v1/local/presets/${encodeURIComponent(presetId)}:reload`,
     );
+  }
+  getPreset(presetId: string): Promise<GetPresetResponse> {
+    return this.get<GetPresetResponse>(`/v1/local/presets/${encodeURIComponent(presetId)}`);
+  }
+  updatePreset(presetId: string, request: UpdatePresetRequest): Promise<UpdatePresetResponse> {
+    return this.patch<UpdatePresetResponse>(
+      `/v1/local/presets/${encodeURIComponent(presetId)}`,
+      request,
+    );
+  }
+  deletePreset(presetId: string): Promise<void> {
+    return this.delete<void>(`/v1/local/presets/${encodeURIComponent(presetId)}`);
   }
 
   // ── Chapters (V1.65 Content-Authoring) ─────────────────────────────────────
@@ -227,6 +243,10 @@ export class BrowserClient implements NexusClient {
 
   private put<T>(path: string, body: unknown, query?: object): Promise<T> {
     return this.request<T>('PUT', `${path}${toQueryString(query)}`, body);
+  }
+
+  private delete<T>(path: string): Promise<T> {
+    return this.request<T>('DELETE', path);
   }
 
   private async request<T>(

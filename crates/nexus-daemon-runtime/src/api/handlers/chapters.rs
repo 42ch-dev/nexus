@@ -33,13 +33,13 @@ static TEST_UPDATE_OUTLINE_PATH_FAIL: AtomicBool = AtomicBool::new(false);
 fn parse_chapter(n: &str) -> Result<i32, NexusApiError> {
     n.parse::<i32>()
         .map_err(|_| NexusApiError::BadRequest {
-            code: "INVALID_CHAPTER_NUMBER".to_string(),
+            code: "invalid_chapter_number".to_string(),
             message: format!("chapter number must be a positive integer, got '{n}'"),
         })
         .and_then(|v| {
             if v < 1 {
                 Err(NexusApiError::BadRequest {
-                    code: "INVALID_CHAPTER_NUMBER".to_string(),
+                    code: "invalid_chapter_number".to_string(),
                     message: format!("chapter number must be >= 1, got {v}"),
                 })
             } else {
@@ -61,7 +61,7 @@ fn decode_chapter_cursor(cursor: Option<&String>) -> Result<(i32, i32), NexusApi
         Some(raw) => {
             let stripped = raw.strip_prefix(CHAPTER_CURSOR_PREFIX).ok_or_else(|| {
                 NexusApiError::BadRequest {
-                    code: "INVALID_INPUT".to_string(),
+                    code: "invalid_input".to_string(),
                     message: "invalid chapter_cursor; pass the next_cursor value unchanged"
                         .to_string(),
                 }
@@ -72,7 +72,7 @@ fn decode_chapter_cursor(cursor: Option<&String>) -> Result<(i32, i32), NexusApi
                 .and_then(|s| s.parse::<i32>().ok())
                 .filter(|v| *v >= 1)
                 .ok_or_else(|| NexusApiError::BadRequest {
-                    code: "INVALID_INPUT".to_string(),
+                    code: "invalid_input".to_string(),
                     message: "invalid chapter_cursor volume".to_string(),
                 })?;
             let chapter = parts
@@ -80,7 +80,7 @@ fn decode_chapter_cursor(cursor: Option<&String>) -> Result<(i32, i32), NexusApi
                 .and_then(|s| s.parse::<i32>().ok())
                 .filter(|v| *v >= 1)
                 .ok_or_else(|| NexusApiError::BadRequest {
-                    code: "INVALID_INPUT".to_string(),
+                    code: "invalid_input".to_string(),
                     message: "invalid chapter_cursor chapter".to_string(),
                 })?;
             Ok((volume, chapter))
@@ -201,7 +201,7 @@ async fn read_guarded_file(
     const CHAPTER_BODY_MAX_BYTES: usize = 10 * 1024 * 1024;
 
     let path = resolve_guarded_path(workspace_root, rel_path, true).map_err(|e| {
-        if matches!(e, NexusApiError::BadRequest { ref code, .. } if code == "CHAPTER_PATH_FORBIDDEN")
+        if matches!(e, NexusApiError::BadRequest { ref code, .. } if code == "chapter_path_forbidden")
         {
             NexusApiError::BadRequest {
                 code: forbidden_code.to_string(),
@@ -226,7 +226,7 @@ async fn read_guarded_file(
     let max_bytes = u64::try_from(CHAPTER_BODY_MAX_BYTES).unwrap_or(u64::MAX);
     if metadata.len() > max_bytes {
         return Err(NexusApiError::BadRequest {
-            code: "CHAPTER_BODY_TOO_LARGE".to_string(),
+            code: "chapter_body_too_large".to_string(),
             message: format!(
                 "chapter body at '{rel_path}' is {size} bytes, exceeding the maximum of {max} bytes",
                 size = metadata.len(),
@@ -281,6 +281,12 @@ async fn atomic_write_outline(
         // after rename() returns does not leave the rename unflushed.
         let final_file = tokio::fs::File::open(&target).await?;
         final_file.sync_all().await?;
+        // Durability: fsync the parent directory so the renamed entry is
+        // committed to disk (QC3-S3).
+        if let Some(parent) = target.parent() {
+            let dir = tokio::fs::File::open(parent).await?;
+            dir.sync_all().await?;
+        }
         Ok::<(), std::io::Error>(())
     }
     .await;
@@ -304,7 +310,7 @@ fn validate_status_transition(from: &str, to: &str) -> Result<(), NexusApiError>
     match (from, to) {
         ("not_started", "outlined") => Ok(()),
         _ => Err(NexusApiError::BadRequest {
-            code: "CHAPTER_STATUS_TRANSITION_INVALID".to_string(),
+            code: "chapter_status_transition_invalid".to_string(),
             message: format!(
                 "status transition '{from}' -> '{to}' is not allowed through this endpoint"
             ),
@@ -432,8 +438,8 @@ pub async fn get_chapter_outline(
     let content = read_guarded_file(
         &workspace_root,
         outline_path,
-        "CHAPTER_OUTLINE_PATH_FORBIDDEN",
-        "CHAPTER_OUTLINE_NOT_FOUND",
+        "chapter_outline_path_forbidden",
+        "chapter_outline_not_found",
     )
     .await?;
 
@@ -561,7 +567,7 @@ pub async fn patch_chapter(
     // Reject display-only title writes in V1.65.
     if req.title.is_some() {
         return Err(NexusApiError::BadRequest {
-            code: "CHAPTER_TITLE_UNSUPPORTED".to_string(),
+            code: "chapter_title_unsupported".to_string(),
             message: "title is display-only in V1.65; use outline frontmatter or slug instead"
                 .to_string(),
         });
@@ -583,13 +589,13 @@ pub async fn patch_chapter(
         match record.status.as_str() {
             "published" => {
                 return Err(NexusApiError::BadRequest {
-                    code: "CHAPTER_STRUCTURE_EDIT_BLOCKED".to_string(),
+                    code: "chapter_structure_edit_blocked".to_string(),
                     message: "structural edits to published chapters are blocked".to_string(),
                 });
             }
             "finalized" if !req.confirm_structural_edit.unwrap_or(false) => {
                 return Err(NexusApiError::BadRequest {
-                    code: "CHAPTER_STRUCTURE_CONFIRMATION_REQUIRED".to_string(),
+                    code: "chapter_structure_confirmation_required".to_string(),
                     message: "set confirm_structural_edit=true to edit a finalized chapter"
                         .to_string(),
                 });
@@ -678,8 +684,8 @@ pub async fn get_chapter_body(
     let content = read_guarded_file(
         &workspace_root,
         body_path,
-        "CHAPTER_BODY_PATH_FORBIDDEN",
-        "CHAPTER_BODY_NOT_FOUND",
+        "chapter_body_path_forbidden",
+        "chapter_body_not_found",
     )
     .await?;
 
@@ -1081,7 +1087,7 @@ mod tests {
         assert!(result.is_err(), "expected error for oversized body");
         match result {
             Err(NexusApiError::BadRequest { code, .. }) => {
-                assert_eq!(code, "CHAPTER_BODY_TOO_LARGE");
+                assert_eq!(code, "chapter_body_too_large");
             }
             Err(other) => panic!("unexpected error: {other:?}"),
             Ok(_) => panic!("expected error"),

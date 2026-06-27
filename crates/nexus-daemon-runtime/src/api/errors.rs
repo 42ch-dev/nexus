@@ -11,7 +11,7 @@
 //! {
 //!   "success": false,
 //!   "error": {
-//!     "code": "INVALID_INPUT",
+//!     "code": "invalid_input",
 //!     "message": "Human-readable description",
 //!     "details": { "field": "workspace_slug", "reason": "must be a single path segment" },
 //!     "request_id": "req_01h..."
@@ -20,7 +20,7 @@
 //! ```
 //!
 //! - `success`: always `false` for errors.
-//! - `error.code`: stable public `UPPER_SNAKE_CASE` code.
+//! - `error.code`: stable public lowercase `snake_case` code (V1.67 ratification).
 //! - `error.message`: human-readable, safe for CLI/UI display.
 //! - `error.details`: optional structured data for field highlighting.
 //! - `error.request_id`: correlation ID when request-tracing middleware is active.
@@ -29,15 +29,15 @@
 //!
 //! This module follows a two-tier error code strategy:
 //!
-//! 1. **`error_code()`** returns a **public, stable** error code in `UPPER_SNAKE_CASE`
-//!    (e.g., `"INTERNAL"`, `"INVALID_INPUT"`). These codes are sent to API clients
+//! 1. **`error_code()`** returns a **public, stable** error code in lowercase `snake_case`
+//!    (e.g., `"internal"`, `"invalid_input"`). These codes are sent to API clients
 //!    and must remain stable across versions. They intentionally group error categories
 //!    at a coarse level to avoid leaking implementation details.
 //!
 //! 2. **`Internal.code`** holds an **internal classification** string (e.g., `"INTERNAL_ERROR"`,
 //!    `"DATABASE_ERROR"`, `"DATABASE_UNAVAILABLE"`). This field is used for *internal*
 //!    debugging, logging, and error categorization — it is NOT exposed as the `error_code`
-//!    in the API response body (which always returns `"INTERNAL"` for all `Internal` variants).
+//!    in the API response body (which always returns `"internal"` for all `Internal` variants).
 //!
 //! This design means `Internal.code` and `error_code()` serve different purposes:
 //! - `Internal.code` → internal classification (fine-grained, for logging/diagnosis)
@@ -94,7 +94,7 @@ pub enum NexusApiError {
     /// The `code` field provides **internal classification** only (e.g., `"DATABASE_ERROR"`,
     /// `"INTERNAL_ERROR"`, `"DATABASE_UNAVAILABLE"`). It is used for logging and debugging,
     /// not for the public API error code. The public `error_code()` method always returns
-    /// `"INTERNAL"` for this variant, intentionally hiding implementation details from
+    /// `"internal"` for this variant, intentionally hiding implementation details from
     /// API consumers. See module-level docs for the full rationale.
     #[error("Internal error: {message}")]
     Internal { code: String, message: String },
@@ -143,12 +143,20 @@ pub enum NexusApiError {
     /// Bad request with code and message (e.g., invalid stage value)
     #[error("Bad request: {message}")]
     BadRequest { code: String, message: String },
+
+    /// Service unavailable (e.g., supervisor/engine not configured).
+    #[error("Service unavailable: {message}")]
+    ServiceUnavailable { message: String },
+
+    /// Preset gate evaluation failed (semantic validation; HTTP 422).
+    #[error("Preset gates failed")]
+    PresetGatesFailed { details: serde_json::Value },
 }
 
 impl NexusApiError {
     /// Get the HTTP status code for this error variant.
     ///
-    /// `BadRequest` with canonical tool-bridge code `POLICY_BLOCKED` maps to
+    /// `BadRequest` with canonical tool-bridge code `policy_blocked` maps to
     /// 403 (spec §12.4: "403 or 409, P4 chooses one consistently").
     #[must_use]
     pub fn status_code(&self) -> StatusCode {
@@ -156,25 +164,27 @@ impl NexusApiError {
             Self::Uninitialized | Self::Conflict(_) => StatusCode::CONFLICT,
             Self::Locked { .. } => StatusCode::LOCKED,
             Self::InvalidInput { .. } | Self::InvalidApiKeyFormat => StatusCode::BAD_REQUEST,
+            Self::ServiceUnavailable { .. } => StatusCode::SERVICE_UNAVAILABLE,
+            Self::PresetGatesFailed { .. } => StatusCode::UNPROCESSABLE_ENTITY,
             Self::BadRequest { code, .. } => {
                 match code.as_str() {
-                    "POLICY_BLOCKED" => StatusCode::FORBIDDEN,
-                    // V1.40: WORLD_ID_REQUIRED and INVALID_WORLD_ID are semantic
+                    "policy_blocked" => StatusCode::FORBIDDEN,
+                    // V1.40: world_id_required and invalid_world_id are semantic
                     // validation errors → 422 Unprocessable Entity (aligned with
                     // preset_gates_failed pattern per spec §3.5.1.2).
-                    "WORLD_ID_REQUIRED" | "INVALID_WORLD_ID" | "WORLD_CLEAR_FORBIDDEN" => {
+                    "world_id_required" | "invalid_world_id" | "world_clear_forbidden" => {
                         StatusCode::UNPROCESSABLE_ENTITY
                     }
                     // V1.49 F6 (findings-lifecycle.md §2.1): illegal lifecycle
-                    // transitions return 422 with the stable `INVALID_TRANSITION`
+                    // transitions return 422 with the stable `invalid_transition`
                     // code so callers can distinguish "no such finding" (404)
                     // from "finding exists but the move is not allowed".
                     // V1.49 P0 W-1: invalid PATCH enum values (severity /
                     // status membership / target_executor) return 422 with the
-                    // stable `INVALID_INPUT` code, distinct from transitions.
-                    "INVALID_TRANSITION" | "INVALID_INPUT" => StatusCode::UNPROCESSABLE_ENTITY,
+                    // stable `invalid_input` code, distinct from transitions.
+                    "invalid_transition" | "invalid_input" => StatusCode::UNPROCESSABLE_ENTITY,
                     // V1.65: chapter bodies above the size cap return 413.
-                    "CHAPTER_BODY_TOO_LARGE" => StatusCode::PAYLOAD_TOO_LARGE,
+                    "chapter_body_too_large" => StatusCode::PAYLOAD_TOO_LARGE,
                     _ => StatusCode::BAD_REQUEST,
                 }
             }
@@ -188,42 +198,46 @@ impl NexusApiError {
         }
     }
 
-    /// Get the error code string (`UPPER_SNAKE_CASE`).
+    /// Get the error code string (lowercase `snake_case`).
     ///
     /// For `BadRequest`, the inner `code` is returned when it matches one of
     /// the tool-bridge canonical codes (spec §12.4), so that HTTP and worker
-    /// wire responses surface the *specific* code (e.g. `POLICY_BLOCKED`,
-    /// `NOT_SUPPORTED`, `INVALID_INPUT`) instead of the generic `BAD_REQUEST`.
+    /// wire responses surface the *specific* code (e.g. `policy_blocked`,
+    /// `not_supported`, `invalid_input`) instead of the generic `bad_request`.
     #[must_use]
     pub fn error_code(&self) -> &str {
         match self {
-            Self::Uninitialized => "UNINITIALIZED",
-            Self::InvalidInput { .. } => "INVALID_INPUT",
-            Self::Internal { .. } => "INTERNAL",
-            Self::AuthRequired => "AUTH_REQUIRED",
-            Self::NotFound(_) => "NOT_FOUND",
-            Self::NotImplemented(_) => "NOT_IMPLEMENTED",
-            Self::Forbidden { .. } => "FORBIDDEN",
-            Self::InvalidApiKeyFormat => "INVALID_API_KEY",
-            Self::ApiKeyExpired => "API_KEY_EXPIRED",
-            Self::InsufficientPermissions { .. } => "INSUFFICIENT_PERMISSIONS",
+            Self::Uninitialized => "uninitialized",
+            Self::InvalidInput { .. } => "invalid_input",
+            Self::Internal { .. } => "internal",
+            Self::AuthRequired => "auth_required",
+            Self::NotFound(_) => "not_found",
+            Self::NotImplemented(_) => "not_implemented",
+            Self::Forbidden { .. } => "forbidden",
+            Self::InvalidApiKeyFormat => "invalid_api_key",
+            Self::ApiKeyExpired => "api_key_expired",
+            Self::InsufficientPermissions { .. } => "insufficient_permissions",
             Self::BadRequest { code, .. } => {
                 // Surface canonical tool-bridge codes (spec §12.4), plus
                 // V1.40 world-binding and V1.49 F6 lifecycle codes, as-is.
+                // V1.67 F-F1: resource-specific sort-invalid codes are also public.
                 match code.as_str() {
-                    "POLICY_BLOCKED"
-                    | "NOT_SUPPORTED"
-                    | "INVALID_INPUT"
-                    | "INVALID_TRANSITION"
-                    | "WORLD_ID_REQUIRED"
-                    | "INVALID_WORLD_ID"
-                    | "WORLD_CLEAR_FORBIDDEN" => code.as_str(),
-                    _ => "BAD_REQUEST",
+                    "policy_blocked"
+                    | "not_supported"
+                    | "invalid_input"
+                    | "invalid_transition"
+                    | "world_id_required"
+                    | "invalid_world_id"
+                    | "world_clear_forbidden" => code.as_str(),
+                    _ if code.ends_with("_sort_invalid") => code.as_str(),
+                    _ => "bad_request",
                 }
             }
-            Self::SessionExpired => "SESSION_EXPIRED",
-            Self::Conflict(_) => "CONFLICT",
-            Self::Locked { .. } => "LOCKED",
+            Self::SessionExpired => "session_expired",
+            Self::Conflict(_) => "conflict",
+            Self::Locked { .. } => "locked",
+            Self::ServiceUnavailable { .. } => "service_unavailable",
+            Self::PresetGatesFailed { .. } => "preset_gates_failed",
         }
     }
 
@@ -243,7 +257,26 @@ impl NexusApiError {
                     "reason": reason,
                 }))
             }
+            Self::PresetGatesFailed { details } => Some(details.clone()),
             _ => None,
+        }
+    }
+
+    /// Build a `service_unavailable` error from a message.
+    #[must_use]
+    pub fn service_unavailable(message: impl Into<String>) -> Self {
+        Self::ServiceUnavailable {
+            message: message.into(),
+        }
+    }
+
+    /// Build a `preset_gates_failed` error from structured gate-failure details.
+    #[must_use]
+    pub fn preset_gates_failed(
+        failure: &nexus_orchestration::preset_gates::PresetGatesFailed,
+    ) -> Self {
+        Self::PresetGatesFailed {
+            details: serde_json::to_value(failure).unwrap_or_else(|_| serde_json::json!({})),
         }
     }
 
@@ -327,7 +360,7 @@ mod tests {
     fn uninitialized_maps_to_409() {
         let err = NexusApiError::Uninitialized;
         assert_eq!(err.status_code(), StatusCode::CONFLICT);
-        assert_eq!(err.error_code(), "UNINITIALIZED");
+        assert_eq!(err.error_code(), "uninitialized");
     }
 
     #[test]
@@ -337,7 +370,7 @@ mod tests {
             reason: "must not be empty".into(),
         };
         assert_eq!(err.status_code(), StatusCode::BAD_REQUEST);
-        assert_eq!(err.error_code(), "INVALID_INPUT");
+        assert_eq!(err.error_code(), "invalid_input");
     }
 
     #[test]
@@ -347,21 +380,21 @@ mod tests {
             message: "connection failed".into(),
         };
         assert_eq!(err.status_code(), StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(err.error_code(), "INTERNAL");
+        assert_eq!(err.error_code(), "internal");
     }
 
     #[test]
     fn auth_required_maps_to_401() {
         let err = NexusApiError::AuthRequired;
         assert_eq!(err.status_code(), StatusCode::UNAUTHORIZED);
-        assert_eq!(err.error_code(), "AUTH_REQUIRED");
+        assert_eq!(err.error_code(), "auth_required");
     }
 
     #[test]
     fn not_found_maps_to_404() {
         let err = NexusApiError::NotFound("creator".into());
         assert_eq!(err.status_code(), StatusCode::NOT_FOUND);
-        assert_eq!(err.error_code(), "NOT_FOUND");
+        assert_eq!(err.error_code(), "not_found");
     }
 
     #[test]
@@ -369,7 +402,7 @@ mod tests {
         let err = NexusApiError::Uninitialized;
         let body = err.to_response_body();
         assert!(!body.success);
-        assert_eq!(body.error.code, "UNINITIALIZED");
+        assert_eq!(body.error.code, "uninitialized");
         assert_eq!(body.error.message, "Workspace not initialized");
         assert!(body.error.details.is_none());
         assert!(body.error.request_id.is_none());
@@ -383,7 +416,7 @@ mod tests {
         };
         let body = err.to_response_body();
         assert!(!body.success);
-        assert_eq!(body.error.code, "INVALID_INPUT");
+        assert_eq!(body.error.code, "invalid_input");
         let details = body.error.details.expect("details should be present");
         assert_eq!(details["field"], "workspace_slug");
         assert_eq!(details["reason"], "must be a single path segment");
@@ -448,7 +481,7 @@ mod tests {
     fn invalid_api_key_format_maps_to_400() {
         let err = NexusApiError::InvalidApiKeyFormat;
         assert_eq!(err.status_code(), StatusCode::BAD_REQUEST);
-        assert_eq!(err.error_code(), "INVALID_API_KEY");
+        assert_eq!(err.error_code(), "invalid_api_key");
         assert_eq!(err.to_string(), "Invalid API key format");
     }
 
@@ -456,7 +489,7 @@ mod tests {
     fn api_key_expired_maps_to_401() {
         let err = NexusApiError::ApiKeyExpired;
         assert_eq!(err.status_code(), StatusCode::UNAUTHORIZED);
-        assert_eq!(err.error_code(), "API_KEY_EXPIRED");
+        assert_eq!(err.error_code(), "api_key_expired");
         assert_eq!(err.to_string(), "API key expired or revoked");
     }
 
@@ -466,7 +499,7 @@ mod tests {
             required: vec!["admin".into(), "write".into()],
         };
         assert_eq!(err.status_code(), StatusCode::FORBIDDEN);
-        assert_eq!(err.error_code(), "INSUFFICIENT_PERMISSIONS");
+        assert_eq!(err.error_code(), "insufficient_permissions");
         let display = err.to_string();
         assert!(
             display.contains("admin") && display.contains("write"),
@@ -478,14 +511,14 @@ mod tests {
     fn insufficient_permissions_empty_vec() {
         let err = NexusApiError::InsufficientPermissions { required: vec![] };
         assert_eq!(err.status_code(), StatusCode::FORBIDDEN);
-        assert_eq!(err.error_code(), "INSUFFICIENT_PERMISSIONS");
+        assert_eq!(err.error_code(), "insufficient_permissions");
     }
 
     #[test]
     fn session_expired_maps_to_401() {
         let err = NexusApiError::SessionExpired;
         assert_eq!(err.status_code(), StatusCode::UNAUTHORIZED);
-        assert_eq!(err.error_code(), "SESSION_EXPIRED");
+        assert_eq!(err.error_code(), "session_expired");
         assert_eq!(err.to_string(), "Session expired");
     }
 
@@ -494,21 +527,92 @@ mod tests {
         let err = NexusApiError::InvalidApiKeyFormat;
         let body = err.to_response_body();
         assert!(!body.success);
-        assert_eq!(body.error.code, "INVALID_API_KEY");
+        assert_eq!(body.error.code, "invalid_api_key");
         assert_eq!(body.error.message, "Invalid API key format");
 
         let err = NexusApiError::ApiKeyExpired;
         let body = err.to_response_body();
         assert!(!body.success);
-        assert_eq!(body.error.code, "API_KEY_EXPIRED");
+        assert_eq!(body.error.code, "api_key_expired");
         assert_eq!(body.error.message, "API key expired or revoked");
 
         let err = NexusApiError::SessionExpired;
         let body = err.to_response_body();
         assert!(!body.success);
-        assert_eq!(body.error.code, "SESSION_EXPIRED");
+        assert_eq!(body.error.code, "session_expired");
         assert_eq!(body.error.message, "Session expired");
     }
+    #[test]
+    fn service_unavailable_maps_to_503() {
+        let err = NexusApiError::service_unavailable("engine not available");
+        assert_eq!(err.status_code(), StatusCode::SERVICE_UNAVAILABLE);
+        assert_eq!(err.error_code(), "service_unavailable");
+        assert_eq!(err.to_string(), "Service unavailable: engine not available");
+    }
+
+    #[test]
+    fn preset_gates_failed_maps_to_422() {
+        let failure = nexus_orchestration::preset_gates::PresetGatesFailed {
+            error: "preset_gates_failed".to_string(),
+            preset_id: "novel-writing".to_string(),
+            work_id: "wrk_123".to_string(),
+            failed_gates: vec![],
+        };
+        let err = NexusApiError::preset_gates_failed(&failure);
+        assert_eq!(err.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(err.error_code(), "preset_gates_failed");
+        let body = err.to_response_body();
+        assert_eq!(body.error.details.unwrap()["preset_id"], "novel-writing");
+    }
+
+    #[test]
+    fn sort_invalid_codes_are_public() {
+        for code in [
+            "work_sort_invalid",
+            "schedule_sort_invalid",
+            "session_sort_invalid",
+            "capability_sort_invalid",
+        ] {
+            let err = NexusApiError::BadRequest {
+                code: code.into(),
+                message: "bad sort".into(),
+            };
+            assert_eq!(err.status_code(), StatusCode::BAD_REQUEST);
+            assert_eq!(err.error_code(), code);
+            assert_eq!(err.to_response_body().error.code, code);
+        }
+    }
+
+    #[test]
+    fn bad_request_passthrough_codes_are_lowercase() {
+        let err = NexusApiError::BadRequest {
+            code: "policy_blocked".into(),
+            message: "denied".into(),
+        };
+        assert_eq!(err.status_code(), StatusCode::FORBIDDEN);
+        assert_eq!(err.error_code(), "policy_blocked");
+
+        let err = NexusApiError::BadRequest {
+            code: "not_supported".into(),
+            message: "no".into(),
+        };
+        assert_eq!(err.error_code(), "not_supported");
+
+        let err = NexusApiError::BadRequest {
+            code: "invalid_transition".into(),
+            message: "bad".into(),
+        };
+        assert_eq!(err.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(err.error_code(), "invalid_transition");
+
+        let err = NexusApiError::BadRequest {
+            code: "world_id_required".into(),
+            message: "missing".into(),
+        };
+        assert_eq!(err.status_code(), StatusCode::UNPROCESSABLE_ENTITY);
+        assert_eq!(err.error_code(), "world_id_required");
+    }
+
     /// Integration test: POST /v1/local/workspace/init with empty path → 400
     #[tokio::test]
     async fn init_workspace_with_empty_path_returns_400() {
@@ -538,7 +642,7 @@ mod tests {
                 );
                 let body = err.to_response_body();
                 assert!(!body.success);
-                assert_eq!(body.error.code, "INVALID_INPUT");
+                assert_eq!(body.error.code, "invalid_input");
             }
         }
     }

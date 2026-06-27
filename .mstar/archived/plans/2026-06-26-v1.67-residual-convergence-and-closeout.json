@@ -1,0 +1,17 @@
+{
+  "plan_id": "2026-06-26-v1.67-residual-convergence-and-closeout",
+  "title": "V1.67 P-last — Residual Convergence & Closeout",
+  "iteration": "V1.67",
+  "slot": "P-last",
+  "status": "Done",
+  "effort": "M",
+  "owner": "@fullstack-dev + @project-manager",
+  "review": "tri-review",
+  "wave": 3,
+  "dependency": "P-mid",
+  "working_branch": "feature/v1.67-residual-convergence-and-closeout",
+  "merge_target": "iteration/v1.67",
+  "file": ".mstar/plans/2026-06-26-v1.67-residual-convergence-and-closeout.md",
+  "completion_summary": "P-last Done. Closeout: 26 residuals closed across Wave1+Wave2 (15+11); 21 V1.67 QC-suggestion residuals registered open (defer V1.68+, all low); tech_debt_summary refreshed (was stale total_open:4 -> actual 21 open / resolved count updated); spec promotion done in Prepare (local-api-surface-conventions.md V1.67-amended, web-ui.md §15, canvas-strategy-surface.md Exploration, daemon-runtime.md + chapter-content-local-api.md deferrals resolved); Profile B compaction (P-mid+P-last archived). PR iteration/v1.67 -> main. QC skipped w/ explicit reason (closeout/bookkeeping, no runtime artifact).",
+  "completed_at": "2026-06-26 (Wave 3 closeout)"
+}

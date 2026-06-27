@@ -1,0 +1,17 @@
+{
+  "plan_id": "2026-06-26-v1.67-overdue-debt-closure",
+  "title": "V1.67 P2 — Overdue Debt Closure (9 V1.52/V1.60 residuals)",
+  "iteration": "V1.67",
+  "slot": "P2",
+  "status": "Done",
+  "effort": "M",
+  "owner": "@fullstack-dev",
+  "review": "tri-review",
+  "wave": 2,
+  "dependency": "P-1",
+  "working_branch": "feature/v1.67-overdue-debt-closure",
+  "merge_target": "iteration/v1.67",
+  "file": ".mstar/plans/2026-06-26-v1.67-overdue-debt-closure.md",
+  "completion_summary": "P2 Done. 9 overdue V1.52/V1.60 residuals closed: KB signal drift, 五问 NOGO observability, named-column parsing, ownership-gate dedup, atomic timeline append, world.delta N+1 (batch pre-fetch), script.section_status.update capability (local; 34 builtins), is_script_complete path validation, migration PRAGMA foreign_key_check. fix-wave-1: PRAGMA enforced fail-closed + world.delta IN-list chunked (cap 500). QC 3/3 Approve after fix-wave-1; QA Pass. Closes 9 residuals. 4 Suggestions -> residuals (V1.68+).",
+  "completed_at": "2026-06-26 (Wave 2 closeout)"
+}
