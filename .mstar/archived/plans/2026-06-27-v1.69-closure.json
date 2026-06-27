@@ -1,0 +1,22 @@
+{
+  "plan_id": "2026-06-27-v1.69-closure",
+  "archived_at": "2026-06-27",
+  "schema_version": 1,
+  "plan": {
+    "plan_id": "2026-06-27-v1.69-closure",
+    "title": "V1.69 P-last — Closure (residual convergence + tech_debt refresh + spec promotion + Profile B compaction + iteration PR)",
+    "iteration": "V1.69",
+    "slot": "P-last",
+    "status": "Todo",
+    "effort": "S",
+    "owner": "@project-manager",
+    "review": "n/a (closure)",
+    "wave": 3,
+    "dependency": "P0 + P1 merged",
+    "working_branch": "iteration/v1.69",
+    "merge_target": "iteration/v1.69",
+    "file": ".mstar/plans/2026-06-27-v1.69-closure.md",
+    "wire_contracts_changed": false,
+    "iteration_compass": "v1.69-design-system-maturation-and-canvas-draft-compass-v1.md"
+  }
+}
