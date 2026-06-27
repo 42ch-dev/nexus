@@ -35,6 +35,15 @@ export const queryKeys = {
   presets: {
     all: ['presets'] as const,
     list: () => [...queryKeys.presets.all, 'list'] as const,
+    // Detail keys staged for the V1.70 canvas Strategy surface
+    // (R-V167P1-QC3-S2): getPreset/updatePreset/deletePreset operate on a
+    // single preset by id. Invalidation follows the existing inline mutation
+    // pattern (e.g. useReloadPreset) — `qc.invalidateQueries({ queryKey:
+    // queryKeys.presets.all })` covers the list + every detail, and
+    // `queryKeys.presets.detail(id)` targets one. The actual
+    // `invalidateQueries` wiring lands in V1.70 when the canvas consumes these.
+    details: () => [...queryKeys.presets.all, 'detail'] as const,
+    detail: (presetId: string) => [...queryKeys.presets.details(), presetId] as const,
   },
   chapters: {
     all: ['chapters'] as const,
