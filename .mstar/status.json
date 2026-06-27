@@ -4013,10 +4013,10 @@
         "note": "Script builds apps/web, builds nexus42 release binary (rust-embed release-only), starts the daemon with a throwaway HOME, verifies Local API health, and asserts the root path serves the embedded SPA HTML. CI job runs on macOS after desktop-build.",
         "lifecycle": "resolved",
         "closed_at": "2026-06-27",
-        "closure_note": "Closed by commit TBD: added scripts/served-ui-smoke.sh and a CI job in desktop-build.yml; smoke test uses an ephemeral port and release binary to avoid stale-daemon shadowing.",
+        "closure_note": "Closed by commit 835e4762: added scripts/served-ui-smoke.sh and a CI job in desktop-build.yml; smoke test uses an ephemeral port and release binary to avoid stale-daemon shadowing.",
         "resolution": {
           "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
-          "commit": "TBD"
+          "commit": "835e4762"
         }
       }
     ],
