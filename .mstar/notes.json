@@ -3,6 +3,11 @@
   "updated_at": "2026-06-27T00:00:00Z",
   "entries": [
     {
+      "at": "2026-06-27 (V1.68 MERGED to main)",
+      "message": "V1.68 merged to main @ f322f574 via PR #92 (squash). iteration/v1.68 retired + deleted. apps/nexus42 now canonical CLI location; crates/ pure libs. All 18 CI checks green on the PR (incl. Build unsigned macOS desktop app — confirms W-001 fix: desktop bundle builds with CLI at apps/nexus42). Post-merge retirement: integration_branch → null, retired. latest_active_iteration → V1.68 (Shipped); V1.69 (pending). Next iteration slot = V1.69 (Canvas Strategy Surface implement, conditions permitting).",
+      "plan_id": "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization"
+    },
+    {
       "at": "2026-06-27 (V1.68 SHIP — pending PR merge)",
       "message": "V1.68 CLI -> apps/ Product-Surface Unification shipped on iteration/v1.68 (PR to main next). Structural hygiene: relocated crates/nexus42 -> apps/nexus42; apps/ = polyglot product-surfaces dir (Rust CLI/daemon + TS desktop + TS web); crates/ = pure Rust libs. Durable placement rule pinned in new apps/AGENTS.md + root README Monorepo Layout + ARCHITECTURE + AGENTS index (app-owned nested Rust e.g. src-tauri is product-surface impl, promote to crates/ only if reusable). Zero source changes (leaf consumer; Cargo resolves by name); CI-invisible. 12 live refs updated; ~978 historical .mstar records + archived/ left as-is; 0 open residuals affected. 1 regression R-V168P0-QC1-W001 (desktop-build.yml paths filter lost apps/nexus42/** coverage when CLI left crates/** glob) caught by QC tri-review (qc1+qc3 cross-confirm) + fixed in-wave (630df3af: added apps/nexus42/** to push+pull_request paths) + qc1/qc3 targeted re-review Approve. QC tri-review 3/3 Approve (qc1/qc2/qc3); QA Pass (build/clippy/test/fmt/drift/pnpm all green; 7/7 AC; byte-identical source; wire_contracts_changed: false). 2 plans Done (P-1 Prepare + P0 implement); Profile B compaction done. Single-stream iteration/v1.68 (no worktree).",
       "plan_id": "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization"

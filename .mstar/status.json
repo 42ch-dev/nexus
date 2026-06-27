@@ -3,12 +3,12 @@
   "updated_at": "2026-06-27T00:00:00Z",
   "plans": [],
   "metadata": {
-    "integration_branch": "iteration/v1.68",
-    "integration_branch_retired": false,
-    "last_integration_branch": "iteration/v1.67",
+    "integration_branch": null,
+    "integration_branch_retired": true,
+    "last_integration_branch": "iteration/v1.68",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.68 (shipped — pending PR merge to main)",
-    "latest_active_compass": "v1.68-cli-to-apps-product-surface-unification-compass-v1.md",
+    "latest_active_iteration": "V1.68 (Shipped via PR #92 → main @ f322f574); V1.69 (pending)",
+    "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": "pending (V1.69)",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
@@ -16,7 +16,7 @@
     "latest_ship": {
       "iteration": "V1.68",
       "compass": "v1.68-cli-to-apps-product-surface-unification-compass-v1.md",
-      "shipped_at": "2026-06-27 (pending PR merge)",
+      "shipped_at": "2026-06-27 (merged to main @ f322f574 via PR #92, squash)",
       "plan_count": 2,
       "plan_count_done": 2,
       "wire_contracts_changed": false,
@@ -26,7 +26,8 @@
         "2026-06-27-v1.68-compass-and-plan",
         "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization"
       ],
-      "note": "Structural hygiene: relocated crates/nexus42 -> apps/nexus42 so apps/ is the polyglot product-surfaces dir and crates/ returns to pure Rust libs. Zero source changes (Cargo resolves by crate name); CI-invisible. 12 live refs updated; ~978 historical .mstar records left as-is. 1 regression R-V168P0-QC1-W001 (desktop-build path filter omitted apps/nexus42/**) caught by QC tri-review + fixed in-wave (630df3af). QC 3/3 Approve after fix wave; QA Pass. Single-plan iteration on iteration/v1.68."
+      "note": "Structural hygiene: relocated crates/nexus42 -> apps/nexus42 so apps/ is the polyglot product-surfaces dir and crates/ returns to pure Rust libs. Zero source changes (Cargo resolves by crate name); CI-invisible. 12 live refs updated; ~978 historical .mstar records left as-is. 1 regression R-V168P0-QC1-W001 (desktop-build path filter omitted apps/nexus42/**) caught by QC tri-review + fixed in-wave (630df3af). QC 3/3 Approve after fix wave; QA Pass. Single-plan iteration on iteration/v1.68.",
+      "merge_commit": "f322f574"
     },
     "tech_debt_summary": {
       "total_open": 21,
@@ -45,7 +46,7 @@
       "refreshed_at": "2026-06-26T... (V1.67 P-last closeout)",
       "refreshed_reason": "V1.67 P-last: post Wave1+Wave2 QC+QA; all V1.67 closures done; 21 open are V1.67 QC-suggestions deferred V1.68+ (all low)"
     },
-    "updated_at": "2026-06-27 (V1.68 ship — pending PR merge)",
+    "updated_at": "2026-06-27 (V1.68 shipped via PR #92 → main @ f322f574)",
     "spec_integration_branch": null,
     "wave1_merged_at": "2026-06-25T15:49:19Z"
   },
