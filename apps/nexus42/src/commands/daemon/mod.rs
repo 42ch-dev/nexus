@@ -203,8 +203,7 @@ async fn start_daemon(port: u16, foreground: bool, cdn_url: Option<String>) -> R
         })?;
 
         let mut cmd = std::process::Command::new(&exe);
-        cmd.arg("__internal")
-            .arg("daemon-run")
+        cmd.arg("daemon-run")
             .arg("--port")
             .arg(port.to_string())
             .stdout(std::process::Stdio::null())

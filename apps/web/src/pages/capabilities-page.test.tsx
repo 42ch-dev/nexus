@@ -12,7 +12,7 @@ import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 import { BrowserClient } from '@/lib/nexus';
 import { CapabilitiesPage } from '@/pages/capabilities-page';
-import { screen, waitFor } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 
 const client = () => new BrowserClient();
 

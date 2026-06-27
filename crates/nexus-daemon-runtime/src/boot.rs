@@ -106,16 +106,19 @@ impl DaemonConfig {
 #[allow(clippy::too_many_lines)]
 pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // --- Section 1: Logging ---
-    // Initialize tracing subscriber with configurable verbosity.
+    // Initialize tracing subscriber with configurable verbosity. Use try_init
+    // so the daemon can be invoked both as a standalone process and from a
+    // parent CLI that has already installed a subscriber (e.g. foreground
+    // `nexus42 daemon start` or the `__internal daemon-run` subprocess).
     let filter = if config.verbose {
         EnvFilter::new("debug")
     } else {
         EnvFilter::new("info")
     };
-    tracing_subscriber::fmt()
+    let _ = tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_target(false)
-        .init();
+        .try_init();
 
     tracing::info!("Starting daemon-runtime v{}", env!("CARGO_PKG_VERSION"));
 
