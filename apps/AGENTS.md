@@ -10,8 +10,8 @@
 
 ## Durable placement rule
 
-> `apps/` = **product surfaces** — runnable things you install or use, any language.  
-> `crates/` = **reusable Rust libraries** — building blocks.  
+> `apps/` = **product surfaces** — runnable things you install or use, any language.
+> `crates/` = **reusable Rust libraries** — building blocks.
 > `packages/` = **publishable npm libraries** — wire contracts.
 >
 > A new product surface of *any* language → `apps/`. A new reusable Rust library → `crates/`.
