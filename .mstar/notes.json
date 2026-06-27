@@ -3,6 +3,11 @@
   "updated_at": "2026-06-27T00:00:00Z",
   "entries": [
     {
+      "at": "2026-06-27 (security remediation)",
+      "message": "Security remediation pass on main. (1) Dependabot glib #25 (medium) DISMISSED as tolerable_risk: glib 0.18.5 locked to ^0.18 by gtk 0.18.2 pulled by Tauri 2.11.3 (latest 2.x); no Tauri release ships gtk-rs >= 0.20 yet (cargo update -p glib and -p tauri both move 0 packages). Advisory = Rust unsoundness in glib::VariantStrIter (Iterator/DoubleEndedIterator impls) — only exercised on Linux/GTK code paths; CI builds macOS only (native WKWebView, no GTK), so the vulnerable path is compiled-for-linux-target only and not run on the supported platform. Revisit when Tauri bumps its gtk-rs baseline to >= 0.20 or when Linux desktop builds are added. (2) Code scanning / AI findings: 0 open via API; all 16 CodeQL alerts already fixed (actions/unpinned-tag x7, actions/missing-workflow-permissions x9). ci.yml still had 19 floating @v4 action refs while desktop-build.yml was already SHA-pinned -> PR #93 pinned ci.yml to the SAME commit SHAs desktop-build.yml uses (checkout/setup-node/upload-artifact match; download-artifact newly pinned), preserving v4 behavior (no major upgrade). PR #93 merged @ f878c178. Result: dependabot 0 open, code-scanning 0 open, both workflows SHA-pinned + permissions-compliant.",
+      "plan_id": null
+    },
+    {
       "at": "2026-06-27 (V1.68 MERGED to main)",
       "message": "V1.68 merged to main @ f322f574 via PR #92 (squash). iteration/v1.68 retired + deleted. apps/nexus42 now canonical CLI location; crates/ pure libs. All 18 CI checks green on the PR (incl. Build unsigned macOS desktop app — confirms W-001 fix: desktop bundle builds with CLI at apps/nexus42). Post-merge retirement: integration_branch → null, retired. latest_active_iteration → V1.68 (Shipped); V1.69 (pending). Next iteration slot = V1.69 (Canvas Strategy Surface implement, conditions permitting).",
       "plan_id": "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization"
