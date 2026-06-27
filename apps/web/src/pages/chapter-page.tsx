@@ -6,7 +6,7 @@
  * react-markdown + remark-gfm with frontmatter header strip; right-click
  * context menu offering "Copy path" only.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -72,14 +72,19 @@ export function ChapterPage() {
   // view; acts on the chapter's outline_path.
   const outlineMenu = useContextMenu();
 
+  // Pin TipTap editor dependencies so `useEditor` does not re-initialize the
+  // ProseMirror instance on every render (qc3 S-1).
+  const editorExtensions = useMemo(() => [StarterKit, Markdown], []);
+  const handleEditorUpdate = useCallback(() => {
+    setSaveState('dirty');
+    setSaveError(null);
+  }, []);
+
   const editor = useEditor({
-    extensions: [StarterKit, Markdown],
+    extensions: editorExtensions,
     content: outline.data?.content ?? '',
     editable: true,
-    onUpdate: () => {
-      setSaveState('dirty');
-      setSaveError(null);
-    },
+    onUpdate: handleEditorUpdate,
   });
 
   // Reset editor when outline loads or changes externally.
