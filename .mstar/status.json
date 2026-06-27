@@ -5,7 +5,7 @@
     {
       "plan_id": "2026-06-27-v1.70-compass-and-plan",
       "title": "V1.70 Compass and Plan Stubs (P-1 Prepare)",
-      "status": "InProgress",
+      "status": "Done",
       "owner": "@project-manager",
       "effort": "S",
       "working_branch": "iteration/v1.70",
@@ -16,24 +16,28 @@
     {
       "plan_id": "2026-06-27-v1.70-canvas-strategy-surface-implement",
       "title": "Canvas Strategy Surface Implement (α: read + overlay + Idea-steer)",
-      "status": "Todo",
-      "owner": "@fullstack-dev + @frontend-dev",
+      "status": "InReview",
+      "owner": "@frontend-dev",
       "effort": "L",
-      "working_branch": "feature/v1.70-canvas-strategy-read",
+      "working_branch": "iteration/v1.70",
       "merge_target": "iteration/v1.70",
-      "depends_on": ["2026-06-27-v1.70-compass-and-plan"],
+      "depends_on": [
+        "2026-06-27-v1.70-compass-and-plan"
+      ],
       "iteration": "V1.70",
       "wire_contracts_changed": false
     },
     {
       "plan_id": "2026-06-27-v1.70-ci-desktop-build-optimization",
       "title": "CI / Desktop-Build Optimization",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "@ops-engineer",
       "effort": "S",
-      "working_branch": "feature/v1.70-ci-desktop-build-optimize",
+      "working_branch": "iteration/v1.70",
       "merge_target": "iteration/v1.70",
-      "depends_on": ["2026-06-27-v1.70-compass-and-plan"],
+      "depends_on": [
+        "2026-06-27-v1.70-compass-and-plan"
+      ],
       "iteration": "V1.70"
     },
     {
@@ -44,7 +48,10 @@
       "effort": "S",
       "working_branch": "iteration/v1.70",
       "merge_target": "iteration/v1.70",
-      "depends_on": ["2026-06-27-v1.70-canvas-strategy-surface-implement", "2026-06-27-v1.70-ci-desktop-build-optimization"],
+      "depends_on": [
+        "2026-06-27-v1.70-canvas-strategy-surface-implement",
+        "2026-06-27-v1.70-ci-desktop-build-optimization"
+      ],
       "iteration": "V1.70"
     }
   ],
