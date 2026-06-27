@@ -6,8 +6,8 @@
 
 use crate::commands::{
     acp::AcpCommand, acp_worker::AcpWorkerArgs, creator::CreatorCommand, daemon::DaemonCommand,
-    daemon_run::DaemonRunArgs, host_call::HostCallArgs, platform::PlatformCommand,
-    sync::SyncCommand, system::SystemCommand,
+    daemon_run::DaemonRunArgs, desktop::DesktopCommand, host_call::HostCallArgs,
+    platform::PlatformCommand, sync::SyncCommand, system::SystemCommand,
 };
 use clap::{Parser, Subcommand};
 
@@ -79,6 +79,12 @@ pub enum Commands {
     Acp {
         #[command(subcommand)]
         command: AcpCommand,
+    },
+
+    /// Manage the Tauri desktop shell (build, sign, diagnostics)
+    Desktop {
+        #[command(subcommand)]
+        command: DesktopCommand,
     },
 
     /// Platform interaction (auth, explore, context, publish, **sync**)
