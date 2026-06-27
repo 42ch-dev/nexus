@@ -84,18 +84,18 @@
       "pr_number": 95
     },
     "tech_debt_summary": {
-      "total_open": 2,
+      "total_open": 1,
       "total_deferred": 0,
-      "total_resolved": 232,
+      "total_resolved": 233,
       "total_archived": 0,
       "by_severity_active": {
-        "low": 2
+        "low": 1
       },
       "by_target_active": {
-        "V1.65+": 2
+        "V1.65+": 1
       },
-      "refreshed_at": "2026-06-27 (V1.71 Track B hygiene: closed 3, resolved 1 deferred; 15\u21922 open)",
-      "refreshed_reason": "V1.71 Track B closed R-V164-P2-G3 (admission-gate UI note), R-V164-P2-S1 (served-UI smoke), R-V167P2-QC1-S4 (frontmatter-helper extraction deferred with reason). R-V165-QC-SUGG-DX partially closed. Remaining open: R-V165-QC3-VIRT (chapter table virtualization) and R-V165-QC-SUGG-DX remainder (save-error/protected-edit web coverage)."
+      "refreshed_at": "2026-06-27 (V1.71 Track B hygiene: closed 4, resolved 1 deferred; 15\u21921 open)",
+      "refreshed_reason": "V1.71 Track B closed R-V164-P2-G3 (admission-gate UI note), R-V164-P2-S1 (served-UI smoke), R-V167P2-QC1-S4 (frontmatter-helper extraction deferred with reason), and R-V165-QC-SUGG-DX (DX/UX polish). Remaining open: R-V165-QC3-VIRT (chapter table virtualization)."
     },
     "updated_at": "2026-06-27T19:15:18Z",
     "spec_integration_branch": "iteration/v1.71",
@@ -4081,14 +4081,19 @@
       },
       {
         "id": "R-V165-QC-SUGG-DX",
-        "title": "DX/UX polish (save-error/protected-edit web coverage remaining)",
+        "title": "DX/UX polish (can_edit_outline probe, title 400 DX, route nesting, enum_conversions discoverability, TipTap inline-deps pinning, save-error/protected-edit web coverage)",
         "severity": "low",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "source": "qc1/qc3",
         "scope": "cross-cutting DX",
-        "decision": "defer",
-        "target_iteration": "V1.66+",
-        "note": "Partially closed in V1.71: can_edit_outline probe added to chapter detail, PATCH chapter title returns 422 field_errors, chapter routes nested via Router::nest, enum_conversions discoverability header added, and TipTap extensions/onUpdate memoized. Remaining: save-error and protected-edit web test coverage in chapter-page/chapters-page tests."
+        "decision": "resolved",
+        "target_iteration": "V1.71",
+        "closed_at": "2026-06-27",
+        "closure_note": "Closed in commit 5706277f: added can_edit_outline probe to chapter detail, PATCH title now returns 422 field_errors, chapter routes nested via Router::nest, enum_conversions discoverability header added, TipTap extensions/onUpdate memoized, and ChapterPage now respects can_edit_outline with save-error + protected-edit web coverage.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+          "commit": "5706277f"
+        }
       }
     ],
     "2026-06-25-v1.66-mid-meta-tracking": [
