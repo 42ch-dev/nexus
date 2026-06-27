@@ -618,6 +618,7 @@ async fn seed_core_context(
 // ---------------------------------------------------------------------------
 
 /// `GET /v1/local/orchestration/schedules` — list schedules with optional filters.
+#[allow(clippy::too_many_lines)] // dynamic-SQL build + sort + tx-wrapped list/count + pagination is one cohesive handler; splitting harms readability
 pub async fn list_schedules(
     state: State<WorkspaceState>,
     Query(query): Query<ListSchedulesQuery>,
@@ -679,6 +680,17 @@ pub async fn list_schedules(
     sql.push_str(&order_clauses.join(", "));
     sql.push_str(" LIMIT ? OFFSET ?");
 
+    // Wrap the list SELECT and the COUNT in one transaction so both see the
+    // same snapshot — avoids TOCTOU on `has_more` under concurrent add/delete
+    // of schedules (consistent with list_works' list_and_count_works tx).
+    let mut tx = pool
+        .begin()
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: format!("database error: {e}"),
+        })?;
+
     // SAFETY: dynamic query — see list_schedules SAFETY comment above.
     let mut q = sqlx::query_as::<_, ListRow>(&sql);
     if let Some(ref cid) = query.creator_id {
@@ -690,7 +702,7 @@ pub async fn list_schedules(
     q = q.bind(limit).bind(offset);
 
     let rows: Vec<ListRow> = q
-        .fetch_all(&*pool)
+        .fetch_all(&mut *tx)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".into(),
@@ -706,7 +718,7 @@ pub async fn list_schedules(
         count_q = count_q.bind(st);
     }
     let total: i64 = count_q
-        .fetch_one(&*pool)
+        .fetch_one(&mut *tx)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".into(),
@@ -714,6 +726,13 @@ pub async fn list_schedules(
         })?
         .get("cnt");
     let total = u32::try_from(total).unwrap_or(0);
+
+    tx.commit()
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: format!("database error: {e}"),
+        })?;
 
     let items: Vec<ScheduleSummary> = rows.into_iter().map(ListRow::into_summary).collect();
 
