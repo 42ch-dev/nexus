@@ -253,8 +253,11 @@ function pushOuterEdge(
     dangling.push(`${source} → ${target}`);
     return;
   }
+  // Multiple branches from the same source → same target (same transitionKind)
+  // would otherwise collide on id. Append the current edges.length as a
+  // disambiguator so React Flow keeps every conditional rule visible.
   edges.push({
-    id: `e-${source}-${target}-${data.transitionKind}`,
+    id: `e-${source}-${target}-${data.transitionKind}-${edges.length}`,
     source,
     target,
     type: 'strategy-edge',
