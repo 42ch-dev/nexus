@@ -1,14 +1,46 @@
 {
   "version": 1,
-  "updated_at": "2026-06-26T00:00:00Z",
-  "plans": [],
+  "updated_at": "2026-06-27T00:00:00Z",
+  "plans": [
+    {
+      "plan_id": "2026-06-27-v1.68-compass-and-plan",
+      "title": "V1.68 P-1 — Compass & Plan (Prepare)",
+      "iteration": "V1.68",
+      "slot": "P-1",
+      "status": "InProgress",
+      "effort": "S",
+      "owner": "@project-manager",
+      "review": "reviewer chain (@architect + @writing-specialist); no tri-review (Prepare coordination)",
+      "wave": 0,
+      "dependency": "—",
+      "working_branch": "(direct on iteration/v1.68)",
+      "merge_target": "iteration/v1.68",
+      "file": ".mstar/plans/2026-06-27-v1.68-compass-and-plan.md"
+    },
+    {
+      "plan_id": "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization",
+      "title": "V1.68 P0 — Relocate CLI to apps/ + Product-Surface Formalization",
+      "iteration": "V1.68",
+      "slot": "P0",
+      "status": "Todo",
+      "effort": "S",
+      "owner": "@fullstack-dev",
+      "review": "QC tri-review pending (after implement)",
+      "wave": 1,
+      "dependency": "P-1 (compass Locked)",
+      "working_branch": "iteration/v1.68",
+      "merge_target": "iteration/v1.68",
+      "file": ".mstar/plans/2026-06-27-v1.68-cli-relocation-and-product-surface-formalization.md",
+      "wire_contracts_changed": false
+    }
+  ],
   "metadata": {
-    "integration_branch": null,
-    "integration_branch_retired": true,
+    "integration_branch": "iteration/v1.68",
+    "integration_branch_retired": false,
     "last_integration_branch": "iteration/v1.67",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.68 (pending)",
-    "latest_active_compass": null,
+    "latest_active_iteration": "V1.68",
+    "latest_active_compass": "v1.68-cli-to-apps-product-surface-unification-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": "pending (V1.68)",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
@@ -51,7 +83,7 @@
       "refreshed_at": "2026-06-26T... (V1.67 P-last closeout)",
       "refreshed_reason": "V1.67 P-last: post Wave1+Wave2 QC+QA; all V1.67 closures done; 21 open are V1.67 QC-suggestions deferred V1.68+ (all low)"
     },
-    "updated_at": "2026-06-26 (V1.67 ship)",
+    "updated_at": "2026-06-27 (V1.68 Prepare)",
     "spec_integration_branch": null,
     "wave1_merged_at": "2026-06-25T15:49:19Z"
   },
