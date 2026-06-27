@@ -10,12 +10,16 @@
  * so this client sends no credentials.
  */
 import type {
+  AddScheduleRequest,
+  AddScheduleResponse,
   ChapterBody,
   ChapterContentQuery,
   ChapterDetail,
   ChapterOutline,
   CreateWorkRequest,
   CreateWorkResponse,
+  EditCoreContextRequest,
+  EditCoreContextResponse,
   GetPresetResponse,
   InspectScheduleResponse,
   ListCapabilitiesQuery,
@@ -38,6 +42,8 @@ import type {
   ScaffoldPresetRequest,
   ScaffoldPresetResponse,
   SessionDetailResponse,
+  SignalScheduleRequest,
+  SignalScheduleResponse,
   UpdatePresetRequest,
   UpdatePresetResponse,
   ValidatePresetRequest,
@@ -125,6 +131,28 @@ export class BrowserClient implements NexusClient {
   inspectSchedule(scheduleId: string): Promise<InspectScheduleResponse> {
     return this.get<InspectScheduleResponse>(
       `/v1/local/orchestration/schedules/${encodeURIComponent(scheduleId)}`,
+    );
+  }
+  // V1.70 canvas Idea→Run/Resume/Steer promotions (V1.67 G2 pattern).
+  addSchedule(request: AddScheduleRequest): Promise<AddScheduleResponse> {
+    return this.post<AddScheduleResponse>('/v1/local/orchestration/schedules', request);
+  }
+  signalSchedule(
+    scheduleId: string,
+    request: SignalScheduleRequest,
+  ): Promise<SignalScheduleResponse> {
+    return this.post<SignalScheduleResponse>(
+      `/v1/local/orchestration/schedules/${encodeURIComponent(scheduleId)}/signal`,
+      request,
+    );
+  }
+  editCoreContext(
+    scheduleId: string,
+    request: EditCoreContextRequest,
+  ): Promise<EditCoreContextResponse> {
+    return this.patch<EditCoreContextResponse>(
+      `/v1/local/orchestration/schedules/${encodeURIComponent(scheduleId)}/core-context`,
+      request,
     );
   }
 
