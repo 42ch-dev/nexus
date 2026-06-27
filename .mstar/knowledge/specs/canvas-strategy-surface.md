@@ -2,14 +2,14 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | **Exploration (V1.67)** — design-only; no implement authority until a future compass promotes Draft→implement (target V1.68+) |
-| **Document class** | Exploration |
-| **Scope** | Product vision + architecture for the human-facing **Canvas** control surfaces: Strategy (Preset) orchestration graph, Work outline + timeline graph, World KB graph; React Flow rendering; the "AI owns prose, human steers via Canvas" thesis; the no-raw-file-editing write boundary |
+| **Status** | **Draft (V1.69)** — design/specification input for a future V1.70+ canvas implementation; paper contracts only, no schema/codegen lock and no React Flow code authority in V1.69 |
+| **Document class** | Draft overlay |
+| **Scope** | Product vision + Draft architecture for the human-facing **Canvas** control surfaces: Strategy (Preset) orchestration graph, Work outline + timeline graph, World KB graph; React Flow rendering; the "AI owns prose, human steers via Canvas" thesis; node-granular write boundaries; canvas token contract for DESIGN.md placeholders |
 | **Coordinates with** | [orchestration-engine.md](orchestration-engine.md) (strategy = graph-of-graphs), [web-ui.md](web-ui.md) (§15 V1.67 stage + V1.68 canvas roadmap), [local-api-surface-conventions.md](local-api-surface-conventions.md), [chapter-content-local-api.md](chapter-content-local-api.md), [daemon-runtime.md](daemon-runtime.md) |
 | **Supersedes** | [body-editor.md](body-editor.md) (archived: [../../archived/knowledge/body-editor.md](../../archived/knowledge/body-editor.md)) |
 | **Authored** | V1.67 Phase 2b re-discussion — **@architect** (architecture + React Flow feasibility + DAG↔canvas mapping + write boundary) + **@product-manager** (product thesis + canvas UX + Strategy terminology); PM-scaffolded stub pending authoring |
 
-> **Authored (2026-06-26 Phase 2b).** This Exploration was authored by `@architect` (§3 architecture/feasibility + §4 technical UX) and `@product-manager` (§4.5 user stories) during the V1.67 re-discussion. The product thesis (§1) and architectural principle (§2) were locked from the user's re-discussion.
+> **Promoted to Draft (2026-06-27 V1.69 P0).** The V1.67 Exploration was promoted to Draft by `@architect` for interface contracts, structured write boundary, and canvas-token contract. Product/UX thesis from the original `@product-manager` contribution remains in §4. This Draft intentionally stops short of schema/codegen or React Flow implementation authority.
 
 ## 1. Product thesis (LOCKED from user re-discussion, 2026-06-26)
 
@@ -80,7 +80,92 @@ All three surfaces should share a **Canvas Shell** and specialize by data adapte
 | **Work outline + timeline** | Work, volume, chapter, scene/beat, timeline event, foreshadowing/index item | Contains/ordered-after, references, foreshadows, belongs-to-volume, event→chapter realization | Volume lane, chapter card, event node, dependency/foreshadow node, in-node TipTap outline editor | Work/detail, chapter list/detail, outline read/structured patch, structure patch, timeline/index read/patch. The shipped V1.65 outline is a linear rich-text document (`web-ui.md` §13); the canvas projection turns headings/chapters/events into addressable graph nodes instead of replacing the underlying Work model. |
 | **World KB** | World, KeyBlock/entity, event, rule, location, organization, computable block, pending extraction candidate | Relationship/reference, source-anchor, timeline membership, rule-applies-to, promotion candidate→confirmed KeyBlock | Entity card, relationship edge, pending-candidate node, source-anchor node, computable-state badge | World detail; KB query/list/detail; pending/confirmed/rejected promotion state; adopt/reject/merge/update. Grounding: `entity-scope-model.md` §1–§2 defines World-owned narrative KB assets; §5.5 defines the World KB promotion state machine. |
 
-### 3.4 Structured write boundary
+### 3.4 Draft interface contracts (B2)
+
+The V1.70 implementation should treat React Flow as a presentation and interaction model over domain-owned graph projections. These contracts are **paper contracts**: they define naming, ownership, and shape constraints for implement planning, but they do not authorize new JSON Schemas, generated DTOs, or Local API routes in V1.69.
+
+#### Shared React Flow document shape
+
+All three surfaces use one shell-level graph envelope before conversion to `@xyflow/react` `nodes` and `edges`:
+
+```ts
+type CanvasSurfaceKind = "strategy" | "work-outline-timeline" | "world-kb";
+
+interface CanvasGraphDocument<NodeData, EdgeData> {
+  surface: CanvasSurfaceKind;
+  graphId: string;
+  version: string;
+  nodes: Array<CanvasNode<NodeData>>;
+  edges: Array<CanvasEdge<EdgeData>>;
+  viewport?: { x: number; y: number; zoom: number };
+  validation: CanvasValidationSummary;
+  liveOverlay?: CanvasLiveOverlay;
+}
+
+interface CanvasNode<TData> {
+  id: string;
+  type: string;
+  position: { x: number; y: number };
+  data: TData;
+  parentId?: string;
+  extent?: "parent";
+  draggable?: boolean;
+  selectable?: boolean;
+  focusable?: boolean;
+}
+
+interface CanvasEdge<TData> {
+  id: string;
+  type: string;
+  source: string;
+  sourceHandle?: string;
+  target: string;
+  targetHandle?: string;
+  label?: string;
+  data: TData;
+  selectable?: boolean;
+  focusable?: boolean;
+}
+```
+
+The shell owns React Flow provider state, viewport, selection, dirty state, accessibility summaries, minimap/controls, command palette, validation panel, side inspector, and transport injection via the existing `NexusClient` boundary. Per-surface adapters own domain DTO projection into these node/edge arrays.
+
+#### Surface-specific node/edge schema
+
+| Surface | Node data contract | Edge data contract | Notes |
+| --- | --- | --- | --- |
+| Strategy (Preset) | `StrategyNodeData = { stateId, label, stateKind, presetId, innerGraphId?, status?, promptRef?, capabilityRef?, validation[] }` | `StrategyEdgeData = { transitionKind: "next" | "branch" | "default" | "converge" | "depends_on", condition?, convergeStrategy? }` | UI label is Strategy; persisted identifiers remain preset/runtime names until a breaking rename plan. |
+| Work outline + timeline | `WorkNodeData = { workId, nodeKind: "work" | "volume" | "chapter" | "scene" | "beat" | "timeline_event" | "foreshadow", title, status?, path?, tiptapFragment? }` | `WorkEdgeData = { relation: "contains" | "ordered_after" | "references" | "foreshadows" | "belongs_to_volume" | "realizes_event" }` | TipTap is allowed only inside a selected node/fragment, not as whole-document editing. |
+| World KB | `WorldKbNodeData = { worldId, keyBlockId?, candidateId?, entityKind, name, lifecycle: "pending" | "confirmed" | "rejected" | "merged", sourceAnchors[] }` | `WorldKbEdgeData = { relationType, confidence?, sourceAnchorIds[], promotionState? }` | Promotion state follows the World KB lifecycle in `entity-scope-model.md` §5.5. |
+
+#### State model
+
+The shared shell state is intentionally UI-local until a structured operation is accepted by the daemon:
+
+- `selectedNodeIds` / `selectedEdgeIds`: inspector and command-palette scope.
+- `hoveredNodeId` / `hoveredEdgeId`: transient highlight only.
+- `collapsedGroupNodeIds`: sub-flow visibility; collapse does not remove canonical children.
+- `draftOperations`: ordered client-side operations pending validation/save.
+- `validationByElementId`: daemon and client validation mirrored in graph and side panel.
+- `liveOverlay`: execution progress, current node, paused/waiting/error states, and child-session status.
+
+#### Sub-flow nesting model
+
+Strategy is a graph-of-graphs per `orchestration-engine.md` §3: outer Strategy states can launch inner DAGs. React Flow group nodes model this without changing engine semantics:
+
+- Outer states are top-level nodes.
+- An `inner_graph` state expands into a group node (`type: "strategy-inner-graph-group"`).
+- Inner DAG steps are child nodes with `parentId` set to the group node and `extent: "parent"`.
+- Inner `depends_on` edges remain inside the group; outer transitions connect to the group/state boundary.
+- Collapse hides the child nodes visually but keeps validation and execution status summarized on the group.
+
+The same mechanism can group volumes/chapters in Work and entity clusters in World KB, but Strategy is the canonical nested-flow case.
+
+#### Browser tab and Tauri WKWebView parity
+
+The canvas must run in both the daemon-served browser SPA and the Tauri macOS shell that embeds the same `apps/web/dist`. V1.70 smoke tests must cover drag, pan/zoom, wheel/pinch gestures, keyboard focus movement, clipboard shortcuts, and inspector focus return in Chromium-like browsers and WKWebView. Any desktop-only filesystem action still routes through Tauri/native capabilities and structured daemon operations; the canvas webview never reads or writes raw local files directly.
+
+### 3.5 Structured write boundary (B3)
 
 The locked rule in §2 becomes this implementation principle: **canvas edits produce structured domain operations; the daemon applies them atomically; the UI never mutates raw files.**
 
@@ -95,7 +180,7 @@ React Flow draft edit
           → UI refetches canonical graph projection
 ```
 
-Examples:
+Examples (operation names are illustrative until a future wire-contract plan promotes them):
 
 | User action | Structured operation shape | Daemon persistence target |
 | --- | --- | --- |
@@ -105,9 +190,41 @@ Examples:
 | Move chapter under volume / attach event | `work.patch_outline_graph({ op: "move_chapter" | "link_event", ... })` | Updates outline/index/DB metadata via a structured writer; no whole-document outline PUT from the canvas. |
 | Adopt World KB candidate / edit relationship | `world_kb.adopt_candidate(...)`, `world_kb.patch_relationship(...)` | Updates `kb_extract_jobs` / `kb_key_blocks` under the World KB state machine (`entity-scope-model.md` §5.5). |
 
-This supersedes the V1.65 whole-file outline PUT model for the future canvas surface: V1.65 could save a whole outline document because the UI was a document editor (`web-ui.md` §13.1, §13.5). The canvas model must instead address and validate individual nodes/edges. The daemon should continue to use the existing durability pattern established elsewhere in the repo (atomic temp write + rename + directory fsync, DB transactions, guarded paths); the open design is which exact operation DTOs become schema-backed Local API contracts. (V1.68 implement decision)
+This supersedes the V1.65 whole-file outline PUT model for the future canvas surface: V1.65 could save a whole outline document because the UI was a document editor (`web-ui.md` §13.1, §13.5). The canvas model must instead address and validate individual nodes/edges. The daemon should continue to use the existing durability pattern established elsewhere in the repo (atomic temp write + rename + directory fsync, DB transactions, guarded paths); the open design is which exact operation DTOs become schema-backed Local API contracts. (V1.70 implement decision)
 
-### 3.5 "AI owns prose" execution trigger
+#### Conflict policy vs host tool body writes
+
+Orchestration may write prose or artifacts through host-tool paths such as `host_tool_handlers.rs` `body_path`. The canvas must not concurrently mutate those same raw files. Draft policy:
+
+1. Canvas saves carry a base revision (`graphRevision`, `nodeRevision`, or equivalent domain version) from the last canonical projection.
+2. Daemon rejects stale node/edge operations with a structured conflict error that identifies the changed node/file/object and recovery action.
+3. UI keeps the user's draft operation list, refetches the canonical graph, and offers reapply/merge at node granularity where safe.
+4. If orchestration is actively writing a node/body artifact, canvas editing for that node is read-only with a clear status label (`Nexus is writing this node…`).
+5. Raw `body_path` conflicts are never resolved in the browser by loading and overwriting files; they are resolved by daemon-owned structured merges or explicit retry after refetch.
+
+TipTap remains useful as an in-node editor for prompt snippets, outline fragments, notes, or constraints. It is not a whole-document manuscript editor and must not bypass the operation boundary.
+
+### 3.6 Canvas → DESIGN.md token contract (B4)
+
+V1.69 freezes the minimal credible token names that V1.70 canvas implementation will need. `apps/web/DESIGN.md` and `apps/web/DESIGN.dark.md` stub these as commented LEVEL placeholders; V1.70 assigns concrete values when implementing the canvas.
+
+| Token | Intent |
+| --- | --- |
+| `canvas-surface` | Infinite-canvas background behind graph nodes; distinct from cards/page background so grid and selection remain visible. |
+| `canvas-grid` | Subtle grid/dot/guide color on `canvas-surface`; must pass reduced-contrast needs without visual noise. |
+| `canvas-node-fill` | Default node card fill for Strategy, Work, and World KB nodes. |
+| `canvas-node-fill-hover` | Hover/focus-adjacent node fill for pointer and keyboard discovery. |
+| `canvas-node-border` | Default node outline, including collapsed sub-flow group boundaries. |
+| `canvas-node-border-selected` | Selected/focused node outline; must pair with the global focus-ring language and not rely on color alone. |
+| `canvas-edge` | Default relationship/transition edge stroke. |
+| `canvas-edge-hover` | Hovered/selected edge stroke for rewiring and relationship inspection. |
+| `canvas-port` | Handle/port fill and border for connectable source/target points. |
+| `canvas-minimap` | Minimap viewport/region color and quiet overview affordances. |
+| `canvas-strategy-accent` | Strategy/preset-specific accent for state-machine nodes, inner-graph groups, and Strategy nav affordances; expected to derive from the purple family unless V1.70 changes the palette deliberately. |
+
+These tokens intentionally cover shared canvas primitives only. Surface-specific status still uses existing semantic colors (`green-*`, `amber-*`, `red-*`, `teal-*`, `purple-*`) so the canvas remains consistent with non-canvas dashboard states.
+
+### 3.7 "AI owns prose" execution trigger
 
 The canvas is the **steering surface**, not the prose surface. A human can:
 
@@ -117,9 +234,9 @@ The canvas is the **steering surface**, not the prose surface. A human can:
 
 Execution then moves to orchestration: the Strategy/preset drives ACP prompts and capabilities, writes prose or structured artifacts through authorized host tools, and persists session state. The UI overlays progress and outputs back on the canvas. Human-authored rich text is limited to steering artifacts (node labels, prompt snippets, outline-node content, notes, constraints); chapter/body prose remains AI-produced unless a future compass explicitly authorizes a manual prose-editing product line.
 
-Open V1.68 design points include the exact trigger verbs (for example, "Run Strategy", "Resume from Node", "Regenerate Branch", "Apply Idea to Node"), whether triggers enqueue schedule runs or call a direct orchestration advance endpoint, and how rollback/preview is shown before generated prose is committed. (V1.68 implement decision)
+Open V1.70 design points include the exact trigger verbs (for example, "Run Strategy", "Resume from Node", "Regenerate Branch", "Apply Idea to Node"), whether triggers enqueue schedule runs or call a direct orchestration advance endpoint, and how rollback/preview is shown before generated prose is committed. (V1.70 implement decision)
 
-### 3.6 Relationship to V1.67 Local API convergence
+### 3.8 Relationship to V1.67 Local API convergence
 
 The canvas is a heavy Local API consumer: every graph node binds to list/detail data, every inspector needs typed update operations, and every execution overlay depends on consistent session/status responses. Therefore V1.67 P0 is not incidental hygiene; it is the foundation for V1.68 canvas work:
 
@@ -178,12 +295,13 @@ The author **directs an autonomous executor**; they do not write alongside an as
 - **Steer World KB continuity** — *As an author*, I browse entities/events/rules as a relationship graph with promotion-state badges, and adopt/reject/merge from the canvas, so continuity constraints stay coherent as the Work grows.
 - **Review AI execution on the canvas** — *As an author*, after Nexus executes, I see what changed on the canvas (node status, generated-output links, pending instructions) and review the result read-only, so I stay in command of an autonomous process.
 
-## 5. Non-goals (V1.67)
+## 5. Non-goals (V1.69 Draft)
 
-- No canvas **implement** in V1.67 (Exploration only). V1.67 ships the hygiene foundation (Local API convergence) that the canvas will consume.
-- No removal/regression of the shipped V1.65 outline editor (canvas-pivot is V1.68+).
-- No CLI/spec rename of `preset` → `strategy` (breaking; deferred). V1.67 adopts the terminology in UI/spec wording only.
+- No canvas **implement** in V1.69. This Draft is the V1.70+ implementation input.
+- No schema/codegen/DTO lock in V1.69. Operation names and TypeScript-like interfaces above are illustrative paper contracts.
+- No removal/regression of the shipped V1.65 outline editor (canvas-pivot is V1.70+).
+- No CLI/spec rename of `preset` → `strategy` (breaking; deferred). V1.69 adopts the terminology in UI/spec wording only.
 
 ## 6. Roadmap (durable tracking)
 
-- **V1.68 lead**: Canvas Strategy Surface implement (Promote this Exploration → Draft → Shipped). May split across iterations (3 surfaces is XL). This is the successor to the retired body-editor roadmap.
+- **V1.70 lead**: Canvas Strategy Surface implement from this Draft. May split across iterations (3 surfaces is XL). This is the successor to the retired body-editor roadmap.

@@ -1,33 +1,35 @@
 {
   "version": 1,
-  "updated_at": "2026-06-27T00:00:00Z",
+  "updated_at": "2026-06-27",
   "plans": [],
   "metadata": {
     "integration_branch": null,
     "integration_branch_retired": true,
-    "last_integration_branch": "iteration/v1.68",
+    "last_integration_branch": "iteration/v1.69",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.68 (Shipped via PR #92 → main @ f322f574); V1.69 (pending)",
-    "latest_active_compass": null,
+    "latest_active_iteration": "V1.69 (shipped via integration branch iteration/v1.69; PR to main pending)",
+    "latest_active_compass": "v1.69-design-system-maturation-and-canvas-draft-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": "pending (V1.69)",
+    "pre_implement_gate": "n/a (V1.69 shipped; V1.70 pending)",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.68",
-      "compass": "v1.68-cli-to-apps-product-surface-unification-compass-v1.md",
-      "shipped_at": "2026-06-27 (merged to main @ f322f574 via PR #92, squash)",
-      "plan_count": 2,
-      "plan_count_done": 2,
+      "iteration": "V1.69",
+      "compass": "v1.69-design-system-maturation-and-canvas-draft-compass-v1.md",
+      "shipped_at": "2026-06-27 (pending PR to main)",
+      "plan_count": 4,
+      "plan_count_done": 4,
       "wire_contracts_changed": false,
-      "wire_contracts_note": "V1.68: pure relocation + docs, no schema/codegen/contract change.",
+      "wire_contracts_note": "V1.69: DESIGN.md format migration + Canvas Draft + frontend TS refactors. No schema/codegen/contract/DTO change.",
       "profile_b_compaction": "done",
       "plan_ids": [
-        "2026-06-27-v1.68-compass-and-plan",
-        "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization"
+        "2026-06-27-v1.69-compass-and-plan",
+        "2026-06-27-v1.69-design-md-and-canvas-draft",
+        "2026-06-27-v1.69-frontend-residuals",
+        "2026-06-27-v1.69-closure"
       ],
-      "note": "Structural hygiene: relocated crates/nexus42 -> apps/nexus42 so apps/ is the polyglot product-surfaces dir and crates/ returns to pure Rust libs. Zero source changes (Cargo resolves by crate name); CI-invisible. 12 live refs updated; ~978 historical .mstar records left as-is. 1 regression R-V168P0-QC1-W001 (desktop-build path filter omitted apps/nexus42/**) caught by QC tri-review + fixed in-wave (630df3af). QC 3/3 Approve after fix wave; QA Pass. Single-plan iteration on iteration/v1.68.",
-      "merge_commit": "f322f574"
+      "note": "Design System Maturation & Canvas Draft. P0 (docs/spec): apps/web/DESIGN.md migrated to YAML frontmatter SSOT (Level 3 Production) + apps/web/DESIGN.dark.md created + canvas-strategy-surface.md Exploration->Draft (B1-B4). P1 (code): 4 V1.67 frontend refactor residuals closed. P0 QC skipped (docs-only, validation green); P1 QC 3/3 Approve + QA Pass. Token names preserved verbatim -> zero consumer breakage.",
+      "merge_commit": "pending (PR to main)"
     },
     "tech_debt_summary": {
       "total_open": 21,
@@ -46,7 +48,7 @@
       "refreshed_at": "2026-06-26T... (V1.67 P-last closeout)",
       "refreshed_reason": "V1.67 P-last: post Wave1+Wave2 QC+QA; all V1.67 closures done; 21 open are V1.67 QC-suggestions deferred V1.68+ (all low)"
     },
-    "updated_at": "2026-06-27 (V1.68 shipped via PR #92 → main @ f322f574)",
+    "updated_at": "2026-06-27",
     "spec_integration_branch": null,
     "wave1_merged_at": "2026-06-25T15:49:19Z"
   },
@@ -4312,7 +4314,13 @@
         "target": "V1.68+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-frontend-scope-gaps][R-V167P1-QC1-S1]",
         "note": "QC Suggestion, non-blocking; deferred.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.69-frontend-residuals",
+          "commit": "8a48f80e",
+          "date": "2026-06-27",
+          "note": "Closed by V1.69 P1 (QC 3/3 Approve, QA Pass)."
+        }
       },
       {
         "id": "R-V167P1-QC1-S2",
@@ -4325,7 +4333,13 @@
         "target": "V1.68+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-frontend-scope-gaps][R-V167P1-QC1-S2]",
         "note": "QC Suggestion, non-blocking; deferred.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.69-frontend-residuals",
+          "commit": "8a48f80e",
+          "date": "2026-06-27",
+          "note": "Closed by V1.69 P1 (QC 3/3 Approve, QA Pass)."
+        }
       },
       {
         "id": "R-V167P1-QC3-S1",
@@ -4338,7 +4352,13 @@
         "target": "V1.68+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-frontend-scope-gaps][R-V167P1-QC3-S1]",
         "note": "QC Suggestion, non-blocking; deferred.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.69-frontend-residuals",
+          "commit": "8a48f80e",
+          "date": "2026-06-27",
+          "note": "Closed by V1.69 P1 (QC 3/3 Approve, QA Pass)."
+        }
       },
       {
         "id": "R-V167P1-QC3-S2",
@@ -4351,7 +4371,13 @@
         "target": "V1.68+",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-frontend-scope-gaps][R-V167P1-QC3-S2]",
         "note": "QC Suggestion, non-blocking; deferred.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.69-frontend-residuals",
+          "commit": "8a48f80e",
+          "date": "2026-06-27",
+          "note": "Closed by V1.69 P1 (QC 3/3 Approve, QA Pass)."
+        }
       }
     ],
     "2026-06-26-v1.67-overdue-debt-closure": [

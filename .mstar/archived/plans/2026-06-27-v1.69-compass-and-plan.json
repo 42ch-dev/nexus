@@ -1,0 +1,24 @@
+{
+  "plan_id": "2026-06-27-v1.69-compass-and-plan",
+  "archived_at": "2026-06-27",
+  "schema_version": 1,
+  "plan": {
+    "plan_id": "2026-06-27-v1.69-compass-and-plan",
+    "title": "V1.69 P-1 — Prepare (compass + plan stubs + status + integration branch + Phase 2b/2c review chain + PM lock)",
+    "iteration": "V1.69",
+    "slot": "P-1",
+    "status": "Done",
+    "effort": "S",
+    "owner": "@project-manager",
+    "review": "n/a (Prepare)",
+    "wave": 0,
+    "dependency": "—",
+    "working_branch": "iteration/v1.69",
+    "merge_target": "iteration/v1.69",
+    "file": ".mstar/plans/2026-06-27-v1.69-compass-and-plan.md",
+    "wire_contracts_changed": false,
+    "iteration_compass": "v1.69-design-system-maturation-and-canvas-draft-compass-v1.md",
+    "completed_at": "2026-06-27 (PM lock — review chain integrated)",
+    "completion_summary": "PM lock — Prepare complete: compass Locked (3 grill decisions + Phase 2b @architect Approve-with-edits with all countersigns + Phase 2b @product-manager no-blocking-issues + Phase 2c @writing-specialist Approve-with-edits 3 surgical prose edits). 4 plan stubs on disk; status.json registered; integration branch iteration/v1.69 from main @ 74b3fff6; iteration README updated. Pre-implement gate ready to flip GO at P0 dispatch."
+  }
+}

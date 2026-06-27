@@ -319,7 +319,11 @@
     "2026-06-26-v1.67-mid-meta-tracking",
     "2026-06-26-v1.67-residual-convergence-and-closeout",
     "2026-06-27-v1.68-compass-and-plan",
-    "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization"
+    "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization",
+    "2026-06-27-v1.69-compass-and-plan",
+    "2026-06-27-v1.69-design-md-and-canvas-draft",
+    "2026-06-27-v1.69-frontend-residuals",
+    "2026-06-27-v1.69-closure"
   ],
   "iteration_summaries": {
     "v1.45": {
@@ -668,5 +672,6 @@
     "v1_47_iteration_complete": "yes — ready for PR to main",
     "v1_50_iteration_complete": "yes — ready for PR to main",
     "v1_51_iteration_complete": "yes — shipped to main at c57b927bbf8621adf7ec59095d274f17f429c9b7 via PR #64 on 2026-06-19T07:52:26Z"
-  }
+  },
+  "updated_at": "2026-06-27"
 }
