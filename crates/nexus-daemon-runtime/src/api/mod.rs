@@ -227,6 +227,27 @@ fn narrative_routes() -> Router<WorkspaceState> {
         )
 }
 
+/// Strategy canvas write-boundary routes (V1.71 Track A).
+///
+/// These three `POST` endpoints mutate a local strategy preset bundle
+/// (`preset.yaml` + optional prompt template files) and enforce revision
+/// consistency via the YAML `revision:` field.
+fn strategy_routes() -> Router<WorkspaceState> {
+    Router::new()
+        .route(
+            "/v1/local/strategies/{strategy_id}/states/{state_id}/patch",
+            post(handlers::strategy::patch_state),
+        )
+        .route(
+            "/v1/local/strategies/{strategy_id}/transitions/patch",
+            post(handlers::strategy::patch_transition),
+        )
+        .route(
+            "/v1/local/strategies/{strategy_id}/states/{state_id}/prompt/patch",
+            post(handlers::strategy::patch_prompt_template),
+        )
+}
+
 /// Memory routes (sync routes removed in V1.21 — cloud-sync is CLI-only).
 ///
 /// V1.33 P4: Added `POST /v1/local/memory/review` and
@@ -396,6 +417,7 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
         .merge(memory_routes())
         .merge(works_routes())
         .merge(narrative_routes())
+        .merge(strategy_routes())
         // Legacy creators list & references
         .route("/v1/local/creators", get(handlers::creators::list))
         .route("/v1/local/references", get(handlers::references::list))

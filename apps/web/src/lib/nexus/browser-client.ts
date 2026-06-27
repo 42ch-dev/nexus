@@ -44,6 +44,10 @@ import type {
   SessionDetailResponse,
   SignalScheduleRequest,
   SignalScheduleResponse,
+  StrategyPatchPromptTemplateRequest,
+  StrategyPatchResponse,
+  StrategyPatchStateRequest,
+  StrategyPatchTransitionRequest,
   UpdatePresetRequest,
   UpdatePresetResponse,
   ValidatePresetRequest,
@@ -195,6 +199,37 @@ export class BrowserClient implements NexusClient {
   }
   deletePreset(presetId: string): Promise<void> {
     return this.delete<void>(`/v1/local/presets/${encodeURIComponent(presetId)}`);
+  }
+
+  // ── Strategy canvas (V1.71 Track A) ───────────────────────────────────────
+  strategyPatchState(
+    strategyId: string,
+    stateId: string,
+    request: StrategyPatchStateRequest,
+  ): Promise<StrategyPatchResponse> {
+    return this.post<StrategyPatchResponse>(
+      `/v1/local/strategies/${encodeURIComponent(strategyId)}/states/${encodeURIComponent(stateId)}/patch`,
+      request,
+    );
+  }
+  strategyPatchTransition(
+    strategyId: string,
+    request: StrategyPatchTransitionRequest,
+  ): Promise<StrategyPatchResponse> {
+    return this.post<StrategyPatchResponse>(
+      `/v1/local/strategies/${encodeURIComponent(strategyId)}/transitions/patch`,
+      request,
+    );
+  }
+  strategyPatchPromptTemplate(
+    strategyId: string,
+    stateId: string,
+    request: StrategyPatchPromptTemplateRequest,
+  ): Promise<StrategyPatchResponse> {
+    return this.post<StrategyPatchResponse>(
+      `/v1/local/strategies/${encodeURIComponent(strategyId)}/states/${encodeURIComponent(stateId)}/prompt/patch`,
+      request,
+    );
   }
 
   // ── Chapters (V1.65 Content-Authoring) ─────────────────────────────────────

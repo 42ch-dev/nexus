@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/canvas/strategy/strategy-patch-prompt-template-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus StrategyPatchPromptTemplateRequest",
+  "description": "Request body for POST /v1/local/strategies/{strategy_id}/states/{state_id}/prompt/patch (V1.71). Atomically updates a prompt-template file referenced by a state or inner-graph node inside the Strategy bundle.",
+  "type": "object",
+  "required": ["strategy_id", "state_id", "base_revision", "template_ref", "set"],
+  "properties": {
+    "strategy_id": {
+      "type": "string",
+      "description": "Preset / Strategy identifier from the URL path. Must match the path parameter."
+    },
+    "state_id": {
+      "type": "string",
+      "description": "State identifier from the URL path."
+    },
+    "base_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Revision observed by the client on the last canonical read."
+    },
+    "template_ref": {
+      "type": "string",
+      "description": "Relative path to the prompt template inside the bundle (e.g. prompts/outline-exit.md)."
+    },
+    "set": {
+      "type": "object",
+      "description": "Prompt-template content update.",
+      "required": ["body"],
+      "properties": {
+        "body": {
+          "type": "string",
+          "description": "Complete replacement Markdown content of the prompt template."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}
