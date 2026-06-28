@@ -33,7 +33,7 @@ const OUTLINE_FILE_MAX_BYTES: usize = 10 * 1024 * 1024;
 #[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 struct OutlineFrontmatter {
-    outline_revision: u64,
+    outline_revision: i64,
     volumes: Vec<WorkOutlineVolume>,
     timeline_events: Vec<WorkOutlineTimelineEvent>,
     foreshadows: Vec<WorkOutlineForeshadow>,
@@ -46,13 +46,24 @@ impl OutlineFrontmatter {
     fn to_work_outline(&self, work_id: String) -> WorkOutline {
         WorkOutline {
             work_id,
-            outline_revision: self.outline_revision,
+            outline_revision: self
+                .outline_revision_u64()
+                .expect("outline_revision is kept non-negative by the patch handlers"),
             volumes: self.volumes.clone(),
             timeline_events: self.timeline_events.clone(),
             foreshadows: self.foreshadows.clone(),
             chapter_titles: self.chapter_titles.clone(),
             updated_at: self.updated_at.clone(),
         }
+    }
+
+    /// Return `outline_revision` as `u64` for wire contracts that use unsigned
+    /// integers. This is an internal invariant; a negative value is a bug.
+    fn outline_revision_u64(&self) -> Result<u64, NexusApiError> {
+        u64::try_from(self.outline_revision).map_err(|_| NexusApiError::Internal {
+            code: "OUTLINE_REVISION_NEGATIVE".to_string(),
+            message: "outline_revision became negative".to_string(),
+        })
     }
 }
 
@@ -281,9 +292,9 @@ fn validate_status_transition(from: &str, to: &str) -> Result<(), NexusApiError>
 }
 
 /// Build a successful patch response with optional side effects.
-fn patch_ok(new_revision: u64, side_effects: Vec<String>) -> OutlinePatchResponse {
+fn patch_ok(new_revision: i64, side_effects: Vec<String>) -> OutlinePatchResponse {
     OutlinePatchResponse {
-        new_revision: i64::try_from(new_revision).unwrap_or(0),
+        new_revision,
         validation_summary: serde_json::json!({
             "errors": Vec::<String>::new(),
             "warnings": Vec::<String>::new(),
@@ -357,12 +368,18 @@ pub async fn patch_outline_structure(
             message: e.to_string(),
         })?;
 
-    let (initial_frontmatter, body) =
-        read_outline_file(&workspace_root, &rel_path, &chapters).await?;
+    let initial_frontmatter = read_outline_file(&workspace_root, &rel_path, &chapters)
+        .await?
+        .0;
 
-    if req.base_revision != initial_frontmatter.outline_revision {
+    let base_revision =
+        i64::try_from(req.base_revision).map_err(|_| NexusApiError::BadRequest {
+            code: "base_revision_out_of_range".to_string(),
+            message: "base_revision exceeds i64 range".to_string(),
+        })?;
+    if base_revision != initial_frontmatter.outline_revision {
         return Err(NexusApiError::outline_conflict(
-            initial_frontmatter.outline_revision,
+            initial_frontmatter.outline_revision_u64()?,
             req.chapter_id
                 .map_or_else(|| work_id.clone(), |n| n.to_string()),
             "outline_revision",
@@ -372,14 +389,13 @@ pub async fn patch_outline_structure(
 
     let lock = RuntimeLockGuard::acquire(state.pool(), &creator_id, &work_id).await?;
 
-    // Re-read under lock to close the TOCTOU window for concurrent writers.
-    let mut frontmatter = read_outline_file(&workspace_root, &rel_path, &chapters)
-        .await?
-        .0;
-    if req.base_revision != frontmatter.outline_revision {
+    // Re-read both frontmatter and body under lock to close the TOCTOU window
+    // for concurrent writers and avoid persisting a stale body snapshot.
+    let (mut frontmatter, body) = read_outline_file(&workspace_root, &rel_path, &chapters).await?;
+    if base_revision != frontmatter.outline_revision {
         lock.release().await;
         return Err(NexusApiError::outline_conflict(
-            frontmatter.outline_revision,
+            frontmatter.outline_revision_u64()?,
             req.chapter_id
                 .map_or_else(|| work_id.clone(), |n| n.to_string()),
             "outline_revision",
@@ -462,12 +478,18 @@ pub async fn patch_outline_chapter(
             message: e.to_string(),
         })?;
 
-    let (initial_frontmatter, body) =
-        read_outline_file(&workspace_root, &rel_path, &chapters).await?;
+    let initial_frontmatter = read_outline_file(&workspace_root, &rel_path, &chapters)
+        .await?
+        .0;
 
-    if req.base_revision != initial_frontmatter.outline_revision {
+    let base_revision =
+        i64::try_from(req.base_revision).map_err(|_| NexusApiError::BadRequest {
+            code: "base_revision_out_of_range".to_string(),
+            message: "base_revision exceeds i64 range".to_string(),
+        })?;
+    if base_revision != initial_frontmatter.outline_revision {
         return Err(NexusApiError::outline_conflict(
-            initial_frontmatter.outline_revision,
+            initial_frontmatter.outline_revision_u64()?,
             chapter.to_string(),
             "outline_revision",
             "refetch the work outline and reapply",
@@ -484,13 +506,13 @@ pub async fn patch_outline_chapter(
 
     let lock = RuntimeLockGuard::acquire(state.pool(), &creator_id, &work_id).await?;
 
-    let mut frontmatter = read_outline_file(&workspace_root, &rel_path, &chapters)
-        .await?
-        .0;
-    if req.base_revision != frontmatter.outline_revision {
+    // Re-read both frontmatter and body under lock to close the TOCTOU window
+    // for concurrent writers and avoid persisting a stale body snapshot.
+    let (mut frontmatter, body) = read_outline_file(&workspace_root, &rel_path, &chapters).await?;
+    if base_revision != frontmatter.outline_revision {
         lock.release().await;
         return Err(NexusApiError::outline_conflict(
-            frontmatter.outline_revision,
+            frontmatter.outline_revision_u64()?,
             chapter.to_string(),
             "outline_revision",
             "refetch the work outline and reapply",
@@ -548,12 +570,18 @@ pub async fn patch_timeline_event(
             message: e.to_string(),
         })?;
 
-    let (initial_frontmatter, body) =
-        read_outline_file(&workspace_root, &rel_path, &chapters).await?;
+    let initial_frontmatter = read_outline_file(&workspace_root, &rel_path, &chapters)
+        .await?
+        .0;
 
-    if req.base_revision != initial_frontmatter.outline_revision {
+    let base_revision =
+        i64::try_from(req.base_revision).map_err(|_| NexusApiError::BadRequest {
+            code: "base_revision_out_of_range".to_string(),
+            message: "base_revision exceeds i64 range".to_string(),
+        })?;
+    if base_revision != initial_frontmatter.outline_revision {
         return Err(NexusApiError::outline_conflict(
-            initial_frontmatter.outline_revision,
+            initial_frontmatter.outline_revision_u64()?,
             req.event_id.clone().unwrap_or_else(|| work_id.clone()),
             "outline_revision",
             "refetch the work outline and reapply",
@@ -562,13 +590,13 @@ pub async fn patch_timeline_event(
 
     let lock = RuntimeLockGuard::acquire(state.pool(), &creator_id, &work_id).await?;
 
-    let mut frontmatter = read_outline_file(&workspace_root, &rel_path, &chapters)
-        .await?
-        .0;
-    if req.base_revision != frontmatter.outline_revision {
+    // Re-read both frontmatter and body under lock to close the TOCTOU window
+    // for concurrent writers and avoid persisting a stale body snapshot.
+    let (mut frontmatter, body) = read_outline_file(&workspace_root, &rel_path, &chapters).await?;
+    if base_revision != frontmatter.outline_revision {
         lock.release().await;
         return Err(NexusApiError::outline_conflict(
-            frontmatter.outline_revision,
+            frontmatter.outline_revision_u64()?,
             req.event_id.clone().unwrap_or_else(|| work_id.clone()),
             "outline_revision",
             "refetch the work outline and reapply",
@@ -1007,5 +1035,164 @@ mod tests {
     fn validate_status_transition_rejects_reverse_and_published() {
         assert!(validate_status_transition("finalized", "draft").is_err());
         assert!(validate_status_transition("not_started", "published").is_err());
+    }
+
+    /// Regression test for R-V172P0-QC3-001.
+    ///
+    /// Simulates a concurrent writer changing the outline body between the
+    /// early (pre-lock) read and the locked re-read. The handler must persist
+    /// the body that was present at locked-read time, not the stale snapshot
+    /// from the early read.
+    #[tokio::test]
+    async fn patch_write_uses_body_from_locked_re_read() {
+        use crate::api::handlers::works::{CreateWorkRequest, PatchWorkRequest};
+
+        let (tmp, nexus_home, db_path, workspace_dir) =
+            crate::test_utils::create_initialized_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(
+            nexus_home,
+            db_path,
+            Some(workspace_dir.to_string_lossy().to_string()),
+        )
+        .await;
+        crate::test_utils::seed_test_creator_and_world(state.pool()).await;
+
+        let work_id = {
+            let req = CreateWorkRequest {
+                title: "Outline Test Novel".to_string(),
+                long_term_goal: "Test the outline canvas".to_string(),
+                initial_idea: "A test story".to_string(),
+                world_id: Some("wld_test_world".to_string()),
+                story_ref: None,
+                primary_preset_id: None,
+                lineage_from_work_id: None,
+                client_request_id: None,
+                set_pool_active: None,
+                work_profile: None,
+            };
+            let (_status, axum::Json(resp)) = crate::api::handlers::works::create_work(
+                axum::extract::State(state.clone()),
+                axum::Json(req),
+            )
+            .await
+            .unwrap();
+            resp.work_id
+        };
+
+        // Set the story_ref so the outline file path is deterministic.
+        {
+            let req = PatchWorkRequest {
+                title: None,
+                long_term_goal: None,
+                creative_brief: None,
+                intake_status: None,
+                status: None,
+                world_id: None,
+                story_ref: Some(Some("outline-test-novel".to_string())),
+                primary_preset_id: None,
+                current_stage: None,
+                stage_status: None,
+                force: None,
+                auto_review_master_on_timeout: None,
+                auto_chain_interrupted: None,
+                work_profile: None,
+            };
+            let _ = crate::api::handlers::works::patch_work(
+                axum::extract::State(state.clone()),
+                axum::extract::Path(work_id.clone()),
+                axum::Json(req),
+            )
+            .await
+            .unwrap();
+        }
+
+        // Seed a single chapter so default frontmatter / volume moves work.
+        let now = chrono::Utc::now().to_rfc3339();
+        nexus_local_db::work_chapters::insert_chapter(
+            state.pool(),
+            &nexus_local_db::work_chapters::InsertChapterParams {
+                work_id: &work_id,
+                chapter: 1,
+                volume: Some(1),
+                slug: Some("ch01"),
+                planned_word_count: 4000,
+                outline_path: None,
+                body_path: None,
+                now: &now,
+            },
+        )
+        .await
+        .expect("seed chapter");
+
+        let workspace_root = workspace_dir;
+        let rel_path = "Works/outline-test-novel/Outlines/outline.md";
+        let outline_path = workspace_root.join(rel_path);
+        tokio::fs::create_dir_all(outline_path.parent().unwrap())
+            .await
+            .expect("create outline dirs");
+
+        let stale_body = "stale body\n";
+        tokio::fs::write(
+            &outline_path,
+            format!(
+                "---\noutline_revision: 0\nvolumes: []\ntimeline_events: []\nforeshadows: []\nchapter_titles: {{}}\nupdated_at: \"2024-01-01T00:00:00Z\"\n---\n{stale_body}"
+            ),
+        )
+        .await
+        .expect("write initial outline");
+
+        let chapters = work_chapters::list_chapters(state.pool(), &work_id)
+            .await
+            .expect("list chapters");
+
+        // Pre-lock read (old bug would capture this body for the later write).
+        let (_initial_frontmatter, _stale_body) =
+            read_outline_file(&workspace_root, rel_path, &chapters)
+                .await
+                .expect("early read");
+
+        // Concurrent writer changes the body before the lock is acquired.
+        let fresh_body = "fresh body\n";
+        tokio::fs::write(
+            &outline_path,
+            format!(
+                "---\noutline_revision: 0\nvolumes: []\ntimeline_events: []\nforeshadows: []\nchapter_titles: {{}}\nupdated_at: \"2024-01-01T00:00:00Z\"\n---\n{fresh_body}"
+            ),
+        )
+        .await
+        .expect("write concurrent outline body");
+
+        // Locked re-read must observe the fresh body; the subsequent write uses it.
+        let (mut frontmatter, body) = read_outline_file(&workspace_root, rel_path, &chapters)
+            .await
+            .expect("locked re-read");
+        assert_eq!(body, fresh_body);
+
+        // Apply a minimal mutation and bump the revision exactly as the handler does.
+        frontmatter.outline_revision += 1;
+        frontmatter.updated_at = chrono::Utc::now().to_rfc3339();
+        atomic_write_outline(&workspace_root, rel_path, &frontmatter, &body)
+            .await
+            .expect("write outline");
+
+        // The file on disk must contain the fresh body, not the stale snapshot.
+        let final_content = tokio::fs::read_to_string(&outline_path).await.unwrap();
+        assert!(
+            final_content.contains(fresh_body),
+            "final outline should contain the fresh body; got: {final_content}"
+        );
+        assert!(
+            !final_content.contains(stale_body),
+            "final outline should not contain the stale body; got: {final_content}"
+        );
+
+        // The revision bump must also have been persisted.
+        let (final_frontmatter, _final_body) =
+            read_outline_file(&workspace_root, rel_path, &chapters)
+                .await
+                .expect("final read");
+        assert_eq!(final_frontmatter.outline_revision, 1);
+
+        drop(tmp);
     }
 }
