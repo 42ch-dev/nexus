@@ -316,9 +316,125 @@ fn patch_ok(new_revision: i64, side_effects: Vec<String>) -> OutlinePatchRespons
     }
 }
 
-// simplify: V1.72 does not yet implement full graph validation; we guard the
-// most critical invariants (id existence, revision, published protection) and
-// leave acyclic / foreshadow-order checks for a future slice.
+// ─── Outline validation rules (V1.73 β hardening, B1–B4) ────────────────────
+//
+// These rules close the V1.72 carry-over validation gaps. They reject only
+// genuinely-invalid inputs through the structured `outline_validation_failed`
+// (HTTP 422) channel; existing valid patches continue to pass.
+
+/// Maximum length of a chapter slug (kebab-case identifier).
+const MAX_SLUG_LEN: usize = 80;
+
+/// Validate a chapter slug (B1 — `R-V172P0-QC2-001`).
+///
+/// Rules:
+/// - Kebab-case only: ASCII lowercase letters, digits, and hyphens
+///   (`^[a-z0-9-]+$`).
+/// - Length 1..=80.
+/// - Unique within the Work (excluding the chapter currently being patched,
+///   so re-asserting an unchanged slug is allowed).
+fn validate_chapter_slug(
+    slug: &str,
+    current_chapter: i32,
+    chapters: &[WorkChapterRecord],
+) -> Result<(), NexusApiError> {
+    let len = slug.len();
+    if !(1..=MAX_SLUG_LEN).contains(&len) {
+        return Err(NexusApiError::outline_validation_failed(
+            &[format!(
+                "slug '{slug}' must be 1..={MAX_SLUG_LEN} characters (got {len})"
+            )],
+            &[],
+        ));
+    }
+    if !slug
+        .bytes()
+        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+    {
+        return Err(NexusApiError::outline_validation_failed(
+            &[format!(
+                "slug '{slug}' must be kebab-case (lowercase ascii letters, digits, and hyphens only)"
+            )],
+            &[],
+        ));
+    }
+    // Uniqueness within the Work (exclude the chapter being patched).
+    if chapters
+        .iter()
+        .any(|r| r.chapter != current_chapter && r.slug.as_deref() == Some(slug))
+    {
+        return Err(NexusApiError::outline_validation_failed(
+            &[format!(
+                "slug '{slug}' is already used by another chapter in this work"
+            )],
+            &[],
+        ));
+    }
+    Ok(())
+}
+
+/// Validate a volume binding target (B2 — `R-V172P0-QC2-002`).
+///
+/// The target volume must already exist in the outline, OR be the immediate
+/// next sequential volume (`max_existing + 1`) — the only legitimate way a
+/// new volume is introduced. Arbitrary out-of-range volumes (e.g. a typo like
+/// `999` when only volume 1 exists) are rejected with 422 rather than silently
+/// auto-created. This preserves the existing valid "move chapter to the next
+/// volume" authoring flow (see `outline_structure_patch_moves_chapter_*`).
+fn validate_volume_target(
+    frontmatter: &OutlineFrontmatter,
+    volume_id: i64,
+) -> Result<(), NexusApiError> {
+    if volume_id < 1 {
+        return Err(NexusApiError::outline_validation_failed(
+            &[format!("volume_id {volume_id} must be >= 1")],
+            &[],
+        ));
+    }
+    let max_volume = frontmatter
+        .volumes
+        .iter()
+        .map(|v| v.volume_id)
+        .max()
+        .unwrap_or(0);
+    if volume_id > max_volume + 1 {
+        return Err(NexusApiError::outline_validation_failed(
+            &[format!(
+                "volume_id {volume_id} does not exist and is not the next sequential volume \
+                 (max existing volume: {max_volume}); create it explicitly before binding chapters"
+            )],
+            &[],
+        ));
+    }
+    Ok(())
+}
+
+/// Reject structural mutations of a published chapter (B4 — `R-V172P0-QC2-004`).
+///
+/// Guards `patch_structure` operations (`move_chapter`, `attach_to_volume`)
+/// that would mutate a published chapter's containment/ordering. The
+/// route-specific `patch_chapter` guard above uses the older `BadRequest`
+/// channel; this structural guard uses the structured 422 validation channel.
+fn ensure_chapter_not_published(
+    chapters: &[WorkChapterRecord],
+    chapter_id: i64,
+) -> Result<(), NexusApiError> {
+    if let Some(record) = chapters.iter().find(|r| i64::from(r.chapter) == chapter_id) {
+        if record.status == "published" {
+            return Err(NexusApiError::outline_validation_failed(
+                &[format!(
+                    "structural edits to published chapter {chapter_id} are blocked"
+                )],
+                &[],
+            ));
+        }
+    }
+    Ok(())
+}
+
+// V1.73 β hardening closes the four V1.72 MEDIUM validation gaps (slug format,
+// volume existence, foreshadow temporal order, published-chapter structural
+// guard). Full graph validation (acyclic checks, etc.) remains a future slice.
 
 // ─── Handlers ───────────────────────────────────────────────────────────────
 
@@ -532,8 +648,16 @@ pub async fn patch_outline_chapter(
         ));
     }
 
-    let result =
-        apply_chapter_patch(&state, &work_id, chapter, &record, &req, &mut frontmatter).await;
+    let result = apply_chapter_patch(
+        &state,
+        &work_id,
+        chapter,
+        &record,
+        &req,
+        &mut frontmatter,
+        &chapters,
+    )
+    .await;
     if let Err(e) = &result {
         lock.release().await;
         return Err(e.clone());
@@ -655,9 +779,14 @@ async fn apply_structure_patch(
                 code: "missing_volume_id".to_string(),
                 message: format!("{operation} requires volume_id"),
             })?;
-            let volume_id_i32 = i32::try_from(volume_id).unwrap_or(1);
 
             ensure_chapter_exists(chapters, chapter_id)?;
+            // V1.73 B4 — block structural edits to published chapters.
+            ensure_chapter_not_published(chapters, chapter_id)?;
+            // V1.73 B2 — reject binding to a non-existent / out-of-range volume.
+            validate_volume_target(frontmatter, volume_id)?;
+
+            let volume_id_i32 = i32::try_from(volume_id).unwrap_or(1);
 
             // Update the DB volume binding so `work_chapters` stays SSOT.
             let now = chrono::Utc::now().to_rfc3339();
@@ -813,9 +942,19 @@ async fn apply_chapter_patch(
     record: &WorkChapterRecord,
     req: &OutlinePatchChapterRequest,
     frontmatter: &mut OutlineFrontmatter,
+    chapters: &[WorkChapterRecord],
 ) -> Result<(), NexusApiError> {
     if let Some(ref status) = req.set.status {
         validate_status_transition(&record.status, status)?;
+    }
+
+    // V1.73 B1 — validate slug format + Work-wide uniqueness before writing.
+    if let Some(ref slug) = req.set.slug {
+        validate_chapter_slug(slug, chapter, chapters)?;
+    }
+    // V1.73 B2 — validate volume binding target before moving the chapter.
+    if let Some(volume_id) = req.set.volume {
+        validate_volume_target(frontmatter, volume_id)?;
     }
 
     let has_volume_change = req.set.volume.is_some();
@@ -990,20 +1129,48 @@ fn timeline_link_foreshadow(
             code: "missing_foreshadows_event_id".to_string(),
             message: "link_foreshadow requires foreshadows_event_id".to_string(),
         })?;
-    if !frontmatter
+    let source_event = frontmatter
         .timeline_events
         .iter()
-        .any(|e| e.event_id == source)
-    {
-        return Err(NexusApiError::NotFound(format!("event {source}")));
-    }
-    if !frontmatter
+        .find(|e| e.event_id == source)
+        .ok_or_else(|| NexusApiError::NotFound(format!("event {source}")))?;
+    let target_event = frontmatter
         .timeline_events
         .iter()
-        .any(|e| e.event_id == target)
-    {
-        return Err(NexusApiError::NotFound(format!("event {target}")));
+        .find(|e| e.event_id == target)
+        .ok_or_else(|| NexusApiError::NotFound(format!("event {target}")))?;
+
+    // V1.73 B3 — enforce source-before-target temporal order. A foreshadow is
+    // planted by the source event and realized by the target event, so the
+    // source must be scheduled at or before the target's realization point.
+    // An event's temporal coordinate is its `realizes_chapter_id`; both ends
+    // must carry one to establish an ordering.
+    let source_chapter = source_event.realizes_chapter_id;
+    let target_chapter = target_event.realizes_chapter_id;
+    match (source_chapter, target_chapter) {
+        (Some(src), Some(tgt)) if src <= tgt => {}
+        (Some(src), Some(tgt)) => {
+            return Err(NexusApiError::outline_validation_failed(
+                &[format!(
+                    "foreshadow source event '{source}' realizes chapter {src}, which is after \
+                     target event '{target}' realization chapter {tgt}; the source must be \
+                     scheduled at or before the target's realization point"
+                )],
+                &[],
+            ));
+        }
+        _ => {
+            return Err(NexusApiError::outline_validation_failed(
+                &[format!(
+                    "foreshadow link requires both source and target events to be attached to a \
+                     realizing chapter (source '{source}' realizes: {source_chapter:?}, target \
+                     '{target}' realizes: {target_chapter:?})"
+                )],
+                &[],
+            ));
+        }
     }
+
     if !frontmatter
         .foreshadows
         .iter()
