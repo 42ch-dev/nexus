@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-28T05:31:48Z",
+  "updated_at": "2026-06-28T06:09:11Z",
   "plans": [],
   "metadata": {
     "integration_branch": "iteration/v1.71",
@@ -28,7 +28,7 @@
         "2026-06-27-v1.71-hygiene-and-sign-groundwork",
         "2026-06-27-v1.71-closure"
       ],
-      "merge_commit": "a47af3f046c22f313fd146e18d2de99ef6299894"
+      "merge_commit": "1cedbc799957e61516073733527b1fd9607c55bf"
     },
     "tech_debt_summary": {
       "total_open": 12,
@@ -54,7 +54,7 @@
       "refreshed_at": "2026-06-28T05:31:48Z",
       "refreshed_reason": "Recorded 2 V1.72 residuals from Greptile 5/5 summary post-merge: misleading toast after state rename, non-atomic template rollback path."
     },
-    "updated_at": "2026-06-28T05:31:48Z",
+    "updated_at": "2026-06-28T06:09:11Z",
     "spec_integration_branch": "iteration/v1.71",
     "wave1_merged_at": null
   },
