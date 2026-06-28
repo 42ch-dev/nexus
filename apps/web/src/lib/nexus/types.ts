@@ -49,6 +49,9 @@ import type {
   ListSessionsResponse,
   ListWorksQuery,
   ListWorksResponse,
+  OutlinePatchChapterRequest,
+  OutlinePatchResponse,
+  OutlinePatchStructureRequest,
   PatchChapterRequest,
   PatchWorkRequest,
   PutChapterOutlineRequest,
@@ -62,11 +65,13 @@ import type {
   StrategyPatchResponse,
   StrategyPatchStateRequest,
   StrategyPatchTransitionRequest,
+  TimelinePatchEventRequest,
   UpdatePresetRequest,
   UpdatePresetResponse,
   ValidatePresetRequest,
   ValidatePresetResponse,
   WorkDetailResponse,
+  WorkOutline,
 } from '@42ch/nexus-contracts';
 
 /** Daemon health probe result (`GET /v1/local/runtime/health`). App-side type. */
@@ -200,6 +205,26 @@ export interface NexusClient {
   patchChapter(workId: string, chapter: number, request: PatchChapterRequest, query?: ChapterContentQuery): Promise<ChapterDetail>;
   /** `GET /v1/local/works/{work_id}/chapters/{n}/body` — read-only body markdown. */
   getChapterBody(workId: string, chapter: number, query?: ChapterContentQuery): Promise<ChapterBody>;
+
+  // ── Outline+Timeline canvas (V1.72 Track A) ────────────────────────────────
+  /** `GET /v1/local/works/{work_id}/outline` — work-level outline + timeline. */
+  getWorkOutline(workId: string): Promise<WorkOutline>;
+  /** `POST /v1/local/works/{work_id}/outline/patch` — structure/volume patch. */
+  patchOutlineStructure(
+    workId: string,
+    request: OutlinePatchStructureRequest,
+  ): Promise<OutlinePatchResponse>;
+  /** `POST /v1/local/works/{work_id}/chapters/{n}/patch` — outline chapter patch. */
+  patchOutlineChapter(
+    workId: string,
+    chapter: number,
+    request: OutlinePatchChapterRequest,
+  ): Promise<OutlinePatchResponse>;
+  /** `POST /v1/local/works/{work_id}/timeline/patch` — structured timeline patch. */
+  patchTimelineEvent(
+    workId: string,
+    request: TimelinePatchEventRequest,
+  ): Promise<OutlinePatchResponse>;
 }
 
 /** Re-exported for consumers building query/mutation hooks. */

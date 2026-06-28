@@ -1,0 +1,30 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/canvas/outline/outline-patch-chapter-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus OutlinePatchChapterRequest",
+  "description": "Request body for POST /v1/local/works/{work_id}/chapters/{chapter_id}/patch (V1.72). Edits chapter-level metadata exposed on the outline canvas.",
+  "type": "object",
+  "required": ["work_id", "chapter_id", "base_revision", "set"],
+  "properties": {
+    "work_id": {
+      "type": "string",
+      "description": "Work identifier from the URL path. Must match the path parameter."
+    },
+    "chapter_id": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Chapter number from the URL path. Must match the path parameter."
+    },
+    "base_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Revision observed by the client on the last canonical read."
+    },
+    "set": {
+      "$ref": "outline-patch-chapter-set.schema.json",
+      "description": "Fields to update on the chapter. At least one property must be provided."
+    }
+  },
+  "additionalProperties": false
+}

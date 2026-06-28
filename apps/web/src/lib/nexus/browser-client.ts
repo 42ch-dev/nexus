@@ -35,6 +35,9 @@ import type {
   ListSessionsResponse,
   ListWorksQuery,
   ListWorksResponse,
+  OutlinePatchChapterRequest,
+  OutlinePatchResponse,
+  OutlinePatchStructureRequest,
   PatchChapterRequest,
   PatchWorkRequest,
   PutChapterOutlineRequest,
@@ -48,11 +51,13 @@ import type {
   StrategyPatchResponse,
   StrategyPatchStateRequest,
   StrategyPatchTransitionRequest,
+  TimelinePatchEventRequest,
   UpdatePresetRequest,
   UpdatePresetResponse,
   ValidatePresetRequest,
   ValidatePresetResponse,
   WorkDetailResponse,
+  WorkOutline,
 } from '@42ch/nexus-contracts';
 
 import { NexusClientError } from './errors';
@@ -287,6 +292,39 @@ export class BrowserClient implements NexusClient {
     return this.get<ChapterBody>(
       `/v1/local/works/${encodeURIComponent(workId)}/chapters/${chapter}/body`,
       query,
+    );
+  }
+
+  // ── Outline+Timeline canvas (V1.72 Track A) ────────────────────────────────
+  getWorkOutline(workId: string): Promise<WorkOutline> {
+    return this.get<WorkOutline>(`/v1/local/works/${encodeURIComponent(workId)}/outline`);
+  }
+  patchOutlineStructure(
+    workId: string,
+    request: OutlinePatchStructureRequest,
+  ): Promise<OutlinePatchResponse> {
+    return this.post<OutlinePatchResponse>(
+      `/v1/local/works/${encodeURIComponent(workId)}/outline/patch`,
+      request,
+    );
+  }
+  patchOutlineChapter(
+    workId: string,
+    chapter: number,
+    request: OutlinePatchChapterRequest,
+  ): Promise<OutlinePatchResponse> {
+    return this.post<OutlinePatchResponse>(
+      `/v1/local/works/${encodeURIComponent(workId)}/chapters/${chapter}/patch`,
+      request,
+    );
+  }
+  patchTimelineEvent(
+    workId: string,
+    request: TimelinePatchEventRequest,
+  ): Promise<OutlinePatchResponse> {
+    return this.post<OutlinePatchResponse>(
+      `/v1/local/works/${encodeURIComponent(workId)}/timeline/patch`,
+      request,
     );
   }
 
