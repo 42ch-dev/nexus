@@ -2560,6 +2560,7 @@ dependencies = [
  "nexus-narrative",
  "nexus-orchestration",
  "nexus-wasm-host",
+ "nix 0.28.0",
  "regex",
  "rust-embed",
  "serde",
