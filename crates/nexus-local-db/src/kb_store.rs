@@ -766,10 +766,7 @@ pub async fn cas_update_key_block_fields(
     // Build a dynamic SET clause from the supplied fields. revision is always
     // bumped; updated_at always set. SAFETY: dynamic SET built from a fixed
     // field whitelist (not user-controlled SQL); all values are bind params.
-    let mut sets = vec![
-        "revision = ?".to_string(),
-        "updated_at = ?".to_string(),
-    ];
+    let mut sets = vec!["revision = ?".to_string(), "updated_at = ?".to_string()];
     if canonical_name.is_some() {
         sets.push("canonical_name = ?".to_string());
     }
@@ -783,11 +780,12 @@ pub async fn cas_update_key_block_fields(
     let now = chrono::Utc::now().to_rfc3339();
     let new_revision = expected_revision + 1;
     // SAFETY: dynamic SET built from a fixed field whitelist (not user-
-    // controlled SQL); all values are bind params. revision IS ? matches
-    // NULL revisions too (NULL-normalized to 0 on read by the caller).
+    // controlled SQL); all values are bind params. COALESCE(revision, 0)
+    // NULL-normalizes the revision column per the architect Phase 2b lock
+    // (existing rows may have revision = NULL; treated as 0 for OCC).
     let sql = format!(
         "UPDATE kb_key_blocks SET {set_clause} \
-         WHERE key_block_id = ? AND revision IS ?"
+         WHERE key_block_id = ? AND COALESCE(revision, 0) = ?"
     );
 
     let mut q = sqlx::query(&sql);
