@@ -7,7 +7,6 @@ import { ChapterPage } from '@/pages/chapter-page';
 import { ChaptersPage } from '@/pages/chapters-page';
 import { FindingsPage } from '@/pages/findings-page';
 import { NotFoundPage } from '@/pages/not-found-page';
-import { OutlinePage } from '@/pages/outline-page';
 import { PresetsPage } from '@/pages/presets-page';
 import { SchedulePage } from '@/pages/schedule-page';
 import { SessionsPage } from '@/pages/sessions-page';
@@ -20,6 +19,12 @@ import { LoadingState } from '@/components/ui/states';
 // Room bootstrap chunk (canvas-strategy-surface.md Draft §3.1 bundle/perf).
 const StrategyPage = lazy(() =>
   import('@/pages/strategy-page').then((m) => ({ default: m.StrategyPage })),
+);
+
+// Route-split: the Outline canvas contains the outline/timeline interactive
+// surface and is not part of the Control Room bootstrap path.
+const OutlinePage = lazy(() =>
+  import('@/pages/outline-page').then((m) => ({ default: m.OutlinePage })),
 );
 
 /**
@@ -41,7 +46,14 @@ export function App() {
         <Route path="works/:workId" element={<WorkDetailPage />} />
         <Route path="works/:workId/chapters" element={<ChaptersPage />} />
         <Route path="works/:workId/chapters/:chapter" element={<ChapterPage />} />
-        <Route path="works/:workId/outline" element={<OutlinePage />} />
+        <Route
+          path="works/:workId/outline"
+          element={
+            <Suspense fallback={<LoadingState label="Loading Outline…" />}>
+              <OutlinePage />
+            </Suspense>
+          }
+        />
         <Route path="sessions" element={<SessionsPage />} />
         <Route path="schedule" element={<SchedulePage />} />
         <Route path="capabilities" element={<CapabilitiesPage />} />
