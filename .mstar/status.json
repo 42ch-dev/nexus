@@ -1,74 +1,7 @@
 {
   "version": 1,
   "updated_at": "2026-06-28T18:57:00Z",
-  "plans": [
-    {
-      "plan_id": "2026-06-28-v1.72-compass-and-plan",
-      "iteration_id": "V1.72",
-      "status": "Done",
-      "owner": "project-manager",
-      "effort": "S",
-      "type": "prepare",
-      "working_branch": "iteration/v1.72",
-      "merge_target": "iteration/v1.72",
-      "task_category": "docs",
-      "wire_contracts_changed": false,
-      "depends_on": [],
-      "completed_at": "2026-06-28T07:32:34Z",
-      "merge_commit": "92a1c07f"
-    },
-    {
-      "plan_id": "2026-06-28-v1.72-canvas-outline-timeline-beta",
-      "iteration_id": "V1.72",
-      "status": "InReview",
-      "owner": "frontend-dev + fullstack-dev",
-      "effort": "L",
-      "type": "implement",
-      "working_branch": "feature/v1.72-canvas-outline-timeline-beta",
-      "merge_target": "iteration/v1.72",
-      "task_category": "visual",
-      "wire_contracts_changed": true,
-      "wire_contracts_note": "V1.72 Track A: new Local API DTOs for outline.patch_structure / outline.patch_chapter / timeline.patch_event + outlineRevision + conflict error; @42ch/nexus-contracts 0.7.0 → 0.8.0",
-      "depends_on": [
-        "2026-06-28-v1.72-compass-and-plan"
-      ],
-      "merged_to_integration_at": "2026-06-28T08:57:55Z",
-      "merged_to_integration_commits": "cfb2e8b3"
-    },
-    {
-      "plan_id": "2026-06-28-v1.72-hygiene-and-release-hardening",
-      "iteration_id": "V1.72",
-      "status": "InReview",
-      "owner": "frontend-dev + fullstack-dev + ops-engineer",
-      "effort": "M",
-      "type": "implement",
-      "working_branch": "feature/v1.72-hygiene-and-release-hardening",
-      "merge_target": "iteration/v1.72",
-      "task_category": "ops",
-      "wire_contracts_changed": false,
-      "depends_on": [
-        "2026-06-28-v1.72-compass-and-plan"
-      ],
-      "merged_to_integration_at": "2026-06-28T08:57:55Z",
-      "merged_to_integration_commits": "31805f9e"
-    },
-    {
-      "plan_id": "2026-06-28-v1.72-closure",
-      "iteration_id": "V1.72",
-      "status": "Todo",
-      "owner": "project-manager",
-      "effort": "S",
-      "type": "closure",
-      "working_branch": "iteration/v1.72",
-      "merge_target": "iteration/v1.72",
-      "task_category": "docs",
-      "wire_contracts_changed": false,
-      "depends_on": [
-        "2026-06-28-v1.72-canvas-outline-timeline-beta",
-        "2026-06-28-v1.72-hygiene-and-release-hardening"
-      ]
-    }
-  ],
+  "plans": [],
   "metadata": {
     "integration_branch": "iteration/v1.72",
     "integration_branch_retired": false,
@@ -77,57 +10,59 @@
     "latest_active_iteration": "V1.72 (prepare)",
     "latest_active_compass": "v1.72-canvas-outline-timeline-beta-and-hygiene-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": "GO",
+    "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.71",
-      "compass": "v1.71-canvas-strategy-write-boundary-and-hygiene-compass-v1.md",
+      "iteration": "V1.72",
+      "compass": "v1.72-canvas-outline-timeline-beta-and-hygiene-compass-v1.md",
       "shipped_at": "2026-06-28",
       "plan_count": 4,
       "plan_count_done": 4,
       "wire_contracts_changed": true,
-      "wire_contracts_note": "V1.71 Track A: new Local API DTOs for strategy.patch_state/transition/prompt_template + graphRevision + conflict error; @42ch/nexus-contracts 0.6.0 → 0.7.0. Track B: no wire change.",
-      "profile_b_compaction": "done (commit 67343139)",
+      "wire_contracts_note": "V1.72 Track A: new Local API DTOs for outline.patch_structure / outline.patch_chapter / timeline.patch_event + outlineRevision + conflict error; @42ch/nexus-contracts 0.7.0 → 0.8.0. Track B: no wire change.",
+      "profile_b_compaction": "done (V1.72 P-last closure)",
       "plan_ids": [
-        "2026-06-27-v1.71-compass-and-plan",
-        "2026-06-27-v1.71-canvas-strategy-write-boundary",
-        "2026-06-27-v1.71-hygiene-and-sign-groundwork",
-        "2026-06-27-v1.71-closure"
+        "2026-06-28-v1.72-compass-and-plan",
+        "2026-06-28-v1.72-canvas-outline-timeline-beta",
+        "2026-06-28-v1.72-hygiene-and-release-hardening",
+        "2026-06-28-v1.72-closure"
       ],
-      "merge_commit": "1cedbc799957e61516073733527b1fd9607c55bf"
+      "merge_commit": "pending-V1.72-PR-merge",
+      "residual_summary": {
+        "closed_in_v172": 6,
+        "deferred_to_v173": 14,
+        "open_post_v172": 13
+      }
     },
     "tech_debt_summary": {
-      "total_open": 23,
-      "total_deferred": 23,
-      "total_resolved": 247,
+      "total_open": 13,
+      "total_deferred": 14,
+      "total_resolved": 248,
       "total_archived": 0,
       "by_severity_active": {
-        "high": 1,
-        "critical": 1,
-        "medium": 6,
+        "high": 0,
+        "critical": 0,
+        "medium": 5,
         "low": 7,
-        "nit": 0
+        "nit": 1
       },
       "by_target_active": {
-        "V1.72 P0 fix-wave (target_date 2026-06-29)": 4,
-        "V1.72 P1 fix-wave (target_date 2026-06-29)": 2,
-        "V1.72 P-last closure": 1,
         "V1.73 canvas-outline-split backlog": 1,
-        "V1.73 hygiene backlog": 13,
-        "V1.73 release hardening backlog": 2
+        "V1.73 hygiene backlog": 11,
+        "V1.73 release hardening backlog": 1
       },
       "by_plan_active": {
-        "2026-06-28-v1.72-canvas-outline-timeline-beta": 10,
-        "2026-06-28-v1.72-hygiene-and-release-hardening": 5,
         "v1.65": 1,
         "2026-06-27-v1.71-canvas-strategy-write-boundary": 2,
-        "2026-06-27-v1.71-hygiene-and-sign-groundwork": 5
+        "2026-06-27-v1.71-hygiene-and-sign-groundwork": 4,
+        "2026-06-28-v1.72-canvas-outline-timeline-beta": 5,
+        "2026-06-28-v1.72-hygiene-and-release-hardening": 1
       },
-      "refreshed_at": "2026-06-28T17:30:00Z",
-      "refreshed_reason": "V1.72 P0 + P1 QC tri-review complete; PM consolidated decision: P0 4 fix (F-001 critical + 3 warnings) + 6 defer; P1 3 fix (W-001 + W-002 high + S-002 minor) + 2 defer. Targeted re-review next."
+      "refreshed_at": "2026-06-28T12:08:51Z",
+      "refreshed_reason": "V1.72 ship: 6 residuals resolved (4 V1.71 carry-over + 2 fix-wave QC findings); 14 deferred to V1.73 backlog with durable plan-id pointers; R-V172P1-QC3-004 closure prose corrected."
     },
-    "updated_at": "2026-06-28T18:57:00Z",
+    "updated_at": "2026-06-28T12:19:56Z",
     "spec_integration_branch": "iteration/v1.72",
     "wave1_merged_at": null
   },
@@ -5005,7 +4940,7 @@
         "note": "ci.yml and desktop-build.yml each re-declare the same monorepo setup boilerplate (checkout, pnpm/action-setup, setup-node, dtolnay/rust-toolchain, Swatinem/rust-cache, pnpm install --frozen-lockfile) in every job. The boilerplate cannot be merged at the workflow level (jobs must run in parallel on independent runners with different OS images), but the setup steps themselves are repeated verbatim ~7 times across the two files, making it tedious to bump action SHAs or pnpm/node versions. Fix: extract a .github/actions/setup-monorepo composite action that takes rust-targets, cache-key, and cache-workspaces as inputs, and have all jobs in both workflows use it. Do NOT attempt to merge jobs or workflows (GitHub Actions jobs are intentionally isolated). Do NOT extract the build/test steps themselves — they vary too much across jobs to share meaningfully.",
         "lifecycle": "resolved",
         "closed_at": "2026-06-28",
-        "closure_note": "Closed in V1.72 P1: created .github/actions/setup-monorepo/action.yml composite action covering checkout, pnpm/node setup, Rust toolchain install, rust-cache, and frozen-lockfile install with optional rust-targets/cache-key/cache-workspaces inputs. Updated ci.yml and desktop-build.yml to consume the composite action; both files shrank by ≥20 lines each while preserving matrix behavior and OS coverage.",
+        "closure_note": "Closed in V1.72 P1: created .github/actions/setup-monorepo/action.yml composite action covering pnpm/action-setup, actions/setup-node (with pnpm cache), optional dtolnay/rust-toolchain (skipped when rust-toolchain input is empty), and pnpm install --frozen-lockfile. Updated ci.yml and desktop-build.yml to consume the composite action; both files shrank by ≥20 lines each while preserving matrix behavior and OS coverage. checkout and rust-cache remain workflow-owned (composite action does not include them, per V1.72 §6.8 hard constraint). Note: V1.72 P-last closure prose correction (R-V172P1-QC3-004).",
         "resolution": {
           "plan_id": "2026-06-28-v1.72-hygiene-and-release-hardening",
           "commit": "9a6591aa"
@@ -5270,7 +5205,13 @@
         "target": "V1.72 P-last closure",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-hygiene-and-release-hardening][R-V172P1-QC3-004]",
         "note": "status.json closure note overstates composite action (mentions checkout + rust-cache). Composite actually covers pnpm setup + Node setup + optional Rust toolchain + pnpm install. PM/QA corrects in P-last closure.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28T12:08:51Z",
+        "closure_note": "Closed in V1.72 P-last closure: status.json closure_note for R-V171-CI-WORKFLOW-SETUP-DEDUPE corrected to reflect actual composite action scope (pnpm setup + Node setup with pnpm cache + optional Rust toolchain + pnpm install; NOT checkout, NOT rust-cache).",
+        "resolution": {
+          "plan_id": "2026-06-28-v1.72-closure",
+          "commit": "pending-P-last-commit"
+        }
       }
     ]
   }

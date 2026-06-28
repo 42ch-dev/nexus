@@ -1,0 +1,23 @@
+{
+  "plan_id": "2026-06-28-v1.72-hygiene-and-release-hardening",
+  "archived_at": "2026-06-28",
+  "schema_version": 1,
+  "plan": {
+    "plan_id": "2026-06-28-v1.72-hygiene-and-release-hardening",
+    "iteration_id": "V1.72",
+    "status": "Done",
+    "owner": "frontend-dev + fullstack-dev + ops-engineer",
+    "effort": "M",
+    "type": "implement",
+    "working_branch": "feature/v1.72-hygiene-and-release-hardening",
+    "merge_target": "iteration/v1.72",
+    "task_category": "ops",
+    "wire_contracts_changed": false,
+    "depends_on": [
+      "2026-06-28-v1.72-compass-and-plan"
+    ],
+    "merged_to_integration_at": "2026-06-28T08:57:55Z",
+    "merged_to_integration_commits": "31805f9e",
+    "completed_at": "2026-06-28T11:49:04Z"
+  }
+}
