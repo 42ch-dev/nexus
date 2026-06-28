@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-28T03:56:05Z",
+  "updated_at": "2026-06-28T05:21:34Z",
   "plans": [],
   "metadata": {
     "integration_branch": "iteration/v1.71",
@@ -31,30 +31,30 @@
       "merge_commit": "a47af3f046c22f313fd146e18d2de99ef6299894"
     },
     "tech_debt_summary": {
-      "total_open": 9,
+      "total_open": 10,
       "total_deferred": 1,
       "total_resolved": 243,
       "total_archived": 0,
       "by_severity_active": {
-        "low": 5,
+        "low": 6,
         "high": 1,
         "medium": 2,
         "nit": 1
       },
       "by_target_active": {
-        "V1.72": 1,
+        "V1.72": 2,
         "V1.72 or V1.71 P-last cleanup": 7,
         "V1.72 release-hardening plan": 1
       },
       "by_plan_active": {
         "v1.65": 1,
         "2026-06-27-v1.71-canvas-strategy-write-boundary": 4,
-        "2026-06-27-v1.71-hygiene-and-sign-groundwork": 4
+        "2026-06-27-v1.71-hygiene-and-sign-groundwork": 5
       },
-      "refreshed_at": "2026-06-28T03:56:05Z",
-      "refreshed_reason": "Recorded R-V171-CI-RELEASE-WORKFLOW-INCOMPLETE: desktop-release.yml missing keychain import + notarize; deferred to V1.72 release-hardening plan."
+      "refreshed_at": "2026-06-28T05:21:34Z",
+      "refreshed_reason": "Recorded R-V171-CI-WORKFLOW-SETUP-DEDUPE: dedupe ci.yml and desktop-build.yml setup boilerplate via .github/actions/setup-monorepo composite action; deferred to V1.72."
     },
-    "updated_at": "2026-06-28T03:56:05Z",
+    "updated_at": "2026-06-28T05:21:34Z",
     "spec_integration_branch": "iteration/v1.71",
     "wave1_merged_at": null
   },
@@ -4899,6 +4899,18 @@
         "owner": "@ops-engineer",
         "target": "V1.72 release-hardening plan",
         "note": "desktop-release.yml reads APPLE_SIGNING_IDENTITY and has a fail-fast check, but the .p12 certificate is never imported to the runner's temporary keychain, so even when the secret is configured, tauri build's codesign invocation cannot find the private key and fails. Also missing: notarize + staple steps, so signed .dmg would still be blocked by macOS Gatekeeper on first open. V1.71 ship is not blocked because the PR-verification workflow (desktop-build.yml) is now unsigned-only (revert of P1 mis-injection). Release artifacts for V1.71 are produced by developer-local signing + manual upload, not via this CI workflow. Full fix: add 'Import signing certificate to temporary keychain' step between 'Require signing identity' and 'Build Tauri desktop bundle', plus a notarize + staple step after dmg creation. Secrets required: APPLE_CERTIFICATE_P12_BASE64, APPLE_CERTIFICATE_PASSWORD, APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID in addition to APPLE_SIGNING_IDENTITY.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V171-CI-WORKFLOW-SETUP-DEDUPE",
+        "title": "Dedupe CI/desktop-build setup steps via composite action",
+        "severity": "low",
+        "source": "V1.71 PR review (workflow dedup discussion)",
+        "scope": ".github/workflows/ci.yml, .github/workflows/desktop-build.yml",
+        "decision": "defer",
+        "owner": "@ops-engineer",
+        "target": "V1.72",
+        "note": "ci.yml and desktop-build.yml each re-declare the same monorepo setup boilerplate (checkout, pnpm/action-setup, setup-node, dtolnay/rust-toolchain, Swatinem/rust-cache, pnpm install --frozen-lockfile) in every job. The boilerplate cannot be merged at the workflow level (jobs must run in parallel on independent runners with different OS images), but the setup steps themselves are repeated verbatim ~7 times across the two files, making it tedious to bump action SHAs or pnpm/node versions. Fix: extract a .github/actions/setup-monorepo composite action that takes rust-targets, cache-key, and cache-workspaces as inputs, and have all jobs in both workflows use it. Do NOT attempt to merge jobs or workflows (GitHub Actions jobs are intentionally isolated). Do NOT extract the build/test steps themselves \u2014 they vary too much across jobs to share meaningfully.",
         "lifecycle": "open"
       }
     ]
