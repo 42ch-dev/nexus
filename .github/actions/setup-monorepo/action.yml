@@ -1,0 +1,55 @@
+name: Setup monorepo
+description: |
+  Shared setup for the Nexus monorepo: pnpm, Node.js, Rust toolchain, and
+  dependency install. Used by CI and desktop workflows to avoid duplicated
+  setup steps.
+
+inputs:
+  node-version:
+    description: Node.js version to install
+    required: false
+    default: "22"
+  pnpm-version:
+    description: pnpm version to install
+    required: false
+    default: "9"
+  rust-toolchain:
+    description: Rust toolchain to install (e.g. stable). Leave empty to skip Rust.
+    required: false
+    default: "stable"
+  rust-components:
+    description: Comma-separated Rust components to install
+    required: false
+    default: ""
+  rust-targets:
+    description: Comma-separated Rust targets to install
+    required: false
+    default: ""
+  install-deps:
+    description: Whether to run pnpm install --frozen-lockfile
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - uses: pnpm/action-setup@eae0cfeb286e66ffb5155f1a79b90583a127a68b  # v2
+      with:
+        version: ${{ inputs.pnpm-version }}
+
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: pnpm
+
+    - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+      if: ${{ inputs.rust-toolchain != '' }}
+      with:
+        toolchain: ${{ inputs.rust-toolchain }}
+        components: ${{ inputs.rust-components }}
+        targets: ${{ inputs.rust-targets }}
+
+    - name: Install pnpm dependencies
+      if: ${{ inputs.install-deps == 'true' }}
+      shell: bash
+      run: pnpm install --frozen-lockfile
