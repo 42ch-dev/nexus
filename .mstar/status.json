@@ -5,7 +5,7 @@
     {
       "plan_id": "2026-06-28-v1.72-compass-and-plan",
       "iteration_id": "V1.72",
-      "status": "Todo",
+      "status": "Done",
       "owner": "project-manager",
       "effort": "S",
       "type": "prepare",
@@ -13,12 +13,14 @@
       "merge_target": "iteration/v1.72",
       "task_category": "docs",
       "wire_contracts_changed": false,
-      "depends_on": []
+      "depends_on": [],
+      "completed_at": "2026-06-28T07:32:34Z",
+      "merge_commit": "92a1c07f"
     },
     {
       "plan_id": "2026-06-28-v1.72-canvas-outline-timeline-beta",
       "iteration_id": "V1.72",
-      "status": "Todo",
+      "status": "InProgress",
       "owner": "frontend-dev + fullstack-dev",
       "effort": "L",
       "type": "implement",
@@ -34,7 +36,7 @@
     {
       "plan_id": "2026-06-28-v1.72-hygiene-and-release-hardening",
       "iteration_id": "V1.72",
-      "status": "Todo",
+      "status": "InProgress",
       "owner": "frontend-dev + fullstack-dev + ops-engineer",
       "effort": "M",
       "type": "implement",
@@ -115,7 +117,7 @@
       "refreshed_at": "2026-06-28T05:31:48Z",
       "refreshed_reason": "V1.72 prepare: 4 plans registered (P-1 prepare + P0 canvas outline+timeline beta + P1 hygiene+release hardening + P-last closure), integration_branch → iteration/v1.72, retired iteration/v1.71, pre_implement_gate=pending."
     },
-    "updated_at": "2026-06-28T07:11:45Z",
+    "updated_at": "2026-06-28T07:32:34Z",
     "spec_integration_branch": "iteration/v1.72",
     "wave1_merged_at": null
   },
