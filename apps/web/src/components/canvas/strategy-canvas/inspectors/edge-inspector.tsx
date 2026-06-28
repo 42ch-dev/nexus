@@ -4,7 +4,7 @@
  * Owns its own save button and partial-failure UI (R-V171P0-QC1-004).
  */
 import type { MutableRefObject } from 'react';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/react-query';
 
 import { useNexusClient } from '@/lib/client-context';
@@ -83,6 +83,7 @@ export function EdgeInspector({
   const patch = usePatchStrategyTransition();
   const original = originalFormOf(selectedState);
   const dirty = isSectionDirty('transition', form, original);
+  const lastHandledTriggerRef = useRef(0);
 
   async function handleSave() {
     if (!dirty || patch.isPending || typeof selectedState.next !== 'string') return;
@@ -114,7 +115,10 @@ export function EdgeInspector({
   }
 
   useEffect(() => {
-    if (saveTrigger > 0) void handleSave();
+    if (saveTrigger > 0 && saveTrigger !== lastHandledTriggerRef.current) {
+      lastHandledTriggerRef.current = saveTrigger;
+      void handleSave();
+    }
   }, [saveTrigger, handleSave]);
 
   if (typeof selectedState.next !== 'string') return null;
