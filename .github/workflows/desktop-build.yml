@@ -34,12 +34,10 @@ permissions:
 
 env:
   SQLX_OFFLINE: "true"
-  # Sign when the secret is present; otherwise build unsigned (local dev / PRs).
-  APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
 
 jobs:
   desktop-build:
-    name: Build macOS desktop app
+    name: Build unsigned macOS desktop app
     runs-on: macos-14
     # F1: single-arch native aarch64 build fits the 6h Actions budget; fail fast
     # if something hangs. macos-13 (Intel) is deprecated and no longer provisions,
@@ -80,14 +78,6 @@ jobs:
 
       - name: Build contracts package
         run: pnpm --filter @42ch/nexus-contracts run build
-
-      - name: Report signing mode
-        run: |
-          if [ -n "$APPLE_SIGNING_IDENTITY" ]; then
-            echo "Signing identity configured; bundle will be signed."
-          else
-            echo "No signing identity configured; bundle will be unsigned."
-          fi
 
       - name: Build Tauri desktop bundle (universal, fallback per-arch)
         run: |
@@ -143,4 +133,6 @@ jobs:
         run: pnpm --filter @42ch/nexus-contracts run build
 
       - name: Run served-UI smoke test
+        env:
+          SKIP_WEB_BUILD: "1"
         run: ./scripts/served-ui-smoke.sh
