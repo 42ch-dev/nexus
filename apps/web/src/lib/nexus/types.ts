@@ -65,6 +65,12 @@ import type {
   StrategyPatchResponse,
   StrategyPatchStateRequest,
   StrategyPatchTransitionRequest,
+  WorldKbCandidatesResponse,
+  WorldKbGraphResponse,
+  WorldKbPatchEntityRequest,
+  WorldKbPatchEntityResponse,
+  WorldKbPromoteCandidateRequest,
+  WorldKbPromoteCandidateResponse,
   TimelinePatchEventRequest,
   UpdatePresetRequest,
   UpdatePresetResponse,
@@ -225,6 +231,25 @@ export interface NexusClient {
     workId: string,
     request: TimelinePatchEventRequest,
   ): Promise<OutlinePatchResponse>;
+
+  // ── World KB canvas (V1.73 Track A) ───────────────────────────────────────
+  /** `GET /v1/local/worlds/{world_id}/kb/graph` — entity graph projection. */
+  getWorldKbGraph(worldId: string): Promise<WorldKbGraphResponse>;
+  /** `GET /v1/local/worlds/{world_id}/kb/candidates` — pending candidates. */
+  getWorldKbCandidates(
+    worldId: string,
+    query?: { limit?: number; cursor?: string },
+  ): Promise<WorldKbCandidatesResponse>;
+  /** `POST /v1/local/worlds/{world_id}/kb/patch-entity` — entity-level patch (per-row OCC). */
+  worldKbPatchEntity(
+    worldId: string,
+    request: WorldKbPatchEntityRequest,
+  ): Promise<WorldKbPatchEntityResponse>;
+  /** `POST /v1/local/worlds/{world_id}/kb/promote-candidate` — adopt/reject/merge. */
+  worldKbPromoteCandidate(
+    worldId: string,
+    request: WorldKbPromoteCandidateRequest,
+  ): Promise<WorldKbPromoteCandidateResponse>;
 }
 
 /** Re-exported for consumers building query/mutation hooks. */
