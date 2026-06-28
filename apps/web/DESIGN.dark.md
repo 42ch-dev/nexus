@@ -209,6 +209,24 @@ components:
     canvas-outline-foreshadow-edge: "#C4B5FD"
     canvas-outline-timeline-marker: "#38BDF8"
     canvas-outline-conflict-marker: "#F87171"
+    # V1.73 World KB canvas-write tokens — concrete dark values (same token names as DESIGN.md; 17 tokens)
+    canvas-worldkb-entity-card-fill-default: "#1A1A1A"
+    canvas-worldkb-entity-card-fill-hover: "#2A2A2A"
+    canvas-worldkb-entity-card-fill-selected: "rgba(82,168,255,0.14)"
+    canvas-worldkb-entity-card-stroke-default: "rgba(255,255,255,0.18)"
+    canvas-worldkb-entity-card-stroke-selected: "{colors.blue-700}"
+    canvas-worldkb-promotion-pending: "#FBBF24"
+    canvas-worldkb-promotion-confirmed: "#34D399"
+    canvas-worldkb-promotion-rejected: "#F87171"
+    canvas-worldkb-promotion-merged: "#A78BFA"
+    canvas-worldkb-source-anchor-edge: "#C4B5FD"
+    canvas-worldkb-source-anchor-node: "#2A2440"
+    canvas-worldkb-computable-badge: "#38BDF8"
+    canvas-worldkb-conflict-marker: "#F87171"
+    canvas-worldkb-conflict-marker-fill: "rgba(248,113,113,0.12)"
+    canvas-worldkb-nonspatial-row-highlight: "#1F1F1E"
+    canvas-worldkb-focus-ring: "{colors.blue-700}"
+    canvas-worldkb-relationship-edge: "#64748B"
 ---
 
 # Nexus Local Web UI Design System — Dark Theme
