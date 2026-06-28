@@ -2,7 +2,7 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — V1.71 amendment (§7 structured patch-route convention for canvas-like surfaces; Strategy β patch routes; `@42ch/nexus-contracts` 0.6.0 → 0.7.0 by default). Prior: V1.67 amendment (§3.2 casing ratification + §4 `items` enforcement + §5 sort-param contract; `@42ch/nexus-contracts` 0.5.0 → 0.6.0), V1.64 cursor/error/`items` conventions + V1.65 chapter-content file-backed route rules. |
+| **Status** | Normative — V1.72 amendment (§7 outline/timeline structured patch routes extending the V1.71 patch-route convention; additive outline DTOs; `@42ch/nexus-contracts` 0.7.0 → 0.8.0 by default). Prior: V1.71 amendment (§7 structured patch-route convention for canvas-like surfaces; Strategy β patch routes; `@42ch/nexus-contracts` 0.6.0 → 0.7.0 by default), V1.67 amendment (§3.2 casing ratification + §4 `items` enforcement + §5 sort-param contract; `@42ch/nexus-contracts` 0.5.0 → 0.6.0), V1.64 cursor/error/`items` conventions + V1.65 chapter-content file-backed route rules. |
 | **Document class** | Master |
 | **Scope** | Cross-resource Local API response/query conventions for schemas under `schemas/local-api/` and handlers under `nexus-daemon-runtime` |
 | **Coordinates with** | [schemas-directory-layout.md](./schemas-directory-layout.md), [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md), [daemon-runtime.md](./daemon-runtime.md) |
@@ -364,7 +364,17 @@ Revision conflicts are **pre-write** failures: if `base_revision` does not equal
 
 The owning domain chooses the revision storage location, but it MUST name a single source of truth and expose the current revision on canonical reads. V1.71 Strategy uses a `revision:` key in the preset YAML header; existing presets without the key read as revision `0` and write `revision: 1` on the first accepted patch.
 
-Future outline+timeline and World KB canvas surfaces in V1.72+ should reuse this convention:
+V1.72 Outline+Timeline canvas surfaces reuse this convention with an outline markdown frontmatter `outline_revision:` key (mirroring the V1.71 preset YAML `revision:` choice): existing outlines without the key read as revision `0` and write `1` on the first accepted patch. The owning domain chooses the revision storage location, but it MUST name a single source of truth and expose the current revision on canonical reads; a future DB-backed revisions table is deferred until audit history, multi-device sync, or collaborative edits require it, and would backfill from frontmatter rather than become a second source of truth.
+
+V1.72 adds 3 outline/timeline patch routes following the V1.71 pattern:
+
+1. `POST /v1/local/works/{work_id}/outline/patch` with `OutlinePatchStructureRequest` (operations: `move_chapter`, `link_event`, `attach_to_volume`) → `OutlinePatchResponse`.
+2. `POST /v1/local/works/{work_id}/chapters/{chapter_id}/patch` with `OutlinePatchChapterRequest` (fields: title, slug, wc, volume binding, status) → `OutlinePatchResponse`.
+3. `POST /v1/local/works/{work_id}/timeline/patch` with `TimelinePatchEventRequest` (operations: `add_event`, `remove_event`, `attach_event_to_chapter`, `link_foreshadow`) → `OutlinePatchResponse`.
+
+Error envelope (mirrors V1.71 Strategy convention): `OutlineConflictError` (409) extends canonical `ErrorResponse.details` with `current_revision`, `node_id`, `conflicting_path`, recovery hint; `OutlineValidationError` (422) carries structured `validation_summary` mirroring V1.71's `StrategyValidationError`.
+
+Future World KB canvas surface in V1.73+ should reuse this convention:
 
 1. Client reads a canonical graph/document projection with `revision`.
 2. Client submits a node/edge/subresource patch with `base_revision`.

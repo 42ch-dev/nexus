@@ -79,7 +79,7 @@ pub struct ApiErrorDetail {
 pub struct RequestId(pub String);
 
 /// Nexus API Error — unified error type for all daemon endpoints
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, Clone, thiserror::Error)]
 pub enum NexusApiError {
     /// Workspace has not been initialized
     #[error("Workspace not initialized")]
@@ -171,6 +171,26 @@ pub enum NexusApiError {
     /// the canvas can surface per-field diagnostics.
     #[error("Strategy validation failed")]
     StrategyValidationFailed { details: serde_json::Value },
+
+    /// Outline canvas patch conflict (HTTP 409).
+    ///
+    /// Emitted when the client `base_revision` does not match the current
+    /// on-disk outline revision, allowing the UI to fetch the latest outline
+    /// and offer merge/retry affordances.
+    #[error("Outline conflict: {conflicting_path}")]
+    OutlineConflict {
+        current_revision: u64,
+        node_id: String,
+        conflicting_path: String,
+        recovery_hint: String,
+    },
+
+    /// Outline canvas patch validation failure (HTTP 422).
+    ///
+    /// Carries the same `validation_summary` shape as a successful patch so
+    /// the canvas can surface per-field diagnostics.
+    #[error("Outline validation failed")]
+    OutlineValidationFailed { details: serde_json::Value },
 }
 
 impl NexusApiError {
@@ -181,15 +201,16 @@ impl NexusApiError {
     #[must_use]
     pub fn status_code(&self) -> StatusCode {
         match self {
-            Self::Uninitialized | Self::Conflict(_) | Self::StrategyConflict { .. } => {
-                StatusCode::CONFLICT
-            }
+            Self::Uninitialized
+            | Self::Conflict(_)
+            | Self::StrategyConflict { .. }
+            | Self::OutlineConflict { .. } => StatusCode::CONFLICT,
             Self::Locked { .. } => StatusCode::LOCKED,
             Self::InvalidInput { .. } | Self::InvalidApiKeyFormat => StatusCode::BAD_REQUEST,
             Self::ServiceUnavailable { .. } => StatusCode::SERVICE_UNAVAILABLE,
-            Self::PresetGatesFailed { .. } | Self::StrategyValidationFailed { .. } => {
-                StatusCode::UNPROCESSABLE_ENTITY
-            }
+            Self::PresetGatesFailed { .. }
+            | Self::StrategyValidationFailed { .. }
+            | Self::OutlineValidationFailed { .. } => StatusCode::UNPROCESSABLE_ENTITY,
             Self::BadRequest { code, .. } => {
                 match code.as_str() {
                     "policy_blocked" => StatusCode::FORBIDDEN,
@@ -259,6 +280,8 @@ impl NexusApiError {
             }
             Self::StrategyConflict { .. } => "strategy_conflict",
             Self::StrategyValidationFailed { .. } => "strategy_validation_failed",
+            Self::OutlineConflict { .. } => "outline_conflict",
+            Self::OutlineValidationFailed { .. } => "outline_validation_failed",
             Self::SessionExpired => "session_expired",
             Self::Conflict(_) => "conflict",
             Self::Locked { .. } => "locked",
@@ -291,12 +314,19 @@ impl NexusApiError {
                 node_id,
                 conflicting_path,
                 recovery_hint,
+            }
+            | Self::OutlineConflict {
+                current_revision,
+                node_id,
+                conflicting_path,
+                recovery_hint,
             } => Some(serde_json::json!({
                 "current_revision": current_revision,
                 "node_id": node_id,
                 "conflicting_path": conflicting_path,
                 "recovery_hint": recovery_hint,
             })),
+            Self::OutlineValidationFailed { details } => Some(details.clone()),
             _ => None,
         }
     }
@@ -329,6 +359,32 @@ impl NexusApiError {
     #[must_use]
     pub fn strategy_validation_failed(errors: &[String], warnings: &[String]) -> Self {
         Self::StrategyValidationFailed {
+            details: serde_json::json!({
+                "validation_summary": { "errors": errors, "warnings": warnings },
+            }),
+        }
+    }
+
+    /// Build an `outline_conflict` error with structured recovery details.
+    #[must_use]
+    pub fn outline_conflict(
+        current_revision: u64,
+        node_id: impl Into<String>,
+        conflicting_path: impl Into<String>,
+        recovery_hint: impl Into<String>,
+    ) -> Self {
+        Self::OutlineConflict {
+            current_revision,
+            node_id: node_id.into(),
+            conflicting_path: conflicting_path.into(),
+            recovery_hint: recovery_hint.into(),
+        }
+    }
+
+    /// Build an `outline_validation_failed` error from a validation summary.
+    #[must_use]
+    pub fn outline_validation_failed(errors: &[String], warnings: &[String]) -> Self {
+        Self::OutlineValidationFailed {
             details: serde_json::json!({
                 "validation_summary": { "errors": errors, "warnings": warnings },
             }),

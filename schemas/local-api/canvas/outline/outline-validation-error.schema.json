@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/canvas/outline/outline-validation-error.schema.json",
+  "schema_version": 1,
+  "title": "Nexus OutlineValidationError",
+  "description": "Structured detail placed inside the canonical ErrorResponse.details field when an Outline or Timeline patch fails domain validation (HTTP 422). Mirrors the validation_summary shape of OutlinePatchResponse.",
+  "type": "object",
+  "required": ["validation_summary"],
+  "properties": {
+    "validation_summary": {
+      "type": "object",
+      "required": ["errors", "warnings"],
+      "properties": {
+        "errors": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Fatal validation messages that prevented the patch."
+        },
+        "warnings": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Non-fatal validation messages."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

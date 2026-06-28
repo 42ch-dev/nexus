@@ -200,6 +200,15 @@ components:
     canvas-write-conflict: "{colors.red-700}"
     canvas-write-success: "{colors.green-700}"
     canvas-write-stale-bg: "color-mix(in srgb, {colors.amber-700} 12%, transparent)"
+    # V1.72 outline/timeline canvas-write tokens — concrete dark values (same token names as DESIGN.md)
+    canvas-outline-volume-fill: "#1F1F1E"
+    canvas-outline-chapter-card-status-pending: "#64748B"
+    canvas-outline-chapter-card-status-drafted: "#60A5FA"
+    canvas-outline-chapter-card-status-completed: "#34D399"
+    canvas-outline-timeline-event-pin: "#FBBF24"
+    canvas-outline-foreshadow-edge: "#C4B5FD"
+    canvas-outline-timeline-marker: "#38BDF8"
+    canvas-outline-conflict-marker: "#F87171"
 ---
 
 # Nexus Local Web UI Design System — Dark Theme
