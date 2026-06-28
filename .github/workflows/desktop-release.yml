@@ -90,9 +90,16 @@ jobs:
           echo "dmg_path=$dmg_path" >> "$GITHUB_OUTPUT"
           echo "bundle_dir=$base" >> "$GITHUB_OUTPUT"
 
+      - name: Preserve unsigned DMG fallback
+        if: ${{ steps.bundle.outcome == 'success' }}
+        run: |
+          set -euo pipefail
+          cp "${{ steps.bundle.outputs.dmg_path }}" "${{ steps.bundle.outputs.bundle_dir }}/Nexus-unsigned-fallback.dmg"
+
       - name: Create temporary signing keychain
         if: ${{ steps.sign-eval.outputs.should_sign == 'true' }}
         id: keychain
+        timeout-minutes: 20
         run: |
           set -euo pipefail
           keychain_path="$RUNNER_TEMP/nexus-signing.keychain-db"
@@ -118,6 +125,7 @@ jobs:
 
       - name: Sign app bundle with hardened runtime
         if: ${{ steps.sign-eval.outputs.should_sign == 'true' }}
+        timeout-minutes: 20
         run: |
           set -euo pipefail
           /usr/bin/codesign --force --sign "$APPLE_SIGN_IDENTITY" \
@@ -127,6 +135,7 @@ jobs:
 
       - name: Recreate signed DMG
         if: ${{ steps.sign-eval.outputs.should_sign == 'true' }}
+        timeout-minutes: 20
         run: |
           set -euo pipefail
           dmg_path="${{ steps.bundle.outputs.dmg_path }}"
@@ -142,6 +151,7 @@ jobs:
 
       - name: Notarize DMG
         if: ${{ steps.sign-eval.outputs.should_sign == 'true' }}
+        timeout-minutes: 20
         run: |
           set -euo pipefail
           xcrun notarytool submit "${{ steps.bundle.outputs.dmg_path }}" \
@@ -152,29 +162,56 @@ jobs:
 
       - name: Staple DMG
         if: ${{ steps.sign-eval.outputs.should_sign == 'true' }}
+        id: staple
+        timeout-minutes: 20
         run: |
           set -euo pipefail
           xcrun stapler staple "${{ steps.bundle.outputs.dmg_path }}"
 
       - name: Package release assets
+        if: ${{ always() && steps.bundle.outcome == 'success' }}
         run: |
           set -euo pipefail
+          if [ ! -d "${{ steps.bundle.outputs.app_path }}" ]; then
+            echo "::error::Expected app bundle not found at ${{ steps.bundle.outputs.app_path }}"
+            exit 1
+          fi
           cd "${{ steps.bundle.outputs.bundle_dir }}"
           zip -r "Nexus-macos-universal.app.zip" "macos/Nexus.app"
 
       - name: Upload release assets
+        if: ${{ always() && steps.bundle.outcome == 'success' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           cd "${{ steps.bundle.outputs.bundle_dir }}"
-          # --clobber: lets a retry safely overwrite any partially-uploaded
-          # assets (e.g. .app.zip landed but DMG upload failed mid-run).
-          # Safe here because this workflow is single-source on
-          # release.published (no double-run risk; QC3 W1).
-          gh release upload --clobber "${{ github.event.release.tag_name }}" \
-            "Nexus-macos-universal.app.zip" \
-            "${{ steps.bundle.outputs.dmg_path }}"
+
+          should_sign="${{ steps.sign-eval.outputs.should_sign }}"
+          signed_dmg="${{ steps.bundle.outputs.dmg_path }}"
+          fallback_dmg="Nexus-unsigned-fallback.dmg"
+          app_zip="Nexus-macos-universal.app.zip"
+
+          if [ ! -f "$app_zip" ]; then
+            echo "::error::Expected app.zip not found in $PWD"
+            exit 1
+          fi
+
+          files=("$app_zip")
+          if [ "$should_sign" = "true" ]; then
+            if [ "${{ steps.staple.outcome }}" = "success" ]; then
+              echo "::notice::Uploading signed DMG."
+              files+=("$signed_dmg")
+            else
+              echo "::error::Signing/notarization/staple failed; uploading unsigned fallback DMG instead of signed artifact."
+              files+=("$fallback_dmg")
+            fi
+          else
+            echo "::notice::Uploading unsigned DMG (no signing secrets)."
+            files+=("$signed_dmg")
+          fi
+
+          gh release upload --clobber "${{ github.event.release.tag_name }}" "${files[@]}"
 
       - name: Clean up signing keychain
         if: ${{ always() && steps.sign-eval.outputs.should_sign == 'true' }}
