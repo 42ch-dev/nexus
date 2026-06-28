@@ -3,8 +3,8 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-28-v1.72-canvas-outline-timeline-beta"
-verdict: "Request Changes"
-generated_at: "2026-06-28"
+verdict: "Approve"
+generated_at: "2026-06-28T11:37:01Z"
 ---
 
 # Code Review Report
@@ -109,3 +109,32 @@ F-001 (module decomposition) and F-002 (type mismatch) must be addressed before 
 If PM chooses to defer F-001 to a follow-up (e.g., as part of removing the β label) and fix only F-002 now, the verdict can be downgraded to Approve with Residuals. The architectural decision is PM's.
 
 F-003 and F-004 are non-blocking suggestions.
+
+## Revalidation (targeted re-review after fix-wave)
+
+- **Re-review timestamp**: 2026-06-28T11:37:01Z
+- **Plan HEAD at re-review**: 266f8b07
+- **Items re-validated**: F-002 (u64/i64 fix); F-001 deferral recorded; F-003/F-004 (no action).
+- **F-002 verification**: Confirmed fixed in commit `78670211`. `OutlineFrontmatter.outline_revision` is now `i64` (line 36). `patch_ok` signature takes `i64` directly (line 295), removing the silent `unwrap_or(0)` fallback. Added `outline_revision_u64()` helper (line 62) with proper `NexusApiError::Internal` error handling for wire boundaries that require unsigned values. All three `+= 1` increments still compile (lines 413, 530, 613). `base_revision` comparison uses `i64::try_from(req.base_revision)` with explicit `BadRequest` error (lines 371, 483, 571). Generated Rust type `OutlinePatchResponse.new_revision` is `i64` (matching schema `minimum: 1`). Schema `outline-patch-response.schema.json` `new_revision` is `type: integer, minimum: 1`. Codegen shows no drift. Also fixed in this commit: all three handlers now re-read both frontmatter AND body under lock (previously only re-read frontmatter from early snapshot), closing the stale-body TOCTOU window (R-V172P0-QC3-001). Regression test `patch_write_uses_body_from_locked_re_read` added (line 1045). **Verdict: F-002 fully resolved.**
+- **F-001 deferral recorded**: Yes. `R-V172P0-QC1-002` present in root `residual_findings[2026-06-28-v1.72-canvas-outline-timeline-beta][]` with `decision: defer`, `lifecycle: open`, `target: V1.73 plan: tbd-v1.73-canvas-outline-split`, `severity: low`, `owner: frontend-dev`. PM note: "accepted as V1.72 β trade-off."
+- **CI gates re-run**:
+  - `cargo clippy --all -- -D warnings` → PASS
+  - `cargo +nightly-2026-06-26 fmt --all --check` → PASS
+  - `cargo test -p nexus-daemon-runtime --test outline_api` → 5/5 PASS
+  - `pnpm --filter web typecheck` → PASS
+  - `pnpm --filter web build` → PASS (outline-page chunk produced at 20.77 KB)
+  - `pnpm --filter web test` → 20 files / 156 tests PASS
+  - `pnpm run codegen` → PASS (no drift)
+
+### Revalidation Findings
+None — fix-wave addresses F-002; R-V172P0-QC3-001 (stale-body TOCTOU) also resolved in same commit `78670211`. R-V172P0-QC3-002 (chapter query invalidation) resolved in commit `a6981dc8`. R-V172P0-QC3-003 (route-split OutlinePage) resolved in commit `7f615654`. F-001 deferred per PM disposition with residual recorded.
+
+### Revalidation Verdict
+Approve
+
+### Revalidation Summary
+| Severity | Count |
+|---|---|
+| 🔴 Critical | 0 |
+| 🟡 Warning | 0 |
+| 🟢 Suggestion | 0 |
