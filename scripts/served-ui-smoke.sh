@@ -7,8 +7,10 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 SMOKE_HOME="$(mktemp -d)"
 CREATIVE_ROOT="${SMOKE_HOME}/Documents/nexus/smoke/smoke"
+
 # Pick a free ephemeral port so a stale local daemon on the default port
-# does not silently shadow this test.
+# does not silently shadow this test. When NEXUS_DAEMON_PORT is set, use it
+# exactly and fail fast if something else is already listening there.
 if [ -n "${NEXUS_DAEMON_PORT:-}" ]; then
   PORT="${NEXUS_DAEMON_PORT}"
 else
@@ -18,11 +20,56 @@ BASE="http://127.0.0.1:${PORT}"
 CREATOR_ID="smoke"
 WORKSPACE_SLUG="smoke"
 
-# Best-effort cleanup of any leftover process on the chosen port.
-if command -v lsof >/dev/null 2>&1; then
-  for pid in $(lsof -ti tcp:"${PORT}" 2>/dev/null || true); do
-    kill "${pid}" 2>/dev/null || true
-  done
+# Best-effort helpers for port ownership checks.
+listener_pid() {
+  local port="$1"
+  if command -v lsof >/dev/null 2>&1; then
+    # The `|| true` keeps this helper from returning a non-zero status when
+    # no process is listening on the port (with `set -o pipefail` active).
+    lsof -ti tcp:"${port}" 2>/dev/null | head -n 1 || true
+  fi
+}
+
+process_cmdline() {
+  local pid="$1"
+  if command -v ps >/dev/null 2>&1; then
+    ps -p "${pid}" -o command= 2>/dev/null || true
+  elif [ -r "/proc/${pid}/cmdline" ]; then
+    tr '\0' ' ' < "/proc/${pid}/cmdline" || true
+  fi
+}
+
+fail() {
+  echo "Error: $*" >&2
+  exit 1
+}
+
+# Determine the daemon binary path without building yet. An explicit override
+# is useful for local verification against an already-built artifact.
+NEXUS42="${NEXUS42:-${REPO_ROOT}/target/release/nexus42}"
+
+# Fail fast if the chosen port is occupied by an unrelated process. Only a
+# leftover Nexus smoke daemon (same binary, same port, --foreground) may be
+# terminated; everything else is left alone and the script aborts.
+preexisting_pid="$(listener_pid "${PORT}")"
+if [ -n "${preexisting_pid:-}" ]; then
+  preexisting_cmd="$(process_cmdline "${preexisting_pid}")"
+  if [[ "${preexisting_cmd}" == *"${NEXUS42}"*daemon*start*--port*"${PORT}"*--foreground* ]]; then
+    echo "Stopping stale smoke daemon (PID ${preexisting_pid}) on port ${PORT}..."
+    kill "${preexisting_pid}" 2>/dev/null || true
+    for _ in {1..20}; do
+      if ! kill -0 "${preexisting_pid}" 2>/dev/null; then
+        break
+      fi
+      sleep 0.2
+    done
+    kill -9 "${preexisting_pid}" 2>/dev/null || true
+    if [ -n "$(listener_pid "${PORT}")" ]; then
+      fail "Port ${PORT} is still occupied by stale smoke daemon PID ${preexisting_pid}."
+    fi
+  else
+    fail "Port ${PORT} is already in use by PID ${preexisting_pid} (${preexisting_cmd}). Refusing to start the smoke daemon to avoid killing an unrelated process. Set NEXUS_DAEMON_PORT to a free port or stop the existing listener."
+  fi
 fi
 
 cd "${REPO_ROOT}"
@@ -34,11 +81,12 @@ if [ -z "${SKIP_WEB_BUILD:-}" ]; then
 fi
 
 # Build the nexus42 release binary so the test exercises the same artifact that
-# embeds the SPA (static assets are release-only).
-echo "Building nexus42 (release)..."
-cargo build -p nexus42 --release --quiet
-
-NEXUS42="${REPO_ROOT}/target/release/nexus42"
+# embeds the SPA (static assets are release-only), unless an override path was
+# provided and the binary already exists.
+if [ ! -x "${NEXUS42}" ]; then
+  echo "Building nexus42 (release)..."
+  cargo build -p nexus42 --release --quiet
+fi
 
 # Use a throwaway HOME so the smoke test does not touch the developer's
 # ~/.nexus42. All operational paths are derived from HOME.
@@ -93,7 +141,7 @@ cleanup() {
   echo "Stopping daemon..."
   if kill "${DAEMON_PID}" 2>/dev/null; then
     # Give the daemon a moment to shut down gracefully, then forcefully.
-    for _ in $(seq 1 10); do
+    for _ in {1..10}; do
       if ! kill -0 "${DAEMON_PID}" 2>/dev/null; then
         break
       fi
@@ -106,13 +154,30 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Wait for the HTTP server to be ready.
-for i in $(seq 1 30); do
+# Wait for the HTTP server to be ready, but fail immediately if the daemon
+# process dies before the health endpoint responds.
+ready=false
+for _ in {1..30}; do
   if curl -fsS "${BASE}/v1/local/runtime/health" >/dev/null 2>&1; then
+    ready=true
     break
+  fi
+  if ! kill -0 "${DAEMON_PID}" 2>/dev/null; then
+    echo "Daemon exited before the health endpoint became ready. Log tail:" >&2
+    if [ -r "${SMOKE_HOME}/daemon.log" ]; then
+      tail -n 30 "${SMOKE_HOME}/daemon.log" >&2 || true
+    fi
+    exit 1
   fi
   sleep 1
 done
+if [ "${ready}" != "true" ]; then
+  echo "Daemon health endpoint did not become ready within 30 seconds. Log tail:" >&2
+  if [ -r "${SMOKE_HOME}/daemon.log" ]; then
+    tail -n 30 "${SMOKE_HOME}/daemon.log" >&2 || true
+  fi
+  exit 1
+fi
 
 echo "Checking Local API health..."
 curl -fsS "${BASE}/v1/local/runtime/health" | grep -q '"status"'
