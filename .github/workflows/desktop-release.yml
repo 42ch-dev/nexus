@@ -119,7 +119,6 @@ jobs:
           security list-keychains -d user -s "$keychain_path" $original
 
           echo "keychain_path=$keychain_path" >> "$GITHUB_OUTPUT"
-          echo "keychain_pass=$keychain_pass" >> "$GITHUB_OUTPUT"
           echo "p12_path=$p12_path" >> "$GITHUB_OUTPUT"
           echo "original_keychains=$original" >> "$GITHUB_OUTPUT"
 
