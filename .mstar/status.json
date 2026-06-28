@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-28T05:12:00Z",
+  "updated_at": "2026-06-28T08:22:00Z",
   "plans": [
     {
       "plan_id": "2026-06-27-v1.71-compass-and-plan",
@@ -99,7 +99,7 @@
       "refreshed_at": "2026-06-27",
       "refreshed_reason": "V1.71 Track B hygiene: 12 residuals closed + 1 deferred (R-V167P2-QC1-S4 frontmatter-helper extraction) + R-V165-QC3-VIRT chapter virtualization deferred to V1.72. Total open: 1."
     },
-    "updated_at": "2026-06-27T21:02:58Z",
+    "updated_at": "2026-06-28T08:22:00Z",
     "spec_integration_branch": "iteration/v1.71",
     "wave1_merged_at": null
   },
@@ -4596,7 +4596,13 @@
         "target_date": "2026-06-28",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.71-canvas-strategy-write-boundary][R-V171P0-QC1-001]",
         "note": "Current modal is a simplified two-button dialog. Missing required headline, What changed/What you were about to do summaries, Use current/Reapply my edit/Review side-by-side actions, disabled-when-unsafe logic, and A8 accessibility behavior (ARIA live region, focus trap, return focus, reduced-motion).",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28",
+        "closure_note": "Extracted ConflictModal to apps/web/src/components/canvas/conflict-modal.tsx with the specified headline, server/draft change summaries, Use current/Reapply my edit/Review side-by-side actions, disabled Reapply when server and draft fields overlap, focus trap, aria-live region, return focus, and reduced-motion handling. Added 8 component tests in conflict-modal.test.tsx.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-canvas-strategy-write-boundary",
+          "commits": ["58ac43d3"]
+        }
       },
       {
         "id": "R-V171P0-QC1-002",
@@ -4610,7 +4616,13 @@
         "target_date": "2026-06-28",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.71-canvas-strategy-write-boundary][R-V171P0-QC1-002]",
         "note": "Acceptance A9 requires unit, integration, e2e, and regression tests including concurrent daemon-write 409 scenario. Only inline unit tests exist in the handler file.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28",
+        "closure_note": "Added crates/nexus-daemon-runtime/tests/strategy_patch.rs with 5 handler-level integration tests covering state rename + revision bump, stale revision conflict, invalid transition condition, prompt-template rollback on validation failure, and concurrent serialization. Also added unit tests in strategy.rs for condition validation, rollback, and concurrent patch serialization.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-canvas-strategy-write-boundary",
+          "commits": ["af992f36"]
+        }
       },
       {
         "id": "R-V171P0-QC1-003",
@@ -4624,7 +4636,13 @@
         "target_date": "2026-06-28",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.71-canvas-strategy-write-boundary][R-V171P0-QC1-003]",
         "note": "File is written before validate_preset_yaml runs. A 422 validation failure leaves the bundle with a mutated prompt-template but unchanged preset.yaml/revision, producing a partial/inconsistent state.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28",
+        "closure_note": "patch_prompt_template now stages the template file via temp + rename, then runs full preset YAML validation before committing the preset.yaml bump. On validation failure the staged template is removed and preset.yaml is left untouched.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-canvas-strategy-write-boundary",
+          "commits": ["af992f36"]
+        }
       },
       {
         "id": "R-V171P0-QC1-004",
@@ -4637,7 +4655,7 @@
         "target": "V1.71 P0 fix-wave",
         "target_date": "2026-06-28",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.71-canvas-strategy-write-boundary][R-V171P0-QC1-004]",
-        "note": "Up to three sequential mutateAsync calls. Early success + later failure leaves the graph partially persisted with no rollback or unified transaction boundary.",
+        "note": "Up to three sequential mutateAsync calls. Early success + later failure leaves the graph partially persisted with no rollback or unified transaction boundary. Backend mitigation: each individual patch is now serialized and atomic, and the canvas refetches canonical state on conflict so the user sees the partial result instead of stale state.",
         "lifecycle": "open"
       },
       {
@@ -4652,7 +4670,13 @@
         "target_date": "2026-06-28",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.71-canvas-strategy-write-boundary][R-V171P0-QC1-005]",
         "note": "Concurrent requests with the same base_revision can both pass the precondition, compute the same new_revision, and rename their temp files, resulting in last-write-wins with duplicate revision numbers.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28",
+        "closure_note": "All three mutation handlers now run inside tokio::task::spawn_blocking, acquire an advisory flock on bundle/.strategy-lock, re-check base_revision after lock acquisition, and write preset.yaml atomically with fsync. Concurrent requests with the same base_revision are serialized; the second re-check fails CAS and returns 409.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-canvas-strategy-write-boundary",
+          "commits": ["af992f36"]
+        }
       },
       {
         "id": "R-V171P0-QC1-006",
@@ -4665,7 +4689,7 @@
         "target": "V1.71 P0 fix-wave",
         "target_date": "2026-06-28",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.71-canvas-strategy-write-boundary][R-V171P0-QC1-006]",
-        "note": "File contains graph sync, live overlay, edit-form state, validation panel, conflict modal, artifacts list, and helper components. Extract InspectorOverlay, ConflictModal, ValidationPanel, and ArtifactsList into focused modules.",
+        "note": "File contains graph sync, live overlay, edit-form state, validation panel, conflict modal, artifacts list, and helper components. ConflictModal has been extracted; InspectorOverlay, ValidationPanel, and ArtifactsList remain inline.",
         "lifecycle": "open"
       },
       {
@@ -4680,7 +4704,13 @@
         "target_date": "2026-06-28",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.71-canvas-strategy-write-boundary][R-V171P0-QC1-007]",
         "note": "Raw rgba(183,110,0,...) hardcoded in both themes. Prefer a reference-based token or explicit amber-alpha component token.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28",
+        "closure_note": "Replaced the raw rgba literal with color-mix(in srgb, {colors.amber-700} N%, transparent) in DESIGN.md, DESIGN.dark.md, and src/index.css, keeping the same amber wash in light and dark themes.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-canvas-strategy-write-boundary",
+          "commits": ["58ac43d3"]
+        }
       },
       {
         "id": "R-V171P0-QC1-008",
@@ -4693,7 +4723,7 @@
         "target": "V1.71 P0 fix-wave",
         "target_date": "2026-06-28",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.71-canvas-strategy-write-boundary][R-V171P0-QC1-008]",
-        "note": "Web coverage is currently limited to BrowserClient msw tests. Add a component or e2e test that submits a patch and verifies query invalidation/refetch.",
+        "note": "Web coverage is currently limited to BrowserClient msw tests. Add a component or e2e test that submits a patch and verifies query invalidation/refetch. ConflictModal now has component tests; StrategyCanvas auto-refetch on conflict is implemented but not yet covered by an automated test.",
         "lifecycle": "open"
       },
       {
