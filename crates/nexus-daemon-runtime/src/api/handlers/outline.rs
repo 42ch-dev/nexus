@@ -114,7 +114,9 @@ fn split_frontmatter(content: &str) -> Option<(String, String)> {
     let end = after_open.find("\n---")?;
     let yaml = after_open[..end].to_string();
     let body_start = end + 4; // skip past '\n---'
-    let body = after_open[body_start..].trim_start_matches('\n').to_string();
+    let body = after_open[body_start..]
+        .trim_start_matches('\n')
+        .to_string();
     Some((yaml, body))
 }
 
@@ -156,17 +158,17 @@ async fn read_outline_file(
         }
     };
 
-    let metadata = tokio::fs::metadata(&path).await.map_err(|e| NexusApiError::Internal {
-        code: "FILE_READ_ERROR".to_string(),
-        message: format!("failed to read outline metadata '{rel_path}': {e}"),
-    })?;
+    let metadata = tokio::fs::metadata(&path)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "FILE_READ_ERROR".to_string(),
+            message: format!("failed to read outline metadata '{rel_path}': {e}"),
+        })?;
     let max_bytes = u64::try_from(OUTLINE_FILE_MAX_BYTES).unwrap_or(u64::MAX);
     if metadata.len() > max_bytes {
         return Err(NexusApiError::BadRequest {
             code: "outline_file_too_large".to_string(),
-            message: format!(
-                "outline file '{rel_path}' exceeds {OUTLINE_FILE_MAX_BYTES} bytes"
-            ),
+            message: format!("outline file '{rel_path}' exceeds {OUTLINE_FILE_MAX_BYTES} bytes"),
         });
     }
 
@@ -175,12 +177,11 @@ async fn read_outline_file(
         return Ok((default_frontmatter(&now, chapters), content));
     };
 
-    let frontmatter: OutlineFrontmatter = serde_yaml::from_str(&yaml).map_err(|e| {
-        NexusApiError::BadRequest {
+    let frontmatter: OutlineFrontmatter =
+        serde_yaml::from_str(&yaml).map_err(|e| NexusApiError::BadRequest {
             code: "outline_frontmatter_invalid".to_string(),
             message: format!("failed to parse outline frontmatter: {e}"),
-        }
-    })?;
+        })?;
 
     Ok((frontmatter, body))
 }
@@ -362,7 +363,8 @@ pub async fn patch_outline_structure(
     if req.base_revision != initial_frontmatter.outline_revision {
         return Err(NexusApiError::outline_conflict(
             initial_frontmatter.outline_revision,
-            req.chapter_id.map_or_else(|| work_id.clone(), |n| n.to_string()),
+            req.chapter_id
+                .map_or_else(|| work_id.clone(), |n| n.to_string()),
             "outline_revision",
             "refetch the work outline and reapply",
         ));
@@ -378,7 +380,8 @@ pub async fn patch_outline_structure(
         lock.release().await;
         return Err(NexusApiError::outline_conflict(
             frontmatter.outline_revision,
-            req.chapter_id.map_or_else(|| work_id.clone(), |n| n.to_string()),
+            req.chapter_id
+                .map_or_else(|| work_id.clone(), |n| n.to_string()),
             "outline_revision",
             "refetch the work outline and reapply",
         ));
@@ -494,7 +497,8 @@ pub async fn patch_outline_chapter(
         ));
     }
 
-    let result = apply_chapter_patch(&state, &work_id, chapter, &record, &req, &mut frontmatter).await;
+    let result =
+        apply_chapter_patch(&state, &work_id, chapter, &record, &req, &mut frontmatter).await;
     if let Err(e) = &result {
         lock.release().await;
         return Err(e.clone());
@@ -620,35 +624,30 @@ async fn apply_structure_patch(
                 volume: Some(volume_id_i32),
                 ..Default::default()
             };
-            let chapter_id_i32 = i32::try_from(chapter_id).map_err(|_| {
-                NexusApiError::BadRequest {
+            let chapter_id_i32 =
+                i32::try_from(chapter_id).map_err(|_| NexusApiError::BadRequest {
                     code: "invalid_chapter_id".to_string(),
                     message: format!("chapter_id {chapter_id} out of range"),
-                }
-            })?;
-            work_chapters::patch_chapter(
-                state.pool(),
-                work_id,
-                chapter_id_i32,
-                1,
-                &patch,
-                &now,
-            )
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: e.to_string(),
-            })?;
+                })?;
+            work_chapters::patch_chapter(state.pool(), work_id, chapter_id_i32, 1, &patch, &now)
+                .await
+                .map_err(|e| NexusApiError::Internal {
+                    code: "DATABASE_ERROR".to_string(),
+                    message: e.to_string(),
+                })?;
 
             // Re-sync the outline volume ordering.
             move_chapter_in_frontmatter(frontmatter, chapter_id, volume_id, chapters);
             Ok(())
         }
         "link_event" => {
-            let event_id = req.event_id.as_deref().ok_or_else(|| NexusApiError::BadRequest {
-                code: "missing_event_id".to_string(),
-                message: "link_event requires event_id".to_string(),
-            })?;
+            let event_id = req
+                .event_id
+                .as_deref()
+                .ok_or_else(|| NexusApiError::BadRequest {
+                    code: "missing_event_id".to_string(),
+                    message: "link_event requires event_id".to_string(),
+                })?;
             let target = req
                 .target_chapter_id
                 .ok_or_else(|| NexusApiError::BadRequest {
@@ -682,7 +681,9 @@ fn move_chapter_in_frontmatter(
     for vol in &mut frontmatter.volumes {
         vol.chapter_ids.retain(|id| *id != chapter_id);
     }
-    frontmatter.volumes.retain(|vol| !vol.chapter_ids.is_empty());
+    frontmatter
+        .volumes
+        .retain(|vol| !vol.chapter_ids.is_empty());
 
     // Append to the target volume, creating it if necessary.
     let target = frontmatter
@@ -733,7 +734,9 @@ fn move_chapter_in_frontmatter(
     }
 
     // Drop the volume-1 placeholder if no chapters actually landed there.
-    frontmatter.volumes.retain(|vol| !vol.chapter_ids.is_empty());
+    frontmatter
+        .volumes
+        .retain(|vol| !vol.chapter_ids.is_empty());
 
     // Sort each volume's chapter list by chapter number for stable ordering.
     for vol in &mut frontmatter.volumes {
@@ -742,7 +745,10 @@ fn move_chapter_in_frontmatter(
     frontmatter.volumes.sort_by_key(|vol| vol.volume_id);
 }
 
-fn ensure_chapter_exists(chapters: &[WorkChapterRecord], chapter_id: i64) -> Result<(), NexusApiError> {
+fn ensure_chapter_exists(
+    chapters: &[WorkChapterRecord],
+    chapter_id: i64,
+) -> Result<(), NexusApiError> {
     if chapters.iter().any(|r| i64::from(r.chapter) == chapter_id) {
         Ok(())
     } else {
@@ -783,15 +789,12 @@ async fn apply_chapter_patch(
                 code: "planned_word_count_too_large".to_string(),
                 message: "planned_word_count exceeds i32 range".to_string(),
             })?,
-        volume: req
-            .set
-            .volume
-            .map(i32::try_from)
-            .transpose()
-            .map_err(|_| NexusApiError::BadRequest {
+        volume: req.set.volume.map(i32::try_from).transpose().map_err(|_| {
+            NexusApiError::BadRequest {
                 code: "invalid_volume".to_string(),
                 message: "volume exceeds i32 range".to_string(),
-            })?,
+            }
+        })?,
         status: req.set.status.clone(),
     };
 
@@ -830,12 +833,7 @@ async fn apply_chapter_patch(
                 code: "DATABASE_ERROR".to_string(),
                 message: e.to_string(),
             })?;
-        move_chapter_in_frontmatter(
-            frontmatter,
-            i64::from(chapter),
-            new_volume,
-            &chapters,
-        );
+        move_chapter_in_frontmatter(frontmatter, i64::from(chapter), new_volume, &chapters);
     }
 
     Ok(())
@@ -866,10 +864,13 @@ fn apply_timeline_patch(
             Ok(())
         }
         "remove_event" => {
-            let event_id = req.event_id.as_deref().ok_or_else(|| NexusApiError::BadRequest {
-                code: "missing_event_id".to_string(),
-                message: "remove_event requires event_id".to_string(),
-            })?;
+            let event_id = req
+                .event_id
+                .as_deref()
+                .ok_or_else(|| NexusApiError::BadRequest {
+                    code: "missing_event_id".to_string(),
+                    message: "remove_event requires event_id".to_string(),
+                })?;
             let before = frontmatter.timeline_events.len();
             frontmatter
                 .timeline_events
@@ -878,16 +879,19 @@ fn apply_timeline_patch(
                 return Err(NexusApiError::NotFound(format!("event {event_id}")));
             }
             // Also drop foreshadow edges touching this event.
-            frontmatter
-                .foreshadows
-                .retain(|edge| edge.source_event_id != event_id && edge.target_event_id != event_id);
+            frontmatter.foreshadows.retain(|edge| {
+                edge.source_event_id != event_id && edge.target_event_id != event_id
+            });
             Ok(())
         }
         "attach_event_to_chapter" => {
-            let event_id = req.event_id.as_deref().ok_or_else(|| NexusApiError::BadRequest {
-                code: "missing_event_id".to_string(),
-                message: "attach_event_to_chapter requires event_id".to_string(),
-            })?;
+            let event_id = req
+                .event_id
+                .as_deref()
+                .ok_or_else(|| NexusApiError::BadRequest {
+                    code: "missing_event_id".to_string(),
+                    message: "attach_event_to_chapter requires event_id".to_string(),
+                })?;
             let target = req
                 .target_chapter_id
                 .ok_or_else(|| NexusApiError::BadRequest {
@@ -904,21 +908,32 @@ fn apply_timeline_patch(
             Ok(())
         }
         "link_foreshadow" => {
-            let source = req.event_id.as_deref().ok_or_else(|| NexusApiError::BadRequest {
-                code: "missing_event_id".to_string(),
-                message: "link_foreshadow requires event_id".to_string(),
-            })?;
-            let target = req
-                .foreshadows_event_id
+            let source = req
+                .event_id
                 .as_deref()
                 .ok_or_else(|| NexusApiError::BadRequest {
-                    code: "missing_foreshadows_event_id".to_string(),
-                    message: "link_foreshadow requires foreshadows_event_id".to_string(),
+                    code: "missing_event_id".to_string(),
+                    message: "link_foreshadow requires event_id".to_string(),
                 })?;
-            if !frontmatter.timeline_events.iter().any(|e| e.event_id == source) {
+            let target =
+                req.foreshadows_event_id
+                    .as_deref()
+                    .ok_or_else(|| NexusApiError::BadRequest {
+                        code: "missing_foreshadows_event_id".to_string(),
+                        message: "link_foreshadow requires foreshadows_event_id".to_string(),
+                    })?;
+            if !frontmatter
+                .timeline_events
+                .iter()
+                .any(|e| e.event_id == source)
+            {
                 return Err(NexusApiError::NotFound(format!("event {source}")));
             }
-            if !frontmatter.timeline_events.iter().any(|e| e.event_id == target) {
+            if !frontmatter
+                .timeline_events
+                .iter()
+                .any(|e| e.event_id == target)
+            {
                 return Err(NexusApiError::NotFound(format!("event {target}")));
             }
             if !frontmatter
