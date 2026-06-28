@@ -627,7 +627,7 @@ function ChapterInspector({
             value={volume}
             onChange={(e) => {
               const next = Number.parseInt(e.target.value, 10);
-              if (!Number.isNaN(next)) onMove(chapter.chapter, next);
+              if (!Number.isNaN(next)) setVolume(String(next));
             }}
             disabled={isPublished}
             className="rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-2 text-gray-1000 focus:border-blue-700 disabled:bg-gray-100 disabled:text-gray-700"
