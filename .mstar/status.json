@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-28",
+  "updated_at": "2026-06-28T01:25:23Z",
   "plans": [
     {
       "plan_id": "2026-06-27-v1.71-compass-and-plan",
@@ -88,29 +88,27 @@
     "tech_debt_summary": {
       "total_open": 8,
       "total_deferred": 1,
-      "total_resolved": 242,
+      "total_resolved": 243,
       "total_archived": 0,
       "by_severity_active": {
-        "critical": 0,
+        "low": 5,
         "high": 1,
         "medium": 1,
-        "low": 5,
         "nit": 1
       },
       "by_target_active": {
-        "V1.71 P0 fix-wave rev3": 1,
         "V1.72": 1,
         "V1.72 or V1.71 P-last cleanup": 7
       },
       "by_plan_active": {
-        "2026-06-27-v1.71-canvas-strategy-write-boundary": 5,
-        "2026-06-27-v1.71-hygiene-and-sign-groundwork": 3,
-        "v1.65": 1
+        "v1.65": 1,
+        "2026-06-27-v1.71-canvas-strategy-write-boundary": 4,
+        "2026-06-27-v1.71-hygiene-and-sign-groundwork": 3
       },
-      "refreshed_at": "2026-06-28",
-      "refreshed_reason": "Closed R-V171P0-QC3-C2 after fix-wave rev3: prompt-template YAML persistence rollback + regression test."
+      "refreshed_at": "2026-06-28T01:25:23Z",
+      "refreshed_reason": "PM consolidation after P0/P1 QC tri-review approvals (qc3 rev3). 8 non-blocking residuals remain for V1.72/P-last or V1.72 (R-V165-QC3-VIRT)."
     },
-    "updated_at": "2026-06-28",
+    "updated_at": "2026-06-28T01:25:23Z",
     "spec_integration_branch": "iteration/v1.71",
     "wave1_merged_at": null
   },
