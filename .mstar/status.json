@@ -7,8 +7,8 @@
     "integration_branch_retired": false,
     "last_integration_branch": "iteration/v1.71",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.72 hotfix (greptile-post5)",
-    "latest_active_compass": "v1.72-canvas-outline-timeline-beta-and-hygiene-compass-v1.md",
+    "latest_active_iteration": "V1.73 (pending /iteration-start)",
+    "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
@@ -36,17 +36,15 @@
       }
     },
     "tech_debt_summary": {
-      "total_open": 17,
+      "total_open": 13,
       "total_deferred": 14,
-      "total_resolved": 248,
+      "total_resolved": 253,
       "total_archived": 0,
       "by_severity_active": {
-        "high": 1,
-        "medium": 9,
-        "low": 7
+        "medium": 5,
+        "low": 8
       },
       "by_target_active": {
-        "V1.72 hotfix (target_date 2026-06-28)": 4,
         "V1.73 canvas-outline-split backlog": 1,
         "V1.73 hygiene backlog": 11,
         "V1.73 release hardening backlog": 1
@@ -56,13 +54,12 @@
         "2026-06-27-v1.71-canvas-strategy-write-boundary": 2,
         "2026-06-27-v1.71-hygiene-and-sign-groundwork": 4,
         "2026-06-28-v1.72-canvas-outline-timeline-beta": 5,
-        "2026-06-28-v1.72-hygiene-and-release-hardening": 1,
-        "2026-06-28-v1.72-greptile-post5": 4
+        "2026-06-28-v1.72-hygiene-and-release-hardening": 1
       },
-      "refreshed_at": "2026-06-28T13:20:18Z",
-      "refreshed_reason": "V1.72 post-merge Greptile review surfaced 4 findings (PR accidentally merged before Greptile finished). Surfaced as residual_findings before hotfix dispatch."
+      "refreshed_at": "2026-06-28T14:06:00Z",
+      "refreshed_reason": "V1.72 greploop complete: 5 Greptile findings closed (R-V172-GREPTILE-001 to -005) at PR #98 merge commit e41392a1; Greptile 5/5 confidence with all review threads resolved."
     },
-    "updated_at": "2026-06-28T13:20:18Z",
+    "updated_at": "2026-06-28T14:06:00Z",
     "spec_integration_branch": "iteration/v1.72",
     "wave1_merged_at": null
   },
@@ -5226,7 +5223,13 @@
         "target": "V1.72 hotfix (target_date 2026-06-28)",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-greptile-post5][R-V172-GREPTILE-001]",
         "note": "handleSave is declared as async function inside component body without useCallback. Reference changes every render, causing useEffect to re-fire continuously. lastHandledTriggerRef guard prevents duplicate API calls in practice, but violates React hooks contract. Fix: wrap handleSave in useCallback with proper dependencies.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28T14:06:00Z",
+        "closure_note": "Closed in V1.72 Greptile hotfix PR #98 (merged at e41392a1b7e604297e0554ef0bfd8cb73ca547b7); review thread resolved by Greptile (5/5 confidence).",
+        "resolution": {
+          "plan_id": "hotfix/v1.72-greptile-post5",
+          "commit": "e41392a1b7e604297e0554ef0bfd8cb73ca547b7"
+        }
       },
       {
         "id": "R-V172-GREPTILE-002",
@@ -5239,7 +5242,13 @@
         "target": "V1.72 hotfix (target_date 2026-06-28)",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-greptile-post5][R-V172-GREPTILE-002]",
         "note": "Volume dropdown onChange calls onMove (handleStructure → patchStructure.mutate) immediately, while title/slug/status/planned_word_count accumulate into local state and dispatch only on Save click. UX inconsistency + risk of accidental revision-bumping dispatch. Fix: update volume local state in onChange and dispatch via the same save() path (set.volume in OutlinePatchChapterRequest) as other fields.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28T14:06:00Z",
+        "closure_note": "Closed in V1.72 Greptile hotfix PR #98 (merged at e41392a1b7e604297e0554ef0bfd8cb73ca547b7); review thread resolved by Greptile (5/5 confidence).",
+        "resolution": {
+          "plan_id": "hotfix/v1.72-greptile-post5",
+          "commit": "e41392a1b7e604297e0554ef0bfd8cb73ca547b7"
+        }
       },
       {
         "id": "R-V172-GREPTILE-003",
@@ -5252,7 +5261,13 @@
         "target": "V1.72 hotfix (target_date 2026-06-28)",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-greptile-post5][R-V172-GREPTILE-003]",
         "note": "Random keychain password echoed to GITHUB_OUTPUT exposes secret via steps.keychain.outputs.keychain_pass in GitHub Actions summary and any step that reads step outputs. Cleanup step uses security delete-keychain (no password required); signing steps run in same shell invocation where password is in scope. Fix: remove echo \"keychain_pass=$keychain_pass\" line.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28T14:06:00Z",
+        "closure_note": "Closed in V1.72 Greptile hotfix PR #98 (merged at e41392a1b7e604297e0554ef0bfd8cb73ca547b7); review thread resolved by Greptile (5/5 confidence).",
+        "resolution": {
+          "plan_id": "hotfix/v1.72-greptile-post5",
+          "commit": "e41392a1b7e604297e0554ef0bfd8cb73ca547b7"
+        }
       },
       {
         "id": "R-V172-GREPTILE-004",
@@ -5265,7 +5280,32 @@
         "target": "V1.72 hotfix (target_date 2026-06-28)",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-greptile-post5][R-V172-GREPTILE-004]",
         "note": "after_open.find(\"\\n---\") matches substring anywhere, including \"\\n---more-text\" or YAML block scalar starting line with ---. User-defined chapter title or timeline event description containing --- at line start, serialized by serde_yaml without quoting, could cause premature frontmatter split. Fix: match \"\\n---\\n\" (or only at end-of-string) to enforce bare delimiter line.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28T14:06:00Z",
+        "closure_note": "Closed in V1.72 Greptile hotfix PR #98 (merged at e41392a1b7e604297e0554ef0bfd8cb73ca547b7); review thread resolved by Greptile (5/5 confidence).",
+        "resolution": {
+          "plan_id": "hotfix/v1.72-greptile-post5",
+          "commit": "e41392a1b7e604297e0554ef0bfd8cb73ca547b7"
+        }
+      },
+      {
+        "id": "R-V172-GREPTILE-005",
+        "title": "Redundant `patch` object dep alongside `patch.isPending` primitive (greploop iter 1)",
+        "severity": "low",
+        "source": "Greptile P2 follow-up on PR #98",
+        "scope": "apps/web/src/components/canvas/strategy-canvas/inspectors/{state,edge,prompt}-inspector.tsx:115 (useCallback deps)",
+        "decision": "fix",
+        "owner": "frontend-dev",
+        "target": "V1.72 greploop iter 1 (greploop feedback during PR #98 review)",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-greptile-post5][R-V172-GREPTILE-005]",
+        "note": "`patch` object reference is stable in TanStack Query v5; listing it alongside the narrower `patch.isPending` primitive dep causes handleSave to re-create unnecessarily. Fix: removed `patch` from deps; kept `patch.isPending` as narrow primitive; `patch.mutateAsync` is stable per TanStack Query v5.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28T14:06:00Z",
+        "closure_note": "Closed in greploop iter 1: cc7dde17 dropped `patch` from useCallback deps across 3 inspectors; `patch.isPending` retained as narrow primitive dep. Tests pass (156/156).",
+        "resolution": {
+          "plan_id": "hotfix/v1.72-greptile-post5",
+          "commit": "cc7dde17"
+        }
       }
     ]
   }
