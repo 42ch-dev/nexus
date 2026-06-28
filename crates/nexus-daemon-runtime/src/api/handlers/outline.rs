@@ -844,115 +844,136 @@ fn apply_timeline_patch(
     frontmatter: &mut OutlineFrontmatter,
     chapters: &[WorkChapterRecord],
 ) -> Result<(), NexusApiError> {
-    let operation = req.operation.as_str();
-    match operation {
-        "add_event" => {
-            let title = req.title.clone().ok_or_else(|| NexusApiError::BadRequest {
-                code: "missing_event_title".to_string(),
-                message: "add_event requires title".to_string(),
-            })?;
-            if let Some(chapter_id) = req.realizes_chapter_id {
-                ensure_chapter_exists(chapters, chapter_id)?;
-            }
-            let event_id = format!("evt_{}", uuid::Uuid::new_v4());
-            frontmatter.timeline_events.push(WorkOutlineTimelineEvent {
-                event_id,
-                title,
-                description: req.description.clone(),
-                realizes_chapter_id: req.realizes_chapter_id,
-            });
-            Ok(())
-        }
-        "remove_event" => {
-            let event_id = req
-                .event_id
-                .as_deref()
-                .ok_or_else(|| NexusApiError::BadRequest {
-                    code: "missing_event_id".to_string(),
-                    message: "remove_event requires event_id".to_string(),
-                })?;
-            let before = frontmatter.timeline_events.len();
-            frontmatter
-                .timeline_events
-                .retain(|e| e.event_id != event_id);
-            if frontmatter.timeline_events.len() == before {
-                return Err(NexusApiError::NotFound(format!("event {event_id}")));
-            }
-            // Also drop foreshadow edges touching this event.
-            frontmatter.foreshadows.retain(|edge| {
-                edge.source_event_id != event_id && edge.target_event_id != event_id
-            });
-            Ok(())
-        }
-        "attach_event_to_chapter" => {
-            let event_id = req
-                .event_id
-                .as_deref()
-                .ok_or_else(|| NexusApiError::BadRequest {
-                    code: "missing_event_id".to_string(),
-                    message: "attach_event_to_chapter requires event_id".to_string(),
-                })?;
-            let target = req
-                .target_chapter_id
-                .ok_or_else(|| NexusApiError::BadRequest {
-                    code: "missing_target_chapter_id".to_string(),
-                    message: "attach_event_to_chapter requires target_chapter_id".to_string(),
-                })?;
-            ensure_chapter_exists(chapters, target)?;
-            let event = frontmatter
-                .timeline_events
-                .iter_mut()
-                .find(|e| e.event_id == event_id)
-                .ok_or_else(|| NexusApiError::NotFound(format!("event {event_id}")))?;
-            event.realizes_chapter_id = Some(target);
-            Ok(())
-        }
-        "link_foreshadow" => {
-            let source = req
-                .event_id
-                .as_deref()
-                .ok_or_else(|| NexusApiError::BadRequest {
-                    code: "missing_event_id".to_string(),
-                    message: "link_foreshadow requires event_id".to_string(),
-                })?;
-            let target =
-                req.foreshadows_event_id
-                    .as_deref()
-                    .ok_or_else(|| NexusApiError::BadRequest {
-                        code: "missing_foreshadows_event_id".to_string(),
-                        message: "link_foreshadow requires foreshadows_event_id".to_string(),
-                    })?;
-            if !frontmatter
-                .timeline_events
-                .iter()
-                .any(|e| e.event_id == source)
-            {
-                return Err(NexusApiError::NotFound(format!("event {source}")));
-            }
-            if !frontmatter
-                .timeline_events
-                .iter()
-                .any(|e| e.event_id == target)
-            {
-                return Err(NexusApiError::NotFound(format!("event {target}")));
-            }
-            if !frontmatter
-                .foreshadows
-                .iter()
-                .any(|edge| edge.source_event_id == source && edge.target_event_id == target)
-            {
-                frontmatter.foreshadows.push(WorkOutlineForeshadow {
-                    source_event_id: source.to_string(),
-                    target_event_id: target.to_string(),
-                });
-            }
-            Ok(())
-        }
-        _ => Err(NexusApiError::BadRequest {
+    match req.operation.as_str() {
+        "add_event" => timeline_add_event(req, frontmatter, chapters),
+        "remove_event" => timeline_remove_event(req, frontmatter),
+        "attach_event_to_chapter" => timeline_attach_event_to_chapter(req, frontmatter, chapters),
+        "link_foreshadow" => timeline_link_foreshadow(req, frontmatter),
+        operation => Err(NexusApiError::BadRequest {
             code: "invalid_timeline_operation".to_string(),
             message: format!("unsupported timeline operation '{operation}'"),
         }),
     }
+}
+
+fn timeline_add_event(
+    req: &TimelinePatchEventRequest,
+    frontmatter: &mut OutlineFrontmatter,
+    chapters: &[WorkChapterRecord],
+) -> Result<(), NexusApiError> {
+    let title = req.title.clone().ok_or_else(|| NexusApiError::BadRequest {
+        code: "missing_event_title".to_string(),
+        message: "add_event requires title".to_string(),
+    })?;
+    if let Some(chapter_id) = req.realizes_chapter_id {
+        ensure_chapter_exists(chapters, chapter_id)?;
+    }
+    let event_id = format!("evt_{}", uuid::Uuid::new_v4());
+    frontmatter.timeline_events.push(WorkOutlineTimelineEvent {
+        event_id,
+        title,
+        description: req.description.clone(),
+        realizes_chapter_id: req.realizes_chapter_id,
+    });
+    Ok(())
+}
+
+fn timeline_remove_event(
+    req: &TimelinePatchEventRequest,
+    frontmatter: &mut OutlineFrontmatter,
+) -> Result<(), NexusApiError> {
+    let event_id = req
+        .event_id
+        .as_deref()
+        .ok_or_else(|| NexusApiError::BadRequest {
+            code: "missing_event_id".to_string(),
+            message: "remove_event requires event_id".to_string(),
+        })?;
+    let before = frontmatter.timeline_events.len();
+    frontmatter
+        .timeline_events
+        .retain(|e| e.event_id != event_id);
+    if frontmatter.timeline_events.len() == before {
+        return Err(NexusApiError::NotFound(format!("event {event_id}")));
+    }
+    // Also drop foreshadow edges touching this event.
+    frontmatter
+        .foreshadows
+        .retain(|edge| edge.source_event_id != event_id && edge.target_event_id != event_id);
+    Ok(())
+}
+
+fn timeline_attach_event_to_chapter(
+    req: &TimelinePatchEventRequest,
+    frontmatter: &mut OutlineFrontmatter,
+    chapters: &[WorkChapterRecord],
+) -> Result<(), NexusApiError> {
+    let event_id = req
+        .event_id
+        .as_deref()
+        .ok_or_else(|| NexusApiError::BadRequest {
+            code: "missing_event_id".to_string(),
+            message: "attach_event_to_chapter requires event_id".to_string(),
+        })?;
+    let target = req
+        .target_chapter_id
+        .ok_or_else(|| NexusApiError::BadRequest {
+            code: "missing_target_chapter_id".to_string(),
+            message: "attach_event_to_chapter requires target_chapter_id".to_string(),
+        })?;
+    ensure_chapter_exists(chapters, target)?;
+    let event = frontmatter
+        .timeline_events
+        .iter_mut()
+        .find(|e| e.event_id == event_id)
+        .ok_or_else(|| NexusApiError::NotFound(format!("event {event_id}")))?;
+    event.realizes_chapter_id = Some(target);
+    Ok(())
+}
+
+fn timeline_link_foreshadow(
+    req: &TimelinePatchEventRequest,
+    frontmatter: &mut OutlineFrontmatter,
+) -> Result<(), NexusApiError> {
+    let source = req
+        .event_id
+        .as_deref()
+        .ok_or_else(|| NexusApiError::BadRequest {
+            code: "missing_event_id".to_string(),
+            message: "link_foreshadow requires event_id".to_string(),
+        })?;
+    let target = req
+        .foreshadows_event_id
+        .as_deref()
+        .ok_or_else(|| NexusApiError::BadRequest {
+            code: "missing_foreshadows_event_id".to_string(),
+            message: "link_foreshadow requires foreshadows_event_id".to_string(),
+        })?;
+    if !frontmatter
+        .timeline_events
+        .iter()
+        .any(|e| e.event_id == source)
+    {
+        return Err(NexusApiError::NotFound(format!("event {source}")));
+    }
+    if !frontmatter
+        .timeline_events
+        .iter()
+        .any(|e| e.event_id == target)
+    {
+        return Err(NexusApiError::NotFound(format!("event {target}")));
+    }
+    if !frontmatter
+        .foreshadows
+        .iter()
+        .any(|edge| edge.source_event_id == source && edge.target_event_id == target)
+    {
+        frontmatter.foreshadows.push(WorkOutlineForeshadow {
+            source_event_id: source.to_string(),
+            target_event_id: target.to_string(),
+        });
+    }
+    Ok(())
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────────────
