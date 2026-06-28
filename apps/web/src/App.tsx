@@ -27,6 +27,12 @@ const OutlinePage = lazy(() =>
   import('@/pages/outline-page').then((m) => ({ default: m.OutlinePage })),
 );
 
+// Route-split: the World KB canvas pulls in `@xyflow/react` and is lazy-loaded
+// alongside the other canvas routes (canvas-strategy-surface.md §3.1).
+const WorldKbPage = lazy(() =>
+  import('@/pages/world-kb-page').then((m) => ({ default: m.WorldKbPage })),
+);
+
 /**
  * App routes — Control Room + Setup shell.
  *
@@ -51,6 +57,14 @@ export function App() {
           element={
             <Suspense fallback={<LoadingState label="Loading Outline…" />}>
               <OutlinePage />
+            </Suspense>
+          }
+        />
+        <Route
+          path="worlds/:worldId/kb"
+          element={
+            <Suspense fallback={<LoadingState label="Loading World KB…" />}>
+              <WorldKbPage />
             </Suspense>
           }
         />
