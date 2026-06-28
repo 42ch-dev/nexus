@@ -191,6 +191,28 @@ pub enum NexusApiError {
     /// the canvas can surface per-field diagnostics.
     #[error("Outline validation failed")]
     OutlineValidationFailed { details: serde_json::Value },
+
+    /// World KB canvas patch conflict (HTTP 409).
+    ///
+    /// Emitted when the client `expected_version` does not match the current
+    /// per-row version (`kb_key_blocks.revision` / `kb_extract_jobs.version`,
+    /// NULL-normalized to 0). Per-row OCC — the conflict modal fires per-entity.
+    /// Field names use the `version` vocabulary (not outline's `revision`).
+    #[error("World KB conflict: {conflicting_path}")]
+    WorldKbConflict {
+        current_version: u64,
+        entity_id: String,
+        conflicting_path: String,
+        recovery_hint: String,
+    },
+
+    /// World KB canvas patch validation failure (HTTP 422).
+    ///
+    /// Domain-rule violations (id existence, authorization, promotion transition
+    /// validity, entity edit validity). Distinct from 409 conflict which is
+    /// concurrent-write version mismatch only.
+    #[error("World KB validation failed")]
+    WorldKbValidationFailed { details: serde_json::Value },
 }
 
 impl NexusApiError {
@@ -204,13 +226,15 @@ impl NexusApiError {
             Self::Uninitialized
             | Self::Conflict(_)
             | Self::StrategyConflict { .. }
-            | Self::OutlineConflict { .. } => StatusCode::CONFLICT,
+            | Self::OutlineConflict { .. }
+            | Self::WorldKbConflict { .. } => StatusCode::CONFLICT,
             Self::Locked { .. } => StatusCode::LOCKED,
             Self::InvalidInput { .. } | Self::InvalidApiKeyFormat => StatusCode::BAD_REQUEST,
             Self::ServiceUnavailable { .. } => StatusCode::SERVICE_UNAVAILABLE,
             Self::PresetGatesFailed { .. }
             | Self::StrategyValidationFailed { .. }
-            | Self::OutlineValidationFailed { .. } => StatusCode::UNPROCESSABLE_ENTITY,
+            | Self::OutlineValidationFailed { .. }
+            | Self::WorldKbValidationFailed { .. } => StatusCode::UNPROCESSABLE_ENTITY,
             Self::BadRequest { code, .. } => {
                 match code.as_str() {
                     "policy_blocked" => StatusCode::FORBIDDEN,
@@ -282,6 +306,8 @@ impl NexusApiError {
             Self::StrategyValidationFailed { .. } => "strategy_validation_failed",
             Self::OutlineConflict { .. } => "outline_conflict",
             Self::OutlineValidationFailed { .. } => "outline_validation_failed",
+            Self::WorldKbConflict { .. } => "world_kb_conflict",
+            Self::WorldKbValidationFailed { .. } => "world_kb_validation_failed",
             Self::SessionExpired => "session_expired",
             Self::Conflict(_) => "conflict",
             Self::Locked { .. } => "locked",
@@ -327,6 +353,18 @@ impl NexusApiError {
                 "recovery_hint": recovery_hint,
             })),
             Self::OutlineValidationFailed { details } => Some(details.clone()),
+            Self::WorldKbConflict {
+                current_version,
+                entity_id,
+                conflicting_path,
+                recovery_hint,
+            } => Some(serde_json::json!({
+                "current_version": current_version,
+                "entity_id": entity_id,
+                "conflicting_path": conflicting_path,
+                "recovery_hint": recovery_hint,
+            })),
+            Self::WorldKbValidationFailed { details } => Some(details.clone()),
             _ => None,
         }
     }
@@ -385,6 +423,35 @@ impl NexusApiError {
     #[must_use]
     pub fn outline_validation_failed(errors: &[String], warnings: &[String]) -> Self {
         Self::OutlineValidationFailed {
+            details: serde_json::json!({
+                "validation_summary": { "errors": errors, "warnings": warnings },
+            }),
+        }
+    }
+
+    /// Build a `world_kb_conflict` error with structured recovery details.
+    ///
+    /// `current_version` is the per-row OCC version observed at conflict time
+    /// (NULL-normalized to 0); `entity_id` is the key_block/candidate id.
+    #[must_use]
+    pub fn world_kb_conflict(
+        current_version: u64,
+        entity_id: impl Into<String>,
+        conflicting_path: impl Into<String>,
+        recovery_hint: impl Into<String>,
+    ) -> Self {
+        Self::WorldKbConflict {
+            current_version,
+            entity_id: entity_id.into(),
+            conflicting_path: conflicting_path.into(),
+            recovery_hint: recovery_hint.into(),
+        }
+    }
+
+    /// Build a `world_kb_validation_failed` error from a validation summary.
+    #[must_use]
+    pub fn world_kb_validation_failed(errors: &[String], warnings: &[String]) -> Self {
+        Self::WorldKbValidationFailed {
             details: serde_json::json!({
                 "validation_summary": { "errors": errors, "warnings": warnings },
             }),
