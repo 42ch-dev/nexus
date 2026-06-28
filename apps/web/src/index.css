@@ -100,7 +100,7 @@
     --color-canvas-write-dirty: #b76e00;
     --color-canvas-write-conflict: #e5484d;
     --color-canvas-write-success: #1f8f4d;
-    --color-canvas-write-stale-bg: rgba(183, 110, 0, 0.08);
+    --color-canvas-write-stale-bg: color-mix(in srgb, var(--color-amber-700) 8%, transparent);
 
     /* Elevation — DESIGN.md §Elevation */
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04);
@@ -185,7 +185,7 @@
     --color-canvas-write-dirty: #b76e00;
     --color-canvas-write-conflict: #e5484d;
     --color-canvas-write-success: #1f8f4d;
-    --color-canvas-write-stale-bg: rgba(183, 110, 0, 0.12);
+    --color-canvas-write-stale-bg: color-mix(in srgb, var(--color-amber-700) 12%, transparent);
 
     /* Elevation */
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);

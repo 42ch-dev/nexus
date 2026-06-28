@@ -199,7 +199,7 @@ components:
     canvas-write-dirty: "{colors.amber-700}"
     canvas-write-conflict: "{colors.red-700}"
     canvas-write-success: "{colors.green-700}"
-    canvas-write-stale-bg: "rgba(183,110,0,0.12)"
+    canvas-write-stale-bg: "color-mix(in srgb, {colors.amber-700} 12%, transparent)"
 ---
 
 # Nexus Local Web UI Design System — Dark Theme

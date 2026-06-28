@@ -11,9 +11,10 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useEdgesState, useNodesState, type Edge, type Node } from '@xyflow/react';
-import { AlertTriangle, Info, Pencil, RefreshCw, Save, ScrollText, X } from 'lucide-react';
+import { AlertTriangle, Info, Pencil, Save, ScrollText, X } from 'lucide-react';
 
 import { CanvasShell } from '@/components/canvas/canvas-shell';
+import { ConflictModal, type ConflictModalDraft, type ChangedField } from '@/components/canvas/conflict-modal';
 import { IdeaInput, type IdeaArtifact } from '@/components/canvas/idea-input';
 import { strategyNodeTypes } from '@/components/canvas/strategy-nodes';
 import { StrategyAltView } from '@/components/canvas/strategy-alt-view';
@@ -110,6 +111,15 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
   const baseRevision = graphQuery.data?.revision ?? 0;
   const promptTemplateRef = useMemo(() => templateRefOf(selectedState), [selectedState]);
 
+  // Track the revision we are patching against. After each successful partial
+  // patch the daemon bumps revision, so the next mutation must use the new
+  // base. This prevents a single multi-field Save from conflicting with itself
+  // (R-V171-P0-QC3-C3).
+  const [workingRevision, setWorkingRevision] = useState(baseRevision);
+  useEffect(() => {
+    setWorkingRevision(baseRevision);
+  }, [baseRevision]);
+
   // Initialise the edit form when the user opens edit mode or selects a node.
   useEffect(() => {
     if (!isEditing || !selectedState) {
@@ -153,50 +163,49 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
   async function handleSave() {
     if (!selectedState || !graphQuery.data) return;
 
-    const original: EditForm = {
-      label: selectedState.id,
-      description: selectedState.description ?? '',
-      nextTarget: typeof selectedState.next === 'string' ? selectedState.next : '',
-      promptBody: '',
-    };
-
-    const renamedStateId =
-      form.label !== original.label ? form.label : selectedState.id;
+    const original = originalFormOf(selectedState);
+    const renamedStateId = form.label !== original.label ? form.label : selectedState.id;
 
     try {
+      let currentRevision = workingRevision;
+
       if (form.label !== original.label || form.description !== original.description) {
         const args: PatchStrategyStateArgs = {
           strategyId: presetId,
           stateId: selectedState.id,
-          baseRevision,
+          baseRevision: currentRevision,
         };
         if (form.label !== original.label) args.label = form.label;
         if (form.description !== original.description) args.description = form.description;
-        await patchState.mutateAsync(args);
+        const res = await patchState.mutateAsync(args);
+        currentRevision = Number(res.new_revision);
       }
 
       if (form.nextTarget !== original.nextTarget && typeof selectedState.next === 'string') {
         const args: PatchStrategyTransitionArgs = {
           strategyId: presetId,
           sourceStateId: renamedStateId,
-          baseRevision,
+          baseRevision: currentRevision,
           oldTarget: original.nextTarget,
           newTarget: form.nextTarget,
           transitionKind: 'next',
         };
-        await patchTransition.mutateAsync(args);
+        const res = await patchTransition.mutateAsync(args);
+        currentRevision = Number(res.new_revision);
       }
 
       if (form.promptBody && promptTemplateRef) {
-        await patchPrompt.mutateAsync({
+        const res = await patchPrompt.mutateAsync({
           strategyId: presetId,
           stateId: selectedState.id,
-          baseRevision,
+          baseRevision: currentRevision,
           templateRef: promptTemplateRef,
           body: form.promptBody,
         });
+        currentRevision = Number(res.new_revision);
       }
 
+      setWorkingRevision(currentRevision);
       setIsEditing(false);
     } catch (error) {
       if (isStrategyConflictError(error)) {
@@ -205,9 +214,21 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
             ? (error.details as { current_revision?: number }).current_revision ?? 0
             : 0;
         setConflict({ currentRevision });
+        // Fetch the canonical graph immediately so the modal can show the
+        // server state alongside the user's draft (R-V171-P0-QC3-W2).
+        void graphQuery.refetch();
       }
       // Other errors are surfaced by the mutation's onError toast.
     }
+  }
+
+  function originalFormOf(state: PresetState | undefined): EditForm {
+    return {
+      label: state?.id ?? '',
+      description: state?.description ?? '',
+      nextTarget: typeof state?.next === 'string' ? state.next : '',
+      promptBody: '',
+    };
   }
 
   function updateField<K extends keyof EditForm>(field: K, value: EditForm[K]) {
@@ -294,10 +315,20 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
 
       {conflict ? (
         <ConflictModal
+          open
           currentRevision={conflict.currentRevision}
-          onRefetch={() => {
+          draft={getConflictDraft(form)}
+          canonicalState={selectedState}
+          promptTemplateRef={promptTemplateRef}
+          changedFields={getChangedFields(form, originalFormOf(selectedState))}
+          onUseCurrent={() => {
             setConflict(null);
+            setIsEditing(false);
             void graphQuery.refetch();
+          }}
+          onReapply={() => {
+            setConflict(null);
+            void graphQuery.refetch().then(() => handleSave());
           }}
           onDismiss={() => setConflict(null)}
         />
@@ -475,50 +506,22 @@ function InspectorOverlay({
   );
 }
 
-function ConflictModal({
-  currentRevision,
-  onRefetch,
-  onDismiss,
-}: {
-  currentRevision: number;
-  onRefetch: () => void;
-  onDismiss: () => void;
-}) {
-  return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-gray-1000/40 p-4"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="conflict-title"
-    >
-      <div className="w-full max-w-md rounded-popover border border-canvas-write-conflict bg-background-100 p-6 shadow-modal">
-        <h3 id="conflict-title" className="text-heading-20 font-heading text-canvas-write-conflict">
-          Strategy changed elsewhere
-        </h3>
-        <p className="mt-2 text-copy-14 text-gray-900">
-          The Strategy preset was modified while you were editing. Server revision is now{' '}
-          <span className="font-mono">{currentRevision}</span>. Refetch the latest graph, then reapply your edit.
-        </p>
-        <div className="mt-4 flex justify-end gap-2">
-          <button
-            type="button"
-            onClick={onDismiss}
-            className="rounded-control border border-gray-alpha-400 px-4 py-2 text-button-12 text-gray-900 hover:bg-gray-alpha-100"
-          >
-            Keep editing
-          </button>
-          <button
-            type="button"
-            onClick={onRefetch}
-            className="rounded-control bg-canvas-write-conflict px-4 py-2 text-button-12 text-white hover:bg-red-800"
-          >
-            <RefreshCw className="mr-1.5 inline h-4 w-4" aria-hidden />
-            Refetch graph
-          </button>
-        </div>
-      </div>
-    </div>
-  );
+function getConflictDraft(form: EditForm): ConflictModalDraft {
+  return {
+    label: form.label,
+    description: form.description,
+    nextTarget: form.nextTarget,
+    promptBody: form.promptBody,
+  };
+}
+
+function getChangedFields(form: EditForm, original: EditForm): ChangedField[] {
+  const changed: ChangedField[] = [];
+  if (form.label !== original.label) changed.push('label');
+  if (form.description !== original.description) changed.push('description');
+  if (form.nextTarget !== original.nextTarget) changed.push('nextTarget');
+  if (form.promptBody && form.promptBody !== original.promptBody) changed.push('promptBody');
+  return changed;
 }
 
 function ValidationPanel({ problems, dangling }: { problems: string[]; dangling: string[] }) {
