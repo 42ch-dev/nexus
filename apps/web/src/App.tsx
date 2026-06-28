@@ -21,6 +21,12 @@ const StrategyPage = lazy(() =>
   import('@/pages/strategy-page').then((m) => ({ default: m.StrategyPage })),
 );
 
+// Route-split: the Outline canvas contains the outline/timeline interactive
+// surface and is not part of the Control Room bootstrap path.
+const OutlinePage = lazy(() =>
+  import('@/pages/outline-page').then((m) => ({ default: m.OutlinePage })),
+);
+
 /**
  * App routes — Control Room + Setup shell.
  *
@@ -40,6 +46,14 @@ export function App() {
         <Route path="works/:workId" element={<WorkDetailPage />} />
         <Route path="works/:workId/chapters" element={<ChaptersPage />} />
         <Route path="works/:workId/chapters/:chapter" element={<ChapterPage />} />
+        <Route
+          path="works/:workId/outline"
+          element={
+            <Suspense fallback={<LoadingState label="Loading Outline…" />}>
+              <OutlinePage />
+            </Suspense>
+          }
+        />
         <Route path="sessions" element={<SessionsPage />} />
         <Route path="schedule" element={<SchedulePage />} />
         <Route path="capabilities" element={<CapabilitiesPage />} />

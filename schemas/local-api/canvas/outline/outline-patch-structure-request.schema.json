@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/canvas/outline/outline-patch-structure-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus OutlinePatchStructureRequest",
+  "description": "Request body for POST /v1/local/works/{work_id}/outline/patch (V1.72). Mutates the Work outline structure: move a chapter between volumes, attach a chapter to a volume, or link an event to a chapter.",
+  "type": "object",
+  "required": ["work_id", "base_revision", "operation"],
+  "properties": {
+    "work_id": {
+      "type": "string",
+      "description": "Work identifier from the URL path. Must match the path parameter."
+    },
+    "base_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Revision observed by the client on the last canonical read."
+    },
+    "operation": {
+      "type": "string",
+      "enum": ["move_chapter", "link_event", "attach_to_volume"],
+      "description": "Structural patch operation to perform."
+    },
+    "chapter_id": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Target chapter number for move_chapter or attach_to_volume."
+    },
+    "volume_id": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Destination volume for move_chapter or attach_to_volume."
+    },
+    "event_id": {
+      "type": "string",
+      "description": "Timeline event identifier for link_event."
+    },
+    "target_chapter_id": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Chapter that the event realizes for link_event."
+    }
+  },
+  "additionalProperties": false
+}
