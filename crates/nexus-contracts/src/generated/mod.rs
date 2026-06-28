@@ -29,6 +29,7 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("World", 1),
     ("OutlineConflictError", 1),
     ("OutlinePatchChapterRequest", 1),
+    ("OutlinePatchChapterSet", 1),
     ("OutlinePatchResponse", 1),
     ("OutlinePatchStructureRequest", 1),
     ("OutlineValidationError", 1),

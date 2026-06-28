@@ -280,6 +280,31 @@ fn memory_routes() -> Router<WorkspaceState> {
         )
 }
 
+/// Canvas Outline+Timeline write-boundary routes (V1.72 Track A).
+///
+/// Kept separate from `works_routes` so the chapter `/{n}/patch` route can be
+/// registered before `/{n}` and the overall works registry stays under the
+/// clippy line threshold.
+fn canvas_outline_routes() -> Router<WorkspaceState> {
+    Router::new()
+        .route(
+            "/v1/local/works/{work_id}/outline",
+            get(handlers::outline::get_work_outline),
+        )
+        .route(
+            "/v1/local/works/{work_id}/outline/patch",
+            post(handlers::outline::patch_outline_structure),
+        )
+        .route(
+            "/v1/local/works/{work_id}/chapters/{n}/patch",
+            post(handlers::outline::patch_outline_chapter),
+        )
+        .route(
+            "/v1/local/works/{work_id}/timeline/patch",
+            post(handlers::outline::patch_timeline_event),
+        )
+}
+
 /// Works routes — Work CRUD + inspiration + reconcile-chapters (V1.33 §7.2, V1.36 §8).
 ///
 /// Also includes findings sub-routes (V1.39 P1) merged into the same router
@@ -321,6 +346,8 @@ fn works_routes() -> Router<WorkspaceState> {
             "/v1/local/works/{work_id}",
             get(handlers::works::get_work).patch(handlers::works::patch_work),
         )
+        // ── Canvas Outline+Timeline routes (V1.72) ─────────────────────────
+        .merge(canvas_outline_routes())
         .route(
             "/v1/local/works/{work_id}/inspiration",
             post(handlers::works::append_inspiration),
