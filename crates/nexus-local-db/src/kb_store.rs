@@ -28,6 +28,8 @@ use nexus_kb::KbStore;
 use sqlx::SqlitePool;
 use std::sync::Arc;
 
+use crate::LocalDbError;
+
 /// Test helpers for seeding KB data into the database.
 ///
 /// These functions are intended for tests and development fixtures only.
@@ -714,6 +716,131 @@ impl KbStore for SqliteKbStore {
 
         Ok(())
     }
+}
+
+// ── V1.73 Canvas World KB: per-row OCC CAS entity edit ──────────────────────
+
+/// V1.73 P0: CAS-aware partial update of a `kb_key_blocks` row.
+///
+/// Mirrors the V1.51 `kb_extract_jobs` CAS pattern
+/// ([`kb_extract_job::mark_confirmed_in_tx_with_cas`]). Adds a
+/// `WHERE key_block_id = ? AND revision = ?` guard so a stale preimage
+/// (read before another writer modified the row) is rejected with
+/// [`LocalDbError::VersionMismatch`]. On success the `revision` column is
+/// bumped to `expected_revision + 1` and the bumped value is returned.
+///
+/// Only the fields supplied as `Some(..)` are mutated; `None` fields keep
+/// their current DB value. `revision` is NULL-normalized to 0 by this
+/// function (the architect Phase 2b lock: existing rows may have
+/// `revision = NULL`; the first successful patch sets it to 1).
+///
+/// # Arguments
+///
+/// - `tx` — caller-owned transaction (so the entity edit can be composed
+///   atomically with sibling writes if needed).
+/// - `key_block_id` — target row PK.
+/// - `canonical_name` / `block_type` / `body_json` — optional replacement
+///   values (JSON strings for `body_json`).
+/// - `expected_revision` — the per-row version the caller observed on read
+///   (NULL-normalized to 0; this is the OCC precondition).
+///
+/// # Returns
+///
+/// - `Ok(new_revision)` — row updated, returns the new bumped version.
+/// - `Err(LocalDbError::VersionMismatch)` — the row's `revision` changed
+///   between read and UPDATE (409 caller-side).
+/// - `Err(LocalDbError::VersionMismatch { actual: None })` — row not found.
+/// - `Err(LocalDbError::Sqlx)` — database failure.
+///
+/// # Errors
+///
+/// See above.
+pub async fn cas_update_key_block_fields(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    key_block_id: &str,
+    canonical_name: Option<&str>,
+    block_type: Option<&str>,
+    body_json: Option<&str>,
+    expected_revision: i64,
+) -> Result<u64, LocalDbError> {
+    // Build a dynamic SET clause from the supplied fields. revision is always
+    // bumped; updated_at always set. SAFETY: dynamic SET built from a fixed
+    // field whitelist (not user-controlled SQL); all values are bind params.
+    let mut sets = vec![
+        "revision = ?".to_string(),
+        "updated_at = ?".to_string(),
+    ];
+    if canonical_name.is_some() {
+        sets.push("canonical_name = ?".to_string());
+    }
+    if block_type.is_some() {
+        sets.push("block_type = ?".to_string());
+    }
+    if body_json.is_some() {
+        sets.push("body_json = ?".to_string());
+    }
+    let set_clause = sets.join(", ");
+    let now = chrono::Utc::now().to_rfc3339();
+    let new_revision = expected_revision + 1;
+    // SAFETY: dynamic SET built from a fixed field whitelist (not user-
+    // controlled SQL); all values are bind params. revision IS ? matches
+    // NULL revisions too (NULL-normalized to 0 on read by the caller).
+    let sql = format!(
+        "UPDATE kb_key_blocks SET {set_clause} \
+         WHERE key_block_id = ? AND revision IS ?"
+    );
+
+    let mut q = sqlx::query(&sql);
+    q = q.bind(new_revision).bind(now);
+    if let Some(v) = canonical_name {
+        q = q.bind(v);
+    }
+    if let Some(v) = block_type {
+        q = q.bind(v);
+    }
+    if let Some(v) = body_json {
+        q = q.bind(v);
+    }
+    q = q.bind(key_block_id).bind(expected_revision);
+    let result = q.execute(&mut **tx).await?;
+
+    if result.rows_affected() == 1 {
+        return Ok(u64::try_from(new_revision).unwrap_or(0));
+    }
+
+    // rows_affected == 0 — disambiguate not-found vs version mismatch by
+    // re-reading the row. NULL revision is treated as 0.
+    let current: Option<Option<i64>> =
+        sqlx::query_scalar("SELECT revision FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind(key_block_id)
+            .fetch_optional(&mut **tx)
+            .await?;
+    let actual = current.map(|rev| rev.unwrap_or(0));
+    Err(LocalDbError::VersionMismatch {
+        table: "kb_key_blocks".to_string(),
+        id: key_block_id.to_string(),
+        expected: expected_revision,
+        actual,
+    })
+}
+
+/// V1.73 P0: read the per-row OCC version of a `kb_key_blocks` row,
+/// NULL-normalized to 0. Returns `None` when the row does not exist.
+///
+/// # Errors
+///
+/// Returns [`LocalDbError::Sqlx`] on database failure.
+pub async fn read_key_block_revision(
+    pool: &SqlitePool,
+    key_block_id: &str,
+) -> Result<Option<u64>, LocalDbError> {
+    // SAFETY: static SELECT by PK with bind param.
+    let row: Option<Option<i64>> =
+        sqlx::query_scalar("SELECT revision FROM kb_key_blocks WHERE key_block_id = ?")
+            .bind(key_block_id)
+            .fetch_optional(pool)
+            .await?;
+    Ok(row.map(|rev| rev.unwrap_or(0).max(0).cast_unsigned()))
 }
 
 // ── Tests ───────────────────────────────────────────────────────────
