@@ -29,7 +29,15 @@ export interface ConflictReviewRow {
 export interface ConflictModalBaseProps<T extends string = string> {
   open: boolean;
   title: string;
-  description?: string;
+  description?: React.ReactNode;
+  /**
+   * Node rendered after the server revision span in the description branch.
+   * Additive (V1.73): lets domain variants append a trailing clause (e.g. the
+   * World KB promote-candidate "while you were about to … it" tail) without
+   * changing the existing Strategy/Outline descriptions. Existing callers omit
+   * it, so their rendered body is unchanged.
+   */
+  descriptionSuffix?: React.ReactNode;
   currentRevision: number;
   revisionLabel?: string;
   serverSectionTitle?: string;
@@ -50,6 +58,7 @@ export function ConflictModalBase<T extends string = string>({
   open,
   title,
   description,
+  descriptionSuffix,
   currentRevision,
   revisionLabel = 'Server revision is now',
   serverSectionTitle = 'What changed on the server',
@@ -150,7 +159,8 @@ export function ConflictModalBase<T extends string = string>({
             {description ? (
               <p className="mt-1 text-copy-14 text-gray-900">
                 {description}{' '}
-                <span className="font-mono">{currentRevision}</span>.
+                <span className="font-mono">{currentRevision}</span>
+                {descriptionSuffix ? <>{descriptionSuffix}</> : '.'}
               </p>
             ) : (
               <p className="mt-1 text-copy-14 text-gray-900">

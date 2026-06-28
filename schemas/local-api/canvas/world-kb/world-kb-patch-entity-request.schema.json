@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/canvas/world-kb/world-kb-patch-entity-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus PatchWorldKbEntityRequest",
+  "description": "Request body for POST /v1/local/worlds/{world_id}/kb/patch-entity (V1.73). Edits an entity (KeyBlock) title/body/aliases/block_type with per-row OCC on kb_key_blocks.revision.",
+  "type": "object",
+  "required": ["entity_id", "expected_version", "patch"],
+  "properties": {
+    "entity_id": { "type": "string", "description": "KeyBlock id from the URL world scope. Authoritative identifier." },
+    "expected_version": { "type": "integer", "minimum": 0, "description": "Per-row version observed by the client on the last canonical read (kb_key_blocks.revision, NULL normalized to 0)." },
+    "patch": { "$ref": "world-kb-entity-patch.schema.json", "description": "Fields to update. At least one property must be provided." },
+    "idempotency_key": { "type": "string", "description": "Optional idempotency key (reserved; V1.73 accepts and ignores)." }
+  },
+  "additionalProperties": false
+}

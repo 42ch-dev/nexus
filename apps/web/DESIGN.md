@@ -209,6 +209,24 @@ components:
     canvas-outline-foreshadow-edge: "#A78BFA"
     canvas-outline-timeline-marker: "#0EA5E9"
     canvas-outline-conflict-marker: "#EF4444"
+    # V1.73 World KB canvas-write tokens — concrete light values (locked names, verbatim; 17 tokens)
+    canvas-worldkb-entity-card-fill-default: "#FFFFFF"
+    canvas-worldkb-entity-card-fill-hover: "#F5F5F5"
+    canvas-worldkb-entity-card-fill-selected: "#EBF2FF"
+    canvas-worldkb-entity-card-stroke-default: "rgba(0,0,0,0.14)"
+    canvas-worldkb-entity-card-stroke-selected: "{colors.blue-700}"
+    canvas-worldkb-promotion-pending: "#F59E0B"
+    canvas-worldkb-promotion-confirmed: "#10B981"
+    canvas-worldkb-promotion-rejected: "#EF4444"
+    canvas-worldkb-promotion-merged: "#8B5CF6"
+    canvas-worldkb-source-anchor-edge: "#A78BFA"
+    canvas-worldkb-source-anchor-node: "#EDE9FE"
+    canvas-worldkb-computable-badge: "#0EA5E9"
+    canvas-worldkb-conflict-marker: "#EF4444"
+    canvas-worldkb-conflict-marker-fill: "rgba(239,68,68,0.10)"
+    canvas-worldkb-nonspatial-row-highlight: "#F5F5F4"
+    canvas-worldkb-focus-ring: "{colors.blue-700}"
+    canvas-worldkb-relationship-edge: "#94A3B8"
 ---
 
 # Nexus Local Web UI Design System
@@ -459,6 +477,30 @@ The V1.72 outline/timeline canvas-write tokens extend `components.canvas` with c
 | `canvas-outline-foreshadow-edge` | Foreshadow edge color/weight | `#A78BFA` | `#C4B5FD` | `stroke: var(--color-canvas-outline-foreshadow-edge); stroke-width: 1.5px;` |
 | `canvas-outline-timeline-marker` | Timeline lane marker color | `#0EA5E9` | `#38BDF8` | `background: var(--color-canvas-outline-timeline-marker);` |
 | `canvas-outline-conflict-marker` | Outline-specific conflict marker (distinct from `canvas-write-conflict`) | `#EF4444` | `#F87171` | `color: var(--color-canvas-outline-conflict-marker);` |
+
+### World KB Canvas Tokens (V1.73)
+
+The V1.73 World KB canvas-write tokens extend `components.canvas` with concrete light + dark values for entity-card fills/strokes, promotion-state lifecycle badges (pending/confirmed/rejected/merged), source-anchor provenance, computable-state, conflict markers, the non-spatial alternate view, the focus ring, and the read-only relationship edge. Token names are frozen verbatim across the compass Phase 2b architect lock, docs, and the design system (V1.69→V1.73 preservation invariant). Promotion-state colors reuse the established semantic mapping (pending=amber, confirmed=green, rejected=red, merged=purple) so state is not color-only — badges also carry a text label and the selected card pairs `canvas-worldkb-entity-card-stroke-selected` with the global focus ring.
+
+| Token | Purpose | Light | Dark | Example |
+| --- | --- | --- | --- | --- |
+| `canvas-worldkb-entity-card-fill-default` | Entity card default fill | `#FFFFFF` | `#1A1A1A` | `background: var(--color-canvas-worldkb-entity-card-fill-default);` |
+| `canvas-worldkb-entity-card-fill-hover` | Entity card hover fill | `#F5F5F5` | `#2A2A2A` | `background: var(--color-canvas-worldkb-entity-card-fill-hover);` |
+| `canvas-worldkb-entity-card-fill-selected` | Entity card selected fill | `#EBF2FF` | `rgba(82,168,255,0.14)` | `background: var(--color-canvas-worldkb-entity-card-fill-selected);` |
+| `canvas-worldkb-entity-card-stroke-default` | Entity card default border | `rgba(0,0,0,0.14)` | `rgba(255,255,255,0.18)` | `border: 1px solid var(--color-canvas-worldkb-entity-card-stroke-default);` |
+| `canvas-worldkb-entity-card-stroke-selected` | Entity card selected border | `{colors.blue-700}` | `{colors.blue-700}` | `border: 1px solid var(--color-canvas-worldkb-entity-card-stroke-selected);` |
+| `canvas-worldkb-promotion-pending` | Pending candidate lifecycle badge | `#F59E0B` | `#FBBF24` | `background: var(--color-canvas-worldkb-promotion-pending);` |
+| `canvas-worldkb-promotion-confirmed` | Confirmed entity lifecycle badge | `#10B981` | `#34D399` | `background: var(--color-canvas-worldkb-promotion-confirmed);` |
+| `canvas-worldkb-promotion-rejected` | Rejected candidate lifecycle badge | `#EF4444` | `#F87171` | `background: var(--color-canvas-worldkb-promotion-rejected);` |
+| `canvas-worldkb-promotion-merged` | Merged entity lifecycle badge | `#8B5CF6` | `#A78BFA` | `background: var(--color-canvas-worldkb-promotion-merged);` |
+| `canvas-worldkb-source-anchor-edge` | Source-anchor provenance edge stroke | `#A78BFA` | `#C4B5FD` | `stroke: var(--color-canvas-worldkb-source-anchor-edge);` |
+| `canvas-worldkb-source-anchor-node` | Source-anchor node fill | `#EDE9FE` | `#2A2440` | `fill: var(--color-canvas-worldkb-source-anchor-node);` |
+| `canvas-worldkb-computable-badge` | Computable-state badge fill | `#0EA5E9` | `#38BDF8` | `background: var(--color-canvas-worldkb-computable-badge);` |
+| `canvas-worldkb-conflict-marker` | World KB conflict marker stroke | `#EF4444` | `#F87171` | `color: var(--color-canvas-worldkb-conflict-marker);` |
+| `canvas-worldkb-conflict-marker-fill` | World KB conflict marker background | `rgba(239,68,68,0.10)` | `rgba(248,113,113,0.12)` | `background: var(--color-canvas-worldkb-conflict-marker-fill);` |
+| `canvas-worldkb-nonspatial-row-highlight` | Non-spatial alternate view row highlight | `#F5F5F4` | `#1F1F1E` | `background: var(--color-canvas-worldkb-nonspatial-row-highlight);` |
+| `canvas-worldkb-focus-ring` | Entity card focus ring color | `{colors.blue-700}` | `{colors.blue-700}` | `box-shadow: 0 0 0 2px var(--color-canvas-worldkb-focus-ring);` |
+| `canvas-worldkb-relationship-edge` | Relationship edge stroke (read-only until V1.74) | `#94A3B8` | `#64748B` | `stroke: var(--color-canvas-worldkb-relationship-edge);` |
 
 ---
 

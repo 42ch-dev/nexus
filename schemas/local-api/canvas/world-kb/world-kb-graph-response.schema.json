@@ -1,0 +1,27 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/canvas/world-kb/world-kb-graph-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus WorldKbGraphResponse",
+  "description": "Read projection for GET /v1/local/worlds/{world_id}/kb/graph (V1.73). Entities + source-anchor provenance edges. `relationships` is always empty in V1.73 (no kb_relationships table until V1.74); derived reference edges render read-only from source_anchors.",
+  "type": "object",
+  "required": ["entities", "source_anchors", "relationships"],
+  "properties": {
+    "entities": {
+      "type": "array",
+      "items": { "$ref": "world-kb-entity-projection.schema.json" },
+      "description": "All non-deleted KeyBlock entities in the World (confirmed + pending + manual)."
+    },
+    "source_anchors": {
+      "type": "array",
+      "items": { "$ref": "world-kb-source-anchor-projection.schema.json" },
+      "description": "Provenance edges derived from kb_source_anchors."
+    },
+    "relationships": {
+      "type": "array",
+      "items": { "type": "object" },
+      "description": "Reserved for V1.74 typed relationship edges. Always empty in V1.73."
+    }
+  },
+  "additionalProperties": false
+}
