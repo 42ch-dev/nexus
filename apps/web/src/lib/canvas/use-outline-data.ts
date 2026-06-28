@@ -53,6 +53,7 @@ export function usePatchOutlineStructure(workId: string | undefined) {
       client.patchOutlineStructure(workId!, request),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.outline.detail(workId ?? '') });
+      void qc.invalidateQueries({ queryKey: queryKeys.chapters.lists() });
     },
     onError: (error) => errorToast(error, 'Could not update outline structure'),
   });
@@ -66,8 +67,12 @@ export function usePatchOutlineChapter(workId: string | undefined) {
   return useMutation({
     mutationFn: ({ chapter, request }: { chapter: number; request: OutlinePatchChapterRequest }) =>
       client.patchOutlineChapter(workId!, chapter, request),
-    onSuccess: () => {
+    onSuccess: (_data, variables) => {
       void qc.invalidateQueries({ queryKey: queryKeys.outline.detail(workId ?? '') });
+      void qc.invalidateQueries({ queryKey: queryKeys.chapters.lists() });
+      void qc.invalidateQueries({
+        queryKey: queryKeys.chapters.detail(workId ?? '', variables.chapter),
+      });
     },
     onError: (error) => errorToast(error, 'Could not update chapter'),
   });
