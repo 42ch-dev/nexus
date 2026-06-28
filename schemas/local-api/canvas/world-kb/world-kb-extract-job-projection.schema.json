@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/canvas/world-kb/world-kb-extract-job-projection.schema.json",
+  "schema_version": 1,
+  "title": "Nexus WorldKbExtractJobProjection",
+  "description": "Extract-job projection returned after a promotion action (V1.73). `version` maps to kb_extract_jobs.version CAS column.",
+  "type": "object",
+  "required": ["job_id", "world_id", "status", "version"],
+  "properties": {
+    "job_id": { "type": "string", "description": "Extract job id." },
+    "world_id": { "type": "string" },
+    "status": { "type": "string", "description": "Job lifecycle status." },
+    "version": { "type": "integer", "minimum": 0, "description": "Per-row OCC version (kb_extract_jobs.version)." },
+    "candidate_ids": { "type": "array", "items": { "type": "string" }, "description": "Remaining candidate key_block_ids attached to the job." },
+    "updated_at": { "type": "string" }
+  },
+  "additionalProperties": false
+}

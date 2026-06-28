@@ -305,6 +305,31 @@ fn canvas_outline_routes() -> Router<WorkspaceState> {
         )
 }
 
+/// Canvas World KB write-boundary routes (V1.73 Track A).
+///
+/// Four World KB routes under `/v1/local/worlds/{world_id}/kb/*`. Per-row OCC
+/// on `kb_key_blocks.revision` (entity edits) and `kb_extract_jobs.version`
+/// (promotion) — no new migration.
+fn world_kb_routes() -> Router<WorkspaceState> {
+    Router::new()
+        .route(
+            "/v1/local/worlds/{world_id}/kb/patch-entity",
+            post(handlers::world_kb::patch_entity),
+        )
+        .route(
+            "/v1/local/worlds/{world_id}/kb/promote-candidate",
+            post(handlers::world_kb::promote_candidate),
+        )
+        .route(
+            "/v1/local/worlds/{world_id}/kb/graph",
+            get(handlers::world_kb::get_graph),
+        )
+        .route(
+            "/v1/local/worlds/{world_id}/kb/candidates",
+            get(handlers::world_kb::get_candidates),
+        )
+}
+
 /// Works routes — Work CRUD + inspiration + reconcile-chapters (V1.33 §7.2, V1.36 §8).
 ///
 /// Also includes findings sub-routes (V1.39 P1) merged into the same router
@@ -445,6 +470,7 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
         .merge(works_routes())
         .merge(narrative_routes())
         .merge(strategy_routes())
+        .merge(world_kb_routes())
         // Legacy creators list & references
         .route("/v1/local/creators", get(handlers::creators::list))
         .route("/v1/local/references", get(handlers::references::list))

@@ -1,0 +1,28 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/canvas/world-kb/world-kb-entity-projection.schema.json",
+  "schema_version": 1,
+  "title": "Nexus WorldKbEntityProjection",
+  "description": "Flat wire projection of a World KB KeyBlock entity for canvas graph + inspector surfaces (V1.73). `version` maps to the SQLite per-row OCC column (kb_key_blocks.revision, NULL-normalized to 0).",
+  "type": "object",
+  "required": ["key_block_id", "world_id", "block_type", "canonical_name", "status", "version"],
+  "properties": {
+    "key_block_id": { "type": "string", "description": "KeyBlock identifier." },
+    "world_id": { "type": "string", "description": "Owning World identifier." },
+    "block_type": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/BlockType",
+      "description": "Entity content type (entity-scope-model §5.1.1)."
+    },
+    "canonical_name": { "type": "string", "minLength": 1, "description": "Display title / canonical name." },
+    "status": {
+      "type": "string",
+      "description": "Promotion lifecycle state: pending | confirmed | rejected | merged | manual | deleted (entity-scope-model §5.5)."
+    },
+    "version": { "type": "integer", "minimum": 0, "description": "Per-row OCC revision (kb_key_blocks.revision, NULL normalized to 0)." },
+    "body": { "type": "object", "description": "KeyBlock body JSON (summary/attributes/tags/state/computable) when present." },
+    "aliases": { "type": "array", "items": { "type": "string" }, "description": "Alias names for the entity." },
+    "source_anchor_count": { "type": "integer", "minimum": 0, "description": "Number of source-anchor provenance edges referencing this entity." },
+    "updated_at": { "type": "string", "description": "ISO-8601 timestamp of last mutation." }
+  },
+  "additionalProperties": false
+}

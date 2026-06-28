@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/canvas/world-kb/world-kb-entity-patch.schema.json",
+  "schema_version": 1,
+  "title": "Nexus WorldKbEntityPatch",
+  "description": "Field set for world_kb.patch_entity (V1.73). `title` maps to kb_key_blocks.canonical_name; `body` to body_json; `block_type` re-classifies the entity (entity-scope-model §5.1.1). At least one property must be provided.",
+  "type": "object",
+  "properties": {
+    "title": { "type": "string", "minLength": 1, "maxLength": 200, "description": "New canonical_name (display title)." },
+    "body": { "type": "object", "description": "Replacement KeyBlock body JSON (summary/attributes/tags/state/computable)." },
+    "aliases": { "type": "array", "items": { "type": "string" }, "description": "Replacement alias list." },
+    "block_type": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/BlockType",
+      "description": "Re-classify the entity. Must be a valid BlockType (entity-scope-model §5.1.1)."
+    }
+  },
+  "additionalProperties": false
+}
