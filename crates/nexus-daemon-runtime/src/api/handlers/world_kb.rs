@@ -236,15 +236,13 @@ pub async fn patch_entity(
     // Authorization: creator owns the world.
     require_world_owner(pool, &world_id, &creator_id).await?;
 
-    // Manual-state invariant: manual/direct-insert entities bypass promotion
-    // and are edited here. Terminal promotion statuses (pending candidates)
-    // must go through promote-candidate, not patch-entity.
-    if kb.status == "pending" {
+    // Editability invariant: deleted entities are terminal and cannot be
+    // patched. (Pending candidates live on kb_extract_jobs, not
+    // kb_key_blocks — they are promoted via promote-candidate, not edited
+    // here.) 'merged' entities remain editable to allow post-merge cleanup.
+    if kb.status == "deleted" {
         return Err(NexusApiError::world_kb_validation_failed(
-            &[
-                "pending candidates must be promoted via promote-candidate, not patch-entity"
-                    .to_string(),
-            ],
+            &["deleted entities are terminal and cannot be patched".to_string()],
             &[],
         ));
     }
@@ -429,16 +427,19 @@ pub async fn promote_candidate(
     }
 }
 
-/// Adopt: parse `proposed_payload` → confirmed `KeyBlock`; atomic insert + CAS flip.
-async fn promote_adopt(
-    state: &WorkspaceState,
-    world_id: &str,
+/// Resolved adopt inputs (parsed payload + optional patch refinements).
+struct AdoptPlan {
+    body: KeyBlockBody,
+    block_type: nexus_contracts::BlockType,
+    canonical_name: String,
+}
+
+/// Parse the candidate `proposed_payload` and apply optional `patch`
+/// refinements (`title`/`body`/`aliases`/`block_type`) into a validated adopt plan.
+fn build_adopt_plan(
     candidate: &KbExtractPromotion,
     req: &WorldKbPromoteCandidateRequest,
-) -> Result<Json<WorldKbPromoteCandidateResponse>, NexusApiError> {
-    let pool = state.pool();
-    let store = kb_store::SqliteKbStore::with_validation_mode(pool.clone(), ValidationMode::Novel);
-
+) -> Result<AdoptPlan, NexusApiError> {
     let mut body: KeyBlockBody = serde_json::from_str(
         candidate.proposed_payload.as_deref().unwrap_or("{}"),
     )
@@ -446,7 +447,6 @@ async fn promote_adopt(
         code: "KB_PAYLOAD_INVALID".to_string(),
         message: format!("proposed_payload is not a valid KeyBlockBody: {e}"),
     })?;
-    // Apply optional patch refinements (title/body/aliases/block_type).
     let block_type = req
         .patch
         .as_ref()
@@ -473,21 +473,50 @@ async fn promote_adopt(
             })?;
         }
         if let Some(ref aliases) = p.aliases {
-            let mut value = serde_json::to_value(&body).unwrap_or_default();
-            if let Some(obj) = value.as_object_mut() {
-                let attrs = obj
-                    .entry("attributes")
-                    .or_insert_with(|| serde_json::json!({}));
-                attrs["aliases"] = serde_json::Value::Array(
-                    aliases
-                        .iter()
-                        .map(|a| serde_json::Value::String(a.clone()))
-                        .collect(),
-                );
-            }
-            body = serde_json::from_value(value).unwrap_or(body);
+            merge_aliases_into_body(&mut body, aliases);
         }
     }
+    Ok(AdoptPlan {
+        body,
+        block_type,
+        canonical_name,
+    })
+}
+
+/// Set `body.attributes.aliases` in place.
+fn merge_aliases_into_body(body: &mut KeyBlockBody, aliases: &[String]) {
+    let mut value = serde_json::to_value(&*body).unwrap_or_default();
+    if let Some(obj) = value.as_object_mut() {
+        let attrs = obj
+            .entry("attributes")
+            .or_insert_with(|| serde_json::json!({}));
+        attrs["aliases"] = serde_json::Value::Array(
+            aliases
+                .iter()
+                .map(|a| serde_json::Value::String(a.clone()))
+                .collect(),
+        );
+    }
+    if let Ok(merged) = serde_json::from_value::<KeyBlockBody>(value) {
+        *body = merged;
+    }
+}
+
+/// Adopt: parse `proposed_payload` → confirmed `KeyBlock`; atomic insert + CAS flip.
+async fn promote_adopt(
+    state: &WorkspaceState,
+    world_id: &str,
+    candidate: &KbExtractPromotion,
+    req: &WorldKbPromoteCandidateRequest,
+) -> Result<Json<WorldKbPromoteCandidateResponse>, NexusApiError> {
+    let pool = state.pool();
+    let store = kb_store::SqliteKbStore::with_validation_mode(pool.clone(), ValidationMode::Novel);
+
+    let AdoptPlan {
+        body,
+        block_type,
+        canonical_name,
+    } = build_adopt_plan(candidate, req)?;
 
     validate_canonical_name(&canonical_name)
         .map_err(|e| NexusApiError::world_kb_validation_failed(&[e.to_string()], &[]))?;
