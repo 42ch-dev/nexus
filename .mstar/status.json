@@ -1,125 +1,58 @@
 {
   "version": 1,
-  "updated_at": "2026-06-28T19:30:00Z",
-  "plans": [
-    {
-      "plan_id": "2026-06-28-v1.73-compass-and-plan",
-      "iteration_id": "V1.73",
-      "status": "Done",
-      "owner": "project-manager",
-      "effort": "S",
-      "type": "prepare",
-      "working_branch": "iteration/v1.73",
-      "merge_target": "iteration/v1.73",
-      "task_category": "docs",
-      "wire_contracts_changed": false,
-      "depends_on": []
-    },
-    {
-      "plan_id": "2026-06-28-v1.73-canvas-world-kb-beta",
-      "iteration_id": "V1.73",
-      "status": "Todo",
-      "owner": "frontend-dev,fullstack-dev",
-      "effort": "L",
-      "type": "implement",
-      "working_branch": "feature/v1.73-canvas-world-kb-beta",
-      "merge_target": "iteration/v1.73",
-      "task_category": "visual",
-      "wire_contracts_changed": true,
-      "depends_on": [
-        "2026-06-28-v1.73-compass-and-plan"
-      ]
-    },
-    {
-      "plan_id": "2026-06-28-v1.73-outline-hardening-and-release",
-      "iteration_id": "V1.73",
-      "status": "Todo",
-      "owner": "fullstack-dev,frontend-dev,ops-engineer",
-      "effort": "M",
-      "type": "implement",
-      "working_branch": "feature/v1.73-outline-hardening-and-release",
-      "merge_target": "iteration/v1.73",
-      "task_category": "logic",
-      "wire_contracts_changed": false,
-      "depends_on": [
-        "2026-06-28-v1.73-compass-and-plan"
-      ]
-    },
-    {
-      "plan_id": "2026-06-28-v1.73-closure",
-      "iteration_id": "V1.73",
-      "status": "Todo",
-      "owner": "project-manager",
-      "effort": "S",
-      "type": "closure",
-      "working_branch": "iteration/v1.73",
-      "merge_target": "iteration/v1.73",
-      "task_category": "docs",
-      "wire_contracts_changed": false,
-      "depends_on": [
-        "2026-06-28-v1.73-canvas-world-kb-beta",
-        "2026-06-28-v1.73-outline-hardening-and-release"
-      ]
-    }
-  ],
+  "updated_at": "2026-06-28T20:00:00Z",
+  "plans": [],
   "metadata": {
     "integration_branch": "iteration/v1.73",
     "integration_branch_retired": false,
     "last_integration_branch": "iteration/v1.72",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.73",
-    "latest_active_compass": "v1.73-canvas-world-kb-beta-and-outline-hardening-compass-v1.md",
+    "latest_active_iteration": "V1.74 (pending /iteration-start)",
+    "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.72",
-      "compass": "v1.72-canvas-outline-timeline-beta-and-hygiene-compass-v1.md",
+      "iteration": "V1.73",
+      "compass": "v1.73-canvas-world-kb-beta-and-outline-hardening-compass-v1.md",
       "shipped_at": "2026-06-28",
       "plan_count": 4,
       "plan_count_done": 4,
       "wire_contracts_changed": true,
-      "wire_contracts_note": "V1.72 Track A: new Local API DTOs for outline.patch_structure / outline.patch_chapter / timeline.patch_event + outlineRevision + conflict error; @42ch/nexus-contracts 0.7.0 → 0.8.0. Track B: no wire change.",
-      "profile_b_compaction": "done (V1.72 P-last closure)",
+      "wire_contracts_note": "V1.73 Track A: new Local API DTOs for world_kb.patch_entity / world_kb.promote_candidate + graph/candidates read + conflict/validation errors; @42ch/nexus-contracts 0.8.0 → 0.9.0. Track B: no wire change.",
+      "profile_b_compaction": "done (V1.73 P-last closure)",
       "plan_ids": [
-        "2026-06-28-v1.72-compass-and-plan",
-        "2026-06-28-v1.72-canvas-outline-timeline-beta",
-        "2026-06-28-v1.72-hygiene-and-release-hardening",
-        "2026-06-28-v1.72-closure"
+        "2026-06-28-v1.73-compass-and-plan",
+        "2026-06-28-v1.73-canvas-world-kb-beta",
+        "2026-06-28-v1.73-outline-hardening-and-release",
+        "2026-06-28-v1.73-closure"
       ],
-      "merge_commit": "pending-V1.72-PR-merge",
+      "merge_commit": "pending-V1.73-PR-merge",
       "residual_summary": {
-        "closed_in_v172": 6,
-        "deferred_to_v173": 14,
-        "open_post_v172": 13
+        "closed_in_v173": 7,
+        "deferred_to_v174": 12,
+        "open_post_v173": 12
       }
     },
     "tech_debt_summary": {
-      "total_open": 13,
-      "total_deferred": 14,
-      "total_resolved": 253,
+      "total_open": 12,
+      "total_deferred": 0,
+      "total_resolved": 260,
       "total_archived": 0,
       "by_severity_active": {
-        "medium": 5,
-        "low": 8
+        "low": 12
       },
       "by_target_active": {
-        "V1.73 canvas-outline-split backlog": 1,
-        "V1.73 hygiene backlog": 11,
-        "V1.73 release hardening backlog": 1
+        "V1.74 hygiene backlog (plan-id tbd-v1.74-hygiene)": 12
       },
       "by_plan_active": {
-        "v1.65": 1,
-        "2026-06-27-v1.71-canvas-strategy-write-boundary": 2,
-        "2026-06-27-v1.71-hygiene-and-sign-groundwork": 4,
-        "2026-06-28-v1.72-canvas-outline-timeline-beta": 5,
-        "2026-06-28-v1.72-hygiene-and-release-hardening": 1
+        "2026-06-28-v1.73-canvas-world-kb-beta": 3
       },
-      "refreshed_at": "2026-06-28T14:06:00Z",
-      "refreshed_reason": "V1.72 greploop complete: 5 Greptile findings closed (R-V172-GREPTILE-001 to -005) at PR #98 merge commit e41392a1; Greptile 5/5 confidence with all review threads resolved."
+      "refreshed_at": "2026-06-28T19:30:00Z",
+      "refreshed_reason": "V1.73 closure: 7 V1.72 residuals resolved (P1 B1-B7); 9 hygiene re-targeted to V1.74; 3 new V1.73 QC suggestions (qc1 F-S1/S2/S3) deferred to V1.74."
     },
-    "updated_at": "2026-06-28T19:30:00Z",
+    "updated_at": "2026-06-28T20:00:00Z",
     "spec_integration_branch": "iteration/v1.73",
     "wave1_merged_at": null
   },
@@ -4086,9 +4019,10 @@
         "scope": "apps/web chapters-page",
         "decision": "defer",
         "target_iteration": "V1.72",
-        "target": "V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene)",
+        "target": "V1.74 hygiene backlog (plan-id tbd-v1.74-hygiene)",
         "notes": "Deferred from V1.71 Track B: chapter virtualization requires @tanstack/react-virtual dependency + table restructuring; no real large-chapter dataset available in V1.71 to validate. Scheduled for V1.72 hygiene or outline+timeline canvas pivot.",
-        "note": "V1.72 deferred to V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene) per compass §5 V1.73 deferrals table."
+        "note": "V1.72 deferred to V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene) per compass §5 V1.73 deferrals table.",
+        "target_date": "V1.74"
       },
       {
         "id": "R-V165-QC-SUGG-DEFENSE",
@@ -4803,8 +4737,8 @@
         "scope": "apps/web/src/components/canvas/strategy-canvas.tsx; apps/web/src/lib/nexus/browser-client.test.ts",
         "decision": "defer",
         "owner": "@frontend-dev + @qa-engineer",
-        "target": "V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene)",
-        "target_date": "2026-06-28",
+        "target": "V1.74 hygiene backlog (plan-id tbd-v1.74-hygiene)",
+        "target_date": "V1.74",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.71-canvas-strategy-write-boundary][R-V171P0-QC1-008]",
         "note": "Still open. The ConflictModal now has 8 component tests and the canvas auto-refetches on conflict, but there is no automated test that submits an edit through StrategyCanvas and verifies query invalidation/refetch. Add a focused component or e2e test before closing. | V1.72 deferred to V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene) per compass §5 V1.73 deferrals table.",
         "lifecycle": "open"
@@ -4839,8 +4773,8 @@
         "scope": ".mstar/plans/2026-06-27-v1.71-canvas-strategy-write-boundary.md A1; packages/nexus-contracts/src/generated/local-api/canvas/strategy/",
         "decision": "defer",
         "owner": "@project-manager or @architect",
-        "target": "V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene)",
-        "target_date": "2026-06-28",
+        "target": "V1.74 hygiene backlog (plan-id tbd-v1.74-hygiene)",
+        "target_date": "V1.74",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.71-canvas-strategy-write-boundary][R-V171P0-QC1-010]",
         "note": "Still open. The plan and compass still state that generated TypeScript output lives under apps/web/src/api-types/canvas/, but the actual generated TS is in packages/nexus-contracts/src/generated/ and is consumed via the workspace package. apps/web/src/api-types/ does not exist. Update the plan, compass, and any spec references to match the actual architecture. | V1.72 deferred to V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene) per compass §5 V1.73 deferrals table.",
         "lifecycle": "open"
@@ -4912,8 +4846,8 @@
         "scope": "apps/nexus42/src/commands/daemon_run.rs module doc; crates/nexus-daemon-runtime/src/boot.rs try_init comment",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene)",
-        "target_date": "V1.72",
+        "target": "V1.74 hygiene backlog (plan-id tbd-v1.74-hygiene)",
+        "target_date": "V1.74",
         "tracking_link": ".mstar/plans/reports/2026-06-27-v1.71-hygiene-and-sign-groundwork/qc1.md",
         "note": "start_daemon now spawns 'daemon-run' directly (commit 835e4762). The module-level comments in daemon_run.rs and boot.rs still describe the old '__internal daemon-run' invocation. Pure doc drift; no runtime impact. | V1.72 deferred to V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene) per compass §5 V1.73 deferrals table.",
         "lifecycle": "open"
@@ -4930,7 +4864,13 @@
         "target_date": "V1.72",
         "tracking_link": ".mstar/plans/reports/2026-06-27-v1.71-hygiene-and-sign-groundwork/qc1.md",
         "note": "Tauri docs say APPLE_SIGNING_IDENTITY overwrites tauri.conf.json > bundle > macOS > signingIdentity, so the env-var path works. However, explicitly setting signingIdentity:null reads as 'signing disabled' and may confuse maintainers. Either omit the key or add a comment explaining the env-var override. Non-blocking; signed build still functions when secrets are present. | V1.72 deferred to V1.73 release hardening backlog (plan-id tbd-v1.73-release-hardening) per compass §5 V1.73 deferrals table.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28",
+        "closure_note": "V1.73 P1 B6 tauri signing clarity — fixed.",
+        "resolution": {
+          "plan_id": "2026-06-28-v1.73-outline-hardening-and-release",
+          "commit": "fe5c4bc3"
+        }
       },
       {
         "id": "R-V171P1-QC3-001",
@@ -4961,8 +4901,8 @@
         "scope": "apps/web/src/pages/chapter-page.tsx line 70",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene)",
-        "target_date": "V1.72",
+        "target": "V1.74 hygiene backlog (plan-id tbd-v1.74-hygiene)",
+        "target_date": "V1.74",
         "tracking_link": ".mstar/plans/reports/2026-06-27-v1.71-hygiene-and-sign-groundwork/qc1.md",
         "note": "const canEditOutline = chapter.data?.can_edit_outline ?? true; falls back to editable if the API omits the field. Backend always populates it today, but defense-in-depth would default to false or validate the contract shape at the API boundary. Non-blocking for P1 approval. | V1.72 deferred to V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene) per compass §5 V1.73 deferrals table.",
         "lifecycle": "open"
@@ -5011,9 +4951,10 @@
         "scope": "apps/web/src/components/canvas/use-strategy-data.ts",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene)",
+        "target": "V1.74 hygiene backlog (plan-id tbd-v1.74-hygiene)",
         "note": "usePatchStrategyState's success toast description uses args.stateId (the old ID) rather than the new label after a rename, so the user sees a description referring to the old name even though the state now has the new label. Cosmetic only — data integrity is correct. R-V171-GREPTILE-POST5. | V1.72 deferred to V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene) per compass §5 V1.73 deferrals table.",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "target_date": "V1.74"
       },
       {
         "id": "R-V171-GREPTILE-POST5-ROLLBACK-ATOMIC",
@@ -5023,9 +4964,10 @@
         "scope": "crates/nexus-daemon-runtime/src/api/handlers/strategy.rs::rollback_template_write",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene)",
+        "target": "V1.74 hygiene backlog (plan-id tbd-v1.74-hygiene)",
         "note": "rollback_template_write restores the previous template bytes via std::fs::write after a validation failure, which is non-atomic. A process crash mid-rollback could leave the template truncated while the YAML revision was already restored. Note: the rollback path is only reachable on validation failure (very rare), and the primary write path is now atomic via atomic_write_with_dir_fsync. Cosmetic defence-in-depth for the failure path. R-V171-GREPTILE-POST5. | V1.72 deferred to V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene) per compass §5 V1.73 deferrals table.",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "target_date": "V1.74"
       }
     ],
     "2026-06-28-v1.72-canvas-outline-timeline-beta": [
@@ -5116,7 +5058,13 @@
         "target": "V1.73 plan: tbd-v1.73-canvas-outline-split",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-canvas-outline-timeline-beta][R-V172P0-QC1-002]",
         "note": "PM accepts as V1.72 β trade-off. Project pattern established by P1 B2 (strategy-canvas split into 7 modules ≤200 lines). Mirror split for outline-canvas in V1.73 follow-up before β label is removed. | V1.72 deferred to V1.73 canvas-outline-split backlog.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28",
+        "closure_note": "V1.73 P1 B5 outline-canvas.tsx split — fixed.",
+        "resolution": {
+          "plan_id": "2026-06-28-v1.73-outline-hardening-and-release",
+          "commit": "f71ea472"
+        }
       },
       {
         "id": "R-V172P0-QC3-004",
@@ -5126,10 +5074,11 @@
         "scope": "apps/web/src/lib/nexus/adapter-contract.test.ts:126-160; types.ts:209-227",
         "decision": "defer",
         "owner": "frontend-dev",
-        "target": "V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene)",
+        "target": "V1.74 hygiene backlog (plan-id tbd-v1.74-hygiene)",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-canvas-outline-timeline-beta][R-V172P0-QC3-004]",
         "note": "Test drift; runtime parity likely OK (TauriClient inherits BrowserClient). Fix test count + path assertions to cover all NexusClient methods including new outline/timeline routes.",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "target_date": "V1.74"
       },
       {
         "id": "R-V172P0-QC2-001",
@@ -5142,7 +5091,13 @@
         "target": "V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene)",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-canvas-outline-timeline-beta][R-V172P0-QC2-001]",
         "note": "PM accepts as V1.72 β trade-off per qc2 own recommendation. Three warnings (slug format, volume existence, foreshadow order) are domain-validation completeness items explicitly listed in QC focus; \"simplify\" comments in code mark β scope. Slug regex (^[a-z0-9][a-z0-9_-]{0,63}$) + schema pattern in V1.73.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28",
+        "closure_note": "V1.73 P1 B1 slug format validation — fixed.",
+        "resolution": {
+          "plan_id": "2026-06-28-v1.73-outline-hardening-and-release",
+          "commit": "dd085713"
+        }
       },
       {
         "id": "R-V172P0-QC2-002",
@@ -5155,7 +5110,13 @@
         "target": "V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene)",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-canvas-outline-timeline-beta][R-V172P0-QC2-002]",
         "note": "PM accepts as V1.72 β trade-off. Volumes are derived (created on demand); pre-declared volume model is V1.73 product decision.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28",
+        "closure_note": "V1.73 P1 B2 volume existence — fixed.",
+        "resolution": {
+          "plan_id": "2026-06-28-v1.73-outline-hardening-and-release",
+          "commit": "dd085713"
+        }
       },
       {
         "id": "R-V172P0-QC2-003",
@@ -5168,7 +5129,13 @@
         "target": "V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene)",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-canvas-outline-timeline-beta][R-V172P0-QC2-003]",
         "note": "PM accepts as V1.72 β trade-off per code comment \"simplify: V1.72 does not yet implement full graph validation; ... leave acyclic / foreshadow-order checks for a future slice.\" V1.73 adds temporal guard.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28",
+        "closure_note": "V1.73 P1 B3 foreshadow temporal order — fixed.",
+        "resolution": {
+          "plan_id": "2026-06-28-v1.73-outline-hardening-and-release",
+          "commit": "dd085713"
+        }
       },
       {
         "id": "R-V172P0-QC2-004",
@@ -5181,7 +5148,13 @@
         "target": "V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene)",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-canvas-outline-timeline-beta][R-V172P0-QC2-004]",
         "note": "PM accepts as V1.72 β trade-off. Volume/timeline edits on published chapters allowed in β. Centralize ensure_not_published_for_structural_change helper in V1.73.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28",
+        "closure_note": "V1.73 P1 B4 published-chapter structural guard — fixed.",
+        "resolution": {
+          "plan_id": "2026-06-28-v1.73-outline-hardening-and-release",
+          "commit": "dd085713"
+        }
       }
     ],
     "2026-06-28-v1.72-hygiene-and-release-hardening": [
@@ -5233,10 +5206,11 @@
         "scope": "apps/web/src/components/canvas/strategy-canvas/inspectors/{state,edge,prompt}-inspector.tsx",
         "decision": "defer",
         "owner": "frontend-dev",
-        "target": "V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene)",
+        "target": "V1.74 hygiene backlog (plan-id tbd-v1.74-hygiene)",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-hygiene-and-release-hardening][R-V172P1-QC1-001]",
         "note": "PM accepts as cosmetic residual. Early-exit guards prevent actual double-saves. Fix in V1.73 (wrap handleSave in useCallback with proper deps, or use ref-based trigger pattern). Subsumed by R-V172P1-QC3-001 fix-wave which addresses root cause.",
-        "lifecycle": "open"
+        "lifecycle": "open",
+        "target_date": "V1.74"
       },
       {
         "id": "R-V172P1-QC3-003",
@@ -5249,7 +5223,13 @@
         "target": "V1.73 release hardening backlog (plan-id tbd-v1.73-release-hardening)",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-hygiene-and-release-hardening][R-V172P1-QC3-003]",
         "note": "Architectural preference; no correctness blocker. Add Swatinem/rust-cache to desktop-release.yml before first real signed release.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28",
+        "closure_note": "V1.73 P1 B7 desktop-release Rust cache — fixed.",
+        "resolution": {
+          "plan_id": "2026-06-28-v1.73-outline-hardening-and-release",
+          "commit": "d0bb9986"
+        }
       },
       {
         "id": "R-V172P1-QC3-004",
@@ -5366,6 +5346,44 @@
           "plan_id": "hotfix/v1.72-greptile-post5",
           "commit": "cc7dde17"
         }
+      }
+    ],
+    "2026-06-28-v1.73-canvas-world-kb-beta": [
+      {
+        "id": "R-V173QC1-S1",
+        "title": "Naming drift: JSON Schema title verb-prefix (PatchWorldKbEntityRequest) vs generated entity-prefix (WorldKbPatchEntityRequest); V1.71/V1.72 baseline is verb-prefix",
+        "severity": "low",
+        "source": "qc1 F-S1",
+        "scope": "schemas/local-api/canvas/world-kb/ titles vs generated names",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.74 hygiene backlog (plan-id tbd-v1.74-hygiene)",
+        "note": "Non-blocking; implementer documented choice. Reconcile naming convention at V1.74.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V173QC1-S2",
+        "title": "world-kb-canvas.tsx 546 lines with 4 inline sub-components; B5 split cap not applied to world-kb canvas (only outline)",
+        "severity": "low",
+        "source": "qc1 F-S2",
+        "scope": "apps/web/src/components/canvas/world-kb/world-kb-canvas.tsx",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.74 hygiene backlog (plan-id tbd-v1.74-hygiene)",
+        "note": "Mirror B5 split pattern for world-kb canvas at V1.74.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V173QC1-S3",
+        "title": "idempotency_key field wired through schema/DTO but unused in handlers (reserved, accepts+ignores)",
+        "severity": "low",
+        "source": "qc1 F-S3",
+        "scope": "World KB patch routes idempotency_key",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.74 hygiene backlog (plan-id tbd-v1.74-hygiene)",
+        "note": "Forward-compat debt; either wire idempotency or remove the field at V1.74.",
+        "lifecycle": "open"
       }
     ]
   }

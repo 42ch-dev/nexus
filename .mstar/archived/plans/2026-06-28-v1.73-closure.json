@@ -1,0 +1,21 @@
+{
+  "plan_id": "2026-06-28-v1.73-closure",
+  "archived_at": "2026-06-28",
+  "schema_version": 1,
+  "plan": {
+    "plan_id": "2026-06-28-v1.73-closure",
+    "iteration_id": "V1.73",
+    "status": "Done",
+    "owner": "project-manager",
+    "effort": "S",
+    "type": "closure",
+    "working_branch": "iteration/v1.73",
+    "merge_target": "iteration/v1.73",
+    "task_category": "docs",
+    "wire_contracts_changed": false,
+    "depends_on": [
+      "2026-06-28-v1.73-canvas-world-kb-beta",
+      "2026-06-28-v1.73-outline-hardening-and-release"
+    ]
+  }
+}

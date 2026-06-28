@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-06-27T00:00:00Z",
+  "updated_at": "2026-06-28T20:00:00Z",
   "entries": [
     {
       "at": "2026-06-27 (security remediation)",
@@ -302,6 +302,10 @@
       "at": "2026-06-25T02:30:00Z",
       "message": "V1.64 SHIPPED to iteration/v1.64 (PR open to main). Local Web UI Kickoff: Nexus goes CLI-only -> CLI + local Web UI. S-B dual track, 7 plans / 3 waves. Track A (apps/web React/Vite/TS/Tailwind/shadcn/TanStack Query SPA): P1 scaffold + DESIGN.md (Standard, light+dark) + NexusClient/BrowserClient/TauriClient adapter (Tauri-ready); P2 Control Room + Setup MVP (Works dashboard/detail, Sessions, Schedule, Capabilities, Findings, Work CRUD, Preset mgmt w/ validate dry-run) + F-P3/F-F1 adapters + W-1 error-envelope toasts + 30 vitest tests; P3 daemon serving (rust-embed static_assets.rs + SPA fallback at / + cache headers + daemon ui/web CLI). Track B (P0): closed 4 Local API prerequisites (Handler DTO drift R-V163P1-T6, F-E1 ErrorResponse, F-P1 Works cursor pre-1.0 breaking, F-P2 findings endpoint); @42ch/nexus-contracts 0.4.0->0.5.0. QC: Wave 1 qc1 Request Changes (W-1 error-envelope layering mismatch) -> fix-wave (errors.ts wrapped-envelope parse + convention 3.1) -> qc1 re-review Approve; qc2/qc3 Approve. Wave 2 qc1/qc2/qc3 Approve (qc3 host-glitch wrote to wrong path, relocated by PM). PM QA gate green both waves (web typecheck/build/test 30/30, clippy clean, drift clean). Integration merges clean both waves; no fix-wave needed Wave 2. Profile B compaction done (7 plans archived). Deferred to V1.65+: Tauri desktop shell, content-authoring UI (chapter rich-text lead), R-V164-FE1-ORCH (orchestration error-envelope), R-V164-QC1-CASING, R-V164-P2-G1/G2/G3 (scope gaps: work_profile field, preset full-CRUD routes, capability admission gates), R-V164-QC1-S1-P0 (PaginationInfo dedup w/ F-P3 sweep), SURF-003 (F-P3 items rename), SURF-005 (F-F1 sort). Wire contracts changed (pre-1.0 breaking Works/findings list shapes). Prepare was full PM grill-me (6 decisions) + @product-manager/@architect parallel reviewer pass + @writing-specialist pass.",
       "plan_id": "2026-06-24-v1.64-residual-convergence-and-closeout"
+    },
+    {
+      "at": "2026-06-28T20:00:00Z",
+      "message": "V1.73 SHIPPED to integration (PR pending to main). Canvas World KB β (Track A, L) + Outline β Hardening + Release Hardening (Track B, M), dual-track parallel. 4 plans all Done (P-1 prepare + P0 world-kb + P1 outline-hardening + P-last closure). Track A: Canvas World KB β — third canvas surface; 4 Local API routes (patch-entity + promote-candidate + graph + candidates) + per-row OCC on existing kb_key_blocks.revision (no migration; NULL→0 normalize) + @42ch/nexus-contracts 0.8.0→0.9.0 (additive) + canvas UI (graph projection + entity/promotion inspectors + KB-flavored conflict modal + non-spatial alternate view + 17 canvas-worldkb-* DESIGN.md tokens) + backend prerequisite (CLI-direct-DB→Local API promotion). Track B: 4 MEDIUM outline validation gaps (slug/volume/foreshadow/published) + outline-canvas.tsx 825→228-line split + tauri signing clarity + desktop Rust cache. QC tri-review 3/3 Approve (qc3 W-01 candidates cursor pagination fixed in fix-wave 35e4404e + revalidated 121a6797). QA Pass (162+ Rust tests, 191 web tests, clippy/fmt/codegen/validate-schemas all clean). 7 V1.72 residuals resolved; 12 deferred to V1.74 (9 hygiene + 3 QC suggestions, tbd-v1.74-hygiene); World KB relationships surface deferred (tbd-v1.74-world-kb-relationships — no kb_relationships table yet). Profile B compaction done (4 plans archived, plans-done.json 340). wire_contracts_changed: TRUE (Track A only)."
     }
   ]
 }

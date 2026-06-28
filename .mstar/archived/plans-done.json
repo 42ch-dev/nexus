@@ -335,7 +335,11 @@
     "2026-06-28-v1.72-compass-and-plan",
     "2026-06-28-v1.72-canvas-outline-timeline-beta",
     "2026-06-28-v1.72-hygiene-and-release-hardening",
-    "2026-06-28-v1.72-closure"
+    "2026-06-28-v1.72-closure",
+    "2026-06-28-v1.73-compass-and-plan",
+    "2026-06-28-v1.73-canvas-world-kb-beta",
+    "2026-06-28-v1.73-outline-hardening-and-release",
+    "2026-06-28-v1.73-closure"
   ],
   "iteration_summaries": {
     "v1.45": {
@@ -698,5 +702,5 @@
     "v1_50_iteration_complete": "yes — ready for PR to main",
     "v1_51_iteration_complete": "yes — shipped to main at c57b927bbf8621adf7ec59095d274f17f429c9b7 via PR #64 on 2026-06-19T07:52:26Z"
   },
-  "updated_at": "2026-06-27"
+  "updated_at": "2026-06-28"
 }
