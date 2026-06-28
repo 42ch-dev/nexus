@@ -124,6 +124,10 @@ const config: Config = {
           port: cv('canvas-port'),
           minimap: cv('canvas-minimap'),
           'strategy-accent': cv('canvas-strategy-accent'),
+          'write-dirty': cv('canvas-write-dirty'),
+          'write-conflict': cv('canvas-write-conflict'),
+          'write-success': cv('canvas-write-success'),
+          'write-stale-bg': cv('canvas-write-stale-bg'),
         },
       },
       fontFamily: {

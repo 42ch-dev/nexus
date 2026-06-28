@@ -39,6 +39,8 @@ opener = "0.7"
 tokio = { version = "1.35", features = ["sync", "time", "net", "rt", "macros"] }
 # Lightweight loopback health probe; reuses the same HTTP endpoint as the SPA.
 reqwest = { version = "0.12", features = ["json"] }
+# Observability for the sidecar lifecycle (backoff jitter, state transitions).
+tracing = "0.1"
 # Deterministic jitter for sidecar restart backoff (QC3-S5). Fast, no-std-friendly
 # PRNG already present in the Tauri dependency tree.
 fastrand = "2"

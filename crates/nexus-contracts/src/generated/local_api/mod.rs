@@ -1,3 +1,4 @@
+pub mod canvas;
 pub mod common;
 pub mod compute;
 pub mod creators;
@@ -9,6 +10,7 @@ pub mod schedule;
 pub mod works;
 pub mod workspace;
 
+pub use canvas::*;
 pub use common::*;
 pub use compute::*;
 pub use creators::*;

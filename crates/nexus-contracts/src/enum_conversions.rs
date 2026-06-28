@@ -2,6 +2,12 @@
 //!
 //! Provides `Display`, `as_str()`, and `FromStr` implementations for enum types
 //! generated from JSON Schema. This file extends generated types without modifying them.
+//!
+//! This is the project's hand-maintained extension surface for generated enums.
+//! When a JSON Schema adds or renames enum values, update this file in the same
+//! commit and verify with `cargo test -p nexus-contracts`. See
+//! `crates/nexus-contracts/AGENTS.md` for the full rule, and `tooling/codegen/`
+//! for the templates that produce the generated types.
 
 use crate::generated::common::common_types::{
     AccountStatus, AgentProfileStatus, BindingStatus, BlockType, CommandOrigin, CommandStatus,

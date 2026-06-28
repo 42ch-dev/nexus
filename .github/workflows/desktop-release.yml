@@ -14,6 +14,8 @@ permissions:
 
 env:
   SQLX_OFFLINE: "true"
+  # Release builds must be signed; the secret is required below.
+  APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
 
 jobs:
   desktop-release:
@@ -45,6 +47,13 @@ jobs:
 
       - name: Install pnpm dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Require signing identity for release
+        run: |
+          if [ -z "$APPLE_SIGNING_IDENTITY" ]; then
+            echo "APPLE_SIGNING_IDENTITY secret is required for release builds" >&2
+            exit 1
+          fi
 
       - name: Build contracts package
         run: pnpm --filter @42ch/nexus-contracts run build

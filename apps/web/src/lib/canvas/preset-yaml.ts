@@ -29,6 +29,12 @@ export interface PresetConditionalNext {
   default?: string;
 }
 
+/** Context-update hook attached to a state (orchestration-engine.md §7). */
+export interface PresetContextUpdate {
+  op?: { kind?: string };
+  template_file?: string;
+}
+
 /** One outer state-machine state — orchestration-engine.md §7.2. */
 export interface PresetState {
   id: string;
@@ -39,6 +45,8 @@ export interface PresetState {
   next?: string | PresetConditionalNext;
   converge?: { strategy?: ConvergeStrategy };
   terminal?: boolean;
+  /** Optional context-update hook (may carry a prompt `template_file`). */
+  context_update?: PresetContextUpdate;
 }
 
 /** A node inside an inner DAG — orchestration-engine.md §7.2 `inner_graphs`. */
@@ -71,6 +79,8 @@ export interface PresetManifest {
 
 export interface ParsedPreset {
   manifest: PresetManifest;
+  /** Bundle revision from the YAML `revision:` header (used for patch consistency). */
+  revision?: number;
   /** Non-fatal parse/validation problems (empty when clean). */
   problems: string[];
 }
@@ -121,6 +131,8 @@ export function parsePresetYaml(yaml: string): ParsedPreset {
 
   const innerGraphs = coerceInnerGraphs(obj.inner_graphs);
 
+  const revision = typeof obj.revision === 'number' ? obj.revision : undefined;
+
   const manifest: PresetManifest = {
     preset: {
       id,
@@ -138,7 +150,7 @@ export function parsePresetYaml(yaml: string): ParsedPreset {
     problems.push(`preset.initial references unknown state "${manifest.preset.initial}".`);
   }
 
-  return { manifest, problems };
+  return { manifest, revision, problems };
 }
 
 function coerceState(raw: unknown, index: number, problems: string[]): PresetState | null {
@@ -178,6 +190,7 @@ function coerceState(raw: unknown, index: number, problems: string[]): PresetSta
     next,
     converge,
     terminal: s.terminal === true,
+    context_update: coerceContextUpdate(s.context_update),
   };
 }
 
@@ -190,6 +203,18 @@ function coerceEnter(raw: unknown): PresetEnterTask | null {
     name: typeof e.name === 'string' ? e.name : undefined,
     args: e.args !== null && typeof e.args === 'object' ? (e.args as Record<string, unknown>) : undefined,
   };
+}
+
+function coerceContextUpdate(raw: unknown): PresetContextUpdate | undefined {
+  if (raw === null || typeof raw !== 'object') return undefined;
+  const c = raw as Record<string, unknown>;
+  const opRaw = c.op;
+  const op = opRaw !== null && typeof opRaw === 'object'
+    ? { kind: typeof (opRaw as Record<string, unknown>).kind === 'string' ? (opRaw as Record<string, unknown>).kind as string : undefined }
+    : undefined;
+  const templateFile = typeof c.template_file === 'string' ? c.template_file : undefined;
+  if (op === undefined && templateFile === undefined) return undefined;
+  return { op, template_file: templateFile };
 }
 
 function coerceNext(raw: unknown): PresetState['next'] {

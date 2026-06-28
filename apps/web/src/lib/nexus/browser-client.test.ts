@@ -274,3 +274,98 @@ describe('BrowserClient preset CRUD (V1.67 G2 promotion)', () => {
     await expect(client.deletePreset('my-strategy')).resolves.toBeUndefined();
   });
 });
+
+describe('BrowserClient Strategy canvas write boundary (V1.71)', () => {
+  it('patches a state label and description', async () => {
+    let receivedBody: unknown = null;
+    useHandlers(
+      http.post('/v1/local/strategies/:strategyId/states/:stateId/patch', async ({ request }) => {
+        receivedBody = await request.json();
+        return HttpResponse.json({
+          new_revision: 3,
+          validation_summary: { errors: [], warnings: [] },
+          side_effects: ["renamed state 'draft' -> 'outline'"],
+        });
+      }),
+    );
+
+    const client = new BrowserClient();
+    const res = await client.strategyPatchState('novel-writing', 'draft', {
+      strategy_id: 'novel-writing',
+      state_id: 'draft',
+      base_revision: 2,
+      set: { label: 'outline', description: 'Outline the story.' },
+    });
+    expect(receivedBody).toEqual({
+      strategy_id: 'novel-writing',
+      state_id: 'draft',
+      base_revision: 2,
+      set: { label: 'outline', description: 'Outline the story.' },
+    });
+    expect(res.new_revision).toBe(3);
+  });
+
+  it('rewires a transition target', async () => {
+    let receivedBody: unknown = null;
+    useHandlers(
+      http.post('/v1/local/strategies/:strategyId/transitions/patch', async ({ request }) => {
+        receivedBody = await request.json();
+        return HttpResponse.json({
+          new_revision: 4,
+          validation_summary: { errors: [], warnings: [] },
+          side_effects: ["transition draft -> revise set to edit"],
+        });
+      }),
+    );
+
+    const client = new BrowserClient();
+    const res = await client.strategyPatchTransition('novel-writing', {
+      strategy_id: 'novel-writing',
+      base_revision: 3,
+      source_state_id: 'draft',
+      old_target: 'revise',
+      new_target: 'edit',
+      transition_kind: 'next',
+    });
+    expect(receivedBody).toEqual({
+      strategy_id: 'novel-writing',
+      base_revision: 3,
+      source_state_id: 'draft',
+      old_target: 'revise',
+      new_target: 'edit',
+      transition_kind: 'next',
+    });
+    expect(res.new_revision).toBe(4);
+  });
+
+  it('writes a prompt template body', async () => {
+    let receivedBody: unknown = null;
+    useHandlers(
+      http.post('/v1/local/strategies/:strategyId/states/:stateId/prompt/patch', async ({ request }) => {
+        receivedBody = await request.json();
+        return HttpResponse.json({
+          new_revision: 5,
+          validation_summary: { errors: [], warnings: [] },
+          side_effects: ["wrote prompt template 'prompts/draft.md'"],
+        });
+      }),
+    );
+
+    const client = new BrowserClient();
+    const res = await client.strategyPatchPromptTemplate('novel-writing', 'draft', {
+      strategy_id: 'novel-writing',
+      state_id: 'draft',
+      base_revision: 4,
+      template_ref: 'prompts/draft.md',
+      set: { body: '# Draft prompt\n' },
+    });
+    expect(receivedBody).toEqual({
+      strategy_id: 'novel-writing',
+      state_id: 'draft',
+      base_revision: 4,
+      template_ref: 'prompts/draft.md',
+      set: { body: '# Draft prompt\n' },
+    });
+    expect(res.new_revision).toBe(5);
+  });
+});

@@ -58,6 +58,10 @@ import type {
   SessionDetailResponse,
   SignalScheduleRequest,
   SignalScheduleResponse,
+  StrategyPatchPromptTemplateRequest,
+  StrategyPatchResponse,
+  StrategyPatchStateRequest,
+  StrategyPatchTransitionRequest,
   UpdatePresetRequest,
   UpdatePresetResponse,
   ValidatePresetRequest,
@@ -158,6 +162,25 @@ export interface NexusClient {
   updatePreset(presetId: string, request: UpdatePresetRequest): Promise<UpdatePresetResponse>;
   /** `DELETE /v1/local/presets/{id}` — delete a user preset bundle; 204 No Content (V1.67 G2 promotion). */
   deletePreset(presetId: string): Promise<void>;
+
+  // ── Strategy canvas (V1.71 Track A) ───────────────────────────────────────
+  /** `POST /v1/local/strategies/{strategy_id}/states/{state_id}/patch` — patch a state. */
+  strategyPatchState(
+    strategyId: string,
+    stateId: string,
+    request: StrategyPatchStateRequest,
+  ): Promise<StrategyPatchResponse>;
+  /** `POST /v1/local/strategies/{strategy_id}/transitions/patch` — rewire a transition. */
+  strategyPatchTransition(
+    strategyId: string,
+    request: StrategyPatchTransitionRequest,
+  ): Promise<StrategyPatchResponse>;
+  /** `POST /v1/local/strategies/{strategy_id}/states/{state_id}/prompt/patch` — patch a prompt template. */
+  strategyPatchPromptTemplate(
+    strategyId: string,
+    stateId: string,
+    request: StrategyPatchPromptTemplateRequest,
+  ): Promise<StrategyPatchResponse>;
 
   // ── Chapters (V1.65 Content-Authoring) ─────────────────────────────────────
   /** `GET /v1/local/works/{work_id}/chapters` — cursor list (F-P3 `items` key). */

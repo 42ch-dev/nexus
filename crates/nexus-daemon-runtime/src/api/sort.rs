@@ -49,6 +49,35 @@ pub fn parse_sort_terms(
     Ok(terms)
 }
 
+/// Compare two values by a list of parsed sort terms.
+///
+/// `resolve` is called for each term key and should return the natural
+/// `Ordering` of `a` vs `b` for that key, or `None` if the key is unknown
+/// (unknown keys are ignored). Ascending/descending direction is applied by
+/// this function.
+///
+/// This closes the repeated `compare_*` closure pattern in list handlers
+/// (R-V167P0-QC1-S-COMPARE).
+pub fn compare_by_terms<T, F>(
+    a: &T,
+    b: &T,
+    terms: &[(String, bool)],
+    mut resolve: F,
+) -> std::cmp::Ordering
+where
+    F: FnMut(&str, &T, &T) -> Option<std::cmp::Ordering>,
+{
+    for (key, ascending) in terms {
+        if let Some(ord) = resolve(key, a, b) {
+            let ord = if *ascending { ord } else { ord.reverse() };
+            if ord != std::cmp::Ordering::Equal {
+                return ord;
+            }
+        }
+    }
+    std::cmp::Ordering::Equal
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -115,5 +144,45 @@ mod tests {
     fn unknown_key_in_multi_key_list_returns_resource_specific_code() {
         let err = parse_sort_terms(Some("a,unknown"), &["a", "b"], "capability").unwrap_err();
         assert_eq!(err.error_code(), "capability_sort_invalid");
+    }
+
+    #[test]
+    fn compare_by_terms_applies_ascending_and_descending_keys() {
+        let terms = vec![("name".to_string(), true), ("age".to_string(), false)];
+        let a = ("alice".to_string(), 30);
+        let b = ("bob".to_string(), 25);
+
+        // name asc → alice < bob
+        assert_eq!(
+            compare_by_terms(&a, &b, &terms, |key, x, y| match key {
+                "name" => Some(x.0.cmp(&y.0)),
+                "age" => Some(x.1.cmp(&y.1)),
+                _ => None,
+            }),
+            std::cmp::Ordering::Less
+        );
+
+        // name tied, age desc → 30 before 25, so a < b
+        let a2 = ("alice".to_string(), 30);
+        let b2 = ("alice".to_string(), 25);
+        assert_eq!(
+            compare_by_terms(&a2, &b2, &terms, |key, x, y| match key {
+                "name" => Some(x.0.cmp(&y.0)),
+                "age" => Some(x.1.cmp(&y.1)),
+                _ => None,
+            }),
+            std::cmp::Ordering::Less
+        );
+    }
+
+    #[test]
+    fn compare_by_terms_ignores_unknown_keys() {
+        let terms = vec![("unknown".to_string(), true), ("x".to_string(), true)];
+        let a = 1;
+        let b = 2;
+        assert_eq!(
+            compare_by_terms(&a, &b, &terms, |_key, x, y| Some(x.cmp(y))),
+            std::cmp::Ordering::Less
+        );
     }
 }

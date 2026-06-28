@@ -2,6 +2,16 @@
 //!
 //! Each type has `From<acp_sdk_type>` conversions in the same module
 //! (or in `nexus-acp-host/src/client.rs` for types that depend on the SDK crate).
+//!
+//! # Naming convention
+//!
+//! Types in this module intentionally mirror ACP SDK types but use a
+//! `Nexus`-prefixed name (e.g. `NexusAgentInfo` mirrors SDK `Implementation`,
+//! `NexusStopReason` mirrors SDK `StopReason`). The prefix keeps the wire DTO
+//! namespace distinct from the SDK types consumed by `nexus-acp-host` and makes
+//! the conversion boundary explicit in caller code. When adding a new ACP
+//! mirror type, preserve the `Nexus` prefix and add a doc comment naming the
+//! SDK type it mirrors.
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
