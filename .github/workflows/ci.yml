@@ -31,15 +31,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
-      - uses: pnpm/action-setup@eae0cfeb286e66ffb5155f1a79b90583a127a68b  # v2
+      - uses: ./.github/actions/setup-monorepo
         with:
-          version: 9
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
-        with:
-          node-version: 22
-          cache: 'pnpm'
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          rust-toolchain: ""
       - name: Validate schemas
         run: pnpm run validate-schemas
 
@@ -52,15 +46,9 @@ jobs:
       actions: write
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
-      - uses: pnpm/action-setup@eae0cfeb286e66ffb5155f1a79b90583a127a68b  # v2
+      - uses: ./.github/actions/setup-monorepo
         with:
-          version: 9
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
-        with:
-          node-version: 22
-          cache: 'pnpm'
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+          rust-toolchain: ""
       - name: Run codegen
         run: pnpm run codegen
       - name: Check generated code is up-to-date
@@ -152,19 +140,13 @@ jobs:
     needs: verify-codegen
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
-      - uses: pnpm/action-setup@eae0cfeb286e66ffb5155f1a79b90583a127a68b  # v2
+      - uses: ./.github/actions/setup-monorepo
         with:
-          version: 9
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
-        with:
-          node-version: 22
-          cache: 'pnpm'
+          rust-toolchain: ""
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           name: generated-types
           path: .
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
       - name: Build contracts package
         run: pnpm --filter @42ch/nexus-contracts run build
       - name: Typecheck
@@ -176,19 +158,13 @@ jobs:
     needs: verify-codegen
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
-      - uses: pnpm/action-setup@eae0cfeb286e66ffb5155f1a79b90583a127a68b  # v2
+      - uses: ./.github/actions/setup-monorepo
         with:
-          version: 9
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
-        with:
-          node-version: 22
-          cache: 'pnpm'
+          rust-toolchain: ""
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           name: generated-types
           path: .
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
       - name: Build contracts package
         run: pnpm --filter @42ch/nexus-contracts run build
       - name: Typecheck web
