@@ -4722,12 +4722,12 @@
         "owner": "@fullstack-dev",
         "target": "V1.71 P0 fix-wave rev3",
         "target_date": "2026-06-28",
-        "tracking_link": ".mstar/plans/reports/2026-06-27-v1.71-canvas-strategy-write-boundary/qc3-rev2.md",
+        "tracking_link": ".mstar/plans/reports/2026-06-27-v1.71-canvas-strategy-write-boundary/qc3-rev3.md",
         "note": "Prompt-template patch now rolls back the committed template file if YAML revision persistence fails after validation, preserving the invariant that on-disk prompt bytes and preset.yaml revision advance together or not at all. Failure-injection regression coverage added.",
         "lifecycle": "resolved",
         "closed_at": "2026-06-28",
-        "closure_note": "patch_prompt_template_inner now calls write_preset_yaml inside a rollback guard; any YAML persistence error triggers rollback_template_write to restore the original template bytes. Added unit test patch_prompt_template_rolls_back_on_yaml_persistence_failure that injects a failing YAML writer and asserts both template content and revision remain unchanged.",
-        "closure_evidence": "crates/nexus-daemon-runtime/src/api/handlers/strategy.rs patch_prompt_template_inner / patch_prompt_template_inner_with_writer / patch_prompt_template_rolls_back_on_yaml_persistence_failure",
+        "closure_note": "Verified resolved by qc3 rev3: patch_prompt_template_inner calls write_preset_yaml through a rollback guard; any YAML persistence error triggers rollback_template_write to restore the original template bytes before returning the error. The rollback helper logs rollback write failures with tracing::error!, so rollback failure is observable rather than silent.",
+        "closure_evidence": ".mstar/plans/reports/2026-06-27-v1.71-canvas-strategy-write-boundary/qc3-rev3.md; crates/nexus-daemon-runtime/src/api/handlers/strategy.rs patch_prompt_template_inner_with_writer / patch_prompt_template_rolls_back_on_yaml_persistence_failure; cargo +nightly-2026-06-26 fmt --all --check; cargo clippy --workspace -- -D warnings; cargo test --workspace; cargo test -p nexus-daemon-runtime patch_prompt_template_rolls_back_on_yaml_persistence_failure",
         "resolution": {
           "plan_id": "2026-06-27-v1.71-canvas-strategy-write-boundary",
           "commits": [
