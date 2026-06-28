@@ -440,3 +440,155 @@ async fn get_candidates_returns_pending() {
         nexus_contracts::BlockType::Character
     );
 }
+
+/// Regression for V1.73 qc3 W-01: cursor pagination must reach every pending
+/// candidate, not just the first `limit + 1` window. Seeds 4 candidates,
+/// walks the list with `limit = 2`, and asserts all 4 are returned exactly
+/// once across the two pages (no loss, no duplication). The expected order is
+/// derived from the seeded rows using the same `(created_at, job_id)`
+/// comparator the storage query uses, so the assertion holds whether or not
+/// the inserts land in the same `datetime('now')` second.
+#[tokio::test]
+async fn get_candidates_multi_page_cursor_reaches_all_rows() {
+    let (_tmp, state) = fresh_state().await;
+
+    // Seed 4 pending candidates; collect the returned rows so we can derive
+    // the expected keyset order independently of the handler.
+    let mut seeded: Vec<nexus_local_db::kb_extract_job::KbExtractPromotion> = Vec::new();
+    for idx in 0..4u8 {
+        let row = insert_pending(
+            state.pool(),
+            "test_creator",
+            "ws",
+            "wld_test_world",
+            None,
+            None,
+            "character",
+            &format!("Cand {idx}"),
+            NOVEL_CHARACTER_BODY,
+        )
+        .await
+        .expect("insert_pending should succeed");
+        seeded.push(row);
+    }
+    // Expected keyset order: (created_at ASC, job_id ASC) — mirrors the SQL
+    // `ORDER BY created_at ASC, job_id ASC` in `list_pending_for_world_after`.
+    seeded.sort_by(|a, b| {
+        a.created_at
+            .cmp(&b.created_at)
+            .then_with(|| a.job_id.cmp(&b.job_id))
+    });
+    let expected_names: Vec<String> = seeded
+        .iter()
+        .map(|c| c.canonical_name_guess.clone().unwrap_or_default())
+        .collect();
+    let expected_ids: Vec<String> = seeded.iter().map(|c| c.job_id.clone()).collect();
+
+    // Page 1: limit=2, no cursor.
+    let Json(page1) = get_candidates(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Query(CandidatesQuery {
+            limit: Some(2),
+            cursor: None,
+        }),
+    )
+    .await
+    .expect("page 1 should succeed");
+    assert_eq!(
+        page1.items.len(),
+        2,
+        "page 1 should return exactly `limit` items"
+    );
+    assert_eq!(page1.items[0].canonical_name, expected_names[0]);
+    assert_eq!(page1.items[1].canonical_name, expected_names[1]);
+    assert_eq!(page1.items[0].job_id, expected_ids[0]);
+    assert_eq!(page1.items[1].job_id, expected_ids[1]);
+    assert!(
+        page1.pagination.has_more,
+        "page 1 must signal has_more when more rows remain"
+    );
+    let cursor1 = page1
+        .pagination
+        .next_cursor
+        .clone()
+        .expect("page 1 must return a next_cursor");
+
+    // Page 2: limit=2, cursor from page 1 — must reach the REMAINING rows,
+    // not re-skip inside the first truncated window.
+    let Json(page2) = get_candidates(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Query(CandidatesQuery {
+            limit: Some(2),
+            cursor: Some(cursor1),
+        }),
+    )
+    .await
+    .expect("page 2 should succeed");
+    assert_eq!(
+        page2.items.len(),
+        2,
+        "page 2 should return the remaining 2 items (the W-01 bug returned 0)"
+    );
+    assert_eq!(page2.items[0].canonical_name, expected_names[2]);
+    assert_eq!(page2.items[1].canonical_name, expected_names[3]);
+    assert_eq!(page2.items[0].job_id, expected_ids[2]);
+    assert_eq!(page2.items[1].job_id, expected_ids[3]);
+    assert!(
+        !page2.pagination.has_more,
+        "page 2 is the last page; has_more must be false"
+    );
+    assert!(
+        page2.pagination.next_cursor.is_none(),
+        "page 2 is the last page; next_cursor must be absent"
+    );
+
+    // No loss, no duplication across the full walk.
+    let mut seen: Vec<String> = page1
+        .items
+        .iter()
+        .map(|c| c.job_id.clone())
+        .chain(page2.items.iter().map(|c| c.job_id.clone()))
+        .collect();
+    seen.sort();
+    assert_eq!(
+        seen,
+        {
+            let mut all = expected_ids.clone();
+            all.sort();
+            all
+        },
+        "every seeded candidate must appear exactly once across pages 1+2"
+    );
+
+    // Page 3: cursor past the end — must be empty, not an error.
+    let cursor2 = page2
+        .pagination
+        .next_cursor
+        .clone()
+        .or_else(|| {
+            // Last page has no next_cursor by design; synthesize a cursor from
+            // the final row so we can prove a follow-up request stays empty
+            // rather than re-issuing page 2.
+            seeded
+                .last()
+                .map(|r| format!("kbp:{}|{}", r.created_at, r.job_id))
+        })
+        .expect("a synthesized terminal cursor must be available");
+    let Json(page3) = get_candidates(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Query(CandidatesQuery {
+            limit: Some(2),
+            cursor: Some(cursor2),
+        }),
+    )
+    .await
+    .expect("page 3 (past end) should succeed, not error");
+    assert!(
+        page3.items.is_empty(),
+        "a cursor past the last row must yield an empty page, not a repeat"
+    );
+    assert!(!page3.pagination.has_more);
+}
