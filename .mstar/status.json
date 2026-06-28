@@ -98,27 +98,36 @@
       "merge_commit": "1cedbc799957e61516073733527b1fd9607c55bf"
     },
     "tech_debt_summary": {
-      "total_open": 8,
-      "total_deferred": 8,
+      "total_open": 23,
+      "total_deferred": 23,
       "total_resolved": 247,
       "total_archived": 0,
       "by_severity_active": {
+        "high": 1,
+        "critical": 1,
+        "medium": 6,
         "low": 7,
-        "nit": 1
+        "nit": 0
       },
       "by_target_active": {
-        "V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene)": 7,
-        "V1.73 release hardening backlog (plan-id tbd-v1.73-release-hardening)": 1
+        "V1.72 P0 fix-wave (target_date 2026-06-29)": 4,
+        "V1.72 P1 fix-wave (target_date 2026-06-29)": 2,
+        "V1.72 P-last closure": 1,
+        "V1.73 canvas-outline-split backlog": 1,
+        "V1.73 hygiene backlog": 13,
+        "V1.73 release hardening backlog": 2
       },
       "by_plan_active": {
+        "2026-06-28-v1.72-canvas-outline-timeline-beta": 10,
+        "2026-06-28-v1.72-hygiene-and-release-hardening": 5,
         "v1.65": 1,
         "2026-06-27-v1.71-canvas-strategy-write-boundary": 2,
         "2026-06-27-v1.71-hygiene-and-sign-groundwork": 5
       },
-      "refreshed_at": "2026-06-28T08:57:08Z",
-      "refreshed_reason": "V1.72 P0 + P1 implement complete; 4 V1.71 carry-over residuals resolved (HIGH R-V171P0-QC1-004 + MEDIUM R-V171P0-QC1-006 + MEDIUM R-V171-CI-RELEASE-WORKFLOW-INCOMPLETE + LOW R-V171-CI-WORKFLOW-SETUP-DEDUPE); 8 V1.72-targeted residuals re-targeted to V1.73 hygiene/release-hardening backlog with durable plan-id pointer."
+      "refreshed_at": "2026-06-28T17:30:00Z",
+      "refreshed_reason": "V1.72 P0 + P1 QC tri-review complete; PM consolidated decision: P0 4 fix (F-001 critical + 3 warnings) + 6 defer; P1 3 fix (W-001 + W-002 high + S-002 minor) + 2 defer. Targeted re-review next."
     },
-    "updated_at": "2026-06-28T08:57:55Z",
+    "updated_at": "2026-06-28T09:24:26Z",
     "spec_integration_branch": "iteration/v1.72",
     "wave1_merged_at": null
   },
@@ -5024,6 +5033,205 @@
         "owner": "@fullstack-dev",
         "target": "V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene)",
         "note": "rollback_template_write restores the previous template bytes via std::fs::write after a validation failure, which is non-atomic. A process crash mid-rollback could leave the template truncated while the YAML revision was already restored. Note: the rollback path is only reachable on validation failure (very rare), and the primary write path is now atomic via atomic_write_with_dir_fsync. Cosmetic defence-in-depth for the failure path. R-V171-GREPTILE-POST5. | V1.72 deferred to V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene) per compass §5 V1.73 deferrals table.",
+        "lifecycle": "open"
+      }
+    ],
+    "2026-06-28-v1.72-canvas-outline-timeline-beta": [
+      {
+        "id": "R-V172P0-QC3-001",
+        "title": "Canvas patch routes can overwrite concurrently edited outline markdown body with stale pre-lock copy (CRITICAL)",
+        "severity": "critical",
+        "source": "qc3 (performance/reliability) F-001",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/outline.rs:360-376, 465-488, 551-565",
+        "decision": "fix",
+        "owner": "fullstack-dev",
+        "target": "V1.72 P0 fix-wave (target_date 2026-06-29)",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-canvas-outline-timeline-beta][R-V172P0-QC3-001]",
+        "note": "Each write handler reads (initial_frontmatter, body) before acquiring RuntimeLockGuard; uses stale pre-lock body for atomic_write_outline. Compass §6.4 calls out that outline markdown body must remain V1.65 editor-owned. Fix: re-read body under lock; never use pre-lock body for persistence.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V172P0-QC1-001",
+        "title": "u64/i64 type mismatch in outline_revision — silent unwrap_or(0) fallback (Warning)",
+        "severity": "medium",
+        "source": "qc1 (architecture/maintainability) F-002",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/outline.rs:286 (patch_ok); outline.rs:36 (u64)",
+        "decision": "fix",
+        "owner": "fullstack-dev",
+        "target": "V1.72 P0 fix-wave (target_date 2026-06-29)",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-canvas-outline-timeline-beta][R-V172P0-QC1-001]",
+        "note": "OutlineFrontmatter.outline_revision is u64; OutlinePatchResponse.new_revision is i64 with minimum:1 schema contract. patch_ok uses i64::try_from(new_revision).unwrap_or(0). Fix: change OutlineFrontmatter.outline_revision to i64 to match wire contract (consistent with StrategyPatchResponse).",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V172P0-QC3-002",
+        "title": "Successful outline chapter/structure mutations invalidate only outline query, leaving chapter data stale (Warning)",
+        "severity": "medium",
+        "source": "qc3 (performance/reliability) F-003",
+        "scope": "apps/web/src/lib/canvas/use-outline-data.ts:54-56, 69-71, 84-86",
+        "decision": "fix",
+        "owner": "frontend-dev",
+        "target": "V1.72 P0 fix-wave (target_date 2026-06-29)",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-canvas-outline-timeline-beta][R-V172P0-QC3-002]",
+        "note": "usePatchOutlineStructure/Chapter/TimelineEvent invalidate only queryKeys.outline.detail(workId). But structure/chapter patches also mutate work_chapters fields (volume, status, slug, planned_word_count) displayed by useChapters. Fix: invalidate queryKeys.chapters.lists() (and detail(workId, chapter) for chapter patches) on successful structure/chapter patches.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V172P0-QC3-003",
+        "title": "Outline page is not route-split; canvas UI enters Control Room bootstrap chunk (Warning)",
+        "severity": "medium",
+        "source": "qc3 (performance/reliability) F-004",
+        "scope": "apps/web/src/App.tsx:10,44; apps/web/src/pages/outline-page.tsx:9",
+        "decision": "fix",
+        "owner": "frontend-dev",
+        "target": "V1.72 P0 fix-wave (target_date 2026-06-29)",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-canvas-outline-timeline-beta][R-V172P0-QC3-003]",
+        "note": "OutlinePage imported statically; not lazy-loaded. V1.70/V1.72 canvas policy says canvas routes must be route-split. Fix: lazy-load OutlinePage behind /works/:workId/outline using same lazy + Suspense pattern as StrategyPage.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V172P0-QC1-002",
+        "title": "outline-canvas.tsx is monolithic (825 lines) — should match strategy-canvas split pattern (Warning)",
+        "severity": "low",
+        "source": "qc1 (architecture/maintainability) F-001",
+        "scope": "apps/web/src/components/canvas/outline-canvas.tsx",
+        "decision": "defer",
+        "owner": "frontend-dev",
+        "target": "V1.73 plan: tbd-v1.73-canvas-outline-split",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-canvas-outline-timeline-beta][R-V172P0-QC1-002]",
+        "note": "PM accepts as V1.72 β trade-off. Project pattern established by P1 B2 (strategy-canvas split into 7 modules ≤200 lines). Mirror split for outline-canvas in V1.73 follow-up before β label is removed. | V1.72 deferred to V1.73 canvas-outline-split backlog.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V172P0-QC3-004",
+        "title": "Tauri/adapter parity guard still counts 24 methods and does not exercise 4 new outline methods (Warning)",
+        "severity": "low",
+        "source": "qc3 (performance/reliability) F-005",
+        "scope": "apps/web/src/lib/nexus/adapter-contract.test.ts:126-160; types.ts:209-227",
+        "decision": "defer",
+        "owner": "frontend-dev",
+        "target": "V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene)",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-canvas-outline-timeline-beta][R-V172P0-QC3-004]",
+        "note": "Test drift; runtime parity likely OK (TauriClient inherits BrowserClient). Fix test count + path assertions to cover all NexusClient methods including new outline/timeline routes.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V172P0-QC2-001",
+        "title": "Missing slug format validation in patch_outline_chapter (Warning)",
+        "severity": "medium",
+        "source": "qc2 (security/correctness) W1",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/outline.rs:782; outline-patch-chapter-set.schema.json",
+        "decision": "defer",
+        "owner": "fullstack-dev",
+        "target": "V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene)",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-canvas-outline-timeline-beta][R-V172P0-QC2-001]",
+        "note": "PM accepts as V1.72 β trade-off per qc2 own recommendation. Three warnings (slug format, volume existence, foreshadow order) are domain-validation completeness items explicitly listed in QC focus; \"simplify\" comments in code mark β scope. Slug regex (^[a-z0-9][a-z0-9_-]{0,63}$) + schema pattern in V1.73.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V172P0-QC2-002",
+        "title": "Target volume existence/pre-creation not validated before binding (Warning)",
+        "severity": "medium",
+        "source": "qc2 (security/correctness) W2",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/outline.rs:apply_structure_patch:608-641; move_chapter_in_frontmatter:674-746",
+        "decision": "defer",
+        "owner": "fullstack-dev",
+        "target": "V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene)",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-canvas-outline-timeline-beta][R-V172P0-QC2-002]",
+        "note": "PM accepts as V1.72 β trade-off. Volumes are derived (created on demand); pre-declared volume model is V1.73 product decision.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V172P0-QC2-003",
+        "title": "Foreshadow link does not enforce source-before-target temporal order (Warning)",
+        "severity": "medium",
+        "source": "qc2 (security/correctness) W3",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/outline.rs:timeline_link_foreshadow:934-977",
+        "decision": "defer",
+        "owner": "fullstack-dev",
+        "target": "V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene)",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-canvas-outline-timeline-beta][R-V172P0-QC2-003]",
+        "note": "PM accepts as V1.72 β trade-off per code comment \"simplify: V1.72 does not yet implement full graph validation; ... leave acyclic / foreshadow-order checks for a future slice.\" V1.73 adds temporal guard.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V172P0-QC2-004",
+        "title": "Published-chapter structural edit guard is route-specific (Warning)",
+        "severity": "medium",
+        "source": "qc2 (security/correctness) W4",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/outline.rs:patch_outline_chapter:477 (guard); structure/timeline paths lack equivalent",
+        "decision": "defer",
+        "owner": "fullstack-dev",
+        "target": "V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene)",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-canvas-outline-timeline-beta][R-V172P0-QC2-004]",
+        "note": "PM accepts as V1.72 β trade-off. Volume/timeline edits on published chapters allowed in β. Centralize ensure_not_published_for_structural_change helper in V1.73.",
+        "lifecycle": "open"
+      }
+    ],
+    "2026-06-28-v1.72-hygiene-and-release-hardening": [
+      {
+        "id": "R-V172P1-QC3-001",
+        "title": "Cmd/Ctrl+S save triggers can replay on later renders, duplicating inspector mutations (Warning)",
+        "severity": "high",
+        "source": "qc3 (performance/reliability) W-001",
+        "scope": "apps/web/src/components/canvas/strategy-canvas/hooks/use-strategy-canvas.ts:85-94; inspectors/state-inspector.tsx:85-117; edge-inspector.tsx:87-118; prompt-inspector.tsx:83-113",
+        "decision": "fix",
+        "owner": "frontend-dev",
+        "target": "V1.72 P1 fix-wave (target_date 2026-06-29)",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-hygiene-and-release-hardening][R-V172P1-QC3-001]",
+        "note": "useEffect depends on saveTrigger + handleSave; handleSave is recreated every render; saveTrigger never resets. Can issue duplicate PATCH + extra revision bumps + avoidable 409s. Fix: edge-trigger via lastHandledTriggerRef, or reset trigger after consumption, or stable handleSave via useCallback.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V172P1-QC3-002",
+        "title": "Signing/notarization failures do not preserve/upload unsigned fallback artifact (Warning)",
+        "severity": "high",
+        "source": "qc3 (performance/reliability) W-002",
+        "scope": ".github/workflows/desktop-release.yml:27,93-157,159-192",
+        "decision": "fix",
+        "owner": "ops-engineer",
+        "target": "V1.72 P1 fix-wave (target_date 2026-06-29)",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-hygiene-and-release-hardening][R-V172P1-QC3-002]",
+        "note": "Packaging/upload only runs after signing/notarize/staple succeed. Unsigned DMG is removed during signed DMG recreation. Fix: copy unsigned DMG to fallback path before signing; packaging/upload runs with always() condition and uploads signed DMG when signing succeeds, otherwise fallback unsigned DMG; add step-level timeouts for keychain/codesign/notarize/staple so cleanup runs before overall timeout.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V172P1-QC1-001",
+        "title": "React useEffect deps churn in inspector save handlers (Warning, cosmetic)",
+        "severity": "low",
+        "source": "qc1 (architecture/maintainability) W1",
+        "scope": "apps/web/src/components/canvas/strategy-canvas/inspectors/{state,edge,prompt}-inspector.tsx",
+        "decision": "defer",
+        "owner": "frontend-dev",
+        "target": "V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene)",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-hygiene-and-release-hardening][R-V172P1-QC1-001]",
+        "note": "PM accepts as cosmetic residual. Early-exit guards prevent actual double-saves. Fix in V1.73 (wrap handleSave in useCallback with proper deps, or use ref-based trigger pattern). Subsumed by R-V172P1-QC3-001 fix-wave which addresses root cause.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V172P1-QC3-003",
+        "title": "Desktop release should add Rust cache coverage before real signed releases (Suggestion)",
+        "severity": "low",
+        "source": "qc3 (performance/reliability) S-001",
+        "scope": ".github/actions/setup-monorepo/action.yml:40-55; .github/workflows/desktop-build.yml:53-59,95-100; .github/workflows/desktop-release.yml:61-72",
+        "decision": "defer",
+        "owner": "ops-engineer",
+        "target": "V1.73 release hardening backlog (plan-id tbd-v1.73-release-hardening)",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-hygiene-and-release-hardening][R-V172P1-QC3-003]",
+        "note": "Architectural preference; no correctness blocker. Add Swatinem/rust-cache to desktop-release.yml before first real signed release.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V172P1-QC3-004",
+        "title": "Status residual closure prose overstates composite action contents (Suggestion)",
+        "severity": "low",
+        "source": "qc3 (performance/reliability) S-002",
+        "scope": ".mstar/status.json lifecycle note for R-V171-CI-WORKFLOW-SETUP-DEDUPE; .github/actions/setup-monorepo/action.yml",
+        "decision": "fix",
+        "owner": "project-manager",
+        "target": "V1.72 P-last closure",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-hygiene-and-release-hardening][R-V172P1-QC3-004]",
+        "note": "status.json closure note overstates composite action (mentions checkout + rust-cache). Composite actually covers pnpm setup + Node setup + optional Rust toolchain + pnpm install. PM/QA corrects in P-last closure.",
         "lifecycle": "open"
       }
     ]
