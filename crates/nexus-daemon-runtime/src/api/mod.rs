@@ -227,6 +227,27 @@ fn narrative_routes() -> Router<WorkspaceState> {
         )
 }
 
+/// Strategy canvas write-boundary routes (V1.71 Track A).
+///
+/// These three `POST` endpoints mutate a local strategy preset bundle
+/// (`preset.yaml` + optional prompt template files) and enforce revision
+/// consistency via the YAML `revision:` field.
+fn strategy_routes() -> Router<WorkspaceState> {
+    Router::new()
+        .route(
+            "/v1/local/strategies/{strategy_id}/states/{state_id}/patch",
+            post(handlers::strategy::patch_state),
+        )
+        .route(
+            "/v1/local/strategies/{strategy_id}/transitions/patch",
+            post(handlers::strategy::patch_transition),
+        )
+        .route(
+            "/v1/local/strategies/{strategy_id}/states/{state_id}/prompt/patch",
+            post(handlers::strategy::patch_prompt_template),
+        )
+}
+
 /// Memory routes (sync routes removed in V1.21 — cloud-sync is CLI-only).
 ///
 /// V1.33 P4: Added `POST /v1/local/memory/review` and
@@ -313,22 +334,23 @@ fn works_routes() -> Router<WorkspaceState> {
             post(handlers::works::reconcile_chapters),
         )
         // ── Chapter content sub-routes (V1.65 P0) ────────────────────────
-        .route(
+        // Nest chapter routes under /v1/local/works/{work_id}/chapters so the
+        // work_id prefix is shared and future Works sub-resources cannot
+        // accidentally interleave with chapter paths (qc1 S-5).
+        .nest(
             "/v1/local/works/{work_id}/chapters",
-            get(handlers::chapters::list_chapters),
-        )
-        .route(
-            "/v1/local/works/{work_id}/chapters/{n}",
-            get(handlers::chapters::get_chapter).patch(handlers::chapters::patch_chapter),
-        )
-        .route(
-            "/v1/local/works/{work_id}/chapters/{n}/outline",
-            get(handlers::chapters::get_chapter_outline)
-                .put(handlers::chapters::put_chapter_outline),
-        )
-        .route(
-            "/v1/local/works/{work_id}/chapters/{n}/body",
-            get(handlers::chapters::get_chapter_body),
+            Router::new()
+                .route("/", get(handlers::chapters::list_chapters))
+                .route(
+                    "/{n}",
+                    get(handlers::chapters::get_chapter).patch(handlers::chapters::patch_chapter),
+                )
+                .route(
+                    "/{n}/outline",
+                    get(handlers::chapters::get_chapter_outline)
+                        .put(handlers::chapters::put_chapter_outline),
+                )
+                .route("/{n}/body", get(handlers::chapters::get_chapter_body)),
         )
         // ── Findings sub-routes (V1.39 P1) ───────────────────────────
         .route(
@@ -395,6 +417,7 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
         .merge(memory_routes())
         .merge(works_routes())
         .merge(narrative_routes())
+        .merge(strategy_routes())
         // Legacy creators list & references
         .route("/v1/local/creators", get(handlers::creators::list))
         .route("/v1/local/references", get(handlers::references::list))

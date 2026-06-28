@@ -2,7 +2,7 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — V1.67 amendment (§3.2 casing ratification + §4 `items` enforcement + §5 sort-param contract; `@42ch/nexus-contracts` 0.5.0 → 0.6.0). Prior: V1.64 cursor/error/`items` conventions + V1.65 chapter-content file-backed route rules. |
+| **Status** | Normative — V1.71 amendment (§7 structured patch-route convention for canvas-like surfaces; Strategy β patch routes; `@42ch/nexus-contracts` 0.6.0 → 0.7.0 by default). Prior: V1.67 amendment (§3.2 casing ratification + §4 `items` enforcement + §5 sort-param contract; `@42ch/nexus-contracts` 0.5.0 → 0.6.0), V1.64 cursor/error/`items` conventions + V1.65 chapter-content file-backed route rules. |
 | **Document class** | Master |
 | **Scope** | Cross-resource Local API response/query conventions for schemas under `schemas/local-api/` and handlers under `nexus-daemon-runtime` |
 | **Coordinates with** | [schemas-directory-layout.md](./schemas-directory-layout.md), [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md), [daemon-runtime.md](./daemon-runtime.md) |
@@ -296,7 +296,86 @@ last-write-wins semantics for clients.
 
 ---
 
-## 7. Handler/schema drift closure
+## 7. Structured patch routes for canvas-like surfaces (V1.71)
+
+V1.71 promotes the Strategy canvas write-boundary from paper contract to Local API convention. New node/edge edit surfaces that mutate graph-like or structured domain documents SHOULD use an explicit patch route rather than raw file PUTs or broad resource updates:
+
+```text
+POST /v1/local/{surface}/{id}/{sub}/patch
+```
+
+Examples:
+
+| Surface | Route | Request DTO | Response DTO |
+| --- | --- | --- | --- |
+| Strategy state | `POST /v1/local/strategies/{strategy_id}/states/{state_id}/patch` | `StrategyPatchStateRequest` | `StrategyPatchResponse` |
+| Strategy transition | `POST /v1/local/strategies/{strategy_id}/transitions/patch` | `StrategyPatchTransitionRequest` | `StrategyPatchResponse` |
+| Strategy prompt template | `POST /v1/local/strategies/{strategy_id}/states/{state_id}/prompt/patch` | `StrategyPatchPromptTemplateRequest` | `StrategyPatchResponse` |
+
+### 7.1 Request semantics
+
+Patch request DTOs MUST include:
+
+| Field | Rule |
+| --- | --- |
+| Resource identifiers | Path identifiers are authoritative. If the body repeats them, the daemon MUST reject mismatches with the canonical error envelope. |
+| `base_revision` | Required domain graph/document revision observed by the client during the last canonical read. |
+| Patch payload | Minimal, domain-specific mutation shape (`set`, `replace`, `template_patch`, transition target/condition, etc.). Do not accept raw YAML/Markdown/file bytes unless the owning domain spec explicitly authorizes a file-backed route. |
+
+The patch route owns a **single structured operation** at node/edge/subresource granularity. Batch operations require an explicit batch DTO and validation contract; clients must not smuggle multiple unrelated edits through an untyped blob.
+
+### 7.2 Success response envelope
+
+Successful patch responses SHOULD use a domain response DTO with this shape:
+
+```json
+{
+  "new_revision": 43,
+  "validation_summary": {
+    "errors": [],
+    "warnings": []
+  },
+  "side_effects": []
+}
+```
+
+Rules:
+
+1. `new_revision` is the committed revision after the daemon has persisted the patch.
+2. `validation_summary` mirrors the domain validator's structured diagnostics and is present even when empty if the domain exposes validation in the UI.
+3. `side_effects` is optional and must list only daemon-owned derived updates (for example, normalized labels or rebuilt projection metadata), not speculative client actions.
+4. The response is the committed result or commit metadata, not a speculative echo of the request.
+
+### 7.3 Error envelope and conflict semantics
+
+Patch routes MUST use the canonical error envelope from §3.
+
+| HTTP status | Use | Details rules |
+| --- | --- | --- |
+| `400` | Malformed JSON/body/path mismatch | Stable `<surface>_patch_invalid`-style code. |
+| `404` | Target resource or subresource not found | Include the missing id(s) in `details`. |
+| `409` | Revision conflict | Include `current_revision`, the target id, `conflicting_path` or equivalent structured locator, and a recovery hint. |
+| `422` | Domain validation failure | Include structured validation paths so the UI can focus the failing node/field. |
+| `500` | Unexpected daemon failure | Do not leak raw stack traces; include `request_id` when middleware supplies it. |
+
+Revision conflicts are **pre-write** failures: if `base_revision` does not equal the current canonical revision, the handler MUST return 409 before mutating files or DB rows. Validation failures are also non-mutating and MUST NOT increment the revision.
+
+### 7.4 Revision storage and future reuse
+
+The owning domain chooses the revision storage location, but it MUST name a single source of truth and expose the current revision on canonical reads. V1.71 Strategy uses a `revision:` key in the preset YAML header; existing presets without the key read as revision `0` and write `revision: 1` on the first accepted patch.
+
+Future outline+timeline and World KB canvas surfaces in V1.72+ should reuse this convention:
+
+1. Client reads a canonical graph/document projection with `revision`.
+2. Client submits a node/edge/subresource patch with `base_revision`.
+3. Daemon validates identifiers, reachability/domain invariants, condition/expression syntax when applicable, and referenced templates/entities.
+4. Daemon persists atomically and returns `new_revision`, or rejects stale writes with 409 and structured recovery data.
+
+This convention does **not** authorize direct browser/Tauri webview writes to raw files. File-backed routes remain domain-specific and must be separately specified like the V1.65 chapter-content routes in §6.
+
+---
+
+## 8. Handler/schema drift closure
 
 Handlers that serve schema-promoted Local API routes MUST emit `generated::local_api::*` response shapes or structurally equivalent types verified by `schema_drift_detection.rs` in `CheckMode::Strict`.
 
@@ -310,7 +389,7 @@ Future endpoint acceptance requires:
 
 ---
 
-## 8. Evidence and V1.64 decisions
+## 9. Evidence and V1.64 decisions
 
 The V1.63 Local API surface audit identified:
 
@@ -324,7 +403,7 @@ V1.64 closes F-P1, F-P2, and F-E1 for the Web UI data-layer baseline, while docu
 
 ---
 
-## 9. Local daemon port discovery (V1.66 desktop shell)
+## 10. Local daemon port discovery (V1.66 desktop shell)
 
 Local API clients that connect over loopback HTTP use a **resolved daemon base URL**, not a schema-defined discovery endpoint. (Compass: [v1.66 §5 #3 LOCKED](../iterations/v1.66-tauri-desktop-shell-delivery-compass-v1.md).)
 

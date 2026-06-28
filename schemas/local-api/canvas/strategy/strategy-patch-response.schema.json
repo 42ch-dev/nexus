@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/canvas/strategy/strategy-patch-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus StrategyPatchResponse",
+  "description": "Success response for Strategy patch routes (V1.71). Returns the committed revision and any domain validation diagnostics produced during the patch.",
+  "type": "object",
+  "required": ["new_revision", "validation_summary"],
+  "properties": {
+    "new_revision": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Canonical graph revision after the patch was persisted."
+    },
+    "validation_summary": {
+      "type": "object",
+      "required": ["errors", "warnings"],
+      "properties": {
+        "errors": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Fatal validation messages that prevented the patch. Always present; empty on success."
+        },
+        "warnings": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Non-fatal validation messages. Always present; empty when none."
+        }
+      },
+      "additionalProperties": false
+    },
+    "side_effects": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Optional daemon-owned derived updates (e.g. normalized references).",
+      "default": []
+    }
+  },
+  "additionalProperties": false
+}

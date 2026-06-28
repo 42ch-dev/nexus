@@ -1,0 +1,41 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/canvas/strategy/strategy-patch-state-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus StrategyPatchStateRequest",
+  "description": "Request body for POST /v1/local/strategies/{strategy_id}/states/{state_id}/patch (V1.71). Renames and/or updates the description of a single outer state-machine state.",
+  "type": "object",
+  "required": ["strategy_id", "state_id", "base_revision", "set"],
+  "properties": {
+    "strategy_id": {
+      "type": "string",
+      "description": "Preset / Strategy identifier from the URL path. Must match the path parameter."
+    },
+    "state_id": {
+      "type": "string",
+      "description": "State identifier from the URL path. Must match the path parameter."
+    },
+    "base_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Revision observed by the client on the last canonical read."
+    },
+    "set": {
+      "type": "object",
+      "description": "Fields to update on the state. At least one property must be provided.",
+      "minProperties": 1,
+      "properties": {
+        "label": {
+          "type": "string",
+          "description": "New human-facing state id/label. Renaming a state also rewrites all references (next targets, initial, terminal)."
+        },
+        "description": {
+          "type": "string",
+          "description": "New state description."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

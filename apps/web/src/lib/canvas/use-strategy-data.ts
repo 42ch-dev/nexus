@@ -21,15 +21,29 @@
  * (V1.67 G2 pattern) when the canvas needs first-run author attribution.
  */
 import { useMemo } from 'react';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  useMutation,
+  useQuery,
+  useQueryClient,
+  type UseMutationResult,
+} from '@tanstack/react-query';
 
 import { useNexusClient } from '@/lib/client-context';
 import { NexusClientError } from '@/lib/nexus';
 import { queryKeys } from '@/lib/nexus/query-keys';
 import { useToast } from '@/lib/use-toast';
 
-import { buildStrategyGraph, type StrategyGraph } from './strategy-graph';
+import {
+  buildStrategyGraph,
+  type StrategyGraph,
+} from './strategy-graph';
 import { parsePresetYaml } from './preset-yaml';
+import type {
+  StrategyPatchPromptTemplateRequest,
+  StrategyPatchResponse,
+  StrategyPatchStateRequest,
+  StrategyPatchTransitionRequest,
+} from '@42ch/nexus-contracts';
 
 /** Calm overlay refresh cadence (A3 bounded overlay — session-level status). */
 const OVERLAY_POLL_MS = 5_000;
@@ -43,7 +57,7 @@ export function usePresetGraph(presetId: string | undefined) {
       const res = await client.getPreset(presetId!);
       const parsed = parsePresetYaml(res.yaml);
       const graph: StrategyGraph = buildStrategyGraph(parsed);
-      return { preset: res, parsed, graph };
+      return { preset: res, parsed, graph, revision: parsed.revision ?? 0 };
     },
     enabled: Boolean(presetId),
     // Preset YAML is immutable unless reloaded; cache generously.
@@ -210,4 +224,158 @@ export function useResumeStrategy() {
     },
     onError: (error) => errorToast(error, 'Could not resume Strategy'),
   });
+}
+
+// ─── Strategy canvas write boundary (V1.71 Track A) ────────────────────────
+
+export interface PatchStrategyStateArgs {
+  strategyId: string;
+  stateId: string;
+  baseRevision: number;
+  label?: string;
+  description?: string;
+}
+
+function buildPatchStateRequest(
+  args: PatchStrategyStateArgs,
+): StrategyPatchStateRequest {
+  const set: StrategyPatchStateRequest['set'] = {};
+  if (args.label !== undefined) set.label = args.label;
+  if (args.description !== undefined) set.description = args.description;
+  return {
+    strategy_id: args.strategyId,
+    state_id: args.stateId,
+    base_revision: args.baseRevision,
+    set,
+  };
+}
+
+/** Patch a Strategy state (label/description). */
+export function usePatchStrategyState(): UseMutationResult<
+  StrategyPatchResponse,
+  unknown,
+  PatchStrategyStateArgs
+> {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: (args: PatchStrategyStateArgs) =>
+      client.strategyPatchState(
+        args.strategyId,
+        args.stateId,
+        buildPatchStateRequest(args),
+      ),
+    onSuccess: (_data, args) => {
+      toast({
+        variant: 'success',
+        title: 'State updated',
+        description: args.stateId,
+      });
+      void qc.invalidateQueries({
+        queryKey: queryKeys.presets.detail(args.strategyId),
+      });
+    },
+    onError: (error) => errorToast(error, 'Could not update state'),
+  });
+}
+
+export interface PatchStrategyTransitionArgs {
+  strategyId: string;
+  sourceStateId: string;
+  baseRevision: number;
+  oldTarget: string;
+  newTarget?: string;
+  condition?: string;
+  transitionKind?: StrategyPatchTransitionRequest['transition_kind'];
+}
+
+/** Rewire a Strategy transition. */
+export function usePatchStrategyTransition(): UseMutationResult<
+  StrategyPatchResponse,
+  unknown,
+  PatchStrategyTransitionArgs
+> {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: (args: PatchStrategyTransitionArgs) =>
+      client.strategyPatchTransition(args.strategyId, {
+        strategy_id: args.strategyId,
+        base_revision: args.baseRevision,
+        source_state_id: args.sourceStateId,
+        old_target: args.oldTarget,
+        new_target: args.newTarget,
+        condition: args.condition,
+        transition_kind: args.transitionKind,
+      }),
+    onSuccess: (_data, args) => {
+      toast({
+        variant: 'success',
+        title: 'Transition updated',
+        description: `${args.sourceStateId} → ${args.newTarget ?? args.oldTarget}`,
+      });
+      void qc.invalidateQueries({
+        queryKey: queryKeys.presets.detail(args.strategyId),
+      });
+    },
+    onError: (error) => errorToast(error, 'Could not update transition'),
+  });
+}
+
+export interface PatchStrategyPromptTemplateArgs {
+  strategyId: string;
+  stateId: string;
+  baseRevision: number;
+  templateRef: string;
+  body: string;
+}
+
+/** Patch a Strategy prompt-template file. */
+export function usePatchStrategyPromptTemplate(): UseMutationResult<
+  StrategyPatchResponse,
+  unknown,
+  PatchStrategyPromptTemplateArgs
+> {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: (args: PatchStrategyPromptTemplateArgs) => {
+      const req: StrategyPatchPromptTemplateRequest = {
+        strategy_id: args.strategyId,
+        state_id: args.stateId,
+        base_revision: args.baseRevision,
+        template_ref: args.templateRef,
+        set: { body: args.body },
+      };
+      return client.strategyPatchPromptTemplate(
+        args.strategyId,
+        args.stateId,
+        req,
+      );
+    },
+    onSuccess: (_data, args) => {
+      toast({
+        variant: 'success',
+        title: 'Prompt template saved',
+        description: args.templateRef,
+      });
+      void qc.invalidateQueries({
+        queryKey: queryKeys.presets.detail(args.strategyId),
+      });
+    },
+    onError: (error) => errorToast(error, 'Could not save prompt template'),
+  });
+}
+
+/** True if the error is a Strategy revision conflict (HTTP 409). */
+export function isStrategyConflictError(
+  error: unknown,
+): error is NexusClientError & { details: { current_revision?: number } } {
+  return error instanceof NexusClientError && error.code === 'strategy_conflict';
 }

@@ -21,6 +21,11 @@ export * from './domain/TimelineEvent';
 export * from './domain/User';
 export * from './domain/WorldMembership';
 export * from './domain/World';
+export * from './local-api/canvas/strategy/StrategyConflictError';
+export * from './local-api/canvas/strategy/StrategyPatchPromptTemplateRequest';
+export * from './local-api/canvas/strategy/StrategyPatchResponse';
+export * from './local-api/canvas/strategy/StrategyPatchStateRequest';
+export * from './local-api/canvas/strategy/StrategyPatchTransitionRequest';
 export * from './local-api/common/ErrorResponse';
 export * from './local-api/compute/ComputeInput';
 export * from './local-api/compute/ComputeOutput';
@@ -161,6 +166,11 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   User: 1,
   WorldMembership: 1,
   World: 1,
+  StrategyConflictError: 1,
+  StrategyPatchPromptTemplateRequest: 1,
+  StrategyPatchResponse: 1,
+  StrategyPatchStateRequest: 1,
+  StrategyPatchTransitionRequest: 1,
   ErrorResponse: 1,
   ComputeInput: 1,
   ComputeOutput: 1,
