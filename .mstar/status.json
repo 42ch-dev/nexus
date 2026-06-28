@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-28T09:40:56Z",
+  "updated_at": "2026-06-28T18:57:00Z",
   "plans": [
     {
       "plan_id": "2026-06-28-v1.72-compass-and-plan",
@@ -127,7 +127,7 @@
       "refreshed_at": "2026-06-28T17:30:00Z",
       "refreshed_reason": "V1.72 P0 + P1 QC tri-review complete; PM consolidated decision: P0 4 fix (F-001 critical + 3 warnings) + 6 defer; P1 3 fix (W-001 + W-002 high + S-002 minor) + 2 defer. Targeted re-review next."
     },
-    "updated_at": "2026-06-28T09:24:26Z",
+    "updated_at": "2026-06-28T18:57:00Z",
     "spec_integration_branch": "iteration/v1.72",
     "wave1_merged_at": null
   },
@@ -5048,7 +5048,13 @@
         "target": "V1.72 P0 fix-wave (target_date 2026-06-29)",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-canvas-outline-timeline-beta][R-V172P0-QC3-001]",
         "note": "Each write handler reads (initial_frontmatter, body) before acquiring RuntimeLockGuard; uses stale pre-lock body for atomic_write_outline. Compass §6.4 calls out that outline markdown body must remain V1.65 editor-owned. Fix: re-read body under lock; never use pre-lock body for persistence.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28",
+        "closure_note": "Fixed in commit 78670211: patch_outline_structure, patch_outline_chapter, and patch_timeline_event now discard the pre-lock body snapshot and re-read frontmatter + body under RuntimeLockGuard. Added regression unit test patch_write_uses_body_from_locked_re_read.",
+        "resolution": {
+          "plan_id": "2026-06-28-v1.72-canvas-outline-timeline-beta",
+          "commit": "78670211"
+        }
       },
       {
         "id": "R-V172P0-QC1-001",
@@ -5061,7 +5067,13 @@
         "target": "V1.72 P0 fix-wave (target_date 2026-06-29)",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-canvas-outline-timeline-beta][R-V172P0-QC1-001]",
         "note": "OutlineFrontmatter.outline_revision is u64; OutlinePatchResponse.new_revision is i64 with minimum:1 schema contract. patch_ok uses i64::try_from(new_revision).unwrap_or(0). Fix: change OutlineFrontmatter.outline_revision to i64 to match wire contract (consistent with StrategyPatchResponse).",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28",
+        "closure_note": "Fixed in commit 78670211: OutlineFrontmatter.outline_revision changed to i64, matching OutlinePatchResponse.new_revision. Removed silent unwrap_or(0) in patch_ok; added outline_revision_u64() helper for wire boundaries that require unsigned values.",
+        "resolution": {
+          "plan_id": "2026-06-28-v1.72-canvas-outline-timeline-beta",
+          "commit": "78670211"
+        }
       },
       {
         "id": "R-V172P0-QC3-002",
@@ -5074,7 +5086,13 @@
         "target": "V1.72 P0 fix-wave (target_date 2026-06-29)",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-canvas-outline-timeline-beta][R-V172P0-QC3-002]",
         "note": "usePatchOutlineStructure/Chapter/TimelineEvent invalidate only queryKeys.outline.detail(workId). But structure/chapter patches also mutate work_chapters fields (volume, status, slug, planned_word_count) displayed by useChapters. Fix: invalidate queryKeys.chapters.lists() (and detail(workId, chapter) for chapter patches) on successful structure/chapter patches.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28",
+        "closure_note": "Fixed in commit a6981dc8: usePatchOutlineStructure and usePatchOutlineChapter now invalidate queryKeys.chapters.lists(); usePatchOutlineChapter also invalidates the specific chapter detail query. usePatchTimelineEvent continues to invalidate only the outline detail query.",
+        "resolution": {
+          "plan_id": "2026-06-28-v1.72-canvas-outline-timeline-beta",
+          "commit": "a6981dc8"
+        }
       },
       {
         "id": "R-V172P0-QC3-003",
@@ -5087,7 +5105,13 @@
         "target": "V1.72 P0 fix-wave (target_date 2026-06-29)",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-canvas-outline-timeline-beta][R-V172P0-QC3-003]",
         "note": "OutlinePage imported statically; not lazy-loaded. V1.70/V1.72 canvas policy says canvas routes must be route-split. Fix: lazy-load OutlinePage behind /works/:workId/outline using same lazy + Suspense pattern as StrategyPage.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28",
+        "closure_note": "Fixed in commit 7f615654: OutlinePage is now lazy-loaded via React.lazy + Suspense on /works/:workId/outline, producing a separate outline-page chunk in the production build.",
+        "resolution": {
+          "plan_id": "2026-06-28-v1.72-canvas-outline-timeline-beta",
+          "commit": "7f615654"
+        }
       },
       {
         "id": "R-V172P0-QC1-002",
