@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-28T08:55:00Z",
+  "updated_at": "2026-06-28T00:43:54Z",
   "plans": [
     {
       "plan_id": "2026-06-27-v1.71-compass-and-plan",
@@ -86,12 +86,12 @@
       "pr_number": 95
     },
     "tech_debt_summary": {
-      "total_open": 9,
+      "total_open": 10,
       "total_deferred": 1,
-      "total_resolved": 233,
+      "total_resolved": 237,
       "total_archived": 0,
       "by_severity_active": {
-        "critical": 0,
+        "critical": 1,
         "high": 1,
         "medium": 1,
         "low": 6,
@@ -99,17 +99,18 @@
       },
       "by_target_active": {
         "V1.72": 1,
-        "V1.72 or V1.71 P-last cleanup": 8
+        "V1.72 or V1.71 P-last cleanup": 8,
+        "V1.71 P0 fix-wave rev3": 1
       },
       "by_plan_active": {
-        "2026-06-27-v1.71-canvas-strategy-write-boundary": 4,
+        "2026-06-27-v1.71-canvas-strategy-write-boundary": 5,
         "2026-06-27-v1.71-hygiene-and-sign-groundwork": 4,
         "v1.65": 1
       },
-      "refreshed_at": "2026-06-28T08:55:00Z",
-      "refreshed_reason": "V1.71 P1 qc3 review: approved with one new low-severity smoke-script reliability residual R-V171P1-QC3-001 registered. P0 open residuals from qc1 re-review and P1 qc1 residuals remain open."
+      "refreshed_at": "2026-06-28T00:43:54Z",
+      "refreshed_reason": "V1.71 P0 qc3 targeted re-review: C1, C3, W3, and S3 verified closed; C2 remains open/critical because prompt-template rollback does not cover YAML persistence failure after template rename. P1 residuals remain open."
     },
-    "updated_at": "2026-06-28T08:55:00Z",
+    "updated_at": "2026-06-28T00:43:54Z",
     "spec_integration_branch": "iteration/v1.71",
     "wave1_merged_at": null
   },
@@ -4764,6 +4765,95 @@
         "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.71-canvas-strategy-write-boundary][R-V171P0-QC1-010]",
         "note": "Still open. The plan and compass still state that generated TypeScript output lives under apps/web/src/api-types/canvas/, but the actual generated TS is in packages/nexus-contracts/src/generated/ and is consumed via the workspace package. apps/web/src/api-types/ does not exist. Update the plan, compass, and any spec references to match the actual architecture.",
         "lifecycle": "open"
+      },
+      {
+        "id": "R-V171P0-QC3-C1",
+        "title": "Strategy patch revision precondition is serialized across concurrent writers",
+        "severity": "critical",
+        "source": "qc3 targeted re-review rev2",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/strategy.rs Strategy patch lock and concurrent same-base regression coverage",
+        "decision": "verified-closed",
+        "owner": "@fullstack-dev",
+        "target": "V1.71 P0 fix-wave",
+        "target_date": "2026-06-28",
+        "tracking_link": ".mstar/plans/reports/2026-06-27-v1.71-canvas-strategy-write-boundary/qc3-rev2.md",
+        "note": "Resolved in fix wave: all three Strategy mutation handlers acquire bundle/.strategy-lock with exclusive flock inside spawn_blocking and re-check base_revision while holding the lock. Regression test concurrent_patch_state_serializes_and_one_writer_gets_conflict passed in targeted and workspace test runs.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28",
+        "closure_note": "Verified by qc3 rev2: concurrent same-base patch requests now serialize; one succeeds and the other returns strategy_conflict.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-canvas-strategy-write-boundary",
+          "commits": ["af992f36"]
+        }
+      },
+      {
+        "id": "R-V171P0-QC3-C2",
+        "title": "Prompt-template body write remains non-atomic if YAML revision persistence fails after validation",
+        "severity": "critical",
+        "source": "qc3 targeted re-review rev2",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/strategy.rs::patch_prompt_template_inner",
+        "decision": "fix-in-wave",
+        "owner": "@fullstack-dev",
+        "target": "V1.71 P0 fix-wave rev3",
+        "target_date": "2026-06-28",
+        "tracking_link": ".mstar/plans/reports/2026-06-27-v1.71-canvas-strategy-write-boundary/qc3-rev2.md",
+        "note": "Partially resolved only. Validation-failure rollback is fixed, but the template rename still occurs before write_preset_yaml. If write_preset_yaml fails after validation, prompt content can change while preset.yaml revision remains old. Add rollback for any YAML persistence failure or redesign the commit order, plus failure-injection coverage.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V171P0-QC3-C3",
+        "title": "Client multi-field Save no longer reuses a stale base_revision after its own first patch",
+        "severity": "critical",
+        "source": "qc3 targeted re-review rev2",
+        "scope": "apps/web/src/components/canvas/strategy-canvas.tsx::handleSave workingRevision flow",
+        "decision": "verified-closed",
+        "owner": "@frontend-dev",
+        "target": "V1.71 P0 fix-wave",
+        "target_date": "2026-06-28",
+        "tracking_link": ".mstar/plans/reports/2026-06-27-v1.71-canvas-strategy-write-boundary/qc3-rev2.md",
+        "note": "Resolved in fix wave: StrategyCanvas tracks workingRevision and updates it from each StrategyPatchResponse.new_revision before sending the next mutation. The broader non-transactional multi-patch Save risk remains separately open as R-V171P0-QC1-004.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28",
+        "closure_note": "Verified by qc3 rev2 code inspection and web typecheck/test/build evidence.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-canvas-strategy-write-boundary",
+          "commits": ["58ac43d3"]
+        }
+      },
+      {
+        "id": "R-V171P0-QC3-W3",
+        "title": "Web build now runs the contracts dist prebuild explicitly",
+        "severity": "medium",
+        "source": "qc3 targeted re-review rev2",
+        "scope": "apps/web/package.json prebuild script; pnpm --filter web build",
+        "decision": "verified-closed",
+        "owner": "@frontend-dev",
+        "target": "V1.71 P0 fix-wave",
+        "target_date": "2026-06-28",
+        "tracking_link": ".mstar/plans/reports/2026-06-27-v1.71-canvas-strategy-write-boundary/qc3-rev2.md",
+        "note": "Resolved: apps/web/package.json defines prebuild as pnpm --filter @42ch/nexus-contracts run build. The requested pnpm --filter web build command now executes the contracts package build first and succeeds.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28",
+        "closure_note": "Verified by qc3 rev2: pnpm --filter web build succeeded with contracts prebuild output followed by Vite build output.",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-canvas-strategy-write-boundary",
+          "commits": ["58ac43d3"]
+        }
+      },
+      {
+        "id": "R-V171P0-QC3-S3",
+        "title": "Strategy route chunk size baseline recorded after fix wave",
+        "severity": "low",
+        "source": "qc3 targeted re-review rev2",
+        "scope": "pnpm --filter web build output for strategy-page assets",
+        "decision": "closed-in-report",
+        "owner": "@qc-specialist-3",
+        "target": "V1.71 P0 re-review",
+        "target_date": "2026-06-28",
+        "tracking_link": ".mstar/plans/reports/2026-06-27-v1.71-canvas-strategy-write-boundary/qc3-rev2.md",
+        "note": "Recorded current baseline: strategy-page-B-YSqRaf.js 320.26 kB minified / 101.07 kB gzip and strategy-page-C5ap-Sga.css 15.87 kB / 2.67 kB gzip. Bootstrap index remains the source of the generic >500 kB Vite warning.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28"
       }
     ],
     "2026-06-27-v1.71-hygiene-and-sign-groundwork": [
