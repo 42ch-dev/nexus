@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-06-28-v1.73-canvas-world-kb-beta"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-29"
 ---
 
@@ -64,3 +64,26 @@ generated_at: "2026-06-29"
 - `pnpm --filter web build` → passed: TypeScript check + Vite build completed; Vite warning only for existing large shared chunk.
 
 **Verdict**: Request Changes
+
+## Revalidation (W-01 fix @ 35e4404e)
+
+### Scope Rechecked
+- Targeted re-review scope: W-01 only (candidates cursor pagination fix at `35e4404e` on top of initial review HEAD `d04a6b4e`).
+- Verified checkout: `/Users/bibi/workspace/organizations/42ch/nexus` on `iteration/v1.73`, `git log -1 --oneline` = `35e4404e fix(world-kb): W-01 candidates cursor pagination — apply keyset filter in SQL (qc3)`.
+- Reviewed fix diff via `git show 35e4404e` across:
+  - `crates/nexus-local-db/src/kb_extract_job.rs`
+  - `crates/nexus-daemon-runtime/src/api/handlers/world_kb.rs`
+  - `crates/nexus-daemon-runtime/tests/world_kb_patch.rs`
+
+### Evidence
+- `cargo test -p nexus-daemon-runtime --test world_kb_patch` → passed: 10 tests, 0 failed, including `get_candidates_multi_page_cursor_reaches_all_rows`.
+- Storage now applies keyset pagination in SQL: `list_pending_for_world_after` adds `AND (created_at, job_id) > (?, ?)` before `ORDER BY created_at ASC, job_id ASC LIMIT ?`, so the cursor advances the DB result set before `limit + 1` truncation.
+- Handler now decodes opaque `kbp:<created_at>|<job_id>` cursors, fetches `limit + 1` rows after that tuple, returns only `limit` rows, and encodes `next_cursor` from the last visible row on the current page.
+- Regression coverage seeds 4 pending candidates, uses `limit = 2`, verifies page 1 returns rows 1-2, page 2 returns rows 3-4, no row is lost or duplicated, and a terminal cursor does not repeat page 2.
+
+### Disposition
+- W-01 is resolved. The original reliability failure (page 2+ unreachable because the handler scanned for the cursor inside only the first `limit + 1` rows) is fixed by moving cursor semantics into the SQL query.
+- No new Critical or Warning issue found in the targeted diff. The cursor token format intentionally changes to an opaque prefixed keyset cursor; in this pre-1.0 API, the old bare-`job_id` cursor was already broken for multi-page traversal and now fails fast as `400 invalid_input` instead of silently mis-paginating.
+- Original Suggestions S-01 through S-03 remain visible as non-blocking follow-up ideas; they do not block this targeted revalidation.
+
+**Updated Verdict**: Approve
