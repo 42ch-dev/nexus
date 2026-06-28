@@ -200,6 +200,15 @@ components:
     canvas-write-conflict: "{colors.red-700}"
     canvas-write-success: "{colors.green-700}"
     canvas-write-stale-bg: "color-mix(in srgb, {colors.amber-700} 8%, transparent)"
+    # V1.72 outline/timeline canvas-write tokens — concrete light values (locked names, verbatim)
+    canvas-outline-volume-fill: "#F5F5F4"
+    canvas-outline-chapter-card-status-pending: "#94A3B8"
+    canvas-outline-chapter-card-status-drafted: "#3B82F6"
+    canvas-outline-chapter-card-status-completed: "#10B981"
+    canvas-outline-timeline-event-pin: "#F59E0B"
+    canvas-outline-foreshadow-edge: "#A78BFA"
+    canvas-outline-timeline-marker: "#0EA5E9"
+    canvas-outline-conflict-marker: "#EF4444"
 ---
 
 # Nexus Local Web UI Design System
@@ -435,6 +444,21 @@ Copy-path behavior:
 Canvas token names are stubbed in frontmatter `components.canvas` as commented LEVEL placeholders. They are not consumed in V1.69. The canonical Draft list lives in `.mstar/knowledge/specs/canvas-strategy-surface.md` §3.6 / B4 and gives V1.70 a reviewed target for infinite-canvas surfaces.
 
 Minimal placeholder set: `canvas-surface`, `canvas-grid`, `canvas-node-fill`, `canvas-node-fill-hover`, `canvas-node-border`, `canvas-node-border-selected`, `canvas-edge`, `canvas-edge-hover`, `canvas-port`, `canvas-minimap`, `canvas-strategy-accent`.
+
+### Outline & Timeline Canvas Tokens (V1.72)
+
+The V1.72 outline/timeline canvas-write tokens extend `components.canvas` with concrete light + dark values for the volume-lane, chapter-card status, timeline, foreshadow-edge, and outline-conflict surfaces. Token names are frozen verbatim across docs and the design system (V1.69→V1.72 preservation invariant); `canvas-outline-conflict-marker` is intentionally distinct from V1.71's generic conflict marker and the V1.70 `canvas-write-conflict` write-state token.
+
+| Token | Purpose | Light | Dark | Example |
+| --- | --- | --- | --- | --- |
+| `canvas-outline-volume-fill` | Volume lane fill (subtle band behind a volume's chapters) | `#F5F5F4` | `#1F1F1E` | `background: var(--color-canvas-outline-volume-fill);` |
+| `canvas-outline-chapter-card-status-pending` | Chapter card `not_started` state accent | `#94A3B8` | `#64748B` | `border-left: 3px solid var(--color-canvas-outline-chapter-card-status-pending);` |
+| `canvas-outline-chapter-card-status-drafted` | Chapter card `outlined` / `draft` / `finalized` state accent | `#3B82F6` | `#60A5FA` | `border-left: 3px solid var(--color-canvas-outline-chapter-card-status-drafted);` |
+| `canvas-outline-chapter-card-status-completed` | Chapter card `completed` state accent | `#10B981` | `#34D399` | `border-left: 3px solid var(--color-canvas-outline-chapter-card-status-completed);` |
+| `canvas-outline-timeline-event-pin` | Timeline event node pin | `#F59E0B` | `#FBBF24` | `fill: var(--color-canvas-outline-timeline-event-pin);` |
+| `canvas-outline-foreshadow-edge` | Foreshadow edge color/weight | `#A78BFA` | `#C4B5FD` | `stroke: var(--color-canvas-outline-foreshadow-edge); stroke-width: 1.5px;` |
+| `canvas-outline-timeline-marker` | Timeline lane marker color | `#0EA5E9` | `#38BDF8` | `background: var(--color-canvas-outline-timeline-marker);` |
+| `canvas-outline-conflict-marker` | Outline-specific conflict marker (distinct from `canvas-write-conflict`) | `#EF4444` | `#F87171` | `color: var(--color-canvas-outline-conflict-marker);` |
 
 ---
 
