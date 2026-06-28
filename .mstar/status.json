@@ -7,7 +7,7 @@
     "integration_branch_retired": false,
     "last_integration_branch": "iteration/v1.71",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.72 (prepare)",
+    "latest_active_iteration": "V1.72 hotfix (greptile-post5)",
     "latest_active_compass": "v1.72-canvas-outline-timeline-beta-and-hygiene-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
@@ -36,18 +36,17 @@
       }
     },
     "tech_debt_summary": {
-      "total_open": 13,
+      "total_open": 17,
       "total_deferred": 14,
       "total_resolved": 248,
       "total_archived": 0,
       "by_severity_active": {
-        "high": 0,
-        "critical": 0,
-        "medium": 5,
-        "low": 7,
-        "nit": 1
+        "high": 1,
+        "medium": 9,
+        "low": 7
       },
       "by_target_active": {
+        "V1.72 hotfix (target_date 2026-06-28)": 4,
         "V1.73 canvas-outline-split backlog": 1,
         "V1.73 hygiene backlog": 11,
         "V1.73 release hardening backlog": 1
@@ -57,12 +56,13 @@
         "2026-06-27-v1.71-canvas-strategy-write-boundary": 2,
         "2026-06-27-v1.71-hygiene-and-sign-groundwork": 4,
         "2026-06-28-v1.72-canvas-outline-timeline-beta": 5,
-        "2026-06-28-v1.72-hygiene-and-release-hardening": 1
+        "2026-06-28-v1.72-hygiene-and-release-hardening": 1,
+        "2026-06-28-v1.72-greptile-post5": 4
       },
-      "refreshed_at": "2026-06-28T12:08:51Z",
-      "refreshed_reason": "V1.72 ship: 6 residuals resolved (4 V1.71 carry-over + 2 fix-wave QC findings); 14 deferred to V1.73 backlog with durable plan-id pointers; R-V172P1-QC3-004 closure prose corrected."
+      "refreshed_at": "2026-06-28T13:20:18Z",
+      "refreshed_reason": "V1.72 post-merge Greptile review surfaced 4 findings (PR accidentally merged before Greptile finished). Surfaced as residual_findings before hotfix dispatch."
     },
-    "updated_at": "2026-06-28T12:19:56Z",
+    "updated_at": "2026-06-28T13:20:18Z",
     "spec_integration_branch": "iteration/v1.72",
     "wave1_merged_at": null
   },
@@ -5212,6 +5212,60 @@
           "plan_id": "2026-06-28-v1.72-closure",
           "commit": "pending-P-last-commit"
         }
+      }
+    ],
+    "2026-06-28-v1.72-greptile-post5": [
+      {
+        "id": "R-V172-GREPTILE-001",
+        "title": "Unstable handleSave reference in useEffect dependency array (3 inspector files)",
+        "severity": "medium",
+        "source": "Greptile post-merge review (PR #97)",
+        "scope": "apps/web/src/components/canvas/strategy-canvas/inspectors/{state,edge,prompt}-inspector.tsx:115-122",
+        "decision": "fix",
+        "owner": "frontend-dev",
+        "target": "V1.72 hotfix (target_date 2026-06-28)",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-greptile-post5][R-V172-GREPTILE-001]",
+        "note": "handleSave is declared as async function inside component body without useCallback. Reference changes every render, causing useEffect to re-fire continuously. lastHandledTriggerRef guard prevents duplicate API calls in practice, but violates React hooks contract. Fix: wrap handleSave in useCallback with proper dependencies.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V172-GREPTILE-002",
+        "title": "Volume select fires structural patch immediately on change (UX inconsistency)",
+        "severity": "medium",
+        "source": "Greptile post-merge review (PR #97)",
+        "scope": "apps/web/src/components/canvas/outline-canvas.tsx:626-641",
+        "decision": "fix",
+        "owner": "frontend-dev",
+        "target": "V1.72 hotfix (target_date 2026-06-28)",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-greptile-post5][R-V172-GREPTILE-002]",
+        "note": "Volume dropdown onChange calls onMove (handleStructure → patchStructure.mutate) immediately, while title/slug/status/planned_word_count accumulate into local state and dispatch only on Save click. UX inconsistency + risk of accidental revision-bumping dispatch. Fix: update volume local state in onChange and dispatch via the same save() path (set.volume in OutlinePatchChapterRequest) as other fields.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V172-GREPTILE-003",
+        "title": "Keychain password written to GITHUB_OUTPUT but never read by subsequent steps",
+        "severity": "high",
+        "source": "Greptile post-merge review (PR #97)",
+        "scope": ".github/workflows/desktop-release.yml:122",
+        "decision": "fix",
+        "owner": "ops-engineer",
+        "target": "V1.72 hotfix (target_date 2026-06-28)",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-greptile-post5][R-V172-GREPTILE-003]",
+        "note": "Random keychain password echoed to GITHUB_OUTPUT exposes secret via steps.keychain.outputs.keychain_pass in GitHub Actions summary and any step that reads step outputs. Cleanup step uses security delete-keychain (no password required); signing steps run in same shell invocation where password is in scope. Fix: remove echo \"keychain_pass=$keychain_pass\" line.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V172-GREPTILE-004",
+        "title": "split_frontmatter matches \\n--- anywhere, not just bare delimiter line",
+        "severity": "medium",
+        "source": "Greptile post-merge review (PR #97)",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/outline.rs:125",
+        "decision": "fix",
+        "owner": "fullstack-dev",
+        "target": "V1.72 hotfix (target_date 2026-06-28)",
+        "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-greptile-post5][R-V172-GREPTILE-004]",
+        "note": "after_open.find(\"\\n---\") matches substring anywhere, including \"\\n---more-text\" or YAML block scalar starting line with ---. User-defined chapter title or timeline event description containing --- at line start, serialized by serde_yaml without quoting, could cause premature frontmatter split. Fix: match \"\\n---\\n\" (or only at end-of-string) to enforce bare delimiter line.",
+        "lifecycle": "open"
       }
     ]
   }
