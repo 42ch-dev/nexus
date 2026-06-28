@@ -1,6 +1,6 @@
 {
   "version": 1,
-    "updated_at": "2026-06-28T08:45:00Z",
+  "updated_at": "2026-06-28T08:55:00Z",
   "plans": [
     {
       "plan_id": "2026-06-27-v1.71-compass-and-plan",
@@ -86,7 +86,7 @@
       "pr_number": 95
     },
     "tech_debt_summary": {
-      "total_open": 8,
+      "total_open": 9,
       "total_deferred": 1,
       "total_resolved": 233,
       "total_archived": 0,
@@ -94,22 +94,22 @@
         "critical": 0,
         "high": 1,
         "medium": 1,
-        "low": 5,
+        "low": 6,
         "nit": 1
       },
       "by_target_active": {
         "V1.72": 1,
-        "V1.72 or V1.71 P-last cleanup": 7
+        "V1.72 or V1.71 P-last cleanup": 8
       },
       "by_plan_active": {
         "2026-06-27-v1.71-canvas-strategy-write-boundary": 4,
-        "2026-06-27-v1.71-hygiene-and-sign-groundwork": 3,
+        "2026-06-27-v1.71-hygiene-and-sign-groundwork": 4,
         "v1.65": 1
       },
-      "refreshed_at": "2026-06-28T08:45:00Z",
-      "refreshed_reason": "V1.71 P0 qc1 re-review after fix wave: R-V171P0-QC1-001/002/003/005/007/009 verified resolved; R-V171P0-QC1-004/006 partially resolved and kept open with corrected severity (high/medium); R-V171P0-QC1-008/010 still open (low). Severities for open warning-class residuals were corrected from 'warning' to the canonical enum. P1 residuals R-V171P1-QC1-001..003 and R-V165-QC3-VIRT remain open."
+      "refreshed_at": "2026-06-28T08:55:00Z",
+      "refreshed_reason": "V1.71 P1 qc3 review: approved with one new low-severity smoke-script reliability residual R-V171P1-QC3-001 registered. P0 open residuals from qc1 re-review and P1 qc1 residuals remain open."
     },
-  "updated_at": "2026-06-28T08:45:00Z",
+    "updated_at": "2026-06-28T08:55:00Z",
     "spec_integration_branch": "iteration/v1.71",
     "wave1_merged_at": null
   },
@@ -4807,6 +4807,20 @@
         "target_date": "V1.72",
         "tracking_link": ".mstar/plans/reports/2026-06-27-v1.71-hygiene-and-sign-groundwork/qc1.md",
         "note": "const canEditOutline = chapter.data?.can_edit_outline ?? true; falls back to editable if the API omits the field. Backend always populates it today, but defense-in-depth would default to false or validate the contract shape at the API boundary. Non-blocking for P1 approval.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V171P1-QC3-001",
+        "title": "Served-UI smoke cleanup kills any process on the selected port before proving ownership",
+        "severity": "low",
+        "source": "qc3 S-001",
+        "scope": "scripts/served-ui-smoke.sh lines 21-26",
+        "decision": "defer",
+        "owner": "@ops-engineer",
+        "target": "V1.72 or V1.71 P-last cleanup",
+        "target_date": "V1.72",
+        "tracking_link": ".mstar/plans/reports/2026-06-27-v1.71-hygiene-and-sign-groundwork/qc3.md",
+        "note": "The smoke script runs lsof -ti tcp:${PORT} and kills all returned PIDs before starting its own daemon. This is low risk in CI because the script normally chooses an ephemeral port, but local runs with NEXUS_DAEMON_PORT set, or an ephemeral-port race, can terminate an unrelated process. Prefer failing fast on occupied port, or only killing a process proven to be a previous Nexus smoke daemon owned by this script/test home.",
         "lifecycle": "open"
       }
     ]
