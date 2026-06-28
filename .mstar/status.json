@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-28T06:09:11Z",
+  "updated_at": "2026-06-28T09:40:56Z",
   "plans": [
     {
       "plan_id": "2026-06-28-v1.72-compass-and-plan",
@@ -5180,7 +5180,14 @@
         "target": "V1.72 P1 fix-wave (target_date 2026-06-29)",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-hygiene-and-release-hardening][R-V172P1-QC3-001]",
         "note": "useEffect depends on saveTrigger + handleSave; handleSave is recreated every render; saveTrigger never resets. Can issue duplicate PATCH + extra revision bumps + avoidable 409s. Fix: edge-trigger via lastHandledTriggerRef, or reset trigger after consumption, or stable handleSave via useCallback.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28",
+        "closure_note": "Applied edge-trigger guard: each inspector now tracks the last handled saveTrigger value in a ref and only invokes handleSave for unseen values. This prevents duplicate PATCH calls when the inspector re-renders while the trigger is still non-zero. Regression test added in inspector-save-trigger.test.tsx verifies StateInspector/EdgeInspector/PromptInspector each call their patch mutation exactly once per trigger value across multiple renders.",
+        "closure_evidence": "apps/web/src/components/canvas/strategy-canvas/inspectors/inspector-save-trigger.test.tsx; pnpm --filter web test (156 passed)",
+        "resolution": {
+          "plan_id": "2026-06-28-v1.72-hygiene-and-release-hardening",
+          "commit": "890b6559"
+        }
       },
       {
         "id": "R-V172P1-QC3-002",
@@ -5193,7 +5200,14 @@
         "target": "V1.72 P1 fix-wave (target_date 2026-06-29)",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-hygiene-and-release-hardening][R-V172P1-QC3-002]",
         "note": "Packaging/upload only runs after signing/notarize/staple succeed. Unsigned DMG is removed during signed DMG recreation. Fix: copy unsigned DMG to fallback path before signing; packaging/upload runs with always() condition and uploads signed DMG when signing succeeds, otherwise fallback unsigned DMG; add step-level timeouts for keychain/codesign/notarize/staple so cleanup runs before overall timeout.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28",
+        "closure_note": "Workflow updated: unsigned DMG is copied to Nexus-unsigned-fallback.dmg before signing; packaging and upload steps run with always()&&steps.bundle.outcome=='success' and select signed DMG when staple succeeds, fallback unsigned DMG otherwise, with a clear error annotation; step-level timeouts (20 min) added to keychain creation, codesign, DMG recreation, notarization, and staple so the cleanup step still runs before the 120-minute job timeout. actionlint passes with no new issues.",
+        "closure_evidence": ".github/workflows/desktop-release.yml; actionlint validation (pre-existing shellcheck nits only)",
+        "resolution": {
+          "plan_id": "2026-06-28-v1.72-hygiene-and-release-hardening",
+          "commit": "1fa5d4ac"
+        }
       },
       {
         "id": "R-V172P1-QC1-001",
