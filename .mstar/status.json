@@ -20,7 +20,7 @@
     {
       "plan_id": "2026-06-28-v1.72-canvas-outline-timeline-beta",
       "iteration_id": "V1.72",
-      "status": "InProgress",
+      "status": "InReview",
       "owner": "frontend-dev + fullstack-dev",
       "effort": "L",
       "type": "implement",
@@ -31,12 +31,14 @@
       "wire_contracts_note": "V1.72 Track A: new Local API DTOs for outline.patch_structure / outline.patch_chapter / timeline.patch_event + outlineRevision + conflict error; @42ch/nexus-contracts 0.7.0 → 0.8.0",
       "depends_on": [
         "2026-06-28-v1.72-compass-and-plan"
-      ]
+      ],
+      "merged_to_integration_at": "2026-06-28T08:57:55Z",
+      "merged_to_integration_commits": "cfb2e8b3"
     },
     {
       "plan_id": "2026-06-28-v1.72-hygiene-and-release-hardening",
       "iteration_id": "V1.72",
-      "status": "InProgress",
+      "status": "InReview",
       "owner": "frontend-dev + fullstack-dev + ops-engineer",
       "effort": "M",
       "type": "implement",
@@ -46,7 +48,9 @@
       "wire_contracts_changed": false,
       "depends_on": [
         "2026-06-28-v1.72-compass-and-plan"
-      ]
+      ],
+      "merged_to_integration_at": "2026-06-28T08:57:55Z",
+      "merged_to_integration_commits": "31805f9e"
     },
     {
       "plan_id": "2026-06-28-v1.72-closure",
@@ -114,7 +118,7 @@
       "refreshed_at": "2026-06-28T08:57:08Z",
       "refreshed_reason": "V1.72 P0 + P1 implement complete; 4 V1.71 carry-over residuals resolved (HIGH R-V171P0-QC1-004 + MEDIUM R-V171P0-QC1-006 + MEDIUM R-V171-CI-RELEASE-WORKFLOW-INCOMPLETE + LOW R-V171-CI-WORKFLOW-SETUP-DEDUPE); 8 V1.72-targeted residuals re-targeted to V1.73 hygiene/release-hardening backlog with durable plan-id pointer."
     },
-    "updated_at": "2026-06-28T08:57:08Z",
+    "updated_at": "2026-06-28T08:57:55Z",
     "spec_integration_branch": "iteration/v1.72",
     "wave1_merged_at": null
   },
