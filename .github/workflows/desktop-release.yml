@@ -62,6 +62,18 @@ jobs:
         with:
           rust-targets: aarch64-apple-darwin, x86_64-apple-darwin, wasm32-unknown-unknown
 
+      # V1.73 B7 (R-V172P1-QC3-003): cache the Rust build legs (workspace +
+      # Tauri crate) so release rebuilds reuse compilation artifacts. Mirrors
+      # the cache wiring already used by ci.yml / desktop-build.yml. The pinned
+      # SHA and the `workspaces` list match desktop-build.yml exactly so the two
+      # jobs share cache entries where their targets overlap.
+      - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
+        with:
+          key: desktop-release-universal
+          workspaces: |
+            .
+            apps/desktop/src-tauri
+
       - name: Build contracts package
         run: pnpm --filter @42ch/nexus-contracts run build
 
