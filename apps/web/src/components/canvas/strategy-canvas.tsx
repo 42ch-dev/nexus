@@ -191,11 +191,19 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
       }
 
       if (form.nextTarget !== original.nextTarget && typeof selectedState.next === 'string') {
+        // If the original transition was a self-loop pointing at the state
+        // being renamed, the server-side rename updates it to the new ID, so
+        // `oldTarget` must be the renamed ID rather than the original. Without
+        // this, patchTransition returns strategy_transition_not_found because
+        // the branch no longer matches `original.nextTarget` (= old state ID).
+        // R-V171-GREPTILE-P1-5.
+        const oldTarget =
+          original.nextTarget === selectedState.id ? renamedStateId : original.nextTarget;
         const args: PatchStrategyTransitionArgs = {
           strategyId: presetId,
           sourceStateId: renamedStateId,
           baseRevision: currentRevision,
-          oldTarget: original.nextTarget,
+          oldTarget,
           newTarget: form.nextTarget,
           transitionKind: 'next',
         };
