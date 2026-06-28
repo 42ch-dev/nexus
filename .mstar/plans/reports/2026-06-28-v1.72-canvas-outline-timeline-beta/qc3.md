@@ -3,8 +3,8 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: 2026-06-28-v1.72-canvas-outline-timeline-beta
-verdict: Request Changes
-generated_at: 2026-06-28
+verdict: Approve
+generated_at: 2026-06-28T11:46:56Z
 ---
 
 # Code Review Report
@@ -102,3 +102,35 @@ generated_at: 2026-06-28
 **Verdict**: Request Changes
 
 Critical F-001 must be fixed before approval. Warnings F-002 through F-005 are reliability/performance gate issues; if PM accepts any as β trade-offs, they should be explicitly tracked as residuals with tests or scope notes.
+
+## Revalidation (targeted re-review after fix-wave)
+
+- **Re-review timestamp**: 2026-06-28T11:46:56Z
+- **Plan HEAD at re-review**: `266f8b07`
+- **Items re-validated**: F-001 (Critical body overwrite); F-002 (type); F-003 (cache); F-004 (route split); F-005 deferral.
+- **F-001 verification**: Verified fixed in `crates/nexus-daemon-runtime/src/api/handlers/outline.rs`. All three patch handlers keep the early read as a fast conflict shortcut that extracts only `.0` (frontmatter), convert `req.base_revision` to `i64`, and then re-read `(mut frontmatter, body)` under `RuntimeLockGuard` before mutation and `atomic_write_outline(...)`. The write calls at structure/chapter/timeline paths pass `&body` from the under-lock read. Regression coverage exists in `patch_write_uses_body_from_locked_re_read`, which simulates the body changing between the early read and locked read and asserts the final file preserves `fresh body` and excludes the stale snapshot. Targeted regression command passed: `cargo test -p nexus-daemon-runtime outline::tests::patch_write_uses_body_from_locked_re_read` (1 passed; unrelated warning output from other filtered integration test targets only).
+- **F-002 verification**: Verified fixed in `outline.rs`: `OutlineFrontmatter.outline_revision` is now `i64`; `patch_ok(new_revision: i64, ...)` returns `new_revision` directly; no `unwrap_or(0)` fallback remains in the outline handler for the patch response. Boundary conversion to the existing unsigned `WorkOutline.outline_revision` uses explicit `outline_revision_u64()?` / invariant handling. Codegen no-drift was verified with `pnpm run codegen && git diff --exit-code -- schemas packages/nexus-contracts crates/nexus-contracts` (exit 0, no diff).
+- **F-003 verification**: Verified fixed in `apps/web/src/lib/canvas/use-outline-data.ts`. `usePatchOutlineStructure` invalidates both `queryKeys.outline.detail(workId ?? '')` and `queryKeys.chapters.lists()`. `usePatchOutlineChapter` invalidates outline detail, `queryKeys.chapters.lists()`, and `queryKeys.chapters.detail(workId ?? '', variables.chapter)`. `usePatchTimelineEvent` still invalidates only the outline detail query, as required because it does not mutate chapter metadata.
+- **F-004 verification**: Verified fixed in `apps/web/src/App.tsx`: `OutlinePage` is loaded with `lazy(() => import('@/pages/outline-page').then(...))` and rendered behind a `Suspense` fallback on `/works/:workId/outline`, matching the existing `StrategyPage` pattern. Fresh `pnpm --filter web build` emitted `dist/assets/outline-page-CSOmw105.js` (20.77 kB, gzip 5.69 kB); the main `index-DOQpDVDS.js` chunk is 956.53 kB versus the prior qc3 observed 983.07 kB, so it reduced. Vite's existing >500 kB chunk warning remains for the main chunk but is not a new blocker for this targeted fix.
+- **F-005 deferral recorded**: Yes — `.mstar/status.json` root `residual_findings["2026-06-28-v1.72-canvas-outline-timeline-beta"]` contains `R-V172P0-QC3-004` with `decision: "defer"`, `target: "V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene)"`, and `lifecycle: "open"` (lines 5130-5140 in the re-review read). Note: PM also marked fix-wave items `R-V172P0-QC3-001/002/003` and the qc1 type residual resolved in `status.json`; QC did not edit `status.json`.
+- **CI gates re-run**:
+  - `cargo clippy --all -- -D warnings` — PASS.
+  - `cargo test --all` — PASS on fresh rerun (the first run exposed `nexus-creator-memory` tests failing from shared `/tmp` test-path interference; focused serial rerun passed, then a fresh full `cargo test --all` passed: 762 app/CLI tests in the final `nexus42` lib batch plus all subsequent integration/doc tests shown passed, with ignored daemon smoke doctests unchanged).
+  - `pnpm --filter web typecheck` — PASS.
+  - `pnpm --filter web build` — PASS; emitted outline-specific chunk `outline-page-CSOmw105.js` and retained only the Vite chunk-size warning.
+  - `pnpm --filter web test` — PASS (`20` test files, `156` tests).
+  - `pnpm run codegen && git diff --exit-code -- schemas packages/nexus-contracts crates/nexus-contracts` — PASS; no generated/schema drift.
+
+### Revalidation Findings
+None — fix-wave addresses F-001 (Critical) + F-002/F-003/F-004 (Warnings); F-005 deferred per PM disposition with residual recorded.
+
+### Revalidation Verdict
+Approve
+
+### Revalidation Summary
+| Severity | Count |
+|---|---|
+| 🔴 Critical | 0 |
+| 🟡 Warning | 0 |
+| 🟢 Suggestion | 0 |
+
