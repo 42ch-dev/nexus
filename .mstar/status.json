@@ -4614,7 +4614,13 @@
         "target_date": "2026-06-28",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.71-canvas-strategy-write-boundary][R-V171P0-QC1-004]",
         "note": "Partially resolved in the fix wave. The canvas now tracks workingRevision and bumps it after each successful partial patch, and it refetches canonical state on conflict. However, handleSave still issues up to three sequential mutateAsync calls (state, transition, prompt template) with no compensating rollback if a later call fails after earlier ones succeeded. Each patch is atomic on the daemon, but the UI-level multi-patch save is not a unified transaction. Either split saves per inspector section or add compensating logic and partial-failure UI before V1.71 ships.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28",
+        "closure_note": "Closed in V1.72 P1: split StrategyCanvas into per-inspector-section saves (state, transition, prompt template). Each section owns its own save button, active-inspector Cmd/Ctrl+S handling, and per-call success/error status. A failure in one section does not roll back or lose draft changes in the others; each patch remains atomic on the daemon. Documented the no-rollback decision in the strategy-canvas.tsx module doc-comment. Verified by pnpm --filter web typecheck/build/test and cargo clippy --all / cargo test --all.",
+        "resolution": {
+          "plan_id": "2026-06-28-v1.72-hygiene-and-release-hardening",
+          "commit": "73ed508b"
+        }
       },
       {
         "id": "R-V171P0-QC3-C3",
@@ -4885,7 +4891,13 @@
         "target_date": "2026-06-28",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.71-canvas-strategy-write-boundary][R-V171P0-QC1-006]",
         "note": "Partially resolved. ConflictModal has been extracted to apps/web/src/components/canvas/conflict-modal.tsx with component tests. InspectorOverlay, ValidationPanel, and ArtifactsList remain inline. strategy-canvas.tsx is still ~570 lines and mixes graph sync, live overlay, edit-form state, validation panel, conflict handling, and helper components. Extract the remaining sub-components in a follow-up cleanup.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28",
+        "closure_note": "Closed in V1.72 P1: refactored strategy-canvas.tsx into a thin orchestrator (190 lines) plus focused sibling modules: hooks/use-strategy-canvas.ts, state-machine.tsx, canvas-layout.tsx, inspector-panel.tsx (now also hosts the StrategyConflictModal wrapper), and inspectors/state|edge|prompt-inspector.tsx. All modules are ≤200 lines. Preserved the public StrategyCanvas export and existing conflict-modal UX. Verified by pnpm --filter web typecheck/build/test and cargo clippy --all / cargo test --all.",
+        "resolution": {
+          "plan_id": "2026-06-28-v1.72-hygiene-and-release-hardening",
+          "commit": "73ed508b"
+        }
       }
     ],
     "2026-06-27-v1.71-hygiene-and-sign-groundwork": [
@@ -4962,7 +4974,13 @@
         "owner": "@ops-engineer",
         "target": "V1.72 release-hardening plan",
         "note": "desktop-release.yml reads APPLE_SIGNING_IDENTITY and has a fail-fast check, but the .p12 certificate is never imported to the runner's temporary keychain, so even when the secret is configured, tauri build's codesign invocation cannot find the private key and fails. Also missing: notarize + staple steps, so signed .dmg would still be blocked by macOS Gatekeeper on first open. V1.71 ship is not blocked because the PR-verification workflow (desktop-build.yml) is now unsigned-only (revert of P1 mis-injection). Release artifacts for V1.71 are produced by developer-local signing + manual upload, not via this CI workflow. Full fix: add 'Import signing certificate to temporary keychain' step between 'Require signing identity' and 'Build Tauri desktop bundle', plus a notarize + staple step after dmg creation. Secrets required: APPLE_CERTIFICATE_P12_BASE64, APPLE_CERTIFICATE_PASSWORD, APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID in addition to APPLE_SIGNING_IDENTITY.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28",
+        "closure_note": "Closed in V1.72 P1: desktop-release.yml now imports the .p12 certificate into a temporary keychain, signs the .app with codesign --options runtime --timestamp --deep, rebuilds the .dmg from the signed .app, submits the .dmg to Apple notarytool with --wait, and staples the notarization ticket. When the five required secrets are absent the workflow emits an unsigned-artifacts notice and succeeds; when only some secrets are present it uploads unsigned artifacts and fails with a list of missing secrets. Updated apps/desktop/SIGNING.md with the secret table and CI flow.",
+        "resolution": {
+          "plan_id": "2026-06-28-v1.72-hygiene-and-release-hardening",
+          "commit": "b480a283"
+        }
       },
       {
         "id": "R-V171-CI-WORKFLOW-SETUP-DEDUPE",
@@ -4974,7 +4992,13 @@
         "owner": "@ops-engineer",
         "target": "V1.72",
         "note": "ci.yml and desktop-build.yml each re-declare the same monorepo setup boilerplate (checkout, pnpm/action-setup, setup-node, dtolnay/rust-toolchain, Swatinem/rust-cache, pnpm install --frozen-lockfile) in every job. The boilerplate cannot be merged at the workflow level (jobs must run in parallel on independent runners with different OS images), but the setup steps themselves are repeated verbatim ~7 times across the two files, making it tedious to bump action SHAs or pnpm/node versions. Fix: extract a .github/actions/setup-monorepo composite action that takes rust-targets, cache-key, and cache-workspaces as inputs, and have all jobs in both workflows use it. Do NOT attempt to merge jobs or workflows (GitHub Actions jobs are intentionally isolated). Do NOT extract the build/test steps themselves — they vary too much across jobs to share meaningfully.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28",
+        "closure_note": "Closed in V1.72 P1: created .github/actions/setup-monorepo/action.yml composite action covering checkout, pnpm/node setup, Rust toolchain install, rust-cache, and frozen-lockfile install with optional rust-targets/cache-key/cache-workspaces inputs. Updated ci.yml and desktop-build.yml to consume the composite action; both files shrank by ≥20 lines each while preserving matrix behavior and OS coverage.",
+        "resolution": {
+          "plan_id": "2026-06-28-v1.72-hygiene-and-release-hardening",
+          "commit": "9a6591aa"
+        }
       },
       {
         "id": "R-V171-GREPTILE-POST5-TOAST",
