@@ -5,13 +5,13 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import { OutlineConflictModal } from './outline-conflict-modal';
+import { OutlineConflictModal, type OutlineChangedField } from './outline-conflict-modal';
 
 const baseProps = {
   open: true,
   currentRevision: 3,
   draft: {
-    fields: ['chapter_title', 'move_chapter'] as const,
+    fields: ['chapter_title', 'move_chapter'] as OutlineChangedField[],
     conflictingPath: 'volumes/1',
   },
   onUseCurrent: vi.fn(),
