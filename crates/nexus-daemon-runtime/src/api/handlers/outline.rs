@@ -552,6 +552,14 @@ pub async fn patch_outline_structure(
 }
 
 /// `POST /v1/local/works/{work_id}/chapters/{chapter_id}/patch` — outline chapter patch.
+///
+// `too_many_lines`: this handler intentionally keeps the auth → work load →
+// pre-lock read → revision check → `RuntimeLockGuard` acquire → locked re-read
+// → validation → atomic persist sequence inline so the TOCTOU + lock-release
+// invariants (see `nexus-daemon-runtime/AGENTS.md` Rule 2) are locally
+// auditable. V1.73 B1 extended `apply_chapter_patch` with the `chapters` slice
+// for slug-uniqueness validation, which pushed it one line over the cap.
+#[allow(clippy::too_many_lines)]
 pub async fn patch_outline_chapter(
     State(state): State<WorkspaceState>,
     Path((work_id, n)): Path<(String, String)>,
