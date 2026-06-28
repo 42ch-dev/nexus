@@ -94,30 +94,27 @@
       "merge_commit": "1cedbc799957e61516073733527b1fd9607c55bf"
     },
     "tech_debt_summary": {
-      "total_open": 12,
-      "total_deferred": 1,
-      "total_resolved": 243,
+      "total_open": 8,
+      "total_deferred": 8,
+      "total_resolved": 247,
       "total_archived": 0,
       "by_severity_active": {
-        "low": 8,
-        "high": 1,
-        "medium": 2,
+        "low": 7,
         "nit": 1
       },
       "by_target_active": {
-        "V1.72": 4,
-        "V1.72 or V1.71 P-last cleanup": 7,
-        "V1.72 release-hardening plan": 1
+        "V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene)": 7,
+        "V1.73 release hardening backlog (plan-id tbd-v1.73-release-hardening)": 1
       },
       "by_plan_active": {
         "v1.65": 1,
-        "2026-06-27-v1.71-canvas-strategy-write-boundary": 4,
-        "2026-06-27-v1.71-hygiene-and-sign-groundwork": 7
+        "2026-06-27-v1.71-canvas-strategy-write-boundary": 2,
+        "2026-06-27-v1.71-hygiene-and-sign-groundwork": 5
       },
-      "refreshed_at": "2026-06-28T05:31:48Z",
-      "refreshed_reason": "V1.72 prepare: 4 plans registered (P-1 prepare + P0 canvas outline+timeline beta + P1 hygiene+release hardening + P-last closure), integration_branch → iteration/v1.72, retired iteration/v1.71, pre_implement_gate=pending."
+      "refreshed_at": "2026-06-28T08:57:08Z",
+      "refreshed_reason": "V1.72 P0 + P1 implement complete; 4 V1.71 carry-over residuals resolved (HIGH R-V171P0-QC1-004 + MEDIUM R-V171P0-QC1-006 + MEDIUM R-V171-CI-RELEASE-WORKFLOW-INCOMPLETE + LOW R-V171-CI-WORKFLOW-SETUP-DEDUPE); 8 V1.72-targeted residuals re-targeted to V1.73 hygiene/release-hardening backlog with durable plan-id pointer."
     },
-    "updated_at": "2026-06-28T07:32:34Z",
+    "updated_at": "2026-06-28T08:57:08Z",
     "spec_integration_branch": "iteration/v1.72",
     "wave1_merged_at": null
   },
@@ -4084,8 +4081,9 @@
         "scope": "apps/web chapters-page",
         "decision": "defer",
         "target_iteration": "V1.72",
-        "target": "V1.72",
-        "notes": "Deferred from V1.71 Track B: chapter virtualization requires @tanstack/react-virtual dependency + table restructuring; no real large-chapter dataset available in V1.71 to validate. Scheduled for V1.72 hygiene or outline+timeline canvas pivot."
+        "target": "V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene)",
+        "notes": "Deferred from V1.71 Track B: chapter virtualization requires @tanstack/react-virtual dependency + table restructuring; no real large-chapter dataset available in V1.71 to validate. Scheduled for V1.72 hygiene or outline+timeline canvas pivot.",
+        "note": "V1.72 deferred to V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene) per compass §5 V1.73 deferrals table."
       },
       {
         "id": "R-V165-QC-SUGG-DEFENSE",
@@ -4800,10 +4798,10 @@
         "scope": "apps/web/src/components/canvas/strategy-canvas.tsx; apps/web/src/lib/nexus/browser-client.test.ts",
         "decision": "defer",
         "owner": "@frontend-dev + @qa-engineer",
-        "target": "V1.72 or V1.71 P-last cleanup",
+        "target": "V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene)",
         "target_date": "2026-06-28",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.71-canvas-strategy-write-boundary][R-V171P0-QC1-008]",
-        "note": "Still open. The ConflictModal now has 8 component tests and the canvas auto-refetches on conflict, but there is no automated test that submits an edit through StrategyCanvas and verifies query invalidation/refetch. Add a focused component or e2e test before closing.",
+        "note": "Still open. The ConflictModal now has 8 component tests and the canvas auto-refetches on conflict, but there is no automated test that submits an edit through StrategyCanvas and verifies query invalidation/refetch. Add a focused component or e2e test before closing. | V1.72 deferred to V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene) per compass §5 V1.73 deferrals table.",
         "lifecycle": "open"
       },
       {
@@ -4836,10 +4834,10 @@
         "scope": ".mstar/plans/2026-06-27-v1.71-canvas-strategy-write-boundary.md A1; packages/nexus-contracts/src/generated/local-api/canvas/strategy/",
         "decision": "defer",
         "owner": "@project-manager or @architect",
-        "target": "V1.72 or V1.71 P-last cleanup",
+        "target": "V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene)",
         "target_date": "2026-06-28",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.71-canvas-strategy-write-boundary][R-V171P0-QC1-010]",
-        "note": "Still open. The plan and compass still state that generated TypeScript output lives under apps/web/src/api-types/canvas/, but the actual generated TS is in packages/nexus-contracts/src/generated/ and is consumed via the workspace package. apps/web/src/api-types/ does not exist. Update the plan, compass, and any spec references to match the actual architecture.",
+        "note": "Still open. The plan and compass still state that generated TypeScript output lives under apps/web/src/api-types/canvas/, but the actual generated TS is in packages/nexus-contracts/src/generated/ and is consumed via the workspace package. apps/web/src/api-types/ does not exist. Update the plan, compass, and any spec references to match the actual architecture. | V1.72 deferred to V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene) per compass §5 V1.73 deferrals table.",
         "lifecycle": "open"
       },
       {
@@ -4909,10 +4907,10 @@
         "scope": "apps/nexus42/src/commands/daemon_run.rs module doc; crates/nexus-daemon-runtime/src/boot.rs try_init comment",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.72 or V1.71 P-last cleanup",
+        "target": "V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene)",
         "target_date": "V1.72",
         "tracking_link": ".mstar/plans/reports/2026-06-27-v1.71-hygiene-and-sign-groundwork/qc1.md",
-        "note": "start_daemon now spawns 'daemon-run' directly (commit 835e4762). The module-level comments in daemon_run.rs and boot.rs still describe the old '__internal daemon-run' invocation. Pure doc drift; no runtime impact.",
+        "note": "start_daemon now spawns 'daemon-run' directly (commit 835e4762). The module-level comments in daemon_run.rs and boot.rs still describe the old '__internal daemon-run' invocation. Pure doc drift; no runtime impact. | V1.72 deferred to V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene) per compass §5 V1.73 deferrals table.",
         "lifecycle": "open"
       },
       {
@@ -4923,10 +4921,10 @@
         "scope": "apps/desktop/src-tauri/tauri.conf.json line 45; apps/desktop/SIGNING.md",
         "decision": "defer",
         "owner": "@ops-engineer",
-        "target": "V1.72 or V1.71 P-last cleanup",
+        "target": "V1.73 release hardening backlog (plan-id tbd-v1.73-release-hardening)",
         "target_date": "V1.72",
         "tracking_link": ".mstar/plans/reports/2026-06-27-v1.71-hygiene-and-sign-groundwork/qc1.md",
-        "note": "Tauri docs say APPLE_SIGNING_IDENTITY overwrites tauri.conf.json > bundle > macOS > signingIdentity, so the env-var path works. However, explicitly setting signingIdentity:null reads as 'signing disabled' and may confuse maintainers. Either omit the key or add a comment explaining the env-var override. Non-blocking; signed build still functions when secrets are present.",
+        "note": "Tauri docs say APPLE_SIGNING_IDENTITY overwrites tauri.conf.json > bundle > macOS > signingIdentity, so the env-var path works. However, explicitly setting signingIdentity:null reads as 'signing disabled' and may confuse maintainers. Either omit the key or add a comment explaining the env-var override. Non-blocking; signed build still functions when secrets are present. | V1.72 deferred to V1.73 release hardening backlog (plan-id tbd-v1.73-release-hardening) per compass §5 V1.73 deferrals table.",
         "lifecycle": "open"
       },
       {
@@ -4958,10 +4956,10 @@
         "scope": "apps/web/src/pages/chapter-page.tsx line 70",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "V1.72 or V1.71 P-last cleanup",
+        "target": "V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene)",
         "target_date": "V1.72",
         "tracking_link": ".mstar/plans/reports/2026-06-27-v1.71-hygiene-and-sign-groundwork/qc1.md",
-        "note": "const canEditOutline = chapter.data?.can_edit_outline ?? true; falls back to editable if the API omits the field. Backend always populates it today, but defense-in-depth would default to false or validate the contract shape at the API boundary. Non-blocking for P1 approval.",
+        "note": "const canEditOutline = chapter.data?.can_edit_outline ?? true; falls back to editable if the API omits the field. Backend always populates it today, but defense-in-depth would default to false or validate the contract shape at the API boundary. Non-blocking for P1 approval. | V1.72 deferred to V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene) per compass §5 V1.73 deferrals table.",
         "lifecycle": "open"
       },
       {
@@ -5008,8 +5006,8 @@
         "scope": "apps/web/src/components/canvas/use-strategy-data.ts",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "V1.72",
-        "note": "usePatchStrategyState's success toast description uses args.stateId (the old ID) rather than the new label after a rename, so the user sees a description referring to the old name even though the state now has the new label. Cosmetic only — data integrity is correct. R-V171-GREPTILE-POST5.",
+        "target": "V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene)",
+        "note": "usePatchStrategyState's success toast description uses args.stateId (the old ID) rather than the new label after a rename, so the user sees a description referring to the old name even though the state now has the new label. Cosmetic only — data integrity is correct. R-V171-GREPTILE-POST5. | V1.72 deferred to V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene) per compass §5 V1.73 deferrals table.",
         "lifecycle": "open"
       },
       {
@@ -5020,8 +5018,8 @@
         "scope": "crates/nexus-daemon-runtime/src/api/handlers/strategy.rs::rollback_template_write",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.72",
-        "note": "rollback_template_write restores the previous template bytes via std::fs::write after a validation failure, which is non-atomic. A process crash mid-rollback could leave the template truncated while the YAML revision was already restored. Note: the rollback path is only reachable on validation failure (very rare), and the primary write path is now atomic via atomic_write_with_dir_fsync. Cosmetic defence-in-depth for the failure path. R-V171-GREPTILE-POST5.",
+        "target": "V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene)",
+        "note": "rollback_template_write restores the previous template bytes via std::fs::write after a validation failure, which is non-atomic. A process crash mid-rollback could leave the template truncated while the YAML revision was already restored. Note: the rollback path is only reachable on validation failure (very rare), and the primary write path is now atomic via atomic_write_with_dir_fsync. Cosmetic defence-in-depth for the failure path. R-V171-GREPTILE-POST5. | V1.72 deferred to V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene) per compass §5 V1.73 deferrals table.",
         "lifecycle": "open"
       }
     ]
