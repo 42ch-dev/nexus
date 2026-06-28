@@ -3,8 +3,8 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: 2026-06-28-v1.72-hygiene-and-release-hardening
-verdict: Request Changes
-generated_at: 2026-06-28
+verdict: Approve
+generated_at: 2026-06-28T11:39:35Z
 ---
 
 # Code Review Report
@@ -97,3 +97,31 @@ generated_at: 2026-06-28
 | 🟢 Suggestion | 2 |
 
 **Verdict**: Request Changes
+
+## Revalidation (targeted re-review after fix-wave)
+
+- **Re-review timestamp**: 2026-06-28T11:39:35Z
+- **Plan HEAD at re-review**: `266f8b07`
+- **Items re-validated**: W-001 (Cmd/Ctrl+S replay); W-002 (signing fallback); S-001 deferral.
+- **W-001 verification**: Resolved. Commit `890b6559` adds `lastHandledTriggerRef` to `StateInspector`, `EdgeInspector`, and `PromptInspector`; each effect now consumes only unseen `saveTrigger` values (`saveTrigger > 0 && saveTrigger !== lastHandledTriggerRef.current`) before calling `handleSave`. The new regression file `apps/web/src/components/canvas/strategy-canvas/inspectors/inspector-save-trigger.test.tsx` renders each inspector, re-renders with the same trigger value, and verifies exactly one patch call for that trigger. `StateInspector` additionally verifies a fresh trigger value is still handled once. This satisfies the edge-trigger requirement and prevents replay on unrelated renders while preserving subsequent shortcut saves.
+- **W-002 verification**: Resolved. Commit `1fa5d4ac` adds `Preserve unsigned DMG fallback` (`cp ... Nexus-unsigned-fallback.dmg`) immediately after bundle discovery. `Package release assets` and `Upload release assets` now use `if: ${{ always() && steps.bundle.outcome == 'success' }}`. Upload selects the signed DMG only when `steps.staple.outcome == 'success'`; otherwise, with signing enabled, it uploads the fallback unsigned DMG and emits an error annotation. Step-level `timeout-minutes: 20` exists on temporary keychain creation, codesign, signed-DMG recreation, notarization, and staple. The cleanup step remains guarded by `always() && steps.sign-eval.outputs.should_sign == 'true'`, so these step-level timeouts leave room for keychain cleanup before the job-level timeout. The signing/notarization/staple steps remain fail-fast when secrets are present; the always-gated upload runs first and the failed signing step still leaves the job failed after fallback upload.
+- **S-001 deferral recorded**: Yes — `.mstar/status.json` root `residual_findings["2026-06-28-v1.72-hygiene-and-release-hardening"]` contains `R-V172P1-QC3-003` with `decision: "defer"`, `lifecycle: "open"`, and target `V1.73 release hardening backlog (plan-id tbd-v1.73-release-hardening)`.
+- **CI gates re-run**:
+  - `cargo clippy --all -- -D warnings` — pass (`Finished dev profile`, exit 0).
+  - `pnpm --filter web typecheck` — pass (`tsc --noEmit`, exit 0).
+  - `pnpm --filter web build` — pass (`vite build` complete; pre-existing >500 kB chunk warning remains informational).
+  - `pnpm --filter web test` — pass (20 files / 156 tests; includes `inspector-save-trigger.test.tsx` 3 tests).
+  - `cargo test --all` — failed in `nexus-creator-memory` lib tests with 7 failures around shared `/tmp/test_*` memory paths and atomic temp-file renames/ID preservation under parallel test execution; this is outside the assigned fix-wave files. Targeted reproduction `cargo test -p nexus-creator-memory --lib -- --test-threads=1` passes (150/150), indicating a pre-existing parallel-test isolation issue rather than a P1 fix-wave regression.
+
+### Revalidation Findings
+None — fix-wave addresses W-001 + W-002 (Warnings); S-001 deferred per PM disposition with residual recorded. Note: `cargo test --all` still exposes an unrelated `nexus-creator-memory` parallel test isolation failure; the crate passes serially and the failure is outside this targeted review range.
+
+### Revalidation Verdict
+Approve
+
+### Revalidation Summary
+| Severity | Count |
+|---|---|
+| 🔴 Critical | 0 |
+| 🟡 Warning | 0 |
+| 🟢 Suggestion | 0 |
