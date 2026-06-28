@@ -367,8 +367,12 @@ function RevisionBadge({ revision, status }: { revision: number; status: 'clean'
 
 function templateRefOf(state: PresetState | undefined): string | undefined {
   if (!state) return undefined;
+  // Primary: an `acp_prompt` enter task names the template directly.
   const task = state.enter?.find((e) => e.kind === 'acp_prompt');
-  return task?.name;
+  if (task?.name) return task.name;
+  // Fallback: states may wire a prompt via a `context_update` hook whose
+  // `template_file` points at the same bundle-relative prompt path.
+  return state.context_update?.template_file;
 }
 
 interface InspectorOverlayProps {

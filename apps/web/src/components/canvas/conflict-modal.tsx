@@ -110,9 +110,10 @@ export function ConflictModal({
   if (canonicalDescription !== draft.description) serverChanges.push('description');
   if (canonicalNext !== draft.nextTarget) serverChanges.push('nextTarget');
   // Prompt body changes are not reflected in the manifest; we cannot detect
-  // server-side prompt edits without a separate template-read contract, so
-  // prompt overlap is conservatively assumed if the user edited it.
-  if (draft.promptBody) serverChanges.push('promptBody');
+  // server-side prompt edits without a separate template-read contract.
+  // Only treat the prompt as conflicted when the user actually changed it AND
+  // the changedFields list confirms the conflict was on the prompt path.
+  if (draft.promptBody && changedFields.includes('promptBody')) serverChanges.push('promptBody');
 
   const overlap = changedFields.filter((f) => serverChanges.includes(f));
   const canReapply = overlap.length === 0;

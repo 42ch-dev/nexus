@@ -581,18 +581,15 @@ pub async fn patch_chapter(
         })?
         .ok_or_else(|| NexusApiError::NotFound(format!("chapter {chapter} volume {volume}")))?;
 
-    // Reject display-only title writes in V1.65 with a 422 + field_errors so
-    // the UI can highlight the offending field instead of a generic 400.
+    // Reject display-only title writes in V1.65. This is field validation, not
+    // a preset gate, so use BadRequest (HTTP 400, code `bad_request`) rather
+    // than PresetGatesFailed (HTTP 422, `preset_gates_failed`) — the previous
+    // observable contract and the semantic meaning of both error categories.
     if req.title.is_some() {
-        return Err(NexusApiError::PresetGatesFailed {
-            details: serde_json::json!({
-                "field_errors": [
-                    {
-                        "field": "title",
-                        "reason": "title is display-only in V1.65; use outline frontmatter or slug instead",
-                    }
-                ]
-            }),
+        return Err(NexusApiError::BadRequest {
+            code: "chapter_title_unsupported".to_string(),
+            message: "title is display-only in V1.65; use outline frontmatter or slug instead"
+                .to_string(),
         });
     }
 
@@ -1104,10 +1101,13 @@ mod tests {
         assert_eq!(resp.volume, 2);
     }
 
-    /// Regression: writing `title` used to return a plain 400. It now returns
-    /// 422 with a `field_errors` array so the UI can highlight the field.
+    /// Regression: writing `title` must return BadRequest (HTTP 400,
+    /// `bad_request`) with code `chapter_title_unsupported`. This is field
+    /// validation, not a preset gate, so PresetGatesFailed (HTTP 422,
+    /// `preset_gates_failed`) would be both semantically wrong and an
+    /// observable contract change.
     #[tokio::test]
-    async fn patch_chapter_title_returns_422_field_error() {
+    async fn patch_chapter_title_returns_bad_request() {
         let (state, _tmp, work_id) = setup_chapter_work().await;
         let req = PatchChapterRequest {
             title: Some("New Title".to_string()),
@@ -1129,15 +1129,11 @@ mod tests {
 
         let err = result.expect_err("title patch should fail");
         match err {
-            NexusApiError::PresetGatesFailed { details } => {
-                let field_errors = details
-                    .get("field_errors")
-                    .and_then(|v| v.as_array())
-                    .expect("details should contain field_errors array");
-                assert_eq!(field_errors.len(), 1);
-                assert_eq!(field_errors[0]["field"], "title");
+            NexusApiError::BadRequest { code, message } => {
+                assert_eq!(code, "chapter_title_unsupported");
+                assert!(message.contains("display-only"));
             }
-            other => panic!("expected PresetGatesFailed, got {other:?}"),
+            other => panic!("expected BadRequest, got {other:?}"),
         }
     }
 
