@@ -23,6 +23,7 @@ export * from './domain/WorldMembership';
 export * from './domain/World';
 export * from './local-api/canvas/outline/OutlineConflictError';
 export * from './local-api/canvas/outline/OutlinePatchChapterRequest';
+export * from './local-api/canvas/outline/OutlinePatchChapterSet';
 export * from './local-api/canvas/outline/OutlinePatchResponse';
 export * from './local-api/canvas/outline/OutlinePatchStructureRequest';
 export * from './local-api/canvas/outline/OutlineValidationError';
@@ -175,6 +176,7 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   World: 1,
   OutlineConflictError: 1,
   OutlinePatchChapterRequest: 1,
+  OutlinePatchChapterSet: 1,
   OutlinePatchResponse: 1,
   OutlinePatchStructureRequest: 1,
   OutlineValidationError: 1,

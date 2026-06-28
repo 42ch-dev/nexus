@@ -14,5 +14,6 @@ export interface WorkOutline {
   volumes: { volume_id: number; label: string; chapter_ids: number[] }[];
   timeline_events: { event_id: string; title: string; description?: string; realizes_chapter_id?: number }[];
   foreshadows: { source_event_id: string; target_event_id: string }[];
+  chapter_titles: Record<string, unknown>;
   updated_at: string;
 }

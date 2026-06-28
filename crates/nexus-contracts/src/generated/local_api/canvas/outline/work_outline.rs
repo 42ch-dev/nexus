@@ -42,5 +42,6 @@ pub struct WorkOutline {
     pub volumes: Vec<WorkOutlineVolume>,
     pub timeline_events: Vec<WorkOutlineTimelineEvent>,
     pub foreshadows: Vec<WorkOutlineForeshadow>,
+    pub chapter_titles: std::collections::HashMap<String, String>,
     pub updated_at: String,
 }

@@ -22,40 +22,8 @@
       "description": "Revision observed by the client on the last canonical read."
     },
     "set": {
-      "type": "object",
-      "description": "Fields to update on the chapter. At least one property must be provided.",
-      "minProperties": 1,
-      "properties": {
-        "title": {
-          "type": "string",
-          "description": "Display title for the chapter (UI-only; persisted in the work outline frontmatter)."
-        },
-        "slug": {
-          "type": "string",
-          "description": "Filename slug for the chapter."
-        },
-        "planned_word_count": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Planned word count for the chapter."
-        },
-        "actual_word_count": {
-          "type": "integer",
-          "minimum": 0,
-          "description": "Actual word count for the chapter, if known."
-        },
-        "volume": {
-          "type": "integer",
-          "minimum": 1,
-          "description": "Volume binding for the chapter."
-        },
-        "status": {
-          "type": "string",
-          "enum": ["not_started", "outlined", "draft", "finalized", "published"],
-          "description": "Lifecycle status of the chapter. published is read/protected in V1.72 patch routes unless explicitly authorized."
-        }
-      },
-      "additionalProperties": false
+      "$ref": "outline-patch-chapter-set.schema.json",
+      "description": "Fields to update on the chapter. At least one property must be provided."
     }
   },
   "additionalProperties": false
