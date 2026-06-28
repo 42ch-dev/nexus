@@ -19,13 +19,78 @@ use nexus_contracts::{
 };
 use nexus_home_layout::{user_preset_base_dir, user_preset_bundle_dir};
 use serde_json::Value;
+use std::os::fd::AsRawFd;
 use tracing::info;
+
+/// Advisory lock file inside a user preset bundle.
+///
+/// Provides cross-process serialization for Strategy patch operations. The lock
+/// is acquired before any read/check/write sequence and released when the guard
+/// drops. This prevents the TOCTOU race where two writers starting from the
+/// same `base_revision` both commit `revision: N+1`.
+const STRATEGY_LOCK_FILE: &str = ".strategy-lock";
 
 /// Maximum YAML file size for a user preset (1 MiB).
 const PRESET_MAX_YAML_SIZE: usize = 1024 * 1024;
 
 /// Maximum YAML nesting depth for a user preset.
 const PRESET_MAX_YAML_DEPTH: usize = 10;
+
+// ─── Cross-process advisory lock ───────────────────────────────────────────
+
+/// RAII guard holding an exclusive `flock` on the strategy bundle lock file.
+#[derive(Debug)]
+struct StrategyLockGuard {
+    fd: std::fs::File,
+}
+
+impl Drop for StrategyLockGuard {
+    fn drop(&mut self) {
+        let raw_fd = self.fd.as_raw_fd();
+        #[allow(deprecated)]
+        {
+            if let Err(e) = nix::fcntl::flock(raw_fd, nix::fcntl::FlockArg::Unlock) {
+                tracing::error!(error = %e, "strategy patch: failed to release flock");
+            }
+        }
+    }
+}
+
+/// Acquire an exclusive advisory lock for a strategy bundle.
+///
+/// Blocks until the lock is available. All mutating strategy operations must
+/// hold this lock for the entire load → CAS → validate → write sequence.
+fn acquire_strategy_lock(bundle_dir: &std::path::Path) -> Result<StrategyLockGuard, NexusApiError> {
+    let lock_path = bundle_dir.join(STRATEGY_LOCK_FILE);
+    if let Some(parent) = lock_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| NexusApiError::Internal {
+            code: "DIR_CREATE_ERROR".to_string(),
+            message: format!("cannot create bundle directory: {e}"),
+        })?;
+    }
+
+    let fd = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(false)
+        .open(&lock_path)
+        .map_err(|e| NexusApiError::Internal {
+            code: "LOCK_OPEN_ERROR".to_string(),
+            message: format!("cannot open strategy lock file: {e}"),
+        })?;
+
+    let raw_fd = fd.as_raw_fd();
+    #[allow(deprecated)]
+    nix::fcntl::flock(raw_fd, nix::fcntl::FlockArg::LockExclusive).map_err(|e| {
+        NexusApiError::Internal {
+            code: "LOCK_ACQUIRE_ERROR".to_string(),
+            message: format!("cannot acquire strategy lock: {e}"),
+        }
+    })?;
+
+    Ok(StrategyLockGuard { fd })
+}
 
 // ─── Request helpers ───────────────────────────────────────────────────────
 
@@ -323,7 +388,9 @@ fn validate_preset_yaml(
 
 /// Write the updated YAML back to `preset.yaml`, bumping the revision header.
 ///
-/// Uses a temp file + rename + fsync for atomicity.
+/// Uses a request-unique temp file + rename + fsync (file and parent directory)
+/// for atomicity. The parent directory fsync ensures the rename entry is durable
+/// on POSIX filesystems.
 fn write_preset_yaml(
     bundle_root: &std::path::Path,
     value: &mut serde_yaml::Value,
@@ -337,35 +404,118 @@ fn write_preset_yaml(
     }
 
     let yaml_path = bundle_root.join("preset.yaml");
-    let tmp_path = bundle_root.join("preset.yaml.tmp");
+    let suffix = uuid::Uuid::new_v4().to_string();
+    let tmp_path = bundle_root.join(format!("preset.yaml.tmp.{suffix}"));
 
     let yaml_str = serde_yaml::to_string(value).map_err(|e| NexusApiError::Internal {
         code: "YAML_SERIALIZE_ERROR".to_string(),
         message: e.to_string(),
     })?;
 
-    std::fs::write(&tmp_path, yaml_str).map_err(|e| NexusApiError::Internal {
+    atomic_write_with_dir_fsync(&yaml_path, &tmp_path, yaml_str.as_bytes())?;
+
+    Ok(())
+}
+
+/// Atomically write `content` to `target_path` using `tmp_path`, then rename.
+///
+/// Syncs the temp file, renames, and fsyncs the parent directory. Cleans up
+/// `tmp_path` on error.
+fn atomic_write_with_dir_fsync(
+    target_path: &std::path::Path,
+    tmp_path: &std::path::Path,
+    content: &[u8],
+) -> Result<(), NexusApiError> {
+    std::fs::write(tmp_path, content).map_err(|e| NexusApiError::Internal {
         code: "FILE_WRITE_ERROR".to_string(),
-        message: e.to_string(),
+        message: format!("cannot write temp file {}: {e}", tmp_path.display()),
     })?;
 
-    // fsync the temp file so the subsequent rename is durable.
-    let file = std::fs::File::open(&tmp_path).map_err(|e| NexusApiError::Internal {
+    let file = std::fs::File::open(tmp_path).map_err(|e| NexusApiError::Internal {
         code: "FILE_SYNC_ERROR".to_string(),
-        message: e.to_string(),
+        message: format!("cannot open temp file for fsync: {e}"),
     })?;
     file.sync_all().map_err(|e| NexusApiError::Internal {
         code: "FILE_SYNC_ERROR".to_string(),
-        message: e.to_string(),
+        message: format!("cannot fsync temp file: {e}"),
     })?;
     drop(file);
 
-    std::fs::rename(&tmp_path, &yaml_path).map_err(|e| NexusApiError::Internal {
-        code: "FILE_RENAME_ERROR".to_string(),
-        message: e.to_string(),
+    std::fs::rename(tmp_path, target_path).map_err(|e| {
+        let _ = std::fs::remove_file(tmp_path);
+        NexusApiError::Internal {
+            code: "FILE_RENAME_ERROR".to_string(),
+            message: format!(
+                "cannot rename {} to {}: {e}",
+                tmp_path.display(),
+                target_path.display()
+            ),
+        }
     })?;
 
+    // fsync parent directory so the rename is durable.
+    if let Some(parent) = target_path.parent() {
+        let dir = std::fs::File::open(parent).map_err(|e| NexusApiError::Internal {
+            code: "DIR_SYNC_ERROR".to_string(),
+            message: format!("cannot open bundle directory for fsync: {e}"),
+        })?;
+        if let Err(e) = dir.sync_all() {
+            tracing::warn!(
+                parent = %parent.display(),
+                error = %e,
+                "strategy patch: directory fsync failed"
+            );
+        }
+    }
+
     Ok(())
+}
+
+/// Back up the existing file at `path` (if any) and return the backup bytes.
+fn backup_existing_file(path: &std::path::Path) -> Result<Option<Vec<u8>>, NexusApiError> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let bytes = std::fs::read(path).map_err(|e| NexusApiError::Internal {
+        code: "FILE_READ_ERROR".to_string(),
+        message: format!("cannot back up {}: {e}", path.display()),
+    })?;
+    Ok(Some(bytes))
+}
+
+/// Restore `path` from `backup` and remove any leftover temp file.
+fn rollback_template_write(
+    path: &std::path::Path,
+    backup: Option<Vec<u8>>,
+    tmp_path: &std::path::Path,
+) {
+    let _ = std::fs::remove_file(tmp_path);
+    match backup {
+        Some(bytes) => {
+            if let Err(e) = std::fs::write(path, bytes) {
+                tracing::error!(
+                    path = %path.display(),
+                    error = %e,
+                    "strategy patch: failed to roll back prompt template after validation failure"
+                );
+            }
+        }
+        None => {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+}
+
+/// Validate that a transition condition string parses against the preset
+/// condition grammar. Conditional `when:` values in user presets are expression
+/// strings; an unparsable condition must be rejected before persistence.
+fn validate_transition_condition(condition: &str) -> Result<(), NexusApiError> {
+    nexus_orchestration::preset::expr::parse(condition)
+        .map(|_| ())
+        .map_err(|e| NexusApiError::BadRequest {
+            code: "strategy_transition_condition_invalid".to_string(),
+            message: format!("transition condition is not a valid expression: {e}"),
+        })
 }
 
 // ─── Handlers ──────────────────────────────────────────────────────────────
@@ -386,14 +536,41 @@ pub async fn patch_state(
     ensure_id_matches(&strategy_id, &req.strategy_id, "strategy_id")?;
     ensure_id_matches(&state_id, &req.state_id, "state_id")?;
 
-    let nexus_home = state.nexus_home();
+    let nexus_home = state.nexus_home().clone();
+    let strategy_id = strategy_id.clone();
+    let state_id = state_id.clone();
+    let req = req.clone();
+
+    let response = tokio::task::spawn_blocking(move || {
+        patch_state_inner(&nexus_home, &strategy_id, &state_id, &req)
+    })
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "PATCH_TASK_ERROR".to_string(),
+        message: format!("patch_state task failed: {e}"),
+    })?;
+
+    response.map(Json)
+}
+
+fn patch_state_inner(
+    nexus_home: &std::path::Path,
+    strategy_id: &str,
+    state_id: &str,
+    req: &StrategyPatchStateRequest,
+) -> Result<StrategyPatchResponse, NexusApiError> {
+    let bundle_dir = user_preset_bundle_dir(nexus_home, strategy_id);
+    let _guard = acquire_strategy_lock(&bundle_dir)?;
+
+    // Load the canonical YAML while holding the lock so the revision check is
+    // not subject to TOCTOU.
     let (mut yaml_value, bundle_dir, current_revision) =
-        load_user_preset_yaml(nexus_home, &strategy_id)?;
+        load_user_preset_yaml(nexus_home, strategy_id)?;
 
     if req.base_revision != current_revision {
         return Err(strategy_conflict(
             current_revision,
-            &state_id,
+            state_id,
             "states",
             "refetch the Strategy and reapply your edit",
         ));
@@ -409,7 +586,7 @@ pub async fn patch_state(
             message: "preset.yaml is missing the 'states' array".to_string(),
         })?;
 
-    let idx = find_state_index(states, &state_id).ok_or_else(|| {
+    let idx = find_state_index(states, state_id).ok_or_else(|| {
         NexusApiError::NotFound(format!(
             "state '{state_id}' not found in Strategy '{strategy_id}'"
         ))
@@ -427,7 +604,7 @@ pub async fn patch_state(
                     message: format!("state id '{new_label}' already exists"),
                 });
             }
-            side_effects = rename_state_references(&mut yaml_value, &state_id, &new_label)?;
+            side_effects = rename_state_references(&mut yaml_value, state_id, &new_label)?;
         }
     }
 
@@ -451,18 +628,14 @@ pub async fn patch_state(
         ));
     }
 
-    let new_revision = i64::try_from(current_revision.saturating_add(1)).unwrap_or(i64::MAX);
-    write_preset_yaml(
-        &bundle_dir,
-        &mut yaml_value,
-        current_revision.saturating_add(1),
-    )?;
+    let new_revision = current_revision.saturating_add(1);
+    write_preset_yaml(&bundle_dir, &mut yaml_value, new_revision)?;
 
-    Ok(Json(StrategyPatchResponse {
-        new_revision,
+    Ok(StrategyPatchResponse {
+        new_revision: i64::try_from(new_revision).unwrap_or(i64::MAX),
         validation_summary: serde_json::json!({ "errors": [], "warnings": warnings }),
         side_effects: Some(side_effects),
-    }))
+    })
 }
 
 /// Apply a transition patch to a `next` YAML value.
@@ -594,9 +767,32 @@ pub async fn patch_transition(
     info!(strategy_id = %strategy_id, source = %req.source_state_id, "Patching Strategy transition");
     ensure_id_matches(&strategy_id, &req.strategy_id, "strategy_id")?;
 
-    let nexus_home = state.nexus_home();
+    let nexus_home = state.nexus_home().clone();
+    let strategy_id = strategy_id.clone();
+    let req = req.clone();
+
+    let response = tokio::task::spawn_blocking(move || {
+        patch_transition_inner(&nexus_home, &strategy_id, &req)
+    })
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "PATCH_TASK_ERROR".to_string(),
+        message: format!("patch_transition task failed: {e}"),
+    })?;
+
+    response.map(Json)
+}
+
+fn patch_transition_inner(
+    nexus_home: &std::path::Path,
+    strategy_id: &str,
+    req: &StrategyPatchTransitionRequest,
+) -> Result<StrategyPatchResponse, NexusApiError> {
+    let bundle_dir = user_preset_bundle_dir(nexus_home, strategy_id);
+    let _guard = acquire_strategy_lock(&bundle_dir)?;
+
     let (mut yaml_value, bundle_dir, current_revision) =
-        load_user_preset_yaml(nexus_home, &strategy_id)?;
+        load_user_preset_yaml(nexus_home, strategy_id)?;
 
     if req.base_revision != current_revision {
         return Err(strategy_conflict(
@@ -605,6 +801,12 @@ pub async fn patch_transition(
             "transitions",
             "refetch the Strategy and reapply your edit",
         ));
+    }
+
+    // Reject an unparsable condition before touching YAML so the file is never
+    // left with a bad expression.
+    if let Some(condition) = &req.condition {
+        validate_transition_condition(condition)?;
     }
 
     let states = yaml_value
@@ -636,7 +838,7 @@ pub async fn patch_transition(
             message: format!("state '{}' has no outgoing transition", req.source_state_id),
         })?;
 
-    let (matched, side_effects) = apply_transition_patch(next, &req);
+    let (matched, side_effects) = apply_transition_patch(next, req);
 
     if !matched {
         return Err(NexusApiError::BadRequest {
@@ -655,18 +857,14 @@ pub async fn patch_transition(
         ));
     }
 
-    let new_revision = i64::try_from(current_revision.saturating_add(1)).unwrap_or(i64::MAX);
-    write_preset_yaml(
-        &bundle_dir,
-        &mut yaml_value,
-        current_revision.saturating_add(1),
-    )?;
+    let new_revision = current_revision.saturating_add(1);
+    write_preset_yaml(&bundle_dir, &mut yaml_value, new_revision)?;
 
-    Ok(Json(StrategyPatchResponse {
-        new_revision,
+    Ok(StrategyPatchResponse {
+        new_revision: i64::try_from(new_revision).unwrap_or(i64::MAX),
         validation_summary: serde_json::json!({ "errors": [], "warnings": warnings }),
         side_effects: Some(side_effects),
-    }))
+    })
 }
 
 /// `POST /v1/local/strategies/{strategy_id}/states/{state_id}/prompt/patch` — patch prompt template.
@@ -685,14 +883,39 @@ pub async fn patch_prompt_template(
     ensure_id_matches(&strategy_id, &req.strategy_id, "strategy_id")?;
     ensure_id_matches(&state_id, &req.state_id, "state_id")?;
 
-    let nexus_home = state.nexus_home();
+    let nexus_home = state.nexus_home().clone();
+    let strategy_id = strategy_id.clone();
+    let state_id = state_id.clone();
+    let req = req.clone();
+
+    let response = tokio::task::spawn_blocking(move || {
+        patch_prompt_template_inner(&nexus_home, &strategy_id, &state_id, &req)
+    })
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "PATCH_TASK_ERROR".to_string(),
+        message: format!("patch_prompt_template task failed: {e}"),
+    })?;
+
+    response.map(Json)
+}
+
+fn patch_prompt_template_inner(
+    nexus_home: &std::path::Path,
+    strategy_id: &str,
+    state_id: &str,
+    req: &StrategyPatchPromptTemplateRequest,
+) -> Result<StrategyPatchResponse, NexusApiError> {
+    let bundle_dir = user_preset_bundle_dir(nexus_home, strategy_id);
+    let _guard = acquire_strategy_lock(&bundle_dir)?;
+
     let (mut yaml_value, bundle_dir, current_revision) =
-        load_user_preset_yaml(nexus_home, &strategy_id)?;
+        load_user_preset_yaml(nexus_home, strategy_id)?;
 
     if req.base_revision != current_revision {
         return Err(strategy_conflict(
             current_revision,
-            &state_id,
+            state_id,
             &format!("prompt:{}", req.template_ref),
             "refetch the Strategy and reapply your edit",
         ));
@@ -751,33 +974,54 @@ pub async fn patch_prompt_template(
             reason: "prompt body is required".to_string(),
         })?;
 
-    let mut side_effects: Vec<String> = Vec::new();
-    std::fs::write(&canonical_template, body).map_err(|e| NexusApiError::Internal {
+    // Stage the new template with a request-unique temp file, then rename it
+    // into place before validating the manifest. If validation fails we roll
+    // back to the previous file contents and never bump YAML revision.
+    let backup = backup_existing_file(&canonical_template)?;
+
+    let file_name = canonical_template
+        .file_name()
+        .ok_or_else(|| NexusApiError::Internal {
+            code: "TEMPLATE_PATH_INVALID".to_string(),
+            message: "template path has no file name".to_string(),
+        })?;
+    let mut tmp_name = file_name.to_os_string();
+    tmp_name.push(format!(".tmp.{}", uuid::Uuid::new_v4()));
+    let tmp_path = canonical_template.with_file_name(&tmp_name);
+
+    std::fs::write(&tmp_path, body.as_bytes()).map_err(|e| NexusApiError::Internal {
         code: "FILE_WRITE_ERROR".to_string(),
-        message: e.to_string(),
+        message: format!("cannot write template temp file: {e}"),
     })?;
-    side_effects.push(format!("wrote prompt template '{}'", req.template_ref));
+
+    if let Err(e) = std::fs::rename(&tmp_path, &canonical_template) {
+        let _ = std::fs::remove_file(&tmp_path);
+        return Err(NexusApiError::Internal {
+            code: "FILE_RENAME_ERROR".to_string(),
+            message: format!("cannot commit template file: {e}"),
+        });
+    }
 
     // Validate the manifest still loads with the new/updated template file.
     let (errors, warnings) = validate_preset_yaml(&bundle_dir, &yaml_value)?;
     if !errors.is_empty() {
+        rollback_template_write(&canonical_template, backup, &tmp_path);
         return Err(NexusApiError::strategy_validation_failed(
             &errors, &warnings,
         ));
     }
 
-    let new_revision = i64::try_from(current_revision.saturating_add(1)).unwrap_or(i64::MAX);
-    write_preset_yaml(
-        &bundle_dir,
-        &mut yaml_value,
-        current_revision.saturating_add(1),
-    )?;
+    let new_revision = current_revision.saturating_add(1);
+    write_preset_yaml(&bundle_dir, &mut yaml_value, new_revision)?;
 
-    Ok(Json(StrategyPatchResponse {
-        new_revision,
+    let mut side_effects: Vec<String> = Vec::new();
+    side_effects.push(format!("wrote prompt template '{}'", req.template_ref));
+
+    Ok(StrategyPatchResponse {
+        new_revision: i64::try_from(new_revision).unwrap_or(i64::MAX),
         validation_summary: serde_json::json!({ "errors": [], "warnings": warnings }),
         side_effects: Some(side_effects),
-    }))
+    })
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────────────
@@ -983,5 +1227,174 @@ states:
         assert_eq!(res.new_revision, 2);
         let body = std::fs::read_to_string(bundle_dir.join("prompts/start.md")).unwrap();
         assert_eq!(body, "# Hello\n");
+    }
+
+    #[tokio::test]
+    async fn patch_transition_rejects_invalid_condition() {
+        use crate::test_utils::create_test_workspace;
+        use crate::workspace::WorkspaceState;
+        use axum::Json;
+
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        seed_test_bundle(&nexus_home, "test-strategy");
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = StrategyPatchTransitionRequest {
+            strategy_id: "test-strategy".to_string(),
+            base_revision: 1,
+            source_state_id: "start".to_string(),
+            old_target: "end".to_string(),
+            new_target: None,
+            condition: Some("not a valid expression @#$".to_string()),
+            transition_kind: None,
+        };
+        let err = patch_transition(State(state), Path("test-strategy".to_string()), Json(req))
+            .await
+            .expect_err("invalid condition should fail");
+
+        assert_eq!(err.status_code(), axum::http::StatusCode::BAD_REQUEST);
+        match err {
+            NexusApiError::BadRequest { code, .. } => {
+                assert_eq!(code, "strategy_transition_condition_invalid");
+            }
+            other => panic!("expected BadRequest with condition code, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn patch_prompt_template_rolls_back_on_validation_failure() {
+        use crate::test_utils::create_test_workspace;
+        use crate::workspace::WorkspaceState;
+        use axum::Json;
+
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let bundle_dir = user_preset_bundle_dir(&nexus_home, "test-strategy");
+        std::fs::create_dir_all(&bundle_dir).expect("create bundle dir");
+
+        // The manifest references a missing asset so validation will fail after
+        // the prompt template is staged.
+        let yaml = r#"
+revision: 1
+preset:
+  id: test-strategy
+  version: 1
+  kind: creator
+  description: "Test strategy for rollback"
+  run_intents: [work_init]
+  initial: start
+  terminal: end
+states:
+  - id: start
+    description: "Start state"
+    context_update:
+      op:
+        kind: append
+        body: ""
+      template_file: prompts/missing.md
+    next: end
+  - id: end
+    terminal: true
+"#;
+        std::fs::write(bundle_dir.join("preset.yaml"), yaml).expect("write preset.yaml");
+
+        std::fs::create_dir_all(bundle_dir.join("prompts")).expect("create prompts dir");
+        let other_path = bundle_dir.join("prompts/other.md");
+        std::fs::write(&other_path, "original content").expect("write original template");
+
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let req = StrategyPatchPromptTemplateRequest {
+            strategy_id: "test-strategy".to_string(),
+            state_id: "start".to_string(),
+            base_revision: 1,
+            template_ref: "prompts/other.md".to_string(),
+            set: serde_json::json!({ "body": "new content" }),
+        };
+        let err = patch_prompt_template(
+            State(state),
+            Path(("test-strategy".to_string(), "start".to_string())),
+            Json(req),
+        )
+        .await
+        .expect_err("validation failure should roll back");
+
+        assert_eq!(
+            err.status_code(),
+            axum::http::StatusCode::UNPROCESSABLE_ENTITY
+        );
+        assert_eq!(err.error_code(), "strategy_validation_failed");
+
+        // The template file must be restored to its original content.
+        let body = std::fs::read_to_string(&other_path).unwrap();
+        assert_eq!(body, "original content");
+    }
+
+    #[tokio::test]
+    async fn concurrent_patch_state_serializes_on_lock() {
+        use crate::test_utils::create_test_workspace;
+        use crate::workspace::WorkspaceState;
+        use axum::Json;
+
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        seed_test_bundle(&nexus_home, "test-strategy");
+        let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
+
+        let req_a = StrategyPatchStateRequest {
+            strategy_id: "test-strategy".to_string(),
+            state_id: "start".to_string(),
+            base_revision: 1,
+            set: serde_json::json!({ "description": "A" }),
+        };
+        let req_b = StrategyPatchStateRequest {
+            strategy_id: "test-strategy".to_string(),
+            state_id: "start".to_string(),
+            base_revision: 1,
+            set: serde_json::json!({ "description": "B" }),
+        };
+
+        let state_a = state.clone();
+        let task_a = tokio::spawn(async move {
+            patch_state(
+                State(state_a),
+                Path(("test-strategy".to_string(), "start".to_string())),
+                Json(req_a),
+            )
+            .await
+        });
+
+        let task_b = tokio::spawn(async move {
+            // Small delay so both requests are in flight and contend on the lock.
+            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+            patch_state(
+                State(state),
+                Path(("test-strategy".to_string(), "start".to_string())),
+                Json(req_b),
+            )
+            .await
+        });
+
+        let (res_a, res_b) = tokio::join!(task_a, task_b);
+        let outcomes = [res_a.unwrap(), res_b.unwrap()];
+        let successes = outcomes.iter().filter(|r| r.is_ok()).count();
+        let conflicts = outcomes
+            .iter()
+            .filter(|r| {
+                r.as_ref()
+                    .err()
+                    .is_some_and(|e| e.error_code() == "strategy_conflict")
+            })
+            .count();
+
+        assert_eq!(successes, 1, "exactly one concurrent patch should succeed");
+        assert_eq!(
+            conflicts, 1,
+            "the other concurrent patch should get a conflict"
+        );
+
+        let yaml = std::fs::read_to_string(
+            user_preset_bundle_dir(&nexus_home, "test-strategy").join("preset.yaml"),
+        )
+        .unwrap();
+        assert!(yaml.contains("revision: 2"));
     }
 }
