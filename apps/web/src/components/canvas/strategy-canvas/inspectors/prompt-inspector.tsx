@@ -107,7 +107,7 @@ export function PromptInspector({
         onSaveStatus({ type: 'error', message });
       }
     }
-  }, [dirty, patch.isPending, form, original, presetId, selectedState, patch, onSaveStatus, onConflict, promptTemplateRef]);
+  }, [dirty, patch.isPending, form, original, presetId, selectedState, onSaveStatus, onConflict, promptTemplateRef]);
 
   useEffect(() => {
     if (saveTrigger > 0 && saveTrigger !== lastHandledTriggerRef.current) {

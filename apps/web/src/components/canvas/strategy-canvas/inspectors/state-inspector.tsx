@@ -111,7 +111,7 @@ export function StateInspector({
         onSaveStatus({ type: 'error', message });
       }
     }
-  }, [dirty, patch.isPending, form, original, presetId, selectedState, patch, onSaveStatus, onConflict]);
+  }, [dirty, patch.isPending, form, original, presetId, selectedState, onSaveStatus, onConflict]);
 
   useEffect(() => {
     if (saveTrigger > 0 && saveTrigger !== lastHandledTriggerRef.current) {
