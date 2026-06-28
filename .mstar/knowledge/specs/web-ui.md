@@ -1,6 +1,6 @@
 # Local Web UI (Control Room + Setup → Content-Authoring) — Specification v1
 
-**Status**: Shipped (V1.65) — Control Room + Setup MVP (V1.64) **+ Content-Authoring UI stage (V1.65, §13)**: outline rich-text editor + chapter structure table + structure CRUD (slug/wc/volume/status; title display-only) + body read-only render + browser "Copy path" context menu. Tauri desktop shell + body full-text editor + "open-with" → **V1.66** (compass §0 Q5). QC tri-review Approve (fix-wave-1) + QA Pass. **+ V1.67 Surface Convergence & De-risk (§15)** + **V1.69 Design System Maturation & Canvas Draft** (`apps/web/DESIGN.md` Production + Canvas Draft) + **V1.70 Canvas Strategy Implement α (§16)** + **CI/desktop-build optimization** (parallel ops track; PR path filter narrowed + release-gated full build) + **V1.71 Canvas Strategy Write-Boundary (§17)** (Strategy patch routes, graphRevision conflict policy, conflict modal UX, canvas-write tokens) + **V1.72 Canvas Outline+Timeline β (§18)** (3 outline/timeline patch routes `outline.patch_structure` / `outline.patch_chapter` / `timeline.patch_event` + outlineRevision conflict policy + outline-flavored conflict modal UX + non-spatial alternate views + 8 outline/timeline canvas-write DESIGN.md tokens). V1.71 `wire_contracts_changed: TRUE` for Strategy; V1.72 `wire_contracts_changed: TRUE` for additive Outline+Timeline (`@42ch/nexus-contracts` 0.7.0 → 0.8.0).
+**Status**: Shipped (V1.65) — Control Room + Setup MVP (V1.64) **+ Content-Authoring UI stage (V1.65, §13)**: outline rich-text editor + chapter structure table + structure CRUD (slug/wc/volume/status; title display-only) + body read-only render + browser "Copy path" context menu. Tauri desktop shell + body full-text editor + "open-with" → **V1.66** (compass §0 Q5). QC tri-review Approve (fix-wave-1) + QA Pass. **+ V1.67 Surface Convergence & De-risk (§15)** + **V1.69 Design System Maturation & Canvas Draft** (`apps/web/DESIGN.md` Production + Canvas Draft) + **V1.70 Canvas Strategy Implement α (§16)** + **CI/desktop-build optimization** (parallel ops track; PR path filter narrowed + release-gated full build) + **V1.71 Canvas Strategy Write-Boundary (§17)** (Strategy patch routes, graphRevision conflict policy, conflict modal UX, canvas-write tokens) + **V1.72 Canvas Outline+Timeline β (§18)** (3 outline/timeline patch routes `outline.patch_structure` / `outline.patch_chapter` / `timeline.patch_event` + outlineRevision conflict policy + outline-flavored conflict modal UX + non-spatial alternate views + 8 outline/timeline canvas-write DESIGN.md tokens). V1.71 `wire_contracts_changed: TRUE` for Strategy; V1.72 `wire_contracts_changed: TRUE` for additive Outline+Timeline (`@42ch/nexus-contracts` 0.7.0 → 0.8.0); V1.73 `wire_contracts_changed: TRUE` for additive World KB (`@42ch/nexus-contracts` 0.8.0 → 0.9.0). **V1.74 roadmap**: World KB relationships surface (`tbd-v1.74-world-kb-relationships`, no `kb_relationships` table yet) + 9 hygiene backlog items (`tbd-v1.74-hygiene`).
 **Document class**: Feature line  
 **Created**: 2026-06-24  
 **Scope**: Nexus local Web UI product contract — placement (`apps/web`), stack, daemon-served model, `tauri-api` adapter boundary, MVP surface (Control Room + Setup), Content-Authoring stage (V1.65), Tauri / body-editor roadmap (V1.66), and strict separation from the private cloud SaaS  
@@ -200,7 +200,8 @@ Explicitly deferred with durable tracking (compass §1.2 + §6; satisfies the Du
 | **V1.70 (§16 stage)** | **Canvas Strategy Implement (α)** — the first canvas surface ships: shared Canvas Shell (`@xyflow/react`, route-split behind `/strategy`) + Strategy (Preset) graph read projection (preset YAML → outer state-machine nodes + inner-DAG sub-flows + Converge join nodes per Draft §3.2) + live execution overlay (session-level status, 5 s poll) + Idea-input affordance + Run/Resume/Steer verbs (reuse existing schedule/orchestration endpoints; `wire_contracts_changed: FALSE` — A5 verdict: option a, client-side YAML parse from existing `getPreset(id).yaml`; no new backend route). DESIGN.md canvas tokens filled with concrete light + dark values. Accessibility baseline (keyboard-first, non-spatial alt view, ARIA live-region summary, focus management). UI copy adopts **Strategy** terminology; persisted identifiers remain `preset`. **`R-V167PSEC-QC1-S-UNMOUNT`** closed (daemon-status-bar subscription-cleanup race fix alongside overlay work). **Parallel ops track**: `desktop-build.yml` PR path filter narrowed (Rust-only PRs skip the 75 min macOS packaging build; main + tag/release triggers retain full coverage); new `desktop-release.yml` for distributable artifacts; **`R-V167PSEC-QC1-S-CI-SETUO`** closed (`set -euo pipefail`); `ci.yml` untouched. |
 | **V1.71 (§17 stage)** | **Canvas Strategy write-boundary β** — Strategy patch routes + graphRevision tracking + conflict modal UX + canvas-write DESIGN.md tokens. Desktop signing groundwork is companion ops scope; outline+timeline and World KB remain future surfaces. |
 | **V1.72 (§18 stage)** | **Canvas Outline+Timeline β** — 3 patch routes (`outline.patch_structure` / `outline.patch_chapter` / `timeline.patch_event`) + outlineRevision frontmatter tracking + outline-flavored conflict modal UX (use `{node_label}` placeholder adapting to chapter/event/volume domain entity) + non-spatial alternate views (sortable chapter list + sortable timeline event list) + 8 outline/timeline canvas-write DESIGN.md tokens (`canvas-outline-volume-fill` + 4 chapter-card statuses + `canvas-outline-timeline-event-pin` + `canvas-outline-foreshadow-edge` + `canvas-outline-timeline-marker` + `canvas-outline-conflict-marker`) + atomic outline markdown persistence (body preserved under `RuntimeLockGuard`). **Body ownership invariant**: outline markdown body remains V1.65 editor-owned and is never overwritten by canvas writes. **Companion hygiene + release hardening**: per-inspector save split (R-V171P0-QC1-004 HIGH) + strategy-canvas.tsx 7-module split ≤200 lines (R-V171P0-QC1-006 MEDIUM) + desktop-release.yml signing workflow completion (keychain + notarize + staple + unsigned fallback on signing failure; R-V171-CI-RELEASE-WORKFLOW-INCOMPLETE MEDIUM) + CI setup composite action (R-V171-CI-WORKFLOW-SETUP-DEDUPE LOW). Cmd/Ctrl+S save-trigger replay fixed via `lastHandledTriggerRef` edge-trigger. |
-| **V1.73+** | **Canvas World KB surface** (Draft §3.3 surface 3). **Canvas-pivot** (retire V1.65 outline whole-document editor in favor of node-granular canvas operations — depends on V1.72 Outline+Timeline β maturity). Desktop distribution v2 actual signing rollout (blocked on Apple Developer ID cert + notarization credentials); Mobile (Tauri v2 mobile targets). V1.73 hygiene backlog carries 14 deferred residuals (8 prior V1.72-targeted + 6 new V1.72 QC-deferred). |
+| **V1.73 (§19 stage)** | **Canvas World KB β** — third canvas surface (after Strategy α/β + Outline+Timeline β): 2 structured patch routes (`world_kb.patch_entity` for entity title/body/aliases/block_type edits + `world_kb.promote_candidate` for adopt/reject/merge promotion state machine) + per-row OCC conflict detection (reuses `kb_key_blocks.revision` + `kb_extract_jobs.version`; 409 `WorldKbConflictError` + 422 `WorldKbValidationError`) + Canvas UI: World KB graph projection (entity nodes + promotion-state badges + source-anchor edges + computable badges) + entity inspector + promotion inspector + conflict modal (KB-flavored copy) + non-spatial alternate view (sortable entity list with virtualization) + backend prerequisite: promoted World KB read+write from CLI-direct-DB to 4 first-class Local API routes + `@42ch/nexus-contracts` 0.8.0 → 0.9.0 (additive World KB DTOs) + 17 `canvas-worldkb-*` DESIGN.md tokens. Track B companion: 4 outline β hardening (MEDIUM validation gaps) + outline-canvas.tsx split + 2 release-hardening items. |
+| **V1.74** | **World KB relationships surface** (`tbd-v1.74-world-kb-relationships` — no `kb_relationships` table yet) + 9 hygiene backlog items (`tbd-v1.74-hygiene`). Canvas-pivot (retire V1.65 outline editor) remains V1.74+ candidate. Desktop distribution v2 actual signing rollout (blocked on Apple Developer ID cert + notarization credentials); Mobile (Tauri v2 mobile targets). |
 
 The Tauri-ready boundary (§5) is what keeps the V1.66 shell a thin wrap rather than a rewrite. The V1.68 canvas adds new screens (graph surfaces) on the unchanged transport boundary — not a re-architecture.
 
@@ -504,4 +505,81 @@ V1.70 made the Strategy canvas legible and steerable. V1.71 makes the **Strategy
 
 ---
 
-*Local-first Web UI product contract. V1.64 Shipped (Control Room + Setup) → V1.65 §13 Content-Authoring → V1.66 §14 Desktop Shell → V1.67 §15 Surface Convergence & De-risk → V1.69 Design System Maturation & Canvas Draft → V1.70 §16 Canvas Strategy Implement (α) + CI/desktop-build optimization → V1.71 §17 Canvas Strategy Write-Boundary (β) → V1.72+ outline/timeline + World KB. Design tokens: `apps/web/DESIGN.md` (V1.65 Standard+ + V1.66 desktop supplement + V1.69 Production migration + V1.70 canvas-token fill + V1.71 canvas-write tokens).*
+## 18. Next stage — Canvas Outline+Timeline β (V1.72)
+
+V1.71 made the Strategy canvas editable at node granularity. V1.72 extends the canvas to the **Outline+Timeline surface** — the second of the three Draft canvas surfaces — bringing Work-structure (Volume → Chapter → Scene/Beat) and timeline events onto the graph with structured patch routes, outlineRevision conflict handling, and non-spatial alternate views.
+
+> **Scope and roadmap SSOT**: [v1.72-canvas-outline-timeline-beta-and-hygiene-compass-v1.md](../../iterations/v1.72-canvas-outline-timeline-beta-and-hygiene-compass-v1.md) §1.1 Tracks A+B, §1.3 wire contracts, §2 normative specs. This section records the product contract; the compass is authoritative for scope, batching, and residual tracking.
+
+### 18.1 What ships in V1.72 (Track A — Outline+Timeline β)
+
+- **3 outline/timeline patch routes**: the UI calls three new Local API routes through `NexusClient`, following the V1.71 Strategy patch-route convention:
+  - `POST /v1/local/outline/patch_structure` for volume-level structure edits (order, title, metadata).
+  - `POST /v1/local/outline/patch_chapter` for per-chapter edits (slug, planned word count, volume assignment, status advancement).
+  - `POST /v1/local/timeline/patch_event` for timeline event CRUD (timestamp, description, linked chapters).
+- **outlineRevision conflict policy**: stale writes return 409 with outlineRevision locator; conflict modal adapts the Strategy pattern (§17.1) with `{node_label}` placeholder substituting chapter/event/volume domain entity names.
+- **Outline-flavored conflict modal UX**: same structural flow as Strategy but with domain-appropriate copy ("This chapter changed…" / "This event changed…") and outline-flavored actions (Use current, Reapply my edit, Review side-by-side).
+- **Non-spatial alternate views**: sortable chapter list + sortable timeline event list (with virtualization), satisfying the accessibility requirement for non-spatial navigation.
+- **8 outline/timeline canvas-write DESIGN.md tokens**: `canvas-outline-volume-fill` + 4 chapter-card status tokens + `canvas-outline-timeline-event-pin` + `canvas-outline-foreshadow-edge` + `canvas-outline-timeline-marker` + `canvas-outline-conflict-marker` — filled with concrete light + dark values; token names preserved verbatim (V1.69 invariant continues).
+- **Atomic outline markdown persistence**: outline body preserved under `RuntimeLockGuard`; never overwritten by canvas writes.
+- **Body ownership invariant**: outline markdown body remains V1.65 editor-owned and is never overwritten by canvas writes.
+
+### 18.2 The planning loop this enables
+
+1. **Inspect and edit structure** — the author opens the Outline canvas, sees chapter nodes organized by volume, edits chapter properties (slug, word count, status) inline on the node or via the inspector.
+2. **Timeline alongside outline** — the author positions timeline events relative to chapters, seeing both on the same canvas with timeline edges connecting to corresponding chapter nodes.
+3. **Resolve conflicts** — when an orchestration session or another author changes the outline concurrently, the conflict modal surfaces the delta with chapter/event labels and recovery actions.
+
+### 18.3 Non-goals for V1.72
+
+- **No World KB canvas surface** — V1.73 candidate.
+- **No in-canvas markdown body editing** — outline body remains V1.65 editor-owned; canvas writes only structure fields.
+- **No canvas-pivot retirement of V1.65 outline editor** — deferred to V1.74+.
+
+### 18.4 Wire contracts (V1.72)
+
+**`wire_contracts_changed: TRUE`** (`@42ch/nexus-contracts` 0.7.0 → 0.8.0). Additive Outline+Timeline patch DTOs and routes through schemas/codegen.
+
+---
+
+## 19. Next stage — Canvas World KB β (V1.73)
+
+V1.72 shipped the Outline+Timeline canvas. V1.73 completes the Canvas program's third surface — **World KB β** — the final of the three Draft canvas surfaces. The World KB canvas surfaces the author's accumulated world knowledge (characters, locations, items, events, organizations, conflicts, and computable derived entities) as a graph with entity nodes, promotion-state lifecycle badges, source-anchor provenance edges, and structured patch operations. This is the first canvas surface to require a **backend prerequisite**: promoting World KB read+write operations from CLI-direct-DB to first-class Local API routes with per-row OCC revision tracking.
+
+> **Scope and roadmap SSOT**: [v1.73-canvas-world-kb-beta-and-outline-hardening-compass-v1.md](../../iterations/v1.73-canvas-world-kb-beta-and-outline-hardening-compass-v1.md) §1.1 Tracks A+B, §1.3 wire contracts, §2 normative specs. This section records the product contract; the compass is authoritative for scope, batching, and residual tracking.
+
+### 19.1 What ships in V1.73 (Track A — World KB β)
+
+- **2 structured patch routes**: the UI calls two new Local API routes through `NexusClient`, following the V1.71/V1.72 patch-route OCC convention:
+  - `POST /v1/local/world-kb/patch_entity` — entity title, body, aliases, and block_type edits on `kb_key_blocks`.
+  - `POST /v1/local/world-kb/promote_candidate` — adopt/reject/merge promotion state machine on `kb_extract_jobs`.
+- **Per-row OCC conflict detection** (LOCKED): reuses existing columns — `kb_key_blocks.revision` (from `20260525_kb_key_blocks.sql`) + `kb_extract_jobs.version` (from `202606190001_kb_extract_jobs_and_pool_version.sql`) — no new migration needed; no world-level revision counter. Stale writes return **409 `WorldKbConflictError`** with entity locator + current revision; validation failures return **422 `WorldKbValidationError`**.
+- **Backend prerequisite — promoted World KB Local API routes**: World KB read+write operations promoted from CLI-direct-DB (`creator world kb adopt/reject/edit/delete`) to **4 first-class Local API routes** with OCC revision tracking, making the World KB a normative Local API surface (not CLI-only).
+- **Canvas UI — World KB graph projection**: entity nodes (all block_type variants per entity-scope-model §5.1.1, plus computable blocks) + promotion-state lifecycle badges (pending → confirmed/rejected/merged, with `manual` state) + source-anchor provenance edges + computable badges (age, reference count, confidence). Route-split behind the shared Canvas Shell.
+- **Canvas UI — entity inspector + promotion inspector**: entity inspector shows title, body, aliases, block_type, revision, and source anchors; promotion inspector shows candidate metadata (source, confidence, timestamp), current state, and promotion action buttons. Both inspectors surface inline validation errors and a save-in-progress indicator.
+- **Canvas UI — KB-flavored conflict modal**: same structural pattern as Strategy (§17.1) and Outline (§18.1) conflict modals, but with World-KB-appropriate copy ("This entity changed while you were editing." / "This candidate's state changed while you were editing.") and KB-flavored actions (Use current, Reapply my edit, Review side-by-side). Cancel returns focus to the originating inspector.
+- **Non-spatial alternate view**: sortable entity list (name, block_type, promotion state, last modified) with virtualization — satisfies the accessibility requirement for non-spatial navigation.
+- **17 `canvas-worldkb-*` DESIGN.md tokens**: concrete light + dark values filled in `apps/web/DESIGN.md` + `apps/web/DESIGN.dark.md` for World KB node fills/borders/selection, promotion-state badges (confirmed/rejected/merged/pending), source-anchor edges, computable badges, conflict markers, and entity-inspector chrome — token names preserved verbatim (V1.69 invariant continues).
+- **Track B companion — Outline β hardening**: 4 MEDIUM outline validation gaps closed (slug format, volume existence, foreshadow temporal order, published-chapter structural guard) + `outline-canvas.tsx` monolith split (≤250 lines per V1.71 Strategy pattern) + 2 release-hardening items (`tauri.conf.json` signing clarity + desktop release Rust cache coverage).
+
+### 19.2 The knowledge loop this enables
+
+1. **See the world as a graph** — the author opens the World KB canvas and sees all entities (characters, locations, items, etc.) laid out as a connected knowledge graph with source-anchor edges showing provenance — so the author understands the web of world knowledge the AI has accumulated and can trace every fact back to its source.
+2. **Edit entity details** — the author selects an entity node, edits its title, body, aliases, or block_type via the inspector, and commits with OCC protection — so the author refines the AI-extracted world without overwriting concurrent extractions.
+3. **Curate extracted knowledge** — the author opens the promotion inspector for a candidate fact, sees its source, confidence, and extraction context, then adopts, rejects, or merges it — so the author is the final curator of what goes into the canon.
+4. **Resolve conflicts** — when the AI extracts a newer version of a fact while the author is editing, the KB-flavored conflict modal surfaces the delta and recovery actions — so the author never silently loses changes.
+
+### 19.3 Non-goals for V1.73
+
+- **No World KB relationships surface** — no `kb_relationships` table exists in the local DB; relationship semantics (directed, typed, confidence-weighted) require independent grill-me + architect lock. Deferred to V1.74: `tbd-v1.74-world-kb-relationships`.
+- **No canvas-pivot retirement of V1.65 outline editor** — V1.74+ candidate.
+- **No canvas-pivot retirement of KB CLI surface** — γ path rejected; KB CLI stays normative (V1.51).
+- **9 hygiene items deferred** — virtualization/UI e2e/toast/atomic-rollback/useEffect/stale-docs/codegen-target/adapter-parity/can_edit_outline → V1.74 with durable plan-id pointer (`tbd-v1.74-hygiene`).
+
+### 19.4 Wire contracts (V1.73)
+
+**`wire_contracts_changed: TRUE`** (`@42ch/nexus-contracts` 0.8.0 → 0.9.0). Additive World KB DTOs and routes through schemas/codegen. New schemas under `schemas/local-api/world-kb/`.
+
+---
+
+*Local-first Web UI product contract. V1.64 Shipped (Control Room + Setup) → V1.65 §13 Content-Authoring → V1.66 §14 Desktop Shell → V1.67 §15 Surface Convergence & De-risk → V1.69 Design System Maturation & Canvas Draft → V1.70 §16 Canvas Strategy Implement (α) + CI/desktop-build optimization → V1.71 §17 Canvas Strategy Write-Boundary (β) → V1.72 §18 Canvas Outline+Timeline (β) → V1.73 §19 Canvas World KB (β). V1.74 roadmap: World KB relationships + 9 hygiene items. Design tokens: `apps/web/DESIGN.md` (V1.65 Standard+ + V1.66 desktop supplement + V1.69 Production migration + V1.70 canvas-token fill + V1.71 canvas-write tokens + V1.72 outline/timeline tokens + V1.73 canvas-worldkb tokens).*
