@@ -20,6 +20,10 @@ let capturedOnUpdate: (() => void) | undefined;
 let currentMarkdown = '# Chapter 1';
 
 const mockEditor = {
+  isEditable: true,
+  setEditable: vi.fn((next: boolean) => {
+    mockEditor.isEditable = next;
+  }),
   commands: {
     setContent: vi.fn((content: string) => {
       currentMarkdown = content;
@@ -68,6 +72,8 @@ const client = () => new BrowserClient();
 beforeEach(() => {
   capturedOnUpdate = undefined;
   currentMarkdown = '# Chapter 1';
+  mockEditor.isEditable = true;
+  mockEditor.setEditable.mockClear();
 });
 
 function renderChapter(workId = 'w-123', chapter = 1) {
@@ -476,5 +482,12 @@ describe('ChapterPage', () => {
     expect(screen.getByText(/Chapter is locked by the orchestration engine/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Save Outline/i })).toBeDisabled();
     expect(screen.getByRole('button', { name: /Reset/i })).toBeDisabled();
+    // R-V171-GREPTILE-P1-4: TipTap reads `editable` only at mount, so a cold
+    // page load with the flag arriving late must still flip the editor to
+    // read-only. Verify setEditable(false) was called.
+    await waitFor(() => {
+      expect(mockEditor.setEditable).toHaveBeenCalledWith(false);
+    });
+    expect(mockEditor.isEditable).toBe(false);
   });
 });
