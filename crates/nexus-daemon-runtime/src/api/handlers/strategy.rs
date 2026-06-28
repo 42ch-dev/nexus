@@ -906,6 +906,27 @@ fn patch_prompt_template_inner(
     state_id: &str,
     req: &StrategyPatchPromptTemplateRequest,
 ) -> Result<StrategyPatchResponse, NexusApiError> {
+    patch_prompt_template_inner_with_writer(
+        nexus_home,
+        strategy_id,
+        state_id,
+        req,
+        write_preset_yaml,
+    )
+}
+
+/// Injected YAML writer for tests so filesystem failures after the template
+/// rename can be exercised deterministically.
+type PresetYamlWriter =
+    fn(&std::path::Path, &mut serde_yaml::Value, u64) -> Result<(), NexusApiError>;
+
+fn patch_prompt_template_inner_with_writer(
+    nexus_home: &std::path::Path,
+    strategy_id: &str,
+    state_id: &str,
+    req: &StrategyPatchPromptTemplateRequest,
+    write_yaml: PresetYamlWriter,
+) -> Result<StrategyPatchResponse, NexusApiError> {
     let bundle_dir = user_preset_bundle_dir(nexus_home, strategy_id);
     let _guard = acquire_strategy_lock(&bundle_dir)?;
 
@@ -1011,8 +1032,14 @@ fn patch_prompt_template_inner(
         ));
     }
 
+    // Persist the YAML revision only after the template file has been
+    // committed. If YAML persistence fails, roll the template back so the
+    // on-disk prompt bytes and the YAML revision can never diverge.
     let new_revision = current_revision.saturating_add(1);
-    write_preset_yaml(&bundle_dir, &mut yaml_value, new_revision)?;
+    if let Err(e) = write_yaml(&bundle_dir, &mut yaml_value, new_revision) {
+        rollback_template_write(&canonical_template, backup, &tmp_path);
+        return Err(e);
+    }
 
     let mut side_effects: Vec<String> = Vec::new();
     side_effects.push(format!("wrote prompt template '{}'", req.template_ref));
@@ -1396,5 +1423,91 @@ states:
         )
         .unwrap();
         assert!(yaml.contains("revision: 2"));
+    }
+
+    #[tokio::test]
+    async fn patch_prompt_template_rolls_back_on_yaml_persistence_failure() {
+        use crate::test_utils::create_test_workspace;
+        use crate::workspace::WorkspaceState;
+
+        fn failing_yaml_writer(
+            _bundle_root: &std::path::Path,
+            _value: &mut serde_yaml::Value,
+            _revision: u64,
+        ) -> Result<(), NexusApiError> {
+            Err(NexusApiError::Internal {
+                code: "INJECTED_YAML_WRITE_ERROR".to_string(),
+                message: "injected yaml persistence failure".to_string(),
+            })
+        }
+
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let bundle_dir = user_preset_bundle_dir(&nexus_home, "test-strategy");
+        std::fs::create_dir_all(&bundle_dir).expect("create bundle dir");
+
+        let yaml = r#"
+revision: 1
+preset:
+  id: test-strategy
+  version: 1
+  kind: creator
+  description: "Test strategy for yaml rollback"
+  run_intents: [work_init]
+  initial: start
+  terminal: end
+states:
+  - id: start
+    description: "Start state"
+    context_update:
+      op:
+        kind: append
+        body: ""
+      template_file: prompts/original.md
+    next: end
+  - id: end
+    terminal: true
+"#;
+        std::fs::write(bundle_dir.join("preset.yaml"), yaml).expect("write preset.yaml");
+
+        std::fs::create_dir_all(bundle_dir.join("prompts")).expect("create prompts dir");
+        let template_path = bundle_dir.join("prompts/original.md");
+        std::fs::write(&template_path, "original content").expect("write original template");
+
+        // Pre-load the WorkspaceState so the registry is available for validation,
+        // but exercise the synchronous inner function directly to inject a YAML
+        // writer that fails after the template rename.
+        let _state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
+
+        let req = StrategyPatchPromptTemplateRequest {
+            strategy_id: "test-strategy".to_string(),
+            state_id: "start".to_string(),
+            base_revision: 1,
+            template_ref: "prompts/original.md".to_string(),
+            set: serde_json::json!({ "body": "new content" }),
+        };
+
+        let err = patch_prompt_template_inner_with_writer(
+            &nexus_home,
+            "test-strategy",
+            "start",
+            &req,
+            failing_yaml_writer,
+        )
+        .expect_err("yaml persistence failure should roll back");
+
+        assert_eq!(
+            err.status_code(),
+            axum::http::StatusCode::INTERNAL_SERVER_ERROR
+        );
+        assert_eq!(err.error_code(), "internal");
+
+        // The prompt template must be rolled back to its original bytes.
+        let body = std::fs::read_to_string(&template_path).unwrap();
+        assert_eq!(body, "original content");
+
+        // The YAML revision must not have advanced.
+        let yaml = std::fs::read_to_string(bundle_dir.join("preset.yaml")).unwrap();
+        assert!(yaml.contains("revision: 1"));
+        assert!(!yaml.contains("revision: 2"));
     }
 }
