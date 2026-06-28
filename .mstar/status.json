@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-28T08:55:00Z",
+  "updated_at": "2026-06-28T09:30:00Z",
   "plans": [
     {
       "plan_id": "2026-06-27-v1.71-compass-and-plan",
@@ -86,30 +86,30 @@
       "pr_number": 95
     },
     "tech_debt_summary": {
-      "total_open": 9,
+      "total_open": 8,
       "total_deferred": 1,
-      "total_resolved": 233,
+      "total_resolved": 234,
       "total_archived": 0,
       "by_severity_active": {
         "critical": 0,
         "high": 1,
         "medium": 1,
-        "low": 6,
+        "low": 5,
         "nit": 1
       },
       "by_target_active": {
         "V1.72": 1,
-        "V1.72 or V1.71 P-last cleanup": 8
+        "V1.72 or V1.71 P-last cleanup": 7
       },
       "by_plan_active": {
         "2026-06-27-v1.71-canvas-strategy-write-boundary": 4,
-        "2026-06-27-v1.71-hygiene-and-sign-groundwork": 4,
+        "2026-06-27-v1.71-hygiene-and-sign-groundwork": 3,
         "v1.65": 1
       },
-      "refreshed_at": "2026-06-28T08:55:00Z",
-      "refreshed_reason": "V1.71 P1 qc3 review: approved with one new low-severity smoke-script reliability residual R-V171P1-QC3-001 registered. P0 open residuals from qc1 re-review and P1 qc1 residuals remain open."
+      "refreshed_at": "2026-06-28T09:30:00Z",
+      "refreshed_reason": "Closed R-V171P1-QC3-001 (served-ui-smoke port-ownership guard) in commit 3574da24. P0 open residuals from qc1 re-review and P1 qc1 residuals remain open."
     },
-    "updated_at": "2026-06-28T08:55:00Z",
+    "updated_at": "2026-06-28T09:30:00Z",
     "spec_integration_branch": "iteration/v1.71",
     "wave1_merged_at": null
   },
@@ -4821,7 +4821,14 @@
         "target_date": "V1.72",
         "tracking_link": ".mstar/plans/reports/2026-06-27-v1.71-hygiene-and-sign-groundwork/qc3.md",
         "note": "The smoke script runs lsof -ti tcp:${PORT} and kills all returned PIDs before starting its own daemon. This is low risk in CI because the script normally chooses an ephemeral port, but local runs with NEXUS_DAEMON_PORT set, or an ephemeral-port race, can terminate an unrelated process. Prefer failing fast on occupied port, or only killing a process proven to be a previous Nexus smoke daemon owned by this script/test home.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-06-28",
+        "closure_note": "Replaced the lsof kill loop with a port-ownership guard. The script now fails fast when the chosen port is occupied by an unrelated process and only terminates a leftover Nexus smoke daemon whose command line matches this script's binary + 'daemon start --port <port> --foreground'. Added readiness-poll failure when the daemon process exits early, NEXUS42 path override for local testing, and shellcheck-clean loops. Verified with shellcheck, bash -n, a full local smoke run, an occupied-port guard test (unrelated listener preserved), and a stale-smoke-daemon cleanup test.",
+        "closure_evidence": "feature/v1.71-hygiene-and-sign-groundwork-fixes @ 3574da24",
+        "resolution": {
+          "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+          "commit": "3574da24"
+        }
       }
     ]
   }
