@@ -332,9 +332,10 @@ impl NexusApiError {
                     "reason": reason,
                 }))
             }
-            Self::PresetGatesFailed { details } | Self::StrategyValidationFailed { details } => {
-                Some(details.clone())
-            }
+            Self::PresetGatesFailed { details }
+            | Self::StrategyValidationFailed { details }
+            | Self::OutlineValidationFailed { details }
+            | Self::WorldKbValidationFailed { details } => Some(details.clone()),
             Self::StrategyConflict {
                 current_revision,
                 node_id,
@@ -352,7 +353,6 @@ impl NexusApiError {
                 "conflicting_path": conflicting_path,
                 "recovery_hint": recovery_hint,
             })),
-            Self::OutlineValidationFailed { details } => Some(details.clone()),
             Self::WorldKbConflict {
                 current_version,
                 entity_id,
@@ -364,7 +364,6 @@ impl NexusApiError {
                 "conflicting_path": conflicting_path,
                 "recovery_hint": recovery_hint,
             })),
-            Self::WorldKbValidationFailed { details } => Some(details.clone()),
             _ => None,
         }
     }
@@ -432,7 +431,7 @@ impl NexusApiError {
     /// Build a `world_kb_conflict` error with structured recovery details.
     ///
     /// `current_version` is the per-row OCC version observed at conflict time
-    /// (NULL-normalized to 0); `entity_id` is the key_block/candidate id.
+    /// (NULL-normalized to 0); `entity_id` is the `key_block/candidate` id.
     #[must_use]
     pub fn world_kb_conflict(
         current_version: u64,
