@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-28T08:22:00Z",
+    "updated_at": "2026-06-28T08:45:00Z",
   "plans": [
     {
       "plan_id": "2026-06-27-v1.71-compass-and-plan",
@@ -86,22 +86,30 @@
       "pr_number": 95
     },
     "tech_debt_summary": {
-      "total_open": 4,
+      "total_open": 8,
       "total_deferred": 1,
       "total_resolved": 233,
       "total_archived": 0,
       "by_severity_active": {
-        "low": 3,
+        "critical": 0,
+        "high": 1,
+        "medium": 1,
+        "low": 5,
         "nit": 1
       },
       "by_target_active": {
-        "V1.65+": 1,
-        "V1.72 or V1.71 P-last cleanup": 3
+        "V1.72": 1,
+        "V1.72 or V1.71 P-last cleanup": 7
       },
-      "refreshed_at": "2026-06-27T21:37:35Z",
-      "refreshed_reason": "V1.71 P1 qc1 review: approved with 3 non-blocking suggestions registered as R-V171P1-QC1-001..003. Active open residuals: R-V165-QC3-VIRT (low, V1.65+) plus the three new qc1 items; one deferred item (R-V167P2-QC1-S4) unchanged."
+      "by_plan_active": {
+        "2026-06-27-v1.71-canvas-strategy-write-boundary": 4,
+        "2026-06-27-v1.71-hygiene-and-sign-groundwork": 3,
+        "v1.65": 1
+      },
+      "refreshed_at": "2026-06-28T08:45:00Z",
+      "refreshed_reason": "V1.71 P0 qc1 re-review after fix wave: R-V171P0-QC1-001/002/003/005/007/009 verified resolved; R-V171P0-QC1-004/006 partially resolved and kept open with corrected severity (high/medium); R-V171P0-QC1-008/010 still open (low). Severities for open warning-class residuals were corrected from 'warning' to the canonical enum. P1 residuals R-V171P1-QC1-001..003 and R-V165-QC3-VIRT remain open."
     },
-    "updated_at": "2026-06-28T08:22:00Z",
+  "updated_at": "2026-06-28T08:45:00Z",
     "spec_integration_branch": "iteration/v1.71",
     "wave1_merged_at": null
   },
@@ -4649,15 +4657,15 @@
       {
         "id": "R-V171P0-QC1-004",
         "title": "handleSave chains non-atomic state/transition/prompt mutations",
-        "severity": "warning",
+        "severity": "high",
         "source": "qc1 (architecture/maintainability) W-004",
         "scope": "apps/web/src/components/canvas/strategy-canvas.tsx::handleSave",
-        "decision": "fix-in-wave",
+        "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "V1.71 P0 fix-wave",
+        "target": "V1.72 or V1.71 P-last cleanup",
         "target_date": "2026-06-28",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.71-canvas-strategy-write-boundary][R-V171P0-QC1-004]",
-        "note": "Up to three sequential mutateAsync calls. Early success + later failure leaves the graph partially persisted with no rollback or unified transaction boundary. Backend mitigation: each individual patch is now serialized and atomic, and the canvas refetches canonical state on conflict so the user sees the partial result instead of stale state.",
+        "note": "Partially resolved in the fix wave. The canvas now tracks workingRevision and bumps it after each successful partial patch, and it refetches canonical state on conflict. However, handleSave still issues up to three sequential mutateAsync calls (state, transition, prompt template) with no compensating rollback if a later call fails after earlier ones succeeded. Each patch is atomic on the daemon, but the UI-level multi-patch save is not a unified transaction. Either split saves per inspector section or add compensating logic and partial-failure UI before V1.71 ships.",
         "lifecycle": "open"
       },
       {
@@ -4683,15 +4691,15 @@
       {
         "id": "R-V171P0-QC1-006",
         "title": "strategy-canvas.tsx mixes multiple concerns in one file",
-        "severity": "warning",
+        "severity": "medium",
         "source": "qc1 (architecture/maintainability) W-006",
-        "scope": "apps/web/src/components/canvas/strategy-canvas.tsx (~568 lines)",
-        "decision": "fix-in-wave",
+        "scope": "apps/web/src/components/canvas/strategy-canvas.tsx (~571 lines)",
+        "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "V1.71 P0 fix-wave",
+        "target": "V1.72 or V1.71 P-last cleanup",
         "target_date": "2026-06-28",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.71-canvas-strategy-write-boundary][R-V171P0-QC1-006]",
-        "note": "File contains graph sync, live overlay, edit-form state, validation panel, conflict modal, artifacts list, and helper components. ConflictModal has been extracted; InspectorOverlay, ValidationPanel, and ArtifactsList remain inline.",
+        "note": "Partially resolved. ConflictModal has been extracted to apps/web/src/components/canvas/conflict-modal.tsx with component tests. InspectorOverlay, ValidationPanel, and ArtifactsList remain inline. strategy-canvas.tsx is still ~570 lines and mixes graph sync, live overlay, edit-form state, validation panel, conflict handling, and helper components. Extract the remaining sub-components in a follow-up cleanup.",
         "lifecycle": "open"
       },
       {
@@ -4722,10 +4730,10 @@
         "scope": "apps/web/src/components/canvas/strategy-canvas.tsx; apps/web/src/lib/nexus/browser-client.test.ts",
         "decision": "defer",
         "owner": "@frontend-dev + @qa-engineer",
-        "target": "V1.71 P0 fix-wave",
+        "target": "V1.72 or V1.71 P-last cleanup",
         "target_date": "2026-06-28",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.71-canvas-strategy-write-boundary][R-V171P0-QC1-008]",
-        "note": "Web coverage is currently limited to BrowserClient msw tests. Add a component or e2e test that submits a patch and verifies query invalidation/refetch. ConflictModal now has component tests; StrategyCanvas auto-refetch on conflict is implemented but not yet covered by an automated test.",
+        "note": "Still open. The ConflictModal now has 8 component tests and the canvas auto-refetches on conflict, but there is no automated test that submits an edit through StrategyCanvas and verifies query invalidation/refetch. Add a focused component or e2e test before closing.",
         "lifecycle": "open"
       },
       {
@@ -4751,10 +4759,10 @@
         "scope": ".mstar/plans/2026-06-27-v1.71-canvas-strategy-write-boundary.md A1; packages/nexus-contracts/src/generated/local-api/canvas/strategy/",
         "decision": "defer",
         "owner": "@project-manager or @architect",
-        "target": "V1.71 P0 fix-wave",
+        "target": "V1.72 or V1.71 P-last cleanup",
         "target_date": "2026-06-28",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.71-canvas-strategy-write-boundary][R-V171P0-QC1-010]",
-        "note": "Plan mentions TS output in apps/web/src/api-types/canvas/, but generated TS lives in packages/nexus-contracts and is consumed via workspace package. Confirm intended architecture and update plan/spec if the apps/web path is no longer used.",
+        "note": "Still open. The plan and compass still state that generated TypeScript output lives under apps/web/src/api-types/canvas/, but the actual generated TS is in packages/nexus-contracts/src/generated/ and is consumed via the workspace package. apps/web/src/api-types/ does not exist. Update the plan, compass, and any spec references to match the actual architecture.",
         "lifecycle": "open"
       }
     ],
