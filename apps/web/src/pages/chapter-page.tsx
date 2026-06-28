@@ -88,6 +88,16 @@ export function ChapterPage() {
     onUpdate: handleEditorUpdate,
   });
 
+  // TipTap reads `editable` only at mount time; on a cold page load the
+  // chapter flag may arrive after the editor is created. Sync it when the
+  // query resolves so the editor becomes read-only when the server says so.
+  // R-V171-GREPTILE-P1-4.
+  useEffect(() => {
+    if (editor && editor.isEditable !== canEditOutline) {
+      editor.setEditable(canEditOutline);
+    }
+  }, [editor, canEditOutline]);
+
   // Reset editor when outline loads or changes externally.
   useEffect(() => {
     if (editor && outline.data && !outline.isFetching) {
