@@ -121,11 +121,24 @@ fn split_frontmatter(content: &str) -> Option<(String, String)> {
         return None;
     }
     let after_open = &trimmed[3..];
-    // Find the closing `---` on its own line.
-    let end = after_open.find("\n---")?;
+    // Find the closing `---` on its own line: it must be followed by `\n` or be
+    // at end-of-string. Matching bare `\n---` would also accept substrings like
+    // `\n---more` or an unquoted YAML block scalar line starting with `---`,
+    // splitting the frontmatter prematurely (R-V172-GREPTILE-004).
+    let (end, skip) = if let Some(idx) = after_open.find("\n---\n") {
+        (idx, 5)
+    } else if let Some(idx) = after_open.find("\n---") {
+        if idx + 4 == after_open.len() {
+            (idx, 4)
+        } else {
+            // `---` is not on its own line (e.g. `\n---more`); malformed.
+            return None;
+        }
+    } else {
+        return None;
+    };
     let yaml = after_open[..end].to_string();
-    let body_start = end + 4; // skip past '\n---'
-    let body = after_open[body_start..]
+    let body = after_open[end + skip..]
         .trim_start_matches('\n')
         .to_string();
     Some((yaml, body))
@@ -1021,6 +1034,49 @@ mod tests {
     #[test]
     fn split_frontmatter_returns_none_without_delimiter() {
         assert!(split_frontmatter("# Just body").is_none());
+    }
+
+    /// Regression for R-V172-GREPTILE-004.
+    ///
+    /// A YAML block scalar line starting with `---` (indented) must not be
+    /// mistaken for the closing delimiter. The real closing `---` on its own
+    /// line must still be found.
+    #[test]
+    fn split_frontmatter_rejects_non_delimiter_dashes() {
+        // The `  ---` line is inside the `body_intro` block scalar, not a
+        // delimiter. The bare `---` line closes the frontmatter.
+        let content = "---\ntitle: \"hello\"\nbody_intro: |\n  ---\n  multi-line\n---\nactual body";
+        let (yaml, body) = split_frontmatter(content).expect("valid frontmatter should parse");
+        assert!(
+            yaml.contains("body_intro"),
+            "yaml should keep the block scalar: {yaml}"
+        );
+        assert_eq!(body, "actual body");
+    }
+
+    /// Regression for R-V172-GREPTILE-004.
+    ///
+    /// `\n---more` is not a bare delimiter line and must be rejected rather
+    /// than splitting the frontmatter at the inline dashes.
+    #[test]
+    fn split_frontmatter_rejects_inline_dashes() {
+        let content = "---\ntitle: test\n---more\nbody";
+        assert!(
+            split_frontmatter(content).is_none(),
+            "inline `---more` should not match as a delimiter"
+        );
+    }
+
+    /// Regression for R-V172-GREPTILE-004.
+    ///
+    /// A closing delimiter at end-of-string (no body, no trailing newline) is
+    /// a valid bare delimiter line and must still parse.
+    #[test]
+    fn split_frontmatter_accepts_trailing_delimiter_without_body() {
+        let content = "---\ntitle: test\n---";
+        let (yaml, body) = split_frontmatter(content).expect("trailing delimiter should parse");
+        assert!(yaml.contains("title: test"));
+        assert_eq!(body, "");
     }
 
     #[test]
