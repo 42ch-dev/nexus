@@ -9,7 +9,7 @@
  *
  * UI label is "Strategy"; persisted identifiers remain "preset" (Draft §4.2).
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useEdgesState, useNodesState, type Edge, type Node } from '@xyflow/react';
 import { AlertTriangle, Info, Pencil, Save, ScrollText, X } from 'lucide-react';
 
@@ -115,9 +115,14 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
   // patch the daemon bumps revision, so the next mutation must use the new
   // base. This prevents a single multi-field Save from conflicting with itself
   // (R-V171-P0-QC3-C3).
-  const [workingRevision, setWorkingRevision] = useState(baseRevision);
+  //
+  // A `useRef` (not state) is used so closures invoked from microtasks — e.g.
+  // `graphQuery.refetch().then(handleSave)` inside `onReapply` — read the
+  // post-refetch value without waiting for the next render to commit.
+  // R-V171-GREPTILE-P1-1.
+  const workingRevisionRef = useRef(baseRevision);
   useEffect(() => {
-    setWorkingRevision(baseRevision);
+    workingRevisionRef.current = baseRevision;
   }, [baseRevision]);
 
   // Initialise the edit form when the user opens edit mode or selects a node.
@@ -167,7 +172,11 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
     const renamedStateId = form.label !== original.label ? form.label : selectedState.id;
 
     try {
-      let currentRevision = workingRevision;
+      // Read the latest base revision from the ref so closures invoked from
+      // microtasks (e.g. `graphQuery.refetch().then(handleSave)` inside
+      // `onReapply`) see the post-refetch value, not the pre-refetch render's
+      // `workingRevision` state. R-V171-GREPTILE-P1-1.
+      let currentRevision = workingRevisionRef.current;
 
       if (form.label !== original.label || form.description !== original.description) {
         const args: PatchStrategyStateArgs = {
@@ -205,7 +214,7 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
         currentRevision = Number(res.new_revision);
       }
 
-      setWorkingRevision(currentRevision);
+      workingRevisionRef.current = currentRevision;
       setIsEditing(false);
     } catch (error) {
       if (isStrategyConflictError(error)) {
