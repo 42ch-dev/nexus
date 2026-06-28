@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/canvas/outline/timeline-patch-event-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus TimelinePatchEventRequest",
+  "description": "Request body for POST /v1/local/works/{work_id}/timeline/patch (V1.72). Mutates the Work timeline: add, remove, attach to chapter, or create foreshadow links.",
+  "type": "object",
+  "required": ["work_id", "base_revision", "operation"],
+  "properties": {
+    "work_id": {
+      "type": "string",
+      "description": "Work identifier from the URL path. Must match the path parameter."
+    },
+    "base_revision": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Revision observed by the client on the last canonical read."
+    },
+    "operation": {
+      "type": "string",
+      "enum": ["add_event", "remove_event", "attach_event_to_chapter", "link_foreshadow"],
+      "description": "Timeline patch operation to perform."
+    },
+    "event_id": {
+      "type": "string",
+      "description": "Identifier of an existing event (required for remove_event, attach_event_to_chapter, link_foreshadow)."
+    },
+    "title": {
+      "type": "string",
+      "description": "Human-facing title for a new event (add_event)."
+    },
+    "description": {
+      "type": "string",
+      "description": "Optional longer description for a new event (add_event)."
+    },
+    "realizes_chapter_id": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Chapter number that the event realizes (add_event, attach_event_to_chapter)."
+    },
+    "target_chapter_id": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Chapter number that the event attaches to (attach_event_to_chapter)."
+    },
+    "foreshadows_event_id": {
+      "type": "string",
+      "description": "Event identifier that the source event foreshadows (link_foreshadow)."
+    }
+  },
+  "additionalProperties": false
+}
