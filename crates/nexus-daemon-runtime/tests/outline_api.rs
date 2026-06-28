@@ -48,12 +48,10 @@ async fn create_work(state: &WorkspaceState) -> String {
         set_pool_active: None,
         work_profile: None,
     };
-    let (_status, Json(resp)) = nexus_daemon_runtime::api::handlers::works::create_work(
-        State(state.clone()),
-        Json(req),
-    )
-    .await
-    .unwrap();
+    let (_status, Json(resp)) =
+        nexus_daemon_runtime::api::handlers::works::create_work(State(state.clone()), Json(req))
+            .await
+            .unwrap();
     resp.work_id
 }
 
