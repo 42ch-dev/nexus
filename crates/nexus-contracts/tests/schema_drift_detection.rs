@@ -668,6 +668,72 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             WorkOutline
         ),
+        // ── local-api/canvas/world-kb/ (V1.73) ───────────────────────────
+        entry!(
+            "schemas/local-api/canvas/world-kb/world-kb-patch-entity-request.schema.json",
+            Strict,
+            WorldKbPatchEntityRequest
+        ),
+        entry!(
+            "schemas/local-api/canvas/world-kb/world-kb-patch-entity-response.schema.json",
+            Strict,
+            WorldKbPatchEntityResponse
+        ),
+        entry!(
+            "schemas/local-api/canvas/world-kb/world-kb-promote-candidate-request.schema.json",
+            Strict,
+            WorldKbPromoteCandidateRequest
+        ),
+        entry!(
+            "schemas/local-api/canvas/world-kb/world-kb-promote-candidate-response.schema.json",
+            Strict,
+            WorldKbPromoteCandidateResponse
+        ),
+        entry!(
+            "schemas/local-api/canvas/world-kb/world-kb-graph-response.schema.json",
+            Strict,
+            WorldKbGraphResponse
+        ),
+        entry!(
+            "schemas/local-api/canvas/world-kb/world-kb-candidates-response.schema.json",
+            Strict,
+            WorldKbCandidatesResponse
+        ),
+        entry!(
+            "schemas/local-api/canvas/world-kb/world-kb-conflict-error.schema.json",
+            Strict,
+            WorldKbConflictError
+        ),
+        entry!(
+            "schemas/local-api/canvas/world-kb/world-kb-validation-error.schema.json",
+            Strict,
+            WorldKbValidationError
+        ),
+        entry!(
+            "schemas/local-api/canvas/world-kb/world-kb-entity-patch.schema.json",
+            Strict,
+            WorldKbEntityPatch
+        ),
+        entry!(
+            "schemas/local-api/canvas/world-kb/world-kb-entity-projection.schema.json",
+            Strict,
+            WorldKbEntityProjection
+        ),
+        entry!(
+            "schemas/local-api/canvas/world-kb/world-kb-candidate-projection.schema.json",
+            Strict,
+            WorldKbCandidateProjection
+        ),
+        entry!(
+            "schemas/local-api/canvas/world-kb/world-kb-source-anchor-projection.schema.json",
+            Strict,
+            WorldKbSourceAnchorProjection
+        ),
+        entry!(
+            "schemas/local-api/canvas/world-kb/world-kb-extract-job-projection.schema.json",
+            Strict,
+            WorldKbExtractJobProjection
+        ),
         // ── platform/http-bff/ ───────────────────────────────────────────
         // V1.62 reorganization: platform HTTP bodies moved here from platform/.
         entry!(

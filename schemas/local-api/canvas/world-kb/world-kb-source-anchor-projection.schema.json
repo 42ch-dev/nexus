@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/canvas/world-kb/world-kb-source-anchor-projection.schema.json",
+  "schema_version": 1,
+  "title": "Nexus WorldKbSourceAnchorProjection",
+  "description": "Provenance edge projection derived from kb_source_anchors (V1.73). Rendered read-only on the canvas graph.",
+  "type": "object",
+  "required": ["source_anchor_id", "key_block_id", "source_type", "reference"],
+  "properties": {
+    "source_anchor_id": { "type": "string", "description": "Source anchor identifier." },
+    "key_block_id": { "type": "string", "description": "KeyBlock the anchor attaches to." },
+    "source_type": { "type": "string", "description": "Origin kind (e.g. chapter, review, manual)." },
+    "reference": { "type": "string", "description": "Locator string (path / chapter ref / review id)." },
+    "created_at": { "type": "string", "description": "ISO-8601 timestamp." }
+  },
+  "additionalProperties": false
+}
