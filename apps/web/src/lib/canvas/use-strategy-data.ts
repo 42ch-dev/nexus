@@ -1,49 +1,21 @@
 /**
- * Strategy canvas data hooks — TanStack Query bindings for the α scope
- * (read projection + bounded overlay + Idea→Run/Resume/Steer).
+ * Strategy canvas data hooks — TanStack Query bindings for the Strategy read
+ * surface and Idea steering affordance.
  *
- * A5 verdict (option a): no new read route. The graph comes from
- * `getPreset(id).yaml` parsed client-side (`parsePresetYaml`); the overlay
- * comes from `listSessions` filtered by `preset_id` and polled at a calm
- * cadence (bounded to current-node/status per A5 — completed-path history +
- * child-session progress are V1.71).
- *
- * A4 steering reuses existing schedule/orchestration endpoints (no new DTO):
- *   • Run     → `addSchedule({ creator_id, preset_id, seed, label })`
- *   • Steer   → `editCoreContext(scheduleId, { op:'append', body: idea })` + signal resume
- *   • Resume  → `signalSchedule(scheduleId, { signal:'resume' })`
- *
- * simplify: `creator_id` for a new Run is derived from the most recent
- * schedule/session for the preset (or any schedule). The NexusClient does not
- * yet expose an active-creator endpoint, so a brand-new daemon with zero
- * schedules has no creator to attribute — the Run button is disabled with a
- * helper in that case. Upgrade path: promote an active-creator read method
- * (V1.67 G2 pattern) when the canvas needs first-run author attribution.
+ * Write mutations (state, transition, prompt template) live next to the
+ * inspector sections that own them so each section can save independently and
+ * surface its own partial-failure UI (R-V171P0-QC1-004).
  */
 import { useMemo } from 'react';
-import {
-  useMutation,
-  useQuery,
-  useQueryClient,
-  type UseMutationResult,
-} from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useNexusClient } from '@/lib/client-context';
 import { NexusClientError } from '@/lib/nexus';
 import { queryKeys } from '@/lib/nexus/query-keys';
 import { useToast } from '@/lib/use-toast';
 
-import {
-  buildStrategyGraph,
-  type StrategyGraph,
-} from './strategy-graph';
+import { buildStrategyGraph, type StrategyGraph } from './strategy-graph';
 import { parsePresetYaml } from './preset-yaml';
-import type {
-  StrategyPatchPromptTemplateRequest,
-  StrategyPatchResponse,
-  StrategyPatchStateRequest,
-  StrategyPatchTransitionRequest,
-} from '@42ch/nexus-contracts';
 
 /** Calm overlay refresh cadence (A3 bounded overlay — session-level status). */
 const OVERLAY_POLL_MS = 5_000;
@@ -60,7 +32,6 @@ export function usePresetGraph(presetId: string | undefined) {
       return { preset: res, parsed, graph, revision: parsed.revision ?? 0 };
     },
     enabled: Boolean(presetId),
-    // Preset YAML is immutable unless reloaded; cache generously.
     staleTime: 30_000,
   });
 }
@@ -93,23 +64,11 @@ export function usePresetSchedules(presetId: string | undefined) {
   });
 }
 
-/**
- * The most recently active session for a preset (drives the live overlay).
- *
- * Returns `undefined` if every session for this preset is completed — in
- * that case the canvas should hide the Live banner and disable Steer/Resume
- * rather than presenting a misleading "active" state that targets a
- * completed schedule. The wire schema does not yet expose a direct
- * session ↔ schedule link (SessionSummary + ScheduleSummary both lack the
- * cross-reference id), so a real "is this schedule actively running?" answer
- * is a V1.71 wire-contract concern; for the α scope, no-active-session
- * cleanly disables the steering surface.
- */
+/** The most recently active session for a preset (drives the live overlay). */
 export function useActiveSession(presetId: string | undefined) {
   const sessions = usePresetSessions(presetId);
   return useMemo(() => {
     const items = sessions.data ?? [];
-    if (items.length === 0) return undefined;
     return items.find((s) => !s.status.toLowerCase().includes('complete'));
   }, [sessions.data]);
 }
@@ -118,11 +77,10 @@ export function useActiveSession(presetId: string | undefined) {
 export function useDerivedCreatorId(presetId: string | undefined): string | undefined {
   const sessions = usePresetSessions(presetId);
   const schedules = usePresetSchedules(presetId);
-  return useMemo(() => {
-    const fromSession = sessions.data?.[0]?.creator_id;
-    const fromSchedule = schedules.data?.[0]?.creator_id;
-    return fromSession ?? fromSchedule;
-  }, [sessions.data, schedules.data]);
+  return useMemo(
+    () => sessions.data?.[0]?.creator_id ?? schedules.data?.[0]?.creator_id,
+    [sessions.data, schedules.data],
+  );
 }
 
 function useErrorToast() {
@@ -174,18 +132,7 @@ export interface SteerIdeaArgs {
   idea: string;
 }
 
-/**
- * Idea → Steer: signal resume first, then append the Idea to the schedule's
- * core context.
- *
- * Signal-then-append ordering avoids partial-failure duplication: if the
- * signal call fails, no context was changed and a retry is safe (the signal
- * is idempotent). If the signal succeeds and the append fails, the run
- * resumed without the idea — the user retries; the signal is a no-op
- * (already resumed), and the single append lands cleanly. With the previous
- * append-then-signal order, a signal failure left the idea appended; a retry
- * would append the same idea a second time before signaling.
- */
+/** Idea → Steer: signal resume first, then append the Idea to core context. */
 export function useSteerStrategy() {
   const client = useNexusClient();
   const qc = useQueryClient();
@@ -194,10 +141,7 @@ export function useSteerStrategy() {
   return useMutation({
     mutationFn: async (args: SteerIdeaArgs) => {
       await client.signalSchedule(args.scheduleId, { signal: 'resume' });
-      return client.editCoreContext(args.scheduleId, {
-        op: 'append',
-        body: args.idea,
-      });
+      return client.editCoreContext(args.scheduleId, { op: 'append', body: args.idea });
     },
     onSuccess: (_data, args) => {
       toast({ variant: 'success', title: 'Idea sent to Strategy', description: args.scheduleId });
@@ -215,161 +159,13 @@ export function useResumeStrategy() {
   const errorToast = useErrorToast();
   const { toast } = useToast();
   return useMutation({
-    mutationFn: (scheduleId: string) =>
-      client.signalSchedule(scheduleId, { signal: 'resume' }),
+    mutationFn: (scheduleId: string) => client.signalSchedule(scheduleId, { signal: 'resume' }),
     onSuccess: (_data, scheduleId) => {
       toast({ variant: 'success', title: 'Strategy resumed', description: scheduleId });
       void qc.invalidateQueries({ queryKey: queryKeys.schedules.all });
       void qc.invalidateQueries({ queryKey: queryKeys.sessions.all });
     },
     onError: (error) => errorToast(error, 'Could not resume Strategy'),
-  });
-}
-
-// ─── Strategy canvas write boundary (V1.71 Track A) ────────────────────────
-
-export interface PatchStrategyStateArgs {
-  strategyId: string;
-  stateId: string;
-  baseRevision: number;
-  label?: string;
-  description?: string;
-}
-
-function buildPatchStateRequest(
-  args: PatchStrategyStateArgs,
-): StrategyPatchStateRequest {
-  const set: StrategyPatchStateRequest['set'] = {};
-  if (args.label !== undefined) set.label = args.label;
-  if (args.description !== undefined) set.description = args.description;
-  return {
-    strategy_id: args.strategyId,
-    state_id: args.stateId,
-    base_revision: args.baseRevision,
-    set,
-  };
-}
-
-/** Patch a Strategy state (label/description). */
-export function usePatchStrategyState(): UseMutationResult<
-  StrategyPatchResponse,
-  unknown,
-  PatchStrategyStateArgs
-> {
-  const client = useNexusClient();
-  const qc = useQueryClient();
-  const errorToast = useErrorToast();
-  const { toast } = useToast();
-  return useMutation({
-    mutationFn: (args: PatchStrategyStateArgs) =>
-      client.strategyPatchState(
-        args.strategyId,
-        args.stateId,
-        buildPatchStateRequest(args),
-      ),
-    onSuccess: (_data, args) => {
-      toast({
-        variant: 'success',
-        title: 'State updated',
-        description: args.stateId,
-      });
-      void qc.invalidateQueries({
-        queryKey: queryKeys.presets.detail(args.strategyId),
-      });
-    },
-    onError: (error) => errorToast(error, 'Could not update state'),
-  });
-}
-
-export interface PatchStrategyTransitionArgs {
-  strategyId: string;
-  sourceStateId: string;
-  baseRevision: number;
-  oldTarget: string;
-  newTarget?: string;
-  condition?: string;
-  transitionKind?: StrategyPatchTransitionRequest['transition_kind'];
-}
-
-/** Rewire a Strategy transition. */
-export function usePatchStrategyTransition(): UseMutationResult<
-  StrategyPatchResponse,
-  unknown,
-  PatchStrategyTransitionArgs
-> {
-  const client = useNexusClient();
-  const qc = useQueryClient();
-  const errorToast = useErrorToast();
-  const { toast } = useToast();
-  return useMutation({
-    mutationFn: (args: PatchStrategyTransitionArgs) =>
-      client.strategyPatchTransition(args.strategyId, {
-        strategy_id: args.strategyId,
-        base_revision: args.baseRevision,
-        source_state_id: args.sourceStateId,
-        old_target: args.oldTarget,
-        new_target: args.newTarget,
-        condition: args.condition,
-        transition_kind: args.transitionKind,
-      }),
-    onSuccess: (_data, args) => {
-      toast({
-        variant: 'success',
-        title: 'Transition updated',
-        description: `${args.sourceStateId} → ${args.newTarget ?? args.oldTarget}`,
-      });
-      void qc.invalidateQueries({
-        queryKey: queryKeys.presets.detail(args.strategyId),
-      });
-    },
-    onError: (error) => errorToast(error, 'Could not update transition'),
-  });
-}
-
-export interface PatchStrategyPromptTemplateArgs {
-  strategyId: string;
-  stateId: string;
-  baseRevision: number;
-  templateRef: string;
-  body: string;
-}
-
-/** Patch a Strategy prompt-template file. */
-export function usePatchStrategyPromptTemplate(): UseMutationResult<
-  StrategyPatchResponse,
-  unknown,
-  PatchStrategyPromptTemplateArgs
-> {
-  const client = useNexusClient();
-  const qc = useQueryClient();
-  const errorToast = useErrorToast();
-  const { toast } = useToast();
-  return useMutation({
-    mutationFn: (args: PatchStrategyPromptTemplateArgs) => {
-      const req: StrategyPatchPromptTemplateRequest = {
-        strategy_id: args.strategyId,
-        state_id: args.stateId,
-        base_revision: args.baseRevision,
-        template_ref: args.templateRef,
-        set: { body: args.body },
-      };
-      return client.strategyPatchPromptTemplate(
-        args.strategyId,
-        args.stateId,
-        req,
-      );
-    },
-    onSuccess: (_data, args) => {
-      toast({
-        variant: 'success',
-        title: 'Prompt template saved',
-        description: args.templateRef,
-      });
-      void qc.invalidateQueries({
-        queryKey: queryKeys.presets.detail(args.strategyId),
-      });
-    },
-    onError: (error) => errorToast(error, 'Could not save prompt template'),
   });
 }
 
