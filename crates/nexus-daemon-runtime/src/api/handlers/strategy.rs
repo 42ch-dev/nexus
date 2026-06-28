@@ -1010,18 +1010,12 @@ fn patch_prompt_template_inner_with_writer(
     tmp_name.push(format!(".tmp.{}", uuid::Uuid::new_v4()));
     let tmp_path = canonical_template.with_file_name(&tmp_name);
 
-    std::fs::write(&tmp_path, body.as_bytes()).map_err(|e| NexusApiError::Internal {
-        code: "FILE_WRITE_ERROR".to_string(),
-        message: format!("cannot write template temp file: {e}"),
-    })?;
-
-    if let Err(e) = std::fs::rename(&tmp_path, &canonical_template) {
-        let _ = std::fs::remove_file(&tmp_path);
-        return Err(NexusApiError::Internal {
-            code: "FILE_RENAME_ERROR".to_string(),
-            message: format!("cannot commit template file: {e}"),
-        });
-    }
+    // Use the same atomic-write helper as the YAML path so the template file
+    // and the parent directory are fsync'd before and after the rename. Without
+    // this, a crash between the write and the OS page-cache flush could leave
+    // the template empty/truncated while the YAML revision has already been
+    // bumped. R-V171-GREPTILE-P1-2.
+    atomic_write_with_dir_fsync(&canonical_template, &tmp_path, body.as_bytes())?;
 
     // Validate the manifest still loads with the new/updated template file.
     let (errors, warnings) = validate_preset_yaml(&bundle_dir, &yaml_value)?;
