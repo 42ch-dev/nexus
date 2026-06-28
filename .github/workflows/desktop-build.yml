@@ -133,6 +133,8 @@ jobs:
         run: pnpm --filter @42ch/nexus-contracts run build
 
       - name: Run served-UI smoke test
-        env:
-          SKIP_WEB_BUILD: "1"
+        # The script's own SKIP_WEB_BUILD guard is left at its default; this
+        # job is a separate runner from `desktop-build` so its built SPA is
+        # not accessible here. Letting the script build the SPA locally keeps
+        # the smoke test self-contained.
         run: ./scripts/served-ui-smoke.sh
