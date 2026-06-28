@@ -62,4 +62,8 @@ export const queryKeys = {
     body: (workId: string, chapter: number, query?: object) =>
       [...queryKeys.chapters.bodies(), workId, chapter, query ?? {}] as const,
   },
+  outline: {
+    all: ['outline'] as const,
+    detail: (workId: string) => [...queryKeys.outline.all, 'detail', workId] as const,
+  },
 } as const;

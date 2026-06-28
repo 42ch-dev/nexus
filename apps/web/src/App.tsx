@@ -7,6 +7,7 @@ import { ChapterPage } from '@/pages/chapter-page';
 import { ChaptersPage } from '@/pages/chapters-page';
 import { FindingsPage } from '@/pages/findings-page';
 import { NotFoundPage } from '@/pages/not-found-page';
+import { OutlinePage } from '@/pages/outline-page';
 import { PresetsPage } from '@/pages/presets-page';
 import { SchedulePage } from '@/pages/schedule-page';
 import { SessionsPage } from '@/pages/sessions-page';
@@ -40,6 +41,7 @@ export function App() {
         <Route path="works/:workId" element={<WorkDetailPage />} />
         <Route path="works/:workId/chapters" element={<ChaptersPage />} />
         <Route path="works/:workId/chapters/:chapter" element={<ChapterPage />} />
+        <Route path="works/:workId/outline" element={<OutlinePage />} />
         <Route path="sessions" element={<SessionsPage />} />
         <Route path="schedule" element={<SchedulePage />} />
         <Route path="capabilities" element={<CapabilitiesPage />} />
