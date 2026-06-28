@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-28T01:34:05Z",
+  "updated_at": "2026-06-28T03:56:05Z",
   "plans": [],
   "metadata": {
     "integration_branch": "iteration/v1.71",
@@ -31,29 +31,30 @@
       "merge_commit": "a47af3f046c22f313fd146e18d2de99ef6299894"
     },
     "tech_debt_summary": {
-      "total_open": 8,
+      "total_open": 9,
       "total_deferred": 1,
       "total_resolved": 243,
       "total_archived": 0,
       "by_severity_active": {
         "low": 5,
         "high": 1,
-        "medium": 1,
+        "medium": 2,
         "nit": 1
       },
       "by_target_active": {
         "V1.72": 1,
-        "V1.72 or V1.71 P-last cleanup": 7
+        "V1.72 or V1.71 P-last cleanup": 7,
+        "V1.72 release-hardening plan": 1
       },
       "by_plan_active": {
         "v1.65": 1,
         "2026-06-27-v1.71-canvas-strategy-write-boundary": 4,
-        "2026-06-27-v1.71-hygiene-and-sign-groundwork": 3
+        "2026-06-27-v1.71-hygiene-and-sign-groundwork": 4
       },
-      "refreshed_at": "2026-06-28T01:25:23Z",
-      "refreshed_reason": "PM consolidation after P0/P1 QC tri-review approvals (qc3 rev3). 8 non-blocking residuals remain for V1.72/P-last or V1.72 (R-V165-QC3-VIRT)."
+      "refreshed_at": "2026-06-28T03:56:05Z",
+      "refreshed_reason": "Recorded R-V171-CI-RELEASE-WORKFLOW-INCOMPLETE: desktop-release.yml missing keychain import + notarize; deferred to V1.72 release-hardening plan."
     },
-    "updated_at": "2026-06-28T01:34:05Z",
+    "updated_at": "2026-06-28T03:56:05Z",
     "spec_integration_branch": "iteration/v1.71",
     "wave1_merged_at": null
   },
@@ -4886,6 +4887,18 @@
         "target_date": "V1.72",
         "tracking_link": ".mstar/plans/reports/2026-06-27-v1.71-hygiene-and-sign-groundwork/qc1.md",
         "note": "const canEditOutline = chapter.data?.can_edit_outline ?? true; falls back to editable if the API omits the field. Backend always populates it today, but defense-in-depth would default to false or validate the contract shape at the API boundary. Non-blocking for P1 approval.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V171-CI-RELEASE-WORKFLOW-INCOMPLETE",
+        "title": "desktop-release.yml signing flow is incomplete (no keychain import, no notarize)",
+        "severity": "medium",
+        "source": "V1.71 PR review (CI signing discussion)",
+        "scope": ".github/workflows/desktop-release.yml",
+        "decision": "defer",
+        "owner": "@ops-engineer",
+        "target": "V1.72 release-hardening plan",
+        "note": "desktop-release.yml reads APPLE_SIGNING_IDENTITY and has a fail-fast check, but the .p12 certificate is never imported to the runner's temporary keychain, so even when the secret is configured, tauri build's codesign invocation cannot find the private key and fails. Also missing: notarize + staple steps, so signed .dmg would still be blocked by macOS Gatekeeper on first open. V1.71 ship is not blocked because the PR-verification workflow (desktop-build.yml) is now unsigned-only (revert of P1 mis-injection). Release artifacts for V1.71 are produced by developer-local signing + manual upload, not via this CI workflow. Full fix: add 'Import signing certificate to temporary keychain' step between 'Require signing identity' and 'Build Tauri desktop bundle', plus a notarize + staple step after dmg creation. Secrets required: APPLE_CERTIFICATE_P12_BASE64, APPLE_CERTIFICATE_PASSWORD, APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID in addition to APPLE_SIGNING_IDENTITY.",
         "lifecycle": "open"
       }
     ]
