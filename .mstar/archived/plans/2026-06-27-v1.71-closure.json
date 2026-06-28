@@ -1,0 +1,17 @@
+{
+  "plan_id": "2026-06-27-v1.71-closure",
+  "archived_at": "2026-06-28",
+  "schema_version": 1,
+  "plan": {
+    "plan_id": "2026-06-27-v1.71-closure",
+    "iteration_id": "V1.71",
+    "status": "Done",
+    "owner": "project-manager",
+    "effort": "S",
+    "type": "closeout",
+    "working_branch": "iteration/v1.71",
+    "merge_target": "iteration/v1.71",
+    "completed_at": "2026-06-28T01:33:17Z",
+    "merge_commit": "67343139"
+  }
+}

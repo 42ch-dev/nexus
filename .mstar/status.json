@@ -1,89 +1,34 @@
 {
   "version": 1,
-  "updated_at": "2026-06-28T01:25:23Z",
-  "plans": [
-    {
-      "plan_id": "2026-06-27-v1.71-compass-and-plan",
-      "iteration_id": "V1.71",
-      "status": "Done",
-      "owner": "project-manager",
-      "effort": "S",
-      "type": "prepare",
-      "working_branch": "iteration/v1.71",
-      "merge_target": "iteration/v1.71",
-      "metadata": {
-        "compass": "v1.71-canvas-strategy-write-boundary-and-hygiene-compass-v1.md"
-      },
-      "completed_at": "2026-06-27T19:15:18Z"
-    },
-    {
-      "plan_id": "2026-06-27-v1.71-canvas-strategy-write-boundary",
-      "iteration_id": "V1.71",
-      "status": "InReview",
-      "owner": "frontend-dev + fullstack-dev",
-      "effort": "L",
-      "type": "implement",
-      "working_branch": "feature/v1.71-canvas-strategy-write-boundary",
-      "merge_target": "iteration/v1.71",
-      "task_category": "visual",
-      "wire_contracts_changed": true,
-      "wire_contracts_note": "V1.71 Track A: new Local API DTOs for strategy.patch_state/transition/prompt_template + graphRevision + conflict error; @42ch/nexus-contracts 0.6.0 \u2192 0.7.0",
-      "merged_to_integration_at": "2026-06-27T21:02:58Z"
-    },
-    {
-      "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
-      "iteration_id": "V1.71",
-      "status": "InReview",
-      "owner": "ops-engineer + fullstack-dev + frontend-dev",
-      "effort": "M",
-      "type": "implement",
-      "working_branch": "feature/v1.71-hygiene-and-sign-groundwork",
-      "merge_target": "iteration/v1.71",
-      "task_category": "ops",
-      "wire_contracts_changed": false,
-      "wire_contracts_note": "Track B only: surgical residual closures + desktop sign infrastructure; no schema/codegen/DTO change",
-      "started_at": "2026-06-27T19:54:37Z",
-      "merged_to_integration_at": "2026-06-27T21:02:58Z"
-    },
-    {
-      "plan_id": "2026-06-27-v1.71-closure",
-      "iteration_id": "V1.71",
-      "status": "Todo",
-      "owner": "project-manager",
-      "effort": "S",
-      "type": "closeout",
-      "working_branch": "iteration/v1.71",
-      "merge_target": "iteration/v1.71"
-    }
-  ],
+  "updated_at": "2026-06-28T01:34:05Z",
+  "plans": [],
   "metadata": {
     "integration_branch": "iteration/v1.71",
-    "integration_branch_retired": false,
+    "integration_branch_retired": true,
     "last_integration_branch": "iteration/v1.70",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.71 (Prepare active \u2014 2026-06-28)",
+    "latest_active_iteration": "V1.72 (pending)",
     "latest_active_compass": "v1.71-canvas-strategy-write-boundary-and-hygiene-compass-v1.md",
     "platform_integration": "paused \u2014 local-only until further notice",
-    "pre_implement_gate": "GO",
+    "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.70",
-      "compass": "v1.70-canvas-strategy-implement-and-ci-optimization-compass-v1.md",
-      "shipped_at": "2026-06-27",
+      "iteration": "V1.71",
+      "compass": "v1.71-canvas-strategy-write-boundary-and-hygiene-compass-v1.md",
+      "shipped_at": "2026-06-28",
       "plan_count": 4,
       "plan_count_done": 4,
-      "wire_contracts_changed": false,
-      "wire_contracts_note": "V1.70: Canvas Strategy Surface \u03b1 implement (read + overlay + Idea-steer) + parallel CI/desktop-build optimization (PR path filter narrowed + release-gated build added). A5 verdict: option (a) \u2014 existing endpoints suffice; no schema/codegen/DTO change. Closed 2 residuals (R-V167PSEC-QC1-S-UNMOUNT, R-V167PSEC-QC1-S-CI-SETUO). QC 3/3 Approve per plan + QA Pass.",
-      "profile_b_compaction": "done (commit acabcc64)",
+      "wire_contracts_changed": true,
+      "wire_contracts_note": "V1.71 Track A: new Local API DTOs for strategy.patch_state/transition/prompt_template + graphRevision + conflict error; @42ch/nexus-contracts 0.6.0 \u2192 0.7.0. Track B: no wire change.",
+      "profile_b_compaction": "done (commit 67343139)",
       "plan_ids": [
-        "2026-06-27-v1.70-compass-and-plan",
-        "2026-06-27-v1.70-canvas-strategy-surface-implement",
-        "2026-06-27-v1.70-ci-desktop-build-optimization",
-        "2026-06-27-v1.70-closure"
+        "2026-06-27-v1.71-compass-and-plan",
+        "2026-06-27-v1.71-canvas-strategy-write-boundary",
+        "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+        "2026-06-27-v1.71-closure"
       ],
-      "merge_commit": "62a70c02",
-      "pr_number": 95
+      "merge_commit": "a47af3f046c22f313fd146e18d2de99ef6299894"
     },
     "tech_debt_summary": {
       "total_open": 8,
@@ -108,7 +53,7 @@
       "refreshed_at": "2026-06-28T01:25:23Z",
       "refreshed_reason": "PM consolidation after P0/P1 QC tri-review approvals (qc3 rev3). 8 non-blocking residuals remain for V1.72/P-last or V1.72 (R-V165-QC3-VIRT)."
     },
-    "updated_at": "2026-06-28T01:25:23Z",
+    "updated_at": "2026-06-28T01:34:05Z",
     "spec_integration_branch": "iteration/v1.71",
     "wave1_merged_at": null
   },
