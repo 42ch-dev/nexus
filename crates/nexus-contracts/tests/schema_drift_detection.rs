@@ -632,6 +632,42 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             StrategyConflictError
         ),
+        // ── local-api/canvas/outline/ (V1.72) ─────────────────────────────
+        entry!(
+            "schemas/local-api/canvas/outline/outline-patch-structure-request.schema.json",
+            Strict,
+            OutlinePatchStructureRequest
+        ),
+        entry!(
+            "schemas/local-api/canvas/outline/outline-patch-chapter-request.schema.json",
+            Strict,
+            OutlinePatchChapterRequest
+        ),
+        entry!(
+            "schemas/local-api/canvas/outline/timeline-patch-event-request.schema.json",
+            Strict,
+            TimelinePatchEventRequest
+        ),
+        entry!(
+            "schemas/local-api/canvas/outline/outline-patch-response.schema.json",
+            Strict,
+            OutlinePatchResponse
+        ),
+        entry!(
+            "schemas/local-api/canvas/outline/outline-conflict-error.schema.json",
+            Strict,
+            OutlineConflictError
+        ),
+        entry!(
+            "schemas/local-api/canvas/outline/outline-validation-error.schema.json",
+            Strict,
+            OutlineValidationError
+        ),
+        entry!(
+            "schemas/local-api/canvas/outline/work-outline.schema.json",
+            Strict,
+            WorkOutline
+        ),
         // ── platform/http-bff/ ───────────────────────────────────────────
         // V1.62 reorganization: platform HTTP bodies moved here from platform/.
         entry!(

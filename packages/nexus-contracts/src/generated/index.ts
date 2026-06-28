@@ -21,6 +21,13 @@ export * from './domain/TimelineEvent';
 export * from './domain/User';
 export * from './domain/WorldMembership';
 export * from './domain/World';
+export * from './local-api/canvas/outline/OutlineConflictError';
+export * from './local-api/canvas/outline/OutlinePatchChapterRequest';
+export * from './local-api/canvas/outline/OutlinePatchResponse';
+export * from './local-api/canvas/outline/OutlinePatchStructureRequest';
+export * from './local-api/canvas/outline/OutlineValidationError';
+export * from './local-api/canvas/outline/TimelinePatchEventRequest';
+export * from './local-api/canvas/outline/WorkOutline';
 export * from './local-api/canvas/strategy/StrategyConflictError';
 export * from './local-api/canvas/strategy/StrategyPatchPromptTemplateRequest';
 export * from './local-api/canvas/strategy/StrategyPatchResponse';
@@ -166,6 +173,13 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   User: 1,
   WorldMembership: 1,
   World: 1,
+  OutlineConflictError: 1,
+  OutlinePatchChapterRequest: 1,
+  OutlinePatchResponse: 1,
+  OutlinePatchStructureRequest: 1,
+  OutlineValidationError: 1,
+  TimelinePatchEventRequest: 1,
+  WorkOutline: 1,
   StrategyConflictError: 1,
   StrategyPatchPromptTemplateRequest: 1,
   StrategyPatchResponse: 1,
