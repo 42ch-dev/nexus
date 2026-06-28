@@ -887,6 +887,7 @@ pub async fn get_promotion(
 ///
 /// Ordered by creation date (oldest first) so the author sees candidates in
 /// extraction order. Bounded by `limit` (default [`DEFAULT_PENDING_LIMIT`]).
+/// Not cursor-aware — use [`list_pending_for_world_after`] for paged reads.
 ///
 /// # Errors
 ///
@@ -913,6 +914,60 @@ pub async fn list_pending_for_world(
         .bind(world_id)
         .fetch_all(pool)
         .await
+}
+
+/// List `pending` promotion candidates for a world with keyset cursor
+/// pagination (V1.73 qc3 W-01 fix).
+///
+/// Rows are ordered by `(created_at, job_id)` ascending so the ordering is
+/// total even when several candidates share the same `created_at` second (the
+/// `job_id` tiebreaker is globally unique). When `cursor_created_at` and
+/// `cursor_job_id` are both `Some`, the page starts strictly AFTER that tuple
+/// (`(created_at, job_id) > (?, ?)`) so every row is reachable. Pass `None`
+/// for both on the first page.
+///
+/// Callers should pass `limit + 1` so the extra row can be used to compute
+/// `has_more` / `next_cursor` (mirrors `work_chapters::list_chapters_paginated`).
+///
+/// The covering index `idx_kb_extract_jobs_promotion_status_world`
+/// `(promotion_status, world_id, created_at)` still serves the equality prefix
+/// `(promotion_status, world_id, created_at)`; the `job_id` tiebreaker is
+/// resolved by a cheap per-page sort of the limited window.
+///
+/// # Errors
+///
+/// Returns `sqlx::Error` on database failure.
+pub async fn list_pending_for_world_after(
+    pool: &SqlitePool,
+    world_id: &str,
+    cursor_created_at: Option<&str>,
+    cursor_job_id: Option<&str>,
+    limit: i64,
+) -> Result<Vec<KbExtractPromotion>, sqlx::Error> {
+    let limit = limit.clamp(1, 500);
+    let has_cursor = cursor_created_at.is_some() && cursor_job_id.is_some();
+    // SAFETY: dynamic WHERE clause gated on cursor presence; every value is a
+    // bind parameter (not interpolated). Column names are static.
+    let mut sql = String::from(
+        "SELECT job_id, creator_id, workspace_id, world_id, work_id, \
+                promotion_status, proposed_payload, source_chapter_id, \
+                block_type_guess, canonical_name_guess, llm_confidence, \
+                llm_source_quote, created_at, version, \
+                auto_promoted_at, auto_promoted_reason, auto_promoted_by \
+         FROM kb_extract_jobs \
+         WHERE world_id = ? AND promotion_status = 'pending'",
+    );
+    if has_cursor {
+        sql.push_str(" AND (created_at, job_id) > (?, ?)");
+    }
+    sql.push_str(" ORDER BY created_at ASC, job_id ASC LIMIT ?");
+
+    let mut query = sqlx::query_as::<_, KbExtractPromotion>(&sql).bind(world_id);
+    if has_cursor {
+        query = query.bind(cursor_created_at).bind(cursor_job_id);
+    }
+    query = query.bind(limit);
+    query.fetch_all(pool).await
 }
 
 /// Idempotency pre-check: returns `true` if a `pending` or `confirmed` row

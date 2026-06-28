@@ -38,7 +38,7 @@ use nexus_kb::key_block::{KeyBlock, KeyBlockBody};
 use nexus_kb::validation::{validate_body, validate_canonical_name, ValidationMode};
 use nexus_kb::KbStore;
 use nexus_local_db::kb_extract_job::{
-    get_promotion, list_pending_for_world, mark_confirmed_in_tx_with_cas, KbExtractPromotion,
+    get_promotion, list_pending_for_world_after, mark_confirmed_in_tx_with_cas, KbExtractPromotion,
 };
 use nexus_local_db::kb_store::{self, cas_update_key_block_fields};
 use nexus_local_db::LocalDbError;
@@ -51,6 +51,11 @@ const GRAPH_ENTITY_CAP: usize = 500;
 /// Default + max page size for the candidates endpoint.
 const DEFAULT_CANDIDATE_LIMIT: i64 = 50;
 const MAX_CANDIDATE_LIMIT: i64 = 250;
+
+/// Prefix for candidate-list keyset cursors (`kb promotion`). Distinguishes
+/// the V1.73 qc3 W-01 keyset cursor from any legacy bare-`job_id` cursor so a
+/// malformed/old cursor surfaces as 400 instead of silently mis-paginating.
+const CANDIDATE_CURSOR_PREFIX: &str = "kbp:";
 
 // ─── Shared helpers ─────────────────────────────────────────────────────────
 
@@ -821,7 +826,59 @@ pub struct CandidatesQuery {
     pub cursor: Option<String>,
 }
 
+/// Decode an opaque candidates cursor into the `(created_at, job_id)` keyset
+/// tuple that the next page must start strictly after. `None` decodes to
+/// `(None, None)` so the first page includes the oldest candidate.
+///
+/// Format: `kbp:<created_at>|<job_id>`. `|` never appears in either field
+/// (`created_at` is `datetime('now')` ISO8601; `job_id` is `xj_<uuid hex>`).
+fn decode_candidate_cursor(
+    cursor: Option<&String>,
+) -> Result<(Option<String>, Option<String>), NexusApiError> {
+    let Some(raw) = cursor else {
+        return Ok((None, None));
+    };
+    let stripped =
+        raw.strip_prefix(CANDIDATE_CURSOR_PREFIX)
+            .ok_or_else(|| NexusApiError::BadRequest {
+                code: "invalid_input".to_string(),
+                message: "invalid candidates cursor; pass the next_cursor value unchanged"
+                    .to_string(),
+            })?;
+    let mut parts = stripped.splitn(2, '|');
+    let created_at =
+        parts
+            .next()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| NexusApiError::BadRequest {
+                code: "invalid_input".to_string(),
+                message: "invalid candidates cursor: missing created_at".to_string(),
+            })?;
+    let job_id =
+        parts
+            .next()
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| NexusApiError::BadRequest {
+                code: "invalid_input".to_string(),
+                message: "invalid candidates cursor: missing job_id".to_string(),
+            })?;
+    Ok((Some(created_at.to_string()), Some(job_id.to_string())))
+}
+
+/// Encode the keyset tuple of the last row visible on the current page into an
+/// opaque cursor token for the next page request.
+fn encode_candidate_cursor(created_at: &str, job_id: &str) -> String {
+    format!("{CANDIDATE_CURSOR_PREFIX}{created_at}|{job_id}")
+}
+
 /// `GET /v1/local/worlds/{world_id}/kb/candidates` — pending candidates list.
+///
+/// Cursor-paginated via a `(created_at, job_id)` keyset applied **inside** the
+/// storage query (V1.73 qc3 W-01 fix). The previous implementation fetched the
+/// first `limit + 1` rows and then skipped forward to the cursor in Rust,
+/// which made page 2+ unreachable once a world had more than one page of
+/// candidates. The keyset filter now lives in the SQL `WHERE` clause so every
+/// row beyond the cursor is reachable.
 pub async fn get_candidates(
     State(state): State<WorkspaceState>,
     Path(world_id): Path<String>,
@@ -834,35 +891,42 @@ pub async fn get_candidates(
         .limit
         .unwrap_or(DEFAULT_CANDIDATE_LIMIT)
         .clamp(1, MAX_CANDIDATE_LIMIT);
-    let pending = list_pending_for_world(state.pool(), &world_id, Some(limit + 1))
-        .await
-        .map_err(NexusApiError::from)?;
+    let limit_us = usize::try_from(limit).unwrap_or(usize::MAX);
+    let (cursor_created_at, cursor_job_id) = decode_candidate_cursor(query.cursor.as_ref())?;
 
-    // Cursor pagination (cursor = last job_id seen).
-    let mut items: Vec<WorldKbCandidateProjection> = Vec::new();
-    let mut after_cursor = query.cursor.as_deref();
-    let mut took = 0i64;
-    let mut next_cursor: Option<String> = None;
-    for c in &pending {
-        if let Some(cur) = after_cursor {
-            if c.job_id == cur {
-                after_cursor = None;
-            }
-            continue;
-        }
-        if took >= limit {
-            next_cursor = Some(c.job_id.clone());
-            break;
-        }
-        items.push(project_candidate(c));
-        took += 1;
-    }
+    // Fetch `limit + 1` rows starting strictly after the cursor tuple so the
+    // extra row detects `has_more` without truncating later pages.
+    let pending = list_pending_for_world_after(
+        state.pool(),
+        &world_id,
+        cursor_created_at.as_deref(),
+        cursor_job_id.as_deref(),
+        limit + 1,
+    )
+    .await
+    .map_err(NexusApiError::from)?;
+
+    // Cursor = keyset of the last row ON the current page (index limit-1), so
+    // the next page starts strictly after it. Mirrors `chapter_page_meta`.
+    let next_cursor = if pending.len() > limit_us {
+        let last = &pending[limit_us - 1];
+        Some(encode_candidate_cursor(&last.created_at, &last.job_id))
+    } else {
+        None
+    };
+    let has_more = next_cursor.is_some();
+
+    let items: Vec<WorldKbCandidateProjection> = pending
+        .iter()
+        .take(limit_us)
+        .map(project_candidate)
+        .collect();
 
     Ok(Json(WorldKbCandidatesResponse {
         items,
         pagination: PaginationInfo {
             limit,
-            has_more: next_cursor.is_some(),
+            has_more,
             next_cursor,
         },
     }))
