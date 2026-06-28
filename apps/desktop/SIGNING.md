@@ -4,6 +4,39 @@ The Nexus desktop shell is a Tauri v2 application. By default it builds
 **unsigned**. Code signing is opt-in and gated by environment so that local
 development and CI do not require a certificate.
 
+## Configuration source of truth (`signingIdentity`)
+
+The macOS signing identity is resolved with a single precedence (highest first):
+
+1. **CLI flag** — `nexus42 desktop bundle --sign-identity "<identity>"`.
+2. **Tauri config** — `apps/desktop/src-tauri/tauri.conf.json` →
+   `bundle.macOS.signingIdentity`. A non-null value here is the config default.
+3. **Environment variable** — `APPLE_SIGNING_IDENTITY`. Tauri v2's bundler reads
+   this when the config value is `null` (per the Tauri v2 signing docs).
+4. **Unsigned** — if none of the above is set, Tauri emits an unsigned `.app`
+   and `.dmg`.
+
+`tauri.conf.json` ships `"signingIdentity": null`, which means *"no config-level
+identity — defer to the `APPLE_SIGNING_IDENTITY` environment variable, or build
+unsigned if it is unset."* It is intentionally `null` (not a hard-coded identity)
+so local dev and PR builds never require a certificate.
+
+> **Why no inline comment in `tauri.conf.json`?** Tauri parses `tauri.conf.json`
+> as strict JSON — the `config-json5` Cargo feature is **not** enabled
+> (`tauri`/`tauri-build` use `features = []`), so JSON `//` comments would break
+> the build. This document is the authoritative place for signing-identity
+> documentation; do not add JSON comments to `tauri.conf.json`.
+
+### Local vs CI variable names
+
+Two similarly-named variables appear across the codebase; they are **distinct
+and intentional**, not a typo:
+
+| Variable | Where used | Purpose |
+|----------|------------|---------|
+| `APPLE_SIGNING_IDENTITY` | Local `nexus42 desktop bundle` CLI + Tauri's own bundler | Drives Tauri's native codesign step (and the CLI's `--sign-identity` fallback). This is the variable Tauri v2 documents. |
+| `APPLE_SIGN_IDENTITY` | `desktop-release.yml` CI secret | Feeds the workflow's **manual** `codesign --sign "$APPLE_SIGN_IDENTITY"` step. Tauri itself builds unsigned in CI (the config is `null` and `APPLE_SIGNING_IDENTITY` is not exported to Tauri), then the workflow codesigns the bundle separately. |
+
 ## Local signed build
 
 Set the Apple Developer ID application identity and run the CLI wrapper:
