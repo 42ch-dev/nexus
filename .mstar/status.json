@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-28T05:21:34Z",
+  "updated_at": "2026-06-28T05:31:48Z",
   "plans": [],
   "metadata": {
     "integration_branch": "iteration/v1.71",
@@ -31,30 +31,30 @@
       "merge_commit": "a47af3f046c22f313fd146e18d2de99ef6299894"
     },
     "tech_debt_summary": {
-      "total_open": 10,
+      "total_open": 12,
       "total_deferred": 1,
       "total_resolved": 243,
       "total_archived": 0,
       "by_severity_active": {
-        "low": 6,
+        "low": 8,
         "high": 1,
         "medium": 2,
         "nit": 1
       },
       "by_target_active": {
-        "V1.72": 2,
+        "V1.72": 4,
         "V1.72 or V1.71 P-last cleanup": 7,
         "V1.72 release-hardening plan": 1
       },
       "by_plan_active": {
         "v1.65": 1,
         "2026-06-27-v1.71-canvas-strategy-write-boundary": 4,
-        "2026-06-27-v1.71-hygiene-and-sign-groundwork": 5
+        "2026-06-27-v1.71-hygiene-and-sign-groundwork": 7
       },
-      "refreshed_at": "2026-06-28T05:21:34Z",
-      "refreshed_reason": "Recorded R-V171-CI-WORKFLOW-SETUP-DEDUPE: dedupe ci.yml and desktop-build.yml setup boilerplate via .github/actions/setup-monorepo composite action; deferred to V1.72."
+      "refreshed_at": "2026-06-28T05:31:48Z",
+      "refreshed_reason": "Recorded 2 V1.72 residuals from Greptile 5/5 summary post-merge: misleading toast after state rename, non-atomic template rollback path."
     },
-    "updated_at": "2026-06-28T05:21:34Z",
+    "updated_at": "2026-06-28T05:31:48Z",
     "spec_integration_branch": "iteration/v1.71",
     "wave1_merged_at": null
   },
@@ -4911,6 +4911,30 @@
         "owner": "@ops-engineer",
         "target": "V1.72",
         "note": "ci.yml and desktop-build.yml each re-declare the same monorepo setup boilerplate (checkout, pnpm/action-setup, setup-node, dtolnay/rust-toolchain, Swatinem/rust-cache, pnpm install --frozen-lockfile) in every job. The boilerplate cannot be merged at the workflow level (jobs must run in parallel on independent runners with different OS images), but the setup steps themselves are repeated verbatim ~7 times across the two files, making it tedious to bump action SHAs or pnpm/node versions. Fix: extract a .github/actions/setup-monorepo composite action that takes rust-targets, cache-key, and cache-workspaces as inputs, and have all jobs in both workflows use it. Do NOT attempt to merge jobs or workflows (GitHub Actions jobs are intentionally isolated). Do NOT extract the build/test steps themselves \u2014 they vary too much across jobs to share meaningfully.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V171-GREPTILE-POST5-TOAST",
+        "title": "Misleading toast description after strategy state rename",
+        "severity": "low",
+        "source": "Greptile 5/5 summary (V1.71 PR #96)",
+        "scope": "apps/web/src/components/canvas/use-strategy-data.ts",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.72",
+        "note": "usePatchStrategyState's success toast description uses args.stateId (the old ID) rather than the new label after a rename, so the user sees a description referring to the old name even though the state now has the new label. Cosmetic only \u2014 data integrity is correct. R-V171-GREPTILE-POST5.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V171-GREPTILE-POST5-ROLLBACK-ATOMIC",
+        "title": "Template rollback in strategy.rs uses non-atomic std::fs::write",
+        "severity": "low",
+        "source": "Greptile 5/5 summary (V1.71 PR #96)",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/strategy.rs::rollback_template_write",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.72",
+        "note": "rollback_template_write restores the previous template bytes via std::fs::write after a validation failure, which is non-atomic. A process crash mid-rollback could leave the template truncated while the YAML revision was already restored. Note: the rollback path is only reachable on validation failure (very rare), and the primary write path is now atomic via atomic_write_with_dir_fsync. Cosmetic defence-in-depth for the failure path. R-V171-GREPTILE-POST5.",
         "lifecycle": "open"
       }
     ]
