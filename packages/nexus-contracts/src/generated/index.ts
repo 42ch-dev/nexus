@@ -34,6 +34,19 @@ export * from './local-api/canvas/strategy/StrategyPatchPromptTemplateRequest';
 export * from './local-api/canvas/strategy/StrategyPatchResponse';
 export * from './local-api/canvas/strategy/StrategyPatchStateRequest';
 export * from './local-api/canvas/strategy/StrategyPatchTransitionRequest';
+export * from './local-api/canvas/world-kb/WorldKbCandidateProjection';
+export * from './local-api/canvas/world-kb/WorldKbCandidatesResponse';
+export * from './local-api/canvas/world-kb/WorldKbConflictError';
+export * from './local-api/canvas/world-kb/WorldKbEntityPatch';
+export * from './local-api/canvas/world-kb/WorldKbEntityProjection';
+export * from './local-api/canvas/world-kb/WorldKbExtractJobProjection';
+export * from './local-api/canvas/world-kb/WorldKbGraphResponse';
+export * from './local-api/canvas/world-kb/WorldKbPatchEntityRequest';
+export * from './local-api/canvas/world-kb/WorldKbPatchEntityResponse';
+export * from './local-api/canvas/world-kb/WorldKbPromoteCandidateRequest';
+export * from './local-api/canvas/world-kb/WorldKbPromoteCandidateResponse';
+export * from './local-api/canvas/world-kb/WorldKbSourceAnchorProjection';
+export * from './local-api/canvas/world-kb/WorldKbValidationError';
 export * from './local-api/common/ErrorResponse';
 export * from './local-api/compute/ComputeInput';
 export * from './local-api/compute/ComputeOutput';
@@ -187,6 +200,19 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   StrategyPatchResponse: 1,
   StrategyPatchStateRequest: 1,
   StrategyPatchTransitionRequest: 1,
+  WorldKbCandidateProjection: 1,
+  WorldKbCandidatesResponse: 1,
+  WorldKbConflictError: 1,
+  WorldKbEntityPatch: 1,
+  WorldKbEntityProjection: 1,
+  WorldKbExtractJobProjection: 1,
+  WorldKbGraphResponse: 1,
+  WorldKbPatchEntityRequest: 1,
+  WorldKbPatchEntityResponse: 1,
+  WorldKbPromoteCandidateRequest: 1,
+  WorldKbPromoteCandidateResponse: 1,
+  WorldKbSourceAnchorProjection: 1,
+  WorldKbValidationError: 1,
   ErrorResponse: 1,
   ComputeInput: 1,
   ComputeOutput: 1,
