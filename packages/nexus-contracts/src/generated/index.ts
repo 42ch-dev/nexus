@@ -121,7 +121,6 @@ export * from './local-api/works/chapters/ChapterSummary';
 export * from './local-api/works/chapters/ListChaptersQuery';
 export * from './local-api/works/chapters/ListChaptersResponse';
 export * from './local-api/works/chapters/PatchChapterRequest';
-export * from './local-api/works/chapters/PutChapterOutlineRequest';
 export * from './local-api/works/CreateWorkRequest';
 export * from './local-api/works/CreateWorkResponse';
 export * from './local-api/works/ListWorksQuery';
@@ -292,7 +291,6 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   ListChaptersQuery: 1,
   ListChaptersResponse: 1,
   PatchChapterRequest: 1,
-  PutChapterOutlineRequest: 1,
   CreateWorkRequest: 1,
   CreateWorkResponse: 1,
   ListWorksQuery: 2,
