@@ -31,6 +31,8 @@ interface ChapterInspectorProps {
   onMove: (chapterId: number, volumeId: number) => void;
   /** True while a chapter patch mutation is in flight (metadata or content). */
   patchIsPending: boolean;
+  /** True while the orchestrator has a 409 conflict modal open for this chapter. */
+  isConflicting: boolean;
   /** Monotonic counter the orchestrator bumps to request an editor reset after
    * a refetch (e.g. following conflict resolution). */
   contentVersion: number;
@@ -44,6 +46,7 @@ export function ChapterInspector({
   onPatchChapter,
   onMove,
   patchIsPending,
+  isConflicting,
   contentVersion,
 }: ChapterInspectorProps) {
   const titles = outline.chapter_titles as Record<string, string> | undefined;
@@ -225,6 +228,7 @@ export function ChapterInspector({
             disabled={isPublished}
             onPatchChapter={onPatchChapter}
             patchIsPending={patchIsPending}
+            isConflicting={isConflicting}
             contentVersion={contentVersion}
           />
         </div>

@@ -17,7 +17,7 @@
  * (V1.73 split cap). The toolbar + editor mirror the V1.65 chapter-page editor
  * behavior so authors do not lose rich-text capability in the pivot.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Bold,
   Heading1,
@@ -58,8 +58,13 @@ interface ChapterOutlineContentEditorProps {
    * pending/conflict state.
    */
   patchIsPending: boolean;
-  /** Bumped whenever the orchestrator wants the editor to reset (e.g. after a
-   * successful refetch following a conflict resolution). */
+  /** True while the orchestrator has a 409 conflict modal open (for any field
+   * of this chapter). When set, a failed content save keeps the editor's draft
+   * as 'dirty' instead of reverting to the stale server snapshot. */
+  isConflicting: boolean;
+  /** Bumped by the orchestrator ONLY for an explicit editor reset (e.g. after a
+   * conflict "Use current" refetch). Not bumped on ordinary patches, so a bump
+   * is a reliable forced-reset signal that overrides the dirty guard below. */
   contentVersion: number;
 }
 
@@ -71,6 +76,7 @@ export function ChapterOutlineContentEditor({
   disabled,
   onPatchChapter,
   patchIsPending,
+  isConflicting,
   contentVersion,
 }: ChapterOutlineContentEditorProps) {
   const volumeQuery = useMemo(
@@ -111,33 +117,38 @@ export function ChapterOutlineContentEditor({
     setSaveState('clean');
   }, [chapterNumber]);
 
-  // Reset editor content when the outline read resolves or the canvas signals a
-  // content reset (post-conflict refetch). Never clobber an in-progress edit:
-  // contentVersion bumps after EVERY chapter patch (metadata-only saves
-  // included), and the outline read is not re-fetched on those, so without the
-  // dirty/saving guard a title or status save would overwrite the editor with a
-  // stale server snapshot and silently discard the user's edits.
+  // Reset editor content when the outline read resolves or the orchestrator
+  // signals an explicit reset (contentVersion bump, e.g. conflict "Use current"
+  // -> refetch + bump). Never clobber an in-progress edit EXCEPT for that
+  // explicit forced reset: contentVersion is no longer bumped on ordinary
+  // patches (metadata-only saves included), so a bump reliably means "discard
+  // the local draft and reload canonical".
+  const prevContentVersion = useRef(contentVersion);
   useEffect(() => {
     if (!editor || !outline.data || outline.isFetching) return;
-    if (saveState === 'dirty' || saveState === 'saving') return;
+    const forcedReset = contentVersion !== prevContentVersion.current;
+    prevContentVersion.current = contentVersion;
+    if (!forcedReset && (saveState === 'dirty' || saveState === 'saving')) return;
     const current = getMarkdown(editor);
     if (current !== outline.data.content) {
       editor.commands.setContent(outline.data.content, false);
-      setSaveState('clean');
     }
-    // contentVersion is an intentional reset trigger.
+    setSaveState('clean');
+    // contentVersion + saveState are intentional reset/guard triggers.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [editor, outline.data, outline.isFetching, contentVersion, saveState]);
 
   // Clear the local dirty flag when the orchestrator's patch mutation settles.
   useEffect(() => {
     if (!patchIsPending && saveState === 'saving') {
-      // If we transitioned out of saving without an error callback, treat as
-      // clean. Error UX is owned by the canvas conflict modal (409) and the
-      // shared error toast.
-      setSaveState('clean');
+      // On success -> clean (the content-sync effect confirms against the
+      // refetched canonical content). On a 409 conflict -> dirty, preserving
+      // the user's draft while the conflict modal is open AND after it is
+      // dismissed (so the author can re-edit). "Use current" discards the draft
+      // via the explicit contentVersion forced-reset above.
+      setSaveState(isConflicting ? 'dirty' : 'clean');
     }
-  }, [patchIsPending, saveState]);
+  }, [patchIsPending, saveState, isConflicting]);
 
   function handleSave() {
     if (!editor) return;
