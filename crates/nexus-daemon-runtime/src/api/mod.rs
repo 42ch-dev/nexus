@@ -401,10 +401,7 @@ fn works_routes() -> Router<WorkspaceState> {
                     "/{n}",
                     get(handlers::chapters::get_chapter).patch(handlers::chapters::patch_chapter),
                 )
-                .route(
-                    "/{n}/outline",
-                    get(handlers::chapters::get_chapter_outline),
-                )
+                .route("/{n}/outline", get(handlers::chapters::get_chapter_outline))
                 .route("/{n}/body", get(handlers::chapters::get_chapter_body)),
         )
         // ── Findings sub-routes (V1.39 P1) ───────────────────────────

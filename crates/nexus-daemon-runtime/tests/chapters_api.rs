@@ -12,9 +12,7 @@
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
-use nexus_contracts::{
-    ChapterContentQuery, ChapterStatus, ListChaptersQuery,     PatchChapterRequest,
-};
+use nexus_contracts::{ChapterContentQuery, ChapterStatus, ListChaptersQuery, PatchChapterRequest};
 use nexus_daemon_runtime::api::errors::NexusApiError;
 use nexus_daemon_runtime::api::handlers::chapters;
 use nexus_daemon_runtime::api::handlers::works::{create_work, CreateWorkRequest};
