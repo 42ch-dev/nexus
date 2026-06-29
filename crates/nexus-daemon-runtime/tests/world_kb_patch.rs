@@ -55,6 +55,38 @@ async fn seed_key_block(
     .unwrap();
 }
 
+/// Seed a `kb_extract_jobs` promotion-candidate row directly (bypassing the
+/// `insert_pending` helper, which sets `work_entry_id = canonical_name_guess`
+/// and so cannot produce two same-name rows). Lets the test model two distinct
+/// extraction jobs that happen to guess the same canonical name (e.g. the same
+/// character extracted from two different source works).
+#[allow(clippy::too_many_arguments)]
+async fn seed_pending_candidate(
+    pool: &sqlx::SqlitePool,
+    job_id: &str,
+    work_entry_id: &str,
+    world_id: &str,
+    block_type_guess: &str,
+    canonical_name_guess: &str,
+) {
+    // SAFETY: test-only seed against the known kb_extract_jobs schema.
+    sqlx::query(
+        "INSERT INTO kb_extract_jobs \
+         (job_id, creator_id, workspace_id, work_entry_id, world_id, status, \
+          promotion_status, proposed_payload, block_type_guess, canonical_name_guess, version) \
+         VALUES (?, 'test_creator', 'ws', ?, ?, 'done', 'pending', ?, ?, ?, 0)",
+    )
+    .bind(job_id)
+    .bind(work_entry_id)
+    .bind(world_id)
+    .bind(NOVEL_CHARACTER_BODY)
+    .bind(block_type_guess)
+    .bind(canonical_name_guess)
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
 async fn fresh_state() -> (
     nexus_daemon_runtime::test_utils::TestTempRoot,
     WorkspaceState,
@@ -591,4 +623,72 @@ async fn get_candidates_multi_page_cursor_reaches_all_rows() {
         "a cursor past the last row must yield an empty page, not a repeat"
     );
     assert!(!page3.pagination.has_more);
+}
+
+/// Regression for V1.73 greploop issue 2: `candidate_id` was projected from the
+/// non-unique `canonical_name_guess`. Two pending candidates that share the
+/// same guessed name (the same character extracted from two different source
+/// works — distinct `work_entry_id`) collided on `candidate_id`, so their React
+/// Flow node IDs clashed and `candidateItems.find(c => c.candidate_id === ...)`
+/// resolved to the FIRST match, promoting the wrong `job_id`. The fix projects
+/// `candidate_id` from the unique row PK `job_id`.
+#[tokio::test]
+async fn get_candidates_distinct_candidate_id_for_same_canonical_name() {
+    let (_tmp, state) = fresh_state().await;
+
+    // Two pending candidates with the SAME canonical_name_guess but distinct
+    // work_entry_id (the idempotency index is on (creator, work_entry_id,
+    // world), so distinct work_entry_id lets both rows coexist).
+    seed_pending_candidate(
+        state.pool(),
+        "xj_aaaaaa0000000000000000000001",
+        "we_source_work_one",
+        "wld_test_world",
+        "character",
+        "Duplicate Name",
+    )
+    .await;
+    seed_pending_candidate(
+        state.pool(),
+        "xj_aaaaaa0000000000000000000002",
+        "we_source_work_two",
+        "wld_test_world",
+        "character",
+        "Duplicate Name",
+    )
+    .await;
+
+    let Json(resp) = get_candidates(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Query(CandidatesQuery {
+            limit: None,
+            cursor: None,
+        }),
+    )
+    .await
+    .expect("candidates should succeed");
+
+    assert_eq!(
+        resp.items.len(),
+        2,
+        "both same-name candidates must be listed"
+    );
+    let ids: Vec<String> = resp.items.iter().map(|c| c.candidate_id.clone()).collect();
+    assert_ne!(
+        ids[0], ids[1],
+        "candidate_id must be unique per row even when canonical_name_guess collides"
+    );
+    // The fix: candidate_id == job_id (the row PK), not canonical_name_guess.
+    assert!(
+        resp.items.iter().all(|c| c.candidate_id == c.job_id),
+        "candidate_id must equal job_id; got {ids:?}"
+    );
+    // Display name is still the shared guess.
+    assert!(
+        resp.items
+            .iter()
+            .all(|c| c.canonical_name == "Duplicate Name"),
+        "canonical_name stays the guessed display name"
+    );
 }
