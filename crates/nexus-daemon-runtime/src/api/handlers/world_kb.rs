@@ -149,7 +149,12 @@ fn project_entity(kb: &KeyBlock) -> WorldKbEntityProjection {
 /// Build the wire projection of a pending promotion candidate.
 fn project_candidate(c: &KbExtractPromotion) -> WorldKbCandidateProjection {
     WorldKbCandidateProjection {
-        candidate_id: c.canonical_name_guess.clone().unwrap_or_default(),
+        // `job_id` is the unique row PK of `kb_extract_jobs` and the value the
+        // promote path already keys on. `canonical_name_guess` is NOT unique
+        // within a world (two source works can guess the same character name),
+        // so using it here made React Flow node IDs collide and caused the
+        // wrong candidate to be promoted (V1.73 greploop issue 2).
+        candidate_id: c.job_id.clone(),
         job_id: c.job_id.clone(),
         world_id: c.world_id.clone(),
         block_type: parse_block_type(c.block_type_guess.as_deref().unwrap_or("character")),
