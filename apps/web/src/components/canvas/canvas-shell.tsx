@@ -25,6 +25,7 @@ import {
   type Node,
   type NodeChange,
   type NodeTypes,
+  type OnConnect,
   type OnEdgesChange,
   type OnNodesChange,
 } from '@xyflow/react';
@@ -38,6 +39,7 @@ export interface CanvasShellProps {
   onNodesChange: OnNodesChange;
   onEdgesChange?: OnEdgesChange;
   onEdgeClick?: (event: React.MouseEvent, edge: Edge) => void;
+  onConnect?: OnConnect;
   /** Graph-level summary spoken to assistive tech (A8). */
   summaryText: string;
   /** Accessible label for the canvas region. */
@@ -57,6 +59,7 @@ function CanvasShellInner({
   onNodesChange,
   onEdgesChange,
   onEdgeClick,
+  onConnect,
   summaryText,
   ariaLabel,
   children,
@@ -75,6 +78,7 @@ function CanvasShellInner({
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         onEdgeClick={onEdgeClick}
+        onConnect={onConnect}
         nodesFocusable
         edgesFocusable
         fitView

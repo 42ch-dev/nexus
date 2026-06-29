@@ -97,6 +97,23 @@ export function InspectorPanel({
       </aside>
     );
   }
+  if (selection.kind === 'new-relationship') {
+    return (
+      <aside
+        aria-label="New relationship inspector"
+        className="rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-card"
+      >
+        <RelationshipInspector
+          worldId={worldId}
+          initialSourceEntityId={selection.initialSourceEntityId}
+          initialTargetEntityId={selection.initialTargetEntityId}
+          entities={confirmedEntities}
+          anchors={anchors}
+          onSaved={onRelationshipSaved}
+        />
+      </aside>
+    );
+  }
   return (
     <aside
       aria-label={`Relationship inspector: ${selection.relationship.relationship_id}`}

@@ -21,11 +21,12 @@ import type { WorldKbNodeData } from './types';
 /** Editable entity fields tracked for conflict reapply. */
 export type EntityField = 'title' | 'body' | 'aliases' | 'block_type';
 
-/** Current canvas selection — entity, candidate, relationship, or nothing. */
+/** Current canvas selection — entity, candidate, relationship, new relationship, or nothing. */
 export type Selection =
   | { kind: 'entity'; node: WorldKbNodeData; entity: WorldKbEntityProjection }
   | { kind: 'candidate'; node: WorldKbNodeData; candidate: WorldKbCandidateProjection }
   | { kind: 'relationship'; relationship: WorldKbRelationshipProjection }
+  | { kind: 'new-relationship'; initialSourceEntityId?: string; initialTargetEntityId?: string }
   | null;
 
 /** Conflict state captured when `patch_entity` returns 409. */

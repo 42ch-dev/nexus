@@ -8,7 +8,7 @@
  * `EntityField`) are preserved for existing consumers.
  */
 import { useEffect, useMemo, useState } from 'react';
-import type { Node } from '@xyflow/react';
+import type { Connection, Node } from '@xyflow/react';
 
 import { CanvasShell, useNodeChangeHandler } from '@/components/canvas/canvas-shell';
 import { ErrorState, LoadingState } from '@/components/ui/states';
@@ -53,6 +53,7 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
     selection,
     setSelection,
     selectedNodeId,
+    selectedRelationshipId,
     entityConflict,
     promoteConflict,
     relationshipConflict,
@@ -62,6 +63,8 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
     setPromoteConflict,
     setRelationshipConflict,
     onSelectNode,
+    onSelectRelationship,
+    onCreateRelationship,
     onEdgeClick,
   } = useWorldKbCanvasState({ entities, candidateItems, relationships });
 
@@ -108,6 +111,13 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
 
   const handleEntityConflict = (payload: Parameters<typeof buildEntityConflict>[1]) =>
     setEntityConflict(buildEntityConflict(selection, payload));
+  const handleConnect = ({ source, target }: Connection) => {
+    const sourceId = source?.startsWith('entity:') ? source.slice('entity:'.length) : undefined;
+    const targetId = target?.startsWith('entity:') ? target.slice('entity:'.length) : undefined;
+    if (sourceId && targetId && sourceId !== targetId) {
+      onCreateRelationship({ sourceEntityId: sourceId, targetEntityId: targetId });
+    }
+  };
   const onPromoteConflict = (payload: Parameters<typeof handlePromoteConflict>[1]) =>
     handlePromoteConflict(setPromoteConflict, payload);
   const onRelationshipConflict = (payload: Parameters<typeof handleRelationshipConflict>[1]) =>
@@ -147,8 +157,13 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
         <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
           <WorldKbAltView
             nodes={nodesToData(nodes)}
-            selectedId={selectedNodeId}
-            onSelect={(n) => onSelectNode(n)}
+            relationships={relationships}
+            entities={confirmedEntities}
+            selectedNodeId={selectedNodeId}
+            selectedRelationshipId={selectedRelationshipId}
+            onSelectNode={(n) => onSelectNode(n)}
+            onSelectRelationship={onSelectRelationship}
+            onCreateRelationship={onCreateRelationship}
           />
           <InspectorPanel {...inspectorPanelProps} />
         </div>
@@ -159,6 +174,7 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
           nodeTypes={worldKbNodeTypes}
           onNodesChange={onNodesChange}
           onEdgeClick={onEdgeClick}
+          onConnect={handleConnect}
           summaryText={summary}
           ariaLabel="World KB entity graph"
         >
