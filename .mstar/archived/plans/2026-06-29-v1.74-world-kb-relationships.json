@@ -1,0 +1,20 @@
+{
+  "plan_id": "2026-06-29-v1.74-world-kb-relationships",
+  "archived_at": "2026-06-29",
+  "schema_version": 1,
+  "plan": {
+    "plan_id": "2026-06-29-v1.74-world-kb-relationships",
+    "iteration_id": "V1.74",
+    "status": "Done",
+    "owner": "frontend-dev,fullstack-dev",
+    "effort": "L",
+    "type": "implement",
+    "working_branch": "feature/v1.74-world-kb-relationships",
+    "merge_target": "iteration/v1.74",
+    "task_category": "visual",
+    "wire_contracts_changed": true,
+    "depends_on": [
+      "2026-06-29-v1.74-compass-and-plan"
+    ]
+  }
+}

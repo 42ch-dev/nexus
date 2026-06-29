@@ -1,0 +1,18 @@
+{
+  "plan_id": "2026-06-29-v1.74-compass-and-plan",
+  "archived_at": "2026-06-29",
+  "schema_version": 1,
+  "plan": {
+    "plan_id": "2026-06-29-v1.74-compass-and-plan",
+    "iteration_id": "V1.74",
+    "status": "Done",
+    "owner": "project-manager",
+    "effort": "S",
+    "type": "prepare",
+    "working_branch": "iteration/v1.74",
+    "merge_target": "iteration/v1.74",
+    "task_category": "docs",
+    "wire_contracts_changed": false,
+    "depends_on": []
+  }
+}
