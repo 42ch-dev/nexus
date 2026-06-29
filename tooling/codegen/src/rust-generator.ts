@@ -635,7 +635,9 @@ function generateRustStructContent(
   // Determine Eq-safety: any `number` type in the local shape, any inline array
   // item struct containing `number`, or a global eligibility pass that follows
   // cross-schema `$ref`s can all disable `Eq`.
-  const directHasF64 = Object.values(properties).some(schemaFragmentHasF64);
+  const directHasF64 = Object.values(properties).some((v) =>
+    schemaFragmentHasF64(v as Record<string, unknown>),
+  );
 
   const fields: string[] = [];
   const commonImports: Set<string> = new Set();

@@ -41,14 +41,16 @@ export function relationshipEdgeLabel(rel: WorldKbRelationshipProjection): strin
  * Both the stored direction and the derived symmetric_reverse direction are
  * rendered; the edge label shows the relation type + optional custom label,
  * and the data payload carries confidence + grounding anchor ids for badges.
+ *
+ * Note: the backend (`project_relationships_for_world`) already swaps
+ * source/target when emitting the `symmetric_reverse` projection, so this
+ * function consumes `source_entity_id`/`target_entity_id` verbatim. Swapping
+ * here too would double-swap and render both edges in the same direction.
  */
 export function deriveRelationshipEdges(
   relationships: WorldKbRelationshipProjection[],
 ): Edge[] {
   return relationships.map((rel) => {
-    const isReverse = rel.projection_direction === 'symmetric_reverse';
-    const source = isReverse ? rel.target_entity_id : rel.source_entity_id;
-    const target = isReverse ? rel.source_entity_id : rel.target_entity_id;
     const data: WorldKbEdgeData = {
       relationType: 'relationship',
       sourceAnchorIds: rel.source_anchor_ids ?? [],
@@ -64,8 +66,8 @@ export function deriveRelationshipEdges(
     const style = { stroke: strokeColor };
     return {
       id: `relationship:${rel.relationship_id}:${rel.projection_direction}`,
-      source: `entity:${source}`,
-      target: `entity:${target}`,
+      source: `entity:${rel.source_entity_id}`,
+      target: `entity:${rel.target_entity_id}`,
       type: 'default',
       label,
       data,
