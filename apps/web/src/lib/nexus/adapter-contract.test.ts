@@ -123,9 +123,11 @@ describe('TauriClient transport parity (thin-over-BrowserClient)', () => {
     };
     const client = new TauriClient({ fetchImpl });
     const workId = 'w1';
-    // Exercise all 24 NexusClient methods (health + 23 data). The three
+    // Exercise all 28 NexusClient methods (health + 27 data). The three
     // preset methods (getPreset/updatePreset/deletePreset) were promoted in
-    // V1.67 G2 (R-V167P1-QC3-S1) — they must hit the same transport as the
+    // V1.67 G2 (R-V167P1-QC3-S1), and the four outline+timeline methods
+    // (getWorkOutline/patchOutlineStructure/patchOutlineChapter/patchTimelineEvent)
+    // were promoted in V1.72 Track A — they must hit the same transport as the
     // rest of the surface, not silently no-op.
     await client.health();
     await client.listWorks();
@@ -151,16 +153,38 @@ describe('TauriClient transport parity (thin-over-BrowserClient)', () => {
     await client.putChapterOutline(workId, 1, { content: '' });
     await client.patchChapter(workId, 1, { slug: 'ch' });
     await client.getChapterBody(workId, 1);
+    await client.getWorkOutline(workId);
+    await client.patchOutlineStructure(workId, {
+      work_id: workId,
+      base_revision: 1,
+      operation: 'attach_to_volume',
+    });
+    await client.patchOutlineChapter(workId, 1, {
+      work_id: workId,
+      chapter_id: 1,
+      base_revision: 1,
+      set: {},
+    });
+    await client.patchTimelineEvent(workId, {
+      work_id: workId,
+      base_revision: 1,
+      operation: 'add_event',
+    });
 
     // Every method must have hit a /v1/local/* path (transport parity with the
     // browser client). If a method silently no-op'd or threw — as the V1.65
     // stub did — its path would be missing and this set would be smaller.
     const paths = [...seen].sort();
     expect(paths.every((p) => p.includes('/v1/local/'))).toBe(true);
-    expect(seen.size).toBe(24);
+    expect(seen.size).toBe(28);
     // Spot-check the chapter surface (the Q5 action target).
     expect(seen).toContain('GET /v1/local/works/w1/chapters/1/body');
     expect(seen).toContain('GET /v1/local/works/w1/chapters/1/outline');
+    // Spot-check the V1.72 outline+timeline surface.
+    expect(seen).toContain('GET /v1/local/works/w1/outline');
+    expect(seen).toContain('POST /v1/local/works/w1/outline/patch');
+    expect(seen).toContain('POST /v1/local/works/w1/chapters/1/patch');
+    expect(seen).toContain('POST /v1/local/works/w1/timeline/patch');
     // Spot-check the V1.67 G2 preset-promotion surface.
     expect(seen).toContain('GET /v1/local/presets/foo');
     expect(seen).toContain('PATCH /v1/local/presets/foo');
