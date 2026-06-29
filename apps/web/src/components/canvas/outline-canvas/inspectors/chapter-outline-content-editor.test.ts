@@ -25,10 +25,10 @@ beforeAll(() => {
   const noopRect = { x: 0, y: 0, top: 0, left: 0, bottom: 0, right: 0, width: 0, height: 0, toJSON: () => ({}) };
   const proto = Element.prototype;
   if (!proto.getClientRects) {
-    proto.getClientRects = () => [noopRect as DOMRect];
+    proto.getClientRects = (() => [noopRect] as unknown as DOMRectList) as typeof proto.getClientRects;
   }
   if (!proto.getBoundingClientRect) {
-    proto.getBoundingClientRect = () => noopRect as DOMRect;
+    proto.getBoundingClientRect = (() => noopRect as DOMRect) as typeof proto.getBoundingClientRect;
   }
   // Range is used by ProseMirror's text-offset resolution.
   const rangeProto = Range.prototype as unknown as { getClientRects?: unknown };
