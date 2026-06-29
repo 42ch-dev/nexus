@@ -113,7 +113,7 @@ fn add_request(
 }
 
 #[tokio::test]
-async fn add_relationship_happy_path() {
+async fn add_relationship_returns_projected_row() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
         state.pool(),
@@ -151,7 +151,7 @@ async fn add_relationship_happy_path() {
 }
 
 #[tokio::test]
-async fn update_relationship_bumps_version() {
+async fn update_relationship_returns_bumped_version_and_projected_row() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
         state.pool(),
@@ -217,7 +217,7 @@ async fn update_relationship_bumps_version() {
 }
 
 #[tokio::test]
-async fn remove_relationship_happy_path() {
+async fn remove_relationship_returns_null_projection() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
         state.pool(),
@@ -269,7 +269,7 @@ async fn remove_relationship_happy_path() {
 }
 
 #[tokio::test]
-async fn add_self_loop_rejected_422() {
+async fn add_self_loop_rejects_422() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
         state.pool(),
@@ -297,7 +297,7 @@ async fn add_self_loop_rejected_422() {
 }
 
 #[tokio::test]
-async fn add_custom_without_label_rejected_422() {
+async fn add_custom_without_label_rejects_422() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
         state.pool(),
@@ -334,7 +334,7 @@ async fn add_custom_without_label_rejected_422() {
 }
 
 #[tokio::test]
-async fn add_confidence_out_of_range_rejected_422() {
+async fn add_confidence_out_of_range_rejects_422() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
         state.pool(),
@@ -435,7 +435,7 @@ async fn update_stale_version_returns_409() {
 }
 
 #[tokio::test]
-async fn get_graph_projects_symmetric_reverse_edge() {
+async fn get_graph_includes_symmetric_reverse_projection() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
         state.pool(),
@@ -490,7 +490,7 @@ async fn get_graph_projects_symmetric_reverse_edge() {
 }
 
 #[tokio::test]
-async fn add_with_anchors_validates_anchor_existence() {
+async fn add_with_valid_anchor_succeeds() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block_with_source(
         state.pool(),
@@ -526,7 +526,7 @@ async fn add_with_anchors_validates_anchor_existence() {
 }
 
 #[tokio::test]
-async fn add_with_invalid_anchor_rejected_422() {
+async fn add_with_invalid_anchor_rejects_422() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
         state.pool(),
@@ -564,7 +564,7 @@ async fn add_with_invalid_anchor_rejected_422() {
 }
 
 #[tokio::test]
-async fn add_cross_world_entity_rejected_422() {
+async fn add_cross_world_entity_rejects_422() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
         state.pool(),
@@ -616,4 +616,137 @@ async fn add_cross_world_entity_rejected_422() {
         axum::http::StatusCode::UNPROCESSABLE_ENTITY
     );
     assert_eq!(err.error_code(), "world_kb_validation_failed");
+}
+
+async fn seed_other_world(pool: &sqlx::SqlitePool, world_id: &str) {
+    let row = sqlx::query!(
+        "SELECT owner_creator_id, workspace_id FROM narrative_worlds WHERE world_id = ?",
+        "wld_test_world"
+    )
+    .fetch_one(pool)
+    .await
+    .unwrap();
+    sqlx::query!(
+        "INSERT INTO narrative_worlds \
+         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
+          time_policy, metadata_json, created_at) \
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))",
+        world_id,
+        row.workspace_id,
+        row.owner_creator_id,
+        "Other",
+        "other-world",
+        "active",
+        "private",
+        "manual",
+        "{}"
+    )
+    .execute(pool)
+    .await
+    .unwrap();
+}
+
+async fn relationship_in_other_world(state: &WorkspaceState, other_world_id: &str) -> String {
+    seed_other_world(state.pool(), other_world_id).await;
+    seed_key_block(
+        state.pool(),
+        "kb_other_a",
+        other_world_id,
+        "character",
+        "Other A",
+        "confirmed",
+    )
+    .await;
+    seed_key_block(
+        state.pool(),
+        "kb_other_b",
+        other_world_id,
+        "character",
+        "Other B",
+        "confirmed",
+    )
+    .await;
+    let Json(created) = patch_relationship(
+        State(state.clone()),
+        Path(other_world_id.to_string()),
+        Json(add_request(
+            "kb_other_a",
+            "kb_other_b",
+            WorldKbRelationshipKind::AlliedWith,
+        )),
+    )
+    .await
+    .expect("relationship in other world should be created");
+    created.relationship.unwrap().relationship_id
+}
+
+#[tokio::test]
+async fn update_cross_world_relationship_returns_403() {
+    let (_tmp, state) = fresh_state().await;
+    seed_key_block(
+        state.pool(),
+        "kb_a",
+        "wld_test_world",
+        "character",
+        "Aria",
+        "confirmed",
+    )
+    .await;
+    seed_key_block(
+        state.pool(),
+        "kb_b",
+        "wld_test_world",
+        "character",
+        "Kael",
+        "confirmed",
+    )
+    .await;
+    let rel_id = relationship_in_other_world(&state, "wld_other").await;
+
+    let req = WorldKbPatchRelationshipRequest {
+        relationship_id: Some(rel_id),
+        action: "update".to_string(),
+        expected_version: Some(0),
+        relationship: Some(WorldKbRelationshipInput {
+            source_entity_id: "kb_a".to_string(),
+            target_entity_id: "kb_b".to_string(),
+            relation_type: WorldKbRelationshipKind::MentorOf,
+            custom_label: None,
+            symmetric: false,
+            confidence: None,
+            source_anchor_ids: None,
+            metadata: None,
+        }),
+    };
+    let err = patch_relationship(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect_err("cross-world update must 403");
+    assert_eq!(err.status_code(), axum::http::StatusCode::FORBIDDEN);
+    assert_eq!(err.error_code(), "forbidden");
+}
+
+#[tokio::test]
+async fn remove_cross_world_relationship_returns_403() {
+    let (_tmp, state) = fresh_state().await;
+    let rel_id = relationship_in_other_world(&state, "wld_other_remove").await;
+
+    let req = WorldKbPatchRelationshipRequest {
+        relationship_id: Some(rel_id),
+        action: "remove".to_string(),
+        expected_version: Some(0),
+        relationship: None,
+    };
+    let err = patch_relationship(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect_err("cross-world remove must 403");
+    assert_eq!(err.status_code(), axum::http::StatusCode::FORBIDDEN);
+    assert_eq!(err.error_code(), "forbidden");
 }
