@@ -129,7 +129,7 @@ async fn patch_entity_title_bumps_version() {
             aliases: None,
             block_type: None,
         },
-        idempotency_key: None,
+        ..Default::default()
     };
     let Json(resp) = patch_entity(
         State(state.clone()),
@@ -168,7 +168,7 @@ async fn patch_entity_stale_version_returns_409() {
             aliases: None,
             block_type: None,
         },
-        idempotency_key: None,
+        ..Default::default()
     };
     let err = patch_entity(
         State(state.clone()),
@@ -208,7 +208,7 @@ async fn patch_entity_deleted_entity_rejected_422() {
             aliases: None,
             block_type: None,
         },
-        idempotency_key: None,
+        ..Default::default()
     };
     let err = patch_entity(
         State(state.clone()),
@@ -267,7 +267,7 @@ async fn patch_entity_cross_author_forbidden() {
             aliases: None,
             block_type: None,
         },
-        idempotency_key: None,
+        ..Default::default()
     };
     let err = patch_entity(
         State(state.clone()),
@@ -341,7 +341,7 @@ async fn patch_entity_cross_author_does_not_leak_existence() {
             aliases: None,
             block_type: None,
         },
-        idempotency_key: None,
+        ..Default::default()
     };
     let err = patch_entity(
         State(state.clone()),
@@ -386,7 +386,7 @@ async fn promote_adopt_confirms_candidate() {
         expected_version: u64::try_from(candidate.version).unwrap_or(0),
         merge_target_id: None,
         patch: None,
-        idempotency_key: None,
+        ..Default::default()
     };
     let Json(resp) = promote_candidate(
         State(state.clone()),
@@ -426,7 +426,7 @@ async fn promote_reject_dismisses_candidate() {
         expected_version: u64::try_from(candidate.version).unwrap_or(0),
         merge_target_id: None,
         patch: None,
-        idempotency_key: None,
+        ..Default::default()
     };
     let Json(resp) = promote_candidate(
         State(state.clone()),
@@ -464,7 +464,7 @@ async fn promote_stale_version_returns_409() {
         expected_version: u64::try_from(candidate.version).unwrap_or(0) + 100, // stale
         merge_target_id: None,
         patch: None,
-        idempotency_key: None,
+        ..Default::default()
     };
     let err = promote_candidate(
         State(state.clone()),
@@ -811,7 +811,7 @@ async fn promote_reject_cas_miss_conflict_carries_bumped_version() {
         expected_version: stale_expected,
         merge_target_id: None,
         patch: None,
-        idempotency_key: None,
+        ..Default::default()
     };
 
     // Two concurrent rejects against the same pending candidate. `join!`
@@ -924,7 +924,7 @@ async fn promote_merge_target_cas_miss_marks_target_conflict() {
         expected_version: 0,
         merge_target_id: Some("kb_target".to_string()),
         patch: None,
-        idempotency_key: None,
+        ..Default::default()
     };
 
     // Two concurrent merges against the same target. `join!` interleaves at
