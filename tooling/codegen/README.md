@@ -21,6 +21,20 @@ pnpm run codegen:watch
 cd tooling/codegen && npm run build
 ```
 
+## Codegen targets
+
+| Item | Path / Command |
+|---|---|
+| Source schemas | `schemas/**/*.schema.json` |
+| Regenerate command | `pnpm run codegen` |
+| Validate command | `pnpm run validate-schemas` |
+| Wire-drift check | `./tooling/check-wire-drift.sh` |
+| TypeScript destination | `packages/nexus-contracts/src/generated/` |
+| Rust destination | `crates/nexus-contracts/src/generated/` |
+| Web app consumption | `@42ch/nexus-contracts` package (published from `packages/nexus-contracts/`) |
+
+There is no `apps/web/src/api-types/` directory. The web app imports all wire DTOs from the generated `@42ch/nexus-contracts` package.
+
 ## Workflow
 
 1. **Load schemas** from `schemas/**/*.schema.json`
