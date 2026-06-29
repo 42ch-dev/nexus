@@ -312,6 +312,8 @@ Examples:
 | Strategy transition | `POST /v1/local/strategies/{strategy_id}/transitions/patch` | `StrategyPatchTransitionRequest` | `StrategyPatchResponse` |
 | Strategy prompt template | `POST /v1/local/strategies/{strategy_id}/states/{state_id}/prompt/patch` | `StrategyPatchPromptTemplateRequest` | `StrategyPatchResponse` |
 
+> **V1.75 amendment — outline `content` field.** `outline.patch_chapter` supports node-scoped chapter edits. In addition to metadata fields (`title`, `slug`, `planned_word_count`, `actual_word_count`, `volume`, `status`), V1.75 adds optional `set.content` for chapter outline prose. `content` is a chapter-outline markdown string persisted to the chapter row's `outline_path` file under the same `base_revision` / `new_revision` `outline_revision` CAS used by outline structure and timeline patches. `content` is not a body editor: handlers MUST NOT mutate `body_path` or body markdown files, and conflict handling remains the standard 409 `OutlineConflictError` with refetch/reapply UX. The V1.65 `PUT /chapters/{n}/outline` whole-document write route is removed in the same bump; the canvas patch route is now the sole outline write path.
+
 ### 7.1 Request semantics
 
 Patch request DTOs MUST include:

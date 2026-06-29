@@ -123,5 +123,6 @@ export function changedFieldsOf(pending: PendingPatch): OutlineChangedField[] {
   if (set.status !== undefined) fields.push('chapter_status');
   if (set.planned_word_count !== undefined) fields.push('chapter_planned_word_count');
   if (set.actual_word_count !== undefined) fields.push('chapter_actual_word_count');
+  if (set.content !== undefined) fields.push('chapter_outline_content');
   return fields;
 }

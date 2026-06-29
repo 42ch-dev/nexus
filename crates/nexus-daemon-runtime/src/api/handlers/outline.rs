@@ -658,6 +658,8 @@ pub async fn patch_outline_chapter(
 
     let result = apply_chapter_patch(
         &state,
+        &workspace_root,
+        &work_ref,
         &work_id,
         chapter,
         &record,
@@ -943,8 +945,18 @@ const fn has_chapter_structural_edit(req: &OutlinePatchChapterRequest) -> bool {
         || req.set.status.is_some()
 }
 
+// `too_many_arguments` / `too_many_lines`: V1.75 A2 extended this helper to
+// carry `workspace_root` + `work_ref` for per-chapter outline-path resolution
+// and added the content-persistence block. The arg list and line count are a
+// direct consequence of keeping the validate → DB persist → frontmatter
+// mutate → outline-path seed/write sequence inline so the lock-release and
+// body-ownership invariants stay locally auditable (mirrors the
+// `patch_outline_chapter` allow above).
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
 async fn apply_chapter_patch(
     state: &WorkspaceState,
+    workspace_root: &StdPath,
+    work_ref: &str,
     work_id: &str,
     chapter: i32,
     record: &WorkChapterRecord,
@@ -1022,6 +1034,74 @@ async fn apply_chapter_patch(
                 message: e.to_string(),
             })?;
         move_chapter_in_frontmatter(frontmatter, i64::from(chapter), new_volume, &chapters);
+    }
+
+    // V1.75 A2 — outline-prose content patch (canvas-pivot parity-close).
+    //
+    // The chapter outline prose lives in the per-chapter markdown file
+    // referenced by `work_chapters.outline_path` (NOT the work-level
+    // `Outlines/outline.md` body, and NEVER `body_path`). Persist it with the
+    // same temp+rename+fsync durability pattern used by the V1.65 PUT route,
+    // reusing `chapters::atomic_write_outline`. The work-level
+    // `outline_revision` CAS bump happens in the caller after this function
+    // returns, so a content write rides the same revision increment as a
+    // metadata edit.
+    //
+    // Body-ownership invariant: this block writes ONLY to `outline_path`. It
+    // does not touch `body_path`, the body writer, or `Stories/**`.
+    if let Some(content) = req.set.content.clone() {
+        if content.len() > OUTLINE_FILE_MAX_BYTES {
+            return Err(NexusApiError::BadRequest {
+                code: "chapter_outline_content_too_large".to_string(),
+                message: format!(
+                    "chapter outline content is {} bytes, exceeding the maximum of {} bytes",
+                    content.len(),
+                    OUTLINE_FILE_MAX_BYTES
+                ),
+            });
+        }
+
+        // Resolve the per-chapter outline_path, deriving the V1.65 fallback
+        // path when the column is empty so the canvas can seed prose for a
+        // chapter that was never edited through the legacy editor.
+        let volume_for_path = record.volume.unwrap_or(1);
+        let outline_path = record
+            .outline_path
+            .clone()
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| {
+                format!("Works/{work_ref}/Outlines/chapters/ch{chapter:02}-outline.md")
+            });
+
+        // If the column was empty, persist the derived path so subsequent reads
+        // (V1.65 GET, the canvas inspector) find the file. This mirrors the
+        // V1.65 PUT route's seeding behavior.
+        if record.outline_path.as_deref().is_none_or(str::is_empty) {
+            let now = chrono::Utc::now().to_rfc3339();
+            work_chapters::update_outline_path(
+                state.pool(),
+                work_id,
+                chapter,
+                volume_for_path,
+                Some(&outline_path),
+                &now,
+            )
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: e.to_string(),
+            })?;
+        }
+
+        // Atomic write of prose to the per-chapter outline file. This is the
+        // chapters.rs plain-content writer (distinct from this module's
+        // frontmatter+body `atomic_write_outline`).
+        crate::api::handlers::chapters::atomic_write_outline(
+            workspace_root,
+            &outline_path,
+            &content,
+        )
+        .await?;
     }
 
     Ok(())
