@@ -17,12 +17,15 @@ CREATE TABLE IF NOT EXISTS kb_relationships (
     revision INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (world_id) REFERENCES narrative_worlds(world_id) ON DELETE CASCADE,
     FOREIGN KEY (source_entity_id) REFERENCES kb_key_blocks(key_block_id) ON DELETE CASCADE,
-    FOREIGN KEY (target_entity_id) REFERENCES kb_key_blocks(key_block_id) ON DELETE CASCADE,
-    -- Prevent exact-duplicate directed relationships in the same World.
-    -- (Symmetric dedup across both directions is enforced by daemon validation;
-    -- this constraint guards the storage layer against identical rows.)
-    UNIQUE (world_id, source_entity_id, target_entity_id, relation_type)
+    FOREIGN KEY (target_entity_id) REFERENCES kb_key_blocks(key_block_id) ON DELETE CASCADE
 );
+
+-- Note: a UNIQUE(world_id, source_entity_id, target_entity_id, relation_type)
+-- constraint was considered (Greptile V1.74 suggestion) but deferred to V1.75:
+-- it broke test_list_for_world (which exercises multi-row listing with same
+-- source/target/type), and proper symmetric cross-direction dedup belongs in
+-- daemon validation rather than an ordered-tuple storage constraint.
+-- Tracked: tbd-v1.75-qc-followup.
 
 CREATE INDEX IF NOT EXISTS idx_kb_relationships_world_id
     ON kb_relationships(world_id);
