@@ -222,9 +222,19 @@ pub async fn patch_entity(
     Json(req): Json<WorldKbPatchEntityRequest>,
 ) -> Result<Json<WorldKbPatchEntityResponse>, NexusApiError> {
     let creator_id = require_creator(&state)?;
+    let pool = state.pool();
+
+    // Authorization FIRST: verify the active creator owns the world BEFORE any
+    // entity read. `world_id` comes from the PATH (not the entity), so this is
+    // safe to check first. Doing the entity read + cross-world scope check
+    // before this point leaked entity existence across world boundaries — an
+    // unauthenticated-but-locally-active creator could distinguish `NotFound`
+    // ("entity not in this world") from `Forbidden` ("not your world"). This
+    // matches the order already used by `promote_candidate` and the read
+    // endpoints (V1.73 greploop issue 3).
+    require_world_owner(pool, &world_id, &creator_id).await?;
 
     // ID existence + scope: the entity must live in this world.
-    let pool = state.pool();
     let store = nexus_local_db::kb_store::SqliteKbStore::with_validation_mode(
         pool.clone(),
         ValidationMode::Novel,
@@ -242,9 +252,6 @@ pub async fn patch_entity(
             req.entity_id
         )));
     }
-
-    // Authorization: creator owns the world.
-    require_world_owner(pool, &world_id, &creator_id).await?;
 
     // Editability invariant: deleted entities are terminal and cannot be
     // patched. (Pending candidates live on kb_extract_jobs, not

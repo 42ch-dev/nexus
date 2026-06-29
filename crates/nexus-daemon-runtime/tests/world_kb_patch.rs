@@ -279,6 +279,84 @@ async fn patch_entity_cross_author_forbidden() {
     assert_eq!(err.status_code(), axum::http::StatusCode::FORBIDDEN);
 }
 
+/// Regression for V1.73 greploop issue 3: `patch_entity` read the KeyBlock (and
+/// ran the cross-world scope check) BEFORE `require_world_owner`. An
+/// unauthenticated-but-locally-active creator could therefore distinguish
+/// `NotFound` ("entity not in this world") from `Forbidden` ("not your world"),
+/// leaking entity-existence signals across world boundaries.
+///
+/// Discriminating case: the active creator does NOT own the path world, and the
+/// entity they quote exists in their OWN world (so `kb.world_id != path world`).
+/// Under the buggy order this returned 404 NotFound; the fix runs
+/// `require_world_owner` first (mirroring `promote_candidate` + the read
+/// endpoints), so every cross-author request collapses to 403 regardless of
+/// whether the entity exists in the path world.
+#[tokio::test]
+async fn patch_entity_cross_author_does_not_leak_existence() {
+    let (_tmp, state) = fresh_state().await;
+
+    // Foreign world owned by another creator.
+    // SAFETY: test-only seed of a foreign-owned world + its owner creator.
+    sqlx::query(
+        "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
+         VALUES ('other_creator', 'Other', 'active', datetime('now'), '{}')",
+    )
+    .execute(state.pool())
+    .await
+    .unwrap();
+    sqlx::query(
+        "INSERT OR IGNORE INTO narrative_worlds \
+         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
+          time_policy, metadata_json, created_at) \
+         VALUES ('wld_other', 'ws', 'other_creator', 'Other', 'other-world', 'active', 'private', \
+          'manual', '{}', datetime('now'))",
+    )
+    .execute(state.pool())
+    .await
+    .unwrap();
+
+    // An entity that exists in the ACTIVE creator's OWN world (not the foreign
+    // path world). This is the row whose existence must NOT be revealed.
+    seed_key_block(
+        state.pool(),
+        "kb_mine",
+        "wld_test_world",
+        "character",
+        "My Hero",
+        "confirmed",
+        Some(0),
+        None,
+    )
+    .await;
+
+    // Active creator (test_creator) does NOT own wld_other. Quoting an entity
+    // that lives in their own world via the foreign world's path must collapse
+    // to 403 Forbidden, NOT 404 NotFound.
+    let req = WorldKbPatchEntityRequest {
+        entity_id: "kb_mine".to_string(),
+        expected_version: 0,
+        patch: WorldKbEntityPatch {
+            title: Some("Whatever".to_string()),
+            body: None,
+            aliases: None,
+            block_type: None,
+        },
+        idempotency_key: None,
+    };
+    let err = patch_entity(
+        State(state.clone()),
+        Path("wld_other".to_string()),
+        Json(req),
+    )
+    .await
+    .expect_err("cross-author must be forbidden before any entity read");
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::FORBIDDEN,
+        "cross-author patch-entity must return 403, not leak existence via 404"
+    );
+}
+
 // ─── promote-candidate ──────────────────────────────────────────────────────
 
 const NOVEL_CHARACTER_BODY: &str =
