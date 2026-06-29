@@ -86,7 +86,7 @@ const mocks = vi.hoisted(() => {
   // Return STABLE references: the canvas derives `candidateItems` from the
   // hook result each render and feeds it into a useMemo + setNodes effect — a
   // fresh `data` object per render would retrigger that effect forever.
-  const graphData = { entities: [] as unknown[], source_anchors: [] as unknown[] };
+  const graphData = { entities: [] as unknown[], source_anchors: [] as unknown[], relationships: [] as unknown[] };
   return {
     promoteMutate,
     graphResult: {
@@ -106,6 +106,7 @@ const mocks = vi.hoisted(() => {
       dataUpdatedAt: 0,
     },
     patchResult: { mutate: vi.fn(), isPending: false },
+    relationshipResult: { mutate: vi.fn(), isPending: false },
     // The inspector and the canvas each call usePromoteWorldKbCandidate; both
     // resolve to the same mutate stub so call order is deterministic.
     promoteResult: { mutate: promoteMutate, isPending: false },
@@ -120,6 +121,7 @@ vi.mock('@/lib/canvas/use-world-kb-data', async (importOriginal) => {
     useWorldKbGraph: () => mocks.graphResult,
     useWorldKbCandidates: () => mocks.candidatesResult,
     usePatchWorldKbEntity: () => mocks.patchResult,
+    usePatchWorldKbRelationship: () => mocks.relationshipResult,
     usePromoteWorldKbCandidate: () => mocks.promoteResult,
   };
 });
