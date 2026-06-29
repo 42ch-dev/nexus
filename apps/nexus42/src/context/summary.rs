@@ -543,6 +543,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn summary_config_from_env_override() {
         // Set environment variable
         env::set_var("NEXUS_CONTEXT_MAX_FILE_SIZE", "5000");
@@ -553,6 +554,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn summary_config_from_env_invalid_value() {
         env::set_var("NEXUS_CONTEXT_MAX_FILE_SIZE", "invalid");
         let config = SummaryConfig::from_env();
@@ -562,6 +564,7 @@ mod tests {
     }
 
     #[test]
+    #[serial_test::serial]
     fn summary_config_from_env_unset() {
         env::remove_var("NEXUS_CONTEXT_MAX_FILE_SIZE");
         let config = SummaryConfig::from_env();

@@ -145,21 +145,6 @@ export function chapterOutline(
   );
 }
 
-/** `PUT /v1/local/works/:workId/chapters/:n/outline` → 200 `ChapterOutline`. */
-export function chapterOutlineUpdated(): RequestHandler {
-  return http.put('/v1/local/works/:workId/chapters/:n/outline', async ({ params, request }) => {
-    const body = (await request.json().catch(() => ({}))) as { content?: string };
-    return HttpResponse.json({
-      work_id: params.workId ?? 'w-123',
-      chapter: Number(params.n),
-      volume: 1,
-      outline_path: `Works/WRK/Outlines/chapters/ch${String(params.n).padStart(2, '0')}-outline.md`,
-      content: body.content ?? '',
-      updated_at: '2026-06-25T00:00:00Z',
-    });
-  });
-}
-
 /** `PATCH /v1/local/works/:workId/chapters/:n` → 200 `ChapterDetail`. */
 export function chapterPatched(): RequestHandler {
   return http.patch('/v1/local/works/:workId/chapters/:n', async ({ params, request }) => {

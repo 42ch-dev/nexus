@@ -37,7 +37,7 @@ All endpoints use the V1.64 Local API error convention: non-2xx responses are em
 | `GET` | `/v1/local/works/{work_id}/chapters` | Cursor-paginated chapter summaries | No | No |
 | `GET` | `/v1/local/works/{work_id}/chapters/{n}` | Chapter detail including paths | No | No |
 | `GET` | `/v1/local/works/{work_id}/chapters/{n}/outline` | Read outline markdown | No | No |
-| `PUT` | `/v1/local/works/{work_id}/chapters/{n}/outline` | Replace outline markdown atomically | Yes, `outline_path` only | Yes, `outline_path` if initialized/normalized + `updated_at` |
+| ~~`PUT`~~ | ~~`/v1/local/works/{work_id}/chapters/{n}/outline`~~ | **Removed in V1.75** (canvas-pivot). Outline prose writes now go through the canvas patch route `POST /v1/local/works/{work_id}/chapters/{chapter_id}/patch` with `set.content` + `base_revision` (`outline_revision` CAS). See [canvas-strategy-surface.md](canvas-strategy-surface.md) §3.5. | — | — |
 | `PATCH` | `/v1/local/works/{work_id}/chapters/{n}` | Structure metadata update | No | Yes |
 | `GET` | `/v1/local/works/{work_id}/chapters/{n}/body` | Read body markdown | No | No |
 
@@ -197,37 +197,9 @@ Rules:
 - Before reading, resolve the path inside the workspace root and apply the W-002 path guard described in §7.
 - Missing but in-bounds files return a typed file-read/not-found error; path traversal returns validation failure.
 
-### 5.4 `PUT /v1/local/works/{work_id}/chapters/{n}/outline`
+### 5.4 `PUT /v1/local/works/{work_id}/chapters/{n}/outline` — removed in V1.75
 
-Query:
-
-| Parameter | Type | Default | Rule |
-| --- | --- | --- | --- |
-| `volume` | integer | `1` | Positive volume number. |
-
-Request schema target: reuse `chapter-outline.schema.json` request side or materialize `put-chapter-outline-request.schema.json` if codegen prefers request/response split.
-
-```json
-{
-  "content": "# Chapter 1\n\n- Revised beat...\n"
-}
-```
-
-Response schema target: `schemas/local-api/works/chapters/chapter-outline.schema.json`.
-
-Rules:
-
-1. Verify active creator owns the Work and the chapter row exists.
-2. Determine the target path from DB `outline_path`. If missing, initialize the canonical seed path `Works/{work_ref}/Outlines/chapters/chNN-outline.md` and persist it in the same transaction as the write metadata update.
-3. Resolve the path under the workspace root; reject traversal or symlink escape with `chapter_outline_path_forbidden` (or shared `workspace_path_forbidden` if the implementation standardizes that code).
-4. Create parent directories as needed inside the workspace root.
-5. Write `content` to a sibling temp file, flush/sync it, then atomically rename it over the final `outline_path`, mirroring `work_chapters::sync_frontmatter_status` around line 552.
-6. Update `work_chapters.outline_path` and `updated_at` in the same DB transaction that guards the finalization of the write. If DB update or rename fails, clean up the temp file and do not report success.
-7. Return the final `ChapterOutline` content from the committed file/row state.
-
-Status rule: outline PUT is content-only and MUST NOT automatically bump `status` to `outlined`, even when the chapter is `not_started` or `draft`. Status progression is explicit through `PATCH /chapters/{n}`.
-
-Soft-concurrency rule: no hard per-chapter lock exists in V1.65. Orchestration reads outline at draft-time, so its read is a natural snapshot of whatever is on disk then. PUT should be last-write-wins at the file level, with UI warnings for `draft`/`finalized` chapters supplied by P2.
+**Removed in V1.75** (canvas-pivot). The V1.65 whole-document outline PUT route, its `put-chapter-outline-request` DTO, and schema file were retired; outline prose writes now go through the canvas patch route `POST /v1/local/works/{work_id}/chapters/{chapter_id}/patch` with `set.content` + `base_revision` (`outline_revision` CAS). The atomic-write / RuntimeLockGuard / body-ownership invariants that this section used to describe are re-anchored to that PATCH content path in [local-api-surface-conventions.md](local-api-surface-conventions.md) §6.2 and §7 (V1.75 amendment); see also [canvas-strategy-surface.md](canvas-strategy-surface.md) §3.5. The outline *read* (`GET …/outline`, §5.3) is unchanged.
 
 ### 5.5 `PATCH /v1/local/works/{work_id}/chapters/{n}`
 

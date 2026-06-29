@@ -1,56 +1,56 @@
 {
   "version": 1,
-  "updated_at": "2026-06-29T17:30:00Z",
+  "updated_at": "2026-06-30T00:10:00Z",
   "plans": [],
   "metadata": {
-    "integration_branch": "iteration/v1.74",
+    "integration_branch": "iteration/v1.75",
     "integration_branch_retired": true,
-    "last_integration_branch": "iteration/v1.74",
+    "last_integration_branch": "iteration/v1.75",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.75 (pending /iteration-start)",
+    "latest_active_iteration": "V1.76 (pending /iteration-start)",
     "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.74",
-      "compass": "v1.74-world-kb-relationships-and-hygiene-compass-v1.md",
+      "iteration": "V1.75",
+      "compass": "v1.75-canvas-pivot-and-qc-followup-compass-v1.md",
       "shipped_at": "2026-06-29",
       "plan_count": 4,
       "plan_count_done": 4,
       "wire_contracts_changed": true,
-      "wire_contracts_note": "V1.74 Track A: new Local API relationship DTOs (WorldKbPatchRelationshipRequest/Response, WorldKbRelationshipInput/Projection, WorldKbRelationshipKind) + graph-response relationships[] item schema promoted; @42ch/nexus-contracts 0.9.0 -> 0.10.0. Track B: B3/B4 schema reconciliations ride the same bump.",
-      "profile_b_compaction": "done (V1.74 P-last closure)",
+      "wire_contracts_note": "V1.75 Track A: additive content field on outline-patch-chapter-set + removed V1.65 PUT outline route/DTO; @42ch/nexus-contracts 0.10.0 -> 0.11.0. Track B: B1 codegen Eq verified correct (no change); B2-B8 fixes.",
+      "profile_b_compaction": "done (V1.75 P-last closure)",
       "plan_ids": [
-        "2026-06-29-v1.74-compass-and-plan",
-        "2026-06-29-v1.74-world-kb-relationships",
-        "2026-06-29-v1.74-hygiene-slate-clear",
-        "2026-06-29-v1.74-closure"
+        "2026-06-29-v1.75-compass-and-plan",
+        "2026-06-29-v1.75-canvas-pivot",
+        "2026-06-29-v1.75-qc-followup",
+        "2026-06-29-v1.75-closure"
       ],
       "residual_summary": {
-        "closed_in_v174": 12,
-        "new_qc_followup_v175": 8,
-        "open_post_v174": 8
+        "closed_in_v175": 8,
+        "new_qc_followup_v176": 8,
+        "open_post_v175": 8
       }
     },
     "tech_debt_summary": {
       "total_open": 8,
       "total_deferred": 0,
-      "total_resolved": 272,
+      "total_resolved": 280,
       "total_archived": 0,
       "by_severity_active": {
-        "low": 6,
-        "nit": 2
+        "low": 3,
+        "nit": 5
       },
       "by_target_active": {
-        "V1.75 QC followup (tbd-v1.75-qc-followup)": 8
+        "V1.76 QC followup (tbd-v1.76-qc-followup)": 8
       },
-      "refreshed_at": "2026-06-29T17:00:00Z",
-      "refreshed_reason": "V1.74 closure: 12 pre-existing residuals resolved (slate cleared to 0); 8 new QC suggestions registered for V1.75 followup."
+      "refreshed_at": "2026-06-29T23:59:00Z",
+      "refreshed_reason": "V1.75 closure: 8 pre-existing residuals resolved (slate cleared); 8 new QC suggestions registered for V1.76 followup."
     },
     "updated_at": "2026-06-29T05:11:00Z",
-    "spec_integration_branch": "iteration/v1.74",
+    "spec_integration_branch": "iteration/v1.75",
     "wave1_merged_at": null
   },
   "residual_findings": {
@@ -5465,7 +5465,13 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.75 QC followup (tbd-v1.75-qc-followup)",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-06-29-v1.75-qc-followup",
+          "commit": "a8f0a36e",
+          "at": "2026-06-29",
+          "note": "Closed in V1.75 (QC tri-review 3/3 Approve + QA Pass). B1 verified already-correct; B2-B8 fixed."
+        }
       },
       {
         "id": "R-V174QC1-S004",
@@ -5476,7 +5482,13 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.75 QC followup (tbd-v1.75-qc-followup)",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-06-29-v1.75-qc-followup",
+          "commit": "a8f0a36e",
+          "at": "2026-06-29",
+          "note": "Closed in V1.75 (QC tri-review 3/3 Approve + QA Pass). B1 verified already-correct; B2-B8 fixed."
+        }
       },
       {
         "id": "R-V174QC1-S006",
@@ -5487,7 +5499,13 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "V1.75 QC followup (tbd-v1.75-qc-followup)",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-06-29-v1.75-qc-followup",
+          "commit": "a8f0a36e",
+          "at": "2026-06-29",
+          "note": "Closed in V1.75 (QC tri-review 3/3 Approve + QA Pass). B1 verified already-correct; B2-B8 fixed."
+        }
       },
       {
         "id": "R-V174QC1-S007",
@@ -5498,7 +5516,13 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.75 QC followup (tbd-v1.75-qc-followup)",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-06-29-v1.75-qc-followup",
+          "commit": "a8f0a36e",
+          "at": "2026-06-29",
+          "note": "Closed in V1.75 (QC tri-review 3/3 Approve + QA Pass). B1 verified already-correct; B2-B8 fixed."
+        }
       },
       {
         "id": "R-V174QC2-S001",
@@ -5509,7 +5533,13 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.75 QC followup (tbd-v1.75-qc-followup)",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-06-29-v1.75-qc-followup",
+          "commit": "a8f0a36e",
+          "at": "2026-06-29",
+          "note": "Closed in V1.75 (QC tri-review 3/3 Approve + QA Pass). B1 verified already-correct; B2-B8 fixed."
+        }
       },
       {
         "id": "R-V174QC2-S002",
@@ -5520,7 +5550,13 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.75 QC followup (tbd-v1.75-qc-followup)",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-06-29-v1.75-qc-followup",
+          "commit": "a8f0a36e",
+          "at": "2026-06-29",
+          "note": "Closed in V1.75 (QC tri-review 3/3 Approve + QA Pass). B1 verified already-correct; B2-B8 fixed."
+        }
       },
       {
         "id": "R-V174QC2-S003",
@@ -5531,7 +5567,13 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.75 QC followup (tbd-v1.75-qc-followup)",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-06-29-v1.75-qc-followup",
+          "commit": "a8f0a36e",
+          "at": "2026-06-29",
+          "note": "Closed in V1.75 (QC tri-review 3/3 Approve + QA Pass). B1 verified already-correct; B2-B8 fixed."
+        }
       },
       {
         "id": "R-V174QC3-S001",
@@ -5542,6 +5584,102 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.75 QC followup (tbd-v1.75-qc-followup)",
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-06-29-v1.75-qc-followup",
+          "commit": "a8f0a36e",
+          "at": "2026-06-29",
+          "note": "Closed in V1.75 (QC tri-review 3/3 Approve + QA Pass). B1 verified already-correct; B2-B8 fixed."
+        }
+      }
+    ],
+    "2026-06-29-v1.75-canvas-pivot": [
+      {
+        "id": "R-V175QC1-S001",
+        "title": "chapter-inspector at 248-line split-cap seam (qc1 S-1)",
+        "severity": "low",
+        "source": "qc1 S-1",
+        "scope": "chapter-inspector.tsx",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.76 QC followup (tbd-v1.76-qc-followup)",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V175QC1-S002",
+        "title": "apply_chapter_patch justified #[allow] (qc1 S-2)",
+        "severity": "nit",
+        "source": "qc1 S-2",
+        "scope": "outline.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.76 QC followup (tbd-v1.76-qc-followup)",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V175QC1-S003",
+        "title": "chapter-outline-content-editor save-state transition test (qc1 S-3)",
+        "severity": "low",
+        "source": "qc1 S-3",
+        "scope": "chapter-outline-content-editor.tsx",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.76 QC followup (tbd-v1.76-qc-followup)",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V175QC1-DOC003",
+        "title": "local-api-surface-conventions §6.3/§6.6 benign stale-PUT tokens (qc1)",
+        "severity": "nit",
+        "source": "qc1 W-2 out-of-scope",
+        "scope": "local-api-surface-conventions.md §6.3/§6.6",
+        "decision": "defer",
+        "owner": "@architect",
+        "target": "V1.76 QC followup (tbd-v1.76-qc-followup)",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V175QC2-S001",
+        "title": "B5 enum coercion warn logging could be metric (qc2)",
+        "severity": "nit",
+        "source": "qc2 Suggestion",
+        "scope": "world_kb.rs project_relationship",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.76 QC followup (tbd-v1.76-qc-followup)",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V175QC2-S002",
+        "title": "CAS helper generalization note (qc2)",
+        "severity": "nit",
+        "source": "qc2 Suggestion",
+        "scope": "cas.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.76 QC followup (tbd-v1.76-qc-followup)",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V175QC2-S003",
+        "title": "two-file write ordering comment (qc2)",
+        "severity": "nit",
+        "source": "qc2 Suggestion",
+        "scope": "outline.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.76 QC followup (tbd-v1.76-qc-followup)",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V175QC3-S001",
+        "title": "web build Vite chunk-size warning (qc3 S-QC3-001)",
+        "severity": "nit",
+        "source": "qc3 S-QC3-001",
+        "scope": "apps/web vite build",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.76 QC followup (tbd-v1.76-qc-followup)",
         "lifecycle": "open"
       }
     ]

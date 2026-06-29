@@ -25,7 +25,6 @@
 //! not outside it (concurrency.md §2.4).
 
 use crate::error::LocalDbError;
-use sqlx::SqlitePool;
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -47,28 +46,40 @@ const DEFAULT_BACKOFF_MS: u64 = 100;
 /// id column, and id value to enable this; use `None` for the id to skip
 /// the re-read and use a generic message).
 ///
+/// Accepts any `SQLite` executor (`&SqlitePool` or `&mut SqliteConnection`),
+/// so it can be used both outside and inside a transaction. The version
+/// column name is parameterized for tables that use a column other than
+/// `version` (e.g. `kb_relationships.revision`).
+///
 /// # Errors
 ///
 /// Returns `LocalDbError::VersionMismatch` when `rows_affected == 0`.
 /// Returns `LocalDbError::Sqlx` if the version re-read fails.
-pub async fn cas_check(
-    pool: &SqlitePool,
+pub async fn cas_check_with_version_column<'e, E>(
+    executor: E,
     rows_affected: u64,
     table: &str,
     id_column: &str,
     id_value: &str,
+    version_column: &str,
     expected_version: i64,
-) -> Result<(), LocalDbError> {
+) -> Result<(), LocalDbError>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
     if rows_affected == 1 {
         return Ok(());
     }
 
     // Re-read the current version for a descriptive error message.
+    // SAFETY: dynamic SQL — table, id_column, and version_column are
+    // parameters, not static identifiers, so a compile-time checked macro
+    // cannot be used.
     let actual: Option<(i64,)> = sqlx::query_as(&format!(
-        "SELECT version FROM {table} WHERE {id_column} = ?"
+        "SELECT {version_column} FROM {table} WHERE {id_column} = ?"
     ))
     .bind(id_value)
-    .fetch_optional(pool)
+    .fetch_optional(executor)
     .await?;
 
     Err(LocalDbError::VersionMismatch {
@@ -77,6 +88,36 @@ pub async fn cas_check(
         expected: expected_version,
         actual: actual.map(|(v,)| v),
     })
+}
+
+/// Convenience wrapper for [`cas_check_with_version_column`] when the version
+/// column is named `version`.
+///
+/// # Errors
+///
+/// Returns `LocalDbError::VersionMismatch` when `rows_affected == 0`.
+/// Returns `LocalDbError::Sqlx` if the version re-read fails.
+pub async fn cas_check<'e, E>(
+    executor: E,
+    rows_affected: u64,
+    table: &str,
+    id_column: &str,
+    id_value: &str,
+    expected_version: i64,
+) -> Result<(), LocalDbError>
+where
+    E: sqlx::Executor<'e, Database = sqlx::Sqlite>,
+{
+    cas_check_with_version_column(
+        executor,
+        rows_affected,
+        table,
+        id_column,
+        id_value,
+        "version",
+        expected_version,
+    )
+    .await
 }
 
 /// Retry a fallible CAS operation up to `max_attempts` times with a fixed
@@ -139,6 +180,7 @@ where
 mod tests {
     use super::*;
     use crate::{open_pool, run_migrations};
+    use sqlx::SqlitePool;
 
     async fn fresh_pool() -> (SqlitePool, tempfile::TempDir) {
         let dir = tempfile::tempdir().unwrap();

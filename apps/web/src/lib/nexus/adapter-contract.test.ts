@@ -123,12 +123,13 @@ describe('TauriClient transport parity (thin-over-BrowserClient)', () => {
     };
     const client = new TauriClient({ fetchImpl });
     const workId = 'w1';
-    // Exercise all 28 NexusClient methods (health + 27 data). The three
+    // Exercise all 27 NexusClient methods (health + 26 data). The three
     // preset methods (getPreset/updatePreset/deletePreset) were promoted in
     // V1.67 G2 (R-V167P1-QC3-S1), and the four outline+timeline methods
     // (getWorkOutline/patchOutlineStructure/patchOutlineChapter/patchTimelineEvent)
     // were promoted in V1.72 Track A — they must hit the same transport as the
-    // rest of the surface, not silently no-op.
+    // rest of the surface, not silently no-op. (V1.75 A6 removed the V1.65
+    // `putChapterOutline` PUT method.)
     await client.health();
     await client.listWorks();
     await client.getWork(workId);
@@ -150,7 +151,6 @@ describe('TauriClient transport parity (thin-over-BrowserClient)', () => {
     await client.listChapters(workId);
     await client.getChapter(workId, 1);
     await client.getChapterOutline(workId, 1);
-    await client.putChapterOutline(workId, 1, { content: '' });
     await client.patchChapter(workId, 1, { slug: 'ch' });
     await client.getChapterBody(workId, 1);
     await client.getWorkOutline(workId);
@@ -176,7 +176,7 @@ describe('TauriClient transport parity (thin-over-BrowserClient)', () => {
     // stub did — its path would be missing and this set would be smaller.
     const paths = [...seen].sort();
     expect(paths.every((p) => p.includes('/v1/local/'))).toBe(true);
-    expect(seen.size).toBe(28);
+    expect(seen.size).toBe(27);
     // Spot-check the chapter surface (the Q5 action target).
     expect(seen).toContain('GET /v1/local/works/w1/chapters/1/body');
     expect(seen).toContain('GET /v1/local/works/w1/chapters/1/outline');

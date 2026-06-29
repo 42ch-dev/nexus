@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT owner_creator_id, workspace_id FROM narrative_worlds WHERE world_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "owner_creator_id",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "workspace_id",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "036485f82d6f2d902efded6048a9877cf65a3c18584ba5e751933ddf8afbeb41"
+}

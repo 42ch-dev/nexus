@@ -778,14 +778,15 @@ async fn get_candidates_distinct_candidate_id_for_same_canonical_name() {
 /// canvas client (`promotion-inspector.tsx`) resubmits with the same stale
 /// version and hits a second, avoidable conflict.
 ///
-/// We force the CAS-miss path deterministically by firing two concurrent
-/// `reject` actions on the same pending candidate. On the current-thread
-/// `tokio::test` runtime, `tokio::join!` interleaves both futures at their
-/// await points, so BOTH outer reads see version V before EITHER CAS UPDATE
-/// runs; `SQLite` then serializes the writes — the first CAS wins (V → V+1,
-/// `pending` → `rejected`) and the second CAS affects 0 rows (the bug path).
+/// We force the CAS-miss path deterministically by bumping the candidate's
+/// `version` directly (simulating a concurrent write) while keeping it
+/// `pending`, then issuing a single `reject` with the now-stale
+/// `expected_version`. The candidate reaches the CAS precondition (still
+/// pending) but the CAS UPDATE affects 0 rows (version mismatch) -> 409.
 /// The losing 409 must therefore carry `current_version = V+1`, not the stale
-/// `expected_version = V`.
+/// `expected_version = V`. (An earlier `tokio::join!` form was
+/// non-deterministic: the winning reject could terminalize the candidate
+/// before the loser's validation read, yielding a 422 instead of the 409.)
 #[tokio::test]
 async fn promote_reject_cas_miss_conflict_carries_bumped_version() {
     let (_tmp, state) = fresh_state().await;
@@ -814,33 +815,29 @@ async fn promote_reject_cas_miss_conflict_carries_bumped_version() {
         ..Default::default()
     };
 
-    // Two concurrent rejects against the same pending candidate. `join!`
-    // interleaves at await points on the current-thread runtime, so both
-    // outer reads observe version V before either CAS commits.
-    let (res_a, res_b) = tokio::join!(
-        promote_candidate(
-            State(state.clone()),
-            Path("wld_test_world".to_string()),
-            Json(mk_req()),
-        ),
-        promote_candidate(
-            State(state.clone()),
-            Path("wld_test_world".to_string()),
-            Json(mk_req()),
-        ),
-    );
+    // Deterministically create the CAS-miss scenario: bump the candidate's
+    // version directly (simulating a concurrent write) WITHOUT transitioning
+    // its state, so it stays `pending` and reaches the CAS precondition. The
+    // previous `tokio::join!` form relied on scheduler-dependent interleaving
+    // and could let the winning reject terminalize the candidate before the
+    // loser's validation read it — producing a 422 ("already terminal") instead
+    // of the intended 409 CAS-miss on some CI runners.
+    // SAFETY: dynamic SQL — test-only version bump; compile-time macro not applicable.
+    sqlx::query("UPDATE kb_extract_jobs SET version = version + 1 WHERE job_id = ?")
+        .bind(&candidate.job_id)
+        .execute(state.pool())
+        .await
+        .unwrap();
 
-    // Exactly one CAS wins; the other hits the CAS-miss branch under test.
-    let (winner, loser) = match (res_a, res_b) {
-        (Ok(_), Err(e)) => (true, e),
-        (Err(e), Ok(_)) => (false, e),
-        (Ok(_), Ok(_)) => panic!("both rejects won the CAS — race did not serialize"),
-        (Err(a), Err(b)) => panic!(
-            "both rejects failed; neither reached the CAS-miss path. \
-             errors: a={a:?} b={b:?}"
-        ),
-    };
-    let _ = winner; // either order is fine; only the loser's 409 is asserted.
+    // The candidate is still pending but its version is now stale_expected + 1,
+    // so the promote CAS UPDATE affects 0 rows -> 409 conflict.
+    let loser = promote_candidate(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(mk_req()),
+    )
+    .await
+    .expect_err("stale expected_version must produce a 409 CAS-miss conflict");
 
     assert_eq!(loser.status_code(), axum::http::StatusCode::CONFLICT);
     assert_eq!(loser.error_code(), "world_kb_conflict");
