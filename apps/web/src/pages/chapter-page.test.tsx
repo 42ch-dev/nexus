@@ -88,25 +88,28 @@ function renderChapter(workId = 'w-123', chapter = 1) {
   );
 }
 
-function chapterDetail(status: string, canEditOutline = true) {
-  return http.get('/v1/local/works/:workId/chapters/:n', ({ params }) =>
-    HttpResponse.json({
+function chapterDetail(status: string, canEditOutline: boolean | 'absent' = true) {
+  return http.get('/v1/local/works/:workId/chapters/:n', ({ params }) => {
+    const detail: Record<string, unknown> = {
       work_id: params.workId,
       chapter: Number(params.n),
       volume: 1,
       slug: 'ch01',
       planned_word_count: 4000,
       status,
-      can_edit_outline: canEditOutline,
       can_edit_structure: true,
       body_read_only: true,
-      protection: canEditOutline
-        ? { level: 'none', reason: '' }
-        : { level: 'status', reason: 'Chapter is locked by the orchestration engine.' },
       created_at: '2026-06-25T00:00:00Z',
       updated_at: '2026-06-25T00:00:00Z',
-    }),
-  );
+    };
+    if (canEditOutline !== 'absent') {
+      detail.can_edit_outline = canEditOutline;
+      detail.protection = canEditOutline
+        ? { level: 'none', reason: '' }
+        : { level: 'status', reason: 'Chapter is locked by the orchestration engine.' };
+    }
+    return HttpResponse.json(detail);
+  });
 }
 
 describe('ChapterPage', () => {
@@ -485,6 +488,44 @@ describe('ChapterPage', () => {
     // R-V171-GREPTILE-P1-4: TipTap reads `editable` only at mount, so a cold
     // page load with the flag arriving late must still flip the editor to
     // read-only. Verify setEditable(false) was called.
+    await waitFor(() => {
+      expect(mockEditor.setEditable).toHaveBeenCalledWith(false);
+    });
+    expect(mockEditor.isEditable).toBe(false);
+  });
+
+  it('defaults to non-editable when can_edit_outline is absent (R-V171P1-QC1-003)', async () => {
+    useHandlers(
+      chapterDetail('draft', 'absent'),
+      http.get('/v1/local/works/:workId/chapters/:n/outline', () =>
+        HttpResponse.json({
+          work_id: 'w-123',
+          chapter: 1,
+          volume: 1,
+          outline_path: 'Works/WRK/Outlines/chapters/ch01-outline.md',
+          content: '# Chapter 1',
+          updated_at: '2026-06-25T00:00:00Z',
+        }),
+      ),
+      http.get('/v1/local/works/:workId/chapters/:n/body', () =>
+        HttpResponse.json({
+          work_id: 'w-123',
+          chapter: 1,
+          volume: 1,
+          body_path: 'Works/WRK/Stories/ch01-ch01.md',
+          content: 'Body prose.',
+          read_only: true,
+          updated_at: '2026-06-25T00:00:00Z',
+        }),
+      ),
+    );
+
+    renderChapter();
+    expect(
+      await screen.findByText(/Outline editing is disabled for this chapter/i),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Save Outline/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /Reset/i })).toBeDisabled();
     await waitFor(() => {
       expect(mockEditor.setEditable).toHaveBeenCalledWith(false);
     });

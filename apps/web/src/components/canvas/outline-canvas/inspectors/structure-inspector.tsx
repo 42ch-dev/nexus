@@ -7,6 +7,7 @@
  */
 import { useMemo } from 'react';
 import { BookOpen, ChevronRight } from 'lucide-react';
+import { FixedSizeList, type ListChildComponentProps } from 'react-window';
 
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
@@ -18,6 +19,9 @@ import {
   unassignedChaptersOf,
 } from '../graph-projection';
 import type { ChapterSummary, WorkOutline } from '@42ch/nexus-contracts';
+
+const CHAPTER_ROW_HEIGHT = 48;
+const MAX_LIST_HEIGHT = 384;
 
 interface OutlineStructurePanelProps {
   outline: WorkOutline;
@@ -67,17 +71,12 @@ export function OutlineStructurePanel({
             {unassigned.length > 0 && (
               <div>
                 <h4 className="text-label-14 font-semibold text-gray-900">Unassigned</h4>
-                <ul className="mt-2 space-y-1">
-                  {unassigned.map((c) => (
-                    <ChapterRow
-                      key={c.chapter}
-                      chapter={c}
-                      outline={outline}
-                      selected={selectedChapterId === c.chapter}
-                      onSelect={() => onSelectChapter(c.chapter)}
-                    />
-                  ))}
-                </ul>
+                <VirtualUnassignedList
+                  unassigned={unassigned}
+                  outline={outline}
+                  selectedChapterId={selectedChapterId}
+                  onSelectChapter={onSelectChapter}
+                />
               </div>
             )}
           </div>
@@ -104,41 +103,146 @@ function VolumeSection({
   onSelectChapter,
   onMoveChapter,
 }: VolumeSectionProps) {
+  const listHeight = Math.min(volume.chapter_ids.length * CHAPTER_ROW_HEIGHT, MAX_LIST_HEIGHT);
   return (
     <div className="rounded-card border border-gray-alpha-300 bg-background-100 p-3">
       <div className="flex items-center justify-between">
         <h4 className="text-label-14 font-semibold text-gray-900">{volume.label || `Volume ${volume.volume_id}`}</h4>
         <span className="text-label-12 text-gray-700">{volume.chapter_ids.length} chapters</span>
       </div>
-      <ul className="mt-2 space-y-1">
-        {volume.chapter_ids.map((id) => {
-          const chapter = chapters.find((c) => c.chapter === id);
-          if (!chapter) return null;
-          const nextVolume = outline.volumes.find((v) => v.volume_id === volume.volume_id + 1);
-          return (
-            <li key={id} className="flex items-center gap-2">
-              <ChapterRow
-                chapter={chapter}
-                outline={outline}
-                selected={selectedChapterId === id}
-                onSelect={() => onSelectChapter(id)}
-              />
-              {nextVolume ? (
-                <button
-                  type="button"
-                  onClick={() => onMoveChapter(id, nextVolume.volume_id)}
-                  className="rounded-control p-1 text-gray-700 hover:bg-gray-alpha-100"
-                  aria-label={`Move chapter ${id} to ${nextVolume.label || `Volume ${nextVolume.volume_id}`}`}
-                  title={`Move to ${nextVolume.label || `Volume ${nextVolume.volume_id}`}`}
-                >
-                  <ChevronRight className="h-4 w-4" aria-hidden />
-                </button>
-              ) : null}
-            </li>
-          );
-        })}
-      </ul>
+      <VirtualVolumeList
+        volume={volume}
+        outline={outline}
+        chapters={chapters}
+        selectedChapterId={selectedChapterId}
+        onSelectChapter={onSelectChapter}
+        onMoveChapter={onMoveChapter}
+        height={listHeight}
+      />
     </div>
+  );
+}
+
+interface VolumeListData {
+  volume: WorkOutline['volumes'][number];
+  outline: WorkOutline;
+  chapters: ChapterSummary[];
+  selectedChapterId: number | null;
+  onSelectChapter: (id: number | null) => void;
+  onMoveChapter: (chapterId: number, volumeId: number) => void;
+}
+
+function VolumeRow({ index, style, data }: ListChildComponentProps<VolumeListData>) {
+  const { volume, outline, chapters, selectedChapterId, onSelectChapter, onMoveChapter } = data;
+  const id = volume.chapter_ids[index];
+  const chapter = chapters.find((c) => c.chapter === id);
+  if (!chapter) return null;
+  const nextVolume = outline.volumes.find((v) => v.volume_id === volume.volume_id + 1);
+  return (
+    <li key={id} style={style} className="flex items-center gap-2">
+      <ChapterRow
+        chapter={chapter}
+        outline={outline}
+        selected={selectedChapterId === id}
+        onSelect={() => onSelectChapter(id)}
+      />
+      {nextVolume ? (
+        <button
+          type="button"
+          onClick={() => onMoveChapter(id, nextVolume.volume_id)}
+          className="rounded-control p-1 text-gray-700 hover:bg-gray-alpha-100"
+          aria-label={`Move chapter ${id} to ${nextVolume.label || `Volume ${nextVolume.volume_id}`}`}
+          title={`Move to ${nextVolume.label || `Volume ${nextVolume.volume_id}`}`}
+        >
+          <ChevronRight className="h-4 w-4" aria-hidden />
+        </button>
+      ) : null}
+    </li>
+  );
+}
+
+function VirtualVolumeList({
+  volume,
+  outline,
+  chapters,
+  selectedChapterId,
+  onSelectChapter,
+  onMoveChapter,
+  height,
+}: VolumeListData & { height: number }) {
+  const itemData = useMemo(
+    () => ({
+      volume,
+      outline,
+      chapters,
+      selectedChapterId,
+      onSelectChapter,
+      onMoveChapter,
+    }),
+    [volume, outline, chapters, selectedChapterId, onSelectChapter, onMoveChapter],
+  );
+
+  return (
+    <FixedSizeList
+      className="mt-2"
+      innerElementType="ul"
+      itemCount={volume.chapter_ids.length}
+      itemData={itemData}
+      itemSize={CHAPTER_ROW_HEIGHT}
+      height={height}
+      width="100%"
+    >
+      {VolumeRow}
+    </FixedSizeList>
+  );
+}
+
+interface UnassignedListData {
+  unassigned: ChapterSummary[];
+  outline: WorkOutline;
+  selectedChapterId: number | null;
+  onSelectChapter: (id: number | null) => void;
+}
+
+function UnassignedRow({ index, style, data }: ListChildComponentProps<UnassignedListData>) {
+  const { unassigned, outline, selectedChapterId, onSelectChapter } = data;
+  const chapter = unassigned[index];
+  return (
+    <li key={chapter.chapter} style={style}>
+      <ChapterRow
+        chapter={chapter}
+        outline={outline}
+        selected={selectedChapterId === chapter.chapter}
+        onSelect={() => onSelectChapter(chapter.chapter)}
+      />
+    </li>
+  );
+}
+
+function VirtualUnassignedList({
+  unassigned,
+  outline,
+  selectedChapterId,
+  onSelectChapter,
+}: UnassignedListData) {
+  const listHeight = Math.min(unassigned.length * CHAPTER_ROW_HEIGHT, MAX_LIST_HEIGHT);
+  const itemData = useMemo(
+    () => ({ unassigned, outline, selectedChapterId, onSelectChapter }),
+    [unassigned, outline, selectedChapterId, onSelectChapter],
+  );
+
+  return (
+    <FixedSizeList
+      className="mt-2"
+      innerElementType="ul"
+      itemCount={unassigned.length}
+      itemData={itemData}
+      itemSize={CHAPTER_ROW_HEIGHT}
+      height={listHeight}
+      width="100%"
+    >
+      {UnassignedRow}
+    </FixedSizeList>
   );
 }
 
