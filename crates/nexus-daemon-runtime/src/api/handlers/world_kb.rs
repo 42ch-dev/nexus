@@ -100,12 +100,18 @@ async fn require_world_owner(
 
 /// Map a `LocalDbError::VersionMismatch` to a 409 `WorldKbConflictError`;
 /// everything else to a 500.
-fn map_cas_err(e: LocalDbError, entity_id: &str) -> NexusApiError {
+///
+/// `conflicting_path` lets the merge target CAS miss tag itself as
+/// `"merge_target"` (distinct from a candidate's `"version"`) so the client
+/// can tell WHICH entity conflicted and refresh the right list instead of
+/// blindly retrying the candidate with the target's revision as
+/// `expected_version` (greptile P1, iter 5).
+fn map_cas_err(e: LocalDbError, entity_id: &str, conflicting_path: &str) -> NexusApiError {
     match e {
         LocalDbError::VersionMismatch { actual, .. } => NexusApiError::world_kb_conflict(
             actual.unwrap_or(0).max(0).cast_unsigned(),
             entity_id,
-            "version",
+            conflicting_path,
             "refetch the World KB graph and reapply",
         ),
         other => NexusApiError::Internal {
@@ -329,7 +335,7 @@ pub async fn patch_entity(
         i64::try_from(current_version).unwrap_or(0),
     )
     .await
-    .map_err(|e| map_cas_err(e, &req.entity_id))?;
+    .map_err(|e| map_cas_err(e, &req.entity_id, "version"))?;
     tx.commit().await.map_err(NexusApiError::from)?;
 
     info!(entity_id = %req.entity_id, new_version, "world_kb.patch_entity committed");
@@ -584,7 +590,7 @@ async fn promote_adopt(
         i64::try_from(req.expected_version).unwrap_or(0),
     )
     .await
-    .map_err(|e| map_cas_err(e, &req.job_id))?;
+    .map_err(|e| map_cas_err(e, &req.job_id, "version"))?;
     if !flipped {
         // Race: row left pending state between read and flip. Roll back the
         // orphan KeyBlock insert; surface a validation error (not a conflict).
@@ -728,6 +734,8 @@ async fn promote_merge(
 
     // Atomic: CAS-update target body + CAS-reject candidate job in one tx.
     let mut tx = pool.begin().await.map_err(NexusApiError::from)?;
+    // Target CAS miss is tagged "merge_target" (not the candidate's "version")
+    // so the client refreshes the target, not the candidate (greptile P1, iter 5).
     let _new_target_version = cas_update_key_block_fields(
         &mut tx,
         target_id,
@@ -737,7 +745,7 @@ async fn promote_merge(
         i64::try_from(target_version).unwrap_or(0),
     )
     .await
-    .map_err(|e| map_cas_err(e, target_id))?;
+    .map_err(|e| map_cas_err(e, target_id, "merge_target"))?;
     let reject = sqlx::query(
         "UPDATE kb_extract_jobs \
          SET promotion_status = 'rejected', version = version + 1 \
