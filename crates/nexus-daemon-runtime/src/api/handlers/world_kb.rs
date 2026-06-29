@@ -50,7 +50,7 @@ use nexus_local_db::kb_relationships::{
 use nexus_local_db::kb_store::{self, cas_update_key_block_fields};
 use nexus_local_db::LocalDbError;
 use serde::Deserialize;
-use tracing::info;
+use tracing::{info, warn};
 
 /// Maximum entities returned by the graph projection (mirrors `kb_store`
 /// `LIST_BY_WORLD_LIMIT` safety cap).
@@ -872,6 +872,12 @@ pub async fn get_graph(
         entities.push(project_entity(&kb));
     }
 
+    // V1.76 TODO: relationship graph pagination. The response currently ships
+    // the entire graph for the world (capped by `GRAPH_ENTITY_CAP`). When the
+    // relationship count exceeds the client viewport budget, introduce
+    // `limit`/`cursor` query params and a `truncated` flag plus `next_cursor`
+    // in `WorldKbGraphResponse` so callers can paginate without losing the
+    // symmetric-reverse derived edges. Keep V1.75 contract unchanged.
     Ok(Json(WorldKbGraphResponse {
         entities,
         source_anchors,
@@ -1081,7 +1087,7 @@ async fn patch_relationship_add(
 
     let relationship_id = generate_relationship_id();
     let mut tx = pool.begin().await.map_err(NexusApiError::from)?;
-    insert_relationship_in_tx(
+    let row = insert_relationship_in_tx(
         &mut tx,
         &InsertRelationshipParams {
             relationship_id: relationship_id.clone(),
@@ -1104,13 +1110,6 @@ async fn patch_relationship_add(
         message: e.to_string(),
     })?;
     tx.commit().await.map_err(NexusApiError::from)?;
-
-    let row = get_relationship(pool, &relationship_id)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?;
 
     Ok(Json(WorldKbPatchRelationshipResponse {
         relationship: Some(project_relationship(&row, "stored")),
@@ -1163,13 +1162,17 @@ async fn patch_relationship_update(
             },
         })?;
     if existing.world_id != world_id {
-        return Err(NexusApiError::NotFound(format!(
-            "relationship {relationship_id} in world {world_id}"
-        )));
+        return Err(NexusApiError::Forbidden {
+            resource: format!("relationship {relationship_id}"),
+            reason: format!(
+                "relationship belongs to world {}; cross-world access is forbidden",
+                existing.world_id
+            ),
+        });
     }
 
     let mut tx = pool.begin().await.map_err(NexusApiError::from)?;
-    let new_version = update_relationship_in_tx(
+    let row = update_relationship_in_tx(
         &mut tx,
         relationship_id,
         &UpdateRelationshipParams {
@@ -1182,22 +1185,15 @@ async fn patch_relationship_update(
             updated_at: now.to_string(),
         },
         i64::try_from(expected_version).unwrap_or(0),
+        &existing,
     )
     .await
     .map_err(|e| map_relationship_cas_err(e, relationship_id))?;
     tx.commit().await.map_err(NexusApiError::from)?;
 
-    let row =
-        get_relationship(pool, relationship_id)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: e.to_string(),
-            })?;
-
     Ok(Json(WorldKbPatchRelationshipResponse {
         relationship: Some(project_relationship(&row, "stored")),
-        version: new_version,
+        version: u64::try_from(row.revision).unwrap_or(0),
         validation_summary: validation_summary(&[], &[]),
     }))
 }
@@ -1230,9 +1226,13 @@ async fn patch_relationship_remove(
             },
         })?;
     if existing.world_id != world_id {
-        return Err(NexusApiError::NotFound(format!(
-            "relationship {relationship_id} in world {world_id}"
-        )));
+        return Err(NexusApiError::Forbidden {
+            resource: format!("relationship {relationship_id}"),
+            reason: format!(
+                "relationship belongs to world {}; cross-world access is forbidden",
+                existing.world_id
+            ),
+        });
     }
 
     let mut tx = pool.begin().await.map_err(NexusApiError::from)?;
@@ -1429,15 +1429,21 @@ fn project_relationship(row: &KbRelationshipRow, direction: &str) -> WorldKbRela
         .as_deref()
         .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
 
+    let relation_type: WorldKbRelationshipKind = row.relation_type.parse().unwrap_or_else(|_| {
+        warn!(
+            relationship_id = row.relationship_id,
+            relation_type = row.relation_type,
+            "unknown relation_type stored in kb_relationships; projecting as Custom"
+        );
+        WorldKbRelationshipKind::Custom
+    });
+
     WorldKbRelationshipProjection {
         relationship_id: row.relationship_id.clone(),
         world_id: row.world_id.clone(),
         source_entity_id: row.source_entity_id.clone(),
         target_entity_id: row.target_entity_id.clone(),
-        relation_type: row
-            .relation_type
-            .parse()
-            .unwrap_or(WorldKbRelationshipKind::Custom),
+        relation_type,
         custom_label: row.custom_label.clone(),
         symmetric: row.symmetric != 0,
         confidence: row.confidence,

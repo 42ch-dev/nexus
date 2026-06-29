@@ -1,16 +1,18 @@
 /**
- * World KB graph projection — World → entity/candidate nodes + source-anchor
- * provenance edges (canvas-strategy-surface.md §3.3 surface 3 + §3.4).
+ * World KB graph projection — World → entity/candidate nodes + typed
+ * relationship edges + source-anchor provenance edges
+ * (canvas-strategy-surface.md §3.3 surface 3 + §3.4).
  *
- * Pure functions: convert the V1.73 generated projections
+ * Pure functions: convert the V1.74 generated projections
  * (`WorldKbGraphResponse` + `WorldKbCandidatesResponse`) into the
  * {@link WorldKbNodeData} / {@link WorldKbEdgeData} payloads plus React Flow
  * `Node`/`Edge` arrays. The graph adapter owns node layout (a deterministic
  * grid by BlockType lane); the inspector + conflict modal own write affordances.
  *
- * Relationship edges (`world-kb-relationship-edge`) are derived read-only from
- * source anchors in V1.73; `world_kb.patch_relationship` + a `kb_relationships`
- * table are deferred to V1.74.
+ * Relationship edges (`world-kb-relationship-edge`) are first-class typed
+ * edges in V1.74, sourced from `WorldKbGraphResponse.relationships`. They are
+ * complemented by source-anchor provenance edges derived from entity
+ * `source_anchors`.
  */
 import type { Edge, Node } from '@xyflow/react';
 import type { BlockType } from '@42ch/nexus-contracts';
