@@ -1542,12 +1542,11 @@ states:
         let backup = backup_existing_file(&path).expect("backup original");
         assert!(backup.is_some());
 
-        let tmp_path = dir.path().join("prompt.md.tmp.00000000-0000-0000-0000-000000000000");
-        atomic_write_with_dir_fsync(&path,
-            &tmp_path,
-            b"new content that should be rolled back",
-        )
-        .expect("atomic write new content");
+        let tmp_path = dir
+            .path()
+            .join("prompt.md.tmp.00000000-0000-0000-0000-000000000000");
+        atomic_write_with_dir_fsync(&path, &tmp_path, b"new content that should be rolled back")
+            .expect("atomic write new content");
 
         rollback_template_write(&path, backup, &tmp_path);
 
@@ -1560,13 +1559,12 @@ states:
     fn rollback_template_write_removes_file_when_no_backup() {
         let dir = tempfile::tempdir().expect("create temp dir");
         let path = dir.path().join("new_prompt.md");
-        let tmp_path = dir.path().join("new_prompt.md.tmp.00000000-0000-0000-0000-000000000000");
+        let tmp_path = dir
+            .path()
+            .join("new_prompt.md.tmp.00000000-0000-0000-0000-000000000000");
 
-        atomic_write_with_dir_fsync(&path,
-            &tmp_path,
-            b"new content that should be removed",
-        )
-        .expect("atomic write new file");
+        atomic_write_with_dir_fsync(&path, &tmp_path, b"new content that should be removed")
+            .expect("atomic write new file");
         assert!(path.exists());
 
         rollback_template_write(&path, None, &tmp_path);
