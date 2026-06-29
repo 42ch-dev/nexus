@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/canvas/world-kb/world-kb-candidate-projection.schema.json",
+  "schema_version": 1,
+  "title": "Nexus WorldKbCandidateProjection",
+  "description": "Pending promotion candidate projection for the World KB promotion inspector (V1.73). Backed by kb_extract_jobs + the pending KeyBlock row.",
+  "type": "object",
+  "required": ["candidate_id", "job_id", "world_id", "block_type", "canonical_name", "version"],
+  "properties": {
+    "candidate_id": { "type": "string", "description": "Pending KeyBlock id (key_block_id)." },
+    "job_id": { "type": "string", "description": "Extract job id (kb_extract_jobs.job_id)." },
+    "world_id": { "type": "string", "description": "Owning World identifier." },
+    "block_type": {
+      "$ref": "https://nexus42.invalid/schemas/common/common.schema.json#/definitions/BlockType"
+    },
+    "canonical_name": { "type": "string" },
+    "status": { "type": "string", "description": "Promotion state, normally `pending`." },
+    "version": { "type": "integer", "minimum": 0, "description": "Per-row OCC version of the candidate row." },
+    "source_anchor_count": { "type": "integer", "minimum": 0 },
+    "created_at": { "type": "string" }
+  },
+  "additionalProperties": false
+}

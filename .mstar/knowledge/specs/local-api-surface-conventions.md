@@ -2,7 +2,7 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — V1.72 amendment (§7 outline/timeline structured patch routes extending the V1.71 patch-route convention; additive outline DTOs; `@42ch/nexus-contracts` 0.7.0 → 0.8.0 by default). Prior: V1.71 amendment (§7 structured patch-route convention for canvas-like surfaces; Strategy β patch routes; `@42ch/nexus-contracts` 0.6.0 → 0.7.0 by default), V1.67 amendment (§3.2 casing ratification + §4 `items` enforcement + §5 sort-param contract; `@42ch/nexus-contracts` 0.5.0 → 0.6.0), V1.64 cursor/error/`items` conventions + V1.65 chapter-content file-backed route rules. |
+| **Status** | Normative — V1.73 amendment (§7 World KB canvas structured patch/read routes extending the V1.71/V1.72 patch-route convention; additive World KB DTOs; per-row OCC with `expected_version`/`version`). Prior: V1.72 amendment (§7 outline/timeline structured patch routes extending the V1.71 patch-route convention; additive outline DTOs; `@42ch/nexus-contracts` 0.7.0 → 0.8.0 by default), V1.71 amendment (§7 structured patch-route convention for canvas-like surfaces; Strategy β patch routes; `@42ch/nexus-contracts` 0.6.0 → 0.7.0 by default), V1.67 amendment (§3.2 casing ratification + §4 `items` enforcement + §5 sort-param contract; `@42ch/nexus-contracts` 0.5.0 → 0.6.0), V1.64 cursor/error/`items` conventions + V1.65 chapter-content file-backed route rules. |
 | **Document class** | Master |
 | **Scope** | Cross-resource Local API response/query conventions for schemas under `schemas/local-api/` and handlers under `nexus-daemon-runtime` |
 | **Coordinates with** | [schemas-directory-layout.md](./schemas-directory-layout.md), [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md), [daemon-runtime.md](./daemon-runtime.md) |
@@ -374,14 +374,46 @@ V1.72 adds 3 outline/timeline patch routes following the V1.71 pattern:
 
 Error envelope (mirrors V1.71 Strategy convention): `OutlineConflictError` (409) extends canonical `ErrorResponse.details` with `current_revision`, `node_id`, `conflicting_path`, recovery hint; `OutlineValidationError` (422) carries structured `validation_summary` mirroring V1.71's `StrategyValidationError`.
 
-Future World KB canvas surface in V1.73+ should reuse this convention:
+V1.73 World KB canvas surface reuses this convention with per-row OCC rather than a single graph/document revision:
 
-1. Client reads a canonical graph/document projection with `revision`.
-2. Client submits a node/edge/subresource patch with `base_revision`.
-3. Daemon validates identifiers, reachability/domain invariants, condition/expression syntax when applicable, and referenced templates/entities.
-4. Daemon persists atomically and returns `new_revision`, or rejects stale writes with 409 and structured recovery data.
+1. Client reads a canonical graph/candidate projection with row `version` values.
+2. Client submits a node/subresource patch or candidate promotion with `expected_version`.
+3. Daemon validates path identifiers, row identifiers, entity-scope-model §5.5 promotion-state invariants, merge/adopt/reject rules, and entity patch payloads.
+4. Daemon persists atomically and returns the updated row `version`, or rejects stale writes with 409 and structured recovery data.
 
 This convention does **not** authorize direct browser/Tauri webview writes to raw files. File-backed routes remain domain-specific and must be separately specified like the V1.65 chapter-content routes in §6.
+
+### 7.5 World KB canvas β routes (V1.73)
+
+V1.73 adds the World KB entities + candidates surface to the structured canvas convention. It intentionally ships **2 mutating patch routes** plus **2 read projection routes**; typed relationship CRUD remains `tbd-v1.74-world-kb-relationships`.
+
+| Use | Route | Request DTO | Response DTO |
+| --- | --- | --- | --- |
+| Patch a World KB entity row | `POST /v1/local/worlds/{world_id}/kb/patch-entity` | `WorldKbPatchEntityRequest` | `WorldKbPatchEntityResponse` |
+| Promote a pending candidate | `POST /v1/local/worlds/{world_id}/kb/promote-candidate` | `WorldKbPromoteCandidateRequest` | `WorldKbPromoteCandidateResponse` |
+| Read World KB graph projection | `GET /v1/local/worlds/{world_id}/kb/graph` | — | `WorldKbGraphResponse` |
+| Read pending candidates | `GET /v1/local/worlds/{world_id}/kb/candidates` | query params as endpoint-defined | `WorldKbCandidatesResponse` |
+
+DTO naming follows the generated filename convention from `schemas/local-api/canvas/world-kb/world-kb-*.schema.json`: generated symbols use the `WorldKb...` entity-prefix form (`WorldKbPatchEntityRequest`, `WorldKbPromoteCandidateRequest`, etc.) even where a schema `title` string uses a verb-prefix phrase. This matches the V1.71/V1.72 generated-contract convention: filenames govern generated public names.
+
+World KB request semantics:
+
+| Field / rule | Requirement |
+| --- | --- |
+| Path-authoritative `world_id` | The `world_id` path segment is authoritative for World ownership and workspace scoping. Request bodies MUST NOT override it; any repeated/mismatched identifier is a 400 path/body mismatch under the canonical error envelope. |
+| Row identifiers | `WorldKbPatchEntityRequest.entity_id` identifies the KeyBlock row under the path `world_id`; `WorldKbPromoteCandidateRequest.job_id` + `candidate_id` identify the pending extraction job/candidate row under the path `world_id`. |
+| `expected_version` | Required on both mutating requests. It is the row version observed on the last canonical read: `kb_key_blocks.revision` for entity patches and `kb_extract_jobs.version` for candidate promotion (NULL/absent normalized to `0` where applicable). |
+| Response `version` | Mutating success responses return the committed row `version` after persistence. Clients MUST update their local projection from the response or refetch before issuing the next patch. |
+| Patch payload | `WorldKbPatchEntityRequest.patch` edits entity fields such as title/body/aliases/block_type. `WorldKbPromoteCandidateRequest.action` is `adopt` / `reject` / `merge`; `merge` requires `merge_target_id`; optional `patch` may refine fields during adoption. |
+
+Conflict and validation errors:
+
+| HTTP status | DTO | Rule |
+| --- | --- | --- |
+| `409` | `WorldKbConflictError` | Returned before mutation when `expected_version` is stale. Details include `current_version`, `entity_id`, `conflicting_path`, and `recovery_hint`. |
+| `422` | `WorldKbValidationError` | Returned for domain-rule failures such as invalid promotion action/target, invalid merge target, invalid entity patch, or entity-scope lifecycle violations. Details carry `validation_summary.errors[]` / `warnings[]`. |
+
+V1.73 graph reads expose source-anchor provenance edges and reserve `relationships` as an empty array until the V1.74 relationship surface. Relationship editing must not be tunneled through `patch-entity` or `promote-candidate` blobs.
 
 ---
 

@@ -56,6 +56,12 @@ import type {
   UpdatePresetResponse,
   ValidatePresetRequest,
   ValidatePresetResponse,
+  WorldKbCandidatesResponse,
+  WorldKbGraphResponse,
+  WorldKbPatchEntityRequest,
+  WorldKbPatchEntityResponse,
+  WorldKbPromoteCandidateRequest,
+  WorldKbPromoteCandidateResponse,
   WorkDetailResponse,
   WorkOutline,
 } from '@42ch/nexus-contracts';
@@ -324,6 +330,40 @@ export class BrowserClient implements NexusClient {
   ): Promise<OutlinePatchResponse> {
     return this.post<OutlinePatchResponse>(
       `/v1/local/works/${encodeURIComponent(workId)}/timeline/patch`,
+      request,
+    );
+  }
+
+  // ── World KB canvas (V1.73 Track A) ───────────────────────────────────────
+  getWorldKbGraph(worldId: string): Promise<WorldKbGraphResponse> {
+    return this.get<WorldKbGraphResponse>(
+      `/v1/local/worlds/${encodeURIComponent(worldId)}/kb/graph`,
+    );
+  }
+  getWorldKbCandidates(
+    worldId: string,
+    query?: { limit?: number; cursor?: string },
+  ): Promise<WorldKbCandidatesResponse> {
+    return this.get<WorldKbCandidatesResponse>(
+      `/v1/local/worlds/${encodeURIComponent(worldId)}/kb/candidates`,
+      query,
+    );
+  }
+  worldKbPatchEntity(
+    worldId: string,
+    request: WorldKbPatchEntityRequest,
+  ): Promise<WorldKbPatchEntityResponse> {
+    return this.post<WorldKbPatchEntityResponse>(
+      `/v1/local/worlds/${encodeURIComponent(worldId)}/kb/patch-entity`,
+      request,
+    );
+  }
+  worldKbPromoteCandidate(
+    worldId: string,
+    request: WorldKbPromoteCandidateRequest,
+  ): Promise<WorldKbPromoteCandidateResponse> {
+    return this.post<WorldKbPromoteCandidateResponse>(
+      `/v1/local/worlds/${encodeURIComponent(worldId)}/kb/promote-candidate`,
       request,
     );
   }

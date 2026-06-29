@@ -21,3 +21,4 @@ pub mod strategy;
 pub mod works;
 pub mod workspace;
 pub mod workspaces;
+pub mod world_kb;

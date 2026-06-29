@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Pencil } from 'lucide-react';
+import { ArrowLeft, Network, Pencil } from 'lucide-react';
 
 import { StatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
@@ -113,6 +113,14 @@ export function WorkDetailPage() {
           )}
 
           <div className="mt-6 flex flex-wrap gap-2">
+            {w.world_id && (
+              <Button asChild variant="secondary" size="small">
+                <Link to={`/worlds/${encodeURIComponent(w.world_id)}/kb`}>
+                  <Network className="h-4 w-4" aria-hidden />
+                  Open World KB
+                </Link>
+              </Button>
+            )}
             {!isArchived && (
               <Button
                 type="button"

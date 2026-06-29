@@ -102,6 +102,25 @@
     --color-canvas-write-success: #1f8f4d;
     --color-canvas-write-stale-bg: color-mix(in srgb, var(--color-amber-700) 8%, transparent);
 
+    /* World KB canvas — DESIGN.md §World KB Canvas Tokens (V1.73) */
+    --color-canvas-worldkb-entity-card-fill-default: #ffffff;
+    --color-canvas-worldkb-entity-card-fill-hover: #f5f5f5;
+    --color-canvas-worldkb-entity-card-fill-selected: #ebf2ff;
+    --color-canvas-worldkb-entity-card-stroke-default: rgba(0, 0, 0, 0.14);
+    --color-canvas-worldkb-entity-card-stroke-selected: #006bff;
+    --color-canvas-worldkb-promotion-pending: #f59e0b;
+    --color-canvas-worldkb-promotion-confirmed: #10b981;
+    --color-canvas-worldkb-promotion-rejected: #ef4444;
+    --color-canvas-worldkb-promotion-merged: #8b5cf6;
+    --color-canvas-worldkb-source-anchor-edge: #a78bfa;
+    --color-canvas-worldkb-source-anchor-node: #ede9fe;
+    --color-canvas-worldkb-computable-badge: #0ea5e9;
+    --color-canvas-worldkb-conflict-marker: #ef4444;
+    --color-canvas-worldkb-conflict-marker-fill: rgba(239, 68, 68, 0.1);
+    --color-canvas-worldkb-nonspatial-row-highlight: #f5f5f4;
+    --color-canvas-worldkb-focus-ring: #006bff;
+    --color-canvas-worldkb-relationship-edge: #94a3b8;
+
     /* Elevation — DESIGN.md §Elevation */
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04);
     --shadow-popover: 0 1px 1px rgba(0, 0, 0, 0.03), 0 8px 24px -12px rgba(0, 0, 0, 0.18);
@@ -186,6 +205,25 @@
     --color-canvas-write-conflict: #e5484d;
     --color-canvas-write-success: #1f8f4d;
     --color-canvas-write-stale-bg: color-mix(in srgb, var(--color-amber-700) 12%, transparent);
+
+    /* World KB canvas — DESIGN.dark.md §World KB Canvas Tokens (V1.73) */
+    --color-canvas-worldkb-entity-card-fill-default: #1a1a1a;
+    --color-canvas-worldkb-entity-card-fill-hover: #2a2a2a;
+    --color-canvas-worldkb-entity-card-fill-selected: rgba(82, 168, 255, 0.14);
+    --color-canvas-worldkb-entity-card-stroke-default: rgba(255, 255, 255, 0.18);
+    --color-canvas-worldkb-entity-card-stroke-selected: #52a8ff;
+    --color-canvas-worldkb-promotion-pending: #fbbf24;
+    --color-canvas-worldkb-promotion-confirmed: #34d399;
+    --color-canvas-worldkb-promotion-rejected: #f87171;
+    --color-canvas-worldkb-promotion-merged: #a78bfa;
+    --color-canvas-worldkb-source-anchor-edge: #c4b5fd;
+    --color-canvas-worldkb-source-anchor-node: #2a2440;
+    --color-canvas-worldkb-computable-badge: #38bdf8;
+    --color-canvas-worldkb-conflict-marker: #f87171;
+    --color-canvas-worldkb-conflict-marker-fill: rgba(248, 113, 113, 0.12);
+    --color-canvas-worldkb-nonspatial-row-highlight: #1f1f1e;
+    --color-canvas-worldkb-focus-ring: #52a8ff;
+    --color-canvas-worldkb-relationship-edge: #64748b;
 
     /* Elevation */
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
