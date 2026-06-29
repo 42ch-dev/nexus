@@ -31,14 +31,21 @@ use axum::Json;
 use nexus_contracts::{
     PaginationInfo, WorldKbCandidateProjection, WorldKbCandidatesResponse, WorldKbEntityPatch,
     WorldKbEntityProjection, WorldKbExtractJobProjection, WorldKbGraphResponse,
-    WorldKbPatchEntityRequest, WorldKbPatchEntityResponse, WorldKbPromoteCandidateRequest,
-    WorldKbPromoteCandidateResponse, WorldKbSourceAnchorProjection,
+    WorldKbPatchEntityRequest, WorldKbPatchEntityResponse, WorldKbPatchRelationshipRequest,
+    WorldKbPatchRelationshipResponse, WorldKbPromoteCandidateRequest,
+    WorldKbPromoteCandidateResponse, WorldKbRelationshipInput, WorldKbRelationshipKind,
+    WorldKbRelationshipProjection, WorldKbSourceAnchorProjection,
 };
 use nexus_kb::key_block::{KeyBlock, KeyBlockBody};
 use nexus_kb::validation::{validate_body, validate_canonical_name, ValidationMode};
 use nexus_kb::KbStore;
 use nexus_local_db::kb_extract_job::{
     get_promotion, list_pending_for_world_after, mark_confirmed_in_tx_with_cas, KbExtractPromotion,
+};
+use nexus_local_db::kb_relationships::{
+    delete_relationship_in_tx, generate_relationship_id, get_relationship,
+    insert_relationship_in_tx, list_relationships_for_world, update_relationship_in_tx,
+    InsertRelationshipParams, KbRelationshipRow, UpdateRelationshipParams,
 };
 use nexus_local_db::kb_store::{self, cas_update_key_block_fields};
 use nexus_local_db::LocalDbError;
@@ -868,8 +875,32 @@ pub async fn get_graph(
     Ok(Json(WorldKbGraphResponse {
         entities,
         source_anchors,
-        relationships: Vec::new(),
+        relationships: project_relationships_for_world(state.pool(), &world_id).await?,
     }))
+}
+
+/// Read all relationships for the world and emit stored + derived symmetric-reverse
+/// projections.
+async fn project_relationships_for_world(
+    pool: &sqlx::SqlitePool,
+    world_id: &str,
+) -> Result<Vec<WorldKbRelationshipProjection>, NexusApiError> {
+    let rows = list_relationships_for_world(pool, world_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?;
+    let mut projections = Vec::with_capacity(rows.len() * 2);
+    for row in rows {
+        projections.push(project_relationship(&row, "stored"));
+        if row.symmetric != 0 {
+            let mut reverse = row.clone();
+            std::mem::swap(&mut reverse.source_entity_id, &mut reverse.target_entity_id);
+            projections.push(project_relationship(&reverse, "symmetric_reverse"));
+        }
+    }
+    Ok(projections)
 }
 
 #[derive(Debug, Deserialize)]
@@ -982,4 +1013,438 @@ pub async fn get_candidates(
             next_cursor,
         },
     }))
+}
+
+// ─── patch-relationship ─────────────────────────────────────────────────────
+
+/// `POST /v1/local/worlds/{world_id}/kb/patch-relationship` — add/update/remove a
+/// typed relationship between two World KB entities.
+pub async fn patch_relationship(
+    State(state): State<WorkspaceState>,
+    Path(world_id): Path<String>,
+    Json(req): Json<WorldKbPatchRelationshipRequest>,
+) -> Result<Json<WorldKbPatchRelationshipResponse>, NexusApiError> {
+    let creator_id = require_creator(&state)?;
+    let pool = state.pool();
+    require_world_owner(pool, &world_id, &creator_id).await?;
+
+    let now = chrono::Utc::now().to_rfc3339();
+
+    match req.action.as_str() {
+        "add" => patch_relationship_add(pool, &world_id, req.relationship, &now).await,
+        "update" => {
+            patch_relationship_update(
+                pool,
+                &world_id,
+                req.relationship_id.as_deref(),
+                req.expected_version,
+                req.relationship,
+                &now,
+            )
+            .await
+        }
+        "remove" => {
+            patch_relationship_remove(
+                pool,
+                &world_id,
+                req.relationship_id.as_deref(),
+                req.expected_version,
+            )
+            .await
+        }
+        other => Err(NexusApiError::InvalidInput {
+            field: "action".to_string(),
+            reason: format!("unknown action '{other}'; expected add, update, or remove"),
+        }),
+    }
+}
+
+async fn patch_relationship_add(
+    pool: &sqlx::SqlitePool,
+    world_id: &str,
+    input: Option<WorldKbRelationshipInput>,
+    now: &str,
+) -> Result<Json<WorldKbPatchRelationshipResponse>, NexusApiError> {
+    let input = input.ok_or_else(|| NexusApiError::InvalidInput {
+        field: "relationship".to_string(),
+        reason: "relationship payload is required for add".to_string(),
+    })?;
+    validate_relationship_input(&input)?;
+    require_entities_in_world(
+        pool,
+        world_id,
+        &input.source_entity_id,
+        &input.target_entity_id,
+    )
+    .await?;
+    require_valid_source_anchors(pool, world_id, input.source_anchor_ids.as_deref()).await?;
+
+    let relationship_id = generate_relationship_id();
+    let mut tx = pool.begin().await.map_err(NexusApiError::from)?;
+    insert_relationship_in_tx(
+        &mut tx,
+        &InsertRelationshipParams {
+            relationship_id: relationship_id.clone(),
+            world_id: world_id.to_string(),
+            source_entity_id: input.source_entity_id.clone(),
+            target_entity_id: input.target_entity_id.clone(),
+            relation_type: input.relation_type.as_str().to_string(),
+            custom_label: input.custom_label.clone(),
+            symmetric: input.symmetric,
+            confidence: input.confidence,
+            source_anchor_ids: input.source_anchor_ids.clone().unwrap_or_default(),
+            metadata: input.metadata.clone(),
+            created_at: now.to_string(),
+            updated_at: now.to_string(),
+        },
+    )
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: e.to_string(),
+    })?;
+    tx.commit().await.map_err(NexusApiError::from)?;
+
+    let row = get_relationship(pool, &relationship_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?;
+
+    Ok(Json(WorldKbPatchRelationshipResponse {
+        relationship: Some(project_relationship(&row, "stored")),
+        version: u64::try_from(row.revision).unwrap_or(0),
+        validation_summary: validation_summary(&[], &[]),
+    }))
+}
+
+async fn patch_relationship_update(
+    pool: &sqlx::SqlitePool,
+    world_id: &str,
+    relationship_id: Option<&str>,
+    expected_version: Option<u64>,
+    input: Option<WorldKbRelationshipInput>,
+    now: &str,
+) -> Result<Json<WorldKbPatchRelationshipResponse>, NexusApiError> {
+    let relationship_id = relationship_id.ok_or_else(|| NexusApiError::InvalidInput {
+        field: "relationship_id".to_string(),
+        reason: "relationship_id is required for update".to_string(),
+    })?;
+    let expected_version = expected_version.ok_or_else(|| NexusApiError::InvalidInput {
+        field: "expected_version".to_string(),
+        reason: "expected_version is required for update".to_string(),
+    })?;
+    let input = input.ok_or_else(|| NexusApiError::InvalidInput {
+        field: "relationship".to_string(),
+        reason: "relationship payload is required for update".to_string(),
+    })?;
+
+    validate_relationship_input(&input)?;
+    require_entities_in_world(
+        pool,
+        world_id,
+        &input.source_entity_id,
+        &input.target_entity_id,
+    )
+    .await?;
+    require_valid_source_anchors(pool, world_id, input.source_anchor_ids.as_deref()).await?;
+
+    // Scope check: the row must belong to this world.
+    let existing = get_relationship(pool, relationship_id)
+        .await
+        .map_err(|e| match e {
+            LocalDbError::Sqlx(sqlx::Error::RowNotFound) => {
+                NexusApiError::NotFound(format!("relationship {relationship_id}"))
+            }
+            other => NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: other.to_string(),
+            },
+        })?;
+    if existing.world_id != world_id {
+        return Err(NexusApiError::NotFound(format!(
+            "relationship {relationship_id} in world {world_id}"
+        )));
+    }
+
+    let mut tx = pool.begin().await.map_err(NexusApiError::from)?;
+    let new_version = update_relationship_in_tx(
+        &mut tx,
+        relationship_id,
+        &UpdateRelationshipParams {
+            relation_type: input.relation_type.as_str().to_string(),
+            custom_label: input.custom_label,
+            symmetric: input.symmetric,
+            confidence: input.confidence,
+            source_anchor_ids: input.source_anchor_ids.unwrap_or_default(),
+            metadata: input.metadata,
+            updated_at: now.to_string(),
+        },
+        i64::try_from(expected_version).unwrap_or(0),
+    )
+    .await
+    .map_err(|e| map_relationship_cas_err(e, relationship_id))?;
+    tx.commit().await.map_err(NexusApiError::from)?;
+
+    let row =
+        get_relationship(pool, relationship_id)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: e.to_string(),
+            })?;
+
+    Ok(Json(WorldKbPatchRelationshipResponse {
+        relationship: Some(project_relationship(&row, "stored")),
+        version: new_version,
+        validation_summary: validation_summary(&[], &[]),
+    }))
+}
+
+async fn patch_relationship_remove(
+    pool: &sqlx::SqlitePool,
+    world_id: &str,
+    relationship_id: Option<&str>,
+    expected_version: Option<u64>,
+) -> Result<Json<WorldKbPatchRelationshipResponse>, NexusApiError> {
+    let relationship_id = relationship_id.ok_or_else(|| NexusApiError::InvalidInput {
+        field: "relationship_id".to_string(),
+        reason: "relationship_id is required for remove".to_string(),
+    })?;
+    let expected_version = expected_version.ok_or_else(|| NexusApiError::InvalidInput {
+        field: "expected_version".to_string(),
+        reason: "expected_version is required for remove".to_string(),
+    })?;
+
+    // Scope check: the row must belong to this world.
+    let existing = get_relationship(pool, relationship_id)
+        .await
+        .map_err(|e| match e {
+            LocalDbError::Sqlx(sqlx::Error::RowNotFound) => {
+                NexusApiError::NotFound(format!("relationship {relationship_id}"))
+            }
+            other => NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: other.to_string(),
+            },
+        })?;
+    if existing.world_id != world_id {
+        return Err(NexusApiError::NotFound(format!(
+            "relationship {relationship_id} in world {world_id}"
+        )));
+    }
+
+    let mut tx = pool.begin().await.map_err(NexusApiError::from)?;
+    delete_relationship_in_tx(
+        &mut tx,
+        relationship_id,
+        i64::try_from(expected_version).unwrap_or(0),
+    )
+    .await
+    .map_err(|e| map_relationship_cas_err(e, relationship_id))?;
+    tx.commit().await.map_err(NexusApiError::from)?;
+
+    Ok(Json(WorldKbPatchRelationshipResponse {
+        relationship: None,
+        version: expected_version,
+        validation_summary: validation_summary(&[], &[]),
+    }))
+}
+
+/// Domain validation for a relationship payload.
+fn validate_relationship_input(input: &WorldKbRelationshipInput) -> Result<(), NexusApiError> {
+    if input.source_entity_id == input.target_entity_id {
+        return Err(NexusApiError::world_kb_validation_failed(
+            &["source_entity_id and target_entity_id must be different".to_string()],
+            &[],
+        ));
+    }
+    if input.relation_type == WorldKbRelationshipKind::Custom && input.custom_label.is_none() {
+        return Err(NexusApiError::world_kb_validation_failed(
+            &["custom relation_type requires custom_label".to_string()],
+            &[],
+        ));
+    }
+    if let Some(confidence) = input.confidence {
+        if !(0.0..=1.0).contains(&confidence) {
+            return Err(NexusApiError::world_kb_validation_failed(
+                &["confidence must be between 0.0 and 1.0".to_string()],
+                &[],
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Verify both endpoint entities exist in the world and are not deleted.
+async fn require_entities_in_world(
+    pool: &sqlx::SqlitePool,
+    world_id: &str,
+    source_id: &str,
+    target_id: &str,
+) -> Result<(), NexusApiError> {
+    // SAFETY: compile-time checked query against kb_key_blocks.
+    let rows: Vec<(String, String)> = sqlx::query_as(
+        "SELECT key_block_id, status FROM kb_key_blocks \
+         WHERE world_id = ? AND key_block_id IN (?, ?)",
+    )
+    .bind(world_id)
+    .bind(source_id)
+    .bind(target_id)
+    .fetch_all(pool)
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: e.to_string(),
+    })?;
+
+    let mut missing = Vec::new();
+    let mut deleted = Vec::new();
+    for id in [source_id, target_id] {
+        match rows.iter().find(|(k, _)| k == id) {
+            None => missing.push(id.to_string()),
+            Some((_, status)) if status == "deleted" => deleted.push(id.to_string()),
+            Some(_) => {}
+        }
+    }
+
+    if !missing.is_empty() {
+        return Err(NexusApiError::world_kb_validation_failed(
+            &[format!(
+                "entities not found in world {world_id}: {}",
+                missing.join(", ")
+            )],
+            &[],
+        ));
+    }
+    if !deleted.is_empty() {
+        return Err(NexusApiError::world_kb_validation_failed(
+            &[format!(
+                "cannot relate deleted entities: {}",
+                deleted.join(", ")
+            )],
+            &[],
+        ));
+    }
+    Ok(())
+}
+
+/// Row shape for source-anchor validation lookups.
+#[derive(sqlx::FromRow)]
+struct AnchorValidationRow {
+    key_block_id: String,
+    source_work_id: Option<String>,
+}
+
+/// Verify every source-anchor projection id references a `KeyBlock` in the world
+/// that actually has provenance (`source_work_id IS NOT NULL`). Anchor ids use
+/// the V1.73 graph projection format `sa_<key_block_id>`.
+async fn require_valid_source_anchors(
+    pool: &sqlx::SqlitePool,
+    world_id: &str,
+    anchor_ids: Option<&[String]>,
+) -> Result<(), NexusApiError> {
+    let ids = anchor_ids.unwrap_or_default();
+    if ids.is_empty() {
+        return Ok(());
+    }
+
+    let mut key_block_ids = Vec::with_capacity(ids.len());
+    for id in ids {
+        let Some(kb_id) = id.strip_prefix("sa_") else {
+            return Err(NexusApiError::world_kb_validation_failed(
+                &[format!(
+                    "source_anchor_id '{id}' is not a valid anchor projection id"
+                )],
+                &[],
+            ));
+        };
+        key_block_ids.push(kb_id.to_string());
+    }
+
+    // SAFETY: runtime query with a dynamic JSON array binding. The SQL is
+    // otherwise static; compile-time macros cannot bind a variable-length list.
+    let rows: Vec<AnchorValidationRow> = sqlx::query_as(
+        "SELECT key_block_id, source_work_id FROM kb_key_blocks \
+         WHERE world_id = ? AND key_block_id IN (SELECT value FROM json_each(?))",
+    )
+    .bind(world_id)
+    .bind(serde_json::to_string(&key_block_ids).unwrap_or_default())
+    .fetch_all(pool)
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: e.to_string(),
+    })?;
+
+    let mut errors = Vec::new();
+    for id in ids {
+        let kb_id = id.strip_prefix("sa_").unwrap_or(id);
+        match rows.iter().find(|r| r.key_block_id == kb_id) {
+            None => errors.push(format!(
+                "source anchor '{id}' does not reference an entity in this world"
+            )),
+            Some(row) if row.source_work_id.is_none() => errors.push(format!(
+                "source anchor '{id}' references an entity without provenance"
+            )),
+            Some(_) => {}
+        }
+    }
+
+    if !errors.is_empty() {
+        return Err(NexusApiError::world_kb_validation_failed(&errors, &[]));
+    }
+    Ok(())
+}
+
+/// Map a relationship CAS miss to a 409 `WorldKbConflict`; other DB errors to 500.
+fn map_relationship_cas_err(e: LocalDbError, relationship_id: &str) -> NexusApiError {
+    match e {
+        LocalDbError::VersionMismatch { actual, .. } => NexusApiError::world_kb_conflict(
+            actual.unwrap_or(0).max(0).cast_unsigned(),
+            relationship_id,
+            "version",
+            "refetch the World KB graph and reapply",
+        ),
+        LocalDbError::Sqlx(sqlx::Error::RowNotFound) => {
+            NexusApiError::NotFound(format!("relationship {relationship_id}"))
+        }
+        other => NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: other.to_string(),
+        },
+    }
+}
+
+/// Build a wire projection from a stored relationship row.
+fn project_relationship(row: &KbRelationshipRow, direction: &str) -> WorldKbRelationshipProjection {
+    let source_anchor_ids = row
+        .source_anchor_ids
+        .as_deref()
+        .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok())
+        .unwrap_or_default();
+    let metadata = row
+        .metadata
+        .as_deref()
+        .and_then(|s| serde_json::from_str::<serde_json::Value>(s).ok());
+
+    WorldKbRelationshipProjection {
+        relationship_id: row.relationship_id.clone(),
+        world_id: row.world_id.clone(),
+        source_entity_id: row.source_entity_id.clone(),
+        target_entity_id: row.target_entity_id.clone(),
+        relation_type: row
+            .relation_type
+            .parse()
+            .unwrap_or(WorldKbRelationshipKind::Custom),
+        custom_label: row.custom_label.clone(),
+        symmetric: row.symmetric != 0,
+        confidence: row.confidence,
+        source_anchor_ids,
+        metadata,
+        version: u64::try_from(row.revision).unwrap_or(0),
+        updated_at: row.updated_at.clone(),
+        projection_direction: direction.to_string(),
+    }
 }

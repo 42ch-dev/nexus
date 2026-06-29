@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/canvas/world-kb/world-kb-patch-relationship-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus PatchWorldKbRelationshipRequest",
+  "description": "Request body for POST /v1/local/worlds/{world_id}/kb/patch-relationship (V1.74). Action-discriminated add/update/remove for typed World KB relationships with per-row OCC on kb_relationships.revision.",
+  "type": "object",
+  "required": ["action"],
+  "properties": {
+    "relationship_id": { "type": "string", "description": "Storage row id; required for update and remove, omitted for add." },
+    "action": { "type": "string", "enum": ["add", "update", "remove"], "description": "Discriminator: add creates a new row; update mutates an existing row; remove deletes it." },
+    "expected_version": { "type": "integer", "minimum": 0, "description": "Per-row version observed by the client; required for update/remove, omitted or 0 for add." },
+    "relationship": { "$ref": "world-kb-relationship-input.schema.json", "description": "Payload required for add and update; omitted for remove." }
+  },
+  "additionalProperties": false
+}

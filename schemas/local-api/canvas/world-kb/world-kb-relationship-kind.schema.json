@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/canvas/world-kb/world-kb-relationship-kind.schema.json",
+  "schema_version": 1,
+  "title": "Nexus WorldKbRelationshipKind",
+  "description": "Core taxonomy values for World KB typed relationships (V1.74). Use `custom` with a non-empty `custom_label` for out-of-enum narrative relationships.",
+  "type": "string",
+  "enum": [
+    "allied_with",
+    "opposes",
+    "parent_of",
+    "child_of",
+    "member_of",
+    "located_in",
+    "rules_over",
+    "references",
+    "serves",
+    "rival_of",
+    "mentor_of",
+    "custom"
+  ],
+  "additionalProperties": false
+}

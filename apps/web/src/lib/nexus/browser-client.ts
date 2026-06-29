@@ -60,6 +60,8 @@ import type {
   WorldKbGraphResponse,
   WorldKbPatchEntityRequest,
   WorldKbPatchEntityResponse,
+  WorldKbPatchRelationshipRequest,
+  WorldKbPatchRelationshipResponse,
   WorldKbPromoteCandidateRequest,
   WorldKbPromoteCandidateResponse,
   WorkDetailResponse,
@@ -364,6 +366,15 @@ export class BrowserClient implements NexusClient {
   ): Promise<WorldKbPromoteCandidateResponse> {
     return this.post<WorldKbPromoteCandidateResponse>(
       `/v1/local/worlds/${encodeURIComponent(worldId)}/kb/promote-candidate`,
+      request,
+    );
+  }
+  worldKbPatchRelationship(
+    worldId: string,
+    request: WorldKbPatchRelationshipRequest,
+  ): Promise<WorldKbPatchRelationshipResponse> {
+    return this.post<WorldKbPatchRelationshipResponse>(
+      `/v1/local/worlds/${encodeURIComponent(worldId)}/kb/patch-relationship`,
       request,
     );
   }
