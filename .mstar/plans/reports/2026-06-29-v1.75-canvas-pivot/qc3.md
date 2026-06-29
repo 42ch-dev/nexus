@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-06-29-v1.75-canvas-pivot"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-29"
 ---
 # Code Review Report
@@ -84,10 +84,46 @@ generated_at: "2026-06-29"
 - `SQLX_OFFLINE=true cargo test -p nexus-contracts --test schema_drift_detection` — PASS: 4 passed.
 
 ## Summary
+Current unresolved counts after targeted revalidation (original F-QC3-001 is preserved above and marked resolved in `## Revalidation`).
+
 | Severity | Count |
 |----------|-------|
 | 🔴 Critical | 0 |
-| 🟡 Warning | 1 |
+| 🟡 Warning | 0 |
 | 🟢 Suggestion | 1 |
 
-**Verdict**: Request Changes
+**Verdict**: Approve
+
+## Revalidation
+
+- Revalidation timestamp: 2026-06-29T15:54:00Z
+- Fix-wave commit reviewed: `a8f0a36e81f61ac90b4e4085dec3d1784f3d23d1` (`fix(v1.75): qc1 spec doc drift (removed PUT prose) + qc3 chapter preselect`)
+- Updated Review range / Diff basis: `6e6b42c6..a8f0a36e` (origin/main merge-base..iteration/v1.75 HEAD after fix-wave)
+- Working branch verified: `iteration/v1.75`
+- Review cwd verified: `/Users/bibi/workspace/organizations/42ch/nexus`
+
+### F-QC3-001 status
+
+Resolved. `OutlinePage` now reads `?chapter=N` with `useSearchParams`, validates positive finite numeric values, and passes `initialSelectedChapterId` into `OutlineCanvas`. `OutlineCanvas` seeds `selectedChapterId` from that prop on mount, so the selected chapter is resolved through `chapterById` and the `ChapterInspector` opens preselected. Because the prop is used only as the `useState` initializer, later user clicks through `onSelectChapter={setSelectedChapterId}` override normally and are not re-clobbered by the query param.
+
+Evidence reviewed:
+- `apps/web/src/pages/outline-page.tsx:17-31` parses `chapter` and passes `initialSelectedChapterId`.
+- `apps/web/src/components/canvas/outline-canvas.tsx:34-55` accepts the prop and seeds `selectedChapterId`.
+- `apps/web/src/components/canvas/outline-canvas.tsx:191-226` passes current selection to `OutlineStructurePanel` and `ChapterInspector`, preserving normal user-driven selection updates.
+
+### Test coverage
+
+Resolved coverage gap. `apps/web/src/pages/outline-page.test.tsx` adds three focused route tests:
+- `?chapter=2` preselects chapter 2 and opens `Chapter Inspector` with `#2` in the inspector copy.
+- No `chapter` param leaves the inspector empty.
+- `?chapter=0` is ignored and leaves the inspector empty.
+
+### Revalidation commands
+
+- `pnpm --filter web typecheck` — PASS.
+- `pnpm --filter web test -- --run` — PASS: 35 files, 238 tests passed, including the 3 new outline-page preselection tests. Non-fatal test stderr remains limited to existing React Router future warnings / act warnings plus an MSW unhandled GET warning from the preselection test's mounted content editor; the suite passes and the inspector preselection assertion is covered.
+- `pnpm --filter web build` — PASS. The existing Vite chunk-size warning remains and is covered by non-blocking `S-QC3-001` for PM residual tracking.
+
+### Updated verdict
+
+No unresolved Critical or Warning findings remain for qc3. `S-QC3-001` remains non-blocking. **Verdict: Approve**.
