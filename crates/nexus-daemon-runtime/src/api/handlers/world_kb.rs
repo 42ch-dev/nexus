@@ -825,9 +825,16 @@ fn map_kb_store_err(e: &nexus_kb::store::KbStoreError, job_id: &str) -> NexusApi
 // ─── read endpoints ─────────────────────────────────────────────────────────
 
 /// `GET /v1/local/worlds/{world_id}/kb/graph` — entity graph projection.
+///
+/// V1.76: defaults to excluding `needs_review = 1` (extraction-suggested)
+/// relationships from the graph. Pass `?include_suggested=true` to surface
+/// them (rendered as dashed edges by the client). Existing data is unaffected
+/// — all rows default to `needs_review = 0` (migration
+/// `202606300001_kb_relationships_needs_review.sql`).
 pub async fn get_graph(
     State(state): State<WorkspaceState>,
     Path(world_id): Path<String>,
+    Query(query): Query<GraphQuery>,
 ) -> Result<Json<WorldKbGraphResponse>, NexusApiError> {
     let creator_id = require_creator(&state)?;
     require_world_owner(state.pool(), &world_id, &creator_id).await?;
@@ -881,15 +888,34 @@ pub async fn get_graph(
     Ok(Json(WorldKbGraphResponse {
         entities,
         source_anchors,
-        relationships: project_relationships_for_world(state.pool(), &world_id).await?,
+        relationships: project_relationships_for_world(
+            state.pool(),
+            &world_id,
+            query.include_suggested.unwrap_or(false),
+        )
+        .await?,
     }))
+}
+
+/// Query params for the graph endpoint (V1.76).
+#[derive(Debug, Deserialize)]
+pub struct GraphQuery {
+    /// When `true`, include `needs_review = 1` (extraction-suggested)
+    /// relationships in the graph projection. Defaults to `false` so the
+    /// confirmed graph is not flooded by co-occurrence suggestions.
+    pub include_suggested: Option<bool>,
 }
 
 /// Read all relationships for the world and emit stored + derived symmetric-reverse
 /// projections.
+///
+/// V1.76: when `include_suggested` is `false` (the default), `needs_review = 1`
+/// rows are filtered out before projection so the confirmed graph excludes
+/// extraction suggestions. Symmetric-reverse derivation is unchanged.
 async fn project_relationships_for_world(
     pool: &sqlx::SqlitePool,
     world_id: &str,
+    include_suggested: bool,
 ) -> Result<Vec<WorldKbRelationshipProjection>, NexusApiError> {
     let rows = list_relationships_for_world(pool, world_id)
         .await
@@ -899,6 +925,10 @@ async fn project_relationships_for_world(
         })?;
     let mut projections = Vec::with_capacity(rows.len() * 2);
     for row in rows {
+        // V1.76 needs_review gate: hide suggestions unless opted in.
+        if !include_suggested && row.needs_review != 0 {
+            continue;
+        }
         projections.push(project_relationship(&row, "stored"));
         if row.symmetric != 0 {
             let mut reverse = row.clone();
@@ -1102,6 +1132,11 @@ async fn patch_relationship_add(
             metadata: input.metadata.clone(),
             created_at: now.to_string(),
             updated_at: now.to_string(),
+            // V1.76: author adds default to confirmed (needs_review = the
+            // input's value or false); source is always manual for author
+            // creates (extraction goes through the upsert path, not here).
+            needs_review: input.needs_review.unwrap_or(false),
+            source: nexus_local_db::kb_relationships::SOURCE_MANUAL.to_string(),
         },
     )
     .await
@@ -1183,6 +1218,12 @@ async fn patch_relationship_update(
             source_anchor_ids: input.source_anchor_ids.unwrap_or_default(),
             metadata: input.metadata,
             updated_at: now.to_string(),
+            // V1.76: promotion clears the needs_review gate. When the input
+            // omits needs_review, preserve the existing flag so a routine
+            // relation_type/symmetric edit does not silently confirm a
+            // suggestion (the client must explicitly set needs_review=false to
+            // promote).
+            needs_review: input.needs_review.unwrap_or(existing.needs_review != 0),
         },
         i64::try_from(expected_version).unwrap_or(0),
         &existing,
@@ -1449,6 +1490,8 @@ fn project_relationship(row: &KbRelationshipRow, direction: &str) -> WorldKbRela
         confidence: row.confidence,
         source_anchor_ids,
         metadata,
+        needs_review: row.needs_review != 0,
+        source: row.source.clone(),
         version: u64::try_from(row.revision).unwrap_or(0),
         updated_at: row.updated_at.clone(),
         projection_direction: direction.to_string(),

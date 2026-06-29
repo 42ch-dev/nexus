@@ -3,12 +3,12 @@
 //! Exercises `patch_relationship` (add/update/remove) and the `get_graph`
 //! projection directly against a canonical daemon `WorkspaceState`.
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::Json;
 use nexus_contracts::{
     WorldKbPatchRelationshipRequest, WorldKbRelationshipInput, WorldKbRelationshipKind,
 };
-use nexus_daemon_runtime::api::handlers::world_kb::{get_graph, patch_relationship};
+use nexus_daemon_runtime::api::handlers::world_kb::{get_graph, patch_relationship, GraphQuery};
 use nexus_daemon_runtime::workspace::WorkspaceState;
 
 async fn seed_key_block(
@@ -108,6 +108,7 @@ fn add_request(
             confidence: None,
             source_anchor_ids: None,
             metadata: None,
+            needs_review: None,
         }),
     }
 }
@@ -198,6 +199,7 @@ async fn update_relationship_returns_bumped_version_and_projected_row() {
             confidence: Some(0.75),
             source_anchor_ids: None,
             metadata: None,
+            needs_review: None,
         }),
     };
     let Json(resp) = patch_relationship(
@@ -419,6 +421,7 @@ async fn update_stale_version_returns_409() {
             confidence: None,
             source_anchor_ids: None,
             metadata: None,
+            needs_review: None,
         }),
     };
     let err = patch_relationship(
@@ -466,9 +469,15 @@ async fn get_graph_includes_symmetric_reverse_projection() {
     .await
     .unwrap();
 
-    let Json(graph) = get_graph(State(state.clone()), Path("wld_test_world".to_string()))
-        .await
-        .expect("graph should succeed");
+    let Json(graph) = get_graph(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Query(GraphQuery {
+            include_suggested: None,
+        }),
+    )
+    .await
+    .expect("graph should succeed");
     assert_eq!(
         graph.relationships.len(),
         2,
@@ -716,6 +725,7 @@ async fn update_cross_world_relationship_returns_403() {
             confidence: None,
             source_anchor_ids: None,
             metadata: None,
+            needs_review: None,
         }),
     };
     let err = patch_relationship(

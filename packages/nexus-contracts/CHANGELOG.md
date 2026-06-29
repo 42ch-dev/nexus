@@ -5,6 +5,17 @@ All notable changes to the `@42ch/nexus-contracts` package will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-06-30
+
+### Added
+
+- `WorldKbRelationshipProjection` gains `needs_review` (boolean) and `source` (`manual` | `extraction`) for the V1.76 extraction-suggestion gate + provenance.
+- `WorldKbRelationshipInput` gains optional `needs_review` so the existing patch-relationship route can promote a suggestion (clear the gate) without a second promotion state machine.
+
+### Changed
+
+- `GET /v1/local/worlds/{world_id}/kb/graph` now defaults to excluding `needs_review = 1` relationships (suggestions). Pass `?include_suggested=true` to surface them. Existing data is unaffected (all rows default to `needs_review = 0`).
+
 ## [0.4.0] - 2026-04-18
 
 ### Changed
