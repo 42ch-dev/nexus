@@ -76,6 +76,7 @@ function renderEditor(disabled = false) {
       disabled={disabled}
       onPatchChapter={vi.fn()}
       patchIsPending={false}
+      isConflicting={false}
       contentVersion={0}
     />,
   );

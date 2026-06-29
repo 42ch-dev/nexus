@@ -99,10 +99,6 @@ export function OutlineCanvas({ workId, initialSelectedChapterId = null }: Outli
       { chapter, request },
       {
         onError: (error) => captureConflictState(error, state),
-        onSuccess: () => {
-          // Content/metadata patch committed; bump so the editor clears dirty.
-          setContentVersion((v) => v + 1);
-        },
       },
     );
   }
@@ -116,9 +112,14 @@ export function OutlineCanvas({ workId, initialSelectedChapterId = null }: Outli
     });
   }
 
-  function onUseCurrent() {
+  async function onUseCurrent() {
     setConflict(null);
-    void outline.refetch();
+    await outline.refetch();
+    // Force the content editor to discard its draft and reload the canonical
+    // content. contentVersion is no longer bumped on ordinary patches, so this
+    // bump is a reliable forced-reset signal that overrides the editor's
+    // dirty/saving guard.
+    setContentVersion((v) => v + 1);
   }
 
   function onDismiss() {
@@ -222,6 +223,7 @@ export function OutlineCanvas({ workId, initialSelectedChapterId = null }: Outli
               })
             }
             patchIsPending={patchChapter.isPending}
+            isConflicting={conflict !== null}
             contentVersion={contentVersion}
           />
 
