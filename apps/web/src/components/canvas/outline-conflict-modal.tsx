@@ -20,6 +20,7 @@ export type OutlineChangedField =
   | 'chapter_status'
   | 'chapter_planned_word_count'
   | 'chapter_actual_word_count'
+  | 'chapter_outline_content'
   | 'move_chapter'
   | 'attach_to_volume'
   | 'link_event'
@@ -35,6 +36,7 @@ const FIELD_LABELS: Record<OutlineChangedField, string> = {
   chapter_status: 'Chapter status',
   chapter_planned_word_count: 'Planned word count',
   chapter_actual_word_count: 'Actual word count',
+  chapter_outline_content: 'Chapter outline content',
   move_chapter: 'Move chapter',
   attach_to_volume: 'Attach chapter to volume',
   link_event: 'Link event to chapter',
