@@ -10,7 +10,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 import { WorldKbAltView } from '../world-kb-alt-view';
-import type { WorldKbNodeData } from '../types';
+import { worldKbNodeId, type WorldKbNodeData } from '../types';
 
 function node(overrides: Partial<WorldKbNodeData>): WorldKbNodeData {
   return {
@@ -75,5 +75,55 @@ describe('WorldKbAltView', () => {
     render(<WorldKbAltView nodes={nodes} selectedId={null} onSelect={vi.fn()} />);
     const nameHeader = screen.getByRole('button', { name: /^Name/i }).closest('th');
     expect(nameHeader?.getAttribute('aria-sort')).toBe('ascending');
+  });
+
+  // Regression for V1.73 greploop issue 1: the selectedId produced by the
+  // canvas MUST be in the prefixed format the alt-view rows are keyed by
+  // (`entity:<id>` / `candidate:<id>`), otherwise the selected row never gets
+  // the highlight class. The shared `worldKbNodeId` helper is the single source
+  // of that format.
+  it('highlights the row whose id matches selectedId (prefixed format)', () => {
+    const aria = nodes.find((n) => n.name === 'Aria')!;
+    render(
+      <WorldKbAltView
+        nodes={nodes}
+        selectedId={worldKbNodeId(aria)}
+        onSelect={vi.fn()}
+      />,
+    );
+    const ariaRow = screen.getByText('Aria').closest('tr')!;
+    expect(ariaRow.getAttribute('aria-selected')).toBe('true');
+    // Other rows must NOT be selected.
+    const betaRow = screen.getByText('Beta').closest('tr')!;
+    expect(betaRow.getAttribute('aria-selected')).toBe('false');
+  });
+
+  it('does not highlight any row when selectedId is a raw (un-prefixed) id', () => {
+    // A raw id — the pre-fix canvas shape — must NOT match any prefixed row.
+    render(
+      <WorldKbAltView
+        nodes={nodes}
+        selectedId={'a' /* raw keyBlockId, no `entity:` prefix */}
+        onSelect={vi.fn()}
+      />,
+    );
+    const ariaRow = screen.getByText('Aria').closest('tr')!;
+    expect(ariaRow.getAttribute('aria-selected')).toBe('false');
+  });
+});
+
+describe('worldKbNodeId (selection id format contract)', () => {
+  it('prefixes entity ids with `entity:`', () => {
+    expect(worldKbNodeId(node({ keyBlockId: 'kb_1' }))).toBe('entity:kb_1');
+  });
+
+  it('prefixes candidate ids with `candidate:`', () => {
+    expect(worldKbNodeId(node({ candidateId: 'cand_1' }))).toBe('candidate:cand_1');
+  });
+
+  it('disambiguates an entity and a candidate that share the same raw id', () => {
+    const entity = worldKbNodeId(node({ keyBlockId: 'shared' }));
+    const candidate = worldKbNodeId(node({ candidateId: 'shared' }));
+    expect(entity).not.toBe(candidate);
   });
 });

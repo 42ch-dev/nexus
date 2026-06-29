@@ -42,12 +42,12 @@ import {
   isWorldKbConflictError,
 } from '@/lib/canvas/use-world-kb-data';
 import { useReducedMotionPreference } from './use-view-preference';
+import { worldKbNodeId, type WorldKbNodeData } from './types';
 import type { Node } from '@xyflow/react';
 import type {
   WorldKbCandidateProjection,
   WorldKbEntityProjection,
 } from '@42ch/nexus-contracts';
-import type { WorldKbNodeData } from './types';
 
 export interface WorldKbCanvasProps {
   worldId: string;
@@ -211,7 +211,7 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
         <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
           <WorldKbAltView
             nodes={nodesToData(nodes)}
-            selectedId={selection ? selection.node.keyBlockId ?? selection.node.candidateId ?? null : null}
+            selectedId={selection ? worldKbNodeId(selection.node) : null}
             onSelect={(n) => onSelectNode(n)}
           />
           <InspectorPanel

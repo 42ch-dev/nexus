@@ -16,7 +16,7 @@
  */
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 
-import { BLOCK_TYPE_LABELS, type EntityLifecycle, type WorldKbNodeData } from './types';
+import { BLOCK_TYPE_LABELS, worldKbNodeId, type EntityLifecycle, type WorldKbNodeData } from './types';
 
 type SortKey = 'name' | 'blockType' | 'lifecycle' | 'anchors' | 'updated';
 type SortDir = 'asc' | 'desc';
@@ -142,7 +142,7 @@ export function WorldKbAltView({ nodes, selectedId, onSelect }: WorldKbAltViewPr
                   </tr>
                 ) : null}
                 {visible.map((node) => {
-                  const id = nodeId(node);
+                  const id = worldKbNodeId(node);
                   const selected = id === selectedId;
                   return (
                     <tr
@@ -192,10 +192,6 @@ export function WorldKbAltView({ nodes, selectedId, onSelect }: WorldKbAltViewPr
       </p>
     </section>
   );
-}
-
-function nodeId(node: WorldKbNodeData): string {
-  return node.candidateId ? `candidate:${node.candidateId}` : `entity:${node.keyBlockId}`;
 }
 
 function compare(a: WorldKbNodeData, b: WorldKbNodeData, key: SortKey): number {
