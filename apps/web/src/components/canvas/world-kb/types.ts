@@ -121,6 +121,20 @@ export function isComputableBlock(kind: BlockType): boolean {
   return kind === 'beat' || kind === 'act' || kind === 'economy_tier';
 }
 
+/**
+ * Stable row/node id for a World KB node, prefixed by kind so entity and
+ * candidate ids can never collide (`entity:<keyBlockId>` vs
+ * `candidate:<candidateId>`).
+ *
+ * This is the SINGLE source of the prefixed format — both the alt-view row
+ * keys and the canvas `selectedId` prop MUST be produced by this helper so the
+ * selection-highlight contract holds. Hand-rolling the format in either place
+ * caused V1.73 greploop issue 1 (raw id vs prefixed id → no highlight).
+ */
+export function worldKbNodeId(node: WorldKbNodeData): string {
+  return node.candidateId ? `candidate:${node.candidateId}` : `entity:${node.keyBlockId}`;
+}
+
 export type {
   WorldKbCandidateProjection,
   WorldKbEntityProjection,
