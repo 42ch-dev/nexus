@@ -1,6 +1,6 @@
 # World KB Runtime Architecture
 
-**Status**: Normative — V1.51 Shipped (§5.5 LLM pathway + §6 OCC extension)  
+**Status**: Normative — V1.74 Shipped (§2 `kb_relationships` store + symmetric read projection; prior V1.51 §5.5 LLM pathway + §6 OCC extension)
 **Authority**: Implementation SSOT below normative specs. Does not override [entity-scope-model.md](specs/entity-scope-model.md) or [novel-writing/workflow-profile.md](specs/novel-writing/workflow-profile.md).  
 **Iteration**: [v1.40-novel-world-kb-delivery-compass-v1.md](../iterations/v1.40-novel-world-kb-delivery-compass-v1.md)
 
@@ -24,6 +24,8 @@ World KB concerns were split across `nexus-kb`, `nexus-moment-context-assembly`,
 | **Persistence mechanics** | `nexus-local-db` | SQLite migrations, `kb_extract_jobs`, `kb_key_blocks` tables |
 
 Platform integration reads World KB through `assemble_moment` / moment-context-assembly contracts, not through orchestration presets.
+
+V1.74 adds `kb_relationships` as the first-class relationship store under the World KB graph. Source/target entities FK to `kb_key_blocks`; source anchors remain optional JSON projection ids validated by the daemon. `GET graph` reads stored rows and emits derived reverse projections for `symmetric=true` without writing duplicate rows.
 
 ---
 

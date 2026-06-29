@@ -2,7 +2,7 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — V1.73 amendment (§7 World KB canvas structured patch/read routes extending the V1.71/V1.72 patch-route convention; additive World KB DTOs; per-row OCC with `expected_version`/`version`). Prior: V1.72 amendment (§7 outline/timeline structured patch routes extending the V1.71 patch-route convention; additive outline DTOs; `@42ch/nexus-contracts` 0.7.0 → 0.8.0 by default), V1.71 amendment (§7 structured patch-route convention for canvas-like surfaces; Strategy β patch routes; `@42ch/nexus-contracts` 0.6.0 → 0.7.0 by default), V1.67 amendment (§3.2 casing ratification + §4 `items` enforcement + §5 sort-param contract; `@42ch/nexus-contracts` 0.5.0 → 0.6.0), V1.64 cursor/error/`items` conventions + V1.65 chapter-content file-backed route rules. |
+| **Status** | Normative — V1.74 amendment (§7.6 World KB relationship patch route extending the V1.73 World KB route pattern; additive relationship DTOs; per-row OCC with `expected_version`/`version` against `kb_relationships.revision`). Prior: V1.73 amendment (§7 World KB canvas structured patch/read routes extending the V1.71/V1.72 patch-route convention; additive World KB DTOs; per-row OCC with `expected_version`/`version`), V1.72 amendment (§7 outline/timeline structured patch routes extending the V1.71 patch-route convention; additive outline DTOs; `@42ch/nexus-contracts` 0.7.0 → 0.8.0 by default), V1.71 amendment (§7 structured patch-route convention for canvas-like surfaces; Strategy β patch routes; `@42ch/nexus-contracts` 0.6.0 → 0.7.0 by default), V1.67 amendment (§3.2 casing ratification + §4 `items` enforcement + §5 sort-param contract; `@42ch/nexus-contracts` 0.5.0 → 0.6.0), V1.64 cursor/error/`items` conventions + V1.65 chapter-content file-backed route rules. |
 | **Document class** | Master |
 | **Scope** | Cross-resource Local API response/query conventions for schemas under `schemas/local-api/` and handlers under `nexus-daemon-runtime` |
 | **Coordinates with** | [schemas-directory-layout.md](./schemas-directory-layout.md), [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md), [daemon-runtime.md](./daemon-runtime.md) |
@@ -414,6 +414,37 @@ Conflict and validation errors:
 | `422` | `WorldKbValidationError` | Returned for domain-rule failures such as invalid promotion action/target, invalid merge target, invalid entity patch, or entity-scope lifecycle violations. Details carry `validation_summary.errors[]` / `warnings[]`. |
 
 V1.73 graph reads expose source-anchor provenance edges and reserve `relationships` as an empty array until the V1.74 relationship surface. Relationship editing must not be tunneled through `patch-entity` or `promote-candidate` blobs.
+
+### 7.6 World KB relationship patch route (V1.74)
+
+V1.74 extends the World KB canvas β routes with a first-class relationship patch route and with populated relationship projections on the existing graph read.
+
+| Use | Route | Request DTO | Response DTO |
+| --- | --- | --- | --- |
+| Patch a World KB relationship row | `POST /v1/local/worlds/{world_id}/kb/patch-relationship` | `WorldKbPatchRelationshipRequest` | `WorldKbPatchRelationshipResponse` |
+| Read World KB graph projection | `GET /v1/local/worlds/{world_id}/kb/graph` | — | `WorldKbGraphResponse` with `relationships: WorldKbRelationshipProjection[]` |
+
+DTO naming follows the generated filename convention from `schemas/local-api/canvas/world-kb/world-kb-*.schema.json`: generated public symbols use the `WorldKb...` entity-prefix form (`WorldKbPatchRelationshipRequest`, `WorldKbPatchRelationshipResponse`, `WorldKbRelationshipInput`, `WorldKbRelationshipProjection`, `WorldKbRelationshipKind`). Schema `title` text may use a verb-prefix phrase for human readability, but public generated symbols are filename-derived.
+
+Relationship request semantics:
+
+| Field / rule | Requirement |
+| --- | --- |
+| Path-authoritative `world_id` | The path segment is authoritative for World ownership and workspace scoping. Request bodies MUST NOT override it; source, target, and anchors must resolve within this World. |
+| `action` | Required discriminator: `add`, `update`, or `remove`. |
+| `relationship_id` | Server-assigned for `add`; required for `update` and `remove`. |
+| `expected_version` | Required for `update` and `remove`; omitted or `0` for `add`. It is the row version observed on the last canonical read and compares against `kb_relationships.revision`. |
+| Response `version` | Mutating success responses return the committed row version after persistence. Clients MUST update from the response or refetch before issuing another patch. |
+| `relationship` payload | Required for `add` and `update`, omitted for `remove`. Contains `source_entity_id`, `target_entity_id`, `relation_type`, optional `custom_label`, `symmetric`, optional `confidence`, optional `source_anchor_ids`, and optional `metadata`. |
+
+Conflict and validation errors:
+
+| HTTP status | DTO | Rule |
+| --- | --- | --- |
+| `409` | `WorldKbConflictError` | Returned before mutation when `expected_version` is stale. Details include `current_version`, `relationship_id`, `conflicting_path`, and `recovery_hint`. |
+| `422` | `WorldKbValidationError` | Returned for domain-rule failures such as self-loop, invalid relation type/custom label, cross-World source/target, invalid source anchor ids, out-of-range confidence, or missing relationship payload for add/update. Details carry `validation_summary.errors[]` / `warnings[]`. |
+
+Graph read projection rule: `kb_relationships` stores one directed row. When `symmetric=true`, the graph response emits both the stored direction and a derived reverse projection with the same `relationship_id` and `projection_direction = "symmetric_reverse"`. The reverse projection is read-side only; implementations MUST NOT create a second storage row for the reverse edge.
 
 ---
 

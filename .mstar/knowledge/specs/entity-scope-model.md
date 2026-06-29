@@ -4,7 +4,7 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — entity scope hierarchy, uniqueness, crate ownership. **V1.40 Shipped**: §5.1.1 narrative taxonomy (`BlockType` + `novel_category` + `canonical_name` grammar). **V1.50 Shipped**: §5.5 World KB promotion state machine. **V1.51 Shipped**: §5.5.6 LLM pathway subsection. **V1.54 Shipped**: §5.1.1 game-bible taxonomy. **V1.55 P3**: §5.1.1 script taxonomy. **V1.62 Shipped**: §5.5.9 computable-flag semantics + structured validation mode (closes `R-V161P1-LOW-001`). |
+| **Status** | Normative — entity scope hierarchy, uniqueness, crate ownership. **V1.40 Shipped**: §5.1.1 narrative taxonomy (`BlockType` + `novel_category` + `canonical_name` grammar). **V1.50 Shipped**: §5.5 World KB promotion state machine. **V1.51 Shipped**: §5.5.6 LLM pathway subsection. **V1.54 Shipped**: §5.1.1 game-bible taxonomy. **V1.55 P3**: §5.1.1 script taxonomy. **V1.62 Shipped**: §5.5.9 computable-flag semantics + structured validation mode (closes `R-V161P1-LOW-001`). **V1.74 Shipped β**: §5.6 World KB relationship semantics. |
 | **Document class** | Master |
 | **Scope** | Global/User/Creator/World/Timeline/Event/Moment hierarchy; entity ownership; `kb`/`knowledge` naming boundaries; scope transition rules |
 | **Last updated** | 2026-06-23 — V1.62 P2 §5.5.9 computable-flag semantics + structured validation mode |
@@ -571,6 +571,38 @@ On `creator world kb adopt <extract_job_id>`:
   - Jobs promoted via `adopt --auto` → `author_explicit`
 
 On `creator world kb adopt --auto <world_ref>`: same logic applied to each auto-promoted candidate individually.
+
+### 5.6 World KB relationship semantics (V1.74 normative)
+
+> **Status**: Normative — V1.74 Shipped β. This section defines first-class inter-entity relationships in the World KB graph. The V1.50–V1.73 model defined KeyBlocks, SourceAnchors, and the promotion state machine; V1.74 adds typed edges between confirmed/non-deleted World KB entities.
+
+World KB relationships are World-scoped graph edges owned by the same World as their source and target KeyBlocks. A relationship row does not transfer ownership, change the KeyBlock lifecycle, or replace SourceAnchor provenance; it records author-visible semantic linkage between two World KB entities.
+
+#### 5.6.1 Storage and identity
+
+- A relationship is stored as one `kb_relationships` row with `relationship_id`, `world_id`, `source_entity_id`, `target_entity_id`, `relation_type`, optional `custom_label`, `symmetric`, optional `confidence`, optional `source_anchor_ids`, optional `metadata`, timestamps, and `revision`.
+- `source_entity_id` and `target_entity_id` MUST refer to non-deleted `kb_key_blocks.key_block_id` rows in the same `world_id`.
+- Self-loops are prohibited: `source_entity_id == target_entity_id` is invalid and MUST be rejected as a validation error.
+
+#### 5.6.2 Directed + symmetric model
+
+Relationships are stored as directed edges. The `symmetric` flag marks a directed row whose author-visible meaning should be projected in both directions. Implementations MUST NOT store a second reverse row for symmetry. On canonical graph reads, a symmetric row emits both the stored projection and a derived reverse projection that share the same `relationship_id`; editing or deleting either projection targets the single stored row.
+
+#### 5.6.3 Taxonomy
+
+The wire taxonomy is the `WorldKbRelationshipKind` enum. V1.74 core values are: `allied_with`, `opposes`, `parent_of`, `child_of`, `member_of`, `located_in`, `rules_over`, `references`, `serves`, `rival_of`, `mentor_of`, and `custom`. Wire values are snake_case. When `relation_type = custom`, `custom_label` is required and carries the author's narrative label. When `relation_type` is any core enum value, `custom_label` is ignored or normalized to absent.
+
+#### 5.6.4 Source-anchor grounding
+
+Relationship grounding is optional. `source_anchor_ids` may be empty for author-asserted worldbuilding relationships that are true in the author's model but not yet grounded in extracted text. Non-empty `source_anchor_ids` indicate grounding and MUST resolve to source-anchor projections in the same World. UI may display “author-asserted” for empty grounding and “N anchors” for grounded relationships.
+
+#### 5.6.5 Confidence
+
+`confidence` is optional and display-only in V1.74. It may be author-set or future-extraction-set, but it MUST NOT drive validation, graph layout weighting, filtering, or conflict resolution in this iteration. Values, when present, are in the inclusive range `0.0..=1.0`.
+
+#### 5.6.6 Optimistic concurrency
+
+Relationship writes use per-row OCC through `kb_relationships.revision`. Canonical reads expose the current row version; mutating requests submit `expected_version`. A stale `expected_version` MUST return a conflict before mutation. Successful updates increment the stored `revision`; deletes compare against the expected revision before removing the row.
 
 ---
 
