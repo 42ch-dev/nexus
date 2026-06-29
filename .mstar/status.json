@@ -1,16 +1,76 @@
 {
   "version": 1,
-  "updated_at": "2026-06-28T20:00:00Z",
-  "plans": [],
+  "updated_at": "2026-06-29T14:00:00Z",
+  "plans": [
+    {
+      "plan_id": "2026-06-29-v1.74-compass-and-plan",
+      "iteration_id": "V1.74",
+      "status": "Done",
+      "owner": "project-manager",
+      "effort": "S",
+      "type": "prepare",
+      "working_branch": "iteration/v1.74",
+      "merge_target": "iteration/v1.74",
+      "task_category": "docs",
+      "wire_contracts_changed": false,
+      "depends_on": []
+    },
+    {
+      "plan_id": "2026-06-29-v1.74-world-kb-relationships",
+      "iteration_id": "V1.74",
+      "status": "Todo",
+      "owner": "frontend-dev,fullstack-dev",
+      "effort": "L",
+      "type": "implement",
+      "working_branch": "feature/v1.74-world-kb-relationships",
+      "merge_target": "iteration/v1.74",
+      "task_category": "visual",
+      "wire_contracts_changed": true,
+      "depends_on": [
+        "2026-06-29-v1.74-compass-and-plan"
+      ]
+    },
+    {
+      "plan_id": "2026-06-29-v1.74-hygiene-slate-clear",
+      "iteration_id": "V1.74",
+      "status": "Todo",
+      "owner": "fullstack-dev,frontend-dev,ops-engineer",
+      "effort": "M",
+      "type": "implement",
+      "working_branch": "feature/v1.74-hygiene-slate-clear",
+      "merge_target": "iteration/v1.74",
+      "task_category": "logic",
+      "wire_contracts_changed": false,
+      "depends_on": [
+        "2026-06-29-v1.74-compass-and-plan"
+      ]
+    },
+    {
+      "plan_id": "2026-06-29-v1.74-closure",
+      "iteration_id": "V1.74",
+      "status": "Todo",
+      "owner": "project-manager",
+      "effort": "S",
+      "type": "closure",
+      "working_branch": "iteration/v1.74",
+      "merge_target": "iteration/v1.74",
+      "task_category": "docs",
+      "wire_contracts_changed": false,
+      "depends_on": [
+        "2026-06-29-v1.74-world-kb-relationships",
+        "2026-06-29-v1.74-hygiene-slate-clear"
+      ]
+    }
+  ],
   "metadata": {
-    "integration_branch": "iteration/v1.73",
-    "integration_branch_retired": true,
-    "last_integration_branch": "iteration/v1.72",
+    "integration_branch": "iteration/v1.74",
+    "integration_branch_retired": false,
+    "last_integration_branch": "iteration/v1.73",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.74 (pending /iteration-start)",
-    "latest_active_compass": null,
+    "latest_active_iteration": "V1.74",
+    "latest_active_compass": "v1.74-world-kb-relationships-and-hygiene-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": null,
+    "pre_implement_gate": "GO",
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
@@ -53,7 +113,7 @@
       "refreshed_reason": "V1.73 closure: 7 V1.72 residuals resolved (P1 B1-B7); 9 hygiene re-targeted to V1.74; 3 new V1.73 QC suggestions (qc1 F-S1/S2/S3) deferred to V1.74."
     },
     "updated_at": "2026-06-29T05:11:00Z",
-    "spec_integration_branch": "iteration/v1.73",
+    "spec_integration_branch": "iteration/v1.74",
     "wave1_merged_at": null
   },
   "residual_findings": {
