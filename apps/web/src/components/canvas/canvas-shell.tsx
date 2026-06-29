@@ -37,6 +37,7 @@ export interface CanvasShellProps {
   nodeTypes: NodeTypes;
   onNodesChange: OnNodesChange;
   onEdgesChange?: OnEdgesChange;
+  onEdgeClick?: (event: React.MouseEvent, edge: Edge) => void;
   /** Graph-level summary spoken to assistive tech (A8). */
   summaryText: string;
   /** Accessible label for the canvas region. */
@@ -55,6 +56,7 @@ function CanvasShellInner({
   nodeTypes,
   onNodesChange,
   onEdgesChange,
+  onEdgeClick,
   summaryText,
   ariaLabel,
   children,
@@ -72,6 +74,7 @@ function CanvasShellInner({
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
+        onEdgeClick={onEdgeClick}
         nodesFocusable
         edgesFocusable
         fitView

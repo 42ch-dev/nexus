@@ -7,9 +7,11 @@
 import type {
   WorldKbCandidateProjection,
   WorldKbEntityProjection,
+  WorldKbRelationshipProjection,
 } from '@42ch/nexus-contracts';
 
 import type { EntityEditForm } from './entity-inspector';
+import type { RelationshipForm } from './relationship-inspector';
 import type {
   WorldKbEntityConflictDraft,
   WorldKbPromoteConflictDraft,
@@ -19,10 +21,11 @@ import type { WorldKbNodeData } from './types';
 /** Editable entity fields tracked for conflict reapply. */
 export type EntityField = 'title' | 'body' | 'aliases' | 'block_type';
 
-/** Current canvas selection — entity, candidate, or nothing. */
+/** Current canvas selection — entity, candidate, relationship, or nothing. */
 export type Selection =
   | { kind: 'entity'; node: WorldKbNodeData; entity: WorldKbEntityProjection }
   | { kind: 'candidate'; node: WorldKbNodeData; candidate: WorldKbCandidateProjection }
+  | { kind: 'relationship'; relationship: WorldKbRelationshipProjection }
   | null;
 
 /** Conflict state captured when `patch_entity` returns 409. */
@@ -38,5 +41,12 @@ export interface EntityConflictState {
 /** Conflict state captured when `promote_candidate` returns 409. */
 export interface PromoteConflictState {
   draft: WorldKbPromoteConflictDraft;
+  currentVersion: number;
+}
+
+/** Conflict state captured when `patch_relationship` returns 409. */
+export interface RelationshipConflictState {
+  relationshipId: string;
+  draft: RelationshipForm;
   currentVersion: number;
 }
