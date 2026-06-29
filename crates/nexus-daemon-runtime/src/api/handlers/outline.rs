@@ -633,11 +633,12 @@ pub async fn patch_outline_chapter(
         ));
     }
 
-    // Protect published chapters from any canvas metadata edit in V1.72.
+    // Protect published chapters from any canvas outline edit (structural
+    // metadata AND prose content — V1.75 extended the guard to `content`).
     if record.status == "published" && has_chapter_structural_edit(&req) {
         return Err(NexusApiError::BadRequest {
             code: "chapter_structure_edit_blocked".to_string(),
-            message: "structural edits to published chapters are blocked".to_string(),
+            message: "edits to published chapters are blocked".to_string(),
         });
     }
 
@@ -936,6 +937,10 @@ fn ensure_chapter_exists(
     }
 }
 
+/// Returns true if the patch carries any canvas-editable chapter field. Used
+/// by the published-chapter guard to block ALL outline mutations on a published
+/// chapter (structural metadata AND prose content) — a published chapter is in
+/// its final state. V1.75 extended this to include `content`.
 const fn has_chapter_structural_edit(req: &OutlinePatchChapterRequest) -> bool {
     req.set.title.is_some()
         || req.set.slug.is_some()
@@ -943,6 +948,7 @@ const fn has_chapter_structural_edit(req: &OutlinePatchChapterRequest) -> bool {
         || req.set.actual_word_count.is_some()
         || req.set.volume.is_some()
         || req.set.status.is_some()
+        || req.set.content.is_some()
 }
 
 // `too_many_arguments` / `too_many_lines`: V1.75 A2 extended this helper to
