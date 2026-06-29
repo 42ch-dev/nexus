@@ -30,7 +30,7 @@ import { InspectorPanel } from './world-kb-inspector-panel';
 import { useWorldKbCanvasState, buildEntityConflict, handleRelationshipConflict, handlePromoteConflict } from './use-world-kb-canvas-state';
 import { formatRelative, nodesToData } from './world-kb-canvas-utils';
 import { useReducedMotionPreference } from './use-view-preference';
-import type { WorldKbNodeData } from './types';
+import type { WorldKbNodeData, WorldKbEdgeData } from './types';
 import type { WorldKbRelationshipProjection } from '@42ch/nexus-contracts';
 
 export type { EntityField } from './world-kb-canvas-types';
@@ -73,15 +73,33 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
     onEdgeClick,
   } = useWorldKbCanvasState({ entities, candidateItems, relationships });
 
+  // V1.76: confidence threshold for the graph view. Confirmed edges with
+  // confidence below the threshold are hidden; manual edges (no confidence)
+  // and suggested (needs_review) edges always show. Default 0.0 = show all.
+  const [confidenceThreshold, setConfidenceThreshold] = useState(0);
+
   const projected = useMemo(() => {
     const entityNodes = layoutNodes(entities, candidateItems, worldId);
     const allNodes = [...anchorNodes(anchors), ...entityNodes] as Node[];
+    const relEdges = deriveRelationshipEdges(relationships);
+    // Apply the confidence threshold to confirmed relationship edges only.
+    const threshold = confidenceThreshold;
+    const visibleRelEdges =
+      threshold > 0
+        ? relEdges.filter((e) => {
+            const data = e.data as WorldKbEdgeData | undefined;
+            // Suggested edges always show; manual (no confidence) always show.
+            if (data?.needsReview) return true;
+            if (data?.confidence == null) return true;
+            return data.confidence >= threshold;
+          })
+        : relEdges;
     return {
       nodes: allNodes,
-      edges: [...deriveEdges(anchors), ...deriveRelationshipEdges(relationships)],
+      edges: [...deriveEdges(anchors), ...visibleRelEdges],
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entities, candidateItems, anchors, relationships, worldId]);
+  }, [entities, candidateItems, anchors, relationships, worldId, confidenceThreshold]);
 
   // Hold nodes in local state so React Flow drag/select moves persist; reseed
   // when the server projection changes (refetch or selection-driven invalidation).
@@ -253,6 +271,27 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
           ariaLabel="World KB entity graph"
         >
           <div className="pointer-events-none absolute inset-0" />
+          {/* V1.76: confidence threshold filter (confirmed edges below the
+              threshold are hidden; manual + suggested edges always show). */}
+          <div className="pointer-events-auto absolute left-3 top-3 flex items-center gap-2 rounded-card border border-gray-alpha-400 bg-background-100 px-3 py-2 shadow-card">
+            <label
+              htmlFor="kb-confidence-threshold"
+              className="text-label-12 text-gray-700"
+            >
+              Confidence ≥ {(confidenceThreshold / 100).toFixed(2)}
+            </label>
+            <input
+              id="kb-confidence-threshold"
+              type="range"
+              min={0}
+              max={100}
+              step={5}
+              value={confidenceThreshold}
+              onChange={(e) => setConfidenceThreshold(Number(e.target.value))}
+              className="h-1 w-32 cursor-pointer accent-canvas-strategy-accent"
+              aria-label="Minimum confidence threshold for confirmed relationship edges"
+            />
+          </div>
           <div className="pointer-events-auto absolute right-3 top-3 w-[340px] max-w-[calc(100%-1.5rem)] rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-popover">
             <InspectorPanel {...inspectorPanelProps} />
           </div>
