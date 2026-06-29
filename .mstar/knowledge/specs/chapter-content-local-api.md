@@ -37,7 +37,7 @@ All endpoints use the V1.64 Local API error convention: non-2xx responses are em
 | `GET` | `/v1/local/works/{work_id}/chapters` | Cursor-paginated chapter summaries | No | No |
 | `GET` | `/v1/local/works/{work_id}/chapters/{n}` | Chapter detail including paths | No | No |
 | `GET` | `/v1/local/works/{work_id}/chapters/{n}/outline` | Read outline markdown | No | No |
-| `PUT` | `/v1/local/works/{work_id}/chapters/{n}/outline` | Replace outline markdown atomically | Yes, `outline_path` only | Yes, `outline_path` if initialized/normalized + `updated_at` |
+| ~~`PUT`~~ | ~~`/v1/local/works/{work_id}/chapters/{n}/outline`~~ | **Removed in V1.75** (canvas-pivot). Outline prose writes now go through the canvas patch route `POST /v1/local/works/{work_id}/chapters/{chapter_id}/patch` with `set.content` + `base_revision` (`outline_revision` CAS). See [canvas-strategy-surface.md](canvas-strategy-surface.md) §3.5. | — | — |
 | `PATCH` | `/v1/local/works/{work_id}/chapters/{n}` | Structure metadata update | No | Yes |
 | `GET` | `/v1/local/works/{work_id}/chapters/{n}/body` | Read body markdown | No | No |
 
