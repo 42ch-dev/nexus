@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://nexus42.invalid/schemas/local-api/canvas/world-kb/world-kb-promote-candidate-request.schema.json",
   "schema_version": 1,
-  "title": "Nexus PromoteWorldKbCandidateRequest",
+  "title": "Nexus WorldKbPromoteCandidateRequest",
   "description": "Request body for POST /v1/local/worlds/{world_id}/kb/promote-candidate (V1.73). adopt/reject/merge a pending candidate via the entity-scope-model §5.5.2 promotion state machine. Per-row OCC on kb_extract_jobs.version.",
   "type": "object",
   "required": ["job_id", "candidate_id", "action", "expected_version"],
@@ -16,8 +16,7 @@
     },
     "expected_version": { "type": "integer", "minimum": 0, "description": "Per-row version of the candidate row (kb_extract_jobs.version)." },
     "merge_target_id": { "type": "string", "description": "Confirmed KeyBlock id to merge into. Required when action=merge." },
-    "patch": { "$ref": "world-kb-entity-patch.schema.json", "description": "Optional fields applied on adopt (e.g. refine title/body before confirming)." },
-    "idempotency_key": { "type": "string", "description": "Optional idempotency key (reserved; V1.73 accepts and ignores)." }
+    "patch": { "$ref": "world-kb-entity-patch.schema.json", "description": "Optional fields applied on adopt (e.g. refine title/body before confirming)." }
   },
   "additionalProperties": false
 }
