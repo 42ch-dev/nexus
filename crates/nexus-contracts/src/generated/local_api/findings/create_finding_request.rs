@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `Request` body for `POST` /v1/local/works/{`work_id`}/findings.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct CreateFindingRequest {
     #[serde(skip_serializing_if = "Option::is_none")]

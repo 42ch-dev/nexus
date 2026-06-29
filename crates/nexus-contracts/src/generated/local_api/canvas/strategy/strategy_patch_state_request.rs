@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `Request` body for `POST` /v1/local/strategies/{`strategy_id`}/states/{`state_id`}/patch (`V1`.71). `Renames` and/or updates the description of a single outer state-machine state.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct StrategyPatchStateRequest {
     pub strategy_id: String,

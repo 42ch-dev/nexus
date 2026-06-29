@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `Single` inbox notification row (platform plan 20).
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct NotificationsInboxItem {
     pub schema_version: u32,

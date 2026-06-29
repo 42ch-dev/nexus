@@ -361,13 +361,14 @@ function snakeToPascal(snakeStr: string): string {
 function generateRustEnumFile(schema: LoadedSchema, outputDir: string, _typeModuleMap: Map<string, string[]>): void {
   const values = schema.schemaContent.enum as string[];
 
-  const variants = values.map(v => {
+  const variants = values.map((v, idx) => {
     const pascal = snakeToPascal(v);
     // Build doc comment from enumDescriptions if available
     const descriptions = schema.schemaContent.enumDescriptions as Record<string, string> | undefined;
     const desc = descriptions?.[v];
     const docComment = desc ? `    /// ${backtickDocIdentifiers(desc)}\n` : '';
-    return `${docComment}    #[serde(rename = "${v}")]\n    ${pascal},`;
+    const defaultAttr = idx === 0 ? '    #[default]\n' : '';
+    return `${docComment}${defaultAttr}    #[serde(rename = "${v}")]\n    ${pascal},`;
   });
 
   const content = `//! ${backtickDocIdentifiers(String(schema.schemaContent.title || schema.typeName))}
@@ -380,7 +381,7 @@ function generateRustEnumFile(schema: LoadedSchema, outputDir: string, _typeModu
 use serde::{Deserialize, Serialize};
 
 /// ${backtickDocIdentifiers(String(schema.schemaContent.description || schema.typeName))}
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum ${schema.typeName} {
 ${variants.join('\n')}
@@ -550,7 +551,7 @@ function generateRustStructContent(
 
   const desc = (schemaContent.description || typeName) as string;
   const result = `/// ${backtickDocIdentifiers(desc)}
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct ${typeName} {
 ${fields.join('\n')}
@@ -746,7 +747,7 @@ function generateInlineArrayItemStruct(
   }
 
   return `${useLine}/// Inline array item type (auto-generated from schema)
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct ${itemTypeName} {
 ${fields.join('\n')}

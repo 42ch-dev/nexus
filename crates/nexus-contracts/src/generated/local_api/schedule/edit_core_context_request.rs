@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `Request` body for `PATCH` /v1/local/orchestration/schedules/{`schedule_id`}/core-context.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct EditCoreContextRequest {
     pub op: String,

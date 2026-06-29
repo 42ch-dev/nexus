@@ -1,0 +1,20 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/canvas/world-kb/world-kb-relationship-input.schema.json",
+  "schema_version": 1,
+  "title": "Nexus WorldKbRelationshipInput",
+  "description": "Author-editable payload for a World KB relationship (V1.74). Supplied inside WorldKbPatchRelationshipRequest for add/update actions.",
+  "type": "object",
+  "required": ["source_entity_id", "target_entity_id", "relation_type", "symmetric"],
+  "properties": {
+    "source_entity_id": { "type": "string", "description": "Source KeyBlock id. Must be a non-deleted entity in the same world." },
+    "target_entity_id": { "type": "string", "description": "Target KeyBlock id. Must be a non-deleted entity in the same world and different from source_entity_id." },
+    "relation_type": { "$ref": "world-kb-relationship-kind.schema.json", "description": "Core taxonomy value; `custom` requires `custom_label`." },
+    "custom_label": { "type": "string", "minLength": 1, "description": "Required narrative label when relation_type is `custom`; ignored for core enum values." },
+    "symmetric": { "type": "boolean", "description": "When true, the graph read emits a derived reverse projection sharing the same relationship_id." },
+    "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Optional author/assertion confidence, display-only in V1.74." },
+    "source_anchor_ids": { "type": "array", "items": { "type": "string" }, "description": "Optional source-anchor projection ids grounding this relationship." },
+    "metadata": { "type": "object", "description": "Optional opaque JSON metadata." }
+  },
+  "additionalProperties": false
+}

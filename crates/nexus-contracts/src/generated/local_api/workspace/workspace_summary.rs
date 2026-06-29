@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `Summary` row for a workspace in list responses.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct WorkspaceSummary {
     pub creator_id: String,

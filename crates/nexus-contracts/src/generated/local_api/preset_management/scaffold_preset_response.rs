@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `Response` for `POST` /v1/local/presets — scaffold result with created paths.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct ScaffoldPresetResponse {
     pub id: String,

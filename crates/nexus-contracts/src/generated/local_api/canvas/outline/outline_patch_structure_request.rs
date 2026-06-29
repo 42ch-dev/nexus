@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `Request` body for `POST` /v1/local/works/{`work_id`}/outline/patch (`V1`.72). `Mutates` the `Work` outline structure: move a chapter between volumes, attach a chapter to a volume, or link an event to a chapter.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct OutlinePatchStructureRequest {
     pub work_id: String,

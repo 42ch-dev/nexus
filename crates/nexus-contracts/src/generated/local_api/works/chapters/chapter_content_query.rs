@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `Query` parameters for `GET`/`PUT`/`PATCH` chapter detail, outline, and body routes (`V1`.65 `P0`).
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct ChapterContentQuery {
     #[serde(skip_serializing_if = "Option::is_none")]

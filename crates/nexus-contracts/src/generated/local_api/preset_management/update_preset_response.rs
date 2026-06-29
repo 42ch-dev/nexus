@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `Response` for `PATCH` /v1/local/presets/{id} (`V1`.65 `P0`).
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct UpdatePresetResponse {
     pub id: String,

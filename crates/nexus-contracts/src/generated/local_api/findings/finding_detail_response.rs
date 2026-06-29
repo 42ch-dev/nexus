@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `Response` for `GET` /v1/local/works/{`work_id`}/findings/{`finding_id`} and create/update responses.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct FindingDetailResponse {
     pub finding_id: String,

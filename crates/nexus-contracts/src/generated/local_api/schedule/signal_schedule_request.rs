@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `Request` body for `POST` /v1/local/orchestration/schedules/{`schedule_id`}/signal.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct SignalScheduleRequest {
     pub signal: String,
