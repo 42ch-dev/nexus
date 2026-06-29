@@ -484,6 +484,12 @@ fn backup_existing_file(path: &std::path::Path) -> Result<Option<Vec<u8>>, Nexus
 }
 
 /// Restore `path` from `backup` and remove any leftover temp file.
+///
+/// The restore itself is atomic: backup bytes are written to a fresh temp file
+/// in the same directory, fsync'd, and renamed over `path`, followed by a
+/// directory fsync. This mirrors the V1.72 outline markdown persistence pattern
+/// so a crash mid-rollback cannot leave the template truncated while the YAML
+/// revision has already been restored.
 fn rollback_template_write(
     path: &std::path::Path,
     backup: Option<Vec<u8>>,
@@ -492,7 +498,28 @@ fn rollback_template_write(
     let _ = std::fs::remove_file(tmp_path);
     match backup {
         Some(bytes) => {
-            if let Err(e) = std::fs::write(path, bytes) {
+            let rollback_tmp = if let Some(name) = path.file_name() {
+                let mut tmp_name = name.to_os_string();
+                tmp_name.push(format!(
+                    ".rollback.{}.{}",
+                    std::process::id(),
+                    uuid::Uuid::new_v4()
+                ));
+                path.with_file_name(&tmp_name)
+            } else {
+                // The caller always passes a file path, but if that invariant
+                // ever breaks, still attempt the rollback via a non-atomic write
+                // rather than leaving the file in an inconsistent state.
+                if let Err(e) = std::fs::write(path, &bytes) {
+                    tracing::error!(
+                        path = %path.display(),
+                        error = %e,
+                        "strategy patch: failed to roll back prompt template after validation failure"
+                    );
+                }
+                return;
+            };
+            if let Err(e) = atomic_write_with_dir_fsync(path, &rollback_tmp, &bytes) {
                 tracing::error!(
                     path = %path.display(),
                     error = %e,
@@ -1503,5 +1530,48 @@ states:
         let yaml = std::fs::read_to_string(bundle_dir.join("preset.yaml")).unwrap();
         assert!(yaml.contains("revision: 1"));
         assert!(!yaml.contains("revision: 2"));
+    }
+
+    #[test]
+    fn rollback_template_write_restores_original_bytes_atomically() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("prompt.md");
+        let original = b"original content";
+        std::fs::write(&path, original).expect("write original template");
+
+        let backup = backup_existing_file(&path).expect("backup original");
+        assert!(backup.is_some());
+
+        let tmp_path = dir.path().join("prompt.md.tmp.00000000-0000-0000-0000-000000000000");
+        atomic_write_with_dir_fsync(&path,
+            &tmp_path,
+            b"new content that should be rolled back",
+        )
+        .expect("atomic write new content");
+
+        rollback_template_write(&path, backup, &tmp_path);
+
+        let restored = std::fs::read(&path).expect("read restored template");
+        assert_eq!(restored, original);
+        assert!(!tmp_path.exists(), "staged temp file must be removed");
+    }
+
+    #[test]
+    fn rollback_template_write_removes_file_when_no_backup() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let path = dir.path().join("new_prompt.md");
+        let tmp_path = dir.path().join("new_prompt.md.tmp.00000000-0000-0000-0000-000000000000");
+
+        atomic_write_with_dir_fsync(&path,
+            &tmp_path,
+            b"new content that should be removed",
+        )
+        .expect("atomic write new file");
+        assert!(path.exists());
+
+        rollback_template_write(&path, None, &tmp_path);
+
+        assert!(!path.exists(), "new file must be removed on rollback");
+        assert!(!tmp_path.exists(), "staged temp file must be removed");
     }
 }
