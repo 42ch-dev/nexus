@@ -71,3 +71,7 @@ chrono-tz = { workspace = true }
 assert_cmd = "2.0"
 predicates = "3.1"
 wiremock = "0.6"
+# `serial_test` serializes tests that mutate process-global state (env vars).
+# Without it, the summary_config_from_env_* tests race on NEXUS_CONTEXT_MAX_FILE_SIZE
+# under cargo's default parallel runner and intermittently fail on CI.
+serial_test = "3"
