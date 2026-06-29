@@ -797,14 +797,34 @@ async fn seed_extraction_suggestion(
 #[tokio::test]
 async fn get_graph_hides_needs_review_by_default() {
     let (_tmp, state) = fresh_state().await;
-    seed_key_block(state.pool(), "kb_a", "wld_test_world", "character", "Aria", "confirmed").await;
-    seed_key_block(state.pool(), "kb_b", "wld_test_world", "character", "Kael", "confirmed").await;
+    seed_key_block(
+        state.pool(),
+        "kb_a",
+        "wld_test_world",
+        "character",
+        "Aria",
+        "confirmed",
+    )
+    .await;
+    seed_key_block(
+        state.pool(),
+        "kb_b",
+        "wld_test_world",
+        "character",
+        "Kael",
+        "confirmed",
+    )
+    .await;
 
     // One confirmed (manual) + one suggested (extraction) relationship.
     let _ = patch_relationship(
         State(state.clone()),
         Path("wld_test_world".to_string()),
-        Json(add_request("kb_a", "kb_b", WorldKbRelationshipKind::AlliedWith)),
+        Json(add_request(
+            "kb_a",
+            "kb_b",
+            WorldKbRelationshipKind::AlliedWith,
+        )),
     )
     .await
     .unwrap();
@@ -862,8 +882,24 @@ async fn get_graph_hides_needs_review_by_default() {
 #[tokio::test]
 async fn promote_suggestion_clears_needs_review() {
     let (_tmp, state) = fresh_state().await;
-    seed_key_block(state.pool(), "kb_a", "wld_test_world", "character", "Aria", "confirmed").await;
-    seed_key_block(state.pool(), "kb_b", "wld_test_world", "character", "Kael", "confirmed").await;
+    seed_key_block(
+        state.pool(),
+        "kb_a",
+        "wld_test_world",
+        "character",
+        "Aria",
+        "confirmed",
+    )
+    .await;
+    seed_key_block(
+        state.pool(),
+        "kb_b",
+        "wld_test_world",
+        "character",
+        "Kael",
+        "confirmed",
+    )
+    .await;
 
     let rel_id = seed_extraction_suggestion(
         state.pool(),
@@ -917,7 +953,10 @@ async fn promote_suggestion_clears_needs_review() {
     .await
     .unwrap();
     assert!(
-        graph.relationships.iter().any(|r| r.relationship_id == rel_id),
+        graph
+            .relationships
+            .iter()
+            .any(|r| r.relationship_id == rel_id),
         "promoted suggestion now visible in the default graph"
     );
 }
@@ -925,8 +964,24 @@ async fn promote_suggestion_clears_needs_review() {
 #[tokio::test]
 async fn update_preserves_needs_review_when_omitted() {
     let (_tmp, state) = fresh_state().await;
-    seed_key_block(state.pool(), "kb_a", "wld_test_world", "character", "Aria", "confirmed").await;
-    seed_key_block(state.pool(), "kb_b", "wld_test_world", "character", "Kael", "confirmed").await;
+    seed_key_block(
+        state.pool(),
+        "kb_a",
+        "wld_test_world",
+        "character",
+        "Aria",
+        "confirmed",
+    )
+    .await;
+    seed_key_block(
+        state.pool(),
+        "kb_b",
+        "wld_test_world",
+        "character",
+        "Kael",
+        "confirmed",
+    )
+    .await;
 
     let rel_id = seed_extraction_suggestion(
         state.pool(),

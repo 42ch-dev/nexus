@@ -522,7 +522,10 @@ mod tests {
         let candidates = result.get("candidates").and_then(|v| v.as_array()).unwrap();
         assert_eq!(candidates.len(), 1);
         // relationships present.
-        let relationships = result.get("relationships").and_then(|v| v.as_array()).unwrap();
+        let relationships = result
+            .get("relationships")
+            .and_then(|v| v.as_array())
+            .unwrap();
         assert_eq!(relationships.len(), 1);
         assert_eq!(relationships[0]["source_canonical_name"], "Aria");
         assert_eq!(relationships[0]["relation_type"], "allied_with");
