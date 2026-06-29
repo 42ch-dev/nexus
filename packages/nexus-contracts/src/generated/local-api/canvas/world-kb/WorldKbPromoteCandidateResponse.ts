@@ -2,7 +2,7 @@ import type { WorldKbEntityProjection } from './WorldKbEntityProjection';
 import type { WorldKbExtractJobProjection } from './WorldKbExtractJobProjection';
 import type { SchemaVersion } from '../../../common/CommonTypes';
 /**
- * Nexus PromoteWorldKbCandidateResponse
+ * Nexus WorldKbPromoteCandidateResponse
  *
  * Success response for POST /v1/local/worlds/{world_id}/kb/promote-candidate (V1.73). `entity` is the resulting (or null for reject) KeyBlock; `job` is the updated extract-job projection; `version` is the new per-row version.
  *
