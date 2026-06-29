@@ -158,28 +158,6 @@ describe('BrowserClient chapter content routes (V1.65)', () => {
     expect(res.content).toBe('# Chapter 1');
   });
 
-  it('writes a chapter outline via PUT', async () => {
-    let receivedBody: unknown = null;
-    useHandlers(
-      http.put('/v1/local/works/:workId/chapters/:n/outline', async ({ request, params }) => {
-        receivedBody = await request.json();
-        return HttpResponse.json({
-          work_id: params.workId,
-          chapter: Number(params.n),
-          volume: 1,
-          outline_path: 'Works/WRK/Outlines/chapters/ch01-outline.md',
-          content: (receivedBody as { content?: string }).content ?? '',
-          updated_at: '2026-06-25T00:00:00Z',
-        });
-      }),
-    );
-
-    const client = new BrowserClient();
-    const res = await client.putChapterOutline('w1', 1, { content: '# Updated' });
-    expect(receivedBody).toEqual({ content: '# Updated' });
-    expect(res.content).toBe('# Updated');
-  });
-
   it('patches chapter structure with confirm flag for finalized chapters', async () => {
     let receivedBody: unknown = null;
     useHandlers(

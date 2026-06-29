@@ -127,7 +127,6 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("ListChaptersQuery", 1),
     ("ListChaptersResponse", 1),
     ("PatchChapterRequest", 1),
-    ("PutChapterOutlineRequest", 1),
     ("CreateWorkRequest", 1),
     ("CreateWorkResponse", 1),
     ("ListWorksQuery", 2),

@@ -13,8 +13,7 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
 use nexus_contracts::{
-    ChapterContentQuery, ChapterStatus, ListChaptersQuery, PatchChapterRequest,
-    PutChapterOutlineRequest,
+    ChapterContentQuery, ChapterStatus, ListChaptersQuery,     PatchChapterRequest,
 };
 use nexus_daemon_runtime::api::errors::NexusApiError;
 use nexus_daemon_runtime::api::handlers::chapters;
@@ -191,67 +190,6 @@ async fn list_chapters_returns_401_without_creator() {
     .await
     .expect_err("no creator should 401");
     assert_eq!(err.status_code(), StatusCode::UNAUTHORIZED);
-}
-
-// ─── T1.2: OUTLINE PUT — atomic file write + DB metadata ────────────────────
-
-#[tokio::test]
-async fn put_outline_creates_file_and_updates_metadata() {
-    let (state, _tmp) = handler_state().await;
-    let (work_id, work_ref) = create_work_with_chapters(&state, 3).await;
-    let root = state.workspace_path().expect("workspace path");
-
-    let content = "# Chapter 1\n\nOutline text.";
-    let resp = chapters::put_chapter_outline(
-        State(state.clone()),
-        Path((work_id.clone(), "1".to_string())),
-        Query(ChapterContentQuery { volume: None }),
-        Json(PutChapterOutlineRequest {
-            content: content.to_string(),
-        }),
-    )
-    .await
-    .expect("put outline");
-    assert_eq!(resp.content, content);
-    assert_eq!(
-        resp.outline_path,
-        format!("Works/{work_ref}/Outlines/chapters/ch01-outline.md")
-    );
-    assert!(!resp.updated_at.is_empty());
-
-    let file_path = std::path::PathBuf::from(&root).join(format!(
-        "Works/{work_ref}/Outlines/chapters/ch01-outline.md"
-    ));
-    assert!(file_path.exists(), "outline file should be created");
-
-    let record = nexus_local_db::work_chapters::get_chapter(state.pool(), &work_id, 1, 1)
-        .await
-        .expect("db query")
-        .expect("chapter row");
-    assert_eq!(
-        record.outline_path,
-        Some(format!(
-            "Works/{work_ref}/Outlines/chapters/ch01-outline.md"
-        ))
-    );
-    assert!(!record.updated_at.is_empty());
-}
-
-#[tokio::test]
-async fn put_outline_returns_404_for_unknown_chapter() {
-    let (state, _tmp) = handler_state().await;
-    let (work_id, _work_ref) = create_work_with_chapters(&state, 1).await;
-    let err = chapters::put_chapter_outline(
-        State(state),
-        Path((work_id, "99".to_string())),
-        Query(ChapterContentQuery { volume: None }),
-        Json(PutChapterOutlineRequest {
-            content: "text".to_string(),
-        }),
-    )
-    .await
-    .expect_err("unknown chapter should 404");
-    assert_eq!(err.status_code(), StatusCode::NOT_FOUND);
 }
 
 // ─── T1.3: STRUCTURE PATCH ──────────────────────────────────────────────────
