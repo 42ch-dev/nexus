@@ -448,9 +448,22 @@ V1.74 extends the World KB canvas β routes with a first-class relationship patc
 | Use | Route | Request DTO | Response DTO |
 | --- | --- | --- | --- |
 | Patch a World KB relationship row | `POST /v1/local/worlds/{world_id}/kb/patch-relationship` | `WorldKbPatchRelationshipRequest` | `WorldKbPatchRelationshipResponse` |
-| Read World KB graph projection | `GET /v1/local/worlds/{world_id}/kb/graph` | — | `WorldKbGraphResponse` with `relationships: WorldKbRelationshipProjection[]` |
+| Read World KB graph projection | `GET /v1/local/worlds/{world_id}/kb/graph?include_suggested=true` | — | `WorldKbGraphResponse` with `relationships: WorldKbRelationshipProjection[]` |
 
 DTO naming follows the generated filename convention from `schemas/local-api/canvas/world-kb/world-kb-*.schema.json`: generated public symbols use the `WorldKb...` entity-prefix form (`WorldKbPatchRelationshipRequest`, `WorldKbPatchRelationshipResponse`, `WorldKbRelationshipInput`, `WorldKbRelationshipProjection`, `WorldKbRelationshipKind`). Schema `title` text may use a verb-prefix phrase for human readability, but public generated symbols are filename-derived.
+
+**V1.76 `needs_review` + `source` (extraction suggestions):** `WorldKbRelationshipProjection`
+exposes `needs_review` (boolean) and `source` (`manual` | `extraction`). `source`
+is read-only provenance — `manual` marks author-created rows, `extraction` marks
+`nexus.llm.extract`-proposed suggestions. `needs_review` is the lightweight
+curation gate: `GET .../kb/graph` defaults to excluding `needs_review = 1` rows
+(confirmed graph); `?include_suggested=true` surfaces both confirmed and
+suggested relationships and preserves the symmetric-reverse projection rule.
+Promotion is clearing `needs_review` through the existing patch-relationship
+`update` action (the `relationship` payload carries an optional `needs_review`
+field; `false` confirms the suggestion). Omitting `needs_review` on update
+preserves the existing flag so a routine edit does not accidentally confirm a
+suggestion.
 
 Relationship request semantics:
 
@@ -461,7 +474,7 @@ Relationship request semantics:
 | `relationship_id` | Server-assigned for `add`; required for `update` and `remove`. |
 | `expected_version` | Required for `update` and `remove`; omitted or `0` for `add`. It is the row version observed on the last canonical read and compares against `kb_relationships.revision`. |
 | Response `version` | Mutating success responses return the committed row version after persistence. Clients MUST update from the response or refetch before issuing another patch. |
-| `relationship` payload | Required for `add` and `update`, omitted for `remove`. Contains `source_entity_id`, `target_entity_id`, `relation_type`, optional `custom_label`, `symmetric`, optional `confidence`, optional `source_anchor_ids`, and optional `metadata`. |
+| `relationship` payload | Required for `add` and `update`, omitted for `remove`. Contains `source_entity_id`, `target_entity_id`, `relation_type`, optional `custom_label`, `symmetric`, optional `confidence`, optional `source_anchor_ids`, optional `metadata`, and optional `needs_review` (V1.76: `false` promotes/confirm a suggestion; omit to preserve). |
 
 Conflict and validation errors:
 

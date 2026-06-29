@@ -117,6 +117,34 @@ queryable/sortable. Heuristic rows keep the V1.50 shape (columns `NULL`,
 `tags: ["novel","heuristic-extracted"]`). Cross-chapter reconciliation
 (T-A P1) and missing-KB detection (T-A P2) build on this pathway.
 
+### 5.5.7 Relationship candidate extraction (V1.76 γ — Normative)
+
+V1.76 extends the extraction pathway to also **propose relationships** from
+chapter prose. `nexus.llm.extract` may now return `{ candidates, relationships? }`
+(see [llm-extract.md](specs/llm-extract.md) §1.2). The review-time hook
+(`quality_loop::extract_kb_candidates_for_review`) parses the optional
+`relationships` array and persists suggestions into `kb_relationships` after
+endpoint resolution:
+
+```text
+nexus.llm.extract → { candidates, relationships? }
+  ├─ candidates → persist_candidates → kb_extract_jobs (pending)   [V1.51 path]
+  └─ relationships → persist_relationship_candidates
+       ├─ resolve_entity_by_canonical_name (source + target)
+       │     skip + log when an endpoint is missing/ambiguous
+       └─ upsert_extraction_relationship → kb_relationships
+             (needs_review=1, source='extraction', idempotent dedup key)
+```
+
+`LlmExtractTask` remains a pure parser/invoker (it does not persist). Entity
+candidates continue through `quality_loop::persist_candidates` /
+`kb_extract_jobs`; `extract_finalize` remains the `kb.extract_work` direct
+KeyBlock insert helper (not the suggestion path). Relationship persistence runs
+**after** endpoint resolution and writes idempotent suggestions only when both
+endpoints already exist as non-deleted KeyBlocks (entity-scope-model §5.6.7).
+The `needs_review` gate + GET graph default-filter + confidence-weighting UX
+complete the γ surface; see entity-scope-model §5.6.7 + llm-extract.md §5.2.
+
 ### 5.5.1 Cross-chapter reconciliation (V1.51 T-A P1 — Normative)
 
 V1.51 T-A P1 closes `R-V150KBED-08` by extending the V1.50 chapter-scoped

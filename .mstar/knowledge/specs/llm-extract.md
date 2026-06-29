@@ -76,6 +76,25 @@ context, **not** accepted from user/preset input — same security rule as
           "source_quote": { "type": "string", "description": "Verbatim chapter excerpt justifying the extraction" }
         }
       }
+    },
+    "relationships": {
+      "type": "array",
+      "description": "V1.76: optional relationship candidates proposed from chapter prose. Missing/empty array means no relationship candidates (backward compatible).",
+      "items": {
+        "type": "object",
+        "required": ["source_canonical_name", "target_canonical_name", "relation_type", "symmetric", "confidence", "source_quote"],
+        "properties": {
+          "source_canonical_name": { "type": "string" },
+          "source_block_type": { "type": ["string", "null"] },
+          "target_canonical_name": { "type": "string" },
+          "target_block_type": { "type": ["string", "null"] },
+          "relation_type": { "type": "string", "description": "WorldKbRelationshipKind snake_case value; 'custom' requires custom_label" },
+          "custom_label": { "type": ["string", "null"] },
+          "symmetric": { "type": "boolean" },
+          "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+          "source_quote": { "type": "string" }
+        }
+      }
     }
   }
 }
@@ -84,6 +103,16 @@ context, **not** accepted from user/preset input — same security rule as
 `block_type` values are the wire `BlockType` enum (SSOT:
 `schemas/common/common.schema.json`; entity-scope-model §5.1.1). Implementations
 MUST NOT introduce a parallel enum.
+
+**V1.76 relationship candidates**: the optional `relationships` array carries
+entity-pair relationship candidates proposed from the chapter prose. Each item
+references endpoints by `canonical_name` (+ optional `*_block_type` to
+disambiguate), carries a `WorldKbRelationshipKind`-typed `relation_type`
+(`custom` requires `custom_label`), an LLM-assigned `confidence` in `[0.0, 1.0]`,
+and a verbatim `source_quote`. Relationship parsing is best-effort like entity
+parsing: a malformed or missing `relationships` array means no relationship
+candidates, not a capability failure. The review-time hook resolves endpoints to
+existing non-deleted KeyBlocks before persisting suggestions (see §5.2).
 
 ### 1.3 Worker invocation
 
@@ -221,6 +250,34 @@ Candidates are persisted via `insert_pending_with_llm` (LLM pathway) or
 The fallback is the **only** heuristic code path retained; it exists solely so
 no-worker environments (hermetic tests, daemon-without-worker) remain
 functional. Production daemons with a worker always take the LLM pathway.
+
+### 5.2 Relationship candidate persistence (V1.76 γ)
+
+When the LLM returns a `relationships` array (§1.2), the review-time hook
+(`quality_loop::extract_kb_candidates_for_review`) persists relationship
+candidates into `kb_relationships` as **suggestions** (`needs_review = 1`,
+`source = 'extraction'`), behind the same "extraction suggests, author decides"
+split extended from entity candidates to relationships.
+
+**Entity-existence prerequisite** (architect lock): a relationship candidate
+whose source or target endpoint cannot resolve to a non-deleted KeyBlock in the
+same world is **skipped + logged**. Endpoints resolve by `(world_id, block_type,
+canonical_name)` when `*_block_type` is provided, or case-insensitively by
+`(world_id, canonical_name)` only when exactly one non-deleted KeyBlock matches.
+Review-time extraction does NOT confirm entity candidates in the same pass, so
+relationships involving newly suggested entities appear only after the author
+promotes entities and reruns/rescans extraction.
+
+**Idempotent upsert** (architect lock): suggestions are keyed on `(world_id,
+source_entity_id, target_entity_id, relation_type, COALESCE(custom_label, ''),
+source = 'extraction')`. A rescan that re-proposes the same pair is a no-op
+(the row is not re-inserted and the revision is not bumped). Symmetric rows use
+the stored direction and do not insert a reverse row (entity-scope-model §5.6.2).
+
+The author promotes a suggestion (clears `needs_review`) or deletes it through
+the existing `world_kb.patch_relationship` route; no second promotion state
+machine is introduced (entity-scope-model §5.6). The GET graph defaults to
+excluding `needs_review` rows; `?include_suggested=true` surfaces them.
 
 ---
 
