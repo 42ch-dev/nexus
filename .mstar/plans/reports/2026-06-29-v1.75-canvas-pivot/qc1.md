@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-29-v1.75-canvas-pivot"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-29"
 ---
 
@@ -146,3 +146,51 @@ The 4 🟢 Suggestions are non-blocking; PM/QA may register them as `Suggestion`
 | 🟢 Suggestion | 4 |
 
 **Verdict**: Request Changes
+
+## Revalidation
+
+**Fix-wave commit reviewed**: `a8f0a36e` — `fix(v1.75): qc1 spec doc drift (removed PUT prose) + qc3 chapter preselect`
+
+**Workflow context**: Targeted re-review per `mstar-review-qc` "After Request Changes (default): Targeted re-review". PM dispatched only this QC seat (qc1) for revalidation; qc2 already Approve; qc3's F-QC3-001 was also fixed in the same commit. Scope revalidated on `iteration/v1.75` HEAD `a8f0a36e81f61ac90b4e4085dec3d1784f3d23d1`.
+
+### Disposition of prior findings
+
+| ID | Original status | Revalidated status | Evidence |
+|----|-----------------|--------------------|----------|
+| **W-1** (`chapter-content-local-api.md` §5.4 stale PUT prose) | 🟡 Warning | ✅ **Resolved** | `git show a8f0a36e -- .mstar/knowledge/specs/chapter-content-local-api.md`: §5.4 anchor retained (lines 200), the 30-line normative block (query table, request/response schema sample, 7 atomic-write rules, status rule, soft-concurrency rule) collapsed to a single-paragraph retired-history stub that names the canvas patch route (`POST /v1/local/works/{work_id}/chapters/{chapter_id}/patch` + `set.content` + `base_revision`), re-anchors the invariants to `local-api-surface-conventions.md` §6.2 and §7, cross-references `canvas-strategy-surface.md` §3.5, and explicitly notes "`GET …/outline` (§5.3) is unchanged". §5.3 GET outline read (lines 173-198) is intact — query table, JSON response sample, and 3 rules preserved verbatim. No live PUT prose remains. |
+| **W-2** (`local-api-surface-conventions.md` §6.2 stale PUT atomic-write rules) | 🟡 Warning | ✅ **Resolved** | `git show a8f0a36e -- .mstar/knowledge/specs/local-api-surface-conventions.md`: §6.2 title rewritten to "Outline-prose `set.content` persistence is atomic file write + DB metadata update (V1.75)"; opening paragraph calls out the V1.65 PUT removal and re-points at §7 (V1.75 amendment) + `canvas-strategy-surface.md` §3.5; the original 5 PUT rules rewritten/expanded to **6** rules against the new PATCH content path enforced by `crates/nexus-daemon-runtime/src/api/handlers/outline.rs::apply_chapter_patch` — Rule 1 (load `outline_path` + canonical seed via `update_outline_path`), Rule 2 (§6.5 path guard), Rule 3 (`atomic_write_outline` temp+rename+file fsync+directory fsync), Rule 4 (persist `outline_path` + `updated_at` + bump `frontmatter.outline_revision`), Rule 5 (RuntimeLockGuard held across the sequence + body-ownership invariant — cross-referencing §6.4), Rule 6 (return `OutlinePatchResponse` with `new_revision`). The closing sentence of §6.5 was also updated to read "applies it to outline writes (V1.75: the `outline.patch_chapter set.content` path — see §6.2)" — replacing the prior "applies it to the new outline PUT" framing that contradicted §6.2. Cross-references are coherent. |
+| **S-1–S-4** (Suggestions: line-cap headroom, `#[allow]` justification, save-state test gap, docstring incremental) | 🟢 Suggestion | 🟢 Suggestion (non-blocking residuals) | No change — suggestions remain as PM-tracked non-blocking residuals per the targeted re-review rule. |
+
+### Out-of-scope benign stale tokens (PM-flagged)
+
+The fix-wave callout noted 2 more benign `outline PUT` tokens in §6.3 and §6.6 of `local-api-surface-conventions.md` that are out of W-2's scope:
+
+- **§6.3 line 273** — "they must never occur as side effects of outline PUT or ordinary structure edits" — describes the status side-effect rule against the structure-PATCH route. The phrase "outline PUT" is technically slightly stale (V1.75 outlines are written via `outline.patch_chapter set.content`, not PUT), but the *normative intent* ("outline writes") still holds against the new code path per §6.2's closing paragraph ("A successful outline-prose patch MUST NOT automatically change chapter `status`"). Benign drift; not blocking.
+- **§6.6 line 315** — "The daemon **does** acquire the per-Work runtime lock for `PUT outline` and `PATCH structure`" — explicitly names "PUT outline" (the removed route). This is genuinely stale wording; the daemon now locks for the `outline.patch_chapter set.content` path per §6.2 Rule 5. Benign drift (the lock invariant is still true + enforced), but the prose should be updated for consistency.
+
+Per the PM directive ("if you agree they're benign, they can be V1.76 residuals — don't block your verdict"), both are **non-blocking**. Recommend PM register `R-V175QC1-DOC-003` (`local-api-surface-conventions.md` §6.3 + §6.6 benign stale-PUT tokens) at `severity: warning` in `status.json` for a V1.76 spec-hygiene follow-up.
+
+### Architecture checks (re-run)
+
+| Check | Outcome | Evidence |
+|-------|---------|----------|
+| `cargo clippy -p nexus-daemon-runtime -p nexus-local-db -- -D warnings` | ✅ Pass | `Finished dev profile [unoptimized + debuginfo] target(s) in 9.16s` — clean. |
+| `pnpm --filter web typecheck` | ✅ Pass | `tsc --noEmit` exit 0, no output. |
+| `pnpm --filter nexus-codegen typecheck` | ✅ Pass | `tsc --noEmit` exit 0, no output. |
+
+### Side note on qc3 fix (out of qc1 scope but observed)
+
+`a8f0a36e` also landed qc3's F-QC3-001 (chapter-page CTA preselection). I confirmed the implementation stays in-scope from an architecture lens: `OutlineCanvas` gained a single optional `initialSelectedChapterId?: number | null` prop (default `null`, no breaking change to existing call sites), seeded into `useState` (read once, later clicks override), and `OutlinePage` parses `?chapter=N` via `useSearchParams` and threads it in. One-way props flow, no leaky abstraction, 3 new preselect tests in `apps/web/src/pages/outline-page.test.tsx` cover the valid/no-param/non-positive branches. This closes the chapter-page → canvas hop — the redirect CTA's destination is now functional.
+
+### Updated verdict
+
+W-1 and W-2 (both 🟡 Warnings blocking the prior verdict) are resolved with surgical, scope-bound edits and no regressions to the canvas-pivot implementation surface. The §6.3/§6.6 benign tokens are explicitly out-of-scope per the targeted re-review rule and are non-blocking residuals for V1.76 spec hygiene. The qc3 fix-wave item (F-QC3-001) is a clean architecture addition that doesn't affect my qc1 surface. All three static checks pass on `a8f0a36e`.
+
+| Severity | Count |
+|----------|-------|
+| 🔴 Critical | 0 |
+| 🟡 Warning | 0 (both prior warnings resolved) |
+| 🟢 Suggestion | 4 (carried over as PM-tracked non-blocking residuals) |
+| 🆕 Out-of-scope follow-up (benign) | 2 (§6.3 + §6.6 stale-PUT tokens; recommend `R-V175QC1-DOC-003` warning residual for V1.76) |
+
+**Verdict (revised)**: **Approve**
