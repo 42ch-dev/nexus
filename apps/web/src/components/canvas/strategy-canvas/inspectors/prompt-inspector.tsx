@@ -109,12 +109,17 @@ export function PromptInspector({
     }
   }, [dirty, patch.isPending, form, original, presetId, selectedState, onSaveStatus, onConflict, promptTemplateRef]);
 
+  // Keep a fresh callback reference for the keyboard shortcut effect so the
+  // effect itself does not need to depend on the callback (R-V172P1-QC1-001).
+  const handleSaveRef = useRef(handleSave);
+  handleSaveRef.current = handleSave;
+
   useEffect(() => {
     if (saveTrigger > 0 && saveTrigger !== lastHandledTriggerRef.current) {
       lastHandledTriggerRef.current = saveTrigger;
-      void handleSave();
+      void handleSaveRef.current();
     }
-  }, [saveTrigger, handleSave]);
+  }, [saveTrigger]);
 
   return (
     <section className="flex flex-col gap-2" aria-label="Prompt template editor">
