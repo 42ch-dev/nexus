@@ -71,15 +71,25 @@ export function useWorldKbCandidates(worldId: string | undefined) {
 export function usePatchWorldKbEntity(worldId: string | undefined) {
   const client = useNexusClient();
   const qc = useQueryClient();
+  const errorToast = useErrorToast();
   return useMutation({
     mutationFn: (request: WorldKbPatchEntityRequest) =>
       client.worldKbPatchEntity(worldId!, request),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.worldKb.graph(worldId ?? '') });
     },
-    // Errors (409 conflict / 422 validation) are handled by the inspector via
-    // the returned error shape; do not toast here or the conflict modal would
-    // double-report.
+    onError: (error) => {
+      // 409 conflicts → inspector renders the conflict modal; 422 validation →
+      // inspector renders inline field errors. Mirror the promotion path's
+      // non-conflict guard (extended to also skip 422 validation) so everything
+      // else (500/403/dropped network) is surfaced as a toast instead of being
+      // silently swallowed. Both guards check `instanceof NexusClientError`, so
+      // the real client errors (which ARE instances) are excluded; the per-call
+      // handler still owns the 409/422 UX paths.
+      if (!isWorldKbConflictError(error) && !isWorldKbValidationError(error)) {
+        errorToast(error, 'Could not save entity');
+      }
+    },
   });
 }
 

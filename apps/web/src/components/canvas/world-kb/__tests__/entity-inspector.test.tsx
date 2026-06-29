@@ -6,15 +6,15 @@
  * version as `expected_version`, that invalid JSON surfaces an inline error, and
  * that a 409 conflict hands off to the parent canvas (onConflict).
  */
-import { render, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
 import { makeQueryClient } from '@/test/test-providers';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { ClientProvider } from '@/lib/client-context';
-import { ToastProvider } from '@/lib/use-toast';
-import type { NexusClient } from '@/lib/nexus';
+import { ToastProvider, Toaster } from '@/lib/use-toast';
+import { NexusClientError, type NexusClient } from '@/lib/nexus';
 import type { WorldKbEntityProjection } from '@42ch/nexus-contracts';
 
 import { EntityInspector } from '../entity-inspector';
@@ -59,6 +59,7 @@ function renderWith(client: NexusClient, ui: React.ReactElement) {
     <QueryClientProvider client={makeQueryClient()}>
       <ToastProvider>
         <ClientProvider client={client}>{ui}</ClientProvider>
+        <Toaster />
       </ToastProvider>
     </QueryClientProvider>,
   );
@@ -109,18 +110,14 @@ describe('EntityInspector', () => {
   it('hands a 409 conflict to the parent via onConflict', async () => {
     const user = userEvent.setup();
     const client = makeClient({
-      worldKbPatchEntity: vi.fn().mockRejectedValue({
-        name: 'NexusClientError',
-        status: 409,
-        code: 'world_kb_conflict',
-        message: 'stale',
-        details: {
+      worldKbPatchEntity: vi.fn().mockRejectedValue(
+        new NexusClientError(409, 'world_kb_conflict', 'stale', {
           current_version: 7,
           entity_id: 'kb-1',
           conflicting_path: 'title',
           recovery_hint: 'r',
-        },
-      }),
+        }),
+      ),
     });
     const onConflict = vi.fn();
     const { findByDisplayValue, findByRole } = renderWith(
@@ -138,5 +135,34 @@ describe('EntityInspector', () => {
       entityId: 'kb-1',
       conflictingPath: 'title',
     });
+  });
+
+  // Regression for V1.73 greploop final (greptile P1): the entity patch hook
+  // must surface non-conflict / non-validation failures (500/403/network) as a
+  // toast instead of silently swallowing them — mirroring the promotion path's
+  // non-conflict guard (extended to also skip 422 validation).
+  it('surfaces a non-conflict error (500) as a toast, not silence', async () => {
+    const user = userEvent.setup();
+    const client = makeClient({
+      worldKbPatchEntity: vi.fn().mockRejectedValue(
+        new NexusClientError(500, 'internal_error', 'Boom — server failure'),
+      ),
+    });
+    const onConflict = vi.fn();
+    const { findByDisplayValue, findByRole } = renderWith(
+      client,
+      <EntityInspector worldId="w-1" node={node} entity={entity} onConflict={onConflict} />,
+    );
+
+    const title = await findByDisplayValue('Aria Stormwind');
+    await user.type(title, '!');
+    (await findByRole('button', { name: /Save entity/i })).click();
+
+    // The hook's global onError toasts non-conflict/non-validation failures.
+    expect(await screen.findByRole('alert')).toBeInTheDocument();
+    expect(await screen.findByText('Could not save entity')).toBeInTheDocument();
+    // A 500 is neither a conflict nor validation — no modal handoff.
+    await waitFor(() => expect(client.worldKbPatchEntity).toHaveBeenCalled());
+    expect(onConflict).not.toHaveBeenCalled();
   });
 });

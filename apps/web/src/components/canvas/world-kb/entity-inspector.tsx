@@ -150,6 +150,9 @@ export function EntityInspector({
               dirtyFields: dirty,
             });
           }
+          // Any other status (500/403/dropped network) is surfaced as a toast
+          // by the hook's global onError (see usePatchWorldKbEntity) — never
+          // silently swallowed.
         },
       },
     );
