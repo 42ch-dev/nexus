@@ -115,6 +115,26 @@ fn map_cas_err(e: LocalDbError, entity_id: &str) -> NexusApiError {
     }
 }
 
+/// Re-read the actual current `kb_extract_jobs.version` for `job_id` after a
+/// promote-path CAS miss, normalized the same way as the outer OCC
+/// precondition (`u64::try_from(version).unwrap_or(0)`).
+///
+/// The promote handlers run an outer version check, then a separate CAS
+/// `UPDATE ... WHERE version = ?`. A concurrent write between the two makes
+/// the CAS affect 0 rows. Echoing the stale `req.expected_version` as the
+/// 409 `current_version` (greptile P1) sends the client retrying with the
+/// same stale version — a second avoidable conflict. Re-reading the row
+/// gives the client the NEW version it must retry against.
+async fn reread_promotion_version(
+    pool: &sqlx::SqlitePool,
+    job_id: &str,
+) -> Result<u64, NexusApiError> {
+    Ok(get_promotion(pool, job_id)
+        .await
+        .map_err(NexusApiError::from)?
+        .map_or(0, |j| u64::try_from(j.version).unwrap_or(0)))
+}
+
 /// Build the wire projection of a `KeyBlock`.
 fn project_entity(kb: &KeyBlock) -> WorldKbEntityProjection {
     let body_value = kb
@@ -619,8 +639,14 @@ async fn promote_reject(
     .await
     .map_err(NexusApiError::from)?;
     if result.rows_affected() != 1 {
+        // CAS miss: a concurrent write bumped `version` (or flipped
+        // `promotion_status`) between the outer check and this UPDATE. Re-read
+        // the actual current version so the client retries against the NEW
+        // version instead of resubmitting the stale `expected_version`
+        // (greptile P1).
+        let current = reread_promotion_version(pool, &req.job_id).await?;
         return Err(NexusApiError::world_kb_conflict(
-            req.expected_version,
+            current,
             &req.job_id,
             "version",
             "refetch the candidates list and reapply",
@@ -723,9 +749,15 @@ async fn promote_merge(
     .await
     .map_err(NexusApiError::from)?;
     if reject.rows_affected() != 1 {
+        // CAS miss: a concurrent write bumped the candidate `version` (or
+        // flipped its `promotion_status`) between the outer check and this
+        // in-tx UPDATE. Roll back the target fold and re-read the candidate's
+        // actual current version so the client retries against the NEW version
+        // instead of resubmitting the stale `expected_version` (greptile P1).
         let _ = tx.rollback().await;
+        let current = reread_promotion_version(pool, &req.job_id).await?;
         return Err(NexusApiError::world_kb_conflict(
-            req.expected_version,
+            current,
             &req.job_id,
             "version",
             "refetch the candidates list and reapply",

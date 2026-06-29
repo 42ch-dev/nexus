@@ -770,3 +770,92 @@ async fn get_candidates_distinct_candidate_id_for_same_canonical_name() {
         "canonical_name stays the guessed display name"
     );
 }
+
+/// Regression for the V1.73 greploop iter-2 greptile P1: when a concurrent
+/// write bumps `kb_extract_jobs.version` between the outer version check and
+/// the promote-reject CAS UPDATE, the 409 conflict MUST report the re-read
+/// current version — NOT the stale `req.expected_version`. Otherwise the
+/// canvas client (`promotion-inspector.tsx`) resubmits with the same stale
+/// version and hits a second, avoidable conflict.
+///
+/// We force the CAS-miss path deterministically by firing two concurrent
+/// `reject` actions on the same pending candidate. On the current-thread
+/// `tokio::test` runtime, `tokio::join!` interleaves both futures at their
+/// await points, so BOTH outer reads see version V before EITHER CAS UPDATE
+/// runs; `SQLite` then serializes the writes — the first CAS wins (V → V+1,
+/// `pending` → `rejected`) and the second CAS affects 0 rows (the bug path).
+/// The losing 409 must therefore carry `current_version = V+1`, not the stale
+/// `expected_version = V`.
+#[tokio::test]
+async fn promote_reject_cas_miss_conflict_carries_bumped_version() {
+    let (_tmp, state) = fresh_state().await;
+    let candidate = insert_pending(
+        state.pool(),
+        "test_creator",
+        "ws",
+        "wld_test_world",
+        None,
+        None,
+        "character",
+        "Racea",
+        NOVEL_CHARACTER_BODY,
+    )
+    .await
+    .unwrap();
+    let stale_expected = u64::try_from(candidate.version).unwrap_or(0);
+
+    let mk_req = || WorldKbPromoteCandidateRequest {
+        job_id: candidate.job_id.clone(),
+        candidate_id: "kb_cand".to_string(),
+        action: "reject".to_string(),
+        expected_version: stale_expected,
+        merge_target_id: None,
+        patch: None,
+        idempotency_key: None,
+    };
+
+    // Two concurrent rejects against the same pending candidate. `join!`
+    // interleaves at await points on the current-thread runtime, so both
+    // outer reads observe version V before either CAS commits.
+    let (res_a, res_b) = tokio::join!(
+        promote_candidate(
+            State(state.clone()),
+            Path("wld_test_world".to_string()),
+            Json(mk_req()),
+        ),
+        promote_candidate(
+            State(state.clone()),
+            Path("wld_test_world".to_string()),
+            Json(mk_req()),
+        ),
+    );
+
+    // Exactly one CAS wins; the other hits the CAS-miss branch under test.
+    let (winner, loser) = match (res_a, res_b) {
+        (Ok(_), Err(e)) => (true, e),
+        (Err(e), Ok(_)) => (false, e),
+        (Ok(_), Ok(_)) => panic!("both rejects won the CAS — race did not serialize"),
+        (Err(a), Err(b)) => panic!(
+            "both rejects failed; neither reached the CAS-miss path. \
+             errors: a={a:?} b={b:?}"
+        ),
+    };
+    let _ = winner; // either order is fine; only the loser's 409 is asserted.
+
+    assert_eq!(loser.status_code(), axum::http::StatusCode::CONFLICT);
+    assert_eq!(loser.error_code(), "world_kb_conflict");
+    let details = loser.error_details().expect("conflict must carry details");
+    // The fix: `current_version` is re-read after the CAS miss, reflecting the
+    // winner's bump (V+1). Pre-fix this was the stale `expected_version` (V).
+    assert_eq!(
+        details["current_version"],
+        serde_json::json!(stale_expected + 1),
+        "CAS-miss 409 must report the re-read bumped version, not the stale expected_version"
+    );
+    assert_ne!(
+        details["current_version"],
+        serde_json::json!(stale_expected),
+        "regression: CAS-miss 409 echoed the stale expected_version"
+    );
+    assert_eq!(details["entity_id"], candidate.job_id);
+}
