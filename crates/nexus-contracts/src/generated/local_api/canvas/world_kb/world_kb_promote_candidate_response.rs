@@ -10,7 +10,7 @@ use crate::generated::local_api::canvas::world_kb::world_kb_entity_projection::W
 use crate::generated::local_api::canvas::world_kb::world_kb_extract_job_projection::WorldKbExtractJobProjection;
 
 /// `Success` response for `POST` /v1/local/worlds/{`world_id`}/kb/promote-candidate (`V1`.73). `entity` is the resulting (or null for reject) `KeyBlock`; `job` is the updated extract-job projection; `version` is the new per-row version.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct WorldKbPromoteCandidateResponse {
     #[serde(skip_serializing_if = "Option::is_none")]

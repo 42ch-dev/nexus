@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Inline array item type (auto-generated from schema)
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct ConflictResponseConflict {
     pub code: String,
@@ -23,7 +23,7 @@ pub struct ConflictResponseConflict {
     pub resolution_hint: Option<String>,
 }
 /// `Platform` conflict response for bundle push operations. `HTTP` 200 with success:false indicates a conflict requiring resolution. `See` hard-vs-soft-validation-v1.md §7.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct ConflictResponse {
     pub success: bool,

@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `Query` parameters for `GET` /v1/local/workspaces.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct ListWorkspacesQuery {
     #[serde(skip_serializing_if = "Option::is_none")]

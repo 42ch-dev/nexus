@@ -10,7 +10,7 @@ use crate::generated::local_api::kb::pagination_info::PaginationInfo;
 use crate::generated::local_api::workspace::workspace_summary::WorkspaceSummary;
 
 /// `Response` for `GET` /v1/local/workspaces.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct ListWorkspacesResponse {
     pub items: Vec<WorkspaceSummary>,

@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `Success` response for `Strategy` patch routes (`V1`.71). `Returns` the committed revision and any domain validation diagnostics produced during the patch.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct StrategyPatchResponse {
     pub new_revision: i64,

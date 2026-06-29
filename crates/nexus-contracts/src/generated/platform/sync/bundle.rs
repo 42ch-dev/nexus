@@ -10,7 +10,7 @@ use crate::generated::common::common_types::{BundleType, ManuscriptPhase};
 use crate::generated::platform::sync::delta::Delta;
 
 /// Inline array item type (auto-generated from schema)
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct BundleDeltaResult {
     pub delta_index: u64,
@@ -21,7 +21,7 @@ pub struct BundleDeltaResult {
     pub applied_entity_revision: Option<i64>,
 }
 /// `DeltaBundle` envelope containing delta operations for world synchronization. `Aligned` with bundle-envelope-schema-v1.md §5.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct Bundle {
     pub schema_version: u32,

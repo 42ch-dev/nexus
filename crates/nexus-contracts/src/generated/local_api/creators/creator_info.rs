@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `Creator` info row from local identity store.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct CreatorInfo {
     pub creator_id: String,

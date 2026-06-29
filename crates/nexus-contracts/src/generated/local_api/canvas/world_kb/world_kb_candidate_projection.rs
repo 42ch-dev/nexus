@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::generated::common::common_types::{BlockType};
 
 /// `Pending` promotion candidate projection for the `World` `KB` promotion inspector (`V1`.73). `Backed` by `kb_extract_jobs` + the pending `KeyBlock` row.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct WorldKbCandidateProjection {
     pub candidate_id: String,

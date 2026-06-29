@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `Provenance` edge projection derived from `kb_source_anchors` (`V1`.73). `Rendered` read-only on the canvas graph.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct WorldKbSourceAnchorProjection {
     pub source_anchor_id: String,

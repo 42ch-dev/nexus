@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::generated::common::common_types::{CreatorStatus, RegistrationSource};
 
 /// `Creator` entity - a first-class creative agent that can be user-owned or agent-registered. `Aligned` with data-model-v1.md §5.2.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct Creator {
     pub schema_version: u32,

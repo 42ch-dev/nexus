@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `Extract`-job projection returned after a promotion action (`V1`.73). `version` maps to `kb_extract_jobs`.version `CAS` column.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct WorldKbExtractJobProjection {
     pub job_id: String,

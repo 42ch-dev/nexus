@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::generated::local_api::works::chapters::chapter_status::ChapterStatus;
 
 /// `Request` body for `PATCH` /v1/local/works/{`work_id`}/chapters/{n} (`V1`.65 `P0`). `All` fields optional. `title` is rejected because it is display-only until `P0` materializes a title column.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct PatchChapterRequest {
     #[serde(skip_serializing_if = "Option::is_none")]

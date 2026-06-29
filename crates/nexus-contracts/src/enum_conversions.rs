@@ -17,6 +17,7 @@ use crate::generated::common::common_types::{
     ReferenceSourceType, RegistrationSource, ScanStatus, SelectionMode, StoryManifestStatus,
     SubscriptionTier, TimelineEventStatus, TimelineEventType, VerificationStatus, WorldStatus,
 };
+use crate::generated::local_api::canvas::world_kb::world_kb_relationship_kind::WorldKbRelationshipKind;
 use crate::generated::local_api::works::chapters::chapter_status::ChapterStatus;
 use crate::local::domain::runtime_mode::RuntimeMode;
 use std::fmt;
@@ -122,6 +123,55 @@ impl BlockType {
 impl fmt::Display for BlockType {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.as_str())
+    }
+}
+
+// V1.74: WorldKbRelationshipKind as_str + FromStr for daemon validation.
+impl WorldKbRelationshipKind {
+    #[must_use]
+    pub const fn as_str(&self) -> &'static str {
+        match self {
+            Self::AlliedWith => "allied_with",
+            Self::Opposes => "opposes",
+            Self::ParentOf => "parent_of",
+            Self::ChildOf => "child_of",
+            Self::MemberOf => "member_of",
+            Self::LocatedIn => "located_in",
+            Self::RulesOver => "rules_over",
+            Self::References => "references",
+            Self::Serves => "serves",
+            Self::RivalOf => "rival_of",
+            Self::MentorOf => "mentor_of",
+            Self::Custom => "custom",
+        }
+    }
+}
+
+impl fmt::Display for WorldKbRelationshipKind {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.as_str())
+    }
+}
+
+impl FromStr for WorldKbRelationshipKind {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "allied_with" => Ok(Self::AlliedWith),
+            "opposes" => Ok(Self::Opposes),
+            "parent_of" => Ok(Self::ParentOf),
+            "child_of" => Ok(Self::ChildOf),
+            "member_of" => Ok(Self::MemberOf),
+            "located_in" => Ok(Self::LocatedIn),
+            "rules_over" => Ok(Self::RulesOver),
+            "references" => Ok(Self::References),
+            "serves" => Ok(Self::Serves),
+            "rival_of" => Ok(Self::RivalOf),
+            "mentor_of" => Ok(Self::MentorOf),
+            "custom" => Ok(Self::Custom),
+            _ => Err(format!("Invalid WorldKbRelationshipKind: {s}")),
+        }
     }
 }
 
@@ -507,16 +557,6 @@ impl ChapterStatus {
             Self::Finalized => "finalized",
             Self::Published => "published",
         }
-    }
-}
-
-// The generated `ChapterStatus` enum does not derive `Default` (codegen does not
-// annotate enums with `#[default]`), so we provide the impl here rather than
-// hand-editing generated source.
-#[allow(clippy::derivable_impls)]
-impl Default for ChapterStatus {
-    fn default() -> Self {
-        Self::NotStarted
     }
 }
 

@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Inline array item type (auto-generated from schema)
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct WorkOutlineVolume {
     pub volume_id: i64,
@@ -16,7 +16,7 @@ pub struct WorkOutlineVolume {
     pub chapter_ids: Vec<i64>,
 }
 /// Inline array item type (auto-generated from schema)
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct WorkOutlineTimelineEvent {
     pub event_id: String,
@@ -27,14 +27,14 @@ pub struct WorkOutlineTimelineEvent {
     pub realizes_chapter_id: Option<i64>,
 }
 /// Inline array item type (auto-generated from schema)
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct WorkOutlineForeshadow {
     pub source_event_id: String,
     pub target_event_id: String,
 }
 /// `Canonical` read model for the `Work` outline + timeline (`V1`.72). `Exposes` the `outline_revision` and structured metadata needed by the `Canvas` `Outline`+`Timeline` surface.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct WorkOutline {
     pub work_id: String,

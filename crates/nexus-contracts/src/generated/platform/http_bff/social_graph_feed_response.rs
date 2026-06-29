@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Inline array item type (auto-generated from schema)
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct SocialGraphFeedResponseEntry {
     pub edge_id: String,
@@ -24,7 +24,7 @@ pub struct SocialGraphFeedResponseEntry {
     pub occurred_at: String,
 }
 /// `Paginated` personalized feed for social graph (platform plan 17). `Entries` are activity rows; shape may evolve per v1-spec.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct SocialGraphFeedResponse {
     pub schema_version: u32,

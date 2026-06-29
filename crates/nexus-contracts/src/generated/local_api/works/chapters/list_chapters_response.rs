@@ -10,7 +10,7 @@ use crate::generated::local_api::works::chapters::chapter_summary::ChapterSummar
 use crate::generated::local_api::kb::pagination_info::PaginationInfo;
 
 /// `Response` for `GET` /v1/local/works/{`work_id`}/chapters (`V1`.65 `P0`). `Cursor`-based pagination over `ChapterSummary` rows. `Uses` `items` key per `F`-`P3`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 #[serde(rename_all = "snake_case")]
 pub struct ListChaptersResponse {
     pub items: Vec<ChapterSummary>,
