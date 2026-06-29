@@ -303,6 +303,15 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
             },
             {
               onSuccess: () => setPromoteConflict(null),
+              onError: (error) => {
+                if (isWorldKbConflictError(error)) {
+                  const details = error.details;
+                  setPromoteConflict({
+                    ...promoteConflict,
+                    currentVersion: details.current_version,
+                  });
+                }
+              },
             },
           );
         }}
