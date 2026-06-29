@@ -128,7 +128,14 @@ export function usePatchWorldKbRelationship(worldId: string | undefined) {
       void qc.invalidateQueries({ queryKey: queryKeys.worldKb.graph(worldId ?? '') });
     },
     onError: (error) => {
-      if (!isWorldKbConflictError(error) && !isWorldKbValidationError(error)) {
+      if (isWorldKbConflictError(error)) {
+        // A 409 means the expected_version is stale (concurrent modification).
+        // Refetch the graph so the client reconciles to canonical state — this
+        // also covers the remove/delete path, where there is no draft to reapply
+        // but the UI must not stay on a stale snapshot. Callers (inspector/
+        // canvas) layer their own dismiss/clear-selection UX on top.
+        void qc.invalidateQueries({ queryKey: queryKeys.worldKb.graph(worldId ?? '') });
+      } else if (!isWorldKbValidationError(error)) {
         errorToast(error, 'Could not save relationship');
       }
     },

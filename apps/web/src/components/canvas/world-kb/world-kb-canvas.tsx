@@ -16,6 +16,7 @@ import {
   usePatchWorldKbRelationship,
   useWorldKbCandidates,
   useWorldKbGraph,
+  isWorldKbConflictError,
 } from '@/lib/canvas/use-world-kb-data';
 
 import { buildRelationshipRemoveRequest } from './relationship-inspector-logic';
@@ -151,6 +152,16 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
           setSelection(null);
         }
         bumpReseed();
+      },
+      onError: (error) => {
+        // A 409 on delete = the relationship changed concurrently. The hook's
+        // global onError already refetches the graph to canonical state; here we
+        // clear the selection so the inspector does not keep editing a stale row.
+        if (isWorldKbConflictError(error)) {
+          if (selection?.kind === 'relationship' && selection.relationship.relationship_id === rel.relationship_id) {
+            setSelection(null);
+          }
+        }
       },
     });
   };
