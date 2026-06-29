@@ -30,7 +30,6 @@ import type {
   PatchChapterRequest,
   PatchWorkRequest,
   PresetSummary,
-  PutChapterOutlineRequest,
   ScaffoldPresetRequest,
   ValidatePresetRequest,
   WorkSummary,
@@ -303,25 +302,6 @@ export function useChapterBody(
     queryKey: queryKeys.chapters.body(workId ?? '', chapter ?? 0, query),
     queryFn: () => client.getChapterBody(workId!, chapter!, query),
     enabled: Boolean(workId) && typeof chapter === 'number' && chapter > 0,
-  });
-}
-
-export function usePutChapterOutline(
-  workId: string | undefined,
-  chapter: number | undefined,
-  query?: ChapterContentQuery,
-) {
-  const client = useNexusClient();
-  const qc = useQueryClient();
-  const errorToast = useErrorToast();
-  return useMutation({
-    mutationFn: (request: PutChapterOutlineRequest) =>
-      client.putChapterOutline(workId!, chapter!, request, query),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: queryKeys.chapters.outlines() });
-      void qc.invalidateQueries({ queryKey: queryKeys.chapters.lists() });
-    },
-    onError: (error) => errorToast(error, 'Could not save outline'),
   });
 }
 

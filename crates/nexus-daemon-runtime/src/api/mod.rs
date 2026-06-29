@@ -403,8 +403,7 @@ fn works_routes() -> Router<WorkspaceState> {
                 )
                 .route(
                     "/{n}/outline",
-                    get(handlers::chapters::get_chapter_outline)
-                        .put(handlers::chapters::put_chapter_outline),
+                    get(handlers::chapters::get_chapter_outline),
                 )
                 .route("/{n}/body", get(handlers::chapters::get_chapter_body)),
         )

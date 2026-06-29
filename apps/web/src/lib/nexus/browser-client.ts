@@ -40,7 +40,6 @@ import type {
   OutlinePatchStructureRequest,
   PatchChapterRequest,
   PatchWorkRequest,
-  PutChapterOutlineRequest,
   ReloadPresetResponse,
   ScaffoldPresetRequest,
   ScaffoldPresetResponse,
@@ -268,18 +267,6 @@ export class BrowserClient implements NexusClient {
       query,
     );
   }
-  putChapterOutline(
-    workId: string,
-    chapter: number,
-    request: PutChapterOutlineRequest,
-    query?: ChapterContentQuery,
-  ): Promise<ChapterOutline> {
-    return this.put<ChapterOutline>(
-      `/v1/local/works/${encodeURIComponent(workId)}/chapters/${chapter}/outline`,
-      request,
-      query,
-    );
-  }
   patchChapter(
     workId: string,
     chapter: number,
@@ -391,10 +378,6 @@ export class BrowserClient implements NexusClient {
 
   private patch<T>(path: string, body: unknown, query?: object): Promise<T> {
     return this.request<T>('PATCH', `${path}${toQueryString(query)}`, body);
-  }
-
-  private put<T>(path: string, body: unknown, query?: object): Promise<T> {
-    return this.request<T>('PUT', `${path}${toQueryString(query)}`, body);
   }
 
   private delete<T>(path: string): Promise<T> {
