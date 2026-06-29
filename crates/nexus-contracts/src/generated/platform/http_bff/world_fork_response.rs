@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::generated::domain::fork_branch::ForkBranch;
 
 /// `Response` body for `POST` /v1/worlds/fork — created `ForkBranch` record.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct WorldForkResponse {
     pub schema_version: u32,

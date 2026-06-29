@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `Request` body for `POST` /v1/local/works/{`work_id`}/timeline/patch (`V1`.72). `Mutates` the `Work` timeline: add, remove, attach to chapter, or create foreshadow links.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct TimelinePatchEventRequest {
     pub work_id: String,

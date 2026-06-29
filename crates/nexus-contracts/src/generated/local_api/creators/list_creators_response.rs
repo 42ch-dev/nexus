@@ -10,7 +10,7 @@ use crate::generated::local_api::creators::creator_info::CreatorInfo;
 use crate::generated::local_api::kb::pagination_info::PaginationInfo;
 
 /// `Response` for `GET` /v1/local/creators.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ListCreatorsResponse {
     pub items: Vec<CreatorInfo>,

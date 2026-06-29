@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `Response` body for `GET`/`PUT` /v1/local/works/{`work_id`}/chapters/{n}/outline (`V1`.65 `P0`).
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ChapterOutline {
     pub work_id: String,

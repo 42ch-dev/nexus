@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM kb_relationships WHERE relationship_id = ? AND revision = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "9b201696402d8774a0a1779bfb74d215130509aae49af3dbe769b03e3b77b811"
+}

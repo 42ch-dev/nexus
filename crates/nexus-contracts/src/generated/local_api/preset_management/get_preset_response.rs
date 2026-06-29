@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `Response` for `GET` /v1/local/presets/{id} (`V1`.65 `P0`). `Returns` the preset manifest as raw `YAML` so clients can edit and `PATCH` it back.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct GetPresetResponse {
     pub id: String,

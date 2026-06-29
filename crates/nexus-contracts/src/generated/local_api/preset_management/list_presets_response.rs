@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::generated::local_api::preset_management::preset_summary::PresetSummary;
 
 /// `Response` for `GET` /v1/local/presets — presets grouped by source (embedded, system, user).
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ListPresetsResponse {
     pub embedded: Vec<PresetSummary>,

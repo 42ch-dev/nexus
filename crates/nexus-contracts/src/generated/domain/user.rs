@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::generated::common::common_types::{AccountStatus, SubscriptionTier};
 
 /// `End`-user account for authentication and platform identity. `Aligned` with data-model-v1.md §5.1.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct User {
     pub schema_version: u32,

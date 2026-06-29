@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// Inline array item type (auto-generated from schema)
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ExploreAiAnswerResponseCitation {
     pub title: String,
@@ -20,7 +20,7 @@ pub struct ExploreAiAnswerResponseCitation {
     pub entity_id: Option<String>,
 }
 /// `Response` for `Explore` `AI` `Q`&`A` with optional citations envelope (platform plan 19).
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ExploreAiAnswerResponse {
     pub schema_version: u32,
