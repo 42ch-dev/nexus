@@ -44,8 +44,8 @@ use nexus_local_db::kb_extract_job::{
 };
 use nexus_local_db::kb_relationships::{
     delete_relationship_in_tx, generate_relationship_id, get_relationship,
-    insert_relationship_in_tx, update_relationship_in_tx, InsertRelationshipParams,
-    KbRelationshipRow, UpdateRelationshipParams,
+    insert_relationship_in_tx, list_relationships_for_world, update_relationship_in_tx,
+    InsertRelationshipParams, KbRelationshipRow, UpdateRelationshipParams,
 };
 use nexus_local_db::kb_store::{self, cas_update_key_block_fields};
 use nexus_local_db::LocalDbError;
@@ -875,8 +875,33 @@ pub async fn get_graph(
     Ok(Json(WorldKbGraphResponse {
         entities,
         source_anchors,
-        relationships: Vec::new(),
+        relationships: project_relationships_for_world(state.pool(), &world_id)
+            .await?,
     }))
+}
+
+/// Read all relationships for the world and emit stored + derived symmetric-reverse
+/// projections.
+async fn project_relationships_for_world(
+    pool: &sqlx::SqlitePool,
+    world_id: &str,
+) -> Result<Vec<WorldKbRelationshipProjection>, NexusApiError> {
+    let rows = list_relationships_for_world(pool, world_id)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?;
+    let mut projections = Vec::with_capacity(rows.len() * 2);
+    for row in rows {
+        projections.push(project_relationship(&row, "stored"));
+        if row.symmetric != 0 {
+            let mut reverse = row.clone();
+            std::mem::swap(&mut reverse.source_entity_id, &mut reverse.target_entity_id);
+            projections.push(project_relationship(&reverse, "symmetric_reverse"));
+        }
+    }
+    Ok(projections)
 }
 
 #[derive(Debug, Deserialize)]
@@ -1053,6 +1078,7 @@ async fn patch_relationship_add(
         &input.target_entity_id,
     )
     .await?;
+    require_valid_source_anchors(pool, world_id, input.source_anchor_ids.as_deref()).await?;
 
     let relationship_id = generate_relationship_id();
     let mut tx = pool.begin().await.map_err(NexusApiError::from)?;
@@ -1061,14 +1087,14 @@ async fn patch_relationship_add(
         &InsertRelationshipParams {
             relationship_id: relationship_id.clone(),
             world_id: world_id.to_string(),
-            source_entity_id: input.source_entity_id,
-            target_entity_id: input.target_entity_id,
+            source_entity_id: input.source_entity_id.clone(),
+            target_entity_id: input.target_entity_id.clone(),
             relation_type: input.relation_type.as_str().to_string(),
-            custom_label: input.custom_label,
+            custom_label: input.custom_label.clone(),
             symmetric: input.symmetric,
             confidence: input.confidence,
-            source_anchor_ids: input.source_anchor_ids.unwrap_or_default(),
-            metadata: input.metadata,
+            source_anchor_ids: input.source_anchor_ids.clone().unwrap_or_default(),
+            metadata: input.metadata.clone(),
             created_at: now.to_string(),
             updated_at: now.to_string(),
         },
@@ -1123,6 +1149,7 @@ async fn patch_relationship_update(
         &input.target_entity_id,
     )
     .await?;
+    require_valid_source_anchors(pool, world_id, input.source_anchor_ids.as_deref()).await?;
 
     // Scope check: the row must belong to this world.
     let existing = get_relationship(pool, relationship_id)
@@ -1284,10 +1311,13 @@ async fn require_entities_in_world(
     }
 
     if !missing.is_empty() {
-        return Err(NexusApiError::NotFound(format!(
-            "entities not found in world {world_id}: {}",
-            missing.join(", ")
-        )));
+        return Err(NexusApiError::world_kb_validation_failed(
+            &[format!(
+                "entities not found in world {world_id}: {}",
+                missing.join(", ")
+            )],
+            &[],
+        ));
     }
     if !deleted.is_empty() {
         return Err(NexusApiError::world_kb_validation_failed(
@@ -1297,6 +1327,68 @@ async fn require_entities_in_world(
             )],
             &[],
         ));
+    }
+    Ok(())
+}
+
+/// Row shape for source-anchor validation lookups.
+#[derive(sqlx::FromRow)]
+struct AnchorValidationRow {
+    key_block_id: String,
+    source_work_id: Option<String>,
+}
+
+/// Verify every source-anchor projection id references a `KeyBlock` in the world
+/// that actually has provenance (`source_work_id IS NOT NULL`). Anchor ids use
+/// the V1.73 graph projection format `sa_<key_block_id>`.
+async fn require_valid_source_anchors(
+    pool: &sqlx::SqlitePool,
+    world_id: &str,
+    anchor_ids: Option<&[String]>,
+) -> Result<(), NexusApiError> {
+    let ids = anchor_ids.unwrap_or_default();
+    if ids.is_empty() {
+        return Ok(());
+    }
+
+    let mut key_block_ids = Vec::with_capacity(ids.len());
+    for id in ids {
+        let Some(kb_id) = id.strip_prefix("sa_") else {
+            return Err(NexusApiError::world_kb_validation_failed(
+                &[format!("source_anchor_id '{id}' is not a valid anchor projection id")],
+                &[],
+            ));
+        };
+        key_block_ids.push(kb_id.to_string());
+    }
+
+    // SAFETY: runtime query with a dynamic JSON array binding. The SQL is
+    // otherwise static; compile-time macros cannot bind a variable-length list.
+    let rows: Vec<AnchorValidationRow> = sqlx::query_as(
+        "SELECT key_block_id, source_work_id FROM kb_key_blocks \
+         WHERE world_id = ? AND key_block_id IN (SELECT value FROM json_each(?))",
+    )
+    .bind(world_id)
+    .bind(serde_json::to_string(&key_block_ids).unwrap_or_default())
+    .fetch_all(pool)
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: e.to_string(),
+    })?;
+
+    let mut errors = Vec::new();
+    for id in ids {
+        let kb_id = id.strip_prefix("sa_").unwrap_or(id);
+        match rows.iter().find(|r| r.key_block_id == kb_id) {
+            None => errors.push(format!("source anchor '{id}' does not reference an entity in this world")),
+            Some(row) if row.source_work_id.is_none() => errors.push(format!("source anchor '{id}' references an entity without provenance")),
+            Some(_) => {}
+        }
+    }
+
+    if !errors.is_empty() {
+        return Err(NexusApiError::world_kb_validation_failed(&errors, &[]));
     }
     Ok(())
 }
