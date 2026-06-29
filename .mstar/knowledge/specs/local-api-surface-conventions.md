@@ -217,25 +217,48 @@ Do not introduce a `chapters` array key. Chapter list ordering defaults to
 `volume ASC, chapter ASC`; optional filters such as `status` must preserve cursor
 semantics and return `chapter_cursor_invalid` / validation errors for bad input.
 
-### 6.2 Outline PUT is atomic file write + DB metadata update
+### 6.2 Outline-prose `set.content` persistence is atomic file write + DB metadata update (V1.75)
 
-`PUT /v1/local/works/{work_id}/chapters/{n}/outline` is the only writable
-chapter-file route in V1.65. It MUST:
+The V1.65 `PUT /v1/local/works/{work_id}/chapters/{n}/outline` whole-document
+write route is **removed in V1.75** (canvas-pivot). Outline prose writes now go
+through the canvas patch route
+`POST /v1/local/works/{work_id}/chapters/{chapter_id}/patch` with `set.content`
++ `base_revision` (`outline_revision` CAS) — see §7 (V1.75 amendment) and
+[canvas-strategy-surface.md](canvas-strategy-surface.md) §3.5. The atomic-write
+invariants that this section historically attached to the removed PUT are still
+normative; they are re-anchored to the PATCH content path below and enforced by
+`crates/nexus-daemon-runtime/src/api/handlers/outline.rs::apply_chapter_patch`
+(the `atomic_write_outline` call: sibling temp + rename + file fsync + directory
+fsync, run while the caller holds a `RuntimeLockGuard`).
+
+When `set.content` is present on an `outline.patch_chapter` request, the handler
+MUST:
 
 1. Load the target `outline_path` from `work_chapters` after Work ownership is
-   verified. If absent, initialize the canonical seed path explicitly.
+   verified. If absent, initialize the canonical seed path
+   (`update_outline_path`) and seed it in the same finalization path as the
+   write metadata update.
 2. Resolve that path under the active workspace root and apply the path guard in
    §6.5 before creating directories or writing bytes.
-3. Write to a sibling temp file, flush/sync, then atomically rename over the
-   final outline file, mirroring the reconcile atomic write pattern in
+3. Write `content` to a sibling temp file, flush/sync, then atomically rename it
+   over the final outline file (`atomic_write_outline`: temp + rename + file
+   fsync + directory fsync), mirroring the reconcile atomic write pattern in
    `work_chapters::sync_frontmatter_status`.
-4. Update `work_chapters.outline_path` and `updated_at` in the same transactional
-   finalization path as the file rename. Failed DB update or failed rename must
-   clean up the temp file where possible and must not report success.
-5. Return the committed outline DTO, not a speculative echo.
+4. Persist `work_chapters.outline_path` and `updated_at`, and bump
+   `frontmatter.outline_revision`, in the same transactional finalization path
+   as the file rename so subsequent reads return the new revision. Failed DB
+   update or failed rename must clean up the temp file where possible and must
+   not report success.
+5. Hold the per-Work `RuntimeLockGuard` across the validate → DB persist →
+   frontmatter mutate → outline-path seed/write sequence, releasing it on every
+   exit path (success and error). Body-ownership invariant: handlers MUST NOT
+   mutate `body_path` or body markdown files (see §6.4).
+6. Return the committed patch response (`OutlinePatchResponse` with
+   `new_revision`), not a speculative echo.
 
-Successful outline PUT MUST NOT automatically change chapter `status`. Status is
-author-controlled through the explicit chapter structure route.
+A successful outline-prose patch MUST NOT automatically change chapter `status`.
+Status is author-controlled through the explicit chapter structure route /
+`outline.patch_chapter` metadata fields.
 
 ### 6.3 Structure PATCH status and protection rules
 
@@ -279,7 +302,8 @@ until resolved. Every outline/body read or write route MUST:
    through to an arbitrary filesystem error.
 
 This mirrors the W-002 defense-in-depth guard in
-`host_tool_handlers.rs` for body reads and applies it to the new outline PUT.
+`host_tool_handlers.rs` for body reads and applies it to outline writes (V1.75:
+the `outline.patch_chapter set.content` path — see §6.2).
 
 ### 6.6 Soft concurrency semantics
 
