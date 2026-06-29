@@ -823,10 +823,9 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         let (world_id, source_id, _target_id) = seed_world_and_entities(&pool).await;
 
-        let resolved =
-            resolve_entity_by_canonical_name(&pool, &world_id, "KB_SOURCE", None)
-                .await
-                .unwrap();
+        let resolved = resolve_entity_by_canonical_name(&pool, &world_id, "KB_SOURCE", None)
+            .await
+            .unwrap();
         assert_eq!(resolved.as_deref(), Some(source_id.as_str()));
     }
 
@@ -835,10 +834,9 @@ mod tests {
         let (pool, _dir) = fresh_pool().await;
         let (world_id, _source_id, _target_id) = seed_world_and_entities(&pool).await;
 
-        let resolved =
-            resolve_entity_by_canonical_name(&pool, &world_id, "nonexistent", None)
-                .await
-                .unwrap();
+        let resolved = resolve_entity_by_canonical_name(&pool, &world_id, "nonexistent", None)
+            .await
+            .unwrap();
         assert!(resolved.is_none());
     }
 
@@ -901,12 +899,30 @@ mod tests {
         let now = chrono::Utc::now().to_rfc3339();
 
         let _ = upsert_extraction_relationship(
-            &pool, &world_id, &source_id, &target_id, "custom", Some("bond"), true, None, None, &now,
+            &pool,
+            &world_id,
+            &source_id,
+            &target_id,
+            "custom",
+            Some("bond"),
+            true,
+            None,
+            None,
+            &now,
         )
         .await
         .unwrap();
         let second = upsert_extraction_relationship(
-            &pool, &world_id, &source_id, &target_id, "custom", Some("oath"), true, None, None, &now,
+            &pool,
+            &world_id,
+            &source_id,
+            &target_id,
+            "custom",
+            Some("oath"),
+            true,
+            None,
+            None,
+            &now,
         )
         .await
         .unwrap();
