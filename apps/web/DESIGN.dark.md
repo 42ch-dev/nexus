@@ -227,6 +227,15 @@ components:
     canvas-worldkb-nonspatial-row-highlight: "#1F1F1E"
     canvas-worldkb-focus-ring: "{colors.blue-700}"
     canvas-worldkb-relationship-edge: "#64748B"
+    canvas-worldkb-relationship-edge-default: "#64748B"
+    canvas-worldkb-relationship-edge-symmetric: "#A78BFA"
+    canvas-worldkb-relationship-edge-custom: "#F472B6"
+    canvas-worldkb-relationship-confidence-low: "#FF6B6B"
+    canvas-worldkb-relationship-confidence-mid: "#FFC043"
+    canvas-worldkb-relationship-confidence-high: "#54D58A"
+    canvas-worldkb-relationship-grounded-badge: "rgba(82,168,255,0.14)"
+    canvas-worldkb-relationship-asserted-badge: "rgba(183,148,255,0.14)"
+    canvas-worldkb-relationship-inspector-fill: "#1A1A1A"
 ---
 
 # Nexus Local Web UI Design System — Dark Theme

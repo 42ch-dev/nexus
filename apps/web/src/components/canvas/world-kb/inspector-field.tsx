@@ -8,14 +8,15 @@ import { Label } from '@/components/ui/label';
 
 interface FieldProps {
   label: string;
+  htmlFor?: string;
   error?: string;
   children: React.ReactNode;
 }
 
-export function Field({ label, error, children }: FieldProps) {
+export function Field({ label, htmlFor, error, children }: FieldProps) {
   return (
     <div className="flex flex-col gap-1">
-      <Label className="text-copy-13 text-gray-700">{label}</Label>
+      <Label htmlFor={htmlFor} className="text-copy-13 text-gray-700">{label}</Label>
       {children}
       {error && <span className="text-copy-12 text-red-700">{error}</span>}
     </div>

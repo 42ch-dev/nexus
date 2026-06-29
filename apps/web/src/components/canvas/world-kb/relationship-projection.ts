@@ -56,6 +56,12 @@ export function deriveRelationshipEdges(
       promotionState: undefined,
     };
     const label = relationshipEdgeLabel(rel);
+    const strokeColor = rel.relation_type === 'custom'
+      ? 'var(--color-canvas-worldkb-relationship-edge-custom)'
+      : rel.symmetric
+        ? 'var(--color-canvas-worldkb-relationship-edge-symmetric)'
+        : 'var(--color-canvas-worldkb-relationship-edge-default)';
+    const style = { stroke: strokeColor };
     return {
       id: `relationship:${rel.relationship_id}:${rel.projection_direction}`,
       source: `entity:${source}`,
@@ -65,6 +71,7 @@ export function deriveRelationshipEdges(
       data,
       selectable: true,
       focusable: true,
+      style,
     } satisfies Edge;
   });
 }
