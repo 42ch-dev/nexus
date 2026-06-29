@@ -26,7 +26,7 @@ import type {
 
 import { RELATIONSHIP_KIND_LABELS } from './relationship-projection';
 import { Field } from './inspector-field';
-import { RelationshipAnchorPicker } from './relationship-anchor-picker';
+import { RelationshipFieldGrid } from './relationship-inspector-field-grid';
 import {
   CORE_KINDS,
   type RelationshipForm,
@@ -209,37 +209,12 @@ export function RelationshipInspector({
           </Field>
         )}
 
-        <label className="flex items-center gap-2 text-copy-14 text-gray-1000">
-          <input
-            type="checkbox"
-            className="h-4 w-4 rounded border-gray-alpha-400"
-            checked={form.symmetric}
-            onChange={(e) => setForm((f) => ({ ...f, symmetric: e.target.checked }))}
-          />
-          Symmetric (show reverse edge)
-        </label>
-
-        <Field label={`Confidence: ${form.confidence.toFixed(2)}`} htmlFor="rel-confidence" error={errors.confidence}>
-          <Input
-            id="rel-confidence"
-            type="number"
-            min={0}
-            max={1}
-            step={0.01}
-            value={form.confidence}
-            onChange={(e) => setForm((f) => ({ ...f, confidence: Number(e.target.value) }))}
-            invalid={Boolean(errors.confidence)}
-          />
-        </Field>
-
-        <Field label="Grounding anchors" htmlFor="rel-anchors">
-          <RelationshipAnchorPicker
-            id="rel-anchors"
-            anchors={anchors}
-            selectedIds={form.sourceAnchorIds}
-            onChange={(ids) => setForm((f) => ({ ...f, sourceAnchorIds: ids }))}
-          />
-        </Field>
+        <RelationshipFieldGrid
+          form={form}
+          errors={errors}
+          anchors={anchors}
+          onChange={(patch) => setForm((f) => ({ ...f, ...patch }))}
+        />
       </div>
 
       {submitError && <p className="text-copy-13 text-red-700">{submitError}</p>}

@@ -65,3 +65,17 @@ export function formatRelative(ts: number): string {
   const hrs = Math.round(mins / 60);
   return hrs < 24 ? `${hrs}h ago` : `${Math.round(hrs / 24)}d ago`;
 }
+
+export function formatUpdated(iso: string | undefined): string {
+  if (!iso) return '—';
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '—';
+  const diff = Date.now() - t;
+  const mins = Math.round(diff / 60_000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.round(hrs / 24);
+  return `${days}d ago`;
+}

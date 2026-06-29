@@ -6,6 +6,7 @@
  */
 import type {
   WorldKbEntityProjection,
+  WorldKbPatchRelationshipRequest as RelationshipPatchRequest,
   WorldKbRelationshipKind,
   WorldKbRelationshipProjection,
 } from '@42ch/nexus-contracts';
@@ -84,21 +85,6 @@ export function validateRelationshipForm(form: RelationshipForm): RelationshipFo
     next.confidence = 'Confidence must be between 0 and 1.';
   }
   return next;
-}
-
-export interface RelationshipPatchRequest {
-  relationship_id?: string;
-  action: 'add' | 'update' | 'remove';
-  expected_version?: number;
-  relationship?: {
-    source_entity_id: string;
-    target_entity_id: string;
-    relation_type: WorldKbRelationshipKind;
-    custom_label?: string;
-    symmetric: boolean;
-    confidence?: number;
-    source_anchor_ids: string[];
-  };
 }
 
 export function buildRelationshipPatchRequest(
