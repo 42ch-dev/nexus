@@ -7,9 +7,11 @@
  * export are unchanged.
  */
 import { useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 
 import { EmptyState, ErrorState, LoadingState } from '@/components/ui/states';
 import { useChapters, useWork, flattenPages } from '@/api/queries';
+import { queryKeys } from '@/lib/nexus/query-keys';
 import {
   isOutlineConflictError,
   usePatchOutlineChapter,
@@ -33,9 +35,15 @@ import type {
 
 export interface OutlineCanvasProps {
   workId: string;
+  /**
+   * Optional chapter id to preselect on mount (V1.75 F-QC3-001). Read once from
+   * the route's `?chapter=N` query param by {@link OutlinePage} and used to
+   * seed {@link selectedChapterId}; later user clicks override it normally.
+   */
+  initialSelectedChapterId?: number | null;
 }
 
-export function OutlineCanvas({ workId }: OutlineCanvasProps) {
+export function OutlineCanvas({ workId, initialSelectedChapterId = null }: OutlineCanvasProps) {
   const work = useWork(workId);
   const chaptersQuery = useChapters(workId);
   const outline = useWorkOutline(workId);
@@ -44,8 +52,14 @@ export function OutlineCanvas({ workId }: OutlineCanvasProps) {
   const patchChapter = usePatchOutlineChapter(workId);
   const patchTimeline = usePatchTimelineEvent(workId);
 
-  const [selectedChapterId, setSelectedChapterId] = useState<number | null>(null);
+  const [selectedChapterId, setSelectedChapterId] = useState<number | null>(
+    initialSelectedChapterId ?? null,
+  );
   const [conflict, setConflict] = useState<ConflictState | null>(null);
+  const qc = useQueryClient();
+  // Bumped after a successful refetch so the inspector's content editor resets
+  // its local dirty state (e.g. following conflict resolution / reapply).
+  const [contentVersion, setContentVersion] = useState(0);
 
   const chapters = useMemo(() => flattenPages(chaptersQuery.data), [chaptersQuery.data]);
   const chapterById = useMemo(() => {
@@ -101,9 +115,24 @@ export function OutlineCanvas({ workId }: OutlineCanvasProps) {
     });
   }
 
-  function onUseCurrent() {
+  async function onUseCurrent() {
     setConflict(null);
-    void outline.refetch();
+    await outline.refetch();
+    // Also invalidate the per-chapter outline cache (useChapterOutline, read by
+    // the content editor). The work-level outline.refetch() above does NOT touch
+    // the chapter outline query; without this invalidation the forced content
+    // reset below would reload stale chapter prose — silently showing outdated
+    // content when another writer concurrently edited the same chapter. The
+    // content editor's content-sync effect guards on outline.isFetching, so it
+    // waits for this refetch before applying the forced reset.
+    void qc.invalidateQueries({
+      queryKey: [...queryKeys.chapters.outlines(), workId],
+    });
+    // Force the content editor to discard its draft and reload the canonical
+    // content. contentVersion is no longer bumped on ordinary patches, so this
+    // bump is a reliable forced-reset signal that overrides the editor's
+    // dirty/saving guard.
+    setContentVersion((v) => v + 1);
   }
 
   function onDismiss() {
@@ -206,6 +235,9 @@ export function OutlineCanvas({ workId }: OutlineCanvasProps) {
                 volume_id: volumeId,
               })
             }
+            patchIsPending={patchChapter.isPending}
+            isConflicting={conflict !== null}
+            contentVersion={contentVersion}
           />
 
           <TimelinePanel

@@ -23,4 +23,6 @@ pub struct OutlinePatchChapterSet {
     pub volume: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub status: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub content: Option<String>,
 }

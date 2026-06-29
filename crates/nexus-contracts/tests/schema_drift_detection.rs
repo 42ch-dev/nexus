@@ -267,11 +267,6 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             ChapterOutline
         ),
         entry!(
-            "schemas/local-api/works/chapters/put-chapter-outline-request.schema.json",
-            Strict,
-            PutChapterOutlineRequest
-        ),
-        entry!(
             "schemas/local-api/works/chapters/patch-chapter-request.schema.json",
             Strict,
             PatchChapterRequest

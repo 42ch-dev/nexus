@@ -19,4 +19,5 @@ export interface OutlinePatchChapterSet {
   actual_word_count?: number;
   volume?: number;
   status?: OutlinePatchChapterSetStatus;
+  content?: string;
 }

@@ -4,6 +4,7 @@
 //! All writes are transaction-aware (`*_in_tx`) so they can compose atomically
 //! with sibling operations if needed.
 
+use crate::cas::cas_check_with_version_column;
 use crate::LocalDbError;
 use sqlx::SqlitePool;
 
@@ -60,20 +61,23 @@ pub struct UpdateRelationshipParams {
     pub updated_at: String,
 }
 
-fn bool_to_i64(v: bool) -> i64 {
+pub(crate) fn bool_to_i64(v: bool) -> i64 {
     i64::from(v)
 }
 
 #[cfg(test)]
-fn i64_to_bool(v: i64) -> bool {
+const fn i64_to_bool(v: i64) -> bool {
     v != 0
 }
 
-fn serialize_string_array(ids: &[String]) -> String {
+pub(crate) fn serialize_string_array(ids: &[String]) -> String {
     serde_json::to_string(ids).unwrap_or_else(|_| "[]".to_string())
 }
 
 /// Insert a new `kb_relationships` row inside a caller-managed transaction.
+///
+/// Returns the inserted row (revision 0) so callers can project it without a
+/// post-commit re-read.
 ///
 /// # Errors
 ///
@@ -81,7 +85,7 @@ fn serialize_string_array(ids: &[String]) -> String {
 pub async fn insert_relationship_in_tx(
     tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
     params: &InsertRelationshipParams,
-) -> Result<u64, LocalDbError> {
+) -> Result<KbRelationshipRow, LocalDbError> {
     let symmetric_i64 = bool_to_i64(params.symmetric);
     let source_anchor_json = serialize_string_array(&params.source_anchor_ids);
     let metadata_json = params
@@ -113,14 +117,33 @@ pub async fn insert_relationship_in_tx(
     .execute(&mut **tx)
     .await?;
 
-    Ok(0)
+    Ok(KbRelationshipRow {
+        relationship_id: params.relationship_id.clone(),
+        world_id: params.world_id.clone(),
+        source_entity_id: params.source_entity_id.clone(),
+        target_entity_id: params.target_entity_id.clone(),
+        relation_type: params.relation_type.clone(),
+        custom_label: params.custom_label.clone(),
+        symmetric: symmetric_i64,
+        confidence: params.confidence,
+        source_anchor_ids: Some(source_anchor_json),
+        metadata: metadata_json,
+        created_at: params.created_at.clone(),
+        updated_at: params.updated_at.clone(),
+        revision: 0,
+    })
 }
 
 /// CAS-update a `kb_relationships` row inside a caller-managed transaction.
 ///
 /// The update only applies when `revision = expected_revision`. On mismatch,
 /// returns [`LocalDbError::VersionMismatch`] with the actual current revision.
-/// On success the revision is bumped to `expected_revision + 1`.
+/// On success the revision is bumped to `expected_revision + 1` and the
+/// updated row is returned so callers can project it without a post-commit
+/// re-read.
+///
+/// `existing` supplies the immutable columns (`world_id`, `source_entity_id`,
+/// `target_entity_id`, `created_at`) that are not part of the update payload.
 ///
 /// # Errors
 ///
@@ -131,7 +154,8 @@ pub async fn update_relationship_in_tx(
     relationship_id: &str,
     params: &UpdateRelationshipParams,
     expected_revision: i64,
-) -> Result<u64, LocalDbError> {
+    existing: &KbRelationshipRow,
+) -> Result<KbRelationshipRow, LocalDbError> {
     let new_revision = expected_revision + 1;
     let symmetric_i64 = bool_to_i64(params.symmetric);
     let source_anchor_json = serialize_string_array(&params.source_anchor_ids);
@@ -166,20 +190,31 @@ pub async fn update_relationship_in_tx(
     .execute(&mut **tx)
     .await?;
 
-    if result.rows_affected() == 1 {
-        return Ok(u64::try_from(new_revision).unwrap_or(0));
-    }
+    cas_check_with_version_column(
+        &mut **tx,
+        result.rows_affected(),
+        "kb_relationships",
+        "relationship_id",
+        relationship_id,
+        "revision",
+        expected_revision,
+    )
+    .await?;
 
-    let current: Option<Option<i64>> =
-        sqlx::query_scalar("SELECT revision FROM kb_relationships WHERE relationship_id = ?")
-            .bind(relationship_id)
-            .fetch_optional(&mut **tx)
-            .await?;
-    Err(LocalDbError::VersionMismatch {
-        table: "kb_relationships".to_string(),
-        id: relationship_id.to_string(),
-        expected: expected_revision,
-        actual: current.map(|rev| rev.unwrap_or(0)),
+    Ok(KbRelationshipRow {
+        relationship_id: relationship_id.to_string(),
+        world_id: existing.world_id.clone(),
+        source_entity_id: existing.source_entity_id.clone(),
+        target_entity_id: existing.target_entity_id.clone(),
+        relation_type: params.relation_type.clone(),
+        custom_label: params.custom_label.clone(),
+        symmetric: symmetric_i64,
+        confidence: params.confidence,
+        source_anchor_ids: Some(source_anchor_json),
+        metadata: metadata_json,
+        created_at: existing.created_at.clone(),
+        updated_at: params.updated_at.clone(),
+        revision: new_revision,
     })
 }
 
@@ -205,21 +240,18 @@ pub async fn delete_relationship_in_tx(
     .execute(&mut **tx)
     .await?;
 
-    if result.rows_affected() == 1 {
-        return Ok(());
-    }
+    cas_check_with_version_column(
+        &mut **tx,
+        result.rows_affected(),
+        "kb_relationships",
+        "relationship_id",
+        relationship_id,
+        "revision",
+        expected_revision,
+    )
+    .await?;
 
-    let current: Option<Option<i64>> =
-        sqlx::query_scalar("SELECT revision FROM kb_relationships WHERE relationship_id = ?")
-            .bind(relationship_id)
-            .fetch_optional(&mut **tx)
-            .await?;
-    Err(LocalDbError::VersionMismatch {
-        table: "kb_relationships".to_string(),
-        id: relationship_id.to_string(),
-        expected: expected_revision,
-        actual: current.map(|rev| rev.unwrap_or(0)),
-    })
+    Ok(())
 }
 
 /// Read one relationship row by id.
@@ -414,8 +446,10 @@ mod tests {
         .unwrap();
         tx.commit().await.unwrap();
 
+        let existing = get_relationship(&pool, &rel_id).await.unwrap();
+
         let mut tx = pool.begin().await.unwrap();
-        let new_version = update_relationship_in_tx(
+        let row = update_relationship_in_tx(
             &mut tx,
             &rel_id,
             &UpdateRelationshipParams {
@@ -428,12 +462,15 @@ mod tests {
                 updated_at: chrono::Utc::now().to_rfc3339(),
             },
             0,
+            &existing,
         )
         .await
         .unwrap();
         tx.commit().await.unwrap();
 
-        assert_eq!(new_version, 1);
+        assert_eq!(row.revision, 1);
+        assert_eq!(row.relation_type, "opposes");
+        assert!(i64_to_bool(row.symmetric));
         let row = get_relationship(&pool, &rel_id).await.unwrap();
         assert_eq!(row.relation_type, "opposes");
         assert!(i64_to_bool(row.symmetric));
@@ -467,6 +504,7 @@ mod tests {
         .unwrap();
         tx.commit().await.unwrap();
 
+        let existing = get_relationship(&pool, &rel_id).await.unwrap();
         let mut tx = pool.begin().await.unwrap();
         let err = update_relationship_in_tx(
             &mut tx,
@@ -481,6 +519,7 @@ mod tests {
                 updated_at: chrono::Utc::now().to_rfc3339(),
             },
             99,
+            &existing,
         )
         .await
         .unwrap_err();

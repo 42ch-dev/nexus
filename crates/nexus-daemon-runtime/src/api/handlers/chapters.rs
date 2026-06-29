@@ -15,17 +15,11 @@ use axum::Json;
 use nexus_contracts::{
     ChapterBody, ChapterContentQuery, ChapterDetail, ChapterOutline, ChapterProtection,
     ChapterStatus, ChapterSummary, ListChaptersQuery, ListChaptersResponse, PaginationInfo,
-    PatchChapterRequest, PutChapterOutlineRequest,
+    PatchChapterRequest,
 };
 use nexus_local_db::work_chapters::{self, PatchChapterParams, WorkChapterRecord};
 use nexus_local_db::works;
 use std::path::{Path as StdPath, PathBuf};
-
-#[cfg(test)]
-use std::sync::atomic::{AtomicBool, Ordering};
-
-#[cfg(test)]
-static TEST_UPDATE_OUTLINE_PATH_FAIL: AtomicBool = AtomicBool::new(false);
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -261,7 +255,12 @@ async fn read_guarded_file(
 
 /// Atomically write `content` to `rel_path` under `workspace_root`, creating
 /// parent directories as needed. Mirrors `work_chapters::sync_frontmatter_status`.
-async fn atomic_write_outline(
+///
+/// Reused by the outline canvas `patch_chapter` handler (V1.75 A2) to persist
+/// per-chapter outline prose to the `outline_path` markdown file, so the
+/// temp+rename+file fsync+dir fsync durability pattern stays identical for
+/// every chapter-file write path.
+pub(crate) async fn atomic_write_outline(
     workspace_root: &StdPath,
     rel_path: &str,
     content: &str,
@@ -470,93 +469,6 @@ pub async fn get_chapter_outline(
     }))
 }
 
-/// `PUT /v1/local/works/{work_id}/chapters/{n}/outline` — replace outline atomically.
-pub async fn put_chapter_outline(
-    State(state): State<WorkspaceState>,
-    Path((work_id, n)): Path<(String, String)>,
-    Query(query): Query<ChapterContentQuery>,
-    Json(req): Json<PutChapterOutlineRequest>,
-) -> Result<Json<ChapterOutline>, NexusApiError> {
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-    let _workspace_slug = read_active_workspace_slug(state.nexus_home(), &creator_id)
-        .ok_or(NexusApiError::AuthRequired)?;
-
-    let work = load_work(&state, &creator_id, &work_id).await?;
-    let chapter = parse_chapter(&n)?;
-    let volume = i32::try_from(query.volume.unwrap_or(1)).unwrap_or(1);
-
-    let record = work_chapters::get_chapter(state.pool(), &work_id, chapter, volume)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?
-        .ok_or_else(|| NexusApiError::NotFound(format!("chapter {chapter} volume {volume}")))?;
-
-    let work_ref = work.work_ref.ok_or_else(|| NexusApiError::Internal {
-        code: "WORK_REF_MISSING".to_string(),
-        message: format!("work {work_id} has no work_ref"),
-    })?;
-
-    let outline_path = record
-        .outline_path
-        .clone()
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| format!("Works/{work_ref}/Outlines/chapters/ch{chapter:02}-outline.md"));
-
-    let workspace_root = workspace_root(&state)?;
-
-    // Acquire runtime lock before mutating file + DB.
-    let lock = RuntimeLockGuard::acquire(state.pool(), &creator_id, &work_id).await?;
-
-    // Test-only seam: simulate a DB-update failure to verify the file is not
-    // written before the metadata is persisted.
-    #[cfg(test)]
-    if TEST_UPDATE_OUTLINE_PATH_FAIL.load(Ordering::SeqCst) {
-        lock.release().await;
-        return Err(NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: "simulated update_outline_path failure".to_string(),
-        });
-    }
-
-    // Persist the metadata first, then write the file. If the DB update fails,
-    // no file is created; if the file write fails after the DB commit, the DB
-    // points to the intended path and a retry PUT is idempotent.
-    let result: Result<(String, String, String), NexusApiError> = async {
-        let now = chrono::Utc::now().to_rfc3339();
-        work_chapters::update_outline_path(
-            state.pool(),
-            &work_id,
-            chapter,
-            volume,
-            Some(&outline_path),
-            &now,
-        )
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?;
-        atomic_write_outline(&workspace_root, &outline_path, &req.content).await?;
-        Ok((now, outline_path, req.content))
-    }
-    .await;
-
-    lock.release().await;
-    let (now, outline_path, content) = result?;
-
-    Ok(Json(ChapterOutline {
-        work_id: record.work_id,
-        chapter: i64::from(record.chapter),
-        volume: i64::from(record.volume.unwrap_or(1)),
-        outline_path,
-        content,
-        updated_at: now,
-    }))
-}
-
 /// `PATCH /v1/local/works/{work_id}/chapters/{n}` — partial structure update.
 pub async fn patch_chapter(
     State(state): State<WorkspaceState>,
@@ -733,23 +645,6 @@ mod tests {
     use super::*;
     use crate::api::handlers::works::{create_work, CreateWorkRequest};
     use axum::extract::{Path as AxumPath, Query as AxumQuery, State as AxumState};
-
-    /// RAII guard that enables the simulated `update_outline_path` failure and
-    /// disables it when dropped, even if the test panics.
-    struct FailpointGuard;
-
-    impl FailpointGuard {
-        fn enable() -> Self {
-            TEST_UPDATE_OUTLINE_PATH_FAIL.store(true, Ordering::SeqCst);
-            Self
-        }
-    }
-
-    impl Drop for FailpointGuard {
-        fn drop(&mut self) {
-            TEST_UPDATE_OUTLINE_PATH_FAIL.store(false, Ordering::SeqCst);
-        }
-    }
 
     async fn setup_chapter_work() -> (
         crate::workspace::WorkspaceState,
@@ -979,74 +874,6 @@ mod tests {
         assert!(
             !resp.can_edit_outline,
             "an outline_path that escapes the workspace root must not be editable"
-        );
-    }
-
-    // Both outline-PUT tests share the global `TEST_UPDATE_OUTLINE_PATH_FAIL`
-    // failpoint (one sets it, the other is vulnerable to it). Serialize them so
-    // the flag cannot leak across threads under the default multi-threaded test
-    // runner — without this, `put_outline_creates_file_and_updates_path` flakes
-    // when the DB-failure test's guard is concurrently held.
-    #[tokio::test]
-    #[serial_test::serial]
-    async fn put_outline_creates_file_and_updates_path() {
-        let (state, _tmp, work_id) = setup_chapter_work().await;
-        let root = state.workspace_path().expect("workspace path");
-
-        let req = PutChapterOutlineRequest {
-            content: "# Chapter 1\n\nOutline text.".to_string(),
-        };
-        let _ = put_chapter_outline(
-            AxumState(state.clone()),
-            AxumPath((work_id.clone(), "1".to_string())),
-            AxumQuery(ChapterContentQuery { volume: None }),
-            axum::Json(req),
-        )
-        .await
-        .expect("put outline");
-
-        let file_path = std::path::PathBuf::from(&root)
-            .join("Works/test-novel/Outlines/chapters/ch01-outline.md");
-        assert!(file_path.exists(), "outline file should be created");
-
-        let resp = get_chapter_outline(
-            AxumState(state),
-            AxumPath((work_id, "1".to_string())),
-            AxumQuery(ChapterContentQuery { volume: None }),
-        )
-        .await
-        .expect("get outline");
-        assert!(resp.content.contains("Outline text"));
-    }
-
-    #[tokio::test]
-    #[serial_test::serial]
-    async fn put_outline_db_failure_does_not_write_file() {
-        let (state, _tmp, work_id) = setup_chapter_work().await;
-        let root = state.workspace_path().expect("workspace path");
-
-        // Enable simulated DB-update failure. The guard disables the failpoint
-        // on drop so subsequent tests are unaffected, even if this test panics.
-        let _guard = FailpointGuard::enable();
-
-        let req = PutChapterOutlineRequest {
-            content: "# Chapter 1\n\nOutline text.".to_string(),
-        };
-        let result = put_chapter_outline(
-            AxumState(state.clone()),
-            AxumPath((work_id, "1".to_string())),
-            AxumQuery(ChapterContentQuery { volume: None }),
-            axum::Json(req),
-        )
-        .await;
-
-        assert!(result.is_err(), "expected DB failure error");
-
-        let file_path = std::path::PathBuf::from(&root)
-            .join("Works/test-novel/Outlines/chapters/ch01-outline.md");
-        assert!(
-            !file_path.exists(),
-            "outline file should not be created when DB update fails"
         );
     }
 

@@ -54,7 +54,6 @@ import type {
   OutlinePatchStructureRequest,
   PatchChapterRequest,
   PatchWorkRequest,
-  PutChapterOutlineRequest,
   ReloadPresetResponse,
   ScaffoldPresetRequest,
   ScaffoldPresetResponse,
@@ -202,13 +201,6 @@ export interface NexusClient {
   getChapter(workId: string, chapter: number, query?: ChapterContentQuery): Promise<ChapterDetail>;
   /** `GET /v1/local/works/{work_id}/chapters/{n}/outline` — read outline markdown. */
   getChapterOutline(workId: string, chapter: number, query?: ChapterContentQuery): Promise<ChapterOutline>;
-  /** `PUT /v1/local/works/{work_id}/chapters/{n}/outline` — atomic outline write. */
-  putChapterOutline(
-    workId: string,
-    chapter: number,
-    request: PutChapterOutlineRequest,
-    query?: ChapterContentQuery,
-  ): Promise<ChapterOutline>;
   /** `PATCH /v1/local/works/{work_id}/chapters/{n}` — structure/status update. */
   patchChapter(workId: string, chapter: number, request: PatchChapterRequest, query?: ChapterContentQuery): Promise<ChapterDetail>;
   /** `GET /v1/local/works/{work_id}/chapters/{n}/body` — read-only body markdown. */
