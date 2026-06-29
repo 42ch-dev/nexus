@@ -324,9 +324,15 @@ export class BrowserClient implements NexusClient {
   }
 
   // ── World KB canvas (V1.73 Track A) ───────────────────────────────────────
-  getWorldKbGraph(worldId: string): Promise<WorldKbGraphResponse> {
+  getWorldKbGraph(
+    worldId: string,
+    query?: { includeSuggested?: boolean },
+  ): Promise<WorldKbGraphResponse> {
+    const params = new URLSearchParams();
+    if (query?.includeSuggested) params.set('include_suggested', 'true');
+    const qs = params.toString();
     return this.get<WorldKbGraphResponse>(
-      `/v1/local/worlds/${encodeURIComponent(worldId)}/kb/graph`,
+      `/v1/local/worlds/${encodeURIComponent(worldId)}/kb/graph${qs ? `?${qs}` : ''}`,
     );
   }
   getWorldKbCandidates(

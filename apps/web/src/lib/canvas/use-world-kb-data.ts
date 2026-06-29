@@ -47,12 +47,20 @@ export interface WorldKbConflictDetails {
   recovery_hint: string;
 }
 
-/** Read the entity graph projection (entities + source-anchor provenance). */
+/**
+ * Read the entity graph projection (entities + source-anchor provenance).
+ *
+ * V1.76: always passes `include_suggested=true` so the client receives both
+ * confirmed and `needs_review` (extraction-suggested) relationships in one
+ * fetch. The canvas filters the confirmed graph (default) vs the Suggested
+ * pane client-side, avoiding a refetch on toggle. The server still defaults
+ * to excluding suggestions for other callers.
+ */
 export function useWorldKbGraph(worldId: string | undefined) {
   const client = useNexusClient();
   return useQuery({
     queryKey: queryKeys.worldKb.graph(worldId ?? ''),
-    queryFn: async () => client.getWorldKbGraph(worldId!),
+    queryFn: async () => client.getWorldKbGraph(worldId!, { includeSuggested: true }),
     enabled: Boolean(worldId),
     staleTime: 5_000,
   });

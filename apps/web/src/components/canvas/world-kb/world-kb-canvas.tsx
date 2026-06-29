@@ -166,6 +166,36 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
     });
   };
 
+  // V1.76: promote an extraction suggestion (clear needs_review) via the
+  // existing patch-relationship update route — no second promotion state machine.
+  const onPromoteSuggestion = (rel: WorldKbRelationshipProjection) => {
+    patchRelationship.mutate(
+      {
+        relationship_id: rel.relationship_id,
+        action: 'update',
+        expected_version: rel.version,
+        relationship: {
+          source_entity_id: rel.source_entity_id,
+          target_entity_id: rel.target_entity_id,
+          relation_type: rel.relation_type,
+          custom_label: rel.custom_label,
+          symmetric: rel.symmetric,
+          confidence: rel.confidence,
+          source_anchor_ids: rel.source_anchor_ids,
+          metadata: rel.metadata,
+          needs_review: false,
+        },
+      },
+      { onSuccess: () => bumpReseed() },
+    );
+  };
+  const onDeleteSuggestion = onDeleteRelationship;
+  const onPromoteAllSuggestions = (rels: WorldKbRelationshipProjection[]) => {
+    for (const rel of rels) {
+      onPromoteSuggestion(rel);
+    }
+  };
+
   const inspectorPanelProps = {
     selection,
     worldId,
@@ -204,6 +234,10 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
             onSelectRelationship={onSelectRelationship}
             onCreateRelationship={onCreateRelationship}
             onDeleteRelationship={onDeleteRelationship}
+            onPromoteSuggestion={onPromoteSuggestion}
+            onDeleteSuggestion={onDeleteSuggestion}
+            onPromoteAllSuggestions={onPromoteAllSuggestions}
+            suggestionPending={patchRelationship.isPending}
           />
           <InspectorPanel {...inspectorPanelProps} />
         </div>

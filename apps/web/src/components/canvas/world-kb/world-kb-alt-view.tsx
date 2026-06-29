@@ -1,9 +1,10 @@
 /**
- * World KB non-spatial alternate view (V1.74 A6/A8).
+ * World KB non-spatial alternate view (V1.74 A6/A8; V1.76 adds Suggested tab).
  *
- * Two-pane accessible equivalent to the canvas graph:
+ * Three-pane accessible equivalent to the canvas graph:
  *   1. Entities — sortable entity table (keyboard/screen-reader primary).
  *   2. Relationships — sortable relationship table with full write parity.
+ *   3. Suggested — extraction-suggested relationships (needs_review) triage.
  *
  * Selection in either pane opens the matching inspector.
  */
@@ -16,9 +17,10 @@ import type {
 
 import { WorldKbEntityTable } from './world-kb-entity-table';
 import { WorldKbRelationshipTable } from './world-kb-relationship-table';
+import { SuggestedRelationshipsPane } from './suggested-relationships-pane';
 import type { WorldKbNodeData } from './types';
 
-type Tab = 'entities' | 'relationships';
+type Tab = 'entities' | 'relationships' | 'suggested';
 
 export interface WorldKbAltViewProps {
   nodes: WorldKbNodeData[];
@@ -30,6 +32,14 @@ export interface WorldKbAltViewProps {
   onSelectRelationship: (relationship: WorldKbRelationshipProjection) => void;
   onCreateRelationship: () => void;
   onDeleteRelationship?: (relationship: WorldKbRelationshipProjection) => void;
+  /** V1.76: promote a suggested relationship (clear needs_review). */
+  onPromoteSuggestion?: (rel: WorldKbRelationshipProjection) => void;
+  /** V1.76: delete a suggested relationship. */
+  onDeleteSuggestion?: (rel: WorldKbRelationshipProjection) => void;
+  /** V1.76: bulk-promote all visible suggestions. */
+  onPromoteAllSuggestions?: (rels: WorldKbRelationshipProjection[]) => void;
+  /** V1.76: whether a promote/delete mutation is in flight. */
+  suggestionPending?: boolean;
 }
 
 export function WorldKbAltView({
@@ -42,8 +52,17 @@ export function WorldKbAltView({
   onSelectRelationship,
   onCreateRelationship,
   onDeleteRelationship,
+  onPromoteSuggestion,
+  onDeleteSuggestion,
+  onPromoteAllSuggestions,
+  suggestionPending,
 }: WorldKbAltViewProps) {
   const [activeTab, setActiveTab] = useState<Tab>('entities');
+
+  // V1.76: split relationships into confirmed (default table) and suggested.
+  const storedRels = relationships.filter((r) => r.projection_direction === 'stored');
+  const confirmedRels = storedRels.filter((r) => !r.needs_review);
+  const suggestedRels = storedRels.filter((r) => r.needs_review);
 
   return (
     <div className="flex flex-col gap-3">
@@ -58,20 +77,35 @@ export function WorldKbAltView({
           label="Relationships"
           active={activeTab === 'relationships'}
           onClick={() => setActiveTab('relationships')}
-          count={relationships.filter((r) => r.projection_direction === 'stored').length}
+          count={confirmedRels.length}
+        />
+        <TabButton
+          label="Suggested"
+          active={activeTab === 'suggested'}
+          onClick={() => setActiveTab('suggested')}
+          count={suggestedRels.length}
         />
       </div>
 
       {activeTab === 'entities' ? (
         <WorldKbEntityTable nodes={nodes} selectedId={selectedNodeId} onSelect={onSelectNode} />
-      ) : (
+      ) : activeTab === 'relationships' ? (
         <WorldKbRelationshipTable
-          relationships={relationships}
+          relationships={confirmedRels}
           entities={entities}
           selectedId={selectedRelationshipId}
           onSelect={onSelectRelationship}
           onCreate={onCreateRelationship}
           onDelete={onDeleteRelationship}
+        />
+      ) : (
+        <SuggestedRelationshipsPane
+          suggestions={suggestedRels}
+          entities={entities}
+          onPromote={(rel) => onPromoteSuggestion?.(rel)}
+          onDelete={(rel) => onDeleteSuggestion?.(rel)}
+          onPromoteAll={(rels) => onPromoteAllSuggestions?.(rels)}
+          pending={suggestionPending}
         />
       )}
     </div>
