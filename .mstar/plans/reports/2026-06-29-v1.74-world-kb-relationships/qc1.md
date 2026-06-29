@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-29-v1.74-world-kb-relationships"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-29"
 ---
 
@@ -137,7 +137,7 @@ generated_at: "2026-06-29"
 | 🟡 Warning | 1 |
 | 🟢 Suggestion | 7 |
 
-**Verdict**: Request Changes
+**Verdict** (initial): Request Changes
 
 ## Checklist Execution (architecture/maintainability lens)
 
@@ -181,4 +181,132 @@ generated_at: "2026-06-29"
 
 ---
 
-*No revalidation yet — initial tri-review report.*
+## Revalidation
+
+**Trigger**: PM dispatched a targeted re-review after the fix-wave commit `9b6e546c fix(v1.74): qc1 F-001 split cap + F-003/F-005 conformance` (9 files changed, +282 / −150). This re-review covers the same plan_id + Review range now `0fed23f8..9b6e546c` (origin/main merge-base..iteration/v1.74 HEAD after fix-wave; 30 commits total).
+
+### Alignment verification
+
+| Field | Value | Status |
+|---|---|---|
+| `Working branch` | `iteration/v1.74` | ✅ verified via `git branch --show-current` |
+| `HEAD` | `9b6e546c86709af06b001295839e3a266d194bd6` | ✅ verified via `git rev-parse HEAD` |
+| `Review cwd` | `/Users/bibi/workspace/organizations/42ch/nexus` | ✅ verified via `git rev-parse --show-toplevel` |
+| `Review range / Diff basis` | `0fed23f8..9b6e546c` | ✅ revalidated; new commit `9b6e546c` on top of prior HEAD `38cacda2` |
+
+### Per-finding disposition
+
+#### F-001 — Split-cap on `world-kb/` modules → **RESOLVED**
+
+Three over-cap files were extracted in commit `9b6e546c`:
+
+- `world-kb-canvas.tsx`: **268 → 237 lines** (conflict-host render block extracted to `world-kb-canvas-conflicts.tsx`).
+- `relationship-inspector.tsx`: **254 → 229 lines** (symmetric + confidence + anchor picker extracted to `relationship-inspector-field-grid.tsx`).
+- `world-kb-relationship-table.tsx`: **257 → 215 lines** (`SortHeader` + sort types extracted to `world-kb-relationship-table-sort.tsx`; `formatUpdated` migrated to `world-kb-canvas-utils.ts` next to `formatRelative`).
+
+New module line counts (`find apps/web/src/components/canvas/world-kb -name "*.tsx" -o -name "*.ts" | xargs wc -l | sort -n`):
+
+| File | Lines | Cap |
+|---|---:|---:|
+| `inspector-field.tsx` | 24 | ✅ |
+| `use-view-preference.ts` | 30 | ✅ |
+| `relationship-anchor-picker.tsx` | 45 | ✅ |
+| `world-kb-relationship-table-sort.tsx` (NEW) | 48 | ✅ |
+| `world-kb-canvas-types.ts` | 53 | ✅ |
+| `relationship-inspector-field-grid.tsx` (NEW) | 66 | ✅ |
+| `world-kb-entity-context-menu.tsx` | 66 | ✅ |
+| `world-kb-canvas-header.tsx` | 73 | ✅ |
+| `relationship-projection.ts` | 77 | ✅ |
+| `world-kb-canvas-utils.ts` | 81 | ✅ |
+| `world-kb-canvas-conflicts.tsx` (NEW) | 104 | ✅ |
+| `world-kb-alt-view.tsx` | 111 | ✅ |
+| `world-kb-relationship-conflict-modal.tsx` | 114 | ✅ |
+| `relationship-inspector-logic.ts` | 122 | ✅ |
+| `world-kb-inspector-panel.tsx` | 132 | ✅ |
+| `types.ts` | 142 | ✅ |
+| `entity-node.tsx` | 151 | ✅ |
+| `use-world-kb-canvas-state.ts` | 174 | ✅ |
+| `world-kb-conflict-modal.tsx` | 219 | ✅ |
+| `world-kb-conflict-hosts.tsx` | 227 | ✅ |
+| `world-kb-entity-table.tsx` | 217 | ✅ |
+| `world-kb-relationship-table.tsx` | **215** | ✅ (was 257) |
+| `relationship-inspector.tsx` | **229** | ✅ (was 254) |
+| `world-kb-canvas.tsx` | **237** | ✅ (was 268) |
+| `entity-inspector.tsx` | 249 | ✅ |
+| `promotion-inspector.tsx` | 245 | ✅ |
+| `graph-projection.ts` | 211 | ✅ |
+
+**Public facade preserved** (`world-kb-canvas.tsx:35-36`):
+- `export type { EntityField } from './world-kb-canvas-types';` ✅
+- `export { patchFromForm } from './world-kb-canvas-utils';` ✅
+- `export function WorldKbCanvas({ worldId }: WorldKbCanvasProps)` ✅
+
+#### F-003 — Handwritten `RelationshipPatchRequest` → **RESOLVED**
+
+`relationship-inspector-logic.ts:9` now imports the generated type via `import type { ... WorldKbPatchRelationshipRequest as RelationshipPatchRequest, ... } from '@42ch/nexus-contracts';`. The local `interface RelationshipPatchRequest { ... }` is gone. `buildRelationshipPatchRequest` (line 90) and `buildRelationshipRemoveRequest` (line 114) annotate their return type with the aliased generated type, satisfying the `apps/web/AGENTS.md` "no handwritten wire DTOs" rule. Drift risk on future schema bumps is eliminated.
+
+#### F-005 — Relationship conflict modal copy → **RESOLVED**
+
+`world-kb-relationship-conflict-modal.tsx:42, 70-80` now reads:
+```
+description: <>Nexus updated the relationship {relationshipNames} to version</>
+descriptionSuffix: <> while you were editing its {editedFieldLabelFor(draft.form)}. Your change is still in the inspector.</>
+currentRevision={currentVersion}
+```
+where `relationshipNames = bold(\`${draft.sourceName} → ${draft.targetName}\`)` and `editedFieldLabelFor` returns `'custom label'` or `'relation type'`. The base modal (`conflict-modal-base.tsx:159-164`) interpolates `currentRevision` between `description` and `descriptionSuffix`, so the rendered copy is:
+
+> "Nexus updated the relationship **A → B** to version 5 while you were editing its relation type. Your change is still in the inspector."
+
+This matches the compass §1.1 A6 conflict-modal body copy:
+> "Nexus updated the relationship **{source_entity_name} → {target_entity_name}** to version **{current_version}** while you were editing its **{field}**. Your change is still in the inspector."
+
+(Arrow separator, "to version N" wording, and `{field}` placeholder all match. `editedFieldLabelFor` derives the field name from the form state — "custom label" when `relationType === 'custom'`, "relation type" otherwise — which matches the compass "Per-field diff showing the canonical value(s)…" intent for the most-relevant field.)
+
+#### F-002, F-004, F-006, F-007, F-008 — **STILL OPEN (non-blocking Suggestions)**
+
+Per the verdict rule (`0 Critical + 0 Warning → Approve`), Suggestions are non-blocking and PM tracks them as residuals. They are not regressions from the fix-wave and remain tracked from the initial review:
+
+- **F-002**: `kb_relationships.rs` still duplicates the `cas_check` re-read pattern. Acceptable per the initial finding; tracked as a refactor residual.
+- **F-004**: `rust-generator.ts` still strips `Eq` from all generated structs. The codegen policy decision is unchanged; current consumer impact is zero (verified in initial review). Tracked for V1.75 generator narrowing.
+- **F-006**: `graph-projection.ts:11-13` docstring still describes V1.73 read-only relationship behavior. Stale but cosmetic. Tracked as a doc fix.
+- **F-007**: `project_relationship` still falls back to `WorldKbRelationshipKind::Custom` on unknown stored enum values. Defense-in-depth only; unreachable today per the additive-only SemVer policy. Tracked for V1.75.
+- **F-008**: Compass §2 still references a non-existent `world-kb-runtime-architecture.md` spec. **PM action**: must be resolved at P-last by either creating the file with the locked wording or amending an existing spec and updating the compass reference.
+
+### Static checks (re-run on `9b6e546c`)
+
+| Check | Result |
+|---|---|
+| `cargo clippy -p nexus-daemon-runtime -p nexus-local-db -- -D warnings` | ✅ clean (no warnings) |
+| `pnpm --filter web typecheck` | ✅ clean (no output, exit 0) |
+| `pnpm --filter web test` | ✅ **223/223 pass** across 32 test files |
+| `cargo test -p nexus-daemon-runtime --test world_kb_relationships` | ✅ 11/11 pass |
+| `cargo test -p nexus-local-db --lib kb_relationships` | ✅ 5/5 pass |
+
+All checks confirm the fix-wave is behavior-preserving for the previous-good test surface.
+
+### Summary (post-revalidation)
+
+| Severity | Count |
+|----------|-------|
+| 🔴 Critical | 0 |
+| 🟡 Warning | 0 (F-001 resolved) |
+| 🟢 Suggestion | 7 (F-002/F-004/F-006/F-007/F-008 unchanged from initial; F-003 resolved into the satisfied Suggestion bucket; F-005 resolved into the satisfied Suggestion bucket) |
+
+**Verdict (post-revalidation)**: **Approve**
+
+### Disposition
+
+- **F-001** (split-cap): closed. The three over-cap files are now ≤ 250 lines each and the public facade re-export is preserved.
+- **F-003** (handwritten DTO): closed. The generated `WorldKbPatchRelationshipRequest` is imported and aliased; no parallel wire-DTO source remains.
+- **F-005** (copy divergence): closed. The relationship conflict modal body now matches compass §1.1 A6 wording (arrow separator + "to version N" + `{field}` placeholder).
+- F-002, F-004, F-006, F-007, F-008: remain as tracked residuals for V1.75 (per the verdict rule, Suggestions are non-blocking). F-008 in particular should be settled at P-last by creating `world-kb-runtime-architecture.md` or amending an existing spec.
+
+### Handoff
+
+- All three QC seats are now resolved: qc1 Approve (this revalidation), qc2 Approve (initial), qc3 Approve (initial). PM may proceed to consolidation.
+- The 12 V1.74-targeted residuals remain `lifecycle: open` in `.mstar/status.json`; PM owns the closure writes at P-last per `compass §5`.
+- The fix-wave commit `9b6e546c` is a clean, surgical conformance patch: 3 new modules (`world-kb-canvas-conflicts.tsx`, `relationship-inspector-field-grid.tsx`, `world-kb-relationship-table-sort.tsx`) + 1 helper migration (`formatUpdated` to `world-kb-canvas-utils.ts`) + DTO alias swap + copy-text edits. No behavioral regression visible in the 11 integration tests, 5 unit tests, or 223 web tests.
+
+---
+
+*Revalidation completed 2026-06-29 on commit `9b6e546c86709af06b001295839e3a266d194bd6`. Initial tri-review report + revalidation are in this single file per `qc-specialist-shared.md` "Edit the same `{PLAN_DIR}/reports/<plan-id>/{report_suffix}.md` — do not create `qc1-rev2.md` siblings on this path."*
