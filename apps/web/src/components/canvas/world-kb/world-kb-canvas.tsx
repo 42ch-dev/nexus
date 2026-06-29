@@ -13,10 +13,12 @@ import type { Connection, Node } from '@xyflow/react';
 import { CanvasShell, useNodeChangeHandler } from '@/components/canvas/canvas-shell';
 import { ErrorState, LoadingState } from '@/components/ui/states';
 import {
+  usePatchWorldKbRelationship,
   useWorldKbCandidates,
   useWorldKbGraph,
 } from '@/lib/canvas/use-world-kb-data';
 
+import { buildRelationshipRemoveRequest } from './relationship-inspector-logic';
 import { worldKbNodeTypes } from './entity-node';
 import { anchorNodes, deriveEdges, entryCountOf, graphSummary, layoutNodes } from './graph-projection';
 import { deriveRelationshipEdges } from './relationship-projection';
@@ -28,6 +30,7 @@ import { useWorldKbCanvasState, buildEntityConflict, handleRelationshipConflict,
 import { formatRelative, nodesToData } from './world-kb-canvas-utils';
 import { useReducedMotionPreference } from './use-view-preference';
 import type { WorldKbNodeData } from './types';
+import type { WorldKbRelationshipProjection } from '@42ch/nexus-contracts';
 
 export type { EntityField } from './world-kb-canvas-types';
 export { patchFromForm } from './world-kb-canvas-utils';
@@ -39,6 +42,7 @@ export interface WorldKbCanvasProps {
 export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
   const graph = useWorldKbGraph(worldId);
   const candidates = useWorldKbCandidates(worldId);
+  const patchRelationship = usePatchWorldKbRelationship(worldId);
 
   // List view is the default for keyboard-only / screen-reader users.
   const prefersReducedMotion = useReducedMotionPreference();
@@ -126,6 +130,16 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
     setSelection(null);
     bumpReseed();
   };
+  const onDeleteRelationship = (rel: WorldKbRelationshipProjection) => {
+    patchRelationship.mutate(buildRelationshipRemoveRequest(rel), {
+      onSuccess: () => {
+        if (selection?.kind === 'relationship' && selection.relationship.relationship_id === rel.relationship_id) {
+          setSelection(null);
+        }
+        bumpReseed();
+      },
+    });
+  };
 
   const inspectorPanelProps = {
     selection,
@@ -164,6 +178,7 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
             onSelectNode={(n) => onSelectNode(n)}
             onSelectRelationship={onSelectRelationship}
             onCreateRelationship={onCreateRelationship}
+            onDeleteRelationship={onDeleteRelationship}
           />
           <InspectorPanel {...inspectorPanelProps} />
         </div>

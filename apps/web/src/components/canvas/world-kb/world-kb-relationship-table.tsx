@@ -6,7 +6,7 @@
  * in create mode.
  */
 import { useMemo, useState } from 'react';
-import { Pencil, Plus } from 'lucide-react';
+import { Pencil, Plus, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import type {
@@ -24,9 +24,10 @@ export interface WorldKbRelationshipTableProps {
   selectedId: string | null;
   onSelect: (relationship: WorldKbRelationshipProjection) => void;
   onCreate: () => void;
+  onDelete?: (relationship: WorldKbRelationshipProjection) => void;
 }
 
-type SortKey = 'source' | 'target' | 'type' | 'confidence';
+type SortKey = 'source' | 'target' | 'type' | 'symmetric' | 'confidence' | 'anchors' | 'updated';
 type SortDir = 'asc' | 'desc';
 
 export function WorldKbRelationshipTable({
@@ -35,6 +36,7 @@ export function WorldKbRelationshipTable({
   selectedId,
   onSelect,
   onCreate,
+  onDelete,
 }: WorldKbRelationshipTableProps) {
   const [sortKey, setSortKey] = useState<SortKey>('type');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
@@ -55,9 +57,24 @@ export function WorldKbRelationshipTable({
         case 'type':
           cmp = relationshipEdgeLabel(a).localeCompare(relationshipEdgeLabel(b));
           break;
+        case 'symmetric':
+          cmp = Number(a.symmetric) - Number(b.symmetric);
+          break;
         case 'confidence':
           cmp = (a.confidence ?? 1) - (b.confidence ?? 1);
           break;
+        case 'anchors':
+          cmp = (a.source_anchor_ids?.length ?? 0) - (b.source_anchor_ids?.length ?? 0);
+          break;
+        case 'updated': {
+          const at = Date.parse(a.updated_at ?? '');
+          const bt = Date.parse(b.updated_at ?? '');
+          if (Number.isNaN(at) && Number.isNaN(bt)) cmp = 0;
+          else if (Number.isNaN(at)) cmp = 1;
+          else if (Number.isNaN(bt)) cmp = -1;
+          else cmp = at - bt;
+          break;
+        }
       }
       return sortDir === 'asc' ? cmp : -cmp;
     });
@@ -70,6 +87,19 @@ export function WorldKbRelationshipTable({
     } else {
       setSortKey(key);
       setSortDir('asc');
+    }
+  }
+
+  function handleDelete(rel: WorldKbRelationshipProjection) {
+    if (!onDelete) return;
+    const source = entityName(rel.source_entity_id);
+    const target = entityName(rel.target_entity_id);
+    if (
+      window.confirm(
+        `Delete the relationship "${relationshipEdgeLabel(rel)}" from ${source} to ${target}?`,
+      )
+    ) {
+      onDelete(rel);
     }
   }
 
@@ -96,20 +126,24 @@ export function WorldKbRelationshipTable({
               <SortHeader label="Source" sortKey="source" current={sortKey} dir={sortDir} onToggle={toggleSort} />
               <SortHeader label="Target" sortKey="target" current={sortKey} dir={sortDir} onToggle={toggleSort} />
               <SortHeader label="Type" sortKey="type" current={sortKey} dir={sortDir} onToggle={toggleSort} />
+              <SortHeader label="Symmetric" sortKey="symmetric" current={sortKey} dir={sortDir} onToggle={toggleSort} />
               <SortHeader label="Confidence" sortKey="confidence" current={sortKey} dir={sortDir} onToggle={toggleSort} />
+              <SortHeader label="Anchors" sortKey="anchors" current={sortKey} dir={sortDir} onToggle={toggleSort} />
+              <SortHeader label="Updated" sortKey="updated" current={sortKey} dir={sortDir} onToggle={toggleSort} />
               <th className={columnClass}>Actions</th>
             </tr>
           </thead>
           <tbody>
             {sorted.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-3 py-6 text-center text-copy-13 text-gray-700">
+                <td colSpan={8} className="px-3 py-6 text-center text-copy-13 text-gray-700">
                   No relationships yet.
                 </td>
               </tr>
             ) : (
               sorted.map((rel) => {
                 const selected = rel.relationship_id === selectedId;
+                const anchorCount = rel.source_anchor_ids?.length ?? 0;
                 return (
                   <tr
                     key={rel.relationship_id}
@@ -131,10 +165,37 @@ export function WorldKbRelationshipTable({
                     <td className="truncate px-3 py-2 text-gray-1000">{entityName(rel.source_entity_id)}</td>
                     <td className="truncate px-3 py-2 text-gray-1000">{entityName(rel.target_entity_id)}</td>
                     <td className="px-3 py-2 text-gray-900">{relationshipEdgeLabel(rel)}</td>
+                    <td className="px-3 py-2 text-gray-900">{rel.symmetric ? 'Yes' : 'No'}</td>
                     <td className="px-3 py-2 tabular-nums text-gray-900">{(rel.confidence ?? 1).toFixed(2)}</td>
+                    <td className="px-3 py-2 tabular-nums text-gray-900">{anchorCount}</td>
+                    <td className="px-3 py-2 text-copy-13-mono text-gray-700">{formatUpdated(rel.updated_at)}</td>
                     <td className="px-3 py-2">
-                      <Pencil className="inline h-4 w-4 text-gray-700" aria-hidden />
-                      <span className="sr-only">Edit relationship</span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            onSelect(rel);
+                          }}
+                          className="rounded p-1 text-gray-700 hover:bg-gray-alpha-200 hover:text-gray-1000 focus-visible:ring-2 focus-visible:ring-canvas-strategy-accent"
+                          aria-label={`Edit relationship ${relationshipEdgeLabel(rel)}`}
+                        >
+                          <Pencil className="h-4 w-4" aria-hidden />
+                        </button>
+                        {onDelete && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleDelete(rel);
+                            }}
+                            className="rounded p-1 text-red-700 hover:bg-red-100 focus-visible:ring-2 focus-visible:ring-red-700"
+                            aria-label={`Delete relationship ${relationshipEdgeLabel(rel)}`}
+                          >
+                            <Trash2 className="h-4 w-4" aria-hidden />
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -179,4 +240,18 @@ function SortHeader({
       </button>
     </th>
   );
+}
+
+function formatUpdated(iso: string | undefined): string {
+  if (!iso) return '—';
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return '—';
+  const diff = Date.now() - t;
+  const mins = Math.round(diff / 60_000);
+  if (mins < 1) return 'just now';
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  const days = Math.round(hrs / 24);
+  return `${days}d ago`;
 }
