@@ -1,4 +1,5 @@
 import type { WorldKbEntityProjection } from './WorldKbEntityProjection';
+import type { WorldKbRelationshipProjection } from './WorldKbRelationshipProjection';
 import type { WorldKbSourceAnchorProjection } from './WorldKbSourceAnchorProjection';
 import type { SchemaVersion } from '../../../common/CommonTypes';
 /**
@@ -13,5 +14,5 @@ import type { SchemaVersion } from '../../../common/CommonTypes';
 export interface WorldKbGraphResponse {
   entities: WorldKbEntityProjection[];
   source_anchors: WorldKbSourceAnchorProjection[];
-  relationships: Record<string, unknown>[];
+  relationships: WorldKbRelationshipProjection[];
 }

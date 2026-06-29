@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/canvas/world-kb/world-kb-patch-relationship-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus PatchWorldKbRelationshipResponse",
+  "description": "Success response for POST /v1/local/worlds/{world_id}/kb/patch-relationship (V1.74). Returns the committed relationship projection (absent on remove), the new per-row version, and validation diagnostics.",
+  "type": "object",
+  "required": ["version", "validation_summary"],
+  "properties": {
+    "relationship": { "$ref": "world-kb-relationship-projection.schema.json", "description": "Canonical projection of the row after the patch. Null/absent for remove." },
+    "version": { "type": "integer", "minimum": 0, "description": "New per-row version after the patch was persisted." },
+    "validation_summary": {
+      "type": "object",
+      "required": ["errors", "warnings"],
+      "properties": {
+        "errors": { "type": "array", "items": { "type": "string" } },
+        "warnings": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

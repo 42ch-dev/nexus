@@ -149,6 +149,7 @@ export function generateRustTypes(schemas: LoadedSchema[]): void {
   logger.info(`Generating Rust types to: ${outputDir}`);
 
   const typeModuleMap = buildTypeModuleMap(schemas);
+  const eqEligibility = computeEqEligibility(schemas);
 
   // Generate common types module first (under generated/common/)
   generateRustCommonTypes(outputDir);
@@ -170,7 +171,7 @@ export function generateRustTypes(schemas: LoadedSchema[]): void {
       generateRustEnumFile(schema, outputDir, typeModuleMap);
     } else {
       // Generate individual type files into nested folders
-      generateRustTypeFile(schema, outputDir, hasTopLevel, hasDefs, typeModuleMap);
+      generateRustTypeFile(schema, outputDir, hasTopLevel, hasDefs, typeModuleMap, eqEligibility);
     }
   }
 
@@ -361,13 +362,14 @@ function snakeToPascal(snakeStr: string): string {
 function generateRustEnumFile(schema: LoadedSchema, outputDir: string, _typeModuleMap: Map<string, string[]>): void {
   const values = schema.schemaContent.enum as string[];
 
-  const variants = values.map(v => {
+  const variants = values.map((v, idx) => {
     const pascal = snakeToPascal(v);
     // Build doc comment from enumDescriptions if available
     const descriptions = schema.schemaContent.enumDescriptions as Record<string, string> | undefined;
     const desc = descriptions?.[v];
     const docComment = desc ? `    /// ${backtickDocIdentifiers(desc)}\n` : '';
-    return `${docComment}    #[serde(rename = "${v}")]\n    ${pascal},`;
+    const defaultAttr = idx === 0 ? '    #[default]\n' : '';
+    return `${docComment}${defaultAttr}    #[serde(rename = "${v}")]\n    ${pascal},`;
   });
 
   const content = `//! ${backtickDocIdentifiers(String(schema.schemaContent.title || schema.typeName))}
@@ -380,7 +382,7 @@ function generateRustEnumFile(schema: LoadedSchema, outputDir: string, _typeModu
 use serde::{Deserialize, Serialize};
 
 /// ${backtickDocIdentifiers(String(schema.schemaContent.description || schema.typeName))}
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum ${schema.typeName} {
 ${variants.join('\n')}
@@ -405,6 +407,7 @@ function generateRustTypeFile(
   hasTopLevel: boolean,
   hasDefs: boolean,
   typeModuleMap: Map<string, string[]>,
+  eqEligibility: Map<string, boolean>,
 ): void {
   const localDefinitions = hasDefs ? getDefinitions(schema) : undefined;
 
@@ -418,7 +421,7 @@ function generateRustTypeFile(
 
   // Generate main struct from top-level properties
   if (hasTopLevel) {
-    const { structContent, commonImports, crossModuleImports } = generateRustStructContent(schema.typeName, schema.schemaContent, localDefinitions);
+    const { structContent, commonImports, crossModuleImports } = generateRustStructContent(schema.typeName, schema.schemaContent, localDefinitions, eqEligibility);
     structs.push({ typeName: schema.typeName, content: structContent, commonImports, crossModuleImports });
   }
 
@@ -428,7 +431,7 @@ function generateRustTypeFile(
       const def = defContent as Record<string, unknown>;
       if (def.type !== 'object' || !def.properties) continue;
 
-      const { structContent, commonImports, crossModuleImports } = generateRustStructContent(defName, def, localDefinitions);
+      const { structContent, commonImports, crossModuleImports } = generateRustStructContent(defName, def, localDefinitions, eqEligibility);
       structs.push({ typeName: defName, content: structContent, commonImports, crossModuleImports });
     }
   }
@@ -482,32 +485,173 @@ use serde::{Deserialize, Serialize};
 }
 
 /**
+ * Check whether a schema fragment contains a JSON Schema `number` type anywhere
+ * in its shape. Used to decide whether a generated Rust struct can safely derive
+ * `Eq` (Rust `f64` does not implement `Eq`).
+ *
+ * Only follows local structure (properties / items / inline object arrays).
+ * `$ref` targets are assumed non-floating unless resolved in a future pass.
+ */
+function schemaFragmentHasF64(fragment: Record<string, unknown>): boolean {
+  const type = fragment.type;
+  if (type === 'number') return true;
+  if (Array.isArray(type) && type.includes('number')) return true;
+  if (type === 'array' && fragment.items) {
+    return schemaFragmentHasF64(fragment.items as Record<string, unknown>);
+  }
+  if (type === 'object' && fragment.properties) {
+    for (const prop of Object.values(fragment.properties as Record<string, unknown>)) {
+      if (schemaFragmentHasF64(prop as Record<string, unknown>)) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Compute Eq-derivability for every named struct fragment (main struct + object
+ * definitions) across all schemas. A fragment cannot derive `Eq` if it contains a
+ * JSON Schema `number` type or references (via `$ref`) another fragment that cannot
+ * derive `Eq`. Computed with a fixed-point iteration so transitive references are
+ * resolved.
+ */
+function computeEqEligibility(schemas: LoadedSchema[]): Map<string, boolean> {
+  const eligible = new Map<string, boolean>();
+
+  const fragmentNames = (schema: LoadedSchema): string[] => {
+    const names: string[] = [];
+    if (!schema.isDefinitionsOnly && !schema.isStandaloneEnum && schema.schemaContent.type === 'object') {
+      names.push(schema.typeName);
+    }
+    const defs = getDefinitions(schema);
+    if (defs) {
+      for (const [defName, def] of Object.entries(defs)) {
+        if ((def as Record<string, unknown>).type === 'object') {
+          names.push(defName);
+        }
+      }
+    }
+    return names;
+  };
+
+  // Initialize all named fragments as eligible.
+  for (const schema of schemas) {
+    if (schema.isExplicitlySkipped) continue;
+    for (const name of fragmentNames(schema)) {
+      eligible.set(name, true);
+    }
+  }
+
+  const propertyCanDeriveEq = (
+    propDef: Record<string, unknown>,
+    eligibilityMap: Map<string, boolean>,
+  ): boolean => {
+    const type = propDef.type;
+    if (type === 'number') return false;
+    if (Array.isArray(type) && type.includes('number')) return false;
+    if (type === 'array' && propDef.items) {
+      return propertyCanDeriveEq(propDef.items as Record<string, unknown>, eligibilityMap);
+    }
+    if (type === 'object' && propDef.properties) {
+      for (const prop of Object.values(propDef.properties as Record<string, unknown>)) {
+        if (!propertyCanDeriveEq(prop as Record<string, unknown>, eligibilityMap)) return false;
+      }
+      return true;
+    }
+    const ref = propDef.$ref as string | undefined;
+    if (ref) {
+      const defName = resolveRef(ref);
+      if (defName && eligibilityMap.has(defName)) {
+        return eligibilityMap.get(defName) ?? true;
+      }
+      // Unknown / common type refs assumed Eq-safe.
+      return true;
+    }
+    return true;
+  };
+
+  const fragmentCanDeriveEq = (
+    content: Record<string, unknown>,
+    eligibilityMap: Map<string, boolean>,
+  ): boolean => {
+    const props = (content.properties || {}) as Record<string, unknown>;
+    for (const prop of Object.values(props)) {
+      if (!propertyCanDeriveEq(prop as Record<string, unknown>, eligibilityMap)) return false;
+    }
+    return true;
+  };
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const schema of schemas) {
+      if (schema.isExplicitlySkipped || schema.isStandaloneEnum) continue;
+
+      const fragments: Array<{ name: string; content: Record<string, unknown> }> = [];
+      if (!schema.isDefinitionsOnly && schema.schemaContent.type === 'object') {
+        fragments.push({ name: schema.typeName, content: schema.schemaContent });
+      }
+      const defs = getDefinitions(schema);
+      if (defs) {
+        for (const [defName, def] of Object.entries(defs)) {
+          const defContent = def as Record<string, unknown>;
+          if (defContent.type === 'object') {
+            fragments.push({ name: defName, content: defContent });
+          }
+        }
+      }
+
+      for (const { name, content } of fragments) {
+        if (eligible.get(name) === false) continue;
+        if (!fragmentCanDeriveEq(content, eligible)) {
+          eligible.set(name, false);
+          changed = true;
+        }
+      }
+    }
+  }
+
+  return eligible;
+}
+/**
  * Generate a Rust struct from a schema object (top-level or definition).
  *
- * Returns the struct definition as a string plus any imports needed.
+ * Returns the struct definition as a string plus any imports needed, and a
+ * boolean indicating whether the struct can safely derive `Eq`.
  */
 function generateRustStructContent(
   typeName: string,
   schemaContent: Record<string, unknown>,
-  localDefinitions?: Record<string, Record<string, unknown>>,
+  localDefinitions: Record<string, Record<string, unknown>> | undefined,
+  eqEligibility: Map<string, boolean>,
 ): {
   structContent: string;
   commonImports: Set<string>;
   crossModuleImports: Set<string>;
+  canDeriveEq: boolean;
 } {
   const properties = (schemaContent.properties || {}) as Record<string, unknown>;
   const requiredFields = (schemaContent.required || []) as string[];
+
+  // Determine Eq-safety: any `number` type in the local shape, any inline array
+  // item struct containing `number`, or a global eligibility pass that follows
+  // cross-schema `$ref`s can all disable `Eq`.
+  const directHasF64 = Object.values(properties).some(schemaFragmentHasF64);
 
   const fields: string[] = [];
   const commonImports: Set<string> = new Set();
   const crossModuleImports: Set<string> = new Set(); // For types like Delta that are in separate modules
   const inlineStructs: string[] = [];
+  let inlineHasF64 = false;
 
   for (const [propName, propDef] of Object.entries(properties)) {
     const def = propDef as Record<string, unknown>;
     const isRequired = requiredFields.includes(propName);
-    const { rustType, commonImport, inlineStruct, crossModuleImport } = resolveRustTypeFull(def, propName, typeName, localDefinitions);
+    const { rustType, commonImport, inlineStruct, crossModuleImport, inlineStructHasF64 } =
+      resolveRustTypeFull(def, propName, typeName, localDefinitions);
 
+    if (inlineStructHasF64) {
+      inlineHasF64 = true;
+    }
     if (commonImport) {
       commonImports.add(commonImport);
     }
@@ -548,9 +692,14 @@ function generateRustStructContent(
   }
   const useStatements = useCommon + useCross;
 
+  const globallyEligible = eqEligibility.get(typeName) ?? true;
+  const canDeriveEq = globallyEligible && !directHasF64 && !inlineHasF64;
+  const deriveTraits = canDeriveEq
+    ? 'Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq'
+    : 'Debug, Clone, Default, Serialize, Deserialize, PartialEq';
   const desc = (schemaContent.description || typeName) as string;
   const result = `/// ${backtickDocIdentifiers(desc)}
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(${deriveTraits})]
 #[serde(rename_all = "snake_case")]
 pub struct ${typeName} {
 ${fields.join('\n')}
@@ -562,7 +711,7 @@ ${fields.join('\n')}
     structContent = inlineStructs.join('\n') + '\n' + result;
   }
 
-  return { structContent, commonImports, crossModuleImports };
+  return { structContent, commonImports, crossModuleImports, canDeriveEq };
 }
 
 /**
@@ -574,7 +723,7 @@ function resolveRustTypeFull(
   propName: string,
   parentTypeName: string,
   localDefinitions?: Record<string, Record<string, unknown>>,
-): { rustType: string; commonImport?: string; inlineStruct?: string; crossModuleImport?: string } {
+): { rustType: string; commonImport?: string; inlineStruct?: string; crossModuleImport?: string; inlineStructHasF64?: boolean } {
   const ref_ = propDef.$ref as string | undefined;
   const type = propDef.type;
 
@@ -609,7 +758,11 @@ function resolveRustTypeFull(
     const hasNull = type.includes('null');
     if (nonNullTypes.length === 1) {
       const base = resolveSingleRustType(nonNullTypes[0], propDef, propName, parentTypeName, localDefinitions);
-      return { rustType: hasNull ? stripOuterOption(base.rustType) : base.rustType, inlineStruct: base.inlineStruct };
+      return {
+        rustType: hasNull ? stripOuterOption(base.rustType) : base.rustType,
+        inlineStruct: base.inlineStruct,
+        inlineStructHasF64: base.inlineStructHasF64,
+      };
     }
     return { rustType: 'serde_json::Value' };
   }
@@ -636,7 +789,7 @@ function resolveSingleRustType(
   propName: string,
   parentTypeName: string,
   localDefinitions?: Record<string, Record<string, unknown>>,
-): { rustType: string; commonImport?: string; inlineStruct?: string; crossModuleImport?: string } {
+): { rustType: string; commonImport?: string; inlineStruct?: string; crossModuleImport?: string; inlineStructHasF64?: boolean } {
   switch (type) {
     case 'string':
       // Inline enum — use String for now (schema-first generates enums via COMMON_DEFINITIONS)
@@ -658,12 +811,12 @@ function resolveSingleRustType(
         if (items.type === 'object' && items.properties) {
           // Complex inline object in array → generate a named struct
           const itemTypeName = inlineItemTypeName(parentTypeName, propName);
-          const inlineStruct = generateInlineArrayItemStruct(
+          const { content: inlineStruct, hasF64 } = generateInlineArrayItemStruct(
             itemTypeName,
             items,
             localDefinitions,
           );
-          return { rustType: `Vec<${itemTypeName}>`, inlineStruct };
+          return { rustType: `Vec<${itemTypeName}>`, inlineStruct, inlineStructHasF64: hasF64 };
         }
         const { rustType, commonImport, crossModuleImport } = resolveRustTypeFull(items, propName, parentTypeName, localDefinitions);
         return { rustType: `Vec<${rustType}>`, commonImport, crossModuleImport };
@@ -710,17 +863,21 @@ function generateInlineArrayItemStruct(
   itemTypeName: string,
   objDef: Record<string, unknown>,
   localDefinitions?: Record<string, Record<string, unknown>>,
-): string {
+): { content: string; hasF64: boolean } {
   const properties = (objDef.properties || {}) as Record<string, unknown>;
   const requiredFields = (objDef.required || []) as string[];
   const fields: string[] = [];
   const commonImports: Set<string> = new Set();
+  let inlineHasF64 = false;
 
   for (const [propName, propDef] of Object.entries(properties)) {
     const def = propDef as Record<string, unknown>;
     const isRequired = requiredFields.includes(propName);
-    const { rustType, commonImport } = resolveRustTypeFull(def, propName, itemTypeName, localDefinitions);
+    const { rustType, commonImport, inlineStructHasF64 } = resolveRustTypeFull(def, propName, itemTypeName, localDefinitions);
 
+    if (inlineStructHasF64) {
+      inlineHasF64 = true;
+    }
     if (commonImport) {
       commonImports.add(commonImport);
     }
@@ -745,12 +902,18 @@ function generateInlineArrayItemStruct(
     useLine = `use crate::generated::common::common_types::{${importsArr.join(', ')}};\n`;
   }
 
-  return `${useLine}/// Inline array item type (auto-generated from schema)
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+  const hasF64 = inlineHasF64 || schemaFragmentHasF64(objDef);
+  const deriveTraits = hasF64
+    ? 'Debug, Clone, Default, Serialize, Deserialize, PartialEq'
+    : 'Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq';
+
+  const content = `${useLine}/// Inline array item type (auto-generated from schema)
+#[derive(${deriveTraits})]
 #[serde(rename_all = "snake_case")]
 pub struct ${itemTypeName} {
 ${fields.join('\n')}
 }`;
+  return { content, hasF64 };
 }
 
 /**

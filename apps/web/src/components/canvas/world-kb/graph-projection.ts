@@ -143,7 +143,6 @@ export function layoutNodes(
  *
  * Each anchor links a source reference to its backing entity; we render it as
  * an undirected-style edge from the source-anchor node to the entity node.
- * `world_kb.patch_relationship` and a `kb_relationships` table are V1.74.
  */
 export function deriveEdges(
   anchors: WorldKbSourceAnchorProjection[],
@@ -197,7 +196,8 @@ export function graphSummary(
   if (!graph) return 'World KB graph not loaded.';
   const entityCount = graph.entities.length;
   const anchorCount = graph.source_anchors.length;
-  return `World KB graph: ${entityCount} ${entityCount === 1 ? 'entity' : 'entities'}, ${anchorCount} ${anchorCount === 1 ? 'source anchor' : 'source anchors'}, ${candidateCount} pending ${candidateCount === 1 ? 'candidate' : 'candidates'}.`;
+  const relationshipCount = graph.relationships.length;
+  return `World KB graph: ${entityCount} ${entityCount === 1 ? 'entity' : 'entities'}, ${relationshipCount} ${relationshipCount === 1 ? 'relationship' : 'relationships'}, ${anchorCount} ${anchorCount === 1 ? 'source anchor' : 'source anchors'}, ${candidateCount} pending ${candidateCount === 1 ? 'candidate' : 'candidates'}.`;
 }
 
 /** Stable count of confirmed entities + pending candidates for the freshness indicator. */

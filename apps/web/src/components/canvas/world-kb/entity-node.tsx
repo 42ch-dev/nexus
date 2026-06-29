@@ -14,7 +14,10 @@
 import { memo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 
+import { useContextMenu } from '@/components/path-context-menu';
+
 import { BLOCK_TYPE_LABELS, type EntityLifecycle, type WorldKbNodeData } from './types';
+import { WorldKbEntityContextMenu } from './world-kb-entity-context-menu';
 
 const LIFECYCLE_BADGE: Record<EntityLifecycle, { label: string; className: string }> = {
   pending: {
@@ -53,6 +56,7 @@ export const WorldKbEntityNode = memo(function WorldKbEntityNode({
   selected,
 }: NodeProps) {
   const d = data as WorldKbNodeData;
+  const { open, position, openMenu, close } = useContextMenu();
   const badge = LIFECYCLE_BADGE[d.lifecycle];
   return (
     <div
@@ -62,6 +66,7 @@ export const WorldKbEntityNode = memo(function WorldKbEntityNode({
           ? 'border-canvas-worldkb-entity-card-stroke-selected bg-canvas-worldkb-entity-card-fill-selected'
           : 'border-canvas-worldkb-entity-card-stroke-default hover:bg-canvas-worldkb-entity-card-fill-hover',
       ].join(' ')}
+      onContextMenu={d.keyBlockId ? openMenu : undefined}
     >
       <Handle
         type="target"
@@ -95,6 +100,22 @@ export const WorldKbEntityNode = memo(function WorldKbEntityNode({
         className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port"
       />
       {selected ? <span className="sr-only">Selected World KB entity</span> : null}
+      {d.keyBlockId && open ? (
+        <WorldKbEntityContextMenu
+          position={position}
+          entityName={d.name || '(unnamed)'}
+          onClose={close}
+          onConnectTo={() => {
+            close();
+            // React Flow node data is not directly wired to onConnectTo; the
+            // canvas listens for selection change after the menu closes.
+            const event = new CustomEvent('world-kb-connect-to', {
+              detail: { sourceEntityId: d.keyBlockId! },
+            });
+            window.dispatchEvent(event);
+          }}
+        />
+      ) : null}
     </div>
   );
 });
