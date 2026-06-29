@@ -29,6 +29,7 @@ export interface WorldKbAltViewProps {
   onSelectNode: (node: WorldKbNodeData) => void;
   onSelectRelationship: (relationship: WorldKbRelationshipProjection) => void;
   onCreateRelationship: () => void;
+  onDeleteRelationship?: (relationship: WorldKbRelationshipProjection) => void;
 }
 
 export function WorldKbAltView({
@@ -40,6 +41,7 @@ export function WorldKbAltView({
   onSelectNode,
   onSelectRelationship,
   onCreateRelationship,
+  onDeleteRelationship,
 }: WorldKbAltViewProps) {
   const [activeTab, setActiveTab] = useState<Tab>('entities');
 
@@ -69,6 +71,7 @@ export function WorldKbAltView({
           selectedId={selectedRelationshipId}
           onSelect={onSelectRelationship}
           onCreate={onCreateRelationship}
+          onDelete={onDeleteRelationship}
         />
       )}
     </div>

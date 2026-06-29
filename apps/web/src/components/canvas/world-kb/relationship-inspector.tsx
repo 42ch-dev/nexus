@@ -79,6 +79,10 @@ export function RelationshipInspector({
     () => entities.filter((e) => e.status?.toLowerCase() !== 'rejected'),
     [entities],
   );
+  const targetEntities = useMemo(
+    () => selectableEntities.filter((e) => e.key_block_id !== form.sourceEntityId),
+    [selectableEntities, form.sourceEntityId],
+  );
 
   function handleSubmit() {
     const validation = validateRelationshipForm(form);
@@ -165,7 +169,7 @@ export function RelationshipInspector({
             invalid={Boolean(errors.targetEntityId)}
           >
             <option value="">Select target…</option>
-            {selectableEntities.map((e) => (
+            {targetEntities.map((e) => (
               <option key={e.key_block_id} value={e.key_block_id}>
                 {e.canonical_name}
               </option>
