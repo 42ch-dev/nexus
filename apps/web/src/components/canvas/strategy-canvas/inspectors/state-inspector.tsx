@@ -48,7 +48,9 @@ export function usePatchStrategyState(): UseMutationResult<
     mutationFn: (args: PatchStrategyStateArgs) =>
       client.strategyPatchState(args.strategyId, args.stateId, buildPatchStateRequest(args)),
     onSuccess: (_data, args) => {
-      toast({ variant: 'success', title: 'State updated', description: args.stateId });
+      // Show the new label after a rename; fall back to the immutable id for
+      // description-only edits (R-V171P1-QC1-003 B10).
+      toast({ variant: 'success', title: 'State updated', description: args.label ?? args.stateId });
       void qc.invalidateQueries({ queryKey: queryKeys.presets.detail(args.strategyId) });
     },
     onError: () => {},
