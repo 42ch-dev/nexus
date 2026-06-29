@@ -102,6 +102,15 @@ export function ChapterOutlineContentEditor({
     }
   }, [editor, disabled]);
 
+  // Reset save state on chapter switch so the content-sync effect below can
+  // load the new chapter's outline. Without this, a dirty/saving guard left
+  // over from the previous chapter blocks the sync — the editor keeps showing
+  // the old chapter's content, and a subsequent Save would write it to the NEW
+  // chapter (content corruption).
+  useEffect(() => {
+    setSaveState('clean');
+  }, [chapterNumber]);
+
   // Reset editor content when the outline read resolves or the canvas signals a
   // content reset (post-conflict refetch). Never clobber an in-progress edit:
   // contentVersion bumps after EVERY chapter patch (metadata-only saves
