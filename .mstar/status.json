@@ -4,7 +4,7 @@
   "plans": [],
   "metadata": {
     "integration_branch": "iteration/v1.73",
-    "integration_branch_retired": false,
+    "integration_branch_retired": true,
     "last_integration_branch": "iteration/v1.72",
     "integration_merge_target": "main",
     "latest_active_iteration": "V1.74 (pending /iteration-start)",
@@ -28,7 +28,7 @@
         "2026-06-28-v1.73-outline-hardening-and-release",
         "2026-06-28-v1.73-closure"
       ],
-      "merge_commit": "pending-V1.73-PR-merge",
+      "merge_commit": "7c1a4d36",
       "residual_summary": {
         "closed_in_v173": 7,
         "deferred_to_v174": 12,
@@ -52,7 +52,7 @@
       "refreshed_at": "2026-06-28T19:30:00Z",
       "refreshed_reason": "V1.73 closure: 7 V1.72 residuals resolved (P1 B1-B7); 9 hygiene re-targeted to V1.74; 3 new V1.73 QC suggestions (qc1 F-S1/S2/S3) deferred to V1.74."
     },
-    "updated_at": "2026-06-28T20:00:00Z",
+    "updated_at": "2026-06-29T05:11:00Z",
     "spec_integration_branch": "iteration/v1.73",
     "wave1_merged_at": null
   },
