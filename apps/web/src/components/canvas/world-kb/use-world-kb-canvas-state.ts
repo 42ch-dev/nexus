@@ -53,10 +53,11 @@ export function useWorldKbCanvasState({
     } else if (selection.kind === 'candidate') {
       const fresh = candidateItems.find((c) => c.candidate_id === selection.candidate.candidate_id);
       if (!fresh) setSelection(null);
-    } else {
+    } else if (selection.kind === 'relationship') {
       const fresh = relationships.find((r) => r.relationship_id === selection.relationship.relationship_id);
       if (!fresh) setSelection(null);
     }
+    // new-relationship selection is transient and never needs invalidation.
   }, [entities, candidateItems, relationships, selection]);
 
   function onSelectNode(node: WorldKbNodeData) {
@@ -78,12 +79,31 @@ export function useWorldKbCanvasState({
     }
   }
 
-  const selectedNodeId = selection && selection.kind !== 'relationship' ? worldKbNodeId(selection.node) : null;
+  function onSelectRelationship(relationship: WorldKbRelationshipProjection) {
+    setSelection({ kind: 'relationship', relationship });
+  }
+
+  function onCreateRelationship(initial?: { sourceEntityId?: string; targetEntityId?: string }) {
+    setSelection({
+      kind: 'new-relationship',
+      initialSourceEntityId: initial?.sourceEntityId,
+      initialTargetEntityId: initial?.targetEntityId,
+    });
+  }
+
+  const selectedNodeId =
+    selection && selection.kind !== 'relationship' && selection.kind !== 'new-relationship'
+      ? worldKbNodeId(selection.node)
+      : null;
+
+  const selectedRelationshipId =
+    selection?.kind === 'relationship' ? selection.relationship.relationship_id : null;
 
   return {
     selection,
     setSelection,
     selectedNodeId,
+    selectedRelationshipId,
     entityConflict,
     promoteConflict,
     relationshipConflict,
@@ -93,6 +113,8 @@ export function useWorldKbCanvasState({
     setPromoteConflict,
     setRelationshipConflict,
     onSelectNode,
+    onSelectRelationship,
+    onCreateRelationship,
     onEdgeClick,
   };
 }
