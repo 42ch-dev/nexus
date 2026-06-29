@@ -33,9 +33,15 @@ import type {
 
 export interface OutlineCanvasProps {
   workId: string;
+  /**
+   * Optional chapter id to preselect on mount (V1.75 F-QC3-001). Read once from
+   * the route's `?chapter=N` query param by {@link OutlinePage} and used to
+   * seed {@link selectedChapterId}; later user clicks override it normally.
+   */
+  initialSelectedChapterId?: number | null;
 }
 
-export function OutlineCanvas({ workId }: OutlineCanvasProps) {
+export function OutlineCanvas({ workId, initialSelectedChapterId = null }: OutlineCanvasProps) {
   const work = useWork(workId);
   const chaptersQuery = useChapters(workId);
   const outline = useWorkOutline(workId);
@@ -44,7 +50,9 @@ export function OutlineCanvas({ workId }: OutlineCanvasProps) {
   const patchChapter = usePatchOutlineChapter(workId);
   const patchTimeline = usePatchTimelineEvent(workId);
 
-  const [selectedChapterId, setSelectedChapterId] = useState<number | null>(null);
+  const [selectedChapterId, setSelectedChapterId] = useState<number | null>(
+    initialSelectedChapterId ?? null,
+  );
   const [conflict, setConflict] = useState<ConflictState | null>(null);
   // Bumped after a successful refetch so the inspector's content editor resets
   // its local dirty state (e.g. following conflict resolution / reapply).
