@@ -58,7 +58,7 @@ type Selection =
   | { kind: 'candidate'; node: WorldKbNodeData; candidate: WorldKbCandidateProjection }
   | null;
 
-type EntityField = 'title' | 'body' | 'aliases' | 'block_type';
+export type EntityField = 'title' | 'body' | 'aliases' | 'block_type';
 
 interface EntityConflictState {
   /** Modal draft (KB-flavored copy) — includes entityName. */
@@ -320,15 +320,21 @@ function nodesToData(nodes: Node[]): WorldKbNodeData[] {
     .filter(Boolean);
 }
 
-/** Build a patch payload from the captured conflict form + dirty fields. */
-function patchFromForm(form: EntityEditForm, dirty: EntityField[]) {
+/** Build a patch payload from the captured conflict form + dirty fields.
+ * Exported for unit testing the reapply payload shape. */
+export function patchFromForm(form: EntityEditForm, dirty: EntityField[]) {
   const patch: {
     title?: string;
     body?: Record<string, unknown>;
     aliases?: string[];
     block_type?: EntityEditForm['block_type'];
   } = {};
-  if (dirty.includes('title')) patch.title = form.title.trim() || undefined;
+  // Preserve the trimmed value verbatim — including the empty string. The
+  // primary handleSubmit path sends `form.title.trim()` directly, so an
+  // explicitly-cleared title surfaces a meaningful 422 from the server.
+  // Coercing `''` to `undefined` here dropped `title` from the JSON payload,
+  // leaving an empty patch → 400 InvalidInput (V1.73 greploop issue 4).
+  if (dirty.includes('title')) patch.title = form.title.trim();
   if (dirty.includes('block_type')) patch.block_type = form.block_type;
   if (dirty.includes('aliases')) {
     patch.aliases = form.aliasesText
