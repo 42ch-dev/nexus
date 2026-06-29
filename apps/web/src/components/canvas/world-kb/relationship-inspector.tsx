@@ -113,6 +113,15 @@ export function RelationshipInspector({
     if (!relationship) return;
     patchRelationship.mutate(buildRelationshipRemoveRequest(relationship), {
       onSuccess: () => onSaved?.(),
+      onError: (error) => {
+        // A 409 on delete = the relationship changed concurrently (or was
+        // already removed). The hook's global onError refetches the graph to
+        // canonical state; here we dismiss the inspector since the stale row is
+        // no longer editable.
+        if (isWorldKbConflictError(error)) {
+          onSaved?.();
+        }
+      },
     });
   }
 
