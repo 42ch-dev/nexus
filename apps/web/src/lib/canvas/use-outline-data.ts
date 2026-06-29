@@ -73,6 +73,15 @@ export function usePatchOutlineChapter(workId: string | undefined) {
       void qc.invalidateQueries({
         queryKey: queryKeys.chapters.detail(workId ?? '', variables.chapter),
       });
+      // Invalidate the chapter's outline read so the content editor's
+      // useChapterOutline cache refetches after a content patch. Without this,
+      // the stale cache reverts the editor to the pre-save content once the
+      // local save state settles to 'clean'. Use the chapter-specific prefix
+      // (no trailing volume-query object) so it matches regardless of the
+      // volume query the editor read with.
+      void qc.invalidateQueries({
+        queryKey: [...queryKeys.chapters.outlines(), workId ?? '', variables.chapter],
+      });
     },
     onError: (error) => errorToast(error, 'Could not update chapter'),
   });
