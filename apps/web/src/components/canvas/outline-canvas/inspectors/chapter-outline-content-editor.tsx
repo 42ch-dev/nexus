@@ -38,7 +38,7 @@ import { Button } from '@/components/ui/button';
 import { useChapterOutline } from '@/api/queries';
 import type { OutlinePatchChapterRequest } from '@42ch/nexus-contracts';
 
-type SaveState = 'clean' | 'dirty' | 'saving' | 'saved-error';
+type SaveState = 'clean' | 'dirty' | 'saving';
 
 interface ChapterOutlineContentEditorProps {
   workId: string;
@@ -80,14 +80,12 @@ export function ChapterOutlineContentEditor({
   const outline = useChapterOutline(workId, chapterNumber, volumeQuery);
 
   const [saveState, setSaveState] = useState<SaveState>('clean');
-  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Pin editor deps so useEditor does not re-initialize on every render.
   const editorExtensions = useMemo(() => [StarterKit, Markdown], []);
 
   const handleEditorUpdate = useCallback(() => {
     setSaveState((prev) => (prev === 'saving' ? prev : 'dirty'));
-    setSaveError(null);
   }, []);
 
   const editor = useEditor({
@@ -105,19 +103,22 @@ export function ChapterOutlineContentEditor({
   }, [editor, disabled]);
 
   // Reset editor content when the outline read resolves or the canvas signals a
-  // content reset (post-conflict refetch). Avoids clobbering an in-flight dirty
-  // edit with a stale read by checking the markdown round-trip.
+  // content reset (post-conflict refetch). Never clobber an in-progress edit:
+  // contentVersion bumps after EVERY chapter patch (metadata-only saves
+  // included), and the outline read is not re-fetched on those, so without the
+  // dirty/saving guard a title or status save would overwrite the editor with a
+  // stale server snapshot and silently discard the user's edits.
   useEffect(() => {
     if (!editor || !outline.data || outline.isFetching) return;
+    if (saveState === 'dirty' || saveState === 'saving') return;
     const current = getMarkdown(editor);
     if (current !== outline.data.content) {
       editor.commands.setContent(outline.data.content, false);
       setSaveState('clean');
-      setSaveError(null);
     }
     // contentVersion is an intentional reset trigger.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editor, outline.data, outline.isFetching, contentVersion]);
+  }, [editor, outline.data, outline.isFetching, contentVersion, saveState]);
 
   // Clear the local dirty flag when the orchestrator's patch mutation settles.
   useEffect(() => {
@@ -133,7 +134,6 @@ export function ChapterOutlineContentEditor({
     if (!editor) return;
     const content = getMarkdown(editor);
     setSaveState('saving');
-    setSaveError(null);
     onPatchChapter(chapterNumber, {
       work_id: workId,
       chapter_id: chapterNumber,
@@ -146,7 +146,6 @@ export function ChapterOutlineContentEditor({
     if (!editor || !outline.data) return;
     editor.commands.setContent(outline.data.content, false);
     setSaveState('clean');
-    setSaveError(null);
   }
 
   if (outline.isLoading) {
@@ -169,7 +168,7 @@ export function ChapterOutlineContentEditor({
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <span className="text-copy-13 font-medium text-gray-700">Outline content</span>
-        <SaveStateIndicator state={saveState} error={saveError} />
+        <SaveStateIndicator state={saveState} />
       </div>
       <div className="overflow-hidden rounded-card border border-gray-alpha-400 bg-background-100 focus-within:border-blue-700 focus-within:ring-2 focus-within:ring-blue-700/20">
         <EditorToolbar editor={editor} disabled={disabled} />
@@ -198,7 +197,7 @@ export function ChapterOutlineContentEditor({
             variant="primary"
             size="small"
             onClick={handleSave}
-            disabled={disabled || saveState === 'saving' || (saveState !== 'dirty' && saveState !== 'saved-error')}
+            disabled={disabled || saveState === 'saving' || saveState !== 'dirty'}
           >
             {saveState === 'saving' && <Loader2 className="h-4 w-4 animate-spin" aria-hidden />}
             Save content
@@ -213,12 +212,11 @@ function getMarkdown(editor: Editor): string {
   return (editor.storage.markdown as { getMarkdown: () => string }).getMarkdown();
 }
 
-function SaveStateIndicator({ state, error }: { state: SaveState; error: string | null }) {
+function SaveStateIndicator({ state }: { state: SaveState }) {
   const config: Record<SaveState, { dot: string; label: string }> = {
     clean: { dot: 'bg-green-700', label: 'Saved' },
     dirty: { dot: 'bg-amber-700', label: 'Unsaved changes' },
     saving: { dot: 'bg-amber-700', label: 'Saving…' },
-    'saved-error': { dot: 'bg-red-700', label: error ?? 'Save failed' },
   };
   const { dot, label } = config[state];
   return (
