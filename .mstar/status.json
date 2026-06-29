@@ -1,59 +1,56 @@
 {
   "version": 1,
-  "updated_at": "2026-06-28T20:00:00Z",
+  "updated_at": "2026-06-29T17:30:00Z",
   "plans": [],
   "metadata": {
-    "integration_branch": "iteration/v1.73",
+    "integration_branch": "iteration/v1.74",
     "integration_branch_retired": true,
-    "last_integration_branch": "iteration/v1.72",
+    "last_integration_branch": "iteration/v1.74",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.74 (pending /iteration-start)",
+    "latest_active_iteration": "V1.75 (pending /iteration-start)",
     "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.73",
-      "compass": "v1.73-canvas-world-kb-beta-and-outline-hardening-compass-v1.md",
-      "shipped_at": "2026-06-28",
+      "iteration": "V1.74",
+      "compass": "v1.74-world-kb-relationships-and-hygiene-compass-v1.md",
+      "shipped_at": "2026-06-29",
       "plan_count": 4,
       "plan_count_done": 4,
       "wire_contracts_changed": true,
-      "wire_contracts_note": "V1.73 Track A: new Local API DTOs for world_kb.patch_entity / world_kb.promote_candidate + graph/candidates read + conflict/validation errors; @42ch/nexus-contracts 0.8.0 → 0.9.0. Track B: no wire change.",
-      "profile_b_compaction": "done (V1.73 P-last closure)",
+      "wire_contracts_note": "V1.74 Track A: new Local API relationship DTOs (WorldKbPatchRelationshipRequest/Response, WorldKbRelationshipInput/Projection, WorldKbRelationshipKind) + graph-response relationships[] item schema promoted; @42ch/nexus-contracts 0.9.0 -> 0.10.0. Track B: B3/B4 schema reconciliations ride the same bump.",
+      "profile_b_compaction": "done (V1.74 P-last closure)",
       "plan_ids": [
-        "2026-06-28-v1.73-compass-and-plan",
-        "2026-06-28-v1.73-canvas-world-kb-beta",
-        "2026-06-28-v1.73-outline-hardening-and-release",
-        "2026-06-28-v1.73-closure"
+        "2026-06-29-v1.74-compass-and-plan",
+        "2026-06-29-v1.74-world-kb-relationships",
+        "2026-06-29-v1.74-hygiene-slate-clear",
+        "2026-06-29-v1.74-closure"
       ],
-      "merge_commit": "7c1a4d36",
       "residual_summary": {
-        "closed_in_v173": 7,
-        "deferred_to_v174": 12,
-        "open_post_v173": 12
+        "closed_in_v174": 12,
+        "new_qc_followup_v175": 8,
+        "open_post_v174": 8
       }
     },
     "tech_debt_summary": {
-      "total_open": 12,
+      "total_open": 8,
       "total_deferred": 0,
-      "total_resolved": 260,
+      "total_resolved": 272,
       "total_archived": 0,
       "by_severity_active": {
-        "low": 12
+        "low": 6,
+        "nit": 2
       },
       "by_target_active": {
-        "V1.74 hygiene backlog (plan-id tbd-v1.74-hygiene)": 12
+        "V1.75 QC followup (tbd-v1.75-qc-followup)": 8
       },
-      "by_plan_active": {
-        "2026-06-28-v1.73-canvas-world-kb-beta": 3
-      },
-      "refreshed_at": "2026-06-28T19:30:00Z",
-      "refreshed_reason": "V1.73 closure: 7 V1.72 residuals resolved (P1 B1-B7); 9 hygiene re-targeted to V1.74; 3 new V1.73 QC suggestions (qc1 F-S1/S2/S3) deferred to V1.74."
+      "refreshed_at": "2026-06-29T17:00:00Z",
+      "refreshed_reason": "V1.74 closure: 12 pre-existing residuals resolved (slate cleared to 0); 8 new QC suggestions registered for V1.75 followup."
     },
     "updated_at": "2026-06-29T05:11:00Z",
-    "spec_integration_branch": "iteration/v1.73",
+    "spec_integration_branch": "iteration/v1.74",
     "wave1_merged_at": null
   },
   "residual_findings": {
@@ -4014,7 +4011,7 @@
         "id": "R-V165-QC3-VIRT",
         "title": "Chapter table virtualization for large chapter counts",
         "severity": "low",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "source": "qc3.md",
         "scope": "apps/web chapters-page",
         "decision": "defer",
@@ -4022,7 +4019,13 @@
         "target": "V1.74 hygiene backlog (plan-id tbd-v1.74-hygiene)",
         "notes": "Deferred from V1.71 Track B: chapter virtualization requires @tanstack/react-virtual dependency + table restructuring; no real large-chapter dataset available in V1.71 to validate. Scheduled for V1.72 hygiene or outline+timeline canvas pivot.",
         "note": "V1.72 deferred to V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene) per compass §5 V1.73 deferrals table.",
-        "target_date": "V1.74"
+        "target_date": "V1.74",
+        "resolution": {
+          "plan_id": "2026-06-29-v1.74-hygiene-slate-clear",
+          "commit": "ad867216",
+          "at": "2026-06-29",
+          "note": "Closed in V1.74 (QC tri-review 3/3 Approve + QA Pass)."
+        }
       },
       {
         "id": "R-V165-QC-SUGG-DEFENSE",
@@ -4741,7 +4744,13 @@
         "target_date": "V1.74",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.71-canvas-strategy-write-boundary][R-V171P0-QC1-008]",
         "note": "Still open. The ConflictModal now has 8 component tests and the canvas auto-refetches on conflict, but there is no automated test that submits an edit through StrategyCanvas and verifies query invalidation/refetch. Add a focused component or e2e test before closing. | V1.72 deferred to V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene) per compass §5 V1.73 deferrals table.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-06-29-v1.74-hygiene-slate-clear",
+          "commit": "ad867216",
+          "at": "2026-06-29",
+          "note": "Closed in V1.74 (QC tri-review 3/3 Approve + QA Pass)."
+        }
       },
       {
         "id": "R-V171P0-QC1-002",
@@ -4777,7 +4786,13 @@
         "target_date": "V1.74",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-27-v1.71-canvas-strategy-write-boundary][R-V171P0-QC1-010]",
         "note": "Still open. The plan and compass still state that generated TypeScript output lives under apps/web/src/api-types/canvas/, but the actual generated TS is in packages/nexus-contracts/src/generated/ and is consumed via the workspace package. apps/web/src/api-types/ does not exist. Update the plan, compass, and any spec references to match the actual architecture. | V1.72 deferred to V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene) per compass §5 V1.73 deferrals table.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-06-29-v1.74-hygiene-slate-clear",
+          "commit": "ad867216",
+          "at": "2026-06-29",
+          "note": "Closed in V1.74 (QC tri-review 3/3 Approve + QA Pass)."
+        }
       },
       {
         "id": "R-V171P0-QC3-S3",
@@ -4850,7 +4865,13 @@
         "target_date": "V1.74",
         "tracking_link": ".mstar/plans/reports/2026-06-27-v1.71-hygiene-and-sign-groundwork/qc1.md",
         "note": "start_daemon now spawns 'daemon-run' directly (commit 835e4762). The module-level comments in daemon_run.rs and boot.rs still describe the old '__internal daemon-run' invocation. Pure doc drift; no runtime impact. | V1.72 deferred to V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene) per compass §5 V1.73 deferrals table.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-06-29-v1.74-hygiene-slate-clear",
+          "commit": "ad867216",
+          "at": "2026-06-29",
+          "note": "Closed in V1.74 (QC tri-review 3/3 Approve + QA Pass)."
+        }
       },
       {
         "id": "R-V171P1-QC1-001",
@@ -4905,7 +4926,13 @@
         "target_date": "V1.74",
         "tracking_link": ".mstar/plans/reports/2026-06-27-v1.71-hygiene-and-sign-groundwork/qc1.md",
         "note": "const canEditOutline = chapter.data?.can_edit_outline ?? true; falls back to editable if the API omits the field. Backend always populates it today, but defense-in-depth would default to false or validate the contract shape at the API boundary. Non-blocking for P1 approval. | V1.72 deferred to V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene) per compass §5 V1.73 deferrals table.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-06-29-v1.74-hygiene-slate-clear",
+          "commit": "ad867216",
+          "at": "2026-06-29",
+          "note": "Closed in V1.74 (QC tri-review 3/3 Approve + QA Pass)."
+        }
       },
       {
         "id": "R-V171-CI-RELEASE-WORKFLOW-INCOMPLETE",
@@ -4953,8 +4980,14 @@
         "owner": "@frontend-dev",
         "target": "V1.74 hygiene backlog (plan-id tbd-v1.74-hygiene)",
         "note": "usePatchStrategyState's success toast description uses args.stateId (the old ID) rather than the new label after a rename, so the user sees a description referring to the old name even though the state now has the new label. Cosmetic only — data integrity is correct. R-V171-GREPTILE-POST5. | V1.72 deferred to V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene) per compass §5 V1.73 deferrals table.",
-        "lifecycle": "open",
-        "target_date": "V1.74"
+        "lifecycle": "resolved",
+        "target_date": "V1.74",
+        "resolution": {
+          "plan_id": "2026-06-29-v1.74-hygiene-slate-clear",
+          "commit": "ad867216",
+          "at": "2026-06-29",
+          "note": "Closed in V1.74 (QC tri-review 3/3 Approve + QA Pass)."
+        }
       },
       {
         "id": "R-V171-GREPTILE-POST5-ROLLBACK-ATOMIC",
@@ -4966,8 +4999,14 @@
         "owner": "@fullstack-dev",
         "target": "V1.74 hygiene backlog (plan-id tbd-v1.74-hygiene)",
         "note": "rollback_template_write restores the previous template bytes via std::fs::write after a validation failure, which is non-atomic. A process crash mid-rollback could leave the template truncated while the YAML revision was already restored. Note: the rollback path is only reachable on validation failure (very rare), and the primary write path is now atomic via atomic_write_with_dir_fsync. Cosmetic defence-in-depth for the failure path. R-V171-GREPTILE-POST5. | V1.72 deferred to V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene) per compass §5 V1.73 deferrals table.",
-        "lifecycle": "open",
-        "target_date": "V1.74"
+        "lifecycle": "resolved",
+        "target_date": "V1.74",
+        "resolution": {
+          "plan_id": "2026-06-29-v1.74-hygiene-slate-clear",
+          "commit": "ad867216",
+          "at": "2026-06-29",
+          "note": "Closed in V1.74 (QC tri-review 3/3 Approve + QA Pass)."
+        }
       }
     ],
     "2026-06-28-v1.72-canvas-outline-timeline-beta": [
@@ -5077,8 +5116,14 @@
         "target": "V1.74 hygiene backlog (plan-id tbd-v1.74-hygiene)",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-canvas-outline-timeline-beta][R-V172P0-QC3-004]",
         "note": "Test drift; runtime parity likely OK (TauriClient inherits BrowserClient). Fix test count + path assertions to cover all NexusClient methods including new outline/timeline routes.",
-        "lifecycle": "open",
-        "target_date": "V1.74"
+        "lifecycle": "resolved",
+        "target_date": "V1.74",
+        "resolution": {
+          "plan_id": "2026-06-29-v1.74-hygiene-slate-clear",
+          "commit": "ad867216",
+          "at": "2026-06-29",
+          "note": "Closed in V1.74 (QC tri-review 3/3 Approve + QA Pass)."
+        }
       },
       {
         "id": "R-V172P0-QC2-001",
@@ -5209,8 +5254,14 @@
         "target": "V1.74 hygiene backlog (plan-id tbd-v1.74-hygiene)",
         "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-hygiene-and-release-hardening][R-V172P1-QC1-001]",
         "note": "PM accepts as cosmetic residual. Early-exit guards prevent actual double-saves. Fix in V1.73 (wrap handleSave in useCallback with proper deps, or use ref-based trigger pattern). Subsumed by R-V172P1-QC3-001 fix-wave which addresses root cause.",
-        "lifecycle": "open",
-        "target_date": "V1.74"
+        "lifecycle": "resolved",
+        "target_date": "V1.74",
+        "resolution": {
+          "plan_id": "2026-06-29-v1.74-hygiene-slate-clear",
+          "commit": "ad867216",
+          "at": "2026-06-29",
+          "note": "Closed in V1.74 (QC tri-review 3/3 Approve + QA Pass)."
+        }
       },
       {
         "id": "R-V172P1-QC3-003",
@@ -5359,7 +5410,13 @@
         "owner": "@fullstack-dev",
         "target": "V1.74 hygiene backlog (plan-id tbd-v1.74-hygiene)",
         "note": "Non-blocking; implementer documented choice. Reconcile naming convention at V1.74.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-06-29-v1.74-hygiene-slate-clear",
+          "commit": "ad867216",
+          "at": "2026-06-29",
+          "note": "Closed in V1.74 (QC tri-review 3/3 Approve + QA Pass)."
+        }
       },
       {
         "id": "R-V173QC1-S2",
@@ -5371,7 +5428,13 @@
         "owner": "@frontend-dev",
         "target": "V1.74 hygiene backlog (plan-id tbd-v1.74-hygiene)",
         "note": "Mirror B5 split pattern for world-kb canvas at V1.74.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-06-29-v1.74-world-kb-relationships",
+          "commit": "ad867216",
+          "at": "2026-06-29",
+          "note": "Closed in V1.74 (QC tri-review 3/3 Approve + QA Pass)."
+        }
       },
       {
         "id": "R-V173QC1-S3",
@@ -5383,6 +5446,102 @@
         "owner": "@fullstack-dev",
         "target": "V1.74 hygiene backlog (plan-id tbd-v1.74-hygiene)",
         "note": "Forward-compat debt; either wire idempotency or remove the field at V1.74.",
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-06-29-v1.74-hygiene-slate-clear",
+          "commit": "ad867216",
+          "at": "2026-06-29",
+          "note": "Closed in V1.74 (QC tri-review 3/3 Approve + QA Pass)."
+        }
+      }
+    ],
+    "2026-06-29-v1.74-world-kb-relationships": [
+      {
+        "id": "R-V174QC1-S002",
+        "title": "kb_relationships.rs duplicates cas_check re-read pattern (F-002)",
+        "severity": "low",
+        "source": "qc1 F-002",
+        "scope": "crates/nexus-local-db/src/kb_relationships.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.75 QC followup (tbd-v1.75-qc-followup)",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V174QC1-S004",
+        "title": "codegen strips Eq from all generated structs, not just f64-containing (F-004)",
+        "severity": "low",
+        "source": "qc1 F-004",
+        "scope": "tooling/codegen/src/rust-generator.ts",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.75 QC followup (tbd-v1.75-qc-followup)",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V174QC1-S006",
+        "title": "graph-projection.ts docstring still describes V1.73 read-only behavior (F-006)",
+        "severity": "nit",
+        "source": "qc1 F-006",
+        "scope": "apps/web/src/components/canvas/world-kb/graph-projection.ts",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.75 QC followup (tbd-v1.75-qc-followup)",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V174QC1-S007",
+        "title": "project_relationship silently coerces unknown enum values to Custom (F-007)",
+        "severity": "low",
+        "source": "qc1 F-007",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/world_kb.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.75 QC followup (tbd-v1.75-qc-followup)",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V174QC2-S001",
+        "title": "qc2: cross-world error code 404 vs 403",
+        "severity": "low",
+        "source": "qc2 Suggestion",
+        "scope": "world_kb relationship handler authorization",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.75 QC followup (tbd-v1.75-qc-followup)",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V174QC2-S002",
+        "title": "qc2: post-commit re-fetch consistency",
+        "severity": "low",
+        "source": "qc2 Suggestion",
+        "scope": "world_kb handler",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.75 QC followup (tbd-v1.75-qc-followup)",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V174QC2-S003",
+        "title": "qc2: test naming consistency",
+        "severity": "nit",
+        "source": "qc2 Suggestion",
+        "scope": "world_kb_relationships tests",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.75 QC followup (tbd-v1.75-qc-followup)",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V174QC3-S001",
+        "title": "qc3: relationship graph cap/pagination for large worlds",
+        "severity": "low",
+        "source": "qc3 Suggestion",
+        "scope": "GET graph relationships projection",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.75 QC followup (tbd-v1.75-qc-followup)",
         "lifecycle": "open"
       }
     ]

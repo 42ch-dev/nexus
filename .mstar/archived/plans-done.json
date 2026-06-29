@@ -339,7 +339,11 @@
     "2026-06-28-v1.73-compass-and-plan",
     "2026-06-28-v1.73-canvas-world-kb-beta",
     "2026-06-28-v1.73-outline-hardening-and-release",
-    "2026-06-28-v1.73-closure"
+    "2026-06-28-v1.73-closure",
+    "2026-06-29-v1.74-compass-and-plan",
+    "2026-06-29-v1.74-world-kb-relationships",
+    "2026-06-29-v1.74-hygiene-slate-clear",
+    "2026-06-29-v1.74-closure"
   ],
   "iteration_summaries": {
     "v1.45": {

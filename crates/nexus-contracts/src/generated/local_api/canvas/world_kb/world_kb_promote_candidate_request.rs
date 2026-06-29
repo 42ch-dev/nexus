@@ -1,4 +1,4 @@
-//! `Nexus` `PromoteWorldKbCandidateRequest`
+//! `Nexus` `WorldKbPromoteCandidateRequest`
 //!
 //! `Request` body for `POST` /v1/local/worlds/{`world_id`}/kb/promote-candidate (`V1`.73). adopt/reject/merge a pending candidate via the entity-scope-model §5.5.2 promotion state machine. `Per`-row `OCC` on `kb_extract_jobs`.version.
 //!
@@ -20,6 +20,4 @@ pub struct WorldKbPromoteCandidateRequest {
     pub merge_target_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub patch: Option<WorldKbEntityPatch>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub idempotency_key: Option<String>,
 }

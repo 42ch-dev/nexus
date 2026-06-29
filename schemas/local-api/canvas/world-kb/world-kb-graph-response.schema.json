@@ -19,8 +19,8 @@
     },
     "relationships": {
       "type": "array",
-      "items": { "type": "object" },
-      "description": "Reserved for V1.74 typed relationship edges. Always empty in V1.73."
+      "items": { "$ref": "world-kb-relationship-projection.schema.json" },
+      "description": "Typed World KB relationship projections (V1.74). Symmetric rows emit both stored and symmetric_reverse projections."
     }
   },
   "additionalProperties": false

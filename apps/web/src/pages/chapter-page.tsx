@@ -67,7 +67,7 @@ export function ChapterPage() {
   const [saveState, setSaveState] = useState<SaveState>('clean');
   const [saveError, setSaveError] = useState<string | null>(null);
   const [lastSavedAt, setLastSavedAt] = useState<string | null>(null);
-  const canEditOutline = chapter.data?.can_edit_outline ?? true;
+  const canEditOutline = chapter.data?.can_edit_outline ?? false;
   // V1.66 desktop right-click menu on the outline editor surface
   // (web-ui-design-requirements §6.4). Shares the same component as the body
   // view; acts on the chapter's outline_path.
