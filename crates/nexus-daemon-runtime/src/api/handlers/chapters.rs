@@ -261,7 +261,12 @@ async fn read_guarded_file(
 
 /// Atomically write `content` to `rel_path` under `workspace_root`, creating
 /// parent directories as needed. Mirrors `work_chapters::sync_frontmatter_status`.
-async fn atomic_write_outline(
+///
+/// Reused by the outline canvas `patch_chapter` handler (V1.75 A2) to persist
+/// per-chapter outline prose to the `outline_path` markdown file, so the
+/// temp+rename+file fsync+dir fsync durability pattern stays identical for
+/// every chapter-file write path.
+pub(crate) async fn atomic_write_outline(
     workspace_root: &StdPath,
     rel_path: &str,
     content: &str,
