@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/canvas/world-kb/world-kb-patch-entity-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus PatchWorldKbEntityResponse",
+  "description": "Success response for POST /v1/local/worlds/{world_id}/kb/patch-entity (V1.73). Returns the updated entity projection, the new per-row version, and validation diagnostics.",
+  "type": "object",
+  "required": ["entity", "version", "validation_summary"],
+  "properties": {
+    "entity": { "$ref": "world-kb-entity-projection.schema.json" },
+    "version": { "type": "integer", "minimum": 0, "description": "New per-row version after the patch was persisted." },
+    "validation_summary": {
+      "type": "object",
+      "required": ["errors", "warnings"],
+      "properties": {
+        "errors": { "type": "array", "items": { "type": "string" } },
+        "warnings": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

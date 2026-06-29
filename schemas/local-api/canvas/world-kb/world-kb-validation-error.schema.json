@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/canvas/world-kb/world-kb-validation-error.schema.json",
+  "schema_version": 1,
+  "title": "Nexus WorldKbValidationError",
+  "description": "Structured detail placed inside the canonical ErrorResponse.details field when a World KB patch is rejected for domain-rule violations (HTTP 422, V1.73). Distinct from 409 WorldKbConflictError which is concurrent-write version mismatch only.",
+  "type": "object",
+  "required": ["validation_summary"],
+  "properties": {
+    "validation_summary": {
+      "type": "object",
+      "required": ["errors", "warnings"],
+      "properties": {
+        "errors": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Fatal validation messages that prevented the patch. Always present; empty on success."
+        },
+        "warnings": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Non-fatal validation messages. Always present; empty when none."
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

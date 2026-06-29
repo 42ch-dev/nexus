@@ -66,4 +66,10 @@ export const queryKeys = {
     all: ['outline'] as const,
     detail: (workId: string) => [...queryKeys.outline.all, 'detail', workId] as const,
   },
+  worldKb: {
+    all: ['worldKb'] as const,
+    graph: (worldId: string) => [...queryKeys.worldKb.all, 'graph', worldId] as const,
+    candidates: (worldId: string, query?: object) =>
+      [...queryKeys.worldKb.all, 'candidates', worldId, query ?? {}] as const,
+  },
 } as const;
