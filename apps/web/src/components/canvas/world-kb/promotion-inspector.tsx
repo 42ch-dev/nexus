@@ -59,7 +59,17 @@ export function PromotionInspector({
     setValidationErrors([]);
   }, [candidate.candidate_id, reseedSignal]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const mergeTargets = confirmedEntities.filter((e) => e.block_type === candidate.block_type);
+  // Backend `promote_merge` only accepts `confirmed` or `manual` targets
+  // (world_kb.rs promote_merge status guard); any other status that has leaked
+  // into `confirmedEntities` (e.g. `merged`/`rejected`/`deprecated`/`deleted`)
+  // would 422 at submit with no client-side hint. Filter the dropdown to the
+  // backend's allowed set so users never pick a target the daemon will reject.
+  // (greptile 4→5)
+  const mergeTargets = confirmedEntities.filter(
+    (e) =>
+      e.block_type === candidate.block_type &&
+      (e.status?.toLowerCase() === 'confirmed' || e.status?.toLowerCase() === 'manual'),
+  );
 
   function handleSubmit() {
     setValidationErrors([]);
