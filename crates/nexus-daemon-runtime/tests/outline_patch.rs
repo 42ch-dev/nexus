@@ -649,24 +649,17 @@ async fn v175_content_patch_writes_outline_path_and_bumps_revision() {
     // Seed an existing outline_path so we patch a pre-existing file.
     let now = chrono::Utc::now().to_rfc3339();
     let rel_outline = "Works/outline-hardening-novel/Outlines/chapters/ch01-outline.md";
-    work_chapters::update_outline_path(
-        ctx.state.pool(),
-        &work_id,
-        1,
-        1,
-        Some(rel_outline),
-        &now,
-    )
-    .await
-    .expect("set outline_path");
-    let ws_root = std::path::PathBuf::from(
-        ctx.state.workspace_path().expect("workspace path set"),
-    );
+    work_chapters::update_outline_path(ctx.state.pool(), &work_id, 1, 1, Some(rel_outline), &now)
+        .await
+        .expect("set outline_path");
+    let ws_root = std::path::PathBuf::from(ctx.state.workspace_path().expect("workspace path set"));
     let outline_abs = ws_root.join(rel_outline);
     tokio::fs::create_dir_all(outline_abs.parent().unwrap())
         .await
         .unwrap();
-    tokio::fs::write(&outline_abs, "# Old outline\n").await.unwrap();
+    tokio::fs::write(&outline_abs, "# Old outline\n")
+        .await
+        .unwrap();
 
     let new_rev = chapter_patch(
         &ctx.state,
@@ -707,9 +700,15 @@ async fn v175_content_patch_seeds_outline_path_when_missing() {
         "precondition: chapter has no outline_path"
     );
 
-    chapter_patch(&ctx.state, &work_id, "1", 0, json!({ "content": "Fresh prose" }))
-        .await
-        .expect("content patch should seed the outline_path");
+    chapter_patch(
+        &ctx.state,
+        &work_id,
+        "1",
+        0,
+        json!({ "content": "Fresh prose" }),
+    )
+    .await
+    .expect("content patch should seed the outline_path");
 
     let after = chapter_row(ctx.state.pool(), &work_id, 1).await;
     let derived = after
@@ -722,9 +721,7 @@ async fn v175_content_patch_seeds_outline_path_when_missing() {
     );
 
     // The derived file was actually written.
-    let ws_root = std::path::PathBuf::from(
-        ctx.state.workspace_path().expect("workspace path set"),
-    );
+    let ws_root = std::path::PathBuf::from(ctx.state.workspace_path().expect("workspace path set"));
     let on_disk = tokio::fs::read_to_string(ws_root.join(derived))
         .await
         .expect("seeded outline file should exist");
@@ -767,46 +764,37 @@ async fn v175_content_patch_does_not_touch_body_path() {
     let work_id = setup_work(&ctx.state).await;
     seed_chapter(ctx.state.pool(), &work_id, 1).await;
 
-    let ws_root = std::path::PathBuf::from(
-        ctx.state.workspace_path().expect("workspace path set"),
-    );
+    let ws_root = std::path::PathBuf::from(ctx.state.workspace_path().expect("workspace path set"));
 
     // Seed a distinct outline_path and body_path, each with sentinel content.
     let now = chrono::Utc::now().to_rfc3339();
     let rel_outline = "Works/outline-hardening-novel/Outlines/chapters/ch01-outline.md";
     let rel_body = "Works/outline-hardening-novel/Stories/ch01-body.md";
-    work_chapters::update_outline_path(
-        ctx.state.pool(),
-        &work_id,
-        1,
-        1,
-        Some(rel_outline),
-        &now,
-    )
-    .await
-    .unwrap();
-    // Seed the body_path column directly (insert_chapter took None).
-    sqlx::query(
-        "UPDATE work_chapters SET body_path = ? WHERE work_id = ? AND chapter = ?",
-    )
-    .bind(rel_body)
-    .bind(&work_id)
-    .bind(1)
-    .execute(ctx.state.pool())
-    .await
-    .expect("seed body_path");
-
-    let body_abs = ws_root.join(rel_body);
-    tokio::fs::create_dir_all(body_abs.parent().unwrap()).await.unwrap();
-    let body_sentinel = "# Chapter body\n\nThe AI owns this prose. It must not change.\n";
-    tokio::fs::write(&body_abs, body_sentinel)
+    work_chapters::update_outline_path(ctx.state.pool(), &work_id, 1, 1, Some(rel_outline), &now)
         .await
         .unwrap();
+    // Seed the body_path column directly (insert_chapter took None).
+    sqlx::query("UPDATE work_chapters SET body_path = ? WHERE work_id = ? AND chapter = ?")
+        .bind(rel_body)
+        .bind(&work_id)
+        .bind(1)
+        .execute(ctx.state.pool())
+        .await
+        .expect("seed body_path");
+
+    let body_abs = ws_root.join(rel_body);
+    tokio::fs::create_dir_all(body_abs.parent().unwrap())
+        .await
+        .unwrap();
+    let body_sentinel = "# Chapter body\n\nThe AI owns this prose. It must not change.\n";
+    tokio::fs::write(&body_abs, body_sentinel).await.unwrap();
     let outline_abs = ws_root.join(rel_outline);
     tokio::fs::create_dir_all(outline_abs.parent().unwrap())
         .await
         .unwrap();
-    tokio::fs::write(&outline_abs, "old outline\n").await.unwrap();
+    tokio::fs::write(&outline_abs, "old outline\n")
+        .await
+        .unwrap();
 
     let body_bytes_before = tokio::fs::read(&body_abs).await.unwrap();
 
@@ -845,9 +833,15 @@ async fn v175_content_patch_rejects_oversized_content() {
 
     // 10 MiB + 1 byte exceeds the OUTLINE_FILE_MAX_BYTES cap.
     let oversized = "x".repeat((10 * 1024 * 1024) + 1);
-    let err = chapter_patch(&ctx.state, &work_id, "1", 0, json!({ "content": oversized }))
-        .await
-        .expect_err("oversized content should be rejected");
+    let err = chapter_patch(
+        &ctx.state,
+        &work_id,
+        "1",
+        0,
+        json!({ "content": oversized }),
+    )
+    .await
+    .expect_err("oversized content should be rejected");
     assert!(
         matches!(
             err,

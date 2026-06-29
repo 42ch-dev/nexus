@@ -141,4 +141,36 @@ describe('changedFieldsOf', () => {
       }),
     ).toEqual([]);
   });
+
+  // V1.75 A3/A8 — content edits must surface in the conflict modal with the
+  // content-specific field label so prose edits are not mislabeled as metadata.
+  it('projects a chapter content edit as chapter_outline_content (V1.75 A3)', () => {
+    expect(
+      changedFieldsOf({
+        kind: 'chapter',
+        chapter: 1,
+        request: {
+          work_id: 'wk',
+          chapter_id: 1,
+          base_revision: 0,
+          set: { content: '## New beats\n\n- one' },
+        },
+      }),
+    ).toEqual(['chapter_outline_content']);
+  });
+
+  it('projects a mixed metadata + content edit in stable order (V1.75 A3)', () => {
+    expect(
+      changedFieldsOf({
+        kind: 'chapter',
+        chapter: 1,
+        request: {
+          work_id: 'wk',
+          chapter_id: 1,
+          base_revision: 0,
+          set: { title: 'T', content: 'prose' },
+        },
+      }),
+    ).toEqual(['chapter_title', 'chapter_outline_content']);
+  });
 });

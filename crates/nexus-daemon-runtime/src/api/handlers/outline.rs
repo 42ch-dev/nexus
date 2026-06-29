@@ -1076,11 +1076,7 @@ async fn apply_chapter_patch(
         // If the column was empty, persist the derived path so subsequent reads
         // (V1.65 GET, the canvas inspector) find the file. This mirrors the
         // V1.65 PUT route's seeding behavior.
-        if record
-            .outline_path
-            .as_deref()
-            .is_none_or(str::is_empty)
-        {
+        if record.outline_path.as_deref().is_none_or(str::is_empty) {
             let now = chrono::Utc::now().to_rfc3339();
             work_chapters::update_outline_path(
                 state.pool(),
