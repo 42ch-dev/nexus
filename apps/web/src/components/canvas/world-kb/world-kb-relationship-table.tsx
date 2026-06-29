@@ -15,6 +15,12 @@ import type {
 } from '@42ch/nexus-contracts';
 
 import { relationshipEdgeLabel } from './relationship-projection';
+import {
+  SortHeader,
+  type RelationshipTableSortDir,
+  type RelationshipTableSortKey,
+} from './world-kb-relationship-table-sort';
+import { formatUpdated } from './world-kb-canvas-utils';
 
 const ROW_HEIGHT = 44;
 
@@ -27,9 +33,6 @@ export interface WorldKbRelationshipTableProps {
   onDelete?: (relationship: WorldKbRelationshipProjection) => void;
 }
 
-type SortKey = 'source' | 'target' | 'type' | 'symmetric' | 'confidence' | 'anchors' | 'updated';
-type SortDir = 'asc' | 'desc';
-
 export function WorldKbRelationshipTable({
   relationships,
   entities,
@@ -38,8 +41,8 @@ export function WorldKbRelationshipTable({
   onCreate,
   onDelete,
 }: WorldKbRelationshipTableProps) {
-  const [sortKey, setSortKey] = useState<SortKey>('type');
-  const [sortDir, setSortDir] = useState<SortDir>('asc');
+  const [sortKey, setRelationshipTableSortKey] = useState<RelationshipTableSortKey>('type');
+  const [sortDir, setRelationshipTableSortDir] = useState<RelationshipTableSortDir>('asc');
 
   const entityName = (id: string) => entities.find((e) => e.key_block_id === id)?.canonical_name ?? id;
 
@@ -81,12 +84,12 @@ export function WorldKbRelationshipTable({
     return stored;
   }, [relationships, sortKey, sortDir, entities]);
 
-  function toggleSort(key: SortKey) {
+  function toggleSort(key: RelationshipTableSortKey) {
     if (key === sortKey) {
-      setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
+      setRelationshipTableSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
     } else {
-      setSortKey(key);
-      setSortDir('asc');
+      setRelationshipTableSortKey(key);
+      setRelationshipTableSortDir('asc');
     }
   }
 
@@ -209,49 +212,4 @@ export function WorldKbRelationshipTable({
       </p>
     </section>
   );
-}
-
-function SortHeader({
-  label,
-  sortKey,
-  current,
-  dir,
-  onToggle,
-}: {
-  label: string;
-  sortKey: SortKey;
-  current: SortKey;
-  dir: SortDir;
-  onToggle: (key: SortKey) => void;
-}) {
-  return (
-    <th
-      scope="col"
-      aria-sort={current === sortKey ? (dir === 'asc' ? 'ascending' : 'descending') : 'none'}
-      className="px-3 py-2 text-left text-label-12 text-gray-700"
-    >
-      <button
-        type="button"
-        onClick={() => onToggle(sortKey)}
-        className="inline-flex items-center gap-1 hover:text-gray-1000"
-      >
-        {label}
-        {current === sortKey ? <span aria-hidden>{dir === 'asc' ? '▲' : '▼'}</span> : null}
-      </button>
-    </th>
-  );
-}
-
-function formatUpdated(iso: string | undefined): string {
-  if (!iso) return '—';
-  const t = Date.parse(iso);
-  if (Number.isNaN(t)) return '—';
-  const diff = Date.now() - t;
-  const mins = Math.round(diff / 60_000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hrs = Math.round(mins / 60);
-  if (hrs < 24) return `${hrs}h ago`;
-  const days = Math.round(hrs / 24);
-  return `${days}d ago`;
 }

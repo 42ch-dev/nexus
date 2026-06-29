@@ -23,7 +23,7 @@ import { worldKbNodeTypes } from './entity-node';
 import { anchorNodes, deriveEdges, entryCountOf, graphSummary, layoutNodes } from './graph-projection';
 import { deriveRelationshipEdges } from './relationship-projection';
 import { WorldKbAltView } from './world-kb-alt-view';
-import { EntityConflictHost, PromoteConflictHost, RelationshipConflictHost } from './world-kb-conflict-hosts';
+import { WorldKbCanvasConflicts } from './world-kb-canvas-conflicts';
 import { WorldKbHeader } from './world-kb-canvas-header';
 import { InspectorPanel } from './world-kb-inspector-panel';
 import { useWorldKbCanvasState, buildEntityConflict, handleRelationshipConflict, handlePromoteConflict } from './use-world-kb-canvas-state';
@@ -214,53 +214,22 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
         </CanvasShell>
       )}
 
-      <EntityConflictHost
-        state={entityConflict}
+      <WorldKbCanvasConflicts
+        entityConflict={entityConflict}
+        promoteConflict={promoteConflict}
+        relationshipConflict={relationshipConflict}
         selection={selection}
         worldId={worldId}
-        onUseCurrent={() => {
-          setEntityConflict(null);
-          bumpReseed();
+        confirmedEntities={confirmedEntities}
+        setEntityConflict={setEntityConflict}
+        setPromoteConflict={setPromoteConflict}
+        setRelationshipConflict={setRelationshipConflict}
+        bumpReseed={bumpReseed}
+        refetchGraph={() => {
           void graph.refetch();
         }}
-        onDismiss={() => setEntityConflict(null)}
-        onResolved={() => {
-          setEntityConflict(null);
-          bumpReseed();
-        }}
-      />
-
-      <PromoteConflictHost
-        state={promoteConflict}
-        selection={selection}
-        worldId={worldId}
-        onUseCurrent={() => {
-          setPromoteConflict(null);
-          bumpReseed();
-          void graph.refetch();
+        refetchCandidates={() => {
           void candidates.refetch();
-        }}
-        onDismiss={() => setPromoteConflict(null)}
-        onResolved={() => {
-          setPromoteConflict(null);
-          bumpReseed();
-        }}
-      />
-
-      <RelationshipConflictHost
-        state={relationshipConflict}
-        selection={selection}
-        worldId={worldId}
-        entities={confirmedEntities}
-        onUseCurrent={() => {
-          setRelationshipConflict(null);
-          bumpReseed();
-          void graph.refetch();
-        }}
-        onDismiss={() => setRelationshipConflict(null)}
-        onResolved={() => {
-          setRelationshipConflict(null);
-          bumpReseed();
         }}
       />
     </div>

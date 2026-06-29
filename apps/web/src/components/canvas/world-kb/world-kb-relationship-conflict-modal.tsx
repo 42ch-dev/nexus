@@ -38,23 +38,25 @@ export function WorldKbRelationshipConflictModal({
   onDismiss,
 }: WorldKbRelationshipConflictModalProps) {
   const label = relationshipLabel(draft.form);
+  const fieldLabel = capitalize(editedFieldLabelFor(draft.form));
+  const relationshipNames = bold(`${draft.sourceName} → ${draft.targetName}`);
   const serverChanges: ConflictField<keyof RelationshipForm>[] = [
     {
       id: 'relationType',
-      label: 'Relationship',
+      label: fieldLabel,
       serverValue: 'Modified by another session',
     },
   ];
   const localChanges: ConflictField<keyof RelationshipForm>[] = [
     {
       id: 'relationType',
-      label: 'Relationship',
+      label: fieldLabel,
       localValue: `${draft.sourceName} ${label} ${draft.targetName}`,
     },
   ];
   const reviewRows: ConflictReviewRow[] = [
     {
-      label: 'Relationship',
+      label: fieldLabel,
       server: 'Changed by another session',
       draft: `${draft.sourceName} ${label} ${draft.targetName}`,
       changed: true,
@@ -67,13 +69,14 @@ export function WorldKbRelationshipConflictModal({
       title="This relationship changed while you were editing it."
       description={
         <>
-          Nexus updated the relationship between {bold(draft.sourceName)} and {bold(draft.targetName)}{' '}
-          (version
+          Nexus updated the relationship {relationshipNames} to version
         </>
       }
       descriptionSuffix={
         <>
-          {') while you were editing it. Your change is still in the inspector.'}
+          {' '}
+          while you were editing its {bold(editedFieldLabelFor(draft.form))}. Your change is still
+          in the inspector.
         </>
       }
       currentRevision={currentVersion}
@@ -90,6 +93,15 @@ export function WorldKbRelationshipConflictModal({
       keepEditingLabel="Cancel"
     />
   );
+}
+
+function editedFieldLabelFor(form: RelationshipForm): string {
+  if (form.relationType === 'custom') return 'custom label';
+  return 'relation type';
+}
+
+function capitalize(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
 function relationshipLabel(form: RelationshipForm): string {
