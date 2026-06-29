@@ -859,3 +859,123 @@ async fn promote_reject_cas_miss_conflict_carries_bumped_version() {
     );
     assert_eq!(details["entity_id"], candidate.job_id);
 }
+
+/// Regression for the V1.73 greploop iter-5 greptile P1: when a concurrent
+/// write bumps the merge TARGET's `kb_key_blocks.revision` between the merge's
+/// read and its in-tx CAS UPDATE, the 409 conflict MUST distinctly mark the
+/// TARGET as the conflicting entity (`conflicting_path = "merge_target"`,
+/// `entity_id = <target_id>`) — NOT the candidate's `"version"` path.
+///
+/// Without the marker, the client (`promotion-inspector.tsx`) cannot tell a
+/// target conflict from a candidate conflict: it treats the 409's
+/// `current_version` (the target's revision) as the candidate's version and
+/// retries the promote with `expected_version = <target revision>`, which fails
+/// the candidate CAS again — a two-round-trip conflict loop with misleading
+/// modal text.
+///
+/// We force the target-CAS-miss deterministically by firing two concurrent
+/// `merge` actions on the same confirmed target (two distinct pending
+/// candidates). On the current-thread `tokio::test` runtime, `tokio::join!`
+/// interleaves both futures at their await points, so BOTH target reads see
+/// revision V before EITHER target CAS UPDATE runs; SQLite then serializes the
+/// writes — the first target CAS wins (V → V+1) and the second affects 0 rows
+/// (the bug path). The losing 409 must carry `conflicting_path = "merge_target"`
+/// and `entity_id = <target_id>`, not the candidate's `"version"`.
+#[tokio::test]
+async fn promote_merge_target_cas_miss_marks_target_conflict() {
+    let (_tmp, state) = fresh_state().await;
+    // Confirmed merge target at revision 0.
+    seed_key_block(
+        state.pool(),
+        "kb_target",
+        "wld_test_world",
+        "character",
+        "Aria",
+        "confirmed",
+        Some(0),
+        None,
+    )
+    .await;
+    // Two distinct pending candidates targeting the same entity. Both start at
+    // version 0 so each merge's outer OCC precondition passes independently.
+    seed_pending_candidate(
+        state.pool(),
+        "xj_merge_c1",
+        "Racea1",
+        "wld_test_world",
+        "character",
+        "Racea",
+    )
+    .await;
+    seed_pending_candidate(
+        state.pool(),
+        "xj_merge_c2",
+        "Racea2",
+        "wld_test_world",
+        "character",
+        "Racea",
+    )
+    .await;
+
+    let mk_req = |job_id: &str| WorldKbPromoteCandidateRequest {
+        job_id: job_id.to_string(),
+        candidate_id: "kb_cand".to_string(),
+        action: "merge".to_string(),
+        expected_version: 0,
+        merge_target_id: Some("kb_target".to_string()),
+        patch: None,
+        idempotency_key: None,
+    };
+
+    // Two concurrent merges against the same target. `join!` interleaves at
+    // await points on the current-thread runtime, so both target reads observe
+    // revision 0 before either target CAS commits.
+    let (res_a, res_b) = tokio::join!(
+        promote_candidate(
+            State(state.clone()),
+            Path("wld_test_world".to_string()),
+            Json(mk_req("xj_merge_c1")),
+        ),
+        promote_candidate(
+            State(state.clone()),
+            Path("wld_test_world".to_string()),
+            Json(mk_req("xj_merge_c2")),
+        ),
+    );
+
+    // Exactly one target CAS wins; the other hits the target-CAS-miss branch.
+    let loser = match (res_a, res_b) {
+        (Ok(_), Err(e)) | (Err(e), Ok(_)) => e,
+        (Ok(_), Ok(_)) => panic!(
+            "both merges won the target CAS — race did not serialize; \
+             expected one winner + one target-conflict 409"
+        ),
+        (Err(a), Err(b)) => panic!(
+            "both merges failed; neither reached the target-CAS-miss path. \
+             errors: a={a:?} b={b:?}"
+        ),
+    };
+
+    assert_eq!(loser.status_code(), axum::http::StatusCode::CONFLICT);
+    assert_eq!(loser.error_code(), "world_kb_conflict");
+    let details = loser.error_details().expect("conflict must carry details");
+    // The fix: the target CAS miss is tagged `conflicting_path = "merge_target"`
+    // (distinct from the candidate's `"version"`) so the client can distinguish
+    // a target conflict from a candidate conflict. Pre-fix this was
+    // `conflicting_path = "version"` — indistinguishable from a candidate CAS
+    // miss, causing the client to retry the candidate with the target's
+    // revision as `expected_version`.
+    assert_eq!(
+        details["conflicting_path"], "merge_target",
+        "target CAS-miss 409 must tag conflicting_path = merge_target so the \
+         client distinguishes a target conflict from a candidate conflict"
+    );
+    assert_eq!(
+        details["entity_id"], "kb_target",
+        "target CAS-miss 409 must carry the target's entity_id"
+    );
+    assert_eq!(
+        details["current_version"], 1,
+        "target CAS-miss 409 must report the bumped target revision (V+1)"
+    );
+}
