@@ -760,3 +760,210 @@ async fn remove_cross_world_relationship_returns_403() {
     assert_eq!(err.status_code(), axum::http::StatusCode::FORBIDDEN);
     assert_eq!(err.error_code(), "forbidden");
 }
+
+// ── V1.76: needs_review gate + extraction suggestions ─────────────────────
+
+/// Seed a needs_review=1/source='extraction' suggestion directly into the DB
+/// (simulating what the extraction pipeline's upsert produces).
+async fn seed_extraction_suggestion(
+    pool: &sqlx::SqlitePool,
+    world_id: &str,
+    source_id: &str,
+    target_id: &str,
+    relation_type: &str,
+    confidence: Option<f64>,
+) -> String {
+    let rel_id = format!("rel_ext_{}", uuid::Uuid::new_v4().simple());
+    sqlx::query(
+        "INSERT INTO kb_relationships \
+         (relationship_id, world_id, source_entity_id, target_entity_id, relation_type, \
+          symmetric, confidence, source_anchor_ids, metadata, created_at, updated_at, \
+          revision, needs_review, source) \
+         VALUES (?, ?, ?, ?, ?, 1, ?, '[]', '{\"source_quote\":\"q\"}', \
+          datetime('now'), datetime('now'), 0, 1, 'extraction')",
+    )
+    .bind(&rel_id)
+    .bind(world_id)
+    .bind(source_id)
+    .bind(target_id)
+    .bind(relation_type)
+    .bind(confidence)
+    .execute(pool)
+    .await
+    .unwrap();
+    rel_id
+}
+
+#[tokio::test]
+async fn get_graph_hides_needs_review_by_default() {
+    let (_tmp, state) = fresh_state().await;
+    seed_key_block(state.pool(), "kb_a", "wld_test_world", "character", "Aria", "confirmed").await;
+    seed_key_block(state.pool(), "kb_b", "wld_test_world", "character", "Kael", "confirmed").await;
+
+    // One confirmed (manual) + one suggested (extraction) relationship.
+    let _ = patch_relationship(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(add_request("kb_a", "kb_b", WorldKbRelationshipKind::AlliedWith)),
+    )
+    .await
+    .unwrap();
+    seed_extraction_suggestion(
+        state.pool(),
+        "wld_test_world",
+        "kb_a",
+        "kb_b",
+        "rival_of",
+        Some(0.8),
+    )
+    .await;
+
+    // Default (include_suggested=None): only the confirmed relationship shows.
+    let Json(graph) = get_graph(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Query(GraphQuery {
+            include_suggested: None,
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        graph.relationships.len(),
+        1,
+        "default excludes needs_review suggestions"
+    );
+
+    // include_suggested=true: both show.
+    let Json(graph) = get_graph(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Query(GraphQuery {
+            include_suggested: Some(true),
+        }),
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        graph.relationships.len(),
+        3,
+        "include_suggested surfaces suggestions (1 confirmed + 1 symmetric pair = 3)"
+    );
+    // The suggestion carries needs_review + source markers.
+    let suggestion = graph
+        .relationships
+        .iter()
+        .find(|r| r.needs_review)
+        .expect("suggestion present with include_suggested");
+    assert_eq!(suggestion.source, "extraction");
+    assert!(suggestion.needs_review);
+}
+
+#[tokio::test]
+async fn promote_suggestion_clears_needs_review() {
+    let (_tmp, state) = fresh_state().await;
+    seed_key_block(state.pool(), "kb_a", "wld_test_world", "character", "Aria", "confirmed").await;
+    seed_key_block(state.pool(), "kb_b", "wld_test_world", "character", "Kael", "confirmed").await;
+
+    let rel_id = seed_extraction_suggestion(
+        state.pool(),
+        "wld_test_world",
+        "kb_a",
+        "kb_b",
+        "allied_with",
+        Some(0.75),
+    )
+    .await;
+
+    // Promote: update with needs_review=false clears the gate.
+    let req = WorldKbPatchRelationshipRequest {
+        relationship_id: Some(rel_id.clone()),
+        action: "update".to_string(),
+        expected_version: Some(0),
+        relationship: Some(WorldKbRelationshipInput {
+            source_entity_id: "kb_a".to_string(),
+            target_entity_id: "kb_b".to_string(),
+            relation_type: WorldKbRelationshipKind::AlliedWith,
+            custom_label: None,
+            symmetric: true,
+            confidence: Some(0.75),
+            source_anchor_ids: None,
+            metadata: None,
+            needs_review: Some(false),
+        }),
+    };
+    let Json(resp) = patch_relationship(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .expect("promote should succeed");
+    let promoted = resp.relationship.unwrap();
+    assert!(
+        !promoted.needs_review,
+        "promotion clears the needs_review gate"
+    );
+    assert_eq!(promoted.source, "extraction", "source provenance preserved");
+
+    // After promotion the suggestion shows in the default graph.
+    let Json(graph) = get_graph(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Query(GraphQuery {
+            include_suggested: None,
+        }),
+    )
+    .await
+    .unwrap();
+    assert!(
+        graph.relationships.iter().any(|r| r.relationship_id == rel_id),
+        "promoted suggestion now visible in the default graph"
+    );
+}
+
+#[tokio::test]
+async fn update_preserves_needs_review_when_omitted() {
+    let (_tmp, state) = fresh_state().await;
+    seed_key_block(state.pool(), "kb_a", "wld_test_world", "character", "Aria", "confirmed").await;
+    seed_key_block(state.pool(), "kb_b", "wld_test_world", "character", "Kael", "confirmed").await;
+
+    let rel_id = seed_extraction_suggestion(
+        state.pool(),
+        "wld_test_world",
+        "kb_a",
+        "kb_b",
+        "allied_with",
+        None,
+    )
+    .await;
+
+    // A routine edit that omits needs_review must NOT accidentally promote.
+    let req = WorldKbPatchRelationshipRequest {
+        relationship_id: Some(rel_id),
+        action: "update".to_string(),
+        expected_version: Some(0),
+        relationship: Some(WorldKbRelationshipInput {
+            source_entity_id: "kb_a".to_string(),
+            target_entity_id: "kb_b".to_string(),
+            relation_type: WorldKbRelationshipKind::MentorOf,
+            custom_label: None,
+            symmetric: false,
+            confidence: None,
+            source_anchor_ids: None,
+            metadata: None,
+            needs_review: None,
+        }),
+    };
+    let Json(resp) = patch_relationship(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Json(req),
+    )
+    .await
+    .unwrap();
+    assert!(
+        resp.relationship.unwrap().needs_review,
+        "omitting needs_review preserves the suggestion gate"
+    );
+}
