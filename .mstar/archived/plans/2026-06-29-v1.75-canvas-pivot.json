@@ -1,0 +1,20 @@
+{
+  "plan_id": "2026-06-29-v1.75-canvas-pivot",
+  "archived_at": "2026-06-29",
+  "schema_version": 1,
+  "plan": {
+    "plan_id": "2026-06-29-v1.75-canvas-pivot",
+    "iteration_id": "V1.75",
+    "status": "Done",
+    "owner": "frontend-dev,fullstack-dev",
+    "effort": "XL",
+    "type": "implement",
+    "working_branch": "feature/v1.75-canvas-pivot",
+    "merge_target": "iteration/v1.75",
+    "task_category": "visual",
+    "wire_contracts_changed": true,
+    "depends_on": [
+      "2026-06-29-v1.75-compass-and-plan"
+    ]
+  }
+}
