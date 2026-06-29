@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `Response` for `DELETE` /v1/local/orchestration/schedules/{`schedule_id`}.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct DeleteScheduleResponse {
     pub deleted: bool,

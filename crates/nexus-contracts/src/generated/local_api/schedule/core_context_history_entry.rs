@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `Single` entry in core context version history.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct CoreContextHistoryEntry {
     pub version: i64,

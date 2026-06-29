@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `Response` for `POST` /v1/local/presets:validate — validation result with structured errors and warnings.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ValidatePresetResponse {
     pub valid: bool,

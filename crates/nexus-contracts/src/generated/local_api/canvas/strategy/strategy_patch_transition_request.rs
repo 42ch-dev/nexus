@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `Request` body for `POST` /v1/local/strategies/{`strategy_id`}/transitions/patch (`V1`.71). `Rewires` an outer transition (linear next, conditional branch, or default target) and/or updates its condition label.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct StrategyPatchTransitionRequest {
     pub strategy_id: String,

@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::generated::common::common_types::{BlockType};
 
 /// `Flat` wire projection of a `World` `KB` `KeyBlock` entity for canvas graph + inspector surfaces (`V1`.73). `version` maps to the `SQLite` per-row `OCC` column (`kb_key_blocks`.revision, `NULL`-normalized to 0).
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct WorldKbEntityProjection {
     pub key_block_id: String,

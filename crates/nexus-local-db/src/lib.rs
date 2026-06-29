@@ -18,6 +18,7 @@ pub mod force_gates_audit;
 pub mod identity;
 pub mod inspiration_items;
 pub mod kb_extract_job;
+pub mod kb_relationships;
 pub mod kb_store;
 pub mod knowledge_store;
 pub mod memory_fragment;
@@ -89,6 +90,13 @@ pub use narrative_write::{
 
 // Re-export knowledge_store types
 pub use knowledge_store::SqliteKnowledgeStore;
+
+// Re-export kb_relationships types (V1.74 A2)
+pub use kb_relationships::{
+    delete_relationship_in_tx, generate_relationship_id, get_relationship,
+    insert_relationship_in_tx, list_relationships_for_world, update_relationship_in_tx,
+    InsertRelationshipParams, KbRelationshipRow, UpdateRelationshipParams,
+};
 
 // Re-export reference_source types
 pub use reference_source::{

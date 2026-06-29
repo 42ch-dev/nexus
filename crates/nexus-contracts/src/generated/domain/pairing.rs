@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::generated::common::common_types::{PairingSource, PairingStatus};
 
 /// `Pairing` entity describing `Creator` <-> `User` association. `Aligned` with data-model-v1.md §5.2A.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct Pairing {
     pub schema_version: u32,

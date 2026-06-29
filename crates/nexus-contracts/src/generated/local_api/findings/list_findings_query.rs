@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `Query` parameters for `GET` /v1/local/works/{`work_id`}/findings (cursor-based pagination, `F`-`P2`).
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ListFindingsQuery {
     #[serde(skip_serializing_if = "Option::is_none")]

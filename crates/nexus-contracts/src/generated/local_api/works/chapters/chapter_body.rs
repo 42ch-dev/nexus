@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `Response` body for `GET` /v1/local/works/{`work_id`}/chapters/{n}/body (`V1`.65 `P0`). `Body` is read-only through this surface.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ChapterBody {
     pub work_id: String,

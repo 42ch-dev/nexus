@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::generated::common::common_types::{ManifestType, ManuscriptStorage, StoryManifestStatus};
 
 /// `StoryManifest` entity for platform-side chapter/arc manifest and summary. `Aligned` with data-model-v1.md §5.9.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct StoryManifest {
     pub schema_version: u32,

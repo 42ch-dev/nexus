@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `Summary` row for a schedule in list/inspect responses.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ScheduleSummary {
     pub schedule_id: String,

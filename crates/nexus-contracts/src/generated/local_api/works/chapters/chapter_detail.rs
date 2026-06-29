@@ -10,7 +10,7 @@ use crate::generated::local_api::works::chapters::chapter_protection::ChapterPro
 use crate::generated::local_api::works::chapters::chapter_status::ChapterStatus;
 
 /// `Response` for `GET` /v1/local/works/{`work_id`}/chapters/{n} (`V1`.65 `P0`). `Mirrors` `ChapterSummary` plus content metadata. `Does` not read outline/body content.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ChapterDetail {
     pub work_id: String,

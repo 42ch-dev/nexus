@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::generated::common::common_types::{DeltaOperation, DeltaType, SourceAnchor};
 
 /// `Single` atomic change to an entity in a manuscript world. `Aligned` with data-model-v1.md §5.12.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct Delta {
     pub delta_type: DeltaType,

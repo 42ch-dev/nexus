@@ -8,7 +8,7 @@
 use serde::{Deserialize, Serialize};
 
 /// `Request` shape for deferred direct platform cloud context assembly. `CLI` may use this shape when platform cloud assembly becomes available; `V1`.26 shipped context assembly is local-only and does not send this request to a daemon context-assemble `Local` `API` endpoint.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ContextAssembleRequestV1 {
     pub request_id: String,
@@ -39,7 +39,7 @@ pub struct ContextAssembleRequestV1 {
     pub as_of: Option<String>,
 }
 /// Inline array item type (auto-generated from schema)
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ContextAssembleResponseV1KeyBlock {
     pub key_block_id: String,
@@ -48,7 +48,7 @@ pub struct ContextAssembleResponseV1KeyBlock {
     pub summary: String,
 }
 /// Inline array item type (auto-generated from schema)
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ContextAssembleResponseV1TimelineEvent {
     pub event_id: String,
@@ -57,7 +57,7 @@ pub struct ContextAssembleResponseV1TimelineEvent {
     pub occurred_at: String,
 }
 /// Inline array item type (auto-generated from schema)
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ContextAssembleResponseV1StorySummary {
     pub story_manifest_id: String,
@@ -66,7 +66,7 @@ pub struct ContextAssembleResponseV1StorySummary {
     pub manifest_type: String,
 }
 /// Inline array item type (auto-generated from schema)
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ContextAssembleResponseV1MemoryItem {
     pub memory_id: String,
@@ -74,7 +74,7 @@ pub struct ContextAssembleResponseV1MemoryItem {
     pub content: String,
 }
 /// `Response` shape for deferred direct platform cloud context assembly. `Shipped` `V1`.26 local assembly paths run in-process and do not receive this response from a daemon context-assemble `Local` `API` endpoint.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ContextAssembleResponseV1 {
     pub request_id: String,

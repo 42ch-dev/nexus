@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::generated::platform::http_bff::publish_history_entry::PublishHistoryEntry;
 
 /// `Response` body for `POST` /v1/publish/history.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct PublishHistoryResponse {
     pub schema_version: u32,

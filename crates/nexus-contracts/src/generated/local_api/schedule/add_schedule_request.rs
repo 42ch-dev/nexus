@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::generated::local_api::schedule::schedule_concurrency_request::ScheduleConcurrencyRequest;
 
 /// `Request` body for `POST` /v1/local/orchestration/schedules — create a new schedule.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct AddScheduleRequest {
     pub creator_id: String,

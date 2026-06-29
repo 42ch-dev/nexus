@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::generated::domain::key_block::KeyBlock;
 
 /// `Standard` input envelope passed into a `WASM` compute module (`V1`.61 `ABI`, compass `Q3`/`Q8`). `Bundles` a read-only `KeyBlock` snapshot, the narrative position, and module-declared invocation parameters. `Modules` are stateless pure functions (compass `Q6`): every call receives a fresh envelope and returns a `ComputeOutput`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ComputeInput {
     pub schema_version: u32,
