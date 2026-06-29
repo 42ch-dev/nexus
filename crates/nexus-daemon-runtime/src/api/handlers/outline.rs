@@ -1113,6 +1113,12 @@ async fn apply_chapter_patch(
     //
     // Body-ownership invariant: this block writes ONLY to `outline_path`. It
     // does not touch `body_path`, the body writer, or `Stories/**`.
+    //
+    // Two-file write ordering: this helper writes the per-chapter outline file
+    // first; the caller then atomically writes the work-level frontmatter and
+    // bumps `outline_revision`. The per-chapter content is durable before the
+    // work-level revision advances, and a failed work-level write can be
+    // retried idempotently.
     if let Some(content) = req.set.content.clone() {
         let workspace_root = workspace_root(state)?;
         persist_chapter_outline_content(
