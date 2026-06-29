@@ -307,14 +307,18 @@ fn canvas_outline_routes() -> Router<WorkspaceState> {
 
 /// Canvas World KB write-boundary routes (V1.73 Track A).
 ///
-/// Four World KB routes under `/v1/local/worlds/{world_id}/kb/*`. Per-row OCC
-/// on `kb_key_blocks.revision` (entity edits) and `kb_extract_jobs.version`
-/// (promotion) — no new migration.
+/// World KB routes under `/v1/local/worlds/{world_id}/kb/*`. Per-row OCC on
+/// `kb_key_blocks.revision` (entity edits), `kb_extract_jobs.version`
+/// (promotion), and `kb_relationships.revision` (relationship edits).
 fn world_kb_routes() -> Router<WorkspaceState> {
     Router::new()
         .route(
             "/v1/local/worlds/{world_id}/kb/patch-entity",
             post(handlers::world_kb::patch_entity),
+        )
+        .route(
+            "/v1/local/worlds/{world_id}/kb/patch-relationship",
+            post(handlers::world_kb::patch_relationship),
         )
         .route(
             "/v1/local/worlds/{world_id}/kb/promote-candidate",

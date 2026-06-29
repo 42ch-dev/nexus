@@ -43,8 +43,13 @@ export * from './local-api/canvas/world-kb/WorldKbExtractJobProjection';
 export * from './local-api/canvas/world-kb/WorldKbGraphResponse';
 export * from './local-api/canvas/world-kb/WorldKbPatchEntityRequest';
 export * from './local-api/canvas/world-kb/WorldKbPatchEntityResponse';
+export * from './local-api/canvas/world-kb/WorldKbPatchRelationshipRequest';
+export * from './local-api/canvas/world-kb/WorldKbPatchRelationshipResponse';
 export * from './local-api/canvas/world-kb/WorldKbPromoteCandidateRequest';
 export * from './local-api/canvas/world-kb/WorldKbPromoteCandidateResponse';
+export * from './local-api/canvas/world-kb/WorldKbRelationshipInput';
+export * from './local-api/canvas/world-kb/WorldKbRelationshipKind';
+export * from './local-api/canvas/world-kb/WorldKbRelationshipProjection';
 export * from './local-api/canvas/world-kb/WorldKbSourceAnchorProjection';
 export * from './local-api/canvas/world-kb/WorldKbValidationError';
 export * from './local-api/common/ErrorResponse';
@@ -209,8 +214,13 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   WorldKbGraphResponse: 1,
   WorldKbPatchEntityRequest: 1,
   WorldKbPatchEntityResponse: 1,
+  WorldKbPatchRelationshipRequest: 1,
+  WorldKbPatchRelationshipResponse: 1,
   WorldKbPromoteCandidateRequest: 1,
   WorldKbPromoteCandidateResponse: 1,
+  WorldKbRelationshipInput: 1,
+  WorldKbRelationshipKind: 1,
+  WorldKbRelationshipProjection: 1,
   WorldKbSourceAnchorProjection: 1,
   WorldKbValidationError: 1,
   ErrorResponse: 1,

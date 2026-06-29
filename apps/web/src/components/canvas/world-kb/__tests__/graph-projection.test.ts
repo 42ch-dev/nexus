@@ -148,7 +148,7 @@ describe('freshness helpers', () => {
   });
 
   it('renders a screen-reader-friendly summary', () => {
-    expect(graphSummary(graph, 1)).toMatch(/2 entities, 1 source anchor, 1 pending candidate/);
+    expect(graphSummary(graph, 1)).toMatch(/2 entities, 0 relationships, 1 source anchor, 1 pending candidate/);
     expect(graphSummary(undefined, 0)).toMatch(/not loaded/);
   });
 });

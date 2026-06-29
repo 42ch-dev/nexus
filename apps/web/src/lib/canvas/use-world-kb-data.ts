@@ -17,6 +17,8 @@ import type {
   WorldKbGraphResponse,
   WorldKbPatchEntityRequest,
   WorldKbPatchEntityResponse,
+  WorldKbPatchRelationshipRequest,
+  WorldKbPatchRelationshipResponse,
   WorldKbPromoteCandidateRequest,
   WorldKbPromoteCandidateResponse,
 } from '@42ch/nexus-contracts';
@@ -114,6 +116,25 @@ export function usePromoteWorldKbCandidate(worldId: string | undefined) {
   });
 }
 
+/** `POST .../kb/patch-relationship` — add/update/remove a typed relationship (V1.74). */
+export function usePatchWorldKbRelationship(worldId: string | undefined) {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (request: WorldKbPatchRelationshipRequest) =>
+      client.worldKbPatchRelationship(worldId!, request),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.worldKb.graph(worldId ?? '') });
+    },
+    onError: (error) => {
+      if (!isWorldKbConflictError(error) && !isWorldKbValidationError(error)) {
+        errorToast(error, 'Could not save relationship');
+      }
+    },
+  });
+}
+
 /**
  * Type guard for the World KB 409 conflict error.
  *
@@ -147,6 +168,8 @@ export type {
   WorldKbGraphResponse,
   WorldKbPatchEntityRequest,
   WorldKbPatchEntityResponse,
+  WorldKbPatchRelationshipRequest,
+  WorldKbPatchRelationshipResponse,
   WorldKbPromoteCandidateRequest,
   WorldKbPromoteCandidateResponse,
 };

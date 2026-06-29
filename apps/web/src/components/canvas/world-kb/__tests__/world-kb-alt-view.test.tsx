@@ -33,7 +33,16 @@ const nodes: WorldKbNodeData[] = [
 
 describe('WorldKbAltView', () => {
   it('renders all rows with name + lifecycle', () => {
-    render(<WorldKbAltView nodes={nodes} selectedId={null} onSelect={vi.fn()} />);
+    render(<WorldKbAltView
+        nodes={nodes}
+        relationships={[]}
+        entities={[]}
+        selectedNodeId={null}
+        selectedRelationshipId={null}
+        onSelectNode={vi.fn()}
+        onSelectRelationship={vi.fn()}
+        onCreateRelationship={vi.fn()}
+      />);
     expect(screen.getByText('Aria')).toBeInTheDocument();
     expect(screen.getByText('Beta')).toBeInTheDocument();
     expect(screen.getByText('Cand')).toBeInTheDocument();
@@ -42,7 +51,16 @@ describe('WorldKbAltView', () => {
 
   it('sorts by name ascending then descending', async () => {
     const user = userEvent.setup();
-    render(<WorldKbAltView nodes={nodes} selectedId={null} onSelect={vi.fn()} />);
+    render(<WorldKbAltView
+        nodes={nodes}
+        relationships={[]}
+        entities={[]}
+        selectedNodeId={null}
+        selectedRelationshipId={null}
+        onSelectNode={vi.fn()}
+        onSelectRelationship={vi.fn()}
+        onCreateRelationship={vi.fn()}
+      />);
     const nameHeader = screen.getByRole('button', { name: /Name/i });
 
     // Default asc by name → Aria first.
@@ -55,24 +73,44 @@ describe('WorldKbAltView', () => {
 
   it('activates a row via keyboard (Enter) and via click', async () => {
     const user = userEvent.setup();
-    const onSelect = vi.fn();
-    render(<WorldKbAltView nodes={nodes} selectedId={null} onSelect={onSelect} />);
+    const onSelectNode = vi.fn();
+    render(
+      <WorldKbAltView
+        nodes={nodes}
+        relationships={[]}
+        entities={[]}
+        selectedNodeId={null}
+        selectedRelationshipId={null}
+        onSelectNode={onSelectNode}
+        onSelectRelationship={vi.fn()}
+        onCreateRelationship={vi.fn()}
+      />,
+    );
 
     // Click path.
     await user.click(screen.getByText('Aria'));
-    expect(onSelect).toHaveBeenCalled();
-    const clicked = onSelect.mock.calls[onSelect.mock.calls.length - 1][0] as WorldKbNodeData;
+    expect(onSelectNode).toHaveBeenCalled();
+    const clicked = onSelectNode.mock.calls[onSelectNode.mock.calls.length - 1][0] as WorldKbNodeData;
     expect(clicked.keyBlockId).toBe('a');
 
     // Keyboard path: focus a row, press Enter.
     const betaRow = screen.getByText('Beta').closest('tr')!;
     betaRow.focus();
     await user.keyboard('{Enter}');
-    expect(onSelect.mock.calls[onSelect.mock.calls.length - 1][0]).toMatchObject({ keyBlockId: 'b' });
+    expect(onSelectNode.mock.calls[onSelectNode.mock.calls.length - 1][0]).toMatchObject({ keyBlockId: 'b' });
   });
 
   it('marks aria-sort on the active column', () => {
-    render(<WorldKbAltView nodes={nodes} selectedId={null} onSelect={vi.fn()} />);
+    render(<WorldKbAltView
+        nodes={nodes}
+        relationships={[]}
+        entities={[]}
+        selectedNodeId={null}
+        selectedRelationshipId={null}
+        onSelectNode={vi.fn()}
+        onSelectRelationship={vi.fn()}
+        onCreateRelationship={vi.fn()}
+      />);
     const nameHeader = screen.getByRole('button', { name: /^Name/i }).closest('th');
     expect(nameHeader?.getAttribute('aria-sort')).toBe('ascending');
   });
@@ -87,8 +125,13 @@ describe('WorldKbAltView', () => {
     render(
       <WorldKbAltView
         nodes={nodes}
-        selectedId={worldKbNodeId(aria)}
-        onSelect={vi.fn()}
+        relationships={[]}
+        entities={[]}
+        selectedNodeId={worldKbNodeId(aria)}
+        selectedRelationshipId={null}
+        onSelectNode={vi.fn()}
+        onSelectRelationship={vi.fn()}
+        onCreateRelationship={vi.fn()}
       />,
     );
     const ariaRow = screen.getByText('Aria').closest('tr')!;
@@ -103,8 +146,13 @@ describe('WorldKbAltView', () => {
     render(
       <WorldKbAltView
         nodes={nodes}
-        selectedId={'a' /* raw keyBlockId, no `entity:` prefix */}
-        onSelect={vi.fn()}
+        relationships={[]}
+        entities={[]}
+        selectedNodeId={'a' /* raw keyBlockId, no `entity:` prefix */}
+        selectedRelationshipId={null}
+        onSelectNode={vi.fn()}
+        onSelectRelationship={vi.fn()}
+        onCreateRelationship={vi.fn()}
       />,
     );
     const ariaRow = screen.getByText('Aria').closest('tr')!;
