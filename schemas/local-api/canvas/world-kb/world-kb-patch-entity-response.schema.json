@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://nexus42.invalid/schemas/local-api/canvas/world-kb/world-kb-patch-entity-response.schema.json",
   "schema_version": 1,
-  "title": "Nexus PatchWorldKbEntityResponse",
+  "title": "Nexus WorldKbPatchEntityResponse",
   "description": "Success response for POST /v1/local/worlds/{world_id}/kb/patch-entity (V1.73). Returns the updated entity projection, the new per-row version, and validation diagnostics.",
   "type": "object",
   "required": ["entity", "version", "validation_summary"],

@@ -1,7 +1,7 @@
 //! Daemon boot sequence — extracted from the former standalone daemon binary.
 //!
 //! Provides `run_daemon()` as the single callable entry point for both
-//! the `nexus42 __internal daemon-run` hidden command and the
+//! the `nexus42 daemon-run` hidden command and the
 //! `nexus42 daemon start --foreground` path.
 
 use std::path::PathBuf;
@@ -109,7 +109,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // Initialize tracing subscriber with configurable verbosity. Use try_init
     // so the daemon can be invoked both as a standalone process and from a
     // parent CLI that has already installed a subscriber (e.g. foreground
-    // `nexus42 daemon start` or the `__internal daemon-run` subprocess).
+    // `nexus42 daemon start` or the `daemon-run` subprocess).
     let filter = if config.verbose {
         EnvFilter::new("debug")
     } else {

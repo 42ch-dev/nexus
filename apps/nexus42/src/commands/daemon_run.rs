@@ -1,4 +1,4 @@
-//! Hidden `__internal daemon-run` command — daemon subprocess entry point.
+//! Hidden `daemon-run` command — daemon subprocess entry point.
 //!
 //! This module provides the hidden internal command invoked by
 //! `nexus42 daemon start` (background mode) via self-spawn. It calls
