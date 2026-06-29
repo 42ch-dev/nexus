@@ -48,7 +48,12 @@ jobs:
 
       - uses: ./.github/actions/setup-monorepo
         with:
-          rust-targets: aarch64-apple-darwin, x86_64-apple-darwin, wasm32-unknown-unknown
+          # Native aarch64 only — the universal build (aarch64 + x86_64
+          # sidecar cross-compile) roughly doubled Rust compile time and pushed
+          # this job past the ~5min CI budget. This is a build-verification
+          # gate; the distributable universal binary is produced by
+          # desktop-release.yml. wasm32 is retained for the wasm-host feature.
+          rust-targets: aarch64-apple-darwin, wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32  # v2
         with:
@@ -60,19 +65,13 @@ jobs:
       - name: Build contracts package
         run: pnpm --filter @42ch/nexus-contracts run build
 
-      - name: Build Tauri desktop bundle (universal, fallback per-arch)
-        run: |
-          set -euo pipefail
-          # QC1-S4: attempt a universal build first; if Tauri's bundler or the
-          # cross-arch sidecar build fails, fall back to the proven native
-          # aarch64 path so CI stays green.
-          if SIDECAR_TARGETS="aarch64-apple-darwin x86_64-apple-darwin" \
-             pnpm --filter desktop tauri build --target universal-apple-darwin; then
-            echo "Built universal-apple-darwin bundle."
-          else
-            echo "Universal build failed; falling back to per-arch (aarch64 host) bundle."
-            pnpm --filter desktop tauri build
-          fi
+      - name: Build Tauri desktop bundle (native aarch64)
+        # Native host build only (macos-14 = aarch64). The previous
+        # universal-apple-darwin attempt compiled the nexus42 sidecar for both
+        # arches (~2x Rust compile) and pushed CI past budget; it is now reserved
+        # for the release workflow. Native aarch64 still verifies the Tauri
+        # bundle assembles end-to-end on macOS.
+        run: pnpm --filter desktop tauri build
 
       # Note: build artifacts are intentionally NOT uploaded here. This workflow
       # is a build-verification gate (does the Tauri bundle assemble on macOS?),
@@ -83,7 +82,10 @@ jobs:
   served-ui-smoke:
     name: Served UI smoke test
     runs-on: macos-14
-    needs: desktop-build
+    # No `needs: desktop-build` — this job builds its own daemon + SPA and does
+    # not consume the Tauri bundle artifact, so it runs in parallel with
+    # desktop-build to keep the workflow wall-clock at max(desktop, smoke)
+    # instead of desktop + smoke.
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
