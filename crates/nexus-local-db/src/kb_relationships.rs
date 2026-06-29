@@ -65,7 +65,7 @@ pub struct InsertRelationshipParams {
     pub metadata: Option<serde_json::Value>,
     pub created_at: String,
     pub updated_at: String,
-    /// V1.76: needs_review gate. `false` for manual author adds; `true` for
+    /// V1.76: `needs_review` gate. `false` for manual author adds; `true` for
     /// extraction-sourced suggestions.
     pub needs_review: bool,
     /// V1.76: provenance. [`SOURCE_MANUAL`] for author adds;
@@ -83,7 +83,7 @@ pub struct UpdateRelationshipParams {
     pub source_anchor_ids: Vec<String>,
     pub metadata: Option<serde_json::Value>,
     pub updated_at: String,
-    /// V1.76: needs_review gate. Promotion sets this to `false`; the existing
+    /// V1.76: `needs_review` gate. Promotion sets this to `false`; the existing
     /// patch-relationship route carries it so no second promotion state machine
     /// is needed. `source` is immutable and not part of the update payload.
     pub needs_review: bool,
@@ -378,10 +378,10 @@ pub async fn list_relationships_for_world(
 /// persisting a suggestion (entity-scope-model §5.6 extraction ordering).
 ///
 /// - `block_type = Some(bt)`: resolve by `(world_id, block_type, canonical_name)`
-///   against non-deleted KeyBlocks. Returns `None` when no row matches.
+///   against non-deleted `KeyBlocks`. Returns `None` when no row matches.
 /// - `block_type = None`: resolve case-insensitively by
 ///   `(world_id, canonical_name)` and require **exactly one** non-deleted
-///   KeyBlock to match. Returns `None` when zero or more than one match
+///   `KeyBlock` to match. Returns `None` when zero or more than one match
 ///   (ambiguous → skip + log, per the architect lock).
 ///
 /// `canonical_name` is matched case-insensitively in both branches so the LLM
@@ -396,37 +396,34 @@ pub async fn resolve_entity_by_canonical_name(
     canonical_name: &str,
     block_type: Option<&str>,
 ) -> Result<Option<String>, LocalDbError> {
-    match block_type {
-        Some(bt) => {
-            let id: Option<String> = sqlx::query_scalar(
-                "SELECT key_block_id FROM kb_key_blocks \
-                 WHERE world_id = ? AND block_type = ? AND canonical_name = ? COLLATE NOCASE \
-                 AND status NOT IN ('deleted', 'merged', 'deprecated') \
-                 LIMIT 1",
-            )
-            .bind(world_id)
-            .bind(bt)
-            .bind(canonical_name)
-            .fetch_optional(pool)
-            .await?;
-            Ok(id)
-        }
-        None => {
-            // SAFETY: static SELECT with bind params; case-insensitive resolve.
-            let rows: Vec<(String,)> = sqlx::query_as(
-                "SELECT key_block_id FROM kb_key_blocks \
-                 WHERE world_id = ? AND canonical_name = ? COLLATE NOCASE \
-                 AND status NOT IN ('deleted', 'merged', 'deprecated')",
-            )
-            .bind(world_id)
-            .bind(canonical_name)
-            .fetch_all(pool)
-            .await?;
-            if rows.len() == 1 {
-                Ok(Some(rows[0].0.clone()))
-            } else {
-                Ok(None)
-            }
+    if let Some(bt) = block_type {
+        let id: Option<String> = sqlx::query_scalar(
+            "SELECT key_block_id FROM kb_key_blocks \
+             WHERE world_id = ? AND block_type = ? AND canonical_name = ? COLLATE NOCASE \
+             AND status NOT IN ('deleted', 'merged', 'deprecated') \
+             LIMIT 1",
+        )
+        .bind(world_id)
+        .bind(bt)
+        .bind(canonical_name)
+        .fetch_optional(pool)
+        .await?;
+        Ok(id)
+    } else {
+        // SAFETY: static SELECT with bind params; case-insensitive resolve.
+        let rows: Vec<(String,)> = sqlx::query_as(
+            "SELECT key_block_id FROM kb_key_blocks \
+             WHERE world_id = ? AND canonical_name = ? COLLATE NOCASE \
+             AND status NOT IN ('deleted', 'merged', 'deprecated')",
+        )
+        .bind(world_id)
+        .bind(canonical_name)
+        .fetch_all(pool)
+        .await?;
+        if rows.len() == 1 {
+            Ok(Some(rows[0].0.clone()))
+        } else {
+            Ok(None)
         }
     }
 }
@@ -442,7 +439,7 @@ pub async fn resolve_entity_by_canonical_name(
 /// the verbatim `source_quote` carried in `metadata` for audit.
 ///
 /// The caller (the review-time extraction hook) MUST have already resolved both
-/// endpoint entity ids to existing non-deleted KeyBlocks via
+/// endpoint entity ids to existing non-deleted `KeyBlocks` via
 /// [`resolve_entity_by_canonical_name`]; this function does not re-check.
 ///
 /// Returns `Ok(true)` when a new suggestion row was inserted, `Ok(false)` when
@@ -452,6 +449,9 @@ pub async fn resolve_entity_by_canonical_name(
 ///
 /// Returns [`LocalDbError::Sqlx`] on database failure (including FK violations
 /// if an endpoint entity id does not exist).
+// Single dedicated extraction upsert; splitting into a builder adds
+// indirection for one call-site, mirroring the insert_pending_with_llm allow.
+#[allow(clippy::too_many_arguments)]
 pub async fn upsert_extraction_relationship(
     pool: &SqlitePool,
     world_id: &str,
