@@ -34,6 +34,8 @@ import type {
   ScaffoldPresetRequest,
   ValidatePresetRequest,
   WorkSummary,
+  WorldKbPatchEntityRequest,
+  WorldKbPatchRelationshipRequest,
 } from '@42ch/nexus-contracts';
 
 import { useToast } from '@/lib/use-toast';
@@ -246,6 +248,46 @@ export function useReloadPreset() {
       void qc.invalidateQueries({ queryKey: queryKeys.presets.list() });
     },
     onError: (error) => errorToast(error, 'Could not reload preset'),
+  });
+}
+
+// ── World KB canvas (V1.73/V1.74 Track A) ───────────────────────────────────
+
+export function useWorldKbGraph(worldId: string | undefined) {
+  const client = useNexusClient();
+  return useQuery({
+    queryKey: queryKeys.worldKb.graph(worldId ?? ''),
+    queryFn: () => client.getWorldKbGraph(worldId!),
+    enabled: Boolean(worldId),
+  });
+}
+
+export function useWorldKbPatchEntity(worldId: string | undefined) {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (request: WorldKbPatchEntityRequest) =>
+      client.worldKbPatchEntity(worldId!, request),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.worldKb.graph(worldId!) });
+      void qc.invalidateQueries({ queryKey: queryKeys.worldKb.candidates(worldId!) });
+    },
+    onError: (error) => errorToast(error, 'Could not update entity'),
+  });
+}
+
+export function useWorldKbPatchRelationship(worldId: string | undefined) {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (request: WorldKbPatchRelationshipRequest) =>
+      client.worldKbPatchRelationship(worldId!, request),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.worldKb.graph(worldId!) });
+    },
+    onError: (error) => errorToast(error, 'Could not update relationship'),
   });
 }
 

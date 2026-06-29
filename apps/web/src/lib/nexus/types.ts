@@ -69,6 +69,8 @@ import type {
   WorldKbGraphResponse,
   WorldKbPatchEntityRequest,
   WorldKbPatchEntityResponse,
+  WorldKbPatchRelationshipRequest,
+  WorldKbPatchRelationshipResponse,
   WorldKbPromoteCandidateRequest,
   WorldKbPromoteCandidateResponse,
   TimelinePatchEventRequest,
@@ -250,6 +252,11 @@ export interface NexusClient {
     worldId: string,
     request: WorldKbPromoteCandidateRequest,
   ): Promise<WorldKbPromoteCandidateResponse>;
+  /** `POST /v1/local/worlds/{world_id}/kb/patch-relationship` — relationship add/update/remove (V1.74). */
+  worldKbPatchRelationship(
+    worldId: string,
+    request: WorldKbPatchRelationshipRequest,
+  ): Promise<WorldKbPatchRelationshipResponse>;
 }
 
 /** Re-exported for consumers building query/mutation hooks. */
