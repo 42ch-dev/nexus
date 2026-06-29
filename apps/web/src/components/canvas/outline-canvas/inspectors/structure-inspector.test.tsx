@@ -20,6 +20,9 @@ function chapter(id: number, overrides: Partial<ChapterSummary> = {}): ChapterSu
     planned_word_count: 1000,
     actual_word_count: undefined,
     volume: 1,
+    work_id: 'wk_test',
+    created_at: '',
+    updated_at: '',
     ...overrides,
   };
 }
