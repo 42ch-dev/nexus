@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-06-30T00:10:00Z",
+  "updated_at": "2026-06-30T01:00:00Z",
   "plans": [],
   "metadata": {
     "integration_branch": "iteration/v1.75",
@@ -20,7 +20,7 @@
       "plan_count": 4,
       "plan_count_done": 4,
       "wire_contracts_changed": true,
-      "wire_contracts_note": "V1.75 Track A: additive content field on outline-patch-chapter-set + removed V1.65 PUT outline route/DTO; @42ch/nexus-contracts 0.10.0 -> 0.11.0. Track B: B1 codegen Eq verified correct (no change); B2-B8 fixes.",
+      "wire_contracts_note": "V1.75 Track A: additive content field on outline-patch-chapter-set + removed V1.65 PUT outline route/DTO; @42ch/nexus-contracts 0.10.0 -> 0.11.0. Track B: B1 codegen Eq verified correct (no change); B2-B8 fixes. Merged via PR #101 @ 2d6d0d32 after greploop (4/5 Greptile; flaky-test + CI-time + content-editor fixes).",
       "profile_b_compaction": "done (V1.75 P-last closure)",
       "plan_ids": [
         "2026-06-29-v1.75-compass-and-plan",
@@ -31,23 +31,25 @@
       "residual_summary": {
         "closed_in_v175": 8,
         "new_qc_followup_v176": 8,
-        "open_post_v175": 8
-      }
+        "greptile_4_5_open": 1,
+        "open_post_v175": 9
+      },
+      "merge_commit": "2d6d0d32"
     },
     "tech_debt_summary": {
-      "total_open": 8,
+      "total_open": 9,
       "total_deferred": 0,
       "total_resolved": 280,
       "total_archived": 0,
       "by_severity_active": {
-        "low": 3,
+        "low": 4,
         "nit": 5
       },
       "by_target_active": {
-        "V1.76 QC followup (tbd-v1.76-qc-followup)": 8
+        "V1.76 QC followup (tbd-v1.76-qc-followup)": 9
       },
-      "refreshed_at": "2026-06-29T23:59:00Z",
-      "refreshed_reason": "V1.75 closure: 8 pre-existing residuals resolved (slate cleared); 8 new QC suggestions registered for V1.76 followup."
+      "refreshed_at": "2026-06-30T01:00:00Z",
+      "refreshed_reason": "V1.75 post-merge closeout: PR #101 merged @ 2d6d0d32. 8 V1.75 QC-tri-review suggestions remain open (V1.76); +1 Greptile 4/5 UX finding (R-V175GREPTILE-001, chapter-switch/save-in-flight misalignment, low, not data loss)."
     },
     "updated_at": "2026-06-29T05:11:00Z",
     "spec_integration_branch": "iteration/v1.75",
@@ -5681,6 +5683,18 @@
         "owner": "@frontend-dev",
         "target": "V1.76 QC followup (tbd-v1.76-qc-followup)",
         "lifecycle": "open"
+      },
+      {
+        "id": "R-V175GREPTILE-001",
+        "title": "chapter-switch / save-in-flight UX misalignment in ChapterOutlineContentEditor state machine (Greptile 4/5)",
+        "severity": "low",
+        "source": "Greptile PR #101 final review (4/5)",
+        "scope": "apps/web/src/components/canvas/outline-canvas/inspectors/chapter-outline-content-editor.tsx + outline-canvas.tsx (saveState/isConflicting/contentVersion)",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.76 QC followup (tbd-v1.76-qc-followup)",
+        "lifecycle": "open",
+        "note": "Not data loss (Greptile: 'a UX misalignment rather than data loss'). The dirty/saving guard + chapterNumber-switch reset + contentVersion forced-reset logic are sound but complex; a chapter switch while a save is in flight produces a transient UX inconsistency. Track for a V1.76 state-machine simplification. The 3/5 Greptile findings (published-content guard, onUseCurrent stale cache, dismiss-content-loss) were resolved in the greploop (commits fca82d0b + earlier)."
       }
     ]
   }

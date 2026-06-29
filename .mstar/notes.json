@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-06-29T23:59:00Z",
+  "updated_at": "2026-06-30T01:00:00Z",
   "entries": [
     {
       "at": "2026-06-27 (security remediation)",
@@ -315,6 +315,11 @@
     {
       "at": "2026-06-29 (V1.75 SHIP — pending PR merge)",
       "message": "V1.75 shipped to integration (PR pending to main). Canvas-Pivot (retire V1.65 outline editor) + QC Followup Slate-Clear, dual-track parallel. 4 plans all Done. Track A (P0, XL): the long-flagged canvas-pivot (deferred since V1.67) — depth = parity-close + flip + retire. Phase 1 parity-close: added 'content' field to outline-patch-chapter-set (additive wire @42ch/nexus-contracts 0.10.0->0.11.0) + daemon persistence (per-chapter outline_path prose bridged to work-level outline_revision CAS under RuntimeLockGuard; body-ownership invariant preserved — body_path untouched, regression-tested v175_content_patch_does_not_touch_body_path) + in-inspector TipTap rich-text editor (extracted to chapter-outline-content-editor.tsx sibling; chapter-inspector 248 lines). Phase 2 flip+retire (GATED on parity): morphed chapter-page.tsx 481->222 lines (removed V1.65 TipTap editor + usePutChapterOutline PUT save + PUT outline route/DTO; kept read-only body render + Copy path + canvas redirect CTA with ?chapter=N preselection). Track B (P1, S-M): closed 8 V1.74-QC-followup residuals (B1 codegen Eq verified already-correct; B2 cross-world 403; B3 post-commit refetch; B4 CAS dedup via cas_check_with_version_column; B5 enum coercion warn; B6 graph cap TODO; B7 docstring; B8 test naming). QC tri-review 3/3 Approve (qc1 W-1/W-2 spec doc drift + qc3 F-QC3-001 chapter-preselection fixed in fix-wave a8f0a36e + revalidated). QA Pass (outline_patch 20 + world_kb_relationships 13 + 238 web tests; clippy/fmt/codegen-deterministic/validate-schemas 170 clean). SLATE-CLEAR: 8 pre-existing V1.75 residuals resolved -> 0; 8 new QC suggestions registered for V1.76. MILESTONE: V1.65 whole-document TipTap outline editor (shipped V1.65) RETIRED after canvas matured across 4 beta surfaces; canvas is sole outline authoring surface. Profile B compaction done. wire_contracts_changed: TRUE (Track A 0.10.0->0.11.0; B1 no change). Integration iteration/v1.75 from main @ 6e6b42c6.",
+      "plan_id": "2026-06-29-v1.75-closure"
+    },
+    {
+      "at": "2026-06-30 (V1.75 MERGED to main + greploop post-merge closeout)",
+      "message": "V1.75 merged to main @ 2d6d0d32 via PR #101 (merge commit). iteration/v1.75 retired + deleted. Post-merge greploop (7 reviews) brought Greptile to 4/5 and fixed: (1) two flaky CI tests — promote_reject_cas_miss rewritten deterministically (tokio::join! race -> direct version bump) + summary_config_from_env_* serialized with serial_test (env-var race); (2) CI desktop-build.yml optimization — dropped universal-apple-darwin -> native aarch64 (Tauri build ~8min -> ~5min) + served-ui-smoke parallel (remove needs) -> CI round ~15min -> ~5min; (3) ChapterOutlineContentEditor content-loss root cause — contentVersion no longer bumped per-patch (Issue 1 root fix), settle effect transitions saving->dirty on 409 (isConflicting), contentVersion is now a reliable forced-reset signal overriding the dirty guard, onUseCurrent bumps it post-refetch; (4) published-chapter guard extended to the new content field (outline.rs has_chapter_structural_edit); (5) onUseCurrent invalidates the per-chapter outline cache (was reading stale prose on forced reset). Final Greptile 4/5: the one remaining gap is a chapter-switch/save-in-flight UX misalignment (NOT data loss) recorded as R-V175GREPTILE-001 (low, tbd-v1.76-qc-followup). Residual slate: 8 V1.75-QC-tri-review suggestions + 1 Greptile 4/5 finding = 9 open, all targeted V1.76. Canvas-pivot milestone stands: V1.65 TipTap outline editor retired; V1.72 node-granular canvas is the sole outline authoring surface.",
       "plan_id": "2026-06-29-v1.75-closure"
     }
   ]
