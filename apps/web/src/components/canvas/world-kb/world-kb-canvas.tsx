@@ -102,6 +102,20 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodes, showList]);
 
+  useEffect(() => {
+    function onConnectTo(event: Event) {
+      const custom = event as CustomEvent<{ sourceEntityId: string }>;
+      const sourceEntityId = custom.detail.sourceEntityId;
+      if (!sourceEntityId) return;
+      setSelection({
+        kind: 'new-relationship',
+        initialSourceEntityId: sourceEntityId,
+      });
+    }
+    window.addEventListener('world-kb-connect-to', onConnectTo);
+    return () => window.removeEventListener('world-kb-connect-to', onConnectTo);
+  }, [setSelection]);
+
   if (graph.isLoading || candidates.isLoading) return <LoadingState label="Loading World KB…" />;
   if (graph.isError)
     return (

@@ -120,6 +120,15 @@
     --color-canvas-worldkb-nonspatial-row-highlight: #f5f5f4;
     --color-canvas-worldkb-focus-ring: #006bff;
     --color-canvas-worldkb-relationship-edge: #94a3b8;
+    --color-canvas-worldkb-relationship-edge-default: #94a3b8;
+    --color-canvas-worldkb-relationship-edge-symmetric: #8b5cf6;
+    --color-canvas-worldkb-relationship-edge-custom: #db2777;
+    --color-canvas-worldkb-relationship-confidence-low: #e5484d;
+    --color-canvas-worldkb-relationship-confidence-mid: #b76e00;
+    --color-canvas-worldkb-relationship-confidence-high: #1f8f4d;
+    --color-canvas-worldkb-relationship-grounded-badge: rgba(0, 107, 255, 0.12);
+    --color-canvas-worldkb-relationship-asserted-badge: rgba(124, 58, 237, 0.12);
+    --color-canvas-worldkb-relationship-inspector-fill: #ffffff;
 
     /* Elevation — DESIGN.md §Elevation */
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04);
@@ -224,6 +233,15 @@
     --color-canvas-worldkb-nonspatial-row-highlight: #1f1f1e;
     --color-canvas-worldkb-focus-ring: #52a8ff;
     --color-canvas-worldkb-relationship-edge: #64748b;
+    --color-canvas-worldkb-relationship-edge-default: #64748b;
+    --color-canvas-worldkb-relationship-edge-symmetric: #a78bfa;
+    --color-canvas-worldkb-relationship-edge-custom: #f472b6;
+    --color-canvas-worldkb-relationship-confidence-low: #ff6b6b;
+    --color-canvas-worldkb-relationship-confidence-mid: #ffc043;
+    --color-canvas-worldkb-relationship-confidence-high: #54d58a;
+    --color-canvas-worldkb-relationship-grounded-badge: rgba(82, 168, 255, 0.14);
+    --color-canvas-worldkb-relationship-asserted-badge: rgba(183, 148, 255, 0.14);
+    --color-canvas-worldkb-relationship-inspector-fill: #1a1a1a;
 
     /* Elevation */
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);

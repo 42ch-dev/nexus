@@ -7,21 +7,23 @@
 import type { WorldKbSourceAnchorProjection } from '@42ch/nexus-contracts';
 
 interface RelationshipAnchorPickerProps {
+  id?: string;
   anchors: WorldKbSourceAnchorProjection[];
   selectedIds: string[];
   onChange: (selectedIds: string[]) => void;
 }
 
 export function RelationshipAnchorPicker({
+  id,
   anchors,
   selectedIds,
   onChange,
 }: RelationshipAnchorPickerProps) {
   if (anchors.length === 0) {
-    return <span className="text-copy-13 text-gray-700">No source anchors available.</span>;
+    return <span id={id} className="text-copy-13 text-gray-700">No source anchors available.</span>;
   }
   return (
-    <div className="max-h-32 overflow-auto rounded-control border border-gray-alpha-400 bg-background-100 p-2">
+    <div id={id} className="max-h-32 overflow-auto rounded-control border border-gray-alpha-400 bg-background-100 p-2">
       {anchors.map((a) => (
         <label key={a.source_anchor_id} className="flex items-center gap-2 py-1 text-copy-14">
           <input

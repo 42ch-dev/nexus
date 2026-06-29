@@ -120,7 +120,7 @@ export function RelationshipInspector({
 
   return (
     <form
-      className="flex flex-col gap-4"
+      className="flex flex-col gap-4 rounded-card border border-gray-alpha-400 bg-canvas-worldkb-relationship-inspector-fill p-4 shadow-card"
       onSubmit={(e) => {
         e.preventDefault();
         handleSubmit();
@@ -145,8 +145,9 @@ export function RelationshipInspector({
       </div>
 
       <div className="grid gap-4">
-        <Field label="Source entity" error={errors.sourceEntityId}>
+        <Field label="Source entity" htmlFor="rel-source" error={errors.sourceEntityId}>
           <Select
+            id="rel-source"
             value={form.sourceEntityId}
             onChange={(e) => setForm((f) => ({ ...f, sourceEntityId: e.target.value }))}
             disabled={isEdit}
@@ -161,8 +162,9 @@ export function RelationshipInspector({
           </Select>
         </Field>
 
-        <Field label="Target entity" error={errors.targetEntityId}>
+        <Field label="Target entity" htmlFor="rel-target" error={errors.targetEntityId}>
           <Select
+            id="rel-target"
             value={form.targetEntityId}
             onChange={(e) => setForm((f) => ({ ...f, targetEntityId: e.target.value }))}
             disabled={isEdit}
@@ -177,8 +179,9 @@ export function RelationshipInspector({
           </Select>
         </Field>
 
-        <Field label="Relation type" error={errors.relationType}>
+        <Field label="Relation type" htmlFor="rel-type" error={errors.relationType}>
           <Select
+            id="rel-type"
             value={form.relationType}
             onChange={(e) =>
               setForm((f) => ({
@@ -195,8 +198,9 @@ export function RelationshipInspector({
         </Field>
 
         {isCustom && (
-          <Field label="Custom label" error={errors.customLabel}>
+          <Field label="Custom label" htmlFor="rel-custom" error={errors.customLabel}>
             <Input
+              id="rel-custom"
               value={form.customLabel}
               onChange={(e) => setForm((f) => ({ ...f, customLabel: e.target.value }))}
               placeholder="e.g., Childhood Friend"
@@ -215,8 +219,9 @@ export function RelationshipInspector({
           Symmetric (show reverse edge)
         </label>
 
-        <Field label={`Confidence: ${form.confidence.toFixed(2)}`} error={errors.confidence}>
+        <Field label={`Confidence: ${form.confidence.toFixed(2)}`} htmlFor="rel-confidence" error={errors.confidence}>
           <Input
+            id="rel-confidence"
             type="number"
             min={0}
             max={1}
@@ -227,8 +232,9 @@ export function RelationshipInspector({
           />
         </Field>
 
-        <Field label="Grounding anchors">
+        <Field label="Grounding anchors" htmlFor="rel-anchors">
           <RelationshipAnchorPicker
+            id="rel-anchors"
             anchors={anchors}
             selectedIds={form.sourceAnchorIds}
             onChange={(ids) => setForm((f) => ({ ...f, sourceAnchorIds: ids }))}

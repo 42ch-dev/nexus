@@ -875,8 +875,7 @@ pub async fn get_graph(
     Ok(Json(WorldKbGraphResponse {
         entities,
         source_anchors,
-        relationships: project_relationships_for_world(state.pool(), &world_id)
-            .await?,
+        relationships: project_relationships_for_world(state.pool(), &world_id).await?,
     }))
 }
 
@@ -1355,7 +1354,9 @@ async fn require_valid_source_anchors(
     for id in ids {
         let Some(kb_id) = id.strip_prefix("sa_") else {
             return Err(NexusApiError::world_kb_validation_failed(
-                &[format!("source_anchor_id '{id}' is not a valid anchor projection id")],
+                &[format!(
+                    "source_anchor_id '{id}' is not a valid anchor projection id"
+                )],
                 &[],
             ));
         };
@@ -1381,8 +1382,12 @@ async fn require_valid_source_anchors(
     for id in ids {
         let kb_id = id.strip_prefix("sa_").unwrap_or(id);
         match rows.iter().find(|r| r.key_block_id == kb_id) {
-            None => errors.push(format!("source anchor '{id}' does not reference an entity in this world")),
-            Some(row) if row.source_work_id.is_none() => errors.push(format!("source anchor '{id}' references an entity without provenance")),
+            None => errors.push(format!(
+                "source anchor '{id}' does not reference an entity in this world"
+            )),
+            Some(row) if row.source_work_id.is_none() => errors.push(format!(
+                "source anchor '{id}' references an entity without provenance"
+            )),
             Some(_) => {}
         }
     }

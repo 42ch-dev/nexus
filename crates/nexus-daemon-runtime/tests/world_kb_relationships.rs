@@ -36,11 +36,7 @@ async fn seed_key_block(
     .unwrap();
 }
 
-async fn seed_source_anchor(
-    pool: &sqlx::SqlitePool,
-    key_block_id: &str,
-    anchor_ordinal: i64,
-) {
+async fn seed_source_anchor(pool: &sqlx::SqlitePool, key_block_id: &str, anchor_ordinal: i64) {
     sqlx::query(
         "INSERT INTO kb_source_anchors \
          (key_block_id, anchor_ordinal, source_anchor_json) \
@@ -62,14 +58,20 @@ async fn seed_key_block_with_source(
     canonical_name: &str,
     status: &str,
 ) {
-    seed_key_block(pool, key_block_id, world_id, block_type, canonical_name, status).await;
-    sqlx::query(
-        "UPDATE kb_key_blocks SET source_work_id = 'we_source' WHERE key_block_id = ?",
+    seed_key_block(
+        pool,
+        key_block_id,
+        world_id,
+        block_type,
+        canonical_name,
+        status,
     )
-    .bind(key_block_id)
-    .execute(pool)
-    .await
-    .unwrap();
+    .await;
+    sqlx::query("UPDATE kb_key_blocks SET source_work_id = 'we_source' WHERE key_block_id = ?")
+        .bind(key_block_id)
+        .execute(pool)
+        .await
+        .unwrap();
 }
 
 async fn fresh_state() -> (
@@ -88,7 +90,11 @@ async fn fresh_state() -> (
     (tmp, state)
 }
 
-fn add_request(source: &str, target: &str, relation_type: WorldKbRelationshipKind) -> WorldKbPatchRelationshipRequest {
+fn add_request(
+    source: &str,
+    target: &str,
+    relation_type: WorldKbRelationshipKind,
+) -> WorldKbPatchRelationshipRequest {
     WorldKbPatchRelationshipRequest {
         relationship_id: None,
         action: "add".to_string(),
@@ -109,8 +115,24 @@ fn add_request(source: &str, target: &str, relation_type: WorldKbRelationshipKin
 #[tokio::test]
 async fn add_relationship_happy_path() {
     let (_tmp, state) = fresh_state().await;
-    seed_key_block(state.pool(), "kb_a", "wld_test_world", "character", "Aria", "confirmed").await;
-    seed_key_block(state.pool(), "kb_b", "wld_test_world", "character", "Kael", "confirmed").await;
+    seed_key_block(
+        state.pool(),
+        "kb_a",
+        "wld_test_world",
+        "character",
+        "Aria",
+        "confirmed",
+    )
+    .await;
+    seed_key_block(
+        state.pool(),
+        "kb_b",
+        "wld_test_world",
+        "character",
+        "Kael",
+        "confirmed",
+    )
+    .await;
 
     let req = add_request("kb_a", "kb_b", WorldKbRelationshipKind::AlliedWith);
     let Json(resp) = patch_relationship(
@@ -131,13 +153,33 @@ async fn add_relationship_happy_path() {
 #[tokio::test]
 async fn update_relationship_bumps_version() {
     let (_tmp, state) = fresh_state().await;
-    seed_key_block(state.pool(), "kb_a", "wld_test_world", "character", "Aria", "confirmed").await;
-    seed_key_block(state.pool(), "kb_b", "wld_test_world", "character", "Kael", "confirmed").await;
+    seed_key_block(
+        state.pool(),
+        "kb_a",
+        "wld_test_world",
+        "character",
+        "Aria",
+        "confirmed",
+    )
+    .await;
+    seed_key_block(
+        state.pool(),
+        "kb_b",
+        "wld_test_world",
+        "character",
+        "Kael",
+        "confirmed",
+    )
+    .await;
 
     let Json(created) = patch_relationship(
         State(state.clone()),
         Path("wld_test_world".to_string()),
-        Json(add_request("kb_a", "kb_b", WorldKbRelationshipKind::AlliedWith)),
+        Json(add_request(
+            "kb_a",
+            "kb_b",
+            WorldKbRelationshipKind::AlliedWith,
+        )),
     )
     .await
     .unwrap();
@@ -177,13 +219,33 @@ async fn update_relationship_bumps_version() {
 #[tokio::test]
 async fn remove_relationship_happy_path() {
     let (_tmp, state) = fresh_state().await;
-    seed_key_block(state.pool(), "kb_a", "wld_test_world", "character", "Aria", "confirmed").await;
-    seed_key_block(state.pool(), "kb_b", "wld_test_world", "character", "Kael", "confirmed").await;
+    seed_key_block(
+        state.pool(),
+        "kb_a",
+        "wld_test_world",
+        "character",
+        "Aria",
+        "confirmed",
+    )
+    .await;
+    seed_key_block(
+        state.pool(),
+        "kb_b",
+        "wld_test_world",
+        "character",
+        "Kael",
+        "confirmed",
+    )
+    .await;
 
     let Json(created) = patch_relationship(
         State(state.clone()),
         Path("wld_test_world".to_string()),
-        Json(add_request("kb_a", "kb_b", WorldKbRelationshipKind::AlliedWith)),
+        Json(add_request(
+            "kb_a",
+            "kb_b",
+            WorldKbRelationshipKind::AlliedWith,
+        )),
     )
     .await
     .unwrap();
@@ -209,7 +271,15 @@ async fn remove_relationship_happy_path() {
 #[tokio::test]
 async fn add_self_loop_rejected_422() {
     let (_tmp, state) = fresh_state().await;
-    seed_key_block(state.pool(), "kb_a", "wld_test_world", "character", "Aria", "confirmed").await;
+    seed_key_block(
+        state.pool(),
+        "kb_a",
+        "wld_test_world",
+        "character",
+        "Aria",
+        "confirmed",
+    )
+    .await;
 
     let req = add_request("kb_a", "kb_a", WorldKbRelationshipKind::AlliedWith);
     let err = patch_relationship(
@@ -229,8 +299,24 @@ async fn add_self_loop_rejected_422() {
 #[tokio::test]
 async fn add_custom_without_label_rejected_422() {
     let (_tmp, state) = fresh_state().await;
-    seed_key_block(state.pool(), "kb_a", "wld_test_world", "character", "Aria", "confirmed").await;
-    seed_key_block(state.pool(), "kb_b", "wld_test_world", "character", "Kael", "confirmed").await;
+    seed_key_block(
+        state.pool(),
+        "kb_a",
+        "wld_test_world",
+        "character",
+        "Aria",
+        "confirmed",
+    )
+    .await;
+    seed_key_block(
+        state.pool(),
+        "kb_b",
+        "wld_test_world",
+        "character",
+        "Kael",
+        "confirmed",
+    )
+    .await;
 
     let req = add_request("kb_a", "kb_b", WorldKbRelationshipKind::Custom);
     let err = patch_relationship(
@@ -250,8 +336,24 @@ async fn add_custom_without_label_rejected_422() {
 #[tokio::test]
 async fn add_confidence_out_of_range_rejected_422() {
     let (_tmp, state) = fresh_state().await;
-    seed_key_block(state.pool(), "kb_a", "wld_test_world", "character", "Aria", "confirmed").await;
-    seed_key_block(state.pool(), "kb_b", "wld_test_world", "character", "Kael", "confirmed").await;
+    seed_key_block(
+        state.pool(),
+        "kb_a",
+        "wld_test_world",
+        "character",
+        "Aria",
+        "confirmed",
+    )
+    .await;
+    seed_key_block(
+        state.pool(),
+        "kb_b",
+        "wld_test_world",
+        "character",
+        "Kael",
+        "confirmed",
+    )
+    .await;
 
     let mut req = add_request("kb_a", "kb_b", WorldKbRelationshipKind::AlliedWith);
     req.relationship.as_mut().unwrap().confidence = Some(1.5);
@@ -272,13 +374,33 @@ async fn add_confidence_out_of_range_rejected_422() {
 #[tokio::test]
 async fn update_stale_version_returns_409() {
     let (_tmp, state) = fresh_state().await;
-    seed_key_block(state.pool(), "kb_a", "wld_test_world", "character", "Aria", "confirmed").await;
-    seed_key_block(state.pool(), "kb_b", "wld_test_world", "character", "Kael", "confirmed").await;
+    seed_key_block(
+        state.pool(),
+        "kb_a",
+        "wld_test_world",
+        "character",
+        "Aria",
+        "confirmed",
+    )
+    .await;
+    seed_key_block(
+        state.pool(),
+        "kb_b",
+        "wld_test_world",
+        "character",
+        "Kael",
+        "confirmed",
+    )
+    .await;
 
     let Json(created) = patch_relationship(
         State(state.clone()),
         Path("wld_test_world".to_string()),
-        Json(add_request("kb_a", "kb_b", WorldKbRelationshipKind::AlliedWith)),
+        Json(add_request(
+            "kb_a",
+            "kb_b",
+            WorldKbRelationshipKind::AlliedWith,
+        )),
     )
     .await
     .unwrap();
@@ -315,8 +437,24 @@ async fn update_stale_version_returns_409() {
 #[tokio::test]
 async fn get_graph_projects_symmetric_reverse_edge() {
     let (_tmp, state) = fresh_state().await;
-    seed_key_block(state.pool(), "kb_a", "wld_test_world", "character", "Aria", "confirmed").await;
-    seed_key_block(state.pool(), "kb_b", "wld_test_world", "character", "Kael", "confirmed").await;
+    seed_key_block(
+        state.pool(),
+        "kb_a",
+        "wld_test_world",
+        "character",
+        "Aria",
+        "confirmed",
+    )
+    .await;
+    seed_key_block(
+        state.pool(),
+        "kb_b",
+        "wld_test_world",
+        "character",
+        "Kael",
+        "confirmed",
+    )
+    .await;
 
     let mut req = add_request("kb_a", "kb_b", WorldKbRelationshipKind::RivalOf);
     req.relationship.as_mut().unwrap().symmetric = true;
@@ -331,7 +469,11 @@ async fn get_graph_projects_symmetric_reverse_edge() {
     let Json(graph) = get_graph(State(state.clone()), Path("wld_test_world".to_string()))
         .await
         .expect("graph should succeed");
-    assert_eq!(graph.relationships.len(), 2, "symmetric relationship emits forward + reverse");
+    assert_eq!(
+        graph.relationships.len(),
+        2,
+        "symmetric relationship emits forward + reverse"
+    );
     let stored = graph
         .relationships
         .iter()
@@ -350,8 +492,24 @@ async fn get_graph_projects_symmetric_reverse_edge() {
 #[tokio::test]
 async fn add_with_anchors_validates_anchor_existence() {
     let (_tmp, state) = fresh_state().await;
-    seed_key_block_with_source(state.pool(), "kb_a", "wld_test_world", "character", "Aria", "confirmed").await;
-    seed_key_block(state.pool(), "kb_b", "wld_test_world", "character", "Kael", "confirmed").await;
+    seed_key_block_with_source(
+        state.pool(),
+        "kb_a",
+        "wld_test_world",
+        "character",
+        "Aria",
+        "confirmed",
+    )
+    .await;
+    seed_key_block(
+        state.pool(),
+        "kb_b",
+        "wld_test_world",
+        "character",
+        "Kael",
+        "confirmed",
+    )
+    .await;
     seed_source_anchor(state.pool(), "kb_a", 1).await;
 
     let mut req = add_request("kb_a", "kb_b", WorldKbRelationshipKind::AlliedWith);
@@ -370,8 +528,24 @@ async fn add_with_anchors_validates_anchor_existence() {
 #[tokio::test]
 async fn add_with_invalid_anchor_rejected_422() {
     let (_tmp, state) = fresh_state().await;
-    seed_key_block(state.pool(), "kb_a", "wld_test_world", "character", "Aria", "confirmed").await;
-    seed_key_block(state.pool(), "kb_b", "wld_test_world", "character", "Kael", "confirmed").await;
+    seed_key_block(
+        state.pool(),
+        "kb_a",
+        "wld_test_world",
+        "character",
+        "Aria",
+        "confirmed",
+    )
+    .await;
+    seed_key_block(
+        state.pool(),
+        "kb_b",
+        "wld_test_world",
+        "character",
+        "Kael",
+        "confirmed",
+    )
+    .await;
 
     let mut req = add_request("kb_a", "kb_b", WorldKbRelationshipKind::AlliedWith);
     req.relationship.as_mut().unwrap().source_anchor_ids = Some(vec!["sa_missing".to_string()]);
@@ -392,7 +566,15 @@ async fn add_with_invalid_anchor_rejected_422() {
 #[tokio::test]
 async fn add_cross_world_entity_rejected_422() {
     let (_tmp, state) = fresh_state().await;
-    seed_key_block(state.pool(), "kb_a", "wld_test_world", "character", "Aria", "confirmed").await;
+    seed_key_block(
+        state.pool(),
+        "kb_a",
+        "wld_test_world",
+        "character",
+        "Aria",
+        "confirmed",
+    )
+    .await;
     // kb_b exists in a different world — the handler should reject it.
     sqlx::query(
         "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
@@ -411,7 +593,15 @@ async fn add_cross_world_entity_rejected_422() {
     .execute(state.pool())
     .await
     .unwrap();
-    seed_key_block(state.pool(), "kb_b", "wld_other", "character", "Kael", "confirmed").await;
+    seed_key_block(
+        state.pool(),
+        "kb_b",
+        "wld_other",
+        "character",
+        "Kael",
+        "confirmed",
+    )
+    .await;
 
     let req = add_request("kb_a", "kb_b", WorldKbRelationshipKind::AlliedWith);
     let err = patch_relationship(
