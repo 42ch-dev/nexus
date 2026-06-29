@@ -455,6 +455,79 @@ mod tests {
         assert_eq!(parsed[0]["block_type"], "event");
     }
 
+    // ── V1.76: relationship candidate parsing ──────────────────────────────
+
+    #[test]
+    fn parse_relationships_from_object_response() {
+        let parsed = parse_relationships_response(
+            r#"{"candidates":[],"relationships":[
+                {"source_canonical_name":"Aria","source_block_type":"character",
+                 "target_canonical_name":"Kael","target_block_type":"character",
+                 "relation_type":"allied_with","symmetric":true,
+                 "confidence":0.8,"source_quote":"Aria and Kael fought together"}
+            ]}"#,
+        );
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0]["source_canonical_name"], "Aria");
+        assert_eq!(parsed[0]["target_canonical_name"], "Kael");
+        assert_eq!(parsed[0]["relation_type"], "allied_with");
+        assert_eq!(parsed[0]["symmetric"], true);
+        assert_eq!(parsed[0]["confidence"], json!(0.8));
+    }
+
+    #[test]
+    fn parse_relationships_missing_key_returns_empty() {
+        // Object with candidates but no relationships key → empty (backward compat).
+        let parsed = parse_relationships_response(
+            r#"{"candidates":[{"canonical_name":"A","block_type":"character","confidence":0.5,"source_quote":"q"}]}"#,
+        );
+        assert!(parsed.is_empty(), "missing relationships key → empty");
+    }
+
+    #[test]
+    fn parse_relationships_clamps_confidence() {
+        let parsed = parse_relationships_response(
+            r#"{"relationships":[{"source_canonical_name":"A","target_canonical_name":"B",
+               "relation_type":"rival_of","symmetric":false,"confidence":1.5,"source_quote":"q"}]}"#,
+        );
+        assert_eq!(parsed[0]["confidence"], json!(1.0));
+    }
+
+    #[test]
+    fn parse_relationships_normalizes_missing_fields() {
+        let parsed = parse_relationships_response(
+            r#"{"relationships":[{"source_canonical_name":"A","target_canonical_name":"B"}]}"#,
+        );
+        assert_eq!(parsed.len(), 1);
+        // relation_type defaults to custom; symmetric to false; confidence 0.0.
+        assert_eq!(parsed[0]["relation_type"], "custom");
+        assert_eq!(parsed[0]["symmetric"], false);
+        assert_eq!(parsed[0]["confidence"], json!(0.0));
+    }
+
+    #[tokio::test]
+    async fn llm_extract_with_mock_worker_returns_relationships() {
+        let cap = LlmExtract::with_worker_provider(mock_provider(
+            r#"{"candidates":[
+                {"canonical_name":"Aria","block_type":"character","confidence":0.9,"source_quote":"Aria drew her blade."}
+            ],"relationships":[
+                {"source_canonical_name":"Aria","target_canonical_name":"Kael",
+                 "relation_type":"allied_with","symmetric":true,"confidence":0.8,
+                 "source_quote":"Aria and Kael fought together"}
+            ]}"#,
+        ));
+        let input = json!({ "prompt": "extract", "chapter_prose": "..." });
+        let result = cap.run(input).await.unwrap();
+        // candidates still present.
+        let candidates = result.get("candidates").and_then(|v| v.as_array()).unwrap();
+        assert_eq!(candidates.len(), 1);
+        // relationships present.
+        let relationships = result.get("relationships").and_then(|v| v.as_array()).unwrap();
+        assert_eq!(relationships.len(), 1);
+        assert_eq!(relationships[0]["source_canonical_name"], "Aria");
+        assert_eq!(relationships[0]["relation_type"], "allied_with");
+    }
+
     // ── SEC-V131-01: identity boundary regression (mirrors judge.llm) ──────
 
     struct CapturingProvider {

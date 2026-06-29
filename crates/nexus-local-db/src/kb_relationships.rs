@@ -801,4 +801,118 @@ mod tests {
             .unwrap();
         assert_eq!(rows.len(), 3);
     }
+
+    // ── V1.76: extraction resolve + idempotent upsert ─────────────────────
+
+    #[tokio::test]
+    async fn resolve_entity_by_canonical_name_with_block_type() {
+        let (pool, _dir) = fresh_pool().await;
+        // seed_world_and_entities inserts kb_source + kb_target as 'character'
+        // with canonical_name == id.
+        let (world_id, source_id, _target_id) = seed_world_and_entities(&pool).await;
+
+        let resolved =
+            resolve_entity_by_canonical_name(&pool, &world_id, "kb_source", Some("character"))
+                .await
+                .unwrap();
+        assert_eq!(resolved.as_deref(), Some(source_id.as_str()));
+    }
+
+    #[tokio::test]
+    async fn resolve_entity_case_insensitive_without_block_type() {
+        let (pool, _dir) = fresh_pool().await;
+        let (world_id, source_id, _target_id) = seed_world_and_entities(&pool).await;
+
+        let resolved =
+            resolve_entity_by_canonical_name(&pool, &world_id, "KB_SOURCE", None)
+                .await
+                .unwrap();
+        assert_eq!(resolved.as_deref(), Some(source_id.as_str()));
+    }
+
+    #[tokio::test]
+    async fn resolve_entity_missing_returns_none() {
+        let (pool, _dir) = fresh_pool().await;
+        let (world_id, _source_id, _target_id) = seed_world_and_entities(&pool).await;
+
+        let resolved =
+            resolve_entity_by_canonical_name(&pool, &world_id, "nonexistent", None)
+                .await
+                .unwrap();
+        assert!(resolved.is_none());
+    }
+
+    #[tokio::test]
+    async fn upsert_extraction_relationship_inserts_then_dedup() {
+        let (pool, _dir) = fresh_pool().await;
+        let (world_id, source_id, target_id) = seed_world_and_entities(&pool).await;
+        let now = chrono::Utc::now().to_rfc3339();
+
+        // First call inserts a suggestion.
+        let inserted = upsert_extraction_relationship(
+            &pool,
+            &world_id,
+            &source_id,
+            &target_id,
+            "allied_with",
+            None,
+            true,
+            Some(0.8),
+            Some("quote"),
+            &now,
+        )
+        .await
+        .unwrap();
+        assert!(inserted, "first call inserts a new suggestion");
+
+        // Second call with the same composite key is a no-op (dedup).
+        let inserted_again = upsert_extraction_relationship(
+            &pool,
+            &world_id,
+            &source_id,
+            &target_id,
+            "allied_with",
+            None,
+            true,
+            Some(0.8),
+            Some("quote"),
+            &now,
+        )
+        .await
+        .unwrap();
+        assert!(
+            !inserted_again,
+            "second call is idempotent (no duplicate, no revision bump)"
+        );
+
+        // Only one row exists.
+        let rows = list_relationships_for_world(&pool, &world_id)
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].needs_review, 1);
+        assert_eq!(rows[0].source, "extraction");
+    }
+
+    #[tokio::test]
+    async fn upsert_extraction_different_custom_label_inserts_separate() {
+        let (pool, _dir) = fresh_pool().await;
+        let (world_id, source_id, target_id) = seed_world_and_entities(&pool).await;
+        let now = chrono::Utc::now().to_rfc3339();
+
+        let _ = upsert_extraction_relationship(
+            &pool, &world_id, &source_id, &target_id, "custom", Some("bond"), true, None, None, &now,
+        )
+        .await
+        .unwrap();
+        let second = upsert_extraction_relationship(
+            &pool, &world_id, &source_id, &target_id, "custom", Some("oath"), true, None, None, &now,
+        )
+        .await
+        .unwrap();
+        assert!(
+            second,
+            "different custom_label is a distinct suggestion (not deduped)"
+        );
+    }
 }
