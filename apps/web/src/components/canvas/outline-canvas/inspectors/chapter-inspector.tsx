@@ -1,10 +1,11 @@
 /**
- * Outline canvas — chapter inspector (V1.73 B5 split, `R-V172P0-QC1-002`).
+ * Outline canvas — chapter inspector (V1.73 B5 split, `R-V172P0-QC1-002`;
+ * V1.75 A3 mounts the outline-content editor below the metadata fields).
  *
- * Edits a chapter's outline metadata (title/slug/status/planned words/volume)
- * through the `patch_outline_chapter` route, with prev/next volume moves.
- * Published chapters are read-only. Extracted from the original
- * `outline-canvas.tsx` monolith; behavior is unchanged.
+ * Edits chapter outline metadata (title/slug/status/planned words/volume) via
+ * `patch_outline_chapter`, with prev/next volume moves. V1.75 closes the V1.65
+ * prose-editing parity gap by mounting `ChapterOutlineContentEditor`. Published
+ * chapters are read-only.
  */
 import { useEffect, useState } from 'react';
 import { AlertTriangle, ChevronLeft, ChevronRight, Save } from 'lucide-react';
@@ -13,6 +14,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
 import { STATUS_OPTIONS } from '../graph-projection';
+import { ChapterOutlineContentEditor } from './chapter-outline-content-editor';
 import type {
   ChapterStatus,
   ChapterSummary,
@@ -27,6 +29,11 @@ interface ChapterInspectorProps {
   baseRevision: number;
   onPatchChapter: (chapter: number, request: OutlinePatchChapterRequest) => void;
   onMove: (chapterId: number, volumeId: number) => void;
+  /** True while a chapter patch mutation is in flight (metadata or content). */
+  patchIsPending: boolean;
+  /** Monotonic counter the orchestrator bumps to request an editor reset after
+   * a refetch (e.g. following conflict resolution). */
+  contentVersion: number;
 }
 
 export function ChapterInspector({
@@ -36,6 +43,8 @@ export function ChapterInspector({
   baseRevision,
   onPatchChapter,
   onMove,
+  patchIsPending,
+  contentVersion,
 }: ChapterInspectorProps) {
   const titles = outline.chapter_titles as Record<string, string> | undefined;
   const [title, setTitle] = useState('');
@@ -69,6 +78,10 @@ export function ChapterInspector({
 
   const isPublished = chapter.status === 'published';
   const isFinalized = chapter.status === 'finalized';
+  const currentVolume = outline.volumes.find((v) => v.chapter_ids.includes(chapter.chapter));
+  const currentVolumeIndex = currentVolume
+    ? outline.volumes.findIndex((v) => v.volume_id === currentVolume.volume_id)
+    : -1;
 
   function save() {
     if (!chapter) return;
@@ -81,8 +94,7 @@ export function ChapterInspector({
       const n = Number.parseInt(planned, 10);
       if (!Number.isNaN(n)) set.planned_word_count = n;
     }
-    const currentVolumeId = outline.volumes.find((v) => v.chapter_ids.includes(chapter.chapter))?.volume_id;
-    if (volume !== String(currentVolumeId ?? '')) {
+    if (volume !== String(currentVolume?.volume_id ?? '')) {
       const n = Number.parseInt(volume, 10);
       if (!Number.isNaN(n)) set.volume = n;
     }
@@ -106,11 +118,6 @@ export function ChapterInspector({
     });
   }
 
-  const currentVolume = outline.volumes.find((v) => v.chapter_ids.includes(chapter.chapter));
-  const currentVolumeIndex = currentVolume
-    ? outline.volumes.findIndex((v) => v.volume_id === currentVolume.volume_id)
-    : -1;
-
   return (
     <Card>
       <CardHeader>
@@ -123,62 +130,38 @@ export function ChapterInspector({
         {isPublished ? (
           <div className="rounded-card border border-red-700/30 bg-red-700/10 p-3 text-copy-13 text-red-1000">
             <AlertTriangle className="mr-1.5 inline h-4 w-4" aria-hidden />
-            This chapter is published. Edits must be made through a fork or
-            revision workflow.
+            This chapter is published. Edits must be made through a fork or revision workflow.
           </div>
         ) : null}
 
-        <label className="flex flex-col gap-1 text-copy-13">
-          <span className="text-gray-700">Title</span>
-          <input
-            type="text"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-            disabled={isPublished}
-            className="rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-2 text-gray-1000 focus:border-blue-700 disabled:bg-gray-100 disabled:text-gray-700"
-          />
-        </label>
+        <MetaField label="Title">
+          <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} disabled={isPublished} className={INPUT_CLASS} />
+        </MetaField>
 
-        <label className="flex flex-col gap-1 text-copy-13">
-          <span className="text-gray-700">Slug</span>
-          <input
-            type="text"
-            value={slug}
-            onChange={(e) => setSlug(e.target.value)}
-            disabled={isPublished}
-            className="rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-2 text-gray-1000 focus:border-blue-700 disabled:bg-gray-100 disabled:text-gray-700"
-          />
-        </label>
+        <MetaField label="Slug">
+          <input type="text" value={slug} onChange={(e) => setSlug(e.target.value)} disabled={isPublished} className={INPUT_CLASS} />
+        </MetaField>
 
         <div className="grid grid-cols-2 gap-3">
-          <label className="flex flex-col gap-1 text-copy-13">
-            <span className="text-gray-700">Status</span>
+          <MetaField label="Status">
             <select
               value={status}
               onChange={(e) => setStatus(e.target.value as ChapterStatus)}
               disabled={isPublished}
-              className="rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-2 text-gray-1000 focus:border-blue-700 disabled:bg-gray-100 disabled:text-gray-700"
+              className={INPUT_CLASS}
             >
               {STATUS_OPTIONS.map((o) => (
                 <option key={o.value} value={o.value}>{o.label}</option>
               ))}
             </select>
-          </label>
+          </MetaField>
 
-          <label className="flex flex-col gap-1 text-copy-13">
-            <span className="text-gray-700">Planned words</span>
-            <input
-              type="number"
-              value={planned}
-              onChange={(e) => setPlanned(e.target.value)}
-              disabled={isPublished}
-              className="rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-2 text-gray-1000 focus:border-blue-700 disabled:bg-gray-100 disabled:text-gray-700"
-            />
-          </label>
+          <MetaField label="Planned words">
+            <input type="number" value={planned} onChange={(e) => setPlanned(e.target.value)} disabled={isPublished} className={INPUT_CLASS} />
+          </MetaField>
         </div>
 
-        <label className="flex flex-col gap-1 text-copy-13">
-          <span className="text-gray-700">Volume</span>
+        <MetaField label="Volume">
           <select
             value={volume}
             onChange={(e) => {
@@ -186,7 +169,7 @@ export function ChapterInspector({
               if (!Number.isNaN(next)) setVolume(String(next));
             }}
             disabled={isPublished}
-            className="rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-2 text-gray-1000 focus:border-blue-700 disabled:bg-gray-100 disabled:text-gray-700"
+            className={INPUT_CLASS}
           >
             <option value="">Unassigned</option>
             {outline.volumes.map((v) => (
@@ -195,7 +178,7 @@ export function ChapterInspector({
               </option>
             ))}
           </select>
-        </label>
+        </MetaField>
 
         <div className="flex items-center gap-2 pt-1">
           {currentVolumeIndex > 0 ? (
@@ -232,7 +215,34 @@ export function ChapterInspector({
             <Save className="h-4 w-4" aria-hidden /> Save chapter
           </Button>
         </div>
+
+        <div className="border-t border-gray-alpha-400 pt-3">
+          <ChapterOutlineContentEditor
+            workId={workId}
+            chapterNumber={chapter.chapter}
+            baseRevision={baseRevision}
+            volume={currentVolume?.volume_id}
+            disabled={isPublished}
+            onPatchChapter={onPatchChapter}
+            patchIsPending={patchIsPending}
+            contentVersion={contentVersion}
+          />
+        </div>
       </CardContent>
     </Card>
+  );
+}
+
+/** Shared form-control class for the metadata inputs (DESIGN.md tokens). */
+const INPUT_CLASS =
+  'rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-2 text-gray-1000 focus:border-blue-700 disabled:bg-gray-100 disabled:text-gray-700';
+
+/** Label + control wrapper for the metadata fields. */
+function MetaField({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="flex flex-col gap-1 text-copy-13">
+      <span className="text-gray-700">{label}</span>
+      {children}
+    </label>
   );
 }

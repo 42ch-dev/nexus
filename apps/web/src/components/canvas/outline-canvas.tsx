@@ -46,6 +46,9 @@ export function OutlineCanvas({ workId }: OutlineCanvasProps) {
 
   const [selectedChapterId, setSelectedChapterId] = useState<number | null>(null);
   const [conflict, setConflict] = useState<ConflictState | null>(null);
+  // Bumped after a successful refetch so the inspector's content editor resets
+  // its local dirty state (e.g. following conflict resolution / reapply).
+  const [contentVersion, setContentVersion] = useState(0);
 
   const chapters = useMemo(() => flattenPages(chaptersQuery.data), [chaptersQuery.data]);
   const chapterById = useMemo(() => {
@@ -88,6 +91,10 @@ export function OutlineCanvas({ workId }: OutlineCanvasProps) {
       { chapter, request },
       {
         onError: (error) => captureConflictState(error, state),
+        onSuccess: () => {
+          // Content/metadata patch committed; bump so the editor clears dirty.
+          setContentVersion((v) => v + 1);
+        },
       },
     );
   }
@@ -206,6 +213,8 @@ export function OutlineCanvas({ workId }: OutlineCanvasProps) {
                 volume_id: volumeId,
               })
             }
+            patchIsPending={patchChapter.isPending}
+            contentVersion={contentVersion}
           />
 
           <TimelinePanel
