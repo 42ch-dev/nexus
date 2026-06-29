@@ -688,6 +688,32 @@ async fn v175_content_patch_writes_outline_path_and_bumps_revision() {
 }
 
 #[tokio::test]
+async fn v175_content_patch_blocked_on_published_chapter() {
+    let ctx = test_ctx().await;
+    let work_id = setup_work(&ctx.state).await;
+    seed_chapter(ctx.state.pool(), &work_id, 1).await;
+    force_chapter_status(ctx.state.pool(), &work_id, 1, "published").await;
+
+    // The V1.75 published-chapter guard was extended to cover the new `content`
+    // field — a published chapter's outline prose is locked, just like its
+    // metadata. Pre-fix the content field slipped past the guard.
+    let err = chapter_patch(
+        &ctx.state,
+        &work_id,
+        "1",
+        0,
+        json!({ "content": "attempted prose edit on a published chapter" }),
+    )
+    .await
+    .expect_err("content patch on a published chapter must be rejected");
+    assert!(
+        matches!(err, NexusApiError::BadRequest { .. }),
+        "expected BadRequest (published-chapter guard), got {err:?}"
+    );
+    assert_eq!(current_revision(&ctx.state, &work_id).await, 0);
+}
+
+#[tokio::test]
 async fn v175_content_patch_seeds_outline_path_when_missing() {
     let ctx = test_ctx().await;
     let work_id = setup_work(&ctx.state).await;
