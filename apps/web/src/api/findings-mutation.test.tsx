@@ -136,4 +136,74 @@ describe('useUpdateFinding — optimistic update + invalidation', () => {
     // onSettled also invalidates → refetch.
     await waitFor(() => expect(listCount).toBeGreaterThanOrEqual(2));
   });
+
+  it('does not invalidate other Works findings lists on settle (qc3 W-QC3-P0-001)', async () => {
+    // A mutation on w1 must refetch w1's list (a status transition can move a
+    // finding between filter views of w1) but must NOT touch w2's list. The
+    // global findings-list prefix is no longer invalidated.
+    const listSpies: Record<string, ReturnType<typeof vi.fn>> = {};
+    const listFor = (workId: string) => {
+      listSpies[workId] ??= vi.fn(() =>
+        HttpResponse.json({
+          items: [makeFinding({ work_id: workId, status: 'open' })],
+          pagination: { limit: 20, has_more: false },
+        }),
+      );
+      return listSpies[workId];
+    };
+    useHandlers(
+      http.get('/v1/local/works/:workId/findings', ({ params }) =>
+        listFor(String(params.workId))(),
+      ),
+      http.patch('/v1/local/works/:workId/findings/:findingId', ({ params }) =>
+        HttpResponse.json(
+          makeFinding({
+            work_id: String(params.workId),
+            finding_id: 'f1',
+            status: 'triaged',
+            updated_at: 2,
+          }),
+        ),
+      ),
+    );
+
+    function TwoWorkHarness() {
+      const w1 = useFindings('w1');
+      const w2 = useFindings('w2');
+      const updateFinding = useUpdateFinding();
+      return (
+        <div>
+          <span data-testid="w1-status">{flattenPages(w1.data)?.[0]?.status ?? 'none'}</span>
+          <span data-testid="w2-status">{flattenPages(w2.data)?.[0]?.status ?? 'none'}</span>
+          <button
+            type="button"
+            onClick={() =>
+              updateFinding.mutate({ workId: 'w1', findingId: 'f1', patch: { status: 'triaged' } })
+            }
+          >
+            Triage w1
+          </button>
+        </div>
+      );
+    }
+
+    const client = new BrowserClient();
+    renderInApp(<TwoWorkHarness />, { client });
+
+    // Both lists load exactly once.
+    await waitFor(() => expect(screen.getByTestId('w1-status')).toHaveTextContent('open'));
+    await waitFor(() => expect(screen.getByTestId('w2-status')).toHaveTextContent('open'));
+    expect(listSpies['w1']).toHaveBeenCalledTimes(1);
+    expect(listSpies['w2']).toHaveBeenCalledTimes(1);
+
+    // Mutate a finding in w1. The optimistic patch flips w1's status.
+    fireEvent.click(screen.getByRole('button', { name: /triage w1/i }));
+    await waitFor(() => expect(screen.getByTestId('w1-status')).toHaveTextContent('triaged'));
+
+    // On settle, w1's list is invalidated → refetched. TanStack processes every
+    // query invalidated by the same invalidation call in one batch, so by the
+    // time w1 has been called a second time, w2's fate is sealed too.
+    await waitFor(() => expect(listSpies['w1']).toHaveBeenCalledTimes(2));
+    expect(listSpies['w2']).toHaveBeenCalledTimes(1);
+  });
 });
