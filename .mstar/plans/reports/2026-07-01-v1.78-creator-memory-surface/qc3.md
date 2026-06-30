@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-07-01-v1.78-creator-memory-surface"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-07-01"
 ---
 
@@ -118,4 +118,50 @@ generated_at: "2026-07-01"
 | 🟡 Warning | 4 |
 | 🟢 Suggestion | 2 |
 
-**Verdict**: Request Changes
+## Revalidation
+
+### Targeted re-review scope
+- QC re-review: targeted — qc-specialist-3 performance/reliability findings after the V1.78 fix-wave.
+- Review range / Diff basis: merge-base: 116296d0 (origin/main) + tip: cf167a0e (iteration/v1.78 HEAD after fix-wave) — equivalent to `git diff 116296d0...cf167a0e`; fix-wave focus: `git diff 004ad9c5..cf167a0e -- crates/`.
+- Working branch (verified): iteration/v1.78.
+- Review cwd (verified): /Users/bibi/workspace/organizations/42ch/nexus.
+- Verified HEAD: cf167a0eb751a8f619a32e05a07a7be5b0add4af.
+- Tools run:
+  - `pwd && git rev-parse --show-toplevel && git branch --show-current && git rev-parse --short HEAD && git rev-parse HEAD && git status --short && git log --oneline -5`
+  - `git diff 004ad9c5..cf167a0e -- crates/`
+  - Read `crates/nexus-daemon-runtime/src/api/handlers/memory.rs`, `crates/nexus-local-db/src/memory_fragment.rs`, `crates/nexus-daemon-runtime/tests/memory_pagination_bounded.rs`, `apps/web/src/api/queries.ts`, `.mstar/status.json` residual entries.
+  - `SQLX_OFFLINE=true cargo test -p nexus-daemon-runtime --test memory_pagination_bounded` (pass: 5/5)
+  - `SQLX_OFFLINE=true cargo test -p nexus-local-db` (pass: 286 unit + integration/doc tests)
+  - `SQLX_OFFLINE=true cargo clippy -p nexus-daemon-runtime -p nexus-local-db -- -D warnings` (pass)
+  - OpenViking `memsearch` attempted for prior context; unavailable due authentication failure, not used as evidence.
+
+### Finding dispositions
+- [W-QC3-001] Accepted as deferred low residual `R-V178P0-QC3-001`.
+  - Status evidence: `.mstar/status.json` root `residual_findings[2026-07-01-v1.78-creator-memory-surface]` contains `R-V178P0-QC3-001` with `severity: "low"`, `decision: "defer"`, `target: "V1.79+ (or CI wrapper)"`, and note that `apps/web/AGENTS.md` documents building `@42ch/nexus-contracts` before web typecheck while CI's web build does this automatically.
+  - Revalidation judgment: Accept. The original risk is a local/reviewer build-order reproducibility gap, not source or generated DTO drift. The documented build/typecheck contract is explicit in `apps/web/AGENTS.md`, source generation is correct, and the residual is tracked with a plausible follow-up target. This no longer blocks approval.
+- [W-QC3-002] Resolved.
+  - Code evidence: `list_pending_reviews` now calls `fetch_pending_reviews_page(...)` with `fetch_limit = limit + 1`; the page helper resolves cursor `created_at` and applies SQL keyset pagination with `WHERE creator_id = ? AND (created_at < ? OR (created_at = ? AND pending_id < ?)) ORDER BY created_at DESC, pending_id DESC LIMIT ?`. The no-cursor/deleted-cursor branch also uses `ORDER BY created_at DESC, pending_id DESC LIMIT ?`.
+  - Tiebreaker judgment: Accept. Adding `pending_id DESC` makes equal-`created_at` ties deterministic; this is strictly more reliable than the prior implementation-defined tie order and preserves cursor continuity with a stable total order.
+  - Regression evidence: `memory_pagination_bounded.rs` seeds 60 pending rows, verifies page size/`has_more`, full cursor walk with no gaps/duplicates, and deleted-cursor fallback. The targeted test passed 5/5.
+- [W-QC3-003] Resolved.
+  - Code evidence: no-keyword `fragments` now routes through `nexus_local_db::memory_fragment::list_fragments_limited(...)`, whose SQL has `WHERE creator_id = ? ORDER BY created_at DESC LIMIT ?`. The handler no longer calls `list_fragments` + in-memory `truncate(limit)` for this path.
+  - Regression evidence: `memory_pagination_bounded.rs` seeds 60 fragments and verifies `/v1/local/memory/fragments?...&limit=10` returns exactly 10, plus an above-dataset limit case. The targeted test passed 5/5.
+- [W-QC3-004] Accepted as deferred low residual `R-V178P0-QC3-003`.
+  - Status evidence: `.mstar/status.json` root `residual_findings[2026-07-01-v1.78-creator-memory-surface]` contains `R-V178P0-QC3-003` with `severity: "low"`, `decision: "defer"`, `target: "V1.79+ reliability roadmap"`, and explicit roadmap items: chunked processing, per-creator in-flight serialization, and client uncertain-completion handling.
+  - Revalidation judgment: Accept. Under the stated local-only, single-active-creator, small-queue threat model the risk is appropriately low for V1.78. The V1.79+ roadmap is specific enough to inherit the reliability debt. This no longer blocks approval.
+- [S-QC3-002] Resolved.
+  - Code evidence: `usePendingReviewCount` now documents that `refetchIntervalInBackground` is intentionally omitted because TanStack pauses polling in hidden tabs/windows by default, preserving battery/CPU on the Tauri desktop shell and browser tabs.
+- [S-QC3-001] Remains non-blocking suggestion only.
+
+### Revalidation summary
+| Original finding | Disposition |
+|------------------|-------------|
+| W-QC3-001 | Accepted as low residual `R-V178P0-QC3-001` |
+| W-QC3-002 | Resolved by bounded keyset SQL (`LIMIT ? + 1`) |
+| W-QC3-003 | Resolved by `list_fragments_limited` SQL `LIMIT ?` |
+| W-QC3-004 | Accepted as low residual `R-V178P0-QC3-003` |
+| S-QC3-001 | Non-blocking carry-forward suggestion |
+| S-QC3-002 | Resolved by hook comment |
+
+**Revalidation verdict**: Approve
+
