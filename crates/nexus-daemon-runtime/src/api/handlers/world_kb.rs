@@ -1472,8 +1472,11 @@ fn project_relationship(row: &KbRelationshipRow, direction: &str) -> WorldKbRela
 
     let relation_type: WorldKbRelationshipKind = row.relation_type.parse().unwrap_or_else(|_| {
         warn!(
+            metric = "world_kb_relation_type_coercion",
             relationship_id = row.relationship_id,
+            world_id = row.world_id,
             relation_type = row.relation_type,
+            %direction,
             "unknown relation_type stored in kb_relationships; projecting as Custom"
         );
         WorldKbRelationshipKind::Custom

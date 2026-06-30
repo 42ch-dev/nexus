@@ -51,6 +51,14 @@ const DEFAULT_BACKOFF_MS: u64 = 100;
 /// column name is parameterized for tables that use a column other than
 /// `version` (e.g. `kb_relationships.revision`).
 ///
+/// # When to use
+///
+/// Prefer [`cas_check`] for tables whose version column is literally named
+/// `version`. Use this lower-level helper only when the table uses a different
+/// column name (for example, `kb_relationships.revision`). Keeping the common
+/// case on [`cas_check`] avoids unnecessary dynamic SQL for callers that do not
+/// need column-name flexibility.
+///
 /// # Errors
 ///
 /// Returns `LocalDbError::VersionMismatch` when `rows_affected == 0`.
