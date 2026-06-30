@@ -17,9 +17,14 @@
  *    only; admission-gate logic is not exposed in the list response.
  *
  * V1.67 G2 (R-V164-P2-G2): preset get/update/delete promoted onto this
- * interface (21 → 24 methods). The daemon routes + generated TS types already
- * existed; only the TS client surface was missing. A form-based management UI
- * is deferred to the V1.68 canvas (compass §0 Q6).
+ * interface. The daemon routes + generated TS types already existed; only the
+ * TS client surface was missing. A form-based management UI is deferred to the
+ * V1.68 canvas (compass §0 Q6).
+ *
+ * Method count: see the interface below — it grows as daemon surfaces are
+ * promoted (V1.78 added 5 creator-memory methods). Earlier comments carried a
+ * stale literal count that drifted each release, so the count is now sourced
+ * from the interface itself rather than restated in prose.
  */
 import type {
   AddScheduleRequest,

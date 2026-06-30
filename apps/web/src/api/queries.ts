@@ -478,6 +478,11 @@ export function usePendingReviewCount(creatorId: string | undefined) {
     queryFn: (): Promise<CountPendingReviewsResponse> => client.countPendingReviews(creatorId!),
     enabled: Boolean(creatorId),
     refetchInterval: MEMORY_COUNT_POLL_MS,
+    // Intentionally NO `refetchIntervalInBackground: true`: TanStack pauses
+    // `refetchInterval` when the tab/window is hidden by default, which keeps
+    // this 10s poll from draining battery/CPU on the Tauri desktop shell and
+    // backgrounded browser tabs. Do not add `refetchIntervalInBackground` here
+    // without a deliberate reason — this is a battery-sensitive surface.
   });
 }
 

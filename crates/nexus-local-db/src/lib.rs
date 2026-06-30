@@ -73,7 +73,8 @@ pub use pending_review::{
 // Re-export memory_fragment types
 pub use memory_fragment::{
     count_fragments, create_fragment, delete_fragment, get_all_keywords, list_fragments,
-    list_fragments_by_session, list_fragments_filtered, MemoryFragmentRecord,
+    list_fragments_by_session, list_fragments_filtered, list_fragments_limited,
+    MemoryFragmentRecord,
 };
 
 // Re-export world_stories types
