@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-06-30-v1.76-relationship-gamma"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-30"
 ---
 
@@ -42,10 +42,10 @@ generated_at: "2026-06-30"
 ### 🔴 Critical
 
 #### F-001 — Test target `world_kb_patch.rs` no longer compiles after the GET graph signature change
-- **Evidence**: `cargo build -p nexus-daemon-runtime --tests` exits with
-  `error[E0061]: this function takes 3 arguments but 2 arguments were supplied` at
-  `crates/nexus-daemon-runtime/tests/world_kb_patch.rs:508` (test
-  `get_graph_returns_non_deleted_entities`):
+- **Evidence (initial wave)**: `cargo build -p nexus-daemon-runtime --tests`
+  exited with `error[E0061]: this function takes 3 arguments but 2 arguments
+  were supplied` at `crates/nexus-daemon-runtime/tests/world_kb_patch.rs:508`
+  (test `get_graph_returns_non_deleted_entities`):
   ```rust
   let Json(resp) = get_graph(State(state.clone()), Path("wld_test_world".to_string()))
       .await
@@ -54,21 +54,14 @@ generated_at: "2026-06-30"
   The V1.76 handler signature is now `pub async fn get_graph(State, Path(world_id), Query<GraphQuery>)`
   (`crates/nexus-daemon-runtime/src/api/handlers/world_kb.rs:834`). The sibling
   test `world_kb_relationships.rs` was updated to pass `Query(GraphQuery { include_suggested: None })`
-  in 3 call sites (lines 472, 842, 858, 946), but `world_kb_patch.rs` was not.
-- **Impact**: `cargo test -p nexus-daemon-runtime --test world_kb_patch` is a hard
-  CI gate failure. The full test gate (`cargo test --all` in the `Rust test` CI
-  job) will fail at the test-target compile step before any assertions run.
-  `world_kb_patch.rs` was touched (i.e., read/edited) by V1.76's
-  `RelationshipInput.needs_review` addition (lines 111, 202, 424, 728 of the
-  test), so the maintainer had the file in their working set and should have
-  caught the `get_graph` call-site change. The omission is a missed
-  file-disjointness claim — the GET-filter change (`Query<GraphQuery>`) was
-  not actually disjoint from the P1 backend test path.
-- **Fix**: add `Query(GraphQuery { include_suggested: None })` (or `Some(false)`)
-  to the call at `world_kb_patch.rs:508`, matching the pattern already used in
-  `world_kb_relationships.rs:472`. One-line change; do it as a targeted
-  fix-up. Per the QC role contract this report does NOT modify code — only
-  documents the finding.
+  in 4 call sites, but `world_kb_patch.rs` was not.
+- **Impact (initial wave)**: `cargo test -p nexus-daemon-runtime --test world_kb_patch`
+  is a hard CI gate failure. The full test gate (`cargo test --all` in the
+  `Rust test` CI job) would fail at the test-target compile step before any
+  assertions run. The omission was a missed file-disjointness claim — the
+  GET-filter change (`Query<GraphQuery>`) was not actually disjoint from the
+  P1 backend test path.
+- **Status**: **Resolved in fix-wave commit `7807603f`** — see Revalidation §1.
 
 ### 🟡 Warning
 
@@ -322,11 +315,11 @@ inline comment. Architecturally clean.
 
 | Severity | Count |
 |----------|-------|
-| 🔴 Critical | 1 |
-| 🟡 Warning | 2 |
-| 🟢 Suggestion | 3 |
+| 🔴 Critical | 0 (1 resolved in revalidation) |
+| 🟡 Warning | 2 (deferred to V1.77+) |
+| 🟢 Suggestion | 3 (optional) |
 
-**Verdict**: **Request Changes**
+**Verdict**: **Approve** (post-revalidation; was Request Changes at initial wave)
 
 The architecture and maintainability story for V1.76 is **strong**:
 
@@ -343,19 +336,15 @@ The architecture and maintainability story for V1.76 is **strong**:
 - B1/B2/B3/B4 refactors are all small and reversible; B3 specifically does
   not regress the V1.75 content-loss invariants.
 - All static checks pass (`cargo clippy`, `pnpm typecheck`, codegen).
-- All non-`world_kb_patch` test targets pass.
+- All test targets pass after the fix-wave commit (see Revalidation).
 
-The single blocker is **F-001**: the `world_kb_patch` integration test
-target was not updated for the `Query<GraphQuery>` signature change on
-`get_graph`, producing a hard compile error that will fail the CI test
-gate. This is a one-line fix in the test (`Query(GraphQuery { include_suggested: None })`)
-and matches the pattern already used in `world_kb_relationships.rs`. The
-implementation behavior is correct — only the test call site is stale.
-
-PM should dispatch a **targeted fix** to update the call site; no
-implementation change is needed. After the fix, this reviewer is confident
-the iteration can move from `InReview` to `Done` without further tri-review
-(the change is mechanical and the architecture is sound).
+PM should register the unresolved Warning/Suggestion findings against
+`2026-06-30-v1.76-relationship-gamma` in the root `residual_findings` array
+in `.mstar/status.json` (per `mstar-plan-artifacts`): F-002 (warning) +
+F-003 (warning) defer to V1.77+; F-004/005/006 (suggestions) are optional.
+After residual registration, the iteration can move from `InReview` to
+`Done` without further tri-review (the fix-wave was targeted, the
+architecture is sound, and no implementation rework was needed).
 
 ## Source Trace
 - F-001:
@@ -389,3 +378,144 @@ the iteration can move from `InReview` to `Done` without further tri-review
     vs the new test at
     `apps/web/src/components/canvas/outline-canvas/inspectors/chapter-outline-content-editor.state.test.tsx`.
   - Confidence: Medium.
+
+## Revalidation
+
+**Trigger**: PM dispatched a targeted fix-wave (`@qc-specialist` raised F-001 Critical blocker; `@qc-specialist-3` raised W1/W2/W3 architecture-relevant findings about the flooding gate, SQL filter, and slider range). Fix-wave commit `7807603f` (HEAD) bundles the four fixes plus a follow-on sanity sweep (6 new regression tests for the qc3-W3 slider bug).
+
+**Range re-checked**: `aadefa0e41..7807603f` (origin/main merge-base..iteration/v1.76 HEAD after fix-wave). 22 commits total (21 from the initial wave + 1 fix-wave commit `7807603f`).
+
+### §1 — F-001 (Critical, my own finding) revalidation
+
+**Evidence (fix-wave)**:
+- `git show 7807603f -- crates/nexus-daemon-runtime/tests/world_kb_patch.rs` confirms the call site at line 508 was updated:
+  ```rust
+  let Json(resp) = get_graph(
+      State(state.clone()),
+      Path("wld_test_world".to_string()),
+      Query(GraphQuery { include_suggested: None }),
+  )
+  .await
+  .expect("graph should succeed");
+  ```
+  Matches the pattern already used in `world_kb_relationships.rs`. The
+  `GraphQuery` import was added to the `use nexus_daemon_runtime::api::handlers::world_kb::{...}`
+  block.
+- `SQLX_OFFLINE=true cargo test -p nexus-daemon-runtime --test world_kb_patch` → **14/14 passed**
+  (incl. `get_graph_returns_non_deleted_entities`).
+- `SQLX_OFFLINE=true cargo test -p nexus-daemon-runtime --test world_kb_relationships` → **16/16 passed**
+  (all V1.76 extraction/filter/promote tests green).
+- `SQLX_OFFLINE=true cargo test -p nexus-local-db --lib kb_relationships` → **10/10 passed**
+  (the parameterized `list_relationships_for_world` change kept unit-level coverage green).
+
+**Disposition**: **Resolved**. The fix is exactly the one-line change my initial
+report prescribed; no implementation rework was needed. No residual.
+
+### §2 — qc3 fixes (W1/W2/W3) architectural spot-check (per PM re-review scope)
+
+I spot-checked the qc3 fix-wave changes against my architecture lens. None
+regress the V1.76 architecture. Findings below are observational; no new
+qc1 findings raised.
+
+#### W1 (flooding gate) — `useWorldKbGraph(worldId, includeSuggested)`
+- **Change**: `apps/web/src/lib/canvas/use-world-kb-data.ts:59-67` — signature
+  gains `includeSuggested = false` (default). Query key is now
+  `[...queryKeys.worldKb.graph(worldId), { includeSuggested }]`. The alt-view
+  signals tab changes via a new optional `onActiveTabChange` callback that
+  the canvas wires to `setAltTab`.
+- **Architectural check** — mutation invalidation: every mutation call site
+  (`usePatchWorldKbEntity` line 89, `usePatchWorldKbRelationship` lines 136,
+  141, 145, `usePromoteWorldKbCandidate` line 114) invalidates
+  `queryKeys.worldKb.graph(worldId)` (or `worldKb.all`). TanStack Query's
+  prefix-match algorithm matches any query key beginning with
+  `['worldKb', 'graph', worldId]`, so both variants
+  (`{includeSuggested: false}` and `{includeSuggested: true}`) are invalidated
+  together on any mutation. No staleness window. ✓
+- **Backward compat**: `onActiveTabChange?` is optional on the alt-view
+  (`world-kb-alt-view.tsx:46-51`), so existing test setups / consumers
+  without the callback still work. ✓
+- **Default agreement**: client default `false` matches server default
+  `unwrap_or(false)` in `project_relationships_for_world`. Both sides
+  agree on "confirmed graph is the default". ✓
+- **Status**: qc3-W1 fix is architecturally sound; my F-003 (Warning about
+  always-fetch) is now effectively mitigated — payload size tracks the
+  world only when the Suggested pane is open. The deeper pagination TODO
+  (now relocated to the server side) remains a V1.77+ concern; F-003 stays
+  as a Warning.
+
+#### W2 (SQL filter) — `list_relationships_for_world(world_id, include_suggested)`
+- **Change**: `crates/nexus-local-db/src/kb_relationships.rs:344-409` — two
+  compile-time-checked static queries. The default branch adds
+  `AND needs_review = 0` to the WHERE clause so SQLite uses the new
+  `idx_kb_relationships_world_id_needs_review` index. The post-fetch Rust
+  filter in `project_relationships_for_world` is correctly removed.
+- **Architectural check** — symmetric_reverse derivation: the SQL filter
+  runs BEFORE `project_relationships_for_world` derives the
+  `symmetric_reverse` projection, so even when `include_suggested=true`
+  surfaces `needs_review=1` rows, the symmetric reverse of a suggestion
+  cannot leak into the confirmed graph (it lives in the same row, so its
+  symmetric reverse carries `needs_review=1` too and would already be
+  filtered out on a future default fetch). ✓
+- **Index usage**: the `WHERE world_id = ? AND needs_review = 0` shape
+  matches the migration index `idx_kb_relationships_world_id_needs_review`
+  on `(world_id, needs_review)`. ✓
+- **Architect lock honored**: SQL is push-down (not post-fetch filter),
+  matching the qc3 finding that the Rust filter defeated the index. The
+  symmetric_reverse + suggestion-leak invariant is preserved. ✓
+
+#### W3 (slider range + extracted filter helper) — `filterRelationshipEdgesByConfidence`
+- **Change**: `apps/web/src/components/canvas/world-kb/relationship-projection.ts:90-119`
+  — new pure helper. `apps/web/src/components/canvas/world-kb/world-kb-canvas.tsx:96`
+  now calls the helper instead of inline filter. Slider is normalized to
+  `min=0, max=1, step=0.05` (was `min=0, max=100, step=5`) and the display
+  drops the `/100` rescale. 6 regression tests added at
+  `__tests__/relationship-confidence.test.ts:115-163`.
+- **Architectural check** — module placement: the helper lives in
+  `relationship-projection.ts` (already owns `deriveRelationshipEdges`,
+  `relationshipEdgeLabel`, `RELATIONSHIP_KIND_LABELS`). Co-locating with
+  `confidenceBand`/`confidenceEdgeStyle` (in `relationship-confidence.ts`)
+  would split one concept across two modules; keeping it in
+  `relationship-projection.ts` is the right call because the helper takes
+  `Edge[]` (projection-shaped) rather than `WorldKbRelationshipProjection[]`
+  (DTO-shaped). ✓
+- **Range agreement**: slider `0.0`–`1.0` step `0.05` matches the compass
+  Phase 2b spec ("range 0.0–1.0 step 0.05"). The regression test
+  `a threshold of 0.05 no longer wipes out a 0.5-confidence edge` is the
+  exact bug pre-fix (old 0–100 slider stored 5 for step "0.05", and
+  `0.5 >= 5` was always false). ✓
+- **Test coverage**: `pnpm --filter web test -- relationship-confidence` →
+  **18/18 passed** (was 12/12; the 6 new tests are the qc3-W3 regression
+  suite).
+
+### §3 — Static checks (post-fix)
+
+| Check | Result |
+|-------|--------|
+| `SQLX_OFFLINE=true cargo test -p nexus-daemon-runtime --test world_kb_patch` | 14/14 passed |
+| `SQLX_OFFLINE=true cargo test -p nexus-daemon-runtime --test world_kb_relationships` | 16/16 passed |
+| `SQLX_OFFLINE=true cargo test -p nexus-local-db --lib kb_relationships` | 10/10 passed |
+| `cargo clippy -p nexus-daemon-runtime -p nexus-orchestration -- -D warnings` | exit 0 |
+| `pnpm --filter web typecheck` | exit 0 |
+| `pnpm --filter web test -- relationship-confidence` | 18/18 passed |
+
+### §4 — Disposition summary
+
+| Finding | Initial verdict | Revalidation |
+|---------|----------------|--------------|
+| **F-001** (my own, Critical) | Request Changes | **Resolved** in `7807603f` |
+| **F-002** (Warning, my own) | Non-blocking | Stays open — defer to V1.77+ per PM residual tracking |
+| **F-003** (Warning, my own) | Non-blocking | Effectively mitigated by qc3-W1 (client no longer always-fetches suggestions); pagination TODO still V1.77+. Stays open as Warning. |
+| F-004 / F-005 / F-006 (Suggestions, my own) | Optional | Stays open — optional, low priority |
+| **qc3-W1** (qc3, performance/reliability) | qc3 raised | Architecturally sound (mutation invalidation prefix-match preserved, alt-view callback backward-compatible). Confirmed by this re-review — no regression. |
+| **qc3-W2** (qc3, perf) | qc3 raised | Architecturally sound (SQL push-down, symmetric_reverse + suggestion-leak invariant preserved). Confirmed. |
+| **qc3-W3** (qc3, reliability) | qc3 raised | Architecturally sound (helper extracted to projection module, slider range normalized, 6 regression tests added). Confirmed. |
+
+**Final verdict**: **Approve**. The architecture is sound, F-001 is resolved,
+all checks are green, and the qc3 fix-wave changes do not regress any
+architectural invariant I previously identified.
+
+No new findings raised in this re-review. F-002 and F-003 are PM-tracked
+warnings (not blockers); F-004/005/006 are optional suggestions. The
+iteration is ready to move from `InReview` to `Done` once PM consolidates
+and registers residual entries against `2026-06-30-v1.76-relationship-gamma`
+in `.mstar/status.json`.
