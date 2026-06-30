@@ -5,7 +5,7 @@
     {
       "plan_id": "2026-06-30-v1.77-post-canvas-inflection-closeout",
       "iteration_id": "V1.77",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "effort": "S",
       "type": "closure",
@@ -31,25 +31,14 @@
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.76",
-      "compass": "v1.76-relationship-gamma-and-slate-clear-compass-v1.md",
+      "iteration": "V1.77",
+      "compass": "v1.77-findings-remediation-ui-and-post-canvas-inflection-compass-v1.md",
       "shipped_at": "2026-06-30",
       "plan_count": 4,
       "plan_count_done": 4,
-      "wire_contracts_changed": true,
-      "wire_contracts_note": "V1.76 Track A: needs_review + source on WorldKbRelationshipProjection + extraction relationship DTO + include_suggested param; @42ch/nexus-contracts 0.11.0 -> 0.12.0. Track B: no wire change.",
-      "profile_b_compaction": "done (V1.76 P-last closure)",
-      "plan_ids": [
-        "2026-06-30-v1.76-compass-and-plan",
-        "2026-06-30-v1.76-relationship-gamma",
-        "2026-06-30-v1.76-slate-clear",
-        "2026-06-30-v1.76-closure"
-      ],
-      "residual_summary": {
-        "closed_in_v176": 9,
-        "new_qc_followup_v177": 3,
-        "open_post_v176": 3
-      }
+      "wire_contracts_changed": false,
+      "wire_contracts_note": "V1.77: findings schemas already shipped + codegen'd; consumer-side imports only. No contracts bump (0.12.0 stays).",
+      "profile_b_compaction": "done (V1.77 P-last closure)"
     },
     "tech_debt_summary": {
       "total_open": 3,
