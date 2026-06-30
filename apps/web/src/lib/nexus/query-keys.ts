@@ -34,9 +34,6 @@ export const queryKeys = {
     lists: () => [...queryKeys.findings.all, 'list'] as const,
     list: (workId: string, query?: object) =>
       [...queryKeys.findings.lists(), workId, query ?? {}] as const,
-    details: () => [...queryKeys.findings.all, 'detail'] as const,
-    detail: (workId: string, findingId: string) =>
-      [...queryKeys.findings.details(), workId, findingId] as const,
   },
   presets: {
     all: ['presets'] as const,

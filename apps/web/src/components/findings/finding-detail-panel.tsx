@@ -84,11 +84,14 @@ export function FindingDetailPanel({ workId, finding }: FindingDetailPanelProps)
   const updateFinding = useUpdateFinding();
   const [form, setForm] = useState<InlineForm>(() => formFromFinding(finding));
 
-  // Re-sync local form when the selected finding changes (row switch) or the
-  // server returns a canonical update that invalidates the snapshot.
+  // Re-sync local form only on row switch (finding_id change). Do NOT depend on
+  // finding.updated_at: the server bumps it on every status transition, which
+  // would silently discard unsaved inline edits mid-triage. The status field is
+  // read directly from finding.status (not form state), so it stays live without
+  // a re-sync. resetInline() remains the manual re-sync from server state.
   useEffect(() => {
     setForm(formFromFinding(finding));
-  }, [finding.finding_id, finding.updated_at]);
+  }, [finding.finding_id]);
 
   const patch = useMemo(() => buildPatch(finding, form), [finding, form]);
   const isDirty = patch !== null;

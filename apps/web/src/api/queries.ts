@@ -151,19 +151,6 @@ export function flattenPages<T>(data: { pages: CursorPage<T>[] } | undefined): T
   return data.pages.flatMap((p) => p.items);
 }
 
-/**
- * Single-finding detail (V1.77 findings-remediation). Used by the inspector
- * panel; falls back to the list-cache row when only the list has been loaded.
- */
-export function useFinding(workId: string | undefined, findingId: string | undefined) {
-  const client = useNexusClient();
-  return useQuery({
-    queryKey: queryKeys.findings.detail(workId ?? '', findingId ?? ''),
-    queryFn: () => client.getFinding(workId!, findingId!),
-    enabled: Boolean(workId && findingId),
-  });
-}
-
 // ── Presets (grouped by source) ──────────────────────────────────────────────
 
 export interface PresetGroups {
@@ -245,8 +232,11 @@ export function useUpdateFinding() {
     mutationFn: (vars: { workId: string; findingId: string; patch: UpdateFindingRequest }) =>
       client.updateFinding(vars.workId, vars.findingId, vars.patch),
     onMutate: async (vars) => {
-      // Cancel outgoing refetches so they don't overwrite the optimistic update.
-      await qc.cancelQueries({ queryKey: queryKeys.findings.lists() });
+      // Cancel outgoing refetches for this Work so they don't overwrite the
+      // optimistic update. Scope to vars.workId — cancelling other Works'
+      // lists is unnecessary and contradicts the work-scoped invalidation
+      // (qc3 W-QC3-P0-001).
+      await qc.cancelQueries({ queryKey: queryKeys.findings.list(vars.workId) });
       // Snapshot every matched list cache for this work (across query filters)
       // so onError can restore the pre-mutation state.
       const previousLists = qc.getQueriesData<FindingsListData>({
@@ -293,9 +283,6 @@ export function useUpdateFinding() {
       // refetch is still needed: a status transition can move a finding between
       // filter views of this Work.
       void qc.invalidateQueries({ queryKey: queryKeys.findings.list(vars.workId) });
-      void qc.invalidateQueries({
-        queryKey: queryKeys.findings.detail(vars.workId, vars.findingId),
-      });
     },
   });
 }
