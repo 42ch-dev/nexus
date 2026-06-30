@@ -928,21 +928,53 @@ pub struct GraphQuery {
 /// materializes extraction-suggestion rows. Symmetric-reverse derivation is
 /// unchanged — only stored rows are projected, so the symmetric reverse of a
 /// suggestion cannot leak into the confirmed graph.
+///
+/// V1.77: the `GRAPH_RELATIONSHIP_CAP` is pushed into the SQL `LIMIT` (qc3
+/// W-QC3-P1-001) by passing `CAP + 1` to the DAO; the extra row detects
+/// truncation. When truncation is detected, a structured `tracing::warn!` is
+/// emitted (qc3 W-QC3-P1-002) so operators/authors have an observable signal
+/// that older relationships were dropped. A wire `truncated` flag remains a
+/// future contract change; the warn is the interim server-side observability.
 async fn project_relationships_for_world(
     pool: &sqlx::SqlitePool,
     world_id: &str,
     include_suggested: bool,
 ) -> Result<Vec<WorldKbRelationshipProjection>, NexusApiError> {
-    let rows = list_relationships_for_world(pool, world_id, include_suggested)
+    // Fetch CAP + 1 rows so truncation is detectable: if the DAO returns more
+    // than GRAPH_RELATIONSHIP_CAP rows, the world exceeded the safety cap and
+    // older relationships are silently dropped from the projection. The cap is
+    // pushed into SQL (qc3 W-QC3-P1-001) so the hot path never materializes
+    // unbounded rows.
+    let fetch_limit = i64::try_from(GRAPH_RELATIONSHIP_CAP + 1).unwrap_or(i64::MAX);
+    let rows = list_relationships_for_world(pool, world_id, include_suggested, fetch_limit)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
             message: e.to_string(),
         })?;
+
+    let observed = rows.len();
+    if observed > GRAPH_RELATIONSHIP_CAP {
+        // qc3 W-QC3-P1-002: surface silent truncation so operators/authors can
+        // detect that older relationships were dropped from the projection. A
+        // wire `truncated` flag is a future contract change; this server-side
+        // warn is the interim observable signal.
+        warn!(
+            metric = "world_kb_graph_relationships_truncated",
+            world_id,
+            include_suggested,
+            cap = GRAPH_RELATIONSHIP_CAP,
+            observed_count = observed,
+            "graph relationship cap reached; older relationships are not projected"
+        );
+    }
+
     // Cap stored rows before projection so the symmetric-reverse derivation
     // never splits a stored edge from its reverse (qc1 F-003 / `R-V176QC1-S002`).
     // Each stored row yields at most 2 projections, so the wire payload is
-    // bounded by `2 * GRAPH_RELATIONSHIP_CAP`.
+    // bounded by `2 * GRAPH_RELATIONSHIP_CAP`. The `.take()` is belt-and-
+    // suspenders: the SQL LIMIT already caps the DAO output, but this guards
+    // correctness if a future caller raises the DAO limit above the cap.
     let mut projections = Vec::with_capacity(rows.len().min(GRAPH_RELATIONSHIP_CAP) * 2);
     for row in rows.into_iter().take(GRAPH_RELATIONSHIP_CAP) {
         projections.push(project_relationship(&row, "stored"));

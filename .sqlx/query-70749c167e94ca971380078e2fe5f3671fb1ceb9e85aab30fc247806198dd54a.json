@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT\n              relationship_id,\n              world_id,\n              source_entity_id,\n              target_entity_id,\n              relation_type,\n              custom_label as \"custom_label?\",\n              symmetric,\n              confidence as \"confidence?\",\n              source_anchor_ids as \"source_anchor_ids?\",\n              metadata as \"metadata?\",\n              created_at,\n              updated_at,\n              revision,\n              needs_review,\n              source\n            FROM kb_relationships\n            WHERE world_id = ?\n            ORDER BY updated_at DESC",
+  "query": "SELECT\n              relationship_id,\n              world_id,\n              source_entity_id,\n              target_entity_id,\n              relation_type,\n              custom_label as \"custom_label?\",\n              symmetric,\n              confidence as \"confidence?\",\n              source_anchor_ids as \"source_anchor_ids?\",\n              metadata as \"metadata?\",\n              created_at,\n              updated_at,\n              revision,\n              needs_review,\n              source\n            FROM kb_relationships\n            WHERE world_id = ?\n            ORDER BY updated_at DESC\n            LIMIT ?",
   "describe": {
     "columns": [
       {
@@ -80,7 +80,7 @@
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 2
     },
     "nullable": [
       false,
@@ -100,5 +100,5 @@
       false
     ]
   },
-  "hash": "06347e38f4b8475be87ad7ada4839cb5296109e1bfc7a38af72774b23b360a1a"
+  "hash": "70749c167e94ca971380078e2fe5f3671fb1ceb9e85aab30fc247806198dd54a"
 }
