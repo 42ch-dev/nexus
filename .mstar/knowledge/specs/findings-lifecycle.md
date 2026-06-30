@@ -95,7 +95,7 @@ Request body fields (all optional on the wire):
 | `description` | string | Replace description |
 | `target_executor` | string | Replace routing hint (must be in `VALID_TARGET_EXECUTORS`) |
 | `kind` | string | Replace finding category |
-| `rule_suggestion` | string | Replace or clear rule suggestion (tri-state: absent/no-op, null/clear, value/set) |
+| `rule_suggestion` | string | Replace or clear rule suggestion (string on the wire — `update-finding-request.schema.json` `"type": "string"`; an empty string clears, omitting leaves it unchanged) |
 
 ### 4.2 Three remediation affordances
 
