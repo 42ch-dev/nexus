@@ -183,6 +183,26 @@ components:
     stopped-bg: "rgba(229,72,77,0.12)"
     stopped-text: "{colors.red-1000}"
 
+  # V1.77 findings-remediation — 6-state finding-status badges + triage chrome.
+  # Severity reuses the existing `severityVariant` mapping (no new severity
+  # tokens); triage chrome (inspector panel, action buttons, assignment
+  # selector, inline-edit inputs) composes the existing card/button/input/
+  # data-table primitives. Token names frozen verbatim (V1.69 invariant).
+  finding-status-pill:
+    open: { backgroundColor: "rgba(183,110,0,0.12)", textColor: "{colors.amber-1000}", borderColor: "rgba(183,110,0,0.30)" }
+    triaged: { backgroundColor: "rgba(0,133,119,0.10)", textColor: "{colors.teal-1000}", borderColor: "rgba(0,133,119,0.30)" }
+    in_review: { backgroundColor: "rgba(0,107,255,0.10)", textColor: "{colors.blue-1000}", borderColor: "rgba(0,107,255,0.30)" }
+    resolved: { backgroundColor: "rgba(31,143,77,0.10)", textColor: "{colors.green-1000}", borderColor: "rgba(31,143,77,0.30)" }
+    wont_fix: { backgroundColor: "{colors.gray-alpha-100}", textColor: "{colors.gray-900}", borderColor: "{colors.gray-alpha-300}" }
+    duplicate: { backgroundColor: "rgba(124,58,237,0.10)", textColor: "{colors.purple-1000}", borderColor: "rgba(124,58,237,0.30)" }
+    base: { height: "24px", paddingInline: "8px", rounded: "{rounded.pill}", typography: "{typography.label-12}" }
+  finding-triage:
+    panel-bg: "{colors.background-100}"
+    panel-border: "{colors.gray-alpha-400}"
+    row-active: "{colors.background-300}"
+    action-button: "secondary"
+    executor-select: "input-select-textarea.default"
+
   # V1.70 canvas implement — concrete light values (canvas-strategy-surface.md Draft §3.6 / B4)
   canvas:
     canvas-surface: "#ebebeb"
@@ -617,3 +637,31 @@ Interaction rules:
 - The status indicator must include text, not color alone.
 - The primary recovery action is `Restart Daemon`.
 - Do not show daemon internals by default; detailed diagnostics belong behind `Copy Diagnostics` or a Help menu item.
+
+### Findings Remediation (V1.77)
+
+The Control-Room findings page promotes from read-only to a remediation authoring surface. Token values: see frontmatter `components.finding-status-pill` and `components.finding-triage`.
+
+**Finding status badge mapping** (6-state lifecycle; server-enforced adjacency at `crates/nexus-local-db/src/findings.rs:172`):
+
+| Status | Token | Color intent |
+| --- | --- | --- |
+| `open` | `finding-status-pill.open` | Amber — newly raised, needs triage attention |
+| `triaged` | `finding-status-pill.triaged` | Teal — reviewed, ready to route |
+| `in_review` | `finding-status-pill.in_review` | Blue — actively under master review |
+| `resolved` | `finding-status-pill.resolved` | Green — addressed, positive terminal |
+| `wont_fix` | `finding-status-pill.wont_fix` | Gray — explicitly waived, quiet terminal |
+| `duplicate` | `finding-status-pill.duplicate` | Purple — superseded by another finding |
+
+Each status gets an intentional, distinct color (the generic `statusVariant` keyword matcher cannot distinguish `in_review` from `resolved` or `wont_fix` from `duplicate`). Rendered via `FindingStatusBadge` using the same `color-mix` pattern as the generic badge variants, so colors stay correct in both light and dark.
+
+**Severity** reuses the existing `severityVariant` mapping (`info`/`low` → queued, `medium`/`warning` → warning, `critical`/`high` → error). No new severity tokens.
+
+**Triage chrome** composes existing primitives — the inspector is a `Card`; action buttons are `button.secondary`; the `target_executor` selector and inline-edit inputs are `input-select-textarea.default`; the active table row uses `data-table.row-selected`. The `finding-triage` group records these compositions so the surface is discoverable without duplicating primitive tokens.
+
+Interaction rules:
+- Invalid status transitions are disabled client-side as defense-in-depth; the server is the authority (HTTP 422 `INVALID_TRANSITION`).
+- Optimistic mutations update the list cache immediately and roll back on error; no conflict modal (last-writer-wins, single-author triage).
+- `target_executor` is an assignment hint, not an auto-trigger — re-running a preset stays a deliberate canvas/CLI action.
+- Status is never color alone: every badge carries a humanized text label.
+
