@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-06-30-v1.76-relationship-gamma"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-30"
 ---
 
@@ -84,3 +84,34 @@ generated_at: "2026-06-30"
 **Verdict**: Request Changes
 
 The verification suite is green and B9/codegen are reliable, but the flooding/performance gate is not met: the web canvas opts into and renders suggested relationships by default, the backend default filter does not use the new index because it filters after fetching all rows, and the confidence threshold slider compares mismatched units. These should be fixed before approval.
+
+## Revalidation
+
+- Revalidation timestamp: 2026-06-30T12:35:00Z
+- Revalidation range / Diff basis: `aadefa0e41..7807603f` (origin/main merge-base..iteration/v1.76 HEAD after fix-wave)
+- Verified branch / HEAD: `iteration/v1.76` at `7807603f648de1093593bb07e26da13f8072ceb5`
+- Fix-wave reviewed: `git show --stat --patch 7807603f`
+
+### Finding Disposition
+
+- **F-QC3-001 — Resolved.** `useWorldKbGraph` now defaults `includeSuggested = false` and uses it in both the query key and `getWorldKbGraph` call. `WorldKbCanvas` computes `includeSuggested` only when `showList && altTab === 'suggested'`, and `WorldKbAltView` reports tab changes via `onActiveTabChange`. This keeps graph/default list loads on the confirmed-only path and fetches suggested relationships only while the Suggested triage pane is open.
+- **F-QC3-002 — Resolved.** `project_relationships_for_world` now passes `include_suggested` through to `list_relationships_for_world`. The storage layer has two compile-time-checked SQL branches; the default branch uses `WHERE world_id = ? AND needs_review = 0`, so the `(world_id, needs_review)` index can protect the default graph path instead of filtering after row materialization.
+- **F-QC3-003 — Resolved.** The graph slider now stores/emits the same `0.0`–`1.0` range as relationship confidence (`min=0`, `max=1`, `step=0.05`) and displays `confidenceThreshold.toFixed(2)`. The comparison moved to `filterRelationshipEdgesByConfidence`, which compares confidence directly against the normalized threshold. The 6 added regression tests cover threshold 0, below/above threshold, suggested-edge preservation, manual-edge preservation, and the `0.05` threshold vs `0.5` confidence repro.
+- **S-QC3-001 — Still non-blocking.** Bulk promote remains one mutation per visible suggestion; acceptable as a tracked suggestion and not a blocker for this fix wave.
+
+### Revalidation Evidence
+
+- `SQLX_OFFLINE=true cargo test -p nexus-daemon-runtime --test world_kb_relationships` — passed: 16/16, including `get_graph_hides_needs_review_by_default`.
+- `pnpm --filter web test -- --run` — passed: 37 files / 260 tests, including 18 relationship-confidence tests and the 6 threshold-filter regressions.
+- `pnpm --filter web build` — passed; no Vite chunk-size warning, largest chunk `tiptap-CXIgA64u.js` 437.82 kB.
+- `pnpm run codegen && git diff --exit-code` — codegen itself passed and produced no generated-output drift; `git diff --exit-code` reported only a pre-existing unstaged `.mstar/status.json` PM state diff, which I did not modify or stage.
+
+### Updated Summary
+
+| Severity | Count |
+|----------|-------|
+| 🔴 Critical | 0 |
+| 🟡 Warning | 0 |
+| 🟢 Suggestion | 1 |
+
+**Updated Verdict**: Approve
