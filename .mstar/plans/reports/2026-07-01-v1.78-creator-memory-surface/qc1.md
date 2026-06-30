@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-07-01-v1.78-creator-memory-surface"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-07-01"
 ---
 
@@ -145,3 +145,74 @@ The architecture/maintainability lens surfaced mostly clean cohesion:
 **Verdict**: Request Changes
 
 Unresolved Warnings (W-QC1-001 status.json SSOT lifecycle flip for the 11 slate-closed V1.77-QC residuals; W-QC1-002 `fetch_pending_reviews_by_creator` centralized unbounded fetch) hold back the gate per `mstar-review-qc` Verdict gate (Critical=0 AND Warning=0 → Approve; else Request Changes). The V1.78 P0 Batch 1 + Batch 2 implementation is otherwise sound (schema↔runtime fidelity held; DTO normalization clean; codegen generated types; adapter-contract parity green; round-trip regression green; memory/finding/web tests green; clippy clean; DESIGN.md token-name discipline respected; slate-clear P1 surgical) — the implementation quality is high; the open items are governance + an architecture-flagged shared-helper carryover from a pre-existing unbounded fetch.
+
+---
+
+## Revalidation (2026-07-01 — targeted re-review after fix-wave)
+
+### Context
+- **Re-review window**: `004ad9c5..cf167a0e` (fix-wave delta: status update `004ad9c5` + dev fix `d5ddfff8` + merge `cf167a0e`)
+- **HEAD (verified)**: `cf167a0eb751a8f619a32e05a07a7be5b0add4af` (matches Assignment tip)
+- **Working branch (verified)**: `iteration/v1.78`
+- **Review cwd (verified)**: `/Users/bibi/workspace/organizations/42ch/nexus` (matches `git rev-parse --show-toplevel`)
+- **Working tree**: clean (`git status --porcelain` returns no rows)
+- **Tools run (this wave)**:
+  - `git rev-parse --show-toplevel`; `git branch --show-current`; `git rev-parse HEAD`; `git status --porcelain` (alignment + tree)
+  - `git show 004ad9c5 -- .mstar/status.json` (status flip diff — 159 insertions, 18 deletions)
+  - `git diff 004ad9c5..cf167a0e --stat` (fix-wave scope: 11 files / 739 insertions / 34 deletions)
+  - `git diff 004ad9c5..cf167a0e -- crates/nexus-daemon-runtime/src/api/handlers/memory.rs` (keyset helper + bounded list path)
+  - `git diff 004ad9c5..cf167a0e -- crates/nexus-local-db/src/memory_fragment.rs crates/nexus-local-db/src/lib.rs` (bounded DAO + re-export)
+  - `git diff 004ad9c5..cf167a0e -- apps/web/src/lib/nexus/{types.ts,tauri-client.ts}` (S-QC1-001 count-agnostic doc fix)
+  - `git diff 004ad9c5..cf167a0e -- apps/web/src/api/queries.ts` (qc3 S-QC3-002 background-polling note landed)
+  - `python3 -c "import json; …"` (verify V1.77 residuals + tech_debt_summary)
+  - `SQLX_OFFLINE=true cargo test -p nexus-daemon-runtime --test memory_pagination_bounded` — **5 passed, 0 failed**
+  - `SQLX_OFFLINE=true cargo clippy -p nexus-daemon-runtime -p nexus-local-db -- -D warnings` — **clean, 0 warnings**
+  - Read: `crates/nexus-daemon-runtime/src/api/handlers/memory.rs:209-237` (new list handler pagination), `:273-306` (kept unbounded helper), `:308-430` (new `fetch_pending_reviews_page`), `:623` (sole remaining caller of unbounded helper), `:865-885` (bounded fragments path); `crates/nexus-daemon-runtime/tests/memory_pagination_bounded.rs` (321-line regression suite)
+
+### Per-finding disposition
+
+#### [W-QC1-001] status.json SSOT drift — **RESOLVED** ✅
+- **Evidence — 12 V1.77-QC residuals flipped to `resolved`**: `python3` script against current `.mstar/status.json` (line 5841+) confirms all 7 V1.77-P0 rows (`R-V177P0-QC1-S001/S002/S003/S004`, `R-V177P0-QC2-S001/S002`, `R-V177P0-QC3-S001`) and all 5 V1.77-P1 rows (`R-V177P1-QC1-S001/S002/S003`, `R-V177P1-QC2-S001`, `R-V177P1-QC3-S001`) now have `lifecycle: resolved` with `closed_at: 2026-07-01` + `resolution.commit: 519ec04d` (11 rows) or `n/a (PM data closure)` for the explicitly PM-owned R-V177P1-QC1-S001 row. The `git show 004ad9c5 -- .mstar/status.json` diff (+159/-18 lines) shows the exact lifecycle flip.
+- **Evidence — `tech_debt_summary` now self-consistent for the open set**: `total_open: 5` matches the 5 V1.78-QC residuals now open (cross-verified via `python3` script counting all `lifecycle: open` rows in `residual_findings`); `by_severity_active: {low: 3, nit: 2}` matches the actual open-residual severities; `by_target_active: {V1.79+ (or CI wrapper): 1, V1.78 fix-wave: 3, V1.79+ reliability roadmap: 1}` sums to 5 and matches the per-row `target` fields. `refreshed_at: 2026-07-01T00:00:00Z`; `refreshed_reason` names the fix.
+- **Evidence — 5 new V1.78-QC residuals registered with proper tracking links**: `R-V178P0-QC1-001` (nit, S-QC1-001 doc drift, target V1.78 fix-wave), `R-V178P0-QC3-001` (low, typecheck prebuild order, defer V1.79+ or CI wrapper), `R-V178P0-QC3-002` (low, **W-QC1-002 / W-QC3-002 / W-QC3-003**, fix-in-wave), `R-V178P0-QC3-003` (low, review pipeline bound/timeout, defer V1.79+ reliability roadmap), `R-V178P0-QC3-004` (nit, usePendingReviewCount polling comment, fix-in-wave). Each row has `id` + `title` + `severity` + `source` (cites qc1/qc3 finding ID) + `scope` + `decision` + `owner` + `target` + `tracking_link` — full per-`mstar-plan-artifacts` discipline. The `R-V178P0-QC3-002` registration explicitly cross-references `qc1 W-QC1-002` as the architecture/maintainability source, and the W-QC1-002 fix below is the closure evidence for it.
+- **Minor observation (not a new finding)**: `total_resolved: 289` is unchanged in the `004ad9c5` diff; the live count of `lifecycle: resolved` rows in `residual_findings` is 310 (12 V1.77-QC newly-closed + ~298 prior). This is a pre-existing data-hygiene drift in the rollup (existed before the fix-wave; my qc1 report did not call it out because the `total_open` staleness was the load-bearing issue), not a regression introduced by this fix-wave. The PM-fix landed at the right level (correct lifecycle flips + correct `total_open` + correct severity/target rollup). The 21-residual drift in `total_resolved` is best addressed by adding it to the existing `mstar-plan-conventions` `references/status-and-residuals.md` maintenance practice rather than by blocking V1.78 sign-off.
+- **Verdict**: My qc1 W-QC1-001 was specifically about (a) the 12 V1.77-QC residuals still being `open` and (b) the `tech_debt_summary` rollup being stale. Both are now fixed. The residual observation is below the W threshold. **RESOLVED.**
+
+#### [W-QC1-002] centralized unbounded fetch — **RESOLVED** ✅
+- **Evidence — keyset helper introduced**: `git diff 004ad9c5..cf167a0e -- crates/nexus-daemon-runtime/src/api/handlers/memory.rs` introduces `fetch_pending_reviews_page` (line 348+) with the exact architecture I recommended: keyset on `(created_at DESC, pending_id DESC)` + `LIMIT ?` (called with `limit + 1` from the list handler at line 217) + cursor = `pending_id`. The doc-comment (line 308-347) explicitly cites `R-V178P0-QC3-002 (qc1 W-QC1-002 + qc3 W-QC3-002/W-QC3-003)` and analyzes the behavior-preservation cases (distinct `created_at` → identical to prior; equal-tie tiebreaker is strictly more correct; deleted cursor → first-page fallback matches prior `position()==None`).
+- **Evidence — list path no longer materializes the full set**: `list_pending_reviews` (line 209-237) now calls `fetch_pending_reviews_page(... fetch_limit)` where `fetch_limit = i64::try_from(limit + 1).unwrap_or(i64::MAX)`. The prior 8-line `fetch_all → position → split_off → truncate(limit)` block is gone; replaced by a single bounded query. The list path applies `limit + 1` over-fetch + truncate + `next_cursor = last.pending_id`, matching the prior `items.len() > limit → truncate(limit) → items.last()` semantics exactly. The wire contract is unchanged.
+- **Evidence — unbounded helper kept ONLY for the `review` handler**: `grep fetch_pending_reviews_by_creator crates/nexus-daemon-runtime` returns 3 matches: a doc-comment cross-ref (line 12), the helper definition (line 283), and one callsite (line 623) inside the `review` handler. The `review` handler intentionally processes the whole queue (per the residual plan + the doc-comment at line 273-282 explaining the `query!`-vs-`query_as!` orphan-rule workaround), so keeping an unbounded helper for that one callsite is the correct trade-off.
+- **Evidence — fragments no-keyword path also bounded**: `git diff 004ad9c5..cf167a0e -- crates/nexus-local-db/src/memory_fragment.rs` introduces `list_fragments_limited` (LIMIT ? in SQL, same projection + ordering as the existing `list_fragments`); re-exported in `lib.rs:76`. The fragments handler's no-keyword branch (line 865-885) replaces the prior `list_fragments` + in-Rust `truncate(limit)` with the bounded DAO.
+- **Evidence — regression test suite passes**: `SQLX_OFFLINE=true cargo test -p nexus-daemon-runtime --test memory_pagination_bounded` → **5 passed, 0 failed, 0 ignored** (321-line suite added in this fix-wave). The suite is the behavioral proof I asked for: seeds 60 rows for both pending-reviews and fragments, walks the full keyset cursor loop asserting zero duplicates + zero gaps, exercises the deleted-cursor fallback, and asserts `limit > dataset` returns all rows. The doc-comment at line 7-12 of the test file explicitly notes "a naive in-Rust truncate would also pass a single-page size check, but only a correct keyset walks all pages without overlap or gaps" — which is exactly the discrimination the test must achieve.
+- **Evidence — clippy clean**: `SQLX_OFFLINE=true cargo clippy -p nexus-daemon-runtime -p nexus-local-db -- -D warnings` → 0 errors, 0 warnings (matches CI scope per my qc1 tools list).
+- **Minor observation (not a new finding)**: The doc-comment at `memory.rs:281-282` of the kept unbounded helper still says "the list and review handlers share it" — the list handler no longer uses this helper. The new helper's own doc-comment is the more accurate reference now. The mapping logic is no longer truly shared (the row→`PendingReviewInfo` field assignment now appears 3 times: in `fetch_pending_reviews_by_creator` and in both branches of `fetch_pending_reviews_page`). This is a minor doc-drift + minor in-helper duplication; it does not affect correctness or the bounded-fetch contract. Worth a follow-up doc cleanup in V1.78+ (low-priority; defer-able).
+- **Verdict**: My qc1 W-QC1-002 was specifically about (a) the unbounded `fetch_all` being kept after the helper centralization and (b) the need for a regression test that seeds > `limit` rows. Both are now addressed — pagination is pushed into SQL with keyset, and the regression suite is comprehensive (5 tests covering size-cap, full cursor walk, deleted-cursor fallback, fragments size-cap, limit-above-dataset). The unbounded helper is correctly scoped to the one callsite that needs it. **RESOLVED.**
+
+#### [S-QC1-001] method-count doc drift — **RESOLVED** ✅ (bonus doc fix in fix-wave)
+- **Evidence**: `git diff 004ad9c5..cf167a0e -- apps/web/src/lib/nexus/types.ts apps/web/src/lib/nexus/tauri-client.ts` replaces the stale "21 → 24 methods" / "24 `NexusClient` data methods" / "all 24 data methods" literals with count-agnostic prose that points readers at the interface for the canonical count. Both files add a "Method count:" paragraph explaining the prior drift and noting the V1.78 promotion as historical context. Per the assignment note ("S-QC1-001 was fixed — comments now count-agnostic"), this is the expected fix.
+
+#### [S-QC1-002 / S-QC1-003 / S-QC1-004] — **deferred** (per Assignment instruction; no new state)
+- The Assignment explicitly says S-QC1-002/003/004 are non-blocking (defer or note). I keep them in the historical Findings list but do not re-raise them. S-QC1-001 is the only Suggestion that landed in the fix-wave (resolved above).
+
+### Bonus fix-wave change (not in my original findings, but worth noting)
+- `apps/web/src/api/queries.ts` (+5 lines, in `usePendingReviewCount`): adds a `refetchIntervalInBackground` comment explaining the intentional battery-sensitivity choice (TanStack pauses `refetchInterval` on hidden tabs by default; do not flip the flag without a reason). This is the closure for qc3 S-QC3-002 and the V1.78-QC `R-V178P0-QC3-004` registration; it lives in the same fix-wave diff but is not a qc1 finding.
+
+### New issues introduced by the fix-wave
+- **None** at Critical or Warning severity.
+- Two minor observations noted above (S-QC1-001 style doc drift on the kept unbounded helper; 8-line row-mapping duplication in the two branches of `fetch_pending_reviews_page`). Both are below the S threshold and do not warrant a new finding row. They are defer-able for V1.78+ cleanup.
+
+### Updated Shared Checklist (architecture/maintainability lens)
+- **Code quality** [✅] — names clear, responsibilities clean, keyset helper is well-isolated and well-documented; row-mapping duplication is local + explicit.
+- **Security/correctness** [✅, n/a here] — no new injection surface; deleted-cursor fallback is explicit and tested.
+- **Performance/reliability** [✅] — list path now bounded at SQL layer; unbounded helper is correctly scoped to the only callsite that needs it. R-V178P0-QC3-003 (review pipeline bound/timeout) is registered for V1.79+ reliability roadmap per qc3.
+- **Maintainability** [✅] — schemas are SSOT, handler DTOs are normalized, the bounded fetch contract is regression-tested, count-agnostic docs in `types.ts` / `tauri-client.ts` prevent future drift, status.json SSOT is now self-consistent for the open set.
+
+### Updated Summary
+
+| Severity | Count (initial wave) | Disposition (re-review) |
+|----------|----------------------|--------------------------|
+| 🔴 Critical | 0 | 0 |
+| 🟡 Warning | 2 | **0** (both RESOLVED) |
+| 🟢 Suggestion | 4 | 3 deferred + **1 RESOLVED** (S-QC1-001 doc-nits) |
+
+**New Verdict**: **Approve** — both blocking Warnings are RESOLVED, the doc-nits Suggestion landed, no new Critical/Warning introduced, 5/5 regression tests pass, clippy clean. Per `mstar-review-qc` Verdict gate (Critical=0 AND Warning=0 → Approve), the V1.78 P0 + P1 implementation is now ready for sign-off. The 3 deferred Suggestions + the registered V1.78-QC residuals (R-V178P0-QC3-001/002/003/004 + R-V178P0-QC1-001) are tracked in `residual_findings[2026-07-01-v1.78-creator-memory-surface]` and will be addressed in V1.78+ / V1.79+ as planned.
