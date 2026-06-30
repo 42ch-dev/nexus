@@ -18,7 +18,7 @@
     {
       "plan_id": "2026-06-30-v1.77-findings-remediation-ui",
       "iteration_id": "V1.77",
-      "status": "InReview",
+      "status": "Done",
       "owner": "@frontend-dev+@fullstack-dev",
       "effort": "M",
       "type": "feature",
@@ -29,12 +29,13 @@
       "depends_on": [
         "2026-06-30-v1.77-findings-remediation-prepare"
       ],
-      "qc_status": "approved_3of3"
+      "qc_status": "approved_3of3",
+      "qa_status": "pass"
     },
     {
       "plan_id": "2026-06-30-v1.77-slate-clear",
       "iteration_id": "V1.77",
-      "status": "InReview",
+      "status": "Done",
       "owner": "@fullstack-dev+@frontend-dev",
       "effort": "S-M",
       "type": "hygiene",
@@ -45,7 +46,8 @@
       "depends_on": [
         "2026-06-30-v1.77-findings-remediation-prepare"
       ],
-      "qc_status": "approved_3of3"
+      "qc_status": "approved_3of3",
+      "qa_status": "pass"
     },
     {
       "plan_id": "2026-06-30-v1.77-post-canvas-inflection-closeout",
@@ -5821,7 +5823,12 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.77 QC followup (tbd-v1.77-qc-followup)",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-06-30-v1.77-slate-clear",
+          "at": "2026-06-30",
+          "note": "Closed in V1.77 P1 (QC 3/3 Approve + QA Pass)."
+        }
       },
       {
         "id": "R-V176QC1-S002",
@@ -5832,7 +5839,12 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.77 QC followup (tbd-v1.77-qc-followup)",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-06-30-v1.77-slate-clear",
+          "at": "2026-06-30",
+          "note": "Closed in V1.77 P1 (QC 3/3 Approve + QA Pass)."
+        }
       },
       {
         "id": "R-V176QC3-S001",
@@ -5843,7 +5855,12 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "V1.77 QC followup (tbd-v1.77-qc-followup)",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-06-30-v1.77-slate-clear",
+          "at": "2026-06-30",
+          "note": "Closed in V1.77 P1 (QC 3/3 Approve + QA Pass)."
+        }
       }
     ],
     "2026-06-30-v1.77-findings-remediation-ui": [
