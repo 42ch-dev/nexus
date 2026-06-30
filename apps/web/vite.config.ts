@@ -24,6 +24,47 @@ export default defineConfig({
   esbuild: { target: 'esnext' },
   build: {
     target: 'esnext',
+    rollupOptions: {
+      // Split large vendor trees into named chunks so no single minified chunk
+      // exceeds Vite's 500 kB warning ceiling (`R-V175QC3-S001`). App + route
+      // code returns `undefined` and stays under Rollup's default route-level
+      // splitting. Group by dependency tree (TipTap pulls ProseMirror; React
+      // Markdown pulls unified/remark/micromark) so each chunk is cache-stable.
+      output: {
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined;
+          if (
+            id.includes('prosemirror') ||
+            id.includes('@tiptap') ||
+            id.includes('tiptap-markdown')
+          ) {
+            return 'tiptap';
+          }
+          if (id.includes('@xyflow')) return 'xyflow';
+          if (id.includes('@tanstack')) return 'query';
+          if (id.includes('react-router')) return 'router';
+          if (
+            id.includes('react-markdown') ||
+            id.includes('remark-') ||
+            id.includes('micromark') ||
+            id.includes('mdast') ||
+            id.includes('hast-') ||
+            id.includes('unified')
+          ) {
+            return 'markdown';
+          }
+          if (id.includes('lucide-react')) return 'icons';
+          if (
+            id.includes('/react-dom/') ||
+            id.includes('/react/') ||
+            id.includes('/scheduler/')
+          ) {
+            return 'react';
+          }
+          return undefined;
+        },
+      },
+    },
   },
   optimizeDeps: {
     esbuildOptions: { target: 'esnext' },
