@@ -1,10 +1,10 @@
 # Deferred Features — Cross-Version Tracker v2
 
-**Quick status**: **V1.77 active (2026-06-30)** — Findings-Remediation UI (quality loop closure) + post-canvas-program inflection. Track A (P0) promotes the Control-Room findings view from read-only (V1.64) to a full remediation authoring surface (6-state status transitions + target_executor assignment + inline edit), consuming the PATCH route the backend already ships. Track B (P1) closed 3 V1.76-QC residuals. The canvas program (V1.67–V1.76, 10 iterations) is **complete** — Strategy/Outline+Timeline/World KB/Relationships all shipped β/γ. Platform **paused**. Residuals SSOT: [`status.json`](../status.json). Shipped/cancelled history: [shipped-features-tracker.md](../archived/shipped-features-tracker.md).
+**Quick status**: **V1.78 delivered (2026-07-01)** — Creator Memory / SOUL review-loop UI (author self-loop closure) + slate-clear. Track A (P0) published the memory OSS contracts (14 schemas + codegen + normalized hand-written handler DTOs, fixing the daemon-runtime no-hand-written-DTO invariant; `@42ch/nexus-contracts` 0.12.0 → 0.13.0) + Memory review-loop Control-Room surface (pending-review list/count/delete + Review & Summarize + fragments browser + inspector). QC fix-wave bounded the memory list/fragments SQL fetches. Track B (P1) closed 12 V1.77-QC residuals. The three author-in-command loops are now all closed in the UI: writing (canvas V1.76) + work quality (findings V1.77) + creator self (memory V1.78). Platform **paused**. Residuals SSOT: [`status.json`](../status.json). Shipped/cancelled history: [shipped-features-tracker.md](../archived/shipped-features-tracker.md).
 
 **Purpose**: Single source of truth for **open** and **backlog** features deferred from delivery compasses. Closed/shipped history lives in shipped archive.
 **Scope**: `nexus` OSS repository only.
-**Created**: 2026-04-21 · **Last updated**: 2026-06-30 (V1.77 P-last: canvas program complete; findings-remediation UI shipped; 3 V1.76 residuals closed; 12 V1.78 QC-suggestion residuals registered)
+**Created**: 2026-04-21 · **Last updated**: 2026-07-01 (V1.78 delivered: creator memory review-loop UI shipped; memory OSS contracts published + hand-written DTOs normalized; 12 V1.77-QC residuals closed; 5 V1.78-QC residuals registered, 3 fix-wave resolved + 2 deferred low to V1.79+)
 
 ---
 
@@ -87,7 +87,7 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 ## 5) Quick index
 
-**Active iteration**: V1.77 active (2026-06-30) — Findings-Remediation UI + post-canvas inflection; next: V1.78 (12 QC-suggestion residuals `tbd-v1.78-qc-followup` + next product surface TBD)
+**Active iteration**: V1.78 delivered (2026-07-01) — Creator Memory / SOUL review-loop UI (author self-loop closure) + slate-clear; next: V1.79 (next product surface candidate — DF-49 MCP server / deeper SOUL / manuscript reading; 2 low V1.78-QC residuals carry forward)
 
 **Latest shipped**: [V1.66](../iterations/v1.66-tauri-desktop-shell-delivery-compass-v1.md) (Tauri Desktop Shell, PR #90 — 2026-06-26)
 

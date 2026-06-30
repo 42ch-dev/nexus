@@ -1,70 +1,27 @@
 {
   "version": 1,
   "updated_at": "2026-07-01T00:00:00Z",
-  "plans": [
-    {
-      "plan_id": "2026-07-01-v1.78-creator-memory-surface",
-      "iteration_id": "V1.78",
-      "status": "Done",
-      "owner": "@project-manager",
-      "effort": "M-L",
-      "type": "feature",
-      "working_branch": "feature/v1.78-memory-surface",
-      "merge_target": "iteration/v1.78",
-      "task_category": "visual",
-      "wire_contracts_changed": true,
-      "depends_on": []
-    },
-    {
-      "plan_id": "2026-07-01-v1.78-slate-clear",
-      "iteration_id": "V1.78",
-      "status": "Done",
-      "owner": "@project-manager",
-      "effort": "S-M",
-      "type": "hygiene",
-      "working_branch": "feature/v1.78-slate-clear",
-      "merge_target": "iteration/v1.78",
-      "task_category": "quick",
-      "wire_contracts_changed": false,
-      "depends_on": []
-    },
-    {
-      "plan_id": "2026-07-01-v1.78-closure",
-      "iteration_id": "V1.78",
-      "status": "InProgress",
-      "owner": "@project-manager",
-      "effort": "S",
-      "type": "closure",
-      "working_branch": "iteration/v1.78",
-      "merge_target": "iteration/v1.78",
-      "task_category": "docs",
-      "wire_contracts_changed": false,
-      "depends_on": [
-        "2026-07-01-v1.78-creator-memory-surface",
-        "2026-07-01-v1.78-slate-clear"
-      ]
-    }
-  ],
+  "plans": [],
   "metadata": {
     "integration_branch": "iteration/v1.78",
-    "integration_branch_retired": false,
-    "last_integration_branch": "iteration/v1.77",
+    "integration_branch_retired": true,
+    "last_integration_branch": "iteration/v1.78",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.78 (compass Locked — Phase 2b/2c review chain complete; iteration/v1.78 creation next)",
-    "latest_active_compass": "v1.78-creator-memory-review-loop-ui-and-slate-clear-compass-v1.md",
+    "latest_active_iteration": "V1.78 delivered (2026-07-01); next V1.79 pending /iteration-start",
+    "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
-    "pre_implement_gate": "GO (V1.78 Prepare: compass locked, 3 plans on disk, review chain complete)",
+    "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.77",
-      "compass": "v1.77-findings-remediation-ui-and-post-canvas-inflection-compass-v1.md",
-      "shipped_at": "2026-06-30",
-      "plan_count": 4,
-      "plan_count_done": 4,
-      "wire_contracts_changed": false,
-      "wire_contracts_note": "V1.77: findings schemas already shipped + codegen'd; consumer-side imports only. No contracts bump (0.12.0 stays).",
-      "profile_b_compaction": "done (V1.77 P-last closure)"
+      "iteration": "V1.78",
+      "compass": "v1.78-creator-memory-review-loop-ui-and-slate-clear-compass-v1.md",
+      "shipped_at": "2026-07-01",
+      "plan_count": 3,
+      "plan_count_done": 3,
+      "wire_contracts_changed": true,
+      "wire_contracts_note": "V1.78: additive — 14 new memory local-api schemas + codegen; @42ch/nexus-contracts 0.12.0 -> 0.13.0.",
+      "profile_b_compaction": "done (V1.78 P-last closure)"
     },
     "tech_debt_summary": {
       "total_open": 2,
@@ -83,7 +40,7 @@
     },
     "updated_at": "2026-07-01",
     "spec_integration_branch": "iteration/v1.78",
-    "wave1_merged_at": null
+    "wave1_merged_at": "2026-07-01"
   },
   "residual_findings": {
     "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization": [
