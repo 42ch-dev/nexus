@@ -28,7 +28,8 @@
       "wire_contracts_changed": false,
       "depends_on": [
         "2026-06-30-v1.77-findings-remediation-prepare"
-      ]
+      ],
+      "qc_status": "approved_3of3"
     },
     {
       "plan_id": "2026-06-30-v1.77-slate-clear",
@@ -43,7 +44,8 @@
       "wire_contracts_changed": false,
       "depends_on": [
         "2026-06-30-v1.77-findings-remediation-prepare"
-      ]
+      ],
+      "qc_status": "approved_3of3"
     },
     {
       "plan_id": "2026-06-30-v1.77-post-canvas-inflection-closeout",
