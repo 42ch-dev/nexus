@@ -286,7 +286,13 @@ export function useUpdateFinding() {
       toast({ variant: 'success', title: 'Finding updated', description: shortId(vars.findingId) });
     },
     onSettled: (_data, _error, vars) => {
-      void qc.invalidateQueries({ queryKey: queryKeys.findings.lists() });
+      // Narrow to the mutated Work's list scope (all filter views of that Work
+      // only), not the global findings-list prefix — so a status change /
+      // assignment / inline edit in one Work doesn't mark every other Work's
+      // findings lists stale and refetch them (qc3 W-QC3-P0-001). The scoped
+      // refetch is still needed: a status transition can move a finding between
+      // filter views of this Work.
+      void qc.invalidateQueries({ queryKey: queryKeys.findings.list(vars.workId) });
       void qc.invalidateQueries({
         queryKey: queryKeys.findings.detail(vars.workId, vars.findingId),
       });
