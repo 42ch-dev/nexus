@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/memory/pending-review-info.schema.json",
+  "schema_version": 1,
+  "title": "Nexus PendingReviewInfo",
+  "description": "A single pending-review row in list/get responses. Mirrors the `memory_pending_review` table projection 1:1. `task_kind` and `created_at` are always present here (defaults are applied server-side on insert), unlike the create-request where they are optional. `world_id` is nullable.",
+  "type": "object",
+  "required": ["pending_id", "session_id", "creator_id", "task_kind", "raw_digest", "created_at"],
+  "properties": {
+    "pending_id": { "type": "string" },
+    "session_id": { "type": "string" },
+    "creator_id": { "type": "string" },
+    "world_id": { "type": "string" },
+    "task_kind": { "type": "string" },
+    "raw_digest": { "type": "string" },
+    "created_at": { "type": "string" }
+  },
+  "additionalProperties": false
+}
