@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-06-30-v1.77-findings-remediation-ui"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-30"
 ---
 
@@ -68,7 +68,9 @@ generated_at: "2026-06-30"
 | 🟡 Warning | 1 |
 | 🟢 Suggestion | 1 |
 
-**Verdict**: Request Changes
+**Verdict**: Approve
+
+Revalidation: Approve
 
 ## Detailed Review Notes (qc3 lens)
 
@@ -95,3 +97,12 @@ generated_at: "2026-06-30"
 - `pnpm --filter web test -- findings-mutation finding-detail-panel findings-lifecycle` — pass (3 files, 21 tests).
 
 **Conclusion (qc3)**: The optimistic error path and bundle footprint are acceptable, but the global findings-list invalidation creates avoidable refetch churn and should be narrowed before approval from the performance/reliability lens.
+
+## Revalidation (after targeted fix)
+
+- Re-review date: 2026-06-30
+- Fix commits reviewed: `da68e7b4` (`fix(v1.77): narrow useUpdateFinding invalidation to mutated Work scope`)
+- W-QC3-P0-001: RESOLVED — `apps/web/src/api/queries.ts:288-295` now invalidates `queryKeys.findings.list(vars.workId)` on settle, not the global `queryKeys.findings.lists()` prefix.
+- Regression evidence: `apps/web/src/api/findings-mutation.test.tsx:140-208` mounts `w1` and `w2`, mutates `w1`, waits for `w1` to refetch, and asserts `w2` remains at one fetch.
+- Verification: `pnpm --filter web run test -- findings-mutation` — pass (40 files, 285 tests; relevant file included).
+- Updated verdict: Approve

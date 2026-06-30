@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-06-30-v1.77-slate-clear"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-06-30"
 ---
 
@@ -79,7 +79,9 @@ generated_at: "2026-06-30"
 | 🟡 Warning | 2 |
 | 🟢 Suggestion | 1 |
 
-**Verdict**: Request Changes
+**Verdict**: Approve
+
+Revalidation: Approve
 
 ## Detailed Review Notes (qc3 lens)
 
@@ -105,3 +107,15 @@ generated_at: "2026-06-30"
 - `pnpm --filter web build` — pass.
 
 **Conclusion (qc3)**: B3's bounded batching is a reliability improvement, but B2 still fetches all graph relationship rows before truncating and gives no signal when truncation occurs. Those two cap-related issues should be fixed before approval from the performance/reliability lens.
+
+## Revalidation (after targeted fix)
+
+- Re-review date: 2026-06-30
+- Fix commits reviewed: `24a8231a` (`fix(v1.77): push graph cap to SQL + emit truncation warning`)
+- W-QC3-P1-001: RESOLVED — `crates/nexus-local-db/src/kb_relationships.rs:354-424` now accepts a `limit: i64` parameter and both `include_suggested` branches end in `LIMIT ?`; `crates/nexus-daemon-runtime/src/api/handlers/world_kb.rs:948-950` passes `GRAPH_RELATIONSHIP_CAP + 1`, bounding DB read/decode/transfer at the SQL layer while retaining Rust `.take(GRAPH_RELATIONSHIP_CAP)` as a defensive projection cap.
+- Symmetric-pair integrity evidence: `crates/nexus-daemon-runtime/src/api/handlers/world_kb.rs:972-985` applies `.take(GRAPH_RELATIONSHIP_CAP)` to stored rows before `project_relationship` and symmetric-reverse derivation, so a stored edge and its reverse still cannot split across the boundary.
+- W-QC3-P1-002: RESOLVED — `crates/nexus-daemon-runtime/src/api/handlers/world_kb.rs:956-969` detects `observed > GRAPH_RELATIONSHIP_CAP` from the CAP+1 sentinel and emits structured `warn!` telemetry with `metric`, `world_id`, `include_suggested`, `cap`, and `observed_count`.
+- Wire contract evidence: no `truncated` field was added to `schemas/local-api/canvas/world-kb/world-kb-graph-response.schema.json:8-24`, `crates/nexus-contracts/src/generated/local_api/canvas/world_kb/world_kb_graph_response.rs:16-20`, or `packages/nexus-contracts/src/generated/local-api/canvas/world-kb/WorldKbGraphResponse.ts:14-18`; `wire_contracts_changed: FALSE` remains respected.
+- Verification: `SQLX_OFFLINE=true cargo test -p nexus-local-db --lib kb_relationships` — pass (11 passed; includes `test_list_for_world_respects_sql_limit`).
+- Verification: `SQLX_OFFLINE=true cargo test -p nexus-daemon-runtime --test world_kb_relationships` — pass (16 passed).
+- Updated verdict: Approve
