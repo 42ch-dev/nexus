@@ -201,6 +201,55 @@ components:
     action-button: "secondary"
     executor-select: "input-select-textarea.default"
 
+  # V1.78 Creator Memory review-loop (same token names as DESIGN.md, dark values).
+  # Pending-count badge + task-kind chips use dark-tuned low-opacity accents;
+  # composition tokens reference existing primitives (unchanged in dark).
+  memory-pending-count:
+    backgroundColor: "rgba(248,113,113,0.16)"
+    textColor: "{colors.red-1000}"
+    borderColor: "rgba(248,113,113,0.30)"
+    base: { height: "20px", minInlineSize: "20px", paddingInline: "6px", rounded: "{rounded.pill}", typography: "{typography.label-12}" }
+  memory-review-button:
+    basis: "primary"
+  memory-task-kind-brainstorm:
+    backgroundColor: "rgba(255,192,67,0.16)"
+    textColor: "{colors.amber-1000}"
+    borderColor: "rgba(255,192,67,0.30)"
+  memory-task-kind-outline:
+    backgroundColor: "rgba(82,168,255,0.14)"
+    textColor: "{colors.blue-1000}"
+    borderColor: "rgba(82,168,255,0.30)"
+  memory-task-kind-chapter:
+    backgroundColor: "rgba(76,216,200,0.14)"
+    textColor: "{colors.teal-1000}"
+    borderColor: "rgba(76,216,200,0.30)"
+  memory-task-kind-research:
+    backgroundColor: "rgba(183,148,255,0.14)"
+    textColor: "{colors.purple-1000}"
+    borderColor: "rgba(183,148,255,0.30)"
+  memory-task-kind-unknown:
+    backgroundColor: "{colors.gray-alpha-100}"
+    textColor: "{colors.gray-900}"
+    borderColor: "{colors.gray-alpha-300}"
+  memory-task-kind-base: { height: "24px", paddingInline: "8px", rounded: "{rounded.pill}", typography: "{typography.label-12}" }
+  memory-fragment-summary:
+    typography: "{typography.copy-14}"
+  memory-fragment-id:
+    typography: "{typography.copy-13-mono}"
+    textColor: "{colors.gray-800}"
+  memory-inspector-header:
+    panel-bg: "{colors.background-100}"
+    panel-border: "{colors.gray-alpha-400}"
+    row-active: "{colors.background-300}"
+  memory-inspector-field-label:
+    typography: "{typography.label-14}"
+    textColor: "{colors.gray-900}"
+  memory-inspector-field-value:
+    typography: "{typography.copy-13}"
+    textColor: "{colors.gray-1000}"
+  memory-fragment-filter-input:
+    basis: "input-select-textarea.default"
+
   # V1.70 canvas implement — concrete dark values (same token names as DESIGN.md)
   canvas:
     canvas-surface: "#141414"

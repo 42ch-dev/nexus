@@ -2,6 +2,7 @@ import { NavLink } from 'react-router-dom';
 import {
   AlertTriangle,
   Boxes,
+  BrainCircuit,
   CalendarClock,
   Layers,
   ListChecks,
@@ -34,6 +35,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/schedule', label: 'Schedule', icon: CalendarClock },
   { to: '/capabilities', label: 'Capabilities', icon: Boxes },
   { to: '/findings', label: 'Findings', icon: AlertTriangle },
+  { to: '/memory', label: 'Memory', icon: BrainCircuit },
   { to: '/presets', label: 'Presets', icon: Sparkles },
   { to: '/strategy', label: 'Strategy', icon: Workflow },
 ];

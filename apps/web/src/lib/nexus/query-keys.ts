@@ -73,4 +73,13 @@ export const queryKeys = {
     candidates: (worldId: string, query?: object) =>
       [...queryKeys.worldKb.all, 'candidates', worldId, query ?? {}] as const,
   },
+  memory: {
+    all: ['memory'] as const,
+    pendingLists: () => [...queryKeys.memory.all, 'pending', 'list'] as const,
+    pendingList: (creatorId: string, query?: object) =>
+      [...queryKeys.memory.pendingLists(), creatorId, query ?? {}] as const,
+    count: (creatorId: string) => [...queryKeys.memory.all, 'pending', 'count', creatorId] as const,
+    fragments: (creatorId: string, query?: object) =>
+      [...queryKeys.memory.all, 'fragments', creatorId, query ?? {}] as const,
+  },
 } as const;

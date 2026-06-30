@@ -18,18 +18,23 @@ import {
 import type {
   ChapterContentQuery,
   ChapterSummary,
+  CountPendingReviewsResponse,
   CreateWorkRequest,
   FindingDetailResponse,
   ListCapabilitiesQuery,
   ListChaptersQuery,
   ListFindingsQuery,
+  ListMemoryFragmentsQuery,
+  ListPendingReviewsQuery,
   ListSchedulesQuery,
   ListSessionsQuery,
   ListWorksQuery,
   PaginationInfo,
   PatchChapterRequest,
   PatchWorkRequest,
+  PendingReviewInfo,
   PresetSummary,
+  ReviewResponse,
   ScaffoldPresetRequest,
   UpdateFindingRequest,
   ValidatePresetRequest,
@@ -395,5 +400,177 @@ export function usePatchChapter(workId: string | undefined) {
       void qc.invalidateQueries({ queryKey: queryKeys.chapters.detail(workId!, vars.chapter) });
     },
     onError: (error) => errorToast(error, 'Could not update chapter'),
+  });
+}
+
+// ── Creator Memory review-loop (V1.78) ───────────────────────────────────────
+
+/**
+ * Resolve the active creator id from the most recent session/schedule. The
+ * daemon model is single-active-creator (config.toml); every memory endpoint
+ * rejects a `creator_id` that does not match the active creator with 403. There
+ * is no dedicated active-creator accessor in the client surface today, so the
+ * Memory page mirrors the canvas's `useDerivedCreatorId` derivation
+ * (`apps/web/src/lib/canvas/use-strategy-data.ts:76`) — it reads the creator_id
+ * off existing sessions/schedules, which are themselves creator-scoped. Returns
+ * `undefined` until sessions load (the page gates memory calls on a defined id).
+ *
+ * Compass Phase 2b open item #1 (`creator_id` UI source): this is the chosen
+ * wiring. A first-class active-creator endpoint/context is a future surface.
+ */
+export function useActiveCreatorId(): string | undefined {
+  const client = useNexusClient();
+  const sessions = useQuery({
+    // Borrow the sessions list key (single page) — do not introduce a parallel
+    // creator query; the derivation is a projection over existing data.
+    queryKey: [...queryKeys.sessions.all, 'for-creator-derivation'],
+    queryFn: async () => {
+      const res = await client.listSessions({ limit: 1 });
+      return res.items;
+    },
+  });
+  return sessions.data?.[0]?.creator_id;
+}
+
+/** Pending-review count badge refresh cadence (live count indicator). */
+const MEMORY_COUNT_POLL_MS = 10_000;
+
+/** Cursor-paginated pending-review list for the active creator. */
+export function usePendingReviews(
+  creatorId: string | undefined,
+  query?: Omit<ListPendingReviewsQuery, 'creator_id'>,
+) {
+  const client = useNexusClient();
+  const limit = query?.limit ?? DEFAULT_PAGE_SIZE;
+  return useInfiniteQuery({
+    queryKey: queryKeys.memory.pendingList(creatorId ?? '', { ...query, limit }),
+    initialPageParam: FIRST_PAGE,
+    queryFn: async ({ pageParam }): Promise<CursorPage<PendingReviewInfo>> => {
+      const res = await client.listPendingReviews(creatorId!, { ...query, limit, cursor: pageParam });
+      return { items: res.items, pagination: res.pagination };
+    },
+    enabled: Boolean(creatorId),
+    getNextPageParam: (lastPage: CursorPage<PendingReviewInfo>): Cursor =>
+      lastPage.pagination.has_more ? lastPage.pagination.next_cursor : undefined,
+  });
+}
+
+/** Live pending-review count for the header badge (polled). */
+export function usePendingReviewCount(creatorId: string | undefined) {
+  const client = useNexusClient();
+  return useQuery({
+    queryKey: queryKeys.memory.count(creatorId ?? ''),
+    queryFn: (): Promise<CountPendingReviewsResponse> => client.countPendingReviews(creatorId!),
+    enabled: Boolean(creatorId),
+    refetchInterval: MEMORY_COUNT_POLL_MS,
+  });
+}
+
+/** Read-only fragments list for the active creator (NOT paginated; bounded by `limit`). */
+export function useMemoryFragments(
+  creatorId: string | undefined,
+  query?: Omit<ListMemoryFragmentsQuery, 'creator_id'>,
+) {
+  const client = useNexusClient();
+  return useQuery({
+    queryKey: queryKeys.memory.fragments(creatorId ?? '', query),
+    queryFn: () => client.listMemoryFragments(creatorId!, query),
+    enabled: Boolean(creatorId),
+  });
+}
+
+/**
+ * Delete a pending-review row. Optimistically removes the row from every cached
+ * pending-review list for this creator and decrements the count badge before
+ * the server responds, rolls back on error, and invalidates pending-list +
+ * count + fragments queries on settle.
+ */
+export function useDeletePendingReview() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  const { toast } = useToast();
+  type PendingListData = { pages: CursorPage<PendingReviewInfo>[] };
+  return useMutation({
+    mutationFn: (vars: { pendingId: string; creatorId: string }) =>
+      client.deletePendingReview(vars.pendingId, vars.creatorId),
+    onMutate: async (vars) => {
+      await qc.cancelQueries({ queryKey: queryKeys.memory.pendingList(vars.creatorId) });
+      const previousLists = qc.getQueriesData<PendingListData>({
+        queryKey: queryKeys.memory.pendingList(vars.creatorId),
+      });
+      const previousCount = qc.getQueryData<CountPendingReviewsResponse>(
+        queryKeys.memory.count(vars.creatorId),
+      );
+      // Drop the row from every cached list view for this creator.
+      qc.setQueriesData<PendingListData>(
+        { queryKey: queryKeys.memory.pendingList(vars.creatorId) },
+        (old) => {
+          if (!old) return old;
+          return {
+            ...old,
+            pages: old.pages.map((page) => ({
+              ...page,
+              items: page.items.filter((r) => r.pending_id !== vars.pendingId),
+            })),
+          };
+        },
+      );
+      // Optimistically decrement the count badge (floor at 0).
+      if (previousCount && previousCount.count > 0) {
+        qc.setQueryData<CountPendingReviewsResponse>(queryKeys.memory.count(vars.creatorId), {
+          count: previousCount.count - 1,
+        });
+      }
+      return { previousLists, previousCount };
+    },
+    onError: (error, vars, context) => {
+      if (context?.previousLists) {
+        for (const [queryKey, data] of context.previousLists) {
+          qc.setQueryData(queryKey, data);
+        }
+      }
+      if (context?.previousCount) {
+        qc.setQueryData(queryKeys.memory.count(vars.creatorId), context.previousCount);
+      }
+      errorToast(error, 'Could not delete pending review');
+    },
+    onSuccess: (_data, vars) => {
+      toast({ variant: 'success', title: 'Pending review deleted', description: shortId(vars.pendingId) });
+    },
+    onSettled: (_data, _error, vars) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.memory.pendingList(vars.creatorId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.memory.count(vars.creatorId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.memory.fragments(vars.creatorId) });
+    },
+  });
+}
+
+/**
+ * Trigger the server-side review/summarization pipeline. Surfaces the result
+ * counters (`promoted`/`fragmented`/`dropped`) in a confirmation toast, then
+ * invalidates pending-list + count + fragments so the post-review state
+ * refetches. Processing state is exposed via `isPending` (the caller disables
+ * the CTA while in-flight — there is no optimistic body to render because the
+ * server classifies the whole queue atomically).
+ */
+export function useReviewMemory() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: (creatorId: string) => client.reviewMemory({ creator_id: creatorId }),
+    onSuccess: (data: ReviewResponse, creatorId) => {
+      toast({
+        variant: 'success',
+        title: 'Review complete',
+        description: `${data.promoted} promoted to long-term memory, ${data.fragmented} saved as fragments, ${data.dropped} dropped.`,
+      });
+      void qc.invalidateQueries({ queryKey: queryKeys.memory.pendingList(creatorId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.memory.count(creatorId) });
+      void qc.invalidateQueries({ queryKey: queryKeys.memory.fragments(creatorId) });
+    },
+    onError: (error) => errorToast(error, 'Could not complete review'),
   });
 }
