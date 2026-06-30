@@ -90,13 +90,43 @@ The Tauri v2 native desktop client (`apps/desktop`). Wraps the web SPA (`apps/we
 
 ## Cross-Reference
 
+Paths are relative to the repo root. Each entry links the term to its authoritative spec doc under `.mstar/knowledge/specs/`.
+
+### Creative Writing Domain
+
 | Term | Related concepts | Spec doc |
 |------|-----------------|----------|
-| World | Fork, Timeline, Manuscript, Scope | entity-scope-model.md |
-| KeyBlock | SourceAnchor, Taxonomy, Computable | entity-scope-model.md |
-| Creator | Creator Memory, Works | creator-workflow.md |
-| Compute | Preset, WASM module, Capability Registry | compute-module-abi.md |
-| ACP | Agent Host, Daemon Runtime | acp-client-tech-spec.md |
-| Workspace | Canvas, Outline, Manuscript | canvas-strategy-surface.md |
-| Web UI | Desktop Shell, Daemon Runtime, NexusClient | web-ui.md |
-| Desktop Shell | Web UI, Sidecar, Tauri IPC | desktop-shell.md |
+| World | Fork, Timeline, Manuscript, Scope | [entity-scope-model.md](.mstar/knowledge/specs/entity-scope-model.md) |
+| KeyBlock | SourceAnchor, Taxonomy, Computable | [entity-scope-model.md](.mstar/knowledge/specs/entity-scope-model.md) |
+| SourceAnchor | KeyBlock, Provenance | [entity-scope-model.md](.mstar/knowledge/specs/entity-scope-model.md) |
+| Manuscript | World, Timeline, Chapter | [entity-scope-model.md](.mstar/knowledge/specs/entity-scope-model.md) |
+| Timeline | World, KeyBlock, Fork | [entity-scope-model.md](.mstar/knowledge/specs/entity-scope-model.md) |
+| Fork | World, Timeline | [entity-scope-model.md](.mstar/knowledge/specs/entity-scope-model.md) |
+| Scope | KeyBlock, Moment Context Assembly | [entity-scope-model.md](.mstar/knowledge/specs/entity-scope-model.md) |
+| Narrative Profile | Novel, Essay, Game-Bible, Script | [novel-writing/workflow-profile.md](.mstar/knowledge/specs/novel-writing/workflow-profile.md) |
+| Outline | Workspace, Canvas, Manuscript | [canvas-strategy-surface.md](.mstar/knowledge/specs/canvas-strategy-surface.md) |
+
+### Compute & AI Domain
+
+| Term | Related concepts | Spec doc |
+|------|-----------------|----------|
+| Compute | Preset, WASM module, Capability Registry | [compute-module-abi.md](.mstar/knowledge/specs/compute-module-abi.md) |
+| Preset | Compute, Orchestration, Capability | [orchestration-engine.md](.mstar/knowledge/specs/orchestration-engine.md) |
+| Creator | Creator Memory, Works | [creator-workflow.md](.mstar/knowledge/specs/creator-workflow.md) |
+| Creator Memory | Creator, SOUL I/O | [creator-workflow.md](.mstar/knowledge/specs/creator-workflow.md) |
+| Moment Context Assembly | Scope, KeyBlock, Creator Memory | [local-runtime-boundary.md](.mstar/knowledge/specs/local-runtime-boundary.md) |
+| Quality Loop | Findings, Review, Knowledge Loop | [novel-writing/quality-loop.md](.mstar/knowledge/specs/novel-writing/quality-loop.md) |
+| Knowledge Loop | KeyBlock, SourceAnchor, Quality Loop | [novel-writing/quality-loop.md](.mstar/knowledge/specs/novel-writing/quality-loop.md) |
+
+### Protocol & Infrastructure
+
+| Term | Related concepts | Spec doc |
+|------|-----------------|----------|
+| ACP | Agent Host, Daemon Runtime | [acp-client-tech-spec.md](.mstar/knowledge/specs/acp-client-tech-spec.md) |
+| Agent Host | ACP, Capability, Daemon Runtime | [agent-host.md](.mstar/knowledge/specs/agent-host.md) |
+| Daemon Runtime | Local Database, Agent Host, Local API | [daemon-runtime.md](.mstar/knowledge/specs/daemon-runtime.md) |
+| Local Database | SQLite, World KB, Orchestration state | [local-db-schema.md](.mstar/knowledge/specs/local-db-schema.md) |
+| JSON Schema (Wire Contracts) | schemas/, codegen, nexus-contracts | [schemas-directory-layout.md](.mstar/knowledge/specs/schemas-directory-layout.md) |
+| Workspace (Canvas) | Canvas, Outline, Manuscript | [canvas-strategy-surface.md](.mstar/knowledge/specs/canvas-strategy-surface.md) |
+| Web UI | Desktop Shell, Daemon Runtime, NexusClient | [web-ui.md](.mstar/knowledge/specs/web-ui.md) |
+| Desktop Shell | Web UI, Sidecar, Tauri IPC | [desktop-shell.md](.mstar/knowledge/specs/desktop-shell.md) |

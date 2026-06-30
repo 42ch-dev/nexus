@@ -55,6 +55,15 @@ use tracing::{info, warn};
 /// Maximum entities returned by the graph projection (mirrors `kb_store`
 /// `LIST_BY_WORLD_LIMIT` safety cap).
 const GRAPH_ENTITY_CAP: usize = 500;
+/// Maximum stored relationships projected by the graph endpoint before
+/// symmetric-reverse derivation (qc1 F-003 / `R-V176QC1-S002`). Bounds the
+/// payload for worlds that have accumulated many extraction suggestions across
+/// rescans, mirroring `GRAPH_ENTITY_CAP`. The cap is applied to *stored* rows
+/// so a stored edge and its symmetric reverse are never split across the
+/// boundary. Pre-1.0 local-first datasets stay well under this; a future
+/// `limit`/`cursor` pagination pass (see `get_graph` TODO) can replace it once
+/// the wire contract gains a `truncated`/`next_cursor` envelope.
+const GRAPH_RELATIONSHIP_CAP: usize = 1000;
 /// Default + max page size for the candidates endpoint.
 const DEFAULT_CANDIDATE_LIMIT: i64 = 50;
 const MAX_CANDIDATE_LIMIT: i64 = 250;
@@ -880,11 +889,15 @@ pub async fn get_graph(
     }
 
     // V1.76 TODO: relationship graph pagination. The response currently ships
-    // the entire graph for the world (capped by `GRAPH_ENTITY_CAP`). When the
+    // the entire graph for the world (entities capped by `GRAPH_ENTITY_CAP`,
+    // relationships capped by `GRAPH_RELATIONSHIP_CAP` as of V1.77). When the
     // relationship count exceeds the client viewport budget, introduce
     // `limit`/`cursor` query params and a `truncated` flag plus `next_cursor`
     // in `WorldKbGraphResponse` so callers can paginate without losing the
-    // symmetric-reverse derived edges. Keep V1.75 contract unchanged.
+    // symmetric-reverse derived edges. That requires a wire-contract change
+    // (new response fields + schema/codegen), so it is deferred past the V1.77
+    // `wire_contracts_changed: FALSE` polish pass; the cap is the interim
+    // safety bound (qc1 F-003 / `R-V176QC1-S002`).
     Ok(Json(WorldKbGraphResponse {
         entities,
         source_anchors,
@@ -915,19 +928,55 @@ pub struct GraphQuery {
 /// materializes extraction-suggestion rows. Symmetric-reverse derivation is
 /// unchanged — only stored rows are projected, so the symmetric reverse of a
 /// suggestion cannot leak into the confirmed graph.
+///
+/// V1.77: the `GRAPH_RELATIONSHIP_CAP` is pushed into the SQL `LIMIT` (qc3
+/// W-QC3-P1-001) by passing `CAP + 1` to the DAO; the extra row detects
+/// truncation. When truncation is detected, a structured `tracing::warn!` is
+/// emitted (qc3 W-QC3-P1-002) so operators/authors have an observable signal
+/// that older relationships were dropped. A wire `truncated` flag remains a
+/// future contract change; the warn is the interim server-side observability.
 async fn project_relationships_for_world(
     pool: &sqlx::SqlitePool,
     world_id: &str,
     include_suggested: bool,
 ) -> Result<Vec<WorldKbRelationshipProjection>, NexusApiError> {
-    let rows = list_relationships_for_world(pool, world_id, include_suggested)
+    // Fetch CAP + 1 rows so truncation is detectable: if the DAO returns more
+    // than GRAPH_RELATIONSHIP_CAP rows, the world exceeded the safety cap and
+    // older relationships are silently dropped from the projection. The cap is
+    // pushed into SQL (qc3 W-QC3-P1-001) so the hot path never materializes
+    // unbounded rows.
+    let fetch_limit = i64::try_from(GRAPH_RELATIONSHIP_CAP + 1).unwrap_or(i64::MAX);
+    let rows = list_relationships_for_world(pool, world_id, include_suggested, fetch_limit)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
             message: e.to_string(),
         })?;
-    let mut projections = Vec::with_capacity(rows.len() * 2);
-    for row in rows {
+
+    let observed = rows.len();
+    if observed > GRAPH_RELATIONSHIP_CAP {
+        // qc3 W-QC3-P1-002: surface silent truncation so operators/authors can
+        // detect that older relationships were dropped from the projection. A
+        // wire `truncated` flag is a future contract change; this server-side
+        // warn is the interim observable signal.
+        warn!(
+            metric = "world_kb_graph_relationships_truncated",
+            world_id,
+            include_suggested,
+            cap = GRAPH_RELATIONSHIP_CAP,
+            observed_count = observed,
+            "graph relationship cap reached; older relationships are not projected"
+        );
+    }
+
+    // Cap stored rows before projection so the symmetric-reverse derivation
+    // never splits a stored edge from its reverse (qc1 F-003 / `R-V176QC1-S002`).
+    // Each stored row yields at most 2 projections, so the wire payload is
+    // bounded by `2 * GRAPH_RELATIONSHIP_CAP`. The `.take()` is belt-and-
+    // suspenders: the SQL LIMIT already caps the DAO output, but this guards
+    // correctness if a future caller raises the DAO limit above the cap.
+    let mut projections = Vec::with_capacity(rows.len().min(GRAPH_RELATIONSHIP_CAP) * 2);
+    for row in rows.into_iter().take(GRAPH_RELATIONSHIP_CAP) {
         projections.push(project_relationship(&row, "stored"));
         if row.symmetric != 0 {
             let mut reverse = row.clone();

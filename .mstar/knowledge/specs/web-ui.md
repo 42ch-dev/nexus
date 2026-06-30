@@ -178,7 +178,7 @@ Explicitly deferred with durable tracking (compass §1.2 + §6; satisfies the Du
 
 - **Tauri desktop shell (`apps/desktop`)** — V1.65. The SPA is Tauri-ready now; the shell wraps the same `apps/web/dist`.
 - **Content-authoring UI** — chapter rich-text editor, outline editor, KB editor — V1.65+. CLI continues content production this iteration.
-- **Findings-remediation UI** — V1.65+. Findings are *visible* in V1.64; acting on them is deferred.
+- **Findings-remediation UI** — **Ships in V1.77 (§23).** Findings were *visible* in V1.64; remediation (status transitions, `target_executor` assignment, inline edit) is the V1.77 lead surface.
 - **Schedule / cron editor** — V1.65+. Hand-editing cron is a footgun for non-technical authors; schedules are driven by presets/CLI. V1.64 only displays them.
 - **Mobile (Tauri v2 mobile targets)** — V1.66+.
 - **OpenAPI spec generation + generated TS client SDK (C2)** — deferred; TanStack Query + codegen TS types suffice for the SPA.
@@ -204,6 +204,7 @@ Explicitly deferred with durable tracking (compass §1.2 + §6; satisfies the Du
 | **V1.74 (§20 stage)** | **Canvas World KB Relationships β** — fourth Canvas World KB capability: typed relationship edges, `world_kb.patch_relationship`, relationship inspector, non-spatial relationship table, conflict modal reuse, and relationship DESIGN.md tokens. Hygiene slate cleared in the same iteration. |
 | **V1.75 (§21 stage)** | **Canvas-Pivot** — the V1.65 §13 whole-document TipTap outline editor (`chapter-page.tsx` Outline tab + `usePutChapterOutline` PUT save path) is **retired**. The V1.72 node-granular canvas is now the **sole outline authoring surface**. The canvas chapter inspector gains outline-prose TipTap editing via a new `content` field on `outline.patch_chapter` (parity-close — the inspector replicates the V1.65 editor's rich-text capability: headings, bold, italic, lists, markdown round-trip via `tiptap-markdown`). The retired `chapter-page.tsx` morphs to a read-only body view + "Edit outline → Canvas" redirect CTA — the reading/preview value is preserved (body prose render, frontmatter metadata strip, Copy Path), and outline authoring is relocated (not lost) to the canvas. This is a pre-1.0 hard cutover: no dual-editor deprecation period; the pivot is a clean retire+replace. `wire_contracts_changed: TRUE` (`content` field + V1.65 PUT write route/DTO removal → `@42ch/nexus-contracts` 0.10.0 → 0.11.0). |
 | **V1.76 (§22 stage)** | **World KB Relationship γ — auto-extraction + confidence** — completes the World KB relationship surface. **Extraction proposes relationships**: `nexus.llm.extract` emits relationship candidates (entity pairs + relation_type + confidence + source anchors) from chapter text, persisted behind a `needs_review=1` gate (`source='extraction'`); the canvas shows them in a **Suggested pane** (sortable by confidence, default high→low, per-row Promote/Delete + bulk Promote all). **Confidence-weighting UX**: graph edges render with stepped confidence bands (low <0.4: 1px/30%, mid 0.4–<0.7: 2px/60%, high ≥0.7: 3px/100%) consuming the shipped DESIGN.md `canvas-worldkb-relationship-confidence-*` tokens; confidence-band colored badges (red/amber/green, uniform 8px) appear on edge labels. **`needs_review` gate semantics**: extraction defaults to `needs_review=1`; GET graph defaults to excluding suggested rows (`?include_suggested=true` surfaces them); suggested edges render dashed (distinct from confirmed solid). **Curation**: promotion clears `needs_review` via the existing `world_kb.patch_relationship` route (`needs_review: false` on update); `source` stays read-only provenance. `wire_contracts_changed: TRUE` (additive `needs_review` + `source` + extraction DTO + `include_suggested` → `@42ch/nexus-contracts` 0.11.0 → 0.12.0). No new DESIGN.md colors — the stepped bands reuse shipped confidence tokens. Desktop distribution v2 actual signing rollout remains blocked on Apple Developer ID cert + notarization credentials; Mobile (Tauri v2 mobile targets) remains future scope. |
+| **V1.77 (§23 stage)** | **Findings-Remediation UI — quality loop closure** — promotes the Control-Room findings view from read-only (V1.64) to a full remediation authoring surface: status transitions (6-state lifecycle, server-enforced adjacency), `target_executor` assignment, inline edit of title/description/severity/kind/rule_suggestion. Detail-panel + row-action hybrid layout. TanStack Query optimistic mutations with stale-count refresh. DESIGN.md tokens: 6 status badges + severity color reuse + triage chrome. Closes the §8 deferred "Findings-remediation UI" item. Cross-profile (DB + Local API already profile-agnostic). `wire_contracts_changed: FALSE` (findings schemas already shipped + codegen'd; V1.77 only consumes them). |
 
 The Tauri-ready boundary (§5) is what keeps the V1.66 shell a thin wrap rather than a rewrite. The V1.68 canvas adds new screens (graph surfaces) on the unchanged transport boundary — not a re-architecture.
 
@@ -620,4 +621,64 @@ V1.74 completes the World KB canvas surface by promoting first-class typed relat
 
 ---
 
-*Local-first Web UI product contract. V1.64 Shipped (Control Room + Setup) → V1.65 §13 Content-Authoring → V1.66 §14 Desktop Shell → V1.67 §15 Surface Convergence & De-risk → V1.69 Design System Maturation & Canvas Draft → V1.70 §16 Canvas Strategy Implement (α) + CI/desktop-build optimization → V1.71 §17 Canvas Strategy Write-Boundary (β) → V1.72 §18 Canvas Outline+Timeline (β) → V1.73 §19 Canvas World KB (β) → V1.74 §20 Canvas World KB Relationships (β). V1.75 roadmap: canvas-pivot candidate + 8 QC suggestions (`tbd-v1.75-qc-followup`). Design tokens: `apps/web/DESIGN.md` (V1.65 Standard+ + V1.66 desktop supplement + V1.69 Production migration + V1.70 canvas-token fill + V1.71 canvas-write tokens + V1.72 outline/timeline tokens + V1.73 canvas-worldkb tokens + V1.74 relationship tokens).*
+*Local-first Web UI product contract. V1.64 Shipped (Control Room + Setup) → V1.65 §13 Content-Authoring → V1.66 §14 Desktop Shell → V1.67 §15 Surface Convergence & De-risk → V1.69 Design System Maturation & Canvas Draft → V1.70 §16 Canvas Strategy Implement (α) + CI/desktop-build optimization → V1.71 §17 Canvas Strategy Write-Boundary (β) → V1.72 §18 Canvas Outline+Timeline (β) → V1.73 §19 Canvas World KB (β) → V1.74 §20 Canvas World KB Relationships (β) → V1.77 §23 Findings-Remediation UI. V1.75 roadmap: canvas-pivot candidate + 8 QC suggestions (`tbd-v1.75-qc-followup`). Design tokens: `apps/web/DESIGN.md` (V1.65 Standard+ + V1.66 desktop supplement + V1.69 Production migration + V1.70 canvas-token fill + V1.71 canvas-write tokens + V1.72 outline/timeline tokens + V1.73 canvas-worldkb tokens + V1.74 relationship tokens + V1.77 findings triage tokens).*
+
+---
+
+## 23. Next stage — Findings-Remediation UI (V1.77)
+
+V1.76 shipped the World KB Relationship γ surface, completing the canvas program (V1.67–V1.76, 10 iterations). V1.77 pivots from the canvas to the **quality loop**: the Control-Room findings page — read-only since V1.64 — is promoted to a full **remediation authoring surface** that closes the "observe → triage → resolve" quality loop in the UI, exactly as the canvas closed the "steer → execute → review" writing loop. The backend already ships the full findings PATCH surface (6-state lifecycle adjacency enforcement, 7-field `UpdateFindingRequest` payload, full CRUD routes, stale-count endpoint); V1.77 consumes them from the web app with no new backend routes.
+
+> **Scope and roadmap SSOT**: [v1.77-findings-remediation-ui-and-post-canvas-inflection-compass-v1.md](../../iterations/v1.77-findings-remediation-ui-and-post-canvas-inflection-compass-v1.md) §0 grill decisions (Q1–Q4 locked), §1.1 Track A scope, §2 normative specs, §Phase 2b D4 (UX lock — authoritative), and §6 risk notes (all RESOLVED). This section records the product contract; the compass is authoritative for scope, batching, and residual tracking. Lifecycle detail: [findings-lifecycle.md](findings-lifecycle.md) (architect-drafted Master). API surface: [local-api-surface-conventions.md](local-api-surface-conventions.md) (findings PATCH reference).
+
+### 23.1 What ships in V1.77
+
+The findings page gains three remediation affordances consuming the already-shipped `PATCH /v1/local/works/{work_id}/findings/{finding_id}` route (7-field `UpdateFindingRequest` payload, all fields optional), plus a detail-panel layout, TanStack Query mutations, and DESIGN.md triage tokens. No new backend routes — the PATCH surface already exists; V1.77 is frontend consumption only (D2 LOCKED: types are already generated and barrel-exported; no codegen config change needed).
+
+- **Status transitions** — inline status dropdown or action buttons driving the 6-state findings lifecycle: `open` → `triaged` → `in_review` → (`resolved` | `wont_fix` | `duplicate`). Invalid transitions are disabled client-side per the server-enforced adjacency (DAO `is_valid_transition()` table; illegal transitions return HTTP 422 `INVALID_TRANSITION`). Status change persists via PATCH, the findings list refetches, and the stale-findings count in the daemon status bar updates on mutation invalidation.
+
+- **`target_executor` assignment** — dropdown/selector routing the finding to `brainstorm`, `write`, `master`, or `none`. `target_executor` is an *assignment* (route hint for triage), not an auto-trigger — re-running an orchestration session stays a deliberate canvas/CLI action (grill Q2 option C rejected). Valid values per `crates/nexus-local-db/src/findings.rs:192`.
+
+- **Inline edit** — finding detail/inspector panel exposes the 7 `UpdateFindingRequest` fields (all optional): `title`, `description`, `severity`, `kind`, `rule_suggestion`, `status`, `target_executor`. Edits persist via PATCH with optimistic TanStack Query mutations (`useUpdateFinding`); the findings list + stale-count queries refetch on mutation invalidation. The inspector shows full finding context: `chapter`, `source_schedule_id`, `routing_hint`, `kind`, timestamps.
+
+- **Detail-panel + row-action hybrid layout** (D4 LOCKED) — the findings page remains a Control-Room table (not a canvas graph); a detail/inspector panel with the three remediation affordances supplements row-level status/severity badges, reusing existing `Table` + `StatusBadge` components. Row-level actions (status dropdown, assignment selector) enable quick triage without opening the inspector. A11y: the canvas non-spatial-alternate-view discipline applies to canvas graph surfaces, not to Control-Room tables.
+
+- **TanStack Query mutations with optimistic updates** — `useUpdateFinding` updates locally before the server responds, rolls back on error, and invalidates the findings list + stale-count queries on success. In the last-writer-wins model (D1b — no OCC, no revision column, no conflict modal; the quality loop is single-author-triage), optimistic updates are safe with no conflict modal needed.
+
+- **DESIGN.md tokens** — findings status badges (6 states: `open`, `triaged`, `in_review`, `resolved`, `wont_fix`, `duplicate`), severity colors (reusing existing `severityVariant` where possible), triage chrome (action buttons, assignment selector, inline-edit affordance). Token names preserved verbatim (V1.69 invariant continues).
+
+- **Codegen wiring** — `UpdateFindingRequest` and `CreateFindingRequest` are already generated and barrel-exported by `@42ch/nexus-contracts` (D2 LOCKED: codegen is glob-based, both types exist on disk at `packages/nexus-contracts/src/generated/local-api/findings/` and `crates/nexus-contracts/src/generated/local_api/findings/`). V1.77 adds imports in `apps/web/src/lib/nexus/types.ts` + wires `getFinding`/`updateFinding` onto the `NexusClient` interface + `BrowserClient`/`TauriClient` implementations. No codegen config change, no schema change.
+
+### 23.2 The triage loop this enables
+
+The UI closes the **observe → triage → resolve** quality loop for an author who previously had to drop to the CLI:
+
+- **Triage status** — *As an author*, I can review a finding, assess its severity and context, and advance its status through the 6-state lifecycle (`open` → `triaged` → `in_review` → `resolved` / `wont_fix` / `duplicate`) directly from the findings page, so the quality loop progresses without CLI commands.
+
+- **Route by assignment** — *As an author*, I can assign a finding's `target_executor` to `brainstorm`, `write`, `master`, or `none` — routing it to the appropriate stage of the writing loop — so my triage decisions are visible and actionable when I return to the canvas or CLI to re-run orchestration.
+
+- **Edit finding details inline** — *As an author*, I can correct a finding's title, description, severity, kind, or rule_suggestion in the inspector panel without dropping to the terminal, so I can refine quality metadata as I triage.
+
+- **Cross-profile triage** — *As an author*, I can triage findings for any Work (novel, essay, game-bible, or script) from the same findings page — the DB and Local API are already profile-agnostic, so no profile-specific UI restriction is introduced.
+
+### 23.3 Non-goals for V1.77
+
+Explicitly deferred with rationale (compass §1.2 + grill Q2 option C rejected; satisfies the Durable Roadmap Gate):
+
+- **One-click orchestration re-trigger from a finding** — **rejected** (grill Q2, option C). Re-running a brainstorm/write session stays a deliberate canvas/CLI action. The canvas is the intended steering surface for re-runs; a finding "Re-run" button would couple UI remediation to scheduler semantics and overlap the canvas steering surface. `target_executor` is an *assignment* (route hint), not an auto-trigger.
+
+- **Findings producer changes** — V1.77 consumes findings the quality loop already produces. Changing *what* findings are produced (new rules, new review-master output, new extraction) is out of scope.
+
+- **New quality-loop rules / rubrics** — the 五问 rubric and review-master presets are unchanged.
+
+- **New canvas surfaces** — the canvas program is complete (V1.67–V1.76). V1.77 deepens the findings *Control-Room* surface, not the canvas.
+
+- **Body editor** — **rejected** direction (Nexus is AI-autonomous executor; AI owns prose).
+
+- **Platform publish** — platform paused (local-only).
+
+- **Mobile** — future scope.
+
+### 23.4 Wire contracts (V1.77)
+
+**`wire_contracts_changed: FALSE`** (LOCKED by Phase 2b architect). The findings schemas (`update-finding-request`, `create-finding-request`, `finding-detail-response`, `list-findings-query`/`response`, `stale-findings-response`) already exist on disk under `schemas/local-api/findings/` and are already fully codegen'd into both TypeScript (`packages/nexus-contracts/src/generated/local-api/findings/`) and Rust (`crates/nexus-contracts/src/generated/local_api/findings/`). All generated types are already barrel-exported by `@42ch/nexus-contracts` (version `0.12.0` stays). V1.77 only adds consumer-side imports of already-available types — a purely additive frontend change that does not constitute a wire-contracts bump. The web app's `NexusClient` interface gains `getFinding` and `updateFinding` methods consuming the existing `UpdateFindingRequest` and `FindingDetailResponse` DTOs.

@@ -1,0 +1,22 @@
+{
+  "plan_id": "2026-06-30-v1.77-findings-remediation-ui",
+  "archived_at": "2026-06-30",
+  "schema_version": 1,
+  "plan": {
+    "plan_id": "2026-06-30-v1.77-findings-remediation-ui",
+    "iteration_id": "V1.77",
+    "status": "Done",
+    "owner": "@frontend-dev+@fullstack-dev",
+    "effort": "M",
+    "type": "feature",
+    "working_branch": "feature/v1.77-findings-remediation",
+    "merge_target": "iteration/v1.77",
+    "task_category": "visual",
+    "wire_contracts_changed": false,
+    "depends_on": [
+      "2026-06-30-v1.77-findings-remediation-prepare"
+    ],
+    "qc_status": "approved_3of3",
+    "qa_status": "pass"
+  }
+}

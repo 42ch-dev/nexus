@@ -31,6 +31,7 @@ import type {
   PatchWorkRequest,
   PresetSummary,
   ScaffoldPresetRequest,
+  UpdateFindingRequest,
   ValidatePresetRequest,
   WorkSummary,
 } from '@42ch/nexus-contracts';
@@ -38,6 +39,7 @@ import type {
 import { useToast } from '@/lib/use-toast';
 import { useNexusClient } from '@/lib/client-context';
 import { NexusClientError } from '@/lib/nexus';
+import { shortId } from '@/lib/format';
 import { queryKeys } from '@/lib/nexus/query-keys';
 
 /** Default page size for cursor-paginated lists. */
@@ -206,6 +208,82 @@ export function usePatchWork() {
       void qc.invalidateQueries({ queryKey: queryKeys.works.detail(vars.workId) });
     },
     onError: (error) => errorToast(error, 'Could not update Work'),
+  });
+}
+
+/**
+ * Update a finding (V1.77 findings-remediation). Optimistically patches the
+ * finding in the cached findings list before the server responds, rolls back on
+ * error, and refetches the list + detail on settle. Last-writer-wins (D1b — no
+ * OCC, no conflict modal); the quality loop is single-author-triage, so an
+ * optimistic update cannot collide with a concurrent author.
+ *
+ * The server enforces the 6-state lifecycle adjacency (HTTP 422
+ * `INVALID_TRANSITION`); the UI disables illegal transitions as defense-in-
+ * depth, but a bypass reaches the server and rolls back here.
+ */
+export function useUpdateFinding() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  const { toast } = useToast();
+  type FindingsListData = { pages: CursorPage<FindingDetailResponse>[] };
+  return useMutation({
+    mutationFn: (vars: { workId: string; findingId: string; patch: UpdateFindingRequest }) =>
+      client.updateFinding(vars.workId, vars.findingId, vars.patch),
+    onMutate: async (vars) => {
+      // Cancel outgoing refetches for this Work so they don't overwrite the
+      // optimistic update. Scope to vars.workId — cancelling other Works'
+      // lists is unnecessary and contradicts the work-scoped invalidation
+      // (qc3 W-QC3-P0-001).
+      await qc.cancelQueries({ queryKey: queryKeys.findings.list(vars.workId) });
+      // Snapshot every matched list cache for this work (across query filters)
+      // so onError can restore the pre-mutation state.
+      const previousLists = qc.getQueriesData<FindingsListData>({
+        queryKey: queryKeys.findings.list(vars.workId),
+      });
+      // Only apply defined patch fields — undefined means "no-op" on the wire
+      // and must not clobber the cached value during the optimistic merge.
+      const optimistic = Object.fromEntries(
+        Object.entries(vars.patch).filter(([, v]) => v !== undefined),
+      );
+      qc.setQueriesData<FindingsListData>(
+        { queryKey: queryKeys.findings.list(vars.workId) },
+        (old) => {
+          if (!old) return old;
+          return {
+            ...old,
+            pages: old.pages.map((page) => ({
+              ...page,
+              items: page.items.map((f) =>
+                f.finding_id === vars.findingId ? { ...f, ...optimistic } : f,
+              ),
+            })),
+          };
+        },
+      );
+      return { previousLists };
+    },
+    onError: (error, _vars, context) => {
+      if (context?.previousLists) {
+        for (const [queryKey, data] of context.previousLists) {
+          qc.setQueryData(queryKey, data);
+        }
+      }
+      errorToast(error, 'Could not update finding');
+    },
+    onSuccess: (_data, vars) => {
+      toast({ variant: 'success', title: 'Finding updated', description: shortId(vars.findingId) });
+    },
+    onSettled: (_data, _error, vars) => {
+      // Narrow to the mutated Work's list scope (all filter views of that Work
+      // only), not the global findings-list prefix — so a status change /
+      // assignment / inline edit in one Work doesn't mark every other Work's
+      // findings lists stale and refetch them (qc3 W-QC3-P0-001). The scoped
+      // refetch is still needed: a status transition can move a finding between
+      // filter views of this Work.
+      void qc.invalidateQueries({ queryKey: queryKeys.findings.list(vars.workId) });
+    },
   });
 }
 

@@ -332,13 +332,21 @@ pub async fn get_relationship(
     row.ok_or_else(|| LocalDbError::Sqlx(sqlx::Error::RowNotFound))
 }
 
-/// List relationships in a world, ordered by `updated_at` descending.
+/// List relationships in a world, ordered by `updated_at` descending, capped
+/// by `limit` at the SQL layer.
 ///
 /// V1.76: `include_suggested` gates the `needs_review` filter at the SQL layer
 /// so the default (confirmed) graph uses the `(world_id, needs_review)` index
 /// and never materializes extraction-suggestion rows. Pass `false` for the
 /// confirmed graph (default path); pass `true` to fetch both confirmed and
 /// suggested rows (Suggested triage pane).
+///
+/// V1.77: `limit` is pushed into the SQL `LIMIT ?` so the hot path never
+/// materializes unbounded rows (qc3 W-QC3-P1-001). Callers that need
+/// truncation detection pass `cap + 1` and inspect the returned length: a
+/// result of `cap + 1` rows means the world exceeded the cap. The existing
+/// `(world_id, needs_review)` / `(world_id)` indexes cover the `WHERE` +
+/// `ORDER BY updated_at DESC` + `LIMIT` shape; no new migration is required.
 ///
 /// # Errors
 ///
@@ -347,11 +355,14 @@ pub async fn list_relationships_for_world(
     pool: &SqlitePool,
     world_id: &str,
     include_suggested: bool,
+    limit: i64,
 ) -> Result<Vec<KbRelationshipRow>, LocalDbError> {
     // Two compile-time-checked static queries (sqlx macros can't express a
     // conditional WHERE clause). The default (`false`) branch pushes
     // `needs_review = 0` into SQL so SQLite uses
-    // `idx_kb_relationships_world_id_needs_review` and skips hidden rows.
+    // `idx_kb_relationships_world_id_needs_review` and skips hidden rows. The
+    // `LIMIT ?` is pushed down (qc3 W-QC3-P1-001) so the cap bounds the DB
+    // read + decode, not just the final projection.
     let rows = if include_suggested {
         sqlx::query_as!(
             KbRelationshipRow,
@@ -373,8 +384,10 @@ pub async fn list_relationships_for_world(
               source
             FROM kb_relationships
             WHERE world_id = ?
-            ORDER BY updated_at DESC"#,
+            ORDER BY updated_at DESC
+            LIMIT ?"#,
             world_id,
+            limit,
         )
         .fetch_all(pool)
         .await?
@@ -399,8 +412,10 @@ pub async fn list_relationships_for_world(
               source
             FROM kb_relationships
             WHERE world_id = ? AND needs_review = 0
-            ORDER BY updated_at DESC"#,
+            ORDER BY updated_at DESC
+            LIMIT ?"#,
             world_id,
+            limit,
         )
         .fetch_all(pool)
         .await?
@@ -835,10 +850,62 @@ mod tests {
         }
         tx.commit().await.unwrap();
 
-        let rows = list_relationships_for_world(&pool, &world_id, true)
+        let rows = list_relationships_for_world(&pool, &world_id, true, 100)
             .await
             .unwrap();
         assert_eq!(rows.len(), 3);
+    }
+
+    // ── V1.77: SQL LIMIT pushdown (qc3 W-QC3-P1-001) ─────────────────────
+
+    #[tokio::test]
+    async fn test_list_for_world_respects_sql_limit() {
+        let (pool, _dir) = fresh_pool().await;
+        let (world_id, source_id, target_id) = seed_world_and_entities(&pool).await;
+
+        // Seed 3 confirmed rows.
+        let mut tx = pool.begin().await.unwrap();
+        for i in 0..3 {
+            insert_relationship_in_tx(
+                &mut tx,
+                &InsertRelationshipParams {
+                    relationship_id: generate_relationship_id(),
+                    world_id: world_id.clone(),
+                    source_entity_id: source_id.clone(),
+                    target_entity_id: target_id.clone(),
+                    relation_type: "allied_with".to_string(),
+                    custom_label: None,
+                    symmetric: false,
+                    confidence: None,
+                    source_anchor_ids: vec![],
+                    metadata: None,
+                    created_at: chrono::Utc::now().to_rfc3339(),
+                    updated_at: format!("{}-{:02}", chrono::Utc::now().to_rfc3339(), i),
+                    needs_review: false,
+                    source: SOURCE_MANUAL.to_string(),
+                },
+            )
+            .await
+            .unwrap();
+        }
+        tx.commit().await.unwrap();
+
+        // SQL LIMIT caps at the DB layer: pass `cap + 1 = 3` and observe 3
+        // (no truncation), then pass `2` and observe the truncation sentinel
+        // shape (rows.len() == limit).
+        let rows = list_relationships_for_world(&pool, &world_id, true, 3)
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 3, "limit >= row count returns all rows");
+
+        let rows = list_relationships_for_world(&pool, &world_id, true, 2)
+            .await
+            .unwrap();
+        assert_eq!(
+            rows.len(),
+            2,
+            "SQL LIMIT pushdown caps the materialized row count"
+        );
     }
 
     // ── V1.76: extraction resolve + idempotent upsert ─────────────────────
@@ -923,7 +990,7 @@ mod tests {
         );
 
         // Only one row exists.
-        let rows = list_relationships_for_world(&pool, &world_id, true)
+        let rows = list_relationships_for_world(&pool, &world_id, true, 100)
             .await
             .unwrap();
         assert_eq!(rows.len(), 1);

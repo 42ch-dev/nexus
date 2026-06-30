@@ -351,7 +351,10 @@
     "2026-06-30-v1.76-compass-and-plan",
     "2026-06-30-v1.76-relationship-gamma",
     "2026-06-30-v1.76-slate-clear",
-    "2026-06-30-v1.76-closure"
+    "2026-06-30-v1.76-closure",
+    "2026-06-30-v1.77-findings-remediation-prepare",
+    "2026-06-30-v1.77-findings-remediation-ui",
+    "2026-06-30-v1.77-slate-clear"
   ],
   "iteration_summaries": {
     "v1.45": {
@@ -706,6 +709,17 @@
       ],
       "residuals_carried": 8,
       "residuals_deferred": 1
+    },
+    "V1.77": {
+      "shipped_at": "2026-06-30",
+      "compass": "v1.77-findings-remediation-ui-and-post-canvas-inflection-compass-v1.md",
+      "plan_ids": [
+        "2026-06-30-v1.77-findings-remediation-prepare",
+        "2026-06-30-v1.77-findings-remediation-ui",
+        "2026-06-30-v1.77-slate-clear"
+      ],
+      "wire_contracts_changed": false,
+      "summary": "Findings-Remediation UI (quality loop closure) + post-canvas-program inflection. Track A promoted findings from read-only to remediation surface (6-state transitions + target_executor + inline edit, last-writer-wins). Track B closed 3 V1.76 residuals. QC tri-review (3/3 Approve after qc3 fix-wave: invalidation narrowing + graph-cap SQL pushdown + truncation warn). QA Pass. Compound: canvas-surface-implementation-pattern knowledge doc. 12 V1.78 QC-suggestion residuals registered."
     }
   },
   "metadata": {
