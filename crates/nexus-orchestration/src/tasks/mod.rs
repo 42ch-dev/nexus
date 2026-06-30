@@ -2866,7 +2866,7 @@ mod tests {
 
         let outcome = task.evaluate(&ctx).await.unwrap();
         let candidates = match outcome {
-            crate::quality_loop::LlmExtractOutcome::Candidates(c) => c,
+            crate::quality_loop::LlmExtractOutcome::Candidates { candidates: c, .. } => c,
             other => panic!("expected Candidates, got: {other:?}"),
         };
         assert_eq!(candidates.len(), 2, "expected 2 candidates");
@@ -2934,7 +2934,7 @@ mod tests {
         let ctx = graph_flow::Context::new();
         let outcome = task.evaluate(&ctx).await.unwrap();
         match outcome {
-            crate::quality_loop::LlmExtractOutcome::Candidates(c) => {
+            crate::quality_loop::LlmExtractOutcome::Candidates { candidates: c, .. } => {
                 assert!(c.is_empty(), "malformed LLM JSON → empty candidates");
             }
             other => panic!("expected Candidates, got: {other:?}"),
@@ -2957,7 +2957,7 @@ mod tests {
         let ctx = graph_flow::Context::new();
         let outcome = task.evaluate(&ctx).await.unwrap();
         let candidates = match outcome {
-            crate::quality_loop::LlmExtractOutcome::Candidates(c) => c,
+            crate::quality_loop::LlmExtractOutcome::Candidates { candidates: c, .. } => c,
             other => panic!("expected Candidates, got: {other:?}"),
         };
         assert_eq!(candidates.len(), 1);
@@ -2996,7 +2996,7 @@ mod tests {
 
         let outcome = task.evaluate(&ctx).await.unwrap();
         let candidates = match outcome {
-            crate::quality_loop::LlmExtractOutcome::Candidates(c) => c,
+            crate::quality_loop::LlmExtractOutcome::Candidates { candidates: c, .. } => c,
             other => panic!("expected Candidates, got: {other:?}"),
         };
         assert_eq!(candidates.len(), 1, "expected 1 candidate");

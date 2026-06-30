@@ -47,7 +47,7 @@ export interface WorldKbNodeData {
 
 /** Edge data payload for source-anchor provenance + read-only relationships. */
 export interface WorldKbEdgeData {
-  /** React Flow requires an index signature on edge data. */
+  /** React Flow requires an index signature on node data. */
   [key: string]: unknown;
   relationType: 'source_anchor' | 'relationship';
   /** Source-anchor ids backing this edge (empty for V1.74+ relationships). */
@@ -56,6 +56,10 @@ export interface WorldKbEdgeData {
   confidence?: number;
   /** Promotion state snapshot if the edge records a promotion event. */
   promotionState?: EntityLifecycle;
+  /** V1.76: true when the edge is an extraction suggestion (needs_review=1). */
+  needsReview?: boolean;
+  /** V1.76: relationship provenance — 'manual' (author) or 'extraction'. */
+  source?: 'manual' | 'extraction';
 }
 
 /** All BlockType variants that may appear as World KB entities. */
