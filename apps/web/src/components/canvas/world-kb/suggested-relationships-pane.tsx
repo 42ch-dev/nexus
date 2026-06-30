@@ -57,6 +57,17 @@ function ConfidenceBadge({ confidence }: { confidence: number | undefined | null
   );
 }
 
+/**
+ * Testable wrapper around `window.confirm`. Exported at module scope so tests
+ * can mock it (`vi.mock(..., { confirmAction: vi.fn(() => true) })`) instead of
+ * patching the global `window` — the prior inline `window.confirm` was
+ * untestable in JSDOM (always returns `true`) and blocked the render thread.
+ * A styled Dialog replacement is a V1.77 candidate.
+ */
+export function confirmAction(message: string): boolean {
+  return window.confirm(message);
+}
+
 export function SuggestedRelationshipsPane({
   suggestions,
   entities,
@@ -112,7 +123,7 @@ export function SuggestedRelationshipsPane({
     const source = entityName(rel.source_entity_id);
     const target = entityName(rel.target_entity_id);
     if (
-      window.confirm(
+      confirmAction(
         `Delete the suggested relationship "${relationshipEdgeLabel(rel)}" from ${source} to ${target}?`,
       )
     ) {
@@ -126,7 +137,7 @@ export function SuggestedRelationshipsPane({
       sorted.length > 1
         ? `Promote all ${sorted.length} suggested relationships? This confirms them all at once.`
         : `Promote this suggested relationship?`;
-    if (window.confirm(message)) {
+    if (confirmAction(message)) {
       onPromoteAll(sorted);
     }
   }

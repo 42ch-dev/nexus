@@ -47,7 +47,7 @@ export interface WorldKbNodeData {
 
 /** Edge data payload for source-anchor provenance + read-only relationships. */
 export interface WorldKbEdgeData {
-  /** React Flow requires an index signature on node data. */
+  /** React Flow requires an index signature on edge data. */
   [key: string]: unknown;
   relationType: 'source_anchor' | 'relationship';
   /** Source-anchor ids backing this edge (empty for V1.74+ relationships). */
