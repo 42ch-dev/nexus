@@ -73,6 +73,7 @@ import type {
   WorldKbPromoteCandidateRequest,
   WorldKbPromoteCandidateResponse,
   TimelinePatchEventRequest,
+  UpdateFindingRequest,
   UpdatePresetRequest,
   UpdatePresetResponse,
   ValidatePresetRequest,
@@ -158,6 +159,24 @@ export interface NexusClient {
   // ── Findings ───────────────────────────────────────────────────────────────
   /** `GET /v1/local/works/{work_id}/findings` — cursor list (F-P2; canonical `items` key). */
   listFindings(workId: string, query?: ListFindingsQuery): Promise<ListFindingsResponse>;
+  /**
+   * `GET /v1/local/works/{work_id}/findings/{finding_id}` — full finding detail.
+   * V1.77 findings-remediation promotion: the daemon route + generated TS type
+   * already existed (V1.67 G2 pattern); only the TS client surface was missing.
+   * No schema/codegen change (`wire_contracts_changed: FALSE`).
+   */
+  getFinding(workId: string, findingId: string): Promise<FindingDetailResponse>;
+  /**
+   * `PATCH /v1/local/works/{work_id}/findings/{finding_id}` — remediation patch
+   * (status transition / target_executor / inline edit). Server enforces the
+   * 6-state lifecycle adjacency (HTTP 422 `INVALID_TRANSITION` on illegal
+   * transitions); last-writer-wins, no OCC (D1b). V1.77 promotion.
+   */
+  updateFinding(
+    workId: string,
+    findingId: string,
+    patch: UpdateFindingRequest,
+  ): Promise<FindingDetailResponse>;
 
   // ── Preset management ─────────────────────────────────────────────────────
   /** `GET /v1/local/presets` — grouped by source. */
@@ -255,4 +274,4 @@ export interface NexusClient {
 }
 
 /** Re-exported for consumers building query/mutation hooks. */
-export type { CapabilityInfo, FindingDetailResponse };
+export type { CapabilityInfo, FindingDetailResponse, UpdateFindingRequest };
