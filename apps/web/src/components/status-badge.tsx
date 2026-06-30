@@ -1,5 +1,7 @@
 import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { humanizeStatus } from '@/lib/format';
+import { FINDING_STATUSES, type FindingStatus } from '@/lib/findings-lifecycle';
+import { cn } from '@/lib/utils';
 import type { ChapterStatus } from '@42ch/nexus-contracts';
 
 /**
@@ -84,3 +86,55 @@ export function ChapterStatusBadge({ status, className }: ChapterStatusBadgeProp
     </Badge>
   );
 }
+
+/**
+ * DESIGN.md §Findings — explicit 6-state finding-status badge mapping.
+ *
+ * Each finding status gets an intentional, distinct color (the generic
+ * `statusVariant` keyword matcher cannot distinguish `in_review` from `resolved`
+ * or `wont_fix` from `duplicate`). Colors reuse the established semantic palette
+ * (amber=needs triage, teal=reviewed/ready, blue=active review, green=resolved,
+ * gray=waived, purple=superseded) via the same `color-mix` pattern as the
+ * generic badge variants, so they stay correct in both light and dark.
+ */
+function findingStatusClasses(status: FindingStatus | string | undefined | null): string {
+  switch (status as FindingStatus) {
+    case 'open':
+      // amber — newly raised, needs triage attention.
+      return 'bg-[color-mix(in_srgb,var(--color-amber-700)_12%,transparent)] text-amber-1000 border-[color-mix(in_srgb,var(--color-amber-700)_30%,transparent)]';
+    case 'triaged':
+      // teal — reviewed, ready to route.
+      return 'bg-[color-mix(in_srgb,var(--color-teal-700)_10%,transparent)] text-teal-1000 border-[color-mix(in_srgb,var(--color-teal-700)_30%,transparent)]';
+    case 'in_review':
+      // blue — actively under master review.
+      return 'bg-[color-mix(in_srgb,var(--color-blue-700)_10%,transparent)] text-blue-1000 border-[color-mix(in_srgb,var(--color-blue-700)_30%,transparent)]';
+    case 'resolved':
+      // green — addressed, positive terminal.
+      return 'bg-[color-mix(in_srgb,var(--color-green-700)_10%,transparent)] text-green-1000 border-[color-mix(in_srgb,var(--color-green-700)_30%,transparent)]';
+    case 'wont_fix':
+      // gray — explicitly waived, quiet terminal.
+      return 'bg-gray-alpha-100 text-gray-900 border-gray-alpha-300';
+    case 'duplicate':
+      // purple — superseded by another finding.
+      return 'bg-[color-mix(in_srgb,var(--color-purple-700)_10%,transparent)] text-purple-1000 border-[color-mix(in_srgb,var(--color-purple-700)_30%,transparent)]';
+    default:
+      return 'bg-gray-alpha-100 text-gray-900 border-gray-alpha-300';
+  }
+}
+
+interface FindingStatusBadgeProps {
+  status?: string | null;
+  className?: string;
+}
+
+/** Finding status pill with the DESIGN.md §Findings 6-state mapping. */
+export function FindingStatusBadge({ status, className }: FindingStatusBadgeProps) {
+  return (
+    <Badge className={cn(findingStatusClasses(status), className)}>
+      {humanizeStatus(status)}
+    </Badge>
+  );
+}
+
+/** Re-export the status set for affordance rendering (row actions / dropdowns). */
+export { FINDING_STATUSES };
