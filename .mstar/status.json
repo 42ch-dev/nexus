@@ -5,7 +5,7 @@
     {
       "plan_id": "2026-07-01-v1.78-creator-memory-surface",
       "iteration_id": "V1.78",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "@project-manager",
       "effort": "M-L",
       "type": "feature",
@@ -18,7 +18,7 @@
     {
       "plan_id": "2026-07-01-v1.78-slate-clear",
       "iteration_id": "V1.78",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "@project-manager",
       "effort": "S-M",
       "type": "hygiene",
