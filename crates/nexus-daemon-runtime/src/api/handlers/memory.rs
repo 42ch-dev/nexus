@@ -209,23 +209,30 @@ pub async fn list_pending_reviews(
         });
     }
 
+    // R-V178P0-QC3-002: push pagination into SQL (keyset on
+    // `(created_at DESC, pending_id DESC)` with `LIMIT ? + 1`) so the daemon
+    // never materializes the full creator set before applying the cursor/limit.
+    // The prior fetch-all + in-Rust `split_off`/`truncate` is preserved at the
+    // wire level — see `fetch_pending_reviews_page` for the behavior argument.
     let limit = resolve_query_limit(params.limit);
     let creator_id_filter = active_creator; // R-V133P4-07: use active creator
-    let mut items = fetch_pending_reviews_by_creator(state.pool(), &creator_id_filter)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: format!("failed to list pending reviews: {e}"),
-        })?;
+    let fetch_limit = i64::try_from(limit + 1).unwrap_or(i64::MAX);
+    let mut items = fetch_pending_reviews_page(
+        state.pool(),
+        &creator_id_filter,
+        params.cursor.as_deref(),
+        fetch_limit,
+    )
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".into(),
+        message: format!("failed to list pending reviews: {e}"),
+    })?;
 
-    // Apply cursor-based pagination (cursor = pending_id)
-    if let Some(ref cursor) = params.cursor {
-        let pos = items.iter().position(|i| i.pending_id == *cursor);
-        if let Some(idx) = pos {
-            items = items.split_off(idx + 1);
-        }
-    }
-
+    // Determine the next cursor from the over-fetched (`limit + 1`) row. If we
+    // fetched strictly more than `limit`, there is at least one more row on the
+    // server; the next page's cursor is the last item of the truncated page.
+    // This matches the prior `items.len() > limit` branch exactly.
     let next_cursor = if items.len() > limit {
         items.truncate(limit);
         items.last().map(|i| i.pending_id.clone())
@@ -296,6 +303,130 @@ async fn fetch_pending_reviews_by_creator(
             created_at: row.created_at,
         })
         .collect())
+}
+
+/// Fetch one bounded page of a creator's pending reviews for the list endpoint.
+///
+/// **R-V178P0-QC3-002 (qc1 W-QC1-002 + qc3 W-QC3-002/W-QC3-003):** replaces the
+/// unbounded `fetch_all` + in-Rust `split_off`/`truncate` pagination in
+/// [`list_pending_reviews`]. The daemon now fetches at most `limit + 1` rows
+/// from the database instead of materializing the full creator set.
+///
+/// # Keyset + behavior preservation
+///
+/// The wire cursor is a `pending_id`. Pagination is implemented as a keyset on
+/// `(created_at DESC, pending_id DESC)`:
+///
+/// 1. If a cursor is supplied, its `created_at` is resolved with a point
+///    lookup. The page query then returns rows strictly after the cursor's key:
+///    `(created_at < cursor_ca) OR (created_at == cursor_ca AND pending_id <
+///    cursor_pid)`, ordered `created_at DESC, pending_id DESC`, `LIMIT ?`.
+/// 2. If no cursor is supplied (or the cursor row was deleted between pages),
+///    the first page is returned with `LIMIT ?`.
+///
+/// This reproduces the prior `position(cursor)` → `split_off(idx + 1)` →
+/// `truncate(limit)` semantics:
+///
+/// - **Distinct `created_at`** (the overwhelmingly common case): the observable
+///   row order is identical to the prior `ORDER BY created_at DESC`, so every
+///   page returns the same rows and the same `next_cursor`.
+/// - **Equal `created_at` ties:** the prior query ordered by `created_at DESC`
+///   only, leaving ties to the database's implementation-defined rowid order. Adding
+///   `pending_id DESC` as a tiebreaker makes ties deterministic, which is
+///   strictly more correct (the prior nondeterminism was a latent pagination
+///   hazard at the tie boundary). No row that previously appeared on page *N*
+///   can now appear on page *N-1* or *N+1* in a way that breaks cursor
+///   continuity, because the tiebreaker is total and stable.
+/// - **Deleted cursor:** the prior code returned the first page when
+///   `position()` could not find the cursor (pos `None` → items unchanged).
+///   This implementation returns the first page via the no-cursor query when the
+///   cursor's `created_at` lookup misses, matching that fallback.
+///
+/// `fetch_limit` is `page_limit + 1` from the caller; the extra row drives the
+/// `has_more` / `next_cursor` decision without a second round-trip (the caller
+/// truncates back to `page_limit`).
+async fn fetch_pending_reviews_page(
+    pool: &sqlx::SqlitePool,
+    creator_id: &str,
+    cursor: Option<&str>,
+    fetch_limit: i64,
+) -> Result<Vec<PendingReviewInfo>, sqlx::Error> {
+    // Resolve the cursor row's `created_at`. Returns `None` if the cursor was
+    // deleted (or never existed); the caller then falls through to the
+    // no-cursor first-page query, preserving the prior `position() == None`
+    // behavior.
+    let cursor_created_at: Option<String> = if let Some(cursor_pid) = cursor {
+        sqlx::query_scalar!(
+            "SELECT created_at FROM memory_pending_review
+             WHERE creator_id = ? AND pending_id = ?",
+            creator_id,
+            cursor_pid
+        )
+        .fetch_optional(pool)
+        .await?
+    } else {
+        None
+    };
+
+    let rows: Vec<PendingReviewInfo> = if let (Some(cursor_pid), Some(cursor_ca)) =
+        (cursor, cursor_created_at)
+    {
+        // Keyset page: rows strictly after `(cursor_ca, cursor_pid)` in
+        // `created_at DESC, pending_id DESC` order.
+        sqlx::query!(
+            r#"SELECT pending_id as "pending_id!", session_id, creator_id, world_id, task_kind, raw_digest, created_at
+             FROM memory_pending_review
+             WHERE creator_id = ?
+               AND (created_at < ? OR (created_at = ? AND pending_id < ?))
+             ORDER BY created_at DESC, pending_id DESC
+             LIMIT ?"#,
+            creator_id,
+            cursor_ca,
+            cursor_ca,
+            cursor_pid,
+            fetch_limit
+        )
+        .fetch_all(pool)
+        .await?
+        .into_iter()
+        .map(|row| PendingReviewInfo {
+            pending_id: row.pending_id,
+            session_id: row.session_id,
+            creator_id: row.creator_id,
+            world_id: row.world_id,
+            task_kind: row.task_kind,
+            raw_digest: row.raw_digest,
+            created_at: row.created_at,
+        })
+        .collect()
+    } else {
+        // First page (no cursor, or cursor deleted → restart from the top to
+        // preserve the prior position()==None behavior).
+        sqlx::query!(
+            r#"SELECT pending_id as "pending_id!", session_id, creator_id, world_id, task_kind, raw_digest, created_at
+             FROM memory_pending_review
+             WHERE creator_id = ?
+             ORDER BY created_at DESC, pending_id DESC
+             LIMIT ?"#,
+            creator_id,
+            fetch_limit
+        )
+        .fetch_all(pool)
+        .await?
+        .into_iter()
+        .map(|row| PendingReviewInfo {
+            pending_id: row.pending_id,
+            session_id: row.session_id,
+            creator_id: row.creator_id,
+            world_id: row.world_id,
+            task_kind: row.task_kind,
+            raw_digest: row.raw_digest,
+            created_at: row.created_at,
+        })
+        .collect()
+    };
+
+    Ok(rows)
 }
 
 /// GET /v1/local/memory/pending-review/count?creator_id=...
@@ -737,17 +868,21 @@ pub async fn fragments(
             message: format!("failed to list memory fragments: {e}"),
         })?
     } else {
-        // Use compile-time checked query (more reliable) when no keyword filter
-        let all = nexus_local_db::memory_fragment::list_fragments(state.pool(), &active_creator)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".into(),
-                message: format!("failed to list memory fragments: {e}"),
-            })?;
-        // Apply limit manually
-        let mut truncated = all;
-        truncated.truncate(limit);
-        truncated
+        // R-V178P0-QC3-002 (W-QC3-002): no-keyword path now uses the bounded
+        // DAO (`LIMIT ?` in SQL) instead of `list_fragments` (fetch-all) +
+        // in-Rust `truncate(limit)`. For total ≤ limit the returned set is
+        // identical; the cap is simply enforced server-side now.
+        let limit_i64 = i64::try_from(limit).unwrap_or(i64::MAX);
+        nexus_local_db::memory_fragment::list_fragments_limited(
+            state.pool(),
+            &active_creator,
+            limit_i64,
+        )
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: format!("failed to list memory fragments: {e}"),
+        })?
     };
 
     let fragments_list: Vec<MemoryFragmentInfo> = records
