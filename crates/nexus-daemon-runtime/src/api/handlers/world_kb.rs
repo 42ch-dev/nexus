@@ -64,8 +64,13 @@ const GRAPH_ENTITY_CAP: usize = 500;
 /// `limit`/`cursor` pagination pass (see `get_graph` TODO) can replace it once
 /// the wire contract gains a `truncated`/`next_cursor` envelope.
 const GRAPH_RELATIONSHIP_CAP: usize = 1000;
-/// Default + max page size for the candidates endpoint.
+/// Default page size for the candidates endpoint. 50 matches the UI's default
+/// list viewport plus one buffer page, so the first render does not block on a
+/// large fetch while still amortizing pagination overhead.
 const DEFAULT_CANDIDATE_LIMIT: i64 = 50;
+/// Hard upper bound for the candidates endpoint. 250 prevents a malformed or
+/// malicious `?limit=` value from materializing an unbounded response; it
+/// aligns with the largest list viewport we expect in the local SPA.
 const MAX_CANDIDATE_LIMIT: i64 = 250;
 
 /// Prefix for candidate-list keyset cursors (`kb promotion`). Distinguishes

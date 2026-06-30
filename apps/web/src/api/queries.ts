@@ -151,6 +151,14 @@ export function flattenPages<T>(data: { pages: CursorPage<T>[] } | undefined): T
   return data.pages.flatMap((p) => p.items);
 }
 
+// Forward-staging closure: a `useFinding(workId, findingId)` detail hook was
+// considered for the V1.77 remediation surface but is intentionally absent
+// here. The FindingDetailPanel reads the selected row from the work-scoped
+// list cache, which is sufficient while the UI is a list+inspector hybrid. A
+// dedicated detail-endpoint hook can be re-introduced when (and only when) a
+// standalone finding-detail route or inspector needs it as the source of truth
+// (qc1 S-001).
+
 // ── Presets (grouped by source) ──────────────────────────────────────────────
 
 export interface PresetGroups {
@@ -262,6 +270,13 @@ export function useUpdateFinding() {
           };
         },
       );
+      // Asymmetry note: `getQueriesData` snapshots every matched list under the
+      // work-scoped prefix (all filter views), while `setQueryData` restores
+      // each snapshot by its exact query key. This is correct because TanStack's
+      // `setQueryData` ignores filters that are not part of the exact key tuple;
+      // a rollback must target the same key that was snapshotted. If the
+      // snapshot/apply scope ever changes (e.g., page-cursor filters become part
+      // of the key), the rollback loop must be widened to match (qc1 S-004).
       return { previousLists };
     },
     onError: (error, _vars, context) => {
