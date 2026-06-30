@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/memory/create-pending-review-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CreatePendingReviewResponse",
+  "description": "Response body for POST /v1/local/memory/pending-review. Echoes the request `pending_id`; `success` is always `true` (uses INSERT OR IGNORE so duplicate retries also return success).",
+  "type": "object",
+  "required": ["success", "pending_id"],
+  "properties": {
+    "success": { "type": "boolean" },
+    "pending_id": { "type": "string" }
+  },
+  "additionalProperties": false
+}

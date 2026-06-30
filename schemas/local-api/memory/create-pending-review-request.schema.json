@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/memory/create-pending-review-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CreatePendingReviewRequest",
+  "description": "Request body for POST /v1/local/memory/pending-review. Called by the CLI at session-end capture. Optional fields (`world_id`, `task_kind`, `created_at`) default at runtime (`task_kind` → \"unknown\", `created_at` → current RFC 3339 timestamp); validation limits (pending_id/session_id/world_id ≤ 128, raw_digest ≤ 64KB, task_kind ≤ 64) stay handler-owned and are intentionally NOT encoded here (no behavior redesign).",
+  "type": "object",
+  "required": ["pending_id", "session_id", "creator_id", "raw_digest"],
+  "properties": {
+    "pending_id": { "type": "string" },
+    "session_id": { "type": "string" },
+    "creator_id": { "type": "string" },
+    "world_id": { "type": "string" },
+    "task_kind": { "type": "string" },
+    "raw_digest": { "type": "string" },
+    "created_at": { "type": "string" }
+  },
+  "additionalProperties": false
+}

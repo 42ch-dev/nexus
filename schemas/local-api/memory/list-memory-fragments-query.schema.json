@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/memory/list-memory-fragments-query.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ListMemoryFragmentsQuery",
+  "description": "Query parameters for GET /v1/local/memory/fragments. `keyword` is an optional case-insensitive LIKE filter; `limit` defaults to 50 (clamped 1..=250) when omitted.",
+  "type": "object",
+  "required": ["creator_id"],
+  "properties": {
+    "creator_id": { "type": "string" },
+    "keyword": { "type": "string" },
+    "limit": { "type": "integer" }
+  },
+  "additionalProperties": false
+}

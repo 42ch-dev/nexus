@@ -77,6 +77,20 @@ export * from './local-api/kb/KbEntrySummary';
 export * from './local-api/kb/ListKbEntriesQuery';
 export * from './local-api/kb/ListKbEntriesResponse';
 export * from './local-api/kb/PaginationInfo';
+export * from './local-api/memory/CountPendingReviewsQuery';
+export * from './local-api/memory/CountPendingReviewsResponse';
+export * from './local-api/memory/CreatePendingReviewRequest';
+export * from './local-api/memory/CreatePendingReviewResponse';
+export * from './local-api/memory/DeletePendingReviewQuery';
+export * from './local-api/memory/DeletePendingReviewResponse';
+export * from './local-api/memory/ListMemoryFragmentsQuery';
+export * from './local-api/memory/ListMemoryFragmentsResponse';
+export * from './local-api/memory/ListPendingReviewsQuery';
+export * from './local-api/memory/ListPendingReviewsResponse';
+export * from './local-api/memory/MemoryFragmentInfo';
+export * from './local-api/memory/PendingReviewInfo';
+export * from './local-api/memory/ReviewRequest';
+export * from './local-api/memory/ReviewResponse';
 export * from './local-api/orchestration/capabilities/CapabilityInfo';
 export * from './local-api/orchestration/capabilities/ListCapabilitiesQuery';
 export * from './local-api/orchestration/capabilities/ListCapabilitiesResponse';
@@ -247,6 +261,20 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   ListKbEntriesQuery: 1,
   ListKbEntriesResponse: 1,
   PaginationInfo: 1,
+  CountPendingReviewsQuery: 1,
+  CountPendingReviewsResponse: 1,
+  CreatePendingReviewRequest: 1,
+  CreatePendingReviewResponse: 1,
+  DeletePendingReviewQuery: 1,
+  DeletePendingReviewResponse: 1,
+  ListMemoryFragmentsQuery: 1,
+  ListMemoryFragmentsResponse: 1,
+  ListPendingReviewsQuery: 1,
+  ListPendingReviewsResponse: 1,
+  MemoryFragmentInfo: 1,
+  PendingReviewInfo: 1,
+  ReviewRequest: 1,
+  ReviewResponse: 1,
   CapabilityInfo: 1,
   ListCapabilitiesQuery: 2,
   ListCapabilitiesResponse: 2,
