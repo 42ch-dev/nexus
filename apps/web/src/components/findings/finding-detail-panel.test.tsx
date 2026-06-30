@@ -49,6 +49,15 @@ function recordingClient(finding: FindingDetailResponse): {
   return { client, calls };
 }
 
+/** A client that rejects updateFinding with a NexusClient-shaped error. */
+function rejectingClient(): NexusClient {
+  return {
+    updateFinding: vi.fn(() =>
+      Promise.reject(new Error('INVALID_TRANSITION')),
+    ),
+  } as unknown as NexusClient;
+}
+
 describe('FindingDetailPanel — status transitions', () => {
   it('renders a button for every reachable transition from open', () => {
     const { client } = recordingClient(makeFinding({ status: 'open' }));
@@ -79,6 +88,32 @@ describe('FindingDetailPanel — status transitions', () => {
     });
     expect(screen.getByText(/terminal/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /advance finding/i })).not.toBeInTheDocument();
+  });
+
+  it('disables non-adjacent transition buttons (client-side guard)', () => {
+    const { client } = recordingClient(makeFinding({ status: 'triaged' }));
+    renderInApp(<FindingDetailPanel workId="w1" finding={makeFinding({ status: 'triaged' })} />, {
+      client,
+    });
+    // triaged → open is not a valid adjacency.
+    expect(screen.getByRole('button', { name: /advance finding to open/i })).toBeDisabled();
+    // triaged → in_review is valid and should be enabled.
+    expect(screen.getByRole('button', { name: /advance finding to in review/i })).not.toBeDisabled();
+  });
+
+  it('does not reflect a rejected transition in the panel status', async () => {
+    const finding = makeFinding({ status: 'open' });
+    const client = rejectingClient();
+    renderInApp(<FindingDetailPanel workId="w1" finding={finding} />, { client });
+
+    fireEvent.click(screen.getByRole('button', { name: /advance finding to triaged/i }));
+    // The panel reads its status from the parent finding prop, not from the
+    // optimistic cache, so a failed mutation must not alter the displayed row.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /advance finding to triaged/i })).not.toBeDisabled(),
+    );
+    expect(screen.getByText('Open')).toBeInTheDocument();
+    expect(client.updateFinding).toHaveBeenCalledTimes(1);
   });
 });
 

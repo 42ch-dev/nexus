@@ -220,7 +220,9 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
     );
   };
   const onDeleteSuggestion = onDeleteRelationship;
-  const onPromoteAllSuggestions = async (rels: WorldKbRelationshipProjection[]) => {
+  const onPromoteAllSuggestions = async (
+    rels: WorldKbRelationshipProjection[],
+  ): Promise<{ succeeded: number; failed: number }> => {
     // TanStack Query v5 mutate() in a loop only delivers callbacks for the
     // LAST submitted call — earlier promotions' errors are silently dropped.
     // mutateAsync + Promise.allSettled ensures every outcome is observed.
@@ -255,11 +257,13 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
     }
     const failed = results.filter(
       (r): r is PromiseRejectedResult => r.status === 'rejected',
-    );
-    if (failed.length > 0) {
-      console.warn(`promoteAll: ${failed.length}/${rels.length} suggestions failed`);
+    ).length;
+    const succeeded = results.length - failed;
+    if (failed > 0) {
+      console.warn(`promoteAll: ${failed}/${rels.length} suggestions failed`);
     }
     bumpReseed();
+    return { succeeded, failed };
   };
 
   const inspectorPanelProps = {
@@ -322,8 +326,10 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
           <div className="pointer-events-none absolute inset-0" />
           {/* V1.76: confidence threshold filter (confirmed edges below the
               threshold are hidden; manual + suggested edges always show).
-              Slider emits 0.0–1.0 (step 0.05) matching confidence values and
-              the compass Phase 2b stepped bands at 0.4 / 0.7. */}
+              Slider emits 0.0–1.0 with step 0.05 (21 steps) so the label
+              tracks the same granularity as stored confidence values and the
+              compass Phase 2b stepped bands at 0.4 / 0.7 without oversensitive
+              micro-adjustments. */}
           <div className="pointer-events-auto absolute left-3 top-3 flex items-center gap-2 rounded-card border border-gray-alpha-400 bg-background-100 px-3 py-2 shadow-card">
             <label
               htmlFor="kb-confidence-threshold"
