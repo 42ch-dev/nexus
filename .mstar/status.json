@@ -18,7 +18,7 @@
     {
       "plan_id": "2026-06-30-v1.77-findings-remediation-ui",
       "iteration_id": "V1.77",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "@frontend-dev+@fullstack-dev",
       "effort": "M",
       "type": "feature",
@@ -33,7 +33,7 @@
     {
       "plan_id": "2026-06-30-v1.77-slate-clear",
       "iteration_id": "V1.77",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "@fullstack-dev+@frontend-dev",
       "effort": "S-M",
       "type": "hygiene",
@@ -5841,6 +5841,142 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "V1.77 QC followup (tbd-v1.77-qc-followup)",
+        "lifecycle": "open"
+      }
+    ],
+    "2026-06-30-v1.77-findings-remediation-ui": [
+      {
+        "id": "R-V177P0-QC1-S001",
+        "title": "useFinding forward-staging marker (qc1 S)",
+        "severity": "nit",
+        "source": "qc1 Suggestion",
+        "scope": "apps/web/src/api/queries.ts",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.78 QC followup (tbd-v1.78-qc-followup)",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V177P0-QC1-S002",
+        "title": "finding-detail-panel.tsx 305-line split (qc1 S)",
+        "severity": "low",
+        "source": "qc1 Suggestion",
+        "scope": "apps/web/src/components/findings/finding-detail-panel.tsx",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.78 QC followup (tbd-v1.78-qc-followup)",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V177P0-QC1-S003",
+        "title": "client adjacency golden test vs DAO (qc1 S)",
+        "severity": "low",
+        "source": "qc1 Suggestion",
+        "scope": "apps/web/src/lib/findings-lifecycle.ts",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.78 QC followup (tbd-v1.78-qc-followup)",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V177P0-QC1-S004",
+        "title": "getQueriesData/setQueryData asymmetry note (qc1 S)",
+        "severity": "nit",
+        "source": "qc1 Suggestion",
+        "scope": "apps/web/src/api/queries.ts",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.78 QC followup (tbd-v1.78-qc-followup)",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V177P0-QC2-S001",
+        "title": "client-side validation guard defense-in-depth (qc2 S)",
+        "severity": "nit",
+        "source": "qc2 Suggestion",
+        "scope": "finding-detail-panel.tsx",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.78 QC followup (tbd-v1.78-qc-followup)",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V177P0-QC2-S002",
+        "title": "detail-panel rollback assertion (qc2 S)",
+        "severity": "nit",
+        "source": "qc2 Suggestion",
+        "scope": "finding-detail-panel.test.tsx",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.78 QC followup (tbd-v1.78-qc-followup)",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V177P0-QC3-S001",
+        "title": "cross-Work invalidation-breadth regression test (qc3 S)",
+        "severity": "low",
+        "source": "qc3 Suggestion",
+        "scope": "apps/web/src/api/findings-mutation.test.tsx",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.78 QC followup (tbd-v1.78-qc-followup)",
+        "lifecycle": "open"
+      }
+    ],
+    "2026-06-30-v1.77-slate-clear": [
+      {
+        "id": "R-V177P1-QC1-S001",
+        "title": "register R-V176QC1-S002 open residual row in status.json (qc1 S)",
+        "severity": "nit",
+        "source": "qc1 Suggestion",
+        "scope": ".mstar/status.json",
+        "decision": "defer",
+        "owner": "@project-manager",
+        "target": "V1.78 QC followup (tbd-v1.78-qc-followup)",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V177P1-QC1-S002",
+        "title": "GRAPH_RELATIONSHIP_CAP exhaustion regression test (qc1 S)",
+        "severity": "low",
+        "source": "qc1 Suggestion",
+        "scope": "crates/nexus-daemon-runtime world_kb tests",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.78 QC followup (tbd-v1.78-qc-followup)",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V177P1-QC1-S003",
+        "title": "PROMOTE_BATCH_SIZE rationale comment (qc1 S)",
+        "severity": "nit",
+        "source": "qc1 Suggestion",
+        "scope": "world-kb-canvas.tsx",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.78 QC followup (tbd-v1.78-qc-followup)",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V177P1-QC2-S001",
+        "title": "rationale comments on new constants (qc2 S)",
+        "severity": "nit",
+        "source": "qc2 Suggestion",
+        "scope": "world_kb.rs + world-kb-canvas.tsx",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.78 QC followup (tbd-v1.78-qc-followup)",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V177P1-QC3-S001",
+        "title": "bulk Promote-all progress/failure copy (qc3 S)",
+        "severity": "low",
+        "source": "qc3 Suggestion",
+        "scope": "suggested-relationships-pane.tsx",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.78 QC followup (tbd-v1.78-qc-followup)",
         "lifecycle": "open"
       }
     ]
