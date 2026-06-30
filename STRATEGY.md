@@ -6,7 +6,15 @@ Nexus is a **local-first, AI-agent-driven creative writing tool** that uses an i
 
 ## What we build
 
-An open-source CLI (`nexus42`) and daemon for creative writers — novelists, worldbuilders, essayists — who need:
+Three product surfaces, all open-source, targeting creative writers — novelists, worldbuilders, essayists:
+
+| Surface | Tech | Role | What it does |
+|---------|------|------|-------------|
+| **`nexus42`** | Rust (CLI + daemon) | **Producer** | CLI commands, daemon lifecycle, local HTTP API, orchestration, World KB management |
+| **`web`** | TypeScript (React SPA) | **Consumer** | "Control Room + Setup" UI — served by the daemon, provides the infinite canvas and structured writing interface |
+| **`desktop`** | TypeScript + Tauri v2 (Rust) | **Consumer** | Native desktop shell — wraps the web SPA, adds OS-level capabilities (file open, reveal in Finder, sidecar lifecycle) |
+
+Shared needs they serve:
 
 - **Local-first privacy** — data stays on their machine by default; cloud sync is optional
 - **AI agent orchestration** — leverage the user's own local agents (via ACP or native) to assist in writing, worldbuilding, and narrative structuring, without forcing extra tooling burden
@@ -36,6 +44,8 @@ An open-source CLI (`nexus42`) and daemon for creative writers — novelists, wo
 | **SQLite** (via sqlx) | Local-first persistence — simple, portable, zero-ops |
 | **Native WASM host** (via wasmtime) | Embeddable compute without browser dependency |
 | **Axum** for local HTTP API | Modern, type-safe Rust web framework for the local API surface |
+| **React SPA** (`apps/web`) | Local-first Control Room + Setup UI — served by the daemon, Tauri-ready |
+| **Tauri v2** (`apps/desktop`) | Cross-platform desktop shell wrapping the web SPA with native OS capabilities |
 | **Pre-1.0** | Breaking changes expected and allowed; no deprecation period |
 
 ## Decision Log
@@ -44,6 +54,8 @@ An open-source CLI (`nexus42`) and daemon for creative writers — novelists, wo
 |----------|---------|------|
 | Monorepo with `apps/` + `crates/` + `schemas/` | Product surfaces, reusable Rust libs, and wire contracts each have their own lifecycle | Early 2025 |
 | `nexus42` binary hosts both CLI and daemon | Single binary for simplicity (no separate `nexus42d`) | V1.68 (June 2026) |
+| Web SPA (`apps/web`) as daemon-served Control Room UI | React SPA, served by the daemon over localhost HTTP; reuses generated contract types | V1.64 (June 2026) |
+| Desktop shell (`apps/desktop`) via Tauri v2 | Wraps the web SPA for native OS capabilities (file open, reveal in Finder, sidecar lifecycle); no second DTO set | V1.66 (June 2026) |
 | JSON Schema as wire truth source | Enables Rust + TypeScript codegen; avoids hand-written DTO drift | V1.0 planning |
 | Integration branches via PR only | All merges to `main` go through GitHub PR for review trail and CI gate | V1.39 (June 2026) |
 | `.mstar/` harness conventions | Morning Star harness for plan/QC/QA discipline | V1.39 (June 2026) |
