@@ -22,7 +22,7 @@ import {
 import { buildRelationshipRemoveRequest } from './relationship-inspector-logic';
 import { worldKbNodeTypes } from './entity-node';
 import { anchorNodes, deriveEdges, entryCountOf, graphSummary, layoutNodes } from './graph-projection';
-import { deriveRelationshipEdges } from './relationship-projection';
+import { deriveRelationshipEdges, filterRelationshipEdgesByConfidence } from './relationship-projection';
 import { WorldKbAltView } from './world-kb-alt-view';
 import { WorldKbCanvasConflicts } from './world-kb-canvas-conflicts';
 import { WorldKbHeader } from './world-kb-canvas-header';
@@ -30,7 +30,7 @@ import { InspectorPanel } from './world-kb-inspector-panel';
 import { useWorldKbCanvasState, buildEntityConflict, handleRelationshipConflict, handlePromoteConflict } from './use-world-kb-canvas-state';
 import { formatRelative, nodesToData } from './world-kb-canvas-utils';
 import { useReducedMotionPreference } from './use-view-preference';
-import type { WorldKbNodeData, WorldKbEdgeData } from './types';
+import type { WorldKbNodeData } from './types';
 import type { WorldKbRelationshipProjection } from '@42ch/nexus-contracts';
 
 export type { EntityField } from './world-kb-canvas-types';
@@ -41,13 +41,21 @@ export interface WorldKbCanvasProps {
 }
 
 export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
-  const graph = useWorldKbGraph(worldId);
-  const candidates = useWorldKbCandidates(worldId);
-  const patchRelationship = usePatchWorldKbRelationship(worldId);
-
   // List view is the default for keyboard-only / screen-reader users.
   const prefersReducedMotion = useReducedMotionPreference();
   const [showList, setShowList] = useState<boolean>(prefersReducedMotion);
+
+  // V1.76 flooding gate (qc3-W1): extraction suggestions are fetched ONLY when
+  // the Suggested triage pane is open (list view + Suggested tab). The confirmed
+  // graph (default, incl. graph mode) excludes `needs_review` rows so a world
+  // with many extraction suggestions does not flood the canvas on load. The
+  // active-tab signal is lifted from the alt-view via `onActiveTabChange`.
+  const [altTab, setAltTab] = useState<'entities' | 'relationships' | 'suggested'>('entities');
+  const includeSuggested = showList && altTab === 'suggested';
+
+  const graph = useWorldKbGraph(worldId, includeSuggested);
+  const candidates = useWorldKbCandidates(worldId);
+  const patchRelationship = usePatchWorldKbRelationship(worldId);
 
   const entities = graph.data?.entities ?? [];
   const candidateItems = candidates.data?.items ?? [];
@@ -75,7 +83,9 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
 
   // V1.76: confidence threshold for the graph view. Confirmed edges with
   // confidence below the threshold are hidden; manual edges (no confidence)
-  // and suggested (needs_review) edges always show. Default 0.0 = show all.
+  // and suggested (needs_review) edges always show. Stored in the 0.0–1.0
+  // range (matching confidence values + the compass Phase 2b bands); default
+  // 0.0 = show all.
   const [confidenceThreshold, setConfidenceThreshold] = useState(0);
 
   const projected = useMemo(() => {
@@ -83,17 +93,7 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
     const allNodes = [...anchorNodes(anchors), ...entityNodes] as Node[];
     const relEdges = deriveRelationshipEdges(relationships);
     // Apply the confidence threshold to confirmed relationship edges only.
-    const threshold = confidenceThreshold;
-    const visibleRelEdges =
-      threshold > 0
-        ? relEdges.filter((e) => {
-            const data = e.data as WorldKbEdgeData | undefined;
-            // Suggested edges always show; manual (no confidence) always show.
-            if (data?.needsReview) return true;
-            if (data?.confidence == null) return true;
-            return data.confidence >= threshold;
-          })
-        : relEdges;
+    const visibleRelEdges = filterRelationshipEdgesByConfidence(relEdges, confidenceThreshold);
     return {
       nodes: allNodes,
       edges: [...deriveEdges(anchors), ...visibleRelEdges],
@@ -256,6 +256,7 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
             onDeleteSuggestion={onDeleteSuggestion}
             onPromoteAllSuggestions={onPromoteAllSuggestions}
             suggestionPending={patchRelationship.isPending}
+            onActiveTabChange={setAltTab}
           />
           <InspectorPanel {...inspectorPanelProps} />
         </div>
@@ -272,20 +273,22 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
         >
           <div className="pointer-events-none absolute inset-0" />
           {/* V1.76: confidence threshold filter (confirmed edges below the
-              threshold are hidden; manual + suggested edges always show). */}
+              threshold are hidden; manual + suggested edges always show).
+              Slider emits 0.0–1.0 (step 0.05) matching confidence values and
+              the compass Phase 2b stepped bands at 0.4 / 0.7. */}
           <div className="pointer-events-auto absolute left-3 top-3 flex items-center gap-2 rounded-card border border-gray-alpha-400 bg-background-100 px-3 py-2 shadow-card">
             <label
               htmlFor="kb-confidence-threshold"
               className="text-label-12 text-gray-700"
             >
-              Confidence ≥ {(confidenceThreshold / 100).toFixed(2)}
+              Confidence ≥ {confidenceThreshold.toFixed(2)}
             </label>
             <input
               id="kb-confidence-threshold"
               type="range"
               min={0}
-              max={100}
-              step={5}
+              max={1}
+              step={0.05}
               value={confidenceThreshold}
               onChange={(e) => setConfidenceThreshold(Number(e.target.value))}
               className="h-1 w-32 cursor-pointer accent-canvas-strategy-accent"

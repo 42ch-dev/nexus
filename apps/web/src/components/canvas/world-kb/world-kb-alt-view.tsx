@@ -40,6 +40,13 @@ export interface WorldKbAltViewProps {
   onPromoteAllSuggestions?: (rels: WorldKbRelationshipProjection[]) => void;
   /** V1.76: whether a promote/delete mutation is in flight. */
   suggestionPending?: boolean;
+  /**
+   * V1.76 flooding gate (qc3-W1): notified when the active tab changes so the
+   * canvas can fetch extraction suggestions only while the Suggested pane is
+   * open (and only in list view). Optional — when omitted the tab is purely
+   * internal, preserving the pre-V1.76 call shape for existing consumers/tests.
+   */
+  onActiveTabChange?: (tab: Tab) => void;
 }
 
 export function WorldKbAltView({
@@ -56,8 +63,16 @@ export function WorldKbAltView({
   onDeleteSuggestion,
   onPromoteAllSuggestions,
   suggestionPending,
+  onActiveTabChange,
 }: WorldKbAltViewProps) {
   const [activeTab, setActiveTab] = useState<Tab>('entities');
+
+  // V1.76: wrap setActiveTab so the canvas can react to the Suggested pane
+  // opening/closing and gate the `include_suggested` graph fetch accordingly.
+  function selectTab(tab: Tab) {
+    setActiveTab(tab);
+    onActiveTabChange?.(tab);
+  }
 
   // V1.76: split relationships into confirmed (default table) and suggested.
   const storedRels = relationships.filter((r) => r.projection_direction === 'stored');
@@ -70,19 +85,19 @@ export function WorldKbAltView({
         <TabButton
           label="Entities"
           active={activeTab === 'entities'}
-          onClick={() => setActiveTab('entities')}
+          onClick={() => selectTab('entities')}
           count={nodes.length}
         />
         <TabButton
           label="Relationships"
           active={activeTab === 'relationships'}
-          onClick={() => setActiveTab('relationships')}
+          onClick={() => selectTab('relationships')}
           count={confirmedRels.length}
         />
         <TabButton
           label="Suggested"
           active={activeTab === 'suggested'}
-          onClick={() => setActiveTab('suggested')}
+          onClick={() => selectTab('suggested')}
           count={suggestedRels.length}
         />
       </div>

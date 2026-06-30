@@ -50,17 +50,22 @@ export interface WorldKbConflictDetails {
 /**
  * Read the entity graph projection (entities + source-anchor provenance).
  *
- * V1.76: always passes `include_suggested=true` so the client receives both
- * confirmed and `needs_review` (extraction-suggested) relationships in one
- * fetch. The canvas filters the confirmed graph (default) vs the Suggested
- * pane client-side, avoiding a refetch on toggle. The server still defaults
- * to excluding suggestions for other callers.
+ * V1.76 flooding gate (qc3-W1): defaults to `includeSuggested = false` so the
+ * confirmed graph excludes `needs_review` (extraction-suggested) relationships.
+ * The caller opts into suggestions only when the Suggested triage pane is open
+ * (`includeSuggested = true`); the two modes are distinct cache entries (the
+ * discriminator is appended after the shared graph prefix so mutation
+ * invalidation via `queryKeys.worldKb.graph(worldId)` still prefix-matches
+ * both variants and refetches whichever is mounted).
  */
-export function useWorldKbGraph(worldId: string | undefined) {
+export function useWorldKbGraph(
+  worldId: string | undefined,
+  includeSuggested = false,
+) {
   const client = useNexusClient();
   return useQuery({
-    queryKey: queryKeys.worldKb.graph(worldId ?? ''),
-    queryFn: async () => client.getWorldKbGraph(worldId!, { includeSuggested: true }),
+    queryKey: [...queryKeys.worldKb.graph(worldId ?? ''), { includeSuggested }],
+    queryFn: async () => client.getWorldKbGraph(worldId!, { includeSuggested }),
     enabled: Boolean(worldId),
     staleTime: 5_000,
   });

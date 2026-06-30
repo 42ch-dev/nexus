@@ -16,7 +16,7 @@ use nexus_contracts::{
     WorldKbEntityPatch, WorldKbPatchEntityRequest, WorldKbPromoteCandidateRequest,
 };
 use nexus_daemon_runtime::api::handlers::world_kb::{
-    get_candidates, get_graph, patch_entity, promote_candidate, CandidatesQuery,
+    get_candidates, get_graph, patch_entity, promote_candidate, CandidatesQuery, GraphQuery,
 };
 use nexus_daemon_runtime::workspace::WorkspaceState;
 use nexus_local_db::kb_extract_job::insert_pending;
@@ -505,9 +505,15 @@ async fn get_graph_returns_non_deleted_entities() {
     )
     .await;
 
-    let Json(resp) = get_graph(State(state.clone()), Path("wld_test_world".to_string()))
-        .await
-        .expect("graph should succeed");
+    let Json(resp) = get_graph(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Query(GraphQuery {
+            include_suggested: None,
+        }),
+    )
+    .await
+    .expect("graph should succeed");
     assert_eq!(resp.entities.len(), 1, "deleted entities are excluded");
     assert_eq!(resp.entities[0].key_block_id, "kb_one");
     assert!(
