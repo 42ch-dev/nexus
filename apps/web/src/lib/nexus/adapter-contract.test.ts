@@ -141,6 +141,10 @@ describe('TauriClient transport parity (thin-over-BrowserClient)', () => {
     await client.inspectSchedule('sch1');
     await client.listCapabilities();
     await client.listFindings(workId);
+    // V1.77 findings-remediation promotion (getFinding/updateFinding) — the
+    // types + daemon routes already existed; these exercise the new TS surface.
+    await client.getFinding(workId, 'f1');
+    await client.updateFinding(workId, 'f1', { status: 'triaged' });
     await client.listPresets();
     await client.scaffoldPreset({ name: 'foo' });
     await client.validatePreset({ path: '/p.yaml' });
@@ -176,7 +180,7 @@ describe('TauriClient transport parity (thin-over-BrowserClient)', () => {
     // stub did — its path would be missing and this set would be smaller.
     const paths = [...seen].sort();
     expect(paths.every((p) => p.includes('/v1/local/'))).toBe(true);
-    expect(seen.size).toBe(27);
+    expect(seen.size).toBe(29);
     // Spot-check the chapter surface (the Q5 action target).
     expect(seen).toContain('GET /v1/local/works/w1/chapters/1/body');
     expect(seen).toContain('GET /v1/local/works/w1/chapters/1/outline');
@@ -189,6 +193,9 @@ describe('TauriClient transport parity (thin-over-BrowserClient)', () => {
     expect(seen).toContain('GET /v1/local/presets/foo');
     expect(seen).toContain('PATCH /v1/local/presets/foo');
     expect(seen).toContain('DELETE /v1/local/presets/foo');
+    // Spot-check the V1.77 findings-remediation surface.
+    expect(seen).toContain('GET /v1/local/works/w1/findings/f1');
+    expect(seen).toContain('PATCH /v1/local/works/w1/findings/f1');
   });
 });
 
@@ -441,5 +448,76 @@ describe('NexusClient preset-method parity guard (R-V167P1-QC3-S1)', () => {
     for (const method of PRESET_METHODS) {
       expect(typeof client[method], `TauriClient.${method} must be a function`).toBe('function');
     }
+  });
+});
+
+// ── 5. Findings-method parity guard (V1.77) ────────────────────────────────
+
+/**
+ * The V1.77 findings-remediation promotion added `getFinding`/`updateFinding`
+ * to the `NexusClient` interface. This guard mirrors the preset-method guard:
+ * it fails at compile time (the `satisfies` constraint) if the interface drops
+ * either method, and at runtime if an adapter implementation is missing it.
+ */
+const FINDINGS_METHODS = [
+  'getFinding',
+  'updateFinding',
+] as const satisfies readonly (keyof NexusClient)[];
+
+describe('NexusClient findings-method parity guard (V1.77)', () => {
+  it('BrowserClient implements every findings method on the NexusClient interface', () => {
+    const client = new BrowserClient();
+    for (const method of FINDINGS_METHODS) {
+      expect(typeof client[method], `BrowserClient.${method} must be a function`).toBe('function');
+    }
+  });
+
+  it('TauriClient inherits every findings method (thin-over-BrowserClient)', () => {
+    const client = new TauriClient({
+      fetchImpl: async () =>
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    });
+    for (const method of FINDINGS_METHODS) {
+      expect(typeof client[method], `TauriClient.${method} must be a function`).toBe('function');
+    }
+  });
+
+  it('getFinding / updateFinding route to the {finding_id} path with GET / PATCH', async () => {
+    // Contract edge: the two promoted findings methods target
+    // `/v1/local/works/{work_id}/findings/{finding_id}` with GET/PATCH and
+    // URL-encode both path params. Pinned via the fetchImpl seam (this file owns
+    // the adapter boundary — fetchImpl injection + path serialization).
+    const seen: { method: string; url: string; body?: unknown }[] = [];
+    const fetchImpl: typeof fetch = async (input, init) => {
+      seen.push({
+        method: init?.method ?? 'GET',
+        url: String(input),
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      });
+      return new Response(
+        JSON.stringify({
+          finding_id: 'f1', work_id: 'w1', severity: 'major', status: 'open',
+          title: 't', description: 'd', target_executor: 'none', kind: 'k',
+          created_at: 1, updated_at: 1,
+        }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    };
+
+    const client = new BrowserClient({ fetchImpl });
+    await client.getFinding('w1', 'f1');
+    await client.updateFinding('w1', 'f1', { status: 'triaged', target_executor: 'write' });
+
+    expect(seen).toEqual([
+      { method: 'GET', url: '/v1/local/works/w1/findings/f1' },
+      {
+        method: 'PATCH',
+        url: '/v1/local/works/w1/findings/f1',
+        body: { status: 'triaged', target_executor: 'write' },
+      },
+    ]);
   });
 });
