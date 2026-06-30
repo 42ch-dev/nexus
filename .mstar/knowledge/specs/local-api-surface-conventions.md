@@ -2,10 +2,10 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — V1.74 amendment (§7.6 World KB relationship patch route extending the V1.73 World KB route pattern; additive relationship DTOs; per-row OCC with `expected_version`/`version` against `kb_relationships.revision`). Prior: V1.73 amendment (§7 World KB canvas structured patch/read routes extending the V1.71/V1.72 patch-route convention; additive World KB DTOs; per-row OCC with `expected_version`/`version`), V1.72 amendment (§7 outline/timeline structured patch routes extending the V1.71 patch-route convention; additive outline DTOs; `@42ch/nexus-contracts` 0.7.0 → 0.8.0 by default), V1.71 amendment (§7 structured patch-route convention for canvas-like surfaces; Strategy β patch routes; `@42ch/nexus-contracts` 0.6.0 → 0.7.0 by default), V1.67 amendment (§3.2 casing ratification + §4 `items` enforcement + §5 sort-param contract; `@42ch/nexus-contracts` 0.5.0 → 0.6.0), V1.64 cursor/error/`items` conventions + V1.65 chapter-content file-backed route rules. |
+| **Status** | Normative — V1.77 amendment (§11 findings PATCH route as a non-OCC resource PATCH; last-writer-wins, no revision/version, no conflict modal; cross-profile consumption). Prior: V1.74 amendment (§7.6 World KB relationship patch route extending the V1.73 World KB route pattern; additive relationship DTOs; per-row OCC with `expected_version`/`version` against `kb_relationships.revision`), V1.73 amendment (§7 World KB canvas structured patch/read routes extending the V1.71/V1.72 patch-route convention; additive World KB DTOs; per-row OCC with `expected_version`/`version`), V1.72 amendment (§7 outline/timeline structured patch routes extending the V1.71 patch-route convention; additive outline DTOs; `@42ch/nexus-contracts` 0.7.0 → 0.8.0 by default), V1.71 amendment (§7 structured patch-route convention for canvas-like surfaces; Strategy β patch routes; `@42ch/nexus-contracts` 0.6.0 → 0.7.0 by default), V1.67 amendment (§3.2 casing ratification + §4 `items` enforcement + §5 sort-param contract; `@42ch/nexus-contracts` 0.5.0 → 0.6.0), V1.64 cursor/error/`items` conventions + V1.65 chapter-content file-backed route rules. |
 | **Document class** | Master |
 | **Scope** | Cross-resource Local API response/query conventions for schemas under `schemas/local-api/` and handlers under `nexus-daemon-runtime` |
-| **Coordinates with** | [schemas-directory-layout.md](./schemas-directory-layout.md), [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md), [daemon-runtime.md](./daemon-runtime.md) |
+| **Coordinates with** | [schemas-directory-layout.md](./schemas-directory-layout.md), [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md), [daemon-runtime.md](./daemon-runtime.md), [findings-lifecycle.md](./findings-lifecycle.md) |
 | **Evidence** | [surface-audit.md](../../plans/reports/2026-06-24-v1.63-local-api-orchestration-and-preset-dtos/surface-audit.md) |
 
 ---
@@ -537,3 +537,55 @@ V1.66 desktop-shell convention:
 6. **V1.66 does not introduce a dynamic port handshake endpoint or daemon-lifecycle Local API schema** (`wire_contracts_changed: false`).
 
 If a future iteration introduces dynamic port allocation, it must define a separate launcher-to-app handshake contract **before** adding any Local API schema.
+
+---
+
+## 11. Findings PATCH route (V1.77 — non-OCC resource PATCH)
+
+The findings PATCH route (`PATCH /v1/local/works/{work_id}/findings/{finding_id}`) is a **non-OCC resource PATCH** — last-writer-wins, no `revision`/`version` field, no conflict detection. It is consumed by the V1.77 findings-remediation UI surface (Control-Room table → full triage authoring surface).
+
+### 11.1 Route
+
+```text
+PATCH /v1/local/works/{work_id}/findings/{finding_id}
+```
+
+Request body: `UpdateFindingRequest` (7 optional fields — `severity`, `status`, `title`, `description`, `target_executor`, `kind`, `rule_suggestion`). All fields optional; absent fields are not patched.
+
+Response: `FindingDetailResponse` (the canonical finding DTO, same shape as `GET` detail).
+
+Error codes:
+
+| HTTP | Code | Condition |
+|------|------|-----------|
+| 422 | `invalid_transition` | Status transition violates the 6-state lifecycle adjacency (e.g. `resolved → open`, `duplicate → anything`, self-loop). |
+| 422 | `invalid_input` | Patched enum value is not a member of its allowed set (e.g. unknown status/severity/target_executor). |
+| 404 | `not_found` | Finding or Work not found for the active creator. |
+
+### 11.2 OCC / conflict policy
+
+**Last-writer-wins.** The findings table has no `revision`/`version`/`expected_version` column or field. The UPDATE is a simple `WHERE creator_id = ? AND finding_id = ?` with no compare-and-swap predicate (`crates/nexus-local-db/src/findings.rs:1037-1039`).
+
+This is intentional and distinct from the canvas OCC surfaces (§7): the canvas surfaces (Strategy/Outline/Timeline/World KB) have concurrent-author conflict scenarios because the author and AI orchestration both write to the same graph; findings triage is single-author (the author triages their own findings — the producer creates, the author triages, no concurrent-author conflict). No conflict modal is needed for the findings PATCH.
+
+The transition-guard read-before-write (`enforce_status_transition`, `findings.rs:863-895`) is best-effort under SQLite's serialized writer. A stronger atomic CAS was identified as an upgrade path (`findings.rs:851-856` doc comment) but has not been implemented.
+
+### 11.3 Relationship to canvas OCC convention
+
+The findings PATCH does **not** follow the structured canvas patch convention in §7. Specifically:
+
+- **No `base_revision`/`expected_version`** — the route has no revision field and no OCC predicate.
+- **No `new_revision`/`version` in response** — `FindingDetailResponse` has no revision field.
+- **No 409 Conflict** — the route returns 422 for transition/enum errors, 404 for not-found, but never 409.
+- **No `validation_summary` or `side_effects`** — the response is the canonical `FindingDetailResponse` DTO.
+
+This is the correct shape for a simple CRUD PATCH on a non-OCC resource. Future resources that need row-level OCC should follow the §7 canvas convention; resources that don't should follow this findings pattern.
+
+### 11.4 Contract status
+
+- **Schema on disk**: `schemas/local-api/findings/update-finding-request.schema.json` (unchanged since V1.49).
+- **Codegen**: `UpdateFindingRequest` + `CreateFindingRequest` are fully codegen'd into both Rust and TypeScript and barrel-exported by `@42ch/nexus-contracts` (confirmed `generated/index.ts:66,71`).
+- **Handler**: `update_finding_handler` in `crates/nexus-daemon-runtime/src/api/handlers/findings.rs:380-451`.
+- **DAO enforcement**: `update_finding` in `crates/nexus-local-db/src/findings.rs:927-1042` (enum validation + transition enforcement + dynamic SET clause builder).
+- **`wire_contracts_changed`**: `FALSE` for V1.77 — the route, schema, codegen, and handler are unchanged. Only consumer-side consumption is additive.
+- **Spec cross-reference**: [findings-lifecycle.md](./findings-lifecycle.md) — the 6-state lifecycle, `target_executor` routing, and UI remediation surface.

@@ -1,9 +1,69 @@
 {
   "version": 1,
   "updated_at": "2026-06-30T04:00:00Z",
-  "plans": [],
+  "plans": [
+    {
+      "plan_id": "2026-06-30-v1.77-findings-remediation-prepare",
+      "iteration_id": "V1.77",
+      "status": "Done",
+      "owner": "@project-manager",
+      "effort": "S",
+      "type": "prepare",
+      "working_branch": "iteration/v1.77",
+      "merge_target": "iteration/v1.77",
+      "task_category": "docs",
+      "wire_contracts_changed": false,
+      "depends_on": []
+    },
+    {
+      "plan_id": "2026-06-30-v1.77-findings-remediation-ui",
+      "iteration_id": "V1.77",
+      "status": "Todo",
+      "owner": "@frontend-dev+@fullstack-dev",
+      "effort": "M",
+      "type": "feature",
+      "working_branch": "feature/v1.77-findings-remediation",
+      "merge_target": "iteration/v1.77",
+      "task_category": "visual",
+      "wire_contracts_changed": false,
+      "depends_on": [
+        "2026-06-30-v1.77-findings-remediation-prepare"
+      ]
+    },
+    {
+      "plan_id": "2026-06-30-v1.77-slate-clear",
+      "iteration_id": "V1.77",
+      "status": "Todo",
+      "owner": "@fullstack-dev+@frontend-dev",
+      "effort": "S-M",
+      "type": "hygiene",
+      "working_branch": "feature/v1.77-slate-clear",
+      "merge_target": "iteration/v1.77",
+      "task_category": "logic",
+      "wire_contracts_changed": false,
+      "depends_on": [
+        "2026-06-30-v1.77-findings-remediation-prepare"
+      ]
+    },
+    {
+      "plan_id": "2026-06-30-v1.77-post-canvas-inflection-closeout",
+      "iteration_id": "V1.77",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "effort": "S",
+      "type": "closure",
+      "working_branch": "iteration/v1.77",
+      "merge_target": "iteration/v1.77",
+      "task_category": "docs",
+      "wire_contracts_changed": false,
+      "depends_on": [
+        "2026-06-30-v1.77-findings-remediation-ui",
+        "2026-06-30-v1.77-slate-clear"
+      ]
+    }
+  ],
   "metadata": {
-    "integration_branch": "iteration/v1.76",
+    "integration_branch": "iteration/v1.77",
     "integration_branch_retired": true,
     "last_integration_branch": "iteration/v1.76",
     "integration_merge_target": "main",
@@ -49,7 +109,7 @@
       "refreshed_at": "2026-06-30T04:00:00Z",
       "refreshed_reason": "V1.76 closure: 9 pre-existing residuals resolved (slate cleared); 3 new QC suggestions registered for V1.77."
     },
-    "updated_at": "2026-06-29T05:11:00Z",
+    "updated_at": "2026-06-30",
     "spec_integration_branch": "iteration/v1.76",
     "wave1_merged_at": null
   },
