@@ -364,6 +364,77 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             StaleFindingsResponse
         ),
+        // ── local-api/memory/ (V1.78 P0 — creator memory review-loop) ─────
+        entry!(
+            "schemas/local-api/memory/create-pending-review-request.schema.json",
+            Strict,
+            CreatePendingReviewRequest
+        ),
+        entry!(
+            "schemas/local-api/memory/create-pending-review-response.schema.json",
+            Strict,
+            CreatePendingReviewResponse
+        ),
+        entry!(
+            "schemas/local-api/memory/pending-review-info.schema.json",
+            Strict,
+            PendingReviewInfo
+        ),
+        entry!(
+            "schemas/local-api/memory/list-pending-reviews-query.schema.json",
+            Strict,
+            ListPendingReviewsQuery
+        ),
+        entry!(
+            "schemas/local-api/memory/list-pending-reviews-response.schema.json",
+            Strict,
+            ListPendingReviewsResponse
+        ),
+        entry!(
+            "schemas/local-api/memory/count-pending-reviews-query.schema.json",
+            Strict,
+            CountPendingReviewsQuery
+        ),
+        entry!(
+            "schemas/local-api/memory/count-pending-reviews-response.schema.json",
+            Strict,
+            CountPendingReviewsResponse
+        ),
+        entry!(
+            "schemas/local-api/memory/delete-pending-review-query.schema.json",
+            Strict,
+            DeletePendingReviewQuery
+        ),
+        entry!(
+            "schemas/local-api/memory/delete-pending-review-response.schema.json",
+            Strict,
+            DeletePendingReviewResponse
+        ),
+        entry!(
+            "schemas/local-api/memory/review-request.schema.json",
+            Strict,
+            ReviewRequest
+        ),
+        entry!(
+            "schemas/local-api/memory/review-response.schema.json",
+            Strict,
+            ReviewResponse
+        ),
+        entry!(
+            "schemas/local-api/memory/memory-fragment-info.schema.json",
+            Strict,
+            MemoryFragmentInfo
+        ),
+        entry!(
+            "schemas/local-api/memory/list-memory-fragments-query.schema.json",
+            Strict,
+            ListMemoryFragmentsQuery
+        ),
+        entry!(
+            "schemas/local-api/memory/list-memory-fragments-response.schema.json",
+            Strict,
+            ListMemoryFragmentsResponse
+        ),
         // ── local-api/schedule/ (V1.63 P1) ───────────────────────────────
         entry!(
             "schemas/local-api/schedule/add-schedule-request.schema.json",

@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/memory/count-pending-reviews-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus CountPendingReviewsResponse",
+  "description": "Response body for GET /v1/local/memory/pending-review/count. `count` is the number of pending-review rows for the creator.",
+  "type": "object",
+  "required": ["count"],
+  "properties": {
+    "count": { "type": "integer" }
+  },
+  "additionalProperties": false
+}
