@@ -1,0 +1,20 @@
+{
+  "plan_id": "2026-06-30-v1.76-slate-clear",
+  "archived_at": "2026-06-30",
+  "schema_version": 1,
+  "plan": {
+    "plan_id": "2026-06-30-v1.76-slate-clear",
+    "iteration_id": "V1.76",
+    "status": "Done",
+    "owner": "frontend-dev,fullstack-dev",
+    "effort": "S",
+    "type": "implement",
+    "working_branch": "feature/v1.76-slate-clear",
+    "merge_target": "iteration/v1.76",
+    "task_category": "logic",
+    "wire_contracts_changed": false,
+    "depends_on": [
+      "2026-06-30-v1.76-compass-and-plan"
+    ]
+  }
+}

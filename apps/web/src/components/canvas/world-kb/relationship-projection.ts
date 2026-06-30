@@ -12,6 +12,7 @@ import type {
 } from '@42ch/nexus-contracts';
 
 import type { WorldKbEdgeData } from './types';
+import { confidenceBand, confidenceEdgeStyle } from './relationship-confidence';
 
 /** Human-readable label for each core relationship kind (Title Case). */
 export const RELATIONSHIP_KIND_LABELS: Record<WorldKbRelationshipKind, string> = {
@@ -51,29 +52,67 @@ export function deriveRelationshipEdges(
   relationships: WorldKbRelationshipProjection[],
 ): Edge[] {
   return relationships.map((rel) => {
+    const needsReview = rel.needs_review ?? false;
     const data: WorldKbEdgeData = {
       relationType: 'relationship',
       sourceAnchorIds: rel.source_anchor_ids ?? [],
       confidence: rel.confidence,
       promotionState: undefined,
+      needsReview,
+      source: rel.source,
     };
     const label = relationshipEdgeLabel(rel);
+    // V1.76: base stroke color by relation kind; the confidence band then
+    // modulates stroke-width + opacity (PM-locked stepped bands). Suggested
+    // (needs_review) edges render dashed regardless of band.
     const strokeColor = rel.relation_type === 'custom'
       ? 'var(--color-canvas-worldkb-relationship-edge-custom)'
       : rel.symmetric
         ? 'var(--color-canvas-worldkb-relationship-edge-symmetric)'
         : 'var(--color-canvas-worldkb-relationship-edge-default)';
-    const style = { stroke: strokeColor };
+    const band = confidenceBand(rel.confidence);
+    const style = confidenceEdgeStyle(band, strokeColor, needsReview);
+    const labelText = needsReview ? `${label} · suggested` : label;
     return {
       id: `relationship:${rel.relationship_id}:${rel.projection_direction}`,
       source: `entity:${rel.source_entity_id}`,
       target: `entity:${rel.target_entity_id}`,
       type: 'default',
-      label,
+      label: labelText,
       data,
       selectable: true,
       focusable: true,
       style,
     } satisfies Edge;
+  });
+}
+
+/**
+ * Filter relationship edges by a confidence threshold (V1.76 γ).
+ *
+ * Confirmed edges whose `confidence` is strictly below `threshold` are hidden.
+ * Suggested (`needs_review`) edges and manual edges (no confidence) always
+ * remain visible — the threshold only thins confirmed edges the author has
+ * already promoted. `threshold` is in the `0.0`–`1.0` range (matching the
+ * confidence value range and the compass Phase 2b stepped bands at 0.4 / 0.7);
+ * `0` (or below) shows everything.
+ *
+ * Extracted from the canvas so the threshold math is unit-testable in
+ * isolation — the slider emits `0.0`–`1.0` (step `0.05`), so the comparison is
+ * direct (no `/100` rescale). Regression for qc3-W3: an earlier revision stored
+ * the slider as `0`–`100` and compared it against `0.0`–`1.0` confidence,
+ * hiding every confirmed edge at the first non-zero step.
+ */
+export function filterRelationshipEdgesByConfidence(
+  edges: Edge[],
+  threshold: number,
+): Edge[] {
+  if (threshold <= 0) return edges;
+  return edges.filter((e) => {
+    const data = e.data as WorldKbEdgeData | undefined;
+    // Suggested edges always show; manual (no confidence) always show.
+    if (data?.needsReview) return true;
+    if (data?.confidence == null) return true;
+    return data.confidence >= threshold;
   });
 }

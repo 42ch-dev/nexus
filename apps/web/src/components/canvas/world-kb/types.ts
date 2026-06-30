@@ -56,6 +56,10 @@ export interface WorldKbEdgeData {
   confidence?: number;
   /** Promotion state snapshot if the edge records a promotion event. */
   promotionState?: EntityLifecycle;
+  /** V1.76: true when the edge is an extraction suggestion (needs_review=1). */
+  needsReview?: boolean;
+  /** V1.76: relationship provenance — 'manual' (author) or 'extraction'. */
+  source?: 'manual' | 'extraction';
 }
 
 /** All BlockType variants that may appear as World KB entities. */

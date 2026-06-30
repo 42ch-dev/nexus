@@ -1,58 +1,56 @@
 {
   "version": 1,
-  "updated_at": "2026-06-30T01:00:00Z",
+  "updated_at": "2026-06-30T04:00:00Z",
   "plans": [],
   "metadata": {
-    "integration_branch": "iteration/v1.75",
+    "integration_branch": "iteration/v1.76",
     "integration_branch_retired": true,
-    "last_integration_branch": "iteration/v1.75",
+    "last_integration_branch": "iteration/v1.76",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.76 (pending /iteration-start)",
+    "latest_active_iteration": "V1.77 (pending /iteration-start)",
     "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.75",
-      "compass": "v1.75-canvas-pivot-and-qc-followup-compass-v1.md",
-      "shipped_at": "2026-06-29",
+      "iteration": "V1.76",
+      "compass": "v1.76-relationship-gamma-and-slate-clear-compass-v1.md",
+      "shipped_at": "2026-06-30",
       "plan_count": 4,
       "plan_count_done": 4,
       "wire_contracts_changed": true,
-      "wire_contracts_note": "V1.75 Track A: additive content field on outline-patch-chapter-set + removed V1.65 PUT outline route/DTO; @42ch/nexus-contracts 0.10.0 -> 0.11.0. Track B: B1 codegen Eq verified correct (no change); B2-B8 fixes. Merged via PR #101 @ 2d6d0d32 after greploop (4/5 Greptile; flaky-test + CI-time + content-editor fixes).",
-      "profile_b_compaction": "done (V1.75 P-last closure)",
+      "wire_contracts_note": "V1.76 Track A: needs_review + source on WorldKbRelationshipProjection + extraction relationship DTO + include_suggested param; @42ch/nexus-contracts 0.11.0 -> 0.12.0. Track B: no wire change.",
+      "profile_b_compaction": "done (V1.76 P-last closure)",
       "plan_ids": [
-        "2026-06-29-v1.75-compass-and-plan",
-        "2026-06-29-v1.75-canvas-pivot",
-        "2026-06-29-v1.75-qc-followup",
-        "2026-06-29-v1.75-closure"
+        "2026-06-30-v1.76-compass-and-plan",
+        "2026-06-30-v1.76-relationship-gamma",
+        "2026-06-30-v1.76-slate-clear",
+        "2026-06-30-v1.76-closure"
       ],
       "residual_summary": {
-        "closed_in_v175": 8,
-        "new_qc_followup_v176": 8,
-        "greptile_4_5_open": 1,
-        "open_post_v175": 9
-      },
-      "merge_commit": "2d6d0d32"
+        "closed_in_v176": 9,
+        "new_qc_followup_v177": 3,
+        "open_post_v176": 3
+      }
     },
     "tech_debt_summary": {
-      "total_open": 9,
+      "total_open": 3,
       "total_deferred": 0,
-      "total_resolved": 280,
+      "total_resolved": 289,
       "total_archived": 0,
       "by_severity_active": {
-        "low": 4,
-        "nit": 5
+        "low": 2,
+        "nit": 1
       },
       "by_target_active": {
-        "V1.76 QC followup (tbd-v1.76-qc-followup)": 9
+        "V1.77 QC followup (tbd-v1.77-qc-followup)": 3
       },
-      "refreshed_at": "2026-06-30T01:00:00Z",
-      "refreshed_reason": "V1.75 post-merge closeout: PR #101 merged @ 2d6d0d32. 8 V1.75 QC-tri-review suggestions remain open (V1.76); +1 Greptile 4/5 UX finding (R-V175GREPTILE-001, chapter-switch/save-in-flight misalignment, low, not data loss)."
+      "refreshed_at": "2026-06-30T04:00:00Z",
+      "refreshed_reason": "V1.76 closure: 9 pre-existing residuals resolved (slate cleared); 3 new QC suggestions registered for V1.77."
     },
     "updated_at": "2026-06-29T05:11:00Z",
-    "spec_integration_branch": "iteration/v1.75",
+    "spec_integration_branch": "iteration/v1.76",
     "wave1_merged_at": null
   },
   "residual_findings": {
@@ -5605,7 +5603,13 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "V1.76 QC followup (tbd-v1.76-qc-followup)",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-06-30-v1.76-slate-clear",
+          "commit": "7807603f",
+          "at": "2026-06-30",
+          "note": "Closed in V1.76 (QC 3/3 Approve + QA Pass)."
+        }
       },
       {
         "id": "R-V175QC1-S002",
@@ -5616,7 +5620,13 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.76 QC followup (tbd-v1.76-qc-followup)",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-06-30-v1.76-slate-clear",
+          "commit": "7807603f",
+          "at": "2026-06-30",
+          "note": "Closed in V1.76 (QC 3/3 Approve + QA Pass)."
+        }
       },
       {
         "id": "R-V175QC1-S003",
@@ -5627,7 +5637,13 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "V1.76 QC followup (tbd-v1.76-qc-followup)",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-06-30-v1.76-slate-clear",
+          "commit": "7807603f",
+          "at": "2026-06-30",
+          "note": "Closed in V1.76 (QC 3/3 Approve + QA Pass)."
+        }
       },
       {
         "id": "R-V175QC1-DOC003",
@@ -5638,7 +5654,13 @@
         "decision": "defer",
         "owner": "@architect",
         "target": "V1.76 QC followup (tbd-v1.76-qc-followup)",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-06-30-v1.76-slate-clear",
+          "commit": "7807603f",
+          "at": "2026-06-30",
+          "note": "Closed in V1.76 (QC 3/3 Approve + QA Pass)."
+        }
       },
       {
         "id": "R-V175QC2-S001",
@@ -5649,7 +5671,13 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.76 QC followup (tbd-v1.76-qc-followup)",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-06-30-v1.76-slate-clear",
+          "commit": "7807603f",
+          "at": "2026-06-30",
+          "note": "Closed in V1.76 (QC 3/3 Approve + QA Pass)."
+        }
       },
       {
         "id": "R-V175QC2-S002",
@@ -5660,7 +5688,13 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.76 QC followup (tbd-v1.76-qc-followup)",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-06-30-v1.76-slate-clear",
+          "commit": "7807603f",
+          "at": "2026-06-30",
+          "note": "Closed in V1.76 (QC 3/3 Approve + QA Pass)."
+        }
       },
       {
         "id": "R-V175QC2-S003",
@@ -5671,7 +5705,13 @@
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.76 QC followup (tbd-v1.76-qc-followup)",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-06-30-v1.76-slate-clear",
+          "commit": "7807603f",
+          "at": "2026-06-30",
+          "note": "Closed in V1.76 (QC 3/3 Approve + QA Pass)."
+        }
       },
       {
         "id": "R-V175QC3-S001",
@@ -5682,7 +5722,13 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "V1.76 QC followup (tbd-v1.76-qc-followup)",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-06-30-v1.76-slate-clear",
+          "commit": "7807603f",
+          "at": "2026-06-30",
+          "note": "Closed in V1.76 (QC 3/3 Approve + QA Pass)."
+        }
       },
       {
         "id": "R-V175GREPTILE-001",
@@ -5693,8 +5739,49 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "V1.76 QC followup (tbd-v1.76-qc-followup)",
-        "lifecycle": "open",
-        "note": "Not data loss (Greptile: 'a UX misalignment rather than data loss'). The dirty/saving guard + chapterNumber-switch reset + contentVersion forced-reset logic are sound but complex; a chapter switch while a save is in flight produces a transient UX inconsistency. Track for a V1.76 state-machine simplification. The 3/5 Greptile findings (published-content guard, onUseCurrent stale cache, dismiss-content-loss) were resolved in the greploop (commits fca82d0b + earlier)."
+        "lifecycle": "resolved",
+        "note": "Not data loss (Greptile: 'a UX misalignment rather than data loss'). The dirty/saving guard + chapterNumber-switch reset + contentVersion forced-reset logic are sound but complex; a chapter switch while a save is in flight produces a transient UX inconsistency. Track for a V1.76 state-machine simplification. The 3/5 Greptile findings (published-content guard, onUseCurrent stale cache, dismiss-content-loss) were resolved in the greploop (commits fca82d0b + earlier).",
+        "resolution": {
+          "plan_id": "2026-06-30-v1.76-relationship-gamma",
+          "commit": "7807603f",
+          "at": "2026-06-30",
+          "note": "Closed in V1.76 (QC 3/3 Approve + QA Pass)."
+        }
+      }
+    ],
+    "2026-06-30-v1.76-relationship-gamma": [
+      {
+        "id": "R-V176QC1-S001",
+        "title": "LlmExtractOutcome.relationships field discoverability (qc1 F-002)",
+        "severity": "low",
+        "source": "qc1 F-002",
+        "scope": "llm_extract.rs",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.77 QC followup (tbd-v1.77-qc-followup)",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V176QC1-S002",
+        "title": "relationship graph pagination TODO (qc1 F-003)",
+        "severity": "low",
+        "source": "qc1 F-003",
+        "scope": "world_kb.rs GET graph",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.77 QC followup (tbd-v1.77-qc-followup)",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V176QC3-S001",
+        "title": "bulk-promote throttling (qc3 suggestion)",
+        "severity": "nit",
+        "source": "qc3 suggestion",
+        "scope": "suggested-relationships-pane.tsx",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.77 QC followup (tbd-v1.77-qc-followup)",
+        "lifecycle": "open"
       }
     ]
   }
