@@ -7,6 +7,9 @@ Domain-specific rules live in subdirectory AGENTS.md files listed below.
 
 This is the **public open-source monorepo** containing `nexus42` CLI (Rust, with integrated daemon runtime), JSON Schema wire contracts (truth source for TypeScript/Rust codegen), and published package `@42ch/nexus-contracts` (npm). Rust `nexus-contracts` crate is monorepo-internal only.
 
+- `STRATEGY.md` — project vision, guiding principles, technology direction
+- `CONCEPTS.md` — core domain vocabulary for Nexus OSS
+
 **Not in this repo:** `nexus-platform` (private TypeScript monorepo for web/API/services) — do not reference its tech stack here.
 
 **Harness `status.json`:** Open QC residual rows are stored under **root** `residual_findings` in `.mstar/status.json`. Details: [`.mstar/AGENTS.md`](.mstar/AGENTS.md).
