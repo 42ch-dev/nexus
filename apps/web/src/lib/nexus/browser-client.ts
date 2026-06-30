@@ -20,6 +20,7 @@ import type {
   CreateWorkResponse,
   EditCoreContextRequest,
   EditCoreContextResponse,
+  FindingDetailResponse,
   GetPresetResponse,
   InspectScheduleResponse,
   ListCapabilitiesQuery,
@@ -51,6 +52,7 @@ import type {
   StrategyPatchStateRequest,
   StrategyPatchTransitionRequest,
   TimelinePatchEventRequest,
+  UpdateFindingRequest,
   UpdatePresetRequest,
   UpdatePresetResponse,
   ValidatePresetRequest,
@@ -182,6 +184,23 @@ export class BrowserClient implements NexusClient {
     return this.get<ListFindingsResponse>(
       `/v1/local/works/${encodeURIComponent(workId)}/findings`,
       query,
+    );
+  }
+  // V1.77 findings-remediation promotion (V1.67 G2 pattern — types + routes
+  // already shipped; only the TS client surface was missing).
+  getFinding(workId: string, findingId: string): Promise<FindingDetailResponse> {
+    return this.get<FindingDetailResponse>(
+      `/v1/local/works/${encodeURIComponent(workId)}/findings/${encodeURIComponent(findingId)}`,
+    );
+  }
+  updateFinding(
+    workId: string,
+    findingId: string,
+    patch: UpdateFindingRequest,
+  ): Promise<FindingDetailResponse> {
+    return this.patch<FindingDetailResponse>(
+      `/v1/local/works/${encodeURIComponent(workId)}/findings/${encodeURIComponent(findingId)}`,
+      patch,
     );
   }
 

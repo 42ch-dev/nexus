@@ -183,6 +183,24 @@ components:
     stopped-bg: "rgba(255,107,107,0.16)"
     stopped-text: "{colors.red-1000}"
 
+  # V1.77 findings-remediation — 6-state finding-status badges + triage chrome
+  # (same token names as DESIGN.md, dark values). Severity reuses `severityVariant`;
+  # triage chrome composes existing card/button/input/data-table primitives.
+  finding-status-pill:
+    open: { backgroundColor: "rgba(255,192,67,0.16)", textColor: "{colors.amber-1000}", borderColor: "rgba(255,192,67,0.30)" }
+    triaged: { backgroundColor: "rgba(76,216,200,0.14)", textColor: "{colors.teal-1000}", borderColor: "rgba(76,216,200,0.30)" }
+    in_review: { backgroundColor: "rgba(82,168,255,0.14)", textColor: "{colors.blue-1000}", borderColor: "rgba(82,168,255,0.30)" }
+    resolved: { backgroundColor: "rgba(84,213,138,0.14)", textColor: "{colors.green-1000}", borderColor: "rgba(84,213,138,0.30)" }
+    wont_fix: { backgroundColor: "{colors.gray-alpha-100}", textColor: "{colors.gray-900}", borderColor: "{colors.gray-alpha-300}" }
+    duplicate: { backgroundColor: "rgba(183,148,255,0.14)", textColor: "{colors.purple-1000}", borderColor: "rgba(183,148,255,0.30)" }
+    base: { height: "24px", paddingInline: "8px", rounded: "{rounded.pill}", typography: "{typography.label-12}" }
+  finding-triage:
+    panel-bg: "{colors.background-100}"
+    panel-border: "{colors.gray-alpha-400}"
+    row-active: "{colors.background-300}"
+    action-button: "secondary"
+    executor-select: "input-select-textarea.default"
+
   # V1.70 canvas implement — concrete dark values (same token names as DESIGN.md)
   canvas:
     canvas-surface: "#141414"
