@@ -67,21 +67,19 @@
       "profile_b_compaction": "done (V1.77 P-last closure)"
     },
     "tech_debt_summary": {
-      "total_open": 5,
+      "total_open": 2,
       "total_deferred": 2,
       "total_resolved": 289,
       "total_archived": 0,
       "by_severity_active": {
-        "low": 3,
-        "nit": 2
+        "low": 2
       },
       "by_target_active": {
         "V1.79+ (or CI wrapper)": 1,
-        "V1.78 fix-wave": 3,
         "V1.79+ reliability roadmap": 1
       },
       "refreshed_at": "2026-07-01T00:00:00Z",
-      "refreshed_reason": "V1.78 Wave 1 QC: 12 V1.77-QC residuals resolved (P1 slate-clear); 5 new V1.78-QC residuals registered (2 deferred low + 1 fix-wave low + 2 fix-wave nit). Fixes qc1 W-QC1-001 stale rollup."
+      "refreshed_reason": "V1.78 QC fix-wave closed (3 residuals resolved: pagination + 2 doc nits). 2 low residuals remain deferred to V1.79+."
     },
     "updated_at": "2026-07-01",
     "spec_integration_branch": "iteration/v1.78",
@@ -6066,7 +6064,13 @@
         "target": "V1.78 fix-wave",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.78-creator-memory-surface][R-V178P0-QC3-002]",
         "note": "Fix-wave pushes LIMIT + keyset cursor into SQL for both paths. Behavior-preserving. Regression test seeds >limit rows.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-07-01",
+        "resolution": {
+          "plan_id": "2026-07-01-v1.78-creator-memory-surface",
+          "commit": "d5ddfff8"
+        },
+        "closure_note": "Fixed in V1.78 QC fix-wave (commit d5ddfff8). qc1+qc3 targeted re-review both Approve."
       },
       {
         "id": "R-V178P0-QC3-003",
@@ -6092,7 +6096,13 @@
         "target": "V1.78 fix-wave",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.78-creator-memory-surface][R-V178P0-QC1-001]",
         "note": "Mechanical doc fix in fix-wave.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-07-01",
+        "resolution": {
+          "plan_id": "2026-07-01-v1.78-creator-memory-surface",
+          "commit": "d5ddfff8"
+        },
+        "closure_note": "Fixed in V1.78 QC fix-wave (commit d5ddfff8). qc1+qc3 targeted re-review both Approve."
       },
       {
         "id": "R-V178P0-QC3-004",
@@ -6105,7 +6115,13 @@
         "target": "V1.78 fix-wave",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.78-creator-memory-surface][R-V178P0-QC3-004]",
         "note": "One-line comment: background polling intentionally disabled by TanStack default.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-07-01",
+        "resolution": {
+          "plan_id": "2026-07-01-v1.78-creator-memory-surface",
+          "commit": "d5ddfff8"
+        },
+        "closure_note": "Fixed in V1.78 QC fix-wave (commit d5ddfff8). qc1+qc3 targeted re-review both Approve."
       }
     ]
   }
