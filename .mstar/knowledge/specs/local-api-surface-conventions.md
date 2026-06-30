@@ -270,8 +270,8 @@ Normative rules:
 - The only normal UI-driven status progression in V1.65 is
   `not_started → outlined`.
 - Reverse transitions and terminal-state changes MUST be explicit actions with a
-  reason if implemented; they must never occur as side effects of outline PUT or
-  ordinary structure edits.
+  reason if implemented; they must never occur as side effects of ordinary
+  structure edits.
 - `draft` chapters may be structurally edited, but consumers should warn that a
   body already exists.
 - `finalized` structural edits require explicit confirmation from the caller.
@@ -312,11 +312,11 @@ the file level, and orchestration reads the outline at draft-time as a natural
 snapshot. UI consumers should warn when editing outlines for `draft` or
 `finalized` chapters.
 
-The daemon **does** acquire the per-Work runtime lock for `PUT outline` and
-`PATCH structure` to honor the existing single-writer invariant
-(`multi-work-lifecycle.md` §4.2). The lock is released on both success and
-error paths. This is implementation-specific and does not change the contract's
-last-write-wins semantics for clients.
+The daemon **does** acquire the per-Work runtime lock for the outline/timeline
+PATCH routes (`outline/patch`, `chapters/{n}/patch`, `timeline/patch`) to honor
+the existing single-writer invariant (`multi-work-lifecycle.md` §4.2). The lock
+is released on both success and error paths. This is implementation-specific and
+does not change the contract's last-write-wins semantics for clients.
 
 ---
 

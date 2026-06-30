@@ -108,25 +108,32 @@ export function ChapterOutlineContentEditor({
     }
   }, [editor, disabled]);
 
-  // Reset save state on chapter switch so the content-sync effect below can
-  // load the new chapter's outline. Without this, a dirty/saving guard left
-  // over from the previous chapter blocks the sync — the editor keeps showing
-  // the old chapter's content, and a subsequent Save would write it to the NEW
-  // chapter (content corruption).
-  useEffect(() => {
-    setSaveState('clean');
-  }, [chapterNumber]);
-
-  // Reset editor content when the outline read resolves or the orchestrator
-  // signals an explicit reset (contentVersion bump, e.g. conflict "Use current"
-  // -> refetch + bump). Never clobber an in-progress edit EXCEPT for that
-  // explicit forced reset: contentVersion is no longer bumped on ordinary
-  // patches (metadata-only saves included), so a bump reliably means "discard
-  // the local draft and reload canonical".
+  // Load this chapter's canonical outline content into the editor and reset the
+  // save state. One effect owns BOTH the ordinary load and the two forced-reset
+  // signals so they no longer race a separate reset effect (V1.76 B3 /
+  // `R-V175GREPTILE-001` — removes the chapter-switch/save-in-flight seam):
+  //
+  //   - chapterNumber change: switching chapters must reload the new chapter's
+  //     content even if a dirty/saving guard is left from the previous chapter
+  //     (commit 3787c7b3 — otherwise the editor keeps the old chapter's prose
+  //     and a later Save writes it to the NEW chapter = cross-chapter
+  //     corruption). `useChapterOutline` has no placeholderData, so a switch
+  //     flips `isLoading` and this component renders its loading state until the
+  //     new data arrives; the forced reset then runs against the fresh content.
+  //   - contentVersion bump: the orchestrator's explicit "discard the draft,
+  //     reload canonical" signal (conflict "Use current"). It is no longer
+  //     bumped on ordinary patches (commit 1f0c614c), so a bump unambiguously
+  //     means a forced reset that overrides the dirty/saving guard.
+  //
+  // In every other case the dirty/saving guard is honored, so an ordinary
+  // metadata save's refetch never clobbers an in-progress content edit.
+  const prevChapterNumber = useRef(chapterNumber);
   const prevContentVersion = useRef(contentVersion);
   useEffect(() => {
     if (!editor || !outline.data || outline.isFetching) return;
-    const forcedReset = contentVersion !== prevContentVersion.current;
+    const chapterSwitched = chapterNumber !== prevChapterNumber.current;
+    const forcedReset = chapterSwitched || contentVersion !== prevContentVersion.current;
+    prevChapterNumber.current = chapterNumber;
     prevContentVersion.current = contentVersion;
     if (!forcedReset && (saveState === 'dirty' || saveState === 'saving')) return;
     const current = getMarkdown(editor);
@@ -134,9 +141,10 @@ export function ChapterOutlineContentEditor({
       editor.commands.setContent(outline.data.content, false);
     }
     setSaveState('clean');
-    // contentVersion + saveState are intentional reset/guard triggers.
+    // chapterNumber + contentVersion + saveState are intentional reset/guard
+    // triggers; outline.data/isFetching are load gates, not reset signals.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [editor, outline.data, outline.isFetching, contentVersion, saveState]);
+  }, [editor, outline.data, outline.isFetching, contentVersion, chapterNumber, saveState]);
 
   // Clear the local dirty flag when the orchestrator's patch mutation settles.
   useEffect(() => {
