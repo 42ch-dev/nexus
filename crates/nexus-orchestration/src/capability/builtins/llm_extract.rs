@@ -96,6 +96,25 @@ impl Capability for LlmExtract {
                             "source_quote": { "type": "string" }
                         }
                     }
+                },
+                "relationships": {
+                    "type": "array",
+                    "description": "V1.76: optional relationship candidates proposed from chapter prose. Missing/empty array means no relationship candidates (backward compatible).",
+                    "items": {
+                        "type": "object",
+                        "required": ["source_canonical_name", "target_canonical_name", "relation_type", "symmetric", "confidence", "source_quote"],
+                        "properties": {
+                            "source_canonical_name": { "type": "string" },
+                            "source_block_type": { "type": ["string", "null"] },
+                            "target_canonical_name": { "type": "string" },
+                            "target_block_type": { "type": ["string", "null"] },
+                            "relation_type": { "type": "string", "description": "WorldKbRelationshipKind snake_case value; 'custom' requires custom_label" },
+                            "custom_label": { "type": ["string", "null"] },
+                            "symmetric": { "type": "boolean" },
+                            "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0 },
+                            "source_quote": { "type": "string" }
+                        }
+                    }
                 }
             }
         }"#
@@ -129,15 +148,24 @@ impl Capability for LlmExtract {
             .ok_or(CapabilityError::WorkerUnavailable)?;
 
         // Build the extraction prompt: instruction + verbatim prose, framed so
-        // the LLM returns a JSON array of candidates. deny_all tool policy —
+        // the LLM returns a JSON object with a `candidates` array (entities) and
+        // an optional `relationships` array (V1.76). deny_all tool policy —
         // extraction is read-only, no tools, no side-effect.
         let extract_prompt = format!(
             "{prompt_text}\n\n\
              Return ONLY a JSON object of the form {{\"candidates\": [{{\"canonical_name\": \
              string, \"block_type\": one of [character, ability, scene, organization, item, \
              conflict, info_point, event], \"summary\": string|null, \"confidence\": number \
-             in [0.0,1.0], \"source_quote\": string}}]}}. Use the wire `block_type` enum \
-             (snake_case). `source_quote` MUST be a verbatim excerpt from the chapter.\n\n\
+             in [0.0,1.0], \"source_quote\": string}}], \"relationships\": [{{\
+             \"source_canonical_name\": string, \"source_block_type\": block_type|null, \
+             \"target_canonical_name\": string, \"target_block_type\": block_type|null, \
+             \"relation_type\": one of [allied_with, rival_of, mentor_of, parent_of, child_of, \
+             member_of, located_in, created_by, rules_over, custom], \"custom_label\": \
+             string|null (required when relation_type is custom), \"symmetric\": boolean, \
+             \"confidence\": number in [0.0,1.0], \"source_quote\": string}}]}}. \
+             Use the wire `block_type` and `relation_type` enums (snake_case). \
+             `source_quote` MUST be a verbatim excerpt from the chapter. The \
+             `relationships` array MAY be empty when no relationships are evident.\n\n\
              CHAPTER PROSE:\n{chapter_prose}"
         );
 
@@ -151,7 +179,8 @@ impl Capability for LlmExtract {
             .unwrap_or("");
 
         let candidates = parse_extract_response(full_text);
-        Ok(json!({ "candidates": candidates }))
+        let relationships = parse_relationships_response(full_text);
+        Ok(json!({ "candidates": candidates, "relationships": relationships }))
     }
 }
 
@@ -224,6 +253,65 @@ fn normalize_candidate(v: &Value) -> Value {
     }
     if !out.contains_key("source_quote") {
         out.insert("source_quote".into(), Value::String(String::new()));
+    }
+    // Clamp confidence to [0.0, 1.0]; default 0.0 when missing/invalid.
+    let confidence = out
+        .get("confidence")
+        .and_then(Value::as_f64)
+        .unwrap_or(0.0)
+        .clamp(0.0, 1.0);
+    out.insert("confidence".into(), json!(confidence));
+    Value::Object(out)
+}
+
+/// Parse the LLM extraction response text into a `relationships` JSON array.
+///
+/// V1.76: mirrors [`parse_extract_response`] but extracts the optional
+/// `relationships` key. When the LLM omits the key, returns an empty array
+/// (backward compatible — relationship proposal is best-effort). Each
+/// relationship candidate is normalized via [`normalize_relationship`].
+#[must_use]
+pub fn parse_relationships_response(text: &str) -> Vec<Value> {
+    let trimmed = strip_code_fences(text.trim());
+    if let Ok(obj) = serde_json::from_str::<serde_json::Map<String, Value>>(trimmed) {
+        if let Some(Value::Array(arr)) = obj.get("relationships") {
+            return arr.iter().map(normalize_relationship).collect();
+        }
+    }
+    // Bare array or object without `relationships` → no relationship candidates.
+    Vec::new()
+}
+
+/// Normalize a single relationship candidate object: clamp confidence, ensure
+/// required string fields exist (defaulting to empty string so downstream
+/// never panics on a missing key — the persist path validates and skips).
+fn normalize_relationship(v: &Value) -> Value {
+    let Some(obj) = v.as_object() else {
+        return v.clone();
+    };
+    let mut out = serde_json::Map::new();
+    for (k, val) in obj {
+        out.insert(k.clone(), val.clone());
+    }
+    // Ensure required string fields are present.
+    if !out.contains_key("source_canonical_name") {
+        out.insert("source_canonical_name".into(), Value::String(String::new()));
+    }
+    if !out.contains_key("target_canonical_name") {
+        out.insert("target_canonical_name".into(), Value::String(String::new()));
+    }
+    if !out.contains_key("relation_type") {
+        out.insert("relation_type".into(), Value::String("custom".into()));
+    }
+    if !out.contains_key("source_quote") {
+        out.insert("source_quote".into(), Value::String(String::new()));
+    }
+    // `symmetric` defaults to false when missing/invalid.
+    if !out
+        .get("symmetric")
+        .is_some_and(serde_json::Value::is_boolean)
+    {
+        out.insert("symmetric".into(), Value::Bool(false));
     }
     // Clamp confidence to [0.0, 1.0]; default 0.0 when missing/invalid.
     let confidence = out
@@ -365,6 +453,82 @@ mod tests {
         );
         assert_eq!(parsed.len(), 1);
         assert_eq!(parsed[0]["block_type"], "event");
+    }
+
+    // ── V1.76: relationship candidate parsing ──────────────────────────────
+
+    #[test]
+    fn parse_relationships_from_object_response() {
+        let parsed = parse_relationships_response(
+            r#"{"candidates":[],"relationships":[
+                {"source_canonical_name":"Aria","source_block_type":"character",
+                 "target_canonical_name":"Kael","target_block_type":"character",
+                 "relation_type":"allied_with","symmetric":true,
+                 "confidence":0.8,"source_quote":"Aria and Kael fought together"}
+            ]}"#,
+        );
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0]["source_canonical_name"], "Aria");
+        assert_eq!(parsed[0]["target_canonical_name"], "Kael");
+        assert_eq!(parsed[0]["relation_type"], "allied_with");
+        assert_eq!(parsed[0]["symmetric"], true);
+        assert_eq!(parsed[0]["confidence"], json!(0.8));
+    }
+
+    #[test]
+    fn parse_relationships_missing_key_returns_empty() {
+        // Object with candidates but no relationships key → empty (backward compat).
+        let parsed = parse_relationships_response(
+            r#"{"candidates":[{"canonical_name":"A","block_type":"character","confidence":0.5,"source_quote":"q"}]}"#,
+        );
+        assert!(parsed.is_empty(), "missing relationships key → empty");
+    }
+
+    #[test]
+    fn parse_relationships_clamps_confidence() {
+        let parsed = parse_relationships_response(
+            r#"{"relationships":[{"source_canonical_name":"A","target_canonical_name":"B",
+               "relation_type":"rival_of","symmetric":false,"confidence":1.5,"source_quote":"q"}]}"#,
+        );
+        assert_eq!(parsed[0]["confidence"], json!(1.0));
+    }
+
+    #[test]
+    fn parse_relationships_normalizes_missing_fields() {
+        let parsed = parse_relationships_response(
+            r#"{"relationships":[{"source_canonical_name":"A","target_canonical_name":"B"}]}"#,
+        );
+        assert_eq!(parsed.len(), 1);
+        // relation_type defaults to custom; symmetric to false; confidence 0.0.
+        assert_eq!(parsed[0]["relation_type"], "custom");
+        assert_eq!(parsed[0]["symmetric"], false);
+        assert_eq!(parsed[0]["confidence"], json!(0.0));
+    }
+
+    #[tokio::test]
+    async fn llm_extract_with_mock_worker_returns_relationships() {
+        let cap = LlmExtract::with_worker_provider(mock_provider(
+            r#"{"candidates":[
+                {"canonical_name":"Aria","block_type":"character","confidence":0.9,"source_quote":"Aria drew her blade."}
+            ],"relationships":[
+                {"source_canonical_name":"Aria","target_canonical_name":"Kael",
+                 "relation_type":"allied_with","symmetric":true,"confidence":0.8,
+                 "source_quote":"Aria and Kael fought together"}
+            ]}"#,
+        ));
+        let input = json!({ "prompt": "extract", "chapter_prose": "..." });
+        let result = cap.run(input).await.unwrap();
+        // candidates still present.
+        let candidates = result.get("candidates").and_then(|v| v.as_array()).unwrap();
+        assert_eq!(candidates.len(), 1);
+        // relationships present.
+        let relationships = result
+            .get("relationships")
+            .and_then(|v| v.as_array())
+            .unwrap();
+        assert_eq!(relationships.len(), 1);
+        assert_eq!(relationships[0]["source_canonical_name"], "Aria");
+        assert_eq!(relationships[0]["relation_type"], "allied_with");
     }
 
     // ── SEC-V131-01: identity boundary regression (mirrors judge.llm) ──────

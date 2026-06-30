@@ -604,6 +604,29 @@ Relationship grounding is optional. `source_anchor_ids` may be empty for author-
 
 Relationship writes use per-row OCC through `kb_relationships.revision`. Canonical reads expose the current row version; mutating requests submit `expected_version`. A stale `expected_version` MUST return a conflict before mutation. Successful updates increment the stored `revision`; deletes compare against the expected revision before removing the row.
 
+#### 5.6.7 Extraction-sourced suggested relationships (V1.76 γ)
+
+`kb_relationships.needs_review = 1` marks an edge as a **suggestion** proposed by
+extraction (`nexus.llm.extract`) and not yet author-confirmed; it is not part of
+the default confirmed graph. `source = 'extraction'` marks extraction provenance
+while `source = 'manual'` marks author-created rows. Extraction-sourced rows
+remain normal `kb_relationships` rows with OCC, symmetric projection, confidence
+validation, and optional grounding; **promotion is clearing `needs_review`**,
+not moving through a pending/confirmed/rejected relationship state machine. A
+full relationship promotion state machine (mirroring entities) is post-1.0.
+
+**Entity-existence prerequisite**: extraction persists a relationship suggestion
+only when both endpoints already resolve to non-deleted KeyBlocks in the same
+World. A candidate whose endpoints are missing or ambiguous is skipped + logged
+and may be re-proposed on a later rescan after the author promotes the endpoint
+entities. Review-time extraction does NOT confirm entity candidates in the same
+pass, so relationships involving newly suggested entities are deferred.
+
+The GET graph defaults to excluding `needs_review` rows; `?include_suggested=true`
+surfaces them. The "extraction suggests, author decides" split (§5.5) is extended
+from entity candidates to relationships without cloning the entity promotion
+state machine.
+
 ---
 
 ## 6. Scope transition rules

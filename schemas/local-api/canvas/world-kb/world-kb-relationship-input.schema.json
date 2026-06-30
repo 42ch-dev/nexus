@@ -3,7 +3,7 @@
   "$id": "https://nexus42.invalid/schemas/local-api/canvas/world-kb/world-kb-relationship-input.schema.json",
   "schema_version": 1,
   "title": "Nexus WorldKbRelationshipInput",
-  "description": "Author-editable payload for a World KB relationship (V1.74). Supplied inside WorldKbPatchRelationshipRequest for add/update actions.",
+  "description": "Author-editable payload for a World KB relationship (V1.74; V1.76 adds optional needs_review for promotion). Supplied inside WorldKbPatchRelationshipRequest for add/update actions.",
   "type": "object",
   "required": ["source_entity_id", "target_entity_id", "relation_type", "symmetric"],
   "properties": {
@@ -14,7 +14,8 @@
     "symmetric": { "type": "boolean", "description": "When true, the graph read emits a derived reverse projection sharing the same relationship_id." },
     "confidence": { "type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Optional author/assertion confidence, display-only in V1.74." },
     "source_anchor_ids": { "type": "array", "items": { "type": "string" }, "description": "Optional source-anchor projection ids grounding this relationship." },
-    "metadata": { "type": "object", "description": "Optional opaque JSON metadata." }
+    "metadata": { "type": "object", "description": "Optional opaque JSON metadata." },
+    "needs_review": { "type": "boolean", "description": "V1.76: optional. When omitted on add, defaults to false (author-confirmed). When provided on update, sets the needs_review gate (false = promote/confirm the suggestion)." }
   },
   "additionalProperties": false
 }

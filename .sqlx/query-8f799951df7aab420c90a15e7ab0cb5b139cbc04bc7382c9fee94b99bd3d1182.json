@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT\n             relationship_id,\n             world_id,\n             source_entity_id,\n             target_entity_id,\n             relation_type,\n             custom_label as \"custom_label?\",\n             symmetric,\n             confidence as \"confidence?\",\n             source_anchor_ids as \"source_anchor_ids?\",\n             metadata as \"metadata?\",\n             created_at,\n             updated_at,\n             revision\n           FROM kb_relationships\n           WHERE relationship_id = ?",
+  "query": "SELECT\n             relationship_id,\n             world_id,\n             source_entity_id,\n             target_entity_id,\n             relation_type,\n             custom_label as \"custom_label?\",\n             symmetric,\n             confidence as \"confidence?\",\n             source_anchor_ids as \"source_anchor_ids?\",\n             metadata as \"metadata?\",\n             created_at,\n             updated_at,\n             revision,\n             needs_review,\n             source\n           FROM kb_relationships\n           WHERE world_id = ?\n           ORDER BY updated_at DESC",
   "describe": {
     "columns": [
       {
@@ -67,6 +67,16 @@
         "name": "revision",
         "ordinal": 12,
         "type_info": "Integer"
+      },
+      {
+        "name": "needs_review",
+        "ordinal": 13,
+        "type_info": "Integer"
+      },
+      {
+        "name": "source",
+        "ordinal": 14,
+        "type_info": "Text"
       }
     ],
     "parameters": {
@@ -85,8 +95,10 @@
       true,
       false,
       false,
+      false,
+      false,
       false
     ]
   },
-  "hash": "047dadaf26bcc903c195490eef0f8e0d2ba8e49f287a9aabc16f679a2cfed1b4"
+  "hash": "8f799951df7aab420c90a15e7ab0cb5b139cbc04bc7382c9fee94b99bd3d1182"
 }
