@@ -501,8 +501,8 @@ impl LlmJudgeTask {
 ///
 /// Sibling to [`LlmExtractTask`] (sic — see [`LlmJudgeTask`]): mirrors the
 /// `LlmJudgeTask` lifecycle (render template → build capability input → invoke
-/// → parse result), but emits `Vec<quality_loop::KbCandidate>` instead of a
-/// GO/NOGO verdict.
+/// → parse result), but emits [`crate::quality_loop::LlmExtractOutcome`] (entity
+/// candidates + V1.76 relationship candidates) instead of a GO/NOGO verdict.
 ///
 /// Flow:
 /// 1. Render `template_file` content using handlebars against the context.
@@ -510,12 +510,22 @@ impl LlmJudgeTask {
 ///    prose there before invoking the task).
 /// 3. Build capability input: `{ prompt, chapter_prose, _creator_id, _session_id }`.
 /// 4. Call `nexus.llm.extract` (or configured capability name) via the registry.
-/// 5. Parse the response `{ candidates: [...] }` into `Vec<KbCandidate>`.
+/// 5. Parse the response `{ candidates: [...], relationships: [...] }` into
+///    [`crate::quality_loop::LlmExtractOutcome::Candidates`].
 ///
 /// When the capability returns [`CapabilityError::WorkerUnavailable`] (no
 /// worker IPC), returns an empty `Vec` so the caller can fall back to the
 /// heuristic. The task does NOT persist candidates — persistence is the
 /// caller's responsibility (the review-time hook), keeping the task pure.
+///
+/// Relationship candidates (V1.76) are surfaced the same way candidates are:
+/// [`Self::evaluate`] returns them inside [`LlmExtractOutcome::Candidates`], and
+/// the review-time hook persists them via `run_llm_extract` →
+/// `persist_relationship_candidates` (`quality_loop.rs`). A preset author wiring
+/// `LlmExtractTask` directly MUST destructure `Candidates { candidates,
+/// relationships, .. }` rather than dropping `relationships` — the task never
+/// persists them itself, so a caller that ignores the field silently loses the
+/// extracted relationships (qc1 F-002 / `R-V176QC1-S001`).
 ///
 /// Design: `llm-extract.md` §2, compass §0.1 #7.
 // R-V152TA-S003: `LlmExtractTask` has no production preset routing yet

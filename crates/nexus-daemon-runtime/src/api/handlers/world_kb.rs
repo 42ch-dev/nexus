@@ -55,6 +55,15 @@ use tracing::{info, warn};
 /// Maximum entities returned by the graph projection (mirrors `kb_store`
 /// `LIST_BY_WORLD_LIMIT` safety cap).
 const GRAPH_ENTITY_CAP: usize = 500;
+/// Maximum stored relationships projected by the graph endpoint before
+/// symmetric-reverse derivation (qc1 F-003 / `R-V176QC1-S002`). Bounds the
+/// payload for worlds that have accumulated many extraction suggestions across
+/// rescans, mirroring `GRAPH_ENTITY_CAP`. The cap is applied to *stored* rows
+/// so a stored edge and its symmetric reverse are never split across the
+/// boundary. Pre-1.0 local-first datasets stay well under this; a future
+/// `limit`/`cursor` pagination pass (see `get_graph` TODO) can replace it once
+/// the wire contract gains a `truncated`/`next_cursor` envelope.
+const GRAPH_RELATIONSHIP_CAP: usize = 1000;
 /// Default + max page size for the candidates endpoint.
 const DEFAULT_CANDIDATE_LIMIT: i64 = 50;
 const MAX_CANDIDATE_LIMIT: i64 = 250;
@@ -880,11 +889,15 @@ pub async fn get_graph(
     }
 
     // V1.76 TODO: relationship graph pagination. The response currently ships
-    // the entire graph for the world (capped by `GRAPH_ENTITY_CAP`). When the
+    // the entire graph for the world (entities capped by `GRAPH_ENTITY_CAP`,
+    // relationships capped by `GRAPH_RELATIONSHIP_CAP` as of V1.77). When the
     // relationship count exceeds the client viewport budget, introduce
     // `limit`/`cursor` query params and a `truncated` flag plus `next_cursor`
     // in `WorldKbGraphResponse` so callers can paginate without losing the
-    // symmetric-reverse derived edges. Keep V1.75 contract unchanged.
+    // symmetric-reverse derived edges. That requires a wire-contract change
+    // (new response fields + schema/codegen), so it is deferred past the V1.77
+    // `wire_contracts_changed: FALSE` polish pass; the cap is the interim
+    // safety bound (qc1 F-003 / `R-V176QC1-S002`).
     Ok(Json(WorldKbGraphResponse {
         entities,
         source_anchors,
@@ -926,8 +939,12 @@ async fn project_relationships_for_world(
             code: "DATABASE_ERROR".to_string(),
             message: e.to_string(),
         })?;
-    let mut projections = Vec::with_capacity(rows.len() * 2);
-    for row in rows {
+    // Cap stored rows before projection so the symmetric-reverse derivation
+    // never splits a stored edge from its reverse (qc1 F-003 / `R-V176QC1-S002`).
+    // Each stored row yields at most 2 projections, so the wire payload is
+    // bounded by `2 * GRAPH_RELATIONSHIP_CAP`.
+    let mut projections = Vec::with_capacity(rows.len().min(GRAPH_RELATIONSHIP_CAP) * 2);
+    for row in rows.into_iter().take(GRAPH_RELATIONSHIP_CAP) {
         projections.push(project_relationship(&row, "stored"));
         if row.symmetric != 0 {
             let mut reverse = row.clone();
