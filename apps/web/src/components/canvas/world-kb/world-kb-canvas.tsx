@@ -208,10 +208,37 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
     );
   };
   const onDeleteSuggestion = onDeleteRelationship;
-  const onPromoteAllSuggestions = (rels: WorldKbRelationshipProjection[]) => {
-    for (const rel of rels) {
-      onPromoteSuggestion(rel);
+  const onPromoteAllSuggestions = async (rels: WorldKbRelationshipProjection[]) => {
+    // TanStack Query v5 mutate() in a loop only delivers callbacks for the
+    // LAST submitted call — earlier promotions' errors are silently dropped.
+    // mutateAsync + Promise.allSettled ensures every outcome is observed.
+    const results = await Promise.allSettled(
+      rels.map((rel) =>
+        patchRelationship.mutateAsync({
+          relationship_id: rel.relationship_id,
+          action: 'update' as const,
+          expected_version: rel.version,
+          relationship: {
+            source_entity_id: rel.source_entity_id,
+            target_entity_id: rel.target_entity_id,
+            relation_type: rel.relation_type,
+            custom_label: rel.custom_label,
+            symmetric: rel.symmetric,
+            confidence: rel.confidence,
+            source_anchor_ids: rel.source_anchor_ids,
+            metadata: rel.metadata,
+            needs_review: false,
+          },
+        }),
+      ),
+    );
+    const failed = results.filter(
+      (r): r is PromiseRejectedResult => r.status === 'rejected',
+    );
+    if (failed.length > 0) {
+      console.warn(`promoteAll: ${failed.length}/${rels.length} suggestions failed`);
     }
+    bumpReseed();
   };
 
   const inspectorPanelProps = {
