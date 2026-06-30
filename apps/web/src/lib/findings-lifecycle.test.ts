@@ -85,6 +85,34 @@ describe('findings lifecycle — 6-state status machine', () => {
     expect(isValidTransition('in_review', 'wont_fix')).toBe(true);
   });
 
+  it('golden: client adjacency table matches the DAO is_valid_transition source', () => {
+    // Hand-transcribed from crates/nexus-local-db/src/findings.rs:172-189.
+    // Self-transitions and unknown endpoints are rejected; terminal statuses
+    // have no outbound edges.
+    const daoTransition = (from: string, to: string): boolean => {
+      if (from === to) return false;
+      switch (from) {
+        case 'open':
+          return ['triaged', 'in_review', 'resolved', 'wont_fix', 'duplicate'].includes(to);
+        case 'triaged':
+          return ['in_review', 'resolved', 'wont_fix', 'duplicate'].includes(to);
+        case 'in_review':
+          return ['resolved', 'wont_fix', 'duplicate'].includes(to);
+        case 'resolved':
+        case 'wont_fix':
+        case 'duplicate':
+          return false;
+        default:
+          return false;
+      }
+    };
+    for (const from of FINDING_STATUSES) {
+      for (const to of FINDING_STATUSES) {
+        expect(isValidTransition(from, to)).toBe(daoTransition(from, to));
+      }
+    }
+  });
+
   it('handles undefined / unknown statuses defensively', () => {
     expect(isValidTransition(undefined, 'open')).toBe(false);
     expect(isValidTransition('open', undefined)).toBe(false);

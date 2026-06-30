@@ -18,6 +18,7 @@ import type {
 import { WorldKbEntityTable } from './world-kb-entity-table';
 import { WorldKbRelationshipTable } from './world-kb-relationship-table';
 import { SuggestedRelationshipsPane } from './suggested-relationships-pane';
+import type { SuggestedRelationshipsPaneProps } from './suggested-relationships-pane';
 import type { WorldKbNodeData } from './types';
 
 type Tab = 'entities' | 'relationships' | 'suggested';
@@ -36,8 +37,8 @@ export interface WorldKbAltViewProps {
   onPromoteSuggestion?: (rel: WorldKbRelationshipProjection) => void;
   /** V1.76: delete a suggested relationship. */
   onDeleteSuggestion?: (rel: WorldKbRelationshipProjection) => void;
-  /** V1.76: bulk-promote all visible suggestions. */
-  onPromoteAllSuggestions?: (rels: WorldKbRelationshipProjection[]) => void;
+  /** V1.76: bulk-promote all visible suggestions. Returns result counts. */
+  onPromoteAllSuggestions?: SuggestedRelationshipsPaneProps['onPromoteAll'];
   /** V1.76: whether a promote/delete mutation is in flight. */
   suggestionPending?: boolean;
   /**
@@ -119,7 +120,10 @@ export function WorldKbAltView({
           entities={entities}
           onPromote={(rel) => onPromoteSuggestion?.(rel)}
           onDelete={(rel) => onDeleteSuggestion?.(rel)}
-          onPromoteAll={(rels) => onPromoteAllSuggestions?.(rels)}
+          onPromoteAll={async (rels) => {
+            if (!onPromoteAllSuggestions) return { succeeded: 0, failed: 0 };
+            return onPromoteAllSuggestions(rels);
+          }}
           pending={suggestionPending}
         />
       )}

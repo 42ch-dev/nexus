@@ -27,6 +27,11 @@ import {
   formatConfidence,
 } from './relationship-confidence';
 
+export interface PromoteAllResult {
+  succeeded: number;
+  failed: number;
+}
+
 export interface SuggestedRelationshipsPaneProps {
   /** Relationships with `needs_review = true` (extraction suggestions). */
   suggestions: WorldKbRelationshipProjection[];
@@ -35,14 +40,19 @@ export interface SuggestedRelationshipsPaneProps {
   onPromote: (rel: WorldKbRelationshipProjection) => void;
   /** Delete a single suggestion. */
   onDelete: (rel: WorldKbRelationshipProjection) => void;
-  /** Promote all currently-visible suggestions (bulk). */
-  onPromoteAll: (rels: WorldKbRelationshipProjection[]) => void;
+  /** Promote all currently-visible suggestions (bulk). Returns result counts. */
+  onPromoteAll: (rels: WorldKbRelationshipProjection[]) => Promise<PromoteAllResult>;
   /** Whether a promote/delete mutation is in flight (disables actions). */
   pending?: boolean;
 }
 
 type SortKey = 'confidence' | 'source' | 'target' | 'type';
 type SortDir = 'asc' | 'desc';
+
+type PromoteAllStatus =
+  | { kind: 'idle' }
+  | { kind: 'running'; total: number }
+  | { kind: 'done'; result: PromoteAllResult };
 
 /** A uniform 8px colored dot badge for a confidence band. */
 function ConfidenceBadge({ confidence }: { confidence: number | undefined | null }) {
@@ -78,6 +88,7 @@ export function SuggestedRelationshipsPane({
 }: SuggestedRelationshipsPaneProps) {
   const [sortKey, setSortKey] = useState<SortKey>('confidence');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
+  const [promoteAllStatus, setPromoteAllStatus] = useState<PromoteAllStatus>({ kind: 'idle' });
 
   const entityName = (id: string) =>
     entities.find((e) => e.key_block_id === id)?.canonical_name ?? id;
@@ -131,19 +142,48 @@ export function SuggestedRelationshipsPane({
     }
   }
 
-  function handlePromoteAll() {
+  async function handlePromoteAll() {
     if (sorted.length === 0) return;
     const message =
       sorted.length > 1
         ? `Promote all ${sorted.length} suggested relationships? This confirms them all at once.`
         : `Promote this suggested relationship?`;
-    if (confirmAction(message)) {
-      onPromoteAll(sorted);
+    if (!confirmAction(message)) return;
+
+    setPromoteAllStatus({ kind: 'running', total: sorted.length });
+    try {
+      const result = await onPromoteAll(sorted);
+      setPromoteAllStatus({ kind: 'done', result });
+    } catch {
+      // If the parent handler throws instead of returning counts, treat every
+      // item as failed so the user sees a failure message.
+      setPromoteAllStatus({ kind: 'done', result: { succeeded: 0, failed: sorted.length } });
     }
   }
 
   const headerClass =
     'px-3 py-2 text-left text-label-12 text-gray-700 cursor-pointer select-none hover:text-gray-1000';
+
+  function promoteAllCopy(): string | null {
+    switch (promoteAllStatus.kind) {
+      case 'running':
+        return `Promoting ${promoteAllStatus.total} suggested relationships…`;
+      case 'done': {
+        const { succeeded, failed } = promoteAllStatus.result;
+        if (failed === 0) {
+          return `Promoted ${succeeded} suggested relationship${succeeded === 1 ? '' : 's'}.`;
+        }
+        if (succeeded === 0) {
+          return `${failed} suggestion${failed === 1 ? '' : 's'} could not be promoted. Try promoting individually.`;
+        }
+        return `Promoted ${succeeded}; ${failed} could not be promoted. Try promoting the rest individually.`;
+      }
+      default:
+        return null;
+    }
+  }
+
+  const copy = promoteAllCopy();
 
   return (
     <section
@@ -167,6 +207,19 @@ export function SuggestedRelationshipsPane({
       <p className="border-b border-gray-alpha-200 px-3 py-1.5 text-label-12 text-gray-700">
         Extraction-suggested relationships. Promote to confirm, or delete to dismiss.
       </p>
+      {copy && (
+        <p
+          className={[
+            'border-b border-gray-alpha-200 px-3 py-1.5 text-label-12',
+            promoteAllStatus.kind === 'done' && promoteAllStatus.result.failed > 0
+              ? 'text-red-700'
+              : 'text-green-700',
+          ].join(' ')}
+          aria-live="polite"
+        >
+          {copy}
+        </p>
+      )}
       <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 460px)' }}>
         <table className="w-full table-fixed text-copy-14">
           <caption className="sr-only">
