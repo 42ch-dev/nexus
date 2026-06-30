@@ -354,7 +354,8 @@
     "2026-06-30-v1.76-closure",
     "2026-06-30-v1.77-findings-remediation-prepare",
     "2026-06-30-v1.77-findings-remediation-ui",
-    "2026-06-30-v1.77-slate-clear"
+    "2026-06-30-v1.77-slate-clear",
+    "2026-06-30-v1.77-post-canvas-inflection-closeout"
   ],
   "iteration_summaries": {
     "v1.45": {
@@ -728,5 +729,5 @@
     "v1_50_iteration_complete": "yes — ready for PR to main",
     "v1_51_iteration_complete": "yes — shipped to main at c57b927bbf8621adf7ec59095d274f17f429c9b7 via PR #64 on 2026-06-19T07:52:26Z"
   },
-  "updated_at": "2026-06-28"
+  "updated_at": "2026-07-01"
 }
