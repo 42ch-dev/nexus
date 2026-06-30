@@ -6,6 +6,7 @@ import { CapabilitiesPage } from '@/pages/capabilities-page';
 import { ChapterPage } from '@/pages/chapter-page';
 import { ChaptersPage } from '@/pages/chapters-page';
 import { FindingsPage } from '@/pages/findings-page';
+import { MemoryPage } from '@/pages/memory-page';
 import { NotFoundPage } from '@/pages/not-found-page';
 import { PresetsPage } from '@/pages/presets-page';
 import { SchedulePage } from '@/pages/schedule-page';
@@ -72,6 +73,7 @@ export function App() {
         <Route path="schedule" element={<SchedulePage />} />
         <Route path="capabilities" element={<CapabilitiesPage />} />
         <Route path="findings" element={<FindingsPage />} />
+        <Route path="memory" element={<MemoryPage />} />
         <Route path="presets" element={<PresetsPage />} />
         <Route
           path="strategy"
