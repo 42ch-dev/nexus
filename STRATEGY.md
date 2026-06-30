@@ -59,3 +59,5 @@ Shared needs they serve:
 | JSON Schema as wire truth source | Enables Rust + TypeScript codegen; avoids hand-written DTO drift | V1.0 planning |
 | Integration branches via PR only | All merges to `main` go through GitHub PR for review trail and CI gate | V1.39 (June 2026) |
 | `.mstar/` harness conventions | Morning Star harness for plan/QC/QA discipline | V1.39 (June 2026) |
+| Canvas program complete (V1.67–V1.76) | 4 β/γ surfaces shipped (Strategy, Outline+Timeline, World KB, Relationships) on React Flow with a structured write-boundary (no raw-file edits from the webview); V1.75 retired the V1.65 whole-document editor in favor of node-granular canvas edits | V1.76 (June 2026) |
+| Findings-remediation UI closes the quality loop (V1.77) | Control-Room findings view promoted from read-only (V1.64) to a full remediation authoring surface (6-state status transitions + target_executor assignment + inline edit), consuming the PATCH route the backend already ships; last-writer-wins (single-author triage, no OCC) | V1.77 (June 2026) |
