@@ -909,15 +909,18 @@ pub struct GraphQuery {
 /// Read all relationships for the world and emit stored + derived symmetric-reverse
 /// projections.
 ///
-/// V1.76: when `include_suggested` is `false` (the default), `needs_review = 1`
-/// rows are filtered out before projection so the confirmed graph excludes
-/// extraction suggestions. Symmetric-reverse derivation is unchanged.
+/// V1.76: when `include_suggested` is `false` (the default), the `needs_review = 1`
+/// filter is pushed into the storage query (see [`list_relationships_for_world`])
+/// so the confirmed graph uses the `(world_id, needs_review)` index and never
+/// materializes extraction-suggestion rows. Symmetric-reverse derivation is
+/// unchanged — only stored rows are projected, so the symmetric reverse of a
+/// suggestion cannot leak into the confirmed graph.
 async fn project_relationships_for_world(
     pool: &sqlx::SqlitePool,
     world_id: &str,
     include_suggested: bool,
 ) -> Result<Vec<WorldKbRelationshipProjection>, NexusApiError> {
-    let rows = list_relationships_for_world(pool, world_id)
+    let rows = list_relationships_for_world(pool, world_id, include_suggested)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -925,10 +928,6 @@ async fn project_relationships_for_world(
         })?;
     let mut projections = Vec::with_capacity(rows.len() * 2);
     for row in rows {
-        // V1.76 needs_review gate: hide suggestions unless opted in.
-        if !include_suggested && row.needs_review != 0 {
-            continue;
-        }
         projections.push(project_relationship(&row, "stored"));
         if row.symmetric != 0 {
             let mut reverse = row.clone();

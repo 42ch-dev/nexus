@@ -332,7 +332,13 @@ pub async fn get_relationship(
     row.ok_or_else(|| LocalDbError::Sqlx(sqlx::Error::RowNotFound))
 }
 
-/// List all relationships in a world, ordered by `updated_at` descending.
+/// List relationships in a world, ordered by `updated_at` descending.
+///
+/// V1.76: `include_suggested` gates the `needs_review` filter at the SQL layer
+/// so the default (confirmed) graph uses the `(world_id, needs_review)` index
+/// and never materializes extraction-suggestion rows. Pass `false` for the
+/// confirmed graph (default path); pass `true` to fetch both confirmed and
+/// suggested rows (Suggested triage pane).
 ///
 /// # Errors
 ///
@@ -340,32 +346,65 @@ pub async fn get_relationship(
 pub async fn list_relationships_for_world(
     pool: &SqlitePool,
     world_id: &str,
+    include_suggested: bool,
 ) -> Result<Vec<KbRelationshipRow>, LocalDbError> {
-    let rows = sqlx::query_as!(
-        KbRelationshipRow,
-        r#"SELECT
-             relationship_id,
-             world_id,
-             source_entity_id,
-             target_entity_id,
-             relation_type,
-             custom_label as "custom_label?",
-             symmetric,
-             confidence as "confidence?",
-             source_anchor_ids as "source_anchor_ids?",
-             metadata as "metadata?",
-             created_at,
-             updated_at,
-             revision,
-             needs_review,
-             source
-           FROM kb_relationships
-           WHERE world_id = ?
-           ORDER BY updated_at DESC"#,
-        world_id,
-    )
-    .fetch_all(pool)
-    .await?;
+    // Two compile-time-checked static queries (sqlx macros can't express a
+    // conditional WHERE clause). The default (`false`) branch pushes
+    // `needs_review = 0` into SQL so SQLite uses
+    // `idx_kb_relationships_world_id_needs_review` and skips hidden rows.
+    let rows = if include_suggested {
+        sqlx::query_as!(
+            KbRelationshipRow,
+            r#"SELECT
+              relationship_id,
+              world_id,
+              source_entity_id,
+              target_entity_id,
+              relation_type,
+              custom_label as "custom_label?",
+              symmetric,
+              confidence as "confidence?",
+              source_anchor_ids as "source_anchor_ids?",
+              metadata as "metadata?",
+              created_at,
+              updated_at,
+              revision,
+              needs_review,
+              source
+            FROM kb_relationships
+            WHERE world_id = ?
+            ORDER BY updated_at DESC"#,
+            world_id,
+        )
+        .fetch_all(pool)
+        .await?
+    } else {
+        sqlx::query_as!(
+            KbRelationshipRow,
+            r#"SELECT
+              relationship_id,
+              world_id,
+              source_entity_id,
+              target_entity_id,
+              relation_type,
+              custom_label as "custom_label?",
+              symmetric,
+              confidence as "confidence?",
+              source_anchor_ids as "source_anchor_ids?",
+              metadata as "metadata?",
+              created_at,
+              updated_at,
+              revision,
+              needs_review,
+              source
+            FROM kb_relationships
+            WHERE world_id = ? AND needs_review = 0
+            ORDER BY updated_at DESC"#,
+            world_id,
+        )
+        .fetch_all(pool)
+        .await?
+    };
 
     Ok(rows)
 }
@@ -796,7 +835,7 @@ mod tests {
         }
         tx.commit().await.unwrap();
 
-        let rows = list_relationships_for_world(&pool, &world_id)
+        let rows = list_relationships_for_world(&pool, &world_id, true)
             .await
             .unwrap();
         assert_eq!(rows.len(), 3);
@@ -884,7 +923,7 @@ mod tests {
         );
 
         // Only one row exists.
-        let rows = list_relationships_for_world(&pool, &world_id)
+        let rows = list_relationships_for_world(&pool, &world_id, true)
             .await
             .unwrap();
         assert_eq!(rows.len(), 1);
