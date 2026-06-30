@@ -203,6 +203,59 @@ components:
     action-button: "secondary"
     executor-select: "input-select-textarea.default"
 
+  # V1.78 Creator Memory review-loop — pending-count badge, task-kind chips,
+  # fragment browser chrome, and inspector tokens. Concrete colors use the same
+  # `color-mix` low-opacity + matching-text pattern as the V1.77 findings-status
+  # badges. Composition tokens (review-button, fragment-summary, fragment-id,
+  # inspector chrome, fragment-filter-input) reference existing primitives so
+  # the surface stays discoverable without duplicating primitive values. Token
+  # names frozen verbatim (V1.69 invariant continues).
+  memory-pending-count:
+    backgroundColor: "rgba(229,72,77,0.12)"
+    textColor: "{colors.red-1000}"
+    borderColor: "rgba(229,72,77,0.30)"
+    base: { height: "20px", minInlineSize: "20px", paddingInline: "6px", rounded: "{rounded.pill}", typography: "{typography.label-12}" }
+  memory-review-button:
+    basis: "primary"
+  memory-task-kind-brainstorm:
+    backgroundColor: "rgba(183,110,0,0.12)"
+    textColor: "{colors.amber-1000}"
+    borderColor: "rgba(183,110,0,0.30)"
+  memory-task-kind-outline:
+    backgroundColor: "rgba(0,107,255,0.10)"
+    textColor: "{colors.blue-1000}"
+    borderColor: "rgba(0,107,255,0.30)"
+  memory-task-kind-chapter:
+    backgroundColor: "rgba(0,133,119,0.10)"
+    textColor: "{colors.teal-1000}"
+    borderColor: "rgba(0,133,119,0.30)"
+  memory-task-kind-research:
+    backgroundColor: "rgba(124,58,237,0.10)"
+    textColor: "{colors.purple-1000}"
+    borderColor: "rgba(124,58,237,0.30)"
+  memory-task-kind-unknown:
+    backgroundColor: "{colors.gray-alpha-100}"
+    textColor: "{colors.gray-900}"
+    borderColor: "{colors.gray-alpha-300}"
+  memory-task-kind-base: { height: "24px", paddingInline: "8px", rounded: "{rounded.pill}", typography: "{typography.label-12}" }
+  memory-fragment-summary:
+    typography: "{typography.copy-14}"
+  memory-fragment-id:
+    typography: "{typography.copy-13-mono}"
+    textColor: "{colors.gray-800}"
+  memory-inspector-header:
+    panel-bg: "{colors.background-100}"
+    panel-border: "{colors.gray-alpha-400}"
+    row-active: "{colors.background-300}"
+  memory-inspector-field-label:
+    typography: "{typography.label-14}"
+    textColor: "{colors.gray-900}"
+  memory-inspector-field-value:
+    typography: "{typography.copy-13}"
+    textColor: "{colors.gray-1000}"
+  memory-fragment-filter-input:
+    basis: "input-select-textarea.default"
+
   # V1.70 canvas implement — concrete light values (canvas-strategy-surface.md Draft §3.6 / B4)
   canvas:
     canvas-surface: "#ebebeb"
@@ -664,4 +717,31 @@ Interaction rules:
 - Optimistic mutations update the list cache immediately and roll back on error; no conflict modal (last-writer-wins, single-author triage).
 - `target_executor` is an assignment hint, not an auto-trigger — re-running a preset stays a deliberate canvas/CLI action.
 - Status is never color alone: every badge carries a humanized text label.
+
+### Creator Memory Review-Loop (V1.78)
+
+The Control-Room gains a creator-scoped Memory surface that closes the capture → review → internalize loop. Token values: see frontmatter `memory-pending-count`, `memory-task-kind-*`, `memory-fragment-summary`, `memory-fragment-id`, `memory-inspector-*`, `memory-review-button`, `memory-fragment-filter-input`.
+
+**Pending-review count badge** (`memory-pending-count`) — a red numeric indicator on the pending-reviews header showing the live count from `GET /v1/local/memory/pending-review/count`. Red signals "items awaiting your review".
+
+**Task-kind chips** (`memory-task-kind-*`) — `task_kind` is a free-form string on the wire, so five known values map to distinct color accents (reusing the V1.77 `severityVariant` / `findingStatusClasses` `color-mix` pattern) and any unrecognized value falls back to a neutral chip rendered verbatim:
+
+| `task_kind` | Token | Color intent |
+| --- | --- | --- |
+| `brainstorm` | `memory-task-kind-brainstorm` | Amber — ideation / creative |
+| `outline` | `memory-task-kind-outline` | Blue — planning / structure |
+| `chapter` | `memory-task-kind-chapter` | Teal — writing / content |
+| `research` | `memory-task-kind-research` | Purple — inquiry / knowledge |
+| `unknown` (and unrecognized) | `memory-task-kind-unknown` | Gray — neutral |
+
+**Fragment browser** (`memory-fragment-summary`, `memory-fragment-id`, `memory-fragment-filter-input`) — a read-only list of long-term memory fragments produced only by the `review` route. `fragment_id` renders in monospace; `summary` renders as body copy; the keyword filter is a standard search input. No CRUD — fragments are produced only by reviewing pending captures.
+
+**Inspector chrome** (`memory-inspector-header`, `memory-inspector-field-label`, `memory-inspector-field-value`) — the side inspector (matching the V1.77 `FindingDetailPanel` pattern) shows all 6 `PendingReviewInfo` fields. Absent `world_id` reads as "(none)"; `created_at` is RFC 3339 rendered in the author's local time; `raw_digest` is a scrollable preformatted area.
+
+**Review & Summarize CTA** (`memory-review-button`) — a primary accent button (reuses `button.primary` basis) enabled only when `count > 0`; shows a processing state then surfaces `promoted`/`fragmented`/`dropped` counters in a confirmation toast.
+
+Interaction rules:
+- The surface is review/consume-only — `createPendingReview` stays CLI/producer-only (the session-end capture pipeline owns creation), mirroring V1.77's `createFinding` CLI-only decision.
+- Optimistic delete removes the row and decrements the count badge before the server responds; rolls back on error.
+- Token names are preserved verbatim — no consumer (`tailwind.config.ts`, `index.css`, or Memory page components) invents a name not in this frontmatter (V1.69 invariant continues).
 

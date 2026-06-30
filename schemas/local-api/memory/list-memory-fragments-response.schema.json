@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/memory/list-memory-fragments-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ListMemoryFragmentsResponse",
+  "description": "Response body for GET /v1/local/memory/fragments. Fragments are produced only by the `review` route (no CRUD on this surface). Unlike the pending-review list, this response is NOT paginated (returns up to `limit` rows).",
+  "type": "object",
+  "required": ["fragments"],
+  "properties": {
+    "fragments": { "type": "array", "items": { "$ref": "https://nexus42.invalid/schemas/local-api/memory/memory-fragment-info.schema.json" } }
+  },
+  "additionalProperties": false
+}

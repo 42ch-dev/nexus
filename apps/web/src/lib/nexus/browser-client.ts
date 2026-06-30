@@ -16,8 +16,10 @@ import type {
   ChapterContentQuery,
   ChapterDetail,
   ChapterOutline,
+  CountPendingReviewsResponse,
   CreateWorkRequest,
   CreateWorkResponse,
+  DeletePendingReviewResponse,
   EditCoreContextRequest,
   EditCoreContextResponse,
   FindingDetailResponse,
@@ -29,6 +31,10 @@ import type {
   ListChaptersResponse,
   ListFindingsQuery,
   ListFindingsResponse,
+  ListMemoryFragmentsQuery,
+  ListMemoryFragmentsResponse,
+  ListPendingReviewsQuery,
+  ListPendingReviewsResponse,
   ListPresetsResponse,
   ListSchedulesQuery,
   ListSchedulesResponse,
@@ -42,6 +48,8 @@ import type {
   PatchChapterRequest,
   PatchWorkRequest,
   ReloadPresetResponse,
+  ReviewRequest,
+  ReviewResponse,
   ScaffoldPresetRequest,
   ScaffoldPresetResponse,
   SessionDetailResponse,
@@ -391,6 +399,48 @@ export class BrowserClient implements NexusClient {
     );
   }
 
+  // ── Creator Memory review-loop (V1.78) ─────────────────────────────────────
+  // Review/consume-only surface (compass D-UX LOCKED). `createPendingReview` is
+  // CLI/producer-only and intentionally absent from this client. Every endpoint
+  // is creator-scoped — `creator_id` rides as a query param (or body field for
+  // review) and the daemon enforces active-creator ownership (403 on mismatch).
+  listPendingReviews(
+    creatorId: string,
+    query?: Omit<ListPendingReviewsQuery, 'creator_id'>,
+  ): Promise<ListPendingReviewsResponse> {
+    return this.get<ListPendingReviewsResponse>('/v1/local/memory/pending-review', {
+      ...query,
+      creator_id: creatorId,
+    });
+  }
+  countPendingReviews(creatorId: string): Promise<CountPendingReviewsResponse> {
+    return this.get<CountPendingReviewsResponse>(
+      '/v1/local/memory/pending-review/count',
+      { creator_id: creatorId },
+    );
+  }
+  deletePendingReview(
+    pendingId: string,
+    creatorId: string,
+  ): Promise<DeletePendingReviewResponse> {
+    return this.delete<DeletePendingReviewResponse>(
+      `/v1/local/memory/pending-review/${encodeURIComponent(pendingId)}`,
+      { creator_id: creatorId },
+    );
+  }
+  reviewMemory(request: ReviewRequest): Promise<ReviewResponse> {
+    return this.post<ReviewResponse>('/v1/local/memory/review', request);
+  }
+  listMemoryFragments(
+    creatorId: string,
+    query?: Omit<ListMemoryFragmentsQuery, 'creator_id'>,
+  ): Promise<ListMemoryFragmentsResponse> {
+    return this.get<ListMemoryFragmentsResponse>('/v1/local/memory/fragments', {
+      ...query,
+      creator_id: creatorId,
+    });
+  }
+
   // ── Transport core ─────────────────────────────────────────────────────────
 
   private get<T>(path: string, query?: object): Promise<T> {
@@ -405,8 +455,8 @@ export class BrowserClient implements NexusClient {
     return this.request<T>('PATCH', `${path}${toQueryString(query)}`, body);
   }
 
-  private delete<T>(path: string): Promise<T> {
-    return this.request<T>('DELETE', path);
+  private delete<T>(path: string, query?: object): Promise<T> {
+    return this.request<T>('DELETE', `${path}${toQueryString(query)}`);
   }
 
   private async request<T>(

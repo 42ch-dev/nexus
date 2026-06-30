@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/memory/delete-pending-review-query.schema.json",
+  "schema_version": 1,
+  "title": "Nexus DeletePendingReviewQuery",
+  "description": "Query parameters for DELETE /v1/local/memory/pending-review/{id}. The `{id}` path parameter is the pending review's `pending_id` (not modeled here); `creator_id` gates ownership.",
+  "type": "object",
+  "required": ["creator_id"],
+  "properties": {
+    "creator_id": { "type": "string" }
+  },
+  "additionalProperties": false
+}
