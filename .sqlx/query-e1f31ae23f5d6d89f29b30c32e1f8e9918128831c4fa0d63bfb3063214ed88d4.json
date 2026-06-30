@@ -1,0 +1,56 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT pending_id as \"pending_id!\", session_id, creator_id, world_id, task_kind, raw_digest, created_at\n             FROM memory_pending_review\n             WHERE creator_id = ?\n             ORDER BY created_at DESC, pending_id DESC\n             LIMIT ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "pending_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "session_id",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "creator_id",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "world_id",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "task_kind",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "raw_digest",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 6,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "e1f31ae23f5d6d89f29b30c32e1f8e9918128831c4fa0d63bfb3063214ed88d4"
+}
