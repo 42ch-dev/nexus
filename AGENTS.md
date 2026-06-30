@@ -37,6 +37,8 @@ See linked AGENTS.md files for per-directory decision rules and invariants:
 | `schemas/` | JSON Schema wire contracts | [`schemas/AGENTS.md`](schemas/AGENTS.md) |
 | `tooling/` | Codegen pipeline & CI | [`tooling/AGENTS.md`](tooling/AGENTS.md) |
 | `apps/nexus42/` | CLI executable (polyglot product-surfaces dir) | [`apps/nexus42/AGENTS.md`](apps/nexus42/AGENTS.md) |
+| `apps/web/` | Web SPA — Control Room + canvas (daemon-served React) | [`apps/web/AGENTS.md`](apps/web/AGENTS.md) |
+| `apps/desktop/` | Tauri v2 desktop shell wrapping `apps/web` | [`apps/desktop/AGENTS.md`](apps/desktop/AGENTS.md) |
 | `crates/nexus-acp-host/` | ACP client adapter | [`crates/nexus-acp-host/AGENTS.md`](crates/nexus-acp-host/AGENTS.md) |
 | `crates/nexus-agent-host/` | Agent host adapter | [`crates/nexus-agent-host/AGENTS.md`](crates/nexus-agent-host/AGENTS.md) |
 | `crates/nexus-contracts/` | Generated Rust wire types | [`crates/nexus-contracts/AGENTS.md`](crates/nexus-contracts/AGENTS.md) |
