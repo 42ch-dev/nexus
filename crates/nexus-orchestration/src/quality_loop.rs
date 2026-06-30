@@ -35,6 +35,9 @@
 use crate::auto_chain::AutoChainError;
 use crate::capability::{CapabilityError, CapabilityRegistry};
 use nexus_local_db::kb_extract_job::{insert_pending_with_llm, is_idempotent};
+use nexus_local_db::kb_relationships::{
+    resolve_entity_by_canonical_name, upsert_extraction_relationship,
+};
 use regex::Regex;
 use sqlx::SqlitePool;
 use std::sync::OnceLock;
@@ -56,6 +59,11 @@ const DEFAULT_BLOCK_TYPE_GUESS: &str = "character";
 /// Maximum candidates persisted per review pass (safety cap to avoid
 /// flooding `kb_extract_jobs.pending` from a single chapter scan).
 const MAX_CANDIDATES_PER_PASS: usize = 20;
+
+/// Maximum relationship candidates persisted per review pass (V1.76 safety cap;
+/// mirrors [`MAX_CANDIDATES_PER_PASS`] to avoid flooding `kb_relationships`
+/// suggestions from a single chapter scan).
+const MAX_RELATIONSHIPS_PER_PASS: usize = 20;
 
 /// A review-time KB candidate.
 ///
@@ -82,6 +90,37 @@ pub struct KbCandidate {
     pub confidence: Option<f64>,
     /// Verbatim chapter excerpt justifying the extraction. `None` for
     /// heuristic candidates; `Some(s)` for `nexus.llm.extract` candidates.
+    pub source_quote: Option<String>,
+}
+
+/// A review-time KB relationship candidate (V1.76).
+///
+/// Produced by the `nexus.llm.extract` capability alongside entity
+/// [`KbCandidate`]s. Endpoints are referenced by `canonical_name` (+ optional
+/// `block_type`) and resolved to `KeyBlock` ids at persist time by
+/// [`persist_relationship_candidates`]. A candidate whose endpoints cannot
+/// resolve to existing non-deleted `KeyBlocks` is skipped + logged (entities are
+/// NOT confirmed in the same extraction pass — architect lock).
+#[derive(Debug, Clone, PartialEq)]
+pub struct KbRelationshipCandidate {
+    /// Canonical name of the source endpoint.
+    pub source_canonical_name: String,
+    /// Optional `block_type` hint to disambiguate the source endpoint.
+    pub source_block_type: Option<String>,
+    /// Canonical name of the target endpoint.
+    pub target_canonical_name: String,
+    /// Optional `block_type` hint to disambiguate the target endpoint.
+    pub target_block_type: Option<String>,
+    /// `WorldKbRelationshipKind` `snake_case` value; `custom` requires
+    /// [`custom_label`](Self::custom_label).
+    pub relation_type: String,
+    /// Narrative label when `relation_type` is `custom`.
+    pub custom_label: Option<String>,
+    /// Whether the relationship projects in both directions.
+    pub symmetric: bool,
+    /// LLM self-reported confidence in `[0.0, 1.0]`.
+    pub confidence: Option<f64>,
+    /// Verbatim chapter excerpt justifying the relationship.
     pub source_quote: Option<String>,
 }
 
@@ -456,14 +495,17 @@ pub async fn extract_kb_candidates_for_review(
     };
     // Pathway selection: LLM when a registry + worker is available, else the
     // V1.50 heuristic fallback (llm-extract.md §5.1).
-    let candidates = match extract_via_llm(registry, &ctx).await {
-        LlmExtractOutcome::Candidates(c) => c,
+    let (candidates, relationships) = match extract_via_llm(registry, &ctx).await {
+        LlmExtractOutcome::Candidates {
+            candidates,
+            relationships,
+        } => (candidates, relationships),
         LlmExtractOutcome::WorkerUnavailable => {
             tracing::debug!(
                 schedule_id,
                 "kb-extract: LLM worker unavailable; falling back to heuristic"
             );
-            extract_candidates_from_text(&ctx.prose)
+            (extract_candidates_from_text(&ctx.prose), Vec::new())
         }
         LlmExtractOutcome::CapabilityError(ref reason) => {
             tracing::warn!(
@@ -471,19 +513,24 @@ pub async fn extract_kb_candidates_for_review(
                 reason,
                 "kb-extract: LLM extraction failed; falling back to heuristic"
             );
-            extract_candidates_from_text(&ctx.prose)
+            (extract_candidates_from_text(&ctx.prose), Vec::new())
         }
     };
     let existing_names = existing_canonical_names(pool, &ctx.world_id).await?;
     let inserted = persist_candidates(pool, schedule_id, &ctx, &existing_names, candidates).await?;
-    if inserted > 0 {
+    // V1.76: persist relationship candidates (idempotent; entity-existence
+    // prerequisite enforced inside persist_relationship_candidates).
+    let rel_inserted =
+        persist_relationship_candidates(pool, schedule_id, &ctx, relationships).await?;
+    if inserted > 0 || rel_inserted > 0 {
         tracing::info!(
             schedule_id,
             work_id = %ctx.work_id,
             chapter = ctx.chapter,
             world_id = ctx.world_id,
             inserted,
-            "kb-extract: inserted pending KB candidates"
+            rel_inserted,
+            "kb-extract: inserted pending KB candidates + relationship suggestions"
         );
     }
     Ok(inserted)
@@ -528,7 +575,7 @@ pub async fn detect_missing_kb_on_finalize(
     };
 
     let candidates = match extract_via_llm(registry, &ctx).await {
-        LlmExtractOutcome::Candidates(c) => c,
+        LlmExtractOutcome::Candidates { candidates, .. } => candidates,
         LlmExtractOutcome::WorkerUnavailable => {
             tracing::debug!(
                 schedule_id,
@@ -585,10 +632,10 @@ pub async fn detect_missing_kb_on_finalize(
     Ok(written)
 }
 
-/// Outcome of an LLM extraction attempt (V1.52 T-A P0).
+/// Outcome of an LLM extraction attempt (V1.52 T-A P0; V1.76 adds relationships).
 ///
 /// - `Candidates`: LLM returned parsed candidates (may be empty if the LLM
-///   produced no entities).
+///   produced no entities) + optional relationship candidates (V1.76).
 /// - `WorkerUnavailable`: no worker IPC was available. The caller should
 ///   fall back to the heuristic rather than treat this as "zero candidates".
 /// - `CapabilityError`: the capability was missing or returned a non-worker
@@ -596,7 +643,12 @@ pub async fn detect_missing_kb_on_finalize(
 ///   reason (closes R-V151Q3-W002).
 #[derive(Debug)]
 pub(crate) enum LlmExtractOutcome {
-    Candidates(Vec<KbCandidate>),
+    Candidates {
+        candidates: Vec<KbCandidate>,
+        /// V1.76: relationship candidates proposed by the LLM. Empty when the
+        /// LLM produced no `relationships` array (backward compatible).
+        relationships: Vec<KbRelationshipCandidate>,
+    },
     WorkerUnavailable,
     CapabilityError(String),
 }
@@ -675,7 +727,23 @@ pub(crate) async fn run_llm_extract(
             .collect(),
         _ => Vec::new(),
     };
-    LlmExtractOutcome::Candidates(candidates)
+
+    // V1.76: parse relationship candidates (best-effort; empty when the LLM
+    // produced no `relationships` array).
+    let relationships_json = output.get("relationships").and_then(|v| v.as_array());
+    let relationships: Vec<KbRelationshipCandidate> = match relationships_json {
+        Some(arr) if !arr.is_empty() => arr
+            .iter()
+            .filter_map(relationship_from_llm_json)
+            .take(MAX_RELATIONSHIPS_PER_PASS)
+            .collect(),
+        _ => Vec::new(),
+    };
+
+    LlmExtractOutcome::Candidates {
+        candidates,
+        relationships,
+    }
 }
 
 /// Attempt LLM extraction via the `nexus.llm.extract` capability for a chapter.
@@ -817,6 +885,77 @@ pub(crate) fn candidate_from_llm_json_for_profile(
         canonical_name_guess: canonical_name,
         proposed_payload: payload.to_string(),
         block_type,
+        confidence,
+        source_quote,
+    })
+}
+
+/// Build a [`KbRelationshipCandidate`] from one LLM-returned relationship JSON
+/// object (V1.76).
+///
+/// Returns `None` when either `source_canonical_name` or
+/// `target_canonical_name` is missing/empty (no point persisting a
+/// nameless relationship). Unknown `relation_type` values are kept as-is
+/// (the persist path resolves against the taxonomy and skips/warns on
+/// unsupported values rather than inventing parallel enum values).
+pub(crate) fn relationship_from_llm_json(c: &serde_json::Value) -> Option<KbRelationshipCandidate> {
+    let source_canonical_name = c
+        .get("source_canonical_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let target_canonical_name = c
+        .get("target_canonical_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if source_canonical_name.is_empty() || target_canonical_name.is_empty() {
+        return None;
+    }
+    let relation_type = c
+        .get("relation_type")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("custom")
+        .to_string();
+    let custom_label = c
+        .get("custom_label")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(String::from);
+    let symmetric = c
+        .get("symmetric")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let confidence = c
+        .get("confidence")
+        .and_then(serde_json::Value::as_f64)
+        .map(|x| x.clamp(0.0, 1.0));
+    let source_quote = c
+        .get("source_quote")
+        .and_then(|v| v.as_str())
+        .map(String::from);
+    let source_block_type = c
+        .get("source_block_type")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(String::from);
+    let target_block_type = c
+        .get("target_block_type")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.is_empty())
+        .map(String::from);
+
+    Some(KbRelationshipCandidate {
+        source_canonical_name,
+        source_block_type,
+        target_canonical_name,
+        target_block_type,
+        relation_type,
+        custom_label,
+        symmetric,
         confidence,
         source_quote,
     })
@@ -1187,6 +1326,103 @@ async fn persist_candidates(
                     candidate = %candidate.canonical_name_guess,
                     error = %e,
                     "kb-extract: failed to insert pending candidate"
+                );
+            }
+        }
+    }
+    Ok(inserted)
+}
+
+/// Resolve relationship-candidate endpoints to existing `KeyBlocks` and persist
+/// idempotent extraction-sourced suggestions into `kb_relationships` (V1.76).
+///
+/// Implements the architect-locked entity-existence prerequisite: a
+/// relationship candidate whose source or target endpoint cannot resolve to a
+/// non-deleted `KeyBlock` in the same world is **skipped + logged** (entities
+/// are NOT confirmed in the same extraction pass). Resolved candidates are
+/// upserted via [`upsert_extraction_relationship`] with
+/// `needs_review = 1` + `source = 'extraction'`; the dedup composite key
+/// `(world_id, source_entity_id, target_entity_id, relation_type,
+/// custom_label, source='extraction')` makes rescans idempotent.
+///
+/// Returns the count of newly-inserted suggestion rows. Per-candidate errors
+/// (including ambiguous/missing endpoints) are logged at `debug!`/`warn!` and
+/// do not abort the loop. Best-effort + non-blocking like
+/// [`persist_candidates`].
+async fn persist_relationship_candidates(
+    pool: &SqlitePool,
+    schedule_id: &str,
+    ctx: &ChapterContext,
+    relationships: Vec<KbRelationshipCandidate>,
+) -> Result<usize, AutoChainError> {
+    if relationships.is_empty() {
+        return Ok(0);
+    }
+    let now = chrono::Utc::now().to_rfc3339();
+    let mut inserted = 0usize;
+    for rel in relationships {
+        // Resolve both endpoints to existing non-deleted KeyBlocks. When a
+        // block_type hint is provided, resolve by (world, block_type, name);
+        // otherwise case-insensitive by name only when exactly one matches.
+        let source_id = resolve_entity_by_canonical_name(
+            pool,
+            &ctx.world_id,
+            &rel.source_canonical_name,
+            rel.source_block_type.as_deref(),
+        )
+        .await?;
+        let target_id = resolve_entity_by_canonical_name(
+            pool,
+            &ctx.world_id,
+            &rel.target_canonical_name,
+            rel.target_block_type.as_deref(),
+        )
+        .await?;
+
+        let (Some(source_id), Some(target_id)) = (source_id, target_id) else {
+            // Entity-existence prerequisite: skip + log. The suggestion may be
+            // re-proposed on a later rescan after the author promotes the
+            // endpoint entities (architect lock).
+            tracing::debug!(
+                schedule_id,
+                work_id = %ctx.work_id,
+                world_id = %ctx.world_id,
+                source = %rel.source_canonical_name,
+                target = %rel.target_canonical_name,
+                relation_type = %rel.relation_type,
+                "kb-extract: skipped relationship suggestion — endpoint entity not confirmed"
+            );
+            continue;
+        };
+
+        match upsert_extraction_relationship(
+            pool,
+            &ctx.world_id,
+            &source_id,
+            &target_id,
+            &rel.relation_type,
+            rel.custom_label.as_deref(),
+            rel.symmetric,
+            rel.confidence,
+            rel.source_quote.as_deref(),
+            &now,
+        )
+        .await
+        {
+            Ok(true) => inserted += 1,
+            Ok(false) => {
+                // Idempotent skip: suggestion already exists from a prior rescan.
+            }
+            Err(e) => {
+                tracing::warn!(
+                    schedule_id,
+                    work_id = %ctx.work_id,
+                    world_id = %ctx.world_id,
+                    source = %rel.source_canonical_name,
+                    target = %rel.target_canonical_name,
+                    relation_type = %rel.relation_type,
+                    error = %e,
+                    "kb-extract: failed to upsert relationship suggestion"
                 );
             }
         }

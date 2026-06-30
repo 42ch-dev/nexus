@@ -22,7 +22,7 @@ import {
 import { buildRelationshipRemoveRequest } from './relationship-inspector-logic';
 import { worldKbNodeTypes } from './entity-node';
 import { anchorNodes, deriveEdges, entryCountOf, graphSummary, layoutNodes } from './graph-projection';
-import { deriveRelationshipEdges } from './relationship-projection';
+import { deriveRelationshipEdges, filterRelationshipEdgesByConfidence } from './relationship-projection';
 import { WorldKbAltView } from './world-kb-alt-view';
 import { WorldKbCanvasConflicts } from './world-kb-canvas-conflicts';
 import { WorldKbHeader } from './world-kb-canvas-header';
@@ -41,13 +41,21 @@ export interface WorldKbCanvasProps {
 }
 
 export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
-  const graph = useWorldKbGraph(worldId);
-  const candidates = useWorldKbCandidates(worldId);
-  const patchRelationship = usePatchWorldKbRelationship(worldId);
-
   // List view is the default for keyboard-only / screen-reader users.
   const prefersReducedMotion = useReducedMotionPreference();
   const [showList, setShowList] = useState<boolean>(prefersReducedMotion);
+
+  // V1.76 flooding gate (qc3-W1): extraction suggestions are fetched ONLY when
+  // the Suggested triage pane is open (list view + Suggested tab). The confirmed
+  // graph (default, incl. graph mode) excludes `needs_review` rows so a world
+  // with many extraction suggestions does not flood the canvas on load. The
+  // active-tab signal is lifted from the alt-view via `onActiveTabChange`.
+  const [altTab, setAltTab] = useState<'entities' | 'relationships' | 'suggested'>('entities');
+  const includeSuggested = showList && altTab === 'suggested';
+
+  const graph = useWorldKbGraph(worldId, includeSuggested);
+  const candidates = useWorldKbCandidates(worldId);
+  const patchRelationship = usePatchWorldKbRelationship(worldId);
 
   const entities = graph.data?.entities ?? [];
   const candidateItems = candidates.data?.items ?? [];
@@ -73,15 +81,25 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
     onEdgeClick,
   } = useWorldKbCanvasState({ entities, candidateItems, relationships });
 
+  // V1.76: confidence threshold for the graph view. Confirmed edges with
+  // confidence below the threshold are hidden; manual edges (no confidence)
+  // and suggested (needs_review) edges always show. Stored in the 0.0–1.0
+  // range (matching confidence values + the compass Phase 2b bands); default
+  // 0.0 = show all.
+  const [confidenceThreshold, setConfidenceThreshold] = useState(0);
+
   const projected = useMemo(() => {
     const entityNodes = layoutNodes(entities, candidateItems, worldId);
     const allNodes = [...anchorNodes(anchors), ...entityNodes] as Node[];
+    const relEdges = deriveRelationshipEdges(relationships);
+    // Apply the confidence threshold to confirmed relationship edges only.
+    const visibleRelEdges = filterRelationshipEdgesByConfidence(relEdges, confidenceThreshold);
     return {
       nodes: allNodes,
-      edges: [...deriveEdges(anchors), ...deriveRelationshipEdges(relationships)],
+      edges: [...deriveEdges(anchors), ...visibleRelEdges],
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entities, candidateItems, anchors, relationships, worldId]);
+  }, [entities, candidateItems, anchors, relationships, worldId, confidenceThreshold]);
 
   // Hold nodes in local state so React Flow drag/select moves persist; reseed
   // when the server projection changes (refetch or selection-driven invalidation).
@@ -166,6 +184,63 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
     });
   };
 
+  // V1.76: promote an extraction suggestion (clear needs_review) via the
+  // existing patch-relationship update route — no second promotion state machine.
+  const onPromoteSuggestion = (rel: WorldKbRelationshipProjection) => {
+    patchRelationship.mutate(
+      {
+        relationship_id: rel.relationship_id,
+        action: 'update',
+        expected_version: rel.version,
+        relationship: {
+          source_entity_id: rel.source_entity_id,
+          target_entity_id: rel.target_entity_id,
+          relation_type: rel.relation_type,
+          custom_label: rel.custom_label,
+          symmetric: rel.symmetric,
+          confidence: rel.confidence,
+          source_anchor_ids: rel.source_anchor_ids,
+          metadata: rel.metadata,
+          needs_review: false,
+        },
+      },
+      { onSuccess: () => bumpReseed() },
+    );
+  };
+  const onDeleteSuggestion = onDeleteRelationship;
+  const onPromoteAllSuggestions = async (rels: WorldKbRelationshipProjection[]) => {
+    // TanStack Query v5 mutate() in a loop only delivers callbacks for the
+    // LAST submitted call — earlier promotions' errors are silently dropped.
+    // mutateAsync + Promise.allSettled ensures every outcome is observed.
+    const results = await Promise.allSettled(
+      rels.map((rel) =>
+        patchRelationship.mutateAsync({
+          relationship_id: rel.relationship_id,
+          action: 'update' as const,
+          expected_version: rel.version,
+          relationship: {
+            source_entity_id: rel.source_entity_id,
+            target_entity_id: rel.target_entity_id,
+            relation_type: rel.relation_type,
+            custom_label: rel.custom_label,
+            symmetric: rel.symmetric,
+            confidence: rel.confidence,
+            source_anchor_ids: rel.source_anchor_ids,
+            metadata: rel.metadata,
+            needs_review: false,
+          },
+        }),
+      ),
+    );
+    const failed = results.filter(
+      (r): r is PromiseRejectedResult => r.status === 'rejected',
+    );
+    if (failed.length > 0) {
+      console.warn(`promoteAll: ${failed.length}/${rels.length} suggestions failed`);
+    }
+    bumpReseed();
+  };
+
   const inspectorPanelProps = {
     selection,
     worldId,
@@ -204,6 +279,11 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
             onSelectRelationship={onSelectRelationship}
             onCreateRelationship={onCreateRelationship}
             onDeleteRelationship={onDeleteRelationship}
+            onPromoteSuggestion={onPromoteSuggestion}
+            onDeleteSuggestion={onDeleteSuggestion}
+            onPromoteAllSuggestions={onPromoteAllSuggestions}
+            suggestionPending={patchRelationship.isPending}
+            onActiveTabChange={setAltTab}
           />
           <InspectorPanel {...inspectorPanelProps} />
         </div>
@@ -219,6 +299,29 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
           ariaLabel="World KB entity graph"
         >
           <div className="pointer-events-none absolute inset-0" />
+          {/* V1.76: confidence threshold filter (confirmed edges below the
+              threshold are hidden; manual + suggested edges always show).
+              Slider emits 0.0–1.0 (step 0.05) matching confidence values and
+              the compass Phase 2b stepped bands at 0.4 / 0.7. */}
+          <div className="pointer-events-auto absolute left-3 top-3 flex items-center gap-2 rounded-card border border-gray-alpha-400 bg-background-100 px-3 py-2 shadow-card">
+            <label
+              htmlFor="kb-confidence-threshold"
+              className="text-label-12 text-gray-700"
+            >
+              Confidence ≥ {confidenceThreshold.toFixed(2)}
+            </label>
+            <input
+              id="kb-confidence-threshold"
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={confidenceThreshold}
+              onChange={(e) => setConfidenceThreshold(Number(e.target.value))}
+              className="h-1 w-32 cursor-pointer accent-canvas-strategy-accent"
+              aria-label="Minimum confidence threshold for confirmed relationship edges"
+            />
+          </div>
           <div className="pointer-events-auto absolute right-3 top-3 w-[340px] max-w-[calc(100%-1.5rem)] rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-popover">
             <InspectorPanel {...inspectorPanelProps} />
           </div>

@@ -228,7 +228,10 @@ export interface NexusClient {
 
   // ── World KB canvas (V1.73 Track A) ───────────────────────────────────────
   /** `GET /v1/local/worlds/{world_id}/kb/graph` — entity graph projection. */
-  getWorldKbGraph(worldId: string): Promise<WorldKbGraphResponse>;
+  getWorldKbGraph(
+    worldId: string,
+    query?: { includeSuggested?: boolean },
+  ): Promise<WorldKbGraphResponse>;
   /** `GET /v1/local/worlds/{world_id}/kb/candidates` — pending candidates. */
   getWorldKbCandidates(
     worldId: string,

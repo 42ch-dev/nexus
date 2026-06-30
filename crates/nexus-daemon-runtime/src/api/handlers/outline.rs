@@ -659,10 +659,8 @@ pub async fn patch_outline_chapter(
 
     let result = apply_chapter_patch(
         &state,
-        &workspace_root,
         &work_ref,
         &work_id,
-        chapter,
         &record,
         &req,
         &mut frontmatter,
@@ -951,25 +949,85 @@ const fn has_chapter_structural_edit(req: &OutlinePatchChapterRequest) -> bool {
         || req.set.content.is_some()
 }
 
-// `too_many_arguments` / `too_many_lines`: V1.75 A2 extended this helper to
-// carry `workspace_root` + `work_ref` for per-chapter outline-path resolution
-// and added the content-persistence block. The arg list and line count are a
-// direct consequence of keeping the validate → DB persist → frontmatter
-// mutate → outline-path seed/write sequence inline so the lock-release and
-// body-ownership invariants stay locally auditable (mirrors the
-// `patch_outline_chapter` allow above).
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+/// Persist chapter outline prose to its per-chapter file and seed the DB
+/// `outline_path` column when it is empty.
+///
+/// Ordering invariant: the DB `outline_path` is seeded before the file is
+/// atomically written. If the file write fails, the column still points at the
+/// canonical derived path, and the next read will re-derive and re-seed it.
+/// The caller remains responsible for the work-level `Outlines/outline.md`
+/// frontmatter + `outline_revision` bump, so the per-chapter content is
+/// durably on disk before the work-level revision is advanced.
+async fn persist_chapter_outline_content(
+    pool: &sqlx::SqlitePool,
+    workspace_root: &StdPath,
+    work_id: &str,
+    work_ref: &str,
+    record: &WorkChapterRecord,
+    content: String,
+) -> Result<(), NexusApiError> {
+    if content.len() > OUTLINE_FILE_MAX_BYTES {
+        return Err(NexusApiError::BadRequest {
+            code: "chapter_outline_content_too_large".to_string(),
+            message: format!(
+                "chapter outline content is {} bytes, exceeding the maximum of {} bytes",
+                content.len(),
+                OUTLINE_FILE_MAX_BYTES
+            ),
+        });
+    }
+
+    let chapter = record.chapter;
+    let volume_for_path = record.volume.unwrap_or(1);
+    let was_empty = record.outline_path.as_deref().is_none_or(str::is_empty);
+    let outline_path = record
+        .outline_path
+        .clone()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| format!("Works/{work_ref}/Outlines/chapters/ch{chapter:02}-outline.md"));
+
+    // If the column was empty, persist the derived path so subsequent reads
+    // (V1.65 GET, the canvas inspector) find the file. This mirrors the
+    // V1.65 PUT route's seeding behavior.
+    if was_empty {
+        let now = chrono::Utc::now().to_rfc3339();
+        work_chapters::update_outline_path(
+            pool,
+            work_id,
+            chapter,
+            volume_for_path,
+            Some(&outline_path),
+            &now,
+        )
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?;
+    }
+
+    // Atomic write of prose to the per-chapter outline file. This is the
+    // chapters.rs plain-content writer (distinct from this module's
+    // frontmatter+body `atomic_write_outline`).
+    crate::api::handlers::chapters::atomic_write_outline(workspace_root, &outline_path, &content)
+        .await
+}
+
+// The validate → DB persist → frontmatter mutate sequence is kept inline so
+// the `RuntimeLockGuard` release paths stay locally auditable. The per-chapter
+// outline-file write is delegated to `persist_chapter_outline_content`, which
+// documents its own body-ownership invariant.
 async fn apply_chapter_patch(
     state: &WorkspaceState,
-    workspace_root: &StdPath,
     work_ref: &str,
     work_id: &str,
-    chapter: i32,
     record: &WorkChapterRecord,
     req: &OutlinePatchChapterRequest,
     frontmatter: &mut OutlineFrontmatter,
     chapters: &[WorkChapterRecord],
 ) -> Result<(), NexusApiError> {
+    let chapter = record.chapter;
+
     if let Some(ref status) = req.set.status {
         validate_status_transition(&record.status, status)?;
     }
@@ -1055,57 +1113,21 @@ async fn apply_chapter_patch(
     //
     // Body-ownership invariant: this block writes ONLY to `outline_path`. It
     // does not touch `body_path`, the body writer, or `Stories/**`.
+    //
+    // Two-file write ordering: this helper writes the per-chapter outline file
+    // first; the caller then atomically writes the work-level frontmatter and
+    // bumps `outline_revision`. The per-chapter content is durable before the
+    // work-level revision advances, and a failed work-level write can be
+    // retried idempotently.
     if let Some(content) = req.set.content.clone() {
-        if content.len() > OUTLINE_FILE_MAX_BYTES {
-            return Err(NexusApiError::BadRequest {
-                code: "chapter_outline_content_too_large".to_string(),
-                message: format!(
-                    "chapter outline content is {} bytes, exceeding the maximum of {} bytes",
-                    content.len(),
-                    OUTLINE_FILE_MAX_BYTES
-                ),
-            });
-        }
-
-        // Resolve the per-chapter outline_path, deriving the V1.65 fallback
-        // path when the column is empty so the canvas can seed prose for a
-        // chapter that was never edited through the legacy editor.
-        let volume_for_path = record.volume.unwrap_or(1);
-        let outline_path = record
-            .outline_path
-            .clone()
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| {
-                format!("Works/{work_ref}/Outlines/chapters/ch{chapter:02}-outline.md")
-            });
-
-        // If the column was empty, persist the derived path so subsequent reads
-        // (V1.65 GET, the canvas inspector) find the file. This mirrors the
-        // V1.65 PUT route's seeding behavior.
-        if record.outline_path.as_deref().is_none_or(str::is_empty) {
-            let now = chrono::Utc::now().to_rfc3339();
-            work_chapters::update_outline_path(
-                state.pool(),
-                work_id,
-                chapter,
-                volume_for_path,
-                Some(&outline_path),
-                &now,
-            )
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: e.to_string(),
-            })?;
-        }
-
-        // Atomic write of prose to the per-chapter outline file. This is the
-        // chapters.rs plain-content writer (distinct from this module's
-        // frontmatter+body `atomic_write_outline`).
-        crate::api::handlers::chapters::atomic_write_outline(
-            workspace_root,
-            &outline_path,
-            &content,
+        let workspace_root = workspace_root(state)?;
+        persist_chapter_outline_content(
+            state.pool(),
+            &workspace_root,
+            work_id,
+            work_ref,
+            record,
+            content,
         )
         .await?;
     }
