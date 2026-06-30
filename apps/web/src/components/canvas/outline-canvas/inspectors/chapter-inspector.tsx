@@ -15,6 +15,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 
 import { STATUS_OPTIONS } from '../graph-projection';
 import { ChapterOutlineContentEditor } from './chapter-outline-content-editor';
+import { buildChapterPatchSet } from './chapter-inspector-utils';
+import { INPUT_CLASS, MetaField } from './chapter-meta-field';
 import type {
   ChapterStatus,
   ChapterSummary,
@@ -88,20 +90,12 @@ export function ChapterInspector({
 
   function save() {
     if (!chapter) return;
-    const set: OutlinePatchChapterRequest['set'] = {};
-    const currentTitle = titles?.[String(chapter.chapter)] ?? chapter.title ?? '';
-    if (title !== currentTitle) set.title = title;
-    if (slug !== (chapter.slug ?? '')) set.slug = slug;
-    if (status !== chapter.status) set.status = status;
-    if (planned !== String(chapter.planned_word_count ?? '')) {
-      const n = Number.parseInt(planned, 10);
-      if (!Number.isNaN(n)) set.planned_word_count = n;
-    }
-    if (volume !== String(currentVolume?.volume_id ?? '')) {
-      const n = Number.parseInt(volume, 10);
-      if (!Number.isNaN(n)) set.volume = n;
-    }
-
+    const set = buildChapterPatchSet(
+      chapter,
+      titles,
+      { title, slug, status, planned, volume },
+      outline,
+    );
     if (Object.keys(set).length === 0) return;
 
     if (
@@ -234,19 +228,5 @@ export function ChapterInspector({
         </div>
       </CardContent>
     </Card>
-  );
-}
-
-/** Shared form-control class for the metadata inputs (DESIGN.md tokens). */
-const INPUT_CLASS =
-  'rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-2 text-gray-1000 focus:border-blue-700 disabled:bg-gray-100 disabled:text-gray-700';
-
-/** Label + control wrapper for the metadata fields. */
-function MetaField({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="flex flex-col gap-1 text-copy-13">
-      <span className="text-gray-700">{label}</span>
-      {children}
-    </label>
   );
 }
