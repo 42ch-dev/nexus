@@ -3,53 +3,6 @@
   "updated_at": "2026-06-30T04:00:00Z",
   "plans": [
     {
-      "plan_id": "2026-06-30-v1.77-findings-remediation-prepare",
-      "iteration_id": "V1.77",
-      "status": "Done",
-      "owner": "@project-manager",
-      "effort": "S",
-      "type": "prepare",
-      "working_branch": "iteration/v1.77",
-      "merge_target": "iteration/v1.77",
-      "task_category": "docs",
-      "wire_contracts_changed": false,
-      "depends_on": []
-    },
-    {
-      "plan_id": "2026-06-30-v1.77-findings-remediation-ui",
-      "iteration_id": "V1.77",
-      "status": "Done",
-      "owner": "@frontend-dev+@fullstack-dev",
-      "effort": "M",
-      "type": "feature",
-      "working_branch": "feature/v1.77-findings-remediation",
-      "merge_target": "iteration/v1.77",
-      "task_category": "visual",
-      "wire_contracts_changed": false,
-      "depends_on": [
-        "2026-06-30-v1.77-findings-remediation-prepare"
-      ],
-      "qc_status": "approved_3of3",
-      "qa_status": "pass"
-    },
-    {
-      "plan_id": "2026-06-30-v1.77-slate-clear",
-      "iteration_id": "V1.77",
-      "status": "Done",
-      "owner": "@fullstack-dev+@frontend-dev",
-      "effort": "S-M",
-      "type": "hygiene",
-      "working_branch": "feature/v1.77-slate-clear",
-      "merge_target": "iteration/v1.77",
-      "task_category": "logic",
-      "wire_contracts_changed": false,
-      "depends_on": [
-        "2026-06-30-v1.77-findings-remediation-prepare"
-      ],
-      "qc_status": "approved_3of3",
-      "qa_status": "pass"
-    },
-    {
       "plan_id": "2026-06-30-v1.77-post-canvas-inflection-closeout",
       "iteration_id": "V1.77",
       "status": "Todo",

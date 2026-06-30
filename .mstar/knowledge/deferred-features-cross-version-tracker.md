@@ -1,10 +1,10 @@
 # Deferred Features — Cross-Version Tracker v2
 
-**Quick status**: **V1.72 shipped (2026-06-28)** — Canvas Outline+Timeline β + Hygiene + Release Hardening Companion (dual-track parallel). Track A (Canvas Outline+Timeline β — Work → Volume → Chapter → Scene/Beat graph projection + timeline lane + foreshadow edges + 3 structured patch routes `outline.patch_structure` / `outline.patch_chapter` / `timeline.patch_event` + outlineRevision + structured conflict error + UI retry/merge + non-spatial alternate views; `@42ch/nexus-contracts` 0.7.0 → 0.8.0). Track B (Hygiene + Release Hardening — per-inspector save split + strategy-canvas.tsx 7-module split ≤200 lines + desktop-release.yml signing workflow completion + CI setup composite action; 4 V1.71 carry-over residuals closed). V1.71 (Canvas Strategy β) shipped 2026-06-28 via PR #96. V1.73 lead candidate: **Canvas World KB surface** (Draft §3.3 surface 3); also V1.73 canvas-pivot (retire V1.65 outline whole-document editor) + 14 deferred residuals (8 prior V1.72-targeted + 6 new V1.72 QC-deferred to V1.73 hygiene/release-hardening backlog with durable plan-id pointers). Platform **paused**. Residuals SSOT: [`status.json`](../status.json). Shipped/cancelled history: [shipped-features-tracker.md](../archived/shipped-features-tracker.md).
+**Quick status**: **V1.77 active (2026-06-30)** — Findings-Remediation UI (quality loop closure) + post-canvas-program inflection. Track A (P0) promotes the Control-Room findings view from read-only (V1.64) to a full remediation authoring surface (6-state status transitions + target_executor assignment + inline edit), consuming the PATCH route the backend already ships. Track B (P1) closed 3 V1.76-QC residuals. The canvas program (V1.67–V1.76, 10 iterations) is **complete** — Strategy/Outline+Timeline/World KB/Relationships all shipped β/γ. Platform **paused**. Residuals SSOT: [`status.json`](../status.json). Shipped/cancelled history: [shipped-features-tracker.md](../archived/shipped-features-tracker.md).
 
 **Purpose**: Single source of truth for **open** and **backlog** features deferred from delivery compasses. Closed/shipped history lives in shipped archive.
 **Scope**: `nexus` OSS repository only.
-**Created**: 2026-04-21 · **Last updated**: 2026-06-28 (V1.72 closure: Canvas Outline+Timeline β shipped; Outline+Timeline moved from Draft to Shipped β in `canvas-strategy-surface.md` §3.3 surface 2; 14 residuals deferred to V1.73 backlog with plan-id pointers; 4 V1.71 carry-over + 2 V1.72 QC findings resolved in fix-wave)
+**Created**: 2026-04-21 · **Last updated**: 2026-06-30 (V1.77 P-last: canvas program complete; findings-remediation UI shipped; 3 V1.76 residuals closed; 12 V1.78 QC-suggestion residuals registered)
 
 ---
 
@@ -87,7 +87,7 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 ## 5) Quick index
 
-**Active iteration**: V1.67 Active prepare (2026-06-26) — Local API Surface Convergence & De-risk (hygiene-lead); next: V1.68 (body full-text editor + per-chapter lock implement + UI productivity + desktop distribution v2)
+**Active iteration**: V1.77 active (2026-06-30) — Findings-Remediation UI + post-canvas inflection; next: V1.78 (12 QC-suggestion residuals `tbd-v1.78-qc-followup` + next product surface TBD)
 
 **Latest shipped**: [V1.66](../iterations/v1.66-tauri-desktop-shell-delivery-compass-v1.md) (Tauri Desktop Shell, PR #90 — 2026-06-26)
 
