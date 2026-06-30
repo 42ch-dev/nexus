@@ -36,6 +36,18 @@ import type { WorldKbRelationshipProjection } from '@42ch/nexus-contracts';
 export type { EntityField } from './world-kb-canvas-types';
 export { patchFromForm } from './world-kb-canvas-utils';
 
+/**
+ * Max concurrent PATCHes fired by bulk "Promote all" (qc3 S-QC3-001 /
+ * `R-V176QC3-S001`). The prior path fanned out every suggestion at once via
+ * `Promise.allSettled(rels.map(...))`, which for suggestions accumulated across
+ * rescans produced an unbounded burst of concurrent requests plus repeated
+ * graph invalidations. Promotions now run in bounded batches; each batch is
+ * awaited before the next starts, and every outcome is still collected so the
+ * failed-count warning stays accurate. A future server-side bulk-promote route
+ * can replace this entirely.
+ */
+const PROMOTE_BATCH_SIZE = 5;
+
 export interface WorldKbCanvasProps {
   worldId: string;
 }
@@ -212,26 +224,35 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
     // TanStack Query v5 mutate() in a loop only delivers callbacks for the
     // LAST submitted call — earlier promotions' errors are silently dropped.
     // mutateAsync + Promise.allSettled ensures every outcome is observed.
-    const results = await Promise.allSettled(
-      rels.map((rel) =>
-        patchRelationship.mutateAsync({
-          relationship_id: rel.relationship_id,
-          action: 'update' as const,
-          expected_version: rel.version,
-          relationship: {
-            source_entity_id: rel.source_entity_id,
-            target_entity_id: rel.target_entity_id,
-            relation_type: rel.relation_type,
-            custom_label: rel.custom_label,
-            symmetric: rel.symmetric,
-            confidence: rel.confidence,
-            source_anchor_ids: rel.source_anchor_ids,
-            metadata: rel.metadata,
-            needs_review: false,
-          },
-        }),
-      ),
-    );
+    //
+    // qc3 S-QC3-001: instead of fanning out every suggestion concurrently, the
+    // promotions run in bounded batches of `PROMOTE_BATCH_SIZE` so a large
+    // suggestion set does not fire an unbounded burst of concurrent PATCHes.
+    const results: PromiseSettledResult<unknown>[] = [];
+    for (let i = 0; i < rels.length; i += PROMOTE_BATCH_SIZE) {
+      const batch = rels.slice(i, i + PROMOTE_BATCH_SIZE);
+      const settled = await Promise.allSettled(
+        batch.map((rel) =>
+          patchRelationship.mutateAsync({
+            relationship_id: rel.relationship_id,
+            action: 'update' as const,
+            expected_version: rel.version,
+            relationship: {
+              source_entity_id: rel.source_entity_id,
+              target_entity_id: rel.target_entity_id,
+              relation_type: rel.relation_type,
+              custom_label: rel.custom_label,
+              symmetric: rel.symmetric,
+              confidence: rel.confidence,
+              source_anchor_ids: rel.source_anchor_ids,
+              metadata: rel.metadata,
+              needs_review: false,
+            },
+          }),
+        ),
+      );
+      results.push(...settled);
+    }
     const failed = results.filter(
       (r): r is PromiseRejectedResult => r.status === 'rejected',
     );
