@@ -134,6 +134,14 @@
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04);
     --shadow-popover: 0 1px 1px rgba(0, 0, 0, 0.03), 0 8px 24px -12px rgba(0, 0, 0, 0.18);
     --shadow-modal: 0 1px 1px rgba(0, 0, 0, 0.04), 0 24px 48px -24px rgba(0, 0, 0, 0.3);
+
+    /* Reading surface — DESIGN.md §Typography/reading-prose (V1.79 P0).
+       Theme-independent metrics (a reading measure is a line-length target, not
+       a color); identical values in :root and .dark so the prose column shape
+       does not shift between themes. */
+    --reading-prose-measure: 68ch;
+    --reading-prose-line-height: 1.75;
+    --reading-prose-paragraph-spacing: 1.25em;
   }
 
   .dark {
