@@ -3,6 +3,7 @@ import { Loader2, RefreshCw, Sparkles, Trash2 } from 'lucide-react';
 
 import { LoadMore } from '@/components/load-more';
 import { MemoryDetailPanel } from '@/components/memory/memory-detail-panel';
+import { SoulPanel } from '@/components/soul/soul-panel';
 import { TaskKindBadge } from '@/components/memory/task-kind-badge';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -41,6 +42,9 @@ import type { PendingReviewInfo } from '@42ch/nexus-contracts';
  */
 export function MemoryPage() {
   const creatorId = useActiveCreatorId();
+  // Lifted so the SOUL viz click-to-filter can drive the fragments browser
+  // (V1.79 P1 §D integration). FragmentsSection is now controlled.
+  const [fragmentKeyword, setFragmentKeyword] = useState('');
 
   return (
     <Card className="shadow-card">
@@ -59,7 +63,15 @@ export function MemoryPage() {
         ) : (
           <div className="flex flex-col gap-8">
             <PendingReviewsSection creatorId={creatorId} />
-            <FragmentsSection creatorId={creatorId} />
+            <FragmentsSection
+              creatorId={creatorId}
+              keyword={fragmentKeyword}
+              onKeywordChange={setFragmentKeyword}
+            />
+            <SoulSection
+              creatorId={creatorId}
+              onFilterFragments={(kw) => setFragmentKeyword(kw ?? '')}
+            />
           </div>
         )}
       </CardContent>
@@ -254,8 +266,15 @@ function PendingReviewsSection({ creatorId }: { creatorId: string }) {
 
 // ── Fragments browser (read-only; optional keyword filter) ──────────────────
 
-function FragmentsSection({ creatorId }: { creatorId: string }) {
-  const [keyword, setKeyword] = useState('');
+function FragmentsSection({
+  creatorId,
+  keyword,
+  onKeywordChange,
+}: {
+  creatorId: string;
+  keyword: string;
+  onKeywordChange: (next: string) => void;
+}) {
   const trimmed = keyword.trim();
   const fragments = useMemoryFragments(creatorId, trimmed ? { keyword: trimmed } : undefined);
   const rows = fragments.data?.fragments ?? [];
@@ -275,7 +294,7 @@ function FragmentsSection({ creatorId }: { creatorId: string }) {
           id="memory-fragment-filter"
           type="search"
           value={keyword}
-          onChange={(e) => setKeyword(e.target.value)}
+          onChange={(e) => onKeywordChange(e.target.value)}
           placeholder="Filter fragments (case-insensitive)"
           className="h-10 w-full max-w-[320px] rounded-control border border-gray-alpha-400 bg-background-100 px-3 text-copy-14 text-gray-1000 placeholder:text-gray-700"
         />
@@ -309,6 +328,33 @@ function FragmentsSection({ creatorId }: { creatorId: string }) {
           ))}
         </ul>
       )}
+    </section>
+  );
+}
+
+// ── SOUL personality visualization (V1.79 P1 — Track B §D) ───────────────────
+
+function SoulSection({
+  creatorId,
+  onFilterFragments,
+}: {
+  creatorId: string;
+  onFilterFragments: (keyword: string | null) => void;
+}) {
+  // Reuses the existing fragments query — fragments already carry `keywords` +
+  // `created_at` (additive DTO), so no new endpoint/query/client method. The
+  // SOUL panel reads the same data the fragments browser does.
+  const fragments = useMemoryFragments(creatorId);
+
+  return (
+    <section data-testid="memory-soul-section">
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-heading-16 text-gray-1000">SOUL</h2>
+        <p className="text-copy-13 text-gray-700">
+          The themes your creative work has internalized, and how they shift over time.
+        </p>
+      </div>
+      <SoulPanel fragmentsQuery={fragments} onFilterFragments={onFilterFragments} />
     </section>
   );
 }
