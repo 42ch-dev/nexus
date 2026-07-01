@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-07-01-v1.80-memory-review-reliability"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-07-01"
 ---
 
@@ -41,13 +41,7 @@ generated_at: "2026-07-01"
 - None.
 
 ### 🟡 Warning
-- [W-QC3-001] Row-level timeout/failure accounting can report `has_more=false` while an unprocessed pending row remains, so the review pipeline is not reliably drained.
-  - Evidence: `process_review_batch` increments `outcome.processed += 1` immediately after `timeout_at(...)` returns, before checking whether the row action completed or timed out (`crates/nexus-daemon-runtime/src/api/handlers/memory.rs:749-764`). On `Err(_elapsed)`, the comment says the row is left in place and retried next call, but the row has already been counted as processed. The handler then computes `deadline_stopped = batch.processed < processing_slice` and `has_more = more_in_db || deadline_stopped` (`memory.rs:636-641`). If the timeout happens on the only row or final row in the fetched slice, `processed == processing_slice`, `more_in_db == false`, and `has_more` is returned as `false` even though that row was not deleted. The same semantic gap applies to row actions that return `Ok(RowActionCounts { 0, 0, 0 })` after a promote/fragment failure: the row remains pending, but `processed` advances and the client may see “Review complete.”
-  - Impact: This directly weakens two REL-01 guarantees: timeout partial-progress semantics and client uncertain-completion handling. The client drain loop terminates, but it can terminate with a false “complete” state for a still-pending row, and its `processed === 0 && has_more === true` guard cannot detect this because the server reports progress for an action attempt rather than successful queue advancement.
-  - Fix: Track queue advancement separately from rows attempted. On row-level timeout, do not count the row as `processed` for the drain-progress contract, and return `has_more=true`. For action failures that leave the pending row in place, either return a distinct `has_more=true`/zero-progress condition (so the client emits “still draining”) or define and test an explicit retry/failure contract. Add regression coverage for (1) one-row timeout, (2) timeout/failure on the final row in a batch, and (3) a perpetually failing head row.
-  - Source Type: deep-lens: Reliability Lens / Concurrency-bounding Lens
-  - Source Reference: `crates/nexus-daemon-runtime/src/api/handlers/memory.rs:746-764`, `:636-641`; `apps/web/src/api/queries.ts:608-621`
-  - Confidence: High
+- [W-QC3-001] Resolved in targeted revalidation; see `## Revalidation`.
 
 ### 🟢 Suggestion
 - [S-QC3-001] Document the intended lifecycle ceiling for `memory_review_locks` entries.
@@ -67,22 +61,68 @@ generated_at: "2026-07-01"
 
 **Closure verdict for `R-V178P0-QC3-003`**: Not fully closed yet. Two of three axes are genuinely addressed; the third needs the accounting/`has_more` fix above before this residual should be marked resolved.
 
+## Revalidation
+
+### Targeted Re-review Scope
+- Reviewer: `qc-specialist-3` only; targeted re-review for `W-QC3-001` / `R-V180P0-QC3-001`.
+- plan_id: `2026-07-01-v1.80-memory-review-reliability` (P0 only).
+- Review range / Diff basis: targeted fix-wave diff `e8907abb...530070c3f57e`; equivalent to `git diff e8907abb...530070c3f57e`.
+- Working branch (verified): `iteration/v1.80`.
+- Review cwd (verified): `/Users/bibi/workspace/organizations/42ch/nexus`.
+- Verified HEAD: `530070c3f57e655abd60781e85fe882a0bfeff6f`.
+- Files re-reviewed: `crates/nexus-daemon-runtime/src/api/handlers/memory.rs`; `crates/nexus-daemon-runtime/tests/memory_review_fragments_api.rs`; client contract cross-check in `apps/web/src/api/queries.ts` and existing `memory-mutation.test.tsx` cap tests.
+
+### Fix Verification
+- `ReviewBatchOutcome` now separates attempted work (`processed`) from drain completion (`any_row_remained_pending`). The public response still reports `processed` as rows inspected/attempted, preserving the additive wire semantic.
+- `review` now derives `has_more` as `more_in_db || deadline_stopped || batch.any_row_remained_pending`, with an explicit contract comment tying `has_more` to client re-request behavior.
+- The flag is set in both non-completion arms of `process_review_batch`:
+  - `Ok(action_counts)` with `promoted + fragmented + dropped == 0`: the row's side effect failed or the action is unimplemented, so the row was not deleted and remains pending.
+  - `Err(_elapsed)`: deadline expired mid-row, so the row was inspected/attempted but not completed/deleted; the loop stops and `has_more` remains true.
+- Original failure modes are covered by the invariant:
+  - One-row timeout/failure: `any_row_remained_pending = true`, so `has_more = true` even when `processed == processing_slice == 1` and `more_in_db == false`.
+  - Final-row timeout/failure: all fetched rows may be attempted (`deadline_stopped == false`), but the final row sets `any_row_remained_pending = true`, so `has_more = true`.
+  - Action-failure leaving row pending: the zero-count `Ok(action_counts)` arm sets the flag, so the client cannot receive a false completion while the pending row remains.
+
+### `Err(_elapsed)` Arm Judgment
+The lack of a deterministic integration test for the `timeout_at(...).await == Err(_elapsed)` branch is acceptable and not a material residual. The `Err` arm is in the same match as the deterministic zero-count `Ok` arm and performs the same essential state transition (`outcome.any_row_remained_pending = true`) before breaking. The only meaningful post-condition for the original bug is that `review` folds that flag into `has_more`; this is structurally identical for `Err(_elapsed)` and for the tested `Ok(0,0,0)` path. The separately covered top-of-loop deadline path still yields `processed < processing_slice`, so `deadline_stopped` remains sufficient there. I judge the untested `Err` branch as structurally trustworthy, with no remaining blocking gap.
+
+### Regression Test Disposition
+- `review_single_pending_row_with_failed_action_keeps_has_more_true`: pass. Covers the only-row action-failure case and asserts the failed row remains pending.
+- `review_batch_where_final_row_fails_keeps_has_more_true`: pass. Covers the final-row failure case where `processed == processing_slice` but the pending row remains.
+- `review_perpetually_failing_row_keeps_has_more_true_across_calls`: pass. Covers repeated re-fetch of a non-advancing row; `has_more` stays true across calls.
+
+### Validation Commands
+- `SQLX_OFFLINE=true cargo test -p nexus-daemon-runtime --test memory_review_fragments_api` — pass: 27/27.
+- `SQLX_OFFLINE=true cargo clippy -p nexus-daemon-runtime -- -D warnings` — pass.
+
+### Updated R-V178P0-QC3-003 Closure Assessment
+
+| Axis from original qc3 W-QC3-004 | Updated assessment | Evidence |
+| --- | --- | --- |
+| Chunked processing / bounded operation | Addressed | Still addressed by `REVIEW_BATCH_LIMIT = 50`, overfetch to 51, and existing 55-row drain coverage. |
+| Per-creator in-flight serialization | Addressed | Still addressed by the per-creator async mutex held across fetch/classify/side-effect/delete and the overlapping-call test. |
+| Client uncertain-completion handling | Addressed | Server completion semantics now keep `has_more=true` when an inspected row remains pending; the web drain loop already drains while `has_more === true` and its cap test (`processed: 3, has_more: true` repeated) models the perpetually-failing/non-advancing case as a non-error "still draining" state rather than "Review complete". |
+
+**Updated closure verdict for `R-V178P0-QC3-003`**: All three axes are now addressed. The residual can be marked resolved by PM/QA after lifecycle update.
+
+**W-QC3-001 disposition**: Resolved. `R-V180P0-QC3-001` can be marked resolved.
+
 ## Positive / Non-blocking Observations
 - The SQL-layer bound is real: `fetch_pending_reviews_page` uses compile-time checked `sqlx::query!` with `LIMIT ?`, and the review handler passes `51`, processes at most 50, and derives `has_more` from the over-fetched row.
 - Per-creator serialization holds the async lock across the full critical section and does not hold the outer `std::sync::Mutex` across `.await`; this is acceptable for brief HashMap lookup contention.
 - No ordinary budget exhaustion path returns 503; validation/database failures still route through `NexusApiError`.
-- The web drain loop is bounded (`REVIEW_DRAIN_MAX_CALLS = 20`) and terminates for rows arriving faster than the drain or for explicit zero-progress responses. The remaining warning is the server-side definition of progress/completion.
-- P1 frontend hygiene was also reviewed for cross-plan interference; no P1 performance/reliability blocker was found.
+- The web drain loop is bounded (`REVIEW_DRAIN_MAX_CALLS = 20`) and now has a server completion contract that prevents false completion for inspected-but-still-pending rows.
+- P1 frontend hygiene was also reviewed for cross-plan interference in the original wave; no P1 performance/reliability blocker was found.
 
 ## Source Trace
-- W-QC3-001: deep-lens: Reliability Lens / Concurrency-bounding Lens — `process_review_batch` counts timed-out/failed attempts as processed and `review` derives `has_more` from `processed < processing_slice` — Confidence: High.
+- W-QC3-001: targeted fix-wave revalidation — `process_review_batch` sets `any_row_remained_pending` for both zero-count action failures and `Err(_elapsed)` timeouts; `review` folds the flag into `has_more` — Confidence: High; disposition: Resolved.
 - S-QC3-001: deep-lens: Reliability Lens — per-creator lock map entries are daemon-lifetime/unbounded by distinct creator IDs; acceptable but should document lifecycle ceiling — Confidence: High.
 
 ## Summary
 | Severity | Count |
 |----------|-------|
 | 🔴 Critical | 0 |
-| 🟡 Warning | 1 |
+| 🟡 Warning | 0 |
 | 🟢 Suggestion | 1 |
 
-**Verdict**: Request Changes
+**Verdict**: Approve
