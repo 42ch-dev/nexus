@@ -25,6 +25,8 @@ V1.39–V1.43 shipped inline finalize `llm_judge`, FL-E `reflection-loop`, `nove
 
 V1.44 P0 implements **DF-69**: a dual-mode embedded preset (or preset pair) plus CLI entry.
 
+V1.79's manuscript reading surface is distinct from this on-demand audit line: reading is a read-only consumption surface for authors, while manuscript audit remains an out-of-band quality/extract tool that may create reports, findings, or KeyBlocks.
+
 ---
 
 ## 2. Distinction from shipped presets
@@ -141,4 +143,3 @@ At V1.44 P-last hygiene:
 ## V1.45 supersession (P-last promotion)
 
 **Superseded by**: [creator-run-preset-entry.md](../creator-run-preset-entry.md) (Shipped Master V1.45). The split preset ids (`novel-manuscript-audit-review` / `novel-manuscript-audit-extract`), DEPRECATED parent dir deletion, and `cli_args` declaration are now part of the canonical Master body.
-

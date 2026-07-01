@@ -1,14 +1,74 @@
 {
   "version": 1,
-  "updated_at": "2026-07-01T02:54:00Z",
-  "plans": [],
+  "updated_at": "2026-07-01T03:00:00Z",
+  "plans": [
+    {
+      "plan_id": "2026-07-01-v1.79-prepare-dual-track-spec-amendments",
+      "iteration_id": "V1.79",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "effort": "S",
+      "type": "prepare",
+      "working_branch": "feature/v1.79-prepare",
+      "merge_target": "iteration/v1.79",
+      "task_category": "docs",
+      "wire_contracts_changed": false,
+      "depends_on": []
+    },
+    {
+      "plan_id": "2026-07-01-v1.79-manuscript-reading-surface",
+      "iteration_id": "V1.79",
+      "status": "Todo",
+      "owner": "@frontend-dev",
+      "effort": "M",
+      "type": "implement",
+      "working_branch": "feature/v1.79-reading-surface",
+      "merge_target": "iteration/v1.79",
+      "task_category": "visual",
+      "wire_contracts_changed": false,
+      "depends_on": [
+        "2026-07-01-v1.79-prepare-dual-track-spec-amendments"
+      ]
+    },
+    {
+      "plan_id": "2026-07-01-v1.79-soul-personality-visualization",
+      "iteration_id": "V1.79",
+      "status": "Todo",
+      "owner": "@fullstack-dev",
+      "effort": "M",
+      "type": "implement",
+      "working_branch": "feature/v1.79-soul-viz",
+      "merge_target": "iteration/v1.79",
+      "task_category": "deep",
+      "wire_contracts_changed": true,
+      "depends_on": [
+        "2026-07-01-v1.79-prepare-dual-track-spec-amendments"
+      ]
+    },
+    {
+      "plan_id": "2026-07-01-v1.79-closure",
+      "iteration_id": "V1.79",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "effort": "S",
+      "type": "closure",
+      "working_branch": "feature/v1.79-closure",
+      "merge_target": "iteration/v1.79",
+      "task_category": "docs",
+      "wire_contracts_changed": false,
+      "depends_on": [
+        "2026-07-01-v1.79-manuscript-reading-surface",
+        "2026-07-01-v1.79-soul-personality-visualization"
+      ]
+    }
+  ],
   "metadata": {
-    "integration_branch": null,
-    "integration_branch_retired": true,
+    "integration_branch": "iteration/v1.79",
+    "integration_branch_retired": false,
     "last_integration_branch": "iteration/v1.78",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.78 shipped (2026-07-01 via PR #105 @ fbdb27de); next V1.79 pending /iteration-start",
-    "latest_active_compass": null,
+    "latest_active_iteration": "V1.79 active (iteration-start complete — compass LOCKED after §1.6 Review & Edit chain; ready for §6 Integration Branch)",
+    "latest_active_compass": "v1.79-author-reflection-reading-and-soul-visualization-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
@@ -41,7 +101,7 @@
       "refreshed_reason": "V1.78 QC fix-wave closed (3 residuals resolved: pagination + 2 doc nits). 2 low residuals remain deferred to V1.79+."
     },
     "updated_at": "2026-07-01",
-    "spec_integration_branch": null,
+    "spec_integration_branch": "iteration/v1.79",
     "wave1_merged_at": "2026-07-01"
   },
   "residual_findings": {
