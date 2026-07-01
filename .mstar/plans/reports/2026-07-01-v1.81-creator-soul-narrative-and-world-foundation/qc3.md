@@ -103,3 +103,35 @@ None.
 - Review range: `git diff 83000ca3...cb802209`
 - Report path: `.mstar/plans/reports/2026-07-01-v1.81-creator-soul-narrative-and-world-foundation/qc3.md`
 - No application-code edits performed.
+
+## Revalidation
+
+- Date: 2026-07-02
+- Review range / Diff basis: fix-wave `git diff faae53de..d55ec4f3` (fix commit `e8d135cb`)
+- Working branch / HEAD verified: `iteration/v1.81` @ `d55ec4f3`
+- Re-checked files: `crates/nexus-local-db/src/soul_narrative.rs`, `crates/nexus-daemon-runtime/src/api/handlers/memory.rs`, `.sqlx/query-*.json`, and the new/changed daemon-runtime tests in the fix wave.
+- Validation run: `cargo test -p nexus-daemon-runtime -p nexus-local-db` — passed. Final visible summaries included `nexus-daemon-runtime` unit/integration/doc tests passing (360 unit tests; all listed integration suites passed, including `memory_review_fragments_api` 29 tests) and `nexus-local-db` unit/integration/doc tests passing (289 unit tests plus listed integration/doc tests).
+
+### Prior finding dispositions
+
+- **W-QC3-001 / R-V181P0-QC3-W001 — Resolved for the original unbounded read-side scan.**
+  - Evidence: `soul_narrative_fragment_stats` now computes `fragment_count` with `SELECT COUNT(*)` and `max_created_at` with `SELECT MAX(created_at)` via `query_scalar!`, and the only remaining Rust JSON keyword decode is behind `SELECT keywords ... ORDER BY created_at DESC LIMIT ?` with `KEYWORD_SCAN_CAP = 200` (`crates/nexus-local-db/src/soul_narrative.rs:111-139`).
+  - The `reflect_soul` cached read/status path still computes stats before cache branching and retains the same gate/stale branches (`fragment_count < 10 || distinct_keyword_count < 20`; stale compares generation count + max timestamp), but it no longer materializes/decodes all keyword rows for cached `force_regenerate=false` reads (`crates/nexus-daemon-runtime/src/api/handlers/memory.rs:1136-1234`).
+
+- **W-QC3-002 / R-V181P0-QC3-W002 — Resolved.**
+  - Evidence: `truncate_summary()` uses `summary.chars().count()` and `summary.chars().take(max_chars - 1).collect()` before appending `…`, so it truncates on Unicode scalar boundaries rather than byte offsets (`crates/nexus-daemon-runtime/src/api/handlers/memory.rs:1312-1324`, used at `1355-1358`).
+  - Regression tests exist for short/exact/ASCII-over-limit/CJK/emoji/empty cases (`crates/nexus-daemon-runtime/src/api/handlers/memory.rs:1587-1634`), including multi-byte cases that would have panicked under the old `&summary[..279]` byte slice.
+
+### New issue found during revalidation
+
+- **W-QC3-003 — The bounded keyword scan can under-count the insufficient-data gate and return `insufficient_data` for creators that actually meet the `current_distinct_keyword_count >= 20` contract.**
+  - **Evidence**: The fix scans only the newest 200 keyword rows (`ORDER BY created_at DESC LIMIT 200`) and uses that capped set as `distinct_keyword_count` (`crates/nexus-local-db/src/soul_narrative.rs:132-153`). `reflect_soul` then applies the locked gate directly to that value before cache lookup (`crates/nexus-daemon-runtime/src/api/handlers/memory.rs:1147-1167`). The P-1 contract defines `current_distinct_keyword_count` as the current distinct keyword count across all Creator fragments and gates on `< 20` (`.mstar/plans/2026-07-01-v1.81-prepare-spec-and-contracts.md:191-198`).
+  - **Why the `LIMIT 200` bound is not semantically sound**: Seeing `>= 20` distinct keywords in the capped set is sufficient to pass the gate, but seeing `< 20` in the newest 200 rows does **not** prove the whole Creator has `< 20` distinct keywords. A creator with 200 recent same-keyword fragments and 20 older distinct-keyword fragments would be misclassified as `insufficient_data`, including on a cached read before the endpoint can return an existing `current` or `stale` narrative.
+  - **Impact**: False `insufficient_data` responses can hide an existing cached narrative and block regeneration for large creators whose diversity is outside the newest 200 fragments. This is a correctness/reliability regression introduced while fixing the original performance warning.
+  - **Required fix**: Preserve the locked gate semantics while avoiding unbounded Rust materialization/decode. Options include an exact SQL-side distinct keyword aggregate over all creator rows (e.g. SQLite JSON1/normalized keyword table) or another approach that only returns `< 20` after proving fewer than 20 distinct keywords across the full creator set. Add a regression test for a creator whose newest capped rows have `<20` distinct keywords but older rows bring the full set to `>=20`.
+  - **Source Type**: manual-reasoning / diff revalidation
+  - **Confidence**: High
+
+### Revalidation verdict
+
+**Verdict**: Request Changes. The original unbounded scan and UTF-8 panic findings are resolved, and the required Rust test command passes, but the W001 fix-wave introduced a new blocking Warning (`W-QC3-003`) because the capped newest-200 keyword scan can under-count the locked insufficient-data gate.
