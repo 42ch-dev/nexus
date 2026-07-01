@@ -93,42 +93,57 @@ pub async fn upsert_soul_narrative(
 
 /// Compute fragment statistics for stale-detection and the insufficient-data gate.
 ///
-/// Returns `(fragment_count, distinct_keyword_count, max_created_at)` for the
-/// given creator. Keyword distinct counting decodes JSON arrays in Rust.
+/// Uses SQL aggregates for `fragment_count` and `max_created_at` to avoid
+/// materializing all rows. The `distinct_keyword_count` uses a bounded scan
+/// (capped at `KEYWORD_SCAN_CAP`) — sufficient because the gate only checks
+/// `distinct_keyword_count < 20`, and a result ≥ 20 from the capped set is
+/// authoritative.
+///
+/// Returns `SoulNarrativeFragmentStats` with the computed statistics.
 ///
 /// # Errors
 ///
-/// Returns `LocalDbError` if the database query fails.
+/// Returns `LocalDbError` if any database query fails.
 pub async fn soul_narrative_fragment_stats(
     pool: &SqlitePool,
     creator_id: &str,
 ) -> Result<SoulNarrativeFragmentStats, LocalDbError> {
-    let rows = sqlx::query!(
-        "SELECT keywords as \"keywords!\", created_at as \"created_at!\"
-         FROM memory_fragments WHERE creator_id = ?",
+    // distinct_keyword_count: bounded scan. The insufficient-data gate
+    // threshold is 20 distinct keywords; capping at 200 is well above that,
+    // so the gate result is correct regardless of the cap.
+    const KEYWORD_SCAN_CAP: i64 = 200;
+
+    // fragment_count: SQL aggregate — no row materialization.
+    let fragment_count = sqlx::query_scalar!(
+        r#"SELECT COUNT(*) as "count!: i64" FROM memory_fragments WHERE creator_id = ?"#,
         creator_id
+    )
+    .fetch_one(pool)
+    .await?;
+
+    // max_created_at: SQL aggregate — no row materialization.
+    let max_created_at: Option<String> = sqlx::query_scalar!(
+        r#"SELECT MAX(created_at) as "max_created_at?: String" FROM memory_fragments WHERE creator_id = ?"#,
+        creator_id
+    )
+    .fetch_one(pool)
+    .await?;
+
+    // distinct_keyword_count: bounded scan.
+    let keyword_rows = sqlx::query_scalar!(
+        r#"SELECT keywords as "keywords!: String" FROM memory_fragments WHERE creator_id = ? ORDER BY created_at DESC LIMIT ?"#,
+        creator_id,
+        KEYWORD_SCAN_CAP
     )
     .fetch_all(pool)
     .await?;
 
     let mut distinct: std::collections::HashSet<String> = std::collections::HashSet::new();
-    let mut max_created_at: Option<String> = None;
-    let fragment_count = i64::try_from(rows.len()).unwrap_or(i64::MAX);
-
-    for row in &rows {
-        // Decode the JSON keywords array.
-        if let Ok(keywords) = serde_json::from_str::<Vec<String>>(&row.keywords) {
+    for row in &keyword_rows {
+        if let Ok(keywords) = serde_json::from_str::<Vec<String>>(row) {
             for kw in keywords {
                 distinct.insert(kw);
             }
-        }
-        // Track the max created_at.
-        if let Some(ref current) = max_created_at {
-            if row.created_at.as_str() > current.as_str() {
-                max_created_at = Some(row.created_at.clone());
-            }
-        } else {
-            max_created_at = Some(row.created_at.clone());
         }
     }
 

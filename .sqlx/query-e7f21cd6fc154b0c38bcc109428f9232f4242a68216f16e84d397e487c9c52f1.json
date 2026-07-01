@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT keywords as \"keywords!: String\" FROM memory_fragments WHERE creator_id = ? ORDER BY created_at DESC LIMIT ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "keywords!: String",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e7f21cd6fc154b0c38bcc109428f9232f4242a68216f16e84d397e487c9c52f1"
+}
