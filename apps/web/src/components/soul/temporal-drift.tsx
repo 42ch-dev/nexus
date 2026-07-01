@@ -21,11 +21,11 @@ import { formatDate } from '@/lib/format';
  */
 const BAND_PALETTE = [
   'var(--color-soul-viz-drift-band-fill)',
-  'rgba(124,58,237,0.22)',
-  'rgba(31,143,77,0.22)',
-  'rgba(183,110,0,0.22)',
-  'rgba(229,72,77,0.22)',
-  'rgba(0,133,119,0.22)',
+  'var(--color-soul-viz-drift-band-fill-2)',
+  'var(--color-soul-viz-drift-band-fill-3)',
+  'var(--color-soul-viz-drift-band-fill-4)',
+  'var(--color-soul-viz-drift-band-fill-5)',
+  'var(--color-soul-viz-drift-band-fill-6)',
 ];
 
 export function TemporalDrift({ buckets }: { buckets: TimeBucket[] }) {
