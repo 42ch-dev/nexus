@@ -73,6 +73,14 @@ pub struct WorkspaceState {
     /// The outer `std::sync::Mutex` guards only the map lookup; each creator's
     /// lock is an independent `tokio::sync::Mutex` cloned out and awaited in the
     /// handler, so the map mutex is never held across `.await`.
+    ///
+    /// Lifecycle ceiling (R-V180P0-QC1-001): map entries are never evicted — the
+    /// map grows with the number of distinct creators that have ever triggered a
+    /// review on this daemon instance. This is bounded by the daemon lifetime +
+    /// the single-active-creator local-only model (one entry per creator, an
+    /// `Arc<AsyncMutex<()>>` is tiny). Revisit only if multi-creator session
+    /// churn becomes real (e.g. a shared/rotating-creator deployment); an
+    /// LRU/eviction policy would be the fix then.
     memory_review_locks: Arc<std::sync::Mutex<HashMap<String, Arc<AsyncMutex<()>>>>>,
 }
 
