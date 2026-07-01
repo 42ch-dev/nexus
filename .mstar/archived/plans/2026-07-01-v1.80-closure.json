@@ -1,0 +1,16 @@
+{
+  "plan_id": "2026-07-01-v1.80-closure",
+  "iteration_id": "V1.80",
+  "status": "Done",
+  "owner": "@fullstack-dev",
+  "effort": "S",
+  "type": "closure",
+  "working_branch": "feature/v1.80-closure",
+  "merge_target": "iteration/v1.80",
+  "task_category": "docs",
+  "wire_contracts_changed": false,
+  "depends_on": [
+    "2026-07-01-v1.80-memory-review-reliability",
+    "2026-07-01-v1.80-frontend-hygiene-residuals"
+  ]
+}
