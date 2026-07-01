@@ -362,7 +362,10 @@
     "2026-07-01-v1.79-prepare-dual-track-spec-amendments",
     "2026-07-01-v1.79-manuscript-reading-surface",
     "2026-07-01-v1.79-soul-personality-visualization",
-    "2026-07-01-v1.79-closure"
+    "2026-07-01-v1.79-closure",
+    "2026-07-01-v1.80-memory-review-reliability",
+    "2026-07-01-v1.80-frontend-hygiene-residuals",
+    "2026-07-01-v1.80-closure"
   ],
   "iteration_summaries": {
     "v1.45": {
@@ -753,6 +756,26 @@
       "headline": "Author Reflection (manuscript reading surface + SOUL personality visualization); DF-49 cancelled",
       "residuals_new": 4,
       "residuals_note": "4 low V1.79-QC residuals -> V1.80+ (2 P0 reading + 2 P1 soul-viz)"
+    },
+    "V1.80": {
+      "compass": "v1.80-memory-review-reliability-and-frontend-hygiene-compass-v1.md",
+      "plans": [
+        "2026-07-01-v1.80-memory-review-reliability",
+        "2026-07-01-v1.80-frontend-hygiene-residuals",
+        "2026-07-01-v1.80-closure"
+      ],
+      "theme": "Memory Review Reliability + Frontend Hygiene (stabilize-before-extend)",
+      "wire": "@42ch/nexus-contracts 0.14.0 -> 0.15.0 (ReviewResponse +has_more/+processed additive)",
+      "residuals_closed": [
+        "R-V178P0-QC3-003",
+        "R-V179P0-QC1-001",
+        "R-V179P0-QC1-002",
+        "R-V179P1-QC1-001",
+        "R-V179P1-QC1-002"
+      ],
+      "compound": [
+        "architecture-patterns/bounded-drain-completion-contract.md"
+      ]
     }
   },
   "metadata": {

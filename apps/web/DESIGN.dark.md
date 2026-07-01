@@ -290,8 +290,18 @@ components:
     line: "{colors.gray-alpha-400}"
     tick: "{colors.gray-500}"
     label: "{typography.label-12} @ {colors.gray-700}"
+  # V1.80 — ordered band-fill set backing the temporal-drift BAND_PALETTE
+  # (R-V179P1-QC1-002). Same token names as DESIGN.md (slot 0 = `fill`,
+  # slots 1..5 = `fill-2`..`fill-6`); only the values differ. Dark-tuned
+  # categorical hues at alpha 0.22 so the stacked bands stay legible against
+  # the dark surface without bleeding into each other.
   soul-viz-drift-band:
     fill: "rgba(82,168,255,0.22)"
+    fill-2: "rgba(183,148,255,0.22)"
+    fill-3: "rgba(76,216,200,0.22)"
+    fill-4: "rgba(255,192,67,0.22)"
+    fill-5: "rgba(255,108,162,0.22)"
+    fill-6: "rgba(134,204,108,0.22)"
     step-stroke: "{colors.gray-alpha-200}"
     label: "{typography.label-12} @ {colors.gray-900}"
 

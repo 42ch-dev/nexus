@@ -567,12 +567,31 @@ export function useDeletePendingReview() {
 }
 
 /**
+ * Maximum client-side drain calls per user action (V1.80 REL-01). The daemon
+ * processes up to REVIEW_BATCH_LIMIT (50) rows per call; 20 calls × 50 rows =
+ * 1,000 rows per user action before the drain stops with a still-draining
+ * toast. Guards against pathological queues hanging the UI.
+ */
+const REVIEW_DRAIN_MAX_CALLS = 20;
+
+/**
  * Trigger the server-side review/summarization pipeline. Surfaces the result
  * counters (`promoted`/`fragmented`/`dropped`) in a confirmation toast, then
  * invalidates pending-list + count + fragments so the post-review state
- * refetches. Processing state is exposed via `isPending` (the caller disables
- * the CTA while in-flight — there is no optimistic body to render because the
- * server classifies the whole queue atomically).
+ * refetches.
+ *
+ * V1.80 REL-01: the daemon now processes a bounded batch per call and signals
+ * `has_more` when the queue was not fully drained. This mutation drains the
+ * queue by re-issuing the POST while `has_more === true`, up to
+ * `REVIEW_DRAIN_MAX_CALLS` calls, aggregating counters across calls. It also
+ * breaks early if a call returns zero progress (`processed === 0`) with
+ * `has_more === true` to avoid an infinite tight loop on an unprocessable head
+ * row. If the cap or zero-progress guard trips, a non-error "still draining"
+ * info toast tells the author to run review again.
+ *
+ * Processing state is exposed via `isPending` (the caller disables the CTA
+ * while in-flight — there is no optimistic body to render because the server
+ * classifies the queue).
  */
 export function useReviewMemory() {
   const client = useNexusClient();
@@ -580,13 +599,43 @@ export function useReviewMemory() {
   const errorToast = useErrorToast();
   const { toast } = useToast();
   return useMutation({
-    mutationFn: (creatorId: string) => client.reviewMemory({ creator_id: creatorId }),
+    mutationFn: async (creatorId: string): Promise<ReviewResponse> => {
+      let promoted = 0;
+      let fragmented = 0;
+      let dropped = 0;
+      let processed = 0;
+      let hasMore = false;
+      for (let call = 0; call < REVIEW_DRAIN_MAX_CALLS; call += 1) {
+        const res = await client.reviewMemory({ creator_id: creatorId });
+        promoted += res.promoted;
+        fragmented += res.fragmented;
+        dropped += res.dropped;
+        processed += res.processed ?? 0;
+        hasMore = res.has_more ?? false;
+        // Queue fully drained by the server.
+        if (!hasMore) break;
+        // Zero-progress guard: a call that inspected no rows but still reports
+        // has_more would loop forever on an unprocessable head row.
+        if ((res.processed ?? 0) === 0) break;
+      }
+      return { promoted, fragmented, dropped, has_more: hasMore, processed };
+    },
     onSuccess: (data: ReviewResponse) => {
-      toast({
-        variant: 'success',
-        title: 'Review complete',
-        description: `${data.promoted} promoted to long-term memory, ${data.fragmented} saved as fragments, ${data.dropped} dropped.`,
-      });
+      if (data.has_more) {
+        // Cap or zero-progress guard tripped: the queue is still draining but
+        // the client stopped re-requesting. Non-error informational message.
+        toast({
+          variant: 'info',
+          title: 'Review still draining',
+          description: `Processed ${data.processed} so far (${data.promoted} promoted, ${data.fragmented} fragments, ${data.dropped} dropped). Some entries remain — run review again to continue.`,
+        });
+      } else {
+        toast({
+          variant: 'success',
+          title: 'Review complete',
+          description: `${data.promoted} promoted to long-term memory, ${data.fragmented} saved as fragments, ${data.dropped} dropped.`,
+        });
+      }
     },
     onError: (error) => errorToast(error, 'Could not complete review'),
     // Invalidate on settle (not just success): if the network fails AFTER the

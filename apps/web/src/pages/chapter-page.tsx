@@ -13,11 +13,12 @@
  * Canvas" redirect CTA. See {@link ReadingProse} for the prose surface and
  * {@link MaturationIndicators} / {@link ChapterNav} for the V1.79 additions.
  */
-import { useEffect, useMemo } from 'react';
+import { useMemo } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, ArrowUpRight } from 'lucide-react';
 
 import { ChapterNav } from '@/components/reading/chapter-nav';
+import { useChapterKeyboardNav } from '@/components/reading/chapter-keyboard-nav';
 import { MaturationIndicators } from '@/components/reading/maturation-indicators';
 import { ReadingProgress } from '@/components/reading/reading-progress';
 import { ReadingProse } from '@/components/reading/reading-prose';
@@ -48,7 +49,7 @@ export function ChapterPage() {
   // Keyboard navigation (←/→) — wired here so the nav component stays a pure
   // affordance. Guarded against input/textarea/contenteditable focus and open
   // menus/dialogs so typing in a field or using the context menu never
-  // hijacks chapter navigation.
+  // hijacks chapter navigation. See components/reading/chapter-keyboard-nav.
   useChapterKeyboardNav(workId, neighbors, navigate);
 
   if (chapter.isLoading) return <LoadingState label="Loading chapter…" />;
@@ -64,7 +65,8 @@ export function ChapterPage() {
   const ch = chapter.data;
   const canvasHref = `/works/${encodeURIComponent(workId)}/outline?chapter=${ch.chapter}`;
   // Key the progress bar on chapter so it resets when the reader navigates.
-  const progressKey = `${workId}:${ch.chapter}:${ch.volume ?? 1}`;
+  // `ch.volume` is contract-guaranteed (ChapterDetail.volume: number, >= 1).
+  const progressKey = `${workId}:${ch.chapter}:${ch.volume}`;
 
   return (
     <div className="flex flex-col gap-4">
@@ -124,46 +126,4 @@ export function ChapterPage() {
       />
     </div>
   );
-}
-
-/**
- * Wire ←/→ keyboard navigation between chapters. The effect is a no-op when the
- * reader is focused in an editable element or a menu/dialog is open, so it
- * never competes with form input or the body context menu.
- */
-function useChapterKeyboardNav(
-  workId: string,
-  neighbors: { prev: { chapter: number; volume: number } | null; next: { chapter: number; volume: number } | null },
-  navigate: ReturnType<typeof useNavigate>,
-) {
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      if (e.defaultPrevented) return;
-      if (e.metaKey || e.ctrlKey || e.altKey) return;
-      const el = document.activeElement;
-      if (el && (isEditable(el) || hasOpenOverlay())) return;
-      const target = e.key === 'ArrowLeft' ? neighbors.prev : e.key === 'ArrowRight' ? neighbors.next : null;
-      if (!target) return;
-      e.preventDefault();
-      const v = target.volume ?? 1;
-      navigate(`/works/${encodeURIComponent(workId)}/chapters/${target.chapter}?volume=${v}`);
-    }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [workId, neighbors, navigate]);
-}
-
-function isEditable(el: Element): boolean {
-  const tag = el.tagName;
-  return (
-    tag === 'INPUT' ||
-    tag === 'TEXTAREA' ||
-    tag === 'SELECT' ||
-    (el as HTMLElement).isContentEditable === true
-  );
-}
-
-function hasOpenOverlay(): boolean {
-  // A visible menu or dialog captures keyboard intent; do not navigate.
-  return Boolean(document.querySelector('[role="menu"]:not([hidden]), [role="dialog"]:not([hidden])'));
 }

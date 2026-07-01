@@ -1,10 +1,10 @@
 # Deferred Features — Cross-Version Tracker v2
 
-**Quick status**: **V1.79 delivered (2026-07-01)** — Author Reflection: Manuscript Reading Surface (Track A) + SOUL Personality Visualization (Track B), the first post-loop-closure iteration. Track A (P0) promoted the post-V1.75-pivot residual into a designed reading surface (typography + nav + session-only progress + lightweight maturation indicators: completion-state badge + World KB density + open-findings "N+" via `has_more`). Track B (P1) added keyword clusters + temporal-drift visualization over internalized memory fragments; additive wire DTO (`memory-fragment-info` + `keywords`/`created_at`) → `@42ch/nexus-contracts` 0.13.0 → 0.14.0. QC tri-review 3/3 Approve both tracks (P0 after a fix-wave for pagination correctness). **DF-49 (Standalone MCP server) CANCELLED** — conflicts with ACP-client product direction (`STRATEGY.md`: CLI is an ACP client, not a server) + circular-invocation risk. Platform **paused**. Residuals SSOT: [`status.json`](../status.json). Shipped/cancelled history: [shipped-features-tracker.md](../archived/shipped-features-tracker.md).
+**Quick status**: **V1.80 delivered (2026-07-01)** — Memory Review Reliability + Frontend Hygiene: the first "stabilize before extending" reliability investment iteration after four consecutive feature iterations (V1.76–V1.79). Track A (P0) closed REL-01 (`R-V178P0-QC3-003`): rewrote `POST /v1/local/memory/review` from an unbounded synchronous whole-queue loop into a bounded (`REVIEW_BATCH_LIMIT=50`) / per-creator serialized (in-process mutex map on `WorkspaceState`) / deadline-aware (5s partial-progress) pipeline; additive wire DTO (`ReviewResponse` + `has_more`/`processed`) → `@42ch/nexus-contracts` 0.14.0 → 0.15.0. QC tri-review 3/3 Approve (P0 after a fix-wave for the drain-completion `has_more` accounting bug W-QC3-001). Track B (P1) closed four low V1.79-QC frontend hygiene residuals (reading keyboard-nav tests + component tests + `memory-page.tsx` split + SOUL `temporal-drift` BAND_PALETTE token promotion). Compound captured the bounded-drain-completion-contract pattern. Platform **paused**. Residuals SSOT: [`status.json`](../status.json). Shipped/cancelled history: [shipped-features-tracker.md](../archived/shipped-features-tracker.md).
 
 **Purpose**: Single source of truth for **open** and **backlog** features deferred from delivery compasses. Closed/shipped history lives in shipped archive.
 **Scope**: `nexus` OSS repository only.
-**Created**: 2026-04-21 · **Last updated**: 2026-07-01 (V1.79 delivered: Author Reflection — manuscript reading surface + SOUL personality visualization; DF-49 cancelled — conflicts with ACP-client product direction; R-V178P0-QC3-001 closed via pretypecheck; R-V178P0-QC3-003 → reliability roadmap; 4 low V1.79-QC residuals → V1.80+)
+**Created**: 2026-04-21 · **Last updated**: 2026-07-01 (V1.80 delivered: Memory Review Reliability + Frontend Hygiene; REL-01 `R-V178P0-QC3-003` closed + 4 V1.79-QC residuals closed; compound bounded-drain-completion-contract)
 
 ---
 
@@ -79,7 +79,7 @@ Non-feature reliability work routed out of feature iterations; picked up by a de
 
 | ID | Item | Source | Target | Notes |
 |----|------|--------|--------|-------|
-| REL-01 | POST /memory/review synchronous whole-queue pipeline — add bound/timeout/cancellation/concurrency | `R-V178P0-QC3-003` (V1.78 QC) | Reliability iteration | V1.79 P-last reclassified from "V1.79+ reliability roadmap" to this dedicated grouping. Synchronous whole-queue rewrite; not silently dropped. |
+| ~~REL-01~~ | ~~POST /memory/review synchronous whole-queue pipeline — add bound/timeout/cancellation/concurrency~~ **SHIPPED (V1.80)** | `R-V178P0-QC3-003` (V1.78 QC) | ~~Reliability iteration~~ | V1.80 P0 shipped the bounded/serialized/deadline-aware rewrite (REVIEW_BATCH_LIMIT=50 + per-creator mutex + 5s partial-progress + has_more/processed drain). `R-V178P0-QC3-003` resolved. Compound: bounded-drain-completion-contract. |
 
 ---
 
@@ -99,7 +99,7 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 ## 5) Quick index
 
-**Active iteration**: V1.79 delivered (2026-07-01) — Author Reflection (manuscript reading surface + SOUL personality visualization); DF-49 cancelled (ACP-client conflict); next: V1.80 candidate evaluation at next `/iteration-start` (backlog: standalone maturation dashboard, independent SOUL growth-curve view, deeper manuscript reading/annotations, reliability hardening iteration to pick up R-V178P0-QC3-003)
+**Active iteration**: V1.80 delivered (2026-07-01) — Memory Review Reliability + Frontend Hygiene (REL-01 `R-V178P0-QC3-003` closed + 4 V1.79-QC residuals closed); next: V1.81 candidate evaluation at next `/iteration-start` (backlog: BL-09 standalone maturation dashboard, BL-10 independent SOUL growth-curve view, BL-11 deeper manuscript reading/annotations, BL-12 SOUL viz refinements)
 
 **Latest shipped**: [V1.66](../iterations/v1.66-tauri-desktop-shell-delivery-compass-v1.md) (Tauri Desktop Shell, PR #90 — 2026-06-26)
 

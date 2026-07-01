@@ -55,6 +55,8 @@ fn handler_serves_exact_contract_types() {
         promoted: 3,
         fragmented: 5,
         dropped: 2,
+        has_more: Some(true),
+        processed: Some(10),
     };
     let _: nexus_contracts::MemoryFragmentInfo = handler::MemoryFragmentInfo {
         fragment_id: "frag_1".into(),
@@ -127,21 +129,55 @@ fn list_pending_reviews_response_shape() {
 }
 
 /// `ReviewResponse` counts serialize as integers (the handler reports
-/// promoted/fragmented/dropped counters).
+/// promoted/fragmented/dropped counters). V1.80 REL-01 adds optional
+/// `has_more` + `processed`; the round-trip covers both the populated additive
+/// shape and the pre-V1.80 minimal JSON (no optional fields) still
+/// deserializing.
 #[test]
 fn review_response_counts_are_integers() {
     let resp = handler::ReviewResponse {
         promoted: 3,
         fragmented: 5,
         dropped: 2,
+        has_more: Some(true),
+        processed: Some(10),
     };
     let _: ReviewResponse = resp;
     let v = serde_json::to_value(&resp).unwrap();
     assert_eq!(v["promoted"], json!(3));
     assert_eq!(v["fragmented"], json!(5));
     assert_eq!(v["dropped"], json!(2));
+    // V1.80 additive fields serialize when populated.
+    assert_eq!(v["has_more"], json!(true));
+    assert_eq!(v["processed"], json!(10));
     let rt: ReviewResponse = serde_json::from_value(v.clone()).unwrap();
     assert_eq!(rt, resp);
+
+    // Absent optional fields are omitted from the wire (skip_serializing_if).
+    let minimal = handler::ReviewResponse {
+        promoted: 0,
+        fragmented: 0,
+        dropped: 0,
+        has_more: None,
+        processed: None,
+    };
+    let mv = serde_json::to_value(&minimal).unwrap();
+    assert!(
+        !mv.as_object().unwrap().contains_key("has_more"),
+        "optional has_more must be omitted when None, got: {mv}"
+    );
+    assert!(
+        !mv.as_object().unwrap().contains_key("processed"),
+        "optional processed must be omitted when None, got: {mv}"
+    );
+
+    // Backward compatibility: pre-V1.80 minimal JSON (no optional fields)
+    // still deserializes — older daemons/clients must not break.
+    let old_json = json!({ "promoted": 1, "fragmented": 0, "dropped": 0 });
+    let parsed: ReviewResponse = serde_json::from_value(old_json).unwrap();
+    assert_eq!(parsed.promoted, 1);
+    assert_eq!(parsed.has_more, None);
+    assert_eq!(parsed.processed, None);
 }
 
 /// `CountPendingReviewsResponse.count` is a JSON integer.
