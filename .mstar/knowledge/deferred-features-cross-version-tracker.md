@@ -1,10 +1,10 @@
 # Deferred Features — Cross-Version Tracker v2
 
-**Quick status**: **V1.78 delivered (2026-07-01)** — Creator Memory / SOUL review-loop UI (author self-loop closure) + slate-clear. Track A (P0) published the memory OSS contracts (14 schemas + codegen + normalized hand-written handler DTOs, fixing the daemon-runtime no-hand-written-DTO invariant; `@42ch/nexus-contracts` 0.12.0 → 0.13.0) + Memory review-loop Control-Room surface (pending-review list/count/delete + Review & Summarize + fragments browser + inspector). QC fix-wave bounded the memory list/fragments SQL fetches. Track B (P1) closed 12 V1.77-QC residuals. The three author-in-command loops are now all closed in the UI: writing (canvas V1.76) + work quality (findings V1.77) + creator self (memory V1.78). Platform **paused**. Residuals SSOT: [`status.json`](../status.json). Shipped/cancelled history: [shipped-features-tracker.md](../archived/shipped-features-tracker.md).
+**Quick status**: **V1.79 delivered (2026-07-01)** — Author Reflection: Manuscript Reading Surface (Track A) + SOUL Personality Visualization (Track B), the first post-loop-closure iteration. Track A (P0) promoted the post-V1.75-pivot residual into a designed reading surface (typography + nav + session-only progress + lightweight maturation indicators: completion-state badge + World KB density + open-findings "N+" via `has_more`). Track B (P1) added keyword clusters + temporal-drift visualization over internalized memory fragments; additive wire DTO (`memory-fragment-info` + `keywords`/`created_at`) → `@42ch/nexus-contracts` 0.13.0 → 0.14.0. QC tri-review 3/3 Approve both tracks (P0 after a fix-wave for pagination correctness). **DF-49 (Standalone MCP server) CANCELLED** — conflicts with ACP-client product direction (`STRATEGY.md`: CLI is an ACP client, not a server) + circular-invocation risk. Platform **paused**. Residuals SSOT: [`status.json`](../status.json). Shipped/cancelled history: [shipped-features-tracker.md](../archived/shipped-features-tracker.md).
 
 **Purpose**: Single source of truth for **open** and **backlog** features deferred from delivery compasses. Closed/shipped history lives in shipped archive.
 **Scope**: `nexus` OSS repository only.
-**Created**: 2026-04-21 · **Last updated**: 2026-07-01 (V1.78 delivered: creator memory review-loop UI shipped; memory OSS contracts published + hand-written DTOs normalized; 12 V1.77-QC residuals closed; 5 V1.78-QC residuals registered, 3 fix-wave resolved + 2 deferred low to V1.79+)
+**Created**: 2026-04-21 · **Last updated**: 2026-07-01 (V1.79 delivered: Author Reflection — manuscript reading surface + SOUL personality visualization; DF-49 cancelled — conflicts with ACP-client product direction; R-V178P0-QC3-001 closed via pretypecheck; R-V178P0-QC3-003 → reliability roadmap; 4 low V1.79-QC residuals → V1.80+)
 
 ---
 
@@ -46,7 +46,7 @@
 | DF-41 | Agent slot ACP connection stub | V1.7 audit | Any future | S | V1.7 | `nexus42/.../agent_slot.rs`. |
 | DF-46 | Full `nexus.*` capability implementation | V1.34 audit | **Reduced — V1.60 local complete** | L | V1.34→V1.60 | Local scope complete: 32 shipped + 4 sync.* catalog-only (platform-blocked) + 2 publish.* OUT (DF-59). Remaining 4 sync.* are platform-gated per PD-05. |
 | DF-47 | Host tool + `worker/agent_tool_request` unified registry | V1.34 audit | V1.42 P3 Narrowed | M | V1.34→V1.42 | V1.42 P3 shipped `DaemonToolDispatchAdapter` + `HostToolCallTask` + one tool proven E2E. |
-| DF-49 | Standalone MCP server for Nexus capabilities | V1.34 | Backlog | L | V1.34 | Separate from ACP agent path. |
+| DF-49 | ~~Standalone MCP server for Nexus capabilities~~ **CANCELLED (V1.79)** | V1.34 | Cancelled | L | V1.34→V1.79 cancelled | **Cancelled — conflicts with ACP-client product direction** (`STRATEGY.md`: CLI is an ACP client, not a server) + circular-invocation risk (Nexus drives an agent via ACP → agent calls back into Nexus via MCP → loop). Not deferred. See archived shipped-features-tracker cancelled section. |
 | DF-55 | `nexus.context.assemble` cloud/platform path | V1.34 | V2.0+ | M | V1.34 | Local/read-only or `policy_blocked` (PD-05). |
 | DF-59 | Platform publish integration for novel | V1.36 prepare | Backlog | L | V1.36 | Platform dependency. |
 | PF-ESSAY | `essay` Work profile | V1.52 lock | **V1.63 Shipped** | M | V1.52→V1.63 | Shipped: scaffold + `essay-writing` preset + 4-dim rubric + completion + optional KB. Spec: [essay-profile.md](specs/essay-profile.md) (Draft → Shipped V1.63). |
@@ -68,6 +68,18 @@
 | BL-06 | Independent search microservice | V1.2 | Backlog | L | |
 | BL-07 | Explore ranking / cold-start + Publish compliance matrix | V1.2 | Backlog | M | |
 | BL-08 | Social / marketing features | V1.3 | V2.0+ | XL | |
+| BL-09 | Standalone maturation dashboard (multi-chart cross-Work/World aggregate view) | V1.79 | Backlog | M | V1.79 Track A shipped in-context lightweight maturation indicators only; standalone dashboard deferred. |
+| BL-10 | Independent SOUL growth-curve view (separate from temporal-drift timeline) | V1.79 | Backlog | S | V1.79 Track B folded growth-count into the temporal-drift timeline; standalone view deferred. |
+| BL-11 | Deeper manuscript reading — persisted reading progress + annotations/highlights + profile-specific reading chrome | V1.79 | Backlog | M-L | V1.79 reading surface is session-only + novel-first; persistence/annotations/profile-chrome deferred. |
+| BL-12 | SOUL viz refinements — per-World filtering + realtime updates + LLM-generated personality-score narrative | V1.79 | Backlog | M | V1.79 SOUL viz is per-creator + poll/manual-refresh + raw keyword/timeline; refinements deferred. |
+
+### 2.5 Reliability roadmap (cross-version)
+
+Non-feature reliability work routed out of feature iterations; picked up by a dedicated reliability iteration or opportunistically.
+
+| ID | Item | Source | Target | Notes |
+|----|------|--------|--------|-------|
+| REL-01 | POST /memory/review synchronous whole-queue pipeline — add bound/timeout/cancellation/concurrency | `R-V178P0-QC3-003` (V1.78 QC) | Reliability iteration | V1.79 P-last reclassified from "V1.79+ reliability roadmap" to this dedicated grouping. Synchronous whole-queue rewrite; not silently dropped. |
 
 ---
 
@@ -87,7 +99,7 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 ## 5) Quick index
 
-**Active iteration**: V1.78 delivered (2026-07-01) — Creator Memory / SOUL review-loop UI (author self-loop closure) + slate-clear; next: V1.79 (next product surface candidate — DF-49 MCP server / deeper SOUL / manuscript reading; 2 low V1.78-QC residuals carry forward)
+**Active iteration**: V1.79 delivered (2026-07-01) — Author Reflection (manuscript reading surface + SOUL personality visualization); DF-49 cancelled (ACP-client conflict); next: V1.80 candidate evaluation at next `/iteration-start` (backlog: standalone maturation dashboard, independent SOUL growth-curve view, deeper manuscript reading/annotations, reliability hardening iteration to pick up R-V178P0-QC3-003)
 
 **Latest shipped**: [V1.66](../iterations/v1.66-tauri-desktop-shell-delivery-compass-v1.md) (Tauri Desktop Shell, PR #90 — 2026-06-26)
 

@@ -1,89 +1,29 @@
 {
   "version": 1,
-  "updated_at": "2026-07-01T03:00:00Z",
-  "plans": [
-    {
-      "plan_id": "2026-07-01-v1.79-prepare-dual-track-spec-amendments",
-      "iteration_id": "V1.79",
-      "status": "Done",
-      "owner": "@project-manager",
-      "effort": "S",
-      "type": "prepare",
-      "working_branch": "feature/v1.79-prepare",
-      "merge_target": "iteration/v1.79",
-      "task_category": "docs",
-      "wire_contracts_changed": false,
-      "depends_on": []
-    },
-    {
-      "plan_id": "2026-07-01-v1.79-manuscript-reading-surface",
-      "iteration_id": "V1.79",
-      "status": "Done",
-      "owner": "@frontend-dev",
-      "effort": "M",
-      "type": "implement",
-      "working_branch": "feature/v1.79-reading-surface",
-      "merge_target": "iteration/v1.79",
-      "task_category": "visual",
-      "wire_contracts_changed": false,
-      "depends_on": [
-        "2026-07-01-v1.79-prepare-dual-track-spec-amendments"
-      ]
-    },
-    {
-      "plan_id": "2026-07-01-v1.79-soul-personality-visualization",
-      "iteration_id": "V1.79",
-      "status": "Done",
-      "owner": "@fullstack-dev",
-      "effort": "M",
-      "type": "implement",
-      "working_branch": "feature/v1.79-soul-viz",
-      "merge_target": "iteration/v1.79",
-      "task_category": "deep",
-      "wire_contracts_changed": true,
-      "depends_on": [
-        "2026-07-01-v1.79-prepare-dual-track-spec-amendments"
-      ]
-    },
-    {
-      "plan_id": "2026-07-01-v1.79-closure",
-      "iteration_id": "V1.79",
-      "status": "Todo",
-      "owner": "@project-manager",
-      "effort": "S",
-      "type": "closure",
-      "working_branch": "feature/v1.79-closure",
-      "merge_target": "iteration/v1.79",
-      "task_category": "docs",
-      "wire_contracts_changed": false,
-      "depends_on": [
-        "2026-07-01-v1.79-manuscript-reading-surface",
-        "2026-07-01-v1.79-soul-personality-visualization"
-      ]
-    }
-  ],
+  "updated_at": "2026-07-01T04:00:00Z",
+  "plans": [],
   "metadata": {
     "integration_branch": "iteration/v1.79",
     "integration_branch_retired": false,
     "last_integration_branch": "iteration/v1.78",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.79 active (iteration-start complete — compass LOCKED after §1.6 Review & Edit chain; ready for §6 Integration Branch)",
-    "latest_active_compass": "v1.79-author-reflection-reading-and-soul-visualization-compass-v1.md",
+    "latest_active_iteration": "V1.79 shipped (2026-07-01, PR pending); next V1.80 pending /iteration-start",
+    "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.78",
-      "compass": "v1.78-creator-memory-review-loop-ui-and-slate-clear-compass-v1.md",
-      "shipped_at": "2026-07-01 (merged via PR #105 @ fbdb27de)",
-      "plan_count": 3,
-      "plan_count_done": 3,
+      "iteration": "V1.79",
+      "compass": "v1.79-author-reflection-reading-and-soul-visualization-compass-v1.md",
+      "shipped_at": "2026-07-01 (PR pending)",
+      "plan_count": 4,
+      "plan_count_done": 4,
       "wire_contracts_changed": true,
-      "wire_contracts_note": "V1.78: additive — 14 new memory local-api schemas + codegen; @42ch/nexus-contracts 0.12.0 -> 0.13.0.",
-      "profile_b_compaction": "done (V1.78 P-last closure)",
-      "merge_commit": "fbdb27de",
-      "pr": "#105"
+      "wire_contracts_note": "V1.79: additive — memory-fragment-info + keywords/created_at; @42ch/nexus-contracts 0.13.0 -> 0.14.0.",
+      "profile_b_compaction": "done (V1.79 all 4 plans)",
+      "merge_commit": null,
+      "pr": "pending"
     },
     "tech_debt_summary": {
       "total_open": 6,
