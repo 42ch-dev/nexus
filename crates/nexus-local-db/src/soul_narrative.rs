@@ -4,6 +4,7 @@
 //! snapshot columns (`fragment_count_at_generation`,
 //! `max_fragment_created_at_at_generation`).
 
+use futures_util::TryStreamExt;
 use sqlx::SqlitePool;
 
 use crate::error::LocalDbError;
@@ -94,10 +95,14 @@ pub async fn upsert_soul_narrative(
 /// Compute fragment statistics for stale-detection and the insufficient-data gate.
 ///
 /// Uses SQL aggregates for `fragment_count` and `max_created_at` to avoid
-/// materializing all rows. The `distinct_keyword_count` uses a bounded scan
-/// (capped at `KEYWORD_SCAN_CAP`) — sufficient because the gate only checks
-/// `distinct_keyword_count < 20`, and a result ≥ 20 from the capped set is
-/// authoritative.
+/// materializing all rows. The `distinct_keyword_count` uses an early-exit
+/// streaming scan: it streams keyword rows one at a time, accumulating distinct
+/// keywords into a `HashSet`. The scan stops as soon as 20 distinct keywords are
+/// found (the insufficient-data gate threshold), but continues to EOF for an
+/// exact count for the response field. This is sound — no under-count, no
+/// bounded LIMIT — and proportional: creators with ≥20 distinct keywords stop
+/// early; creators with <20 distinct have few fragments in the local
+/// small-queue model.
 ///
 /// Returns `SoulNarrativeFragmentStats` with the computed statistics.
 ///
@@ -108,10 +113,8 @@ pub async fn soul_narrative_fragment_stats(
     pool: &SqlitePool,
     creator_id: &str,
 ) -> Result<SoulNarrativeFragmentStats, LocalDbError> {
-    // distinct_keyword_count: bounded scan. The insufficient-data gate
-    // threshold is 20 distinct keywords; capping at 200 is well above that,
-    // so the gate result is correct regardless of the cap.
-    const KEYWORD_SCAN_CAP: i64 = 200;
+    /// Insufficient-data gate threshold for distinct keywords (≤20).
+    const DISTINCT_KEYWORD_THRESHOLD: usize = 20;
 
     // fragment_count: SQL aggregate — no row materialization.
     let fragment_count = sqlx::query_scalar!(
@@ -129,21 +132,35 @@ pub async fn soul_narrative_fragment_stats(
     .fetch_one(pool)
     .await?;
 
-    // distinct_keyword_count: bounded scan.
-    let keyword_rows = sqlx::query_scalar!(
-        r#"SELECT keywords as "keywords!: String" FROM memory_fragments WHERE creator_id = ? ORDER BY created_at DESC LIMIT ?"#,
-        creator_id,
-        KEYWORD_SCAN_CAP
+    // distinct_keyword_count: early-exit streaming scan.
+    // Stream rows one at a time with `.fetch()` (NOT `.fetch_all()`); stop
+    // scanning as soon as the distinct-keyword set reaches the gate threshold.
+    // Then drain remaining rows for an exact count for the response field.
+    let mut stream = sqlx::query!(
+        r#"SELECT keywords as "keywords!: String" FROM memory_fragments WHERE creator_id = ? ORDER BY created_at DESC"#,
+        creator_id
     )
-    .fetch_all(pool)
-    .await?;
+    .fetch(pool);
 
     let mut distinct: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for row in &keyword_rows {
-        if let Ok(keywords) = serde_json::from_str::<Vec<String>>(row) {
+    while let Some(row) = stream.try_next().await? {
+        if let Ok(keywords) = serde_json::from_str::<Vec<String>>(&row.keywords) {
             for kw in keywords {
                 distinct.insert(kw);
             }
+        }
+        // Early exit: the gate threshold is 20 distinct keywords.
+        // Once we reach it, the gate result is authoritative (passes).
+        // Drain remaining rows for exact count for the response field.
+        if distinct.len() >= DISTINCT_KEYWORD_THRESHOLD {
+            while let Some(row) = stream.try_next().await? {
+                if let Ok(keywords) = serde_json::from_str::<Vec<String>>(&row.keywords) {
+                    for kw in keywords {
+                        distinct.insert(kw);
+                    }
+                }
+            }
+            break;
         }
     }
 

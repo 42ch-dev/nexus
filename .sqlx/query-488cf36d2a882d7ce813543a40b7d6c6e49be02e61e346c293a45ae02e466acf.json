@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT keywords as \"keywords!: String\" FROM memory_fragments WHERE creator_id = ? ORDER BY created_at DESC LIMIT ?",
+  "query": "SELECT keywords as \"keywords!: String\" FROM memory_fragments WHERE creator_id = ? ORDER BY created_at DESC",
   "describe": {
     "columns": [
       {
@@ -10,11 +10,11 @@
       }
     ],
     "parameters": {
-      "Right": 2
+      "Right": 1
     },
     "nullable": [
       false
     ]
   },
-  "hash": "e7f21cd6fc154b0c38bcc109428f9232f4242a68216f16e84d397e487c9c52f1"
+  "hash": "488cf36d2a882d7ce813543a40b7d6c6e49be02e61e346c293a45ae02e466acf"
 }
