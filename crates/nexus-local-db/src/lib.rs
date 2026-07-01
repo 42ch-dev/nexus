@@ -30,6 +30,7 @@ pub mod prompt_injection;
 pub mod reference_source;
 pub mod runtime_lock;
 pub mod soul_meta;
+pub mod soul_narrative;
 pub mod work_chapters;
 pub mod works;
 pub mod workspace_session;
@@ -75,6 +76,12 @@ pub use memory_fragment::{
     count_fragments, create_fragment, delete_fragment, get_all_keywords, list_fragments,
     list_fragments_by_session, list_fragments_filtered, list_fragments_limited,
     MemoryFragmentRecord,
+};
+
+// Re-export soul_narrative types
+pub use soul_narrative::{
+    get_soul_narrative, soul_narrative_fragment_stats, upsert_soul_narrative,
+    SoulNarrativeFragmentStats, SoulNarrativeRecord,
 };
 
 // Re-export world_stories types

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO memory_fragments (fragment_id, session_id, creator_id, keywords, summary, created_at, ttl, world_id)\n         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 8
+    },
+    "nullable": []
+  },
+  "hash": "6df4a5de70897fdb766c54c19496303741130a8aeae972550fc30cf8a736e658"
+}
