@@ -21,8 +21,9 @@ pub use nexus_contracts::{
     CreatePendingReviewResponse, DeletePendingReviewQuery, DeletePendingReviewResponse,
     ListMemoryFragmentsQuery, ListMemoryFragmentsResponse, ListPendingReviewsQuery,
     ListPendingReviewsResponse, MemoryFragmentInfo, PaginationInfo, PendingReviewInfo,
-    ReviewRequest, ReviewResponse,
+    ReviewRequest, ReviewResponse, SoulNarrativeRequest, SoulNarrativeResponse,
 };
+use nexus_creator_memory::soul_narrative::SoulNarrativeSynthesizer as _;
 use tracing::{debug, info};
 
 /// POST /v1/local/memory/pending-review
@@ -882,6 +883,7 @@ async fn process_single_review_row(
                 summary: fragment.summary,
                 created_at: fragment.created_at,
                 ttl: fragment.ttl,
+                world_id: input.world_id.clone(),
             };
 
             match nexus_local_db::memory_fragment::create_fragment(pool, &record).await {
@@ -1019,6 +1021,7 @@ pub async fn fragments(
     info!(
         creator_id = %active_creator,
         keyword = ?params.keyword,
+        world_id = ?params.world_id,
         "Listing memory fragments"
     );
 
@@ -1031,6 +1034,7 @@ pub async fn fragments(
             state.pool(),
             &active_creator,
             params.keyword.as_deref(),
+            params.world_id.as_deref(),
             limit_u32,
         )
         .await
@@ -1047,6 +1051,7 @@ pub async fn fragments(
         nexus_local_db::memory_fragment::list_fragments_limited(
             state.pool(),
             &active_creator,
+            params.world_id.as_deref(),
             limit_i64,
         )
         .await
@@ -1061,14 +1066,7 @@ pub async fn fragments(
         .map(|r| MemoryFragmentInfo {
             fragment_id: r.fragment_id,
             summary: r.summary,
-            // V1.79: expose the stored keyword labels + creation timestamp for
-            // read-only SOUL visualization. `keywords` is a JSON-array String in
-            // `memory_fragments`; decode it to `Vec<String>` (malformed JSON on
-            // legacy/corrupt rows degrades to an empty list, never fails the
-            // response — see `decode_fragment_keywords`). `created_at` is copied
-            // verbatim (RFC 3339 string). Both DB columns are non-null, so they
-            // are always populated as `Some`; the optional wire shape lets
-            // future producers omit them.
+            world_id: r.world_id,
             keywords: Some(decode_fragment_keywords(&r.keywords)),
             created_at: Some(r.created_at),
         })
@@ -1082,6 +1080,353 @@ pub async fn fragments(
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+/// Minimum fragment count before narrative synthesis is attempted.
+const MIN_SOUL_NARRATIVE_FRAGMENTS: i64 = 10;
+
+/// Minimum distinct keyword count before narrative synthesis is attempted.
+const MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS: i64 = 20;
+
+/// `POST /v1/local/memory/soul/reflect`
+///
+/// Reads or regenerates the cached whole-Creator SOUL narrative.
+/// The endpoint:
+/// 1. Enforces active creator (same pattern as `fragments`).
+/// 2. Computes fragment stats for the insufficient-data gate.
+/// 3. Checks the cache for a current/stale/ungenerated state.
+/// 4. If `force_regenerate` or stale or ungenerated, synthesizes via
+///    `SoulNarrativeSynthesizer` (ACP-backed), persists the result, and returns it.
+/// 5. The insufficient-data gate (`fragment_count < 10` OR
+///    `distinct_keyword_count < 20`) is evaluated BEFORE any ACP call, so
+///    new creators never pay LLM latency for a guaranteed-thin result.
+///
+/// Auth: requires active creator from config.toml.
+/// Request body `creator_id` must match the active creator, otherwise 403.
+#[allow(clippy::too_many_lines, clippy::similar_names)]
+pub async fn reflect_soul(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<SoulNarrativeRequest>,
+) -> Result<Json<SoulNarrativeResponse>, NexusApiError> {
+    let active_creator =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    if req.creator_id != active_creator {
+        return Err(NexusApiError::Forbidden {
+            resource: "soul_narrative".into(),
+            reason: format!(
+                "creator_id '{}' does not match active creator '{}'",
+                req.creator_id, active_creator
+            ),
+        });
+    }
+
+    if !nexus_creator::local_identity::is_valid_creator_id(&req.creator_id) {
+        return Err(NexusApiError::InvalidInput {
+            field: "creator_id".into(),
+            reason: "creator_id must start with 'ctr_' followed by alphanumeric characters".into(),
+        });
+    }
+
+    info!(
+        creator_id = %active_creator,
+        force_regenerate = req.force_regenerate.unwrap_or(false),
+        "Reflecting on Creator SOUL narrative"
+    );
+
+    // 1. Compute fragment stats for the insufficient-data gate + stale detection.
+    let fragment_stats =
+        nexus_local_db::soul_narrative_fragment_stats(state.pool(), &active_creator)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".into(),
+                message: format!("failed to compute fragment stats: {e}"),
+            })?;
+
+    let force = req.force_regenerate.unwrap_or(false);
+
+    // 2. Insufficient-data gate (before any ACP call).
+    let min_distinct = usize::try_from(MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS).unwrap_or(usize::MAX);
+    let insufficient = fragment_stats.fragment_count < MIN_SOUL_NARRATIVE_FRAGMENTS
+        || fragment_stats.distinct_keyword_count < min_distinct;
+
+    if insufficient {
+        return Ok(Json(SoulNarrativeResponse {
+            creator_id: active_creator,
+            state: "insufficient_data".to_string(),
+            narrative: None,
+            generated_at: None,
+            stale: false,
+            fragment_count_at_generation: None,
+            max_fragment_created_at_at_generation: None,
+            current_fragment_count: u64::try_from(fragment_stats.fragment_count).unwrap_or(0),
+            current_distinct_keyword_count: u64::try_from(fragment_stats.distinct_keyword_count)
+                .unwrap_or(0),
+            min_fragment_count: MIN_SOUL_NARRATIVE_FRAGMENTS,
+            min_distinct_keyword_count: MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS,
+        }));
+    }
+
+    // 3. Check the cache.
+    let cached = nexus_local_db::get_soul_narrative(state.pool(), &active_creator)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: format!("failed to read soul narrative cache: {e}"),
+        })?;
+
+    // 4. Stale detection.
+    let stale = if let Some(ref c) = cached {
+        c.fragment_count_at_generation != fragment_stats.fragment_count
+            || c.max_fragment_created_at_at_generation.as_deref()
+                != fragment_stats.max_created_at.as_deref()
+    } else {
+        false
+    };
+
+    // 5. If cached and not force and not stale → return current.
+    if !force && !stale {
+        if let Some(ref c) = cached {
+            return Ok(Json(SoulNarrativeResponse {
+                creator_id: active_creator,
+                state: "current".to_string(),
+                narrative: Some(c.narrative.clone()),
+                generated_at: Some(c.generated_at.clone()),
+                stale: false,
+                fragment_count_at_generation: Some(
+                    u64::try_from(c.fragment_count_at_generation).unwrap_or(0),
+                ),
+                max_fragment_created_at_at_generation: c
+                    .max_fragment_created_at_at_generation
+                    .clone(),
+                current_fragment_count: u64::try_from(fragment_stats.fragment_count).unwrap_or(0),
+                current_distinct_keyword_count: u64::try_from(
+                    fragment_stats.distinct_keyword_count,
+                )
+                .unwrap_or(0),
+                min_fragment_count: MIN_SOUL_NARRATIVE_FRAGMENTS,
+                min_distinct_keyword_count: MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS,
+            }));
+        }
+    }
+
+    // 6. If cached and not force and stale → return stale (don't regenerate).
+    if !force && stale {
+        if let Some(ref c) = cached {
+            return Ok(Json(SoulNarrativeResponse {
+                creator_id: active_creator,
+                state: "stale".to_string(),
+                narrative: Some(c.narrative.clone()),
+                generated_at: Some(c.generated_at.clone()),
+                stale: true,
+                fragment_count_at_generation: Some(
+                    u64::try_from(c.fragment_count_at_generation).unwrap_or(0),
+                ),
+                max_fragment_created_at_at_generation: c
+                    .max_fragment_created_at_at_generation
+                    .clone(),
+                current_fragment_count: u64::try_from(fragment_stats.fragment_count).unwrap_or(0),
+                current_distinct_keyword_count: u64::try_from(
+                    fragment_stats.distinct_keyword_count,
+                )
+                .unwrap_or(0),
+                min_fragment_count: MIN_SOUL_NARRATIVE_FRAGMENTS,
+                min_distinct_keyword_count: MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS,
+            }));
+        }
+    }
+
+    // 7. Need to synthesize (ungenerated, stale + force, or force).
+    let registry =
+        state
+            .capability_registry()
+            .ok_or_else(|| NexusApiError::ServiceUnavailable {
+                message: "capability registry not available".to_string(),
+            })?;
+
+    let synthesizer =
+        crate::api::handlers::soul_narrative_synthesizer::AcpSoulNarrativeSynthesizer::new(
+            registry,
+        );
+
+    // Build capped input signal.
+    let input =
+        build_soul_narrative_synthesis_input(state.pool(), &active_creator, &fragment_stats)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".into(),
+                message: format!("failed to build synthesis input: {e}"),
+            })?;
+
+    let draft = synthesizer
+        .synthesize(&active_creator, input)
+        .await
+        .map_err(|e| {
+            // Map MemoryError to appropriate NexusApiError.
+            let msg = e.to_string();
+            if msg.contains("not available") || msg.contains("unavailable") {
+                NexusApiError::ServiceUnavailable { message: msg }
+            } else {
+                NexusApiError::Internal {
+                    code: "NARRATIVE_SYNTHESIS_ERROR".into(),
+                    message: msg,
+                }
+            }
+        })?;
+
+    // 8. Persist the result.
+    let now = chrono::Utc::now().to_rfc3339();
+    let record = nexus_local_db::SoulNarrativeRecord {
+        creator_id: active_creator.clone(),
+        narrative: draft.narrative.clone(),
+        generated_at: now.clone(),
+        fragment_count_at_generation: fragment_stats.fragment_count,
+        max_fragment_created_at_at_generation: fragment_stats.max_created_at.clone(),
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    nexus_local_db::upsert_soul_narrative(state.pool(), &record)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: format!("failed to persist soul narrative: {e}"),
+        })?;
+
+    Ok(Json(SoulNarrativeResponse {
+        creator_id: active_creator,
+        state: "current".to_string(),
+        narrative: Some(draft.narrative),
+        generated_at: Some(record.generated_at),
+        stale: false,
+        fragment_count_at_generation: Some(
+            u64::try_from(record.fragment_count_at_generation).unwrap_or(0),
+        ),
+        max_fragment_created_at_at_generation: record.max_fragment_created_at_at_generation,
+        current_fragment_count: u64::try_from(fragment_stats.fragment_count).unwrap_or(0),
+        current_distinct_keyword_count: u64::try_from(fragment_stats.distinct_keyword_count)
+            .unwrap_or(0),
+        min_fragment_count: MIN_SOUL_NARRATIVE_FRAGMENTS,
+        min_distinct_keyword_count: MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS,
+    }))
+}
+
+/// Build a capped `SoulNarrativeSynthesisInput` from the creator's fragments.
+///
+/// Caps: ≤30 keywords, ≤24 summaries ≤280 chars, ≤8 temporal buckets.
+async fn build_soul_narrative_synthesis_input(
+    pool: &sqlx::SqlitePool,
+    creator_id: &str,
+    stats: &nexus_local_db::SoulNarrativeFragmentStats,
+) -> Result<nexus_creator_memory::soul_narrative::SoulNarrativeSynthesisInput, NexusApiError> {
+    use nexus_creator_memory::soul_narrative::SoulNarrativeSynthesisInput;
+
+    // Fetch recent fragments for summaries + keyword counting.
+    let fragments = nexus_local_db::list_fragments_limited(pool, creator_id, None, 100)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: format!("failed to fetch fragments for synthesis: {e}"),
+        })?;
+
+    // Count keywords across all fragments.
+    let mut keyword_counts: std::collections::HashMap<String, u64> =
+        std::collections::HashMap::new();
+    let mut summaries: Vec<String> = Vec::new();
+
+    for frag in &fragments {
+        if let Ok(keywords) = serde_json::from_str::<Vec<String>>(&frag.keywords) {
+            for kw in keywords {
+                *keyword_counts.entry(kw).or_default() += 1;
+            }
+        }
+        // Cap summaries: ≤24, each ≤280 chars.
+        if summaries.len() < 24 {
+            let summary = if frag.summary.len() > 280 {
+                format!("{}…", &frag.summary[..279])
+            } else {
+                frag.summary.clone()
+            };
+            summaries.push(summary);
+        }
+    }
+
+    // Sort keywords by count desc, cap at 30.
+    let mut top_keywords: Vec<(String, u64)> = keyword_counts.into_iter().collect();
+    top_keywords.sort_by_key(|(_k, count)| std::cmp::Reverse(*count));
+    top_keywords.truncate(30);
+
+    // Build temporal buckets (up to 8) by grouping fragments into time windows.
+    let temporal_buckets = build_temporal_buckets(&fragments);
+
+    Ok(SoulNarrativeSynthesisInput {
+        top_keywords,
+        recent_summaries: summaries,
+        temporal_buckets,
+        total_fragment_count: u64::try_from(stats.fragment_count).unwrap_or(0),
+        distinct_keyword_count: u64::try_from(stats.distinct_keyword_count).unwrap_or(0),
+        oldest_created_at: fragments.last().map(|f| f.created_at.clone()),
+        newest_created_at: fragments.first().map(|f| f.created_at.clone()),
+    })
+}
+
+/// Build up to 8 temporal buckets from fragments (ordered by `created_at`).
+fn build_temporal_buckets(
+    fragments: &[nexus_local_db::MemoryFragmentRecord],
+) -> Vec<nexus_creator_memory::soul_narrative::TemporalBucket> {
+    use nexus_creator_memory::soul_narrative::TemporalBucket;
+
+    if fragments.is_empty() {
+        return Vec::new();
+    }
+
+    let max_buckets = 8;
+    let n = fragments.len();
+    let bucket_size = n.div_ceil(max_buckets); // ceiling division
+    let bucket_size = bucket_size.max(1);
+
+    let mut buckets: Vec<TemporalBucket> = Vec::new();
+
+    for (bi, chunk) in fragments.chunks(bucket_size).enumerate() {
+        if buckets.len() >= max_buckets {
+            break;
+        }
+
+        // Collect top 5 keywords in this bucket.
+        let mut kw_counts: std::collections::HashMap<String, u64> =
+            std::collections::HashMap::new();
+        for frag in chunk {
+            if let Ok(keywords) = serde_json::from_str::<Vec<String>>(&frag.keywords) {
+                for kw in keywords {
+                    *kw_counts.entry(kw).or_default() += 1;
+                }
+            }
+        }
+        let mut top: Vec<(String, u64)> = kw_counts.into_iter().collect();
+        top.sort_by_key(|(_k, count)| std::cmp::Reverse(*count));
+        top.truncate(5);
+        let top_keywords: Vec<String> = top.into_iter().map(|(k, _)| k).collect();
+
+        // Label: use the first fragment's created_at date portion.
+        let label = chunk.first().map_or_else(
+            || format!("bucket_{bi}"),
+            |f| {
+                // Extract date portion (first 10 chars = YYYY-MM-DD).
+                if f.created_at.len() >= 10 {
+                    f.created_at[..10].to_string()
+                } else {
+                    f.created_at.clone()
+                }
+            },
+        );
+
+        buckets.push(TemporalBucket {
+            label,
+            top_keywords,
+            fragment_count: u64::try_from(chunk.len()).unwrap_or(0),
+        });
+    }
+
+    buckets
+}
 
 /// Decode the `memory_fragments.keywords` JSON-array string into `Vec<String>`.
 ///

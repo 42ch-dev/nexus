@@ -170,6 +170,7 @@ impl CreatorCapabilityStore {
             summary: content.to_string(),
             created_at: now,
             ttl: None,
+            world_id: None, // V1.81: standalone writes have no world context
         };
 
         nexus_local_db::create_fragment(self.pool.as_ref(), &fragment)
@@ -804,6 +805,7 @@ mod tests {
                 summary: "Test fragment".to_string(),
                 created_at: "2026-05-30T00:00:00Z".to_string(),
                 ttl: None,
+                world_id: None,
             },
         )
         .await
@@ -833,6 +835,7 @@ mod tests {
                 summary: "Alpha fragment".to_string(),
                 created_at: "2026-05-30T00:00:00Z".to_string(),
                 ttl: None,
+                world_id: None,
             },
         )
         .await
@@ -848,6 +851,7 @@ mod tests {
                 summary: "Beta fragment".to_string(),
                 created_at: "2026-05-30T00:00:00Z".to_string(),
                 ttl: None,
+                world_id: None,
             },
         )
         .await
