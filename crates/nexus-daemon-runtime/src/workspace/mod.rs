@@ -20,8 +20,10 @@ use nexus_orchestration::{
     engine::OrchestrationEngine, schedule::supervisor::ScheduleSupervisor, CapabilityRegistry,
     WorkerManager,
 };
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::sync::Mutex as AsyncMutex;
 use tokio::sync::Notify;
 
 /// Shared workspace state
@@ -64,6 +66,14 @@ pub struct WorkspaceState {
     /// Workspace session manager (DF-31 skeleton).
     /// In-memory session store for workspace.open / workspace.commit.
     session_manager: Arc<WorkspaceSessionManager>,
+    /// V1.80 REL-01: per-creator in-flight serialization guard for
+    /// `POST /v1/local/memory/review`. Two overlapping review calls for the same
+    /// creator fetch the same pending rows and would double-promote / mint
+    /// duplicate fragments (the side effects are not idempotent at the DB).
+    /// The outer `std::sync::Mutex` guards only the map lookup; each creator's
+    /// lock is an independent `tokio::sync::Mutex` cloned out and awaited in the
+    /// handler, so the map mutex is never held across `.await`.
+    memory_review_locks: Arc<std::sync::Mutex<HashMap<String, Arc<AsyncMutex<()>>>>>,
 }
 
 impl WorkspaceState {
@@ -103,6 +113,7 @@ impl WorkspaceState {
             shutdown_notify: Arc::new(Notify::new()),
             daemon_tool_dispatch: Arc::new(None),
             session_manager,
+            memory_review_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
     }
 
@@ -159,6 +170,7 @@ impl WorkspaceState {
             shutdown_notify: Arc::new(Notify::new()),
             daemon_tool_dispatch: Arc::new(None),
             session_manager,
+            memory_review_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
         })
     }
 
@@ -215,6 +227,23 @@ impl WorkspaceState {
     #[must_use]
     pub fn agent_host(&self) -> Option<Arc<dyn nexus_agent_host::HostFacade>> {
         self.agent_host.as_ref().clone()
+    }
+
+    /// V1.80 REL-01: get (or lazily create) the per-creator review lock.
+    ///
+    /// The outer `std::sync::Mutex` guards only this map lookup — it is released
+    /// as soon as the function returns. The caller then `.lock().await`s the
+    /// returned `Arc<AsyncMutex<()>>` to serialize overlapping review calls for
+    /// the same creator without blocking unrelated creators.
+    #[must_use]
+    pub fn memory_review_lock(&self, creator_id: &str) -> Arc<AsyncMutex<()>> {
+        let mut map = self
+            .memory_review_locks
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner); // poison-recovery (crate policy)
+        map.entry(creator_id.to_string())
+            .or_insert_with(|| Arc::new(AsyncMutex::new(())))
+            .clone()
     }
 
     /// Get the narrative gateway (shared per workspace pool).
