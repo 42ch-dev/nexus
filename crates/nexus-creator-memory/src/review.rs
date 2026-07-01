@@ -7,7 +7,7 @@
 //! Also provides promotion functions for converting pending reviews
 //! into long-term memory files with idempotency guarantees.
 //!
-//! See creator-memory-soul-lifecycle-v1.md §7.2, §7.3.
+//! See creator-memory-soul-lifecycle.md §7.2, §7.3.
 
 use std::collections::HashSet;
 use std::future::Future;

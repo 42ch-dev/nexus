@@ -1,7 +1,7 @@
 //! Memory fragment CRUD operations for review pipeline.
 //!
 //! Manages lightweight keyword-indexed fragments from review decisions.
-//! See creator-memory-soul-lifecycle-v1.md §7.2.
+//! See creator-memory-soul-lifecycle.md §7.2.
 
 use sqlx::{Row, SqlitePool};
 

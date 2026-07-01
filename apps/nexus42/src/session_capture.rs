@@ -6,7 +6,7 @@
 //! Wired into the ACP worker's `handle_agent_stop` — fires a background
 //! task that submits to the daemon Local API with local-file fallback.
 //!
-//! See creator-memory-soul-lifecycle-v1.md §6.2.
+//! See creator-memory-soul-lifecycle.md §6.2.
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
