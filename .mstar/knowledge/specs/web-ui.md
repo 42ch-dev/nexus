@@ -741,3 +741,62 @@ Explicitly deferred with rationale (compass §1.2 + D-UX LOCKED; satisfies the D
 ### 24.4 Wire contracts (V1.78)
 
 **`wire_contracts_changed: TRUE`** (additive — LOCKED by Phase 2b architect). V1.78 publishes the memory OSS schemas that the runtime already serves but never contracted. The new files live under `schemas/local-api/memory/`; no existing schema is modified, and handler behavior is unchanged (the schemas mirror the existing hand-written runtime DTOs field-for-field). Codegen auto-discovers the net-new files via the existing glob. `@42ch/nexus-contracts` additive bump **0.12.0 → 0.13.0**; new memory types are barrel-exported and no existing type changes. The web app's `NexusClient` interface gains five methods consuming the generated memory DTOs (`ListPendingReviewsQuery`/`Response`, `CountPendingReviewsResponse`, `DeletePendingReviewResponse`, `ReviewRequest`/`Response`, `ListMemoryFragmentsQuery`/`Response`, `PendingReviewInfo`, `MemoryFragmentInfo`).
+
+---
+
+## 25. Next stage — Author Reflection: Reading Surface + SOUL Visualization (V1.79)
+
+V1.78 closed the third and final author-in-command loop (creator memory). V1.79 is the first **post-loop-closure iteration** and takes the natural next step: rather than opening a new loop, it deepens the author's ability to **reflect on** what the closed loops produce. Two independent UI tracks ship under the shared theme **"Author Reflection"** — a manuscript reading surface with in-context maturation indicators (Track A) and a SOUL personality visualization over internalized memory fragments (Track B).
+
+> **Scope and roadmap SSOT**: [v1.79-author-reflection-reading-and-soul-visualization-compass-v1.md](../../iterations/v1.79-author-reflection-reading-and-soul-visualization-compass-v1.md) §1 grill decisions, §2 scope, and §6 acceptance criteria. This section records the product contract; the compass is authoritative for scope, batching, and residual tracking.
+
+### 25.1 What ships in V1.79 (dual-track)
+
+**Track A — Manuscript reading surface (P0)**
+
+- **Designed reading experience**: the post-V1.75-pivot residual `chapter-page.tsx` (bare read-only body render + frontmatter strip + Copy Path + "Edit outline → Canvas" redirect) is promoted to a designed reading surface with legible reading typography (light + dark), chapter/volume navigation (prev/next, keyboard ←/→), and session-only reading progress. No new write routes — body-ownership invariant preserved (canvas remains the sole authoring surface).
+- **In-context lightweight maturation indicators**: three indicators visible on the reading surface without navigation — chapter completion-state badge (from `work_chapters.status`), World KB density count (from `kb_key_blocks` count), and open-findings count (from `findings` non-terminal lifecycle rows). Read-only consumption of existing data.
+- **Profile scope**: novel-first; other profiles (essay/game-bible/script) render read-only-prose-compatible via the same body render. Profile-specific reading chrome deferred. `wire_contracts_changed: FALSE` for Track A.
+
+**Track B — SOUL personality visualization (P1)**
+
+- **Keyword clusters**: frequency/cluster visualization of the creator's internalized memory fragment `keywords`, scoped per creator (`creator_id` from the `n` table). Surfaces the top accumulated themes — what the author and their AI assistants have been focusing on.
+- **Temporal drift timeline**: `created_at`-axis showing fragment accumulation + keyword composition shift over time, with fragment count folded into the timeline. Answers "how has my creative focus shifted?" — the core reflection insight.
+- **Sparse-data graceful degradation**: three states (empty → low-data → rich) with empathetic, encouraging copy at each state. New creators see a forward-looking empty state, not a broken chart.
+- **Memory page integration**: both viz surfaces integrate into the V1.78 Control-Room Memory page as a new tab/section — no new top-level route.
+- **Wire additive**: `memory-fragment-info` gains optional `keywords` (array) + `created_at` (string, RFC 3339). `@42ch/nexus-contracts` 0.13.0 → 0.14.0 (additive only; handler behavior unchanged — DAO already stores these fields).
+
+**B companion**: light — close `R-V178P0-QC3-001` (web typecheck build-order CI/prebuild wrapper). `R-V178P0-QC3-003` (synchronous-review reliability) recorded in reliability roadmap, future iteration.
+
+### 25.2 The reflection loops this enables
+
+**Track A — review-augmented reading**:
+
+1. **Read as a reader** — the author opens any chapter in a comfortable, distraction-free reading view with book-like typography, rather than raw markdown.
+2. **See maturity at a glance** — without leaving the reading surface, the author sees the chapter's completion state, World KB richness, and open findings count — making the reading surface actionable for review.
+3. **Navigate the manuscript** — chapter/volume navigation with session progress lets the author flow through their manuscript naturally.
+
+**Track B — seeing who you are becoming**:
+
+1. **Discover creative themes** — the author sees keyword clusters surfacing what their creative work has internalized into SOUL memory.
+2. **Track focus over time** — the temporal drift timeline shows how the author's themes have shifted — "am I drifting toward or away from the writer I want to be?"
+3. **Start from nothing with confidence** — new creators see an encouraging empty state that explains the feature's value proposition and what actions will populate it.
+
+### 25.3 Non-goals for V1.79
+
+- **Standalone maturation dashboard** (multi-chart cross-Work/World aggregate) — Track A is in-context indicators only; standalone is a V1.80 candidate.
+- **Independent growth-curve view** as a separate SOUL visualization — folded into temporal drift; standalone deferred.
+- **Persisted reading progress** — session-only; persistence requires a write route (breaking the read-only invariant) and is deferred.
+- **Per-World SOUL filtering** — per-creator scope only; per-World is a deferred enhancement.
+- **Reading annotations/highlights** — future iteration.
+- **DF-49 (Standalone MCP server)** — **cancelled** (not deferred), conflicts with ACP-client product direction and creates circular-invocation risk.
+- **Any new write route on the reading surface** — read-only consumption only.
+- **New canvas surfaces** — the canvas program is complete (V1.67–V1.76). V1.79 deepens the Control-Room reading + memory surfaces.
+
+### 25.4 Wire contracts (V1.79)
+
+**`wire_contracts_changed: TRUE`** (additive — Track B only; Track A is read-only consumption of existing data). `memory-fragment-info` gains optional `keywords` (array of string) + `created_at` (string, RFC 3339) in `schemas/local-api/memory/memory-fragment-info.schema.json`. `@42ch/nexus-contracts` **0.13.0 → 0.14.0** (additive — no existing type changes; handler behavior unchanged). Track A changes no schemas.
+
+---
+
+*Local-first Web UI product contract. V1.64 Shipped (Control Room + Setup) → V1.65 §13 Content-Authoring → V1.66 §14 Desktop Shell → V1.67 §15 Surface Convergence & De-risk → V1.69 Design System Maturation & Canvas Draft → V1.70 §16 Canvas Strategy Implement (α) + CI/desktop-build optimization → V1.71 §17 Canvas Strategy Write-Boundary (β) → V1.72 §18 Canvas Outline+Timeline (β) → V1.73 §19 Canvas World KB (β) → V1.74 §20 Canvas World KB Relationships (β) → V1.77 §23 Findings-Remediation UI → V1.78 §24 Creator Memory Review-Loop UI → V1.79 §25 Author Reflection: Reading Surface + SOUL Visualization. Design tokens: `apps/web/DESIGN.md` (V1.65 Standard+ + V1.66 desktop supplement + V1.69 Production migration + V1.70 canvas-token fill + V1.71 canvas-write tokens + V1.72 outline/timeline tokens + V1.73 canvas-worldkb tokens + V1.74 relationship tokens + V1.77 findings triage tokens + V1.78 creator-memory review-loop tokens + V1.79 reading-surface tokens + SOUL-viz tokens).*

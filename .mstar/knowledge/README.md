@@ -21,6 +21,7 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | [deferred-features-cross-version-tracker.md](deferred-features-cross-version-tracker.md) | Open/backlog deferred features (active) |
 | [architecture-patterns/canvas-surface-implementation-pattern.md](architecture-patterns/canvas-surface-implementation-pattern.md) | Canvas surface implementation pattern (V1.67–V1.76 distilled; compound V1.77) |
 | [architecture-patterns/contracts-gap-on-shipped-backend.md](architecture-patterns/contracts-gap-on-shipped-backend.md) | Closing the contracts/codegen gap on a shipped handler with hand-written DTOs (V1.78 memory surface distilled; compound V1.78) |
+| [architecture-patterns/pagination-cursor-without-total-count-labels.md](architecture-patterns/pagination-cursor-without-total-count-labels.md) | Cursor pagination without `total` — render honest "N+" lower-bound count labels via `has_more` (V1.79 reading-surface distilled; compound V1.79) |
 
 **All OSS feature specs:** [`specs/README.md`](specs/README.md) (full index by domain).
 

@@ -1,9 +1,9 @@
 # Creator Workflow — Normative Specification
 
-**Status**: Shipped (V1.34 — 2026-06-05; V1.35 P4 partial; V1.39 — DF-53 full auto-chain + daemon continuity; **V1.40 Shipped** — DF-63 W5 `kb-extract` persistence via `novel-review-master sync_world_kb`: World-bound Works enqueue extract with `work.world_id`, `source_kind=work_chapter`, `source_locator={{preset.input.body_path}}`, `work_id`; worldless Works (legacy V1.39-and-earlier) skip World promotion)  
+**Status**: Shipped (V1.34 — 2026-06-05; V1.35 P4 partial; V1.39 — DF-53 full auto-chain + daemon continuity; **V1.40 Shipped** — DF-63 W5 `kb-extract` persistence via `novel-review-master sync_world_kb`: World-bound Works enqueue extract with `work.world_id`, `source_kind=work_chapter`, `source_locator={{preset.input.body_path}}`, `work_id`; worldless Works (legacy V1.39-and-earlier) skip World promotion; V1.79 additive SOUL visualization contract over memory fragments)  
 **Document class**: Feature line  
 **Created**: 2026-06-04  
-**Last updated**: 2026-06-11 — V1.40 P3 World KB extract binding shipped  
+**Last updated**: 2026-07-01 — V1.79 SOUL visualization contract note  
 **Scope**: Staged creator journey on **Work** (`intake → research → produce → review → persist`), built on shipped `creator run` + `run_intents`  
 **Coordinates with**:
 
@@ -161,6 +161,15 @@ Insertions during an active auto-chain **must not** fork or cancel the driver sc
 | Research stage side effects | KB/reference artifacts written during chain; consumed by downstream produce/review via existing assembly (P0.5) |
 
 Invariant: at most one active FL-E stage driver schedule per Work remains enforced.
+
+### 5.6 Author reflection: SOUL visualization (V1.79 extension)
+
+V1.79 adds a read-only reflection surface over the creator's internalized SOUL fragments. The surface consumes rows already stored in the local `memory_fragments` (`n`) table and renders:
+
+- **Keyword clusters** from each fragment's `keywords` JSON array.
+- **Temporal drift** from each fragment's `created_at` timestamp, with growth count folded into the timeline.
+
+Wire contract: `schemas/local-api/memory/memory-fragment-info.schema.json` extends the list-fragments item DTO with optional `keywords: string[]` and optional `created_at: string` (RFC 3339 by description). The extension is additive: `fragment_id` and `summary` remain the only required fields, and internal ownership/session fields (`creator_id`, `session_id`, `ttl`) stay out of the response. The visualization is a consumer of the creator-scoped memory list endpoint; it does not create, patch, or delete memory fragments.
 
 ---
 
