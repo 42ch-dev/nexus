@@ -9,7 +9,15 @@
   "properties": {
     "promoted": { "type": "integer" },
     "fragmented": { "type": "integer" },
-    "dropped": { "type": "integer" }
+    "dropped": { "type": "integer" },
+    "has_more": {
+      "type": "boolean",
+      "description": "V1.80 REL-01 additive: when true the pending queue was not fully drained by this call (the bounded fetch found more rows, or the per-call review budget expired mid-batch). The client should re-issue POST /review to drain the remainder. Omitted by pre-V1.80 daemons; consumers treat absent as false."
+    },
+    "processed": {
+      "type": "integer",
+      "description": "V1.80 REL-01 additive: number of pending rows inspected (classified + action attempted) during this call. Used by the client's zero-progress drain guard. Omitted by pre-V1.80 daemons; consumers treat absent as 0."
+    }
   },
   "additionalProperties": false
 }
