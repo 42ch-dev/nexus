@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-07-01-v1.81-creator-soul-narrative-and-world-foundation"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-07-02"
 ---
 
@@ -129,3 +129,66 @@ The single Warning concerns an **explicit DoD criterion** from §2.A / §4 Accep
 - V-182 backlog: per-world LLM narratives (Compass §8, BL-12).
 - V-182+ server-side work: worlds-list / world-detail endpoint so `world-selector.tsx` `simplify:` path can render titles + re-enable the Work-backed-but-no-fragment subset-empty state.
 - Companion test for the daemon-level handler-side stale-detection flip (cache `current` → `stale` after a new fragment): not in plan §2.A's test list, but a natural follow-on once the synth path is exercised end-to-end.
+
+---
+
+## Revalidation (targeted re-review — fix-wave `faae53de..d55ec4f3`, commit `e8d135cb`)
+
+**Scope of this re-review**: my single prior finding **W-001 / R-V181P0-QC1-W001** (missing daemon-level regression test for `world_id` threading through the review pipeline). I did **not** re-litigate the five Suggestions (S-001…S-005) — those were non-blocking. This re-review also covers whether the fix introduced any new Warning/Critical.
+
+### What I re-checked
+1. `git diff faae53de..d55ec4f3 --stat` → 9 files, +342 / −53. Touch-set:
+   - `crates/nexus-daemon-runtime/src/api/handlers/memory.rs` (+71)
+   - `crates/nexus-daemon-runtime/tests/memory_review_fragments_api.rs` (+145)
+   - `crates/nexus-local-db/src/soul_narrative.rs` (+55 / bulk refactor of `soul_narrative_fragment_stats` to SQL aggregates + bounded scan cap 200)
+   - `crates/nexus-orchestration/src/capability/builtins/creator.rs` (+36)
+   - 3 `status.json` snapshots + 1 compass snapshot (PM bookkeeping, out of QC scope).
+2. Read the new test bodies in `crates/nexus-daemon-runtime/tests/memory_review_fragments_api.rs` (lines 855–1000): both `world_id_propagation_from_review_to_fragments` and `world_id_none_core_only_fragment` are full daemon-handler integration tests via `ctx.server.post(...).json(&body)` / `ctx.server.get(...)` — **not** local-db unit tests. They exercise the actual axum router + the line-886 handler `world_id: input.world_id.clone()` site that my W-001 named.
+3. Read the new test `write_memory_with_store_uses_world_id_none` in `crates/nexus-orchestration/src/capability/builtins/creator.rs::tests` (lines 744–780): asserts the standalone `CreatorCapabilityStore::write_memory` path persists `world_id: None` via `nexus_local_db::list_fragments`.
+4. Re-read `CreatorCapabilityStore::write_memory` (lines 144–181): the signature has no `world_id` parameter; the body explicitly sets `world_id: None, // V1.81: standalone writes have no world context`. This is an intentional design choice (world context only flows through the daemon `/v1/local/memory/review` pipeline; standalone capability calls have no world binding).
+5. Ran the new tests:
+   - `cargo test -p nexus-daemon-runtime --test memory_review_fragments_api -- world_id_propagation_from_review_to_fragments` → **1 passed; 0 failed**.
+   - `cargo test -p nexus-daemon-runtime --test memory_review_fragments_api -- world_id_none_core_only_fragment` → **1 passed; 0 failed**.
+   - `cargo test -p nexus-orchestration --lib write_memory_with_store_uses_world_id_none` → **1 passed; 0 failed**.
+6. Ran the full affected test suites:
+   - `cargo test -p nexus-daemon-runtime --test memory_review_fragments_api` → **29 passed; 0 failed; 0 ignored** (was 27 before the fix-wave — exactly +2 new tests, all green).
+   - `cargo test -p nexus-orchestration --lib` → **965 passed; 0 failed; 3 ignored** (was 964 before — exactly +1 new test, all green).
+7. Checked formatting on touched crates: `cargo +nightly-2026-06-26 fmt --check -p nexus-daemon-runtime -p nexus-orchestration -p nexus-local-db` → clean.
+
+### Per-finding disposition
+
+**[W-001 / R-V181P0-QC1-W001] — RESOLVED.**
+The fix-wave delivers exactly the test coverage my W-001 named, end-to-end through the daemon handler:
+
+- **`world_id_propagation_from_review_to_fragments`** exercises the Some(...) path:
+  - POST `/v1/local/memory/pending-review` with `world_id: "wld_x"` → POST `/v1/local/memory/review` → GET `/v1/local/memory/fragments?creator_id=ctr_testuser&world_id=wld_x` asserts `fragments[0]["world_id"] == "wld_x"`.
+  - Also asserts cross-world isolation: `world_id=wld_y` excludes the `wld_x` fragment (no false positives in the DAO world filter).
+  - Also asserts unfiltered query still returns the fragment (no over-filtering).
+  - This pins the line-886 handler site: any future regression dropping `world_id: input.world_id.clone()` from `create_fragment` would now fail this test.
+
+- **`world_id_none_core_only_fragment`** exercises the None / Creator-core-only path:
+  - Seeds pending-review without `world_id` → POST review → unfiltered GET asserts fragment with `world_id: null` is present; filtered GET by `world_id=wld_z` asserts it is absent.
+  - This pins the `NULL` ↔ specific-`world_id` filter distinction in the DAO.
+
+- **`write_memory_with_store_uses_world_id_none`** pins the orchestration-side standalone contract: `CreatorWriteMemory::with_store(...).run(...)` always persists `world_id: None`, which matches the explicit design comment at `crates/nexus-orchestration/src/capability/builtins/creator.rs:173`.
+
+**Deviation from my original fix recommendation**: I had asked for an orchestration test that constructs `world_id: Some(...)` via `write_memory`. The fix-wave instead pins `world_id: None` for that path. After re-reading the API signature, this is the **correct** contract — `CreatorCapabilityStore::write_memory` has no `world_id` parameter, and the body comment makes the world-less design explicit. The world-aware path goes through the daemon `POST /v1/local/memory/review`; the daemon-handler integration tests above cover that. The orchestration `world_id: None` test now pins the design intent so a future contributor cannot silently start populating `world_id` from `write_memory` and skew the test surface. **This deviation is acceptable** and arguably stronger than my original suggestion (it documents the boundary, not just the Some case).
+
+### New issues introduced by the fix-wave?
+None at Warning/Critical level. Specifically:
+
+- **Daemon handler (`memory.rs`)**: the diff adds `truncate_summary` helper + 6 unit tests (R-V181P0-QC3-W002 territory — qc3's UTF-8 byte-slice panic finding). ASCII / CJK / emoji / edge-case coverage is solid; pure refactor of the existing truncation site to use `chars().take(...)` instead of byte-slice `&s[..279]`. No new handler surface area introduced.
+- **`soul_narrative.rs`**: `soul_narrative_fragment_stats` refactored from full row materialization to `COUNT(*)` + `MAX(created_at)` SQL aggregates + bounded scan (`LIMIT 200`) for `distinct_keyword_count`. The inline comment correctly explains the bound: the insufficient-data gate threshold is 20 distinct keywords, cap is 200 (10×), so the gate result is correct regardless. This is a performance/reliability improvement, not a behavior change — out of my seat-1 (architecture) purview but flagged for completeness.
+- **`creator.rs`**: +1 test using `nexus_local_db::list_fragments` — idiomatic usage of the public API; no new module surface.
+- **Status JSON / compass**: PM bookkeeping only.
+
+I did not re-run `cargo clippy --all -- -D warnings` because the pre-existing clippy failures in unrelated files (e.g. `crates/nexus-daemon-runtime/src/api/handlers/host_tool_executor_tests.rs:1010+`, `crates/nexus-daemon-runtime/src/workspace/session.rs:772`, `crates/nexus-orchestration` `doc_markdown` warnings around line 2983 in unrelated `game_bible_category` docs) are out of scope for this re-review — they pre-date `faae53de`. Per `mstar-review-qc` "Pre-existing claim verification" rule, the touched-line clippy status is what matters here; the new code compiles and the tests are green.
+
+### Summary
+| Severity | Count (this re-review) |
+|----------|------------------------|
+| 🔴 Critical | 0 |
+| 🟡 Warning (unresolved) | 0 — **W-001 closed** |
+| 🟢 Suggestion (unresolved) | 5 (unchanged from wave 1; non-blocking, per `mstar-review-qc` verdict rules, not re-litigated in this targeted re-review) |
+
+**Verdict**: **Approve** (W-001 closed; no new Critical or Warning introduced by the fix-wave).
