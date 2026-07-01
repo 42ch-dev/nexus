@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-07-01-v1.79-manuscript-reading-surface"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-07-01"
 ---
 
@@ -93,3 +93,33 @@ generated_at: "2026-07-01"
 | 🟢 Suggestion | 1 |
 
 **Verdict**: Request Changes
+
+## Revalidation
+
+### Revalidation Scope
+- Targeted re-review of QC3 findings: W-QC3-001 and W-QC3-002.
+- Review range / Diff basis: merge-base: 0015694f (origin/main) .. tip: 0d69b3c0 (HEAD)
+- Working branch (verified): iteration/v1.79
+- Review cwd (verified): /Users/bibi/workspace/organizations/42ch/nexus
+- Fix-wave commit reviewed: 3d33688e (`fix(v1.79): P0 QC fix-wave — honest open-findings count (N+ when truncated) + chapter-nav cursor-walk across server pages`)
+- Files re-reviewed: `apps/web/src/components/reading/reading-hooks.ts`, `apps/web/src/components/reading/maturation-indicators.tsx`, `apps/web/src/components/reading/chapter-nav.tsx`, `apps/web/src/pages/chapter-page.tsx`, `apps/web/src/pages/chapter-page.test.tsx`; supporting checks against generated `PaginationInfo`, `useChapters` pagination, and daemon chapter/findings handlers.
+
+### Evidence
+- `git show 3d33688e` reviewed the P0 fix-wave diff and confirmed the intended changed files.
+- `packages/nexus-contracts/src/generated/local-api/kb/PaginationInfo.ts` confirms the envelope is `{ limit, next_cursor?, has_more }` with no `total` field.
+- `crates/nexus-daemon-runtime/src/api/handlers/chapters.rs:349-384` confirms chapter list requests are clamped to `[1, 100]` and expose `next_cursor` / `has_more`.
+- `pnpm --filter @42ch/nexus-contracts run build` passed.
+- `pnpm --filter web run test -- src/pages/chapter-page.test.tsx` passed (`44 passed` files / `323 passed` tests; targeted `src/pages/chapter-page.test.tsx` reports `16 tests` passed, including the two new pagination regressions). Existing stderr warnings were unrelated React Router future-flag / act warnings and did not fail the run.
+
+### Finding Disposition
+- [W-QC3-002] **Resolved.** `useOpenFindingsCount` now derives `truncated` from the last loaded page's `pagination.has_more` and returns it with the lower-bound `rows.length` (`apps/web/src/components/reading/reading-hooks.ts:129-143`). `MaturationIndicators` forwards `findings.truncated` to `CountBadge`, and `CountBadge` renders `${count}+` when truncated (`apps/web/src/components/reading/maturation-indicators.tsx:47-54,81-94`). This satisfies the requested deviation: since `PaginationInfo` has no `total`, the explicit `N+` label is an honest lower-bound display and removes the silent exact-looking undercount. The regression test `renders an honest "N+" open-findings label when the page is truncated` verifies `has_more: true` renders `2+ open findings`.
+- [W-QC3-001] **Resolved.** `useChapterNeighbors` now cursor-walks chapter pages via `fetchNextPage()` while `chapters.hasNextPage` is true and no next-page fetch is already in flight (`apps/web/src/components/reading/reading-hooks.ts:70-109`). Because `useChapters` obtains `hasNextPage` from `pagination.has_more ? next_cursor : undefined` (`apps/web/src/api/queries.ts:352-368`), normal first-page responses with `has_more: false` stop immediately and do not over-fetch. While page 1 or a cursor walk is still resolving, `loading` remains true (`isLoading || hasNextPage || isFetchingNextPage`) and `ChapterNav` renders neutral `Loading chapters…` placeholders rather than misleading `First chapter` / `Last chapter` labels (`apps/web/src/components/reading/chapter-nav.tsx:48-120`; `apps/web/src/pages/chapter-page.tsx:90-97`). The regression test `resolves prev/next across the server page boundary by cursor-walking` verifies a 150-chapter fixture paginated 100/page resolves chapter 101 with prev=100 and next=102, covering the daemon's 100-chapter clamp.
+
+### Updated Summary
+| Severity | Count |
+|----------|-------|
+| 🔴 Critical | 0 |
+| 🟡 Warning | 0 |
+| 🟢 Suggestion | 1 |
+
+**Revalidation Verdict**: Approve
