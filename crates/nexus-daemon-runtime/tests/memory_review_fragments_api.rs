@@ -853,3 +853,148 @@ async fn review_perpetually_failing_row_keeps_has_more_true_across_calls() {
     // "Review complete". (The client-side cap behavior is covered by the
     // existing `useReviewMemory` `stops at the drain cap` web test.)
 }
+
+// ─── R-V181P0-QC1-W001: world_id propagation through review → fragments ─────
+
+/// Seed a pending review entry WITH a world_id via the daemon API.
+async fn seed_pending_review_with_world(ctx: &TestCtx, pending_id: &str, world_id: &str) {
+    let body = json!({
+        "pending_id": pending_id,
+        "session_id": "sess_test",
+        "creator_id": "ctr_testuser",
+        "world_id": world_id,
+        "task_kind": "research",
+        "raw_digest": "Research summary with enough content to pass the length threshold for fragment creation and keyword extraction."
+    });
+    let resp = ctx
+        .server
+        .post("/v1/local/memory/pending-review")
+        .json(&body)
+        .await;
+    resp.assert_status(axum::http::StatusCode::OK);
+}
+
+/// R-V181P0-QC1-W001: when a pending review is created with world_id="wld_x",
+/// the FragmentOnly path propagates world_id to the created fragment, and the
+/// fragment is filterable by that world_id via the fragments endpoint.
+#[tokio::test]
+async fn world_id_propagation_from_review_to_fragments() {
+    let ctx = test_ctx().await;
+
+    // Seed a pending review with world_id = "wld_x"
+    seed_pending_review_with_world(&ctx, "pending_world_x", "wld_x").await;
+
+    // Run review → FragmentOnly path should propagate world_id
+    let review_body = json!({ "creator_id": "ctr_testuser" });
+    let resp = ctx
+        .server
+        .post("/v1/local/memory/review")
+        .json(&review_body)
+        .await;
+    resp.assert_status(axum::http::StatusCode::OK);
+    let result: Value = resp.json();
+    assert!(
+        result["fragmented"].as_u64().unwrap() > 0,
+        "research should fragment"
+    );
+
+    // GET fragments filtered by world_id=wld_x → fragment carries world_id
+    let resp = ctx
+        .server
+        .get("/v1/local/memory/fragments?creator_id=ctr_testuser&world_id=wld_x")
+        .await;
+    resp.assert_status(axum::http::StatusCode::OK);
+    let frag_body: Value = resp.json();
+    let fragments = frag_body["fragments"].as_array().unwrap();
+    assert!(
+        !fragments.is_empty(),
+        "fragment should exist for world_id=wld_x"
+    );
+    assert_eq!(
+        fragments[0]["world_id"].as_str().unwrap(),
+        "wld_x",
+        "fragment must carry the propagated world_id"
+    );
+
+    // Unfiltered query also returns the fragment
+    let resp = ctx
+        .server
+        .get("/v1/local/memory/fragments?creator_id=ctr_testuser")
+        .await;
+    resp.assert_status(axum::http::StatusCode::OK);
+    let all_body: Value = resp.json();
+    let all_fragments = all_body["fragments"].as_array().unwrap();
+    assert!(
+        all_fragments
+            .iter()
+            .any(|f| f["world_id"].as_str() == Some("wld_x")),
+        "unfiltered query must include the wld_x fragment"
+    );
+
+    // Filter by a different world_id → fragment NOT returned
+    let resp = ctx
+        .server
+        .get("/v1/local/memory/fragments?creator_id=ctr_testuser&world_id=wld_y")
+        .await;
+    resp.assert_status(axum::http::StatusCode::OK);
+    let other_body: Value = resp.json();
+    let other_fragments = other_body["fragments"].as_array().unwrap();
+    assert!(
+        !other_fragments
+            .iter()
+            .any(|f| f["world_id"].as_str() == Some("wld_x")),
+        "different world_id filter must exclude the wld_x fragment"
+    );
+}
+
+/// R-V181P0-QC1-W001: mirror — a pending review with world_id=None produces a
+/// fragment with world_id=None, visible in unfiltered queries but not when
+/// filtered by a specific world_id.
+#[tokio::test]
+async fn world_id_none_core_only_fragment() {
+    let ctx = test_ctx().await;
+
+    // Seed a pending review WITHOUT world_id using "research" task_kind
+    // (which classifies as FragmentOnly — "brainstorm" classifies as Promote).
+    seed_n_pending_reviews_raw(&ctx.pool, "ctr_testuser", 1).await;
+
+    // Run review
+    let review_body = json!({ "creator_id": "ctr_testuser" });
+    let resp = ctx
+        .server
+        .post("/v1/local/memory/review")
+        .json(&review_body)
+        .await;
+    resp.assert_status(axum::http::StatusCode::OK);
+    let result: Value = resp.json();
+    assert!(
+        result["fragmented"].as_u64().unwrap() > 0,
+        "research should fragment"
+    );
+
+    // Unfiltered query → fragment appears
+    let resp = ctx
+        .server
+        .get("/v1/local/memory/fragments?creator_id=ctr_testuser")
+        .await;
+    resp.assert_status(axum::http::StatusCode::OK);
+    let all_body: Value = resp.json();
+    let all_fragments = all_body["fragments"].as_array().unwrap();
+    assert!(
+        all_fragments.iter().any(|f| f["world_id"].is_null()),
+        "unfiltered query must include the None-world_id fragment"
+    );
+
+    // Filter by a specific world_id → fragment NOT returned (world_id=None != "wld_z")
+    let resp = ctx
+        .server
+        .get("/v1/local/memory/fragments?creator_id=ctr_testuser&world_id=wld_z")
+        .await;
+    resp.assert_status(axum::http::StatusCode::OK);
+    let filtered_body: Value = resp.json();
+    let filtered = filtered_body["fragments"].as_array().unwrap();
+    assert!(
+        !filtered.iter().any(|f| f["world_id"].is_null()),
+        "world_id=wld_z filter must exclude None-world_id fragments"
+    );
+}

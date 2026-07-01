@@ -741,6 +741,42 @@ mod tests {
         assert_eq!(out["fragmentId"], "stub-fragment-id");
     }
 
+    /// R-V181P0-QC1-W001: `write_memory` standalone path always uses
+    /// `world_id: None`. The review pipeline is the world_id propagation
+    /// path; standalone writes (e.g. from an ACP session without an active
+    /// world context) have no world binding.
+    #[tokio::test]
+    async fn write_memory_with_store_uses_world_id_none() {
+        let (pool, _dir) = fresh_pool().await;
+        let store = Arc::new(CreatorCapabilityStore::new(pool.clone()));
+        let cap = CreatorWriteMemory::with_store(store);
+
+        let out = cap
+            .run(serde_json::json!({
+                "content": "standalone memory with no world context",
+                "keywords": ["standalone"],
+                "_creator_id": "ctr_noworld"
+            }))
+            .await
+            .unwrap();
+
+        let fragment_id = out["fragmentId"].as_str().unwrap();
+        assert!(
+            !fragment_id.contains("stub"),
+            "expected real fragment ID, got: {fragment_id}"
+        );
+
+        // Verify the persisted fragment has world_id = None
+        let list = nexus_local_db::list_fragments(&pool, "ctr_noworld")
+            .await
+            .unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(
+            list[0].world_id, None,
+            "standalone write_memory must use world_id: None"
+        );
+    }
+
     /// Standalone mode: no store injected — returns queued without persistence.
     #[tokio::test]
     async fn inject_prompt_standalone_returns_queued() {
