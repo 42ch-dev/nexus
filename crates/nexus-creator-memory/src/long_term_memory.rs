@@ -4,7 +4,7 @@
 //! frontmatter (spec §3.3). Each memory file lives at:
 //! `~/.nexus42/creators/<creator_id>/memory/long-term/<slug>.md`
 //!
-//! See `creator-memory-soul-lifecycle-v1.md` §3, §5.
+//! See `creator-memory-soul-lifecycle.md` §3, §5.
 
 use crate::errors::MemoryError;
 use crate::memory_item::MemoryKind;

@@ -1,7 +1,7 @@
 //! Pending review CRUD operations for memory pipeline.
 //!
 //! Manages session-end captured queue entries for review → memory promotion.
-//! See creator-memory-soul-lifecycle-v1.md §6.2.
+//! See creator-memory-soul-lifecycle.md §6.2.
 
 use sqlx::SqlitePool;
 

@@ -3,7 +3,7 @@
 //! Stage-1: Call platform `context/assemble` API.
 //! Stage-2: Merge platform response with local SOUL + memories + fragments.
 //!
-//! Spec: `creator-memory-soul-lifecycle-v1.md` §9
+//! Spec: `creator-memory-soul-lifecycle.md` §9
 
 use nexus_contracts::local::domain::RuntimeMode;
 use nexus_creator_memory::LongTermMemory;
