@@ -25,6 +25,7 @@ nexus-narrative = { path = "../nexus-narrative" }
 nexus-kb = { path = "../nexus-kb" }
 nexus-knowledge = { path = "../nexus-knowledge" }
 async-trait.workspace = true
+futures-util = { workspace = true }
 
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.28", features = ["fs"] }
