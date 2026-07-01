@@ -1,0 +1,56 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT creator_id as \"creator_id!\", narrative as \"narrative!\",\n                  generated_at as \"generated_at!\",\n                  fragment_count_at_generation as \"fragment_count_at_generation!\",\n                  max_fragment_created_at_at_generation,\n                  created_at as \"created_at!\", updated_at as \"updated_at!\"\n           FROM memory_soul_narratives WHERE creator_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "creator_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "narrative!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "generated_at!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "fragment_count_at_generation!",
+        "ordinal": 3,
+        "type_info": "Integer"
+      },
+      {
+        "name": "max_fragment_created_at_at_generation",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at!",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "updated_at!",
+        "ordinal": 6,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "b7839f89ae56445532ed4b957aef14442bfcad89e4adf79642bb76faf0f99b7d"
+}
