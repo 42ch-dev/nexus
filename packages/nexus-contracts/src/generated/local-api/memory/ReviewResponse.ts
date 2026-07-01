@@ -12,4 +12,6 @@ export interface ReviewResponse {
   promoted: number;
   fragmented: number;
   dropped: number;
+  has_more?: boolean;
+  processed?: number;
 }

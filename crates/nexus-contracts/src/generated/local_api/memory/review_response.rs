@@ -14,4 +14,8 @@ pub struct ReviewResponse {
     pub promoted: i64,
     pub fragmented: i64,
     pub dropped: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub has_more: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub processed: Option<i64>,
 }
