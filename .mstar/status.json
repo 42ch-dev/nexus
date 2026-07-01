@@ -6299,7 +6299,13 @@
         "target": "V1.81 QC fix-wave",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.81-creator-soul-narrative-and-world-foundation][R-V181P0-QC1-W001]",
         "note": "Add daemon integration test: POST pending review world_id=Some -> POST /review -> GET /fragments?world_id -> assert propagation; + orchestration write_memory Some assertion.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-07-02 (QC fix-wave)",
+        "closure_note": "Fixed in e8d135cb; re-validated by targeted re-review (qc1 Approve b6ddee1b / qc3 731f57e9).",
+        "resolution": {
+          "plan_id": "2026-07-01-v1.81-creator-soul-narrative-and-world-foundation",
+          "commit": "e8d135cb"
+        }
       },
       {
         "id": "R-V181P0-QC3-W001",
@@ -6312,7 +6318,13 @@
         "target": "V1.81 QC fix-wave",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.81-creator-soul-narrative-and-world-foundation][R-V181P0-QC3-W001]",
         "note": "Split cheap stale stats (COUNT(*), MAX(created_at)) into SQL aggregates; cap Rust keyword decode for insufficient-data gate; force_regenerate=false returns cached state without scanning all keyword JSON.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-07-02 (QC fix-wave)",
+        "closure_note": "Fixed in e8d135cb; re-validated by targeted re-review (qc1 Approve b6ddee1b / qc3 731f57e9).",
+        "resolution": {
+          "plan_id": "2026-07-01-v1.81-creator-soul-narrative-and-world-foundation",
+          "commit": "e8d135cb"
+        }
       },
       {
         "id": "R-V181P0-QC3-W002",
@@ -6325,7 +6337,13 @@
         "target": "V1.81 QC fix-wave",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.81-creator-soul-narrative-and-world-foundation][R-V181P0-QC3-W002]",
         "note": "Truncate by Unicode scalar chars (chars().take(279) + ellipsis); add multi-byte regression test.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-07-02 (QC fix-wave)",
+        "closure_note": "Fixed in e8d135cb; re-validated by targeted re-review (qc1 Approve b6ddee1b / qc3 731f57e9).",
+        "resolution": {
+          "plan_id": "2026-07-01-v1.81-creator-soul-narrative-and-world-foundation",
+          "commit": "e8d135cb"
+        }
       },
       {
         "id": "R-V181P0-QC1-S001",
@@ -6377,6 +6395,19 @@
         "target": "V1.81 P-last",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.81-creator-soul-narrative-and-world-foundation][R-V181P0-QC1-S003]",
         "note": "Add world-title-resolution deferral row to tracker (BL-12) or downgrade comment to 'deferred - see BL-12'.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V181P0-QC3-W003",
+        "title": "Bounded LIMIT 200 keyword scan under-counts distinct_keyword_count -> false insufficient_data for creators with >=20 distinct keywords",
+        "severity": "medium",
+        "source": "qc3 W-QC3-003 (targeted re-review, Performance Lens)",
+        "scope": "crates/nexus-local-db/src/soul_narrative.rs distinct_keyword_count (LIMIT 200) + insufficient-data gate",
+        "decision": "fix-in-wave",
+        "owner": "@fullstack-dev",
+        "target": "V1.81 QC fix-wave round 2",
+        "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.81-creator-soul-narrative-and-world-foundation][R-V181P0-QC3-W003]",
+        "note": "Sound distinct-keyword count: early-exit streaming (SELECT keywords ORDER BY created_at DESC, HashSet accumulate, stop at 20 distinct => gate passes; EOF => exact count). No under-count. Bounded by min(rows-to-20-distinct, total).",
         "lifecycle": "open"
       }
     ]
