@@ -163,6 +163,72 @@ function readingHandlers(opts?: { chapter?: number; status?: string; findings?: 
   ];
 }
 
+/**
+ * Cursor-paginated chapter list fixture for nav-truncation regression tests.
+ * The daemon clamps `limit` to `[1, 100]`, so a Work with >100 chapters is
+ * served in pages. The opaque cursor is simulated as a page index so the
+ * client's cursor-walk (`fetchNextPage`) resolves successive pages.
+ */
+function paginatedChaptersHandler(totalChapters: number, pageSize: number) {
+  return http.get('/v1/local/works/:workId/chapters', ({ request }) => {
+    const url = new URL(request.url);
+    const cursor = url.searchParams.get('cursor');
+    const page = cursor ? Number.parseInt(cursor, 10) || 0 : 0;
+    const start = page * pageSize;
+    const remaining = totalChapters - start;
+    if (remaining <= 0) {
+      return HttpResponse.json({ items: [], pagination: { limit: pageSize, has_more: false } });
+    }
+    const count = Math.min(pageSize, remaining);
+    const items = Array.from({ length: count }, (_, i) => {
+      const ch = start + i + 1;
+      return {
+        work_id: 'w-123',
+        chapter: ch,
+        volume: 1,
+        slug: `ch${ch}`,
+        planned_word_count: 4000,
+        status: 'draft',
+        created_at: '2026-06-25T00:00:00Z',
+        updated_at: '2026-06-25T00:00:00Z',
+      };
+    });
+    const hasMore = start + pageSize < totalChapters;
+    return HttpResponse.json({
+      items,
+      pagination: {
+        limit: pageSize,
+        has_more: hasMore,
+        ...(hasMore ? { next_cursor: String(page + 1) } : {}),
+      },
+    });
+  });
+}
+
+/** Open-findings page that signals truncation (`has_more: true`). */
+function truncatedOpenFindingsHandler(chapter: number, count: number) {
+  return http.get('/v1/local/works/:workId/findings', ({ request }) => {
+    const url = new URL(request.url);
+    if (url.searchParams.get('chapter') !== String(chapter)) {
+      return HttpResponse.json({ items: [], pagination: { limit: 200, has_more: false } });
+    }
+    const items = Array.from({ length: count }, (_, i) => ({
+      finding_id: `f-${i}`,
+      work_id: 'w-123',
+      chapter,
+      severity: 'medium',
+      status: 'open',
+      title: `Finding ${i}`,
+      description: 'desc',
+      target_executor: 'writer',
+      kind: 'consistency',
+      created_at: 0,
+      updated_at: 0,
+    }));
+    return HttpResponse.json({ items, pagination: { limit: 200, has_more: true } });
+  });
+}
+
 describe('ChapterPage (V1.75 residuals preserved)', () => {
   it('renders the canvas redirect CTA pointing at the outline canvas with the chapter preselect', async () => {
     useHandlers(...readingHandlers({ status: 'not_started' }));
@@ -343,5 +409,44 @@ describe('ChapterPage (V1.79 reading surface)', () => {
     expect(screen.getByRole('link', { name: /Edit outline for Chapter 1/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Save body/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /Edit body/i })).not.toBeInTheDocument();
+  });
+});
+
+describe('ChapterPage (V1.79 P0 QC fix-wave — pagination correctness)', () => {
+  it('renders an honest "N+" open-findings label when the page is truncated (qc3 W-QC3-002)', async () => {
+    useHandlers(
+      chapterDetail('draft'),
+      bodyHandler(),
+      workDetailHandler(),
+      chaptersListHandler(),
+      // Page reports has_more: true — the count (2) is a lower bound, not exact.
+      truncatedOpenFindingsHandler(1, 2),
+      worldKbGraphHandler('world-1', 0),
+    );
+
+    renderChapter();
+    await screen.findByLabelText('Chapter maturation indicators');
+    // Truncated count renders "2+" — honest lower bound, not a clipped exact integer.
+    expect(await screen.findByLabelText('2+ open findings')).toBeInTheDocument();
+  });
+
+  it('resolves prev/next across the server page boundary by cursor-walking (qc3 W-QC3-001)', async () => {
+    // 150 chapters served in pages of 100 (daemon cap). Chapter 101 lives on
+    // page 2; without the cursor-walk its prev/next would be silently lost and
+    // the nav would degrade to "First/Last chapter" placeholders.
+    useHandlers(
+      chapterDetail('draft'),
+      bodyHandler(),
+      workDetailHandler(),
+      paginatedChaptersHandler(150, 100),
+      openFindingsHandler(101, 0),
+      worldKbGraphHandler('world-1', 0),
+    );
+
+    renderChapter('w-123', 101);
+    // After the walk completes, chapter 101 has prev=100 and next=102 — proving
+    // the nav no longer loses chapters past the first server page.
+    expect(await screen.findByRole('link', { name: /Previous chapter: Chapter 100/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /Next chapter: Chapter 102/i })).toBeInTheDocument();
   });
 });
