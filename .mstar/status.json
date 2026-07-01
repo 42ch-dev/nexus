@@ -5,7 +5,7 @@
     {
       "plan_id": "2026-07-01-v1.80-memory-review-reliability",
       "iteration_id": "V1.80",
-      "status": "InReview",
+      "status": "Done",
       "owner": "@fullstack-dev",
       "effort": "M",
       "type": "feature",
@@ -22,7 +22,7 @@
     {
       "plan_id": "2026-07-01-v1.80-frontend-hygiene-residuals",
       "iteration_id": "V1.80",
-      "status": "InReview",
+      "status": "Done",
       "owner": "@frontend-dev",
       "effort": "S",
       "type": "feature",
@@ -82,22 +82,19 @@
       "pr": "#106 merged"
     },
     "tech_debt_summary": {
-      "total_open": 8,
+      "total_open": 3,
       "total_deferred": 9,
-      "total_resolved": 290,
+      "total_resolved": 295,
       "total_archived": 0,
       "by_severity_active": {
-        "low": 8
+        "low": 3
       },
       "by_target_active": {
         "V1.79+ (or CI wrapper)": 1,
-        "V1.79+ reliability roadmap": 1,
-        "set V1.80+": 4,
-        "V1.80 P0 fix-wave": 0,
         "V1.80+ accept": 2
       },
       "refreshed_at": "2026-07-01",
-      "refreshed_reason": "V1.80 P0 fix-wave: R-V180P0-QC3-001 (medium) resolved via has_more flag fix (e7417c99); qc3 targeted re-review Approve."
+      "refreshed_reason": "V1.80 wave-1 Done (QA Pass): R-V178P0-QC3-003 (REL-01) + 4 V1.79-QC residuals resolved. Remaining open: 2 P0 accepted low + 1 V1.79 CI-wrapper low."
     },
     "updated_at": "2026-07-01"
   },
@@ -6105,7 +6102,13 @@
         "target": "V1.80+ reliability roadmap (POST /memory/review async/cancelable/bounded)",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.78-creator-memory-surface][R-V178P0-QC3-003]",
         "note": "V1.79 P-last reclassified from \"V1.79+ reliability roadmap\" to dedicated reliability-roadmap target. Synchronous whole-queue review pipeline rewrite deferred; not silently dropped.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-07-01 (V1.80 P0)",
+        "closure_note": "Closed by V1.80 P0 (2026-07-01-v1.80-memory-review-reliability). All 3 axes addressed (qc3 revalidation 7e9dacf3 + QA Pass d3982d9d): chunked processing (REVIEW_BATCH_LIMIT=50 + SQL LIMIT), per-creator in-flight serialization (mutex map on WorkspaceState), client uncertain-completion handling (has_more/processed drain + W-QC3-001 fix: has_more=true when any fetched row remains pending). @42ch/nexus-contracts 0.14.0 -> 0.15.0 additive.",
+        "resolution": {
+          "plan_id": "2026-07-01-v1.80-memory-review-reliability",
+          "commit": "530070c3"
+        }
       },
       {
         "id": "R-V178P0-QC1-001",
@@ -6158,7 +6161,13 @@
         "target": "V1.80+",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.79-manuscript-reading-surface][R-V179P0-QC1-001]",
         "note": "Guard checks [role=menu]:not([hidden])/[role=dialog]:not([hidden]); robust for current overlays but revisit if future overlay uses different role pattern. Add keyboard-nav interaction tests.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-07-01 (V1.80 P1)",
+        "closure_note": "Closed by V1.80 P1 (2026-07-01-v1.80-frontend-hygiene-residuals). QC 3/3 Approve + QA Pass (d3982d9d).",
+        "resolution": {
+          "plan_id": "2026-07-01-v1.80-frontend-hygiene-residuals",
+          "commit": "0851e2cc"
+        }
       },
       {
         "id": "R-V179P0-QC1-002",
@@ -6171,7 +6180,13 @@
         "target": "V1.80+ hygiene",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.79-manuscript-reading-surface][R-V179P0-QC1-002]",
         "note": "Bundle of low/nit test-coverage + defensive-coding suggestions deferred as hygiene.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-07-01 (V1.80 P1)",
+        "closure_note": "Closed by V1.80 P1 (2026-07-01-v1.80-frontend-hygiene-residuals). QC 3/3 Approve + QA Pass (d3982d9d).",
+        "resolution": {
+          "plan_id": "2026-07-01-v1.80-frontend-hygiene-residuals",
+          "commit": "0851e2cc"
+        }
       }
     ],
     "2026-07-01-v1.79-soul-personality-visualization": [
@@ -6186,7 +6201,13 @@
         "target": "V1.80+ hygiene",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.79-soul-personality-visualization][R-V179P1-QC1-001]",
         "note": "Pre-existing tech debt (314 pre-P1); bounded P1 addition (+46 SoulSection). Extract sections into apps/web/src/components/memory/ siblings. Not a P1 regression.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-07-01 (V1.80 P1)",
+        "closure_note": "Closed by V1.80 P1 (2026-07-01-v1.80-frontend-hygiene-residuals). QC 3/3 Approve + QA Pass (d3982d9d).",
+        "resolution": {
+          "plan_id": "2026-07-01-v1.80-frontend-hygiene-residuals",
+          "commit": "0851e2cc"
+        }
       },
       {
         "id": "R-V179P1-QC1-002",
@@ -6199,7 +6220,13 @@
         "target": "V1.80+ hygiene",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.79-soul-personality-visualization][R-V179P1-QC1-002]",
         "note": "Slot 1-5 BAND_PALETTE hardcodes RGBA while slot 0 uses var(); promote to DESIGN.md tokens. Remove unused driftDateHelper export.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-07-01 (V1.80 P1)",
+        "closure_note": "Closed by V1.80 P1 (2026-07-01-v1.80-frontend-hygiene-residuals). QC 3/3 Approve + QA Pass (d3982d9d).",
+        "resolution": {
+          "plan_id": "2026-07-01-v1.80-frontend-hygiene-residuals",
+          "commit": "0851e2cc"
+        }
       }
     ],
     "2026-07-01-v1.80-memory-review-reliability": [
