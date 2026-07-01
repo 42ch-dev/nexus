@@ -5,7 +5,7 @@
     {
       "plan_id": "2026-07-01-v1.80-memory-review-reliability",
       "iteration_id": "V1.80",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "@fullstack-dev",
       "effort": "M",
       "type": "feature",
@@ -14,13 +14,15 @@
       "task_category": "logic",
       "wire_contracts_changed": true,
       "wire_contracts_note": "V1.80 P0: additive — ReviewResponse gains has_more + processed; @42ch/nexus-contracts 0.14.0 -> 0.15.0.",
-      "closes_residuals": ["R-V178P0-QC3-003"],
+      "closes_residuals": [
+        "R-V178P0-QC3-003"
+      ],
       "depends_on": []
     },
     {
       "plan_id": "2026-07-01-v1.80-frontend-hygiene-residuals",
       "iteration_id": "V1.80",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "@frontend-dev",
       "effort": "S",
       "type": "feature",
@@ -28,7 +30,12 @@
       "merge_target": "iteration/v1.80",
       "task_category": "visual",
       "wire_contracts_changed": false,
-      "closes_residuals": ["R-V179P0-QC1-001", "R-V179P0-QC1-002", "R-V179P1-QC1-001", "R-V179P1-QC1-002"],
+      "closes_residuals": [
+        "R-V179P0-QC1-001",
+        "R-V179P0-QC1-002",
+        "R-V179P1-QC1-001",
+        "R-V179P1-QC1-002"
+      ],
       "depends_on": []
     },
     {
@@ -75,20 +82,23 @@
       "pr": "#106 merged"
     },
     "tech_debt_summary": {
-      "total_open": 6,
-      "total_deferred": 6,
+      "total_open": 9,
+      "total_deferred": 9,
       "total_resolved": 289,
       "total_archived": 0,
       "by_severity_active": {
-        "low": 6
+        "low": 8,
+        "medium": 1
       },
       "by_target_active": {
         "V1.79+ (or CI wrapper)": 1,
         "V1.79+ reliability roadmap": 1,
-        "set V1.80+": 4
+        "set V1.80+": 4,
+        "V1.80 P0 fix-wave": 1,
+        "V1.80+ accept": 2
       },
       "refreshed_at": "2026-07-01",
-      "refreshed_reason": "V1.79 P0+P1 QC consolidated: 4 low residuals registered (2 P0 reading-surface + 2 P1 soul-viz) targeting V1.80+ hygiene."
+      "refreshed_reason": "V1.80 wave-1 QC consolidated: P0 qc3 W-QC3-001 (medium, fix-in-wave) + 2 low accepted residuals (map growth, best-effort delete) registered."
     },
     "updated_at": "2026-07-01"
   },
@@ -6190,6 +6200,47 @@
         "target": "V1.80+ hygiene",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.79-soul-personality-visualization][R-V179P1-QC1-002]",
         "note": "Slot 1-5 BAND_PALETTE hardcodes RGBA while slot 0 uses var(); promote to DESIGN.md tokens. Remove unused driftDateHelper export.",
+        "lifecycle": "open"
+      }
+    ],
+    "2026-07-01-v1.80-memory-review-reliability": [
+      {
+        "id": "R-V180P0-QC3-001",
+        "title": "POST /memory/review has_more false-completion when final/only row times out or fails and remains pending (process_review_batch counts timed-out/failed attempts as processed)",
+        "severity": "medium",
+        "source": "qc3 W-QC3-001",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/memory.rs process_review_batch (processed accounting) + review (has_more derivation)",
+        "decision": "fix-in-wave",
+        "owner": "@fullstack-dev",
+        "target": "V1.80 P0 fix-wave (fix/v1.80-review-has-more-completion)",
+        "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.80-memory-review-reliability][R-V180P0-QC3-001]",
+        "note": "Blocks full closure of R-V178P0-QC3-003 client-completion axis. Fix: track queue advancement separately from rows attempted; on row-level timeout/failure that leaves the row pending, ensure has_more=true. Add regression tests for one-row timeout, final-row timeout, perpetually-failing head row.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V180P0-QC1-001",
+        "title": "memory_review_locks HashMap unbounded per-creator (entries never evicted; daemon-lifetime)",
+        "severity": "low",
+        "source": "qc1 F-P0-1 + qc3 S-QC3-001",
+        "scope": "crates/nexus-daemon-runtime/src/workspace/mod.rs memory_review_locks field + memory_review_lock() accessor",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target": "V1.80+ (document lifecycle ceiling; revisit if multi-creator/session churn becomes real)",
+        "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.80-memory-review-reliability][R-V180P0-QC1-001]",
+        "note": "Local single-active-creator daemon: ~1 entry at a time. Acceptable for current threat model. Add a lifecycle comment noting the simplification; replace with eviction/DB-lock if multi-creator churn materializes.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V180P0-QC2-001",
+        "title": "best-effort delete_pending_by_id after side-effect success leaves re-processing window (at-least-once under threat model)",
+        "severity": "low",
+        "source": "qc2 Warning (accepted) + qc1 F-P0-3",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/memory.rs delete_pending_by_id + process_review_batch promote/fragment paths",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target": "V1.80+ (pre-existing V1.33 best-effort pattern; at-least-once accepted under local-only/single-creator/small-queue threat model)",
+        "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.80-memory-review-reliability][R-V180P0-QC2-001]",
+        "note": "If delete fails after a successful promote/fragment, the pending row remains and the next review re-processes it (duplicate promote/fragment). Per-creator mutex prevents within-cycle double-processing; cross-cycle re-processing is the at-least-once trade-off. Accepted under documented threat model; raise severity if queue size or writer count increases.",
         "lifecycle": "open"
       }
     ]
