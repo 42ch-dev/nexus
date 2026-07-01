@@ -5,7 +5,7 @@
     {
       "plan_id": "2026-07-01-v1.79-prepare-dual-track-spec-amendments",
       "iteration_id": "V1.79",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "effort": "S",
       "type": "prepare",
