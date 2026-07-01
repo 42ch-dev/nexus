@@ -611,17 +611,12 @@ pub async fn review(
 
         // Bounded fetch: REVIEW_BATCH_LIMIT + 1 overfetch drives `has_more`.
         let fetch_limit = REVIEW_BATCH_LIMIT + 1;
-        let mut rows = fetch_pending_reviews_page(
-            state.pool(),
-            &active_creator,
-            None,
-            fetch_limit,
-        )
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: format!("failed to fetch pending reviews for review: {e}"),
-        })?;
+        let mut rows = fetch_pending_reviews_page(state.pool(), &active_creator, None, fetch_limit)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".into(),
+                message: format!("failed to fetch pending reviews for review: {e}"),
+            })?;
 
         // The over-fetched (51st) row, if present, means more rows remain in the
         // DB beyond this batch. Truncate the processing slice back to the limit.
@@ -635,8 +630,8 @@ pub async fn review(
         let deadline = tokio::time::Instant::now() + REVIEW_CALL_TIMEOUT;
         let nexus_home = state.nexus_home().to_owned();
         let pool = state.pool().clone();
-        let mut batch = process_review_batch(&rows, &nexus_home, &active_creator, &pool, deadline)
-            .await;
+        let mut batch =
+            process_review_batch(&rows, &nexus_home, &active_creator, &pool, deadline).await;
 
         // has_more is true when the client should re-issue the call: either the
         // DB still has rows beyond this batch, or the per-call budget expired
@@ -1186,5 +1181,61 @@ mod tests {
     fn decode_fragment_keywords_non_string_items_rejected() {
         // Mixed-type arrays are not `Vec<String>` → graceful empty.
         assert!(decode_fragment_keywords(r#"["ok", 42]"#).is_empty());
+    }
+
+    // ─── V1.80 REL-01: deadline-aware partial progress ───────────────────
+
+    /// With a deadline already in the past, `process_review_batch` inspects
+    /// zero rows and returns all-zero counters. The caller (review handler)
+    /// then reports `has_more = true` because `processed < processing_slice`.
+    /// This proves the deadline-check-before-each-row logic stops the loop
+    /// immediately on budget exhaustion without touching side effects.
+    #[tokio::test]
+    async fn process_review_batch_past_deadline_processes_zero_rows() {
+        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let pool = nexus_local_db::open_pool(&db_path)
+            .await
+            .expect("test pool");
+
+        // Seed 3 rows so the processing slice is non-empty; the deadline alone
+        // must prevent them from being inspected.
+        for i in 0..3 {
+            // SAFETY: test-only seed using runtime query.
+            sqlx::query(
+                "INSERT OR IGNORE INTO memory_pending_review \
+                 (pending_id, session_id, creator_id, world_id, task_kind, raw_digest, created_at) \
+                 VALUES (?, ?, 'ctr_testuser', NULL, 'research', \
+                 'Research summary long enough to classify as fragment.', '2026-01-01T00:00:0X0Z')",
+            )
+            .bind(format!("pending_deadline_{i}"))
+            .bind(format!("sess_deadline_{i}"))
+            .execute(&pool)
+            .await
+            .expect("seed");
+        }
+
+        let rows = fetch_pending_reviews_page(&pool, "ctr_testuser", None, 51)
+            .await
+            .expect("fetch");
+        assert_eq!(rows.len(), 3, "precondition: 3 rows seeded");
+
+        // Deadline already in the past.
+        let deadline = tokio::time::Instant::now();
+        let outcome =
+            process_review_batch(&rows, &nexus_home, "ctr_testuser", &pool, deadline).await;
+
+        assert_eq!(outcome.processed, 0, "past deadline must inspect zero rows");
+        assert_eq!(outcome.promoted, 0);
+        assert_eq!(outcome.fragmented, 0);
+        assert_eq!(outcome.dropped, 0);
+
+        // The 3 seeded rows are untouched (no side effects ran).
+        let remaining: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM memory_pending_review")
+            .fetch_one(&pool)
+            .await
+            .expect("count");
+        assert_eq!(remaining.0, 3, "no rows deleted under a past deadline");
+
+        drop(tmp);
     }
 }

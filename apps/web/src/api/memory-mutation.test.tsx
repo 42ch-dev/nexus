@@ -258,4 +258,143 @@ describe('useReviewMemory — result counters + invalidation', () => {
     // The error toast surfaces.
     await screen.findByText(/could not complete review/i);
   });
+
+  // ─── V1.80 REL-01: drain loop + aggregation + cap/zero-progress guards ──
+
+  it('drains multiple calls aggregating counters until has_more is false', async () => {
+    const reviewSpy = vi.fn();
+    useHandlers(
+      http.get('/v1/local/memory/pending-review', () =>
+        HttpResponse.json({ items: [], pagination: { limit: 20, has_more: false } }),
+      ),
+      http.get('/v1/local/memory/pending-review/count', () => HttpResponse.json({ count: 0 })),
+      http.get('/v1/local/memory/fragments', () => HttpResponse.json({ fragments: [] })),
+      http.post('/v1/local/memory/review', () => {
+        reviewSpy();
+        // First call: server has more; second call: drained.
+        if (reviewSpy.mock.calls.length === 1) {
+          return HttpResponse.json({
+            promoted: 3,
+            fragmented: 0,
+            dropped: 0,
+            has_more: true,
+            processed: 3,
+          });
+        }
+        return HttpResponse.json({
+          promoted: 2,
+          fragmented: 1,
+          dropped: 0,
+          has_more: false,
+          processed: 3,
+        });
+      }),
+    );
+
+    function ReviewHarness() {
+      const reviewMemory = useReviewMemory();
+      return (
+        <button type="button" onClick={() => reviewMemory.mutate(CREATOR)}>
+          Review
+        </button>
+      );
+    }
+
+    const client = new BrowserClient();
+    renderInApp(<ReviewHarness />, { client });
+
+    fireEvent.click(screen.getByRole('button', { name: /review/i }));
+
+    // Two drain calls were issued (has_more true → false).
+    await waitFor(() => expect(reviewSpy).toHaveBeenCalledTimes(2));
+
+    // The success toast shows the AGGREGATED counters across both calls.
+    await screen.findByText(/5 promoted to long-term memory, 1 saved as fragments/);
+  });
+
+  it('stops at the drain cap and shows a non-error still-draining toast', async () => {
+    const reviewSpy = vi.fn();
+    useHandlers(
+      http.get('/v1/local/memory/pending-review', () =>
+        HttpResponse.json({ items: [], pagination: { limit: 20, has_more: false } }),
+      ),
+      http.get('/v1/local/memory/pending-review/count', () => HttpResponse.json({ count: 0 })),
+      http.get('/v1/local/memory/fragments', () => HttpResponse.json({ fragments: [] })),
+      // Server always reports has_more = true (pathological large queue) — the
+      // client cap (REVIEW_DRAIN_MAX_CALLS = 20) must stop the drain.
+      http.post('/v1/local/memory/review', () => {
+        reviewSpy();
+        return HttpResponse.json({
+          promoted: 3,
+          fragmented: 0,
+          dropped: 0,
+          has_more: true,
+          processed: 3,
+        });
+      }),
+    );
+
+    function ReviewHarness() {
+      const reviewMemory = useReviewMemory();
+      return (
+        <button type="button" onClick={() => reviewMemory.mutate(CREATOR)}>
+          Review
+        </button>
+      );
+    }
+
+    const client = new BrowserClient();
+    renderInApp(<ReviewHarness />, { client });
+
+    fireEvent.click(screen.getByRole('button', { name: /review/i }));
+
+    // The drain cap (20 calls) stops the loop.
+    await waitFor(() => expect(reviewSpy).toHaveBeenCalledTimes(20));
+
+    // Non-error informational toast (not "Review complete").
+    await screen.findByText(/review still draining/i);
+  });
+
+  it('breaks the drain on zero progress to avoid an infinite loop', async () => {
+    const reviewSpy = vi.fn();
+    useHandlers(
+      http.get('/v1/local/memory/pending-review', () =>
+        HttpResponse.json({ items: [], pagination: { limit: 20, has_more: false } }),
+      ),
+      http.get('/v1/local/memory/pending-review/count', () => HttpResponse.json({ count: 0 })),
+      http.get('/v1/local/memory/fragments', () => HttpResponse.json({ fragments: [] })),
+      // Server reports has_more = true but processed = 0 (unprocessable head
+      // row) — the zero-progress guard must break after one call.
+      http.post('/v1/local/memory/review', () => {
+        reviewSpy();
+        return HttpResponse.json({
+          promoted: 0,
+          fragmented: 0,
+          dropped: 0,
+          has_more: true,
+          processed: 0,
+        });
+      }),
+    );
+
+    function ReviewHarness() {
+      const reviewMemory = useReviewMemory();
+      return (
+        <button type="button" onClick={() => reviewMemory.mutate(CREATOR)}>
+          Review
+        </button>
+      );
+    }
+
+    const client = new BrowserClient();
+    renderInApp(<ReviewHarness />, { client });
+
+    fireEvent.click(screen.getByRole('button', { name: /review/i }));
+
+    // Exactly one call — the zero-progress guard stops the drain immediately.
+    await waitFor(() => expect(reviewSpy).toHaveBeenCalledTimes(1));
+
+    // Still-draining informational toast.
+    await screen.findByText(/review still draining/i);
+  });
 });
