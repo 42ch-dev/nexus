@@ -19,14 +19,14 @@
     "latest_ship": {
       "iteration": "V1.80",
       "compass": "v1.80-memory-review-reliability-and-frontend-hygiene-compass-v1.md",
-      "shipped_at": "2026-07-01 (PR pending)",
+      "shipped_at": "2026-07-01 (PR #107 merged)",
       "plan_count": 3,
       "plan_count_done": 3,
       "wire_contracts_changed": true,
       "wire_contracts_note": "V1.80: additive — ReviewResponse +has_more/+processed; @42ch/nexus-contracts 0.14.0 -> 0.15.0.",
       "profile_b_compaction": "done (V1.80 all 3 plans)",
-      "merge_commit": null,
-      "pr": "pending"
+      "merge_commit": "f305df030f",
+      "pr": "#107 merged"
     },
     "tech_debt_summary": {
       "total_open": 3,
