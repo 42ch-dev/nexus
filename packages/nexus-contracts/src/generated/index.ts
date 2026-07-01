@@ -91,6 +91,8 @@ export * from './local-api/memory/MemoryFragmentInfo';
 export * from './local-api/memory/PendingReviewInfo';
 export * from './local-api/memory/ReviewRequest';
 export * from './local-api/memory/ReviewResponse';
+export * from './local-api/memory/SoulNarrativeRequest';
+export * from './local-api/memory/SoulNarrativeResponse';
 export * from './local-api/orchestration/capabilities/CapabilityInfo';
 export * from './local-api/orchestration/capabilities/ListCapabilitiesQuery';
 export * from './local-api/orchestration/capabilities/ListCapabilitiesResponse';
@@ -275,6 +277,8 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   PendingReviewInfo: 1,
   ReviewRequest: 1,
   ReviewResponse: 1,
+  SoulNarrativeRequest: 1,
+  SoulNarrativeResponse: 1,
   CapabilityInfo: 1,
   ListCapabilitiesQuery: 2,
   ListCapabilitiesResponse: 2,

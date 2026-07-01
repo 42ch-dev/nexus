@@ -9,6 +9,10 @@
   "properties": {
     "fragment_id": { "type": "string" },
     "summary": { "type": "string" },
+    "world_id": {
+      "type": ["string", "null"],
+      "description": "Optional originating world identifier. Absent or null means a Creator-core-only fragment with no originating world; a string value means the fragment emerged from that world."
+    },
     "keywords": {
       "type": "array",
       "description": "Optional keyword labels extracted for this fragment, decoded from the `memory_fragments.keywords` JSON array for read-only visualization.",
