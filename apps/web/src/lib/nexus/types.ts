@@ -17,9 +17,14 @@
  *    only; admission-gate logic is not exposed in the list response.
  *
  * V1.67 G2 (R-V164-P2-G2): preset get/update/delete promoted onto this
- * interface (21 → 24 methods). The daemon routes + generated TS types already
- * existed; only the TS client surface was missing. A form-based management UI
- * is deferred to the V1.68 canvas (compass §0 Q6).
+ * interface. The daemon routes + generated TS types already existed; only the
+ * TS client surface was missing. A form-based management UI is deferred to the
+ * V1.68 canvas (compass §0 Q6).
+ *
+ * Method count: see the interface below — it grows as daemon surfaces are
+ * promoted (V1.78 added 5 creator-memory methods). Earlier comments carried a
+ * stale literal count that drifted each release, so the count is now sourced
+ * from the interface itself rather than restated in prose.
  */
 import type {
   AddScheduleRequest,
@@ -29,8 +34,10 @@ import type {
   ChapterContentQuery,
   ChapterDetail,
   ChapterOutline,
+  CountPendingReviewsResponse,
   CreateWorkRequest,
   CreateWorkResponse,
+  DeletePendingReviewResponse,
   EditCoreContextRequest,
   EditCoreContextResponse,
   FindingDetailResponse,
@@ -42,7 +49,12 @@ import type {
   ListChaptersResponse,
   ListFindingsQuery,
   ListFindingsResponse,
+  ListMemoryFragmentsQuery,
+  ListMemoryFragmentsResponse,
+  ListPendingReviewsQuery,
+  ListPendingReviewsResponse,
   ListPresetsResponse,
+  MemoryFragmentInfo,
   ListSchedulesQuery,
   ListSchedulesResponse,
   ListSessionsQuery,
@@ -54,7 +66,10 @@ import type {
   OutlinePatchStructureRequest,
   PatchChapterRequest,
   PatchWorkRequest,
+  PendingReviewInfo,
   ReloadPresetResponse,
+  ReviewRequest,
+  ReviewResponse,
   ScaffoldPresetRequest,
   ScaffoldPresetResponse,
   SessionDetailResponse,
@@ -271,7 +286,66 @@ export interface NexusClient {
     worldId: string,
     request: WorldKbPatchRelationshipRequest,
   ): Promise<WorldKbPatchRelationshipResponse>;
+
+  // ── Creator Memory review-loop (V1.78) ─────────────────────────────────────
+  // All memory endpoints are creator-scoped: the daemon rejects a `creator_id`
+  // that does not match the active creator in config.toml with 403. The UI is
+  // review/consume-only — `createPendingReview` stays CLI/producer-only (the
+  // session-end capture pipeline owns `POST .../memory/pending-review`), mirroring
+  // V1.77's `createFinding` CLI-only decision (compass D-UX LOCKED).
+  /**
+   * `GET /v1/local/memory/pending-review?creator_id={id}` — cursor-paginated
+   * pending-review list for the active creator (default 50, max 250; cursor is
+   * the opaque `next_cursor` from a previous page).
+   */
+  listPendingReviews(
+    creatorId: string,
+    query?: Omit<ListPendingReviewsQuery, 'creator_id'>,
+  ): Promise<ListPendingReviewsResponse>;
+  /**
+   * `GET /v1/local/memory/pending-review/count?creator_id={id}` — live pending
+   * count for the active creator, surfaced as a badge on the Memory page header.
+   */
+  countPendingReviews(creatorId: string): Promise<CountPendingReviewsResponse>;
+  /**
+   * `DELETE /v1/local/memory/pending-review/{pending_id}?creator_id={id}` —
+   * delete one pending-review row; echoes the path `pending_id`. A missing or
+   * non-owned row surfaces as an error envelope, not `success: false`.
+   */
+  deletePendingReview(
+    pendingId: string,
+    creatorId: string,
+  ): Promise<DeletePendingReviewResponse>;
+  /**
+   * `POST /v1/local/memory/review` — trigger the review/summarization pipeline
+   * for the active creator's entire pending queue. Shipped behavior: the
+   * passthrough classifier promotes/fragments/drops each pending row and returns
+   * `{ promoted, fragmented, dropped }` (no LLM-backed summarizer).
+   */
+  reviewMemory(request: ReviewRequest): Promise<ReviewResponse>;
+  /**
+   * `GET /v1/local/memory/fragments?creator_id={id}` — read-only long-term
+   * memory fragments for the active creator (NOT paginated; optional
+   * case-insensitive `keyword` LIKE filter, default 50, max 250). Fragments are
+   * produced only by the `reviewMemory` route — no manual CRUD on this surface.
+   */
+  listMemoryFragments(
+    creatorId: string,
+    query?: Omit<ListMemoryFragmentsQuery, 'creator_id'>,
+  ): Promise<ListMemoryFragmentsResponse>;
 }
 
 /** Re-exported for consumers building query/mutation hooks. */
-export type { CapabilityInfo, FindingDetailResponse, UpdateFindingRequest };
+export type {
+  CapabilityInfo,
+  CountPendingReviewsResponse,
+  DeletePendingReviewResponse,
+  FindingDetailResponse,
+  ListMemoryFragmentsQuery,
+  ListPendingReviewsQuery,
+  MemoryFragmentInfo,
+  PendingReviewInfo,
+  ReviewRequest,
+  ReviewResponse,
+  UpdateFindingRequest,
+};

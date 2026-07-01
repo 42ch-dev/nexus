@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/memory/list-pending-reviews-query.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ListPendingReviewsQuery",
+  "description": "Query parameters for GET /v1/local/memory/pending-review. `limit` defaults to 50 (clamped 1..=250) when omitted; `cursor` is the opaque `next_cursor` from a previous page (cursor = pending_id).",
+  "type": "object",
+  "required": ["creator_id"],
+  "properties": {
+    "creator_id": { "type": "string" },
+    "limit": { "type": "integer" },
+    "cursor": { "type": "string" }
+  },
+  "additionalProperties": false
+}

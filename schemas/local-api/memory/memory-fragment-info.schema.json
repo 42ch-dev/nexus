@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/memory/memory-fragment-info.schema.json",
+  "schema_version": 1,
+  "title": "Nexus MemoryFragmentInfo",
+  "description": "A single memory-fragment row in the list-fragments response. The Local API intentionally exposes only `fragment_id` and `summary`; internal fragment fields (session_id, creator_id, keywords, created_at, ttl) are not part of this response.",
+  "type": "object",
+  "required": ["fragment_id", "summary"],
+  "properties": {
+    "fragment_id": { "type": "string" },
+    "summary": { "type": "string" }
+  },
+  "additionalProperties": false
+}

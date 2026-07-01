@@ -88,6 +88,52 @@ pub async fn list_fragments(
         .collect())
 }
 
+/// List a bounded page of fragments for a creator.
+///
+/// Same projection + ordering as [`list_fragments`] (`created_at DESC`) but
+/// pushes `LIMIT` into SQL so the daemon never materializes the full set before
+/// truncating. This is the bounded counterpart used by the `fragments` list
+/// endpoint's no-keyword path (R-V178P0-QC3-002 / W-QC3-002). For total row
+/// counts ≤ `limit` the returned set is identical to `list_fragments` followed
+/// by an in-Rust `truncate(limit)`; the only difference is that the cap is now
+/// enforced server-side.
+///
+/// `limit` is an `i64` (the `LIMIT` bind type) and is expected to be already
+/// clamped to `1..=MAX_LIMIT` by the caller.
+///
+/// # Errors
+///
+/// Returns `LocalDbError` if the database query fails.
+pub async fn list_fragments_limited(
+    pool: &SqlitePool,
+    creator_id: &str,
+    limit: i64,
+) -> Result<Vec<MemoryFragmentRecord>, LocalDbError> {
+    let rows = sqlx::query!(
+        "SELECT fragment_id as \"fragment_id!\", session_id as \"session_id!\",
+                creator_id as \"creator_id!\", keywords as \"keywords!\",
+                summary as \"summary!\", created_at as \"created_at!\", ttl
+         FROM memory_fragments WHERE creator_id = ? ORDER BY created_at DESC LIMIT ?",
+        creator_id,
+        limit
+    )
+    .fetch_all(pool)
+    .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|r| MemoryFragmentRecord {
+            fragment_id: r.fragment_id,
+            session_id: r.session_id,
+            creator_id: r.creator_id,
+            keywords: r.keywords,
+            summary: r.summary,
+            created_at: r.created_at,
+            ttl: r.ttl,
+        })
+        .collect())
+}
+
 /// List all fragments for a specific session.
 ///
 /// Returns records for a given `session_id` (useful for session-level review).

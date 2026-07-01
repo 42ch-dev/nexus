@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/memory/list-pending-reviews-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ListPendingReviewsResponse",
+  "description": "Response for GET /v1/local/memory/pending-review (cursor-based pagination). The `pagination` envelope reuses the shared `PaginationInfo`; `next_cursor` is the `pending_id` of the last item in the page (opaque to clients).",
+  "type": "object",
+  "required": ["items", "pagination"],
+  "properties": {
+    "items": { "type": "array", "items": { "$ref": "https://nexus42.invalid/schemas/local-api/memory/pending-review-info.schema.json" } },
+    "pagination": { "$ref": "https://nexus42.invalid/schemas/local-api/kb/pagination-info.schema.json" }
+  },
+  "additionalProperties": false
+}

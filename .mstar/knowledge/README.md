@@ -20,6 +20,7 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | [schemas-external-consumer-boundary.md](schemas-external-consumer-boundary.md) | Wire vs local-only contract types |
 | [deferred-features-cross-version-tracker.md](deferred-features-cross-version-tracker.md) | Open/backlog deferred features (active) |
 | [architecture-patterns/canvas-surface-implementation-pattern.md](architecture-patterns/canvas-surface-implementation-pattern.md) | Canvas surface implementation pattern (V1.67–V1.76 distilled; compound V1.77) |
+| [architecture-patterns/contracts-gap-on-shipped-backend.md](architecture-patterns/contracts-gap-on-shipped-backend.md) | Closing the contracts/codegen gap on a shipped handler with hand-written DTOs (V1.78 memory surface distilled; compound V1.78) |
 
 **All OSS feature specs:** [`specs/README.md`](specs/README.md) (full index by domain).
 

@@ -1,0 +1,13 @@
+{
+  "plan_id": "2026-07-01-v1.78-creator-memory-surface",
+  "iteration_id": "V1.78",
+  "status": "Done",
+  "owner": "@project-manager",
+  "effort": "M-L",
+  "type": "feature",
+  "working_branch": "feature/v1.78-memory-surface",
+  "merge_target": "iteration/v1.78",
+  "task_category": "visual",
+  "wire_contracts_changed": true,
+  "depends_on": []
+}
