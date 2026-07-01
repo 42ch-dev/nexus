@@ -13,7 +13,25 @@
  */
 import { useEffect, useState } from 'react';
 
-/** Debounce floor so the bar doesn't thrash on every scroll event tick. */
+/**
+ * Debounce design (R-V179P0-QC1-002).
+ *
+ * Scroll fires many times per second; re-rendering + recomputing the ratio on
+ * every tick thrashes the bar and the aria-valuenow. The effect uses a two-tier
+ * debounce rather than a fixed setInterval:
+ *
+ *   1. A time gate (`RAF_GUARD_MS`, ~1 frame). Events closer together than the
+ *      gate are coalesced — they schedule at most one `requestAnimationFrame`
+ *      flush instead of computing inline.
+ *   2. A single rAF. The flush reads layout once per frame and writes the
+ *      rounded percent; multiple gated events within the same frame collapse to
+ *      that single rAF callback (`frame` is reused until it fires).
+ *
+ * This keeps the bar visually smooth (frame-aligned) without the cost of a
+ * timer that would outlive the scroll. The effect is reset on unmount, which
+ * cancels any pending rAF so no stale update lands after navigation.
+ */
+/** Time-gate floor (~1 frame @ 60Hz) so the bar doesn't thrash per scroll tick. */
 const RAF_GUARD_MS = 16;
 
 export function ReadingProgress() {

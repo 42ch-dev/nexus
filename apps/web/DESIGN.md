@@ -301,8 +301,21 @@ components:
     line: "{colors.gray-alpha-400}"
     tick: "{colors.gray-400}"
     label: "{typography.label-12} @ {colors.gray-700}"
+  # V1.80 — ordered band-fill set backing the temporal-drift BAND_PALETTE
+  # (R-V179P1-QC1-002). `fill` is slot 0; `fill-2`..`fill-6` are slots 1..5.
+  # The stacked-band chart maps band index → these tokens 1:1; component code
+  # consumes them only via the `--color-soul-viz-drift-band-fill*` CSS vars so
+  # no RGBA value is hardcoded in temporal-drift.tsx. Light values are calm,
+  # low-alpha categorical hues (alpha 0.16) drawn from the same families as the
+  # reading-maturation / keyword-cluster accents so the timeline composes with
+  # the rest of the SOUL surface.
   soul-viz-drift-band:
     fill: "rgba(0,107,255,0.16)"
+    fill-2: "rgba(124,58,237,0.16)"
+    fill-3: "rgba(0,133,119,0.16)"
+    fill-4: "rgba(183,110,0,0.16)"
+    fill-5: "rgba(190,24,93,0.16)"
+    fill-6: "rgba(53,142,53,0.16)"
     step-stroke: "{colors.gray-alpha-200}"
     label: "{typography.label-12} @ {colors.gray-900}"
 

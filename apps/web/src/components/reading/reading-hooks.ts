@@ -45,9 +45,10 @@ function matchCurrent(
 ): boolean {
   // Chapter number is the primary key; volume disambiguates only when the
   // caller is reading a specific volume context (the route's ?volume= query).
+  // `row.volume` is contract-guaranteed (ChapterSummary.volume: number, >= 1).
   if (row.chapter !== chapter) return false;
   if (volume === undefined) return true;
-  return (row.volume ?? 1) === volume;
+  return row.volume === volume;
 }
 
 /**
@@ -109,8 +110,9 @@ export function useChapterNeighbors(
 }
 
 function deriveVolumes(rows: ChapterSummary[]): number[] {
+  // `volume` is contract-guaranteed (ChapterSummary.volume: number, >= 1).
   const set = new Set<number>();
-  for (const r of rows) set.add(r.volume ?? 1);
+  for (const r of rows) set.add(r.volume);
   return [...set].sort((a, b) => a - b);
 }
 
