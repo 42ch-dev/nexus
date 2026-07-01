@@ -80,8 +80,8 @@ pub use memory_fragment::{
 
 // Re-export soul_narrative types
 pub use soul_narrative::{
-    get_soul_narrative, soul_narrative_fragment_stats, upsert_soul_narrative,
-    SoulNarrativeFragmentStats, SoulNarrativeRecord,
+    build_stats_fingerprint, get_soul_narrative, soul_narrative_fragment_stats,
+    upsert_soul_narrative, SoulNarrativeFragmentStats, SoulNarrativeRecord,
 };
 
 // Re-export world_stories types

@@ -1273,14 +1273,21 @@ pub async fn reflect_soul(
             }
         })?;
 
-    // 8. Persist the result.
+    // 8. Persist the result (including stats cache for future read-path hits).
     let now = chrono::Utc::now().to_rfc3339();
+    let stats_fingerprint = nexus_local_db::build_stats_fingerprint(
+        fragment_stats.fragment_count,
+        fragment_stats.max_created_at.as_deref(),
+    );
     let record = nexus_local_db::SoulNarrativeRecord {
         creator_id: active_creator.clone(),
         narrative: draft.narrative.clone(),
         generated_at: now.clone(),
         fragment_count_at_generation: fragment_stats.fragment_count,
         max_fragment_created_at_at_generation: fragment_stats.max_created_at.clone(),
+        distinct_keyword_count_cache: i64::try_from(fragment_stats.distinct_keyword_count)
+            .unwrap_or(0),
+        stats_fingerprint: Some(stats_fingerprint),
         created_at: now.clone(),
         updated_at: now,
     };
