@@ -44,8 +44,11 @@ and consumed by the screens. Remaining gaps the UI adapts around:
 ## Build / typecheck contract
 
 - `build` and `typecheck` resolve `@42ch/nexus-contracts` types from its `dist/`.
-  Build the contracts package first: `pnpm --filter @42ch/nexus-contracts run build`.
-  CI's `web-build` job does this automatically.
+  The web package runs `pnpm --filter @42ch/nexus-contracts run build` via its
+  `prebuild` and `pretypecheck` lifecycle scripts, so `pnpm --filter web run build`
+  and `pnpm --filter web run typecheck` are self-contained from a fresh install.
+  CI's `web-build` job also builds contracts first, so the explicit CI step and
+  the local lifecycle hook stay aligned.
 - Workspace + lockfile surfaces touched here (`pnpm-workspace.yaml`, root
   `package.json`, lockfile) are shared with P0's codegen — coordinate at
   integration merge (compass §3 parallelism note).
