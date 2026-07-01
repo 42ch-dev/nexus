@@ -4,7 +4,7 @@
 
 **Purpose**: Single source of truth for **open** and **backlog** features deferred from delivery compasses. Closed/shipped history lives in shipped archive.
 **Scope**: `nexus` OSS repository only.
-**Created**: 2026-04-21 · **Last updated**: 2026-07-01 (V1.80 delivered: Memory Review Reliability + Frontend Hygiene; REL-01 `R-V178P0-QC3-003` closed + 4 V1.79-QC residuals closed; compound bounded-drain-completion-contract)
+**Created**: 2026-04-21 · **Last updated**: 2026-07-01 (V1.81 active: Creator SOUL Maturation; BL-10 + BL-12 annotated in-progress)
 
 ---
 
@@ -69,9 +69,9 @@
 | BL-07 | Explore ranking / cold-start + Publish compliance matrix | V1.2 | Backlog | M | |
 | BL-08 | Social / marketing features | V1.3 | V2.0+ | XL | |
 | BL-09 | Standalone maturation dashboard (multi-chart cross-Work/World aggregate view) | V1.79 | Backlog | M | V1.79 Track A shipped in-context lightweight maturation indicators only; standalone dashboard deferred. |
-| BL-10 | Independent SOUL growth-curve view (separate from temporal-drift timeline) | V1.79 | Backlog | S | V1.79 Track B folded growth-count into the temporal-drift timeline; standalone view deferred. |
+| BL-10 | Independent SOUL growth-curve view (separate from temporal-drift timeline) | V1.79 | **V1.81 (in-progress)** | S | V1.79→V1.81 | V1.79 Track B folded growth-count into the temporal-drift timeline; standalone view deferred. V1.81 ships as SP-3 — cumulative-fragment-growth viz with density branching (`empty`/`low-data`/`rich`), respects world projection, independent of the temporal-drift timeline. |
 | BL-11 | Deeper manuscript reading — persisted reading progress + annotations/highlights + profile-specific reading chrome | V1.79 | Backlog | M-L | V1.79 reading surface is session-only + novel-first; persistence/annotations/profile-chrome deferred. |
-| BL-12 | SOUL viz refinements — per-World filtering + realtime updates + LLM-generated personality-score narrative | V1.79 | Backlog | M | V1.79 SOUL viz is per-creator + poll/manual-refresh + raw keyword/timeline; refinements deferred. |
+| BL-12 | SOUL viz refinements — per-World filtering + realtime updates + LLM-generated personality-score narrative | V1.79 | **V1.81 (in-progress, partial)** | M | V1.79→V1.81 | V1.79 SOUL viz is per-creator + poll/manual-refresh + raw keyword/timeline; refinements deferred. V1.81 ships: per-World projection (SP-2, world-selector drilling viz into subset) + LLM Creator-SOUL personality narrative (SP-1, headline — world-agnostic, on-demand + stale-invalidation) + auto-refresh (SP-4, replacing manual reload). **Per-World LLM narrative is deferred** — V1.81 narrative is Creator-level (whole) only; the world projection only filters read-side keyword/drift/growth viz. Full BL-12 closure (including per-World narrative + realtime push) remains backlog. |
 
 ### 2.5 Reliability roadmap (cross-version)
 
@@ -99,9 +99,9 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 ## 5) Quick index
 
-**Active iteration**: V1.80 delivered (2026-07-01) — Memory Review Reliability + Frontend Hygiene (REL-01 `R-V178P0-QC3-003` closed + 4 V1.79-QC residuals closed); next: V1.81 candidate evaluation at next `/iteration-start` (backlog: BL-09 standalone maturation dashboard, BL-10 independent SOUL growth-curve view, BL-11 deeper manuscript reading/annotations, BL-12 SOUL viz refinements)
+**Active iteration**: V1.81 (active) — Creator SOUL Maturation: headline = Creator-SOUL Narrative (on-demand + stale-invalidation, world-agnostic); companions = per-World projection + BL-10 growth-curve + auto-refresh. Backlog after V1.81: per-World LLM narratives, BL-09 standalone maturation dashboard, BL-11 deeper manuscript reading/annotations.
 
-**Latest shipped**: [V1.66](../iterations/v1.66-tauri-desktop-shell-delivery-compass-v1.md) (Tauri Desktop Shell, PR #90 — 2026-06-26)
+**Latest shipped**: [V1.80](../iterations/v1.80-memory-review-reliability-and-frontend-hygiene-compass-v1.md) (Memory Review Reliability + Frontend Hygiene, PR #107 — 2026-07-01)
 
 **Full iteration index**: [iterations/README.md](../iterations/README.md)
 
