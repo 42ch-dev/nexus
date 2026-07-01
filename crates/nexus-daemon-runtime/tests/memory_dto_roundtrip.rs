@@ -59,6 +59,8 @@ fn handler_serves_exact_contract_types() {
     let _: nexus_contracts::MemoryFragmentInfo = handler::MemoryFragmentInfo {
         fragment_id: "frag_1".into(),
         summary: "s".into(),
+        keywords: Some(vec!["theme".into()]),
+        created_at: Some("2026-07-01T00:00:00Z".into()),
     };
 }
 
@@ -171,13 +173,18 @@ fn create_and_delete_responses_echo_pending_id() {
     assert_eq!(vd, json!({ "success": true, "pending_id": "p1" }));
 }
 
-/// `ListMemoryFragmentsResponse` exposes only `fragment_id` + `summary`.
+/// `ListMemoryFragmentsResponse` exposes `fragment_id` + `summary` plus the V1.79
+/// additive `keywords` + `created_at` read-only fields, while internal fields
+/// (`ttl`, `session_id`, `creator_id`) stay off this wire shape. The two additive
+/// fields round-trip through serde; an explicit `None` is omitted on the wire.
 #[test]
-fn fragments_response_exposes_only_id_and_summary() {
+fn fragments_response_round_trips_keywords_and_created_at() {
     let resp = handler::ListMemoryFragmentsResponse {
         fragments: vec![handler::MemoryFragmentInfo {
             fragment_id: "frag_1".into(),
             summary: "a keyword fragment".into(),
+            keywords: Some(vec!["historical fiction".into(), "moral ambiguity".into()]),
+            created_at: Some("2026-07-01T00:00:00Z".into()),
         }],
     };
     let _: ListMemoryFragmentsResponse = resp;
@@ -185,8 +192,32 @@ fn fragments_response_exposes_only_id_and_summary() {
     let frag = &v["fragments"][0];
     assert_eq!(frag["fragment_id"], json!("frag_1"));
     assert_eq!(frag["summary"], json!("a keyword fragment"));
+    // V1.79 additive fields serialize and carry the keyword array + timestamp.
+    assert_eq!(
+        frag["keywords"],
+        json!(["historical fiction", "moral ambiguity"])
+    );
+    assert_eq!(frag["created_at"], json!("2026-07-01T00:00:00Z"));
     // Internal fragment fields are intentionally not on this wire shape.
-    assert!(frag.get("keywords").is_none());
     assert!(frag.get("ttl").is_none());
     assert!(frag.get("session_id").is_none());
+    assert!(frag.get("creator_id").is_none());
+
+    // Round-trip: serialize → deserialize → re-serialize is stable.
+    let rt: ListMemoryFragmentsResponse = serde_json::from_value(v.clone()).unwrap();
+    assert_eq!(serde_json::to_value(&rt).unwrap(), v);
+
+    // A fragment with no keyword labels still serializes keywords as an empty
+    // array (the handler always emits Some when the DB column is populated;
+    // malformed JSON degrades to an empty Vec, not an absent field).
+    let empty_kw = handler::MemoryFragmentInfo {
+        fragment_id: "frag_2".into(),
+        summary: "no keywords".into(),
+        keywords: Some(Vec::new()),
+        created_at: Some("2026-07-01T00:00:00Z".into()),
+    };
+    let v_empty = serde_json::to_value(&empty_kw).unwrap();
+    assert_eq!(v_empty["keywords"], json!([]));
+    assert!(v_empty.get("ttl").is_none());
+    assert!(v_empty.get("session_id").is_none());
 }

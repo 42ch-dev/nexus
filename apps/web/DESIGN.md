@@ -66,6 +66,13 @@ typography:
   button-12: { fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif", fontSize: "12px", fontWeight: 600, lineHeight: 1, letterSpacing: "0.01em" }
   label-12-mono: { fontFamily: "\"SFMono-Regular\", \"Cascadia Code\", \"Roboto Mono\", Consolas, monospace", fontSize: "12px", fontWeight: 500, lineHeight: 1.4, letterSpacing: "0" }
   copy-13-mono: { fontFamily: "\"SFMono-Regular\", \"Cascadia Code\", \"Roboto Mono\", Consolas, monospace", fontSize: "13px", fontWeight: 400, lineHeight: 1.5, letterSpacing: "0" }
+  # V1.79 Author Reflection — reading-surface typography (P0 concrete values).
+  # Theme-independent metrics (a reading measure is a line-length target, not a
+  # color); values are identical in DESIGN.dark.md so the prose column shape does
+  # not shift between themes. Consumed via CSS vars in index.css.
+  reading-prose-measure: "68ch"
+  reading-prose-line-height: "1.75"
+  reading-prose-paragraph-spacing: "1.25em"
 
 spacing:
   base: "4px"
@@ -255,6 +262,49 @@ components:
     textColor: "{colors.gray-1000}"
   memory-fragment-filter-input:
     basis: "input-select-textarea.default"
+
+  # V1.79 Author Reflection — Track A/B token stubs only (names + structure).
+  # Concrete light values land in P0 (reading surface) and P1 (SOUL viz).
+  # V1.79 Author Reflection — Track A reading-surface component tokens (P0
+  # concrete light values). Token names frozen verbatim (V1.69 invariant
+  # continues); dark values live in DESIGN.dark.md under the same names.
+  # Composition tokens reference existing primitives so the surface composes
+  # card/button/badge semantics without duplicating primitive values. Track B
+  # (soul-viz-*) stubs remain for P1 and are NOT filled here.
+  reading-chapter-nav:
+    chrome-bg: "{colors.background-200}"
+    chrome-border: "{colors.gray-alpha-400}"
+    control-prev: "button.secondary basis"
+    control-next: "button.secondary basis"
+    volume-group-bg: "{colors.background-300}"
+    volume-group-border: "{colors.gray-alpha-300}"
+  reading-progress-indicator:
+    track: "{colors.gray-alpha-200}"
+    fill: "{colors.blue-700}"
+    label: "{colors.gray-700}"
+  reading-maturation-badge:
+    chapter-completion-state: "ChapterStatusBadge basis"
+    world-kb-density-count: { backgroundColor: "rgba(0,133,119,0.10)", textColor: "{colors.teal-1000}", borderColor: "rgba(0,133,119,0.30)" }
+    open-findings-count: { backgroundColor: "rgba(183,110,0,0.12)", textColor: "{colors.amber-1000}", borderColor: "rgba(183,110,0,0.30)" }
+    base: { height: "20px", paddingInline: "6px", rounded: "{rounded.pill}", typography: "{typography.label-12}" }
+  # V1.79 P1 — SOUL personality visualization concrete light values.
+  # Keyword clusters: nodes scale by frequency; size/opacity encode weight.
+  # Temporal drift: a calm stacked-band timeline where band height encodes a
+  # keyword's share of newly-captured fragments in that time bucket.
+  soul-viz-keyword-cluster-node:
+    shape: "circle"
+    size: "min-max 10px-44px by frequency"
+    fill: "rgba(124,58,237,0.18)"
+    stroke: "{colors.purple-700}"
+    label: "{colors.gray-1000}"
+  soul-viz-timeline-axis:
+    line: "{colors.gray-alpha-400}"
+    tick: "{colors.gray-400}"
+    label: "{typography.label-12} @ {colors.gray-700}"
+  soul-viz-drift-band:
+    fill: "rgba(0,107,255,0.16)"
+    step-stroke: "{colors.gray-alpha-200}"
+    label: "{typography.label-12} @ {colors.gray-900}"
 
   # V1.70 canvas implement — concrete light values (canvas-strategy-surface.md Draft §3.6 / B4)
   canvas:
@@ -745,3 +795,6 @@ Interaction rules:
 - Optimistic delete removes the row and decrements the count badge before the server responds; rolls back on error.
 - Token names are preserved verbatim — no consumer (`tailwind.config.ts`, `index.css`, or Memory page components) invents a name not in this frontmatter (V1.69 invariant continues).
 
+### Author Reflection Token Stubs (V1.79)
+
+V1.79 P0 filled the Track A reading-surface tokens with concrete light values; only the Track B SOUL visualization token stubs remain for P1 to replace with concrete light/dark values.

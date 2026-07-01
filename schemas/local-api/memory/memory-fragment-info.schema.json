@@ -3,12 +3,21 @@
   "$id": "https://nexus42.invalid/schemas/local-api/memory/memory-fragment-info.schema.json",
   "schema_version": 1,
   "title": "Nexus MemoryFragmentInfo",
-  "description": "A single memory-fragment row in the list-fragments response. The Local API intentionally exposes only `fragment_id` and `summary`; internal fragment fields (session_id, creator_id, keywords, created_at, ttl) are not part of this response.",
+  "description": "A single memory-fragment row in the list-fragments response. V1.79 exposes keyword and creation-time metadata for read-only SOUL visualization; write-only/internal fragment fields (session_id, creator_id, ttl) remain out of this response.",
   "type": "object",
   "required": ["fragment_id", "summary"],
   "properties": {
     "fragment_id": { "type": "string" },
-    "summary": { "type": "string" }
+    "summary": { "type": "string" },
+    "keywords": {
+      "type": "array",
+      "description": "Optional keyword labels extracted for this fragment, decoded from the `memory_fragments.keywords` JSON array for read-only visualization.",
+      "items": { "type": "string" }
+    },
+    "created_at": {
+      "type": "string",
+      "description": "Optional RFC 3339 creation timestamp copied from `memory_fragments.created_at`; used as the temporal-drift axis. Family convention keeps timestamps as plain strings."
+    }
   },
   "additionalProperties": false
 }
