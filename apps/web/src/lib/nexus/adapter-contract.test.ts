@@ -174,13 +174,22 @@ describe('TauriClient transport parity (thin-over-BrowserClient)', () => {
       base_revision: 1,
       operation: 'add_event',
     });
+    // V1.78 Creator Memory review-loop promotion (V1.67 G2 pattern — types +
+    // routes already shipped; these exercise the new TS surface). The memory
+    // surface is creator-scoped; the active creator id rides as a query/body
+    // param, so the path portion stays under /v1/local/memory/*.
+    await client.listPendingReviews('c1');
+    await client.countPendingReviews('c1');
+    await client.deletePendingReview('p1', 'c1');
+    await client.reviewMemory({ creator_id: 'c1' });
+    await client.listMemoryFragments('c1');
 
     // Every method must have hit a /v1/local/* path (transport parity with the
     // browser client). If a method silently no-op'd or threw — as the V1.65
     // stub did — its path would be missing and this set would be smaller.
     const paths = [...seen].sort();
     expect(paths.every((p) => p.includes('/v1/local/'))).toBe(true);
-    expect(seen.size).toBe(29);
+    expect(seen.size).toBe(34);
     // Spot-check the chapter surface (the Q5 action target).
     expect(seen).toContain('GET /v1/local/works/w1/chapters/1/body');
     expect(seen).toContain('GET /v1/local/works/w1/chapters/1/outline');
@@ -196,6 +205,12 @@ describe('TauriClient transport parity (thin-over-BrowserClient)', () => {
     // Spot-check the V1.77 findings-remediation surface.
     expect(seen).toContain('GET /v1/local/works/w1/findings/f1');
     expect(seen).toContain('PATCH /v1/local/works/w1/findings/f1');
+    // Spot-check the V1.78 Creator Memory review-loop surface.
+    expect(seen).toContain('GET /v1/local/memory/pending-review');
+    expect(seen).toContain('GET /v1/local/memory/pending-review/count');
+    expect(seen).toContain('DELETE /v1/local/memory/pending-review/p1');
+    expect(seen).toContain('POST /v1/local/memory/review');
+    expect(seen).toContain('GET /v1/local/memory/fragments');
   });
 });
 
@@ -518,6 +533,92 @@ describe('NexusClient findings-method parity guard (V1.77)', () => {
         url: '/v1/local/works/w1/findings/f1',
         body: { status: 'triaged', target_executor: 'write' },
       },
+    ]);
+  });
+});
+
+// ── 6. Memory-method parity guard (V1.78) ───────────────────────────────────
+
+/**
+ * The V1.78 Creator Memory review-loop promotion added five methods to the
+ * `NexusClient` interface (`listPendingReviews` / `countPendingReviews` /
+ * `deletePendingReview` / `reviewMemory` / `listMemoryFragments`). This guard
+ * mirrors the preset + findings parity guards: it fails at compile time (the
+ * `satisfies` constraint) if the interface drops any method, and at runtime if
+ * an adapter implementation is missing it. `createPendingReview` is
+ * intentionally absent (CLI/producer-only — compass D-UX LOCKED).
+ */
+const MEMORY_METHODS = [
+  'listPendingReviews',
+  'countPendingReviews',
+  'deletePendingReview',
+  'reviewMemory',
+  'listMemoryFragments',
+] as const satisfies readonly (keyof NexusClient)[];
+
+describe('NexusClient memory-method parity guard (V1.78)', () => {
+  it('BrowserClient implements every memory method on the NexusClient interface', () => {
+    const client = new BrowserClient();
+    for (const method of MEMORY_METHODS) {
+      expect(typeof client[method], `BrowserClient.${method} must be a function`).toBe('function');
+    }
+  });
+
+  it('TauriClient inherits every memory method (thin-over-BrowserClient)', () => {
+    const client = new TauriClient({
+      fetchImpl: async () =>
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    });
+    for (const method of MEMORY_METHODS) {
+      expect(typeof client[method], `TauriClient.${method} must be a function`).toBe('function');
+    }
+  });
+
+  it('routes the memory methods to the right verb + path + creator_id param', async () => {
+    // Contract edges: list/count/fragments carry creator_id as a query param;
+    // delete encodes the pending_id path param AND the creator_id query param;
+    // review carries creator_id in the JSON body. Pinned via the fetchImpl seam
+    // (this file owns the adapter boundary — fetchImpl injection + path/query
+    // serialization + body shape).
+    const seen: { method: string; url: string; body?: unknown }[] = [];
+    const fetchImpl: typeof fetch = async (input, init) => {
+      seen.push({
+        method: init?.method ?? 'GET',
+        url: String(input),
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      });
+      // Minimal valid payloads per route; shape is what matters here.
+      if ((init?.method ?? 'GET') === 'DELETE') {
+        return new Response(JSON.stringify({ success: true, pending_id: 'p1' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    };
+
+    const client = new BrowserClient({ fetchImpl });
+    await client.listPendingReviews('c1', { limit: 5, cursor: 'cur' });
+    await client.countPendingReviews('c1');
+    await client.deletePendingReview('p1', 'c1');
+    await client.reviewMemory({ creator_id: 'c1' });
+    await client.listMemoryFragments('c1', { keyword: 'kw', limit: 10 });
+
+    // list/count/fragments serialize creator_id (+optional params) into the
+    // query string; delete encodes the pending_id path segment and adds the
+    // creator_id query param; review sends creator_id in the JSON body.
+    expect(seen).toEqual([
+      { method: 'GET', url: '/v1/local/memory/pending-review?limit=5&cursor=cur&creator_id=c1' },
+      { method: 'GET', url: '/v1/local/memory/pending-review/count?creator_id=c1' },
+      { method: 'DELETE', url: '/v1/local/memory/pending-review/p1?creator_id=c1' },
+      { method: 'POST', url: '/v1/local/memory/review', body: { creator_id: 'c1' } },
+      { method: 'GET', url: '/v1/local/memory/fragments?keyword=kw&limit=10&creator_id=c1' },
     ]);
   });
 });

@@ -1022,3 +1022,89 @@ async fn update_preserves_needs_review_when_omitted() {
         "omitting needs_review preserves the suggestion gate"
     );
 }
+
+// ── V1.77: relationship graph cap ──────────────────────────────────────────
+
+/// Seed `count` confirmed, non-symmetric relationships with strictly increasing
+/// `updated_at` values so `ORDER BY updated_at DESC` is deterministic.
+async fn seed_many_relationships(pool: &sqlx::SqlitePool, world_id: &str, count: usize) {
+    for i in 0..count {
+        let rel_id = format!("rel_cap_{i:04}");
+        let updated = format!(
+            "2026-06-30T{:02}:{:02}:{:02}.000Z",
+            i / 3600,
+            (i % 3600) / 60,
+            i % 60
+        );
+        sqlx::query(
+            "INSERT INTO kb_relationships \
+             (relationship_id, world_id, source_entity_id, target_entity_id, relation_type, \
+              symmetric, confidence, source_anchor_ids, metadata, created_at, updated_at, \
+              revision, needs_review, source) \
+             VALUES (?, ?, 'kb_a', 'kb_b', 'allied_with', 0, NULL, '[]', '{}', ?, ?, 0, 0, 'manual')",
+        )
+        .bind(&rel_id)
+        .bind(world_id)
+        .bind(&updated)
+        .bind(&updated)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+}
+
+#[tokio::test]
+async fn get_graph_truncates_relationships_at_cap() {
+    let (_tmp, state) = fresh_state().await;
+    seed_key_block(
+        state.pool(),
+        "kb_a",
+        "wld_test_world",
+        "character",
+        "Aria",
+        "confirmed",
+    )
+    .await;
+    seed_key_block(
+        state.pool(),
+        "kb_b",
+        "wld_test_world",
+        "character",
+        "Kael",
+        "confirmed",
+    )
+    .await;
+
+    // GRAPH_RELATIONSHIP_CAP is 1000 in src/api/handlers/world_kb.rs.
+    const CAP: usize = 1000;
+    seed_many_relationships(state.pool(), "wld_test_world", CAP + 2).await;
+
+    let Json(graph) = get_graph(
+        State(state.clone()),
+        Path("wld_test_world".to_string()),
+        Query(GraphQuery {
+            include_suggested: None,
+        }),
+    )
+    .await
+    .expect("graph should succeed");
+
+    assert_eq!(
+        graph.relationships.len(),
+        CAP,
+        "projects at most GRAPH_RELATIONSHIP_CAP stored rows"
+    );
+
+    let ids: std::collections::HashSet<_> = graph
+        .relationships
+        .iter()
+        .map(|r| r.relationship_id.as_str())
+        .collect();
+
+    // The two oldest relationships (lowest updated_at) are silently dropped.
+    assert!(!ids.contains("rel_cap_0000"));
+    assert!(!ids.contains("rel_cap_0001"));
+    // The newest relationships are retained.
+    assert!(ids.contains("rel_cap_0002"));
+    assert!(ids.contains(format!("rel_cap_{:04}", CAP).as_str()));
+}

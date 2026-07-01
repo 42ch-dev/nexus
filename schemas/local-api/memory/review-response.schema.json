@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/memory/review-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ReviewResponse",
+  "description": "Response body for POST /v1/local/memory/review. Summarizes how many pending entries were promoted to long-term memory, fragmented, or dropped by the rule-based classifier. Shipped behavior: PassthroughSummarizer (no LLM); each pending row is classified and the pending row is deleted on promote/fragment/drop success.",
+  "type": "object",
+  "required": ["promoted", "fragmented", "dropped"],
+  "properties": {
+    "promoted": { "type": "integer" },
+    "fragmented": { "type": "integer" },
+    "dropped": { "type": "integer" }
+  },
+  "additionalProperties": false
+}
