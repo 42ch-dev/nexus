@@ -52,8 +52,7 @@ export function useChapterKeyboardNav(
         e.key === 'ArrowLeft' ? neighbors.prev : e.key === 'ArrowRight' ? neighbors.next : null;
       if (!target) return;
       e.preventDefault();
-      const v = target.volume ?? 1;
-      navigate(`/works/${encodeURIComponent(workId)}/chapters/${target.chapter}?volume=${v}`);
+      navigate(`/works/${encodeURIComponent(workId)}/chapters/${target.chapter}?volume=${target.volume}`);
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
