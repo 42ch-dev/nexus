@@ -890,6 +890,16 @@ pub async fn fragments(
         .map(|r| MemoryFragmentInfo {
             fragment_id: r.fragment_id,
             summary: r.summary,
+            // V1.79: expose the stored keyword labels + creation timestamp for
+            // read-only SOUL visualization. `keywords` is a JSON-array String in
+            // `memory_fragments`; decode it to `Vec<String>` (malformed JSON on
+            // legacy/corrupt rows degrades to an empty list, never fails the
+            // response — see `decode_fragment_keywords`). `created_at` is copied
+            // verbatim (RFC 3339 string). Both DB columns are non-null, so they
+            // are always populated as `Some`; the optional wire shape lets
+            // future producers omit them.
+            keywords: Some(decode_fragment_keywords(&r.keywords)),
+            created_at: Some(r.created_at),
         })
         .collect();
 
@@ -901,6 +911,19 @@ pub async fn fragments(
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+/// Decode the `memory_fragments.keywords` JSON-array string into `Vec<String>`.
+///
+/// V1.79 SOUL visualization reads this off the list-fragments wire shape. The
+/// stored column is a JSON array (`["alpha","beta"]`); legacy or corrupt rows
+/// may hold malformed JSON. A decode failure degrades to an **empty** list
+/// rather than failing the whole fragments response — the read-only viz then
+/// simply shows no keywords for that fragment. Mirrors the same
+/// `serde_json::from_str::<Vec<String>>(...).unwrap_or_default()` contract used
+/// by `nexus_local_db::memory_fragment::get_all_keywords`.
+fn decode_fragment_keywords(raw: &str) -> Vec<String> {
+    serde_json::from_str::<Vec<String>>(raw).unwrap_or_default()
+}
 
 /// Read active `creator_id` from CLI config (matches works.rs pattern).
 ///
@@ -1005,5 +1028,33 @@ mod tests {
             result.contains(small),
             "Small digest should be included verbatim"
         );
+    }
+
+    // ── V1.79: keyword JSON decode (SOUL visualization projection) ──────────
+
+    #[test]
+    fn decode_fragment_keywords_parses_valid_json_array() {
+        let kw = decode_fragment_keywords(r#"["historical fiction","moral ambiguity"]"#);
+        assert_eq!(kw, vec!["historical fiction", "moral ambiguity"]);
+    }
+
+    #[test]
+    fn decode_fragment_keywords_empty_array() {
+        assert!(decode_fragment_keywords("[]").is_empty());
+    }
+
+    #[test]
+    fn decode_fragment_keywords_malformed_json_degrades_to_empty() {
+        // Legacy/corrupt rows must never fail the fragments response.
+        assert!(decode_fragment_keywords("not valid json").is_empty());
+        assert!(decode_fragment_keywords("").is_empty());
+        // A JSON object (not an array) is also rejected gracefully.
+        assert!(decode_fragment_keywords(r#"{"key":"value"}"#).is_empty());
+    }
+
+    #[test]
+    fn decode_fragment_keywords_non_string_items_rejected() {
+        // Mixed-type arrays are not `Vec<String>` → graceful empty.
+        assert!(decode_fragment_keywords(r#"["ok", 42]"#).is_empty());
     }
 }
