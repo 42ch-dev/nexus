@@ -318,6 +318,12 @@ components:
     fill-6: "rgba(53,142,53,0.16)"
     step-stroke: "{colors.gray-alpha-200}"
     label: "{typography.label-12} @ {colors.gray-900}"
+  # V1.81 Creator SOUL Maturation — narrative prose + growth-curve accent.
+  # Narrative prose composes the existing V1.79 reading-prose rhythm with a
+  # quieter foreground; growth-curve stroke reuses the SOUL accent family while
+  # remaining distinct from the temporal-drift stacked-band fills.
+  soul-narrative-prose: "{typography.copy-16} @ {colors.gray-900}"
+  soul-growth-curve-stroke: "{colors.purple-700}"
 
   # V1.70 canvas implement — concrete light values (canvas-strategy-surface.md Draft §3.6 / B4)
   canvas:

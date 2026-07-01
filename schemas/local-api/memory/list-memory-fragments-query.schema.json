@@ -8,6 +8,10 @@
   "required": ["creator_id"],
   "properties": {
     "creator_id": { "type": "string" },
+    "world_id": {
+      "type": "string",
+      "description": "Optional world projection filter. Omitted returns the whole Creator SOUL; present returns only fragments that emerged from this world. V1.81 has no public query value for core-only fragments."
+    },
     "keyword": { "type": "string" },
     "limit": { "type": "integer" }
   },

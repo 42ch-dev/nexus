@@ -11,6 +11,7 @@ import type { SchemaVersion } from '../../common/CommonTypes';
 export interface MemoryFragmentInfo {
   fragment_id: string;
   summary: string;
+  world_id?: string | null;
   keywords?: string[];
   created_at?: string;
 }

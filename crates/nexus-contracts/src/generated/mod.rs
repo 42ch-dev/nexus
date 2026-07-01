@@ -102,6 +102,8 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("PendingReviewInfo", 1),
     ("ReviewRequest", 1),
     ("ReviewResponse", 1),
+    ("SoulNarrativeRequest", 1),
+    ("SoulNarrativeResponse", 1),
     ("CapabilityInfo", 1),
     ("ListCapabilitiesQuery", 2),
     ("ListCapabilitiesResponse", 2),
