@@ -37,8 +37,9 @@ interface ChapterNavProps {
 }
 
 function chapterHref(workId: string, row: ChapterSummary): string {
-  const v = row.volume ?? 1;
-  return `/works/${encodeURIComponent(workId)}/chapters/${row.chapter}?volume=${v}`;
+  // `volume` is contract-guaranteed (ChapterSummary.volume: number, >= 1), so
+  // no defensive fallback is needed (R-V179P0-QC1-002).
+  return `/works/${encodeURIComponent(workId)}/chapters/${row.chapter}?volume=${row.volume}`;
 }
 
 function chapterLabel(row: ChapterSummary): string {

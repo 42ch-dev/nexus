@@ -65,7 +65,8 @@ export function ChapterPage() {
   const ch = chapter.data;
   const canvasHref = `/works/${encodeURIComponent(workId)}/outline?chapter=${ch.chapter}`;
   // Key the progress bar on chapter so it resets when the reader navigates.
-  const progressKey = `${workId}:${ch.chapter}:${ch.volume ?? 1}`;
+  // `ch.volume` is contract-guaranteed (ChapterDetail.volume: number, >= 1).
+  const progressKey = `${workId}:${ch.chapter}:${ch.volume}`;
 
   return (
     <div className="flex flex-col gap-4">
