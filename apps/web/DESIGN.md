@@ -287,20 +287,24 @@ components:
     world-kb-density-count: { backgroundColor: "rgba(0,133,119,0.10)", textColor: "{colors.teal-1000}", borderColor: "rgba(0,133,119,0.30)" }
     open-findings-count: { backgroundColor: "rgba(183,110,0,0.12)", textColor: "{colors.amber-1000}", borderColor: "rgba(183,110,0,0.30)" }
     base: { height: "20px", paddingInline: "6px", rounded: "{rounded.pill}", typography: "{typography.label-12}" }
+  # V1.79 P1 — SOUL personality visualization concrete light values.
+  # Keyword clusters: nodes scale by frequency; size/opacity encode weight.
+  # Temporal drift: a calm stacked-band timeline where band height encodes a
+  # keyword's share of newly-captured fragments in that time bucket.
   soul-viz-keyword-cluster-node:
-    shape: "TODO-V1.79-light-soul-viz-keyword-cluster-node-shape"
-    size: "TODO-V1.79-light-soul-viz-keyword-cluster-node-size"
-    fill: "TODO-V1.79-light-soul-viz-keyword-cluster-node-fill"
-    stroke: "TODO-V1.79-light-soul-viz-keyword-cluster-node-stroke"
-    label: "TODO-V1.79-light-soul-viz-keyword-cluster-node-label"
+    shape: "circle"
+    size: "min-max 10px-44px by frequency"
+    fill: "rgba(124,58,237,0.18)"
+    stroke: "{colors.purple-700}"
+    label: "{colors.gray-1000}"
   soul-viz-timeline-axis:
-    line: "TODO-V1.79-light-soul-viz-timeline-axis-line"
-    tick: "TODO-V1.79-light-soul-viz-timeline-axis-tick"
-    label: "TODO-V1.79-light-soul-viz-timeline-axis-label"
+    line: "{colors.gray-alpha-400}"
+    tick: "{colors.gray-400}"
+    label: "{typography.label-12} @ {colors.gray-700}"
   soul-viz-drift-band:
-    fill: "TODO-V1.79-light-soul-viz-drift-band-fill"
-    step-stroke: "TODO-V1.79-light-soul-viz-drift-band-step-stroke"
-    label: "TODO-V1.79-light-soul-viz-drift-band-label"
+    fill: "rgba(0,107,255,0.16)"
+    step-stroke: "{colors.gray-alpha-200}"
+    label: "{typography.label-12} @ {colors.gray-900}"
 
   # V1.70 canvas implement — concrete light values (canvas-strategy-surface.md Draft §3.6 / B4)
   canvas:
