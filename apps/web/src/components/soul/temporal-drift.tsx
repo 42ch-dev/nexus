@@ -1,5 +1,4 @@
 import type { TimeBucket } from '@/components/soul/soul-stats';
-import { formatDate } from '@/lib/format';
 
 /**
  * Temporal drift timeline (V1.79 P1 — SOUL §C).
@@ -18,6 +17,13 @@ import { formatDate } from '@/lib/format';
  *  - Sparse data renders honest step heights — no interpolation, no fake curves.
  *  - A legend maps the top-N band colors to keywords; the cumulative count sits
  *    above each bucket boundary so growth is legible without a second axis.
+ *
+ * Palette (R-V179P1-QC1-002): the band fills are an ordered token set in the
+ * `soul-viz-drift-band` family (DESIGN.md / DESIGN.dark.md), bridged to the
+ * `--color-soul-viz-drift-band-fill*` CSS vars in src/index.css. Slot 0 maps to
+ * `--color-soul-viz-drift-band-fill` and slots 1..5 to `-fill-2`..`-fill-6`.
+ * No RGBA value is hardcoded here; adding a 7th band requires extending the
+ * token family + the CSS bridge (the chart caps at the palette length).
  */
 const BAND_PALETTE = [
   'var(--color-soul-viz-drift-band-fill)',
@@ -133,6 +139,3 @@ function collectLegendKeywords(buckets: TimeBucket[], topN: number): string[] {
     .slice(0, topN)
     .map(([kw]) => kw);
 }
-
-/** Re-export for tests that need stable date formatting of the first bucket. */
-export const driftDateHelper = formatDate;
