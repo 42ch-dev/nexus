@@ -1,13 +1,13 @@
 {
   "version": 1,
-  "updated_at": "2026-07-01T00:00:00Z",
+  "updated_at": "2026-07-01T02:54:00Z",
   "plans": [],
   "metadata": {
-    "integration_branch": "iteration/v1.78",
+    "integration_branch": null,
     "integration_branch_retired": true,
     "last_integration_branch": "iteration/v1.78",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.78 delivered (2026-07-01); next V1.79 pending /iteration-start",
+    "latest_active_iteration": "V1.78 shipped (2026-07-01 via PR #105 @ fbdb27de); next V1.79 pending /iteration-start",
     "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
@@ -16,12 +16,14 @@
     "latest_ship": {
       "iteration": "V1.78",
       "compass": "v1.78-creator-memory-review-loop-ui-and-slate-clear-compass-v1.md",
-      "shipped_at": "2026-07-01",
+      "shipped_at": "2026-07-01 (merged via PR #105 @ fbdb27de)",
       "plan_count": 3,
       "plan_count_done": 3,
       "wire_contracts_changed": true,
       "wire_contracts_note": "V1.78: additive — 14 new memory local-api schemas + codegen; @42ch/nexus-contracts 0.12.0 -> 0.13.0.",
-      "profile_b_compaction": "done (V1.78 P-last closure)"
+      "profile_b_compaction": "done (V1.78 P-last closure)",
+      "merge_commit": "fbdb27de",
+      "pr": "#105"
     },
     "tech_debt_summary": {
       "total_open": 2,
@@ -39,7 +41,7 @@
       "refreshed_reason": "V1.78 QC fix-wave closed (3 residuals resolved: pagination + 2 doc nits). 2 low residuals remain deferred to V1.79+."
     },
     "updated_at": "2026-07-01",
-    "spec_integration_branch": "iteration/v1.78",
+    "spec_integration_branch": null,
     "wave1_merged_at": "2026-07-01"
   },
   "residual_findings": {
