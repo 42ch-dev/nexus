@@ -1,0 +1,15 @@
+{
+  "plan_id": "2026-07-01-v1.81-prepare-spec-and-contracts",
+  "iteration_id": "V1.81",
+  "status": "Done",
+  "owner": "@architect",
+  "effort": "S",
+  "type": "prepare",
+  "working_branch": "feature/v1.81-prepare",
+  "merge_target": "iteration/v1.81",
+  "task_category": "logic",
+  "wire_contracts_changed": true,
+  "wire_contracts_note": "P-1 owns contract landing (schema edits + codegen + 0.15.0->0.16.0 + drift registration); P0/P1 consume frozen generated types.",
+  "depends_on": [],
+  "completion_note": "V1.81 shipped (QC 3/3 Approve after 3 fix-wave rounds; QA Pass)."
+}

@@ -2623,6 +2623,7 @@ dependencies = [
  "async-trait",
  "blake3",
  "chrono",
+ "futures-util",
  "nexus-contracts",
  "nexus-home-layout",
  "nexus-kb",

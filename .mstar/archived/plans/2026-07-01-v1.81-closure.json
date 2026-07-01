@@ -1,0 +1,18 @@
+{
+  "plan_id": "2026-07-01-v1.81-closure",
+  "iteration_id": "V1.81",
+  "status": "Done",
+  "owner": "@project-manager",
+  "effort": "S",
+  "type": "closure",
+  "working_branch": "feature/v1.81-closure",
+  "merge_target": "iteration/v1.81",
+  "task_category": "docs",
+  "wire_contracts_changed": false,
+  "wire_contracts_note": "Closure only.",
+  "depends_on": [
+    "2026-07-01-v1.81-creator-soul-narrative-and-world-foundation",
+    "2026-07-01-v1.81-soul-surface-deepening"
+  ],
+  "completion_note": "V1.81 shipped (QC 3/3 Approve after 3 fix-wave rounds; QA Pass)."
+}

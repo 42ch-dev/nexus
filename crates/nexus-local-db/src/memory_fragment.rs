@@ -1,7 +1,7 @@
 //! Memory fragment CRUD operations for review pipeline.
 //!
 //! Manages lightweight keyword-indexed fragments from review decisions.
-//! See creator-memory-soul-lifecycle-v1.md §7.2.
+//! See creator-memory-soul-lifecycle.md §7.2.
 
 use sqlx::{Row, SqlitePool};
 
@@ -24,6 +24,8 @@ pub struct MemoryFragmentRecord {
     pub created_at: String,
     /// Optional TTL (e.g., "30d", "90d").
     pub ttl: Option<String>,
+    /// World context (nullable provenance tag; no FK).
+    pub world_id: Option<String>,
 }
 
 /// Create a new memory fragment.
@@ -38,15 +40,16 @@ pub async fn create_fragment(
     fragment: &MemoryFragmentRecord,
 ) -> Result<(), LocalDbError> {
     sqlx::query!(
-        "INSERT INTO memory_fragments (fragment_id, session_id, creator_id, keywords, summary, created_at, ttl)
-         VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO memory_fragments (fragment_id, session_id, creator_id, keywords, summary, created_at, ttl, world_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         fragment.fragment_id,
         fragment.session_id,
         fragment.creator_id,
         fragment.keywords,
         fragment.summary,
         fragment.created_at,
-        fragment.ttl
+        fragment.ttl,
+        fragment.world_id
     )
     .execute(pool)
     .await?;
@@ -67,7 +70,7 @@ pub async fn list_fragments(
     let rows = sqlx::query!(
         "SELECT fragment_id as \"fragment_id!\", session_id as \"session_id!\",
                 creator_id as \"creator_id!\", keywords as \"keywords!\",
-                summary as \"summary!\", created_at as \"created_at!\", ttl
+                summary as \"summary!\", created_at as \"created_at!\", ttl, world_id
          FROM memory_fragments WHERE creator_id = ? ORDER BY created_at DESC",
         creator_id
     )
@@ -84,6 +87,7 @@ pub async fn list_fragments(
             summary: r.summary,
             created_at: r.created_at,
             ttl: r.ttl,
+            world_id: r.world_id,
         })
         .collect())
 }
@@ -101,35 +105,55 @@ pub async fn list_fragments(
 /// `limit` is an `i64` (the `LIMIT` bind type) and is expected to be already
 /// clamped to `1..=MAX_LIMIT` by the caller.
 ///
+/// When `world_id` is `Some`, only fragments matching that world are returned;
+/// `None` means no world filter (Creator SOUL whole).
+///
 /// # Errors
 ///
 /// Returns `LocalDbError` if the database query fails.
 pub async fn list_fragments_limited(
     pool: &SqlitePool,
     creator_id: &str,
+    world_id: Option<&str>,
     limit: i64,
 ) -> Result<Vec<MemoryFragmentRecord>, LocalDbError> {
-    let rows = sqlx::query!(
-        "SELECT fragment_id as \"fragment_id!\", session_id as \"session_id!\",
-                creator_id as \"creator_id!\", keywords as \"keywords!\",
-                summary as \"summary!\", created_at as \"created_at!\", ttl
-         FROM memory_fragments WHERE creator_id = ? ORDER BY created_at DESC LIMIT ?",
-        creator_id,
-        limit
-    )
-    .fetch_all(pool)
-    .await?;
+    // SAFETY: dynamic SQL — compile-time macro not applicable.
+    // Optional world_id produces two WHERE clause variants;
+    // all values are parameterized with .bind() to prevent injection.
+    let rows = if let Some(wid) = world_id {
+        sqlx::query(
+            "SELECT fragment_id, session_id, creator_id, keywords, summary, created_at, ttl, world_id
+             FROM memory_fragments WHERE creator_id = ? AND world_id = ?
+             ORDER BY created_at DESC LIMIT ?",
+        )
+        .bind(creator_id)
+        .bind(wid)
+        .bind(limit)
+        .fetch_all(pool)
+        .await?
+    } else {
+        sqlx::query(
+            "SELECT fragment_id, session_id, creator_id, keywords, summary, created_at, ttl, world_id
+             FROM memory_fragments WHERE creator_id = ?
+             ORDER BY created_at DESC LIMIT ?",
+        )
+        .bind(creator_id)
+        .bind(limit)
+        .fetch_all(pool)
+        .await?
+    };
 
     Ok(rows
         .into_iter()
-        .map(|r| MemoryFragmentRecord {
-            fragment_id: r.fragment_id,
-            session_id: r.session_id,
-            creator_id: r.creator_id,
-            keywords: r.keywords,
-            summary: r.summary,
-            created_at: r.created_at,
-            ttl: r.ttl,
+        .map(|row| MemoryFragmentRecord {
+            fragment_id: row.get("fragment_id"),
+            session_id: row.get("session_id"),
+            creator_id: row.get("creator_id"),
+            keywords: row.get("keywords"),
+            summary: row.get("summary"),
+            created_at: row.get("created_at"),
+            ttl: row.get("ttl"),
+            world_id: row.get("world_id"),
         })
         .collect())
 }
@@ -148,7 +172,7 @@ pub async fn list_fragments_by_session(
     let rows = sqlx::query!(
         "SELECT fragment_id as \"fragment_id!\", session_id as \"session_id!\",
                 creator_id as \"creator_id!\", keywords as \"keywords!\",
-                summary as \"summary!\", created_at as \"created_at!\", ttl
+                summary as \"summary!\", created_at as \"created_at!\", ttl, world_id
          FROM memory_fragments WHERE session_id = ? ORDER BY created_at DESC",
         session_id
     )
@@ -165,6 +189,7 @@ pub async fn list_fragments_by_session(
             summary: r.summary,
             created_at: r.created_at,
             ttl: r.ttl,
+            world_id: r.world_id,
         })
         .collect())
 }
@@ -220,10 +245,12 @@ pub async fn get_all_keywords(
     Ok(all_keywords)
 }
 
-/// List fragments for a creator with optional keyword filter and limit.
+/// List fragments for a creator with optional keyword and world filters and limit.
 ///
 /// When `keyword` is `Some`, only fragments whose `keywords` JSON array contains
 /// the given keyword (case-insensitive `LIKE` match) are returned.
+/// When `world_id` is `Some`, only fragments matching that world are returned;
+/// `None` means no world filter (Creator SOUL whole).
 /// Results are ordered by `created_at` descending, limited to `limit` rows.
 ///
 /// # Errors
@@ -233,39 +260,73 @@ pub async fn list_fragments_filtered(
     pool: &SqlitePool,
     creator_id: &str,
     keyword: Option<&str>,
+    world_id: Option<&str>,
     limit: u32,
 ) -> Result<Vec<MemoryFragmentRecord>, LocalDbError> {
-    // SAFETY: keyword and limit are used in a parameterized query (no injection risk).
-    // Dynamic SQL is used because the optional keyword filter changes the WHERE clause
-    // structure, which cannot be expressed with sqlx compile-time macros alone.
+    // SAFETY: dynamic SQL — compile-time macro not applicable.
+    // Optional keyword + optional world_id filters produce 4 WHERE clause variants;
+    // all values are parameterized with .bind() to prevent injection.
     // R-V133P4-04: removed `!` suffix from column aliases — those are compile-time
     // sqlx markers and cause runtime lookup failures with runtime sqlx::query().
-    let rows = if let Some(kw) = keyword {
-        let pattern = format!("%\"{kw}\"%");
-        sqlx::query(
-            "SELECT fragment_id, session_id, creator_id, keywords, summary, created_at, ttl
-             FROM memory_fragments
-             WHERE creator_id = ? AND keywords LIKE ?
-             ORDER BY created_at DESC
-             LIMIT ?",
-        )
-        .bind(creator_id)
-        .bind(&pattern)
-        .bind(limit)
-        .fetch_all(pool)
-        .await?
-    } else {
-        sqlx::query(
-            "SELECT fragment_id, session_id, creator_id, keywords, summary, created_at, ttl
-             FROM memory_fragments
-             WHERE creator_id = ?
-             ORDER BY created_at DESC
-             LIMIT ?",
-        )
-        .bind(creator_id)
-        .bind(limit)
-        .fetch_all(pool)
-        .await?
+    let rows = match (keyword, world_id) {
+        (Some(kw), Some(wid)) => {
+            let pattern = format!("%\"{kw}\"%");
+            sqlx::query(
+                "SELECT fragment_id, session_id, creator_id, keywords, summary, created_at, ttl, world_id
+                 FROM memory_fragments
+                 WHERE creator_id = ? AND keywords LIKE ? AND world_id = ?
+                 ORDER BY created_at DESC
+                 LIMIT ?",
+            )
+            .bind(creator_id)
+            .bind(&pattern)
+            .bind(wid)
+            .bind(limit)
+            .fetch_all(pool)
+            .await?
+        }
+        (Some(kw), None) => {
+            let pattern = format!("%\"{kw}\"%");
+            sqlx::query(
+                "SELECT fragment_id, session_id, creator_id, keywords, summary, created_at, ttl, world_id
+                 FROM memory_fragments
+                 WHERE creator_id = ? AND keywords LIKE ?
+                 ORDER BY created_at DESC
+                 LIMIT ?",
+            )
+            .bind(creator_id)
+            .bind(&pattern)
+            .bind(limit)
+            .fetch_all(pool)
+            .await?
+        }
+        (None, Some(wid)) => {
+            sqlx::query(
+                "SELECT fragment_id, session_id, creator_id, keywords, summary, created_at, ttl, world_id
+                 FROM memory_fragments
+                 WHERE creator_id = ? AND world_id = ?
+                 ORDER BY created_at DESC
+                 LIMIT ?",
+            )
+            .bind(creator_id)
+            .bind(wid)
+            .bind(limit)
+            .fetch_all(pool)
+            .await?
+        }
+        (None, None) => {
+            sqlx::query(
+                "SELECT fragment_id, session_id, creator_id, keywords, summary, created_at, ttl, world_id
+                 FROM memory_fragments
+                 WHERE creator_id = ?
+                 ORDER BY created_at DESC
+                 LIMIT ?",
+            )
+            .bind(creator_id)
+            .bind(limit)
+            .fetch_all(pool)
+            .await?
+        }
     };
 
     Ok(rows
@@ -278,6 +339,7 @@ pub async fn list_fragments_filtered(
             summary: row.get("summary"),
             created_at: row.get("created_at"),
             ttl: row.get("ttl"),
+            world_id: row.get("world_id"),
         })
         .collect())
 }
@@ -336,6 +398,7 @@ mod tests {
             summary: "Test fragment summary".to_string(),
             created_at: "2026-04-14T10:00:00Z".to_string(),
             ttl: Some("30d".to_string()),
+            world_id: None,
         }
     }
 
@@ -473,5 +536,84 @@ mod tests {
         // Should still return keywords from valid fragment
         assert!(keywords.contains(&"keyword1".to_string()));
         assert!(keywords.contains(&"keyword2".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_world_id_propagation() {
+        let (pool, _dir) = fresh_pool().await;
+        let fragment = MemoryFragmentRecord {
+            world_id: Some("world_alpha".to_string()),
+            ..sample_fragment("frag_world")
+        };
+        create_fragment(&pool, &fragment).await.unwrap();
+
+        let list = list_fragments(&pool, "ctr_test").await.unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].fragment_id, "frag_world");
+        assert_eq!(list[0].world_id.as_deref(), Some("world_alpha"));
+    }
+
+    #[tokio::test]
+    async fn test_world_id_null_by_default() {
+        let (pool, _dir) = fresh_pool().await;
+        let fragment = sample_fragment("frag_null_world");
+        create_fragment(&pool, &fragment).await.unwrap();
+
+        let list = list_fragments(&pool, "ctr_test").await.unwrap();
+        assert_eq!(list.len(), 1);
+        assert_eq!(list[0].world_id, None);
+    }
+
+    #[tokio::test]
+    async fn test_list_fragments_filtered_world_filter() {
+        let (pool, _dir) = fresh_pool().await;
+
+        let frag_world_a = MemoryFragmentRecord {
+            fragment_id: "frag_a".to_string(),
+            world_id: Some("world_a".to_string()),
+            ..sample_fragment("frag_a")
+        };
+        let frag_world_b = MemoryFragmentRecord {
+            fragment_id: "frag_b".to_string(),
+            world_id: Some("world_b".to_string()),
+            ..sample_fragment("frag_b")
+        };
+        let frag_null_world = MemoryFragmentRecord {
+            fragment_id: "frag_null".to_string(),
+            world_id: None,
+            ..sample_fragment("frag_null")
+        };
+
+        create_fragment(&pool, &frag_world_a).await.unwrap();
+        create_fragment(&pool, &frag_world_b).await.unwrap();
+        create_fragment(&pool, &frag_null_world).await.unwrap();
+
+        // Filter by world_a — should return exactly 1
+        let filtered = list_fragments_filtered(&pool, "ctr_test", None, Some("world_a"), 10)
+            .await
+            .unwrap();
+        assert_eq!(filtered.len(), 1);
+        assert_eq!(filtered[0].fragment_id, "frag_a");
+
+        // Filter by world_b
+        let filtered_b = list_fragments_filtered(&pool, "ctr_test", None, Some("world_b"), 10)
+            .await
+            .unwrap();
+        assert_eq!(filtered_b.len(), 1);
+        assert_eq!(filtered_b[0].fragment_id, "frag_b");
+
+        // No world filter → all 3
+        let all = list_fragments_filtered(&pool, "ctr_test", None, None, 10)
+            .await
+            .unwrap();
+        assert_eq!(all.len(), 3);
+
+        // keyword + world filter combination
+        let both =
+            list_fragments_filtered(&pool, "ctr_test", Some("keyword1"), Some("world_a"), 10)
+                .await
+                .unwrap();
+        assert_eq!(both.len(), 1);
+        assert_eq!(both[0].fragment_id, "frag_a");
     }
 }

@@ -62,6 +62,8 @@ import type {
   ListWorksQuery,
   ListWorksResponse,
   OutlinePatchChapterRequest,
+  SoulNarrativeRequest,
+  SoulNarrativeResponse,
   OutlinePatchResponse,
   OutlinePatchStructureRequest,
   PatchChapterRequest,
@@ -333,6 +335,15 @@ export interface NexusClient {
     creatorId: string,
     query?: Omit<ListMemoryFragmentsQuery, 'creator_id'>,
   ): Promise<ListMemoryFragmentsResponse>;
+  /**
+   * `POST /v1/local/memory/soul/reflect` — read or regenerate the cached
+   * whole-Creator SOUL narrative (V1.81). With `force_regenerate` absent/false
+   * the endpoint returns the current cache state (`ungenerated` / `current` /
+   * `stale` / `insufficient_data`); with `force_regenerate: true` it
+   * regenerates the narrative and returns the fresh synthesis. Per-world
+   * narratives are out of scope (the narrative is world-agnostic by contract).
+   */
+  reflectSoulNarrative(request: SoulNarrativeRequest): Promise<SoulNarrativeResponse>;
 }
 
 /** Re-exported for consumers building query/mutation hooks. */
@@ -347,5 +358,7 @@ export type {
   PendingReviewInfo,
   ReviewRequest,
   ReviewResponse,
+  SoulNarrativeRequest,
+  SoulNarrativeResponse,
   UpdateFindingRequest,
 };

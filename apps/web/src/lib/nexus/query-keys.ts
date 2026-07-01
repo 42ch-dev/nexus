@@ -81,5 +81,10 @@ export const queryKeys = {
     count: (creatorId: string) => [...queryKeys.memory.all, 'pending', 'count', creatorId] as const,
     fragments: (creatorId: string, query?: object) =>
       [...queryKeys.memory.all, 'fragments', creatorId, query ?? {}] as const,
+    // V1.81 — whole-Creator SOUL narrative cache (world-agnostic by contract).
+    // Distinct from `fragments` so the narrative read/reflect lifecycle
+    // invalidates independently of the viz fragments query.
+    soulNarrative: (creatorId: string) =>
+      [...queryKeys.memory.all, 'soul-narrative', creatorId] as const,
   },
 } as const;
