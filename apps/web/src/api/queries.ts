@@ -581,16 +581,22 @@ export function useReviewMemory() {
   const { toast } = useToast();
   return useMutation({
     mutationFn: (creatorId: string) => client.reviewMemory({ creator_id: creatorId }),
-    onSuccess: (data: ReviewResponse, creatorId) => {
+    onSuccess: (data: ReviewResponse) => {
       toast({
         variant: 'success',
         title: 'Review complete',
         description: `${data.promoted} promoted to long-term memory, ${data.fragmented} saved as fragments, ${data.dropped} dropped.`,
       });
+    },
+    onError: (error) => errorToast(error, 'Could not complete review'),
+    // Invalidate on settle (not just success): if the network fails AFTER the
+    // server already processed/deleted the pending queue, the client would
+    // otherwise keep showing rows that no longer exist until a manual refresh.
+    // Matches the useDeletePendingReview onSettled pattern.
+    onSettled: (_data, _error, creatorId) => {
       void qc.invalidateQueries({ queryKey: queryKeys.memory.pendingList(creatorId) });
       void qc.invalidateQueries({ queryKey: queryKeys.memory.count(creatorId) });
       void qc.invalidateQueries({ queryKey: queryKeys.memory.fragments(creatorId) });
     },
-    onError: (error) => errorToast(error, 'Could not complete review'),
   });
 }

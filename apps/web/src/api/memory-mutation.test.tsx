@@ -7,7 +7,7 @@
  *    pending-review list AND decrements the count badge before the server
  *    responds, then invalidates pending-list + count + fragments on settle.
  *  - `useReviewMemory` surfaces the result counters in a toast and invalidates
- *    pending-list + count + fragments on success.
+ *    pending-list + count + fragments on settle (success OR error).
  */
 import { screen, fireEvent, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
@@ -149,8 +149,7 @@ describe('useDeletePendingReview — optimistic remove + count decrement + inval
 });
 
 describe('useReviewMemory — result counters + invalidation', () => {
-  it('invalidates pending-list + count + fragments on success', async () => {
-    const listSpy = vi.fn(() =>
+  it('invalidates pending-list + count + fragments on success', async () => {    const listSpy = vi.fn(() =>
       HttpResponse.json({ items: [makePending()], pagination: { limit: 20, has_more: false } }),
     );
     const countSpy = vi.fn(() => HttpResponse.json({ count: 1 }));
@@ -202,5 +201,61 @@ describe('useReviewMemory — result counters + invalidation', () => {
 
     // The result-counters toast surfaces the promoted/fragmented/dropped counts.
     await screen.findByText(/2 promoted to long-term memory/);
+  });
+
+  it('invalidates pending-list + count + fragments even when the review POST fails', async () => {
+    // Regression for the Greptile V1.78 finding: if the network fails AFTER the
+    // server already processed/deleted the pending queue, the client must still
+    // refetch so it does not keep showing rows that no longer exist.
+    const listSpy = vi.fn(() =>
+      HttpResponse.json({ items: [makePending()], pagination: { limit: 20, has_more: false } }),
+    );
+    const countSpy = vi.fn(() => HttpResponse.json({ count: 1 }));
+    const fragmentsSpy = vi.fn(() => HttpResponse.json({ fragments: [] }));
+
+    useHandlers(
+      http.get('/v1/local/memory/pending-review', () => listSpy()),
+      http.get('/v1/local/memory/pending-review/count', () => countSpy()),
+      http.get('/v1/local/memory/fragments', () => fragmentsSpy()),
+      http.post('/v1/local/memory/review', () =>
+        HttpResponse.json(
+          { success: false, error: { code: 'internal', message: 'boom' } },
+          { status: 500 },
+        ),
+      ),
+    );
+
+    function ReviewHarness() {
+      const reviews = usePendingReviews(CREATOR);
+      const count = usePendingReviewCount(CREATOR);
+      const fragments = useMemoryFragments(CREATOR);
+      const reviewMemory = useReviewMemory();
+      void reviews.data;
+      void count.data;
+      void fragments.data;
+      return (
+        <button type="button" onClick={() => reviewMemory.mutate(CREATOR)}>
+          Review
+        </button>
+      );
+    }
+
+    const client = new BrowserClient();
+    renderInApp(<ReviewHarness />, { client });
+
+    await waitFor(() => expect(listSpy).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(fragmentsSpy).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByRole('button', { name: /review/i }));
+
+    // onSettled invalidates pending-list + count + fragments even though the
+    // POST 500'd → all refetch (the whole point: the server may have already
+    // processed the queue before the error reached the client).
+    await waitFor(() => expect(listSpy.mock.calls.length).toBeGreaterThanOrEqual(2));
+    await waitFor(() => expect(countSpy.mock.calls.length).toBeGreaterThanOrEqual(2));
+    await waitFor(() => expect(fragmentsSpy.mock.calls.length).toBeGreaterThanOrEqual(2));
+
+    // The error toast surfaces.
+    await screen.findByText(/could not complete review/i);
   });
 });
