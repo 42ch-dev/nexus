@@ -435,6 +435,16 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             ListMemoryFragmentsResponse
         ),
+        entry!(
+            "schemas/local-api/memory/soul-narrative-request.schema.json",
+            Strict,
+            SoulNarrativeRequest
+        ),
+        entry!(
+            "schemas/local-api/memory/soul-narrative-response.schema.json",
+            Strict,
+            SoulNarrativeResponse
+        ),
         // ── local-api/schedule/ (V1.63 P1) ───────────────────────────────
         entry!(
             "schemas/local-api/schedule/add-schedule-request.schema.json",

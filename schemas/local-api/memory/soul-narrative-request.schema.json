@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/memory/soul-narrative-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus SoulNarrativeRequest",
+  "description": "Request body for POST /v1/local/memory/soul/reflect. The endpoint reads or regenerates the cached whole-Creator SOUL narrative; per-world narratives are out of scope for V1.81.",
+  "type": "object",
+  "required": ["creator_id"],
+  "properties": {
+    "creator_id": {
+      "type": "string",
+      "description": "Active creator identifier; the endpoint rejects mismatches through the existing Local API auth/creator checks."
+    },
+    "force_regenerate": {
+      "type": "boolean",
+      "default": false,
+      "description": "When true, synthesize and overwrite the cached narrative even if a current or stale cache row exists. When omitted or false, the endpoint is read/status-only and does not invoke the LLM."
+    }
+  },
+  "additionalProperties": false
+}

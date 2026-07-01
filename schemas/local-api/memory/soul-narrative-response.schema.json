@@ -1,0 +1,67 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/memory/soul-narrative-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus SoulNarrativeResponse",
+  "description": "Response body for POST /v1/local/memory/soul/reflect. Reports the whole-Creator SOUL narrative cache state, stale metadata, current counts, and insufficient-data thresholds.",
+  "type": "object",
+  "required": [
+    "creator_id",
+    "state",
+    "stale",
+    "current_fragment_count",
+    "current_distinct_keyword_count",
+    "min_fragment_count",
+    "min_distinct_keyword_count"
+  ],
+  "properties": {
+    "creator_id": { "type": "string" },
+    "state": {
+      "type": "string",
+      "enum": ["ungenerated", "current", "stale", "insufficient_data"],
+      "description": "Narrative cache state. `insufficient_data` means the endpoint did not invoke synthesis because one or more minimum thresholds is not met."
+    },
+    "narrative": {
+      "type": "string",
+      "description": "Cached reflective narrative. Present only for `current` or `stale` rows; omitted for `ungenerated` and `insufficient_data`."
+    },
+    "generated_at": {
+      "type": "string",
+      "description": "RFC 3339 generation timestamp. Present only when a cached narrative exists."
+    },
+    "stale": {
+      "type": "boolean",
+      "description": "True only when a cached narrative exists and current fragment stats differ from the generation snapshot."
+    },
+    "fragment_count_at_generation": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Fragment-count snapshot persisted with the cached narrative. Present only when a cached narrative exists."
+    },
+    "max_fragment_created_at_at_generation": {
+      "type": "string",
+      "description": "RFC 3339 timestamp snapshot of the newest fragment included in generation. Present only when a cached narrative exists and at least one fragment existed at generation time."
+    },
+    "current_fragment_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Current whole-Creator fragment count used for stale and insufficient-data decisions."
+    },
+    "current_distinct_keyword_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Current distinct keyword count across all Creator fragments."
+    },
+    "min_fragment_count": {
+      "type": "integer",
+      "const": 10,
+      "description": "Minimum fragment count required before synthesis is allowed. Exposed so clients can render threshold copy and tests."
+    },
+    "min_distinct_keyword_count": {
+      "type": "integer",
+      "const": 20,
+      "description": "Minimum distinct keyword count required before synthesis is allowed. Exposed so clients can render threshold copy and tests."
+    }
+  },
+  "additionalProperties": false
+}

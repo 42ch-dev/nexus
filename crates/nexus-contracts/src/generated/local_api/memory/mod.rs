@@ -12,6 +12,8 @@ pub mod memory_fragment_info;
 pub mod pending_review_info;
 pub mod review_request;
 pub mod review_response;
+pub mod soul_narrative_request;
+pub mod soul_narrative_response;
 
 pub use count_pending_reviews_query::*;
 pub use count_pending_reviews_response::*;
@@ -27,3 +29,5 @@ pub use memory_fragment_info::*;
 pub use pending_review_info::*;
 pub use review_request::*;
 pub use review_response::*;
+pub use soul_narrative_request::*;
+pub use soul_narrative_response::*;
