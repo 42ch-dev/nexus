@@ -8,7 +8,7 @@
  * body-ownership invariant (canvas = sole authoring surface) is preserved:
  * nothing here mutates.
  */
-import { useMemo } from 'react';
+import { useEffect, useMemo } from 'react';
 
 import { flattenPages, useChapters, useFindings, useWork } from '@/api/queries';
 import { useWorldKbGraph } from '@/lib/canvas/use-world-kb-data';
@@ -29,6 +29,13 @@ export interface ChapterNeighbors {
   next: ChapterSummary | null;
   /** Distinct volume numbers present in the Work (sorted ascending). */
   volumes: number[];
+  /**
+   * True while the chapter list is still being walked (page-1 load or
+   * cursor-walking additional pages). While true, `prev`/`next` may be null
+   * simply because the relevant page has not loaded yet — callers must NOT
+   * degrade to "first/last chapter" placeholders until this is false.
+   */
+  loading: boolean;
 }
 
 function matchCurrent(
@@ -45,8 +52,20 @@ function matchCurrent(
 
 /**
  * Resolve the prev/next chapters for navigation within a Work. Reads the
- * chapter list (one broad page) and locates the current chapter's neighbors.
- * Returns `prev: null, next: null` while the list is still loading.
+ * chapter list and locates the current chapter's neighbors.
+ *
+ * The daemon clamps the chapter-list `limit` to `[1, 100]`
+ * (`crates/nexus-daemon-runtime/src/api/handlers/chapters.rs`), so a broad
+ * request is silently served as a 100-row page. When the server signals more
+ * pages (`has_more`), this hook cursor-walks the full list so neighbor
+ * resolution sees the complete ordered set — without it, chapters past the
+ * first server page silently lose prev/next nav (qc3 W-QC3-001). For
+ * normal-sized Works the first page returns `has_more: false` and the effect
+ * never fires, so there is no over-fetch.
+ *
+ * Returns `prev: null, next: null` (with `loading: true`) while pages are
+ * still loading, so callers can avoid rendering misleading "first/last
+ * chapter" placeholders during the walk.
  */
 export function useChapterNeighbors(
   workId: string | undefined,
@@ -56,21 +75,37 @@ export function useChapterNeighbors(
   const chapters = useChapters(workId || undefined, { limit: NEIGHBOR_PAGE_LIMIT });
   const rows = useMemo(() => flattenPages(chapters.data), [chapters.data]);
 
+  // Cursor-walk every page when the server paginates. Guarded by `hasNextPage`
+  // so normal-sized Works (first page returns `has_more: false`) never fetch a
+  // second page. Long Works walk 2-3 pages; chapters are rarely in the 100s.
+  useEffect(() => {
+    if (chapters.hasNextPage && !chapters.isFetchingNextPage) {
+      void chapters.fetchNextPage();
+    }
+  }, [chapters.hasNextPage, chapters.isFetchingNextPage, chapters.fetchNextPage]);
+
+  // Still resolving: page-1 fetch in flight, more pages to walk, or a walk
+  // fetch in flight. Once all pages land, all three are false.
+  const loading = chapters.isLoading || chapters.hasNextPage || chapters.isFetchingNextPage;
+
   return useMemo<ChapterNeighbors>(() => {
     if (chapter === undefined) {
-      return { chapters: rows, prev: null, next: null, volumes: deriveVolumes(rows) };
+      return { chapters: rows, prev: null, next: null, volumes: deriveVolumes(rows), loading };
     }
     const idx = rows.findIndex((r) => matchCurrent(r, chapter, volume));
     if (idx === -1) {
-      return { chapters: rows, prev: null, next: null, volumes: deriveVolumes(rows) };
+      // Not in the loaded rows yet. If `loading`, the chapter may live on a
+      // not-yet-fetched page — keep neighbors null without implying first/last.
+      return { chapters: rows, prev: null, next: null, volumes: deriveVolumes(rows), loading };
     }
     return {
       chapters: rows,
       prev: idx > 0 ? rows[idx - 1] : null,
       next: idx >= 0 && idx < rows.length - 1 ? rows[idx + 1] : null,
       volumes: deriveVolumes(rows),
+      loading,
     };
-  }, [rows, chapter, volume]);
+  }, [rows, chapter, volume, loading]);
 }
 
 function deriveVolumes(rows: ChapterSummary[]): number[] {
@@ -83,18 +118,28 @@ function deriveVolumes(rows: ChapterSummary[]): number[] {
  * Count non-terminal findings scoped to a chapter (the actionable count while
  * reading). Reuses the existing `useFindings` cache; the comma-separated status
  * filter is enforced server-side (`list_findings_handler`).
+ *
+ * The `PaginationInfo` envelope carries no `total` field, so an exact count
+ * beyond one page would require cursor-walking every page (loading full
+ * `FindingDetailResponse` rows just to count them). Instead, when the last
+ * loaded page reports `has_more`, the count is a lower bound and `truncated`
+ * is true — callers render an honest "N+" label rather than an exact-looking
+ * but clipped integer (qc3 W-QC3-002).
  */
 export function useOpenFindingsCount(
   workId: string | undefined,
   chapter: number | undefined,
-): { count: number; isLoading: boolean } {
+): { count: number; isLoading: boolean; truncated: boolean } {
   const findings = useFindings(workId || undefined, {
     status: OPEN_FINDING_STATUSES,
     chapter,
     limit: NEIGHBOR_PAGE_LIMIT,
   });
   const rows = useMemo(() => flattenPages(findings.data), [findings.data]);
-  return { count: rows.length, isLoading: findings.isLoading };
+  const pages = findings.data?.pages;
+  const lastPage = pages && pages.length > 0 ? pages[pages.length - 1] : undefined;
+  const truncated = Boolean(lastPage?.pagination.has_more);
+  return { count: rows.length, isLoading: findings.isLoading, truncated };
 }
 
 /**
