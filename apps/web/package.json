@@ -11,6 +11,7 @@
     "prebuild": "pnpm --filter @42ch/nexus-contracts run build",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
+    "pretypecheck": "pnpm --filter @42ch/nexus-contracts run build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
