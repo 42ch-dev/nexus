@@ -135,3 +135,34 @@ None.
 ### Revalidation verdict
 
 **Verdict**: Request Changes. The original unbounded scan and UTF-8 panic findings are resolved, and the required Rust test command passes, but the W001 fix-wave introduced a new blocking Warning (`W-QC3-003`) because the capped newest-200 keyword scan can under-count the locked insufficient-data gate.
+
+## Revalidation
+
+- Date: 2026-07-02
+- Review range / Diff basis: round-2 fix `git diff 3868833b..35797fb0` (fix commit `d38ea098`, merge tip `35797fb0`)
+- Working branch / HEAD verified: `iteration/v1.81` @ `35797fb0`
+- Re-checked files: `crates/nexus-local-db/src/soul_narrative.rs`, `crates/nexus-local-db/tests/soul_narrative_keyword_count.rs`, `crates/nexus-local-db/Cargo.toml`, `Cargo.lock`, `.sqlx/query-488cf36d2a882d7ce813543a40b7d6c6e49be02e61e346c293a45ae02e466acf.json`, and the cached read/status call path in `crates/nexus-daemon-runtime/src/api/handlers/memory.rs`.
+- Validation run: `cargo test -p nexus-local-db -p nexus-daemon-runtime` — passed. The new `soul_narrative_keyword_count` integration suite ran 5/5 tests successfully (`distinct_keywords_at_least_20_across_many_fragments`, `distinct_keywords_below_20_gate_fails`, `distinct_keywords_exactly_20_gate_passes`, `distinct_keywords_with_duplicates_still_sound`, `no_fragments_zero_distinct`), with the broader crate test command also passing (`nexus-daemon-runtime` unit/integration/doc tests and `nexus-local-db` unit/integration/doc tests).
+
+### Round-2 disposition
+
+- **W-QC3-003 / R-V181P0-QC3-W003 — Resolved for soundness.**
+  - Evidence: the old `ORDER BY created_at DESC LIMIT ?` + `.fetch_all()` path is gone. `soul_narrative_fragment_stats` now uses a compile-time checked `sqlx::query!` with no `LIMIT`, streams rows via `.fetch(pool)` + `TryStreamExt::try_next()`, and accumulates keywords into a `HashSet<String>` (`crates/nexus-local-db/src/soul_narrative.rs:135-170`). For `<20` cases the stream reaches EOF before returning, so the failing gate is exact. For `>=20` cases the code reaches the threshold authoritatively, then drains the remaining stream and continues decoding before returning, so `current_distinct_keyword_count` remains exact rather than `>=20`-only semantics. This removes the false `insufficient_data` under-count from the newest-200 window.
+  - Coverage: the new local-db regression tests cover `>=20` across many fragments, `<20`, exact boundary at 20, duplicates, and empty creators (`crates/nexus-local-db/tests/soul_narrative_keyword_count.rs`).
+
+### Blocking regression found during round-2 revalidation
+
+- **W-QC3-001 regression — cached read/status once again performs an unbounded keyword JSON decode scan.**
+  - **Evidence**: `reflect_soul` still calls `soul_narrative_fragment_stats` before cache lookup and before branching on `force_regenerate` (`crates/nexus-daemon-runtime/src/api/handlers/memory.rs:1136-1170`). The round-2 stats function no longer materializes all rows with `fetch_all()`, but because it drains the remaining stream after reaching 20 distinct keywords in order to return an exact `current_distinct_keyword_count`, it still reads and decodes every matching `memory_fragments.keywords` JSON row before any cached `current`/`stale` response can return (`crates/nexus-local-db/src/soul_narrative.rs:146-165`). Thus `force_regenerate=false` cached reads still pay O(total creator fragments + total keyword JSON bytes) CPU/I/O work on every poll; only peak memory materialization was improved.
+  - **Impact**: This reintroduces the core performance/reliability risk from W-QC3-001 for large creators and violates the round-2 no-regression requirement that the cached common path not trigger an unbounded decode scan unnecessarily. W-QC3-003 is sound, but the chosen exact-response implementation restores the unbounded read-side cost.
+  - **Required fix direction**: keep the W-QC3-003 soundness property while avoiding full keyword decode on cached `force_regenerate=false` reads. Viable approaches include caching/maintaining an exact distinct keyword summary, documenting and implementing `current_distinct_keyword_count` as threshold-capped `>=20` semantics if the wire contract allows it, splitting the gate from the exact response field, or moving exact distinct counting to a bounded/indexed SQL-side representation rather than per-poll Rust JSON decode.
+  - **Source Type**: manual-reasoning / diff revalidation
+  - **Confidence**: High
+
+### Dependency assessment
+
+- `futures-util` is justified for `TryStreamExt::try_next()` on the `sqlx` stream and is workspace-consistent: the workspace already declares `futures-util = "0.3"`, other crates consume it via `{ workspace = true }`, and `nexus-local-db` now follows that pattern rather than introducing a new version.
+
+### Revalidation verdict
+
+**Verdict**: Request Changes. W-QC3-003 is resolved as a soundness bug and the 5 new regression tests pass, but round-2 reintroduced/continued the W-QC3-001 unbounded keyword JSON decode cost on cached read/status calls, so this targeted re-review cannot flip to Approve.
