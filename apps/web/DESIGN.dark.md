@@ -278,20 +278,22 @@ components:
     world-kb-density-count: { backgroundColor: "rgba(76,216,200,0.14)", textColor: "{colors.teal-1000}", borderColor: "rgba(76,216,200,0.30)" }
     open-findings-count: { backgroundColor: "rgba(255,192,67,0.16)", textColor: "{colors.amber-1000}", borderColor: "rgba(255,192,67,0.30)" }
     base: { height: "20px", paddingInline: "6px", rounded: "{rounded.pill}", typography: "{typography.label-12}" }
+  # V1.79 P1 — SOUL personality visualization concrete dark values
+  # (same token names as DESIGN.md, dark-tuned opacities/text).
   soul-viz-keyword-cluster-node:
-    shape: "TODO-V1.79-dark-soul-viz-keyword-cluster-node-shape"
-    size: "TODO-V1.79-dark-soul-viz-keyword-cluster-node-size"
-    fill: "TODO-V1.79-dark-soul-viz-keyword-cluster-node-fill"
-    stroke: "TODO-V1.79-dark-soul-viz-keyword-cluster-node-stroke"
-    label: "TODO-V1.79-dark-soul-viz-keyword-cluster-node-label"
+    shape: "circle"
+    size: "min-max 10px-44px by frequency"
+    fill: "rgba(183,148,255,0.20)"
+    stroke: "{colors.purple-700}"
+    label: "{colors.gray-1000}"
   soul-viz-timeline-axis:
-    line: "TODO-V1.79-dark-soul-viz-timeline-axis-line"
-    tick: "TODO-V1.79-dark-soul-viz-timeline-axis-tick"
-    label: "TODO-V1.79-dark-soul-viz-timeline-axis-label"
+    line: "{colors.gray-alpha-400}"
+    tick: "{colors.gray-500}"
+    label: "{typography.label-12} @ {colors.gray-700}"
   soul-viz-drift-band:
-    fill: "TODO-V1.79-dark-soul-viz-drift-band-fill"
-    step-stroke: "TODO-V1.79-dark-soul-viz-drift-band-step-stroke"
-    label: "TODO-V1.79-dark-soul-viz-drift-band-label"
+    fill: "rgba(82,168,255,0.22)"
+    step-stroke: "{colors.gray-alpha-200}"
+    label: "{typography.label-12} @ {colors.gray-900}"
 
   # V1.70 canvas implement — concrete dark values (same token names as DESIGN.md)
   canvas:
