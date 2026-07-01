@@ -66,10 +66,12 @@ typography:
   button-12: { fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif", fontSize: "12px", fontWeight: 600, lineHeight: 1, letterSpacing: "0.01em" }
   label-12-mono: { fontFamily: "\"SFMono-Regular\", \"Cascadia Code\", \"Roboto Mono\", Consolas, monospace", fontSize: "12px", fontWeight: 500, lineHeight: 1.4, letterSpacing: "0" }
   copy-13-mono: { fontFamily: "\"SFMono-Regular\", \"Cascadia Code\", \"Roboto Mono\", Consolas, monospace", fontSize: "13px", fontWeight: 400, lineHeight: 1.5, letterSpacing: "0" }
-  # V1.79 Author Reflection — reading-surface typography stubs only; concrete values land in P0.
-  reading-prose-measure: "TODO-V1.79-dark-reading-prose-measure"
-  reading-prose-line-height: "TODO-V1.79-dark-reading-prose-line-height"
-  reading-prose-paragraph-spacing: "TODO-V1.79-dark-reading-prose-paragraph-spacing"
+  # V1.79 Author Reflection — reading-surface typography (P0 concrete values).
+  # Theme-independent metrics — identical to DESIGN.md so the prose column shape
+  # does not shift between themes. See DESIGN.md for rationale.
+  reading-prose-measure: "68ch"
+  reading-prose-line-height: "1.75"
+  reading-prose-paragraph-spacing: "1.25em"
 
 spacing:
   base: "4px"
@@ -256,22 +258,26 @@ components:
 
   # V1.79 Author Reflection — Track A/B token stubs only (names + structure).
   # Concrete dark values land in P0 (reading surface) and P1 (SOUL viz).
+  # V1.79 Author Reflection — Track A reading-surface component tokens (P0
+  # concrete dark values; same token names as DESIGN.md). Dark-tuned low-opacity
+  # accents on the maturation badges mirror the V1.77/V1.78 badge pattern so
+  # colors stay correct in dark. Track B (soul-viz-*) stubs remain for P1.
   reading-chapter-nav:
-    chrome-bg: "TODO-V1.79-dark-reading-chapter-nav-chrome-bg"
-    chrome-border: "TODO-V1.79-dark-reading-chapter-nav-chrome-border"
-    control-prev: "TODO-V1.79-dark-reading-chapter-nav-control-prev"
-    control-next: "TODO-V1.79-dark-reading-chapter-nav-control-next"
-    volume-group-bg: "TODO-V1.79-dark-reading-chapter-nav-volume-group-bg"
-    volume-group-border: "TODO-V1.79-dark-reading-chapter-nav-volume-group-border"
+    chrome-bg: "{colors.background-200}"
+    chrome-border: "{colors.gray-alpha-400}"
+    control-prev: "button.secondary basis"
+    control-next: "button.secondary basis"
+    volume-group-bg: "{colors.background-300}"
+    volume-group-border: "{colors.gray-alpha-300}"
   reading-progress-indicator:
-    track: "TODO-V1.79-dark-reading-progress-indicator-track"
-    fill: "TODO-V1.79-dark-reading-progress-indicator-fill"
-    label: "TODO-V1.79-dark-reading-progress-indicator-label"
+    track: "{colors.gray-alpha-200}"
+    fill: "{colors.blue-700}"
+    label: "{colors.gray-700}"
   reading-maturation-badge:
-    chapter-completion-state: "TODO-V1.79-dark-reading-maturation-badge-chapter-completion-state"
-    world-kb-density-count: "TODO-V1.79-dark-reading-maturation-badge-world-kb-density-count"
-    open-findings-count: "TODO-V1.79-dark-reading-maturation-badge-open-findings-count"
-    base: "TODO-V1.79-dark-reading-maturation-badge-base"
+    chapter-completion-state: "ChapterStatusBadge basis"
+    world-kb-density-count: { backgroundColor: "rgba(76,216,200,0.14)", textColor: "{colors.teal-1000}", borderColor: "rgba(76,216,200,0.30)" }
+    open-findings-count: { backgroundColor: "rgba(255,192,67,0.16)", textColor: "{colors.amber-1000}", borderColor: "rgba(255,192,67,0.30)" }
+    base: { height: "20px", paddingInline: "6px", rounded: "{rounded.pill}", typography: "{typography.label-12}" }
   soul-viz-keyword-cluster-node:
     shape: "TODO-V1.79-dark-soul-viz-keyword-cluster-node-shape"
     size: "TODO-V1.79-dark-soul-viz-keyword-cluster-node-size"
@@ -348,4 +354,4 @@ This file is the dark-theme token companion to [`DESIGN.md`](DESIGN.md). It inte
 
 Dark values were split from the former inline `Dark` columns in `DESIGN.md` during the V1.69 Production migration. Consumers should resolve dark values from this file conceptually while continuing to reference the same token names (`--color-<token>`, Tailwind `cv('<token>')`).
 
-V1.79 stubs Track A reading-surface tokens and Track B SOUL visualization tokens in frontmatter only; P0/P1 replace the `TODO-V1.79-*` placeholders with concrete light/dark values.
+V1.79 P0 filled the Track A reading-surface tokens with concrete dark values; only the Track B SOUL visualization token stubs remain for P1 to replace with concrete dark values.
