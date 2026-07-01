@@ -19,7 +19,7 @@
     {
       "plan_id": "2026-07-01-v1.81-creator-soul-narrative-and-world-foundation",
       "iteration_id": "V1.81",
-      "status": "InReview",
+      "status": "Done",
       "owner": "@fullstack-dev",
       "effort": "L",
       "type": "feature",
@@ -35,7 +35,7 @@
     {
       "plan_id": "2026-07-01-v1.81-soul-surface-deepening",
       "iteration_id": "V1.81",
-      "status": "InReview",
+      "status": "Done",
       "owner": "@frontend-dev",
       "effort": "M",
       "type": "feature",
@@ -6408,7 +6408,13 @@
         "target": "V1.81 QC fix-wave round 2",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.81-creator-soul-narrative-and-world-foundation][R-V181P0-QC3-W003]",
         "note": "Sound distinct-keyword count: early-exit streaming (SELECT keywords ORDER BY created_at DESC, HashSet accumulate, stop at 20 distinct => gate passes; EOF => exact count). No under-count. Bounded by min(rows-to-20-distinct, total).",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-07-02 (QC fix-wave round 3)",
+        "closure_note": "Fixed in 7fe671f6 (fingerprint cache): cached reads pay O(COUNT+MAX) only (W-QC3-001); sound early-exit distinct count on fingerprint mismatch (W-QC3-003). qc3 round-3 Approve (b023b7e1).",
+        "resolution": {
+          "plan_id": "2026-07-01-v1.81-creator-soul-narrative-and-world-foundation",
+          "commit": "7fe671f6"
+        }
       }
     ]
   }
