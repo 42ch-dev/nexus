@@ -1,14 +1,63 @@
 {
   "version": 1,
-  "updated_at": "2026-07-01T04:00:00Z",
-  "plans": [],
+  "updated_at": "2026-07-01T05:00:00Z",
+  "plans": [
+    {
+      "plan_id": "2026-07-01-v1.80-memory-review-reliability",
+      "iteration_id": "V1.80",
+      "status": "Todo",
+      "owner": "@fullstack-dev",
+      "effort": "M",
+      "type": "feature",
+      "working_branch": "feature/v1.80-memory-review-reliability",
+      "merge_target": "iteration/v1.80",
+      "task_category": "logic",
+      "wire_contracts_changed": true,
+      "wire_contracts_note": "V1.80 P0: additive — ReviewResponse gains has_more + processed; @42ch/nexus-contracts 0.14.0 -> 0.15.0.",
+      "closes_residuals": ["R-V178P0-QC3-003"],
+      "depends_on": []
+    },
+    {
+      "plan_id": "2026-07-01-v1.80-frontend-hygiene-residuals",
+      "iteration_id": "V1.80",
+      "status": "Todo",
+      "owner": "@frontend-dev",
+      "effort": "S",
+      "type": "feature",
+      "working_branch": "feature/v1.80-frontend-hygiene",
+      "merge_target": "iteration/v1.80",
+      "task_category": "visual",
+      "wire_contracts_changed": false,
+      "closes_residuals": ["R-V179P0-QC1-001", "R-V179P0-QC1-002", "R-V179P1-QC1-001", "R-V179P1-QC1-002"],
+      "depends_on": []
+    },
+    {
+      "plan_id": "2026-07-01-v1.80-closure",
+      "iteration_id": "V1.80",
+      "status": "Todo",
+      "owner": "@fullstack-dev",
+      "effort": "S",
+      "type": "closure",
+      "working_branch": "feature/v1.80-closure",
+      "merge_target": "iteration/v1.80",
+      "task_category": "docs",
+      "wire_contracts_changed": false,
+      "depends_on": [
+        "2026-07-01-v1.80-memory-review-reliability",
+        "2026-07-01-v1.80-frontend-hygiene-residuals"
+      ]
+    }
+  ],
   "metadata": {
-    "integration_branch": "iteration/v1.79",
+    "integration_branch": "iteration/v1.80",
     "integration_branch_retired": false,
-    "last_integration_branch": "iteration/v1.78",
+    "last_integration_branch": "iteration/v1.79",
     "integration_merge_target": "main",
-    "latest_active_iteration": "V1.79 shipped (2026-07-01, PR pending); next V1.80 pending /iteration-start",
-    "latest_active_compass": null,
+    "iteration_base_branch": "main",
+    "target_branch": "main",
+    "spec_integration_branch": "iteration/v1.80",
+    "latest_active_iteration": "V1.80 active (iteration-start); REL-01 memory-review reliability + 4 V1.79-QC frontend hygiene residuals",
+    "latest_active_compass": "v1.80-memory-review-reliability-and-frontend-hygiene-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
@@ -16,14 +65,14 @@
     "latest_ship": {
       "iteration": "V1.79",
       "compass": "v1.79-author-reflection-reading-and-soul-visualization-compass-v1.md",
-      "shipped_at": "2026-07-01 (PR pending)",
+      "shipped_at": "2026-07-01 (PR #106 merged)",
       "plan_count": 4,
       "plan_count_done": 4,
       "wire_contracts_changed": true,
       "wire_contracts_note": "V1.79: additive — memory-fragment-info + keywords/created_at; @42ch/nexus-contracts 0.13.0 -> 0.14.0.",
       "profile_b_compaction": "done (V1.79 all 4 plans)",
-      "merge_commit": null,
-      "pr": "pending"
+      "merge_commit": "1954a5c5",
+      "pr": "#106 merged"
     },
     "tech_debt_summary": {
       "total_open": 6,
@@ -41,9 +90,7 @@
       "refreshed_at": "2026-07-01",
       "refreshed_reason": "V1.79 P0+P1 QC consolidated: 4 low residuals registered (2 P0 reading-surface + 2 P1 soul-viz) targeting V1.80+ hygiene."
     },
-    "updated_at": "2026-07-01",
-    "spec_integration_branch": "iteration/v1.79",
-    "wave1_merged_at": "2026-07-01"
+    "updated_at": "2026-07-01"
   },
   "residual_findings": {
     "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization": [
