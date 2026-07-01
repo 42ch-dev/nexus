@@ -27,6 +27,13 @@ interface ChapterNavProps {
   volumes: number[];
   /** Volume the current chapter belongs to (for the "in Volume N" label). */
   currentVolume?: number;
+  /**
+   * True while the chapter list is still being walked. While true, a null
+   * `prev`/`next` may simply mean the relevant page has not loaded yet, so the
+   * nav renders a neutral loading placeholder instead of the misleading "First
+   * chapter"/"Last chapter" labels (qc3 W-QC3-001).
+   */
+  loading?: boolean;
 }
 
 function chapterHref(workId: string, row: ChapterSummary): string {
@@ -38,7 +45,7 @@ function chapterLabel(row: ChapterSummary): string {
   return row.title?.trim() ? row.title : `Chapter ${row.chapter}`;
 }
 
-export function ChapterNav({ workId, prev, next, volumes, currentVolume }: ChapterNavProps) {
+export function ChapterNav({ workId, prev, next, volumes, currentVolume, loading = false }: ChapterNavProps) {
   const multiVolume = volumes.length > 1;
   return (
     <nav
@@ -53,6 +60,14 @@ export function ChapterNav({ workId, prev, next, volumes, currentVolume }: Chapt
               <span className="truncate">{chapterLabel(prev)}</span>
             </Link>
           </Button>
+        ) : loading ? (
+          <span
+            className="inline-flex h-8 items-center gap-1 rounded-control border border-gray-alpha-300 px-3 text-copy-13 text-gray-700"
+            aria-label="Loading chapters"
+          >
+            <ChevronLeft className="h-4 w-4" aria-hidden />
+            Loading chapters…
+          </span>
         ) : (
           <span
             className="inline-flex h-8 items-center gap-1 rounded-control border border-gray-alpha-300 px-3 text-copy-13 text-gray-700"
@@ -86,6 +101,14 @@ export function ChapterNav({ workId, prev, next, volumes, currentVolume }: Chapt
               <ChevronRight className="h-4 w-4" aria-hidden />
             </Link>
           </Button>
+        ) : loading ? (
+          <span
+            className="inline-flex h-8 items-center gap-1 rounded-control border border-gray-alpha-300 px-3 text-copy-13 text-gray-700"
+            aria-label="Loading chapters"
+          >
+            Loading chapters…
+            <ChevronRight className="h-4 w-4" aria-hidden />
+          </span>
         ) : (
           <span
             className="inline-flex h-8 items-center gap-1 rounded-control border border-gray-alpha-300 px-3 text-copy-13 text-gray-700"
