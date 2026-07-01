@@ -270,40 +270,18 @@ fn resolve_query_limit(raw: Option<i64>) -> usize {
     usize::try_from(clamped).unwrap_or(MAX_LIMIT)
 }
 
-/// (open item #7 bridging) Fetch a creator's pending reviews ordered by `created_at DESC`.
-///
-/// The generated `PendingReviewInfo` cannot derive `sqlx::FromRow` — both
-/// `sqlx::FromRow` and `nexus_contracts::PendingReviewInfo` are foreign to
-/// this crate, so the orphan rule forbids `impl FromRow for PendingReviewInfo`
-/// here (and `nexus-contracts` intentionally does not depend on sqlx). This
-/// helper therefore uses `query!` + explicit field mapping instead of
-/// `query_as!`. Behavior is identical to the prior `query_as!` form: same
-/// column set, same ordering, same row count. The mapping lives here once so
-/// the list and review handlers share it (no second hand-written SQL struct).
-async fn fetch_pending_reviews_by_creator(
-    pool: &sqlx::SqlitePool,
-    creator_id: &str,
-) -> Result<Vec<PendingReviewInfo>, sqlx::Error> {
-    let rows = sqlx::query!(
-        r#"SELECT pending_id as "pending_id!", session_id, creator_id, world_id, task_kind, raw_digest, created_at
-         FROM memory_pending_review WHERE creator_id = ? ORDER BY created_at DESC"#,
-        creator_id
-    )
-    .fetch_all(pool)
-    .await?;
-    Ok(rows
-        .into_iter()
-        .map(|row| PendingReviewInfo {
-            pending_id: row.pending_id,
-            session_id: row.session_id,
-            creator_id: row.creator_id,
-            world_id: row.world_id,
-            task_kind: row.task_kind,
-            raw_digest: row.raw_digest,
-            created_at: row.created_at,
-        })
-        .collect())
-}
+// (open item #7 bridging) The generated `PendingReviewInfo` cannot derive
+// `sqlx::FromRow` — both `sqlx::FromRow` and `nexus_contracts::PendingReviewInfo`
+// are foreign to this crate, so the orphan rule forbids `impl FromRow for
+// PendingReviewInfo` here (and `nexus-contracts` intentionally does not depend
+// on sqlx). The bounded helper `fetch_pending_reviews_page` below uses `query!`
+// + explicit field mapping instead of `query_as!`; the list and review handlers
+// share it.
+//
+// V1.80 REL-01: the unbounded `fetch_pending_reviews_by_creator` that used to
+// live here was removed — the review handler now reuses the bounded
+// `fetch_pending_reviews_page` (50 + 1 overfetch). The bounded helper carries
+// the same column-set, ordering, and field-mapping convention.
 
 /// Fetch one bounded page of a creator's pending reviews for the list endpoint.
 ///
@@ -619,45 +597,140 @@ pub async fn review(
 
     info!(creator_id = %active_creator, "Reviewing pending memories");
 
-    let creator_id_filter = active_creator.clone();
-    let rows = fetch_pending_reviews_by_creator(state.pool(), &creator_id_filter)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: format!("failed to fetch pending reviews for review: {e}"),
-        })?;
+    // V1.80 REL-01: bounded fetch + per-creator serialization + per-call timeout.
+    //
+    // All of fetch, classify, side effects, and best-effort deletes happen
+    // inside the per-creator guard scope so two overlapping requests for the
+    // same creator cannot fetch/delete the same pending rows (the side effects
+    // mint fresh IDs and are not idempotent at the DB). The map mutex is only
+    // held briefly inside `memory_review_lock`; this `.await` waits on the
+    // creator-scoped lock. Overlapping calls serialize instead of erroring.
+    let outcome = {
+        let creator_lock = state.memory_review_lock(&active_creator);
+        let _guard = creator_lock.lock().await;
 
-    let nexus_home = state.nexus_home().to_owned();
-    let pool = state.pool().clone();
+        // Bounded fetch: REVIEW_BATCH_LIMIT + 1 overfetch drives `has_more`.
+        let fetch_limit = REVIEW_BATCH_LIMIT + 1;
+        let mut rows = fetch_pending_reviews_page(state.pool(), &active_creator, None, fetch_limit)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".into(),
+                message: format!("failed to fetch pending reviews for review: {e}"),
+            })?;
 
-    let result = process_review_queue(&rows, &nexus_home, &active_creator, &pool).await;
+        // The over-fetched (51st) row, if present, means more rows remain in the
+        // DB beyond this batch. Truncate the processing slice back to the limit.
+        let batch_limit = usize::try_from(REVIEW_BATCH_LIMIT).unwrap_or(usize::MAX);
+        let more_in_db = rows.len() > batch_limit;
+        if more_in_db {
+            rows.truncate(batch_limit);
+        }
+        let processing_slice = rows.len();
+
+        let deadline = tokio::time::Instant::now() + REVIEW_CALL_TIMEOUT;
+        let nexus_home = state.nexus_home().to_owned();
+        let pool = state.pool().clone();
+        let mut batch =
+            process_review_batch(&rows, &nexus_home, &active_creator, &pool, deadline).await;
+
+        // has_more is true when the client should re-issue the call: either the
+        // DB still has rows beyond this batch, or the per-call budget expired
+        // before we finished inspecting the fetched slice.
+        let deadline_stopped = batch.processed < processing_slice;
+        let has_more = more_in_db || deadline_stopped;
+        batch.has_more = has_more;
+        batch.more_in_db = more_in_db;
+        batch.processing_slice = processing_slice;
+        batch
+    }; // per-creator guard drops here (before the response is returned)
 
     info!(
         creator_id = %active_creator,
-        promoted = result.promoted,
-        fragmented = result.fragmented,
-        dropped = result.dropped,
+        promoted = outcome.promoted,
+        fragmented = outcome.fragmented,
+        dropped = outcome.dropped,
+        processed = outcome.processed,
+        has_more = outcome.has_more,
         "Review completed"
     );
 
-    Ok(Json(result))
+    Ok(Json(ReviewResponse {
+        promoted: outcome.promoted,
+        fragmented: outcome.fragmented,
+        dropped: outcome.dropped,
+        has_more: Some(outcome.has_more),
+        processed: Some(i64::try_from(outcome.processed).unwrap_or(i64::MAX)),
+    }))
 }
 
-/// Process the review queue for a creator's pending entries.
+/// Maximum pending rows inspected per `POST /memory/review` call (V1.80 REL-01).
 ///
-/// Classifies each entry, performs the appropriate action (promote, fragment,
-/// or drop), and returns a summary of actions taken.
-async fn process_review_queue(
+/// Aligns the review-drain batch with the memory list default
+/// (`DEFAULT_QUERY_LIMIT = 50`): a 50-row synchronous batch is the smallest
+/// policy that preserves the local-only / small-queue threat model while
+/// bounding the request duration. Not user-configurable in this slice.
+const REVIEW_BATCH_LIMIT: i64 = 50;
+
+/// Per-call server budget for `POST /memory/review` (V1.80 REL-01).
+///
+/// Implemented as a deadline checked before each row; on expiry the handler
+/// returns the partial progress accumulated so far (`has_more = true`) instead
+/// of failing the request.
+const REVIEW_CALL_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5);
+
+/// Outcome of a bounded review batch, accumulated incrementally so the deadline
+/// path can return partial progress.
+struct ReviewBatchOutcome {
+    promoted: i64,
+    fragmented: i64,
+    dropped: i64,
+    /// Rows inspected (classified + action attempted) so far.
+    processed: usize,
+    has_more: bool,
+    // Diagnostics for logging; not serialized.
+    more_in_db: bool,
+    processing_slice: usize,
+}
+
+impl ReviewBatchOutcome {
+    const fn new() -> Self {
+        Self {
+            promoted: 0,
+            fragmented: 0,
+            dropped: 0,
+            processed: 0,
+            has_more: false,
+            more_in_db: false,
+            processing_slice: 0,
+        }
+    }
+}
+
+/// Process a bounded slice of the review queue for a creator's pending entries.
+///
+/// This is the deadline-aware evolution of the V1.33 `process_review_queue`:
+/// before each row the deadline is checked, and the per-row async side effect
+/// is bounded by `timeout_at(deadline, …)` so a single slow promote cannot
+/// overrun the whole request. Classification (promote/fragment/drop) and the
+/// post-success pending-row delete are unchanged. On budget expiry the loop
+/// stops and the caller reports `has_more = true` with the counters accumulated
+/// so far — completed side effects/deletes are NOT rolled back.
+async fn process_review_batch(
     rows: &[PendingReviewInfo],
     nexus_home: &std::path::Path,
     creator_id: &str,
     pool: &sqlx::SqlitePool,
-) -> ReviewResponse {
-    let mut promoted: i64 = 0;
-    let mut fragmented: i64 = 0;
-    let mut dropped: i64 = 0;
+    deadline: tokio::time::Instant,
+) -> ReviewBatchOutcome {
+    let mut outcome = ReviewBatchOutcome::new();
 
     for row in rows {
+        // Check the deadline before each row. If the budget is exhausted, stop
+        // and let the caller report partial progress.
+        if tokio::time::Instant::now() >= deadline {
+            break;
+        }
+
         let input = nexus_creator_memory::review::PendingReviewInput {
             pending_id: row.pending_id.clone(),
             session_id: row.session_id.clone(),
@@ -670,78 +743,130 @@ async fn process_review_queue(
 
         let decision = nexus_creator_memory::review::classify_pending_review(&input);
 
-        match decision.action {
-            nexus_creator_memory::review::ReviewAction::PromoteToLongTerm => {
-                let summarizer = PassthroughSummarizer {
-                    creator_id: creator_id.to_string(),
-                };
-                match nexus_creator_memory::review::promote_to_long_term(
-                    nexus_home,
-                    creator_id,
-                    &input,
-                    &summarizer,
-                )
-                .await
-                {
-                    Ok(_) => {
-                        promoted += 1;
-                        delete_pending_by_id(pool, &row.pending_id).await;
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            pending_id = %row.pending_id,
-                            error = %e,
-                            "Failed to promote pending review; skipping"
-                        );
-                    }
-                }
-            }
-            nexus_creator_memory::review::ReviewAction::FragmentOnly => {
-                let fragment = nexus_creator_memory::review::create_fragment_from_review(&input);
-                let record = nexus_local_db::memory_fragment::MemoryFragmentRecord {
-                    fragment_id: fragment.fragment_id,
-                    session_id: fragment.session_id,
-                    creator_id: fragment.creator_id,
-                    keywords: serde_json::to_string(&fragment.keywords).unwrap_or_default(),
-                    summary: fragment.summary,
-                    created_at: fragment.created_at,
-                    ttl: fragment.ttl,
-                };
+        // Wrap the per-row work so a slow side effect cannot overrun the budget.
+        // On timeout the row is left in place (not counted, not deleted) and the
+        // loop stops — the caller reports has_more and the row is retried next call.
+        let row_result = tokio::time::timeout_at(
+            deadline,
+            process_single_review_row(&decision, &input, nexus_home, creator_id, pool),
+        )
+        .await;
 
-                match nexus_local_db::memory_fragment::create_fragment(pool, &record).await {
-                    Ok(()) => {
-                        fragmented += 1;
-                        delete_pending_by_id(pool, &row.pending_id).await;
-                    }
-                    Err(e) => {
-                        tracing::warn!(
-                            pending_id = %row.pending_id,
-                            error = %e,
-                            "Failed to create fragment; skipping"
-                        );
-                    }
-                }
+        outcome.processed += 1;
+
+        match row_result {
+            Ok(action_counts) => {
+                outcome.promoted += action_counts.promoted;
+                outcome.fragmented += action_counts.fragmented;
+                outcome.dropped += action_counts.dropped;
             }
-            nexus_creator_memory::review::ReviewAction::Drop => {
-                delete_pending_by_id(pool, &row.pending_id).await;
-                dropped += 1;
-            }
-            // MergeIntoExisting and TriggerSoulExperienceOnly are Phase 2 features
-            _ => {
-                tracing::debug!(
+            Err(_elapsed) => {
+                // Deadline expired mid-row. Stop processing further rows; the
+                // caller computes has_more from processed < processing_slice.
+                tracing::info!(
+                    creator_id = %creator_id,
                     pending_id = %row.pending_id,
-                    action = ?decision.action,
-                    "Skipping unimplemented review action"
+                    processed = outcome.processed,
+                    "Review deadline reached mid-batch; returning partial progress"
                 );
+                break;
             }
         }
     }
 
-    ReviewResponse {
-        promoted,
-        fragmented,
-        dropped,
+    outcome
+}
+
+/// Counts produced by a single row's classify+action. Each field is 0 or 1.
+struct RowActionCounts {
+    promoted: i64,
+    fragmented: i64,
+    dropped: i64,
+}
+
+/// Classify one pending row, perform the action (promote/fragment/drop), and
+/// delete the pending row on success. Behavior matches the V1.33
+/// `process_review_queue` body; extracted so the deadline loop can bound it.
+async fn process_single_review_row(
+    decision: &nexus_creator_memory::review::ReviewDecision,
+    input: &nexus_creator_memory::review::PendingReviewInput,
+    nexus_home: &std::path::Path,
+    creator_id: &str,
+    pool: &sqlx::SqlitePool,
+) -> RowActionCounts {
+    let mut counts = RowActionCounts {
+        promoted: 0,
+        fragmented: 0,
+        dropped: 0,
+    };
+
+    match decision.action {
+        nexus_creator_memory::review::ReviewAction::PromoteToLongTerm => {
+            let summarizer = PassthroughSummarizer {
+                creator_id: creator_id.to_string(),
+            };
+            match nexus_creator_memory::review::promote_to_long_term(
+                nexus_home,
+                creator_id,
+                input,
+                &summarizer,
+            )
+            .await
+            {
+                Ok(_) => {
+                    counts.promoted = 1;
+                    delete_pending_by_id(pool, &input.pending_id).await;
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        pending_id = %input.pending_id,
+                        error = %e,
+                        "Failed to promote pending review; skipping"
+                    );
+                }
+            }
+        }
+        nexus_creator_memory::review::ReviewAction::FragmentOnly => {
+            let fragment = nexus_creator_memory::review::create_fragment_from_review(input);
+            let record = nexus_local_db::memory_fragment::MemoryFragmentRecord {
+                fragment_id: fragment.fragment_id,
+                session_id: fragment.session_id,
+                creator_id: fragment.creator_id,
+                keywords: serde_json::to_string(&fragment.keywords).unwrap_or_default(),
+                summary: fragment.summary,
+                created_at: fragment.created_at,
+                ttl: fragment.ttl,
+            };
+
+            match nexus_local_db::memory_fragment::create_fragment(pool, &record).await {
+                Ok(()) => {
+                    counts.fragmented = 1;
+                    delete_pending_by_id(pool, &input.pending_id).await;
+                }
+                Err(e) => {
+                    tracing::warn!(
+                        pending_id = %input.pending_id,
+                        error = %e,
+                        "Failed to create fragment; skipping"
+                    );
+                }
+            }
+        }
+        nexus_creator_memory::review::ReviewAction::Drop => {
+            delete_pending_by_id(pool, &input.pending_id).await;
+            counts.dropped = 1;
+        }
+        // MergeIntoExisting and TriggerSoulExperienceOnly are Phase 2 features
+        _ => {
+            tracing::debug!(
+                pending_id = %input.pending_id,
+                action = ?decision.action,
+                "Skipping unimplemented review action"
+            );
+        }
     }
+
+    counts
 }
 
 /// Delete a pending review entry by ID (best-effort, logs on failure).
@@ -1056,5 +1181,61 @@ mod tests {
     fn decode_fragment_keywords_non_string_items_rejected() {
         // Mixed-type arrays are not `Vec<String>` → graceful empty.
         assert!(decode_fragment_keywords(r#"["ok", 42]"#).is_empty());
+    }
+
+    // ─── V1.80 REL-01: deadline-aware partial progress ───────────────────
+
+    /// With a deadline already in the past, `process_review_batch` inspects
+    /// zero rows and returns all-zero counters. The caller (review handler)
+    /// then reports `has_more = true` because `processed < processing_slice`.
+    /// This proves the deadline-check-before-each-row logic stops the loop
+    /// immediately on budget exhaustion without touching side effects.
+    #[tokio::test]
+    async fn process_review_batch_past_deadline_processes_zero_rows() {
+        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let pool = nexus_local_db::open_pool(&db_path)
+            .await
+            .expect("test pool");
+
+        // Seed 3 rows so the processing slice is non-empty; the deadline alone
+        // must prevent them from being inspected.
+        for i in 0..3 {
+            // SAFETY: test-only seed using runtime query.
+            sqlx::query(
+                "INSERT OR IGNORE INTO memory_pending_review \
+                 (pending_id, session_id, creator_id, world_id, task_kind, raw_digest, created_at) \
+                 VALUES (?, ?, 'ctr_testuser', NULL, 'research', \
+                 'Research summary long enough to classify as fragment.', '2026-01-01T00:00:0X0Z')",
+            )
+            .bind(format!("pending_deadline_{i}"))
+            .bind(format!("sess_deadline_{i}"))
+            .execute(&pool)
+            .await
+            .expect("seed");
+        }
+
+        let rows = fetch_pending_reviews_page(&pool, "ctr_testuser", None, 51)
+            .await
+            .expect("fetch");
+        assert_eq!(rows.len(), 3, "precondition: 3 rows seeded");
+
+        // Deadline already in the past.
+        let deadline = tokio::time::Instant::now();
+        let outcome =
+            process_review_batch(&rows, &nexus_home, "ctr_testuser", &pool, deadline).await;
+
+        assert_eq!(outcome.processed, 0, "past deadline must inspect zero rows");
+        assert_eq!(outcome.promoted, 0);
+        assert_eq!(outcome.fragmented, 0);
+        assert_eq!(outcome.dropped, 0);
+
+        // The 3 seeded rows are untouched (no side effects ran).
+        let remaining: (i64,) = sqlx::query_as("SELECT COUNT(*) FROM memory_pending_review")
+            .fetch_one(&pool)
+            .await
+            .expect("count");
+        assert_eq!(remaining.0, 3, "no rows deleted under a past deadline");
+
+        drop(tmp);
     }
 }
