@@ -633,11 +633,24 @@ pub async fn review(
         let mut batch =
             process_review_batch(&rows, &nexus_home, &active_creator, &pool, deadline).await;
 
-        // has_more is true when the client should re-issue the call: either the
-        // DB still has rows beyond this batch, or the per-call budget expired
-        // before we finished inspecting the fetched slice.
+        // `has_more` is the drain-completion contract: `true` means the queue
+        // may not be fully drained and the client should re-request
+        // (`apps/web` `useReviewMemory` drains while `has_more === true`). It is
+        // `true` when ANY of:
+        //   - `more_in_db`: the overfetched (51st) row proves rows exist beyond
+        //     this batch;
+        //   - `deadline_stopped`: the per-call budget expired before the loop
+        //     inspected every fetched row (`processed < processing_slice`);
+        //   - `any_row_remained_pending`: a fetched row was inspected but NOT
+        //     completed — its action failed or it timed out mid-row, so it was
+        //     left pending. This is the key invariant added for W-QC3-001
+        //     (R-V180P0-QC3-001): if any row fetched in this batch still awaits
+        //     completion, `has_more` MUST be true, otherwise the client could
+        //     terminate with a false "Review complete" while a pending row
+        //     remains. `processed` alone was insufficient because it advances
+        //     for inspected-but-uncompleted rows too.
         let deadline_stopped = batch.processed < processing_slice;
-        let has_more = more_in_db || deadline_stopped;
+        let has_more = more_in_db || deadline_stopped || batch.any_row_remained_pending;
         batch.has_more = has_more;
         batch.more_in_db = more_in_db;
         batch.processing_slice = processing_slice;
@@ -684,9 +697,23 @@ struct ReviewBatchOutcome {
     promoted: i64,
     fragmented: i64,
     dropped: i64,
-    /// Rows inspected (classified + action attempted) so far.
+    /// Rows inspected (classified + action attempted) so far. This is the
+    /// "rows attempted" progress signal — it advances even when a row's action
+    /// fails or times out and the row is left pending. Drain *completion* is
+    /// decided from `any_row_remained_pending` (see below), NOT from this count
+    /// alone, so a non-advancing row can never produce a false "Review
+    /// complete" (W-QC3-001 / R-V180P0-QC3-001).
     processed: usize,
     has_more: bool,
+    /// True if any fetched row was inspected but NOT completed — it timed out
+    /// mid-row, or its side effect failed, leaving the row pending (not
+    /// deleted). When true, the caller MUST report `has_more = true` so the
+    /// client re-requests and the queue keeps draining. This is the
+    /// queue-advancement signal that `processed` is not: a row counts as
+    /// `processed` whether or not it was actually removed from the pending
+    /// queue. Key invariant: if any row fetched in this batch still awaits
+    /// completion, the drain is not done.
+    any_row_remained_pending: bool,
     // Diagnostics for logging; not serialized.
     more_in_db: bool,
     processing_slice: usize,
@@ -700,6 +727,7 @@ impl ReviewBatchOutcome {
             dropped: 0,
             processed: 0,
             has_more: false,
+            any_row_remained_pending: false,
             more_in_db: false,
             processing_slice: 0,
         }
@@ -744,14 +772,21 @@ async fn process_review_batch(
         let decision = nexus_creator_memory::review::classify_pending_review(&input);
 
         // Wrap the per-row work so a slow side effect cannot overrun the budget.
-        // On timeout the row is left in place (not counted, not deleted) and the
-        // loop stops — the caller reports has_more and the row is retried next call.
+        // On timeout the row is left in place (not deleted) and the loop stops;
+        // the caller reports `has_more = true` and the row is retried next call.
         let row_result = tokio::time::timeout_at(
             deadline,
             process_single_review_row(&decision, &input, nexus_home, creator_id, pool),
         )
         .await;
 
+        // `processed` counts rows *inspected* (attempted): it advances for both
+        // successful and timed-out/failed rows, so the client's progress signal
+        // reflects work the server actually performed. It is NOT a drain-
+        // completion signal — queue advancement (rows actually completed and
+        // deleted) is tracked separately via `any_row_remained_pending`, which
+        // the caller folds into `has_more` so a non-advancing row never yields a
+        // false "Review complete" (W-QC3-001 / R-V180P0-QC3-001).
         outcome.processed += 1;
 
         match row_result {
@@ -759,10 +794,21 @@ async fn process_review_batch(
                 outcome.promoted += action_counts.promoted;
                 outcome.fragmented += action_counts.fragmented;
                 outcome.dropped += action_counts.dropped;
+                // A row whose action produced zero counts was NOT completed: its
+                // side effect failed (promote/fragment error) or it hit an
+                // unimplemented action, so it was not deleted and remains
+                // pending. Any such row must keep `has_more` true so the client
+                // re-requests instead of terminating with a false "complete".
+                if action_counts.promoted + action_counts.fragmented + action_counts.dropped == 0 {
+                    outcome.any_row_remained_pending = true;
+                }
             }
             Err(_elapsed) => {
-                // Deadline expired mid-row. Stop processing further rows; the
-                // caller computes has_more from processed < processing_slice.
+                // Deadline expired mid-row. The row was inspected but its side
+                // effect was abandoned, so it remains pending (not deleted).
+                // Stop processing further rows; the caller reports `has_more`
+                // and the row is retried next call.
+                outcome.any_row_remained_pending = true;
                 tracing::info!(
                     creator_id = %creator_id,
                     pending_id = %row.pending_id,
