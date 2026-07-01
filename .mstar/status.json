@@ -18,7 +18,7 @@
     {
       "plan_id": "2026-07-01-v1.79-manuscript-reading-surface",
       "iteration_id": "V1.79",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@frontend-dev",
       "effort": "M",
       "type": "implement",
@@ -33,7 +33,7 @@
     {
       "plan_id": "2026-07-01-v1.79-soul-personality-visualization",
       "iteration_id": "V1.79",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@fullstack-dev",
       "effort": "M",
       "type": "implement",
@@ -86,19 +86,20 @@
       "pr": "#105"
     },
     "tech_debt_summary": {
-      "total_open": 2,
-      "total_deferred": 2,
+      "total_open": 6,
+      "total_deferred": 6,
       "total_resolved": 289,
       "total_archived": 0,
       "by_severity_active": {
-        "low": 2
+        "low": 6
       },
       "by_target_active": {
         "V1.79+ (or CI wrapper)": 1,
-        "V1.79+ reliability roadmap": 1
+        "V1.79+ reliability roadmap": 1,
+        "set V1.80+": 4
       },
-      "refreshed_at": "2026-07-01T00:00:00Z",
-      "refreshed_reason": "V1.78 QC fix-wave closed (3 residuals resolved: pagination + 2 doc nits). 2 low residuals remain deferred to V1.79+."
+      "refreshed_at": "2026-07-01",
+      "refreshed_reason": "V1.79 P0+P1 QC consolidated: 4 low residuals registered (2 P0 reading-surface + 2 P1 soul-viz) targeting V1.80+ hygiene."
     },
     "updated_at": "2026-07-01",
     "spec_integration_branch": "iteration/v1.79",
@@ -6070,7 +6071,13 @@
         "target": "V1.79+ (or CI wrapper)",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.78-creator-memory-surface][R-V178P0-QC3-001]",
         "note": "Bare `pnpm --filter web typecheck` fails on stale contracts dist/; documented in apps/web/AGENTS.md (build contracts first). Optional: pretypecheck hook or CI wrapper. Non-blocking — source generation is correct.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-07-01 (V1.79 P-last T1)",
+        "closure_note": "Fixed in fix/v1.79-build-order (merge into iteration/v1.79): added pretypecheck lifecycle script in apps/web/package.json so local typecheck/build self-contain the contracts prebuild. apps/web/AGENTS.md updated.",
+        "resolution": {
+          "plan_id": "2026-07-01-v1.79-closure",
+          "commit": "2418e5ae"
+        }
       },
       {
         "id": "R-V178P0-QC3-002",
@@ -6099,9 +6106,9 @@
         "scope": "crates/nexus-daemon-runtime/src/api/handlers/memory.rs review/process_review_queue; apps/web reviewMemory mutation",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.79+ reliability roadmap",
+        "target": "V1.80+ reliability roadmap (POST /memory/review async/cancelable/bounded)",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.78-creator-memory-surface][R-V178P0-QC3-003]",
-        "note": "Under local-only single-active-creator small-queue threat model the risk is low. V1.79+: chunked processing (N per request + remaining), per-creator in-flight serialization, client uncertain-completion handling. Threat-model rationale documented; not blocking V1.78.",
+        "note": "V1.79 P-last reclassified from \"V1.79+ reliability roadmap\" to dedicated reliability-roadmap target. Synchronous whole-queue review pipeline rewrite deferred; not silently dropped.",
         "lifecycle": "open"
       },
       {
@@ -6141,6 +6148,62 @@
           "commit": "d5ddfff8"
         },
         "closure_note": "Fixed in V1.78 QC fix-wave (commit d5ddfff8). qc1+qc3 targeted re-review both Approve."
+      }
+    ],
+    "2026-07-01-v1.79-manuscript-reading-surface": [
+      {
+        "id": "R-V179P0-QC1-001",
+        "title": "Reading-surface keyboard-nav test coverage + DOM-query overlay guard robustness (qc1 S-001)",
+        "severity": "low",
+        "source": "qc1 S-001 (revalidation noted out-of-fix-scope)",
+        "scope": "apps/web/src/components/reading (hasOpenOverlay DOM-query guard) + chapter-page keyboard handler",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.80+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.79-manuscript-reading-surface][R-V179P0-QC1-001]",
+        "note": "Guard checks [role=menu]:not([hidden])/[role=dialog]:not([hidden]); robust for current overlays but revisit if future overlay uses different role pattern. Add keyboard-nav interaction tests.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V179P0-QC1-002",
+        "title": "Reading-surface component-level unit-test coverage gap + minor nits (qc1 S-002/S-003/S-004)",
+        "severity": "low",
+        "source": "qc1 S-002/S-003/S-004",
+        "scope": "apps/web/src/components/reading/* unit tests; defensive ?? 1 on volume; reading-progress debounce design",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.80+ hygiene",
+        "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.79-manuscript-reading-surface][R-V179P0-QC1-002]",
+        "note": "Bundle of low/nit test-coverage + defensive-coding suggestions deferred as hygiene.",
+        "lifecycle": "open"
+      }
+    ],
+    "2026-07-01-v1.79-soul-personality-visualization": [
+      {
+        "id": "R-V179P1-QC1-001",
+        "title": "memory-page.tsx 360-line module exceeds <=250 discipline — extract PendingReviewsSection/FragmentsSection (qc1 W1; pre-existing 314 + P1 46)",
+        "severity": "low",
+        "source": "qc1 W1",
+        "scope": "apps/web/src/pages/memory-page.tsx",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.80+ hygiene",
+        "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.79-soul-personality-visualization][R-V179P1-QC1-001]",
+        "note": "Pre-existing tech debt (314 pre-P1); bounded P1 addition (+46 SoulSection). Extract sections into apps/web/src/components/memory/ siblings. Not a P1 regression.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V179P1-QC1-002",
+        "title": "SOUL viz minor nits — BAND_PALETTE token promotion + unused driftDateHelper alias (qc1 S1/S2)",
+        "severity": "low",
+        "source": "qc1 S1/S2",
+        "scope": "apps/web/src/components/soul/temporal-drift.tsx",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.80+ hygiene",
+        "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.79-soul-personality-visualization][R-V179P1-QC1-002]",
+        "note": "Slot 1-5 BAND_PALETTE hardcodes RGBA while slot 0 uses var(); promote to DESIGN.md tokens. Remove unused driftDateHelper export.",
+        "lifecycle": "open"
       }
     ]
   }
