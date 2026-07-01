@@ -66,6 +66,10 @@ typography:
   button-12: { fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif", fontSize: "12px", fontWeight: 600, lineHeight: 1, letterSpacing: "0.01em" }
   label-12-mono: { fontFamily: "\"SFMono-Regular\", \"Cascadia Code\", \"Roboto Mono\", Consolas, monospace", fontSize: "12px", fontWeight: 500, lineHeight: 1.4, letterSpacing: "0" }
   copy-13-mono: { fontFamily: "\"SFMono-Regular\", \"Cascadia Code\", \"Roboto Mono\", Consolas, monospace", fontSize: "13px", fontWeight: 400, lineHeight: 1.5, letterSpacing: "0" }
+  # V1.79 Author Reflection — reading-surface typography stubs only; concrete values land in P0.
+  reading-prose-measure: "TODO-V1.79-light-reading-prose-measure"
+  reading-prose-line-height: "TODO-V1.79-light-reading-prose-line-height"
+  reading-prose-paragraph-spacing: "TODO-V1.79-light-reading-prose-paragraph-spacing"
 
 spacing:
   base: "4px"
@@ -255,6 +259,39 @@ components:
     textColor: "{colors.gray-1000}"
   memory-fragment-filter-input:
     basis: "input-select-textarea.default"
+
+  # V1.79 Author Reflection — Track A/B token stubs only (names + structure).
+  # Concrete light values land in P0 (reading surface) and P1 (SOUL viz).
+  reading-chapter-nav:
+    chrome-bg: "TODO-V1.79-light-reading-chapter-nav-chrome-bg"
+    chrome-border: "TODO-V1.79-light-reading-chapter-nav-chrome-border"
+    control-prev: "TODO-V1.79-light-reading-chapter-nav-control-prev"
+    control-next: "TODO-V1.79-light-reading-chapter-nav-control-next"
+    volume-group-bg: "TODO-V1.79-light-reading-chapter-nav-volume-group-bg"
+    volume-group-border: "TODO-V1.79-light-reading-chapter-nav-volume-group-border"
+  reading-progress-indicator:
+    track: "TODO-V1.79-light-reading-progress-indicator-track"
+    fill: "TODO-V1.79-light-reading-progress-indicator-fill"
+    label: "TODO-V1.79-light-reading-progress-indicator-label"
+  reading-maturation-badge:
+    chapter-completion-state: "TODO-V1.79-light-reading-maturation-badge-chapter-completion-state"
+    world-kb-density-count: "TODO-V1.79-light-reading-maturation-badge-world-kb-density-count"
+    open-findings-count: "TODO-V1.79-light-reading-maturation-badge-open-findings-count"
+    base: "TODO-V1.79-light-reading-maturation-badge-base"
+  soul-viz-keyword-cluster-node:
+    shape: "TODO-V1.79-light-soul-viz-keyword-cluster-node-shape"
+    size: "TODO-V1.79-light-soul-viz-keyword-cluster-node-size"
+    fill: "TODO-V1.79-light-soul-viz-keyword-cluster-node-fill"
+    stroke: "TODO-V1.79-light-soul-viz-keyword-cluster-node-stroke"
+    label: "TODO-V1.79-light-soul-viz-keyword-cluster-node-label"
+  soul-viz-timeline-axis:
+    line: "TODO-V1.79-light-soul-viz-timeline-axis-line"
+    tick: "TODO-V1.79-light-soul-viz-timeline-axis-tick"
+    label: "TODO-V1.79-light-soul-viz-timeline-axis-label"
+  soul-viz-drift-band:
+    fill: "TODO-V1.79-light-soul-viz-drift-band-fill"
+    step-stroke: "TODO-V1.79-light-soul-viz-drift-band-step-stroke"
+    label: "TODO-V1.79-light-soul-viz-drift-band-label"
 
   # V1.70 canvas implement — concrete light values (canvas-strategy-surface.md Draft §3.6 / B4)
   canvas:
@@ -745,3 +782,6 @@ Interaction rules:
 - Optimistic delete removes the row and decrements the count badge before the server responds; rolls back on error.
 - Token names are preserved verbatim — no consumer (`tailwind.config.ts`, `index.css`, or Memory page components) invents a name not in this frontmatter (V1.69 invariant continues).
 
+### Author Reflection Token Stubs (V1.79)
+
+V1.79 stubs Track A reading-surface tokens and Track B SOUL visualization tokens in frontmatter only; P0/P1 replace the `TODO-V1.79-*` placeholders with concrete light/dark values.
