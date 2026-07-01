@@ -1309,6 +1309,20 @@ pub async fn reflect_soul(
     }))
 }
 
+/// Truncate `summary` to at most `max_chars` Unicode scalar characters.
+///
+/// If the summary exceeds `max_chars`, takes the first `max_chars - 1` chars
+/// and appends `…`. This avoids the UTF-8 byte-slice truncation panic that
+/// `&s[..279]` causes when byte 279 is mid-multibyte-char.
+fn truncate_summary(summary: &str, max_chars: usize) -> String {
+    if summary.chars().count() <= max_chars {
+        summary.to_string()
+    } else {
+        let t: String = summary.chars().take(max_chars - 1).collect();
+        format!("{t}…")
+    }
+}
+
 /// Build a capped `SoulNarrativeSynthesisInput` from the creator's fragments.
 ///
 /// Caps: ≤30 keywords, ≤24 summaries ≤280 chars, ≤8 temporal buckets.
@@ -1338,13 +1352,9 @@ async fn build_soul_narrative_synthesis_input(
                 *keyword_counts.entry(kw).or_default() += 1;
             }
         }
-        // Cap summaries: ≤24, each ≤280 chars.
+        // Cap summaries: ≤24, each ≤280 chars (Unicode scalar chars, not bytes).
         if summaries.len() < 24 {
-            let summary = if frag.summary.len() > 280 {
-                format!("{}…", &frag.summary[..279])
-            } else {
-                frag.summary.clone()
-            };
+            let summary = truncate_summary(&frag.summary, 280);
             summaries.push(summary);
         }
     }
@@ -1572,6 +1582,55 @@ mod tests {
     fn decode_fragment_keywords_non_string_items_rejected() {
         // Mixed-type arrays are not `Vec<String>` → graceful empty.
         assert!(decode_fragment_keywords(r#"["ok", 42]"#).is_empty());
+    }
+
+    // ─── R-V181P0-QC3-W002: UTF-8 char-safe summary truncation ───────────
+
+    #[test]
+    fn truncate_summary_short_enough_returns_unchanged() {
+        let short = "Hello world";
+        assert_eq!(truncate_summary(short, 280), short);
+    }
+
+    #[test]
+    fn truncate_summary_exactly_at_limit_returns_unchanged() {
+        let exact = "a".repeat(280);
+        assert_eq!(truncate_summary(&exact, 280), exact);
+    }
+
+    #[test]
+    fn truncate_summary_over_limit_ascii_truncates_with_ellipsis() {
+        let long = "a".repeat(300);
+        let result = truncate_summary(&long, 280);
+        // 279 chars + '…' = 280 chars
+        assert_eq!(result.chars().count(), 280);
+        assert!(result.ends_with('…'));
+    }
+
+    #[test]
+    fn truncate_summary_cjk_multibyte_no_panic() {
+        // Each CJK char is 3 bytes; 300 CJK chars = 900 bytes.
+        // Byte index 279 is mid-character → old byte-slice would panic.
+        let cjk = "字".repeat(300);
+        let result = truncate_summary(&cjk, 280);
+        // Must not panic. 279 CJK chars + '…' = 280 chars.
+        assert_eq!(result.chars().count(), 280);
+        assert!(result.ends_with('…'));
+    }
+
+    #[test]
+    fn truncate_summary_emoji_multibyte_no_panic() {
+        // Emoji can be 4+ bytes; byte slice at 279 would panic.
+        let emoji = "🎉".repeat(300);
+        let result = truncate_summary(&emoji, 280);
+        assert_eq!(result.chars().count(), 280);
+        assert!(result.ends_with('…'));
+    }
+
+    #[test]
+    fn truncate_summary_short_below_limit_unchanged() {
+        assert_eq!(truncate_summary("abc", 280), "abc");
+        assert_eq!(truncate_summary("", 280), "");
     }
 
     // ─── V1.80 REL-01: deadline-aware partial progress ───────────────────
