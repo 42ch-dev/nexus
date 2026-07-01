@@ -13,6 +13,8 @@ use serde::{Deserialize, Serialize};
 pub struct ListMemoryFragmentsQuery {
     pub creator_id: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub world_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub keyword: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<i64>,
