@@ -918,6 +918,16 @@ async fn process_single_review_row(
 }
 
 /// Delete a pending review entry by ID (best-effort, logs on failure).
+///
+/// At-least-once semantics (R-V180P0-QC2-001): the delete runs AFTER the row's
+/// side effect (promote/fragment/drop) succeeds. If the delete itself fails (DB
+/// error), the pending row remains and may be reprocessed on the next review
+/// call — for promote/fragment that means a duplicate memory/fragment. This is
+/// accepted under the local-only / single-active-creator / small-queue threat
+/// model (operator-triggered review, bounded pipeline, observable warn log);
+/// it mirrors the pre-existing V1.33 best-effort pattern. A transactional
+/// side-effect-then-delete (or a row-state flip before the side effect) would
+/// harden it for an untrusted/multi-writer model in a future major version.
 async fn delete_pending_by_id(pool: &sqlx::SqlitePool, pending_id: &str) {
     let pid = pending_id.to_string();
     if let Err(e) = sqlx::query!(
