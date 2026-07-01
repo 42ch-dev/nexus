@@ -36,6 +36,7 @@ import type {
   PresetSummary,
   ReviewResponse,
   ScaffoldPresetRequest,
+  SoulNarrativeResponse,
   UpdateFindingRequest,
   ValidatePresetRequest,
   WorkSummary,
@@ -490,12 +491,18 @@ export function usePendingReviewCount(creatorId: string | undefined) {
 export function useMemoryFragments(
   creatorId: string | undefined,
   query?: Omit<ListMemoryFragmentsQuery, 'creator_id'>,
+  options?: { refetchInterval?: number },
 ) {
   const client = useNexusClient();
   return useQuery({
     queryKey: queryKeys.memory.fragments(creatorId ?? '', query),
     queryFn: () => client.listMemoryFragments(creatorId!, query),
     enabled: Boolean(creatorId),
+    refetchInterval: options?.refetchInterval,
+    // Intentionally NO `refetchIntervalInBackground: true`: TanStack pauses
+    // `refetchInterval` when the tab/window is hidden by default, which keeps a
+    // SOUL auto-refresh poll from draining battery/CPU on the Tauri desktop
+    // shell and backgrounded browser tabs (matches usePendingReviewCount).
   });
 }
 
@@ -646,6 +653,75 @@ export function useReviewMemory() {
       void qc.invalidateQueries({ queryKey: queryKeys.memory.pendingList(creatorId) });
       void qc.invalidateQueries({ queryKey: queryKeys.memory.count(creatorId) });
       void qc.invalidateQueries({ queryKey: queryKeys.memory.fragments(creatorId) });
+      // V1.81 SP-4 auto-refresh: a review produces new fragments, which may
+      // flip a cached narrative from `current` → `stale` (or lift a thin SOUL
+      // over the insufficient-data threshold). Invalidate the whole-Creator
+      // narrative cache so the card re-reads post-review state without a manual
+      // reload (plan §2.4).
+      void qc.invalidateQueries({ queryKey: queryKeys.memory.soulNarrative(creatorId) });
+    },
+  });
+}
+
+// ── Creator SOUL Narrative (V1.81 SP-1) ──────────────────────────────────────
+
+/**
+ * Auto-refresh cadence for the SOUL surface (V1.81 SP-4). Polled so new
+ * fragments captured by a background review surface in the viz + narrative
+ * stale-detection without a manual reload. Conservative vs. the 10s
+ * pending-review badge: the SOUL surface is a reflection view, not a live
+ * action queue, so a slower cadence keeps the Tauri desktop shell light.
+ */
+export const SOUL_REFETCH_MS = 30_000;
+
+/**
+ * Read the cached whole-Creator SOUL narrative (V1.81 SP-1).
+ *
+ * The `/soul/reflect` endpoint is a POST that returns the current cache state
+ * when `force_regenerate` is absent — so this is a *read* query shaped as a POST
+ * (the contract is one endpoint for read + regenerate; there is no separate
+ * GET). It returns one of `ungenerated` / `current` / `stale` /
+ * `insufficient_data`, plus the cached narrative text + metadata when present.
+ *
+ * The narrative is world-agnostic (Creator-level whole); the world projection
+ * selector does NOT re-scope this query (plan §0, §2.2). Auto-refreshes on the
+ * SOUL poll cadence + after a review mutation (via onSettled invalidation).
+ */
+export function useSoulNarrative(creatorId: string | undefined) {
+  const client = useNexusClient();
+  return useQuery({
+    queryKey: queryKeys.memory.soulNarrative(creatorId ?? ''),
+    queryFn: (): Promise<SoulNarrativeResponse> =>
+      client.reflectSoulNarrative({ creator_id: creatorId! }),
+    enabled: Boolean(creatorId),
+    refetchInterval: SOUL_REFETCH_MS,
+  });
+}
+
+/**
+ * Force-regenerate the whole-Creator SOUL narrative (V1.81 SP-1).
+ *
+ * Fires `force_regenerate: true` on the CTA ("Reflect on my SOUL" /
+ * "Re-reflect"). The caller drives the `generating` UX from `isPending`; on
+ * settle the narrative read query is invalidated so the fresh synthesis replaces
+ * the cached text. Errors surface as a toast; the read query is still
+ * invalidated on error so a partial/failed regeneration does not leave a frozen
+ * stale card (matches the review-mutation onSettled discipline).
+ */
+export function useReflectSoulNarrative() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: (creatorId: string): Promise<SoulNarrativeResponse> =>
+      client.reflectSoulNarrative({ creator_id: creatorId, force_regenerate: true }),
+    onSuccess: () => {
+      toast({ variant: 'success', title: 'SOUL reflected', description: 'Your narrative is up to date.' });
+    },
+    onError: (error) => errorToast(error, 'Could not reflect your SOUL'),
+    onSettled: (_data, _error, creatorId) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.memory.soulNarrative(creatorId) });
     },
   });
 }

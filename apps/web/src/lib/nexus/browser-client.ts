@@ -55,6 +55,8 @@ import type {
   SessionDetailResponse,
   SignalScheduleRequest,
   SignalScheduleResponse,
+  SoulNarrativeRequest,
+  SoulNarrativeResponse,
   StrategyPatchPromptTemplateRequest,
   StrategyPatchResponse,
   StrategyPatchStateRequest,
@@ -439,6 +441,9 @@ export class BrowserClient implements NexusClient {
       ...query,
       creator_id: creatorId,
     });
+  }
+  reflectSoulNarrative(request: SoulNarrativeRequest): Promise<SoulNarrativeResponse> {
+    return this.post<SoulNarrativeResponse>('/v1/local/memory/soul/reflect', request);
   }
 
   // ── Transport core ─────────────────────────────────────────────────────────
