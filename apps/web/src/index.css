@@ -138,6 +138,14 @@
     --color-soul-viz-timeline-axis-tick: #c7c7c7;
     --color-soul-viz-timeline-axis-label: #8a8a8a;
     --color-soul-viz-drift-band-fill: rgba(0, 107, 255, 0.16);
+    /* V1.80 — ordered band-fill slots 1..5 (slot 0 is `-fill` above).
+       Bridge the temporal-drift BAND_PALETTE tokens to CSS vars so no RGBA
+       value is hardcoded in the component (R-V179P1-QC1-002). */
+    --color-soul-viz-drift-band-fill-2: rgba(124, 58, 237, 0.16);
+    --color-soul-viz-drift-band-fill-3: rgba(0, 133, 119, 0.16);
+    --color-soul-viz-drift-band-fill-4: rgba(183, 110, 0, 0.16);
+    --color-soul-viz-drift-band-fill-5: rgba(190, 24, 93, 0.16);
+    --color-soul-viz-drift-band-fill-6: rgba(53, 142, 53, 0.16);
     --color-soul-viz-drift-band-step-stroke: rgba(0, 0, 0, 0.06);
     --color-soul-viz-drift-band-label: #4a4a4a;
 
@@ -270,6 +278,13 @@
     --color-soul-viz-timeline-axis-tick: #737373;
     --color-soul-viz-timeline-axis-label: #a3a3a3;
     --color-soul-viz-drift-band-fill: rgba(82, 168, 255, 0.22);
+    /* V1.80 — ordered band-fill slots 1..5 (slot 0 is `-fill` above), dark
+       values (R-V179P1-QC1-002). Same names as :root; only values differ. */
+    --color-soul-viz-drift-band-fill-2: rgba(183, 148, 255, 0.22);
+    --color-soul-viz-drift-band-fill-3: rgba(76, 216, 200, 0.22);
+    --color-soul-viz-drift-band-fill-4: rgba(255, 192, 67, 0.22);
+    --color-soul-viz-drift-band-fill-5: rgba(255, 108, 162, 0.22);
+    --color-soul-viz-drift-band-fill-6: rgba(134, 204, 108, 0.22);
     --color-soul-viz-drift-band-step-stroke: rgba(255, 255, 255, 0.08);
     --color-soul-viz-drift-band-label: #e0e0e0;
 
