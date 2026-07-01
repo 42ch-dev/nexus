@@ -5,7 +5,7 @@
     {
       "plan_id": "2026-07-01-v1.81-prepare-spec-and-contracts",
       "iteration_id": "V1.81",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@architect",
       "effort": "S",
       "type": "prepare",
@@ -19,7 +19,7 @@
     {
       "plan_id": "2026-07-01-v1.81-creator-soul-narrative-and-world-foundation",
       "iteration_id": "V1.81",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "@fullstack-dev",
       "effort": "L",
       "type": "feature",
@@ -35,7 +35,7 @@
     {
       "plan_id": "2026-07-01-v1.81-soul-surface-deepening",
       "iteration_id": "V1.81",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "@frontend-dev",
       "effort": "M",
       "type": "feature",
@@ -107,7 +107,7 @@
       "refreshed_at": "2026-07-01",
       "refreshed_reason": "V1.80 wave-1 Done (QA Pass): R-V178P0-QC3-003 (REL-01) + 4 V1.79-QC residuals resolved. Remaining open: 2 P0 accepted low + 1 V1.79 CI-wrapper low."
     },
-    "updated_at": "2026-07-01"
+    "updated_at": "2026-07-02"
   },
   "residual_findings": {
     "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization": [
@@ -6284,6 +6284,99 @@
         "target": "V1.80+ (pre-existing V1.33 best-effort pattern; at-least-once accepted under local-only/single-creator/small-queue threat model)",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.80-memory-review-reliability][R-V180P0-QC2-001]",
         "note": "If delete fails after a successful promote/fragment, the pending row remains and the next review re-processes it (duplicate promote/fragment). Per-creator mutex prevents within-cycle double-processing; cross-cycle re-processing is the at-least-once trade-off. Accepted under documented threat model; raise severity if queue size or writer count increases.",
+        "lifecycle": "open"
+      }
+    ],
+    "2026-07-01-v1.81-creator-soul-narrative-and-world-foundation": [
+      {
+        "id": "R-V181P0-QC1-W001",
+        "title": "Missing daemon-level regression test for world_id threading through the review pipeline",
+        "severity": "low",
+        "source": "qc1 W-001",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/memory.rs:886 + tests/memory_review_fragments_api.rs + crates/nexus-orchestration/.../creator.rs",
+        "decision": "fix-in-wave",
+        "owner": "@fullstack-dev",
+        "target": "V1.81 QC fix-wave",
+        "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.81-creator-soul-narrative-and-world-foundation][R-V181P0-QC1-W001]",
+        "note": "Add daemon integration test: POST pending review world_id=Some -> POST /review -> GET /fragments?world_id -> assert propagation; + orchestration write_memory Some assertion.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V181P0-QC3-W001",
+        "title": "/memory/soul/reflect read/status path scans + decodes every fragment on every read/poll (unbounded)",
+        "severity": "medium",
+        "source": "qc3 W-QC3-001 (Performance Lens)",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/memory.rs:1136-1145 + crates/nexus-local-db/src/soul_narrative.rs:106-123",
+        "decision": "fix-in-wave",
+        "owner": "@fullstack-dev",
+        "target": "V1.81 QC fix-wave",
+        "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.81-creator-soul-narrative-and-world-foundation][R-V181P0-QC3-W001]",
+        "note": "Split cheap stale stats (COUNT(*), MAX(created_at)) into SQL aggregates; cap Rust keyword decode for insufficient-data gate; force_regenerate=false returns cached state without scanning all keyword JSON.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V181P0-QC3-W002",
+        "title": "Summary truncation slices UTF-8 by byte offset -> panic on non-ASCII",
+        "severity": "medium",
+        "source": "qc3 W-QC3-002 (Reliability Lens)",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/memory.rs:1341-1345",
+        "decision": "fix-in-wave",
+        "owner": "@fullstack-dev",
+        "target": "V1.81 QC fix-wave",
+        "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.81-creator-soul-narrative-and-world-foundation][R-V181P0-QC3-W002]",
+        "note": "Truncate by Unicode scalar chars (chars().take(279) + ellipsis); add multi-byte regression test.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V181P0-QC1-S001",
+        "title": "Plan-promised validate-draft step not implemented (narrative quality floor is prompt-only)",
+        "severity": "low",
+        "source": "qc1 S-001",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/memory.rs reflect_soul synthesize->upsert path",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.82+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.81-creator-soul-narrative-and-world-foundation][R-V181P0-QC1-S001]",
+        "note": "Lightweight validator on draft.narrative (>=2 keyword hits, >=1 temporal token, forward-looking suffix) -> MemoryError::QualityThresholdMissed.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V181P0-QC1-S002",
+        "title": "MemoryError -> NexusApiError mapping in reflect_soul is string-content-matching (brittle)",
+        "severity": "low",
+        "source": "qc1 S-002",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/memory.rs ~line 1268",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.82+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.81-creator-soul-narrative-and-world-foundation][R-V181P0-QC1-S002]",
+        "note": "Typed SoulNarrativeError enum or structural map_memory_error_for_narrative helper.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V181P0-QC1-S005",
+        "title": "Synthesized narrative length uncapped at persist boundary",
+        "severity": "low",
+        "source": "qc1 S-005",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/memory.rs upsert_soul_narrative",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.82+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.81-creator-soul-narrative-and-world-foundation][R-V181P0-QC1-S005]",
+        "note": "narrative.chars().count() <= N (e.g. 16KiB) check before upsert, or simplify: comment marking prompt-only trust bound.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V181P0-QC1-S003",
+        "title": "world-selector.tsx simplify comment claims 'Tracked' but deferred-features tracker lacks the entry",
+        "severity": "low",
+        "source": "qc1 S-003",
+        "scope": "apps/web/src/components/soul/world-selector.tsx:19-27 + deferred-features-cross-version-tracker.md BL-12",
+        "decision": "defer",
+        "owner": "@project-manager",
+        "target": "V1.81 P-last",
+        "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.81-creator-soul-narrative-and-world-foundation][R-V181P0-QC1-S003]",
+        "note": "Add world-title-resolution deferral row to tracker (BL-12) or downgrade comment to 'deferred - see BL-12'.",
         "lifecycle": "open"
       }
     ]
