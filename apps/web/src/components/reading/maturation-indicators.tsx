@@ -49,6 +49,7 @@ export function MaturationIndicators({ workId, chapter, status }: MaturationIndi
         label="open findings"
         count={findings.count}
         loading={findings.isLoading}
+        truncated={findings.truncated}
         variant={findings.count > 0 ? 'attention' : 'neutral'}
       />
     </div>
@@ -60,6 +61,13 @@ interface CountBadgeProps {
   label: string;
   count: number | null;
   loading: boolean;
+  /**
+   * When true, `count` is a lower bound (more rows exist on unloaded pages).
+   * Renders an honest "N+" label instead of an exact-looking but clipped
+   * integer. The `PaginationInfo` envelope has no `total`, so this is the
+   * accurate representation of a truncated count (qc3 W-QC3-002).
+   */
+  truncated?: boolean;
   variant: 'info' | 'attention' | 'neutral';
 }
 
@@ -70,9 +78,9 @@ interface CountBadgeProps {
  * V1.77/V1.78 badges so colors stay correct in light and dark. Count is never
  * color-only — the label and count travel together.
  */
-function CountBadge({ icon, label, count, loading, variant }: CountBadgeProps) {
+function CountBadge({ icon, label, count, loading, truncated = false, variant }: CountBadgeProps) {
   const variantClass = VARIANT_CLASSES[variant];
-  const text = count === null ? '—' : String(count);
+  const text = count === null ? '—' : truncated ? `${count}+` : String(count);
   return (
     <span
       className={cn(

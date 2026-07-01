@@ -93,6 +93,7 @@ export function ChapterPage() {
         next={neighbors.next}
         volumes={neighbors.volumes}
         currentVolume={ch.volume ?? currentVolume}
+        loading={neighbors.loading}
       />
 
       <Card className="shadow-card">
