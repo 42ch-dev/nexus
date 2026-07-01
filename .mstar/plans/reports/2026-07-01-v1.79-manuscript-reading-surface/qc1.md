@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-07-01-v1.79-manuscript-reading-surface"
-verdict: "Approve with residuals"
+verdict: "Approve"
 generated_at: "2026-07-01"
 ---
 
@@ -155,3 +155,55 @@ PM action items (suggested residual registration):
 - R3 (S-001): Keyboard nav + overlay-guard test coverage → owner `@qa-engineer` (test additions) + `@frontend-dev` (refactor if guard pattern changes). Tracking: same path + §S-001.
 
 Body-ownership invariant (V1.75 pivot: canvas = sole authoring surface) is preserved. Read-only composition only. Acceptance criteria 1-6 from `§Acceptance` are all met by this implementation (verified via `pnpm --filter web run typecheck` clean + 321 tests pass + module size discipline + DESIGN.md token parity).
+
+## Revalidation
+
+**Trigger**: PM dispatched targeted re-review for fix-wave commit `3d33688e` (merged at `0d69b3c0`) addressing qc1 W-001 + qc1 W-002 (this report) and qc3 W-QC3-001 / W-QC3-002. Re-review scope restricted to those two warnings + the four Suggestions, in scope only where the fix-wave touched them.
+
+**Scope verification (Review Context Gate, `mstar-branch-worktree`)**:
+- Review cwd: `/Users/bibi/workspace/organizations/42ch/nexus` (verified via `git rev-parse --show-toplevel`)
+- Working branch: `iteration/v1.79` (verified via `git branch --show-current`)
+- HEAD: `0d69b3c0` (merge commit containing fix-wave `3d33688e`)
+- Review range / Diff basis: `merge-base: 0015694f (origin/main) .. HEAD: 0d69b3c0` (matches initial-review Assignment; fix-wave diff = merge commit + its parent fix commit)
+- Files re-reviewed (fix-wave diff): `apps/web/src/components/reading/reading-hooks.ts`, `apps/web/src/components/reading/maturation-indicators.tsx`, `apps/web/src/components/reading/chapter-nav.tsx`, `apps/web/src/pages/chapter-page.tsx`, `apps/web/src/pages/chapter-page.test.tsx`
+
+**Evidence**:
+- `git show 3d33688e --stat`: 5 files changed, 193 insertions, 11 deletions. **Zero mutations / write routes introduced** (body-ownership invariant preserved — only `useEffect` / `useMemo` additions in `reading-hooks.ts`, derived boolean in `maturation-indicators.tsx`, pure render JSX changes in `chapter-nav.tsx` + `chapter-page.tsx`, test additions in `chapter-page.test.tsx`).
+- `pnpm --filter @42ch/nexus-contracts run build`: contracts package rebuilt (required by `apps/web/AGENTS.md` build/typecheck contract); exit 0, dts emitted.
+- `pnpm --filter web run typecheck`: clean, exit 0.
+- `pnpm --filter web run test -- src/pages/chapter-page.test.tsx`: **16 chapter-page tests pass** (was 14; +2 new regression tests). Both new tests verified by name via `--reporter=verbose`:
+  - ✓ `ChapterPage (V1.79 P0 QC fix-wave — pagination correctness) > renders an honest "N+" open-findings label when the page is truncated (qc3 W-QC3-002)` — 19 ms
+  - ✓ `ChapterPage (V1.79 P0 QC fix-wave — pagination correctness) > resolves prev/next across the server page boundary by cursor-walking (qc3 W-QC3-001)` — 23 ms
+- Full suite: **44 test files passed, 323 tests passed** (was 321; +2 regression tests, zero other regressions).
+
+**Deviation review (PM brief vs. dev execution)**: The brief said "use `PaginationInfo.total`", but `PaginationInfo` (verified at `packages/nexus-contracts/src/generated/local-api/kb/PaginationInfo.ts:11-15` and the SSOT schema at `schemas/local-api/kb/pagination-info.schema.json:8-20`) declares exactly `{ limit, next_cursor?, has_more }` with `"additionalProperties": false`. **No `total` field exists, and the schema forbids adding one** — generating one would require both a schema change AND a daemon handler change AND a regenerated `@42ch/nexus-contracts` package, none of which the brief authorized. The dev's deviation to render an honest "N+" lower-bound label via `has_more` (qc3's option b) is therefore contract-faithful: no invented field, no schema drift, no fallback to a value the server never returns. This is the right call — inventing a `total` field would have been a contract violation; rendering "N+" matches the data the server actually sends.
+
+**Per-finding disposition**:
+
+| Finding ID | Status | Evidence |
+|---|---|---|
+| W-001 (open-findings page-1 truncation) | **Resolved** | `reading-hooks.ts:139-142`: `useOpenFindingsCount` now exposes `truncated: boolean` derived from `lastPage.pagination.has_more`. `maturation-indicators.tsx:52, 64-69, 81, 83`: `CountBadge` accepts `truncated` and renders `${count}+` when true (`const text = count === null ? '—' : truncated ? \`${count}+\` : String(count)`). Regression test asserts the truncated-page case renders the `aria-label="2+ open findings"` badge — verified passing. Honest lower-bound label; no clipped-looking exact integer. |
+| W-002 (chapter-neighbor >200-chapter degradation) | **Resolved** | `reading-hooks.ts:81-89`: cursor-walk effect fires `fetchNextPage()` when `hasNextPage && !isFetchingNextPage`; `loading = isLoading \|\| hasNextPage \|\| isFetchingNextPage`. `chapter-nav.tsx:30-37, 48, 63-79, 104-120`: new `loading?: boolean` prop renders a neutral "Loading chapters…" placeholder (`aria-label="Loading chapters"`, using existing `border-gray-alpha-300` / `bg-background-200` / `text-gray-700` primitives — no new tokens) instead of misleading "First chapter"/"Last chapter" labels during the walk. Regression test: 150-chapter Work paginated at 100/page, chapter 101 resolves prev=100/next=102 after the walk — verified passing. Normal Works (first page returns `has_more: false`) never trigger the effect — no over-fetch. |
+| S-001 (keyboard nav + overlay-guard test coverage) | Not in scope of fix-wave; no changes to `useChapterKeyboardNav` or keyboard coverage in `chapter-page.test.tsx`. **Still open** (unchanged from initial review). |
+| S-002 (component-level unit tests for reading components) | Not in scope of fix-wave; the fix-wave added 2 integration tests in `chapter-page.test.tsx`, not component-level tests. **Still open** (unchanged from initial review). |
+| S-003 (`volume ?? 1` defensive fallback) | Not in scope of fix-wave; defensive fallbacks still present in `deriveVolumes` (`reading-hooks.ts:113`), `matchCurrent` (`reading-hooks.ts:50`), `chapterHref` (`chapter-nav.tsx:40`). **Still open** (unchanged from initial review). |
+| S-004 (RAF_GUARD_MS debounce over-engineering) | Not in scope of fix-wave. **Still open** (unchanged from initial review). |
+
+**Architectural impact (architecture/maintainability lens)**:
+- **Read-only invariant preserved (V1.75 pivot)**: zero `useMutation`/write paths added. Verified by `git show 3d33688e -- '*.ts' '*.tsx' | grep -E 'useMutation|fetch\([^)]*POST|fetch\([^)]*PATCH|fetch\([^)]*DELETE'` → no matches. All new logic is composition over existing read hooks (`useChapters`, `useFindings`).
+- **Module-size discipline held** (`apps/web/AGENTS.md` ≤250-line rule, post-fix HEAD):
+  - `reading-hooks.ts`: 159 lines (was 114, +45 — within budget)
+  - `chapter-nav.tsx`: 124 lines (was 101, +23 — within budget)
+  - `maturation-indicators.tsx`: 111 lines (was 103, +8 — within budget)
+  - `chapter-page.tsx`: 169 lines (was 168, +1 — within budget)
+- **Contract discipline held**: no parallel DTOs; all types from `@42ch/nexus-contracts`. `PaginationInfo` access is read-only through the `useFindings` / `useChapters` cache; no new query-key namespace.
+- **DESIGN.md / DESIGN.dark.md parity**: no new tokens invented. `CountBadge` reuses the existing `color-mix(in_srgb, ...)` pattern from V1.77/V1.78 badges (light + dark correct via base CSS vars). The "Loading chapters…" placeholder uses standard `border-gray-alpha-300` / `bg-background-200` / `text-gray-700` primitives. "2+" / "N+" labels are inline count text, not titles/nav/buttons — Title Case rule from `apps/web/AGENTS.md` §Voice & Content does not apply.
+- **Accessibility preserved**: `aria-label="Loading chapters"` on placeholder spans (screen-reader-distinct from `aria-label="No previous chapter"` / `"No next chapter"`); `aria-label="2+ open findings"` keeps the count + label together on `CountBadge` (no color-only state); cursor-walk effect dependency array `[chapters.hasNextPage, chapters.isFetchingNextPage, chapters.fetchNextPage]` avoids re-firing on unrelated store updates.
+
+**Verdict update**: Both Warnings (W-001, W-002) resolved by fix-wave `3d33688e`. Zero new findings introduced. Body-ownership invariant intact, contract discipline intact, DESIGN.md token discipline intact, regression tests pass, typecheck clean, full suite green.
+
+Per `mstar-review-qc` verdict rules: `Critical = 0`, `Warning = 0` (unresolved). Verdict upgraded from **Approve with residuals** → **Approve**.
+
+**PM action items (residual lifecycle)**:
+- R1 (W-001) and R2 (W-002) should be closed in `status.json.residual_findings["2026-07-01-v1.79-manuscript-reading-surface"]` and moved to `archived/residuals/<plan-id>.json` with `closure_note` referencing fix-wave commit `3d33688e` and `lifecycle: resolved` (per `mstar-plan-artifacts` §Residual 关闭与验证). QC does not own residual lifecycle writes.
+- S-001, S-002, S-003, S-004 remain unaddressed by this fix-wave (intentionally out of scope per Assignment). If PM chooses to retain them as Suggestion-severity residuals into V1.80 backlog, register via `mstar-plan-artifacts/references/status-and-residuals.md` enum SSOT. Out of scope for this re-review round.
