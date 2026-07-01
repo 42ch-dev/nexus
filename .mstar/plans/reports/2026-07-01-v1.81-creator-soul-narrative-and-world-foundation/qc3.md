@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-07-01-v1.81-creator-soul-narrative-and-world-foundation"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-07-02"
 ---
 
@@ -166,3 +166,35 @@ None.
 ### Revalidation verdict
 
 **Verdict**: Request Changes. W-QC3-003 is resolved as a soundness bug and the 5 new regression tests pass, but round-2 reintroduced/continued the W-QC3-001 unbounded keyword JSON decode cost on cached read/status calls, so this targeted re-review cannot flip to Approve.
+
+## Revalidation
+
+- Date: 2026-07-02
+- Review range / Diff basis: round-3 fix `git diff f6b64ffa..92cb7c8a` (fix commit `7fe671f6`, merge tip `92cb7c8a`)
+- Working branch / HEAD verified: `iteration/v1.81` @ `92cb7c8a`
+- Re-checked files: `crates/nexus-local-db/src/soul_narrative.rs`, `crates/nexus-local-db/migrations/20260702_000001_memory_soul_narratives_stats_cache.sql`, `crates/nexus-local-db/src/lib.rs`, `crates/nexus-daemon-runtime/src/api/handlers/memory.rs`, `crates/nexus-local-db/tests/soul_narrative_keyword_count.rs`, and the updated `.sqlx/query-*.json` metadata.
+- Tools/evidence:
+  - `git diff f6b64ffa..92cb7c8a` — reviewed the round-3 fix scope.
+  - `gitnexus_detect_changes({ base_ref: "f6b64ffa", scope: "compare", repo: "nexus" })` — low-risk graph summary for the targeted fix range (8 changed files, no indexed changed symbols reported).
+  - `cargo test -p nexus-local-db -p nexus-daemon-runtime` — passed. The target keyword/cache integration suite ran 9/9 tests successfully: the 5 soundness tests (`distinct_keywords_at_least_20_across_many_fragments`, `distinct_keywords_below_20_gate_fails`, `distinct_keywords_exactly_20_gate_passes`, `distinct_keywords_with_duplicates_still_sound`, `no_fragments_zero_distinct`) plus the 4 cache tests (`fingerprint_cache_unchanged_fragments_returns_cached_count`, `fingerprint_cache_changed_fragments_recomputes`, `fingerprint_cache_no_row_computes_soundly`, `fingerprint_cache_zero_fragments_returns_cached_zero`). Broader `nexus-daemon-runtime` and `nexus-local-db` tests/doc-tests also passed; existing warnings were non-fatal in test builds.
+
+### Round-3 disposition
+
+- **W-QC3-001 / R-V181P0-QC3-W001 — Resolved.**
+  - Evidence: `soul_narrative_fragment_stats` now always computes only `COUNT(*)` and `MAX(created_at)` as cheap SQL aggregates first (`crates/nexus-local-db/src/soul_narrative.rs:206-226`), builds `stats_fingerprint = "{fragment_count}:{max_created_at}"` via `build_stats_fingerprint`, then checks the cached `memory_soul_narratives.stats_fingerprint` (`crates/nexus-local-db/src/soul_narrative.rs:228-241`). When the fingerprint matches, it returns `distinct_keyword_count_cache` immediately and does **not** enter `compute_distinct_keyword_count`; therefore cached `force_regenerate=false` read/status calls with unchanged fragments no longer stream or decode keyword JSON.
+  - Handler path: `reflect_soul` still calls `soul_narrative_fragment_stats` before the cache-state branch, but after this fix the unchanged cached path pays the two SQL aggregates plus the narrative-row lookup, then returns cached `current`/`stale` state with the cached distinct count (`crates/nexus-daemon-runtime/src/api/handlers/memory.rs:1136-1234`). After synthesis, `reflect_soul` persists `distinct_keyword_count_cache` and the same fingerprint on the narrative row, warming future reads (`crates/nexus-daemon-runtime/src/api/handlers/memory.rs:1276-1294`).
+  - Fingerprint assessment: `{fragment_count}:{max_created_at}` detects ordinary append-mostly fragment changes because any new fragment changes count and/or max timestamp. It intentionally does not detect a contrived delete-then-reinsert/replace sequence that preserves both count and max-created-at; `memory_fragment::delete_fragment` exists as a low-level DAO/test helper, but no production caller currently uses fragment deletion, and there is no fragment update path. Given the local append-mostly fragment model and stale detection already based on the same count/max snapshot semantics, this edge is acceptable for the targeted read-path performance fix.
+  - Migration assessment: `20260702_000001_memory_soul_narratives_stats_cache.sql` is additive (`distinct_keyword_count_cache INTEGER NOT NULL DEFAULT 0`, nullable `stats_fingerprint TEXT`). Existing rows keep `stats_fingerprint = NULL`, so the first post-migration read cannot falsely use the default zero count; it recomputes soundly once and updates the cache.
+
+- **W-QC3-003 / R-V181P0-QC3-W003 — Resolved.**
+  - Evidence: cache misses and fingerprint mismatches call `compute_distinct_keyword_count`, which streams all `memory_fragments.keywords` rows without `LIMIT`, accumulates distinct keywords in a `HashSet`, and after reaching the threshold still drains the remaining stream to return an exact count (`crates/nexus-local-db/src/soul_narrative.rs:141-180`). Thus a `<20` result is only returned after EOF proves fewer than 20 distinct keywords across all fragments, and a `>=20` result remains exact for `current_distinct_keyword_count`.
+  - Response soundness: `reflect_soul` uses `fragment_stats.distinct_keyword_count` for both the insufficient-data gate and `current_distinct_keyword_count` in `insufficient_data`, `current`, `stale`, and newly generated responses (`crates/nexus-daemon-runtime/src/api/handlers/memory.rs:1147-1166`, `1201-1205`, `1227-1231`, `1311-1313`). That value is either the previously computed exact cached count for the matching fingerprint or a freshly recomputed exact count on mismatch/no-row; it is not the old newest-200 bounded estimate.
+  - Coverage: the 9-test `soul_narrative_keyword_count` suite covers the original soundness cases plus cache-hit, cache-miss/recompute, no-cache-row, and cached-zero behavior (`crates/nexus-local-db/tests/soul_narrative_keyword_count.rs`). The cache-hit test seeds a sentinel cached count (`999`) with a matching fingerprint and verifies that value is returned instead of recomputing from the 25 actual keyword fragments, proving the unchanged cached path bypasses keyword decode.
+
+### New blocking issue assessment
+
+None found. The round-3 fix preserves W-QC3-003 soundness on recompute while removing W-QC3-001's repeated keyword JSON stream/decode from unchanged cached reads. The remaining contrived fingerprint collision edge is non-blocking under the current append-mostly fragment lifecycle.
+
+### Revalidation verdict
+
+**Verdict**: Approve. Both prior QC3 blocking findings are resolved and the required `cargo test -p nexus-local-db -p nexus-daemon-runtime` command passes, including all 9 keyword/cache regression tests.
