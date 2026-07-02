@@ -33,11 +33,14 @@ export function SoulNarrativeCard({
   isLoading,
   isReflecting,
   onReflect,
+  scope = 'creator',
 }: {
   narrative: SoulNarrativeResponse | undefined;
   isLoading: boolean;
   isReflecting: boolean;
   onReflect: () => void;
+  /** V1.82: `world` scopes copy to the selected world's per-World narrative. */
+  scope?: 'creator' | 'world';
 }) {
   // `generating` (client-side, mutation in flight) takes precedence over the
   // server-reported state so the CTA shows active progress regardless of the
@@ -63,7 +66,7 @@ export function SoulNarrativeCard({
   }
 
   if (narrative.state === 'insufficient_data') {
-    return <InsufficientDataState narrative={narrative} />;
+    return <InsufficientDataState narrative={narrative} scope={scope} />;
   }
 
   if (narrative.state === 'ungenerated') {
@@ -133,13 +136,24 @@ function UngeneratedState({ onReflect }: { onReflect: () => void }) {
   );
 }
 
-function InsufficientDataState({ narrative }: { narrative: SoulNarrativeResponse }) {
+function InsufficientDataState({
+  narrative,
+  scope,
+}: {
+  narrative: SoulNarrativeResponse;
+  scope: 'creator' | 'world';
+}) {
   const remaining = remainingToFragmentsThreshold(narrative);
+  const isWorld = scope === 'world';
   return (
     <div data-testid="soul-narrative-insufficient">
       <EmptyState
-        title="Your SOUL is still forming"
-        description="Keep writing and reviewing — once you've accumulated enough creative experience, Nexus can reflect on who you are becoming."
+        title={isWorld ? "This world's SOUL is still forming" : 'Your SOUL is still forming'}
+        description={
+          isWorld
+            ? "Keep writing and reviewing in this world — once it has enough fragments, themes, and creative experience, Nexus can reflect on its identity."
+            : "Keep writing and reviewing — once you've accumulated enough fragments, themes, and creative experience, Nexus can reflect on who you are becoming."
+        }
       />
       <p className="mt-3 text-copy-13 text-gray-700">
         {narrative.current_fragment_count} fragment{narrative.current_fragment_count === 1 ? '' : 's'} captured so far

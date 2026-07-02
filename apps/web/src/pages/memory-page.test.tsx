@@ -32,10 +32,28 @@ function sessionListHandler(creatorId = CREATOR) {
   });
 }
 
+/** Wire the SOUL section handlers so MemoryPage fully renders (V1.82). */
+function soulHandlers(creatorId = CREATOR) {
+  return [
+    http.get('/v1/local/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
+    http.post('/v1/local/memory/soul/reflect', () =>
+      HttpResponse.json({
+        creator_id: creatorId,
+        state: 'insufficient_data',
+        current_fragment_count: 0,
+        current_distinct_keyword_count: 0,
+        min_fragment_count: 10,
+        min_distinct_keyword_count: 20,
+      }),
+    ),
+  ];
+}
+
 describe('MemoryPage — pending list, count badge, fragments, delete, review', () => {
   it('renders the pending-review list with the live count badge', async () => {
     useHandlers(
       sessionListHandler(),
+      ...soulHandlers(),
       http.get('/v1/local/memory/pending-review', () =>
         HttpResponse.json({
           items: [
@@ -71,6 +89,7 @@ describe('MemoryPage — pending list, count badge, fragments, delete, review', 
   it('renders fragments and shows "(none)" for absent world_id in the inspector (open item #3)', async () => {
     useHandlers(
       sessionListHandler(),
+      ...soulHandlers(),
       http.get('/v1/local/memory/pending-review', () =>
         HttpResponse.json({
           items: [
@@ -115,6 +134,7 @@ describe('MemoryPage — pending list, count badge, fragments, delete, review', 
     let deleted = false;
     useHandlers(
       sessionListHandler(),
+      ...soulHandlers(),
       http.get('/v1/local/memory/pending-review', () =>
         HttpResponse.json({
           items: deleted
@@ -161,6 +181,7 @@ describe('MemoryPage — pending list, count badge, fragments, delete, review', 
     );
     useHandlers(
       sessionListHandler(),
+      ...soulHandlers(),
       http.get('/v1/local/memory/pending-review', () =>
         HttpResponse.json({
           items: [

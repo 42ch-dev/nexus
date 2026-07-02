@@ -149,4 +149,28 @@ describe('SoulNarrativeCard — five UX states', () => {
     expect(screen.getByText(/12 fragments captured so far/i)).toBeInTheDocument();
     expect(screen.queryByText(/more to go/i)).not.toBeInTheDocument();
   });
+
+  it('insufficient-data (world scope): uses world-scoped copy', () => {
+    renderInApp(
+      <SoulNarrativeCard
+        narrative={response({
+          state: 'insufficient_data',
+          current_fragment_count: 2,
+          min_fragment_count: 10,
+        })}
+        isLoading={false}
+        isReflecting={false}
+        onReflect={() => {}}
+        scope="world"
+      />,
+    );
+    expect(screen.getByText("This world's SOUL is still forming")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /once it has enough fragments, themes, and creative experience, Nexus can reflect on its identity/i,
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/2 fragments captured so far/i)).toBeInTheDocument();
+    expect(screen.getByText(/8 more to go/i)).toBeInTheDocument();
+  });
 });
