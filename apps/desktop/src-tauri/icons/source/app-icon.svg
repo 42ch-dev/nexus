@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-labelledby="nexus-app-icon-title nexus-app-icon-desc">
+  <title id="nexus-app-icon-title">Nexus</title>
+  <desc id="nexus-app-icon-desc">Nexus app icon — network mark on a deep-blue branded background</desc>
+  <rect x="0" y="0" width="1024" height="1024" fill="#1E3A5F"/>
+  <g transform="translate(102.4,102.4) scale(8.192)" fill="none" stroke="#25D1E0" stroke-width="6.6" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="8" y="8" width="84" height="84" rx="20"/>
+    <polygon points="50,8 92,50 50,92 8,50"/>
+    <path d="M30 28 L30 72"/>
+    <path d="M30 28 L70 72"/>
+    <path d="M70 28 L70 72"/>
+  </g>
+  <g transform="translate(102.4,102.4) scale(8.192)" fill="#FFFFFF" stroke="none">
+    <circle cx="50" cy="8" r="7.4"/>
+    <circle cx="92" cy="50" r="7.4"/>
+    <circle cx="50" cy="92" r="7.4"/>
+    <circle cx="8" cy="50" r="7.4"/>
+    <circle cx="30" cy="28" r="7.4"/>
+    <circle cx="70" cy="28" r="7.4"/>
+    <circle cx="30" cy="72" r="7.4"/>
+    <circle cx="70" cy="72" r="7.4"/>
+  </g>
+</svg>
