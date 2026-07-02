@@ -20,8 +20,35 @@ CREATE TABLE memory_soul_narratives_new (
     updated_at TEXT NOT NULL
 );
 
-INSERT INTO memory_soul_narratives_new
-    SELECT * FROM memory_soul_narratives;
+-- Copy rows by NAME (not positional SELECT *) so the copy is order-independent.
+-- The old table (after migration 2's ALTER ADD COLUMN) ends with
+-- ..., created_at, updated_at, distinct_keyword_count_cache, stats_fingerprint,
+-- while the new table declares ..., distinct_keyword_count_cache,
+-- stats_fingerprint, created_at, updated_at — a positional SELECT * would map
+-- the NULL-able stats_fingerprint into the NOT NULL updated_at and abort the
+-- migration if any row existed. (Greptile review feedback.)
+INSERT INTO memory_soul_narratives_new (
+    creator_id,
+    narrative,
+    generated_at,
+    fragment_count_at_generation,
+    max_fragment_created_at_at_generation,
+    distinct_keyword_count_cache,
+    stats_fingerprint,
+    created_at,
+    updated_at
+)
+SELECT
+    creator_id,
+    narrative,
+    generated_at,
+    fragment_count_at_generation,
+    max_fragment_created_at_at_generation,
+    distinct_keyword_count_cache,
+    stats_fingerprint,
+    created_at,
+    updated_at
+FROM memory_soul_narratives;
 
 DROP TABLE memory_soul_narratives;
 
