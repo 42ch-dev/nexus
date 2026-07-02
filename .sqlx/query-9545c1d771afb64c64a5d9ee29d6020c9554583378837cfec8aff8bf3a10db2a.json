@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT MAX(created_at) as \"max_created_at?: String\" FROM memory_fragments WHERE creator_id = ? AND world_id = ?",
+  "describe": {
+    "columns": [
+      {
+        "name": "max_created_at?: String",
+        "ordinal": 0,
+        "type_info": "Null"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "9545c1d771afb64c64a5d9ee29d6020c9554583378837cfec8aff8bf3a10db2a"
+}

@@ -50,7 +50,7 @@ async fn distinct_keywords_at_least_20_across_many_fragments() {
         insert_fragment(&pool, creator_id, &[&kw], i).await;
     }
 
-    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id)
+    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id, None)
         .await
         .unwrap();
 
@@ -76,7 +76,7 @@ async fn distinct_keywords_below_20_gate_fails() {
         insert_fragment(&pool, creator_id, &[kw], i).await;
     }
 
-    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id)
+    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id, None)
         .await
         .unwrap();
 
@@ -102,7 +102,7 @@ async fn distinct_keywords_exactly_20_gate_passes() {
         insert_fragment(&pool, creator_id, &[&kw], i).await;
     }
 
-    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id)
+    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id, None)
         .await
         .unwrap();
 
@@ -129,7 +129,7 @@ async fn distinct_keywords_with_duplicates_still_sound() {
         insert_fragment(&pool, creator_id, &[&kw], i).await;
     }
 
-    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id)
+    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id, None)
         .await
         .unwrap();
 
@@ -146,7 +146,7 @@ async fn no_fragments_zero_distinct() {
     let pool = init_pool(&db_path).await.unwrap();
     let creator_id = "ctr_test_empty";
 
-    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id)
+    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id, None)
         .await
         .unwrap();
 
@@ -218,7 +218,7 @@ async fn fingerprint_cache_unchanged_fragments_returns_cached_count() {
     let fingerprint = build_stats_fingerprint(25, max_created_at.as_deref());
     seed_narrative_cache(&pool, creator_id, 999, &fingerprint).await;
 
-    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id)
+    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id, None)
         .await
         .unwrap();
 
@@ -247,7 +247,7 @@ async fn fingerprint_cache_changed_fragments_recomputes() {
     let old_fingerprint = build_stats_fingerprint(10, None);
     seed_narrative_cache(&pool, creator_id, 999, &old_fingerprint).await;
 
-    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id)
+    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id, None)
         .await
         .unwrap();
 
@@ -257,7 +257,7 @@ async fn fingerprint_cache_changed_fragments_recomputes() {
     assert!(stats.distinct_keyword_count >= 20);
 
     // Second call with unchanged fragments → should now return cached 25.
-    let (stats2, _cached2) = soul_narrative_fragment_stats(&pool, creator_id)
+    let (stats2, _cached2) = soul_narrative_fragment_stats(&pool, creator_id, None)
         .await
         .unwrap();
     assert_eq!(stats2.distinct_keyword_count, 25);
@@ -279,7 +279,7 @@ async fn fingerprint_cache_no_row_computes_and_persists_stats_row() {
         insert_fragment(&pool, creator_id, &[&kw], i).await;
     }
 
-    let (stats, cached) = soul_narrative_fragment_stats(&pool, creator_id)
+    let (stats, cached) = soul_narrative_fragment_stats(&pool, creator_id, None)
         .await
         .unwrap();
 
@@ -299,7 +299,7 @@ async fn fingerprint_cache_no_row_computes_and_persists_stats_row() {
     assert!(cached.stats_fingerprint.is_some());
 
     // Second call with unchanged fragments → fingerprint cache hit.
-    let (stats2, cached2) = soul_narrative_fragment_stats(&pool, creator_id)
+    let (stats2, cached2) = soul_narrative_fragment_stats(&pool, creator_id, None)
         .await
         .unwrap();
     assert_eq!(
@@ -321,7 +321,7 @@ async fn fingerprint_cache_zero_fragments_returns_cached_zero() {
     let fingerprint = build_stats_fingerprint(0, None);
     seed_narrative_cache(&pool, creator_id, 0, &fingerprint).await;
 
-    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id)
+    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id, None)
         .await
         .unwrap();
 
