@@ -8,7 +8,7 @@
 //! cached read/poll.
 
 use futures_util::TryStreamExt;
-use sqlx::SqlitePool;
+use sqlx::{Row, SqlitePool};
 
 use crate::error::LocalDbError;
 
@@ -19,6 +19,8 @@ use crate::error::LocalDbError;
 #[derive(Debug, Clone)]
 pub struct SoulNarrativeRecord {
     pub creator_id: String,
+    /// `None` = Creator-level (whole) narrative; `Some(w)` = per-World narrative.
+    pub world_id: Option<String>,
     pub narrative: Option<String>,
     pub generated_at: Option<String>,
     pub fragment_count_at_generation: i64,
@@ -38,7 +40,10 @@ pub struct SoulNarrativeFragmentStats {
     pub max_created_at: Option<String>,
 }
 
-/// Read the cached narrative for a creator (if any).
+/// Read the cached narrative for a `(creator_id, world_id)` scope.
+///
+/// `world_id = None` reads the Creator-level (whole) narrative; `Some(w)` reads
+/// the per-World narrative for that world's fragment subset.
 ///
 /// # Errors
 ///
@@ -46,22 +51,25 @@ pub struct SoulNarrativeFragmentStats {
 pub async fn get_soul_narrative(
     pool: &SqlitePool,
     creator_id: &str,
+    world_id: Option<&str>,
 ) -> Result<Option<SoulNarrativeRecord>, LocalDbError> {
     let row = sqlx::query!(
-        r#"SELECT creator_id as "creator_id!", narrative, generated_at,
+        r#"SELECT creator_id as "creator_id!", world_id, narrative, generated_at,
                   fragment_count_at_generation as "fragment_count_at_generation!",
                   max_fragment_created_at_at_generation,
                   distinct_keyword_count_cache as "distinct_keyword_count_cache!",
                   stats_fingerprint,
                   created_at as "created_at!", updated_at as "updated_at!"
-           FROM memory_soul_narratives WHERE creator_id = ?"#,
-        creator_id
+           FROM memory_soul_narratives WHERE creator_id = ? AND world_id IS ?"#,
+        creator_id,
+        world_id
     )
     .fetch_optional(pool)
     .await?;
 
     Ok(row.map(|r| SoulNarrativeRecord {
         creator_id: r.creator_id,
+        world_id: r.world_id,
         narrative: r.narrative,
         generated_at: r.generated_at,
         fragment_count_at_generation: r.fragment_count_at_generation,
@@ -73,10 +81,11 @@ pub async fn get_soul_narrative(
     }))
 }
 
-/// Insert or update the cached narrative for a creator.
+/// Insert or update the cached narrative for a `(creator_id, world_id)` scope.
 ///
 /// Uses `INSERT OR REPLACE` so the handler can call this unconditionally
-/// after synthesis.
+/// after synthesis. `world_id` is bound consistently (NULL for Creator-level)
+/// so the composite PK / partial UNIQUE index conflict target fires correctly.
 ///
 /// # Errors
 ///
@@ -87,12 +96,13 @@ pub async fn upsert_soul_narrative(
 ) -> Result<(), LocalDbError> {
     sqlx::query!(
         "INSERT OR REPLACE INTO memory_soul_narratives
-         (creator_id, narrative, generated_at, fragment_count_at_generation,
+         (creator_id, world_id, narrative, generated_at, fragment_count_at_generation,
           max_fragment_created_at_at_generation,
           distinct_keyword_count_cache, stats_fingerprint,
           created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         record.creator_id,
+        record.world_id,
         record.narrative,
         record.generated_at,
         record.fragment_count_at_generation,
@@ -127,6 +137,7 @@ pub fn build_stats_fingerprint(fragment_count: i64, max_created_at: Option<&str>
 async fn update_stats_cache(
     pool: &SqlitePool,
     creator_id: &str,
+    world_id: Option<&str>,
     distinct_keyword_count: i64,
     fingerprint: &str,
     cached: Option<&SoulNarrativeRecord>,
@@ -136,10 +147,11 @@ async fn update_stats_cache(
         sqlx::query!(
             "UPDATE memory_soul_narratives
              SET distinct_keyword_count_cache = ?, stats_fingerprint = ?
-             WHERE creator_id = ?",
+             WHERE creator_id = ? AND world_id IS ?",
             distinct_keyword_count,
             fingerprint,
-            creator_id
+            creator_id,
+            world_id
         )
         .execute(pool)
         .await?;
@@ -148,12 +160,13 @@ async fn update_stats_cache(
         let now = chrono::Utc::now().to_rfc3339();
         sqlx::query!(
             "INSERT OR REPLACE INTO memory_soul_narratives
-             (creator_id, narrative, generated_at, fragment_count_at_generation,
+             (creator_id, world_id, narrative, generated_at, fragment_count_at_generation,
               max_fragment_created_at_at_generation,
               distinct_keyword_count_cache, stats_fingerprint,
               created_at, updated_at)
-             VALUES (?, NULL, NULL, 0, NULL, ?, ?, ?, ?)",
+             VALUES (?, ?, NULL, NULL, 0, NULL, ?, ?, ?, ?)",
             creator_id,
+            world_id,
             distinct_keyword_count,
             fingerprint,
             now,
@@ -175,18 +188,39 @@ async fn update_stats_cache(
 async fn compute_distinct_keyword_count(
     pool: &SqlitePool,
     creator_id: &str,
+    world_id: Option<&str>,
 ) -> Result<usize, LocalDbError> {
     const DISTINCT_KEYWORD_THRESHOLD: usize = 20;
 
-    let mut stream = sqlx::query!(
-        r#"SELECT keywords as "keywords!: String" FROM memory_fragments WHERE creator_id = ? ORDER BY created_at DESC"#,
-        creator_id
-    )
-    .fetch(pool);
+    // SAFETY: dynamic SQL — the optional world_id filter produces two static
+    // WHERE-clause variants. All values are parameterized with .bind() to
+    // prevent injection. A compile-time macro cannot be used because the two
+    // variants yield distinct anonymous record types, which cannot unify in
+    // a single stream variable.
+    let mut stream = world_id.map_or_else(
+        || {
+            sqlx::query(
+                "SELECT keywords FROM memory_fragments \
+                 WHERE creator_id = ? ORDER BY created_at DESC",
+            )
+            .bind(creator_id)
+            .fetch(pool)
+        },
+        |wid| {
+            sqlx::query(
+                "SELECT keywords FROM memory_fragments \
+                 WHERE creator_id = ? AND world_id = ? ORDER BY created_at DESC",
+            )
+            .bind(creator_id)
+            .bind(wid)
+            .fetch(pool)
+        },
+    );
 
     let mut distinct: std::collections::HashSet<String> = std::collections::HashSet::new();
     while let Some(row) = stream.try_next().await? {
-        if let Ok(keywords) = serde_json::from_str::<Vec<String>>(&row.keywords) {
+        let keywords_json: String = row.get("keywords");
+        if let Ok(keywords) = serde_json::from_str::<Vec<String>>(&keywords_json) {
             for kw in keywords {
                 distinct.insert(kw);
             }
@@ -194,7 +228,8 @@ async fn compute_distinct_keyword_count(
         if distinct.len() >= DISTINCT_KEYWORD_THRESHOLD {
             // Drain remaining rows for exact count.
             while let Some(row) = stream.try_next().await? {
-                if let Ok(keywords) = serde_json::from_str::<Vec<String>>(&row.keywords) {
+                let keywords_json: String = row.get("keywords");
+                if let Ok(keywords) = serde_json::from_str::<Vec<String>>(&keywords_json) {
                     for kw in keywords {
                         distinct.insert(kw);
                     }
@@ -221,9 +256,9 @@ async fn compute_distinct_keyword_count(
 ///   computes the distinct count soundly via early-exit streaming, then
 ///   updates the cache.
 ///
-/// This resolves both W-QC3-001 (cached reads pay only 2 SQL aggregates)
-/// and W-QC3-003 (when the count IS computed, it's the sound early-exit
-/// streaming — no under-count).
+/// The cache row is keyed per `(creator_id, world_id)`. `world_id = None`
+/// computes over the Creator-level whole; `Some(w)` computes over that world's
+/// fragment subset.
 ///
 /// Returns the computed statistics plus the cached narrative record (if any),
 /// so callers can avoid a redundant `get_soul_narrative` call.
@@ -234,27 +269,48 @@ async fn compute_distinct_keyword_count(
 pub async fn soul_narrative_fragment_stats(
     pool: &SqlitePool,
     creator_id: &str,
+    world_id: Option<&str>,
 ) -> Result<(SoulNarrativeFragmentStats, Option<SoulNarrativeRecord>), LocalDbError> {
     // 1. Cheap SQL aggregates — always O(1) index scan, no row materialization.
-    let fragment_count = sqlx::query_scalar!(
-        r#"SELECT COUNT(*) as "count!: i64" FROM memory_fragments WHERE creator_id = ?"#,
-        creator_id
-    )
-    .fetch_one(pool)
-    .await?;
+    let fragment_count = if let Some(wid) = world_id {
+        sqlx::query_scalar!(
+            r#"SELECT COUNT(*) as "count!: i64" FROM memory_fragments WHERE creator_id = ? AND world_id = ?"#,
+            creator_id,
+            wid
+        )
+        .fetch_one(pool)
+        .await?
+    } else {
+        sqlx::query_scalar!(
+            r#"SELECT COUNT(*) as "count!: i64" FROM memory_fragments WHERE creator_id = ?"#,
+            creator_id
+        )
+        .fetch_one(pool)
+        .await?
+    };
 
-    let max_created_at: Option<String> = sqlx::query_scalar!(
-        r#"SELECT MAX(created_at) as "max_created_at?: String" FROM memory_fragments WHERE creator_id = ?"#,
-        creator_id
-    )
-    .fetch_one(pool)
-    .await?;
+    let max_created_at: Option<String> = if let Some(wid) = world_id {
+        sqlx::query_scalar!(
+            r#"SELECT MAX(created_at) as "max_created_at?: String" FROM memory_fragments WHERE creator_id = ? AND world_id = ?"#,
+            creator_id,
+            wid
+        )
+        .fetch_one(pool)
+        .await?
+    } else {
+        sqlx::query_scalar!(
+            r#"SELECT MAX(created_at) as "max_created_at?: String" FROM memory_fragments WHERE creator_id = ?"#,
+            creator_id
+        )
+        .fetch_one(pool)
+        .await?
+    };
 
     // 2. Build fingerprint from cheap aggregates.
     let fingerprint = build_stats_fingerprint(fragment_count, max_created_at.as_deref());
 
-    // 3. Check the fingerprint cache.
-    let cached = get_soul_narrative(pool, creator_id).await?;
+    // 3. Check the fingerprint cache for this (creator, world) scope.
+    let cached = get_soul_narrative(pool, creator_id, world_id).await?;
 
     if let Some(ref c) = cached {
         if c.stats_fingerprint.as_deref() == Some(&fingerprint) {
@@ -273,12 +329,13 @@ pub async fn soul_narrative_fragment_stats(
     }
 
     // 4. Fingerprint mismatch or no cache row → compute soundly.
-    let distinct_keyword_count = compute_distinct_keyword_count(pool, creator_id).await?;
+    let distinct_keyword_count = compute_distinct_keyword_count(pool, creator_id, world_id).await?;
 
     // 5. Persist stats cache (inserts stats-only row if none exists — G3 fix).
     update_stats_cache(
         pool,
         creator_id,
+        world_id,
         i64::try_from(distinct_keyword_count).unwrap_or(0),
         &fingerprint,
         cached.as_ref(),
@@ -290,7 +347,7 @@ pub async fn soul_narrative_fragment_stats(
     let cached = if cached.is_some() {
         cached
     } else {
-        get_soul_narrative(pool, creator_id).await?
+        get_soul_narrative(pool, creator_id, world_id).await?
     };
 
     Ok((
