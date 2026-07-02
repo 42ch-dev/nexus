@@ -92,13 +92,15 @@
     --color-pink-900: #9d174d;
     --color-pink-1000: #831843;
 
-    /* Canvas surface — DESIGN.md §Canvas Surface (V1.70) */
+    /* Canvas surface — DESIGN.md §Canvas Surface (V1.70).
+       Canvas/SOUL brand-blue tokens must reference var(--color-blue-700);
+       do not parallel a hardcoded blue scale (W005). */
     --color-canvas-surface: #ebebeb;
     --color-canvas-grid: rgba(0, 0, 0, 0.05);
     --color-canvas-node-fill: #ffffff;
     --color-canvas-node-fill-hover: #f5f5f5;
     --color-canvas-node-border: rgba(0, 0, 0, 0.14);
-    --color-canvas-node-border-selected: #1e3a5f;
+    --color-canvas-node-border-selected: var(--color-blue-700);
     --color-canvas-edge: #a3a3a3;
     --color-canvas-edge-hover: #4a4a4a;
     --color-canvas-port: #666666;
@@ -114,7 +116,7 @@
     --color-canvas-worldkb-entity-card-fill-hover: #f5f5f5;
     --color-canvas-worldkb-entity-card-fill-selected: #ebf2ff;
     --color-canvas-worldkb-entity-card-stroke-default: rgba(0, 0, 0, 0.14);
-    --color-canvas-worldkb-entity-card-stroke-selected: #1e3a5f;
+    --color-canvas-worldkb-entity-card-stroke-selected: var(--color-blue-700);
     --color-canvas-worldkb-promotion-pending: #f59e0b;
     --color-canvas-worldkb-promotion-confirmed: #10b981;
     --color-canvas-worldkb-promotion-rejected: #ef4444;
@@ -125,7 +127,7 @@
     --color-canvas-worldkb-conflict-marker: #ef4444;
     --color-canvas-worldkb-conflict-marker-fill: rgba(239, 68, 68, 0.1);
     --color-canvas-worldkb-nonspatial-row-highlight: #f5f5f4;
-    --color-canvas-worldkb-focus-ring: #1e3a5f;
+    --color-canvas-worldkb-focus-ring: var(--color-blue-700);
     --color-canvas-worldkb-relationship-edge: #94a3b8;
     --color-canvas-worldkb-relationship-edge-default: #94a3b8;
     --color-canvas-worldkb-relationship-edge-symmetric: #8b5cf6;
@@ -133,7 +135,7 @@
     --color-canvas-worldkb-relationship-confidence-low: #e5484d;
     --color-canvas-worldkb-relationship-confidence-mid: #b76e00;
     --color-canvas-worldkb-relationship-confidence-high: #1f8f4d;
-    --color-canvas-worldkb-relationship-grounded-badge: rgba(30, 58, 95, 0.12);
+    --color-canvas-worldkb-relationship-grounded-badge: color-mix(in srgb, var(--color-blue-700) 12%, transparent);
     --color-canvas-worldkb-relationship-asserted-badge: rgba(124, 58, 237, 0.12);
     --color-canvas-worldkb-relationship-inspector-fill: #ffffff;
 
@@ -144,7 +146,7 @@
     --color-soul-viz-timeline-axis-line: rgba(0, 0, 0, 0.12);
     --color-soul-viz-timeline-axis-tick: #c7c7c7;
     --color-soul-viz-timeline-axis-label: #8a8a8a;
-    --color-soul-viz-drift-band-fill: rgba(30, 58, 95, 0.16);
+    --color-soul-viz-drift-band-fill: color-mix(in srgb, var(--color-blue-700) 16%, transparent);
     /* V1.80 — ordered band-fill slots 1..5 (slot 0 is `-fill` above).
        Bridge the temporal-drift BAND_PALETTE tokens to CSS vars so no RGBA
        value is hardcoded in the component (R-V179P1-QC1-002). */
@@ -239,13 +241,15 @@
     --color-pink-900: #ffc4df;
     --color-pink-1000: #ffe3f0;
 
-    /* Canvas surface — DESIGN.dark.md §Canvas Surface (V1.70) */
+    /* Canvas surface — DESIGN.dark.md §Canvas Surface (V1.70).
+       Canvas/SOUL brand-blue tokens must reference var(--color-blue-700);
+       do not parallel a hardcoded blue scale (W005). */
     --color-canvas-surface: #141414;
     --color-canvas-grid: rgba(255, 255, 255, 0.05);
     --color-canvas-node-fill: #1a1a1a;
     --color-canvas-node-fill-hover: #2a2a2a;
     --color-canvas-node-border: rgba(255, 255, 255, 0.18);
-    --color-canvas-node-border-selected: #25d1e0;
+    --color-canvas-node-border-selected: var(--color-blue-700);
     --color-canvas-edge: #525252;
     --color-canvas-edge-hover: #c7c7c7;
     --color-canvas-port: #a3a3a3;
@@ -259,9 +263,9 @@
     /* World KB canvas — DESIGN.dark.md §World KB Canvas Tokens (V1.73) */
     --color-canvas-worldkb-entity-card-fill-default: #1a1a1a;
     --color-canvas-worldkb-entity-card-fill-hover: #2a2a2a;
-    --color-canvas-worldkb-entity-card-fill-selected: rgba(37, 209, 224, 0.14);
+    --color-canvas-worldkb-entity-card-fill-selected: color-mix(in srgb, var(--color-blue-700) 14%, transparent);
     --color-canvas-worldkb-entity-card-stroke-default: rgba(255, 255, 255, 0.18);
-    --color-canvas-worldkb-entity-card-stroke-selected: #25d1e0;
+    --color-canvas-worldkb-entity-card-stroke-selected: var(--color-blue-700);
     --color-canvas-worldkb-promotion-pending: #fbbf24;
     --color-canvas-worldkb-promotion-confirmed: #34d399;
     --color-canvas-worldkb-promotion-rejected: #f87171;
@@ -272,7 +276,7 @@
     --color-canvas-worldkb-conflict-marker: #f87171;
     --color-canvas-worldkb-conflict-marker-fill: rgba(248, 113, 113, 0.12);
     --color-canvas-worldkb-nonspatial-row-highlight: #1f1f1e;
-    --color-canvas-worldkb-focus-ring: #25d1e0;
+    --color-canvas-worldkb-focus-ring: var(--color-blue-700);
     --color-canvas-worldkb-relationship-edge: #64748b;
     --color-canvas-worldkb-relationship-edge-default: #64748b;
     --color-canvas-worldkb-relationship-edge-symmetric: #a78bfa;
@@ -280,7 +284,7 @@
     --color-canvas-worldkb-relationship-confidence-low: #ff6b6b;
     --color-canvas-worldkb-relationship-confidence-mid: #ffc043;
     --color-canvas-worldkb-relationship-confidence-high: #54d58a;
-    --color-canvas-worldkb-relationship-grounded-badge: rgba(37, 209, 224, 0.14);
+    --color-canvas-worldkb-relationship-grounded-badge: color-mix(in srgb, var(--color-blue-700) 14%, transparent);
     --color-canvas-worldkb-relationship-asserted-badge: rgba(183, 148, 255, 0.14);
     --color-canvas-worldkb-relationship-inspector-fill: #1a1a1a;
 
@@ -291,7 +295,7 @@
     --color-soul-viz-timeline-axis-line: rgba(255, 255, 255, 0.16);
     --color-soul-viz-timeline-axis-tick: #737373;
     --color-soul-viz-timeline-axis-label: #a3a3a3;
-    --color-soul-viz-drift-band-fill: rgba(37, 209, 224, 0.22);
+    --color-soul-viz-drift-band-fill: color-mix(in srgb, var(--color-blue-700) 22%, transparent);
     /* V1.80 — ordered band-fill slots 1..5 (slot 0 is `-fill` above), dark
        values (R-V179P1-QC1-002). Same names as :root; only values differ. */
     --color-soul-viz-drift-band-fill-2: rgba(183, 148, 255, 0.22);
