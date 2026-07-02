@@ -14,7 +14,7 @@
  * Tailwind default 4px scale (1=4px … 24=96px), so the default `spacing` theme
  * already covers it — no override needed.
  *
- * See apps/web/DESIGN.md §Implementation Mapping for P1.
+ * See apps/web/DESIGN.md §Implementation Mapping for P2.
  *
  * Dark mode: `class` strategy. A `.dark` class on <html> swaps the color +
  * shadow CSS variables; token names are identical in both themes.
@@ -65,6 +65,12 @@ const config: Config = {
           400: cv('gray-alpha-400'),
           500: cv('gray-alpha-500'),
           600: cv('gray-alpha-600'),
+        },
+        // Brand primitives — root DESIGN.md + @42ch/nexus-ui/theme.css.
+        brand: {
+          'deep-blue': cv('brand-deep-blue'),
+          cyan: cv('brand-cyan'),
+          white: cv('brand-white'),
         },
         // Accent scales — DESIGN.md §Colors/Accent Scales.
         blue: {
