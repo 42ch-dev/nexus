@@ -81,10 +81,12 @@ export const queryKeys = {
     count: (creatorId: string) => [...queryKeys.memory.all, 'pending', 'count', creatorId] as const,
     fragments: (creatorId: string, query?: object) =>
       [...queryKeys.memory.all, 'fragments', creatorId, query ?? {}] as const,
-    // V1.81 — whole-Creator SOUL narrative cache (world-agnostic by contract).
-    // Distinct from `fragments` so the narrative read/reflect lifecycle
-    // invalidates independently of the viz fragments query.
-    soulNarrative: (creatorId: string) =>
-      [...queryKeys.memory.all, 'soul-narrative', creatorId] as const,
+    // V1.82 — workspace-scoped world list for the SOUL selector.
+    worlds: () => [...queryKeys.memory.all, 'worlds'] as const,
+    // V1.81 → V1.82: whole-Creator or per-World SOUL narrative cache. The query
+    // key includes the selected `world_id` so switching scopes creates exactly
+    // one observer per active scope and never leaves a stale narrative visible.
+    soulNarrative: (creatorId: string, worldId?: string | null) =>
+      [...queryKeys.memory.all, 'soul-narrative', creatorId, worldId ?? 'creator'] as const,
   },
 } as const;

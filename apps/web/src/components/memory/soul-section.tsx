@@ -1,6 +1,6 @@
 /**
  * SoulSection — V1.79 SOUL visualization wrapper, extended in V1.81 (Creator
- * SOUL Maturation).
+ * SOUL Maturation) and V1.82 (per-World SOUL narrative completion).
  *
  * V1.79: keyword clusters + temporal drift over internalized fragments,
  * reusing the existing fragments query (fragments carry `keywords` +
@@ -9,35 +9,42 @@
  *
  * V1.81 additions (web-ui.md §26):
  *  - **Narrative card** (SP-1): the headline surface, rendered above the
- *    keyword/drift viz. World-agnostic (Creator-level whole) — the narrative
- *    query is NOT re-scoped by the world selector.
+ *    keyword/drift viz.
  *  - **World projection selector** (SP-2): re-scopes the keyword/drift +
  *    growth-curve to a world's fragment subset. "All worlds" (default) is the
- *    whole Creator SOUL. World options are derived from the whole-creator
- *    fragment list (see world-selector.tsx `simplify` note on title resolution).
+ *    whole Creator SOUL.
  *  - **Growth-curve** (SP-3): cumulative fragment growth, independent of the
  *    temporal-drift timeline.
  *  - **Auto-refresh** (SP-4): the SOUL fragments query polls on the
  *    `SOUL_REFETCH_MS` cadence; the narrative + fragments queries invalidate
  *    after a review mutation (wired in queries.ts `useReviewMemory`).
  *
- * Layout: the narrative card sits at the top (the first thing the author sees
- * on the SOUL tab); below it, the world-scoped keyword/drift viz + growth-curve.
- * When a world projection returns zero fragments, the whole viz area shows the
- * honest subset-empty copy instead of forcing an empty chart.
+ * V1.82 additions:
+ *  - The selector now loads world **titles** from `GET /v1/local/narrative/worlds`
+ *    and includes Work-backed worlds with zero fragments.
+ *  - The narrative card re-scopes with the selected world: "All worlds" →
+ *    Creator-level narrative; a world → that world's per-World narrative.
+ *  - Per-world insufficient/empty states are independent of the Creator-level
+ *    state.
+ *
+ * Layout: the narrative card sits at the top; below it, the world-scoped
+ * keyword/drift viz + growth-curve. When a world projection returns zero
+ * fragments, the whole viz area shows the honest subset-empty copy.
  */
 import { useState } from 'react';
 
 import { GrowthCurve } from '@/components/soul/growth-curve';
 import { SoulNarrativeCard } from '@/components/soul/soul-narrative-card';
 import { SoulPanel } from '@/components/soul/soul-panel';
-import {
-  WorldSelector,
-  deriveWorldOptions,
-} from '@/components/soul/world-selector';
+import { WorldSelector, countFragmentsByWorld } from '@/components/soul/world-selector';
 import { EmptyState } from '@/components/ui/states';
-import { SOUL_REFETCH_MS, useReflectSoulNarrative, useSoulNarrative } from '@/api/queries';
-import { useMemoryFragments } from '@/api/queries';
+import {
+  SOUL_REFETCH_MS,
+  useMemoryFragments,
+  useNarrativeWorlds,
+  useReflectSoulNarrative,
+  useSoulNarrative,
+} from '@/api/queries';
 import type { MemoryFragmentInfo } from '@42ch/nexus-contracts';
 
 export function SoulSection({
@@ -48,12 +55,15 @@ export function SoulSection({
   onFilterFragments: (keyword: string | null) => void;
 }) {
   // World projection: null = "All worlds" (whole Creator SOUL); a world_id
-  // narrows keyword/drift + growth to that world's subset. The narrative card
-  // is intentionally NOT re-scoped (world-agnostic by contract).
+  // narrows keyword/drift + growth + narrative to that world's subset.
   const [selectedWorld, setSelectedWorld] = useState<string | null>(null);
 
-  // Whole-creator fragments: drives the world-selector options + fragment-count
-  // badges, and is the active view when "All worlds" is selected.
+  // Workspace-scoped world list: drives the selector titles and includes
+  // Work-backed worlds even when they have zero fragments.
+  const worlds = useNarrativeWorlds();
+
+  // Whole-creator fragments: drives fragment-count badges in the selector and
+  // is the active view when "All worlds" is selected.
   const wholeFragments = useMemoryFragments(creatorId, undefined, {
     refetchInterval: SOUL_REFETCH_MS,
   });
@@ -67,17 +77,21 @@ export function SoulSection({
     { refetchInterval: SOUL_REFETCH_MS },
   );
 
-  // Narrative is world-agnostic — always the whole-Creator cache.
-  const narrative = useSoulNarrative(creatorId);
+  // V1.82: narrative follows the selected scope. The query key includes
+  // `world_id` so the card re-renders when the selector changes and there is
+  // exactly one active observer per scope (no duplicate poll timers).
+  const narrative = useSoulNarrative(creatorId, selectedWorld);
   const reflect = useReflectSoulNarrative();
 
   const wholeList: MemoryFragmentInfo[] = wholeFragments.data?.fragments ?? [];
-  const worldOptions = deriveWorldOptions(wholeList);
+  const fragmentCounts = countFragmentsByWorld(wholeList);
 
   const activeList: MemoryFragmentInfo[] = activeFragments.data?.fragments ?? [];
   const isWorldSubset = selectedWorld !== null;
   const isSubsetEmpty =
     isWorldSubset && !activeFragments.isLoading && !activeFragments.isError && activeList.length === 0;
+
+  const isLoading = worlds.isLoading || wholeFragments.isLoading;
 
   return (
     <section data-testid="memory-soul-section">
@@ -89,10 +103,11 @@ export function SoulSection({
           </p>
         </div>
         <WorldSelector
-          options={worldOptions}
+          worlds={worlds.data ?? []}
+          fragmentCounts={fragmentCounts}
           selectedWorld={selectedWorld}
           onSelect={setSelectedWorld}
-          disabled={wholeFragments.isLoading}
+          disabled={isLoading}
         />
       </div>
 
@@ -101,7 +116,8 @@ export function SoulSection({
           narrative={narrative.data}
           isLoading={narrative.isLoading}
           isReflecting={reflect.isPending}
-          onReflect={() => reflect.mutate(creatorId)}
+          onReflect={() => reflect.mutate({ creatorId, worldId: selectedWorld })}
+          scope={isWorldSubset ? 'world' : 'creator'}
         />
       </div>
 

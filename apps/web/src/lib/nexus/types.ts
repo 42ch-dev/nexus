@@ -81,6 +81,7 @@ import type {
   StrategyPatchResponse,
   StrategyPatchStateRequest,
   StrategyPatchTransitionRequest,
+  World,
   WorldKbCandidatesResponse,
   WorldKbGraphResponse,
   WorldKbPatchEntityRequest,
@@ -295,6 +296,14 @@ export interface NexusClient {
   // review/consume-only — `createPendingReview` stays CLI/producer-only (the
   // session-end capture pipeline owns `POST .../memory/pending-review`), mirroring
   // V1.77's `createFinding` CLI-only decision (compass D-UX LOCKED).
+  /**
+   * `GET /v1/local/narrative/worlds` — workspace-scoped world list for the
+   * active creator. Returns every Work-backed world (including zero-fragment
+   * worlds) so the SOUL world selector can surface honest subset-empty states.
+   * V1.82: typed against the generated `World` domain contract; the response
+   * shape is promoted to a generated list response once P0 lands the schema.
+   */
+  listNarrativeWorlds(): Promise<World[]>;
   /**
    * `GET /v1/local/memory/pending-review?creator_id={id}` — cursor-paginated
    * pending-review list for the active creator (default 50, max 250; cursor is
