@@ -36,7 +36,7 @@ export function countFragmentsByWorld(fragments: { world_id?: string | null }[])
 
 /** Render label for a world option: title with fragment count (or "no fragments"). */
 export function worldOptionLabel(world: World, fragmentCount: number): string {
-  const count = fragmentCount ?? 0;
+  const count = fragmentCount;
   const noun = count === 1 ? 'fragment' : 'fragments';
   const countText = count > 0 ? `${count} ${noun}` : 'no fragments';
   return `${world.title ?? world.world_id} (${countText})`;
