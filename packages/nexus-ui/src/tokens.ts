@@ -13,10 +13,10 @@ export const brandColors = {
 export type BrandColorName = keyof typeof brandColors;
 
 export const logoVariants = {
-  /** Cyan mark — primary brand color on light surfaces or accent on dark hero */
+  /** Deep blue mark (flat primary color) — navigation and light-background shells */
+  primary: 'logo-primary.svg',
+  /** Cyan mark — bright logo for dark backgrounds / dark chrome */
   color: 'logo-color.svg',
-  /** Deep blue mark — navigation and light-background shells */
-  dark: 'logo-dark.svg',
   /** White mark — dark hero, photography overlays, high-contrast panels */
   white: 'logo-white.svg',
   /** Monotone mark — inline UI; inherits `color` via currentColor */

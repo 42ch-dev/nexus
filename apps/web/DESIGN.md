@@ -705,7 +705,7 @@ Nexus UI copy should sound like a careful CLI message translated into a local da
 - Tailwind should reference CSS variables, not hard-coded hex values inside components.
 - Shadcn component defaults should read from the component primitive entries above.
 - `data-theme="dark"` or a root class swaps values from `DESIGN.dark.md`; token names stay identical.
-- Logo: light shell → `logo-dark.svg`; see root `DESIGN.md` § Logo Usage and `@42ch/nexus-ui` README.
+- Logo: light shell → `logo-primary.svg`; see root `DESIGN.md` § Logo Usage and `@42ch/nexus-ui` README.
 - Re-tint hardcoded legacy blue `rgba(0,107,255,…)` in canvas/SOUL/findings tokens to brand rgba during P2; **token names stay frozen**.
 
 ---

@@ -1,5 +1,5 @@
 import logoColor from '@42ch/nexus-ui/assets/logos/logo-color.svg';
-import logoDark from '@42ch/nexus-ui/assets/logos/logo-dark.svg';
+import logoPrimary from '@42ch/nexus-ui/assets/logos/logo-primary.svg';
 
 import { useTheme } from '@/components/theme-provider';
 import { cn } from '@/lib/utils';
@@ -16,7 +16,7 @@ export interface NexusLogoProps {
  */
 export function NexusLogo({ label = 'Nexus', className }: NexusLogoProps) {
   const { theme } = useTheme();
-  const src = theme === 'dark' ? logoColor : logoDark;
+  const src = theme === 'dark' ? logoColor : logoPrimary;
 
   return (
     <img

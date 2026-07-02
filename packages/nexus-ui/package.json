@@ -35,7 +35,7 @@
     },
     "./theme.css": "./theme.css",
     "./assets/logos/logo-color.svg": "./assets/logos/logo-color.svg",
-    "./assets/logos/logo-dark.svg": "./assets/logos/logo-dark.svg",
+    "./assets/logos/logo-primary.svg": "./assets/logos/logo-primary.svg",
     "./assets/logos/logo-white.svg": "./assets/logos/logo-white.svg",
     "./assets/logos/logo-mono.svg": "./assets/logos/logo-mono.svg"
   },
