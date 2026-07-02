@@ -181,10 +181,17 @@ async fn update_stats_cache(
 /// Compute the distinct keyword count via early-exit streaming scan.
 ///
 /// Streams keyword rows one at a time, decoding JSON, accumulating into
-/// a `HashSet`. Early-exits at the gate threshold (20 distinct) then
-/// drains remaining rows for an exact count. This is sound — no
-/// under-count — but proportional to total fragments, so it should only
-/// run when fragments have actually changed.
+/// a `HashSet`. Stops as soon as the gate threshold (20 distinct) is
+/// reached and returns the threshold as a **saturated count**.
+///
+/// # Threshold-saturated semantics
+///
+/// The SOUL insufficient-data gate only needs to know whether the count
+/// is `>= 20`. When the streaming distinct set reaches 20 we stop decoding
+/// and return 20. This bounds the recompute cost by the number of rows
+/// needed to observe 20 distinct keywords, not the total fragment count.
+/// Counts below the threshold scan to EOF and return the exact value.
+/// Callers must treat `20` as "at least 20" rather than an exact count.
 async fn compute_distinct_keyword_count(
     pool: &SqlitePool,
     creator_id: &str,
@@ -226,16 +233,9 @@ async fn compute_distinct_keyword_count(
             }
         }
         if distinct.len() >= DISTINCT_KEYWORD_THRESHOLD {
-            // Drain remaining rows for exact count.
-            while let Some(row) = stream.try_next().await? {
-                let keywords_json: String = row.get("keywords");
-                if let Ok(keywords) = serde_json::from_str::<Vec<String>>(&keywords_json) {
-                    for kw in keywords {
-                        distinct.insert(kw);
-                    }
-                }
-            }
-            break;
+            // Threshold-saturated count: the gate only needs `>= 20`, so stop
+            // decoding as soon as we have 20 distinct keywords.
+            return Ok(DISTINCT_KEYWORD_THRESHOLD);
         }
     }
 

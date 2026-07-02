@@ -35,7 +35,7 @@ function baselineMemoryHandlers(fragments: ReturnType<typeof jsonFragments>) {
     ),
     http.get('/v1/local/memory/pending-review/count', () => HttpResponse.json({ count: 0 })),
     http.get('/v1/local/memory/fragments', () => HttpResponse.json({ fragments })),
-    http.get('/v1/local/narrative/worlds', () => HttpResponse.json([])),
+    http.get('/v1/local/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
     http.post('/v1/local/memory/soul/reflect', () =>
       HttpResponse.json({
         creator_id: CREATOR,

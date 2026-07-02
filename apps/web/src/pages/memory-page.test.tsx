@@ -35,7 +35,7 @@ function sessionListHandler(creatorId = CREATOR) {
 /** Wire the SOUL section handlers so MemoryPage fully renders (V1.82). */
 function soulHandlers(creatorId = CREATOR) {
   return [
-    http.get('/v1/local/narrative/worlds', () => HttpResponse.json([])),
+    http.get('/v1/local/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
     http.post('/v1/local/memory/soul/reflect', () =>
       HttpResponse.json({
         creator_id: creatorId,

@@ -1838,7 +1838,9 @@ mod tests {
         assert!(resp.generated_at.is_none());
         assert!(!resp.stale);
         assert_eq!(resp.current_fragment_count, 25);
-        assert_eq!(resp.current_distinct_keyword_count, 25);
+        // Threshold-saturated count: 25 distinct reports as 20 (the gate only
+        // needs `>= 20?`).
+        assert_eq!(resp.current_distinct_keyword_count, 20);
         assert_eq!(resp.min_fragment_count, MIN_SOUL_NARRATIVE_FRAGMENTS);
         assert_eq!(
             resp.min_distinct_keyword_count,
@@ -2117,7 +2119,8 @@ mod tests {
         assert_eq!(resp.state, "ungenerated");
         assert!(resp.narrative.is_none());
         assert_eq!(resp.current_fragment_count, 25);
-        assert_eq!(resp.current_distinct_keyword_count, 25);
+        // Threshold-saturated count: 25 distinct reports as 20.
+        assert_eq!(resp.current_distinct_keyword_count, 20);
 
         // force=true → reaches synthesis block, fails with ServiceUnavailable.
         let req2 = SoulNarrativeRequest {
@@ -2202,7 +2205,8 @@ mod tests {
             crate::workspace::WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None)
                 .await;
 
-        // Poll the world: counts should be the subset (25), not the whole (35).
+        // Poll the world: fragment count should be the subset (25), distinct
+        // keyword count threshold-saturated (20).
         let req = SoulNarrativeRequest {
             creator_id: creator_id.to_string(),
             world_id: Some(world_id.to_string()),
@@ -2213,10 +2217,12 @@ mod tests {
             .expect("owned world poll should succeed");
         assert_eq!(resp.state, "ungenerated");
         assert_eq!(resp.current_fragment_count, 25);
-        assert_eq!(resp.current_distinct_keyword_count, 25);
+        assert_eq!(resp.current_distinct_keyword_count, 20);
 
-        // Poll the Creator whole: counts should be the whole (35), with its own
-        // cache row distinct from the world row.
+        // Poll the Creator whole: fragment count should be the whole (35),
+        // distinct keyword count threshold-saturated (20). The cache row is
+        // distinct from the world row because the two scopes are keyed by
+        // `(creator_id, world_id)`.
         let req = SoulNarrativeRequest {
             creator_id: creator_id.to_string(),
             world_id: None,
@@ -2227,7 +2233,7 @@ mod tests {
             .expect("creator-level poll should succeed");
         assert_eq!(resp.state, "ungenerated");
         assert_eq!(resp.current_fragment_count, 35);
-        assert_eq!(resp.current_distinct_keyword_count, 35);
+        assert_eq!(resp.current_distinct_keyword_count, 20);
 
         drop(tmp);
     }
