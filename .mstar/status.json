@@ -87,7 +87,7 @@
       "name": "P-last — QC, QA, Compound, and Closeout",
       "iteration": "V1.85",
       "type": "closure",
-      "status": "InProgress",
+      "status": "Done",
       "primary_spec": ".mstar/iterations/v1.85-app-icon-branding-delivery-compass-v1.md",
       "working_branch": null,
       "merge_target": "iteration/v1.85",
@@ -98,7 +98,9 @@
           "V1.85"
         ]
       },
-      "qc_consolidated_verdict": "Approve (qc1+qc2+qc3, clean)"
+      "qc_consolidated_verdict": "Approve (qc1+qc2+qc3, clean)",
+      "qa_report": ".mstar/plans/reports/2026-07-03-v1.85-closure/qa.md",
+      "qa_verdict": "Pass-with-deferred-GUI"
     }
   ],
   "metadata": {
