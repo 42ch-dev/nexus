@@ -67,6 +67,7 @@ import type {
   UpdatePresetResponse,
   ValidatePresetRequest,
   ValidatePresetResponse,
+  World,
   WorldKbCandidatesResponse,
   WorldKbGraphResponse,
   WorldKbPatchEntityRequest,
@@ -406,6 +407,11 @@ export class BrowserClient implements NexusClient {
   // CLI/producer-only and intentionally absent from this client. Every endpoint
   // is creator-scoped — `creator_id` rides as a query param (or body field for
   // review) and the daemon enforces active-creator ownership (403 on mismatch).
+  // V1.82: workspace-scoped world list reused by the SOUL selector.
+  async listNarrativeWorlds(): Promise<World[]> {
+    const res = await this.get<{ worlds: World[] }>('/v1/local/narrative/worlds');
+    return res.worlds;
+  }
   listPendingReviews(
     creatorId: string,
     query?: Omit<ListPendingReviewsQuery, 'creator_id'>,

@@ -1,0 +1,15 @@
+{
+  "plan_id": "2026-07-02-v1.82-prepare-contracts",
+  "iteration_id": "V1.82",
+  "status": "Done",
+  "owner": "@architect",
+  "effort": "S",
+  "type": "prepare",
+  "working_branch": "feature/v1.82-prepare",
+  "merge_target": "iteration/v1.82",
+  "task_category": "logic",
+  "wire_contracts_changed": true,
+  "wire_contracts_note": "V1.82 P-1: additive — soul-narrative-request + optional world_id; @42ch/nexus-contracts 0.16.0 -> 0.17.0.",
+  "depends_on": [],
+  "completion_note": "V1.82 shipped (QC 3/3 Approve after 1 fix-wave; QA Pass; P-last swept 7 V1.81 residuals)."
+}

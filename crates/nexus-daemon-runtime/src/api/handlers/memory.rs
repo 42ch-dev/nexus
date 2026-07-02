@@ -24,6 +24,7 @@ pub use nexus_contracts::{
     ReviewRequest, ReviewResponse, SoulNarrativeRequest, SoulNarrativeResponse,
 };
 use nexus_creator_memory::soul_narrative::SoulNarrativeSynthesizer as _;
+use nexus_creator_memory::MemoryError;
 use tracing::{debug, info};
 
 /// POST /v1/local/memory/pending-review
@@ -1097,6 +1098,25 @@ const MIN_SOUL_NARRATIVE_FRAGMENTS: i64 = 10;
 /// Minimum distinct keyword count before narrative synthesis is attempted.
 const MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS: i64 = 20;
 
+/// Maximum Unicode scalar characters persisted for a synthesized narrative.
+///
+/// Longer drafts are truncated cleanly before the quality gate and upsert.
+const SOUL_NARRATIVE_MAX_CHARS: usize = 16 * 1024;
+
+/// Forward-looking tokens checked by the narrative quality suffix heuristic.
+const FORWARD_LOOKING_TOKENS: &[&str] = &[
+    "will", "shall", "next", "upcoming", "future", "continue", "toward", "await", "explore",
+    "discover",
+];
+
+/// Forward-looking bigrams checked by the narrative quality suffix heuristic.
+const FORWARD_LOOKING_BIGRAMS: &[(&str, &str)] = &[
+    ("looking", "ahead"),
+    ("going", "forward"),
+    ("what", "if"),
+    ("how", "might"),
+];
+
 /// `POST /v1/local/memory/soul/reflect`
 ///
 /// Reads or regenerates the cached whole-Creator SOUL narrative.
@@ -1144,15 +1164,36 @@ pub async fn reflect_soul(
         });
     }
 
+    let world_id = req.world_id.as_deref();
+
+    // V1.82: per-World narrative ownership check. Reuse the shared helper that
+    // works/world_kb/host-tool handlers already use. Non-owned/non-existent
+    // worlds are rejected before any stats query or synthesis.
+    if let Some(w) = world_id {
+        if !nexus_local_db::narrative_write::is_world_owned(state.pool(), &active_creator, w)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".into(),
+                message: e.to_string(),
+            })?
+        {
+            return Err(NexusApiError::Forbidden {
+                resource: "soul_narrative".into(),
+                reason: format!("creator does not own world '{w}'"),
+            });
+        }
+    }
+
     info!(
         creator_id = %active_creator,
+        world_id = ?world_id,
         force_regenerate = req.force_regenerate.unwrap_or(false),
-        "Reflecting on Creator SOUL narrative"
+        "Reflecting on SOUL narrative"
     );
 
     // 1. Compute fragment stats + cache row in one DB round-trip (G2 fix).
     let (fragment_stats, cached) =
-        nexus_local_db::soul_narrative_fragment_stats(state.pool(), &active_creator)
+        nexus_local_db::soul_narrative_fragment_stats(state.pool(), &active_creator, world_id)
             .await
             .map_err(|e| NexusApiError::Internal {
                 code: "DATABASE_ERROR".into(),
@@ -1293,30 +1334,35 @@ pub async fn reflect_soul(
             registry,
         );
 
-    // Build capped input signal.
-    let input =
-        build_soul_narrative_synthesis_input(state.pool(), &active_creator, &fragment_stats)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".into(),
-                message: format!("failed to build synthesis input: {e}"),
-            })?;
+    // Build capped input signal scoped to the (creator, world) subset.
+    let input = build_soul_narrative_synthesis_input(
+        state.pool(),
+        &active_creator,
+        world_id,
+        &fragment_stats,
+    )
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".into(),
+        message: format!("failed to build synthesis input: {e}"),
+    })?;
+
+    // Keep the keyword list for the post-synthesis quality gate.
+    let top_keywords = input.top_keywords.clone();
 
     let draft = synthesizer
         .synthesize(&active_creator, input)
         .await
-        .map_err(|e| {
-            // Map MemoryError to appropriate NexusApiError.
-            let msg = e.to_string();
-            if msg.contains("not available") || msg.contains("unavailable") {
-                NexusApiError::ServiceUnavailable { message: msg }
-            } else {
-                NexusApiError::Internal {
-                    code: "NARRATIVE_SYNTHESIS_ERROR".into(),
-                    message: msg,
-                }
-            }
-        })?;
+        .map_err(map_soul_narrative_memory_error)?;
+
+    // 5b. Validate and cap the draft before persistence.
+    //
+    // Long narratives are truncated cleanly; the quality gate then runs on the
+    // text that will actually be persisted, so we never store an unvalidated
+    // or oversized draft.
+    let narrative = truncate_summary(&draft.narrative, SOUL_NARRATIVE_MAX_CHARS);
+    validate_soul_narrative_draft(&narrative, &top_keywords)
+        .map_err(map_soul_narrative_memory_error)?;
 
     // 6. Persist the result (including stats cache for future read-path hits).
     let now = chrono::Utc::now().to_rfc3339();
@@ -1326,7 +1372,8 @@ pub async fn reflect_soul(
     );
     let record = nexus_local_db::SoulNarrativeRecord {
         creator_id: active_creator.clone(),
-        narrative: Some(draft.narrative.clone()),
+        world_id: world_id.map(std::string::ToString::to_string),
+        narrative: Some(narrative.clone()),
         generated_at: Some(now.clone()),
         fragment_count_at_generation: fragment_stats.fragment_count,
         max_fragment_created_at_at_generation: fragment_stats.max_created_at.clone(),
@@ -1346,7 +1393,7 @@ pub async fn reflect_soul(
     Ok(Json(SoulNarrativeResponse {
         creator_id: active_creator,
         state: "current".to_string(),
-        narrative: Some(draft.narrative),
+        narrative: Some(narrative),
         generated_at: record.generated_at,
         stale: false,
         fragment_count_at_generation: Some(
@@ -1375,18 +1422,109 @@ fn truncate_summary(summary: &str, max_chars: usize) -> String {
     }
 }
 
-/// Build a capped `SoulNarrativeSynthesisInput` from the creator's fragments.
+/// Map narrative-synthesis `MemoryError` variants to canonical `NexusApiError`
+/// shapes without string-content matching.
+fn map_soul_narrative_memory_error(err: MemoryError) -> NexusApiError {
+    match err {
+        MemoryError::WorkerUnavailable => NexusApiError::ServiceUnavailable {
+            message: "ACP worker unavailable for narrative synthesis".into(),
+        },
+        MemoryError::CapabilityMissing { capability } => NexusApiError::ServiceUnavailable {
+            message: format!("{capability} capability not available in registry"),
+        },
+        MemoryError::MalformedOutput { reason }
+        | MemoryError::QualityThresholdMissed { reason } => NexusApiError::BadRequest {
+            code: "narrative_generation_failed".into(),
+            message: reason,
+        },
+        other => NexusApiError::Internal {
+            code: "NARRATIVE_SYNTHESIS_ERROR".into(),
+            message: other.to_string(),
+        },
+    }
+}
+
+/// Lightweight, deterministic quality gate for a synthesized narrative draft.
+///
+/// Passes when the draft references at least two of the provided top keywords,
+/// or when it ends with a forward-looking suffix (question or future-oriented
+/// language). This is a cheap runtime guard against generic/partial output.
+fn validate_soul_narrative_draft(
+    narrative: &str,
+    top_keywords: &[(String, u64)],
+) -> Result<(), MemoryError> {
+    let lower = narrative.to_lowercase();
+    let keyword_hits = top_keywords
+        .iter()
+        .filter(|(kw, _)| lower.contains(&kw.to_lowercase()))
+        .count();
+
+    if keyword_hits >= 2 || has_forward_looking_suffix(narrative) {
+        return Ok(());
+    }
+
+    Err(MemoryError::QualityThresholdMissed {
+        reason: format!(
+            "narrative quality floor missed: {keyword_hits} keyword hits and no forward-looking suffix"
+        ),
+    })
+}
+
+/// Heuristic: does the narrative end with a forward-looking reflection?
+fn has_forward_looking_suffix(narrative: &str) -> bool {
+    let trimmed = narrative.trim_end();
+    if trimmed.ends_with('?') {
+        return true;
+    }
+
+    // The last sentence is the last non-empty segment after splitting on
+    // terminal punctuation. rsplit + skip-empty handles a trailing period
+    // (rsplit_once lands on the terminal punctuation and yields an empty
+    // `after`, which previously made this always false for narratives ending
+    // in `.`/`!` — greptile review feedback).
+    let last_sentence = trimmed
+        .rsplit(['.', '!', '?'])
+        .map(str::trim)
+        .find(|s| !s.is_empty())
+        .unwrap_or(trimmed);
+
+    let words: Vec<String> = last_sentence
+        .split_whitespace()
+        .map(|w| {
+            w.trim_matches(|c: char| !c.is_alphanumeric())
+                .to_lowercase()
+        })
+        .filter(|w| !w.is_empty())
+        .collect();
+
+    if words
+        .iter()
+        .any(|w| FORWARD_LOOKING_TOKENS.contains(&w.as_str()))
+    {
+        return true;
+    }
+
+    words.windows(2).any(|pair| {
+        FORWARD_LOOKING_BIGRAMS
+            .iter()
+            .any(|(a, b)| pair[0] == *a && pair[1] == *b)
+    })
+}
+
+/// Build a capped `SoulNarrativeSynthesisInput` from a `(creator_id, world_id)`
+/// fragment subset.
 ///
 /// Caps: ≤30 keywords, ≤24 summaries ≤280 chars, ≤8 temporal buckets.
 async fn build_soul_narrative_synthesis_input(
     pool: &sqlx::SqlitePool,
     creator_id: &str,
+    world_id: Option<&str>,
     stats: &nexus_local_db::SoulNarrativeFragmentStats,
 ) -> Result<nexus_creator_memory::soul_narrative::SoulNarrativeSynthesisInput, NexusApiError> {
     use nexus_creator_memory::soul_narrative::SoulNarrativeSynthesisInput;
 
-    // Fetch recent fragments for summaries + keyword counting.
-    let fragments = nexus_local_db::list_fragments_limited(pool, creator_id, None, 100)
+    // Fetch recent fragments for the scope (Creator whole or world subset).
+    let fragments = nexus_local_db::list_fragments_limited(pool, creator_id, world_id, 100)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".into(),
@@ -1798,6 +1936,7 @@ mod tests {
         // WITHOUT trying to use capability_registry (which is None in test mode).
         let req = SoulNarrativeRequest {
             creator_id: creator_id.to_string(),
+            world_id: None,
             force_regenerate: Some(false),
         };
         let resp = reflect_soul(axum::extract::State(state.clone()), axum::Json(req))
@@ -1809,7 +1948,9 @@ mod tests {
         assert!(resp.generated_at.is_none());
         assert!(!resp.stale);
         assert_eq!(resp.current_fragment_count, 25);
-        assert_eq!(resp.current_distinct_keyword_count, 25);
+        // Threshold-saturated count: 25 distinct reports as 20 (the gate only
+        // needs `>= 20?`).
+        assert_eq!(resp.current_distinct_keyword_count, 20);
         assert_eq!(resp.min_fragment_count, MIN_SOUL_NARRATIVE_FRAGMENTS);
         assert_eq!(
             resp.min_distinct_keyword_count,
@@ -1821,6 +1962,7 @@ mod tests {
         // the code reaches the synthesis block only when force=true.
         let req2 = SoulNarrativeRequest {
             creator_id: creator_id.to_string(),
+            world_id: None,
             force_regenerate: Some(true),
         };
         let err = reflect_soul(axum::extract::State(state.clone()), axum::Json(req2))
@@ -1889,10 +2031,10 @@ mod tests {
         // SAFETY: test-only — seeds a narrative cache row.
         sqlx::query(
             "INSERT OR REPLACE INTO memory_soul_narratives \
-             (creator_id, narrative, generated_at, fragment_count_at_generation, \
+             (creator_id, world_id, narrative, generated_at, fragment_count_at_generation, \
               max_fragment_created_at_at_generation, distinct_keyword_count_cache, \
               stats_fingerprint, created_at, updated_at) \
-             VALUES (?, 'A test narrative.', ?, 25, ?, 25, ?, ?, ?)",
+             VALUES (?, NULL, 'A test narrative.', ?, 25, ?, 25, ?, ?, ?)",
         )
         .bind(creator_id)
         .bind(&now)
@@ -1910,6 +2052,7 @@ mod tests {
 
         let req = SoulNarrativeRequest {
             creator_id: creator_id.to_string(),
+            world_id: None,
             force_regenerate: Some(false),
         };
         let resp = reflect_soul(axum::extract::State(state), axum::Json(req))
@@ -1922,5 +2065,335 @@ mod tests {
         assert_eq!(resp.current_fragment_count, 25);
 
         drop(tmp);
+    }
+
+    // ─── V1.82: per-World narrative ownership + gating ─────────────────────
+
+    /// Helper: seed a narrative_worlds row owned by `creator_id`.
+    async fn seed_owned_world(pool: &sqlx::SqlitePool, creator_id: &str, world_id: &str) {
+        // Ensure the creator row exists so the world FK can be inserted.
+        // SAFETY: test-only setup.
+        sqlx::query(
+            "INSERT OR IGNORE INTO creators (creator_id, display_name, cached_at, data) \
+             VALUES (?, 'Test Creator', ?, '{}')",
+        )
+        .bind(creator_id)
+        .bind(chrono::Utc::now().to_rfc3339())
+        .execute(pool)
+        .await
+        .expect("seed creator");
+
+        sqlx::query(
+            "INSERT OR IGNORE INTO narrative_worlds \
+             (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, time_policy) \
+             VALUES (?, 'default', ?, ?, ?, 'active', 'private', 'linear')",
+        )
+        .bind(world_id)
+        .bind(creator_id)
+        .bind(format!("{world_id} title"))
+        .bind(format!("{world_id}-slug"))
+        .execute(pool)
+        .await
+        .expect("seed world");
+    }
+
+    /// Non-owned and non-existent worlds are rejected with 403 before any stats
+    /// query or synthesis; owned worlds are accepted.
+    #[tokio::test]
+    async fn reflect_soul_per_world_ownership_rejected_before_stats() {
+        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let pool = nexus_local_db::open_pool(&db_path)
+            .await
+            .expect("test pool");
+
+        let creator_id = "ctr_ownerworld";
+        let owned_world = "wld_owned_by_me";
+        let other_world = "wld_owned_by_other";
+        let missing_world = "wld_does_not_exist";
+
+        let toml_str = format!(
+            "active_creator_id = \"{creator_id}\"\n[active_workspace_slug_by_creator]\n\"{creator_id}\" = \"default\""
+        );
+        std::fs::write(nexus_home.join("config.toml"), toml_str).expect("write config.toml");
+
+        seed_owned_world(&pool, creator_id, owned_world).await;
+        seed_owned_world(&pool, "ctr_someone_else", other_world).await;
+
+        let state =
+            crate::workspace::WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None)
+                .await;
+
+        // Owned world → accepted (below gate, so returns insufficient_data).
+        let req = SoulNarrativeRequest {
+            creator_id: creator_id.to_string(),
+            world_id: Some(owned_world.to_string()),
+            force_regenerate: Some(false),
+        };
+        let resp = reflect_soul(axum::extract::State(state.clone()), axum::Json(req))
+            .await
+            .expect("owned world should be accepted");
+        assert_eq!(resp.state, "insufficient_data");
+
+        // Non-owned world → 403 Forbidden.
+        let req = SoulNarrativeRequest {
+            creator_id: creator_id.to_string(),
+            world_id: Some(other_world.to_string()),
+            force_regenerate: Some(false),
+        };
+        let err = reflect_soul(axum::extract::State(state.clone()), axum::Json(req))
+            .await
+            .expect_err("non-owned world should be rejected");
+        match err {
+            NexusApiError::Forbidden { resource, .. } => {
+                assert_eq!(resource, "soul_narrative");
+            }
+            other => panic!("expected Forbidden for non-owned world, got: {other:?}"),
+        }
+
+        // Non-existent world → 403 Forbidden (not a leak).
+        let req = SoulNarrativeRequest {
+            creator_id: creator_id.to_string(),
+            world_id: Some(missing_world.to_string()),
+            force_regenerate: Some(false),
+        };
+        let err = reflect_soul(axum::extract::State(state.clone()), axum::Json(req))
+            .await
+            .expect_err("non-existent world should be rejected");
+        match err {
+            NexusApiError::Forbidden { resource, .. } => {
+                assert_eq!(resource, "soul_narrative");
+            }
+            other => panic!("expected Forbidden for non-existent world, got: {other:?}"),
+        }
+
+        drop(tmp);
+    }
+
+    /// Greploop lesson, applied per world: `force=false` + owned world +
+    /// above-gate + no cache returns `ungenerated` without reaching the
+    /// capability registry. `force=true` for the same world reaches synthesis
+    /// and fails with `ServiceUnavailable` in test mode (no registry).
+    #[tokio::test]
+    async fn reflect_soul_per_world_no_force_ungenerated_no_llm_call() {
+        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let pool = nexus_local_db::open_pool(&db_path)
+            .await
+            .expect("test pool");
+
+        let creator_id = "ctr_worldgating";
+        let world_id = "wld_gated";
+
+        let toml_str = format!(
+            "active_creator_id = \"{creator_id}\"\n[active_workspace_slug_by_creator]\n\"{creator_id}\" = \"default\""
+        );
+        std::fs::write(nexus_home.join("config.toml"), toml_str).expect("write config.toml");
+
+        seed_owned_world(&pool, creator_id, world_id).await;
+
+        // Seed 25 fragments in the owned world → above per-world gate.
+        for i in 0..25 {
+            let kw = format!("world_kw_{i}");
+            let now = chrono::Utc::now().to_rfc3339();
+            sqlx::query(
+                "INSERT INTO memory_fragments \
+                 (fragment_id, session_id, creator_id, keywords, summary, created_at, ttl, world_id) \
+                 VALUES (?, ?, ?, ?, ?, ?, NULL, ?)",
+            )
+            .bind(format!("frag_world_{i:04}"))
+            .bind(format!("sess_world_{i:04}"))
+            .bind(creator_id)
+            .bind(format!(r#"["{kw}"]"#))
+            .bind(format!("summary {i}"))
+            .bind(&now)
+            .bind(world_id)
+            .execute(&pool)
+            .await
+            .expect("seed world fragment");
+        }
+
+        let state =
+            crate::workspace::WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None)
+                .await;
+
+        // force=false + owned world + above-gate + no cache → ungenerated,
+        // and must NOT consult the capability registry (which is None).
+        let req = SoulNarrativeRequest {
+            creator_id: creator_id.to_string(),
+            world_id: Some(world_id.to_string()),
+            force_regenerate: Some(false),
+        };
+        let resp = reflect_soul(axum::extract::State(state.clone()), axum::Json(req))
+            .await
+            .expect("should succeed for force=false + ungenerated world");
+
+        assert_eq!(resp.state, "ungenerated");
+        assert!(resp.narrative.is_none());
+        assert_eq!(resp.current_fragment_count, 25);
+        // Threshold-saturated count: 25 distinct reports as 20.
+        assert_eq!(resp.current_distinct_keyword_count, 20);
+
+        // force=true → reaches synthesis block, fails with ServiceUnavailable.
+        let req2 = SoulNarrativeRequest {
+            creator_id: creator_id.to_string(),
+            world_id: Some(world_id.to_string()),
+            force_regenerate: Some(true),
+        };
+        let err = reflect_soul(axum::extract::State(state.clone()), axum::Json(req2))
+            .await
+            .expect_err("force=true should try synthesis and fail without registry");
+        match err {
+            NexusApiError::ServiceUnavailable { .. } => {}
+            other => panic!(
+                "expected ServiceUnavailable for force=true world without registry, got: {other:?}"
+            ),
+        }
+
+        drop(tmp);
+    }
+
+    /// Per-World response counts reflect the world's fragment subset, and a
+    /// per-World narrative is persisted distinctly from the Creator-level one.
+    #[tokio::test]
+    async fn reflect_soul_per_world_stats_and_cache_are_distinct() {
+        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let pool = nexus_local_db::open_pool(&db_path)
+            .await
+            .expect("test pool");
+
+        let creator_id = "ctr_worldstats";
+        let world_id = "wld_stats";
+
+        let toml_str = format!(
+            "active_creator_id = \"{creator_id}\"\n[active_workspace_slug_by_creator]\n\"{creator_id}\" = \"default\""
+        );
+        std::fs::write(nexus_home.join("config.toml"), toml_str).expect("write config.toml");
+
+        seed_owned_world(&pool, creator_id, world_id).await;
+
+        // Creator whole: 10 fragments (below gate on its own).
+        for i in 0..10 {
+            let kw = format!("core_kw_{i}");
+            let now = chrono::Utc::now().to_rfc3339();
+            sqlx::query(
+                "INSERT INTO memory_fragments \
+                 (fragment_id, session_id, creator_id, keywords, summary, created_at, ttl, world_id) \
+                 VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)",
+            )
+            .bind(format!("frag_core_{i:04}"))
+            .bind(format!("sess_core_{i:04}"))
+            .bind(creator_id)
+            .bind(format!(r#"["{kw}"]"#))
+            .bind(format!("summary {i}"))
+            .bind(&now)
+            .execute(&pool)
+            .await
+            .expect("seed core fragment");
+        }
+
+        // World subset: 25 fragments → above gate.
+        for i in 0..25 {
+            let kw = format!("world_kw_{i}");
+            let now = chrono::Utc::now().to_rfc3339();
+            sqlx::query(
+                "INSERT INTO memory_fragments \
+                 (fragment_id, session_id, creator_id, keywords, summary, created_at, ttl, world_id) \
+                 VALUES (?, ?, ?, ?, ?, ?, NULL, ?)",
+            )
+            .bind(format!("frag_world_{i:04}"))
+            .bind(format!("sess_world_{i:04}"))
+            .bind(creator_id)
+            .bind(format!(r#"["{kw}"]"#))
+            .bind(format!("summary {i}"))
+            .bind(&now)
+            .bind(world_id)
+            .execute(&pool)
+            .await
+            .expect("seed world fragment");
+        }
+
+        let state =
+            crate::workspace::WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None)
+                .await;
+
+        // Poll the world: fragment count should be the subset (25), distinct
+        // keyword count threshold-saturated (20).
+        let req = SoulNarrativeRequest {
+            creator_id: creator_id.to_string(),
+            world_id: Some(world_id.to_string()),
+            force_regenerate: Some(false),
+        };
+        let resp = reflect_soul(axum::extract::State(state.clone()), axum::Json(req))
+            .await
+            .expect("owned world poll should succeed");
+        assert_eq!(resp.state, "ungenerated");
+        assert_eq!(resp.current_fragment_count, 25);
+        assert_eq!(resp.current_distinct_keyword_count, 20);
+
+        // Poll the Creator whole: fragment count should be the whole (35),
+        // distinct keyword count threshold-saturated (20). The cache row is
+        // distinct from the world row because the two scopes are keyed by
+        // `(creator_id, world_id)`.
+        let req = SoulNarrativeRequest {
+            creator_id: creator_id.to_string(),
+            world_id: None,
+            force_regenerate: Some(false),
+        };
+        let resp = reflect_soul(axum::extract::State(state.clone()), axum::Json(req))
+            .await
+            .expect("creator-level poll should succeed");
+        assert_eq!(resp.state, "ungenerated");
+        assert_eq!(resp.current_fragment_count, 35);
+        assert_eq!(resp.current_distinct_keyword_count, 20);
+
+        drop(tmp);
+    }
+
+    #[test]
+    fn validate_draft_passes_with_two_keyword_hits() {
+        let keywords = vec![
+            ("magic".to_string(), 5),
+            ("science".to_string(), 3),
+            ("love".to_string(), 1),
+        ];
+        let narrative = "A story about magic and science intertwined.";
+        assert!(validate_soul_narrative_draft(narrative, &keywords).is_ok());
+    }
+
+    #[test]
+    fn validate_draft_passes_with_forward_looking_suffix() {
+        let keywords = vec![("magic".to_string(), 5)];
+        let narrative = "The hero stood alone. What will happen next?";
+        assert!(validate_soul_narrative_draft(narrative, &keywords).is_ok());
+    }
+
+    #[test]
+    fn validate_draft_forward_looking_suffix_with_period_terminator() {
+        // Regression (greptile): a narrative ending in '.' with a forward-looking
+        // last sentence must pass even with <2 keyword hits. The old rsplit_once
+        // logic used the empty `after` (post-terminal-punctuation) segment and
+        // always returned false here, wrongly rejecting valid narratives.
+        let keywords = vec![("magic".to_string(), 5)]; // 0 hits
+        let narrative = "The hero stood alone. Their journey will continue.";
+        assert!(validate_soul_narrative_draft(narrative, &keywords).is_ok());
+    }
+
+    #[test]
+    fn validate_draft_fails_when_quality_floor_missed() {
+        let keywords = vec![("magic".to_string(), 5), ("science".to_string(), 3)];
+        let narrative = "The hero stood alone in a room.";
+        let err = validate_soul_narrative_draft(narrative, &keywords)
+            .expect_err("should fail quality floor");
+        match err {
+            MemoryError::QualityThresholdMissed { .. } => {}
+            other => panic!("expected QualityThresholdMissed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn narrative_longer_than_max_chars_is_truncated_cleanly() {
+        let long = "x".repeat(SOUL_NARRATIVE_MAX_CHARS + 100);
+        let truncated = truncate_summary(&long, SOUL_NARRATIVE_MAX_CHARS);
+        assert_eq!(truncated.chars().count(), SOUL_NARRATIVE_MAX_CHARS);
+        assert!(truncated.ends_with('…'));
     }
 }

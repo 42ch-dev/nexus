@@ -1,78 +1,54 @@
 /**
- * WorldSelector tests (V1.81 SP-2 — web-ui.md §26.1).
+ * WorldSelector tests (V1.82 SP-2 — web-ui.md §26.1).
  *
- * Covers the pure `deriveWorldOptions` derivation (grouping, counts, the
- * omitted-worlds invariant) and the rendered control: "All worlds" default,
- * world options with fragment counts, and selection re-scoping.
+ * Covers the pure `countFragmentsByWorld` helper and the rendered control:
+ * "All worlds" default, world options rendered with titles + fragment counts,
+ * zero-fragment worlds included, and selection re-scoping.
  */
 import { fireEvent, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 
-import {
-  WorldSelector,
-  deriveWorldOptions,
-  worldOptionLabel,
-} from '@/components/soul/world-selector';
+import { WorldSelector, countFragmentsByWorld } from '@/components/soul/world-selector';
 import { renderInApp } from '@/test/test-providers';
-import type { MemoryFragmentInfo } from '@42ch/nexus-contracts';
+import type { World } from '@42ch/nexus-contracts';
 
-function frag(over: Partial<MemoryFragmentInfo> = {}): MemoryFragmentInfo {
-  return { fragment_id: 'f', summary: 's', ...over };
+function world(over: Partial<World> = {}): World {
+  return {
+    schema_version: 1,
+    world_id: 'w-1',
+    owner_creator_id: 'c1',
+    title: 'World One',
+    slug: 'world-one',
+    status: 'active',
+    visibility: 'private',
+    time_policy: 'manual',
+    created_at: '2026-07-01T00:00:00Z',
+    ...over,
+  };
 }
 
-describe('deriveWorldOptions', () => {
-  it('groups fragments by world_id and counts them', () => {
-    const options = deriveWorldOptions([
-      frag({ world_id: 'eryndor' }),
-      frag({ world_id: 'eryndor' }),
-      frag({ world_id: 'solara' }),
+describe('countFragmentsByWorld', () => {
+  it('counts fragments by world_id', () => {
+    const counts = countFragmentsByWorld([
+      { world_id: 'eryndor' },
+      { world_id: 'eryndor' },
+      { world_id: 'solara' },
     ]);
-    expect(options).toEqual([
-      { worldId: 'eryndor', fragmentCount: 2 },
-      { worldId: 'solara', fragmentCount: 1 },
+    expect(counts).toEqual({ eryndor: 2, solara: 1 });
+  });
+
+  it('ignores Creator-core-only fragments (null/empty world_id)', () => {
+    const counts = countFragmentsByWorld([
+      { world_id: null },
+      { world_id: '' },
+      { world_id: '   ' },
+      { world_id: 'eryndor' },
     ]);
+    expect(counts).toEqual({ eryndor: 1 });
   });
 
-  it('omits Creator-core-only fragments (null/empty world_id)', () => {
-    const options = deriveWorldOptions([
-      frag({ world_id: null }),
-      frag({ world_id: '' }),
-      frag({ world_id: '   ' }),
-      frag({ world_id: 'eryndor' }),
-    ]);
-    // Only the world-backed fragment produces an option; Creator-core-only
-    // fragments contribute to "All worlds" but never become a world option.
-    expect(options).toEqual([{ worldId: 'eryndor', fragmentCount: 1 }]);
-  });
-
-  it('omits worlds with zero fragments (no dead-end empty options)', () => {
-    // A world never enters the option set unless a fragment carries its id —
-    // so a zero-activity world is structurally impossible here. This test pins
-    // the invariant: empty input yields no options.
-    expect(deriveWorldOptions([])).toEqual([]);
-  });
-
-  it('sorts options by world_id for stable order', () => {
-    const options = deriveWorldOptions([
-      frag({ world_id: 'zeta' }),
-      frag({ world_id: 'alpha' }),
-      frag({ world_id: 'mid' }),
-    ]);
-    expect(options.map((o) => o.worldId)).toEqual(['alpha', 'mid', 'zeta']);
-  });
-});
-
-describe('worldOptionLabel', () => {
-  it('uses singular "fragment" for a count of 1', () => {
-    expect(worldOptionLabel({ worldId: 'solara', fragmentCount: 1 })).toBe(
-      'solara (1 fragment)',
-    );
-  });
-
-  it('uses plural "fragments" for counts > 1', () => {
-    expect(worldOptionLabel({ worldId: 'eryndor', fragmentCount: 42 })).toBe(
-      'eryndor (42 fragments)',
-    );
+  it('returns an empty record for empty input', () => {
+    expect(countFragmentsByWorld([])).toEqual({});
   });
 });
 
@@ -80,7 +56,8 @@ describe('WorldSelector', () => {
   it('defaults to "All worlds" and frames the whole Creator SOUL', () => {
     renderInApp(
       <WorldSelector
-        options={[{ worldId: 'eryndor', fragmentCount: 42 }]}
+        worlds={[world({ world_id: 'eryndor', title: 'Eryndor' })]}
+        fragmentCounts={{ eryndor: 42 }}
         selectedWorld={null}
         onSelect={() => {}}
       />,
@@ -88,14 +65,56 @@ describe('WorldSelector', () => {
     const select = screen.getByTestId('soul-world-selector') as HTMLSelectElement;
     expect(select.value).toBe('');
     expect(screen.getByText('your whole Creator SOUL')).toBeInTheDocument();
-    expect(screen.getByText('eryndor (42 fragments)')).toBeInTheDocument();
+    expect(screen.getByText('Eryndor (42 fragments)')).toBeInTheDocument();
+  });
+
+  it('renders world titles, not raw world_id', () => {
+    renderInApp(
+      <WorldSelector
+        worlds={[world({ world_id: 'w-eryndor', title: 'The Realms of Eryndor' })]}
+        fragmentCounts={{ 'w-eryndor': 5 }}
+        selectedWorld={null}
+        onSelect={() => {}}
+      />,
+    );
+    expect(screen.getByText('The Realms of Eryndor (5 fragments)')).toBeInTheDocument();
+    expect(screen.queryByText('w-eryndor')).not.toBeInTheDocument();
+  });
+
+  it('includes Work-backed worlds with zero fragments', () => {
+    renderInApp(
+      <WorldSelector
+        worlds={[world({ world_id: 'solara', title: 'Solara' })]}
+        fragmentCounts={{}}
+        selectedWorld={null}
+        onSelect={() => {}}
+      />,
+    );
+    expect(screen.getByText('Solara (no fragments)')).toBeInTheDocument();
+  });
+
+  it('sorts options by title', () => {
+    renderInApp(
+      <WorldSelector
+        worlds={[
+          world({ world_id: 'zeta', title: 'Zeta' }),
+          world({ world_id: 'alpha', title: 'Alpha' }),
+        ]}
+        fragmentCounts={{ zeta: 1, alpha: 2 }}
+        selectedWorld={null}
+        onSelect={() => {}}
+      />,
+    );
+    const options = screen.getAllByRole('option').slice(1); // skip "All worlds"
+    expect(options.map((o) => o.textContent)).toEqual(['Alpha (2 fragments)', 'Zeta (1 fragment)']);
   });
 
   it('selecting a world re-scopes the projection and reframes the label', () => {
     const onSelect = vi.fn();
     renderInApp(
       <WorldSelector
-        options={[{ worldId: 'eryndor', fragmentCount: 2 }]}
+        worlds={[world({ world_id: 'eryndor', title: 'Eryndor' })]}
+        fragmentCounts={{ eryndor: 2 }}
         selectedWorld={null}
         onSelect={onSelect}
       />,
@@ -110,7 +129,8 @@ describe('WorldSelector', () => {
     const onSelect = vi.fn();
     renderInApp(
       <WorldSelector
-        options={[{ worldId: 'eryndor', fragmentCount: 2 }]}
+        worlds={[world({ world_id: 'eryndor', title: 'Eryndor' })]}
+        fragmentCounts={{ eryndor: 2 }}
         selectedWorld="eryndor"
         onSelect={onSelect}
       />,
@@ -122,12 +142,13 @@ describe('WorldSelector', () => {
     expect(onSelect).toHaveBeenCalledWith(null);
   });
 
-  it('disables when there are no world options', () => {
+  it('shows an honest empty helper when there are no worlds', () => {
     renderInApp(
-      <WorldSelector options={[]} selectedWorld={null} onSelect={() => {}} />,
+      <WorldSelector worlds={[]} fragmentCounts={{}} selectedWorld={null} onSelect={() => {}} />,
     );
     expect(
       (screen.getByTestId('soul-world-selector') as HTMLSelectElement).disabled,
     ).toBe(true);
+    expect(screen.getByText('no worlds in this workspace')).toBeInTheDocument();
   });
 });

@@ -369,7 +369,11 @@
     "2026-07-01-v1.81-prepare-spec-and-contracts",
     "2026-07-01-v1.81-creator-soul-narrative-and-world-foundation",
     "2026-07-01-v1.81-soul-surface-deepening",
-    "2026-07-01-v1.81-closure"
+    "2026-07-01-v1.81-closure",
+    "2026-07-02-v1.82-prepare-contracts",
+    "2026-07-02-v1.82-per-world-narrative-backend",
+    "2026-07-02-v1.82-soul-surface-completion",
+    "2026-07-02-v1.82-closure"
   ],
   "iteration_summaries": {
     "v1.45": {

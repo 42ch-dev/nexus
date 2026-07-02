@@ -892,4 +892,71 @@ This product model is user-visible in the UI — the world selector explicitly f
 
 ---
 
-*Local-first Web UI product contract. V1.64 Shipped (Control Room + Setup) → V1.65 §13 Content-Authoring → V1.66 §14 Desktop Shell → V1.67 §15 Surface Convergence & De-risk → V1.69 Design System Maturation & Canvas Draft → V1.70 §16 Canvas Strategy Implement (α) + CI/desktop-build optimization → V1.71 §17 Canvas Strategy Write-Boundary (β) → V1.72 §18 Canvas Outline+Timeline (β) → V1.73 §19 Canvas World KB (β) → V1.74 §20 Canvas World KB Relationships (β) → V1.77 §23 Findings-Remediation UI → V1.78 §24 Creator Memory Review-Loop UI → V1.79 §25 Author Reflection: Reading Surface + SOUL Visualization → V1.81 §26 Creator SOUL Maturation: Narrative, Projection, Growth, Refresh. Design tokens: `apps/web/DESIGN.md` (V1.65 Standard+ + V1.66 desktop supplement + V1.69 Production migration + V1.70 canvas-token fill + V1.71 canvas-write tokens + V1.72 outline/timeline tokens + V1.73 canvas-worldkb tokens + V1.74 relationship tokens + V1.77 findings triage tokens + V1.78 creator-memory review-loop tokens + V1.79 reading-surface tokens + SOUL-viz tokens + V1.81 narrative-card tokens + growth-curve tokens).*
+## 27. Next stage — SOUL Completion: per-World Narrative + Titled Worlds Selector (V1.82)
+
+V1.81 shipped the Creator-SOUL narrative (the whole, world-agnostic) and the world projection that filters read-side visualization only. V1.82 completes the SOUL surface: each world now gets its own narrative — the Creator SOUL's inclination within that world — and the selector is wired to real world titles from the existing endpoint.
+
+> **Creator SOUL is the creator's core creative identity — world-agnostic. It is the *whole*. A per-World narrative is the Creator SOUL's inclination within a specific world — a *subset* of that whole. Each has its own narrative. "All worlds" shows the Creator-level narrative (V1.81 behavior unchanged). Selecting a world shows that world's own per-World narrative.**
+
+This model is locked in the UI. The world selector shows titles (not ids) and drives both visualization scope and narrative scope. A world may have insufficient data for its own narrative even when the Creator whole does not.
+
+> **Scope and roadmap SSOT**: [v1.82-soul-completion-delivery-compass-v1.md](../../iterations/v1.82-soul-completion-delivery-compass-v1.md) §1 grill decisions, §2 scope, §6 acceptance criteria, and §7 non-goals. This section records the product contract; the compass is authoritative for scope, batching, and residual tracking.
+
+### 27.1 What ships in V1.82 (two spec points)
+
+**SP-1 — per-World Narrative (headline)**
+
+- The narrative card re-renders when the world selector changes.
+  - "All worlds" → the Creator-level narrative (V1.81 behavior and states unchanged).
+  - A specific world → that world's per-World narrative, generated on-demand and invalidated per (creator, world).
+- Per-world narrative states are independent of the Creator-level narrative. A world may show `insufficient_data`, `ungenerated`, or `stale` even when the Creator-level narrative is `current`. The card surfaces the world-specific state; it does not fall back to or restate the Creator-level narrative.
+- **Distinct + valuable gate** (product threshold): a per-World narrative is shown only when it (a) surfaces at least one theme or temporal shift that is specific to that world's fragments and not prominent in the Creator-level narrative, or (b) meets the same three-point quality bar (≥2 theme keywords + ≥1 shift + forward-looking close) scoped to the world's own fragments. A thin restatement of the Creator-level narrative that adds no world signal fails the gate and surfaces the per-world insufficient-data state instead.
+- The per-World narrative uses the same five UX states as V1.81 (ungenerated / generating / current / stale / insufficient-data), with world-specific copy and thresholds.
+- Selector-driven: "Reflect on this world's SOUL" (or equivalent clear label) triggers generation for the selected world.
+
+**SP-2 — Titled world selector (worlds-endpoint wiring)**
+
+- The world selector consumes the existing `GET /v1/local/narrative/worlds` (already returns `title`; workspace-scoped under the single-creator local model). No new backend endpoint. Ownership of a selected world is enforced server-side at `/soul/reflect` via `narrative_worlds.owner_creator_id` — the selector itself does not perform ownership filtering.
+- Renders world **titles** (not raw ids). "All worlds" remains the default and explicitly labels "your whole Creator SOUL."
+- Includes Work-backed worlds (those with Works but no fragments yet). These appear with an honest subset-empty state: "No fragments in this world yet — your Creator SOUL is still shaped by your work here when fragments arrive."
+- Worlds with zero fragments and zero Works remain omitted (no dead-end options).
+- Selector change is the single source of truth: it re-scopes the keyword clusters, temporal drift, growth-curve, *and* the narrative card. No stale narrative from a prior selection remains visible after a change.
+
+### 27.2 The reflection loops this completes
+
+**The Creator SOUL is the whole; a per-World narrative is a subset — each has its own narrative**:
+
+1. **See the whole** — default "All worlds" shows the complete Creator creative identity (V1.81 narrative).
+2. **Drill into a world** — selecting a world shows how the author's themes manifest within that world's context as a distinct per-World narrative, not just filtered viz.
+3. **Honest per-world states** — a world with little data shows its own insufficient state; the UI never pretends a thin per-World narrative is the Creator-level narrative.
+
+1. **See the whole** — default "All worlds" shows the complete Creator creative identity (V1.81 narrative).
+2. **Drill into a world** — selecting a world shows how the author's themes manifest within that world's context as a distinct narrative, not just filtered viz.
+3. **Honest per-world states** — a world with little data shows its own insufficient state; the UI never pretends a thin world narrative is the Creator whole.
+4. **Titled, reachable worlds** — authors choose by name; Work-backed worlds are visible even before fragments arrive.
+
+**Distinct vs thin product gate** (enforced at the surface):
+
+- Worlds that have accumulated enough specific signal show a valuable per-World narrative.
+- Worlds that have not yet produced world-specific signal show the graceful insufficient state rather than a thin restatement of the Creator-level narrative.
+
+### 27.3 Non-goals for V1.82 (see also compass §7)
+
+- Narrative comparison across worlds (side-by-side or diff view) — out of scope.
+- Narrative editing or curation by the author — read-only LLM output; only "re-reflect."
+- Narrative export or share paths.
+- Realtime websocket / push (poll + invalidation only).
+- A new backend worlds endpoint (existing one is wired).
+- Rewrite of V1.81 SOUL components beyond the per-World extension (surgical).
+
+### 27.4 Wire contracts (V1.82)
+
+**`wire_contracts_changed: TRUE`** (additive). One additive change:
+
+- `soul-narrative-request` gains optional `world_id` (absent / null = Creator-level narrative; present = per-World narrative). The `soul-narrative-response` shape is unchanged (reuses the V1.81 state enum and fields, now scoped per world).
+
+`@42ch/nexus-contracts` **0.16.0 → 0.17.0** (additive). The web app consumes the frozen contract types from P-1; the worlds list endpoint is pre-existing and already sufficient for titles.
+
+---
+
+*Local-first Web UI product contract. V1.64 Shipped (Control Room + Setup) → V1.65 §13 Content-Authoring → V1.66 §14 Desktop Shell → V1.67 §15 Surface Convergence & De-risk → V1.69 Design System Maturation & Canvas Draft → V1.70 §16 Canvas Strategy Implement (α) + CI/desktop-build optimization → V1.71 §17 Canvas Strategy Write-Boundary (β) → V1.72 §18 Canvas Outline+Timeline (β) → V1.73 §19 Canvas World KB (β) → V1.74 §20 Canvas World KB Relationships (β) → V1.77 §23 Findings-Remediation UI → V1.78 §24 Creator Memory Review-Loop UI → V1.79 §25 Author Reflection: Reading Surface + SOUL Visualization → V1.81 §26 Creator SOUL Maturation: Narrative, Projection, Growth, Refresh → V1.82 §27 SOUL Completion: per-World Narrative + Titled Worlds Selector. Design tokens: `apps/web/DESIGN.md` (V1.65 Standard+ + V1.66 desktop supplement + V1.69 Production migration + V1.70 canvas-token fill + V1.71 canvas-write tokens + V1.72 outline/timeline tokens + V1.73 canvas-worldkb tokens + V1.74 relationship tokens + V1.77 findings triage tokens + V1.78 creator-memory review-loop tokens + V1.79 reading-surface tokens + SOUL-viz tokens + V1.81 narrative-card tokens + growth-curve tokens + V1.82 per-world narrative + titled-selector tokens).*

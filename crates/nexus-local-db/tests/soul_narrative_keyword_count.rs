@@ -34,8 +34,9 @@ async fn insert_fragment(pool: &sqlx::SqlitePool, creator_id: &str, keywords: &[
 }
 
 /// Creator with ≥20 distinct keywords spread across many fragments
-/// (30 fragments, each with one unique keyword) → gate passes
-/// (distinct_keyword_count ≥ 20), and the response field is exact.
+/// → gate passes (distinct_keyword_count ≥ 20). Above the threshold the
+/// returned value is the threshold-saturated count (20), not the exact
+/// total — the gate only needs the `>= 20?` predicate.
 #[tokio::test]
 async fn distinct_keywords_at_least_20_across_many_fragments() {
     let dir = tempfile::tempdir().unwrap();
@@ -50,14 +51,14 @@ async fn distinct_keywords_at_least_20_across_many_fragments() {
         insert_fragment(&pool, creator_id, &[&kw], i).await;
     }
 
-    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id)
+    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id, None)
         .await
         .unwrap();
 
     // Fragment count should be 30.
     assert_eq!(stats.fragment_count, 30);
-    // Distinct keyword count should be exactly 30 (sound, no under-count).
-    assert_eq!(stats.distinct_keyword_count, 30);
+    // Threshold-saturated count reports 20 (the gate sees `>= 20`).
+    assert_eq!(stats.distinct_keyword_count, 20);
     // Gate check: >= 20 → passes (NOT insufficient_data).
     assert!(stats.distinct_keyword_count >= 20);
 }
@@ -76,7 +77,7 @@ async fn distinct_keywords_below_20_gate_fails() {
         insert_fragment(&pool, creator_id, &[kw], i).await;
     }
 
-    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id)
+    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id, None)
         .await
         .unwrap();
 
@@ -102,7 +103,7 @@ async fn distinct_keywords_exactly_20_gate_passes() {
         insert_fragment(&pool, creator_id, &[&kw], i).await;
     }
 
-    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id)
+    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id, None)
         .await
         .unwrap();
 
@@ -113,7 +114,8 @@ async fn distinct_keywords_exactly_20_gate_passes() {
 }
 
 /// Creator with ≥20 distinct keywords but many duplicate keywords in fragments
-/// → gate still passes (distinct count is sound).
+/// → gate still passes (distinct count is sound). Above the threshold the
+/// reported value is the threshold-saturated count (20).
 #[tokio::test]
 async fn distinct_keywords_with_duplicates_still_sound() {
     let dir = tempfile::tempdir().unwrap();
@@ -129,12 +131,13 @@ async fn distinct_keywords_with_duplicates_still_sound() {
         insert_fragment(&pool, creator_id, &[&kw], i).await;
     }
 
-    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id)
+    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id, None)
         .await
         .unwrap();
 
     assert_eq!(stats.fragment_count, 50);
-    assert_eq!(stats.distinct_keyword_count, 25);
+    // Threshold-saturated count reports 20 (the gate sees `>= 20`).
+    assert_eq!(stats.distinct_keyword_count, 20);
     assert!(stats.distinct_keyword_count >= 20);
 }
 
@@ -146,7 +149,7 @@ async fn no_fragments_zero_distinct() {
     let pool = init_pool(&db_path).await.unwrap();
     let creator_id = "ctr_test_empty";
 
-    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id)
+    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id, None)
         .await
         .unwrap();
 
@@ -218,7 +221,7 @@ async fn fingerprint_cache_unchanged_fragments_returns_cached_count() {
     let fingerprint = build_stats_fingerprint(25, max_created_at.as_deref());
     seed_narrative_cache(&pool, creator_id, 999, &fingerprint).await;
 
-    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id)
+    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id, None)
         .await
         .unwrap();
 
@@ -247,20 +250,20 @@ async fn fingerprint_cache_changed_fragments_recomputes() {
     let old_fingerprint = build_stats_fingerprint(10, None);
     seed_narrative_cache(&pool, creator_id, 999, &old_fingerprint).await;
 
-    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id)
+    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id, None)
         .await
         .unwrap();
 
-    // Fingerprint mismatch → should recompute, returning the real count (25).
+    // Fingerprint mismatch → should recompute, returning the threshold-saturated count (20).
     assert_eq!(stats.fragment_count, 25);
-    assert_eq!(stats.distinct_keyword_count, 25);
+    assert_eq!(stats.distinct_keyword_count, 20);
     assert!(stats.distinct_keyword_count >= 20);
 
-    // Second call with unchanged fragments → should now return cached 25.
-    let (stats2, _cached2) = soul_narrative_fragment_stats(&pool, creator_id)
+    // Second call with unchanged fragments → should now return cached 20.
+    let (stats2, _cached2) = soul_narrative_fragment_stats(&pool, creator_id, None)
         .await
         .unwrap();
-    assert_eq!(stats2.distinct_keyword_count, 25);
+    assert_eq!(stats2.distinct_keyword_count, 20);
 }
 
 /// No cache row exists (ungenerated case) → computes soundly, then
@@ -279,13 +282,14 @@ async fn fingerprint_cache_no_row_computes_and_persists_stats_row() {
         insert_fragment(&pool, creator_id, &[&kw], i).await;
     }
 
-    let (stats, cached) = soul_narrative_fragment_stats(&pool, creator_id)
+    let (stats, cached) = soul_narrative_fragment_stats(&pool, creator_id, None)
         .await
         .unwrap();
 
-    // Should compute from scratch — no cache to serve from.
+    // Should compute from scratch — no cache to serve from. Above-threshold
+    // count is threshold-saturated (20).
     assert_eq!(stats.fragment_count, 22);
-    assert_eq!(stats.distinct_keyword_count, 22);
+    assert_eq!(stats.distinct_keyword_count, 20);
     assert!(stats.distinct_keyword_count >= 20);
     // After first call, a stats-only row should exist (G3 fix).
     assert!(cached.is_some(), "G3: stats-only row should be created");
@@ -295,16 +299,16 @@ async fn fingerprint_cache_no_row_computes_and_persists_stats_row() {
         cached.generated_at.is_none(),
         "stats-only: generated_at is NULL"
     );
-    assert_eq!(cached.distinct_keyword_count_cache, 22);
+    assert_eq!(cached.distinct_keyword_count_cache, 20);
     assert!(cached.stats_fingerprint.is_some());
 
     // Second call with unchanged fragments → fingerprint cache hit.
-    let (stats2, cached2) = soul_narrative_fragment_stats(&pool, creator_id)
+    let (stats2, cached2) = soul_narrative_fragment_stats(&pool, creator_id, None)
         .await
         .unwrap();
     assert_eq!(
-        stats2.distinct_keyword_count, 22,
-        "cached count should be 22"
+        stats2.distinct_keyword_count, 20,
+        "cached count should be 20"
     );
     assert!(cached2.is_some());
 }
@@ -321,7 +325,7 @@ async fn fingerprint_cache_zero_fragments_returns_cached_zero() {
     let fingerprint = build_stats_fingerprint(0, None);
     seed_narrative_cache(&pool, creator_id, 0, &fingerprint).await;
 
-    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id)
+    let (stats, _cached) = soul_narrative_fragment_stats(&pool, creator_id, None)
         .await
         .unwrap();
 

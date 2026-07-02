@@ -324,6 +324,10 @@ components:
   # remaining distinct from the temporal-drift stacked-band fills.
   soul-narrative-prose: "{typography.copy-16} @ {colors.gray-900}"
   soul-growth-curve-stroke: "{colors.purple-700}"
+  # V1.82 per-World narrative reuses the V1.81 SOUL tokens above
+  # (soul-narrative-prose + soul-growth-curve-stroke + insufficient-data/empty
+  # styling) — no new tokens. The per-World card is the same component shape as
+  # the V1.81 Creator card, scoped to a world; only copy differs, not tokens.
 
   # V1.70 canvas implement — concrete light values (canvas-strategy-surface.md Draft §3.6 / B4)
   canvas:
