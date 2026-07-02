@@ -12,6 +12,7 @@ import {
   type LucideIcon,
 } from 'lucide-react';
 
+import { NexusLogo } from '@/components/brand/nexus-logo';
 import { cn } from '@/lib/utils';
 
 /**
@@ -44,7 +45,7 @@ export function Sidebar() {
   return (
     <nav aria-label="Primary" className="flex h-full w-full flex-col gap-1 p-3">
       <div className="flex h-12 items-center px-3">
-        <span className="text-heading-16 font-heading tracking-tight text-gray-1000">Nexus</span>
+        <NexusLogo />
       </div>
       <div className="my-2 h-px bg-gray-alpha-400" role="separator" />
       <ul className="flex flex-col gap-1">
