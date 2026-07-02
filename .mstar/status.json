@@ -3,30 +3,30 @@
   "updated_at": "2026-07-01T06:00:00Z",
   "plans": [],
   "metadata": {
-    "integration_branch": "iteration/v1.81",
-    "integration_branch_retired": false,
-    "last_integration_branch": "iteration/v1.80",
+    "integration_branch": null,
+    "integration_branch_retired": true,
+    "last_integration_branch": "iteration/v1.81",
     "integration_merge_target": "main",
     "iteration_base_branch": "main",
     "target_branch": "main",
     "spec_integration_branch": "iteration/v1.81",
-    "latest_active_iteration": "V1.81 — QC 3/3 Approve + QA Pass; P-last closure in progress (Phase 3 next)",
-    "latest_active_compass": "v1.81-creator-soul-maturation-delivery-compass-v1.md",
+    "latest_active_iteration": "V1.81 delivered (2026-07-02, PR #108 merged); next V1.82 pending /iteration-start",
+    "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.80",
-      "compass": "v1.80-memory-review-reliability-and-frontend-hygiene-compass-v1.md",
-      "shipped_at": "2026-07-01 (PR #107 merged)",
-      "plan_count": 3,
-      "plan_count_done": 3,
+      "iteration": "V1.81",
+      "compass": "v1.81-creator-soul-maturation-delivery-compass-v1.md",
+      "shipped_at": "2026-07-02 (PR #108 merged)",
+      "plan_count": 4,
+      "plan_count_done": 4,
       "wire_contracts_changed": true,
-      "wire_contracts_note": "V1.80: additive — ReviewResponse +has_more/+processed; @42ch/nexus-contracts 0.14.0 -> 0.15.0.",
-      "profile_b_compaction": "done (V1.80 all 3 plans)",
-      "merge_commit": "f305df030f",
-      "pr": "#107 merged"
+      "wire_contracts_note": "V1.81: additive — memory-fragment-info + world_id; new soul-narrative request/response schemas; @42ch/nexus-contracts 0.15.0 -> 0.16.0.",
+      "profile_b_compaction": "done (V1.81 all 4 plans)",
+      "merge_commit": "939510f6",
+      "pr": "#108 merged"
     },
     "tech_debt_summary": {
       "total_open": 3,
@@ -6363,6 +6363,45 @@
           "plan_id": "2026-07-01-v1.81-creator-soul-narrative-and-world-foundation",
           "commit": "7fe671f6"
         }
+      },
+      {
+        "id": "R-V181P0-GRPT-001",
+        "title": "InsufficientDataState progress message incomplete (UI copy nit)",
+        "severity": "low",
+        "source": "greptile iter4 (PR #108) quality note",
+        "scope": "apps/web/src/components/soul/soul-narrative-card.tsx InsufficientDataState",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.82+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.81-creator-soul-narrative-and-world-foundation][R-V181P0-GRPT-001]",
+        "note": "Greptile: non-blocking quality improvement; no correctness/data-integrity impact.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V181P0-GRPT-002",
+        "title": "compute_distinct_keyword_count doc comment misleading",
+        "severity": "low",
+        "source": "greptile iter4 quality note",
+        "scope": "crates/nexus-local-db/src/soul_narrative.rs compute_distinct_keyword_count doc",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.82+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.81-creator-soul-narrative-and-world-foundation][R-V181P0-GRPT-002]",
+        "note": "Doc-comment clarity; non-blocking.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V181P0-GRPT-003",
+        "title": "Double poll timer when a world projection is active (minor redundant fetch)",
+        "severity": "low",
+        "source": "greptile iter4 quality note (cf qc3 S-QC3-001)",
+        "scope": "apps/web/src/components/memory/soul-section.tsx (wholeFragments + activeFragments observers)",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.82+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.81-creator-soul-narrative-and-world-foundation][R-V181P0-GRPT-003]",
+        "note": "TanStack dedupes in-flight fetches; non-blocking perf nit. Related to qc3 S-QC3-001 (duplicate observers).",
+        "lifecycle": "open"
       }
     ]
   }
