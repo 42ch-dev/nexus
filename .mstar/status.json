@@ -10,7 +10,7 @@
     "iteration_base_branch": "main",
     "target_branch": "main",
     "spec_integration_branch": "iteration/v1.81",
-    "latest_active_iteration": "V1.81 delivered (2026-07-02, PR #108 merged); next V1.82 pending /iteration-start",
+    "latest_active_iteration": "V1.82 locked — SOUL Completion (compass §1.6 Review & Edit chain complete; P-1/P0/P1/P-last Todo, ready for Phase 2 Autonomous Execute)",
     "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
