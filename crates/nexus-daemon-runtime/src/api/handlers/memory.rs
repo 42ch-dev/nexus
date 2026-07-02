@@ -1477,9 +1477,16 @@ fn has_forward_looking_suffix(narrative: &str) -> bool {
         return true;
     }
 
+    // The last sentence is the last non-empty segment after splitting on
+    // terminal punctuation. rsplit + skip-empty handles a trailing period
+    // (rsplit_once lands on the terminal punctuation and yields an empty
+    // `after`, which previously made this always false for narratives ending
+    // in `.`/`!` — greptile review feedback).
     let last_sentence = trimmed
-        .rsplit_once(['.', '!', '?'])
-        .map_or(trimmed, |(_, after)| after);
+        .rsplit(['.', '!', '?'])
+        .map(str::trim)
+        .find(|s| !s.is_empty())
+        .unwrap_or(trimmed);
 
     let words: Vec<String> = last_sentence
         .split_whitespace()
@@ -2356,6 +2363,17 @@ mod tests {
     fn validate_draft_passes_with_forward_looking_suffix() {
         let keywords = vec![("magic".to_string(), 5)];
         let narrative = "The hero stood alone. What will happen next?";
+        assert!(validate_soul_narrative_draft(narrative, &keywords).is_ok());
+    }
+
+    #[test]
+    fn validate_draft_forward_looking_suffix_with_period_terminator() {
+        // Regression (greptile): a narrative ending in '.' with a forward-looking
+        // last sentence must pass even with <2 keyword hits. The old rsplit_once
+        // logic used the empty `after` (post-terminal-punctuation) segment and
+        // always returned false here, wrongly rejecting valid narratives.
+        let keywords = vec![("magic".to_string(), 5)]; // 0 hits
+        let narrative = "The hero stood alone. Their journey will continue.";
         assert!(validate_soul_narrative_draft(narrative, &keywords).is_ok());
     }
 
