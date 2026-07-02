@@ -5,7 +5,7 @@
     {
       "plan_id": "2026-07-02-v1.83-nexus-ui-brand-assets",
       "title": "P0 — V1.83 Nexus UI Package and Brand Assets",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@frontend-dev",
       "task_category": "visual",
       "working_branch": "feature/v1.83-nexus-ui-brand-assets",
@@ -22,7 +22,7 @@
     {
       "plan_id": "2026-07-02-v1.83-brand-design-system",
       "title": "P1 — V1.83 Brand DESIGN Contract",
-      "status": "Todo",
+      "status": "InProgress",
       "owner": "@architect",
       "task_category": "docs",
       "working_branch": "feature/v1.83-brand-design-system",
