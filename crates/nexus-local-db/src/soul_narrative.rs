@@ -13,11 +13,14 @@ use sqlx::SqlitePool;
 use crate::error::LocalDbError;
 
 /// A row from the `memory_soul_narratives` table.
+///
+/// `narrative` and `generated_at` are `None` for stats-only rows (fingerprint
+/// cache for above-gate ungenerated creators).
 #[derive(Debug, Clone)]
 pub struct SoulNarrativeRecord {
     pub creator_id: String,
-    pub narrative: String,
-    pub generated_at: String,
+    pub narrative: Option<String>,
+    pub generated_at: Option<String>,
     pub fragment_count_at_generation: i64,
     pub max_fragment_created_at_at_generation: Option<String>,
     pub distinct_keyword_count_cache: i64,
@@ -45,8 +48,7 @@ pub async fn get_soul_narrative(
     creator_id: &str,
 ) -> Result<Option<SoulNarrativeRecord>, LocalDbError> {
     let row = sqlx::query!(
-        r#"SELECT creator_id as "creator_id!", narrative as "narrative!",
-                  generated_at as "generated_at!",
+        r#"SELECT creator_id as "creator_id!", narrative, generated_at,
                   fragment_count_at_generation as "fragment_count_at_generation!",
                   max_fragment_created_at_at_generation,
                   distinct_keyword_count_cache as "distinct_keyword_count_cache!",
@@ -115,26 +117,51 @@ pub fn build_stats_fingerprint(fragment_count: i64, max_created_at: Option<&str>
     format!("{fragment_count}:{}", max_created_at.unwrap_or(""))
 }
 
-/// Update only the stats-cache columns on an existing narrative row.
+/// Persist stats cache columns, creating a stats-only row if none exists.
 ///
-/// Uses a targeted UPDATE so the narrative text and generation metadata
-/// are not touched.
+/// When `cached` is `Some`, does a targeted UPDATE that leaves narrative and
+/// generation metadata untouched. When `cached` is `None` (above-gate
+/// ungenerated creator), inserts a stats-only row with `narrative = NULL`
+/// and `generated_at = NULL` so the next poll hits the fingerprint cache
+/// instead of re-scanning keyword JSON.
 async fn update_stats_cache(
     pool: &SqlitePool,
     creator_id: &str,
     distinct_keyword_count: i64,
     fingerprint: &str,
+    cached: Option<&SoulNarrativeRecord>,
 ) -> Result<(), LocalDbError> {
-    sqlx::query!(
-        "UPDATE memory_soul_narratives
-         SET distinct_keyword_count_cache = ?, stats_fingerprint = ?
-         WHERE creator_id = ?",
-        distinct_keyword_count,
-        fingerprint,
-        creator_id
-    )
-    .execute(pool)
-    .await?;
+    if cached.is_some() {
+        // Targeted UPDATE — don't touch narrative/generation metadata.
+        sqlx::query!(
+            "UPDATE memory_soul_narratives
+             SET distinct_keyword_count_cache = ?, stats_fingerprint = ?
+             WHERE creator_id = ?",
+            distinct_keyword_count,
+            fingerprint,
+            creator_id
+        )
+        .execute(pool)
+        .await?;
+    } else {
+        // Stats-only INSERT — narrative/generated_at are NULL.
+        let now = chrono::Utc::now().to_rfc3339();
+        sqlx::query!(
+            "INSERT OR REPLACE INTO memory_soul_narratives
+             (creator_id, narrative, generated_at, fragment_count_at_generation,
+              max_fragment_created_at_at_generation,
+              distinct_keyword_count_cache, stats_fingerprint,
+              created_at, updated_at)
+             VALUES (?, NULL, NULL, 0, NULL, ?, ?, ?, ?)",
+            creator_id,
+            distinct_keyword_count,
+            fingerprint,
+            now,
+            now
+        )
+        .execute(pool)
+        .await?;
+    }
     Ok(())
 }
 
@@ -198,7 +225,8 @@ async fn compute_distinct_keyword_count(
 /// and W-QC3-003 (when the count IS computed, it's the sound early-exit
 /// streaming — no under-count).
 ///
-/// Returns `SoulNarrativeFragmentStats` with the computed statistics.
+/// Returns the computed statistics plus the cached narrative record (if any),
+/// so callers can avoid a redundant `get_soul_narrative` call.
 ///
 /// # Errors
 ///
@@ -206,7 +234,7 @@ async fn compute_distinct_keyword_count(
 pub async fn soul_narrative_fragment_stats(
     pool: &SqlitePool,
     creator_id: &str,
-) -> Result<SoulNarrativeFragmentStats, LocalDbError> {
+) -> Result<(SoulNarrativeFragmentStats, Option<SoulNarrativeRecord>), LocalDbError> {
     // 1. Cheap SQL aggregates — always O(1) index scan, no row materialization.
     let fragment_count = sqlx::query_scalar!(
         r#"SELECT COUNT(*) as "count!: i64" FROM memory_fragments WHERE creator_id = ?"#,
@@ -232,32 +260,45 @@ pub async fn soul_narrative_fragment_stats(
         if c.stats_fingerprint.as_deref() == Some(&fingerprint) {
             // Fingerprint match → fragments unchanged since last compute.
             // Return cached distinct count — NO keyword streaming/decode.
-            return Ok(SoulNarrativeFragmentStats {
-                fragment_count,
-                distinct_keyword_count: usize::try_from(c.distinct_keyword_count_cache)
-                    .unwrap_or(0),
-                max_created_at,
-            });
+            return Ok((
+                SoulNarrativeFragmentStats {
+                    fragment_count,
+                    distinct_keyword_count: usize::try_from(c.distinct_keyword_count_cache)
+                        .unwrap_or(0),
+                    max_created_at,
+                },
+                cached,
+            ));
         }
     }
 
     // 4. Fingerprint mismatch or no cache row → compute soundly.
     let distinct_keyword_count = compute_distinct_keyword_count(pool, creator_id).await?;
 
-    // 5. Update cache if a narrative row exists.
-    if cached.is_some() {
-        update_stats_cache(
-            pool,
-            creator_id,
-            i64::try_from(distinct_keyword_count).unwrap_or(0),
-            &fingerprint,
-        )
-        .await?;
-    }
+    // 5. Persist stats cache (inserts stats-only row if none exists — G3 fix).
+    update_stats_cache(
+        pool,
+        creator_id,
+        i64::try_from(distinct_keyword_count).unwrap_or(0),
+        &fingerprint,
+        cached.as_ref(),
+    )
+    .await?;
 
-    Ok(SoulNarrativeFragmentStats {
-        fragment_count,
-        distinct_keyword_count,
-        max_created_at,
-    })
+    // Re-read cache after possible stats-only insert so callers get the
+    // freshly-persisted row (G3: fingerprint cache hit on next poll).
+    let cached = if cached.is_some() {
+        cached
+    } else {
+        get_soul_narrative(pool, creator_id).await?
+    };
+
+    Ok((
+        SoulNarrativeFragmentStats {
+            fragment_count,
+            distinct_keyword_count,
+            max_created_at,
+        },
+        cached,
+    ))
 }
