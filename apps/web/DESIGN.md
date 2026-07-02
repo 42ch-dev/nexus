@@ -706,7 +706,7 @@ Nexus UI copy should sound like a careful CLI message translated into a local da
 - Shadcn component defaults should read from the component primitive entries above.
 - `data-theme="dark"` or a root class swaps values from `DESIGN.dark.md`; token names stay identical.
 - Logo: light shell → `logo-primary.svg`; see root `DESIGN.md` § Logo Usage and `@42ch/nexus-ui` README.
-- Re-tint hardcoded legacy blue `rgba(0,107,255,…)` in canvas/SOUL/findings tokens to brand rgba during P2; **token names stay frozen**.
+- V1.84 consolidated brand-blue consumption through `var(--color-blue-700)` and `color-mix(in srgb, var(--color-blue-700) N%, transparent)`. The `rgba(0,107,255,…)` / `rgba(82,168,255,…)` frontmatter entries document pre-consolidation approximations; CSS consumers resolve through the single-sourced variable chain. **Token names stay frozen**.
 
 ---
 
