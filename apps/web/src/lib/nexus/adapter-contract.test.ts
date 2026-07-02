@@ -554,6 +554,7 @@ const MEMORY_METHODS = [
   'deletePendingReview',
   'reviewMemory',
   'listMemoryFragments',
+  'reflectSoulNarrative',
 ] as const satisfies readonly (keyof NexusClient)[];
 
 describe('NexusClient memory-method parity guard (V1.78)', () => {
@@ -609,16 +610,23 @@ describe('NexusClient memory-method parity guard (V1.78)', () => {
     await client.deletePendingReview('p1', 'c1');
     await client.reviewMemory({ creator_id: 'c1' });
     await client.listMemoryFragments('c1', { keyword: 'kw', limit: 10 });
+    await client.reflectSoulNarrative({ creator_id: 'c1', force_regenerate: true });
 
     // list/count/fragments serialize creator_id (+optional params) into the
     // query string; delete encodes the pending_id path segment and adds the
     // creator_id query param; review sends creator_id in the JSON body.
+    // reflect sends creator_id (+optional force_regenerate) in the JSON body.
     expect(seen).toEqual([
       { method: 'GET', url: '/v1/local/memory/pending-review?limit=5&cursor=cur&creator_id=c1' },
       { method: 'GET', url: '/v1/local/memory/pending-review/count?creator_id=c1' },
       { method: 'DELETE', url: '/v1/local/memory/pending-review/p1?creator_id=c1' },
       { method: 'POST', url: '/v1/local/memory/review', body: { creator_id: 'c1' } },
       { method: 'GET', url: '/v1/local/memory/fragments?keyword=kw&limit=10&creator_id=c1' },
+      {
+        method: 'POST',
+        url: '/v1/local/memory/soul/reflect',
+        body: { creator_id: 'c1', force_regenerate: true },
+      },
     ]);
   });
 });

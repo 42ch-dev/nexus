@@ -1,0 +1,17 @@
+{
+  "plan_id": "2026-07-01-v1.81-creator-soul-narrative-and-world-foundation",
+  "iteration_id": "V1.81",
+  "status": "Done",
+  "owner": "@fullstack-dev",
+  "effort": "L",
+  "type": "feature",
+  "working_branch": "feature/v1.81-soul-backend",
+  "merge_target": "iteration/v1.81",
+  "task_category": "logic",
+  "wire_contracts_changed": true,
+  "wire_contracts_note": "V1.81 P0: additive — memory-fragment-info + world_id; new soul-narrative request/response schemas; @42ch/nexus-contracts 0.15.0 -> 0.16.0.",
+  "depends_on": [
+    "2026-07-01-v1.81-prepare-spec-and-contracts"
+  ],
+  "completion_note": "V1.81 shipped (QC 3/3 Approve after 3 fix-wave rounds; QA Pass)."
+}

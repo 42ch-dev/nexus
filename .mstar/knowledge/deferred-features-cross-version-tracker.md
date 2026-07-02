@@ -1,10 +1,10 @@
 # Deferred Features — Cross-Version Tracker v2
 
-**Quick status**: **V1.80 delivered (2026-07-01)** — Memory Review Reliability + Frontend Hygiene: the first "stabilize before extending" reliability investment iteration after four consecutive feature iterations (V1.76–V1.79). Track A (P0) closed REL-01 (`R-V178P0-QC3-003`): rewrote `POST /v1/local/memory/review` from an unbounded synchronous whole-queue loop into a bounded (`REVIEW_BATCH_LIMIT=50`) / per-creator serialized (in-process mutex map on `WorkspaceState`) / deadline-aware (5s partial-progress) pipeline; additive wire DTO (`ReviewResponse` + `has_more`/`processed`) → `@42ch/nexus-contracts` 0.14.0 → 0.15.0. QC tri-review 3/3 Approve (P0 after a fix-wave for the drain-completion `has_more` accounting bug W-QC3-001). Track B (P1) closed four low V1.79-QC frontend hygiene residuals (reading keyboard-nav tests + component tests + `memory-page.tsx` split + SOUL `temporal-drift` BAND_PALETTE token promotion). Compound captured the bounded-drain-completion-contract pattern. Platform **paused**. Residuals SSOT: [`status.json`](../status.json). Shipped/cancelled history: [shipped-features-tracker.md](../archived/shipped-features-tracker.md).
+**Quick status**: **V1.81 delivered (2026-07-02)** — Creator SOUL Maturation: returned to the feature cadence after V1.80 stabilization, deepening the V1.79 reflection axis. Headline = Creator-SOUL Narrative (LLM on-demand synthesis + stale-invalidation, world-agnostic). Companions = per-World SOUL projection (`memory_fragments.world_id` + UI world-selector), independent growth-curve (BL-10 shipped), auto-refresh. Shipped the user-locked "Creator SOUL (whole) vs World projection (subset)" model. Additive wire (`memory-fragment-info` + `world_id`; new soul-narrative schemas) → `@42ch/nexus-contracts` 0.15.0 → 0.16.0. QC tri-review 3/3 Approve after a 3-round fix-wave (world_id propagation test; fingerprint-cached sound distinct-keyword count; UTF-8 char-truncation). Compound captured the fingerprint-cached-live-aggregate pattern. Platform **paused**. Residuals SSOT: [`status.json`](../status.json). Shipped/cancelled history: [shipped-features-tracker.md](../archived/shipped-features-tracker.md).
 
 **Purpose**: Single source of truth for **open** and **backlog** features deferred from delivery compasses. Closed/shipped history lives in shipped archive.
 **Scope**: `nexus` OSS repository only.
-**Created**: 2026-04-21 · **Last updated**: 2026-07-01 (V1.80 delivered: Memory Review Reliability + Frontend Hygiene; REL-01 `R-V178P0-QC3-003` closed + 4 V1.79-QC residuals closed; compound bounded-drain-completion-contract)
+**Created**: 2026-04-21 · **Last updated**: 2026-07-02 (V1.81 delivered: Creator SOUL Maturation; BL-10 + BL-12 shipped)
 
 ---
 
@@ -69,9 +69,9 @@
 | BL-07 | Explore ranking / cold-start + Publish compliance matrix | V1.2 | Backlog | M | |
 | BL-08 | Social / marketing features | V1.3 | V2.0+ | XL | |
 | BL-09 | Standalone maturation dashboard (multi-chart cross-Work/World aggregate view) | V1.79 | Backlog | M | V1.79 Track A shipped in-context lightweight maturation indicators only; standalone dashboard deferred. |
-| BL-10 | Independent SOUL growth-curve view (separate from temporal-drift timeline) | V1.79 | Backlog | S | V1.79 Track B folded growth-count into the temporal-drift timeline; standalone view deferred. |
+| BL-10 | Independent SOUL growth-curve view (separate from temporal-drift timeline) | V1.79 | **V1.81 Shipped** | S | V1.79→V1.81 shipped | V1.79 Track B folded growth-count into the temporal-drift timeline; standalone view deferred. V1.81 shipped as SP-3 — cumulative-fragment-growth viz with density branching (`empty`/`low-data`/`rich`), respects world projection, independent of the temporal-drift timeline. |
 | BL-11 | Deeper manuscript reading — persisted reading progress + annotations/highlights + profile-specific reading chrome | V1.79 | Backlog | M-L | V1.79 reading surface is session-only + novel-first; persistence/annotations/profile-chrome deferred. |
-| BL-12 | SOUL viz refinements — per-World filtering + realtime updates + LLM-generated personality-score narrative | V1.79 | Backlog | M | V1.79 SOUL viz is per-creator + poll/manual-refresh + raw keyword/timeline; refinements deferred. |
+| BL-12 | SOUL viz refinements — per-World filtering + realtime updates + LLM-generated personality-score narrative | V1.79 | **V1.81 Shipped (partial; per-World narrative backlog)** | M | V1.79→V1.81 shipped (partial) | V1.79 SOUL viz is per-creator + poll/manual-refresh + raw keyword/timeline; refinements deferred. V1.81 shipped: per-World projection (SP-2, world-selector drilling viz into subset) + LLM Creator-SOUL personality narrative (SP-1, headline — world-agnostic, on-demand + stale-invalidation) + auto-refresh (SP-4). **Per-World LLM narrative remains backlog** — V1.81 narrative is Creator-level (whole) only; the world projection only filters read-side keyword/drift/growth viz. Full BL-12 closure (per-World narrative + realtime push) stays backlog. |
 
 ### 2.5 Reliability roadmap (cross-version)
 
@@ -99,9 +99,9 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 ## 5) Quick index
 
-**Active iteration**: V1.80 delivered (2026-07-01) — Memory Review Reliability + Frontend Hygiene (REL-01 `R-V178P0-QC3-003` closed + 4 V1.79-QC residuals closed); next: V1.81 candidate evaluation at next `/iteration-start` (backlog: BL-09 standalone maturation dashboard, BL-10 independent SOUL growth-curve view, BL-11 deeper manuscript reading/annotations, BL-12 SOUL viz refinements)
+**Active iteration**: V1.81 delivered (2026-07-02) — Creator SOUL Maturation (Creator-SOUL Narrative headline + per-World projection + BL-10 growth-curve + auto-refresh); next: V1.82 candidate evaluation at next `/iteration-start` (backlog: per-World LLM narratives, BL-09 standalone maturation dashboard, BL-11 deeper manuscript reading/annotations, worlds-list/world-detail endpoint).
 
-**Latest shipped**: [V1.66](../iterations/v1.66-tauri-desktop-shell-delivery-compass-v1.md) (Tauri Desktop Shell, PR #90 — 2026-06-26)
+**Latest shipped**: [V1.80](../iterations/v1.80-memory-review-reliability-and-frontend-hygiene-compass-v1.md) (Memory Review Reliability + Frontend Hygiene, PR #107 — 2026-07-01)
 
 **Full iteration index**: [iterations/README.md](../iterations/README.md)
 

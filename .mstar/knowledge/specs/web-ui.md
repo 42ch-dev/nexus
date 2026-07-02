@@ -799,4 +799,97 @@ V1.78 closed the third and final author-in-command loop (creator memory). V1.79 
 
 ---
 
-*Local-first Web UI product contract. V1.64 Shipped (Control Room + Setup) → V1.65 §13 Content-Authoring → V1.66 §14 Desktop Shell → V1.67 §15 Surface Convergence & De-risk → V1.69 Design System Maturation & Canvas Draft → V1.70 §16 Canvas Strategy Implement (α) + CI/desktop-build optimization → V1.71 §17 Canvas Strategy Write-Boundary (β) → V1.72 §18 Canvas Outline+Timeline (β) → V1.73 §19 Canvas World KB (β) → V1.74 §20 Canvas World KB Relationships (β) → V1.77 §23 Findings-Remediation UI → V1.78 §24 Creator Memory Review-Loop UI → V1.79 §25 Author Reflection: Reading Surface + SOUL Visualization. Design tokens: `apps/web/DESIGN.md` (V1.65 Standard+ + V1.66 desktop supplement + V1.69 Production migration + V1.70 canvas-token fill + V1.71 canvas-write tokens + V1.72 outline/timeline tokens + V1.73 canvas-worldkb tokens + V1.74 relationship tokens + V1.77 findings triage tokens + V1.78 creator-memory review-loop tokens + V1.79 reading-surface tokens + SOUL-viz tokens).*
+## 26. Next stage — Creator SOUL Maturation: Narrative, Projection, Growth, Refresh (V1.81)
+
+V1.79 gave the author their first reflection surface — keyword clusters and a temporal drift timeline over internalized SOUL fragments. V1.80 stabilized the review pipeline that feeds those fragments. V1.81 deepens the reflection axis with four additions under the product theme **"Creator SOUL Maturation"**, anchored on a definitive product model:
+
+> **Creator SOUL is the creator's core creative identity — world-agnostic. It is the *whole*: all accumulated `memory_fragments`. A per-World SOUL projection is the Creator SOUL's inclination within a specific world — a *subset* of fragments filtered by the world they emerged from. It is a drill-down view, not a separate identity. The LLM personality narrative synthesizes the whole into a reflective "who you are becoming" statement and is world-agnostic by definition; the world projection only filters the read-side viz (keyword clusters, temporal drift, growth-curve).**
+
+This product model is user-visible in the UI — the world selector explicitly frames a world projection as "a subset of your Creator SOUL," not a separate identity.
+
+> **Scope and roadmap SSOT**: [v1.81-creator-soul-maturation-delivery-compass-v1.md](../../iterations/v1.81-creator-soul-maturation-delivery-compass-v1.md) §1 grill decisions, §2 scope, and §6 acceptance criteria. This section records the product contract; the compass is authoritative for scope, batching, and residual tracking.
+
+### 26.1 What ships in V1.81 (four spec points)
+
+**SP-1 — Creator-SOUL Narrative (headline, ④)**
+
+- **Narrative card** (`soul-narrative-card.tsx`): a new surface above the existing keyword/drift viz on the SOUL tab. The card synthesizes an LLM-generated reflective narrative — "who you are becoming" as a creative identity — from the author's accumulated fragment themes, temporal shifts, and preoccupations. The narrative is generated on-demand ("Reflect on my SOUL") and persisted (cached); it is not regenerated on every page load.
+- **Five UX states (each testable)**:
+  1. `ungenerated` — CTA card with a "Reflect on my SOUL" button; preview hint text below explaining what the narrative will show.
+  2. `generating` — loading skeleton with pulse; button shows spinner + "Reflecting…"; no timeout panic.
+  3. `current` — prose block with `generated_at` timestamp; "Re-reflect" secondary action.
+  4. `stale` — cached narrative still visible; banner above: "You've grown since this reflection — new fragments have arrived." with "Re-reflect" CTA on the banner.
+  5. `insufficient-data` — empty-state illustration: "Your SOUL is still forming. Keep writing and reviewing — once you've accumulated enough creative experience, Nexus can reflect on who you are becoming." Below, a fragment count with "X more to go" when close to the threshold.
+- **Narrative quality threshold** (product-gated, architect-enforced in the prompt contract): a narrative is "good enough" when it (1) references at least two distinct theme keywords from the creator's fragment clusters, (2) references at least one shift or development over time, and (3) ends with a forward-looking reflection or question. Below the minimum-fragment threshold, the endpoint returns the insufficient-data state rather than risking a thin/generic narrative.
+- **Consumes**: `POST /v1/local/memory/soul/reflect` (new endpoint, P0) via a new `useSoulNarrative` query/mutation. The request carries required `creator_id` and optional `force_regenerate`; the response exposes `state`, cached/generated narrative fields when present, stale snapshots, current counts, and insufficient-data thresholds.
+
+**SP-2 — World Projection Selector (①)**
+
+- **World selector**: a dropdown/list control in the SOUL section header, defaulting to "All worlds" (the whole Creator SOUL). Selecting a specific world re-scopes the keyword clusters, temporal drift, and growth-curve to that world's fragment subset. It does **not** re-scope the LLM narrative or its generation metadata in V1.81; the narrative remains Creator-level / world-agnostic.
+- **Subset semantics (UX contract)**:
+  - Worlds with fragments list their name + fragment count (e.g., "Eryndor (42 fragments)"); worlds with Works but no fragments may appear with the subset-empty state.
+  - Worlds with zero fragments and zero Works are **omitted** from the selector — no dead-end empty options.
+  - "All worlds" is always the default; the label clarifies "your whole Creator SOUL."
+  - If a selected Work-backed world has no fragments yet, the viz area shows the subset-empty copy: "No fragments in this world yet — your Creator SOUL is still shaped by your work here when fragments arrive."
+- Drives a `world_id` query param on the fragments query; coordinates with the page-level `fragmentKeyword` lift pattern in `memory-page.tsx`.
+
+**SP-3 — Growth-Curve (②, BL-10)**
+
+- **Growth-curve component** (`growth-curve.tsx`): cumulative fragment count over time as a simple line/area chart, independent of the temporal-drift timeline (which answers "how has my focus shifted?" — the growth-curve answers "how much have I accumulated?").
+- **Three density states** (reuses the V1.79 `densityFor` branching):
+  - `empty` (0 fragments): forward-looking illustration + "Your SOUL begins here — every review session adds a fragment to your creative growth."
+  - `low-data` (1–9 fragments): simple chart + "Your SOUL is taking shape. Keep writing to see your growth curve emerge."
+  - `rich` (≥10 fragments): full cumulative curve with axis labels and a summary stat.
+- Respects the world projection (re-scopes when a world is selected).
+
+**SP-4 — Auto-Refresh (③)**
+
+- Poll interval on the SOUL fragments query (react-query `refetchInterval`) + invalidation of all SOUL queries when the review mutation settles.
+- After a review session, the SOUL viz refreshes without a manual reload — the author sees the new fragments immediately.
+
+### 26.2 The reflection loops this deepens
+
+**SP-1 (Narrative) — seeing who you are becoming in prose**:
+
+1. **Reflect on demand** — the author triggers a synthesis and reads a narrative statement of their accumulated creative identity, not a keyword dump.
+2. **Stay current** — the stale banner prompts re-reflection after growth, making the narrative a living mirror rather than a frozen snapshot.
+3. **Start with confidence** — new creators see an encouraging empty state that explains the feature's value, not a thin/generic LLM output.
+
+**SP-2 (Projection) — understanding your creative self across worlds**:
+
+1. **See the whole** — default "All worlds" shows the author's complete creative identity.
+2. **Drill into a world** — selecting a world shows how the author's themes manifest within that world's context, as a subset.
+3. **Honest subset rendering** — the UI never pretends a projection is the whole; empty worlds are omitted; subset-empty states are labeled clearly.
+
+**SP-3 (Growth) — watching accumulation**:
+
+1. **Growth at a glance** — the curve answers "am I accumulating creative experience?" separately from "is my thematic focus shifting?"
+2. **Degrade gracefully** — new creators see a forward-looking state, not a broken chart.
+
+**SP-4 (Refresh) — responsiveness**:
+
+1. **No manual steps** — finishing a review session flows naturally into seeing the updated SOUL.
+
+### 26.3 Non-goals for V1.81
+
+- **Per-World LLM narratives** — the narrative operates on the Creator whole only; a per-world narrative synthesis is deferred. The world projection only filters read-side viz.
+- **Narrative editing / curation by the author** — the narrative is read-only; the "stale → re-reflect" cycle is the only author influence. Editing/curation is a candidate for future reflection-axis deepening.
+- **Narrative export / share** — no copy-to-clipboard, export, or share path this iteration.
+- **Async background-job infrastructure** — on-demand generation only (consistent with V1.80 discipline).
+- **BL-09 standalone maturation dashboard** — remains backlog.
+- **BL-11 deeper manuscript reading** (annotations/highlights) — remains backlog.
+- **Realtime websocket / push** — poll + invalidation only.
+- **Rewrite of existing keyword/drift viz** — the world filter is surgical; no restructuring beyond adding the selector.
+
+### 26.4 Wire contracts (V1.81)
+
+**`wire_contracts_changed: TRUE`** (additive — P-1 creates schemas, P0 runs codegen). Two additive changes:
+
+1. `memory-fragment-info` gains optional `world_id` (`string | null`; consumers treat absent/null as Creator-core-only). `list-memory-fragments-query` gains optional `world_id` query param (omitted = whole Creator SOUL; present = specific world subset).
+2. New soul-narrative schemas: `soul-narrative-request.schema.json` (required `creator_id`, optional `force_regenerate`) + `soul-narrative-response.schema.json` (`state`, optional narrative/cache fields, stale flag, current counts, and threshold fields for the insufficient-data state).
+
+`@42ch/nexus-contracts` **0.15.0 → 0.16.0** (additive — no existing type changes). The web app consumes the new types as frozen contracts from P-1; P0 owns the codegen commit.
+
+---
+
+*Local-first Web UI product contract. V1.64 Shipped (Control Room + Setup) → V1.65 §13 Content-Authoring → V1.66 §14 Desktop Shell → V1.67 §15 Surface Convergence & De-risk → V1.69 Design System Maturation & Canvas Draft → V1.70 §16 Canvas Strategy Implement (α) + CI/desktop-build optimization → V1.71 §17 Canvas Strategy Write-Boundary (β) → V1.72 §18 Canvas Outline+Timeline (β) → V1.73 §19 Canvas World KB (β) → V1.74 §20 Canvas World KB Relationships (β) → V1.77 §23 Findings-Remediation UI → V1.78 §24 Creator Memory Review-Loop UI → V1.79 §25 Author Reflection: Reading Surface + SOUL Visualization → V1.81 §26 Creator SOUL Maturation: Narrative, Projection, Growth, Refresh. Design tokens: `apps/web/DESIGN.md` (V1.65 Standard+ + V1.66 desktop supplement + V1.69 Production migration + V1.70 canvas-token fill + V1.71 canvas-write tokens + V1.72 outline/timeline tokens + V1.73 canvas-worldkb tokens + V1.74 relationship tokens + V1.77 findings triage tokens + V1.78 creator-memory review-loop tokens + V1.79 reading-surface tokens + SOUL-viz tokens + V1.81 narrative-card tokens + growth-curve tokens).*

@@ -365,7 +365,11 @@
     "2026-07-01-v1.79-closure",
     "2026-07-01-v1.80-memory-review-reliability",
     "2026-07-01-v1.80-frontend-hygiene-residuals",
-    "2026-07-01-v1.80-closure"
+    "2026-07-01-v1.80-closure",
+    "2026-07-01-v1.81-prepare-spec-and-contracts",
+    "2026-07-01-v1.81-creator-soul-narrative-and-world-foundation",
+    "2026-07-01-v1.81-soul-surface-deepening",
+    "2026-07-01-v1.81-closure"
   ],
   "iteration_summaries": {
     "v1.45": {

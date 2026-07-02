@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT fragment_id as \"fragment_id!\", session_id as \"session_id!\",\n                creator_id as \"creator_id!\", keywords as \"keywords!\",\n                summary as \"summary!\", created_at as \"created_at!\", ttl\n         FROM memory_fragments WHERE creator_id = ? ORDER BY created_at DESC LIMIT ?",
+  "query": "SELECT fragment_id as \"fragment_id!\", session_id as \"session_id!\",\n                creator_id as \"creator_id!\", keywords as \"keywords!\",\n                summary as \"summary!\", created_at as \"created_at!\", ttl, world_id\n         FROM memory_fragments WHERE session_id = ? ORDER BY created_at DESC",
   "describe": {
     "columns": [
       {
@@ -37,10 +37,15 @@
         "name": "ttl",
         "ordinal": 6,
         "type_info": "Text"
+      },
+      {
+        "name": "world_id",
+        "ordinal": 7,
+        "type_info": "Text"
       }
     ],
     "parameters": {
-      "Right": 2
+      "Right": 1
     },
     "nullable": [
       true,
@@ -49,8 +54,9 @@
       false,
       false,
       false,
+      true,
       true
     ]
   },
-  "hash": "ca0e7c625b0146fa4bcff49f7f913c5495dbd397318a3a34ee055db42afbeb35"
+  "hash": "4e8b3edc86d3f3d205cbeefe8ae93d57cda7b5ccc9ef9df9ebc488a681fbedf4"
 }

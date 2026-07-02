@@ -21,8 +21,9 @@ pub use nexus_contracts::{
     CreatePendingReviewResponse, DeletePendingReviewQuery, DeletePendingReviewResponse,
     ListMemoryFragmentsQuery, ListMemoryFragmentsResponse, ListPendingReviewsQuery,
     ListPendingReviewsResponse, MemoryFragmentInfo, PaginationInfo, PendingReviewInfo,
-    ReviewRequest, ReviewResponse,
+    ReviewRequest, ReviewResponse, SoulNarrativeRequest, SoulNarrativeResponse,
 };
+use nexus_creator_memory::soul_narrative::SoulNarrativeSynthesizer as _;
 use tracing::{debug, info};
 
 /// POST /v1/local/memory/pending-review
@@ -882,6 +883,7 @@ async fn process_single_review_row(
                 summary: fragment.summary,
                 created_at: fragment.created_at,
                 ttl: fragment.ttl,
+                world_id: input.world_id.clone(),
             };
 
             match nexus_local_db::memory_fragment::create_fragment(pool, &record).await {
@@ -916,6 +918,16 @@ async fn process_single_review_row(
 }
 
 /// Delete a pending review entry by ID (best-effort, logs on failure).
+///
+/// At-least-once semantics (R-V180P0-QC2-001): the delete runs AFTER the row's
+/// side effect (promote/fragment/drop) succeeds. If the delete itself fails (DB
+/// error), the pending row remains and may be reprocessed on the next review
+/// call — for promote/fragment that means a duplicate memory/fragment. This is
+/// accepted under the local-only / single-active-creator / small-queue threat
+/// model (operator-triggered review, bounded pipeline, observable warn log);
+/// it mirrors the pre-existing V1.33 best-effort pattern. A transactional
+/// side-effect-then-delete (or a row-state flip before the side effect) would
+/// harden it for an untrusted/multi-writer model in a future major version.
 async fn delete_pending_by_id(pool: &sqlx::SqlitePool, pending_id: &str) {
     let pid = pending_id.to_string();
     if let Err(e) = sqlx::query!(
@@ -1019,6 +1031,7 @@ pub async fn fragments(
     info!(
         creator_id = %active_creator,
         keyword = ?params.keyword,
+        world_id = ?params.world_id,
         "Listing memory fragments"
     );
 
@@ -1031,6 +1044,7 @@ pub async fn fragments(
             state.pool(),
             &active_creator,
             params.keyword.as_deref(),
+            params.world_id.as_deref(),
             limit_u32,
         )
         .await
@@ -1047,6 +1061,7 @@ pub async fn fragments(
         nexus_local_db::memory_fragment::list_fragments_limited(
             state.pool(),
             &active_creator,
+            params.world_id.as_deref(),
             limit_i64,
         )
         .await
@@ -1061,14 +1076,7 @@ pub async fn fragments(
         .map(|r| MemoryFragmentInfo {
             fragment_id: r.fragment_id,
             summary: r.summary,
-            // V1.79: expose the stored keyword labels + creation timestamp for
-            // read-only SOUL visualization. `keywords` is a JSON-array String in
-            // `memory_fragments`; decode it to `Vec<String>` (malformed JSON on
-            // legacy/corrupt rows degrades to an empty list, never fails the
-            // response — see `decode_fragment_keywords`). `created_at` is copied
-            // verbatim (RFC 3339 string). Both DB columns are non-null, so they
-            // are always populated as `Some`; the optional wire shape lets
-            // future producers omit them.
+            world_id: r.world_id,
             keywords: Some(decode_fragment_keywords(&r.keywords)),
             created_at: Some(r.created_at),
         })
@@ -1082,6 +1090,411 @@ pub async fn fragments(
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
+
+/// Minimum fragment count before narrative synthesis is attempted.
+const MIN_SOUL_NARRATIVE_FRAGMENTS: i64 = 10;
+
+/// Minimum distinct keyword count before narrative synthesis is attempted.
+const MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS: i64 = 20;
+
+/// `POST /v1/local/memory/soul/reflect`
+///
+/// Reads or regenerates the cached whole-Creator SOUL narrative.
+/// The endpoint:
+/// 1. Enforces active creator (same pattern as `fragments`).
+/// 2. Computes fragment stats for the insufficient-data gate.
+/// 3. When `force_regenerate` is `false` (the read/poll path):
+///    - Returns `insufficient_data` if below gate.
+///    - Returns `ungenerated` if above gate but no cache row exists.
+///    - Returns `current` if cache row exists and fragments haven't changed.
+///    - Returns `stale` if cache row exists but fragments have changed.
+///    - **Never** calls the LLM — synthesis is on-demand only.
+/// 4. When `force_regenerate` is `true` (the explicit CTA):
+///    - Returns `insufficient_data` if below gate.
+///    - Synthesizes via `SoulNarrativeSynthesizer` (ACP-backed), persists
+///      the result, and returns `current`.
+/// 5. The insufficient-data gate (`fragment_count < 10` OR
+///    `distinct_keyword_count < 20`) is evaluated BEFORE any ACP call, so
+///    new creators never pay LLM latency for a guaranteed-thin result.
+///
+/// Auth: requires active creator from config.toml.
+/// Request body `creator_id` must match the active creator, otherwise 403.
+#[allow(clippy::too_many_lines, clippy::similar_names)]
+pub async fn reflect_soul(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<SoulNarrativeRequest>,
+) -> Result<Json<SoulNarrativeResponse>, NexusApiError> {
+    let active_creator =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    if req.creator_id != active_creator {
+        return Err(NexusApiError::Forbidden {
+            resource: "soul_narrative".into(),
+            reason: format!(
+                "creator_id '{}' does not match active creator '{}'",
+                req.creator_id, active_creator
+            ),
+        });
+    }
+
+    if !nexus_creator::local_identity::is_valid_creator_id(&req.creator_id) {
+        return Err(NexusApiError::InvalidInput {
+            field: "creator_id".into(),
+            reason: "creator_id must start with 'ctr_' followed by alphanumeric characters".into(),
+        });
+    }
+
+    info!(
+        creator_id = %active_creator,
+        force_regenerate = req.force_regenerate.unwrap_or(false),
+        "Reflecting on Creator SOUL narrative"
+    );
+
+    // 1. Compute fragment stats + cache row in one DB round-trip (G2 fix).
+    let (fragment_stats, cached) =
+        nexus_local_db::soul_narrative_fragment_stats(state.pool(), &active_creator)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".into(),
+                message: format!("failed to compute fragment stats: {e}"),
+            })?;
+
+    let force = req.force_regenerate.unwrap_or(false);
+
+    // 2. Insufficient-data gate (before any ACP call).
+    let min_distinct = usize::try_from(MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS).unwrap_or(usize::MAX);
+    let insufficient = fragment_stats.fragment_count < MIN_SOUL_NARRATIVE_FRAGMENTS
+        || fragment_stats.distinct_keyword_count < min_distinct;
+
+    if insufficient {
+        return Ok(Json(SoulNarrativeResponse {
+            creator_id: active_creator,
+            state: "insufficient_data".to_string(),
+            narrative: None,
+            generated_at: None,
+            stale: false,
+            fragment_count_at_generation: None,
+            max_fragment_created_at_at_generation: None,
+            current_fragment_count: u64::try_from(fragment_stats.fragment_count).unwrap_or(0),
+            current_distinct_keyword_count: u64::try_from(fragment_stats.distinct_keyword_count)
+                .unwrap_or(0),
+            min_fragment_count: MIN_SOUL_NARRATIVE_FRAGMENTS,
+            min_distinct_keyword_count: MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS,
+        }));
+    }
+
+    // 3. Stale detection — stats-only rows (narrative=None) are treated as
+    //    ungenerated, not stale (G3 fix).
+    let has_narrative = cached.as_ref().and_then(|c| c.narrative.as_ref()).is_some();
+    let stale = cached.as_ref().is_some_and(|c| {
+        has_narrative
+            && (c.fragment_count_at_generation != fragment_stats.fragment_count
+                || c.max_fragment_created_at_at_generation.as_deref()
+                    != fragment_stats.max_created_at.as_deref())
+    });
+
+    // 4. Read/poll path (force=false): return current, stale, or ungenerated.
+    //    NEVER calls the LLM — synthesis is gated behind force=true (G1 fix).
+    if !force {
+        if let Some(ref c) = cached {
+            // Stats-only row (G3) — treat as ungenerated, not stale/current.
+            if !has_narrative {
+                return Ok(Json(SoulNarrativeResponse {
+                    creator_id: active_creator,
+                    state: "ungenerated".to_string(),
+                    narrative: None,
+                    generated_at: None,
+                    stale: false,
+                    fragment_count_at_generation: None,
+                    max_fragment_created_at_at_generation: None,
+                    current_fragment_count: u64::try_from(fragment_stats.fragment_count)
+                        .unwrap_or(0),
+                    current_distinct_keyword_count: u64::try_from(
+                        fragment_stats.distinct_keyword_count,
+                    )
+                    .unwrap_or(0),
+                    min_fragment_count: MIN_SOUL_NARRATIVE_FRAGMENTS,
+                    min_distinct_keyword_count: MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS,
+                }));
+            }
+            if stale {
+                return Ok(Json(SoulNarrativeResponse {
+                    creator_id: active_creator,
+                    state: "stale".to_string(),
+                    narrative: c.narrative.clone(),
+                    generated_at: c.generated_at.clone(),
+                    stale: true,
+                    fragment_count_at_generation: Some(
+                        u64::try_from(c.fragment_count_at_generation).unwrap_or(0),
+                    ),
+                    max_fragment_created_at_at_generation: c
+                        .max_fragment_created_at_at_generation
+                        .clone(),
+                    current_fragment_count: u64::try_from(fragment_stats.fragment_count)
+                        .unwrap_or(0),
+                    current_distinct_keyword_count: u64::try_from(
+                        fragment_stats.distinct_keyword_count,
+                    )
+                    .unwrap_or(0),
+                    min_fragment_count: MIN_SOUL_NARRATIVE_FRAGMENTS,
+                    min_distinct_keyword_count: MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS,
+                }));
+            }
+            // Not stale → current.
+            return Ok(Json(SoulNarrativeResponse {
+                creator_id: active_creator,
+                state: "current".to_string(),
+                narrative: c.narrative.clone(),
+                generated_at: c.generated_at.clone(),
+                stale: false,
+                fragment_count_at_generation: Some(
+                    u64::try_from(c.fragment_count_at_generation).unwrap_or(0),
+                ),
+                max_fragment_created_at_at_generation: c
+                    .max_fragment_created_at_at_generation
+                    .clone(),
+                current_fragment_count: u64::try_from(fragment_stats.fragment_count).unwrap_or(0),
+                current_distinct_keyword_count: u64::try_from(
+                    fragment_stats.distinct_keyword_count,
+                )
+                .unwrap_or(0),
+                min_fragment_count: MIN_SOUL_NARRATIVE_FRAGMENTS,
+                min_distinct_keyword_count: MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS,
+            }));
+        }
+        // Above gate but no cache row → ungenerated.
+        // Populate current_* counts from fragment_stats; narrative/generated_at = None.
+        return Ok(Json(SoulNarrativeResponse {
+            creator_id: active_creator,
+            state: "ungenerated".to_string(),
+            narrative: None,
+            generated_at: None,
+            stale: false,
+            fragment_count_at_generation: None,
+            max_fragment_created_at_at_generation: None,
+            current_fragment_count: u64::try_from(fragment_stats.fragment_count).unwrap_or(0),
+            current_distinct_keyword_count: u64::try_from(fragment_stats.distinct_keyword_count)
+                .unwrap_or(0),
+            min_fragment_count: MIN_SOUL_NARRATIVE_FRAGMENTS,
+            min_distinct_keyword_count: MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS,
+        }));
+    }
+
+    // 5. force=true → synthesize (explicit CTA, on-demand only).
+    let registry =
+        state
+            .capability_registry()
+            .ok_or_else(|| NexusApiError::ServiceUnavailable {
+                message: "capability registry not available".to_string(),
+            })?;
+
+    let synthesizer =
+        crate::api::handlers::soul_narrative_synthesizer::AcpSoulNarrativeSynthesizer::new(
+            registry,
+        );
+
+    // Build capped input signal.
+    let input =
+        build_soul_narrative_synthesis_input(state.pool(), &active_creator, &fragment_stats)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".into(),
+                message: format!("failed to build synthesis input: {e}"),
+            })?;
+
+    let draft = synthesizer
+        .synthesize(&active_creator, input)
+        .await
+        .map_err(|e| {
+            // Map MemoryError to appropriate NexusApiError.
+            let msg = e.to_string();
+            if msg.contains("not available") || msg.contains("unavailable") {
+                NexusApiError::ServiceUnavailable { message: msg }
+            } else {
+                NexusApiError::Internal {
+                    code: "NARRATIVE_SYNTHESIS_ERROR".into(),
+                    message: msg,
+                }
+            }
+        })?;
+
+    // 6. Persist the result (including stats cache for future read-path hits).
+    let now = chrono::Utc::now().to_rfc3339();
+    let stats_fingerprint = nexus_local_db::build_stats_fingerprint(
+        fragment_stats.fragment_count,
+        fragment_stats.max_created_at.as_deref(),
+    );
+    let record = nexus_local_db::SoulNarrativeRecord {
+        creator_id: active_creator.clone(),
+        narrative: Some(draft.narrative.clone()),
+        generated_at: Some(now.clone()),
+        fragment_count_at_generation: fragment_stats.fragment_count,
+        max_fragment_created_at_at_generation: fragment_stats.max_created_at.clone(),
+        distinct_keyword_count_cache: i64::try_from(fragment_stats.distinct_keyword_count)
+            .unwrap_or(0),
+        stats_fingerprint: Some(stats_fingerprint),
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    nexus_local_db::upsert_soul_narrative(state.pool(), &record)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: format!("failed to persist soul narrative: {e}"),
+        })?;
+
+    Ok(Json(SoulNarrativeResponse {
+        creator_id: active_creator,
+        state: "current".to_string(),
+        narrative: Some(draft.narrative),
+        generated_at: record.generated_at,
+        stale: false,
+        fragment_count_at_generation: Some(
+            u64::try_from(record.fragment_count_at_generation).unwrap_or(0),
+        ),
+        max_fragment_created_at_at_generation: record.max_fragment_created_at_at_generation,
+        current_fragment_count: u64::try_from(fragment_stats.fragment_count).unwrap_or(0),
+        current_distinct_keyword_count: u64::try_from(fragment_stats.distinct_keyword_count)
+            .unwrap_or(0),
+        min_fragment_count: MIN_SOUL_NARRATIVE_FRAGMENTS,
+        min_distinct_keyword_count: MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS,
+    }))
+}
+
+/// Truncate `summary` to at most `max_chars` Unicode scalar characters.
+///
+/// If the summary exceeds `max_chars`, takes the first `max_chars - 1` chars
+/// and appends `…`. This avoids the UTF-8 byte-slice truncation panic that
+/// `&s[..279]` causes when byte 279 is mid-multibyte-char.
+fn truncate_summary(summary: &str, max_chars: usize) -> String {
+    if summary.chars().count() <= max_chars {
+        summary.to_string()
+    } else {
+        let t: String = summary.chars().take(max_chars - 1).collect();
+        format!("{t}…")
+    }
+}
+
+/// Build a capped `SoulNarrativeSynthesisInput` from the creator's fragments.
+///
+/// Caps: ≤30 keywords, ≤24 summaries ≤280 chars, ≤8 temporal buckets.
+async fn build_soul_narrative_synthesis_input(
+    pool: &sqlx::SqlitePool,
+    creator_id: &str,
+    stats: &nexus_local_db::SoulNarrativeFragmentStats,
+) -> Result<nexus_creator_memory::soul_narrative::SoulNarrativeSynthesisInput, NexusApiError> {
+    use nexus_creator_memory::soul_narrative::SoulNarrativeSynthesisInput;
+
+    // Fetch recent fragments for summaries + keyword counting.
+    let fragments = nexus_local_db::list_fragments_limited(pool, creator_id, None, 100)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: format!("failed to fetch fragments for synthesis: {e}"),
+        })?;
+
+    // Count keywords across all fragments.
+    let mut keyword_counts: std::collections::HashMap<String, u64> =
+        std::collections::HashMap::new();
+    let mut summaries: Vec<String> = Vec::new();
+
+    for frag in &fragments {
+        if let Ok(keywords) = serde_json::from_str::<Vec<String>>(&frag.keywords) {
+            for kw in keywords {
+                *keyword_counts.entry(kw).or_default() += 1;
+            }
+        }
+        // Cap summaries: ≤24, each ≤280 chars (Unicode scalar chars, not bytes).
+        if summaries.len() < 24 {
+            let summary = truncate_summary(&frag.summary, 280);
+            summaries.push(summary);
+        }
+    }
+
+    // Sort keywords by count desc, cap at 30.
+    let mut top_keywords: Vec<(String, u64)> = keyword_counts.into_iter().collect();
+    top_keywords.sort_by_key(|(_k, count)| std::cmp::Reverse(*count));
+    top_keywords.truncate(30);
+
+    // Build temporal buckets (up to 8) by grouping fragments into time windows.
+    let temporal_buckets = build_temporal_buckets(&fragments);
+
+    Ok(SoulNarrativeSynthesisInput {
+        top_keywords,
+        recent_summaries: summaries,
+        temporal_buckets,
+        total_fragment_count: u64::try_from(stats.fragment_count).unwrap_or(0),
+        distinct_keyword_count: u64::try_from(stats.distinct_keyword_count).unwrap_or(0),
+        oldest_created_at: fragments.last().map(|f| f.created_at.clone()),
+        newest_created_at: fragments.first().map(|f| f.created_at.clone()),
+    })
+}
+
+/// Build up to 8 temporal buckets from fragments (ordered by `created_at`).
+fn build_temporal_buckets(
+    fragments: &[nexus_local_db::MemoryFragmentRecord],
+) -> Vec<nexus_creator_memory::soul_narrative::TemporalBucket> {
+    use nexus_creator_memory::soul_narrative::TemporalBucket;
+
+    if fragments.is_empty() {
+        return Vec::new();
+    }
+
+    let max_buckets = 8;
+    let n = fragments.len();
+    let bucket_size = n.div_ceil(max_buckets); // ceiling division
+    let bucket_size = bucket_size.max(1);
+
+    let mut buckets: Vec<TemporalBucket> = Vec::new();
+
+    for (bi, chunk) in fragments.chunks(bucket_size).enumerate() {
+        if buckets.len() >= max_buckets {
+            break;
+        }
+
+        // Collect top 5 keywords in this bucket.
+        let mut kw_counts: std::collections::HashMap<String, u64> =
+            std::collections::HashMap::new();
+        for frag in chunk {
+            if let Ok(keywords) = serde_json::from_str::<Vec<String>>(&frag.keywords) {
+                for kw in keywords {
+                    *kw_counts.entry(kw).or_default() += 1;
+                }
+            }
+        }
+        let mut top: Vec<(String, u64)> = kw_counts.into_iter().collect();
+        top.sort_by_key(|(_k, count)| std::cmp::Reverse(*count));
+        top.truncate(5);
+        let top_keywords: Vec<String> = top.into_iter().map(|(k, _)| k).collect();
+
+        // Label: use the first fragment's created_at date portion.
+        let label = chunk.first().map_or_else(
+            || format!("bucket_{bi}"),
+            |f| {
+                // Extract date portion (first 10 chars = YYYY-MM-DD).
+                if f.created_at.len() >= 10 {
+                    f.created_at[..10].to_string()
+                } else {
+                    f.created_at.clone()
+                }
+            },
+        );
+
+        buckets.push(TemporalBucket {
+            label,
+            top_keywords,
+            fragment_count: u64::try_from(chunk.len()).unwrap_or(0),
+        });
+    }
+
+    // `fragments` arrive in `created_at DESC` order (newest first), so the
+    // chunks above are newest→oldest. The synthesis prompt describes drift
+    // *over time* and expects chronological order (oldest→newest); reverse so
+    // bucket[0] is the earliest period. (Greptile review feedback.)
+    buckets.reverse();
+
+    buckets
+}
 
 /// Decode the `memory_fragments.keywords` JSON-array string into `Vec<String>`.
 ///
@@ -1229,6 +1642,55 @@ mod tests {
         assert!(decode_fragment_keywords(r#"["ok", 42]"#).is_empty());
     }
 
+    // ─── R-V181P0-QC3-W002: UTF-8 char-safe summary truncation ───────────
+
+    #[test]
+    fn truncate_summary_short_enough_returns_unchanged() {
+        let short = "Hello world";
+        assert_eq!(truncate_summary(short, 280), short);
+    }
+
+    #[test]
+    fn truncate_summary_exactly_at_limit_returns_unchanged() {
+        let exact = "a".repeat(280);
+        assert_eq!(truncate_summary(&exact, 280), exact);
+    }
+
+    #[test]
+    fn truncate_summary_over_limit_ascii_truncates_with_ellipsis() {
+        let long = "a".repeat(300);
+        let result = truncate_summary(&long, 280);
+        // 279 chars + '…' = 280 chars
+        assert_eq!(result.chars().count(), 280);
+        assert!(result.ends_with('…'));
+    }
+
+    #[test]
+    fn truncate_summary_cjk_multibyte_no_panic() {
+        // Each CJK char is 3 bytes; 300 CJK chars = 900 bytes.
+        // Byte index 279 is mid-character → old byte-slice would panic.
+        let cjk = "字".repeat(300);
+        let result = truncate_summary(&cjk, 280);
+        // Must not panic. 279 CJK chars + '…' = 280 chars.
+        assert_eq!(result.chars().count(), 280);
+        assert!(result.ends_with('…'));
+    }
+
+    #[test]
+    fn truncate_summary_emoji_multibyte_no_panic() {
+        // Emoji can be 4+ bytes; byte slice at 279 would panic.
+        let emoji = "🎉".repeat(300);
+        let result = truncate_summary(&emoji, 280);
+        assert_eq!(result.chars().count(), 280);
+        assert!(result.ends_with('…'));
+    }
+
+    #[test]
+    fn truncate_summary_short_below_limit_unchanged() {
+        assert_eq!(truncate_summary("abc", 280), "abc");
+        assert_eq!(truncate_summary("", 280), "");
+    }
+
     // ─── V1.80 REL-01: deadline-aware partial progress ───────────────────
 
     /// With a deadline already in the past, `process_review_batch` inspects
@@ -1281,6 +1743,183 @@ mod tests {
             .await
             .expect("count");
         assert_eq!(remaining.0, 3, "no rows deleted under a past deadline");
+
+        drop(tmp);
+    }
+
+    // ─── V1.81 G1: synthesis gated behind force=true ─────────────────────
+
+    /// `force_regenerate=false` + above-gate + no cache → `ungenerated`,
+    /// and the synthesizer is NOT called (proved by returning before the
+    /// capability-registry check, which would fail with ServiceUnavailable
+    /// in test mode).
+    #[tokio::test]
+    async fn reflect_soul_no_force_ungenerated_no_llm_call() {
+        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let pool = nexus_local_db::open_pool(&db_path)
+            .await
+            .expect("test pool");
+
+        // Override config.toml to use a creator_id that passes validation
+        // (must start with "ctr_" followed by alphanumeric only).
+        let creator_id = "ctr_testreflect";
+        let toml_str = format!(
+            "active_creator_id = \"{creator_id}\"\n[active_workspace_slug_by_creator]\n\"{creator_id}\" = \"default\""
+        );
+        std::fs::write(nexus_home.join("config.toml"), toml_str).expect("write config.toml");
+
+        // Seed 25 fragments with 25 distinct keywords → above data gate
+        // (10+ fragments AND 20+ distinct keywords).
+        for i in 0..25 {
+            let kw = format!("unique_kw_{i}");
+            let now = chrono::Utc::now().to_rfc3339();
+            // SAFETY: test-only data setup.
+            sqlx::query(
+                "INSERT INTO memory_fragments \
+                 (fragment_id, session_id, creator_id, keywords, summary, created_at, ttl, world_id) \
+                 VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)",
+            )
+            .bind(format!("frag_g1_{i:04}"))
+            .bind(format!("sess_g1_{i:04}"))
+            .bind(creator_id)
+            .bind(format!(r#"["{kw}"]"#))
+            .bind(format!("summary {i}"))
+            .bind(&now)
+            .execute(&pool)
+            .await
+            .expect("seed fragment");
+        }
+
+        let state =
+            crate::workspace::WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None)
+                .await;
+
+        // Test 1: force=false, above-gate, no cache → must return "ungenerated"
+        // WITHOUT trying to use capability_registry (which is None in test mode).
+        let req = SoulNarrativeRequest {
+            creator_id: creator_id.to_string(),
+            force_regenerate: Some(false),
+        };
+        let resp = reflect_soul(axum::extract::State(state.clone()), axum::Json(req))
+            .await
+            .expect("should succeed for force=false + ungenerated");
+
+        assert_eq!(resp.state, "ungenerated");
+        assert!(resp.narrative.is_none());
+        assert!(resp.generated_at.is_none());
+        assert!(!resp.stale);
+        assert_eq!(resp.current_fragment_count, 25);
+        assert_eq!(resp.current_distinct_keyword_count, 25);
+        assert_eq!(resp.min_fragment_count, MIN_SOUL_NARRATIVE_FRAGMENTS);
+        assert_eq!(
+            resp.min_distinct_keyword_count,
+            MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS
+        );
+
+        // Test 2: force=true → tries to synthesize → ServiceUnavailable
+        // (because capability_registry is None in test mode). This proves
+        // the code reaches the synthesis block only when force=true.
+        let req2 = SoulNarrativeRequest {
+            creator_id: creator_id.to_string(),
+            force_regenerate: Some(true),
+        };
+        let err = reflect_soul(axum::extract::State(state.clone()), axum::Json(req2))
+            .await
+            .expect_err("force=true should try synthesis and fail without registry");
+
+        match err {
+            NexusApiError::ServiceUnavailable { .. } => {
+                // Expected: no registry in test mode.
+            }
+            other => panic!(
+                "expected ServiceUnavailable for force=true without registry, got: {other:?}"
+            ),
+        }
+
+        drop(tmp);
+    }
+
+    /// `force_regenerate=false` + above-gate + cached + not stale → `current`.
+    /// The cached row comes from a prior synthesis; the read path returns it
+    /// without calling the LLM.
+    #[tokio::test]
+    async fn reflect_soul_no_force_current_no_llm_call() {
+        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let pool = nexus_local_db::open_pool(&db_path)
+            .await
+            .expect("test pool");
+
+        // Override config.toml to use a creator_id that passes validation.
+        let creator_id = "ctr_testcurrent";
+        let toml_str = format!(
+            "active_creator_id = \"{creator_id}\"\n[active_workspace_slug_by_creator]\n\"{creator_id}\" = \"default\""
+        );
+        std::fs::write(nexus_home.join("config.toml"), toml_str).expect("write config.toml");
+
+        // Seed 25 fragments with 25 distinct keywords → above gate.
+        for i in 0..25 {
+            let kw = format!("unique_kw_{i}");
+            let now = chrono::Utc::now().to_rfc3339();
+            sqlx::query(
+                "INSERT INTO memory_fragments \
+                 (fragment_id, session_id, creator_id, keywords, summary, created_at, ttl, world_id) \
+                 VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)",
+            )
+            .bind(format!("frag_g1cur_{i:04}"))
+            .bind(format!("sess_g1cur_{i:04}"))
+            .bind(creator_id)
+            .bind(format!(r#"["{kw}"]"#))
+            .bind(format!("summary {i}"))
+            .bind(&now)
+            .execute(&pool)
+            .await
+            .expect("seed fragment");
+        }
+
+        // Pre-seed a narrative cache row (simulating a prior synthesis).
+        // Use the actual max_created_at from the DB so the fingerprint matches.
+        let max_created_at: Option<String> =
+            sqlx::query_scalar("SELECT MAX(created_at) FROM memory_fragments WHERE creator_id = ?")
+                .bind(creator_id)
+                .fetch_one(&pool)
+                .await
+                .expect("max_created_at");
+        let now = chrono::Utc::now().to_rfc3339();
+        let fingerprint = nexus_local_db::build_stats_fingerprint(25, max_created_at.as_deref());
+        // SAFETY: test-only — seeds a narrative cache row.
+        sqlx::query(
+            "INSERT OR REPLACE INTO memory_soul_narratives \
+             (creator_id, narrative, generated_at, fragment_count_at_generation, \
+              max_fragment_created_at_at_generation, distinct_keyword_count_cache, \
+              stats_fingerprint, created_at, updated_at) \
+             VALUES (?, 'A test narrative.', ?, 25, ?, 25, ?, ?, ?)",
+        )
+        .bind(creator_id)
+        .bind(&now)
+        .bind(&max_created_at)
+        .bind(&fingerprint)
+        .bind(&now)
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .expect("seed cache");
+
+        let state =
+            crate::workspace::WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None)
+                .await;
+
+        let req = SoulNarrativeRequest {
+            creator_id: creator_id.to_string(),
+            force_regenerate: Some(false),
+        };
+        let resp = reflect_soul(axum::extract::State(state), axum::Json(req))
+            .await
+            .expect("should succeed for force=false + cached current");
+
+        assert_eq!(resp.state, "current");
+        assert_eq!(resp.narrative.as_deref(), Some("A test narrative."));
+        assert!(!resp.stale);
+        assert_eq!(resp.current_fragment_count, 25);
 
         drop(tmp);
     }

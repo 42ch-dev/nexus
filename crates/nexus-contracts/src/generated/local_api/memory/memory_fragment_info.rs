@@ -14,6 +14,8 @@ pub struct MemoryFragmentInfo {
     pub fragment_id: String,
     pub summary: String,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub world_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub keywords: Option<Vec<String>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub created_at: Option<String>,

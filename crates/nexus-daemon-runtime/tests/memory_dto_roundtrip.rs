@@ -61,6 +61,7 @@ fn handler_serves_exact_contract_types() {
     let _: nexus_contracts::MemoryFragmentInfo = handler::MemoryFragmentInfo {
         fragment_id: "frag_1".into(),
         summary: "s".into(),
+        world_id: None,
         keywords: Some(vec!["theme".into()]),
         created_at: Some("2026-07-01T00:00:00Z".into()),
     };
@@ -219,6 +220,7 @@ fn fragments_response_round_trips_keywords_and_created_at() {
         fragments: vec![handler::MemoryFragmentInfo {
             fragment_id: "frag_1".into(),
             summary: "a keyword fragment".into(),
+            world_id: None,
             keywords: Some(vec!["historical fiction".into(), "moral ambiguity".into()]),
             created_at: Some("2026-07-01T00:00:00Z".into()),
         }],
@@ -249,6 +251,7 @@ fn fragments_response_round_trips_keywords_and_created_at() {
     let empty_kw = handler::MemoryFragmentInfo {
         fragment_id: "frag_2".into(),
         summary: "no keywords".into(),
+        world_id: None,
         keywords: Some(Vec::new()),
         created_at: Some("2026-07-01T00:00:00Z".into()),
     };

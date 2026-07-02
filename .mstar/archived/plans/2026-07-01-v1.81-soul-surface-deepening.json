@@ -1,0 +1,17 @@
+{
+  "plan_id": "2026-07-01-v1.81-soul-surface-deepening",
+  "iteration_id": "V1.81",
+  "status": "Done",
+  "owner": "@frontend-dev",
+  "effort": "M",
+  "type": "feature",
+  "working_branch": "feature/v1.81-soul-frontend",
+  "merge_target": "iteration/v1.81",
+  "task_category": "visual",
+  "wire_contracts_changed": false,
+  "wire_contracts_note": "P1 consumes frozen contracts; no schema edit.",
+  "depends_on": [
+    "2026-07-01-v1.81-prepare-spec-and-contracts"
+  ],
+  "completion_note": "V1.81 shipped (QC 3/3 Approve after 3 fix-wave rounds; QA Pass)."
+}
