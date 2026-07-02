@@ -4,6 +4,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { NexusLogo } from '@/components/brand/nexus-logo';
 import { useTheme } from '@/components/theme-provider';
 
+vi.mock('@42ch/nexus-ui/assets/logos/logo-color.svg', () => ({
+  default: '/mock/logo-color.svg',
+}));
+vi.mock('@42ch/nexus-ui/assets/logos/logo-primary.svg', () => ({
+  default: '/mock/logo-primary.svg',
+}));
+
 vi.mock('@/components/theme-provider', () => ({
   useTheme: vi.fn(),
 }));
@@ -27,7 +34,7 @@ describe('NexusLogo', () => {
     });
     render(<NexusLogo />);
     const logo = screen.getByRole('img', { name: 'Nexus' });
-    expect(logo.getAttribute('src')).toContain('%231E3A5F');
+    expect(logo.getAttribute('src')).toContain('logo-primary.svg');
   });
 
   it('renders the cyan mark in dark theme', () => {
@@ -38,7 +45,7 @@ describe('NexusLogo', () => {
     });
     render(<NexusLogo />);
     const logo = screen.getByRole('img', { name: 'Nexus' });
-    expect(logo.getAttribute('src')).toContain('%2325D1E0');
+    expect(logo.getAttribute('src')).toContain('logo-color.svg');
   });
 
   it('honors a custom accessible label', () => {

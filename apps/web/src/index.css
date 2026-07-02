@@ -259,7 +259,7 @@
     /* World KB canvas — DESIGN.dark.md §World KB Canvas Tokens (V1.73) */
     --color-canvas-worldkb-entity-card-fill-default: #1a1a1a;
     --color-canvas-worldkb-entity-card-fill-hover: #2a2a2a;
-    --color-canvas-worldkb-entity-card-fill-selected: rgba(82, 168, 255, 0.14);
+    --color-canvas-worldkb-entity-card-fill-selected: rgba(37, 209, 224, 0.14);
     --color-canvas-worldkb-entity-card-stroke-default: rgba(255, 255, 255, 0.18);
     --color-canvas-worldkb-entity-card-stroke-selected: #25d1e0;
     --color-canvas-worldkb-promotion-pending: #fbbf24;
