@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-07-02T17:28:00+08:00",
+  "updated_at": "2026-07-02T18:25:00+08:00",
   "plans": [
     {
       "plan_id": "2026-07-02-v1.83-nexus-ui-brand-assets",
@@ -39,7 +39,7 @@
     {
       "plan_id": "2026-07-02-v1.83-web-brand-application",
       "title": "P2 — V1.83 Web Brand Application",
-      "status": "InProgress",
+      "status": "Done",
       "owner": "@frontend-dev",
       "task_category": "visual",
       "working_branch": "feature/v1.83-web-brand-application",
@@ -56,7 +56,7 @@
     {
       "plan_id": "2026-07-02-v1.83-closure",
       "title": "P-last — V1.83 QA, QC, Compound, and Closeout",
-      "status": "Todo",
+      "status": "InProgress",
       "owner": "@project-manager",
       "task_category": "docs",
       "working_branch": "feature/v1.83-closure",
