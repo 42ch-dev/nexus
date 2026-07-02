@@ -1,12 +1,12 @@
 # Deferred Features — Cross-Version Tracker v2
 
-**Quick status**: **V1.81 delivered (2026-07-02)** — Creator SOUL Maturation: returned to the feature cadence after V1.80 stabilization, deepening the V1.79 reflection axis. Headline = Creator-SOUL Narrative (LLM on-demand synthesis + stale-invalidation, world-agnostic). Companions = per-World SOUL projection (`memory_fragments.world_id` + UI world-selector), independent growth-curve (BL-10 shipped), auto-refresh. Shipped the user-locked "Creator SOUL (whole) vs World projection (subset)" model. Additive wire (`memory-fragment-info` + `world_id`; new soul-narrative schemas) → `@42ch/nexus-contracts` 0.15.0 → 0.16.0. QC tri-review 3/3 Approve after a 3-round fix-wave (world_id propagation test; fingerprint-cached sound distinct-keyword count; UTF-8 char-truncation). Compound captured the fingerprint-cached-live-aggregate pattern. Platform **paused**. Residuals SSOT: [`status.json`](../status.json). Shipped/cancelled history: [shipped-features-tracker.md](../archived/shipped-features-tracker.md).
+**Quick status**: **V1.82 delivered (2026-07-02)** — SOUL Completion: completes the SOUL track after V1.79 (Track B) → V1.81 (Maturation). Headline = per-World SOUL narrative (extend `POST /v1/local/memory/soul/reflect` + optional `world_id`; `memory_soul_narratives` composite-key cache `(creator_id, world_id)` + NULL-PK partial-index + by-name copy [greploop lesson]; selector scope linkage; per-World ownership via `is_world_owned`; read-path gated behind `force=true`; threshold-saturated distinct-keyword count). Worlds-endpoint wiring (frontend consumes the EXISTING `/v1/local/narrative/worlds` → titles, client unwraps `{ worlds }`). Closes the V1.81-flagged SOUL gaps. Additive wire (`soul-narrative-request` + `world_id`) → `@42ch/nexus-contracts` 0.16.0 → 0.17.0. QC 3/3 Approve after 1 fix-wave (W001 worlds-shape unwrap + W002 threshold-saturated count). QA Pass. P-last swept all 7 V1.81 residuals. Compound updated fingerprint-cached-live-aggregate (threshold-saturated-response-field refinement). Platform **paused**.
 
 **V1.82 in-progress (2026-07-02)**: SOUL Completion — per-World LLM narrative (extend `/soul/reflect` + composite-key cache + selector) + worlds-endpoint wiring (frontend consumes existing `/narrative/worlds` → titles). Closes remaining BL-12 (per-World narrative). Model locked: The Creator SOUL is the whole; a per-World narrative is a subset — each has its own narrative. V1.81 Creator-level narrative unchanged.
 
 **Purpose**: Single source of truth for **open** and **backlog** features deferred from delivery compasses. Closed/shipped history lives in shipped archive.
 **Scope**: `nexus` OSS repository only.
-**Created**: 2026-04-21 · **Last updated**: 2026-07-02 (V1.81 delivered: Creator SOUL Maturation; BL-10 + BL-12 shipped)
+**Created**: 2026-04-21 · **Last updated**: 2026-07-02 (V1.82 delivered: SOUL Completion — per-World narrative + worlds wiring; BL-12 fully closed)
 
 ---
 
@@ -73,7 +73,7 @@
 | BL-09 | Standalone maturation dashboard (multi-chart cross-Work/World aggregate view) | V1.79 | Backlog | M | V1.79 Track A shipped in-context lightweight maturation indicators only; standalone dashboard deferred. |
 | BL-10 | Independent SOUL growth-curve view (separate from temporal-drift timeline) | V1.79 | **V1.81 Shipped** | S | V1.79→V1.81 shipped | V1.79 Track B folded growth-count into the temporal-drift timeline; standalone view deferred. V1.81 shipped as SP-3 — cumulative-fragment-growth viz with density branching (`empty`/`low-data`/`rich`), respects world projection, independent of the temporal-drift timeline. |
 | BL-11 | Deeper manuscript reading — persisted reading progress + annotations/highlights + profile-specific reading chrome | V1.79 | Backlog | M-L | V1.79 reading surface is session-only + novel-first; persistence/annotations/profile-chrome deferred. |
-| BL-12 | SOUL viz refinements — per-World filtering + realtime updates + LLM-generated personality-score narrative | V1.79 | **V1.82 in-progress (per-World narrative closing)** | M | V1.79→V1.81 shipped (partial); V1.82 in-progress | V1.79 SOUL viz is per-creator + poll/manual-refresh + raw keyword/timeline; refinements deferred. V1.81 shipped: per-World projection (SP-2, world-selector drilling viz into subset) + LLM Creator-SOUL personality narrative (SP-1, headline — world-agnostic, on-demand + stale-invalidation) + auto-refresh (SP-4). **V1.82 closes the remaining per-World LLM narrative** (extend `/soul/reflect` + composite-key cache + selector); worlds-endpoint wiring (frontend consumes existing `/narrative/worlds` → titles). Model locked: The Creator SOUL is the whole; a per-World narrative is a subset — each has its own narrative. V1.81 Creator-level narrative unchanged. Realtime push still backlog. |
+| BL-12 | SOUL viz refinements — per-World filtering + realtime updates + LLM-generated personality-score narrative | V1.79 | **V1.82 Shipped (per-World narrative closed)** | M | V1.79→V1.81 (partial)→V1.82 shipped | V1.79 SOUL viz is per-creator + poll/manual-refresh + raw keyword/timeline. V1.81 shipped: per-World projection + LLM Creator-SOUL narrative (world-agnostic) + auto-refresh. **V1.82 closed the remaining per-World LLM narrative** (extend `/soul/reflect` + optional `world_id`; composite-key cache; selector scope linkage; ownership via `is_world_owned`; threshold-saturated distinct count) + worlds-endpoint wiring (frontend consumes existing `/narrative/worlds` → titles). Model: Creator SOUL = whole; per-World narrative = subset; each has its own narrative. **Realtime push remains backlog** (the only BL-12 sub-item not yet shipped). |
 
 ### 2.5 Reliability roadmap (cross-version)
 
@@ -101,9 +101,9 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 ## 5) Quick index
 
-**Active iteration**: V1.82 in-progress (2026-07-02) — SOUL Completion: per-World LLM narrative (closing remaining BL-12) + worlds-endpoint wiring (titles from existing `/narrative/worlds`). V1.81 Creator-level narrative unchanged; V1.82 adds per-World narrative. Next after close: V1.83 candidate eval (backlog: BL-09 standalone dashboard, BL-11 deeper reading, realtime push).
+**Active iteration**: V1.82 delivered (2026-07-02) — SOUL Completion (per-World narrative + worlds-endpoint wiring); BL-12 fully closed (minus realtime push). Next: V1.83 candidate eval at next `/iteration-start` (backlog: BL-11 deeper manuscript reading, BL-09 standalone dashboard, realtime SOUL push, or reliability/hygiene).
 
-**Latest shipped**: [V1.80](../iterations/v1.80-memory-review-reliability-and-frontend-hygiene-compass-v1.md) (Memory Review Reliability + Frontend Hygiene, PR #107 — 2026-07-01)
+**Latest shipped**: [V1.81](../iterations/v1.81-creator-soul-maturation-delivery-compass-v1.md) (Creator SOUL Maturation, PR #108 — 2026-07-02)
 
 **Full iteration index**: [iterations/README.md](../iterations/README.md)
 

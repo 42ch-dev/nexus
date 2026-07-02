@@ -137,3 +137,34 @@ model, but V1.80 is **write-side drain-completion semantics** (`has_more`
 reflects advancement) while this doc is **read-side live-aggregate cost**.
 Flagged for a future consolidation review if a unifying "bounded local
 endpoint contract" doc is warranted; for now they address orthogonal traps.
+
+## V1.82 refinement — threshold-saturated response field (compound V1.82)
+
+V1.82 extended the pattern per-(creator, world) and surfaced a sharper rule for
+the response field that carries the aggregate:
+
+> **When the aggregate feeds a `≥ threshold?` gate, the response field should
+> report the THRESHOLD as a saturated count (stop decoding at the threshold),
+> NOT an exact-above-threshold value.** Exact-above-threshold is not worth an
+> unbounded decode — the gate only needs `≥ threshold?`.
+
+The V1.81 implementation reached the threshold (20 distinct) then DRAINED the
+remaining rows for an exact count — bounded by the fingerprint cache on the
+steady-state read, but the recompute (fingerprint mismatch) still paid O(all
+keyword JSON). V1.82's QC (W-QC3-002) caught this; the fix returns the
+threshold immediately once 20 distinct are found (no drain). Counts below the
+threshold still scan to EOF for an exact value (the small-set case is cheap).
+
+**Contract implication**: callers must treat the threshold value (e.g. `20`) as
+"at least 20" — document this in the field description. The UI displays the
+threshold as a lower bound ("20+") rather than a precise count above the gate.
+This trades a cosmetic exactness (rarely actionable above the gate) for a hard
+bound on the expensive recompute — the right tradeoff for a polled local
+endpoint.
+
+**Update the V1.81 example**: `POST /soul/reflect` `current_distinct_keyword_count`
+now returns a threshold-saturated count (≥20 → 20) in BOTH the Creator-level
+(V1.81) and per-World (V1.82) scopes. The fingerprint cache + early-exit +
+threshold-saturation together make the endpoint bounded on every path
+(steady-state read = O(COUNT+MAX); recompute = O(rows-to-20-distinct); never
+O(all keyword JSON)).

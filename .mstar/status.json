@@ -1,96 +1,32 @@
 {
   "version": 1,
   "updated_at": "2026-07-01T06:00:00Z",
-  "plans": [
-    {
-      "plan_id": "2026-07-02-v1.82-prepare-contracts",
-      "iteration_id": "V1.82",
-      "status": "Done",
-      "owner": "@architect",
-      "effort": "S",
-      "type": "prepare",
-      "working_branch": "feature/v1.82-prepare",
-      "merge_target": "iteration/v1.82",
-      "task_category": "logic",
-      "wire_contracts_changed": true,
-      "wire_contracts_note": "V1.82 P-1: additive — soul-narrative-request + optional world_id; @42ch/nexus-contracts 0.16.0 -> 0.17.0.",
-      "depends_on": []
-    },
-    {
-      "plan_id": "2026-07-02-v1.82-per-world-narrative-backend",
-      "iteration_id": "V1.82",
-      "status": "Done",
-      "owner": "@fullstack-dev",
-      "effort": "M",
-      "type": "feature",
-      "working_branch": "feature/v1.82-soul-backend",
-      "merge_target": "iteration/v1.82",
-      "task_category": "logic",
-      "wire_contracts_changed": false,
-      "wire_contracts_note": "P0 consumes P-1 generated types; composite-key migration internal.",
-      "depends_on": [
-        "2026-07-02-v1.82-prepare-contracts"
-      ]
-    },
-    {
-      "plan_id": "2026-07-02-v1.82-soul-surface-completion",
-      "iteration_id": "V1.82",
-      "status": "Done",
-      "owner": "@frontend-dev",
-      "effort": "M",
-      "type": "feature",
-      "working_branch": "feature/v1.82-soul-frontend",
-      "merge_target": "iteration/v1.82",
-      "task_category": "visual",
-      "wire_contracts_changed": false,
-      "wire_contracts_note": "P1 consumes frozen contracts; no schema edit.",
-      "depends_on": [
-        "2026-07-02-v1.82-prepare-contracts"
-      ]
-    },
-    {
-      "plan_id": "2026-07-02-v1.82-closure",
-      "iteration_id": "V1.82",
-      "status": "Todo",
-      "owner": "@project-manager",
-      "effort": "S",
-      "type": "closure",
-      "working_branch": "feature/v1.82-closure",
-      "merge_target": "iteration/v1.82",
-      "task_category": "docs",
-      "wire_contracts_changed": false,
-      "wire_contracts_note": "Closure + 7 V1.81 residual sweep.",
-      "depends_on": [
-        "2026-07-02-v1.82-per-world-narrative-backend",
-        "2026-07-02-v1.82-soul-surface-completion"
-      ]
-    }
-  ],
+  "plans": [],
   "metadata": {
-    "integration_branch": "iteration/v1.82",
-    "integration_branch_retired": false,
-    "last_integration_branch": "iteration/v1.81",
+    "integration_branch": null,
+    "integration_branch_retired": true,
+    "last_integration_branch": "iteration/v1.82",
     "integration_merge_target": "main",
     "iteration_base_branch": "main",
     "target_branch": "main",
     "spec_integration_branch": "iteration/v1.82",
-    "latest_active_iteration": "V1.82 locked — SOUL Completion (compass §1.6 Review & Edit chain complete; P-1/P0/P1/P-last Todo, ready for Phase 2 Autonomous Execute)",
+    "latest_active_iteration": "V1.82 delivered (2026-07-02, PR pending); next V1.83 pending /iteration-start",
     "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.81",
-      "compass": "v1.81-creator-soul-maturation-delivery-compass-v1.md",
-      "shipped_at": "2026-07-02 (PR #108 merged)",
+      "iteration": "V1.82",
+      "compass": "v1.82-soul-completion-delivery-compass-v1.md",
+      "shipped_at": "2026-07-02 (PR pending)",
       "plan_count": 4,
       "plan_count_done": 4,
       "wire_contracts_changed": true,
-      "wire_contracts_note": "V1.81: additive — memory-fragment-info + world_id; new soul-narrative request/response schemas; @42ch/nexus-contracts 0.15.0 -> 0.16.0.",
-      "profile_b_compaction": "done (V1.81 all 4 plans)",
-      "merge_commit": "939510f6",
-      "pr": "#108 merged"
+      "wire_contracts_note": "V1.82: additive — soul-narrative-request + optional world_id; @42ch/nexus-contracts 0.16.0 -> 0.17.0.",
+      "profile_b_compaction": "done (V1.82 all 4 plans)",
+      "merge_commit": "(PR pending)",
+      "pr": "(pending)"
     },
     "tech_debt_summary": {
       "total_open": 3,
@@ -6368,7 +6304,13 @@
         "target": "V1.82+",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.81-creator-soul-narrative-and-world-foundation][R-V181P0-QC1-S001]",
         "note": "Lightweight validator on draft.narrative (>=2 keyword hits, >=1 temporal token, forward-looking suffix) -> MemoryError::QualityThresholdMissed.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-07-02 (V1.82 P-last residual sweep)",
+        "closure_note": "b7751230 (validate-draft step added)",
+        "resolution": {
+          "plan_id": "2026-07-02-v1.82-closure",
+          "commit": "b7751230/1ecd9df3/already-addressed"
+        }
       },
       {
         "id": "R-V181P0-QC1-S002",
@@ -6381,7 +6323,13 @@
         "target": "V1.82+",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.81-creator-soul-narrative-and-world-foundation][R-V181P0-QC1-S002]",
         "note": "Typed SoulNarrativeError enum or structural map_memory_error_for_narrative helper.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-07-02 (V1.82 P-last residual sweep)",
+        "closure_note": "b7751230 (typed MemoryError variants + map_soul_narrative_memory_error)",
+        "resolution": {
+          "plan_id": "2026-07-02-v1.82-closure",
+          "commit": "b7751230/1ecd9df3/already-addressed"
+        }
       },
       {
         "id": "R-V181P0-QC1-S005",
@@ -6394,7 +6342,13 @@
         "target": "V1.82+",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.81-creator-soul-narrative-and-world-foundation][R-V181P0-QC1-S005]",
         "note": "narrative.chars().count() <= N (e.g. 16KiB) check before upsert, or simplify: comment marking prompt-only trust bound.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-07-02 (V1.82 P-last residual sweep)",
+        "closure_note": "b7751230 (SOUL_NARRATIVE_MAX_CHARS=16KiB truncate)",
+        "resolution": {
+          "plan_id": "2026-07-02-v1.82-closure",
+          "commit": "b7751230/1ecd9df3/already-addressed"
+        }
       },
       {
         "id": "R-V181P0-QC1-S003",
@@ -6407,7 +6361,13 @@
         "target": "V1.81 P-last",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.81-creator-soul-narrative-and-world-foundation][R-V181P0-QC1-S003]",
         "note": "Add world-title-resolution deferral row to tracker (BL-12) or downgrade comment to 'deferred - see BL-12'.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-07-02 (V1.82 P-last residual sweep)",
+        "closure_note": "V1.82 selector rework removed the simplify placeholder; world-selector now consumes /narrative/worlds (no tracker entry needed)",
+        "resolution": {
+          "plan_id": "2026-07-02-v1.82-closure",
+          "commit": "b7751230/1ecd9df3/already-addressed"
+        }
       },
       {
         "id": "R-V181P0-QC3-W003",
@@ -6439,7 +6399,13 @@
         "target": "V1.82+",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.81-creator-soul-narrative-and-world-foundation][R-V181P0-GRPT-001]",
         "note": "Greptile: non-blocking quality improvement; no correctness/data-integrity impact.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-07-02 (V1.82 P-last residual sweep)",
+        "closure_note": "1ecd9df3 (InsufficientDataState copy completed)",
+        "resolution": {
+          "plan_id": "2026-07-02-v1.82-closure",
+          "commit": "b7751230/1ecd9df3/already-addressed"
+        }
       },
       {
         "id": "R-V181P0-GRPT-002",
@@ -6452,7 +6418,13 @@
         "target": "V1.82+",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.81-creator-soul-narrative-and-world-foundation][R-V181P0-GRPT-002]",
         "note": "Doc-comment clarity; non-blocking.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-07-02 (V1.82 P-last residual sweep)",
+        "closure_note": "already addressed by V1.82 W002 fix (3c7b547c, threshold-saturated doc)",
+        "resolution": {
+          "plan_id": "2026-07-02-v1.82-closure",
+          "commit": "b7751230/1ecd9df3/already-addressed"
+        }
       },
       {
         "id": "R-V181P0-GRPT-003",
@@ -6465,7 +6437,13 @@
         "target": "V1.82+",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.81-creator-soul-narrative-and-world-foundation][R-V181P0-GRPT-003]",
         "note": "TanStack dedupes in-flight fetches; non-blocking perf nit. Related to qc3 S-QC3-001 (duplicate observers).",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-07-02 (V1.82 P-last residual sweep)",
+        "closure_note": "already addressed by V1.82 P1 (a0eba0df, single active observer per scope)",
+        "resolution": {
+          "plan_id": "2026-07-02-v1.82-closure",
+          "commit": "b7751230/1ecd9df3/already-addressed"
+        }
       }
     ],
     "2026-07-02-v1.82-per-world-narrative-backend": [

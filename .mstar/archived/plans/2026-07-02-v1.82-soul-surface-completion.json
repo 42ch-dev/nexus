@@ -1,0 +1,17 @@
+{
+  "plan_id": "2026-07-02-v1.82-soul-surface-completion",
+  "iteration_id": "V1.82",
+  "status": "Done",
+  "owner": "@frontend-dev",
+  "effort": "M",
+  "type": "feature",
+  "working_branch": "feature/v1.82-soul-frontend",
+  "merge_target": "iteration/v1.82",
+  "task_category": "visual",
+  "wire_contracts_changed": false,
+  "wire_contracts_note": "P1 consumes frozen contracts; no schema edit.",
+  "depends_on": [
+    "2026-07-02-v1.82-prepare-contracts"
+  ],
+  "completion_note": "V1.82 shipped (QC 3/3 Approve after 1 fix-wave; QA Pass; P-last swept 7 V1.81 residuals)."
+}
