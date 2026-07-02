@@ -1,9 +1,14 @@
 ---
-version: 0.1.0
+version: 0.2.0
 name: "Nexus Local Web UI"
-description: "Nexus Local Web UI dark theme. The Light theme uses the same token names with different values and lives at DESIGN.md."
+description: "Web consumption mapping — dark theme. Brand values derive from root DESIGN.dark.md; same token names as apps/web/DESIGN.md."
 
 colors:
+  # ── Brand (aliases → root DESIGN.dark.md `brand-*`) ──
+  brand-deep-blue: "#1E3A5F"
+  brand-cyan: "#25D1E0"
+  brand-white: "#FFFFFF"
+
   background-100: "#0a0a0a"
   background-200: "#111111"
   background-300: "#1a1a1a"
@@ -23,10 +28,11 @@ colors:
   gray-alpha-400: "rgba(255,255,255,0.16)"
   gray-alpha-500: "rgba(255,255,255,0.22)"
   gray-alpha-600: "rgba(255,255,255,0.30)"
-  blue-700: "#52a8ff"
-  blue-800: "#7bbdff"
-  blue-900: "#a8d3ff"
-  blue-1000: "#d6ebff"
+  # Primary interactive scale — maps to root `brand-cyan` steps (dark)
+  blue-700: "#25D1E0"
+  blue-800: "#3DD9E6"
+  blue-900: "#5DE0EB"
+  blue-1000: "#7FE8F0"
   red-700: "#ff6b6b"
   red-800: "#ff8585"
   red-900: "#ffb3b3"
@@ -94,7 +100,7 @@ rounded:
 
 components:
   button:
-    primary: { backgroundColor: "{colors.blue-700}", textColor: "#ffffff", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.blue-800}", activeBackgroundColor: "{colors.blue-900}" }
+    primary: { backgroundColor: "{colors.brand-cyan}", textColor: "{colors.brand-deep-blue}", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.blue-800}", activeBackgroundColor: "{colors.blue-900}" }
     secondary: { backgroundColor: "{colors.background-100}", textColor: "{colors.gray-1000}", borderColor: "{colors.gray-alpha-400}", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.background-200}", hoverBorderColor: "{colors.gray-alpha-500}" }
     tertiary: { backgroundColor: "transparent", textColor: "{colors.gray-1000}", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.gray-alpha-100}" }
     destructive: { backgroundColor: "{colors.red-800}", textColor: "#ffffff", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.red-700}", activeBackgroundColor: "{colors.red-900}" }
@@ -362,7 +368,20 @@ components:
 
 # Nexus Local Web UI Design System — Dark Theme
 
-This file is the dark-theme token companion to [`DESIGN.md`](DESIGN.md). It intentionally preserves the same token names and frontmatter structure with dark values. Rule-type documentation, component behavior, voice/content guidance, and implementation mapping live in `DESIGN.md` and apply to both themes.
+**Web consumption mapping (dark).** Canonical brand tokens: root [`DESIGN.dark.md`](../../DESIGN.dark.md). Light mapping: [`DESIGN.md`](DESIGN.md). Package: `@42ch/nexus-ui`.
+
+### Brand → Web alias map (dark)
+
+| Root token (`DESIGN.dark.md`) | Web frontmatter key | Notes |
+| --- | --- | --- |
+| `brand-cyan` | `brand-cyan`, `blue-700` | Primary interactive, focus ring, nav accent |
+| `brand-cyan-800` | `blue-800` | Hover |
+| `brand-deep-blue` | `brand-deep-blue` | Primary button label on cyan fill |
+| `brand-white` | `brand-white` | Logo on deepest panels |
+
+Dark primary button uses **cyan fill + deep blue text** (WCAG AA). `blue-*` names preserved for existing `{colors.blue-700}` consumers.
+
+This file intentionally preserves the same token names and frontmatter structure with dark values. Rule-type documentation, component behavior, voice/content guidance, and implementation mapping live in `DESIGN.md` and apply to both themes.
 
 Dark values were split from the former inline `Dark` columns in `DESIGN.md` during the V1.69 Production migration. Consumers should resolve dark values from this file conceptually while continuing to reference the same token names (`--color-<token>`, Tailwind `cv('<token>')`).
 

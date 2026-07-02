@@ -1,5 +1,6 @@
 import { Moon, Sun } from 'lucide-react';
 
+import { NexusLogo } from '@/components/brand/nexus-logo';
 import { DaemonHealthIndicator } from '@/components/daemon-health-indicator';
 import { Button } from '@/components/ui/button';
 import { useTheme } from '@/components/theme-provider';
@@ -15,7 +16,10 @@ export function Header({ title }: { title: string }) {
   const desktop = useDesktopCapabilities();
   return (
     <header className="flex h-14 items-center justify-between border-b border-gray-alpha-400 bg-background-100 px-4 md:px-6">
-      <h1 className="text-heading-20 font-heading tracking-tight text-gray-1000">{title}</h1>
+      <div className="flex min-w-0 items-center gap-3">
+        <NexusLogo className="h-7 lg:hidden" />
+        <h1 className="truncate text-heading-20 font-heading tracking-tight text-gray-1000">{title}</h1>
+      </div>
       <div className="flex items-center gap-3">
         {desktop ? null : <DaemonHealthIndicator />}
         <Button

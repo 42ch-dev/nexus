@@ -16,10 +16,7 @@ Tauri-ready. Parent rules: [`../../AGENTS.md`](../../AGENTS.md) (repo),
 
 ## SSOT & authority
 
-- **Design tokens**: [`DESIGN.md`](./DESIGN.md) is the SSOT (authored by
-  `@architect`). `src/index.css` + `tailwind.config.ts` *consume* it; they do
-  not invent tokens. If a token you need is missing from DESIGN.md, **report**
-  it to the architect — do not fabricate a value.
+- **Design tokens**: root [`DESIGN.md`](../../DESIGN.md) is the **brand SSOT**; [`DESIGN.md`](./DESIGN.md) / [`DESIGN.dark.md`](./DESIGN.dark.md) are **Web consumption mappings** (authored by `@architect`). `src/index.css` + `tailwind.config.ts` *consume* them; they do not invent tokens. If a token you need is missing, **report** it to the architect — do not fabricate a value.
 - **Product contract**: [`web-ui.md`](../../.mstar/knowledge/specs/web-ui.md).
 - **Transport boundary**: the `NexusClient` interface
   (`src/lib/nexus/types.ts`). Screens must depend only on the interface, never

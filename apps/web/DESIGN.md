@@ -1,9 +1,14 @@
 ---
-version: 0.1.0
+version: 0.2.0
 name: "Nexus Local Web UI"
-description: "Nexus Local Web UI is the light/default theme for the local-first Control Room, Setup, and Authoring SPA. YAML frontmatter is the light-token SSOT; the dark theme uses the same token names with dark values in DESIGN.dark.md."
+description: "Web consumption mapping for the local-first Control Room, Setup, and Authoring SPA (light/default). Brand values derive from root DESIGN.md; this file owns Web CSS/Tailwind/component tokens. Dark theme: DESIGN.dark.md."
 
 colors:
+  # ── Brand (aliases → root DESIGN.md `brand-*`) ──
+  brand-deep-blue: "#1E3A5F"
+  brand-cyan: "#25D1E0"
+  brand-white: "#FFFFFF"
+
   background-100: "#ffffff"
   background-200: "#fafafa"
   background-300: "#f5f5f5"
@@ -23,10 +28,11 @@ colors:
   gray-alpha-400: "rgba(0,0,0,0.12)"
   gray-alpha-500: "rgba(0,0,0,0.18)"
   gray-alpha-600: "rgba(0,0,0,0.24)"
-  blue-700: "#006bff"
-  blue-800: "#0057d9"
-  blue-900: "#0046ad"
-  blue-1000: "#003680"
+  # Primary interactive scale — maps to root `brand-deep-blue` steps (light)
+  blue-700: "#1E3A5F"
+  blue-800: "#182F4D"
+  blue-900: "#12243B"
+  blue-1000: "#0C1A2B"
   red-700: "#e5484d"
   red-800: "#d11f2a"
   red-900: "#a91520"
@@ -386,11 +392,24 @@ components:
 
 # Nexus Local Web UI Design System
 
-<!-- COMPLETENESS_LEVEL: 3 — Production, last audited 2026-06-27 -->
+<!-- COMPLETENESS_LEVEL: 3 — Production, last audited 2026-07-02 -->
 
 Nexus Local Web UI is a restrained, author-focused design system for the local-first **Control Room + Setup + Authoring** SPA. It should feel calm and trustworthy: quiet surfaces, dense but readable data, explicit status language, and high-confidence controls for local creative runtime work without making writers feel like they are operating infrastructure.
 
-This file is the light/default theme and the token-value SSOT through the YAML frontmatter above. The Dark theme lives at [`DESIGN.dark.md`](DESIGN.dark.md) with the same token names and dark values. The Markdown body below is supplementary documentation: usage intent, interaction rules, content rules, and implementation mapping.
+**This file is a Web consumption mapping**, not the brand SSOT. Canonical brand tokens live in root [`DESIGN.md`](../../DESIGN.md) (light) and [`DESIGN.dark.md`](../../DESIGN.dark.md) (dark). Package exports: `@42ch/nexus-ui` (`brandColors`, `theme.css`, logo SVGs). YAML frontmatter below holds Web-resolved values; the dark theme uses the same token names in [`DESIGN.dark.md`](DESIGN.dark.md).
+
+### Brand → Web alias map (light)
+
+| Root token (`DESIGN.md`) | Web frontmatter key | CSS variable (P2) |
+| --- | --- | --- |
+| `brand-deep-blue` | `brand-deep-blue`, `blue-700` | `--color-brand-deep-blue`, `--color-blue-700` |
+| `brand-deep-blue-800` | `blue-800` | `--color-blue-800` |
+| `brand-deep-blue-900` | `blue-900` | `--color-blue-900` |
+| `brand-cyan` | `brand-cyan` | `--color-brand-cyan` |
+| `brand-white` | `brand-white` | `--color-brand-white` |
+| Package mirror | — | `--nexus-brand-deep-blue` via `@42ch/nexus-ui/theme.css` |
+
+`blue-*` keys are **preserved aliases** so existing component tokens (`{colors.blue-700}`) continue to resolve without renames. P2 wires both `--color-brand-*` and `--color-blue-*` from this mapping.
 
 Product inputs from `.mstar/knowledge/specs/web-ui-design-requirements.md`:
 
@@ -415,7 +434,8 @@ Color values live in frontmatter `colors:`. Color tokens follow the Geist-style 
 
 | Meaning | Token |
 | --- | --- |
-| Primary action/focus/link | `blue-700` |
+| Primary action/focus/link | `blue-700` → root `brand-deep-blue` |
+| Brand accent (icons, dark nav; not body text on white) | `brand-cyan` |
 | Running/healthy/completed | `green-700` |
 | Warning/stale/needs review | `amber-700` |
 | Failed/error/destructive | `red-700` / `red-800` |
@@ -514,7 +534,7 @@ Radii stay tight and utility-oriented. Do not mix very rounded and sharp corners
 
 ## Component Primitives
 
-Component token values live in frontmatter `components:`. All components must expose visible `:focus-visible` styles using a two-layer ring: `0 0 0 2px var(--color-background-100), 0 0 0 4px var(--color-blue-700)`.
+Component token values live in frontmatter `components:`. All components must expose visible `:focus-visible` styles using a two-layer ring: `0 0 0 2px var(--color-background-100), 0 0 0 4px var(--color-blue-700)` (resolves to root `brand-deep-blue` in light).
 
 ### Button
 
@@ -678,13 +698,15 @@ Nexus UI copy should sound like a careful CLI message translated into a local da
 
 ---
 
-## Implementation Mapping for P1
+## Implementation Mapping (P2 — `@frontend-dev`)
 
-- Map color tokens to CSS variables: `--color-background-100`, `--color-gray-1000`, etc.
+- Import brand CSS: `@import '@42ch/nexus-ui/theme.css'` in `index.css` for `--nexus-brand-*` vars.
+- Map color tokens to CSS variables: `--color-background-100`, `--color-brand-deep-blue`, `--color-blue-700`, etc.
 - Tailwind should reference CSS variables, not hard-coded hex values inside components.
 - Shadcn component defaults should read from the component primitive entries above.
-- `data-theme="dark"` or a root class may swap values; token names must remain identical.
-- Production-level split is now active: `DESIGN.md` holds light frontmatter values; `DESIGN.dark.md` holds dark frontmatter values.
+- `data-theme="dark"` or a root class swaps values from `DESIGN.dark.md`; token names stay identical.
+- Logo: light shell → `logo-primary.svg`; see root `DESIGN.md` § Logo Usage and `@42ch/nexus-ui` README.
+- Re-tint hardcoded legacy blue `rgba(0,107,255,…)` in canvas/SOUL/findings tokens to brand rgba during P2; **token names stay frozen**.
 
 ---
 
