@@ -167,3 +167,89 @@ function distinctDays(stamped: { ms: number }[]): number {
 function bucketLabel(ms: number): string {
   return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(ms);
 }
+
+// ── Growth-curve helpers (V1.81 SP-3) ────────────────────────────────────────
+
+/**
+ * Growth-curve density thresholds (plan §2.3). These are deliberately tighter
+ * than the V1.79 keyword/drift `LOW_DATA_MAX` (20): the growth-curve answers
+ * "how much have I accumulated?" and degrades to simpler charts rather than
+ * gating entirely, so a smaller rich threshold still renders a meaningful
+ * cumulative line. The narrative insufficient-data gate is a separate concern
+ * (server-side, see `SoulNarrativeResponse` threshold fields).
+ */
+export const GROWTH_RICH_FRAGMENT_THRESHOLD = 10;
+export const GROWTH_RICH_DAY_THRESHOLD = 5;
+export const GROWTH_LOW_DATA_MAX_FRAGMENT = 9;
+
+export type GrowthDensity = 'empty' | 'low-data' | 'rich';
+
+export interface GrowthDensityInput {
+  /** Total fragment count (stamped + unstamped). */
+  fragmentCount: number;
+  /** Distinct calendar days among fragments that carry a parseable timestamp. */
+  distinctDays: number;
+}
+
+/**
+ * Resolve the growth-curve density state. Mirrors the V1.79 `densityFor`
+ * branching pattern (pure predicate → render branch) but with growth-specific
+ * thresholds: `empty` (0 fragments), `low-data` (1–9 fragments), `rich`
+ * (≥10 fragments OR ≥5 distinct days). See plan §2.3.
+ */
+export function growthDensityFor(input: GrowthDensityInput): GrowthDensity {
+  if (input.fragmentCount <= 0) return 'empty';
+  if (
+    input.fragmentCount >= GROWTH_RICH_FRAGMENT_THRESHOLD ||
+    input.distinctDays >= GROWTH_RICH_DAY_THRESHOLD
+  ) {
+    return 'rich';
+  }
+  return 'low-data';
+}
+
+export interface GrowthPoint {
+  /** Short human label for the day (e.g. "Jun 1"). */
+  label: string;
+  /** Cumulative fragment count through the end of this day (growth). */
+  cumulative: number;
+}
+
+export interface GrowthSeries {
+  /** One cumulative point per distinct day, in chronological order. */
+  points: GrowthPoint[];
+  /** Distinct calendar days among parseable timestamps. */
+  distinctDays: number;
+}
+
+/**
+ * Build the cumulative-growth series: one point per distinct calendar day,
+ * carrying the running fragment total. Fragments with an unparseable timestamp
+ * are dropped from the timeline (they still count toward density via
+ * `fragmentCount`, passed separately by the caller). Returns an empty `points`
+ * array when no timestamp parses; the caller renders the `empty`/`low-data`
+ * fallback instead of a zero-point chart.
+ */
+export function growthSeries(fragments: MemoryFragmentInfo[]): GrowthSeries {
+  const perDay = new Map<string, { ms: number; added: number }>();
+  for (const f of fragments) {
+    const ms = safeParseMs(f.created_at);
+    if (ms === null) continue;
+    const d = new Date(ms);
+    const key = `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+    const existing = perDay.get(key);
+    if (existing) {
+      existing.added += 1;
+      if (ms < existing.ms) existing.ms = ms;
+    } else {
+      perDay.set(key, { ms, added: 1 });
+    }
+  }
+  const sorted = [...perDay.values()].sort((a, b) => a.ms - b.ms);
+  let running = 0;
+  const points: GrowthPoint[] = sorted.map((d) => {
+    running += d.added;
+    return { label: bucketLabel(d.ms), cumulative: running };
+  });
+  return { points, distinctDays: sorted.length };
+}

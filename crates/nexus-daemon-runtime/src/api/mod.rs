@@ -278,6 +278,11 @@ fn memory_routes() -> Router<WorkspaceState> {
             "/v1/local/memory/fragments",
             get(handlers::memory::fragments),
         )
+        // Creator-SOUL narrative (V1.81)
+        .route(
+            "/v1/local/memory/soul/reflect",
+            post(handlers::memory::reflect_soul),
+        )
 }
 
 /// Canvas Outline+Timeline write-boundary routes (V1.72 Track A).

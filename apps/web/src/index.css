@@ -149,6 +149,13 @@
     --color-soul-viz-drift-band-step-stroke: rgba(0, 0, 0, 0.06);
     --color-soul-viz-drift-band-label: #4a4a4a;
 
+    /* V1.81 Creator SOUL Maturation — narrative prose + growth-curve tokens
+       (DESIGN.md). soul-narrative-prose composes copy-16 typography with the
+       gray-900 foreground; soul-growth-curve-stroke reuses the SOUL purple
+       accent. Bridged to CSS vars so no value is hardcoded in the components. */
+    --color-soul-narrative-prose: var(--color-gray-900);
+    --color-soul-growth-curve-stroke: var(--color-purple-700);
+
     /* Elevation — DESIGN.md §Elevation */
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04);
     --shadow-popover: 0 1px 1px rgba(0, 0, 0, 0.03), 0 8px 24px -12px rgba(0, 0, 0, 0.18);
@@ -287,6 +294,12 @@
     --color-soul-viz-drift-band-fill-6: rgba(134, 204, 108, 0.22);
     --color-soul-viz-drift-band-step-stroke: rgba(255, 255, 255, 0.08);
     --color-soul-viz-drift-band-label: #e0e0e0;
+
+    /* V1.81 Creator SOUL Maturation — narrative prose + growth-curve tokens
+       (DESIGN.dark.md). Same token names as :root; values derive from the dark
+       gray-900 / purple-700. */
+    --color-soul-narrative-prose: var(--color-gray-900);
+    --color-soul-growth-curve-stroke: var(--color-purple-700);
 
     /* Elevation */
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
