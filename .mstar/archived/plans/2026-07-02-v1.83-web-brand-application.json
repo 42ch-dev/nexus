@@ -1,0 +1,17 @@
+{
+  "plan_id": "2026-07-02-v1.83-web-brand-application",
+  "iteration_id": "V1.83",
+  "status": "Done",
+  "owner": "@frontend-dev",
+  "effort": "M",
+  "type": "implement",
+  "working_branch": "feature/v1.83-web-brand-application",
+  "merge_target": "iteration/v1.83",
+  "task_category": "visual",
+  "wire_contracts_changed": false,
+  "depends_on": [
+    "2026-07-02-v1.83-nexus-ui-brand-assets",
+    "2026-07-02-v1.83-brand-design-system"
+  ],
+  "completion_note": "V1.83 P2: Web shell + base primitives brand apply via @42ch/nexus-ui. QC 3/3 Approve; QA Pass (387/387 tests)."
+}

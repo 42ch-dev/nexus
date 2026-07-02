@@ -784,6 +784,23 @@
       "compound": [
         "architecture-patterns/bounded-drain-completion-contract.md"
       ]
+    },
+    "V1.83": {
+      "compass": "v1.83-brand-ui-foundation-delivery-compass-v1.md",
+      "shipped_at": "2026-07-02",
+      "plan_count": 4,
+      "plan_ids": [
+        "2026-07-02-v1.83-nexus-ui-brand-assets",
+        "2026-07-02-v1.83-brand-design-system",
+        "2026-07-02-v1.83-web-brand-application",
+        "2026-07-02-v1.83-closure"
+      ],
+      "wire_contracts_changed": false,
+      "summary": "Brand UI Foundation: @42ch/nexus-ui package (LFS PNG + SVG logos + tokens/theme), root DESIGN SSOT, apps/web shell/base primitive brand application. QC tri-review per plan + P-last consolidated Approve; QA Pass. 5 accepted low residuals.",
+      "compound": [
+        "architecture-patterns/nexus-brand-token-hierarchy.md"
+      ],
+      "residuals_accepted": 5
     }
   },
   "metadata": {
@@ -792,5 +809,5 @@
     "v1_50_iteration_complete": "yes — ready for PR to main",
     "v1_51_iteration_complete": "yes — shipped to main at c57b927bbf8621adf7ec59095d274f17f429c9b7 via PR #64 on 2026-06-19T07:52:26Z"
   },
-  "updated_at": "2026-07-01"
+  "updated_at": "2026-07-02"
 }

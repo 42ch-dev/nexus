@@ -1,0 +1,14 @@
+{
+  "plan_id": "2026-07-02-v1.83-brand-design-system",
+  "iteration_id": "V1.83",
+  "status": "Done",
+  "owner": "@architect",
+  "effort": "M",
+  "type": "implement",
+  "working_branch": "feature/v1.83-brand-design-system",
+  "merge_target": "iteration/v1.83",
+  "task_category": "docs",
+  "wire_contracts_changed": false,
+  "depends_on": ["2026-07-02-v1.83-nexus-ui-brand-assets"],
+  "completion_note": "V1.83 P1: root DESIGN.md/DESIGN.dark.md brand SSOT + apps/web consumption mappings. QA Pass (QC skipped — design docs)."
+}

@@ -1,0 +1,14 @@
+{
+  "plan_id": "2026-07-02-v1.83-nexus-ui-brand-assets",
+  "iteration_id": "V1.83",
+  "status": "Done",
+  "owner": "@frontend-dev",
+  "effort": "M",
+  "type": "implement",
+  "working_branch": "feature/v1.83-nexus-ui-brand-assets",
+  "merge_target": "iteration/v1.83",
+  "task_category": "visual",
+  "wire_contracts_changed": false,
+  "depends_on": [],
+  "completion_note": "V1.83 P0: @42ch/nexus-ui package, Git LFS PNGs, SVG logo family, tokens/theme exports. QC 3/3 Approve after fix-wave; QA Pass."
+}

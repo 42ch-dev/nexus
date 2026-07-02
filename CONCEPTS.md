@@ -60,6 +60,16 @@ The process: persist new text → extract structured knowledge → promote to Wo
 
 ---
 
+## Brand & Design
+
+### Brand DESIGN SSOT
+Repo-root `DESIGN.md` and `DESIGN.dark.md` — the cross-application source of truth for Nexus brand tokens, VI palette, logo usage rules, and accessibility intent. App-specific files (e.g. `apps/web/DESIGN.md`) are **consumption mappings** that derive from this layer; they must not redefine shared brand values.
+
+### @42ch/nexus-ui
+Publishable npm workspace package (`packages/nexus-ui`) exporting brand assets (SVG logos), token data, and CSS theme entry points. PNG logo sources are Git LFS–tracked for provenance; canonical SVGs are regular-git text. V1.83 ships assets/tokens/theme only — React component library deferred.
+
+---
+
 ## Protocol & Infrastructure
 
 ### ACP (Agent Communication Protocol)
