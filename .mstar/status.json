@@ -19,7 +19,7 @@
     {
       "plan_id": "2026-07-02-v1.82-per-world-narrative-backend",
       "iteration_id": "V1.82",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "@fullstack-dev",
       "effort": "M",
       "type": "feature",
@@ -35,7 +35,7 @@
     {
       "plan_id": "2026-07-02-v1.82-soul-surface-completion",
       "iteration_id": "V1.82",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "@frontend-dev",
       "effort": "M",
       "type": "feature",
