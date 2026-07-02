@@ -5,7 +5,7 @@
     {
       "plan_id": "2026-07-02-v1.82-prepare-contracts",
       "iteration_id": "V1.82",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@architect",
       "effort": "S",
       "type": "prepare",
