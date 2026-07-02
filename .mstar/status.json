@@ -1,139 +1,32 @@
 {
   "version": 1,
   "updated_at": "2026-07-02T19:30:00+08:00",
-  "plans": [
-    {
-      "plan_id": "2026-07-02-v1.84-compass-and-plan-stubs",
-      "name": "P-1 — Prepare (compass + plan stubs)",
-      "iteration": "V1.84",
-      "type": "prepare",
-      "status": "Done",
-      "primary_spec": ".mstar/iterations/v1.84-brand-polish-and-token-consolidation-delivery-compass-v1.md",
-      "working_branch": null,
-      "merge_target": "iteration/v1.84",
-      "qc_reports": [
-        "skipped — prepare/harness-docs plan; reviewed via Phase 1 Review & Edit chain (product-manager → architect → writing-specialist → PM lock)"
-      ],
-      "metadata": {
-        "plan_index": "P-1",
-        "iteration_refs": [
-          "V1.84"
-        ]
-      },
-      "completion_note": "Compass locked, 4 plans registered, status.json + README index updated, Review & Edit chain complete."
-    },
-    {
-      "plan_id": "2026-07-02-v1.84-brand-polish-and-token-consolidation",
-      "name": "P0 — Brand Polish and Token Consolidation",
-      "iteration": "V1.84",
-      "type": "implement",
-      "task_category": "visual",
-      "status": "Done",
-      "primary_spec": ".mstar/iterations/v1.84-brand-polish-and-token-consolidation-delivery-compass-v1.md",
-      "closes_residuals": [
-        "R-V183CLOSE-W004",
-        "R-V183CLOSE-W005"
-      ],
-      "working_branch": "feature/v1.84-brand-polish-and-token-consolidation",
-      "merge_target": "iteration/v1.84",
-      "parallel_with": "2026-07-02-v1.84-ci-and-tooling-hygiene",
-      "qc_reports": [
-        ".mstar/plans/reports/2026-07-02-v1.84-closure/qc1.md",
-        "qc2.md",
-        "qc3.md"
-      ],
-      "metadata": {
-        "plan_index": "P0",
-        "iteration_refs": [
-          "V1.84"
-        ],
-        "spec_integration_branch": "iteration/v1.84",
-        "merge_target": "iteration/v1.84"
-      },
-      "merge_commit": "06090e94",
-      "implementation_commit": "8c249484",
-      "qc_verdict": "Approve (consolidated, post fix-wave)"
-    },
-    {
-      "plan_id": "2026-07-02-v1.84-ci-and-tooling-hygiene",
-      "name": "P1 — CI and Tooling Hygiene",
-      "iteration": "V1.84",
-      "type": "implement",
-      "task_category": "ops",
-      "status": "Done",
-      "primary_spec": ".mstar/iterations/v1.84-brand-polish-and-token-consolidation-delivery-compass-v1.md",
-      "closes_residuals": [
-        "R-V183CLOSE-W001",
-        "R-V183CLOSE-W002",
-        "R-V183CLOSE-W003"
-      ],
-      "working_branch": "feature/v1.84-ci-and-tooling-hygiene",
-      "merge_target": "iteration/v1.84",
-      "parallel_with": "2026-07-02-v1.84-brand-polish-and-token-consolidation",
-      "qc_reports": [
-        ".mstar/plans/reports/2026-07-02-v1.84-closure/qc1.md",
-        "qc2.md",
-        "qc3.md"
-      ],
-      "metadata": {
-        "plan_index": "P1",
-        "iteration_refs": [
-          "V1.84"
-        ],
-        "spec_integration_branch": "iteration/v1.84",
-        "merge_target": "iteration/v1.84"
-      },
-      "merge_commit": "380ae1b6",
-      "implementation_commit": "da123db7",
-      "fix_wave_commit": "8e844a9b",
-      "qc_verdict": "Approve (consolidated, post fix-wave 8e844a9b for W1)"
-    },
-    {
-      "plan_id": "2026-07-02-v1.84-closure",
-      "name": "P-last — QC, QA, Compound, and Closeout",
-      "iteration": "V1.84",
-      "type": "closure",
-      "status": "Done",
-      "primary_spec": ".mstar/iterations/v1.84-brand-polish-and-token-consolidation-delivery-compass-v1.md",
-      "working_branch": null,
-      "merge_target": "iteration/v1.84",
-      "qc_reports": [],
-      "metadata": {
-        "plan_index": "P-last",
-        "iteration_refs": [
-          "V1.84"
-        ]
-      },
-      "qc_consolidated_verdict": "Approve (qc1+qc2+qc3 after fix-wave 8e844a9b)",
-      "qa_report": ".mstar/plans/reports/2026-07-02-v1.84-closure/qa.md",
-      "qa_verdict": "Pass-with-deferred-GUI"
-    }
-  ],
+  "plans": [],
   "metadata": {
-    "integration_branch": "iteration/v1.84",
-    "integration_branch_retired": false,
-    "last_integration_branch": "iteration/v1.83",
+    "integration_branch": null,
+    "integration_branch_retired": true,
+    "last_integration_branch": "iteration/v1.84",
     "integration_merge_target": "main",
     "iteration_base_branch": "main",
     "target_branch": "main",
     "spec_integration_branch": "iteration/v1.84",
-    "latest_active_iteration": "V1.84 active: Brand Polish and Token Consolidation — closes 5 V1.83 residuals (W004/W005 brand polish + W001/W002/W003 CI hygiene)",
+    "latest_active_iteration": "V1.84 completed (2026-07-02): Brand Polish and Token Consolidation — merged via PR #111",
     "latest_active_compass": ".mstar/iterations/v1.84-brand-polish-and-token-consolidation-delivery-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.83",
-      "compass": "v1.83-brand-ui-foundation-delivery-compass-v1.md",
-      "shipped_at": "2026-07-02 (PR #110 merged)",
+      "iteration": "V1.84",
+      "compass": "v1.84-brand-polish-and-token-consolidation-delivery-compass-v1.md",
+      "shipped_at": "2026-07-02 (PR #111 merged)",
       "plan_count": 4,
       "plan_count_done": 4,
       "wire_contracts_changed": false,
-      "wire_contracts_note": "V1.83: no wire/schema changes — brand assets + DESIGN docs + Web CSS/Tailwind only.",
-      "profile_b_compaction": "done (V1.83 all 4 plans)",
-      "merge_commit": "1b19d69c",
-      "pr": "#110"
+      "wire_contracts_note": "V1.84: no wire/schema changes — index.css token consolidation + CI workflows + vitest config only.",
+      "profile_b_compaction": "done (V1.84 all 4 plans)",
+      "merge_commit": "1ff20bbf",
+      "pr": "#111"
     },
     "tech_debt_summary": {
       "total_open": 3,

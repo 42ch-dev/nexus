@@ -1,0 +1,20 @@
+{
+  "plan_id": "2026-07-02-v1.84-compass-and-plan-stubs",
+  "name": "P-1 — Prepare (compass + plan stubs)",
+  "iteration": "V1.84",
+  "type": "prepare",
+  "status": "Done",
+  "primary_spec": ".mstar/iterations/v1.84-brand-polish-and-token-consolidation-delivery-compass-v1.md",
+  "working_branch": null,
+  "merge_target": "iteration/v1.84",
+  "qc_reports": [
+    "skipped — prepare/harness-docs plan; reviewed via Phase 1 Review & Edit chain (product-manager → architect → writing-specialist → PM lock)"
+  ],
+  "metadata": {
+    "plan_index": "P-1",
+    "iteration_refs": [
+      "V1.84"
+    ]
+  },
+  "completion_note": "Compass locked, 4 plans registered, status.json + README index updated, Review & Edit chain complete."
+}
