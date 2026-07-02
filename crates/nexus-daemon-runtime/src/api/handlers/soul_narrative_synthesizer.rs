@@ -117,11 +117,12 @@ impl SoulNarrativeSynthesizer for AcpSoulNarrativeSynthesizer {
         creator_id: &str,
         input: SoulNarrativeSynthesisInput,
     ) -> Result<SoulNarrativeDraft, MemoryError> {
-        let cap = self.registry.get("acp.prompt").ok_or_else(|| {
-            MemoryError::ValidationError(
-                "acp.prompt capability not available in registry".to_string(),
-            )
-        })?;
+        let cap =
+            self.registry
+                .get("acp.prompt")
+                .ok_or_else(|| MemoryError::CapabilityMissing {
+                    capability: "acp.prompt".to_string(),
+                })?;
 
         let prompt = Self::build_prompt(&input);
 
@@ -134,9 +135,7 @@ impl SoulNarrativeSynthesizer for AcpSoulNarrativeSynthesizer {
             }))
             .await
             .map_err(|e| match e {
-                CapabilityError::WorkerUnavailable => MemoryError::ValidationError(
-                    "ACP worker unavailable for narrative synthesis".to_string(),
-                ),
+                CapabilityError::WorkerUnavailable => MemoryError::WorkerUnavailable,
                 other => {
                     MemoryError::ValidationError(format!("narrative synthesis failed: {other}"))
                 }
@@ -145,10 +144,8 @@ impl SoulNarrativeSynthesizer for AcpSoulNarrativeSynthesizer {
         let full_text = result
             .get("full_text")
             .and_then(|v| v.as_str())
-            .ok_or_else(|| {
-                MemoryError::ValidationError(
-                    "acp.prompt response missing 'full_text' field".to_string(),
-                )
+            .ok_or_else(|| MemoryError::MalformedOutput {
+                reason: "acp.prompt response missing 'full_text' field".to_string(),
             })?;
 
         Ok(SoulNarrativeDraft {
