@@ -34,8 +34,9 @@ async fn insert_fragment(pool: &sqlx::SqlitePool, creator_id: &str, keywords: &[
 }
 
 /// Creator with ≥20 distinct keywords spread across many fragments
-/// (30 fragments, each with one unique keyword) → gate passes
-/// (distinct_keyword_count ≥ 20), and the response field is exact.
+/// → gate passes (distinct_keyword_count ≥ 20). Above the threshold the
+/// returned value is the threshold-saturated count (20), not the exact
+/// total — the gate only needs the `>= 20?` predicate.
 #[tokio::test]
 async fn distinct_keywords_at_least_20_across_many_fragments() {
     let dir = tempfile::tempdir().unwrap();
@@ -56,8 +57,8 @@ async fn distinct_keywords_at_least_20_across_many_fragments() {
 
     // Fragment count should be 30.
     assert_eq!(stats.fragment_count, 30);
-    // Distinct keyword count should be exactly 30 (sound, no under-count).
-    assert_eq!(stats.distinct_keyword_count, 30);
+    // Threshold-saturated count reports 20 (the gate sees `>= 20`).
+    assert_eq!(stats.distinct_keyword_count, 20);
     // Gate check: >= 20 → passes (NOT insufficient_data).
     assert!(stats.distinct_keyword_count >= 20);
 }
@@ -113,7 +114,8 @@ async fn distinct_keywords_exactly_20_gate_passes() {
 }
 
 /// Creator with ≥20 distinct keywords but many duplicate keywords in fragments
-/// → gate still passes (distinct count is sound).
+/// → gate still passes (distinct count is sound). Above the threshold the
+/// reported value is the threshold-saturated count (20).
 #[tokio::test]
 async fn distinct_keywords_with_duplicates_still_sound() {
     let dir = tempfile::tempdir().unwrap();
@@ -134,7 +136,8 @@ async fn distinct_keywords_with_duplicates_still_sound() {
         .unwrap();
 
     assert_eq!(stats.fragment_count, 50);
-    assert_eq!(stats.distinct_keyword_count, 25);
+    // Threshold-saturated count reports 20 (the gate sees `>= 20`).
+    assert_eq!(stats.distinct_keyword_count, 20);
     assert!(stats.distinct_keyword_count >= 20);
 }
 
@@ -251,16 +254,16 @@ async fn fingerprint_cache_changed_fragments_recomputes() {
         .await
         .unwrap();
 
-    // Fingerprint mismatch → should recompute, returning the real count (25).
+    // Fingerprint mismatch → should recompute, returning the threshold-saturated count (20).
     assert_eq!(stats.fragment_count, 25);
-    assert_eq!(stats.distinct_keyword_count, 25);
+    assert_eq!(stats.distinct_keyword_count, 20);
     assert!(stats.distinct_keyword_count >= 20);
 
-    // Second call with unchanged fragments → should now return cached 25.
+    // Second call with unchanged fragments → should now return cached 20.
     let (stats2, _cached2) = soul_narrative_fragment_stats(&pool, creator_id, None)
         .await
         .unwrap();
-    assert_eq!(stats2.distinct_keyword_count, 25);
+    assert_eq!(stats2.distinct_keyword_count, 20);
 }
 
 /// No cache row exists (ungenerated case) → computes soundly, then
@@ -283,9 +286,10 @@ async fn fingerprint_cache_no_row_computes_and_persists_stats_row() {
         .await
         .unwrap();
 
-    // Should compute from scratch — no cache to serve from.
+    // Should compute from scratch — no cache to serve from. Above-threshold
+    // count is threshold-saturated (20).
     assert_eq!(stats.fragment_count, 22);
-    assert_eq!(stats.distinct_keyword_count, 22);
+    assert_eq!(stats.distinct_keyword_count, 20);
     assert!(stats.distinct_keyword_count >= 20);
     // After first call, a stats-only row should exist (G3 fix).
     assert!(cached.is_some(), "G3: stats-only row should be created");
@@ -295,7 +299,7 @@ async fn fingerprint_cache_no_row_computes_and_persists_stats_row() {
         cached.generated_at.is_none(),
         "stats-only: generated_at is NULL"
     );
-    assert_eq!(cached.distinct_keyword_count_cache, 22);
+    assert_eq!(cached.distinct_keyword_count_cache, 20);
     assert!(cached.stats_fingerprint.is_some());
 
     // Second call with unchanged fragments → fingerprint cache hit.
@@ -303,8 +307,8 @@ async fn fingerprint_cache_no_row_computes_and_persists_stats_row() {
         .await
         .unwrap();
     assert_eq!(
-        stats2.distinct_keyword_count, 22,
-        "cached count should be 22"
+        stats2.distinct_keyword_count, 20,
+        "cached count should be 20"
     );
     assert!(cached2.is_some());
 }

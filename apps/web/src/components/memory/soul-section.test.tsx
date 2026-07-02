@@ -58,7 +58,7 @@ function baselineHandlers(overrides: {
   } = overrides;
 
   return [
-    http.get('/v1/local/narrative/worlds', () => HttpResponse.json(worlds)),
+    http.get('/v1/local/narrative/worlds', () => HttpResponse.json({ worlds })),
     http.get('/v1/local/memory/fragments', ({ request }) => {
       const url = new URL(request.url);
       const worldId = url.searchParams.get('world_id');

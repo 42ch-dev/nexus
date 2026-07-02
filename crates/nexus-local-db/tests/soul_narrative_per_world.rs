@@ -179,21 +179,21 @@ async fn per_world_stats_are_distinct_from_creator_whole() {
         insert_fragment(&pool, creator_id, None, &[&kw], i + 200).await;
     }
 
-    // Creator whole: 25 fragments, 25 distinct keywords.
+    // Creator whole: 25 fragments, threshold-saturated count (20).
     let (whole_stats, _) = soul_narrative_fragment_stats(&pool, creator_id, None)
         .await
         .unwrap();
     assert_eq!(whole_stats.fragment_count, 25);
-    assert_eq!(whole_stats.distinct_keyword_count, 25);
+    assert_eq!(whole_stats.distinct_keyword_count, 20);
 
-    // World A subset: 12 fragments, 12 distinct keywords.
+    // World A subset: 12 fragments, 12 distinct keywords (below threshold → exact).
     let (a_stats, _) = soul_narrative_fragment_stats(&pool, creator_id, Some(world_a))
         .await
         .unwrap();
     assert_eq!(a_stats.fragment_count, 12);
     assert_eq!(a_stats.distinct_keyword_count, 12);
 
-    // World B subset: 8 fragments, 8 distinct keywords.
+    // World B subset: 8 fragments, 8 distinct keywords (below threshold → exact).
     let (b_stats, _) = soul_narrative_fragment_stats(&pool, creator_id, Some(world_b))
         .await
         .unwrap();
