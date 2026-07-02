@@ -158,6 +158,8 @@ jobs:
     needs: verify-codegen
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          lfs: true
       - uses: ./.github/actions/setup-monorepo
         with:
           rust-toolchain: ""
@@ -173,6 +175,21 @@ jobs:
         run: pnpm --filter web build
       - name: Test web
         run: pnpm --filter web test
+
+  nexus-ui:
+    name: Build & typecheck @42ch/nexus-ui
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          lfs: true
+      - uses: ./.github/actions/setup-monorepo
+        with:
+          rust-toolchain: ""
+      - name: Build nexus-ui package
+        run: pnpm --filter @42ch/nexus-ui run build
+      - name: Typecheck nexus-ui package
+        run: pnpm --filter @42ch/nexus-ui run typecheck
 
   verify-no-acp-in-daemon:
     name: Verify nexus-daemon-runtime linkage matrix

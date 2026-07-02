@@ -2,6 +2,28 @@ import path from 'node:path';
 import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 
+// V1.84 W003: Narrow suppression of Node 24+ ExperimentalWarning for
+// localStorage. Node's experimental localStorage shim (gated behind
+// --localstorage-file) emits an ExperimentalWarning that is harmless under
+// jsdom but clutters test output. Only filters warnings matching BOTH
+// 'ExperimentalWarning' name AND 'localStorage' message content, so real
+// warnings (deprecations, assertion failures, etc.) remain visible.
+{
+  const warningHandler = (warning: Error) => {
+    if (
+      warning.name === 'ExperimentalWarning' &&
+      warning.message.includes('localStorage')
+    ) {
+      return; // suppress — Node 24+ experimental localStorage shim
+    }
+    // Re-emit non-matching warnings through the default handler.
+    process.off('warning', warningHandler);
+    process.nextTick(() => process.emitWarning(warning));
+    process.on('warning', warningHandler);
+  };
+  process.on('warning', warningHandler);
+}
+
 // Vitest config for the Nexus local Web UI.
 //
 // Mirrors the resolve alias + esbuild target from vite.config.ts so source
