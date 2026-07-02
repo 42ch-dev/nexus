@@ -3,25 +3,47 @@ import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 
 // V1.84 W003: Narrow suppression of Node 24+ ExperimentalWarning for
-// localStorage. Node's experimental localStorage shim (gated behind
-// --localstorage-file) emits an ExperimentalWarning that is harmless under
-// jsdom but clutters test output. Only filters warnings matching BOTH
-// 'ExperimentalWarning' name AND 'localStorage' message content, so real
-// warnings (deprecations, assertion failures, etc.) remain visible.
-{
-  const warningHandler = (warning: Error) => {
+// localStorage. Node's experimental localStorage shim emits a warning that is
+// harmless under jsdom but clutters test output. We remove Node's default
+// 'warning' listener (the one that prints to stderr) and install a single
+// filter: drop warnings matching BOTH 'ExperimentalWarning' name AND
+// 'localStorage' message; forward everything else to the original listener(s)
+// directly. No process.emitWarning from inside the handler, so non-target
+// warnings cannot loop.
+const NEXUS_LOCALSTORAGE_WARNING_FILTER = Symbol.for(
+  'nexus:vitest:localStorageWarningFilter',
+);
+if (!(globalThis as Record<symbol, unknown>)[NEXUS_LOCALSTORAGE_WARNING_FILTER]) {
+  (globalThis as Record<symbol, unknown>)[NEXUS_LOCALSTORAGE_WARNING_FILTER] = true;
+
+  const defaultWarningListeners = process.listeners('warning');
+
+  process.removeAllListeners('warning');
+  process.on('warning', (warning: Error) => {
     if (
       warning.name === 'ExperimentalWarning' &&
       warning.message.includes('localStorage')
     ) {
-      return; // suppress — Node 24+ experimental localStorage shim
+      return; // drop target — Node 24+ experimental localStorage shim
     }
-    // Re-emit non-matching warnings through the default handler.
-    process.off('warning', warningHandler);
-    process.nextTick(() => process.emitWarning(warning));
-    process.on('warning', warningHandler);
-  };
-  process.on('warning', warningHandler);
+
+    if (defaultWarningListeners.length > 0) {
+      for (const listener of defaultWarningListeners) {
+        try {
+          listener.call(process, warning);
+        } catch {
+          // swallow listener errors to avoid breaking test startup
+        }
+      }
+    } else {
+      // Fallback for Node versions where the default handler is not exposed via
+      // process.listeners('warning'): write the warning to stderr directly.
+      process.stderr.write(`${warning.name}: ${warning.message}\n`);
+      if (warning.stack) {
+        process.stderr.write(`${warning.stack}\n`);
+      }
+    }
+  });
 }
 
 // Vitest config for the Nexus local Web UI.
