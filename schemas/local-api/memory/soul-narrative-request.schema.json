@@ -3,13 +3,17 @@
   "$id": "https://nexus42.invalid/schemas/local-api/memory/soul-narrative-request.schema.json",
   "schema_version": 1,
   "title": "Nexus SoulNarrativeRequest",
-  "description": "Request body for POST /v1/local/memory/soul/reflect. The endpoint reads or regenerates the cached whole-Creator SOUL narrative; per-world narratives are out of scope for V1.81.",
+  "description": "Request body for POST /v1/local/memory/soul/reflect. Absent/null `world_id` reads or regenerates the Creator-level narrative; a present `world_id` scopes read/regeneration to that world's per-World narrative (ownership verified server-side).",
   "type": "object",
   "required": ["creator_id"],
   "properties": {
     "creator_id": {
       "type": "string",
       "description": "Active creator identifier; the endpoint rejects mismatches through the existing Local API auth/creator checks."
+    },
+    "world_id": {
+      "type": "string",
+      "description": "Optional world scope. Absent or null = the Creator-level narrative (V1.81 behavior, world-agnostic). Present = synthesize/return the per-World narrative for that world's fragment subset; the endpoint verifies the active creator owns the world via `narrative_worlds.owner_creator_id` and rejects non-owned worlds."
     },
     "force_regenerate": {
       "type": "boolean",
