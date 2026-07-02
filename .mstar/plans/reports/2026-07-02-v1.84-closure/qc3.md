@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-07-02-v1.84-closure"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-07-02"
 ---
 
@@ -32,7 +32,7 @@ generated_at: "2026-07-02"
 
 ### 🟡 Warning
 
-**W1 — `apps/web/vitest.config.ts` warning filter is ineffective for the target warning and can recursively re-emit non-target process warnings until OOM.**
+**W1 — `apps/web/vitest.config.ts` warning filter is ineffective for the target warning and can recursively re-emit non-target process warnings until OOM.** *(Resolved in fix-wave `8e844a9b`; see Revalidation below.)*
 
 The new handler in `apps/web/vitest.config.ts:11-25` attaches `process.on('warning', warningHandler)`, returns for `ExperimentalWarning` + `localStorage`, and re-emits non-matching warnings by temporarily removing the listener, scheduling `process.emitWarning(warning)` on `nextTick`, then immediately re-attaching the listener.
 
@@ -72,13 +72,76 @@ Suggested fix: avoid re-emitting from a `warning` event listener. If the goal is
 | Severity | Count |
 |----------|-------|
 | 🔴 Critical | 0 |
-| 🟡 Warning | 1 |
+| 🟡 Warning | 0 (W1 resolved in fix-wave `8e844a9b`) |
 | 🟢 Suggestion | 2 |
 
-**Verdict**: Request Changes
+**Verdict**: Approve
 
-The CSS/token changes are low-risk for performance and runtime reliability: `color-mix()` is already a house pattern, is widely supported in modern targets, and the changed values are token definitions rather than hot JS render-path work. CI LFS and the dedicated `nexus-ui` job have bounded cost and good setup reliability. However, the Vitest warning filter introduces a reliability regression in the warning path and does not reliably suppress the target warning, so V1.84 closure should not approve until W1 is fixed or PM explicitly scopes W003 differently.
+The CSS/token changes are low-risk for performance and runtime reliability: `color-mix()` is already a house pattern, is widely supported in modern targets, and the changed values are token definitions rather than hot JS render-path work. CI LFS and the dedicated `nexus-ui` job have bounded cost and good setup reliability. The fix-wave commit `8e844a9b` resolves W1: the target Vitest `ExperimentalWarning` + `localStorage` output is now suppressed, non-target warnings are forwarded without `process.emitWarning` recursion, the web test run completes, and typecheck is green. Remaining items are non-blocking residual suggestions only.
 
 ## Residual suggestions for PM
-- Register no new residual for W1 if fixed in-wave; it is a direct P1 acceptance issue and should be resolved before approval.
+- Register no new residual for W1; it was resolved in-wave by fix commit `8e844a9b`.
 - Optional low residual: document the LFS intent near workflow checkout steps if PM wants to preserve the `lfs: true` rationale beyond this iteration.
+
+## Revalidation (fix-wave 8e844a9b)
+
+### Revalidation Scope
+- **plan_id:** `2026-07-02-v1.84-closure`
+- **Working branch (verified):** `iteration/v1.84`
+- **Review cwd:** `/Users/bibi/workspace/organizations/42ch/nexus`
+- **Review range / Diff basis:** targeted re-review of fix commit `8e844a9b` on `apps/web/vitest.config.ts` (resolves W1 from the initial review whose range was `merge-base: main (1b19d69c) … tip 380ae1b6`).
+- Fix commit confirmed: `8e844a9b fix(web): vitest warning filter actually suppresses + no infinite loop (V1.84 qc3 W1)`.
+- Local checkout confirmed: `git branch --show-current` → `iteration/v1.84`; `git rev-parse --short HEAD` → `8e844a9b` before editing this report.
+
+### Revalidation Checks
+
+1. **Actual suppression of the target warning — resolved.**
+   - Command: `pnpm --filter web run test 2>&1 | rg -i "ExperimentalWarning|localStorage"`
+   - Output: `rg exit status: 1 (0 matches)`
+   - Interpretation: the full web test run produced no `ExperimentalWarning` / `localStorage` matches in combined stdout/stderr, so the target warning is genuinely absent from test output.
+
+2. **No infinite loop / no recursive re-emission — resolved.**
+   - Code review: `git show 8e844a9b -- apps/web/vitest.config.ts` replaces the previous `process.emitWarning(warning)` replay path with a saved-listener forwarding path. Current code captures `process.listeners('warning')`, removes the default listener, drops only warnings where `warning.name === 'ExperimentalWarning'` and `warning.message.includes('localStorage')`, then forwards all non-target warnings by calling the saved listeners directly (`listener.call(process, warning)`) or writing to stderr when no saved default listener exists. There is no runtime `process.emitWarning` call inside the handler; the only remaining `process.emitWarning` text is a comment documenting that invariant.
+   - Smoke check command:
+     ```sh
+     node - <<'NODE'
+     const savedListeners = [warning => {
+       forwarded += 1;
+       process.stderr.write(`saved-listener:${warning.name}:${warning.message}\n`);
+     }];
+     let handlerCalls = 0;
+     let forwarded = 0;
+     process.removeAllListeners('warning');
+     process.on('warning', warning => {
+       handlerCalls += 1;
+       if (warning.name === 'ExperimentalWarning' && warning.message.includes('localStorage')) {
+         return;
+       }
+       for (const listener of savedListeners) {
+         listener.call(process, warning);
+       }
+     });
+     process.emitWarning('non-target smoke', { type: 'DeprecationWarning' });
+     setImmediate(() => {
+       console.log(JSON.stringify({ handlerCalls, forwarded }));
+     });
+     NODE
+     ```
+   - Output:
+     ```text
+     saved-listener:DeprecationWarning:non-target smoke
+     {"handlerCalls":1,"forwarded":1}
+     ```
+   - Interpretation: one non-target warning invokes the handler and saved listener exactly once in the forwarding shape used by the fix; no recursion.
+
+3. **W003 intent preserved — resolved.**
+   - The filter remains narrow: it drops only the conjunction of `ExperimentalWarning` name and `localStorage` message content. Non-target warnings are forwarded to saved warning listeners or stderr, and assertion failures are not touched.
+   - The implementation is documented in the config comments, including why the default warning listener is removed and why `process.emitWarning` is not used inside the handler.
+
+4. **Regression checks — passed.**
+   - Command: `pnpm --filter web run test`
+   - Output summary: `Test Files  51 passed (51)` / `Tests  387 passed (387)` / `Duration  17.49s`; the run completed without hang/OOM. Existing React Router / `act(...)` / MSW stderr warnings remain visible, confirming the filter does not blanket-suppress unrelated warnings.
+   - Command: `pnpm --filter web run typecheck`
+   - Output summary: `web@0.0.0 typecheck ... tsc --noEmit` completed successfully after the `pretypecheck` package builds.
+
+**Updated Verdict**: Approve — W1 is resolved by `8e844a9b`; no new Critical or Warning issue was introduced by the fix. S1/S2 remain non-blocking suggestions/residual candidates only.
