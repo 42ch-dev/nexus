@@ -24,6 +24,7 @@ pub use nexus_contracts::{
     ReviewRequest, ReviewResponse, SoulNarrativeRequest, SoulNarrativeResponse,
 };
 use nexus_creator_memory::soul_narrative::SoulNarrativeSynthesizer as _;
+use nexus_creator_memory::MemoryError;
 use tracing::{debug, info};
 
 /// POST /v1/local/memory/pending-review
@@ -1097,6 +1098,25 @@ const MIN_SOUL_NARRATIVE_FRAGMENTS: i64 = 10;
 /// Minimum distinct keyword count before narrative synthesis is attempted.
 const MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS: i64 = 20;
 
+/// Maximum Unicode scalar characters persisted for a synthesized narrative.
+///
+/// Longer drafts are truncated cleanly before the quality gate and upsert.
+const SOUL_NARRATIVE_MAX_CHARS: usize = 16 * 1024;
+
+/// Forward-looking tokens checked by the narrative quality suffix heuristic.
+const FORWARD_LOOKING_TOKENS: &[&str] = &[
+    "will", "shall", "next", "upcoming", "future", "continue", "toward", "await", "explore",
+    "discover",
+];
+
+/// Forward-looking bigrams checked by the narrative quality suffix heuristic.
+const FORWARD_LOOKING_BIGRAMS: &[(&str, &str)] = &[
+    ("looking", "ahead"),
+    ("going", "forward"),
+    ("what", "if"),
+    ("how", "might"),
+];
+
 /// `POST /v1/local/memory/soul/reflect`
 ///
 /// Reads or regenerates the cached whole-Creator SOUL narrative.
@@ -1327,21 +1347,22 @@ pub async fn reflect_soul(
         message: format!("failed to build synthesis input: {e}"),
     })?;
 
+    // Keep the keyword list for the post-synthesis quality gate.
+    let top_keywords = input.top_keywords.clone();
+
     let draft = synthesizer
         .synthesize(&active_creator, input)
         .await
-        .map_err(|e| {
-            // Map MemoryError to appropriate NexusApiError.
-            let msg = e.to_string();
-            if msg.contains("not available") || msg.contains("unavailable") {
-                NexusApiError::ServiceUnavailable { message: msg }
-            } else {
-                NexusApiError::Internal {
-                    code: "NARRATIVE_SYNTHESIS_ERROR".into(),
-                    message: msg,
-                }
-            }
-        })?;
+        .map_err(map_soul_narrative_memory_error)?;
+
+    // 5b. Validate and cap the draft before persistence.
+    //
+    // Long narratives are truncated cleanly; the quality gate then runs on the
+    // text that will actually be persisted, so we never store an unvalidated
+    // or oversized draft.
+    let narrative = truncate_summary(&draft.narrative, SOUL_NARRATIVE_MAX_CHARS);
+    validate_soul_narrative_draft(&narrative, &top_keywords)
+        .map_err(map_soul_narrative_memory_error)?;
 
     // 6. Persist the result (including stats cache for future read-path hits).
     let now = chrono::Utc::now().to_rfc3339();
@@ -1352,7 +1373,7 @@ pub async fn reflect_soul(
     let record = nexus_local_db::SoulNarrativeRecord {
         creator_id: active_creator.clone(),
         world_id: world_id.map(std::string::ToString::to_string),
-        narrative: Some(draft.narrative.clone()),
+        narrative: Some(narrative.clone()),
         generated_at: Some(now.clone()),
         fragment_count_at_generation: fragment_stats.fragment_count,
         max_fragment_created_at_at_generation: fragment_stats.max_created_at.clone(),
@@ -1372,7 +1393,7 @@ pub async fn reflect_soul(
     Ok(Json(SoulNarrativeResponse {
         creator_id: active_creator,
         state: "current".to_string(),
-        narrative: Some(draft.narrative),
+        narrative: Some(narrative),
         generated_at: record.generated_at,
         stale: false,
         fragment_count_at_generation: Some(
@@ -1399,6 +1420,88 @@ fn truncate_summary(summary: &str, max_chars: usize) -> String {
         let t: String = summary.chars().take(max_chars - 1).collect();
         format!("{t}…")
     }
+}
+
+/// Map narrative-synthesis `MemoryError` variants to canonical `NexusApiError`
+/// shapes without string-content matching.
+fn map_soul_narrative_memory_error(err: MemoryError) -> NexusApiError {
+    match err {
+        MemoryError::WorkerUnavailable => NexusApiError::ServiceUnavailable {
+            message: "ACP worker unavailable for narrative synthesis".into(),
+        },
+        MemoryError::CapabilityMissing { capability } => NexusApiError::ServiceUnavailable {
+            message: format!("{capability} capability not available in registry"),
+        },
+        MemoryError::MalformedOutput { reason }
+        | MemoryError::QualityThresholdMissed { reason } => NexusApiError::BadRequest {
+            code: "narrative_generation_failed".into(),
+            message: reason,
+        },
+        other => NexusApiError::Internal {
+            code: "NARRATIVE_SYNTHESIS_ERROR".into(),
+            message: other.to_string(),
+        },
+    }
+}
+
+/// Lightweight, deterministic quality gate for a synthesized narrative draft.
+///
+/// Passes when the draft references at least two of the provided top keywords,
+/// or when it ends with a forward-looking suffix (question or future-oriented
+/// language). This is a cheap runtime guard against generic/partial output.
+fn validate_soul_narrative_draft(
+    narrative: &str,
+    top_keywords: &[(String, u64)],
+) -> Result<(), MemoryError> {
+    let lower = narrative.to_lowercase();
+    let keyword_hits = top_keywords
+        .iter()
+        .filter(|(kw, _)| lower.contains(&kw.to_lowercase()))
+        .count();
+
+    if keyword_hits >= 2 || has_forward_looking_suffix(narrative) {
+        return Ok(());
+    }
+
+    Err(MemoryError::QualityThresholdMissed {
+        reason: format!(
+            "narrative quality floor missed: {keyword_hits} keyword hits and no forward-looking suffix"
+        ),
+    })
+}
+
+/// Heuristic: does the narrative end with a forward-looking reflection?
+fn has_forward_looking_suffix(narrative: &str) -> bool {
+    let trimmed = narrative.trim_end();
+    if trimmed.ends_with('?') {
+        return true;
+    }
+
+    let last_sentence = trimmed
+        .rsplit_once(['.', '!', '?'])
+        .map_or(trimmed, |(_, after)| after);
+
+    let words: Vec<String> = last_sentence
+        .split_whitespace()
+        .map(|w| {
+            w.trim_matches(|c: char| !c.is_alphanumeric())
+                .to_lowercase()
+        })
+        .filter(|w| !w.is_empty())
+        .collect();
+
+    if words
+        .iter()
+        .any(|w| FORWARD_LOOKING_TOKENS.contains(&w.as_str()))
+    {
+        return true;
+    }
+
+    words.windows(2).any(|pair| {
+        FORWARD_LOOKING_BIGRAMS
+            .iter()
+            .any(|(a, b)| pair[0] == *a && pair[1] == *b)
+    })
 }
 
 /// Build a capped `SoulNarrativeSynthesisInput` from a `(creator_id, world_id)`
@@ -2236,5 +2339,43 @@ mod tests {
         assert_eq!(resp.current_distinct_keyword_count, 20);
 
         drop(tmp);
+    }
+
+    #[test]
+    fn validate_draft_passes_with_two_keyword_hits() {
+        let keywords = vec![
+            ("magic".to_string(), 5),
+            ("science".to_string(), 3),
+            ("love".to_string(), 1),
+        ];
+        let narrative = "A story about magic and science intertwined.";
+        assert!(validate_soul_narrative_draft(narrative, &keywords).is_ok());
+    }
+
+    #[test]
+    fn validate_draft_passes_with_forward_looking_suffix() {
+        let keywords = vec![("magic".to_string(), 5)];
+        let narrative = "The hero stood alone. What will happen next?";
+        assert!(validate_soul_narrative_draft(narrative, &keywords).is_ok());
+    }
+
+    #[test]
+    fn validate_draft_fails_when_quality_floor_missed() {
+        let keywords = vec![("magic".to_string(), 5), ("science".to_string(), 3)];
+        let narrative = "The hero stood alone in a room.";
+        let err = validate_soul_narrative_draft(narrative, &keywords)
+            .expect_err("should fail quality floor");
+        match err {
+            MemoryError::QualityThresholdMissed { .. } => {}
+            other => panic!("expected QualityThresholdMissed, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn narrative_longer_than_max_chars_is_truncated_cleanly() {
+        let long = "x".repeat(SOUL_NARRATIVE_MAX_CHARS + 100);
+        let truncated = truncate_summary(&long, SOUL_NARRATIVE_MAX_CHARS);
+        assert_eq!(truncated.chars().count(), SOUL_NARRATIVE_MAX_CHARS);
+        assert!(truncated.ends_with('…'));
     }
 }
