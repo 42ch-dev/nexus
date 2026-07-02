@@ -1487,6 +1487,12 @@ fn build_temporal_buckets(
         });
     }
 
+    // `fragments` arrive in `created_at DESC` order (newest first), so the
+    // chunks above are newest→oldest. The synthesis prompt describes drift
+    // *over time* and expects chronological order (oldest→newest); reverse so
+    // bucket[0] is the earliest period. (Greptile review feedback.)
+    buckets.reverse();
+
     buckets
 }
 
