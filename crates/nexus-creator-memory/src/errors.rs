@@ -57,4 +57,29 @@ pub enum MemoryError {
     /// SOUL frontmatter error.
     #[error("SOUL.md frontmatter error: {0}")]
     SoulFrontmatterError(String),
+
+    /// ACP worker unavailable for a synthesis request.
+    #[error("ACP worker unavailable")]
+    WorkerUnavailable,
+
+    /// Required capability missing from the registry.
+    #[error("capability missing: {capability}")]
+    CapabilityMissing {
+        /// Capability id that was missing.
+        capability: String,
+    },
+
+    /// Synthesizer produced malformed output that cannot be persisted.
+    #[error("malformed output: {reason}")]
+    MalformedOutput {
+        /// Human-readable reason the output was rejected.
+        reason: String,
+    },
+
+    /// Generated draft failed the quality floor.
+    #[error("quality threshold missed: {reason}")]
+    QualityThresholdMissed {
+        /// Human-readable reason the draft was rejected.
+        reason: String,
+    },
 }
