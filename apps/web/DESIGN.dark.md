@@ -381,6 +381,8 @@ components:
 
 Dark primary button uses **cyan fill + deep blue text** (WCAG AA). `blue-*` names preserved for existing `{colors.blue-700}` consumers.
 
+V1.84 consolidated canvas/SOUL/World-KB brand-blue consumption through `var(--color-blue-700)` and `color-mix(in srgb, var(--color-blue-700) N%, transparent)`. The `rgba(82,168,255,…)` frontmatter entries document pre-consolidation approximations; CSS consumers resolve through the single-sourced variable chain — in the dark theme `--color-blue-700: #25d1e0` (brand-cyan). See DESIGN.md § Implementation Mapping.
+
 This file intentionally preserves the same token names and frontmatter structure with dark values. Rule-type documentation, component behavior, voice/content guidance, and implementation mapping live in `DESIGN.md` and apply to both themes.
 
 Dark values were split from the former inline `Dark` columns in `DESIGN.md` during the V1.69 Production migration. Consumers should resolve dark values from this file conceptually while continuing to reference the same token names (`--color-<token>`, Tailwind `cv('<token>')`).
