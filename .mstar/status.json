@@ -1,17 +1,86 @@
 {
   "version": 1,
-  "updated_at": "2026-07-01T06:00:00Z",
-  "plans": [],
+  "updated_at": "2026-07-02T17:28:00+08:00",
+  "plans": [
+    {
+      "plan_id": "2026-07-02-v1.83-nexus-ui-brand-assets",
+      "title": "P0 — V1.83 Nexus UI Package and Brand Assets",
+      "status": "Todo",
+      "owner": "@frontend-dev",
+      "task_category": "visual",
+      "working_branch": "feature/v1.83-nexus-ui-brand-assets",
+      "merge_target": "iteration/v1.83",
+      "metadata": {
+        "iteration_refs": [
+          ".mstar/iterations/v1.83-brand-ui-foundation-delivery-compass-v1.md"
+        ],
+        "spec_integration_branch": "iteration/v1.83",
+        "primary_spec": ".mstar/plans/2026-07-02-v1.83-nexus-ui-brand-assets.md",
+        "roadmap": "V1.83 current iteration: shared package and logo assets; React component library deferred."
+      }
+    },
+    {
+      "plan_id": "2026-07-02-v1.83-brand-design-system",
+      "title": "P1 — V1.83 Brand DESIGN Contract",
+      "status": "Todo",
+      "owner": "@architect",
+      "task_category": "docs",
+      "working_branch": "feature/v1.83-brand-design-system",
+      "merge_target": "iteration/v1.83",
+      "metadata": {
+        "iteration_refs": [
+          ".mstar/iterations/v1.83-brand-ui-foundation-delivery-compass-v1.md"
+        ],
+        "spec_integration_branch": "iteration/v1.83",
+        "primary_spec": ".mstar/plans/2026-07-02-v1.83-brand-design-system.md",
+        "roadmap": "V1.83 current iteration: root brand DESIGN SSOT plus apps/web consumption mapping."
+      }
+    },
+    {
+      "plan_id": "2026-07-02-v1.83-web-brand-application",
+      "title": "P2 — V1.83 Web Brand Application",
+      "status": "Todo",
+      "owner": "@frontend-dev",
+      "task_category": "visual",
+      "working_branch": "feature/v1.83-web-brand-application",
+      "merge_target": "iteration/v1.83",
+      "metadata": {
+        "iteration_refs": [
+          ".mstar/iterations/v1.83-brand-ui-foundation-delivery-compass-v1.md"
+        ],
+        "spec_integration_branch": "iteration/v1.83",
+        "primary_spec": ".mstar/plans/2026-07-02-v1.83-web-brand-application.md",
+        "roadmap": "V1.83 current iteration: apply brand tokens/assets to apps/web shell and primitives; full page redesign deferred."
+      }
+    },
+    {
+      "plan_id": "2026-07-02-v1.83-closure",
+      "title": "P-last — V1.83 QA, QC, Compound, and Closeout",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "task_category": "docs",
+      "working_branch": "feature/v1.83-closure",
+      "merge_target": "iteration/v1.83",
+      "metadata": {
+        "iteration_refs": [
+          ".mstar/iterations/v1.83-brand-ui-foundation-delivery-compass-v1.md"
+        ],
+        "spec_integration_branch": "iteration/v1.83",
+        "primary_spec": ".mstar/plans/2026-07-02-v1.83-closure.md",
+        "roadmap": "V1.83 current iteration closeout: QC, QA, compound, status updates, PR readiness."
+      }
+    }
+  ],
   "metadata": {
-    "integration_branch": null,
-    "integration_branch_retired": true,
+    "integration_branch": "iteration/v1.83",
+    "integration_branch_retired": false,
     "last_integration_branch": "iteration/v1.82",
     "integration_merge_target": "main",
     "iteration_base_branch": "main",
     "target_branch": "main",
-    "spec_integration_branch": "iteration/v1.82",
-    "latest_active_iteration": "V1.82 delivered (2026-07-02, PR pending); next V1.83 pending /iteration-start",
-    "latest_active_compass": null,
+    "spec_integration_branch": "iteration/v1.83",
+    "latest_active_iteration": "V1.83 locked (2026-07-02): Brand UI Foundation; Phase 1 Review & Edit chain complete",
+    "latest_active_compass": ".mstar/iterations/v1.83-brand-ui-foundation-delivery-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
