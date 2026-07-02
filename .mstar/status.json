@@ -28,7 +28,7 @@
       "iteration": "V1.85",
       "type": "implement",
       "task_category": "visual",
-      "status": "Todo",
+      "status": "InReview",
       "primary_spec": ".mstar/iterations/v1.85-app-icon-branding-delivery-compass-v1.md",
       "working_branch": "feature/v1.85-app-icon-branding",
       "merge_target": "iteration/v1.85",
@@ -41,7 +41,9 @@
         ],
         "spec_integration_branch": "iteration/v1.85",
         "merge_target": "iteration/v1.85"
-      }
+      },
+      "implementation_commit": "dc0c8057",
+      "merge_commit": "d4bb8a92"
     },
     {
       "plan_id": "2026-07-03-v1.85-brand-and-ci-doc-hygiene",
@@ -49,7 +51,7 @@
       "iteration": "V1.85",
       "type": "implement",
       "task_category": "docs",
-      "status": "Todo",
+      "status": "InReview",
       "primary_spec": ".mstar/iterations/v1.85-app-icon-branding-delivery-compass-v1.md",
       "closes_residuals": [
         "R-V184CL-QC1-S001",
@@ -66,14 +68,16 @@
         ],
         "spec_integration_branch": "iteration/v1.85",
         "merge_target": "iteration/v1.85"
-      }
+      },
+      "implementation_commit": "d0982aa9",
+      "merge_commit": "030d71c6"
     },
     {
       "plan_id": "2026-07-03-v1.85-closure",
       "name": "P-last — QC, QA, Compound, and Closeout",
       "iteration": "V1.85",
       "type": "closure",
-      "status": "Todo",
+      "status": "InProgress",
       "primary_spec": ".mstar/iterations/v1.85-app-icon-branding-delivery-compass-v1.md",
       "working_branch": null,
       "merge_target": "iteration/v1.85",
