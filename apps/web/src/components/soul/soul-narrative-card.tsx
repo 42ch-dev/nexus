@@ -151,8 +151,8 @@ function InsufficientDataState({
         title={isWorld ? "This world's SOUL is still forming" : 'Your SOUL is still forming'}
         description={
           isWorld
-            ? "Keep writing and reviewing in this world — once it has enough creative experience, Nexus can reflect on its identity."
-            : 'Keep writing and reviewing — once you\'ve accumulated enough creative experience, Nexus can reflect on who you are becoming.'
+            ? "Keep writing and reviewing in this world — once it has enough fragments, themes, and creative experience, Nexus can reflect on its identity."
+            : "Keep writing and reviewing — once you've accumulated enough fragments, themes, and creative experience, Nexus can reflect on who you are becoming."
         }
       />
       <p className="mt-3 text-copy-13 text-gray-700">
