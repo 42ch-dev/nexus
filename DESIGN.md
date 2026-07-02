@@ -100,7 +100,7 @@ components:
     width-outer: "2px"
     width-inner: "4px"
   shell-nav:
-    logo-variant: "logo-dark.svg"
+    logo-variant: "logo-primary.svg"
     logo-min-height: "24px"
     logo-clear-space-ratio: "0.25"
     active-bar-color: "{colors.brand-deep-blue}"
@@ -239,7 +239,7 @@ Canonical SVG assets ship from `@42ch/nexus-ui/assets/logos/`. PNG sources are p
 
 | Variant | File | Surface |
 | --- | --- | --- |
-| Deep blue mark | `logo-dark.svg` | Light nav, sidebar, light shell header |
+| Deep blue mark | `logo-primary.svg` | Light nav, sidebar, light shell header |
 | Cyan mark | `logo-color.svg` | Dark nav, dark shell header |
 | White mark | `logo-white.svg` | Dark hero, photography overlays, high-contrast panels |
 | Monotone mark | `logo-mono.svg` | Inline UI; inherits `color` via `currentColor` |
@@ -250,7 +250,7 @@ Canonical SVG assets ship from `@42ch/nexus-ui/assets/logos/`. PNG sources are p
 - Clear space: **≥ 25%** of logo height on all sides.
 - Alt text: `Nexus` on `<img>`; inline SVGs include `<title>` and `<desc>`.
 - Do not recolor SVG fills outside the mono variant.
-- Do not place cyan mark on white/light gray without a contrast check — prefer `logo-dark.svg` on light surfaces.
+- Do not place cyan mark on white/light gray without a contrast check — prefer `logo-primary.svg` on light surfaces.
 
 ---
 

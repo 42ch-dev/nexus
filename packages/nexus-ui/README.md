@@ -15,8 +15,8 @@ pnpm add @42ch/nexus-ui --workspace
 | `@42ch/nexus-ui` | Brand token constants (`brandColors`, `logoVariants`, sizing guidance) |
 | `@42ch/nexus-ui/tokens` | Same token module (direct import) |
 | `@42ch/nexus-ui/theme.css` | Brand CSS custom properties (`--nexus-brand-*`) |
-| `@42ch/nexus-ui/assets/logos/logo-color.svg` | Cyan mark (`#25D1E0`) |
-| `@42ch/nexus-ui/assets/logos/logo-dark.svg` | Deep blue mark (`#1E3A5F`) |
+| `@42ch/nexus-ui/assets/logos/logo-primary.svg` | Deep blue mark (`#1E3A5F`, flat primary) for light backgrounds |
+| `@42ch/nexus-ui/assets/logos/logo-color.svg` | Cyan mark (`#25D1E0`) — bright logo for dark backgrounds |
 | `@42ch/nexus-ui/assets/logos/logo-white.svg` | White mark (`#FFFFFF`) |
 | `@42ch/nexus-ui/assets/logos/logo-mono.svg` | Monotone mark (`currentColor`) |
 
@@ -26,11 +26,11 @@ PNG source references (`logo_dark.png`, `logo_light.png`, `logo_white.png`) live
 
 | Surface | Variant | File | Notes |
 |---------|---------|------|-------|
-| Light nav / sidebar (light theme) | Deep blue | `logo-dark.svg` | Default shell mark on white/light gray backgrounds |
-| Dark nav / sidebar (dark theme) | Cyan | `logo-color.svg` | Brand accent on dark chrome |
+| Light nav / sidebar (light theme) | Deep blue | `logo-primary.svg` | Default shell mark on white/light gray backgrounds |
+| Dark nav / sidebar (dark theme) | Cyan | `logo-color.svg` | Bright mark on dark chrome |
 | Dark hero / photography / high-contrast panel | White | `logo-white.svg` | Maximum contrast on deep or busy backgrounds |
 | Inline UI (buttons, badges, list rows) | Monotone | `logo-mono.svg` | Set `color` on parent; inherits via `currentColor` |
-| Favicon / small chrome (optional) | Deep blue or mono | `logo-dark.svg` or `logo-mono.svg` | Prefer mono when tinting |
+| Favicon / small chrome (optional) | Deep blue or mono | `logo-primary.svg` or `logo-mono.svg` | Prefer mono when tinting |
 
 ### Accessibility
 
@@ -46,7 +46,7 @@ PNG source references (`logo_dark.png`, `logo_light.png`, `logo_white.png`) live
 ```ts
 import { brandColors, logoVariants } from '@42ch/nexus-ui';
 
-const navLogo = logoVariants.dark;
+const navLogo = logoVariants.primary;
 const accent = brandColors.cyan;
 ```
 
@@ -63,7 +63,7 @@ const accent = brandColors.cyan;
 ### Vite / bundler (SVG URL)
 
 ```ts
-import nexusLogo from '@42ch/nexus-ui/assets/logos/logo-dark.svg';
+import nexusLogo from '@42ch/nexus-ui/assets/logos/logo-primary.svg';
 
 // <img src={nexusLogo} alt="Nexus" width={32} height={32} />
 ```

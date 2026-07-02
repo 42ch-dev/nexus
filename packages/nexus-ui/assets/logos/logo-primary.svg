@@ -1,15 +1,15 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-labelledby="nexus-logo-title nexus-logo-desc">
   <title id="nexus-logo-title">Nexus</title>
-  <desc id="nexus-logo-desc">Nexus network mark — rounded square frame with connected nodes forming the letter N (cyan variant for dark backgrounds)</desc>
-  <g fill="none" stroke="#25D1E0" stroke-width="6.6" stroke-linecap="round" stroke-linejoin="round">
+  <desc id="nexus-logo-desc">Nexus network mark — rounded square frame with connected nodes forming the letter N (deep blue primary variant)</desc>
+  <g fill="none" stroke="#1E3A5F" stroke-width="6.6" stroke-linecap="round" stroke-linejoin="round">
     <rect x="8" y="8" width="84" height="84" rx="20"/>
     <polygon points="50,8 92,50 50,92 8,50"/>
     <path d="M30 28 L30 72"/>
     <path d="M30 28 L70 72"/>
     <path d="M70 28 L70 72"/>
   </g>
-  <g fill="#25D1E0" stroke="none">
+  <g fill="#1E3A5F" stroke="none">
     <circle cx="50" cy="8" r="7.4"/>
     <circle cx="92" cy="50" r="7.4"/>
     <circle cx="50" cy="92" r="7.4"/>
