@@ -6467,6 +6467,34 @@
         "note": "TanStack dedupes in-flight fetches; non-blocking perf nit. Related to qc3 S-QC3-001 (duplicate observers).",
         "lifecycle": "open"
       }
+    ],
+    "2026-07-02-v1.82-per-world-narrative-backend": [
+      {
+        "id": "R-V182P0-QC3-W001",
+        "title": "Frontend listNarrativeWorlds expects raw World[] but daemon returns { worlds: [...] } — runtime shape mismatch",
+        "severity": "medium",
+        "source": "qc3 W-QC3-001 (Contract Boundary/Frontend Reliability)",
+        "scope": "apps/web/src/lib/nexus/browser-client.ts:411-413 + queries.ts:687-692 + soul-section/world-selector + tests mock shape",
+        "decision": "fix-in-wave",
+        "owner": "@fullstack-dev",
+        "target": "V1.82 QC fix-wave",
+        "tracking_link": ".mstar/status.json residual_findings[2026-07-02-v1.82-per-world-narrative-backend][R-V182P0-QC3-W001]",
+        "note": "Align BrowserClient.listNarrativeWorlds/NexusClient to the { worlds } envelope; return res.worlds; update P1 tests to mock the real shape.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V182P0-QC3-W002",
+        "title": "per-World distinct-keyword recompute does not early-exit at 20 (drains all rows on fingerprint mismatch)",
+        "severity": "medium",
+        "source": "qc3 W-QC3-002 (Performance Hot Path)",
+        "scope": "crates/nexus-local-db/src/soul_narrative.rs:228-239 (drains after threshold)",
+        "decision": "fix-in-wave",
+        "owner": "@fullstack-dev",
+        "target": "V1.82 QC fix-wave",
+        "tracking_link": ".mstar/status.json residual_findings[2026-07-02-v1.82-per-world-narrative-backend][R-V182P0-QC3-W002]",
+        "note": "Early-exit at 20 distinct (stop decoding; threshold-saturated count); update tests asserting exact counts to assert bounded/threshold semantics. V1.81 fingerprint-cache + early-exit lesson applied to per-World recompute.",
+        "lifecycle": "open"
+      }
     ]
   }
 }
