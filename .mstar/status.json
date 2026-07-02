@@ -1,17 +1,98 @@
 {
   "version": 1,
-  "updated_at": "2026-07-02T19:30:00+08:00",
-  "plans": [],
+  "updated_at": "2026-07-03T10:00:00+08:00",
+  "plans": [
+    {
+      "plan_id": "2026-07-03-v1.85-compass-and-plan-stubs",
+      "name": "P-1 — Prepare (compass + plan stubs)",
+      "iteration": "V1.85",
+      "type": "prepare",
+      "status": "Todo",
+      "primary_spec": ".mstar/iterations/v1.85-app-icon-branding-delivery-compass-v1.md",
+      "working_branch": null,
+      "merge_target": "iteration/v1.85",
+      "qc_reports": [],
+      "metadata": {
+        "plan_index": "P-1",
+        "iteration_refs": [
+          "V1.85"
+        ]
+      }
+    },
+    {
+      "plan_id": "2026-07-03-v1.85-app-icon-branding",
+      "name": "P0 — App Icon Branding",
+      "iteration": "V1.85",
+      "type": "implement",
+      "task_category": "visual",
+      "status": "Todo",
+      "primary_spec": ".mstar/iterations/v1.85-app-icon-branding-delivery-compass-v1.md",
+      "working_branch": "feature/v1.85-app-icon-branding",
+      "merge_target": "iteration/v1.85",
+      "parallel_with": "2026-07-03-v1.85-brand-and-ci-doc-hygiene",
+      "qc_reports": [],
+      "metadata": {
+        "plan_index": "P0",
+        "iteration_refs": [
+          "V1.85"
+        ],
+        "spec_integration_branch": "iteration/v1.85",
+        "merge_target": "iteration/v1.85"
+      }
+    },
+    {
+      "plan_id": "2026-07-03-v1.85-brand-and-ci-doc-hygiene",
+      "name": "P1 — Brand/CI Doc Hygiene",
+      "iteration": "V1.85",
+      "type": "implement",
+      "task_category": "docs",
+      "status": "Todo",
+      "primary_spec": ".mstar/iterations/v1.85-app-icon-branding-delivery-compass-v1.md",
+      "closes_residuals": [
+        "R-V184CL-QC1-S001",
+        "R-V184CL-QC2-S001"
+      ],
+      "working_branch": "feature/v1.85-brand-and-ci-doc-hygiene",
+      "merge_target": "iteration/v1.85",
+      "parallel_with": "2026-07-03-v1.85-app-icon-branding",
+      "qc_reports": [],
+      "metadata": {
+        "plan_index": "P1",
+        "iteration_refs": [
+          "V1.85"
+        ],
+        "spec_integration_branch": "iteration/v1.85",
+        "merge_target": "iteration/v1.85"
+      }
+    },
+    {
+      "plan_id": "2026-07-03-v1.85-closure",
+      "name": "P-last — QC, QA, Compound, and Closeout",
+      "iteration": "V1.85",
+      "type": "closure",
+      "status": "Todo",
+      "primary_spec": ".mstar/iterations/v1.85-app-icon-branding-delivery-compass-v1.md",
+      "working_branch": null,
+      "merge_target": "iteration/v1.85",
+      "qc_reports": [],
+      "metadata": {
+        "plan_index": "P-last",
+        "iteration_refs": [
+          "V1.85"
+        ]
+      }
+    }
+  ],
   "metadata": {
-    "integration_branch": null,
-    "integration_branch_retired": true,
+    "integration_branch": "iteration/v1.85",
+    "integration_branch_retired": false,
     "last_integration_branch": "iteration/v1.84",
     "integration_merge_target": "main",
     "iteration_base_branch": "main",
     "target_branch": "main",
-    "spec_integration_branch": "iteration/v1.84",
-    "latest_active_iteration": "V1.84 completed (2026-07-02): Brand Polish and Token Consolidation — merged via PR #111",
-    "latest_active_compass": ".mstar/iterations/v1.84-brand-polish-and-token-consolidation-delivery-compass-v1.md",
+    "spec_integration_branch": "iteration/v1.85",
+    "latest_active_iteration": "V1.85 active: App Icon Branding — replace placeholder Tauri app icons with Nexus-branded icons (tauri icon regenerate) + close 2 V1.84 low residuals (DESIGN.md doc drift + LFS comment)",
+    "latest_active_compass": ".mstar/iterations/v1.85-app-icon-branding-delivery-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
@@ -43,7 +124,7 @@
       "refreshed_at": "2026-07-01",
       "refreshed_reason": "V1.80 wave-1 Done (QA Pass): R-V178P0-QC3-003 (REL-01) + 4 V1.79-QC residuals resolved. Remaining open: 2 P0 accepted low + 1 V1.79 CI-wrapper low."
     },
-    "updated_at": "2026-07-02"
+    "updated_at": "2026-07-03"
   },
   "residual_findings": {
     "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization": [
