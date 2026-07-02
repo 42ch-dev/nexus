@@ -7,17 +7,20 @@
       "name": "P-1 — Prepare (compass + plan stubs)",
       "iteration": "V1.84",
       "type": "prepare",
-      "status": "Todo",
+      "status": "Done",
       "primary_spec": ".mstar/iterations/v1.84-brand-polish-and-token-consolidation-delivery-compass-v1.md",
       "working_branch": null,
       "merge_target": "iteration/v1.84",
-      "qc_reports": [],
+      "qc_reports": [
+        "skipped — prepare/harness-docs plan; reviewed via Phase 1 Review & Edit chain (product-manager → architect → writing-specialist → PM lock)"
+      ],
       "metadata": {
         "plan_index": "P-1",
         "iteration_refs": [
           "V1.84"
         ]
-      }
+      },
+      "completion_note": "Compass locked, 4 plans registered, status.json + README index updated, Review & Edit chain complete."
     },
     {
       "plan_id": "2026-07-02-v1.84-brand-polish-and-token-consolidation",
@@ -25,7 +28,7 @@
       "iteration": "V1.84",
       "type": "implement",
       "task_category": "visual",
-      "status": "Todo",
+      "status": "Done",
       "primary_spec": ".mstar/iterations/v1.84-brand-polish-and-token-consolidation-delivery-compass-v1.md",
       "closes_residuals": [
         "R-V183CLOSE-W004",
@@ -34,7 +37,11 @@
       "working_branch": "feature/v1.84-brand-polish-and-token-consolidation",
       "merge_target": "iteration/v1.84",
       "parallel_with": "2026-07-02-v1.84-ci-and-tooling-hygiene",
-      "qc_reports": [],
+      "qc_reports": [
+        ".mstar/plans/reports/2026-07-02-v1.84-closure/qc1.md",
+        "qc2.md",
+        "qc3.md"
+      ],
       "metadata": {
         "plan_index": "P0",
         "iteration_refs": [
@@ -42,7 +49,10 @@
         ],
         "spec_integration_branch": "iteration/v1.84",
         "merge_target": "iteration/v1.84"
-      }
+      },
+      "merge_commit": "06090e94",
+      "implementation_commit": "8c249484",
+      "qc_verdict": "Approve (consolidated, post fix-wave)"
     },
     {
       "plan_id": "2026-07-02-v1.84-ci-and-tooling-hygiene",
@@ -50,7 +60,7 @@
       "iteration": "V1.84",
       "type": "implement",
       "task_category": "ops",
-      "status": "Todo",
+      "status": "Done",
       "primary_spec": ".mstar/iterations/v1.84-brand-polish-and-token-consolidation-delivery-compass-v1.md",
       "closes_residuals": [
         "R-V183CLOSE-W001",
@@ -60,7 +70,11 @@
       "working_branch": "feature/v1.84-ci-and-tooling-hygiene",
       "merge_target": "iteration/v1.84",
       "parallel_with": "2026-07-02-v1.84-brand-polish-and-token-consolidation",
-      "qc_reports": [],
+      "qc_reports": [
+        ".mstar/plans/reports/2026-07-02-v1.84-closure/qc1.md",
+        "qc2.md",
+        "qc3.md"
+      ],
       "metadata": {
         "plan_index": "P1",
         "iteration_refs": [
@@ -68,14 +82,18 @@
         ],
         "spec_integration_branch": "iteration/v1.84",
         "merge_target": "iteration/v1.84"
-      }
+      },
+      "merge_commit": "380ae1b6",
+      "implementation_commit": "da123db7",
+      "fix_wave_commit": "8e844a9b",
+      "qc_verdict": "Approve (consolidated, post fix-wave 8e844a9b for W1)"
     },
     {
       "plan_id": "2026-07-02-v1.84-closure",
       "name": "P-last — QC, QA, Compound, and Closeout",
       "iteration": "V1.84",
       "type": "closure",
-      "status": "Todo",
+      "status": "InProgress",
       "primary_spec": ".mstar/iterations/v1.84-brand-polish-and-token-consolidation-delivery-compass-v1.md",
       "working_branch": null,
       "merge_target": "iteration/v1.84",
@@ -85,7 +103,8 @@
         "iteration_refs": [
           "V1.84"
         ]
-      }
+      },
+      "qc_consolidated_verdict": "Approve (qc1+qc2+qc3 after fix-wave 8e844a9b)"
     }
   ],
   "metadata": {
@@ -6642,6 +6661,34 @@
         "note": "Drift risk; shell/primitives use brand vars correctly.",
         "lifecycle": "accepted",
         "closed_at": "2026-07-02 (P-last accepted residual)"
+      }
+    ],
+    "2026-07-02-v1.84-closure": [
+      {
+        "id": "R-V184CL-QC1-S001",
+        "title": "apps/web/DESIGN.md/DESIGN.dark.md brand-blue consumption-path doc drift (pre-existing from V1.83) — still references the old parallel hardcoded scale in prose",
+        "severity": "low",
+        "source": "qc1 S1",
+        "scope": "apps/web/DESIGN.md, apps/web/DESIGN.dark.md brand-blue token sections",
+        "decision": "defer",
+        "owner": "@architect",
+        "target": "V1.85+ doc hygiene",
+        "tracking_link": ".mstar/status.json residual_findings[2026-07-02-v1.84-closure][R-V184CL-QC1-S001]",
+        "note": "Pre-existing V1.83 doc drift; V1.84 consolidated the index.css token path but did not amend the DESIGN.md prose. Low; defer to a future doc-hygiene pass.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V184CL-QC2-S001",
+        "title": "No inline comment in CI workflows noting LFS purpose (brand PNG provenance only)",
+        "severity": "low",
+        "source": "qc2 S2",
+        "scope": ".github/workflows/ci.yml, .github/workflows/desktop-build.yml lfs:true steps",
+        "decision": "accept",
+        "owner": "@ops-engineer",
+        "target": "V1.85+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-07-02-v1.84-closure][R-V184CL-QC2-S001]",
+        "note": "Trivial doc nit; .gitattributes already scopes LFS to brand PNGs. Accept as-is.",
+        "lifecycle": "open"
       }
     ]
   }
