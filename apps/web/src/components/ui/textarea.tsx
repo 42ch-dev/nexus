@@ -19,6 +19,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
       className={cn(
         'min-h-24 w-full rounded-control border bg-background-100 p-3 text-copy-14 text-gray-1000 transition-colors duration-state ease-standard',
         'placeholder:text-gray-700',
+        'focus-visible:border-blue-700',
         'disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed',
         invalid ? 'border-red-700' : 'border-gray-alpha-400',
         className,
