@@ -22,7 +22,7 @@
     {
       "plan_id": "2026-07-02-v1.83-brand-design-system",
       "title": "P1 — V1.83 Brand DESIGN Contract",
-      "status": "InProgress",
+      "status": "Done",
       "owner": "@architect",
       "task_category": "docs",
       "working_branch": "feature/v1.83-brand-design-system",
@@ -39,7 +39,7 @@
     {
       "plan_id": "2026-07-02-v1.83-web-brand-application",
       "title": "P2 — V1.83 Web Brand Application",
-      "status": "Todo",
+      "status": "InProgress",
       "owner": "@frontend-dev",
       "task_category": "visual",
       "working_branch": "feature/v1.83-web-brand-application",
