@@ -1103,9 +1103,16 @@ const MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS: i64 = 20;
 /// The endpoint:
 /// 1. Enforces active creator (same pattern as `fragments`).
 /// 2. Computes fragment stats for the insufficient-data gate.
-/// 3. Checks the cache for a current/stale/ungenerated state.
-/// 4. If `force_regenerate` or stale or ungenerated, synthesizes via
-///    `SoulNarrativeSynthesizer` (ACP-backed), persists the result, and returns it.
+/// 3. When `force_regenerate` is `false` (the read/poll path):
+///    - Returns `insufficient_data` if below gate.
+///    - Returns `ungenerated` if above gate but no cache row exists.
+///    - Returns `current` if cache row exists and fragments haven't changed.
+///    - Returns `stale` if cache row exists but fragments have changed.
+///    - **Never** calls the LLM — synthesis is on-demand only.
+/// 4. When `force_regenerate` is `true` (the explicit CTA):
+///    - Returns `insufficient_data` if below gate.
+///    - Synthesizes via `SoulNarrativeSynthesizer` (ACP-backed), persists
+///      the result, and returns `current`.
 /// 5. The insufficient-data gate (`fragment_count < 10` OR
 ///    `distinct_keyword_count < 20`) is evaluated BEFORE any ACP call, so
 ///    new creators never pay LLM latency for a guaranteed-thin result.
@@ -1143,8 +1150,8 @@ pub async fn reflect_soul(
         "Reflecting on Creator SOUL narrative"
     );
 
-    // 1. Compute fragment stats for the insufficient-data gate + stale detection.
-    let fragment_stats =
+    // 1. Compute fragment stats + cache row in one DB round-trip (G2 fix).
+    let (fragment_stats, cached) =
         nexus_local_db::soul_narrative_fragment_stats(state.pool(), &active_creator)
             .await
             .map_err(|e| NexusApiError::Internal {
@@ -1176,31 +1183,69 @@ pub async fn reflect_soul(
         }));
     }
 
-    // 3. Check the cache.
-    let cached = nexus_local_db::get_soul_narrative(state.pool(), &active_creator)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: format!("failed to read soul narrative cache: {e}"),
-        })?;
+    // 3. Stale detection — stats-only rows (narrative=None) are treated as
+    //    ungenerated, not stale (G3 fix).
+    let has_narrative = cached.as_ref().and_then(|c| c.narrative.as_ref()).is_some();
+    let stale = cached.as_ref().is_some_and(|c| {
+        has_narrative
+            && (c.fragment_count_at_generation != fragment_stats.fragment_count
+                || c.max_fragment_created_at_at_generation.as_deref()
+                    != fragment_stats.max_created_at.as_deref())
+    });
 
-    // 4. Stale detection.
-    let stale = if let Some(ref c) = cached {
-        c.fragment_count_at_generation != fragment_stats.fragment_count
-            || c.max_fragment_created_at_at_generation.as_deref()
-                != fragment_stats.max_created_at.as_deref()
-    } else {
-        false
-    };
-
-    // 5. If cached and not force and not stale → return current.
-    if !force && !stale {
+    // 4. Read/poll path (force=false): return current, stale, or ungenerated.
+    //    NEVER calls the LLM — synthesis is gated behind force=true (G1 fix).
+    if !force {
         if let Some(ref c) = cached {
+            // Stats-only row (G3) — treat as ungenerated, not stale/current.
+            if !has_narrative {
+                return Ok(Json(SoulNarrativeResponse {
+                    creator_id: active_creator,
+                    state: "ungenerated".to_string(),
+                    narrative: None,
+                    generated_at: None,
+                    stale: false,
+                    fragment_count_at_generation: None,
+                    max_fragment_created_at_at_generation: None,
+                    current_fragment_count: u64::try_from(fragment_stats.fragment_count)
+                        .unwrap_or(0),
+                    current_distinct_keyword_count: u64::try_from(
+                        fragment_stats.distinct_keyword_count,
+                    )
+                    .unwrap_or(0),
+                    min_fragment_count: MIN_SOUL_NARRATIVE_FRAGMENTS,
+                    min_distinct_keyword_count: MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS,
+                }));
+            }
+            if stale {
+                return Ok(Json(SoulNarrativeResponse {
+                    creator_id: active_creator,
+                    state: "stale".to_string(),
+                    narrative: c.narrative.clone(),
+                    generated_at: c.generated_at.clone(),
+                    stale: true,
+                    fragment_count_at_generation: Some(
+                        u64::try_from(c.fragment_count_at_generation).unwrap_or(0),
+                    ),
+                    max_fragment_created_at_at_generation: c
+                        .max_fragment_created_at_at_generation
+                        .clone(),
+                    current_fragment_count: u64::try_from(fragment_stats.fragment_count)
+                        .unwrap_or(0),
+                    current_distinct_keyword_count: u64::try_from(
+                        fragment_stats.distinct_keyword_count,
+                    )
+                    .unwrap_or(0),
+                    min_fragment_count: MIN_SOUL_NARRATIVE_FRAGMENTS,
+                    min_distinct_keyword_count: MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS,
+                }));
+            }
+            // Not stale → current.
             return Ok(Json(SoulNarrativeResponse {
                 creator_id: active_creator,
                 state: "current".to_string(),
-                narrative: Some(c.narrative.clone()),
-                generated_at: Some(c.generated_at.clone()),
+                narrative: c.narrative.clone(),
+                generated_at: c.generated_at.clone(),
                 stale: false,
                 fragment_count_at_generation: Some(
                     u64::try_from(c.fragment_count_at_generation).unwrap_or(0),
@@ -1217,35 +1262,25 @@ pub async fn reflect_soul(
                 min_distinct_keyword_count: MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS,
             }));
         }
-    }
-
-    // 6. If cached and not force and stale → return stale (don't regenerate).
-    if !force && stale {
-        if let Some(ref c) = cached {
-            return Ok(Json(SoulNarrativeResponse {
-                creator_id: active_creator,
-                state: "stale".to_string(),
-                narrative: Some(c.narrative.clone()),
-                generated_at: Some(c.generated_at.clone()),
-                stale: true,
-                fragment_count_at_generation: Some(
-                    u64::try_from(c.fragment_count_at_generation).unwrap_or(0),
-                ),
-                max_fragment_created_at_at_generation: c
-                    .max_fragment_created_at_at_generation
-                    .clone(),
-                current_fragment_count: u64::try_from(fragment_stats.fragment_count).unwrap_or(0),
-                current_distinct_keyword_count: u64::try_from(
-                    fragment_stats.distinct_keyword_count,
-                )
+        // Above gate but no cache row → ungenerated.
+        // Populate current_* counts from fragment_stats; narrative/generated_at = None.
+        return Ok(Json(SoulNarrativeResponse {
+            creator_id: active_creator,
+            state: "ungenerated".to_string(),
+            narrative: None,
+            generated_at: None,
+            stale: false,
+            fragment_count_at_generation: None,
+            max_fragment_created_at_at_generation: None,
+            current_fragment_count: u64::try_from(fragment_stats.fragment_count).unwrap_or(0),
+            current_distinct_keyword_count: u64::try_from(fragment_stats.distinct_keyword_count)
                 .unwrap_or(0),
-                min_fragment_count: MIN_SOUL_NARRATIVE_FRAGMENTS,
-                min_distinct_keyword_count: MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS,
-            }));
-        }
+            min_fragment_count: MIN_SOUL_NARRATIVE_FRAGMENTS,
+            min_distinct_keyword_count: MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS,
+        }));
     }
 
-    // 7. Need to synthesize (ungenerated, stale + force, or force).
+    // 5. force=true → synthesize (explicit CTA, on-demand only).
     let registry =
         state
             .capability_registry()
@@ -1283,7 +1318,7 @@ pub async fn reflect_soul(
             }
         })?;
 
-    // 8. Persist the result (including stats cache for future read-path hits).
+    // 6. Persist the result (including stats cache for future read-path hits).
     let now = chrono::Utc::now().to_rfc3339();
     let stats_fingerprint = nexus_local_db::build_stats_fingerprint(
         fragment_stats.fragment_count,
@@ -1291,8 +1326,8 @@ pub async fn reflect_soul(
     );
     let record = nexus_local_db::SoulNarrativeRecord {
         creator_id: active_creator.clone(),
-        narrative: draft.narrative.clone(),
-        generated_at: now.clone(),
+        narrative: Some(draft.narrative.clone()),
+        generated_at: Some(now.clone()),
         fragment_count_at_generation: fragment_stats.fragment_count,
         max_fragment_created_at_at_generation: fragment_stats.max_created_at.clone(),
         distinct_keyword_count_cache: i64::try_from(fragment_stats.distinct_keyword_count)
@@ -1312,7 +1347,7 @@ pub async fn reflect_soul(
         creator_id: active_creator,
         state: "current".to_string(),
         narrative: Some(draft.narrative),
-        generated_at: Some(record.generated_at),
+        generated_at: record.generated_at,
         stale: false,
         fragment_count_at_generation: Some(
             u64::try_from(record.fragment_count_at_generation).unwrap_or(0),
@@ -1702,6 +1737,183 @@ mod tests {
             .await
             .expect("count");
         assert_eq!(remaining.0, 3, "no rows deleted under a past deadline");
+
+        drop(tmp);
+    }
+
+    // ─── V1.81 G1: synthesis gated behind force=true ─────────────────────
+
+    /// `force_regenerate=false` + above-gate + no cache → `ungenerated`,
+    /// and the synthesizer is NOT called (proved by returning before the
+    /// capability-registry check, which would fail with ServiceUnavailable
+    /// in test mode).
+    #[tokio::test]
+    async fn reflect_soul_no_force_ungenerated_no_llm_call() {
+        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let pool = nexus_local_db::open_pool(&db_path)
+            .await
+            .expect("test pool");
+
+        // Override config.toml to use a creator_id that passes validation
+        // (must start with "ctr_" followed by alphanumeric only).
+        let creator_id = "ctr_testreflect";
+        let toml_str = format!(
+            "active_creator_id = \"{creator_id}\"\n[active_workspace_slug_by_creator]\n\"{creator_id}\" = \"default\""
+        );
+        std::fs::write(nexus_home.join("config.toml"), toml_str).expect("write config.toml");
+
+        // Seed 25 fragments with 25 distinct keywords → above data gate
+        // (10+ fragments AND 20+ distinct keywords).
+        for i in 0..25 {
+            let kw = format!("unique_kw_{i}");
+            let now = chrono::Utc::now().to_rfc3339();
+            // SAFETY: test-only data setup.
+            sqlx::query(
+                "INSERT INTO memory_fragments \
+                 (fragment_id, session_id, creator_id, keywords, summary, created_at, ttl, world_id) \
+                 VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)",
+            )
+            .bind(format!("frag_g1_{i:04}"))
+            .bind(format!("sess_g1_{i:04}"))
+            .bind(creator_id)
+            .bind(format!(r#"["{kw}"]"#))
+            .bind(format!("summary {i}"))
+            .bind(&now)
+            .execute(&pool)
+            .await
+            .expect("seed fragment");
+        }
+
+        let state =
+            crate::workspace::WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None)
+                .await;
+
+        // Test 1: force=false, above-gate, no cache → must return "ungenerated"
+        // WITHOUT trying to use capability_registry (which is None in test mode).
+        let req = SoulNarrativeRequest {
+            creator_id: creator_id.to_string(),
+            force_regenerate: Some(false),
+        };
+        let resp = reflect_soul(axum::extract::State(state.clone()), axum::Json(req))
+            .await
+            .expect("should succeed for force=false + ungenerated");
+
+        assert_eq!(resp.state, "ungenerated");
+        assert!(resp.narrative.is_none());
+        assert!(resp.generated_at.is_none());
+        assert!(!resp.stale);
+        assert_eq!(resp.current_fragment_count, 25);
+        assert_eq!(resp.current_distinct_keyword_count, 25);
+        assert_eq!(resp.min_fragment_count, MIN_SOUL_NARRATIVE_FRAGMENTS);
+        assert_eq!(
+            resp.min_distinct_keyword_count,
+            MIN_SOUL_NARRATIVE_DISTINCT_KEYWORDS
+        );
+
+        // Test 2: force=true → tries to synthesize → ServiceUnavailable
+        // (because capability_registry is None in test mode). This proves
+        // the code reaches the synthesis block only when force=true.
+        let req2 = SoulNarrativeRequest {
+            creator_id: creator_id.to_string(),
+            force_regenerate: Some(true),
+        };
+        let err = reflect_soul(axum::extract::State(state.clone()), axum::Json(req2))
+            .await
+            .expect_err("force=true should try synthesis and fail without registry");
+
+        match err {
+            NexusApiError::ServiceUnavailable { .. } => {
+                // Expected: no registry in test mode.
+            }
+            other => panic!(
+                "expected ServiceUnavailable for force=true without registry, got: {other:?}"
+            ),
+        }
+
+        drop(tmp);
+    }
+
+    /// `force_regenerate=false` + above-gate + cached + not stale → `current`.
+    /// The cached row comes from a prior synthesis; the read path returns it
+    /// without calling the LLM.
+    #[tokio::test]
+    async fn reflect_soul_no_force_current_no_llm_call() {
+        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let pool = nexus_local_db::open_pool(&db_path)
+            .await
+            .expect("test pool");
+
+        // Override config.toml to use a creator_id that passes validation.
+        let creator_id = "ctr_testcurrent";
+        let toml_str = format!(
+            "active_creator_id = \"{creator_id}\"\n[active_workspace_slug_by_creator]\n\"{creator_id}\" = \"default\""
+        );
+        std::fs::write(nexus_home.join("config.toml"), toml_str).expect("write config.toml");
+
+        // Seed 25 fragments with 25 distinct keywords → above gate.
+        for i in 0..25 {
+            let kw = format!("unique_kw_{i}");
+            let now = chrono::Utc::now().to_rfc3339();
+            sqlx::query(
+                "INSERT INTO memory_fragments \
+                 (fragment_id, session_id, creator_id, keywords, summary, created_at, ttl, world_id) \
+                 VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)",
+            )
+            .bind(format!("frag_g1cur_{i:04}"))
+            .bind(format!("sess_g1cur_{i:04}"))
+            .bind(creator_id)
+            .bind(format!(r#"["{kw}"]"#))
+            .bind(format!("summary {i}"))
+            .bind(&now)
+            .execute(&pool)
+            .await
+            .expect("seed fragment");
+        }
+
+        // Pre-seed a narrative cache row (simulating a prior synthesis).
+        // Use the actual max_created_at from the DB so the fingerprint matches.
+        let max_created_at: Option<String> =
+            sqlx::query_scalar("SELECT MAX(created_at) FROM memory_fragments WHERE creator_id = ?")
+                .bind(creator_id)
+                .fetch_one(&pool)
+                .await
+                .expect("max_created_at");
+        let now = chrono::Utc::now().to_rfc3339();
+        let fingerprint = nexus_local_db::build_stats_fingerprint(25, max_created_at.as_deref());
+        // SAFETY: test-only — seeds a narrative cache row.
+        sqlx::query(
+            "INSERT OR REPLACE INTO memory_soul_narratives \
+             (creator_id, narrative, generated_at, fragment_count_at_generation, \
+              max_fragment_created_at_at_generation, distinct_keyword_count_cache, \
+              stats_fingerprint, created_at, updated_at) \
+             VALUES (?, 'A test narrative.', ?, 25, ?, 25, ?, ?, ?)",
+        )
+        .bind(creator_id)
+        .bind(&now)
+        .bind(&max_created_at)
+        .bind(&fingerprint)
+        .bind(&now)
+        .bind(&now)
+        .execute(&pool)
+        .await
+        .expect("seed cache");
+
+        let state =
+            crate::workspace::WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None)
+                .await;
+
+        let req = SoulNarrativeRequest {
+            creator_id: creator_id.to_string(),
+            force_regenerate: Some(false),
+        };
+        let resp = reflect_soul(axum::extract::State(state), axum::Json(req))
+            .await
+            .expect("should succeed for force=false + cached current");
+
+        assert_eq!(resp.state, "current");
+        assert_eq!(resp.narrative.as_deref(), Some("A test narrative."));
+        assert!(!resp.stale);
+        assert_eq!(resp.current_fragment_count, 25);
 
         drop(tmp);
     }

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE memory_soul_narratives\n             SET distinct_keyword_count_cache = ?, stats_fingerprint = ?\n             WHERE creator_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "2d130a32a61cde84a6f147c3afb5a567136da27f33e43afadbb10dba96f46cc1"
+}
