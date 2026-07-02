@@ -40,6 +40,7 @@ import type {
   UpdateFindingRequest,
   ValidatePresetRequest,
   WorkSummary,
+  World,
 } from '@42ch/nexus-contracts';
 
 import { useToast } from '@/lib/use-toast';
@@ -653,17 +654,17 @@ export function useReviewMemory() {
       void qc.invalidateQueries({ queryKey: queryKeys.memory.pendingList(creatorId) });
       void qc.invalidateQueries({ queryKey: queryKeys.memory.count(creatorId) });
       void qc.invalidateQueries({ queryKey: queryKeys.memory.fragments(creatorId) });
-      // V1.81 SP-4 auto-refresh: a review produces new fragments, which may
-      // flip a cached narrative from `current` → `stale` (or lift a thin SOUL
-      // over the insufficient-data threshold). Invalidate the whole-Creator
-      // narrative cache so the card re-reads post-review state without a manual
-      // reload (plan §2.4).
-      void qc.invalidateQueries({ queryKey: queryKeys.memory.soulNarrative(creatorId) });
+      // V1.82 auto-refresh: a review produces new fragments, which may flip
+      // any narrative scope (Creator-level or per-World) from `current` →
+      // `stale` (or lift it over the insufficient-data threshold). Invalidate
+      // the whole narrative cache prefix for this creator so every scope
+      // re-reads post-review state without a manual reload.
+      void qc.invalidateQueries({ queryKey: [...queryKeys.memory.all, 'soul-narrative', creatorId] });
     },
   });
 }
 
-// ── Creator SOUL Narrative (V1.81 SP-1) ──────────────────────────────────────
+// ── Creator SOUL Narrative (V1.81 SP-1 → V1.82 per-World) ────────────────────
 
 /**
  * Auto-refresh cadence for the SOUL surface (V1.81 SP-4). Polled so new
@@ -675,7 +676,24 @@ export function useReviewMemory() {
 export const SOUL_REFETCH_MS = 30_000;
 
 /**
- * Read the cached whole-Creator SOUL narrative (V1.81 SP-1).
+ * Read the workspace-scoped world list for the SOUL selector.
+ *
+ * `GET /v1/local/narrative/worlds` returns every Work-backed world (including
+ * zero-fragment worlds) so the selector can surface honest subset-empty states.
+ * The list is workspace-scoped in the single-creator local model; P1 does not
+ * client-filter by owner. V1.82 mocks the response shape against the generated
+ * `World` domain contract until P0 lands the generated list-response type.
+ */
+export function useNarrativeWorlds() {
+  const client = useNexusClient();
+  return useQuery({
+    queryKey: queryKeys.memory.worlds(),
+    queryFn: (): Promise<World[]> => client.listNarrativeWorlds(),
+  });
+}
+
+/**
+ * Read the cached SOUL narrative for the active scope (V1.82).
  *
  * The `/soul/reflect` endpoint is a POST that returns the current cache state
  * when `force_regenerate` is absent — so this is a *read* query shaped as a POST
@@ -683,30 +701,33 @@ export const SOUL_REFETCH_MS = 30_000;
  * GET). It returns one of `ungenerated` / `current` / `stale` /
  * `insufficient_data`, plus the cached narrative text + metadata when present.
  *
- * The narrative is world-agnostic (Creator-level whole); the world projection
- * selector does NOT re-scope this query (plan §0, §2.2). Auto-refreshes on the
- * SOUL poll cadence + after a review mutation (via onSettled invalidation).
+ * `worldId` absent/null reads the whole-Creator narrative; a present `worldId`
+ * reads that world's per-World narrative. The query key includes `worldId` so
+ * the narrative re-fetches when the selector changes and TanStack maintains
+ * exactly one active observer per scope (no duplicate poll timers).
+ * Auto-refreshes on the SOUL poll cadence + after a review mutation.
  */
-export function useSoulNarrative(creatorId: string | undefined) {
+export function useSoulNarrative(creatorId: string | undefined, worldId?: string | null) {
   const client = useNexusClient();
   return useQuery({
-    queryKey: queryKeys.memory.soulNarrative(creatorId ?? ''),
+    queryKey: queryKeys.memory.soulNarrative(creatorId ?? '', worldId),
     queryFn: (): Promise<SoulNarrativeResponse> =>
-      client.reflectSoulNarrative({ creator_id: creatorId! }),
+      client.reflectSoulNarrative({ creator_id: creatorId!, world_id: worldId ?? undefined }),
     enabled: Boolean(creatorId),
     refetchInterval: SOUL_REFETCH_MS,
   });
 }
 
 /**
- * Force-regenerate the whole-Creator SOUL narrative (V1.81 SP-1).
+ * Force-regenerate the SOUL narrative for the active scope (V1.82).
  *
  * Fires `force_regenerate: true` on the CTA ("Reflect on my SOUL" /
- * "Re-reflect"). The caller drives the `generating` UX from `isPending`; on
- * settle the narrative read query is invalidated so the fresh synthesis replaces
- * the cached text. Errors surface as a toast; the read query is still
- * invalidated on error so a partial/failed regeneration does not leave a frozen
- * stale card (matches the review-mutation onSettled discipline).
+ * "Re-reflect"). `worldId` absent/null regenerates the whole-Creator narrative;
+ * a present `worldId` regenerates that world's per-World narrative. The caller
+ * drives the `generating` UX from `isPending`; on settle the matching narrative
+ * read query is invalidated so the fresh synthesis replaces the cached text.
+ * Errors surface as a toast; the read query is still invalidated on error so a
+ * partial/failed regeneration does not leave a frozen stale card.
  */
 export function useReflectSoulNarrative() {
   const client = useNexusClient();
@@ -714,14 +735,20 @@ export function useReflectSoulNarrative() {
   const errorToast = useErrorToast();
   const { toast } = useToast();
   return useMutation({
-    mutationFn: (creatorId: string): Promise<SoulNarrativeResponse> =>
-      client.reflectSoulNarrative({ creator_id: creatorId, force_regenerate: true }),
+    mutationFn: (vars: { creatorId: string; worldId?: string | null }): Promise<SoulNarrativeResponse> =>
+      client.reflectSoulNarrative({
+        creator_id: vars.creatorId,
+        world_id: vars.worldId ?? undefined,
+        force_regenerate: true,
+      }),
     onSuccess: () => {
       toast({ variant: 'success', title: 'SOUL reflected', description: 'Your narrative is up to date.' });
     },
     onError: (error) => errorToast(error, 'Could not reflect your SOUL'),
-    onSettled: (_data, _error, creatorId) => {
-      void qc.invalidateQueries({ queryKey: queryKeys.memory.soulNarrative(creatorId) });
+    onSettled: (_data, _error, vars) => {
+      void qc.invalidateQueries({
+        queryKey: queryKeys.memory.soulNarrative(vars.creatorId, vars.worldId),
+      });
     },
   });
 }
