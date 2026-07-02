@@ -166,7 +166,9 @@ describe('SoulNarrativeCard — five UX states', () => {
     );
     expect(screen.getByText("This world's SOUL is still forming")).toBeInTheDocument();
     expect(
-      screen.getByText(/once it has enough creative experience, Nexus can reflect on its identity/i),
+      screen.getByText(
+        /once it has enough fragments, themes, and creative experience, Nexus can reflect on its identity/i,
+      ),
     ).toBeInTheDocument();
     expect(screen.getByText(/2 fragments captured so far/i)).toBeInTheDocument();
     expect(screen.getByText(/8 more to go/i)).toBeInTheDocument();
