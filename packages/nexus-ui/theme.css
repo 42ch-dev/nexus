@@ -1,0 +1,10 @@
+/**
+ * Nexus brand CSS custom properties — V1.83 foundation.
+ * Consumers import via `@42ch/nexus-ui/theme.css`.
+ * App-specific tokens remain in apps/web/DESIGN*.md (P1/P2 mapping).
+ */
+:root {
+  --nexus-brand-deep-blue: #1e3a5f;
+  --nexus-brand-cyan: #25d1e0;
+  --nexus-brand-white: #ffffff;
+}

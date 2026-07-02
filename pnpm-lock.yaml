@@ -139,6 +139,15 @@ importers:
         specifier: ^5.3.0
         version: 5.9.3
 
+  packages/nexus-ui:
+    devDependencies:
+      tsup:
+        specifier: ^8.0.0
+        version: 8.5.1(jiti@1.21.7)(postcss@8.5.15)(typescript@5.9.3)(yaml@2.9.0)
+      typescript:
+        specifier: ^5.3.0
+        version: 5.9.3
+
   tooling/codegen:
     dependencies:
       glob:
