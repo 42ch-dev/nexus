@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-07-02-v1.82-per-world-narrative-backend"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-07-02"
 ---
 
@@ -123,3 +123,40 @@ generated_at: "2026-07-02"
 | 🟢 Suggestion | 1 |
 
 **Verdict**: Request Changes
+
+## Revalidation
+
+- Revalidated at: 2026-07-02T15:30:00-07:00
+- Re-review scope: targeted fix-wave `git diff db8fc0f7..119fc770` (fix commit `3c7b547c`), limited to prior findings `W-QC3-001 / R-V182P0-QC3-W001` and `W-QC3-002 / R-V182P0-QC3-W002`.
+- Working branch / HEAD verified: `iteration/v1.82` at `119fc770` in `/Users/bibi/workspace/organizations/42ch/nexus`.
+
+### W-QC3-001 / R-V182P0-QC3-W001 — Resolved
+
+`BrowserClient.listNarrativeWorlds` now keeps the `NexusClient` interface as `Promise<World[]>` while unwrapping the daemon envelope internally:
+
+- `apps/web/src/lib/nexus/browser-client.ts:411-413` fetches `this.get<{ worlds: World[] }>("/v1/local/narrative/worlds")` and returns `res.worlds`.
+- `apps/web/src/api/queries.ts:687-692` still exposes `Promise<World[]>` from `client.listNarrativeWorlds()`.
+- `apps/web/src/components/memory/soul-section.tsx:105-107` still passes `worlds.data ?? []` to `WorldSelector`, so the selector receives a real `World[]`, not the `{ worlds }` envelope.
+- P1/worlds tests now mock the real daemon response shape: `soul-section.test.tsx`, `soul-panel.test.tsx`, and `memory-page.test.tsx` all return `HttpResponse.json({ worlds: ... })` for `/v1/local/narrative/worlds`.
+
+### W-QC3-002 / R-V182P0-QC3-W002 — Resolved
+
+`compute_distinct_keyword_count` now uses threshold-saturated semantics and no longer drains the stream after reaching 20 distinct keywords:
+
+- `crates/nexus-local-db/src/soul_narrative.rs:181-194` documents that `20` means "at least 20" and that below-threshold counts scan to EOF and remain exact.
+- `crates/nexus-local-db/src/soul_narrative.rs:235-238` returns `Ok(DISTINCT_KEYWORD_THRESHOLD)` immediately once the distinct set reaches the threshold; the prior drain loop is gone.
+- Tests now encode the intended bounded semantics: above-threshold cases assert `20` (`soul_narrative_keyword_count.rs` and daemon `memory.rs` tests), while below-threshold per-world subsets still assert exact counts (`12`, `8`, etc.).
+- Gate semantics are preserved in `crates/nexus-daemon-runtime/src/api/handlers/memory.rs:1185-1188`: insufficient remains `fragment_count < 10 || distinct_keyword_count < 20`.
+- Creator-level `world_id = None` path is still present in `soul_narrative_fragment_stats` and `compute_distinct_keyword_count`; the per-world tests verify Creator whole remains a distinct cache/stat scope from `Some(world_id)`.
+
+### Regression / New Issue Check
+
+No new blocking issue found in the targeted fix-wave. The steady-state fingerprint cache still returns cached counts without keyword JSON streaming on fingerprint match (`soul_narrative.rs:315-328`). The read-path greploop invariant remains intact: `force=false` returns `insufficient_data` / `ungenerated` / `current` / `stale` before `capability_registry()` is reached, and `reflect_soul_per_world_no_force_ungenerated_no_llm_call` continues to cover `force=false + world` without LLM.
+
+### Revalidation Evidence
+
+- `git diff db8fc0f7..119fc770` — reviewed fix-wave changes for W001 and W002.
+- `pnpm --filter web run test` — passed: 50 test files, 384 tests. Non-failing stderr included existing React Router future-flag warnings, existing `EntityInspector` act warnings, and one MSW unhandled-request warning in `outline-page.test.tsx`; vitest exit code was success.
+- `cargo test -p nexus-local-db -p nexus-daemon-runtime` — passed. Relevant output included 365 daemon-runtime unit tests, daemon-runtime integration suites, 289 local-db unit tests, `soul_narrative_keyword_count` (9/9), `soul_narrative_per_world` (3/3), and doc-tests passing.
+
+**Revalidation Verdict**: Approve — both prior warnings are resolved, and no new Critical/Warning was identified in the targeted re-review scope.
