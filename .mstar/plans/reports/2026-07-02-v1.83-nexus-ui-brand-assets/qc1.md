@@ -3,8 +3,9 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-07-02-v1.83-nexus-ui-brand-assets"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-07-02"
+revalidation_at: "2026-07-02"
 ---
 
 # Code Review Report
@@ -21,9 +22,10 @@ generated_at: "2026-07-02"
 - Review range / Diff basis: `git merge-base iteration/v1.83 HEAD`..`HEAD` on branch `feature/v1.83-nexus-ui-brand-assets`
 - Working branch (verified): `feature/v1.83-nexus-ui-brand-assets`
 - Review cwd (verified): `/Users/bibi/workspace/organizations/42ch/nexus`
-- Files reviewed: 17 (1 commit: `bce85d6d`)
-- Commit range (if not identical to Review range line, explain): `25e126e1..bce85d6d` (single implementation commit atop merge-base with `iteration/v1.83`)
-- Tools run: `git rev-parse`, `git branch`, `git diff`, `git lfs ls-files`, `pnpm --filter @42ch/nexus-ui run typecheck`, `pnpm --filter @42ch/nexus-ui run build`, `xxd` (SVG byte inspection)
+- Files reviewed: 22 (2 commits: `bce85d6d`, `396ec42a`)
+- Commit range (if not identical to Review range line, explain): `25e126e1..396ec42a` (P0 scaffold + W1/W2 fix commit)
+- Tools run (initial): `git rev-parse`, `git branch`, `git diff`, `git lfs ls-files`, `pnpm --filter @42ch/nexus-ui run typecheck`, `pnpm --filter @42ch/nexus-ui run build`, `xxd` (SVG byte inspection)
+- Tools run (revalidation): `git log`, `git show 396ec42a`, `xxd`, Python control-byte scan, `pnpm run prepare` (after `rm -rf dist`)
 
 ## Findings
 
@@ -32,14 +34,9 @@ generated_at: "2026-07-02"
 
 ### 🟡 Warning
 
-- **W1 — Corrupted control character in SVG `<desc>` (all four logo variants)**  
-  Each canonical SVG (`logo-color.svg`, `logo-dark.svg`, `logo-white.svg`, `logo-mono.svg`) uses `aria-labelledby="nexus-logo-title nexus-logo-desc"`, but the `<desc>` text contains ASCII `0x14` (DC4) between “mark” and “rounded” instead of punctuation (e.g. em dash or hyphen). Screen readers that honor `aria-labelledby` may announce garbled content alongside the valid `<title>`.  
-  **Evidence:** `xxd` on `logo-color.svg` shows bytes `6d 61 72 6b 14 20 72 6f 75 6e 64` (“mark\x14 rounded”).  
-  **Fix:** Replace `0x14` with `—` or ` - ` in all four SVG `<desc>` elements; re-verify with `xxd` or `rg` that no control bytes remain.
+- ~~**W1 — Corrupted control character in SVG `<desc>` (all four logo variants)**~~ **Resolved** (see Revalidation)
 
-- **W2 — TypeScript entry points require pre-build; no install-time hook**  
-  `package.json` `main` / `types` / `exports["."].*` resolve to `./dist/*`, but `dist/` is gitignored (consistent with `@42ch/nexus-contracts`). There is no `prepare` / `prepublishOnly` script (contracts has `prepublishOnly` only). P2 `apps/web` consumers will fail type resolution until `pnpm --filter @42ch/nexus-ui run build` is run locally or wired into CI/turbo.  
-  **Fix:** Add a documented build prerequisite for P2 (root turbo pipeline or `prepare` script), or commit built `dist/` if the monorepo policy for publishable packages changes.
+- ~~**W2 — TypeScript entry points require pre-build; no install-time hook**~~ **Resolved** (see Revalidation)
 
 ### 🟢 Suggestion
 
@@ -56,8 +53,8 @@ generated_at: "2026-07-02"
 
 | Finding ID | Source Type | Source Reference | Confidence |
 |------------|-------------|------------------|------------|
-| W1 | manual-reasoning | `xxd packages/nexus-ui/assets/logos/logo-color.svg`; all four `assets/logos/*.svg` | High |
-| W2 | git-diff | `packages/nexus-ui/package.json` exports → `./dist/*`; `.gitignore:83:dist` | High |
+| W1 | manual-reasoning | `xxd packages/nexus-ui/assets/logos/logo-color.svg`; all four `assets/logos/*.svg` | High — **resolved** in `396ec42a` |
+| W2 | git-diff | `packages/nexus-ui/package.json` `prepare` script | High — **resolved** in `396ec42a` |
 | S1 | doc-rule | Root `AGENTS.md` subdirectory index vs `packages/nexus-ui/AGENTS.md` | High |
 | S2 | manual-reasoning | `assets/logos/logo_*.png` vs `logo-*.svg` naming | Medium |
 | S3 | manual-reasoning | Compare `packages/nexus-contracts/package.json` scripts | High |
@@ -73,7 +70,7 @@ generated_at: "2026-07-02"
 | Framework neutrality | Pass | Zero runtime deps; `theme.css` uses generic custom properties |
 | Workspace integration | Pass | Registered under `packages/*` in root `package.json`; lockfile importer `packages/nexus-ui` present |
 | Token palette vs compass VI | Pass | `#1E3A5F`, `#25D1E0`, `#FFFFFF` in `tokens.ts` and `theme.css` |
-| Downstream API stability for P1/P2 | Pass with W2 | Export names are stable; build prerequisite must be explicit before P2 consumption |
+| Downstream API stability for P1/P2 | Pass | Export names stable; `prepare` builds `dist/` on install |
 
 ## Checklist (shared baseline)
 
@@ -95,7 +92,7 @@ generated_at: "2026-07-02"
 ### Maintainability
 - [x] `AGENTS.md` documents boundaries per new-package policy
 - [x] Public API documented in README + `exports`
-- [ ] Install/build ergonomics for workspace consumers (W2)
+- [x] Install/build ergonomics for workspace consumers (`prepare` script — W2 resolved)
 
 ### Tests
 - [ ] No automated tests (acceptable for P0 asset scaffold; P-last may add smoke import test in closure plan)
@@ -105,9 +102,20 @@ generated_at: "2026-07-02"
 | Severity | Count |
 |----------|-------|
 | 🔴 Critical | 0 |
-| 🟡 Warning | 2 |
+| 🟡 Warning | 0 (2 resolved) |
 | 🟢 Suggestion | 3 |
 
-**Verdict**: Request Changes
+**Verdict**: Approve
 
-P0 architecture is coherent and aligns with the V1.83 compass: framework-neutral `@42ch/nexus-ui` with explicit exports, Git LFS for PNG provenance, canonical SVGs, and clear no-React boundary. Resolve W1 (SVG accessibility text corruption) and document or automate the W2 build prerequisite before P2 integration.
+P0 architecture is coherent and aligns with the V1.83 compass: framework-neutral `@42ch/nexus-ui` with explicit exports, Git LFS for PNG provenance, canonical SVGs, and clear no-React boundary. Mandatory warnings W1 and W2 are resolved in `396ec42a`; open suggestions (S1–S3) are non-blocking for P2 integration.
+
+## Revalidation
+
+Targeted re-review of W1 and W2 after fix commit `396ec42a` (`fix(nexus-ui): clean SVG desc text and add prepare build hook`).
+
+| Finding | Disposition | Evidence |
+|---------|-------------|----------|
+| W1 — SVG `<desc>` control char `0x14` | **Resolved** | All four `assets/logos/logo-*.svg` now use em dash: `Nexus network mark — rounded square frame…`. Python scan: `control_bytes=[]` on each file; `xxd` shows `6d 61 72 6b e2 80 94 20 72 6f 75 6e 64` (UTF-8 em dash) instead of `mark\x14 rounded`. |
+| W2 — No install-time build hook | **Resolved** | `package.json` adds `"prepare": "pnpm run build"`. After `rm -rf dist`, `pnpm run prepare` succeeds and produces `dist/index.d.ts`, `dist/index.js`, and related artifacts. Workspace consumers get `dist/` on `pnpm install`. |
+
+Suggestions S1–S3 remain open and do not block approval.
