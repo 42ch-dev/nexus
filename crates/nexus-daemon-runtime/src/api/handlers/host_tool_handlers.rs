@@ -15,7 +15,7 @@ use nexus_kb::KbStore;
 use nexus_local_db::works;
 use nexus_narrative::NarrativeGateway;
 use std::future::Future;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
 
 // Re-import from parent module
@@ -34,7 +34,7 @@ use super::host_tool_executor::{
 /// 5. Audit log (written by caller `execute()`, not here)
 ///
 /// Returns `(creator_id, workspace_slug)` if all gates pass.
-pub(crate) fn admission_pipeline(
+pub(crate) async fn admission_pipeline(
     req: &ToolExecuteRequest,
     state: &WorkspaceState,
 ) -> Result<(String, String), NexusApiError> {
@@ -95,7 +95,7 @@ pub(crate) fn admission_pipeline(
     }
 
     // Gate 3: workspace bounds
-    validate_file_path(req, state)?;
+    validate_file_path(req, state).await?;
 
     Ok((creator_id.unwrap_or_default(), String::new()))
 }
@@ -537,7 +537,10 @@ async fn execute_context_assemble(
 // ─── fs/* Baseline handlers (V1.33, unchanged behavior) ───────────────────
 
 /// Execute `fs/read_text_file` tool.
-fn execute_read_file(
+///
+/// V1.86 T5 (R-V156P0-M004): all blocking `std::fs` operations run on the
+/// tokio blocking pool so the async runtime is not stalled by local disk I/O.
+async fn execute_read_file(
     req: &ToolExecuteRequest,
     state: &WorkspaceState,
 ) -> Result<serde_json::Value, NexusApiError> {
@@ -546,7 +549,8 @@ fn execute_read_file(
         .ok_or_else(|| NexusApiError::InvalidInput {
             field: "parameters.path".into(),
             reason: "must be a string".into(),
-        })?;
+        })?
+        .to_string();
 
     let workspace_path_str = state
         .workspace_path()
@@ -555,17 +559,27 @@ fn execute_read_file(
             reason: "fs/* tools require an active workspace".into(),
         })?;
 
-    let resolved = resolve_guarded_path(Path::new(&workspace_path_str), path_str, true).map_err(
-        |e| match e {
+    let workspace_path = Path::new(&workspace_path_str).to_path_buf();
+    let resolved = resolve_guarded_path_async(workspace_path, path_str.clone(), true)
+        .await
+        .map_err(|e| match e {
             NexusApiError::BadRequest { .. } => NexusApiError::Forbidden {
                 resource: "file".into(),
                 reason: format!("path '{path_str}' is outside the workspace root"),
             },
             other => other,
-        },
-    )?;
+        })?;
 
-    let content = std::fs::read_to_string(&resolved).map_err(|e| NexusApiError::Internal {
+    let content = tokio::task::spawn_blocking({
+        let resolved = resolved.clone();
+        move || std::fs::read_to_string(&resolved)
+    })
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "FILE_READ_PANIC".into(),
+        message: format!("file read task panicked: {e}"),
+    })?
+    .map_err(|e| NexusApiError::Internal {
         code: "FILE_READ_FAILED".into(),
         message: format!("failed to read file {}: {e}", resolved.display()),
     })?;
@@ -576,7 +590,10 @@ fn execute_read_file(
 }
 
 /// Execute `fs/write_text_file` tool.
-fn execute_write_file(
+///
+/// V1.86 T5 (R-V156P0-M004): all blocking `std::fs` operations run on the
+/// tokio blocking pool so the async runtime is not stalled by local disk I/O.
+async fn execute_write_file(
     req: &ToolExecuteRequest,
     state: &WorkspaceState,
 ) -> Result<serde_json::Value, NexusApiError> {
@@ -585,15 +602,16 @@ fn execute_write_file(
         .ok_or_else(|| NexusApiError::InvalidInput {
             field: "parameters.path".into(),
             reason: "must be a string".into(),
-        })?;
+        })?
+        .to_string();
 
-    let content =
-        req.parameters["content"]
-            .as_str()
-            .ok_or_else(|| NexusApiError::InvalidInput {
-                field: "parameters.content".into(),
-                reason: "must be a string".into(),
-            })?;
+    let content = req.parameters["content"]
+        .as_str()
+        .ok_or_else(|| NexusApiError::InvalidInput {
+            field: "parameters.content".into(),
+            reason: "must be a string".into(),
+        })?
+        .to_string();
 
     let workspace_path_str = state
         .workspace_path()
@@ -602,27 +620,35 @@ fn execute_write_file(
             reason: "fs/* tools require an active workspace".into(),
         })?;
 
-    let resolved = resolve_guarded_path(Path::new(&workspace_path_str), path_str, false).map_err(
-        |e| match e {
+    let workspace_path = Path::new(&workspace_path_str).to_path_buf();
+    let resolved = resolve_guarded_path_async(workspace_path, path_str.clone(), false)
+        .await
+        .map_err(|e| match e {
             NexusApiError::BadRequest { .. } => NexusApiError::Forbidden {
                 resource: "file".into(),
                 reason: format!("path '{path_str}' is outside the workspace root"),
             },
             other => other,
-        },
-    )?;
-
-    if let Some(parent) = resolved.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| NexusApiError::Internal {
-            code: "DIR_CREATE_FAILED".into(),
-            message: format!("failed to create directory {}: {}", parent.display(), e),
         })?;
-    }
 
-    std::fs::write(&resolved, content).map_err(|e| NexusApiError::Internal {
-        code: "FILE_WRITE_FAILED".into(),
-        message: format!("failed to write file {}: {e}", resolved.display()),
+    let write_result = tokio::task::spawn_blocking(move || {
+        if let Some(parent) = resolved.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| NexusApiError::Internal {
+                code: "DIR_CREATE_FAILED".into(),
+                message: format!("failed to create directory {}: {}", parent.display(), e),
+            })?;
+        }
+        std::fs::write(&resolved, content).map_err(|e| NexusApiError::Internal {
+            code: "FILE_WRITE_FAILED".into(),
+            message: format!("failed to write file {}: {e}", resolved.display()),
+        })
+    })
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "FILE_WRITE_PANIC".into(),
+        message: format!("file write task panicked: {e}"),
     })?;
+    write_result?;
 
     Ok(serde_json::json!({
         "written": true
@@ -739,11 +765,33 @@ fn load_permission_policy(workspace_path: &str) -> Option<WorkspacePermissionPol
     })
 }
 
+/// Async wrapper around [`resolve_guarded_path`] that runs the blocking
+/// `std::fs::canonicalize` syscalls on the tokio blocking pool.
+///
+/// V1.86 T5 (R-V156P0-M004): the path guard uses synchronous `canonicalize`,
+/// which must not block the async runtime.
+async fn resolve_guarded_path_async(
+    workspace_root: PathBuf,
+    rel_path: String,
+    must_exist: bool,
+) -> Result<PathBuf, NexusApiError> {
+    tokio::task::spawn_blocking(move || {
+        resolve_guarded_path(&workspace_root, &rel_path, must_exist)
+    })
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "PATH_GUARD_PANIC".into(),
+        message: format!("path guard task panicked: {e}"),
+    })?
+}
+
 /// Validate that file paths are within the workspace root (for fs/* tools).
 ///
 /// Uses the shared `resolve_guarded_path` helper so fs/* tools enforce the same
-/// component-wise W-002 guard as manuscript chapter paths.
-fn validate_file_path(
+/// component-wise W-002 guard as manuscript chapter paths. The canonicalize
+/// syscall runs on the tokio blocking pool so admission does not block the
+/// async runtime (V1.86 T5).
+async fn validate_file_path(
     req: &ToolExecuteRequest,
     state: &WorkspaceState,
 ) -> Result<(), NexusApiError> {
@@ -752,7 +800,8 @@ fn validate_file_path(
         .ok_or_else(|| NexusApiError::InvalidInput {
             field: "parameters.path".into(),
             reason: "must be a string".into(),
-        })?;
+        })?
+        .to_string();
 
     let workspace_path_str = state.workspace_path().unwrap_or_default();
     if workspace_path_str.is_empty() {
@@ -762,11 +811,15 @@ fn validate_file_path(
         });
     }
 
-    resolve_guarded_path(Path::new(&workspace_path_str), path_str, false).map_err(|_| {
-        NexusApiError::Forbidden {
-            resource: "file".into(),
-            reason: "path outside workspace root".into(),
-        }
+    resolve_guarded_path_async(
+        Path::new(&workspace_path_str).to_path_buf(),
+        path_str,
+        false,
+    )
+    .await
+    .map_err(|_| NexusApiError::Forbidden {
+        resource: "file".into(),
+        reason: "path outside workspace root".into(),
     })?;
 
     Ok(())
@@ -1095,24 +1148,22 @@ pub(crate) fn registry_context_assemble<'a>(
     Box::pin(execute_context_assemble(req, state, creator_id))
 }
 
-/// Registry wrapper: `fs/read_text_file` — sync → async wrapper (ignores `creator_id`).
+/// Registry wrapper: `fs/read_text_file` — async passthrough (ignores `creator_id`).
 pub(crate) fn registry_read_file<'a>(
     req: &'a ToolExecuteRequest,
     state: &'a WorkspaceState,
     _creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
-    let result = execute_read_file(req, state);
-    Box::pin(async move { result })
+    Box::pin(execute_read_file(req, state))
 }
 
-/// Registry wrapper: `fs/write_text_file` — sync → async wrapper (ignores `creator_id`).
+/// Registry wrapper: `fs/write_text_file` — async passthrough (ignores `creator_id`).
 pub(crate) fn registry_write_file<'a>(
     req: &'a ToolExecuteRequest,
     state: &'a WorkspaceState,
     _creator_id: &'a str,
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
-    let result = execute_write_file(req, state);
-    Box::pin(async move { result })
+    Box::pin(execute_write_file(req, state))
 }
 
 // ─── V1.53 P1: Registry wrappers for DF-46 read-heavy tools ───────────────
