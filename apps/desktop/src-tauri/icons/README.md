@@ -23,7 +23,7 @@ The committed PNG was produced with [sharp](https://sharp.pixelplumbing.com/)
 
 ```bash
 cd apps/desktop/src-tauri/icons/source
-node -e "
+node --input-type=module -e "
 import sharp from 'sharp';
 await sharp('app-icon.svg', { density: 96 })
   .resize(1024, 1024, { fit: 'contain', background: { r: 30, g: 58, b: 95, alpha: 1 } })
