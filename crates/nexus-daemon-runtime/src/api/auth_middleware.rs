@@ -76,9 +76,43 @@ impl DaemonApiConfig {
         (origins, sources)
     }
 
+    /// Format an HTTP `Origin` value for a resolved loopback bind host and port.
+    fn http_origin_for_bind_host(host: &str, port: u16) -> String {
+        let trimmed = host.trim();
+        if trimmed.starts_with('[') || !trimmed.contains(':') {
+            format!("http://{trimmed}:{port}")
+        } else {
+            format!("http://[{trimmed}]:{port}")
+        }
+    }
+
+    fn is_loopback_bind_host(host: &str) -> bool {
+        let h = host
+            .trim()
+            .trim_start_matches('[')
+            .trim_end_matches(']');
+        if h.eq_ignore_ascii_case("localhost") {
+            return true;
+        }
+        h.parse::<std::net::IpAddr>()
+            .map(|ip| ip.is_loopback())
+            .unwrap_or(false)
+    }
+
     /// Resolve allowed origins from defaults plus the env override.
-    fn resolve_allowed_origins(port: u16) -> (Vec<String>, Vec<(String, String)>) {
+    fn resolve_allowed_origins(
+        port: u16,
+        bind_host: Option<&str>,
+    ) -> (Vec<String>, Vec<(String, String)>) {
         let (mut origins, mut sources) = Self::default_allowed_origins(port);
+
+        if let Some(host) = bind_host.filter(|h| Self::is_loopback_bind_host(h)) {
+            let bind_origin = Self::http_origin_for_bind_host(host, port);
+            if !origins.iter().any(|origin| origin == &bind_origin) {
+                origins.push(bind_origin.clone());
+                sources.push((bind_origin, "computed".to_string()));
+            }
+        }
 
         if let Ok(env_str) = std::env::var(Self::ENV_ALLOWED_ORIGINS) {
             for raw in env_str.split(',') {
@@ -117,7 +151,7 @@ impl DaemonApiConfig {
             .ok()
             .and_then(|s| s.parse().ok())
             .unwrap_or(Self::DEFAULT_PORT);
-        let (allowed_origins, allowed_origin_sources) = Self::resolve_allowed_origins(port);
+        let (allowed_origins, allowed_origin_sources) = Self::resolve_allowed_origins(port, None);
 
         if trimmed.is_empty() {
             tracing::warn!(
@@ -144,22 +178,34 @@ impl DaemonApiConfig {
         }
     }
 
-    /// Return a copy of this config with the resolved daemon port updated.
+    /// Return a copy of this config with the resolved daemon listen address updated.
     ///
     /// Used by `boot.rs` after CLI config / transport resolution so the own-origin
-    /// allowlist entry matches the actual listening port.
+    /// allowlist entries match the actual listening host and port.
     #[must_use]
-    pub fn with_resolved_port(self, port: u16) -> Self {
+    pub fn with_resolved_listen_addr(self, port: u16, bind_host: &str) -> Self {
         if self.daemon_port == port {
-            return self;
+            let bind_origin = Self::http_origin_for_bind_host(bind_host, port);
+            if self.allowed_origins.iter().any(|origin| origin == &bind_origin) {
+                return self;
+            }
         }
-        let (allowed_origins, allowed_origin_sources) = Self::resolve_allowed_origins(port);
+        let (allowed_origins, allowed_origin_sources) =
+            Self::resolve_allowed_origins(port, Some(bind_host));
         Self {
             daemon_port: port,
             allowed_origins,
             allowed_origin_sources,
             ..self
         }
+    }
+
+    /// Return a copy of this config with the resolved daemon port updated.
+    ///
+    /// Prefer [`Self::with_resolved_listen_addr`] when the bind host is known.
+    #[must_use]
+    pub fn with_resolved_port(self, port: u16) -> Self {
+        self.with_resolved_listen_addr(port, "127.0.0.1")
     }
 
     /// Create a config for testing in keyed-all mode with a specific key.
@@ -700,6 +746,34 @@ mod tests {
     }
 
     // --- Config unit tests ---
+
+    #[tokio::test]
+    async fn ipv6_loopback_origin_request_is_allowed() {
+        let app =
+            create_test_app(DaemonApiConfig::keyless().with_resolved_listen_addr(8420, "::1"))
+                .await;
+        let response = app
+            .get("/v1/local/creators")
+            .add_header("Origin", "http://[::1]:8420")
+            .await;
+        assert_ne!(
+            response.status_code(),
+            403,
+            "IPv6 loopback bind-host origin should pass Origin gate"
+        );
+    }
+
+    #[test]
+    fn resolve_allowed_origins_includes_configured_bind_host() {
+        let config = DaemonApiConfig::keyless().with_resolved_listen_addr(8420, "::1");
+        assert!(
+            config
+                .allowed_origins
+                .iter()
+                .any(|origin| origin == "http://[::1]:8420"),
+            "configured loopback bind host should be in allowlist"
+        );
+    }
 
     #[test]
     fn daemon_api_config_keyed_mode() {
