@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "updated_at": "2026-07-04T09:00:00+0800",
+  "updated_at": "2026-07-04T01:56:57+0800",
   "plans": [
     {
       "plan_id": "2026-07-03-v1.88-frontend-slate-clear-and-reliability-cleanup",
       "name": "Frontend Slate-Clear and Reliability Cleanup",
-      "status": "InProgress",
+      "status": "InReview",
       "type": "implement",
       "working_branch": "feature/v1.88-frontend-slate-clear-and-reliability-cleanup",
       "merge_target": "iteration/v1.88",
@@ -61,7 +61,7 @@
       "refreshed_at": "2026-07-01",
       "refreshed_reason": "V1.80 wave-1 Done (QA Pass): R-V178P0-QC3-003 (REL-01) + 4 V1.79-QC residuals resolved. Remaining open: 2 P0 accepted low + 1 V1.79 CI-wrapper low."
     },
-    "updated_at": "2026-07-04T09:00:00+0800"
+    "updated_at": "2026-07-04T01:56:57+0800"
   },
   "residual_findings": {
     "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization": [
