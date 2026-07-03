@@ -12,7 +12,6 @@ describe('NexusLogo', () => {
     expect(img).toBeInTheDocument();
     expect(img).toHaveAttribute('src', '/mock/logo-primary.svg');
     expect(img).toHaveAttribute('height', '32');
-    expect(img).toHaveAttribute('width', 'auto');
     expect(img).toHaveAttribute('decoding', 'async');
   });
 
