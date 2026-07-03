@@ -5,12 +5,17 @@
     {
       "plan_id": "2026-07-03-v1.87-nexus-ui-component-library",
       "name": "nexus-ui Component Library Promotion (P0) + manuscript.body.read Path-Guard Fast-Follow (P1)",
-      "status": "Todo",
+      "status": "InReview",
       "type": "implement",
       "working_branch": "feature/v1.87-nexus-ui-component-library",
       "merge_target": "iteration/v1.87",
       "primary_spec": ".mstar/iterations/v1.87-nexus-ui-component-library-delivery-compass-v1.md",
-      "qc_reports": {},
+      "qc_reports": {
+        "qc1": ".mstar/plans/reports/2026-07-03-v1.87-nexus-ui-component-library/qc1.md",
+        "qc2": ".mstar/plans/reports/2026-07-03-v1.87-nexus-ui-component-library/qc2.md",
+        "qc3": ".mstar/plans/reports/2026-07-03-v1.87-nexus-ui-component-library/qc3.md",
+        "consolidated": ".mstar/plans/reports/2026-07-03-v1.87-nexus-ui-component-library/qc-consolidated.md"
+      },
       "metadata": {
         "iteration_refs": "V1.87",
         "spec_integration_branch": "iteration/v1.87",
@@ -56,7 +61,7 @@
       "refreshed_at": "2026-07-01",
       "refreshed_reason": "V1.80 wave-1 Done (QA Pass): R-V178P0-QC3-003 (REL-01) + 4 V1.79-QC residuals resolved. Remaining open: 2 P0 accepted low + 1 V1.79 CI-wrapper low."
     },
-    "updated_at": "2026-07-03T14:30:00+08:00"
+    "updated_at": "2026-07-03T17:35:00+08:00"
   },
   "residual_findings": {
     "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization": [
@@ -6683,11 +6688,17 @@
         "scope": "crates/nexus-daemon-runtime/src/api/handlers/host_tool_handlers.rs:2155-2156",
         "title": "Manuscript body read still uses string-prefix path comparison (same class as Finding 3)",
         "description": "nexus.manuscript.body.read host tool uses abs_body_str.starts_with(&workspace_root) for the non-canonicalized branch — same path-traversal anti-pattern as Finding 3, in a nexus.* tool path outside V1.86 fs/* scope (spec §13). Remote vector closed by T1 so urgency reduced; latent local/agent-exploitable.",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "decision": "defer",
         "owner": "PM",
         "target": "next iteration (fast-follow) or hotfix",
-        "tracking_link": "reports/2026-07-03-v1.86-local-api-trust-hardening/qc-consolidated.md"
+        "tracking_link": "reports/2026-07-03-v1.86-local-api-trust-hardening/qc-consolidated.md",
+        "closed_at": "2026-07-03 (V1.87 P1)",
+        "closure_note": "V1.87 P1 closed: nexus.manuscript.read_range handler (execute_manuscript_read_range) now delegates to resolve_guarded_path (3-step: must_exist determination -> resolve_guarded_path -> BadRequest->InvalidInput mapping). qc2 adversarial probing confirmed the sibling-escape is closed (all probes rejected by canonicalize + component-wise Path::starts_with). Regression test manuscript_read_range_rejects_sibling_escape_body_path reproduces the escape as failing-without-the-fix.",
+        "resolution": {
+          "plan_id": "2026-07-03-v1.87-nexus-ui-component-library",
+          "commit": "4eb26a7c"
+        }
       },
       {
         "id": "R-V186-QC3-PERF-DOUBLE-RESOLVE",
@@ -6714,6 +6725,44 @@
         "owner": "PM",
         "target": "future perf iteration",
         "tracking_link": "reports/2026-07-03-v1.86-local-api-trust-hardening/qc-consolidated.md"
+      }
+    ],
+    "2026-07-03-v1.87-nexus-ui-component-library": [
+      {
+        "id": "R-V187-QC1-S001",
+        "title": "Variant (nexus-logo.tsx) and LogoVariantName (tokens.ts) duplicate the same 4-variant union — unify into one exported type identity",
+        "severity": "low",
+        "source": "qc1 S-001",
+        "scope": "packages/nexus-ui/src/components/nexus-logo.tsx (Variant) vs packages/nexus-ui/src/tokens.ts (LogoVariantName)",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.88+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-07-03-v1.87-nexus-ui-component-library][R-V187-QC1-S001]",
+        "note": "Cosmetic maintainability debt; both enumerate 'primary'|'color'|'white'|'mono'. Optional follow-up."
+      },
+      {
+        "id": "R-V187-QC3-P001",
+        "title": "Migrate remaining sync resolve_guarded_path call sites to resolve_guarded_path_async (honor V1.86 T5 direction R-V156P0-M004)",
+        "severity": "low",
+        "source": "qc3 F-001",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/host_tool_handlers.rs:1435,1502,2136,2280 + outline.rs:159,239 + chapters.rs:209,268",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.88+ (reliability roadmap)",
+        "tracking_link": ".mstar/status.json residual_findings[2026-07-03-v1.87-nexus-ui-component-library][R-V187-QC3-P001]",
+        "note": "V1.87 closed only R-V186-QC1-S005 (manuscript.read_range); the repo-wide sweep was a non-goal. Remaining sync sites are pre-existing, same-class, non-blocking."
+      },
+      {
+        "id": "R-V187-QC3-P002",
+        "title": "Optional React.memo on <NexusMark> if it lands in high-render surfaces (virtualized lists, motion loops)",
+        "severity": "low",
+        "source": "qc3 F-002",
+        "scope": "packages/nexus-ui/src/components/nexus-mark.tsx",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.88+ (if observed)",
+        "tracking_link": ".mstar/status.json residual_findings[2026-07-03-v1.87-nexus-ui-component-library][R-V187-QC3-P002]",
+        "note": "NexusMark is a tiny static SVG; allocation cost negligible at author-action frequency. Reassess only if it enters a render-hot surface."
       }
     ]
   }
