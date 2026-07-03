@@ -6,15 +6,13 @@
  * (e.g. Vite) and pass the resulting URL as `src`.
  */
 
-export type Variant = 'primary' | 'color' | 'white' | 'mono';
+import { logoVariants, type LogoVariantName } from '../tokens';
 
-/** Maps each logo variant to its canonical asset filename. */
-export const VARIANT_FILENAMES: Record<Variant, string> = {
-  primary: 'logo-primary.svg',
-  color: 'logo-color.svg',
-  white: 'logo-white.svg',
-  mono: 'logo-mono.svg',
-};
+/** Backward-compatible alias for the canonical logo variant name. */
+export type Variant = LogoVariantName;
+
+/** Backward-compatible alias; canonical definition lives in {@link ../tokens}. */
+export { logoVariants as VARIANT_FILENAMES };
 
 export interface NexusLogoProps {
   /** Which brand variant to render. */
