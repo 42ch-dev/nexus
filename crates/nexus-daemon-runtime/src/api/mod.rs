@@ -28,6 +28,7 @@ use axum::{
     routing::{delete, get, post},
     Router,
 };
+use std::sync::Arc;
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
 /// Agent Host routes (V1.20 Batch 3).
@@ -450,6 +451,8 @@ fn works_routes() -> Router<WorkspaceState> {
 /// - All other routes (workspace, creators, memory,
 ///   orchestration, agent-host, monitoring).
 pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Router {
+    let auth_config = Arc::new(auth_config);
+
     // --- Unguarded: runtime liveness / status (always accessible) ---
     let runtime_routes = Router::new()
         .route("/v1/local/runtime/health", get(handlers::runtime::health))
@@ -494,7 +497,7 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
         .merge(agent_host_routes())
         // Apply require_api_key middleware to all protected routes
         .route_layer(axum_mw::from_fn_with_state(
-            auth_config.clone(),
+            Arc::clone(&auth_config),
             auth_middleware::require_api_key,
         ));
 
@@ -531,7 +534,7 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
     router
         .layer(cors_layer)
         .layer(axum_mw::from_fn_with_state(
-            auth_config,
+            Arc::clone(&auth_config),
             auth_middleware::require_allowed_origin,
         ))
         // Request ID middleware: runs on ALL requests (before auth),

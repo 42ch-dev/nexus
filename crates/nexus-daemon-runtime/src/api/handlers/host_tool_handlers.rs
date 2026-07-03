@@ -8,14 +8,14 @@
 
 use crate::api::errors::NexusApiError;
 use crate::api::handlers::works::{read_active_creator_id, read_active_workspace_slug, WorkApiDto};
-use crate::api::path_guard::resolve_guarded_path;
+use crate::api::path_guard::resolve_guarded_path_async;
 use crate::capability_registry::host_tool_registry;
 use crate::workspace::WorkspaceState;
 use nexus_kb::KbStore;
 use nexus_local_db::works;
 use nexus_narrative::NarrativeGateway;
 use std::future::Future;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::pin::Pin;
 
 // Re-import from parent module
@@ -94,8 +94,9 @@ pub(crate) async fn admission_pipeline(
         check_fs_tool_permission(&req.tool_name, &policy)?;
     }
 
-    // Gate 3: workspace bounds
-    validate_file_path(req, state).await?;
+    // Gate 3 workspace bounds check intentionally skipped for fs/* tools:
+    // execute_read_file / execute_write_file call resolve_guarded_path_async
+    // before any FS access, making them the single resolution site.
 
     Ok((creator_id.unwrap_or_default(), String::new()))
 }
@@ -765,66 +766,6 @@ fn load_permission_policy(workspace_path: &str) -> Option<WorkspacePermissionPol
     })
 }
 
-/// Async wrapper around [`resolve_guarded_path`] that runs the blocking
-/// `std::fs::canonicalize` syscalls on the tokio blocking pool.
-///
-/// V1.86 T5 (R-V156P0-M004): the path guard uses synchronous `canonicalize`,
-/// which must not block the async runtime.
-async fn resolve_guarded_path_async(
-    workspace_root: PathBuf,
-    rel_path: String,
-    must_exist: bool,
-) -> Result<PathBuf, NexusApiError> {
-    tokio::task::spawn_blocking(move || {
-        resolve_guarded_path(&workspace_root, &rel_path, must_exist)
-    })
-    .await
-    .map_err(|e| NexusApiError::Internal {
-        code: "PATH_GUARD_PANIC".into(),
-        message: format!("path guard task panicked: {e}"),
-    })?
-}
-
-/// Validate that file paths are within the workspace root (for fs/* tools).
-///
-/// Uses the shared `resolve_guarded_path` helper so fs/* tools enforce the same
-/// component-wise W-002 guard as manuscript chapter paths. The canonicalize
-/// syscall runs on the tokio blocking pool so admission does not block the
-/// async runtime (V1.86 T5).
-async fn validate_file_path(
-    req: &ToolExecuteRequest,
-    state: &WorkspaceState,
-) -> Result<(), NexusApiError> {
-    let path_str = req.parameters["path"]
-        .as_str()
-        .ok_or_else(|| NexusApiError::InvalidInput {
-            field: "parameters.path".into(),
-            reason: "must be a string".into(),
-        })?
-        .to_string();
-
-    let workspace_path_str = state.workspace_path().unwrap_or_default();
-    if workspace_path_str.is_empty() {
-        return Err(NexusApiError::Forbidden {
-            resource: "tool_execution".into(),
-            reason: "fs/* tools require an active workspace".into(),
-        });
-    }
-
-    resolve_guarded_path_async(
-        Path::new(&workspace_path_str).to_path_buf(),
-        path_str,
-        false,
-    )
-    .await
-    .map_err(|_| NexusApiError::Forbidden {
-        resource: "file".into(),
-        reason: "path outside workspace root".into(),
-    })?;
-
-    Ok(())
-}
-
 // ─── Audit logging (spec §12.6) ───────────────────────────────────────────
 
 /// Audit tool execution to `SQLite` (Gate 5).
@@ -1432,16 +1373,21 @@ async fn execute_manuscript_chapter_update(
         // W-002: defense-in-depth path guard — ensure the resolved body path
         // stays inside the workspace root before any FS op. Mirrors the chapter
         // PUT handler's resolve_guarded_path behavior.
-        let body_file = resolve_guarded_path(Path::new(&workspace_root), &canonical_path, false)
-            .map_err(|e| match e {
-                NexusApiError::BadRequest { code, .. } if code == "chapter_path_forbidden" => {
-                    NexusApiError::InvalidInput {
-                        field: "body_path".into(),
-                        reason: "body path outside workspace root".into(),
-                    }
+        let body_file = resolve_guarded_path_async(
+            Path::new(&workspace_root).to_path_buf(),
+            canonical_path.clone(),
+            false,
+        )
+        .await
+        .map_err(|e| match e {
+            NexusApiError::BadRequest { code, .. } if code == "chapter_path_forbidden" => {
+                NexusApiError::InvalidInput {
+                    field: "body_path".into(),
+                    reason: "body path outside workspace root".into(),
                 }
-                other => other,
-            })?;
+            }
+            other => other,
+        })?;
 
         if let Some(parent) = body_file.parent() {
             // C-002: use tokio::fs to avoid blocking the async runtime.
@@ -1499,15 +1445,17 @@ async fn execute_manuscript_chapter_update(
                 message: "workspace path not available".to_string(),
             })?;
         let abs_body =
-            resolve_guarded_path(Path::new(&workspace_root), bp, false).map_err(|e| match e {
-                NexusApiError::BadRequest { code, .. } if code == "chapter_path_forbidden" => {
-                    NexusApiError::InvalidInput {
-                        field: "body_path".into(),
-                        reason: "body path outside workspace root".into(),
+            resolve_guarded_path_async(Path::new(&workspace_root).to_path_buf(), bp.clone(), false)
+                .await
+                .map_err(|e| match e {
+                    NexusApiError::BadRequest { code, .. } if code == "chapter_path_forbidden" => {
+                        NexusApiError::InvalidInput {
+                            field: "body_path".into(),
+                            reason: "body path outside workspace root".into(),
+                        }
                     }
-                }
-                other => other,
-            })?;
+                    other => other,
+                })?;
         let abs_tmp = abs_body.with_extension("md.tmp");
         let word_count = req.parameters["content"]
             .as_str()
@@ -2132,14 +2080,19 @@ async fn execute_manuscript_read_range(
     // the component-wise prefix check; a missing-but-in-bounds file falls through
     // to the existing FILE_READ_FAILED behavior below.
     let must_exist = abs_body.exists();
-    let abs_body =
-        resolve_guarded_path(workspace_root_path, &body_path, must_exist).map_err(|e| match e {
-            NexusApiError::BadRequest { message, .. } => NexusApiError::InvalidInput {
-                field: "body_path".into(),
-                reason: message,
-            },
-            other => other,
-        })?;
+    let abs_body = resolve_guarded_path_async(
+        workspace_root_path.to_path_buf(),
+        body_path.clone(),
+        must_exist,
+    )
+    .await
+    .map_err(|e| match e {
+        NexusApiError::BadRequest { message, .. } => NexusApiError::InvalidInput {
+            field: "body_path".into(),
+            reason: message,
+        },
+        other => other,
+    })?;
 
     let content =
         tokio::fs::read_to_string(&abs_body)
@@ -2277,15 +2230,17 @@ async fn execute_manuscript_write(
     // within the workspace root before any FS op. Uses the same canonicalize +
     // component-wise prefix-check helper as the chapter PUT handler.
     let abs_body =
-        resolve_guarded_path(workspace_root_path, &body_path, false).map_err(|e| match e {
-            NexusApiError::BadRequest { code, .. } if code == "chapter_path_forbidden" => {
-                NexusApiError::InvalidInput {
-                    field: "body_path".into(),
-                    reason: "body path outside workspace root".into(),
+        resolve_guarded_path_async(workspace_root_path.to_path_buf(), body_path.clone(), false)
+            .await
+            .map_err(|e| match e {
+                NexusApiError::BadRequest { code, .. } if code == "chapter_path_forbidden" => {
+                    NexusApiError::InvalidInput {
+                        field: "body_path".into(),
+                        reason: "body path outside workspace root".into(),
+                    }
                 }
-            }
-            other => other,
-        })?;
+                other => other,
+            })?;
 
     // Ensure parent directory exists.
     if let Some(parent) = abs_body.parent() {
@@ -2755,4 +2710,116 @@ pub(crate) fn registry_trace_correlation<'a>(
 ) -> Pin<Box<dyn Future<Output = Result<serde_json::Value, NexusApiError>> + Send + 'a>> {
     let result = execute_trace_correlation(req, state, creator_id);
     Box::pin(async move { Ok(result) })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn setup_fs_tool_state() -> (
+        crate::workspace::WorkspaceState,
+        crate::test_utils::TestTempRoot,
+    ) {
+        let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
+        let workspace_dir = tmp.path().join("creative");
+        std::fs::create_dir_all(&workspace_dir).unwrap();
+        let state = crate::workspace::WorkspaceState::new_for_testing(
+            nexus_home,
+            db_path,
+            Some(workspace_dir.to_string_lossy().to_string()),
+        )
+        .await;
+        (state, tmp)
+    }
+
+    /// V1.88 T3 (R-V187-QC3-P001): fs/write_text_file resolves an in-bounds
+    /// path asynchronously and writes the file.
+    #[tokio::test]
+    async fn execute_write_file_accepts_in_bounds_path() {
+        let (state, _tmp) = setup_fs_tool_state().await;
+        let req = ToolExecuteRequest {
+            tool_name: "fs/write_text_file".to_string(),
+            parameters: serde_json::json!({
+                "path": "notes/hello.txt",
+                "content": "hello world"
+            }),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = execute_write_file(&req, &state).await;
+        assert!(result.is_ok(), "in-bounds write should succeed: {result:?}");
+    }
+
+    /// V1.88 T3 (R-V187-QC3-P001): fs/write_text_file rejects a relative path
+    /// that escapes the workspace root before any FS access.
+    #[tokio::test]
+    async fn execute_write_file_rejects_escape_path() {
+        let (state, _tmp) = setup_fs_tool_state().await;
+        let req = ToolExecuteRequest {
+            tool_name: "fs/write_text_file".to_string(),
+            parameters: serde_json::json!({
+                "path": "../evil.txt",
+                "content": "stolen"
+            }),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = execute_write_file(&req, &state).await;
+        assert!(result.is_err(), "escape path should be rejected");
+        match result {
+            Err(NexusApiError::Forbidden { resource, .. }) => {
+                assert_eq!(resource, "file");
+            }
+            Err(other) => panic!("expected Forbidden file error, got {other:?}"),
+            Ok(_) => panic!("expected error"),
+        }
+    }
+
+    /// V1.88 T3 (R-V187-QC3-P001): fs/read_text_file resolves an in-bounds
+    /// path asynchronously and returns the file content.
+    #[tokio::test]
+    async fn execute_read_file_accepts_in_bounds_path() {
+        let (state, _tmp) = setup_fs_tool_state().await;
+        let root = state.workspace_path().expect("workspace path");
+        let file_path = std::path::PathBuf::from(&root).join("notes/readme.txt");
+        std::fs::create_dir_all(file_path.parent().unwrap()).unwrap();
+        std::fs::write(&file_path, "file content").unwrap();
+
+        let req = ToolExecuteRequest {
+            tool_name: "fs/read_text_file".to_string(),
+            parameters: serde_json::json!({ "path": "notes/readme.txt" }),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = execute_read_file(&req, &state).await;
+        assert!(result.is_ok(), "in-bounds read should succeed: {result:?}");
+        let value = result.unwrap();
+        assert_eq!(value["content"], "file content");
+    }
+
+    /// V1.88 T3 (R-V187-QC3-P001): fs/read_text_file rejects a relative path
+    /// that escapes the workspace root before any FS access.
+    #[tokio::test]
+    async fn execute_read_file_rejects_escape_path() {
+        let (state, _tmp) = setup_fs_tool_state().await;
+        let req = ToolExecuteRequest {
+            tool_name: "fs/read_text_file".to_string(),
+            parameters: serde_json::json!({ "path": "../evil.txt" }),
+            session_id: None,
+            request_id: None,
+            caller_kind: None,
+        };
+        let result = execute_read_file(&req, &state).await;
+        assert!(result.is_err(), "escape path should be rejected");
+        match result {
+            Err(NexusApiError::Forbidden { resource, .. }) => {
+                assert_eq!(resource, "file");
+            }
+            Err(other) => panic!("expected Forbidden file error, got {other:?}"),
+            Ok(_) => panic!("expected error"),
+        }
+    }
 }
