@@ -108,7 +108,7 @@
       "iteration": "V1.86",
       "type": "implement",
       "task_category": "logic",
-      "status": "Todo",
+      "status": "InReview",
       "primary_spec": ".mstar/iterations/v1.86-local-api-trust-hardening-delivery-compass-v1.md",
       "working_branch": "feature/v1.86-local-api-trust-hardening",
       "merge_target": "iteration/v1.86",
@@ -119,8 +119,10 @@
           "V1.86"
         ],
         "spec_integration_branch": "iteration/v1.86",
-        "merge_target": "iteration/v1.86"
-      }
+        "merge_target": "iteration/v1.86",
+        "batch_progress": "Batch 1 (T1-T3) + Batch 2 (T4-T8) complete; plan InReview; HEAD ec54e15a"
+      },
+      "implementation_commit": "ec54e15a"
     }
   ],
   "metadata": {
@@ -164,7 +166,7 @@
       "refreshed_at": "2026-07-01",
       "refreshed_reason": "V1.80 wave-1 Done (QA Pass): R-V178P0-QC3-003 (REL-01) + 4 V1.79-QC residuals resolved. Remaining open: 2 P0 accepted low + 1 V1.79 CI-wrapper low."
     },
-    "updated_at": "2026-07-03T12:00:00+08:00"
+    "updated_at": "2026-07-03T13:00:00+08:00"
   },
   "residual_findings": {
     "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization": [
@@ -6757,6 +6759,32 @@
         "tracking_link": ".mstar/status.json residual_findings[2026-07-03-v1.85-closure][R-V185CL-QC1-S001]",
         "note": "Trivial doc accuracy; both are brand PNG provenance. Accept as-is.",
         "lifecycle": "open"
+      }
+    ],
+    "2026-07-03-v1.86-local-api-trust-hardening": [
+      {
+        "id": "R-V186-REGRESS-M004",
+        "severity": "medium",
+        "title": "Regression-of-resolution: R-V156P0-M004 prior resolution did not hold",
+        "description": "R-V156P0-M004 (blocking sync I/O in the async fs/* handler) was marked lifecycle:resolved in V1.58 (commit 764cee49), but execute_read_file still used std::fs::read_to_string on current main. V1.86 T5 (commit 42335a16) moved the fs read/write + path-guard canonicalize behind tokio::task::spawn_blocking and converted execute_* / admission_pipeline / validate_file_path to async.",
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-07-03-v1.86-local-api-trust-hardening",
+          "commit": "42335a16",
+          "reason": "actually moved to spawn_blocking; prior resolution was insufficient"
+        }
+      },
+      {
+        "id": "R-V186-REGRESS-W001",
+        "severity": "medium",
+        "title": "Regression-of-resolution: R-V157P1-W001 prior resolution did not fully hold",
+        "description": "R-V157P1-W001 (privileged fs/* host-tool path coverage) was marked lifecycle:resolved in V1.58 (commit e78c9307), but the fs/* host-tool execution surface still lacked tests for sibling-prefix escape, symlink escape, and the worker-IPC caller path. V1.86 T4 (commit 0eb9aa4f) backfilled these (Batch 1 T1-T3 already covered ../ and absolute-path escapes).",
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-07-03-v1.86-local-api-trust-hardening",
+          "commit": "0eb9aa4f",
+          "reason": "backfilled missing privileged-path coverage; prior resolution was insufficient"
+        }
       }
     ]
   }
