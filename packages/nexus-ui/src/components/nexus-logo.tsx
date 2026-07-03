@@ -40,7 +40,6 @@ export function NexusLogo({
       src={src}
       alt={label}
       height={size}
-      width="auto"
       decoding="async"
       className={className}
     />

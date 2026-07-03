@@ -5,6 +5,8 @@
  * the package stays bundler-agnostic. Color is inherited via `currentColor`.
  */
 
+import { useId } from 'react';
+
 import { logoMinSizePx } from '../tokens';
 
 export interface NexusMarkProps {
@@ -20,6 +22,7 @@ export function NexusMark({
   className,
   size = logoMinSizePx,
 }: NexusMarkProps) {
+  const titleId = useId();
   return (
     <svg
       xmlns="http://www.w3.org/2000/svg"
@@ -28,9 +31,9 @@ export function NexusMark({
       width={size}
       height={size}
       className={className}
-      aria-labelledby="nexus-mark-title"
+      aria-labelledby={titleId}
     >
-      <title id="nexus-mark-title">{label}</title>
+      <title id={titleId}>{label}</title>
       <g
         fill="none"
         stroke="currentColor"

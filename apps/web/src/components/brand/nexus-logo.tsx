@@ -19,8 +19,8 @@ export interface NexusLogoProps {
  * `sidebar.tsx` and `header.tsx`.
  */
 export function NexusLogo({ label = 'Nexus', className }: NexusLogoProps) {
-  const { theme } = useTheme();
-  const variant = theme === 'dark' ? 'color' : 'primary';
+  const { resolvedTheme } = useTheme();
+  const variant = resolvedTheme === 'dark' ? 'color' : 'primary';
   const src = variant === 'color' ? logoColor : logoPrimary;
 
   return (
