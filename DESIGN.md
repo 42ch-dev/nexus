@@ -118,14 +118,14 @@ components:
 
 This file is the **cross-application brand SSOT** for Nexus. It defines canonical brand token names, values, accessibility intent, logo rules, and voice guidance. App-specific design files (for example `apps/web/DESIGN*.md`) are **consumption mappings** — they may alias or extend these tokens for Tailwind/CSS/shadcn consumers but must not invent parallel brand values.
 
-**Token hierarchy (V1.83):**
+**Token hierarchy:**
 
 1. Root `DESIGN.md` / `DESIGN.dark.md` — brand contract (this file)
 2. `packages/nexus-ui` (`@42ch/nexus-ui`) — package-consumable tokens, `theme.css`, logo assets
 3. `apps/web/DESIGN*.md` — Web CSS variable and component-token mapping
-4. `apps/web` implementation — applies mapped tokens in shell and primitives (P2)
+4. `apps/web` implementation — applies mapped tokens in shell and primitives
 
-**Author experience intent:** Nexus should feel like a calm, trustworthy creative workspace — recognizable from the shell, low-distraction, with clear action hierarchy. Brand visibility in V1.83 targets navigation identity, focus states, and base primitives — not full-page redesign.
+**Author experience intent:** Nexus should feel like a calm, trustworthy creative workspace — recognizable from the shell, low-distraction, with clear action hierarchy. Brand visibility targets navigation identity, focus states, and base primitives — not full-page redesign.
 
 ---
 
@@ -271,9 +271,9 @@ Canonical SVG assets ship from `@42ch/nexus-ui/assets/logos/`. PNG sources are p
 - `@42ch/nexus-ui/theme.css` — brand CSS custom properties
 - `@42ch/nexus-ui/assets/logos/*.svg` — logo assets
 
-React component exports are **out of scope** for V1.83. Future `nexus-platform` consumption should use only documented package entries — no deep `src/` imports.
+React component exports are **out of scope** for the package contract. Future `nexus-platform` consumption should use only documented package entries — no deep `src/` imports.
 
-Extended brand scales (`brand-deep-blue-800`, neutrals, semantic accents) are defined here first; package `theme.css` may grow in a later plan after P2 proves stable usage. P2 Web implementation should map from root tokens via `apps/web/DESIGN*.md`, not hard-code hex values.
+Extended brand scales (`brand-deep-blue-800`, neutrals, semantic accents) are defined here first; package `theme.css` may grow in a later plan after Web usage is stable. Web implementation should map from root tokens via `apps/web/DESIGN*.md`, not hard-code hex values.
 
 ---
 
@@ -287,7 +287,7 @@ Extended brand scales (`brand-deep-blue-800`, neutrals, semantic accents) are de
 
 ---
 
-## P2 Implementation Notes
+## Implementation Notes
 
 Locked token names for `@frontend-dev`:
 
@@ -301,6 +301,6 @@ Locked token names for `@frontend-dev`:
 | `brand-deep-blue` | `brand-deep-blue` (new) | same name | Explicit brand CSS vars |
 | `brand-cyan` | `brand-cyan` (new) | same name | Explicit brand CSS vars |
 
-**Files P2 may edit:** `apps/web/src/index.css`, `apps/web/tailwind.config.ts`, shell layout components, `src/components/ui/*` primitives. **Do not** rename root tokens or package export paths without routing back through P1/P0.
+**Implementation files:** `apps/web/src/index.css`, `apps/web/tailwind.config.ts`, shell layout components, `src/components/ui/*` primitives. **Do not** rename root tokens or package export paths without routing back through the brand token owners.
 
-**Hardcoded rgba tints** in canvas/SOUL/findings tokens that reference legacy blue `rgba(0,107,255,…)` should be re-tinted to `rgba(30,58,95,…)` (light) or `rgba(37,209,224,…)` (dark) during P2 — names stay frozen.
+**Hardcoded rgba tints** in canvas/SOUL/findings tokens that reference legacy blue `rgba(0,107,255,…)` should be re-tinted to `rgba(30,58,95,…)` (light) or `rgba(37,209,224,…)` (dark) when CSS mapping consumes these tokens — names stay frozen.

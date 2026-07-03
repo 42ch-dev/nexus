@@ -7,12 +7,16 @@
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
+    "icons:compose": "node src-tauri/icons/source/compose-app-icon.mjs",
+    "icons:generate": "pnpm run icons:compose && tauri icon src-tauri/icons/source/source-1024.png && rm -rf src-tauri/icons/ios src-tauri/icons/android",
     "tauri": "tauri",
+    "predev": "pnpm run icons:generate",
     "dev": "tauri dev",
     "build": "tauri build"
   },
   "devDependencies": {
-    "@tauri-apps/cli": "^2.1.0"
+    "@tauri-apps/cli": "^2.1.0",
+    "sharp": "^0.34.3"
   },
   "engines": {
     "node": ">=20.0.0",

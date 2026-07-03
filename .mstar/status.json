@@ -1,17 +1,118 @@
 {
   "version": 1,
-  "updated_at": "2026-07-02T19:30:00+08:00",
-  "plans": [],
+  "updated_at": "2026-07-03T10:00:00+08:00",
+  "plans": [
+    {
+      "plan_id": "2026-07-03-v1.85-compass-and-plan-stubs",
+      "name": "P-1 — Prepare (compass + plan stubs)",
+      "iteration": "V1.85",
+      "type": "prepare",
+      "status": "Done",
+      "primary_spec": ".mstar/iterations/v1.85-app-icon-branding-delivery-compass-v1.md",
+      "working_branch": null,
+      "merge_target": "iteration/v1.85",
+      "qc_reports": [
+        "skipped — prepare/harness-docs plan; reviewed via Phase 1 Review & Edit chain (product-manager -> architect -> writing-specialist -> PM lock)"
+      ],
+      "metadata": {
+        "plan_index": "P-1",
+        "iteration_refs": [
+          "V1.85"
+        ]
+      },
+      "completion_note": "Compass locked, 4 plans registered, status.json + README index updated, Review & Edit chain complete."
+    },
+    {
+      "plan_id": "2026-07-03-v1.85-app-icon-branding",
+      "name": "P0 — App Icon Branding",
+      "iteration": "V1.85",
+      "type": "implement",
+      "task_category": "visual",
+      "status": "Done",
+      "primary_spec": ".mstar/iterations/v1.85-app-icon-branding-delivery-compass-v1.md",
+      "working_branch": "feature/v1.85-app-icon-branding",
+      "merge_target": "iteration/v1.85",
+      "parallel_with": "2026-07-03-v1.85-brand-and-ci-doc-hygiene",
+      "qc_reports": [
+        ".mstar/plans/reports/2026-07-03-v1.85-closure/qc1.md",
+        "qc2.md",
+        "qc3.md"
+      ],
+      "metadata": {
+        "plan_index": "P0",
+        "iteration_refs": [
+          "V1.85"
+        ],
+        "spec_integration_branch": "iteration/v1.85",
+        "merge_target": "iteration/v1.85"
+      },
+      "implementation_commit": "dc0c8057",
+      "merge_commit": "d4bb8a92",
+      "qc_verdict": "Approve (consolidated, clean first pass)"
+    },
+    {
+      "plan_id": "2026-07-03-v1.85-brand-and-ci-doc-hygiene",
+      "name": "P1 — Brand/CI Doc Hygiene",
+      "iteration": "V1.85",
+      "type": "implement",
+      "task_category": "docs",
+      "status": "Done",
+      "primary_spec": ".mstar/iterations/v1.85-app-icon-branding-delivery-compass-v1.md",
+      "closes_residuals": [
+        "R-V184CL-QC1-S001",
+        "R-V184CL-QC2-S001"
+      ],
+      "working_branch": "feature/v1.85-brand-and-ci-doc-hygiene",
+      "merge_target": "iteration/v1.85",
+      "parallel_with": "2026-07-03-v1.85-app-icon-branding",
+      "qc_reports": [
+        ".mstar/plans/reports/2026-07-03-v1.85-closure/qc1.md",
+        "qc2.md",
+        "qc3.md"
+      ],
+      "metadata": {
+        "plan_index": "P1",
+        "iteration_refs": [
+          "V1.85"
+        ],
+        "spec_integration_branch": "iteration/v1.85",
+        "merge_target": "iteration/v1.85"
+      },
+      "implementation_commit": "d0982aa9",
+      "merge_commit": "030d71c6",
+      "qc_verdict": "Approve (consolidated)"
+    },
+    {
+      "plan_id": "2026-07-03-v1.85-closure",
+      "name": "P-last — QC, QA, Compound, and Closeout",
+      "iteration": "V1.85",
+      "type": "closure",
+      "status": "Done",
+      "primary_spec": ".mstar/iterations/v1.85-app-icon-branding-delivery-compass-v1.md",
+      "working_branch": null,
+      "merge_target": "iteration/v1.85",
+      "qc_reports": [],
+      "metadata": {
+        "plan_index": "P-last",
+        "iteration_refs": [
+          "V1.85"
+        ]
+      },
+      "qc_consolidated_verdict": "Approve (qc1+qc2+qc3, clean)",
+      "qa_report": ".mstar/plans/reports/2026-07-03-v1.85-closure/qa.md",
+      "qa_verdict": "Pass-with-deferred-GUI"
+    }
+  ],
   "metadata": {
-    "integration_branch": null,
-    "integration_branch_retired": true,
+    "integration_branch": "iteration/v1.85",
+    "integration_branch_retired": false,
     "last_integration_branch": "iteration/v1.84",
     "integration_merge_target": "main",
     "iteration_base_branch": "main",
     "target_branch": "main",
-    "spec_integration_branch": "iteration/v1.84",
-    "latest_active_iteration": "V1.84 completed (2026-07-02): Brand Polish and Token Consolidation — merged via PR #111",
-    "latest_active_compass": ".mstar/iterations/v1.84-brand-polish-and-token-consolidation-delivery-compass-v1.md",
+    "spec_integration_branch": "iteration/v1.85",
+    "latest_active_iteration": "V1.85 active: App Icon Branding — replace placeholder Tauri app icons with Nexus-branded icons (tauri icon regenerate) + close 2 V1.84 low residuals (DESIGN.md doc drift + LFS comment)",
+    "latest_active_compass": ".mstar/iterations/v1.85-app-icon-branding-delivery-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
@@ -43,7 +144,7 @@
       "refreshed_at": "2026-07-01",
       "refreshed_reason": "V1.80 wave-1 Done (QA Pass): R-V178P0-QC3-003 (REL-01) + 4 V1.79-QC residuals resolved. Remaining open: 2 P0 accepted low + 1 V1.79 CI-wrapper low."
     },
-    "updated_at": "2026-07-02"
+    "updated_at": "2026-07-03"
   },
   "residual_findings": {
     "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization": [
@@ -6595,7 +6696,13 @@
         "target": "V1.85+ doc hygiene",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-02-v1.84-closure][R-V184CL-QC1-S001]",
         "note": "Pre-existing V1.83 doc drift; V1.84 consolidated the index.css token path but did not amend the DESIGN.md prose. Low; defer to a future doc-hygiene pass.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-07-03",
+        "resolution": {
+          "plan_id": "2026-07-03-v1.85-brand-and-ci-doc-hygiene",
+          "commit": "d0982aa9"
+        },
+        "closure_note": "Closed by V1.85 P1: DESIGN.md brand-blue prose amended to V1.84 token reality / LFS-purpose comment added at CI checkouts."
       },
       {
         "id": "R-V184CL-QC2-S001",
@@ -6608,6 +6715,27 @@
         "target": "V1.85+",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-02-v1.84-closure][R-V184CL-QC2-S001]",
         "note": "Trivial doc nit; .gitattributes already scopes LFS to brand PNGs. Accept as-is.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-07-03",
+        "resolution": {
+          "plan_id": "2026-07-03-v1.85-brand-and-ci-doc-hygiene",
+          "commit": "d0982aa9"
+        },
+        "closure_note": "Closed by V1.85 P1: DESIGN.md brand-blue prose amended to V1.84 token reality / LFS-purpose comment added at CI checkouts."
+      }
+    ],
+    "2026-07-03-v1.85-closure": [
+      {
+        "id": "R-V185CL-QC1-S001",
+        "title": "LFS-purpose CI comment enumerates only nexus-ui logo PNGs; now also covers apps/desktop app-icon source PNGs (comment scope stale)",
+        "severity": "low",
+        "source": "qc1 S1",
+        "scope": ".github/workflows/desktop-build.yml lfs:true comment",
+        "decision": "accept",
+        "owner": "@ops-engineer",
+        "target": "V1.86+",
+        "tracking_link": ".mstar/status.json residual_findings[2026-07-03-v1.85-closure][R-V185CL-QC1-S001]",
+        "note": "Trivial doc accuracy; both are brand PNG provenance. Accept as-is.",
         "lifecycle": "open"
       }
     ]

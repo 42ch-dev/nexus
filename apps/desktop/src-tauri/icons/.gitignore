@@ -1,0 +1,6 @@
+# Generated desktop app icons — rebuilt from source/ via `pnpm --filter desktop run icons:generate`
+*
+!README.md
+!source/
+!source/**
+!.gitignore
