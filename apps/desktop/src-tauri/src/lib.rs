@@ -111,9 +111,11 @@ fn resolve_workspace_root() -> Option<PathBuf> {
 ///
 /// There is a small race window between canonicalizing the workspace root and
 /// canonicalizing the requested path: a local attacker with filesystem access
-/// could replace either path during that window. This guard is authoritative
-/// for the single-user local desktop context; adversarial multi-user FS access
-/// is out of V1.66/V1.67 scope and tracked by `R-V166-QC2-TOCTOU`.
+/// could replace either path during that window. Per the V1.86 trust-boundary
+/// spec, this is "racy-correct" rather than "racy-incorrect" for the
+/// single-user local desktop context: the practical risk is bounded by that
+/// threat model, while adversarial multi-user FS access is out of scope
+/// (`R-V166-QC2-TOCTOU`).
 fn guard_path(requested: &str, workspace_root: &WorkspaceRoot) -> Result<PathBuf, PathGuardError> {
     let root = workspace_root
         .0
