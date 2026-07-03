@@ -166,7 +166,7 @@
       "refreshed_at": "2026-07-01",
       "refreshed_reason": "V1.80 wave-1 Done (QA Pass): R-V178P0-QC3-003 (REL-01) + 4 V1.79-QC residuals resolved. Remaining open: 2 P0 accepted low + 1 V1.79 CI-wrapper low."
     },
-    "updated_at": "2026-07-03T13:00:00+08:00"
+    "updated_at": "2026-07-03T13:35:00+08:00"
   },
   "residual_findings": {
     "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization": [
@@ -6785,6 +6785,45 @@
           "commit": "0eb9aa4f",
           "reason": "backfilled missing privileged-path coverage; prior resolution was insufficient"
         }
+      },
+      {
+        "id": "R-V186-QC1-S005",
+        "severity": "medium",
+        "source": "qc1",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/host_tool_handlers.rs:2155-2156",
+        "title": "Manuscript body read still uses string-prefix path comparison (same class as Finding 3)",
+        "description": "nexus.manuscript.body.read host tool uses abs_body_str.starts_with(&workspace_root) for the non-canonicalized branch — same path-traversal anti-pattern as Finding 3, in a nexus.* tool path outside V1.86 fs/* scope (spec §13). Remote vector closed by T1 so urgency reduced; latent local/agent-exploitable.",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "PM",
+        "target": "next iteration (fast-follow) or hotfix",
+        "tracking_link": "reports/2026-07-03-v1.86-local-api-trust-hardening/qc-consolidated.md"
+      },
+      {
+        "id": "R-V186-QC3-PERF-DOUBLE-RESOLVE",
+        "severity": "low",
+        "source": "qc3",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/host_tool_handlers.rs",
+        "title": "resolve_guarded_path_async runs twice per fs/* call",
+        "description": "admission validate_file_path (must_exist=false) + execute_* (must_exist=true) both resolve; negligible for local single-user.",
+        "lifecycle": "open",
+        "decision": "accept",
+        "owner": "PM",
+        "target": "future perf iteration",
+        "tracking_link": "reports/2026-07-03-v1.86-local-api-trust-hardening/qc-consolidated.md"
+      },
+      {
+        "id": "R-V186-QC3-PERF-ARC-CONFIG",
+        "severity": "low",
+        "source": "qc3",
+        "scope": "crates/nexus-daemon-runtime/src/api/mod.rs",
+        "title": "DaemonApiConfig cloned per-request by axum State",
+        "description": "Arc<...> wrapper would zero-cost; clone sites at router construction are one-time (confirmed), so impact is small.",
+        "lifecycle": "open",
+        "decision": "accept",
+        "owner": "PM",
+        "target": "future perf iteration",
+        "tracking_link": "reports/2026-07-03-v1.86-local-api-trust-hardening/qc-consolidated.md"
       }
     ]
   }
