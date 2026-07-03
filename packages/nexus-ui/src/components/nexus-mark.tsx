@@ -5,7 +5,7 @@
  * the package stays bundler-agnostic. Color is inherited via `currentColor`.
  */
 
-import { useId } from 'react';
+import { memo, useId } from 'react';
 
 import { logoMinSizePx } from '../tokens';
 
@@ -17,7 +17,7 @@ export interface NexusMarkProps {
   size?: number;
 }
 
-export function NexusMark({
+function NexusMarkImpl({
   label = 'Nexus',
   className,
   size = logoMinSizePx,
@@ -60,3 +60,9 @@ export function NexusMark({
     </svg>
   );
 }
+
+/**
+ * Static SVG with no derived state. Memoized defensively for future high-render
+ * surfaces (lists, animations) without adding measurable cost today.
+ */
+export const NexusMark = memo(NexusMarkImpl);

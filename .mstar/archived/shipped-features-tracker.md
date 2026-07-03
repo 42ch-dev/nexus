@@ -6,7 +6,7 @@
 **Location**: Top-level harness archive (`.mstar/archived/`) — not under `archived/knowledge/` (implementation knowledge supersession).  
 **Split from**: [deferred-features-cross-version-tracker.md](../knowledge/deferred-features-cross-version-tracker.md) §4–§5 (2026-05-30 restructure)  
 **Created**: 2026-05-30  
-**Last updated**: 2026-06-22 (V1.57 closeout: 7 plans all Done — P-1 prepare (compass + 7 plan stubs + status.json + tracker activation) + P0 Spec Governance (bridge→Master draft + acp §4 roster rewrite 41 rows + capability::Registry consolidation + R-V156P3-S003 field drops re-introduction) + P1 Daemon Refactor (host_tool_executor.rs 4298→349 lines + 3 caller entry points CLI/worker/HTTP all dispatching through `capability::Registry::dispatch` + `nexus42 host-call` debug-only subcommand + CdnConfig constructor-injection closing R-V156P1-M002 + 4 spec amendments Draft overlays cli-spec.md §6.2M + daemon-runtime.md + local-runtime-boundary.md + orchestration-engine.md §6.4) + P2 V1.56 Carry-Forwards (R-V156P1-M001 schema rename `agent_count`→`capability_count` with backward-compat serde aliases + 5 reproducer tests in `schema_rename_compliance.rs`) + P3 Worker IPC (dynamic allowlist 1→18 IDs derived from `CapabilityRegistry::lookup()` + 54-case cross-caller E2E in `cross_caller_e2e.rs` covering all 18 IDs × 3 caller paths + profile-set non-registration verified + orchestration-engine.md §6.4 + daemon-runtime.md updates) + P-mid meta tracking (3-wave QC rhythm + 12 QC reports + 3 targeted re-reviews + 1 mid-QA) + P-last closeout (bridge Master promotion + capability-registry.md fold-in + Profile B compaction + shipped-features-tracker V1.57 snapshot + deferred-features-tracker V1.57 ship line + DF-46 reduced + tech-debt rollup + report-only QA); 3 V1.57 carry-forwards CLOSED (R-V156P1-M001/M002/P3-S003); 3 new V1.57+ residuals filed (R-V157P0-L001/L002 + R-V157P1-W001); DF-46 reduced (not Closed — 2 publish.* IDs still OUT per DF-59); wire contracts changed (3-caller adapter topology + new `nexus42 host-call` subcommand + 41-row acp §4 roster + bridge→Master spec promotion)
+**Last updated**: 2026-07-04 (V1.88 hygiene: archived 8 shipped/cancelled tracker rows from deferred-features-cross-version-tracker.md — BL-10, BL-12, PF-ESSAY, PF-GAME-BIBLE, PF-SCRIPT, FEAT-WORLD-KB-RELATIONSHIPS, REL-01, DF-49)
 
 **Last updated (V1.55 history)**: 2026-06-22 (V1.55 closeout: 7 plans all Done — P-1 prepare + P0 DF-43 SQLite persistence / crate-model alignment (closed) + P1 DF-31 workspace interface skeleton + P2 game-bible Depth 3.5 (design-writing + design 五问 rubric + section completion detection + KB extraction; Master spec) + P3 Script profile scaffold (V1.54-style parity + additive BlockType dialogue/beat/act + script_category + ScaffoldTransaction closure on BOTH non-novel scaffolds) + P-mid QC rhythm + P-last closeout (Profile B compaction + spec promotion + tracker ship snapshot + tech-debt rollup); R-V154P1-W001 + R-V154P1-S002 + DF-43 + DF-31 all closed; 1 new R-V155P2-F002 → V1.56+; wire contracts unchanged)
 
@@ -116,6 +116,23 @@ When a version ships, append new closed rows here and remove them from the activ
 | ~~R18~~ | KB extract job IDs use custom timestamp-derived generation | V1.30 | UUIDv4 with `xj_` prefix + `insert_with_retry`. |
 | ~~R19~~ | creator command module approaching maintainability threshold | V1.30 | KB handlers extracted to `creator/kb.rs` (973 lines); `mod.rs` reduced ~30%. |
 | ~~R20~~ | KB extract status list is unbounded | V1.30 | Bounded listing with `limit=100` default. |
+
+---
+
+### Shipped / cancelled rows moved in V1.88 hygiene
+
+Archived from [deferred-features-cross-version-tracker.md](../knowledge/deferred-features-cross-version-tracker.md) during V1.88 P-last tracker cleanup. IDs may overlap with earlier tracker versions; these rows represent the V2 tracker state as of 2026-07-04.
+
+| ID | Feature | Status | Notes |
+|----|---------|--------|-------|
+| BL-10 | Independent SOUL growth-curve view (separate from temporal-drift timeline) | Shipped V1.81 | Cumulative-fragment-growth viz with density branching (`empty`/`low-data`/`rich`), respects world projection, independent of the temporal-drift timeline. |
+| BL-12 | SOUL viz refinements — per-World filtering + realtime updates + LLM-generated personality-score narrative | Shipped V1.82 | Per-World LLM narrative (`/soul/reflect` + optional `world_id`; composite-key cache; selector scope linkage; `is_world_owned`; threshold-saturated distinct count) + worlds-endpoint wiring. **Realtime push remains backlog.** |
+| PF-ESSAY | `essay` Work profile | Shipped V1.63 | Scaffold + `essay-writing` preset + 4-dim rubric + completion + optional KB. Spec: [essay-profile.md](../knowledge/specs/essay-profile.md). |
+| PF-GAME-BIBLE | `game-bible` Work profile | Shipped V1.55 P2 (Master) | `design-writing` + 五问 + section completion + KB extraction. Spec: [game-bible-profile.md](../knowledge/specs/game-bible-profile.md). |
+| PF-SCRIPT | `script` Work profile | Shipped V1.60 P1 (Master) | V1.55 scaffold; V1.60 Depth 3.5: `script-writing` preset + 五问 + completion. Spec: [script-profile.md](../knowledge/specs/script-profile.md). |
+| FEAT-WORLD-KB-RELATIONSHIPS | World KB relationships surface (`world_kb.patch_relationship` + `kb_relationships` table) | Shipped V1.74 | Typed relationship β — hybrid taxonomy + directed/`symmetric` single-row semantics + per-row OCC. `@42ch/nexus-contracts` 0.9.0 → 0.10.0. |
+| REL-01 | POST /memory/review synchronous whole-queue pipeline — add bound/timeout/cancellation/concurrency | Shipped V1.80 | Bounded/serialized/deadline-aware rewrite (REVIEW_BATCH_LIMIT=50 + per-creator mutex + 5s partial-progress + has_more/processed drain). `R-V178P0-QC3-003` resolved. |
+| DF-49 | Standalone MCP server for Nexus capabilities | Cancelled V1.79 | Conflicts with ACP-client product direction (`STRATEGY.md`: CLI is an ACP client, not a server) + circular-invocation risk. |
 
 ---
 

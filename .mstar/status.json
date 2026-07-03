@@ -1,15 +1,15 @@
 {
   "version": 1,
-  "updated_at": "2026-07-03T16:00:00+08:00",
+  "updated_at": "2026-07-04T02:17:20+0800",
   "plans": [],
   "metadata": {
-    "integration_branch": "iteration/v1.87",
+    "integration_branch": "iteration/v1.88",
     "integration_branch_retired": true,
-    "last_integration_branch": "iteration/v1.87",
+    "last_integration_branch": "iteration/v1.88",
     "integration_merge_target": "main",
     "iteration_base_branch": "main",
     "target_branch": "main",
-    "spec_integration_branch": "iteration/v1.87",
+    "spec_integration_branch": "iteration/v1.88",
     "latest_active_iteration": null,
     "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
@@ -17,13 +17,13 @@
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.87",
-      "compass": "v1.87-nexus-ui-component-library-delivery-compass-v1.md",
-      "shipped_at": "2026-07-03 (iteration/v1.87 PR pending)",
+      "iteration": "V1.88",
+      "compass": "v1.88-frontend-slate-clear-and-reliability-cleanup-delivery-compass-v1.md",
+      "shipped_at": "2026-07-04",
       "plan_count": 1,
       "plan_count_done": 1,
       "wire_contracts_changed": false,
-      "note": "V1.87 nexus-ui component library + R-V186-QC1-S005 closure; iteration/v1.87 PR to main pending"
+      "note": "V1.88 frontend slate-clear + reliability cleanup + tracker hygiene; QC 3/3 Approve; QA Pass"
     },
     "tech_debt_summary": {
       "total_open": 3,
@@ -40,7 +40,7 @@
       "refreshed_at": "2026-07-01",
       "refreshed_reason": "V1.80 wave-1 Done (QA Pass): R-V178P0-QC3-003 (REL-01) + 4 V1.79-QC residuals resolved. Remaining open: 2 P0 accepted low + 1 V1.79 CI-wrapper low."
     },
-    "updated_at": "2026-07-03T18:30:00+08:00"
+    "updated_at": "2026-07-04T02:17:20+0800"
   },
   "residual_findings": {
     "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization": [
@@ -6632,7 +6632,13 @@
         "target": "V1.86+",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-03-v1.85-closure][R-V185CL-QC1-S001]",
         "note": "Trivial doc accuracy; both are brand PNG provenance. Accept as-is.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-07-04",
+        "closure_note": "V1.88 P1 T6 inspection: the LFS-purpose comment in .github/workflows/desktop-build.yml already enumerates both globs (packages/nexus-ui/assets/logos/*.png and apps/desktop/src-tauri/icons/source/*.png). No code change required.",
+        "resolution": {
+          "plan_id": "2026-07-03-v1.88-frontend-slate-clear-and-reliability-cleanup",
+          "commit": null
+        }
       }
     ],
     "2026-07-03-v1.86-local-api-trust-hardening": [
@@ -6686,11 +6692,17 @@
         "scope": "crates/nexus-daemon-runtime/src/api/handlers/host_tool_handlers.rs",
         "title": "resolve_guarded_path_async runs twice per fs/* call",
         "description": "admission validate_file_path (must_exist=false) + execute_* (must_exist=true) both resolve; negligible for local single-user.",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "decision": "accept",
         "owner": "PM",
         "target": "future perf iteration",
-        "tracking_link": "reports/2026-07-03-v1.86-local-api-trust-hardening/qc-consolidated.md"
+        "tracking_link": "reports/2026-07-03-v1.86-local-api-trust-hardening/qc-consolidated.md",
+        "closed_at": "2026-07-04",
+        "closure_note": "V1.88 P1 T4: removed Gate 3 validate_file_path call from admission_pipeline for fs/* tools. Gate 4 permissions.toml check remains. execute_read_file and execute_write_file now own the single resolve_guarded_path_async resolution before filesystem access. Error behavior preserved (BadRequest -> Forbidden { resource: \"file\" }). Regression tests added for fs/* in-bounds reads/writes and escape rejection. Commit e2463330.",
+        "resolution": {
+          "plan_id": "2026-07-03-v1.88-frontend-slate-clear-and-reliability-cleanup",
+          "commit": "e2463330"
+        }
       },
       {
         "id": "R-V186-QC3-PERF-ARC-CONFIG",
@@ -6699,11 +6711,17 @@
         "scope": "crates/nexus-daemon-runtime/src/api/mod.rs",
         "title": "DaemonApiConfig cloned per-request by axum State",
         "description": "Arc<...> wrapper would zero-cost; clone sites at router construction are one-time (confirmed), so impact is small.",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "decision": "accept",
         "owner": "PM",
         "target": "future perf iteration",
-        "tracking_link": "reports/2026-07-03-v1.86-local-api-trust-hardening/qc-consolidated.md"
+        "tracking_link": "reports/2026-07-03-v1.86-local-api-trust-hardening/qc-consolidated.md",
+        "closed_at": "2026-07-04",
+        "closure_note": "V1.88 P1 T5: create_router now wraps the incoming DaemonApiConfig in Arc::new internally; the public signature is unchanged. Both route_layer calls share the Arc via Arc::clone. require_api_key and require_allowed_origin extract State<Arc<DaemonApiConfig>>; field access works unchanged via Arc Deref. Test helper build_router updated to wrap its config in Arc. Commit 7f6eeea2.",
+        "resolution": {
+          "plan_id": "2026-07-03-v1.88-frontend-slate-clear-and-reliability-cleanup",
+          "commit": "7f6eeea2"
+        }
       }
     ],
     "2026-07-03-v1.87-nexus-ui-component-library": [
@@ -6717,7 +6735,14 @@
         "owner": "@frontend-dev",
         "target": "V1.88+",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-03-v1.87-nexus-ui-component-library][R-V187-QC1-S001]",
-        "note": "Cosmetic maintainability debt; both enumerate 'primary'|'color'|'white'|'mono'. Optional follow-up."
+        "note": "Cosmetic maintainability debt; both enumerate 'primary'|'color'|'white'|'mono'. Optional follow-up.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-07-04",
+        "closure_note": "V1.88 P0 T1: replaced local Variant union in nexus-logo.tsx with re-export alias `export type Variant = LogoVariantName;`. Sourced VARIANT_FILENAMES from logoVariants in tokens.ts as a backward-compat export. Added compile-time type guard in nexus-logo.test.tsx proving Variant == LogoVariantName. packages/nexus-ui/src/index.ts required no changes. No apps/web call sites changed; visual parity preserved. Commit fb4dd364.",
+        "resolution": {
+          "plan_id": "2026-07-03-v1.88-frontend-slate-clear-and-reliability-cleanup",
+          "commit": "fb4dd364"
+        }
       },
       {
         "id": "R-V187-QC3-P001",
@@ -6729,7 +6754,14 @@
         "owner": "@fullstack-dev",
         "target": "V1.88+ (reliability roadmap)",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-03-v1.87-nexus-ui-component-library][R-V187-QC3-P001]",
-        "note": "V1.87 closed only R-V186-QC1-S005 (manuscript.read_range); the repo-wide sweep was a non-goal. Remaining sync sites are pre-existing, same-class, non-blocking."
+        "note": "V1.87 closed only R-V186-QC1-S005 (manuscript.read_range); the repo-wide sweep was a non-goal. Remaining sync sites are pre-existing, same-class, non-blocking.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-07-04",
+        "closure_note": "V1.88 P1 T3: extracted resolve_guarded_path_async to crates/nexus-daemon-runtime/src/api/path_guard.rs as pub async fn delegating to sync resolve_guarded_path via tokio::task::spawn_blocking. Migrated all listed call sites in host_tool_handlers.rs (4), outline.rs (2), and chapters.rs (2) to .await the async wrapper; per-site .map_err() mappings preserved exactly. chapters.rs:174 to_detail sync probe deliberately excluded (DTO mapper, no FS I/O). Regression tests added in path_guard.rs, host_tool_handlers.rs, outline.rs, and chapters.rs covering in-bounds success and sibling-escape rejection. Commit e2463330.",
+        "resolution": {
+          "plan_id": "2026-07-03-v1.88-frontend-slate-clear-and-reliability-cleanup",
+          "commit": "e2463330"
+        }
       },
       {
         "id": "R-V187-QC3-P002",
@@ -6741,7 +6773,14 @@
         "owner": "@frontend-dev",
         "target": "V1.88+ (if observed)",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-03-v1.87-nexus-ui-component-library][R-V187-QC3-P002]",
-        "note": "NexusMark is a tiny static SVG; allocation cost negligible at author-action frequency. Reassess only if it enters a render-hot surface."
+        "note": "NexusMark is a tiny static SVG; allocation cost negligible at author-action frequency. Reassess only if it enters a render-hot surface.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-07-04",
+        "closure_note": "V1.88 P0 T2: wrapped NexusMark in React.memo with a rationale comment explaining the static SVG is memoized defensively for future high-render surfaces (lists, animations) without adding measurable cost today. pnpm --filter @42ch/nexus-ui and pnpm --filter web build/typecheck/test all pass. No visual or behavior change. Commit fb4dd364.",
+        "resolution": {
+          "plan_id": "2026-07-03-v1.88-frontend-slate-clear-and-reliability-cleanup",
+          "commit": "fb4dd364"
+        }
       }
     ]
   }

@@ -383,7 +383,8 @@
     "2026-07-03-v1.85-brand-and-ci-doc-hygiene",
     "2026-07-03-v1.85-closure",
     "2026-07-03-v1.86-local-api-trust-hardening",
-    "2026-07-03-v1.87-nexus-ui-component-library"
+    "2026-07-03-v1.87-nexus-ui-component-library",
+    "2026-07-03-v1.88-frontend-slate-clear-and-reliability-cleanup"
   ],
   "iteration_summaries": {
     "v1.45": {

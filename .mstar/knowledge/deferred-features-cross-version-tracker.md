@@ -1,12 +1,12 @@
 # Deferred Features — Cross-Version Tracker v2
 
-**Quick status**: **V1.82 delivered (2026-07-02)** — SOUL Completion: completes the SOUL track after V1.79 (Track B) → V1.81 (Maturation). Headline = per-World SOUL narrative (extend `POST /v1/local/memory/soul/reflect` + optional `world_id`; `memory_soul_narratives` composite-key cache `(creator_id, world_id)` + NULL-PK partial-index + by-name copy [greploop lesson]; selector scope linkage; per-World ownership via `is_world_owned`; read-path gated behind `force=true`; threshold-saturated distinct-keyword count). Worlds-endpoint wiring (frontend consumes the EXISTING `/v1/local/narrative/worlds` → titles, client unwraps `{ worlds }`). Closes the V1.81-flagged SOUL gaps. Additive wire (`soul-narrative-request` + `world_id`) → `@42ch/nexus-contracts` 0.16.0 → 0.17.0. QC 3/3 Approve after 1 fix-wave (W001 worlds-shape unwrap + W002 threshold-saturated count). QA Pass. P-last swept all 7 V1.81 residuals. Compound updated fingerprint-cached-live-aggregate (threshold-saturated-response-field refinement). Platform **paused**.
+**Quick status**: **V1.88 active (2026-07-04)** — Frontend Slate-Clear and Reliability Cleanup: six V1.85–V1.87 residuals closed (type-unification, NexusMark memo, async path-guard, fs/* double-resolution, Arc<DaemonApiConfig>, LFS comment verification) and 8 shipped/cancelled tracker rows archived (BL-10, BL-12, PF-ESSAY, PF-GAME-BIBLE, PF-SCRIPT, FEAT-WORLD-KB-RELATIONSHIPS, REL-01, DF-49). No wire contract changes. Platform **paused**.
 
-**V1.82 in-progress (2026-07-02)**: SOUL Completion — per-World LLM narrative (extend `/soul/reflect` + composite-key cache + selector) + worlds-endpoint wiring (frontend consumes existing `/narrative/worlds` → titles). Closes remaining BL-12 (per-World narrative). Model locked: The Creator SOUL is the whole; a per-World narrative is a subset — each has its own narrative. V1.81 Creator-level narrative unchanged.
+**V1.88 in-progress (2026-07-04)**: Frontend + reliability hygiene iteration. Next: QC tri-review, QA, iteration-close, PR to `main`.
 
 **Purpose**: Single source of truth for **open** and **backlog** features deferred from delivery compasses. Closed/shipped history lives in shipped archive.
 **Scope**: `nexus` OSS repository only.
-**Created**: 2026-04-21 · **Last updated**: 2026-07-02 (V1.82 delivered: SOUL Completion — per-World narrative + worlds wiring; BL-12 fully closed)
+**Created**: 2026-04-21 · **Last updated**: 2026-07-04 (V1.88 hygiene: archived 8 shipped/cancelled rows; active tracker now contains only open/backlog rows)
 
 ---
 
@@ -48,14 +48,9 @@
 | DF-41 | Agent slot ACP connection stub | V1.7 audit | Any future | S | V1.7 | `nexus42/.../agent_slot.rs`. |
 | DF-46 | Full `nexus.*` capability implementation | V1.34 audit | **Reduced — V1.60 local complete** | L | V1.34→V1.60 | Local scope complete: 32 shipped + 4 sync.* catalog-only (platform-blocked) + 2 publish.* OUT (DF-59). Remaining 4 sync.* are platform-gated per PD-05. |
 | DF-47 | Host tool + `worker/agent_tool_request` unified registry | V1.34 audit | V1.42 P3 Narrowed | M | V1.34→V1.42 | V1.42 P3 shipped `DaemonToolDispatchAdapter` + `HostToolCallTask` + one tool proven E2E. |
-| DF-49 | ~~Standalone MCP server for Nexus capabilities~~ **CANCELLED (V1.79)** | V1.34 | Cancelled | L | V1.34→V1.79 cancelled | **Cancelled — conflicts with ACP-client product direction** (`STRATEGY.md`: CLI is an ACP client, not a server) + circular-invocation risk (Nexus drives an agent via ACP → agent calls back into Nexus via MCP → loop). Not deferred. See archived shipped-features-tracker cancelled section. |
 | DF-55 | `nexus.context.assemble` cloud/platform path | V1.34 | V2.0+ | M | V1.34 | Local/read-only or `policy_blocked` (PD-05). |
 | DF-59 | Platform publish integration for novel | V1.36 prepare | Backlog | L | V1.36 | Platform dependency. |
-| PF-ESSAY | `essay` Work profile | V1.52 lock | **V1.63 Shipped** | M | V1.52→V1.63 | Shipped: scaffold + `essay-writing` preset + 4-dim rubric + completion + optional KB. Spec: [essay-profile.md](specs/essay-profile.md) (Draft → Shipped V1.63). |
-| PF-GAME-BIBLE | `game-bible` Work profile | V1.52 lock | **V1.55 P2 (Master)** | L | V1.52→V1.55 | Shipped Depth 3.5: `design-writing` + 五问 + section completion + KB extraction. Spec: [game-bible-profile.md](specs/game-bible-profile.md). |
-| PF-SCRIPT | `script` Work profile | V1.52 lock | **V1.60 P1 (Master)** | L | V1.52→V1.55→V1.60 | V1.55 scaffold; V1.60 Depth 3.5: `script-writing` preset + 五问 + completion. Spec: [script-profile.md](specs/script-profile.md). |
 | FEAT-WASM-COMPUTE | **Programmable Narrative Progression** — WASM compute for timeline narrative | V1.61 | **V1.61 (Prepare active)** | XL | V1.61 | Core differentiator: wasmtime + KB structured layer (attributes/state/computable) + `narrative.compute` capability + `combat-engine` preset + `basic-combat` sample. 6 plans, 4 waves. Canvas: `canvases/programmable-narrative-progression.canvas.tsx`. Compass: [v1.61-programmable-narrative-progression-delivery-compass-v1.md](../iterations/v1.61-programmable-narrative-progression-delivery-compass-v1.md). V2 deferred: Generic Combat Protocol, CDN distrib, 3P game bridge, marketplace, GPU/SIMD. |
-| FEAT-WORLD-KB-RELATIONSHIPS | World KB relationships surface (`world_kb.patch_relationship` + `kb_relationships` table) | V1.73 | **V1.74 Shipped** | L | V1.73→V1.74 | Shipped: typed relationship β — hybrid taxonomy (`WorldKbRelationshipKind` core enum + `custom_label`) + directed/`symmetric` single-row semantics + single `world_kb.patch_relationship` route (add/update/remove, per-row OCC on `kb_relationships.revision`) + `GET graph` populates `relationships[]` (symmetric reverse auto-projected) + anchors-optional + confidence display-only. `@42ch/nexus-contracts` 0.9.0 → 0.10.0. Compass: [v1.74-...compass-v1.md](../iterations/v1.74-world-kb-relationships-and-hygiene-compass-v1.md). V1.75 followup: confidence-weighting, relationship auto-extraction, 8 QC suggestions (`tbd-v1.75-qc-followup`). |
 
 ### 2.4 Backlog (no committed target)
 
@@ -71,9 +66,7 @@
 | BL-07 | Explore ranking / cold-start + Publish compliance matrix | V1.2 | Backlog | M | |
 | BL-08 | Social / marketing features | V1.3 | V2.0+ | XL | |
 | BL-09 | Standalone maturation dashboard (multi-chart cross-Work/World aggregate view) | V1.79 | Backlog | M | V1.79 Track A shipped in-context lightweight maturation indicators only; standalone dashboard deferred. |
-| BL-10 | Independent SOUL growth-curve view (separate from temporal-drift timeline) | V1.79 | **V1.81 Shipped** | S | V1.79→V1.81 shipped | V1.79 Track B folded growth-count into the temporal-drift timeline; standalone view deferred. V1.81 shipped as SP-3 — cumulative-fragment-growth viz with density branching (`empty`/`low-data`/`rich`), respects world projection, independent of the temporal-drift timeline. |
 | BL-11 | Deeper manuscript reading — persisted reading progress + annotations/highlights + profile-specific reading chrome | V1.79 | Backlog | M-L | V1.79 reading surface is session-only + novel-first; persistence/annotations/profile-chrome deferred. |
-| BL-12 | SOUL viz refinements — per-World filtering + realtime updates + LLM-generated personality-score narrative | V1.79 | **V1.82 Shipped (per-World narrative closed)** | M | V1.79→V1.81 (partial)→V1.82 shipped | V1.79 SOUL viz is per-creator + poll/manual-refresh + raw keyword/timeline. V1.81 shipped: per-World projection + LLM Creator-SOUL narrative (world-agnostic) + auto-refresh. **V1.82 closed the remaining per-World LLM narrative** (extend `/soul/reflect` + optional `world_id`; composite-key cache; selector scope linkage; ownership via `is_world_owned`; threshold-saturated distinct count) + worlds-endpoint wiring (frontend consumes existing `/narrative/worlds` → titles). Model: Creator SOUL = whole; per-World narrative = subset; each has its own narrative. **Realtime push remains backlog** (the only BL-12 sub-item not yet shipped). |
 
 ### 2.5 Reliability roadmap (cross-version)
 
@@ -81,7 +74,6 @@ Non-feature reliability work routed out of feature iterations; picked up by a de
 
 | ID | Item | Source | Target | Notes |
 |----|------|--------|--------|-------|
-| ~~REL-01~~ | ~~POST /memory/review synchronous whole-queue pipeline — add bound/timeout/cancellation/concurrency~~ **SHIPPED (V1.80)** | `R-V178P0-QC3-003` (V1.78 QC) | ~~Reliability iteration~~ | V1.80 P0 shipped the bounded/serialized/deadline-aware rewrite (REVIEW_BATCH_LIMIT=50 + per-creator mutex + 5s partial-progress + has_more/processed drain). `R-V178P0-QC3-003` resolved. Compound: bounded-drain-completion-contract. |
 
 ---
 
@@ -101,9 +93,9 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 ## 5) Quick index
 
-**Active iteration**: V1.82 delivered (2026-07-02) — SOUL Completion (per-World narrative + worlds-endpoint wiring); BL-12 fully closed (minus realtime push). Next: V1.83 candidate eval at next `/iteration-start` (backlog: BL-11 deeper manuscript reading, BL-09 standalone dashboard, realtime SOUL push, or reliability/hygiene).
+**Active iteration**: V1.88 active (2026-07-04) — Frontend Slate-Clear and Reliability Cleanup; 6 residuals closed + 8 shipped/cancelled tracker rows archived. Next: QC tri-review, QA, iteration-close, PR to `main`.
 
-**Latest shipped**: [V1.81](../iterations/v1.81-creator-soul-maturation-delivery-compass-v1.md) (Creator SOUL Maturation, PR #108 — 2026-07-02)
+**Latest shipped**: [V1.87](../iterations/v1.87-nexus-ui-component-library-delivery-compass-v1.md) (nexus-ui Component Library Promotion + manuscript read_range path-guard closure, PR #109 — 2026-07-03)
 
 **Full iteration index**: [iterations/README.md](../iterations/README.md)
 
