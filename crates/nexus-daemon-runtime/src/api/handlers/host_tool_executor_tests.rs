@@ -33,21 +33,31 @@ async fn execute_rejects_read_without_path() {
     };
     let result = HostToolExecutor::execute(&req, &state).await;
     assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert_eq!(err.error_code(), "forbidden");
+    assert!(
+        err.to_string().contains("active workspace"),
+        "error should mention active workspace requirement: {err}"
+    );
 }
 
 #[tokio::test]
 async fn execute_read_file_succeeds() {
-    let (_tmp, nexus_home, db_path) = create_test_workspace().await;
-    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+    let (_tmp, nexus_home, db_path, workspace_dir) = create_initialized_test_workspace().await;
+    let state = WorkspaceState::new_for_testing(
+        nexus_home,
+        db_path,
+        Some(workspace_dir.to_string_lossy().to_string()),
+    )
+    .await;
 
-    // Write a temp file to read
-    let temp = tempfile::NamedTempFile::new().expect("temp file");
-    let path = temp.path().to_string_lossy().to_string();
-    std::fs::write(temp.path(), "hello world").expect("write temp");
+    // Write a file inside the workspace and read it back.
+    let target = workspace_dir.join("read_test.txt");
+    std::fs::write(&target, "hello world").expect("write workspace file");
 
     let req = ToolExecuteRequest {
         tool_name: "fs/read_text_file".to_string(),
-        parameters: serde_json::json!({ "path": path }),
+        parameters: serde_json::json!({ "path": target.to_string_lossy() }),
         session_id: None,
         request_id: None,
         caller_kind: None,
@@ -60,15 +70,19 @@ async fn execute_read_file_succeeds() {
 
 #[tokio::test]
 async fn execute_write_file_succeeds() {
-    let (_tmp, nexus_home, db_path) = create_test_workspace().await;
-    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+    let (_tmp, nexus_home, db_path, workspace_dir) = create_initialized_test_workspace().await;
+    let state = WorkspaceState::new_for_testing(
+        nexus_home,
+        db_path,
+        Some(workspace_dir.to_string_lossy().to_string()),
+    )
+    .await;
 
-    let temp = tempfile::NamedTempFile::new().expect("temp file");
-    let path = temp.path().to_string_lossy().to_string();
+    let target = workspace_dir.join("write_test.txt");
 
     let req = ToolExecuteRequest {
         tool_name: "fs/write_text_file".to_string(),
-        parameters: serde_json::json!({ "path": path, "content": "written!" }),
+        parameters: serde_json::json!({ "path": target.to_string_lossy(), "content": "written!" }),
         session_id: None,
         request_id: None,
         caller_kind: None,
@@ -76,8 +90,48 @@ async fn execute_write_file_succeeds() {
     let result = HostToolExecutor::execute(&req, &state).await;
     assert!(result.is_ok());
 
-    let content = std::fs::read_to_string(&path).expect("read back");
+    let content = std::fs::read_to_string(&target).expect("read back");
     assert_eq!(content, "written!");
+}
+
+/// V1.86 T2: `fs/write_text_file` is denied when no workspace is configured.
+#[tokio::test]
+async fn fs_write_rejected_without_workspace() {
+    let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+    let req = ToolExecuteRequest {
+        tool_name: "fs/write_text_file".to_string(),
+        parameters: serde_json::json!({ "path": "anywhere.txt", "content": "x" }),
+        session_id: None,
+        request_id: None,
+        caller_kind: None,
+    };
+    let result = HostToolExecutor::execute(&req, &state).await;
+    let err = result.expect_err("fs/* write must require an active workspace");
+    assert_eq!(err.error_code(), "forbidden");
+    assert!(
+        err.to_string().contains("active workspace"),
+        "error should mention active workspace requirement: {err}"
+    );
+}
+
+/// V1.86 T2: `fs/read_text_file` is denied when no workspace is configured.
+#[tokio::test]
+async fn fs_read_rejected_without_workspace() {
+    let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+    let req = ToolExecuteRequest {
+        tool_name: "fs/read_text_file".to_string(),
+        parameters: serde_json::json!({ "path": "anywhere.txt" }),
+        session_id: None,
+        request_id: None,
+        caller_kind: None,
+    };
+    let result = HostToolExecutor::execute(&req, &state).await;
+    let err = result.expect_err("fs/* read must require an active workspace");
+    assert_eq!(err.error_code(), "forbidden");
 }
 
 #[tokio::test]
