@@ -56,9 +56,13 @@ impl DaemonApiConfig {
 
     /// Build the default allowlist (codebase-verified origins) for a given port.
     fn default_allowed_origins(port: u16) -> (Vec<String>, Vec<(String, String)>) {
-        let own = format!("http://127.0.0.1:{port}");
-        let mut origins = vec![own.clone()];
-        let mut sources = vec![(own, "computed".to_string())];
+        let own_v4 = format!("http://127.0.0.1:{port}");
+        let own_localhost = format!("http://localhost:{port}");
+        let mut origins = vec![own_v4.clone(), own_localhost.clone()];
+        let mut sources = vec![
+            (own_v4, "computed".to_string()),
+            (own_localhost, "computed".to_string()),
+        ];
 
         for hardcoded in [
             "tauri://localhost",
@@ -624,6 +628,20 @@ mod tests {
             response.status_code(),
             403,
             "same-origin request should pass Origin gate"
+        );
+    }
+
+    #[tokio::test]
+    async fn localhost_own_port_origin_request_is_allowed() {
+        let app = create_test_app(DaemonApiConfig::keyless()).await;
+        let response = app
+            .get("/v1/local/creators")
+            .add_header("Origin", "http://localhost:8420")
+            .await;
+        assert_ne!(
+            response.status_code(),
+            403,
+            "localhost own-port origin should pass Origin gate"
         );
     }
 
