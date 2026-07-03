@@ -46,6 +46,7 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
+          # Git LFS — brand PNG provenance (packages/nexus-ui/assets/logos/*.png, apps/desktop/src-tauri/icons/source/*.png)
           lfs: true
 
       - uses: ./.github/actions/setup-monorepo
@@ -92,6 +93,7 @@ jobs:
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
+          # Git LFS — brand PNG provenance (packages/nexus-ui/assets/logos/*.png, apps/desktop/src-tauri/icons/source/*.png)
           lfs: true
 
       - uses: ./.github/actions/setup-monorepo

@@ -72,7 +72,7 @@ typography:
   button-12: { fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif", fontSize: "12px", fontWeight: 600, lineHeight: 1, letterSpacing: "0.01em" }
   label-12-mono: { fontFamily: "\"SFMono-Regular\", \"Cascadia Code\", \"Roboto Mono\", Consolas, monospace", fontSize: "12px", fontWeight: 500, lineHeight: 1.4, letterSpacing: "0" }
   copy-13-mono: { fontFamily: "\"SFMono-Regular\", \"Cascadia Code\", \"Roboto Mono\", Consolas, monospace", fontSize: "13px", fontWeight: 400, lineHeight: 1.5, letterSpacing: "0" }
-  # V1.79 Author Reflection — reading-surface typography (P0 concrete values).
+  # Author Reflection — reading-surface typography.
   # Theme-independent metrics (a reading measure is a line-length target, not a
   # color); values are identical in DESIGN.dark.md so the prose column shape does
   # not shift between themes. Consumed via CSS vars in index.css.
@@ -196,11 +196,11 @@ components:
     stopped-bg: "rgba(229,72,77,0.12)"
     stopped-text: "{colors.red-1000}"
 
-  # V1.77 findings-remediation — 6-state finding-status badges + triage chrome.
+  # Findings-remediation — 6-state finding-status badges + triage chrome.
   # Severity reuses the existing `severityVariant` mapping (no new severity
   # tokens); triage chrome (inspector panel, action buttons, assignment
   # selector, inline-edit inputs) composes the existing card/button/input/
-  # data-table primitives. Token names frozen verbatim (V1.69 invariant).
+  # data-table primitives. Token names frozen verbatim (do not rename).
   finding-status-pill:
     open: { backgroundColor: "rgba(183,110,0,0.12)", textColor: "{colors.amber-1000}", borderColor: "rgba(183,110,0,0.30)" }
     triaged: { backgroundColor: "rgba(0,133,119,0.10)", textColor: "{colors.teal-1000}", borderColor: "rgba(0,133,119,0.30)" }
@@ -216,13 +216,13 @@ components:
     action-button: "secondary"
     executor-select: "input-select-textarea.default"
 
-  # V1.78 Creator Memory review-loop — pending-count badge, task-kind chips,
+  # Creator Memory review-loop — pending-count badge, task-kind chips,
   # fragment browser chrome, and inspector tokens. Concrete colors use the same
-  # `color-mix` low-opacity + matching-text pattern as the V1.77 findings-status
-  # badges. Composition tokens (review-button, fragment-summary, fragment-id,
+  # low-opacity + matching-text pattern as the findings-status badges.
+  # Composition tokens (review-button, fragment-summary, fragment-id,
   # inspector chrome, fragment-filter-input) reference existing primitives so
   # the surface stays discoverable without duplicating primitive values. Token
-  # names frozen verbatim (V1.69 invariant continues).
+  # names frozen verbatim (do not rename).
   memory-pending-count:
     backgroundColor: "rgba(229,72,77,0.12)"
     textColor: "{colors.red-1000}"
@@ -269,14 +269,12 @@ components:
   memory-fragment-filter-input:
     basis: "input-select-textarea.default"
 
-  # V1.79 Author Reflection — Track A/B token stubs only (names + structure).
-  # Concrete light values land in P0 (reading surface) and P1 (SOUL viz).
-  # V1.79 Author Reflection — Track A reading-surface component tokens (P0
-  # concrete light values). Token names frozen verbatim (V1.69 invariant
-  # continues); dark values live in DESIGN.dark.md under the same names.
-  # Composition tokens reference existing primitives so the surface composes
-  # card/button/badge semantics without duplicating primitive values. Track B
-  # (soul-viz-*) stubs remain for P1 and are NOT filled here.
+  # Author Reflection — reading-surface and SOUL visualization component tokens.
+  # Reading-surface tokens have concrete light values; dark values live in
+  # DESIGN.dark.md under the same names. Composition tokens reference existing
+  # primitives so the surface composes card/button/badge semantics without
+  # duplicating primitive values. SOUL visualization tokens define keyword
+  # cluster and timeline surfaces.
   reading-chapter-nav:
     chrome-bg: "{colors.background-200}"
     chrome-border: "{colors.gray-alpha-400}"
@@ -293,7 +291,7 @@ components:
     world-kb-density-count: { backgroundColor: "rgba(0,133,119,0.10)", textColor: "{colors.teal-1000}", borderColor: "rgba(0,133,119,0.30)" }
     open-findings-count: { backgroundColor: "rgba(183,110,0,0.12)", textColor: "{colors.amber-1000}", borderColor: "rgba(183,110,0,0.30)" }
     base: { height: "20px", paddingInline: "6px", rounded: "{rounded.pill}", typography: "{typography.label-12}" }
-  # V1.79 P1 — SOUL personality visualization concrete light values.
+  # SOUL personality visualization concrete light values.
   # Keyword clusters: nodes scale by frequency; size/opacity encode weight.
   # Temporal drift: a calm stacked-band timeline where band height encodes a
   # keyword's share of newly-captured fragments in that time bucket.
@@ -307,8 +305,8 @@ components:
     line: "{colors.gray-alpha-400}"
     tick: "{colors.gray-400}"
     label: "{typography.label-12} @ {colors.gray-700}"
-  # V1.80 — ordered band-fill set backing the temporal-drift BAND_PALETTE
-  # (R-V179P1-QC1-002). `fill` is slot 0; `fill-2`..`fill-6` are slots 1..5.
+  # Temporal-drift ordered band-fill set backing the BAND_PALETTE.
+  # `fill` is slot 0; `fill-2`..`fill-6` are slots 1..5.
   # The stacked-band chart maps band index → these tokens 1:1; component code
   # consumes them only via the `--color-soul-viz-drift-band-fill*` CSS vars so
   # no RGBA value is hardcoded in temporal-drift.tsx. Light values are calm,
@@ -324,18 +322,18 @@ components:
     fill-6: "rgba(53,142,53,0.16)"
     step-stroke: "{colors.gray-alpha-200}"
     label: "{typography.label-12} @ {colors.gray-900}"
-  # V1.81 Creator SOUL Maturation — narrative prose + growth-curve accent.
-  # Narrative prose composes the existing V1.79 reading-prose rhythm with a
-  # quieter foreground; growth-curve stroke reuses the SOUL accent family while
+  # Creator SOUL Maturation — narrative prose + growth-curve accent.
+  # Narrative prose composes the existing reading-prose rhythm with a quieter
+  # foreground; growth-curve stroke reuses the SOUL accent family while
   # remaining distinct from the temporal-drift stacked-band fills.
   soul-narrative-prose: "{typography.copy-16} @ {colors.gray-900}"
   soul-growth-curve-stroke: "{colors.purple-700}"
-  # V1.82 per-World narrative reuses the V1.81 SOUL tokens above
+  # Per-World narrative reuses the SOUL tokens above
   # (soul-narrative-prose + soul-growth-curve-stroke + insufficient-data/empty
   # styling) — no new tokens. The per-World card is the same component shape as
-  # the V1.81 Creator card, scoped to a world; only copy differs, not tokens.
+  # the Creator card, scoped to a world; only copy differs, not tokens.
 
-  # V1.70 canvas implement — concrete light values (canvas-strategy-surface.md Draft §3.6 / B4)
+  # Canvas concrete light values (canvas-strategy-surface.md Draft §3.6 / B4)
   canvas:
     canvas-surface: "#ebebeb"
     canvas-grid: "rgba(0,0,0,0.05)"
@@ -352,7 +350,7 @@ components:
     canvas-write-conflict: "{colors.red-700}"
     canvas-write-success: "{colors.green-700}"
     canvas-write-stale-bg: "color-mix(in srgb, {colors.amber-700} 8%, transparent)"
-    # V1.72 outline/timeline canvas-write tokens — concrete light values (locked names, verbatim)
+    # Outline/timeline canvas-write tokens — concrete light values (locked names, verbatim)
     canvas-outline-volume-fill: "#F5F5F4"
     canvas-outline-chapter-card-status-pending: "#94A3B8"
     canvas-outline-chapter-card-status-drafted: "#3B82F6"
@@ -361,7 +359,7 @@ components:
     canvas-outline-foreshadow-edge: "#A78BFA"
     canvas-outline-timeline-marker: "#0EA5E9"
     canvas-outline-conflict-marker: "#EF4444"
-    # V1.73 World KB canvas-write tokens — concrete light values (locked names, verbatim; 17 tokens)
+    # World KB canvas-write tokens — concrete light values (locked names, verbatim; 17 tokens)
     canvas-worldkb-entity-card-fill-default: "#FFFFFF"
     canvas-worldkb-entity-card-fill-hover: "#F5F5F5"
     canvas-worldkb-entity-card-fill-selected: "#EBF2FF"
@@ -415,7 +413,7 @@ Product inputs from `.mstar/knowledge/specs/web-ui-design-requirements.md`:
 
 - Primary persona: writers/authors, not engineers; calm and focused over dashboard anxiety.
 - Control Room screens are data-dense; Setup screens are form-dense with first-class validation and destructive-action confirmation.
-- V1.65 Authoring screens add outline editing, chapter structure tables, and a body read-only context menu. Browser V1.65 ships `Copy path` only, while `Open with` / `Reveal in file manager` wait for the V1.66 Tauri shell.
+- Authoring screens include outline editing, chapter structure tables, and a body read-only context menu. Browser mode ships `Copy path` only, while `Open with` / `Reveal in file manager` belong to the Tauri shell.
 - WCAG 2.1 AA is the floor in both light and dark; focus rings, keyboard paths, status text, and reduced motion are non-negotiable.
 - Brand voice: helpful, plain, local-first, and consistent with CLI terms (`Work`, `preset`, `stage`, `finding`, `capability`).
 
@@ -571,7 +569,7 @@ Sidebar values: see frontmatter `components.sidebar-nav`. Collapsed/mobile nav m
 
 Dialog/popover values: see frontmatter `components.dialog` and `components.popover`.
 
-### Editor (V1.65 Standard+)
+### Editor
 
 The outline editor is a planning surface, not the body manuscript editor. It should feel closer to an intentional note/workbench than a document processor: compact toolbar, clear save state, and no hidden background writes.
 
@@ -592,7 +590,7 @@ Editor content typography:
 - Inline code uses `copy-13-mono`, `gray-alpha-100` background, `rounded.control`, horizontal padding `4px`.
 - Unknown markdown/frontmatter preservation warnings use `amber-700` icon + `copy-13` text.
 
-### Data Table (V1.65 Standard+)
+### Data Table
 
 Chapter structure tables extend the base `Table` primitive with inline-edit and chapter-status semantics. Token values: see frontmatter `components.data-table`.
 
@@ -614,9 +612,9 @@ Inline edit rules:
 - Validation errors render under the edited cell in `copy-13` + `red-700`; row remains in `table-row-edited` until resolved or canceled.
 - `finalized` edits require an explicit confirmation dialog; `published` edits surface a hard-block message.
 
-### Context Menu (V1.65 Standard+)
+### Context Menu
 
-The V1.65 browser context menu is intentionally narrow: **Copy path** only for body/outline path affordances. Native `Open with` and `Reveal in file manager` are V1.66 Tauri-shell capabilities. Token values: see frontmatter `components.context-menu`.
+The browser context menu is intentionally narrow: **Copy path** only for body/outline path affordances. Native `Open with` and `Reveal in file manager` are Tauri-shell capabilities. Token values: see frontmatter `components.context-menu`.
 
 | Element | Token use | Size / rhythm | States |
 | --- | --- | --- | --- |
@@ -632,15 +630,15 @@ Copy-path behavior:
 
 ---
 
-## Canvas Surface (V1.70 placeholder)
+## Canvas Surface
 
-Canvas token names are stubbed in frontmatter `components.canvas` as commented LEVEL placeholders. They are not consumed in V1.69. The canonical Draft list lives in `.mstar/knowledge/specs/canvas-strategy-surface.md` §3.6 / B4 and gives V1.70 a reviewed target for infinite-canvas surfaces.
+Canvas token names are defined in frontmatter `components.canvas`. The canonical Draft list lives in `.mstar/knowledge/specs/canvas-strategy-surface.md` §3.6 / B4 and provides the reviewed target for infinite-canvas surfaces.
 
 Minimal placeholder set: `canvas-surface`, `canvas-grid`, `canvas-node-fill`, `canvas-node-fill-hover`, `canvas-node-border`, `canvas-node-border-selected`, `canvas-edge`, `canvas-edge-hover`, `canvas-port`, `canvas-minimap`, `canvas-strategy-accent`.
 
-### Outline & Timeline Canvas Tokens (V1.72)
+### Outline & Timeline Canvas Tokens
 
-The V1.72 outline/timeline canvas-write tokens extend `components.canvas` with concrete light + dark values for the volume-lane, chapter-card status, timeline, foreshadow-edge, and outline-conflict surfaces. Token names are frozen verbatim across docs and the design system (V1.69→V1.72 preservation invariant); `canvas-outline-conflict-marker` is intentionally distinct from V1.71's generic conflict marker and the V1.70 `canvas-write-conflict` write-state token.
+The outline/timeline canvas-write tokens extend `components.canvas` with concrete light + dark values for the volume-lane, chapter-card status, timeline, foreshadow-edge, and outline-conflict surfaces. Token names are frozen verbatim across docs and the design system (preservation invariant); `canvas-outline-conflict-marker` is intentionally distinct from the generic conflict marker and the `canvas-write-conflict` write-state token.
 
 | Token | Purpose | Light | Dark | Example |
 | --- | --- | --- | --- | --- |
@@ -653,9 +651,9 @@ The V1.72 outline/timeline canvas-write tokens extend `components.canvas` with c
 | `canvas-outline-timeline-marker` | Timeline lane marker color | `#0EA5E9` | `#38BDF8` | `background: var(--color-canvas-outline-timeline-marker);` |
 | `canvas-outline-conflict-marker` | Outline-specific conflict marker (distinct from `canvas-write-conflict`) | `#EF4444` | `#F87171` | `color: var(--color-canvas-outline-conflict-marker);` |
 
-### World KB Canvas Tokens (V1.73)
+### World KB Canvas Tokens
 
-The V1.73 World KB canvas-write tokens extend `components.canvas` with concrete light + dark values for entity-card fills/strokes, promotion-state lifecycle badges (pending/confirmed/rejected/merged), source-anchor provenance, computable-state, conflict markers, the non-spatial alternate view, the focus ring, and the read-only relationship edge. Token names are frozen verbatim across the compass Phase 2b architect lock, docs, and the design system (V1.69→V1.73 preservation invariant). Promotion-state colors reuse the established semantic mapping (pending=amber, confirmed=green, rejected=red, merged=purple) so state is not color-only — badges also carry a text label and the selected card pairs `canvas-worldkb-entity-card-stroke-selected` with the global focus ring.
+The World KB canvas-write tokens extend `components.canvas` with concrete light + dark values for entity-card fills/strokes, promotion-state lifecycle badges (pending/confirmed/rejected/merged), source-anchor provenance, computable-state, conflict markers, the non-spatial alternate view, the focus ring, and the read-only relationship edge. Token names are frozen verbatim across docs and the design system (preservation invariant). Promotion-state colors reuse the established semantic mapping (pending=amber, confirmed=green, rejected=red, merged=purple) so state is not color-only — badges also carry a text label and the selected card pairs `canvas-worldkb-entity-card-stroke-selected` with the global focus ring.
 
 | Token | Purpose | Light | Dark | Example |
 | --- | --- | --- | --- | --- |
@@ -675,7 +673,7 @@ The V1.73 World KB canvas-write tokens extend `components.canvas` with concrete 
 | `canvas-worldkb-conflict-marker-fill` | World KB conflict marker background | `rgba(239,68,68,0.10)` | `rgba(248,113,113,0.12)` | `background: var(--color-canvas-worldkb-conflict-marker-fill);` |
 | `canvas-worldkb-nonspatial-row-highlight` | Non-spatial alternate view row highlight | `#F5F5F4` | `#1F1F1E` | `background: var(--color-canvas-worldkb-nonspatial-row-highlight);` |
 | `canvas-worldkb-focus-ring` | Entity card focus ring color | `{colors.blue-700}` | `{colors.blue-700}` | `box-shadow: 0 0 0 2px var(--color-canvas-worldkb-focus-ring);` |
-| `canvas-worldkb-relationship-edge` | Relationship edge stroke (read-only until V1.74) | `#94A3B8` | `#64748B` | `stroke: var(--color-canvas-worldkb-relationship-edge);` |
+| `canvas-worldkb-relationship-edge` | Relationship edge stroke (read-only surface) | `#94A3B8` | `#64748B` | `stroke: var(--color-canvas-worldkb-relationship-edge);` |
 
 ---
 
@@ -698,7 +696,7 @@ Nexus UI copy should sound like a careful CLI message translated into a local da
 
 ---
 
-## Implementation Mapping (P2 — `@frontend-dev`)
+## Implementation Mapping
 
 - Import brand CSS: `@import '@42ch/nexus-ui/theme.css'` in `index.css` for `--nexus-brand-*` vars.
 - Map color tokens to CSS variables: `--color-background-100`, `--color-brand-deep-blue`, `--color-blue-700`, etc.
@@ -706,23 +704,23 @@ Nexus UI copy should sound like a careful CLI message translated into a local da
 - Shadcn component defaults should read from the component primitive entries above.
 - `data-theme="dark"` or a root class swaps values from `DESIGN.dark.md`; token names stay identical.
 - Logo: light shell → `logo-primary.svg`; see root `DESIGN.md` § Logo Usage and `@42ch/nexus-ui` README.
-- Re-tint hardcoded legacy blue `rgba(0,107,255,…)` in canvas/SOUL/findings tokens to brand rgba during P2; **token names stay frozen**.
+- Canvas/SOUL/World-KB brand-blue tokens resolve through `var(--color-blue-700)` and `color-mix(in srgb, var(--color-blue-700) N%, transparent)`. The `rgba(0,107,255,…)` / `rgba(82,168,255,…)` frontmatter entries are reference approximations; CSS consumers use the variable chain. **Token names stay frozen**.
 
 ---
 
-## Desktop Shell Supplement (V1.66 Standard+)
+## Desktop Shell Supplement
 
-The V1.66 Tauri desktop shell ([desktop-shell.md](../.mstar/knowledge/specs/desktop-shell.md)) uses the same token names and voice rules as the local Web UI. Desktop shell surfaces should feel native enough to be trustworthy on macOS, but not custom-chromed or distribution-polished yet. Production polish — custom title bars, system tray/menu bar app, global shortcuts, native notifications, signing/notarization copy, animation refinements — is deferred to V1.67+.
+The Tauri desktop shell ([desktop-shell.md](../.mstar/knowledge/specs/desktop-shell.md)) uses the same token names and voice rules as the local Web UI. Desktop shell surfaces should feel native enough to be trustworthy on macOS, but not custom-chromed or distribution-polished yet. Production polish — custom title bars, system tray/menu bar app, global shortcuts, native notifications, signing/notarization copy, animation refinements — belongs to the desktop polish roadmap.
 
 ### Desktop Scope
 
-| Surface | V1.66 decision |
+| Surface | Decision |
 | --- | --- |
 | Window chrome | Standard OS window chrome; no custom title bar |
 | App menu | Native menu structure only; minimal commands |
 | Native dialogs | Use for open/reveal errors, restart confirmation, about/system info |
 | Desktop context menu | Enables `Open With…` and `Reveal in Finder` only in desktop mode |
-| System tray / menu bar | None in V1.66 |
+| System tray / menu bar | Out of scope for the standard shell |
 | Daemon status | Visible lightweight indicator with restart affordance |
 
 ### Desktop Window Chrome
@@ -730,7 +728,7 @@ The V1.66 Tauri desktop shell ([desktop-shell.md](../.mstar/knowledge/specs/desk
 Desktop token values: see frontmatter `components.desktop-window-chrome`.
 
 Rules:
-- Do not implement a custom title bar in V1.66.
+- Do not implement a custom title bar.
 - Keep primary navigation below the native title bar / traffic-light area.
 - Never place destructive or high-frequency actions where they may conflict with native window controls.
 
@@ -758,13 +756,13 @@ Copy rules:
 
 ### Desktop Context Menu
 
-Desktop mode extends the V1.65 context-menu tokens with native file actions. Token values: see frontmatter `components.context-menu`.
+Desktop mode extends the browser context-menu tokens with native file actions. Token values: see frontmatter `components.context-menu`.
 
 Behavior rules:
 - Browser mode shows `Copy Path` only.
 - Desktop mode shows `Copy Path`, `Open With…`, and `Reveal in Finder`.
 - `Open With…` uses an ellipsis (opens a system chooser).
-- `Reveal in Finder` is macOS wording for V1.66. Future Windows/Linux builds map to `Reveal in File Explorer` / `Reveal in Files`.
+- `Reveal in Finder` is macOS wording. Windows/Linux builds map to `Reveal in File Explorer` / `Reveal in Files`.
 - If the path guard rejects a path: `Path not opened. The file is outside the active workspace.`
 
 ### Daemon Status Indicator
@@ -786,7 +784,7 @@ Interaction rules:
 - The primary recovery action is `Restart Daemon`.
 - Do not show daemon internals by default; detailed diagnostics belong behind `Copy Diagnostics` or a Help menu item.
 
-### Findings Remediation (V1.77)
+### Findings Remediation
 
 The Control-Room findings page promotes from read-only to a remediation authoring surface. Token values: see frontmatter `components.finding-status-pill` and `components.finding-triage`.
 
@@ -813,13 +811,13 @@ Interaction rules:
 - `target_executor` is an assignment hint, not an auto-trigger — re-running a preset stays a deliberate canvas/CLI action.
 - Status is never color alone: every badge carries a humanized text label.
 
-### Creator Memory Review-Loop (V1.78)
+### Creator Memory Review-Loop
 
 The Control-Room gains a creator-scoped Memory surface that closes the capture → review → internalize loop. Token values: see frontmatter `memory-pending-count`, `memory-task-kind-*`, `memory-fragment-summary`, `memory-fragment-id`, `memory-inspector-*`, `memory-review-button`, `memory-fragment-filter-input`.
 
 **Pending-review count badge** (`memory-pending-count`) — a red numeric indicator on the pending-reviews header showing the live count from `GET /v1/local/memory/pending-review/count`. Red signals "items awaiting your review".
 
-**Task-kind chips** (`memory-task-kind-*`) — `task_kind` is a free-form string on the wire, so five known values map to distinct color accents (reusing the V1.77 `severityVariant` / `findingStatusClasses` `color-mix` pattern) and any unrecognized value falls back to a neutral chip rendered verbatim:
+**Task-kind chips** (`memory-task-kind-*`) — `task_kind` is a free-form string on the wire, so five known values map to distinct color accents (reusing the `severityVariant` / `findingStatusClasses` `color-mix` pattern) and any unrecognized value falls back to a neutral chip rendered verbatim:
 
 | `task_kind` | Token | Color intent |
 | --- | --- | --- |
@@ -831,15 +829,15 @@ The Control-Room gains a creator-scoped Memory surface that closes the capture �
 
 **Fragment browser** (`memory-fragment-summary`, `memory-fragment-id`, `memory-fragment-filter-input`) — a read-only list of long-term memory fragments produced only by the `review` route. `fragment_id` renders in monospace; `summary` renders as body copy; the keyword filter is a standard search input. No CRUD — fragments are produced only by reviewing pending captures.
 
-**Inspector chrome** (`memory-inspector-header`, `memory-inspector-field-label`, `memory-inspector-field-value`) — the side inspector (matching the V1.77 `FindingDetailPanel` pattern) shows all 6 `PendingReviewInfo` fields. Absent `world_id` reads as "(none)"; `created_at` is RFC 3339 rendered in the author's local time; `raw_digest` is a scrollable preformatted area.
+**Inspector chrome** (`memory-inspector-header`, `memory-inspector-field-label`, `memory-inspector-field-value`) — the side inspector (matching the `FindingDetailPanel` pattern) shows all 6 `PendingReviewInfo` fields. Absent `world_id` reads as "(none)"; `created_at` is RFC 3339 rendered in the author's local time; `raw_digest` is a scrollable preformatted area.
 
 **Review & Summarize CTA** (`memory-review-button`) — a primary accent button (reuses `button.primary` basis) enabled only when `count > 0`; shows a processing state then surfaces `promoted`/`fragmented`/`dropped` counters in a confirmation toast.
 
 Interaction rules:
-- The surface is review/consume-only — `createPendingReview` stays CLI/producer-only (the session-end capture pipeline owns creation), mirroring V1.77's `createFinding` CLI-only decision.
+- The surface is review/consume-only — `createPendingReview` stays CLI/producer-only (the session-end capture pipeline owns creation), mirroring the `createFinding` CLI-only decision.
 - Optimistic delete removes the row and decrements the count badge before the server responds; rolls back on error.
-- Token names are preserved verbatim — no consumer (`tailwind.config.ts`, `index.css`, or Memory page components) invents a name not in this frontmatter (V1.69 invariant continues).
+- Token names are preserved verbatim — no consumer (`tailwind.config.ts`, `index.css`, or Memory page components) invents a name not in this frontmatter (preservation invariant).
 
-### Author Reflection Token Stubs (V1.79)
+### Author Reflection Tokens
 
-V1.79 P0 filled the Track A reading-surface tokens with concrete light values; only the Track B SOUL visualization token stubs remain for P1 to replace with concrete light/dark values.
+Reading-surface tokens have concrete light values; SOUL visualization tokens cover the concrete light/dark keyword-cluster and timeline values.
