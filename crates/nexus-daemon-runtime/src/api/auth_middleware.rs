@@ -10,6 +10,8 @@
 
 use axum::body::Body;
 use axum::extract::Request;
+use axum::http::header::ORIGIN;
+use axum::http::HeaderValue;
 use axum::middleware::Next;
 use axum::response::Response;
 
@@ -31,11 +33,107 @@ pub struct DaemonApiConfig {
     pub api_key: Option<String>,
     /// Resolved authentication mode.
     pub auth_mode: AuthMode,
+    /// Resolved daemon HTTP port (used to compute the own-origin allowlist entry).
+    pub daemon_port: u16,
+    /// Allowed `Origin` values for the Local API CORS + Origin-reject gate.
+    pub allowed_origins: Vec<String>,
+    /// Human-readable `(origin, source)` pairs for startup logging.
+    pub allowed_origin_sources: Vec<(String, String)>,
 }
 
 impl DaemonApiConfig {
     /// Environment variable name for the daemon API key.
     pub const ENV_KEY: &'static str = "NEXUS42_DAEMON_API_KEY";
+
+    /// Environment variable name for the comma-separated allowed-origin override.
+    pub const ENV_ALLOWED_ORIGINS: &'static str = "NEXUS_DAEMON_ALLOWED_ORIGINS";
+
+    /// Environment variable name for the daemon HTTP port.
+    pub const ENV_DAEMON_PORT: &'static str = "NEXUS_DAEMON_PORT";
+
+    /// Default daemon HTTP port.
+    pub const DEFAULT_PORT: u16 = 8420;
+
+    /// Build the default allowlist (codebase-verified origins) for a given port.
+    fn default_allowed_origins(port: u16) -> (Vec<String>, Vec<(String, String)>) {
+        let own_v4 = format!("http://127.0.0.1:{port}");
+        let own_localhost = format!("http://localhost:{port}");
+        let mut origins = vec![own_v4.clone(), own_localhost.clone()];
+        let mut sources = vec![
+            (own_v4, "computed".to_string()),
+            (own_localhost, "computed".to_string()),
+        ];
+
+        for hardcoded in [
+            "tauri://localhost",
+            "http://tauri.localhost",
+            "http://localhost:5173",
+        ] {
+            origins.push(hardcoded.to_string());
+            sources.push((hardcoded.to_string(), "hardcoded".to_string()));
+        }
+
+        (origins, sources)
+    }
+
+    /// Format an HTTP `Origin` value for a resolved loopback bind host and port.
+    fn http_origin_for_bind_host(host: &str, port: u16) -> String {
+        let trimmed = host.trim();
+        if trimmed.starts_with('[') || !trimmed.contains(':') {
+            format!("http://{trimmed}:{port}")
+        } else {
+            format!("http://[{trimmed}]:{port}")
+        }
+    }
+
+    fn is_loopback_bind_host(host: &str) -> bool {
+        let h = host.trim().trim_start_matches('[').trim_end_matches(']');
+        if h.eq_ignore_ascii_case("localhost") {
+            return true;
+        }
+        h.parse::<std::net::IpAddr>()
+            .is_ok_and(|ip| ip.is_loopback())
+    }
+
+    /// Resolve allowed origins from defaults plus the env override.
+    fn resolve_allowed_origins(
+        port: u16,
+        bind_host: Option<&str>,
+    ) -> (Vec<String>, Vec<(String, String)>) {
+        let (mut origins, mut sources) = Self::default_allowed_origins(port);
+
+        if let Some(host) = bind_host.filter(|h| Self::is_loopback_bind_host(h)) {
+            let bind_origin = Self::http_origin_for_bind_host(host, port);
+            if !origins.iter().any(|origin| origin == &bind_origin) {
+                origins.push(bind_origin.clone());
+                sources.push((bind_origin, "computed".to_string()));
+            }
+        }
+
+        if let Ok(env_str) = std::env::var(Self::ENV_ALLOWED_ORIGINS) {
+            for raw in env_str.split(',') {
+                let origin = raw.trim();
+                if origin.is_empty() {
+                    continue;
+                }
+                match HeaderValue::from_str(origin) {
+                    Ok(_) => {
+                        origins.push(origin.to_string());
+                        sources.push((origin.to_string(), "env".to_string()));
+                    }
+                    Err(_) => {
+                        tracing::warn!(
+                            origin = %origin,
+                            "{} contained an invalid origin value; skipping",
+                            Self::ENV_ALLOWED_ORIGINS,
+                        );
+                    }
+                }
+            }
+        }
+
+        (origins, sources)
+    }
 
     /// Read and resolve config from the process environment.
     ///
@@ -44,6 +142,12 @@ impl DaemonApiConfig {
     pub fn from_env() -> Self {
         let raw = std::env::var(Self::ENV_KEY).unwrap_or_default();
         let trimmed = raw.trim().to_string();
+
+        let port = std::env::var(Self::ENV_DAEMON_PORT)
+            .ok()
+            .and_then(|s| s.parse().ok())
+            .unwrap_or(Self::DEFAULT_PORT);
+        let (allowed_origins, allowed_origin_sources) = Self::resolve_allowed_origins(port, None);
 
         if trimmed.is_empty() {
             tracing::warn!(
@@ -54,31 +158,81 @@ impl DaemonApiConfig {
             Self {
                 api_key: None,
                 auth_mode: AuthMode::KeylessLocalhost,
+                daemon_port: port,
+                allowed_origins,
+                allowed_origin_sources,
             }
         } else {
             tracing::info!("Daemon API key loaded; running in keyed-all mode.");
             Self {
                 api_key: Some(trimmed),
                 auth_mode: AuthMode::KeyedAll,
+                daemon_port: port,
+                allowed_origins,
+                allowed_origin_sources,
             }
         }
     }
 
+    /// Return a copy of this config with the resolved daemon listen address updated.
+    ///
+    /// Used by `boot.rs` after CLI config / transport resolution so the own-origin
+    /// allowlist entries match the actual listening host and port.
+    #[must_use]
+    pub fn with_resolved_listen_addr(self, port: u16, bind_host: &str) -> Self {
+        if self.daemon_port == port {
+            let bind_origin = Self::http_origin_for_bind_host(bind_host, port);
+            if self
+                .allowed_origins
+                .iter()
+                .any(|origin| origin == &bind_origin)
+            {
+                return self;
+            }
+        }
+        let (allowed_origins, allowed_origin_sources) =
+            Self::resolve_allowed_origins(port, Some(bind_host));
+        Self {
+            daemon_port: port,
+            allowed_origins,
+            allowed_origin_sources,
+            ..self
+        }
+    }
+
+    /// Return a copy of this config with the resolved daemon port updated.
+    ///
+    /// Prefer [`Self::with_resolved_listen_addr`] when the bind host is known.
+    #[must_use]
+    pub fn with_resolved_port(self, port: u16) -> Self {
+        self.with_resolved_listen_addr(port, "127.0.0.1")
+    }
+
     /// Create a config for testing in keyed-all mode with a specific key.
-    #[cfg(test)]
+    #[must_use]
     pub fn keyed(key: &str) -> Self {
+        let (allowed_origins, allowed_origin_sources) =
+            Self::default_allowed_origins(Self::DEFAULT_PORT);
         Self {
             api_key: Some(key.to_string()),
             auth_mode: AuthMode::KeyedAll,
+            daemon_port: Self::DEFAULT_PORT,
+            allowed_origins,
+            allowed_origin_sources,
         }
     }
 
     /// Create a config for testing in keyless-localhost mode.
-    #[cfg(test)]
-    pub const fn keyless() -> Self {
+    #[must_use]
+    pub fn keyless() -> Self {
+        let (allowed_origins, allowed_origin_sources) =
+            Self::default_allowed_origins(Self::DEFAULT_PORT);
         Self {
             api_key: None,
             auth_mode: AuthMode::KeylessLocalhost,
+            daemon_port: Self::DEFAULT_PORT,
+            allowed_origins,
+            allowed_origin_sources,
         }
     }
 }
@@ -96,6 +250,59 @@ pub enum LocalAuthScheme {
     ApiKey,
     /// Keyless-localhost mode — loopback connection, no key required.
     LoopbackBypass,
+}
+
+/// Require an allowlisted `Origin` header (defense-in-depth CORS gate).
+///
+/// - Requests with **no** `Origin` header are permitted (non-browser clients).
+/// - `OPTIONS` preflight requests are permitted unconditionally; the configured
+///   `CorsLayer` is authoritative for preflight.
+/// - Requests whose `Origin` header is not in [`DaemonApiConfig::allowed_origins`]
+///   are rejected with [`NexusApiError::Forbidden`].
+///
+/// This middleware is applied as a tower layer *before* `require_api_key`, so
+/// cross-origin browser requests are rejected before the auth middleware runs.
+///
+/// # Errors
+///
+/// - [`NexusApiError::Forbidden`] — the request's `Origin` header is not in the
+///   configured allowlist.
+pub async fn require_allowed_origin(
+    axum::extract::State(config): axum::extract::State<DaemonApiConfig>,
+    request: Request<Body>,
+    next: Next,
+) -> Result<Response, NexusApiError> {
+    // Preflight requests are handled by the CorsLayer; do not double-reject them.
+    if request.method() == axum::http::Method::OPTIONS {
+        return Ok(next.run(request).await);
+    }
+
+    if let Some(origin) = request.headers().get(ORIGIN) {
+        let origin_str = origin.to_str().unwrap_or_default();
+        if !config
+            .allowed_origins
+            .iter()
+            .any(|allowed| allowed == origin_str)
+        {
+            tracing::info!(
+                method = %request.method(),
+                path = %request.uri().path(),
+                origin = %origin_str,
+                "Request rejected: Origin not in allowlist",
+            );
+            return Err(NexusApiError::Forbidden {
+                resource: "origin".to_string(),
+                reason: format!(
+                    "Origin '{}' is not allowed for this Local API; \
+                     add it to {} to allow it",
+                    origin_str,
+                    DaemonApiConfig::ENV_ALLOWED_ORIGINS,
+                ),
+            });
+        }
+    }
+
+    Ok(next.run(request).await)
 }
 
 /// Constant-time comparison of two byte strings.
@@ -280,6 +487,7 @@ mod tests {
 
     fn build_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Router {
         use axum::middleware as axum_mw;
+        use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
         let runtime_routes = Router::new()
             .route("/v1/local/runtime/health", get(handlers::runtime::health))
@@ -301,14 +509,29 @@ mod tests {
             .route("/v1/local/creators", get(handlers::creators::list))
             .route("/v1/local/references", get(handlers::references::list))
             .route_layer(axum_mw::from_fn_with_state(
-                auth_config,
+                auth_config.clone(),
                 super::require_api_key,
             ));
+
+        let allowed_origins: Vec<axum::http::HeaderValue> = auth_config
+            .allowed_origins
+            .iter()
+            .filter_map(|origin| axum::http::HeaderValue::from_str(origin).ok())
+            .collect();
+        let cors_layer = CorsLayer::new()
+            .allow_origin(AllowOrigin::list(allowed_origins))
+            .allow_methods(Any)
+            .allow_headers(Any);
 
         Router::new()
             .merge(runtime_routes)
             .merge(workspace_routes)
             .merge(protected_routes)
+            .layer(cors_layer)
+            .layer(axum_mw::from_fn_with_state(
+                auth_config,
+                super::require_allowed_origin,
+            ))
             .with_state(state)
     }
 
@@ -415,7 +638,142 @@ mod tests {
         );
     }
 
+    // --- Origin allowlist gate (V1.86) ---
+
+    #[tokio::test]
+    async fn cross_origin_request_is_rejected_with_403() {
+        let app = create_test_app(DaemonApiConfig::keyless()).await;
+        let response = app
+            .get("/v1/local/creators")
+            .add_header("Origin", "https://evil.com")
+            .await;
+        assert_eq!(
+            response.status_code(),
+            403,
+            "cross-origin Origin should be rejected before auth"
+        );
+        let body: Value = response.json();
+        assert_eq!(body["error"]["code"], "forbidden");
+        assert!(
+            body["error"]["message"]
+                .as_str()
+                .unwrap_or("")
+                .contains("https://evil.com"),
+            "error message should include rejected origin"
+        );
+    }
+
+    #[tokio::test]
+    async fn same_origin_request_is_allowed() {
+        let app = create_test_app(DaemonApiConfig::keyless()).await;
+        let response = app
+            .get("/v1/local/creators")
+            .add_header("Origin", "http://127.0.0.1:8420")
+            .await;
+        assert_ne!(
+            response.status_code(),
+            403,
+            "same-origin request should pass Origin gate"
+        );
+    }
+
+    #[tokio::test]
+    async fn localhost_own_port_origin_request_is_allowed() {
+        let app = create_test_app(DaemonApiConfig::keyless()).await;
+        let response = app
+            .get("/v1/local/creators")
+            .add_header("Origin", "http://localhost:8420")
+            .await;
+        assert_ne!(
+            response.status_code(),
+            403,
+            "localhost own-port origin should pass Origin gate"
+        );
+    }
+
+    #[tokio::test]
+    async fn tauri_origin_request_is_allowed() {
+        let app = create_test_app(DaemonApiConfig::keyless()).await;
+
+        let mac_response = app
+            .get("/v1/local/creators")
+            .add_header("Origin", "tauri://localhost")
+            .await;
+        assert_ne!(
+            mac_response.status_code(),
+            403,
+            "Tauri macOS origin should pass Origin gate"
+        );
+
+        let win_response = app
+            .get("/v1/local/creators")
+            .add_header("Origin", "http://tauri.localhost")
+            .await;
+        assert_ne!(
+            win_response.status_code(),
+            403,
+            "Tauri Windows/Linux origin should pass Origin gate"
+        );
+    }
+
+    #[tokio::test]
+    async fn vite_dev_origin_request_is_allowed() {
+        let app = create_test_app(DaemonApiConfig::keyless()).await;
+        let response = app
+            .get("/v1/local/creators")
+            .add_header("Origin", "http://localhost:5173")
+            .await;
+        assert_ne!(
+            response.status_code(),
+            403,
+            "Vite dev origin should pass Origin gate"
+        );
+    }
+
+    #[tokio::test]
+    async fn options_preflight_passes_origin_middleware() {
+        let app = create_test_app(DaemonApiConfig::keyless()).await;
+        let response = app
+            .method(axum::http::Method::OPTIONS, "/v1/local/creators")
+            .add_header("Origin", "http://127.0.0.1:8420")
+            .add_header("Access-Control-Request-Method", "GET")
+            .await;
+        assert_ne!(
+            response.status_code(),
+            403,
+            "OPTIONS preflight must not be rejected by Origin middleware"
+        );
+    }
+
     // --- Config unit tests ---
+
+    #[tokio::test]
+    async fn ipv6_loopback_origin_request_is_allowed() {
+        let app =
+            create_test_app(DaemonApiConfig::keyless().with_resolved_listen_addr(8420, "::1"))
+                .await;
+        let response = app
+            .get("/v1/local/creators")
+            .add_header("Origin", "http://[::1]:8420")
+            .await;
+        assert_ne!(
+            response.status_code(),
+            403,
+            "IPv6 loopback bind-host origin should pass Origin gate"
+        );
+    }
+
+    #[test]
+    fn resolve_allowed_origins_includes_configured_bind_host() {
+        let config = DaemonApiConfig::keyless().with_resolved_listen_addr(8420, "::1");
+        assert!(
+            config
+                .allowed_origins
+                .iter()
+                .any(|origin| origin == "http://[::1]:8420"),
+            "configured loopback bind host should be in allowlist"
+        );
+    }
 
     #[test]
     fn daemon_api_config_keyed_mode() {

@@ -33,21 +33,31 @@ async fn execute_rejects_read_without_path() {
     };
     let result = HostToolExecutor::execute(&req, &state).await;
     assert!(result.is_err());
+    let err = result.unwrap_err();
+    assert_eq!(err.error_code(), "forbidden");
+    assert!(
+        err.to_string().contains("active workspace"),
+        "error should mention active workspace requirement: {err}"
+    );
 }
 
 #[tokio::test]
 async fn execute_read_file_succeeds() {
-    let (_tmp, nexus_home, db_path) = create_test_workspace().await;
-    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+    let (_tmp, nexus_home, db_path, workspace_dir) = create_initialized_test_workspace().await;
+    let state = WorkspaceState::new_for_testing(
+        nexus_home,
+        db_path,
+        Some(workspace_dir.to_string_lossy().to_string()),
+    )
+    .await;
 
-    // Write a temp file to read
-    let temp = tempfile::NamedTempFile::new().expect("temp file");
-    let path = temp.path().to_string_lossy().to_string();
-    std::fs::write(temp.path(), "hello world").expect("write temp");
+    // Write a file inside the workspace and read it back.
+    let target = workspace_dir.join("read_test.txt");
+    std::fs::write(&target, "hello world").expect("write workspace file");
 
     let req = ToolExecuteRequest {
         tool_name: "fs/read_text_file".to_string(),
-        parameters: serde_json::json!({ "path": path }),
+        parameters: serde_json::json!({ "path": target.to_string_lossy() }),
         session_id: None,
         request_id: None,
         caller_kind: None,
@@ -60,15 +70,19 @@ async fn execute_read_file_succeeds() {
 
 #[tokio::test]
 async fn execute_write_file_succeeds() {
-    let (_tmp, nexus_home, db_path) = create_test_workspace().await;
-    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+    let (_tmp, nexus_home, db_path, workspace_dir) = create_initialized_test_workspace().await;
+    let state = WorkspaceState::new_for_testing(
+        nexus_home,
+        db_path,
+        Some(workspace_dir.to_string_lossy().to_string()),
+    )
+    .await;
 
-    let temp = tempfile::NamedTempFile::new().expect("temp file");
-    let path = temp.path().to_string_lossy().to_string();
+    let target = workspace_dir.join("write_test.txt");
 
     let req = ToolExecuteRequest {
         tool_name: "fs/write_text_file".to_string(),
-        parameters: serde_json::json!({ "path": path, "content": "written!" }),
+        parameters: serde_json::json!({ "path": target.to_string_lossy(), "content": "written!" }),
         session_id: None,
         request_id: None,
         caller_kind: None,
@@ -76,8 +90,367 @@ async fn execute_write_file_succeeds() {
     let result = HostToolExecutor::execute(&req, &state).await;
     assert!(result.is_ok());
 
-    let content = std::fs::read_to_string(&path).expect("read back");
+    let content = std::fs::read_to_string(&target).expect("read back");
     assert_eq!(content, "written!");
+}
+
+/// V1.86 T2: `fs/write_text_file` is denied when no workspace is configured.
+#[tokio::test]
+async fn fs_write_rejected_without_workspace() {
+    let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+    let req = ToolExecuteRequest {
+        tool_name: "fs/write_text_file".to_string(),
+        parameters: serde_json::json!({ "path": "anywhere.txt", "content": "x" }),
+        session_id: None,
+        request_id: None,
+        caller_kind: None,
+    };
+    let result = HostToolExecutor::execute(&req, &state).await;
+    let err = result.expect_err("fs/* write must require an active workspace");
+    assert_eq!(err.error_code(), "forbidden");
+    assert!(
+        err.to_string().contains("active workspace"),
+        "error should mention active workspace requirement: {err}"
+    );
+}
+
+/// V1.86 T2: `fs/read_text_file` is denied when no workspace is configured.
+#[tokio::test]
+async fn fs_read_rejected_without_workspace() {
+    let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+    let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+    let req = ToolExecuteRequest {
+        tool_name: "fs/read_text_file".to_string(),
+        parameters: serde_json::json!({ "path": "anywhere.txt" }),
+        session_id: None,
+        request_id: None,
+        caller_kind: None,
+    };
+    let result = HostToolExecutor::execute(&req, &state).await;
+    let err = result.expect_err("fs/* read must require an active workspace");
+    assert_eq!(err.error_code(), "forbidden");
+}
+
+/// V1.86 T3: `fs/read_text_file` rejects an absolute path outside the workspace.
+#[tokio::test]
+async fn fs_read_rejects_absolute_path_outside_workspace() {
+    let (_tmp, nexus_home, db_path, workspace_dir) = create_initialized_test_workspace().await;
+    let state = WorkspaceState::new_for_testing(
+        nexus_home,
+        db_path,
+        Some(workspace_dir.to_string_lossy().to_string()),
+    )
+    .await;
+
+    let outside = workspace_dir
+        .parent()
+        .expect("workspace has parent")
+        .join("outside_read.txt");
+
+    let req = ToolExecuteRequest {
+        tool_name: "fs/read_text_file".to_string(),
+        parameters: serde_json::json!({ "path": outside.to_string_lossy() }),
+        session_id: None,
+        request_id: None,
+        caller_kind: None,
+    };
+    let result = HostToolExecutor::execute(&req, &state).await;
+    let err = result.expect_err("fs read outside workspace must be forbidden");
+    assert_eq!(err.error_code(), "forbidden");
+}
+
+/// V1.86 T3: `fs/read_text_file` rejects a relative `../` escape.
+#[tokio::test]
+async fn fs_read_rejects_relative_escape() {
+    let (_tmp, nexus_home, db_path, workspace_dir) = create_initialized_test_workspace().await;
+    let state = WorkspaceState::new_for_testing(
+        nexus_home,
+        db_path,
+        Some(workspace_dir.to_string_lossy().to_string()),
+    )
+    .await;
+
+    let req = ToolExecuteRequest {
+        tool_name: "fs/read_text_file".to_string(),
+        parameters: serde_json::json!({ "path": "../outside.txt" }),
+        session_id: None,
+        request_id: None,
+        caller_kind: None,
+    };
+    let result = HostToolExecutor::execute(&req, &state).await;
+    let err = result.expect_err("relative escape must be forbidden");
+    assert_eq!(err.error_code(), "forbidden");
+}
+
+/// V1.86 T3: `fs/write_text_file` rejects an absolute path outside the workspace.
+#[tokio::test]
+async fn fs_write_rejects_absolute_path_outside_workspace() {
+    let (_tmp, nexus_home, db_path, workspace_dir) = create_initialized_test_workspace().await;
+    let state = WorkspaceState::new_for_testing(
+        nexus_home,
+        db_path,
+        Some(workspace_dir.to_string_lossy().to_string()),
+    )
+    .await;
+
+    let outside = workspace_dir
+        .parent()
+        .expect("workspace has parent")
+        .join("outside_write.txt");
+
+    let req = ToolExecuteRequest {
+        tool_name: "fs/write_text_file".to_string(),
+        parameters: serde_json::json!({
+            "path": outside.to_string_lossy(),
+            "content": "should not be written"
+        }),
+        session_id: None,
+        request_id: None,
+        caller_kind: None,
+    };
+    let result = HostToolExecutor::execute(&req, &state).await;
+    let err = result.expect_err("fs write outside workspace must be forbidden");
+    assert_eq!(err.error_code(), "forbidden");
+    assert!(
+        !outside.exists(),
+        "file outside workspace must not be created"
+    );
+}
+
+/// V1.86 T3: `fs/write_text_file` rejects a relative `../` escape.
+#[tokio::test]
+async fn fs_write_rejects_relative_escape() {
+    let (_tmp, nexus_home, db_path, workspace_dir) = create_initialized_test_workspace().await;
+    let state = WorkspaceState::new_for_testing(
+        nexus_home,
+        db_path,
+        Some(workspace_dir.to_string_lossy().to_string()),
+    )
+    .await;
+
+    let req = ToolExecuteRequest {
+        tool_name: "fs/write_text_file".to_string(),
+        parameters: serde_json::json!({
+            "path": "../outside.txt",
+            "content": "should not be written"
+        }),
+        session_id: None,
+        request_id: None,
+        caller_kind: None,
+    };
+    let result = HostToolExecutor::execute(&req, &state).await;
+    let err = result.expect_err("relative escape must be forbidden");
+    assert_eq!(err.error_code(), "forbidden");
+}
+
+/// V1.86 T3: `fs/read_text_file` resolves a relative path inside the workspace.
+#[tokio::test]
+async fn fs_read_relative_path_inside_workspace() {
+    let (_tmp, nexus_home, db_path, workspace_dir) = create_initialized_test_workspace().await;
+    let state = WorkspaceState::new_for_testing(
+        nexus_home,
+        db_path,
+        Some(workspace_dir.to_string_lossy().to_string()),
+    )
+    .await;
+
+    std::fs::write(workspace_dir.join("relative.txt"), "relative content").expect("write file");
+
+    let req = ToolExecuteRequest {
+        tool_name: "fs/read_text_file".to_string(),
+        parameters: serde_json::json!({ "path": "relative.txt" }),
+        session_id: None,
+        request_id: None,
+        caller_kind: None,
+    };
+    let result = HostToolExecutor::execute(&req, &state).await;
+    assert!(result.is_ok(), "relative read should succeed: {result:?}");
+    assert_eq!(result.unwrap()["content"], "relative content");
+}
+
+// ─── V1.86 T4: fs/* privileged-path coverage backfill (R-V157P1-W001) ───
+
+/// V1.86 T4: `fs/read_text_file` rejects a sibling-prefix escape.
+/// A workspace root named `.../workspace` must not allow access to a sibling
+/// directory named `.../workspace-evil` via `../workspace-evil/...`.
+#[tokio::test]
+async fn fs_read_rejects_sibling_prefix_escape() {
+    let (_tmp, nexus_home, db_path, workspace_dir) = create_initialized_test_workspace().await;
+    let state = WorkspaceState::new_for_testing(
+        nexus_home,
+        db_path,
+        Some(workspace_dir.to_string_lossy().to_string()),
+    )
+    .await;
+
+    let parent = workspace_dir.parent().expect("workspace has parent");
+    let evil_dir = parent.join(format!(
+        "{}-evil",
+        workspace_dir.file_name().unwrap().to_string_lossy()
+    ));
+    std::fs::create_dir_all(&evil_dir).expect("create evil sibling");
+    std::fs::write(evil_dir.join("secret.md"), "stolen").expect("write evil file");
+
+    let req = ToolExecuteRequest {
+        tool_name: "fs/read_text_file".to_string(),
+        parameters: serde_json::json!({ "path": "../workspace-evil/secret.md" }),
+        session_id: None,
+        request_id: None,
+        caller_kind: None,
+    };
+    let result = HostToolExecutor::execute(&req, &state).await;
+    let err = result.expect_err("sibling-prefix escape must be forbidden");
+    assert_eq!(err.error_code(), "forbidden");
+}
+
+/// V1.86 T4: `fs/write_text_file` rejects a sibling-prefix escape.
+#[tokio::test]
+async fn fs_write_rejects_sibling_prefix_escape() {
+    let (_tmp, nexus_home, db_path, workspace_dir) = create_initialized_test_workspace().await;
+    let state = WorkspaceState::new_for_testing(
+        nexus_home,
+        db_path,
+        Some(workspace_dir.to_string_lossy().to_string()),
+    )
+    .await;
+
+    let parent = workspace_dir.parent().expect("workspace has parent");
+    let evil_dir = parent.join(format!(
+        "{}-evil",
+        workspace_dir.file_name().unwrap().to_string_lossy()
+    ));
+    std::fs::create_dir_all(&evil_dir).expect("create evil sibling");
+
+    let req = ToolExecuteRequest {
+        tool_name: "fs/write_text_file".to_string(),
+        parameters: serde_json::json!({
+            "path": "../workspace-evil/secret.md",
+            "content": "should not be written"
+        }),
+        session_id: None,
+        request_id: None,
+        caller_kind: None,
+    };
+    let result = HostToolExecutor::execute(&req, &state).await;
+    let err = result.expect_err("sibling-prefix escape must be forbidden");
+    assert_eq!(err.error_code(), "forbidden");
+    assert!(
+        !evil_dir.join("secret.md").exists(),
+        "file outside workspace must not be created"
+    );
+}
+
+/// V1.86 T4: `fs/read_text_file` rejects a symlink inside the workspace that
+/// points to a file outside the workspace.
+#[tokio::test]
+#[cfg(unix)]
+async fn fs_read_rejects_symlink_escape() {
+    use std::os::unix::fs::symlink;
+
+    let (_tmp, nexus_home, db_path, workspace_dir) = create_initialized_test_workspace().await;
+    let state = WorkspaceState::new_for_testing(
+        nexus_home,
+        db_path,
+        Some(workspace_dir.to_string_lossy().to_string()),
+    )
+    .await;
+
+    let outside = workspace_dir
+        .parent()
+        .expect("workspace has parent")
+        .join("outside_secret.md");
+    std::fs::write(&outside, "stolen via symlink").expect("write outside file");
+
+    let link = workspace_dir.join("escape_link.md");
+    symlink(&outside, &link).expect("create symlink");
+
+    let req = ToolExecuteRequest {
+        tool_name: "fs/read_text_file".to_string(),
+        parameters: serde_json::json!({ "path": "escape_link.md" }),
+        session_id: None,
+        request_id: None,
+        caller_kind: None,
+    };
+    let result = HostToolExecutor::execute(&req, &state).await;
+    let err = result.expect_err("symlink escape must be forbidden");
+    assert_eq!(err.error_code(), "forbidden");
+}
+
+/// V1.86 T4: `fs/write_text_file` rejects a path whose parent is a symlink
+/// inside the workspace pointing to a directory outside the workspace.
+#[tokio::test]
+#[cfg(unix)]
+async fn fs_write_rejects_symlink_parent_escape() {
+    use std::os::unix::fs::symlink;
+
+    let (_tmp, nexus_home, db_path, workspace_dir) = create_initialized_test_workspace().await;
+    let state = WorkspaceState::new_for_testing(
+        nexus_home,
+        db_path,
+        Some(workspace_dir.to_string_lossy().to_string()),
+    )
+    .await;
+
+    let outside_dir = workspace_dir
+        .parent()
+        .expect("workspace has parent")
+        .join("outside_dir");
+    std::fs::create_dir_all(&outside_dir).expect("create outside dir");
+
+    let link_dir = workspace_dir.join("link_dir");
+    symlink(&outside_dir, &link_dir).expect("create symlink dir");
+
+    let req = ToolExecuteRequest {
+        tool_name: "fs/write_text_file".to_string(),
+        parameters: serde_json::json!({
+            "path": "link_dir/nested_file.md",
+            "content": "should not be written"
+        }),
+        session_id: None,
+        request_id: None,
+        caller_kind: None,
+    };
+    let result = HostToolExecutor::execute(&req, &state).await;
+    let err = result.expect_err("symlink parent escape must be forbidden");
+    assert_eq!(err.error_code(), "forbidden");
+    assert!(
+        !outside_dir.join("nested_file.md").exists(),
+        "file outside workspace must not be created"
+    );
+}
+
+/// V1.86 T4: worker IPC entry point (`dispatch_from_worker`) applies the same
+/// fs/* path guard as the CLI/HTTP path.
+#[tokio::test]
+async fn worker_fs_read_rejects_escape() {
+    let (_tmp, nexus_home, db_path, workspace_dir) = create_initialized_test_workspace().await;
+    let state = WorkspaceState::new_for_testing(
+        nexus_home,
+        db_path,
+        Some(workspace_dir.to_string_lossy().to_string()),
+    )
+    .await;
+
+    std::fs::write(
+        workspace_dir.parent().unwrap().join("outside_worker.md"),
+        "x",
+    )
+    .expect("write outside");
+
+    let result = HostToolExecutor::dispatch_from_worker(
+        "fs/read_text_file",
+        &serde_json::json!({ "path": "../outside_worker.md" }),
+        "req-worker-fs-001",
+        &state,
+    )
+    .await;
+
+    assert!(!result.grant, "worker fs/* escape must not be granted");
+    let error = result.error.expect("worker should return error");
+    assert_eq!(error.code, "forbidden");
 }
 
 #[tokio::test]

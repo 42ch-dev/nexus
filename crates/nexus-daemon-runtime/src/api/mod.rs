@@ -28,7 +28,7 @@ use axum::{
     routing::{delete, get, post},
     Router,
 };
-use tower_http::cors::CorsLayer;
+use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
 /// Agent Host routes (V1.20 Batch 3).
 fn agent_host_routes() -> Router<WorkspaceState> {
@@ -494,7 +494,7 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
         .merge(agent_host_routes())
         // Apply require_api_key middleware to all protected routes
         .route_layer(axum_mw::from_fn_with_state(
-            auth_config,
+            auth_config.clone(),
             auth_middleware::require_api_key,
         ));
 
@@ -511,8 +511,29 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
     #[cfg(not(debug_assertions))]
     let router = router.fallback(static_assets::serve_embedded_app);
 
+    let allowed_origins: Vec<axum::http::HeaderValue> = auth_config
+        .allowed_origins
+        .iter()
+        .filter_map(|origin| {
+            axum::http::HeaderValue::from_str(origin)
+                .inspect_err(|_| {
+                    tracing::warn!(origin = %origin, "Skipping invalid allowed origin");
+                })
+                .ok()
+        })
+        .collect();
+
+    let cors_layer = CorsLayer::new()
+        .allow_origin(AllowOrigin::list(allowed_origins))
+        .allow_methods(Any)
+        .allow_headers(Any);
+
     router
-        .layer(CorsLayer::permissive())
+        .layer(cors_layer)
+        .layer(axum_mw::from_fn_with_state(
+            auth_config,
+            auth_middleware::require_allowed_origin,
+        ))
         // Request ID middleware: runs on ALL requests (before auth),
         // so error responses from auth middleware also include request_id.
         .route_layer(axum_mw::from_fn(middleware::attach_request_id))
