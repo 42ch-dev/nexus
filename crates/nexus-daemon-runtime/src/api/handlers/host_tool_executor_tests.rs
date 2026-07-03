@@ -2831,6 +2831,93 @@ async fn manuscript_read_range_rejects_missing_chapter() {
     assert_eq!(result.unwrap_err().error_code(), "invalid_input");
 }
 
+/// V1.87 P1: `nexus.manuscript.read_range` rejects a sibling-escape body_path
+/// that would pass a naive string-prefix check (R-V186-QC1-S005).
+#[tokio::test]
+async fn manuscript_read_range_rejects_sibling_escape_body_path() {
+    let (_tmp, nexus_home, db_path, workspace_dir) = create_initialized_test_workspace().await;
+    let state = WorkspaceState::new_for_testing(
+        nexus_home,
+        db_path,
+        Some(workspace_dir.to_string_lossy().to_string()),
+    )
+    .await;
+    let (work_id, _workspace_root) = create_test_manuscript_work(&state).await;
+
+    // Create a sibling directory whose name extends the workspace root name.
+    // Do NOT create the target file so the old missing-file branch would fall
+    // through the string-prefix guard and reach FILE_READ_FAILED instead of
+    // rejecting the escape (R-V186-QC1-S005).
+    let sibling_dir = workspace_dir
+        .parent()
+        .expect("workspace parent")
+        .join("workspace-evil");
+    std::fs::create_dir_all(&sibling_dir).expect("create sibling dir");
+
+    // Patch chapter 1's body_path to escape into the sibling directory.
+    let now = chrono::Utc::now().to_rfc3339();
+    nexus_local_db::work_chapters::update_paths(
+        state.pool(),
+        &work_id,
+        1,
+        1,
+        None,
+        Some("../workspace-evil/evil.md"),
+        &now,
+    )
+    .await
+    .expect("update body_path");
+
+    let req = ToolExecuteRequest {
+        tool_name: "nexus.manuscript.read_range".to_string(),
+        parameters: serde_json::json!({"work_id": work_id, "chapter": 1}),
+        session_id: None,
+        request_id: None,
+        caller_kind: None,
+    };
+    let result = HostToolExecutor::execute(&req, &state).await;
+    let err = result.expect_err("sibling-escape body_path must be rejected");
+    assert_eq!(err.error_code(), "invalid_input");
+    assert!(
+        err.to_string().contains("escapes workspace root"),
+        "error should mention workspace escape: {err}"
+    );
+}
+
+/// V1.87 P1: `nexus.manuscript.read_range` succeeds for an in-bounds body path.
+#[tokio::test]
+async fn manuscript_read_range_accepts_in_bounds_body_path() {
+    let (_tmp, nexus_home, db_path, workspace_dir) = create_initialized_test_workspace().await;
+    let state = WorkspaceState::new_for_testing(
+        nexus_home,
+        db_path,
+        Some(workspace_dir.to_string_lossy().to_string()),
+    )
+    .await;
+    let (work_id, _workspace_root) = create_test_manuscript_work(&state).await;
+
+    let chapter = nexus_local_db::work_chapters::get_chapter(state.pool(), &work_id, 1, 1)
+        .await
+        .expect("get chapter")
+        .expect("chapter exists");
+    let body_path = chapter.body_path.expect("body_path");
+    let abs_body = std::path::Path::new(&workspace_dir).join(&body_path);
+    std::fs::create_dir_all(abs_body.parent().expect("parent")).expect("mkdir");
+    std::fs::write(&abs_body, "in-bounds body content").expect("write body");
+
+    let req = ToolExecuteRequest {
+        tool_name: "nexus.manuscript.read_range".to_string(),
+        parameters: serde_json::json!({"work_id": work_id, "chapter": 1}),
+        session_id: None,
+        request_id: None,
+        caller_kind: None,
+    };
+    let result = HostToolExecutor::execute(&req, &state).await;
+    assert!(result.is_ok(), "in-bounds read should succeed: {result:?}");
+    let val = result.expect("result");
+    assert_eq!(val["content"], "in-bounds body content");
+}
+
 /// T3 success: `nexus.manuscript.write` writes body content within quota.
 #[tokio::test]
 async fn manuscript_write_writes_content() {
