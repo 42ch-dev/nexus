@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-07-04T01:04:26+0800",
+  "updated_at": "2026-07-04T09:00:00+0800",
   "plans": [
     {
       "plan_id": "2026-07-03-v1.88-frontend-slate-clear-and-reliability-cleanup",
@@ -61,7 +61,7 @@
       "refreshed_at": "2026-07-01",
       "refreshed_reason": "V1.80 wave-1 Done (QA Pass): R-V178P0-QC3-003 (REL-01) + 4 V1.79-QC residuals resolved. Remaining open: 2 P0 accepted low + 1 V1.79 CI-wrapper low."
     },
-    "updated_at": "2026-07-04T01:04:26+0800"
+    "updated_at": "2026-07-04T09:00:00+0800"
   },
   "residual_findings": {
     "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization": [
@@ -6653,7 +6653,13 @@
         "target": "V1.86+",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-03-v1.85-closure][R-V185CL-QC1-S001]",
         "note": "Trivial doc accuracy; both are brand PNG provenance. Accept as-is.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "closed_at": "2026-07-04",
+        "closure_note": "V1.88 P1 T6 inspection: the LFS-purpose comment in .github/workflows/desktop-build.yml already enumerates both globs (packages/nexus-ui/assets/logos/*.png and apps/desktop/src-tauri/icons/source/*.png). No code change required.",
+        "resolution": {
+          "plan_id": "2026-07-03-v1.88-frontend-slate-clear-and-reliability-cleanup",
+          "commit": null
+        }
       }
     ],
     "2026-07-03-v1.86-local-api-trust-hardening": [
@@ -6707,11 +6713,17 @@
         "scope": "crates/nexus-daemon-runtime/src/api/handlers/host_tool_handlers.rs",
         "title": "resolve_guarded_path_async runs twice per fs/* call",
         "description": "admission validate_file_path (must_exist=false) + execute_* (must_exist=true) both resolve; negligible for local single-user.",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "decision": "accept",
         "owner": "PM",
         "target": "future perf iteration",
-        "tracking_link": "reports/2026-07-03-v1.86-local-api-trust-hardening/qc-consolidated.md"
+        "tracking_link": "reports/2026-07-03-v1.86-local-api-trust-hardening/qc-consolidated.md",
+        "closed_at": "2026-07-04",
+        "closure_note": "V1.88 P1 T4: removed Gate 3 validate_file_path call from admission_pipeline for fs/* tools. Gate 4 permissions.toml check remains. execute_read_file and execute_write_file now own the single resolve_guarded_path_async resolution before filesystem access. Error behavior preserved (BadRequest -> Forbidden { resource: \"file\" }). Regression tests added for fs/* in-bounds reads/writes and escape rejection. Commit e2463330.",
+        "resolution": {
+          "plan_id": "2026-07-03-v1.88-frontend-slate-clear-and-reliability-cleanup",
+          "commit": "e2463330"
+        }
       },
       {
         "id": "R-V186-QC3-PERF-ARC-CONFIG",
@@ -6720,11 +6732,17 @@
         "scope": "crates/nexus-daemon-runtime/src/api/mod.rs",
         "title": "DaemonApiConfig cloned per-request by axum State",
         "description": "Arc<...> wrapper would zero-cost; clone sites at router construction are one-time (confirmed), so impact is small.",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "decision": "accept",
         "owner": "PM",
         "target": "future perf iteration",
-        "tracking_link": "reports/2026-07-03-v1.86-local-api-trust-hardening/qc-consolidated.md"
+        "tracking_link": "reports/2026-07-03-v1.86-local-api-trust-hardening/qc-consolidated.md",
+        "closed_at": "2026-07-04",
+        "closure_note": "V1.88 P1 T5: create_router now wraps the incoming DaemonApiConfig in Arc::new internally; the public signature is unchanged. Both route_layer calls share the Arc via Arc::clone. require_api_key and require_allowed_origin extract State<Arc<DaemonApiConfig>>; field access works unchanged via Arc Deref. Test helper build_router updated to wrap its config in Arc. Commit 7f6eeea2.",
+        "resolution": {
+          "plan_id": "2026-07-03-v1.88-frontend-slate-clear-and-reliability-cleanup",
+          "commit": "7f6eeea2"
+        }
       }
     ],
     "2026-07-03-v1.87-nexus-ui-component-library": [
@@ -6750,7 +6768,14 @@
         "owner": "@fullstack-dev",
         "target": "V1.88+ (reliability roadmap)",
         "tracking_link": ".mstar/status.json residual_findings[2026-07-03-v1.87-nexus-ui-component-library][R-V187-QC3-P001]",
-        "note": "V1.87 closed only R-V186-QC1-S005 (manuscript.read_range); the repo-wide sweep was a non-goal. Remaining sync sites are pre-existing, same-class, non-blocking."
+        "note": "V1.87 closed only R-V186-QC1-S005 (manuscript.read_range); the repo-wide sweep was a non-goal. Remaining sync sites are pre-existing, same-class, non-blocking.",
+        "lifecycle": "resolved",
+        "closed_at": "2026-07-04",
+        "closure_note": "V1.88 P1 T3: extracted resolve_guarded_path_async to crates/nexus-daemon-runtime/src/api/path_guard.rs as pub async fn delegating to sync resolve_guarded_path via tokio::task::spawn_blocking. Migrated all listed call sites in host_tool_handlers.rs (4), outline.rs (2), and chapters.rs (2) to .await the async wrapper; per-site .map_err() mappings preserved exactly. chapters.rs:174 to_detail sync probe deliberately excluded (DTO mapper, no FS I/O). Regression tests added in path_guard.rs, host_tool_handlers.rs, outline.rs, and chapters.rs covering in-bounds success and sibling-escape rejection. Commit e2463330.",
+        "resolution": {
+          "plan_id": "2026-07-03-v1.88-frontend-slate-clear-and-reliability-cleanup",
+          "commit": "e2463330"
+        }
       },
       {
         "id": "R-V187-QC3-P002",
