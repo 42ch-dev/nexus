@@ -377,7 +377,12 @@
     "2026-07-02-v1.84-compass-and-plan-stubs",
     "2026-07-02-v1.84-brand-polish-and-token-consolidation",
     "2026-07-02-v1.84-ci-and-tooling-hygiene",
-    "2026-07-02-v1.84-closure"
+    "2026-07-02-v1.84-closure",
+    "2026-07-03-v1.85-compass-and-plan-stubs",
+    "2026-07-03-v1.85-app-icon-branding",
+    "2026-07-03-v1.85-brand-and-ci-doc-hygiene",
+    "2026-07-03-v1.85-closure",
+    "2026-07-03-v1.86-local-api-trust-hardening"
   ],
   "iteration_summaries": {
     "v1.45": {
@@ -832,6 +837,20 @@
       ],
       "pr": "#111",
       "merge_commit": "1ff20bbf"
+    },
+    "V1.85": {
+      "compass": "v1.85-app-icon-branding-delivery-compass-v1.md",
+      "shipped_at": "2026-07-03 (PR #112 merged)",
+      "plans_done": 4,
+      "headline": "App Icon Branding — replaced placeholder Tauri icons with Nexus-branded icons (V1.83 logo family on V1.84 palette) + closed 2 V1.84 doc residuals",
+      "wire_contracts_changed": false
+    },
+    "V1.86": {
+      "compass": "v1.86-local-api-trust-hardening-delivery-compass-v1.md",
+      "shipped_at": "2026-07-03 (PR pending)",
+      "plans_done": 1,
+      "headline": "Local API Trust-Boundary Hardening — closed 3-finding attack chain (CORS Origin gate, fs/* deny-without-workspace, component-wise path guard) + same-class sweep; QC 3/3 Approve, QA Pass",
+      "wire_contracts_changed": false
     }
   },
   "metadata": {
@@ -840,5 +859,5 @@
     "v1_50_iteration_complete": "yes — ready for PR to main",
     "v1_51_iteration_complete": "yes — shipped to main at c57b927bbf8621adf7ec59095d274f17f429c9b7 via PR #64 on 2026-06-19T07:52:26Z"
   },
-  "updated_at": "2026-07-02"
+  "updated_at": "2026-07-03T14:30:00+08:00"
 }

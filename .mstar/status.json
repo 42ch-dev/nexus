@@ -1,130 +1,7 @@
 {
   "version": 1,
   "updated_at": "2026-07-03T10:00:00+08:00",
-  "plans": [
-    {
-      "plan_id": "2026-07-03-v1.85-compass-and-plan-stubs",
-      "name": "P-1 — Prepare (compass + plan stubs)",
-      "iteration": "V1.85",
-      "type": "prepare",
-      "status": "Done",
-      "primary_spec": ".mstar/iterations/v1.85-app-icon-branding-delivery-compass-v1.md",
-      "working_branch": null,
-      "merge_target": "iteration/v1.85",
-      "qc_reports": [
-        "skipped — prepare/harness-docs plan; reviewed via Phase 1 Review & Edit chain (product-manager -> architect -> writing-specialist -> PM lock)"
-      ],
-      "metadata": {
-        "plan_index": "P-1",
-        "iteration_refs": [
-          "V1.85"
-        ]
-      },
-      "completion_note": "Compass locked, 4 plans registered, status.json + README index updated, Review & Edit chain complete."
-    },
-    {
-      "plan_id": "2026-07-03-v1.85-app-icon-branding",
-      "name": "P0 — App Icon Branding",
-      "iteration": "V1.85",
-      "type": "implement",
-      "task_category": "visual",
-      "status": "Done",
-      "primary_spec": ".mstar/iterations/v1.85-app-icon-branding-delivery-compass-v1.md",
-      "working_branch": "feature/v1.85-app-icon-branding",
-      "merge_target": "iteration/v1.85",
-      "parallel_with": "2026-07-03-v1.85-brand-and-ci-doc-hygiene",
-      "qc_reports": [
-        ".mstar/plans/reports/2026-07-03-v1.85-closure/qc1.md",
-        "qc2.md",
-        "qc3.md"
-      ],
-      "metadata": {
-        "plan_index": "P0",
-        "iteration_refs": [
-          "V1.85"
-        ],
-        "spec_integration_branch": "iteration/v1.85",
-        "merge_target": "iteration/v1.85"
-      },
-      "implementation_commit": "dc0c8057",
-      "merge_commit": "d4bb8a92",
-      "qc_verdict": "Approve (consolidated, clean first pass)"
-    },
-    {
-      "plan_id": "2026-07-03-v1.85-brand-and-ci-doc-hygiene",
-      "name": "P1 — Brand/CI Doc Hygiene",
-      "iteration": "V1.85",
-      "type": "implement",
-      "task_category": "docs",
-      "status": "Done",
-      "primary_spec": ".mstar/iterations/v1.85-app-icon-branding-delivery-compass-v1.md",
-      "closes_residuals": [
-        "R-V184CL-QC1-S001",
-        "R-V184CL-QC2-S001"
-      ],
-      "working_branch": "feature/v1.85-brand-and-ci-doc-hygiene",
-      "merge_target": "iteration/v1.85",
-      "parallel_with": "2026-07-03-v1.85-app-icon-branding",
-      "qc_reports": [
-        ".mstar/plans/reports/2026-07-03-v1.85-closure/qc1.md",
-        "qc2.md",
-        "qc3.md"
-      ],
-      "metadata": {
-        "plan_index": "P1",
-        "iteration_refs": [
-          "V1.85"
-        ],
-        "spec_integration_branch": "iteration/v1.85",
-        "merge_target": "iteration/v1.85"
-      },
-      "implementation_commit": "d0982aa9",
-      "merge_commit": "030d71c6",
-      "qc_verdict": "Approve (consolidated)"
-    },
-    {
-      "plan_id": "2026-07-03-v1.85-closure",
-      "name": "P-last — QC, QA, Compound, and Closeout",
-      "iteration": "V1.85",
-      "type": "closure",
-      "status": "Done",
-      "primary_spec": ".mstar/iterations/v1.85-app-icon-branding-delivery-compass-v1.md",
-      "working_branch": null,
-      "merge_target": "iteration/v1.85",
-      "qc_reports": [],
-      "metadata": {
-        "plan_index": "P-last",
-        "iteration_refs": [
-          "V1.85"
-        ]
-      },
-      "qc_consolidated_verdict": "Approve (qc1+qc2+qc3, clean)",
-      "qa_report": ".mstar/plans/reports/2026-07-03-v1.85-closure/qa.md",
-      "qa_verdict": "Pass-with-deferred-GUI"
-    },
-    {
-      "plan_id": "2026-07-03-v1.86-local-api-trust-hardening",
-      "name": "Local API Trust-Boundary Hardening (P0 holes + P1 same-class sweep)",
-      "iteration": "V1.86",
-      "type": "implement",
-      "task_category": "logic",
-      "status": "InReview",
-      "primary_spec": ".mstar/iterations/v1.86-local-api-trust-hardening-delivery-compass-v1.md",
-      "working_branch": "feature/v1.86-local-api-trust-hardening",
-      "merge_target": "iteration/v1.86",
-      "qc_reports": [],
-      "metadata": {
-        "plan_index": "P0",
-        "iteration_refs": [
-          "V1.86"
-        ],
-        "spec_integration_branch": "iteration/v1.86",
-        "merge_target": "iteration/v1.86",
-        "batch_progress": "Batch 1 (T1-T3) + Batch 2 (T4-T8) complete; plan InReview; HEAD ec54e15a"
-      },
-      "implementation_commit": "ec54e15a"
-    }
-  ],
+  "plans": [],
   "metadata": {
     "integration_branch": "iteration/v1.86",
     "integration_branch_retired": false,
@@ -140,16 +17,13 @@
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.84",
-      "compass": "v1.84-brand-polish-and-token-consolidation-delivery-compass-v1.md",
-      "shipped_at": "2026-07-02 (PR #111 merged)",
+      "iteration": "V1.85",
+      "compass": "v1.85-app-icon-branding-delivery-compass-v1.md",
+      "shipped_at": "2026-07-03 (PR #112 merged)",
       "plan_count": 4,
       "plan_count_done": 4,
       "wire_contracts_changed": false,
-      "wire_contracts_note": "V1.84: no wire/schema changes — index.css token consolidation + CI workflows + vitest config only.",
-      "profile_b_compaction": "done (V1.84 all 4 plans)",
-      "merge_commit": "1ff20bbf",
-      "pr": "#111"
+      "note": "V1.86 PR pending; latest_ship tracks last merged to main"
     },
     "tech_debt_summary": {
       "total_open": 3,
@@ -166,7 +40,7 @@
       "refreshed_at": "2026-07-01",
       "refreshed_reason": "V1.80 wave-1 Done (QA Pass): R-V178P0-QC3-003 (REL-01) + 4 V1.79-QC residuals resolved. Remaining open: 2 P0 accepted low + 1 V1.79 CI-wrapper low."
     },
-    "updated_at": "2026-07-03T13:35:00+08:00"
+    "updated_at": "2026-07-03T14:30:00+08:00"
   },
   "residual_findings": {
     "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization": [
