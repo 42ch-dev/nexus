@@ -539,7 +539,7 @@ async fn execute_context_assemble(
 /// Execute `fs/read_text_file` tool.
 fn execute_read_file(
     req: &ToolExecuteRequest,
-    _state: &WorkspaceState,
+    state: &WorkspaceState,
 ) -> Result<serde_json::Value, NexusApiError> {
     let path_str = req.parameters["path"]
         .as_str()
@@ -548,9 +548,26 @@ fn execute_read_file(
             reason: "must be a string".into(),
         })?;
 
-    let content = std::fs::read_to_string(path_str).map_err(|e| NexusApiError::Internal {
+    let workspace_path_str = state
+        .workspace_path()
+        .ok_or_else(|| NexusApiError::Forbidden {
+            resource: "tool_execution".into(),
+            reason: "fs/* tools require an active workspace".into(),
+        })?;
+
+    let resolved = resolve_guarded_path(Path::new(&workspace_path_str), path_str, true).map_err(
+        |e| match e {
+            NexusApiError::BadRequest { .. } => NexusApiError::Forbidden {
+                resource: "file".into(),
+                reason: format!("path '{path_str}' is outside the workspace root"),
+            },
+            other => other,
+        },
+    )?;
+
+    let content = std::fs::read_to_string(&resolved).map_err(|e| NexusApiError::Internal {
         code: "FILE_READ_FAILED".into(),
-        message: format!("failed to read file {path_str}: {e}"),
+        message: format!("failed to read file {}: {e}", resolved.display()),
     })?;
 
     Ok(serde_json::json!({
@@ -561,7 +578,7 @@ fn execute_read_file(
 /// Execute `fs/write_text_file` tool.
 fn execute_write_file(
     req: &ToolExecuteRequest,
-    _state: &WorkspaceState,
+    state: &WorkspaceState,
 ) -> Result<serde_json::Value, NexusApiError> {
     let path_str = req.parameters["path"]
         .as_str()
@@ -578,17 +595,33 @@ fn execute_write_file(
                 reason: "must be a string".into(),
             })?;
 
-    let path = std::path::Path::new(path_str);
-    if let Some(parent) = path.parent() {
+    let workspace_path_str = state
+        .workspace_path()
+        .ok_or_else(|| NexusApiError::Forbidden {
+            resource: "tool_execution".into(),
+            reason: "fs/* tools require an active workspace".into(),
+        })?;
+
+    let resolved = resolve_guarded_path(Path::new(&workspace_path_str), path_str, false).map_err(
+        |e| match e {
+            NexusApiError::BadRequest { .. } => NexusApiError::Forbidden {
+                resource: "file".into(),
+                reason: format!("path '{path_str}' is outside the workspace root"),
+            },
+            other => other,
+        },
+    )?;
+
+    if let Some(parent) = resolved.parent() {
         std::fs::create_dir_all(parent).map_err(|e| NexusApiError::Internal {
             code: "DIR_CREATE_FAILED".into(),
             message: format!("failed to create directory {}: {}", parent.display(), e),
         })?;
     }
 
-    std::fs::write(path, content).map_err(|e| NexusApiError::Internal {
+    std::fs::write(&resolved, content).map_err(|e| NexusApiError::Internal {
         code: "FILE_WRITE_FAILED".into(),
-        message: format!("failed to write file {path_str}: {e}"),
+        message: format!("failed to write file {}: {e}", resolved.display()),
     })?;
 
     Ok(serde_json::json!({
@@ -707,6 +740,9 @@ fn load_permission_policy(workspace_path: &str) -> Option<WorkspacePermissionPol
 }
 
 /// Validate that file paths are within the workspace root (for fs/* tools).
+///
+/// Uses the shared `resolve_guarded_path` helper so fs/* tools enforce the same
+/// component-wise W-002 guard as manuscript chapter paths.
 fn validate_file_path(
     req: &ToolExecuteRequest,
     state: &WorkspaceState,
@@ -718,56 +754,20 @@ fn validate_file_path(
             reason: "must be a string".into(),
         })?;
 
-    let requested_path = Path::new(path_str);
     let workspace_path_str = state.workspace_path().unwrap_or_default();
-    let workspace_root = Path::new(&workspace_path_str);
-
-    let canonical_requested = if requested_path.exists() {
-        requested_path
-            .canonicalize()
-            .map_err(|e| NexusApiError::InvalidInput {
-                field: "parameters.path".into(),
-                reason: format!("path cannot be resolved: {e}"),
-            })?
-    } else {
-        let abs_requested = if requested_path.is_absolute() {
-            requested_path.to_path_buf()
-        } else {
-            std::env::current_dir()
-                .map(|cwd| cwd.join(requested_path))
-                .map_err(|e| NexusApiError::Internal {
-                    code: "CURRENT_DIR_ERROR".into(),
-                    message: format!("failed to get current directory: {e}"),
-                })?
-        };
-
-        let abs_requested_str = abs_requested.display().to_string();
-        if !abs_requested_str.starts_with(&workspace_path_str) {
-            return Err(NexusApiError::Forbidden {
-                resource: "file".into(),
-                reason: "path outside workspace root".into(),
-            });
-        }
-
-        abs_requested
-    };
-
-    if requested_path.exists() {
-        let canonical_workspace =
-            workspace_root
-                .canonicalize()
-                .map_err(|e| NexusApiError::Internal {
-                    code: "WORKSPACE_PATH_INVALID".into(),
-                    message: format!("workspace root cannot be resolved: {e}"),
-                })?;
-
-        if !canonical_requested.starts_with(&canonical_workspace) {
-            return Err(NexusApiError::Forbidden {
-                resource: "file".into(),
-                reason: "path outside workspace root".into(),
-            });
-        }
+    if workspace_path_str.is_empty() {
+        return Err(NexusApiError::Forbidden {
+            resource: "tool_execution".into(),
+            reason: "fs/* tools require an active workspace".into(),
+        });
     }
+
+    resolve_guarded_path(Path::new(&workspace_path_str), path_str, false).map_err(|_| {
+        NexusApiError::Forbidden {
+            resource: "file".into(),
+            reason: "path outside workspace root".into(),
+        }
+    })?;
 
     Ok(())
 }

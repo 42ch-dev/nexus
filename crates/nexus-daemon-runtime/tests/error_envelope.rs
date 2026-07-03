@@ -11,7 +11,7 @@ use axum::http::StatusCode;
 use axum_test::TestServer;
 use nexus_contracts::local::schedule::http::AddScheduleRequest;
 use nexus_daemon_runtime::api;
-use nexus_daemon_runtime::api::auth_middleware::{AuthMode, DaemonApiConfig};
+use nexus_daemon_runtime::api::auth_middleware::DaemonApiConfig;
 use nexus_daemon_runtime::test_utils;
 use nexus_daemon_runtime::workspace::WorkspaceState;
 use nexus_orchestration::schedule::supervisor::ScheduleSupervisor;
