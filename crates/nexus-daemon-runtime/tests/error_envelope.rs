@@ -23,10 +23,7 @@ async fn service_unavailable_returns_canonical_envelope() {
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
-    let auth_config = DaemonApiConfig {
-        api_key: None,
-        auth_mode: AuthMode::KeylessLocalhost,
-    };
+    let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
     let server = TestServer::new(app).expect("failed to create test server");
     std::mem::forget(tmp);
@@ -65,10 +62,7 @@ async fn preset_gates_failed_returns_canonical_envelope() {
     let registry = Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
     state.set_capability_registry(registry);
 
-    let auth_config = DaemonApiConfig {
-        api_key: None,
-        auth_mode: AuthMode::KeylessLocalhost,
-    };
+    let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
     let server = TestServer::new(app).expect("failed to create test server");
     std::mem::forget(tmp);
