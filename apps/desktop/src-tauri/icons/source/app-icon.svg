@@ -10,7 +10,7 @@
     <path d="M30 28 L70 72"/>
     <path d="M70 28 L70 72"/>
   </g>
-  <g transform="translate(102.4,102.4) scale(8.192)" fill="#FFFFFF" stroke="none">
+  <g transform="translate(102.4,102.4) scale(8.192)" fill="#25D1E0" stroke="none">
     <circle cx="50" cy="8" r="7.4"/>
     <circle cx="92" cy="50" r="7.4"/>
     <circle cx="50" cy="92" r="7.4"/>
