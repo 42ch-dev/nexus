@@ -2,7 +2,17 @@ import { render, screen } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import '@testing-library/jest-dom/vitest';
 
-import { NexusLogo, VARIANT_FILENAMES } from './nexus-logo';
+import type { LogoVariantName } from '../tokens';
+import { NexusLogo, type Variant, VARIANT_FILENAMES } from './nexus-logo';
+
+// Compile-time guard: the re-exported Variant alias must be identical to the
+// canonical LogoVariantName from tokens.ts.
+type AssertVariantAlias = [Variant] extends [LogoVariantName]
+  ? [LogoVariantName] extends [Variant]
+    ? true
+    : never
+  : never;
+const _variantAliasCheck: AssertVariantAlias = true;
 
 describe('NexusLogo', () => {
   it('renders an img with default alt, size, and forwarded src', () => {
