@@ -80,16 +80,22 @@ pub(crate) fn admission_pipeline(
     }
 
     // For fs/* tools: existing V1.33 permission + path validation
-    let workspace_path_str = state.workspace_path().unwrap_or_default();
-    if !workspace_path_str.is_empty() {
-        // Gate 4: permissions
-        if let Some(policy) = load_permission_policy(&workspace_path_str) {
-            check_fs_tool_permission(&req.tool_name, &policy)?;
-        }
-
-        // Gate 3: workspace bounds
-        validate_file_path(req, state)?;
+    let workspace_path = state.workspace_path();
+    let workspace_path_str = workspace_path.unwrap_or_default();
+    if workspace_path_str.is_empty() {
+        return Err(NexusApiError::Forbidden {
+            resource: "tool_execution".to_string(),
+            reason: "fs/* tools require an active workspace with defined bounds".to_string(),
+        });
     }
+
+    // Gate 4: permissions
+    if let Some(policy) = load_permission_policy(&workspace_path_str) {
+        check_fs_tool_permission(&req.tool_name, &policy)?;
+    }
+
+    // Gate 3: workspace bounds
+    validate_file_path(req, state)?;
 
     Ok((creator_id.unwrap_or_default(), String::new()))
 }
