@@ -39,10 +39,7 @@ async fn test_ctx_with_active_creator(active_creator: &str) -> TestCtx {
 
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
     let pool = state.pool().clone();
-    let auth_config = DaemonApiConfig {
-        api_key: None,
-        auth_mode: AuthMode::KeylessLocalhost,
-    };
+    let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
     let server = TestServer::new(app).expect("failed to create test server");
     TestCtx {
@@ -345,10 +342,7 @@ async fn test_ctx_without_creator() -> TestCtx {
     std::fs::remove_file(nexus_home.join("config.toml")).expect("remove config.toml");
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
     let pool = state.pool().clone();
-    let auth_config = DaemonApiConfig {
-        api_key: None,
-        auth_mode: AuthMode::KeylessLocalhost,
-    };
+    let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
     let server = TestServer::new(app).expect("failed to create test server");
     TestCtx {

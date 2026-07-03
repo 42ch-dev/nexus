@@ -33,10 +33,7 @@ async fn sessions_ctx() -> TestCtx {
 
     std::mem::forget(tmp);
 
-    let auth_config = DaemonApiConfig {
-        api_key: None,
-        auth_mode: AuthMode::KeylessLocalhost,
-    };
+    let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
     let server = TestServer::new(app).expect("failed to create test server");
     TestCtx { server }

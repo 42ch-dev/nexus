@@ -38,10 +38,7 @@ async fn test_ctx() -> TestCtx {
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path.clone(), None).await;
     test_utils::seed_test_creator_and_world(state.pool()).await;
-    let auth_config = DaemonApiConfig {
-        api_key: None,
-        auth_mode: AuthMode::KeylessLocalhost,
-    };
+    let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
     let server = TestServer::new(app).expect("failed to create test server");
     TestCtx { _tmp: tmp, server }
@@ -58,10 +55,7 @@ async fn test_ctx_no_creator() -> TestCtx {
     nexus_local_db::seed_versions(&pool).await.unwrap();
 
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path.clone(), None).await;
-    let auth_config = DaemonApiConfig {
-        api_key: None,
-        auth_mode: AuthMode::KeylessLocalhost,
-    };
+    let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
     let server = TestServer::new(app).expect("failed to create test server");
     std::mem::forget(tmp);
@@ -104,10 +98,7 @@ async fn test_ctx_other_creator() -> (TestCtx, std::path::PathBuf) {
     nexus_local_db::seed_versions(&pool).await.unwrap();
 
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path.clone(), None).await;
-    let auth_config = DaemonApiConfig {
-        api_key: None,
-        auth_mode: AuthMode::KeylessLocalhost,
-    };
+    let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
     let server = TestServer::new(app).expect("failed to create test server");
     std::mem::forget(tmp);

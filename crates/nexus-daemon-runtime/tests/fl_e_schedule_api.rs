@@ -56,10 +56,7 @@ async fn test_ctx() -> TestCtx {
     let registry = Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
     state.set_capability_registry(registry);
 
-    let auth_config = DaemonApiConfig {
-        api_key: None,
-        auth_mode: AuthMode::KeylessLocalhost,
-    };
+    let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
     let server = TestServer::new(app).expect("failed to create test server");
     TestCtx {

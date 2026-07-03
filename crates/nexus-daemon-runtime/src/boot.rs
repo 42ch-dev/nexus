@@ -738,13 +738,25 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     let shutdown_notify = state.shutdown_notify();
 
     // Resolve daemon API key configuration (T1: DaemonApiConfig)
-    let auth_config = api::auth_middleware::DaemonApiConfig::from_env();
+    let mut auth_config = api::auth_middleware::DaemonApiConfig::from_env();
     // T7: startup warning is logged inside from_env() for keyless-localhost mode.
 
-    let app = api::create_router(state, auth_config);
-
-    // Resolve transport
+    // Resolve transport before building the router so the Origin allowlist
+    // is derived from the actual listening port.
     let transport = config.resolve_transport();
+    if let Transport::Http { port, .. } = transport {
+        auth_config = auth_config.with_resolved_port(port);
+    }
+
+    // V1.86: log effective Origin allowlist when keyless-localhost is active
+    // so users can inspect the trusted browser origins.
+    if auth_config.auth_mode == api::auth_middleware::AuthMode::KeylessLocalhost {
+        for (origin, source) in &auth_config.allowed_origin_sources {
+            tracing::info!(%origin, %source, "Local API allowed origin");
+        }
+    }
+
+    let app = api::create_router(state, auth_config);
 
     // --- Section 10: Start lifecycle and spawn server ---
     lifecycle.dispatch(Event::ProcessStarted);
