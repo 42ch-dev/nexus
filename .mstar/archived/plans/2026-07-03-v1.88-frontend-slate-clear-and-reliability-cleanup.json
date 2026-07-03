@@ -20,5 +20,7 @@
   "qa_report": ".mstar/plans/reports/2026-07-03-v1.88-frontend-slate-clear-and-reliability-cleanup/qa.md",
   "merge_commit": "6ccc1c3a",
   "completed_at": "2026-07-04",
-  "completion_note": "V1.88 shipped: P0 frontend residuals + P1 reliability residuals + T7 tracker hygiene. QC tri-review 3/3 Approve; QA Pass; wire_contracts_changed: false."
+  "completion_note": "V1.88 shipped: P0 frontend residuals + P1 reliability residuals + T7 tracker hygiene. QC tri-review 3/3 Approve; QA Pass; wire_contracts_changed: false.",
+  "pr_url": "https://github.com/42ch-dev/nexus/pull/115",
+  "pr_number": 115
 }
