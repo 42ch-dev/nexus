@@ -9,6 +9,33 @@
 use crate::api::errors::NexusApiError;
 use std::path::{Path, PathBuf};
 
+/// Async wrapper around [`resolve_guarded_path`] that runs the blocking
+/// `std::fs::canonicalize` syscalls on the tokio blocking pool.
+///
+/// V1.88 T3 (R-V187-QC3-P001): the wrapper is shared by fs/* tools and
+/// manuscript/chapter/outline handlers so all path-guard checks stay
+/// non-blocking for the async runtime.
+///
+/// # Errors
+///
+/// Propagates the same [`NexusApiError`] variants as [`resolve_guarded_path`]
+/// (e.g. `BadRequest` with `chapter_path_*` codes), plus an `Internal`
+/// `PATH_GUARD_PANIC` if the blocking task panics.
+pub async fn resolve_guarded_path_async(
+    workspace_root: PathBuf,
+    rel_path: String,
+    must_exist: bool,
+) -> Result<PathBuf, NexusApiError> {
+    tokio::task::spawn_blocking(move || {
+        resolve_guarded_path(&workspace_root, &rel_path, must_exist)
+    })
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "PATH_GUARD_PANIC".into(),
+        message: format!("path guard task panicked: {e}"),
+    })?
+}
+
 /// Resolve a relative path under the workspace root and enforce the
 /// W-002-style path guard: the resolved absolute path must remain inside
 /// the canonical workspace root.
@@ -98,5 +125,73 @@ pub fn resolve_guarded_path(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn resolve_guarded_path_async_accepts_inside_and_rejects_escape() {
+        let root = tempfile::tempdir().unwrap().path().to_path_buf();
+        let nested = root.join("Works/test/Outlines");
+        std::fs::create_dir_all(&nested).unwrap();
+        let file = nested.join("ch01.md");
+        std::fs::write(&file, "x").unwrap();
+
+        assert!(
+            resolve_guarded_path_async(
+                root.clone(),
+                "Works/test/Outlines/ch01.md".to_string(),
+                true
+            )
+            .await
+            .is_ok(),
+            "inside path should be accepted"
+        );
+        assert!(
+            resolve_guarded_path_async(root, "../escape.md".to_string(), true)
+                .await
+                .is_err(),
+            "escape path should be rejected"
+        );
+    }
+
+    /// Regression: a sibling directory whose name extends the workspace-root
+    /// name (e.g. root `…/creative`, sibling `…/creative-evil`) must NOT pass
+    /// the async guard via a `..` traversal. Covers both the read path
+    /// (`must_exist = true`) and the write path (`must_exist = false`).
+    #[tokio::test]
+    async fn resolve_guarded_path_async_rejects_prefix_confusion_sibling() {
+        let base = tempfile::tempdir().unwrap().path().to_path_buf();
+        let root = base.join("creative");
+        std::fs::create_dir_all(&root).unwrap();
+        let evil_dir = base.join("creative-evil");
+        std::fs::create_dir_all(&evil_dir).unwrap();
+        std::fs::write(evil_dir.join("evil.md"), "stolen").unwrap();
+
+        assert!(
+            resolve_guarded_path_async(root.clone(), "../creative-evil/evil.md".to_string(), true)
+                .await
+                .is_err(),
+            "prefix-confusion sibling must be rejected on the read path"
+        );
+        assert!(
+            resolve_guarded_path_async(
+                root.clone(),
+                "../creative-evil/newfile.md".to_string(),
+                false
+            )
+            .await
+            .is_err(),
+            "prefix-confusion sibling must be rejected on the write path"
+        );
+        assert!(
+            resolve_guarded_path_async(root, "Outlines/ch01.md".to_string(), false)
+                .await
+                .is_ok(),
+            "inside-root creatable path should be accepted"
+        );
     }
 }

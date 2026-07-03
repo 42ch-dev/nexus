@@ -7,7 +7,7 @@
 
 use crate::api::errors::NexusApiError;
 use crate::api::handlers::works::{read_active_creator_id, read_active_workspace_slug};
-use crate::api::path_guard::resolve_guarded_path;
+use crate::api::path_guard::{resolve_guarded_path, resolve_guarded_path_async};
 use crate::api::runtime_lock::RuntimeLockGuard;
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
@@ -206,7 +206,13 @@ async fn read_guarded_file(
 ) -> Result<String, NexusApiError> {
     const CHAPTER_BODY_MAX_BYTES: usize = 10 * 1024 * 1024;
 
-    let path = resolve_guarded_path(workspace_root, rel_path, true).map_err(|e| {
+    let path = resolve_guarded_path_async(
+        workspace_root.to_path_buf(),
+        rel_path.to_string(),
+        true,
+    )
+    .await
+    .map_err(|e| {
         if matches!(e, NexusApiError::BadRequest { ref code, .. } if code == "chapter_path_forbidden")
         {
             NexusApiError::BadRequest {
@@ -265,7 +271,9 @@ pub(crate) async fn atomic_write_outline(
     rel_path: &str,
     content: &str,
 ) -> Result<(), NexusApiError> {
-    let target = resolve_guarded_path(workspace_root, rel_path, false)?;
+    let target =
+        resolve_guarded_path_async(workspace_root.to_path_buf(), rel_path.to_string(), false)
+            .await?;
 
     if let Some(parent) = target.parent() {
         tokio::fs::create_dir_all(parent)
@@ -1011,6 +1019,56 @@ mod tests {
                 assert_eq!(code, "chapter_body_too_large");
             }
             Err(other) => panic!("unexpected error: {other:?}"),
+            Ok(_) => panic!("expected error"),
+        }
+    }
+
+    /// V1.88 T3 (R-V187-QC3-P001): async path guard accepts an in-bounds
+    /// chapter file and returns its contents.
+    #[tokio::test]
+    async fn read_guarded_file_accepts_in_bounds_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace_root = tmp.path();
+        let rel_path = "Works/test-novel/Stories/ch01-ch01.md";
+        let file_path = workspace_root.join(rel_path);
+        std::fs::create_dir_all(file_path.parent().unwrap()).unwrap();
+        std::fs::write(&file_path, "chapter body").unwrap();
+
+        let content = read_guarded_file(
+            workspace_root,
+            rel_path,
+            "chapter_body_path_forbidden",
+            "chapter_body_not_found",
+        )
+        .await
+        .expect("in-bounds file should read successfully");
+        assert_eq!(content, "chapter body");
+    }
+
+    /// V1.88 T3 (R-V187-QC3-P001): async path guard rejects a relative path
+    /// that escapes the workspace root before any FS access.
+    #[tokio::test]
+    async fn read_guarded_file_rejects_escape_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace_root = tmp.path().join("creative");
+        std::fs::create_dir_all(&workspace_root).unwrap();
+        let evil_dir = tmp.path().join("creative-evil");
+        std::fs::create_dir_all(&evil_dir).unwrap();
+        std::fs::write(evil_dir.join("evil.md"), "stolen").unwrap();
+
+        let result = read_guarded_file(
+            &workspace_root,
+            "../creative-evil/evil.md",
+            "chapter_body_path_forbidden",
+            "chapter_body_not_found",
+        )
+        .await;
+        assert!(result.is_err(), "escape path should be rejected");
+        match result {
+            Err(NexusApiError::BadRequest { code, .. }) => {
+                assert_eq!(code, "chapter_body_path_forbidden");
+            }
+            Err(other) => panic!("expected chapter_body_path_forbidden BadRequest, got {other:?}"),
             Ok(_) => panic!("expected error"),
         }
     }
