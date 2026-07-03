@@ -1,29 +1,45 @@
 {
   "version": 1,
-  "updated_at": "2026-07-03T10:00:00+08:00",
-  "plans": [],
+  "updated_at": "2026-07-03T16:00:00+08:00",
+  "plans": [
+    {
+      "plan_id": "2026-07-03-v1.87-nexus-ui-component-library",
+      "name": "nexus-ui Component Library Promotion (P0) + manuscript.body.read Path-Guard Fast-Follow (P1)",
+      "status": "Todo",
+      "type": "implement",
+      "working_branch": "feature/v1.87-nexus-ui-component-library",
+      "merge_target": "iteration/v1.87",
+      "primary_spec": ".mstar/iterations/v1.87-nexus-ui-component-library-delivery-compass-v1.md",
+      "qc_reports": {},
+      "metadata": {
+        "iteration_refs": "V1.87",
+        "spec_integration_branch": "iteration/v1.87",
+        "wire_contracts_changed": false
+      }
+    }
+  ],
   "metadata": {
-    "integration_branch": "iteration/v1.86",
+    "integration_branch": "iteration/v1.87",
     "integration_branch_retired": false,
-    "last_integration_branch": "iteration/v1.85",
+    "last_integration_branch": "iteration/v1.86",
     "integration_merge_target": "main",
     "iteration_base_branch": "main",
     "target_branch": "main",
-    "spec_integration_branch": "iteration/v1.86",
-    "latest_active_iteration": "V1.85 active: App Icon Branding — replace placeholder Tauri app icons with Nexus-branded icons (tauri icon regenerate) + close 2 V1.84 low residuals (DESIGN.md doc drift + LFS comment)",
-    "latest_active_compass": ".mstar/iterations/v1.85-app-icon-branding-delivery-compass-v1.md",
+    "spec_integration_branch": "iteration/v1.87",
+    "latest_active_iteration": "V1.87 active: nexus-ui Component Library Promotion (@42ch/nexus-ui assets/tokens-only -> React component library: NexusLogo + NexusMark) + close R-V186-QC1-S005 (manuscript.body.read path-traversal fast-follow)",
+    "latest_active_compass": ".mstar/iterations/v1.87-nexus-ui-component-library-delivery-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.85",
-      "compass": "v1.85-app-icon-branding-delivery-compass-v1.md",
-      "shipped_at": "2026-07-03 (PR #112 merged)",
-      "plan_count": 4,
-      "plan_count_done": 4,
+      "iteration": "V1.86",
+      "compass": "v1.86-local-api-trust-hardening-delivery-compass-v1.md",
+      "shipped_at": "2026-07-03 (PR #113 merged ffae19f9)",
+      "plan_count": 1,
+      "plan_count_done": 1,
       "wire_contracts_changed": false,
-      "note": "V1.86 PR pending; latest_ship tracks last merged to main"
+      "note": "V1.86 Local API Trust-Boundary Hardening merged to main; latest_ship tracks last merged to main"
     },
     "tech_debt_summary": {
       "total_open": 3,
