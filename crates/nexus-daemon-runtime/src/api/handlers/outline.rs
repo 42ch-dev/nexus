@@ -10,7 +10,7 @@
 
 use crate::api::errors::NexusApiError;
 use crate::api::handlers::works::{read_active_creator_id, read_active_workspace_slug};
-use crate::api::path_guard::resolve_guarded_path;
+use crate::api::path_guard::resolve_guarded_path_async;
 use crate::api::runtime_lock::RuntimeLockGuard;
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, State};
@@ -156,7 +156,13 @@ async fn read_outline_file(
     // Use must_exist=false so a missing outline file is treated as a default
     // frontmatter rather than a path-guard error. The guard still verifies the
     // resolved path would live inside the workspace root.
-    let path = resolve_guarded_path(workspace_root, rel_path, false).map_err(|e| {
+    let path = resolve_guarded_path_async(
+        workspace_root.to_path_buf(),
+        rel_path.to_string(),
+        false,
+    )
+    .await
+    .map_err(|e| {
         if matches!(e, NexusApiError::BadRequest { ref code, .. } if code == "chapter_path_forbidden")
         {
             NexusApiError::BadRequest {
@@ -236,7 +242,9 @@ async fn atomic_write_outline(
     frontmatter: &OutlineFrontmatter,
     body: &str,
 ) -> Result<(), NexusApiError> {
-    let target = resolve_guarded_path(workspace_root, rel_path, false)?;
+    let target =
+        resolve_guarded_path_async(workspace_root.to_path_buf(), rel_path.to_string(), false)
+            .await?;
 
     if let Some(parent) = target.parent() {
         tokio::fs::create_dir_all(parent)
@@ -1533,5 +1541,44 @@ mod tests {
         assert_eq!(final_frontmatter.outline_revision, 1);
 
         drop(tmp);
+    }
+
+    /// V1.88 T3 (R-V187-QC3-P001): async path guard accepts an in-bounds
+    /// outline file and returns the parsed frontmatter/body.
+    #[tokio::test]
+    async fn read_outline_file_accepts_in_bounds_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace_root = tmp.path();
+        let rel_path = "Works/test/Outlines/outline.md";
+        let outline_path = workspace_root.join(rel_path);
+        std::fs::create_dir_all(outline_path.parent().unwrap()).unwrap();
+        std::fs::write(
+            &outline_path,
+            "---\noutline_revision: 2\nvolumes: []\ntimeline_events: []\nforeshadows: []\nchapter_titles: {}\nupdated_at: \"2024-01-01T00:00:00Z\"\n---\nbody\n",
+        )
+        .unwrap();
+
+        let (frontmatter, body) = read_outline_file(workspace_root, rel_path, &[])
+            .await
+            .expect("in-bounds outline should read successfully");
+        assert_eq!(frontmatter.outline_revision, 2);
+        assert_eq!(body, "body\n");
+    }
+
+    /// V1.88 T3 (R-V187-QC3-P001): async path guard rejects a relative path
+    /// that escapes the workspace root before any FS access.
+    #[tokio::test]
+    async fn read_outline_file_rejects_escape_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let workspace_root = tmp.path();
+        let result = read_outline_file(workspace_root, "../evil.md", &[]).await;
+        assert!(result.is_err(), "escape path should be rejected");
+        match result {
+            Err(NexusApiError::BadRequest { code, .. }) => {
+                assert_eq!(code, "outline_path_forbidden");
+            }
+            Err(other) => panic!("expected outline_path_forbidden BadRequest, got {other:?}"),
+            Ok(_) => panic!("expected error"),
+        }
     }
 }
