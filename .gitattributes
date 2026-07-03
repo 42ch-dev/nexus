@@ -1,2 +1,4 @@
-# Git LFS — all PNG assets (brand sources, app icons, regenerated formats)
-*.png filter=lfs diff=lfs merge=lfs -text
+# Git LFS — binary brand source assets (PNG provenance references)
+packages/nexus-ui/assets/logos/*.png filter=lfs diff=lfs merge=lfs -text
+apps/desktop/src-tauri/icons/source/*.png filter=lfs diff=lfs merge=lfs -text
+apps/desktop/src-tauri/icons/source/app-icon-preview-256.png -filter -diff -merge
