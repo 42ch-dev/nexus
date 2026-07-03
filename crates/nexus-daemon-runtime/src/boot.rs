@@ -744,8 +744,8 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // Resolve transport before building the router so the Origin allowlist
     // is derived from the actual listening port.
     let transport = config.resolve_transport();
-    if let Transport::Http { port, .. } = transport {
-        auth_config = auth_config.with_resolved_port(port);
+    if let Transport::Http { port, ref host } = transport {
+        auth_config = auth_config.with_resolved_listen_addr(port, host);
     }
 
     // V1.86: log effective Origin allowlist when keyless-localhost is active
