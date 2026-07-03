@@ -87,10 +87,7 @@ impl DaemonApiConfig {
     }
 
     fn is_loopback_bind_host(host: &str) -> bool {
-        let h = host
-            .trim()
-            .trim_start_matches('[')
-            .trim_end_matches(']');
+        let h = host.trim().trim_start_matches('[').trim_end_matches(']');
         if h.eq_ignore_ascii_case("localhost") {
             return true;
         }
@@ -186,7 +183,11 @@ impl DaemonApiConfig {
     pub fn with_resolved_listen_addr(self, port: u16, bind_host: &str) -> Self {
         if self.daemon_port == port {
             let bind_origin = Self::http_origin_for_bind_host(bind_host, port);
-            if self.allowed_origins.iter().any(|origin| origin == &bind_origin) {
+            if self
+                .allowed_origins
+                .iter()
+                .any(|origin| origin == &bind_origin)
+            {
                 return self;
             }
         }
