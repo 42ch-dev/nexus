@@ -434,7 +434,11 @@ async fn worker_fs_read_rejects_escape() {
     )
     .await;
 
-    std::fs::write(workspace_dir.parent().unwrap().join("outside_worker.md"), "x").expect("write outside");
+    std::fs::write(
+        workspace_dir.parent().unwrap().join("outside_worker.md"),
+        "x",
+    )
+    .expect("write outside");
 
     let result = HostToolExecutor::dispatch_from_worker(
         "fs/read_text_file",
