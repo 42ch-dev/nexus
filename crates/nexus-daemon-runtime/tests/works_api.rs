@@ -18,7 +18,7 @@
 use axum::extract::{Path, State};
 use axum_test::TestServer;
 use nexus_daemon_runtime::api;
-use nexus_daemon_runtime::api::auth_middleware::{AuthMode, DaemonApiConfig};
+use nexus_daemon_runtime::api::auth_middleware::DaemonApiConfig;
 use nexus_daemon_runtime::api::handlers::works::{
     AppendInspirationRequest, CreateWorkRequest, PatchWorkRequest,
 };

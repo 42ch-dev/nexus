@@ -159,6 +159,7 @@ impl DaemonApiConfig {
     }
 
     /// Create a config for testing in keyed-all mode with a specific key.
+    #[must_use]
     pub fn keyed(key: &str) -> Self {
         let (allowed_origins, allowed_origin_sources) =
             Self::default_allowed_origins(Self::DEFAULT_PORT);
@@ -172,6 +173,7 @@ impl DaemonApiConfig {
     }
 
     /// Create a config for testing in keyless-localhost mode.
+    #[must_use]
     pub fn keyless() -> Self {
         let (allowed_origins, allowed_origin_sources) =
             Self::default_allowed_origins(Self::DEFAULT_PORT);
@@ -210,6 +212,11 @@ pub enum LocalAuthScheme {
 ///
 /// This middleware is applied as a tower layer *before* `require_api_key`, so
 /// cross-origin browser requests are rejected before the auth middleware runs.
+///
+/// # Errors
+///
+/// - [`NexusApiError::Forbidden`] — the request's `Origin` header is not in the
+///   configured allowlist.
 pub async fn require_allowed_origin(
     axum::extract::State(config): axum::extract::State<DaemonApiConfig>,
     request: Request<Body>,
@@ -222,7 +229,11 @@ pub async fn require_allowed_origin(
 
     if let Some(origin) = request.headers().get(ORIGIN) {
         let origin_str = origin.to_str().unwrap_or_default();
-        if !config.allowed_origins.iter().any(|allowed| allowed == origin_str) {
+        if !config
+            .allowed_origins
+            .iter()
+            .any(|allowed| allowed == origin_str)
+        {
             tracing::info!(
                 method = %request.method(),
                 path = %request.uri().path(),
