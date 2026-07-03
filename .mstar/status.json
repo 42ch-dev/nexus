@@ -101,16 +101,36 @@
       "qc_consolidated_verdict": "Approve (qc1+qc2+qc3, clean)",
       "qa_report": ".mstar/plans/reports/2026-07-03-v1.85-closure/qa.md",
       "qa_verdict": "Pass-with-deferred-GUI"
+    },
+    {
+      "plan_id": "2026-07-03-v1.86-local-api-trust-hardening",
+      "name": "Local API Trust-Boundary Hardening (P0 holes + P1 same-class sweep)",
+      "iteration": "V1.86",
+      "type": "implement",
+      "task_category": "logic",
+      "status": "Todo",
+      "primary_spec": ".mstar/iterations/v1.86-local-api-trust-hardening-delivery-compass-v1.md",
+      "working_branch": "feature/v1.86-local-api-trust-hardening",
+      "merge_target": "iteration/v1.86",
+      "qc_reports": [],
+      "metadata": {
+        "plan_index": "P0",
+        "iteration_refs": [
+          "V1.86"
+        ],
+        "spec_integration_branch": "iteration/v1.86",
+        "merge_target": "iteration/v1.86"
+      }
     }
   ],
   "metadata": {
-    "integration_branch": "iteration/v1.85",
+    "integration_branch": "iteration/v1.86",
     "integration_branch_retired": false,
-    "last_integration_branch": "iteration/v1.84",
+    "last_integration_branch": "iteration/v1.85",
     "integration_merge_target": "main",
     "iteration_base_branch": "main",
     "target_branch": "main",
-    "spec_integration_branch": "iteration/v1.85",
+    "spec_integration_branch": "iteration/v1.86",
     "latest_active_iteration": "V1.85 active: App Icon Branding — replace placeholder Tauri app icons with Nexus-branded icons (tauri icon regenerate) + close 2 V1.84 low residuals (DESIGN.md doc drift + LFS comment)",
     "latest_active_compass": ".mstar/iterations/v1.85-app-icon-branding-delivery-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
@@ -144,7 +164,7 @@
       "refreshed_at": "2026-07-01",
       "refreshed_reason": "V1.80 wave-1 Done (QA Pass): R-V178P0-QC3-003 (REL-01) + 4 V1.79-QC residuals resolved. Remaining open: 2 P0 accepted low + 1 V1.79 CI-wrapper low."
     },
-    "updated_at": "2026-07-03"
+    "updated_at": "2026-07-03T12:00:00+08:00"
   },
   "residual_findings": {
     "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization": [
