@@ -92,8 +92,7 @@ impl DaemonApiConfig {
             return true;
         }
         h.parse::<std::net::IpAddr>()
-            .map(|ip| ip.is_loopback())
-            .unwrap_or(false)
+            .is_ok_and(|ip| ip.is_loopback())
     }
 
     /// Resolve allowed origins from defaults plus the env override.
