@@ -7,7 +7,9 @@
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
+    "icons:generate": "tauri icon src-tauri/icons/source/source-1024.png && rm -rf src-tauri/icons/ios src-tauri/icons/android",
     "tauri": "tauri",
+    "predev": "pnpm run icons:generate",
     "dev": "tauri dev",
     "build": "tauri build"
   },

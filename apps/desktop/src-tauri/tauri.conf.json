@@ -7,7 +7,7 @@
     "frontendDist": "../../web/dist",
     "devUrl": "http://localhost:5173",
     "beforeDevCommand": "pnpm --filter web dev",
-    "beforeBuildCommand": "pnpm --filter web build && pnpm -w run sidecar"
+    "beforeBuildCommand": "pnpm --filter web build && pnpm -w run sidecar && pnpm --filter desktop run icons:generate"
   },
   "app": {
     "withGlobalTauri": true,
