@@ -14,6 +14,7 @@ use axum::http::header::ORIGIN;
 use axum::http::HeaderValue;
 use axum::middleware::Next;
 use axum::response::Response;
+use std::sync::Arc;
 
 use crate::api::errors::NexusApiError;
 
@@ -268,7 +269,7 @@ pub enum LocalAuthScheme {
 /// - [`NexusApiError::Forbidden`] — the request's `Origin` header is not in the
 ///   configured allowlist.
 pub async fn require_allowed_origin(
-    axum::extract::State(config): axum::extract::State<DaemonApiConfig>,
+    axum::extract::State(config): axum::extract::State<Arc<DaemonApiConfig>>,
     request: Request<Body>,
     next: Next,
 ) -> Result<Response, NexusApiError> {
@@ -332,7 +333,7 @@ fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
 /// - `debug` on every request
 /// - `info` on rejection
 pub async fn require_api_key(
-    axum::extract::State(config): axum::extract::State<DaemonApiConfig>,
+    axum::extract::State(config): axum::extract::State<Arc<DaemonApiConfig>>,
     request: Request<Body>,
     next: Next,
 ) -> Result<Response, NexusApiError> {
@@ -344,7 +345,7 @@ pub async fn require_api_key(
     );
 
     match config.auth_mode {
-        AuthMode::KeyedAll => auth_keyed_all(&config, request, next).await,
+        AuthMode::KeyedAll => auth_keyed_all(config.as_ref(), request, next).await,
         AuthMode::KeylessLocalhost => auth_keyless_localhost(request, next).await,
     }
 }
@@ -489,6 +490,8 @@ mod tests {
         use axum::middleware as axum_mw;
         use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
+        let auth_config = Arc::new(auth_config);
+
         let runtime_routes = Router::new()
             .route("/v1/local/runtime/health", get(handlers::runtime::health))
             .route("/v1/local/runtime/status", get(handlers::runtime::status))
@@ -509,7 +512,7 @@ mod tests {
             .route("/v1/local/creators", get(handlers::creators::list))
             .route("/v1/local/references", get(handlers::references::list))
             .route_layer(axum_mw::from_fn_with_state(
-                auth_config.clone(),
+                Arc::clone(&auth_config),
                 super::require_api_key,
             ));
 
@@ -529,7 +532,7 @@ mod tests {
             .merge(protected_routes)
             .layer(cors_layer)
             .layer(axum_mw::from_fn_with_state(
-                auth_config,
+                Arc::clone(&auth_config),
                 super::require_allowed_origin,
             ))
             .with_state(state)
