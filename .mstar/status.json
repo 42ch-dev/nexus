@@ -1,116 +1,15 @@
 {
   "version": 1,
   "updated_at": "2026-07-03T10:00:00+08:00",
-  "plans": [
-    {
-      "plan_id": "2026-07-03-v1.85-compass-and-plan-stubs",
-      "name": "P-1 — Prepare (compass + plan stubs)",
-      "iteration": "V1.85",
-      "type": "prepare",
-      "status": "Done",
-      "primary_spec": ".mstar/iterations/v1.85-app-icon-branding-delivery-compass-v1.md",
-      "working_branch": null,
-      "merge_target": "iteration/v1.85",
-      "qc_reports": [
-        "skipped — prepare/harness-docs plan; reviewed via Phase 1 Review & Edit chain (product-manager -> architect -> writing-specialist -> PM lock)"
-      ],
-      "metadata": {
-        "plan_index": "P-1",
-        "iteration_refs": [
-          "V1.85"
-        ]
-      },
-      "completion_note": "Compass locked, 4 plans registered, status.json + README index updated, Review & Edit chain complete."
-    },
-    {
-      "plan_id": "2026-07-03-v1.85-app-icon-branding",
-      "name": "P0 — App Icon Branding",
-      "iteration": "V1.85",
-      "type": "implement",
-      "task_category": "visual",
-      "status": "Done",
-      "primary_spec": ".mstar/iterations/v1.85-app-icon-branding-delivery-compass-v1.md",
-      "working_branch": "feature/v1.85-app-icon-branding",
-      "merge_target": "iteration/v1.85",
-      "parallel_with": "2026-07-03-v1.85-brand-and-ci-doc-hygiene",
-      "qc_reports": [
-        ".mstar/plans/reports/2026-07-03-v1.85-closure/qc1.md",
-        "qc2.md",
-        "qc3.md"
-      ],
-      "metadata": {
-        "plan_index": "P0",
-        "iteration_refs": [
-          "V1.85"
-        ],
-        "spec_integration_branch": "iteration/v1.85",
-        "merge_target": "iteration/v1.85"
-      },
-      "implementation_commit": "dc0c8057",
-      "merge_commit": "d4bb8a92",
-      "qc_verdict": "Approve (consolidated, clean first pass)"
-    },
-    {
-      "plan_id": "2026-07-03-v1.85-brand-and-ci-doc-hygiene",
-      "name": "P1 — Brand/CI Doc Hygiene",
-      "iteration": "V1.85",
-      "type": "implement",
-      "task_category": "docs",
-      "status": "Done",
-      "primary_spec": ".mstar/iterations/v1.85-app-icon-branding-delivery-compass-v1.md",
-      "closes_residuals": [
-        "R-V184CL-QC1-S001",
-        "R-V184CL-QC2-S001"
-      ],
-      "working_branch": "feature/v1.85-brand-and-ci-doc-hygiene",
-      "merge_target": "iteration/v1.85",
-      "parallel_with": "2026-07-03-v1.85-app-icon-branding",
-      "qc_reports": [
-        ".mstar/plans/reports/2026-07-03-v1.85-closure/qc1.md",
-        "qc2.md",
-        "qc3.md"
-      ],
-      "metadata": {
-        "plan_index": "P1",
-        "iteration_refs": [
-          "V1.85"
-        ],
-        "spec_integration_branch": "iteration/v1.85",
-        "merge_target": "iteration/v1.85"
-      },
-      "implementation_commit": "d0982aa9",
-      "merge_commit": "030d71c6",
-      "qc_verdict": "Approve (consolidated)"
-    },
-    {
-      "plan_id": "2026-07-03-v1.85-closure",
-      "name": "P-last — QC, QA, Compound, and Closeout",
-      "iteration": "V1.85",
-      "type": "closure",
-      "status": "Done",
-      "primary_spec": ".mstar/iterations/v1.85-app-icon-branding-delivery-compass-v1.md",
-      "working_branch": null,
-      "merge_target": "iteration/v1.85",
-      "qc_reports": [],
-      "metadata": {
-        "plan_index": "P-last",
-        "iteration_refs": [
-          "V1.85"
-        ]
-      },
-      "qc_consolidated_verdict": "Approve (qc1+qc2+qc3, clean)",
-      "qa_report": ".mstar/plans/reports/2026-07-03-v1.85-closure/qa.md",
-      "qa_verdict": "Pass-with-deferred-GUI"
-    }
-  ],
+  "plans": [],
   "metadata": {
-    "integration_branch": "iteration/v1.85",
+    "integration_branch": "iteration/v1.86",
     "integration_branch_retired": false,
-    "last_integration_branch": "iteration/v1.84",
+    "last_integration_branch": "iteration/v1.85",
     "integration_merge_target": "main",
     "iteration_base_branch": "main",
     "target_branch": "main",
-    "spec_integration_branch": "iteration/v1.85",
+    "spec_integration_branch": "iteration/v1.86",
     "latest_active_iteration": "V1.85 active: App Icon Branding — replace placeholder Tauri app icons with Nexus-branded icons (tauri icon regenerate) + close 2 V1.84 low residuals (DESIGN.md doc drift + LFS comment)",
     "latest_active_compass": ".mstar/iterations/v1.85-app-icon-branding-delivery-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
@@ -118,16 +17,13 @@
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.84",
-      "compass": "v1.84-brand-polish-and-token-consolidation-delivery-compass-v1.md",
-      "shipped_at": "2026-07-02 (PR #111 merged)",
+      "iteration": "V1.85",
+      "compass": "v1.85-app-icon-branding-delivery-compass-v1.md",
+      "shipped_at": "2026-07-03 (PR #112 merged)",
       "plan_count": 4,
       "plan_count_done": 4,
       "wire_contracts_changed": false,
-      "wire_contracts_note": "V1.84: no wire/schema changes — index.css token consolidation + CI workflows + vitest config only.",
-      "profile_b_compaction": "done (V1.84 all 4 plans)",
-      "merge_commit": "1ff20bbf",
-      "pr": "#111"
+      "note": "V1.86 PR pending; latest_ship tracks last merged to main"
     },
     "tech_debt_summary": {
       "total_open": 3,
@@ -144,7 +40,7 @@
       "refreshed_at": "2026-07-01",
       "refreshed_reason": "V1.80 wave-1 Done (QA Pass): R-V178P0-QC3-003 (REL-01) + 4 V1.79-QC residuals resolved. Remaining open: 2 P0 accepted low + 1 V1.79 CI-wrapper low."
     },
-    "updated_at": "2026-07-03"
+    "updated_at": "2026-07-03T14:30:00+08:00"
   },
   "residual_findings": {
     "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization": [
@@ -6737,6 +6633,71 @@
         "tracking_link": ".mstar/status.json residual_findings[2026-07-03-v1.85-closure][R-V185CL-QC1-S001]",
         "note": "Trivial doc accuracy; both are brand PNG provenance. Accept as-is.",
         "lifecycle": "open"
+      }
+    ],
+    "2026-07-03-v1.86-local-api-trust-hardening": [
+      {
+        "id": "R-V186-REGRESS-M004",
+        "severity": "medium",
+        "title": "Regression-of-resolution: R-V156P0-M004 prior resolution did not hold",
+        "description": "R-V156P0-M004 (blocking sync I/O in the async fs/* handler) was marked lifecycle:resolved in V1.58 (commit 764cee49), but execute_read_file still used std::fs::read_to_string on current main. V1.86 T5 (commit 42335a16) moved the fs read/write + path-guard canonicalize behind tokio::task::spawn_blocking and converted execute_* / admission_pipeline / validate_file_path to async.",
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-07-03-v1.86-local-api-trust-hardening",
+          "commit": "42335a16",
+          "reason": "actually moved to spawn_blocking; prior resolution was insufficient"
+        }
+      },
+      {
+        "id": "R-V186-REGRESS-W001",
+        "severity": "medium",
+        "title": "Regression-of-resolution: R-V157P1-W001 prior resolution did not fully hold",
+        "description": "R-V157P1-W001 (privileged fs/* host-tool path coverage) was marked lifecycle:resolved in V1.58 (commit e78c9307), but the fs/* host-tool execution surface still lacked tests for sibling-prefix escape, symlink escape, and the worker-IPC caller path. V1.86 T4 (commit 0eb9aa4f) backfilled these (Batch 1 T1-T3 already covered ../ and absolute-path escapes).",
+        "lifecycle": "resolved",
+        "resolution": {
+          "plan_id": "2026-07-03-v1.86-local-api-trust-hardening",
+          "commit": "0eb9aa4f",
+          "reason": "backfilled missing privileged-path coverage; prior resolution was insufficient"
+        }
+      },
+      {
+        "id": "R-V186-QC1-S005",
+        "severity": "medium",
+        "source": "qc1",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/host_tool_handlers.rs:2155-2156",
+        "title": "Manuscript body read still uses string-prefix path comparison (same class as Finding 3)",
+        "description": "nexus.manuscript.body.read host tool uses abs_body_str.starts_with(&workspace_root) for the non-canonicalized branch — same path-traversal anti-pattern as Finding 3, in a nexus.* tool path outside V1.86 fs/* scope (spec §13). Remote vector closed by T1 so urgency reduced; latent local/agent-exploitable.",
+        "lifecycle": "open",
+        "decision": "defer",
+        "owner": "PM",
+        "target": "next iteration (fast-follow) or hotfix",
+        "tracking_link": "reports/2026-07-03-v1.86-local-api-trust-hardening/qc-consolidated.md"
+      },
+      {
+        "id": "R-V186-QC3-PERF-DOUBLE-RESOLVE",
+        "severity": "low",
+        "source": "qc3",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/host_tool_handlers.rs",
+        "title": "resolve_guarded_path_async runs twice per fs/* call",
+        "description": "admission validate_file_path (must_exist=false) + execute_* (must_exist=true) both resolve; negligible for local single-user.",
+        "lifecycle": "open",
+        "decision": "accept",
+        "owner": "PM",
+        "target": "future perf iteration",
+        "tracking_link": "reports/2026-07-03-v1.86-local-api-trust-hardening/qc-consolidated.md"
+      },
+      {
+        "id": "R-V186-QC3-PERF-ARC-CONFIG",
+        "severity": "low",
+        "source": "qc3",
+        "scope": "crates/nexus-daemon-runtime/src/api/mod.rs",
+        "title": "DaemonApiConfig cloned per-request by axum State",
+        "description": "Arc<...> wrapper would zero-cost; clone sites at router construction are one-time (confirmed), so impact is small.",
+        "lifecycle": "open",
+        "decision": "accept",
+        "owner": "PM",
+        "target": "future perf iteration",
+        "tracking_link": "reports/2026-07-03-v1.86-local-api-trust-hardening/qc-consolidated.md"
       }
     ]
   }

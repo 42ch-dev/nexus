@@ -1,0 +1,32 @@
+{
+  "plan_id": "2026-07-03-v1.85-brand-and-ci-doc-hygiene",
+  "name": "P1 — Brand/CI Doc Hygiene",
+  "iteration": "V1.85",
+  "type": "implement",
+  "task_category": "docs",
+  "status": "Done",
+  "primary_spec": ".mstar/iterations/v1.85-app-icon-branding-delivery-compass-v1.md",
+  "closes_residuals": [
+    "R-V184CL-QC1-S001",
+    "R-V184CL-QC2-S001"
+  ],
+  "working_branch": "feature/v1.85-brand-and-ci-doc-hygiene",
+  "merge_target": "iteration/v1.85",
+  "parallel_with": "2026-07-03-v1.85-app-icon-branding",
+  "qc_reports": [
+    ".mstar/plans/reports/2026-07-03-v1.85-closure/qc1.md",
+    "qc2.md",
+    "qc3.md"
+  ],
+  "metadata": {
+    "plan_index": "P1",
+    "iteration_refs": [
+      "V1.85"
+    ],
+    "spec_integration_branch": "iteration/v1.85",
+    "merge_target": "iteration/v1.85"
+  },
+  "implementation_commit": "d0982aa9",
+  "merge_commit": "030d71c6",
+  "qc_verdict": "Approve (consolidated)"
+}

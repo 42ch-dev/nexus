@@ -4,7 +4,7 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — V1.65 Prepare amendment (bundled local Web UI serving + chapter-content Local API route family); **V1.66 Phase 2b amendment** (§12: Tauri sidecar mode launch/readiness/lifecycle contract) |
+| **Status** | Normative — V1.65 Prepare amendment (bundled local Web UI serving + chapter-content Local API route family); **V1.66 Phase 2b amendment** (§12: Tauri sidecar mode launch/readiness/lifecycle contract); **V1.86 amendment** (§13: Local API trust-boundary security — Origin allowlist, deny-fs-without-workspace, component-wise path guard) |
 | **Document class** | Master |
 | **Normative scope** | Architecture boundaries, process model, subsystem responsibilities, pre-release constraints |
 | **Related** | [cli-spec.md](./cli-spec.md), [local-runtime-boundary.md](./local-runtime-boundary.md), [agent-host.md](./agent-host.md) |
@@ -544,3 +544,113 @@ The Tauri app owns the sidecar process while the desktop window/session is alive
 ### 12.4 Asset serving in desktop mode
 
 In desktop mode, Tauri serves the bundled `apps/web/dist` via `build.frontendDist` (compass §5 #4 LOCKED). The daemon's rust-embed static asset route remains normative for the browser-tab flow and standalone `nexus42 daemon ui`, but it is **not** the desktop shell's asset-serving path.
+
+---
+
+## 13. Local API Trust-Boundary Security (V1.86)
+
+This section codifies the normative security contract for the daemon's Local API trust boundary. It closes the three-link attack chain identified in V1.86 (permissive CORS + keyless-localhost → remote-reach; fs/* bypass without workspace → arbitrary-file R/W; string-prefix path comparison → sibling-directory escape). The normative hooks in §4.4.3 (`require_api_key` on data routes) and §4.5 (W-002-style workspace path guard) already provide authority; this section adds the Origin gate, the deny-fs-without-workspace invariant, and the component-wise path guard requirement.
+
+**Coordinates with:** the V1.86 delivery compass ([v1.86-local-api-trust-hardening-delivery-compass-v1.md](../../iterations/v1.86-local-api-trust-hardening-delivery-compass-v1.md)), `api/path_guard.rs` (`resolve_guarded_path`), `api/auth_middleware.rs` (keyless-localhost mode), `api/mod.rs` (CORS layer configuration).
+
+### 13.1 Origin allowlist gate
+
+The daemon's CORS configuration is the primary browser-origin trust boundary. Per [STRATEGY.md](../../../STRATEGY.md) Guiding Principle #1 ("Local-first privacy"), cross-origin access from arbitrary websites MUST be denied by default.
+
+#### 13.1.1 Allowlist composition
+
+The daemon derives its allowed origins at startup from the following sources (no explicit configuration required for standard setups):
+
+| Origin | Source | Rationale |
+|--------|--------|-----------|
+| `http://127.0.0.1:<port>` | Computed from the resolved daemon port (default 8420, or `NEXUS_DAEMON_PORT`) | Own listening origin — the browser SPA served by the daemon or accessed directly via `nexus42 daemon ui` |
+| `tauri://localhost` | Hardcoded | Tauri v2 macOS custom protocol webview origin |
+| `http://tauri.localhost` | Hardcoded | Tauri v2 Windows/Linux webview origin |
+| `http://localhost:5173` | Hardcoded | Vite dev-server origin (`pnpm dev` frontend development proxy) |
+| (any) | `NEXUS_DAEMON_ALLOWED_ORIGINS` env var (comma-separated list) | Escape hatch for reverse-proxy setups, custom hostnames, and corporate proxy environments |
+
+The Vite dev origin (`http://localhost:5173`) is allowed unconditionally because the dev proxy is a development convenience operated by the same local user; it does not weaken the remote-attack surface since the dev flow requires the user to explicitly run the Vite server.
+
+**Design invariant:** the allowlist is derived from codebase-verified client origins (not guessed). The Tauri webview origins match the Tauri v2 protocol configuration in `tauri.conf.json`; the Vite origin matches `vite.config.ts`; the own-origin is computed from the resolved port at startup.
+
+#### 13.1.2 Request handling
+
+| Condition | Outcome |
+|-----------|---------|
+| Request carries no `Origin` header | **Permitted** — non-browser clients (CLI `host-call`, `curl`, worker IPC, direct browser tab navigation to the daemon's own URL at `http://127.0.0.1:<port>`) do not send an `Origin` header. Same-origin browser requests also omit `Origin`. |
+| `Origin` header value is in the allowlist | **Permitted** — the request proceeds to auth middleware (§4.4.3) and the handler |
+| `Origin` header value is NOT in the allowlist | **Rejected** — `403 Forbidden` with a clear error message including the rejected origin value and a reference to `NEXUS_DAEMON_ALLOWED_ORIGINS` as the documented escape hatch |
+
+#### 13.1.3 Defense-in-depth layering
+
+The Origin gate uses two independent mechanisms:
+
+1. **Configured `CorsLayer`** (tower-http): replaces the pre-V1.86 `CorsLayer::permissive()`. Handles CORS preflight (`OPTIONS`) requests correctly with the explicit allowlist. This is the primary CORS-compliant browser gate.
+
+2. **Origin-reject middleware** (axum, applied as a separate tower layer): performs a second hard check on every non-preflight request carrying an `Origin` header. This is defense-in-depth — if the `CorsLayer` configuration were ever accidentally relaxed, the middleware still enforces the allowlist.
+
+Both layers derive their allowlist from the same configuration source. The middleware allows `OPTIONS` preflight requests through unconditionally (the `CorsLayer` is authoritative for preflight; double-rejecting preflight breaks CORS entirely).
+
+#### 13.1.4 Relationship to authentication
+
+The Origin gate is **independent of** and **applied before** the auth middleware (§4.4.3). The keyless-localhost mode (`NEXUS42_DAEMON_API_KEY` unset) remains the default (deprecation is a non-goal; see V1.86 compass §1). Before V1.86, a cross-origin browser request to `http://127.0.0.1:8420` passed both permissive CORS (all origins allowed) AND keyless-localhost auth (TCP connection is loopback). After V1.86, the Origin gate rejects the cross-origin request at the first layer — the auth middleware is never reached — because the malicious site's `Origin` (e.g., `https://evil.com`) is not in the allowlist.
+
+Non-browser clients (CLI, workers, `curl`) do not send an `Origin` header and pass the Origin gate, then proceed through auth as before.
+
+#### 13.1.5 Observability
+
+When keyless-localhost mode is active, the daemon MUST log the effective Origin allowlist at `INFO` level on startup (or on first protected request), so the user can inspect which origins are trusted. The log format includes each origin and its source (computed, hardcoded, or env override).
+
+### 13.2 Deny fs/* tools without active workspace
+
+When no active workspace is configured — i.e., `WorkspaceState::workspace_path()` returns `None` — all `fs/*` host tools (`fs/read_text_file`, `fs/write_text_file`) MUST be denied **unconditionally** during the admission pipeline, before the tool executor runs.
+
+**Error contract:** the denial returns `403 Forbidden` with a clear, actionable message:
+```
+fs/* tools require an active workspace with defined bounds
+```
+
+**Rationale:** the fs/* path guard (§13.3, §4.5 W-002) requires a workspace root to enforce the containment boundary. Without a workspace root there is no boundary to enforce and any filesystem path would pass. Deny-by-default is the safe primitive; a sandbox-dir fallback is YAGNI.
+
+**Caller audit:** all three host-tool caller entry points (CLI `host-call`, worker `agent_tool_request` IPC, schedule executor) require an active workspace context for legitimate fs/* usage. No legitimate no-workspace fs/* invocation path exists in the current architecture. This invariant is verified by grepping all `HostToolExecutor` call sites at the time of the fix and documented here so future callers respect it.
+
+**Implementation contract:** the denial is in `admission_pipeline()` (`api/handlers/host_tool_handlers.rs`), before `execute_read_file` / `execute_write_file` run. The admission check is:
+```rust
+if state.workspace_path().is_none() {
+    return Err(/* 403: fs/* tools require an active workspace */);
+}
+```
+
+This closes the trust-boundary bypass where privileged fs/* tools could read or write arbitrary user files (`~/.nexus42/auth.json`, `~/.ssh/id_rsa`, etc.) when no workspace was configured.
+
+### 13.3 Component-wise path guard for fs/* tools
+
+All path validation for `fs/*` tools MUST use **component-wise** `Path::starts_with` comparison after canonicalization — never string-prefix comparison.
+
+#### 13.3.1 The anti-pattern
+
+String-prefix comparison (`path_str.starts_with(&workspace_str)`) is a path-traversal vulnerability. A workspace root of `/home/user/my-novel` would accept `/home/user/my-novel-evil/secret.md` because the string `/home/user/my-novel-evil/secret.md` starts with `/home/user/my-novel`.
+
+#### 13.3.2 Normative requirement
+
+`validate_file_path` (`host_tool_handlers.rs`) MUST delegate to the canonical `resolve_guarded_path` helper (`api/path_guard.rs`), which already implements the correct pattern for both branches:
+
+- **Existing files** (read paths): `canonicalize(requested_path).starts_with(canonicalize(workspace_root))`
+- **Write targets** (possibly non-existent): walk up to nearest existing parent, `canonicalize(parent).starts_with(canonicalize(workspace_root))`
+
+The `resolve_guarded_path` implementation at `path_guard.rs:35-100` is the single source of truth for the component-wise guard. Its documentation at lines 60-62 explicitly calls out the string-prefix anti-pattern and why `Path::starts_with` is the correct replacement.
+
+#### 13.3.3 Alignment with §4.5 W-002
+
+The chapter-content routes (§4.5) already delegate to `resolve_guarded_path` for outline and body file paths. The W-002 hook ("any file path resolved from a user-supplied or DB-stored relative path must remain inside the active workspace root") is authoritative for all filesystem-accessing routes. V1.86 aligns the host-tool `fs/*` path validation with the same canonical helper, eliminating the duplicated (and vulnerable) string-prefix logic.
+
+#### 13.3.4 TOCTOU note
+
+The canonicalization race window between reading the workspace root and checking the target path is documented in `resolve_guarded_path` (lines 22-28) and tracked by residual `R-V166-QC2-TOCTOU`. The single-user local daemon context bounds the practical risk. The component-wise `Path::starts_with` fix does not introduce a new TOCTOU window; it replaces an already-racy-but-incorrect check with an already-racy-but-correct one.
+
+#### 13.3.5 Coverage requirement
+
+Both the read (existing-file) and write (non-existing-file) branches MUST be covered by automated regression tests that verify:
+1. An in-workspace path is accepted by both branches
+2. A sibling-directory prefix-escape path (e.g., workspace `/home/user/my-novel`, target `/home/user/my-novel-evil/foo`) is rejected by both branches
+3. A parent-directory escape (`../`) is rejected by both branches
