@@ -8,34 +8,27 @@ under this directory (except `source/`) are **generated at build/dev time** via
 
 ## Source assets (committed)
 
-- `source/app-icon.svg` — deterministic 1024×1024 vector composition of the
-  Nexus mark on the brand deep-blue background (`#1E3A5F`). The mark uses the
-  V1.83 logo geometry (`packages/nexus-ui/assets/logos/logo-primary.svg` /
-  `logo-white.svg`), centered with ~10% padding so it remains visible under
-  macOS squircle / Windows / Linux platform masks. Strokes are brand cyan
-  (`#25D1E0`) and node circles are white (`#FFFFFF`).
-- `source/source-1024.png` — rasterized 1024×1024 RGBA PNG used as the input
+- `source/app-icon.svg` — documentation placeholder (white `#FFFFFF` canvas).
+  The visual mark is raster-composed from the brand logo family, not redrawn as
+  vectors in this file.
+- `source/compose-app-icon.mjs` — reproducible composition script: centers
+  `packages/nexus-ui/assets/logos/logo_light.png` on a white background with
+  ~10% padding, then writes the raster outputs below.
+- `source/source-1024.png` — composed 1024×1024 RGBA PNG used as the input
   for `tauri icon`. Tracked by Git LFS.
 - `source/app-icon-preview-256.png` — 256×256 preview render for QA/PR review
   of the dock/taskbar appearance.
 
-## Rasterizing the SVG source
+## Composing the source PNG
 
-The committed PNG was produced with [sharp](https://sharp.pixelplumbing.com/)
-(Node.js). A reproducible one-liner equivalent:
+From the repo root (requires `sharp` in `apps/desktop` devDependencies):
 
 ```bash
-cd apps/desktop/src-tauri/icons/source
-node --input-type=module -e "
-import sharp from 'sharp';
-await sharp('app-icon.svg', { density: 96 })
-  .resize(1024, 1024, { fit: 'contain', background: { r: 30, g: 58, b: 95, alpha: 1 } })
-  .png()
-  .toFile('source-1024.png');
-"
+pnpm --filter desktop run icons:compose
 ```
 
-(Actual command used: a temporary Node project with `sharp` installed via npm.)
+This reads `logo_light.png` (deep-blue 3D mark for light surfaces), places it on
+`#FFFFFF`, and regenerates `source-1024.png` + `app-icon-preview-256.png`.
 
 ## Generating desktop icon formats
 
@@ -45,16 +38,14 @@ From the repo root (or `apps/desktop`):
 pnpm --filter desktop run icons:generate
 ```
 
-This runs `tauri icon` on `source/source-1024.png` and writes desktop formats
-into this directory:
+`icons:generate` runs `icons:compose` first, then `tauri icon`, then deletes
+mobile outputs (`ios/`, `android/`) — Nexus desktop does not ship mobile targets.
+
+Desktop formats written into this directory:
 
 - macOS: `icon.icns`, `32x32.png`, `128x128.png`, `128x128@2x.png`
 - Windows: `icon.ico`, `Square*.png`, `StoreLogo.png`
 - Linux: `icon.png`, `64x64.png`
-
-`tauri icon` also emits `ios/` and `android/` assets by default; the
-`icons:generate` script **deletes those immediately** — Nexus desktop does not
-ship mobile targets.
 
 `predev` and `beforeBuildCommand` in `tauri.conf.json` call `icons:generate`
 automatically so a fresh clone can build without committing generated binaries.
@@ -77,7 +68,7 @@ and reviewed in GitHub/GitLab.
 
 ## Aesthetic sign-off
 
-User aesthetic sign-off was deferred per the V1.85 compass; the composition
-above is a best-judgment, deterministic rendering of the V1.83 logo family on
-the V1.84 brand palette. Review the 256×256 preview at
-`source/app-icon-preview-256.png` at QA/PR time.
+User aesthetic sign-off was deferred per the V1.85 compass. The current
+composition uses `logo_light.png` on a white background (`#FFFFFF`, root
+`DESIGN.md` `background-100`). Review `source/app-icon-preview-256.png` at
+QA/PR time.
