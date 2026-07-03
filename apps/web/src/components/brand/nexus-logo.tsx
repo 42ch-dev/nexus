@@ -1,5 +1,6 @@
 import logoColor from '@42ch/nexus-ui/assets/logos/logo-color.svg';
 import logoPrimary from '@42ch/nexus-ui/assets/logos/logo-primary.svg';
+import { NexusLogo as NexusLogoComponent } from '@42ch/nexus-ui';
 
 import { useTheme } from '@/components/theme-provider';
 import { cn } from '@/lib/utils';
@@ -11,21 +12,24 @@ export interface NexusLogoProps {
 }
 
 /**
- * Theme-aware Nexus wordmark — root DESIGN.md § Logo Usage.
- * Light shell surfaces use the deep-blue mark; dark chrome uses the cyan mark.
+ * Theme-aware Nexus wordmark — thin wrapper around `@42ch/nexus-ui`.
+ *
+ * Resolves the SVG asset via Vite and maps the current theme to the canonical
+ * package variant, preserving the zero-prop call-site ergonomics in
+ * `sidebar.tsx` and `header.tsx`.
  */
 export function NexusLogo({ label = 'Nexus', className }: NexusLogoProps) {
-  const { theme } = useTheme();
-  const src = theme === 'dark' ? logoColor : logoPrimary;
+  const { resolvedTheme } = useTheme();
+  const variant = resolvedTheme === 'dark' ? 'color' : 'primary';
+  const src = variant === 'color' ? logoColor : logoPrimary;
 
   return (
-    <img
+    <NexusLogoComponent
+      variant={variant}
       src={src}
-      alt={label}
-      width={120}
-      height={32}
+      label={label}
+      size={32}
       className={cn('h-8 w-auto shrink-0', className)}
-      decoding="async"
     />
   );
 }

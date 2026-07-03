@@ -2126,40 +2126,20 @@ async fn execute_manuscript_read_range(
     let abs_body = workspace_root_path.join(&body_path);
 
     // W-002: defense-in-depth path guard — ensure body_path (DB-sourced) resolves
-    // within the workspace root before reading. Mirrors the fs/* guard in
-    // `validate_file_path`; the target normally exists (read path), so
-    // canonicalize both and reject prefixes outside the workspace root. A
-    // missing-but-in-bounds file falls through to the existing FILE_READ_FAILED
-    // behavior below.
-    if abs_body.exists() {
-        let canonical_body = abs_body
-            .canonicalize()
-            .map_err(|e| NexusApiError::InvalidInput {
+    // within the workspace root before reading. Delegates to the same canonical
+    // helper used by fs/* and the manuscript write path. `must_exist` preserves
+    // the existing read-path semantics: an existing file is canonicalized before
+    // the component-wise prefix check; a missing-but-in-bounds file falls through
+    // to the existing FILE_READ_FAILED behavior below.
+    let must_exist = abs_body.exists();
+    let abs_body =
+        resolve_guarded_path(workspace_root_path, &body_path, must_exist).map_err(|e| match e {
+            NexusApiError::BadRequest { message, .. } => NexusApiError::InvalidInput {
                 field: "body_path".into(),
-                reason: format!("body path cannot be resolved: {e}"),
-            })?;
-        let canonical_workspace =
-            workspace_root_path
-                .canonicalize()
-                .map_err(|e| NexusApiError::Internal {
-                    code: "WORKSPACE_PATH_INVALID".into(),
-                    message: format!("workspace root cannot be resolved: {e}"),
-                })?;
-        if !canonical_body.starts_with(&canonical_workspace) {
-            return Err(NexusApiError::InvalidInput {
-                field: "body_path".into(),
-                reason: "body path outside workspace root".into(),
-            });
-        }
-    } else {
-        let abs_body_str = abs_body.display().to_string();
-        if !abs_body_str.starts_with(&workspace_root) {
-            return Err(NexusApiError::InvalidInput {
-                field: "body_path".into(),
-                reason: "body path outside workspace root".into(),
-            });
-        }
-    }
+                reason: message,
+            },
+            other => other,
+        })?;
 
     let content =
         tokio::fs::read_to_string(&abs_body)

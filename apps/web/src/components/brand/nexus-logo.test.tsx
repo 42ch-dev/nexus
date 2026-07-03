@@ -21,6 +21,7 @@ describe('NexusLogo', () => {
   beforeEach(() => {
     mockedUseTheme.mockReturnValue({
       theme: 'light',
+      resolvedTheme: 'light',
       setTheme: vi.fn(),
       toggleTheme: vi.fn(),
     });
@@ -29,6 +30,7 @@ describe('NexusLogo', () => {
   it('renders the deep-blue mark in light theme', () => {
     mockedUseTheme.mockReturnValue({
       theme: 'light',
+      resolvedTheme: 'light',
       setTheme: vi.fn(),
       toggleTheme: vi.fn(),
     });
@@ -40,6 +42,7 @@ describe('NexusLogo', () => {
   it('renders the cyan mark in dark theme', () => {
     mockedUseTheme.mockReturnValue({
       theme: 'dark',
+      resolvedTheme: 'dark',
       setTheme: vi.fn(),
       toggleTheme: vi.fn(),
     });

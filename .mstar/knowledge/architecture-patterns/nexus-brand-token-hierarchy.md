@@ -22,7 +22,7 @@ Before V1.83, `apps/web/DESIGN.md` held both app-specific canvas/SOUL/findings t
 Brand consumption follows **four layers**, top to bottom:
 
 1. **Root brand SSOT** — repo-root `DESIGN.md` / `DESIGN.dark.md` own canonical brand token names, VI palette values (`#1E3A5F`, `#25D1E0`, `#FFFFFF`), logo usage rules, and accessibility intent. These files are normative for *shared* brand semantics.
-2. **`@42ch/nexus-ui` package** — owns reusable artifacts derived from the root contract: Git LFS–tracked PNG provenance, canonical SVG logo variants (regular-git text), token data (`tokens.ts`), CSS theme entry (`theme.css`), and package metadata/exports. **V1.83 scope**: assets/tokens/theme only — no React component library exports.
+2. **`@42ch/nexus-ui` package** — owns reusable artifacts derived from the root contract: Git LFS–tracked PNG provenance, canonical SVG logo variants (regular-git text), token data (`tokens.ts`), CSS theme entry (`theme.css`), and package metadata/exports. **V1.83 scope was assets/tokens/theme only; V1.87 promoted the package to also ship React brand components (`<NexusLogo>`, `<NexusMark>`) — see [bundler-agnostic-component-library-assets.md](bundler-agnostic-component-library-assets.md) for the component asset-handling convention.**
 3. **App consumption mapping** — e.g. `apps/web/DESIGN.md` / `DESIGN.dark.md` map root brand tokens into app-specific Tailwind keys, CSS custom properties, and shadcn-style primitive mappings. Web files **derive** brand values; they must not become a second brand source (explicit disclaimers in frontmatter/body).
 4. **App implementation** — shell/base primitives consume public package exports and mapped CSS variables. No deep imports into `packages/nexus-ui/src/**`; use declared `package.json` `exports` only.
 
@@ -57,7 +57,7 @@ Apps that consume `@42ch/nexus-ui` should run `pnpm --filter @42ch/nexus-ui run 
 ## Do NOT
 
 - Put canonical brand hex values only in `apps/web` without root DESIGN + package alignment.
-- Export React components from `@42ch/nexus-ui` in the assets-only phase without a dedicated component-library plan.
+- Export React components from `@42ch/nexus-ui` without following the bundler-agnostic asset convention (consumer resolves the SVG URL via its own bundler and passes it as a `src` prop — do NOT import `.svg` in package source; see [bundler-agnostic-component-library-assets.md](bundler-agnostic-component-library-assets.md)). *(V1.83's "no React components without a dedicated component-library plan" guard was satisfied by V1.87.)*
 - Commit runtime SVG logos through Git LFS (breaks text diffs and bundler inlining).
 - Use cyan `#25D1E0` as primary body text on white backgrounds.
 
@@ -66,4 +66,4 @@ Apps that consume `@42ch/nexus-ui` should run `pnpm --filter @42ch/nexus-ui run 
 - Root SSOT: `DESIGN.md`, `DESIGN.dark.md`
 - Package: `packages/nexus-ui` — `@42ch/nexus-ui` exports `theme.css`, `tokens`, logo SVGs
 - Web mapping: `apps/web/DESIGN.md` — `blue-*` aliases → `--nexus-brand-*`
-- Web implementation: `NexusLogo` imports `@42ch/nexus-ui/assets/logos/logo-dark.svg` (public export)
+- Web implementation: `NexusLogo` (apps/web thin wrapper) imports `@42ch/nexus-ui/assets/logos/logo-color.svg` / `logo-primary.svg` (public export) and passes the resolved URL to the package's `<NexusLogo variant src>` component (V1.87).

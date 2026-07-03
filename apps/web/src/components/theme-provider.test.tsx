@@ -4,8 +4,9 @@
  * DESIGN.md uses identical token names in both themes; only the CSS-variable
  * values swap under the `.dark` class on `<html>` (Tailwind `class` strategy).
  * These tests pin the architectural surface P2 inherits: provider mount,
- * default-theme detection (localStorage → OS preference → light), the `.dark`
- * class + `data-theme` attribute + localStorage persistence on `setTheme`, and
+ * default-theme detection (localStorage → OS preference → system), the `.dark`
+ * class + `data-theme` attribute + localStorage persistence on `setTheme`,
+ * `resolvedTheme` mirroring the OS preference when `theme` is `'system'`, and
  * the `toggleTheme` round-trip. Token *values* themselves live in index.css
  * (CSS-variable projection of DESIGN.md) and are exercised by the build, not
  * the unit layer.
@@ -14,7 +15,7 @@ import { act, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ReactNode } from 'react';
 
-import { ThemeProvider, useTheme } from '@/components/theme-provider';
+import { ThemeProvider, useTheme, type Theme } from '@/components/theme-provider';
 
 const STORAGE_KEY = 'nexus-web-theme';
 
@@ -35,9 +36,15 @@ function mockMatchMedia(prefersDark: boolean) {
 }
 
 /** Surface the context value from inside the provider for assertions. */
-function ThemeProbe({ onTheme }: { onTheme: (t: string) => void }) {
+function ThemeProbe({ onTheme }: { onTheme: (t: Theme) => void }) {
   const { theme } = useTheme();
   return <>{(onTheme(theme), null)}</>;
+}
+
+/** Surface the resolved effective theme from inside the provider. */
+function ThemeResolvedProbe({ onTheme }: { onTheme: (t: 'light' | 'dark') => void }) {
+  const { resolvedTheme } = useTheme();
+  return <>{(onTheme(resolvedTheme), null)}</>;
 }
 
 function renderWith(ui: ReactNode) {
@@ -66,40 +73,56 @@ describe('ThemeProvider default-theme detection', () => {
   it('prefers a stored light theme over the OS preference', () => {
     mockMatchMedia(true); // OS says dark…
     window.localStorage.setItem(STORAGE_KEY, 'light'); // …but stored says light.
-    let current = 'unset';
+    let current: Theme = 'system';
     renderWith(<ThemeProbe onTheme={(t) => (current = t)} />);
     expect(current).toBe('light');
     expect(document.documentElement.classList.contains('dark')).toBe(false);
   });
 
-  it('falls back to the OS preference when nothing is stored', () => {
+  it('falls back to system when nothing is stored', () => {
     mockMatchMedia(true);
-    let current = 'unset';
-    renderWith(<ThemeProbe onTheme={(t) => (current = t)} />);
-    expect(current).toBe('dark');
+    let current: Theme = 'light';
+    let resolved: 'light' | 'dark' = 'light';
+    renderWith(
+      <>
+        <ThemeProbe onTheme={(t) => (current = t)} />
+        <ThemeResolvedProbe onTheme={(t) => (resolved = t)} />
+      </>,
+    );
+    expect(current).toBe('system');
+    expect(resolved).toBe('dark');
     expect(document.documentElement.classList.contains('dark')).toBe(true);
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBe('system');
   });
 
-  it('falls back to light when the OS prefers light and nothing is stored', () => {
+  it('resolves system to light when the OS prefers light', () => {
     mockMatchMedia(false);
-    let current = 'unset';
-    renderWith(<ThemeProbe onTheme={(t) => (current = t)} />);
-    expect(current).toBe('light');
+    let resolved: 'light' | 'dark' = 'dark';
+    renderWith(<ThemeResolvedProbe onTheme={(t) => (resolved = t)} />);
+    expect(resolved).toBe('light');
+    expect(document.documentElement.classList.contains('dark')).toBe(false);
   });
 
-  it('ignores an unrecognized stored value', () => {
+  it('ignores an unrecognized stored value and falls back to system', () => {
     mockMatchMedia(false);
     window.localStorage.setItem(STORAGE_KEY, 'neon');
-    let current = 'unset';
-    renderWith(<ThemeProbe onTheme={(t) => (current = t)} />);
-    expect(current).toBe('light');
+    let current: Theme = 'light';
+    let resolved: 'light' | 'dark' = 'dark';
+    renderWith(
+      <>
+        <ThemeProbe onTheme={(t) => (current = t)} />
+        <ThemeResolvedProbe onTheme={(t) => (resolved = t)} />
+      </>,
+    );
+    expect(current).toBe('system');
+    expect(resolved).toBe('light');
   });
 });
 
 describe('ThemeProvider token application (`.dark` swap)', () => {
   it('applies the `.dark` class + data-theme and persists on setTheme(dark)', () => {
     mockMatchMedia(false);
-    let setTheme: (t: 'light' | 'dark') => void = () => {};
+    let setTheme: (t: Theme) => void = () => {};
     renderWith(
       <ThemeProbeOnAction onReady={(api) => (setTheme = api.setTheme)} />,
     );
@@ -111,8 +134,8 @@ describe('ThemeProvider token application (`.dark` swap)', () => {
   });
 
   it('removes the `.dark` class when switching back to light', () => {
-    mockMatchMedia(true); // start dark
-    let setTheme: (t: 'light' | 'dark') => void = () => {};
+    mockMatchMedia(true); // start system/dark
+    let setTheme: (t: Theme) => void = () => {};
     renderWith(
       <ThemeProbeOnAction onReady={(api) => (setTheme = api.setTheme)} />,
     );
@@ -129,7 +152,7 @@ describe('ThemeProvider toggleTheme', () => {
   it('flips light ↔ dark', () => {
     mockMatchMedia(false);
     let toggle: () => void = () => {};
-    let current = 'unset';
+    let current: 'light' | 'dark' = 'light';
     renderWith(
       <ThemeProbeApi
         onReady={(api) => (toggle = api.toggleTheme)}
@@ -166,7 +189,7 @@ describe('useTheme outside provider', () => {
 function ThemeProbeOnAction({
   onReady,
 }: {
-  onReady: (api: { setTheme: (t: 'light' | 'dark') => void; toggleTheme: () => void }) => void;
+  onReady: (api: { setTheme: (t: Theme) => void; toggleTheme: () => void }) => void;
 }) {
   const { setTheme, toggleTheme } = useTheme();
   return <>{(onReady({ setTheme, toggleTheme }), null)}</>;
@@ -179,10 +202,10 @@ function ThemeProbeApi({
   onReady: (api: { toggleTheme: () => void }) => void;
   onTheme: (t: 'light' | 'dark') => void;
 }) {
-  const { theme, toggleTheme } = useTheme();
+  const { resolvedTheme, toggleTheme } = useTheme();
   return (
     <>
-      {(onReady({ toggleTheme }), onTheme(theme), null)}
+      {(onReady({ toggleTheme }), onTheme(resolvedTheme), null)}
     </>
   );
 }
