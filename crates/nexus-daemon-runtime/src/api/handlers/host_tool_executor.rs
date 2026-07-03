@@ -229,7 +229,7 @@ impl HostToolExecutor {
         );
 
         // Gates 1–4
-        let admission_result = admission_pipeline(req, state);
+        let admission_result = admission_pipeline(req, state).await;
 
         let (creator_id, _workspace_slug) = match admission_result {
             Ok(pair) => pair,
