@@ -1,6 +1,6 @@
 # @42ch/nexus-ui
 
-Nexus brand assets, design tokens, and theme helpers. Framework-neutral — **no React components** in V1.83.
+Nexus brand assets, design tokens, theme helpers, and **React brand components** (`<NexusLogo>`, `<NexusMark>`). Ships as a workspace package consumed by `apps/web` (and, in future, other Nexus surfaces).
 
 ## Install (workspace)
 
@@ -12,7 +12,7 @@ pnpm add @42ch/nexus-ui --workspace
 
 | Entry | Description |
 |-------|-------------|
-| `@42ch/nexus-ui` | Brand token constants (`brandColors`, `logoVariants`, sizing guidance) |
+| `@42ch/nexus-ui` | Brand token constants (`brandColors`, `logoVariants`, sizing guidance) + React components (`<NexusLogo>`, `<NexusMark>`) |
 | `@42ch/nexus-ui/tokens` | Same token module (direct import) |
 | `@42ch/nexus-ui/theme.css` | Brand CSS custom properties (`--nexus-brand-*`) |
 | `@42ch/nexus-ui/assets/logos/logo-primary.svg` | Deep blue mark (`#1E3A5F`, flat primary) for light backgrounds |
@@ -60,22 +60,41 @@ const accent = brandColors.cyan;
 }
 ```
 
-### Vite / bundler (SVG URL)
+### React components
+
+```tsx
+import { NexusLogo, NexusMark } from '@42ch/nexus-ui';
+
+// The consumer resolves the SVG URL through its own bundler.
+// In a Vite project, importing an SVG yields a URL string:
+import logoPrimary from '@42ch/nexus-ui/assets/logos/logo-primary.svg';
+
+function AppShell() {
+  // Pass the resolved URL as `src`. `variant` documents which mark is being rendered.
+  return <NexusLogo variant="primary" src={logoPrimary} size={32} />;
+}
+
+// Inline mono mark — inherits color via `currentColor` (no SVG asset needed):
+function Badge() {
+  return (
+    <span style={{ color: '#1E3A5F' }}>
+      <NexusMark size={24} />
+    </span>
+  );
+}
+```
+
+**Why `<NexusLogo>` takes a `src` prop.** The package itself cannot bundle SVG assets — its build tool (`tsup` / `esbuild`) does not resolve `.svg` imports. Making SVG resolution the *consumer's* responsibility keeps the package bundler-agnostic: any consumer (Vite, webpack, Rollup, etc.) imports the SVG file through its own loader and passes the resulting URL. `<NexusMark>` sidesteps this by inlining the mono mark's path data as hand-authored JSX, so it needs no asset resolution at all. See `AGENTS.md` § *Component export strategy*.
+
+### Raw SVG URL (without the React component)
+
+If you want the logo asset without the component wrapper — for example, a plain `<img>` in a non-React surface — import the SVG directly:
 
 ```ts
 import nexusLogo from '@42ch/nexus-ui/assets/logos/logo-primary.svg';
 
 // <img src={nexusLogo} alt="Nexus" width={32} height={32} />
 ```
-
-### Inline mono SVG
-
-```tsx
-import { ReactComponent as NexusMark } from '@42ch/nexus-ui/assets/logos/logo-mono.svg';
-// Or import raw SVG and render with className="text-foreground"
-```
-
-> V1.83 does not ship React components. P2 `apps/web` wires logos directly.
 
 ## Cross-surface compatibility
 
@@ -90,7 +109,14 @@ pnpm --filter @42ch/nexus-ui run build
 pnpm --filter @42ch/nexus-ui run typecheck
 ```
 
-## Roadmap (out of scope V1.83)
+## Roadmap
 
-- React component library (`<NexusLogo />`, layout primitives) — deferred to a later plan after P2 proves stable usage.
-- npm publish — not in this iteration.
+### Current API (0.2.0)
+
+- **React component library**: `<NexusLogo variant="..." src="...">` (presentational, explicit variant, `<img>`-based) and `<NexusMark>` (inline mono SVG, `currentColor`). React 18+ peer deps.
+
+### Deferred
+
+- Layout primitives (Header/Sidebar/RootLayout) — coupled to app routing/state.
+- npm publish (workspace-only for now).
+- ThemeProvider consolidation into this package.
