@@ -1,0 +1,27 @@
+{
+  "plan_id": "2026-07-03-v1.87-nexus-ui-component-library",
+  "name": "nexus-ui Component Library Promotion (P0) + manuscript.body.read Path-Guard Fast-Follow (P1)",
+  "status": "Done",
+  "type": "implement",
+  "working_branch": "feature/v1.87-nexus-ui-component-library",
+  "merge_target": "iteration/v1.87",
+  "primary_spec": ".mstar/iterations/v1.87-nexus-ui-component-library-delivery-compass-v1.md",
+  "qc_reports": {
+    "qc1": ".mstar/plans/reports/2026-07-03-v1.87-nexus-ui-component-library/qc1.md",
+    "qc2": ".mstar/plans/reports/2026-07-03-v1.87-nexus-ui-component-library/qc2.md",
+    "qc3": ".mstar/plans/reports/2026-07-03-v1.87-nexus-ui-component-library/qc3.md",
+    "consolidated": ".mstar/plans/reports/2026-07-03-v1.87-nexus-ui-component-library/qc-consolidated.md"
+  },
+  "metadata": {
+    "iteration_refs": "V1.87",
+    "spec_integration_branch": "iteration/v1.87",
+    "wire_contracts_changed": false
+  },
+  "merge_commit": "60916911",
+  "completion_report": {
+    "p0": "commits e5935e87, 17e11f3e, 83ad3a03 (frontend-dev)",
+    "p1": "commit 4eb26a7c (fullstack-dev)",
+    "qc": "3/3 Approve (qc1 a2dbe6f9, qc2 c62517d5, qc3 4b740c65); consolidated ec8ee161",
+    "qa": "Pass (6cf7bfdd)"
+  }
+}

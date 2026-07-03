@@ -1,57 +1,29 @@
 {
   "version": 1,
   "updated_at": "2026-07-03T16:00:00+08:00",
-  "plans": [
-    {
-      "plan_id": "2026-07-03-v1.87-nexus-ui-component-library",
-      "name": "nexus-ui Component Library Promotion (P0) + manuscript.body.read Path-Guard Fast-Follow (P1)",
-      "status": "Done",
-      "type": "implement",
-      "working_branch": "feature/v1.87-nexus-ui-component-library",
-      "merge_target": "iteration/v1.87",
-      "primary_spec": ".mstar/iterations/v1.87-nexus-ui-component-library-delivery-compass-v1.md",
-      "qc_reports": {
-        "qc1": ".mstar/plans/reports/2026-07-03-v1.87-nexus-ui-component-library/qc1.md",
-        "qc2": ".mstar/plans/reports/2026-07-03-v1.87-nexus-ui-component-library/qc2.md",
-        "qc3": ".mstar/plans/reports/2026-07-03-v1.87-nexus-ui-component-library/qc3.md",
-        "consolidated": ".mstar/plans/reports/2026-07-03-v1.87-nexus-ui-component-library/qc-consolidated.md"
-      },
-      "metadata": {
-        "iteration_refs": "V1.87",
-        "spec_integration_branch": "iteration/v1.87",
-        "wire_contracts_changed": false
-      },
-      "merge_commit": "60916911",
-      "completion_report": {
-        "p0": "commits e5935e87, 17e11f3e, 83ad3a03 (frontend-dev)",
-        "p1": "commit 4eb26a7c (fullstack-dev)",
-        "qc": "3/3 Approve (qc1 a2dbe6f9, qc2 c62517d5, qc3 4b740c65); consolidated ec8ee161",
-        "qa": "Pass (6cf7bfdd)"
-      }
-    }
-  ],
+  "plans": [],
   "metadata": {
     "integration_branch": "iteration/v1.87",
-    "integration_branch_retired": false,
-    "last_integration_branch": "iteration/v1.86",
+    "integration_branch_retired": true,
+    "last_integration_branch": "iteration/v1.87",
     "integration_merge_target": "main",
     "iteration_base_branch": "main",
     "target_branch": "main",
     "spec_integration_branch": "iteration/v1.87",
-    "latest_active_iteration": "V1.87 active: nexus-ui Component Library Promotion (@42ch/nexus-ui assets/tokens-only -> React component library: NexusLogo + NexusMark) + close R-V186-QC1-S005 (manuscript.body.read path-traversal fast-follow)",
-    "latest_active_compass": ".mstar/iterations/v1.87-nexus-ui-component-library-delivery-compass-v1.md",
+    "latest_active_iteration": null,
+    "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.86",
-      "compass": "v1.86-local-api-trust-hardening-delivery-compass-v1.md",
-      "shipped_at": "2026-07-03 (PR #113 merged ffae19f9)",
+      "iteration": "V1.87",
+      "compass": "v1.87-nexus-ui-component-library-delivery-compass-v1.md",
+      "shipped_at": "2026-07-03 (iteration/v1.87 PR pending)",
       "plan_count": 1,
       "plan_count_done": 1,
       "wire_contracts_changed": false,
-      "note": "V1.86 Local API Trust-Boundary Hardening merged to main; latest_ship tracks last merged to main"
+      "note": "V1.87 nexus-ui component library + R-V186-QC1-S005 closure; iteration/v1.87 PR to main pending"
     },
     "tech_debt_summary": {
       "total_open": 3,
@@ -68,7 +40,7 @@
       "refreshed_at": "2026-07-01",
       "refreshed_reason": "V1.80 wave-1 Done (QA Pass): R-V178P0-QC3-003 (REL-01) + 4 V1.79-QC residuals resolved. Remaining open: 2 P0 accepted low + 1 V1.79 CI-wrapper low."
     },
-    "updated_at": "2026-07-03T18:00:00+08:00"
+    "updated_at": "2026-07-03T18:30:00+08:00"
   },
   "residual_findings": {
     "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization": [
