@@ -8,9 +8,6 @@ under this directory (except `source/`) are **generated at build/dev time** via
 
 ## Source assets (committed)
 
-- `source/app-icon.svg` — documentation placeholder (white `#FFFFFF` canvas).
-  The visual mark is raster-composed from the brand logo family, not redrawn as
-  vectors in this file.
 - `source/compose-app-icon.mjs` — reproducible composition script: centers
   `packages/nexus-ui/assets/logos/logo_light.png` on a white background with
   ~10% padding, then writes the raster outputs below.
@@ -28,7 +25,8 @@ pnpm --filter desktop run icons:compose
 ```
 
 This reads `logo_light.png` (deep-blue 3D mark for light surfaces), places it on
-`#FFFFFF`, and regenerates `source-1024.png` + `app-icon-preview-256.png`.
+root `DESIGN.md` `colors.background-200`, adds a soft `brand-deep-blue-1000` drop
+shadow for depth, and regenerates `source-1024.png` + `app-icon-preview-256.png`.
 
 ## Generating desktop icon formats
 
@@ -69,6 +67,5 @@ and reviewed in GitHub/GitLab.
 ## Aesthetic sign-off
 
 User aesthetic sign-off was deferred per the V1.85 compass. The current
-composition uses `logo_light.png` on a white background (`#FFFFFF`, root
-`DESIGN.md` `background-100`). Review `source/app-icon-preview-256.png` at
-QA/PR time.
+composition uses `logo_light.png` on root `DESIGN.md` `colors.background-200`
+(muted light shell surface). Review `source/app-icon-preview-256.png` at QA/PR time.
