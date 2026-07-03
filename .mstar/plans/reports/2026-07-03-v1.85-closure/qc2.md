@@ -100,3 +100,117 @@ generated_at: "2026-07-03"
 **Plan Update**: N/A (leaf reviewer; no status.json edits).  
 **Handoff**: Report ready for PM consolidation.  
 **Git**: `git add .mstar/plans/reports/2026-07-03-v1.85-closure/qc2.md && git commit -m "docs(qc): qc2 security/correctness review for V1.85 closure"`
+
+---
+
+## Revalidation (fix-wave 1219c577 + 45a2fd22)
+
+**Revalidation Scope (alignment fields — echoed verbatim per assignment):**
+- **plan_id:** `2026-07-03-v1.85-closure`
+- **Working branch:** `iteration/v1.85`
+- **Review cwd:** `/Users/bibi/workspace/organizations/42ch/nexus`
+- **Review range / Diff basis:** targeted re-review of fix-wave commits `1219c577` + `45a2fd22` (on top of the previously-reviewed `main...iteration/v1.85` baseline). Inspected via `git show 1219c577`, `git show 45a2fd22`, and `git diff main...iteration/v1.85`.
+
+**Fix-wave commits confirmed (on iteration/v1.85):**
+- `1219c577` — fix(desktop): unify app-icon mark to cyan + global `*.png` LFS rule (V1.85 user feedback)
+- `45a2fd22` — docs(design): make DESIGN.md series evergreen (V1.85 user feedback)
+
+**Revalidation checks (qc-specialist-2: security & correctness lens):**
+
+1. **SVG unified cyan (no white):**  
+   ```
+   $ rg -n "#FFFFFF|fill=\"#FFFFFF\"|white" apps/desktop/src-tauri/icons/source/app-icon.svg
+   (no output — 0 matches; exit 1)
+   $ rg -n "#25D1E0" apps/desktop/src-tauri/icons/source/app-icon.svg
+   6:  <g transform="translate(102.4,102.4) scale(8.192)" fill="none" stroke="#25D1E0" stroke-width="6.6" stroke-linecap="round" stroke-linejoin="round">
+   13:  <g transform="translate(102.4,102.4) scale(8.192)" fill="#25D1E0" stroke="none">
+   ```
+   ✓ Entire N mark (stroke group + node-circle fill group) is single `#25D1E0` cyan on deep-blue `#1E3A5F` background. No `#FFFFFF` or white nodes remain. SVG remains self-contained (no `<script>`, no external `href`).
+
+2. **LFS `*.png` correctness:**  
+   ```
+   $ cat .gitattributes
+   # Git LFS — all PNG assets (brand sources, app icons, regenerated formats)
+   *.png filter=lfs diff=lfs merge=lfs -text
+   ```
+   ✓ Exactly the comment + single global `*.png` rule (no per-path rules, no negation, no legacy `source/*.png` stanza).  
+   ```
+   $ git lfs ls-files | rg "icons" | sort
+   ... (all icon PNGs listed as LFS: 32x32.png, 64x64.png, 128x128.png, 128x128@2x.png, icon.png, source-1024.png, app-icon-preview-256.png, Square*.png, android/ios assets, etc.)
+   ```
+   ✓ Regenerated icon PNGs + source + preview are LFS-tracked.  
+   ```
+   $ git cat-file -p :apps/desktop/src-tauri/icons/128x128.png | head -1
+   version https://git-lfs.github.com/spec/v1
+   $ git cat-file -p :apps/desktop/src-tauri/icons/32x32.png | head -1
+   version https://git-lfs.github.com/spec/v1
+   ```
+   ✓ Pointers (not binary blobs) — no LFS leakage. `.icns`/`.ico` correctly remain normal git objects (not `*.png`).
+
+3. **Regenerated formats valid:**  
+   ```
+   $ file apps/desktop/src-tauri/icons/128x128.png apps/desktop/src-tauri/icons/icon.icns apps/desktop/src-tauri/icons/icon.ico
+   apps/desktop/src-tauri/icons/128x128.png: PNG image data, 128 x 128, 8-bit/color RGBA, non-interlaced
+   apps/desktop/src-tauri/icons/icon.icns:   Mac OS X icon, 136774 bytes, "ic08" type
+   apps/desktop/src-tauri/icons/icon.ico:    MS Windows icon resource - 6 icons, 32x32 with PNG image data, ...
+   ```
+   ✓ All formats valid. `tauri.conf.json` bundle refs (`"icon": ["icons/32x32.png", "icons/128x128.png", ...]`) resolve.
+
+4. **DESIGN.md token preservation (CRITICAL):**  
+   Independent token sweep (counts sampled for brand + variable chain):  
+   ```
+   $ rg -o "#[0-9A-Fa-f]{6}|#[0-9A-Fa-f]{3}\b|rgba\([^)]*\)|var\(--[^)]*\)|color-mix\([^)]*\)|--color-[a-z0-9-]+" DESIGN.md apps/web/DESIGN.md apps/web/DESIGN.dark.md | sort | uniq -c | sort -rn | head -20
+   ... (full list consistent with prior review)
+   2 DESIGN.md:#1E3A5F
+   2 DESIGN.md:#25D1E0
+   2 apps/web/DESIGN.md:#1E3A5F
+   2 apps/web/DESIGN.md:#25D1E0
+   2 apps/web/DESIGN.md:var(--color-blue-700)
+   2 apps/web/DESIGN.dark.md:#25D1E0
+   2 apps/web/DESIGN.dark.md:var(--color-blue-700)
+   1 apps/web/DESIGN.md:color-mix(in srgb, var(--color-blue-700)
+   ...
+   ```
+   Specific brand tokens present and mapped:
+   ```
+   $ rg -n "1E3A5F|25D1E0|var\(--color-blue-700\)" DESIGN.md apps/web/DESIGN.md apps/web/DESIGN.dark.md
+   DESIGN.md:8:  brand-deep-blue: "#1E3A5F"
+   DESIGN.md:9:  brand-cyan: "#25D1E0"
+   ...
+   apps/web/DESIGN.md:32:  blue-700: "#1E3A5F"
+   apps/web/DESIGN.dark.md:32:  blue-700: "#25D1E0"
+   ...
+   ```
+   ```
+   $ git show 45a2fd22 --unified=0 | head -80
+   ```
+   ✓ All hunks are prose/comment only (V1.xx removal, "Author Reflection" label cleanup, "consolidated"/"pre-consolidation"/"V1.84"/"filled the" narrative removal). No hex, rgba, var(--color-...), or color-mix value lines were altered. Token names, values, and CSS refs preserved verbatim.
+
+5. **Evergreen invariant:**  
+   ```
+   $ rg -n "V1\.[0-9]+|V[0-9]+\.[0-9]+|consolidat|pre-consolidat|during the.*migration|filled the" DESIGN.md apps/web/DESIGN.md apps/web/DESIGN.dark.md || echo "✓ No version numbers or consolidation narrative found"
+   (no matches)
+   ```
+   ✓ 0 matches. No version numbers (V1.xx) or decision-history language remain in the DESIGN series.
+
+6. **Contract invariant still holds:**  
+   ```
+   $ git diff --name-only main...iteration/v1.85 | grep -E '^(schemas/|crates/nexus-contracts/|crates/nexus-daemon|packages/nexus-ui/package.json)' || echo "✓ Contract invariant holds: 0 matches"
+   (no matches)
+   ```
+   ✓ 0 matches. No schema, contracts crate, daemon, or nexus-ui package.json changes in the integrated state.
+
+**Findings delta:** No new 🔴 Critical or 🟡 Warning findings from the fix-wave. All prior items remain resolved. SVG is now a single-color mark per user intent; LFS is simplified and correct; DESIGN.md is evergreen with tokens untouched.
+
+**Updated Verdict:** Approve (fix-wave 1219c577 + 45a2fd22 confirmed clean under security & correctness lens).
+
+---
+
+## Updated Summary (post-revalidation)
+| Severity | Count |
+|----------|-------|
+| 🔴 Critical | 0 |
+| 🟡 Warning | 0 |
+| 🟢 Suggestion | 0 |
+
+**Verdict**: Approve
