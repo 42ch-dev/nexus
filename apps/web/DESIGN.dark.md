@@ -72,7 +72,7 @@ typography:
   button-12: { fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif", fontSize: "12px", fontWeight: 600, lineHeight: 1, letterSpacing: "0.01em" }
   label-12-mono: { fontFamily: "\"SFMono-Regular\", \"Cascadia Code\", \"Roboto Mono\", Consolas, monospace", fontSize: "12px", fontWeight: 500, lineHeight: 1.4, letterSpacing: "0" }
   copy-13-mono: { fontFamily: "\"SFMono-Regular\", \"Cascadia Code\", \"Roboto Mono\", Consolas, monospace", fontSize: "13px", fontWeight: 400, lineHeight: 1.5, letterSpacing: "0" }
-  # V1.79 Author Reflection — reading-surface typography (P0 concrete values).
+  # Author Reflection — reading-surface typography.
   # Theme-independent metrics — identical to DESIGN.md so the prose column shape
   # does not shift between themes. See DESIGN.md for rationale.
   reading-prose-measure: "68ch"
@@ -195,7 +195,7 @@ components:
     stopped-bg: "rgba(255,107,107,0.16)"
     stopped-text: "{colors.red-1000}"
 
-  # V1.77 findings-remediation — 6-state finding-status badges + triage chrome
+  # Findings-remediation — 6-state finding-status badges + triage chrome
   # (same token names as DESIGN.md, dark values). Severity reuses `severityVariant`;
   # triage chrome composes existing card/button/input/data-table primitives.
   finding-status-pill:
@@ -213,7 +213,7 @@ components:
     action-button: "secondary"
     executor-select: "input-select-textarea.default"
 
-  # V1.78 Creator Memory review-loop (same token names as DESIGN.md, dark values).
+  # Creator Memory review-loop (same token names as DESIGN.md, dark values).
   # Pending-count badge + task-kind chips use dark-tuned low-opacity accents;
   # composition tokens reference existing primitives (unchanged in dark).
   memory-pending-count:
@@ -262,12 +262,11 @@ components:
   memory-fragment-filter-input:
     basis: "input-select-textarea.default"
 
-  # V1.79 Author Reflection — Track A/B token stubs only (names + structure).
-  # Concrete dark values land in P0 (reading surface) and P1 (SOUL viz).
-  # V1.79 Author Reflection — Track A reading-surface component tokens (P0
-  # concrete dark values; same token names as DESIGN.md). Dark-tuned low-opacity
-  # accents on the maturation badges mirror the V1.77/V1.78 badge pattern so
-  # colors stay correct in dark. Track B (soul-viz-*) stubs remain for P1.
+  # Author Reflection — reading-surface and SOUL visualization component tokens.
+  # Reading-surface tokens use concrete dark values (same token names as
+  # DESIGN.md). Dark-tuned low-opacity accents on the maturation badges mirror
+  # the badge pattern so colors stay correct in dark. SOUL visualization tokens
+  # define keyword cluster and timeline surfaces.
   reading-chapter-nav:
     chrome-bg: "{colors.background-200}"
     chrome-border: "{colors.gray-alpha-400}"
@@ -284,7 +283,7 @@ components:
     world-kb-density-count: { backgroundColor: "rgba(76,216,200,0.14)", textColor: "{colors.teal-1000}", borderColor: "rgba(76,216,200,0.30)" }
     open-findings-count: { backgroundColor: "rgba(255,192,67,0.16)", textColor: "{colors.amber-1000}", borderColor: "rgba(255,192,67,0.30)" }
     base: { height: "20px", paddingInline: "6px", rounded: "{rounded.pill}", typography: "{typography.label-12}" }
-  # V1.79 P1 — SOUL personality visualization concrete dark values
+  # SOUL personality visualization concrete dark values
   # (same token names as DESIGN.md, dark-tuned opacities/text).
   soul-viz-keyword-cluster-node:
     shape: "circle"
@@ -296,8 +295,8 @@ components:
     line: "{colors.gray-alpha-400}"
     tick: "{colors.gray-500}"
     label: "{typography.label-12} @ {colors.gray-700}"
-  # V1.80 — ordered band-fill set backing the temporal-drift BAND_PALETTE
-  # (R-V179P1-QC1-002). Same token names as DESIGN.md (slot 0 = `fill`,
+  # Temporal-drift ordered band-fill set backing the BAND_PALETTE.
+  # Same token names as DESIGN.md (slot 0 = `fill`,
   # slots 1..5 = `fill-2`..`fill-6`); only the values differ. Dark-tuned
   # categorical hues at alpha 0.22 so the stacked bands stay legible against
   # the dark surface without bleeding into each other.
@@ -311,7 +310,7 @@ components:
     step-stroke: "{colors.gray-alpha-200}"
     label: "{typography.label-12} @ {colors.gray-900}"
 
-  # V1.70 canvas implement — concrete dark values (same token names as DESIGN.md)
+  # Canvas concrete dark values (same token names as DESIGN.md)
   canvas:
     canvas-surface: "#141414"
     canvas-grid: "rgba(255,255,255,0.05)"
@@ -328,7 +327,7 @@ components:
     canvas-write-conflict: "{colors.red-700}"
     canvas-write-success: "{colors.green-700}"
     canvas-write-stale-bg: "color-mix(in srgb, {colors.amber-700} 12%, transparent)"
-    # V1.72 outline/timeline canvas-write tokens — concrete dark values (same token names as DESIGN.md)
+    # Outline/timeline canvas-write tokens — concrete dark values (same token names as DESIGN.md)
     canvas-outline-volume-fill: "#1F1F1E"
     canvas-outline-chapter-card-status-pending: "#64748B"
     canvas-outline-chapter-card-status-drafted: "#60A5FA"
@@ -337,7 +336,7 @@ components:
     canvas-outline-foreshadow-edge: "#C4B5FD"
     canvas-outline-timeline-marker: "#38BDF8"
     canvas-outline-conflict-marker: "#F87171"
-    # V1.73 World KB canvas-write tokens — concrete dark values (same token names as DESIGN.md; 17 tokens)
+    # World KB canvas-write tokens — concrete dark values (same token names as DESIGN.md; 17 tokens)
     canvas-worldkb-entity-card-fill-default: "#1A1A1A"
     canvas-worldkb-entity-card-fill-hover: "#2A2A2A"
     canvas-worldkb-entity-card-fill-selected: "rgba(82,168,255,0.14)"
@@ -381,10 +380,10 @@ components:
 
 Dark primary button uses **cyan fill + deep blue text** (WCAG AA). `blue-*` names preserved for existing `{colors.blue-700}` consumers.
 
-V1.84 consolidated canvas/SOUL/World-KB brand-blue consumption through `var(--color-blue-700)` and `color-mix(in srgb, var(--color-blue-700) N%, transparent)`. The `rgba(82,168,255,…)` frontmatter entries document pre-consolidation approximations; CSS consumers resolve through the single-sourced variable chain — in the dark theme `--color-blue-700: #25d1e0` (brand-cyan). See DESIGN.md § Implementation Mapping.
+Canvas/SOUL/World-KB brand-blue tokens resolve through `var(--color-blue-700)` and `color-mix(in srgb, var(--color-blue-700) N%, transparent)`. The `rgba(82,168,255,…)` frontmatter entries are reference approximations; CSS consumers use the variable chain — in the dark theme `--color-blue-700: #25d1e0` (brand-cyan). See DESIGN.md § Implementation Mapping.
 
 This file intentionally preserves the same token names and frontmatter structure with dark values. Rule-type documentation, component behavior, voice/content guidance, and implementation mapping live in `DESIGN.md` and apply to both themes.
 
-Dark values were split from the former inline `Dark` columns in `DESIGN.md` during the V1.69 Production migration. Consumers should resolve dark values from this file conceptually while continuing to reference the same token names (`--color-<token>`, Tailwind `cv('<token>')`).
+Dark values live in this file (`DESIGN.dark.md`); light values live in `DESIGN.md`. Both use the same token names. Consumers should resolve dark values from this file conceptually while continuing to reference the same token names (`--color-<token>`, Tailwind `cv('<token>')`).
 
-V1.79 P0 filled the Track A reading-surface tokens with concrete dark values; only the Track B SOUL visualization token stubs remain for P1 to replace with concrete dark values.
+Reading-surface tokens have concrete dark values; SOUL visualization tokens cover the concrete dark keyword-cluster and timeline values.
