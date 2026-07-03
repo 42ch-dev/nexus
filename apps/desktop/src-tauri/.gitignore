@@ -6,7 +6,5 @@
 /binaries/*
 !/binaries/README.md
 
-# Generated icons are checked in for V1.66 P1 unsigned dev builds so CI can
-# bundle the .app without a designer asset pipeline. Replace with real artwork
-# before the first public release.
-# If you regenerate locally, commit the resulting set.
+# App icons: only icons/source/ and icons/README.md are tracked. Desktop formats
+# are generated at build/dev time — see icons/README.md and package.json icons:generate.
