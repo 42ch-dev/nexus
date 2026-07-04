@@ -786,9 +786,9 @@ V1.78 closed the third and final author-in-command loop (creator memory). V1.79 
 
 - **Standalone maturation dashboard** (multi-chart cross-Work/World aggregate) — Track A is in-context indicators only; standalone is a V1.80 candidate.
 - **Independent growth-curve view** as a separate SOUL visualization — folded into temporal drift; standalone deferred.
-- **Persisted reading progress** — session-only; persistence requires a write route (breaking the read-only invariant) and is deferred.
+- **Persisted reading progress + annotations/highlights (MVP)** — **Shipped V1.89**. See §28 (V1.89 amendment below). Session-only behavior was V1.79; persistence + highlights landed in V1.89 with the body-ownership invariant preserved.
 - **Per-World SOUL filtering** — per-creator scope only; per-World is a deferred enhancement.
-- **Reading annotations/highlights** — future iteration.
+- **Profile-specific reading chrome** (essay section breaks, game-bible cross-refs, novel typography presets) — remains deferred (BL-11 tracker row).
 - **DF-49 (Standalone MCP server)** — **cancelled** (not deferred), conflicts with ACP-client product direction and creates circular-invocation risk.
 - **Any new write route on the reading surface** — read-only consumption only.
 - **New canvas surfaces** — the canvas program is complete (V1.67–V1.76). V1.79 deepens the Control-Room reading + memory surfaces.
@@ -877,7 +877,7 @@ This product model is user-visible in the UI — the world selector explicitly f
 - **Narrative export / share** — no copy-to-clipboard, export, or share path this iteration.
 - **Async background-job infrastructure** — on-demand generation only (consistent with V1.80 discipline).
 - **BL-09 standalone maturation dashboard** — remains backlog.
-- **BL-11 deeper manuscript reading** (annotations/highlights) — remains backlog.
+- **BL-11 deeper manuscript reading (MVP slice)** — **Shipped V1.89**: persisted reading progress + character-offset annotations/highlights with drift notice. Profile-specific reading chrome remains deferred (see tracker).
 - **Realtime websocket / push** — poll + invalidation only.
 - **Rewrite of existing keyword/drift viz** — the world filter is surgical; no restructuring beyond adding the selector.
 
@@ -959,4 +959,116 @@ This model is locked in the UI. The world selector shows titles (not ids) and dr
 
 ---
 
-*Local-first Web UI product contract. V1.64 Shipped (Control Room + Setup) → V1.65 §13 Content-Authoring → V1.66 §14 Desktop Shell → V1.67 §15 Surface Convergence & De-risk → V1.69 Design System Maturation & Canvas Draft → V1.70 §16 Canvas Strategy Implement (α) + CI/desktop-build optimization → V1.71 §17 Canvas Strategy Write-Boundary (β) → V1.72 §18 Canvas Outline+Timeline (β) → V1.73 §19 Canvas World KB (β) → V1.74 §20 Canvas World KB Relationships (β) → V1.77 §23 Findings-Remediation UI → V1.78 §24 Creator Memory Review-Loop UI → V1.79 §25 Author Reflection: Reading Surface + SOUL Visualization → V1.81 §26 Creator SOUL Maturation: Narrative, Projection, Growth, Refresh → V1.82 §27 SOUL Completion: per-World Narrative + Titled Worlds Selector. Design tokens: `apps/web/DESIGN.md` (V1.65 Standard+ + V1.66 desktop supplement + V1.69 Production migration + V1.70 canvas-token fill + V1.71 canvas-write tokens + V1.72 outline/timeline tokens + V1.73 canvas-worldkb tokens + V1.74 relationship tokens + V1.77 findings triage tokens + V1.78 creator-memory review-loop tokens + V1.79 reading-surface tokens + SOUL-viz tokens + V1.81 narrative-card tokens + growth-curve tokens + V1.82 per-world narrative + titled-selector tokens).*
+*Local-first Web UI product contract. V1.64 Shipped (Control Room + Setup) → V1.65 §13 Content-Authoring → V1.66 §14 Desktop Shell → V1.67 §15 Surface Convergence & De-risk → V1.69 Design System Maturation & Canvas Draft → V1.70 §16 Canvas Strategy Implement (α) + CI/desktop-build optimization → V1.71 §17 Canvas Strategy Write-Boundary (β) → V1.72 §18 Canvas Outline+Timeline (β) → V1.73 §19 Canvas World KB (β) → V1.74 §20 Canvas World KB Relationships (β) → V1.77 §23 Findings-Remediation UI → V1.78 §24 Creator Memory Review-Loop UI → V1.79 §25 Author Reflection: Reading Surface + SOUL Visualization → V1.81 §26 Creator SOUL Maturation: Narrative, Projection, Growth, Refresh → V1.82 §27 SOUL Completion: per-World Narrative + Titled Worlds Selector → **V1.89 §28 Deeper Manuscript Reading (BL-11 MVP: persisted progress + annotations/highlights)**. Design tokens: `apps/web/DESIGN.md` (V1.65 Standard+ + V1.66 desktop supplement + V1.69 Production migration + V1.70 canvas-token fill + V1.71 canvas-write tokens + V1.72 outline/timeline tokens + V1.73 canvas-worldkb tokens + V1.74 relationship tokens + V1.77 findings triage tokens + V1.78 creator-memory review-loop tokens + V1.79 reading-surface tokens + SOUL-viz tokens + V1.81 narrative-card tokens + growth-curve tokens + V1.82 per-world narrative + titled-selector tokens + V1.89 reading-annotation-highlight tokens × 4 + annotation-inspector tokens + selection-toolbar tokens).*
+
+---
+
+## 28. V1.89 Amendment — Deeper Manuscript Reading (BL-11 MVP)
+
+**Status**: In progress (V1.89) — **MVP slice**: persisted reading progress + character-offset annotations/highlights with drift notice. Profile-specific reading chrome deferred.
+
+**Product intent (author-visible)**:
+- "I come back to a chapter and it remembers where I was."
+- "I can mark important passages while reading and find/edit them later."
+
+### 28.1 Data model
+
+Two new SQLite tables in the local database (`crates/nexus-local-db/`), both creator-scoped and cascading on Work deletion:
+
+**`reading_progress`** — one row per creator × work × chapter:
+| Column | Type | Notes |
+|---|---|---|
+| `creator_id` | TEXT NOT NULL | Part of composite PK |
+| `work_id` | TEXT NOT NULL | FK → `works(work_id) ON DELETE CASCADE` |
+| `chapter` | INTEGER NOT NULL | Chapter number; unique within a Work per `work_chapters` PK |
+| `scroll_progress` | INTEGER NOT NULL DEFAULT 0 | 0–10000 (unit = 1/100 of a percent; 10000 = fully scrolled) |
+| `volume` | INTEGER | Stored context; not in PK. Chapter numbers are Work-unique (`work_chapters` PK is `(work_id, chapter)`) |
+| `updated_at` | TEXT NOT NULL | RFC 3339; set server-side on upsert |
+| **PK** | `(creator_id, work_id, chapter)` | Upsert semantics: `INSERT … ON CONFLICT DO UPDATE` |
+
+**`reading_annotations`** — one row per highlight:
+| Column | Type | Notes |
+|---|---|---|
+| `annotation_id` | TEXT PRIMARY KEY | Server-generated UUID v4; not client-supplied on create |
+| `creator_id` | TEXT NOT NULL | Indexed for per-creator listing |
+| `work_id` | TEXT NOT NULL | FK → `works(work_id) ON DELETE CASCADE` |
+| `chapter` | INTEGER NOT NULL | |
+| `volume` | INTEGER | Stored context; nullable |
+| `start_offset` | INTEGER NOT NULL | Non-negative; must be < `end_offset` |
+| `end_offset` | INTEGER NOT NULL | Position in body plain text |
+| `color` | TEXT NOT NULL DEFAULT 'yellow' | Constrained to semantic palette: `{yellow, blue, green, pink}` |
+| `note` | TEXT | Optional free-text note |
+| `created_at` | TEXT NOT NULL | RFC 3339 |
+| `updated_at` | TEXT NOT NULL | RFC 3339 |
+| **Indexes** | `(creator_id, work_id, chapter)` + `(creator_id)` | Per-chapter list + future per-creator browse |
+
+### 28.2 Local API surface
+
+All endpoints are under `/v1/local/reading/`, follow the project's shared `ErrorResponse` convention, and are creator-scoped (handler enforces `active_creator_id`). No endpoint touches `body_path`, outline files, or chapter body content — the body-ownership invariant is preserved (canvas remains the sole authoring surface per V1.75 pivot).
+
+| Method | Route | Behavior |
+|---|---|---|
+| GET | `/v1/local/reading/progress?work_id=&chapter=[&volume=]` | Returns saved `ReadingProgress`. Defaults to `scroll_progress=0` if no row exists. Volume is an optional filter. |
+| PUT | `/v1/local/reading/progress` | Upserts progress row. Idempotent. `updated_at` set server-side. |
+| GET | `/v1/local/reading/annotations?work_id=&chapter=` | Returns `ReadingAnnotationList` with `items[]` sorted by `start_offset` ascending. No cursor pagination (annotations are author-scale). |
+| POST | `/v1/local/reading/annotations` | Creates a highlight. `annotation_id` is server-generated UUID v4. Validates `start_offset < end_offset`, offsets non-negative, and offset ≤ body length if body is cheaply available (otherwise trusts client; drift notice handles the mismatch at render time). Returns created annotation. |
+| PATCH | `/v1/local/reading/annotations/{annotation_id}` | Lookup by `annotation_id` → verify `creator_id == active_creator_id` (404 if not found, 403 if wrong creator) → update `note` and/or `color`. Both fields optional. |
+| DELETE | `/v1/local/reading/annotations/{annotation_id}` | Lookup + owner check (404/403) → hard delete. |
+
+### 28.3 Creator isolation
+
+All DAO calls are creator-scoped: handlers inject `active_creator_id` from the daemon session context. Cross-creator reads return 404 (not 403 — existence is not leaked). Cross-creator writes are rejected. The `works.creator_id` → `work_chapters` → `reading_progress`/`reading_annotations` chain is implicitly gated by the daemon's work-level ownership check at the orchestration layer; explicit FK verification at the handler level is defense-in-depth.
+
+### 28.4 Body-ownership invariant
+
+This surface is **strictly read-only for chapter body content**. No route reads from or writes to `body_path`, outline files, or chapter content files. The six reading endpoints operate only on `reading_progress` and `reading_annotations` tables. Any future "accept annotation into manuscript" flow must route through the canvas/Outline API, not the reading surface. This preserves the V1.75 pivot: canvas is the sole authoring surface.
+
+### 28.5 Offset drift
+
+Annotations use character offsets into the **current** body plain text at creation time. Body edits in the canvas (V1.72–V1.75) may shift or remove the original text. MVP behavior:
+- **Creation**: offsets validated against body length if body text is cheaply available at request time; otherwise trusted.
+- **Rendering**: if `end_offset` exceeds current body length, the UI shows a non-blocking drift notice (see §28.7) and skips rendering for that highlight. Other highlights render normally.
+- **No reconciliation**: no CRDT, fingerprint, or automatic offset adjustment in MVP. Authors who edit the body heavily may see stale highlights; the drift notice is the contract.
+
+### 28.6 DESIGN.md tokens
+
+New tokens under `components:` in `apps/web/DESIGN.md` + `DESIGN.dark.md`:
+
+| Token | Purpose |
+|---|---|
+| `reading-annotation-highlight-yellow` | Highlight background/text color for `color=yellow` |
+| `reading-annotation-highlight-blue` | Highlight background/text color for `color=blue` |
+| `reading-annotation-highlight-green` | Highlight background/text color for `color=green` |
+| `reading-annotation-highlight-pink` | Highlight background/text color for `color=pink` |
+| `reading-annotation-inspector-width` | Side inspector panel width (e.g., `320px`) |
+| `reading-annotation-inspector-elevation` | Inspector panel shadow (reuse `shadow-popover`) |
+| `reading-selection-toolbar-bg` | Floating selection toolbar background |
+| `reading-selection-toolbar-border` | Toolbar border |
+| `reading-selection-toolbar-shadow` | Toolbar shadow |
+
+The existing `reading-progress-indicator` token (with `track`, `fill`, `label` sub-tokens) already covers the scroll-progress bar. No new progress token is needed; the "saved" transient feedback is a standard toast.
+
+### 28.7 Author-visible outcomes
+
+**What ships**:
+- Persisted `reading_progress` (per-creator, per-chapter scroll position) restored on load and saved on scroll stop / page leave.
+- Character-offset `reading_annotations` (highlights) created from text selection in `ReadingProse`, listed/edited/deleted in a side inspector.
+- Drift notice when stored offsets exceed current body length (after canvas body edits): "标注可能因正文编辑而偏移" / "This highlight may have shifted after body edits" — clear, non-blocking, does not prevent reading or other highlights from rendering.
+- All writes go through new Local API endpoints; reading surface remains strictly read-only for body/outline (body-ownership invariant preserved — canvas is sole authoring surface).
+- DESIGN.md reading-depth tokens (highlight backgrounds, inspector chrome, selection affordance) — light + dark.
+
+**Non-goals (explicitly deferred)**:
+- Profile-specific reading chrome (essay/game-bible/script typography, section breaks, cross-ref overlays).
+- Annotation range reconciliation / fingerprinting after body edits.
+- Standalone maturation dashboard (BL-09).
+- Rich threaded comments on highlights.
+
+**Additional invariants (not deferred — always true)**:
+- Any write path from reading surface to body or outline is forbidden (see §28.4).
+- Client-generated annotation IDs are rejected; `annotation_id` is always a server-generated UUID v4.
+
+**Wire contracts**: additive (`reading-progress`, `reading-annotation`, `reading-annotation-list` schemas) → `@42ch/nexus-contracts` 0.17.0 → 0.18.0. P-1 authors the schema files in `schemas/local-api/reading/`; P0 runs codegen commit and version bump.
+
+**Tracker update**: BL-11 MVP moved to shipped archive at V1.89 close; profile-chrome sub-row remains open in deferred tracker.
+
+See active compass `v1.89-deeper-manuscript-reading-delivery-compass-v1.md` and plans for execution detail. This section is the durable product contract amendment.
