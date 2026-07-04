@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "updated_at": "2026-07-04T20:00:00+0800",
+  "updated_at": "2026-07-04T22:40:00+0800",
   "plans": [],
   "metadata": {
     "integration_branch": "iteration/v1.89",
-    "integration_branch_retired": false,
-    "last_integration_branch": "iteration/v1.88",
+    "integration_branch_retired": true,
+    "last_integration_branch": "iteration/v1.89",
     "integration_merge_target": "main",
     "iteration_base_branch": "main",
     "target_branch": "main",
@@ -20,10 +20,13 @@
       "iteration": "V1.89",
       "compass": "v1.89-deeper-manuscript-reading-delivery-compass-v1.md",
       "shipped_at": "2026-07-04",
+      "merged_at": "2026-07-04T17:36:54Z",
+      "merge_commit": "35156c6b8cd290ae8a46ccb707d849aaecb73dc4",
+      "pr": "https://github.com/42ch-dev/nexus/pull/117",
       "plan_count": 4,
       "plan_count_done": 4,
       "wire_contracts_changed": true,
-      "note": "V1.89 deeper manuscript reading MVP: persisted progress + annotations/highlights; QC 3/3 Approve; QA Pass"
+      "note": "V1.89 deeper manuscript reading MVP: persisted progress + annotations/highlights; QC 3/3 Approve; QA Pass; Greptile 5/5; merged via PR #117"
     },
     "tech_debt_summary": {
       "total_open": 0,
@@ -39,7 +42,7 @@
       "refreshed_at": "2026-07-04",
       "refreshed_reason": "V1.88 closure: all open residuals resolved or archived; slate clean before V1.89."
     },
-    "updated_at": "2026-07-04T22:30:00+0800"
+    "updated_at": "2026-07-04T22:40:00+0800"
   },
   "residual_findings": {
     "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization": [
