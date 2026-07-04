@@ -9,7 +9,7 @@
  * is exercised or asserted.
  */
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { Route, Routes } from 'react-router-dom';
 
 import { renderInApp } from '@/test/test-providers';
@@ -147,8 +147,130 @@ function worldKbGraphHandler(worldId = 'world-1', entityCount = 5) {
   });
 }
 
-/** Full reading-surface handler stack so no data hook logs an unhandled request. */
-function readingHandlers(opts?: { chapter?: number; status?: string; findings?: number; kb?: number }) {
+function readingProgressHandler(scrollProgress = 0) {
+  return http.get('/v1/local/reading/progress', () =>
+    HttpResponse.json({
+      work_id: 'w-123',
+      chapter: 1,
+      scroll_progress: scrollProgress,
+      updated_at: '2026-07-04T00:00:00Z',
+    }),
+  );
+}
+
+function saveReadingProgressHandler() {
+  return http.put('/v1/local/reading/progress', async ({ request }) => {
+    const body = (await request.json()) as { work_id: string; chapter: number; scroll_progress: number };
+    return HttpResponse.json({
+      work_id: body.work_id,
+      chapter: body.chapter,
+      scroll_progress: body.scroll_progress,
+      updated_at: '2026-07-04T00:00:00Z',
+    });
+  });
+}
+
+function annotationsHandler(annotations: unknown[] = []) {
+  return http.get('/v1/local/reading/annotations', () =>
+    HttpResponse.json({ items: annotations }),
+  );
+}
+
+function createAnnotationHandler() {
+  return http.post('/v1/local/reading/annotations', async ({ request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    return HttpResponse.json({
+      annotation_id: 'new-annotation',
+      ...body,
+      created_at: '2026-07-04T00:00:00Z',
+      updated_at: '2026-07-04T00:00:00Z',
+    });
+  });
+}
+
+function updateAnnotationHandler() {
+  return http.patch('/v1/local/reading/annotations/:id', async ({ params, request }) => {
+    const body = (await request.json()) as Record<string, unknown>;
+    return HttpResponse.json({
+      annotation_id: params.id,
+      ...body,
+      updated_at: '2026-07-04T00:00:00Z',
+    });
+  });
+}
+
+function deleteAnnotationHandler() {
+  return http.delete('/v1/local/reading/annotations/:id', () => new HttpResponse(null, { status: 204 }));
+}
+
+let originalScrollY: PropertyDescriptor | undefined;
+let originalScrollHeight: PropertyDescriptor | undefined;
+let originalInnerHeight: PropertyDescriptor | undefined;
+let originalScrollTo: typeof window.scrollTo;
+
+/** Override scroll metrics so useReadingProgressSync can compute a ratio. */
+function setScrollMetrics(metrics: { scrollY: number; scrollHeight: number; innerHeight: number }) {
+  Object.defineProperty(window, 'scrollY', { value: metrics.scrollY, writable: true, configurable: true });
+  Object.defineProperty(document.documentElement, 'scrollHeight', {
+    value: metrics.scrollHeight,
+    writable: true,
+    configurable: true,
+  });
+  Object.defineProperty(window, 'innerHeight', { value: metrics.innerHeight, writable: true, configurable: true });
+}
+
+function selectTextInProse(startOffset: number, endOffset: number) {
+  const prose = screen.getByRole('region', { name: 'Chapter body' });
+  const range = document.createRange();
+  const walker = document.createTreeWalker(prose, NodeFilter.SHOW_TEXT);
+  let offset = 0;
+  let startNode: Node | null = null;
+  let node: Node | null;
+  while ((node = walker.nextNode())) {
+    const text = node.textContent ?? '';
+    const nodeStart = offset;
+    const nodeEnd = offset + text.length;
+    if (startNode === null && startOffset < nodeEnd) {
+      startNode = node;
+      range.setStart(node, Math.max(0, startOffset - nodeStart));
+    }
+    if (endOffset <= nodeEnd) {
+      range.setEnd(node, Math.max(0, endOffset - nodeStart));
+      break;
+    }
+    offset += text.length;
+  }
+  // jsdom does not implement Range#getBoundingClientRect; stub it for the
+  // toolbar positioning hook.
+  range.getBoundingClientRect = () => ({ left: 0, top: 0, width: 0, height: 0, right: 0, bottom: 0, x: 0, y: 0, toJSON: () => {} });
+  const selection = window.getSelection();
+  selection?.removeAllRanges();
+  selection?.addRange(range);
+  document.dispatchEvent(new Event('selectionchange'));
+}
+
+beforeEach(() => {
+  originalScrollTo = window.scrollTo;
+  window.scrollTo = vi.fn();
+  originalScrollY = Object.getOwnPropertyDescriptor(window, 'scrollY');
+  originalScrollHeight = Object.getOwnPropertyDescriptor(document.documentElement, 'scrollHeight');
+  originalInnerHeight = Object.getOwnPropertyDescriptor(window, 'innerHeight');
+});
+
+afterEach(() => {
+  window.scrollTo = originalScrollTo;
+  if (originalScrollY) {
+    Object.defineProperty(window, 'scrollY', originalScrollY);
+  }
+  if (originalScrollHeight) {
+    Object.defineProperty(document.documentElement, 'scrollHeight', originalScrollHeight);
+  }
+  if (originalInnerHeight) {
+    Object.defineProperty(window, 'innerHeight', originalInnerHeight);
+  }
+  vi.useRealTimers();
+});
+function readingHandlers(opts?: { chapter?: number; status?: string; findings?: number; kb?: number; scrollProgress?: number; annotations?: unknown[] }) {
   const chapter = opts?.chapter ?? 1;
   const status = opts?.status ?? 'draft';
   const findings = opts?.findings ?? 0;
@@ -160,6 +282,12 @@ function readingHandlers(opts?: { chapter?: number; status?: string; findings?: 
     chaptersListHandler(),
     openFindingsHandler(chapter, findings),
     worldKbGraphHandler('world-1', kb),
+    readingProgressHandler(opts?.scrollProgress ?? 0),
+    saveReadingProgressHandler(),
+    annotationsHandler(opts?.annotations ?? []),
+    createAnnotationHandler(),
+    updateAnnotationHandler(),
+    deleteAnnotationHandler(),
   ];
 }
 
@@ -256,6 +384,10 @@ describe('ChapterPage (V1.75 residuals preserved)', () => {
       chaptersListHandler(),
       openFindingsHandler(1, 0),
       worldKbGraphHandler('world-1', 0),
+      readingProgressHandler(),
+      saveReadingProgressHandler(),
+      annotationsHandler(),
+      createAnnotationHandler(),
     );
 
     renderChapter();
@@ -289,6 +421,10 @@ describe('ChapterPage (V1.75 residuals preserved)', () => {
       chaptersListHandler(),
       openFindingsHandler(1, 0),
       worldKbGraphHandler('world-1', 0),
+      readingProgressHandler(),
+      saveReadingProgressHandler(),
+      annotationsHandler(),
+      createAnnotationHandler(),
     );
 
     renderChapter();
@@ -422,6 +558,10 @@ describe('ChapterPage (V1.79 P0 QC fix-wave — pagination correctness)', () => 
       // Page reports has_more: true — the count (2) is a lower bound, not exact.
       truncatedOpenFindingsHandler(1, 2),
       worldKbGraphHandler('world-1', 0),
+      readingProgressHandler(),
+      saveReadingProgressHandler(),
+      annotationsHandler(),
+      createAnnotationHandler(),
     );
 
     renderChapter();
@@ -441,6 +581,10 @@ describe('ChapterPage (V1.79 P0 QC fix-wave — pagination correctness)', () => 
       paginatedChaptersHandler(150, 100),
       openFindingsHandler(101, 0),
       worldKbGraphHandler('world-1', 0),
+      readingProgressHandler(),
+      saveReadingProgressHandler(),
+      annotationsHandler(),
+      createAnnotationHandler(),
     );
 
     renderChapter('w-123', 101);
@@ -448,5 +592,230 @@ describe('ChapterPage (V1.79 P0 QC fix-wave — pagination correctness)', () => 
     // the nav no longer loses chapters past the first server page.
     expect(await screen.findByRole('link', { name: /Previous chapter: Chapter 100/i })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Next chapter: Chapter 102/i })).toBeInTheDocument();
+  });
+});
+
+describe('ChapterPage (V1.89 Deeper Manuscript Reading)', () => {
+  it('restores persisted scroll progress on load', async () => {
+    useHandlers(...readingHandlers({ scrollProgress: 5_000 }));
+    setScrollMetrics({ scrollY: 0, scrollHeight: 2_000, innerHeight: 1_000 });
+
+    renderChapter();
+    await screen.findByText('Body prose.');
+
+    await waitFor(() => {
+      expect(window.scrollTo).toHaveBeenCalledWith(expect.objectContaining({ top: 500 }));
+    });
+  });
+
+  it('saves scroll progress debounced while reading', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const saveRequests: { scroll_progress: number }[] = [];
+    useHandlers(
+      chapterDetail('draft'),
+      bodyHandler(),
+      workDetailHandler(),
+      chaptersListHandler(),
+      openFindingsHandler(1, 0),
+      worldKbGraphHandler('world-1', 0),
+      readingProgressHandler(0),
+      http.put('/v1/local/reading/progress', async ({ request }) => {
+        const body = (await request.json()) as { scroll_progress: number };
+        saveRequests.push(body);
+        return HttpResponse.json({ work_id: 'w-123', chapter: 1, scroll_progress: body.scroll_progress, updated_at: '2026-07-04T00:00:00Z' });
+      }),
+      annotationsHandler(),
+      createAnnotationHandler(),
+    );
+    setScrollMetrics({ scrollY: 0, scrollHeight: 2_000, innerHeight: 1_000 });
+
+    renderChapter();
+    await screen.findByText('Body prose.');
+
+    // Simulate scroll to 50%.
+    setScrollMetrics({ scrollY: 500, scrollHeight: 2_000, innerHeight: 1_000 });
+    window.dispatchEvent(new Event('scroll'));
+    setScrollMetrics({ scrollY: 600, scrollHeight: 2_000, innerHeight: 1_000 });
+    window.dispatchEvent(new Event('scroll'));
+
+    vi.advanceTimersByTime(600);
+
+    await waitFor(() => {
+      expect(saveRequests.length).toBeGreaterThanOrEqual(1);
+    });
+    const last = saveRequests.at(-1);
+    expect(last?.scroll_progress).toBeGreaterThanOrEqual(5_000);
+  });
+
+  it('creates a highlight from text selection', async () => {
+    const requests: Record<string, unknown>[] = [];
+    useHandlers(
+      chapterDetail('draft'),
+      bodyHandler('Body prose text for selection.'),
+      workDetailHandler(),
+      chaptersListHandler(),
+      openFindingsHandler(1, 0),
+      worldKbGraphHandler('world-1', 0),
+      readingProgressHandler(),
+      saveReadingProgressHandler(),
+      annotationsHandler(),
+      http.post('/v1/local/reading/annotations', async ({ request }) => {
+        const body = (await request.json()) as Record<string, unknown>;
+        requests.push(body);
+        return HttpResponse.json({ annotation_id: 'a-new', ...body, created_at: '2026-07-04T00:00:00Z', updated_at: '2026-07-04T00:00:00Z' });
+      }),
+      updateAnnotationHandler(),
+      deleteAnnotationHandler(),
+    );
+
+    renderChapter();
+    await screen.findByText('Body prose text for selection.');
+
+    selectTextInProse(5, 9);
+    const toolbar = await screen.findByRole('toolbar', { name: /annotation actions/i });
+    const highlightButton = screen.getByRole('button', { name: /highlight selection/i });
+    await userEvent.click(highlightButton);
+
+    await waitFor(() => {
+      expect(requests).toHaveLength(1);
+    });
+    expect(requests[0]).toMatchObject({
+      work_id: 'w-123',
+      chapter: 1,
+      start_offset: 5,
+      end_offset: 9,
+      selected_text: 'pros',
+      color: 'yellow',
+    });
+    expect(toolbar).not.toBeVisible();
+  });
+
+  it('renders a drift notice when persisted annotations are out of bounds', async () => {
+    useHandlers(
+      chapterDetail('draft'),
+      bodyHandler('Short.'),
+      workDetailHandler(),
+      chaptersListHandler(),
+      openFindingsHandler(1, 0),
+      worldKbGraphHandler('world-1', 0),
+      readingProgressHandler(),
+      saveReadingProgressHandler(),
+      annotationsHandler([
+        {
+          annotation_id: 'a-1',
+          work_id: 'w-123',
+          chapter: 1,
+          start_offset: 100,
+          end_offset: 200,
+          selected_text: 'gone',
+          color: 'yellow',
+          created_at: '2026-07-04T00:00:00Z',
+          updated_at: '2026-07-04T00:00:00Z',
+        },
+      ]),
+      createAnnotationHandler(),
+      updateAnnotationHandler(),
+      deleteAnnotationHandler(),
+    );
+
+    renderChapter();
+    await screen.findByText('Short.');
+    expect(await screen.findByRole('note')).toHaveTextContent(/may have shifted/i);
+  });
+
+  it('renders in-bounds persisted highlights inside the prose', async () => {
+    useHandlers(
+      chapterDetail('draft'),
+      bodyHandler('Body prose.'),
+      workDetailHandler(),
+      chaptersListHandler(),
+      openFindingsHandler(1, 0),
+      worldKbGraphHandler('world-1', 0),
+      readingProgressHandler(),
+      saveReadingProgressHandler(),
+      annotationsHandler([
+        {
+          annotation_id: 'a-1',
+          work_id: 'w-123',
+          chapter: 1,
+          start_offset: 0,
+          end_offset: 4,
+          selected_text: 'Body',
+          color: 'yellow',
+          created_at: '2026-07-04T00:00:00Z',
+          updated_at: '2026-07-04T00:00:00Z',
+        },
+      ]),
+      createAnnotationHandler(),
+      updateAnnotationHandler(),
+      deleteAnnotationHandler(),
+    );
+
+    renderChapter();
+    const prose = await screen.findByRole('region', { name: /chapter body/i });
+    await waitFor(() => {
+      expect(prose.textContent).toContain('Body prose.');
+    });
+    const mark = prose.querySelector('mark[data-nexus-highlight]');
+    expect(mark).toHaveTextContent('Body');
+    expect(mark).toHaveAttribute('data-nexus-highlight', 'yellow');
+  });
+
+  it('lists annotations in the inspector and supports delete', async () => {
+    const user = userEvent.setup();
+    let deletedId: string | null = null;
+    useHandlers(
+      chapterDetail('draft'),
+      bodyHandler('Body prose.'),
+      workDetailHandler(),
+      chaptersListHandler(),
+      openFindingsHandler(1, 0),
+      worldKbGraphHandler('world-1', 0),
+      readingProgressHandler(),
+      saveReadingProgressHandler(),
+      annotationsHandler([
+        {
+          annotation_id: 'a-1',
+          work_id: 'w-123',
+          chapter: 1,
+          start_offset: 0,
+          end_offset: 4,
+          selected_text: 'Body',
+          note: 'important',
+          color: 'yellow',
+          created_at: '2026-07-04T00:00:00Z',
+          updated_at: '2026-07-04T00:00:00Z',
+        },
+      ]),
+      createAnnotationHandler(),
+      updateAnnotationHandler(),
+      http.delete('/v1/local/reading/annotations/:id', ({ params }) => {
+        deletedId = params.id as string;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    renderChapter();
+    await waitFor(() => {
+      const prose = screen.getByRole('region', { name: /chapter body/i });
+      expect(prose.textContent).toContain('Body prose.');
+    });
+    expect(await screen.findByText('important')).toBeInTheDocument();
+
+    await user.click(screen.getByRole('button', { name: /delete highlight/i }));
+    await waitFor(() => {
+      expect(deletedId).toBe('a-1');
+    });
+  });
+
+  it('preserves the body-ownership invariant — no body/outline write affordances on the reading surface', async () => {
+    useHandlers(...readingHandlers());
+
+    renderChapter();
+    await screen.findByText('Body prose.');
+    expect(screen.getByRole('link', { name: /Edit outline for Chapter 1/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Save body/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Edit body/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Save outline/i })).not.toBeInTheDocument();
   });
 });

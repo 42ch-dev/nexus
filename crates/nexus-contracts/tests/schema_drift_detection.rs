@@ -445,6 +445,47 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             SoulNarrativeResponse
         ),
+        // ── local-api/reading/ (V1.89 — reading depth: progress + annotations)
+        entry!(
+            "schemas/local-api/reading/reading-progress-query.schema.json",
+            Strict,
+            ReadingProgressQuery
+        ),
+        entry!(
+            "schemas/local-api/reading/reading-progress-request.schema.json",
+            Strict,
+            ReadingProgressRequest
+        ),
+        entry!(
+            "schemas/local-api/reading/reading-progress-response.schema.json",
+            Strict,
+            ReadingProgressResponse
+        ),
+        entry!(
+            "schemas/local-api/reading/reading-annotation.schema.json",
+            Strict,
+            ReadingAnnotation
+        ),
+        entry!(
+            "schemas/local-api/reading/reading-annotation-create-request.schema.json",
+            Strict,
+            ReadingAnnotationCreateRequest
+        ),
+        entry!(
+            "schemas/local-api/reading/reading-annotation-patch-request.schema.json",
+            Strict,
+            ReadingAnnotationPatchRequest
+        ),
+        entry!(
+            "schemas/local-api/reading/reading-annotation-list-query.schema.json",
+            Strict,
+            ReadingAnnotationListQuery
+        ),
+        entry!(
+            "schemas/local-api/reading/reading-annotation-list-response.schema.json",
+            Strict,
+            ReadingAnnotationListResponse
+        ),
         // ── local-api/schedule/ (V1.63 P1) ───────────────────────────────
         entry!(
             "schemas/local-api/schedule/add-schedule-request.schema.json",

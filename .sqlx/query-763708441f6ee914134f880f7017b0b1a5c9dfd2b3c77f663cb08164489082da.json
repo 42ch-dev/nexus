@@ -1,0 +1,80 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        INSERT INTO reading_annotations\n            (annotation_id, creator_id, work_id, chapter, start_offset, end_offset, selected_text, color, note, created_at, updated_at)\n        VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)\n        RETURNING\n            annotation_id as \"annotation_id!\",\n            creator_id as \"creator_id!\",\n            work_id as \"work_id!\",\n            chapter as \"chapter!\",\n            start_offset as \"start_offset!\",\n            end_offset as \"end_offset!\",\n            selected_text as \"selected_text!\",\n            color as \"color!\",\n            note,\n            created_at as \"created_at: _\",\n            updated_at as \"updated_at: _\"\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "annotation_id!",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "creator_id!",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "work_id!",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "chapter!",
+        "ordinal": 3,
+        "type_info": "Integer"
+      },
+      {
+        "name": "start_offset!",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "end_offset!",
+        "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "selected_text!",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "color!",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "note",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at: _",
+        "ordinal": 9,
+        "type_info": "Text"
+      },
+      {
+        "name": "updated_at: _",
+        "ordinal": 10,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 11
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "763708441f6ee914134f880f7017b0b1a5c9dfd2b3c77f663cb08164489082da"
+}

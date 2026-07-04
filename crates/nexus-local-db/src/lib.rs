@@ -27,6 +27,7 @@ pub mod narrative_write;
 pub mod novel_pool_entries;
 pub mod pending_review;
 pub mod prompt_injection;
+pub mod reading;
 pub mod reference_source;
 pub mod runtime_lock;
 pub mod soul_meta;

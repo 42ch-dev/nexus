@@ -34,6 +34,11 @@ import type {
   PatchWorkRequest,
   PendingReviewInfo,
   PresetSummary,
+  ReadingAnnotation,
+  ReadingAnnotationCreateRequest,
+  ReadingAnnotationListResponse,
+  ReadingAnnotationPatchRequest,
+  ReadingProgressResponse,
   ReviewResponse,
   ScaffoldPresetRequest,
   SoulNarrativeResponse,
@@ -48,6 +53,7 @@ import { useNexusClient } from '@/lib/client-context';
 import { NexusClientError } from '@/lib/nexus';
 import { shortId } from '@/lib/format';
 import { queryKeys } from '@/lib/nexus/query-keys';
+import { useCallback, useEffect, useRef } from 'react';
 
 /** Default page size for cursor-paginated lists. */
 export const DEFAULT_PAGE_SIZE = 20;
@@ -751,4 +757,187 @@ export function useReflectSoulNarrative() {
       });
     },
   });
+}
+
+// ── Reading progress + annotations (V1.89 Deeper Manuscript Reading) ─────────
+
+const SCROLL_PROGRESS_UNIT = 10_000;
+
+function ratioToScrollProgress(ratio: number): number {
+  return Math.max(0, Math.min(SCROLL_PROGRESS_UNIT, Math.round(ratio * SCROLL_PROGRESS_UNIT)));
+}
+
+export function useReadingProgress(workId: string | undefined, chapter: number | undefined) {
+  const client = useNexusClient();
+  return useQuery({
+    queryKey: queryKeys.reading.progress(workId ?? '', chapter ?? 0),
+    queryFn: (): Promise<ReadingProgressResponse> => client.getReadingProgress(workId!, chapter!),
+    enabled: Boolean(workId) && typeof chapter === 'number' && chapter > 0,
+  });
+}
+
+export function useSaveReadingProgress(options?: { showToast?: boolean }) {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: (vars: { workId: string; chapter: number; scrollProgress: number }) =>
+      client.putReadingProgress({
+        work_id: vars.workId,
+        chapter: vars.chapter,
+        scroll_progress: vars.scrollProgress,
+      }),
+    onSuccess: (_data, vars) => {
+      qc.setQueryData(queryKeys.reading.progress(vars.workId, vars.chapter), _data);
+      if (options?.showToast) {
+        toast({ variant: 'success', title: 'Progress saved' });
+      }
+    },
+    onError: (error) => errorToast(error, 'Could not save reading progress'),
+  });
+}
+
+export function useAnnotations(workId: string | undefined, chapter: number | undefined) {
+  const client = useNexusClient();
+  return useQuery({
+    queryKey: queryKeys.reading.annotations(workId ?? '', chapter ?? 0),
+    queryFn: async (): Promise<ReadingAnnotation[]> => {
+      const res: ReadingAnnotationListResponse = await client.listReadingAnnotations(workId!, chapter!);
+      return res.items;
+    },
+    enabled: Boolean(workId) && typeof chapter === 'number' && chapter > 0,
+  });
+}
+
+export function useCreateAnnotation() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (request: ReadingAnnotationCreateRequest) => client.createReadingAnnotation(request),
+    onSuccess: (data: ReadingAnnotation) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.reading.annotations(data.work_id, data.chapter) });
+    },
+    onError: (error) => errorToast(error, 'Could not create highlight'),
+  });
+}
+
+export function useUpdateAnnotation() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (vars: {
+      annotationId: string;
+      workId: string;
+      chapter: number;
+      patch: ReadingAnnotationPatchRequest;
+    }) => client.patchReadingAnnotation(vars.annotationId, vars.patch),
+    onSuccess: (_data, vars) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.reading.annotations(vars.workId, vars.chapter) });
+    },
+    onError: (error) => errorToast(error, 'Could not update highlight'),
+  });
+}
+
+export function useDeleteAnnotation() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: (vars: { annotationId: string; workId: string; chapter: number }) =>
+      client.deleteReadingAnnotation(vars.annotationId),
+    onSuccess: (_data, vars) => {
+      toast({ variant: 'success', title: 'Highlight deleted' });
+      void qc.invalidateQueries({ queryKey: queryKeys.reading.annotations(vars.workId, vars.chapter) });
+    },
+    onError: (error) => errorToast(error, 'Could not delete highlight'),
+  });
+}
+
+/**
+ * Sync the document scroll position with persisted reading progress.
+ *
+ * On mount / chapter change, restores the saved scroll ratio once the progress
+ * query resolves. While the user reads, debounces scroll events (~500 ms) and
+ * persists the ratio. Also flushes on `beforeunload` and `visibilitychange`
+ * so the last position is not lost when the tab closes or navigates away.
+ */
+export function useReadingProgressSync(
+  workId: string | undefined,
+  chapter: number | undefined,
+  options?: { enabled?: boolean; showSavedToast?: boolean },
+) {
+  const progress = useReadingProgress(workId, chapter);
+  const save = useSaveReadingProgress({ showToast: options?.showSavedToast });
+  const enabled = options?.enabled ?? true;
+  const restoredRef = useRef(false);
+
+  // Reset the restore guard whenever the chapter changes so navigation to a
+  // different chapter restores its own position.
+  useEffect(() => {
+    restoredRef.current = false;
+  }, [workId, chapter]);
+
+  const saveMutate = save.mutate;
+  const flushSave = useCallback(() => {
+    if (!workId || chapter === undefined || chapter <= 0) return;
+    const scrollable = document.documentElement.scrollHeight - window.innerHeight;
+    const ratio = scrollable > 0 ? window.scrollY / scrollable : 0;
+    saveMutate({ workId, chapter, scrollProgress: ratioToScrollProgress(ratio) });
+  }, [workId, chapter, saveMutate]);
+
+  // Restore once when the persisted value first resolves. The guard prevents
+  // re-scrolling when the save mutation updates the cached scroll_progress.
+  useEffect(() => {
+    if (!enabled || !progress.isSuccess || restoredRef.current) return;
+    if (!progress.data || progress.data.scroll_progress <= 0) {
+      restoredRef.current = true;
+      return;
+    }
+    const scrollable = document.documentElement.scrollHeight - window.innerHeight;
+    if (scrollable <= 0) {
+      restoredRef.current = true;
+      return;
+    }
+    const ratio = progress.data.scroll_progress / SCROLL_PROGRESS_UNIT;
+    window.scrollTo({ top: ratio * scrollable });
+    restoredRef.current = true;
+  }, [enabled, progress.isSuccess, progress.data, workId, chapter]);
+
+  // Debounced scroll save.
+  useEffect(() => {
+    if (!enabled) return;
+    let timer = 0;
+    function onScroll() {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(flushSave, 500);
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      window.clearTimeout(timer);
+    };
+  }, [enabled, flushSave]);
+
+  // Flush on page hide / beforeunload so the last position survives navigation.
+  useEffect(() => {
+    if (!enabled) return;
+    function onBeforeUnload() {
+      flushSave();
+    }
+    function onVisibilityChange() {
+      if (document.visibilityState === 'hidden') flushSave();
+    }
+    window.addEventListener('beforeunload', onBeforeUnload);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [enabled, flushSave]);
+
+  return { progress, save };
 }

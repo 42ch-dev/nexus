@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/reading/reading-annotation-patch-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ReadingAnnotationPatchRequest",
+  "description": "Request body for PATCH /v1/local/reading/annotations/{annotation_id}. Edits the highlight color and/or optional note. Both fields are optional; at least one must be present. The annotation_id comes from the URL path, not the body.",
+  "type": "object",
+  "minProperties": 1,
+  "properties": {
+    "color": {
+      "type": "string",
+      "enum": ["yellow", "blue", "green", "pink"],
+      "description": "New highlight color."
+    },
+    "note": {
+      "type": "string",
+      "description": "New free-text note. Pass an empty string to clear an existing note."
+    }
+  },
+  "additionalProperties": false
+}

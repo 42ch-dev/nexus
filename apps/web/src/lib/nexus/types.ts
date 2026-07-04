@@ -54,21 +54,25 @@ import type {
   ListPendingReviewsQuery,
   ListPendingReviewsResponse,
   ListPresetsResponse,
-  MemoryFragmentInfo,
   ListSchedulesQuery,
   ListSchedulesResponse,
   ListSessionsQuery,
   ListSessionsResponse,
   ListWorksQuery,
   ListWorksResponse,
+  MemoryFragmentInfo,
   OutlinePatchChapterRequest,
-  SoulNarrativeRequest,
-  SoulNarrativeResponse,
   OutlinePatchResponse,
   OutlinePatchStructureRequest,
   PatchChapterRequest,
   PatchWorkRequest,
   PendingReviewInfo,
+  ReadingAnnotation,
+  ReadingAnnotationCreateRequest,
+  ReadingAnnotationListResponse,
+  ReadingAnnotationPatchRequest,
+  ReadingProgressRequest,
+  ReadingProgressResponse,
   ReloadPresetResponse,
   ReviewRequest,
   ReviewResponse,
@@ -77,10 +81,20 @@ import type {
   SessionDetailResponse,
   SignalScheduleRequest,
   SignalScheduleResponse,
+  SoulNarrativeRequest,
+  SoulNarrativeResponse,
   StrategyPatchPromptTemplateRequest,
   StrategyPatchResponse,
   StrategyPatchStateRequest,
   StrategyPatchTransitionRequest,
+  TimelinePatchEventRequest,
+  UpdateFindingRequest,
+  UpdatePresetRequest,
+  UpdatePresetResponse,
+  ValidatePresetRequest,
+  ValidatePresetResponse,
+  WorkDetailResponse,
+  WorkOutline,
   World,
   WorldKbCandidatesResponse,
   WorldKbGraphResponse,
@@ -90,14 +104,6 @@ import type {
   WorldKbPatchRelationshipResponse,
   WorldKbPromoteCandidateRequest,
   WorldKbPromoteCandidateResponse,
-  TimelinePatchEventRequest,
-  UpdateFindingRequest,
-  UpdatePresetRequest,
-  UpdatePresetResponse,
-  ValidatePresetRequest,
-  ValidatePresetResponse,
-  WorkDetailResponse,
-  WorkOutline,
 } from '@42ch/nexus-contracts';
 
 /** Daemon health probe result (`GET /v1/local/runtime/health`). App-side type. */
@@ -353,6 +359,32 @@ export interface NexusClient {
    * narratives are out of scope (the narrative is world-agnostic by contract).
    */
   reflectSoulNarrative(request: SoulNarrativeRequest): Promise<SoulNarrativeResponse>;
+
+  // ── Reading depth (V1.89) ──────────────────────────────────────────────────
+  /**
+   * `GET /v1/local/reading/progress?work_id=&chapter=` — persisted scroll
+   * progress for the current creator on a chapter. Returns `scroll_progress=0`
+   * with a server-generated `updated_at` when no progress has been saved.
+   */
+  getReadingProgress(workId: string, chapter: number): Promise<ReadingProgressResponse>;
+  /** `PUT /v1/local/reading/progress` — upsert scroll progress. */
+  putReadingProgress(request: ReadingProgressRequest): Promise<ReadingProgressResponse>;
+  /** `DELETE /v1/local/reading/progress?work_id=&chapter=` — delete progress. */
+  deleteReadingProgress(workId: string, chapter: number): Promise<void>;
+  /**
+   * `GET /v1/local/reading/annotations?work_id=&chapter=` — list annotations for
+   * a chapter. No pagination; per-chapter counts are expected to stay small.
+   */
+  listReadingAnnotations(workId: string, chapter: number): Promise<ReadingAnnotationListResponse>;
+  /** `POST /v1/local/reading/annotations` — create a highlight annotation. */
+  createReadingAnnotation(request: ReadingAnnotationCreateRequest): Promise<ReadingAnnotation>;
+  /** `PATCH /v1/local/reading/annotations/{annotation_id}` — edit color/note. */
+  patchReadingAnnotation(
+    annotationId: string,
+    request: ReadingAnnotationPatchRequest,
+  ): Promise<ReadingAnnotation>;
+  /** `DELETE /v1/local/reading/annotations/{annotation_id}` — delete annotation. */
+  deleteReadingAnnotation(annotationId: string): Promise<void>;
 }
 
 /** Re-exported for consumers building query/mutation hooks. */
@@ -365,6 +397,12 @@ export type {
   ListPendingReviewsQuery,
   MemoryFragmentInfo,
   PendingReviewInfo,
+  ReadingAnnotation,
+  ReadingAnnotationCreateRequest,
+  ReadingAnnotationListResponse,
+  ReadingAnnotationPatchRequest,
+  ReadingProgressRequest,
+  ReadingProgressResponse,
   ReviewRequest,
   ReviewResponse,
   SoulNarrativeRequest,

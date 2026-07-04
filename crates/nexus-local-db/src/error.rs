@@ -65,6 +65,8 @@ pub enum LocalDbError {
         expected: i64,
         actual: Option<i64>,
     },
+    /// Input validation failed before reaching the database.
+    ValidationError(String),
 }
 
 impl fmt::Display for LocalDbError {
@@ -153,6 +155,9 @@ impl fmt::Display for LocalDbError {
                      row was modified by another writer; retry",
                     actual.map_or("?".to_string(), |v| v.to_string())
                 )
+            }
+            Self::ValidationError(msg) => {
+                write!(f, "validation error: {msg}")
             }
         }
     }
