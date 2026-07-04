@@ -48,6 +48,17 @@ import { useNexusClient } from '@/lib/client-context';
 import { NexusClientError } from '@/lib/nexus';
 import { shortId } from '@/lib/format';
 import { queryKeys } from '@/lib/nexus/query-keys';
+import {
+  createAnnotation,
+  deleteAnnotation,
+  getReadingProgress,
+  listAnnotations,
+  saveReadingProgress,
+  updateAnnotation,
+  type CreateAnnotationRequest,
+  type PatchAnnotationRequest,
+} from '@/components/reading/reading-api';
+import { useCallback, useEffect } from 'react';
 
 /** Default page size for cursor-paginated lists. */
 export const DEFAULT_PAGE_SIZE = 20;
@@ -751,4 +762,153 @@ export function useReflectSoulNarrative() {
       });
     },
   });
+}
+
+// ── Reading progress + annotations (V1.89 Deeper Manuscript Reading) ─────────
+
+const SCROLL_PROGRESS_UNIT = 10_000;
+
+function ratioToScrollProgress(ratio: number): number {
+  return Math.max(0, Math.min(SCROLL_PROGRESS_UNIT, Math.round(ratio * SCROLL_PROGRESS_UNIT)));
+}
+
+export function useReadingProgress(workId: string | undefined, chapter: number | undefined) {
+  return useQuery({
+    queryKey: queryKeys.reading.progress(workId ?? '', chapter ?? 0),
+    queryFn: () => getReadingProgress(workId!, chapter!),
+    enabled: Boolean(workId) && typeof chapter === 'number' && chapter > 0,
+  });
+}
+
+export function useSaveReadingProgress() {
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: (vars: { workId: string; chapter: number; scrollProgress: number }) =>
+      saveReadingProgress(vars.workId, vars.chapter, vars.scrollProgress),
+    onSuccess: (_data, vars) => {
+      qc.setQueryData(queryKeys.reading.progress(vars.workId, vars.chapter), _data);
+      toast({ variant: 'success', title: 'Progress saved' });
+    },
+    onError: (error) => errorToast(error, 'Could not save reading progress'),
+  });
+}
+
+export function useAnnotations(workId: string | undefined, chapter: number | undefined) {
+  return useQuery({
+    queryKey: queryKeys.reading.annotations(workId ?? '', chapter ?? 0),
+    queryFn: () => listAnnotations(workId!, chapter!),
+    enabled: Boolean(workId) && typeof chapter === 'number' && chapter > 0,
+  });
+}
+
+export function useCreateAnnotation() {
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (request: CreateAnnotationRequest) => createAnnotation(request),
+    onSuccess: (data) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.reading.annotations(data.work_id, data.chapter) });
+    },
+    onError: (error) => errorToast(error, 'Could not create highlight'),
+  });
+}
+
+export function useUpdateAnnotation() {
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (vars: { annotationId: string; workId: string; chapter: number; patch: PatchAnnotationRequest }) =>
+      updateAnnotation(vars.annotationId, vars.patch),
+    onSuccess: (_data, vars) => {
+      void qc.invalidateQueries({ queryKey: queryKeys.reading.annotations(vars.workId, vars.chapter) });
+    },
+    onError: (error) => errorToast(error, 'Could not update highlight'),
+  });
+}
+
+export function useDeleteAnnotation() {
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: (vars: { annotationId: string; workId: string; chapter: number }) =>
+      deleteAnnotation(vars.annotationId),
+    onSuccess: (_data, vars) => {
+      toast({ variant: 'success', title: 'Highlight deleted' });
+      void qc.invalidateQueries({ queryKey: queryKeys.reading.annotations(vars.workId, vars.chapter) });
+    },
+    onError: (error) => errorToast(error, 'Could not delete highlight'),
+  });
+}
+
+/**
+ * Sync the document scroll position with persisted reading progress.
+ *
+ * On mount / chapter change, restores the saved scroll ratio once the progress
+ * query resolves. While the user reads, debounces scroll events (~500 ms) and
+ * persists the ratio. Also flushes on `beforeunload` and `visibilitychange`
+ * so the last position is not lost when the tab closes or navigates away.
+ */
+export function useReadingProgressSync(
+  workId: string | undefined,
+  chapter: number | undefined,
+  options?: { enabled?: boolean; showSavedToast?: boolean },
+) {
+  const progress = useReadingProgress(workId, chapter);
+  const save = useSaveReadingProgress();
+  const enabled = options?.enabled ?? true;
+
+  const flushSave = useCallback(() => {
+    if (!workId || chapter === undefined || chapter <= 0) return;
+    const scrollable = document.documentElement.scrollHeight - window.innerHeight;
+    const ratio = scrollable > 0 ? window.scrollY / scrollable : 0;
+    save.mutate({ workId, chapter, scrollProgress: ratioToScrollProgress(ratio) });
+  }, [workId, chapter, save]);
+
+  // Restore once when the persisted value arrives.
+  useEffect(() => {
+    if (!enabled || !progress.data || progress.data.scroll_progress <= 0) return;
+    const scrollable = document.documentElement.scrollHeight - window.innerHeight;
+    if (scrollable <= 0) return;
+    const ratio = progress.data.scroll_progress / SCROLL_PROGRESS_UNIT;
+    window.scrollTo({ top: ratio * scrollable });
+    // Only restore once per distinct (workId, chapter) query key.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, progress.data?.scroll_progress, workId, chapter]);
+
+  // Debounced scroll save.
+  useEffect(() => {
+    if (!enabled) return;
+    let timer = 0;
+    function onScroll() {
+      window.clearTimeout(timer);
+      timer = window.setTimeout(flushSave, 500);
+    }
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => {
+      window.removeEventListener('scroll', onScroll);
+      window.clearTimeout(timer);
+    };
+  }, [enabled, flushSave]);
+
+  // Flush on page hide / beforeunload so the last position survives navigation.
+  useEffect(() => {
+    if (!enabled) return;
+    function onBeforeUnload() {
+      flushSave();
+    }
+    function onVisibilityChange() {
+      if (document.visibilityState === 'hidden') flushSave();
+    }
+    window.addEventListener('beforeunload', onBeforeUnload);
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    return () => {
+      window.removeEventListener('beforeunload', onBeforeUnload);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [enabled, flushSave]);
+
+  return { progress, save };
 }

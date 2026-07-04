@@ -40,11 +40,17 @@ import { createWorkCreated, healthOk, worksList } from '@/test/handlers';
  * `fetch`; the Tauri adapter + desktop-capabilities own `window.__TAURI__` +
  * the loopback `fetch`. Everything else must go through the `NexusClient` /
  * `DesktopCapabilities` interfaces.
+ *
+ * V1.89 Deeper Manuscript Reading adds a temporary reading-api shim
+ * (`/src/components/reading/reading-api.ts`) that uses same-origin `fetch`
+ * until P0 promotes the reading endpoints onto `NexusClient`. The shim is
+ * whitelisted here as a transport primitive consumer.
  */
 const ADAPTER_IMPLS = new Set([
   '/src/lib/nexus/browser-client.ts',
   '/src/lib/nexus/tauri-client.ts',
   '/src/lib/nexus/desktop-capabilities.ts',
+  '/src/components/reading/reading-api.ts',
 ]);
 
 /** Raw sources for every source module (tests excluded by the glob pattern). */

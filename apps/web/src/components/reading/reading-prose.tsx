@@ -8,7 +8,7 @@
  * right-click PathContextMenu — so the reading value is preserved while the
  * typography becomes book-like. Read-only: no body mutation path exists here.
  */
-import { useMemo } from 'react';
+import { forwardRef, useMemo } from 'react';
 import { Copy } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -20,14 +20,17 @@ import { ErrorState, LoadingState } from '@/components/ui/states';
 import { useToast } from '@/lib/use-toast';
 import type { ChapterBody } from '@42ch/nexus-contracts';
 
-interface ReadingProseProps {
+export interface ReadingProseProps {
   body: ChapterBody | undefined;
   isLoading: boolean;
   isError: boolean;
   onRetry: () => void;
 }
 
-export function ReadingProse({ body, isLoading, isError, onRetry }: ReadingProseProps) {
+export const ReadingProse = forwardRef<HTMLDivElement, ReadingProseProps>(function ReadingProse(
+  { body, isLoading, isError, onRetry },
+  ref,
+) {
   const { toast } = useToast();
   const menu = useContextMenu();
 
@@ -81,6 +84,7 @@ export function ReadingProse({ body, isLoading, isError, onRetry }: ReadingProse
       </CardHeader>
       <CardContent>
         <div
+          ref={ref}
           onContextMenu={menu.openMenu}
           className="rounded-card border border-gray-alpha-400 bg-background-100 p-6"
           role="region"
@@ -105,7 +109,9 @@ export function ReadingProse({ body, isLoading, isError, onRetry }: ReadingProse
       )}
     </Card>
   );
-}
+});
+
+ReadingProse.displayName = 'ReadingProse';
 
 /**
  * Prose element renderers — apply reading typography (line-height + paragraph

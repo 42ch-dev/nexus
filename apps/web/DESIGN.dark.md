@@ -368,25 +368,31 @@ components:
   # Annotation highlight background fills — dark-tuned alphas so highlights
   # stay legible against the dark reading surface without bleeding.
   reading-annotation-highlight-yellow:
-    fill: "color-mix(in srgb, {colors.amber-700} 22%, transparent)"
+    backgroundColor: "color-mix(in srgb, {colors.amber-700} 22%, transparent)"
+    textColor: "{colors.amber-1000}"
   reading-annotation-highlight-blue:
-    fill: "color-mix(in srgb, {colors.blue-700} 20%, transparent)"
+    backgroundColor: "color-mix(in srgb, {colors.blue-700} 20%, transparent)"
+    textColor: "{colors.blue-1000}"
   reading-annotation-highlight-green:
-    fill: "color-mix(in srgb, {colors.green-700} 20%, transparent)"
+    backgroundColor: "color-mix(in srgb, {colors.green-700} 20%, transparent)"
+    textColor: "{colors.green-1000}"
   reading-annotation-highlight-pink:
-    fill: "color-mix(in srgb, {colors.pink-700} 20%, transparent)"
+    backgroundColor: "color-mix(in srgb, {colors.pink-700} 20%, transparent)"
+    textColor: "{colors.pink-1000}"
 
   # Annotation inspector — side panel for the highlight list.
   reading-annotation-inspector:
     width: "320px"
-    bg: "{colors.background-100}"
-    border: "{colors.gray-alpha-400}"
+    backgroundColor: "{colors.background-100}"
+    borderColor: "{colors.gray-alpha-400}"
+    textColor: "{colors.gray-1000}"
     elevation: "shadow-elevation-3"
 
   # Selection toolbar — floating toolbar on text selection.
   reading-selection-toolbar:
-    bg: "{colors.background-200}"
-    border: "{colors.gray-alpha-500}"
+    backgroundColor: "{colors.background-200}"
+    borderColor: "{colors.gray-alpha-500}"
+    textColor: "{colors.gray-1000}"
     shadow: "0px 4px 12px rgba(0,0,0,0.40)"
 ---
 
