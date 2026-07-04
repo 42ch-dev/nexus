@@ -1,12 +1,12 @@
 # Deferred Features — Cross-Version Tracker v2
 
-**Quick status**: **V1.89 active (2026-07-04)** — Deeper Manuscript Reading: persisted reading progress + annotations/highlights on the V1.79 reading surface. Profile-specific reading chrome remains deferred. `wire_contracts_changed: true`. Platform **paused**.
+**Quick status**: **V1.89 shipped (2026-07-04)** — Deeper Manuscript Reading MVP (persisted reading progress + annotations/highlights) delivered on the V1.79 reading surface. Profile-specific reading chrome remains deferred as BL-13. `wire_contracts_changed: true`. Platform **paused**.
 
 **V1.89 in-progress (2026-07-04)**: Reading depth iteration. Next: Phase 1 Review & Edit chain, integration branch, per-plan implement.
 
 **Purpose**: Single source of truth for **open** and **backlog** features deferred from delivery compasses. Closed/shipped history lives in shipped archive.
 **Scope**: `nexus` OSS repository only.
-**Created**: 2026-04-21 · **Last updated**: 2026-07-04 (V1.89 iteration-start: active tracker reflects V1.89 scope; BL-11 MVP in progress, profile chrome remains deferred)
+**Created**: 2026-04-21 · **Last updated**: 2026-07-04 (V1.89 closure: BL-11 MVP shipped; profile-specific reading chrome re-filed as BL-13)
 
 ---
 
@@ -66,7 +66,7 @@
 | BL-07 | Explore ranking / cold-start + Publish compliance matrix | V1.2 | Backlog | M | |
 | BL-08 | Social / marketing features | V1.3 | V2.0+ | XL | |
 | BL-09 | Standalone maturation dashboard (multi-chart cross-Work/World aggregate view) | V1.79 | Backlog | M | V1.79 Track A shipped in-context lightweight maturation indicators only; standalone dashboard deferred. |
-| BL-11 | Deeper manuscript reading — persisted reading progress + annotations/highlights + profile-specific reading chrome | V1.79 | Backlog | M-L | V1.79 reading surface is session-only + novel-first; persistence/annotations/profile-chrome deferred. |
+| BL-13 | Profile-specific reading chrome (essay section breaks, game-bible cross-reference overlays, novel typography presets) | V1.89 | Backlog | M | V1.79→V1.89 | BL-11 MVP (persisted progress + annotations/highlights) shipped in V1.89. Profile chrome remains deferred. |
 
 ### 2.5 Reliability roadmap (cross-version)
 

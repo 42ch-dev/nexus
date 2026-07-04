@@ -1,92 +1,7 @@
 {
   "version": 1,
   "updated_at": "2026-07-04T20:00:00+0800",
-  "plans": [
-    {
-      "id": "2026-07-04-v1.89-prepare-dual-track",
-      "title": "P-1 — Prepare (spec + schema + migration + DESIGN tokens)",
-      "file": ".mstar/plans/2026-07-04-v1.89-prepare-dual-track.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": ["@product-manager", "@architect"],
-      "progress": 100,
-      "tags": ["prepare", "spec", "schema", "design"],
-      "created_at": "2026-07-04",
-      "updated_at": "2026-07-04",
-      "done_at": "2026-07-04",
-      "notes": "",
-      "metadata": {
-        "working_branch": "feature/v1.89-prepare",
-        "spec_integration_branch": "iteration/v1.89",
-        "merge_target": "iteration/v1.89",
-        "iteration_refs": ["V1.89"],
-        "primary_spec": ".mstar/knowledge/specs/web-ui.md"
-      }
-    },
-    {
-      "id": "2026-07-04-v1.89-reading-depth-backend",
-      "title": "P0 — Reading depth backend (progress + annotations persistence + Local API)",
-      "file": ".mstar/plans/2026-07-04-v1.89-reading-depth-backend.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": ["@fullstack-dev"],
-      "progress": 100,
-      "tags": ["backend", "local-api", "persistence"],
-      "created_at": "2026-07-04",
-      "updated_at": "2026-07-04",
-      "done_at": "2026-07-04",
-      "notes": "",
-      "metadata": {
-        "working_branch": "feature/v1.89-reading-depth-backend",
-        "spec_integration_branch": "iteration/v1.89",
-        "merge_target": "iteration/v1.89",
-        "iteration_refs": ["V1.89"],
-        "blocked_by_plan_id": "2026-07-04-v1.89-prepare-dual-track"
-      }
-    },
-    {
-      "id": "2026-07-04-v1.89-reading-depth-frontend",
-      "title": "P1 — Reading depth frontend (progress restore + highlight/annotation UI)",
-      "file": ".mstar/plans/2026-07-04-v1.89-reading-depth-frontend.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": ["@frontend-dev"],
-      "progress": 100,
-      "tags": ["frontend", "reading", "annotations"],
-      "created_at": "2026-07-04",
-      "updated_at": "2026-07-04",
-      "done_at": "2026-07-04",
-      "notes": "",
-      "metadata": {
-        "working_branch": "feature/v1.89-reading-depth-frontend",
-        "spec_integration_branch": "iteration/v1.89",
-        "merge_target": "iteration/v1.89",
-        "iteration_refs": ["V1.89"],
-        "blocked_by_plan_id": "2026-07-04-v1.89-prepare-dual-track"
-      }
-    },
-    {
-      "id": "2026-07-04-v1.89-closure",
-      "title": "P-last — Closure (QC/QA + tracker + compound + compaction + PR)",
-      "file": ".mstar/plans/2026-07-04-v1.89-closure.md",
-      "status": "InProgress",
-      "owner": "@project-manager",
-      "agents": ["@project-manager"],
-      "progress": 50,
-      "tags": ["closure", "tracker", "compound"],
-      "created_at": "2026-07-04",
-      "updated_at": "2026-07-04",
-      "done_at": null,
-      "notes": "",
-      "metadata": {
-        "working_branch": "feature/v1.89-closure",
-        "spec_integration_branch": "iteration/v1.89",
-        "merge_target": "iteration/v1.89",
-        "iteration_refs": ["V1.89"],
-        "blocked_by_plan_id": "2026-07-04-v1.89-reading-depth-backend"
-      }
-    }
-  ],
+  "plans": [],
   "metadata": {
     "integration_branch": "iteration/v1.89",
     "integration_branch_retired": false,
@@ -102,13 +17,13 @@
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.88",
-      "compass": "v1.88-frontend-slate-clear-and-reliability-cleanup-delivery-compass-v1.md",
+      "iteration": "V1.89",
+      "compass": "v1.89-deeper-manuscript-reading-delivery-compass-v1.md",
       "shipped_at": "2026-07-04",
-      "plan_count": 1,
-      "plan_count_done": 1,
-      "wire_contracts_changed": false,
-      "note": "V1.88 frontend slate-clear + reliability cleanup + tracker hygiene; QC 3/3 Approve; QA Pass"
+      "plan_count": 4,
+      "plan_count_done": 4,
+      "wire_contracts_changed": true,
+      "note": "V1.89 deeper manuscript reading MVP: persisted progress + annotations/highlights; QC 3/3 Approve; QA Pass"
     },
     "tech_debt_summary": {
       "total_open": 0,
@@ -124,7 +39,7 @@
       "refreshed_at": "2026-07-04",
       "refreshed_reason": "V1.88 closure: all open residuals resolved or archived; slate clean before V1.89."
     },
-    "updated_at": "2026-07-04T20:00:00+0800"
+    "updated_at": "2026-07-04T22:30:00+0800"
   },
   "residual_findings": {
     "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization": [
