@@ -39,12 +39,14 @@ export function AnnotationToolbar({
     // selection before the action fires.
     <div
       className={cn(
-        'pointer-events-none fixed left-0 top-0 z-40 flex -translate-x-1/2 -translate-y-[calc(100%+8px)]',
+        'pointer-events-none fixed left-0 top-0 z-40 flex',
         'bg-[var(--color-reading-selection-toolbar-background)] border border-[var(--color-reading-selection-toolbar-border)] text-[var(--color-reading-selection-toolbar-text)]',
         'rounded-popover shadow-[var(--color-reading-selection-toolbar-shadow)] px-2 py-1.5',
         className,
       )}
-      style={{ transform: `translate(${position.x}px, ${position.y - 8}px) translateX(-50%)` }}
+      style={{
+        transform: `translate(${position.x}px, ${position.y}px) translateX(-50%) translateY(calc(-100% - 8px))`,
+      }}
       role="toolbar"
       aria-label="Annotation actions"
     >
