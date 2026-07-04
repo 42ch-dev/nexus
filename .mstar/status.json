@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-07-04T18:00:00+0800",
+  "updated_at": "2026-07-04T20:00:00+0800",
   "plans": [
     {
       "id": "2026-07-04-v1.89-prepare-dual-track",
@@ -27,14 +27,14 @@
       "id": "2026-07-04-v1.89-reading-depth-backend",
       "title": "P0 — Reading depth backend (progress + annotations persistence + Local API)",
       "file": ".mstar/plans/2026-07-04-v1.89-reading-depth-backend.md",
-      "status": "InProgress",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": ["@fullstack-dev"],
-      "progress": 5,
+      "progress": 100,
       "tags": ["backend", "local-api", "persistence"],
       "created_at": "2026-07-04",
       "updated_at": "2026-07-04",
-      "done_at": null,
+      "done_at": "2026-07-04",
       "notes": "",
       "metadata": {
         "working_branch": "feature/v1.89-reading-depth-backend",
@@ -48,14 +48,14 @@
       "id": "2026-07-04-v1.89-reading-depth-frontend",
       "title": "P1 — Reading depth frontend (progress restore + highlight/annotation UI)",
       "file": ".mstar/plans/2026-07-04-v1.89-reading-depth-frontend.md",
-      "status": "InProgress",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": ["@frontend-dev"],
-      "progress": 5,
+      "progress": 100,
       "tags": ["frontend", "reading", "annotations"],
       "created_at": "2026-07-04",
       "updated_at": "2026-07-04",
-      "done_at": null,
+      "done_at": "2026-07-04",
       "notes": "",
       "metadata": {
         "working_branch": "feature/v1.89-reading-depth-frontend",
@@ -69,10 +69,10 @@
       "id": "2026-07-04-v1.89-closure",
       "title": "P-last — Closure (QC/QA + tracker + compound + compaction + PR)",
       "file": ".mstar/plans/2026-07-04-v1.89-closure.md",
-      "status": "Todo",
+      "status": "InProgress",
       "owner": "@project-manager",
       "agents": ["@project-manager"],
-      "progress": 0,
+      "progress": 10,
       "tags": ["closure", "tracker", "compound"],
       "created_at": "2026-07-04",
       "updated_at": "2026-07-04",
@@ -124,7 +124,7 @@
       "refreshed_at": "2026-07-04",
       "refreshed_reason": "V1.88 closure: all open residuals resolved or archived; slate clean before V1.89."
     },
-    "updated_at": "2026-07-04T18:00:00+0800"
+    "updated_at": "2026-07-04T20:00:00+0800"
   },
   "residual_findings": {
     "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization": [
