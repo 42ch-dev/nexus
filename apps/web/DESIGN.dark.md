@@ -363,6 +363,31 @@ components:
     canvas-worldkb-relationship-grounded-badge: "rgba(82,168,255,0.14)"
     canvas-worldkb-relationship-asserted-badge: "rgba(183,148,255,0.14)"
     canvas-worldkb-relationship-inspector-fill: "#1A1A1A"
+
+  # V1.89 — Deeper Manuscript Reading (web-ui.md §28)
+  # Annotation highlight background fills — dark-tuned alphas so highlights
+  # stay legible against the dark reading surface without bleeding.
+  reading-annotation-highlight-yellow:
+    fill: "color-mix(in srgb, {colors.amber-700} 22%, transparent)"
+  reading-annotation-highlight-blue:
+    fill: "color-mix(in srgb, {colors.blue-700} 20%, transparent)"
+  reading-annotation-highlight-green:
+    fill: "color-mix(in srgb, {colors.green-700} 20%, transparent)"
+  reading-annotation-highlight-pink:
+    fill: "color-mix(in srgb, {colors.pink-700} 20%, transparent)"
+
+  # Annotation inspector — side panel for the highlight list.
+  reading-annotation-inspector:
+    width: "320px"
+    bg: "{colors.background-100}"
+    border: "{colors.gray-alpha-400}"
+    elevation: "shadow-elevation-3"
+
+  # Selection toolbar — floating toolbar on text selection.
+  reading-selection-toolbar:
+    bg: "{colors.background-200}"
+    border: "{colors.gray-alpha-500}"
+    shadow: "0px 4px 12px rgba(0,0,0,0.40)"
 ---
 
 # Nexus Local Web UI Design System — Dark Theme

@@ -386,6 +386,33 @@ components:
     canvas-worldkb-relationship-grounded-badge: "rgba(0,107,255,0.12)"
     canvas-worldkb-relationship-asserted-badge: "rgba(124,58,237,0.12)"
     canvas-worldkb-relationship-inspector-fill: "#FFFFFF"
+
+  # V1.89 — Deeper Manuscript Reading (web-ui.md §28)
+  # Annotation highlight background fills — four color enum values.
+  # Each is a low-alpha tint derived from the nearest accent family so the
+  # highlight composes with reading-prose without obscuring text.
+  reading-annotation-highlight-yellow:
+    fill: "color-mix(in srgb, {colors.amber-700} 18%, transparent)"
+  reading-annotation-highlight-blue:
+    fill: "color-mix(in srgb, {colors.blue-700} 12%, transparent)"
+  reading-annotation-highlight-green:
+    fill: "color-mix(in srgb, {colors.green-700} 16%, transparent)"
+  reading-annotation-highlight-pink:
+    fill: "color-mix(in srgb, {colors.pink-700} 16%, transparent)"
+
+  # Annotation inspector — side panel listing highlights for the current chapter.
+  reading-annotation-inspector:
+    width: "320px"
+    bg: "{colors.background-100}"
+    border: "{colors.gray-alpha-400}"
+    elevation: "shadow-elevation-3"
+
+  # Selection toolbar — floating toolbar that appears when text is selected
+  # in the reading surface, offering a "Highlight" action.
+  reading-selection-toolbar:
+    bg: "{colors.background-100}"
+    border: "{colors.gray-alpha-400}"
+    shadow: "0px 4px 12px rgba(0,0,0,0.12)"
 ---
 
 # Nexus Local Web UI Design System
