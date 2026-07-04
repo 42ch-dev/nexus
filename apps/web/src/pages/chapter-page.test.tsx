@@ -225,7 +225,6 @@ function selectTextInProse(startOffset: number, endOffset: number) {
   const walker = document.createTreeWalker(prose, NodeFilter.SHOW_TEXT);
   let offset = 0;
   let startNode: Node | null = null;
-  let endNode: Node | null = null;
   let node: Node | null;
   while ((node = walker.nextNode())) {
     const text = node.textContent ?? '';
@@ -235,8 +234,7 @@ function selectTextInProse(startOffset: number, endOffset: number) {
       startNode = node;
       range.setStart(node, Math.max(0, startOffset - nodeStart));
     }
-    if (endNode === null && endOffset <= nodeEnd) {
-      endNode = node;
+    if (endOffset <= nodeEnd) {
       range.setEnd(node, Math.max(0, endOffset - nodeStart));
       break;
     }
