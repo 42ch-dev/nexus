@@ -8,7 +8,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { AnnotationInspector } from './annotation-inspector';
-import type { ReadingAnnotation } from './reading-api';
+import type { ReadingAnnotation } from '@42ch/nexus-contracts';
 
 function annotation(overrides: Partial<ReadingAnnotation> = {}): ReadingAnnotation {
   return {

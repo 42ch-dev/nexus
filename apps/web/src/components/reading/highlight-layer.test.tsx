@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
 import { HighlightLayer } from './highlight-layer';
-import type { ReadingAnnotation } from './reading-api';
+import type { ReadingAnnotation } from '@42ch/nexus-contracts';
 
 function annotation(overrides: Partial<ReadingAnnotation> = {}): ReadingAnnotation {
   return {

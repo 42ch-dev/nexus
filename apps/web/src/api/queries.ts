@@ -34,6 +34,11 @@ import type {
   PatchWorkRequest,
   PendingReviewInfo,
   PresetSummary,
+  ReadingAnnotation,
+  ReadingAnnotationCreateRequest,
+  ReadingAnnotationListResponse,
+  ReadingAnnotationPatchRequest,
+  ReadingProgressResponse,
   ReviewResponse,
   ScaffoldPresetRequest,
   SoulNarrativeResponse,
@@ -48,16 +53,6 @@ import { useNexusClient } from '@/lib/client-context';
 import { NexusClientError } from '@/lib/nexus';
 import { shortId } from '@/lib/format';
 import { queryKeys } from '@/lib/nexus/query-keys';
-import {
-  createAnnotation,
-  deleteAnnotation,
-  getReadingProgress,
-  listAnnotations,
-  saveReadingProgress,
-  updateAnnotation,
-  type CreateAnnotationRequest,
-  type PatchAnnotationRequest,
-} from '@/components/reading/reading-api';
 import { useCallback, useEffect } from 'react';
 
 /** Default page size for cursor-paginated lists. */
@@ -773,20 +768,26 @@ function ratioToScrollProgress(ratio: number): number {
 }
 
 export function useReadingProgress(workId: string | undefined, chapter: number | undefined) {
+  const client = useNexusClient();
   return useQuery({
     queryKey: queryKeys.reading.progress(workId ?? '', chapter ?? 0),
-    queryFn: () => getReadingProgress(workId!, chapter!),
+    queryFn: (): Promise<ReadingProgressResponse> => client.getReadingProgress(workId!, chapter!),
     enabled: Boolean(workId) && typeof chapter === 'number' && chapter > 0,
   });
 }
 
 export function useSaveReadingProgress() {
+  const client = useNexusClient();
   const qc = useQueryClient();
   const errorToast = useErrorToast();
   const { toast } = useToast();
   return useMutation({
     mutationFn: (vars: { workId: string; chapter: number; scrollProgress: number }) =>
-      saveReadingProgress(vars.workId, vars.chapter, vars.scrollProgress),
+      client.putReadingProgress({
+        work_id: vars.workId,
+        chapter: vars.chapter,
+        scroll_progress: vars.scrollProgress,
+      }),
     onSuccess: (_data, vars) => {
       qc.setQueryData(queryKeys.reading.progress(vars.workId, vars.chapter), _data);
       toast({ variant: 'success', title: 'Progress saved' });
@@ -796,19 +797,24 @@ export function useSaveReadingProgress() {
 }
 
 export function useAnnotations(workId: string | undefined, chapter: number | undefined) {
+  const client = useNexusClient();
   return useQuery({
     queryKey: queryKeys.reading.annotations(workId ?? '', chapter ?? 0),
-    queryFn: () => listAnnotations(workId!, chapter!),
+    queryFn: async (): Promise<ReadingAnnotation[]> => {
+      const res: ReadingAnnotationListResponse = await client.listReadingAnnotations(workId!, chapter!);
+      return res.items;
+    },
     enabled: Boolean(workId) && typeof chapter === 'number' && chapter > 0,
   });
 }
 
 export function useCreateAnnotation() {
+  const client = useNexusClient();
   const qc = useQueryClient();
   const errorToast = useErrorToast();
   return useMutation({
-    mutationFn: (request: CreateAnnotationRequest) => createAnnotation(request),
-    onSuccess: (data) => {
+    mutationFn: (request: ReadingAnnotationCreateRequest) => client.createReadingAnnotation(request),
+    onSuccess: (data: ReadingAnnotation) => {
       void qc.invalidateQueries({ queryKey: queryKeys.reading.annotations(data.work_id, data.chapter) });
     },
     onError: (error) => errorToast(error, 'Could not create highlight'),
@@ -816,11 +822,16 @@ export function useCreateAnnotation() {
 }
 
 export function useUpdateAnnotation() {
+  const client = useNexusClient();
   const qc = useQueryClient();
   const errorToast = useErrorToast();
   return useMutation({
-    mutationFn: (vars: { annotationId: string; workId: string; chapter: number; patch: PatchAnnotationRequest }) =>
-      updateAnnotation(vars.annotationId, vars.patch),
+    mutationFn: (vars: {
+      annotationId: string;
+      workId: string;
+      chapter: number;
+      patch: ReadingAnnotationPatchRequest;
+    }) => client.patchReadingAnnotation(vars.annotationId, vars.patch),
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({ queryKey: queryKeys.reading.annotations(vars.workId, vars.chapter) });
     },
@@ -829,12 +840,13 @@ export function useUpdateAnnotation() {
 }
 
 export function useDeleteAnnotation() {
+  const client = useNexusClient();
   const qc = useQueryClient();
   const errorToast = useErrorToast();
   const { toast } = useToast();
   return useMutation({
     mutationFn: (vars: { annotationId: string; workId: string; chapter: number }) =>
-      deleteAnnotation(vars.annotationId),
+      client.deleteReadingAnnotation(vars.annotationId),
     onSuccess: (_data, vars) => {
       toast({ variant: 'success', title: 'Highlight deleted' });
       void qc.invalidateQueries({ queryKey: queryKeys.reading.annotations(vars.workId, vars.chapter) });

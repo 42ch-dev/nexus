@@ -28,7 +28,7 @@ import { ReadingProgress } from '@/components/reading/reading-progress';
 import { ReadingProse } from '@/components/reading/reading-prose';
 import { useChapterNeighbors } from '@/components/reading/reading-hooks';
 import { useTextSelection } from '@/components/reading/use-text-selection';
-import { type AnnotationColor } from '@/components/reading/reading-api';
+import type { ReadingAnnotationColor } from '@42ch/nexus-contracts';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ErrorState, LoadingState } from '@/components/ui/states';
@@ -73,7 +73,7 @@ export function ChapterPage() {
 
   const proseRef = useRef<HTMLDivElement>(null);
   const selection = useTextSelection(proseRef);
-  const [defaultColor] = useState<AnnotationColor>('yellow');
+  const [defaultColor] = useState<ReadingAnnotationColor>('yellow');
 
   // Keyboard navigation (←/→) — wired here so the nav component stays a pure
   // affordance. Guarded against input/textarea/contenteditable focus and open

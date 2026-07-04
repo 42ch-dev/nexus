@@ -12,7 +12,7 @@
 import { useLayoutEffect, useRef } from 'react';
 
 import { cn } from '@/lib/utils';
-import type { AnnotationColor, ReadingAnnotation } from './reading-api';
+import type { ReadingAnnotation, ReadingAnnotationColor } from '@42ch/nexus-contracts';
 import { rangeFromOffsets } from './use-text-selection';
 
 export interface HighlightLayerProps {
@@ -23,7 +23,7 @@ export interface HighlightLayerProps {
   className?: string;
 }
 
-const HIGHLIGHT_CLASS: Record<AnnotationColor, string> = {
+const HIGHLIGHT_CLASS: Record<ReadingAnnotationColor, string> = {
   yellow: 'bg-[var(--color-reading-annotation-highlight-yellow-background)] text-[var(--color-reading-annotation-highlight-yellow-text)]',
   blue: 'bg-[var(--color-reading-annotation-highlight-blue-background)] text-[var(--color-reading-annotation-highlight-blue-text)]',
   green: 'bg-[var(--color-reading-annotation-highlight-green-background)] text-[var(--color-reading-annotation-highlight-green-text)]',
@@ -44,7 +44,7 @@ function clearHighlights(container: HTMLElement) {
   }
 }
 
-function wrapRange(range: Range, color: AnnotationColor) {
+function wrapRange(range: Range, color: ReadingAnnotationColor) {
   const contents = range.extractContents();
   const mark = document.createElement('mark');
   mark.className = cn('rounded-sm', HIGHLIGHT_CLASS[color]);

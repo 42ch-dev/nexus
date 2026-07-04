@@ -12,18 +12,20 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Select } from '@/components/ui/select';
 import { cn } from '@/lib/utils';
-import { ANNOTATION_COLORS, type AnnotationColor, type ReadingAnnotation } from './reading-api';
+import type { ReadingAnnotation, ReadingAnnotationColor } from '@42ch/nexus-contracts';
+
+const ANNOTATION_COLORS: ReadingAnnotationColor[] = ['yellow', 'blue', 'green', 'pink'];
 
 export interface AnnotationInspectorProps {
   annotations: ReadingAnnotation[];
-  onUpdate: (annotationId: string, patch: { color?: AnnotationColor; note?: string }) => void;
+  onUpdate: (annotationId: string, patch: { color?: ReadingAnnotationColor; note?: string }) => void;
   onDelete: (annotationId: string) => void;
   isUpdating?: boolean;
   isDeleting?: boolean;
   className?: string;
 }
 
-const SWATCH_CLASS: Record<AnnotationColor, string> = {
+const SWATCH_CLASS: Record<ReadingAnnotationColor, string> = {
   yellow: 'bg-[var(--color-reading-annotation-highlight-yellow-background)] border-amber-700/30',
   blue: 'bg-[var(--color-reading-annotation-highlight-blue-background)] border-blue-700/30',
   green: 'bg-[var(--color-reading-annotation-highlight-green-background)] border-green-700/30',
@@ -46,7 +48,7 @@ export function AnnotationInspector({
 }: AnnotationInspectorProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftNote, setDraftNote] = useState('');
-  const [draftColor, setDraftColor] = useState<AnnotationColor>('yellow');
+  const [draftColor, setDraftColor] = useState<ReadingAnnotationColor>('yellow');
 
   function startEdit(annotation: ReadingAnnotation) {
     setEditingId(annotation.annotation_id);
@@ -96,7 +98,7 @@ export function AnnotationInspector({
                 <div className="flex flex-col gap-2">
                   <Select
                     value={draftColor}
-                    onChange={(event) => setDraftColor(event.target.value as AnnotationColor)}
+                    onChange={(event) => setDraftColor(event.target.value as ReadingAnnotationColor)}
                     aria-label="Highlight color"
                   >
                     {ANNOTATION_COLORS.map((color) => (

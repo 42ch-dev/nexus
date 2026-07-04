@@ -40,17 +40,11 @@ import { createWorkCreated, healthOk, worksList } from '@/test/handlers';
  * `fetch`; the Tauri adapter + desktop-capabilities own `window.__TAURI__` +
  * the loopback `fetch`. Everything else must go through the `NexusClient` /
  * `DesktopCapabilities` interfaces.
- *
- * V1.89 Deeper Manuscript Reading adds a temporary reading-api shim
- * (`/src/components/reading/reading-api.ts`) that uses same-origin `fetch`
- * until P0 promotes the reading endpoints onto `NexusClient`. The shim is
- * whitelisted here as a transport primitive consumer.
  */
 const ADAPTER_IMPLS = new Set([
   '/src/lib/nexus/browser-client.ts',
   '/src/lib/nexus/tauri-client.ts',
   '/src/lib/nexus/desktop-capabilities.ts',
-  '/src/components/reading/reading-api.ts',
 ]);
 
 /** Raw sources for every source module (tests excluded by the glob pattern). */
@@ -129,13 +123,15 @@ describe('TauriClient transport parity (thin-over-BrowserClient)', () => {
     };
     const client = new TauriClient({ fetchImpl });
     const workId = 'w1';
-    // Exercise all 27 NexusClient methods (health + 26 data). The three
-    // preset methods (getPreset/updatePreset/deletePreset) were promoted in
-    // V1.67 G2 (R-V167P1-QC3-S1), and the four outline+timeline methods
+    // Exercise the core NexusClient data surfaces promoted through V1.89
+    // (health + 40 data method invocations here). The three preset methods
+    // (getPreset/updatePreset/deletePreset) were promoted in V1.67 G2
+    // (R-V167P1-QC3-S1), the four outline+timeline methods
     // (getWorkOutline/patchOutlineStructure/patchOutlineChapter/patchTimelineEvent)
-    // were promoted in V1.72 Track A — they must hit the same transport as the
-    // rest of the surface, not silently no-op. (V1.75 A6 removed the V1.65
-    // `putChapterOutline` PUT method.)
+    // were promoted in V1.72 Track A, the five memory methods in V1.78, and the
+    // seven reading-depth methods in V1.89 — they must all hit the same
+    // transport as the rest of the surface, not silently no-op. (V1.75 A6
+    // removed the V1.65 `putChapterOutline` PUT method.)
     await client.health();
     await client.listWorks();
     await client.getWork(workId);
@@ -189,13 +185,30 @@ describe('TauriClient transport parity (thin-over-BrowserClient)', () => {
     await client.deletePendingReview('p1', 'c1');
     await client.reviewMemory({ creator_id: 'c1' });
     await client.listMemoryFragments('c1');
+    // V1.89 Deeper Manuscript Reading promotion (getReadingProgress/
+    // putReadingProgress/deleteReadingProgress/listReadingAnnotations/
+    // createReadingAnnotation/patchReadingAnnotation/deleteReadingAnnotation).
+    await client.getReadingProgress(workId, 1);
+    await client.putReadingProgress({ work_id: workId, chapter: 1, scroll_progress: 5000 });
+    await client.deleteReadingProgress(workId, 1);
+    await client.listReadingAnnotations(workId, 1);
+    await client.createReadingAnnotation({
+      work_id: workId,
+      chapter: 1,
+      start_offset: 0,
+      end_offset: 5,
+      selected_text: 'Hello',
+      color: 'yellow',
+    });
+    await client.patchReadingAnnotation('a1', { color: 'blue', note: 'note' });
+    await client.deleteReadingAnnotation('a1');
 
     // Every method must have hit a /v1/local/* path (transport parity with the
     // browser client). If a method silently no-op'd or threw — as the V1.65
     // stub did — its path would be missing and this set would be smaller.
     const paths = [...seen].sort();
     expect(paths.every((p) => p.includes('/v1/local/'))).toBe(true);
-    expect(seen.size).toBe(34);
+    expect(seen.size).toBe(41);
     // Spot-check the chapter surface (the Q5 action target).
     expect(seen).toContain('GET /v1/local/works/w1/chapters/1/body');
     expect(seen).toContain('GET /v1/local/works/w1/chapters/1/outline');
@@ -217,6 +230,14 @@ describe('TauriClient transport parity (thin-over-BrowserClient)', () => {
     expect(seen).toContain('DELETE /v1/local/memory/pending-review/p1');
     expect(seen).toContain('POST /v1/local/memory/review');
     expect(seen).toContain('GET /v1/local/memory/fragments');
+    // Spot-check the V1.89 Deeper Manuscript Reading surface.
+    expect(seen).toContain('GET /v1/local/reading/progress');
+    expect(seen).toContain('PUT /v1/local/reading/progress');
+    expect(seen).toContain('DELETE /v1/local/reading/progress');
+    expect(seen).toContain('GET /v1/local/reading/annotations');
+    expect(seen).toContain('POST /v1/local/reading/annotations');
+    expect(seen).toContain('PATCH /v1/local/reading/annotations/a1');
+    expect(seen).toContain('DELETE /v1/local/reading/annotations/a1');
   });
 });
 
@@ -633,6 +654,105 @@ describe('NexusClient memory-method parity guard (V1.78)', () => {
         url: '/v1/local/memory/soul/reflect',
         body: { creator_id: 'c1', force_regenerate: true },
       },
+    ]);
+  });
+});
+
+// ── 7. Reading-depth-method parity guard (V1.89) ────────────────────────────
+
+/**
+ * The V1.89 Deeper Manuscript Reading promotion added seven methods to the
+ * `NexusClient` interface (`getReadingProgress` / `putReadingProgress` /
+ * `deleteReadingProgress` / `listReadingAnnotations` / `createReadingAnnotation` /
+ * `patchReadingAnnotation` / `deleteReadingAnnotation`). This guard mirrors the
+ * preset + findings + memory parity guards: it fails at compile time (the
+ * `satisfies` constraint) if the interface drops any method, and at runtime if
+ * an adapter implementation is missing it.
+ */
+const READING_METHODS = [
+  'getReadingProgress',
+  'putReadingProgress',
+  'deleteReadingProgress',
+  'listReadingAnnotations',
+  'createReadingAnnotation',
+  'patchReadingAnnotation',
+  'deleteReadingAnnotation',
+] as const satisfies readonly (keyof NexusClient)[];
+
+describe('NexusClient reading-depth-method parity guard (V1.89)', () => {
+  it('BrowserClient implements every reading-depth method on the NexusClient interface', () => {
+    const client = new BrowserClient();
+    for (const method of READING_METHODS) {
+      expect(typeof client[method], `BrowserClient.${method} must be a function`).toBe('function');
+    }
+  });
+
+  it('TauriClient inherits every reading-depth method (thin-over-BrowserClient)', () => {
+    const client = new TauriClient({
+      fetchImpl: async () =>
+        new Response(JSON.stringify({ ok: true }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+    });
+    for (const method of READING_METHODS) {
+      expect(typeof client[method], `TauriClient.${method} must be a function`).toBe('function');
+    }
+  });
+
+  it('routes the reading-depth methods to the right verb + path + body/query shape', async () => {
+    const seen: { method: string; url: string; body?: unknown }[] = [];
+    const fetchImpl: typeof fetch = async (input, init) => {
+      seen.push({
+        method: init?.method ?? 'GET',
+        url: String(input),
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      });
+      if ((init?.method ?? 'GET') === 'DELETE') {
+        return new Response(null, { status: 204 });
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    };
+
+    const client = new BrowserClient({ fetchImpl });
+    await client.getReadingProgress('w1', 1);
+    await client.putReadingProgress({ work_id: 'w1', chapter: 1, scroll_progress: 5000 });
+    await client.deleteReadingProgress('w1', 1);
+    await client.listReadingAnnotations('w1', 1);
+    await client.createReadingAnnotation({
+      work_id: 'w1',
+      chapter: 1,
+      start_offset: 0,
+      end_offset: 5,
+      selected_text: 'Hello',
+      color: 'yellow',
+    });
+    await client.patchReadingAnnotation('a1', { color: 'blue', note: 'note' });
+    await client.deleteReadingAnnotation('a1');
+
+    expect(seen).toEqual([
+      { method: 'GET', url: '/v1/local/reading/progress?work_id=w1&chapter=1' },
+      {
+        method: 'PUT',
+        url: '/v1/local/reading/progress',
+        body: { work_id: 'w1', chapter: 1, scroll_progress: 5000 },
+      },
+      { method: 'DELETE', url: '/v1/local/reading/progress?work_id=w1&chapter=1' },
+      { method: 'GET', url: '/v1/local/reading/annotations?work_id=w1&chapter=1' },
+      {
+        method: 'POST',
+        url: '/v1/local/reading/annotations',
+        body: { work_id: 'w1', chapter: 1, start_offset: 0, end_offset: 5, selected_text: 'Hello', color: 'yellow' },
+      },
+      {
+        method: 'PATCH',
+        url: '/v1/local/reading/annotations/a1',
+        body: { color: 'blue', note: 'note' },
+      },
+      { method: 'DELETE', url: '/v1/local/reading/annotations/a1' },
     ]);
   });
 });
