@@ -752,8 +752,13 @@ describe('ChapterPage (V1.89 Deeper Manuscript Reading)', () => {
     );
 
     renderChapter();
-    await screen.findByText('Body prose.');
-    expect(await screen.findByText('Body')).toHaveAttribute('data-nexus-highlight', 'yellow');
+    const prose = await screen.findByRole('region', { name: /chapter body/i });
+    await waitFor(() => {
+      expect(prose.textContent).toContain('Body prose.');
+    });
+    const mark = prose.querySelector('mark[data-nexus-highlight]');
+    expect(mark).toHaveTextContent('Body');
+    expect(mark).toHaveAttribute('data-nexus-highlight', 'yellow');
   });
 
   it('lists annotations in the inspector and supports delete', async () => {
@@ -791,7 +796,10 @@ describe('ChapterPage (V1.89 Deeper Manuscript Reading)', () => {
     );
 
     renderChapter();
-    await screen.findByText('Body prose.');
+    await waitFor(() => {
+      const prose = screen.getByRole('region', { name: /chapter body/i });
+      expect(prose.textContent).toContain('Body prose.');
+    });
     expect(await screen.findByText('important')).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: /delete highlight/i }));

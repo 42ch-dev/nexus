@@ -178,6 +178,7 @@ export function ChapterPage() {
           <HighlightLayer
             annotations={annotations.data ?? []}
             bodyLength={bodyLength}
+            proseRef={proseRef}
           >
             <ReadingProse
               ref={proseRef}

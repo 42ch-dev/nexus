@@ -9,7 +9,7 @@
  * body length, a non-blocking notice is shown at the top of the prose. The
  * highlight itself is skipped so it cannot mis-render over unrelated text.
  */
-import { useLayoutEffect, useRef } from 'react';
+import { useLayoutEffect } from 'react';
 
 import { cn } from '@/lib/utils';
 import type { ReadingAnnotation, ReadingAnnotationColor } from '@42ch/nexus-contracts';
@@ -19,6 +19,8 @@ export interface HighlightLayerProps {
   annotations: ReadingAnnotation[];
   /** Plain-text body length used for drift detection. */
   bodyLength: number;
+  /** Ref to the prose container that holds the text nodes offsets are relative to. */
+  proseRef: React.RefObject<HTMLElement | null>;
   children: React.ReactNode;
   className?: string;
 }
@@ -70,18 +72,17 @@ function applyHighlights(container: HTMLElement, annotations: ReadingAnnotation[
   }
 }
 
-export function HighlightLayer({ annotations, bodyLength, children, className }: HighlightLayerProps) {
-  const containerRef = useRef<HTMLDivElement>(null);
+export function HighlightLayer({ annotations, bodyLength, proseRef, children, className }: HighlightLayerProps) {
   const hasDrift = annotations.some((a) => a.end_offset > bodyLength);
 
   useLayoutEffect(() => {
-    const container = containerRef.current;
+    const container = proseRef.current;
     if (!container) return;
     applyHighlights(container, annotations, bodyLength);
-  }, [annotations, bodyLength]);
+  }, [annotations, bodyLength, proseRef]);
 
   return (
-    <div ref={containerRef} className={cn('relative', className)}>
+    <div className={cn('relative', className)}>
       {hasDrift && (
         <div
           className="mb-3 rounded-card border border-amber-700/30 bg-amber-700/10 px-4 py-3 text-copy-14 text-amber-1000"
