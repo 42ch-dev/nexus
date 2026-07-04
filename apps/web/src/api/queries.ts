@@ -53,7 +53,7 @@ import { useNexusClient } from '@/lib/client-context';
 import { NexusClientError } from '@/lib/nexus';
 import { shortId } from '@/lib/format';
 import { queryKeys } from '@/lib/nexus/query-keys';
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 
 /** Default page size for cursor-paginated lists. */
 export const DEFAULT_PAGE_SIZE = 20;
@@ -873,6 +873,13 @@ export function useReadingProgressSync(
   const progress = useReadingProgress(workId, chapter);
   const save = useSaveReadingProgress({ showToast: options?.showSavedToast });
   const enabled = options?.enabled ?? true;
+  const restoredRef = useRef(false);
+
+  // Reset the restore guard whenever the chapter changes so navigation to a
+  // different chapter restores its own position.
+  useEffect(() => {
+    restoredRef.current = false;
+  }, [workId, chapter]);
 
   const saveMutate = save.mutate;
   const flushSave = useCallback(() => {
@@ -882,16 +889,23 @@ export function useReadingProgressSync(
     saveMutate({ workId, chapter, scrollProgress: ratioToScrollProgress(ratio) });
   }, [workId, chapter, saveMutate]);
 
-  // Restore once when the persisted value arrives.
+  // Restore once when the persisted value first resolves. The guard prevents
+  // re-scrolling when the save mutation updates the cached scroll_progress.
   useEffect(() => {
-    if (!enabled || !progress.data || progress.data.scroll_progress <= 0) return;
+    if (!enabled || !progress.isSuccess || restoredRef.current) return;
+    if (!progress.data || progress.data.scroll_progress <= 0) {
+      restoredRef.current = true;
+      return;
+    }
     const scrollable = document.documentElement.scrollHeight - window.innerHeight;
-    if (scrollable <= 0) return;
+    if (scrollable <= 0) {
+      restoredRef.current = true;
+      return;
+    }
     const ratio = progress.data.scroll_progress / SCROLL_PROGRESS_UNIT;
     window.scrollTo({ top: ratio * scrollable });
-    // Only restore once per distinct (workId, chapter) query key.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, progress.data?.scroll_progress, workId, chapter]);
+    restoredRef.current = true;
+  }, [enabled, progress.isSuccess, progress.data, workId, chapter]);
 
   // Debounced scroll save.
   useEffect(() => {
