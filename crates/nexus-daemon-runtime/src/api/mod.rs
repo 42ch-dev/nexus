@@ -25,7 +25,7 @@ use crate::static_assets;
 use crate::workspace::WorkspaceState;
 use axum::{
     middleware as axum_mw,
-    routing::{delete, get, post},
+    routing::{delete, get, patch, post},
     Router,
 };
 use std::sync::Arc;
@@ -246,6 +246,25 @@ fn strategy_routes() -> Router<WorkspaceState> {
         .route(
             "/v1/local/strategies/{strategy_id}/states/{state_id}/prompt/patch",
             post(handlers::strategy::patch_prompt_template),
+        )
+}
+
+/// Reading depth routes (V1.89).
+fn reading_routes() -> Router<WorkspaceState> {
+    Router::new()
+        .route(
+            "/v1/local/reading/progress",
+            get(handlers::reading::get_reading_progress)
+                .put(handlers::reading::put_reading_progress)
+                .delete(handlers::reading::delete_reading_progress),
+        )
+        .route(
+            "/v1/local/reading/annotations",
+            get(handlers::reading::list_annotations).post(handlers::reading::create_annotation),
+        )
+        .route(
+            "/v1/local/reading/annotations/{annotation_id}",
+            patch(handlers::reading::patch_annotation).delete(handlers::reading::delete_annotation),
         )
 }
 
@@ -476,6 +495,7 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
         .merge(kb_routes())
         .merge(memory_routes())
         .merge(works_routes())
+        .merge(reading_routes())
         .merge(narrative_routes())
         .merge(strategy_routes())
         .merge(world_kb_routes())

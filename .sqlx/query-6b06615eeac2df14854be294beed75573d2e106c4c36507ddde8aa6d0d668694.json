@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        DELETE FROM reading_progress\n        WHERE creator_id = ?1 AND work_id = ?2 AND chapter = ?3\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "6b06615eeac2df14854be294beed75573d2e106c4c36507ddde8aa6d0d668694"
+}
