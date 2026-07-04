@@ -27,20 +27,20 @@ pub async fn upsert_reading_progress(
     }
 
     let now = Utc::now();
-    let updated_at = sqlx::query_scalar::<_, DateTime<Utc>>(
-        r"
+    let updated_at = sqlx::query_scalar!(
+        r#"
         INSERT INTO reading_progress (creator_id, work_id, chapter, scroll_progress, updated_at)
         VALUES (?1, ?2, ?3, ?4, ?5)
         ON CONFLICT(creator_id, work_id, chapter)
         DO UPDATE SET scroll_progress = excluded.scroll_progress, updated_at = excluded.updated_at
-        RETURNING updated_at
-        ",
+        RETURNING updated_at as "updated_at: DateTime<Utc>"
+        "#,
+        creator_id,
+        work_id,
+        chapter,
+        progress,
+        now
     )
-    .bind(creator_id)
-    .bind(work_id)
-    .bind(chapter)
-    .bind(progress)
-    .bind(now)
     .fetch_one(pool)
     .await
     .map_err(LocalDbError::Sqlx)?;
@@ -60,23 +60,31 @@ pub async fn get_reading_progress(
     work_id: &str,
     chapter: i64,
 ) -> Result<(i64, Option<DateTime<Utc>>), LocalDbError> {
-    let row = sqlx::query_as::<_, (Option<i64>, Option<DateTime<Utc>>)>(
-        r"
-        SELECT scroll_progress, updated_at
+    let row = sqlx::query_as!(
+        ReadingProgressRow,
+        r#"
+        SELECT scroll_progress as "scroll_progress: _", updated_at as "updated_at: _"
         FROM reading_progress
         WHERE creator_id = ?1 AND work_id = ?2 AND chapter = ?3
-        ",
+        "#,
+        creator_id,
+        work_id,
+        chapter
     )
-    .bind(creator_id)
-    .bind(work_id)
-    .bind(chapter)
     .fetch_optional(pool)
     .await
     .map_err(LocalDbError::Sqlx)?;
 
     match row {
-        Some((Some(progress), updated_at)) => Ok((progress, updated_at)),
-        Some((None, _)) | None => Ok((0, None)),
+        Some(ReadingProgressRow {
+            scroll_progress: Some(progress),
+            updated_at,
+        }) => Ok((progress, updated_at)),
+        Some(ReadingProgressRow {
+            scroll_progress: None,
+            ..
+        })
+        | None => Ok((0, None)),
     }
 }
 
@@ -118,28 +126,29 @@ pub async fn list_annotations(
     work_id: &str,
     chapter: i64,
 ) -> Result<Vec<AnnotationRow>, LocalDbError> {
-    let rows = sqlx::query_as::<_, AnnotationRow>(
-        r"
+    let rows = sqlx::query_as!(
+        AnnotationRow,
+        r#"
         SELECT
-            annotation_id,
-            creator_id,
-            work_id,
-            chapter,
-            start_offset,
-            end_offset,
-            selected_text,
-            color,
+            annotation_id as "annotation_id!",
+            creator_id as "creator_id!",
+            work_id as "work_id!",
+            chapter as "chapter!",
+            start_offset as "start_offset!",
+            end_offset as "end_offset!",
+            selected_text as "selected_text!",
+            color as "color!",
             note,
-            created_at,
-            updated_at
+            created_at as "created_at: _",
+            updated_at as "updated_at: _"
         FROM reading_annotations
         WHERE creator_id = ?1 AND work_id = ?2 AND chapter = ?3
         ORDER BY created_at ASC
-        ",
+        "#,
+        creator_id,
+        work_id,
+        chapter
     )
-    .bind(creator_id)
-    .bind(work_id)
-    .bind(chapter)
     .fetch_all(pool)
     .await
     .map_err(LocalDbError::Sqlx)?;
@@ -156,25 +165,26 @@ pub async fn get_annotation(
     pool: &Pool<Sqlite>,
     annotation_id: &str,
 ) -> Result<Option<AnnotationRow>, LocalDbError> {
-    let row = sqlx::query_as::<_, AnnotationRow>(
-        r"
+    let row = sqlx::query_as!(
+        AnnotationRow,
+        r#"
         SELECT
-            annotation_id,
-            creator_id,
-            work_id,
-            chapter,
-            start_offset,
-            end_offset,
-            selected_text,
-            color,
+            annotation_id as "annotation_id!",
+            creator_id as "creator_id!",
+            work_id as "work_id!",
+            chapter as "chapter!",
+            start_offset as "start_offset!",
+            end_offset as "end_offset!",
+            selected_text as "selected_text!",
+            color as "color!",
             note,
-            created_at,
-            updated_at
+            created_at as "created_at: _",
+            updated_at as "updated_at: _"
         FROM reading_annotations
         WHERE annotation_id = ?1
-        ",
+        "#,
+        annotation_id
     )
-    .bind(annotation_id)
     .fetch_optional(pool)
     .await
     .map_err(LocalDbError::Sqlx)?;
@@ -210,36 +220,37 @@ pub async fn create_annotation(
     }
 
     let now = Utc::now();
-    let row = sqlx::query_as::<_, AnnotationRow>(
-        r"
+    let row = sqlx::query_as!(
+        AnnotationRow,
+        r#"
         INSERT INTO reading_annotations
             (annotation_id, creator_id, work_id, chapter, start_offset, end_offset, selected_text, color, note, created_at, updated_at)
         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
         RETURNING
-            annotation_id,
-            creator_id,
-            work_id,
-            chapter,
-            start_offset,
-            end_offset,
-            selected_text,
-            color,
+            annotation_id as "annotation_id!",
+            creator_id as "creator_id!",
+            work_id as "work_id!",
+            chapter as "chapter!",
+            start_offset as "start_offset!",
+            end_offset as "end_offset!",
+            selected_text as "selected_text!",
+            color as "color!",
             note,
-            created_at,
-            updated_at
-        ",
+            created_at as "created_at: _",
+            updated_at as "updated_at: _"
+        "#,
+        annotation_id,
+        creator_id,
+        work_id,
+        chapter,
+        start_offset,
+        end_offset,
+        selected_text,
+        color,
+        note,
+        now,
+        now
     )
-    .bind(annotation_id)
-    .bind(creator_id)
-    .bind(work_id)
-    .bind(chapter)
-    .bind(start_offset)
-    .bind(end_offset)
-    .bind(selected_text)
-    .bind(color)
-    .bind(note)
-    .bind(now)
-    .bind(now)
     .fetch_one(pool)
     .await
     .map_err(LocalDbError::Sqlx)?;
@@ -270,31 +281,32 @@ pub async fn update_annotation(
     };
 
     let now = Utc::now();
-    let row = sqlx::query_as::<_, AnnotationRow>(
-        r"
+    let row = sqlx::query_as!(
+        AnnotationRow,
+        r#"
         UPDATE reading_annotations
         SET color = ?1,
             note = ?2,
             updated_at = ?3
         WHERE annotation_id = ?4
         RETURNING
-            annotation_id,
-            creator_id,
-            work_id,
-            chapter,
-            start_offset,
-            end_offset,
-            selected_text,
-            color,
+            annotation_id as "annotation_id!",
+            creator_id as "creator_id!",
+            work_id as "work_id!",
+            chapter as "chapter!",
+            start_offset as "start_offset!",
+            end_offset as "end_offset!",
+            selected_text as "selected_text!",
+            color as "color!",
             note,
-            created_at,
-            updated_at
-        ",
+            created_at as "created_at: _",
+            updated_at as "updated_at: _"
+        "#,
+        new_color,
+        new_note,
+        now,
+        annotation_id
     )
-    .bind(new_color)
-    .bind(new_note)
-    .bind(now)
-    .bind(annotation_id)
     .fetch_one(pool)
     .await
     .map_err(LocalDbError::Sqlx)?;
@@ -320,6 +332,13 @@ pub async fn delete_annotation(
     .map_err(LocalDbError::Sqlx)?;
 
     Ok(())
+}
+
+/// Database row for a reading-progress lookup.
+#[derive(Debug, Clone, sqlx::FromRow)]
+struct ReadingProgressRow {
+    scroll_progress: Option<i64>,
+    updated_at: Option<DateTime<Utc>>,
 }
 
 /// Database row for an annotation.
