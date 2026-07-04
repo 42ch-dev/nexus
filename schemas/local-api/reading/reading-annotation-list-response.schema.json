@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/local-api/reading/reading-annotation-list-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ReadingAnnotationListResponse",
+  "description": "Response for GET /v1/local/reading/annotations. Returns all annotations for the current creator on the requested (work, chapter) as a flat list. No pagination — per-chapter annotation count is expected to stay bounded (dozens, not hundreds).",
+  "type": "object",
+  "required": ["items"],
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": { "$ref": "https://nexus42.invalid/schemas/local-api/reading/reading-annotation.schema.json" }
+    }
+  },
+  "additionalProperties": false
+}
