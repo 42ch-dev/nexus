@@ -527,9 +527,15 @@ impl From<sqlx::Error> for NexusApiError {
 
 impl From<nexus_local_db::LocalDbError> for NexusApiError {
     fn from(err: nexus_local_db::LocalDbError) -> Self {
-        Self::Internal {
-            code: "DATABASE_ERROR".into(),
-            message: err.to_string(),
+        match err {
+            nexus_local_db::LocalDbError::ValidationError(msg) => Self::BadRequest {
+                code: "invalid_input".to_string(),
+                message: msg,
+            },
+            _ => Self::Internal {
+                code: "DATABASE_ERROR".into(),
+                message: err.to_string(),
+            },
         }
     }
 }

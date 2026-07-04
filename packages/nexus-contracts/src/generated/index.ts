@@ -110,6 +110,14 @@ export * from './local-api/preset-management/UpdatePresetRequest';
 export * from './local-api/preset-management/UpdatePresetResponse';
 export * from './local-api/preset-management/ValidatePresetRequest';
 export * from './local-api/preset-management/ValidatePresetResponse';
+export * from './local-api/reading/ReadingAnnotationCreateRequest';
+export * from './local-api/reading/ReadingAnnotationListQuery';
+export * from './local-api/reading/ReadingAnnotationListResponse';
+export * from './local-api/reading/ReadingAnnotationPatchRequest';
+export * from './local-api/reading/ReadingAnnotation';
+export * from './local-api/reading/ReadingProgressQuery';
+export * from './local-api/reading/ReadingProgressRequest';
+export * from './local-api/reading/ReadingProgressResponse';
 export * from './local-api/schedule/AddScheduleRequest';
 export * from './local-api/schedule/AddScheduleResponse';
 export * from './local-api/schedule/CoreContextHistoryEntry';
@@ -296,6 +304,14 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   UpdatePresetResponse: 1,
   ValidatePresetRequest: 1,
   ValidatePresetResponse: 1,
+  ReadingAnnotationCreateRequest: 1,
+  ReadingAnnotationListQuery: 1,
+  ReadingAnnotationListResponse: 1,
+  ReadingAnnotationPatchRequest: 1,
+  ReadingAnnotation: 1,
+  ReadingProgressQuery: 1,
+  ReadingProgressRequest: 1,
+  ReadingProgressResponse: 1,
   AddScheduleRequest: 1,
   AddScheduleResponse: 1,
   CoreContextHistoryEntry: 1,

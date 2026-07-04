@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM reading_annotations WHERE annotation_id = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "81f526136a95e045b3734ea417526e8bfefb3de95cb21e96b453acce37734855"
+}
