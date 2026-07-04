@@ -20,8 +20,7 @@ CREATE TABLE IF NOT EXISTS reading_progress (
                      CHECK (scroll_progress >= 0 AND scroll_progress <= 10000),
     updated_at       TEXT NOT NULL,  -- ISO 8601
     PRIMARY KEY (creator_id, work_id, chapter),
-    FOREIGN KEY (work_id) REFERENCES works(work_id) ON DELETE CASCADE,
-    FOREIGN KEY (work_id, chapter) REFERENCES work_chapters(work_id, chapter) ON DELETE CASCADE
+    FOREIGN KEY (work_id) REFERENCES works(work_id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_reading_progress_work_chapter
@@ -40,8 +39,7 @@ CREATE TABLE IF NOT EXISTS reading_annotations (
     note             TEXT,
     created_at       TEXT NOT NULL,  -- ISO 8601
     updated_at       TEXT NOT NULL,  -- ISO 8601
-    FOREIGN KEY (work_id) REFERENCES works(work_id) ON DELETE CASCADE,
-    FOREIGN KEY (work_id, chapter) REFERENCES work_chapters(work_id, chapter) ON DELETE CASCADE
+    FOREIGN KEY (work_id) REFERENCES works(work_id) ON DELETE CASCADE
 );
 
 CREATE INDEX IF NOT EXISTS idx_reading_annotations_work_chapter
