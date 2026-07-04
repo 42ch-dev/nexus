@@ -165,6 +165,24 @@
     --color-soul-narrative-prose: var(--color-gray-900);
     --color-soul-growth-curve-stroke: var(--color-purple-700);
 
+    /* V1.89 Deeper Manuscript Reading — annotation highlight fills + inspector/
+       selection-toolbar chrome. Values mirror DESIGN.md token names verbatim. */
+    --color-reading-annotation-highlight-yellow-background: color-mix(in srgb, var(--color-amber-700) 18%, transparent);
+    --color-reading-annotation-highlight-yellow-text: var(--color-amber-1000);
+    --color-reading-annotation-highlight-blue-background: color-mix(in srgb, var(--color-blue-700) 12%, transparent);
+    --color-reading-annotation-highlight-blue-text: var(--color-blue-1000);
+    --color-reading-annotation-highlight-green-background: color-mix(in srgb, var(--color-green-700) 16%, transparent);
+    --color-reading-annotation-highlight-green-text: var(--color-green-1000);
+    --color-reading-annotation-highlight-pink-background: color-mix(in srgb, var(--color-pink-700) 16%, transparent);
+    --color-reading-annotation-highlight-pink-text: var(--color-pink-1000);
+    --color-reading-annotation-inspector-background: var(--color-background-100);
+    --color-reading-annotation-inspector-border: var(--color-gray-alpha-400);
+    --color-reading-annotation-inspector-text: var(--color-gray-1000);
+    --color-reading-selection-toolbar-background: var(--color-background-100);
+    --color-reading-selection-toolbar-border: var(--color-gray-alpha-400);
+    --color-reading-selection-toolbar-text: var(--color-gray-1000);
+    --color-reading-selection-toolbar-shadow: 0px 4px 12px rgba(0, 0, 0, 0.12);
+
     /* Elevation — DESIGN.md §Elevation */
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04);
     --shadow-popover: 0 1px 1px rgba(0, 0, 0, 0.03), 0 8px 24px -12px rgba(0, 0, 0, 0.18);
@@ -311,6 +329,23 @@
        gray-900 / purple-700. */
     --color-soul-narrative-prose: var(--color-gray-900);
     --color-soul-growth-curve-stroke: var(--color-purple-700);
+
+    /* V1.89 Deeper Manuscript Reading — dark-tuned annotation tokens. */
+    --color-reading-annotation-highlight-yellow-background: color-mix(in srgb, var(--color-amber-700) 22%, transparent);
+    --color-reading-annotation-highlight-yellow-text: var(--color-amber-1000);
+    --color-reading-annotation-highlight-blue-background: color-mix(in srgb, var(--color-blue-700) 20%, transparent);
+    --color-reading-annotation-highlight-blue-text: var(--color-blue-1000);
+    --color-reading-annotation-highlight-green-background: color-mix(in srgb, var(--color-green-700) 20%, transparent);
+    --color-reading-annotation-highlight-green-text: var(--color-green-1000);
+    --color-reading-annotation-highlight-pink-background: color-mix(in srgb, var(--color-pink-700) 20%, transparent);
+    --color-reading-annotation-highlight-pink-text: var(--color-pink-1000);
+    --color-reading-annotation-inspector-background: var(--color-background-100);
+    --color-reading-annotation-inspector-border: var(--color-gray-alpha-400);
+    --color-reading-annotation-inspector-text: var(--color-gray-1000);
+    --color-reading-selection-toolbar-background: var(--color-background-200);
+    --color-reading-selection-toolbar-border: var(--color-gray-alpha-500);
+    --color-reading-selection-toolbar-text: var(--color-gray-1000);
+    --color-reading-selection-toolbar-shadow: 0px 4px 12px rgba(0, 0, 0, 0.40);
 
     /* Elevation */
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);

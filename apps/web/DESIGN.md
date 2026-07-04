@@ -392,26 +392,34 @@ components:
   # Each is a low-alpha tint derived from the nearest accent family so the
   # highlight composes with reading-prose without obscuring text.
   reading-annotation-highlight-yellow:
-    fill: "color-mix(in srgb, {colors.amber-700} 18%, transparent)"
+    backgroundColor: "color-mix(in srgb, {colors.amber-700} 18%, transparent)"
+    textColor: "{colors.amber-1000}"
   reading-annotation-highlight-blue:
-    fill: "color-mix(in srgb, {colors.blue-700} 12%, transparent)"
+    backgroundColor: "color-mix(in srgb, {colors.blue-700} 12%, transparent)"
+    textColor: "{colors.blue-1000}"
   reading-annotation-highlight-green:
-    fill: "color-mix(in srgb, {colors.green-700} 16%, transparent)"
+    backgroundColor: "color-mix(in srgb, {colors.green-700} 16%, transparent)"
+    textColor: "{colors.green-1000}"
   reading-annotation-highlight-pink:
-    fill: "color-mix(in srgb, {colors.pink-700} 16%, transparent)"
+    backgroundColor: "color-mix(in srgb, {colors.pink-700} 16%, transparent)"
+    textColor: "{colors.pink-1000}"
 
   # Annotation inspector — side panel listing highlights for the current chapter.
+  # Background/border/shadow compose existing primitives; textColor keeps the
+  # panel foreground aligned with the reading surface.
   reading-annotation-inspector:
     width: "320px"
-    bg: "{colors.background-100}"
-    border: "{colors.gray-alpha-400}"
+    backgroundColor: "{colors.background-100}"
+    borderColor: "{colors.gray-alpha-400}"
+    textColor: "{colors.gray-1000}"
     elevation: "shadow-elevation-3"
 
   # Selection toolbar — floating toolbar that appears when text is selected
   # in the reading surface, offering a "Highlight" action.
   reading-selection-toolbar:
-    bg: "{colors.background-100}"
-    border: "{colors.gray-alpha-400}"
+    backgroundColor: "{colors.background-100}"
+    borderColor: "{colors.gray-alpha-400}"
+    textColor: "{colors.gray-1000}"
     shadow: "0px 4px 12px rgba(0,0,0,0.12)"
 ---
 
