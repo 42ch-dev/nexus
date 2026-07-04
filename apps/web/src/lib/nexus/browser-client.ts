@@ -47,6 +47,12 @@ import type {
   OutlinePatchStructureRequest,
   PatchChapterRequest,
   PatchWorkRequest,
+  ReadingAnnotation,
+  ReadingAnnotationCreateRequest,
+  ReadingAnnotationListResponse,
+  ReadingAnnotationPatchRequest,
+  ReadingProgressRequest,
+  ReadingProgressResponse,
   ReloadPresetResponse,
   ReviewRequest,
   ReviewResponse,
@@ -67,6 +73,8 @@ import type {
   UpdatePresetResponse,
   ValidatePresetRequest,
   ValidatePresetResponse,
+  WorkDetailResponse,
+  WorkOutline,
   World,
   WorldKbCandidatesResponse,
   WorldKbGraphResponse,
@@ -76,8 +84,6 @@ import type {
   WorldKbPatchRelationshipResponse,
   WorldKbPromoteCandidateRequest,
   WorldKbPromoteCandidateResponse,
-  WorkDetailResponse,
-  WorkOutline,
 } from '@42ch/nexus-contracts';
 
 import { NexusClientError } from './errors';
@@ -452,6 +458,46 @@ export class BrowserClient implements NexusClient {
     return this.post<SoulNarrativeResponse>('/v1/local/memory/soul/reflect', request);
   }
 
+  // ── Reading depth (V1.89) ──────────────────────────────────────────────────
+  getReadingProgress(workId: string, chapter: number): Promise<ReadingProgressResponse> {
+    return this.get<ReadingProgressResponse>('/v1/local/reading/progress', {
+      work_id: workId,
+      chapter,
+    });
+  }
+  putReadingProgress(request: ReadingProgressRequest): Promise<ReadingProgressResponse> {
+    return this.put<ReadingProgressResponse>('/v1/local/reading/progress', request);
+  }
+  deleteReadingProgress(workId: string, chapter: number): Promise<void> {
+    return this.delete<void>('/v1/local/reading/progress', { work_id: workId, chapter });
+  }
+  listReadingAnnotations(
+    workId: string,
+    chapter: number,
+  ): Promise<ReadingAnnotationListResponse> {
+    return this.get<ReadingAnnotationListResponse>('/v1/local/reading/annotations', {
+      work_id: workId,
+      chapter,
+    });
+  }
+  createReadingAnnotation(request: ReadingAnnotationCreateRequest): Promise<ReadingAnnotation> {
+    return this.post<ReadingAnnotation>('/v1/local/reading/annotations', request);
+  }
+  patchReadingAnnotation(
+    annotationId: string,
+    request: ReadingAnnotationPatchRequest,
+  ): Promise<ReadingAnnotation> {
+    return this.patch<ReadingAnnotation>(
+      `/v1/local/reading/annotations/${encodeURIComponent(annotationId)}`,
+      request,
+    );
+  }
+  deleteReadingAnnotation(annotationId: string): Promise<void> {
+    return this.delete<void>(
+      `/v1/local/reading/annotations/${encodeURIComponent(annotationId)}`,
+    );
+  }
+
   // ── Transport core ─────────────────────────────────────────────────────────
 
   private get<T>(path: string, query?: object): Promise<T> {
@@ -460,6 +506,10 @@ export class BrowserClient implements NexusClient {
 
   private post<T>(path: string, body?: unknown): Promise<T> {
     return this.request<T>('POST', path, body);
+  }
+
+  private put<T>(path: string, body: unknown): Promise<T> {
+    return this.request<T>('PUT', path, body);
   }
 
   private patch<T>(path: string, body: unknown, query?: object): Promise<T> {

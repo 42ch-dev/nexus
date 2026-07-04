@@ -1,0 +1,29 @@
+{
+  "id": "2026-07-04-v1.89-reading-depth-backend",
+  "title": "P0 — Reading depth backend (progress + annotations persistence + Local API)",
+  "file": ".mstar/plans/2026-07-04-v1.89-reading-depth-backend.md",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": [
+    "@fullstack-dev"
+  ],
+  "progress": 100,
+  "tags": [
+    "backend",
+    "local-api",
+    "persistence"
+  ],
+  "created_at": "2026-07-04",
+  "updated_at": "2026-07-04",
+  "done_at": "2026-07-04",
+  "notes": "",
+  "metadata": {
+    "working_branch": "feature/v1.89-reading-depth-backend",
+    "spec_integration_branch": "iteration/v1.89",
+    "merge_target": "iteration/v1.89",
+    "iteration_refs": [
+      "V1.89"
+    ],
+    "blocked_by_plan_id": "2026-07-04-v1.89-prepare-dual-track"
+  }
+}

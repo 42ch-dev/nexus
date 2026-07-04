@@ -85,8 +85,16 @@ export const queryKeys = {
     worlds: () => [...queryKeys.memory.all, 'worlds'] as const,
     // V1.81 → V1.82: whole-Creator or per-World SOUL narrative cache. The query
     // key includes the selected `world_id` so switching scopes creates exactly
-    // one observer per active scope and never leaves a stale narrative visible.
+    // one active observer per active scope and never leaves a stale narrative visible.
     soulNarrative: (creatorId: string, worldId?: string | null) =>
       [...queryKeys.memory.all, 'soul-narrative', creatorId, worldId ?? 'creator'] as const,
+  },
+  // V1.89 — Deeper Manuscript Reading (BL-11 MVP slice).
+  reading: {
+    all: ['reading'] as const,
+    progress: (workId: string, chapter: number) =>
+      [...queryKeys.reading.all, 'progress', workId, chapter] as const,
+    annotations: (workId: string, chapter: number) =>
+      [...queryKeys.reading.all, 'annotations', workId, chapter] as const,
   },
 } as const;

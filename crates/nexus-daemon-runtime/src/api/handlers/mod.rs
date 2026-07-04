@@ -15,6 +15,7 @@ pub mod orchestration;
 pub mod outline;
 pub mod permissions;
 pub mod preset_management;
+pub mod reading;
 pub mod references;
 pub mod runtime;
 pub mod soul_narrative_synthesizer;

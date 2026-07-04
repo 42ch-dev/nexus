@@ -1,46 +1,45 @@
 {
   "version": 1,
-  "updated_at": "2026-07-04T02:17:20+0800",
+  "updated_at": "2026-07-04T20:00:00+0800",
   "plans": [],
   "metadata": {
-    "integration_branch": "iteration/v1.88",
-    "integration_branch_retired": true,
+    "integration_branch": "iteration/v1.89",
+    "integration_branch_retired": false,
     "last_integration_branch": "iteration/v1.88",
     "integration_merge_target": "main",
     "iteration_base_branch": "main",
     "target_branch": "main",
-    "spec_integration_branch": "iteration/v1.88",
-    "latest_active_iteration": null,
-    "latest_active_compass": null,
+    "spec_integration_branch": "iteration/v1.89",
+    "latest_active_iteration": "V1.89",
+    "latest_active_compass": "v1.89-deeper-manuscript-reading-delivery-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.88",
-      "compass": "v1.88-frontend-slate-clear-and-reliability-cleanup-delivery-compass-v1.md",
+      "iteration": "V1.89",
+      "compass": "v1.89-deeper-manuscript-reading-delivery-compass-v1.md",
       "shipped_at": "2026-07-04",
-      "plan_count": 1,
-      "plan_count_done": 1,
-      "wire_contracts_changed": false,
-      "note": "V1.88 frontend slate-clear + reliability cleanup + tracker hygiene; QC 3/3 Approve; QA Pass"
+      "plan_count": 4,
+      "plan_count_done": 4,
+      "wire_contracts_changed": true,
+      "note": "V1.89 deeper manuscript reading MVP: persisted progress + annotations/highlights; QC 3/3 Approve; QA Pass"
     },
     "tech_debt_summary": {
-      "total_open": 3,
-      "total_deferred": 9,
-      "total_resolved": 295,
-      "total_archived": 0,
-      "by_severity_active": {
-        "low": 3
+      "total_open": 0,
+      "by_severity": {
+        "critical": 0,
+        "high": 0,
+        "medium": 0,
+        "low": 0,
+        "nit": 0
       },
-      "by_target_active": {
-        "V1.79+ (or CI wrapper)": 1,
-        "V1.80+ accept": 2
-      },
-      "refreshed_at": "2026-07-01",
-      "refreshed_reason": "V1.80 wave-1 Done (QA Pass): R-V178P0-QC3-003 (REL-01) + 4 V1.79-QC residuals resolved. Remaining open: 2 P0 accepted low + 1 V1.79 CI-wrapper low."
+      "by_target": {},
+      "by_plan": {},
+      "refreshed_at": "2026-07-04",
+      "refreshed_reason": "V1.88 closure: all open residuals resolved or archived; slate clean before V1.89."
     },
-    "updated_at": "2026-07-04T02:17:20+0800"
+    "updated_at": "2026-07-04T22:30:00+0800"
   },
   "residual_findings": {
     "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization": [
