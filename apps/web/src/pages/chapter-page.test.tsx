@@ -725,6 +725,39 @@ describe('ChapterPage (V1.89 Deeper Manuscript Reading)', () => {
     expect(await screen.findByRole('note')).toHaveTextContent(/may have shifted/i);
   });
 
+  it('renders in-bounds persisted highlights inside the prose', async () => {
+    useHandlers(
+      chapterDetail('draft'),
+      bodyHandler('Body prose.'),
+      workDetailHandler(),
+      chaptersListHandler(),
+      openFindingsHandler(1, 0),
+      worldKbGraphHandler('world-1', 0),
+      readingProgressHandler(),
+      saveReadingProgressHandler(),
+      annotationsHandler([
+        {
+          annotation_id: 'a-1',
+          work_id: 'w-123',
+          chapter: 1,
+          start_offset: 0,
+          end_offset: 4,
+          selected_text: 'Body',
+          color: 'yellow',
+          created_at: '2026-07-04T00:00:00Z',
+          updated_at: '2026-07-04T00:00:00Z',
+        },
+      ]),
+      createAnnotationHandler(),
+      updateAnnotationHandler(),
+      deleteAnnotationHandler(),
+    );
+
+    renderChapter();
+    await screen.findByText('Body prose.');
+    expect(await screen.findByText('Body')).toHaveAttribute('data-nexus-highlight', 'yellow');
+  });
+
   it('lists annotations in the inspector and supports delete', async () => {
     const user = userEvent.setup();
     let deletedId: string | null = null;

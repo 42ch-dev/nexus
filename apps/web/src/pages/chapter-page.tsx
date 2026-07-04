@@ -14,7 +14,7 @@
  * Canvas" redirect CTA. V1.89 adds persisted scroll progress, text-selection
  * highlights, and the annotation inspector.
  */
-import { useMemo, useRef, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, ArrowUpRight } from 'lucide-react';
 
@@ -72,6 +72,11 @@ export function ChapterPage() {
   const deleteAnnotation = useDeleteAnnotation();
 
   const proseRef = useRef<HTMLDivElement>(null);
+  const [bodyLength, setBodyLength] = useState(0);
+  useLayoutEffect(() => {
+    setBodyLength(proseRef.current?.textContent?.length ?? 0);
+  }, [body.data]);
+
   const selection = useTextSelection(proseRef);
   const [defaultColor] = useState<ReadingAnnotationColor>('yellow');
 
@@ -111,8 +116,6 @@ export function ChapterPage() {
   // Key the progress bar on chapter so it resets when the reader navigates.
   // `ch.volume` is contract-guaranteed (ChapterDetail.volume: number, >= 1).
   const progressKey = `${workId}:${ch.chapter}:${ch.volume}`;
-
-  const bodyLength = proseRef.current?.textContent?.length ?? 0;
 
   return (
     <div className="flex flex-col gap-4">

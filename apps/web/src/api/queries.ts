@@ -776,7 +776,7 @@ export function useReadingProgress(workId: string | undefined, chapter: number |
   });
 }
 
-export function useSaveReadingProgress() {
+export function useSaveReadingProgress(options?: { showToast?: boolean }) {
   const client = useNexusClient();
   const qc = useQueryClient();
   const errorToast = useErrorToast();
@@ -790,7 +790,9 @@ export function useSaveReadingProgress() {
       }),
     onSuccess: (_data, vars) => {
       qc.setQueryData(queryKeys.reading.progress(vars.workId, vars.chapter), _data);
-      toast({ variant: 'success', title: 'Progress saved' });
+      if (options?.showToast) {
+        toast({ variant: 'success', title: 'Progress saved' });
+      }
     },
     onError: (error) => errorToast(error, 'Could not save reading progress'),
   });
@@ -869,15 +871,16 @@ export function useReadingProgressSync(
   options?: { enabled?: boolean; showSavedToast?: boolean },
 ) {
   const progress = useReadingProgress(workId, chapter);
-  const save = useSaveReadingProgress();
+  const save = useSaveReadingProgress({ showToast: options?.showSavedToast });
   const enabled = options?.enabled ?? true;
 
+  const saveMutate = save.mutate;
   const flushSave = useCallback(() => {
     if (!workId || chapter === undefined || chapter <= 0) return;
     const scrollable = document.documentElement.scrollHeight - window.innerHeight;
     const ratio = scrollable > 0 ? window.scrollY / scrollable : 0;
-    save.mutate({ workId, chapter, scrollProgress: ratioToScrollProgress(ratio) });
-  }, [workId, chapter, save]);
+    saveMutate({ workId, chapter, scrollProgress: ratioToScrollProgress(ratio) });
+  }, [workId, chapter, saveMutate]);
 
   // Restore once when the persisted value arrives.
   useEffect(() => {
