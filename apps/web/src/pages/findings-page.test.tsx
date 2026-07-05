@@ -243,4 +243,50 @@ describe('FindingsPage', () => {
       document.createElement = originalCreateElement;
     }
   });
+
+  it('clears multi-selection when the severity filter changes', async () => {
+    useHandlers(
+      http.get('/v1/daemon/works', () =>
+        HttpResponse.json({
+          items: [{ work_id: WORK_ID, title: 'Test Novel', updated_at: '2026-01-01T00:00:00Z' }],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+      http.get('/v1/daemon/works/:workId/findings', () => HttpResponse.json(findingsList)),
+    );
+
+    renderFindings();
+    await selectWork();
+
+    fireEvent.click(screen.getByLabelText(/select all visible findings/i));
+    expect(await screen.findByTestId('findings-bulk-bar')).toHaveTextContent('2 selected');
+
+    fireEvent.change(screen.getByLabelText(/severity/i), { target: { value: 'critical' } });
+    await waitFor(() =>
+      expect(screen.queryByTestId('findings-bulk-bar')).not.toBeInTheDocument(),
+    );
+  });
+
+  it('clears multi-selection when the status filter changes', async () => {
+    useHandlers(
+      http.get('/v1/daemon/works', () =>
+        HttpResponse.json({
+          items: [{ work_id: WORK_ID, title: 'Test Novel', updated_at: '2026-01-01T00:00:00Z' }],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+      http.get('/v1/daemon/works/:workId/findings', () => HttpResponse.json(findingsList)),
+    );
+
+    renderFindings();
+    await selectWork();
+
+    fireEvent.click(screen.getByLabelText(/select all visible findings/i));
+    expect(await screen.findByTestId('findings-bulk-bar')).toHaveTextContent('2 selected');
+
+    fireEvent.change(screen.getByLabelText('Status'), { target: { value: 'triaged' } });
+    await waitFor(() =>
+      expect(screen.queryByTestId('findings-bulk-bar')).not.toBeInTheDocument(),
+    );
+  });
 });

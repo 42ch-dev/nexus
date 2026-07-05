@@ -196,7 +196,10 @@ export function FindingsPage() {
               id="findings-severity"
               type="search"
               value={severity}
-              onChange={(e) => setSeverity(e.target.value)}
+              onChange={(e) => {
+                setSeverity(e.target.value);
+                setSelectedIds(new Set());
+              }}
               placeholder="e.g. critical"
               className="h-10 w-full max-w-[180px] rounded-control border border-gray-alpha-400 bg-background-100 px-3 text-copy-14 text-gray-1000 placeholder:text-gray-700"
             />
@@ -207,7 +210,10 @@ export function FindingsPage() {
               id="findings-status"
               type="search"
               value={status}
-              onChange={(e) => setStatus(e.target.value)}
+              onChange={(e) => {
+                setStatus(e.target.value);
+                setSelectedIds(new Set());
+              }}
               placeholder="e.g. open"
               className="h-10 w-full max-w-[180px] rounded-control border border-gray-alpha-400 bg-background-100 px-3 text-copy-14 text-gray-1000 placeholder:text-gray-700"
             />
