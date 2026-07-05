@@ -139,7 +139,7 @@
       "refreshed_at": "2026-07-05T12:00:55+0000",
       "refreshed_reason": "V1.91 closeout: 5 residuals carried forward from findings batch triage; severity adjusted to canonical enum."
     },
-    "updated_at": "2026-07-05T22:35:00+0000",
+    "updated_at": "2026-07-05T23:10:00+0000",
     "integration_branch": "iteration/v1.92"
   },
   "residual_findings": {
@@ -212,6 +212,112 @@
         "target": "when list virtualisation lands",
         "tracking_link": ".mstar/plans/reports/2026-07-05-v1.91-reading-chrome/qc3.md §S-004",
         "note": "At the 100-item cap this is not user-visible; revisit when findings lists grow larger or virtualisation is introduced. [severity adjusted from info to nit at V1.91 closeout]",
+        "lifecycle": "open"
+      }
+    ],
+    "2026-07-05-v1.92-closure": [
+      {
+        "id": "R-V192P0-001",
+        "title": "Re-bind to a different host does not invalidate/regenerate the persisted TLS cert SAN",
+        "severity": "low",
+        "source": "qc1 W-001 revalidation note + qc3 S-001 (cross-confirmed)",
+        "scope": "crates/nexus-daemon-runtime/src/tls/mod.rs try_load_existing + load_or_generate_tls_config",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.93",
+        "tracking_link": ".mstar/plans/reports/2026-07-05-v1.92-closure/qc1.md §Revalidation; qc3.md S-001",
+        "note": "Cert reused from ~/.nexus42/tls/ without re-validating SAN vs current bind_host. Recovery today = manual delete of tls dir. Future: detect SAN/bind-host mismatch at load + regenerate.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V192P0-002",
+        "title": "TLS listener graceful_shutdown passes None — ignores shutdown_grace_ms cap",
+        "severity": "low",
+        "source": "qc3 S-002",
+        "scope": "crates/nexus-daemon-runtime/src/boot.rs ~line 862 (TLS handle.graceful_shutdown(None))",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.93",
+        "tracking_link": ".mstar/plans/reports/2026-07-05-v1.92-closure/qc3.md S-002",
+        "note": "Plain-HTTP path honours shutdown_grace_ms; TLS path uses unbounded wait. One-line fix to thread the grace duration. Safer default (no mid-response drop) but inconsistent.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V192P1-001",
+        "title": "connection-storage load does not validate the parsed config shape (shallow)",
+        "severity": "low",
+        "source": "qc1 S-001",
+        "scope": "apps/web/src/lib/nexus/connection-storage.ts",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.93",
+        "tracking_link": ".mstar/plans/reports/2026-07-05-v1.92-closure/qc1.md S-001",
+        "note": "Add minimal schema/shape validation on load so a corrupt localStorage entry fails gracefully rather than feeding malformed config into the client.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V192P1-002",
+        "title": "Fingerprint fetch error cannot distinguish self-signed-cert rejection from unreachable daemon (browser)",
+        "severity": "low",
+        "source": "qc3 S-003",
+        "scope": "apps/web/src/lib/nexus/browser-client.ts fingerprint path + connect-daemon-page error copy",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.93",
+        "tracking_link": ".mstar/plans/reports/2026-07-05-v1.92-closure/qc3.md S-003",
+        "note": "Browser fetch cannot tell cert-rejection from network error. Add a UI hint that the Nexus desktop app (TOFU-capable) is the supported remote-connection surface. Copy-only.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V192P1-003",
+        "title": "apps/desktop/src-tauri/src/connection_config.rs has no unit tests",
+        "severity": "low",
+        "source": "qc1 S-003",
+        "scope": "apps/desktop/src-tauri/src/connection_config.rs",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.93",
+        "tracking_link": ".mstar/plans/reports/2026-07-05-v1.92-closure/qc1.md S-003",
+        "note": "Add unit tests for the desktop connection-config (keychain vs app-data fallback) paths.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V192UX-001",
+        "title": "Reconnect-to-same-endpoint path could surface a 'pinned fingerprint matches' hint",
+        "severity": "nit",
+        "source": "qc1 S-002",
+        "scope": "apps/web/src/pages/connect-daemon-page.tsx reconnect flow",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.93",
+        "tracking_link": ".mstar/plans/reports/2026-07-05-v1.92-closure/qc1.md S-002",
+        "note": "Minor reassurance UX on the matching-pinned reconnect state.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V192SPEC-001",
+        "title": "Spec §15.1 should fully codify SAN-vs-bind-host policy + rebinding behavior",
+        "severity": "low",
+        "source": "qc1 S-004",
+        "scope": ".mstar/knowledge/specs/daemon-runtime.md §15.1",
+        "decision": "defer",
+        "owner": "@architect",
+        "target": "V1.93",
+        "tracking_link": ".mstar/plans/reports/2026-07-05-v1.92-closure/qc1.md S-004",
+        "note": "Helper docstring + partial spec note added during fix-wave; fully codify the SAN generation rule (loopback always + bind host + wildcard skip + rebinding limitation) as normative.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V192HYG-001",
+        "title": "Legacy naming stragglers cross-directory audit (e.g. residual 'Local API' references)",
+        "severity": "nit",
+        "source": "qc1 S-005",
+        "scope": "cross-directory (post-V1.90 rename hygiene)",
+        "decision": "defer",
+        "owner": "@writing-specialist",
+        "target": "V1.93+",
+        "tracking_link": ".mstar/plans/reports/2026-07-05-v1.92-closure/qc1.md S-005",
+        "note": "Sweep for any remaining stale 'Local API' / legacy naming in non-historical prose.",
         "lifecycle": "open"
       }
     ]
