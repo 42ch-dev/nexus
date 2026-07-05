@@ -1,12 +1,12 @@
 # Deferred Features — Cross-Version Tracker v2
 
-**Quick status**: **V1.90 active (2026-07-05)** — Daemon API remote-ready rename (`Local API` → `Daemon API`, paths `/v1/daemon/*`, opt-in remote listener). V1.89 shipped (2026-07-04). Platform **paused**.
+**Quick status**: **V1.91 active (2026-07-05)** — Profile-specific reading chrome (BL-13) + findings batch triage companion. V1.90 shipped (2026-07-05). Platform **paused**.
 
-**V1.90 in-progress (2026-07-05)**: Daemon API rename iteration. Next: Phase 1 Review & Edit chain, integration branch, per-plan implement.
+**V1.91 in-progress (2026-07-05)**: Reading chrome + findings batch triage iteration. Next: Phase 3 iteration-close, PR to `main`.
 
 **Purpose**: Single source of truth for **open** and **backlog** features deferred from delivery compasses. Closed/shipped history lives in shipped archive.
 **Scope**: `nexus` OSS repository only.
-**Created**: 2026-04-21 · **Last updated**: 2026-07-05 (V1.90 start: V1.89 marked shipped; V1.90 active; BL-13 profile chrome remains backlog)
+**Created**: 2026-04-21 · **Last updated**: 2026-07-05 (V1.91 closeout: BL-13 marked shipped; companion batch triage delivered; V1.91 active → PR pending)
 
 ---
 
@@ -66,7 +66,6 @@
 | BL-07 | Explore ranking / cold-start + Publish compliance matrix | V1.2 | Backlog | M | |
 | BL-08 | Social / marketing features | V1.3 | V2.0+ | XL | |
 | BL-09 | Standalone maturation dashboard (multi-chart cross-Work/World aggregate view) | V1.79 | Backlog | M | V1.79 Track A shipped in-context lightweight maturation indicators only; standalone dashboard deferred. |
-| BL-13 | Profile-specific reading chrome (essay section breaks, game-bible cross-reference overlays, novel typography presets) | V1.89 | Backlog | M | V1.79→V1.89 | BL-11 MVP (persisted progress + annotations/highlights) shipped in V1.89. Profile chrome remains deferred. |
 
 ### 2.5 Reliability roadmap (cross-version)
 
@@ -93,9 +92,9 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 ## 5) Quick index
 
-**Active iteration**: V1.90 active (2026-07-05) — Daemon API remote-ready rename.
+**Active iteration**: V1.91 active (2026-07-05) — Profile-specific reading chrome + findings batch triage (PR pending).
 
-**Latest shipped**: [V1.89](../iterations/v1.89-deeper-manuscript-reading-delivery-compass-v1.md) (Deeper Manuscript Reading, PR #117 — 2026-07-04)
+**Latest shipped**: [V1.90](../iterations/v1.90-daemon-api-remote-ready-delivery-compass-v1.md) (Daemon API remote-ready rename, PR #118 — 2026-07-05)
 
 **Full iteration index**: [iterations/README.md](../iterations/README.md)
 

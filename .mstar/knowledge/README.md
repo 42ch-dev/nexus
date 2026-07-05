@@ -6,6 +6,7 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | --- | --- |
 | **[`specs/`](specs/README.md)** | Normative OSS specifications (flat layout) |
 | **[`architecture-patterns/`](architecture-patterns/)** | Distilled reusable patterns (compound output) |
+| **[`api-design/`](api-design/)** | Distilled reusable API design patterns (compound output) |
 | **This directory (root files)** | Cross-cutting policy, boundaries, trackers |
 
 **Rules:** [AGENTS.md](AGENTS.md) · **Harness:** [`.mstar/AGENTS.md`](../AGENTS.md) · **Iterations:** [`.mstar/iterations/`](../iterations/README.md)
@@ -28,6 +29,8 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | [architecture-patterns/nexus-brand-token-hierarchy.md](architecture-patterns/nexus-brand-token-hierarchy.md) | Nexus brand token hierarchy — root DESIGN → `@42ch/nexus-ui` → app DESIGN mapping → implementation; LFS PNG + SVG asset policy (V1.83 brand foundation distilled; compound V1.83) |
 | [architecture-patterns/bundler-agnostic-component-library-assets.md](architecture-patterns/bundler-agnostic-component-library-assets.md) | Bundler-agnostic component library assets — a tsup/esbuild-built React component library cannot import `.svg` in source; the consumer resolves the asset URL via its bundler and passes it as a `src` prop (V1.87 nexus-ui promotion distilled; compound V1.87) |
 | [architecture-patterns/daemon-api-remote-bind-gate.md](architecture-patterns/daemon-api-remote-bind-gate.md) | Daemon API remote-bind gate — opt-in non-loopback bind gated by API key + explicit flag, enforced before `TcpListener::bind` (V1.90 remote-ready rename distilled) |
+| [architecture-patterns/profile-aware-reading-chrome.md](architecture-patterns/profile-aware-reading-chrome.md) | Profile-aware reading chrome — map `work_profile` → token-driven ReactMarkdown renderers while preserving the read-only invariant (V1.91 reading chrome distilled) |
+| [api-design/additive-batch-patch-helper.md](api-design/additive-batch-patch-helper.md) | Additive batch PATCH helper — cap-bounded, DAO-reused, partial-success loop with per-ID `not_found`/`conflict` arrays (V1.91 findings batch triage distilled) |
 | [conventions/surface-rename-hygiene-checklist.md](conventions/surface-rename-hygiene-checklist.md) | Surface-rename hygiene checklist — grep sweeps and verification gates for renaming a cross-language contract surface (V1.90 Local API → Daemon API distilled) |
 
 **All OSS feature specs:** [`specs/README.md`](specs/README.md) (full index by domain).

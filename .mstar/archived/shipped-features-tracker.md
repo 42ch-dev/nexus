@@ -49,6 +49,7 @@ When a version ships, append new closed rows here and remove them from the activ
 | ~~DF-37~~ | Worker-handle plumbing for capability-layer LLM calls | V1.31 | Plan `2026-05-30-v1.31-judge-and-summarize-capabilities`: `Arc<dyn WorkerHandleProvider>` injected through `CapabilityRegistry::with_runtime_deps()`; fallback limited to explicit standalone/test mode. |
 | ~~BL-09~~ | V1.17 Prompt + Skills Compass v1 | V1.17 | Shipped V1.17 — see archive §2 V1.17 snapshot. |
 | ~~BL-11~~ | Deeper manuscript reading — persisted reading progress + annotations/highlights (MVP) | V1.89 | Profile-specific reading chrome split to BL-13 and remains deferred. Compass: [v1.89-deeper-manuscript-reading-delivery-compass-v1.md](../iterations/v1.89-deeper-manuscript-reading-delivery-compass-v1.md). |
+| ~~BL-13~~ | Profile-specific reading chrome (essay section breaks, game-bible cross-reference overlays, novel typography presets) | V1.91 | Shipped alongside findings batch triage companion. Compass: [v1.91-reading-chrome-and-findings-batch-delivery-compass-v1.md](../iterations/v1.91-reading-chrome-and-findings-batch-delivery-compass-v1.md). |
 | ~~DF-51~~ | `creator.inject_prompt` wire/schema alignment | V1.34 (P0) | Commits a044f94 + 71c10cc on `feature/v1.34-residual-convergence`: input_schema declares `prompt_file` + `vars` with `anyOf`; `R-P2-01` closed. |
 | ~~DF-54~~ | Work `stage` / `stage_status` persistence gap | V1.34 (P1) | Commits 655d71c + R-FL-E-01..08 on `feature/v1.34-fl-e-run-intents-and-stages`: stage columns + DDL migration + 11 e2e tests + active schedule uniqueness. |
 | ~~DF-29~~ | `registry.refresh` capability (synthetic output + optional `--cdn-url` network) | V1.56 (P1) | Synthetic default (embedded snapshot, version `2026-06-22.v1`); `--cdn-url <url>` daemon flag with 10s timeout + 3-retry exponential backoff; sandbox/air-gap compatible (zero network in default mode); 11 negative tests for SSRF (HTTPS-only + redirect policy `limited(0)` + private-IP block 127/8 10/8 172.16/12 192.168/16 169.254/16 fc00::/7 ::1 IPv4-mapped + 8 MiB body cap + typed `CdnError` enum); qc2 Request Changes → fix-wave → qc-specialist-2 re-review Approve. Capability registered in CapabilityRegistry SSOT (20 tools total); spec amend `acp-capability-set.md` §4.7A + `cli-spec.md` §6.3 + §4.7A.1 Security contract. |
@@ -803,4 +804,21 @@ Archived from [deferred-features-cross-version-tracker.md](../knowledge/deferred
 | **Branch topology** | `iteration/v1.66` (from main @ 6e1f18e0) + per-plan `feature/v1.66-desktop-shell-core` + `feature/v1.66-hygiene-residuals` + `feature/v1.66-sidecar-lifecycle-and-ci` + fix-wave `fix/v1.66-qc-fix-wave-1` (Wave 1 peak 2 worktrees P0‖P-sec; all feature/fix branches merged into integration before QC; integration → main via PR) |
 
 **Note**: V1.66 P-last added this snapshot. F-8 hygiene gap (V1.57–V1.65 snapshots missing from §2 body) remains open as a low-priority backfill — tracked separately, not a V1.66 blocker. **Shipped via PR (TBD) iteration/v1.66 → main** (V1.65 TauriClient stub → V1.66 implemented; apps/web SPA transport unchanged; V1.67 = body editor + lock + UI productivity + desktop distribution v2).
+
+### V1.91 delivery snapshot (Shipped)
+
+| Category | Position |
+|----------|----------|
+| Delivery SSOT | [v1.91-reading-chrome-and-findings-batch-delivery-compass-v1.md](../iterations/v1.91-reading-chrome-and-findings-batch-delivery-compass-v1.md) |
+| Shipped at | 2026-07-05 |
+| PR | #? from `iteration/v1.91` → `main` (created at closeout) |
+| Scope | Profile-specific reading chrome (P0 headline) + findings batch triage companion (P1). P-1 Prepare locked DESIGN.md reading-chrome tokens and the bulk PATCH contract. |
+| Plans | `2026-07-05-v1.91-prepare-dual-track`, `2026-07-05-v1.91-reading-chrome`, `2026-07-05-v1.91-findings-batch`, `2026-07-05-v1.91-closure` |
+| Closed tracker items | BL-13 (profile-specific reading chrome) |
+| Companion delivery | Findings list multi-select + bulk status/executor update + client-side CSV export via `PATCH /v1/daemon/findings/batch` |
+| Wire contracts | Additive only — 2 new schemas under `schemas/daemon-api/findings/`; `@42ch/nexus-contracts` 0.19.0 → 0.19.1; `schema_version` unchanged |
+| QC | Tri-review Approve with residuals (5 low/info residuals registered under `2026-07-05-v1.91-findings-batch`) |
+| QA | Pass — all gates green; every compass §5 AC verified with evidence |
+| Compound docs | `architecture-patterns/profile-aware-reading-chrome.md`, `api-design/additive-batch-patch-helper.md`, `CONCEPTS.md` Reading Chrome entry |
+| Deferred | TLS/mTLS remote hardening, standalone maturation dashboard (BL-09), full remediation workflow, backend export jobs |
 

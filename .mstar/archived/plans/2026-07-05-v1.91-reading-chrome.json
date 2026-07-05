@@ -1,0 +1,22 @@
+{
+  "id": "2026-07-05-v1.91-reading-chrome",
+  "status": "Done",
+  "title": "P0 \u2014 Track A: Profile-Specific Reading Chrome",
+  "file": ".mstar/plans/2026-07-05-v1.91-reading-chrome.md",
+  "type": "implement",
+  "owner": "@frontend-dev",
+  "metadata": {
+    "iteration": "V1.91",
+    "iteration_refs": [
+      "V1.91"
+    ],
+    "spec_integration_branch": "iteration/v1.91",
+    "merge_target": "iteration/v1.91",
+    "primary_spec": ".mstar/plans/2026-07-05-v1.91-prepare-dual-track.md",
+    "blocked_by": [],
+    "blocking": [],
+    "inreview_at": "2026-07-05T10:49:44+0000",
+    "commit": "feceeebe",
+    "done_at": "2026-07-05T11:29:13+0000"
+  }
+}

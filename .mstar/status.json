@@ -1,98 +1,7 @@
 {
   "version": 1,
-  "updated_at": "2026-07-05T11:29:13+0000",
-  "plans": [
-    {
-      "id": "2026-07-05-v1.91-prepare-dual-track",
-      "status": "Done",
-      "title": "P-1 \u2014 Prepare: Reading Chrome + Findings Batch Triage",
-      "file": ".mstar/plans/2026-07-05-v1.91-prepare-dual-track.md",
-      "type": "prepare",
-      "owner": "@project-manager",
-      "metadata": {
-        "iteration": "V1.91",
-        "iteration_refs": [
-          "V1.91"
-        ],
-        "spec_integration_branch": "iteration/v1.91",
-        "merge_target": "iteration/v1.91",
-        "primary_spec": ".mstar/plans/2026-07-05-v1.91-prepare-dual-track.md",
-        "blocked_by": [],
-        "blocking": [
-          "2026-07-05-v1.91-reading-chrome",
-          "2026-07-05-v1.91-findings-batch"
-        ],
-        "done_at": "2026-07-05T08:37:43+0000",
-        "commit": "141c22cb"
-      }
-    },
-    {
-      "id": "2026-07-05-v1.91-reading-chrome",
-      "status": "Done",
-      "title": "P0 \u2014 Track A: Profile-Specific Reading Chrome",
-      "file": ".mstar/plans/2026-07-05-v1.91-reading-chrome.md",
-      "type": "implement",
-      "owner": "@frontend-dev",
-      "metadata": {
-        "iteration": "V1.91",
-        "iteration_refs": [
-          "V1.91"
-        ],
-        "spec_integration_branch": "iteration/v1.91",
-        "merge_target": "iteration/v1.91",
-        "primary_spec": ".mstar/plans/2026-07-05-v1.91-prepare-dual-track.md",
-        "blocked_by": [],
-        "blocking": [],
-        "inreview_at": "2026-07-05T10:49:44+0000",
-        "commit": "feceeebe",
-        "done_at": "2026-07-05T11:29:13+0000"
-      }
-    },
-    {
-      "id": "2026-07-05-v1.91-findings-batch",
-      "status": "Done",
-      "title": "P1 \u2014 Track B: Findings Batch Triage",
-      "file": ".mstar/plans/2026-07-05-v1.91-findings-batch.md",
-      "type": "implement",
-      "owner": "@fullstack-dev",
-      "metadata": {
-        "iteration": "V1.91",
-        "iteration_refs": [
-          "V1.91"
-        ],
-        "spec_integration_branch": "iteration/v1.91",
-        "merge_target": "iteration/v1.91",
-        "primary_spec": ".mstar/plans/2026-07-05-v1.91-prepare-dual-track.md",
-        "blocked_by": [],
-        "blocking": [],
-        "commit": "feceeebe",
-        "inreview_at": "2026-07-05T10:49:44+0000",
-        "done_at": "2026-07-05T11:29:13+0000"
-      }
-    },
-    {
-      "id": "2026-07-05-v1.91-closure",
-      "status": "Todo",
-      "title": "P-last \u2014 Closure: QC/QA/Tracker/Compound/Compaction/PR",
-      "file": ".mstar/plans/2026-07-05-v1.91-closure.md",
-      "type": "closeout",
-      "owner": "@project-manager",
-      "metadata": {
-        "iteration": "V1.91",
-        "iteration_refs": [
-          "V1.91"
-        ],
-        "spec_integration_branch": "iteration/v1.91",
-        "merge_target": "iteration/v1.91",
-        "primary_spec": ".mstar/plans/2026-07-05-v1.91-prepare-dual-track.md",
-        "blocked_by": [
-          "2026-07-05-v1.91-reading-chrome",
-          "2026-07-05-v1.91-findings-batch"
-        ],
-        "blocking": []
-      }
-    }
-  ],
+  "updated_at": "2026-07-05T12:00:55+0000",
+  "plans": [],
   "metadata": {
     "integration_branch": "iteration/v1.91",
     "integration_branch_retired": false,
@@ -108,28 +17,34 @@
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.90",
-      "compass": "v1.90-daemon-api-remote-ready-delivery-compass-v1.md",
+      "iteration": "V1.91",
+      "compass": "v1.91-reading-chrome-and-findings-batch-delivery-compass-v1.md",
       "shipped_at": "2026-07-05",
-      "merged_at": "2026-07-05T15:37:23+0800",
-      "merge_commit": "7a548c1b1e2148095baefad13ed98465162ea92c",
-      "pr": "https://github.com/42ch-dev/nexus/pull/118"
+      "pr": "(created at closeout)"
     },
     "tech_debt_summary": {
-      "total_open": 0,
+      "updated_at": "2026-07-05",
+      "total_open": 5,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 0,
-        "low": 0,
-        "nit": 0
+        "medium": 1,
+        "low": 3,
+        "nit": 1
       },
-      "by_target": {},
-      "by_plan": {},
-      "refreshed_at": "2026-07-04",
-      "refreshed_reason": "V1.88 closure: all open residuals resolved or archived; slate clean before V1.89."
+      "by_target": {
+        "V1.92": 2,
+        "V1.92 (paired with R-V191P1-001)": 1,
+        "V1.92+": 1,
+        "when list virtualisation lands": 1
+      },
+      "by_plan": {
+        "2026-07-05-v1.91-findings-batch": 5
+      },
+      "refreshed_at": "2026-07-05T12:00:55+0000",
+      "refreshed_reason": "V1.91 closeout: 5 residuals carried forward from findings batch triage; severity adjusted to canonical enum."
     },
-    "updated_at": "2026-07-05T11:29:13+0000"
+    "updated_at": "2026-07-05T11:35:54+0000"
   },
   "residual_findings": {
     "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization": [
@@ -6928,14 +6843,14 @@
       {
         "id": "R-V191P1-005",
         "title": "FindingsPage recomputes allSelected / someSelected on every render without memoisation",
-        "severity": "info",
+        "severity": "nit",
         "source": "qc3 S-004",
         "scope": "apps/web/src/pages/findings-page.tsx selection derivation",
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "when list virtualisation lands",
         "tracking_link": ".mstar/plans/reports/2026-07-05-v1.91-reading-chrome/qc3.md \u00a7S-004",
-        "note": "At the 100-item cap this is not user-visible; revisit when findings lists grow larger or virtualisation is introduced.",
+        "note": "At the 100-item cap this is not user-visible; revisit when findings lists grow larger or virtualisation is introduced. [severity adjusted from info to nit at V1.91 closeout]",
         "lifecycle": "open"
       }
     ]
