@@ -4,8 +4,8 @@ reviewer: qc-specialist
 reviewer_index: 1
 plan_id: 2026-07-05-v1.92-closure
 focus: architecture_coherence_maintainability
-verdict: Request Changes
-generated_at: 2026-07-06T01:25:00Z
+verdict: Approve
+generated_at: 2026-07-06T01:55:00Z
 ---
 
 # Code Review Report — qc1 (architecture coherence + maintainability)
@@ -145,3 +145,109 @@ Per role rule: leaf executor, no Task / subagent dispatch.
 **Verdict**: Request Changes
 
 The architecture is otherwise clean: TLS module is well-scoped, single-source-of-truth fingerprint endpoint placement matches the spec, BrowserClient/TauriClient parameterisation is backwards-compatible (same-origin default preserved), `ConnectionConfig` shape matches the spec §16.1 schema, the codegen R-V191P1-003 refactor (FindingBatchPatch concrete struct) is sound at the wire level, and the four UX states in `connect-daemon-page.tsx` correctly mirror the spec §16.2 three phases plus the revert flow. The two Warnings are the blockers.
+
+---
+
+# Targeted Re-review (post fix-wave)
+
+## Re-review Scope
+- **plan_id**: `2026-07-05-v1.92-closure`
+- **Feature / scope label**: V1.92 integrated — P-1 contracts/spec + P0 TLS remote-bind + P1 Remote Connection Model
+- **Working branch** (verified): `iteration/v1.92`
+- **Review cwd** (verified): `/Users/bibi/workspace/organizations/42ch/nexus`
+- **Review range / Diff basis**: `merge-base: 55e215b1 (origin/main)` + `tip: e937fb63 (iteration/v1.92 HEAD)`; the fix-wave delta is `git diff 0a8a4b18...e937fb63`
+- **HEAD** (at re-review): `e937fb632e213c8674b41f41cdec5bfd7c1e2428`
+- **Reviewer index**: 1 (qc-specialist) — same seat, same `qc1.md` file per `mstar-review-qc` Targeted re-review protocol
+- **Files re-reviewed** (fix-wave delta only): `crates/nexus-daemon-runtime/src/tls/mod.rs`, `crates/nexus-daemon-runtime/src/boot.rs`, `crates/nexus-daemon-runtime/src/api/handlers/findings.rs`, `crates/nexus-daemon-runtime/tests/findings_api.rs`
+- **Tools run**:
+  - `git show 59b947d1` (W-001 fix commit)
+  - `git show fbc03477` (W-002 fix commit)
+  - `git diff 0a8a4b18...e937fb63 --stat` (fix-wave delta)
+  - `cargo test -p nexus-daemon-runtime --lib tls::` — 8/8 tls unit tests pass (incl. 3 new SAN tests)
+  - `cargo test -p nexus-daemon-runtime --test findings_api` — 25/25 pass (incl. restored `findings_batch_rejects_unknown_patch_field`)
+  - `cargo test -p nexus-daemon-runtime` — 33 test files, all green; 0 failed (lib unit tests went 408 → 411, +3 for the new SAN tests)
+  - `cargo clippy -p nexus-daemon-runtime -- -D warnings` — clean
+  - `cargo +nightly-2026-06-26 fmt -p nexus-daemon-runtime -- --check` — clean
+- **Manual trace**: `build_subject_alt_names(bind_host)` — loopback SANs always present, non-loopback concrete IP added as IP SAN, non-loopback hostname added as DNS SAN, `0.0.0.0`/`::`/`""` skipped; `validate_batch_patch_keys` — pre-parses the raw JSON `patch` object and rejects any key outside `{status, target_executor}` with `NexusApiError::BadRequest` (422 `invalid_input`); restored test uses raw `Json(json!({...}))` (real wire shape) instead of the typed-request path.
+
+## Revalidation
+
+### W-001 — TLS cert SAN now includes non-loopback bind host — **RESOLVED** ✅
+
+**What the fix did (commit `59b947d1`)**:
+- Threaded `bind_host: &str` through `tls::load_or_generate_tls_config` → `generate_and_persist` → a new `build_subject_alt_names(bind_host)` helper (`crates/nexus-daemon-runtime/src/tls/mod.rs:165-203`).
+- `build_subject_alt_names` always includes the loopback SANs (127.0.0.1, ::1, localhost), then:
+  - If `bind_host` is empty / `0.0.0.0` / `::` → skip (wildcard bind addresses are not valid for hostname validation; documented in the helper's docstring).
+  - If `bind_host` parses as `std::net::IpAddr` and is non-loopback → append `SanType::IpAddress(ip)`.
+  - Else → append `SanType::DnsName(...)` (with a `tracing::warn!` if `Ia5String::try_from` fails — non-IA5 names like IDN are silently skipped, but logged).
+- Updated `boot.rs:811` to pass `host` through the call site; added a comment clarifying that the third gate condition (usable TLS cert) is enforced downstream by `load_or_generate_tls_config`.
+- Updated existing tls unit tests to pass `"127.0.0.1"` as `bind_host` (signature change).
+- Added 3 new unit tests:
+  - `build_sans_includes_non_loopback_bind_host_ip` — verifies `192.168.1.42` is in the SAN alongside the loopback trio.
+  - `build_sans_includes_non_loopback_bind_host_dns` — verifies `nexus.local` (DNS name) is in the SAN.
+  - `build_sans_skips_wildcard_bind_hosts` — verifies `0.0.0.0` is NOT in the SAN (wildcards skipped).
+
+**Evidence re-review ran**:
+- `cargo test -p nexus-daemon-runtime --lib tls::` → 8/8 pass (including all 3 new SAN tests). The tests exercise the exact branch the prior review was worried about (non-loopback IP, non-loopback DNS, wildcard skip).
+- `cargo clippy -p nexus-daemon-runtime -- -D warnings` → clean.
+- `cargo +nightly-2026-06-26 fmt -p nexus-daemon-runtime -- --check` → clean.
+
+**Disposition**: RESOLVED. The SAN now matches the bind host, so a remote client connecting via the actual bind hostname/IP will succeed hostname validation. The TOFU fingerprint fetch (`BrowserClient.certFingerprint` → `useFingerprint` → `connect-daemon-page`) is no longer blocked by TLS handshake failure. The original loopback behavior is preserved (loopback-only SAN for loopback binds). The four UX states in `connect-daemon-page.tsx` continue to work end-to-end.
+
+**Note (NOT a blocker, dev-flagged edge case, recommend PM register as a low residual)**:
+A user who first binds to `192.168.1.42` and later rebinds to a different host (e.g. `192.168.1.43`) **without deleting `~/.nexus42/tls/`** will get the old cert with the wrong SAN — the `try_load_existing` path at `tls/mod.rs:46-55` returns the persisted cert regardless of `bind_host`. The dev flagged this in the `build_subject_alt_names` docstring ("clients in that case must connect via a concrete address whose SAN is present ... or use fingerprint pinning with a custom verifier"). Spec §15.1.3 already says regeneration is "explicit user action only (delete `~/.nexus42/tls/` → next boot regenerates)". A future enhancement could compare the loaded cert's SAN against `bind_host` and force regeneration on mismatch, but that is out of V1.92 scope. **Recommend PM register as R-V192-SAN-002 low** — pure UX/operations, not a blocker.
+
+### W-002 — Unknown patch field rejection restored — **RESOLVED** ✅
+
+**What the fix did (commit `fbc03477`)**:
+- Changed `batch_update_findings_handler` to accept raw `Json<serde_json::Value>` (previously `Json<BatchUpdateFindingsRequest>`) — this is the right boundary for handler-side unknown-field rejection.
+- Added `validate_batch_patch_keys(&raw)` helper at `crates/nexus-daemon-runtime/src/api/handlers/findings.rs:582-606` that:
+  - Returns `NexusApiError::BadRequest` (422, `invalid_input`) if `patch` is missing or not an object (new edge case coverage the old test didn't have).
+  - Iterates the patch object's keys and rejects any key outside `{status, target_executor}` with `NexusApiError::BadRequest { code: "invalid_input", message: format!("unknown patch field: {key}") }`.
+  - Case-sensitive (matches JSON Schema `additionalProperties: false` semantics).
+- Added a `batch_request_value` test helper that converts the typed `BatchUpdateFindingsRequest` into `Json<Value>` — required for the existing typed tests to keep working through the new raw-JSON handler signature.
+- Updated all 9 existing batch tests to use `batch_request_value` (typed → raw conversion) — refactor is clean and the tests still cover their original invariants.
+- Restored `findings_batch_rejects_unknown_patch_field` test using raw `Json(json!({"finding_ids": [...], "patch": {"status": "triaged", "bogus": "x"}}))` (real wire shape), asserting 422 + `invalid_input` — matches the original V1.91 P1 test's contract.
+
+**Evidence re-review ran**:
+- `cargo test -p nexus-daemon-runtime --test findings_api` → 25/25 pass (was 24/24 before; +1 for the restored test). `findings_batch_rejects_unknown_patch_field` is in the run.
+- `cargo test -p nexus-daemon-runtime` → all 33 test files green, 0 failed.
+- `cargo clippy -p nexus-daemon-runtime -- -D warnings` → clean.
+- `cargo +nightly-2026-06-26 fmt -p nexus-daemon-runtime -- --check` → clean.
+
+**Disposition**: RESOLVED. The unknown-field rejection is restored at the handler boundary, the test is back, the wire shape is unchanged on the success path, and the success-path tests still pass (no regression introduced by the raw-JSON detour). The case-sensitive matching matches the schema's `additionalProperties: false` semantics. The codegen-bounded `FindingBatchPatch` concrete struct is preserved for downstream code (handler reads `body.patch.status` / `body.patch.target_executor` exactly as before).
+
+### Suggestions from wave 1 (carry-over — not blockers)
+The 5 Suggestions (S-001 through S-005) from the wave-1 report remain. None are blocking and all are maintainability-only. They can be registered as PM residuals in `residual_findings["2026-07-05-v1.92-closure"]`:
+- **S-001** (`connection-storage.ts` shallow load validation) — low
+- **S-002** (`connect-daemon-page.tsx` "Reconnect" hint) — low
+- **S-003** (`apps/desktop/src-tauri/src/connection_config.rs` no unit tests) — low
+- **S-004** (spec §15.1 should codify SAN-vs-bind-host) — partially resolved by the W-001 fix's docstring; a spec amendment would still be a nice-to-have. Recommend PM register as R-V192-SPEC-001 low.
+- **S-005** (legacy `nexus42d` naming stragglers — repo-wide audit) — low; not in V1.92 scope.
+
+Plus one new low residual surfacing from the fix-wave:
+- **R-V192-SAN-002 (suggested)**: cert regeneration is NOT triggered when the loaded cert's SAN does not match the current `bind_host` (rebinding to a different host requires manual `~/.nexus42/tls/` deletion). Pure ops UX; documented in spec §15.1.3; can ship as a follow-up enhancement (compare SAN at `try_load_existing` time → regenerate on mismatch). Not a blocker for V1.92.
+
+## Updated Summary
+
+| Severity | Count (wave 1) | Count (re-review) | Status |
+|----------|----------------|-------------------|--------|
+| 🔴 Critical | 0 | 0 | unchanged |
+| 🟡 Warning | 2 | 0 | **both resolved** |
+| 🟢 Suggestion | 5 | 5 + 1 new | carry-over, plus 1 new (rebinding edge case) |
+
+## Re-review Verdict
+
+**Verdict**: **Approve**
+
+Both blocking Warnings (W-001 cert SAN hostname validation, W-002 unknown-patch-field contract enforcement) are demonstrably resolved:
+- W-001 fix is structurally sound, preserves loopback behaviour, covers non-loopback IP/DNS bind hosts, skips wildcards, and has dedicated unit tests for each branch.
+- W-002 fix restores the V1.91 P1 unknown-field rejection at the handler boundary, the regression test is back, and the success path is unchanged.
+
+All static gates green (`cargo test -p nexus-daemon-runtime`, `cargo clippy -p nexus-daemon-runtime -- -D warnings`, `cargo +nightly-2026-06-26 fmt -- --check`). No new Critical or Warning introduced by the fix-wave. The 5 wave-1 Suggestions remain maintainability-only and can ride as PM residuals; one new low residual (R-V192-SAN-002 — rebind-to-different-host edge case) is recommended.
+
+Per `mstar-review-qc`: "**0 Critical + 0 Warning → Approve (Suggestions may remain as residuals)**" — verdict gate satisfied.
+
+## Subagent invokes issued: 0
+
+Per role rule: leaf executor, no Task / subagent dispatch.
