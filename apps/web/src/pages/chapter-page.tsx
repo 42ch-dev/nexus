@@ -40,6 +40,7 @@ import {
   useDeleteAnnotation,
   useReadingProgressSync,
   useUpdateAnnotation,
+  useWork,
 } from '@/api/queries';
 import { formatRelative } from '@/lib/format';
 
@@ -58,6 +59,7 @@ export function ChapterPage() {
 
   const chapter = useChapter(workId || undefined, chapterNumber || undefined, volumeQuery);
   const body = useChapterBody(workId || undefined, chapterNumber || undefined, volumeQuery);
+  const work = useWork(workId || undefined);
   const neighbors = useChapterNeighbors(workId || undefined, chapterNumber || undefined, currentVolume);
 
   // V1.89 — persisted reading progress sync.
@@ -186,6 +188,7 @@ export function ChapterPage() {
               isLoading={body.isLoading}
               isError={body.isError}
               onRetry={() => body.refetch()}
+              workProfile={work.data?.work_profile}
             />
           </HighlightLayer>
         </div>
