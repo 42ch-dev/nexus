@@ -1,6 +1,6 @@
 //! Auth Middleware
 //!
-//! Tower/axum middleware layer for daemon-daemon API key authentication.
+//! Tower/axum middleware layer for daemon API key authentication.
 //!
 //! Replaces the former Bearer-token middleware with `X-API-Key` validation.
 //! Two startup modes:
@@ -417,7 +417,7 @@ async fn auth_keyless_localhost(
             "Request rejected: non-loopback connection in keyless-localhost mode",
         );
         return Err(NexusApiError::Forbidden {
-            resource: "daemon-daemon-api".into(),
+            resource: "daemon-api".into(),
             reason: "non-loopback connections require an API key".into(),
         });
     }

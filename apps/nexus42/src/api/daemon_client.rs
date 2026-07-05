@@ -52,7 +52,7 @@ const UNGUARDED_PATHS: &[&str] = &[
     "/v1/daemon/daemon/status",
 ];
 
-/// Client for the daemon Daemon API
+/// Client for the Daemon API
 #[derive(Debug, Clone)]
 pub struct DaemonClient {
     base_url: String,

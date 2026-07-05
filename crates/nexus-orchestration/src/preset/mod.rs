@@ -18,7 +18,7 @@
 //! produce `ValidationDiagnostic` values (not `ValidationProblem`) with richer
 //! metadata (severity, category).
 //!
-//! The daemon `POST /v1/local/presets:validate` handler is being updated to
+//! The daemon `POST /v1/daemon/presets:validate` handler is being updated to
 //! route through the shared validation facade. P4 will own the broader spec
 //! update in `orchestration-engine.md` §7.6/§8 to document the unified
 //! validation contract. Key design decisions:

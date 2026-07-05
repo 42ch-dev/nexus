@@ -55,7 +55,7 @@ pub const MAX_TOTAL_BLOCK_CHARS: usize = 3200;
 /// (blocker > major > minor > info). Unknown severities sort lowest.
 ///
 /// Exposed so callers that fetch findings outside the chapter-scoped DAO
-/// (e.g. the CLI, which lists via the daemon Local API) can re-sort
+/// (e.g. the CLI, which lists via the Daemon API) can re-sort
 /// client-side without duplicating the rank ladder.
 #[must_use]
 pub fn severity_rank(severity: &str) -> i32 {
@@ -73,7 +73,7 @@ pub fn severity_rank(severity: &str) -> i32 {
 /// ASC. This is the same ordering the chapter-scoped DAO query
 /// ([`nexus_local_db::findings::list_open_findings_for_chapter`])
 /// applies server-side; exposed as a helper for callers that fetch via
-/// paths which do not (yet) use that DAO (e.g. CLI Local API round-trip).
+/// paths which do not (yet) use that DAO (e.g. CLI Daemon API round-trip).
 pub fn sort_open_findings(findings: &mut [Finding]) {
     findings.sort_by(|a, b| {
         severity_rank(&b.severity)

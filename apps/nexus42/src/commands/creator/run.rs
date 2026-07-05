@@ -8,7 +8,7 @@
 //!
 //! FL-E stage-advance presets (`research`, `novel-writing`, `novel-chapter-review`,
 //! `kb-extract`) are dispatched to `stage_advance`; all other presets are
-//! scheduled directly via the daemon Daemon API.
+//! scheduled directly via the Daemon API.
 
 use crate::config::CliConfig;
 use crate::errors::Result;
@@ -633,7 +633,7 @@ async fn assemble_world_kb_block(
 }
 
 /// V1.48 P1 (overlay §2 Consumer) — fetch open findings for the active
-/// Work + chapter via the daemon Daemon API and render the
+/// Work + chapter via the Daemon API and render the
 /// `{{ open_findings_block }}` prompt block.
 ///
 /// Fetches `GET /v1/daemon/works/{work_id}/findings?status=open,triaged`,
@@ -657,7 +657,7 @@ async fn assemble_world_kb_block(
 ///
 /// # Errors
 ///
-/// Returns an error if the daemon Daemon API call fails or the response
+/// Returns an error if the Daemon API call fails or the response
 /// body cannot be deserialized.
 async fn assemble_open_findings_block(
     client: &crate::api::DaemonClient,
@@ -901,7 +901,7 @@ async fn stage_advance(
     };
 
     // V1.48 P1 (overlay §2 Consumer): for the produce stage with a
-    // selected chapter, fetch open findings via the daemon Daemon API and
+    // selected chapter, fetch open findings via the Daemon API and
     // render the `{{ open_findings_block }}` prompt block. The block is
     // `None` when the stage is not `produce`, when no chapter is selected,
     // or when no open findings exist (AC2: no empty sentinel noise).

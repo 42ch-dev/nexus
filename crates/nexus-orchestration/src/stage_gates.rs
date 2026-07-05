@@ -2,7 +2,7 @@
 //!
 //! Provides:
 //! - `check_stage_advance` — the single authoritative gate function
-//!   used by both CLI `stage_advance` and daemon `PATCH /v1/local/works/{id}`.
+//!   used by both CLI `stage_advance` and daemon `PATCH /v1/daemon/works/{id}`.
 //! - `preset_for_stage` — normative stage → preset mapping (spec §4).
 //! - `build_stage_schedule_label` — schedule label for stage advance.
 //! - `build_schedule_for_stage` — builds a correctly-shaped `AddScheduleRequest`

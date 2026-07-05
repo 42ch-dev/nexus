@@ -126,7 +126,7 @@ fn guard_path(requested: &str, workspace_root: &WorkspaceRoot) -> Result<PathBuf
         .map_err(|_| PathGuardError::WorkspaceRootUnknown)?;
 
     let requested_path = Path::new(requested);
-    // Resolve relative paths against the workspace root (the form the Local API
+    // Resolve relative paths against the workspace root (the form the Daemon API
     // returns). Absolute paths are taken as-is; the prefix check still applies.
     let candidate = if requested_path.is_absolute() {
         requested_path.to_path_buf()

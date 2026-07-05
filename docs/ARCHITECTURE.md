@@ -43,7 +43,7 @@ Local-only types (daemon HTTP, schedules, orchestration IPC) are hand-written un
 | **Local** | Daemon supervisor, orchestration, agent-host, Creator workspace, Creator memory, World KB / narrative state, User knowledge, Moment context assembly | **Cargo:** `nexus-daemon-runtime` links orchestration, agent-host, creator, creator-memory, narrative, kb, knowledge, moment-context-assembly (default features), local-db. **Product:** memory + orchestration + agent-host + **work-scope KB file index** + **narrative read-only** (`GET /v1/daemon/narrative/*`) are wired on daemon HTTP; `assemble-moment` is the **single assembly SSOT** (no `assemble-local`); SQLite four-domain context assembly via `nexus-moment-context-assembly`. See § Product integration gaps. | `nexus42 daemon …` → `/v1/daemon/*` |
 | **Cloud** | Platform HTTP, registration, bundle sync (CLI-only), optional context Stage-1 | `nexus-cloud-sync` (`legacy-sync` on CLI) → `nexus-cloud-domain` for User/Pairing invariants | `nexus42 sync …`, `nexus42 platform …` |
 
-**Hard isolation (enforced in `Cargo.toml`):** `nexus-daemon-runtime` does **not** depend on `nexus-cloud-sync` or `nexus-cloud-domain`. Platform sync and creator registration must not be exposed on the daemon Daemon API.
+**Hard isolation (enforced in `Cargo.toml`):** `nexus-daemon-runtime` does **not** depend on `nexus-cloud-sync` or `nexus-cloud-domain`. Platform sync and creator registration must not be exposed on the Daemon API.
 
 ## Entity scope hierarchy
 
