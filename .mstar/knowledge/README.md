@@ -27,6 +27,8 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | [architecture-patterns/on-demand-synthesis-read-path-invariant.md](architecture-patterns/on-demand-synthesis-read-path-invariant.md) | On-demand synthesis read-path invariant — gate every LLM call behind explicit intent; verify the poll path never reaches the synthesizer (headless-QA gap; V1.81 greploop-distilled; compound V1.81 post-merge) |
 | [architecture-patterns/nexus-brand-token-hierarchy.md](architecture-patterns/nexus-brand-token-hierarchy.md) | Nexus brand token hierarchy — root DESIGN → `@42ch/nexus-ui` → app DESIGN mapping → implementation; LFS PNG + SVG asset policy (V1.83 brand foundation distilled; compound V1.83) |
 | [architecture-patterns/bundler-agnostic-component-library-assets.md](architecture-patterns/bundler-agnostic-component-library-assets.md) | Bundler-agnostic component library assets — a tsup/esbuild-built React component library cannot import `.svg` in source; the consumer resolves the asset URL via its bundler and passes it as a `src` prop (V1.87 nexus-ui promotion distilled; compound V1.87) |
+| [architecture-patterns/daemon-api-remote-bind-gate.md](architecture-patterns/daemon-api-remote-bind-gate.md) | Daemon API remote-bind gate — opt-in non-loopback bind gated by API key + explicit flag, enforced before `TcpListener::bind` (V1.90 remote-ready rename distilled) |
+| [conventions/surface-rename-hygiene-checklist.md](conventions/surface-rename-hygiene-checklist.md) | Surface-rename hygiene checklist — grep sweeps and verification gates for renaming a cross-language contract surface (V1.90 Local API → Daemon API distilled) |
 
 **All OSS feature specs:** [`specs/README.md`](specs/README.md) (full index by domain).
 

@@ -19,7 +19,7 @@ import { useHandlers } from '@/test/msw-server';
 const CREATOR = 'creator-active';
 
 function sessionListHandler(creatorId = CREATOR) {
-  return http.get('/v1/local/orchestration/sessions', () =>
+  return http.get('/v1/daemon/orchestration/sessions', () =>
     HttpResponse.json({
       items: [{ session_id: 's1', creator_id: creatorId, preset_id: 'p', status: 'completed' }],
       pagination: { limit: 1, has_more: false },
@@ -30,13 +30,13 @@ function sessionListHandler(creatorId = CREATOR) {
 /** Wire the non-SOUL memory handlers as no-ops so MemoryPage fully renders. */
 function baselineMemoryHandlers(fragments: ReturnType<typeof jsonFragments>) {
   return [
-    http.get('/v1/local/memory/pending-review', () =>
+    http.get('/v1/daemon/memory/pending-review', () =>
       HttpResponse.json({ items: [], pagination: { limit: 20, has_more: false } }),
     ),
-    http.get('/v1/local/memory/pending-review/count', () => HttpResponse.json({ count: 0 })),
-    http.get('/v1/local/memory/fragments', () => HttpResponse.json({ fragments })),
-    http.get('/v1/local/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
-    http.post('/v1/local/memory/soul/reflect', () =>
+    http.get('/v1/daemon/memory/pending-review/count', () => HttpResponse.json({ count: 0 })),
+    http.get('/v1/daemon/memory/fragments', () => HttpResponse.json({ fragments })),
+    http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
+    http.post('/v1/daemon/memory/soul/reflect', () =>
       HttpResponse.json({
         creator_id: CREATOR,
         state: 'insufficient_data',

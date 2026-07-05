@@ -5,7 +5,7 @@
 //!     resolved port.
 //!   - Graceful stop on app quit (SIGTERM → bounded timeout → SIGKILL).
 //!   - Restart-on-crash with bounded exponential backoff.
-//!   - Readiness via `GET /v1/local/runtime/health` (no stdout parsing).
+//!   - Readiness via `GET /v1/daemon/runtime/health` (no stdout parsing).
 //!
 //! Spec: `.mstar/knowledge/specs/daemon-runtime.md` §12 and
 //! `.mstar/knowledge/specs/desktop-shell.md` §7/§8.
@@ -36,7 +36,7 @@ const DAEMON_STATUS_EVENT: &str = "nexus://daemon-status-changed";
 /// `reqwest::Client` on every call (QC3-S2).
 static HEALTH_CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
 
-/// Local API health probe response (`GET /v1/local/runtime/health`).
+/// Daemon API health probe response (`GET /v1/daemon/runtime/health`).
 #[derive(Debug, serde::Deserialize)]
 struct DaemonHealth {
     /// Health status string from the daemon (e.g. "ok"). Carried for debugging
@@ -455,7 +455,7 @@ fn backoff(attempt: u32) -> Duration {
 }
 
 async fn probe_health(port: u16) -> Option<DaemonHealth> {
-    let url = format!("http://127.0.0.1:{port}/v1/local/runtime/health");
+        let url = format!("http://127.0.0.1:{port}/v1/daemon/runtime/health");
     let client = HEALTH_CLIENT.get_or_init(|| {
         reqwest::Client::builder()
             .timeout(HEALTH_PROBE_TIMEOUT)

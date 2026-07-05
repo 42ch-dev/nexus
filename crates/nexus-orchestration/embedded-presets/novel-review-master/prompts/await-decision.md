@@ -25,7 +25,7 @@ For each finding, record the master's decision:
 3. **note** (optional): Brief rationale for the decision
 
 Present the decisions as a structured list. The daemon will write these back
-to the findings API (PATCH /v1/local/findings/{finding_id}).
+to the findings API (PATCH /v1/daemon/findings/{finding_id}).
 
 ### Example Output
 

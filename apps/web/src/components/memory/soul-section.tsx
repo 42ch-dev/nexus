@@ -20,7 +20,7 @@
  *    after a review mutation (wired in queries.ts `useReviewMemory`).
  *
  * V1.82 additions:
- *  - The selector now loads world **titles** from `GET /v1/local/narrative/worlds`
+ *  - The selector now loads world **titles** from `GET /v1/daemon/narrative/worlds`
  *    and includes Work-backed worlds with zero fragments.
  *  - The narrative card re-scopes with the selected world: "All worlds" →
  *    Creator-level narrative; a world → that world's per-World narrative.

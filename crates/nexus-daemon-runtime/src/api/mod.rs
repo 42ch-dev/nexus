@@ -1,11 +1,11 @@
-//! Local API — HTTP JSON endpoints for CLI communication
+//! Daemon API — HTTP JSON endpoints for CLI communication
 //!
 //! # Route protection model (V1.20+)
 //!
 //! **Unguarded routes** (no auth even in keyed-all mode):
-//! - `GET /v1/local/runtime/health` — minimal liveness check
-//! - `GET /v1/local/runtime/status` — runtime diagnostic status
-//! - `GET /v1/local/daemon/status` — daemon lifecycle snapshot
+//! - `GET /v1/daemon/runtime/health` — minimal liveness check
+//! - `GET /v1/daemon/runtime/status` — runtime diagnostic status
+//! - `GET /v1/daemon/daemon/status` — daemon lifecycle snapshot
 //!
 //! All other routes are behind `require_api_key` middleware.
 //! See [`auth_middleware::DaemonApiConfig`] for dual-mode startup.
@@ -35,31 +35,31 @@ use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 fn agent_host_routes() -> Router<WorkspaceState> {
     Router::new()
         .route(
-            "/v1/local/agent-host/health",
+            "/v1/daemon/agent-host/health",
             get(handlers::agent_host::health),
         )
         .route(
-            "/v1/local/agent-host/providers",
+            "/v1/daemon/agent-host/providers",
             get(handlers::agent_host::list_providers),
         )
         .route(
-            "/v1/local/agent-host/sessions",
+            "/v1/daemon/agent-host/sessions",
             post(handlers::agent_host::create_session).get(handlers::agent_host::list_sessions),
         )
         .route(
-            "/v1/local/agent-host/sessions/{session_id}",
+            "/v1/daemon/agent-host/sessions/{session_id}",
             get(handlers::agent_host::get_session).delete(handlers::agent_host::shutdown_session),
         )
         .route(
-            "/v1/local/agent-host/sessions/{session_id}/operations",
+            "/v1/daemon/agent-host/sessions/{session_id}/operations",
             post(handlers::agent_host::execute_operation),
         )
         .route(
-            "/v1/local/agent-host/operations/{operation_id}:cancel",
+            "/v1/daemon/agent-host/operations/{operation_id}:cancel",
             post(handlers::agent_host::cancel_operation),
         )
         .route(
-            "/v1/local/agent-host/sessions/{session_id}/events",
+            "/v1/daemon/agent-host/sessions/{session_id}/events",
             get(handlers::agent_host::session_events),
         )
 }
@@ -71,52 +71,52 @@ fn agent_host_routes() -> Router<WorkspaceState> {
 fn orchestration_routes() -> Router<WorkspaceState> {
     Router::new()
         .route(
-            "/v1/local/orchestration/sessions",
+            "/v1/daemon/orchestration/sessions",
             get(handlers::orchestration::sessions::list_sessions)
                 .post(handlers::orchestration::sessions::create_session),
         )
         .route(
-            "/v1/local/orchestration/sessions/{session_id}",
+            "/v1/daemon/orchestration/sessions/{session_id}",
             get(handlers::orchestration::sessions::get_session),
         )
         .route(
-            "/v1/local/orchestration/sessions/{session_id}/signal",
+            "/v1/daemon/orchestration/sessions/{session_id}/signal",
             post(handlers::orchestration::sessions::signal_session),
         )
         .route(
-            "/v1/local/orchestration/capabilities",
+            "/v1/daemon/orchestration/capabilities",
             get(handlers::orchestration::capabilities::list_capabilities),
         )
         .route(
-            "/v1/local/orchestration/presets",
+            "/v1/daemon/orchestration/presets",
             get(handlers::orchestration::presets::list_presets),
         )
         .route(
-            "/v1/local/orchestration/presets/{id}:reload",
+            "/v1/daemon/orchestration/presets/{id}:reload",
             post(handlers::orchestration::presets::reload_preset),
         )
         // Schedule management routes (WS7)
         .route(
-            "/v1/local/orchestration/schedules",
+            "/v1/daemon/orchestration/schedules",
             post(handlers::orchestration::schedules::add_schedule)
                 .get(handlers::orchestration::schedules::list_schedules),
         )
         .route(
-            "/v1/local/orchestration/schedules/{schedule_id}",
+            "/v1/daemon/orchestration/schedules/{schedule_id}",
             get(handlers::orchestration::schedules::inspect_schedule)
                 .delete(handlers::orchestration::schedules::delete_schedule),
         )
         .route(
-            "/v1/local/orchestration/schedules/{schedule_id}/core-context",
+            "/v1/daemon/orchestration/schedules/{schedule_id}/core-context",
             axum::routing::patch(handlers::orchestration::schedules::edit_core_context)
                 .get(handlers::orchestration::schedules::get_core_context),
         )
         .route(
-            "/v1/local/orchestration/schedules/{schedule_id}/core-context-history",
+            "/v1/daemon/orchestration/schedules/{schedule_id}/core-context-history",
             get(handlers::orchestration::schedules::get_core_context_history),
         )
         .route(
-            "/v1/local/orchestration/schedules/{schedule_id}/signal",
+            "/v1/daemon/orchestration/schedules/{schedule_id}/signal",
             post(handlers::orchestration::schedules::signal_schedule),
         )
 }
@@ -128,15 +128,15 @@ fn orchestration_routes() -> Router<WorkspaceState> {
 fn creator_routes() -> Router<WorkspaceState> {
     Router::new()
         .route(
-            "/v1/local/creators/{creator_id}",
+            "/v1/daemon/creators/{creator_id}",
             get(handlers::creators::get_creator),
         )
         .route(
-            "/v1/local/creators/{creator_id}:logout",
+            "/v1/daemon/creators/{creator_id}:logout",
             post(handlers::creators::logout_creator),
         )
         .route(
-            "/v1/local/creators/active",
+            "/v1/daemon/creators/active",
             get(handlers::creators::get_active_creator).put(handlers::creators::set_active_creator),
         )
 }
@@ -145,20 +145,20 @@ fn creator_routes() -> Router<WorkspaceState> {
 fn preset_routes() -> Router<WorkspaceState> {
     Router::new()
         .route(
-            "/v1/local/presets",
+            "/v1/daemon/presets",
             get(handlers::preset_management::list_presets)
                 .post(handlers::preset_management::scaffold_preset),
         )
         .route(
-            "/v1/local/presets:validate",
+            "/v1/daemon/presets:validate",
             post(handlers::preset_management::validate_preset),
         )
         .route(
-            "/v1/local/presets/{id}:reload",
+            "/v1/daemon/presets/{id}:reload",
             post(handlers::preset_management::reload_preset),
         )
         .route(
-            "/v1/local/presets/{id}",
+            "/v1/daemon/presets/{id}",
             get(handlers::preset_management::get_preset)
                 .patch(handlers::preset_management::update_preset)
                 .delete(handlers::preset_management::delete_preset),
@@ -174,11 +174,11 @@ fn preset_routes() -> Router<WorkspaceState> {
 fn kb_routes() -> Router<WorkspaceState> {
     Router::new()
         .route(
-            "/v1/local/kb/entries",
+            "/v1/daemon/kb/entries",
             get(handlers::kb::list_entries).post(handlers::kb::add_entry),
         )
         .route(
-            "/v1/local/kb/entries/{entry_id}",
+            "/v1/daemon/kb/entries/{entry_id}",
             get(handlers::kb::get_entry).delete(handlers::kb::delete_entry),
         )
 }
@@ -186,26 +186,26 @@ fn kb_routes() -> Router<WorkspaceState> {
 /// Workspace management routes (V1.20 Batch 4, T21–T24) + legacy single-workspace.
 fn workspace_routes() -> Router<WorkspaceState> {
     Router::new()
-        .route("/v1/local/workspace", get(handlers::workspace::info))
+        .route("/v1/daemon/workspace", get(handlers::workspace::info))
         .route(
-            "/v1/local/workspace/init",
+            "/v1/daemon/workspace/init",
             post(handlers::workspace::init_workspace),
         )
         // DF-31 skeleton: workspace session open/commit
         .route(
-            "/v1/local/workspace/open",
+            "/v1/daemon/workspace/open",
             post(handlers::workspace::open_workspace),
         )
         .route(
-            "/v1/local/workspace/commit",
+            "/v1/daemon/workspace/commit",
             post(handlers::workspace::commit_workspace),
         )
         .route(
-            "/v1/local/workspaces",
+            "/v1/daemon/workspaces",
             get(handlers::workspaces::list_workspaces).post(handlers::workspaces::create_workspace),
         )
         .route(
-            "/v1/local/workspaces/active",
+            "/v1/daemon/workspaces/active",
             get(handlers::workspaces::get_active_workspace)
                 .put(handlers::workspaces::set_active_workspace),
         )
@@ -215,15 +215,15 @@ fn workspace_routes() -> Router<WorkspaceState> {
 ///
 /// Minimal read-only daemon routes backed by `NarrativeGateway` with
 /// `SQLite` persistent stores (V1.26 local persistence). Distinct from
-/// the work-scope `/v1/local/kb/*` file-index routes.
+/// the work-scope `/v1/daemon/kb/*` file-index routes.
 fn narrative_routes() -> Router<WorkspaceState> {
     Router::new()
         .route(
-            "/v1/local/narrative/worlds",
+            "/v1/daemon/narrative/worlds",
             get(handlers::narrative::list_worlds),
         )
         .route(
-            "/v1/local/narrative/worlds/{world_id}",
+            "/v1/daemon/narrative/worlds/{world_id}",
             get(handlers::narrative::get_world),
         )
 }
@@ -236,15 +236,15 @@ fn narrative_routes() -> Router<WorkspaceState> {
 fn strategy_routes() -> Router<WorkspaceState> {
     Router::new()
         .route(
-            "/v1/local/strategies/{strategy_id}/states/{state_id}/patch",
+            "/v1/daemon/strategies/{strategy_id}/states/{state_id}/patch",
             post(handlers::strategy::patch_state),
         )
         .route(
-            "/v1/local/strategies/{strategy_id}/transitions/patch",
+            "/v1/daemon/strategies/{strategy_id}/transitions/patch",
             post(handlers::strategy::patch_transition),
         )
         .route(
-            "/v1/local/strategies/{strategy_id}/states/{state_id}/prompt/patch",
+            "/v1/daemon/strategies/{strategy_id}/states/{state_id}/prompt/patch",
             post(handlers::strategy::patch_prompt_template),
         )
 }
@@ -253,54 +253,54 @@ fn strategy_routes() -> Router<WorkspaceState> {
 fn reading_routes() -> Router<WorkspaceState> {
     Router::new()
         .route(
-            "/v1/local/reading/progress",
+            "/v1/daemon/reading/progress",
             get(handlers::reading::get_reading_progress)
                 .put(handlers::reading::put_reading_progress)
                 .delete(handlers::reading::delete_reading_progress),
         )
         .route(
-            "/v1/local/reading/annotations",
+            "/v1/daemon/reading/annotations",
             get(handlers::reading::list_annotations).post(handlers::reading::create_annotation),
         )
         .route(
-            "/v1/local/reading/annotations/{annotation_id}",
+            "/v1/daemon/reading/annotations/{annotation_id}",
             patch(handlers::reading::patch_annotation).delete(handlers::reading::delete_annotation),
         )
 }
 
 /// Memory routes (sync routes removed in V1.21 — cloud-sync is CLI-only).
 ///
-/// V1.33 P4: Added `POST /v1/local/memory/review` and
-/// `GET /v1/local/memory/fragments` to close the review/fragment loop.
+/// V1.33 P4: Added `POST /v1/daemon/memory/review` and
+/// `GET /v1/daemon/memory/fragments` to close the review/fragment loop.
 fn memory_routes() -> Router<WorkspaceState> {
     Router::new()
         // Memory pending review
         .route(
-            "/v1/local/memory/pending-review",
+            "/v1/daemon/memory/pending-review",
             post(handlers::memory::create_pending_review),
         )
         .route(
-            "/v1/local/memory/pending-review",
+            "/v1/daemon/memory/pending-review",
             get(handlers::memory::list_pending_reviews),
         )
         .route(
-            "/v1/local/memory/pending-review/count",
+            "/v1/daemon/memory/pending-review/count",
             get(handlers::memory::count_pending_reviews),
         )
         .route(
-            "/v1/local/memory/pending-review/{id}",
+            "/v1/daemon/memory/pending-review/{id}",
             delete(handlers::memory::delete_pending_review),
         )
         // Memory review pipeline (V1.33 P4)
-        .route("/v1/local/memory/review", post(handlers::memory::review))
+        .route("/v1/daemon/memory/review", post(handlers::memory::review))
         // Memory fragments (V1.33 P4)
         .route(
-            "/v1/local/memory/fragments",
+            "/v1/daemon/memory/fragments",
             get(handlers::memory::fragments),
         )
         // Creator-SOUL narrative (V1.81)
         .route(
-            "/v1/local/memory/soul/reflect",
+            "/v1/daemon/memory/soul/reflect",
             post(handlers::memory::reflect_soul),
         )
 }
@@ -313,48 +313,48 @@ fn memory_routes() -> Router<WorkspaceState> {
 fn canvas_outline_routes() -> Router<WorkspaceState> {
     Router::new()
         .route(
-            "/v1/local/works/{work_id}/outline",
+            "/v1/daemon/works/{work_id}/outline",
             get(handlers::outline::get_work_outline),
         )
         .route(
-            "/v1/local/works/{work_id}/outline/patch",
+            "/v1/daemon/works/{work_id}/outline/patch",
             post(handlers::outline::patch_outline_structure),
         )
         .route(
-            "/v1/local/works/{work_id}/chapters/{n}/patch",
+            "/v1/daemon/works/{work_id}/chapters/{n}/patch",
             post(handlers::outline::patch_outline_chapter),
         )
         .route(
-            "/v1/local/works/{work_id}/timeline/patch",
+            "/v1/daemon/works/{work_id}/timeline/patch",
             post(handlers::outline::patch_timeline_event),
         )
 }
 
 /// Canvas World KB write-boundary routes (V1.73 Track A).
 ///
-/// World KB routes under `/v1/local/worlds/{world_id}/kb/*`. Per-row OCC on
+/// World KB routes under `/v1/daemon/worlds/{world_id}/kb/*`. Per-row OCC on
 /// `kb_key_blocks.revision` (entity edits), `kb_extract_jobs.version`
 /// (promotion), and `kb_relationships.revision` (relationship edits).
 fn world_kb_routes() -> Router<WorkspaceState> {
     Router::new()
         .route(
-            "/v1/local/worlds/{world_id}/kb/patch-entity",
+            "/v1/daemon/worlds/{world_id}/kb/patch-entity",
             post(handlers::world_kb::patch_entity),
         )
         .route(
-            "/v1/local/worlds/{world_id}/kb/patch-relationship",
+            "/v1/daemon/worlds/{world_id}/kb/patch-relationship",
             post(handlers::world_kb::patch_relationship),
         )
         .route(
-            "/v1/local/worlds/{world_id}/kb/promote-candidate",
+            "/v1/daemon/worlds/{world_id}/kb/promote-candidate",
             post(handlers::world_kb::promote_candidate),
         )
         .route(
-            "/v1/local/worlds/{world_id}/kb/graph",
+            "/v1/daemon/worlds/{world_id}/kb/graph",
             get(handlers::world_kb::get_graph),
         )
         .route(
-            "/v1/local/worlds/{world_id}/kb/candidates",
+            "/v1/daemon/worlds/{world_id}/kb/candidates",
             get(handlers::world_kb::get_candidates),
         )
 }
@@ -366,60 +366,60 @@ fn world_kb_routes() -> Router<WorkspaceState> {
 fn works_routes() -> Router<WorkspaceState> {
     Router::new()
         .route(
-            "/v1/local/works",
+            "/v1/daemon/works",
             post(handlers::works::create_work).get(handlers::works::list_works),
         )
         // P0 pool route (DF-60 §5.3)
         .route(
-            "/v1/local/works/pool",
+            "/v1/daemon/works/pool",
             post(handlers::works::set_pool_active).get(handlers::works::list_pool),
         )
         // P1 selection pool routes (DF-61)
         .route(
-            "/v1/local/works/pool/promote",
+            "/v1/daemon/works/pool/promote",
             post(handlers::works::promote_pool_entry),
         )
         .route(
-            "/v1/local/works/pool/archive",
+            "/v1/daemon/works/pool/archive",
             post(handlers::works::archive_pool_entry_handler),
         )
         // P1 inspiration pool routes (DF-61)
         .route(
-            "/v1/local/works/pool/inspiration",
+            "/v1/daemon/works/pool/inspiration",
             post(handlers::works::add_inspiration).get(handlers::works::list_inspiration),
         )
         .route(
-            "/v1/local/works/pool/inspiration/promote",
+            "/v1/daemon/works/pool/inspiration/promote",
             post(handlers::works::promote_inspiration_handler),
         )
         .route(
-            "/v1/local/works/pool/inspiration/archive",
+            "/v1/daemon/works/pool/inspiration/archive",
             post(handlers::works::archive_inspiration_handler),
         )
         .route(
-            "/v1/local/works/{work_id}",
+            "/v1/daemon/works/{work_id}",
             get(handlers::works::get_work).patch(handlers::works::patch_work),
         )
         // ── Canvas Outline+Timeline routes (V1.72) ─────────────────────────
         .merge(canvas_outline_routes())
         .route(
-            "/v1/local/works/{work_id}/inspiration",
+            "/v1/daemon/works/{work_id}/inspiration",
             post(handlers::works::append_inspiration),
         )
         .route(
-            "/v1/local/works/{work_id}/completion-lock/release",
+            "/v1/daemon/works/{work_id}/completion-lock/release",
             post(handlers::works::release_completion_lock_handler),
         )
         .route(
-            "/v1/local/works/{work_id}/reconcile-chapters",
+            "/v1/daemon/works/{work_id}/reconcile-chapters",
             post(handlers::works::reconcile_chapters),
         )
         // ── Chapter content sub-routes (V1.65 P0) ────────────────────────
-        // Nest chapter routes under /v1/local/works/{work_id}/chapters so the
+        // Nest chapter routes under /v1/daemon/works/{work_id}/chapters so the
         // work_id prefix is shared and future Works sub-resources cannot
         // accidentally interleave with chapter paths (qc1 S-5).
         .nest(
-            "/v1/local/works/{work_id}/chapters",
+            "/v1/daemon/works/{work_id}/chapters",
             Router::new()
                 .route("/", get(handlers::chapters::list_chapters))
                 .route(
@@ -431,37 +431,37 @@ fn works_routes() -> Router<WorkspaceState> {
         )
         // ── Findings sub-routes (V1.39 P1) ───────────────────────────
         .route(
-            "/v1/local/works/{work_id}/findings",
+            "/v1/daemon/works/{work_id}/findings",
             post(handlers::findings::create_finding_handler)
                 .get(handlers::findings::list_findings_handler),
         )
         .route(
-            "/v1/local/works/{work_id}/findings/from-review",
+            "/v1/daemon/works/{work_id}/findings/from-review",
             post(handlers::findings::create_from_review_handler),
         )
         .route(
-            "/v1/local/works/{work_id}/findings/{finding_id}",
+            "/v1/daemon/works/{work_id}/findings/{finding_id}",
             get(handlers::findings::get_finding_handler)
                 .patch(handlers::findings::update_finding_handler)
                 .delete(handlers::findings::delete_finding_handler),
         )
         // ── Stale findings banner endpoint (V1.39 P4 T3) ─────────────
         .route(
-            "/v1/local/findings/stale",
+            "/v1/daemon/findings/stale",
             get(handlers::findings::list_stale_findings_handler),
         )
         // ── Retention prune endpoint (V1.49 P3, quality-loop §9.4) ───
         .route(
-            "/v1/local/findings/prune",
+            "/v1/daemon/findings/prune",
             post(handlers::findings::prune_findings_handler),
         )
         // ── Creator-scoped finding lookup (V1.48 P2 — accept path) ────
         .route(
-            "/v1/local/findings/{finding_id}",
+            "/v1/daemon/findings/{finding_id}",
             get(handlers::findings::get_finding_creator_scoped_handler),
         )
 }
-/// Create the Local API router
+/// Create the Daemon API router
 ///
 /// **Unguarded routes** (no auth, always reachable):
 /// - runtime health, status, daemon lifecycle snapshot
@@ -474,10 +474,10 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
 
     // --- Unguarded: runtime liveness / status (always accessible) ---
     let runtime_routes = Router::new()
-        .route("/v1/local/runtime/health", get(handlers::runtime::health))
-        .route("/v1/local/runtime/status", get(handlers::runtime::status))
+        .route("/v1/daemon/runtime/health", get(handlers::runtime::health))
+        .route("/v1/daemon/runtime/status", get(handlers::runtime::status))
         .route(
-            "/v1/local/daemon/status",
+            "/v1/daemon/daemon/status",
             get(handlers::runtime::daemon_status),
         );
 
@@ -485,7 +485,7 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
     let protected_routes = Router::new()
         // Monitoring
         .route(
-            "/v1/local/monitoring/pool",
+            "/v1/daemon/monitoring/pool",
             get(handlers::monitoring::pool_status),
         )
         // Workspace + Creator + Preset + KB + Memory (Batch 4–5 route groups)
@@ -500,15 +500,15 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
         .merge(strategy_routes())
         .merge(world_kb_routes())
         // Legacy creators list & references
-        .route("/v1/local/creators", get(handlers::creators::list))
-        .route("/v1/local/references", get(handlers::references::list))
+        .route("/v1/daemon/creators", get(handlers::creators::list))
+        .route("/v1/daemon/references", get(handlers::references::list))
         .route(
-            "/v1/local/references/:reference_id",
+            "/v1/daemon/references/:reference_id",
             get(handlers::references::get),
         )
         // ACP tool execution — internal route only (not public ACP routes)
         .route(
-            "/v1/local/agent-host/internal/tool-executions",
+            "/v1/daemon/agent-host/internal/tool-executions",
             post(handlers::acp::tool_execute),
         )
         // Orchestration routes
@@ -522,9 +522,9 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
         ));
 
     // ── Top-level router ────────────────────────────────────────────
-    // Explicit /v1/local/* + agent-host routes take priority over the SPA
+    // Explicit /v1/daemon/* + agent-host routes take priority over the SPA
     // fallback. The SPA shell carries no data; all data access is through
-    // the protected /v1/local/* routes.
+    // the protected /v1/daemon/* routes.
     let router = Router::new().merge(runtime_routes).merge(protected_routes);
 
     // SPA fallback is **release-only**: serves the embedded Web UI at

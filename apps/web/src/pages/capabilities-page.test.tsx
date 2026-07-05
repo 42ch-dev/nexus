@@ -23,7 +23,7 @@ function renderCaps() {
 describe('CapabilitiesPage', () => {
   it('renders capability schemas and the admission-gate notice', async () => {
     useHandlers(
-      http.get('/v1/local/orchestration/capabilities', () =>
+      http.get('/v1/daemon/orchestration/capabilities', () =>
         HttpResponse.json({
           items: [
             {
@@ -49,7 +49,7 @@ describe('CapabilitiesPage', () => {
 
   it('renders the empty state when no capabilities are registered', async () => {
     useHandlers(
-      http.get('/v1/local/orchestration/capabilities', () =>
+      http.get('/v1/daemon/orchestration/capabilities', () =>
         HttpResponse.json({ items: [], pagination: { limit: 20, has_more: false } }),
       ),
     );

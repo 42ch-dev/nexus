@@ -388,7 +388,11 @@
     "2026-07-04-v1.89-prepare-dual-track",
     "2026-07-04-v1.89-reading-depth-backend",
     "2026-07-04-v1.89-reading-depth-frontend",
-    "2026-07-04-v1.89-closure"
+    "2026-07-04-v1.89-closure",
+    "2026-07-05-v1.90-prepare-dual-track",
+    "2026-07-05-v1.90-daemon-api-rename-backend",
+    "2026-07-05-v1.90-daemon-api-rename-frontend",
+    "2026-07-05-v1.90-closure"
   ],
   "iteration_summaries": {
     "v1.45": {
@@ -857,6 +861,28 @@
       "plans_done": 1,
       "headline": "Local API Trust-Boundary Hardening — closed 3-finding attack chain (CORS Origin gate, fs/* deny-without-workspace, component-wise path guard) + same-class sweep; QC 3/3 Approve, QA Pass",
       "wire_contracts_changed": false
+    },
+    "V1.90": {
+      "compass": "v1.90-daemon-api-remote-ready-delivery-compass-v1.md",
+      "shipped_at": "2026-07-05",
+      "plan_count": 4,
+      "plan_ids": [
+        "2026-07-05-v1.90-prepare-dual-track",
+        "2026-07-05-v1.90-daemon-api-rename-backend",
+        "2026-07-05-v1.90-daemon-api-rename-frontend",
+        "2026-07-05-v1.90-closure"
+      ],
+      "wire_contracts_changed": true,
+      "wire_contracts_note": "Local API -> Daemon API rename: schemas/local-api/ -> schemas/daemon-api/, generated Rust local_api -> daemon_api, generated TS local-api -> daemon-api, daemon router /v1/local/* -> /v1/daemon/*, @42ch/nexus-contracts 0.18.0 -> 0.19.0.",
+      "headline": "Daemon API remote-ready rename — renames the local HTTP surface to Daemon API, regenerates cross-language contracts, changes path prefix to /v1/daemon/*, and adds opt-in non-loopback remote bind gated by NEXUS42_DAEMON_API_KEY + NEXUS_DAEMON_REMOTE_BIND=1.",
+      "residuals_closed": [],
+      "residuals_open_new": [],
+      "compound": [
+        "architecture-patterns/daemon-api-remote-bind-gate.md",
+        "conventions/surface-rename-hygiene-checklist.md"
+      ],
+      "pr": null,
+      "merge_commit": null
     }
   },
   "metadata": {
@@ -865,5 +891,5 @@
     "v1_50_iteration_complete": "yes — ready for PR to main",
     "v1_51_iteration_complete": "yes — shipped to main at c57b927bbf8621adf7ec59095d274f17f429c9b7 via PR #64 on 2026-06-19T07:52:26Z"
   },
-  "updated_at": "2026-07-03T14:30:00+08:00"
+  "updated_at": "2026-07-05T06:39:24Z"
 }

@@ -6,7 +6,7 @@ use axum::{extract::Path, extract::State, http::StatusCode, Json};
 use nexus_contracts::local::orchestration::http::{ListPresetsResponse, ReloadPresetResponse};
 use nexus_orchestration::system_preset_dir;
 
-/// `GET /v1/local/orchestration/presets`
+/// `GET /v1/daemon/orchestration/presets`
 ///
 /// Returns all available embedded preset IDs plus system presets discovered
 /// from `~/.nexus42/presets/_system/<name>/`.
@@ -27,7 +27,7 @@ pub async fn list_presets(
     (StatusCode::OK, Json(ListPresetsResponse { presets }))
 }
 
-/// `POST /v1/local/orchestration/presets/{id}:reload`
+/// `POST /v1/daemon/orchestration/presets/{id}:reload`
 ///
 /// Invalidate loader cache for the given preset ID and reload from embedded
 /// storage. Returns the new source hash.

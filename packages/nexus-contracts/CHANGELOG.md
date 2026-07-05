@@ -5,6 +5,24 @@ All notable changes to the `@42ch/nexus-contracts` package will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.19.0] - 2026-07-05
+
+### Changed
+
+- **BREAKING**: Renamed the local daemon surface from **Local API** to **Daemon API**.
+  - HTTP path prefix changed from `/v1/local/*` to `/v1/daemon/*`.
+  - Generated TypeScript module tree moved from `local-api/` to `daemon-api/`.
+  - Generated Rust module tree moved from `local_api/` to `daemon_api/`.
+  - Resource identifier in `403 Forbidden` details changed from `"daemon-daemon-api"` to `"daemon-api"`.
+
+### Added
+
+- Opt-in remote bind support: non-loopback HTTP binds now require both `NEXUS42_DAEMON_API_KEY` and `NEXUS_DAEMON_REMOTE_BIND=1`.
+
+### Consumer Impact
+
+- Consumers of `@42ch/nexus-contracts` must update imports from `local-api` paths to `daemon-api` paths and route calls to `/v1/daemon/*`.
+
 ## [0.12.0] - 2026-06-30
 
 ### Added

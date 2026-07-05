@@ -1,7 +1,7 @@
 /**
  * Preset YAML parser — client-side projection of a preset bundle manifest.
  *
- * `GET /v1/local/presets/{id}` returns `GetPresetResponse { yaml: string }`
+ * `GET /v1/daemon/presets/{id}` returns `GetPresetResponse { yaml: string }`
  * (A5 verdict — option a: existing endpoint suffices, no new read route). The
  * canvas parses that raw YAML into the typed subset defined in
  * `orchestration-engine.md` §7.2 and feeds it to the Strategy graph adapter.

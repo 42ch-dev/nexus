@@ -96,7 +96,7 @@ fn sanitize_reason(raw: &str) -> String {
         .collect()
 }
 
-/// `POST /v1/local/orchestration/schedules` — add a new schedule.
+/// `POST /v1/daemon/orchestration/schedules` — add a new schedule.
 ///
 /// rationale: mirrors existing dynamic partial-update binder; splitting harms readability
 #[allow(clippy::too_many_lines)]
@@ -617,7 +617,7 @@ async fn seed_core_context(
 // GET /schedules — List schedules
 // ---------------------------------------------------------------------------
 
-/// `GET /v1/local/orchestration/schedules` — list schedules with optional filters.
+/// `GET /v1/daemon/orchestration/schedules` — list schedules with optional filters.
 #[allow(clippy::too_many_lines)] // dynamic-SQL build + sort + tx-wrapped list/count + pagination is one cohesive handler; splitting harms readability
 pub async fn list_schedules(
     state: State<WorkspaceState>,
@@ -755,7 +755,7 @@ pub async fn list_schedules(
 // GET /schedules/{schedule_id} — Inspect schedule
 // ---------------------------------------------------------------------------
 
-/// `GET /v1/local/orchestration/schedules/{schedule_id}` — inspect a schedule.
+/// `GET /v1/daemon/orchestration/schedules/{schedule_id}` — inspect a schedule.
 pub async fn inspect_schedule(
     state: State<WorkspaceState>,
     Path(schedule_id): Path<String>,
@@ -814,7 +814,7 @@ pub async fn inspect_schedule(
 // PATCH /schedules/{id}/core-context — Apply EditOp
 // ---------------------------------------------------------------------------
 
-/// `PATCH /v1/local/orchestration/schedules/{schedule_id}/core-context` — apply `EditOp`.
+/// `PATCH /v1/daemon/orchestration/schedules/{schedule_id}/core-context` — apply `EditOp`.
 pub async fn edit_core_context(
     state: State<WorkspaceState>,
     Path(schedule_id): Path<String>,
@@ -860,7 +860,7 @@ pub async fn edit_core_context(
 // GET /schedules/{id}/core-context — Current content
 // ---------------------------------------------------------------------------
 
-/// `GET /v1/local/orchestration/schedules/{schedule_id}/core-context` — current content.
+/// `GET /v1/daemon/orchestration/schedules/{schedule_id}/core-context` — current content.
 pub async fn get_core_context(
     state: State<WorkspaceState>,
     Path(schedule_id): Path<String>,
@@ -912,7 +912,7 @@ pub async fn get_core_context(
 // GET /schedules/{id}/core-context-history — Version history
 // ---------------------------------------------------------------------------
 
-/// `GET /v1/local/orchestration/schedules/{schedule_id}/core-context-history` — version history.
+/// `GET /v1/daemon/orchestration/schedules/{schedule_id}/core-context-history` — version history.
 pub async fn get_core_context_history(
     state: State<WorkspaceState>,
     Path(schedule_id): Path<String>,
@@ -965,7 +965,7 @@ pub async fn get_core_context_history(
 // POST /schedules/{id}/signal — Pause/Resume/Cancel/Start/Advance
 // ---------------------------------------------------------------------------
 
-/// `POST /v1/local/orchestration/schedules/{schedule_id}/signal` — pause/resume/cancel/start.
+/// `POST /v1/daemon/orchestration/schedules/{schedule_id}/signal` — pause/resume/cancel/start.
 // Signal handler covers five distinct lifecycle transitions; extraction would fragment
 // the atomic state machine without reducing complexity.
 #[allow(clippy::too_many_lines)]
@@ -1178,7 +1178,7 @@ pub async fn signal_schedule(
 // DELETE /schedules/{id} — Remove terminal schedule
 // ---------------------------------------------------------------------------
 
-/// `DELETE /v1/local/orchestration/schedules/{schedule_id}` — remove terminal schedule.
+/// `DELETE /v1/daemon/orchestration/schedules/{schedule_id}` — remove terminal schedule.
 ///
 /// **R5 — Delete cascade**: For non-terminal schedules, cancels the active
 /// session (if any), NULLs out `current_session_id`, then cancels the schedule

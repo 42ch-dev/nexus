@@ -6,7 +6,7 @@
  * hybrid, matching the V1.77 findings-page pattern). The page shell owns active
  * creator lookup + Card layout; this component owns the section's data + rows.
  *
- * API note: consumes the shipped memory Local API hooks as-is; the
+ * API note: consumes the shipped memory Daemon API hooks as-is; the
  * useReviewMemory drain semantics live in @/api/queries (P0-owned, untouched).
  */
 import { useMemo, useState } from 'react';

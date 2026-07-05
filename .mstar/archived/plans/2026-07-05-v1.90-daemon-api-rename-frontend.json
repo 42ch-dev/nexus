@@ -1,0 +1,20 @@
+{
+  "plan_id": "2026-07-05-v1.90-daemon-api-rename-frontend",
+  "name": "P1 — Track B: Daemon API rename frontend",
+  "status": "Done",
+  "metadata": {
+    "iteration_refs": [
+      "V1.90"
+    ],
+    "spec_integration_branch": "iteration/v1.90",
+    "merge_target": "iteration/v1.90",
+    "working_branch": "feature/v1.90-daemon-api-rename-frontend",
+    "worktree_path": ".worktrees/feature-v1.90-daemon-api-rename-frontend",
+    "merge_commit": "39ec24e0",
+    "primary_spec": ".mstar/knowledge/specs/web-ui.md",
+    "spec_refs": [
+      "apps/web/AGENTS.md",
+      ".mstar/knowledge/specs/daemon-api-surface-conventions.md"
+    ]
+  }
+}

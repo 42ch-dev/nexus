@@ -249,7 +249,7 @@ async fn start_daemon(port: u16, foreground: bool, cdn_url: Option<String>) -> R
             if client.health_check().await? {
                 println!("✓ Daemon started successfully on port {port}");
                 println!("  PID: {child_pid}");
-                println!("  Local API: http://127.0.0.1:{port}");
+                println!("  Daemon API: http://127.0.0.1:{port}");
                 println!("  Web UI:    http://127.0.0.1:{port}/");
                 return Ok(());
             }
@@ -489,7 +489,7 @@ async fn daemon_status(port: u16, config: &CliConfig) -> Result<()> {
         println!("  Status: ✓ Running");
         // Try to get more info
         if let Ok(status) = client
-            .get::<serde_json::Value>("/v1/local/runtime/status")
+            .get::<serde_json::Value>("/v1/daemon/runtime/status")
             .await
         {
             if let Some(version) = status.get("version") {

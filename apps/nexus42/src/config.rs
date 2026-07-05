@@ -30,7 +30,7 @@ pub struct CliConfig {
     #[serde(default = "default_platform_url")]
     pub platform_url: String,
 
-    /// Daemon local API base URL
+    /// Daemon API base URL
     #[serde(default = "default_daemon_url")]
     pub daemon_url: String,
 

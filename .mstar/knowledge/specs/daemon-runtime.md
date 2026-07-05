@@ -4,7 +4,7 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — V1.65 Prepare amendment (bundled local Web UI serving + chapter-content Local API route family); **V1.66 Phase 2b amendment** (§12: Tauri sidecar mode launch/readiness/lifecycle contract); **V1.86 amendment** (§13: Local API trust-boundary security — Origin allowlist, deny-fs-without-workspace, component-wise path guard) |
+| **Status** | Normative — V1.65 Prepare amendment (bundled local Web UI serving + chapter-content Local API route family); **V1.66 Phase 2b amendment** (§12: Tauri sidecar mode launch/readiness/lifecycle contract); **V1.86 amendment** (§13: Local API trust-boundary security — Origin allowlist, deny-fs-without-workspace, component-wise path guard); **V1.90 amendment** (§14: Daemon API remote bind gate; normative surface renaming from Local API to Daemon API with `/v1/daemon/` path prefix) |
 | **Document class** | Master |
 | **Normative scope** | Architecture boundaries, process model, subsystem responsibilities, pre-release constraints |
 | **Related** | [cli-spec.md](./cli-spec.md), [local-runtime-boundary.md](./local-runtime-boundary.md), [agent-host.md](./agent-host.md) |
@@ -24,10 +24,10 @@ Pre-release posture: no compatibility migration layer required; local state may 
 ```text
 nexus42 (CLI — entry, routing, UX)
   ├─ nexus-daemon-runtime (library — lifecycle, subsystems, local API)
-  │    ├─ local DB / workspace handles
-  │    ├─ schedule / worker supervision
-  │    ├─ loopback Local API (/v1/local/*) — local product only
-  │    └─ AgentHostSubsystem → nexus-agent-host (see agent-host)
+│    ├─ local DB / workspace handles
+│    ├─ schedule / worker supervision
+│    ├─ loopback Daemon API (/v1/daemon/*) — local product only
+│    └─ AgentHostSubsystem → nexus-agent-host (see agent-host)
   └─ nexus-cloud-sync (CLI-only; platform HTTP + optional legacy-sync)
 ```
 
@@ -37,7 +37,7 @@ Platform sync and registration **must not** live in daemon-runtime. See [local-c
 
 1. Only **`nexus42`** is a user-facing executable artifact.
 2. **Daemon** is started via CLI (`nexus42 daemon start`, foreground or background); background mode may use a hidden internal entry (implementation detail in knowledge SSOT).
-3. **Local API** remains loopback HTTP and/or Unix socket; clients must not assume a separate daemon product binary.
+3. **Daemon API** remains loopback HTTP and/or Unix socket; clients must not assume a separate daemon product binary.
 
 ---
 
@@ -46,9 +46,9 @@ Platform sync and registration **must not** live in daemon-runtime. See [local-c
 | Subsystem | Owns | Does not own |
 | --- | --- | --- |
 | CLI | Parsing, one-shot commands, spawning daemon mode, user errors | Long-lived agent protocol details |
-| Daemon runtime | `SQLite` handles, Local API listener, orchestration/agent-host, workspace session persistence (`workspace_sessions` DB table, V1.56 P0), graceful shutdown | Platform HTTP, sync outbox, creator registration |
+| Daemon runtime | `SQLite` handles, Daemon API listener, orchestration/agent-host, workspace session persistence (`workspace_sessions` DB table, V1.56 P0), graceful shutdown | Platform HTTP, sync outbox, creator registration |
 | Agent host | Managed agent sessions (see agent-host) | Platform HTTP |
-| Cloud sync (CLI) | Platform HTTP, legacy bundle sync (`nexus-cloud-sync`) | Daemon Local API |
+| Cloud sync (CLI) | Platform HTTP, legacy bundle sync (`nexus-cloud-sync`) | Daemon API |
 
 ---
 
@@ -68,17 +68,17 @@ Default `nexus42 daemon start`: preflight → spawn internal daemon-run mode →
 
 ### 4.4 Bundled local Web UI static assets (V1.64)
 
-The daemon runtime may serve the bundled local Web UI SPA from the same loopback listener as the Local API. The Web UI is a local product surface, not a cloud platform application.
+The daemon runtime may serve the bundled local Web UI SPA from the same loopback listener as the Daemon API. The Web UI is a local product surface, not a cloud platform application.
 
 Normative serving model:
 
 1. **Release build**: `apps/web/dist` is embedded into the user-facing `nexus42` binary using `rust-embed` and exposed by the daemon router through `tower-http::ServeDir`-style static serving semantics. The release artifact remains a single `nexus42` product binary; no separate web server process is introduced.
 2. **SPA shell route**: the static Web UI shell (`index.html` plus assets) is unauthenticated so a local browser can load the app and present setup/auth guidance. This does not grant data access.
-3. **Data boundary**: all `/v1/local/*` data routes remain protected according to the existing `require_api_key` model except the explicitly unguarded runtime/daemon health and status routes listed in §2/§4 acceptance. The SPA obtains data only through those Local API routes.
-4. **Dev mode**: during frontend development, Vite serves `apps/web` and proxies `/v1/local/*` to a running daemon. Dev proxy behavior is a development convenience only; release behavior is daemon-served embedded static assets.
+3. **Data boundary**: all `/v1/daemon/*` data routes remain protected according to the existing `require_api_key` model except the explicitly unguarded runtime/daemon health and status routes listed in §2/§4 acceptance. The SPA obtains data only through those Daemon API routes.
+4. **Dev mode**: during frontend development, Vite serves `apps/web` and proxies `/v1/daemon/*` to a running daemon. Dev proxy behavior is a development convenience only; release behavior is daemon-served embedded static assets.
 5. **Tauri readiness**: the future Tauri shell loads the same `apps/web` build output and swaps the frontend transport implementation behind the `NexusClient` boundary. The daemon runtime remains the local supervisor and is still not an ACP Agent/Server.
 
-The router integration point is the top-level `create_router` composition in `crates/nexus-daemon-runtime/src/api/mod.rs`: static serving is added beside the unguarded runtime routes and protected Local API route tree, without moving the auth middleware boundary for data endpoints.
+The router integration point is the top-level `create_router` composition in `crates/nexus-daemon-runtime/src/api/mod.rs`: static serving is added beside the unguarded runtime routes and protected Daemon API route tree, without moving the auth middleware boundary for data endpoints.
 
 #### 4.4.1 Embed implementation (V1.64 P3)
 
@@ -94,11 +94,11 @@ The struct is placed in `nexus-daemon-runtime` (not `nexus42`) because the daemo
 
 #### 4.4.2 Router mount
 
-The SPA handler `serve_embedded_app` is mounted as the top-level `Router::fallback()` inside `create_router()` — added BEFORE merging the API routes. This means explicit `/v1/local/*` routes (network routes + protected routes) take priority over the catch-all SPA fallback.
+The SPA handler `serve_embedded_app` is mounted as the top-level `Router::fallback()` inside `create_router()` — added BEFORE merging the API routes. This means explicit `/v1/daemon/*` routes (network routes + protected routes) take priority over the catch-all SPA fallback.
 
 **Route resolution order:**
-1. Unguarded runtime routes (`/v1/local/runtime/health`, etc.)
-2. Protected Local API routes (`/v1/local/works`, etc., behind `require_api_key`)
+1. Unguarded runtime routes (`/v1/daemon/runtime/health`, etc.)
+2. Protected Daemon API routes (`/v1/daemon/works`, etc., behind `require_api_key`)
 3. SPA fallback (serves `index.html` for unmatched `GET`/`HEAD` requests)
 
 Non-`GET`/`HEAD` requests hitting the fallback return `405 Method Not Allowed`.
@@ -119,14 +119,14 @@ The dist is NOT committed to git (`apps/web/dist/` is gitignored per the Vite sc
 
 #### 4.4.5 CLI URL logging
 
-On startup (both foreground and background modes), the daemon logs the Web UI URL alongside the Local API base URL:
+On startup (both foreground and background modes), the daemon logs the Web UI URL alongside the Daemon API base URL:
 
 - **Foreground** (`boot.rs`): `tracing::info!("Web UI available at http://{}", addr);`
 - **Background** (`nexus42 daemon start` stdout):
   ```
   ✓ Daemon started successfully on port 8420
     PID: 12345
-    Local API: http://127.0.0.1:8420
+    Daemon API: http://127.0.0.1:8420
     Web UI:    http://127.0.0.1:8420/
   ```
 
@@ -138,15 +138,15 @@ The daemon runtime owns the chapter-content route family consumed by the bundled
 Web UI authoring surface:
 
 ```text
-/v1/local/works/{work_id}/chapters
-/v1/local/works/{work_id}/chapters/{n}
-/v1/local/works/{work_id}/chapters/{n}/outline
-/v1/local/works/{work_id}/chapters/{n}/body
+/v1/daemon/works/{work_id}/chapters
+/v1/daemon/works/{work_id}/chapters/{n}
+/v1/daemon/works/{work_id}/chapters/{n}/outline
+/v1/daemon/works/{work_id}/chapters/{n}/body
 ```
 
 Route responsibilities:
 
-1. List/detail chapter metadata from `work_chapters` using the Local API
+1. List/detail chapter metadata from `work_chapters` using the Daemon API
    `items` + cursor convention for the list route.
 2. Read and atomically replace outline markdown at DB-sourced `outline_path`.
 3. PATCH chapter structure metadata (`title` if supported, `slug`,
@@ -498,9 +498,9 @@ The desktop app launches the sidecar with:
 nexus42 daemon start --foreground --port <resolved_port>
 ```
 
-Optional flags such as `--cdn-url <https-url>` may be passed only when the desktop app has an explicit configuration source for them. **V1.66 does not add a new daemon-lifecycle Local API route** (`wire_contracts_changed: false`).
+Optional flags such as `--cdn-url <https-url>` may be passed only when the desktop app has an explicit configuration source for them. **V1.66 does not add a new daemon-lifecycle Daemon API route** (`wire_contracts_changed: false`).
 
-**Port resolution** (compass §5 #3 LOCKED; conventions in [local-api-surface-conventions.md](local-api-surface-conventions.md) §9):
+**Port resolution** (compass §5 #3 LOCKED; conventions in [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md) §9):
 
 1. Explicit configured port (if the Tauri bootstrapper provides one).
 2. Else `NEXUS_DAEMON_PORT` when present and valid.
@@ -510,13 +510,13 @@ When an override is selected, the app passes it via `--port <resolved_port>` so 
 
 ### 12.2 Readiness contract
 
-The sidecar readiness signal is the existing Local API health probe, **not** stdout parsing:
+The sidecar readiness signal is the existing Daemon API health probe, **not** stdout parsing:
 
 ```text
-GET http://127.0.0.1:<resolved_port>/v1/local/runtime/health
+GET http://127.0.0.1:<resolved_port>/v1/daemon/runtime/health
 ```
 
-The desktop app treats the daemon as ready only after the health endpoint returns a successful healthy response. Startup logs such as `Local API listening on …` are diagnostic only and MUST NOT be the app's readiness contract.
+The desktop app treats the daemon as ready only after the health endpoint returns a successful healthy response. Startup logs such as `Daemon API listening on …` are diagnostic only and MUST NOT be the app's readiness contract.
 
 **Recommended bootstrap behavior**:
 
@@ -549,7 +549,9 @@ In desktop mode, Tauri serves the bundled `apps/web/dist` via `build.frontendDis
 
 ## 13. Local API Trust-Boundary Security (V1.86)
 
-This section codifies the normative security contract for the daemon's Local API trust boundary. It closes the three-link attack chain identified in V1.86 (permissive CORS + keyless-localhost → remote-reach; fs/* bypass without workspace → arbitrary-file R/W; string-prefix path comparison → sibling-directory escape). The normative hooks in §4.4.3 (`require_api_key` on data routes) and §4.5 (W-002-style workspace path guard) already provide authority; this section adds the Origin gate, the deny-fs-without-workspace invariant, and the component-wise path guard requirement.
+> **V1.90 note:** The surface was renamed to **Daemon API** and the path prefix to `/v1/daemon/*` in V1.90. The security rules described below apply unchanged to the renamed surface. References to "Local API" in this section title and in V1.86 iteration names are historical only.
+
+This section codifies the normative security contract for the daemon's Daemon API trust boundary. It closes the three-link attack chain identified in V1.86 (permissive CORS + keyless-localhost → remote-reach; fs/* bypass without workspace → arbitrary-file R/W; string-prefix path comparison → sibling-directory escape). The normative hooks in §4.4.3 (`require_api_key` on data routes) and §4.5 (W-002-style workspace path guard) already provide authority; this section adds the Origin gate, the deny-fs-without-workspace invariant, and the component-wise path guard requirement.
 
 **Coordinates with:** the V1.86 delivery compass ([v1.86-local-api-trust-hardening-delivery-compass-v1.md](../../iterations/v1.86-local-api-trust-hardening-delivery-compass-v1.md)), `api/path_guard.rs` (`resolve_guarded_path`), `api/auth_middleware.rs` (keyless-localhost mode), `api/mod.rs` (CORS layer configuration).
 
@@ -654,3 +656,52 @@ Both the read (existing-file) and write (non-existing-file) branches MUST be cov
 1. An in-workspace path is accepted by both branches
 2. A sibling-directory prefix-escape path (e.g., workspace `/home/user/my-novel`, target `/home/user/my-novel-evil/foo`) is rejected by both branches
 3. A parent-directory escape (`../`) is rejected by both branches
+
+---
+
+## 14. Daemon API Remote Bind Gate (V1.90)
+
+This section codifies the security contract for optional non-loopback binding of the Daemon API listener. The Daemon API is local-first by default; remote access is opt-in only and subject to a two-condition gate.
+
+### 14.1 Default: loopback only
+
+The daemon binds to loopback (`127.0.0.1`) by default. This requires no additional configuration. The default behavior provides a local-first experience where the Daemon API is reachable only from the same machine (browser SPA, CLI, Tauri desktop shell).
+
+### 14.2 Opt-in: non-loopback bind
+
+Binding the daemon to a non-loopback address (any interface other than `127.0.0.1` or `::1`) is rejected unless **both** of the following conditions are met:
+
+| Condition | Env var | Effect |
+|---|---|---|
+| API key is set | `NEXUS42_DAEMON_API_KEY` | The daemon must have an explicit API key configured. Keyless-localhost mode is insufficient for remote access. |
+| Remote bind is explicitly enabled | `NEXUS_DAEMON_REMOTE_BIND=1` | The author must explicitly opt in to non-loopback binding. |
+
+If either condition is absent, the daemon **refuses to bind** to a non-loopback address and logs a clear error message including which condition(s) are missing and a reference to this section.
+
+When both conditions are met, the daemon binds to the configured address and requires the API key on all protected routes (the keyless-localhost shortcut is disabled for non-loopback binds, even if the TCP connection originates from the same machine).
+
+### 14.3 CORS and origin allowlist
+
+The existing CORS configuration and origin-allowlist behavior codified in §13.1 (V1.86) continues to apply regardless of the bind address. When the daemon is bound to a non-loopback address:
+
+- The `CorsLayer` and origin-reject middleware described in §13.1.3 use the same allowlist sources (§13.1.1).
+- The own-origin entry (`http://127.0.0.1:<port>`) is still computed from the resolved port; additional origins must be added via `NEXUS_DAEMON_ALLOWED_ORIGINS` if the browser SPA is served from a different host.
+- No origin is added automatically for the non-loopback bind address — the author controls the allowlist explicitly.
+
+### 14.4 Relationship to authentication
+
+When bound to a non-loopback address, all protected Daemon API routes require a valid `X-API-Key` header or `Authorization: Bearer <key>`. The keyless-localhost shortcut (`NEXUS42_DAEMON_API_KEY` unset) is **only** active on loopback binds; it is disabled when the listener is on a non-loopback interface, regardless of `NEXUS_DAEMON_REMOTE_BIND`.
+
+### 14.5 Non-goals
+
+- **TLS termination** — remote users are expected to put the daemon behind a reverse proxy (nginx, Caddy) or VPN; no built-in TLS.
+- **New auth model** — remote access reuses the existing `NEXUS42_DAEMON_API_KEY`.
+- **Dynamic port allocation** — the bind port is configured via `NEXUS_DAEMON_PORT` (default 8420) regardless of bind address.
+- **Multi-user or tenant isolation** — the daemon is single-creator; the security gate protects the single author's local data, not multi-tenant isolation.
+
+### 14.6 Verification
+
+- `remote_bind_rejected_without_key`: non-loopback bind with `NEXUS42_DAEMON_API_KEY` unset MUST fail at boot with a clear error.
+- `remote_bind_rejected_without_flag`: non-loopback bind with `NEXUS42_DAEMON_API_KEY` set but `NEXUS_DAEMON_REMOTE_BIND` unset/not `1` MUST fail at boot.
+- `remote_bind_allowed_with_both`: non-loopback bind with both conditions met MUST succeed; protected routes require the API key.
+- `loopback_bind_allowed_without_flag`: loopback bind MUST succeed without either condition (existing default behavior unchanged).

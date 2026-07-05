@@ -1,11 +1,11 @@
 //! Works API contract tests (V1.33 §7.2 — R-V133P1-03).
 //!
 //! Covers the full status matrix for each of the 5 works endpoints:
-//! - `POST /v1/local/works` → 201 (new), 200 (idempotent replay), 401 (no creator)
-//! - `GET /v1/local/works` → 200 (list), 401 (no creator)
-//! - `GET /v1/local/works/{id}` → 200, 404, 401 (handler-level tests)
-//! - `PATCH /v1/local/works/{id}` → 200, 404, 401 (handler-level tests)
-//! - `POST /v1/local/works/{id}/inspiration` → 200, 404, 401 (handler-level tests)
+//! - `POST /v1/daemon/works` → 201 (new), 200 (idempotent replay), 401 (no creator)
+//! - `GET /v1/daemon/works` → 200 (list), 401 (no creator)
+//! - `GET /v1/daemon/works/{id}` → 200, 404, 401 (handler-level tests)
+//! - `PATCH /v1/daemon/works/{id}` → 200, 404, 401 (handler-level tests)
+//! - `POST /v1/daemon/works/{id}/inspiration` → 200, 404, 401 (handler-level tests)
 //!
 //! Also covers creator isolation via handler-level tests.
 //!
@@ -132,7 +132,7 @@ fn make_create_body_with_title(title: &str) -> Value {
 /// Create a work via HTTP and return its work_id.
 async fn create_work_with_title(server: &TestServer, title: &str) -> String {
     let resp = server
-        .post("/v1/local/works")
+        .post("/v1/daemon/works")
         .json(&make_create_body_with_title(title))
         .await;
     resp.assert_status(axum::http::StatusCode::CREATED);
@@ -148,14 +148,14 @@ async fn handler_state() -> (WorkspaceState, TestTempRoot) {
     (state, tmp)
 }
 
-// ─── HTTP-level: POST /v1/local/works ──────────────────────────────────────
+// ─── HTTP-level: POST /v1/daemon/works ──────────────────────────────────────
 
 #[tokio::test]
 async fn create_work_returns_201() {
     let ctx = test_ctx().await;
     let resp = ctx
         .server
-        .post("/v1/local/works")
+        .post("/v1/daemon/works")
         .json(&make_create_body())
         .await;
     resp.assert_status(axum::http::StatusCode::CREATED);
@@ -178,7 +178,7 @@ async fn create_work_idempotent_replay_returns_200() {
     // First → 201
     let resp1 = ctx
         .server
-        .post("/v1/local/works")
+        .post("/v1/daemon/works")
         .json(&body_with_crid)
         .await;
     resp1.assert_status(axum::http::StatusCode::CREATED);
@@ -188,7 +188,7 @@ async fn create_work_idempotent_replay_returns_200() {
     // Second → 200 (idempotent replay)
     let resp2 = ctx
         .server
-        .post("/v1/local/works")
+        .post("/v1/daemon/works")
         .json(&body_with_crid)
         .await;
     resp2.assert_status(axum::http::StatusCode::OK);
@@ -201,24 +201,24 @@ async fn create_work_returns_401_without_creator() {
     let ctx = test_ctx_no_creator().await;
     let resp = ctx
         .server
-        .post("/v1/local/works")
+        .post("/v1/daemon/works")
         .json(&make_create_body())
         .await;
     resp.assert_status(axum::http::StatusCode::UNAUTHORIZED);
 }
 
-// ─── HTTP-level: GET /v1/local/works (list) ────────────────────────────────
+// ─── HTTP-level: GET /v1/daemon/works (list) ────────────────────────────────
 
 #[tokio::test]
 async fn list_works_returns_200() {
     let ctx = test_ctx().await;
     let _ = ctx
         .server
-        .post("/v1/local/works")
+        .post("/v1/daemon/works")
         .json(&make_create_body())
         .await;
 
-    let resp = ctx.server.get("/v1/local/works").await;
+    let resp = ctx.server.get("/v1/daemon/works").await;
     resp.assert_status(axum::http::StatusCode::OK);
     let body: Value = resp.json();
     assert!(body["items"].is_array());
@@ -232,7 +232,7 @@ async fn list_works_returns_200() {
 #[tokio::test]
 async fn list_works_returns_401_without_creator() {
     let ctx = test_ctx_no_creator().await;
-    let resp = ctx.server.get("/v1/local/works").await;
+    let resp = ctx.server.get("/v1/daemon/works").await;
     resp.assert_status(axum::http::StatusCode::UNAUTHORIZED);
 }
 
@@ -243,7 +243,7 @@ async fn list_works_sort_by_title_ascending() {
     let wid_b = create_work_with_title(&ctx.server, "Beta").await;
     let wid_c = create_work_with_title(&ctx.server, "Charlie").await;
 
-    let resp = ctx.server.get("/v1/local/works?sort=title").await;
+    let resp = ctx.server.get("/v1/daemon/works?sort=title").await;
     resp.assert_status(axum::http::StatusCode::OK);
     let body: Value = resp.json();
     let items = body["items"].as_array().unwrap();
@@ -261,7 +261,7 @@ async fn list_works_sort_descending_and_pagination() {
     let _wid_b = create_work_with_title(&ctx.server, "Beta").await;
     let _wid_c = create_work_with_title(&ctx.server, "Charlie").await;
 
-    let resp = ctx.server.get("/v1/local/works?sort=-title&limit=2").await;
+    let resp = ctx.server.get("/v1/daemon/works?sort=-title&limit=2").await;
     resp.assert_status(axum::http::StatusCode::OK);
     let body: Value = resp.json();
     let items = body["items"].as_array().unwrap();
@@ -274,7 +274,7 @@ async fn list_works_sort_descending_and_pagination() {
     let resp2 = ctx
         .server
         .get(&format!(
-            "/v1/local/works?sort=-title&limit=2&cursor={next_cursor}"
+            "/v1/daemon/works?sort=-title&limit=2&cursor={next_cursor}"
         ))
         .await;
     resp2.assert_status(axum::http::StatusCode::OK);
@@ -290,7 +290,7 @@ async fn list_works_invalid_sort_key_returns_work_sort_invalid() {
     let ctx = test_ctx().await;
     let _ = create_work_with_title(&ctx.server, "Alpha").await;
 
-    let resp = ctx.server.get("/v1/local/works?sort=unknown_key").await;
+    let resp = ctx.server.get("/v1/daemon/works?sort=unknown_key").await;
     resp.assert_status(axum::http::StatusCode::BAD_REQUEST);
     let body: Value = resp.json();
     assert_eq!(body["success"], false);
@@ -302,7 +302,7 @@ async fn get_work_by_id_returns_404_for_unknown() {
     let ctx = test_ctx().await;
     // The SPA static-asset fallback is release-only (cfg-gated out of test
     // builds), so an unknown work path returns the handler's 404 directly.
-    let resp = ctx.server.get("/v1/local/works/wrk_nonexistent").await;
+    let resp = ctx.server.get("/v1/daemon/works/wrk_nonexistent").await;
     resp.assert_status(axum::http::StatusCode::NOT_FOUND);
 }
 
@@ -1552,7 +1552,7 @@ async fn patch_stage_status_active_without_force_is_allowed() {
 
 // ─── V1.39 P5 (R-V138P0-03): get_work lazy-promotion idempotency ──────────
 //
-// Contract: GET /v1/local/works/{id} for a novel-profile Work whose every
+// Contract: GET /v1/daemon/works/{id} for a novel-profile Work whose every
 // chapter is finalized must auto-promote works.status='completed' on the
 // first read AND be idempotent on the second read (no spurious updates, no
 // status flip-flop, no errors).

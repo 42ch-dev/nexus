@@ -332,7 +332,7 @@ async fn run_refresh(config: &CliConfig, reference_ref: &str, dry_run: bool) -> 
         });
 
         match client
-            .post::<serde_json::Value, _>("/v1/local/agent-host/internal/tool-executions", &params)
+            .post::<serde_json::Value, _>("/v1/daemon/agent-host/internal/tool-executions", &params)
             .await
         {
             Ok(result) => {

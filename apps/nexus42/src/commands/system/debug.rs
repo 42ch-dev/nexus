@@ -94,7 +94,7 @@ async fn dump_workspace(config: &CliConfig, format: &str) -> Result<()> {
     match client.health_check().await {
         Ok(true) => {
             match client
-                .get::<serde_json::Value>("/v1/local/runtime/status")
+                .get::<serde_json::Value>("/v1/daemon/runtime/status")
                 .await
             {
                 Ok(status) => {
@@ -186,7 +186,7 @@ async fn replay_delta(config: &CliConfig, delta_id: &str) -> Result<()> {
 
     // Attempt to fetch delta info from daemon
     match client
-        .get::<serde_json::Value>(&format!("/v1/local/delta/{delta_id}"))
+        .get::<serde_json::Value>(&format!("/v1/daemon/delta/{delta_id}"))
         .await
     {
         Ok(delta) => {

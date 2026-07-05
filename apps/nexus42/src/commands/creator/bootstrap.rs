@@ -273,7 +273,7 @@ pub async fn handle_bootstrap(args: BootstrapArgs, config: &CliConfig) -> Result
         .unwrap_or(body);
 
     let resp: serde_json::Value = client
-        .post::<serde_json::Value, _>("/v1/local/works", &body)
+        .post::<serde_json::Value, _>("/v1/daemon/works", &body)
         .await?;
 
     let work_id = resp
@@ -325,7 +325,7 @@ pub async fn handle_bootstrap(args: BootstrapArgs, config: &CliConfig) -> Result
         };
 
         match client
-            .post::<serde_json::Value, _>("/v1/local/orchestration/schedules", &init_request)
+            .post::<serde_json::Value, _>("/v1/daemon/orchestration/schedules", &init_request)
             .await
         {
             Ok(sched_resp) => {
@@ -357,7 +357,7 @@ pub async fn handle_bootstrap(args: BootstrapArgs, config: &CliConfig) -> Result
         };
 
         match client
-            .post::<serde_json::Value, _>("/v1/local/orchestration/schedules", &intake_request)
+            .post::<serde_json::Value, _>("/v1/daemon/orchestration/schedules", &intake_request)
             .await
         {
             Ok(sched_resp) => {
@@ -416,7 +416,7 @@ pub async fn handle_bootstrap(args: BootstrapArgs, config: &CliConfig) -> Result
         };
 
         match client
-            .post::<serde_json::Value, _>("/v1/local/orchestration/schedules", &novel_request)
+            .post::<serde_json::Value, _>("/v1/daemon/orchestration/schedules", &novel_request)
             .await
         {
             Ok(sched_resp) => {

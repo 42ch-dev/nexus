@@ -41,7 +41,7 @@ User-installed presets are fully supported. The composable search order (highest
 
 ### Validation Surfaces
 
-The current shipped CLI has **no** top-level `nexus42 preset validate <path>` command. Preset validation is available through the daemon Local API (`POST /v1/local/presets:validate`) and through loader/tests in `nexus-orchestration`. If a future plan adds a CLI wrapper, update `cli-spec.md`, command-surface tests, and this file in the same change.
+The current shipped CLI has **no** top-level `nexus42 preset validate <path>` command. Preset validation is available through the Daemon API (`POST /v1/daemon/presets:validate`) and through loader/tests in `nexus-orchestration`. If a future plan adds a CLI wrapper, update `cli-spec.md`, command-surface tests, and this file in the same change.
 
 The validation path should check a preset YAML/bundle for:
 - Valid YAML syntax

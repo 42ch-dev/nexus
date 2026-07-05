@@ -163,15 +163,15 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             SyncPullResponse
         ),
-        // ── local-api/common/ (V1.64 — shared envelopes) ───────────────────
-        // F-E1: canonical Local API error detail (the `error` object inside the
+        // ── daemon-api/common/ (V1.64 — shared envelopes) ───────────────────
+        // F-E1: canonical Daemon API error detail (the `error` object inside the
         // daemon's `{ success, false, error: ErrorResponse }` wire body).
         entry!(
-            "schemas/local-api/common/error-response.schema.json",
+            "schemas/daemon-api/common/error-response.schema.json",
             Strict,
             ErrorResponse
         ),
-        // ── local-api/compute/ ───────────────────────────────────────────
+        // ── daemon-api/compute/ ───────────────────────────────────────────
         // V1.62 reorganization: compute envelopes moved here from compute/.
         // V1.61 WASM compute ABI envelopes (compass Q3/Q8). Only the top-level
         // struct of each schema is registered; inline/definition structs
@@ -180,674 +180,674 @@ fn build_schema_map() -> Vec<SchemaEntry> {
         // (entity-attributes/entity-state schemas were DELETED in V1.62 P0;
         // per-module shapes now live in modules/<id>/manifest.json per P1.)
         entry!(
-            "schemas/local-api/compute/compute-input.schema.json",
+            "schemas/daemon-api/compute/compute-input.schema.json",
             Strict,
             ComputeInput
         ),
         entry!(
-            "schemas/local-api/compute/compute-output.schema.json",
+            "schemas/daemon-api/compute/compute-output.schema.json",
             Strict,
             ComputeOutput
         ),
-        // ── local-api/works/ (V1.63 P1) ──────────────────────────────────
+        // ── daemon-api/works/ (V1.63 P1) ──────────────────────────────────
         entry!(
-            "schemas/local-api/works/create-work-request.schema.json",
+            "schemas/daemon-api/works/create-work-request.schema.json",
             Strict,
             CreateWorkRequest
         ),
         entry!(
-            "schemas/local-api/works/create-work-response.schema.json",
+            "schemas/daemon-api/works/create-work-response.schema.json",
             Strict,
             CreateWorkResponse
         ),
         entry!(
-            "schemas/local-api/works/list-works-query.schema.json",
+            "schemas/daemon-api/works/list-works-query.schema.json",
             Strict,
             ListWorksQuery
         ),
         entry!(
-            "schemas/local-api/works/work-summary.schema.json",
+            "schemas/daemon-api/works/work-summary.schema.json",
             Strict,
             WorkSummary
         ),
         entry!(
-            "schemas/local-api/works/list-works-response.schema.json",
+            "schemas/daemon-api/works/list-works-response.schema.json",
             Strict,
             ListWorksResponse
         ),
         entry!(
-            "schemas/local-api/works/work-detail-response.schema.json",
+            "schemas/daemon-api/works/work-detail-response.schema.json",
             Strict,
             WorkDetailResponse
         ),
         entry!(
-            "schemas/local-api/works/patch-work-request.schema.json",
+            "schemas/daemon-api/works/patch-work-request.schema.json",
             Strict,
             PatchWorkRequest
         ),
         entry!(
-            "schemas/local-api/works/append-inspiration-request.schema.json",
+            "schemas/daemon-api/works/append-inspiration-request.schema.json",
             Strict,
             AppendInspirationRequest
         ),
         entry!(
-            "schemas/local-api/works/append-inspiration-response.schema.json",
+            "schemas/daemon-api/works/append-inspiration-response.schema.json",
             Strict,
             AppendInspirationResponse
         ),
         entry!(
-            "schemas/local-api/works/release-completion-lock-request.schema.json",
+            "schemas/daemon-api/works/release-completion-lock-request.schema.json",
             Strict,
             ReleaseCompletionLockRequest
         ),
-        // ── local-api/works/chapters/ (V1.65 P0) ─────────────────────────
+        // ── daemon-api/works/chapters/ (V1.65 P0) ─────────────────────────
         entry!(
-            "schemas/local-api/works/chapters/chapter-status.schema.json",
+            "schemas/daemon-api/works/chapters/chapter-status.schema.json",
             Strict,
             ChapterStatus
         ),
         entry!(
-            "schemas/local-api/works/chapters/chapter-protection.schema.json",
+            "schemas/daemon-api/works/chapters/chapter-protection.schema.json",
             Strict,
             ChapterProtection
         ),
         entry!(
-            "schemas/local-api/works/chapters/chapter-summary.schema.json",
+            "schemas/daemon-api/works/chapters/chapter-summary.schema.json",
             Strict,
             ChapterSummary
         ),
         entry!(
-            "schemas/local-api/works/chapters/chapter-detail.schema.json",
+            "schemas/daemon-api/works/chapters/chapter-detail.schema.json",
             Strict,
             ChapterDetail
         ),
         entry!(
-            "schemas/local-api/works/chapters/chapter-outline.schema.json",
+            "schemas/daemon-api/works/chapters/chapter-outline.schema.json",
             Strict,
             ChapterOutline
         ),
         entry!(
-            "schemas/local-api/works/chapters/patch-chapter-request.schema.json",
+            "schemas/daemon-api/works/chapters/patch-chapter-request.schema.json",
             Strict,
             PatchChapterRequest
         ),
         entry!(
-            "schemas/local-api/works/chapters/chapter-body.schema.json",
+            "schemas/daemon-api/works/chapters/chapter-body.schema.json",
             Strict,
             ChapterBody
         ),
         entry!(
-            "schemas/local-api/works/chapters/list-chapters-query.schema.json",
+            "schemas/daemon-api/works/chapters/list-chapters-query.schema.json",
             Strict,
             ListChaptersQuery
         ),
         entry!(
-            "schemas/local-api/works/chapters/chapter-content-query.schema.json",
+            "schemas/daemon-api/works/chapters/chapter-content-query.schema.json",
             Strict,
             ChapterContentQuery
         ),
         entry!(
-            "schemas/local-api/works/chapters/list-chapters-response.schema.json",
+            "schemas/daemon-api/works/chapters/list-chapters-response.schema.json",
             Strict,
             ListChaptersResponse
         ),
-        // ── local-api/kb/ (V1.63 P1) ─────────────────────────────────────
+        // ── daemon-api/kb/ (V1.63 P1) ─────────────────────────────────────
         entry!(
-            "schemas/local-api/kb/list-kb-entries-query.schema.json",
+            "schemas/daemon-api/kb/list-kb-entries-query.schema.json",
             Strict,
             ListKbEntriesQuery
         ),
         entry!(
-            "schemas/local-api/kb/kb-entry-summary.schema.json",
+            "schemas/daemon-api/kb/kb-entry-summary.schema.json",
             Strict,
             KbEntrySummary
         ),
         entry!(
-            "schemas/local-api/kb/pagination-info.schema.json",
+            "schemas/daemon-api/kb/pagination-info.schema.json",
             Strict,
             PaginationInfo
         ),
         entry!(
-            "schemas/local-api/kb/list-kb-entries-response.schema.json",
+            "schemas/daemon-api/kb/list-kb-entries-response.schema.json",
             Strict,
             ListKbEntriesResponse
         ),
         entry!(
-            "schemas/local-api/kb/add-kb-entry-request.schema.json",
+            "schemas/daemon-api/kb/add-kb-entry-request.schema.json",
             Strict,
             AddKbEntryRequest
         ),
         entry!(
-            "schemas/local-api/kb/add-kb-entry-response.schema.json",
+            "schemas/daemon-api/kb/add-kb-entry-response.schema.json",
             Strict,
             AddKbEntryResponse
         ),
         entry!(
-            "schemas/local-api/kb/get-kb-entry-response.schema.json",
+            "schemas/daemon-api/kb/get-kb-entry-response.schema.json",
             Strict,
             GetKbEntryResponse
         ),
         entry!(
-            "schemas/local-api/kb/delete-kb-entry-response.schema.json",
+            "schemas/daemon-api/kb/delete-kb-entry-response.schema.json",
             Strict,
             DeleteKbEntryResponse
         ),
-        // ── local-api/findings/ (V1.63 P1) ───────────────────────────────
+        // ── daemon-api/findings/ (V1.63 P1) ───────────────────────────────
         entry!(
-            "schemas/local-api/findings/create-finding-request.schema.json",
+            "schemas/daemon-api/findings/create-finding-request.schema.json",
             Strict,
             CreateFindingRequest
         ),
         entry!(
-            "schemas/local-api/findings/finding-detail-response.schema.json",
+            "schemas/daemon-api/findings/finding-detail-response.schema.json",
             Strict,
             FindingDetailResponse
         ),
         entry!(
-            "schemas/local-api/findings/update-finding-request.schema.json",
+            "schemas/daemon-api/findings/update-finding-request.schema.json",
             Strict,
             UpdateFindingRequest
         ),
         entry!(
-            "schemas/local-api/findings/list-findings-query.schema.json",
+            "schemas/daemon-api/findings/list-findings-query.schema.json",
             Strict,
             ListFindingsQuery
         ),
         // F-P2 (V1.64): cursor-paginated findings list response.
         entry!(
-            "schemas/local-api/findings/list-findings-response.schema.json",
+            "schemas/daemon-api/findings/list-findings-response.schema.json",
             Strict,
             ListFindingsResponse
         ),
         entry!(
-            "schemas/local-api/findings/stale-findings-response.schema.json",
+            "schemas/daemon-api/findings/stale-findings-response.schema.json",
             Strict,
             StaleFindingsResponse
         ),
-        // ── local-api/memory/ (V1.78 P0 — creator memory review-loop) ─────
+        // ── daemon-api/memory/ (V1.78 P0 — creator memory review-loop) ─────
         entry!(
-            "schemas/local-api/memory/create-pending-review-request.schema.json",
+            "schemas/daemon-api/memory/create-pending-review-request.schema.json",
             Strict,
             CreatePendingReviewRequest
         ),
         entry!(
-            "schemas/local-api/memory/create-pending-review-response.schema.json",
+            "schemas/daemon-api/memory/create-pending-review-response.schema.json",
             Strict,
             CreatePendingReviewResponse
         ),
         entry!(
-            "schemas/local-api/memory/pending-review-info.schema.json",
+            "schemas/daemon-api/memory/pending-review-info.schema.json",
             Strict,
             PendingReviewInfo
         ),
         entry!(
-            "schemas/local-api/memory/list-pending-reviews-query.schema.json",
+            "schemas/daemon-api/memory/list-pending-reviews-query.schema.json",
             Strict,
             ListPendingReviewsQuery
         ),
         entry!(
-            "schemas/local-api/memory/list-pending-reviews-response.schema.json",
+            "schemas/daemon-api/memory/list-pending-reviews-response.schema.json",
             Strict,
             ListPendingReviewsResponse
         ),
         entry!(
-            "schemas/local-api/memory/count-pending-reviews-query.schema.json",
+            "schemas/daemon-api/memory/count-pending-reviews-query.schema.json",
             Strict,
             CountPendingReviewsQuery
         ),
         entry!(
-            "schemas/local-api/memory/count-pending-reviews-response.schema.json",
+            "schemas/daemon-api/memory/count-pending-reviews-response.schema.json",
             Strict,
             CountPendingReviewsResponse
         ),
         entry!(
-            "schemas/local-api/memory/delete-pending-review-query.schema.json",
+            "schemas/daemon-api/memory/delete-pending-review-query.schema.json",
             Strict,
             DeletePendingReviewQuery
         ),
         entry!(
-            "schemas/local-api/memory/delete-pending-review-response.schema.json",
+            "schemas/daemon-api/memory/delete-pending-review-response.schema.json",
             Strict,
             DeletePendingReviewResponse
         ),
         entry!(
-            "schemas/local-api/memory/review-request.schema.json",
+            "schemas/daemon-api/memory/review-request.schema.json",
             Strict,
             ReviewRequest
         ),
         entry!(
-            "schemas/local-api/memory/review-response.schema.json",
+            "schemas/daemon-api/memory/review-response.schema.json",
             Strict,
             ReviewResponse
         ),
         entry!(
-            "schemas/local-api/memory/memory-fragment-info.schema.json",
+            "schemas/daemon-api/memory/memory-fragment-info.schema.json",
             Strict,
             MemoryFragmentInfo
         ),
         entry!(
-            "schemas/local-api/memory/list-memory-fragments-query.schema.json",
+            "schemas/daemon-api/memory/list-memory-fragments-query.schema.json",
             Strict,
             ListMemoryFragmentsQuery
         ),
         entry!(
-            "schemas/local-api/memory/list-memory-fragments-response.schema.json",
+            "schemas/daemon-api/memory/list-memory-fragments-response.schema.json",
             Strict,
             ListMemoryFragmentsResponse
         ),
         entry!(
-            "schemas/local-api/memory/soul-narrative-request.schema.json",
+            "schemas/daemon-api/memory/soul-narrative-request.schema.json",
             Strict,
             SoulNarrativeRequest
         ),
         entry!(
-            "schemas/local-api/memory/soul-narrative-response.schema.json",
+            "schemas/daemon-api/memory/soul-narrative-response.schema.json",
             Strict,
             SoulNarrativeResponse
         ),
-        // ── local-api/reading/ (V1.89 — reading depth: progress + annotations)
+        // ── daemon-api/reading/ (V1.89 — reading depth: progress + annotations)
         entry!(
-            "schemas/local-api/reading/reading-progress-query.schema.json",
+            "schemas/daemon-api/reading/reading-progress-query.schema.json",
             Strict,
             ReadingProgressQuery
         ),
         entry!(
-            "schemas/local-api/reading/reading-progress-request.schema.json",
+            "schemas/daemon-api/reading/reading-progress-request.schema.json",
             Strict,
             ReadingProgressRequest
         ),
         entry!(
-            "schemas/local-api/reading/reading-progress-response.schema.json",
+            "schemas/daemon-api/reading/reading-progress-response.schema.json",
             Strict,
             ReadingProgressResponse
         ),
         entry!(
-            "schemas/local-api/reading/reading-annotation.schema.json",
+            "schemas/daemon-api/reading/reading-annotation.schema.json",
             Strict,
             ReadingAnnotation
         ),
         entry!(
-            "schemas/local-api/reading/reading-annotation-create-request.schema.json",
+            "schemas/daemon-api/reading/reading-annotation-create-request.schema.json",
             Strict,
             ReadingAnnotationCreateRequest
         ),
         entry!(
-            "schemas/local-api/reading/reading-annotation-patch-request.schema.json",
+            "schemas/daemon-api/reading/reading-annotation-patch-request.schema.json",
             Strict,
             ReadingAnnotationPatchRequest
         ),
         entry!(
-            "schemas/local-api/reading/reading-annotation-list-query.schema.json",
+            "schemas/daemon-api/reading/reading-annotation-list-query.schema.json",
             Strict,
             ReadingAnnotationListQuery
         ),
         entry!(
-            "schemas/local-api/reading/reading-annotation-list-response.schema.json",
+            "schemas/daemon-api/reading/reading-annotation-list-response.schema.json",
             Strict,
             ReadingAnnotationListResponse
         ),
-        // ── local-api/schedule/ (V1.63 P1) ───────────────────────────────
+        // ── daemon-api/schedule/ (V1.63 P1) ───────────────────────────────
         entry!(
-            "schemas/local-api/schedule/add-schedule-request.schema.json",
+            "schemas/daemon-api/schedule/add-schedule-request.schema.json",
             Strict,
             AddScheduleRequest
         ),
         entry!(
-            "schemas/local-api/schedule/add-schedule-response.schema.json",
+            "schemas/daemon-api/schedule/add-schedule-response.schema.json",
             Strict,
             AddScheduleResponse
         ),
         entry!(
-            "schemas/local-api/schedule/list-schedules-query.schema.json",
+            "schemas/daemon-api/schedule/list-schedules-query.schema.json",
             Strict,
             ListSchedulesQuery
         ),
         entry!(
-            "schemas/local-api/schedule/schedule-summary.schema.json",
+            "schemas/daemon-api/schedule/schedule-summary.schema.json",
             Strict,
             ScheduleSummary
         ),
         entry!(
-            "schemas/local-api/schedule/list-schedules-response.schema.json",
+            "schemas/daemon-api/schedule/list-schedules-response.schema.json",
             Strict,
             ListSchedulesResponse
         ),
         entry!(
-            "schemas/local-api/schedule/inspect-schedule-response.schema.json",
+            "schemas/daemon-api/schedule/inspect-schedule-response.schema.json",
             Strict,
             InspectScheduleResponse
         ),
         entry!(
-            "schemas/local-api/schedule/edit-core-context-request.schema.json",
+            "schemas/daemon-api/schedule/edit-core-context-request.schema.json",
             Strict,
             EditCoreContextRequest
         ),
         entry!(
-            "schemas/local-api/schedule/edit-core-context-response.schema.json",
+            "schemas/daemon-api/schedule/edit-core-context-response.schema.json",
             Strict,
             EditCoreContextResponse
         ),
         entry!(
-            "schemas/local-api/schedule/core-context-response.schema.json",
+            "schemas/daemon-api/schedule/core-context-response.schema.json",
             Strict,
             CoreContextResponse
         ),
         entry!(
-            "schemas/local-api/schedule/core-context-history-entry.schema.json",
+            "schemas/daemon-api/schedule/core-context-history-entry.schema.json",
             Strict,
             CoreContextHistoryEntry
         ),
         entry!(
-            "schemas/local-api/schedule/core-context-history-response.schema.json",
+            "schemas/daemon-api/schedule/core-context-history-response.schema.json",
             Strict,
             CoreContextHistoryResponse
         ),
         entry!(
-            "schemas/local-api/schedule/signal-schedule-request.schema.json",
+            "schemas/daemon-api/schedule/signal-schedule-request.schema.json",
             Strict,
             SignalScheduleRequest
         ),
         entry!(
-            "schemas/local-api/schedule/signal-schedule-response.schema.json",
+            "schemas/daemon-api/schedule/signal-schedule-response.schema.json",
             Strict,
             SignalScheduleResponse
         ),
         entry!(
-            "schemas/local-api/schedule/delete-schedule-response.schema.json",
+            "schemas/daemon-api/schedule/delete-schedule-response.schema.json",
             Strict,
             DeleteScheduleResponse
         ),
-        // ── local-api/workspace/ (V1.63 P1) ──────────────────────────────
+        // ── daemon-api/workspace/ (V1.63 P1) ──────────────────────────────
         entry!(
-            "schemas/local-api/workspace/list-workspaces-query.schema.json",
+            "schemas/daemon-api/workspace/list-workspaces-query.schema.json",
             Strict,
             ListWorkspacesQuery
         ),
         entry!(
-            "schemas/local-api/workspace/workspace-summary.schema.json",
+            "schemas/daemon-api/workspace/workspace-summary.schema.json",
             Strict,
             WorkspaceSummary
         ),
         entry!(
-            "schemas/local-api/workspace/list-workspaces-response.schema.json",
+            "schemas/daemon-api/workspace/list-workspaces-response.schema.json",
             Strict,
             ListWorkspacesResponse
         ),
         entry!(
-            "schemas/local-api/workspace/create-workspace-request.schema.json",
+            "schemas/daemon-api/workspace/create-workspace-request.schema.json",
             Strict,
             CreateWorkspaceRequest
         ),
         entry!(
-            "schemas/local-api/workspace/create-workspace-response.schema.json",
+            "schemas/daemon-api/workspace/create-workspace-response.schema.json",
             Strict,
             CreateWorkspaceResponse
         ),
         entry!(
-            "schemas/local-api/workspace/active-workspace-response.schema.json",
+            "schemas/daemon-api/workspace/active-workspace-response.schema.json",
             Strict,
             ActiveWorkspaceResponse
         ),
         entry!(
-            "schemas/local-api/workspace/set-active-workspace-request.schema.json",
+            "schemas/daemon-api/workspace/set-active-workspace-request.schema.json",
             Strict,
             SetActiveWorkspaceRequest
         ),
         entry!(
-            "schemas/local-api/workspace/set-active-workspace-response.schema.json",
+            "schemas/daemon-api/workspace/set-active-workspace-response.schema.json",
             Strict,
             SetActiveWorkspaceResponse
         ),
-        // ── local-api/creators/ (V1.63 P1) ───────────────────────────────
+        // ── daemon-api/creators/ (V1.63 P1) ───────────────────────────────
         entry!(
-            "schemas/local-api/creators/creator-info.schema.json",
+            "schemas/daemon-api/creators/creator-info.schema.json",
             Strict,
             CreatorInfo
         ),
         entry!(
-            "schemas/local-api/creators/list-creators-query.schema.json",
+            "schemas/daemon-api/creators/list-creators-query.schema.json",
             Strict,
             ListCreatorsQuery
         ),
         entry!(
-            "schemas/local-api/creators/list-creators-response.schema.json",
+            "schemas/daemon-api/creators/list-creators-response.schema.json",
             Strict,
             ListCreatorsResponse
         ),
         entry!(
-            "schemas/local-api/creators/creator-detail.schema.json",
+            "schemas/daemon-api/creators/creator-detail.schema.json",
             Strict,
             CreatorDetail
         ),
         entry!(
-            "schemas/local-api/creators/set-active-creator-request.schema.json",
+            "schemas/daemon-api/creators/set-active-creator-request.schema.json",
             Strict,
             SetActiveCreatorRequest
         ),
         entry!(
-            "schemas/local-api/creators/active-creator-response.schema.json",
+            "schemas/daemon-api/creators/active-creator-response.schema.json",
             Strict,
             ActiveCreatorResponse
         ),
         entry!(
-            "schemas/local-api/creators/set-active-creator-response.schema.json",
+            "schemas/daemon-api/creators/set-active-creator-response.schema.json",
             Strict,
             SetActiveCreatorResponse
         ),
         entry!(
-            "schemas/local-api/creators/logout-response.schema.json",
+            "schemas/daemon-api/creators/logout-response.schema.json",
             Strict,
             LogoutResponse
         ),
-        // ── local-api/orchestration/sessions/ (V1.63 P3) ──────────────────
+        // ── daemon-api/orchestration/sessions/ (V1.63 P3) ──────────────────
         entry!(
-            "schemas/local-api/orchestration/sessions/session-summary.schema.json",
+            "schemas/daemon-api/orchestration/sessions/session-summary.schema.json",
             Strict,
             SessionSummary
         ),
         entry!(
-            "schemas/local-api/orchestration/sessions/list-sessions-query.schema.json",
+            "schemas/daemon-api/orchestration/sessions/list-sessions-query.schema.json",
             Strict,
             ListSessionsQuery
         ),
         entry!(
-            "schemas/local-api/orchestration/sessions/list-sessions-response.schema.json",
+            "schemas/daemon-api/orchestration/sessions/list-sessions-response.schema.json",
             Strict,
             ListSessionsResponse
         ),
         entry!(
-            "schemas/local-api/orchestration/sessions/session-detail-response.schema.json",
+            "schemas/daemon-api/orchestration/sessions/session-detail-response.schema.json",
             Strict,
             SessionDetailResponse
         ),
-        // ── local-api/orchestration/capabilities/ (V1.63 P3) ───────────────
+        // ── daemon-api/orchestration/capabilities/ (V1.63 P3) ───────────────
         entry!(
-            "schemas/local-api/orchestration/capabilities/capability-info.schema.json",
+            "schemas/daemon-api/orchestration/capabilities/capability-info.schema.json",
             Strict,
             CapabilityInfo
         ),
         entry!(
-            "schemas/local-api/orchestration/capabilities/list-capabilities-response.schema.json",
+            "schemas/daemon-api/orchestration/capabilities/list-capabilities-response.schema.json",
             Strict,
             ListCapabilitiesResponse
         ),
-        // ── local-api/preset-management/ (V1.63 P3) ────────────────────────
+        // ── daemon-api/preset-management/ (V1.63 P3) ────────────────────────
         entry!(
-            "schemas/local-api/preset-management/preset-summary.schema.json",
+            "schemas/daemon-api/preset-management/preset-summary.schema.json",
             Strict,
             PresetSummary
         ),
         entry!(
-            "schemas/local-api/preset-management/list-presets-response.schema.json",
+            "schemas/daemon-api/preset-management/list-presets-response.schema.json",
             Strict,
             ListPresetsResponse
         ),
         entry!(
-            "schemas/local-api/preset-management/scaffold-preset-request.schema.json",
+            "schemas/daemon-api/preset-management/scaffold-preset-request.schema.json",
             Strict,
             ScaffoldPresetRequest
         ),
         entry!(
-            "schemas/local-api/preset-management/scaffold-preset-response.schema.json",
+            "schemas/daemon-api/preset-management/scaffold-preset-response.schema.json",
             Strict,
             ScaffoldPresetResponse
         ),
         entry!(
-            "schemas/local-api/preset-management/validate-preset-request.schema.json",
+            "schemas/daemon-api/preset-management/validate-preset-request.schema.json",
             Strict,
             ValidatePresetRequest
         ),
         entry!(
-            "schemas/local-api/preset-management/validate-preset-response.schema.json",
+            "schemas/daemon-api/preset-management/validate-preset-response.schema.json",
             Strict,
             ValidatePresetResponse
         ),
         entry!(
-            "schemas/local-api/preset-management/reload-preset-response.schema.json",
+            "schemas/daemon-api/preset-management/reload-preset-response.schema.json",
             Strict,
             ReloadPresetResponse
         ),
         // V1.65 P0: full preset CRUD additions
         entry!(
-            "schemas/local-api/preset-management/get-preset-response.schema.json",
+            "schemas/daemon-api/preset-management/get-preset-response.schema.json",
             Strict,
             GetPresetResponse
         ),
         entry!(
-            "schemas/local-api/preset-management/update-preset-request.schema.json",
+            "schemas/daemon-api/preset-management/update-preset-request.schema.json",
             Strict,
             UpdatePresetRequest
         ),
         entry!(
-            "schemas/local-api/preset-management/update-preset-response.schema.json",
+            "schemas/daemon-api/preset-management/update-preset-response.schema.json",
             Strict,
             UpdatePresetResponse
         ),
-        // ── local-api/canvas/strategy/ (V1.71) ────────────────────────────
+        // ── daemon-api/canvas/strategy/ (V1.71) ────────────────────────────
         entry!(
-            "schemas/local-api/canvas/strategy/strategy-patch-state-request.schema.json",
+            "schemas/daemon-api/canvas/strategy/strategy-patch-state-request.schema.json",
             Strict,
             StrategyPatchStateRequest
         ),
         entry!(
-            "schemas/local-api/canvas/strategy/strategy-patch-transition-request.schema.json",
+            "schemas/daemon-api/canvas/strategy/strategy-patch-transition-request.schema.json",
             Strict,
             StrategyPatchTransitionRequest
         ),
         entry!(
-            "schemas/local-api/canvas/strategy/strategy-patch-prompt-template-request.schema.json",
+            "schemas/daemon-api/canvas/strategy/strategy-patch-prompt-template-request.schema.json",
             Strict,
             StrategyPatchPromptTemplateRequest
         ),
         entry!(
-            "schemas/local-api/canvas/strategy/strategy-patch-response.schema.json",
+            "schemas/daemon-api/canvas/strategy/strategy-patch-response.schema.json",
             Strict,
             StrategyPatchResponse
         ),
         entry!(
-            "schemas/local-api/canvas/strategy/strategy-conflict-error.schema.json",
+            "schemas/daemon-api/canvas/strategy/strategy-conflict-error.schema.json",
             Strict,
             StrategyConflictError
         ),
-        // ── local-api/canvas/outline/ (V1.72) ─────────────────────────────
+        // ── daemon-api/canvas/outline/ (V1.72) ─────────────────────────────
         entry!(
-            "schemas/local-api/canvas/outline/outline-patch-structure-request.schema.json",
+            "schemas/daemon-api/canvas/outline/outline-patch-structure-request.schema.json",
             Strict,
             OutlinePatchStructureRequest
         ),
         entry!(
-            "schemas/local-api/canvas/outline/outline-patch-chapter-request.schema.json",
+            "schemas/daemon-api/canvas/outline/outline-patch-chapter-request.schema.json",
             Strict,
             OutlinePatchChapterRequest
         ),
         entry!(
-            "schemas/local-api/canvas/outline/timeline-patch-event-request.schema.json",
+            "schemas/daemon-api/canvas/outline/timeline-patch-event-request.schema.json",
             Strict,
             TimelinePatchEventRequest
         ),
         entry!(
-            "schemas/local-api/canvas/outline/outline-patch-response.schema.json",
+            "schemas/daemon-api/canvas/outline/outline-patch-response.schema.json",
             Strict,
             OutlinePatchResponse
         ),
         entry!(
-            "schemas/local-api/canvas/outline/outline-conflict-error.schema.json",
+            "schemas/daemon-api/canvas/outline/outline-conflict-error.schema.json",
             Strict,
             OutlineConflictError
         ),
         entry!(
-            "schemas/local-api/canvas/outline/outline-validation-error.schema.json",
+            "schemas/daemon-api/canvas/outline/outline-validation-error.schema.json",
             Strict,
             OutlineValidationError
         ),
         entry!(
-            "schemas/local-api/canvas/outline/work-outline.schema.json",
+            "schemas/daemon-api/canvas/outline/work-outline.schema.json",
             Strict,
             WorkOutline
         ),
-        // ── local-api/canvas/world-kb/ (V1.73) ───────────────────────────
+        // ── daemon-api/canvas/world-kb/ (V1.73) ───────────────────────────
         entry!(
-            "schemas/local-api/canvas/world-kb/world-kb-patch-entity-request.schema.json",
+            "schemas/daemon-api/canvas/world-kb/world-kb-patch-entity-request.schema.json",
             Strict,
             WorldKbPatchEntityRequest
         ),
         entry!(
-            "schemas/local-api/canvas/world-kb/world-kb-patch-entity-response.schema.json",
+            "schemas/daemon-api/canvas/world-kb/world-kb-patch-entity-response.schema.json",
             Strict,
             WorldKbPatchEntityResponse
         ),
         entry!(
-            "schemas/local-api/canvas/world-kb/world-kb-promote-candidate-request.schema.json",
+            "schemas/daemon-api/canvas/world-kb/world-kb-promote-candidate-request.schema.json",
             Strict,
             WorldKbPromoteCandidateRequest
         ),
         entry!(
-            "schemas/local-api/canvas/world-kb/world-kb-promote-candidate-response.schema.json",
+            "schemas/daemon-api/canvas/world-kb/world-kb-promote-candidate-response.schema.json",
             Strict,
             WorldKbPromoteCandidateResponse
         ),
         entry!(
-            "schemas/local-api/canvas/world-kb/world-kb-graph-response.schema.json",
+            "schemas/daemon-api/canvas/world-kb/world-kb-graph-response.schema.json",
             Strict,
             WorldKbGraphResponse
         ),
         entry!(
-            "schemas/local-api/canvas/world-kb/world-kb-candidates-response.schema.json",
+            "schemas/daemon-api/canvas/world-kb/world-kb-candidates-response.schema.json",
             Strict,
             WorldKbCandidatesResponse
         ),
         entry!(
-            "schemas/local-api/canvas/world-kb/world-kb-conflict-error.schema.json",
+            "schemas/daemon-api/canvas/world-kb/world-kb-conflict-error.schema.json",
             Strict,
             WorldKbConflictError
         ),
         entry!(
-            "schemas/local-api/canvas/world-kb/world-kb-validation-error.schema.json",
+            "schemas/daemon-api/canvas/world-kb/world-kb-validation-error.schema.json",
             Strict,
             WorldKbValidationError
         ),
         entry!(
-            "schemas/local-api/canvas/world-kb/world-kb-entity-patch.schema.json",
+            "schemas/daemon-api/canvas/world-kb/world-kb-entity-patch.schema.json",
             Strict,
             WorldKbEntityPatch
         ),
         entry!(
-            "schemas/local-api/canvas/world-kb/world-kb-entity-projection.schema.json",
+            "schemas/daemon-api/canvas/world-kb/world-kb-entity-projection.schema.json",
             Strict,
             WorldKbEntityProjection
         ),
         entry!(
-            "schemas/local-api/canvas/world-kb/world-kb-candidate-projection.schema.json",
+            "schemas/daemon-api/canvas/world-kb/world-kb-candidate-projection.schema.json",
             Strict,
             WorldKbCandidateProjection
         ),
         entry!(
-            "schemas/local-api/canvas/world-kb/world-kb-source-anchor-projection.schema.json",
+            "schemas/daemon-api/canvas/world-kb/world-kb-source-anchor-projection.schema.json",
             Strict,
             WorldKbSourceAnchorProjection
         ),
         entry!(
-            "schemas/local-api/canvas/world-kb/world-kb-extract-job-projection.schema.json",
+            "schemas/daemon-api/canvas/world-kb/world-kb-extract-job-projection.schema.json",
             Strict,
             WorldKbExtractJobProjection
         ),

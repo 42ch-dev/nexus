@@ -54,7 +54,7 @@ function getDefinitions(schema: LoadedSchema): Record<string, Record<string, unk
  * Generate TypeScript types from schemas.
  *
  * Emits a nested file tree mirroring the consumer-scope `schemas/` layout:
- *   generated/{common,domain,platform/{http-bff,sync},local-api/compute}/<PascalType>.ts
+ *   generated/{common,domain,platform/{http-bff,sync},daemon-api/compute}/<PascalType>.ts
  * The root `index.ts` re-exports every leaf module so the package public API stays flat.
  */
 export function generateTSTypes(schemas: LoadedSchema[]): void {

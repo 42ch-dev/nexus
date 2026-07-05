@@ -41,7 +41,7 @@ function displayFor(status: DaemonStatus): StateDisplay {
     case 'running':
       return {
         label: 'Daemon running',
-        helper: status.detail ?? 'Local API is reachable on the configured port.',
+        helper: status.detail ?? 'Daemon API is reachable on the configured port.',
       };
     case 'degraded':
       return {

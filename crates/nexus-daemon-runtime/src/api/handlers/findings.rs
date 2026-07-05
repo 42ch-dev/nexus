@@ -1,14 +1,14 @@
 //! Findings API handlers (V1.39 P1 — novel-quality-loop §2).
 //!
 //! Endpoints:
-//! - `POST   /v1/local/works/{work_id}/findings` — Create finding
-//! - `GET    /v1/local/works/{work_id}/findings` — List findings (filters: status, severity, cursor pagination — F-P2)
-//! - `GET    /v1/local/works/{work_id}/findings/{finding_id}` — Get one finding
-//! - `PATCH  /v1/local/works/{work_id}/findings/{finding_id}` — Update finding
-//! - `DELETE /v1/local/works/{work_id}/findings/{finding_id}` — Delete finding
-//! - `POST   /v1/local/works/{work_id}/findings/from-review` — Create from review verdict (T3)
-//! - `GET    /v1/local/findings/{finding_id}` — Get one finding, creator-scoped (V1.48 P2 — accept path)
-//! - `GET    /v1/local/findings/stale` — Stale open-findings count for active creator (V1.39 P4 T3)
+//! - `POST   /v1/daemon/works/{work_id}/findings` — Create finding
+//! - `GET    /v1/daemon/works/{work_id}/findings` — List findings (filters: status, severity, cursor pagination — F-P2)
+//! - `GET    /v1/daemon/works/{work_id}/findings/{finding_id}` — Get one finding
+//! - `PATCH  /v1/daemon/works/{work_id}/findings/{finding_id}` — Update finding
+//! - `DELETE /v1/daemon/works/{work_id}/findings/{finding_id}` — Delete finding
+//! - `POST   /v1/daemon/works/{work_id}/findings/from-review` — Create from review verdict (T3)
+//! - `GET    /v1/daemon/findings/{finding_id}` — Get one finding, creator-scoped (V1.48 P2 — accept path)
+//! - `GET    /v1/daemon/findings/stale` — Stale open-findings count for active creator (V1.39 P4 T3)
 
 #![allow(clippy::missing_errors_doc)]
 
@@ -220,7 +220,7 @@ pub fn format_routing_hint(target_executor: &str) -> String {
 
 // ─── Handlers ───────────────────────────────────────────────────────────────
 
-/// `POST /v1/local/works/{work_id}/findings` — create a finding.
+/// `POST /v1/daemon/works/{work_id}/findings` — create a finding.
 pub async fn create_finding_handler(
     State(state): State<WorkspaceState>,
     Path(work_id): Path<String>,
@@ -250,7 +250,7 @@ pub async fn create_finding_handler(
     Ok((StatusCode::CREATED, Json(f.into())))
 }
 
-/// `GET /v1/local/works/{work_id}/findings` — list findings.
+/// `GET /v1/daemon/works/{work_id}/findings` — list findings.
 ///
 /// R-V149P0-01 (V1.50): the `status` query parameter now accepts a
 /// comma-separated list (e.g. `?status=open,triaged`) so the produce-prompt
@@ -324,7 +324,7 @@ pub async fn list_findings_handler(
     }))
 }
 
-/// `GET /v1/local/works/{work_id}/findings/{finding_id}` — get one finding.
+/// `GET /v1/daemon/works/{work_id}/findings/{finding_id}` — get one finding.
 pub async fn get_finding_handler(
     State(state): State<WorkspaceState>,
     Path((work_id, finding_id)): Path<(String, String)>,
@@ -341,7 +341,7 @@ pub async fn get_finding_handler(
     Ok(Json(f.into()))
 }
 
-/// `GET /v1/local/findings/{finding_id}` — get one finding, creator-scoped.
+/// `GET /v1/daemon/findings/{finding_id}` — get one finding, creator-scoped.
 ///
 /// V1.48 P2: added so the CLI `creator works findings accept <finding_id>`
 /// command can resolve a finding by ID alone (without the caller knowing
@@ -358,7 +358,7 @@ pub async fn get_finding_creator_scoped_handler(
         .ok_or_else(|| NexusApiError::NotFound(format!("finding {finding_id}")))?;
     Ok(Json(f.into()))
 }
-/// `PATCH /v1/local/works/{work_id}/findings/{finding_id}` — update a finding.
+/// `PATCH /v1/daemon/works/{work_id}/findings/{finding_id}` — update a finding.
 ///
 /// V1.49 F6 (`findings-lifecycle.md` §2.1): when the patch moves `status`,
 /// the DAO validates the lifecycle transition. Illegal transitions surface
@@ -450,7 +450,7 @@ pub async fn update_finding_handler(
     Ok(Json(f.into()))
 }
 
-/// `DELETE /v1/local/works/{work_id}/findings/{finding_id}` — delete a finding.
+/// `DELETE /v1/daemon/works/{work_id}/findings/{finding_id}` — delete a finding.
 pub async fn delete_finding_handler(
     State(state): State<WorkspaceState>,
     Path((work_id, finding_id)): Path<(String, String)>,
@@ -468,7 +468,7 @@ pub async fn delete_finding_handler(
     }
 }
 
-/// `POST /v1/local/works/{work_id}/findings/from-review` — create finding from review verdict (T3).
+/// `POST /v1/daemon/works/{work_id}/findings/from-review` — create finding from review verdict (T3).
 ///
 /// This endpoint is called by the orchestration layer after a review stage
 /// completes. The request body contains the review verdict fields extracted
@@ -524,7 +524,7 @@ pub async fn create_from_review_handler(
 
 // ─── Stale findings (V1.39 P4 T3) ──────────────────────────────────────────
 
-/// Response shape for `GET /v1/local/findings/stale`.
+/// Response shape for `GET /v1/daemon/findings/stale`.
 ///
 /// Lists open findings for the active creator that have aged past the
 /// stale threshold (default 96h, overridable via `NEXUS_DAEMON_STALE_FINDINGS_THRESHOLD_SECS`).
@@ -553,7 +553,7 @@ pub struct StaleFindingDto {
     pub age_seconds: i64,
 }
 
-/// `GET /v1/local/findings/stale` — list stale open findings for the active creator (V1.39 P4 T3).
+/// `GET /v1/daemon/findings/stale` — list stale open findings for the active creator (V1.39 P4 T3).
 ///
 /// Per-creator scoped (uses `read_active_creator_id`). Returns an empty
 /// `findings` list and `stale_count = 0` when no findings have aged past
@@ -604,7 +604,7 @@ pub async fn list_stale_findings_handler(
 
 // ─── Retention prune (V1.49 P3, quality-loop §9.4) ──────────────────────────
 
-/// Query parameters for `POST /v1/local/findings/prune`.
+/// Query parameters for `POST /v1/daemon/findings/prune`.
 #[derive(Debug, Default, Deserialize)]
 pub struct PruneFindingsQuery {
     /// Retention window in days; defaults to [`findings::RETENTION_DEFAULT_DAYS`]
@@ -618,7 +618,7 @@ pub struct PruneFindingsQuery {
     pub dry_run: Option<bool>,
 }
 
-/// Response for `POST /v1/local/findings/prune`.
+/// Response for `POST /v1/daemon/findings/prune`.
 #[derive(Debug, Serialize)]
 pub struct PruneFindingsResponse {
     /// Number of `resolved` rows deleted (or, in dry-run, that WOULD be deleted).
@@ -631,7 +631,7 @@ pub struct PruneFindingsResponse {
     pub now_epoch: i64,
 }
 
-/// `POST /v1/local/findings/prune` — prune (or preview) `resolved` findings
+/// `POST /v1/daemon/findings/prune` — prune (or preview) `resolved` findings
 /// older than the retention window (V1.49 P3, `novel-writing/quality-loop.md`
 /// §9.4).
 ///
@@ -639,7 +639,7 @@ pub struct PruneFindingsResponse {
 /// [`findings::count_resolved_findings_older_than`] when `dry_run=true`). The
 /// DAO is global across creators, which matches the local-first single-creator
 /// daemon model (one active creator per workspace). Requires an active creator
-/// for auth consistency with the other Local API endpoints.
+/// for auth consistency with the other Daemon API endpoints.
 ///
 /// # Errors
 ///

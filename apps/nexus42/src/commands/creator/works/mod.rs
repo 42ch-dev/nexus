@@ -454,7 +454,7 @@ pub async fn handle_works(cmd: WorksCommand, config: &CliConfig) -> Result<()> {
 
 async fn handle_list(client: &DaemonClient, status: Option<String>, json: bool) -> Result<()> {
     // Build query via url::Url to properly encode the status filter value.
-    let base = "/v1/local/works";
+    let base = "/v1/daemon/works";
     let path = status.as_ref().map_or_else(
         || base.to_string(),
         |s| {
@@ -520,7 +520,7 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
     } else {
         // Try pool active Work endpoint.
         let resp: serde_json::Value = client
-            .get::<serde_json::Value>("/v1/local/works?limit=1&status=active")
+            .get::<serde_json::Value>("/v1/daemon/works?limit=1&status=active")
             .await?;
         resp.get("works")
             .and_then(|v| v.as_array())
@@ -538,7 +538,7 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
     // R-V139P1-W-3: DaemonClient already enforces DEFAULT_REQUEST_TIMEOUT
     // (30s) on every request; no unbounded wait is possible.
     let resp: serde_json::Value = client
-        .get::<serde_json::Value>(&format!("/v1/local/works/{resolved_id}"))
+        .get::<serde_json::Value>(&format!("/v1/daemon/works/{resolved_id}"))
         .await?;
 
     if json {
@@ -752,7 +752,7 @@ async fn handle_status(client: &DaemonClient, work_id: Option<String>, json: boo
 async fn handle_use(client: &DaemonClient, work_id: &str) -> Result<()> {
     // Verify the work exists first.
     let _work: serde_json::Value = client
-        .get::<serde_json::Value>(&format!("/v1/local/works/{work_id}"))
+        .get::<serde_json::Value>(&format!("/v1/daemon/works/{work_id}"))
         .await?;
 
     // Set pool active via the works API. The daemon handler will
@@ -762,7 +762,7 @@ async fn handle_use(client: &DaemonClient, work_id: &str) -> Result<()> {
         "work_id": work_id,
     });
     let resp: serde_json::Value = client
-        .post::<serde_json::Value, _>("/v1/local/works/pool", &body)
+        .post::<serde_json::Value, _>("/v1/daemon/works/pool", &body)
         .await?;
 
     println!(
@@ -792,7 +792,10 @@ async fn handle_inspire(
     let resolved_id = super::work_utils::resolve_active_work_id(client, work_id).await?;
     let body = serde_json::json!({ "note": note });
     let resp: serde_json::Value = client
-        .post::<serde_json::Value, _>(&format!("/v1/local/works/{resolved_id}/inspiration"), &body)
+        .post::<serde_json::Value, _>(
+            &format!("/v1/daemon/works/{resolved_id}/inspiration"),
+            &body,
+        )
         .await?;
 
     if json {
@@ -845,7 +848,7 @@ async fn handle_reopen(
     }
 
     let resp: serde_json::Value = client
-        .patch::<serde_json::Value, _>(&format!("/v1/local/works/{resolved_id}"), &patch)
+        .patch::<serde_json::Value, _>(&format!("/v1/daemon/works/{resolved_id}"), &patch)
         .await?;
 
     if json {
@@ -878,7 +881,7 @@ async fn handle_resume_chain(
         "auto_chain_interrupted": false,
     });
     let resp: serde_json::Value = client
-        .patch::<serde_json::Value, _>(&format!("/v1/local/works/{resolved_id}"), &patch)
+        .patch::<serde_json::Value, _>(&format!("/v1/daemon/works/{resolved_id}"), &patch)
         .await?;
 
     if json {
@@ -949,7 +952,7 @@ async fn handle_reconcile_chapters(
     if dry_run {
         // Thread dry_run as a query param; the daemon skips the runtime lock
         // and all filesystem/DB writes (overlay §8.2).
-        let path = format!("/v1/local/works/{resolved_id}/reconcile-chapters?dry_run=true");
+        let path = format!("/v1/daemon/works/{resolved_id}/reconcile-chapters?dry_run=true");
         let report: serde_json::Value = client.post(&path, &serde_json::json!({})).await?;
         if json {
             println!("{}", serde_json::to_string_pretty(&report)?);
@@ -984,7 +987,7 @@ async fn handle_reconcile_chapters(
 
     let report: serde_json::Value = client
         .post(
-            &format!("/v1/local/works/{resolved_id}/reconcile-chapters"),
+            &format!("/v1/daemon/works/{resolved_id}/reconcile-chapters"),
             &serde_json::json!({}),
         )
         .await?;
@@ -1088,7 +1091,7 @@ async fn handle_intake(
     // check; GET the Work so a nonexistent work_id surfaces a clear error
     // (overlay §8.1 remediation: cite this command + `creator bootstrap`).
     let _work: serde_json::Value = client
-        .get::<serde_json::Value>(&format!("/v1/local/works/{resolved_id}"))
+        .get::<serde_json::Value>(&format!("/v1/daemon/works/{resolved_id}"))
         .await
         .map_err(|e| {
             crate::errors::CliError::Config(format!(
@@ -1119,7 +1122,7 @@ async fn handle_intake(
     };
 
     let resp: serde_json::Value = client
-        .post::<serde_json::Value, _>("/v1/local/orchestration/schedules", &request)
+        .post::<serde_json::Value, _>("/v1/daemon/orchestration/schedules", &request)
         .await?;
 
     let schedule_id = resp
@@ -1147,7 +1150,7 @@ async fn handle_completion_lock(client: &DaemonClient, cmd: CompletionLockComman
             });
             let resp: serde_json::Value = client
                 .post::<serde_json::Value, _>(
-                    &format!("/v1/local/works/{work_id}/completion-lock/release"),
+                    &format!("/v1/daemon/works/{work_id}/completion-lock/release"),
                     &body,
                 )
                 .await?;
@@ -1182,7 +1185,7 @@ async fn handle_pool(client: &DaemonClient, action: PoolAction) -> Result<()> {
 }
 
 async fn handle_pool_list(client: &DaemonClient, status: Option<String>, json: bool) -> Result<()> {
-    let base = "/v1/local/works/pool";
+    let base = "/v1/daemon/works/pool";
     let path = status.as_ref().map_or_else(
         || base.to_string(),
         |s| {
@@ -1242,7 +1245,7 @@ async fn handle_pool_promote(
         "set_default": set_default,
     });
     let resp: serde_json::Value = client
-        .post::<serde_json::Value, _>("/v1/local/works/pool/promote", &body)
+        .post::<serde_json::Value, _>("/v1/daemon/works/pool/promote", &body)
         .await?;
 
     let entry_id = resp.get("entry_id").and_then(|v| v.as_str()).unwrap_or("?");
@@ -1255,7 +1258,7 @@ async fn handle_pool_promote(
             "work_id": work_id,
         });
         let _use_resp: serde_json::Value = client
-            .post::<serde_json::Value, _>("/v1/local/works/pool", &use_body)
+            .post::<serde_json::Value, _>("/v1/daemon/works/pool", &use_body)
             .await?;
         println!("Also set as CLI default work.");
     }
@@ -1266,7 +1269,7 @@ async fn handle_pool_promote(
 async fn handle_pool_archive(client: &DaemonClient, entry_id: &str) -> Result<()> {
     let body = serde_json::json!({ "entry_id": entry_id });
     let resp: serde_json::Value = client
-        .post::<serde_json::Value, _>("/v1/local/works/pool/archive", &body)
+        .post::<serde_json::Value, _>("/v1/daemon/works/pool/archive", &body)
         .await?;
 
     let status = resp
@@ -1302,7 +1305,7 @@ async fn handle_inspiration(client: &DaemonClient, action: InspirationAction) ->
 async fn handle_inspiration_add(client: &DaemonClient, title: &str, json: bool) -> Result<()> {
     let body = serde_json::json!({ "title": title });
     let resp: serde_json::Value = client
-        .post::<serde_json::Value, _>("/v1/local/works/pool/inspiration", &body)
+        .post::<serde_json::Value, _>("/v1/daemon/works/pool/inspiration", &body)
         .await?;
 
     if json {
@@ -1322,7 +1325,7 @@ async fn handle_inspiration_list(
     status: Option<String>,
     json: bool,
 ) -> Result<()> {
-    let base = "/v1/local/works/pool/inspiration";
+    let base = "/v1/daemon/works/pool/inspiration";
     let path = status.as_ref().map_or_else(
         || base.to_string(),
         |s| {
@@ -1389,7 +1392,7 @@ async fn handle_inspiration_promote(
     }
 
     let resp: serde_json::Value = client
-        .post::<serde_json::Value, _>("/v1/local/works/pool/inspiration/promote", &body)
+        .post::<serde_json::Value, _>("/v1/daemon/works/pool/inspiration/promote", &body)
         .await?;
 
     let work_id = resp.get("work_id").and_then(|v| v.as_str()).unwrap_or("?");
@@ -1405,7 +1408,7 @@ async fn handle_inspiration_promote(
             "work_id": work_id,
         });
         let _use_resp: serde_json::Value = client
-            .post::<serde_json::Value, _>("/v1/local/works/pool", &use_body)
+            .post::<serde_json::Value, _>("/v1/daemon/works/pool", &use_body)
             .await?;
         println!("Also set as CLI default work.");
     }
@@ -1416,7 +1419,7 @@ async fn handle_inspiration_promote(
 async fn handle_inspiration_archive(client: &DaemonClient, item_id: &str) -> Result<()> {
     let body = serde_json::json!({ "item_id": item_id });
     let _resp: serde_json::Value = client
-        .post::<serde_json::Value, _>("/v1/local/works/pool/inspiration/archive", &body)
+        .post::<serde_json::Value, _>("/v1/daemon/works/pool/inspiration/archive", &body)
         .await?;
 
     println!("Inspiration item {item_id} archived.");
@@ -1434,7 +1437,7 @@ const FINDINGS_FETCH_TIMEOUT: std::time::Duration = std::time::Duration::from_se
 const FINDINGS_FETCH_LIMIT: usize = 50;
 
 /// Stale-fetch subcall timeout — mirrors `FINDINGS_FETCH_TIMEOUT` so the
-/// JSON-path `/v1/local/findings/stale` fetch cannot block the status hot
+/// JSON-path `/v1/daemon/findings/stale` fetch cannot block the status hot
 /// path longer than the findings fetch (qc3 F-002; resolves the timeout
 /// asymmetry flagged in qc1 S-3). Previously the stale fetch inherited the
 /// default 30s `DEFAULT_REQUEST_TIMEOUT`, six times the findings cap.
@@ -1465,7 +1468,7 @@ async fn fetch_open_findings(client: &DaemonClient, work_id: &str) -> FindingsRe
         FINDINGS_FETCH_TIMEOUT,
     );
     let path =
-        format!("/v1/local/works/{work_id}/findings?status=open&limit={FINDINGS_FETCH_LIMIT}");
+        format!("/v1/daemon/works/{work_id}/findings?status=open&limit={FINDINGS_FETCH_LIMIT}");
     // R-V146P0-QC3-S2: observe the silent degradation path — a failed/timeout
     // findings fetch previously vanished into `Unavailable` with no trace.
     let result = findings_client
@@ -1502,7 +1505,7 @@ async fn fetch_stale_findings(client: &DaemonClient) -> Option<serde_json::Value
         STALE_FETCH_TIMEOUT,
     );
     stale_client
-        .get::<serde_json::Value>("/v1/local/findings/stale")
+        .get::<serde_json::Value>("/v1/daemon/findings/stale")
         .await
         .map_err(|e| {
             // R-V146P0-QC3-S2: observe the silent `.ok()` swallow — a failed
@@ -1580,7 +1583,7 @@ async fn fetch_novel_findings_and_stale(
 ///             boolean is also inserted so JSON consumers can detect that more
 ///             open findings may exist beyond the fetched page (qc3 F-003).
 ///
-/// `stale`: the `/v1/local/findings/stale` payload; `findings_stale` is inserted
+/// `stale`: the `/v1/daemon/findings/stale` payload; `findings_stale` is inserted
 ///          only when its `stale_count` is greater than zero.
 fn enrich_status_json(
     mut resp: serde_json::Value,
@@ -2586,7 +2589,7 @@ mod tests {
         // Findings endpoint (path includes query string in the request, but the
         // wiremock `path` matcher matches the path component only).
         Mock::given(method("GET"))
-            .and(path("/v1/local/works/wrk_concurrent/findings"))
+            .and(path("/v1/daemon/works/wrk_concurrent/findings"))
             .respond_with(
                 ResponseTemplate::new(200)
                     .set_body_json(serde_json::json!([]))
@@ -2597,7 +2600,7 @@ mod tests {
 
         // Stale endpoint.
         Mock::given(method("GET"))
-            .and(path("/v1/local/findings/stale"))
+            .and(path("/v1/daemon/findings/stale"))
             .respond_with(
                 ResponseTemplate::new(200)
                     .set_body_json(serde_json::json!({ "stale_count": 0 }))
@@ -2643,7 +2646,7 @@ mod tests {
         // No findings mock mounted → wiremock returns 404 → get() errors →
         // FindingsResult::Unavailable → None.
         Mock::given(method("GET"))
-            .and(path("/v1/local/findings/stale"))
+            .and(path("/v1/daemon/findings/stale"))
             .respond_with(
                 ResponseTemplate::new(200).set_body_json(serde_json::json!({ "stale_count": 2 })),
             )
@@ -2700,7 +2703,7 @@ mod tests {
 
         let mock_server = MockServer::start().await;
         Mock::given(method("GET"))
-            .and(path("/v1/local/findings/stale"))
+            .and(path("/v1/daemon/findings/stale"))
             .respond_with(
                 ResponseTemplate::new(500)
                     .set_body_json(serde_json::json!({ "error": "internal" })),
@@ -3062,7 +3065,7 @@ mod tests {
 
         // GET the Work to verify existence → 200.
         Mock::given(method("GET"))
-            .and(path(format!("/v1/local/works/{work_id}")))
+            .and(path(format!("/v1/daemon/works/{work_id}")))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "work_id": work_id,
                 "title": "Intake Test",
@@ -3073,7 +3076,7 @@ mod tests {
 
         // POST schedule — assert the body binds preset_id + work_id.
         Mock::given(method("POST"))
-            .and(path("/v1/local/orchestration/schedules"))
+            .and(path("/v1/daemon/orchestration/schedules"))
             .and(body_string_contains("\"creative-brief-intake\""))
             .and(body_string_contains(work_id))
             .respond_with(ResponseTemplate::new(201).set_body_json(serde_json::json!({
@@ -3109,7 +3112,7 @@ mod tests {
         let work_id = "wrk_does_not_exist";
 
         Mock::given(method("GET"))
-            .and(path(format!("/v1/local/works/{work_id}")))
+            .and(path(format!("/v1/daemon/works/{work_id}")))
             .respond_with(ResponseTemplate::new(404).set_body_string("not found"))
             .mount(&mock_server)
             .await;

@@ -2,15 +2,15 @@
 //! Agent Host API handlers.
 //!
 //! Endpoints:
-//! - GET    /v1/local/agent-host/health                           — Host health status
-//! - GET    /v1/local/agent-host/providers                        — List available providers
-//! - POST   /v1/local/agent-host/sessions                         — Create a managed session
-//! - GET    /v1/local/agent-host/sessions                         — List active sessions (with pagination)
-//! - GET    /v1/local/agent-host/sessions/{session_id}            — Get session detail
-//! - DELETE /v1/local/agent-host/sessions/{session_id}            — Shutdown a single session
-//! - POST   /v1/local/agent-host/sessions/{session_id}/operations — Execute a host operation
-//! - POST   /v1/local/agent-host/operations/{operation_id}:cancel — Cancel in-flight operation
-//! - GET    /v1/local/agent-host/sessions/{session_id}/events     — SSE event stream
+//! - GET    /v1/daemon/agent-host/health                           — Host health status
+//! - GET    /v1/daemon/agent-host/providers                        — List available providers
+//! - POST   /v1/daemon/agent-host/sessions                         — Create a managed session
+//! - GET    /v1/daemon/agent-host/sessions                         — List active sessions (with pagination)
+//! - GET    /v1/daemon/agent-host/sessions/{session_id}            — Get session detail
+//! - DELETE /v1/daemon/agent-host/sessions/{session_id}            — Shutdown a single session
+//! - POST   /v1/daemon/agent-host/sessions/{session_id}/operations — Execute a host operation
+//! - POST   /v1/daemon/agent-host/operations/{operation_id}:cancel — Cancel in-flight operation
+//! - GET    /v1/daemon/agent-host/sessions/{session_id}/events     — SSE event stream
 
 use std::convert::Infallible;
 use std::sync::Arc;
@@ -191,7 +191,7 @@ fn active_op_display(session: &nexus_agent_host::core::session::HostSession) -> 
 // Handlers
 // ---------------------------------------------------------------------------
 
-/// GET /v1/local/agent-host/health
+/// GET /v1/daemon/agent-host/health
 pub async fn health(
     State(state): State<WorkspaceState>,
 ) -> Result<Json<HostHealthResponse>, NexusApiError> {
@@ -205,7 +205,7 @@ pub async fn health(
     }))
 }
 
-/// GET /v1/local/agent-host/providers
+/// GET /v1/daemon/agent-host/providers
 ///
 /// Returns the real provider catalog from the agent host subsystem.
 pub async fn list_providers(
@@ -233,7 +233,7 @@ pub async fn list_providers(
     Ok(Json(ProviderListResponse { providers }))
 }
 
-/// POST /v1/local/agent-host/sessions
+/// POST /v1/daemon/agent-host/sessions
 pub async fn create_session(
     State(state): State<WorkspaceState>,
     Json(req): Json<CreateSessionRequest>,
@@ -266,7 +266,7 @@ pub async fn create_session(
     }))
 }
 
-/// GET /v1/local/agent-host/sessions
+/// GET /v1/daemon/agent-host/sessions
 ///
 /// Returns real session registry from agent host with pagination.
 pub async fn list_sessions(
@@ -315,7 +315,7 @@ pub async fn list_sessions(
     }))
 }
 
-/// GET /v1/local/agent-host/sessions/{session_id}
+/// GET /v1/daemon/agent-host/sessions/{session_id}
 pub async fn get_session(
     State(state): State<WorkspaceState>,
     Path(session_id): Path<String>,
@@ -338,7 +338,7 @@ pub async fn get_session(
     }))
 }
 
-/// DELETE /v1/local/agent-host/sessions/{session_id}
+/// DELETE /v1/daemon/agent-host/sessions/{session_id}
 ///
 /// Shuts down a single session. The host remains running.
 /// Returns 404 if the session does not exist.
@@ -360,7 +360,7 @@ pub async fn shutdown_session(
     }))
 }
 
-/// POST /v1/local/agent-host/sessions/{session_id}/operations
+/// POST /v1/daemon/agent-host/sessions/{session_id}/operations
 ///
 /// Execute a normalized host operation (prompt, `set_model`, `set_mode`).
 /// Returns the operation ID for tracking.
@@ -416,7 +416,7 @@ pub async fn execute_operation(
     }))
 }
 
-/// POST /v1/local/agent-host/operations/{operation_id}:cancel
+/// POST /v1/daemon/agent-host/operations/{operation_id}:cancel
 ///
 /// Cancel an in-flight operation.
 pub async fn cancel_operation(
@@ -435,7 +435,7 @@ pub async fn cancel_operation(
     }))
 }
 
-/// GET /v1/local/agent-host/sessions/{session_id}/events
+/// GET /v1/daemon/agent-host/sessions/{session_id}/events
 ///
 /// SSE endpoint that delivers `HostEvent` variants for a session.
 /// Compatible with the browser `EventSource` API.

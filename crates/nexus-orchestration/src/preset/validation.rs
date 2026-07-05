@@ -2,7 +2,7 @@
 //!
 //! Single validation surface used by:
 //! - Runtime loader (`load_preset_from_str` / `load_preset`)
-//! - Daemon `POST /v1/local/presets:validate`
+//! - Daemon `POST /v1/daemon/presets:validate`
 //!
 //! Extends the structural checks in `loader::validate_manifest` with:
 //! - A2: Logical completeness (reachability, terminal consistency, id match, orphan inner graphs)

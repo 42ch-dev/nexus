@@ -48,8 +48,8 @@ pub use module_cache::{CachedModule, ModuleCache};
 pub use sandbox::SandboxConfig;
 
 // Re-export the compute ABI types from nexus-contracts so consumers depend on a
-// single crate. These are the generated wire types for `schemas/local-api/compute/`.
-pub use nexus_contracts::generated::local_api::compute::compute_input::ComputeInput;
-pub use nexus_contracts::generated::local_api::compute::compute_output::{
+// single crate. These are the generated wire types for `schemas/daemon-api/compute/`.
+pub use nexus_contracts::generated::daemon_api::compute::compute_input::ComputeInput;
+pub use nexus_contracts::generated::daemon_api::compute::compute_output::{
     ComputeOutput, ComputeOutputStateDelta,
 };

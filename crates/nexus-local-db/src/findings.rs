@@ -14,7 +14,7 @@ use crate::error::LocalDbError;
 /// Finding record — mirrors DB row.
 ///
 /// V1.48 P1: derives `Deserialize` so the CLI can round-trip finding rows
-/// fetched from the daemon Local API (`GET /v1/local/works/{id}/findings`)
+/// fetched from the Daemon API (`GET /v1/daemon/works/{id}/findings`)
 /// back into the orchestration builder
 /// ([`nexus_orchestration::findings_block::build_open_findings_block`])
 /// without a parallel DTO struct.
@@ -87,7 +87,7 @@ pub struct FindingListFilters {
     /// Filter by `status`. Accepts either a single status (e.g. `"open"`)
     /// or a comma-separated list (e.g. `"open,triaged"`) — V1.50
     /// (R-V149P0-01): the produce-prompt consumer asks for the V1.49
-    /// **actionable set** `{ open, triaged }`; the Local API surfaces this
+    /// **actionable set** `{ open, triaged }`; the Daemon API surfaces this
     /// via `?status=open,triaged`. Each comma-separated token MUST be a
     /// member of [`VALID_STATUSES`]; unknown tokens surface as
     /// [`LocalDbError::InvalidEnum`].

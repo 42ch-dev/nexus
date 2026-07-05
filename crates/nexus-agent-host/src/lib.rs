@@ -10,7 +10,7 @@
 //! nexus42 CLI
 //!   └─ nexus-daemon-runtime
 //!        ├─ lifecycle subsystem: AgentHostSubsystem
-//!        ├─ Axum routes: /v1/local/agent-host/*
+//!        ├─ Axum routes: /v1/daemon/agent-host/*
 //!        └─ Arc<dyn HostFacade>
 //!             └─ nexus-agent-host (this crate)
 //!                  ├─ core: HostManager, SessionRegistry, OpRegistry
