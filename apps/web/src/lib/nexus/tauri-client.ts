@@ -61,6 +61,17 @@ export function resolveDesktopPort(explicit?: number | string): number {
 }
 
 export interface TauriClientOptions {
+  /**
+   * Override the daemon origin. When omitted the client targets the resolved
+   * local loopback port (`http://127.0.0.1:<port>`). Set this to connect a
+   * desktop build to a remote daemon (V1.92 P1).
+   */
+  baseUrl?: string;
+  /**
+   * API key for remote daemon access. Ignored for loopback connections unless
+   * an explicit `baseUrl` is provided.
+   */
+  apiKey?: string;
   /** Override the daemon port (defaults to resolved port per §5 #3). */
   port?: number;
   /** Optional fetch implementation (testing injection, mirroring BrowserClient). */
@@ -70,16 +81,18 @@ export interface TauriClientOptions {
 /**
  * Desktop `NexusClient`. Inherits all `NexusClient` data methods from
  * `BrowserClient` unchanged; only the constructor fixes the transport origin to
- * the resolved desktop loopback port. This is the thinnest possible impl — zero
- * method duplication, the entire V1.64/V1.65 HTTP surface reused wholesale.
+ * the resolved desktop loopback port, or to an explicit remote `baseUrl` for
+ * the P1 connection model. This is the thinnest possible impl — zero method
+ * duplication, the entire V1.64/V1.65 HTTP surface reused wholesale.
  */
 export class TauriClient extends BrowserClient {
-  readonly port: number;
+  readonly port: number | undefined;
 
   constructor(options: TauriClientOptions = {}) {
-    const port = resolveDesktopPort(options.port);
+    const port = options.baseUrl ? undefined : resolveDesktopPort(options.port);
     const browserOptions: BrowserClientOptions = {
-      baseUrl: `http://127.0.0.1:${port}`,
+      baseUrl: options.baseUrl ?? (port === undefined ? undefined : `http://127.0.0.1:${port}`),
+      apiKey: options.apiKey,
     };
     if (options.fetchImpl) browserOptions.fetchImpl = options.fetchImpl;
     super(browserOptions);

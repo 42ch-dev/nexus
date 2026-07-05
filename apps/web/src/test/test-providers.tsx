@@ -55,7 +55,7 @@ export function renderInApp(
   function Wrapper({ children }: { children: ReactNode }): ReactElement {
     return (
       <QueryClientProvider client={qc}>
-        <ClientProvider client={activeClient} desktop={desktop ?? null}>
+        <ClientProvider client={activeClient} desktop={desktop ?? null} connectionConfig={null}>
           <ToastProvider>
             <MemoryRouter initialEntries={initialRouterEntries}>{children}</MemoryRouter>
             <Toaster />

@@ -253,6 +253,80 @@ describe('BrowserClient preset CRUD (V1.67 G2 promotion)', () => {
   });
 });
 
+describe('BrowserClient remote connection model (V1.92 P1)', () => {
+  it('uses the configured base URL for absolute requests', async () => {
+    useHandlers(
+      http.get('https://192.168.1.42:8420/v1/daemon/runtime/health', () =>
+        HttpResponse.json({ status: 'ok', version: '0.20.0' }),
+      ),
+    );
+
+    const client = new BrowserClient({ baseUrl: 'https://192.168.1.42:8420' });
+    const health = await client.health();
+    expect(health.version).toBe('0.20.0');
+  });
+
+  it('injects X-API-Key on protected requests when apiKey is set', async () => {
+    let receivedKey: string | null = null;
+    useHandlers(
+      http.get('https://remote.example:8420/v1/daemon/works', ({ request }) => {
+        receivedKey = request.headers.get('X-API-Key');
+        return HttpResponse.json({ items: [], pagination: { limit: 20, has_more: false } });
+      }),
+    );
+
+    const client = new BrowserClient({ baseUrl: 'https://remote.example:8420', apiKey: 'secret-key' });
+    await client.listWorks();
+    expect(receivedKey).toBe('secret-key');
+  });
+
+  it('omits X-API-Key on the unauthenticated fingerprint endpoint', async () => {
+    let receivedKey: string | null = 'sentinel';
+    useHandlers(
+      http.get('https://remote.example:8420/v1/daemon/runtime/cert-fingerprint', ({ request }) => {
+        receivedKey = request.headers.get('X-API-Key');
+        return HttpResponse.json({ fingerprint: 'SHA256:aa:bb:cc', algorithm: 'sha256' });
+      }),
+    );
+
+    const client = new BrowserClient({ baseUrl: 'https://remote.example:8420', apiKey: 'secret-key' });
+    const res = await client.certFingerprint();
+    expect(receivedKey).toBeNull();
+    expect(res.fingerprint).toBe('SHA256:aa:bb:cc');
+  });
+
+  it('surfaces a remote-aware transport message when baseUrl is set', async () => {
+    useHandlers(
+      http.get('https://remote.example:8420/v1/daemon/works', () => HttpResponse.error()),
+    );
+
+    const client = new BrowserClient({ baseUrl: 'https://remote.example:8420' });
+    await expect(client.listWorks()).rejects.toMatchObject({
+      name: 'NexusClientError',
+      code: 'transport_unreachable',
+      message: 'Cannot reach the daemon at this address. Check that the URL and port are correct and that the daemon is running.',
+    });
+  });
+
+  it('rejects with unauthorized when the API key is rejected', async () => {
+    useHandlers(
+      http.get('https://remote.example:8420/v1/daemon/works', () =>
+        HttpResponse.json(
+          { success: false, error: { code: 'unauthorized', message: 'Invalid API key.' } },
+          { status: 401 },
+        )),
+    );
+
+    const client = new BrowserClient({ baseUrl: 'https://remote.example:8420', apiKey: 'wrong-key' });
+    await expect(client.listWorks()).rejects.toMatchObject({
+      name: 'NexusClientError',
+      status: 401,
+      code: 'unauthorized',
+      message: 'Invalid API key.',
+    });
+  });
+});
+
 describe('BrowserClient Strategy canvas write boundary (V1.71)', () => {
   it('patches a state label and description', async () => {
     let receivedBody: unknown = null;
