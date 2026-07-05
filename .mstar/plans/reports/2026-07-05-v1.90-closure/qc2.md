@@ -102,3 +102,66 @@ test boot::tests::remote_bind_gate_behavior ... ok
 - Report committed only after all personal review steps and evidence collection.
 
 **Verdict rationale**: No Critical findings. The two Warnings are real but non-blocking (coverage gap is a nice-to-have strengthening, not a defect in the implemented gate; duplication is cosmetic). The security model (dual-env gate + explicit AuthMode + uniform middleware + client header) is correctly implemented and tested at the unit level for the core decision function. The rename surface is consistent within the reviewed daemon runtime and client paths. This change is safe to approve for the V1.90 remote-ready rename goal.
+
+## Revalidation (targeted re-review of fix commit 1770fee8)
+
+**Re-review scope (per Assignment)**:
+- Targeted changes in commit `1770fee8` vs parent `da8f4c92`, specifically:
+  - `crates/nexus-daemon-runtime/src/api/auth_middleware.rs:420`
+  - `crates/nexus-daemon-runtime/src/api/errors.rs:621-626`
+- Focus: wire-visible `Forbidden` error `resource` string change from `"daemon-daemon-api"` → `"daemon-api"`.
+- Additional context: CHANGELOG `[0.19.0]` entry (packages/nexus-contracts/CHANGELOG.md) documents the rename as a BREAKING change.
+- Security/correctness lens only; no other security-sensitive behavior changes in scope.
+
+**Evidence gathered**:
+1. Direct diff confirmation (1770fee8):
+   ```
+   - resource: "daemon-daemon-api".into(),
+   + resource: "daemon-api".into(),
+   ```
+   (auth_middleware.rs:420 and matching test assertion + literal in errors.rs).
+2. CHANGELOG entry (packages/nexus-contracts/CHANGELOG.md:8-16):
+   ```
+   ## [0.19.0] - 2026-07-05
+   ### Changed
+   - **BREAKING**: Renamed the local daemon surface from **Local API** to **Daemon API**.
+     ...
+     - Resource identifier in `403 Forbidden` details changed from `"daemon-daemon-api"` to `"daemon-api"`.
+   ```
+3. Current state at 1770fee8 HEAD:
+   - `auth_middleware.rs:420` → `resource: "daemon-api".into()`
+   - `errors.rs:621` → `resource: "daemon-api".to_string()`
+   - `errors.rs:626` → `assert_eq!(details["resource"], "daemon-api");`
+4. Test passes cleanly:
+   ```
+   cargo test -p nexus-daemon-runtime --lib response_body_includes_details_for_forbidden
+   test api::errors::tests::response_body_includes_details_for_forbidden ... ok
+   ```
+5. Repo-wide grep for the old value:
+   ```
+   rg -n 'daemon-daemon-api' crates apps
+   (no matches; exit 1)
+   ```
+   (Only historical references remain in prior QC reports and the CHANGELOG "changed from" line.)
+
+**Security/correctness analysis**:
+- **Wire contract impact**: The `resource` field in `error.details` of the canonical `NexusApiError` Forbidden envelope (see `errors.rs:329-332` IntoResponse path) is now `"daemon-api"`. This is a **breaking wire change** for any client/SDK that keys behavior or error handling on the exact string value.
+- **Correctness**: The change is internally consistent (code + test + doc comment hygiene all updated in the same commit). The value now aligns with the Daemon API naming (no more compound `"daemon-daemon-api"` artifact from the prior naive rename pass).
+- **Security surface**: This field is **not an auth token, capability, or privilege identifier**. It is purely an **error classification / diagnostic** string emitted only on 403 Forbidden responses (specifically the keyless-localhost non-loopback rejection path). It does not affect:
+  - Authorization decisions
+  - Loopback / remote-bind gating logic (those remain in boot.rs + middleware dispatch)
+  - API key validation
+  - Any path that grants or denies access
+- **Stability / consumer risk**: 
+  - The original awkward value `"daemon-daemon-api"` was already frozen by a unit test assertion (wave-1 W-3 concern). Shipping the old value would have forced a *second* breaking change later.
+  - Renaming now (with explicit BREAKING entry in `[0.19.0]` CHANGELOG) is the correct single point of change. Consumers are warned in the same release that also renames routes, modules, and the overall surface.
+- **No other security-sensitive deltas in the targeted diff**: The only modifications in the two files are the literal string + test assertion. No logic, control flow, or error emission paths changed.
+- **Regression protection**: The unit test now asserts the new (correct) value, so future accidental re-introduction of the old string will fail immediately.
+
+**Per-finding disposition from wave-1**:
+- Wave-1 W-3 (`"daemon-daemon-api"` resource string) → **Resolved** by this fix commit + CHANGELOG documentation.
+- No new Critical or blocking Warning findings introduced by the rename itself.
+
+**Verdict (revalidation)**: **Approve**
+
+The change is acceptable to ship from a security/correctness perspective. The resource string rename is a deliberate, documented, single breaking wire change that improves naming hygiene and eliminates a prior regression-guarded malformation. It does not alter any security decision, auth flow, or privilege boundary. The surrounding V1.90 Daemon API rename (routes, modules, remote-bind gate) remains consistent. CHANGELOG coverage satisfies the consumer-notification requirement. Ship.
