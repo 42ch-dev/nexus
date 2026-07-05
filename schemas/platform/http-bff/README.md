@@ -2,7 +2,7 @@
 
 Request/response JSON Schemas for **platform BFF HTTP** bodies (`nexus-platform` observes these on the wire).
 
-- **Not** daemon Daemon API (`/v1/daemon/*`) — those DTOs are in `crates/nexus-contracts/src/local/`.
+- **Not** daemon API (`/v1/daemon/*`) — those DTOs are in `crates/nexus-contracts/src/local/`.
 - V1.20 removed **daemon proxies** for world/explore; clients call **platform HTTP** directly. Schemas here remain wire contracts for platform.
 - V1.62 (2026-06-23) moved these files from flat `schemas/platform/` into `schemas/platform/http-bff/` (consumer-scope split from `platform/sync/`).
 

@@ -618,12 +618,12 @@ mod tests {
     #[test]
     fn response_body_includes_details_for_forbidden() {
         let err = NexusApiError::Forbidden {
-            resource: "daemon-daemon-api".to_string(),
+            resource: "daemon-api".to_string(),
             reason: "non-loopback connections require an API key".to_string(),
         };
         let body = err.to_response_body();
         let details = body.error.details.expect("details should be present");
-        assert_eq!(details["resource"], "daemon-daemon-api");
+        assert_eq!(details["resource"], "daemon-api");
         assert_eq!(
             details["reason"],
             "non-loopback connections require an API key"

@@ -4,7 +4,7 @@
 //! a `PendingReviewRecord` to the daemon API for later review/promotion.
 //!
 //! Wired into the ACP worker's `handle_agent_stop` — fires a background
-//! task that submits to the daemon Daemon API with local-file fallback.
+//! task that submits to the Daemon API with local-file fallback.
 //!
 //! See creator-memory-soul-lifecycle.md §6.2.
 

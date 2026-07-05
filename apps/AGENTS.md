@@ -16,7 +16,7 @@
 >
 > A new product surface of *any* language → `apps/`. A new reusable Rust library → `crates/`.
 >
-> `nexus42` is the **producer** (daemon + CLI composition root); `desktop` and `web` are **consumers** (clients over the Local API / IPC boundary).
+> `nexus42` is the **producer** (daemon + CLI composition root); `desktop` and `web` are **consumers** (clients over the Daemon API / IPC boundary).
 >
 > App-owned nested Rust (for example `apps/desktop/src-tauri/`) lives inside its app directory — it is product-surface implementation, not a shared library. Promote it to `crates/` only if it becomes a reusable building block shared across surfaces.
 

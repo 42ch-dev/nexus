@@ -959,6 +959,11 @@ async fn resume_auto_chain_work(
 mod tests {
     use super::*;
 
+    /// Lock to serialize env-var tests that read `NEXUS42_DAEMON_API_KEY`
+    /// and `NEXUS_DAEMON_REMOTE_BIND`.
+    static ENV_TEST_LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =
+        std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
+
     #[test]
     fn transport_defaults_to_http() {
         let config = DaemonConfig {
@@ -1027,6 +1032,8 @@ mod tests {
 
     #[test]
     fn remote_bind_gate_behavior() {
+        let _guard = ENV_TEST_LOCK.lock().expect("env test lock poisoned");
+
         // Loopback binds are always allowed, regardless of env vars.
         std::env::remove_var("NEXUS42_DAEMON_API_KEY");
         std::env::remove_var("NEXUS_DAEMON_REMOTE_BIND");
