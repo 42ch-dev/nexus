@@ -13,7 +13,7 @@
 - [../schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md) — the bundled UI is a first-class external consumer of `@42ch/nexus-contracts`
 - [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md) §1 — strict local-product vs cloud-product separation
 - `apps/web/DESIGN.md` (NEW, project-level, `@architect`-authored) — design tokens this UI consumes
-- [local-api-surface-conventions.md](local-api-surface-conventions.md) (NEW, `@architect`-authored Master) — cursor pagination / `ErrorResponse` / naming conventions the UI data layer relies on
+- [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md) (NEW, `@architect`-authored Master) — cursor pagination / `ErrorResponse` / naming conventions the UI data layer relies on
 
 ---
 
@@ -49,7 +49,7 @@ This is a **different product** from any web UI in the private `nexus-platform`:
 | Dimension | Local Web UI (this spec, OSS) | Cloud SaaS (private `nexus-platform`) |
 | --- | --- | --- |
 | Deployment | bundled into the local `nexus42` binary; served from `localhost` | hosted multi-tenant cloud |
-| Data source | local `state.db` + reference store via loopback Local API | platform HTTP / cloud DB |
+| Data source | local `state.db` + reference store via loopback Daemon API | platform HTTP / cloud DB |
 | Audience | a single author on their own machine | platform tenants / cloud users |
 | Auth | loopback only (keyless on `localhost`; see §4.2) | platform auth / sessions |
 | Roadmap home | this spec + `apps/web/` | `nexus-platform` `v1-spec/` |
@@ -80,15 +80,15 @@ This stack is the **Tauri-ready** foundation: it introduces no browser-only API 
 ### 4.1 Two serving modes
 
 - **Release** — the built `apps/web/dist` is embedded into the `nexus42` binary via **`rust-embed`** and exposed by the daemon router through **`tower-http::ServeDir`-style** static serving semantics at the server root (`/`). The same binary that runs the runtime serves the UI. (Embedding strategy is finalized in plan P3; `serve-from-disk` under `~/.nexus42/web/` is the fallback only if embedding creates release-pipeline friction.)
-- **Dev** — `apps/web` runs the **Vite dev server**, which proxies `/v1/local/*` to the running daemon (`nexus42 daemon start`). No embedding in dev; hot reload against the live Local API.
+- **Dev** — `apps/web` runs the **Vite dev server**, which proxies `/v1/daemon/*` to the running daemon (`nexus42 daemon start`). No embedding in dev; hot reload against the live Daemon API.
 
-The static shell (HTML/JS/CSS assets) is **unauthenticated** by design: it carries no data. All data flows through the Local API.
+The static shell (HTML/JS/CSS assets) is **unauthenticated** by design: it carries no data. All data flows through the Daemon API.
 
 ### 4.2 Auth model (unchanged from the daemon)
 
-The Web UI introduces **no new auth surface**. It inherits the daemon's existing loopback model (V1.20 compass): Local API data endpoints are reachable on `localhost` and are **keyless on loopback**; the static shell needs no credential because it holds no data. The UI does not add login, sessions, or tokens. Any future remote (non-loopback) access is explicitly out of scope (§8) and would require its own auth spec.
+The Web UI introduces **no new auth surface**. It inherits the daemon's existing loopback model (V1.20 compass): Daemon API data endpoints are reachable on `localhost` and are **keyless on loopback**; the static shell needs no credential because it holds no data. The UI does not add login, sessions, or tokens. Any future remote (non-loopback) access is explicitly opt-in (§8) and would require both `NEXUS42_DAEMON_API_KEY` and `NEXUS_DAEMON_REMOTE_BIND=1`; loopback remains the default.
 
-> Implementation note for `local-api-surface-conventions.md`: the shared `ErrorResponse` (F-E1) is what the UI's toast/notification layer parses; the UI must never have to special-case per-handler error shapes.
+> Implementation note for `daemon-api-surface-conventions.md`: the shared `ErrorResponse` (F-E1) is what the UI's toast/notification layer parses; the UI must never have to special-case per-handler error shapes.
 
 ### 4.3 CLI entry
 
@@ -109,13 +109,13 @@ Control Room │  screen components → TanStack Query       │
               BrowserClient│               │ TauriClient (V1.65 stub)
               fetch http://localhost:<port>│ invoke(...)
                            ▼               ▼
-                  /v1/local/*  (axum, hardened by Track B)
+                   /v1/daemon/*  (axum, hardened by Track B)
 ```
 
-- **`BrowserClient`** (V1.64) — `fetch` against `http://localhost:<port>/v1/local/*`. This is the only shipped impl this iteration.
+- **`BrowserClient`** (V1.64) — `fetch` against `http://localhost:<port>/v1/daemon/*`. This is the only shipped impl this iteration.
 - **`TauriClient`** (V1.65) — implements the same interface via Tauri `invoke`; ships as a stub/interface-reference now so the boundary is frozen and P2 screens are transport-agnostic. Not implemented in V1.64.
 
-The interface exposes the Local API resources the MVP consumes (conceptual — exact signatures are owned by plan P1, compass §5 item #7):
+The interface exposes the Daemon API resources the MVP consumes (conceptual — exact signatures are owned by plan P1, compass §5 item #7):
 
 | Resource group | Operations | MVP screen |
 | --- | --- | --- |
@@ -220,7 +220,7 @@ This Feature line adds **no new wire schemas** of its own. It consumes the V1.63
 - Depends on **F-P2** (findings list endpoint) for the findings view.
 - Adapts around **F-P3** (list-array naming) and **F-F1** (sort) client-side until V1.66+.
 
-Versioning, npm/Rust bumps, and the single breaking shape change (Works list) are owned by compass §1.3 and `local-api-surface-conventions.md`.
+Versioning, npm/Rust bumps, and the single breaking shape change (Works list) are owned by compass §1.3 and `daemon-api-surface-conventions.md`.
 
 ---
 
@@ -233,8 +233,8 @@ Versioning, npm/Rust bumps, and the single breaking shape change (Works list) ar
 
 ## 12. Acceptance (spec-level)
 
-1. The UI is served from the `nexus42` binary (release) with no Node runtime requirement, and from the Vite dev server (dev) proxying `/v1/local/*`.
-2. All seven MVP screen groups render and operate against the hardened Local API; no screen calls a transport directly (all via `NexusClient`).
+1. The UI is served from the `nexus42` binary (release) with no Node runtime requirement, and from the Vite dev server (dev) proxying `/v1/daemon/*`.
+2. All seven MVP screen groups render and operate against the hardened Daemon API; no screen calls a transport directly (all via `NexusClient`).
 3. The `tauri-api` adapter boundary is frozen: `BrowserClient` ships, `TauriClient` exists as a documented stub/interface reference.
 4. Errors surface as one parsed `ErrorResponse` shape across all screens.
 5. No cloud-product / platform-gated feature appears in the UI while `platform_integration = paused`.
@@ -253,7 +253,7 @@ V1.64 made the runtime **legible and configurable** (Control Room + Setup). V1.6
 
 ### 13.1 What ships in V1.65 (Track A lead slice)
 
-The browser SPA gains an authoring surface layered on the V1.64 Control Room + Setup screens. All new screens route through the same `NexusClient` interface (§5) and consume the new V1.65 chapter-content Local API (Track B / P0 backend; conventions in [local-api-surface-conventions.md](local-api-surface-conventions.md)).
+The browser SPA gains an authoring surface layered on the V1.64 Control Room + Setup screens. All new screens route through the same `NexusClient` interface (§5) and consume the new V1.65 chapter-content Local API (Track B / P0 backend; conventions in [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md)).
 
 - **Chapter structure table** (per-Work, multi-Work switcher reusing the V1.64 Works dashboard entry): columns — chapter #, title (**display-only** — derived from outline frontmatter or slug/chapter# fallback; no `title` column exists in `work_chapters` in V1.65), slug, planned word count, volume, status (`not_started` / `outlined` / `draft` / `finalized` / `published`), actual word count. Sortable by chapter #.
 - **Outline rich-text editor**: edit a chapter's `outline_path` markdown in a rich-text editor; save writes the file atomically (reuse the reconcile atomic-write pattern) and updates DB metadata (`outline_path`, `updated_at`) in the same transaction. Restricted to a markdown subset (headings, lists, bold/italic, code, blockquote, links).
@@ -291,7 +291,7 @@ Explicitly deferred with rationale (compass §0 Q2/Q4/Q5, §1.2; satisfies the D
 
 ### 13.5 Wire contracts (V1.65)
 
-The authoring surface consumes new chapter-content schemas (additive, owned by Track B / P0; conventions in [local-api-surface-conventions.md](local-api-surface-conventions.md)): chapter list (cursor + `items`) / detail / outline GET+PUT (atomic write) / structure PATCH (status progression) / body GET (read-only), plus `work_profile` on Work requests and full preset CRUD routes. Versioning, npm/Rust bumps, and per-DTO `schema_version` increments are owned by compass §1.3.
+The authoring surface consumes new chapter-content schemas (additive, owned by Track B / P0; conventions in [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md)): chapter list (cursor + `items`) / detail / outline GET+PUT (atomic write) / structure PATCH (status progression) / body GET (read-only), plus `work_profile` on Work requests and full preset CRUD routes. Versioning, npm/Rust bumps, and per-DTO `schema_version` increments are owned by compass §1.3.
 
 ---
 
@@ -474,7 +474,7 @@ Explicitly deferred with rationale (compass §1.2; satisfies the Durable Roadmap
 
 V1.70 made the Strategy canvas legible and steerable. V1.71 makes the **Strategy surface editable at node granularity** while preserving the core boundary: the browser/Tauri webview never writes raw files. All Strategy edits flow through schema-backed Local API patch routes, daemon validation, atomic persistence, and graphRevision conflict handling.
 
-> **Scope and roadmap SSOT**: [v1.71-canvas-strategy-write-boundary-and-hygiene-compass-v1.md](../../iterations/v1.71-canvas-strategy-write-boundary-and-hygiene-compass-v1.md) §1.1 Track A (A1–A9), §1.3 wire contracts, §2 normative specs, and §6 risk notes. Architectural detail: [canvas-strategy-surface.md](canvas-strategy-surface.md) (V1.71 Shipped β) and [local-api-surface-conventions.md](local-api-surface-conventions.md) §7 patch-route pattern.
+> **Scope and roadmap SSOT**: [v1.71-canvas-strategy-write-boundary-and-hygiene-compass-v1.md](../../iterations/v1.71-canvas-strategy-write-boundary-and-hygiene-compass-v1.md) §1.1 Track A (A1–A9), §1.3 wire contracts, §2 normative specs, and §6 risk notes. Architectural detail: [canvas-strategy-surface.md](canvas-strategy-surface.md) (V1.71 Shipped β) and [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md) §7 patch-route pattern.
 
 ### 17.1 What ships in V1.71 (Track A — Strategy β writes)
 
@@ -592,7 +592,7 @@ V1.72 shipped the Outline+Timeline canvas. V1.73 completes the Canvas program's 
 
 V1.74 completes the World KB canvas surface by promoting first-class typed relationships from the V1.73 deferred slot into a shipped authoring surface. The relationship route is reachable from both the canvas graph and the complete non-spatial relationship view; both entry points call the same Local API contract and preserve the §5 `NexusClient` boundary.
 
-> **Scope and roadmap SSOT**: [v1.74-world-kb-relationships-and-hygiene-compass-v1.md](../../iterations/v1.74-world-kb-relationships-and-hygiene-compass-v1.md) §0 grill decisions, §1.1 Track A, §1.3 wire contracts, and §2 normative specs. Architectural detail: [canvas-strategy-surface.md](canvas-strategy-surface.md) (V1.74 Shipped β), [entity-scope-model.md](entity-scope-model.md) §5.6, and [local-api-surface-conventions.md](local-api-surface-conventions.md) §7.6.
+> **Scope and roadmap SSOT**: [v1.74-world-kb-relationships-and-hygiene-compass-v1.md](../../iterations/v1.74-world-kb-relationships-and-hygiene-compass-v1.md) §0 grill decisions, §1.1 Track A, §1.3 wire contracts, and §2 normative specs. Architectural detail: [canvas-strategy-surface.md](canvas-strategy-surface.md) (V1.74 Shipped β), [entity-scope-model.md](entity-scope-model.md) §5.6, and [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md) §7.6.
 
 ### 20.1 What ships in V1.74 (Track A — relationship β)
 
@@ -630,7 +630,7 @@ V1.74 completes the World KB canvas surface by promoting first-class typed relat
 
 V1.76 shipped the World KB Relationship γ surface, completing the canvas program (V1.67–V1.76, 10 iterations). V1.77 pivots from the canvas to the **quality loop**: the Control-Room findings page — read-only since V1.64 — is promoted to a full **remediation authoring surface** that closes the "observe → triage → resolve" quality loop in the UI, exactly as the canvas closed the "steer → execute → review" writing loop. The backend already ships the full findings PATCH surface (6-state lifecycle adjacency enforcement, 7-field `UpdateFindingRequest` payload, full CRUD routes, stale-count endpoint); V1.77 consumes them from the web app with no new backend routes.
 
-> **Scope and roadmap SSOT**: [v1.77-findings-remediation-ui-and-post-canvas-inflection-compass-v1.md](../../iterations/v1.77-findings-remediation-ui-and-post-canvas-inflection-compass-v1.md) §0 grill decisions (Q1–Q4 locked), §1.1 Track A scope, §2 normative specs, §Phase 2b D4 (UX lock — authoritative), and §6 risk notes (all RESOLVED). This section records the product contract; the compass is authoritative for scope, batching, and residual tracking. Lifecycle detail: [findings-lifecycle.md](findings-lifecycle.md) (architect-drafted Master). API surface: [local-api-surface-conventions.md](local-api-surface-conventions.md) (findings PATCH reference).
+> **Scope and roadmap SSOT**: [v1.77-findings-remediation-ui-and-post-canvas-inflection-compass-v1.md](../../iterations/v1.77-findings-remediation-ui-and-post-canvas-inflection-compass-v1.md) §0 grill decisions (Q1–Q4 locked), §1.1 Track A scope, §2 normative specs, §Phase 2b D4 (UX lock — authoritative), and §6 risk notes (all RESOLVED). This section records the product contract; the compass is authoritative for scope, batching, and residual tracking. Lifecycle detail: [findings-lifecycle.md](findings-lifecycle.md) (architect-drafted Master). API surface: [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md) (findings PATCH reference).
 
 ### 23.1 What ships in V1.77
 

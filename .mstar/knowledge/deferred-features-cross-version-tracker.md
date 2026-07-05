@@ -1,12 +1,12 @@
 # Deferred Features — Cross-Version Tracker v2
 
-**Quick status**: **V1.89 shipped (2026-07-04)** — Deeper Manuscript Reading MVP (persisted reading progress + annotations/highlights) delivered on the V1.79 reading surface. Profile-specific reading chrome remains deferred as BL-13. `wire_contracts_changed: true`. Platform **paused**.
+**Quick status**: **V1.90 active (2026-07-05)** — Daemon API remote-ready rename (`Local API` → `Daemon API`, paths `/v1/daemon/*`, opt-in remote listener). V1.89 shipped (2026-07-04). Platform **paused**.
 
-**V1.89 in-progress (2026-07-04)**: Reading depth iteration. Next: Phase 1 Review & Edit chain, integration branch, per-plan implement.
+**V1.90 in-progress (2026-07-05)**: Daemon API rename iteration. Next: Phase 1 Review & Edit chain, integration branch, per-plan implement.
 
 **Purpose**: Single source of truth for **open** and **backlog** features deferred from delivery compasses. Closed/shipped history lives in shipped archive.
 **Scope**: `nexus` OSS repository only.
-**Created**: 2026-04-21 · **Last updated**: 2026-07-04 (V1.89 closure: BL-11 MVP shipped; profile-specific reading chrome re-filed as BL-13)
+**Created**: 2026-04-21 · **Last updated**: 2026-07-05 (V1.90 start: V1.89 marked shipped; V1.90 active; BL-13 profile chrome remains backlog)
 
 ---
 
@@ -93,9 +93,9 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 ## 5) Quick index
 
-**Active iteration**: V1.89 active (2026-07-04) — Deeper Manuscript Reading; persisted reading progress + annotations/highlights in progress; profile-specific reading chrome remains deferred.
+**Active iteration**: V1.90 active (2026-07-05) — Daemon API remote-ready rename.
 
-**Latest shipped**: [V1.88](../iterations/v1.88-frontend-slate-clear-and-reliability-cleanup-delivery-compass-v1.md) (frontend slate-clear + reliability cleanup, PR #115 — 2026-07-04)
+**Latest shipped**: [V1.89](../iterations/v1.89-deeper-manuscript-reading-delivery-compass-v1.md) (Deeper Manuscript Reading, PR #117 — 2026-07-04)
 
 **Full iteration index**: [iterations/README.md](../iterations/README.md)
 

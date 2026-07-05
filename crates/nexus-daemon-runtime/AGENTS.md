@@ -11,7 +11,7 @@ and local API transport. It is a **library crate only** — no standalone binary
 
 ## Error envelope single-source rule (R-V167P0-QC1-S-AGENTS)
 
-`NexusApiError` in `src/api/errors.rs` is the **single source of truth** for the canonical Local API error envelope:
+`NexusApiError` in `src/api/errors.rs` is the **single source of truth** for the canonical Daemon API error envelope:
 
 ```json
 { "success": false, "error": { "code": "...", "message": "...", "details": {...}, "request_id": "..." } }
