@@ -1,105 +1,28 @@
 {
   "version": 1,
   "updated_at": "2026-07-05T17:00:00+0800",
-  "plans": [
-    {
-      "plan_id": "2026-07-05-v1.90-prepare-dual-track",
-      "name": "P-1 — Prepare (spec + rename design + remote listener security spec)",
-      "status": "Done",
-      "metadata": {
-        "iteration_refs": ["V1.90"],
-        "spec_integration_branch": "iteration/v1.90",
-        "merge_target": "iteration/v1.90",
-        "primary_spec": ".mstar/knowledge/specs/daemon-runtime.md",
-        "spec_refs": [
-          ".mstar/knowledge/specs/web-ui.md",
-          ".mstar/knowledge/specs/local-api-surface-conventions.md",
-          "schemas/AGENTS.md",
-          "apps/web/AGENTS.md",
-          "crates/nexus-daemon-runtime/AGENTS.md"
-        ]
-      }
-    },
-    {
-      "plan_id": "2026-07-05-v1.90-daemon-api-rename-backend",
-      "name": "P0 — Track A: Daemon API rename backend + codegen + remote bind",
-      "status": "Done",
-      "metadata": {
-        "iteration_refs": ["V1.90"],
-        "spec_integration_branch": "iteration/v1.90",
-        "merge_target": "iteration/v1.90",
-        "working_branch": "feature/v1.90-daemon-api-rename-backend",
-        "worktree_path": ".worktrees/feature-v1.90-daemon-api-rename-backend",
-        "merge_commit": "c2f4bd97",
-        "primary_spec": ".mstar/knowledge/specs/daemon-runtime.md",
-        "spec_refs": [
-          ".mstar/knowledge/specs/daemon-api-surface-conventions.md",
-          "schemas/AGENTS.md",
-          "crates/nexus-daemon-runtime/AGENTS.md"
-        ]
-      }
-    },
-    {
-      "plan_id": "2026-07-05-v1.90-daemon-api-rename-frontend",
-      "name": "P1 — Track B: Daemon API rename frontend",
-      "status": "Done",
-      "metadata": {
-        "iteration_refs": ["V1.90"],
-        "spec_integration_branch": "iteration/v1.90",
-        "merge_target": "iteration/v1.90",
-        "working_branch": "feature/v1.90-daemon-api-rename-frontend",
-        "worktree_path": ".worktrees/feature-v1.90-daemon-api-rename-frontend",
-        "merge_commit": "39ec24e0",
-        "primary_spec": ".mstar/knowledge/specs/web-ui.md",
-        "spec_refs": [
-          "apps/web/AGENTS.md",
-          ".mstar/knowledge/specs/daemon-api-surface-conventions.md"
-        ]
-      }
-    },
-    {
-      "plan_id": "2026-07-05-v1.90-closure",
-      "name": "P-last — Closure (QC/QA + tracker + compound + compaction + PR)",
-      "status": "InProgress",
-      "metadata": {
-        "iteration_refs": ["V1.90"],
-        "spec_integration_branch": "iteration/v1.90",
-        "merge_target": "iteration/v1.90",
-        "working_branch": "iteration/v1.90",
-        "primary_spec": ".mstar/iterations/v1.90-daemon-api-remote-ready-delivery-compass-v1.md",
-        "spec_refs": [
-          ".mstar/knowledge/specs/daemon-runtime.md",
-          ".mstar/knowledge/specs/web-ui.md",
-          ".mstar/knowledge/specs/daemon-api-surface-conventions.md"
-        ]
-      }
-    }
-  ],
+  "plans": [],
   "metadata": {
     "integration_branch": "iteration/v1.90",
-    "integration_branch_retired": false,
-    "last_integration_branch": "iteration/v1.89",
+    "integration_branch_retired": true,
+    "last_integration_branch": "iteration/v1.90",
     "integration_merge_target": "main",
     "iteration_base_branch": "main",
     "target_branch": "main",
     "spec_integration_branch": "iteration/v1.90",
-    "latest_active_iteration": "V1.90",
-    "latest_active_compass": "v1.90-daemon-api-remote-ready-delivery-compass-v1.md",
+    "latest_active_iteration": null,
+    "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.89",
-      "compass": "v1.89-deeper-manuscript-reading-delivery-compass-v1.md",
-      "shipped_at": "2026-07-04",
-      "merged_at": "2026-07-04T17:36:54Z",
-      "merge_commit": "35156c6b8cd290ae8a46ccb707d849aaecb73dc4",
-      "pr": "https://github.com/42ch-dev/nexus/pull/117",
-      "plan_count": 4,
-      "plan_count_done": 4,
-      "wire_contracts_changed": true,
-      "note": "V1.89 deeper manuscript reading MVP: persisted progress + annotations/highlights; QC 3/3 Approve; QA Pass; Greptile 5/5; merged via PR #117"
+      "iteration": "V1.90",
+      "compass": "v1.90-daemon-api-remote-ready-delivery-compass-v1.md",
+      "shipped_at": "2026-07-05",
+      "merged_at": null,
+      "merge_commit": null,
+      "pr": null
     },
     "tech_debt_summary": {
       "total_open": 0,
