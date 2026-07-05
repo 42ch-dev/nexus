@@ -106,7 +106,7 @@ import type {
   WorldKbPromoteCandidateResponse,
 } from '@42ch/nexus-contracts';
 
-/** Daemon health probe result (`GET /v1/local/runtime/health`). App-side type. */
+/** Daemon health probe result (`GET /v1/daemon/runtime/health`). App-side type. */
 export interface DaemonHealth {
   /** `ok` when the daemon is reachable and healthy. */
   status: string;
@@ -115,50 +115,50 @@ export interface DaemonHealth {
 }
 
 /**
- * Transport-agnostic client for the Nexus Local API.
+ * Transport-agnostic client for the Nexus Daemon API.
  *
  * Two implementations ship with this scaffold:
- *  - {@link BrowserClient} (V1.64) — `fetch` against same-origin `/v1/local/*`.
+ *  - {@link BrowserClient} (V1.64) — `fetch` against same-origin `/v1/daemon/*`.
  *  - `TauriClient` (V1.65 stub) — Tauri `invoke` behind the same interface.
  *
- * Local API data endpoints are keyless on loopback (V1.20 model); the browser
+ * Daemon API data endpoints are keyless on loopback (V1.20 model); the browser
  * client sends no credentials.
  */
 export interface NexusClient {
   // ── Daemon ───────────────────────────────────────────────────────────────
-  /** `GET /v1/local/runtime/health` — liveness + version for the shell header. */
+  /** `GET /v1/daemon/runtime/health` — liveness + version for the shell header. */
   health(): Promise<DaemonHealth>;
 
   // ── Works (dashboard + Work CRUD) ─────────────────────────────────────────
-  /** `GET /v1/local/works` — cursor list (F-P1/F-P3/F-F1; canonical `items` key). */
+  /** `GET /v1/daemon/works` — cursor list (F-P1/F-P3/F-F1; canonical `items` key). */
   listWorks(query?: ListWorksQuery): Promise<ListWorksResponse>;
-  /** `GET /v1/local/works/{work_id}` — full detail. */
+  /** `GET /v1/daemon/works/{work_id}` — full detail. */
   getWork(workId: string): Promise<WorkDetailResponse>;
-  /** `POST /v1/local/works`. */
+  /** `POST /v1/daemon/works`. */
   createWork(request: CreateWorkRequest): Promise<CreateWorkResponse>;
-  /** `PATCH /v1/local/works/{work_id}` — status/stage/archive (free-string status). */
+  /** `PATCH /v1/daemon/works/{work_id}` — status/stage/archive (free-string status). */
   patchWork(workId: string, request: PatchWorkRequest): Promise<WorkDetailResponse>;
 
   // ── Orchestration sessions ────────────────────────────────────────────────
-  /** `GET /v1/local/orchestration/sessions` — cursor list (F-P3/F-F1; canonical `items` key). */
+  /** `GET /v1/daemon/orchestration/sessions` — cursor list (F-P3/F-F1; canonical `items` key). */
   listSessions(query?: ListSessionsQuery): Promise<ListSessionsResponse>;
-  /** `GET /v1/local/orchestration/sessions/{session_id}`. */
+  /** `GET /v1/daemon/orchestration/sessions/{session_id}`. */
   getSession(sessionId: string): Promise<SessionDetailResponse>;
 
   // ── Schedules / cron ──────────────────────────────────────────────────────
-  /** `GET /v1/local/orchestration/schedules` — cursor list (F-P3/F-F1; canonical `items` key). */
+  /** `GET /v1/daemon/orchestration/schedules` — cursor list (F-P3/F-F1; canonical `items` key). */
   listSchedules(query?: ListSchedulesQuery): Promise<ListSchedulesResponse>;
-  /** `GET /v1/local/orchestration/schedules/{schedule_id}`. */
+  /** `GET /v1/daemon/orchestration/schedules/{schedule_id}`. */
   inspectSchedule(scheduleId: string): Promise<InspectScheduleResponse>;
   /**
-   * `POST /v1/local/orchestration/schedules` — create a new schedule (run a
+   * `POST /v1/daemon/orchestration/schedules` — create a new schedule (run a
    * Strategy). V1.70 canvas Idea→Run promotion: the generated TS type + daemon
    * route already existed (V1.67 G2 pattern); only the TS client surface was
    * missing. No schema/codegen change (`wire_contracts_changed: FALSE`).
    */
   addSchedule(request: AddScheduleRequest): Promise<AddScheduleResponse>;
   /**
-   * `POST /v1/local/orchestration/schedules/{schedule_id}/signal` — send a
+   * `POST /v1/daemon/orchestration/schedules/{schedule_id}/signal` — send a
    * lifecycle signal (resume / advance / pause). V1.70 canvas Idea→Resume
    * steering promotion.
    */
@@ -167,7 +167,7 @@ export interface NexusClient {
     request: SignalScheduleRequest,
   ): Promise<SignalScheduleResponse>;
   /**
-   * `PATCH /v1/local/orchestration/schedules/{schedule_id}/core-context` —
+   * `PATCH /v1/daemon/orchestration/schedules/{schedule_id}/core-context` —
    * append/merge steering context (an Idea) into a running schedule's core
    * context. V1.70 canvas Idea→Steer promotion.
    */
@@ -177,21 +177,21 @@ export interface NexusClient {
   ): Promise<EditCoreContextResponse>;
 
   // ── Capabilities ──────────────────────────────────────────────────────────
-  /** `GET /v1/local/orchestration/capabilities` — cursor list (F-P3/F-F1; canonical `items` key). */
+  /** `GET /v1/daemon/orchestration/capabilities` — cursor list (F-P3/F-F1; canonical `items` key). */
   listCapabilities(query?: ListCapabilitiesQuery): Promise<ListCapabilitiesResponse>;
 
   // ── Findings ───────────────────────────────────────────────────────────────
-  /** `GET /v1/local/works/{work_id}/findings` — cursor list (F-P2; canonical `items` key). */
+  /** `GET /v1/daemon/works/{work_id}/findings` — cursor list (F-P2; canonical `items` key). */
   listFindings(workId: string, query?: ListFindingsQuery): Promise<ListFindingsResponse>;
   /**
-   * `GET /v1/local/works/{work_id}/findings/{finding_id}` — full finding detail.
+   * `GET /v1/daemon/works/{work_id}/findings/{finding_id}` — full finding detail.
    * V1.77 findings-remediation promotion: the daemon route + generated TS type
    * already existed (V1.67 G2 pattern); only the TS client surface was missing.
    * No schema/codegen change (`wire_contracts_changed: FALSE`).
    */
   getFinding(workId: string, findingId: string): Promise<FindingDetailResponse>;
   /**
-   * `PATCH /v1/local/works/{work_id}/findings/{finding_id}` — remediation patch
+   * `PATCH /v1/daemon/works/{work_id}/findings/{finding_id}` — remediation patch
    * (status transition / target_executor / inline edit). Server enforces the
    * 6-state lifecycle adjacency (HTTP 422 `INVALID_TRANSITION` on illegal
    * transitions); last-writer-wins, no OCC (D1b). V1.77 promotion.
@@ -203,34 +203,34 @@ export interface NexusClient {
   ): Promise<FindingDetailResponse>;
 
   // ── Preset management ─────────────────────────────────────────────────────
-  /** `GET /v1/local/presets` — grouped by source. */
+  /** `GET /v1/daemon/presets` — grouped by source. */
   listPresets(): Promise<ListPresetsResponse>;
-  /** `POST /v1/local/presets` — scaffold a user preset. */
+  /** `POST /v1/daemon/presets` — scaffold a user preset. */
   scaffoldPreset(request: ScaffoldPresetRequest): Promise<ScaffoldPresetResponse>;
-  /** `POST /v1/local/presets:validate` — dry-run validation (product-priority #1). */
+  /** `POST /v1/daemon/presets:validate` — dry-run validation (product-priority #1). */
   validatePreset(request: ValidatePresetRequest): Promise<ValidatePresetResponse>;
-  /** `POST /v1/local/presets/{id}:reload`. */
+  /** `POST /v1/daemon/presets/{id}:reload`. */
   reloadPreset(presetId: string): Promise<ReloadPresetResponse>;
-  /** `GET /v1/local/presets/{id}` — fetch preset manifest YAML (V1.67 G2 promotion). */
+  /** `GET /v1/daemon/presets/{id}` — fetch preset manifest YAML (V1.67 G2 promotion). */
   getPreset(presetId: string): Promise<GetPresetResponse>;
-  /** `PATCH /v1/local/presets/{id}` — update user preset YAML after validation (V1.67 G2 promotion). */
+  /** `PATCH /v1/daemon/presets/{id}` — update user preset YAML after validation (V1.67 G2 promotion). */
   updatePreset(presetId: string, request: UpdatePresetRequest): Promise<UpdatePresetResponse>;
-  /** `DELETE /v1/local/presets/{id}` — delete a user preset bundle; 204 No Content (V1.67 G2 promotion). */
+  /** `DELETE /v1/daemon/presets/{id}` — delete a user preset bundle; 204 No Content (V1.67 G2 promotion). */
   deletePreset(presetId: string): Promise<void>;
 
   // ── Strategy canvas (V1.71 Track A) ───────────────────────────────────────
-  /** `POST /v1/local/strategies/{strategy_id}/states/{state_id}/patch` — patch a state. */
+  /** `POST /v1/daemon/strategies/{strategy_id}/states/{state_id}/patch` — patch a state. */
   strategyPatchState(
     strategyId: string,
     stateId: string,
     request: StrategyPatchStateRequest,
   ): Promise<StrategyPatchResponse>;
-  /** `POST /v1/local/strategies/{strategy_id}/transitions/patch` — rewire a transition. */
+  /** `POST /v1/daemon/strategies/{strategy_id}/transitions/patch` — rewire a transition. */
   strategyPatchTransition(
     strategyId: string,
     request: StrategyPatchTransitionRequest,
   ): Promise<StrategyPatchResponse>;
-  /** `POST /v1/local/strategies/{strategy_id}/states/{state_id}/prompt/patch` — patch a prompt template. */
+  /** `POST /v1/daemon/strategies/{strategy_id}/states/{state_id}/prompt/patch` — patch a prompt template. */
   strategyPatchPromptTemplate(
     strategyId: string,
     stateId: string,
@@ -238,59 +238,59 @@ export interface NexusClient {
   ): Promise<StrategyPatchResponse>;
 
   // ── Chapters (V1.65 Content-Authoring) ─────────────────────────────────────
-  /** `GET /v1/local/works/{work_id}/chapters` — cursor list (F-P3 `items` key). */
+  /** `GET /v1/daemon/works/{work_id}/chapters` — cursor list (F-P3 `items` key). */
   listChapters(workId: string, query?: ListChaptersQuery): Promise<ListChaptersResponse>;
-  /** `GET /v1/local/works/{work_id}/chapters/{n}` — detail + protection metadata. */
+  /** `GET /v1/daemon/works/{work_id}/chapters/{n}` — detail + protection metadata. */
   getChapter(workId: string, chapter: number, query?: ChapterContentQuery): Promise<ChapterDetail>;
-  /** `GET /v1/local/works/{work_id}/chapters/{n}/outline` — read outline markdown. */
+  /** `GET /v1/daemon/works/{work_id}/chapters/{n}/outline` — read outline markdown. */
   getChapterOutline(workId: string, chapter: number, query?: ChapterContentQuery): Promise<ChapterOutline>;
-  /** `PATCH /v1/local/works/{work_id}/chapters/{n}` — structure/status update. */
+  /** `PATCH /v1/daemon/works/{work_id}/chapters/{n}` — structure/status update. */
   patchChapter(workId: string, chapter: number, request: PatchChapterRequest, query?: ChapterContentQuery): Promise<ChapterDetail>;
-  /** `GET /v1/local/works/{work_id}/chapters/{n}/body` — read-only body markdown. */
+  /** `GET /v1/daemon/works/{work_id}/chapters/{n}/body` — read-only body markdown. */
   getChapterBody(workId: string, chapter: number, query?: ChapterContentQuery): Promise<ChapterBody>;
 
   // ── Outline+Timeline canvas (V1.72 Track A) ────────────────────────────────
-  /** `GET /v1/local/works/{work_id}/outline` — work-level outline + timeline. */
+  /** `GET /v1/daemon/works/{work_id}/outline` — work-level outline + timeline. */
   getWorkOutline(workId: string): Promise<WorkOutline>;
-  /** `POST /v1/local/works/{work_id}/outline/patch` — structure/volume patch. */
+  /** `POST /v1/daemon/works/{work_id}/outline/patch` — structure/volume patch. */
   patchOutlineStructure(
     workId: string,
     request: OutlinePatchStructureRequest,
   ): Promise<OutlinePatchResponse>;
-  /** `POST /v1/local/works/{work_id}/chapters/{n}/patch` — outline chapter patch. */
+  /** `POST /v1/daemon/works/{work_id}/chapters/{n}/patch` — outline chapter patch. */
   patchOutlineChapter(
     workId: string,
     chapter: number,
     request: OutlinePatchChapterRequest,
   ): Promise<OutlinePatchResponse>;
-  /** `POST /v1/local/works/{work_id}/timeline/patch` — structured timeline patch. */
+  /** `POST /v1/daemon/works/{work_id}/timeline/patch` — structured timeline patch. */
   patchTimelineEvent(
     workId: string,
     request: TimelinePatchEventRequest,
   ): Promise<OutlinePatchResponse>;
 
   // ── World KB canvas (V1.73 Track A) ───────────────────────────────────────
-  /** `GET /v1/local/worlds/{world_id}/kb/graph` — entity graph projection. */
+  /** `GET /v1/daemon/worlds/{world_id}/kb/graph` — entity graph projection. */
   getWorldKbGraph(
     worldId: string,
     query?: { includeSuggested?: boolean },
   ): Promise<WorldKbGraphResponse>;
-  /** `GET /v1/local/worlds/{world_id}/kb/candidates` — pending candidates. */
+  /** `GET /v1/daemon/worlds/{world_id}/kb/candidates` — pending candidates. */
   getWorldKbCandidates(
     worldId: string,
     query?: { limit?: number; cursor?: string },
   ): Promise<WorldKbCandidatesResponse>;
-  /** `POST /v1/local/worlds/{world_id}/kb/patch-entity` — entity-level patch (per-row OCC). */
+  /** `POST /v1/daemon/worlds/{world_id}/kb/patch-entity` — entity-level patch (per-row OCC). */
   worldKbPatchEntity(
     worldId: string,
     request: WorldKbPatchEntityRequest,
   ): Promise<WorldKbPatchEntityResponse>;
-  /** `POST /v1/local/worlds/{world_id}/kb/promote-candidate` — adopt/reject/merge. */
+  /** `POST /v1/daemon/worlds/{world_id}/kb/promote-candidate` — adopt/reject/merge. */
   worldKbPromoteCandidate(
     worldId: string,
     request: WorldKbPromoteCandidateRequest,
   ): Promise<WorldKbPromoteCandidateResponse>;
-  /** `POST /v1/local/worlds/{world_id}/kb/patch-relationship` — relationship add/update/remove (V1.74). */
+  /** `POST /v1/daemon/worlds/{world_id}/kb/patch-relationship` — relationship add/update/remove (V1.74). */
   worldKbPatchRelationship(
     worldId: string,
     request: WorldKbPatchRelationshipRequest,
@@ -303,7 +303,7 @@ export interface NexusClient {
   // session-end capture pipeline owns `POST .../memory/pending-review`), mirroring
   // V1.77's `createFinding` CLI-only decision (compass D-UX LOCKED).
   /**
-   * `GET /v1/local/narrative/worlds` — workspace-scoped world list for the
+   * `GET /v1/daemon/narrative/worlds` — workspace-scoped world list for the
    * active creator. Returns every Work-backed world (including zero-fragment
    * worlds) so the SOUL world selector can surface honest subset-empty states.
    * V1.82: typed against the generated `World` domain contract; the response
@@ -311,7 +311,7 @@ export interface NexusClient {
    */
   listNarrativeWorlds(): Promise<World[]>;
   /**
-   * `GET /v1/local/memory/pending-review?creator_id={id}` — cursor-paginated
+   * `GET /v1/daemon/memory/pending-review?creator_id={id}` — cursor-paginated
    * pending-review list for the active creator (default 50, max 250; cursor is
    * the opaque `next_cursor` from a previous page).
    */
@@ -320,12 +320,12 @@ export interface NexusClient {
     query?: Omit<ListPendingReviewsQuery, 'creator_id'>,
   ): Promise<ListPendingReviewsResponse>;
   /**
-   * `GET /v1/local/memory/pending-review/count?creator_id={id}` — live pending
+   * `GET /v1/daemon/memory/pending-review/count?creator_id={id}` — live pending
    * count for the active creator, surfaced as a badge on the Memory page header.
    */
   countPendingReviews(creatorId: string): Promise<CountPendingReviewsResponse>;
   /**
-   * `DELETE /v1/local/memory/pending-review/{pending_id}?creator_id={id}` —
+   * `DELETE /v1/daemon/memory/pending-review/{pending_id}?creator_id={id}` —
    * delete one pending-review row; echoes the path `pending_id`. A missing or
    * non-owned row surfaces as an error envelope, not `success: false`.
    */
@@ -334,14 +334,14 @@ export interface NexusClient {
     creatorId: string,
   ): Promise<DeletePendingReviewResponse>;
   /**
-   * `POST /v1/local/memory/review` — trigger the review/summarization pipeline
+   * `POST /v1/daemon/memory/review` — trigger the review/summarization pipeline
    * for the active creator's entire pending queue. Shipped behavior: the
    * passthrough classifier promotes/fragments/drops each pending row and returns
    * `{ promoted, fragmented, dropped }` (no LLM-backed summarizer).
    */
   reviewMemory(request: ReviewRequest): Promise<ReviewResponse>;
   /**
-   * `GET /v1/local/memory/fragments?creator_id={id}` — read-only long-term
+   * `GET /v1/daemon/memory/fragments?creator_id={id}` — read-only long-term
    * memory fragments for the active creator (NOT paginated; optional
    * case-insensitive `keyword` LIKE filter, default 50, max 250). Fragments are
    * produced only by the `reviewMemory` route — no manual CRUD on this surface.
@@ -351,7 +351,7 @@ export interface NexusClient {
     query?: Omit<ListMemoryFragmentsQuery, 'creator_id'>,
   ): Promise<ListMemoryFragmentsResponse>;
   /**
-   * `POST /v1/local/memory/soul/reflect` — read or regenerate the cached
+   * `POST /v1/daemon/memory/soul/reflect` — read or regenerate the cached
    * whole-Creator SOUL narrative (V1.81). With `force_regenerate` absent/false
    * the endpoint returns the current cache state (`ungenerated` / `current` /
    * `stale` / `insufficient_data`); with `force_regenerate: true` it
@@ -362,28 +362,28 @@ export interface NexusClient {
 
   // ── Reading depth (V1.89) ──────────────────────────────────────────────────
   /**
-   * `GET /v1/local/reading/progress?work_id=&chapter=` — persisted scroll
+   * `GET /v1/daemon/reading/progress?work_id=&chapter=` — persisted scroll
    * progress for the current creator on a chapter. Returns `scroll_progress=0`
    * with a server-generated `updated_at` when no progress has been saved.
    */
   getReadingProgress(workId: string, chapter: number): Promise<ReadingProgressResponse>;
-  /** `PUT /v1/local/reading/progress` — upsert scroll progress. */
+  /** `PUT /v1/daemon/reading/progress` — upsert scroll progress. */
   putReadingProgress(request: ReadingProgressRequest): Promise<ReadingProgressResponse>;
-  /** `DELETE /v1/local/reading/progress?work_id=&chapter=` — delete progress. */
+  /** `DELETE /v1/daemon/reading/progress?work_id=&chapter=` — delete progress. */
   deleteReadingProgress(workId: string, chapter: number): Promise<void>;
   /**
-   * `GET /v1/local/reading/annotations?work_id=&chapter=` — list annotations for
+   * `GET /v1/daemon/reading/annotations?work_id=&chapter=` — list annotations for
    * a chapter. No pagination; per-chapter counts are expected to stay small.
    */
   listReadingAnnotations(workId: string, chapter: number): Promise<ReadingAnnotationListResponse>;
-  /** `POST /v1/local/reading/annotations` — create a highlight annotation. */
+  /** `POST /v1/daemon/reading/annotations` — create a highlight annotation. */
   createReadingAnnotation(request: ReadingAnnotationCreateRequest): Promise<ReadingAnnotation>;
-  /** `PATCH /v1/local/reading/annotations/{annotation_id}` — edit color/note. */
+  /** `PATCH /v1/daemon/reading/annotations/{annotation_id}` — edit color/note. */
   patchReadingAnnotation(
     annotationId: string,
     request: ReadingAnnotationPatchRequest,
   ): Promise<ReadingAnnotation>;
-  /** `DELETE /v1/local/reading/annotations/{annotation_id}` — delete annotation. */
+  /** `DELETE /v1/daemon/reading/annotations/{annotation_id}` — delete annotation. */
   deleteReadingAnnotation(annotationId: string): Promise<void>;
 }
 

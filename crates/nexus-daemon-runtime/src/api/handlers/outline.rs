@@ -1,7 +1,7 @@
-//! Canvas Outline+Timeline Local API handlers (V1.72 P0).
+//! Canvas Outline+Timeline Daemon API handlers (V1.72 P0).
 //!
-//! Endpoints under `/v1/local/works/{work_id}/outline/*` and
-//! `/v1/local/works/{work_id}/timeline/*` expose the Work-level outline
+//! Endpoints under `/v1/daemon/works/{work_id}/outline/*` and
+//! `/v1/daemon/works/{work_id}/timeline/*` expose the Work-level outline
 //! structure, chapter metadata, and timeline events. All writes use the
 //! `outline_revision:` frontmatter in `Works/<work_ref>/Outlines/outline.md`
 //! for optimistic concurrency control.
@@ -446,7 +446,7 @@ fn ensure_chapter_not_published(
 
 // ─── Handlers ───────────────────────────────────────────────────────────────
 
-/// `GET /v1/local/works/{work_id}/outline` — canonical work outline + timeline.
+/// `GET /v1/daemon/works/{work_id}/outline` — canonical work outline + timeline.
 pub async fn get_work_outline(
     State(state): State<WorkspaceState>,
     Path(work_id): Path<String>,
@@ -473,7 +473,7 @@ pub async fn get_work_outline(
     Ok(Json(frontmatter.to_work_outline(work_id)))
 }
 
-/// `POST /v1/local/works/{work_id}/outline/patch` — structured outline patch.
+/// `POST /v1/daemon/works/{work_id}/outline/patch` — structured outline patch.
 pub async fn patch_outline_structure(
     State(state): State<WorkspaceState>,
     Path(work_id): Path<String>,
@@ -559,7 +559,7 @@ pub async fn patch_outline_structure(
     Ok(Json(patch_ok(frontmatter.outline_revision, Vec::new())))
 }
 
-/// `POST /v1/local/works/{work_id}/chapters/{chapter_id}/patch` — outline chapter patch.
+/// `POST /v1/daemon/works/{work_id}/chapters/{chapter_id}/patch` — outline chapter patch.
 ///
 // `too_many_lines`: this handler intentionally keeps the auth → work load →
 // pre-lock read → revision check → `RuntimeLockGuard` acquire → locked re-read
@@ -693,7 +693,7 @@ pub async fn patch_outline_chapter(
     Ok(Json(patch_ok(frontmatter.outline_revision, Vec::new())))
 }
 
-/// `POST /v1/local/works/{work_id}/timeline/patch` — structured timeline patch.
+/// `POST /v1/daemon/works/{work_id}/timeline/patch` — structured timeline patch.
 pub async fn patch_timeline_event(
     State(state): State<WorkspaceState>,
     Path(work_id): Path<String>,

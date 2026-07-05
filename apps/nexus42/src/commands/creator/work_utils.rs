@@ -10,7 +10,7 @@ use crate::errors::{CliError, Result};
 ///
 /// If `work_id` is `Some(id)`, returns it directly.
 /// If `work_id` is `None`, queries the daemon pool for the active Work
-/// (`GET /v1/local/works?limit=1&status=active`) and returns its `work_id`.
+/// (`GET /v1/daemon/works?limit=1&status=active`) and returns its `work_id`.
 ///
 /// # Errors
 ///
@@ -24,7 +24,7 @@ pub async fn resolve_active_work_id(
         return Ok(id);
     }
     let resp: serde_json::Value = client
-        .get::<serde_json::Value>("/v1/local/works?limit=1&status=active")
+        .get::<serde_json::Value>("/v1/daemon/works?limit=1&status=active")
         .await?;
     resp.get("works")
         .and_then(|v| v.as_array())

@@ -50,7 +50,7 @@ pub async fn run(args: HostCallArgs, config: &CliConfig) -> Result<()> {
 
     let response: serde_json::Value = client
         .post(
-            "/v1/local/agent-host/internal/tool-executions",
+            "/v1/daemon/agent-host/internal/tool-executions",
             &request_body,
         )
         .await
@@ -71,7 +71,7 @@ pub async fn run(args: HostCallArgs, config: &CliConfig) -> Result<()> {
 /// Extracted from `run()` so the request-envelope construction is unit-testable
 /// without a live daemon. The CLI-side contract is: given a tool ID and parsed
 /// parameters, produce the wire request body that the daemon's
-/// `/v1/local/agent-host/internal/tool-executions` endpoint expects.
+/// `/v1/daemon/agent-host/internal/tool-executions` endpoint expects.
 #[must_use]
 pub fn build_tool_request(tool_id: &str, params: &serde_json::Value) -> serde_json::Value {
     serde_json::json!({

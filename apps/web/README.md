@@ -30,7 +30,7 @@ pnpm --filter web preview    # serve the production build
 
 ## Dev workflow
 
-The SPA runs on the Vite dev server, which proxies Local API requests to the
+The SPA runs on the Vite dev server, which proxies Daemon API requests to the
 running daemon:
 
 ```sh
@@ -47,10 +47,10 @@ Override the daemon target (e.g. a non-default port) with `VITE_DAEMON_URL`:
 VITE_DAEMON_URL=http://127.0.0.1:9000 pnpm --filter web dev
 ```
 
-All `/v1/local/*` requests are proxied to that origin. Local API data endpoints
+All `/v1/daemon/*` requests are proxied to that origin. Daemon API data endpoints
 are **keyless on loopback** (V1.20 model); the browser client sends no
 credentials. In release the daemon serves the embedded SPA at `/` and the Local
-API at `/v1/local/*` on the same port, so the client stays same-origin.
+API at `/v1/daemon/*` on the same port, so the client stays same-origin.
 
 ## Roadmap (Tauri-ready boundary)
 

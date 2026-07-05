@@ -1,12 +1,12 @@
 /**
  * `BrowserClient` — the V1.64 NexusClient implementation for the browser.
  *
- * Spec: web-ui.md §5. Uses `fetch` against same-origin `/v1/local/*`. In dev
+ * Spec: web-ui.md §5. Uses `fetch` against same-origin `/v1/daemon/*`. In dev
  * the Vite dev server proxies these requests to the running daemon
  * (vite.config.ts, default http://127.0.0.1:8420); in release the daemon serves
- * the embedded SPA at `/` and the Local API at `/v1/local/*` on the same port.
+ * the embedded SPA at `/` and the Daemon API at `/v1/daemon/*` on the same port.
  *
- * The daemon's Local API data endpoints are keyless on loopback (V1.20 model),
+ * Daemon API data endpoints are keyless on loopback (V1.20 model),
  * so this client sends no credentials.
  */
 import type {
@@ -91,7 +91,7 @@ import type { DaemonHealth, NexusClient } from './types';
 
 export interface BrowserClientOptions {
   /**
-   * Origin/base path prefix for Local API requests. Defaults to `''` (same
+   * Origin/base path prefix for Daemon API requests. Defaults to `''` (same
    * origin, relative). Set only if the API is served from a different origin
    * than the SPA shell.
    */
@@ -129,55 +129,55 @@ export class BrowserClient implements NexusClient {
 
   // ── Daemon ─────────────────────────────────────────────────────────────────
   health(): Promise<DaemonHealth> {
-    return this.get<DaemonHealth>('/v1/local/runtime/health');
+    return this.get<DaemonHealth>('/v1/daemon/runtime/health');
   }
 
   // ── Works ──────────────────────────────────────────────────────────────────
   listWorks(query?: ListWorksQuery): Promise<ListWorksResponse> {
-    return this.get<ListWorksResponse>('/v1/local/works', query);
+    return this.get<ListWorksResponse>('/v1/daemon/works', query);
   }
   getWork(workId: string): Promise<WorkDetailResponse> {
-    return this.get<WorkDetailResponse>(`/v1/local/works/${encodeURIComponent(workId)}`);
+    return this.get<WorkDetailResponse>(`/v1/daemon/works/${encodeURIComponent(workId)}`);
   }
   createWork(request: CreateWorkRequest): Promise<CreateWorkResponse> {
-    return this.post<CreateWorkResponse>('/v1/local/works', request);
+    return this.post<CreateWorkResponse>('/v1/daemon/works', request);
   }
   patchWork(workId: string, request: PatchWorkRequest): Promise<WorkDetailResponse> {
     return this.patch<WorkDetailResponse>(
-      `/v1/local/works/${encodeURIComponent(workId)}`,
+      `/v1/daemon/works/${encodeURIComponent(workId)}`,
       request,
     );
   }
 
   // ── Orchestration sessions ─────────────────────────────────────────────────
   listSessions(query?: ListSessionsQuery): Promise<ListSessionsResponse> {
-    return this.get<ListSessionsResponse>('/v1/local/orchestration/sessions', query);
+    return this.get<ListSessionsResponse>('/v1/daemon/orchestration/sessions', query);
   }
   getSession(sessionId: string): Promise<SessionDetailResponse> {
     return this.get<SessionDetailResponse>(
-      `/v1/local/orchestration/sessions/${encodeURIComponent(sessionId)}`,
+      `/v1/daemon/orchestration/sessions/${encodeURIComponent(sessionId)}`,
     );
   }
 
   // ── Schedules ──────────────────────────────────────────────────────────────
   listSchedules(query?: ListSchedulesQuery): Promise<ListSchedulesResponse> {
-    return this.get<ListSchedulesResponse>('/v1/local/orchestration/schedules', query);
+    return this.get<ListSchedulesResponse>('/v1/daemon/orchestration/schedules', query);
   }
   inspectSchedule(scheduleId: string): Promise<InspectScheduleResponse> {
     return this.get<InspectScheduleResponse>(
-      `/v1/local/orchestration/schedules/${encodeURIComponent(scheduleId)}`,
+      `/v1/daemon/orchestration/schedules/${encodeURIComponent(scheduleId)}`,
     );
   }
   // V1.70 canvas Idea→Run/Resume/Steer promotions (V1.67 G2 pattern).
   addSchedule(request: AddScheduleRequest): Promise<AddScheduleResponse> {
-    return this.post<AddScheduleResponse>('/v1/local/orchestration/schedules', request);
+    return this.post<AddScheduleResponse>('/v1/daemon/orchestration/schedules', request);
   }
   signalSchedule(
     scheduleId: string,
     request: SignalScheduleRequest,
   ): Promise<SignalScheduleResponse> {
     return this.post<SignalScheduleResponse>(
-      `/v1/local/orchestration/schedules/${encodeURIComponent(scheduleId)}/signal`,
+      `/v1/daemon/orchestration/schedules/${encodeURIComponent(scheduleId)}/signal`,
       request,
     );
   }
@@ -186,20 +186,20 @@ export class BrowserClient implements NexusClient {
     request: EditCoreContextRequest,
   ): Promise<EditCoreContextResponse> {
     return this.patch<EditCoreContextResponse>(
-      `/v1/local/orchestration/schedules/${encodeURIComponent(scheduleId)}/core-context`,
+      `/v1/daemon/orchestration/schedules/${encodeURIComponent(scheduleId)}/core-context`,
       request,
     );
   }
 
   // ── Capabilities ───────────────────────────────────────────────────────────
   listCapabilities(query?: ListCapabilitiesQuery): Promise<ListCapabilitiesResponse> {
-    return this.get<ListCapabilitiesResponse>('/v1/local/orchestration/capabilities', query);
+    return this.get<ListCapabilitiesResponse>('/v1/daemon/orchestration/capabilities', query);
   }
 
   // ── Findings ───────────────────────────────────────────────────────────────
   listFindings(workId: string, query?: ListFindingsQuery): Promise<ListFindingsResponse> {
     return this.get<ListFindingsResponse>(
-      `/v1/local/works/${encodeURIComponent(workId)}/findings`,
+      `/v1/daemon/works/${encodeURIComponent(workId)}/findings`,
       query,
     );
   }
@@ -207,7 +207,7 @@ export class BrowserClient implements NexusClient {
   // already shipped; only the TS client surface was missing).
   getFinding(workId: string, findingId: string): Promise<FindingDetailResponse> {
     return this.get<FindingDetailResponse>(
-      `/v1/local/works/${encodeURIComponent(workId)}/findings/${encodeURIComponent(findingId)}`,
+      `/v1/daemon/works/${encodeURIComponent(workId)}/findings/${encodeURIComponent(findingId)}`,
     );
   }
   updateFinding(
@@ -216,37 +216,37 @@ export class BrowserClient implements NexusClient {
     patch: UpdateFindingRequest,
   ): Promise<FindingDetailResponse> {
     return this.patch<FindingDetailResponse>(
-      `/v1/local/works/${encodeURIComponent(workId)}/findings/${encodeURIComponent(findingId)}`,
+      `/v1/daemon/works/${encodeURIComponent(workId)}/findings/${encodeURIComponent(findingId)}`,
       patch,
     );
   }
 
   // ── Preset management ──────────────────────────────────────────────────────
   listPresets(): Promise<ListPresetsResponse> {
-    return this.get<ListPresetsResponse>('/v1/local/presets');
+    return this.get<ListPresetsResponse>('/v1/daemon/presets');
   }
   scaffoldPreset(request: ScaffoldPresetRequest): Promise<ScaffoldPresetResponse> {
-    return this.post<ScaffoldPresetResponse>('/v1/local/presets', request);
+    return this.post<ScaffoldPresetResponse>('/v1/daemon/presets', request);
   }
   validatePreset(request: ValidatePresetRequest): Promise<ValidatePresetResponse> {
-    return this.post<ValidatePresetResponse>('/v1/local/presets:validate', request);
+    return this.post<ValidatePresetResponse>('/v1/daemon/presets:validate', request);
   }
   reloadPreset(presetId: string): Promise<ReloadPresetResponse> {
     return this.post<ReloadPresetResponse>(
-      `/v1/local/presets/${encodeURIComponent(presetId)}:reload`,
+      `/v1/daemon/presets/${encodeURIComponent(presetId)}:reload`,
     );
   }
   getPreset(presetId: string): Promise<GetPresetResponse> {
-    return this.get<GetPresetResponse>(`/v1/local/presets/${encodeURIComponent(presetId)}`);
+    return this.get<GetPresetResponse>(`/v1/daemon/presets/${encodeURIComponent(presetId)}`);
   }
   updatePreset(presetId: string, request: UpdatePresetRequest): Promise<UpdatePresetResponse> {
     return this.patch<UpdatePresetResponse>(
-      `/v1/local/presets/${encodeURIComponent(presetId)}`,
+      `/v1/daemon/presets/${encodeURIComponent(presetId)}`,
       request,
     );
   }
   deletePreset(presetId: string): Promise<void> {
-    return this.delete<void>(`/v1/local/presets/${encodeURIComponent(presetId)}`);
+    return this.delete<void>(`/v1/daemon/presets/${encodeURIComponent(presetId)}`);
   }
 
   // ── Strategy canvas (V1.71 Track A) ───────────────────────────────────────
@@ -256,7 +256,7 @@ export class BrowserClient implements NexusClient {
     request: StrategyPatchStateRequest,
   ): Promise<StrategyPatchResponse> {
     return this.post<StrategyPatchResponse>(
-      `/v1/local/strategies/${encodeURIComponent(strategyId)}/states/${encodeURIComponent(stateId)}/patch`,
+      `/v1/daemon/strategies/${encodeURIComponent(strategyId)}/states/${encodeURIComponent(stateId)}/patch`,
       request,
     );
   }
@@ -265,7 +265,7 @@ export class BrowserClient implements NexusClient {
     request: StrategyPatchTransitionRequest,
   ): Promise<StrategyPatchResponse> {
     return this.post<StrategyPatchResponse>(
-      `/v1/local/strategies/${encodeURIComponent(strategyId)}/transitions/patch`,
+      `/v1/daemon/strategies/${encodeURIComponent(strategyId)}/transitions/patch`,
       request,
     );
   }
@@ -275,7 +275,7 @@ export class BrowserClient implements NexusClient {
     request: StrategyPatchPromptTemplateRequest,
   ): Promise<StrategyPatchResponse> {
     return this.post<StrategyPatchResponse>(
-      `/v1/local/strategies/${encodeURIComponent(strategyId)}/states/${encodeURIComponent(stateId)}/prompt/patch`,
+      `/v1/daemon/strategies/${encodeURIComponent(strategyId)}/states/${encodeURIComponent(stateId)}/prompt/patch`,
       request,
     );
   }
@@ -283,13 +283,13 @@ export class BrowserClient implements NexusClient {
   // ── Chapters (V1.65 Content-Authoring) ─────────────────────────────────────
   listChapters(workId: string, query?: ListChaptersQuery): Promise<ListChaptersResponse> {
     return this.get<ListChaptersResponse>(
-      `/v1/local/works/${encodeURIComponent(workId)}/chapters`,
+      `/v1/daemon/works/${encodeURIComponent(workId)}/chapters`,
       query,
     );
   }
   getChapter(workId: string, chapter: number, query?: ChapterContentQuery): Promise<ChapterDetail> {
     return this.get<ChapterDetail>(
-      `/v1/local/works/${encodeURIComponent(workId)}/chapters/${chapter}`,
+      `/v1/daemon/works/${encodeURIComponent(workId)}/chapters/${chapter}`,
       query,
     );
   }
@@ -299,7 +299,7 @@ export class BrowserClient implements NexusClient {
     query?: ChapterContentQuery,
   ): Promise<ChapterOutline> {
     return this.get<ChapterOutline>(
-      `/v1/local/works/${encodeURIComponent(workId)}/chapters/${chapter}/outline`,
+      `/v1/daemon/works/${encodeURIComponent(workId)}/chapters/${chapter}/outline`,
       query,
     );
   }
@@ -310,7 +310,7 @@ export class BrowserClient implements NexusClient {
     query?: ChapterContentQuery,
   ): Promise<ChapterDetail> {
     return this.patch<ChapterDetail>(
-      `/v1/local/works/${encodeURIComponent(workId)}/chapters/${chapter}`,
+      `/v1/daemon/works/${encodeURIComponent(workId)}/chapters/${chapter}`,
       request,
       query,
     );
@@ -321,21 +321,21 @@ export class BrowserClient implements NexusClient {
     query?: ChapterContentQuery,
   ): Promise<ChapterBody> {
     return this.get<ChapterBody>(
-      `/v1/local/works/${encodeURIComponent(workId)}/chapters/${chapter}/body`,
+      `/v1/daemon/works/${encodeURIComponent(workId)}/chapters/${chapter}/body`,
       query,
     );
   }
 
   // ── Outline+Timeline canvas (V1.72 Track A) ────────────────────────────────
   getWorkOutline(workId: string): Promise<WorkOutline> {
-    return this.get<WorkOutline>(`/v1/local/works/${encodeURIComponent(workId)}/outline`);
+    return this.get<WorkOutline>(`/v1/daemon/works/${encodeURIComponent(workId)}/outline`);
   }
   patchOutlineStructure(
     workId: string,
     request: OutlinePatchStructureRequest,
   ): Promise<OutlinePatchResponse> {
     return this.post<OutlinePatchResponse>(
-      `/v1/local/works/${encodeURIComponent(workId)}/outline/patch`,
+      `/v1/daemon/works/${encodeURIComponent(workId)}/outline/patch`,
       request,
     );
   }
@@ -345,7 +345,7 @@ export class BrowserClient implements NexusClient {
     request: OutlinePatchChapterRequest,
   ): Promise<OutlinePatchResponse> {
     return this.post<OutlinePatchResponse>(
-      `/v1/local/works/${encodeURIComponent(workId)}/chapters/${chapter}/patch`,
+      `/v1/daemon/works/${encodeURIComponent(workId)}/chapters/${chapter}/patch`,
       request,
     );
   }
@@ -354,7 +354,7 @@ export class BrowserClient implements NexusClient {
     request: TimelinePatchEventRequest,
   ): Promise<OutlinePatchResponse> {
     return this.post<OutlinePatchResponse>(
-      `/v1/local/works/${encodeURIComponent(workId)}/timeline/patch`,
+      `/v1/daemon/works/${encodeURIComponent(workId)}/timeline/patch`,
       request,
     );
   }
@@ -368,7 +368,7 @@ export class BrowserClient implements NexusClient {
     if (query?.includeSuggested) params.set('include_suggested', 'true');
     const qs = params.toString();
     return this.get<WorldKbGraphResponse>(
-      `/v1/local/worlds/${encodeURIComponent(worldId)}/kb/graph${qs ? `?${qs}` : ''}`,
+      `/v1/daemon/worlds/${encodeURIComponent(worldId)}/kb/graph${qs ? `?${qs}` : ''}`,
     );
   }
   getWorldKbCandidates(
@@ -376,7 +376,7 @@ export class BrowserClient implements NexusClient {
     query?: { limit?: number; cursor?: string },
   ): Promise<WorldKbCandidatesResponse> {
     return this.get<WorldKbCandidatesResponse>(
-      `/v1/local/worlds/${encodeURIComponent(worldId)}/kb/candidates`,
+      `/v1/daemon/worlds/${encodeURIComponent(worldId)}/kb/candidates`,
       query,
     );
   }
@@ -385,7 +385,7 @@ export class BrowserClient implements NexusClient {
     request: WorldKbPatchEntityRequest,
   ): Promise<WorldKbPatchEntityResponse> {
     return this.post<WorldKbPatchEntityResponse>(
-      `/v1/local/worlds/${encodeURIComponent(worldId)}/kb/patch-entity`,
+      `/v1/daemon/worlds/${encodeURIComponent(worldId)}/kb/patch-entity`,
       request,
     );
   }
@@ -394,7 +394,7 @@ export class BrowserClient implements NexusClient {
     request: WorldKbPromoteCandidateRequest,
   ): Promise<WorldKbPromoteCandidateResponse> {
     return this.post<WorldKbPromoteCandidateResponse>(
-      `/v1/local/worlds/${encodeURIComponent(worldId)}/kb/promote-candidate`,
+      `/v1/daemon/worlds/${encodeURIComponent(worldId)}/kb/promote-candidate`,
       request,
     );
   }
@@ -403,7 +403,7 @@ export class BrowserClient implements NexusClient {
     request: WorldKbPatchRelationshipRequest,
   ): Promise<WorldKbPatchRelationshipResponse> {
     return this.post<WorldKbPatchRelationshipResponse>(
-      `/v1/local/worlds/${encodeURIComponent(worldId)}/kb/patch-relationship`,
+      `/v1/daemon/worlds/${encodeURIComponent(worldId)}/kb/patch-relationship`,
       request,
     );
   }
@@ -415,21 +415,21 @@ export class BrowserClient implements NexusClient {
   // review) and the daemon enforces active-creator ownership (403 on mismatch).
   // V1.82: workspace-scoped world list reused by the SOUL selector.
   async listNarrativeWorlds(): Promise<World[]> {
-    const res = await this.get<{ worlds: World[] }>('/v1/local/narrative/worlds');
+    const res = await this.get<{ worlds: World[] }>('/v1/daemon/narrative/worlds');
     return res.worlds;
   }
   listPendingReviews(
     creatorId: string,
     query?: Omit<ListPendingReviewsQuery, 'creator_id'>,
   ): Promise<ListPendingReviewsResponse> {
-    return this.get<ListPendingReviewsResponse>('/v1/local/memory/pending-review', {
+    return this.get<ListPendingReviewsResponse>('/v1/daemon/memory/pending-review', {
       ...query,
       creator_id: creatorId,
     });
   }
   countPendingReviews(creatorId: string): Promise<CountPendingReviewsResponse> {
     return this.get<CountPendingReviewsResponse>(
-      '/v1/local/memory/pending-review/count',
+      '/v1/daemon/memory/pending-review/count',
       { creator_id: creatorId },
     );
   }
@@ -438,63 +438,63 @@ export class BrowserClient implements NexusClient {
     creatorId: string,
   ): Promise<DeletePendingReviewResponse> {
     return this.delete<DeletePendingReviewResponse>(
-      `/v1/local/memory/pending-review/${encodeURIComponent(pendingId)}`,
+      `/v1/daemon/memory/pending-review/${encodeURIComponent(pendingId)}`,
       { creator_id: creatorId },
     );
   }
   reviewMemory(request: ReviewRequest): Promise<ReviewResponse> {
-    return this.post<ReviewResponse>('/v1/local/memory/review', request);
+    return this.post<ReviewResponse>('/v1/daemon/memory/review', request);
   }
   listMemoryFragments(
     creatorId: string,
     query?: Omit<ListMemoryFragmentsQuery, 'creator_id'>,
   ): Promise<ListMemoryFragmentsResponse> {
-    return this.get<ListMemoryFragmentsResponse>('/v1/local/memory/fragments', {
+    return this.get<ListMemoryFragmentsResponse>('/v1/daemon/memory/fragments', {
       ...query,
       creator_id: creatorId,
     });
   }
   reflectSoulNarrative(request: SoulNarrativeRequest): Promise<SoulNarrativeResponse> {
-    return this.post<SoulNarrativeResponse>('/v1/local/memory/soul/reflect', request);
+    return this.post<SoulNarrativeResponse>('/v1/daemon/memory/soul/reflect', request);
   }
 
   // ── Reading depth (V1.89) ──────────────────────────────────────────────────
   getReadingProgress(workId: string, chapter: number): Promise<ReadingProgressResponse> {
-    return this.get<ReadingProgressResponse>('/v1/local/reading/progress', {
+    return this.get<ReadingProgressResponse>('/v1/daemon/reading/progress', {
       work_id: workId,
       chapter,
     });
   }
   putReadingProgress(request: ReadingProgressRequest): Promise<ReadingProgressResponse> {
-    return this.put<ReadingProgressResponse>('/v1/local/reading/progress', request);
+    return this.put<ReadingProgressResponse>('/v1/daemon/reading/progress', request);
   }
   deleteReadingProgress(workId: string, chapter: number): Promise<void> {
-    return this.delete<void>('/v1/local/reading/progress', { work_id: workId, chapter });
+    return this.delete<void>('/v1/daemon/reading/progress', { work_id: workId, chapter });
   }
   listReadingAnnotations(
     workId: string,
     chapter: number,
   ): Promise<ReadingAnnotationListResponse> {
-    return this.get<ReadingAnnotationListResponse>('/v1/local/reading/annotations', {
+    return this.get<ReadingAnnotationListResponse>('/v1/daemon/reading/annotations', {
       work_id: workId,
       chapter,
     });
   }
   createReadingAnnotation(request: ReadingAnnotationCreateRequest): Promise<ReadingAnnotation> {
-    return this.post<ReadingAnnotation>('/v1/local/reading/annotations', request);
+    return this.post<ReadingAnnotation>('/v1/daemon/reading/annotations', request);
   }
   patchReadingAnnotation(
     annotationId: string,
     request: ReadingAnnotationPatchRequest,
   ): Promise<ReadingAnnotation> {
     return this.patch<ReadingAnnotation>(
-      `/v1/local/reading/annotations/${encodeURIComponent(annotationId)}`,
+      `/v1/daemon/reading/annotations/${encodeURIComponent(annotationId)}`,
       request,
     );
   }
   deleteReadingAnnotation(annotationId: string): Promise<void> {
     return this.delete<void>(
-      `/v1/local/reading/annotations/${encodeURIComponent(annotationId)}`,
+      `/v1/daemon/reading/annotations/${encodeURIComponent(annotationId)}`,
     );
   }
 

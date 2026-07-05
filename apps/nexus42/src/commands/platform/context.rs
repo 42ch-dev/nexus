@@ -467,7 +467,7 @@ fn build_two_stage_from_local(
 /// Best-effort collection of fragment keywords from the daemon.
 /// Returns empty vec if daemon is unavailable or endpoint doesn't exist (404).
 async fn collect_fragment_keywords(config: &CliConfig) -> Vec<String> {
-    let url = format!("{}/v1/local/memory/fragments", config.daemon_url);
+    let url = format!("{}/v1/daemon/memory/fragments", config.daemon_url);
 
     let response = match reqwest::Client::new()
         .get(&url)
@@ -484,7 +484,7 @@ async fn collect_fragment_keywords(config: &CliConfig) -> Vec<String> {
 
     // Gracefully handle 404 (endpoint may not be implemented yet)
     if response.status() == reqwest::StatusCode::NOT_FOUND {
-        tracing::debug!("Daemon does not implement /v1/local/memory/fragments, skipping");
+        tracing::debug!("Daemon does not implement /v1/daemon/memory/fragments, skipping");
         return Vec::new();
     }
 

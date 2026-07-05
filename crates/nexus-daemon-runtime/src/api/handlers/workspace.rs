@@ -17,7 +17,7 @@ pub struct WorkspaceInfo {
     pub database_path: String,
 }
 
-/// GET /v1/local/workspace
+/// GET /v1/daemon/workspace
 pub async fn info(State(state): State<WorkspaceState>) -> Json<WorkspaceInfo> {
     info!("Handling workspace info request");
     Json(WorkspaceInfo {
@@ -38,7 +38,7 @@ pub struct InitWorkspaceResponse {
     pub message: String,
 }
 
-/// POST /v1/local/workspace/init
+/// POST /v1/daemon/workspace/init
 pub async fn init_workspace(
     State(state): State<WorkspaceState>,
     Json(req): Json<InitWorkspaceRequest>,
@@ -71,7 +71,7 @@ pub async fn init_workspace(
 
 // ── Workspace open / commit handlers (DF-31 skeleton) ──────────────────────
 
-/// Request body for `POST /v1/local/workspace/open`.
+/// Request body for `POST /v1/daemon/workspace/open`.
 ///
 /// Opens a workspace path and returns a session with a snapshot.
 ///
@@ -116,7 +116,7 @@ pub struct OpenSnapshot {
     pub file_hashes: std::collections::HashMap<String, String>,
 }
 
-/// `POST /v1/local/workspace/open`
+/// `POST /v1/daemon/workspace/open`
 ///
 /// Opens a workspace session for the given relative path. Validates that
 /// the path is safe (no traversal, no absolute paths) and that the workspace
@@ -192,7 +192,7 @@ pub async fn open_workspace(
     }))
 }
 
-/// Request body for `POST /v1/local/workspace/commit`.
+/// Request body for `POST /v1/daemon/workspace/commit`.
 ///
 /// Commits changes against a workspace session. The `changes[]` manifest
 /// is validated against the session snapshot for OCC conflicts.
@@ -216,7 +216,7 @@ pub struct WorkspaceCommitResponse {
     pub committed: bool,
 }
 
-/// `POST /v1/local/workspace/commit`
+/// `POST /v1/daemon/workspace/commit`
 ///
 /// Commits changes against a workspace session. Validates the `changes[]` manifest
 /// against the session snapshot. Rejects on hash mismatch (OCC conflict), stale

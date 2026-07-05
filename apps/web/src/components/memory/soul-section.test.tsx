@@ -58,8 +58,8 @@ function baselineHandlers(overrides: {
   } = overrides;
 
   return [
-    http.get('/v1/local/narrative/worlds', () => HttpResponse.json({ worlds })),
-    http.get('/v1/local/memory/fragments', ({ request }) => {
+    http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json({ worlds })),
+    http.get('/v1/daemon/memory/fragments', ({ request }) => {
       const url = new URL(request.url);
       const worldId = url.searchParams.get('world_id');
       const items = worldId
@@ -75,7 +75,7 @@ describe('SoulSection — selector → narrative scope linkage', () => {
     const reflectSpy = vi.fn();
     useHandlers(
       ...baselineHandlers(),
-      http.post('/v1/local/memory/soul/reflect', async ({ request }) => {
+      http.post('/v1/daemon/memory/soul/reflect', async ({ request }) => {
         const body = (await request.json().catch(() => ({}))) as { world_id?: string };
         reflectSpy(body);
         return HttpResponse.json({
@@ -118,7 +118,7 @@ describe('SoulSection — selector → narrative scope linkage', () => {
           { fragment_id: 'f1', summary: 's1', world_id: 'eryndor', keywords: ['k1'], created_at: '2026-07-01T00:00:00Z' },
         ],
       }),
-      http.post('/v1/local/memory/soul/reflect', async ({ request }) => {
+      http.post('/v1/daemon/memory/soul/reflect', async ({ request }) => {
         const body = (await request.json().catch(() => ({}))) as { world_id?: string };
         reflectSpy(body);
         return HttpResponse.json({
@@ -163,7 +163,7 @@ describe('SoulSection — selector → narrative scope linkage', () => {
           { fragment_id: 'f1', summary: 's1', world_id: 'solara', keywords: ['k1'], created_at: '2026-07-01T00:00:00Z' },
         ],
       }),
-      http.post('/v1/local/memory/soul/reflect', async ({ request }) => {
+      http.post('/v1/daemon/memory/soul/reflect', async ({ request }) => {
         const body = (await request.json().catch(() => ({}))) as { world_id?: string };
         return HttpResponse.json({
           creator_id: CREATOR,
@@ -203,7 +203,7 @@ describe('SoulSection — selector → narrative scope linkage', () => {
           { fragment_id: 'f1', summary: 's1', world_id: 'eryndor', keywords: ['k1'], created_at: '2026-07-01T00:00:00Z' },
         ],
       }),
-      http.post('/v1/local/memory/soul/reflect', async ({ request }) => defaultNarrativeResponse((await request.json().catch(() => ({}))) as { world_id?: string })),
+      http.post('/v1/daemon/memory/soul/reflect', async ({ request }) => defaultNarrativeResponse((await request.json().catch(() => ({}))) as { world_id?: string })),
     );
 
     renderInApp(

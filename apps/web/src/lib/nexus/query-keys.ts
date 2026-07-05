@@ -1,5 +1,5 @@
 /**
- * Centralized TanStack Query keys for the Nexus Local API resources.
+ * Centralized TanStack Query keys for the Nexus Daemon API resources.
  *
  * Keeping keys in one place lets mutations invalidate the right query sets
  * after a write (e.g. patching a Work invalidates the work list + that work's

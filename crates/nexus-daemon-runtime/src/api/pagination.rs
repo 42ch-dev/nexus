@@ -1,6 +1,6 @@
-//! Shared cursor-pagination helpers for Local API list endpoints (V1.64).
+//! Shared cursor-pagination helpers for Daemon API list endpoints (V1.64).
 //!
-//! Conventions established by `local-api-surface-conventions.md` §2: list
+//! Conventions established by `daemon-api-surface-conventions.md` §2: list
 //! endpoints use opaque cursor-based pagination with a `PaginationInfo`
 //! envelope (`{ limit, next_cursor, has_more }`).
 //!

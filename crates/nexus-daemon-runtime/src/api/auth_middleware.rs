@@ -1,6 +1,6 @@
 //! Auth Middleware
 //!
-//! Tower/axum middleware layer for daemon-local API key authentication.
+//! Tower/axum middleware layer for daemon API key authentication.
 //!
 //! Replaces the former Bearer-token middleware with `X-API-Key` validation.
 //! Two startup modes:
@@ -36,7 +36,7 @@ pub struct DaemonApiConfig {
     pub auth_mode: AuthMode,
     /// Resolved daemon HTTP port (used to compute the own-origin allowlist entry).
     pub daemon_port: u16,
-    /// Allowed `Origin` values for the Local API CORS + Origin-reject gate.
+    /// Allowed `Origin` values for the Daemon API CORS + Origin-reject gate.
     pub allowed_origins: Vec<String>,
     /// Human-readable `(origin, source)` pairs for startup logging.
     pub allowed_origin_sources: Vec<(String, String)>,
@@ -294,7 +294,7 @@ pub async fn require_allowed_origin(
             return Err(NexusApiError::Forbidden {
                 resource: "origin".to_string(),
                 reason: format!(
-                    "Origin '{}' is not allowed for this Local API; \
+                    "Origin '{}' is not allowed for this Daemon API; \
                      add it to {} to allow it",
                     origin_str,
                     DaemonApiConfig::ENV_ALLOWED_ORIGINS,
@@ -417,7 +417,7 @@ async fn auth_keyless_localhost(
             "Request rejected: non-loopback connection in keyless-localhost mode",
         );
         return Err(NexusApiError::Forbidden {
-            resource: "daemon-local-api".into(),
+            resource: "daemon-api".into(),
             reason: "non-loopback connections require an API key".into(),
         });
     }
@@ -493,24 +493,24 @@ mod tests {
         let auth_config = Arc::new(auth_config);
 
         let runtime_routes = Router::new()
-            .route("/v1/local/runtime/health", get(handlers::runtime::health))
-            .route("/v1/local/runtime/status", get(handlers::runtime::status))
+            .route("/v1/daemon/runtime/health", get(handlers::runtime::health))
+            .route("/v1/daemon/runtime/status", get(handlers::runtime::status))
             .route(
-                "/v1/local/daemon/status",
+                "/v1/daemon/daemon/status",
                 get(handlers::runtime::daemon_status),
             );
 
         let workspace_routes = Router::new()
-            .route("/v1/local/workspace", get(handlers::workspace::info))
+            .route("/v1/daemon/workspace", get(handlers::workspace::info))
             .route(
-                "/v1/local/workspace/init",
+                "/v1/daemon/workspace/init",
                 post(handlers::workspace::init_workspace),
             );
 
         // Protected routes — require API key
         let protected_routes = Router::new()
-            .route("/v1/local/creators", get(handlers::creators::list))
-            .route("/v1/local/references", get(handlers::references::list))
+            .route("/v1/daemon/creators", get(handlers::creators::list))
+            .route("/v1/daemon/references", get(handlers::references::list))
             .route_layer(axum_mw::from_fn_with_state(
                 Arc::clone(&auth_config),
                 super::require_api_key,
@@ -543,7 +543,7 @@ mod tests {
     #[tokio::test]
     async fn health_route_works_without_auth() {
         let app = create_test_app(DaemonApiConfig::keyed("test-secret")).await;
-        let response = app.get("/v1/local/runtime/health").await;
+        let response = app.get("/v1/daemon/runtime/health").await;
         assert!(
             response.status_code().is_success(),
             "health should return 2xx without auth, got {}",
@@ -556,7 +556,7 @@ mod tests {
     #[tokio::test]
     async fn creators_returns_401_without_api_key() {
         let app = create_test_app(DaemonApiConfig::keyed("test-secret")).await;
-        let response = app.get("/v1/local/creators").await;
+        let response = app.get("/v1/daemon/creators").await;
         assert_eq!(
             response.status_code(),
             401,
@@ -568,7 +568,7 @@ mod tests {
     #[tokio::test]
     async fn references_returns_401_without_api_key() {
         let app = create_test_app(DaemonApiConfig::keyed("test-secret")).await;
-        let response = app.get("/v1/local/references").await;
+        let response = app.get("/v1/daemon/references").await;
         assert_eq!(
             response.status_code(),
             401,
@@ -581,7 +581,7 @@ mod tests {
     async fn creators_returns_401_with_wrong_api_key() {
         let app = create_test_app(DaemonApiConfig::keyed("test-secret")).await;
         let response = app
-            .get("/v1/local/creators")
+            .get("/v1/daemon/creators")
             .add_header("X-API-Key", "wrong-key")
             .await;
         assert_eq!(
@@ -596,7 +596,7 @@ mod tests {
     async fn creators_succeeds_with_valid_api_key() {
         let app = create_test_app(DaemonApiConfig::keyed("test-secret")).await;
         let response = app
-            .get("/v1/local/creators")
+            .get("/v1/daemon/creators")
             .add_header("X-API-Key", "test-secret")
             .await;
         // With a valid key, middleware passes through. The handler itself
@@ -612,7 +612,7 @@ mod tests {
     async fn empty_api_key_header_returns_401() {
         let app = create_test_app(DaemonApiConfig::keyed("test-secret")).await;
         let response = app
-            .get("/v1/local/creators")
+            .get("/v1/daemon/creators")
             .add_header("X-API-Key", "")
             .await;
         assert_eq!(
@@ -628,7 +628,7 @@ mod tests {
     async fn keyless_localhost_accepts_without_key() {
         // In axum_test, connections appear as loopback (in-process)
         let app = create_test_app(DaemonApiConfig::keyless()).await;
-        let response = app.get("/v1/local/creators").await;
+        let response = app.get("/v1/daemon/creators").await;
         assert_ne!(
             response.status_code(),
             401,
@@ -647,7 +647,7 @@ mod tests {
     async fn cross_origin_request_is_rejected_with_403() {
         let app = create_test_app(DaemonApiConfig::keyless()).await;
         let response = app
-            .get("/v1/local/creators")
+            .get("/v1/daemon/creators")
             .add_header("Origin", "https://evil.com")
             .await;
         assert_eq!(
@@ -670,7 +670,7 @@ mod tests {
     async fn same_origin_request_is_allowed() {
         let app = create_test_app(DaemonApiConfig::keyless()).await;
         let response = app
-            .get("/v1/local/creators")
+            .get("/v1/daemon/creators")
             .add_header("Origin", "http://127.0.0.1:8420")
             .await;
         assert_ne!(
@@ -684,7 +684,7 @@ mod tests {
     async fn localhost_own_port_origin_request_is_allowed() {
         let app = create_test_app(DaemonApiConfig::keyless()).await;
         let response = app
-            .get("/v1/local/creators")
+            .get("/v1/daemon/creators")
             .add_header("Origin", "http://localhost:8420")
             .await;
         assert_ne!(
@@ -699,7 +699,7 @@ mod tests {
         let app = create_test_app(DaemonApiConfig::keyless()).await;
 
         let mac_response = app
-            .get("/v1/local/creators")
+            .get("/v1/daemon/creators")
             .add_header("Origin", "tauri://localhost")
             .await;
         assert_ne!(
@@ -709,7 +709,7 @@ mod tests {
         );
 
         let win_response = app
-            .get("/v1/local/creators")
+            .get("/v1/daemon/creators")
             .add_header("Origin", "http://tauri.localhost")
             .await;
         assert_ne!(
@@ -723,7 +723,7 @@ mod tests {
     async fn vite_dev_origin_request_is_allowed() {
         let app = create_test_app(DaemonApiConfig::keyless()).await;
         let response = app
-            .get("/v1/local/creators")
+            .get("/v1/daemon/creators")
             .add_header("Origin", "http://localhost:5173")
             .await;
         assert_ne!(
@@ -737,7 +737,7 @@ mod tests {
     async fn options_preflight_passes_origin_middleware() {
         let app = create_test_app(DaemonApiConfig::keyless()).await;
         let response = app
-            .method(axum::http::Method::OPTIONS, "/v1/local/creators")
+            .method(axum::http::Method::OPTIONS, "/v1/daemon/creators")
             .add_header("Origin", "http://127.0.0.1:8420")
             .add_header("Access-Control-Request-Method", "GET")
             .await;
@@ -756,7 +756,7 @@ mod tests {
             create_test_app(DaemonApiConfig::keyless().with_resolved_listen_addr(8420, "::1"))
                 .await;
         let response = app
-            .get("/v1/local/creators")
+            .get("/v1/daemon/creators")
             .add_header("Origin", "http://[::1]:8420")
             .await;
         assert_ne!(

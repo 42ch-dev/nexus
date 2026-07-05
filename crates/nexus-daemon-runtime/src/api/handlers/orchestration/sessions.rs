@@ -18,7 +18,7 @@ use nexus_contracts::local::orchestration::http::{
 use nexus_contracts::PaginationInfo;
 use nexus_orchestration::engine::{EngineSignal, SessionStatus};
 
-/// `POST /v1/local/orchestration/sessions` — create a new session from a preset.
+/// `POST /v1/daemon/orchestration/sessions` — create a new session from a preset.
 pub async fn create_session(
     State(state): State<WorkspaceState>,
     Json(body): Json<CreateSessionRequest>,
@@ -52,7 +52,7 @@ pub async fn create_session(
     ))
 }
 
-/// `GET /v1/local/orchestration/sessions`
+/// `GET /v1/daemon/orchestration/sessions`
 pub async fn list_sessions(
     State(state): State<WorkspaceState>,
     Query(query): Query<ListSessionsQuery>,
@@ -128,7 +128,7 @@ pub async fn list_sessions(
     }))
 }
 
-/// `GET /v1/local/orchestration/sessions/{session_id}`
+/// `GET /v1/daemon/orchestration/sessions/{session_id}`
 pub async fn get_session(
     State(state): State<WorkspaceState>,
     Path(session_id): Path<String>,
@@ -162,7 +162,7 @@ pub async fn get_session(
     }))
 }
 
-/// `POST /v1/local/orchestration/sessions/{session_id}/signal`
+/// `POST /v1/daemon/orchestration/sessions/{session_id}/signal`
 pub async fn signal_session(
     State(state): State<WorkspaceState>,
     Path(session_id): Path<String>,

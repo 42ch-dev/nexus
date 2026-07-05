@@ -429,7 +429,7 @@ fn confirm_clone(yes: bool, world_ref: &str, source: CloneSourceArg) -> bool {
 /// Run the clone command — hard-deprecated stub (V1.27 H1).
 ///
 /// World cloning is a platform-only operation that cannot be performed
-/// locally by the CLI. The `/v1/local/world/clone` endpoint never existed.
+/// locally by the CLI. The `/v1/daemon/world/clone` endpoint never existed.
 /// Users should use the platform UI or a future `nexus42 sync` command
 /// to pull a world skeleton from the platform.
 fn run_clone(_args: CloneArgs, _config: &CliConfig) -> Result<()> {

@@ -1,4 +1,4 @@
-//! HTTP request/response types for the `/v1/local/orchestration/*` endpoints.
+//! HTTP request/response types for the `/v1/daemon/orchestration/*` endpoints.
 //!
 //! Hand-coded local types — NOT codegen'd, NOT in `schemas/`.
 //! Design: `.mstar/archived/knowledge/schemas-boundary.md` §3.
@@ -6,14 +6,14 @@
 //! The daemon exposes these as local-only HTTP; `nexus-platform` never
 //! observes them over any wire channel.
 
-use crate::generated::local_api::kb::pagination_info::PaginationInfo;
+use crate::generated::daemon_api::kb::pagination_info::PaginationInfo;
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------
 // Sessions
 // ---------------------------------------------------------------------------
 
-/// Query parameters for `GET /v1/local/orchestration/sessions`.
+/// Query parameters for `GET /v1/daemon/orchestration/sessions`.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct ListSessionsQuery {
@@ -32,7 +32,7 @@ pub struct ListSessionsQuery {
     pub sort: Option<String>,
 }
 
-/// Response body for `GET /v1/local/orchestration/sessions`.
+/// Response body for `GET /v1/daemon/orchestration/sessions`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ListSessionsResponse {
     /// Active engine sessions.
@@ -57,14 +57,14 @@ pub struct SessionSummary {
     pub current_task_id: Option<String>,
 }
 
-/// Response body for `GET /v1/local/orchestration/sessions/{id}`.
+/// Response body for `GET /v1/daemon/orchestration/sessions/{id}`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GetSessionResponse {
     pub session: SessionSummary,
 }
 
-/// Request body for `POST /v1/local/orchestration/sessions` (schedule start).
+/// Request body for `POST /v1/daemon/orchestration/sessions` (schedule start).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateSessionRequest {
@@ -77,7 +77,7 @@ pub struct CreateSessionRequest {
     pub seed: Option<String>,
 }
 
-/// Response body for `POST /v1/local/orchestration/sessions` (schedule start).
+/// Response body for `POST /v1/daemon/orchestration/sessions` (schedule start).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CreateSessionResponse {
@@ -85,11 +85,11 @@ pub struct CreateSessionResponse {
     pub session_id: String,
 }
 
-/// Request body for `POST /v1/local/orchestration/presets/{id}:reload`.
+/// Request body for `POST /v1/daemon/orchestration/presets/{id}:reload`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ReloadPresetRequest {}
 
-/// Response body for `POST /v1/local/orchestration/presets/{id}:reload`.
+/// Response body for `POST /v1/daemon/orchestration/presets/{id}:reload`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ReloadPresetResponse {
@@ -99,7 +99,7 @@ pub struct ReloadPresetResponse {
     pub source_hash: String,
 }
 
-/// Request body for `POST /v1/local/orchestration/sessions/{id}/signal`.
+/// Request body for `POST /v1/daemon/orchestration/sessions/{id}/signal`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SignalSessionRequest {
@@ -111,7 +111,7 @@ pub struct SignalSessionRequest {
 // Capabilities
 // ---------------------------------------------------------------------------
 
-/// Query parameters for `GET /v1/local/orchestration/capabilities`.
+/// Query parameters for `GET /v1/daemon/orchestration/capabilities`.
 #[derive(Debug, Clone, Default, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct ListCapabilitiesQuery {
@@ -127,7 +127,7 @@ pub struct ListCapabilitiesQuery {
     pub sort: Option<String>,
 }
 
-/// Response body for `GET /v1/local/orchestration/capabilities`.
+/// Response body for `GET /v1/daemon/orchestration/capabilities`.
 #[derive(Debug, Clone, Serialize)]
 pub struct ListCapabilitiesResponse {
     /// Registered capabilities with their schemas.
@@ -152,7 +152,7 @@ pub struct CapabilityInfo {
 // Presets
 // ---------------------------------------------------------------------------
 
-/// Response body for `GET /v1/local/orchestration/presets`.
+/// Response body for `GET /v1/daemon/orchestration/presets`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ListPresetsResponse {

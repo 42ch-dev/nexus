@@ -5,11 +5,11 @@
 //!
 //! # Endpoints
 //!
-//! - `GET /v1/local/narrative/worlds` — list all worlds
-//! - `GET /v1/local/narrative/worlds/{world_id}` — get a single world state
+//! - `GET /v1/daemon/narrative/worlds` — list all worlds
+//! - `GET /v1/daemon/narrative/worlds/{world_id}` — get a single world state
 //!
 //! These are **narrative state** routes, distinct from the work-scope
-//! `/v1/local/kb/*` file-index routes.
+//! `/v1/daemon/kb/*` file-index routes.
 
 #![allow(clippy::missing_errors_doc)]
 
@@ -22,13 +22,13 @@ use serde::Serialize;
 
 // ─── Response types ────────────────────────────────────────────────────────
 
-/// `GET /v1/local/narrative/worlds` response.
+/// `GET /v1/daemon/narrative/worlds` response.
 #[derive(Debug, Serialize)]
 pub struct ListWorldsResponse {
     pub worlds: Vec<WorldState>,
 }
 
-/// `GET /v1/local/narrative/worlds/{world_id}` response.
+/// `GET /v1/daemon/narrative/worlds/{world_id}` response.
 #[derive(Debug, Serialize)]
 pub struct GetWorldResponse {
     pub world: WorldState,
@@ -36,7 +36,7 @@ pub struct GetWorldResponse {
 
 // ─── Handlers ──────────────────────────────────────────────────────────────
 
-/// `GET /v1/local/narrative/worlds` — list all worlds.
+/// `GET /v1/daemon/narrative/worlds` — list all worlds.
 ///
 /// Returns worlds from the persistent `SQLite` gateway. Empty list when
 /// no worlds have been seeded into the database.
@@ -54,7 +54,7 @@ pub async fn list_worlds(
     Ok(Json(ListWorldsResponse { worlds }))
 }
 
-/// `GET /v1/local/narrative/worlds/{world_id}` — get a single world state.
+/// `GET /v1/daemon/narrative/worlds/{world_id}` — get a single world state.
 ///
 /// Returns 404 for an unknown world ID. Returns the projected world
 /// state for a known world from the persistent gateway.

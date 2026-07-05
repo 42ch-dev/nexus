@@ -8,7 +8,7 @@ import type { World } from '@42ch/nexus-contracts';
  * re-scope to the selected world's subset. Defaults to "All worlds" (the whole
  * Creator SOUL).
  *
- * The options come from `GET /v1/local/narrative/worlds`, which returns every
+ * The options come from `GET /v1/daemon/narrative/worlds`, which returns every
  * Work-backed world including zero-fragment worlds. That makes the honest
  * subset-empty path reachable: a world may exist but have no fragments yet.
  *

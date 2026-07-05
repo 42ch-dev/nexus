@@ -1,0 +1,45 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/canvas/outline/outline-patch-chapter-set.schema.json",
+  "schema_version": 1,
+  "title": "Nexus OutlinePatchChapterSet",
+  "description": "Fields to update on a chapter via the outline canvas patch route (V1.72).",
+  "type": "object",
+  "minProperties": 1,
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Display title for the chapter (UI-only; persisted in the work outline frontmatter)."
+    },
+    "slug": {
+      "type": "string",
+      "description": "Filename slug for the chapter."
+    },
+    "planned_word_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Planned word count for the chapter."
+    },
+    "actual_word_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Actual word count for the chapter, if known."
+    },
+    "volume": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Volume binding for the chapter."
+    },
+    "status": {
+      "type": "string",
+      "enum": ["not_started", "outlined", "draft", "finalized", "published"],
+      "description": "Lifecycle status of the chapter. published is read/protected in V1.72 patch routes unless explicitly authorized."
+    },
+    "content": {
+      "type": "string",
+      "maxLength": 10485760,
+      "description": "Chapter outline prose notes — the rich-text outline content for this chapter (V1.75 canvas-pivot parity-close). Replaces the V1.65 whole-document editor's per-chapter outline content. Persisted to the chapter's outline_path markdown file under the same outline_revision CAS; MUST NOT mutate body_path."
+    }
+  },
+  "additionalProperties": false
+}

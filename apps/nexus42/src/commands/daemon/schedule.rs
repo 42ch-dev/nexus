@@ -16,7 +16,7 @@ use nexus_contracts::local::schedule::http::{
 };
 
 // Base path for all schedule endpoints
-const SCHEDULE_BASE: &str = "/v1/local/orchestration/schedules";
+const SCHEDULE_BASE: &str = "/v1/daemon/orchestration/schedules";
 
 #[derive(Debug, Subcommand)]
 pub enum ScheduleCommand {

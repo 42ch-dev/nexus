@@ -25,7 +25,7 @@ function renderChapters(workId = 'w-123') {
 }
 
 function worksHandler() {
-  return http.get('/v1/local/works', () =>
+  return http.get('/v1/daemon/works', () =>
     HttpResponse.json({
       items: [{ work_id: 'w-123', title: 'Galaxy Novel', status: 'active', updated_at: '2026-06-25T00:00:00Z' }],
       pagination: { limit: 20, has_more: false },
@@ -37,7 +37,7 @@ describe('ChaptersPage', () => {
   it('renders the chapter structure table', async () => {
     useHandlers(
       worksHandler(),
-      http.get('/v1/local/works/:workId/chapters', () =>
+      http.get('/v1/daemon/works/:workId/chapters', () =>
         HttpResponse.json({
           items: [
             {
@@ -68,7 +68,7 @@ describe('ChaptersPage', () => {
   it('shows the empty state when the Work has no chapters', async () => {
     useHandlers(
       worksHandler(),
-      http.get('/v1/local/works/:workId/chapters', () =>
+      http.get('/v1/daemon/works/:workId/chapters', () =>
         HttpResponse.json({ items: [], pagination: { limit: 20, has_more: false } }),
       ),
     );
@@ -80,7 +80,7 @@ describe('ChaptersPage', () => {
   it('shows the error state when the daemon fails', async () => {
     useHandlers(
       worksHandler(),
-      http.get('/v1/local/works/:workId/chapters', () =>        HttpResponse.json(
+      http.get('/v1/daemon/works/:workId/chapters', () =>        HttpResponse.json(
           { success: false, error: { code: 'internal', message: 'boom' } },
           { status: 500 },
         ),
@@ -96,7 +96,7 @@ describe('ChaptersPage', () => {
     let patched = false;
     useHandlers(
       worksHandler(),
-      http.get('/v1/local/works/:workId/chapters', () =>        HttpResponse.json({
+      http.get('/v1/daemon/works/:workId/chapters', () =>        HttpResponse.json({
           items: [
             {
               work_id: 'w-123',
@@ -112,7 +112,7 @@ describe('ChaptersPage', () => {
           pagination: { limit: 20, has_more: false },
         }),
       ),
-      http.patch('/v1/local/works/:workId/chapters/:n', async ({ request }) => {
+      http.patch('/v1/daemon/works/:workId/chapters/:n', async ({ request }) => {
         const body = (await request.json()) as { status?: string };
         patched = body.status === 'outlined';
         return HttpResponse.json({
@@ -142,7 +142,7 @@ describe('ChaptersPage', () => {
     let receivedBody: unknown = null;
     useHandlers(
       worksHandler(),
-      http.get('/v1/local/works/:workId/chapters', () =>
+      http.get('/v1/daemon/works/:workId/chapters', () =>
         HttpResponse.json({
           items: [
             {
@@ -159,7 +159,7 @@ describe('ChaptersPage', () => {
           pagination: { limit: 20, has_more: false },
         }),
       ),
-      http.patch('/v1/local/works/:workId/chapters/:n', async ({ request }) => {
+      http.patch('/v1/daemon/works/:workId/chapters/:n', async ({ request }) => {
         receivedBody = await request.json();
         return HttpResponse.json({
           work_id: 'w-123',
@@ -199,7 +199,7 @@ describe('ChaptersPage', () => {
   it('asks for confirmation before editing a finalized chapter', async () => {
     useHandlers(
       worksHandler(),
-      http.get('/v1/local/works/:workId/chapters', () =>
+      http.get('/v1/daemon/works/:workId/chapters', () =>
         HttpResponse.json({
           items: [
             {
@@ -216,7 +216,7 @@ describe('ChaptersPage', () => {
           pagination: { limit: 20, has_more: false },
         }),
       ),
-      http.patch('/v1/local/works/:workId/chapters/:n', async ({ request }) => {
+      http.patch('/v1/daemon/works/:workId/chapters/:n', async ({ request }) => {
         const body = await request.json();
         return HttpResponse.json({
           work_id: 'w-123',

@@ -4,9 +4,9 @@
 
 | Entry | Language | Role | Boundary |
 |-------|----------|------|----------|
-| `nexus42` | Rust | **Producer** — CLI + integrated daemon runtime composition root | Owns the local daemon lifecycle and CLI commands; emits the Local API |
+| `nexus42` | Rust | **Producer** — CLI + integrated daemon runtime composition root | Owns the local daemon lifecycle and CLI commands; emits the Daemon API |
 | `desktop` | TypeScript + Tauri/Rust | **Consumer** — Tauri desktop client over IPC + bundled `nexus42` sidecar | Reuses `apps/web` SPA; adds desktop-only native capabilities |
-| `web` | TypeScript | **Consumer** — browser SPA served by the daemon | Talks to the Local API over HTTP; also bundled into `apps/desktop` |
+| `web` | TypeScript | **Consumer** — browser SPA served by the daemon | Talks to the Daemon API over HTTP; also bundled into `apps/desktop` |
 
 ## Durable placement rule
 
@@ -16,14 +16,14 @@
 >
 > A new product surface of *any* language → `apps/`. A new reusable Rust library → `crates/`.
 >
-> `nexus42` is the **producer** (daemon + CLI composition root); `desktop` and `web` are **consumers** (clients over the Local API / IPC boundary).
+> `nexus42` is the **producer** (daemon + CLI composition root); `desktop` and `web` are **consumers** (clients over the Daemon API / IPC boundary).
 >
 > App-owned nested Rust (for example `apps/desktop/src-tauri/`) lives inside its app directory — it is product-surface implementation, not a shared library. Promote it to `crates/` only if it becomes a reusable building block shared across surfaces.
 
 ## Producer/consumer wire boundary
 
 - The producer (`nexus42`) owns the daemon runtime, CLI commands, and local persistence.
-- Consumers (`desktop`, `web`) talk to the producer through the Local API (`http://127.0.0.1:<port>/v1/local/*`) or Tauri IPC wrappers.
+- Consumers (`desktop`, `web`) talk to the producer through the Daemon API (`http://127.0.0.1:<port>/v1/daemon/*`) or Tauri IPC wrappers.
 - Wire contracts live in `schemas/` and are published as `@42ch/nexus-contracts`; no consumer invents its own DTOs.
 
 ## Per-entry authority

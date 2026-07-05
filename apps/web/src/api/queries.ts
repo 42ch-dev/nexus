@@ -684,7 +684,7 @@ export const SOUL_REFETCH_MS = 30_000;
 /**
  * Read the workspace-scoped world list for the SOUL selector.
  *
- * `GET /v1/local/narrative/worlds` returns every Work-backed world (including
+ * `GET /v1/daemon/narrative/worlds` returns every Work-backed world (including
  * zero-fragment worlds) so the selector can surface honest subset-empty states.
  * The list is workspace-scoped in the single-creator local model; P1 does not
  * client-filter by owner. V1.82 mocks the response shape against the generated

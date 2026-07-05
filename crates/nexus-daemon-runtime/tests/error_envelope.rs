@@ -29,7 +29,7 @@ async fn service_unavailable_returns_canonical_envelope() {
     std::mem::forget(tmp);
 
     let resp = server
-        .get("/v1/local/orchestration/sessions?creator_id=ctr_test")
+        .get("/v1/daemon/orchestration/sessions?creator_id=ctr_test")
         .await;
 
     resp.assert_status(StatusCode::SERVICE_UNAVAILABLE);
@@ -81,7 +81,7 @@ async fn preset_gates_failed_returns_canonical_envelope() {
     };
 
     let resp = server
-        .post("/v1/local/orchestration/schedules")
+        .post("/v1/daemon/orchestration/schedules")
         .json(&req)
         .await;
 

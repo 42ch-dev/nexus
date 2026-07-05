@@ -11,6 +11,146 @@ export * from './common/CommonTypes';
 
 // Per-schema modules (stable order: sorted schema paths at load time)
 export * from './common/VersionRef';
+export * from './daemon-api/canvas/outline/OutlineConflictError';
+export * from './daemon-api/canvas/outline/OutlinePatchChapterRequest';
+export * from './daemon-api/canvas/outline/OutlinePatchChapterSet';
+export * from './daemon-api/canvas/outline/OutlinePatchResponse';
+export * from './daemon-api/canvas/outline/OutlinePatchStructureRequest';
+export * from './daemon-api/canvas/outline/OutlineValidationError';
+export * from './daemon-api/canvas/outline/TimelinePatchEventRequest';
+export * from './daemon-api/canvas/outline/WorkOutline';
+export * from './daemon-api/canvas/strategy/StrategyConflictError';
+export * from './daemon-api/canvas/strategy/StrategyPatchPromptTemplateRequest';
+export * from './daemon-api/canvas/strategy/StrategyPatchResponse';
+export * from './daemon-api/canvas/strategy/StrategyPatchStateRequest';
+export * from './daemon-api/canvas/strategy/StrategyPatchTransitionRequest';
+export * from './daemon-api/canvas/world-kb/WorldKbCandidateProjection';
+export * from './daemon-api/canvas/world-kb/WorldKbCandidatesResponse';
+export * from './daemon-api/canvas/world-kb/WorldKbConflictError';
+export * from './daemon-api/canvas/world-kb/WorldKbEntityPatch';
+export * from './daemon-api/canvas/world-kb/WorldKbEntityProjection';
+export * from './daemon-api/canvas/world-kb/WorldKbExtractJobProjection';
+export * from './daemon-api/canvas/world-kb/WorldKbGraphResponse';
+export * from './daemon-api/canvas/world-kb/WorldKbPatchEntityRequest';
+export * from './daemon-api/canvas/world-kb/WorldKbPatchEntityResponse';
+export * from './daemon-api/canvas/world-kb/WorldKbPatchRelationshipRequest';
+export * from './daemon-api/canvas/world-kb/WorldKbPatchRelationshipResponse';
+export * from './daemon-api/canvas/world-kb/WorldKbPromoteCandidateRequest';
+export * from './daemon-api/canvas/world-kb/WorldKbPromoteCandidateResponse';
+export * from './daemon-api/canvas/world-kb/WorldKbRelationshipInput';
+export * from './daemon-api/canvas/world-kb/WorldKbRelationshipKind';
+export * from './daemon-api/canvas/world-kb/WorldKbRelationshipProjection';
+export * from './daemon-api/canvas/world-kb/WorldKbSourceAnchorProjection';
+export * from './daemon-api/canvas/world-kb/WorldKbValidationError';
+export * from './daemon-api/common/ErrorResponse';
+export * from './daemon-api/compute/ComputeInput';
+export * from './daemon-api/compute/ComputeOutput';
+export * from './daemon-api/creators/ActiveCreatorResponse';
+export * from './daemon-api/creators/CreatorDetail';
+export * from './daemon-api/creators/CreatorInfo';
+export * from './daemon-api/creators/ListCreatorsQuery';
+export * from './daemon-api/creators/ListCreatorsResponse';
+export * from './daemon-api/creators/LogoutResponse';
+export * from './daemon-api/creators/SetActiveCreatorRequest';
+export * from './daemon-api/creators/SetActiveCreatorResponse';
+export * from './daemon-api/findings/CreateFindingRequest';
+export * from './daemon-api/findings/FindingDetailResponse';
+export * from './daemon-api/findings/ListFindingsQuery';
+export * from './daemon-api/findings/ListFindingsResponse';
+export * from './daemon-api/findings/StaleFindingsResponse';
+export * from './daemon-api/findings/UpdateFindingRequest';
+export * from './daemon-api/kb/AddKbEntryRequest';
+export * from './daemon-api/kb/AddKbEntryResponse';
+export * from './daemon-api/kb/DeleteKbEntryResponse';
+export * from './daemon-api/kb/GetKbEntryResponse';
+export * from './daemon-api/kb/KbEntrySummary';
+export * from './daemon-api/kb/ListKbEntriesQuery';
+export * from './daemon-api/kb/ListKbEntriesResponse';
+export * from './daemon-api/kb/PaginationInfo';
+export * from './daemon-api/memory/CountPendingReviewsQuery';
+export * from './daemon-api/memory/CountPendingReviewsResponse';
+export * from './daemon-api/memory/CreatePendingReviewRequest';
+export * from './daemon-api/memory/CreatePendingReviewResponse';
+export * from './daemon-api/memory/DeletePendingReviewQuery';
+export * from './daemon-api/memory/DeletePendingReviewResponse';
+export * from './daemon-api/memory/ListMemoryFragmentsQuery';
+export * from './daemon-api/memory/ListMemoryFragmentsResponse';
+export * from './daemon-api/memory/ListPendingReviewsQuery';
+export * from './daemon-api/memory/ListPendingReviewsResponse';
+export * from './daemon-api/memory/MemoryFragmentInfo';
+export * from './daemon-api/memory/PendingReviewInfo';
+export * from './daemon-api/memory/ReviewRequest';
+export * from './daemon-api/memory/ReviewResponse';
+export * from './daemon-api/memory/SoulNarrativeRequest';
+export * from './daemon-api/memory/SoulNarrativeResponse';
+export * from './daemon-api/orchestration/capabilities/CapabilityInfo';
+export * from './daemon-api/orchestration/capabilities/ListCapabilitiesQuery';
+export * from './daemon-api/orchestration/capabilities/ListCapabilitiesResponse';
+export * from './daemon-api/orchestration/sessions/ListSessionsQuery';
+export * from './daemon-api/orchestration/sessions/ListSessionsResponse';
+export * from './daemon-api/orchestration/sessions/SessionDetailResponse';
+export * from './daemon-api/orchestration/sessions/SessionSummary';
+export * from './daemon-api/preset-management/GetPresetResponse';
+export * from './daemon-api/preset-management/ListPresetsResponse';
+export * from './daemon-api/preset-management/PresetSummary';
+export * from './daemon-api/preset-management/ReloadPresetResponse';
+export * from './daemon-api/preset-management/ScaffoldPresetRequest';
+export * from './daemon-api/preset-management/ScaffoldPresetResponse';
+export * from './daemon-api/preset-management/UpdatePresetRequest';
+export * from './daemon-api/preset-management/UpdatePresetResponse';
+export * from './daemon-api/preset-management/ValidatePresetRequest';
+export * from './daemon-api/preset-management/ValidatePresetResponse';
+export * from './daemon-api/reading/ReadingAnnotationCreateRequest';
+export * from './daemon-api/reading/ReadingAnnotationListQuery';
+export * from './daemon-api/reading/ReadingAnnotationListResponse';
+export * from './daemon-api/reading/ReadingAnnotationPatchRequest';
+export * from './daemon-api/reading/ReadingAnnotation';
+export * from './daemon-api/reading/ReadingProgressQuery';
+export * from './daemon-api/reading/ReadingProgressRequest';
+export * from './daemon-api/reading/ReadingProgressResponse';
+export * from './daemon-api/schedule/AddScheduleRequest';
+export * from './daemon-api/schedule/AddScheduleResponse';
+export * from './daemon-api/schedule/CoreContextHistoryEntry';
+export * from './daemon-api/schedule/CoreContextHistoryResponse';
+export * from './daemon-api/schedule/CoreContextResponse';
+export * from './daemon-api/schedule/DeleteScheduleResponse';
+export * from './daemon-api/schedule/EditCoreContextRequest';
+export * from './daemon-api/schedule/EditCoreContextResponse';
+export * from './daemon-api/schedule/InspectScheduleResponse';
+export * from './daemon-api/schedule/ListSchedulesQuery';
+export * from './daemon-api/schedule/ListSchedulesResponse';
+export * from './daemon-api/schedule/ScheduleConcurrencyRequest';
+export * from './daemon-api/schedule/ScheduleSummary';
+export * from './daemon-api/schedule/SignalScheduleRequest';
+export * from './daemon-api/schedule/SignalScheduleResponse';
+export * from './daemon-api/works/AppendInspirationRequest';
+export * from './daemon-api/works/AppendInspirationResponse';
+export * from './daemon-api/works/chapters/ChapterBody';
+export * from './daemon-api/works/chapters/ChapterContentQuery';
+export * from './daemon-api/works/chapters/ChapterDetail';
+export * from './daemon-api/works/chapters/ChapterOutline';
+export * from './daemon-api/works/chapters/ChapterProtection';
+export * from './daemon-api/works/chapters/ChapterStatus';
+export * from './daemon-api/works/chapters/ChapterSummary';
+export * from './daemon-api/works/chapters/ListChaptersQuery';
+export * from './daemon-api/works/chapters/ListChaptersResponse';
+export * from './daemon-api/works/chapters/PatchChapterRequest';
+export * from './daemon-api/works/CreateWorkRequest';
+export * from './daemon-api/works/CreateWorkResponse';
+export * from './daemon-api/works/ListWorksQuery';
+export * from './daemon-api/works/ListWorksResponse';
+export * from './daemon-api/works/PatchWorkRequest';
+export * from './daemon-api/works/ReleaseCompletionLockRequest';
+export * from './daemon-api/works/WorkDetailResponse';
+export * from './daemon-api/works/WorkSummary';
+export * from './daemon-api/workspace/ActiveWorkspaceResponse';
+export * from './daemon-api/workspace/CreateWorkspaceRequest';
+export * from './daemon-api/workspace/CreateWorkspaceResponse';
+export * from './daemon-api/workspace/ListWorkspacesQuery';
+export * from './daemon-api/workspace/ListWorkspacesResponse';
+export * from './daemon-api/workspace/SetActiveWorkspaceRequest';
+export * from './daemon-api/workspace/SetActiveWorkspaceResponse';
+export * from './daemon-api/workspace/WorkspaceSummary';
 export * from './domain/Creator';
 export * from './domain/ForkBranch';
 export * from './domain/KeyBlock';
@@ -21,146 +161,6 @@ export * from './domain/TimelineEvent';
 export * from './domain/User';
 export * from './domain/WorldMembership';
 export * from './domain/World';
-export * from './local-api/canvas/outline/OutlineConflictError';
-export * from './local-api/canvas/outline/OutlinePatchChapterRequest';
-export * from './local-api/canvas/outline/OutlinePatchChapterSet';
-export * from './local-api/canvas/outline/OutlinePatchResponse';
-export * from './local-api/canvas/outline/OutlinePatchStructureRequest';
-export * from './local-api/canvas/outline/OutlineValidationError';
-export * from './local-api/canvas/outline/TimelinePatchEventRequest';
-export * from './local-api/canvas/outline/WorkOutline';
-export * from './local-api/canvas/strategy/StrategyConflictError';
-export * from './local-api/canvas/strategy/StrategyPatchPromptTemplateRequest';
-export * from './local-api/canvas/strategy/StrategyPatchResponse';
-export * from './local-api/canvas/strategy/StrategyPatchStateRequest';
-export * from './local-api/canvas/strategy/StrategyPatchTransitionRequest';
-export * from './local-api/canvas/world-kb/WorldKbCandidateProjection';
-export * from './local-api/canvas/world-kb/WorldKbCandidatesResponse';
-export * from './local-api/canvas/world-kb/WorldKbConflictError';
-export * from './local-api/canvas/world-kb/WorldKbEntityPatch';
-export * from './local-api/canvas/world-kb/WorldKbEntityProjection';
-export * from './local-api/canvas/world-kb/WorldKbExtractJobProjection';
-export * from './local-api/canvas/world-kb/WorldKbGraphResponse';
-export * from './local-api/canvas/world-kb/WorldKbPatchEntityRequest';
-export * from './local-api/canvas/world-kb/WorldKbPatchEntityResponse';
-export * from './local-api/canvas/world-kb/WorldKbPatchRelationshipRequest';
-export * from './local-api/canvas/world-kb/WorldKbPatchRelationshipResponse';
-export * from './local-api/canvas/world-kb/WorldKbPromoteCandidateRequest';
-export * from './local-api/canvas/world-kb/WorldKbPromoteCandidateResponse';
-export * from './local-api/canvas/world-kb/WorldKbRelationshipInput';
-export * from './local-api/canvas/world-kb/WorldKbRelationshipKind';
-export * from './local-api/canvas/world-kb/WorldKbRelationshipProjection';
-export * from './local-api/canvas/world-kb/WorldKbSourceAnchorProjection';
-export * from './local-api/canvas/world-kb/WorldKbValidationError';
-export * from './local-api/common/ErrorResponse';
-export * from './local-api/compute/ComputeInput';
-export * from './local-api/compute/ComputeOutput';
-export * from './local-api/creators/ActiveCreatorResponse';
-export * from './local-api/creators/CreatorDetail';
-export * from './local-api/creators/CreatorInfo';
-export * from './local-api/creators/ListCreatorsQuery';
-export * from './local-api/creators/ListCreatorsResponse';
-export * from './local-api/creators/LogoutResponse';
-export * from './local-api/creators/SetActiveCreatorRequest';
-export * from './local-api/creators/SetActiveCreatorResponse';
-export * from './local-api/findings/CreateFindingRequest';
-export * from './local-api/findings/FindingDetailResponse';
-export * from './local-api/findings/ListFindingsQuery';
-export * from './local-api/findings/ListFindingsResponse';
-export * from './local-api/findings/StaleFindingsResponse';
-export * from './local-api/findings/UpdateFindingRequest';
-export * from './local-api/kb/AddKbEntryRequest';
-export * from './local-api/kb/AddKbEntryResponse';
-export * from './local-api/kb/DeleteKbEntryResponse';
-export * from './local-api/kb/GetKbEntryResponse';
-export * from './local-api/kb/KbEntrySummary';
-export * from './local-api/kb/ListKbEntriesQuery';
-export * from './local-api/kb/ListKbEntriesResponse';
-export * from './local-api/kb/PaginationInfo';
-export * from './local-api/memory/CountPendingReviewsQuery';
-export * from './local-api/memory/CountPendingReviewsResponse';
-export * from './local-api/memory/CreatePendingReviewRequest';
-export * from './local-api/memory/CreatePendingReviewResponse';
-export * from './local-api/memory/DeletePendingReviewQuery';
-export * from './local-api/memory/DeletePendingReviewResponse';
-export * from './local-api/memory/ListMemoryFragmentsQuery';
-export * from './local-api/memory/ListMemoryFragmentsResponse';
-export * from './local-api/memory/ListPendingReviewsQuery';
-export * from './local-api/memory/ListPendingReviewsResponse';
-export * from './local-api/memory/MemoryFragmentInfo';
-export * from './local-api/memory/PendingReviewInfo';
-export * from './local-api/memory/ReviewRequest';
-export * from './local-api/memory/ReviewResponse';
-export * from './local-api/memory/SoulNarrativeRequest';
-export * from './local-api/memory/SoulNarrativeResponse';
-export * from './local-api/orchestration/capabilities/CapabilityInfo';
-export * from './local-api/orchestration/capabilities/ListCapabilitiesQuery';
-export * from './local-api/orchestration/capabilities/ListCapabilitiesResponse';
-export * from './local-api/orchestration/sessions/ListSessionsQuery';
-export * from './local-api/orchestration/sessions/ListSessionsResponse';
-export * from './local-api/orchestration/sessions/SessionDetailResponse';
-export * from './local-api/orchestration/sessions/SessionSummary';
-export * from './local-api/preset-management/GetPresetResponse';
-export * from './local-api/preset-management/ListPresetsResponse';
-export * from './local-api/preset-management/PresetSummary';
-export * from './local-api/preset-management/ReloadPresetResponse';
-export * from './local-api/preset-management/ScaffoldPresetRequest';
-export * from './local-api/preset-management/ScaffoldPresetResponse';
-export * from './local-api/preset-management/UpdatePresetRequest';
-export * from './local-api/preset-management/UpdatePresetResponse';
-export * from './local-api/preset-management/ValidatePresetRequest';
-export * from './local-api/preset-management/ValidatePresetResponse';
-export * from './local-api/reading/ReadingAnnotationCreateRequest';
-export * from './local-api/reading/ReadingAnnotationListQuery';
-export * from './local-api/reading/ReadingAnnotationListResponse';
-export * from './local-api/reading/ReadingAnnotationPatchRequest';
-export * from './local-api/reading/ReadingAnnotation';
-export * from './local-api/reading/ReadingProgressQuery';
-export * from './local-api/reading/ReadingProgressRequest';
-export * from './local-api/reading/ReadingProgressResponse';
-export * from './local-api/schedule/AddScheduleRequest';
-export * from './local-api/schedule/AddScheduleResponse';
-export * from './local-api/schedule/CoreContextHistoryEntry';
-export * from './local-api/schedule/CoreContextHistoryResponse';
-export * from './local-api/schedule/CoreContextResponse';
-export * from './local-api/schedule/DeleteScheduleResponse';
-export * from './local-api/schedule/EditCoreContextRequest';
-export * from './local-api/schedule/EditCoreContextResponse';
-export * from './local-api/schedule/InspectScheduleResponse';
-export * from './local-api/schedule/ListSchedulesQuery';
-export * from './local-api/schedule/ListSchedulesResponse';
-export * from './local-api/schedule/ScheduleConcurrencyRequest';
-export * from './local-api/schedule/ScheduleSummary';
-export * from './local-api/schedule/SignalScheduleRequest';
-export * from './local-api/schedule/SignalScheduleResponse';
-export * from './local-api/works/AppendInspirationRequest';
-export * from './local-api/works/AppendInspirationResponse';
-export * from './local-api/works/chapters/ChapterBody';
-export * from './local-api/works/chapters/ChapterContentQuery';
-export * from './local-api/works/chapters/ChapterDetail';
-export * from './local-api/works/chapters/ChapterOutline';
-export * from './local-api/works/chapters/ChapterProtection';
-export * from './local-api/works/chapters/ChapterStatus';
-export * from './local-api/works/chapters/ChapterSummary';
-export * from './local-api/works/chapters/ListChaptersQuery';
-export * from './local-api/works/chapters/ListChaptersResponse';
-export * from './local-api/works/chapters/PatchChapterRequest';
-export * from './local-api/works/CreateWorkRequest';
-export * from './local-api/works/CreateWorkResponse';
-export * from './local-api/works/ListWorksQuery';
-export * from './local-api/works/ListWorksResponse';
-export * from './local-api/works/PatchWorkRequest';
-export * from './local-api/works/ReleaseCompletionLockRequest';
-export * from './local-api/works/WorkDetailResponse';
-export * from './local-api/works/WorkSummary';
-export * from './local-api/workspace/ActiveWorkspaceResponse';
-export * from './local-api/workspace/CreateWorkspaceRequest';
-export * from './local-api/workspace/CreateWorkspaceResponse';
-export * from './local-api/workspace/ListWorkspacesQuery';
-export * from './local-api/workspace/ListWorkspacesResponse';
-export * from './local-api/workspace/SetActiveWorkspaceRequest';
-export * from './local-api/workspace/SetActiveWorkspaceResponse';
-export * from './local-api/workspace/WorkspaceSummary';
 export * from './platform/http-bff/ContextAssemblyV1';
 export * from './platform/http-bff/CreatorRuntimePolicyResponse';
 export * from './platform/http-bff/ExploreAiAnswerRequest';
@@ -205,16 +205,6 @@ export * from './platform/sync/SyncPullResponse';
 // Schema version constants
 export const SCHEMA_VERSIONS: Record<string, number> = {
   VersionRef: 1,
-  Creator: 1,
-  ForkBranch: 1,
-  KeyBlock: 1,
-  Memory: 1,
-  Pairing: 1,
-  StoryManifest: 1,
-  TimelineEvent: 1,
-  User: 1,
-  WorldMembership: 1,
-  World: 1,
   OutlineConflictError: 1,
   OutlinePatchChapterRequest: 1,
   OutlinePatchChapterSet: 1,
@@ -355,6 +345,16 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   SetActiveWorkspaceRequest: 1,
   SetActiveWorkspaceResponse: 1,
   WorkspaceSummary: 1,
+  Creator: 1,
+  ForkBranch: 1,
+  KeyBlock: 1,
+  Memory: 1,
+  Pairing: 1,
+  StoryManifest: 1,
+  TimelineEvent: 1,
+  User: 1,
+  WorldMembership: 1,
+  World: 1,
   ContextAssemblyV1: 1,
   CreatorRuntimePolicyResponse: 1,
   ExploreAiAnswerRequest: 1,

@@ -24,7 +24,7 @@ use crate::errors::Result;
 use clap::Subcommand;
 use clap_complete::Shell;
 
-const ORCHESTRATION_BASE: &str = "/v1/local/orchestration";
+const ORCHESTRATION_BASE: &str = "/v1/daemon/orchestration";
 
 #[derive(Debug, Subcommand)]
 pub enum SystemCommand {
@@ -255,7 +255,7 @@ async fn list_system_presets(
 
     // Build a display list with run_intents from the preset management endpoint
     let mgmt_resp: serde_json::Value = client
-        .get::<serde_json::Value>("/v1/local/presets")
+        .get::<serde_json::Value>("/v1/daemon/presets")
         .await
         .unwrap_or_else(|_| serde_json::json!({}));
 
@@ -333,7 +333,7 @@ async fn validate_preset(config: &CliConfig, path: &str, json_output: bool) -> R
 
     let body = serde_json::json!({ "path": path });
     let resp: serde_json::Value = client
-        .post::<serde_json::Value, _>("/v1/local/presets:validate", &body)
+        .post::<serde_json::Value, _>("/v1/daemon/presets:validate", &body)
         .await?;
 
     let valid = resp

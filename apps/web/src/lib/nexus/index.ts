@@ -1,5 +1,5 @@
 /**
- * Nexus Local API client adapter — the single transport boundary for the SPA.
+ * Nexus Daemon API client adapter — the single transport boundary for the SPA.
  *
  * Import the {@link NexusClient} interface and the factory picks an
  * implementation based on the host (browser-tab vs Tauri webview). Screens must

@@ -11,6 +11,46 @@ use crate::api;
 use crate::lifecycle::{Event, Lifecycle, StatigLifecycle, SubsystemKind};
 use crate::worker_provider::ProductionWorkerProvider;
 use crate::workspace::WorkspaceState;
+
+/// Return true if `host` resolves to a loopback address.
+///
+/// Accepts explicit IP addresses (`127.0.0.1`, `::1`) and the common
+/// `localhost` alias. Hostnames that cannot be parsed as IPs are treated as
+/// non-loopback, which is the conservative choice for a local-only daemon.
+fn is_loopback_host(host: &str) -> bool {
+    if host.eq_ignore_ascii_case("localhost") {
+        return true;
+    }
+    host.parse::<std::net::IpAddr>()
+        .is_ok_and(|ip| ip.is_loopback())
+}
+
+/// Enforce the opt-in remote-bind gate for non-loopback HTTP binds.
+///
+/// A non-loopback bind is only permitted when both `NEXUS42_DAEMON_API_KEY`
+/// and `NEXUS_DAEMON_REMOTE_BIND=1` are present. Loopback binds and Unix
+/// sockets are unaffected.
+fn ensure_remote_bind_allowed(host: &str) -> anyhow::Result<()> {
+    if is_loopback_host(host) {
+        return Ok(());
+    }
+
+    let key_set = std::env::var("NEXUS42_DAEMON_API_KEY").is_ok();
+    let remote_allowed = std::env::var("NEXUS_DAEMON_REMOTE_BIND").as_deref() == Ok("1");
+
+    if !key_set || !remote_allowed {
+        anyhow::bail!(
+            "Refusing to bind daemon API to non-loopback address {host}: \
+             remote bind requires both NEXUS42_DAEMON_API_KEY and NEXUS_DAEMON_REMOTE_BIND=1"
+        );
+    }
+
+    tracing::info!(
+        %host,
+        "Remote daemon API bind enabled (NEXUS42_DAEMON_API_KEY + NEXUS_DAEMON_REMOTE_BIND=1)"
+    );
+    Ok(())
+}
 use nexus_orchestration::worker::{WorkerManagerSpawner, WorkerRegistry};
 use nexus_orchestration::{
     engine::{EngineSignal, OrchestrationEngine},
@@ -20,7 +60,7 @@ use nexus_orchestration::{
 };
 use tracing_subscriber::EnvFilter;
 
-/// Local API transport configuration.
+/// Daemon API transport configuration.
 #[derive(Debug, Clone)]
 pub enum Transport {
     /// HTTP over TCP loopback (default)
@@ -744,6 +784,9 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // Resolve transport before building the router so the Origin allowlist
     // is derived from the actual listening port.
     let transport = config.resolve_transport();
+    if let Transport::Http { ref host, .. } = transport {
+        ensure_remote_bind_allowed(host)?;
+    }
     if let Transport::Http { port, ref host } = transport {
         auth_config = auth_config.with_resolved_listen_addr(port, host);
     }
@@ -752,7 +795,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // so users can inspect the trusted browser origins.
     if auth_config.auth_mode == api::auth_middleware::AuthMode::KeylessLocalhost {
         for (origin, source) in &auth_config.allowed_origin_sources {
-            tracing::info!(%origin, %source, "Local API allowed origin");
+            tracing::info!(%origin, %source, "Daemon API allowed origin");
         }
     }
 
@@ -769,7 +812,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                 let addr = format!("{host}:{port}");
                 let listener = tokio::net::TcpListener::bind(&addr).await?;
 
-                tracing::info!("Local API listening on http://{}", addr);
+                tracing::info!("Daemon API listening on http://{}", addr);
                 tracing::info!("Web UI available at http://{}", addr);
                 tracing::info!("Press Ctrl+C to stop");
 
@@ -798,7 +841,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
 
                     let listener = UnixListener::bind(&path)?;
 
-                    tracing::info!(?path, "Local API listening on Unix socket");
+                    tracing::info!(?path, "Daemon API listening on Unix socket");
                     tracing::info!("Press Ctrl+C to stop");
 
                     loop {
@@ -916,6 +959,11 @@ async fn resume_auto_chain_work(
 mod tests {
     use super::*;
 
+    /// Lock to serialize env-var tests that read `NEXUS42_DAEMON_API_KEY`
+    /// and `NEXUS_DAEMON_REMOTE_BIND`.
+    static ENV_TEST_LOCK: std::sync::LazyLock<std::sync::Mutex<()>> =
+        std::sync::LazyLock::new(|| std::sync::Mutex::new(()));
+
     #[test]
     fn transport_defaults_to_http() {
         let config = DaemonConfig {
@@ -980,5 +1028,38 @@ mod tests {
             }
             Transport::UnixSocket { .. } => panic!("Expected HTTP transport"),
         }
+    }
+
+    #[test]
+    fn remote_bind_gate_behavior() {
+        let _guard = ENV_TEST_LOCK.lock().expect("env test lock poisoned");
+
+        // Loopback binds are always allowed, regardless of env vars.
+        std::env::remove_var("NEXUS42_DAEMON_API_KEY");
+        std::env::remove_var("NEXUS_DAEMON_REMOTE_BIND");
+        assert!(ensure_remote_bind_allowed("127.0.0.1").is_ok());
+        assert!(ensure_remote_bind_allowed("::1").is_ok());
+        assert!(ensure_remote_bind_allowed("localhost").is_ok());
+
+        // Non-loopback binds require both an API key and the remote-bind flag.
+        assert!(ensure_remote_bind_allowed("0.0.0.0").is_err());
+        assert!(ensure_remote_bind_allowed("192.168.1.1").is_err());
+
+        std::env::set_var("NEXUS42_DAEMON_API_KEY", "test-key");
+        std::env::remove_var("NEXUS_DAEMON_REMOTE_BIND");
+        assert!(ensure_remote_bind_allowed("0.0.0.0").is_err());
+
+        std::env::remove_var("NEXUS42_DAEMON_API_KEY");
+        std::env::set_var("NEXUS_DAEMON_REMOTE_BIND", "1");
+        assert!(ensure_remote_bind_allowed("0.0.0.0").is_err());
+
+        std::env::set_var("NEXUS42_DAEMON_API_KEY", "test-key");
+        std::env::set_var("NEXUS_DAEMON_REMOTE_BIND", "1");
+        assert!(ensure_remote_bind_allowed("0.0.0.0").is_ok());
+        assert!(ensure_remote_bind_allowed("192.168.1.1").is_ok());
+
+        // Cleanup so later tests see a clean environment.
+        std::env::remove_var("NEXUS42_DAEMON_API_KEY");
+        std::env::remove_var("NEXUS_DAEMON_REMOTE_BIND");
     }
 }

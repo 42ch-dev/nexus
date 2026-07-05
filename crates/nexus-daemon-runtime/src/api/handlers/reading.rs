@@ -1,6 +1,6 @@
-//! Reading depth Local API handlers (V1.89).
+//! Reading depth Daemon API handlers (V1.89).
 //!
-//! Endpoints under `/v1/local/reading/*` expose persisted scroll progress and
+//! Endpoints under `/v1/daemon/reading/*` expose persisted scroll progress and
 //! character-offset annotations/highlights per (creator, work, chapter).
 
 #![allow(clippy::missing_errors_doc)]
@@ -10,7 +10,7 @@ use crate::api::handlers::works::{read_active_creator_id, read_active_workspace_
 use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
 use axum::Json;
-use nexus_contracts::local_api::reading::{
+use nexus_contracts::daemon_api::reading::{
     ReadingAnnotation, ReadingAnnotationCreateRequest, ReadingAnnotationListQuery,
     ReadingAnnotationListResponse, ReadingAnnotationPatchRequest, ReadingProgressQuery,
     ReadingProgressRequest, ReadingProgressResponse,
@@ -120,7 +120,7 @@ async fn load_annotation_for_creator(
 
 // ─── Handlers ───────────────────────────────────────────────────────────────
 
-/// `GET /v1/local/reading/progress` — get persisted scroll progress.
+/// `GET /v1/daemon/reading/progress` — get persisted scroll progress.
 pub async fn get_reading_progress(
     State(state): State<WorkspaceState>,
     Query(query): Query<ReadingProgressQuery>,
@@ -145,7 +145,7 @@ pub async fn get_reading_progress(
     Ok(Json(response))
 }
 
-/// `PUT /v1/local/reading/progress` — upsert scroll progress.
+/// `PUT /v1/daemon/reading/progress` — upsert scroll progress.
 pub async fn put_reading_progress(
     State(state): State<WorkspaceState>,
     Json(body): Json<ReadingProgressRequest>,
@@ -174,7 +174,7 @@ pub async fn put_reading_progress(
     Ok(Json(response))
 }
 
-/// `DELETE /v1/local/reading/progress` — delete persisted scroll progress.
+/// `DELETE /v1/daemon/reading/progress` — delete persisted scroll progress.
 pub async fn delete_reading_progress(
     State(state): State<WorkspaceState>,
     Query(query): Query<ReadingProgressQuery>,
@@ -188,7 +188,7 @@ pub async fn delete_reading_progress(
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
 
-/// `GET /v1/local/reading/annotations` — list annotations for a chapter.
+/// `GET /v1/daemon/reading/annotations` — list annotations for a chapter.
 pub async fn list_annotations(
     State(state): State<WorkspaceState>,
     Query(query): Query<ReadingAnnotationListQuery>,
@@ -205,7 +205,7 @@ pub async fn list_annotations(
     Ok(Json(response))
 }
 
-/// `POST /v1/local/reading/annotations` — create an annotation.
+/// `POST /v1/daemon/reading/annotations` — create an annotation.
 pub async fn create_annotation(
     State(state): State<WorkspaceState>,
     Json(body): Json<ReadingAnnotationCreateRequest>,
@@ -236,7 +236,7 @@ pub async fn create_annotation(
     Ok(Json(to_annotation_dto(&row)))
 }
 
-/// `PATCH /v1/local/reading/annotations/{annotation_id}` — edit an annotation.
+/// `PATCH /v1/daemon/reading/annotations/{annotation_id}` — edit an annotation.
 pub async fn patch_annotation(
     State(state): State<WorkspaceState>,
     Path(annotation_id): Path<String>,
@@ -272,7 +272,7 @@ pub async fn patch_annotation(
     Ok(Json(to_annotation_dto(&row)))
 }
 
-/// `DELETE /v1/local/reading/annotations/{annotation_id}` — delete an annotation.
+/// `DELETE /v1/daemon/reading/annotations/{annotation_id}` — delete an annotation.
 pub async fn delete_annotation(
     State(state): State<WorkspaceState>,
     Path(annotation_id): Path<String>,

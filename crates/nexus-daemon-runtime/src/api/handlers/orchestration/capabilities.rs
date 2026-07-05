@@ -13,7 +13,7 @@ use nexus_contracts::local::orchestration::http::{
 };
 use nexus_contracts::PaginationInfo;
 
-/// `GET /v1/local/orchestration/capabilities`
+/// `GET /v1/daemon/orchestration/capabilities`
 ///
 /// # Errors
 /// Returns `NexusApiError::BadRequest` if `sort` contains an unsupported key

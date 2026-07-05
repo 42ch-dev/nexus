@@ -1,7 +1,7 @@
-//! Chapter content Local API integration tests (R-V165-QC1-W2).
+//! Chapter content Daemon API integration tests (R-V165-QC1-W2).
 //!
 //! Covers the V1.65 chapter-content surface under
-//! `/v1/local/works/{work_id}/chapters/*` using direct handler invocation.
+//! `/v1/daemon/works/{work_id}/chapters/*` using direct handler invocation.
 //!
 //! HTTP routing is intentionally avoided for path-parameterized endpoints
 //! because axum-test mishandles hyphenated UUIDs in path segments; the

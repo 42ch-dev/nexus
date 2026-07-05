@@ -8,7 +8,7 @@
  *     — daemon lifecycle via Tauri custom commands backed by the bundled
  *       `nexus42` sidecar (P1).
  *
- * Transport = Tauri custom commands (Tauri IPC), **not** Local API HTTP — so
+ * Transport = Tauri custom commands (Tauri IPC), **not** Daemon API HTTP — so
  * `wire_contracts_changed` stays `false` (compass §5 #5). The commands live in
  * `apps/desktop/src-tauri/src/lib.rs` and enforce the authoritative runtime path
  * guard (§5 #8) for file actions.

@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/reading/reading-progress-query.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ReadingProgressQuery",
+  "description": "Query parameters for GET /v1/daemon/reading/progress. Creator scope is inferred from the active session.",
+  "type": "object",
+  "required": ["work_id", "chapter"],
+  "properties": {
+    "work_id": { "type": "string" },
+    "chapter": { "type": "integer", "minimum": 1 }
+  },
+  "additionalProperties": false
+}

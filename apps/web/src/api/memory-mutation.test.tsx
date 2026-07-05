@@ -80,9 +80,9 @@ describe('useDeletePendingReview — optimistic remove + count decrement + inval
     });
     let deleteQuery: string | null = null;
     useHandlers(
-      http.get('/v1/local/memory/pending-review', () => listSpy()),
-      http.get('/v1/local/memory/pending-review/count', () => countSpy()),
-      http.delete('/v1/local/memory/pending-review/:pendingId', async ({ request }) => {
+      http.get('/v1/daemon/memory/pending-review', () => listSpy()),
+      http.get('/v1/daemon/memory/pending-review/count', () => countSpy()),
+      http.delete('/v1/daemon/memory/pending-review/:pendingId', async ({ request }) => {
         deleteQuery = new URL(request.url).searchParams.get('creator_id');
         await deleteGate;
         return HttpResponse.json({ success: true, pending_id: 'p1' });
@@ -115,15 +115,15 @@ describe('useDeletePendingReview — optimistic remove + count decrement + inval
   it('rolls back the row + count when the server rejects the delete', async () => {
     let listCount = 0;
     useHandlers(
-      http.get('/v1/local/memory/pending-review', () => {
+      http.get('/v1/daemon/memory/pending-review', () => {
         listCount += 1;
         return HttpResponse.json({
           items: [makePending()],
           pagination: { limit: 20, has_more: false },
         });
       }),
-      http.get('/v1/local/memory/pending-review/count', () => HttpResponse.json({ count: 1 })),
-      http.delete('/v1/local/memory/pending-review/:pendingId', () =>
+      http.get('/v1/daemon/memory/pending-review/count', () => HttpResponse.json({ count: 1 })),
+      http.delete('/v1/daemon/memory/pending-review/:pendingId', () =>
         HttpResponse.json(
           { success: false, error: { code: 'not_found', message: 'gone' } },
           { status: 404 },
@@ -157,10 +157,10 @@ describe('useReviewMemory — result counters + invalidation', () => {
 
     let reviewBody: unknown = null;
     useHandlers(
-      http.get('/v1/local/memory/pending-review', () => listSpy()),
-      http.get('/v1/local/memory/pending-review/count', () => countSpy()),
-      http.get('/v1/local/memory/fragments', () => fragmentsSpy()),
-      http.post('/v1/local/memory/review', async ({ request }) => {
+      http.get('/v1/daemon/memory/pending-review', () => listSpy()),
+      http.get('/v1/daemon/memory/pending-review/count', () => countSpy()),
+      http.get('/v1/daemon/memory/fragments', () => fragmentsSpy()),
+      http.post('/v1/daemon/memory/review', async ({ request }) => {
         reviewBody = await request.json();
         return HttpResponse.json({ promoted: 2, fragmented: 1, dropped: 0 });
       }),
@@ -214,10 +214,10 @@ describe('useReviewMemory — result counters + invalidation', () => {
     const fragmentsSpy = vi.fn(() => HttpResponse.json({ fragments: [] }));
 
     useHandlers(
-      http.get('/v1/local/memory/pending-review', () => listSpy()),
-      http.get('/v1/local/memory/pending-review/count', () => countSpy()),
-      http.get('/v1/local/memory/fragments', () => fragmentsSpy()),
-      http.post('/v1/local/memory/review', () =>
+      http.get('/v1/daemon/memory/pending-review', () => listSpy()),
+      http.get('/v1/daemon/memory/pending-review/count', () => countSpy()),
+      http.get('/v1/daemon/memory/fragments', () => fragmentsSpy()),
+      http.post('/v1/daemon/memory/review', () =>
         HttpResponse.json(
           { success: false, error: { code: 'internal', message: 'boom' } },
           { status: 500 },
@@ -264,12 +264,12 @@ describe('useReviewMemory — result counters + invalidation', () => {
   it('drains multiple calls aggregating counters until has_more is false', async () => {
     const reviewSpy = vi.fn();
     useHandlers(
-      http.get('/v1/local/memory/pending-review', () =>
+      http.get('/v1/daemon/memory/pending-review', () =>
         HttpResponse.json({ items: [], pagination: { limit: 20, has_more: false } }),
       ),
-      http.get('/v1/local/memory/pending-review/count', () => HttpResponse.json({ count: 0 })),
-      http.get('/v1/local/memory/fragments', () => HttpResponse.json({ fragments: [] })),
-      http.post('/v1/local/memory/review', () => {
+      http.get('/v1/daemon/memory/pending-review/count', () => HttpResponse.json({ count: 0 })),
+      http.get('/v1/daemon/memory/fragments', () => HttpResponse.json({ fragments: [] })),
+      http.post('/v1/daemon/memory/review', () => {
         reviewSpy();
         // First call: server has more; second call: drained.
         if (reviewSpy.mock.calls.length === 1) {
@@ -315,14 +315,14 @@ describe('useReviewMemory — result counters + invalidation', () => {
   it('stops at the drain cap and shows a non-error still-draining toast', async () => {
     const reviewSpy = vi.fn();
     useHandlers(
-      http.get('/v1/local/memory/pending-review', () =>
+      http.get('/v1/daemon/memory/pending-review', () =>
         HttpResponse.json({ items: [], pagination: { limit: 20, has_more: false } }),
       ),
-      http.get('/v1/local/memory/pending-review/count', () => HttpResponse.json({ count: 0 })),
-      http.get('/v1/local/memory/fragments', () => HttpResponse.json({ fragments: [] })),
+      http.get('/v1/daemon/memory/pending-review/count', () => HttpResponse.json({ count: 0 })),
+      http.get('/v1/daemon/memory/fragments', () => HttpResponse.json({ fragments: [] })),
       // Server always reports has_more = true (pathological large queue) — the
       // client cap (REVIEW_DRAIN_MAX_CALLS = 20) must stop the drain.
-      http.post('/v1/local/memory/review', () => {
+      http.post('/v1/daemon/memory/review', () => {
         reviewSpy();
         return HttpResponse.json({
           promoted: 3,
@@ -358,14 +358,14 @@ describe('useReviewMemory — result counters + invalidation', () => {
   it('breaks the drain on zero progress to avoid an infinite loop', async () => {
     const reviewSpy = vi.fn();
     useHandlers(
-      http.get('/v1/local/memory/pending-review', () =>
+      http.get('/v1/daemon/memory/pending-review', () =>
         HttpResponse.json({ items: [], pagination: { limit: 20, has_more: false } }),
       ),
-      http.get('/v1/local/memory/pending-review/count', () => HttpResponse.json({ count: 0 })),
-      http.get('/v1/local/memory/fragments', () => HttpResponse.json({ fragments: [] })),
+      http.get('/v1/daemon/memory/pending-review/count', () => HttpResponse.json({ count: 0 })),
+      http.get('/v1/daemon/memory/fragments', () => HttpResponse.json({ fragments: [] })),
       // Server reports has_more = true but processed = 0 (unprocessable head
       // row) — the zero-progress guard must break after one call.
-      http.post('/v1/local/memory/review', () => {
+      http.post('/v1/daemon/memory/review', () => {
         reviewSpy();
         return HttpResponse.json({
           promoted: 0,
