@@ -1219,3 +1219,27 @@ async fn findings_batch_rejects_unknown_patch_field() {
     );
     assert_eq!(err.error_code(), "invalid_input");
 }
+
+/// V1.91 P1 — bulk PATCH rejects duplicate IDs in `finding_ids`.
+#[tokio::test]
+async fn findings_batch_rejects_duplicate_finding_ids() {
+    let (state, _tmp) = handler_state().await;
+    let work_id = create_work(&state).await;
+    let f1 = create_finding(&state, &work_id, "minor", "only finding").await;
+
+    let err = batch_update_findings_handler(
+        State(state.clone()),
+        axum::Json(BatchUpdateFindingsRequest {
+            finding_ids: vec![f1.finding_id.clone(), f1.finding_id.clone()],
+            patch: serde_json::json!({ "status": "triaged" }),
+        }),
+    )
+    .await
+    .expect_err("duplicate finding_ids must be rejected");
+
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "invalid_input");
+}

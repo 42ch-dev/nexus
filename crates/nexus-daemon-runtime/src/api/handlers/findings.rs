@@ -494,6 +494,14 @@ pub async fn batch_update_findings_handler(
         });
     }
 
+    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    if !body.finding_ids.iter().all(|id| seen.insert(id.as_str())) {
+        return Err(NexusApiError::BadRequest {
+            code: "invalid_input".to_string(),
+            message: "finding_ids must not contain duplicates".to_string(),
+        });
+    }
+
     let patch: BatchFindingPatch =
         serde_json::from_value(body.patch).map_err(|e| NexusApiError::BadRequest {
             code: "invalid_input".to_string(),

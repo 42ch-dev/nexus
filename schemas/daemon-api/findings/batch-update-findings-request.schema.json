@@ -12,7 +12,8 @@
       "items": { "type": "string" },
       "minItems": 1,
       "maxItems": 100,
-      "description": "IDs of the findings to update. Cap enforced at 100; >100 returns HTTP 422 with code `too_many_findings`."
+      "uniqueItems": true,
+      "description": "IDs of the findings to update. Must be unique; cap enforced at 100; >100 returns HTTP 422 with code `too_many_findings`."
     },
     "patch": {
       "type": "object",
