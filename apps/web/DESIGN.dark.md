@@ -394,6 +394,88 @@ components:
     borderColor: "{colors.gray-alpha-500}"
     textColor: "{colors.gray-1000}"
     shadow: "0px 4px 12px rgba(0,0,0,0.40)"
+
+  # ── V1.91 Reading Chrome — profile-specific read-only rendering tokens (dark) ──
+  # Same token names as DESIGN.md. Values that use {colors.xxx} references
+  # automatically resolve to dark values. Raw rgba values are dark-tuned.
+
+  # Profile: novel
+  reading-chrome-novel:
+    chapter-title:
+      fontFamily: "Georgia, 'Times New Roman', ui-serif, serif"
+      fontSize: "28px"
+      fontWeight: 700
+      lineHeight: 1.3
+      letterSpacing: "-0.01em"
+      color: "{colors.gray-1000}"
+    scene-separator:
+      color: "{colors.gray-500}"
+      fontSize: "16px"
+      textAlign: "center"
+      paddingBlock: "12px"
+    epigraph:
+      fontStyle: "italic"
+      textAlign: "right"
+      color: "{colors.gray-700}"
+      paddingLeft: "25%"
+
+  # Profile: essay
+  reading-chrome-essay:
+    section-heading:
+      fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, sans-serif"
+      fontSize: "18px"
+      fontWeight: 500
+      lineHeight: 1.4
+      letterSpacing: "-0.01em"
+      color: "{colors.gray-1000}"
+      marginTop: "28px"
+    blockquote:
+      borderLeft: "3px solid {colors.gray-alpha-400}"
+      paddingLeft: "16px"
+      fontStyle: "italic"
+      color: "{colors.gray-900}"
+    footnote-marker:
+      verticalAlign: "super"
+      fontSize: "0.75em"
+      color: "{colors.teal-700}"
+
+  # Profile: game-bible
+  reading-chrome-game-bible:
+    term-link:
+      color: "{colors.teal-700}"
+      textDecoration: "underline dotted"
+      cursor: "pointer"
+    definition-callout:
+      backgroundColor: "rgba(0,133,119,0.08)"
+      borderLeft: "3px solid {colors.teal-700}"
+      padding: "12px 16px"
+      labelColor: "{colors.teal-900}"
+      labelFontWeight: 600
+    category-badge:
+      backgroundColor: "rgba(183,110,0,0.14)"
+      textColor: "{colors.amber-1000}"
+
+  # Profile: script
+  reading-chrome-script:
+    character-name:
+      textAlign: "center"
+      textTransform: "uppercase"
+      fontWeight: 700
+      fontSize: "14px"
+      letterSpacing: "0.08em"
+      marginTop: "20px"
+      color: "{colors.gray-1000}"
+    parenthetical:
+      fontStyle: "italic"
+      color: "{colors.gray-700}"
+      paddingLeft: "32px"
+    scene-heading:
+      fontWeight: 700
+      textTransform: "uppercase"
+      fontSize: "14px"
+      letterSpacing: "0.05em"
+      color: "{colors.gray-900}"
+      marginTop: "24px"
 ---
 
 # Nexus Local Web UI Design System — Dark Theme
