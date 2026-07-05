@@ -1,5 +1,5 @@
 /**
- * Consolidated msw handler registry for the Local API surface.
+ * Consolidated msw handler registry for the Daemon API surface.
  *
  * Per-test handlers still belong to the test that declares them (see
  * `useHandlers` in msw-server.ts). This module collects the **reusable**
@@ -32,38 +32,38 @@ export function errorEnvelope(status: number, error: ErrorResponse) {
 
 // ── Daemon health ────────────────────────────────────────────────────────────
 
-/** `GET /v1/local/runtime/health` → 200 `{ status, version }`. */
+/** `GET /v1/daemon/runtime/health` → 200 `{ status, version }`. */
 export function healthOk(version = '0.1.0'): RequestHandler {
-  return http.get('/v1/local/runtime/health', () =>
+  return http.get('/v1/daemon/runtime/health', () =>
     HttpResponse.json({ status: 'ok', version }),
   );
 }
 
 // ── Works ────────────────────────────────────────────────────────────────────
 
-/** `GET /v1/local/works` → 200 `{ items, pagination }` (F-P3 canonical `items` key). */
+/** `GET /v1/daemon/works` → 200 `{ items, pagination }` (F-P3 canonical `items` key). */
 export function worksList(
   rows: unknown[],
   over: Partial<PaginationInfo> = {},
 ): RequestHandler {
-  return http.get('/v1/local/works', () =>
+  return http.get('/v1/daemon/works', () =>
     HttpResponse.json({ items: rows, pagination: pagination(over) }),
   );
 }
 
 /**
- * `GET /v1/local/works/:workId` — echoes the captured id back as `work_id` so
+ * `GET /v1/daemon/works/:workId` — echoes the captured id back as `work_id` so
  * detail-screen tests can assert the path param threaded correctly.
  */
 export function workDetail(workId: string, over: Record<string, unknown> = {}): RequestHandler {
-  return http.get('/v1/local/works/:workId', ({ params }) =>
+  return http.get('/v1/daemon/works/:workId', ({ params }) =>
     HttpResponse.json({ work_id: params.workId ?? workId, title: 'Work', ...over }),
   );
 }
 
-/** `POST /v1/local/works` → 201 with the created Work summary. */
+/** `POST /v1/daemon/works` → 201 with the created Work summary. */
 export function createWorkCreated(): RequestHandler {
-  return http.post('/v1/local/works', async ({ request }) => {
+  return http.post('/v1/daemon/works', async ({ request }) => {
     const body = (await request.json().catch(() => ({}))) as { title?: string };
     // CreateWorkResponse is `{ work_id, status }`; `title` is echoed only for
     // the test's benefit via a separate field if needed by callers.
@@ -98,22 +98,22 @@ export function chapterSummary(
   };
 }
 
-/** `GET /v1/local/works/:workId/chapters` → 200 `{ items, pagination }`. */
+/** `GET /v1/daemon/works/:workId/chapters` → 200 `{ items, pagination }`. */
 export function chaptersList(
   rows: Record<string, unknown>[],
   over: Partial<PaginationInfo> = {},
 ): RequestHandler {
-  return http.get('/v1/local/works/:workId/chapters', () =>
+  return http.get('/v1/daemon/works/:workId/chapters', () =>
     HttpResponse.json({ items: rows, pagination: pagination(over) }),
   );
 }
 
-/** `GET /v1/local/works/:workId/chapters/:n` → 200 `ChapterDetail`. */
+/** `GET /v1/daemon/works/:workId/chapters/:n` → 200 `ChapterDetail`. */
 export function chapterDetail(
   _chapter: number,
   over: Record<string, unknown> = {},
 ): RequestHandler {
-  return http.get('/v1/local/works/:workId/chapters/:n', ({ params }) => {
+  return http.get('/v1/daemon/works/:workId/chapters/:n', ({ params }) => {
     const n = Number(params.n);
     return HttpResponse.json({
       ...chapterSummary(n),
@@ -126,13 +126,13 @@ export function chapterDetail(
   });
 }
 
-/** `GET /v1/local/works/:workId/chapters/:n/outline` → 200 `ChapterOutline`. */
+/** `GET /v1/daemon/works/:workId/chapters/:n/outline` → 200 `ChapterOutline`. */
 export function chapterOutline(
   chapter: number,
   content: string,
   over: Record<string, unknown> = {},
 ): RequestHandler {
-  return http.get('/v1/local/works/:workId/chapters/:n/outline', ({ params }) =>
+  return http.get('/v1/daemon/works/:workId/chapters/:n/outline', ({ params }) =>
     HttpResponse.json({
       work_id: 'w-123',
       chapter: Number(params.n),
@@ -145,9 +145,9 @@ export function chapterOutline(
   );
 }
 
-/** `PATCH /v1/local/works/:workId/chapters/:n` → 200 `ChapterDetail`. */
+/** `PATCH /v1/daemon/works/:workId/chapters/:n` → 200 `ChapterDetail`. */
 export function chapterPatched(): RequestHandler {
-  return http.patch('/v1/local/works/:workId/chapters/:n', async ({ params, request }) => {
+  return http.patch('/v1/daemon/works/:workId/chapters/:n', async ({ params, request }) => {
     const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
     return HttpResponse.json({
       ...chapterSummary(Number(params.n)),
@@ -160,13 +160,13 @@ export function chapterPatched(): RequestHandler {
   });
 }
 
-/** `GET /v1/local/works/:workId/chapters/:n/body` → 200 `ChapterBody`. */
+/** `GET /v1/daemon/works/:workId/chapters/:n/body` → 200 `ChapterBody`. */
 export function chapterBody(
   chapter: number,
   content: string,
   over: Record<string, unknown> = {},
 ): RequestHandler {
-  return http.get('/v1/local/works/:workId/chapters/:n/body', ({ params }) =>
+  return http.get('/v1/daemon/works/:workId/chapters/:n/body', ({ params }) =>
     HttpResponse.json({
       work_id: 'w-123',
       chapter: Number(params.n),

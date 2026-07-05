@@ -3,7 +3,7 @@
  *
  * Exercises the full write path end-to-end against msw: open the dialog, fill
  * the required fields, submit, and assert the daemon receives a well-formed
- * POST `/v1/local/works`. Also covers the W-1 error path — a 400 envelope
+ * POST `/v1/daemon/works`. Also covers the W-1 error path — a 400 envelope
  * surfaces as a toast (the mutation's onError → useToast) and the dialog stays
  * open so the author can correct.
  */
@@ -30,11 +30,11 @@ function renderDialog() {
 }
 
 describe('CreateWorkDialog CRUD round-trip', () => {
-  it('submits a well-formed POST /v1/local/works and omits work_profile when untouched (W1)', async () => {
+  it('submits a well-formed POST /v1/daemon/works and omits work_profile when untouched (W1)', async () => {
     const user = userEvent.setup();
     let postedBody: unknown = null;
     useHandlers(
-      http.post('/v1/local/works', async ({ request }) => {
+      http.post('/v1/daemon/works', async ({ request }) => {
         postedBody = await request.json();
         return HttpResponse.json({ work_id: 'w-new', status: 'intake' });
       }),
@@ -63,7 +63,7 @@ describe('CreateWorkDialog CRUD round-trip', () => {
     const user = userEvent.setup();
     let postedBody: unknown = null;
     useHandlers(
-      http.post('/v1/local/works', async ({ request }) => {
+      http.post('/v1/daemon/works', async ({ request }) => {
         postedBody = await request.json();
         return HttpResponse.json({ work_id: 'w-essay', status: 'intake' });
       }),
@@ -84,7 +84,7 @@ describe('CreateWorkDialog CRUD round-trip', () => {
   it('keeps the dialog open and shows a toast when the daemon returns a 400 envelope (W-1)', async () => {
     const user = userEvent.setup();
     useHandlers(
-      http.post('/v1/local/works', () =>
+      http.post('/v1/daemon/works', () =>
         HttpResponse.json(
           {
             success: false,
@@ -113,7 +113,7 @@ describe('CreateWorkDialog CRUD round-trip', () => {
   it('blocks submission until all required fields are filled', async () => {
     const user = userEvent.setup();
     useHandlers(
-      http.post('/v1/local/works', () => HttpResponse.json({ work_id: 'x', status: 'intake' })),
+      http.post('/v1/daemon/works', () => HttpResponse.json({ work_id: 'x', status: 'intake' })),
     );
 
     renderDialog();
@@ -129,7 +129,7 @@ describe('CreateWorkDialog CRUD round-trip', () => {
     const user = userEvent.setup();
     let postedBody: unknown = null;
     useHandlers(
-      http.post('/v1/local/works', async ({ request }) => {
+      http.post('/v1/daemon/works', async ({ request }) => {
         postedBody = await request.json();
         return HttpResponse.json({ work_id: 'w-novel', status: 'intake' });
       }),
@@ -153,7 +153,7 @@ describe('CreateWorkDialog CRUD round-trip', () => {
     const user = userEvent.setup();
     let postedBody: unknown = null;
     useHandlers(
-      http.post('/v1/local/works', async ({ request }) => {
+      http.post('/v1/daemon/works', async ({ request }) => {
         postedBody = await request.json();
         return HttpResponse.json({ work_id: 'w-gb', status: 'intake' });
       }),

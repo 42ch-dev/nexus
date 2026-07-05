@@ -7,7 +7,7 @@ import { usePatchWork } from '@/api/queries';
 import type { WorkDetailResponse } from '@42ch/nexus-contracts';
 
 /**
- * Patch Work dialog — PATCH /v1/local/works/{work_id}.
+ * Patch Work dialog — PATCH /v1/daemon/works/{work_id}.
  *
  * Surfaces the status/stage fields authors change most (plan T7). The contract
  * uses free-strings (no enum), so inputs are free-text with the current value

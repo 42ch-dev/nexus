@@ -2,7 +2,7 @@
  * Client-side error model for the Nexus local Web UI.
  *
  * This is an **app-side** error abstraction — NOT a wire DTO duplicate. The
- * shared Local API `ErrorResponse` schema (landed by Track B / plan P0 in
+ * shared Daemon API `ErrorResponse` schema (landed by Track B / plan P0 in
  * V1.64, residual F-E1) models the daemon's **inner** error detail as
  * `{ code, message, details? }`. The daemon runtime **wraps** that detail in
  * an envelope `{ success: false, error: ErrorResponse }` (see

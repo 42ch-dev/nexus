@@ -7,7 +7,7 @@ import type { ChapterStatus } from '@42ch/nexus-contracts';
 /**
  * Map a free-string status to a Badge variant by keyword.
  *
- * Local API statuses are free-strings (no enum contract), so we match on
+ * Daemon API statuses are free-strings (no enum contract), so we match on
  * known substrings with sensible fallbacks. DESIGN.md semantic mapping:
  * running/healthy/completed → green; queued/informational → teal;
  * warning/needs-review → amber; failed/error → red; everything else → neutral.

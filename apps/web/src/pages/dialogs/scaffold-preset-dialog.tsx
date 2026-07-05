@@ -7,7 +7,7 @@ import { useScaffoldPreset } from '@/api/queries';
 import { useToast } from '@/lib/use-toast';
 
 /**
- * Scaffold Preset dialog — POST /v1/local/presets.
+ * Scaffold Preset dialog — POST /v1/daemon/presets.
  *
  * Creates a new user preset scaffold from a name. The daemon writes the file
  * under the home layout and returns the path. The author then edits that file

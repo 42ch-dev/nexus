@@ -809,7 +809,7 @@ Status labels:
 | State | Label | Helper copy |
 | --- | --- | --- |
 | Starting | `Daemon starting…` | `Nexus is starting the local daemon.` |
-| Healthy | `Daemon running` | `Local API is reachable on the configured port.` |
+| Healthy | `Daemon running` | `Daemon API is reachable on the configured port.` |
 | Degraded | `Daemon reconnecting` | `Nexus is retrying the local daemon connection.` |
 | Stopped | `Daemon stopped` | `Restart the daemon to use local workspace features.` |
 | Port conflict | `Port unavailable` | `Another process is using the configured Nexus port.` |
@@ -850,7 +850,7 @@ Interaction rules:
 
 The Control-Room gains a creator-scoped Memory surface that closes the capture → review → internalize loop. Token values: see frontmatter `memory-pending-count`, `memory-task-kind-*`, `memory-fragment-summary`, `memory-fragment-id`, `memory-inspector-*`, `memory-review-button`, `memory-fragment-filter-input`.
 
-**Pending-review count badge** (`memory-pending-count`) — a red numeric indicator on the pending-reviews header showing the live count from `GET /v1/local/memory/pending-review/count`. Red signals "items awaiting your review".
+**Pending-review count badge** (`memory-pending-count`) — a red numeric indicator on the pending-reviews header showing the live count from `GET /v1/daemon/memory/pending-review/count`. Red signals "items awaiting your review".
 
 **Task-kind chips** (`memory-task-kind-*`) — `task_kind` is a free-form string on the wire, so five known values map to distinct color accents (reusing the `severityVariant` / `findingStatusClasses` `color-mix` pattern) and any unrecognized value falls back to a neutral chip rendered verbatim:
 

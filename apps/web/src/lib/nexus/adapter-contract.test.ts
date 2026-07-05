@@ -16,7 +16,7 @@
  * 2. **TauriClient transport parity (V1.66 §5 #1).** `TauriClient` is thin-over-
  *    `BrowserClient`: the 24 `NexusClient` methods reuse the identical HTTP
  *    transport to the resolved desktop loopback origin. This pins that contract
- *    — every data method hits the same `/v1/local/*` path as `BrowserClient`,
+ *    — every data method hits the same `/v1/daemon/*` path as `BrowserClient`,
  *    just against `http://127.0.0.1:<port>`.
  *
  * 3. **Adapter contract enforcement.** The success/envelope/network paths are
@@ -102,13 +102,13 @@ describe('TauriClient transport parity (thin-over-BrowserClient)', () => {
     expect(client.port).toBe(8421);
     await client.health();
     // The desktop origin is the resolved loopback — NOT same-origin (the
-    // browser-tab BrowserClient uses relative `/v1/local/*`).
-    expect(captured.url).toBe('http://127.0.0.1:8421/v1/local/runtime/health');
+    // browser-tab BrowserClient uses relative `/v1/daemon/*`).
+    expect(captured.url).toBe('http://127.0.0.1:8421/v1/daemon/runtime/health');
   });
 
-  it('delegates every NexusClient data method to the same /v1/local/* path as BrowserClient', async () => {
+  it('delegates every NexusClient data method to the same /v1/daemon/* path as BrowserClient', async () => {
     // Capture every request URL TauriClient issues; assert each maps to the
-    // identical Local API path the browser transport uses. This is the §5 #1
+    // identical Daemon API path the browser transport uses. This is the §5 #1
     // "reuse the identical HTTP transport" invariant, pinned method-by-method.
     const seen = new Set<string>();
     const fetchImpl: typeof fetch = (input, init) => {
@@ -179,7 +179,7 @@ describe('TauriClient transport parity (thin-over-BrowserClient)', () => {
     // V1.78 Creator Memory review-loop promotion (V1.67 G2 pattern — types +
     // routes already shipped; these exercise the new TS surface). The memory
     // surface is creator-scoped; the active creator id rides as a query/body
-    // param, so the path portion stays under /v1/local/memory/*.
+    // param, so the path portion stays under /v1/daemon/memory/*.
     await client.listPendingReviews('c1');
     await client.countPendingReviews('c1');
     await client.deletePendingReview('p1', 'c1');
@@ -203,41 +203,41 @@ describe('TauriClient transport parity (thin-over-BrowserClient)', () => {
     await client.patchReadingAnnotation('a1', { color: 'blue', note: 'note' });
     await client.deleteReadingAnnotation('a1');
 
-    // Every method must have hit a /v1/local/* path (transport parity with the
+    // Every method must have hit a /v1/daemon/* path (transport parity with the
     // browser client). If a method silently no-op'd or threw — as the V1.65
     // stub did — its path would be missing and this set would be smaller.
     const paths = [...seen].sort();
-    expect(paths.every((p) => p.includes('/v1/local/'))).toBe(true);
+    expect(paths.every((p) => p.includes('/v1/daemon/'))).toBe(true);
     expect(seen.size).toBe(41);
     // Spot-check the chapter surface (the Q5 action target).
-    expect(seen).toContain('GET /v1/local/works/w1/chapters/1/body');
-    expect(seen).toContain('GET /v1/local/works/w1/chapters/1/outline');
+    expect(seen).toContain('GET /v1/daemon/works/w1/chapters/1/body');
+    expect(seen).toContain('GET /v1/daemon/works/w1/chapters/1/outline');
     // Spot-check the V1.72 outline+timeline surface.
-    expect(seen).toContain('GET /v1/local/works/w1/outline');
-    expect(seen).toContain('POST /v1/local/works/w1/outline/patch');
-    expect(seen).toContain('POST /v1/local/works/w1/chapters/1/patch');
-    expect(seen).toContain('POST /v1/local/works/w1/timeline/patch');
+    expect(seen).toContain('GET /v1/daemon/works/w1/outline');
+    expect(seen).toContain('POST /v1/daemon/works/w1/outline/patch');
+    expect(seen).toContain('POST /v1/daemon/works/w1/chapters/1/patch');
+    expect(seen).toContain('POST /v1/daemon/works/w1/timeline/patch');
     // Spot-check the V1.67 G2 preset-promotion surface.
-    expect(seen).toContain('GET /v1/local/presets/foo');
-    expect(seen).toContain('PATCH /v1/local/presets/foo');
-    expect(seen).toContain('DELETE /v1/local/presets/foo');
+    expect(seen).toContain('GET /v1/daemon/presets/foo');
+    expect(seen).toContain('PATCH /v1/daemon/presets/foo');
+    expect(seen).toContain('DELETE /v1/daemon/presets/foo');
     // Spot-check the V1.77 findings-remediation surface.
-    expect(seen).toContain('GET /v1/local/works/w1/findings/f1');
-    expect(seen).toContain('PATCH /v1/local/works/w1/findings/f1');
+    expect(seen).toContain('GET /v1/daemon/works/w1/findings/f1');
+    expect(seen).toContain('PATCH /v1/daemon/works/w1/findings/f1');
     // Spot-check the V1.78 Creator Memory review-loop surface.
-    expect(seen).toContain('GET /v1/local/memory/pending-review');
-    expect(seen).toContain('GET /v1/local/memory/pending-review/count');
-    expect(seen).toContain('DELETE /v1/local/memory/pending-review/p1');
-    expect(seen).toContain('POST /v1/local/memory/review');
-    expect(seen).toContain('GET /v1/local/memory/fragments');
+    expect(seen).toContain('GET /v1/daemon/memory/pending-review');
+    expect(seen).toContain('GET /v1/daemon/memory/pending-review/count');
+    expect(seen).toContain('DELETE /v1/daemon/memory/pending-review/p1');
+    expect(seen).toContain('POST /v1/daemon/memory/review');
+    expect(seen).toContain('GET /v1/daemon/memory/fragments');
     // Spot-check the V1.89 Deeper Manuscript Reading surface.
-    expect(seen).toContain('GET /v1/local/reading/progress');
-    expect(seen).toContain('PUT /v1/local/reading/progress');
-    expect(seen).toContain('DELETE /v1/local/reading/progress');
-    expect(seen).toContain('GET /v1/local/reading/annotations');
-    expect(seen).toContain('POST /v1/local/reading/annotations');
-    expect(seen).toContain('PATCH /v1/local/reading/annotations/a1');
-    expect(seen).toContain('DELETE /v1/local/reading/annotations/a1');
+    expect(seen).toContain('GET /v1/daemon/reading/progress');
+    expect(seen).toContain('PUT /v1/daemon/reading/progress');
+    expect(seen).toContain('DELETE /v1/daemon/reading/progress');
+    expect(seen).toContain('GET /v1/daemon/reading/annotations');
+    expect(seen).toContain('POST /v1/daemon/reading/annotations');
+    expect(seen).toContain('PATCH /v1/daemon/reading/annotations/a1');
+    expect(seen).toContain('DELETE /v1/daemon/reading/annotations/a1');
   });
 });
 
@@ -263,7 +263,7 @@ describe('BrowserClient adapter contract', () => {
     const client = new BrowserClient({ fetchImpl });
     const health = await client.health();
     expect(health).toEqual({ status: 'ok', version: 'diag' });
-    expect(captured.url).toBe('/v1/local/runtime/health');
+    expect(captured.url).toBe('/v1/daemon/runtime/health');
     expect(captured.init?.method).toBe('GET');
     expect((captured.init?.headers as Record<string, string>)?.Accept).toBe('application/json');
   });
@@ -271,7 +271,7 @@ describe('BrowserClient adapter contract', () => {
   it('serializes list query params into the request URL (toQueryString)', async () => {
     let requestedUrl: string | null = null;
     useHandlers(
-      http.get('/v1/local/works', ({ request }) => {
+      http.get('/v1/daemon/works', ({ request }) => {
         requestedUrl = request.url;
         return HttpResponse.json({ items: [], pagination: { limit: 5, has_more: false } });
       }),
@@ -287,7 +287,7 @@ describe('BrowserClient adapter contract', () => {
   it('omits empty query values (empty string drops the param, no `?` emitted)', async () => {
     const captured: { url?: string } = {};
     useHandlers(
-      http.get('/v1/local/works', ({ request }) => {
+      http.get('/v1/daemon/works', ({ request }) => {
         captured.url = request.url;
         return HttpResponse.json({ items: [], pagination: { limit: 20, has_more: false } });
       }),
@@ -301,14 +301,14 @@ describe('BrowserClient adapter contract', () => {
   });
 
   it('resolves undefined for a 204 No Content response without parsing a body', async () => {
-    useHandlers(http.get('/v1/local/runtime/health', () => new HttpResponse(null, { status: 204 })));
+    useHandlers(http.get('/v1/daemon/runtime/health', () => new HttpResponse(null, { status: 204 })));
     const client = new BrowserClient();
     await expect(client.health()).resolves.toBeUndefined();
   });
 
   it('unwraps the canonical error envelope on a POST via the registry handler', async () => {
     useHandlers(
-      http.post('/v1/local/works', () =>
+      http.post('/v1/daemon/works', () =>
         HttpResponse.json(
           { success: false, error: { code: 'validation_failed', message: 'Title is required.' } },
           { status: 400 },
@@ -346,16 +346,16 @@ describe('BrowserClient adapter contract', () => {
     // suffixes; msw's path-to-regexp would read those as params, so match them
     // with regexes (deterministic, no param-name collision).
     useHandlers(
-      http.get('/v1/local/presets', () =>
+      http.get('/v1/daemon/presets', () =>
         HttpResponse.json({ embedded: [], system: [], user: [{ name: 'user/foo' }] }),
       ),
-      http.post('/v1/local/presets', () =>
+      http.post('/v1/daemon/presets', () =>
         HttpResponse.json({ id: 'user/foo', path: '/presets/foo.yaml' }, { status: 201 }),
       ),
-      http.post(/\/v1\/local\/presets:validate$/, () =>
+      http.post(/\/v1\/daemon\/presets:validate$/, () =>
         HttpResponse.json({ valid: true, errors: [], warnings: [] }),
       ),
-      http.post(/\/v1\/local\/presets\/[^/]+:reload$/, ({ request }) =>
+      http.post(/\/v1\/daemon\/presets\/[^/]+:reload$/, ({ request }) =>
         HttpResponse.json({ reloaded: new URL(request.url).pathname.split('/').pop()!.replace(':reload', '') }),
       ),
     );
@@ -377,7 +377,7 @@ describe('BrowserClient adapter contract', () => {
 
   it('routes the V1.67 G2 preset methods to the {id} path with the right verb (get/update/delete)', async () => {
     // Contract edge: the three promoted preset methods (getPreset/updatePreset/
-    // deletePreset) target `/v1/local/presets/{id}` with GET/PATCH/DELETE and
+    // deletePreset) target `/v1/daemon/presets/{id}` with GET/PATCH/DELETE and
     // URL-encode the id into the path. Pinned here via the `fetchImpl` seam
     // (this file owns the adapter boundary — fetchImpl injection + path
     // serialization + 204 handling) rather than in browser-client.test.ts,
@@ -407,9 +407,9 @@ describe('BrowserClient adapter contract', () => {
     // The id (`user/foo`) is encoded into the path as `user%2Ffoo`; PATCH
     // carries the YAML body; DELETE emits no body.
     expect(seen).toEqual([
-      { method: 'GET', url: '/v1/local/presets/user%2Ffoo' },
-      { method: 'PATCH', url: '/v1/local/presets/user%2Ffoo', body: { yaml: 'name: x\n' } },
-      { method: 'DELETE', url: '/v1/local/presets/user%2Ffoo' },
+      { method: 'GET', url: '/v1/daemon/presets/user%2Ffoo' },
+      { method: 'PATCH', url: '/v1/daemon/presets/user%2Ffoo', body: { yaml: 'name: x\n' } },
+      { method: 'DELETE', url: '/v1/daemon/presets/user%2Ffoo' },
     ]);
   });
 
@@ -417,7 +417,7 @@ describe('BrowserClient adapter contract', () => {
     let receivedMethod = '';
     let receivedBody: unknown = null;
     useHandlers(
-      http.patch('/v1/local/works/:workId', async ({ request, params }) => {
+      http.patch('/v1/daemon/works/:workId', async ({ request, params }) => {
         receivedMethod = request.method;
         receivedBody = await request.json().catch(() => null);
         return HttpResponse.json({ work_id: String(params.workId), title: 'Patched' });
@@ -529,7 +529,7 @@ describe('NexusClient findings-method parity guard (V1.77)', () => {
 
   it('getFinding / updateFinding route to the {finding_id} path with GET / PATCH', async () => {
     // Contract edge: the two promoted findings methods target
-    // `/v1/local/works/{work_id}/findings/{finding_id}` with GET/PATCH and
+    // `/v1/daemon/works/{work_id}/findings/{finding_id}` with GET/PATCH and
     // URL-encode both path params. Pinned via the fetchImpl seam (this file owns
     // the adapter boundary — fetchImpl injection + path serialization).
     const seen: { method: string; url: string; body?: unknown }[] = [];
@@ -554,10 +554,10 @@ describe('NexusClient findings-method parity guard (V1.77)', () => {
     await client.updateFinding('w1', 'f1', { status: 'triaged', target_executor: 'write' });
 
     expect(seen).toEqual([
-      { method: 'GET', url: '/v1/local/works/w1/findings/f1' },
+      { method: 'GET', url: '/v1/daemon/works/w1/findings/f1' },
       {
         method: 'PATCH',
-        url: '/v1/local/works/w1/findings/f1',
+        url: '/v1/daemon/works/w1/findings/f1',
         body: { status: 'triaged', target_executor: 'write' },
       },
     ]);
@@ -644,14 +644,14 @@ describe('NexusClient memory-method parity guard (V1.78)', () => {
     // creator_id query param; review sends creator_id in the JSON body.
     // reflect sends creator_id (+optional force_regenerate) in the JSON body.
     expect(seen).toEqual([
-      { method: 'GET', url: '/v1/local/memory/pending-review?limit=5&cursor=cur&creator_id=c1' },
-      { method: 'GET', url: '/v1/local/memory/pending-review/count?creator_id=c1' },
-      { method: 'DELETE', url: '/v1/local/memory/pending-review/p1?creator_id=c1' },
-      { method: 'POST', url: '/v1/local/memory/review', body: { creator_id: 'c1' } },
-      { method: 'GET', url: '/v1/local/memory/fragments?keyword=kw&limit=10&creator_id=c1' },
+      { method: 'GET', url: '/v1/daemon/memory/pending-review?limit=5&cursor=cur&creator_id=c1' },
+      { method: 'GET', url: '/v1/daemon/memory/pending-review/count?creator_id=c1' },
+      { method: 'DELETE', url: '/v1/daemon/memory/pending-review/p1?creator_id=c1' },
+      { method: 'POST', url: '/v1/daemon/memory/review', body: { creator_id: 'c1' } },
+      { method: 'GET', url: '/v1/daemon/memory/fragments?keyword=kw&limit=10&creator_id=c1' },
       {
         method: 'POST',
-        url: '/v1/local/memory/soul/reflect',
+        url: '/v1/daemon/memory/soul/reflect',
         body: { creator_id: 'c1', force_regenerate: true },
       },
     ]);
@@ -734,25 +734,25 @@ describe('NexusClient reading-depth-method parity guard (V1.89)', () => {
     await client.deleteReadingAnnotation('a1');
 
     expect(seen).toEqual([
-      { method: 'GET', url: '/v1/local/reading/progress?work_id=w1&chapter=1' },
+      { method: 'GET', url: '/v1/daemon/reading/progress?work_id=w1&chapter=1' },
       {
         method: 'PUT',
-        url: '/v1/local/reading/progress',
+        url: '/v1/daemon/reading/progress',
         body: { work_id: 'w1', chapter: 1, scroll_progress: 5000 },
       },
-      { method: 'DELETE', url: '/v1/local/reading/progress?work_id=w1&chapter=1' },
-      { method: 'GET', url: '/v1/local/reading/annotations?work_id=w1&chapter=1' },
+      { method: 'DELETE', url: '/v1/daemon/reading/progress?work_id=w1&chapter=1' },
+      { method: 'GET', url: '/v1/daemon/reading/annotations?work_id=w1&chapter=1' },
       {
         method: 'POST',
-        url: '/v1/local/reading/annotations',
+        url: '/v1/daemon/reading/annotations',
         body: { work_id: 'w1', chapter: 1, start_offset: 0, end_offset: 5, selected_text: 'Hello', color: 'yellow' },
       },
       {
         method: 'PATCH',
-        url: '/v1/local/reading/annotations/a1',
+        url: '/v1/daemon/reading/annotations/a1',
         body: { color: 'blue', note: 'note' },
       },
-      { method: 'DELETE', url: '/v1/local/reading/annotations/a1' },
+      { method: 'DELETE', url: '/v1/daemon/reading/annotations/a1' },
     ]);
   });
 });

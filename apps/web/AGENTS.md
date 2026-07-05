@@ -22,8 +22,7 @@ Tauri-ready. Parent rules: [`../../AGENTS.md`](../../AGENTS.md) (repo),
   (`src/lib/nexus/types.ts`). Screens must depend only on the interface, never
   on `fetch`/`invoke` directly — that is what keeps the V1.65 Tauri shell a
   one-impl swap (web-ui.md §5, §9). The HTTP path prefix for the daemon
-  surface is `/v1/daemon/*` (renamed from `/v1/local/*` in V1.90 alongside
-  the Local API → Daemon API rename); the SPA reaches the daemon at
+  surface is `/v1/daemon/*`; the SPA reaches the daemon at
   `http://127.0.0.1:<port>/v1/daemon/*`.
 
 ## Contracts status (post Wave-1 merge)

@@ -18,7 +18,7 @@ describe('BrowserClient cursor list', () => {
     let firstCalled = false;
     let secondCalledWithCursor: string | null = null;
     useHandlers(
-      http.get('/v1/local/works', ({ request }) => {
+      http.get('/v1/daemon/works', ({ request }) => {
         const url = new URL(request.url);
         const cursor = url.searchParams.get('cursor');
         if (!cursor) {
@@ -50,7 +50,7 @@ describe('BrowserClient cursor list', () => {
 
   it('unwraps the daemon error envelope into a NexusClientError (W-1, live fetch)', async () => {
     useHandlers(
-      http.post('/v1/local/works', () =>
+      http.post('/v1/daemon/works', () =>
         HttpResponse.json(
           {
             success: false,
@@ -73,7 +73,7 @@ describe('BrowserClient cursor list', () => {
 
   it('rejects with transport_unreachable when the daemon is unreachable', async () => {
     useHandlers(
-      http.get('/v1/local/works', () => HttpResponse.error()),
+      http.get('/v1/daemon/works', () => HttpResponse.error()),
     );
 
     const client = new BrowserClient();
@@ -85,7 +85,7 @@ describe('BrowserClient cursor list', () => {
 
   it('parses the findings list canonical { items, pagination } shape (F-P2)', async () => {
     useHandlers(
-      http.get('/v1/local/works/:workId/findings', () =>
+      http.get('/v1/daemon/works/:workId/findings', () =>
         HttpResponse.json({
           items: [{ finding_id: 'f1', work_id: 'w1', severity: 'critical', status: 'open', title: 't', description: 'd', target_executor: 'x', kind: 'k', created_at: 1, updated_at: 1 }],
           pagination: { limit: 20, has_more: false },
@@ -103,7 +103,7 @@ describe('BrowserClient cursor list', () => {
   it('surfaces ad-hoc (StatusCode, String) error bodies via the generic fallback', async () => {
     // Some orchestration handlers still emit non-envelope bodies (R-V164-FE1-ORCH).
     useHandlers(
-      http.get('/v1/local/orchestration/sessions', () =>
+      http.get('/v1/daemon/orchestration/sessions', () =>
         new HttpResponse('upstream timeout', { status: 502 }),
       ),
     );
@@ -125,7 +125,7 @@ describe('BrowserClient cursor list', () => {
 describe('BrowserClient chapter content routes (V1.65)', () => {
   it('lists chapters with the canonical { items, pagination } shape', async () => {
     useHandlers(
-      http.get('/v1/local/works/:workId/chapters', () =>
+      http.get('/v1/daemon/works/:workId/chapters', () =>
         HttpResponse.json({
           items: [{ work_id: 'w1', chapter: 1, volume: 1, planned_word_count: 4000, status: 'not_started', created_at: '2026-06-25T00:00:00Z', updated_at: '2026-06-25T00:00:00Z' }],
           pagination: { limit: 20, has_more: false },
@@ -141,7 +141,7 @@ describe('BrowserClient chapter content routes (V1.65)', () => {
 
   it('reads a chapter outline', async () => {
     useHandlers(
-      http.get('/v1/local/works/:workId/chapters/:n/outline', ({ params }) =>
+      http.get('/v1/daemon/works/:workId/chapters/:n/outline', ({ params }) =>
         HttpResponse.json({
           work_id: params.workId,
           chapter: Number(params.n),
@@ -161,7 +161,7 @@ describe('BrowserClient chapter content routes (V1.65)', () => {
   it('patches chapter structure with confirm flag for finalized chapters', async () => {
     let receivedBody: unknown = null;
     useHandlers(
-      http.patch('/v1/local/works/:workId/chapters/:n', async ({ request, params }) => {
+      http.patch('/v1/daemon/works/:workId/chapters/:n', async ({ request, params }) => {
         receivedBody = await request.json();
         return HttpResponse.json({
           work_id: params.workId,
@@ -187,7 +187,7 @@ describe('BrowserClient chapter content routes (V1.65)', () => {
 
   it('reads a chapter body', async () => {
     useHandlers(
-      http.get('/v1/local/works/:workId/chapters/:n/body', ({ params }) =>
+      http.get('/v1/daemon/works/:workId/chapters/:n/body', ({ params }) =>
         HttpResponse.json({
           work_id: params.workId,
           chapter: Number(params.n),
@@ -211,7 +211,7 @@ describe('BrowserClient chapter content routes (V1.65)', () => {
 describe('BrowserClient preset CRUD (V1.67 G2 promotion)', () => {
   it('fetches a preset manifest as raw YAML via getPreset', async () => {
     useHandlers(
-      http.get('/v1/local/presets/:id', ({ params }) =>
+      http.get('/v1/daemon/presets/:id', ({ params }) =>
         HttpResponse.json({
           id: params.id,
           source: 'user',
@@ -231,7 +231,7 @@ describe('BrowserClient preset CRUD (V1.67 G2 promotion)', () => {
   it('replaces user preset YAML via updatePreset and echoes { id, updated }', async () => {
     let receivedBody: unknown = null;
     useHandlers(
-      http.patch('/v1/local/presets/:id', async ({ request, params }) => {
+      http.patch('/v1/daemon/presets/:id', async ({ request, params }) => {
         receivedBody = await request.json();
         return HttpResponse.json({ id: params.id, updated: true });
       }),
@@ -245,7 +245,7 @@ describe('BrowserClient preset CRUD (V1.67 G2 promotion)', () => {
 
   it('resolves void when deletePreset returns 204 No Content', async () => {
     useHandlers(
-      http.delete('/v1/local/presets/:id', () => new HttpResponse(null, { status: 204 })),
+      http.delete('/v1/daemon/presets/:id', () => new HttpResponse(null, { status: 204 })),
     );
 
     const client = new BrowserClient();
@@ -257,7 +257,7 @@ describe('BrowserClient Strategy canvas write boundary (V1.71)', () => {
   it('patches a state label and description', async () => {
     let receivedBody: unknown = null;
     useHandlers(
-      http.post('/v1/local/strategies/:strategyId/states/:stateId/patch', async ({ request }) => {
+      http.post('/v1/daemon/strategies/:strategyId/states/:stateId/patch', async ({ request }) => {
         receivedBody = await request.json();
         return HttpResponse.json({
           new_revision: 3,
@@ -286,7 +286,7 @@ describe('BrowserClient Strategy canvas write boundary (V1.71)', () => {
   it('rewires a transition target', async () => {
     let receivedBody: unknown = null;
     useHandlers(
-      http.post('/v1/local/strategies/:strategyId/transitions/patch', async ({ request }) => {
+      http.post('/v1/daemon/strategies/:strategyId/transitions/patch', async ({ request }) => {
         receivedBody = await request.json();
         return HttpResponse.json({
           new_revision: 4,
@@ -319,7 +319,7 @@ describe('BrowserClient Strategy canvas write boundary (V1.71)', () => {
   it('writes a prompt template body', async () => {
     let receivedBody: unknown = null;
     useHandlers(
-      http.post('/v1/local/strategies/:strategyId/states/:stateId/prompt/patch', async ({ request }) => {
+      http.post('/v1/daemon/strategies/:strategyId/states/:stateId/prompt/patch', async ({ request }) => {
         receivedBody = await request.json();
         return HttpResponse.json({
           new_revision: 5,

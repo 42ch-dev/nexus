@@ -8,7 +8,7 @@ import { WORK_PROFILES, isWorkProfile, type WorkProfile } from '@/lib/work-profi
 import { useCreateWork } from '@/api/queries';
 
 /**
- * Create Work dialog — POST /v1/local/works.
+ * Create Work dialog — POST /v1/daemon/works.
  *
  * The contract `CreateWorkRequest` requires title + long_term_goal +
  * initial_idea and accepts an optional `work_profile` (V1.67 G1; the wire
