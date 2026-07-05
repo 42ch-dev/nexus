@@ -7,7 +7,7 @@
  * mapping so components consume DESIGN.md token names only.
  */
 
-import { isWorkProfile, type WorkProfile } from '@/lib/work-profiles';
+import { isWorkProfile } from '@/lib/work-profiles';
 
 /**
  * Chrome profile keys — match the hyphenated suffixes in DESIGN.md
@@ -43,16 +43,4 @@ export function isReadingChromeProfile(
   value: string,
 ): value is ReadingChromeProfile {
   return (READING_CHROME_PROFILES as readonly string[]).includes(value);
-}
-
-/**
- * Normalize a {@link WorkProfile} into the chrome-profile key used by
- * DESIGN.md tokens. `game_bible` -> `game-bible`; everything else is identical.
- */
-export function workProfileToChromeProfile(
-  value: WorkProfile | undefined | null,
-): ReadingChromeProfile {
-  if (!value) return 'novel';
-  if (value === 'game_bible') return 'game-bible';
-  return value;
 }

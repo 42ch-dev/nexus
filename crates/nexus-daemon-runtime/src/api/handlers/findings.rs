@@ -150,6 +150,7 @@ pub struct UpdateFindingRequest {
 /// `serde_json::Value` (codegen quirk for object-with-fixed-keys), so this
 /// helper deserializes that value and enforces the allowed keys.
 #[derive(Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
 struct BatchFindingPatch {
     pub status: Option<String>,
     pub target_executor: Option<String>,
@@ -475,6 +476,13 @@ pub async fn batch_update_findings_handler(
 
     let creator_id =
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    if body.finding_ids.is_empty() {
+        return Err(NexusApiError::BadRequest {
+            code: "invalid_input".to_string(),
+            message: "finding_ids must not be empty".to_string(),
+        });
+    }
 
     if body.finding_ids.len() > BATCH_CAP {
         return Err(NexusApiError::BadRequest {

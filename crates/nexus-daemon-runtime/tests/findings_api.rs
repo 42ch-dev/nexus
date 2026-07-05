@@ -1174,25 +1174,48 @@ async fn findings_batch_update_cap_rejected_with_422() {
     assert_eq!(err.error_code(), "too_many_findings");
 }
 
-/// V1.91 P1 — bulk PATCH with an empty patch returns updated: 0.
+/// V1.91 P1 — bulk PATCH rejects an empty `finding_ids` array.
 #[tokio::test]
-async fn findings_batch_update_empty_patch_returns_zero() {
+async fn findings_batch_rejects_empty_finding_ids() {
     let (state, _tmp) = handler_state().await;
-    let work_id = create_work(&state).await;
 
-    let f1 = create_finding(&state, &work_id, "minor", "unchanged").await;
-
-    let Json(res) = batch_update_findings_handler(
+    let err = batch_update_findings_handler(
         State(state.clone()),
         axum::Json(BatchUpdateFindingsRequest {
-            finding_ids: vec![f1.finding_id.clone()],
-            patch: serde_json::json!({}),
+            finding_ids: vec![],
+            patch: serde_json::json!({ "status": "triaged" }),
         }),
     )
     .await
-    .unwrap();
+    .expect_err("empty finding_ids must be rejected");
 
-    assert_eq!(res.updated, 0);
-    assert!(res.not_found.is_none());
-    assert!(res.conflict.is_none());
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "invalid_input");
+}
+
+/// V1.91 P1 — bulk PATCH rejects unknown fields in `patch`.
+#[tokio::test]
+async fn findings_batch_rejects_unknown_patch_field() {
+    let (state, _tmp) = handler_state().await;
+    let work_id = create_work(&state).await;
+    let f1 = create_finding(&state, &work_id, "minor", "only finding").await;
+
+    let err = batch_update_findings_handler(
+        State(state.clone()),
+        axum::Json(BatchUpdateFindingsRequest {
+            finding_ids: vec![f1.finding_id.clone()],
+            patch: serde_json::json!({ "status": "triaged", "bogus": "x" }),
+        }),
+    )
+    .await
+    .expect_err("unknown patch field must be rejected");
+
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "invalid_input");
 }
