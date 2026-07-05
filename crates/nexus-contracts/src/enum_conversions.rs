@@ -17,8 +17,8 @@ use crate::generated::common::common_types::{
     ReferenceSourceType, RegistrationSource, ScanStatus, SelectionMode, StoryManifestStatus,
     SubscriptionTier, TimelineEventStatus, TimelineEventType, VerificationStatus, WorldStatus,
 };
-use crate::generated::local_api::canvas::world_kb::world_kb_relationship_kind::WorldKbRelationshipKind;
-use crate::generated::local_api::works::chapters::chapter_status::ChapterStatus;
+use crate::generated::daemon_api::canvas::world_kb::world_kb_relationship_kind::WorldKbRelationshipKind;
+use crate::generated::daemon_api::works::chapters::chapter_status::ChapterStatus;
 use crate::local::domain::runtime_mode::RuntimeMode;
 use std::fmt;
 use std::str::FromStr;

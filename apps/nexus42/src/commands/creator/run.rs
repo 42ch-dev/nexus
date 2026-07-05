@@ -8,7 +8,7 @@
 //!
 //! FL-E stage-advance presets (`research`, `novel-writing`, `novel-chapter-review`,
 //! `kb-extract`) are dispatched to `stage_advance`; all other presets are
-//! scheduled directly via the daemon Local API.
+//! scheduled directly via the daemon Daemon API.
 
 use crate::config::CliConfig;
 use crate::errors::Result;
@@ -219,7 +219,7 @@ pub async fn handle_run(cmd: RunCommand, config: &CliConfig) -> Result<()> {
     };
 
     let resp: serde_json::Value = client
-        .post::<serde_json::Value, _>("/v1/local/orchestration/schedules", &request)
+        .post::<serde_json::Value, _>("/v1/daemon/orchestration/schedules", &request)
         .await?;
 
     let schedule_id = resp
@@ -633,10 +633,10 @@ async fn assemble_world_kb_block(
 }
 
 /// V1.48 P1 (overlay §2 Consumer) — fetch open findings for the active
-/// Work + chapter via the daemon Local API and render the
+/// Work + chapter via the daemon Daemon API and render the
 /// `{{ open_findings_block }}` prompt block.
 ///
-/// Fetches `GET /v1/local/works/{work_id}/findings?status=open,triaged`,
+/// Fetches `GET /v1/daemon/works/{work_id}/findings?status=open,triaged`,
 /// filters client-side to overlay §2.1 scope (`chapter == N OR chapter ==
 /// NULL`), re-sorts by severity DESC + `created_at` ASC (the daemon's
 /// generic `list_findings` orders by `created_at` DESC), and feeds the
@@ -657,7 +657,7 @@ async fn assemble_world_kb_block(
 ///
 /// # Errors
 ///
-/// Returns an error if the daemon Local API call fails or the response
+/// Returns an error if the daemon Daemon API call fails or the response
 /// body cannot be deserialized.
 async fn assemble_open_findings_block(
     client: &crate::api::DaemonClient,
@@ -680,7 +680,8 @@ async fn assemble_open_findings_block(
     // finding still reaches the produce prompt. The list_findings DAO branches
     // on the comma to a dynamic `IN (?, ?)` query.
     let actionable_statuses = nexus_local_db::findings::ACTIONABLE_FINDING_STATUSES.join(",");
-    let path = format!("/v1/local/works/{work_id}/findings?status={actionable_statuses}&limit=200");
+    let path =
+        format!("/v1/daemon/works/{work_id}/findings?status={actionable_statuses}&limit=200");
     let resp: FindingsListResponse = client.get(&path).await?;
     let resp = resp.items;
 
@@ -727,7 +728,7 @@ async fn stage_advance(
 ) -> Result<()> {
     // Fetch current work state
     let resp: serde_json::Value = client
-        .get::<serde_json::Value>(&format!("/v1/local/works/{work_id}"))
+        .get::<serde_json::Value>(&format!("/v1/daemon/works/{work_id}"))
         .await?;
 
     let current_stage = resp
@@ -764,7 +765,7 @@ async fn stage_advance(
     });
 
     let updated: serde_json::Value = client
-        .patch::<serde_json::Value, _>(&format!("/v1/local/works/{work_id}"), &patch)
+        .patch::<serde_json::Value, _>(&format!("/v1/daemon/works/{work_id}"), &patch)
         .await?;
 
     // Audit log for --force usage (spec §3.1: "audited").
@@ -900,7 +901,7 @@ async fn stage_advance(
     };
 
     // V1.48 P1 (overlay §2 Consumer): for the produce stage with a
-    // selected chapter, fetch open findings via the daemon Local API and
+    // selected chapter, fetch open findings via the daemon Daemon API and
     // render the `{{ open_findings_block }}` prompt block. The block is
     // `None` when the stage is not `produce`, when no chapter is selected,
     // or when no open findings exist (AC2: no empty sentinel noise).
@@ -967,7 +968,7 @@ async fn stage_advance(
         );
 
         match client
-            .post::<serde_json::Value, _>("/v1/local/orchestration/schedules", &request)
+            .post::<serde_json::Value, _>("/v1/daemon/orchestration/schedules", &request)
             .await
         {
             Ok(sched_resp) => {
@@ -1003,7 +1004,10 @@ async fn stage_advance(
                     "stage_status": current_status,
                 });
                 let rollback_result = client
-                    .patch::<serde_json::Value, _>(&format!("/v1/local/works/{work_id}"), &rollback)
+                    .patch::<serde_json::Value, _>(
+                        &format!("/v1/daemon/works/{work_id}"),
+                        &rollback,
+                    )
                     .await;
 
                 return Err(match rollback_result {
@@ -1366,7 +1370,7 @@ mod tests {
         let mock = MockServer::start().await;
         let work_id = "wrk_rollback_test";
 
-        // GET /v1/local/works/{work_id} — work at intake/complete.
+        // GET /v1/daemon/works/{work_id} — work at intake/complete.
         let work_body = serde_json::json!({
             "work_id": work_id,
             "current_stage": "intake",
@@ -1377,7 +1381,7 @@ mod tests {
             "title": "Test Work",
         });
         Mock::given(method("GET"))
-            .and(path(format!("/v1/local/works/{work_id}")))
+            .and(path(format!("/v1/daemon/works/{work_id}")))
             .respond_with(ResponseTemplate::new(200).set_body_json(work_body))
             .mount(&mock)
             .await;
@@ -1390,7 +1394,7 @@ mod tests {
             "title": "Test Work",
         });
         Mock::given(method("PATCH"))
-            .and(path(format!("/v1/local/works/{work_id}")))
+            .and(path(format!("/v1/daemon/works/{work_id}")))
             .and(body_string_contains("active"))
             .respond_with(ResponseTemplate::new(200).set_body_json(stage_ok_body))
             .mount(&mock)
@@ -1398,7 +1402,7 @@ mod tests {
 
         // Rollback PATCH — body contains "complete" → 500.
         Mock::given(method("PATCH"))
-            .and(path(format!("/v1/local/works/{work_id}")))
+            .and(path(format!("/v1/daemon/works/{work_id}")))
             .and(body_string_contains("complete"))
             .respond_with(ResponseTemplate::new(500).set_body_string("rollback daemon error"))
             .mount(&mock)
@@ -1406,7 +1410,7 @@ mod tests {
 
         // POST schedule — fail with 500.
         Mock::given(method("POST"))
-            .and(path("/v1/local/orchestration/schedules"))
+            .and(path("/v1/daemon/orchestration/schedules"))
             .respond_with(
                 ResponseTemplate::new(500).set_body_string("daemon schedule creation failed"),
             )

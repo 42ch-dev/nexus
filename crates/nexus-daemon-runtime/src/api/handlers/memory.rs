@@ -27,7 +27,7 @@ use nexus_creator_memory::soul_narrative::SoulNarrativeSynthesizer as _;
 use nexus_creator_memory::MemoryError;
 use tracing::{debug, info};
 
-/// POST /v1/local/memory/pending-review
+/// POST /v1/daemon/memory/pending-review
 ///
 /// Creates a new pending review entry from a session-end capture event.
 /// This endpoint is called by the CLI when an ACP session ends.
@@ -180,7 +180,7 @@ fn validate_pending_review_input(req: &CreatePendingReviewRequest) -> Result<(),
     Ok(())
 }
 
-/// GET /v1/local/memory/pending-review?creator_id=...
+/// GET /v1/daemon/memory/pending-review?creator_id=...
 ///
 /// Lists all pending reviews for a creator with cursor-based pagination.
 pub async fn list_pending_reviews(
@@ -409,7 +409,7 @@ async fn fetch_pending_reviews_page(
     Ok(rows)
 }
 
-/// GET /v1/local/memory/pending-review/count?creator_id=...
+/// GET /v1/daemon/memory/pending-review/count?creator_id=...
 ///
 /// Returns the count of pending reviews for a creator.
 pub async fn count_pending_reviews(
@@ -458,7 +458,7 @@ pub async fn count_pending_reviews(
     }))
 }
 
-/// DELETE /v1/local/memory/pending-review/{id}?creator_id=...
+/// DELETE /v1/daemon/memory/pending-review/{id}?creator_id=...
 ///
 /// Deletes a pending review by its ID, but only if it belongs to the specified creator.
 pub async fn delete_pending_review(
@@ -561,7 +561,7 @@ pub async fn delete_pending_review(
 
 // ─── Review + Fragments handlers (V1.33 P4) ────────────────────────────────
 
-/// `POST /v1/local/memory/review`
+/// `POST /v1/daemon/memory/review`
 ///
 /// Triggers the review pipeline for a creator's pending review queue.
 /// Classifies each entry using rule-based heuristics:
@@ -996,7 +996,7 @@ impl nexus_creator_memory::review::SessionDigestSummarizer for PassthroughSummar
     }
 }
 
-/// `GET /v1/local/memory/fragments?creator_id=...&keyword=...&limit=...`
+/// `GET /v1/daemon/memory/fragments?creator_id=...&keyword=...&limit=...`
 ///
 /// Lists memory fragments for a creator with optional keyword filter.
 /// Returns fragment IDs and summaries for the CLI `creator memory fragments` command.
@@ -1117,7 +1117,7 @@ const FORWARD_LOOKING_BIGRAMS: &[(&str, &str)] = &[
     ("how", "might"),
 ];
 
-/// `POST /v1/local/memory/soul/reflect`
+/// `POST /v1/daemon/memory/soul/reflect`
 ///
 /// Reads or regenerates the cached whole-Creator SOUL narrative.
 /// The endpoint:

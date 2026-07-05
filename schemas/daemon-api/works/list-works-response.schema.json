@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/works/list-works-response.schema.json",
+  "schema_version": 2,
+  "title": "Nexus ListWorksResponse",
+  "description": "Response for GET /v1/daemon/works (cursor-based pagination, F-P3). The array field is `items`; the legacy `works` key was removed in `@42ch/nexus-contracts` 0.6.0.",
+  "type": "object",
+  "required": ["items", "pagination"],
+  "properties": {
+    "items": { "type": "array", "items": { "$ref": "https://nexus42.invalid/schemas/daemon-api/works/work-summary.schema.json" } },
+    "pagination": { "$ref": "https://nexus42.invalid/schemas/daemon-api/kb/pagination-info.schema.json" }
+  },
+  "additionalProperties": false
+}

@@ -26,8 +26,8 @@ use crate::workspace::WorkspaceState;
 /// Workspace initialization guard middleware.
 ///
 /// Rejects requests with 409 Conflict when the workspace has not been initialized.
-/// Applied to all daemon routes except `/v1/local/workspace/init` and
-/// `/v1/local/runtime/health`.
+/// Applied to all daemon routes except `/v1/daemon/workspace/init` and
+/// `/v1/daemon/runtime/health`.
 ///
 /// # Tracing
 /// - `debug` on entry/exit for every request
@@ -238,30 +238,30 @@ mod tests {
         use axum::middleware as axum_mw;
 
         let runtime_routes = Router::new()
-            .route("/v1/local/runtime/health", get(handlers::runtime::health))
-            .route("/v1/local/runtime/status", get(handlers::runtime::status))
+            .route("/v1/daemon/runtime/health", get(handlers::runtime::health))
+            .route("/v1/daemon/runtime/status", get(handlers::runtime::status))
             .route(
-                "/v1/local/daemon/status",
+                "/v1/daemon/daemon/status",
                 get(handlers::runtime::daemon_status),
             );
 
         let workspace_routes = Router::new()
-            .route("/v1/local/workspace", get(handlers::workspace::info))
+            .route("/v1/daemon/workspace", get(handlers::workspace::info))
             .route(
-                "/v1/local/workspace/init",
+                "/v1/daemon/workspace/init",
                 post(handlers::workspace::init_workspace),
             );
 
         // Guarded routes — middleware applied
         let creator_routes = Router::new()
-            .route("/v1/local/creators", get(handlers::creators::list))
+            .route("/v1/daemon/creators", get(handlers::creators::list))
             .route_layer(axum_mw::from_fn_with_state(
                 state.clone(),
                 middleware::require_workspace,
             ));
 
         let reference_routes = Router::new()
-            .route("/v1/local/references", get(handlers::references::list))
+            .route("/v1/daemon/references", get(handlers::references::list))
             .route_layer(axum_mw::from_fn_with_state(
                 state.clone(),
                 middleware::require_workspace,
@@ -280,7 +280,7 @@ mod tests {
     #[tokio::test]
     async fn health_route_works_without_init() {
         let app = create_uninitialized_app().await;
-        let response = app.get("/v1/local/runtime/health").await;
+        let response = app.get("/v1/daemon/runtime/health").await;
         assert!(
             response.status_code().is_success(),
             "health should return 2xx without init, got {}",
@@ -291,7 +291,7 @@ mod tests {
     #[tokio::test]
     async fn runtime_status_works_without_init() {
         let app = create_uninitialized_app().await;
-        let response = app.get("/v1/local/runtime/status").await;
+        let response = app.get("/v1/daemon/runtime/status").await;
         assert!(
             response.status_code().is_success(),
             "runtime status should return 2xx without init, got {}",
@@ -302,7 +302,7 @@ mod tests {
     #[tokio::test]
     async fn daemon_status_works_without_init() {
         let app = create_uninitialized_app().await;
-        let response = app.get("/v1/local/daemon/status").await;
+        let response = app.get("/v1/daemon/daemon/status").await;
         assert!(
             response.status_code().is_success(),
             "daemon status should return 2xx without init, got {}",
@@ -316,7 +316,7 @@ mod tests {
     #[tokio::test]
     async fn workspace_info_works_without_init() {
         let app = create_uninitialized_app().await;
-        let response = app.get("/v1/local/workspace").await;
+        let response = app.get("/v1/daemon/workspace").await;
         assert!(
             response.status_code().is_success(),
             "workspace info should return 2xx without init, got {}",
@@ -329,7 +329,7 @@ mod tests {
     #[tokio::test]
     async fn creators_returns_409_without_init() {
         let app = create_uninitialized_app().await;
-        let response = app.get("/v1/local/creators").await;
+        let response = app.get("/v1/daemon/creators").await;
         assert_eq!(
             response.status_code(),
             409,
@@ -341,7 +341,7 @@ mod tests {
     #[tokio::test]
     async fn references_returns_409_without_init() {
         let app = create_uninitialized_app().await;
-        let response = app.get("/v1/local/references").await;
+        let response = app.get("/v1/daemon/references").await;
         assert_eq!(
             response.status_code(),
             409,
@@ -355,7 +355,7 @@ mod tests {
     #[tokio::test]
     async fn creators_succeeds_after_init() {
         let app = create_initialized_app().await;
-        let response = app.get("/v1/local/creators").await;
+        let response = app.get("/v1/daemon/creators").await;
         assert!(
             response.status_code().is_success(),
             "creators should return 2xx after init, got {}",
@@ -366,7 +366,7 @@ mod tests {
     #[tokio::test]
     async fn references_succeeds_after_init() {
         let app = create_initialized_app().await;
-        let response = app.get("/v1/local/references").await;
+        let response = app.get("/v1/daemon/references").await;
         assert!(
             response.status_code().is_success(),
             "references should return 2xx after init, got {}",
@@ -400,7 +400,7 @@ mod tests {
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
         let routes = Router::new()
-            .route("/v1/local/creators", get(handlers::creators::list))
+            .route("/v1/daemon/creators", get(handlers::creators::list))
             .route_layer(axum_mw::from_fn_with_state(
                 state.clone(),
                 super::require_workspace,
@@ -410,7 +410,7 @@ mod tests {
 
         let server = TestServer::new(routes).expect("TestServer should initialize");
         let _guard = tmp;
-        let response = server.get("/v1/local/creators").await;
+        let response = server.get("/v1/daemon/creators").await;
 
         // Should return 409 UNINITIALIZED
         assert_eq!(response.status_code(), 409);
@@ -433,7 +433,7 @@ mod tests {
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
 
         let routes = Router::new()
-            .route("/v1/local/creators", get(handlers::creators::list))
+            .route("/v1/daemon/creators", get(handlers::creators::list))
             .route_layer(axum_mw::from_fn_with_state(
                 state.clone(),
                 super::require_workspace,
@@ -444,7 +444,7 @@ mod tests {
         let server = TestServer::new(routes).expect("TestServer should initialize");
         let _guard = tmp;
         let response = server
-            .get("/v1/local/creators")
+            .get("/v1/daemon/creators")
             .add_header("X-Request-Id", "my-custom-id-123")
             .await;
 

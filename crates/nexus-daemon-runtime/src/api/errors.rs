@@ -618,12 +618,12 @@ mod tests {
     #[test]
     fn response_body_includes_details_for_forbidden() {
         let err = NexusApiError::Forbidden {
-            resource: "daemon-local-api".to_string(),
+            resource: "daemon-daemon-api".to_string(),
             reason: "non-loopback connections require an API key".to_string(),
         };
         let body = err.to_response_body();
         let details = body.error.details.expect("details should be present");
-        assert_eq!(details["resource"], "daemon-local-api");
+        assert_eq!(details["resource"], "daemon-daemon-api");
         assert_eq!(
             details["reason"],
             "non-loopback connections require an API key"
@@ -806,7 +806,7 @@ mod tests {
         assert_eq!(err.error_code(), "world_id_required");
     }
 
-    /// Integration test: POST /v1/local/workspace/init with empty path → 400
+    /// Integration test: POST /v1/daemon/workspace/init with empty path → 400
     #[tokio::test]
     async fn init_workspace_with_empty_path_returns_400() {
         use crate::api::handlers::workspace::init_workspace;
@@ -840,7 +840,7 @@ mod tests {
         }
     }
 
-    /// Integration test: GET /v1/local/creators when no workspace → returns empty list.
+    /// Integration test: GET /v1/daemon/creators when no workspace → returns empty list.
     ///
     /// The workspace initialization guard is enforced by middleware (`require_workspace`),
     /// not by the handler itself. Calling the handler directly without middleware
@@ -869,7 +869,7 @@ mod tests {
         assert!(body.items.is_empty());
     }
 
-    /// Integration test: GET /v1/local/references when no workspace → returns empty list.
+    /// Integration test: GET /v1/daemon/references when no workspace → returns empty list.
     ///
     /// Workspace initialization is enforced by middleware, not by the handler.
     #[tokio::test]

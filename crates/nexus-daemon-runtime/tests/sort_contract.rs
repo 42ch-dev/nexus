@@ -46,7 +46,7 @@ async fn create_session(server: &TestServer, creator_id: &str, preset_id: &str) 
         seed: None,
     };
     let resp = server
-        .post("/v1/local/orchestration/sessions")
+        .post("/v1/daemon/orchestration/sessions")
         .json(&req)
         .await;
     resp.assert_status(StatusCode::CREATED);
@@ -62,7 +62,7 @@ async fn sessions_list_sort_by_preset_id_ascending() {
 
     let resp = ctx
         .server
-        .get("/v1/local/orchestration/sessions?creator_id=ctr_session&sort=preset_id")
+        .get("/v1/daemon/orchestration/sessions?creator_id=ctr_session&sort=preset_id")
         .await;
     resp.assert_status(StatusCode::OK);
     let body: Value = resp.json();
@@ -81,7 +81,7 @@ async fn sessions_list_invalid_sort_key_returns_session_sort_invalid() {
 
     let resp = ctx
         .server
-        .get("/v1/local/orchestration/sessions?creator_id=ctr_session&sort=unknown_key")
+        .get("/v1/daemon/orchestration/sessions?creator_id=ctr_session&sort=unknown_key")
         .await;
     resp.assert_status(StatusCode::BAD_REQUEST);
     let body: Value = resp.json();
@@ -95,7 +95,7 @@ async fn capabilities_list_sort_by_name() {
 
     let resp = ctx
         .server
-        .get("/v1/local/orchestration/capabilities?sort=name")
+        .get("/v1/daemon/orchestration/capabilities?sort=name")
         .await;
     resp.assert_status(StatusCode::OK);
     let body: Value = resp.json();
@@ -120,7 +120,7 @@ async fn capabilities_list_invalid_sort_key_returns_capability_sort_invalid() {
 
     let resp = ctx
         .server
-        .get("/v1/local/orchestration/capabilities?sort=unknown_key")
+        .get("/v1/daemon/orchestration/capabilities?sort=unknown_key")
         .await;
     resp.assert_status(StatusCode::BAD_REQUEST);
     let body: Value = resp.json();

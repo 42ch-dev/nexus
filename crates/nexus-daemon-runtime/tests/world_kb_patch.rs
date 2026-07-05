@@ -1,6 +1,6 @@
 //! V1.73 P0 World KB patch-route integration tests.
 //!
-//! Exercises the four World KB Local API handlers directly against a
+//! Exercises the four World KB Daemon API handlers directly against a
 //! canonical daemon `WorkspaceState` with a seeded creator/world/KeyBlock:
 //! - `patch_entity` happy path + per-row OCC 409 conflict + 422 validation.
 //! - `promote_candidate` adopt + reject (entity-scope-model §5.5.2 state machine).

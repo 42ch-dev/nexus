@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/memory/list-memory-fragments-query.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ListMemoryFragmentsQuery",
+  "description": "Query parameters for GET /v1/daemon/memory/fragments. `keyword` is an optional case-insensitive LIKE filter; `limit` defaults to 50 (clamped 1..=250) when omitted.",
+  "type": "object",
+  "required": ["creator_id"],
+  "properties": {
+    "creator_id": { "type": "string" },
+    "world_id": {
+      "type": "string",
+      "description": "Optional world projection filter. Omitted returns the whole Creator SOUL; present returns only fragments that emerged from this world. V1.81 has no public query value for core-only fragments."
+    },
+    "keyword": { "type": "string" },
+    "limit": { "type": "integer" }
+  },
+  "additionalProperties": false
+}

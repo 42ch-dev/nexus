@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/reading/reading-annotation.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ReadingAnnotation",
+  "description": "Shared annotation detail object returned by POST, PATCH, and as list items in GET /v1/daemon/reading/annotations. Represents a single persistent highlight with optional note, anchored by character offsets into the chapter body plain text.",
+  "type": "object",
+  "required": ["annotation_id", "work_id", "chapter", "start_offset", "end_offset", "selected_text", "color", "created_at", "updated_at"],
+  "properties": {
+    "annotation_id": {
+      "type": "string",
+      "description": "Stable, server-generated annotation identifier (e.g. ULID)."
+    },
+    "work_id": { "type": "string" },
+    "chapter": { "type": "integer", "minimum": 1 },
+    "start_offset": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Character offset where the highlight begins (inclusive)."
+    },
+    "end_offset": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Character offset where the highlight ends (exclusive). Guaranteed > start_offset."
+    },
+    "selected_text": {
+      "type": "string",
+      "minLength": 1,
+      "description": "The highlighted body text captured at creation time."
+    },
+    "color": {
+      "type": "string",
+      "enum": ["yellow", "blue", "green", "pink"],
+      "description": "Highlight color. V1.89 enum: {yellow, blue, green, pink}."
+    },
+    "note": {
+      "type": "string",
+      "description": "Optional free-text note. Absent or null when no note has been set."
+    },
+    "created_at": {
+      "type": "string",
+      "description": "ISO 8601 creation timestamp."
+    },
+    "updated_at": {
+      "type": "string",
+      "description": "ISO 8601 last-update timestamp."
+    }
+  },
+  "additionalProperties": false
+}

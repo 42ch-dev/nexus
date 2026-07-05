@@ -1,7 +1,7 @@
 //! Workspace management handlers (V1.20 Batch 4, T21–T24).
 //!
-//! Replaces the old single-workspace `GET /v1/local/workspace` and `POST /v1/local/workspace/init`
-//! with a multi-workspace CRUD API under `/v1/local/workspaces`.
+//! Replaces the old single-workspace `GET /v1/daemon/workspace` and `POST /v1/daemon/workspace/init`
+//! with a multi-workspace CRUD API under `/v1/daemon/workspaces`.
 
 #![allow(clippy::missing_errors_doc)]
 
@@ -453,7 +453,7 @@ async fn materialize_workspace(
 
 // ─── Handlers ──────────────────────────────────────────────────────────────
 
-/// `GET /v1/local/workspaces` — list workspaces (T21)
+/// `GET /v1/daemon/workspaces` — list workspaces (T21)
 ///
 /// Scans operational workspace directories on disk. Supports optional
 /// `creator_id` query parameter for filtering.
@@ -518,7 +518,7 @@ pub async fn list_workspaces(
     }))
 }
 
-/// `POST /v1/local/workspaces` — create/materialize workspace (T22)
+/// `POST /v1/daemon/workspaces` — create/materialize workspace (T22)
 ///
 /// Creates creative tree, operational registration, and initializes state DB.
 /// Per ADR-014: skeleton-free — no Stories/References directories created.
@@ -587,7 +587,7 @@ pub async fn create_workspace(
     }))
 }
 
-/// `GET /v1/local/workspaces/active` — return active workspace selection (T23)
+/// `GET /v1/daemon/workspaces/active` — return active workspace selection (T23)
 ///
 /// Reads from CLI config. Returns 409 UNINITIALIZED if no active creator is set.
 pub async fn get_active_workspace(
@@ -616,7 +616,7 @@ pub async fn get_active_workspace(
     }))
 }
 
-/// `PUT /v1/local/workspaces/active` — set active workspace (T24)
+/// `PUT /v1/daemon/workspaces/active` — set active workspace (T24)
 ///
 /// Persists selection to CLI config. Validates that the workspace exists on disk.
 pub async fn set_active_workspace(

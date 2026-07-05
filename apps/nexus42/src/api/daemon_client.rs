@@ -1,6 +1,6 @@
 //! Daemon HTTP Client
 //!
-//! Communicates with the daemon runtime via the Local API (HTTP JSON on port 8420).
+//! Communicates with the daemon runtime via the Daemon API (HTTP JSON on port 8420).
 //! Configurable timeouts prevent infinite hangs when the daemon is unresponsive.
 //!
 //! # API Key (V1.20+)
@@ -47,12 +47,12 @@ const DAEMON_API_KEY_ENV: &str = "NEXUS42_DAEMON_API_KEY";
 
 /// Unguarded paths that skip the `X-API-Key` header.
 const UNGUARDED_PATHS: &[&str] = &[
-    "/v1/local/runtime/health",
-    "/v1/local/runtime/status",
-    "/v1/local/daemon/status",
+    "/v1/daemon/runtime/health",
+    "/v1/daemon/runtime/status",
+    "/v1/daemon/daemon/status",
 ];
 
-/// Client for the daemon Local API
+/// Client for the daemon Daemon API
 #[derive(Debug, Clone)]
 pub struct DaemonClient {
     base_url: String,
@@ -121,7 +121,7 @@ impl DaemonClient {
     ///
     /// This function never returns an error; it absorbs all failures and returns `Ok(false)`.
     pub async fn health_check(&self) -> Result<bool> {
-        let url = format!("{}/v1/local/runtime/health", self.base_url);
+        let url = format!("{}/v1/daemon/runtime/health", self.base_url);
         // Health check is unguarded — no API key needed
         self.http
             .get(&url)
@@ -140,7 +140,7 @@ impl DaemonClient {
     /// Returns `CliError::Api` if the daemon returns a non-success HTTP status,
     /// or `CliError::Io`/network error if the request fails.
     pub async fn get_runtime_status(&self) -> Result<crate::api::models::RuntimeStatus> {
-        self.get("/v1/local/runtime/status").await
+        self.get("/v1/daemon/runtime/status").await
     }
 
     /// Send a GET request.
@@ -168,7 +168,7 @@ impl DaemonClient {
     ///
     /// Returns `CliError::Api` if the daemon returns a non-success HTTP status,
     /// or a network/deserialization error if the request or parsing fails.
-    #[allow(dead_code)] // For upcoming sync / local API commands
+    #[allow(dead_code)] // For upcoming sync / daemon API commands
     #[allow(clippy::future_not_send)]
     pub async fn post<T: DeserializeOwned, B: Serialize>(&self, path: &str, body: &B) -> Result<T> {
         let url = format!("{}{}", self.base_url, path);
@@ -191,7 +191,7 @@ impl DaemonClient {
     ///
     /// Returns `CliError::Api` if the daemon returns a non-success HTTP status,
     /// or a network/deserialization error if the request or parsing fails.
-    #[allow(dead_code)] // For upcoming sync / local API commands
+    #[allow(dead_code)] // For upcoming sync / daemon API commands
     #[allow(clippy::future_not_send)]
     pub async fn post_raw<B: Serialize>(&self, path: &str, body: &B) -> Result<serde_json::Value> {
         let url = format!("{}{}", self.base_url, path);
@@ -279,7 +279,7 @@ impl DaemonClient {
 
     // ─── Workspace management methods (V1.20 Batch 4) ──────────────────
 
-    /// List workspaces via daemon API (`GET /v1/local/workspaces`).
+    /// List workspaces via daemon API (`GET /v1/daemon/workspaces`).
     ///
     /// # Errors
     ///
@@ -289,13 +289,13 @@ impl DaemonClient {
         creator_id: Option<&str>,
     ) -> Result<crate::api::models::ListWorkspacesResponse> {
         let path = creator_id.map_or_else(
-            || "/v1/local/workspaces".to_string(),
-            |cid| format!("/v1/local/workspaces?creator_id={cid}"),
+            || "/v1/daemon/workspaces".to_string(),
+            |cid| format!("/v1/daemon/workspaces?creator_id={cid}"),
         );
         self.get(&path).await
     }
 
-    /// Create a workspace via daemon API (`POST /v1/local/workspaces`).
+    /// Create a workspace via daemon API (`POST /v1/daemon/workspaces`).
     ///
     /// # Errors
     ///
@@ -305,10 +305,10 @@ impl DaemonClient {
         &self,
         req: &crate::api::models::CreateWorkspaceRequest,
     ) -> Result<crate::api::models::CreateWorkspaceResponse> {
-        self.post("/v1/local/workspaces", req).await
+        self.post("/v1/daemon/workspaces", req).await
     }
 
-    /// Get the active workspace selection (`GET /v1/local/workspaces/active`).
+    /// Get the active workspace selection (`GET /v1/daemon/workspaces/active`).
     ///
     /// # Errors
     ///
@@ -316,10 +316,10 @@ impl DaemonClient {
     pub async fn get_active_workspace(
         &self,
     ) -> Result<crate::api::models::ActiveWorkspaceResponse> {
-        self.get("/v1/local/workspaces/active").await
+        self.get("/v1/daemon/workspaces/active").await
     }
 
-    /// Set the active workspace (`PUT /v1/local/workspaces/active`).
+    /// Set the active workspace (`PUT /v1/daemon/workspaces/active`).
     ///
     /// # Errors
     ///
@@ -328,21 +328,21 @@ impl DaemonClient {
         &self,
         req: &crate::api::models::SetActiveWorkspaceRequest,
     ) -> Result<crate::api::models::SetActiveWorkspaceResponse> {
-        self.put("/v1/local/workspaces/active", req).await
+        self.put("/v1/daemon/workspaces/active", req).await
     }
 
     // ─── Creator management methods (V1.20 Batch 5) ───────────────────
 
-    /// Get the active creator (`GET /v1/local/creators/active`).
+    /// Get the active creator (`GET /v1/daemon/creators/active`).
     ///
     /// # Errors
     ///
     /// Returns `CliError::Api` with 409 if no creator is active.
     pub async fn get_active_creator(&self) -> Result<crate::api::models::ActiveCreatorResponse> {
-        self.get("/v1/local/creators/active").await
+        self.get("/v1/daemon/creators/active").await
     }
 
-    /// Set the active creator (`PUT /v1/local/creators/active`).
+    /// Set the active creator (`PUT /v1/daemon/creators/active`).
     ///
     /// # Errors
     ///
@@ -351,10 +351,10 @@ impl DaemonClient {
         &self,
         req: &crate::api::models::SetActiveCreatorRequest,
     ) -> Result<crate::api::models::SetActiveCreatorResponse> {
-        self.put("/v1/local/creators/active", req).await
+        self.put("/v1/daemon/creators/active", req).await
     }
 
-    /// Logout a creator (`POST /v1/local/creators/{id}:logout`).
+    /// Logout a creator (`POST /v1/daemon/creators/{id}:logout`).
     ///
     /// # Errors
     ///
@@ -363,22 +363,22 @@ impl DaemonClient {
         &self,
         creator_id: &str,
     ) -> Result<crate::api::models::LogoutCreatorResponse> {
-        self.post(&format!("/v1/local/creators/{creator_id}:logout"), &())
+        self.post(&format!("/v1/daemon/creators/{creator_id}:logout"), &())
             .await
     }
 
     // ─── Preset management methods (V1.20 Batch 5) ────────────────────
 
-    /// List presets grouped by source (`GET /v1/local/presets`).
+    /// List presets grouped by source (`GET /v1/daemon/presets`).
     ///
     /// # Errors
     ///
     /// Returns `CliError::Api` on failure.
     pub async fn list_presets(&self) -> Result<crate::api::models::ListPresetsGroupedResponse> {
-        self.get("/v1/local/presets").await
+        self.get("/v1/daemon/presets").await
     }
 
-    /// Scaffold a user preset (`POST /v1/local/presets`).
+    /// Scaffold a user preset (`POST /v1/daemon/presets`).
     ///
     /// # Errors
     ///
@@ -387,10 +387,10 @@ impl DaemonClient {
         &self,
         req: &crate::api::models::ScaffoldPresetRequest,
     ) -> Result<crate::api::models::ScaffoldPresetResponse> {
-        self.post("/v1/local/presets", req).await
+        self.post("/v1/daemon/presets", req).await
     }
 
-    /// Validate a preset YAML (`POST /v1/local/presets:validate`).
+    /// Validate a preset YAML (`POST /v1/daemon/presets:validate`).
     ///
     /// # Errors
     ///
@@ -399,10 +399,10 @@ impl DaemonClient {
         &self,
         req: &crate::api::models::ValidatePresetRequest,
     ) -> Result<crate::api::models::ValidatePresetResponse> {
-        self.post("/v1/local/presets:validate", req).await
+        self.post("/v1/daemon/presets:validate", req).await
     }
 
-    /// Reload a preset (`POST /v1/local/presets/{id}:reload`).
+    /// Reload a preset (`POST /v1/daemon/presets/{id}:reload`).
     ///
     /// # Errors
     ///
@@ -411,13 +411,13 @@ impl DaemonClient {
         &self,
         preset_id: &str,
     ) -> Result<crate::api::models::ReloadPresetResponse> {
-        self.post(&format!("/v1/local/presets/{preset_id}:reload"), &())
+        self.post(&format!("/v1/daemon/presets/{preset_id}:reload"), &())
             .await
     }
 
     // ─── KB methods (V1.20 Batch 5) ────────────────────────────────────
 
-    /// List KB entries (`GET /v1/local/kb/entries`).
+    /// List KB entries (`GET /v1/daemon/kb/entries`).
     ///
     /// # Errors
     ///
@@ -428,7 +428,7 @@ impl DaemonClient {
         workspace_slug: Option<&str>,
         query: Option<&str>,
     ) -> Result<crate::api::models::ListKbEntriesResponse> {
-        let mut path = format!("/v1/local/kb/entries?creator_id={creator_id}");
+        let mut path = format!("/v1/daemon/kb/entries?creator_id={creator_id}");
         if let Some(slug) = workspace_slug {
             path.push_str("&workspace_slug=");
             path.push_str(slug);
@@ -449,7 +449,7 @@ impl DaemonClient {
         self.get(&path).await
     }
 
-    /// Add a KB entry (`POST /v1/local/kb/entries`).
+    /// Add a KB entry (`POST /v1/daemon/kb/entries`).
     ///
     /// # Errors
     ///
@@ -458,10 +458,10 @@ impl DaemonClient {
         &self,
         req: &crate::api::models::AddKbEntryRequest,
     ) -> Result<crate::api::models::AddKbEntryResponse> {
-        self.post("/v1/local/kb/entries", req).await
+        self.post("/v1/daemon/kb/entries", req).await
     }
 
-    /// Get a KB entry (`GET /v1/local/kb/entries/{id}`).
+    /// Get a KB entry (`GET /v1/daemon/kb/entries/{id}`).
     ///
     /// # Errors
     ///
@@ -470,10 +470,10 @@ impl DaemonClient {
         &self,
         entry_id: &str,
     ) -> Result<crate::api::models::GetKbEntryResponse> {
-        self.get(&format!("/v1/local/kb/entries/{entry_id}")).await
+        self.get(&format!("/v1/daemon/kb/entries/{entry_id}")).await
     }
 
-    /// Delete a KB entry (`DELETE /v1/local/kb/entries/{id}`).
+    /// Delete a KB entry (`DELETE /v1/daemon/kb/entries/{id}`).
     ///
     /// # Errors
     ///
@@ -482,7 +482,7 @@ impl DaemonClient {
         &self,
         entry_id: &str,
     ) -> Result<crate::api::models::DeleteKbEntryResponse> {
-        self.delete(&format!("/v1/local/kb/entries/{entry_id}"))
+        self.delete(&format!("/v1/daemon/kb/entries/{entry_id}"))
             .await
     }
 
@@ -552,7 +552,7 @@ impl DaemonClient {
         }
     }
 
-    // POST /v1/local/context/assemble — Retired (KCA-002 B2).
+    // POST /v1/daemon/context/assemble — Retired (KCA-002 B2).
     // Context assembly is CLI in-process via nexus-moment-context-assembly.
     // See local-runtime-boundary.md §3.2.1.
 
@@ -569,7 +569,7 @@ impl DaemonClient {
         &self,
         creator_id: &str,
     ) -> Result<crate::api::models::ReviewResponse> {
-        let path = "/v1/local/memory/review";
+        let path = "/v1/daemon/memory/review";
         let body = serde_json::json!({ "creator_id": creator_id });
 
         let url = format!("{}{}", self.base_url, path);
@@ -609,7 +609,7 @@ impl DaemonClient {
         &self,
         creator_id: &str,
     ) -> Result<Vec<crate::api::models::FragmentRow>> {
-        let path = "/v1/local/memory/fragments";
+        let path = "/v1/daemon/memory/fragments";
 
         let url = format!("{}{}?creator_id={}", self.base_url, path, creator_id);
         let resp = match self.send_authenticated(self.http.get(&url), path).await {
@@ -636,7 +636,7 @@ impl DaemonClient {
 
     /// List pending reviews for a creator via daemon API.
     ///
-    /// `GET /v1/local/memory/pending-review?creator_id=...`
+    /// `GET /v1/daemon/memory/pending-review?creator_id=...`
     ///
     /// # Errors
     ///
@@ -645,7 +645,7 @@ impl DaemonClient {
         &self,
         creator_id: &str,
     ) -> Result<crate::api::models::ListPendingReviewsResponse> {
-        let path = "/v1/local/memory/pending-review";
+        let path = "/v1/daemon/memory/pending-review";
 
         let url = format!("{}{}?creator_id={}", self.base_url, path, creator_id);
         let resp = match self.send_authenticated(self.http.get(&url), path).await {
@@ -670,7 +670,7 @@ impl DaemonClient {
 
     /// Dismiss (delete) a pending review via daemon API.
     ///
-    /// `DELETE /v1/local/memory/pending-review/{id}?creator_id=...`
+    /// `DELETE /v1/daemon/memory/pending-review/{id}?creator_id=...`
     ///
     /// # Errors
     ///
@@ -680,7 +680,7 @@ impl DaemonClient {
         pending_id: &str,
         creator_id: &str,
     ) -> Result<crate::api::models::DeletePendingReviewResponse> {
-        let path = format!("/v1/local/memory/pending-review/{pending_id}");
+        let path = format!("/v1/daemon/memory/pending-review/{pending_id}");
 
         let url = format!("{}{}?creator_id={}", self.base_url, path, creator_id);
         let resp = match self.send_authenticated(self.http.delete(&url), &path).await {

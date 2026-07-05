@@ -67,7 +67,7 @@ pub struct WorkspaceState {
     /// In-memory session store for workspace.open / workspace.commit.
     session_manager: Arc<WorkspaceSessionManager>,
     /// V1.80 REL-01: per-creator in-flight serialization guard for
-    /// `POST /v1/local/memory/review`. Two overlapping review calls for the same
+    /// `POST /v1/daemon/memory/review`. Two overlapping review calls for the same
     /// creator fetch the same pending rows and would double-promote / mint
     /// duplicate fragments (the side effects are not idempotent at the DB).
     /// The outer `std::sync::Mutex` guards only the map lookup; each creator's

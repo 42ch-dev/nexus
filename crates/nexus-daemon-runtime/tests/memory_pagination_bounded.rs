@@ -117,7 +117,7 @@ async fn pending_review_list_respects_limit_when_dataset_is_large() {
     let resp = ctx
         .server
         .get(&format!(
-            "/v1/local/memory/pending-review?creator_id={ACTIVE_CREATOR}&limit={PAGE_SIZE}"
+            "/v1/daemon/memory/pending-review?creator_id={ACTIVE_CREATOR}&limit={PAGE_SIZE}"
         ))
         .await;
     resp.assert_status(axum::http::StatusCode::OK);
@@ -157,10 +157,10 @@ async fn pending_review_full_cursor_walk_returns_all_rows_once() {
     loop {
         let path = match &cursor {
             Some(c) => format!(
-                "/v1/local/memory/pending-review?creator_id={ACTIVE_CREATOR}&limit={PAGE_SIZE}&cursor={c}"
+                "/v1/daemon/memory/pending-review?creator_id={ACTIVE_CREATOR}&limit={PAGE_SIZE}&cursor={c}"
             ),
             None => format!(
-                "/v1/local/memory/pending-review?creator_id={ACTIVE_CREATOR}&limit={PAGE_SIZE}"
+                "/v1/daemon/memory/pending-review?creator_id={ACTIVE_CREATOR}&limit={PAGE_SIZE}"
             ),
         };
         let resp = ctx.server.get(&path).await;
@@ -219,7 +219,7 @@ async fn pending_review_deleted_cursor_falls_back_to_first_page() {
     let resp = ctx
         .server
         .get(&format!(
-            "/v1/local/memory/pending-review?creator_id={ACTIVE_CREATOR}&limit={PAGE_SIZE}"
+            "/v1/daemon/memory/pending-review?creator_id={ACTIVE_CREATOR}&limit={PAGE_SIZE}"
         ))
         .await;
     let body: Value = resp.json();
@@ -245,7 +245,7 @@ async fn pending_review_deleted_cursor_falls_back_to_first_page() {
     let resp = ctx
         .server
         .get(&format!(
-            "/v1/local/memory/pending-review?creator_id={ACTIVE_CREATOR}&limit={PAGE_SIZE}&cursor={cursor}"
+            "/v1/daemon/memory/pending-review?creator_id={ACTIVE_CREATOR}&limit={PAGE_SIZE}&cursor={cursor}"
         ))
         .await;
     resp.assert_status(axum::http::StatusCode::OK);
@@ -275,7 +275,7 @@ async fn fragments_list_respects_limit_when_dataset_is_large() {
     let resp = ctx
         .server
         .get(&format!(
-            "/v1/local/memory/fragments?creator_id={ACTIVE_CREATOR}&limit={PAGE_SIZE}"
+            "/v1/daemon/memory/fragments?creator_id={ACTIVE_CREATOR}&limit={PAGE_SIZE}"
         ))
         .await;
     resp.assert_status(axum::http::StatusCode::OK);
@@ -309,7 +309,7 @@ async fn fragments_limit_above_dataset_returns_all() {
     let resp = ctx
         .server
         .get(&format!(
-            "/v1/local/memory/fragments?creator_id={ACTIVE_CREATOR}&limit=250"
+            "/v1/daemon/memory/fragments?creator_id={ACTIVE_CREATOR}&limit=250"
         ))
         .await;
     resp.assert_status(axum::http::StatusCode::OK);

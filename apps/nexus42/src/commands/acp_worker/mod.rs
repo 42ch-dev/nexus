@@ -68,7 +68,7 @@ pub struct AcpWorkerArgs {
     #[arg(long = "agent-ref", value_name = "ROLE:AGENT_ID[:MODEL]")]
     pub agent_ref: Vec<String>,
 
-    /// Daemon Local API base URL for session-capture submissions.
+    /// Daemon Daemon API base URL for session-capture submissions.
     /// Defaults to `http://127.0.0.1:8420`.
     #[arg(long, default_value = "http://127.0.0.1:8420")]
     pub daemon_url: String,

@@ -1,10 +1,10 @@
 //! Preset management handlers (V1.20 Batch 5, T34–T37).
 //!
 //! Endpoints:
-//! - `GET /v1/local/presets` — list presets grouped by source
-//! - `POST /v1/local/presets` — scaffold user preset
-//! - `POST /v1/local/presets:validate` — validate preset YAML/bundle
-//! - `POST /v1/local/presets/{id}:reload` — reload preset
+//! - `GET /v1/daemon/presets` — list presets grouped by source
+//! - `POST /v1/daemon/presets` — scaffold user preset
+//! - `POST /v1/daemon/presets:validate` — validate preset YAML/bundle
+//! - `POST /v1/daemon/presets/{id}:reload` — reload preset
 
 #![allow(clippy::missing_errors_doc)]
 
@@ -153,9 +153,9 @@ fn list_system_ids(nexus_home: &std::path::Path) -> Vec<String> {
 
 // ─── Handlers ──────────────────────────────────────────────────────────────
 
-/// `GET /v1/local/presets` — list presets grouped by source (T34)
+/// `GET /v1/daemon/presets` — list presets grouped by source (T34)
 ///
-/// Replaces `GET /v1/local/orchestration/presets` with richer grouping.
+/// Replaces `GET /v1/daemon/orchestration/presets` with richer grouping.
 pub async fn list_presets(
     State(state): State<WorkspaceState>,
 ) -> Result<Json<ListPresetsGroupedResponse>, NexusApiError> {
@@ -224,7 +224,7 @@ pub async fn list_presets(
     }))
 }
 
-/// `POST /v1/local/presets` — scaffold user preset (T35)
+/// `POST /v1/daemon/presets` — scaffold user preset (T35)
 ///
 /// Creates a new user preset bundle directory with template files.
 pub async fn scaffold_preset(
@@ -275,7 +275,7 @@ pub async fn scaffold_preset(
     }))
 }
 
-/// `POST /v1/local/presets:validate` — validate preset YAML/bundle (T36, V1.32 P1)
+/// `POST /v1/daemon/presets:validate` — validate preset YAML/bundle (T36, V1.32 P1)
 ///
 /// Validates a preset YAML file for structural correctness with
 /// field-level detail in the error response. Routes through the shared
@@ -454,7 +454,7 @@ impl ValidatePresetResponse {
     }
 }
 
-/// `POST /v1/local/presets/{id}:reload` — reload preset (T37)
+/// `POST /v1/daemon/presets/{id}:reload` — reload preset (T37)
 ///
 /// Reloads a user or system preset. For embedded presets, refreshes
 /// the cached source hash.
@@ -566,7 +566,7 @@ async fn load_preset_yaml(
     }
 }
 
-/// `GET /v1/local/presets/{id}` — fetch preset manifest YAML.
+/// `GET /v1/daemon/presets/{id}` — fetch preset manifest YAML.
 pub async fn get_preset(
     State(state): State<WorkspaceState>,
     Path(preset_id): Path<String>,
@@ -583,7 +583,7 @@ pub async fn get_preset(
     }))
 }
 
-/// `PATCH /v1/local/presets/{id}` — update user preset YAML.
+/// `PATCH /v1/daemon/presets/{id}` — update user preset YAML.
 pub async fn update_preset(
     State(state): State<WorkspaceState>,
     Path(preset_id): Path<String>,
@@ -621,7 +621,7 @@ pub async fn update_preset(
     }))
 }
 
-/// `DELETE /v1/local/presets/{id}` — delete a user preset bundle.
+/// `DELETE /v1/daemon/presets/{id}` — delete a user preset bundle.
 pub async fn delete_preset(
     State(state): State<WorkspaceState>,
     Path(preset_id): Path<String>,

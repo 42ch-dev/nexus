@@ -905,7 +905,7 @@ async fn findings_lifecycle_rejects_sql_injection_style_status() {
 
 // ─── V1.49 P3: retention prune endpoint (§9.4) ──────────────────────────────
 
-/// `POST /v1/local/findings/prune` previews (`dry_run=true`) and performs
+/// `POST /v1/daemon/findings/prune` previews (`dry_run=true`) and performs
 /// (`dry_run=false`) the retention prune of old `resolved` findings.
 ///
 /// Seeds two findings: one marked `resolved` + old (past the 90-day window)

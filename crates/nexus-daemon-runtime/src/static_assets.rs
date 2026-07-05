@@ -3,11 +3,11 @@
 //! In release builds, `apps/web/dist` is embedded into the `nexus42` binary at
 //! compile time.  The daemon serves these assets at the server root (`/`) as an
 //! unauthenticated SPA shell.  All data routes remain behind the loopback
-//! `/v1/local/*` API under the existing V1.20 keyless-localhost model.
+//! `/v1/daemon/*` API under the existing V1.20 keyless-localhost model.
 //!
 //! # SPA fallback
 //!
-//! Unmatched `GET` / `HEAD` paths (non-`/v1/local/*`) are served `index.html`
+//! Unmatched `GET` / `HEAD` paths (non-`/v1/daemon/*`) are served `index.html`
 //! so the React Router can handle client-side routing.  Non-GET requests and
 //! paths that don't match any embedded file return `404 NOT FOUND`.
 //!
@@ -23,7 +23,7 @@
 //! the `.fallback(...)` registration in `api/mod.rs`). In debug/test builds
 //! the SPA fallback is not wired, so unmatched paths return the framework 404
 //! (avoids masking API routing bugs in tests). Dev uses the Vite dev server,
-//! which proxies `/v1/local/*` to the daemon; the browser loads from the Vite
+//! which proxies `/v1/daemon/*` to the daemon; the browser loads from the Vite
 //! port, never the daemon's `/`. Release binaries embed the real Vite dist
 //! (built via `pnpm --filter web build`); `build.rs` creates a stub dist when
 //! absent so this crate compiles even without a prior web build.
@@ -54,10 +54,10 @@ pub struct WebAssets;
 /// | `GET /assets/<hash>.js`      | `200 <file>` (cached 1 year)      |
 /// | `GET /works` (client route)  | `200 index.html` (SPA fallback)   |
 /// | `POST /works`                | `404 Not Found`                   |
-/// | `GET /v1/local/...`          | *handled by existing API routes*  |
+/// | `GET /v1/daemon/...`          | *handled by existing API routes*  |
 ///
 /// The function is designed as a **fallback** inside the axum router — it only
-/// receives requests that were NOT matched by any `/v1/local/*` or other
+/// receives requests that were NOT matched by any `/v1/daemon/*` or other
 /// explicit route.
 ///
 /// # Panics

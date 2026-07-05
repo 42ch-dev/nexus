@@ -139,7 +139,7 @@ async fn schedule_create_with_correct_dto_shape() {
 
     let resp = ctx
         .server
-        .post("/v1/local/orchestration/schedules")
+        .post("/v1/daemon/orchestration/schedules")
         .json(&req)
         .await;
     resp.assert_status(StatusCode::CREATED);
@@ -160,7 +160,7 @@ async fn schedule_create_with_correct_dto_shape() {
     // Verify via list that the schedule was persisted with correct fields
     let list_resp = ctx
         .server
-        .get("/v1/local/orchestration/schedules?creator_id=ctr_test")
+        .get("/v1/daemon/orchestration/schedules?creator_id=ctr_test")
         .await;
     list_resp.assert_status(StatusCode::OK);
 
@@ -206,7 +206,7 @@ async fn schedule_create_seeds_core_context_from_preset_input() {
 
     let resp = ctx
         .server
-        .post("/v1/local/orchestration/schedules")
+        .post("/v1/daemon/orchestration/schedules")
         .json(&req)
         .await;
     resp.assert_status(StatusCode::CREATED);
@@ -222,7 +222,7 @@ async fn schedule_create_seeds_core_context_from_preset_input() {
     // Verify schedule exists in list with correct preset
     let list_resp = ctx
         .server
-        .get("/v1/local/orchestration/schedules?creator_id=ctr_ctx")
+        .get("/v1/daemon/orchestration/schedules?creator_id=ctr_ctx")
         .await;
     let list_body: Value = list_resp.json();
     let schedules = list_body["items"].as_array().unwrap();
@@ -267,20 +267,20 @@ async fn schedule_list_isolation_by_creator() {
 
     let resp_a = ctx
         .server
-        .post("/v1/local/orchestration/schedules")
+        .post("/v1/daemon/orchestration/schedules")
         .json(&req_a)
         .await;
     resp_a.assert_status(StatusCode::CREATED);
 
     let resp_b = ctx
         .server
-        .post("/v1/local/orchestration/schedules")
+        .post("/v1/daemon/orchestration/schedules")
         .json(&req_b)
         .await;
     resp_b.assert_status(StatusCode::CREATED);
 
     // List all schedules
-    let all_resp = ctx.server.get("/v1/local/orchestration/schedules").await;
+    let all_resp = ctx.server.get("/v1/daemon/orchestration/schedules").await;
     let all_body: Value = all_resp.json();
     let all_schedules = all_body["items"].as_array().unwrap();
     assert_eq!(all_schedules.len(), 2, "Should have 2 schedules total");
@@ -288,7 +288,7 @@ async fn schedule_list_isolation_by_creator() {
     // Filter by creator_alpha — only their schedule appears
     let alpha_resp = ctx
         .server
-        .get("/v1/local/orchestration/schedules?creator_id=ctr_alpha")
+        .get("/v1/daemon/orchestration/schedules?creator_id=ctr_alpha")
         .await;
     let alpha_body: Value = alpha_resp.json();
     let alpha_schedules = alpha_body["items"].as_array().unwrap();
@@ -322,7 +322,7 @@ async fn schedule_create_without_seed_no_core_context() {
 
     let resp = ctx
         .server
-        .post("/v1/local/orchestration/schedules")
+        .post("/v1/daemon/orchestration/schedules")
         .json(&req)
         .await;
     resp.assert_status(StatusCode::CREATED);
@@ -338,7 +338,7 @@ async fn schedule_create_without_seed_no_core_context() {
     // Verify schedule is in the list
     let list_resp = ctx
         .server
-        .get("/v1/local/orchestration/schedules?creator_id=ctr_noseed")
+        .get("/v1/daemon/orchestration/schedules?creator_id=ctr_noseed")
         .await;
     let list_body: Value = list_resp.json();
     let schedules = list_body["items"].as_array().unwrap();
@@ -379,7 +379,7 @@ async fn schedule_with_empty_creator_id_is_isolated_from_legitimate_creators() {
     };
     let resp_empty = ctx
         .server
-        .post("/v1/local/orchestration/schedules")
+        .post("/v1/daemon/orchestration/schedules")
         .json(&req_empty)
         .await;
     // Empty creator_id + no work_id → 422 preset_gates_failed (gate-eval requires
@@ -401,7 +401,7 @@ async fn schedule_with_empty_creator_id_is_isolated_from_legitimate_creators() {
     };
     let resp_real = ctx
         .server
-        .post("/v1/local/orchestration/schedules")
+        .post("/v1/daemon/orchestration/schedules")
         .json(&req_real)
         .await;
     resp_real.assert_status(StatusCode::CREATED);
@@ -410,7 +410,7 @@ async fn schedule_with_empty_creator_id_is_isolated_from_legitimate_creators() {
     // not the one with empty creator_id
     let list_resp = ctx
         .server
-        .get("/v1/local/orchestration/schedules?creator_id=ctr_real")
+        .get("/v1/daemon/orchestration/schedules?creator_id=ctr_real")
         .await;
     list_resp.assert_status(StatusCode::OK);
     let list_body: Value = list_resp.json();
@@ -421,7 +421,7 @@ async fn schedule_with_empty_creator_id_is_isolated_from_legitimate_creators() {
     // Listing all schedules shows only the real one (PR #50 review:
     // empty creator_id request was rejected with 422 preset_gates_failed —
     // the schedule was never created). Pre-fix this assertion expected 2.
-    let all_resp = ctx.server.get("/v1/local/orchestration/schedules").await;
+    let all_resp = ctx.server.get("/v1/daemon/orchestration/schedules").await;
     let all_body: Value = all_resp.json();
     let all_schedules = all_body["items"].as_array().unwrap();
     assert_eq!(
@@ -461,7 +461,7 @@ async fn gated_preset_without_work_id_is_rejected() {
     };
     let resp = ctx
         .server
-        .post("/v1/local/orchestration/schedules")
+        .post("/v1/daemon/orchestration/schedules")
         .json(&req)
         .await;
     resp.assert_status(StatusCode::UNPROCESSABLE_ENTITY);
@@ -483,7 +483,7 @@ async fn create_schedule_with_label(server: &TestServer, creator_id: &str, label
         reason: None,
     };
     let resp = server
-        .post("/v1/local/orchestration/schedules")
+        .post("/v1/daemon/orchestration/schedules")
         .json(&req)
         .await;
     resp.assert_status(StatusCode::CREATED);
@@ -498,7 +498,7 @@ async fn schedule_list_sort_by_label_ascending() {
 
     let resp = ctx
         .server
-        .get("/v1/local/orchestration/schedules?creator_id=ctr_sort&sort=label")
+        .get("/v1/daemon/orchestration/schedules?creator_id=ctr_sort&sort=label")
         .await;
     resp.assert_status(StatusCode::OK);
     let body: Value = resp.json();
@@ -519,7 +519,7 @@ async fn schedule_list_sort_descending_and_pagination() {
 
     let resp = ctx
         .server
-        .get("/v1/local/orchestration/schedules?creator_id=ctr_sort2&sort=-label&limit=2")
+        .get("/v1/daemon/orchestration/schedules?creator_id=ctr_sort2&sort=-label&limit=2")
         .await;
     resp.assert_status(StatusCode::OK);
     let body: Value = resp.json();
@@ -533,7 +533,7 @@ async fn schedule_list_sort_descending_and_pagination() {
     let resp2 = ctx
         .server
         .get(&format!(
-            "/v1/local/orchestration/schedules?creator_id=ctr_sort2&sort=-label&limit=2&cursor={next_cursor}"
+            "/v1/daemon/orchestration/schedules?creator_id=ctr_sort2&sort=-label&limit=2&cursor={next_cursor}"
         ))
         .await;
     resp2.assert_status(StatusCode::OK);
@@ -551,7 +551,7 @@ async fn schedule_list_invalid_sort_key_returns_schedule_sort_invalid() {
 
     let resp = ctx
         .server
-        .get("/v1/local/orchestration/schedules?creator_id=ctr_sort3&sort=unknown_key")
+        .get("/v1/daemon/orchestration/schedules?creator_id=ctr_sort3&sort=unknown_key")
         .await;
     resp.assert_status(StatusCode::BAD_REQUEST);
     let body: Value = resp.json();
@@ -584,7 +584,7 @@ async fn force_gates_writes_audit_row() {
 
     let resp = ctx
         .server
-        .post("/v1/local/orchestration/schedules")
+        .post("/v1/daemon/orchestration/schedules")
         .json(&req)
         .await;
     resp.assert_status(StatusCode::CREATED);
@@ -638,7 +638,7 @@ async fn force_gates_without_reason_is_rejected() {
 
     let resp = ctx
         .server
-        .post("/v1/local/orchestration/schedules")
+        .post("/v1/daemon/orchestration/schedules")
         .json(&req)
         .await;
     resp.assert_status(StatusCode::BAD_REQUEST);
@@ -685,7 +685,7 @@ async fn gate_failure_returns_422_with_structured_body() {
 
     let resp = ctx
         .server
-        .post("/v1/local/orchestration/schedules")
+        .post("/v1/daemon/orchestration/schedules")
         .json(&req)
         .await;
 
@@ -746,7 +746,7 @@ async fn force_gates_with_long_reason_rejected() {
 
     let resp = ctx
         .server
-        .post("/v1/local/orchestration/schedules")
+        .post("/v1/daemon/orchestration/schedules")
         .json(&req)
         .await;
     resp.assert_status(StatusCode::BAD_REQUEST);
@@ -773,7 +773,7 @@ async fn force_gates_with_ansi_in_reason_rejected() {
 
     let resp = ctx
         .server
-        .post("/v1/local/orchestration/schedules")
+        .post("/v1/daemon/orchestration/schedules")
         .json(&req)
         .await;
     resp.assert_status(StatusCode::BAD_REQUEST);

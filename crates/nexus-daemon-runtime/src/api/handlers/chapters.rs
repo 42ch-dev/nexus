@@ -1,6 +1,6 @@
-//! Chapter content Local API handlers (V1.65 P0).
+//! Chapter content Daemon API handlers (V1.65 P0).
 //!
-//! Endpoints under `/v1/local/works/{work_id}/chapters/*` expose the
+//! Endpoints under `/v1/daemon/works/{work_id}/chapters/*` expose the
 //! `work_chapters` metadata table and the file-backed outline/body markdown.
 
 #![allow(clippy::missing_errors_doc)]
@@ -339,7 +339,7 @@ fn validate_status_transition(from: &str, to: &str) -> Result<(), NexusApiError>
 
 // ─── Handlers ───────────────────────────────────────────────────────────────
 
-/// `GET /v1/local/works/{work_id}/chapters` — cursor-paginated chapter summaries.
+/// `GET /v1/daemon/works/{work_id}/chapters` — cursor-paginated chapter summaries.
 pub async fn list_chapters(
     State(state): State<WorkspaceState>,
     Path(work_id): Path<String>,
@@ -394,7 +394,7 @@ pub async fn list_chapters(
     }))
 }
 
-/// `GET /v1/local/works/{work_id}/chapters/{n}` — chapter detail.
+/// `GET /v1/daemon/works/{work_id}/chapters/{n}` — chapter detail.
 pub async fn get_chapter(
     State(state): State<WorkspaceState>,
     Path((work_id, n)): Path<(String, String)>,
@@ -425,7 +425,7 @@ pub async fn get_chapter(
     Ok(Json(to_detail(&record, root.as_deref())))
 }
 
-/// `GET /v1/local/works/{work_id}/chapters/{n}/outline` — read outline markdown.
+/// `GET /v1/daemon/works/{work_id}/chapters/{n}/outline` — read outline markdown.
 pub async fn get_chapter_outline(
     State(state): State<WorkspaceState>,
     Path((work_id, n)): Path<(String, String)>,
@@ -477,7 +477,7 @@ pub async fn get_chapter_outline(
     }))
 }
 
-/// `PATCH /v1/local/works/{work_id}/chapters/{n}` — partial structure update.
+/// `PATCH /v1/daemon/works/{work_id}/chapters/{n}` — partial structure update.
 pub async fn patch_chapter(
     State(state): State<WorkspaceState>,
     Path((work_id, n)): Path<(String, String)>,
@@ -592,7 +592,7 @@ pub async fn patch_chapter(
     Ok(Json(to_detail(&record, root.as_deref())))
 }
 
-/// `GET /v1/local/works/{work_id}/chapters/{n}/body` — read body markdown (read-only).
+/// `GET /v1/daemon/works/{work_id}/chapters/{n}/body` — read body markdown (read-only).
 pub async fn get_chapter_body(
     State(state): State<WorkspaceState>,
     Path((work_id, n)): Path<(String, String)>,

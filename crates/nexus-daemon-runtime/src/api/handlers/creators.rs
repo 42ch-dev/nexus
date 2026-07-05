@@ -265,7 +265,7 @@ fn clear_creator_credentials(creator_id: &str) -> Result<bool, NexusApiError> {
 
 // ── Handlers ────────────────────────────────────────────────────────
 
-/// GET /v1/local/creators
+/// GET /v1/daemon/creators
 pub async fn list(
     State(state): State<WorkspaceState>,
     Query(params): Query<ListCreatorsQuery>,
@@ -313,7 +313,7 @@ pub async fn list(
     }))
 }
 
-/// `GET /v1/local/creators/{creator_id}` — creator status/detail
+/// `GET /v1/daemon/creators/{creator_id}` — creator status/detail
 pub async fn get_creator(
     State(state): State<WorkspaceState>,
     Path(creator_id): Path<String>,
@@ -340,7 +340,7 @@ pub async fn get_creator(
     }))
 }
 
-/// `PUT /v1/local/creators/active` — set active creator
+/// `PUT /v1/daemon/creators/active` — set active creator
 pub async fn set_active_creator(
     State(state): State<WorkspaceState>,
     Json(req): Json<SetActiveCreatorRequest>,
@@ -387,7 +387,7 @@ pub async fn set_active_creator(
     }))
 }
 
-/// `GET /v1/local/creators/active` — get active creator
+/// `GET /v1/daemon/creators/active` — get active creator
 pub async fn get_active_creator(
     State(state): State<WorkspaceState>,
 ) -> Result<Json<ActiveCreatorResponse>, NexusApiError> {
@@ -404,7 +404,7 @@ pub async fn get_active_creator(
     }))
 }
 
-/// `POST /v1/local/creators/{id}:logout` — clear credentials
+/// `POST /v1/daemon/creators/{id}:logout` — clear credentials
 pub async fn logout_creator(
     State(state): State<WorkspaceState>,
     Path(creator_id): Path<String>,

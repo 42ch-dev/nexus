@@ -1,13 +1,13 @@
 //! Works API handlers (V1.33 §7.2).
 //!
 //! Endpoints:
-//! - `POST   /v1/local/works` — Create Work (idempotent on `client_request_id`)
-//! - `GET    /v1/local/works` — List Works (filters: status, `intake_status`, cursor pagination — F-P1)
-//! - `GET    /v1/local/works/{work_id}` — Get one Work
-//! - `PATCH  /v1/local/works/{work_id}` — Partial update
-//! - `POST   /v1/local/works/{work_id}/inspiration` — Append inspiration log entry
-//! - `POST   /v1/local/works/pool` — Set active pool entry (DF-60 §5.3)
-//! - `POST   /v1/local/works/{work_id}/completion-lock/release` — Release completion-lock (DF-60 §3.1)
+//! - `POST   /v1/daemon/works` — Create Work (idempotent on `client_request_id`)
+//! - `GET    /v1/daemon/works` — List Works (filters: status, `intake_status`, cursor pagination — F-P1)
+//! - `GET    /v1/daemon/works/{work_id}` — Get one Work
+//! - `PATCH  /v1/daemon/works/{work_id}` — Partial update
+//! - `POST   /v1/daemon/works/{work_id}/inspiration` — Append inspiration log entry
+//! - `POST   /v1/daemon/works/pool` — Set active pool entry (DF-60 §5.3)
+//! - `POST   /v1/daemon/works/{work_id}/completion-lock/release` — Release completion-lock (DF-60 §3.1)
 
 #![allow(clippy::missing_errors_doc)]
 
@@ -19,7 +19,7 @@ use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
-use nexus_contracts::local_api::works::{ListWorksQuery, ListWorksResponse, WorkSummary};
+use nexus_contracts::daemon_api::works::{ListWorksQuery, ListWorksResponse, WorkSummary};
 use nexus_contracts::PaginationInfo;
 use nexus_local_db::works::{self, WorkListFilters, WorkPatch, WorkRecord};
 use serde::{Deserialize, Serialize};
@@ -515,7 +515,7 @@ pub async fn list_works(
     }))
 }
 
-/// `GET /v1/local/works/{id}` — fetch a single Work by id.
+/// `GET /v1/daemon/works/{id}` — fetch a single Work by id.
 ///
 /// # Lazy completion-promotion contract (R-V138P0-03)
 ///
@@ -1321,7 +1321,7 @@ pub async fn append_inspiration(
 
 // ─── Pool handler (DF-60 §5.3) ──────────────────────────────────────────────
 
-/// `POST /v1/local/works/pool` — Set the active pool entry for the creator.
+/// `POST /v1/daemon/works/pool` — Set the active pool entry for the creator.
 ///
 /// Transactional: demotes any prior `active` row → `queued`, promotes target → `active`.
 ///
@@ -1381,7 +1381,7 @@ pub async fn set_pool_active(
 
 // ─── Completion-lock release handler (DF-60 §3.1) ───────────────────────────
 
-/// `POST /v1/local/works/{work_id}/completion-lock/release`
+/// `POST /v1/daemon/works/{work_id}/completion-lock/release`
 ///
 /// Releases the completion-lock for a Work:
 /// 1. Clear DB `completion_locked_at` + set `novel_completion_status = 'reopened'`.
@@ -1543,7 +1543,7 @@ pub fn read_active_workspace_slug(
 
 /// Reconcile `work_chapters` from filesystem for a Work.
 ///
-/// `POST /v1/local/works/{work_id}/reconcile-chapters[?dry_run=true]`
+/// `POST /v1/daemon/works/{work_id}/reconcile-chapters[?dry_run=true]`
 ///
 /// # Dry-run (V1.49 P2, R-V148P4-W2; overlay §8.2)
 ///
@@ -1729,7 +1729,7 @@ fn is_valid_work_ref(s: &str) -> bool {
 
 // ─── P1: Pool + Inspiration handlers (DF-61) ────────────────────────────────
 
-/// `GET /v1/local/works/pool` — List pool entries for the active creator.
+/// `GET /v1/daemon/works/pool` — List pool entries for the active creator.
 pub async fn list_pool(
     State(state): State<WorkspaceState>,
     Query(query): Query<ListPoolQuery>,
@@ -1774,7 +1774,7 @@ pub async fn list_pool(
     }))
 }
 
-/// `POST /v1/local/works/pool/promote` — Promote a pool entry to active.
+/// `POST /v1/daemon/works/pool/promote` — Promote a pool entry to active.
 pub async fn promote_pool_entry(
     State(state): State<WorkspaceState>,
     Json(req): Json<PromotePoolRequest>,
@@ -1805,7 +1805,7 @@ pub async fn promote_pool_entry(
     Ok(Json(PoolEntryDto::from(entry)))
 }
 
-/// `POST /v1/local/works/pool/archive` — Archive a pool entry.
+/// `POST /v1/daemon/works/pool/archive` — Archive a pool entry.
 pub async fn archive_pool_entry_handler(
     State(state): State<WorkspaceState>,
     Json(req): Json<ArchivePoolRequest>,
@@ -1827,7 +1827,7 @@ pub async fn archive_pool_entry_handler(
     Ok(Json(PoolEntryDto::from(entry)))
 }
 
-/// `POST /v1/local/works/pool/inspiration` — Add an inspiration item.
+/// `POST /v1/daemon/works/pool/inspiration` — Add an inspiration item.
 pub async fn add_inspiration(
     State(state): State<WorkspaceState>,
     Json(req): Json<AddInspirationRequest>,
@@ -1877,7 +1877,7 @@ pub async fn add_inspiration(
     ))
 }
 
-/// `GET /v1/local/works/pool/inspiration` — List inspiration items.
+/// `GET /v1/daemon/works/pool/inspiration` — List inspiration items.
 pub async fn list_inspiration(
     State(state): State<WorkspaceState>,
     Query(query): Query<ListInspirationQuery>,
@@ -1922,7 +1922,7 @@ pub async fn list_inspiration(
     }))
 }
 
-/// `POST /v1/local/works/pool/inspiration/promote` — Promote an inspiration item to a Work.
+/// `POST /v1/daemon/works/pool/inspiration/promote` — Promote an inspiration item to a Work.
 pub async fn promote_inspiration_handler(
     State(state): State<WorkspaceState>,
     Json(req): Json<PromoteInspirationRequest>,
@@ -2023,7 +2023,7 @@ pub async fn promote_inspiration_handler(
     }))
 }
 
-/// `POST /v1/local/works/pool/inspiration/archive` — Archive an inspiration item.
+/// `POST /v1/daemon/works/pool/inspiration/archive` — Archive an inspiration item.
 pub async fn archive_inspiration_handler(
     State(state): State<WorkspaceState>,
     Json(req): Json<ArchiveInspirationRequest>,
