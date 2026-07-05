@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-07-05T17:00:00+0800",
+    "updated_at": "2026-07-05T17:30:00+0800",
   "plans": [],
   "metadata": {
     "integration_branch": "iteration/v1.90",
@@ -22,7 +22,7 @@
       "shipped_at": "2026-07-05",
       "merged_at": null,
       "merge_commit": null,
-      "pr": null
+      "pr": "https://github.com/42ch-dev/nexus/pull/118"
     },
     "tech_debt_summary": {
       "total_open": 0,
@@ -38,7 +38,7 @@
       "refreshed_at": "2026-07-04",
       "refreshed_reason": "V1.88 closure: all open residuals resolved or archived; slate clean before V1.89."
     },
-    "updated_at": "2026-07-05T17:00:00+0800"
+    "updated_at": "2026-07-05T17:30:00+0800"
   },
   "residual_findings": {
     "2026-06-27-v1.68-cli-relocation-and-product-surface-formalization": [
