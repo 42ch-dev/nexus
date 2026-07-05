@@ -30,7 +30,7 @@
     },
     {
       "id": "2026-07-05-v1.92-tls-remote-bind",
-      "status": "InReview",
+      "status": "Done",
       "title": "P0 — TLS for Remote Bind (headline 1)",
       "file": ".mstar/plans/2026-07-05-v1.92-tls-remote-bind.md",
       "type": "implement",
@@ -50,12 +50,16 @@
         "inreview_at": "2026-07-05T22:35:00+0000",
         "working_branch": "iteration/v1.92",
         "review_merge_base": "55e215b1",
-        "review_tip": "0a8a4b18"
+        "review_tip": "0a8a4b18",
+        "done_at": "2026-07-05T23:30:00+0000",
+        "commit": "23327518 + 108457ce + 59b947d1 + fbc03477",
+        "qc": "3/3 Approve (qc1 re-review, qc2, qc3)",
+        "qa": "Pass abf20257"
       }
     },
     {
       "id": "2026-07-05-v1.92-remote-connection-model",
-      "status": "InReview",
+      "status": "Done",
       "title": "P1 — Remote Client Connection Model (headline 2)",
       "file": ".mstar/plans/2026-07-05-v1.92-remote-connection-model.md",
       "type": "implement",
@@ -75,12 +79,16 @@
         "inreview_at": "2026-07-05T22:35:00+0000",
         "working_branch": "iteration/v1.92",
         "review_merge_base": "55e215b1",
-        "review_tip": "0a8a4b18"
+        "review_tip": "0a8a4b18",
+        "done_at": "2026-07-05T23:30:00+0000",
+        "commit": "40ddd440",
+        "qc": "3/3 Approve",
+        "qa": "Pass abf20257"
       }
     },
     {
       "id": "2026-07-05-v1.92-closure",
-      "status": "Todo",
+      "status": "InProgress",
       "title": "P-last — Closure: QC tri-review + QA + compound + Profile B + PR",
       "file": ".mstar/plans/2026-07-05-v1.92-closure.md",
       "type": "closure",
@@ -95,7 +103,8 @@
           "2026-07-05-v1.92-tls-remote-bind",
           "2026-07-05-v1.92-remote-connection-model"
         ],
-        "blocking": []
+        "blocking": [],
+        "inprogress_at": "2026-07-05T23:30:00+0000"
       }
     }
   ],
@@ -139,7 +148,7 @@
       "refreshed_at": "2026-07-05T12:00:55+0000",
       "refreshed_reason": "V1.91 closeout: 5 residuals carried forward from findings batch triage; severity adjusted to canonical enum."
     },
-    "updated_at": "2026-07-05T23:10:00+0000",
+    "updated_at": "2026-07-05T23:30:00+0000",
     "integration_branch": "iteration/v1.92"
   },
   "residual_findings": {
