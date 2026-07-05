@@ -20,7 +20,7 @@ const CREATOR = 'creator-active';
 
 /** Wire the sessions list so `useActiveCreatorId` resolves the active creator. */
 function sessionListHandler(creatorId = CREATOR) {
-  return http.get('/v1/local/orchestration/sessions', ({ request }) => {
+  return http.get('/v1/daemon/orchestration/sessions', ({ request }) => {
     // useActiveCreatorId issues listSessions({ limit: 1 }); echo a session row
     // carrying the creator_id so the derivation resolves.
     const url = new URL(request.url);
@@ -35,8 +35,8 @@ function sessionListHandler(creatorId = CREATOR) {
 /** Wire the SOUL section handlers so MemoryPage fully renders (V1.82). */
 function soulHandlers(creatorId = CREATOR) {
   return [
-    http.get('/v1/local/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
-    http.post('/v1/local/memory/soul/reflect', () =>
+    http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
+    http.post('/v1/daemon/memory/soul/reflect', () =>
       HttpResponse.json({
         creator_id: creatorId,
         state: 'insufficient_data',
@@ -54,7 +54,7 @@ describe('MemoryPage — pending list, count badge, fragments, delete, review', 
     useHandlers(
       sessionListHandler(),
       ...soulHandlers(),
-      http.get('/v1/local/memory/pending-review', () =>
+      http.get('/v1/daemon/memory/pending-review', () =>
         HttpResponse.json({
           items: [
             {
@@ -69,8 +69,8 @@ describe('MemoryPage — pending list, count badge, fragments, delete, review', 
           pagination: { limit: 20, has_more: false },
         }),
       ),
-      http.get('/v1/local/memory/pending-review/count', () => HttpResponse.json({ count: 1 })),
-      http.get('/v1/local/memory/fragments', () => HttpResponse.json({ fragments: [] })),
+      http.get('/v1/daemon/memory/pending-review/count', () => HttpResponse.json({ count: 1 })),
+      http.get('/v1/daemon/memory/fragments', () => HttpResponse.json({ fragments: [] })),
     );
 
     renderInApp(<MemoryPage />, { client: new BrowserClient() });
@@ -90,7 +90,7 @@ describe('MemoryPage — pending list, count badge, fragments, delete, review', 
     useHandlers(
       sessionListHandler(),
       ...soulHandlers(),
-      http.get('/v1/local/memory/pending-review', () =>
+      http.get('/v1/daemon/memory/pending-review', () =>
         HttpResponse.json({
           items: [
             {
@@ -106,8 +106,8 @@ describe('MemoryPage — pending list, count badge, fragments, delete, review', 
           pagination: { limit: 20, has_more: false },
         }),
       ),
-      http.get('/v1/local/memory/pending-review/count', () => HttpResponse.json({ count: 1 })),
-      http.get('/v1/local/memory/fragments', () =>
+      http.get('/v1/daemon/memory/pending-review/count', () => HttpResponse.json({ count: 1 })),
+      http.get('/v1/daemon/memory/fragments', () =>
         HttpResponse.json({
           fragments: [{ fragment_id: 'f1', summary: 'A long-term memory fragment.' }],
         }),
@@ -135,7 +135,7 @@ describe('MemoryPage — pending list, count badge, fragments, delete, review', 
     useHandlers(
       sessionListHandler(),
       ...soulHandlers(),
-      http.get('/v1/local/memory/pending-review', () =>
+      http.get('/v1/daemon/memory/pending-review', () =>
         HttpResponse.json({
           items: deleted
             ? []
@@ -152,11 +152,11 @@ describe('MemoryPage — pending list, count badge, fragments, delete, review', 
           pagination: { limit: 20, has_more: false },
         }),
       ),
-      http.get('/v1/local/memory/pending-review/count', () =>
+      http.get('/v1/daemon/memory/pending-review/count', () =>
         HttpResponse.json({ count: deleted ? 0 : 1 }),
       ),
-      http.get('/v1/local/memory/fragments', () => HttpResponse.json({ fragments: [] })),
-      http.delete('/v1/local/memory/pending-review/:pendingId', () => {
+      http.get('/v1/daemon/memory/fragments', () => HttpResponse.json({ fragments: [] })),
+      http.delete('/v1/daemon/memory/pending-review/:pendingId', () => {
         deleted = true;
         return deleteSpy();
       }),
@@ -182,7 +182,7 @@ describe('MemoryPage — pending list, count badge, fragments, delete, review', 
     useHandlers(
       sessionListHandler(),
       ...soulHandlers(),
-      http.get('/v1/local/memory/pending-review', () =>
+      http.get('/v1/daemon/memory/pending-review', () =>
         HttpResponse.json({
           items: [
             {
@@ -197,9 +197,9 @@ describe('MemoryPage — pending list, count badge, fragments, delete, review', 
           pagination: { limit: 20, has_more: false },
         }),
       ),
-      http.get('/v1/local/memory/pending-review/count', () => HttpResponse.json({ count: 1 })),
-      http.get('/v1/local/memory/fragments', () => HttpResponse.json({ fragments: [] })),
-      http.post('/v1/local/memory/review', reviewSpy),
+      http.get('/v1/daemon/memory/pending-review/count', () => HttpResponse.json({ count: 1 })),
+      http.get('/v1/daemon/memory/fragments', () => HttpResponse.json({ fragments: [] })),
+      http.post('/v1/daemon/memory/review', reviewSpy),
     );
 
     renderInApp(<MemoryPage />, { client: new BrowserClient() });
@@ -218,7 +218,7 @@ describe('MemoryPage — pending list, count badge, fragments, delete, review', 
 
   it('shows the no-active-creator empty state when no sessions exist', async () => {
     useHandlers(
-      http.get('/v1/local/orchestration/sessions', () =>
+      http.get('/v1/daemon/orchestration/sessions', () =>
         HttpResponse.json({ items: [], pagination: { limit: 1, has_more: false } }),
       ),
     );

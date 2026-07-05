@@ -34,7 +34,7 @@ function renderChapter(workId = 'w-123', chapter = 1) {
 }
 
 function chapterDetail(status: string) {
-  return http.get('/v1/local/works/:workId/chapters/:n', ({ params }) =>
+  return http.get('/v1/daemon/works/:workId/chapters/:n', ({ params }) =>
     HttpResponse.json({
       work_id: params.workId,
       chapter: Number(params.n),
@@ -51,7 +51,7 @@ function chapterDetail(status: string) {
 }
 
 function bodyHandler(content = 'Body prose.', frontmatter?: Record<string, unknown>) {
-  return http.get('/v1/local/works/:workId/chapters/:n/body', () =>
+  return http.get('/v1/daemon/works/:workId/chapters/:n/body', () =>
     HttpResponse.json({
       work_id: 'w-123',
       chapter: 1,
@@ -67,7 +67,7 @@ function bodyHandler(content = 'Body prose.', frontmatter?: Record<string, unkno
 
 /** Work detail carrying a world_id so the KB density hook resolves a World. */
 function workDetailHandler(worldId = 'world-1') {
-  return http.get('/v1/local/works/:workId', ({ params }) =>
+  return http.get('/v1/daemon/works/:workId', ({ params }) =>
     HttpResponse.json({
       work_id: params.workId,
       status: 'active',
@@ -93,7 +93,7 @@ function workDetailHandler(worldId = 'world-1') {
 
 /** Chapter list for neighbor resolution (3 chapters → prev/next on chapter 2). */
 function chaptersListHandler() {
-  return http.get('/v1/local/works/:workId/chapters', () =>
+  return http.get('/v1/daemon/works/:workId/chapters', () =>
     HttpResponse.json({
       items: [
         { work_id: 'w-123', chapter: 1, volume: 1, slug: 'ch01', planned_word_count: 4000, status: 'draft', created_at: '2026-06-25T00:00:00Z', updated_at: '2026-06-25T00:00:00Z' },
@@ -107,7 +107,7 @@ function chaptersListHandler() {
 
 /** Open (non-terminal) findings for a chapter — 2 rows for the count assertion. */
 function openFindingsHandler(chapter = 1, count = 2) {
-  return http.get('/v1/local/works/:workId/findings', ({ request }) => {
+  return http.get('/v1/daemon/works/:workId/findings', ({ request }) => {
     const url = new URL(request.url);
     if (url.searchParams.get('chapter') !== String(chapter)) {
       return HttpResponse.json({ items: [], pagination: { limit: 200, has_more: false } });
@@ -131,7 +131,7 @@ function openFindingsHandler(chapter = 1, count = 2) {
 
 /** World KB graph with N entities for the density count assertion. */
 function worldKbGraphHandler(worldId = 'world-1', entityCount = 5) {
-  return http.get('/v1/local/worlds/:worldId/kb/graph', ({ params }) => {
+  return http.get('/v1/daemon/worlds/:worldId/kb/graph', ({ params }) => {
     if (params.worldId !== worldId) {
       return HttpResponse.json({ entities: [], source_anchors: [], relationships: [] });
     }
@@ -148,7 +148,7 @@ function worldKbGraphHandler(worldId = 'world-1', entityCount = 5) {
 }
 
 function readingProgressHandler(scrollProgress = 0) {
-  return http.get('/v1/local/reading/progress', () =>
+  return http.get('/v1/daemon/reading/progress', () =>
     HttpResponse.json({
       work_id: 'w-123',
       chapter: 1,
@@ -159,7 +159,7 @@ function readingProgressHandler(scrollProgress = 0) {
 }
 
 function saveReadingProgressHandler() {
-  return http.put('/v1/local/reading/progress', async ({ request }) => {
+  return http.put('/v1/daemon/reading/progress', async ({ request }) => {
     const body = (await request.json()) as { work_id: string; chapter: number; scroll_progress: number };
     return HttpResponse.json({
       work_id: body.work_id,
@@ -171,13 +171,13 @@ function saveReadingProgressHandler() {
 }
 
 function annotationsHandler(annotations: unknown[] = []) {
-  return http.get('/v1/local/reading/annotations', () =>
+  return http.get('/v1/daemon/reading/annotations', () =>
     HttpResponse.json({ items: annotations }),
   );
 }
 
 function createAnnotationHandler() {
-  return http.post('/v1/local/reading/annotations', async ({ request }) => {
+  return http.post('/v1/daemon/reading/annotations', async ({ request }) => {
     const body = (await request.json()) as Record<string, unknown>;
     return HttpResponse.json({
       annotation_id: 'new-annotation',
@@ -189,7 +189,7 @@ function createAnnotationHandler() {
 }
 
 function updateAnnotationHandler() {
-  return http.patch('/v1/local/reading/annotations/:id', async ({ params, request }) => {
+  return http.patch('/v1/daemon/reading/annotations/:id', async ({ params, request }) => {
     const body = (await request.json()) as Record<string, unknown>;
     return HttpResponse.json({
       annotation_id: params.id,
@@ -200,7 +200,7 @@ function updateAnnotationHandler() {
 }
 
 function deleteAnnotationHandler() {
-  return http.delete('/v1/local/reading/annotations/:id', () => new HttpResponse(null, { status: 204 }));
+  return http.delete('/v1/daemon/reading/annotations/:id', () => new HttpResponse(null, { status: 204 }));
 }
 
 let originalScrollY: PropertyDescriptor | undefined;
@@ -298,7 +298,7 @@ function readingHandlers(opts?: { chapter?: number; status?: string; findings?: 
  * client's cursor-walk (`fetchNextPage`) resolves successive pages.
  */
 function paginatedChaptersHandler(totalChapters: number, pageSize: number) {
-  return http.get('/v1/local/works/:workId/chapters', ({ request }) => {
+  return http.get('/v1/daemon/works/:workId/chapters', ({ request }) => {
     const url = new URL(request.url);
     const cursor = url.searchParams.get('cursor');
     const page = cursor ? Number.parseInt(cursor, 10) || 0 : 0;
@@ -335,7 +335,7 @@ function paginatedChaptersHandler(totalChapters: number, pageSize: number) {
 
 /** Open-findings page that signals truncation (`has_more: true`). */
 function truncatedOpenFindingsHandler(chapter: number, count: number) {
-  return http.get('/v1/local/works/:workId/findings', ({ request }) => {
+  return http.get('/v1/daemon/works/:workId/findings', ({ request }) => {
     const url = new URL(request.url);
     if (url.searchParams.get('chapter') !== String(chapter)) {
       return HttpResponse.json({ items: [], pagination: { limit: 200, has_more: false } });
@@ -411,7 +411,7 @@ describe('ChapterPage (V1.75 residuals preserved)', () => {
   it('shows the body error state and retry action', async () => {
     useHandlers(
       chapterDetail('draft'),
-      http.get('/v1/local/works/:workId/chapters/:n/body', () =>
+      http.get('/v1/daemon/works/:workId/chapters/:n/body', () =>
         HttpResponse.json(
           { success: false, error: { code: 'internal', message: 'boom' } },
           { status: 500 },
@@ -619,7 +619,7 @@ describe('ChapterPage (V1.89 Deeper Manuscript Reading)', () => {
       openFindingsHandler(1, 0),
       worldKbGraphHandler('world-1', 0),
       readingProgressHandler(0),
-      http.put('/v1/local/reading/progress', async ({ request }) => {
+      http.put('/v1/daemon/reading/progress', async ({ request }) => {
         const body = (await request.json()) as { scroll_progress: number };
         saveRequests.push(body);
         return HttpResponse.json({ work_id: 'w-123', chapter: 1, scroll_progress: body.scroll_progress, updated_at: '2026-07-04T00:00:00Z' });
@@ -659,7 +659,7 @@ describe('ChapterPage (V1.89 Deeper Manuscript Reading)', () => {
       readingProgressHandler(),
       saveReadingProgressHandler(),
       annotationsHandler(),
-      http.post('/v1/local/reading/annotations', async ({ request }) => {
+      http.post('/v1/daemon/reading/annotations', async ({ request }) => {
         const body = (await request.json()) as Record<string, unknown>;
         requests.push(body);
         return HttpResponse.json({ annotation_id: 'a-new', ...body, created_at: '2026-07-04T00:00:00Z', updated_at: '2026-07-04T00:00:00Z' });
@@ -789,7 +789,7 @@ describe('ChapterPage (V1.89 Deeper Manuscript Reading)', () => {
       ]),
       createAnnotationHandler(),
       updateAnnotationHandler(),
-      http.delete('/v1/local/reading/annotations/:id', ({ params }) => {
+      http.delete('/v1/daemon/reading/annotations/:id', ({ params }) => {
         deletedId = params.id as string;
         return new HttpResponse(null, { status: 204 });
       }),

@@ -5,7 +5,7 @@ import { useNexusClient } from '@/lib/client-context';
 import { NexusClientError } from '@/lib/nexus';
 
 /**
- * Daemon health indicator — polls `GET /v1/local/runtime/health` and shows
+ * Daemon health indicator — polls `GET /v1/daemon/runtime/health` and shows
  * connection state in the shell header. Demonstrates the `tauri-api` adapter
  * boundary end-to-end (BrowserClient → Vite dev proxy → daemon loopback).
  */

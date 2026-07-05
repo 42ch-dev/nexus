@@ -43,7 +43,7 @@ export function useWorkOutline(workId: string | undefined) {
   });
 }
 
-/** `POST /v1/local/works/{work_id}/outline/patch` — structure/volume edits. */
+/** `POST /v1/daemon/works/{work_id}/outline/patch` — structure/volume edits. */
 export function usePatchOutlineStructure(workId: string | undefined) {
   const client = useNexusClient();
   const qc = useQueryClient();
@@ -59,7 +59,7 @@ export function usePatchOutlineStructure(workId: string | undefined) {
   });
 }
 
-/** `POST /v1/local/works/{work_id}/chapters/{n}/patch` — chapter metadata. */
+/** `POST /v1/daemon/works/{work_id}/chapters/{n}/patch` — chapter metadata. */
 export function usePatchOutlineChapter(workId: string | undefined) {
   const client = useNexusClient();
   const qc = useQueryClient();
@@ -87,7 +87,7 @@ export function usePatchOutlineChapter(workId: string | undefined) {
   });
 }
 
-/** `POST /v1/local/works/{work_id}/timeline/patch` — timeline event edits. */
+/** `POST /v1/daemon/works/{work_id}/timeline/patch` — timeline event edits. */
 export function usePatchTimelineEvent(workId: string | undefined) {
   const client = useNexusClient();
   const qc = useQueryClient();

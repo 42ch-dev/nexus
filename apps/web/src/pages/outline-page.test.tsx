@@ -26,9 +26,9 @@ import { OutlinePage } from '@/pages/outline-page';
 
 const client = () => new BrowserClient();
 
-/** `GET /v1/local/works/:workId/outline` → minimal canonical `WorkOutline`. */
+/** `GET /v1/daemon/works/:workId/outline` → minimal canonical `WorkOutline`. */
 function workOutlineHandler(chapterIds: number[]) {
-  return http.get('/v1/local/works/:workId/outline', () =>
+  return http.get('/v1/daemon/works/:workId/outline', () =>
     HttpResponse.json({
       work_id: 'w-123',
       outline_revision: 1,

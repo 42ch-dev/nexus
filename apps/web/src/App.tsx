@@ -39,7 +39,7 @@ const WorldKbPage = lazy(() =>
  *
  * Seven screen groups (web-ui.md §6): Works dashboard + detail, Sessions,
  * Schedule, Capabilities, Findings (Control Room — READ), Work CRUD + Preset
- * management (Setup — writes). All screens consume the hardened Local API via
+ * management (Setup — writes). All screens consume the hardened Daemon API via
  * the NexusClient interface (transport-agnostic, Tauri-ready). V1.70 adds the
  * Strategy canvas route (lazy-split — React Flow stays out of the bootstrap).
  */

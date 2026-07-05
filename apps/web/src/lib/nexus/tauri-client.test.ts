@@ -75,7 +75,7 @@ describe('TauriClient', () => {
     expect(client.port).toBe(9420);
     await client.health();
     expect(fetchImpl).toHaveBeenCalledWith(
-      'http://127.0.0.1:9420/v1/local/runtime/health',
+      'http://127.0.0.1:9420/v1/daemon/runtime/health',
       expect.objectContaining({ method: 'GET' }),
     );
   });
@@ -88,7 +88,7 @@ describe('TauriClient', () => {
     const health = await client.health();
     expect(health).toMatchObject({ status: 'ok', version: '1.0.0' });
     expect(fetchImpl).toHaveBeenCalledWith(
-      'http://127.0.0.1:8420/v1/local/runtime/health',
+      'http://127.0.0.1:8420/v1/daemon/runtime/health',
       expect.objectContaining({ method: 'GET' }),
     );
   });

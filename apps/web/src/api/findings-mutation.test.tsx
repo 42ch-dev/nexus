@@ -71,8 +71,8 @@ describe('useUpdateFinding — optimistic update + invalidation', () => {
     });
     let patchBody: unknown = null;
     useHandlers(
-      http.get('/v1/local/works/:workId/findings', () => listSpy()),
-      http.patch('/v1/local/works/:workId/findings/:findingId', async ({ request }) => {
+      http.get('/v1/daemon/works/:workId/findings', () => listSpy()),
+      http.patch('/v1/daemon/works/:workId/findings/:findingId', async ({ request }) => {
         patchBody = await request.json();
         await patchGate;
         return HttpResponse.json(makeFinding({ status: 'triaged', updated_at: 2 }));
@@ -108,14 +108,14 @@ describe('useUpdateFinding — optimistic update + invalidation', () => {
     // INVALID_TRANSITION (an illegal transition bypassed the UI guards).
     let listCount = 0;
     useHandlers(
-      http.get('/v1/local/works/:workId/findings', () => {
+      http.get('/v1/daemon/works/:workId/findings', () => {
         listCount += 1;
         return HttpResponse.json({
           items: [makeFinding({ status: 'open' })],
           pagination: { limit: 20, has_more: false },
         });
       }),
-      http.patch('/v1/local/works/:workId/findings/:findingId', () =>
+      http.patch('/v1/daemon/works/:workId/findings/:findingId', () =>
         HttpResponse.json(
           { success: false, error: { code: 'INVALID_TRANSITION', message: 'illegal' } },
           { status: 422 },
@@ -152,10 +152,10 @@ describe('useUpdateFinding — optimistic update + invalidation', () => {
       return listSpies[workId];
     };
     useHandlers(
-      http.get('/v1/local/works/:workId/findings', ({ params }) =>
+      http.get('/v1/daemon/works/:workId/findings', ({ params }) =>
         listFor(String(params.workId))(),
       ),
-      http.patch('/v1/local/works/:workId/findings/:findingId', ({ params }) =>
+      http.patch('/v1/daemon/works/:workId/findings/:findingId', ({ params }) =>
         HttpResponse.json(
           makeFinding({
             work_id: String(params.workId),

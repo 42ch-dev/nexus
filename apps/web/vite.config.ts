@@ -4,7 +4,7 @@ import react from '@vitejs/plugin-react';
 
 // Vite config for the Nexus local Web UI.
 //
-// Dev: the SPA runs on the Vite dev server and proxies Local API requests to
+// Dev: the SPA runs on the Vite dev server and proxies Daemon API requests to
 // the running daemon (default http://127.0.0.1:8420, the daemon HTTP transport
 // default — see crates/nexus-daemon-runtime/src/boot.rs). Override the target
 // with VITE_DAEMON_URL, e.g. VITE_DAEMON_URL=http://127.0.0.1:9000 pnpm dev.
@@ -77,10 +77,10 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      // Local API — keyless on loopback (V1.20 model). BrowserClient is
+      // Daemon API — keyless on loopback (V1.20 model). BrowserClient is
       // same-origin against this proxy in dev; in release it is same-origin
       // against the daemon port that serves the embedded SPA.
-      '/v1/local': {
+      '/v1/daemon': {
         target: daemonUrl,
         changeOrigin: false,
       },

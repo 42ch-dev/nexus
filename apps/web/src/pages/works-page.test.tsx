@@ -24,7 +24,7 @@ function renderWorks() {
 describe('WorksPage', () => {
   it('renders the works table on a successful list', async () => {
     useHandlers(
-      http.get('/v1/local/works', () =>
+      http.get('/v1/daemon/works', () =>
         HttpResponse.json({
           items: [
             {
@@ -39,7 +39,7 @@ describe('WorksPage', () => {
           pagination: { limit: 20, has_more: false },
         }),
       ),
-      http.get('/v1/local/runtime/health', () =>
+      http.get('/v1/daemon/runtime/health', () =>
         HttpResponse.json({ status: 'ok', version: 'test' }),
       ),
     );
@@ -52,7 +52,7 @@ describe('WorksPage', () => {
 
   it('renders the empty state when there are no works', async () => {
     useHandlers(
-      http.get('/v1/local/works', () =>
+      http.get('/v1/daemon/works', () =>
         HttpResponse.json({ items: [], pagination: { limit: 20, has_more: false } }),
       ),
     );
@@ -65,7 +65,7 @@ describe('WorksPage', () => {
 
   it('renders the error state and offers retry when the daemon fails', async () => {
     useHandlers(
-      http.get('/v1/local/works', () =>
+      http.get('/v1/daemon/works', () =>
         HttpResponse.json(
           { success: false, error: { code: 'internal', message: 'boom' } },
           { status: 500 },
@@ -82,7 +82,7 @@ describe('WorksPage', () => {
 
   it('offers a Create Work action that opens the create dialog', async () => {
     useHandlers(
-      http.get('/v1/local/works', () =>
+      http.get('/v1/daemon/works', () =>
         HttpResponse.json({ items: [], pagination: { limit: 20, has_more: false } }),
       ),
     );

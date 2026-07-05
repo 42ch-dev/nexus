@@ -8,7 +8,7 @@ import { useValidatePreset } from '@/api/queries';
 import type { ValidatePresetResponse } from '@42ch/nexus-contracts';
 
 /**
- * Validate Preset dialog — POST /v1/local/presets:validate (dry-run).
+ * Validate Preset dialog — POST /v1/daemon/presets:validate (dry-run).
  *
  * Product-priority #1 for non-CLI authors (web-ui.md §6.2): tells the author a
  * preset is safe to run before they commit. The path targets a preset file on

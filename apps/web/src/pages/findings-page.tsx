@@ -18,7 +18,7 @@ import type { FindingDetailResponse, ListFindingsQuery } from '@42ch/nexus-contr
 /**
  * Findings view (Control Room) — V1.77 remediation surface (web-ui.md §23).
  *
- * Findings are scoped to a Work (`GET /v1/local/works/{work_id}/findings`).
+ * Findings are scoped to a Work (`GET /v1/daemon/works/{work_id}/findings`).
  * The author picks a Work, then sees its findings as a table with row-level
  * status/severity badges. Selecting a row opens the detail/inspector panel
  * (`FindingDetailPanel`) with the three remediation affordances: status

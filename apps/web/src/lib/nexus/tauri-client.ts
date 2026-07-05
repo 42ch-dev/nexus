@@ -4,7 +4,7 @@
  * Spec: [desktop-shell.md](../../../../../.mstar/knowledge/specs/desktop-shell.md)
  * §5; compass §5 #1 LOCKED. Architecture: **thin desktop-augmentation over
  * `BrowserClient`** — the `NexusClient` data methods reuse the identical HTTP
- * transport to the localhost daemon (`http://127.0.0.1:<resolvedPort>/v1/local/*`),
+ * transport to the localhost daemon (`http://127.0.0.1:<resolvedPort>/v1/daemon/*`),
  * exactly as `BrowserClient` does in the browser-tab flow. The Tauri webview can
  * `fetch` loopback directly (compass §5 #4 — no `http` plugin), so no Tauri
  * `invoke` is needed for data access.

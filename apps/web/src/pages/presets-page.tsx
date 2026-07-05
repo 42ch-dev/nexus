@@ -15,7 +15,7 @@ import { ValidatePresetDialog } from './dialogs/validate-preset-dialog';
  * Preset management (Setup — CRUD) — web-ui.md §6.2 #7.
  *
  * Lists presets grouped by source (embedded / system / user) and offers the
- * actions the Local API exposes today: scaffold (create), validate (dry-run,
+ * actions the Daemon API exposes today: scaffold (create), validate (dry-run,
  * product-priority #1), and reload. Get/update/delete are not yet exposed by
  * the daemon (no routes/contracts); that gap is tracked as a residual.
  */
