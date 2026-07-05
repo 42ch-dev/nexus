@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-07-05-v1.91-reading-chrome + 2026-07-05-v1.91-findings-batch"
-verdict: "Request Changes"
+verdict: "Approve with residuals"
 generated_at: "2026-07-05"
 ---
 
@@ -269,7 +269,7 @@ The read-only invariant is **preserved verbatim**; `V1.75 residuals preserved ve
 | 🟡 Warning | 4 |
 | 🟢 Suggestion | 3 |
 
-**Verdict**: **Request Changes**
+**Verdict (initial wave)**: **Request Changes**
 
 **Blocking reason**: W-001 — the web typecheck gate fails on the integration branch HEAD (`fb478e4b`). `mstar-review-qc` §"CI 门禁补充 (强制)" requires that any in-scope CI failure be treated as `>= Warning` and blocks `Approve` until resolved. The completion report's "typecheck passed" claim is contradicted by the live `pnpm --filter web run typecheck` invocation in the review cwd.
 
@@ -277,6 +277,85 @@ The read-only invariant is **preserved verbatim**; `V1.75 residuals preserved ve
 - W-002 / S-003: straightforward refactor to extract CSV utilities; not a DoD violation for V1.91.
 - W-003: UX feedback fidelity improvement; can ship as a small follow-up.
 - W-004: codegen-team backlog item; runtime contract is correctly enforced today.
+
+---
+
+## Revalidation (targeted re-review after W-001 fix — commit `8e6d4d2c`)
+
+### What was re-checked
+
+The PM dispatched a targeted re-review limited to verifying the **W-001** fix. Scope of re-check (no other lines were re-reviewed per the assignment constraint "Do not re-review unrelated code unless new issues are found"):
+
+1. `git pull --ff-only` on `iteration/v1.91` → already up to date; HEAD is `8e6d4d2c`.
+2. Verified the fix commit touches exactly `apps/web/src/pages/findings-page.test.tsx` (2 insertions, 2 deletions).
+3. Re-ran the previously failing gate: `pnpm --filter web run typecheck` → **passes (exit 0)**.
+4. Re-ran the targeted test file: `vitest run src/pages/findings-page.test.tsx` → **6/6 tests pass**, including the previously-typechecking-failing CSV-export test.
+5. Reviewed the patch for any new issues or regressions. (See "Diff assessment" below.)
+6. Re-checked the disposition of the other three Warnings (W-002, W-003, W-004) and three Suggestions (S-001, S-002, S-003) to confirm none are made moot by the fix and none require immediate re-statement.
+
+### Diff assessment (commit `8e6d4d2c`)
+
+```diff
+--- a/apps/web/src/pages/findings-page.test.tsx
++++ b/apps/web/src/pages/findings-page.test.tsx
+@@ -187,7 +187,7 @@ describe('FindingsPage', () => {
+   });
+ 
+   it('exports the filtered findings as CSV with the documented columns', async () => {
+-    const createObjectURL = vi.fn(() => 'blob:test');
++    const createObjectURL = vi.fn<(blob: Blob) => string>(() => 'blob:test');
+     const revokeObjectURL = vi.fn();
+     ...
+-      const [blob] = createObjectURL.mock.calls[0] as [Blob];
++      const blob = createObjectURL.mock.calls[0][0];
+```
+
+**Assessment**: the fix is **superior to the W-001 recommendation** I made in the initial report. Where I suggested routing the cast through `unknown` (`mock.calls[0] as unknown as [Blob]`), the implementer chose to **eliminate the cast entirely** by typing the mock precisely at its declaration site:
+
+- `vi.fn<(blob: Blob) => string>(...)` is vitest's generic mock typing form. It narrows `createObjectURL.mock.calls` to `Array<[Blob]>` so that `mock.calls[0]` is correctly inferred as `[Blob]`.
+- `createObjectURL.mock.calls[0][0]` then accesses the first tuple element with no cast required.
+- `vi.fn<(blob: Blob) => string>(...)` accepts a single type-argument that bundles the parameter list and return type — consistent with vitest ≥ 0.30 syntax (`Mock<(args) => return>`) used elsewhere in the project's existing tests.
+
+This is cleaner than my recommendation because:
+
+1. The cast is gone — `tsc --strict` is satisfied without an `unknown` escape hatch.
+2. The mock typing lives at the mock declaration (the source of truth) rather than at the assertion site, so future test edits to this test cannot re-introduce the same `TS2352` family of mistakes.
+3. The naming `blob` (instead of destructured `[blob]`) is the only minor cosmetic delta and is functionally identical.
+
+**No new issues** are introduced by the fix. The `tsc --noEmit` output is clean (no warnings, no errors). The targeted test passes; the full web test suite (55 files, 420 tests) also passes — confirming the fix did not regress neighbouring tests.
+
+### Evidence
+
+- `pnpm --filter web run typecheck` → exit 0, no `TS2352` (and no other diagnostics).
+- `pnpm --filter web exec vitest run src/pages/findings-page.test.tsx` → **6 passed (6)**.
+- `pnpm --filter web run test` (full suite) → **55 files passed / 420 tests passed**.
+- `git show 8e6d4d2c --stat` → 1 file changed, 2 insertions(+), 2 deletions(-) (matches the surgical-change expectation).
+
+### Per-finding disposition
+
+| Finding | Disposition | Evidence |
+|---|---|---|
+| **W-001** | ✅ **RESOLVED** | `pnpm --filter web run typecheck` exit 0; the strict `TS2352` cast on line 230 is gone; replaced with a properly-typed mock and indexed access. |
+| **W-002** | ⏳ **Unchanged — non-blocking residual** (R-V191P1-002 below) | The `findings-page.tsx` module is still 443 lines and still contains the CSV helpers; not made moot by the W-001 fix. |
+| **W-003** | ⏳ **Unchanged — non-blocking residual** (R-V191P1-001 below) | `apps/web/src/api/queries.ts` toast still conflates `not_found` / `conflict`; UX fidelity improvement unchanged. |
+| **W-004** | ⏳ **Unchanged — non-blocking residual** (R-V191P1-003 below) | Codegen quirk in `BatchUpdateFindingsRequest.patch` is unchanged; runtime contract still enforced via `BatchFindingPatch`. |
+| **S-001 / S-002 / S-003** | ⏳ **Unchanged — informational** | None are made moot by the typecheck fix. S-003 is paired with W-002. |
+
+No previous Warnings became moot: each of W-002/W-003/W-004 sits in a different file from the W-001 fix and addresses an unrelated concern (file size cap, UX fidelity, codegen backlog). All three remain valid, non-blocking observations for residual tracking.
+
+### Updated verdict
+
+**Verdict (post-revalidation)**: **Approve with residuals**
+
+**Rationale**:
+
+- The single **blocking** finding (W-001) is resolved and the strict-typecheck gate now passes.
+- No new Critical findings emerged during the re-check.
+- The remaining **Warnings (W-002 / W-003 / W-004)** and **Suggestions (S-001 / S-002 / S-003)** were characterised as **non-blocking** in the initial report and are unchanged in this round. They are correctly carried forward as residual findings below (same R-IDs as the initial recommendation).
+- Per `mstar-review-qc` §"CI 门禁补充 (强制)": no in-scope CI failures remain.
+- Per `mstar-review-qc` §"Residual Findings 留档门禁": `Approve with residuals` is permitted when no unclosed `Critical` exists and the residual list is registered in `{HARNESS_DIR}/status.json` (`residual_findings[<plan-id>][]`) with stable `R#` IDs, owners, and targets. PM owns the registration write.
+
+DoD-mandated gates are otherwise satisfied (per the initial report's evidence and my verification of the underlying files): bulk endpoint is additive and partial-success; schemas and codegen are committed; multi-select + bulk + CSV work; single-finding flows are unchanged; non-goals are respected.
 
 ---
 
@@ -289,5 +368,7 @@ If PM is prepared to ship V1.91 after W-001 is fixed (the four-week scope is rea
 | R-V191P1-001 | `medium` | CSV toast conflation — `not_found` vs `conflict` indistinct | defer | `@frontend-dev` | V1.92 |
 | R-V191P1-002 | `low` | Extract `findings-csv.ts` from findings-page.tsx | accept / code health | `@frontend-dev` | V1.92 (paired with R-V191P1-001) |
 | R-V191P1-003 | `low` | Codegen should produce concrete `BatchUpdateFindingsRequest.patch` struct instead of `serde_json::Value` | defer | `@architect` / contracts-codegen | V1.92+ |
+
+**Post-revalidation note (2026-07-05)**: the residual list above is unchanged from the initial wave. W-001 is now closed (resolution commit `8e6d4d2c`, typecheck gate passes); W-002 / W-003 / W-004 remain open as **non-blocking residuals** for V1.92 tracking.
 
 DoD-mandated gates are otherwise satisfied (per the completion report's evidence and my verification of the underlying files): bulk endpoint is additive and partial-success; schemas and codegen are committed; multi-select + bulk + CSV work; single-finding flows are unchanged; non-goals are respected.
