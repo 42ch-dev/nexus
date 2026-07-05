@@ -5,6 +5,7 @@
 //! **Unguarded routes** (no auth even in keyed-all mode):
 //! - `GET /v1/daemon/runtime/health` — minimal liveness check
 //! - `GET /v1/daemon/runtime/status` — runtime diagnostic status
+//! - `GET /v1/daemon/runtime/cert-fingerprint` — TLS certificate fingerprint (TOFU)
 //! - `GET /v1/daemon/daemon/status` — daemon lifecycle snapshot
 //!
 //! All other routes are behind `require_api_key` middleware.
@@ -481,6 +482,10 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
     let runtime_routes = Router::new()
         .route("/v1/daemon/runtime/health", get(handlers::runtime::health))
         .route("/v1/daemon/runtime/status", get(handlers::runtime::status))
+        .route(
+            "/v1/daemon/runtime/cert-fingerprint",
+            get(handlers::runtime::cert_fingerprint),
+        )
         .route(
             "/v1/daemon/daemon/status",
             get(handlers::runtime::daemon_status),

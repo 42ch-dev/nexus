@@ -15,7 +15,7 @@
 
 use axum::extract::{Path, Query, State};
 use axum::Json;
-use nexus_contracts::BatchUpdateFindingsRequest;
+use nexus_contracts::{BatchUpdateFindingsRequest, FindingBatchPatch};
 use nexus_daemon_runtime::api::handlers::findings::{
     batch_update_findings_handler, create_finding_handler, create_from_review_handler,
     delete_finding_handler, get_finding_handler, list_findings_handler, prune_findings_handler,
@@ -992,7 +992,10 @@ async fn findings_batch_update_status_happy_path() {
                 f2.finding_id.clone(),
                 f3.finding_id.clone(),
             ],
-            patch: serde_json::json!({ "status": "triaged" }),
+            patch: FindingBatchPatch {
+                status: Some("triaged".to_string()),
+                target_executor: None,
+            },
         }),
     )
     .await
@@ -1028,7 +1031,10 @@ async fn findings_batch_update_assign_executor() {
         State(state.clone()),
         axum::Json(BatchUpdateFindingsRequest {
             finding_ids: vec![f1.finding_id.clone(), f2.finding_id.clone()],
-            patch: serde_json::json!({ "target_executor": "write" }),
+            patch: FindingBatchPatch {
+                status: None,
+                target_executor: Some("write".to_string()),
+            },
         }),
     )
     .await
@@ -1060,7 +1066,10 @@ async fn findings_batch_update_not_found_collected() {
         State(state.clone()),
         axum::Json(BatchUpdateFindingsRequest {
             finding_ids: vec![f1.finding_id.clone(), missing.clone()],
-            patch: serde_json::json!({ "status": "triaged" }),
+            patch: FindingBatchPatch {
+                status: Some("triaged".to_string()),
+                target_executor: None,
+            },
         }),
     )
     .await
@@ -1127,7 +1136,10 @@ async fn findings_batch_update_conflict_collected() {
         State(state.clone()),
         axum::Json(BatchUpdateFindingsRequest {
             finding_ids: vec![open_f.finding_id.clone(), resolved_f.finding_id.clone()],
-            patch: serde_json::json!({ "status": "triaged" }),
+            patch: FindingBatchPatch {
+                status: Some("triaged".to_string()),
+                target_executor: None,
+            },
         }),
     )
     .await
@@ -1161,7 +1173,10 @@ async fn findings_batch_update_cap_rejected_with_422() {
         State(state.clone()),
         axum::Json(BatchUpdateFindingsRequest {
             finding_ids: ids,
-            patch: serde_json::json!({ "status": "triaged" }),
+            patch: FindingBatchPatch {
+                status: Some("triaged".to_string()),
+                target_executor: None,
+            },
         }),
     )
     .await
@@ -1174,6 +1189,91 @@ async fn findings_batch_update_cap_rejected_with_422() {
     assert_eq!(err.error_code(), "too_many_findings");
 }
 
+/// R-V191P1-004: a DAO error mid-batch must fail the whole request (500) while
+/// leaving earlier successful updates persisted.
+#[tokio::test]
+async fn findings_batch_update_mid_batch_dao_error_preserves_prior_updates() {
+    let (state, _tmp) = handler_state().await;
+    let work_id = create_work(&state).await;
+
+    let f1 = create_finding(&state, &work_id, "minor", "first").await;
+    let f2 = create_finding(&state, &work_id, "minor", "second").await;
+    let f3 = create_finding(&state, &work_id, "minor", "third").await;
+
+    // Inject a trigger that fails specifically when f2's status is updated.
+    // SAFETY: test-only DDL; finding_id is a literal generated within this test.
+    let trigger_name = "trg_inject_batch_failure";
+    let trigger_sql = format!(
+        "CREATE TRIGGER {trigger_name} \
+         AFTER UPDATE OF status ON findings \
+         WHEN NEW.finding_id = '{}' \
+         BEGIN \
+             SELECT RAISE(FAIL, 'injected mid-batch DAO error'); \
+         END",
+        f2.finding_id
+    );
+    sqlx::query(&trigger_sql)
+        .execute(state.pool())
+        .await
+        .expect("create trigger");
+
+    let err = batch_update_findings_handler(
+        State(state.clone()),
+        axum::Json(BatchUpdateFindingsRequest {
+            finding_ids: vec![
+                f1.finding_id.clone(),
+                f2.finding_id.clone(),
+                f3.finding_id.clone(),
+            ],
+            patch: FindingBatchPatch {
+                status: Some("triaged".to_string()),
+                target_executor: None,
+            },
+        }),
+    )
+    .await
+    .expect_err("mid-batch DAO error should fail the whole request");
+
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::INTERNAL_SERVER_ERROR
+    );
+    assert_eq!(err.error_code(), "internal");
+
+    // The first finding was updated before the failure.
+    let got1 = get_finding_handler(
+        State(state.clone()),
+        Path((work_id.clone(), f1.finding_id.clone())),
+    )
+    .await
+    .unwrap()
+    .0;
+    assert_eq!(got1.status, "triaged");
+
+    // f2's update applied before the AFTER trigger raised the injected error;
+    // the failing row is therefore also advanced (the 500 signals the caller to
+    // re-inspect state, not that the row was rolled back).
+    let got2 = get_finding_handler(
+        State(state.clone()),
+        Path((work_id.clone(), f2.finding_id.clone())),
+    )
+    .await
+    .unwrap()
+    .0;
+    assert_eq!(got2.status, "triaged");
+
+    // f3 was never reached because the handler short-circuits on the first
+    // internal DAO error.
+    let got3 = get_finding_handler(
+        State(state.clone()),
+        Path((work_id.clone(), f3.finding_id.clone())),
+    )
+    .await
+    .unwrap()
+    .0;
+    assert_eq!(got3.status, "open");
+}
+
 /// V1.91 P1 — bulk PATCH rejects an empty `finding_ids` array.
 #[tokio::test]
 async fn findings_batch_rejects_empty_finding_ids() {
@@ -1183,7 +1283,10 @@ async fn findings_batch_rejects_empty_finding_ids() {
         State(state.clone()),
         axum::Json(BatchUpdateFindingsRequest {
             finding_ids: vec![],
-            patch: serde_json::json!({ "status": "triaged" }),
+            patch: FindingBatchPatch {
+                status: Some("triaged".to_string()),
+                target_executor: None,
+            },
         }),
     )
     .await
@@ -1196,28 +1299,39 @@ async fn findings_batch_rejects_empty_finding_ids() {
     assert_eq!(err.error_code(), "invalid_input");
 }
 
-/// V1.91 P1 — bulk PATCH rejects unknown fields in `patch`.
+/// V1.91 P1 — bulk PATCH with no actual patch fields returns 200 and updates 0.
 #[tokio::test]
-async fn findings_batch_rejects_unknown_patch_field() {
+async fn findings_batch_empty_patch_returns_zero_updated() {
     let (state, _tmp) = handler_state().await;
     let work_id = create_work(&state).await;
     let f1 = create_finding(&state, &work_id, "minor", "only finding").await;
 
-    let err = batch_update_findings_handler(
+    let Json(res) = batch_update_findings_handler(
         State(state.clone()),
         axum::Json(BatchUpdateFindingsRequest {
             finding_ids: vec![f1.finding_id.clone()],
-            patch: serde_json::json!({ "status": "triaged", "bogus": "x" }),
+            patch: FindingBatchPatch {
+                status: None,
+                target_executor: None,
+            },
         }),
     )
     .await
-    .expect_err("unknown patch field must be rejected");
+    .expect("empty patch should succeed with 0 updates");
 
-    assert_eq!(
-        err.status_code(),
-        axum::http::StatusCode::UNPROCESSABLE_ENTITY
-    );
-    assert_eq!(err.error_code(), "invalid_input");
+    assert_eq!(res.updated, 0);
+    assert!(res.not_found.is_none());
+    assert!(res.conflict.is_none());
+
+    // Row must be unchanged.
+    let got = get_finding_handler(
+        State(state.clone()),
+        Path((work_id.clone(), f1.finding_id.clone())),
+    )
+    .await
+    .unwrap()
+    .0;
+    assert_eq!(got.status, "open");
 }
 
 /// V1.91 P1 — bulk PATCH rejects duplicate IDs in `finding_ids`.
@@ -1231,7 +1345,10 @@ async fn findings_batch_rejects_duplicate_finding_ids() {
         State(state.clone()),
         axum::Json(BatchUpdateFindingsRequest {
             finding_ids: vec![f1.finding_id.clone(), f1.finding_id.clone()],
-            patch: serde_json::json!({ "status": "triaged" }),
+            patch: FindingBatchPatch {
+                status: Some("triaged".to_string()),
+                target_executor: None,
+            },
         }),
     )
     .await
