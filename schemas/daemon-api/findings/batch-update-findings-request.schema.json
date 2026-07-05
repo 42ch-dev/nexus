@@ -3,7 +3,7 @@
   "$id": "https://nexus42.invalid/schemas/daemon-api/findings/batch-update-findings-request.schema.json",
   "schema_version": 1,
   "title": "Nexus BatchUpdateFindingsRequest",
-  "description": "Request body for PATCH /v1/daemon/works/{work_id}/findings/batch. Bulk-updates status and/or target_executor for up to 100 findings. Creator-scoped; each individual update reuses the existing update_finding DAO validation.",
+  "description": "Request body for PATCH /v1/daemon/findings/batch. Bulk-updates status and/or target_executor for up to 100 findings. Creator-scoped; each individual update reuses the existing update_finding DAO validation.",
   "type": "object",
   "required": ["finding_ids", "patch"],
   "properties": {

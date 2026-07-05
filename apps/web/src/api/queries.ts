@@ -16,6 +16,7 @@ import {
   useQueryClient,
 } from '@tanstack/react-query';
 import type {
+  BatchUpdateFindingsRequest,
   ChapterContentQuery,
   ChapterSummary,
   CountPendingReviewsResponse,
@@ -312,6 +313,36 @@ export function useUpdateFinding() {
       // filter views of this Work.
       void qc.invalidateQueries({ queryKey: queryKeys.findings.list(vars.workId) });
     },
+  });
+}
+
+/**
+ * Bulk update findings (V1.91 P1). Calls `PATCH /v1/daemon/findings/batch` for
+ * up to 100 IDs. Partial success: the server returns counts and `not_found` /
+ * `conflict` arrays; this hook surfaces those in a toast and invalidates the
+ * work-scoped findings list so the table reflects the applied changes.
+ */
+export function useBatchUpdateFindings() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  const { toast } = useToast();
+  return useMutation({
+    mutationFn: (vars: { workId: string; request: BatchUpdateFindingsRequest }) =>
+      client.batchUpdateFindings(vars.request),
+    onSuccess: (data, vars) => {
+      const parts: string[] = [];
+      if (data.updated) parts.push(`${data.updated} updated`);
+      if (data.not_found?.length) parts.push(`${data.not_found.length} not found`);
+      if (data.conflict?.length) parts.push(`${data.conflict.length} conflict`);
+      toast({
+        variant: 'success',
+        title: 'Batch update complete',
+        description: parts.join(', ') || 'No changes applied',
+      });
+      void qc.invalidateQueries({ queryKey: queryKeys.findings.list(vars.workId) });
+    },
+    onError: (error) => errorToast(error, 'Could not update findings'),
   });
 }
 
