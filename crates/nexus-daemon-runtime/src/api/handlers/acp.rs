@@ -1,8 +1,8 @@
 #![allow(clippy::missing_errors_doc)]
 //! ACP tool execution handler — thin HTTP layer delegating to `HostToolExecutor`.
 //!
-//! The `/v1/local/acp/tool/execute` (legacy) and
-//! `/v1/local/agent-host/internal/tool-executions` routes both delegate to
+//! The `/v1/daemon/acp/tool/execute` (legacy) and
+//! `/v1/daemon/agent-host/internal/tool-executions` routes both delegate to
 //! [`HostToolExecutor::execute`] for permission checking, path validation,
 //! tool dispatch, and audit logging.
 //!
@@ -16,7 +16,7 @@ use crate::workspace::WorkspaceState;
 use axum::extract::State;
 use axum::Json;
 
-/// POST /v1/local/acp/tool/execute (legacy route)
+/// POST /v1/daemon/acp/tool/execute (legacy route)
 ///
 /// Execute an ACP tool request through the daemon.
 /// Delegates to [`HostToolExecutor::execute`].

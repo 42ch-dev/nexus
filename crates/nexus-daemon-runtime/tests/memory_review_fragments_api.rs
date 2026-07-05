@@ -1,8 +1,8 @@
 //! Memory Review + Fragments API contract tests (V1.33 P4).
 //!
 //! Covers the two new daemon endpoints:
-//! - `POST /v1/local/memory/review` → 200 (review processed), 400 (invalid creator_id)
-//! - `GET  /v1/local/memory/fragments` → 200 (list), 400 (invalid creator_id)
+//! - `POST /v1/daemon/memory/review` → 200 (review processed), 400 (invalid creator_id)
+//! - `GET  /v1/daemon/memory/fragments` → 200 (list), 400 (invalid creator_id)
 //!
 //! Also verifies that `pending-review` CRUD routes are not regressed.
 
@@ -61,7 +61,7 @@ async fn seed_pending_review(ctx: &TestCtx, pending_id: &str) {
     });
     let resp = ctx
         .server
-        .post("/v1/local/memory/pending-review")
+        .post("/v1/daemon/memory/pending-review")
         .json(&body)
         .await;
     resp.assert_status(axum::http::StatusCode::OK);
@@ -84,7 +84,7 @@ async fn seed_pending_review_raw(pool: &sqlx::SqlitePool, pending_id: &str, crea
     .expect("raw seed insert");
 }
 
-// ─── POST /v1/local/memory/review ────────────────────────────────────────
+// ─── POST /v1/daemon/memory/review ────────────────────────────────────────
 
 #[tokio::test]
 async fn review_returns_200_with_counts() {
@@ -92,7 +92,11 @@ async fn review_returns_200_with_counts() {
     seed_pending_review(&ctx, "pending_review_test_1").await;
 
     let body = json!({ "creator_id": "ctr_testuser" });
-    let resp = ctx.server.post("/v1/local/memory/review").json(&body).await;
+    let resp = ctx
+        .server
+        .post("/v1/daemon/memory/review")
+        .json(&body)
+        .await;
     resp.assert_status(axum::http::StatusCode::OK);
     let body: Value = resp.json();
     // The brainstorm entry with high-signal content should be promoted
@@ -103,7 +107,11 @@ async fn review_returns_200_with_counts() {
 async fn review_returns_200_empty_queue() {
     let ctx = test_ctx().await;
     let body = json!({ "creator_id": "ctr_testuser" });
-    let resp = ctx.server.post("/v1/local/memory/review").json(&body).await;
+    let resp = ctx
+        .server
+        .post("/v1/daemon/memory/review")
+        .json(&body)
+        .await;
     resp.assert_status(axum::http::StatusCode::OK);
     let body: Value = resp.json();
     assert_eq!(body["promoted"], 0);
@@ -119,7 +127,11 @@ async fn review_returns_400_invalid_creator_id() {
     // (auth check runs before format validation). Use a valid-format but
     // non-matching creator to test format validation path.
     let body = json!({ "creator_id": "invalid_id" });
-    let resp = ctx.server.post("/v1/local/memory/review").json(&body).await;
+    let resp = ctx
+        .server
+        .post("/v1/daemon/memory/review")
+        .json(&body)
+        .await;
     // Auth check (403) runs before format validation since creator_id
     // "invalid_id" != active "ctr_testuser".
     resp.assert_status(axum::http::StatusCode::FORBIDDEN);
@@ -138,7 +150,7 @@ async fn review_drops_short_digest() {
     });
     let resp = ctx
         .server
-        .post("/v1/local/memory/pending-review")
+        .post("/v1/daemon/memory/pending-review")
         .json(&body)
         .await;
     resp.assert_status(axum::http::StatusCode::OK);
@@ -146,7 +158,7 @@ async fn review_drops_short_digest() {
     let review_body = json!({ "creator_id": "ctr_testuser" });
     let resp = ctx
         .server
-        .post("/v1/local/memory/review")
+        .post("/v1/daemon/memory/review")
         .json(&review_body)
         .await;
     resp.assert_status(axum::http::StatusCode::OK);
@@ -154,14 +166,14 @@ async fn review_drops_short_digest() {
     assert!(result["dropped"].as_u64().unwrap() > 0);
 }
 
-// ─── GET /v1/local/memory/fragments ──────────────────────────────────────
+// ─── GET /v1/daemon/memory/fragments ──────────────────────────────────────
 
 #[tokio::test]
 async fn fragments_returns_200_with_array() {
     let ctx = test_ctx().await;
     let resp = ctx
         .server
-        .get("/v1/local/memory/fragments?creator_id=ctr_testuser")
+        .get("/v1/daemon/memory/fragments?creator_id=ctr_testuser")
         .await;
     resp.assert_status(axum::http::StatusCode::OK);
     let body: Value = resp.json();
@@ -173,7 +185,7 @@ async fn fragments_returns_200_empty() {
     let ctx = test_ctx().await;
     let resp = ctx
         .server
-        .get("/v1/local/memory/fragments?creator_id=ctr_testuser")
+        .get("/v1/daemon/memory/fragments?creator_id=ctr_testuser")
         .await;
     resp.assert_status(axum::http::StatusCode::OK);
     let body: Value = resp.json();
@@ -187,7 +199,7 @@ async fn fragments_returns_400_invalid_creator_id() {
     // "bad_id" != active "ctr_testuser".
     let resp = ctx
         .server
-        .get("/v1/local/memory/fragments?creator_id=bad_id")
+        .get("/v1/daemon/memory/fragments?creator_id=bad_id")
         .await;
     resp.assert_status(axum::http::StatusCode::FORBIDDEN);
 }
@@ -206,7 +218,7 @@ async fn fragments_after_review_has_entries() {
     });
     let resp = ctx
         .server
-        .post("/v1/local/memory/pending-review")
+        .post("/v1/daemon/memory/pending-review")
         .json(&body)
         .await;
     resp.assert_status(axum::http::StatusCode::OK);
@@ -215,7 +227,7 @@ async fn fragments_after_review_has_entries() {
     let review_body = json!({ "creator_id": "ctr_testuser" });
     let resp = ctx
         .server
-        .post("/v1/local/memory/review")
+        .post("/v1/daemon/memory/review")
         .json(&review_body)
         .await;
     resp.assert_status(axum::http::StatusCode::OK);
@@ -226,7 +238,7 @@ async fn fragments_after_review_has_entries() {
     // Now query fragments
     let resp = ctx
         .server
-        .get("/v1/local/memory/fragments?creator_id=ctr_testuser")
+        .get("/v1/daemon/memory/fragments?creator_id=ctr_testuser")
         .await;
     resp.assert_status(axum::http::StatusCode::OK);
     let frag_body: Value = resp.json();
@@ -256,7 +268,7 @@ async fn pending_review_list_still_works() {
 
     let resp = ctx
         .server
-        .get("/v1/local/memory/pending-review?creator_id=ctr_testuser")
+        .get("/v1/daemon/memory/pending-review?creator_id=ctr_testuser")
         .await;
     resp.assert_status(axum::http::StatusCode::OK);
     let body: Value = resp.json();
@@ -271,7 +283,11 @@ async fn review_returns_401_without_creator() {
     let ctx = test_ctx_without_creator().await;
 
     let body = json!({ "creator_id": "ctr_testuser" });
-    let resp = ctx.server.post("/v1/local/memory/review").json(&body).await;
+    let resp = ctx
+        .server
+        .post("/v1/daemon/memory/review")
+        .json(&body)
+        .await;
     resp.assert_status(axum::http::StatusCode::UNAUTHORIZED);
 }
 
@@ -282,7 +298,7 @@ async fn fragments_returns_401_without_creator() {
 
     let resp = ctx
         .server
-        .get("/v1/local/memory/fragments?creator_id=ctr_testuser")
+        .get("/v1/daemon/memory/fragments?creator_id=ctr_testuser")
         .await;
     resp.assert_status(axum::http::StatusCode::UNAUTHORIZED);
 }
@@ -293,7 +309,11 @@ async fn review_returns_403_on_creator_id_mismatch() {
     let ctx = test_ctx_with_active_creator("ctr_alice").await;
 
     let body = json!({ "creator_id": "ctr_bob" });
-    let resp = ctx.server.post("/v1/local/memory/review").json(&body).await;
+    let resp = ctx
+        .server
+        .post("/v1/daemon/memory/review")
+        .json(&body)
+        .await;
     resp.assert_status(axum::http::StatusCode::FORBIDDEN);
 }
 
@@ -304,7 +324,7 @@ async fn fragments_returns_403_on_creator_id_mismatch() {
 
     let resp = ctx
         .server
-        .get("/v1/local/memory/fragments?creator_id=ctr_bob")
+        .get("/v1/daemon/memory/fragments?creator_id=ctr_bob")
         .await;
     resp.assert_status(axum::http::StatusCode::FORBIDDEN);
 }
@@ -322,7 +342,7 @@ async fn cross_creator_isolation_review_other_creator_returns_403() {
     let review_body = json!({ "creator_id": "ctr_alice" });
     let resp = ctx
         .server
-        .post("/v1/local/memory/review")
+        .post("/v1/daemon/memory/review")
         .json(&review_body)
         .await;
     resp.assert_status(axum::http::StatusCode::OK);
@@ -364,7 +384,7 @@ async fn pending_review_create_returns_401_without_creator() {
     });
     let resp = ctx
         .server
-        .post("/v1/local/memory/pending-review")
+        .post("/v1/daemon/memory/pending-review")
         .json(&body)
         .await;
     resp.assert_status(axum::http::StatusCode::UNAUTHORIZED);
@@ -376,7 +396,7 @@ async fn pending_review_list_returns_401_without_creator() {
     let ctx = test_ctx_without_creator().await;
     let resp = ctx
         .server
-        .get("/v1/local/memory/pending-review?creator_id=ctr_testuser")
+        .get("/v1/daemon/memory/pending-review?creator_id=ctr_testuser")
         .await;
     resp.assert_status(axum::http::StatusCode::UNAUTHORIZED);
 }
@@ -387,7 +407,7 @@ async fn pending_review_count_returns_401_without_creator() {
     let ctx = test_ctx_without_creator().await;
     let resp = ctx
         .server
-        .get("/v1/local/memory/pending-review/count?creator_id=ctr_testuser")
+        .get("/v1/daemon/memory/pending-review/count?creator_id=ctr_testuser")
         .await;
     resp.assert_status(axum::http::StatusCode::UNAUTHORIZED);
 }
@@ -441,7 +461,7 @@ async fn pending_review_create_returns_403_on_creator_id_mismatch() {
     });
     let resp = ctx
         .server
-        .post("/v1/local/memory/pending-review")
+        .post("/v1/daemon/memory/pending-review")
         .json(&body)
         .await;
     resp.assert_status(axum::http::StatusCode::FORBIDDEN);
@@ -453,7 +473,7 @@ async fn pending_review_list_returns_403_on_creator_id_mismatch() {
     let ctx = test_ctx_with_active_creator("ctr_alice").await;
     let resp = ctx
         .server
-        .get("/v1/local/memory/pending-review?creator_id=ctr_bob")
+        .get("/v1/daemon/memory/pending-review?creator_id=ctr_bob")
         .await;
     resp.assert_status(axum::http::StatusCode::FORBIDDEN);
 }
@@ -500,7 +520,11 @@ async fn review_bounded_drain_walk_more_than_batch_limit() {
 
     // First call: bounded to 50 rows; has_more = true.
     let body = json!({ "creator_id": "ctr_testuser" });
-    let resp = ctx.server.post("/v1/local/memory/review").json(&body).await;
+    let resp = ctx
+        .server
+        .post("/v1/daemon/memory/review")
+        .json(&body)
+        .await;
     resp.assert_status(axum::http::StatusCode::OK);
     let result: Value = resp.json();
     assert_eq!(
@@ -523,7 +547,11 @@ async fn review_bounded_drain_walk_more_than_batch_limit() {
     );
 
     // Second call: drains the remaining 5 rows; has_more = false.
-    let resp = ctx.server.post("/v1/local/memory/review").json(&body).await;
+    let resp = ctx
+        .server
+        .post("/v1/daemon/memory/review")
+        .json(&body)
+        .await;
     resp.assert_status(axum::http::StatusCode::OK);
     let result: Value = resp.json();
     assert_eq!(
@@ -542,7 +570,11 @@ async fn review_bounded_drain_walk_more_than_batch_limit() {
     assert_eq!(second_promoted + second_fragmented + second_dropped, 5);
 
     // Third call: empty queue, zero counters, has_more = false.
-    let resp = ctx.server.post("/v1/local/memory/review").json(&body).await;
+    let resp = ctx
+        .server
+        .post("/v1/daemon/memory/review")
+        .json(&body)
+        .await;
     resp.assert_status(axum::http::StatusCode::OK);
     let result: Value = resp.json();
     assert_eq!(result["processed"].as_u64().unwrap(), 0);
@@ -643,7 +675,11 @@ async fn review_populates_has_more_and_processed_fields() {
     let ctx = test_ctx().await;
     // An empty queue: has_more should be false, processed 0, both present.
     let body = json!({ "creator_id": "ctr_testuser" });
-    let resp = ctx.server.post("/v1/local/memory/review").json(&body).await;
+    let resp = ctx
+        .server
+        .post("/v1/daemon/memory/review")
+        .json(&body)
+        .await;
     resp.assert_status(axum::http::StatusCode::OK);
     let result: Value = resp.json();
     assert!(
@@ -722,7 +758,11 @@ async fn review_single_pending_row_with_failed_action_keeps_has_more_true() {
     block_fragment_creation(&ctx.pool, pending_id).await;
 
     let body = json!({ "creator_id": "ctr_testuser" });
-    let resp = ctx.server.post("/v1/local/memory/review").json(&body).await;
+    let resp = ctx
+        .server
+        .post("/v1/daemon/memory/review")
+        .json(&body)
+        .await;
     resp.assert_status(axum::http::StatusCode::OK);
     let result: Value = resp.json();
 
@@ -768,7 +808,11 @@ async fn review_batch_where_final_row_fails_keeps_has_more_true() {
     block_fragment_creation(&ctx.pool, blocked_id).await;
 
     let body = json!({ "creator_id": "ctr_testuser" });
-    let resp = ctx.server.post("/v1/local/memory/review").json(&body).await;
+    let resp = ctx
+        .server
+        .post("/v1/daemon/memory/review")
+        .json(&body)
+        .await;
     resp.assert_status(axum::http::StatusCode::OK);
     let result: Value = resp.json();
 
@@ -821,7 +865,11 @@ async fn review_perpetually_failing_row_keeps_has_more_true_across_calls() {
     // Repeated review calls re-fetch the same unprocessable row; each must
     // report has_more = true (never a false "complete") and leave the row.
     for call in 1..=3 {
-        let resp = ctx.server.post("/v1/local/memory/review").json(&body).await;
+        let resp = ctx
+            .server
+            .post("/v1/daemon/memory/review")
+            .json(&body)
+            .await;
         resp.assert_status(axum::http::StatusCode::OK);
         let result: Value = resp.json();
         assert_eq!(
@@ -862,7 +910,7 @@ async fn seed_pending_review_with_world(ctx: &TestCtx, pending_id: &str, world_i
     });
     let resp = ctx
         .server
-        .post("/v1/local/memory/pending-review")
+        .post("/v1/daemon/memory/pending-review")
         .json(&body)
         .await;
     resp.assert_status(axum::http::StatusCode::OK);
@@ -882,7 +930,7 @@ async fn world_id_propagation_from_review_to_fragments() {
     let review_body = json!({ "creator_id": "ctr_testuser" });
     let resp = ctx
         .server
-        .post("/v1/local/memory/review")
+        .post("/v1/daemon/memory/review")
         .json(&review_body)
         .await;
     resp.assert_status(axum::http::StatusCode::OK);
@@ -895,7 +943,7 @@ async fn world_id_propagation_from_review_to_fragments() {
     // GET fragments filtered by world_id=wld_x → fragment carries world_id
     let resp = ctx
         .server
-        .get("/v1/local/memory/fragments?creator_id=ctr_testuser&world_id=wld_x")
+        .get("/v1/daemon/memory/fragments?creator_id=ctr_testuser&world_id=wld_x")
         .await;
     resp.assert_status(axum::http::StatusCode::OK);
     let frag_body: Value = resp.json();
@@ -913,7 +961,7 @@ async fn world_id_propagation_from_review_to_fragments() {
     // Unfiltered query also returns the fragment
     let resp = ctx
         .server
-        .get("/v1/local/memory/fragments?creator_id=ctr_testuser")
+        .get("/v1/daemon/memory/fragments?creator_id=ctr_testuser")
         .await;
     resp.assert_status(axum::http::StatusCode::OK);
     let all_body: Value = resp.json();
@@ -928,7 +976,7 @@ async fn world_id_propagation_from_review_to_fragments() {
     // Filter by a different world_id → fragment NOT returned
     let resp = ctx
         .server
-        .get("/v1/local/memory/fragments?creator_id=ctr_testuser&world_id=wld_y")
+        .get("/v1/daemon/memory/fragments?creator_id=ctr_testuser&world_id=wld_y")
         .await;
     resp.assert_status(axum::http::StatusCode::OK);
     let other_body: Value = resp.json();
@@ -956,7 +1004,7 @@ async fn world_id_none_core_only_fragment() {
     let review_body = json!({ "creator_id": "ctr_testuser" });
     let resp = ctx
         .server
-        .post("/v1/local/memory/review")
+        .post("/v1/daemon/memory/review")
         .json(&review_body)
         .await;
     resp.assert_status(axum::http::StatusCode::OK);
@@ -969,7 +1017,7 @@ async fn world_id_none_core_only_fragment() {
     // Unfiltered query → fragment appears
     let resp = ctx
         .server
-        .get("/v1/local/memory/fragments?creator_id=ctr_testuser")
+        .get("/v1/daemon/memory/fragments?creator_id=ctr_testuser")
         .await;
     resp.assert_status(axum::http::StatusCode::OK);
     let all_body: Value = resp.json();
@@ -982,7 +1030,7 @@ async fn world_id_none_core_only_fragment() {
     // Filter by a specific world_id → fragment NOT returned (world_id=None != "wld_z")
     let resp = ctx
         .server
-        .get("/v1/local/memory/fragments?creator_id=ctr_testuser&world_id=wld_z")
+        .get("/v1/daemon/memory/fragments?creator_id=ctr_testuser&world_id=wld_z")
         .await;
     resp.assert_status(axum::http::StatusCode::OK);
     let filtered_body: Value = resp.json();

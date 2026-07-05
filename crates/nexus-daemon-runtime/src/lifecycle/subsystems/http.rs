@@ -23,7 +23,7 @@ enum HttpState {
 
 /// HTTP subsystem implementation.
 ///
-/// Manages the axum HTTP listener for the Local API.
+/// Manages the axum HTTP listener for the Daemon API.
 #[derive(Debug)]
 pub struct HttpSubsystem {
     /// Configured port.

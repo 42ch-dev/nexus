@@ -17,7 +17,7 @@ pub struct HealthResponse {
     pub version: String,
 }
 
-/// GET /v1/local/runtime/health
+/// GET /v1/daemon/runtime/health
 pub async fn health(State(_state): State<WorkspaceState>) -> Json<HealthResponse> {
     info!("Handling health check request");
     Json(HealthResponse {
@@ -48,7 +48,7 @@ pub struct AcpStatusInfo {
     pub total_tool_executions: u64,
 }
 
-/// GET /v1/local/daemon/status — v2 full FSM response.
+/// GET /v1/daemon/daemon/status — v2 full FSM response.
 ///
 /// Returns the full lifecycle state per daemon-lifecycle-api.md §7.
 /// Wire-compatible with v1: v1 clients only see `lifecycle_state` field.
@@ -153,7 +153,7 @@ pub async fn daemon_status(State(state): State<WorkspaceState>) -> Json<DaemonSt
     })
 }
 
-/// GET /v1/local/runtime/status
+/// GET /v1/daemon/runtime/status
 pub async fn status(State(state): State<WorkspaceState>) -> Json<StatusResponse> {
     info!("Handling runtime status request");
 

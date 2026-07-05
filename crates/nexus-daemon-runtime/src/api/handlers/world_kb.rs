@@ -1,6 +1,6 @@
-//! Canvas World KB Local API handlers (V1.73 P0 Track A).
+//! Canvas World KB Daemon API handlers (V1.73 P0 Track A).
 //!
-//! Four World KB routes under `/v1/local/worlds/{world_id}/kb/*`, exposing
+//! Four World KB routes under `/v1/daemon/worlds/{world_id}/kb/*`, exposing
 //! the World-scoped `KeyBlock` graph + promotion state machine
 //! (entity-scope-model §5.5) to the canvas. Writes use per-row OCC on
 //! `kb_key_blocks.revision` (entity edits) and `kb_extract_jobs.version`
@@ -8,12 +8,12 @@
 //!
 //! # Endpoints
 //!
-//! - `POST /v1/local/worlds/{world_id}/kb/patch-entity` — edit an entity
+//! - `POST /v1/daemon/worlds/{world_id}/kb/patch-entity` — edit an entity
 //!   (`title/body/aliases/block_type`) with per-row OCC.
-//! - `POST /v1/local/worlds/{world_id}/kb/promote-candidate` —
+//! - `POST /v1/daemon/worlds/{world_id}/kb/promote-candidate` —
 //!   adopt/reject/merge a pending candidate.
-//! - `GET  /v1/local/worlds/{world_id}/kb/graph` — entity graph projection.
-//! - `GET  /v1/local/worlds/{world_id}/kb/candidates` — pending candidates.
+//! - `GET  /v1/daemon/worlds/{world_id}/kb/graph` — entity graph projection.
+//! - `GET  /v1/daemon/worlds/{world_id}/kb/candidates` — pending candidates.
 //!
 //! # Conflict model
 //!
@@ -262,7 +262,7 @@ fn validation_summary(errors: &[String], warnings: &[String]) -> serde_json::Val
 
 // ─── patch-entity ───────────────────────────────────────────────────────────
 
-/// `POST /v1/local/worlds/{world_id}/kb/patch-entity` — entity-level patch.
+/// `POST /v1/daemon/worlds/{world_id}/kb/patch-entity` — entity-level patch.
 pub async fn patch_entity(
     State(state): State<WorkspaceState>,
     Path(world_id): Path<String>,
@@ -434,7 +434,7 @@ fn compute_body(
 
 // ─── promote-candidate ──────────────────────────────────────────────────────
 
-/// `POST /v1/local/worlds/{world_id}/kb/promote-candidate` — adopt/reject/merge.
+/// `POST /v1/daemon/worlds/{world_id}/kb/promote-candidate` — adopt/reject/merge.
 pub async fn promote_candidate(
     State(state): State<WorkspaceState>,
     Path(world_id): Path<String>,
@@ -838,7 +838,7 @@ fn map_kb_store_err(e: &nexus_kb::store::KbStoreError, job_id: &str) -> NexusApi
 
 // ─── read endpoints ─────────────────────────────────────────────────────────
 
-/// `GET /v1/local/worlds/{world_id}/kb/graph` — entity graph projection.
+/// `GET /v1/daemon/worlds/{world_id}/kb/graph` — entity graph projection.
 ///
 /// V1.76: defaults to excluding `needs_review = 1` (extraction-suggested)
 /// relationships from the graph. Pass `?include_suggested=true` to surface
@@ -1043,7 +1043,7 @@ fn encode_candidate_cursor(created_at: &str, job_id: &str) -> String {
     format!("{CANDIDATE_CURSOR_PREFIX}{created_at}|{job_id}")
 }
 
-/// `GET /v1/local/worlds/{world_id}/kb/candidates` — pending candidates list.
+/// `GET /v1/daemon/worlds/{world_id}/kb/candidates` — pending candidates list.
 ///
 /// Cursor-paginated via a `(created_at, job_id)` keyset applied **inside** the
 /// storage query (V1.73 qc3 W-01 fix). The previous implementation fetched the
@@ -1106,7 +1106,7 @@ pub async fn get_candidates(
 
 // ─── patch-relationship ─────────────────────────────────────────────────────
 
-/// `POST /v1/local/worlds/{world_id}/kb/patch-relationship` — add/update/remove a
+/// `POST /v1/daemon/worlds/{world_id}/kb/patch-relationship` — add/update/remove a
 /// typed relationship between two World KB entities.
 pub async fn patch_relationship(
     State(state): State<WorkspaceState>,

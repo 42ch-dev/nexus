@@ -5,7 +5,7 @@
 //! for use by CLI crates.
 //!
 //! Note (KCA-002 B2): These are wire types for the platform API contract.
-//! The daemon `POST /v1/local/context/assemble` route is retired; context
+//! The daemon `POST /v1/daemon/context/assemble` route is retired; context
 //! assembly runs CLI in-process via `nexus-moment-context-assembly`.
 
 // Re-export generated types from nexus-contracts

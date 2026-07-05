@@ -17,10 +17,10 @@
 //!
 //! # Endpoints
 //!
-//! - `GET /v1/local/kb/entries` — list/search work-scope entries
-//! - `POST /v1/local/kb/entries` — add work-scope entry
-//! - `GET /v1/local/kb/entries/{id}` — get single work-scope entry
-//! - `DELETE /v1/local/kb/entries/{id}` — delete work-scope entry
+//! - `GET /v1/daemon/kb/entries` — list/search work-scope entries
+//! - `POST /v1/daemon/kb/entries` — add work-scope entry
+//! - `GET /v1/daemon/kb/entries/{id}` — get single work-scope entry
+//! - `DELETE /v1/daemon/kb/entries/{id}` — delete work-scope entry
 //!
 //! Future World KB routes (`nexus-kb` + `nexus-narrative`) and User knowledge routes
 //! (`nexus-knowledge`) are **not** served here. Full KB route redesign is deferred
@@ -338,7 +338,7 @@ fn remove_from_kb_entry_index(entry_id: &str) {
 
 // ─── Handlers ──────────────────────────────────────────────────────────────
 
-/// `GET /v1/local/kb/entries` — list/search work-scope entries (T39).
+/// `GET /v1/daemon/kb/entries` — list/search work-scope entries (T39).
 ///
 /// Returns entries from the local work file index for the given creator/workspace.
 /// Only `scope=work` is supported; no World KB or User knowledge access.
@@ -417,7 +417,7 @@ pub async fn list_entries(
     }))
 }
 
-/// `POST /v1/local/kb/entries` — add work-scope entry (T39).
+/// `POST /v1/daemon/kb/entries` — add work-scope entry (T39).
 ///
 /// Adds an entry to the local work file index. Only `scope=work` is supported.
 pub async fn add_entry(
@@ -537,7 +537,7 @@ pub async fn add_entry(
     }))
 }
 
-/// `GET /v1/local/kb/entries/{id}` — get single work-scope entry (T39).
+/// `GET /v1/daemon/kb/entries/{id}` — get single work-scope entry (T39).
 ///
 /// Uses the KB entry index for O(1) lookup (QC3 W-005).
 /// Only `scope=work` is supported.
@@ -651,7 +651,7 @@ pub async fn get_entry(
     )))
 }
 
-/// `DELETE /v1/local/kb/entries/{id}` — delete work-scope entry (T39).
+/// `DELETE /v1/daemon/kb/entries/{id}` — delete work-scope entry (T39).
 ///
 /// Uses the KB entry index for O(1) lookup (QC3 W-005).
 /// Only `scope=work` is supported.

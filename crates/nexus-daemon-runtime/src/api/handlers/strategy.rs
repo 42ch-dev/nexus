@@ -1,9 +1,9 @@
 //! Strategy canvas write-boundary handlers (V1.71 Track A).
 //!
 //! Three structured patch routes for the Strategy (preset) graph surface:
-//! - `POST /v1/local/strategies/{strategy_id}/states/{state_id}/patch`
-//! - `POST /v1/local/strategies/{strategy_id}/transitions/patch`
-//! - `POST /v1/local/strategies/{strategy_id}/states/{state_id}/prompt/patch`
+//! - `POST /v1/daemon/strategies/{strategy_id}/states/{state_id}/patch`
+//! - `POST /v1/daemon/strategies/{strategy_id}/transitions/patch`
+//! - `POST /v1/daemon/strategies/{strategy_id}/states/{state_id}/prompt/patch`
 //!
 //! All writes target **user** preset bundles only; embedded/system presets are
 //! read-only. Every mutating request carries a `base_revision`; stale revisions
@@ -547,7 +547,7 @@ fn validate_transition_condition(condition: &str) -> Result<(), NexusApiError> {
 
 // ─── Handlers ──────────────────────────────────────────────────────────────
 
-/// `POST /v1/local/strategies/{strategy_id}/states/{state_id}/patch` — patch a state.
+/// `POST /v1/daemon/strategies/{strategy_id}/states/{state_id}/patch` — patch a state.
 ///
 /// # Errors
 ///
@@ -779,7 +779,7 @@ fn apply_go_nogo_branches(
     matched
 }
 
-/// `POST /v1/local/strategies/{strategy_id}/transitions/patch` — rewire a transition.
+/// `POST /v1/daemon/strategies/{strategy_id}/transitions/patch` — rewire a transition.
 ///
 /// # Errors
 ///
@@ -894,7 +894,7 @@ fn patch_transition_inner(
     })
 }
 
-/// `POST /v1/local/strategies/{strategy_id}/states/{state_id}/prompt/patch` — patch prompt template.
+/// `POST /v1/daemon/strategies/{strategy_id}/states/{state_id}/prompt/patch` — patch prompt template.
 ///
 /// # Errors
 ///

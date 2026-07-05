@@ -3,7 +3,7 @@
 use nexus_contracts::local::domain::RuntimeMode;
 use serde::{Deserialize, Serialize};
 
-/// Runtime status response from daemon's `/v1/local/runtime/status` endpoint.
+/// Runtime status response from daemon's `/v1/daemon/runtime/status` endpoint.
 #[derive(Debug, Clone, Deserialize)]
 pub struct RuntimeStatus {
     /// Daemon version string
@@ -57,7 +57,7 @@ pub struct FragmentRow {
     pub summary: String,
 }
 
-/// Response from `GET /v1/local/memory/fragments`.
+/// Response from `GET /v1/daemon/memory/fragments`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ListFragmentsResponse {
     pub fragments: Vec<FragmentRow>,
@@ -65,7 +65,7 @@ pub struct ListFragmentsResponse {
 
 // ─── Pending review models ──────────────────────────────────────────────────
 
-/// Response from `GET /v1/local/memory/pending-review`.
+/// Response from `GET /v1/daemon/memory/pending-review`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ListPendingReviewsResponse {
     pub items: Vec<PendingReviewRow>,
@@ -84,7 +84,7 @@ pub struct PendingReviewRow {
     pub created_at: String,
 }
 
-/// Response from `DELETE /v1/local/memory/pending-review/{id}`.
+/// Response from `DELETE /v1/daemon/memory/pending-review/{id}`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct DeletePendingReviewResponse {
     pub success: bool,
@@ -93,7 +93,7 @@ pub struct DeletePendingReviewResponse {
 
 // ─── Workspace management models (V1.20 Batch 4) ─────────────────────────
 
-/// Response from `GET /v1/local/workspaces`.
+/// Response from `GET /v1/daemon/workspaces`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ListWorkspacesResponse {
     pub items: Vec<WorkspaceSummary>,
@@ -108,7 +108,7 @@ pub struct WorkspaceSummary {
     pub display_name: Option<String>,
 }
 
-/// Request body for `POST /v1/local/workspaces`.
+/// Request body for `POST /v1/daemon/workspaces`.
 #[derive(Debug, Clone, Serialize)]
 pub struct CreateWorkspaceRequest {
     pub creator_id: String,
@@ -117,7 +117,7 @@ pub struct CreateWorkspaceRequest {
     pub display_name: Option<String>,
 }
 
-/// Response from `POST /v1/local/workspaces`.
+/// Response from `POST /v1/daemon/workspaces`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct CreateWorkspaceResponse {
     pub creator_id: String,
@@ -127,7 +127,7 @@ pub struct CreateWorkspaceResponse {
     pub state_db_path: String,
 }
 
-/// Response from `GET /v1/local/workspaces/active`.
+/// Response from `GET /v1/daemon/workspaces/active`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ActiveWorkspaceResponse {
     pub creator_id: String,
@@ -136,14 +136,14 @@ pub struct ActiveWorkspaceResponse {
     pub operational_dir: String,
 }
 
-/// Request body for `PUT /v1/local/workspaces/active`.
+/// Request body for `PUT /v1/daemon/workspaces/active`.
 #[derive(Debug, Clone, Serialize)]
 pub struct SetActiveWorkspaceRequest {
     pub creator_id: Option<String>,
     pub workspace_slug: String,
 }
 
-/// Response from `PUT /v1/local/workspaces/active`.
+/// Response from `PUT /v1/daemon/workspaces/active`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct SetActiveWorkspaceResponse {
     pub creator_id: String,
@@ -152,7 +152,7 @@ pub struct SetActiveWorkspaceResponse {
 
 // ─── Creator management models (V1.20 Batch 5) ────────────────────────────
 
-/// Response from `GET /v1/local/creators/active`.
+/// Response from `GET /v1/daemon/creators/active`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ActiveCreatorResponse {
     pub creator_id: String,
@@ -160,19 +160,19 @@ pub struct ActiveCreatorResponse {
     pub display_name: Option<String>,
 }
 
-/// Request body for `PUT /v1/local/creators/active`.
+/// Request body for `PUT /v1/daemon/creators/active`.
 #[derive(Debug, Clone, Serialize)]
 pub struct SetActiveCreatorRequest {
     pub creator_id: String,
 }
 
-/// Response from `PUT /v1/local/creators/active`.
+/// Response from `PUT /v1/daemon/creators/active`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct SetActiveCreatorResponse {
     pub creator_id: String,
 }
 
-/// Response from `POST /v1/local/creators/{id}:logout`.
+/// Response from `POST /v1/daemon/creators/{id}:logout`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct LogoutCreatorResponse {
     pub creator_id: String,
@@ -188,7 +188,7 @@ pub struct PresetSummary {
     pub source: String,
 }
 
-/// Response from `GET /v1/local/presets`.
+/// Response from `GET /v1/daemon/presets`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ListPresetsGroupedResponse {
     pub embedded: Vec<PresetSummary>,
@@ -196,26 +196,26 @@ pub struct ListPresetsGroupedResponse {
     pub user: Vec<PresetSummary>,
 }
 
-/// Request body for `POST /v1/local/presets`.
+/// Request body for `POST /v1/daemon/presets`.
 #[derive(Debug, Clone, Serialize)]
 pub struct ScaffoldPresetRequest {
     pub name: String,
 }
 
-/// Response from `POST /v1/local/presets`.
+/// Response from `POST /v1/daemon/presets`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ScaffoldPresetResponse {
     pub id: String,
     pub path: String,
 }
 
-/// Request body for `POST /v1/local/presets:validate`.
+/// Request body for `POST /v1/daemon/presets:validate`.
 #[derive(Debug, Clone, Serialize)]
 pub struct ValidatePresetRequest {
     pub path: String,
 }
 
-/// Response from `POST /v1/local/presets:validate`.
+/// Response from `POST /v1/daemon/presets:validate`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ValidatePresetResponse {
     pub valid: bool,
@@ -225,7 +225,7 @@ pub struct ValidatePresetResponse {
     pub errors: Vec<String>,
 }
 
-/// Response from `POST /v1/local/presets/{id}:reload`.
+/// Response from `POST /v1/daemon/presets/{id}:reload`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ReloadPresetResponse {
     pub id: String,
@@ -242,7 +242,7 @@ pub struct KbEntrySummary {
     pub created_at: String,
 }
 
-/// Response from `GET /v1/local/kb/entries`.
+/// Response from `GET /v1/daemon/kb/entries`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct ListKbEntriesResponse {
     pub items: Vec<KbEntrySummary>,
@@ -256,7 +256,7 @@ pub struct PaginationInfo {
     pub next_cursor: Option<String>,
 }
 
-/// Request body for `POST /v1/local/kb/entries`.
+/// Request body for `POST /v1/daemon/kb/entries`.
 #[derive(Debug, Clone, Serialize)]
 pub struct AddKbEntryRequest {
     pub creator_id: String,
@@ -266,14 +266,14 @@ pub struct AddKbEntryRequest {
     pub file_path: Option<String>,
 }
 
-/// Response from `POST /v1/local/kb/entries`.
+/// Response from `POST /v1/daemon/kb/entries`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct AddKbEntryResponse {
     pub entry_id: String,
     pub title: String,
 }
 
-/// Response from `GET /v1/local/kb/entries/{id}`.
+/// Response from `GET /v1/daemon/kb/entries/{id}`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct GetKbEntryResponse {
     pub entry_id: String,
@@ -282,7 +282,7 @@ pub struct GetKbEntryResponse {
     pub content: String,
 }
 
-/// Response from `DELETE /v1/local/kb/entries/{id}`.
+/// Response from `DELETE /v1/daemon/kb/entries/{id}`.
 #[derive(Debug, Clone, Deserialize)]
 pub struct DeleteKbEntryResponse {
     pub entry_id: String,

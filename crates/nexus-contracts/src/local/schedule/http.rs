@@ -4,16 +4,16 @@
 //! These are local-only; `nexus-platform` never observes them.
 //!
 //! Endpoints:
-//! - `POST`   `/v1/local/orchestration/schedules`
-//! - `GET`    `/v1/local/orchestration/schedules`
-//! - `GET`    `/v1/local/orchestration/schedules/{schedule_id}`
-//! - `PATCH`  `/v1/local/orchestration/schedules/{schedule_id}/core-context`
-//! - `GET`    `/v1/local/orchestration/schedules/{schedule_id}/core-context`
-//! - `GET`    `/v1/local/orchestration/schedules/{schedule_id}/core-context-history`
-//! - `POST`   `/v1/local/orchestration/schedules/{schedule_id}/signal`
-//! - `DELETE` `/v1/local/orchestration/schedules/{schedule_id}`
+//! - `POST`   `/v1/daemon/orchestration/schedules`
+//! - `GET`    `/v1/daemon/orchestration/schedules`
+//! - `GET`    `/v1/daemon/orchestration/schedules/{schedule_id}`
+//! - `PATCH`  `/v1/daemon/orchestration/schedules/{schedule_id}/core-context`
+//! - `GET`    `/v1/daemon/orchestration/schedules/{schedule_id}/core-context`
+//! - `GET`    `/v1/daemon/orchestration/schedules/{schedule_id}/core-context-history`
+//! - `POST`   `/v1/daemon/orchestration/schedules/{schedule_id}/signal`
+//! - `DELETE` `/v1/daemon/orchestration/schedules/{schedule_id}`
 
-use crate::generated::local_api::kb::pagination_info::PaginationInfo;
+use crate::generated::daemon_api::kb::pagination_info::PaginationInfo;
 use serde::{Deserialize, Serialize};
 
 // ---------------------------------------------------------------------------

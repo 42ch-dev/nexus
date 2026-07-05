@@ -48,7 +48,7 @@ const SKIP_STRUCT_GENERATION_REL_PATHS = new Set(['platform/sync/bundle-refineme
  *   `common/version-ref.schema.json`                    → `['common', 'version_ref']`
  *   `platform/http-bff/context-assembly-v1.schema.json` → `['platform', 'http_bff', 'context_assembly_v1']`
  *   `platform/sync/bundle.schema.json`                  → `['platform', 'sync', 'bundle']`
- *   `local-api/compute/compute-input.schema.json`       → `['local_api', 'compute', 'compute_input']`
+ *   `daemon-api/compute/compute-input.schema.json`       → `['daemon_api', 'compute', 'compute_input']`
  */
 export function computeModulePath(relPath: string, typeName: string): string[] {
   const parts = relPath.split('/');

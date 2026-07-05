@@ -29,7 +29,7 @@ use crate::commands::creator::work_utils::resolve_active_work_id;
 use crate::commands::creator::works::{FindingsCommand, RulesCommand};
 use crate::errors::{CliError, Result};
 
-/// Subset of the daemon `GET /v1/local/works/{work_id}` payload that this
+/// Subset of the daemon `GET /v1/daemon/works/{work_id}` payload that this
 /// module needs. Deserializing via `serde_json::Value` keeps the CLI
 /// decoupled from the daemon DTO crate.
 #[derive(Debug, Deserialize)]
@@ -37,7 +37,7 @@ struct WorkRefResponse {
     work_ref: Option<String>,
 }
 
-/// Subset of the daemon `GET /v1/local/findings/{finding_id}` payload.
+/// Subset of the daemon `GET /v1/daemon/findings/{finding_id}` payload.
 #[derive(Debug, Deserialize)]
 struct FindingResponse {
     work_id: String,
@@ -93,7 +93,7 @@ pub async fn handle_rules(client: &DaemonClient, command: RulesCommand) -> Resul
 /// 5. PATCH the finding `status=resolved`.
 async fn handle_findings_accept(client: &DaemonClient, finding_id: &str, json: bool) -> Result<()> {
     // 1. Fetch the finding (creator-scoped endpoint, V1.48 P2).
-    let path = format!("/v1/local/findings/{finding_id}");
+    let path = format!("/v1/daemon/findings/{finding_id}");
     let finding: FindingResponse = client.get(&path).await?;
 
     // 2. Validate rule_suggestion is present and non-empty.
@@ -110,7 +110,7 @@ async fn handle_findings_accept(client: &DaemonClient, finding_id: &str, json: b
         })?;
 
     // 3. Resolve work_ref from the Work record.
-    let work_path = format!("/v1/local/works/{}", finding.work_id);
+    let work_path = format!("/v1/daemon/works/{}", finding.work_id);
     let work: WorkRefResponse = client.get(&work_path).await?;
     let work_ref = work.work_ref.as_deref().ok_or_else(|| {
         CliError::Config(format!(
@@ -197,7 +197,7 @@ async fn handle_findings_accept(client: &DaemonClient, finding_id: &str, json: b
 /// `creator works findings prune [--older-than <days>] [--dry-run]`
 /// (`novel-writing/quality-loop.md` §9.4).
 ///
-/// Calls `POST /v1/local/findings/prune` and reports the deleted (or, in
+/// Calls `POST /v1/daemon/findings/prune` and reports the deleted (or, in
 /// dry-run, would-be-deleted) count. `resolved` findings older than the
 /// retention window are eligible; `open` and `wont_fix` are never touched.
 ///
@@ -211,7 +211,7 @@ async fn handle_findings_prune(
     json: bool,
 ) -> Result<()> {
     let path =
-        format!("/v1/local/findings/prune?older_than_days={older_than_days}&dry_run={dry_run}");
+        format!("/v1/daemon/findings/prune?older_than_days={older_than_days}&dry_run={dry_run}");
     let resp: serde_json::Value = client.post(&path, &serde_json::json!({})).await?;
 
     if json {
@@ -298,7 +298,7 @@ async fn handle_rules_reset(
     let resolved_work_id = resolve_active_work_id(client, work_id).await?;
 
     // Resolve work_ref from the Work record.
-    let work_path = format!("/v1/local/works/{resolved_work_id}");
+    let work_path = format!("/v1/daemon/works/{resolved_work_id}");
     let work: WorkRefResponse = client.get(&work_path).await?;
     let work_ref = work.work_ref.as_deref().ok_or_else(|| {
         CliError::Config(format!(
@@ -486,7 +486,7 @@ async fn patch_finding_resolved(
     work_id: &str,
     finding_id: &str,
 ) -> Result<()> {
-    let path = format!("/v1/local/works/{work_id}/findings/{finding_id}");
+    let path = format!("/v1/daemon/works/{work_id}/findings/{finding_id}");
     let body = serde_json::json!({ "status": "resolved" });
     client.patch::<serde_json::Value, _>(&path, &body).await?;
     Ok(())

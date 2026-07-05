@@ -1,4 +1,4 @@
-//! Shared sort-parameter parser for Local API list endpoints (F-F1).
+//! Shared sort-parameter parser for Daemon API list endpoints (F-F1).
 //!
 //! Grammar: `sort := term ("," term)*`, `term := ["-"] key`.
 //! `-key` means descending; `key` means ascending.

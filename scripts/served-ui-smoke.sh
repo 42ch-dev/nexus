@@ -158,7 +158,7 @@ trap cleanup EXIT
 # process dies before the health endpoint responds.
 ready=false
 for _ in {1..30}; do
-  if curl -fsS "${BASE}/v1/local/runtime/health" >/dev/null 2>&1; then
+  if curl -fsS "${BASE}/v1/daemon/runtime/health" >/dev/null 2>&1; then
     ready=true
     break
   fi
@@ -179,8 +179,8 @@ if [ "${ready}" != "true" ]; then
   exit 1
 fi
 
-echo "Checking Local API health..."
-curl -fsS "${BASE}/v1/local/runtime/health" | grep -q '"status"'
+echo "Checking Daemon API health..."
+curl -fsS "${BASE}/v1/daemon/runtime/health" | grep -q '"status"'
 
 echo "Checking served Web UI..."
 # The root path serves the embedded SPA; look for the basic HTML skeleton.

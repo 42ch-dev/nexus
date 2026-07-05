@@ -1,11 +1,11 @@
 //! `DaemonStatusV2` — local-only daemon status response.
 //!
-//! Response shape for `GET /v1/local/daemon/status`. Superset of v1 running-probe,
+//! Response shape for `GET /v1/daemon/daemon/status`. Superset of v1 running-probe,
 //! wire-compatible. Per daemon-lifecycle-api.md §7.1.
 
 use serde::{Deserialize, Serialize};
 
-/// Response shape for GET /v1/local/daemon/status.
+/// Response shape for GET /v1/daemon/daemon/status.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct DaemonStatusV2 {

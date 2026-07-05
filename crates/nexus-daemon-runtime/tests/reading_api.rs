@@ -1,6 +1,6 @@
-//! Reading depth Local API integration tests (V1.89).
+//! Reading depth Daemon API integration tests (V1.89).
 //!
-//! Covers the `/v1/local/reading/*` progress and annotation surface using
+//! Covers the `/v1/daemon/reading/*` progress and annotation surface using
 //! direct handler invocation.
 
 #![allow(clippy::unwrap_used)]
@@ -8,7 +8,7 @@
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
-use nexus_contracts::local_api::reading::{
+use nexus_contracts::daemon_api::reading::{
     ReadingAnnotationCreateRequest, ReadingAnnotationListQuery, ReadingAnnotationPatchRequest,
     ReadingProgressQuery, ReadingProgressRequest,
 };

@@ -47,7 +47,7 @@ pub struct GetReferenceResponse {
     pub reference: ReferenceInfo,
 }
 
-/// GET /v1/local/references
+/// GET /v1/daemon/references
 pub async fn list(
     State(state): State<WorkspaceState>,
 ) -> Result<Json<ListReferencesResponse>, NexusApiError> {
@@ -66,7 +66,7 @@ pub async fn list(
     Ok(Json(ListReferencesResponse { references }))
 }
 
-/// `GET /v1/local/references/{reference_id}`
+/// `GET /v1/daemon/references/{reference_id}`
 pub async fn get(
     State(state): State<WorkspaceState>,
     Path(reference_id): Path<String>,
