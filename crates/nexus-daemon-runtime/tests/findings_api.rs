@@ -26,6 +26,7 @@ use nexus_daemon_runtime::api::handlers::works::CreateWorkRequest;
 use nexus_daemon_runtime::test_utils;
 use nexus_daemon_runtime::test_utils::TestTempRoot;
 use nexus_daemon_runtime::workspace::WorkspaceState;
+use serde_json::json;
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -60,6 +61,12 @@ async fn create_work(state: &WorkspaceState) -> String {
     .await
     .unwrap();
     resp.work_id.clone()
+}
+
+/// Serialize a typed batch-update request into the `Json<Value>` the handler
+/// now accepts (W-002: handler-side unknown-field enforcement).
+fn batch_request_value(req: BatchUpdateFindingsRequest) -> axum::Json<serde_json::Value> {
+    axum::Json(serde_json::to_value(req).expect("batch request serializes"))
 }
 
 /// Create a finding via handler invocation.
@@ -986,7 +993,7 @@ async fn findings_batch_update_status_happy_path() {
 
     let Json(res) = batch_update_findings_handler(
         State(state.clone()),
-        axum::Json(BatchUpdateFindingsRequest {
+        batch_request_value(BatchUpdateFindingsRequest {
             finding_ids: vec![
                 f1.finding_id.clone(),
                 f2.finding_id.clone(),
@@ -1029,7 +1036,7 @@ async fn findings_batch_update_assign_executor() {
 
     let Json(res) = batch_update_findings_handler(
         State(state.clone()),
-        axum::Json(BatchUpdateFindingsRequest {
+        batch_request_value(BatchUpdateFindingsRequest {
             finding_ids: vec![f1.finding_id.clone(), f2.finding_id.clone()],
             patch: FindingBatchPatch {
                 status: None,
@@ -1064,7 +1071,7 @@ async fn findings_batch_update_not_found_collected() {
 
     let Json(res) = batch_update_findings_handler(
         State(state.clone()),
-        axum::Json(BatchUpdateFindingsRequest {
+        batch_request_value(BatchUpdateFindingsRequest {
             finding_ids: vec![f1.finding_id.clone(), missing.clone()],
             patch: FindingBatchPatch {
                 status: Some("triaged".to_string()),
@@ -1134,7 +1141,7 @@ async fn findings_batch_update_conflict_collected() {
 
     let Json(res) = batch_update_findings_handler(
         State(state.clone()),
-        axum::Json(BatchUpdateFindingsRequest {
+        batch_request_value(BatchUpdateFindingsRequest {
             finding_ids: vec![open_f.finding_id.clone(), resolved_f.finding_id.clone()],
             patch: FindingBatchPatch {
                 status: Some("triaged".to_string()),
@@ -1171,7 +1178,7 @@ async fn findings_batch_update_cap_rejected_with_422() {
     let ids: Vec<String> = (0..101).map(|i| format!("fnd_{i:024}")).collect();
     let err = batch_update_findings_handler(
         State(state.clone()),
-        axum::Json(BatchUpdateFindingsRequest {
+        batch_request_value(BatchUpdateFindingsRequest {
             finding_ids: ids,
             patch: FindingBatchPatch {
                 status: Some("triaged".to_string()),
@@ -1219,7 +1226,7 @@ async fn findings_batch_update_mid_batch_dao_error_preserves_prior_updates() {
 
     let err = batch_update_findings_handler(
         State(state.clone()),
-        axum::Json(BatchUpdateFindingsRequest {
+        batch_request_value(BatchUpdateFindingsRequest {
             finding_ids: vec![
                 f1.finding_id.clone(),
                 f2.finding_id.clone(),
@@ -1281,7 +1288,7 @@ async fn findings_batch_rejects_empty_finding_ids() {
 
     let err = batch_update_findings_handler(
         State(state.clone()),
-        axum::Json(BatchUpdateFindingsRequest {
+        batch_request_value(BatchUpdateFindingsRequest {
             finding_ids: vec![],
             patch: FindingBatchPatch {
                 status: Some("triaged".to_string()),
@@ -1308,7 +1315,7 @@ async fn findings_batch_empty_patch_returns_zero_updated() {
 
     let Json(res) = batch_update_findings_handler(
         State(state.clone()),
-        axum::Json(BatchUpdateFindingsRequest {
+        batch_request_value(BatchUpdateFindingsRequest {
             finding_ids: vec![f1.finding_id.clone()],
             patch: FindingBatchPatch {
                 status: None,
@@ -1334,6 +1341,30 @@ async fn findings_batch_empty_patch_returns_zero_updated() {
     assert_eq!(got.status, "open");
 }
 
+/// V1.91 P1 — bulk PATCH rejects unknown fields in `patch`.
+#[tokio::test]
+async fn findings_batch_rejects_unknown_patch_field() {
+    let (state, _tmp) = handler_state().await;
+    let work_id = create_work(&state).await;
+    let f1 = create_finding(&state, &work_id, "minor", "only finding").await;
+
+    let err = batch_update_findings_handler(
+        State(state.clone()),
+        Json(json!({
+            "finding_ids": [f1.finding_id.clone()],
+            "patch": { "status": "triaged", "bogus": "x" }
+        })),
+    )
+    .await
+    .expect_err("unknown patch field must be rejected");
+
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "invalid_input");
+}
+
 /// V1.91 P1 — bulk PATCH rejects duplicate IDs in `finding_ids`.
 #[tokio::test]
 async fn findings_batch_rejects_duplicate_finding_ids() {
@@ -1343,7 +1374,7 @@ async fn findings_batch_rejects_duplicate_finding_ids() {
 
     let err = batch_update_findings_handler(
         State(state.clone()),
-        axum::Json(BatchUpdateFindingsRequest {
+        batch_request_value(BatchUpdateFindingsRequest {
             finding_ids: vec![f1.finding_id.clone(), f1.finding_id.clone()],
             patch: FindingBatchPatch {
                 status: Some("triaged".to_string()),

@@ -458,12 +458,26 @@ pub async fn update_finding_handler(
 /// lifecycle transition enforcement stay identical to the single-finding PATCH.
 pub async fn batch_update_findings_handler(
     State(state): State<WorkspaceState>,
-    Json(body): Json<BatchUpdateFindingsRequest>,
+    Json(raw): Json<serde_json::Value>,
 ) -> Result<Json<BatchUpdateFindingsResponse>, NexusApiError> {
     const BATCH_CAP: usize = 100;
 
     let creator_id =
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    // V1.92 P-1 T5: body.patch is the generated FindingBatchPatch struct.
+    // Codegen does not emit #[serde(deny_unknown_fields)], so a handler-side
+    // check on the raw JSON enforces `additionalProperties: false` from the
+    // schema and returns 422 for unknown patch keys before parsing.
+    validate_batch_patch_keys(&raw)?;
+
+    let body: BatchUpdateFindingsRequest =
+        serde_json::from_value(raw).map_err(|e| NexusApiError::BadRequest {
+            code: "invalid_input".to_string(),
+            message: format!("invalid request body: {e}"),
+        })?;
+
+    let patch = body.patch;
 
     if body.finding_ids.is_empty() {
         return Err(NexusApiError::BadRequest {
@@ -489,12 +503,6 @@ pub async fn batch_update_findings_handler(
             message: "finding_ids must not contain duplicates".to_string(),
         });
     }
-
-    // V1.92 P-1 T5: body.patch is now the generated FindingBatchPatch struct
-    // (was serde_json::Value; codegen now emits a concrete struct from
-    // finding-batch-patch.schema.json). Field access is direct — no
-    // serde_json::from_value needed.
-    let patch = body.patch;
 
     // If both fields are absent, the contract says return 200 with updated: 0.
     if patch.status.is_none() && patch.target_executor.is_none() {
@@ -554,6 +562,41 @@ pub async fn batch_update_findings_handler(
             Some(conflict)
         },
     }))
+}
+
+/// Enforce the `finding-batch-patch.schema.json` contract that only
+/// `status` and `target_executor` are permitted keys.
+///
+/// The generated `FindingBatchPatch` does not carry
+/// `#[serde(deny_unknown_fields)]`, so unknown keys are silently ignored by
+/// serde. This helper inspects the raw JSON `patch` object and rejects any
+/// keys outside the allowed set with a 422 `invalid_input` error.
+///
+/// # Errors
+///
+/// Returns `NexusApiError::BadRequest` (mapped to 422) if `patch` is missing,
+/// not an object, or contains any key other than `status` or `target_executor`.
+fn validate_batch_patch_keys(raw: &serde_json::Value) -> Result<(), NexusApiError> {
+    let patch = raw.get("patch").ok_or_else(|| NexusApiError::BadRequest {
+        code: "invalid_input".to_string(),
+        message: "missing patch object".to_string(),
+    })?;
+
+    let obj = patch.as_object().ok_or_else(|| NexusApiError::BadRequest {
+        code: "invalid_input".to_string(),
+        message: "patch must be an object".to_string(),
+    })?;
+
+    for key in obj.keys() {
+        if key != "status" && key != "target_executor" {
+            return Err(NexusApiError::BadRequest {
+                code: "invalid_input".to_string(),
+                message: format!("unknown patch field: {key}"),
+            });
+        }
+    }
+
+    Ok(())
 }
 
 /// `DELETE /v1/daemon/works/{work_id}/findings/{finding_id}` — delete a finding.
