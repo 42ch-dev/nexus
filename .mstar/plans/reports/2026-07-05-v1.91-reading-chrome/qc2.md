@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-2
 reviewer_index: 2
 plan_id: "2026-07-05-v1.91-reading-chrome + 2026-07-05-v1.91-findings-batch"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-07-05"
 ---
 
@@ -29,23 +29,51 @@ generated_at: "2026-07-05"
   - `git status --short` (working tree clean)
   - `cargo check -p nexus-daemon-runtime` (passed)
   - `cargo check -p nexus-contracts` (passed)
-  - `pnpm --filter web run typecheck` (failed — same TS2352 as qc1)
+  - `pnpm --filter web run typecheck` (PASS after fix — revalidated)
   - `grep` / `read` on handler, tests, lib, and schema files for authz, cap, validation, and read-only invariants
 
 ## Verification Summary
 
 | Gate | Command | Result |
-|---|---|---|
+|---:|---|:---|
 | Rust daemon type-check | `cargo check -p nexus-daemon-runtime` | ✅ pass |
 | Rust contracts type-check | `cargo check -p nexus-contracts` | ✅ pass |
-| Web typecheck | `pnpm --filter web run typecheck` | ❌ **FAIL** — `findings-page.test.tsx:230` `TS2352` (unchanged from qc1) |
+| Web typecheck | `pnpm --filter web run typecheck` | ✅ **PASS** (revalidated after fix commit 8e6d4d2c) |
 | Batch handler authz + cap | code + test review (`findings_api.rs` + handler) | ✅ creator-scoped + 100 cap enforced |
 | Partial success model | handler + 6 new tests | ✅ `updated` / `not_found` / `conflict` collected correctly |
 | Lifecycle enforcement | delegates to `findings::update_finding` | ✅ `IllegalTransition` → `conflict` array; no new state machine |
 | Reading chrome read-only | `chapter-page.tsx`, `reading-prose.tsx`, `reading-chrome*.ts*` | ✅ no writes, no new mutations, no new fetches |
 | Schema `additionalProperties: false` | `batch-update-findings-*.schema.json` | ✅ present on both request and response |
 
-CI gate is mandatory per `mstar-review-qc` §"CI 门禁补充 (强制)". The live typecheck failure (W-001 from qc1) remains unresolved on this HEAD and is treated as `>= Warning`, blocking `Approve`.
+CI gate revalidated per `mstar-review-qc` §"CI 门禁补充 (强制)". Typecheck now passes on HEAD 8e6d4d2c. W-001 resolved.
+
+## Revalidation (targeted re-review after W-001 fix)
+
+**Re-review trigger**: Assignment — Targeted re-review of V1.91 P0 + P1 after W-001 fix. Fix commit `8e6d4d2c`.
+
+**What was re-checked**:
+- Current working branch and HEAD: `iteration/v1.91 @ 8e6d4d2c`
+- `pnpm --filter web run typecheck` — now passes cleanly (no output after pretypecheck steps).
+- The exact file changed in the fix: `apps/web/src/pages/findings-page.test.tsx`
+- Git diff of the fix (commit 8e6d4d2c):
+  ```diff
+  -const createObjectURL = vi.fn(() => 'blob:test');
+  +const createObjectURL = vi.fn<(blob: Blob) => string>(() => 'blob:test');
+  ...
+  -const [blob] = createObjectURL.mock.calls[0] as [Blob];
+  +const blob = createObjectURL.mock.calls[0][0];
+  ```
+- No other files touched by this commit.
+- No new code paths, no behavior change — only strict TypeScript typing of the vi.fn mock and call extraction.
+
+**Per-finding disposition**:
+- **W-001** (strict TS cast / typecheck failure): **RESOLVED**. The two-line typing fix eliminates the `TS2352` error. Typecheck gate now passes.
+- All other findings (W-005, W-003, S-004–S-006) were outside the scope of this targeted re-review (they were non-blocking or noted for follow-up). No new issues introduced by the test typing change.
+- The changed test file was re-read in full. It exercises only client-side CSV blob creation and assertions — no impact on authz, batch handler, lifecycle, or read-only invariants reviewed in the original report.
+
+**New issues found**: None.
+
+**Updated verdict**: **Approve** (W-001 resolved; no unresolved Critical or blocking Warning remaining for this reviewer’s focus).
 
 ---
 
@@ -58,12 +86,10 @@ No new Critical security or correctness findings. Creator-scoped authorization, 
 
 ### 🟡 Warning
 
-- **[W-001] `pnpm --filter web run typecheck` still fails with `TS2352` on `apps/web/src/pages/findings-page.test.tsx:230`** (same failure observed by qc1).
-  - **Source Type**: CI gate failure (strict TypeScript)
-  - **Reference**: `apps/web/src/pages/findings-page.test.tsx:230`
-  - **Evidence**: `pnpm --filter web run typecheck` reproduces the identical error in the review cwd.
-  - **Impact**: Per `mstar-review-qc` CI gate rule, any in-scope CI failure is `>= Warning` and blocks `Approve` until resolved.
-  - **Resolution path**: Identical to qc1 — route the cast through `unknown` or type the mock precisely. Single-line fix required before `Approve`.
+- **[W-001] `pnpm --filter web run typecheck` (original)** — **RESOLVED in revalidation**.
+  - Fixed by commit `8e6d4d2c` (strict typing of `vi.fn` and mock call extraction in `findings-page.test.tsx`).
+  - Re-check: `pnpm --filter web run typecheck` passes cleanly on HEAD 8e6d4d2c.
+  - See `## Revalidation` section for details and diff.
 
 - **[W-005] (new, security/correctness) Batch handler aborts on first internal error without partial results for prior successes** — acceptable per documented "loop, not transaction" design, but worth explicit note.
   - **Source Type**: manual-reasoning (security/correctness lens)
@@ -212,8 +238,8 @@ No new Critical security or correctness findings. Creator-scoped authorization, 
 ## Source Trace
 
 | Finding | Source Type | Reference |
-|---|---|---|
-| W-001 | CI gate (typecheck, live) | `pnpm --filter web run typecheck` output |
+|---:|---|:---|
+| W-001 | CI gate (typecheck) — **RESOLVED** (commit 8e6d4d2c) | `pnpm --filter web run typecheck` + test file re-read |
 | W-005 | manual-reasoning (security/correctness) | `crates/nexus-daemon-runtime/src/api/handlers/findings.rs:528-536` |
 | W-003 | carried from qc1 | `apps/web/src/api/queries.ts:331-340` |
 | S-004 | security/correctness lens | `crates/nexus-daemon-runtime/src/api/handlers/findings.rs:479` + schema |
@@ -225,20 +251,18 @@ No new Critical security or correctness findings. Creator-scoped authorization, 
 ## Summary
 
 | Severity | Count |
-|---|---|
+|---:|---|:---|
 | 🔴 Critical | 0 |
 | 🟡 Warning | 3 |
 | 🟢 Suggestion | 3 |
 
-**Verdict**: **Request Changes**
+**Verdict**: **Approve**
 
-**Blocking reason**: W-001 — live typecheck failure on the integration branch HEAD. Per `mstar-review-qc` CI gate supplement, this is treated as `>= Warning` and blocks `Approve`.
+**Revalidation note (targeted re-review)**: W-001 resolved by commit `8e6d4d2c`. Typecheck now passes. See `## Revalidation` section above. No new issues found in the fix. All other findings remain non-blocking for this reviewer’s scope.
 
-**Security & correctness clearance (conditional)**:
-- If W-001 is fixed and no other changes are introduced, the P0 read-only invariant and P1 security/correctness properties (creator-scoped authz, cap enforcement before DB work, partial success with lifecycle enforcement, no injection/traversal vectors, client-only CSV safety) are all satisfied.
-- The code itself does not introduce new Critical or high-severity security issues under the requested focus areas.
+**Security & correctness clearance**: P0 read-only invariant and P1 security/correctness properties (creator-scoped authz, cap enforcement before DB work, partial success with lifecycle enforcement, no injection/traversal vectors, client-only CSV safety) are satisfied. The code does not introduce new Critical or high-severity security issues under the requested focus areas.
 
-**Non-blocking items** (can be tracked as residuals after W-001 fix):
+**Non-blocking items** (can be tracked as residuals):
 - W-005 (abort-on-internal-error design note)
 - W-003 (toast UX)
 - W-004 (codegen quirk from qc1)
@@ -257,20 +281,29 @@ If PM elects to ship after the typecheck is resolved, the following should be re
 | R-V191P1-003 | `low` | Codegen should emit concrete `BatchUpdateFindingsRequest.patch` | defer | `@architect` | V1.92+ |
 | R-V191P1-004 | `low` | Add test for mid-batch internal error path (partial apply visibility) | accept | `@fullstack-dev` | V1.92 |
 
-DoD-mandated gates (bulk endpoint additive + partial-success, schemas committed, multi-select + CSV functional, non-goals respected, read-only chrome) are satisfied once the typecheck gate passes.
+DoD-mandated gates (bulk endpoint additive + partial-success, schemas committed, multi-select + CSV functional, non-goals respected, read-only chrome) are satisfied. Typecheck gate (W-001) now passes after targeted fix.
 
 ## Completion Report v2
 
 **Agent**: qc-specialist-2
-**Task**: QC review #2 for V1.91 P0 + P1 (security and correctness focus)
+**Task**: Targeted re-review (QC #2) of V1.91 P0 + P1 after W-001 fix (security and correctness focus)
 **Status**: Done
-**Scope Delivered**: Full review of combined diff `main..iteration/v1.91` for the assigned files and focus areas. Verified alignment fields, reproduced typecheck failure, audited authz/cap/lifecycle/CSV/read-only invariants, reviewed new tests and schemas.
-**Artifacts**: `.mstar/plans/reports/2026-07-05-v1.91-reading-chrome/qc2.md` (this report) + git commit of the report path only.
-**Validation**: `cargo check` (Rust), live `pnpm typecheck` (failing), manual code + test + schema inspection, git range verification.
-**Issues/Risks**: W-001 (typecheck) remains the sole blocker. No new Critical security or correctness defects found.
+**Scope Delivered**: 
+- Pulled latest `iteration/v1.91` (HEAD 8e6d4d2c).
+- Verified `pnpm --filter web run typecheck` now passes.
+- Re-read the exact changed test file and the fix diff (commit 8e6d4d2c).
+- Added `## Revalidation` section with per-finding disposition and updated verdict.
+- No unrelated code re-reviewed; no new issues found.
+**Artifacts**: `.mstar/plans/reports/2026-07-05-v1.91-reading-chrome/qc2.md` (this report, same file, targeted re-review).
+**Validation**: 
+- `pnpm --filter web run typecheck` (clean pass).
+- `git show 8e6d4d2c -- apps/web/src/pages/findings-page.test.tsx`.
+- Full re-read of the test file post-fix.
+- Alignment fields verified on current cwd/branch.
+**Issues/Risks**: W-001 resolved. No new Critical or blocking findings introduced by the fix. Original non-blocking items (W-005, W-003, S-004–S-006) unchanged.
 **Plan Update**: None (leaf reviewer; no plan edits).
-**Handoff**: Report is ready for PM consolidation. Targeted re-review of only this seat is appropriate after the typecheck fix.
-**Git**: (will be recorded after `git add` + `git commit` of the report path)
+**Handoff**: Report updated in place. Ready for PM consolidation. This targeted re-review is complete for qc-specialist-2.
+**Git**: (will be recorded after `git add` + `git commit` of only the report path)
 
 ---
 
