@@ -179,9 +179,16 @@ pub async fn cert_fingerprint(
     State(state): State<WorkspaceState>,
 ) -> Json<CertFingerprintResponse> {
     info!("Handling cert-fingerprint request");
-    state
-        .tls_fingerprint()
-        .map_or_else(|| Json(CertFingerprintResponse::default()), Json)
+    state.tls_fingerprint().map_or_else(
+        || {
+            Json(CertFingerprintResponse {
+                fingerprint: String::new(),
+                algorithm: "sha256".to_string(),
+                created_at: None,
+            })
+        },
+        Json,
+    )
 }
 
 /// Gather ACP status information from the database.

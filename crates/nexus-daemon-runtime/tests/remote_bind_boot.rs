@@ -232,6 +232,10 @@ async fn run_daemon_loopback_serves_http_and_empty_fingerprint() {
         response.contains("\"fingerprint\":\"\""),
         "loopback-only fingerprint should be empty: {response}"
     );
+    assert!(
+        response.contains("\"algorithm\":\"sha256\""),
+        "loopback-only algorithm should be sha256 per contract: {response}"
+    );
 
     handle.abort();
     let _ = handle.await;
