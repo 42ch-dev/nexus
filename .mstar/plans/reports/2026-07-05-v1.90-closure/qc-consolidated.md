@@ -3,7 +3,7 @@ report_kind: qc-consolidated
 plan_id: "2026-07-05-v1.90-closure"
 iteration_id: "V1.90"
 consolidated_at: "2026-07-05"
-verdict: "Request Changes"
+verdict: "Approve"
 reviewers:
   - qc-specialist
   - qc-specialist-2
@@ -89,9 +89,21 @@ All CI-equivalent gates pass:
 - **Source**: qc3 S-05
 - **Disposition**: pre-existing; not V1.90 scope.
 
+## Final consolidation
+
+After the fix wave (`1770fee8`, `b44519da`) and targeted re-reviews:
+
+| Reviewer | Final verdict | Report commit |
+|----------|---------------|---------------|
+| `@qc-specialist` | **Approve** | `a9587132` |
+| `@qc-specialist-2` | **Approve** | `10a360d4` |
+| `@qc-specialist-3` | **Approve** | `7869c71e` |
+
+All blocking findings (B-1, B-2, B-3, B-4) are resolved. Non-blocking follow-ups F-3/F-4/F-5 are owned by QA or the compound round. The V1.90 closure is cleared for QA.
+
 ## Re-review plan
 
-- **Targeted re-review** after fixes: `@qc-specialist` (B-1/B-2/B-3 doc + B-3 resource string), `@qc-specialist-3` (B-3 wire value + B-4 integration test + env-lock). `@qc-specialist-2` does not require re-review unless the auth middleware error envelope changes materially.
+- **Targeted re-review** after fixes: `@qc-specialist` (B-1/B-2/B-3 docs + resource string), `@qc-specialist-3` (B-3 wire value + B-4 integration test + env-lock). `@qc-specialist-2` does not require re-review unless the auth middleware error envelope changes materially.
 - Reports: update same `qc1.md` / `qc3.md` with `## Revalidation` section, or create `qc1-rev2.md` / `qc3-rev2.md` per `mstar-plan-artifacts` if substantial.
 
 ## PM decision
