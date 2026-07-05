@@ -23,11 +23,13 @@
     {
       "plan_id": "2026-07-05-v1.90-daemon-api-rename-backend",
       "name": "P0 — Track A: Daemon API rename backend + codegen + remote bind",
-      "status": "Todo",
+      "status": "InProgress",
       "metadata": {
         "iteration_refs": ["V1.90"],
         "spec_integration_branch": "iteration/v1.90",
         "merge_target": "iteration/v1.90",
+        "working_branch": "feature/v1.90-daemon-api-rename-backend",
+        "worktree_path": ".worktrees/feature-v1.90-daemon-api-rename-backend",
         "primary_spec": ".mstar/knowledge/specs/daemon-runtime.md",
         "spec_refs": [
           ".mstar/knowledge/specs/daemon-api-surface-conventions.md",
