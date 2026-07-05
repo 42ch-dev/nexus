@@ -85,9 +85,63 @@ See linked AGENTS.md files for per-directory decision rules and invariants:
 
 **Anti-patterns:** Running `cargo test --all` / `cargo clippy --all` on every small edit; skipping cleanup for months while agents run full-workspace builds; treating `target/` bloat as safe to commit (it is always gitignored — clean locally instead).
 
-**Optional:** Set `CARGO_TARGET_DIR` (shell or `.cargo/config.toml` `build.target-dir`) to a large disk if the repo volume is space-constrained — this relocates growth, it does not prevent it; hygiene rules above still apply.
+**Shared build artifacts (worktrees):** Set `CARGO_TARGET_DIR` in user-level `~/.cargo/config.toml` (`[build] target-dir = "…"`) or your shell profile so every worktree shares one cache instead of each growing its own `target/`. Example: `export CARGO_TARGET_DIR="$HOME/.cache/nexus-target"`. This relocates growth; the hygiene rules above still apply.
 
-**Git worktrees:** Place every additional `git worktree` checkout under this repository root at `.worktrees/<name>/` only (`.worktrees/` is gitignored).
+### Git & repository hygiene
+
+**Clone & fetch (developers):**
+
+```bash
+git clone --filter=blob:none --recurse-submodules <url>
+cd nexus
+git submodule update --init --recursive   # after pull if skill dirs are empty
+```
+
+- **`--filter=blob:none`:** faster first clone (blobs fetched on checkout as needed).
+- **`--recurse-submodules`:** required for developers — [`.agents/skills/`](.agents/skills/) (ACP skill root) must be present. Two submodules (~272 KB total) are not a clone bottleneck.
+- Optional user `~/.gitconfig`: `[clone] filter = blob:none`, `[fetch] prune = true`, `[maintenance] auto = true`. Do **not** set `recurseSubmodules = false` globally.
+
+**Submodule policy:**
+
+| Context | Submodule | Notes |
+|---------|-----------|-------|
+| Developer clone / worktree | **Full** init | Always `--recurse-submodules` + `git submodule update --init --recursive` after new worktree |
+| CI default jobs | **Off** | `actions/checkout` without `submodules: true` (Rust/TS builds do not read skills) |
+| CI job needing skills | **On demand** | Add `submodules: true` only when the job touches `.agents/skills/` |
+
+**Worktrees:**
+
+- Path: `.worktrees/<name>/` only (`.worktrees/` is gitignored).
+- Share the main repo object store — worktrees do not re-download packs; slowness is checkout (~4k files), not network.
+- Parallel dual-track: at most **two** worktrees; remove with `git worktree remove` + `git worktree prune` when the iteration slice ends.
+- After `git worktree add`, run `git submodule update --init --recursive`.
+- Optional sparse-checkout when editing a subtree only: `git sparse-checkout init --cone` then `git sparse-checkout set apps/web …`.
+
+**Commit discipline (controls object growth):**
+
+| Rule | Practice |
+|------|----------|
+| Iteration landing | Merge `iteration/{ver}` → `main` via PR with **squash merge** (target: one commit per iteration) |
+| Harness updates | Batch PM/status changes into **one commit** per closeout — no micro-commits on `status.json` |
+| `status.json` size | Before P-last: `wc -c .mstar/status.json` **< 20_000** bytes |
+| Resolved residuals | `lifecycle: resolved` findings **must** move to `.mstar/archived/residuals/<plan-id>.json`; only open/deferred stay in `status.json` |
+| Codegen | Schema changes and generated output in the **same commit** (see [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md)) |
+| Never commit | `target/`, `.worktrees/`, `node_modules/` (gitignored — agents must self-check) |
+
+Harness field rules (`plans[]` non-Done only, `notes.json` for narrative): [`.mstar/AGENTS.md`](.mstar/AGENTS.md) § Plan compaction / `status.json` field discipline.
+
+**Periodic maintenance (monthly or every ~5 iterations):**
+
+```bash
+wc -c .mstar/status.json
+git count-objects -vH
+git maintenance run --task=gc --task=incremental-repack
+cargo sweep -i 14   # optional; requires cargo-sweep
+```
+
+If `.git` exceeds ~100 MiB or clone slows again: consider `git filter-repo` or an orphan history squash (solo maintainer only; see team before force-push on a shared default branch).
+
+**Anti-patterns:** micro-commits on bloated `status.json`; leaving resolved rows in `residual_findings`; per-worktree `target/` without cleanup; developer clone with `--no-recurse-submodules` and no follow-up `submodule update`; `cargo build --all` inside every worktree during daily iteration.
 
 **Merge discipline:** All integration branches **must** be merged into `main` via a GitHub Pull Request — never by local `git merge` directly to `main`. This applies regardless of whether the change is agent-authored or human-authored. Rationale: this is a public open-source repo; PRs provide review trail, CI gate, and merge commit provenance that local merges cannot.
 
