@@ -364,6 +364,17 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             StaleFindingsResponse
         ),
+        // V1.91 — Findings batch PATCH helper
+        entry!(
+            "schemas/daemon-api/findings/batch-update-findings-request.schema.json",
+            Strict,
+            BatchUpdateFindingsRequest
+        ),
+        entry!(
+            "schemas/daemon-api/findings/batch-update-findings-response.schema.json",
+            Strict,
+            BatchUpdateFindingsResponse
+        ),
         // ── daemon-api/memory/ (V1.78 P0 — creator memory review-loop) ─────
         entry!(
             "schemas/daemon-api/memory/create-pending-review-request.schema.json",

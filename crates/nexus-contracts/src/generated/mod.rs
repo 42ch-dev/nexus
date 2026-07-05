@@ -64,6 +64,8 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("LogoutResponse", 1),
     ("SetActiveCreatorRequest", 1),
     ("SetActiveCreatorResponse", 1),
+    ("BatchUpdateFindingsRequest", 1),
+    ("BatchUpdateFindingsResponse", 1),
     ("CreateFindingRequest", 1),
     ("FindingDetailResponse", 1),
     ("ListFindingsQuery", 1),
