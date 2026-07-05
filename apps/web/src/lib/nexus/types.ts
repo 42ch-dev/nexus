@@ -29,6 +29,8 @@
 import type {
   AddScheduleRequest,
   AddScheduleResponse,
+  BatchUpdateFindingsRequest,
+  BatchUpdateFindingsResponse,
   CapabilityInfo,
   ChapterBody,
   ChapterContentQuery,
@@ -201,6 +203,13 @@ export interface NexusClient {
     findingId: string,
     patch: UpdateFindingRequest,
   ): Promise<FindingDetailResponse>;
+
+  /**
+   * `PATCH /v1/daemon/findings/batch` — bulk update status and/or
+   * `target_executor` for up to 100 findings. Creator-scoped; partial success
+   * model with `not_found`/`conflict` arrays in the HTTP 200 response. V1.91 P1.
+   */
+  batchUpdateFindings(request: BatchUpdateFindingsRequest): Promise<BatchUpdateFindingsResponse>;
 
   // ── Preset management ─────────────────────────────────────────────────────
   /** `GET /v1/daemon/presets` — grouped by source. */

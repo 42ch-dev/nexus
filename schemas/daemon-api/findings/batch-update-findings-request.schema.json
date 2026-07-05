@@ -1,0 +1,29 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/findings/batch-update-findings-request.schema.json",
+  "schema_version": 1,
+  "title": "Nexus BatchUpdateFindingsRequest",
+  "description": "Request body for PATCH /v1/daemon/findings/batch. Bulk-updates status and/or target_executor for up to 100 findings. Creator-scoped; each individual update reuses the existing update_finding DAO validation.",
+  "type": "object",
+  "required": ["finding_ids", "patch"],
+  "properties": {
+    "finding_ids": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "maxItems": 100,
+      "uniqueItems": true,
+      "description": "IDs of the findings to update. Must be unique; cap enforced at 100; >100 returns HTTP 422 with code `too_many_findings`."
+    },
+    "patch": {
+      "type": "object",
+      "properties": {
+        "status": { "type": "string" },
+        "target_executor": { "type": "string" }
+      },
+      "additionalProperties": false,
+      "description": "Fields to patch on each matching finding. At least one field must be present."
+    }
+  },
+  "additionalProperties": false
+}

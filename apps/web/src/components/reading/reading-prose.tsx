@@ -1,5 +1,6 @@
 /**
- * ReadingProse — V1.79 Author Reflection (Track A / P0).
+ * ReadingProse — V1.79 Author Reflection (Track A / P0) + V1.91 Profile-specific
+ * Reading Chrome (P0 headline).
  *
  * The prose reading surface: applies reading typography (measure, line-height,
  * paragraph spacing via DESIGN.md §Typography/reading-prose tokens) to the body
@@ -7,6 +8,11 @@
  * strip, ReactMarkdown + remark-gfm render, Copy Path affordance, and the
  * right-click PathContextMenu — so the reading value is preserved while the
  * typography becomes book-like. Read-only: no body mutation path exists here.
+ *
+ * V1.91 adds profile-aware chrome. The chrome key (`novel`, `essay`,
+ * `game-bible`, `script`) is derived from the Work's `work_profile` and
+ * consumed exclusively through DESIGN.md `reading-chrome-*` tokens. Unknown or
+ * missing profiles fall back to `novel` chrome.
  */
 import { forwardRef, useMemo } from 'react';
 import { Copy } from 'lucide-react';
@@ -14,10 +20,12 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 import { PathContextMenu, useContextMenu } from '@/components/path-context-menu';
+import { createProfileRenderers } from '@/components/reading/reading-chrome-renderers';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ErrorState, LoadingState } from '@/components/ui/states';
 import { useToast } from '@/lib/use-toast';
+import { toReadingChromeProfile } from '@/lib/reading-chrome';
 import type { ChapterBody } from '@42ch/nexus-contracts';
 
 export interface ReadingProseProps {
@@ -25,10 +33,12 @@ export interface ReadingProseProps {
   isLoading: boolean;
   isError: boolean;
   onRetry: () => void;
+  /** Optional work_profile from the loaded Work; drives V1.91 reading chrome. */
+  workProfile?: string;
 }
 
 export const ReadingProse = forwardRef<HTMLDivElement, ReadingProseProps>(function ReadingProse(
-  { body, isLoading, isError, onRetry },
+  { body, isLoading, isError, onRetry, workProfile },
   ref,
 ) {
   const { toast } = useToast();
@@ -36,6 +46,9 @@ export const ReadingProse = forwardRef<HTMLDivElement, ReadingProseProps>(functi
 
   const bodyContent = useMemo(() => stripFrontmatter(body), [body]);
   const path = body?.body_path ?? '';
+
+  const profile = useMemo(() => toReadingChromeProfile(workProfile), [workProfile]);
+  const renderers = useMemo(() => createProfileRenderers(profile), [profile]);
 
   async function copyPath() {
     try {
@@ -89,9 +102,10 @@ export const ReadingProse = forwardRef<HTMLDivElement, ReadingProseProps>(functi
           className="rounded-card border border-gray-alpha-400 bg-background-100 p-6"
           role="region"
           aria-label="Chapter body"
+          data-chrome-profile={profile}
         >
           <div className="reading-prose mx-auto max-w-[var(--reading-prose-measure)]">
-            <ReactMarkdown remarkPlugins={[remarkGfm]} components={proseRenderers}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={renderers}>
               {bodyContent}
             </ReactMarkdown>
           </div>
@@ -112,27 +126,6 @@ export const ReadingProse = forwardRef<HTMLDivElement, ReadingProseProps>(functi
 });
 
 ReadingProse.displayName = 'ReadingProse';
-
-/**
- * Prose element renderers — apply reading typography (line-height + paragraph
- * spacing tokens) to body copy. Paragraphs get the comfortable book-like
- * line-height and inter-paragraph breathing room; headings keep the UI type
- * scale so chapter prose hierarchy still reads as part of the app.
- *
- * Inline styles read the DESIGN.md §Typography/reading-prose CSS vars so the
- * values stay SSOT-driven (not hard-coded in the component).
- */
-const proseRenderers = {
-  p: (props: React.HTMLAttributes<HTMLParagraphElement>) => (
-    <p
-      style={{
-        lineHeight: 'var(--reading-prose-line-height)',
-        marginTop: 'var(--reading-prose-paragraph-spacing)',
-      }}
-      {...props}
-    />
-  ),
-};
 
 function stripFrontmatter(body: ChapterBody | undefined): string {
   if (!body) return '';

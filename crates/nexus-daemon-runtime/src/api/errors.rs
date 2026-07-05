@@ -241,9 +241,6 @@ impl NexusApiError {
                     // V1.40: world_id_required and invalid_world_id are semantic
                     // validation errors → 422 Unprocessable Entity (aligned with
                     // preset_gates_failed pattern per spec §3.5.1.2).
-                    "world_id_required" | "invalid_world_id" | "world_clear_forbidden" => {
-                        StatusCode::UNPROCESSABLE_ENTITY
-                    }
                     // V1.49 F6 (findings-lifecycle.md §2.1): illegal lifecycle
                     // transitions return 422 with the stable `invalid_transition`
                     // code so callers can distinguish "no such finding" (404)
@@ -251,7 +248,12 @@ impl NexusApiError {
                     // V1.49 P0 W-1: invalid PATCH enum values (severity /
                     // status membership / target_executor) return 422 with the
                     // stable `invalid_input` code, distinct from transitions.
-                    "invalid_transition" | "invalid_input" => StatusCode::UNPROCESSABLE_ENTITY,
+                    "world_id_required"
+                    | "invalid_world_id"
+                    | "world_clear_forbidden"
+                    | "invalid_transition"
+                    | "invalid_input"
+                    | "too_many_findings" => StatusCode::UNPROCESSABLE_ENTITY,
                     // V1.65: chapter bodies above the size cap return 413.
                     "chapter_body_too_large" => StatusCode::PAYLOAD_TOO_LARGE,
                     _ => StatusCode::BAD_REQUEST,
@@ -295,6 +297,7 @@ impl NexusApiError {
                     | "not_supported"
                     | "invalid_input"
                     | "invalid_transition"
+                    | "too_many_findings"
                     | "world_id_required"
                     | "invalid_world_id"
                     | "world_clear_forbidden" => code.as_str(),

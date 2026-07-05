@@ -421,6 +421,125 @@ components:
     borderColor: "{colors.gray-alpha-400}"
     textColor: "{colors.gray-1000}"
     shadow: "0px 4px 12px rgba(0,0,0,0.12)"
+
+  # ── V1.91 Reading Chrome — profile-specific read-only rendering tokens ──
+  # Each shipped work_profile value (novel, essay, game-bible, script) maps to
+  # a distinct rendering profile. All chrome tokens are additive; no prior token
+  # names are modified. Token names frozen verbatim (do not rename).
+
+  # Profile: novel — prose literature (chapters + epigraphs + scenes).
+  # Distinctive chapter-title serif treatment and scene-break ornament signal
+  # "this is narrative prose, not a document."
+  reading-chrome-novel:
+    # Chapter/epigraph title — Georgia serif with heavier weight and tighter
+    # spacing than the reading surface, drawing the eye to chapter divisions
+    # without competing with body copy.
+    chapter-title:
+      fontFamily: "Georgia, 'Times New Roman', ui-serif, serif"
+      fontSize: "28px"
+      fontWeight: 700
+      lineHeight: 1.3
+      letterSpacing: "-0.01em"
+      color: "{colors.gray-1000}"
+    # Scene separator — centered ornamental rule between scene breaks.
+    # Signals a narrative pivot; distinct from section dividers and horizontal
+    # rules in other profiles. Rendered as a centered string of asterisks.
+    scene-separator:
+      color: "{colors.gray-500}"
+      fontSize: "16px"
+      textAlign: "center"
+      paddingBlock: "12px"
+    # Epigraph block — italic, right-aligned, muted quotation preceding a
+    # chapter. Lower contrast so it reads as contextual flavor, not body prose.
+    epigraph:
+      fontStyle: "italic"
+      textAlign: "right"
+      color: "{colors.gray-700}"
+      paddingLeft: "25%"
+
+  # Profile: essay — structured non-fiction (sections + blockquotes + footnotes).
+  # Clean hierarchy with neutral blockquote signaling cited or offset material.
+  reading-chrome-essay:
+    # Section heading — restrained weight, distinct from body prose but not
+    # dominant. Uses the same font stack as the reading surface for continuity.
+    section-heading:
+      fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, sans-serif"
+      fontSize: "18px"
+      fontWeight: 500
+      lineHeight: 1.4
+      letterSpacing: "-0.01em"
+      color: "{colors.gray-1000}"
+      marginTop: "28px"
+    # Styled blockquote — left-bordered pull with italic body and muted color,
+    # signaling cited, offset, or reflective material distinct from the essay's
+    # main voice.
+    blockquote:
+      borderLeft: "3px solid {colors.gray-alpha-400}"
+      paddingLeft: "16px"
+      fontStyle: "italic"
+      color: "{colors.gray-900}"
+    # Footnote marker — superscript numeric reference rendered in a subdued
+    # accent that does not compete with body text. Links to the footnote body.
+    footnote-marker:
+      verticalAlign: "super"
+      fontSize: "0.75em"
+      color: "{colors.teal-700}"
+
+  # Profile: game-bible — encyclopedic world reference (linked terms +
+  # definition callouts + category badges). Reads like a wiki entry with
+  # navigable cross-references.
+  reading-chrome-game-bible:
+    # Term cross-reference link — inline style for defined world terms linking
+    # to entity detail pages. Dotted underline + teal accent distinguishes
+    # world terms from regular hyperlinks.
+    term-link:
+      color: "{colors.teal-700}"
+      textDecoration: "underline dotted"
+      cursor: "pointer"
+    # Definition callout — block-level definition box with a left accent and
+    # light background tint, signaling "encyclopedic entry" vs narrative prose.
+    definition-callout:
+      backgroundColor: "rgba(0,133,119,0.06)"
+      borderLeft: "3px solid {colors.teal-700}"
+      padding: "12px 16px"
+      labelColor: "{colors.teal-900}"
+      labelFontWeight: 600
+    # Category badge — a small pill label on entity cards showing the category
+    # (e.g. "Character", "Location", "Artifact"). Reuses the pill rounded token.
+    category-badge:
+      backgroundColor: "rgba(183,110,0,0.12)"
+      textColor: "{colors.amber-1000}"
+
+  # Profile: script — screenplay/teleplay (character cues + parentheticals +
+  # scene headings). Cinematic formatting cues signal "this is a script" at a
+  # glance through block-level typography.
+  reading-chrome-script:
+    # Character-name block — centered, uppercase, bold treatment above dialogue.
+    # Distinct whitespace above separates it from the preceding action line;
+    # tight spacing below routes into dialogue.
+    character-name:
+      textAlign: "center"
+      textTransform: "uppercase"
+      fontWeight: 700
+      fontSize: "14px"
+      letterSpacing: "0.08em"
+      marginTop: "20px"
+      color: "{colors.gray-1000}"
+    # Parenthetical direction — italic, indented guidance within dialogue.
+    # Lower contrast so it reads as stage direction, not spoken dialogue.
+    parenthetical:
+      fontStyle: "italic"
+      color: "{colors.gray-700}"
+      paddingLeft: "32px"
+    # Scene heading — bold, uppercase slug line (INT./EXT. LOCATION - DAY).
+    # Distinct top margin and uppercase treatment mark scene boundaries.
+    scene-heading:
+      fontWeight: 700
+      textTransform: "uppercase"
+      fontSize: "14px"
+      letterSpacing: "0.05em"
+      color: "{colors.gray-900}"
+      marginTop: "24px"
 ---
 
 # Nexus Local Web UI Design System

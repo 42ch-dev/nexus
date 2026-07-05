@@ -53,6 +53,8 @@ export * from './daemon-api/creators/ListCreatorsResponse';
 export * from './daemon-api/creators/LogoutResponse';
 export * from './daemon-api/creators/SetActiveCreatorRequest';
 export * from './daemon-api/creators/SetActiveCreatorResponse';
+export * from './daemon-api/findings/BatchUpdateFindingsRequest';
+export * from './daemon-api/findings/BatchUpdateFindingsResponse';
 export * from './daemon-api/findings/CreateFindingRequest';
 export * from './daemon-api/findings/FindingDetailResponse';
 export * from './daemon-api/findings/ListFindingsQuery';
@@ -247,6 +249,8 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   LogoutResponse: 1,
   SetActiveCreatorRequest: 1,
   SetActiveCreatorResponse: 1,
+  BatchUpdateFindingsRequest: 1,
+  BatchUpdateFindingsResponse: 1,
   CreateFindingRequest: 1,
   FindingDetailResponse: 1,
   ListFindingsQuery: 1,

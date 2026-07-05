@@ -19,7 +19,7 @@ use crate::workspace::WorkspaceState;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
-use nexus_contracts::PaginationInfo;
+use nexus_contracts::{BatchUpdateFindingsRequest, BatchUpdateFindingsResponse, PaginationInfo};
 use nexus_local_db::findings::{
     self, Finding, FindingListFilters, FindingPatch, ReviewVerdictFinding,
 };
@@ -142,6 +142,18 @@ pub struct UpdateFindingRequest {
     /// every present value (including `null`) in `Some(...)`.
     #[serde(default, deserialize_with = "deserialize_some")]
     pub rule_suggestion: Option<Option<String>>,
+}
+
+/// V1.91 P1 — inner patch shape for the bulk update helper.
+///
+/// The generated [`BatchUpdateFindingsRequest`] carries `patch` as a loose
+/// `serde_json::Value` (codegen quirk for object-with-fixed-keys), so this
+/// helper deserializes that value and enforces the allowed keys.
+#[derive(Debug, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+struct BatchFindingPatch {
+    pub status: Option<String>,
+    pub target_executor: Option<String>,
 }
 
 /// List findings query parameters.
@@ -448,6 +460,112 @@ pub async fn update_finding_handler(
         .await?
         .expect("finding must exist after successful update");
     Ok(Json(f.into()))
+}
+
+/// `PATCH /v1/daemon/findings/batch` — bulk update status and/or `target_executor`.
+///
+/// V1.91 P1: additive helper for power-user triage. Creator-scoped; caps at
+/// 100 IDs; partial success model (each ID updated independently). Reuses the
+/// existing [`findings::update_finding`] DAO per-ID so enum validation and
+/// lifecycle transition enforcement stay identical to the single-finding PATCH.
+pub async fn batch_update_findings_handler(
+    State(state): State<WorkspaceState>,
+    Json(body): Json<BatchUpdateFindingsRequest>,
+) -> Result<Json<BatchUpdateFindingsResponse>, NexusApiError> {
+    const BATCH_CAP: usize = 100;
+
+    let creator_id =
+        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
+
+    if body.finding_ids.is_empty() {
+        return Err(NexusApiError::BadRequest {
+            code: "invalid_input".to_string(),
+            message: "finding_ids must not be empty".to_string(),
+        });
+    }
+
+    if body.finding_ids.len() > BATCH_CAP {
+        return Err(NexusApiError::BadRequest {
+            code: "too_many_findings".to_string(),
+            message: format!(
+                "batch update is capped at {BATCH_CAP} findings; received {}",
+                body.finding_ids.len()
+            ),
+        });
+    }
+
+    let mut seen: std::collections::HashSet<&str> = std::collections::HashSet::new();
+    if !body.finding_ids.iter().all(|id| seen.insert(id.as_str())) {
+        return Err(NexusApiError::BadRequest {
+            code: "invalid_input".to_string(),
+            message: "finding_ids must not contain duplicates".to_string(),
+        });
+    }
+
+    let patch: BatchFindingPatch =
+        serde_json::from_value(body.patch).map_err(|e| NexusApiError::BadRequest {
+            code: "invalid_input".to_string(),
+            message: format!("invalid patch: {e}"),
+        })?;
+
+    // If both fields are absent, the contract says return 200 with updated: 0.
+    if patch.status.is_none() && patch.target_executor.is_none() {
+        return Ok(Json(BatchUpdateFindingsResponse {
+            updated: 0,
+            not_found: None,
+            conflict: None,
+        }));
+    }
+
+    let finding_patch = FindingPatch {
+        severity: None,
+        status: patch.status,
+        title: None,
+        description: None,
+        target_executor: patch.target_executor,
+        kind: None,
+        rule_suggestion: None,
+    };
+    let now = chrono::Utc::now().timestamp();
+
+    let mut updated: i64 = 0;
+    let mut not_found: Vec<String> = Vec::new();
+    let mut conflict: Vec<String> = Vec::new();
+
+    for finding_id in &body.finding_ids {
+        match findings::update_finding(state.pool(), &creator_id, finding_id, &finding_patch, now)
+            .await
+        {
+            Ok(true) => updated += 1,
+            Ok(false) => not_found.push(finding_id.clone()),
+            Err(nexus_local_db::LocalDbError::IllegalTransition { .. }) => {
+                conflict.push(finding_id.clone());
+            }
+            Err(other) => {
+                tracing::warn!(
+                    creator_id = %creator_id,
+                    finding_id = %finding_id,
+                    error = %other,
+                    "findings batch PATCH: internal error updating finding"
+                );
+                return Err(other.into());
+            }
+        }
+    }
+
+    Ok(Json(BatchUpdateFindingsResponse {
+        updated,
+        not_found: if not_found.is_empty() {
+            None
+        } else {
+            Some(not_found)
+        },
+        conflict: if conflict.is_empty() {
+            None
+        } else {
+            Some(conflict)
+        },
+    }))
 }
 
 /// `DELETE /v1/daemon/works/{work_id}/findings/{finding_id}` — delete a finding.

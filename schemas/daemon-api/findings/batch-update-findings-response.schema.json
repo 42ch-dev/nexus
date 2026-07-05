@@ -1,0 +1,26 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/findings/batch-update-findings-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus BatchUpdateFindingsResponse",
+  "description": "Response for PATCH /v1/daemon/findings/batch. Returns partial-success counts and lists of IDs that could not be updated. Always HTTP 200 unless the request exceeds the cap or a DB error occurs.",
+  "type": "object",
+  "required": ["updated"],
+  "properties": {
+    "updated": {
+      "type": "integer",
+      "description": "Number of findings successfully updated."
+    },
+    "not_found": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "IDs that do not exist or are not owned by the active creator."
+    },
+    "conflict": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "IDs where the requested status transition is illegal per the findings lifecycle."
+    }
+  },
+  "additionalProperties": false
+}

@@ -14,11 +14,13 @@
 #![allow(clippy::unwrap_used)]
 
 use axum::extract::{Path, Query, State};
+use axum::Json;
+use nexus_contracts::BatchUpdateFindingsRequest;
 use nexus_daemon_runtime::api::handlers::findings::{
-    create_finding_handler, create_from_review_handler, delete_finding_handler,
-    get_finding_handler, list_findings_handler, prune_findings_handler, update_finding_handler,
-    CreateFindingRequest, FindingApiDto, ListFindingsQuery, PruneFindingsQuery,
-    UpdateFindingRequest,
+    batch_update_findings_handler, create_finding_handler, create_from_review_handler,
+    delete_finding_handler, get_finding_handler, list_findings_handler, prune_findings_handler,
+    update_finding_handler, CreateFindingRequest, FindingApiDto, ListFindingsQuery,
+    PruneFindingsQuery, UpdateFindingRequest,
 };
 use nexus_daemon_runtime::api::handlers::works::CreateWorkRequest;
 use nexus_daemon_runtime::test_utils;
@@ -183,7 +185,7 @@ async fn findings_list_filter_by_comma_separated_status() {
         (&in_review, "in_review"),
         (&resolved, "resolved"),
     ] {
-        update_finding_handler(
+        let _ = update_finding_handler(
             State(state.clone()),
             Path((work_id.clone(), finding.finding_id.clone())),
             axum::Json(UpdateFindingRequest {
@@ -970,4 +972,274 @@ async fn findings_prune_endpoint_dry_run_and_delete() {
         vec![f2.finding_id],
         "only the old resolved row is pruned; the open finding survives"
     );
+}
+
+/// V1.91 P1 — bulk PATCH helper: update many findings' status in one call.
+#[tokio::test]
+async fn findings_batch_update_status_happy_path() {
+    let (state, _tmp) = handler_state().await;
+    let work_id = create_work(&state).await;
+
+    let f1 = create_finding(&state, &work_id, "minor", "first").await;
+    let f2 = create_finding(&state, &work_id, "minor", "second").await;
+    let f3 = create_finding(&state, &work_id, "minor", "third").await;
+
+    let Json(res) = batch_update_findings_handler(
+        State(state.clone()),
+        axum::Json(BatchUpdateFindingsRequest {
+            finding_ids: vec![
+                f1.finding_id.clone(),
+                f2.finding_id.clone(),
+                f3.finding_id.clone(),
+            ],
+            patch: serde_json::json!({ "status": "triaged" }),
+        }),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(res.updated, 3);
+    assert!(res.not_found.is_none());
+    assert!(res.conflict.is_none());
+
+    // Verify each row advanced to triaged.
+    for finding_id in [&f1.finding_id, &f2.finding_id, &f3.finding_id] {
+        let got = get_finding_handler(
+            State(state.clone()),
+            Path((work_id.clone(), finding_id.clone())),
+        )
+        .await
+        .unwrap()
+        .0;
+        assert_eq!(got.status, "triaged");
+    }
+}
+
+/// V1.91 P1 — bulk PATCH helper: assign target_executor to selected findings.
+#[tokio::test]
+async fn findings_batch_update_assign_executor() {
+    let (state, _tmp) = handler_state().await;
+    let work_id = create_work(&state).await;
+
+    let f1 = create_finding(&state, &work_id, "minor", "first").await;
+    let f2 = create_finding(&state, &work_id, "minor", "second").await;
+
+    let Json(res) = batch_update_findings_handler(
+        State(state.clone()),
+        axum::Json(BatchUpdateFindingsRequest {
+            finding_ids: vec![f1.finding_id.clone(), f2.finding_id.clone()],
+            patch: serde_json::json!({ "target_executor": "write" }),
+        }),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(res.updated, 2);
+
+    let got = get_finding_handler(
+        State(state.clone()),
+        Path((work_id.clone(), f1.finding_id.clone())),
+    )
+    .await
+    .unwrap()
+    .0;
+    assert_eq!(got.target_executor, "write");
+    assert_eq!(got.routing_hint.as_deref(), Some("→ write"));
+}
+
+/// V1.91 P1 — bulk PATCH reports IDs that do not exist or are not owned.
+#[tokio::test]
+async fn findings_batch_update_not_found_collected() {
+    let (state, _tmp) = handler_state().await;
+    let work_id = create_work(&state).await;
+
+    let f1 = create_finding(&state, &work_id, "minor", "exists").await;
+    let missing = "fnd_00000000000000000000000000".to_string();
+
+    let Json(res) = batch_update_findings_handler(
+        State(state.clone()),
+        axum::Json(BatchUpdateFindingsRequest {
+            finding_ids: vec![f1.finding_id.clone(), missing.clone()],
+            patch: serde_json::json!({ "status": "triaged" }),
+        }),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(res.updated, 1);
+    assert_eq!(
+        res.not_found.as_ref().map(Vec::as_slice),
+        Some(&[missing][..])
+    );
+    assert!(res.conflict.is_none());
+
+    let got = get_finding_handler(
+        State(state.clone()),
+        Path((work_id.clone(), f1.finding_id.clone())),
+    )
+    .await
+    .unwrap()
+    .0;
+    assert_eq!(got.status, "triaged");
+}
+
+/// V1.91 P1 — bulk PATCH reports IDs with illegal status transitions.
+#[tokio::test]
+async fn findings_batch_update_conflict_collected() {
+    let (state, _tmp) = handler_state().await;
+    let work_id = create_work(&state).await;
+
+    let open_f = create_finding(&state, &work_id, "minor", "open").await;
+    let resolved_f = create_finding(&state, &work_id, "minor", "resolved").await;
+    // Advance resolved_f to terminal state.
+    let _ = update_finding_handler(
+        State(state.clone()),
+        Path((work_id.clone(), resolved_f.finding_id.clone())),
+        axum::Json(UpdateFindingRequest {
+            status: Some("triaged".to_string()),
+            ..empty_patch()
+        }),
+    )
+    .await
+    .unwrap();
+    let _ = update_finding_handler(
+        State(state.clone()),
+        Path((work_id.clone(), resolved_f.finding_id.clone())),
+        axum::Json(UpdateFindingRequest {
+            status: Some("in_review".to_string()),
+            ..empty_patch()
+        }),
+    )
+    .await
+    .unwrap();
+    let _ = update_finding_handler(
+        State(state.clone()),
+        Path((work_id.clone(), resolved_f.finding_id.clone())),
+        axum::Json(UpdateFindingRequest {
+            status: Some("resolved".to_string()),
+            ..empty_patch()
+        }),
+    )
+    .await
+    .unwrap();
+
+    let Json(res) = batch_update_findings_handler(
+        State(state.clone()),
+        axum::Json(BatchUpdateFindingsRequest {
+            finding_ids: vec![open_f.finding_id.clone(), resolved_f.finding_id.clone()],
+            patch: serde_json::json!({ "status": "triaged" }),
+        }),
+    )
+    .await
+    .unwrap();
+
+    assert_eq!(res.updated, 1);
+    assert!(res.not_found.is_none());
+    assert_eq!(
+        res.conflict.as_ref().map(Vec::as_slice),
+        Some(&[resolved_f.finding_id.clone()][..])
+    );
+
+    // The legal transition still applied.
+    let got = get_finding_handler(
+        State(state.clone()),
+        Path((work_id.clone(), open_f.finding_id.clone())),
+    )
+    .await
+    .unwrap()
+    .0;
+    assert_eq!(got.status, "triaged");
+}
+
+/// V1.91 P1 — bulk PATCH rejects arrays above the 100-ID cap.
+#[tokio::test]
+async fn findings_batch_update_cap_rejected_with_422() {
+    let (state, _tmp) = handler_state().await;
+
+    let ids: Vec<String> = (0..101).map(|i| format!("fnd_{i:024}")).collect();
+    let err = batch_update_findings_handler(
+        State(state.clone()),
+        axum::Json(BatchUpdateFindingsRequest {
+            finding_ids: ids,
+            patch: serde_json::json!({ "status": "triaged" }),
+        }),
+    )
+    .await
+    .expect_err("101 IDs must breach the cap");
+
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "too_many_findings");
+}
+
+/// V1.91 P1 — bulk PATCH rejects an empty `finding_ids` array.
+#[tokio::test]
+async fn findings_batch_rejects_empty_finding_ids() {
+    let (state, _tmp) = handler_state().await;
+
+    let err = batch_update_findings_handler(
+        State(state.clone()),
+        axum::Json(BatchUpdateFindingsRequest {
+            finding_ids: vec![],
+            patch: serde_json::json!({ "status": "triaged" }),
+        }),
+    )
+    .await
+    .expect_err("empty finding_ids must be rejected");
+
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "invalid_input");
+}
+
+/// V1.91 P1 — bulk PATCH rejects unknown fields in `patch`.
+#[tokio::test]
+async fn findings_batch_rejects_unknown_patch_field() {
+    let (state, _tmp) = handler_state().await;
+    let work_id = create_work(&state).await;
+    let f1 = create_finding(&state, &work_id, "minor", "only finding").await;
+
+    let err = batch_update_findings_handler(
+        State(state.clone()),
+        axum::Json(BatchUpdateFindingsRequest {
+            finding_ids: vec![f1.finding_id.clone()],
+            patch: serde_json::json!({ "status": "triaged", "bogus": "x" }),
+        }),
+    )
+    .await
+    .expect_err("unknown patch field must be rejected");
+
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "invalid_input");
+}
+
+/// V1.91 P1 — bulk PATCH rejects duplicate IDs in `finding_ids`.
+#[tokio::test]
+async fn findings_batch_rejects_duplicate_finding_ids() {
+    let (state, _tmp) = handler_state().await;
+    let work_id = create_work(&state).await;
+    let f1 = create_finding(&state, &work_id, "minor", "only finding").await;
+
+    let err = batch_update_findings_handler(
+        State(state.clone()),
+        axum::Json(BatchUpdateFindingsRequest {
+            finding_ids: vec![f1.finding_id.clone(), f1.finding_id.clone()],
+            patch: serde_json::json!({ "status": "triaged" }),
+        }),
+    )
+    .await
+    .expect_err("duplicate finding_ids must be rejected");
+
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "invalid_input");
 }

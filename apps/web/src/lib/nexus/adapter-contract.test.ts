@@ -504,6 +504,7 @@ describe('NexusClient preset-method parity guard (R-V167P1-QC3-S1)', () => {
 const FINDINGS_METHODS = [
   'getFinding',
   'updateFinding',
+  'batchUpdateFindings',
 ] as const satisfies readonly (keyof NexusClient)[];
 
 describe('NexusClient findings-method parity guard (V1.77)', () => {
@@ -559,6 +560,36 @@ describe('NexusClient findings-method parity guard (V1.77)', () => {
         method: 'PATCH',
         url: '/v1/daemon/works/w1/findings/f1',
         body: { status: 'triaged', target_executor: 'write' },
+      },
+    ]);
+  });
+
+  it('batchUpdateFindings routes to /v1/daemon/findings/batch with PATCH', async () => {
+    const seen: { method: string; url: string; body?: unknown }[] = [];
+    const fetchImpl: typeof fetch = async (input, init) => {
+      seen.push({
+        method: init?.method ?? 'GET',
+        url: String(input),
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      });
+      return new Response(
+        JSON.stringify({ updated: 2, not_found: ['fnd_missing'], conflict: [] }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
+    };
+
+    const client = new BrowserClient({ fetchImpl });
+    const res = await client.batchUpdateFindings({
+      finding_ids: ['f1', 'f2'],
+      patch: { status: 'triaged' },
+    });
+
+    expect(res).toEqual({ updated: 2, not_found: ['fnd_missing'], conflict: [] });
+    expect(seen).toEqual([
+      {
+        method: 'PATCH',
+        url: '/v1/daemon/findings/batch',
+        body: { finding_ids: ['f1', 'f2'], patch: { status: 'triaged' } },
       },
     ]);
   });
