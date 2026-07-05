@@ -85,7 +85,7 @@ See linked AGENTS.md files for per-directory decision rules and invariants:
 
 **Anti-patterns:** Running `cargo test --all` / `cargo clippy --all` on every small edit; skipping cleanup for months while agents run full-workspace builds; treating `target/` bloat as safe to commit (it is always gitignored — clean locally instead).
 
-**Shared build artifacts (worktrees):** Set `CARGO_TARGET_DIR` in user-level `~/.cargo/config.toml` (`[build] target-dir = "…"`) or your shell profile so every worktree shares one cache instead of each growing its own `target/`. Example: `export CARGO_TARGET_DIR="$HOME/.cache/nexus-target"`. This relocates growth; the hygiene rules above still apply.
+**Shared build artifacts (worktrees):** Use the repo-root [`.envrc`](.envrc) ( [direnv](https://direnv.net/) ) so `CARGO_TARGET_DIR` points at `~/.cache/nexus-target` **only while you are in this repository** — main checkout and every `.worktrees/*` worktree share one cache. After clone or `git worktree add`, run `direnv allow` once in that checkout root. Without direnv, set the same variable in your shell for the session: `export CARGO_TARGET_DIR="${XDG_CACHE_HOME:-$HOME/.cache}/nexus-target"`. **Do not** put `target-dir` in user-level `~/.cargo/config.toml`; that applies to every Rust crate on the machine. This relocates growth; the hygiene rules above still apply.
 
 ### Git & repository hygiene
 

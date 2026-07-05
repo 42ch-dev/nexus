@@ -70,6 +70,9 @@ web_modules/
 .env.*
 !.env.example
 
+# direnv (see repo-root .envrc for CARGO_TARGET_DIR)
+.direnv/
+
 # parcel-bundler cache (https://parceljs.org/)
 .cache
 .parcel-cache
