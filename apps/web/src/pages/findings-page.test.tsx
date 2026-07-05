@@ -187,7 +187,7 @@ describe('FindingsPage', () => {
   });
 
   it('exports the filtered findings as CSV with the documented columns', async () => {
-    const createObjectURL = vi.fn(() => 'blob:test');
+    const createObjectURL = vi.fn<(blob: Blob) => string>(() => 'blob:test');
     const revokeObjectURL = vi.fn();
     const anchorClick = vi.fn();
     URL.createObjectURL = createObjectURL;
@@ -227,7 +227,7 @@ describe('FindingsPage', () => {
       expect(capturedAnchor).not.toBeNull();
       expect(capturedAnchor!.download).toMatch(/findings-w-1-\d+\.csv/);
 
-      const [blob] = createObjectURL.mock.calls[0] as [Blob];
+      const blob = createObjectURL.mock.calls[0][0];
       const csv = await new Promise<string>((resolve) => {
         const reader = new FileReader();
         reader.onload = () => resolve(String(reader.result));
