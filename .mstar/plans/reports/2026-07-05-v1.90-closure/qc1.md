@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-07-05-v1.90-closure"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-07-05"
 ---
 
@@ -177,6 +177,104 @@ However, **3 new Warning-level issues** require attention before merge:
   - W-1-NEW + W-2-NEW → block re-review until both single-line doc-comment edits land (trivial; same patch).
   - W-3-FOLLOWUP → PM coordinates with qc-specialist-2 for security-tier confirmation; either path is acceptable from an architecture-hygiene standpoint.
 - **Cross-reviewer alignment**: This re-review is independent of qc-specialist-3 (performance/reliability) running in parallel; findings here are scoped to architecture/maintainability + rename-hygiene scope per `qc-specialist-shared.md` parameters.
+
+## Revalidation (targeted re-review of fix commit `b44519da`)
+
+**Re-review scope (per Assignment):** `git diff c2fe0408..b44519da` against parent `c2fe0408` (my last report commit). Verify (a) W-1-NEW and W-2-NEW are fixed, (b) the wire-visible `"daemon-daemon-api"` → `"daemon-api"` resource string rename is acceptable because qc-specialist-2 approved it in `qc2.md` Revalidation and the CHANGELOG documents it, (c) no new rename-hygiene regressions introduced.
+
+**Revalidation timestamp:** 2026-07-05.
+
+### Diff summary (`git diff --stat c2fe0408..b44519da`)
+
+```
+.mstar/plans/reports/2026-07-05-v1.90-closure/qc3.md                                   |  81 +++++++++++++++++++++-
+crates/nexus-local-db/src/findings.rs                                                  |   2 +-
+crates/nexus-orchestration/embedded-presets/novel-review-master/prompts/await-decision.md |  2 +-
+3 files changed, 82 insertions(+), 3 deletions(-)
+```
+
+`qc3.md` is a report-only edit (qc-specialist-3's verdict update from `Request Changes` to `Approve`). The two code/doc changes are surgical 1-line edits, exactly the scope required by W-1-NEW and W-2-NEW:
+
+- `crates/nexus-local-db/src/findings.rs:90` — doc-comment `the Local API surfaces this` → `the Daemon API surfaces this`.
+- `crates/nexus-orchestration/embedded-presets/novel-review-master/prompts/await-decision.md:28` — runtime-shipped prompt `PATCH /v1/local/findings/{finding_id}` → `PATCH /v1/daemon/findings/{finding_id}`.
+
+`git show b44519da` confirmed (1) the fix commit message names both W-1-NEW and W-2-NEW explicitly, (2) the diff is restricted to those two files plus the qc3 report file, and (3) no incidental changes (no whitespace-only churn, no reordered lines, no unrelated doc fixes).
+
+### W-1-NEW — embedded-preset prompt stale `/v1/local/` reference (Resolved)
+
+**Re-checked:**
+
+- `crates/nexus-orchestration/embedded-presets/novel-review-master/prompts/await-decision.md:28` — `to the findings API (PATCH /v1/daemon/findings/{finding_id}).` Confirmed via `git show b44519da` and direct `read`.
+- `rg -n 'daemon|Local|Daemon' crates/nexus-orchestration/embedded-presets/novel-review-master/prompts/await-decision.md` shows line 27 (`The daemon will write these back`) and line 28 (`PATCH /v1/daemon/findings/{finding_id}`) — the `daemon` token appears in the new route, the `local` token no longer appears anywhere in the file.
+- Runtime impact: this file is `include_dir!`-compiled into `nexus-orchestration` and rendered to an LLM agent during the `await-decision` state. The stale `/v1/local/` reference would have misdirected the agent to a non-existent route; the fix ensures the agent sees the canonical V1.90 route.
+- Module-header doc drift (`mod.rs`, `AGENTS.md`) for the orchestration crate was already swept in commit `1770fee8` (per the prior revalidation's W-1 disposition); this is the final cleanup of one runtime-shipped file that escapes `mod.rs`-level lint sweep because it is text content for an LLM, not a Rust doc comment.
+
+**Disposition:** **Resolved.** 1-line fix, surgically applied.
+
+### W-2-NEW — `findings.rs:90` doc-comment "Local API" miss (Resolved)
+
+**Re-checked:**
+
+- `crates/nexus-local-db/src/findings.rs:90` — `/// **actionable set** '{ open, triaged }'; the Daemon API surfaces this`. Confirmed via `git show b44519da` and direct `read`.
+- This file is the same one I called out in wave 1 W-1 (line 17, fixed in `1770fee8`) — the fix author fixed line 17 but did not see line 90. The new commit closes the gap; both doc-comment sites now read "Daemon API" consistently.
+- Predates V1.90 (introduced in commit `c25cb926` for R-V149P0-01) but is in scope of this iteration's rename hygiene because the doc comment is read by every future contributor / AI agent touching `FindingListFilters`.
+
+**Disposition:** **Resolved.** 1-line fix, surgically applied.
+
+### W-3-FOLLOWUP — resource-string rename `daemon-daemon-api` → `daemon-api`
+
+This was flagged in my prior revalidation as crossing the security-tier boundary without prior qc-specialist-2 sign-off. The revalidation Assignment explicitly defers to qc-specialist-2's review, which I confirmed:
+
+- `qc2.md` Revalidation section (lines 106–167 of `.mstar/plans/reports/2026-07-05-v1.90-closure/qc2.md`) records the security/correctness reviewer as approving the rename:
+  - "**Verdict (revalidation)**: **Approve**. The change is acceptable to ship from a security/correctness perspective. The resource string rename is a deliberate, documented, single breaking wire change that improves naming hygiene and eliminates a prior regression-guarded malformation. It does not alter any security decision, auth flow, or privilege boundary."
+  - Security analysis explicitly states the field is **not** an auth token, capability, or privilege identifier — it is purely a `403 Forbidden` error classification string emitted only on the keyless-localhost non-loopback rejection path. Authorization decisions, loopback/remote-bind gating, API key validation, and privilege boundaries are all unchanged.
+  - Regression-protection note: the unit test in `errors.rs:626` now asserts the new (correct) `"daemon-api"` value, so future accidental re-introduction of `"daemon-daemon-api"` will fail immediately.
+- `packages/nexus-contracts/CHANGELOG.md` `[0.19.0] - 2026-07-05` entry documents the rename as a `### Changed` `**BREAKING**` bullet: `Resource identifier in '403 Forbidden' details changed from '"daemon-daemon-api"' to '"daemon-api"'` (line 16). This is the consumer-facing signal that any client parsing the old value must update.
+- The wire-visible sites themselves were unchanged between `1770fee8` and `b44519da` (the only doc-comment fixes were on the two files in this commit). Confirmed via `rg -n '"daemon-api"|"daemon-daemon-api"' crates/nexus-daemon-runtime/src/api/`:
+  - `auth_middleware.rs:420` — `resource: "daemon-api".into()` ✓
+  - `errors.rs:621` — `resource: "daemon-api".to_string()` ✓
+  - `errors.rs:626` — `assert_eq!(details["resource"], "daemon-api")` ✓
+- The full repo-wide sweep (`rg -n "daemon[- ]daemon|daemon Daemon API|Daemon daemon API|daemon-daemon-api" apps crates docs schemas packages tooling`) returns **1 hit only**, which is the CHANGELOG "changed from" line documenting the rename. No re-introduction risk.
+
+**Disposition:** **Resolved.** qc-specialist-2 sign-off recorded; CHANGELOG documentation in place; wire value is stable and regression-guarded.
+
+### Rename-hygiene regression sweep
+
+`rg -n "local[-_]api|Local API" apps crates docs schemas packages tooling 2>/dev/null` after commit `b44519da` returns only the documented-historic / changelog / generated-context-assembly rows from the prior revalidation:
+
+| File:Line | Phrase | Disposition (carried forward) |
+|---|---|---|
+| `schemas/AGENTS.md:7` | "…it is **not** the 'Local API' surface (that surface is now the Daemon API; see V1.90)…" | Acceptable — compass §0 announcement explicitly distinguishes the `local/` Rust module name from the **renamed** "Local API" surface. |
+| `schemas/AGENTS.md:23` | "It was originally introduced as `local-api/` … and was renamed to `daemon-api/` in V1.90 alongside the Local API → Daemon API surface rename." | Acceptable historic narrative. |
+| `packages/nexus-contracts/CHANGELOG.md:12,14,15,24` | `[0.19.0]` BREAKING entry + module-tree paths + consumer migration note | Acceptable historic / migration documentation. |
+| `crates/nexus-home-layout/src/lib.rs:385` | `(DF-42 full Local API redesign — pre-V1.90 historical reference) may add:` | Acceptable historic exception (annotated). |
+| `schemas/platform/http-bff/context-assembly-v1.schema.json:6,10,110` | describes a deferred feature that never shipped | Acceptable — endpoint explicitly does not exist. |
+| `packages/nexus-contracts/src/generated/platform/http-bff/ContextAssemblyV1.ts:5,14,32` | (mirror of the JSON schema description above) | Acceptable — generated from the schema. |
+
+`rg -n "daemon[- ]daemon|daemon Daemon API|Daemon daemon API" apps crates docs schemas packages tooling` → **1 hit**: `packages/nexus-contracts/CHANGELOG.md:16` (the BREAKING `Changed` line documenting the rename). No code-side, doc-side, or comment-side regressions.
+
+No new rename-hygiene regressions introduced by `b44519da`. The fix is scoped to exactly the two files named in W-1-NEW and W-2-NEW; nothing else was touched.
+
+### CI gates (revalidation)
+
+- `cargo clippy --all -- -D warnings` → `Finished 'dev' profile [unoptimized + debuginfo] target(s) in 0.41s` (clean, no errors / no warnings).
+- `pnpm run validate-schemas` → `Valid: 194 / Invalid: 0 / ✓ All schemas valid`.
+- `git show b44519da` → 2 files, 2 insertions, 2 deletions (plus qc3.md report at 81 insertions / 3 deletions). Surgical, scoped, matches the W-1-NEW + W-2-NEW fix brief.
+- `git branch --show-current` → `iteration/v1.90`; `git rev-parse HEAD` (pre-commit) → `b44519da` (the fix commit); the verification is therefore against the correct feature context.
+
+### Final Verdict
+
+**Approve.**
+
+All 3 blocking Warnings from the prior revalidation are cleanly resolved:
+
+1. **W-1-NEW** (`await-decision.md:28`): 1-line surgical fix, runtime-shipped prompt now references the canonical `/v1/daemon/` route. Resolved.
+2. **W-2-NEW** (`findings.rs:90`): 1-line surgical fix, doc-comment now reads "Daemon API" consistently with the rest of the file. Resolved.
+3. **W-3-FOLLOWUP** (resource string `"daemon-daemon-api"` → `"daemon-api"`): qc-specialist-2 sign-off recorded in `qc2.md` Revalidation (verdict `Approve`); CHANGELOG `[0.19.0]` documents the rename as a `**BREAKING**` `### Changed` bullet; the unit test in `errors.rs:626` now regression-guards the new (correct) value; the wire-visible sites (`auth_middleware.rs:420`, `errors.rs:621`) emit `"daemon-api"` consistently. Resolved.
+
+Repo-wide rename-hygiene sweep confirms no new regressions: 6 documented-historic / changelog / generated-context-assembly rows and 1 changelog "changed from" line remain, all within the deliberate-exception categories called out in the prior revalidation. CI gates (`cargo clippy --all -- -D warnings`, `pnpm run validate-schemas`) are both green.
+
+From the architecture-hygiene lens I own for `qc-specialist-1`: the V1.90 Daemon API rename is now complete on every dimension in my scope (wire value, runtime-shipped prompt content, module-header doc comments, in-file doc comments, normative docs). The qc-specialist-2 sign-off closes the cross-tier boundary I flagged. The fix is **production-worthy for `iteration/v1.90 → main`** under the architecture/maintainability lens.
 
 ## Architecture & Maintainability Findings
 
