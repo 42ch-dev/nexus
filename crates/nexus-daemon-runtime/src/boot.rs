@@ -808,7 +808,12 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                 .nexus_home()
                 .parent()
                 .ok_or_else(|| anyhow::anyhow!("nexus_home has no parent directory"))?;
-            let (config, fingerprint) = tls::load_or_generate_tls_config(user_home).await?;
+            // The downstream load_or_generate_tls_config call enforces the
+            // third remote-bind gate condition: a usable TLS cert must be
+            // generated/loaded. If it fails, the `?` here propagates the error
+            // and the daemon fails closed even though ensure_remote_bind_allowed
+            // only checked the two env-var conditions.
+            let (config, fingerprint) = tls::load_or_generate_tls_config(user_home, host).await?;
             state.set_tls_fingerprint(Some(fingerprint));
             tls_config = Some(config);
             tracing::info!(

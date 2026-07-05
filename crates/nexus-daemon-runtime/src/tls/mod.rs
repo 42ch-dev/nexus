@@ -20,6 +20,11 @@ use tracing::info;
 /// generate a new Ed25519 self-signed pair if files are missing or cannot
 /// be parsed.
 ///
+/// `bind_host` is threaded into generated certificates as a Subject Alternative
+/// Name (IP address if it parses as an IP, otherwise DNS name), so remote
+/// clients connecting to the actual bind host can validate the TLS handshake.
+/// Loopback hosts produce loopback-only SANs.
+///
 /// Returns the `axum-server` TLS config plus the public fingerprint used for
 /// TOFU pinning. The fingerprint is computed as SHA-256 of the DER-encoded
 /// certificate, formatted as `SHA256:<colon-hex>`.
@@ -30,6 +35,7 @@ use tracing::info;
 /// read, or parsed into a usable `RustlsConfig`.
 pub async fn load_or_generate_tls_config(
     home: &Path,
+    bind_host: &str,
 ) -> anyhow::Result<(
     axum_server::tls_rustls::RustlsConfig,
     CertFingerprintResponse,
@@ -49,7 +55,7 @@ pub async fn load_or_generate_tls_config(
         return Ok((config, existing));
     }
 
-    generate_and_persist(home, &cert_path, &key_path).await
+    generate_and_persist(home, &cert_path, &key_path, bind_host).await
 }
 
 /// Attempt to reuse an existing certificate/key pair.
@@ -91,6 +97,7 @@ async fn generate_and_persist(
     home: &Path,
     cert_path: &Path,
     key_path: &Path,
+    bind_host: &str,
 ) -> anyhow::Result<(
     axum_server::tls_rustls::RustlsConfig,
     CertFingerprintResponse,
@@ -115,13 +122,7 @@ async fn generate_and_persist(
     let mut dn = DistinguishedName::new();
     dn.push(DnType::CommonName, "nexus42-daemon");
     params.distinguished_name = dn;
-    params.subject_alt_names = vec![
-        rcgen::SanType::IpAddress(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)),
-        rcgen::SanType::IpAddress(std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST)),
-        rcgen::SanType::DnsName(
-            rcgen::Ia5String::try_from("localhost".to_string()).expect("localhost is valid Ia5"),
-        ),
-    ];
+    params.subject_alt_names = build_subject_alt_names(bind_host);
 
     let cert = params
         .self_signed(&key_pair)
@@ -159,6 +160,47 @@ async fn generate_and_persist(
     .context("RustlsConfig::from_pem with generated certificate")?;
 
     Ok((config, response))
+}
+
+/// Build the SAN list for the daemon certificate.
+///
+/// Always includes loopback addresses so local clients and loopback-first
+/// generation work. For non-loopback concrete bind hosts, also includes the
+/// bind host as an IP or DNS SAN. Wildcard bind addresses (`0.0.0.0`, `::`)
+/// are skipped because they are not valid server names for TLS hostname
+/// validation; clients in that case must connect via a concrete address whose
+/// SAN is present (loopback for local tests) or use fingerprint pinning with
+/// a custom verifier.
+fn build_subject_alt_names(bind_host: &str) -> Vec<rcgen::SanType> {
+    let mut sans = vec![
+        rcgen::SanType::IpAddress(std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST)),
+        rcgen::SanType::IpAddress(std::net::IpAddr::V6(std::net::Ipv6Addr::LOCALHOST)),
+        rcgen::SanType::DnsName(
+            rcgen::Ia5String::try_from("localhost".to_string()).expect("localhost is valid Ia5"),
+        ),
+    ];
+
+    let trimmed = bind_host.trim();
+    if trimmed.is_empty() || trimmed == "0.0.0.0" || trimmed == "::" {
+        return sans;
+    }
+
+    if let Ok(ip) = trimmed.parse::<std::net::IpAddr>() {
+        if !ip.is_loopback() {
+            sans.push(rcgen::SanType::IpAddress(ip));
+        }
+    } else {
+        match rcgen::Ia5String::try_from(trimmed.to_string()) {
+            Ok(name) => sans.push(rcgen::SanType::DnsName(name)),
+            Err(e) => tracing::warn!(
+                %bind_host,
+                error = %e,
+                "bind host is not a valid IA5 DNS name; omitting from cert SAN"
+            ),
+        }
+    }
+
+    sans
 }
 
 /// Write `contents` to `path` with owner-only permissions (`0o600`).
@@ -211,7 +253,7 @@ mod tests {
         let tmp = tempfile::TempDir::new().expect("temp dir");
         let home = tmp.path();
 
-        let (config1, fp1) = load_or_generate_tls_config(home)
+        let (config1, fp1) = load_or_generate_tls_config(home, "127.0.0.1")
             .await
             .expect("first generation");
         assert!(fp1.fingerprint.starts_with("SHA256:"));
@@ -221,10 +263,43 @@ mod tests {
         // The file-backed config must be usable.
         let _ = config1;
 
-        let (_config2, fp2) = load_or_generate_tls_config(home)
+        let (_config2, fp2) = load_or_generate_tls_config(home, "127.0.0.1")
             .await
             .expect("second load");
         assert_eq!(fp1.fingerprint, fp2.fingerprint);
+    }
+
+    #[test]
+    fn build_sans_includes_non_loopback_bind_host_ip() {
+        let sans = build_subject_alt_names("192.168.1.42");
+        let sans_str: Vec<String> = sans.iter().map(san_to_string).collect();
+        assert!(sans_str.contains(&"192.168.1.42".to_string()));
+        assert!(sans_str.contains(&"127.0.0.1".to_string()));
+        assert!(sans_str.contains(&"::1".to_string()));
+        assert!(sans_str.contains(&"localhost".to_string()));
+    }
+
+    #[test]
+    fn build_sans_includes_non_loopback_bind_host_dns() {
+        let sans = build_subject_alt_names("nexus.local");
+        let sans_str: Vec<String> = sans.iter().map(san_to_string).collect();
+        assert!(sans_str.contains(&"nexus.local".to_string()));
+    }
+
+    #[test]
+    fn build_sans_skips_wildcard_bind_hosts() {
+        let sans = build_subject_alt_names("0.0.0.0");
+        let sans_str: Vec<String> = sans.iter().map(san_to_string).collect();
+        assert!(!sans_str.contains(&"0.0.0.0".to_string()));
+        assert!(sans_str.contains(&"127.0.0.1".to_string()));
+    }
+
+    fn san_to_string(san: &rcgen::SanType) -> String {
+        match san {
+            rcgen::SanType::IpAddress(ip) => ip.to_string(),
+            rcgen::SanType::DnsName(name) => name.as_str().to_string(),
+            other => panic!("unexpected SAN variant: {other:?}"),
+        }
     }
 
     #[test]
@@ -250,7 +325,7 @@ mod tests {
         fs::write(&cert_path, "not a cert").await.unwrap();
         fs::write(&key_path, "not a key").await.unwrap();
 
-        let (_config, fp) = load_or_generate_tls_config(home)
+        let (_config, fp) = load_or_generate_tls_config(home, "127.0.0.1")
             .await
             .expect("regenerate after corrupt files");
         assert!(fp.fingerprint.starts_with("SHA256:"));
@@ -264,7 +339,9 @@ mod tests {
         let tmp = tempfile::TempDir::new().expect("temp dir");
         let home = tmp.path();
 
-        let _ = load_or_generate_tls_config(home).await.unwrap();
+        let _ = load_or_generate_tls_config(home, "127.0.0.1")
+            .await
+            .unwrap();
 
         let dir_mode = fs::metadata(nexus_home_layout::tls_dir(home))
             .await
