@@ -811,7 +811,7 @@ Archived from [deferred-features-cross-version-tracker.md](../knowledge/deferred
 |----------|----------|
 | Delivery SSOT | [v1.91-reading-chrome-and-findings-batch-delivery-compass-v1.md](../iterations/v1.91-reading-chrome-and-findings-batch-delivery-compass-v1.md) |
 | Shipped at | 2026-07-05 |
-| PR | #? from `iteration/v1.91` → `main` (created at closeout) |
+| PR | [#119](https://github.com/42ch-dev/nexus/pull/119) from `iteration/v1.91` → `main` (created at closeout) |
 | Scope | Profile-specific reading chrome (P0 headline) + findings batch triage companion (P1). P-1 Prepare locked DESIGN.md reading-chrome tokens and the bulk PATCH contract. |
 | Plans | `2026-07-05-v1.91-prepare-dual-track`, `2026-07-05-v1.91-reading-chrome`, `2026-07-05-v1.91-findings-batch`, `2026-07-05-v1.91-closure` |
 | Closed tracker items | BL-13 (profile-specific reading chrome) |
