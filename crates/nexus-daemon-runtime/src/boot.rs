@@ -9,6 +9,7 @@ use std::sync::Arc;
 
 use crate::api;
 use crate::lifecycle::{Event, Lifecycle, StatigLifecycle, SubsystemKind};
+use crate::tls;
 use crate::worker_provider::ProductionWorkerProvider;
 use crate::workspace::WorkspaceState;
 
@@ -161,6 +162,15 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         .try_init();
 
     tracing::info!("Starting daemon-runtime v{}", env!("CARGO_PKG_VERSION"));
+
+    // V1.92 P-1: install the rustls crypto provider once at process startup.
+    // The call is idempotent; an error usually means a provider is already
+    // installed (e.g. by a parent CLI subscriber or an earlier test invocation).
+    if let Err(_e) = rustls::crypto::aws_lc_rs::default_provider().install_default() {
+        tracing::debug!(
+            "rustls crypto provider install returned an error (likely already installed)"
+        );
+    }
 
     // --- Section 1.5: Resolve CDN config for registry.refresh ---
     // V1.57 P1: CdnConfig is constructor-injected (no global state).
@@ -784,11 +794,28 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // Resolve transport before building the router so the Origin allowlist
     // is derived from the actual listening port.
     let transport = config.resolve_transport();
+    let mut tls_config: Option<axum_server::tls_rustls::RustlsConfig> = None;
     if let Transport::Http { ref host, .. } = transport {
         ensure_remote_bind_allowed(host)?;
     }
     if let Transport::Http { port, ref host } = transport {
         auth_config = auth_config.with_resolved_listen_addr(port, host);
+
+        // V1.92 P-1: non-loopback binds require TLS. Loopback binds stay
+        // plain HTTP and do not expose a fingerprint.
+        if !is_loopback_host(host) {
+            let user_home = state
+                .nexus_home()
+                .parent()
+                .ok_or_else(|| anyhow::anyhow!("nexus_home has no parent directory"))?;
+            let (config, fingerprint) = tls::load_or_generate_tls_config(user_home).await?;
+            state.set_tls_fingerprint(Some(fingerprint));
+            tls_config = Some(config);
+            tracing::info!(
+                fingerprint = %state.tls_fingerprint().as_ref().map_or_else(String::new, |f| f.fingerprint.clone()),
+                "TLS configured for remote bind"
+            );
+        }
     }
 
     // V1.86: log effective Origin allowlist when keyless-localhost is active
@@ -810,20 +837,41 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
         match transport {
             Transport::Http { port, host } => {
                 let addr = format!("{host}:{port}");
-                let listener = tokio::net::TcpListener::bind(&addr).await?;
+                if let Some(config) = tls_config {
+                    let socket_addr = tokio::net::lookup_host(&addr)
+                        .await?
+                        .next()
+                        .ok_or_else(|| anyhow::anyhow!("failed to resolve bind address {addr}"))?;
 
-                tracing::info!("Daemon API listening on http://{}", addr);
-                tracing::info!("Web UI available at http://{}", addr);
-                tracing::info!("Press Ctrl+C to stop");
+                    let handle = axum_server::Handle::new();
+                    let server = axum_server::bind_rustls(socket_addr, config)
+                        .handle(handle.clone())
+                        .serve(app.into_make_service());
+                    let server_handle = tokio::spawn(server);
 
-                axum::serve(listener, app)
-                    .with_graceful_shutdown({
-                        let notify = Arc::clone(&shutdown_notify);
-                        async move {
-                            notify.notified().await;
-                        }
-                    })
-                    .await?;
+                    tracing::info!("Daemon API listening on https://{socket_addr}");
+                    tracing::info!("Web UI available at https://{socket_addr}");
+                    tracing::info!("Press Ctrl+C to stop");
+
+                    shutdown_notify.notified().await;
+                    handle.graceful_shutdown(None);
+                    let _ = server_handle.await;
+                } else {
+                    let listener = tokio::net::TcpListener::bind(&addr).await?;
+
+                    tracing::info!("Daemon API listening on http://{}", addr);
+                    tracing::info!("Web UI available at http://{}", addr);
+                    tracing::info!("Press Ctrl+C to stop");
+
+                    axum::serve(listener, app)
+                        .with_graceful_shutdown({
+                            let notify = Arc::clone(&shutdown_notify);
+                            async move {
+                                notify.notified().await;
+                            }
+                        })
+                        .await?;
+                }
             }
             Transport::UnixSocket { path } => {
                 if path.exists() {

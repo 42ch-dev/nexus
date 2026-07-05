@@ -18,6 +18,7 @@ pub mod refresh_scheduler;
 pub mod stale_findings_watcher;
 #[cfg(not(debug_assertions))]
 pub mod static_assets;
+pub mod tls;
 pub mod worker_provider;
 pub mod workspace;
 
