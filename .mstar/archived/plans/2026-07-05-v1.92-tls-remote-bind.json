@@ -1,0 +1,29 @@
+{
+  "id": "2026-07-05-v1.92-tls-remote-bind",
+  "status": "Done",
+  "title": "P0 — TLS for Remote Bind (headline 1)",
+  "file": ".mstar/plans/2026-07-05-v1.92-tls-remote-bind.md",
+  "type": "implement",
+  "owner": "@fullstack-dev",
+  "metadata": {
+    "iteration": "V1.92",
+    "iteration_refs": "v1.92-remote-access-hardening-delivery-compass-v1.md",
+    "spec_integration_branch": "iteration/v1.92",
+    "merge_target": "iteration/v1.92",
+    "primary_spec": "knowledge/specs/daemon-runtime.md",
+    "blocked_by": [
+      "2026-07-05-v1.92-prepare-specs-and-contracts"
+    ],
+    "blocking": [
+      "2026-07-05-v1.92-closure"
+    ],
+    "inreview_at": "2026-07-05T22:35:00+0000",
+    "working_branch": "iteration/v1.92",
+    "review_merge_base": "55e215b1",
+    "review_tip": "0a8a4b18",
+    "done_at": "2026-07-05T23:30:00+0000",
+    "commit": "23327518 + 108457ce + 59b947d1 + fbc03477",
+    "qc": "3/3 Approve (qc1 re-review, qc2, qc3)",
+    "qa": "Pass abf20257"
+  }
+}

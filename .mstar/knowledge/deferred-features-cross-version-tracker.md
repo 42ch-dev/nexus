@@ -1,8 +1,8 @@
 # Deferred Features — Cross-Version Tracker v2
 
-**Quick status**: **V1.91 active (2026-07-05)** — Profile-specific reading chrome (BL-13) + findings batch triage companion. V1.90 shipped (2026-07-05). Platform **paused**.
+**Quick status**: **V1.92 shipped (2026-07-05)** — Remote-Access Hardening (TLS for remote-bind + Remote Client Connection Model). V1.91 shipped (2026-07-05). Platform **paused**.
 
-**V1.91 in-progress (2026-07-05)**: Reading chrome + findings batch triage iteration. Next: Phase 3 iteration-close, PR to `main`.
+**V1.92 delivered (2026-07-05)**: TLS (auto self-signed Ed25519 cert via rcgen+rustls+axum-server; remote-bind gate fail-closed without cert) + remote client connection model (web-ui/desktop "Connect to Daemon"; endpoint + API key + TOFU cert-fingerprint pinning). CSRF resolved-by-design (header-key model). Swept V1.91 residuals 001/002/003/004. 8 low/nit V1.93 residuals registered. PR pending.
 
 **Purpose**: Single source of truth for **open** and **backlog** features deferred from delivery compasses. Closed/shipped history lives in shipped archive.
 **Scope**: `nexus` OSS repository only.
@@ -92,9 +92,9 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 ## 5) Quick index
 
-**Active iteration**: V1.91 active (2026-07-05) — Profile-specific reading chrome + findings batch triage (PR pending).
+**Active iteration**: V1.92 shipped (2026-07-05) — Remote-Access Hardening (TLS + remote connection model). PR pending.
 
-**Latest shipped**: [V1.90](../iterations/v1.90-daemon-api-remote-ready-delivery-compass-v1.md) (Daemon API remote-ready rename, PR #118 — 2026-07-05)
+**Latest shipped**: [V1.91](../iterations/v1.91-reading-chrome-and-findings-batch-delivery-compass-v1.md) (reading chrome + findings batch, PR #119 — 2026-07-05)
 
 **Full iteration index**: [iterations/README.md](../iterations/README.md)
 
