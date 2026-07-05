@@ -22,6 +22,7 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 use tauri::{AppHandle, State};
 
+mod connection_config;
 mod sidecar;
 
 /// Path-guard rejection reason surfaced to the JS layer. Serializes as
@@ -258,6 +259,9 @@ pub fn run() {
             get_daemon_status,
             start_daemon,
             stop_daemon,
+            connection_config::get_connection_config,
+            connection_config::set_connection_config,
+            connection_config::delete_connection_config,
         ])
         .build(tauri::generate_context!())
         .expect("error while building Nexus desktop shell")

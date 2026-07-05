@@ -331,15 +331,33 @@ export function useBatchUpdateFindings() {
     mutationFn: (vars: { workId: string; request: BatchUpdateFindingsRequest }) =>
       client.batchUpdateFindings(vars.request),
     onSuccess: (data, vars) => {
-      const parts: string[] = [];
-      if (data.updated) parts.push(`${data.updated} updated`);
-      if (data.not_found?.length) parts.push(`${data.not_found.length} not found`);
-      if (data.conflict?.length) parts.push(`${data.conflict.length} conflict`);
-      toast({
-        variant: 'success',
-        title: 'Batch update complete',
-        description: parts.join(', ') || 'No changes applied',
-      });
+      if (data.updated && !data.not_found?.length && !data.conflict?.length) {
+        toast({
+          variant: 'success',
+          title: 'Batch update complete',
+          description: `${data.updated} findings updated`,
+        });
+      } else {
+        if (data.updated) {
+          toast({ variant: 'success', title: 'Batch update', description: `${data.updated} updated` });
+        }
+        if (data.not_found?.length) {
+          toast({
+            variant: 'warning',
+            title: 'Findings not found',
+            description: `${data.not_found.length} IDs were not found`,
+            duration: 0,
+          });
+        }
+        if (data.conflict?.length) {
+          toast({
+            variant: 'warning',
+            title: 'Findings conflict',
+            description: `${data.conflict.length} IDs could not be updated`,
+            duration: 0,
+          });
+        }
+      }
       void qc.invalidateQueries({ queryKey: queryKeys.findings.list(vars.workId) });
     },
     onError: (error) => errorToast(error, 'Could not update findings'),

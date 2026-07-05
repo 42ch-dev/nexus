@@ -25,6 +25,8 @@ tauri-plugin-shell = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
+# OS keychain/credential-manager access for V1.92 P1 remote connection config.
+keyring = "2"
 # Home-directory + config resolution for the workspace-root path guard (§5 #8).
 # Mirrors the daemon's workspace_root source (`apps/nexus42/src/config.rs`):
 # `~/.nexus42/config.toml` → `workspace_path`.
