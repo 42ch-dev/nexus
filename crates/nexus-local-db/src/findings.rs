@@ -87,7 +87,7 @@ pub struct FindingListFilters {
     /// Filter by `status`. Accepts either a single status (e.g. `"open"`)
     /// or a comma-separated list (e.g. `"open,triaged"`) — V1.50
     /// (R-V149P0-01): the produce-prompt consumer asks for the V1.49
-    /// **actionable set** `{ open, triaged }`; the Local API surfaces this
+    /// **actionable set** `{ open, triaged }`; the Daemon API surfaces this
     /// via `?status=open,triaged`. Each comma-separated token MUST be a
     /// member of [`VALID_STATUSES`]; unknown tokens surface as
     /// [`LocalDbError::InvalidEnum`].
