@@ -1,12 +1,12 @@
 # Schemas — JSON Schema External-Consumer Contracts
 
-This directory is the **single truth source** for types consumed by an **external client** (cross-language / cross-process boundary): `nexus-platform` (wire) and external Local API clients (e.g. the future WebApp/Web-UI; WASM compute modules). All Rust and TypeScript types here are generated from JSON Schema.
+This directory is the **single truth source** for types consumed by an **external client** (cross-language / cross-process boundary): `nexus-platform` (wire) and external Daemon API clients (e.g. the future WebApp/Web-UI; WASM compute modules). All Rust and TypeScript types here are generated from JSON Schema.
 
 **Layout (folders):** [`.mstar/knowledge/specs/schemas-directory-layout.md`](../.mstar/knowledge/specs/schemas-directory-layout.md) — tree index in [README.md](README.md).
 
-**Not in `schemas/`**: a type belongs here **only if** an external client consumes it. Local-only types (`/v1/local/*` daemon DTOs, orchestration, ACP registry, worker IPC, on-disk/SQLite records) live as hand-written Rust in `crates/nexus-contracts/src/local/`. See [`.mstar/knowledge/schemas-external-consumer-boundary.md`](../.mstar/knowledge/schemas-external-consumer-boundary.md).
+**Not in `schemas/`**: a type belongs here **only if** an external client consumes it. Local-only types (`/v1/daemon/*` daemon DTOs that are not cross-language, orchestration, ACP registry, worker IPC, on-disk/SQLite records) live as hand-written Rust in `crates/nexus-contracts/src/local/`. The `local/` module name refers to "local-only internal types" — it is **not** the "Local API" surface (that surface is now the Daemon API; see V1.90). See [`.mstar/knowledge/schemas-external-consumer-boundary.md`](../.mstar/knowledge/schemas-external-consumer-boundary.md).
 
-**Cloud line only:** daemon internal Local API must not add schemas here; sync/register go through `nexus-cloud-sync` per [local-cloud-crate-architecture.md](../.mstar/knowledge/specs/local-cloud-crate-architecture.md). The `local-api/` subtree is reserved for cross-language Local API contracts (e.g. `local-api/compute/` for the WASM compute ABI).
+**Cloud line only:** daemon internal Daemon API must not add schemas here unless an external client consumes them; sync/register go through `nexus-cloud-sync` per [local-cloud-crate-architecture.md](../.mstar/knowledge/specs/local-cloud-crate-architecture.md). The `daemon-api/` subtree is reserved for cross-language Daemon API contracts (e.g. `daemon-api/compute/` for the WASM compute ABI).
 
 ## Schema URI Placeholder
 
@@ -17,10 +17,10 @@ Committed schemas use `https://nexus42.invalid` in `$id`/`$ref` (RFC 6761 reserv
 `schemas/` → `pnpm run codegen` → Rust (`crates/nexus-contracts/src/generated/`) + TypeScript (`packages/nexus-contracts/src/generated/`).
 
 Generated modules are **nested** to mirror the consumer-scope tree:
-- Rust: `generated::{common, domain, platform::{http_bff, sync}, local_api::{compute, works, kb, findings, schedule, workspace, creators}}::<module>` (e.g. `generated::local_api::works::work_summary::WorkSummary`). The root `generated::mod.rs` also re-exports all leaf types flat, so `generated::WorkSummary` resolves too.
-- TypeScript: mirrors the same folders (hyphenated: `platform/http-bff`, `local-api/works`, `local-api/kb`, etc.); `index.ts` re-exports flat for the package public API.
+- Rust: `generated::{common, domain, platform::{http_bff, sync}, daemon_api::{compute, works, kb, findings, schedule, workspace, creators}}::<module>` (e.g. `generated::daemon_api::works::work_summary::WorkSummary`). The root `generated::mod.rs` also re-exports all leaf types flat, so `generated::WorkSummary` resolves too.
+- TypeScript: mirrors the same folders (hyphenated: `platform/http-bff`, `daemon-api/works`, `daemon-api/kb`, etc.); `index.ts` re-exports flat for the package public API.
 
-The `local-api/` subtree runs through the same codegen as wire types — it is a cross-language contract surface. V1.63 P1 added `local-api/{works,kb,findings,schedule,workspace,creators}/` for the daemon's core CRUD Local API surface; V1.63 P3 added `local-api/{orchestration,preset-management}/` for orchestration sessions/capabilities and preset management. Consumed by future WebApp/Web-UI clients.
+The `daemon-api/` subtree runs through the same codegen as wire types — it is a cross-language contract surface. It was originally introduced as `local-api/` (V1.63 P1 added the core CRUD surface under `local-api/{works,kb,findings,schedule,workspace,creators}/`; V1.63 P3 added `local-api/{orchestration,preset-management}/` for orchestration sessions/capabilities and preset management) and was renamed to `daemon-api/` in V1.90 alongside the Local API → Daemon API surface rename. Consumed by future WebApp/Web-UI clients.
 
 ## ⚠️ Mandatory: Run Codegen After Any Schema Change
 
