@@ -1,0 +1,88 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-06-09-v1.39-findings-and-review-routing",
+  "entries": [
+    {
+      "id": "R-V139P1-W-1",
+      "title": "No server-side enum validation on severity/status/target_executor — typo from non-CLI caller could store invalid value",
+      "severity": "medium",
+      "source": "qc1 W-1 (V1.39 P1 review)",
+      "scope": "crates/nexus-local-db/src/findings.rs (DAO create_finding/update_finding)",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target": "V1.40 hardening",
+      "closure_note": "V1.40 P4 T3: added CHECK constraints via migration 202606100002 + runtime validate_finding_enums() in create/update paths. Commit deba5ab7.",
+      "note": "Cheap to add CHECK constraints in migration or runtime match!().",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "R-V139P1-W-2",
+      "title": "Duplicated finding ID generation across handler and DB layer",
+      "severity": "low",
+      "source": "qc1 W-2 (V1.39 P1 review)",
+      "scope": "crates/nexus-local-db/src/findings.rs + crates/nexus-daemon-runtime/src/api/handlers/findings.rs",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target": "V1.40 hygiene",
+      "closure_note": "V1.40 P4 T3: extracted mint_finding_id() into findings module; handler uses it. Commit deba5ab7.",
+      "note": "Single source of truth for ID mint.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "R-V139P1-W-3",
+      "title": "CLI status HTTP timeout unbounded — slow daemon could freeze CLI",
+      "severity": "low",
+      "source": "qc3 W-1 (V1.39 P1 review)",
+      "scope": "crates/nexus42/src/commands/creator/run.rs (status HTTP fetch)",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target": "V1.40 hygiene",
+      "closure_note": "V1.40 P4 T3: already resolved — DaemonClient enforces DEFAULT_REQUEST_TIMEOUT=30s. Documented in run.rs. Commit deba5ab7.",
+      "note": "Add reqwest timeout.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "R-V139P1-W-4",
+      "title": "List query may skip index for cross-creator patterns",
+      "severity": "low",
+      "source": "qc3 W-2 (V1.39 P1 review)",
+      "scope": "crates/nexus-local-db/src/findings.rs (list_findings)",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target": "V1.40 hygiene",
+      "closure_note": "V1.40 P4 T3: EXPLAIN QUERY PLAN audit documented in list_findings doc comment — all three indexes utilized. Commit deba5ab7.",
+      "note": "EXPLAIN QUERY PLAN audit.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "R-V139P1-W-5",
+      "title": "Runtime sqlx query not compile-time checked (count_open_findings_by_severity)",
+      "severity": "low",
+      "source": "qc3 W-3 (V1.39 P1 review)",
+      "scope": "crates/nexus-local-db/src/findings.rs",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target": "V1.40 hygiene",
+      "closure_note": "V1.40 P4 T3: investigated compile-time conversion — SQLite COUNT(*) return type not reliably inferred by sqlx offline macros. Kept runtime FromRow query with SAFETY comment and CAST. Commit deba5ab7.",
+      "note": "Convert to compile-time query_as! if a struct shape is appropriate.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "R-V139P1-W-6",
+      "title": "from-review hook error not explicitly logged — production debugging gap",
+      "severity": "low",
+      "source": "qc3 W-4 (V1.39 P1 review)",
+      "scope": "crates/nexus-local-db/src/findings.rs (create_finding_from_review)",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target": "V1.40 hygiene",
+      "closure_note": "V1.40 P4 T3: added tracing::warn! on create_finding_from_review errors in handler. Commit deba5ab7.",
+      "note": "Add tracing::warn! on error.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    }
+  ],
+  "archived_at": "2026-06-15T16:49:53Z",
+  "archived_by": "residual_findings hygiene sweep 2026-06-16",
+  "archived_entry_count": 6,
+  "sweep_note": "6 entries merged from status.json residual_findings"
+}

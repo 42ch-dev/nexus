@@ -1,0 +1,102 @@
+{
+  "plan_id": "2026-06-26-v1.67-local-api-surface-convergence",
+  "archived_at": "2026-07-05T13:17:59+0000",
+  "archived_by": "repo hygiene \u2014 Profile B residual archive (git slim plan)",
+  "residual_findings": [
+    {
+      "id": "R-V167P0-QC1-S-AGENTS",
+      "title": "Error-envelope single-source rule in nexus-daemon-runtime/AGENTS.md",
+      "severity": "low",
+      "source": "qc1 S-4",
+      "scope": "see reports/2026-06-26-v1.67-local-api-surface-convergence/qc-consolidated.md",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.68+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-local-api-surface-convergence][R-V167P0-QC1-S-AGENTS]",
+      "note": "QC Suggestion, non-blocking; deferred.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-27",
+      "closure_note": "Closed in commit 1020af69.",
+      "resolution": {
+        "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+        "commit": "1020af69"
+      }
+    },
+    {
+      "id": "R-V167P0-QC1-S-CLI",
+      "title": "--sort flag in nexus42 schedule list CLI",
+      "severity": "low",
+      "source": "qc1 S-3",
+      "scope": "see reports/2026-06-26-v1.67-local-api-surface-convergence/qc-consolidated.md",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.68+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-local-api-surface-convergence][R-V167P0-QC1-S-CLI]",
+      "note": "QC Suggestion, non-blocking; deferred.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-27",
+      "closure_note": "Closed in commit 79509cf2.",
+      "resolution": {
+        "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+        "commit": "79509cf2"
+      }
+    },
+    {
+      "id": "R-V167P0-QC1-S-COMPARE",
+      "title": "Triplicate compare_* sort closures \u2014 extract shared comparator",
+      "severity": "low",
+      "source": "qc1 S-1",
+      "scope": "see reports/2026-06-26-v1.67-local-api-surface-convergence/qc-consolidated.md",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.68+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-local-api-surface-convergence][R-V167P0-QC1-S-COMPARE]",
+      "note": "QC Suggestion, non-blocking; deferred.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-27",
+      "closure_note": "Closed in commit 51597f0d.",
+      "resolution": {
+        "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+        "commit": "51597f0d"
+      }
+    },
+    {
+      "id": "R-V167P0-QC1-ENVELOPE-E2E",
+      "title": "503/422 IntoResponse->canonical-envelope e2e test",
+      "severity": "low",
+      "source": "qc1 W-3 (deferred)",
+      "scope": "see reports/2026-06-26-v1.67-local-api-surface-convergence/qc-consolidated.md",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.68+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-local-api-surface-convergence][R-V167P0-QC1-ENVELOPE-E2E]",
+      "note": "QC Suggestion, non-blocking; deferred.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-27",
+      "closure_note": "Closed in commit daba28f3.",
+      "resolution": {
+        "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+        "commit": "daba28f3"
+      }
+    },
+    {
+      "id": "R-V167P0-QC1-S-DOCS",
+      "title": "ACP SDK mirror-type naming doc-comment",
+      "severity": "low",
+      "source": "qc1 S-2",
+      "scope": "see reports/2026-06-26-v1.67-local-api-surface-convergence/qc-consolidated.md",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.68+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-local-api-surface-convergence][R-V167P0-QC1-S-DOCS]",
+      "note": "QC Suggestion, non-blocking; deferred.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-27",
+      "closure_note": "Closed in commit 044aa53c.",
+      "resolution": {
+        "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+        "commit": "044aa53c"
+      }
+    }
+  ]
+}

@@ -1,0 +1,41 @@
+{
+  "id": "2026-06-15-v1.47-serial-completion-hardening",
+  "title": "P2 — Serial completion hardening",
+  "file": ".mstar/plans/2026-06-15-v1.47-serial-completion-hardening.md",
+  "status": "Done",
+  "owner": "@fullstack-dev",
+  "agents": [
+    "@fullstack-dev"
+  ],
+  "progress": 100,
+  "tags": [
+    "v1.47",
+    "feature"
+  ],
+  "created_at": "2026-06-15",
+  "updated_at": "2026-06-15",
+  "done_at": "2026-06-15",
+  "notes": "",
+  "metadata": {
+    "working_branch": "feature/v1.47-serial-completion-hardening",
+    "merge_target": "iteration/v1.47",
+    "depends_on": "2026-06-15-v1.47-gate-remediation-audit",
+    "implementation_commits": [
+      "4b83852b",
+      "73ee447a",
+      "06ba126f"
+    ],
+    "review_range": "merge-base: c549eec7",
+    "review_tip": "HEAD (06ba126f)",
+    "qc_status": "Approve (3/3, initial tri-review)",
+    "qa_status": "Pass",
+    "qc_review_commits": [
+      "1a78eedd",
+      "c144b64e",
+      "7e0855b8"
+    ],
+    "qa_commit": "10980b67",
+    "merge_commit": "f0d62cb9",
+    "notes": "R-V138P1-01 already archived as lifecycle:resolved at .mstar/archived/residuals/2026-06-08-v1.38-novel-writing-parameterization.json; P2 confirms guard sufficient + adds 3 spec tests."
+  }
+}

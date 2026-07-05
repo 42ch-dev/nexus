@@ -1,0 +1,26 @@
+{
+  "plan_id": "2026-06-22-v1.57-daemon-refactor-and-caller-adapters",
+  "archived_at": "2026-07-05T13:17:59+0000",
+  "archived_by": "repo hygiene \u2014 Profile B residual archive (git slim plan)",
+  "residual_findings": [
+    {
+      "id": "R-V157P1-W001",
+      "title": "host-call smoke tests are `#[ignore]` (require live daemon + active creator); debug-only `host-call` subcommand lacks automated coverage for privileged paths",
+      "severity": "medium",
+      "source": "qc2-F-001 (V1.57 P1 tri-review warning; PM consolidated at qc-consolidated)",
+      "scope": "crates/nexus42/tests/host_call_smoke.rs (3 tests marked `#[ignore]`: read, write, policy-gated)",
+      "decision": "defer",
+      "owner": "@fullstack-dev-2 or @qa-engineer",
+      "target": "V1.58+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.57-daemon-refactor-and-caller-adapters][R-V157P1-W001]",
+      "note": "Medium; P1 dev marked smoke tests `#[ignore]` because they require a live daemon + active creator. qc2 raised a warning (not blocking) that the debug-only `host-call` subcommand lacks automated coverage. Add hermetic test harness for `host-call` in V1.58+ that mocks the daemon connection so the 3 smoke tests can run in CI.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-22",
+      "resolution": {
+        "plan_id": "2026-06-22-v1.58-capability-quality-convergence",
+        "commit": "e78c9307"
+      },
+      "closure_note": "V1.58 P2 T13 closed: host-call smoke un-ignore with hermetic harness. 4 new hermetic tests added in crates/nexus42/tests/host_call_smoke.rs; 3 retained #[ignore] with documented justification (DaemonClient trait extraction is P1 boundary)."
+    }
+  ]
+}

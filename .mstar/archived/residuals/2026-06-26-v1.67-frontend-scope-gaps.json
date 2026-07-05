@@ -1,0 +1,83 @@
+{
+  "plan_id": "2026-06-26-v1.67-frontend-scope-gaps",
+  "archived_at": "2026-07-05T13:17:59+0000",
+  "archived_by": "repo hygiene \u2014 Profile B residual archive (git slim plan)",
+  "residual_findings": [
+    {
+      "id": "R-V167P1-QC3-S1",
+      "title": "adapter-contract.test.ts 21->24 + preset-method parity guard",
+      "severity": "low",
+      "source": "qc3 S1",
+      "scope": "see reports/2026-06-26-v1.67-frontend-scope-gaps/qc-consolidated.md",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "V1.68+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-frontend-scope-gaps][R-V167P1-QC3-S1]",
+      "note": "QC Suggestion, non-blocking; deferred.",
+      "lifecycle": "resolved",
+      "resolution": {
+        "plan_id": "2026-06-27-v1.69-frontend-residuals",
+        "commit": "8a48f80e",
+        "date": "2026-06-27",
+        "note": "Closed by V1.69 P1 (QC 3/3 Approve, QA Pass)."
+      }
+    },
+    {
+      "id": "R-V167P1-QC1-S2",
+      "title": "Extract WORK_PROFILES to a SSOT module",
+      "severity": "low",
+      "source": "qc1 S2",
+      "scope": "see reports/2026-06-26-v1.67-frontend-scope-gaps/qc-consolidated.md",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "V1.68+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-frontend-scope-gaps][R-V167P1-QC1-S2]",
+      "note": "QC Suggestion, non-blocking; deferred.",
+      "lifecycle": "resolved",
+      "resolution": {
+        "plan_id": "2026-06-27-v1.69-frontend-residuals",
+        "commit": "8a48f80e",
+        "date": "2026-06-27",
+        "note": "Closed by V1.69 P1 (QC 3/3 Approve, QA Pass)."
+      }
+    },
+    {
+      "id": "R-V167P1-QC1-S1",
+      "title": "Narrow useState<string> to work_profile literal union",
+      "severity": "low",
+      "source": "qc1 S1",
+      "scope": "see reports/2026-06-26-v1.67-frontend-scope-gaps/qc-consolidated.md",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "V1.68+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-frontend-scope-gaps][R-V167P1-QC1-S1]",
+      "note": "QC Suggestion, non-blocking; deferred.",
+      "lifecycle": "resolved",
+      "resolution": {
+        "plan_id": "2026-06-27-v1.69-frontend-residuals",
+        "commit": "8a48f80e",
+        "date": "2026-06-27",
+        "note": "Closed by V1.69 P1 (QC 3/3 Approve, QA Pass)."
+      }
+    },
+    {
+      "id": "R-V167P1-QC3-S2",
+      "title": "preset query keys + invalidation when V1.68 canvas UI lands",
+      "severity": "low",
+      "source": "qc3 S2",
+      "scope": "see reports/2026-06-26-v1.67-frontend-scope-gaps/qc-consolidated.md",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "V1.68+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-frontend-scope-gaps][R-V167P1-QC3-S2]",
+      "note": "QC Suggestion, non-blocking; deferred.",
+      "lifecycle": "resolved",
+      "resolution": {
+        "plan_id": "2026-06-27-v1.69-frontend-residuals",
+        "commit": "8a48f80e",
+        "date": "2026-06-27",
+        "note": "Closed by V1.69 P1 (QC 3/3 Approve, QA Pass)."
+      }
+    }
+  ]
+}

@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "description": "Archived V1.44 plan per Profile B. P0 — DF-69 novel-manuscript-audit preset + CLI entry",
+  "plan_id": "2026-06-13-v1.44-manuscript-audit-preset",
+  "title": "P0 — DF-69 novel-manuscript-audit preset + CLI entry",
+  "done_at": "2026-06-13T16:00:00+08:00",
+  "archived_at": "2026-06-13T18:00:00+08:00",
+  "plan_file": ".mstar/plans/2026-06-13-v1.44-manuscript-audit-preset.md",
+  "archived_record": ".mstar/archived/plans/2026-06-13-v1.44-manuscript-audit-preset.json",
+  "snapshot": {
+    "id": "2026-06-13-v1.44-manuscript-audit-preset",
+    "status": "Done",
+    "file": ".mstar/plans/2026-06-13-v1.44-manuscript-audit-preset.md",
+    "working_branch": "feature/v1.44-manuscript-audit-preset",
+    "merge_target": "iteration/v1.44",
+    "metadata": {
+      "iteration_compass": ".mstar/iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md",
+      "depends_on": "2026-06-13-v1.44-harness-docs-prepare",
+      "review_sha_range": "068135ed..43550686",
+      "updated_at": "2026-06-13T16:00:00+08:00",
+      "done_at": "2026-06-13T16:00:00+08:00",
+      "notes": [
+        "Implemented 5 commits (83905581..bce2e81a) merged at 9d471bdc; QC initial Request Changes (1 Critical R-V144P0-001 extract mode unreachable, 11 Warning); fix wave 3 commits (d6b9400e..fc9f2f6d) resolved R-V144P0-001..010; re-merged at 44a12a6e; plan §6 verification commit 43550686; targeted QC re-review Approve (all 3); QA Approve (5a0548c5). DF-69 ship; archive closure is P-last scope."
+      ]
+    }
+  },
+  "qc": "3 reviewers (qc1 `16e8e703`, qc2 `a0858b17`, qc3 `3f963183`); initial Request Changes (1 Critical R-V144P0-001 + 11 Warning) → fix wave d6b9400e..fc9f2f6d → targeted re-review Approve (qc1 `927e9577`, qc2 `d78716cf`, qc3 `ff9c1499`)",
+  "qa": "Approve (5a0548c5)",
+  "residual_count": 0,
+  "merge_commits": [
+    "9d471bdc merge(v1.44 P0): manuscript-audit preset + CLI entry",
+    "44a12a6e merge(v1.44 P0): fix wave — split preset + harden CLI for QC Request Changes",
+    "43550686 fix(v1.44 P0): R-V144P0-006 plan §6 verification update",
+    "5a0548c5 qa(v1.44 P0): qa-engineer acceptance verification"
+  ],
+  "notes": "Profile B archive. P0 — DF-69 novel-manuscript-audit preset + CLI entry on iteration/v1.44."
+}

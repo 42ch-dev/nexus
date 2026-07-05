@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-04-06-foundation-hardening",
+  "archived_at": "2026-04-09",
+  "entries": [
+    {
+      "id": "FH-R1",
+      "title": "Schema drift between CLI/daemon has no automated detection",
+      "severity": "medium",
+      "source": "QC2-H1",
+      "scope": "crates/nexus42/src/db/, crates/nexus42d/src/db/",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target": "V1.1 — RESOLVED: Added schema-drift-check CI job comparing SCHEMA_VERSION, reference_sources table columns, and LATEST_SCHEMA_VERSION across CLI, daemon, and contracts",
+      "tracking": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-09T00:00:00Z",
+      "closure_note": "Added schema-drift-check job to ci.yml with 3 checks: SCHEMA_VERSION consistency (CLI vs daemon), reference_sources key columns (both directions), LATEST_SCHEMA_VERSION match (contracts vs CLI). Fast-failing CI detection.",
+      "archived_at": "2026-04-09"
+    },
+    {
+      "id": "FH-R3",
+      "title": "Error code inconsistency between error_code() and Internal code field",
+      "severity": "low",
+      "source": "QC1-M3",
+      "scope": "crates/nexus42d/src/api/errors.rs",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target": "V1.1 — RESOLVED: Documented two-tier error code strategy in module header and Internal variant doc comment. Internal.code is for internal classification (DATABASE_ERROR, INTERNAL_ERROR), error_code() returns stable public codes (INTERNAL). Documented future direction for finer-grained public codes.",
+      "tracking": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-09T00:00:00Z",
+      "closure_note": "Added module-level documentation explaining Internal.code vs error_code() design rationale. Added doc comment on Internal variant explaining code field purpose. Cross-referenced SyncError pattern.",
+      "archived_at": "2026-04-09"
+    },
+    {
+      "id": "FH-R6",
+      "title": "Test helper duplication across errors.rs and middleware.rs",
+      "severity": "low",
+      "source": "QC2-M3",
+      "scope": "crates/nexus42d/src/api/",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target": "V1.1 — RESOLVED: Created test_utils.rs module with create_test_workspace() and create_initialized_test_workspace() helpers. Migrated 6 tests (4 from errors.rs, 2 from sync.rs) to use shared helpers. lib.rs exports test_utils under #[cfg(test)].",
+      "tracking": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-09T00:00:00Z",
+      "closure_note": "Created crates/nexus42d/src/test_utils.rs with create_test_workspace() returning (TempDir, PathBuf, PathBuf) and create_initialized_test_workspace() returning (TempDir, PathBuf, PathBuf, PathBuf). Migrated errors.rs (4 integration tests) and sync.rs (2 integration tests). Other files can migrate incrementally.",
+      "archived_at": "2026-04-09"
+    }
+  ]
+}

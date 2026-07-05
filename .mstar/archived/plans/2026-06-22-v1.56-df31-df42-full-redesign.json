@@ -1,0 +1,22 @@
+{
+  "plan_id": "2026-06-22-v1.56-df31-df42-full-redesign",
+  "title": "V1.56 P0 — DF-31 Full + DF-42 Local API Redesign",
+  "status": "Done",
+  "type": "implement",
+  "track": "Track A / Wave 1",
+  "owner": "@fullstack-dev",
+  "effort": "L/XL",
+  "working_branch": "feature/v1.56-df31-df42-full-redesign",
+  "merge_target": "iteration/v1.56",
+  "created": "2026-06-22",
+  "compass": "v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md",
+  "qc_strategy": "Tri-review + mid-QA + targeted fix-wave",
+  "depends_on": [
+    "P-1 PM signoff"
+  ],
+  "qc_status": "tri-review done — Approve with comments (6 medium, 13 low) — see .mstar/plans/reports/2026-06-22-v1.56-df31-df42-full-redesign/qc-consolidated.md",
+  "qa_status": "mid-QA Fail on Gate 2 (sqlx cache) + Gate 4 (fmt) — both PM-fixed; functional ACs all green per qa-engineer note",
+  "qc_completed_at": "2026-06-22",
+  "done_at": "2026-06-22",
+  "done_note": "PM override on environmental fails (Gate 2 cache, Gate 4 fmt) — both fixed by PM; qa-engineer explicitly noted \"All functional ACs green; gates 2 and 4 are CI/process hygiene on the presented branch.\" 6 medium + 1 resolved residual registered."
+}

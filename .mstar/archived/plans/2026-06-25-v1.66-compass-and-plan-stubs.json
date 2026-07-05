@@ -1,0 +1,16 @@
+{
+  "plan_id": "2026-06-25-v1.66-compass-and-plan-stubs",
+  "title": "V1.66 P-1 — Compass & Plan Stubs (Prepare)",
+  "iteration": "V1.66",
+  "slot": "P-1",
+  "status": "Done",
+  "effort": "M",
+  "owner": "@project-manager",
+  "review": "N/A (Prepare)",
+  "wave": 0,
+  "dependency": "—",
+  "working_branch": "(direct on iteration/v1.66)",
+  "merge_target": "iteration/v1.66",
+  "completed_at": "2026-06-25T14:34:47Z",
+  "completion_summary": "V1.66 Prepare complete: compass Locked (PM grill §0 + Phase 2b @product-manager‖@architect + Phase 2c @writing-specialist integrated); 6 plan stubs on disk; status.json registered; 6 spec amendments applied; wire_contracts_changed: false; iteration/v1.66 pushed; user branch-policy GO confirmed; PM Task Board published; Pre-implement Gate Check GO."
+}

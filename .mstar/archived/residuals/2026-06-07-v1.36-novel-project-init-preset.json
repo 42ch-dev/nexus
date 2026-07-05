@@ -1,0 +1,15 @@
+{
+  "plan_id": "2026-06-07-v1.36-novel-project-init-preset",
+  "schema_version": 1,
+  "entries": [
+    {
+      "id": "R-V136P1-01",
+      "severity": "medium",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-08",
+      "closure_note": "Resolved in V1.37 P0 (plan 2026-06-07-v1.37-novel-foundation-first). AddScheduleRequest now carries an input: HashMap<String, serde_json::Value> field; CLI grill-me answers are threaded through to daemon scheduling and routed to preset.input.* at schedule evaluation time.",
+      "closure_evidence": "Branch feature/v1.37-novel-foundation-first; crates/nexus-contracts/src/local/schedule/http.rs (AddScheduleRequest.input); crates/nexus-daemon-runtime/src/api/handlers/orchestration/schedules.rs; crates/nexus42/src/commands/creator/run.rs",
+      "archived_at": "2026-06-08"
+    }
+  ]
+}

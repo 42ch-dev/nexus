@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "archived_at": "2026-06-03T16:30:00+08:00",
+  "plan_ids": [
+    "2026-06-03-v1.32-preset-validator-core-and-cli",
+    "2026-06-03-v1.32-embedded-presets-usability-hardening",
+    "2026-06-03-v1.32-orchestration-security-followup",
+    "2026-06-03-v1.32-spec-tracker-hygiene"
+  ],
+  "iteration": "v1.32",
+  "closure_note": "V1.32 Preset Quality Gate iteration closed. 4 plans shipped. QC tri-review approved (P1: 3 rounds, P2: 2 rounds, P3: 2 rounds, P4: 2 rounds). 1 security residual closed (SEC-V131-01). 2 new open residuals registered (R-P2-01 Medium, R-P2-02 Low — capability schema gap out of P2 scope). Deferred OUT items (DF-29, DF-31, DF-42, DF-44, PD-05) remain open in active tracker. Platform pause preserved.",
+  "findings": [
+    {
+      "id": "SEC-V131-01",
+      "title": "judge.llm and context.summarize still read raw creator_id/session_id — same IDOR pattern as fixed acp_prompt",
+      "original_severity": "medium",
+      "original_source": "pr-review O-1 (security follow-up to cursor review)",
+      "original_scope": "crates/nexus-orchestration/src/capability/builtins/judge_llm.rs, crates/nexus-orchestration/src/capability/builtins/context_summarize.rs",
+      "closure": "fixed",
+      "closure_note": "P3 plan. Both capabilities now read only context-injected _creator_id/_session_id. Orchestration engine task boundary (StateCompositeTask::run) injects trusted context at invocation. 6 regression tests prove spoofing impossible. Defense-in-depth restored. No behavior change for legitimate (context-injected) callers.",
+      "fixed_in_plan": "2026-06-03-v1.32-orchestration-security-followup",
+      "fixed_in_commit": "96edf4b"
+    }
+  ]
+}

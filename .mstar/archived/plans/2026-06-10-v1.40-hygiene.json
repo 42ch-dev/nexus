@@ -1,0 +1,45 @@
+{
+  "id": "2026-06-10-v1.40-hygiene",
+  "status": "Done",
+  "file": ".mstar/plans/2026-06-10-v1.40-hygiene.md",
+  "working_branch": "feature/v1.40-hygiene",
+  "merge_target": "iteration/v1.40",
+  "metadata": {
+    "iteration_compass": ".mstar/iterations/v1.40-novel-world-kb-delivery-compass-v1.md",
+    "depends_on": [
+      "2026-06-10-v1.40-world-kb-extract-binding"
+    ],
+    "description": "P4 — V1.39 QC residual convergence (V1.40-tagged only)",
+    "explicitly_out": [
+      "full 66-item tech debt sweep",
+      "DF-63",
+      "multi-volume PK"
+    ],
+    "qa": "deferred — .sqlx/ offline cache refresh required (pre-existing infra); compilation clean; clippy clean; nightly fmt clean; 17 V1.40-tagged residuals closed (9 resolved, 5 waived, 1 PM-accept, 3 out-of-scope)",
+    "done_at": "2026-06-11T02:30:00+08:00",
+    "commits": [
+      "c47d2125",
+      "deba5ab7",
+      "69250f10",
+      "9dae01f4",
+      "91ecbe8d",
+      "76a5461d",
+      "ad4dee6d",
+      "95233c32",
+      "baffa7d8",
+      "deca8e16",
+      "57e7b854",
+      "d37c0691",
+      "12b80662",
+      "c6f193fb",
+      "86620098",
+      "790060ba"
+    ],
+    "status_transition": "Todo → InProgress → InReview → Done on 2026-06-11 (with mid-stream QC fix batch — 5 critical findings + 1 PM-accept)",
+    "pm_sign_off": "QC3 W-2 PM-accepted with documentation (sqlx::query_as! design tradeoff; see R-V140P4-W2)"
+  },
+  "updated_at": "2026-06-11",
+  "notes": [
+    "2026-06-11: implement (6 commits: c47d2125..76a5461d); QC1/QC2/QC3 Request Changes initial (5 critical findings: tick_inner dependency bug, PatchWorkRequest compile failures, unsupported ALTER TABLE ADD CONSTRAINT, ID mint SSOT not used, unused import); fix 4 commits (deca8e16..12b80662); QC1+QC2 re-validation Approve; QC3 W-2 PM-accepted with documentation (sqlx query_as! macro design tradeoff); QA deferred pending .sqlx/ cache refresh (pre-existing infra); merge to iteration/v1.40"
+  ]
+}

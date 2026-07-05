@@ -1,0 +1,22 @@
+{
+  "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+  "archived_at": "2026-06-28",
+  "schema_version": 1,
+  "plan": {
+    "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+    "iteration_id": "V1.71",
+    "status": "Done",
+    "owner": "ops-engineer + fullstack-dev + frontend-dev",
+    "effort": "M",
+    "type": "implement",
+    "working_branch": "feature/v1.71-hygiene-and-sign-groundwork",
+    "merge_target": "iteration/v1.71",
+    "task_category": "ops",
+    "wire_contracts_changed": false,
+    "wire_contracts_note": "Track B only: surgical residual closures + desktop sign infrastructure; no schema/codegen/DTO change",
+    "started_at": "2026-06-27T19:54:37Z",
+    "merged_to_integration_at": "2026-06-27T21:02:58Z",
+    "completed_at": "2026-06-28T01:33:17Z",
+    "merge_commit": "67343139"
+  }
+}

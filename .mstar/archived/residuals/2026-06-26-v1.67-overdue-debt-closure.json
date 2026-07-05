@@ -1,0 +1,83 @@
+{
+  "plan_id": "2026-06-26-v1.67-overdue-debt-closure",
+  "archived_at": "2026-07-05T13:17:59+0000",
+  "archived_by": "repo hygiene \u2014 Profile B residual archive (git slim plan)",
+  "residual_findings": [
+    {
+      "id": "R-V167P2-QC1-S2",
+      "title": "Direct unit test for is_world_owned",
+      "severity": "low",
+      "source": "qc1 S2",
+      "scope": "see reports/2026-06-26-v1.67-overdue-debt-closure/qc-consolidated.md",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.68+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-overdue-debt-closure][R-V167P2-QC1-S2]",
+      "note": "QC Suggestion, non-blocking; deferred.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-27",
+      "closure_note": "Closed in commit 100e6050.",
+      "resolution": {
+        "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+        "commit": "100e6050"
+      }
+    },
+    {
+      "id": "R-V167P2-QC1-S1",
+      "title": "outline_five_q NOGO dimension-scores regression test (R-V152TA-S006 promise gap)",
+      "severity": "low",
+      "source": "qc1 S1",
+      "scope": "see reports/2026-06-26-v1.67-overdue-debt-closure/qc-consolidated.md",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.68+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-overdue-debt-closure][R-V167P2-QC1-S1]",
+      "note": "QC Suggestion, non-blocking; deferred.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-27",
+      "closure_note": "Closed in commit 7a9809ad.",
+      "resolution": {
+        "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+        "commit": "7a9809ad"
+      }
+    },
+    {
+      "id": "R-V167P2-QC1-S4",
+      "title": "Extract frontmatter helpers to frontmatter.rs if 3rd frontmatter-edit capability ships",
+      "severity": "low",
+      "source": "qc1 S4",
+      "scope": "see reports/2026-06-26-v1.67-overdue-debt-closure/qc-consolidated.md",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.68+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-overdue-debt-closure][R-V167P2-QC1-S4]",
+      "note": "QC Suggestion, non-blocking; deferred.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-27",
+      "closure_note": "Deferred: no third frontmatter-edit capability ships in V1.71, so extracting helpers is not justified.",
+      "resolution": {
+        "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+        "commit": null
+      }
+    },
+    {
+      "id": "R-V167P2-QC3-S1",
+      "title": "script.section_status.update file-level OCC/lock vs concurrent manual edits",
+      "severity": "low",
+      "source": "qc3 S-001",
+      "scope": "see reports/2026-06-26-v1.67-overdue-debt-closure/qc-consolidated.md",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.68+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-26-v1.67-overdue-debt-closure][R-V167P2-QC3-S1]",
+      "note": "QC Suggestion, non-blocking; deferred.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-27",
+      "closure_note": "Closed in commit 1675369f.",
+      "resolution": {
+        "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+        "commit": "1675369f"
+      }
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+{
+  "plan_id": "2026-07-02-v1.84-brand-polish-and-token-consolidation",
+  "name": "P0 — Brand Polish and Token Consolidation",
+  "iteration": "V1.84",
+  "type": "implement",
+  "task_category": "visual",
+  "status": "Done",
+  "primary_spec": ".mstar/iterations/v1.84-brand-polish-and-token-consolidation-delivery-compass-v1.md",
+  "closes_residuals": [
+    "R-V183CLOSE-W004",
+    "R-V183CLOSE-W005"
+  ],
+  "working_branch": "feature/v1.84-brand-polish-and-token-consolidation",
+  "merge_target": "iteration/v1.84",
+  "parallel_with": "2026-07-02-v1.84-ci-and-tooling-hygiene",
+  "qc_reports": [
+    ".mstar/plans/reports/2026-07-02-v1.84-closure/qc1.md",
+    "qc2.md",
+    "qc3.md"
+  ],
+  "metadata": {
+    "plan_index": "P0",
+    "iteration_refs": [
+      "V1.84"
+    ],
+    "spec_integration_branch": "iteration/v1.84",
+    "merge_target": "iteration/v1.84"
+  },
+  "merge_commit": "06090e94",
+  "implementation_commit": "8c249484",
+  "qc_verdict": "Approve (consolidated, post fix-wave)"
+}

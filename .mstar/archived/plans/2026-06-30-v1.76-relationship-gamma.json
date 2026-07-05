@@ -1,0 +1,20 @@
+{
+  "plan_id": "2026-06-30-v1.76-relationship-gamma",
+  "archived_at": "2026-06-30",
+  "schema_version": 1,
+  "plan": {
+    "plan_id": "2026-06-30-v1.76-relationship-gamma",
+    "iteration_id": "V1.76",
+    "status": "Done",
+    "owner": "fullstack-dev,frontend-dev",
+    "effort": "L",
+    "type": "implement",
+    "working_branch": "feature/v1.76-relationship-gamma",
+    "merge_target": "iteration/v1.76",
+    "task_category": "logic",
+    "wire_contracts_changed": true,
+    "depends_on": [
+      "2026-06-30-v1.76-compass-and-plan"
+    ]
+  }
+}

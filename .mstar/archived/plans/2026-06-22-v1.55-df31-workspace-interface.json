@@ -1,0 +1,20 @@
+{
+  "plan_id": "2026-06-22-v1.55-df31-workspace-interface",
+  "title": "V1.55 P1 — DF-31 Workspace Open / Commit Interface Skeleton",
+  "status": "Done",
+  "owner": "@fullstack-dev",
+  "effort": "M",
+  "working_branch": "feature/v1.55-df31-workspace-interface",
+  "merge_target": "iteration/v1.55",
+  "type": "implement",
+  "track": "Theme B / Track A",
+  "created": "2026-06-22",
+  "compass": "v1.55-non-novel-profile-completion-and-infrastructure-refactor-delivery-compass-v1.md",
+  "dependencies": [
+    "2026-06-22-v1.55-compass-and-plan-stubs"
+  ],
+  "qc_status": "qc1 Approve (commit 39d96204); qc2 Approve (commit 20ac1978); qc3 Approve (commit 8533a1b5); all after 1 fix-wave (5da1ec08) addressing consume_session race + SessionError enum + poison recovery + typed errors + capability count",
+  "qa_status": "Pass — @qa-engineer mid-QA (commit 3197e14c; 7/7 AC; CI gates re-run clean; DF-31 skeleton confirmed)",
+  "merge_commit": "9b3d70ce (P1 base) + 5da1ec08 (P1 fix-wave) + 376ef43a (P1 fix-wave merge)",
+  "done_at": "2026-06-21"
+}

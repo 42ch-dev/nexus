@@ -1,0 +1,19 @@
+{
+  "plan_id": "2026-07-01-v1.80-frontend-hygiene-residuals",
+  "iteration_id": "V1.80",
+  "status": "Done",
+  "owner": "@frontend-dev",
+  "effort": "S",
+  "type": "feature",
+  "working_branch": "feature/v1.80-frontend-hygiene",
+  "merge_target": "iteration/v1.80",
+  "task_category": "visual",
+  "wire_contracts_changed": false,
+  "closes_residuals": [
+    "R-V179P0-QC1-001",
+    "R-V179P0-QC1-002",
+    "R-V179P1-QC1-001",
+    "R-V179P1-QC1-002"
+  ],
+  "depends_on": []
+}

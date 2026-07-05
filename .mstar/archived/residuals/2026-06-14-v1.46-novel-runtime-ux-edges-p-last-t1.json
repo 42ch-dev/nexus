@@ -1,0 +1,75 @@
+{
+  "plan_id": "2026-06-14-v1.46-novel-runtime-ux-edges",
+  "archived_at": "2026-06-18T01:15:00+08:00",
+  "archived_by": "PM (V1.49 P-last T1 WL-A hygiene fix wave)",
+  "residual_findings": [
+    {
+      "id": "R-V146P2-QC1-S1",
+      "title": "std::process::exit(0) in library module (maybe_print_preset_run_help_and_exit)",
+      "severity": "lifecycle_resolved",
+      "lifecycle": "resolved",
+      "source": "qc1 (architecture/maintainability) S-1",
+      "scope": "crates/nexus42/src/commands/creator/run.rs:231-235",
+      "decision": "closed",
+      "owner": "V1.49 P-last T1 (fullstack-dev)",
+      "closed_at": "2026-06-18T01:15:00+08:00",
+      "closure_note": "V1.49 P-last T1 fix wave (commit d77a3627, merged at 60311a9b): move process::exit out of library help-intercept into binary main(). Per project AGENTS.md hygiene fix cadence: surgical commit + regression test. No #[allow] suppressions added. No wire-contract changes. CI gates clean: cargo +nightly fmt --all --check + cargo clippy --all -- -D warnings.",
+      "closure_evidence": "iteration/v1.49 @ 60311a9b (P-last T1 merge) + d77a3627 (fix commit); 171 + 8 + 10 + 5 = 194 regression tests pass on touched crates",
+      "fix_commits": [
+        "d77a3627"
+      ],
+      "re_review_commits": []
+    },
+    {
+      "id": "R-V146P2-QC1-S2",
+      "title": "Config-resolution dedup opportunity",
+      "severity": "lifecycle_resolved",
+      "lifecycle": "resolved",
+      "source": "qc1 (architecture/maintainability) S-2",
+      "scope": "crates/nexus42/src/commands/creator/works/mod.rs",
+      "decision": "closed",
+      "owner": "V1.49 P-last T1 (fullstack-dev)",
+      "closed_at": "2026-06-18T01:15:00+08:00",
+      "closure_note": "V1.49 P-last T1 fix wave (commit ed6a64ea, merged at 60311a9b): dedup workspace-dir resolution in completion-lock hint. Per project AGENTS.md hygiene fix cadence: surgical commit + regression test. No #[allow] suppressions added. No wire-contract changes. CI gates clean: cargo +nightly fmt --all --check + cargo clippy --all -- -D warnings.",
+      "closure_evidence": "iteration/v1.49 @ 60311a9b (P-last T1 merge) + ed6a64ea (fix commit); 171 + 8 + 10 + 5 = 194 regression tests pass on touched crates",
+      "fix_commits": [
+        "ed6a64ea"
+      ],
+      "re_review_commits": []
+    },
+    {
+      "id": "R-V146P2-QC3-S1",
+      "title": "T2 help-intercept exit path should flush stdout before std::process::exit(0)",
+      "severity": "lifecycle_resolved",
+      "lifecycle": "resolved",
+      "source": "qc3 (performance/reliability) S-001",
+      "scope": "crates/nexus42/src/commands/creator/run.rs:231-235",
+      "decision": "closed",
+      "owner": "V1.49 P-last T1 (fullstack-dev)",
+      "closed_at": "2026-06-18T01:15:00+08:00",
+      "closure_note": "V1.49 P-last T1 fix wave (commit 3e1c12af, merged at 60311a9b): flush stdout before exit in help-intercept path. Per project AGENTS.md hygiene fix cadence: surgical commit + regression test. No #[allow] suppressions added. No wire-contract changes. CI gates clean: cargo +nightly fmt --all --check + cargo clippy --all -- -D warnings.",
+      "closure_evidence": "iteration/v1.49 @ 60311a9b (P-last T1 merge) + 3e1c12af (fix commit); 171 + 8 + 10 + 5 = 194 regression tests pass on touched crates",
+      "fix_commits": [
+        "3e1c12af"
+      ],
+      "re_review_commits": []
+    },
+    {
+      "id": "R-V146P2-QC3-S2",
+      "title": "CapabilityRegistry::with_builtins() rebuilt on every help intercept",
+      "severity": "lifecycle_resolved",
+      "lifecycle": "resolved",
+      "source": "qc3 (performance/reliability) S-002",
+      "scope": "crates/nexus42/src/commands/creator/run.rs:214",
+      "decision": "closed",
+      "owner": "V1.49 P-last T1 (fullstack-dev)",
+      "closed_at": "2026-06-18T01:15:00+08:00",
+      "closure_note": "V1.49 P-last T1 fix wave (commit b88feaf6, merged at 60311a9b): extract registry-injected help core (single build). Per project AGENTS.md hygiene fix cadence: surgical commit + regression test. No #[allow] suppressions added. No wire-contract changes. CI gates clean: cargo +nightly fmt --all --check + cargo clippy --all -- -D warnings.",
+      "closure_evidence": "iteration/v1.49 @ 60311a9b (P-last T1 merge) + b88feaf6 (fix commit); 171 + 8 + 10 + 5 = 194 regression tests pass on touched crates",
+      "fix_commits": [
+        "b88feaf6"
+      ],
+      "re_review_commits": []
+    }
+  ]
+}

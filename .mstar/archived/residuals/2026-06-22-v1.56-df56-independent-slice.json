@@ -1,0 +1,177 @@
+{
+  "plan_id": "2026-06-22-v1.56-df56-independent-slice",
+  "archived_at": "2026-07-05T13:17:59+0000",
+  "archived_by": "repo hygiene \u2014 Profile B residual archive (git slim plan)",
+  "residual_findings": [
+    {
+      "id": "R-V156P2-L002",
+      "title": "Expression eval tracing/metrics at convergence gate",
+      "severity": "low",
+      "source": "qc3 S-revalidation (V1.56 P2 tri-review or fix-wave follow-up)",
+      "scope": "crates/nexus-orchestration/src/tasks/mod.rs + expr.rs + loader.rs + converge_runtime_e2e.rs + preset-conditional-routing.md + orchestration-engine.md",
+      "decision": "accept (defer to post-V1.56 hardening)",
+      "owner": "@fullstack-dev (P2 implementer)",
+      "target": "V1.60+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-L002]",
+      "note": "Deferrable low; surfaced by qc3 S-revalidation. No blocking \u2014 V1.56 P2 marked Approve after 2 fix-waves.",
+      "lifecycle": "resolved",
+      "target_date": "V1.60+",
+      "_v1_60_note": "V1.58 P2 NOT_CLOSED (lifecycle never updated); V1.60 P-last T1 absorbs per compass Q11. Previous target: V1.57+.",
+      "closed_at": "2026-06-23",
+      "closure_note": "tracing::debug! span added on evaluate() entry (expr kind + context keys + result); recursive calls delegated to evaluate_inner.",
+      "closure_evidence": "commit 257b354a on iteration/v1.60",
+      "resolution": {
+        "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+        "commit": "257b354a"
+      }
+    },
+    {
+      "id": "R-V156P2-M002",
+      "title": "Converge fan-in validation: 0-predecessor converge \u2014 runtime skip implemented but spec claims loader error; minor doc/impl alignment",
+      "severity": "medium",
+      "source": "qc2-revalidation (V1.56 P2 tri-review or fix-wave follow-up)",
+      "scope": "crates/nexus-orchestration/src/tasks/mod.rs + expr.rs + loader.rs + converge_runtime_e2e.rs + preset-conditional-routing.md + orchestration-engine.md",
+      "decision": "accept (defer to post-V1.56 hardening)",
+      "owner": "@fullstack-dev (P2 implementer)",
+      "target": "V1.57+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-M002]",
+      "note": "Deferrable medium; surfaced by qc2-revalidation. No blocking \u2014 V1.56 P2 marked Approve after 2 fix-waves.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-22",
+      "closure_note": "V1.58 P2 closed: Spec reconciled \u2014 'Converge states with 0 predecessors: gate is skipped, state advances immediately (no validation error)' replacing prior 'validation error (orphan)' text. Verified on main line 251.",
+      "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+      "resolution": {
+        "plan_id": "2026-06-22-v1.58-capability-quality-convergence",
+        "commit": "ffcb2473"
+      },
+      "_v1_60_audit_verdict": "confirmed"
+    },
+    {
+      "id": "R-V156P2-M001",
+      "title": "Null comparison semantics: spec \u00a73.3 updated to JSON equality (null == null \u2192 true); ensure downstream doc snippets in cli-spec or other docs reflect same",
+      "severity": "medium",
+      "source": "qc1 W-003 / qc2 revalidation (V1.56 P2 tri-review or fix-wave follow-up)",
+      "scope": "crates/nexus-orchestration/src/tasks/mod.rs + expr.rs + loader.rs + converge_runtime_e2e.rs + preset-conditional-routing.md + orchestration-engine.md",
+      "decision": "accept (defer to post-V1.56 hardening)",
+      "owner": "@fullstack-dev (P2 implementer)",
+      "target": "V1.57+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-M001]",
+      "note": "Deferrable medium; surfaced by qc1 W-003 / qc2 revalidation. No blocking \u2014 V1.56 P2 marked Approve after 2 fix-waves.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-22",
+      "closure_note": "V1.58 P2 closed: 'Absent vs null vs empty string' paragraph added to preset-conditional-routing.md \u00a73.3 (line 205 on main); distinguishes three field states with worked examples.",
+      "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+      "resolution": {
+        "plan_id": "2026-06-22-v1.58-capability-quality-convergence",
+        "commit": "ffcb2473"
+      },
+      "_v1_60_audit_verdict": "confirmed"
+    },
+    {
+      "id": "R-V156P2-CACHE-01",
+      "title": "PM-process hygiene: convergence runtime tests bypass real `record_converge_arrival` initially exposed by qc-specialist-3 (C-NEW-001); future engine tests must go through real runtime paths; PM lesson captured",
+      "severity": "medium",
+      "source": "qc3-revalidation C-NEW-001 (V1.56 P2 tri-review or fix-wave follow-up)",
+      "scope": "crates/nexus-orchestration/src/tasks/mod.rs + expr.rs + loader.rs + converge_runtime_e2e.rs + preset-conditional-routing.md + orchestration-engine.md",
+      "decision": "accept (defer to post-V1.56 hardening)",
+      "owner": "PM + implementer",
+      "target": "V1.57+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-CACHE-01]",
+      "note": "Deferrable medium; surfaced by qc3-revalidation C-NEW-001. No blocking \u2014 V1.56 P2 marked Approve after 2 fix-waves.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-22",
+      "closure_note": "V1.58 P2 closed: crates/nexus-orchestration/tests/converge_runtime_e2e.rs lines 12-30 on main carry explicit '# Test Contract (R-V156P2-CACHE-01)' doc-comment block. Audit confirmed all converge arrivals use record_converge_arrival; no bypass paths found.",
+      "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+      "resolution": {
+        "plan_id": "2026-06-22-v1.58-capability-quality-convergence",
+        "commit": "70c626b4"
+      },
+      "_v1_60_audit_verdict": "confirmed"
+    },
+    {
+      "id": "R-V156P2-L003",
+      "title": "Converge strategy timeout (wait_for_all unbounded); add bounded timeout for stuck predecessors",
+      "severity": "low",
+      "source": "qc3 S-revalidation (V1.56 P2 tri-review or fix-wave follow-up)",
+      "scope": "crates/nexus-orchestration/src/tasks/mod.rs + expr.rs + loader.rs + converge_runtime_e2e.rs + preset-conditional-routing.md + orchestration-engine.md",
+      "decision": "accept (defer to post-V1.56 hardening)",
+      "owner": "@fullstack-dev (P2 implementer)",
+      "target": "V1.57+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-L003]",
+      "note": "Deferrable low; surfaced by qc3 S-revalidation. No blocking \u2014 V1.56 P2 marked Approve after 2 fix-waves.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-22",
+      "closure_note": "V1.58 P2 PARTIALLY_CLOSED (PM accepts per V1.60 compass Q12): Spec paragraph 'Converge timeout' added at preset-conditional-routing.md line 256 on main, explicitly documenting that bounded timeout is NOT implemented. PM decision: spec-doc-only closure sufficient for pre-1.0 local-only scope; production bounded-timeout enforcement deferred to V1.61+ ConvergeConfig schema work.",
+      "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+      "resolution": {
+        "plan_id": "2026-06-22-v1.58-capability-quality-convergence",
+        "commit": "ffcb2473"
+      },
+      "_v1_60_audit_verdict": "partial"
+    },
+    {
+      "id": "R-V156P2-L004",
+      "title": "Loader: 0-predecessor converge should be hard error (not skip) per spec; doc/impl alignment",
+      "severity": "low",
+      "source": "qc3 M-002 (residual nuance) (V1.56 P2 tri-review or fix-wave follow-up)",
+      "scope": "crates/nexus-orchestration/src/tasks/mod.rs + expr.rs + loader.rs + converge_runtime_e2e.rs + preset-conditional-routing.md + orchestration-engine.md",
+      "decision": "accept (defer to post-V1.56 hardening)",
+      "owner": "@fullstack-dev (P2 implementer)",
+      "target": "V1.57+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-L004]",
+      "note": "Deferrable low; surfaced by qc3 M-002 (residual nuance). No blocking \u2014 V1.56 P2 marked Approve after 2 fix-waves.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-22",
+      "closure_note": "V1.58 P2 NOT_CLOSED -> wontfix (PM decision per V1.60 compass Q10): V1.58 P2 T2 actively REVERSED the spec at preset-conditional-routing.md \u00a73.3 from 'validation error (orphan)' to 'gate is skipped, state advances immediately' \u2014 the original ask (make 0-pred converge a hard error) is explicitly superseded. PM judges re-flipping spec would be more disruptive than the underlying issue warrants (pre-1.0, local-only, no measured incident).",
+      "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+      "resolution": {
+        "plan_id": "2026-06-22-v1.58-capability-quality-convergence",
+        "commit": "ffcb2473"
+      },
+      "_v1_60_audit_verdict": "wontfix"
+    },
+    {
+      "id": "R-V156P2-L001",
+      "title": "No latency benchmark asserting expression eval <1ms target",
+      "severity": "low",
+      "source": "qc3 S-revalidation (V1.56 P2 tri-review or fix-wave follow-up)",
+      "scope": "crates/nexus-orchestration/src/tasks/mod.rs + expr.rs + loader.rs + converge_runtime_e2e.rs + preset-conditional-routing.md + orchestration-engine.md",
+      "decision": "accept (defer to post-V1.56 hardening)",
+      "owner": "@fullstack-dev (P2 implementer)",
+      "target": "V1.60+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-L001]",
+      "note": "Deferrable low; surfaced by qc3 S-revalidation. No blocking \u2014 V1.56 P2 marked Approve after 2 fix-waves.",
+      "lifecycle": "resolved",
+      "target_date": "V1.60+",
+      "_v1_60_note": "V1.58 P2 NOT_CLOSED (lifecycle never updated); V1.60 P-last T1 absorbs per compass Q11. Previous target: V1.57+.",
+      "closed_at": "2026-06-23",
+      "closure_note": "Criterion bench expression_eval_latency.rs added mirroring registry_refresh_latency.rs (3 regimes: simple/numeric/nested-boolean).",
+      "closure_evidence": "commit 257b354a on iteration/v1.60",
+      "resolution": {
+        "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+        "commit": "257b354a"
+      }
+    },
+    {
+      "id": "R-V156P2-M003",
+      "title": "resolve_expression_target routing tests (M-005): pre-existing Warning, no integration tests for expression routing through Task::run()",
+      "severity": "medium",
+      "source": "qc3-revalidation pre-existing (V1.56 P2 tri-review or fix-wave follow-up)",
+      "scope": "crates/nexus-orchestration/src/tasks/mod.rs + expr.rs + loader.rs + converge_runtime_e2e.rs + preset-conditional-routing.md + orchestration-engine.md",
+      "decision": "accept (defer to post-V1.56 hardening)",
+      "owner": "@fullstack-dev (P2 implementer)",
+      "target": "V1.57+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df56-independent-slice][R-V156P2-M003]",
+      "note": "Deferrable medium; surfaced by qc3-revalidation pre-existing. No blocking \u2014 V1.56 P2 marked Approve after 2 fix-waves.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-22",
+      "closure_note": "V1.58 P2 closed: crates/nexus-orchestration/tests/conditional_routing_e2e.rs (304 lines) on main with 8 #[tokio::test] integration tests loading YAML -> real loader -> parser -> scanner -> StateCompositeTask::run -> resolve_expression_target. qc2 explicit: M-003 All implemented.",
+      "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+      "resolution": {
+        "plan_id": "2026-06-22-v1.58-capability-quality-convergence",
+        "commit": "be29f3f8"
+      },
+      "_v1_60_audit_verdict": "confirmed"
+    }
+  ]
+}

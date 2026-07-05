@@ -1,0 +1,28 @@
+{
+  "plan_id": "2026-06-15-v1.47-gate-remediation-audit",
+  "archived_at": "2026-06-17T23:30:00+08:00",
+  "archived_by": "PM (V1.49 P2 closed R-V147P1-01: intake re-trigger on existing Work)",
+  "residual_findings": [
+    {
+      "id": "R-V147P1-01",
+      "title": "Future UX gap — intake re-trigger on existing Work (creator bootstrap creates a new Work; no daemon schedule add --work-id path)",
+      "severity": "lifecycle_resolved",
+      "lifecycle": "resolved",
+      "source": "P1 dev follow-up; closed in V1.49 P2",
+      "scope": "nexus42 CLI / daemon schedule add surface",
+      "decision": "closed",
+      "owner": "V1.49 P2 (fullstack-dev)",
+      "closed_at": "2026-06-17T23:30:00+08:00",
+      "closure_note": "V1.49 P2 (commit 0948cb87, merged at 1fa8002): creator works intake [<work_id>] subcommand added; schedules creative-brief-intake on an existing Work via input.work_id without a new Work row. The preset declares no gates, so the existing schedule-add handler accepts it on any existing Work. New hermetic CLI test handle_intake_schedules_creative_brief_intake_on_existing_work. Overlay §8.1 updated as Shipped (commit 9aea7091). QA verification: works 67+ → 84 lib tests pass; intake test passes.",
+      "closure_evidence": "iteration/v1.49 @ 1fa8002 (P2 merge) + 0948cb87 (T1) + 9aea7091 (T3 docs); qc1/qc2/qc3 all Approve; qa.md post-fix wave",
+      "fix_commits": [
+        "4ab9e0be",
+        "0948cb87",
+        "9aea7091",
+        "7fe873f7",
+        "1fa8002"
+      ],
+      "re_review_commits": []
+    }
+  ]
+}

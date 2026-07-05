@@ -1,0 +1,37 @@
+{
+  "plan_id": "2026-05-25-v1.28-context-and-agent-host",
+  "archived_at": "2026-05-26T15:45:00Z",
+  "closed_by": "v1.29-iteration",
+  "closed": [
+    {
+      "id": "R11",
+      "title": "Persistent child processes survive daemon crash — Drop does not kill",
+      "severity": "low",
+      "source": "qc3 W-002",
+      "scope": "crates/nexus-agent-host/src/providers/native_cli/claude.rs",
+      "closure_status": "fixed",
+      "closure_evidence": "feature/v1.29-agent-host-batch2-hardening commit added Drop cleanup for persistent child PIDs; QC1/QC2/QC3 reviewed under v1.29-iteration.",
+      "closure_note": "Baseline fixed; follow-up residual R17 tracks cross-platform/best-effort hardening."
+    },
+    {
+      "id": "R12",
+      "title": "Persistent mode cancel() is a no-op — stuck operations require timeout",
+      "severity": "nit",
+      "source": "qc3 W-003",
+      "scope": "crates/nexus-agent-host/src/providers/native_cli/claude.rs",
+      "closure_status": "fixed",
+      "closure_evidence": "feature/v1.29-agent-host-batch2-hardening commit implemented cancel() child termination for persistent mode; QC tri-review approved.",
+      "closure_note": "Closed in V1.29 Agent Host Batch 2."
+    },
+    {
+      "id": "R13",
+      "title": "split_stage0_personality uses markdown-header heuristic — brittle to future formatting changes",
+      "severity": "low",
+      "source": "qc2 W-001",
+      "scope": "crates/nexus-moment-context-assembly/src/moment.rs",
+      "closure_status": "fixed",
+      "closure_evidence": "feature/v1.29-stage0-structured-delimiters added structured Stage0 personality delimiters and delimiter-first parsing with fallback coverage.",
+      "closure_note": "Closed in V1.29 Stage0 structured delimiters plan."
+    }
+  ]
+}

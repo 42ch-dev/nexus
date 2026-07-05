@@ -1,0 +1,48 @@
+{
+  "plan_id": "2026-06-10-v1.40-world-kb-extract-binding",
+  "schema_version": 1,
+  "entries": [
+    {
+      "id": "R-V140P3-S1",
+      "severity": "low",
+      "lifecycle": "defer",
+      "closed_at": "2026-06-11",
+      "closure_note": "Cross-creator job_id claim test: test-only, non-surgical. V1.42.",
+      "archived_at": "2026-06-11"
+    },
+    {
+      "id": "R-V140P3-S2",
+      "severity": "low",
+      "lifecycle": "defer",
+      "closed_at": "2026-06-11",
+      "closure_note": "Failure-injection test for finalize_extract: test-only, requires mock infrastructure. V1.42.",
+      "archived_at": "2026-06-11"
+    },
+    {
+      "id": "R-V140P3-S3",
+      "severity": "low",
+      "lifecycle": "defer",
+      "closed_at": "2026-06-11",
+      "closure_note": "Strengthen AC3 test for empty world_id: test-only enhancement. V1.42.",
+      "archived_at": "2026-06-11"
+    },
+    {
+      "id": "R-V140P3-S4",
+      "severity": "low",
+      "lifecycle": "waived",
+      "closed_at": "2026-06-11",
+      "closure_note": "SourceAnchor::from_excerpt overload: cosmetic API design, not a bug. Acceptable pre-1.0.",
+      "closure_evidence": "commit 36890233 (WAIVER comment added)",
+      "archived_at": "2026-06-11"
+    },
+    {
+      "id": "R-V140P3-S5",
+      "severity": "low",
+      "lifecycle": "waived",
+      "closed_at": "2026-06-11",
+      "closure_note": "world_refs_validate not in CapabilityRegistry: pre-existing, out of hygiene scope. V1.42 registration.",
+      "closure_evidence": "commit 36890233 (WAIVER comment added)",
+      "archived_at": "2026-06-11"
+    }
+  ]
+}

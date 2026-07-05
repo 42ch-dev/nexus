@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-06-04-v1.34-fl-e-run-intents-and-stages",
+  "entries": [
+    {
+      "id": "R-FL-E-DDL",
+      "title": "DDL migration lacks defensive IF NOT EXISTS check (qc3 R-03)",
+      "severity": "low",
+      "source": "qc3 R-03 (P1 re-review)",
+      "scope": "crates/nexus-local-db/migrations/20260606_works_stage_columns.sql",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target_date": "V1.34+",
+      "note": "sqlx tracking prevents normal double-run; non-blocking safety add.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "R-FL-E-DEAD",
+      "title": "get_work_stage() dead code after P1 (qc3 R-04)",
+      "severity": "low",
+      "source": "qc3 R-04 (P1 re-review)",
+      "scope": "crates/nexus-local-db/src/works.rs",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target_date": "V1.34+",
+      "note": "Function defined but no caller after refactor; remove or wire in P2/P4.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "R-FL-E-ENDP",
+      "title": "No dedicated stage_advance endpoint (qc3 R-09)",
+      "severity": "low",
+      "source": "qc3 R-09 (P1 re-review)",
+      "scope": "nexus-daemon-runtime (uses PATCH /v1/local/works/{id})",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target_date": "V1.34+",
+      "note": "Dedicated /v1/local/works/{id}/stage/advance endpoint would clarify semantics; non-blocking.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "R-FL-E-FNAME",
+      "title": "DDL migration filename date prefix convention (qc3 R-08)",
+      "severity": "low",
+      "source": "qc3 R-08 (P1 re-review)",
+      "scope": "crates/nexus-local-db/migrations/20260606_works_stage_columns.sql",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target_date": "V1.34+",
+      "note": "Filename date format vs existing convention; non-blocking.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "R-FL-E-LIST",
+      "title": "stage list omits current_stage + stage_status fields (qc3 R-07)",
+      "severity": "low",
+      "source": "qc3 R-07 (P1 re-review)",
+      "scope": "crates/nexus42/src/commands/creator/run/stage.rs",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target_date": "V1.34+",
+      "note": "Non-blocking; stage list returns minimal info; extend in V1.34+.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    }
+  ],
+  "archived_at": "2026-06-15T16:49:53Z",
+  "archived_by": "residual_findings hygiene sweep 2026-06-16",
+  "archived_entry_count": 5,
+  "sweep_note": "5 entries merged from status.json residual_findings"
+}

@@ -1,0 +1,25 @@
+{
+  "plan_id": "2026-06-16-v1.48-serial-hardening",
+  "archived_at": "2026-06-18T01:00:00+08:00",
+  "archived_by": "PM (V1.49 P3 closed R-V148P4-W3: reconcile lock duration)",
+  "residual_findings": [
+    {
+      "id": "R-V148P4-W3",
+      "title": "reconcile-chapters holds Work runtime lock for full filesystem walk + DB + file I/O duration",
+      "severity": "lifecycle_resolved",
+      "lifecycle": "resolved",
+      "source": "qc3 W-3 (P4 tri-review); closed in V1.49 P3",
+      "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs::reconcile_chapters + reconcile_from_filesystem",
+      "decision": "closed",
+      "owner": "V1.49 P3 (fullstack-dev)",
+      "closed_at": "2026-06-18T01:00:00+08:00",
+      "closure_note": "V1.49 P3 (commit aeb95397, merged at 17414d6): reconcile_from_filesystem split into read-only compute_reconcile_diff (unlocked filesystem walk + per-chapter DB reads) and write-only apply_reconcile_diff (the only phase under the runtime lock). The handler computes the diff before RuntimeLockGuard::acquire and holds the lock only across apply. Tests: test_reconcile_chapters_read_phase_runs_unlocked, test_reconcile_chapters_releases_lock_on_error (apply-phase error preserves V1.48 P4-fix1 guarantee), test_compute_is_read_only_then_apply_writes. Tracing emits acquired_at / held_ms for operator observability. Stale-diff trade-off accepted under local-first single-writer daemon model. QA: 9 runtime_lock tests pass + clippy clean.",
+      "closure_evidence": "iteration/v1.49 @ 17414d6 (P3 merge) + aeb95397 (T1); qc1/qc2/qc3 all Approve; qa.md @ df793aae PASS",
+      "fix_commits": [
+        "aeb95397",
+        "17414d6"
+      ],
+      "re_review_commits": []
+    }
+  ]
+}

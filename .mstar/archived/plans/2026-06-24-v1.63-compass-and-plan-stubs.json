@@ -1,0 +1,12 @@
+{
+  "plan_id": "2026-06-24-v1.63-compass-and-plan-stubs",
+  "title": "V1.63 Compass & Plan Stubs (P-1)",
+  "iteration": "V1.63",
+  "slot": "P-1",
+  "status": "Done",
+  "effort": "M",
+  "owner": "@project-manager",
+  "review": "QC skipped (prepare)",
+  "working_branch": "iteration/v1.63",
+  "merge_target": "iteration/v1.63"
+}

@@ -1,0 +1,20 @@
+{
+  "plan_id": "2026-06-22-v1.55-game-bible-depth-35",
+  "title": "V1.55 P2 — Game-Bible Depth 3.5",
+  "status": "Done",
+  "owner": "@fullstack-dev-2",
+  "effort": "L",
+  "working_branch": "feature/v1.55-game-bible-depth-35",
+  "merge_target": "iteration/v1.55",
+  "type": "implement",
+  "track": "Theme D / Track B",
+  "created": "2026-06-22",
+  "compass": "v1.55-non-novel-profile-completion-and-infrastructure-refactor-delivery-compass-v1.md",
+  "dependencies": [
+    "2026-06-22-v1.55-compass-and-plan-stubs"
+  ],
+  "qc_status": "qc1 Approve (after 2 fix-waves; commits ea351a75 + 35772299); qc2 Approve (commit 53efe06f); qc3 Approve (after 1 fix-wave; commit 8fe08564)",
+  "qa_status": "Pass — @qa-engineer mid-QA (commit de1eb1d9; 7/7 AC; CI gates re-run clean; R-V154P1-S002 resolved; R-V155P2-F002 registered)",
+  "merge_commit": "0718a6fe (P2 base) + 798c47a0 (P2 1st fix-wave) + af987571 (P2 2nd fix-wave) + d5f5f8dd + b37d19e5 + f3cec4e6 (commits incl. plan stub updates)",
+  "done_at": "2026-06-21"
+}

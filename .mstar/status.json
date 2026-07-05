@@ -1,0 +1,116 @@
+{
+  "version": 1,
+  "updated_at": "2026-07-05T13:17:59+0000",
+  "plans": [],
+  "metadata": {
+    "integration_branch_retired": true,
+    "last_integration_branch": "iteration/v1.91",
+    "integration_merge_target": "main",
+    "iteration_base_branch": "main",
+    "target_branch": "main",
+    "latest_active_iteration": "V1.91",
+    "latest_active_compass": "v1.91-reading-chrome-and-findings-batch-delivery-compass-v1.md",
+    "platform_integration": "paused \u2014 local-only until further notice",
+    "pre_implement_gate": null,
+    "spec_refs_index": ".mstar/knowledge/specs/README.md",
+    "pre_iteration_hotfix": null,
+    "latest_ship": {
+      "iteration": "V1.91",
+      "compass": "v1.91-reading-chrome-and-findings-batch-delivery-compass-v1.md",
+      "shipped_at": "2026-07-05",
+      "pr": "https://github.com/42ch-dev/nexus/pull/119"
+    },
+    "tech_debt_summary": {
+      "updated_at": "2026-07-05",
+      "total_open": 5,
+      "by_severity": {
+        "critical": 0,
+        "high": 0,
+        "medium": 1,
+        "low": 3,
+        "nit": 1
+      },
+      "by_target": {
+        "V1.92": 2,
+        "V1.92 (paired with R-V191P1-001)": 1,
+        "V1.92+": 1,
+        "when list virtualisation lands": 1
+      },
+      "by_plan": {
+        "2026-07-05-v1.91-findings-batch": 5
+      },
+      "refreshed_at": "2026-07-05T12:00:55+0000",
+      "refreshed_reason": "V1.91 closeout: 5 residuals carried forward from findings batch triage; severity adjusted to canonical enum."
+    },
+    "updated_at": "2026-07-05T13:17:59+0000"
+  },
+  "residual_findings": {
+    "2026-07-05-v1.91-findings-batch": [
+      {
+        "id": "R-V191P1-001",
+        "title": "CSV toast conflates not_found vs conflict \u2014 partial-success UX lacks distinction",
+        "severity": "medium",
+        "source": "qc1 W-003 / qc2 W-003 (cross-confirmed)",
+        "scope": "apps/web/src/api/queries.ts useBatchUpdateFindings onSettled toast + apps/web/src/pages/findings-page.tsx bulk action handlers",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.92",
+        "tracking_link": ".mstar/plans/reports/2026-07-05-v1.91-reading-chrome/qc1.md \u00a7W-003",
+        "note": "The bulk PATCH response exposes not_found[] and conflict[] arrays distinctly, but the UI toast summarizes them together. Future improvement: split toast lines or add a persistent banner listing conflict IDs separately from not_found IDs.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V191P1-002",
+        "title": "Extract CSV utilities from findings-page.tsx to keep page under 250-line cap",
+        "severity": "low",
+        "source": "qc1 W-002",
+        "scope": "apps/web/src/pages/findings-page.tsx lines ~380-430 (CSV_COLUMNS, csvField, downloadFindingsCsv)",
+        "decision": "accept / code health",
+        "owner": "@frontend-dev",
+        "target": "V1.92 (paired with R-V191P1-001)",
+        "tracking_link": ".mstar/plans/reports/2026-07-05-v1.91-reading-chrome/qc1.md \u00a7W-002",
+        "note": "Move CSV helpers to apps/web/src/lib/findings-csv.ts, similar to findings-lifecycle.ts. Makes page \u2264250 lines and helpers reusable/testable.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V191P1-003",
+        "title": "Codegen should emit concrete BatchUpdateFindingsRequest.patch struct instead of serde_json::Value",
+        "severity": "low",
+        "source": "qc1 W-004 / qc3 S-008",
+        "scope": "schemas/daemon-api/findings/batch-update-findings-request.schema.json + contracts-codegen pipeline",
+        "decision": "defer",
+        "owner": "@architect / contracts-codegen",
+        "target": "V1.92+",
+        "tracking_link": ".mstar/plans/reports/2026-07-05-v1.91-reading-chrome/qc1.md \u00a7W-004",
+        "note": "Runtime enforces the contract via hand-rolled BatchFindingPatch helper. Codegen gap is technical debt; extract patch into a standalone schema or use $ref to a strongly-typed object so Rust and TS both get concrete types.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V191P1-004",
+        "title": "Add test for mid-batch internal error path (partial apply visibility)",
+        "severity": "low",
+        "source": "qc2 residual / qc3 S-002+S-003",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/findings.rs batch_update_findings loop + tests/findings_api.rs",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target": "V1.92",
+        "tracking_link": ".mstar/plans/reports/2026-07-05-v1.91-reading-chrome/qc2.md \u00a7Residuals",
+        "note": "Current loop aborts on internal DB error after some IDs may have been updated. This matches the plan's 'loop, not transaction' design but lacks a test verifying partial persistence + 5xx response. Add a test with a mocked DAO error mid-loop.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V191P1-005",
+        "title": "FindingsPage recomputes allSelected / someSelected on every render without memoisation",
+        "severity": "nit",
+        "source": "qc3 S-004",
+        "scope": "apps/web/src/pages/findings-page.tsx selection derivation",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "when list virtualisation lands",
+        "tracking_link": ".mstar/plans/reports/2026-07-05-v1.91-reading-chrome/qc3.md \u00a7S-004",
+        "note": "At the 100-item cap this is not user-visible; revisit when findings lists grow larger or virtualisation is introduced. [severity adjusted from info to nit at V1.91 closeout]",
+        "lifecycle": "open"
+      }
+    ]
+  }
+}

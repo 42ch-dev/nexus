@@ -1,0 +1,15 @@
+{
+  "id": "2026-06-23-v1.61-wasm-host-and-basic-combat",
+  "status": "Done",
+  "file": ".mstar/plans/2026-06-23-v1.61-wasm-host-and-basic-combat.md",
+  "metadata": {
+    "iteration": "V1.61",
+    "slot": "P2",
+    "effort": "L",
+    "owner": "@fullstack-dev",
+    "description": "nexus-wasm-host crate (wasmtime engine, sandbox, ABI) + basic-combat sample module",
+    "dependency": "P0 merged to integration",
+    "working_branch": "feature/v1.61-wasm-host-and-basic-combat",
+    "merge_target": "iteration/v1.61"
+  }
+}

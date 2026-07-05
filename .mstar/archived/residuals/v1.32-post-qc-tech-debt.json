@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "description": "Archived resolved residuals from v1.32-post-qc-tech-debt plan. V1.34 P0 (`2026-06-04-v1.34-residual-convergence`) closed these 2 items in fix wave 1 (R-P2-01 a044f94) + fix wave 2 (R-P2-01 v2 71c10cc); R-P2-02 (research preset same root cause) resolved automatically when capability schema fix lands.",
+  "archived_at": "2026-06-05",
+  "plan_id": "v1.32-post-qc-tech-debt",
+  "entries": [
+    {
+      "id": "R-P2-01",
+      "title": "creator.inject_prompt input_schema doesn't declare prompt_file/vars orchestration-layer args",
+      "severity": "medium",
+      "source": "P2 implementer proposal (qc2 cross-checked; smoke test downgrades as known)",
+      "scope": "crates/nexus-orchestration/src/capability/builtins/creator.rs (CreatorInjectPrompt::input_schema)",
+      "decision": "resolve",
+      "owner": "@fullstack-dev",
+      "target": "Resolved by V1.34 P0 a044f94 (wave 1) + 71c10cc (wave 2). Wave 1 added `prompt_file` and `vars` fields to input_schema. Wave 2 removed `prompt` from top-level `required` (was masking prompt_file as missing-required), added `anyOf` schema + check_any_of_semantics() in validation.rs. A4 CapabilityArgDrift false positives eliminated; `all_embedded_presets_pass_strict_validation_gate` reports 0 drift warnings for creator.inject_prompt (was 4).",
+      "tracking": null,
+      "closed_reason": "resolved_in_p0_fix_wave_1+2",
+      "closure_evidence": "commits a044f94 (wave 1) + 71c10cc (wave 2) on feature/v1.34-residual-convergence; cargo test -p nexus-orchestration --lib all_embedded_presets_pass_strict_validation_gate -- --nocapture confirms 0 creator.inject_prompt drift warnings",
+      "lifecycle": "resolved",
+      "closure_note": "Capability input_schema now declares prompt_file (string) + vars (object<string,string>) and makes prompt optional via anyOf [{required: prompt}, {required: prompt_file}]. Validation enforces anyOf semantics. novel-writing + research preset now load without drift warnings. Test verification: 5/5 run_intents_validation tests pass; strict_validation_gate has 0 creator.inject_prompt warnings (was 4).",
+      "closed_at": "2026-06-05",
+      "archived_at": "2026-06-05"
+    },
+    {
+      "id": "R-P2-02",
+      "title": "research preset uses same creator.inject_prompt drift as novel-writing",
+      "severity": "low",
+      "source": "P2 implementer proposal",
+      "scope": "crates/nexus-orchestration/embedded-presets/research/preset.yaml",
+      "decision": "resolve",
+      "owner": "@fullstack-dev",
+      "target": "Resolved by V1.34 P0 a044f94 + 71c10cc — R-P2-01 fix addresses root cause (capability schema). research preset.yaml already passes prompt_file + vars correctly; A4 validator previously reported drift because capability schema declared prompt as required. Post-fix, no drift warnings emitted.",
+      "tracking": null,
+      "closed_reason": "resolved_by_root_cause_fix_R-P2-01",
+      "closure_evidence": "Same commits as R-P2-01 (a044f94 + 71c10cc). strict_validation_gate now reports 0 creator.inject_prompt drift warnings for research preset (was 2).",
+      "lifecycle": "resolved",
+      "closure_note": "Research preset was not itself buggy — its drift was a downstream symptom of the capability schema. R-P2-01 fix removed the false-positive. research/preset.yaml required no changes; the loader now correctly recognizes its prompt_file + vars invocation pattern.",
+      "closed_at": "2026-06-05",
+      "archived_at": "2026-06-05"
+    }
+  ]
+}

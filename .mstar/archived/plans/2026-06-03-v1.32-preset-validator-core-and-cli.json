@@ -1,0 +1,29 @@
+{
+  "plan_id": "2026-06-03-v1.32-preset-validator-core-and-cli",
+  "title": "V1.32 P1 — Shared preset validator core + CLI/API parity",
+  "status": "Done",
+  "working_branch": "feature/v1.32-preset-validator-core-and-cli",
+  "merge_target": "feature/v1.32-preset-quality-gate",
+  "merge_commit": "0968dfb",
+  "depends_on": [],
+  "metadata": {
+    "iteration": "v1.32",
+    "primary_spec": "../iterations/v1.32-preset-quality-gate-delivery-compass-v1.md",
+    "iteration_compass": "../iterations/v1.32-preset-quality-gate-delivery-compass-v1.md",
+    "theme": "P1-shared-validator",
+    "tracker_ids": []
+  },
+  "qc_summary": {
+    "tri_review_rounds": 3,
+    "final_verdict": "Approve (3/3)",
+    "fixes_during_review": [
+      "rev1: 2 Critical + 1 Warning (loader didn't use facade, daemon lost structural checks, daemon invalid-fixture coverage)",
+      "rev2: 1 Critical (runtime loader still didn't use A3 surface), 1 Warning (path safety tests + error sanitization), 1 perf W (O(n) registry lookup)",
+      "rev3: 0 findings, final Approve"
+    ]
+  },
+  "qa_summary": "QA verification pending; covered by run-merged integration tests (cargo test -p nexus-orchestration, nexus-daemon-runtime, nexus42 command_surface_contract all green).",
+  "residual_count": 0,
+  "notes": "Shared semantic validation facade in crates/nexus-orchestration/src/preset/validation.rs. Three public functions: validate_preset_semantic (A2 reachability/terminal/id/orphan), validate_assets_in_bundle (A3 asset existence + path safety + bundle dir id match), validate_path_safety (A3 standalone). CapabilityRegistry O(1) HashMap lookup. Daemon /v1/local/presets:validate routed through shared facade. CLI wrapper explicitly NOT added (per A6).",
+  "archived_at": "2026-06-03T16:30:00+08:00"
+}

@@ -1,0 +1,42 @@
+{
+  "id": "2026-06-15-v1.47-gate-remediation-audit",
+  "title": "P1 — Gate remediation audit",
+  "file": ".mstar/plans/2026-06-15-v1.47-gate-remediation-audit.md",
+  "status": "Done",
+  "owner": "@fullstack-dev",
+  "agents": [
+    "@fullstack-dev"
+  ],
+  "progress": 100,
+  "tags": [
+    "v1.47",
+    "feature"
+  ],
+  "created_at": "2026-06-15",
+  "updated_at": "2026-06-15",
+  "done_at": "2026-06-15",
+  "notes": "",
+  "metadata": {
+    "working_branch": "feature/v1.47-gate-remediation-audit",
+    "merge_target": "iteration/v1.47",
+    "depends_on": "2026-06-15-v1.47-reflection-loop-findings",
+    "implementation_commits": [
+      "9a3ac5a92e6b3caab197c4483c6be8f1f8600d7a"
+    ],
+    "review_range": "merge-base: 6acb5ae6",
+    "review_tip": "HEAD (9a3ac5a9)",
+    "qc_status": "Approve (3/3, initial tri-review)",
+    "qa_status": "Pass",
+    "qc_review_commits": [
+      "3156b99e",
+      "75c7b8a3",
+      "2698a4bd"
+    ],
+    "qa_commit": "75eef32a",
+    "merge_commit": "43012d20",
+    "closed_residuals": [
+      "R-V146P1-QC3-S1",
+      "R-V146P1-QC3-S4"
+    ]
+  }
+}

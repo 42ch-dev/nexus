@@ -1,0 +1,61 @@
+{
+  "plan_id": "2026-06-28-v1.73-canvas-world-kb-beta",
+  "archived_at": "2026-07-05T13:17:59+0000",
+  "archived_by": "repo hygiene \u2014 Profile B residual archive (git slim plan)",
+  "residual_findings": [
+    {
+      "id": "R-V173QC1-S1",
+      "title": "Naming drift: JSON Schema title verb-prefix (PatchWorldKbEntityRequest) vs generated entity-prefix (WorldKbPatchEntityRequest); V1.71/V1.72 baseline is verb-prefix",
+      "severity": "low",
+      "source": "qc1 F-S1",
+      "scope": "schemas/local-api/canvas/world-kb/ titles vs generated names",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.74 hygiene backlog (plan-id tbd-v1.74-hygiene)",
+      "note": "Non-blocking; implementer documented choice. Reconcile naming convention at V1.74.",
+      "lifecycle": "resolved",
+      "resolution": {
+        "plan_id": "2026-06-29-v1.74-hygiene-slate-clear",
+        "commit": "ad867216",
+        "at": "2026-06-29",
+        "note": "Closed in V1.74 (QC tri-review 3/3 Approve + QA Pass)."
+      }
+    },
+    {
+      "id": "R-V173QC1-S2",
+      "title": "world-kb-canvas.tsx 546 lines with 4 inline sub-components; B5 split cap not applied to world-kb canvas (only outline)",
+      "severity": "low",
+      "source": "qc1 F-S2",
+      "scope": "apps/web/src/components/canvas/world-kb/world-kb-canvas.tsx",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "V1.74 hygiene backlog (plan-id tbd-v1.74-hygiene)",
+      "note": "Mirror B5 split pattern for world-kb canvas at V1.74.",
+      "lifecycle": "resolved",
+      "resolution": {
+        "plan_id": "2026-06-29-v1.74-world-kb-relationships",
+        "commit": "ad867216",
+        "at": "2026-06-29",
+        "note": "Closed in V1.74 (QC tri-review 3/3 Approve + QA Pass)."
+      }
+    },
+    {
+      "id": "R-V173QC1-S3",
+      "title": "idempotency_key field wired through schema/DTO but unused in handlers (reserved, accepts+ignores)",
+      "severity": "low",
+      "source": "qc1 F-S3",
+      "scope": "World KB patch routes idempotency_key",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.74 hygiene backlog (plan-id tbd-v1.74-hygiene)",
+      "note": "Forward-compat debt; either wire idempotency or remove the field at V1.74.",
+      "lifecycle": "resolved",
+      "resolution": {
+        "plan_id": "2026-06-29-v1.74-hygiene-slate-clear",
+        "commit": "ad867216",
+        "at": "2026-06-29",
+        "note": "Closed in V1.74 (QC tri-review 3/3 Approve + QA Pass)."
+      }
+    }
+  ]
+}

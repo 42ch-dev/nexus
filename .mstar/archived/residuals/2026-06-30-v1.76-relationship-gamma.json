@@ -1,0 +1,55 @@
+{
+  "plan_id": "2026-06-30-v1.76-relationship-gamma",
+  "archived_at": "2026-07-05T13:17:59+0000",
+  "archived_by": "repo hygiene \u2014 Profile B residual archive (git slim plan)",
+  "residual_findings": [
+    {
+      "id": "R-V176QC1-S001",
+      "title": "LlmExtractOutcome.relationships field discoverability (qc1 F-002)",
+      "severity": "low",
+      "source": "qc1 F-002",
+      "scope": "llm_extract.rs",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.77 QC followup (tbd-v1.77-qc-followup)",
+      "lifecycle": "resolved",
+      "resolution": {
+        "plan_id": "2026-06-30-v1.77-slate-clear",
+        "at": "2026-06-30",
+        "note": "Closed in V1.77 P1 (QC 3/3 Approve + QA Pass)."
+      }
+    },
+    {
+      "id": "R-V176QC1-S002",
+      "title": "relationship graph pagination TODO (qc1 F-003)",
+      "severity": "low",
+      "source": "qc1 F-003",
+      "scope": "world_kb.rs GET graph",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.77 QC followup (tbd-v1.77-qc-followup)",
+      "lifecycle": "resolved",
+      "resolution": {
+        "plan_id": "2026-06-30-v1.77-slate-clear",
+        "at": "2026-06-30",
+        "note": "Closed in V1.77 P1 (QC 3/3 Approve + QA Pass)."
+      }
+    },
+    {
+      "id": "R-V176QC3-S001",
+      "title": "bulk-promote throttling (qc3 suggestion)",
+      "severity": "nit",
+      "source": "qc3 suggestion",
+      "scope": "suggested-relationships-pane.tsx",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "V1.77 QC followup (tbd-v1.77-qc-followup)",
+      "lifecycle": "resolved",
+      "resolution": {
+        "plan_id": "2026-06-30-v1.77-slate-clear",
+        "at": "2026-06-30",
+        "note": "Closed in V1.77 P1 (QC 3/3 Approve + QA Pass)."
+      }
+    }
+  ]
+}

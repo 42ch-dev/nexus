@@ -1,0 +1,31 @@
+{
+  "plan_id": "2026-06-27-v1.69-design-md-and-canvas-draft",
+  "archived_at": "2026-06-27",
+  "schema_version": 1,
+  "plan": {
+    "plan_id": "2026-06-27-v1.69-design-md-and-canvas-draft",
+    "title": "V1.69 P0 — Design-System Maturation (DESIGN.md frontmatter SSOT + DESIGN.dark.md split + Level 3) + Canvas Exploration -> Draft",
+    "iteration": "V1.69",
+    "slot": "P0",
+    "status": "Done",
+    "effort": "M",
+    "owner": "@architect + @product-manager",
+    "review": "QC tri-review pending (after implement)",
+    "wave": 1,
+    "dependency": "P-1 (compass Locked)",
+    "working_branch": "feature/v1.69-design-md-canvas-draft (merged to iteration/v1.69)",
+    "merge_target": "iteration/v1.69",
+    "file": ".mstar/plans/2026-06-27-v1.69-design-md-and-canvas-draft.md",
+    "wire_contracts_changed": false,
+    "iteration_compass": "v1.69-design-system-maturation-and-canvas-draft-compass-v1.md",
+    "primary_spec": "apps/web/DESIGN.md",
+    "spec_refs": [
+      ".mstar/knowledge/specs/canvas-strategy-surface.md",
+      ".mstar/knowledge/specs/web-ui.md"
+    ],
+    "completed_at": "2026-06-27 (PM sign-off — docs/spec-only, QC skipped with rationale)",
+    "merge_commit": "c43bb114",
+    "qc_decision": "QC tri-review skipped — P0 is docs/spec-only (DESIGN.md format migration + Canvas Exploration→Draft + web-ui.md stage amend); zero runtime/wire change; token-name-preservation invariant verified by green typecheck+build validation (pnpm --filter web run typecheck && pnpm --filter web run build both pass). Per mstar-harness-core non-bypass: product-docs-only/tech-spec-only may skip QC tri-review with explicit reason.",
+    "completion_summary": "Track A: apps/web/DESIGN.md migrated to YAML frontmatter SSOT (47 colors, 13 typography, 10 spacing, 5 rounded, component variants) + body reshaped to rule-type docs + Level 2→3 Production; apps/web/DESIGN.dark.md created (same token names, dark values); apps/web/src/index.css header comment updated. Token names preserved verbatim → zero consumer breakage. Track B: canvas-strategy-surface.md Exploration→Draft (B1-B4: interface contracts, structured write-boundary, canvas→DESIGN.md token contract §3.6 with 11 tokens stubbed in DESIGN.md frontmatter as LEVEL placeholders). web-ui.md V1.69 stage row + compass reference added. @architect implemented Phase 1; @product-manager subagent unavailable (2x empty), PM authored web-ui.md stage amend (B5 content already present from V1.67)."
+  }
+}

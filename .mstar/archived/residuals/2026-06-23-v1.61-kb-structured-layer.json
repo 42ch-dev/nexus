@@ -1,0 +1,27 @@
+{
+  "plan_id": "2026-06-23-v1.61-kb-structured-layer",
+  "archived_at": "2026-07-05T13:17:59+0000",
+  "archived_by": "repo hygiene \u2014 Profile B residual archive (git slim plan)",
+  "residual_findings": [
+    {
+      "id": "R-V161P1-LOW-001",
+      "title": "entity-scope-model.md \u00a75.5 spec amendment (computable flag semantics + structured validation mode) not yet committed",
+      "severity": "low",
+      "source": "qc1 (architecture/maintainability) S-001",
+      "scope": ".mstar/knowledge/specs/entity-scope-model.md \u00a75.5 (Master spec; compass \u00a72 marks it as P1 normative work)",
+      "decision": "defer",
+      "owner": "@project-manager",
+      "target": "V1.61 P-last",
+      "target_date": "V1.61 P-last spec hygiene",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-kb-structured-layer][R-V161P1-LOW-001]",
+      "note": "Compass \u00a72 Normative specs table lists entity-scope-model.md \u00a75.5 as 'Amend \u2014 computable flag semantics + structured validation mode' for P1. Implementation is complete; the spec doc amendment was not done in P1. Doc-only \u2014 defer to P-last spec hygiene pass.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-24",
+      "closure_note": "Confirmed closed \u2014 \u00a75.5.9 computable-flag semantics and structured validation mode was committed in V1.62 P2 (entity-scope-model.md lines 146-247). The spec header already reflects 'V1.62 Shipped: \u00a75.5.9'. The residual was stale; the amendment body was authored and shipped in V1.62 but the residual wasn't marked resolved at that time.",
+      "resolution": {
+        "plan_id": "2026-06-24-v1.63-residual-convergence-and-closeout",
+        "commit": "37324e13"
+      }
+    }
+  ]
+}

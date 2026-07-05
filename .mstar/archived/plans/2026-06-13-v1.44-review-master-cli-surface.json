@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "description": "Archived V1.44 plan per Profile B. P1 — R-V143P0-002 review-master CLI + quickstart convergence",
+  "plan_id": "2026-06-13-v1.44-review-master-cli-surface",
+  "title": "P1 — R-V143P0-002 review-master CLI + quickstart convergence",
+  "done_at": "2026-06-13T16:00:00+08:00",
+  "archived_at": "2026-06-13T18:00:00+08:00",
+  "plan_file": ".mstar/plans/2026-06-13-v1.44-review-master-cli-surface.md",
+  "archived_record": ".mstar/archived/plans/2026-06-13-v1.44-review-master-cli-surface.json",
+  "snapshot": {
+    "id": "2026-06-13-v1.44-review-master-cli-surface",
+    "status": "Done",
+    "file": ".mstar/plans/2026-06-13-v1.44-review-master-cli-surface.md",
+    "working_branch": "feature/v1.44-review-master-cli-surface",
+    "merge_target": "iteration/v1.44",
+    "metadata": {
+      "iteration_compass": ".mstar/iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md",
+      "depends_on": "2026-06-13-v1.44-harness-docs-prepare",
+      "review_sha_range": "9d471bdc..a9262c33",
+      "updated_at": "2026-06-13T16:00:00+08:00",
+      "done_at": "2026-06-13T16:00:00+08:00",
+      "notes": [
+        "Implemented 3 commits (a7b70ebf..73850ddb) merged at c54b1aa6 (P0/P1 conflict on run.rs and cli-spec.md resolved by PM preserving both subcommands); QC initial Request Changes (qc1+qc3 RC; qc2 Approve-with-nits); fix wave 2 commits (9e953abd..a5a9bd7e) resolved R-V144P1-001..006; re-merged at a9262c33; targeted QC re-review Approve (qc-specialist + qc-specialist-3); QA Approve (420df8e1). R-V143P0-002 lifecycle:resolved; archive closure is P-last scope."
+      ]
+    }
+  },
+  "qc": "3 reviewers (qc1 `9d471bdc`-tree, qc2 `c6dd3058`, qc3 `888dc423`); initial Request Changes (qc1+qc3 RC; qc2 Approve-with-nits) → fix wave 9e953abd + a5a9bd7e → targeted re-review Approve (qc1 `bcd46d18`, qc3 `36d99034`)",
+  "qa": "Approve (420df8e1)",
+  "residual_count": 0,
+  "merge_commits": [
+    "c54b1aa6 merge(v1.44 P1): review-master CLI surface + spec convergence (P0/P1 conflict on run.rs and cli-spec.md resolved by PM preserving both subcommands)",
+    "a9262c33 merge(v1.44 P1): fix wave — review-master correctness + spec convergence for QC Request Changes",
+    "420df8e1 qa(v1.44 P1): qa-engineer acceptance verification"
+  ],
+  "notes": "Profile B archive. P1 — R-V143P0-002 review-master CLI + quickstart convergence on iteration/v1.44."
+}

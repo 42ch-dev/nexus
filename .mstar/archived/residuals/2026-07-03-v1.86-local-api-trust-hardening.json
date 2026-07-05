@@ -1,0 +1,88 @@
+{
+  "plan_id": "2026-07-03-v1.86-local-api-trust-hardening",
+  "archived_at": "2026-07-05T13:17:59+0000",
+  "archived_by": "repo hygiene \u2014 Profile B residual archive (git slim plan)",
+  "residual_findings": [
+    {
+      "id": "R-V186-REGRESS-M004",
+      "severity": "medium",
+      "title": "Regression-of-resolution: R-V156P0-M004 prior resolution did not hold",
+      "description": "R-V156P0-M004 (blocking sync I/O in the async fs/* handler) was marked lifecycle:resolved in V1.58 (commit 764cee49), but execute_read_file still used std::fs::read_to_string on current main. V1.86 T5 (commit 42335a16) moved the fs read/write + path-guard canonicalize behind tokio::task::spawn_blocking and converted execute_* / admission_pipeline / validate_file_path to async.",
+      "lifecycle": "resolved",
+      "resolution": {
+        "plan_id": "2026-07-03-v1.86-local-api-trust-hardening",
+        "commit": "42335a16",
+        "reason": "actually moved to spawn_blocking; prior resolution was insufficient"
+      }
+    },
+    {
+      "id": "R-V186-REGRESS-W001",
+      "severity": "medium",
+      "title": "Regression-of-resolution: R-V157P1-W001 prior resolution did not fully hold",
+      "description": "R-V157P1-W001 (privileged fs/* host-tool path coverage) was marked lifecycle:resolved in V1.58 (commit e78c9307), but the fs/* host-tool execution surface still lacked tests for sibling-prefix escape, symlink escape, and the worker-IPC caller path. V1.86 T4 (commit 0eb9aa4f) backfilled these (Batch 1 T1-T3 already covered ../ and absolute-path escapes).",
+      "lifecycle": "resolved",
+      "resolution": {
+        "plan_id": "2026-07-03-v1.86-local-api-trust-hardening",
+        "commit": "0eb9aa4f",
+        "reason": "backfilled missing privileged-path coverage; prior resolution was insufficient"
+      }
+    },
+    {
+      "id": "R-V186-QC1-S005",
+      "severity": "medium",
+      "source": "qc1",
+      "scope": "crates/nexus-daemon-runtime/src/api/handlers/host_tool_handlers.rs:2155-2156",
+      "title": "Manuscript body read still uses string-prefix path comparison (same class as Finding 3)",
+      "description": "nexus.manuscript.body.read host tool uses abs_body_str.starts_with(&workspace_root) for the non-canonicalized branch \u2014 same path-traversal anti-pattern as Finding 3, in a nexus.* tool path outside V1.86 fs/* scope (spec \u00a713). Remote vector closed by T1 so urgency reduced; latent local/agent-exploitable.",
+      "lifecycle": "resolved",
+      "decision": "defer",
+      "owner": "PM",
+      "target": "next iteration (fast-follow) or hotfix",
+      "tracking_link": "reports/2026-07-03-v1.86-local-api-trust-hardening/qc-consolidated.md",
+      "closed_at": "2026-07-03 (V1.87 P1)",
+      "closure_note": "V1.87 P1 closed: nexus.manuscript.read_range handler (execute_manuscript_read_range) now delegates to resolve_guarded_path (3-step: must_exist determination -> resolve_guarded_path -> BadRequest->InvalidInput mapping). qc2 adversarial probing confirmed the sibling-escape is closed (all probes rejected by canonicalize + component-wise Path::starts_with). Regression test manuscript_read_range_rejects_sibling_escape_body_path reproduces the escape as failing-without-the-fix.",
+      "resolution": {
+        "plan_id": "2026-07-03-v1.87-nexus-ui-component-library",
+        "commit": "4eb26a7c"
+      }
+    },
+    {
+      "id": "R-V186-QC3-PERF-DOUBLE-RESOLVE",
+      "severity": "low",
+      "source": "qc3",
+      "scope": "crates/nexus-daemon-runtime/src/api/handlers/host_tool_handlers.rs",
+      "title": "resolve_guarded_path_async runs twice per fs/* call",
+      "description": "admission validate_file_path (must_exist=false) + execute_* (must_exist=true) both resolve; negligible for local single-user.",
+      "lifecycle": "resolved",
+      "decision": "accept",
+      "owner": "PM",
+      "target": "future perf iteration",
+      "tracking_link": "reports/2026-07-03-v1.86-local-api-trust-hardening/qc-consolidated.md",
+      "closed_at": "2026-07-04",
+      "closure_note": "V1.88 P1 T4: removed Gate 3 validate_file_path call from admission_pipeline for fs/* tools. Gate 4 permissions.toml check remains. execute_read_file and execute_write_file now own the single resolve_guarded_path_async resolution before filesystem access. Error behavior preserved (BadRequest -> Forbidden { resource: \"file\" }). Regression tests added for fs/* in-bounds reads/writes and escape rejection. Commit e2463330.",
+      "resolution": {
+        "plan_id": "2026-07-03-v1.88-frontend-slate-clear-and-reliability-cleanup",
+        "commit": "e2463330"
+      }
+    },
+    {
+      "id": "R-V186-QC3-PERF-ARC-CONFIG",
+      "severity": "low",
+      "source": "qc3",
+      "scope": "crates/nexus-daemon-runtime/src/api/mod.rs",
+      "title": "DaemonApiConfig cloned per-request by axum State",
+      "description": "Arc<...> wrapper would zero-cost; clone sites at router construction are one-time (confirmed), so impact is small.",
+      "lifecycle": "resolved",
+      "decision": "accept",
+      "owner": "PM",
+      "target": "future perf iteration",
+      "tracking_link": "reports/2026-07-03-v1.86-local-api-trust-hardening/qc-consolidated.md",
+      "closed_at": "2026-07-04",
+      "closure_note": "V1.88 P1 T5: create_router now wraps the incoming DaemonApiConfig in Arc::new internally; the public signature is unchanged. Both route_layer calls share the Arc via Arc::clone. require_api_key and require_allowed_origin extract State<Arc<DaemonApiConfig>>; field access works unchanged via Arc Deref. Test helper build_router updated to wrap its config in Arc. Commit 7f6eeea2.",
+      "resolution": {
+        "plan_id": "2026-07-03-v1.88-frontend-slate-clear-and-reliability-cleanup",
+        "commit": "7f6eeea2"
+      }
+    }
+  ]
+}

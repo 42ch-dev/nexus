@@ -1,0 +1,13 @@
+{
+  "plan_id": "2026-07-01-v1.78-slate-clear",
+  "iteration_id": "V1.78",
+  "status": "Done",
+  "owner": "@project-manager",
+  "effort": "S-M",
+  "type": "hygiene",
+  "working_branch": "feature/v1.78-slate-clear",
+  "merge_target": "iteration/v1.78",
+  "task_category": "quick",
+  "wire_contracts_changed": false,
+  "depends_on": []
+}

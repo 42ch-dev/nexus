@@ -1,0 +1,14 @@
+{
+  "plan_id": "2026-06-24-v1.64-residual-convergence-and-closeout",
+  "title": "V1.64 P-last — Residual Convergence + Spec Promotion + Profile B + PR",
+  "iteration": "V1.64",
+  "slot": "P-last",
+  "status": "Todo",
+  "effort": "M",
+  "owner": "@fullstack-dev + @project-manager",
+  "review": "Tri-review + QA (closeout)",
+  "wave": 3,
+  "dependency": "P-mid",
+  "working_branch": "feature/v1.64-residual-convergence-and-closeout",
+  "merge_target": "iteration/v1.64"
+}

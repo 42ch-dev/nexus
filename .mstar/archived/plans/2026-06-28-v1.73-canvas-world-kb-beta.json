@@ -1,0 +1,20 @@
+{
+  "plan_id": "2026-06-28-v1.73-canvas-world-kb-beta",
+  "archived_at": "2026-06-28",
+  "schema_version": 1,
+  "plan": {
+    "plan_id": "2026-06-28-v1.73-canvas-world-kb-beta",
+    "iteration_id": "V1.73",
+    "status": "Done",
+    "owner": "frontend-dev,fullstack-dev",
+    "effort": "L",
+    "type": "implement",
+    "working_branch": "feature/v1.73-canvas-world-kb-beta",
+    "merge_target": "iteration/v1.73",
+    "task_category": "visual",
+    "wire_contracts_changed": true,
+    "depends_on": [
+      "2026-06-28-v1.73-compass-and-plan"
+    ]
+  }
+}

@@ -1,0 +1,162 @@
+{
+  "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+  "archived_at": "2026-07-05T13:17:59+0000",
+  "archived_by": "repo hygiene \u2014 Profile B residual archive (git slim plan)",
+  "residual_findings": [
+    {
+      "id": "R-V171P1-QC1-002",
+      "title": "Stale '__internal daemon-run' references remain in daemon_run.rs and boot.rs comments after spawn path changed",
+      "severity": "nit",
+      "source": "qc1 S-002",
+      "scope": "apps/nexus42/src/commands/daemon_run.rs module doc; crates/nexus-daemon-runtime/src/boot.rs try_init comment",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.74 hygiene backlog (plan-id tbd-v1.74-hygiene)",
+      "target_date": "V1.74",
+      "tracking_link": ".mstar/plans/reports/2026-06-27-v1.71-hygiene-and-sign-groundwork/qc1.md",
+      "note": "start_daemon now spawns 'daemon-run' directly (commit 835e4762). The module-level comments in daemon_run.rs and boot.rs still describe the old '__internal daemon-run' invocation. Pure doc drift; no runtime impact. | V1.72 deferred to V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene) per compass \u00a75 V1.73 deferrals table.",
+      "lifecycle": "resolved",
+      "resolution": {
+        "plan_id": "2026-06-29-v1.74-hygiene-slate-clear",
+        "commit": "ad867216",
+        "at": "2026-06-29",
+        "note": "Closed in V1.74 (QC tri-review 3/3 Approve + QA Pass)."
+      }
+    },
+    {
+      "id": "R-V171P1-QC1-001",
+      "title": "tauri.conf.json signingIdentity:null is misleading next to env-var signing override",
+      "severity": "low",
+      "source": "qc1 S-001",
+      "scope": "apps/desktop/src-tauri/tauri.conf.json line 45; apps/desktop/SIGNING.md",
+      "decision": "defer",
+      "owner": "@ops-engineer",
+      "target": "V1.73 release hardening backlog (plan-id tbd-v1.73-release-hardening)",
+      "target_date": "V1.72",
+      "tracking_link": ".mstar/plans/reports/2026-06-27-v1.71-hygiene-and-sign-groundwork/qc1.md",
+      "note": "Tauri docs say APPLE_SIGNING_IDENTITY overwrites tauri.conf.json > bundle > macOS > signingIdentity, so the env-var path works. However, explicitly setting signingIdentity:null reads as 'signing disabled' and may confuse maintainers. Either omit the key or add a comment explaining the env-var override. Non-blocking; signed build still functions when secrets are present. | V1.72 deferred to V1.73 release hardening backlog (plan-id tbd-v1.73-release-hardening) per compass \u00a75 V1.73 deferrals table.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-28",
+      "closure_note": "V1.73 P1 B6 tauri signing clarity \u2014 fixed.",
+      "resolution": {
+        "plan_id": "2026-06-28-v1.73-outline-hardening-and-release",
+        "commit": "fe5c4bc3"
+      }
+    },
+    {
+      "id": "R-V171P1-QC3-001",
+      "title": "Served-UI smoke cleanup kills any process on the selected port before proving ownership",
+      "severity": "low",
+      "source": "qc3 S-001",
+      "scope": "scripts/served-ui-smoke.sh lines 21-26",
+      "decision": "defer",
+      "owner": "@ops-engineer",
+      "target": "V1.72 or V1.71 P-last cleanup",
+      "target_date": "V1.72",
+      "tracking_link": ".mstar/plans/reports/2026-06-27-v1.71-hygiene-and-sign-groundwork/qc3.md",
+      "note": "The smoke script runs lsof -ti tcp:${PORT} and kills all returned PIDs before starting its own daemon. This is low risk in CI because the script normally chooses an ephemeral port, but local runs with NEXUS_DAEMON_PORT set, or an ephemeral-port race, can terminate an unrelated process. Prefer failing fast on occupied port, or only killing a process proven to be a previous Nexus smoke daemon owned by this script/test home.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-28",
+      "closure_note": "Replaced the lsof kill loop with a port-ownership guard. The script now fails fast when the chosen port is occupied by an unrelated process and only terminates a leftover Nexus smoke daemon whose command line matches this script's binary + 'daemon start --port <port> --foreground'. Added readiness-poll failure when the daemon process exits early, NEXUS42 path override for local testing, and shellcheck-clean loops. Verified with shellcheck, bash -n, a full local smoke run, an occupied-port guard test (unrelated listener preserved), and a stale-smoke-daemon cleanup test.",
+      "closure_evidence": "feature/v1.71-hygiene-and-sign-groundwork-fixes @ 3574da24",
+      "resolution": {
+        "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+        "commit": "3574da24"
+      }
+    },
+    {
+      "id": "R-V171P1-QC1-003",
+      "title": "ChapterPage defaults can_edit_outline to true when the field is absent",
+      "severity": "low",
+      "source": "qc1 S-003",
+      "scope": "apps/web/src/pages/chapter-page.tsx line 70",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "V1.74 hygiene backlog (plan-id tbd-v1.74-hygiene)",
+      "target_date": "V1.74",
+      "tracking_link": ".mstar/plans/reports/2026-06-27-v1.71-hygiene-and-sign-groundwork/qc1.md",
+      "note": "const canEditOutline = chapter.data?.can_edit_outline ?? true; falls back to editable if the API omits the field. Backend always populates it today, but defense-in-depth would default to false or validate the contract shape at the API boundary. Non-blocking for P1 approval. | V1.72 deferred to V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene) per compass \u00a75 V1.73 deferrals table.",
+      "lifecycle": "resolved",
+      "resolution": {
+        "plan_id": "2026-06-29-v1.74-hygiene-slate-clear",
+        "commit": "ad867216",
+        "at": "2026-06-29",
+        "note": "Closed in V1.74 (QC tri-review 3/3 Approve + QA Pass)."
+      }
+    },
+    {
+      "id": "R-V171-CI-RELEASE-WORKFLOW-INCOMPLETE",
+      "title": "desktop-release.yml signing flow is incomplete (no keychain import, no notarize)",
+      "severity": "medium",
+      "source": "V1.71 PR review (CI signing discussion)",
+      "scope": ".github/workflows/desktop-release.yml",
+      "decision": "defer",
+      "owner": "@ops-engineer",
+      "target": "V1.72 release-hardening plan",
+      "note": "desktop-release.yml reads APPLE_SIGNING_IDENTITY and has a fail-fast check, but the .p12 certificate is never imported to the runner's temporary keychain, so even when the secret is configured, tauri build's codesign invocation cannot find the private key and fails. Also missing: notarize + staple steps, so signed .dmg would still be blocked by macOS Gatekeeper on first open. V1.71 ship is not blocked because the PR-verification workflow (desktop-build.yml) is now unsigned-only (revert of P1 mis-injection). Release artifacts for V1.71 are produced by developer-local signing + manual upload, not via this CI workflow. Full fix: add 'Import signing certificate to temporary keychain' step between 'Require signing identity' and 'Build Tauri desktop bundle', plus a notarize + staple step after dmg creation. Secrets required: APPLE_CERTIFICATE_P12_BASE64, APPLE_CERTIFICATE_PASSWORD, APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID in addition to APPLE_SIGNING_IDENTITY.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-28",
+      "closure_note": "Closed in V1.72 P1: desktop-release.yml now imports the .p12 certificate into a temporary keychain, signs the .app with codesign --options runtime --timestamp --deep, rebuilds the .dmg from the signed .app, submits the .dmg to Apple notarytool with --wait, and staples the notarization ticket. When the five required secrets are absent the workflow emits an unsigned-artifacts notice and succeeds; when only some secrets are present it uploads unsigned artifacts and fails with a list of missing secrets. Updated apps/desktop/SIGNING.md with the secret table and CI flow.",
+      "resolution": {
+        "plan_id": "2026-06-28-v1.72-hygiene-and-release-hardening",
+        "commit": "b480a283"
+      }
+    },
+    {
+      "id": "R-V171-CI-WORKFLOW-SETUP-DEDUPE",
+      "title": "Dedupe CI/desktop-build setup steps via composite action",
+      "severity": "low",
+      "source": "V1.71 PR review (workflow dedup discussion)",
+      "scope": ".github/workflows/ci.yml, .github/workflows/desktop-build.yml",
+      "decision": "defer",
+      "owner": "@ops-engineer",
+      "target": "V1.72",
+      "note": "ci.yml and desktop-build.yml each re-declare the same monorepo setup boilerplate (checkout, pnpm/action-setup, setup-node, dtolnay/rust-toolchain, Swatinem/rust-cache, pnpm install --frozen-lockfile) in every job. The boilerplate cannot be merged at the workflow level (jobs must run in parallel on independent runners with different OS images), but the setup steps themselves are repeated verbatim ~7 times across the two files, making it tedious to bump action SHAs or pnpm/node versions. Fix: extract a .github/actions/setup-monorepo composite action that takes rust-targets, cache-key, and cache-workspaces as inputs, and have all jobs in both workflows use it. Do NOT attempt to merge jobs or workflows (GitHub Actions jobs are intentionally isolated). Do NOT extract the build/test steps themselves \u2014 they vary too much across jobs to share meaningfully.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-28",
+      "closure_note": "Closed in V1.72 P1: created .github/actions/setup-monorepo/action.yml composite action covering pnpm/action-setup, actions/setup-node (with pnpm cache), optional dtolnay/rust-toolchain (skipped when rust-toolchain input is empty), and pnpm install --frozen-lockfile. Updated ci.yml and desktop-build.yml to consume the composite action; both files shrank by \u226520 lines each while preserving matrix behavior and OS coverage. checkout and rust-cache remain workflow-owned (composite action does not include them, per V1.72 \u00a76.8 hard constraint). Note: V1.72 P-last closure prose correction (R-V172P1-QC3-004).",
+      "resolution": {
+        "plan_id": "2026-06-28-v1.72-hygiene-and-release-hardening",
+        "commit": "9a6591aa"
+      }
+    },
+    {
+      "id": "R-V171-GREPTILE-POST5-TOAST",
+      "title": "Misleading toast description after strategy state rename",
+      "severity": "low",
+      "source": "Greptile 5/5 summary (V1.71 PR #96)",
+      "scope": "apps/web/src/components/canvas/use-strategy-data.ts",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "V1.74 hygiene backlog (plan-id tbd-v1.74-hygiene)",
+      "note": "usePatchStrategyState's success toast description uses args.stateId (the old ID) rather than the new label after a rename, so the user sees a description referring to the old name even though the state now has the new label. Cosmetic only \u2014 data integrity is correct. R-V171-GREPTILE-POST5. | V1.72 deferred to V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene) per compass \u00a75 V1.73 deferrals table.",
+      "lifecycle": "resolved",
+      "target_date": "V1.74",
+      "resolution": {
+        "plan_id": "2026-06-29-v1.74-hygiene-slate-clear",
+        "commit": "ad867216",
+        "at": "2026-06-29",
+        "note": "Closed in V1.74 (QC tri-review 3/3 Approve + QA Pass)."
+      }
+    },
+    {
+      "id": "R-V171-GREPTILE-POST5-ROLLBACK-ATOMIC",
+      "title": "Template rollback in strategy.rs uses non-atomic std::fs::write",
+      "severity": "low",
+      "source": "Greptile 5/5 summary (V1.71 PR #96)",
+      "scope": "crates/nexus-daemon-runtime/src/api/handlers/strategy.rs::rollback_template_write",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.74 hygiene backlog (plan-id tbd-v1.74-hygiene)",
+      "note": "rollback_template_write restores the previous template bytes via std::fs::write after a validation failure, which is non-atomic. A process crash mid-rollback could leave the template truncated while the YAML revision was already restored. Note: the rollback path is only reachable on validation failure (very rare), and the primary write path is now atomic via atomic_write_with_dir_fsync. Cosmetic defence-in-depth for the failure path. R-V171-GREPTILE-POST5. | V1.72 deferred to V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene) per compass \u00a75 V1.73 deferrals table.",
+      "lifecycle": "resolved",
+      "target_date": "V1.74",
+      "resolution": {
+        "plan_id": "2026-06-29-v1.74-hygiene-slate-clear",
+        "commit": "ad867216",
+        "at": "2026-06-29",
+        "note": "Closed in V1.74 (QC tri-review 3/3 Approve + QA Pass)."
+      }
+    }
+  ]
+}

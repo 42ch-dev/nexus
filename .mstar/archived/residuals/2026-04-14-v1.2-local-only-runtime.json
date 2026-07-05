@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-04-14-v1.2-local-only-runtime",
+  "archived_at": "2026-04-16T16:53:30Z",
+  "entries": [
+    {
+      "id": "R3",
+      "title": "Daemon mode staleness after CLI config change",
+      "severity": "low",
+      "source": "QC-1, QC-2, QC-3",
+      "scope": "crates/nexus42d/src/workspace/mod.rs",
+      "decision": "defer",
+      "owner": "fullstack-dev",
+      "target": "T6 (WS4: runtime compatibility)",
+      "tracking": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-16T16:53:30Z",
+      "closure_note": "V1.3 Wave 3: added config file modification time tracking"
+    },
+    {
+      "id": "R4",
+      "title": "classify_operation fail-open default for unknown ops",
+      "severity": "nit",
+      "source": "QC-2",
+      "scope": "crates/nexus-domain/src/runtime_guard.rs",
+      "decision": "accept",
+      "owner": "fullstack-dev",
+      "target": "V1.3+",
+      "tracking": null,
+      "lifecycle": "waived",
+      "closed_at": "2026-04-16T16:53:30Z",
+      "closure_note": "Fail-open is intentional conservative default for unknown operations"
+    }
+  ]
+}

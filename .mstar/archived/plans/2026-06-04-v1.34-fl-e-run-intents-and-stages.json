@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "description": "Archived V1.34 P1 (FL-E run intents and stages) plan per Profile B.",
+  "plan_id": "2026-06-04-v1.34-fl-e-run-intents-and-stages",
+  "title": "V1.34 P1 — Work stage model + creator run stage routing",
+  "done_at": "2026-06-05T02:50:00+08:00",
+  "plan_file": ".mstar/plans/2026-06-04-v1.34-fl-e-run-intents-and-stages.md",
+  "total_batches": 2,
+  "batches_completed": 2,
+  "qc": "Wave 1: qc1 Request Changes (2 Critical), qc2 Request Changes (3 Critical), qc3 Request Changes (2 Critical). Wave 2 (after 8 fix commits c3834ce..6cd1409): qc1 Approve, qc2 Approve, qc3 Approve w/ residuals (R-03/04/07/08/09).",
+  "qa": "Pass w/ notes — 0 unresolved Critical. Notes: plan markdown header still says 'Status: Todo' (status.json SSOT correctly has InReview → now removed post-Done), qc3 residuals tracked in plan_id, commit count 23 (3 feat + 8 fix + 1 harness + 6 QC + 5 QC reval/QA), topic branch ahead of integration by 23 commits at merge.",
+  "residual_count": 5,
+  "residual_open": [
+    "R-FL-E-DDL (qc3 R-03): DDL migration lacks IF NOT EXISTS",
+    "R-FL-E-DEAD (qc3 R-04): get_work_stage() dead code",
+    "R-FL-E-LIST (qc3 R-07): stage list omits current_stage + stage_status",
+    "R-FL-E-FNAME (qc3 R-08): migration filename date prefix convention",
+    "R-FL-E-ENDP (qc3 R-09): no dedicated stage_advance endpoint"
+  ],
+  "merge_commits": [
+    "cf29dd1 (merge P1 into feature/v1.34-creator-workflow-and-agent-tools)"
+  ],
+  "notes": "P1 implementation required substantial rework after QC wave 1 found 7 Critical (stage advance didn't create schedule, intake gate used wrong field, no active-schedule protection, --force audit missing, PATCH bypass, etc). 8 fix commits addressed all Criticals; final QC re-reviews all Approve. Spec §7 acceptance 4/4 reflected in tests. New invariant spec §2 #4 (active FL-E schedule uniqueness) now enforced via shared stage_gates + transaction wrap. P2 (preset chain) and P3 (agent tool spec) unblocked."
+}

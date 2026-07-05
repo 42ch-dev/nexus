@@ -1,0 +1,14 @@
+{
+  "plan_id": "2026-06-25-v1.65-compass-and-plan-stubs",
+  "title": "V1.65 P-1 — Prepare: Compass + Plan Stubs + Status + Index",
+  "iteration": "V1.65",
+  "slot": "P-1",
+  "status": "Done",
+  "effort": "M",
+  "owner": "@project-manager",
+  "review": "PM closeout (no QC)",
+  "wave": 0,
+  "dependency": "—",
+  "working_branch": "(direct commit to iteration/v1.65)",
+  "merge_target": "iteration/v1.65"
+}

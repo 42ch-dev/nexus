@@ -1,0 +1,22 @@
+{
+    "plan_id": "2026-06-13-v1.45-delete-bespoke-run-subcommands",
+    "title": "P1 — Delete bespoke creator run subcommands",
+    "status": "Done",
+    "working_branch": "feature/v1.45-delete-bespoke-run-subcommands",
+    "merge_target": "iteration/v1.45",
+    "merge_commits": [
+        "00084b92",
+        "61082146"
+    ],
+    "completion_report": "P1 Completion Report v2 received; 6 commits e3ca5a47/609e92d2/8e1928c3/ef1f7c47/a3e45b30/f95ce3ff; T1-T5 PASS; DEPRECATED parent dir + memory-review allowlist + hint strings updated; 628 lib tests PASS single-threaded (pre-existing env-var race unrelated)",
+    "plan_file": ".mstar/plans/2026-06-13-v1.45-delete-bespoke-run-subcommands.md",
+    "depends_on": "2026-06-13-v1.45-harness-docs-prepare",
+    "compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md",
+    "done_at": "2026-06-14T00:55:00+08:00",
+    "qc_reports": {
+        "qc1": "Approve (after fix round; C-1 + W-1/2/3 fixed)",
+        "qc2": "Approve (initial; 0 Critical, 2 pre-existing Warning)",
+        "qc3": "Approve (initial; 0 Critical, 2 Warning fixed in B1 fix round)"
+    },
+    "qa_report": "PASS (initial + accepts fix round)"
+}

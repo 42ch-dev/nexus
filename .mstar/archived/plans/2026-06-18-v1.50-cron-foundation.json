@@ -1,0 +1,22 @@
+{
+  "id": "2026-06-18-v1.50-cron-foundation",
+  "title": "T-A P0 — Per-Work cron config layer (DB + CLI + defaults)",
+  "file": ".mstar/plans/2026-06-18-v1.50-cron-foundation.md",
+  "status": "Done",
+  "done_at": "2026-06-18",
+  "owner": "@fullstack-dev",
+  "agents": [
+    "@fullstack-dev"
+  ],
+  "working_branch": "feature/v1.50-cron-foundation",
+  "merge_target": "iteration/v1.50",
+  "iteration_compass": ".mstar/iterations/v1.50-novel-author-production-loop-and-world-kb-closure-delivery-compass-v1.md",
+  "primary_spec": ".mstar/knowledge/specs/novel-writing/cron-staggering.md",
+  "task_category": "feature",
+  "depends_on": [
+    "2026-06-18-v1.50-harness-docs-prepare"
+  ],
+  "created_at": "2026-06-18",
+  "updated_at": "2026-06-18T12:00:00+08:00",
+  "qc_status": "Initial wave: qc1+qc3 Request Changes (5 Warnings R-V150P0-W1..W5). Fix-wave (a7ea8349..f5f58edd): W1..W4 Resolved; W5 deferred to T-A P1 with in-code TODO marker. Targeted re-review qc1+qc3 → both Approve. Merged into iteration/v1.50 at afe812c8."
+}

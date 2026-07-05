@@ -1,0 +1,83 @@
+{
+  "id": "2026-06-15-v1.47-hygiene-and-closeout",
+  "title": "P-last — Hygiene and closeout",
+  "file": ".mstar/plans/2026-06-15-v1.47-hygiene-and-closeout.md",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": [
+    "@fullstack-dev",
+    "@writing-specialist",
+    "@project-manager"
+  ],
+  "progress": 100,
+  "tags": [
+    "v1.47",
+    "hygiene"
+  ],
+  "created_at": "2026-06-15",
+  "updated_at": "2026-06-15",
+  "done_at": "2026-06-15",
+  "notes": "",
+  "metadata": {
+    "working_branch": "feature/v1.47-hygiene-and-closeout",
+    "merge_target": "iteration/v1.47",
+    "qc_status": "skipped (T1 clippy hygiene + T2/T4 PM-only + T3 docs-only)",
+    "qa_status": "Pass (PM signoff per plan §5 T6)",
+    "clippy_validation": "cargo +nightly clippy -p nexus-orchestration --tests -- -D warnings: pass",
+    "whitelist_residuals_closed": [
+      "R-V145-PRE-CLIPPY-001",
+      "R-V146P1-QC3-S1",
+      "R-V146P1-QC3-S4",
+      "R-V145B2-001",
+      "R-V145B2-002"
+    ],
+    "r138p1_01_disposition": "already archived as lifecycle:resolved at V1.46 P-last; P2 confirms guard sufficient",
+    "tech_debt_summary": {
+      "updated_at": "2026-06-15",
+      "total_open": 119,
+      "by_severity": {
+        "critical": 0,
+        "high": 2,
+        "medium": 8,
+        "low": 99,
+        "nit": 10
+      },
+      "by_target": {
+        "V1.48": 39,
+        "Backlog": 79,
+        "V1.47": 1
+      },
+      "by_plan": {
+        "2026-06-14-v1.46-pool-observability": 4,
+        "2026-06-14-v1.46-research-auto-chain-e2e": 3,
+        "2026-06-14-v1.46-novel-runtime-ux-edges": 5,
+        "2026-06-14-v1.46-spec-cli-hygiene": 7,
+        "2026-06-14-v1.46-author-desk-status-ux": 4,
+        "2026-06-04-v1.33-work-model-and-creator-run": 3,
+        "v1.31-post-qc-tech-debt": 5,
+        "v1.30-post-qc-tech-debt": 9,
+        "2026-06-04-v1.34-fl-e-run-intents-and-stages": 5,
+        "2026-06-04-v1.34-agent-tool-implementation": 1,
+        "2026-06-08-v1.38-multi-chapter-selection-status": 1,
+        "2026-06-08-v1.38-novel-writing-parameterization": 4,
+        "2026-06-09-v1.39-fl-e-auto-chain-engine": 5,
+        "2026-06-09-v1.39-research-stage-wiring": 8,
+        "2026-06-09-v1.39-v138-hardening": 3,
+        "2026-06-09-v1.39-findings-and-review-routing": 6,
+        "2026-06-10-v1.40-hygiene": 1,
+        "2026-06-10-v1.41-multi-work-switch": 7,
+        "2026-06-10-v1.41-selection-pool": 14,
+        "2026-06-11-v1.42-runtime-lock-and-hygiene": 3,
+        "2026-06-11-v1.42-conditional-routing": 2,
+        "2026-06-13-v1.45-creator-run-generic-runner": 7,
+        "2026-06-13-v1.45-creator-run-generic-runner_v145_anchors": 3,
+        "2026-06-13-v1.45-quickstart-and-author-spec": 1,
+        "2026-06-13-v1.45-hygiene-and-closeout": 1,
+        "2026-06-15-v1.47-reflection-loop-findings": 6,
+        "2026-06-15-v1.47-gate-remediation-audit": 1
+      },
+      "notes": "V1.47 P-last hygiene 2026-06-15. 5 whitelist residuals closed (R-V145-PRE-CLIPPY-001, R-V146P1-QC3-S1/S4, R-V145B2-001/002). All other V1.45/V1.46 open lows deferred to V1.48."
+    },
+    "pm_signoff": "T2/T4/T5 done in PM thread 2026-06-15"
+  }
+}

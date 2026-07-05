@@ -1,0 +1,24 @@
+{
+  "plan_id": "2026-06-28-v1.72-canvas-outline-timeline-beta",
+  "archived_at": "2026-06-28",
+  "schema_version": 1,
+  "plan": {
+    "plan_id": "2026-06-28-v1.72-canvas-outline-timeline-beta",
+    "iteration_id": "V1.72",
+    "status": "Done",
+    "owner": "frontend-dev + fullstack-dev",
+    "effort": "L",
+    "type": "implement",
+    "working_branch": "feature/v1.72-canvas-outline-timeline-beta",
+    "merge_target": "iteration/v1.72",
+    "task_category": "visual",
+    "wire_contracts_changed": true,
+    "wire_contracts_note": "V1.72 Track A: new Local API DTOs for outline.patch_structure / outline.patch_chapter / timeline.patch_event + outlineRevision + conflict error; @42ch/nexus-contracts 0.7.0 → 0.8.0",
+    "depends_on": [
+      "2026-06-28-v1.72-compass-and-plan"
+    ],
+    "merged_to_integration_at": "2026-06-28T08:57:55Z",
+    "merged_to_integration_commits": "cfb2e8b3",
+    "completed_at": "2026-06-28T11:49:04Z"
+  }
+}

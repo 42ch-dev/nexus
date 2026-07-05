@@ -1,0 +1,21 @@
+{
+  "id": "2026-06-18-v1.51-advisory-lock",
+  "title": "T-B P0 \u2014 Works/<work_ref>/.lock + daemon cron-side + CLI integration (closes R-V149P1-01 advisory-lock note)",
+  "file": ".mstar/plans/2026-06-18-v1.51-advisory-lock.md",
+  "status": "Done",
+  "done_at": "2026-06-18",
+  "merged_at": "2026-06-18",
+  "merge_commit": "d22075ef",
+  "owner": "@fullstack-dev",
+  "agents": [
+    "@fullstack-dev",
+    "@architect",
+    "@qa-engineer"
+  ],
+  "working_branch": "feature/v1.51-advisory-lock",
+  "merge_target": "iteration/v1.51",
+  "iteration_compass": ".mstar/iterations/v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md",
+  "task_category": "logic",
+  "created_at": "2026-06-18",
+  "updated_at": "2026-06-18T15:00:00+08:00"
+}

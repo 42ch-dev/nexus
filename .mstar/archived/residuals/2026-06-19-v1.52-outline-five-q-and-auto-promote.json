@@ -1,0 +1,230 @@
+{
+  "plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
+  "archived_at": "2026-07-05T13:17:59+0000",
+  "archived_by": "repo hygiene \u2014 Profile B residual archive (git slim plan)",
+  "residual_findings": [
+    {
+      "id": "R-V152TA-S007",
+      "title": "run_llm_extract micro-opt: avoid Vec allocation when no labels produced (qc3 S-002)",
+      "severity": "low",
+      "source": "qc3 S-002",
+      "scope": "crates/nexus-orchestration/src/tasks/mod.rs (run_llm_extract)",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.52 P-last WL-A",
+      "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc3.md \u00a7Suggestions",
+      "lifecycle": "resolved",
+      "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
+      "closed_at": "2026-06-23",
+      "closure_note": "run_llm_extract micro-opt: dropped .cloned().unwrap_or_default() (always allocated); now iterates &[Value] and early-returns empty Vec.",
+      "closure_evidence": "commit 257b354a on iteration/v1.60",
+      "resolution": {
+        "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+        "commit": "257b354a"
+      }
+    },
+    {
+      "id": "R-V152TA-S011",
+      "title": "KB extract job column index for auto_promoted_at (qc3 S-006; only if scale demands)",
+      "severity": "low",
+      "source": "qc3 S-006",
+      "scope": "crates/nexus-local-db/src/kb_extract_job.rs (auto_promoted_at index)",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.52 P-last WL-A",
+      "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc3.md \u00a7Suggestions",
+      "lifecycle": "resolved",
+      "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
+      "closed_at": "2026-06-23",
+      "closure_note": "Accept (doc-only). KB extract job column index optimization noted; only relevant if scale demands.",
+      "closure_evidence": "V1.60 P-last T1/T2 PM doc-only closure",
+      "resolution": {
+        "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+        "commit": "PM-closure"
+      }
+    },
+    {
+      "id": "R-V152TA-S002",
+      "title": "Audit log optionality ambiguity in Works/<work_ref>/Logs/kb/auto-promoted/ path construction (qc1 S-002)",
+      "severity": "low",
+      "source": "qc1 S-002",
+      "scope": "crates/nexus42/src/commands/creator/world/kb.rs (audit log dir)",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.52 P-last WL-A",
+      "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc1.md \u00a7Suggestions",
+      "lifecycle": "resolved",
+      "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
+      "closed_at": "2026-06-23",
+      "closure_note": "Accept. Audit log path construction is documented in the spec; optional path is intentional.",
+      "closure_evidence": "V1.60 P-last T1/T2 PM doc-only closure",
+      "resolution": {
+        "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+        "commit": "PM-closure"
+      }
+    },
+    {
+      "id": "R-V152TA-S004",
+      "title": "Auto-promote observability: info-log when auto-promote skips a candidate (qc2 S-001)",
+      "severity": "low",
+      "source": "qc2 (security/correctness) S-001",
+      "scope": "crates/nexus42/src/commands/creator/world/kb.rs (--auto skip path)",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.52 P-last WL-A",
+      "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc2.md \u00a7Suggestions",
+      "lifecycle": "resolved",
+      "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
+      "closed_at": "2026-06-23",
+      "closure_note": "tracing::info! added per auto-promote skip after kb-adopt-auto loop.",
+      "closure_evidence": "commit 257b354a on iteration/v1.60",
+      "resolution": {
+        "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+        "commit": "257b354a"
+      }
+    },
+    {
+      "id": "R-V152TA-S003",
+      "title": "Pre-existing dead_code on LlmExtractTask (qc1 S-003)",
+      "severity": "low",
+      "source": "qc1 S-003",
+      "scope": "crates/nexus-orchestration/src/tasks/mod.rs",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.52 P-last WL-A",
+      "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc1.md \u00a7Suggestions",
+      "lifecycle": "resolved",
+      "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
+      "closed_at": "2026-06-23",
+      "closure_note": "Justification comment added on LlmExtractTask #[cfg_attr(not(test), allow(dead_code))] \u2014 explains no preset graph wiring yet.",
+      "closure_evidence": "commit 257b354a on iteration/v1.60",
+      "resolution": {
+        "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+        "commit": "257b354a"
+      }
+    },
+    {
+      "id": "R-V152TA-S009",
+      "title": "Per-promotion SQL batchability: combine multiple mark_auto_promoted_in_tx_with_cas calls into single tx (qc3 S-004)",
+      "severity": "low",
+      "source": "qc3 S-004",
+      "scope": "crates/nexus42/src/commands/creator/world/kb.rs (--auto batch loop)",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.52 P-last WL-A",
+      "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc3.md \u00a7Suggestions",
+      "lifecycle": "resolved",
+      "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
+      "closed_at": "2026-06-23",
+      "closure_note": "Doc-defer: TODO comment explains per-promotion tx consolidation deferred (per-candidate rollback semantics; SAVEPOINT redesign pends V1.61+).",
+      "closure_evidence": "commit 257b354a on iteration/v1.60",
+      "resolution": {
+        "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+        "commit": "257b354a"
+      }
+    },
+    {
+      "id": "R-V152TA-S005",
+      "title": "Audit log hardening: add fsync to audit log writes (qc2 S-002)",
+      "severity": "low",
+      "source": "qc2 S-002",
+      "scope": "crates/nexus42/src/commands/creator/world/kb.rs (audit log dir)",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.52 P-last WL-A",
+      "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc2.md \u00a7Suggestions",
+      "lifecycle": "resolved",
+      "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
+      "closed_at": "2026-06-23",
+      "closure_note": "write_audit_log_with_fsync helper added (OpenOptions + write_all + sync_all); wired into write_auto_promoted_log + write_rejected_log.",
+      "closure_evidence": "commit 257b354a on iteration/v1.60",
+      "resolution": {
+        "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+        "commit": "257b354a"
+      }
+    },
+    {
+      "id": "R-V152TA-S010",
+      "title": "Auto-promote batch parallelism: consider rayon-parallel per-candidate loops for large N (qc3 S-005)",
+      "severity": "low",
+      "source": "qc3 S-005",
+      "scope": "crates/nexus42/src/commands/creator/world/kb.rs (--auto batch loop)",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.52 P-last WL-A",
+      "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc3.md \u00a7Suggestions",
+      "lifecycle": "resolved",
+      "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
+      "closed_at": "2026-06-23",
+      "closure_note": "Accept (doc-only). Rayon parallelism noted as future optimization option for large N auto-promote batches. Sub-millisecond at current N=2-5.",
+      "closure_evidence": "V1.60 P-last T1/T2 PM doc-only closure",
+      "resolution": {
+        "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+        "commit": "PM-closure"
+      }
+    },
+    {
+      "id": "R-V152TA-S001",
+      "title": "Heuristic/LLM signal drift risk between extract_kb_candidates_for_review and LlmExtractTask paths (qc1 S-001)",
+      "severity": "low",
+      "source": "qc1 (architecture/maintainability) S-001",
+      "scope": "crates/nexus-orchestration/src/quality_loop.rs + tasks/mod.rs",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.61+",
+      "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc1.md \u00a7Suggestions",
+      "lifecycle": "resolved",
+      "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
+      "deferral_note": "T-A P0 tri-review verdict Approve; 11 Suggestions carry-forward to V1.52 P-last WL-A.",
+      "target_date": "V1.61+",
+      "_v1_60_plast_defer_note": "Pathway unified in V1.55 P2 F-001 (both extract paths share run_llm_extract). True cross-invocation drift detection requires stateful tracking beyond surgical scope. Defer to V1.61+.",
+      "closed_at": "2026-06-26",
+      "closure_note": "Closed by V1.67 P2 (overdue debt closure).",
+      "resolution": {
+        "plan_id": "2026-06-26-v1.67-overdue-debt-closure",
+        "commit": "ab3ea216"
+      }
+    },
+    {
+      "id": "R-V152TA-S006",
+      "title": "Outline \u4e94\u95ee gate observability: info-log on NOGO with dimension scores (qc3 S-001)",
+      "severity": "low",
+      "source": "qc3 (performance/reliability) S-001",
+      "scope": "crates/nexus-orchestration/src/quality_loop.rs (outline_five_q_check)",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.61+",
+      "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc3.md \u00a7Suggestions",
+      "lifecycle": "resolved",
+      "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
+      "target_date": "V1.61+",
+      "_v1_60_plast_defer_note": "outline_five_q_check is pub but only invoked from #[cfg(test)]. No production NOGO log to enhance \u2014 the \u4e94\u95ee gate is enforced via YAML preset llm_judge, not the Rust heuristic. Defer until heuristic is wired into production or removed.",
+      "closed_at": "2026-06-26",
+      "closure_note": "Closed by V1.67 P2 (overdue debt closure).",
+      "resolution": {
+        "plan_id": "2026-06-26-v1.67-overdue-debt-closure",
+        "commit": "ab3ea216"
+      }
+    },
+    {
+      "id": "R-V152TA-S008",
+      "title": "Pre-existing dead_code hygiene on legacy extract_kb_candidates_for_review (qc3 S-003)",
+      "severity": "low",
+      "source": "qc3 S-003",
+      "scope": "crates/nexus-orchestration/src/quality_loop.rs",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.52 P-last WL-A",
+      "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-outline-five-q-and-auto-promote/qc3.md \u00a7Suggestions",
+      "lifecycle": "resolved",
+      "_plan_id": "2026-06-19-v1.52-outline-five-q-and-auto-promote",
+      "closed_at": "2026-06-23",
+      "closure_note": "Verified no dead_code warning (cargo clippy clean). extract_kb_candidates_for_review has active callers (schedule::supervisor::tick + 3 test files). Residual based on stale state; nothing to fix. Mark resolved.",
+      "closure_evidence": "Verified clean by @fullstack-dev (cargo clippy -p nexus-orchestration -- -D warnings)",
+      "resolution": {
+        "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+        "commit": "257b354a"
+      }
+    }
+  ]
+}

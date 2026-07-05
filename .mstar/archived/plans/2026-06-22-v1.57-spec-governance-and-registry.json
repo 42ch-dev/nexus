@@ -1,0 +1,55 @@
+{
+  "plan_id": "2026-06-22-v1.57-spec-governance-and-registry",
+  "title": "Spec Governance & Capability::Registry Consolidation (P0)",
+  "iteration": "V1.57",
+  "track": "Track A",
+  "wave": "Wave 1",
+  "effort": "L",
+  "owner": "@fullstack-dev",
+  "status": "Done",
+  "file": ".mstar/plans/2026-06-22-v1.57-spec-governance-and-registry.md",
+  "working_branch": "feature/v1.57-spec-governance-and-registry",
+  "merge_target": "iteration/v1.57",
+  "depends_on": [
+    "2026-06-22-v1.57-compass-and-plan-stubs"
+  ],
+  "created": "2026-06-22",
+  "inreview_at": "2026-06-22",
+  "inreview_commits": [
+    "43e4d89d",
+    "7e9932ce"
+  ],
+  "merge_commit": "56d459ec",
+  "closed_at": "2026-06-22",
+  "fix_wave_commits": [
+    "544a1184",
+    "8f6d598c"
+  ],
+  "qc_reports": [
+    {
+      "reviewer": "qc-specialist",
+      "verdict": "Approve with comments",
+      "commit": "e51bc3b7"
+    },
+    {
+      "reviewer": "qc-specialist-2",
+      "verdict": "Approve",
+      "commit": "9b6e7df7"
+    },
+    {
+      "reviewer": "qc-specialist-3",
+      "verdict": "Approve with comments",
+      "commit": "2b5bc96d"
+    },
+    {
+      "reviewer": "@project-manager (consolidated)",
+      "verdict": "Approve",
+      "commit": null
+    }
+  ],
+  "completion_report": "Bridge→Master draft + acp §4 roster rewrite (41 rows, 5 host-tool IDs gap-filled) + capability::Registry consolidation + R-V156P3-S003 field drops re-introduced. 3 carry-forwards: R-V156P3-S003 closed (P0 cross-cut). 12 AC met post-fix-wave. 1 medium + 2 low residuals filed for V1.57+.",
+  "residuals_filed": [
+    "R-V157P0-L001",
+    "R-V157P0-L002"
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "plan_id": "pre-existing-v1.45-orchestration-clippy",
+  "entries": [
+    {
+      "id": "R-V145-PRE-CLIPPY-001",
+      "title": "Pre-existing cargo clippy --all -- -D warnings failures in nexus-orchestration (60+ errors in tasks/mod.rs + worker/registry.rs)",
+      "severity": "high",
+      "source": "P3 implementer (fullstack-dev) on iteration/v1.46 HEAD 87f00619; pre-existing claim verified by PM against origin/main HEAD 63b36a32 (V1.45 main)",
+      "scope": "crates/nexus-orchestration/src/tasks/mod.rs (last touched V1.42 P3 aa0574cc), crates/nexus-orchestration/src/worker/registry.rs, plus 2 test files (auto_chain + novel_project_init)",
+      "decision": "risk-accepted (PM-override per .mstar/AGENTS.md 'Pre-existing claim verification protocol')",
+      "owner": "@fullstack-dev",
+      "target_date": "V1.46 P-last hygiene (or pre-merge fix branch)",
+      "tracking_link": ".mstar/status.json residual_findings[pre-existing-v1.45-orchestration-clippy]",
+      "note": "PM-override basis: failure reproduces on origin/main HEAD 63b36a32 (V1.45 main, post-V1.45 PR #58 merge). Failure is NOT introduced by V1.46 P0/P1/P2/P3/P4. V1.46 P3 work (hermetic research_supervisor_e2e.rs) is clippy-clean in isolation. P3 implementer provided base-SHA repro: `cargo +nightly clippy -p nexus-orchestration --tests -- -D warnings` on 1d776d23 yields 57 lib errors + 4 auto_chain test + 5 novel_project_init test = ~66 errors, all in code untouched by V1.46 plans. To unblock V1.46 ship, fix in pre-merge hygiene branch or fold into P-last scope.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-15",
+      "closure_note": "Fixed by V1.47 P-last T1 clippy cleanup of 100+ warnings across 18 lint categories in nexus-orchestration; cargo +nightly clippy -p nexus-orchestration --tests -- -D warnings now passes cleanly.",
+      "closure_evidence": "commits c99e5f9c, 34608ab4, 57744e0b, 0feb3805 on feature/v1.47-hygiene-and-closeout",
+      "archived_at": "2026-06-15T16:49:53Z"
+    }
+  ],
+  "archived_at": "2026-06-15T16:49:53Z",
+  "archived_by": "residual_findings hygiene sweep 2026-06-16",
+  "archived_entry_count": 1,
+  "sweep_note": "1 entries merged from status.json residual_findings"
+}

@@ -1,0 +1,126 @@
+{
+  "plan_id": "2026-06-30-v1.77-findings-remediation-ui",
+  "archived_at": "2026-07-05T13:17:59+0000",
+  "archived_by": "repo hygiene \u2014 Profile B residual archive (git slim plan)",
+  "residual_findings": [
+    {
+      "id": "R-V177P0-QC1-S001",
+      "title": "useFinding forward-staging marker (qc1 S)",
+      "severity": "nit",
+      "source": "qc1 Suggestion",
+      "scope": "apps/web/src/api/queries.ts",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "V1.78 QC followup (tbd-v1.78-qc-followup)",
+      "lifecycle": "resolved",
+      "closed_at": "2026-07-01",
+      "resolution": {
+        "plan_id": "2026-07-01-v1.78-slate-clear",
+        "commit": "519ec04d"
+      },
+      "closure_note": "V1.78 P1 slate-clear closed by @fullstack-dev-2 (commit 519ec04d)."
+    },
+    {
+      "id": "R-V177P0-QC1-S002",
+      "title": "finding-detail-panel.tsx 305-line split (qc1 S)",
+      "severity": "low",
+      "source": "qc1 Suggestion",
+      "scope": "apps/web/src/components/findings/finding-detail-panel.tsx",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "V1.78 QC followup (tbd-v1.78-qc-followup)",
+      "lifecycle": "resolved",
+      "closed_at": "2026-07-01",
+      "resolution": {
+        "plan_id": "2026-07-01-v1.78-slate-clear",
+        "commit": "519ec04d"
+      },
+      "closure_note": "V1.78 P1 slate-clear closed by @fullstack-dev-2 (commit 519ec04d)."
+    },
+    {
+      "id": "R-V177P0-QC1-S003",
+      "title": "client adjacency golden test vs DAO (qc1 S)",
+      "severity": "low",
+      "source": "qc1 Suggestion",
+      "scope": "apps/web/src/lib/findings-lifecycle.ts",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "V1.78 QC followup (tbd-v1.78-qc-followup)",
+      "lifecycle": "resolved",
+      "closed_at": "2026-07-01",
+      "resolution": {
+        "plan_id": "2026-07-01-v1.78-slate-clear",
+        "commit": "519ec04d"
+      },
+      "closure_note": "V1.78 P1 slate-clear closed by @fullstack-dev-2 (commit 519ec04d)."
+    },
+    {
+      "id": "R-V177P0-QC1-S004",
+      "title": "getQueriesData/setQueryData asymmetry note (qc1 S)",
+      "severity": "nit",
+      "source": "qc1 Suggestion",
+      "scope": "apps/web/src/api/queries.ts",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "V1.78 QC followup (tbd-v1.78-qc-followup)",
+      "lifecycle": "resolved",
+      "closed_at": "2026-07-01",
+      "resolution": {
+        "plan_id": "2026-07-01-v1.78-slate-clear",
+        "commit": "519ec04d"
+      },
+      "closure_note": "V1.78 P1 slate-clear closed by @fullstack-dev-2 (commit 519ec04d)."
+    },
+    {
+      "id": "R-V177P0-QC2-S001",
+      "title": "client-side validation guard defense-in-depth (qc2 S)",
+      "severity": "nit",
+      "source": "qc2 Suggestion",
+      "scope": "finding-detail-panel.tsx",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "V1.78 QC followup (tbd-v1.78-qc-followup)",
+      "lifecycle": "resolved",
+      "closed_at": "2026-07-01",
+      "resolution": {
+        "plan_id": "2026-07-01-v1.78-slate-clear",
+        "commit": "519ec04d"
+      },
+      "closure_note": "V1.78 P1 slate-clear closed by @fullstack-dev-2 (commit 519ec04d)."
+    },
+    {
+      "id": "R-V177P0-QC2-S002",
+      "title": "detail-panel rollback assertion (qc2 S)",
+      "severity": "nit",
+      "source": "qc2 Suggestion",
+      "scope": "finding-detail-panel.test.tsx",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "V1.78 QC followup (tbd-v1.78-qc-followup)",
+      "lifecycle": "resolved",
+      "closed_at": "2026-07-01",
+      "resolution": {
+        "plan_id": "2026-07-01-v1.78-slate-clear",
+        "commit": "519ec04d"
+      },
+      "closure_note": "V1.78 P1 slate-clear closed by @fullstack-dev-2 (commit 519ec04d)."
+    },
+    {
+      "id": "R-V177P0-QC3-S001",
+      "title": "cross-Work invalidation-breadth regression test (qc3 S)",
+      "severity": "low",
+      "source": "qc3 Suggestion",
+      "scope": "apps/web/src/api/findings-mutation.test.tsx",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "V1.78 QC followup (tbd-v1.78-qc-followup)",
+      "lifecycle": "resolved",
+      "closed_at": "2026-07-01",
+      "resolution": {
+        "plan_id": "2026-07-01-v1.78-slate-clear",
+        "commit": "519ec04d"
+      },
+      "closure_note": "V1.78 P1 slate-clear closed by @fullstack-dev-2 (commit 519ec04d)."
+    }
+  ]
+}

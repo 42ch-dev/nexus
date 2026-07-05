@@ -1,0 +1,21 @@
+{
+  "plan_id": "2026-06-22-v1.55-mid-qc-and-fix-waves",
+  "title": "V1.55 P-mid — Mid-QC Checkpoints & Fix Waves",
+  "status": "Done",
+  "owner": "@project-manager",
+  "effort": "M",
+  "working_branch": "iteration/v1.55",
+  "merge_target": "iteration/v1.55",
+  "type": "meta",
+  "created": "2026-06-22",
+  "compass": "v1.55-non-novel-profile-completion-and-infrastructure-refactor-delivery-compass-v1.md",
+  "dependencies": [
+    "2026-06-22-v1.55-df43-sqlite-alignment",
+    "2026-06-22-v1.55-df31-workspace-interface",
+    "2026-06-22-v1.55-game-bible-depth-35",
+    "2026-06-22-v1.55-script-scaffold"
+  ],
+  "qc_status": "n/a (meta-plan / PM-whitelisted closeout)",
+  "qa_status": "report-only QA pending (final closeout)",
+  "done_at": "2026-06-22"
+}

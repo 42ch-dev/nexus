@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-04-21-v1.7-ws-abc-residual-closure",
+  "archived_at": "2026-04-21T14:00:00Z",
+  "entries": [
+    {
+      "id": "DTO-C1",
+      "title": "sdk_new_session_request_from_nexus silently drops mcp_servers field",
+      "severity": "medium",
+      "source": "QC1 C1 from 2026-04-20-v1.6-ws-b-acp-sdk-dto",
+      "scope": "crates/nexus-acp-host/src/client.rs",
+      "decision": "fixed",
+      "owner": "fullstack-dev",
+      "closed_via": "2026-04-21-v1.7-ws-abc-residual-closure Batch 1",
+      "archived_at": "2026-04-21T14:00:00Z"
+    },
+    {
+      "id": "DTO-C2",
+      "title": "Protocol version .parse::<u16>().unwrap_or(1) silent degradation",
+      "severity": "low",
+      "source": "QC1 C2 from 2026-04-20-v1.6-ws-b-acp-sdk-dto",
+      "scope": "crates/nexus-acp-host/src/client.rs",
+      "decision": "fixed",
+      "owner": "fullstack-dev",
+      "closed_via": "2026-04-21-v1.7-ws-abc-residual-closure Batch 1",
+      "archived_at": "2026-04-21T14:00:00Z"
+    },
+    {
+      "id": "DTO-W1",
+      "title": "NexusContentBlock missing Eq derive",
+      "severity": "nit",
+      "source": "QC2 W1 from 2026-04-20-v1.6-ws-b-acp-sdk-dto",
+      "scope": "crates/nexus-contracts/src/local/acp/types.rs",
+      "decision": "fixed",
+      "owner": "fullstack-dev",
+      "closed_via": "2026-04-21-v1.7-ws-abc-residual-closure Batch 1",
+      "archived_at": "2026-04-21T14:00:00Z"
+    },
+    {
+      "id": "PERM-W1",
+      "title": "policy.rs save re-serializes TOML losing comments/format",
+      "severity": "low",
+      "source": "QC1 W1 from 2026-04-20-v1.6-ws-c-permission-cli",
+      "scope": "crates/nexus-acp-host/src/policy.rs",
+      "decision": "fixed",
+      "owner": "fullstack-dev",
+      "closed_via": "2026-04-21-v1.7-ws-abc-residual-closure Batch 2",
+      "archived_at": "2026-04-21T14:00:00Z"
+    },
+    {
+      "id": "PERM-W2",
+      "title": "JSON permission list omits global rules when agent filter used",
+      "severity": "low",
+      "source": "QC2 W-002 from 2026-04-20-v1.6-ws-c-permission-cli",
+      "scope": "crates/nexus42/src/commands/permission.rs",
+      "decision": "fixed",
+      "owner": "fullstack-dev",
+      "closed_via": "2026-04-21-v1.7-ws-abc-residual-closure Batch 2",
+      "archived_at": "2026-04-21T14:00:00Z"
+    },
+    {
+      "id": "PERM-W3",
+      "title": "Unvalidated TOML keys in permission commands",
+      "severity": "low",
+      "source": "QC2 W-003 from 2026-04-20-v1.6-ws-c-permission-cli",
+      "scope": "crates/nexus42/src/commands/permission.rs",
+      "decision": "fixed",
+      "owner": "fullstack-dev",
+      "closed_via": "2026-04-21-v1.7-ws-abc-residual-closure Batch 2",
+      "archived_at": "2026-04-21T14:00:00Z"
+    },
+    {
+      "id": "R4",
+      "title": "SystemClock DST safety not implemented — doc overstates guarantee",
+      "severity": "low",
+      "source": "QC1 W-4 from 2026-04-18-v1.5-stabilization",
+      "scope": "crates/nexus-orchestration/src/scheduler/mod.rs",
+      "decision": "fixed",
+      "owner": "fullstack-dev",
+      "closed_via": "2026-04-21-v1.7-ws-abc-residual-closure Batch 3",
+      "archived_at": "2026-04-21T14:00:00Z"
+    },
+    {
+      "id": "R7",
+      "title": "CoreContextManager schedule_guards HashMap unbounded growth",
+      "severity": "nit",
+      "source": "QC1 S-1 from 2026-04-18-v1.5-stabilization",
+      "scope": "crates/nexus-orchestration/src/schedule/derivation.rs",
+      "decision": "fixed",
+      "owner": "fullstack-dev",
+      "closed_via": "2026-04-21-v1.7-ws-abc-residual-closure Batch 3",
+      "archived_at": "2026-04-21T14:00:00Z"
+    }
+  ]
+}

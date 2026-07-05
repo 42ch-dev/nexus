@@ -1,0 +1,61 @@
+{
+  "plan_id": "2026-06-18-v1.50-cron-review-staggering",
+  "archived_at": "2026-07-05T13:17:59+0000",
+  "archived_by": "repo hygiene \u2014 Profile B residual archive (git slim plan)",
+  "residual_findings": [
+    {
+      "id": "R-V150P2CRONRV-01",
+      "title": "Cross-plan migration version collision: 202606180002 used by both T-A P1 (works_schedule_json_partial_idx) and T-B P1 (kb_extract_jobs_extend) breaks sqlx::migrate!",
+      "severity": "medium",
+      "source": "T-A P2 implementer (cross-plan defect discovered when T-A P2 tests required fresh DB)",
+      "scope": "crates/nexus-local-db/migrations/202606180002_*.sql (collision between T-A P1 and T-B P1)",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.50 T-A P2 fix-wave",
+      "target_date": "V1.50 T-A P2 fix-wave",
+      "tracking_link": ".mstar/plans/2026-06-18-v1.50-cron-review-staggering.md (Completion Report v2)",
+      "note": "Pre-existing T-A P1 / T-B P1 collision. T-A P2 renumbered works_schedule_json_partial_idx \u2192 202606180003; T-B P2 also independently renumbered it. PM must reconcile at merge time (T-B P2 qc1 flagged R-V150KBED-06-MERGE). Renumber is pre-release safe (per-migration tx rolls back on UNIQUE conflict).",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-18",
+      "closure_note": "V1.50 T-A P2: works_schedule_json_partial_idx renumbered to 202606180003 (filename only; content uses CREATE INDEX IF NOT EXISTS so idempotent). T-B P2 also independently renumbered the same migration; PM to reconcile at merge time (R-V150KBED-06-MERGE).",
+      "closure_evidence": "iteration/v1.50 (commit 12495be8 on feature/v1.50-cron-review-staggering)",
+      "_plan_id": "2026-06-18-v1.50-cron-review-staggering"
+    },
+    {
+      "id": "R-V150P2CRONRV-02",
+      "title": "Pre-existing T-A P0 latent rollback test bug: DROP COLUMN schedule_json fails because T-A P1 partial index references it",
+      "severity": "low",
+      "source": "T-A P2 implementer (latent test defect unmasked by R-V150P2CRONRV-01)",
+      "scope": "crates/nexus-local-db/tests/works_schedule_migration.rs (rollback test ordering)",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.50 T-A P2 fix-wave",
+      "target_date": "V1.50 T-A P2 fix-wave",
+      "tracking_link": ".mstar/plans/2026-06-18-v1.50-cron-review-staggering.md (Completion Report v2)",
+      "note": "Test-only fix: drop the dependent partial index before DROP COLUMN. Same root cause and same fix path as W-QC3-01 in T-B P2 qc3 review.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-18",
+      "closure_note": "V1.50 T-A P2: rollback test fixed (drop idx_works_schedule_json_nonempty before ALTER TABLE works DROP COLUMN schedule_json). Test-only; no production code impact.",
+      "closure_evidence": "iteration/v1.50 (commit b7e438b5 on feature/v1.50-cron-review-staggering)",
+      "_plan_id": "2026-06-18-v1.50-cron-review-staggering"
+    },
+    {
+      "id": "R-V150P2CRONRV-03",
+      "title": "Plan text \u00a72 Goal 4 / \u00a74 AC3 describes a 'T-B P1 hook stub' that was never added (T-B P1 already filled the real hook)",
+      "severity": "low",
+      "source": "qc1 (architecture) S-001",
+      "scope": ".mstar/plans/2026-06-18-v1.50-cron-review-staggering.md \u00a72 Goal 4 / \u00a74 AC3 (plan text vs implementation reality)",
+      "decision": "defer",
+      "owner": "@writing-specialist or @project-manager",
+      "target": "V1.50 P-last (plan archive + spec reconcile)",
+      "target_date": "V1.50 P-last",
+      "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-review-staggering/qc1.md \u00a7S-001",
+      "note": "Doc-only reconcile: implementer correctly avoided dead code per surgical principle; outcome is stronger than plan's literal requirement. At plan archive time, update Goal 4 + AC3 to reflect the real contract (T-B P1 hook is independent of T-A P2).",
+      "lifecycle": "resolved",
+      "_plan_id": "2026-06-18-v1.50-cron-review-staggering",
+      "closed_at": "2026-06-19",
+      "closure_note": "V1.51 P-last: removed stale COORDINATE-WITH-T-A-P2 marker from cron hook comment and updated tense in supervisor.rs.",
+      "closure_evidence": "feature/v1.51-hygiene-and-closeout @ 6c3fcf6a"
+    }
+  ]
+}

@@ -1,0 +1,64 @@
+{
+  "plan_id": "2026-06-23-v1.61-wasm-host-and-basic-combat",
+  "archived_at": "2026-07-05T13:17:59+0000",
+  "archived_by": "repo hygiene \u2014 Profile B residual archive (git slim plan)",
+  "residual_findings": [
+    {
+      "id": "R-V161P2-LOW-001",
+      "title": "modules/README.md \u00a7'Embedding a module' still describes old pre-compile+commit strategy (doc drift after build.rs switched to compile-from-source)",
+      "severity": "low",
+      "source": "P2 fix-wave implementer (doc drift)",
+      "scope": "modules/README.md lines 166-195",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.61 P-last",
+      "target_date": "V1.61 P-last hygiene",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-wasm-host-and-basic-combat][R-V161P2-LOW-001]",
+      "note": "Doc still describes manual rebuild + commit strategy. build.rs now auto-compiles from source. Quick doc pass needed.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-23",
+      "resolution": {
+        "plan_id": "2026-06-23-v1.61-daemon-integration-and-closeout",
+        "commit": "da02291c"
+      }
+    },
+    {
+      "id": "R-V161P2-LOW-003",
+      "title": "nexus-wasm-host not in CI rust-tests matrix \u2014 17 tests only exercised by clippy --all, not cargo test in CI",
+      "severity": "low",
+      "source": "P2 implementer (pre-existing from P2) + fix-wave confirmation",
+      "scope": ".github/workflows/ci.yml rust-tests job matrix",
+      "decision": "defer",
+      "owner": "@ops-engineer or @fullstack-dev",
+      "target": "V1.61 P-last",
+      "target_date": "V1.61 P-last",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-wasm-host-and-basic-combat][R-V161P2-LOW-003]",
+      "note": "Pre-existing from P2: the crate is in the workspace but its test binary isn't in the CI test matrix. wasm32 target is now installed in all Rust CI jobs (fix-wave). Add nexus-wasm-host to the test matrix in P-last.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-23",
+      "resolution": {
+        "plan_id": "2026-06-23-v1.61-daemon-integration-and-closeout",
+        "commit": "da02291c"
+      }
+    },
+    {
+      "id": "R-V161P2-LOW-002",
+      "title": "src/embedded.rs doc comment says 'committed .wasm blobs' \u2014 outdated after gitignore change",
+      "severity": "low",
+      "source": "P2 fix-wave implementer (doc drift)",
+      "scope": "crates/nexus-wasm-host/src/embedded.rs lines 1-8, 52",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.61 P-last",
+      "target_date": "V1.61 P-last hygiene",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-wasm-host-and-basic-combat][R-V161P2-LOW-002]",
+      "note": "Doc comment references 'committed' blobs; should say 'compiled by build.rs'. Runtime behavior unchanged.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-23",
+      "resolution": {
+        "plan_id": "2026-06-23-v1.61-daemon-integration-and-closeout",
+        "commit": "da02291c"
+      }
+    }
+  ]
+}

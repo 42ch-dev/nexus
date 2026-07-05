@@ -1,0 +1,25 @@
+{
+  "plan_id": "2026-06-16-v1.48-findings-producer",
+  "archived_at": "2026-06-18T01:00:00+08:00",
+  "archived_by": "PM (V1.49 P3 closed R-V148P0-W1: review-report path guard)",
+  "residual_findings": [
+    {
+      "id": "R-V148P0-W1",
+      "title": "load_and_parse_review_report path resolution is app-controlled; recommend safe-resolve guard or invariant test before P1/P2 prompt injection surfaces",
+      "severity": "lifecycle_resolved",
+      "lifecycle": "resolved",
+      "source": "qc2 W-1 (P0 tri-review); closed in V1.49 P3",
+      "scope": "crates/nexus-orchestration/src/auto_chain.rs::load_and_parse_review_report",
+      "decision": "closed",
+      "owner": "V1.49 P3 (fullstack-dev)",
+      "closed_at": "2026-06-18T01:00:00+08:00",
+      "closure_note": "V1.49 P3 (commit c10e4337, merged at 17414d6): lexical + canonical path-traversal guard added to load_and_parse_review_report. Validates path is canonicalized (no .. segments, no symlink escape) and verified to be under Works/<work_ref>/. Rejects paths outside the work dir with structured error. Test load_and_parse_review_report_rejects_path_outside_work_dir covers the Works/<work_ref>/../../../etc/passwd shape. QA: 13 review_report tests + 25 auto_chain tests pass.",
+      "closure_evidence": "iteration/v1.49 @ 17414d6 (P3 merge) + c10e4337 (T3); qc1/qc2/qc3 all Approve; qa.md @ df793aae PASS",
+      "fix_commits": [
+        "c10e4337",
+        "17414d6"
+      ],
+      "re_review_commits": []
+    }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "plan_id": "2026-06-22-v1.59-df12-outbox-consolidation",
+  "title": "DF-12 Outbox Consolidation (P1)",
+  "iteration": "V1.59",
+  "track": "Track B",
+  "wave": "Wave 1 (parallel w/ P0)",
+  "effort": "L",
+  "owner": "@fullstack-dev-2",
+  "status": "Done",
+  "file": ".mstar/plans/2026-06-22-v1.59-df12-outbox-consolidation.md",
+  "working_branch": "feature/v1.59-df12-outbox-consolidation",
+  "merge_target": "iteration/v1.59",
+  "depends_on": [
+    "2026-06-22-v1.59-compass-and-plan-stubs"
+  ],
+  "created": "2026-06-22",
+  "review_strategy": "Merge to integration → tri-review → mid-QA → targeted fix-wave",
+  "closed_at": "2026-06-22T23:59:00Z"
+}

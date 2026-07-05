@@ -1,0 +1,22 @@
+{
+  "plan_id": "2026-06-22-v1.56-df56-dependent-slice",
+  "title": "V1.56 P3 — DF-56 Dependent Slice (registry.refresh 条件边 + workspace.open/commit 分支输入)",
+  "status": "Done",
+  "type": "implement",
+  "track": "Track B / Wave 3",
+  "owner": "@fullstack-dev-2",
+  "effort": "M",
+  "working_branch": "feature/v1.56-df56-dependent-slice",
+  "merge_target": "iteration/v1.56",
+  "created": "2026-06-22",
+  "compass": "v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md",
+  "qc_strategy": "Tri-review + mid-QA + targeted fix-wave",
+  "depends_on": [
+    "P0 merged to iteration/v1.56",
+    "P1 merged to iteration/v1.56",
+    "P2 merged to iteration/v1.56"
+  ],
+  "qc_status": "tri-review: qc1 Approve + qc2 Approve + qc3 Request Changes (warnings only); PM consolidated Approve; W-003 entity-scope-model.md amendment applied by PM; W-001/W-002 deferred as residuals",
+  "done_at": "2026-06-22",
+  "done_note": "DF-56 sub-items 4-5 (registry.refresh conditional edges + workspace branch inputs) shipped with PM override on qc3 strict verdict. W-003 spec amend applied directly. 841 lib tests + 11 converge e2e + 20 new P3 tests pass. 6 new residuals registered (2 medium + 4 low). All 4 V1.56 implement plans (P0+P1+P2+P3) now Done."
+}

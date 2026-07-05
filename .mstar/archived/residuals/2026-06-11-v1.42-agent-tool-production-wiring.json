@@ -1,0 +1,42 @@
+{
+  "plan_id": "2026-06-11-v1.42-agent-tool-production-wiring",
+  "schema_version": 1,
+  "entries": [
+    {
+      "id": "R-V142P3-QC3-W-01",
+      "severity": "medium",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-12",
+      "closure_note": "Production path wired: EnterAction::HostTool variant added to preset manifest; production path is schedule tick -> preset graph -> StateCompositeTask -> HostToolCallTask -> DaemonToolDispatchAdapter -> handler. AC1 met (one tool callable from a running schedule). W-01 resolved by fix commit aa0574cc.",
+      "closure_evidence": "commit aa0574cc fix(v1.42 P3): QC fix wave; qc3 targeted re-review (commit 615f1e93, verdict Approve) verified the wiring + new supervisor-level integration test passes",
+      "archived_at": "2026-06-12"
+    },
+    {
+      "id": "R-V142P3-QC3-W-02",
+      "severity": "low",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-12",
+      "closure_note": "Hot-path tightened: value_contains_template() helper short-circuits payload build + handlebars rendering when args contain no {{ placeholders. Trade-off documented. W-02 resolved by fix commit aa0574cc.",
+      "closure_evidence": "commit aa0574cc fix(v1.42 P3): QC fix wave; qc3 targeted re-review (commit 615f1e93, verdict Approve) verified the hot-path tightening",
+      "archived_at": "2026-06-12"
+    },
+    {
+      "id": "R-V142P3-QC2-W-01",
+      "severity": "medium",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-12",
+      "closure_note": "FORBIDDEN test assertion strengthened: CapabilityError::Forbidden variant added; adapter preserves NexusApiError::Forbidden -> CapabilityError::Forbidden. Test now asserts the Forbidden variant directly. W-01 resolved by fix commit aa0574cc.",
+      "closure_evidence": "commit aa0574cc fix(v1.42 P3): QC fix wave; qc2 targeted re-review (commit 9edb1658, verdict Approve) verified the strengthened assertion",
+      "archived_at": "2026-06-12"
+    },
+    {
+      "id": "R-V142P3-QC2-W-02",
+      "severity": "medium",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-12",
+      "closure_note": "Completion-lock test added: seed_work_completion_locked() helper + new test verifies read-only schedule_status succeeds under completion-lock through the adapter path. W-02 resolved by fix commit aa0574cc.",
+      "closure_evidence": "commit aa0574cc fix(v1.42 P3): QC fix wave; qc2 targeted re-review (commit 9edb1658, verdict Approve) verified the new completion-lock test passes",
+      "archived_at": "2026-06-12"
+    }
+  ]
+}

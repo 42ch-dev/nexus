@@ -1,0 +1,32 @@
+{
+  "plan_id": "2026-06-27-v1.69-frontend-residuals",
+  "archived_at": "2026-06-27",
+  "schema_version": 1,
+  "plan": {
+    "plan_id": "2026-06-27-v1.69-frontend-residuals",
+    "title": "V1.69 P1 — V1.67 Frontend Refactor Residuals (work_profile literal union + WORK_PROFILES SSOT + adapter-contract parity + preset query keys)",
+    "iteration": "V1.69",
+    "slot": "P1",
+    "status": "Done",
+    "effort": "S",
+    "owner": "@frontend-dev",
+    "review": "QC tri-review pending (after implement)",
+    "wave": 2,
+    "dependency": "P0 merged (shared apps/web surface)",
+    "working_branch": "feature/v1.69-frontend-residuals",
+    "merge_target": "iteration/v1.69",
+    "file": ".mstar/plans/2026-06-27-v1.69-frontend-residuals.md",
+    "wire_contracts_changed": false,
+    "iteration_compass": "v1.69-design-system-maturation-and-canvas-draft-compass-v1.md",
+    "completed_at": "2026-06-27 (QC 3/3 Approve + QA Pass)",
+    "merge_commit": "8a48f80e",
+    "qc_reports": [
+      ".mstar/plans/reports/2026-06-27-v1.69-frontend-residuals/qc1.md",
+      ".mstar/plans/reports/2026-06-27-v1.69-frontend-residuals/qc2.md",
+      ".mstar/plans/reports/2026-06-27-v1.69-frontend-residuals/qc3.md"
+    ],
+    "qa_report": ".mstar/plans/reports/2026-06-27-v1.69-frontend-residuals/qa.md",
+    "qc_verdict": "Approve (3/3; QC1 1W/3S non-blocking, QC2 0 findings, QC3 0 findings)",
+    "qa_verdict": "Pass (121/121 tests, typecheck/build green, P0+P1 acceptance met)"
+  }
+}

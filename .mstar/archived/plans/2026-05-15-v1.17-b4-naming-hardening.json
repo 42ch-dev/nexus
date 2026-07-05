@@ -1,0 +1,7 @@
+{
+  "id": "2026-05-15-v1.17-b4-naming-hardening",
+  "title": "V1.17 B4: Naming and Hardening",
+  "status": "Done",
+  "done_at": "2026-05-15",
+  "notes": "QC: Approve (initial C-001/C-002 fixed in-tooling, re-check clean). No residuals."
+}

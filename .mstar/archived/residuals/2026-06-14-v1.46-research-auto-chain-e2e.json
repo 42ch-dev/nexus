@@ -1,0 +1,55 @@
+{
+  "plan_id": "2026-06-14-v1.46-research-auto-chain-e2e",
+  "archived_at": "2026-06-15T04:00:00+08:00",
+  "archived_by": "P-last (hygiene-and-closeout)",
+  "residual_findings": [
+    {
+      "id": "R-V139P5-S1",
+      "title": "supervisor+boot E2E",
+      "severity": "lifecycle_resolved",
+      "lifecycle": "resolved",
+      "source": "V1.46 P-last closeout (2026-06-15); 2026-06-14-v1.46-research-auto-chain-e2e",
+      "scope": "see 2026-06-14-v1.46-research-auto-chain-e2e qc-consolidated + QA report",
+      "decision": "closed",
+      "owner": "V1.46 P-last",
+      "closed_at": "2026-06-15T04:00:00+08:00",
+      "closure_note": "Closed in V1.46 P3 (a486e4c3 + 87f00619); 5 hermetic tests prove boot->running->terminal-done + boot-resume; QA PASS (86e54ccb)."
+    },
+    {
+      "id": "R-V146P3-QC3-S1",
+      "title": "Raw SQL fixture duplicates schema knowledge (insert_research_schedule)",
+      "severity": "low",
+      "source": "qc3 (performance/reliability) S-1",
+      "scope": "crates/nexus-orchestration/tests/research_supervisor_e2e.rs:108-135",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target_date": "V1.50",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-research-auto-chain-e2e]",
+      "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.] [P-last T3 2026-06-18: bulk-deferred to V1.50 per compass \u00a71.4.]",
+      "target": "V1.50",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-18",
+      "closure_note": "V1.50 P-last T1: extracted ResearchScheduleFixture struct + insert() method in tests/research_supervisor_e2e.rs so the creator_schedules column list + RESEARCH_PRESET_VERSION constant live in one place within the test file. Struct doc cites the canonical schema sources (20260419_creator_schedules.sql + 202606080002_creator_schedules_work_id.sql). execute().unwrap() replaced with unwrap_or_else + panic naming the fixture. The raw INSERT is preserved (intentional \u2014 bypasses insert_pending validation to control work_id + status); trade-off documented in the struct doc.",
+      "closure_evidence": "feature/v1.50-hygiene-and-closeout (commit c666a1d8)",
+      "_plan_id": "2026-06-14-v1.46-research-auto-chain-e2e"
+    },
+    {
+      "id": "R-V146P3-QC3-S2",
+      "title": "schedule_status helper panics on missing row (fetch_one(...).unwrap())",
+      "severity": "low",
+      "source": "qc3 (performance/reliability) S-2",
+      "scope": "crates/nexus-orchestration/tests/research_supervisor_e2e.rs:138-145",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target_date": "V1.50",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-14-v1.46-research-auto-chain-e2e]",
+      "note": "Out of WL-A. [P-last T3: bulk-deferred to V1.49.] [P-last T3 2026-06-18: bulk-deferred to V1.50 per compass \u00a71.4.]",
+      "target": "V1.50",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-18",
+      "closure_note": "V1.50 P-last T1: schedule_status helper rewritten to use fetch_optional + explicit match. Both failure modes (DB read error, missing row) now panic with a message naming the looked-up schedule_id and pointing at the likely cause (forgot ResearchScheduleFixture::insert). Return type stays String so all 7 assert_eq! call sites remain unchanged.",
+      "closure_evidence": "feature/v1.50-hygiene-and-closeout (commit fee12c37)",
+      "_plan_id": "2026-06-14-v1.46-research-auto-chain-e2e"
+    }
+  ]
+}

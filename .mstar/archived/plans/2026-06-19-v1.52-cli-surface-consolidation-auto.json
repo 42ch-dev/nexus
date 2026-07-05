@@ -1,0 +1,19 @@
+{
+  "plan_id": "2026-06-19-v1.52-cli-surface-consolidation-auto",
+  "title": "T-A P1 — World KB CLI surface consolidation + --auto happy path",
+  "status": "Done",
+  "started_at": "2026-06-19T12:30:00Z",
+  "done_at": "2026-06-19T18:00:00Z",
+  "owner": "@fullstack-dev-2",
+  "agents": [
+    "@fullstack-dev-2",
+    "@qa-engineer"
+  ],
+  "task_category": "logic",
+  "working_branch": "feature/v1.52-cli-surface-consolidation-auto",
+  "merge_target": "iteration/v1.52",
+  "iteration_compass": ".mstar/iterations/v1.52-author-completion-and-multi-branch-preset-orchestration-delivery-compass-v1.md",
+  "created_at": "2026-06-19T08:30:00Z",
+  "qc_dispatched_at": "2026-06-19T13:00:00Z",
+  "qc_reports_path": ".mstar/plans/reports/2026-06-19-v1.52-cli-surface-consolidation-auto/"
+}

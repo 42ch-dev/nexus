@@ -1,0 +1,16 @@
+{
+  "plan_id": "2026-05-12-v1.16-creator-identity-auth-compat",
+  "title": "V1.16 Creator identity and auth compatibility regression",
+  "status": "Done",
+  "started_at": "2026-05-13T05:30:00Z",
+  "done_at": "2026-05-13T06:30:00Z",
+  "working_branch": "feature/v1.16-creator-identity-auth-compat",
+  "theme": "B4",
+  "milestone": "M3",
+  "effort": "M",
+  "depends_on": ["2026-05-12-v1.16-creator-knowledge-topology", "2026-05-12-v1.16-creator-kb-multiscope"],
+  "created_at": "2026-05-12T09:00:00Z",
+  "qc_verdict": "Approve (after fix)",
+  "qa_verdict": "Pass",
+  "residuals": ["R-CREATOR-001", "R-CREATOR-002", "R-CREATOR-003"]
+}

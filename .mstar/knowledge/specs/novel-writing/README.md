@@ -1,0 +1,73 @@
+# Novel writing specs (`specs/novel-writing/`)
+
+Normative specifications for `work_profile: novel` — layout, presets, quality loop, author desk, and sync.
+
+**Relocated**: 2026-06-17 from flat `specs/novel-*.md` (spec hygiene).
+
+**Parent index**: [specs/README.md](../README.md) · **Rules**: [specs/AGENTS.md](../AGENTS.md)
+
+---
+
+## Read order
+
+```text
+workflow-profile.md     → artifact layout, chapter SSOT, preset gates, completion, cron staggering (§11), auto-chronology (§11.5)
+quality-loop.md         → findings, review presets, rules, Logs, 96h escalation
+author-experience.md    → author path, status UX, remediation copy
+sync-contract.md        → chapter sync module scan rules (companion)
+multi-work-lifecycle.md → completion lock, reopen, runtime_lock (V1.41+)
+work-pool.md            → selection + inspiration pools (V1.41)
+manuscript-audit.md     → DF-69 on-demand audit (out-of-band)
+```
+
+**Draft overlays (V1.49 / V1.50 P-last — folded)**:
+
+| Overlay | Merge target | Status |
+| --- | --- | --- |
+| [findings-lifecycle.md](../../archived/knowledge/novel-writing/findings-lifecycle.md) | `quality-loop.md` §2 | **Superseded** (V1.49 P-last) |
+| [narrative-indexes.md](../../archived/knowledge/novel-writing/narrative-indexes.md) | `workflow-profile.md` §4.6 | **Superseded** (V1.49 P-last) |
+| [cron-staggering.md](../../archived/knowledge/novel-writing/cron-staggering.md) | `workflow-profile.md` §11 | **Superseded** (V1.50 P-last) |
+| [auto-chronology.md](../../archived/knowledge/novel-writing/auto-chronology.md) | `workflow-profile.md` §11.5 | **Superseded** (V1.50 P-last) |
+
+---
+
+## Document index
+
+| Document | Class | Status |
+| --- | --- | --- |
+| [workflow-profile.md](workflow-profile.md) | Feature line | Shipped V1.36 → V1.50 (§11 cron + auto-chronology) |
+| [quality-loop.md](quality-loop.md) | Feature line | Shipped V1.47 → V1.49 |
+| [author-experience.md](author-experience.md) | Feature line | Shipped V1.49 P2 |
+| [manuscript-audit.md](manuscript-audit.md) | Feature line | Shipped V1.44 |
+| [multi-work-lifecycle.md](multi-work-lifecycle.md) | Feature line | Shipped V1.41 → V1.42 |
+| [work-pool.md](work-pool.md) | Feature line | Shipped V1.41 |
+| [sync-contract.md](sync-contract.md) | Companion | Normative (module contract) |
+
+**Also archived**: [novel-findings-maturity.md](../../archived/knowledge/novel-findings-maturity.md) — superseded; folded into `quality-loop.md` §9. (The four folded Draft overlays above — findings-lifecycle, narrative-indexes, cron-staggering, auto-chronology — live under [`../../archived/knowledge/novel-writing/`](../../archived/knowledge/novel-writing/).)
+
+---
+
+## Authority matrix (novel domain)
+
+| Topic | Primary SSOT |
+| --- | --- |
+| `Works/<work_ref>/` layout + chapter frontmatter | `workflow-profile.md` |
+| Per-Work cron staggering (3-role) | `workflow-profile.md` §11 |
+| Per-Work auto-chronology (opt-in) | `workflow-profile.md` §11.5 |
+| Findings lifecycle + review chain | `quality-loop.md` §2 (6-state F6) |
+| F### / E### index files | `workflow-profile.md` §4.6 (5-col schema) |
+| World KB promotion state machine | [entity-scope-model.md §5.5](../entity-scope-model.md#55-world-kb-promotion-state-machine-v150-normative) |
+| Author happy path + remediation copy | `author-experience.md` |
+| On-demand chapter audit | `manuscript-audit.md` |
+| Multi-work completion + locks | `multi-work-lifecycle.md` |
+| Pool / default Work | `work-pool.md` |
+| Sync scan roots | `sync-contract.md` (layout SSOT: `workflow-profile.md` §3, §7) |
+| Top-level CLI groups / preset dispatch | [cli-spec.md](../cli-spec.md), [creator-run-preset-entry.md](../creator-run-preset-entry.md) |
+
+---
+
+## Maintaining this subtree
+
+1. Edit canonical files under `novel-writing/` only.
+2. On overlay promotion (P-last), fold into the merge-target Master and archive the overlay.
+3. Update this README when adding or retiring a novel spec.

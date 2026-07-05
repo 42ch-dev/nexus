@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "description": "Archived resolved residual from V1.34 PR42 (cursor-pr42-stage-status). V1.35 P0 (commit 59e50bb) closed R-CURSOR-PR42-03 with a stage_status transition gate.",
+  "archived_at": "2026-06-07T12:30:00+08:00",
+  "plan_id": "2026-06-04-v1.34-cursor-pr42-stage-status",
+  "entries": [
+    {
+      "id": "R-CURSOR-PR42-03",
+      "title": "FL-E stage_status gate bypass via status-only PATCH — reject direct status promotion without force=true",
+      "severity": "medium",
+      "source": "Cursor security automation #351d19c7 (PR #42 revalidation RUN_ID bc-52739238, 2026-06-05) — NEW post-3b24aaf finding",
+      "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs (patch_work_stage: check_stage_status_transition)",
+      "decision": "resolve",
+      "owner": "@fullstack-dev",
+      "target": "Resolved by V1.35 P0 (commit 59e50bb) — check_stage_status_transition() rejects stage_status → complete/skipped without force=true when no current_stage; 3 new tests added (patch_work_stage_change_is_auditable, patch_work_invalid_stage_value_returns_400, patch_work_intake_status_independent_of_stage_status).",
+      "tracking": null,
+      "closed_reason": "resolved_in_v1.35_p0",
+      "closure_evidence": "commit 59e50bb on feature/v1.35-critical-residual-convergence; works_api.rs 28 tests pass (was 18 before P0); clippy clean.",
+      "closed_at": "2026-06-07T12:00:00+08:00",
+      "archived_at": "2026-06-07T12:30:00+08:00",
+      "lifecycle": "resolved",
+      "closure_note": "Resolved per closure_evidence: commit 59e50bb on feature/v1.35-critical-residual-convergence; works_api.rs 28 tests pass (was 18 before P0); clippy clean.. Status.json SSOT refreshed in commit 4a4ba9d (tech_debt_summary) and 13a4b6d (residual lifecycle)."
+    }
+  ]
+}

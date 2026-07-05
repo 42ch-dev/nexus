@@ -1,0 +1,45 @@
+{
+  "plan_id": "2026-07-01-v1.79-soul-personality-visualization",
+  "archived_at": "2026-07-05T13:17:59+0000",
+  "archived_by": "repo hygiene \u2014 Profile B residual archive (git slim plan)",
+  "residual_findings": [
+    {
+      "id": "R-V179P1-QC1-001",
+      "title": "memory-page.tsx 360-line module exceeds <=250 discipline \u2014 extract PendingReviewsSection/FragmentsSection (qc1 W1; pre-existing 314 + P1 46)",
+      "severity": "low",
+      "source": "qc1 W1",
+      "scope": "apps/web/src/pages/memory-page.tsx",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "V1.80+ hygiene",
+      "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.79-soul-personality-visualization][R-V179P1-QC1-001]",
+      "note": "Pre-existing tech debt (314 pre-P1); bounded P1 addition (+46 SoulSection). Extract sections into apps/web/src/components/memory/ siblings. Not a P1 regression.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-07-01 (V1.80 P1)",
+      "closure_note": "Closed by V1.80 P1 (2026-07-01-v1.80-frontend-hygiene-residuals). QC 3/3 Approve + QA Pass (d3982d9d).",
+      "resolution": {
+        "plan_id": "2026-07-01-v1.80-frontend-hygiene-residuals",
+        "commit": "0851e2cc"
+      }
+    },
+    {
+      "id": "R-V179P1-QC1-002",
+      "title": "SOUL viz minor nits \u2014 BAND_PALETTE token promotion + unused driftDateHelper alias (qc1 S1/S2)",
+      "severity": "low",
+      "source": "qc1 S1/S2",
+      "scope": "apps/web/src/components/soul/temporal-drift.tsx",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "V1.80+ hygiene",
+      "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.79-soul-personality-visualization][R-V179P1-QC1-002]",
+      "note": "Slot 1-5 BAND_PALETTE hardcodes RGBA while slot 0 uses var(); promote to DESIGN.md tokens. Remove unused driftDateHelper export.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-07-01 (V1.80 P1)",
+      "closure_note": "Closed by V1.80 P1 (2026-07-01-v1.80-frontend-hygiene-residuals). QC 3/3 Approve + QA Pass (d3982d9d).",
+      "resolution": {
+        "plan_id": "2026-07-01-v1.80-frontend-hygiene-residuals",
+        "commit": "0851e2cc"
+      }
+    }
+  ]
+}

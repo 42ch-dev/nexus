@@ -1,0 +1,14 @@
+{
+  "plan_id": "2026-06-25-v1.65-local-api-chapter-surface-and-track-b",
+  "title": "V1.65 P0 — Local API Chapter-Content Surface + Track B Backend",
+  "iteration": "V1.65",
+  "slot": "P0",
+  "status": "Done",
+  "effort": "L",
+  "owner": "@fullstack-dev",
+  "review": "Tri-review + QA",
+  "wave": 1,
+  "dependency": "P-1",
+  "working_branch": "feature/v1.65-local-api-chapter-surface-and-track-b",
+  "merge_target": "iteration/v1.65"
+}

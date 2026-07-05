@@ -1,0 +1,17 @@
+{
+  "plan_id": "2026-06-22-v1.60-compass-and-plan-stubs",
+  "title": "Compass & Plan Stubs + Forensic status.json Bulk-Resolve (P-1)",
+  "iteration": "V1.60",
+  "track": "prepare",
+  "wave": "—",
+  "effort": "M",
+  "owner": "@project-manager (PM whitelist; forensic audit delegated to @general; compass draft by @writing-specialist)",
+  "status": "Done",
+  "file": ".mstar/plans/2026-06-22-v1.60-compass-and-plan-stubs.md",
+  "created": "2026-06-22",
+  "closed_at": "2026-06-22",
+  "working_branch": "feature/v1.60-prepare (merged; branch deleted)",
+  "merge_target": "iteration/v1.60",
+  "depends_on": null,
+  "completion_report": "P-1 Prepare complete. T0 forensic bulk-resolve: 28 V1.57+ residuals lifecycle=deferred -> resolved per @general audit (25 CONFIRMED_CLOSED + 2 PARTIALLY_CLOSED + 1 wontfix); 4 NOT_CLOSED retargeted V1.57+ -> V1.60+ for P-last absorption. tech_debt_summary.total_open 22(stale)/56(honest) -> 28(post-bulk-resolve). T1 compass PM-locked (v1.60-df46-local-parity-and-script-depth-delivery-compass-v1.md; 14 grill decisions Q1-Q14; 5-plan single-wave dual-track topology; hard fallback Q4 for Track A). T2-T3 five plan stubs authored. T4 status.json preamble set. T6 PM review approved all 5 stubs; pre_implement_gate set to approved. Commits: 8c5c15b7 (Prepare round 1: compass + T0 bulk-resolve + T4 preamble) + 435100e7 (merge to iteration/v1.60) + P-1 round 2 commit (5 plan stubs + T6 approval)."
+}

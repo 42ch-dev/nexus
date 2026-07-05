@@ -1,0 +1,20 @@
+{
+  "plan_id": "2026-06-22-v1.55-df43-sqlite-alignment",
+  "title": "V1.55 P0 — DF-43 SQLite Persistence / Crate-Model Alignment",
+  "status": "Done",
+  "owner": "@fullstack-dev",
+  "effort": "M",
+  "working_branch": "feature/v1.55-df43-sqlite-alignment",
+  "merge_target": "iteration/v1.55",
+  "type": "implement",
+  "track": "Theme B / Track A",
+  "created": "2026-06-22",
+  "compass": "v1.55-non-novel-profile-completion-and-infrastructure-refactor-delivery-compass-v1.md",
+  "dependencies": [
+    "2026-06-22-v1.55-compass-and-plan-stubs"
+  ],
+  "qc_status": "Approve — qc1/qc2/qc3 (commits 7306102a / 21c4b28a / 85406d1c)",
+  "qa_status": "Pass — @qa-engineer mid-QA (commit 24122d26; 8/8 AC; CI gates re-run clean)",
+  "merge_commit": "fa2f28d5 (P0 merge) + 4c768b78 (plan notes)",
+  "done_at": "2026-06-21"
+}

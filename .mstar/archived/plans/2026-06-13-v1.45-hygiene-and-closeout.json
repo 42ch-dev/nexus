@@ -1,0 +1,12 @@
+{
+    "plan_id": "2026-06-13-v1.45-hygiene-and-closeout",
+    "title": "P-last — Spec promotion + tracker closeout",
+    "status": "Done",
+    "working_branch": "feature/v1.45-hygiene-and-closeout",
+    "merge_target": "iteration/v1.45",
+    "plan_file": ".mstar/plans/2026-06-13-v1.45-hygiene-and-closeout.md",
+    "depends_on": "2026-06-13-v1.45-quickstart-and-author-spec",
+    "compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md",
+    "done_at": "2026-06-14T02:30:00+08:00",
+    "qc_status": "PM signoff (no QC required for hygiene plan)"
+}

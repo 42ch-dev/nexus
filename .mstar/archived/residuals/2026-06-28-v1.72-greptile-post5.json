@@ -1,0 +1,102 @@
+{
+  "plan_id": "2026-06-28-v1.72-greptile-post5",
+  "archived_at": "2026-07-05T13:17:59+0000",
+  "archived_by": "repo hygiene \u2014 Profile B residual archive (git slim plan)",
+  "residual_findings": [
+    {
+      "id": "R-V172-GREPTILE-001",
+      "title": "Unstable handleSave reference in useEffect dependency array (3 inspector files)",
+      "severity": "medium",
+      "source": "Greptile post-merge review (PR #97)",
+      "scope": "apps/web/src/components/canvas/strategy-canvas/inspectors/{state,edge,prompt}-inspector.tsx:115-122",
+      "decision": "fix",
+      "owner": "frontend-dev",
+      "target": "V1.72 hotfix (target_date 2026-06-28)",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-greptile-post5][R-V172-GREPTILE-001]",
+      "note": "handleSave is declared as async function inside component body without useCallback. Reference changes every render, causing useEffect to re-fire continuously. lastHandledTriggerRef guard prevents duplicate API calls in practice, but violates React hooks contract. Fix: wrap handleSave in useCallback with proper dependencies.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-28T14:06:00Z",
+      "closure_note": "Closed in V1.72 Greptile hotfix PR #98 (merged at e41392a1b7e604297e0554ef0bfd8cb73ca547b7); review thread resolved by Greptile (5/5 confidence).",
+      "resolution": {
+        "plan_id": "hotfix/v1.72-greptile-post5",
+        "commit": "e41392a1b7e604297e0554ef0bfd8cb73ca547b7"
+      }
+    },
+    {
+      "id": "R-V172-GREPTILE-002",
+      "title": "Volume select fires structural patch immediately on change (UX inconsistency)",
+      "severity": "medium",
+      "source": "Greptile post-merge review (PR #97)",
+      "scope": "apps/web/src/components/canvas/outline-canvas.tsx:626-641",
+      "decision": "fix",
+      "owner": "frontend-dev",
+      "target": "V1.72 hotfix (target_date 2026-06-28)",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-greptile-post5][R-V172-GREPTILE-002]",
+      "note": "Volume dropdown onChange calls onMove (handleStructure \u2192 patchStructure.mutate) immediately, while title/slug/status/planned_word_count accumulate into local state and dispatch only on Save click. UX inconsistency + risk of accidental revision-bumping dispatch. Fix: update volume local state in onChange and dispatch via the same save() path (set.volume in OutlinePatchChapterRequest) as other fields.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-28T14:06:00Z",
+      "closure_note": "Closed in V1.72 Greptile hotfix PR #98 (merged at e41392a1b7e604297e0554ef0bfd8cb73ca547b7); review thread resolved by Greptile (5/5 confidence).",
+      "resolution": {
+        "plan_id": "hotfix/v1.72-greptile-post5",
+        "commit": "e41392a1b7e604297e0554ef0bfd8cb73ca547b7"
+      }
+    },
+    {
+      "id": "R-V172-GREPTILE-003",
+      "title": "Keychain password written to GITHUB_OUTPUT but never read by subsequent steps",
+      "severity": "high",
+      "source": "Greptile post-merge review (PR #97)",
+      "scope": ".github/workflows/desktop-release.yml:122",
+      "decision": "fix",
+      "owner": "ops-engineer",
+      "target": "V1.72 hotfix (target_date 2026-06-28)",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-greptile-post5][R-V172-GREPTILE-003]",
+      "note": "Random keychain password echoed to GITHUB_OUTPUT exposes secret via steps.keychain.outputs.keychain_pass in GitHub Actions summary and any step that reads step outputs. Cleanup step uses security delete-keychain (no password required); signing steps run in same shell invocation where password is in scope. Fix: remove echo \"keychain_pass=$keychain_pass\" line.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-28T14:06:00Z",
+      "closure_note": "Closed in V1.72 Greptile hotfix PR #98 (merged at e41392a1b7e604297e0554ef0bfd8cb73ca547b7); review thread resolved by Greptile (5/5 confidence).",
+      "resolution": {
+        "plan_id": "hotfix/v1.72-greptile-post5",
+        "commit": "e41392a1b7e604297e0554ef0bfd8cb73ca547b7"
+      }
+    },
+    {
+      "id": "R-V172-GREPTILE-004",
+      "title": "split_frontmatter matches \\n--- anywhere, not just bare delimiter line",
+      "severity": "medium",
+      "source": "Greptile post-merge review (PR #97)",
+      "scope": "crates/nexus-daemon-runtime/src/api/handlers/outline.rs:125",
+      "decision": "fix",
+      "owner": "fullstack-dev",
+      "target": "V1.72 hotfix (target_date 2026-06-28)",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-greptile-post5][R-V172-GREPTILE-004]",
+      "note": "after_open.find(\"\\n---\") matches substring anywhere, including \"\\n---more-text\" or YAML block scalar starting line with ---. User-defined chapter title or timeline event description containing --- at line start, serialized by serde_yaml without quoting, could cause premature frontmatter split. Fix: match \"\\n---\\n\" (or only at end-of-string) to enforce bare delimiter line.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-28T14:06:00Z",
+      "closure_note": "Closed in V1.72 Greptile hotfix PR #98 (merged at e41392a1b7e604297e0554ef0bfd8cb73ca547b7); review thread resolved by Greptile (5/5 confidence).",
+      "resolution": {
+        "plan_id": "hotfix/v1.72-greptile-post5",
+        "commit": "e41392a1b7e604297e0554ef0bfd8cb73ca547b7"
+      }
+    },
+    {
+      "id": "R-V172-GREPTILE-005",
+      "title": "Redundant `patch` object dep alongside `patch.isPending` primitive (greploop iter 1)",
+      "severity": "low",
+      "source": "Greptile P2 follow-up on PR #98",
+      "scope": "apps/web/src/components/canvas/strategy-canvas/inspectors/{state,edge,prompt}-inspector.tsx:115 (useCallback deps)",
+      "decision": "fix",
+      "owner": "frontend-dev",
+      "target": "V1.72 greploop iter 1 (greploop feedback during PR #98 review)",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-28-v1.72-greptile-post5][R-V172-GREPTILE-005]",
+      "note": "`patch` object reference is stable in TanStack Query v5; listing it alongside the narrower `patch.isPending` primitive dep causes handleSave to re-create unnecessarily. Fix: removed `patch` from deps; kept `patch.isPending` as narrow primitive; `patch.mutateAsync` is stable per TanStack Query v5.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-28T14:06:00Z",
+      "closure_note": "Closed in greploop iter 1: cc7dde17 dropped `patch` from useCallback deps across 3 inspectors; `patch.isPending` retained as narrow primitive dep. Tests pass (156/156).",
+      "resolution": {
+        "plan_id": "hotfix/v1.72-greptile-post5",
+        "commit": "cc7dde17"
+      }
+    }
+  ]
+}

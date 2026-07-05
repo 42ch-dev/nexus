@@ -1,0 +1,65 @@
+{
+  "plan_id": "2026-06-10-v1.41-hygiene",
+  "schema_version": 1,
+  "entries": [
+    {
+      "id": "R-V141HYG-01",
+      "severity": "medium",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-11",
+      "closure_note": "UTF-8 boundary-aware truncation in promote_to_long_term. TDD: CJK panic test fails before, passes after.",
+      "closure_evidence": "commit 5be7e5d6",
+      "archived_at": "2026-06-11"
+    },
+    {
+      "id": "R-V141HYG-02",
+      "severity": "low",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-11",
+      "closure_note": "YAML-safe string serialization in toyaml. Reverted to {:?} for valid escaped YAML. TDD: metachar test.",
+      "closure_evidence": "commit 3c6d8b4b",
+      "archived_at": "2026-06-11"
+    },
+    {
+      "id": "R-V141HYG-03",
+      "severity": "nit",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-11",
+      "closure_note": "13 WAIVER/SAFETY comments at call sites for the 13 waived residuals.",
+      "closure_evidence": "commit 36890233",
+      "archived_at": "2026-06-11"
+    },
+    {
+      "id": "R-V141HYG-04",
+      "severity": "nit",
+      "lifecycle": "defer",
+      "closed_at": "2026-06-11",
+      "closure_note": "env-driven MAX_DIGEST_BYTES hardcoded const — precedent exists for env-driven limits. V1.42.",
+      "archived_at": "2026-06-11"
+    },
+    {
+      "id": "R-V141HYG-05",
+      "severity": "nit",
+      "lifecycle": "accept",
+      "closed_at": "2026-06-11",
+      "closure_note": "Inline WAIVER/SAFETY comments at call sites — covered by R-V141HYG-03 fix wave. V1.42 if more accrue.",
+      "archived_at": "2026-06-11"
+    },
+    {
+      "id": "R-V141HYG-06",
+      "severity": "nit",
+      "lifecycle": "defer",
+      "closed_at": "2026-06-11",
+      "closure_note": "YAML escaping should be done by a real YAML emitter. V1.42.",
+      "archived_at": "2026-06-11"
+    },
+    {
+      "id": "R-V141HYG-07",
+      "severity": "nit",
+      "lifecycle": "defer",
+      "closed_at": "2026-06-11",
+      "closure_note": "Floor char boundary helper extraction. V1.42.",
+      "archived_at": "2026-06-11"
+    }
+  ]
+}

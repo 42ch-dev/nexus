@@ -1,0 +1,87 @@
+{
+  "plan_id": "2026-06-24-v1.64-control-room-and-setup-screens",
+  "archived_at": "2026-07-05T13:17:59+0000",
+  "archived_by": "repo hygiene \u2014 Profile B residual archive (git slim plan)",
+  "residual_findings": [
+    {
+      "id": "R-V164-P2-G3",
+      "title": "CapabilityInfo carries no admission-gate data \u2014 Capabilities page shows name + I/O schemas only (not admission gates)",
+      "severity": "low",
+      "source": "P2 implementer (scope gap)",
+      "scope": "apps/web/src/pages/capabilities-page.tsx",
+      "decision": "resolved",
+      "owner": "@frontend-dev",
+      "target": "V1.71",
+      "target_date": "V1.71",
+      "tracking_link": ".mstar/plans/reports/2026-06-24-v1.64-control-room-and-setup-screens/ (P2 completion \u00a7Residuals)",
+      "note": "Surfaced an explicit admission-gate enforcement note in the Control Room Capabilities page without changing the wire contract. The daemon already enforces admission gates; the UI now tells the user that enforcement is daemon-side rather than silent.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-27",
+      "closure_note": "Closed by commit 2d82a6f7: added an admission-gate enforcement note and a regression test to capabilities-page.tsx.",
+      "resolution": {
+        "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+        "commit": "2d82a6f7"
+      }
+    },
+    {
+      "id": "R-V164-P2-G1",
+      "title": "CreateWorkRequest/PatchWorkRequest lack work_profile field \u2014 UI cannot select profile at create/update; daemon assigns internally",
+      "severity": "low",
+      "source": "P2 implementer (scope gap, surfaced not faked)",
+      "scope": "schemas/local-api/works/ create/patch request DTOs + apps/web create-work-dialog",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.65+",
+      "target_date": "V1.65+",
+      "tracking_link": ".mstar/plans/reports/2026-06-24-v1.64-control-room-and-setup-screens/ (P2 completion \u00a7Residuals)",
+      "note": "Profile-aware create contract needed for full Work-CRUD parity with CLI. V1.64 MVP creates with daemon-default profile; patch status/stage works.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-26",
+      "closure_note": "Closed by V1.67 P1 (frontend scope gaps).",
+      "resolution": {
+        "plan_id": "2026-06-26-v1.67-frontend-scope-gaps",
+        "commit": "963fa1ed"
+      }
+    },
+    {
+      "id": "R-V164-P2-S1",
+      "title": "Live served-UI smoke against the running nexus42 daemon binary",
+      "severity": "low",
+      "source": "P2 implementer (blocked on P3 binary)",
+      "scope": "scripts/served-ui-smoke.sh + .github/workflows/desktop-build.yml served-ui-smoke job",
+      "decision": "resolved",
+      "owner": "@ops-engineer",
+      "target": "V1.71",
+      "target_date": "V1.71",
+      "tracking_link": ".mstar/plans/reports/2026-06-24-v1.64-control-room-and-setup-screens/ (P2 completion \u00a7Residuals)",
+      "note": "Script builds apps/web, builds nexus42 release binary (rust-embed release-only), starts the daemon with a throwaway HOME, verifies Local API health, and asserts the root path serves the embedded SPA HTML. CI job runs on macOS after desktop-build.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-27",
+      "closure_note": "Closed by commit 835e4762: added scripts/served-ui-smoke.sh and a CI job in desktop-build.yml; smoke test uses an ephemeral port and release binary to avoid stale-daemon shadowing.",
+      "resolution": {
+        "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+        "commit": "835e4762"
+      }
+    },
+    {
+      "id": "R-V164-P2-G2",
+      "title": "Preset get/update/delete have no daemon routes/contracts \u2014 UI delivers list/scaffold/validate/reload only (not full CRUD)",
+      "severity": "low",
+      "source": "P2 implementer (scope gap)",
+      "scope": "crates/nexus-daemon-runtime preset-management handlers + schemas/local-api/preset-management/",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.65+",
+      "target_date": "V1.65+",
+      "tracking_link": ".mstar/plans/reports/2026-06-24-v1.64-control-room-and-setup-screens/ (P2 completion \u00a7Residuals)",
+      "note": "Preset management MVP = list/scaffold/validate/reload (validate dry-run is the high-trust affordance shipped). Full CRUD (get/update/delete routes) deferred to a future preset-CRUD plan.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-26",
+      "closure_note": "Closed by V1.67 P1 (frontend scope gaps).",
+      "resolution": {
+        "plan_id": "2026-06-26-v1.67-frontend-scope-gaps",
+        "commit": "963fa1ed"
+      }
+    }
+  ]
+}

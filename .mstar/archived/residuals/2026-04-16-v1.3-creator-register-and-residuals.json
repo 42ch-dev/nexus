@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-04-16-v1.3-creator-register-and-residuals",
+  "archived_at": "2026-04-17T12:00:00Z",
+  "entries": [
+    {
+      "id": "R1",
+      "title": "Challenge expiry not re-checked before verify submit",
+      "severity": "low",
+      "scope": "crates/nexus42/src/commands/creator.rs register_creator()",
+      "source": "QC3-R2/R4",
+      "decision": "defer",
+      "owner": "fullstack-dev",
+      "target": "V1.4",
+      "tracking": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-17T12:00:00Z",
+      "closure_note": "Added expiry re-check after solve step (Step 5) before submit, using the same buffered_expiry comparison"
+    },
+    {
+      "id": "R2",
+      "title": "Network errors during verify are not retried",
+      "severity": "low",
+      "scope": "crates/nexus42/src/commands/creator.rs submit_with_retry()",
+      "source": "QC3-R2/R5",
+      "decision": "defer",
+      "owner": "fullstack-dev",
+      "target": "V1.4",
+      "tracking": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-17T12:00:00Z",
+      "closure_note": "submit_with_retry now catches CliError::Network on the Err path and retries (up to max_attempts) instead of returning immediately"
+    },
+    {
+      "id": "R3",
+      "title": "--summary CLI flag accepted but silently ignored by register_creator",
+      "severity": "low",
+      "scope": "crates/nexus42/src/commands/creator.rs Register variant",
+      "source": "QC2-R2/S-T2-4",
+      "decision": "defer",
+      "owner": "fullstack-dev",
+      "target": "V1.4",
+      "tracking": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-17T12:00:00Z",
+      "closure_note": "Removed --summary flag from Register variant, register_creator() function signature, and all call sites"
+    }
+  ]
+}

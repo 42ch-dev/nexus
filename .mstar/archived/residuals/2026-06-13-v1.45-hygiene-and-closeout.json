@@ -1,0 +1,22 @@
+{
+  "plan_id": "2026-06-13-v1.45-hygiene-and-closeout",
+  "archived_at": "2026-07-05T13:17:59+0000",
+  "archived_by": "repo hygiene \u2014 Profile B residual archive (git slim plan)",
+  "residual_findings": [
+    {
+      "id": "R-V145B3-001",
+      "severity": "low",
+      "lifecycle": "resolved",
+      "source": "P-last cli-spec.md supersession",
+      "title": "cli-spec.md \u00a76.2D/E body still references shipped V1.33-V1.44 subcommand table; needs to be rewritten to match the new Shipped Master (creator-run-preset-entry.md). Tracked for follow-up spec-hygiene pass.",
+      "decision": "defer",
+      "owner": "@fullstack-dev or @writing-specialist",
+      "target": "V1.48",
+      "p_last_whitelist": true,
+      "closed_at": "2026-06-16",
+      "closure_note": "V1.48 P-last T1: cli-spec.md \u00a76.2D updated with authoritative-surface pointer to Shipped Master creator-run-preset-entry.md; \u00a76.2E note rewritten to record that the body was rewritten in 4aa5aa53 and \u00a76.2E deleted in V1.46 P1.",
+      "closure_evidence": "iteration/v1.48 @ 397ee075 (commit a4d1f3f6)",
+      "_plan_id": "2026-06-13-v1.45-hygiene-and-closeout"
+    }
+  ]
+}

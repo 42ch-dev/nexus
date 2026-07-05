@@ -1,0 +1,15 @@
+{
+  "plan_id": "2026-05-30-v1.31-creator-memory-capabilities",
+  "title": "V1.31 creator memory capabilities de-stub",
+  "status": "Done",
+  "working_branch": "feature/v1.31-creator-memory-capabilities",
+  "merge_target": "feature/v1.31-agentic-design-patterns",
+  "metadata": {
+    "iteration": "v1.31",
+    "primary_spec": "../iterations/v1.31-agentic-design-patterns-delivery-compass-v1.md",
+    "iteration_compass": "../iterations/v1.31-agentic-design-patterns-delivery-compass-v1.md",
+    "theme": "P1-creator-memory",
+    "tracker_ids": ["DF-30"]
+  },
+  "archived_at": "2026-05-30T12:00:00Z"
+}

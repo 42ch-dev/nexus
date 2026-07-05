@@ -1,0 +1,20 @@
+{
+  "plan_id": "2026-06-28-v1.73-outline-hardening-and-release",
+  "archived_at": "2026-06-28",
+  "schema_version": 1,
+  "plan": {
+    "plan_id": "2026-06-28-v1.73-outline-hardening-and-release",
+    "iteration_id": "V1.73",
+    "status": "Done",
+    "owner": "fullstack-dev,frontend-dev,ops-engineer",
+    "effort": "M",
+    "type": "implement",
+    "working_branch": "feature/v1.73-outline-hardening-and-release",
+    "merge_target": "iteration/v1.73",
+    "task_category": "logic",
+    "wire_contracts_changed": false,
+    "depends_on": [
+      "2026-06-28-v1.73-compass-and-plan"
+    ]
+  }
+}

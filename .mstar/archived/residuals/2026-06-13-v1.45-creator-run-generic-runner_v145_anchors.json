@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-06-13-v1.45-creator-run-generic-runner_v145_anchors",
+  "entries": [
+    {
+      "id": "BL-12",
+      "title": "V1.45 deliverable — creator run <preset_id> generic runner (resolved by B1 P0+P1+P2 atomic merge)",
+      "severity": "n/a",
+      "lifecycle": "resolved (V1.45 B1)",
+      "target": "V1.48",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "BL-13",
+      "title": "V1.45 STAGE_PRESET_ALLOWLIST memory-review drift (resolved by P1 T4)",
+      "severity": "n/a",
+      "lifecycle": "resolved (V1.45 B1)",
+      "target": "V1.48",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "Grill #20",
+      "title": "V1.45 hard-delete DEPRECATED novel-manuscript-audit parent preset dir (resolved by P1 T2)",
+      "severity": "n/a",
+      "lifecycle": "resolved (V1.45 B1)",
+      "target": "V1.48",
+      "archived_at": "2026-06-15T16:49:53Z"
+    }
+  ],
+  "archived_at": "2026-06-15T16:49:53Z",
+  "archived_by": "residual_findings hygiene sweep 2026-06-16",
+  "archived_entry_count": 3,
+  "sweep_note": "3 entries merged from status.json residual_findings"
+}

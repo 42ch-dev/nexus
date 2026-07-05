@@ -1,0 +1,91 @@
+{
+  "plan_id": "v1.65",
+  "archived_at": "2026-07-05T13:17:59+0000",
+  "archived_by": "repo hygiene \u2014 Profile B residual archive (git slim plan)",
+  "residual_findings": [
+    {
+      "id": "R-V165-QC1-W2",
+      "title": "Missing HTTP-level integration tests for chapter endpoints",
+      "severity": "medium",
+      "lifecycle": "resolved",
+      "source": "qc1.md",
+      "scope": "chapter API integration tests",
+      "decision": "defer",
+      "owner": "@qa-engineer/@fullstack-dev",
+      "target_iteration": "V1.66",
+      "tracking": "test-depth gap, not correctness",
+      "closed_at": "2026-06-25",
+      "closure_note": "Closed in V1.66 P-sec hygiene residuals (699ac872).",
+      "resolution": {
+        "plan_id": "2026-06-25-v1.66-hygiene-residuals",
+        "commit": "699ac872"
+      }
+    },
+    {
+      "id": "R-V165-QC-SUGG-DX",
+      "title": "DX/UX polish (can_edit_outline probe, title 400 DX, route nesting, enum_conversions discoverability, TipTap inline-deps pinning, save-error/protected-edit web coverage)",
+      "severity": "low",
+      "lifecycle": "resolved",
+      "source": "qc1/qc3",
+      "scope": "cross-cutting DX",
+      "decision": "resolved",
+      "target_iteration": "V1.71",
+      "closed_at": "2026-06-27",
+      "closure_note": "Closed in commit 5706277f: added can_edit_outline probe to chapter detail, PATCH title now returns 422 field_errors, chapter routes nested via Router::nest, enum_conversions discoverability header added, TipTap extensions/onUpdate memoized, and ChapterPage now respects can_edit_outline with save-error + protected-edit web coverage.",
+      "resolution": {
+        "plan_id": "2026-06-27-v1.71-hygiene-and-sign-groundwork",
+        "commit": "5706277f"
+      }
+    },
+    {
+      "id": "R-V165-QC3-VIRT",
+      "title": "Chapter table virtualization for large chapter counts",
+      "severity": "low",
+      "lifecycle": "resolved",
+      "source": "qc3.md",
+      "scope": "apps/web chapters-page",
+      "decision": "defer",
+      "target_iteration": "V1.72",
+      "target": "V1.74 hygiene backlog (plan-id tbd-v1.74-hygiene)",
+      "notes": "Deferred from V1.71 Track B: chapter virtualization requires @tanstack/react-virtual dependency + table restructuring; no real large-chapter dataset available in V1.71 to validate. Scheduled for V1.72 hygiene or outline+timeline canvas pivot.",
+      "note": "V1.72 deferred to V1.73 hygiene backlog (plan-id tbd-v1.73-hygiene) per compass \u00a75 V1.73 deferrals table.",
+      "target_date": "V1.74",
+      "resolution": {
+        "plan_id": "2026-06-29-v1.74-hygiene-slate-clear",
+        "commit": "ad867216",
+        "at": "2026-06-29",
+        "note": "Closed in V1.74 (QC tri-review 3/3 Approve + QA Pass)."
+      }
+    },
+    {
+      "id": "R-V165-QC-SUGG-DEFENSE",
+      "title": "Write-path guard parity + RuntimeLockGuard dedup + post-rename fsync (qc1 S-1/S-4, qc2 S-001, qc3 S-3)",
+      "severity": "low",
+      "lifecycle": "resolved",
+      "source": "qc1/qc2/qc3",
+      "scope": "defense-in-depth + dedup",
+      "decision": "defer",
+      "target_iteration": "V1.66+",
+      "closed_at": "2026-06-25",
+      "closure_note": "Closed in V1.66 P-sec hygiene residuals (e7a1fd05).",
+      "resolution": {
+        "plan_id": "2026-06-25-v1.66-hygiene-residuals",
+        "commit": "e7a1fd05"
+      }
+    },
+    {
+      "id": "R-V165-QC1-W1",
+      "title": "Outline PUT FS/DB atomicity",
+      "severity": "high",
+      "lifecycle": "resolved",
+      "source": "qc1.md",
+      "scope": "chapters.rs put_chapter_outline",
+      "decision": "resolved",
+      "resolution": {
+        "commit": "1407b16a",
+        "plan_id": "fix-wave-1"
+      },
+      "target_iteration": "V1.65"
+    }
+  ]
+}

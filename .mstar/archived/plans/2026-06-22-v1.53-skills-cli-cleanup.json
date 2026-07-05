@@ -1,0 +1,20 @@
+{
+  "plan_id": "2026-06-22-v1.53-skills-cli-cleanup",
+  "title": "P-c — Remove obsolete nexus42 acp skills export|verify surface",
+  "status": "Done",
+  "started_at": "2026-06-20T00:00:00Z",
+  "done_at": "2026-06-20T17:30:00Z",
+  "owner": "@fullstack-dev",
+  "agents": [
+    "@fullstack-dev",
+    "@qc-specialist"
+  ],
+  "task_category": "logic",
+  "working_branch": "feature/v1.53-skills-cli-cleanup",
+  "merge_target": "iteration/v1.53",
+  "iteration_compass": ".mstar/iterations/v1.53-capability-surface-completion-and-skills-cli-cleanup-delivery-compass-v1.md",
+  "created_at": "2026-06-20T00:00:00Z",
+  "qc_dispatched_at": "2026-06-20T17:15:00Z",
+  "qc_reports_path": ".mstar/plans/reports/2026-06-22-v1.53-skills-cli-cleanup/",
+  "merge_commit": "iteration/v1.53 (merge of feature/v1.53-skills-cli-cleanup)"
+}

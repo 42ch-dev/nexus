@@ -1,0 +1,27 @@
+{
+  "id": "2026-06-18-v1.50-hygiene-and-closeout",
+  "title": "P-last — V1.49 carry-forward 6 + WL-A 8-10 + overlay promotion + Profile B",
+  "file": ".mstar/plans/2026-06-18-v1.50-hygiene-and-closeout.md",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": [
+    "@project-manager",
+    "@fullstack-dev",
+    "@writing-specialist"
+  ],
+  "working_branch": "feature/v1.50-hygiene-and-closeout",
+  "merge_target": "iteration/v1.50",
+  "iteration_compass": ".mstar/iterations/v1.50-novel-author-production-loop-and-world-kb-closure-delivery-compass-v1.md",
+  "task_category": "feature",
+  "depends_on": [
+    "2026-06-18-v1.50-auto-chronology",
+    "2026-06-18-v1.50-kb-refreshable-scan"
+  ],
+  "created_at": "2026-06-18",
+  "updated_at": "2026-06-18T18:00:00Z",
+  "done_at": "2026-06-18T18:00:00Z",
+  "merge_commits": [
+    "PENDING"
+  ],
+  "completion_report": "T1: 6 V1.49 carry-forwards + 10 V1.50 WL-A closed via 15 surgical commits (T-A P1 fix-wave 4c305674/75515b27/abfbb855 + T-B P1 2cfbd49e/02cc52d5/125533a8 + T-A P0 87ea2ef6/000d63fd/e478079c/a364f31a + cross-worktree renumber + 6 V1.49 closure). T2: 16 residuals closed. T3: 2 Draft overlays folded into workflow-profile.md §11 + entity-scope-model.md §5.5 Draft → Normative + novel-writing/README.md updated. T4: 8 plans archived to .mstar/archived/plans/<plan-id>.json + plans-done.json index + v1.50 iteration_summaries entry + layout invariant verified. T5: 11 residuals normalized to lifecycle (8 deferred V1.51+ + 3 archived via QC accept); tech_debt_summary refreshed. T6: PR iteration/v1.50 → main pending. T7: status.json.metadata.latest_ship = V1.50."
+}

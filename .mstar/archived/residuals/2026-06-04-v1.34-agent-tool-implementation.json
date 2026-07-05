@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-06-04-v1.34-agent-tool-implementation",
+  "entries": [
+    {
+      "id": "DF-47",
+      "title": "P4 agent tool production caller wiring (orchestration -> dispatch_from_worker)",
+      "severity": "medium",
+      "source": "qc1 reval C-1 (P4 fix wave 3)",
+      "scope": "crates/nexus-orchestration (production caller side)",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target_date": "V1.36",
+      "note": "V1.35 P0 assessed: adapter exists, but production wiring requires IPC-layer changes (IpcClient notification handling, WorkerHandleProvider trait extension, worker-side tool request forwarding). Non-surgical across 3+ crates — deferred to V1.36. V1.35 ships dispatch_from_worker adapter + tests only.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    }
+  ],
+  "archived_at": "2026-06-15T16:49:53Z",
+  "archived_by": "residual_findings hygiene sweep 2026-06-16",
+  "archived_entry_count": 1,
+  "sweep_note": "1 entries merged from status.json residual_findings"
+}

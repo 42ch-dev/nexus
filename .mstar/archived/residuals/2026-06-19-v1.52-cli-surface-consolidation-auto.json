@@ -1,0 +1,55 @@
+{
+  "plan_id": "2026-06-19-v1.52-cli-surface-consolidation-auto",
+  "archived_at": "2026-07-05T13:17:59+0000",
+  "archived_by": "repo hygiene \u2014 Profile B residual archive (git slim plan)",
+  "residual_findings": [
+    {
+      "id": "R-V152TAP1-W002",
+      "title": "Error message divergence between legacy and canonical Schema::init failure (qc3 W-002; blocking)",
+      "severity": "medium",
+      "source": "qc3 (performance/reliability) W-002",
+      "scope": "crates/nexus42/src/commands/creator/kb.rs (legacy error message: \"Failed to open workspace pool: \u2026\") vs crates/nexus42/src/commands/creator/world/kb.rs (canonical error message: \"local database error: \u2026\")",
+      "decision": "fix",
+      "owner": "@fullstack-dev-2",
+      "target": "V1.52 T-A P1 fix-wave",
+      "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-cli-surface-consolidation-auto/qc3.md \u00a7Warnings",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-19",
+      "closure_note": "V1.52 T-A P1 fix-wave (commit fe3c5730): kb.rs open_world_pool switched from .map_err(...) to ? operator, triggering From<LocalDbError> for CliError \u2192 canonical 'local database error: ...' Display matches world::kb::open_workspace_pool. Regression test verifies canonical format.",
+      "closure_evidence": "feature/v1.52-cli-surface-consolidation-auto (commit fe3c5730)",
+      "_plan_id": "2026-06-19-v1.52-cli-surface-consolidation-auto"
+    },
+    {
+      "id": "R-V152TAP1-S001",
+      "title": "creator kb --scope world --help doesn't point to canonical surface (qc1 S-001; partial-blocking discoverability gap)",
+      "severity": "low",
+      "source": "qc1 S-001",
+      "scope": "crates/nexus42/src/commands/creator/kb.rs (--help output)",
+      "decision": "fix",
+      "owner": "@fullstack-dev-2",
+      "target": "V1.52 T-A P1 fix-wave",
+      "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-cli-surface-consolidation-auto/qc1.md \u00a7Suggestions",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-19",
+      "closure_note": "V1.52 T-A P1 fix-wave (commit fe3c5730): --scope arg doc comment on all 5 kb subcommands now includes [DEPRECATED] hint pointing to canonical surface + planned removal V1.53.",
+      "closure_evidence": "feature/v1.52-cli-surface-consolidation-auto (commit fe3c5730)",
+      "_plan_id": "2026-06-19-v1.52-cli-surface-consolidation-auto"
+    },
+    {
+      "id": "R-V152TAP1-W001",
+      "title": "Alias forward wiring untested (qc1 W-001 + qc3 W-001; blocking; plan TDD contract T6/T7 violated)",
+      "severity": "medium",
+      "source": "qc1 (architecture/maintainability) W-001 + qc3 (performance/reliability) W-001 (cross-reviewer corroboration)",
+      "scope": "crates/nexus42/src/commands/creator/kb.rs:448-454, 610-615, 789-797 (forward call sites); tests/world_kb_alias.rs (missing forward-wiring tests for list/show/remove)",
+      "decision": "fix",
+      "owner": "@fullstack-dev-2",
+      "target": "V1.52 T-A P1 fix-wave",
+      "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-cli-surface-consolidation-auto/qc1.md \u00a7Warnings + qc3.md \u00a7Warnings",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-19",
+      "closure_note": "V1.52 T-A P1 fix-wave (commit fe3c5730): added 3 assert_cmd integration tests + 4 unit tests in tests/world_kb_alias.rs + kb.rs covering all 3 forward call sites (list/show/remove). Each test exercises the actual forward path and asserts canonical function was called + result parity.",
+      "closure_evidence": "feature/v1.52-cli-surface-consolidation-auto (commit fe3c5730)",
+      "_plan_id": "2026-06-19-v1.52-cli-surface-consolidation-auto"
+    }
+  ]
+}

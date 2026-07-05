@@ -1,0 +1,24 @@
+{
+  "plan_id": "2026-06-14-v1.46-research-auto-chain-e2e",
+  "archived_at": "2026-06-18T01:15:00+08:00",
+  "archived_by": "PM (V1.49 P-last T1 WL-A hygiene fix wave)",
+  "residual_findings": [
+    {
+      "id": "R-V146P3-QC1-S1",
+      "title": "preset_version = 2 magic number duplicated across test assertion and seed SQL",
+      "severity": "lifecycle_resolved",
+      "lifecycle": "resolved",
+      "source": "qc1 (architecture/maintainability) S-1",
+      "scope": "crates/nexus-orchestration/tests/research_supervisor_e2e.rs:184 (assertion) + :123 (seed SQL)",
+      "decision": "closed",
+      "owner": "V1.49 P-last T1 (fullstack-dev)",
+      "closed_at": "2026-06-18T01:15:00+08:00",
+      "closure_note": "V1.49 P-last T1 fix wave (commit fec1d81a, merged at 60311a9b): dedup research preset_version magic number via RESEARCH_PRESET_VERSION const. Per project AGENTS.md hygiene fix cadence: surgical commit + regression test. No #[allow] suppressions added. No wire-contract changes. CI gates clean: cargo +nightly fmt --all --check + cargo clippy --all -- -D warnings.",
+      "closure_evidence": "iteration/v1.49 @ 60311a9b (P-last T1 merge) + fec1d81a (fix commit); 171 + 8 + 10 + 5 = 194 regression tests pass on touched crates",
+      "fix_commits": [
+        "fec1d81a"
+      ],
+      "re_review_commits": []
+    }
+  ]
+}

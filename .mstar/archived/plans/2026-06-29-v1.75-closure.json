@@ -1,0 +1,21 @@
+{
+  "plan_id": "2026-06-29-v1.75-closure",
+  "archived_at": "2026-06-29",
+  "schema_version": 1,
+  "plan": {
+    "plan_id": "2026-06-29-v1.75-closure",
+    "iteration_id": "V1.75",
+    "status": "Done",
+    "owner": "project-manager",
+    "effort": "S",
+    "type": "closure",
+    "working_branch": "iteration/v1.75",
+    "merge_target": "iteration/v1.75",
+    "task_category": "docs",
+    "wire_contracts_changed": false,
+    "depends_on": [
+      "2026-06-29-v1.75-canvas-pivot",
+      "2026-06-29-v1.75-qc-followup"
+    ]
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "plan_id": "2026-06-22-v1.58-hygiene-and-closeout",
+  "title": "Hygiene & Closeout (P-last)",
+  "iteration": "V1.58",
+  "track": "closeout",
+  "wave": "After Wave 3",
+  "effort": "M",
+  "owner": "@project-manager",
+  "status": "Done",
+  "file": ".mstar/plans/2026-06-22-v1.58-hygiene-and-closeout.md",
+  "merge_target": "iteration/v1.58",
+  "depends_on": [
+    "2026-06-22-v1.58-workspace-occ-hardening",
+    "2026-06-22-v1.58-df44-reference-refresh-pipeline",
+    "2026-06-22-v1.58-capability-quality-convergence",
+    "2026-06-22-v1.58-reference-cli-and-cross-cut-tests"
+  ],
+  "created": "2026-06-22",
+  "merge_commit": "c250027c",
+  "closed_at": "2026-06-22",
+  "completion_report": "P-last closeout: T0 status.json (7 V1.58 plans registered, 6 Done; tech_debt_summary reflects post-V1.58 state). T1 reference-knowledge.md Draft → Master. T2 deferred-features-tracker DF-44 archived; §5 updated; V1.58 Shipped line. T3-T4 Profile B compaction (6 plans archived to .mstar/archived/plans/; plans-done.json +6 entries; invariant holds; 3 V1.58+ residuals marked resolved). T5 spec consolidation (Draft overlays verified, no folding required at V1.58 P-last per V1.57 pattern). T6 final verification (cargo +nightly fmt clean; SQLX_OFFLINE check clean; pre-existing clippy baseline verified; 21-tool test expectation drift fixed). T7 report-only QA verdict Pass (4249 tests green). T8 Profile B invariant check passes. Ready for PR.",
+  "qc_reports": [
+    {
+      "reviewer": "qa-engineer",
+      "verdict": "Pass",
+      "commit": "c250027c"
+    }
+  ]
+}

@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-04-18-v1.5-stabilization",
+  "archived_at": "2026-04-20T12:00:00Z",
+  "reason": "V1.6 WS-A residual governance — R1/R2/R3/R6 resolved and verified (QA CONDITIONAL PASS)",
+  "entries": [
+    {
+      "id": "R1",
+      "title": "cancel signal pause_schedule error silently ignored",
+      "severity": "medium",
+      "resolution": "fixed",
+      "resolved_by": "2026-04-20-v1.6-ws-a-residual-governance",
+      "resolved_commit": "f7379b3",
+      "detail": "Changed let _ = to warn! log in both cancel-path pause (line 545) and standalone pause signal path (line 482)"
+    },
+    {
+      "id": "R2",
+      "title": "resume_schedule TOCTOU race — should check rows_affected after UPDATE",
+      "severity": "medium",
+      "resolution": "fixed",
+      "resolved_by": "2026-04-20-v1.6-ws-a-residual-governance",
+      "resolved_commit": "f7379b3",
+      "detail": "Added rows_affected() check after UPDATE; concurrent TOCTOU test added (d4fcce3)"
+    },
+    {
+      "id": "R3",
+      "title": "Scheduler::tick() duplicates DB query with tick_clocked() — dead code",
+      "severity": "low",
+      "resolution": "fixed",
+      "resolved_by": "2026-04-20-v1.6-ws-a-residual-governance",
+      "resolved_commit": "3b0464b",
+      "detail": "Removed dead query; tick() now delegates to tick_clocked() directly"
+    },
+    {
+      "id": "R6",
+      "title": "Recovered sessions lack runners on first run_step — NoGraphLoaded",
+      "severity": "low",
+      "resolution": "fixed",
+      "resolved_by": "2026-04-20-v1.6-ws-a-residual-governance",
+      "resolved_commit": "68a9367",
+      "detail": "Added reconstruct_runner() method; recover_sessions() now rebuilds FlowRunner from embedded preset"
+    }
+  ]
+}

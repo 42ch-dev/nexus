@@ -1,0 +1,47 @@
+{
+  "plan_id": "2026-06-24-v1.64-web-app-scaffold",
+  "archived_at": "2026-07-05T13:17:59+0000",
+  "archived_by": "repo hygiene \u2014 Profile B residual archive (git slim plan)",
+  "residual_findings": [
+    {
+      "id": "R-V164-QC1-S1-P1",
+      "title": "apps/web has no tests at the most architectural surface (NexusClient adapter, theme/provider, error parsing) \u2014 scaffold ships without a test baseline",
+      "severity": "medium",
+      "source": "qc1 (architecture) S-1",
+      "scope": "apps/web/src/lib/nexus/{types,errors,browser-client,tauri-client}.ts + components/{theme-provider,layout}",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "V1.65 P1 (closed early)",
+      "target_date": "V1.64 P2",
+      "tracking_link": ".mstar/plans/reports/2026-06-24-v1.64-web-app-scaffold/qc1.md S-1",
+      "note": "P2 (screens) is the natural place to establish the apps/web test baseline (vitest + testing-library + msw for BrowserClient). Adapter + error-parsing tests should land with the screens that exercise them.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-25",
+      "closure_note": "apps/web architectural-surface test baseline established in V1.65 P1 (feature/v1.65-web-test-baseline): NexusClient adapter-contract guard + transport coverage (T1), ThemeProvider light/dark (T2), toast hook + error-envelope path (T3), msw handlers registry (T4), v8 coverage config (T5). 30 -> 62 vitest tests, all green; 94.57% statement / 96.77% branch coverage on the architectural surface, every file >= 80%. Closed ahead of the original P2 target so the outline editor builds on a tested scaffold.",
+      "resolution": {
+        "plan_id": "2026-06-25-v1.65-web-test-baseline",
+        "commit": "13c5ec3f"
+      }
+    },
+    {
+      "id": "R-V164-QC1-S3-P1",
+      "title": "F-P3 list-array-rename (works/schedules/sessions/capabilities -> items) UI adapter ownership unclear between types.ts and P2 data hooks",
+      "severity": "low",
+      "source": "qc1 (architecture) S-3",
+      "scope": "apps/web/src/lib/nexus/types.ts + apps/web/src data hooks (P2)",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "P2 (screens) + P-last (verify)",
+      "target_date": "V1.64 P2",
+      "tracking_link": ".mstar/plans/reports/2026-06-24-v1.64-web-app-scaffold/qc1.md S-3",
+      "note": "P2 data hooks should own the F-P3 normalization adapter (thin TanStack Query transformer). P-last verifies the F-P3 deferral boundary holds against the live UI.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-26",
+      "closure_note": "Closed by V1.67 P0 (local API surface convergence).",
+      "resolution": {
+        "plan_id": "2026-06-26-v1.67-local-api-surface-convergence",
+        "commit": "ea94b028"
+      }
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "description": "Archived V1.34 P3 (agent tool registry spec) plan per Profile B. Spec only — no code.",
+  "plan_id": "2026-06-04-v1.34-agent-tool-registry-spec",
+  "title": "V1.34 P3 — Agent tool registry spec",
+  "done_at": "2026-06-05T03:10:00+08:00",
+  "plan_file": ".mstar/plans/2026-06-04-v1.34-agent-tool-registry-spec.md",
+  "total_batches": 1,
+  "batches_completed": 1,
+  "qc": "Skipped per PM routing 'Tech spec only' exception (mstar-dispatch-gates / project-manager.md §Non-Bypass Constraints)",
+  "qa": "PM-direct verified: 3 files, 346 insertions, 17 deletions; agent-nexus-tool-bridge.md 504 lines (was 175); orchestration-engine §6.4 cross-ref added; spec status updated to 'Shipped (V1.34 — 2026-06-04)'; T1 admission rules, T2 single dispatch invariant, T3 contract gap, T4 P4 handoff checklist + Rust trait sketch all delivered",
+  "residual_count": 0,
+  "merge_commits": ["P3 merge commit on integration branch"],
+  "notes": "Spec-only plan; no Rust/codegen changes. 6 implementer commits: T1/T2/T3/T4 + spec Shipped + plan Done. P4 (HostToolExecutor + worker upcall + tests) unblocked with full handoff checklist in spec §12."
+}

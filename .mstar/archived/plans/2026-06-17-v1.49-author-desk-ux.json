@@ -1,0 +1,125 @@
+{
+  "id": "2026-06-17-v1.49-author-desk-ux",
+  "title": "P2 — Intake re-trigger + reconcile preview",
+  "file": ".mstar/plans/2026-06-17-v1.49-author-desk-ux.md",
+  "status": "Done",
+  "owner": "@fullstack-dev",
+  "agents": [
+    "@fullstack-dev"
+  ],
+  "working_branch": "feature/v1.49-author-desk-ux",
+  "merge_target": "iteration/v1.49",
+  "iteration_compass": ".mstar/iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md",
+  "primary_spec": ".mstar/knowledge/specs/novel-writing/author-experience.md",
+  "task_category": "feature",
+  "created_at": "2026-06-17",
+  "updated_at": "2026-06-17T22:30:00+08:00",
+  "completion_report": ".mstar/plans/reports/2026-06-17-v1.49-author-desk-ux/completion.md",
+  "completion_commits": [
+    "4ab9e0be",
+    "0948cb87",
+    "9aea7091",
+    "7fe873f7"
+  ],
+  "head_sha": "7fe873f7",
+  "done_at": "2026-06-17T23:45:00+08:00",
+  "metadata": {
+    "commits": [
+      "4ab9e0be",
+      "0948cb87",
+      "9aea7091",
+      "7fe873f7",
+      "bdd646dc"
+    ],
+    "merge_commits": [
+      "1fa8002",
+      "0b98e194"
+    ],
+    "qc_reports": {
+      "qc1": {
+        "verdict_wave1": "Request Changes",
+        "verdict_re_review": "Approve",
+        "commits": [
+          "e1b76ac9",
+          "e7848336"
+        ]
+      },
+      "qc2": {
+        "verdict": "Approve",
+        "commit": "e1844090"
+      },
+      "qc3": {
+        "verdict": "Approve",
+        "commit": "4632c87b"
+      }
+    },
+    "qc_consolidated": {
+      "commit": "1475f1fa",
+      "final_verdict": "Approve"
+    },
+    "re_review_approval_commit": "911fdee0",
+    "qa_report": {
+      "commit": "22bfab23",
+      "verdict": "PASS"
+    },
+    "residual_lifecycle": {
+      "archived": [
+        "R-V149P2-01",
+        "R-V147P1-01",
+        "R-V148P4-W2"
+      ],
+      "open": []
+    },
+    "residuals_closed_for_other_plans": [
+      "R-V147P1-01 (originally 2026-06-15-v1.47)",
+      "R-V148P4-W2 (originally 2026-06-16-v1.48)"
+    ]
+  },
+  "notes": [
+    {
+      "at": "2026-06-17",
+      "event": "implement_dispatched",
+      "evidence": "feature/v1.49-author-desk-ux @ 7fe873f7 (4 commits T1-T4)"
+    },
+    {
+      "at": "2026-06-17",
+      "event": "merged_to_integration",
+      "evidence": "iteration/v1.49 @ 1fa8002 (P2 merge)"
+    },
+    {
+      "at": "2026-06-17",
+      "event": "in_review",
+      "evidence": "QC tri-review dispatched"
+    },
+    {
+      "at": "2026-06-17",
+      "event": "qc_wave1_verdict",
+      "evidence": "qc1 Request Changes (W-1 clap help); qc2+qc3 Approve → consolidated Request Changes"
+    },
+    {
+      "at": "2026-06-17",
+      "event": "w1_fix_wave",
+      "evidence": "fix/v1.49-p2-w1-clap-help @ bdd646dc (1-line doc fix + regression test); merged at 0b98e194"
+    },
+    {
+      "at": "2026-06-17",
+      "event": "qc_targeted_re_review",
+      "evidence": "qc1 Approve @ e7848336; qc2/qc3 stay Approve"
+    },
+    {
+      "at": "2026-06-17",
+      "event": "residuals_archived",
+      "evidence": "R-V149P2-01 + R-V147P1-01 + R-V148P4-W2 archived to .mstar/archived/residuals/"
+    },
+    {
+      "at": "2026-06-17",
+      "event": "qa_passed",
+      "evidence": "qa.md @ 22bfab23; verdict PASS"
+    },
+    {
+      "at": "2026-06-17",
+      "event": "done",
+      "evidence": "plan marked Done in status.json; archived to .mstar/archived/plans/"
+    }
+  ]
+}

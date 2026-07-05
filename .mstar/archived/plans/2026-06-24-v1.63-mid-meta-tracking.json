@@ -1,0 +1,12 @@
+{
+  "plan_id": "2026-06-24-v1.63-mid-meta-tracking",
+  "title": "V1.63 P-mid \u2014 Meta Tracking",
+  "iteration": "V1.63",
+  "slot": "P-mid",
+  "status": "Done",
+  "effort": "S",
+  "owner": "@project-manager",
+  "review": "PM closeout (no QC)",
+  "wave": 3,
+  "dependency": "P2 + P3 merged to iteration/v1.63"
+}

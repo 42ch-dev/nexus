@@ -1,0 +1,13 @@
+{
+  "source_plan": "2026-05-15-v1.19-agent-host-hardening",
+  "fix_plan": "2026-05-19-v1.19-residuals-v1.20-fix",
+  "closed_at": "2026-05-19T01:00:00Z",
+  "findings": [
+    {"id": "QC2-F002", "severity": "medium", "title": "CreateSessionRequest.cwd not validated for path traversal"},
+    {"id": "QC2-F003", "severity": "low", "title": "TOCTOU in config path validation (exists() pre-check)"},
+    {"id": "QC2-F004", "severity": "low", "title": "shutdown() constructs ManagedSessionHandle with hardcoded acp_full() capabilities"},
+    {"id": "QC2-F005", "severity": "low", "title": "Permission handler race in AcpProvider::new() lacks explicit synchronization"},
+    {"id": "QC3-F002", "severity": "low", "title": "Orphaned ACP session on execute timeout (no cancel sent)"},
+    {"id": "QC3-F003", "severity": "low", "title": "Permission handler registration is racy (spawn without await)"}
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "plan_id": "2026-06-24-v1.64-local-api-hardening",
+  "title": "V1.64 P0 — Track B: Local API Data-Layer Hardening (DTO Drift + F-E1 + F-P1 + F-P2)",
+  "iteration": "V1.64",
+  "slot": "P0",
+  "status": "Done",
+  "effort": "L",
+  "owner": "@fullstack-dev",
+  "review": "Tri-review + QA",
+  "wave": 1,
+  "dependency": "P-1 PM signoff",
+  "working_branch": "feature/v1.64-local-api-hardening",
+  "merge_target": "iteration/v1.64"
+}

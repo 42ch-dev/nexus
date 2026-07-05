@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "archived_at": "2026-05-26T21:30:00Z",
+  "plan_ids": [
+    "2026-05-26-v1.30-kb-extract-lifecycle-hardening",
+    "2026-05-26-v1.30-agent-session-quality",
+    "2026-05-26-v1.30-creator-module-refactor",
+    "2026-05-26-v1.30-local-db-hardening"
+  ],
+  "iteration": "v1.30",
+  "closure_note": "All original residuals R5–R20 implemented and verified. QC tri-review produced 4 Critical + 3 Warning (all fixed in follow-up commits) + 17 Suggestions (tracked as post-QC tech debt in status.json residual_findings['v1.30-post-qc-tech-debt']).",
+  "findings": [
+    {
+      "id": "R5",
+      "title": "body.md written before SQL INSERT — orphaned files on DB failure",
+      "original_severity": "low",
+      "closure": "fixed",
+      "closure_note": "Write order reversed: SQL INSERT first, body.md second (commit 50e9a4d).",
+      "fixed_in_commit": "50e9a4d"
+    },
+    {
+      "id": "R6",
+      "title": "list_references returns all rows unbounded — no pagination",
+      "original_severity": "nit",
+      "closure": "fixed",
+      "closure_note": "LIMIT/OFFSET pagination added with DEFAULT_PAGE_LIMIT (commit 50e9a4d). Clamping added in QC fix (commit 056a41e).",
+      "fixed_in_commit": "50e9a4d"
+    },
+    {
+      "id": "R7",
+      "title": "content_hash always NULL — integrity field unused",
+      "original_severity": "nit",
+      "closure": "fixed",
+      "closure_note": "blake3 content_hash computed on registration (commit 50e9a4d).",
+      "fixed_in_commit": "50e9a4d"
+    },
+    {
+      "id": "R8",
+      "title": "db_err maps all sqlx::Error to ValidationError — no Storage variant",
+      "original_severity": "low",
+      "closure": "fixed",
+      "closure_note": "NarrativeError::Storage variant introduced (commit 50e9a4d).",
+      "fixed_in_commit": "50e9a4d"
+    },
+    {
+      "id": "R9",
+      "title": "KbQuery fetches all blocks into memory then filters — no DB-level pagination",
+      "original_severity": "nit",
+      "closure": "fixed",
+      "closure_note": "LIST_BY_WORLD_LIMIT=500 added to list_by_world (commit 50e9a4d).",
+      "fixed_in_commit": "50e9a4d"
+    },
+    {
+      "id": "R14",
+      "title": "SessionCapture created at agent-stop time produces near-zero session metrics",
+      "original_severity": "medium",
+      "closure": "fixed",
+      "closure_note": "SessionCapture created at session start with session_captures map in MultiplexedWorkerState (commit f7fca31).",
+      "fixed_in_commit": "f7fca31"
+    },
+    {
+      "id": "R15",
+      "title": "KB extract job claim is not atomic across next_queued + mark_running",
+      "original_severity": "medium",
+      "closure": "fixed",
+      "closure_note": "Atomic claim_job with SELECT+UPDATE in single transaction (commit 87371c2). rows_affected check added in QC fix (commit e468c07).",
+      "fixed_in_commit": "87371c2"
+    },
+    {
+      "id": "R16",
+      "title": "kb.extract_work placeholder — no full extraction lifecycle",
+      "original_severity": "low",
+      "closure": "fixed",
+      "closure_note": "Full e2e lifecycle: claim → extract → parse → KeyBlock insert → mark_done (commit 87371c2). Reordered mark_done before KeyBlock in QC fix (commit ca3ec44).",
+      "fixed_in_commit": "87371c2"
+    },
+    {
+      "id": "R17",
+      "title": "Persistent child Drop cleanup is best-effort and Unix-only",
+      "original_severity": "low",
+      "closure": "fixed",
+      "closure_note": "SIGTERM→wait→SIGKILL Drop hardening (commit f7fca31). PID existence check added in QC fix (commit 3d7e90c).",
+      "fixed_in_commit": "f7fca31"
+    },
+    {
+      "id": "R18",
+      "title": "KB extract job IDs use custom timestamp-derived generation",
+      "original_severity": "low",
+      "closure": "fixed",
+      "closure_note": "UUIDv4 xj_ prefix IDs with insert_with_retry (commit 87371c2).",
+      "fixed_in_commit": "87371c2"
+    },
+    {
+      "id": "R19",
+      "title": "creator command module approaching maintainability threshold",
+      "original_severity": "low",
+      "closure": "fixed",
+      "closure_note": "KB handlers extracted to creator/kb.rs, mod.rs reduced ~30% (commit c262d4c).",
+      "fixed_in_commit": "c262d4c"
+    },
+    {
+      "id": "R20",
+      "title": "KB extract status list is unbounded",
+      "original_severity": "low",
+      "closure": "fixed",
+      "closure_note": "Bounded listing with limit=100 default (commit 87371c2).",
+      "fixed_in_commit": "87371c2"
+    }
+  ]
+}

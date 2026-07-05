@@ -1,0 +1,12 @@
+{
+  "id": "2026-06-23-v1.61-compass-and-plan-stubs",
+  "status": "Done",
+  "file": ".mstar/plans/2026-06-23-v1.61-compass-and-plan-stubs.md",
+  "metadata": {
+    "iteration": "V1.61",
+    "slot": "P-1",
+    "effort": "M",
+    "owner": "@project-manager",
+    "description": "V1.61 delivery compass + 6 plan stubs + iteration index registration"
+  }
+}

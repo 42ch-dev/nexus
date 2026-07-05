@@ -1,0 +1,18 @@
+{
+  "id": "2026-06-18-v1.51-harness-docs-prepare",
+  "title": "P-1 \u2014 V1.51 compass, plans, spec overlays, tracker, status (docs-only)",
+  "file": ".mstar/plans/2026-06-18-v1.51-harness-docs-prepare.md",
+  "status": "Done",
+  "done_at": "2026-06-18",
+  "owner": "@project-manager",
+  "agents": [
+    "@project-manager",
+    "@writing-specialist"
+  ],
+  "working_branch": "iteration/v1.51",
+  "merge_target": "iteration/v1.51",
+  "iteration_compass": ".mstar/iterations/v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md",
+  "task_category": "docs",
+  "created_at": "2026-06-18",
+  "updated_at": "2026-06-18T11:30:00+08:00"
+}

@@ -1,0 +1,19 @@
+{
+  "plan_id": "2026-06-25-v1.66-hygiene-residuals",
+  "title": "V1.66 P-sec — Light Hygiene (R-V165-QC1-W2 medium + R-V165-QC-SUGG-DEFENSE + R-V164-QC1-S1-P0)",
+  "iteration": "V1.66",
+  "slot": "P-sec",
+  "status": "Done",
+  "effort": "S-M",
+  "owner": "@fullstack-dev",
+  "review": "Tri-review + QA",
+  "wave": 1,
+  "dependency": "P-1 locked",
+  "working_branch": "feature/v1.66-hygiene-residuals",
+  "merge_target": "iteration/v1.66",
+  "inreview_at": "2026-06-25T15:49:19Z",
+  "merge_commit": "pending-integration-merge",
+  "completed_at": "2026-06-25T19:05:28Z",
+  "done_reason": "QC tri-review Approve (after fix-wave-1) + QA Pass",
+  "archived_at": "2026-06-25T19:08:40Z"
+}

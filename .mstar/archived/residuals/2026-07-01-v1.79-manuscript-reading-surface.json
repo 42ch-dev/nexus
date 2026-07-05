@@ -1,0 +1,45 @@
+{
+  "plan_id": "2026-07-01-v1.79-manuscript-reading-surface",
+  "archived_at": "2026-07-05T13:17:59+0000",
+  "archived_by": "repo hygiene \u2014 Profile B residual archive (git slim plan)",
+  "residual_findings": [
+    {
+      "id": "R-V179P0-QC1-001",
+      "title": "Reading-surface keyboard-nav test coverage + DOM-query overlay guard robustness (qc1 S-001)",
+      "severity": "low",
+      "source": "qc1 S-001 (revalidation noted out-of-fix-scope)",
+      "scope": "apps/web/src/components/reading (hasOpenOverlay DOM-query guard) + chapter-page keyboard handler",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "V1.80+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.79-manuscript-reading-surface][R-V179P0-QC1-001]",
+      "note": "Guard checks [role=menu]:not([hidden])/[role=dialog]:not([hidden]); robust for current overlays but revisit if future overlay uses different role pattern. Add keyboard-nav interaction tests.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-07-01 (V1.80 P1)",
+      "closure_note": "Closed by V1.80 P1 (2026-07-01-v1.80-frontend-hygiene-residuals). QC 3/3 Approve + QA Pass (d3982d9d).",
+      "resolution": {
+        "plan_id": "2026-07-01-v1.80-frontend-hygiene-residuals",
+        "commit": "0851e2cc"
+      }
+    },
+    {
+      "id": "R-V179P0-QC1-002",
+      "title": "Reading-surface component-level unit-test coverage gap + minor nits (qc1 S-002/S-003/S-004)",
+      "severity": "low",
+      "source": "qc1 S-002/S-003/S-004",
+      "scope": "apps/web/src/components/reading/* unit tests; defensive ?? 1 on volume; reading-progress debounce design",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "V1.80+ hygiene",
+      "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.79-manuscript-reading-surface][R-V179P0-QC1-002]",
+      "note": "Bundle of low/nit test-coverage + defensive-coding suggestions deferred as hygiene.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-07-01 (V1.80 P1)",
+      "closure_note": "Closed by V1.80 P1 (2026-07-01-v1.80-frontend-hygiene-residuals). QC 3/3 Approve + QA Pass (d3982d9d).",
+      "resolution": {
+        "plan_id": "2026-07-01-v1.80-frontend-hygiene-residuals",
+        "commit": "0851e2cc"
+      }
+    }
+  ]
+}

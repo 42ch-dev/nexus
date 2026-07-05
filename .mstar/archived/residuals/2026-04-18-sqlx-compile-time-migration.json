@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-04-18-sqlx-compile-time-migration",
+  "archived_at": "2026-04-19T18:00:00Z",
+  "entries": [
+    {
+      "id": "R1",
+      "title": "SAFETY comments non-canonical format",
+      "severity": "nit",
+      "source": "sqlx",
+      "scope": "crates/nexus-sync/src/pool.rs",
+      "decision": "resolved",
+      "owner": "fullstack-dev",
+      "target_date": "V1.5",
+      "tracking_link": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-19T18:00:00Z",
+      "closure_note": "Resolved by V1.5 stabilization \u2014 SAFETY comments non-canonical format"
+    },
+    {
+      "id": "R2",
+      "title": "Duplicate FromRow structs in outbox",
+      "severity": "low",
+      "source": "sqlx",
+      "scope": "crates/nexus-sync/src/outbox.rs",
+      "decision": "resolved",
+      "owner": "fullstack-dev",
+      "target_date": "V1.5",
+      "tracking_link": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-19T18:00:00Z",
+      "closure_note": "Resolved by V1.5 stabilization \u2014 Duplicate FromRow structs in outbox"
+    },
+    {
+      "id": "R3",
+      "title": "Inconsistent ?1 vs ? placeholder syntax",
+      "severity": "low",
+      "source": "sqlx",
+      "scope": "multiple handler files",
+      "decision": "resolved",
+      "owner": "fullstack-dev",
+      "target_date": "V1.5",
+      "tracking_link": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-19T18:00:00Z",
+      "closure_note": "Resolved by V1.5 stabilization \u2014 Inconsistent ?1 vs ? placeholder syntax"
+    },
+    {
+      "id": "R4",
+      "title": "Misleading SAFETY comment in schedules.rs",
+      "severity": "medium",
+      "source": "sqlx",
+      "scope": "crates/nexus42d/src/api/handlers/orchestration/schedules.rs",
+      "decision": "resolved",
+      "owner": "fullstack-dev",
+      "target_date": "V1.5",
+      "tracking_link": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-19T18:00:00Z",
+      "closure_note": "Resolved by V1.5 stabilization \u2014 Misleading SAFETY comment in schedules.rs"
+    },
+    {
+      "id": "R5",
+      "title": "Test-only queries could use query_scalar!/expect()",
+      "severity": "nit",
+      "source": "sqlx",
+      "scope": "crates/nexus42d/src/db/schema.rs",
+      "decision": "resolved",
+      "owner": "fullstack-dev",
+      "target_date": "V1.5",
+      "tracking_link": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-19T18:00:00Z",
+      "closure_note": "Resolved by V1.5 stabilization \u2014 Test-only queries could use query_scalar!/expect()"
+    }
+  ]
+}

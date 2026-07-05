@@ -1,0 +1,33 @@
+{
+  "plan_id": "2026-06-11-v1.42-ux-polish",
+  "schema_version": 1,
+  "entries": [
+    {
+      "id": "R-V142PLAST-QC1-W-1",
+      "severity": "medium",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-12",
+      "closure_note": "Closure note for R-V141P0-02 corrected to reflect actual extracted helpers (print_chapter_table, print_completion_lock_hint, truncate_with_ellipsis); no phantom print_work_header. W-1 resolved by fix commit cefef2b4.",
+      "closure_evidence": "commit cefef2b4 fix(status): correct closure notes; qc1 targeted re-review (commit 36f4bf51, verdict Approve) verified the corrected closure note",
+      "archived_at": "2026-06-12"
+    },
+    {
+      "id": "R-V142PLAST-QC1-W-2",
+      "severity": "low",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-12",
+      "closure_note": "truncate_with_ellipsis applied to 3 remaining eligible locations (handle_list, handle_pool_list, handle_inspiration_list title); now 4 call sites + 1 definition. W-2 resolved by fix commit 928b5632.",
+      "closure_evidence": "commit 928b5632 refactor(nexus42): apply truncate_with_ellipsis to 3 remaining eligible locations; qc1 targeted re-review (commit 36f4bf51, verdict Approve) verified the helper extraction",
+      "archived_at": "2026-06-12"
+    },
+    {
+      "id": "R-V142PLAST-QC3-W-01",
+      "severity": "medium",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-12",
+      "closure_note": "Closure note for R-V141P1-12 corrected to reflect actual behavior (idea-<hex> short-id fallback for pure-CJK titles); no romanized claim. W-01 resolved by fix commit cefef2b4.",
+      "closure_evidence": "commit cefef2b4 fix(status): correct closure notes; qc3 targeted re-review (commit 2794e6a4, verdict Approve) verified the corrected closure note",
+      "archived_at": "2026-06-12"
+    }
+  ]
+}

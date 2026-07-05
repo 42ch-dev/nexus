@@ -1,0 +1,31 @@
+{
+  "plan_id": "2026-06-03-v1.32-spec-tracker-hygiene",
+  "title": "V1.32 P4 — Spec, tracker, and status hygiene for V1.32 close (docs-only)",
+  "status": "Done",
+  "working_branch": "feature/v1.32-spec-tracker-hygiene",
+  "merge_target": "feature/v1.32-preset-quality-gate",
+  "depends_on": [
+    "2026-06-03-v1.32-preset-validator-core-and-cli",
+    "2026-06-03-v1.32-embedded-presets-usability-hardening",
+    "2026-06-03-v1.32-orchestration-security-followup"
+  ],
+  "metadata": {
+    "iteration": "v1.32",
+    "primary_spec": "../iterations/v1.32-preset-quality-gate-delivery-compass-v1.md",
+    "iteration_compass": "../iterations/v1.32-preset-quality-gate-delivery-compass-v1.md",
+    "theme": "P4-spec-tracker-hygiene",
+    "tracker_ids": []
+  },
+  "qc_summary": {
+    "tri_review_rounds": 2,
+    "final_verdict": "Approve (3/3 after re-check)",
+    "fixes_during_review": [
+      "rev1: 2 Critical (spec referenced validation facade not visible in stale P4 worktree pre-rebase; SSOT split-brain) + Warnings (same SSOT issue)",
+      "rev2 (re-check after P4 rebase + SSOT close): C-001 resolved; C-002 + W-001 resolved; final Approve"
+    ]
+  },
+  "qa_summary": "Docs-only. spec §7.6.x expanded for shared validation facade; archived shipped tracker has V1.32 snapshot; active tracker Quick status updated; iterations README marks V1.32 Shipped; compass status updated.",
+  "residual_count": 0,
+  "notes": "Docs-only. The initial Critical findings from rev1 were worktree-isolation artifacts (P4 worktree created before P1 merged) plus real SSOT split-brain (PM hadn't actually closed status.json). Both resolved by rebase + iteration-close SSOT update.",
+  "archived_at": "2026-06-03T16:30:00+08:00"
+}

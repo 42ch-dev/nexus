@@ -1,0 +1,154 @@
+{
+  "plan_id": "2026-06-22-v1.56-df31-df42-full-redesign",
+  "archived_at": "2026-07-05T13:17:59+0000",
+  "archived_by": "repo hygiene \u2014 Profile B residual archive (git slim plan)",
+  "residual_findings": [
+    {
+      "id": "R-V156P0-M005",
+      "title": "TOCTOU window on read-modify-write session model \u2014 known OCC relaxation per spec; low practical risk for single-daemon",
+      "severity": "medium",
+      "source": "qc3 W-QC3-002 (V1.56 P0 tri-review consolidated)",
+      "scope": "crates/nexus-daemon-runtime/src/workspace/, crates/nexus-local-db/src/workspace_session.rs",
+      "decision": "accept (defer to post-V1.56 hardening)",
+      "owner": "@fullstack-dev (P0 implementer)",
+      "target": "V1.57+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df31-df42-full-redesign][R-V156P0-M005]",
+      "note": "Deferrable medium; surfaced by qc3 W-QC3-002. No blocking \u2014 V1.56 P0 marked Approve. Future plan can address these in a hardening round.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-22",
+      "closure_note": "V1.58 P0 closed: WorkspaceSessionManager::commit_session (line 650 on main) binds validate+consume into transaction-guarded call; db::consume_session atomic UPDATE WHERE consumed = 0 is CAS primitive. Fix-wave added validate_changes_manifest_rejects_symlink_in_modify_path regression test.",
+      "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+      "resolution": {
+        "plan_id": "2026-06-22-v1.58-workspace-occ-hardening",
+        "commit": "bf9e7677"
+      },
+      "_v1_60_audit_verdict": "confirmed"
+    },
+    {
+      "id": "R-V156P0-M004",
+      "title": "Blocking sync I/O in async handler (std::fs::read_to_string in async path) \u2014 acceptable pre-1.0; future spawn_blocking",
+      "severity": "medium",
+      "source": "qc3 W-QC3-001 (V1.56 P0 tri-review consolidated)",
+      "scope": "crates/nexus-daemon-runtime/src/workspace/, crates/nexus-local-db/src/workspace_session.rs",
+      "decision": "accept (defer to post-V1.56 hardening)",
+      "owner": "@fullstack-dev (P0 implementer)",
+      "target": "V1.57+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df31-df42-full-redesign][R-V156P0-M004]",
+      "note": "Deferrable medium; surfaced by qc3 W-QC3-001. No blocking \u2014 V1.56 P0 marked Approve. Future plan can address these in a hardening round.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-22",
+      "closure_note": "V1.58 P0 closed: compute_content_hashes + compute_single_file_hash migrated to tokio::fs + AsyncReadExt + tokio::task::spawn_blocking for canonicalize syscall. Fix-wave 99da008f hardened.",
+      "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+      "resolution": {
+        "plan_id": "2026-06-22-v1.58-workspace-occ-hardening",
+        "commit": "764cee49"
+      },
+      "_v1_60_audit_verdict": "confirmed"
+    },
+    {
+      "id": "R-V156P0-M001",
+      "title": "sha2 dependency not workspace-managed \u2014 added directly in nexus-daemon-runtime/Cargo.toml instead of workspace inheritance",
+      "severity": "medium",
+      "source": "qc1 W-001 (V1.56 P0 tri-review consolidated)",
+      "scope": "crates/nexus-daemon-runtime/src/workspace/, crates/nexus-local-db/src/workspace_session.rs",
+      "decision": "accept (defer to post-V1.56 hardening)",
+      "owner": "@fullstack-dev (P0 implementer)",
+      "target": "V1.57+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df31-df42-full-redesign][R-V156P0-M001]",
+      "note": "Deferrable medium; surfaced by qc1 W-001. No blocking \u2014 V1.56 P0 marked Approve. Future plan can address these in a hardening round.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-22",
+      "closure_note": "V1.58 P0 closed: sha2 dep lifted into root Cargo.toml [workspace.dependencies] line 92; all 4 consumer crates reference sha2 = { workspace = true }. Verified on main.",
+      "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+      "resolution": {
+        "plan_id": "2026-06-22-v1.58-workspace-occ-hardening",
+        "commit": "d4a0b3ac"
+      },
+      "_v1_60_audit_verdict": "confirmed"
+    },
+    {
+      "id": "R-V156P0-M002",
+      "title": "Path boundary remains syntactic only \u2014 no canonicalize/symlink/prefix enforcement on workspace.open + hash walk (inherited from V1.55; not regressed in P0)",
+      "severity": "medium",
+      "source": "qc2 W-001 (V1.56 P0 tri-review consolidated)",
+      "scope": "crates/nexus-daemon-runtime/src/workspace/, crates/nexus-local-db/src/workspace_session.rs",
+      "decision": "accept (defer to post-V1.56 hardening)",
+      "owner": "@fullstack-dev (P0 implementer)",
+      "target": "V1.57+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df31-df42-full-redesign][R-V156P0-M002]",
+      "note": "Deferrable medium; surfaced by qc2 W-001. No blocking \u2014 V1.56 P0 marked Approve. Future plan can address these in a hardening round.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-22",
+      "closure_note": "V1.58 P0 closed: canonicalize_workspace_root() (async, spawn_blocking) + enforce_path_boundary() + symlink_metadata() non-traversing check at session.rs:159-349. Fix-wave 99da008f closed qc2-H-2 TOCTOU with symlink_metadata re-validation.",
+      "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+      "resolution": {
+        "plan_id": "2026-06-22-v1.58-workspace-occ-hardening",
+        "commit": "764cee49"
+      },
+      "_v1_60_audit_verdict": "confirmed"
+    },
+    {
+      "id": "R-V156P0-CACHE-01",
+      "title": "P0 self-verification missed cargo check --workspace; nexus42 sqlx query! macro cache stale after workspace_sessions migration (PM pre-QC build blocker)",
+      "severity": "medium",
+      "source": "PM pre-QC verification (cargo check -p nexus42)",
+      "scope": "crates/nexus42/src/commands/creator/mod.rs:1595 (creators INSERT) + crates/nexus42/src/commands/system/db.rs:85 (sqlite_master SELECT) \u2014 both query! macros fail to compile against .sqlx/ cache after P0 added workspace_sessions table migration 202606220002",
+      "decision": "fix",
+      "owner": "@fullstack-dev (P0 implementer oversight)",
+      "target": "V1.56",
+      "target_date": "V1.56 Wave 1",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df31-df42-full-redesign][R-V156P0-CACHE-01]",
+      "note": "Root cause: P0 added new table + queries in nexus-local-db; regenerated .sqlx/ cache for nexus-local-db-only macros but missed consumer crate macros (nexus42 imports nexus-local-db and uses query! macros on creators + sqlite_master tables). P0 self-verification ran cargo test -p nexus-local-db and cargo test -p nexus-daemon-runtime but did NOT run cargo check --workspace. Architectural lesson: any plan touching nexus-local-db migrations or new tables MUST run cargo check --workspace (or cargo test --workspace) in self-verification, not just the touched crate. PM will enforce this rule in future plan AC items (e.g. V1.56 P2/P3/P-last if they touch nexus-local-db).",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-22",
+      "closure_note": "PM regenerated .sqlx/ cache via cargo sqlx prepare --workspace against a freshly-migrated SQLite DB. 2 new cache files added: .sqlx/query-24310e7f662c7c50c6821804d03720afb0651412952ed063ef25cdb87e43de73.json (creators INSERT) and .sqlx/query-3b17cf38385b3fc0e9cf25cbbc4f903bc9ab5d04aeeb2bdc10a7df73b50dacdd.json (sqlite_master SELECT). No existing cache files modified. cargo check --workspace clean post-fix.",
+      "closure_evidence": "iteration/v1.56 @ 8809f0b5 (pre-QC fix-wave PM commit)",
+      "resolution": {
+        "plan_id": "pre-qc-fix-wave-pm",
+        "commit": "8809f0b5"
+      }
+    },
+    {
+      "id": "R-V156P0-M006",
+      "title": "No metrics/tracing spans at OCC conflict path / session expiry / commit latency \u2014 observability gap; recommend #[tracing::instrument] spans",
+      "severity": "medium",
+      "source": "qc3 W-QC3-003 (V1.56 P0 tri-review consolidated)",
+      "scope": "crates/nexus-daemon-runtime/src/workspace/, crates/nexus-local-db/src/workspace_session.rs",
+      "decision": "accept (defer to post-V1.56 hardening)",
+      "owner": "@fullstack-dev (P0 implementer)",
+      "target": "V1.57+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df31-df42-full-redesign][R-V156P0-M006]",
+      "note": "Deferrable medium; surfaced by qc3 W-QC3-003. No blocking \u2014 V1.56 P0 marked Approve. Future plan can address these in a hardening round.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-22",
+      "closure_note": "V1.58 P0 closed: occ_conflict_total() AtomicU64 reader + tracing::warn! with session_id and conflict_type fields at AlreadyConsumed (line 621) and HashConflict (line 663) sites on main.",
+      "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+      "resolution": {
+        "plan_id": "2026-06-22-v1.58-workspace-occ-hardening",
+        "commit": "bf9e7677"
+      },
+      "_v1_60_audit_verdict": "confirmed"
+    },
+    {
+      "id": "R-V156P0-M003",
+      "title": "No concurrent integration test exercising DB-backed OCC + atomic consume under load (stale-session / hash-conflict / expiry races); unit tests cover happy path only",
+      "severity": "medium",
+      "source": "qc2 W-002 (V1.56 P0 tri-review consolidated)",
+      "scope": "crates/nexus-daemon-runtime/src/workspace/, crates/nexus-local-db/src/workspace_session.rs",
+      "decision": "accept (defer to post-V1.56 hardening)",
+      "owner": "@fullstack-dev (P0 implementer)",
+      "target": "V1.57+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.56-df31-df42-full-redesign][R-V156P0-M003]",
+      "note": "Deferrable medium; surfaced by qc2 W-002. No blocking \u2014 V1.56 P0 marked Approve. Future plan can address these in a hardening round.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-22",
+      "closure_note": "V1.58 P0 closed: crates/nexus-daemon-runtime/tests/workspace_occ_concurrent.rs on main; two-concurrent-consumer test asserts single-winner on consume_session + commit_session.",
+      "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
+      "resolution": {
+        "plan_id": "2026-06-22-v1.58-workspace-occ-hardening",
+        "commit": "bf9e7677"
+      },
+      "_v1_60_audit_verdict": "confirmed"
+    }
+  ]
+}

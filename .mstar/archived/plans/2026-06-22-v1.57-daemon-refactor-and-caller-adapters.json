@@ -1,0 +1,59 @@
+{
+  "plan_id": "2026-06-22-v1.57-daemon-refactor-and-caller-adapters",
+  "title": "Daemon Refactor & 3-Caller Adapters (P1)",
+  "iteration": "V1.57",
+  "track": "Track B",
+  "wave": "Wave 1",
+  "effort": "XL",
+  "owner": "@fullstack-dev-2",
+  "status": "Done",
+  "file": ".mstar/plans/2026-06-22-v1.57-daemon-refactor-and-caller-adapters.md",
+  "working_branch": "feature/v1.57-daemon-refactor-and-caller-adapters",
+  "merge_target": "iteration/v1.57",
+  "depends_on": [
+    "2026-06-22-v1.57-compass-and-plan-stubs"
+  ],
+  "created": "2026-06-22",
+  "inreview_at": "2026-06-22",
+  "inreview_commits": [
+    "68989e03",
+    "6b08bb9e",
+    "64c0b245",
+    "fc0e250a"
+  ],
+  "merge_commit": "fe501b6b",
+  "closed_at": "2026-06-22",
+  "fix_wave_commits": [
+    "544a1184"
+  ],
+  "qc_reports": [
+    {
+      "reviewer": "qc-specialist",
+      "verdict": "Approve",
+      "commit": "f2de19ea"
+    },
+    {
+      "reviewer": "qc-specialist-2",
+      "verdict": "Approve",
+      "commit": "f76182e7"
+    },
+    {
+      "reviewer": "qc-specialist-3",
+      "verdict": "Approve (re-review)",
+      "commit": "db5aecc9"
+    },
+    {
+      "reviewer": "@project-manager (consolidated)",
+      "verdict": "Approve",
+      "commit": null
+    }
+  ],
+  "completion_report": "host_tool_executor.rs 4298→349 lines (≤800 AC); 3 caller entry points (CLI host-call / worker agent_tool_request / HTTP ToolExecuteRequest) all dispatch through single capability::Registry::dispatch; CdnConfig constructor-injected (closes R-V156P1-M002); 4 spec amendments delivered as Draft overlays via fix-wave 544a1184; R-V156P3-S003 field drops applied. 18 AC met post-fix-wave. 1 medium + 2 low residuals filed for V1.57+.",
+  "residuals_filed": [
+    "R-V157P1-W001"
+  ],
+  "carry_forwards_closed": [
+    "R-V156P1-M002",
+    "R-V156P3-S003"
+  ]
+}

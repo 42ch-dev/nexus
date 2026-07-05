@@ -1,0 +1,18 @@
+{
+  "plan_id": "2026-06-19-v1.52-hygiene-and-closeout",
+  "title": "P-last — V1.50/V1.51 carry-forwards + V1.52 QC lows + overlay promotion + Profile B + PR",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": [
+    "@project-manager",
+    "@fullstack-dev",
+    "@qa-engineer"
+  ],
+  "task_category": "logic",
+  "working_branch": "feature/v1.52-hygiene-and-closeout",
+  "merge_target": "iteration/v1.52",
+  "iteration_compass": ".mstar/iterations/v1.52-author-completion-and-multi-branch-preset-orchestration-delivery-compass-v1.md",
+  "created_at": "2026-06-19T08:30:00Z",
+  "started_at": "2026-06-20T12:30:00Z",
+  "done_at": "2026-06-20T12:30:00Z"
+}

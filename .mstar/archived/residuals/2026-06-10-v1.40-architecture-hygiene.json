@@ -1,0 +1,33 @@
+{
+  "plan_id": "2026-06-10-v1.40-architecture-hygiene",
+  "schema_version": 1,
+  "entries": [
+    {
+      "id": "R-V140P0.5-S1",
+      "severity": "nit",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-11",
+      "closure_note": "Fixed stale comment \"embedded presets\" → \"embedded_rules module\".",
+      "closure_evidence": "commit d65851d7",
+      "archived_at": "2026-06-11"
+    },
+    {
+      "id": "R-V140P0.5-S2",
+      "severity": "nit",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-11",
+      "closure_note": "Added V1.40 P0.5 migration note to test section header.",
+      "closure_evidence": "commit d65851d7",
+      "archived_at": "2026-06-11"
+    },
+    {
+      "id": "R-V140P0.5-S3",
+      "severity": "low",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-11",
+      "closure_note": "Added \"Layer 1 is compile-time constant, no runtime FS dependency\" to embedded_rules.rs docstring.",
+      "closure_evidence": "commit d65851d7",
+      "archived_at": "2026-06-11"
+    }
+  ]
+}

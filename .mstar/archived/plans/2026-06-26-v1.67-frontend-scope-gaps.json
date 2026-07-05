@@ -1,0 +1,17 @@
+{
+  "plan_id": "2026-06-26-v1.67-frontend-scope-gaps",
+  "title": "V1.67 P1 — Frontend Scope Gaps (G1 work_profile + G2 TS-client; preset mgmt UI -> V1.68 canvas)",
+  "iteration": "V1.67",
+  "slot": "P1",
+  "status": "Done",
+  "effort": "M",
+  "owner": "@frontend-dev",
+  "review": "tri-review",
+  "wave": 2,
+  "dependency": "P0 merged",
+  "working_branch": "feature/v1.67-frontend-scope-gaps",
+  "merge_target": "iteration/v1.67",
+  "file": ".mstar/plans/2026-06-26-v1.67-frontend-scope-gaps.md",
+  "completion_summary": "P1 Done. G1 work_profile selector (canonical game_bible; NULL-default preserved) + G2 NexusClient 21->24 (preset get/update/delete TS promotion; no form UI). fix-wave-1: work_profile wire-value reconciled (DB CHECK canonical), omit-when-untouched (V1.66 NULL). QC 3/3 Approve after fix-wave-1; QA Pass. Closes R-V164-P2-G1/G2. 4 Suggestions -> residuals (V1.68+).",
+  "completed_at": "2026-06-26 (Wave 2 closeout)"
+}

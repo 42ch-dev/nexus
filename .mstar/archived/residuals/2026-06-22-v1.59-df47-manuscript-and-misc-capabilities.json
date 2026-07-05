@@ -1,0 +1,45 @@
+{
+  "plan_id": "2026-06-22-v1.59-df47-manuscript-and-misc-capabilities",
+  "archived_at": "2026-07-05T13:17:59+0000",
+  "archived_by": "repo hygiene \u2014 Profile B residual archive (git slim plan)",
+  "residual_findings": [
+    {
+      "id": "R-V159P0-001",
+      "title": "execute_manuscript_write uses sqlx::query() (runtime) for static SQL \u2014 carry-over pattern (R-V140P0-S3 waived)",
+      "severity": "low",
+      "source": "qc1 (architecture) R1 carry-over",
+      "scope": "crates/nexus-daemon-runtime/src/api/handlers/host_tool_handlers.rs execute_manuscript_write",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.60+",
+      "note": "Pre-existing convention; codebase-wide cleanup. Not blocking.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-23",
+      "closure_note": "Accept (pre-existing convention). sqlx::query() for static SQL in execute_manuscript_write is an established pattern (migrated to macros where feasible in V1.58/V1.59).",
+      "closure_evidence": "V1.60 P-last T1/T2 PM doc-only closure",
+      "resolution": {
+        "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+        "commit": "PM-closure"
+      }
+    },
+    {
+      "id": "R-V159P0-002",
+      "title": "catalog_registry_invariant_all_ids_present uses 28-element manual match list \u2014 auto-derive preferred",
+      "severity": "low",
+      "source": "qc1 (architecture) R2 suggestion",
+      "scope": "crates/nexus-daemon-runtime/src/capability_registry.rs",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.60+",
+      "note": "Suggest auto-deriving via host_tool_registry().ids().filter(). Not blocking.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-23",
+      "closure_note": "V1.60 P0 T8 closed: catalog_registry_invariant_all_ids_present auto-derived via catalog Status + Registry-ref parsing. Manual 28-element match list eliminated.",
+      "closure_evidence": "merged to iteration/v1.60 @ a45e5b8f",
+      "resolution": {
+        "plan_id": "2026-06-22-v1.60-df46-local-parity",
+        "commit": "ea90e435"
+      }
+    }
+  ]
+}

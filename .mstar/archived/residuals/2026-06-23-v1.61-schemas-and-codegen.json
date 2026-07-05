@@ -1,0 +1,127 @@
+{
+  "plan_id": "2026-06-23-v1.61-schemas-and-codegen",
+  "archived_at": "2026-07-05T13:17:59+0000",
+  "archived_by": "repo hygiene \u2014 Profile B residual archive (git slim plan)",
+  "residual_findings": [
+    {
+      "id": "R-V161P0-LOW-004",
+      "title": "KeyBlock body.state growth in SQLite body_json \u2014 document expectation + assess json_extract index need in P1 SqliteKbStore",
+      "severity": "low",
+      "source": "qc3 (performance/reliability) S-002",
+      "scope": "crates/nexus-local-db SqliteKbStore::query (P1 scope); schemas/domain/key-block.schema.json state field",
+      "decision": "defer",
+      "owner": "@fullstack-dev-2",
+      "target": "V1.61 P1",
+      "target_date": "V1.61 P1",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-schemas-and-codegen][R-V161P0-LOW-004]",
+      "note": "No DB migration (body_json TEXT). Computable KeyBlocks accumulate mutable state over compute invocations. P1 should document body_json growth expectation and assess whether json_extract queries on computable need indexing. Not blocking for V1.61 additive rollout.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-24",
+      "closure_note": "Added \u00a75.5.9.2.1 in entity-scope-model.md documenting SQLite body_json TEXT growth expectations for computable KeyBlocks: row size growth (per-module state schemas cap object sizes), DB file growth (SQLite WAL auto-checkpoints; VACUUM for bulk deletes), json_extract query cost (computable filter uses separate WHERE column, not json_extract; no state-path queries are a current pattern), and migration risk (TEXT column, graceful degradation on invalid JSON). No json_extract index needed at current scale (<10K computable KeyBlocks per world). Reassess at V2.0+ when user-authored modules introduce unbounded state shapes.",
+      "resolution": {
+        "plan_id": "2026-06-24-v1.63-residual-convergence-and-closeout",
+        "commit": "37324e13"
+      }
+    },
+    {
+      "id": "R-V161P0-LOW-003",
+      "title": "battle_report is freeform (additionalProperties: true) with no size guard \u2014 add runtime cap (e.g. 64 KB) in P3 apply path",
+      "severity": "low",
+      "source": "qc3 (performance/reliability) S-001",
+      "scope": "schemas/compute/compute-output.schema.json battle_report; P3 narrative.compute apply path",
+      "decision": "defer",
+      "owner": "@fullstack-dev-2",
+      "target": "V1.61 P3",
+      "target_date": "V1.61 P3",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-schemas-and-codegen][R-V161P0-LOW-003]",
+      "note": "V1 envelope design (compass Q8) intentionally freeform; module-declared fields. Runtime size guard belongs in P3 apply path, not schema (V2 may add per-kind shape enforcement).",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-23",
+      "closure_note": "P3 addressed: BATTLE_REPORT_MAX_BYTES = 64 KB cap enforced in narrative_compute.rs apply path. Rejects oversized battle_report payloads.",
+      "resolution": {
+        "plan_id": "2026-06-23-v1.61-compute-capability-and-preset",
+        "commit": "c5cc060f"
+      }
+    },
+    {
+      "id": "R-V161P0-LOW-005",
+      "title": "Permissive placeholder schemas (item/faction/ability/species) \u2014 module manifest validation should declare expected shapes in P2/P3",
+      "severity": "low",
+      "source": "qc3 (performance/reliability) S-003",
+      "scope": "schemas/compute/entity-attributes.schema.json, entity-state.schema.json placeholder definitions",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.61 P2/P3",
+      "target_date": "V1.61 P2/P3",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-schemas-and-codegen][R-V161P0-LOW-005]",
+      "note": "Non-character BlockTypes use additionalProperties: true (intentional V1 placeholders). Runtime validation cost is deferred to module contract enforcement (manifest.json). P2/P3 should document that manifest declares BlockType + attribute/state shapes.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-24",
+      "closure_note": "Confirmed closed \u2014 \u00a75.5.9.3 and \u00a75.5.9.4 in entity-scope-model.md already document that V1.62 deleted the placeholder entity-attributes/entity-state schemas and replaced them with per-module manifest.json schemas blocks. Module authors declare per-BlockType attribute/state shapes in manifest.json (see compute-module-abi.md \u00a77.3). The placeholder schemas are intentionally permissive; structured validation is deferred to module contract enforcement at compute invocation time.",
+      "resolution": {
+        "plan_id": "2026-06-24-v1.63-residual-convergence-and-closeout",
+        "commit": "37324e13"
+      }
+    },
+    {
+      "id": "R-V161P0-LOW-002",
+      "title": "state_delta.op serializes as plain String in generated Rust (codegen maps inline string-enums to String); P3 may promote to a real enum",
+      "severity": "low",
+      "source": "qc1 (architecture/maintainability) S-001",
+      "scope": "schemas/compute/compute-output.schema.json state_delta.op; crates/nexus-contracts/src/generated/compute_output.rs",
+      "decision": "defer",
+      "owner": "@fullstack-dev-2",
+      "target": "V1.61 P3",
+      "target_date": "V1.61 P3",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-schemas-and-codegen][R-V161P0-LOW-002]",
+      "note": "Schema is additive (inline enum in JSON Schema). Generated Rust uses String. P3 (state delta apply) is the consumer \u2014 may promote to enum for exhaustive matching. Non-blocking.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-23",
+      "closure_note": "P3 addressed: state_delta.op kept as String per wire contract, validated at runtime with VALID_OPS constant in narrative_compute.rs. Decision documented in P3 Completion Report.",
+      "resolution": {
+        "plan_id": "2026-06-23-v1.61-compute-capability-and-preset",
+        "commit": "c5cc060f"
+      }
+    },
+    {
+      "id": "R-V161P0-LOW-001",
+      "title": "Pre-existing clippy lints in test targets (7 unnecessary_hashes in preset.rs, 1 redundant_clone in http.rs) \u2014 not in default CI gate",
+      "severity": "low",
+      "source": "P0 implementer (out-of-scope, pre-existing)",
+      "scope": "crates/nexus-contracts/src/local/orchestration/preset.rs (7), src/local/schedule/http.rs (1) \u2014 test targets only",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.61+",
+      "target_date": "V1.61 P-last hygiene",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-schemas-and-codegen][R-V161P0-LOW-001]",
+      "note": "Surfaced by `cargo clippy -p nexus-contracts --tests`. Not caught by CI `cargo clippy --all -- -D warnings` (default targets). Pre-existing on iteration base. P0 surgical-scope: left untouched.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-24",
+      "closure_note": "Already fixed in V1.62 P-last T5 (commit c8cc46ee: 'fix(nexus-contracts): clippy auto-fix for R-V161P0-LOW-001'). Verified clean in V1.63 P-last: cargo clippy --tests -p nexus-contracts -- -D warnings passes with zero warnings. The residual was open because the V1.62 P-last closure wasn't recorded in status.json.",
+      "resolution": {
+        "plan_id": "2026-06-24-v1.63-residual-convergence-and-closeout",
+        "commit": "c8cc46ee"
+      }
+    },
+    {
+      "id": "R-V161P0-INFO-001",
+      "title": "BlockType enum does not include `environment` \u2014 P0 entity-attributes/state schemas substituted valid combat-relevant types (character/item/faction/ability/species)",
+      "severity": "low",
+      "source": "P0 implementer (design note for P1)",
+      "scope": "schemas/compute/entity-attributes.schema.json, schemas/compute/entity-state.schema.json \u2014 block_type definitions",
+      "decision": "defer",
+      "owner": "@fullstack-dev-2",
+      "target": "V1.61 P1",
+      "target_date": "V1.61 P1",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-23-v1.61-schemas-and-codegen][R-V161P0-INFO-001]",
+      "note": "Compass \u00a71.1 P0 T3/T4 named `environment` as a computable BlockType, but `environment` is not a BlockType enum value. P0 substituted character (fully specified) + item/faction/ability/species (permissive placeholders). P1 must confirm the canonical computable BlockType set when wiring the local KeyBlockBody fields.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-24",
+      "closure_note": "Documented intentional exclusion in entity-scope-model.md \u00a75.1.1. 'environment' is too broad for a single entity BlockType \u2014 it spans weather, terrain, celestial, ambient conditions, and multi-entity spatial state. Environmental context uses existing types: scene (spatial), event (ambient), info_point (rules). Per-profile body.attributes shapes (e.g. game-bible 'level' carrying terrain grid) provide domain-specific modelling. Module authors declare per-BlockType shapes in manifest.json schemas (\u00a75.5.9.3). Future domain-specific environmental BlockType (e.g. 'biome') should follow the V1.54 game-bible precedent.",
+      "resolution": {
+        "plan_id": "2026-06-24-v1.63-residual-convergence-and-closeout",
+        "commit": "37324e13"
+      }
+    }
+  ]
+}

@@ -1,0 +1,45 @@
+{
+  "plan_id": "2026-07-02-v1.84-closure",
+  "archived_at": "2026-07-05T13:17:59+0000",
+  "archived_by": "repo hygiene \u2014 Profile B residual archive (git slim plan)",
+  "residual_findings": [
+    {
+      "id": "R-V184CL-QC1-S001",
+      "title": "apps/web/DESIGN.md/DESIGN.dark.md brand-blue consumption-path doc drift (pre-existing from V1.83) \u2014 still references the old parallel hardcoded scale in prose",
+      "severity": "low",
+      "source": "qc1 S1",
+      "scope": "apps/web/DESIGN.md, apps/web/DESIGN.dark.md brand-blue token sections",
+      "decision": "defer",
+      "owner": "@architect",
+      "target": "V1.85+ doc hygiene",
+      "tracking_link": ".mstar/status.json residual_findings[2026-07-02-v1.84-closure][R-V184CL-QC1-S001]",
+      "note": "Pre-existing V1.83 doc drift; V1.84 consolidated the index.css token path but did not amend the DESIGN.md prose. Low; defer to a future doc-hygiene pass.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-07-03",
+      "resolution": {
+        "plan_id": "2026-07-03-v1.85-brand-and-ci-doc-hygiene",
+        "commit": "d0982aa9"
+      },
+      "closure_note": "Closed by V1.85 P1: DESIGN.md brand-blue prose amended to V1.84 token reality / LFS-purpose comment added at CI checkouts."
+    },
+    {
+      "id": "R-V184CL-QC2-S001",
+      "title": "No inline comment in CI workflows noting LFS purpose (brand PNG provenance only)",
+      "severity": "low",
+      "source": "qc2 S2",
+      "scope": ".github/workflows/ci.yml, .github/workflows/desktop-build.yml lfs:true steps",
+      "decision": "accept",
+      "owner": "@ops-engineer",
+      "target": "V1.85+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-07-02-v1.84-closure][R-V184CL-QC2-S001]",
+      "note": "Trivial doc nit; .gitattributes already scopes LFS to brand PNGs. Accept as-is.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-07-03",
+      "resolution": {
+        "plan_id": "2026-07-03-v1.85-brand-and-ci-doc-hygiene",
+        "commit": "d0982aa9"
+      },
+      "closure_note": "Closed by V1.85 P1: DESIGN.md brand-blue prose amended to V1.84 token reality / LFS-purpose comment added at CI checkouts."
+    }
+  ]
+}

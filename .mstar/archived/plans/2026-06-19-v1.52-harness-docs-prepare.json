@@ -1,0 +1,17 @@
+{
+  "plan_id": "2026-06-19-v1.52-harness-docs-prepare",
+  "title": "P-1 — V1.52 compass, plans, spec overlays, tracker, status (docs-only)",
+  "status": "Done",
+  "done_at": "2026-06-19T08:30:00Z",
+  "owner": "@project-manager",
+  "agents": [
+    "@project-manager",
+    "@architect",
+    "@writing-specialist"
+  ],
+  "task_category": "docs",
+  "working_branch": "iteration/v1.52",
+  "merge_target": "iteration/v1.52",
+  "iteration_compass": ".mstar/iterations/v1.52-author-completion-and-multi-branch-preset-orchestration-delivery-compass-v1.md",
+  "created_at": "2026-06-19T08:30:00Z"
+}

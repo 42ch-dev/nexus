@@ -1,0 +1,17 @@
+{
+  "plan_id": "2026-07-01-v1.80-memory-review-reliability",
+  "iteration_id": "V1.80",
+  "status": "Done",
+  "owner": "@fullstack-dev",
+  "effort": "M",
+  "type": "feature",
+  "working_branch": "feature/v1.80-memory-review-reliability",
+  "merge_target": "iteration/v1.80",
+  "task_category": "logic",
+  "wire_contracts_changed": true,
+  "wire_contracts_note": "V1.80 P0: additive — ReviewResponse gains has_more + processed; @42ch/nexus-contracts 0.14.0 -> 0.15.0.",
+  "closes_residuals": [
+    "R-V178P0-QC3-003"
+  ],
+  "depends_on": []
+}

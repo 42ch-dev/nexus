@@ -1,0 +1,161 @@
+{
+  "plan_id": "2026-06-29-v1.75-canvas-pivot",
+  "archived_at": "2026-07-05T13:17:59+0000",
+  "archived_by": "repo hygiene \u2014 Profile B residual archive (git slim plan)",
+  "residual_findings": [
+    {
+      "id": "R-V175QC1-S001",
+      "title": "chapter-inspector at 248-line split-cap seam (qc1 S-1)",
+      "severity": "low",
+      "source": "qc1 S-1",
+      "scope": "chapter-inspector.tsx",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "V1.76 QC followup (tbd-v1.76-qc-followup)",
+      "lifecycle": "resolved",
+      "resolution": {
+        "plan_id": "2026-06-30-v1.76-slate-clear",
+        "commit": "7807603f",
+        "at": "2026-06-30",
+        "note": "Closed in V1.76 (QC 3/3 Approve + QA Pass)."
+      }
+    },
+    {
+      "id": "R-V175QC1-S002",
+      "title": "apply_chapter_patch justified #[allow] (qc1 S-2)",
+      "severity": "nit",
+      "source": "qc1 S-2",
+      "scope": "outline.rs",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.76 QC followup (tbd-v1.76-qc-followup)",
+      "lifecycle": "resolved",
+      "resolution": {
+        "plan_id": "2026-06-30-v1.76-slate-clear",
+        "commit": "7807603f",
+        "at": "2026-06-30",
+        "note": "Closed in V1.76 (QC 3/3 Approve + QA Pass)."
+      }
+    },
+    {
+      "id": "R-V175QC1-S003",
+      "title": "chapter-outline-content-editor save-state transition test (qc1 S-3)",
+      "severity": "low",
+      "source": "qc1 S-3",
+      "scope": "chapter-outline-content-editor.tsx",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "V1.76 QC followup (tbd-v1.76-qc-followup)",
+      "lifecycle": "resolved",
+      "resolution": {
+        "plan_id": "2026-06-30-v1.76-slate-clear",
+        "commit": "7807603f",
+        "at": "2026-06-30",
+        "note": "Closed in V1.76 (QC 3/3 Approve + QA Pass)."
+      }
+    },
+    {
+      "id": "R-V175QC1-DOC003",
+      "title": "local-api-surface-conventions \u00a76.3/\u00a76.6 benign stale-PUT tokens (qc1)",
+      "severity": "nit",
+      "source": "qc1 W-2 out-of-scope",
+      "scope": "local-api-surface-conventions.md \u00a76.3/\u00a76.6",
+      "decision": "defer",
+      "owner": "@architect",
+      "target": "V1.76 QC followup (tbd-v1.76-qc-followup)",
+      "lifecycle": "resolved",
+      "resolution": {
+        "plan_id": "2026-06-30-v1.76-slate-clear",
+        "commit": "7807603f",
+        "at": "2026-06-30",
+        "note": "Closed in V1.76 (QC 3/3 Approve + QA Pass)."
+      }
+    },
+    {
+      "id": "R-V175QC2-S001",
+      "title": "B5 enum coercion warn logging could be metric (qc2)",
+      "severity": "nit",
+      "source": "qc2 Suggestion",
+      "scope": "world_kb.rs project_relationship",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.76 QC followup (tbd-v1.76-qc-followup)",
+      "lifecycle": "resolved",
+      "resolution": {
+        "plan_id": "2026-06-30-v1.76-slate-clear",
+        "commit": "7807603f",
+        "at": "2026-06-30",
+        "note": "Closed in V1.76 (QC 3/3 Approve + QA Pass)."
+      }
+    },
+    {
+      "id": "R-V175QC2-S002",
+      "title": "CAS helper generalization note (qc2)",
+      "severity": "nit",
+      "source": "qc2 Suggestion",
+      "scope": "cas.rs",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.76 QC followup (tbd-v1.76-qc-followup)",
+      "lifecycle": "resolved",
+      "resolution": {
+        "plan_id": "2026-06-30-v1.76-slate-clear",
+        "commit": "7807603f",
+        "at": "2026-06-30",
+        "note": "Closed in V1.76 (QC 3/3 Approve + QA Pass)."
+      }
+    },
+    {
+      "id": "R-V175QC2-S003",
+      "title": "two-file write ordering comment (qc2)",
+      "severity": "nit",
+      "source": "qc2 Suggestion",
+      "scope": "outline.rs",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.76 QC followup (tbd-v1.76-qc-followup)",
+      "lifecycle": "resolved",
+      "resolution": {
+        "plan_id": "2026-06-30-v1.76-slate-clear",
+        "commit": "7807603f",
+        "at": "2026-06-30",
+        "note": "Closed in V1.76 (QC 3/3 Approve + QA Pass)."
+      }
+    },
+    {
+      "id": "R-V175QC3-S001",
+      "title": "web build Vite chunk-size warning (qc3 S-QC3-001)",
+      "severity": "nit",
+      "source": "qc3 S-QC3-001",
+      "scope": "apps/web vite build",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "V1.76 QC followup (tbd-v1.76-qc-followup)",
+      "lifecycle": "resolved",
+      "resolution": {
+        "plan_id": "2026-06-30-v1.76-slate-clear",
+        "commit": "7807603f",
+        "at": "2026-06-30",
+        "note": "Closed in V1.76 (QC 3/3 Approve + QA Pass)."
+      }
+    },
+    {
+      "id": "R-V175GREPTILE-001",
+      "title": "chapter-switch / save-in-flight UX misalignment in ChapterOutlineContentEditor state machine (Greptile 4/5)",
+      "severity": "low",
+      "source": "Greptile PR #101 final review (4/5)",
+      "scope": "apps/web/src/components/canvas/outline-canvas/inspectors/chapter-outline-content-editor.tsx + outline-canvas.tsx (saveState/isConflicting/contentVersion)",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "V1.76 QC followup (tbd-v1.76-qc-followup)",
+      "lifecycle": "resolved",
+      "note": "Not data loss (Greptile: 'a UX misalignment rather than data loss'). The dirty/saving guard + chapterNumber-switch reset + contentVersion forced-reset logic are sound but complex; a chapter switch while a save is in flight produces a transient UX inconsistency. Track for a V1.76 state-machine simplification. The 3/5 Greptile findings (published-content guard, onUseCurrent stale cache, dismiss-content-loss) were resolved in the greploop (commits fca82d0b + earlier).",
+      "resolution": {
+        "plan_id": "2026-06-30-v1.76-relationship-gamma",
+        "commit": "7807603f",
+        "at": "2026-06-30",
+        "note": "Closed in V1.76 (QC 3/3 Approve + QA Pass)."
+      }
+    }
+  ]
+}

@@ -1,0 +1,33 @@
+{
+  "plan_id": "2026-06-22-v1.55-game-bible-depth-35",
+  "archived_at": "2026-07-05T13:17:59+0000",
+  "archived_by": "repo hygiene \u2014 Profile B residual archive (git slim plan)",
+  "residual_findings": [
+    {
+      "id": "R-V155P2-F002",
+      "title": "design-writing preset has no durable section_status auto-transition; accepted frontmatter remains manual author step for V1.55",
+      "severity": "low",
+      "source": "qc1 F-002 (V1.55 P2 fix-wave Option B)",
+      "scope": "crates/nexus-orchestration/embedded-presets/design-writing/preset.yaml",
+      "decision": "defer",
+      "owner": "@fullstack-dev-2",
+      "target": "V1.56 P-last",
+      "target_date": "V1.56 P-last fix-wave",
+      "tracking_link": ".mstar/status.json residual_findings[2026-06-22-v1.55-game-bible-depth-35][R-V155P2-F002]",
+      "note": "Option B: preset/spec comments narrowed to state accepted frontmatter is manual step. Option A (nexus.game_bible.section_status.update capability) deferred to V1.56 P-last fix-wave per V1.56 compass Q7. See preset.yaml line 7-10 for inline note.",
+      "lifecycle": "resolved",
+      "v156_absorption": {
+        "compass": "v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md",
+        "absorbing_plan_id": "2026-06-22-v1.56-hygiene-and-closeout",
+        "decision": "Folded into V1.56 P-last fix-wave per compass Q7; close V1.55 ship residual line to leave zero carry-forwards at V1.56 ship"
+      },
+      "closed_at": "2026-06-22",
+      "closure_note": "V1.56 P-last fix-wave closed R-V155P2-F002: new `nexus.game_bible.section_status.update` capability with transition validation (draft\u2192reviewed\u2192accepted, no skipping/backwards) + atomic write via temp+rename + frontmatter field preservation. design-writing preset updated with auto_update_status state invoking the capability after review pass. 24 new tests cover all transitions + extraction + replacement + atomic write + capability run paths + preserves_fields + section_not_found. Spec amendments applied to acp-capability-set.md \u00a74.7B and game-bible-profile.md \u00a74.1. V1.55\u2192V1.56 carry-forward closure complete.",
+      "closure_evidence": "feature/v1.56-r-v155p2-f002 branch \u2192 iteration/v1.56 merge 248e3ead; commit 638cc9bc feature",
+      "resolution": {
+        "plan_id": "2026-06-22-v1.56-hygiene-and-closeout",
+        "commit": "248e3ead"
+      }
+    }
+  ]
+}

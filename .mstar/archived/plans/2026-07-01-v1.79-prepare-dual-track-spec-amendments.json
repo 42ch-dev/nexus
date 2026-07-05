@@ -1,0 +1,13 @@
+{
+  "plan_id": "2026-07-01-v1.79-prepare-dual-track-spec-amendments",
+  "iteration_id": "V1.79",
+  "status": "Done",
+  "owner": "@project-manager",
+  "effort": "S",
+  "type": "prepare",
+  "working_branch": "feature/v1.79-prepare",
+  "merge_target": "iteration/v1.79",
+  "task_category": "docs",
+  "wire_contracts_changed": false,
+  "depends_on": []
+}

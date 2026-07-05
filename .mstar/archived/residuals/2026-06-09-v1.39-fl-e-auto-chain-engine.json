@@ -1,0 +1,74 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-06-09-v1.39-fl-e-auto-chain-engine",
+  "entries": [
+    {
+      "id": "R-V139P0-S1",
+      "title": "patch_work_stage fail-fast reorder test (W-D) exercises the atomic function in isolation, not handler-level reordering — stronger test would simulate full handler",
+      "severity": "nit",
+      "source": "qc3 S-1 targeted re-review (V1.39 P0); qc-consolidated.md",
+      "scope": "crates/nexus-daemon-runtime/src/api/handlers/works.rs (tests_fix_d::stage_advance_failure_does_not_apply_non_stage_fields)",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target": "backlog",
+      "note": "Atomic-function test still proves the fail-fast property. Integration test would be more thorough but adds dependency on the surrounding handler. Accept as-is; document in test docstring if helper makes it visible.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "R-V139P0-S2",
+      "title": "Boot-resume partial index existence verified but planner usage not empirically confirmed via EXPLAIN QUERY PLAN",
+      "severity": "nit",
+      "source": "qc3 S-2 targeted re-review (V1.39 P0); qc-consolidated.md",
+      "scope": "crates/nexus-local-db/migrations/202606090001_works_auto_chain_checkpoint.sql (works_auto_chain_resume index)",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target": "backlog",
+      "note": "SQLite's planner may or may not use the partial index depending on table statistics; index is still safe (additive, no write overhead on paths that don't match the WHERE clause). Empirical EXPLAIN test can be added in a follow-up.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "R-V139P0-W-B",
+      "title": "ACH timestamp ID format %Y%m%d%H%M%S%3f lacks entropy — concurrent writers that both observe driver_schedule_id=null could collide in same millisecond",
+      "severity": "low",
+      "source": "qc2 W-2 (V1.39 P0 review); qc-consolidated.md",
+      "scope": "crates/nexus-orchestration/src/auto_chain.rs (enqueue_auto_chain_schedule ID minting)",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target": "V1.40 hygiene plan",
+      "tracking": null,
+      "closure_note": "V1.40 P4 T2: appended AtomicU32 monotonic counter suffix to ACH schedule ID. No new deps. Commit c47d2125.",
+      "note": "Local-first single-user assumption lowers probability to near-zero. Fix: append ULID suffix or per-creator monotonic counter to the timestamp ID format. Helper is single source of truth (W-A) so the fix is one location.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "R-V139P0-W-C",
+      "title": "creator run resume only clears auto_chain_interrupted; no synchronous nudge/tick/enqueue creates observable 'resume requested but chain idle' window",
+      "severity": "low",
+      "source": "qc2 W-3 (V1.39 P0 review); qc-consolidated.md",
+      "scope": "crates/nexus42/src/commands/creator/run.rs (creator run resume subcommand)",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target": "V1.40 hygiene plan",
+      "closure_note": "V1.40 P4 T2: added auto_chain_interrupted to PatchWorkRequest + supervisor.tick() trigger on resume. Commit c47d2125.",
+      "note": "Fix: after clearing the auto_chain_interrupted flag, call supervisor.tick() (or a small kick() helper) so the resumed Work progresses in the same request rather than waiting for the next cycle. Could also fold into auto_chain::enqueue_auto_chain_schedule.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    },
+    {
+      "id": "R-V139P0-W-F",
+      "title": "tick_inner loads ALL creator_schedules rows regardless of status on every terminal event — auto-chain increases completion frequency and amplifies O(N) cost",
+      "severity": "low",
+      "source": "qc3 W-3 (V1.39 P0 review); qc-consolidated.md",
+      "scope": "crates/nexus-orchestration/src/schedule/supervisor.rs (tick_inner)",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target": "V1.40 hygiene plan",
+      "closure_note": "V1.40 P4 T2: scoped tick_inner SELECT to status IN ('pending','running','paused'). Both query sites converted to runtime query_as with SAFETY comments. Commit c47d2125.",
+      "note": "Fix: scope the SELECT in tick_inner to pending|running statuses only. Auto-chain does not create new schedules with these statuses (it creates 'pending' or 'running' at enqueue, then transitions), so scope change is safe.",
+      "archived_at": "2026-06-15T16:49:53Z"
+    }
+  ],
+  "archived_at": "2026-06-15T16:49:53Z",
+  "archived_by": "residual_findings hygiene sweep 2026-06-16",
+  "archived_entry_count": 5,
+  "sweep_note": "5 entries merged from status.json residual_findings"
+}

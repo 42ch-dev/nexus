@@ -1,0 +1,20 @@
+{
+  "id": "2026-06-18-v1.51-per-row-occ",
+  "title": "T-B P1 \u2014 version columns + CAS generalisation + E_VERSION/E_LOCK codes + retry-on-conflict",
+  "file": ".mstar/plans/2026-06-18-v1.51-per-row-occ.md",
+  "status": "Done",
+  "done_at": "2026-06-18",
+  "merged_at": "2026-06-18",
+  "merge_commit": "8a970292",
+  "owner": "@fullstack-dev",
+  "agents": [
+    "@fullstack-dev",
+    "@qa-engineer"
+  ],
+  "working_branch": "feature/v1.51-per-row-occ",
+  "merge_target": "iteration/v1.51",
+  "iteration_compass": ".mstar/iterations/v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md",
+  "task_category": "logic",
+  "created_at": "2026-06-18",
+  "updated_at": "2026-06-18T17:00:00+08:00"
+}

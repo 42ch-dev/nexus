@@ -1,0 +1,48 @@
+{
+  "plan_id": "2026-06-18-v1.50-kb-editor-cli",
+  "archived_at": "2026-07-05T13:17:59+0000",
+  "archived_by": "repo hygiene \u2014 Profile B residual archive (git slim plan)",
+  "residual_findings": [
+    {
+      "id": "R-V150KBED-02",
+      "title": "Author identity uses world ownership (narrative_worlds.owner_creator_id) rather than works.creator_id; revisit if Work\u2192KeyBlock provenance linkage is introduced",
+      "severity": "low",
+      "source": "implementer (Completion Report v2)",
+      "scope": "nexus42/CLI: author gate for edit/delete resolves via world ownership not works ownership",
+      "decision": "accept",
+      "owner": "@architect or @fullstack-dev",
+      "target": "V1.52 T-A P2",
+      "target_date": "V1.52 T-A P2",
+      "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-editor-cli/completion.md (T-B P0 plan \u00a75 Completion)",
+      "note": "KeyBlocks are World-scoped (entity-scope-model \u00a75.1.1) and kb_key_blocks has no works FK. The owner_creator_id resolution is the canonical ownership path per entity-scope-model \u00a71.2. Reads (list/show) are local-first (no gate); edit/delete gate on world owner. Edit re-runs ValidationMode::Novel via SqliteKbStore::with_validation_mode.",
+      "_plan_id": "2026-06-18-v1.50-kb-editor-cli",
+      "lifecycle": "resolved",
+      "deferral_note": "Deferred at V1.51 P-last closeout (2026-06-19); not in V1.51 scope.",
+      "closed_at": "2026-06-23",
+      "closure_note": "Accept as pre-1.0 convention. Author identity uses world ownership (narrative_worlds.owner_creator_id); consistent with V1.52 T-A P2 auth gate. Full redesign deferred to V2.0+ (cross-creator provenance).",
+      "closure_evidence": "V1.60 P-last T1/T2 PM doc-only closure",
+      "resolution": {
+        "plan_id": "2026-06-22-v1.60-hygiene-and-closeout",
+        "commit": "PM-closure"
+      }
+    },
+    {
+      "id": "R-V150KBED-01",
+      "title": "creator world kb surface coexists with legacy creator kb --scope world (defer consolidation)",
+      "severity": "low",
+      "source": "implementer (Completion Report v2)",
+      "scope": "nexus42/CLI: creator world kb list/show/edit/delete vs creator kb --scope world",
+      "decision": "accept",
+      "owner": "@fullstack-dev or @product-manager",
+      "target": "V1.52+",
+      "target_date": "V1.52+",
+      "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-editor-cli/completion.md (T-B P0 plan \u00a75 Completion)",
+      "note": "Future hygiene may consolidate; out of T-B P0 scope. PM tracked for V1.51+ backlog.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-06-19",
+      "closure_note": "V1.52 T-A P1 (commits 771f89e7 + fe3c5730 on feature/v1.52-cli-surface-consolidation-auto): creator kb --scope world now aliases to creator world kb with deprecation warning (tracing::warn! + eprintln!). Error Display unified (canonical 'local database error: ...'). --help points to canonical surface. Forward wiring tested via 3 assert_cmd tests + 4 unit tests. Planned removal V1.53.",
+      "closure_evidence": "feature/v1.52-cli-surface-consolidation-auto (commits 771f89e7 + fe3c5730)",
+      "_plan_id": "2026-06-18-v1.50-kb-editor-cli"
+    }
+  ]
+}

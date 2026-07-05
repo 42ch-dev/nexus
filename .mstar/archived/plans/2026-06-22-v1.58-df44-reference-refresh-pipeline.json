@@ -1,0 +1,37 @@
+{
+  "plan_id": "2026-06-22-v1.58-df44-reference-refresh-pipeline",
+  "title": "DF-44 Reference Body Refreshable Pipeline (P1)",
+  "iteration": "V1.58",
+  "track": "Track B",
+  "wave": "Wave 1 (parallel w/ P0)",
+  "effort": "L",
+  "owner": "@fullstack-dev-2 (Track B canonical owner)",
+  "status": "Done",
+  "file": ".mstar/plans/2026-06-22-v1.58-df44-reference-refresh-pipeline.md",
+  "working_branch": "feature/v1.58-df44-reference-refresh-pipeline",
+  "merge_target": "iteration/v1.58",
+  "depends_on": [
+    "2026-06-22-v1.58-compass-and-plan-stubs"
+  ],
+  "created": "2026-06-22",
+  "merge_commit": "20c8ae0f",
+  "closed_at": "2026-06-22",
+  "qc_reports": [
+    {
+      "reviewer": "qc-specialist",
+      "verdict": "Approve",
+      "commit": "6595367f"
+    },
+    {
+      "reviewer": "qc-specialist-2",
+      "verdict": "Approve",
+      "commit": "4790076f (initial) + revalidation"
+    },
+    {
+      "reviewer": "qc-specialist-3",
+      "verdict": "Approve",
+      "commit": "43bf69e2 (initial) + revalidation"
+    }
+  ],
+  "completion_report": "P1: DF-44 reference body refreshable pipeline core. 7 implement commits + 2 fix-wave commits; QC tri-review (3/3 Approve after re-review). Capability nexus.reference.refresh registered in orchestration CapabilityRegistry + host_tool_registry (P3 fix); daemon-side refresh_scheduler periodic task; new Draft spec reference-knowledge.md (7 sections); DB migration 202606220003 adds reference_sources refresh-tracking columns + partial indexes; per-ID test vectors ≥ 1 success + ≥ 1 failure. Fix-wave added validate_reference_url (HTTPS-only + private-IP block) and streaming body fetch with incremental blake3 + 100 MiB cap."
+}

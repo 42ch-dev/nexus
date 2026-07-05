@@ -1,0 +1,124 @@
+{
+  "id": "2026-06-17-v1.49-narrative-indexes",
+  "title": "P1 — F###/E### narrative index runtime MVP",
+  "file": ".mstar/plans/2026-06-17-v1.49-narrative-indexes.md",
+  "status": "Done",
+  "owner": "@fullstack-dev",
+  "agents": [
+    "@fullstack-dev"
+  ],
+  "working_branch": "feature/v1.49-narrative-indexes",
+  "merge_target": "iteration/v1.49",
+  "iteration_compass": ".mstar/iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md",
+  "primary_spec": ".mstar/knowledge/specs/novel-writing/narrative-indexes.md",
+  "task_category": "feature",
+  "created_at": "2026-06-17",
+  "updated_at": "2026-06-17T20:15:00+08:00",
+  "completion_report": ".mstar/plans/reports/2026-06-17-v1.49-narrative-indexes/completion.md",
+  "completion_commits": [
+    "9e73a047",
+    "2ef52406",
+    "01425b8c",
+    "1f037243"
+  ],
+  "head_sha": "1f037243",
+  "done_at": "2026-06-17T22:00:00+08:00",
+  "metadata": {
+    "commits": [
+      "9e73a047",
+      "2ef52406",
+      "01425b8c",
+      "1f037243",
+      "3f2efc03",
+      "480a7663"
+    ],
+    "merge_commits": [
+      "f448b658",
+      "1fee7ada"
+    ],
+    "qc_reports": {
+      "qc1": {
+        "verdict_wave1": "Request Changes",
+        "verdict_re_review": "Approve",
+        "commits": [
+          "1db18f9d",
+          "8f2de9b4"
+        ]
+      },
+      "qc2": {
+        "verdict": "Approve",
+        "commit": "946cfba6"
+      },
+      "qc3": {
+        "verdict": "Approve",
+        "commit": "990a63b6"
+      }
+    },
+    "qc_consolidated": {
+      "commit": "eb75a73d",
+      "final_verdict": "Approve"
+    },
+    "re_review_approval_commit": "993bf936",
+    "qa_report": {
+      "commit": "7dab14c6",
+      "verdict": "PASS"
+    },
+    "residual_lifecycle": {
+      "archived": [
+        "R-V149P1-03",
+        "R-V149P1-04"
+      ],
+      "open": [
+        "R-V149P1-01",
+        "R-V149P1-02"
+      ]
+    }
+  },
+  "notes": [
+    {
+      "at": "2026-06-17",
+      "event": "implement_dispatched",
+      "evidence": "feature/v1.49-narrative-indexes @ 1f037243 (4 commits T1-T5)"
+    },
+    {
+      "at": "2026-06-17",
+      "event": "merged_to_integration",
+      "evidence": "iteration/v1.49 @ f448b658 (P1 merge)"
+    },
+    {
+      "at": "2026-06-17",
+      "event": "in_review",
+      "evidence": "QC tri-review dispatched"
+    },
+    {
+      "at": "2026-06-17",
+      "event": "qc_wave1_verdict",
+      "evidence": "qc1 Request Changes (W-1+W-2); qc2+qc3 Approve → consolidated Request Changes"
+    },
+    {
+      "at": "2026-06-17",
+      "event": "w1_w2_fix_wave",
+      "evidence": "fix/v1.49-p1-w1-w2-typed-and-allocation @ 3f2efc03 (typed ForeshadowingStatus + explicit F### token); merged at 1fee7ada"
+    },
+    {
+      "at": "2026-06-17",
+      "event": "qc_targeted_re_review",
+      "evidence": "qc1 Approve @ 8f2de9b4; qc2/qc3 stay Approve"
+    },
+    {
+      "at": "2026-06-17",
+      "event": "r_v149p1_03_04_archived",
+      "evidence": ".mstar/archived/residuals/2026-06-17-v1.49-narrative-indexes.json"
+    },
+    {
+      "at": "2026-06-17",
+      "event": "qa_passed",
+      "evidence": "qa.md @ 7dab14c6; verdict PASS"
+    },
+    {
+      "at": "2026-06-17",
+      "event": "done",
+      "evidence": "plan marked Done in status.json; archived to .mstar/archived/plans/"
+    }
+  ]
+}

@@ -1,0 +1,24 @@
+{
+  "plan_id": "2026-06-22-v1.58-mid-qc-and-fix-waves",
+  "title": "Mid-QC & Fix-Waves Meta Tracking (P-mid)",
+  "iteration": "V1.58",
+  "track": "meta",
+  "wave": "Across all 3 waves",
+  "effort": "M",
+  "owner": "@project-manager",
+  "status": "Done",
+  "file": ".mstar/plans/2026-06-22-v1.58-mid-qc-and-fix-waves.md",
+  "merge_target": "iteration/v1.58",
+  "depends_on": null,
+  "created": "2026-06-22",
+  "merge_commit": "1de842f2",
+  "closed_at": "2026-06-22",
+  "qc_reports": [
+    {
+      "reviewer": "qa-engineer",
+      "verdict": "Pass with notes",
+      "commit": "v1.58-wave-1-mid-qa.md"
+    }
+  ],
+  "completion_report": "P-mid: 3-wave evidence gate complete. 12 QC reports all Approve. 33/35 V1.57+/V1.58+ residuals closed + DF-44 fully closed. Mid-QA Pass with notes (1 non-blocking test expectation drift for P-last hygiene). Wave 1 + Wave 3 had fix-waves; Wave 2 clean first-pass."
+}

@@ -1,0 +1,16 @@
+{
+  "plan_id": "2026-06-22-v1.56-mid-qc-and-fix-waves",
+  "title": "V1.56 P-mid — 3-Wave Mid-QC & Fix-Wave Rhythm",
+  "status": "Done",
+  "type": "meta",
+  "owner": "@project-manager",
+  "effort": "M",
+  "working_branch": "feature/v1.56-mid-qc-and-fix-waves",
+  "merge_target": "iteration/v1.56",
+  "created": "2026-06-22",
+  "compass": "v1.56-workspace-and-routing-seam-closure-delivery-compass-v1.md",
+  "qc_strategy": "Meta tracking only — no standalone QC",
+  "depends_on": [],
+  "done_at": "2026-06-22",
+  "done_note": "Meta tracking across V1.56 3-wave rhythm. Wave 1 (P0+P1) closed 2 fix-waves; Wave 2 (P2) closed 2 fix-waves (incl. C-NEW-001 dedup); Wave 3 (P3) closed with PM spec amend. 12 QC reports + 4 mid-QA + 1 closeout QA + 3 targeted re-reviews. No product code (meta only)."
+}

@@ -1,0 +1,22 @@
+{
+  "id": "2026-07-05-v1.91-findings-batch",
+  "status": "Done",
+  "title": "P1 \u2014 Track B: Findings Batch Triage",
+  "file": ".mstar/plans/2026-07-05-v1.91-findings-batch.md",
+  "type": "implement",
+  "owner": "@fullstack-dev",
+  "metadata": {
+    "iteration": "V1.91",
+    "iteration_refs": [
+      "V1.91"
+    ],
+    "spec_integration_branch": "iteration/v1.91",
+    "merge_target": "iteration/v1.91",
+    "primary_spec": ".mstar/plans/2026-07-05-v1.91-prepare-dual-track.md",
+    "blocked_by": [],
+    "blocking": [],
+    "commit": "feceeebe",
+    "inreview_at": "2026-07-05T10:49:44+0000",
+    "done_at": "2026-07-05T11:29:13+0000"
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "id": "2026-06-18-v1.51-missing-kb-detection",
+  "title": "T-A P2 \u2014 finalize-time entity reference detection + creator world kb pending --missing-only",
+  "file": ".mstar/plans/2026-06-18-v1.51-missing-kb-detection.md",
+  "status": "Done",
+  "owner": "@fullstack-dev",
+  "agents": [
+    "@fullstack-dev",
+    "@qa-engineer"
+  ],
+  "working_branch": "feature/v1.51-missing-kb-detection",
+  "merge_target": "iteration/v1.51",
+  "iteration_compass": ".mstar/iterations/v1.51-kb-closure-and-multi-writer-concurrency-delivery-compass-v1.md",
+  "task_category": "logic",
+  "created_at": "2026-06-18",
+  "updated_at": "2026-06-19T04:31:57Z",
+  "done_at": "2026-06-19"
+}

@@ -1,0 +1,22 @@
+{
+  "id": "2026-06-18-v1.50-kb-editor-cli",
+  "title": "T-B P0 — creator world kb list/show/edit/delete",
+  "file": ".mstar/plans/2026-06-18-v1.50-kb-editor-cli.md",
+  "status": "Done",
+  "done_at": "2026-06-18",
+  "owner": "@fullstack-dev",
+  "agents": [
+    "@fullstack-dev"
+  ],
+  "working_branch": "feature/v1.50-kb-editor-cli",
+  "merge_target": "iteration/v1.50",
+  "iteration_compass": ".mstar/iterations/v1.50-novel-author-production-loop-and-world-kb-closure-delivery-compass-v1.md",
+  "primary_spec": ".mstar/knowledge/specs/entity-scope-model.md",
+  "task_category": "feature",
+  "depends_on": [
+    "2026-06-18-v1.50-harness-docs-prepare"
+  ],
+  "created_at": "2026-06-18",
+  "updated_at": "2026-06-18T11:30:00+08:00",
+  "qc_status": "qc1+2+3 Approve — 2 accept-low residuals (R-V150KBED-01/02) registered. Merged into iteration/v1.50 at 9754f9f3."
+}

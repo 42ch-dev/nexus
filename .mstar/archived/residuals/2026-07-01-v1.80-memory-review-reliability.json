@@ -1,0 +1,64 @@
+{
+  "plan_id": "2026-07-01-v1.80-memory-review-reliability",
+  "archived_at": "2026-07-05T13:17:59+0000",
+  "archived_by": "repo hygiene \u2014 Profile B residual archive (git slim plan)",
+  "residual_findings": [
+    {
+      "id": "R-V180P0-QC3-001",
+      "title": "POST /memory/review has_more false-completion when final/only row times out or fails and remains pending (process_review_batch counts timed-out/failed attempts as processed)",
+      "severity": "medium",
+      "source": "qc3 W-QC3-001",
+      "scope": "crates/nexus-daemon-runtime/src/api/handlers/memory.rs process_review_batch (processed accounting) + review (has_more derivation)",
+      "decision": "fix-in-wave",
+      "owner": "@fullstack-dev",
+      "target": "V1.80 P0 fix-wave (fix/v1.80-review-has-more-completion)",
+      "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.80-memory-review-reliability][R-V180P0-QC3-001]",
+      "note": "Blocks full closure of R-V178P0-QC3-003 client-completion axis. Fix: track queue advancement separately from rows attempted; on row-level timeout/failure that leaves the row pending, ensure has_more=true. Add regression tests for one-row timeout, final-row timeout, perpetually-failing head row.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-07-01 (P0 fix-wave)",
+      "closure_note": "Fixed in commit e7417c99 (fix/v1.80-review-has-more-completion, merged as 530070c3). process_review_batch now tracks any_row_remained_pending flag (set in both Ok(0,0,0) action-failure + Err(_elapsed) timeout arms); review derives has_more = more_in_db || deadline_stopped || any_row_remained_pending. 3 regression tests added (single-row fail, final-row fail, perpetually-failing row) \u2014 verified FAIL pre-fix. qc3 targeted re-review (7e9dacf3) flipped to Approve; all 3 R-V178P0-QC3-003 axes now Addressed.",
+      "resolution": {
+        "plan_id": "2026-07-01-v1.80-memory-review-reliability",
+        "commit": "e7417c99"
+      }
+    },
+    {
+      "id": "R-V180P0-QC1-001",
+      "title": "memory_review_locks HashMap unbounded per-creator (entries never evicted; daemon-lifetime)",
+      "severity": "low",
+      "source": "qc1 F-P0-1 + qc3 S-QC3-001",
+      "scope": "crates/nexus-daemon-runtime/src/workspace/mod.rs memory_review_locks field + memory_review_lock() accessor",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target": "V1.80+ (document lifecycle ceiling; revisit if multi-creator/session churn becomes real)",
+      "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.80-memory-review-reliability][R-V180P0-QC1-001]",
+      "note": "Local single-active-creator daemon: ~1 entry at a time. Acceptable for current threat model. Add a lifecycle comment noting the simplification; replace with eviction/DB-lock if multi-creator churn materializes.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-07-02 (V1.81 P-last)",
+      "resolution": {
+        "plan_id": "2026-07-01-v1.81-closure",
+        "commit": "(V1.81 P-last closure)"
+      },
+      "closure_note": "Documented in V1.81 P-last: memory_review_locks lifecycle ceiling (workspace/mod.rs) + delete_pending_by_id at-least-once threat model (memory.rs)."
+    },
+    {
+      "id": "R-V180P0-QC2-001",
+      "title": "best-effort delete_pending_by_id after side-effect success leaves re-processing window (at-least-once under threat model)",
+      "severity": "low",
+      "source": "qc2 Warning (accepted) + qc1 F-P0-3",
+      "scope": "crates/nexus-daemon-runtime/src/api/handlers/memory.rs delete_pending_by_id + process_review_batch promote/fragment paths",
+      "decision": "accept",
+      "owner": "@fullstack-dev",
+      "target": "V1.80+ (pre-existing V1.33 best-effort pattern; at-least-once accepted under local-only/single-creator/small-queue threat model)",
+      "tracking_link": ".mstar/status.json residual_findings[2026-07-01-v1.80-memory-review-reliability][R-V180P0-QC2-001]",
+      "note": "If delete fails after a successful promote/fragment, the pending row remains and the next review re-processes it (duplicate promote/fragment). Per-creator mutex prevents within-cycle double-processing; cross-cycle re-processing is the at-least-once trade-off. Accepted under documented threat model; raise severity if queue size or writer count increases.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-07-02 (V1.81 P-last)",
+      "resolution": {
+        "plan_id": "2026-07-01-v1.81-closure",
+        "commit": "(V1.81 P-last closure)"
+      },
+      "closure_note": "Documented in V1.81 P-last: memory_review_locks lifecycle ceiling (workspace/mod.rs) + delete_pending_by_id at-least-once threat model (memory.rs)."
+    }
+  ]
+}

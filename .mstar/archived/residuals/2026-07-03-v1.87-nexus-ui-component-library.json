@@ -1,0 +1,64 @@
+{
+  "plan_id": "2026-07-03-v1.87-nexus-ui-component-library",
+  "archived_at": "2026-07-05T13:17:59+0000",
+  "archived_by": "repo hygiene \u2014 Profile B residual archive (git slim plan)",
+  "residual_findings": [
+    {
+      "id": "R-V187-QC1-S001",
+      "title": "Variant (nexus-logo.tsx) and LogoVariantName (tokens.ts) duplicate the same 4-variant union \u2014 unify into one exported type identity",
+      "severity": "low",
+      "source": "qc1 S-001",
+      "scope": "packages/nexus-ui/src/components/nexus-logo.tsx (Variant) vs packages/nexus-ui/src/tokens.ts (LogoVariantName)",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "V1.88+",
+      "tracking_link": ".mstar/status.json residual_findings[2026-07-03-v1.87-nexus-ui-component-library][R-V187-QC1-S001]",
+      "note": "Cosmetic maintainability debt; both enumerate 'primary'|'color'|'white'|'mono'. Optional follow-up.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-07-04",
+      "closure_note": "V1.88 P0 T1: replaced local Variant union in nexus-logo.tsx with re-export alias `export type Variant = LogoVariantName;`. Sourced VARIANT_FILENAMES from logoVariants in tokens.ts as a backward-compat export. Added compile-time type guard in nexus-logo.test.tsx proving Variant == LogoVariantName. packages/nexus-ui/src/index.ts required no changes. No apps/web call sites changed; visual parity preserved. Commit fb4dd364.",
+      "resolution": {
+        "plan_id": "2026-07-03-v1.88-frontend-slate-clear-and-reliability-cleanup",
+        "commit": "fb4dd364"
+      }
+    },
+    {
+      "id": "R-V187-QC3-P001",
+      "title": "Migrate remaining sync resolve_guarded_path call sites to resolve_guarded_path_async (honor V1.86 T5 direction R-V156P0-M004)",
+      "severity": "low",
+      "source": "qc3 F-001",
+      "scope": "crates/nexus-daemon-runtime/src/api/handlers/host_tool_handlers.rs:1435,1502,2136,2280 + outline.rs:159,239 + chapters.rs:209,268",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "V1.88+ (reliability roadmap)",
+      "tracking_link": ".mstar/status.json residual_findings[2026-07-03-v1.87-nexus-ui-component-library][R-V187-QC3-P001]",
+      "note": "V1.87 closed only R-V186-QC1-S005 (manuscript.read_range); the repo-wide sweep was a non-goal. Remaining sync sites are pre-existing, same-class, non-blocking.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-07-04",
+      "closure_note": "V1.88 P1 T3: extracted resolve_guarded_path_async to crates/nexus-daemon-runtime/src/api/path_guard.rs as pub async fn delegating to sync resolve_guarded_path via tokio::task::spawn_blocking. Migrated all listed call sites in host_tool_handlers.rs (4), outline.rs (2), and chapters.rs (2) to .await the async wrapper; per-site .map_err() mappings preserved exactly. chapters.rs:174 to_detail sync probe deliberately excluded (DTO mapper, no FS I/O). Regression tests added in path_guard.rs, host_tool_handlers.rs, outline.rs, and chapters.rs covering in-bounds success and sibling-escape rejection. Commit e2463330.",
+      "resolution": {
+        "plan_id": "2026-07-03-v1.88-frontend-slate-clear-and-reliability-cleanup",
+        "commit": "e2463330"
+      }
+    },
+    {
+      "id": "R-V187-QC3-P002",
+      "title": "Optional React.memo on <NexusMark> if it lands in high-render surfaces (virtualized lists, motion loops)",
+      "severity": "low",
+      "source": "qc3 F-002",
+      "scope": "packages/nexus-ui/src/components/nexus-mark.tsx",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "V1.88+ (if observed)",
+      "tracking_link": ".mstar/status.json residual_findings[2026-07-03-v1.87-nexus-ui-component-library][R-V187-QC3-P002]",
+      "note": "NexusMark is a tiny static SVG; allocation cost negligible at author-action frequency. Reassess only if it enters a render-hot surface.",
+      "lifecycle": "resolved",
+      "closed_at": "2026-07-04",
+      "closure_note": "V1.88 P0 T2: wrapped NexusMark in React.memo with a rationale comment explaining the static SVG is memoized defensively for future high-render surfaces (lists, animations) without adding measurable cost today. pnpm --filter @42ch/nexus-ui and pnpm --filter web build/typecheck/test all pass. No visual or behavior change. Commit fb4dd364.",
+      "resolution": {
+        "plan_id": "2026-07-03-v1.88-frontend-slate-clear-and-reliability-cleanup",
+        "commit": "fb4dd364"
+      }
+    }
+  ]
+}

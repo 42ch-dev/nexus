@@ -1,0 +1,7 @@
+{
+  "id": "2026-05-15-v1.17-b3-remove-daemon-crate",
+  "title": "V1.17 B3: Remove Old Daemon Crate — delete nexus42d",
+  "status": "Done",
+  "done_at": "2026-05-15",
+  "notes": "QC: Approve (0C/0W/2S deferred to B4). No residuals."
+}

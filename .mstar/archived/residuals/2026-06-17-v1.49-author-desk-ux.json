@@ -1,0 +1,27 @@
+{
+  "plan_id": "2026-06-17-v1.49-author-desk-ux",
+  "archived_at": "2026-06-17T23:30:00+08:00",
+  "archived_by": "PM (qc-consolidated verdict: Approve after W-1 targeted re-review)",
+  "residual_findings": [
+    {
+      "id": "R-V149P2-01",
+      "title": "clap `--yes` help text for `creator works reconcile-chapters` over-promises an inline preview that `confirm_reconcile_interactive` does not print in the default flow",
+      "severity": "lifecycle_resolved",
+      "lifecycle": "resolved",
+      "source": "qc1 W-1 (architecture/maintainability); raised in wave-1 (2026-06-17) qc-consolidated.md",
+      "scope": "crates/nexus42/src/commands/creator/works/mod.rs::handle_reconcile_chapters (clap arg help)",
+      "decision": "closed",
+      "owner": "V1.49 P2 W-1 fix wave (fullstack-dev)",
+      "closed_at": "2026-06-17T23:30:00+08:00",
+      "closure_note": "V1.49 P2 W-1 fix wave (commit bdd646dc, merged at 0b98e194): clap --yes doc comment updated to skip confirmation prompt (no preview promise); preview routed to --dry-run. 1-line handler doc change + new regression test works_reconcile_chapters_help_yes_does_not_promise_inline_preview. No handler code changed (confirm_reconcile_interactive / handle_reconcile_chapters untouched). All tests pass (84 lib + 11 integration creator_works). Targeted re-review: qc-specialist Approve @ e7848336.",
+      "closure_evidence": "iteration/v1.49 @ 0b98e194 (merge) + bdd646dc (fix commit) + e7848336 (qc1 re-review); qc-consolidated.md re-review Approve verdict",
+      "fix_commits": [
+        "bdd646dc",
+        "0b98e194"
+      ],
+      "re_review_commits": [
+        "e7848336"
+      ]
+    }
+  ]
+}

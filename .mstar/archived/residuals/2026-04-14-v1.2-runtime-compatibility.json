@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "plan_id": "2026-04-14-v1.2-runtime-compatibility",
+  "archived_at": "2026-04-16T16:53:30Z",
+  "entries": [
+    {
+      "id": "R1",
+      "title": "should_degrade window semantics incorrect",
+      "severity": "medium",
+      "source": "QC1-W1, QC2-W-3",
+      "scope": "degradation.rs:334-346",
+      "decision": "defer",
+      "owner": "fullstack-dev",
+      "target": "V1.3",
+      "tracking": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-16T16:53:30Z",
+      "closure_note": "V1.3 Wave 2: per-failure timestamps with window pruning"
+    },
+    {
+      "id": "R2",
+      "title": "Placeholder world_id in two-stage assembly",
+      "severity": "medium",
+      "source": "QC1-W2, QC2-W-4",
+      "scope": "context.rs:376-420",
+      "decision": "defer",
+      "owner": "fullstack-dev",
+      "target": "V1.3",
+      "tracking": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-16T16:53:30Z",
+      "closure_note": "V1.3 Wave 2: use actual workspace slug from config"
+    },
+    {
+      "id": "R3",
+      "title": "last_upgrade_attempt not persisted",
+      "severity": "medium",
+      "source": "QC3-W-002",
+      "scope": "degradation.rs",
+      "decision": "defer",
+      "owner": "fullstack-dev",
+      "target": "V1.3",
+      "tracking": null,
+      "lifecycle": "resolved",
+      "closed_at": "2026-04-16T16:53:30Z",
+      "closure_note": "V1.3 Wave 2: persist last_upgrade_attempt in DegradationSnapshot"
+    },
+    {
+      "id": "R4",
+      "title": "Dead call_assemble URL mismatch",
+      "severity": "low",
+      "source": "QC1-W4",
+      "scope": "daemon_client.rs:186",
+      "decision": "accept",
+      "owner": null,
+      "target": "V1.3",
+      "tracking": null,
+      "lifecycle": "waived",
+      "closed_at": "2026-04-16T16:53:30Z",
+      "closure_note": "Dead code path; platform URL resolved at runtime"
+    },
+    {
+      "id": "R5",
+      "title": "Plan file vs test existence mismatch",
+      "severity": "low",
+      "source": "QC3-W-001",
+      "scope": "plan.md",
+      "decision": "defer",
+      "owner": null,
+      "target": "V1.2 cleanup",
+      "tracking": null,
+      "lifecycle": "waived",
+      "closed_at": "2026-04-16T16:53:30Z",
+      "closure_note": "Documentation-only; plan docs updated separately"
+    }
+  ]
+}
