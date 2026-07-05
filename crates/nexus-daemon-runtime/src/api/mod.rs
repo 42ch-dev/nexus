@@ -460,6 +460,11 @@ fn works_routes() -> Router<WorkspaceState> {
             "/v1/daemon/findings/{finding_id}",
             get(handlers::findings::get_finding_creator_scoped_handler),
         )
+        // ── Bulk finding update helper (V1.91 P1) ─────────────────────
+        .route(
+            "/v1/daemon/findings/batch",
+            patch(handlers::findings::batch_update_findings_handler),
+        )
 }
 /// Create the Daemon API router
 ///

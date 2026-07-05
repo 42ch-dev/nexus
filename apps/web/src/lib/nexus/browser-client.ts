@@ -12,6 +12,8 @@
 import type {
   AddScheduleRequest,
   AddScheduleResponse,
+  BatchUpdateFindingsRequest,
+  BatchUpdateFindingsResponse,
   ChapterBody,
   ChapterContentQuery,
   ChapterDetail,
@@ -219,6 +221,10 @@ export class BrowserClient implements NexusClient {
       `/v1/daemon/works/${encodeURIComponent(workId)}/findings/${encodeURIComponent(findingId)}`,
       patch,
     );
+  }
+  // V1.91 P1 — bulk helper for findings triage.
+  batchUpdateFindings(request: BatchUpdateFindingsRequest): Promise<BatchUpdateFindingsResponse> {
+    return this.patch<BatchUpdateFindingsResponse>('/v1/daemon/findings/batch', request);
   }
 
   // ── Preset management ──────────────────────────────────────────────────────
