@@ -144,18 +144,6 @@ pub struct UpdateFindingRequest {
     pub rule_suggestion: Option<Option<String>>,
 }
 
-/// V1.91 P1 — inner patch shape for the bulk update helper.
-///
-/// The generated [`BatchUpdateFindingsRequest`] carries `patch` as a loose
-/// `serde_json::Value` (codegen quirk for object-with-fixed-keys), so this
-/// helper deserializes that value and enforces the allowed keys.
-#[derive(Debug, Deserialize, Default)]
-#[serde(deny_unknown_fields)]
-struct BatchFindingPatch {
-    pub status: Option<String>,
-    pub target_executor: Option<String>,
-}
-
 /// List findings query parameters.
 ///
 /// R-V149P0-01 (V1.50): `status` accepts either a single status or a
@@ -502,11 +490,11 @@ pub async fn batch_update_findings_handler(
         });
     }
 
-    let patch: BatchFindingPatch =
-        serde_json::from_value(body.patch).map_err(|e| NexusApiError::BadRequest {
-            code: "invalid_input".to_string(),
-            message: format!("invalid patch: {e}"),
-        })?;
+    // V1.92 P-1 T5: body.patch is now the generated FindingBatchPatch struct
+    // (was serde_json::Value; codegen now emits a concrete struct from
+    // finding-batch-patch.schema.json). Field access is direct — no
+    // serde_json::from_value needed.
+    let patch = body.patch;
 
     // If both fields are absent, the contract says return 200 with updated: 0.
     if patch.status.is_none() && patch.target_executor.is_none() {
