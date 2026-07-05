@@ -1,3 +1,4 @@
+import type { FindingBatchPatch } from './FindingBatchPatch';
 import type { SchemaVersion } from '../../common/CommonTypes';
 /**
  * Nexus BatchUpdateFindingsRequest
@@ -10,5 +11,5 @@ import type { SchemaVersion } from '../../common/CommonTypes';
 /** Request body for PATCH /v1/daemon/findings/batch. Bulk-updates status and/or target_executor for up to 100 findings. Creator-scoped; each individual update reuses the existing update_finding DAO validation. */
 export interface BatchUpdateFindingsRequest {
   finding_ids: string[];
-  patch: { status?: string; target_executor?: string };
+  patch: FindingBatchPatch;
 }

@@ -57,6 +57,12 @@ sha2 = { workspace = true }
 nix = { version = "0.28", features = ["fs"] }
 rust-embed = { version = "8.11.0", default-features = false, features = ["mime-guess"] }
 mime_guess = "2.0.5"
+# V1.92 P-1 T1 — TLS transport security (self-signed Ed25519 cert via rcgen,
+# axum-server bind_rustls drop-in for non-loopback listeners).
+axum-server = { version = "0.7", features = ["tls-rustls"] }
+rustls = { version = "0.23", features = ["aws-lc-rs"] }
+rcgen = "0.13"
+rustls-pemfile = "2"
 
 [dev-dependencies]
 axum-test = "15"

@@ -143,6 +143,28 @@ pub fn creator_kb_entries_dir(home: &Path, creator_id: &str, workspace_slug: &st
     creator_kb_dir(home, creator_id, workspace_slug).join("entries")
 }
 
+/// `$HOME/.nexus42/tls/` — directory for persistent TLS certificate + key.
+///
+/// The daemon creates this directory with mode `0o700` on first boot.
+/// Cert and key files are written with `0o600` (owner-only read).
+/// Fingerprint is SHA-256 of the DER-encoded certificate, colon-hex.
+#[must_use]
+pub fn tls_dir(home: &Path) -> PathBuf {
+    nexus_root_from_home(home).join("tls")
+}
+
+/// `$HOME/.nexus42/tls/cert.pem` — persistent self-signed TLS certificate.
+#[must_use]
+pub fn tls_cert_path(home: &Path) -> PathBuf {
+    tls_dir(home).join("cert.pem")
+}
+
+/// `$HOME/.nexus42/tls/key.pem` — persistent TLS private key.
+#[must_use]
+pub fn tls_key_path(home: &Path) -> PathBuf {
+    tls_dir(home).join("key.pem")
+}
+
 /// `$HOME/.nexus42/device-id` — persistent machine identifier (`UUID` v4).
 #[must_use]
 pub fn device_id_path(home: &Path) -> PathBuf {
@@ -561,6 +583,30 @@ mod tests {
         assert_eq!(
             device_id_path(&home),
             PathBuf::from("/fake/home/.nexus42/device-id")
+        );
+    }
+
+    #[test]
+    fn tls_dir_layout() {
+        let home = PathBuf::from("/fake/home");
+        assert_eq!(tls_dir(&home), PathBuf::from("/fake/home/.nexus42/tls"));
+    }
+
+    #[test]
+    fn tls_cert_path_layout() {
+        let home = PathBuf::from("/fake/home");
+        assert_eq!(
+            tls_cert_path(&home),
+            PathBuf::from("/fake/home/.nexus42/tls/cert.pem")
+        );
+    }
+
+    #[test]
+    fn tls_key_path_layout() {
+        let home = PathBuf::from("/fake/home");
+        assert_eq!(
+            tls_key_path(&home),
+            PathBuf::from("/fake/home/.nexus42/tls/key.pem")
         );
     }
 

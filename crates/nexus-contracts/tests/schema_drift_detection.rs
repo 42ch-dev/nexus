@@ -171,6 +171,12 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             ErrorResponse
         ),
+        // ── daemon-api/runtime/ (V1.92 P-1 T2 — TLS fingerprint endpoint) ────
+        entry!(
+            "schemas/daemon-api/runtime/cert-fingerprint-response.schema.json",
+            Strict,
+            CertFingerprintResponse
+        ),
         // ── daemon-api/compute/ ───────────────────────────────────────────
         // V1.62 reorganization: compute envelopes moved here from compute/.
         // V1.61 WASM compute ABI envelopes (compass Q3/Q8). Only the top-level
@@ -374,6 +380,12 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             "schemas/daemon-api/findings/batch-update-findings-response.schema.json",
             Strict,
             BatchUpdateFindingsResponse
+        ),
+        // V1.92 P-1 T5 — extracted inline patch from batch-update-findings
+        entry!(
+            "schemas/daemon-api/findings/finding-batch-patch.schema.json",
+            Strict,
+            FindingBatchPatch
         ),
         // ── daemon-api/memory/ (V1.78 P0 — creator memory review-loop) ─────
         entry!(

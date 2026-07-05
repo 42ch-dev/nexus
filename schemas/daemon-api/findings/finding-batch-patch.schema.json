@@ -1,0 +1,13 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/findings/finding-batch-patch.schema.json",
+  "schema_version": 1,
+  "title": "Nexus FindingBatchPatch",
+  "description": "Fields to patch on each matching finding in a batch update. At least one field should be present.",
+  "type": "object",
+  "properties": {
+    "status": { "type": "string" },
+    "target_executor": { "type": "string" }
+  },
+  "additionalProperties": false
+}

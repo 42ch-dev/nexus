@@ -56,6 +56,7 @@ export * from './daemon-api/creators/SetActiveCreatorResponse';
 export * from './daemon-api/findings/BatchUpdateFindingsRequest';
 export * from './daemon-api/findings/BatchUpdateFindingsResponse';
 export * from './daemon-api/findings/CreateFindingRequest';
+export * from './daemon-api/findings/FindingBatchPatch';
 export * from './daemon-api/findings/FindingDetailResponse';
 export * from './daemon-api/findings/ListFindingsQuery';
 export * from './daemon-api/findings/ListFindingsResponse';
@@ -110,6 +111,7 @@ export * from './daemon-api/reading/ReadingAnnotation';
 export * from './daemon-api/reading/ReadingProgressQuery';
 export * from './daemon-api/reading/ReadingProgressRequest';
 export * from './daemon-api/reading/ReadingProgressResponse';
+export * from './daemon-api/runtime/CertFingerprintResponse';
 export * from './daemon-api/schedule/AddScheduleRequest';
 export * from './daemon-api/schedule/AddScheduleResponse';
 export * from './daemon-api/schedule/CoreContextHistoryEntry';
@@ -252,6 +254,7 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   BatchUpdateFindingsRequest: 1,
   BatchUpdateFindingsResponse: 1,
   CreateFindingRequest: 1,
+  FindingBatchPatch: 1,
   FindingDetailResponse: 1,
   ListFindingsQuery: 1,
   ListFindingsResponse: 1,
@@ -306,6 +309,7 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   ReadingProgressQuery: 1,
   ReadingProgressRequest: 1,
   ReadingProgressResponse: 1,
+  CertFingerprintResponse: 1,
   AddScheduleRequest: 1,
   AddScheduleResponse: 1,
   CoreContextHistoryEntry: 1,
