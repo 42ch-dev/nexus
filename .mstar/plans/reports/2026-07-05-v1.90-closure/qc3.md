@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-07-05-v1.90-closure"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-07-05"
 ---
 
@@ -177,3 +177,82 @@ Commands and key outputs captured during this review (paths relative to repo roo
 - **Test-suite runtime is unchanged for the rename** (daemon-runtime lib in ~32 s locally). No performance regression introduced by the module graph reshuffle.
 - **Doc drift is confined to comments** — no code path in production actually depends on the drifted strings (except W-01's `"daemon-daemon-api"` in the error envelope, which *is* the finding). The rest is a one-pass sweep.
 
+## Revalidation
+
+**Trigger:** PM targeted re-review of fix commit `1770fee8` ("fix(v1.90): rename hygiene, daemon-api resource string, remote-bind integration test") against parent `da8f4c92`. Scope limited to W-01 (B-3 in the PM-consolidated report) and W-02 (B-4). Other findings unchanged.
+
+**Revalidation timestamp:** 2026-07-05.
+
+### Diff summary (`git diff --stat da8f4c92..1770fee8`)
+
+- 22 files changed, +142 / -25 lines.
+- Touched exactly the surfaces called out in W-01 (docstrings across `apps/nexus42/**`, `crates/nexus-agent-host/`, `crates/nexus-home-layout/`, `crates/nexus-local-db/`, `crates/nexus-orchestration/`, `crates/nexus-daemon-runtime/src/api/{auth_middleware,errors}.rs`, `docs/ARCHITECTURE.md`, `schemas/platform/http-bff/README.md`, `apps/AGENTS.md`) plus `packages/nexus-contracts/CHANGELOG.md` (+18) and a brand-new `crates/nexus-daemon-runtime/tests/remote_bind_boot.rs` (+92). `boot.rs` gained only `+7 / -0` for the `ENV_TEST_LOCK` static and its guard in the existing `remote_bind_gate_behavior` unit test. No changes to `boot.rs` gate ordering, no reshaping of the error envelope beyond the string value — surgical, matches the "must, before merge" fix scope from W-01/W-02.
+
+
+
+### W-01 — resource string typo (Resolved)
+
+**Re-checked:**
+
+- `crates/nexus-daemon-runtime/src/api/auth_middleware.rs:420` — `resource: "daemon-daemon-api".into()` is now `resource: "daemon-api".into()`. Confirmed via `git diff da8f4c92..1770fee8 -- crates/nexus-daemon-runtime/src/api/auth_middleware.rs`.
+- `crates/nexus-daemon-runtime/src/api/errors.rs:621` — assertion updated: both the constructed value and `assert_eq!(details["resource"], ...)` now read `"daemon-api"`. The old typo is not preserved by any regression guard.
+- Module-header doc drift swept across all sites enumerated in the original W-01 list: `auth_middleware.rs:3`, `apps/nexus42/src/config.rs:33`, `apps/nexus42/src/session_capture.rs:7`, `apps/nexus42/src/api/daemon_client.rs:55`, `apps/nexus42/src/commands/creator/run.rs` (4 sites), `apps/nexus42/src/commands/acp_worker/mod.rs:71`, `docs/ARCHITECTURE.md:46`. `apps/desktop/src-tauri/src/lib.rs`, `crates/nexus-agent-host/src/lib.rs`, `crates/nexus-home-layout/src/lib.rs`, `crates/nexus-local-db/src/findings.rs`, `crates/nexus-orchestration/**` also touched — this closes S-03 en passant.
+- Repo-wide sweep: `rg -n 'daemon-daemon-api' crates apps` returns **0 hits** (exit 1). No re-introduction risk on this branch tip (`1770fee8`).
+- `packages/nexus-contracts/CHANGELOG.md` — new `[0.19.0] - 2026-07-05` section explicitly documents the resource-string change and the Local API → Daemon API rename, closing S-02 in the same commit.
+
+**Tests re-run:**
+
+- `cargo test -p nexus-daemon-runtime --lib` → `test result: ok. 403 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 29.72s`. The `response_body_includes_details_for_forbidden` test in `errors.rs` now asserts the new `"daemon-api"` value and passes cleanly.
+
+**Disposition:** **Resolved.** The wire-visible typo is gone and the assertion no longer freezes it. Doc drift is fully swept.
+
+### W-02 — remote-bind gate integration coverage (Resolved)
+
+**Re-checked:**
+
+- New file `crates/nexus-daemon-runtime/tests/remote_bind_boot.rs` (+92 lines) contains two `#[tokio::test]` cases:
+  - `run_daemon_rejects_remote_bind_without_env_vars` — constructs `DaemonConfig { host: "0.0.0.0", port: 0, ... }`, points `HOME` at a scratch dir, clears both env vars, invokes real `run_daemon(config).await`, asserts an `Err` whose message contains `"Refusing to bind"` or `"remote bind requires"`. This exercises the actual boot path — not a call into the pure-function gate — closing the drift-past-a-guard concern from W-02.
+  - `run_daemon_allows_remote_bind_with_env_vars` — same shape but sets both `NEXUS42_DAEMON_API_KEY` and `NEXUS_DAEMON_REMOTE_BIND=1`, spawns `run_daemon` on a task, waits ~1.2s for workspace init + engine wiring + gate check + `TcpListener::bind`, asserts the handle is still running, then aborts cleanly. Confirms the gate does not spuriously reject the allowed case.
+- Both new tests and the pre-existing `remote_bind_gate_behavior` unit test acquire a `static ENV_TEST_LOCK: LazyLock<Mutex<()>>` before mutating `NEXUS42_DAEMON_API_KEY` / `NEXUS_DAEMON_REMOTE_BIND` — the pattern I called out from `daemon_client.rs:832`. The lock is defined both inside `boot.rs` (unit-test module) and inside `remote_bind_boot.rs` (integration binary). Different binaries can still race on env vars in principle, but within each binary parallelism is now serialised as recommended.
+- The gate call-site at `crates/nexus-daemon-runtime/src/boot.rs:786-789` is unchanged (`ensure_remote_bind_allowed(...)` still runs immediately before `TcpListener::bind`). The new integration tests exercise this exact call path, so a future refactor that drops the gate would fail `run_daemon_rejects_remote_bind_without_env_vars` — the durable regression guard W-02 asked for.
+
+**Tests re-run:**
+
+- `cargo test -p nexus-daemon-runtime --test remote_bind_boot` → `test result: ok. 2 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 1.55s`. Both allow and reject paths pass on a real boot; log output shows `Daemon API listening on http://0.0.0.0:0` in the allow case (proving the listener actually opened) and the reject case fails at the gate before bind.
+- `cargo test -p nexus-daemon-runtime --lib remote_bind_gate_behavior` → `test result: ok. 1 passed`. Unit test still passes with the new `ENV_TEST_LOCK` guard — no lock poisoning or ordering regression.
+- `cargo test -p nexus-daemon-runtime` (full crate incl. integration suite) → all binaries pass. No test disables or ignores added.
+
+**Disposition:** **Resolved.** The headline security feature of V1.90 now has real boot-path coverage plus a serialised env-var lock inside each binary.
+
+### Other findings
+
+- **S-01 — Rename-hygiene grep gate:** not codified as a P-last script in this fix commit. Not required by the assignment; the current tree is clean (`rg` sweep = 0 hits) so nothing regressed. Leaving as an open suggestion for the P-last verification script.
+- **S-02 — CHANGELOG stale:** **Resolved** by the +18 block in `packages/nexus-contracts/CHANGELOG.md` under `[0.19.0]`.
+- **S-03 — `/v1/local/*` doc-comment references in cross-crate docs:** covered by the sweep (touched `crates/nexus-agent-host/src/lib.rs`, `crates/nexus-local-db/src/findings.rs`, `crates/nexus-orchestration/**`). **Resolved** in the same fix wave.
+- **S-04 — Web smoke script (`scripts/served-ui-smoke.sh`):** not exercised by this fix commit; remains a QA suggestion (non-blocking).
+- **S-05 — Pre-existing pedantic clippy** under `crates/nexus-daemon-runtime/src/workspace/session.rs` (and now also visible in `crates/nexus-local-db/src/reference_source.rs` under `--all-targets`): unchanged, still non-blocking. Verified pre-existing on parent `da8f4c92`. Root `AGENTS.md` uses `cargo clippy --all -- -D warnings` (without `--all-targets`) as the CI-equivalent command; that gate is clean.
+
+### Repo-wide gate checks (revalidation)
+
+- `git branch --show-current` → `iteration/v1.90`; `git rev-parse HEAD` (before this report commit) → `1770fee8`.
+- `rg -n 'daemon-daemon-api' crates apps` → 0 hits (exit 1).
+- `cargo test -p nexus-daemon-runtime --test remote_bind_boot` → 2/2 pass.
+- `cargo test -p nexus-daemon-runtime --lib remote_bind_gate_behavior` → 1/1 pass.
+- `cargo test -p nexus-daemon-runtime --lib` → 403/403 pass.
+- `cargo test -p nexus-daemon-runtime` (all targets in crate) → all pass.
+- `cargo clippy --all -- -D warnings` → clean (CI-equivalent command per root `AGENTS.md`).
+- `cargo clippy --all --all-targets -- -D warnings` — surfaces **pre-existing** pedantic lints in `crates/nexus-local-db/src/reference_source.rs` (S-05 class; not part of this iteration; not gated by CI). Verified pre-existing under `da8f4c92`.
+
+### Updated Verdict
+
+**Approve.**
+
+Both blocking Warnings from the initial review are cleanly resolved with surgical fixes that stay within the "before merge to `main`" cost envelope (22 files, +142/-25). No new risk introduced:
+
+- `boot.rs` gate ordering, transport resolution, and error-envelope shape are all unchanged; the only additions are the `ENV_TEST_LOCK` static and its guard in the existing unit test.
+- The new integration binary is self-contained, uses `test_utils::create_test_workspace`, and cleans up spawned tasks with `handle.abort()` + `_ = handle.await`.
+- The `errors.rs` unit test now regression-guards the correct wire value (`"daemon-api"`), so any future accidental re-introduction of `"daemon-daemon-api"` fails the test immediately.
+- Doc-comment sweep is comprehensive and closes S-03 en passant.
+- CHANGELOG update closes S-02 and gives external `@42ch/nexus-contracts` consumers the semver + breaking-change signal that was missing.
+
+From the reliability/performance lens I own for `qc-specialist-3`: no test-suite runtime regression (daemon-runtime lib in ~29.7s vs the ~32s baseline in the initial review — improvement within measurement noise), no new async-cleanup or panic hazard, no drift-past-a-guard risk on the remote-bind gate, and no wire-visible typo shipping. The fix commit is production-worthy for `iteration/v1.90 → main`.
