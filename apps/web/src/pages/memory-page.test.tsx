@@ -4,8 +4,8 @@
  * Covers the three affordances against a real BrowserClient + msw: the
  * pending-review list with live count badge, the read-only fragments browser
  * (incl. the absent-world_id "(none)" legibility rule, open item #3), and the
- * delete + review flows. The active creator id is derived from sessions
- * (mirrors the canvas `useDerivedCreatorId` derivation).
+ * delete + review flows. The active creator id is set via the test provider
+ * (V1.94 client context).
  */
 import { screen, fireEvent, waitFor } from '@testing-library/react';
 import { http, HttpResponse } from 'msw';
@@ -17,20 +17,6 @@ import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 
 const CREATOR = 'creator-active';
-
-/** Wire the sessions list so `useActiveCreatorId` resolves the active creator. */
-function sessionListHandler(creatorId = CREATOR) {
-  return http.get('/v1/daemon/orchestration/sessions', ({ request }) => {
-    // useActiveCreatorId issues listSessions({ limit: 1 }); echo a session row
-    // carrying the creator_id so the derivation resolves.
-    const url = new URL(request.url);
-    void url;
-    return HttpResponse.json({
-      items: [{ session_id: 's1', creator_id: creatorId, preset_id: 'p', status: 'completed' }],
-      pagination: { limit: 1, has_more: false },
-    });
-  });
-}
 
 /** Wire the SOUL section handlers so MemoryPage fully renders (V1.82). */
 function soulHandlers(creatorId = CREATOR) {
@@ -52,7 +38,6 @@ function soulHandlers(creatorId = CREATOR) {
 describe('MemoryPage — pending list, count badge, fragments, delete, review', () => {
   it('renders the pending-review list with the live count badge', async () => {
     useHandlers(
-      sessionListHandler(),
       ...soulHandlers(),
       http.get('/v1/daemon/memory/pending-review', () =>
         HttpResponse.json({
@@ -73,7 +58,7 @@ describe('MemoryPage — pending list, count badge, fragments, delete, review', 
       http.get('/v1/daemon/memory/fragments', () => HttpResponse.json({ fragments: [] })),
     );
 
-    renderInApp(<MemoryPage />, { client: new BrowserClient() });
+    renderInApp(<MemoryPage />, { client: new BrowserClient(), activeCreatorId: CREATOR });
 
     // Count badge renders the live count (memory-pending-count token).
     await waitFor(() =>
@@ -88,7 +73,6 @@ describe('MemoryPage — pending list, count badge, fragments, delete, review', 
 
   it('renders fragments and shows "(none)" for absent world_id in the inspector (open item #3)', async () => {
     useHandlers(
-      sessionListHandler(),
       ...soulHandlers(),
       http.get('/v1/daemon/memory/pending-review', () =>
         HttpResponse.json({
@@ -114,7 +98,7 @@ describe('MemoryPage — pending list, count badge, fragments, delete, review', 
       ),
     );
 
-    renderInApp(<MemoryPage />, { client: new BrowserClient() });
+    renderInApp(<MemoryPage />, { client: new BrowserClient(), activeCreatorId: CREATOR });
 
     // Fragment row renders fragment_id (monospace) + summary.
     expect(await screen.findByText('A long-term memory fragment.')).toBeInTheDocument();
@@ -133,7 +117,6 @@ describe('MemoryPage — pending list, count badge, fragments, delete, review', 
     // mirroring a real server that honors the deletion before the refetch.
     let deleted = false;
     useHandlers(
-      sessionListHandler(),
       ...soulHandlers(),
       http.get('/v1/daemon/memory/pending-review', () =>
         HttpResponse.json({
@@ -162,7 +145,7 @@ describe('MemoryPage — pending list, count badge, fragments, delete, review', 
       }),
     );
 
-    renderInApp(<MemoryPage />, { client: new BrowserClient() });
+    renderInApp(<MemoryPage />, { client: new BrowserClient(), activeCreatorId: CREATOR });
     expect(await screen.findByText('to be deleted')).toBeInTheDocument();
 
     // window.confirm is the web-friendly confirmation (D-UX LOCKED).
@@ -180,7 +163,6 @@ describe('MemoryPage — pending list, count badge, fragments, delete, review', 
       HttpResponse.json({ promoted: 3, fragmented: 5, dropped: 2 }),
     );
     useHandlers(
-      sessionListHandler(),
       ...soulHandlers(),
       http.get('/v1/daemon/memory/pending-review', () =>
         HttpResponse.json({
@@ -202,7 +184,7 @@ describe('MemoryPage — pending list, count badge, fragments, delete, review', 
       http.post('/v1/daemon/memory/review', reviewSpy),
     );
 
-    renderInApp(<MemoryPage />, { client: new BrowserClient() });
+    renderInApp(<MemoryPage />, { client: new BrowserClient(), activeCreatorId: CREATOR });
     // CTA is enabled once pending count resolves (> 0).
     const cta = await screen.findByRole('button', { name: /review and summarize/i });
     await waitFor(() => expect(cta).not.toBeDisabled());
@@ -216,13 +198,7 @@ describe('MemoryPage — pending list, count badge, fragments, delete, review', 
     expect(screen.getByText(/2 dropped/)).toBeInTheDocument();
   });
 
-  it('shows the no-active-creator empty state when no sessions exist', async () => {
-    useHandlers(
-      http.get('/v1/daemon/orchestration/sessions', () =>
-        HttpResponse.json({ items: [], pagination: { limit: 1, has_more: false } }),
-      ),
-    );
-
+  it('shows the no-active-creator empty state when no active creator is selected', async () => {
     renderInApp(<MemoryPage />, { client: new BrowserClient() });
 
     expect(await screen.findByText('No active creator')).toBeInTheDocument();

@@ -18,15 +18,6 @@ import { useHandlers } from '@/test/msw-server';
 
 const CREATOR = 'creator-active';
 
-function sessionListHandler(creatorId = CREATOR) {
-  return http.get('/v1/daemon/orchestration/sessions', () =>
-    HttpResponse.json({
-      items: [{ session_id: 's1', creator_id: creatorId, preset_id: 'p', status: 'completed' }],
-      pagination: { limit: 1, has_more: false },
-    }),
-  );
-}
-
 /** Wire the non-SOUL memory handlers as no-ops so MemoryPage fully renders. */
 function baselineMemoryHandlers(fragments: ReturnType<typeof jsonFragments>) {
   return [
@@ -65,9 +56,9 @@ function jsonFragments(
 
 describe('MemoryPage SOUL section — density states + click-to-filter', () => {
   it('renders the empathetic empty state when there are zero fragments', async () => {
-    useHandlers(sessionListHandler(), ...baselineMemoryHandlers([]));
+    useHandlers(...baselineMemoryHandlers([]));
 
-    renderInApp(<MemoryPage />, { client: new BrowserClient() });
+    renderInApp(<MemoryPage />, { client: new BrowserClient(), activeCreatorId: CREATOR });
 
     expect(await screen.findByTestId('soul-empty-state')).toBeInTheDocument();
     expect(screen.getByText(/your soul is just beginning/i)).toBeInTheDocument();
@@ -77,13 +68,12 @@ describe('MemoryPage SOUL section — density states + click-to-filter', () => {
 
   it('renders the low-data frequency list with the live count', async () => {
     useHandlers(
-      sessionListHandler(),
       ...baselineMemoryHandlers(
         jsonFragments(3, { keywords: ['moral ambiguity', 'ensemble casts'] }),
       ),
     );
 
-    renderInApp(<MemoryPage />, { client: new BrowserClient() });
+    renderInApp(<MemoryPage />, { client: new BrowserClient(), activeCreatorId: CREATOR });
 
     expect(await screen.findByTestId('soul-low-data')).toBeInTheDocument();
     expect(screen.getByText(/3 fragments captured so far/i)).toBeInTheDocument();
@@ -94,13 +84,12 @@ describe('MemoryPage SOUL section — density states + click-to-filter', () => {
 
   it('renders the rich timeline with growth folded in', async () => {
     useHandlers(
-      sessionListHandler(),
       ...baselineMemoryHandlers(
         jsonFragments(22, { keywords: ['political intrigue', 'slow-burn romance'], spreadDays: 6 }),
       ),
     );
 
-    renderInApp(<MemoryPage />, { client: new BrowserClient() });
+    renderInApp(<MemoryPage />, { client: new BrowserClient(), activeCreatorId: CREATOR });
 
     expect(await screen.findByTestId('soul-rich')).toBeInTheDocument();
     // The temporal drift timeline renders with >=2 buckets and a cumulative total.
@@ -110,13 +99,12 @@ describe('MemoryPage SOUL section — density states + click-to-filter', () => {
 
   it('clicks a SOUL keyword to filter the fragments browser', async () => {
     useHandlers(
-      sessionListHandler(),
       ...baselineMemoryHandlers(
         jsonFragments(4, { keywords: ['political intrigue', 'ensemble casts'] }),
       ),
     );
 
-    renderInApp(<MemoryPage />, { client: new BrowserClient() });
+    renderInApp(<MemoryPage />, { client: new BrowserClient(), activeCreatorId: CREATOR });
 
     // Wait for the SOUL frequency row to render, then click it.
     const row = await screen.findByText('political intrigue');
