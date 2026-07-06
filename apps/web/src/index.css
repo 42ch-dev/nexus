@@ -389,7 +389,7 @@
     --color-footer-profile-avatar-bg-hover: var(--color-gray-alpha-200);
     --color-footer-profile-avatar-bg-active: var(--color-blue-700);
     --color-footer-profile-avatar-text: var(--color-gray-1000);
-    --color-footer-profile-avatar-text-active: #ffffff;
+    --color-footer-profile-avatar-text-active: var(--color-brand-deep-blue);
     --color-footer-profile-avatar-fallback-bg: var(--color-gray-alpha-200);
     --color-footer-profile-avatar-fallback-text: var(--color-gray-700);
     --color-footer-profile-add-button-bg: transparent;
@@ -404,9 +404,9 @@
        Same token names as :root; values derive from dark accent scales. */
     --color-setup-wizard-step-circle-size: 32px;
     --color-setup-wizard-step-circle-active-bg: var(--color-blue-700);
-    --color-setup-wizard-step-circle-active-text: #ffffff;
+    --color-setup-wizard-step-circle-active-text: var(--color-brand-deep-blue);
     --color-setup-wizard-step-circle-complete-bg: var(--color-green-700);
-    --color-setup-wizard-step-circle-complete-text: #ffffff;
+    --color-setup-wizard-step-circle-complete-text: var(--color-brand-deep-blue);
     --color-setup-wizard-step-circle-pending-bg: var(--color-gray-alpha-100);
     --color-setup-wizard-step-circle-pending-text: var(--color-gray-700);
     --color-setup-wizard-step-connector: var(--color-gray-alpha-400);

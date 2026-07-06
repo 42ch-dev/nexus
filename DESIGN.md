@@ -202,6 +202,10 @@ Extended brand steps (`brand-deep-blue-800` … `brand-cyan-1000`) support hover
 
 **Cyan usage rule:** `brand-cyan` is an accent token. Use it for marks, borders, icons, progress fills, and dark-theme interactive emphasis — not for paragraph text on white or light gray.
 
+### Background-driven contrast invariant
+
+Text color on any filled element is decided by the **perceived lightness of that element's background**, not by the active light/dark mode. Dark backgrounds (deep blue, dark red, dark gray, saturated dark colors) use light text; light/bright backgrounds (cyan, light red, light green, pastel tints) use dark text. The same component may need dark text in both themes if its background stays light/bright in both.
+
 ---
 
 ## Neutrals

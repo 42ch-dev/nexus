@@ -272,7 +272,7 @@ export function ConflictModalBase<T extends string = string>({
           <button
             type="button"
             onClick={onUseCurrent}
-            className="rounded-control bg-canvas-write-conflict px-4 py-2 text-button-12 text-white hover:bg-red-800"
+            className="rounded-control bg-canvas-write-conflict px-4 py-2 text-button-12 text-white hover:bg-red-800 dark:text-brand-deep-blue"
           >
             <Shield className="mr-1.5 inline h-4 w-4" aria-hidden />
             {useCurrentLabel}

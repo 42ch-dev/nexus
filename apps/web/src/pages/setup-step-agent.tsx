@@ -93,7 +93,7 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
                     </div>
                     <div className="flex items-center gap-2">
                       {recommended && (
-                        <span className="rounded-pill bg-green-700 px-2 py-0.5 text-label-12 text-white">Recommended</span>
+                        <span className="rounded-pill bg-green-700 px-2 py-0.5 text-label-12 text-white dark:text-brand-deep-blue">Recommended</span>
                       )}
                       {agent.installed ? (
                         <>

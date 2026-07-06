@@ -103,7 +103,7 @@ components:
     primary: { backgroundColor: "{colors.brand-cyan}", textColor: "{colors.brand-deep-blue}", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.blue-800}", hoverTextColor: "{colors.brand-deep-blue}", activeBackgroundColor: "{colors.blue-900}", activeTextColor: "{colors.brand-deep-blue}" }
     secondary: { backgroundColor: "{colors.background-100}", textColor: "{colors.gray-1000}", borderColor: "{colors.gray-alpha-400}", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.background-200}", hoverBorderColor: "{colors.gray-alpha-500}" }
     tertiary: { backgroundColor: "transparent", textColor: "{colors.gray-1000}", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.gray-alpha-100}" }
-    destructive: { backgroundColor: "{colors.red-800}", textColor: "#ffffff", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.red-700}", activeBackgroundColor: "{colors.red-900}" }
+    destructive: { backgroundColor: "{colors.red-800}", textColor: "{colors.brand-deep-blue}", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.red-700}", activeBackgroundColor: "{colors.red-900}" }
     sizes:
       small: { height: "32px", typography: "{typography.button-12}" }
       default: { height: "40px", typography: "{typography.button-14}" }
@@ -485,7 +485,7 @@ components:
     avatar-bg-hover: "{colors.gray-alpha-200}"
     avatar-bg-active: "{colors.blue-700}"
     avatar-text: "{colors.gray-1000}"
-    avatar-text-active: "#ffffff"
+    avatar-text-active: "{colors.brand-deep-blue}"
     avatar-fallback-bg: "{colors.gray-alpha-200}"
     avatar-fallback-text: "{colors.gray-700}"
     add-button-bg: "transparent"
@@ -500,9 +500,9 @@ components:
   setup-wizard-step:
     step-circle-size: "32px"
     step-circle-active-bg: "{colors.blue-700}"
-    step-circle-active-text: "#ffffff"
+    step-circle-active-text: "{colors.brand-deep-blue}"
     step-circle-complete-bg: "{colors.green-700}"
-    step-circle-complete-text: "#ffffff"
+    step-circle-complete-text: "{colors.brand-deep-blue}"
     step-circle-pending-bg: "{colors.gray-alpha-100}"
     step-circle-pending-text: "{colors.gray-700}"
     step-connector: "{colors.gray-alpha-400}"

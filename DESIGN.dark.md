@@ -170,4 +170,6 @@ Dark-theme companion to [`DESIGN.md`](DESIGN.md). Same token names; values tuned
 
 **Dark primary button:** cyan fill (`brand-cyan`) + deep blue label (`brand-deep-blue`) — passes AA for button text. Deep blue filled buttons on dark chrome fail surface contrast; reserve deep blue for text on cyan or white-on-brand panels only.
 
+**Background-driven contrast invariant:** Text color on any filled element is decided by the **perceived lightness of that element's background**, not by the active light/dark mode. In the dark theme, bright accent fills that are dark in light mode (e.g. `brand-cyan`, `red-800`, `green-700`) become light/bright surfaces and must use dark text (`brand-deep-blue`) instead of white. Dark surfaces (deep gray, low-alpha tints over dark backgrounds) continue to use light text.
+
 **Logo:** use `logo-color.svg` (cyan) in dark nav/sidebar; `logo-white.svg` on photography or deepest panels.
