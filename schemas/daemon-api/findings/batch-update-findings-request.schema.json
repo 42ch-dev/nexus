@@ -16,13 +16,7 @@
       "description": "IDs of the findings to update. Must be unique; cap enforced at 100; >100 returns HTTP 422 with code `too_many_findings`."
     },
     "patch": {
-      "type": "object",
-      "properties": {
-        "status": { "type": "string" },
-        "target_executor": { "type": "string" }
-      },
-      "additionalProperties": false,
-      "description": "Fields to patch on each matching finding. At least one field must be present."
+      "$ref": "finding-batch-patch.schema.json"
     }
   },
   "additionalProperties": false

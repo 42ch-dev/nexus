@@ -5,6 +5,7 @@ import {
   BrainCircuit,
   CalendarClock,
   Layers,
+  Link2,
   ListChecks,
   NotebookText,
   Sparkles,
@@ -39,6 +40,7 @@ export const NAV_ITEMS: NavItem[] = [
   { to: '/memory', label: 'Memory', icon: BrainCircuit },
   { to: '/presets', label: 'Presets', icon: Sparkles },
   { to: '/strategy', label: 'Strategy', icon: Workflow },
+  { to: '/connect', label: 'Connect', icon: Link2 },
 ];
 
 export function Sidebar() {

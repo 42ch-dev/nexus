@@ -21,3 +21,10 @@ export {
 } from './desktop-capabilities';
 export { isDesktopBuild } from './detect';
 export type { DaemonHealth, NexusClient } from './types';
+export {
+  createConnectionStorage,
+  normalizeEndpointUrl,
+  endpointLabel,
+  type ConnectionConfig,
+  type ConnectionStorage,
+} from './connection-storage';

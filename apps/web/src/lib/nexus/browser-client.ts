@@ -14,6 +14,7 @@ import type {
   AddScheduleResponse,
   BatchUpdateFindingsRequest,
   BatchUpdateFindingsResponse,
+  CertFingerprintResponse,
   ChapterBody,
   ChapterContentQuery,
   ChapterDetail,
@@ -98,6 +99,12 @@ export interface BrowserClientOptions {
    * than the SPA shell.
    */
   baseUrl?: string;
+  /**
+   * Optional API key for remote daemon access. When set, every protected
+   * request carries an `X-API-Key` header. The fingerprint endpoint is the
+   * only daemon route that intentionally requires no key.
+   */
+  apiKey?: string;
   /** Optional fetch implementation (testing/diagnostics injection). */
   fetchImpl?: typeof fetch;
 }
@@ -122,16 +129,25 @@ function toQueryString(query: object | undefined): string {
 
 export class BrowserClient implements NexusClient {
   private readonly baseUrl: string;
+  private readonly apiKey: string | undefined;
   private readonly fetchImpl: typeof fetch;
 
   constructor(options: BrowserClientOptions = {}) {
     this.baseUrl = (options.baseUrl ?? '').replace(/\/+$/, '');
+    this.apiKey = options.apiKey;
     this.fetchImpl = options.fetchImpl ?? fetch.bind(globalThis);
   }
 
   // ── Daemon ─────────────────────────────────────────────────────────────────
   health(): Promise<DaemonHealth> {
     return this.get<DaemonHealth>('/v1/daemon/runtime/health');
+  }
+
+  certFingerprint(): Promise<CertFingerprintResponse> {
+    // The fingerprint endpoint is intentionally unauthenticated and publicly
+    // reachable so clients can perform TOFU verification before sending the
+    // API key. It is the only daemon route that deliberately omits the key.
+    return this.request<CertFingerprintResponse>('GET', '/v1/daemon/runtime/cert-fingerprint', undefined, false);
   }
 
   // ── Works ──────────────────────────────────────────────────────────────────
@@ -530,9 +546,13 @@ export class BrowserClient implements NexusClient {
     method: string,
     path: string,
     body?: unknown,
+    includeApiKey = true,
   ): Promise<T> {
     const url = `${this.baseUrl}${path}`;
     const init: RequestInit = { method, headers: { Accept: 'application/json' } };
+    if (this.apiKey && includeApiKey) {
+      init.headers = { ...init.headers, 'X-API-Key': this.apiKey };
+    }
     if (body !== undefined) {
       init.headers = { ...init.headers, 'Content-Type': 'application/json' };
       init.body = JSON.stringify(body);
@@ -544,12 +564,12 @@ export class BrowserClient implements NexusClient {
     } catch (cause) {
       // Network/transport failure (daemon down, CORS, DNS). The toast layer
       // surfaces `message`; `code` distinguishes it from an HTTP error.
-      throw new NexusClientError(
-        0,
-        'transport_unreachable',
-        'Cannot reach the local daemon. Is `nexus42 daemon start` running?',
-        { cause: String(cause) },
-      );
+      const message = this.baseUrl
+        ? 'Cannot reach the daemon at this address. This usually means the URL or port is wrong, the daemon is not running, or the browser blocked a self-signed certificate. For remote daemons using self-signed certificates, use the Nexus desktop app — it can trust the certificate and store it in the OS keychain.'
+        : 'Cannot reach the local daemon. Is `nexus42 daemon start` running?';
+      throw new NexusClientError(0, 'transport_unreachable', message, {
+        cause: String(cause),
+      });
     }
 
     if (!response.ok) {

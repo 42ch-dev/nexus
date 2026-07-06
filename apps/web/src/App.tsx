@@ -13,6 +13,7 @@ import { SchedulePage } from '@/pages/schedule-page';
 import { SessionsPage } from '@/pages/sessions-page';
 import { WorkDetailPage } from '@/pages/work-detail-page';
 import { WorksPage } from '@/pages/works-page';
+import { ConnectDaemonPage } from '@/pages/connect-daemon-page';
 import { LoadingState } from '@/components/ui/states';
 
 // Route-split: the Strategy canvas pulls in `@xyflow/react`, which is a
@@ -75,6 +76,7 @@ export function App() {
         <Route path="findings" element={<FindingsPage />} />
         <Route path="memory" element={<MemoryPage />} />
         <Route path="presets" element={<PresetsPage />} />
+        <Route path="connect" element={<ConnectDaemonPage />} />
         <Route
           path="strategy"
           element={

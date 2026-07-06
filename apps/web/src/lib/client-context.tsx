@@ -1,13 +1,34 @@
-import { createContext, useContext, useMemo, type ReactNode } from 'react';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 
 import { BrowserClient, type NexusClient } from '@/lib/nexus';
 import { TauriClient } from '@/lib/nexus/tauri-client';
 import { TauriDesktopCapabilities, type DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
 import { isDesktopBuild } from '@/lib/nexus/detect';
+import {
+  createConnectionStorage,
+  type ConnectionConfig,
+} from '@/lib/nexus/connection-storage';
+import {
+  useResumeFingerprintGate,
+  type ResumeFingerprintGateState,
+} from '@/lib/nexus/use-resume-fingerprint-gate';
+import { Button } from '@/components/ui/button';
+import { LoadingState, ErrorState } from '@/components/ui/states';
 
 /**
  * Provides the active {@link NexusClient} (and, in desktop mode, a
- * {@link DesktopCapabilities} object) to the app.
+ * {@link DesktopCapabilities} object) to the app. Since V1.92 P1 the provider
+ * is stateful: it loads the saved {@link ConnectionConfig} from platform
+ * storage and reconstructs the client when the config changes. Local
+ * same-origin mode remains the default when no remote config is active.
  *
  * Capability detection runs **once** here, at the factory (compass §5 #7 LOCKED)
  * — not scattered across screens. Browser build selects {@link BrowserClient}
@@ -19,18 +40,38 @@ import { isDesktopBuild } from '@/lib/nexus/detect';
  */
 const ClientContext = createContext<NexusClient | null>(null);
 const DesktopContext = createContext<DesktopCapabilities | null>(null);
+const ConnectionConfigContext = createContext<ConnectionConfig | null>(null);
+const SetConnectionConfigContext = createContext<
+  ((config: ConnectionConfig | null) => Promise<void>) | null
+>(null);
+const FingerprintGateContext = createContext<ResumeFingerprintGateState | null>(null);
 
 export interface ClientProviderProps {
   /** Override the NexusClient (tests). If omitted, the factory selects. */
   client?: NexusClient;
   /** Override desktop capabilities (tests). `null` hides desktop affordances. */
   desktop?: DesktopCapabilities | null;
+  /** Override the connection config (tests). */
+  connectionConfig?: ConnectionConfig | null;
+  /** Override the config setter (tests). */
+  onConnectionConfigChange?: (config: ConnectionConfig | null) => Promise<void>;
+  /** Override fetch for the fingerprint gate (tests). */
+  fetchImpl?: typeof fetch;
   children: ReactNode;
 }
 
 interface ResolvedClients {
   client: NexusClient;
   desktop: DesktopCapabilities | null;
+}
+
+function buildClient(config: ConnectionConfig | null, desktop: boolean): NexusClient {
+  if (!config || config.active === false) {
+    return desktop ? new TauriClient() : new BrowserClient();
+  }
+  return desktop
+    ? new TauriClient({ baseUrl: config.endpointUrl, apiKey: config.apiKey })
+    : new BrowserClient({ baseUrl: config.endpointUrl, apiKey: config.apiKey });
 }
 
 /**
@@ -46,15 +87,142 @@ export function selectClients(): ResolvedClients {
   return { client: tauri, desktop };
 }
 
-export function ClientProvider({ client, desktop, children }: ClientProviderProps) {
+/**
+ * Resume-time TOFU gate shell (daemon-runtime.md §16.2 Phases 2–3).
+ *
+ * Blocks the app from mounting any screen that may issue authenticated daemon
+ * requests until a pinned remote fingerprint is re-verified. Local mode and
+ * configs without a pinned fingerprint bypass the gate. Mismatch is resolved
+ * by redirecting to `/connect` so the user can re-pin.
+ */
+function FingerprintGate({
+  fetchImpl,
+  children,
+}: {
+  fetchImpl?: typeof fetch;
+  children: ReactNode;
+}) {
+  const config = useConnectionConfig();
+  const { state, verify } = useResumeFingerprintGate(config, { fetchImpl });
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // The connect screen is the re-pin / local-mode fallback path. Allow it to
+  // mount even when the saved remote fingerprint no longer matches so the user
+  // can recover without a hard lockout.
+  const isConnectRoute = location.pathname === '/connect';
+
+  useEffect(() => {
+    if (state.status === 'mismatch' && !isConnectRoute) {
+      navigate('/connect', { replace: true });
+    }
+  }, [state.status, navigate, isConnectRoute]);
+
+  if (!isConnectRoute && state.status === 'verifying') {
+    return (
+      <div className="flex min-h-screen items-center justify-center p-6">
+        <LoadingState label="Verifying daemon identity…" />
+      </div>
+    );
+  }
+
+  if (!isConnectRoute && state.status === 'fetch-failed') {
+    return (
+      <div className="flex min-h-screen items-center justify-center p-6">
+        <div className="w-full max-w-md">
+          <ErrorState
+            title="Could not verify daemon identity"
+            description={state.message}
+            onRetry={() => void verify()}
+            retryLabel="Try again"
+          />
+          <div className="mt-4 flex justify-center">
+            <Button variant="secondary" onClick={() => navigate('/connect')}>
+              Reconnect to daemon
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <FingerprintGateContext.Provider value={state}>
+      {children}
+    </FingerprintGateContext.Provider>
+  );
+}
+
+export function ClientProvider({
+  client,
+  desktop,
+  connectionConfig: injectedConfig,
+  onConnectionConfigChange: injectedSetter,
+  fetchImpl,
+  children,
+}: ClientProviderProps) {
+  const [storedConfig, setStoredConfig] = useState<ConnectionConfig | null>(null);
+  const [loaded, setLoaded] = useState(false);
+  const storage = useMemo(() => createConnectionStorage(), []);
+  const isDesktop = useMemo(() => isDesktopBuild(), []);
+
+  useEffect(() => {
+    if (injectedConfig !== undefined) {
+      setStoredConfig(injectedConfig);
+      setLoaded(true);
+      return;
+    }
+    let cancelled = false;
+    storage
+      .load()
+      .then((cfg) => {
+        if (cancelled) return;
+        setStoredConfig(cfg);
+        setLoaded(true);
+      })
+      .catch(() => setLoaded(true));
+    return () => {
+      cancelled = true;
+    };
+  }, [injectedConfig, storage]);
+
+  const config = injectedConfig !== undefined ? injectedConfig : storedConfig;
+
+  const setConfig = useMemo(
+    () =>
+      injectedSetter ??
+      (async (next: ConnectionConfig | null) => {
+        setStoredConfig(next);
+        if (next === null) {
+          await storage.clear();
+        } else {
+          await storage.save(next);
+        }
+      }),
+    [injectedSetter, storage],
+  );
+
   const value = useMemo<ResolvedClients>(() => {
     if (client) return { client, desktop: desktop ?? null };
-    return selectClients();
-  }, [client, desktop]);
+    if (!loaded) return { client: new BrowserClient(), desktop: null };
+    return {
+      client: buildClient(config, isDesktop),
+      desktop: isDesktop ? new TauriDesktopCapabilities() : null,
+    };
+  }, [client, desktop, config, loaded, isDesktop]);
+
   return (
     <ClientContext.Provider value={value.client}>
       <DesktopContext.Provider value={value.desktop}>
-        {children}
+        <ConnectionConfigContext.Provider value={config}>
+          <SetConnectionConfigContext.Provider value={setConfig}>
+            {client ? (
+              children
+            ) : (
+              <FingerprintGate fetchImpl={fetchImpl}>{children}</FingerprintGate>
+            )}
+          </SetConnectionConfigContext.Provider>
+        </ConnectionConfigContext.Provider>
       </DesktopContext.Provider>
     </ClientContext.Provider>
   );
@@ -73,4 +241,24 @@ export function useNexusClient(): NexusClient {
  */
 export function useDesktopCapabilities(): DesktopCapabilities | null {
   return useContext(DesktopContext);
+}
+
+/** The currently active (or saved-but-inactive) connection config, if any. */
+export function useConnectionConfig(): ConnectionConfig | null {
+  return useContext(ConnectionConfigContext);
+}
+
+/** Setter for the active connection config. Passing `null` clears remote mode. */
+export function useSetConnectionConfig(): (config: ConnectionConfig | null) => Promise<void> {
+  const setter = useContext(SetConnectionConfigContext);
+  if (!setter) throw new Error('useSetConnectionConfig must be used within a ClientProvider');
+  return setter;
+}
+
+/**
+ * Exposes the resume-time fingerprint gate state for screens that need to
+ * reason about verification status (e.g. tests, diagnostics).
+ */
+export function useFingerprintGateState(): ResumeFingerprintGateState | null {
+  return useContext(FingerprintGateContext);
 }

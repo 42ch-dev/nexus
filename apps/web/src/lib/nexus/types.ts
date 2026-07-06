@@ -32,6 +32,7 @@ import type {
   BatchUpdateFindingsRequest,
   BatchUpdateFindingsResponse,
   CapabilityInfo,
+  CertFingerprintResponse,
   ChapterBody,
   ChapterContentQuery,
   ChapterDetail,
@@ -130,8 +131,13 @@ export interface NexusClient {
   // ── Daemon ───────────────────────────────────────────────────────────────
   /** `GET /v1/daemon/runtime/health` — liveness + version for the shell header. */
   health(): Promise<DaemonHealth>;
-
-  // ── Works (dashboard + Work CRUD) ─────────────────────────────────────────
+  /**
+   * `GET /v1/daemon/runtime/cert-fingerprint` — TOFU certificate fingerprint.
+   * Intentionally unauthenticated so clients can verify the daemon before
+   * sending an API key. Empty `fingerprint` means loopback-only / no remote
+   * access (V1.92 P1).
+   */
+  certFingerprint(): Promise<CertFingerprintResponse>;
   /** `GET /v1/daemon/works` — cursor list (F-P1/F-P3/F-F1; canonical `items` key). */
   listWorks(query?: ListWorksQuery): Promise<ListWorksResponse>;
   /** `GET /v1/daemon/works/{work_id}` — full detail. */

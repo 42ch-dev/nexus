@@ -110,6 +110,54 @@ components:
     min-size-px: "24"
     clear-space-ratio: "0.25"
     alt-text: "Nexus"
+  # V1.92 P-1 T4 — connection setup screen surface treatments.
+  # Consumed by the P1 frontend "Connect to Daemon" screen.
+  connection-setup:
+    # Security note (calm blue-tinted box — fingerprint trust guidance)
+    security-note:
+      backgroundColor: "{colors.brand-deep-blue-alpha-100}"
+      borderColor: "{colors.brand-deep-blue-alpha-200}"
+      textColor: "{colors.gray-900}"
+      borderWidth: "1px"
+      rounded: "{rounded.card}"
+      padding: "{spacing.space-4}"
+      iconColor: "{colors.brand-deep-blue}"
+    # Warning box (amber-tinted — certificate changed / fingerprint mismatch)
+    warning:
+      backgroundColor: "rgba(183,110,0,0.08)"
+      borderColor: "rgba(183,110,0,0.20)"
+      textColor: "{colors.gray-900}"
+      borderWidth: "1px"
+      rounded: "{rounded.card}"
+      padding: "{spacing.space-4}"
+      iconColor: "{colors.amber-700}"
+    # Info note (neutral gray-tinted — loopback-only daemon state)
+    info-note:
+      backgroundColor: "{colors.gray-alpha-100}"
+      borderColor: "{colors.gray-alpha-300}"
+      textColor: "{colors.gray-800}"
+      borderWidth: "1px"
+      rounded: "{rounded.card}"
+      padding: "{spacing.space-4}"
+      iconColor: "{colors.gray-600}"
+    # Fingerprint display (monospace block for cert fingerprint)
+    fingerprint-block:
+      backgroundColor: "{colors.background-200}"
+      borderColor: "{colors.gray-alpha-400}"
+      textColor: "{colors.gray-1000}"
+      borderWidth: "1px"
+      rounded: "{rounded.control}"
+      padding: "{spacing.space-3}"
+      fontFamily: "\"SFMono-Regular\", \"Cascadia Code\", \"Roboto Mono\", Consolas, monospace"
+      fontSize: "13px"
+      fontWeight: 400
+      lineHeight: 1.5
+    # Form spacing
+    form-gap: "{spacing.space-6}"
+    form-section-gap: "{spacing.space-8}"
+    label-gap: "{spacing.space-1}"
+    helper-text-size: "13px"
+    helper-text-color: "{colors.gray-600}"
 ---
 
 # Nexus Brand Design System

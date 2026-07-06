@@ -109,6 +109,48 @@ components:
     min-size-px: "24"
     clear-space-ratio: "0.25"
     alt-text: "Nexus"
+  # V1.92 P-1 T4 — connection setup screen surface treatments (dark).
+  connection-setup:
+    security-note:
+      backgroundColor: "{colors.brand-cyan-alpha-100}"
+      borderColor: "{colors.brand-cyan-alpha-200}"
+      textColor: "{colors.gray-1000}"
+      borderWidth: "1px"
+      rounded: "{rounded.card}"
+      padding: "{spacing.space-4}"
+      iconColor: "{colors.brand-cyan}"
+    warning:
+      backgroundColor: "rgba(255,192,67,0.10)"
+      borderColor: "rgba(255,192,67,0.22)"
+      textColor: "{colors.gray-1000}"
+      borderWidth: "1px"
+      rounded: "{rounded.card}"
+      padding: "{spacing.space-4}"
+      iconColor: "{colors.amber-700}"
+    info-note:
+      backgroundColor: "{colors.gray-alpha-200}"
+      borderColor: "{colors.gray-alpha-400}"
+      textColor: "{colors.gray-900}"
+      borderWidth: "1px"
+      rounded: "{rounded.card}"
+      padding: "{spacing.space-4}"
+      iconColor: "{colors.gray-500}"
+    fingerprint-block:
+      backgroundColor: "{colors.background-200}"
+      borderColor: "{colors.gray-alpha-400}"
+      textColor: "{colors.gray-1000}"
+      borderWidth: "1px"
+      rounded: "{rounded.control}"
+      padding: "{spacing.space-3}"
+      fontFamily: "\"SFMono-Regular\", \"Cascadia Code\", \"Roboto Mono\", Consolas, monospace"
+      fontSize: "13px"
+      fontWeight: 400
+      lineHeight: 1.5
+    form-gap: "{spacing.space-6}"
+    form-section-gap: "{spacing.space-8}"
+    label-gap: "{spacing.space-1}"
+    helper-text-size: "13px"
+    helper-text-color: "{colors.gray-600}"
 ---
 
 # Nexus Brand Design System — Dark Theme

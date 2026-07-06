@@ -32,6 +32,8 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | [architecture-patterns/profile-aware-reading-chrome.md](architecture-patterns/profile-aware-reading-chrome.md) | Profile-aware reading chrome — map `work_profile` → token-driven ReactMarkdown renderers while preserving the read-only invariant (V1.91 reading chrome distilled) |
 | [api-design/additive-batch-patch-helper.md](api-design/additive-batch-patch-helper.md) | Additive batch PATCH helper — cap-bounded, DAO-reused, partial-success loop with per-ID `not_found`/`conflict` arrays (V1.91 findings batch triage distilled) |
 | [conventions/surface-rename-hygiene-checklist.md](conventions/surface-rename-hygiene-checklist.md) | Surface-rename hygiene checklist — grep sweeps and verification gates for renaming a cross-language contract surface (V1.90 Local API → Daemon API distilled) |
+| [architecture-patterns/header-key-csrf-defence.md](architecture-patterns/header-key-csrf-defence.md) | Header-key auth is its own CSRF defence — when remote auth uses a custom `X-API-Key` header, the V1.86 Origin allowlist + CORS preflight make a separate CSRF token framework redundant; re-open only if a cookie/session model is adopted (V1.92 remote-access hardening distilled) |
+| [architecture-patterns/self-signed-tls-listener-integration.md](architecture-patterns/self-signed-tls-listener-integration.md) | Self-signed TLS listener integration (rcgen + rustls + axum-server) — `axum_server::bind_rustls` preserves the `axum::serve` call site; crypto provider once at boot; **SAN must include the non-loopback bind host or remote-client hostname validation fails before TOFU** (V1.92 W-001 lesson) |
 
 **All OSS feature specs:** [`specs/README.md`](specs/README.md) (full index by domain).
 

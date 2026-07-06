@@ -8,6 +8,7 @@ use nexus_contracts::local::acp_runtime::daemon_status_v2::{
     DaemonStatusV2, DegradedInfo, HealthStatus, LifecycleState, SubsystemHealth,
     SubsystemHealthEntry,
 };
+use nexus_contracts::CertFingerprintResponse;
 use serde::Serialize;
 use tracing::info;
 
@@ -167,6 +168,27 @@ pub async fn status(State(state): State<WorkspaceState>) -> Json<StatusResponse>
         acp: acp_status,
         runtime_mode: state.runtime_mode_as_str().to_string(),
     })
+}
+
+/// GET /v1/daemon/runtime/cert-fingerprint
+///
+/// Returns the SHA-256 fingerprint of the daemon's TLS certificate for TOFU
+/// pinning. No authentication required. Loopback-only daemons return an empty
+/// fingerprint and no `created_at`.
+pub async fn cert_fingerprint(
+    State(state): State<WorkspaceState>,
+) -> Json<CertFingerprintResponse> {
+    info!("Handling cert-fingerprint request");
+    state.tls_fingerprint().map_or_else(
+        || {
+            Json(CertFingerprintResponse {
+                fingerprint: String::new(),
+                algorithm: "sha256".to_string(),
+                created_at: None,
+            })
+        },
+        Json,
+    )
 }
 
 /// Gather ACP status information from the database.

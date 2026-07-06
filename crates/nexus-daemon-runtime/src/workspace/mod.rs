@@ -16,6 +16,7 @@ use crate::db::SqliteNarrativeGateway;
 use crate::lifecycle::{Lifecycle, LifecycleState, StatigLifecycle};
 use crate::workspace::session::WorkspaceSessionManager;
 use nexus_contracts::local::domain::RuntimeMode;
+use nexus_contracts::CertFingerprintResponse;
 use nexus_orchestration::{
     engine::OrchestrationEngine, schedule::supervisor::ScheduleSupervisor, CapabilityRegistry,
     WorkerManager,
@@ -82,6 +83,9 @@ pub struct WorkspaceState {
     /// churn becomes real (e.g. a shared/rotating-creator deployment); an
     /// LRU/eviction policy would be the fix then.
     memory_review_locks: Arc<std::sync::Mutex<HashMap<String, Arc<AsyncMutex<()>>>>>,
+    /// V1.92: optional TLS certificate fingerprint for remote (non-loopback)
+    /// binds. Loopback-only daemons leave this as `None`.
+    tls_fingerprint: Arc<Option<CertFingerprintResponse>>,
 }
 
 impl WorkspaceState {
@@ -122,6 +126,7 @@ impl WorkspaceState {
             daemon_tool_dispatch: Arc::new(None),
             session_manager,
             memory_review_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            tls_fingerprint: Arc::new(None),
         }
     }
 
@@ -179,7 +184,19 @@ impl WorkspaceState {
             daemon_tool_dispatch: Arc::new(None),
             session_manager,
             memory_review_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            tls_fingerprint: Arc::new(None),
         })
+    }
+
+    /// Set the TLS certificate fingerprint for remote binds.
+    pub fn set_tls_fingerprint(&mut self, fingerprint: Option<CertFingerprintResponse>) {
+        self.tls_fingerprint = Arc::new(fingerprint);
+    }
+
+    /// Get the TLS certificate fingerprint, if any.
+    #[must_use]
+    pub fn tls_fingerprint(&self) -> Option<CertFingerprintResponse> {
+        self.tls_fingerprint.as_ref().clone()
     }
 
     /// Set the lifecycle HSM for this workspace state.

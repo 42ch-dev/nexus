@@ -46,9 +46,9 @@ function AppProviders({ children }: { children: React.ReactNode }) {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <ClientProvider>
-        <BrowserRouter>{children}</BrowserRouter>
-      </ClientProvider>
+      <BrowserRouter>
+        <ClientProvider>{children}</ClientProvider>
+      </BrowserRouter>
     </QueryClientProvider>
   );
 }
