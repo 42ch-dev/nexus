@@ -381,6 +381,30 @@ mod tests {
         assert!(!cert_covers_bind_host(&certs[0], "192.168.1.10"));
     }
 
+    #[tokio::test]
+    async fn ipv6_non_loopback_bind_host_is_covered_by_san() {
+        ensure_crypto_provider();
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let home = tmp.path();
+
+        let (_config, fp) = load_or_generate_tls_config(home, "fd00::1")
+            .await
+            .expect("generate IPv6 bind cert");
+        assert!(fp.fingerprint.starts_with("SHA256:"));
+
+        let cert_path = nexus_home_layout::tls_cert_path(home);
+        let cert_bytes = fs::read(&cert_path).await.expect("read cert");
+        let certs: Vec<Vec<u8>> = rustls_pemfile::certs(&mut cert_bytes.as_slice())
+            .collect::<Result<Vec<_>, _>>()
+            .expect("parse cert")
+            .into_iter()
+            .map(|cert| cert.to_vec())
+            .collect();
+
+        assert!(cert_covers_bind_host(&certs[0], "fd00::1"));
+        assert!(!cert_covers_bind_host(&certs[0], "fd00::2"));
+    }
+
     #[test]
     fn build_sans_includes_non_loopback_bind_host_ip() {
         let sans = build_subject_alt_names("192.168.1.42");

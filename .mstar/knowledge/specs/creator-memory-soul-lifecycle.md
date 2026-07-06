@@ -19,7 +19,7 @@
 
 This spec records the durable lifecycle rules for Creator memory fragments that
 feed the SOUL reflection surface. It complements `creator-workflow.md` §5.6 and
-the Local API memory schemas under `schemas/local-api/memory/`.
+the Daemon API memory schemas under `schemas/local-api/memory/`.
 
 ## 7. Fragment and narrative lifecycle
 
@@ -44,7 +44,7 @@ The Creator SOUL is the whole, not the `NULL` subset. Consumers must not treat
 
 #### 7.2.2 Projection behavior
 
-The Local API may expose an optional `world_id` filter for read-side projection.
+The Daemon API may expose an optional `world_id` filter for read-side projection.
 Omitting the filter returns the whole Creator SOUL. Supplying a `world_id` returns
 only fragments whose nullable `world_id` equals that value. V1.81 does not expose
 a public query value for `world_id IS NULL`; core-only filtering can be added in
@@ -58,7 +58,7 @@ whole Creator SOUL. It is not a per-world narrative and it is not written into
 
 Lifecycle:
 
-1. **Generate** — the author triggers reflection through the Local API. If the
+1. **Generate** — the author triggers reflection through the Daemon API. If the
    Creator has at least 10 fragments and at least 20 distinct fragment keywords,
    the daemon builds a capped synthesis signal (top keywords, recent summaries,
    temporal buckets) and invokes the narrative synthesizer. Raw session digests

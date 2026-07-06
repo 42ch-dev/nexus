@@ -13,7 +13,7 @@
 1. [SDK Selection Decision](#1-sdk-selection-decision)
 2. [Integration Architecture](#2-integration-architecture)
 3. [Registry Integration Detailed Design](#3-registry-integration-detailed-design)
-4. [Local API Contract Analysis](#4-local-api-contract-analysis)
+4. [Daemon API Contract Analysis](#4-daemon-api-contract-analysis)
 5. [Skills / Capability Export](#5-skills--capability-export)
 6. [CLI Command Detailed Design](#6-cli-command-detailed-design)
 7. [Schema Definitions](#7-schema-definitions)
@@ -151,7 +151,7 @@ nexus42 agent run <agent-ref>
 - The `tokio::task::LocalSet` requirement: ACP SDK futures are `!Send`, requiring `spawn_local`. The CLI's `#[tokio::main]` creates a multi-threaded runtime by default. We must use `tokio::task::LocalSet` within the agent session to bridge this gap.
 - **Timeout**: Default 30-second timeout for `initialize`, 5-minute for `session/prompt` (configurable).
 - **Error handling**: Non-zero exit code, broken pipe, timeout — all map to `AcpError` variants with user-friendly messages.
-- **Daemon relationship**: daemon runtime is **NOT** involved in the ACP communication path. The CLI spawns and talks to agents directly. The daemon may expose Local API endpoints that agents can call (via `request_permission` tool grants), but this is V1.1+ scope.
+- **Daemon relationship**: daemon runtime is **NOT** involved in the ACP communication path. The CLI spawns and talks to agents directly. The daemon may expose Daemon API endpoints that agents can call (via `request_permission` tool grants), but this is V1.1+ scope.
 
 ### 2.4 Connection Management
 
@@ -297,9 +297,9 @@ For V1.0, installation is **lazy** — agents are launched on demand. No pre-ins
 
 ---
 
-## 4. Local API Contract Analysis
+## 4. Daemon API Contract Analysis
 
-### 4.1 Question: Does nexus42 need a Local API for agent communication?
+### 4.1 Question: Does nexus42 need a Daemon API for agent communication?
 
 **Short answer: No for V1.0. Direct stdio between CLI and agent.**
 
@@ -309,17 +309,17 @@ For V1.0, installation is **lazy** — agents are launched on demand. No pre-ins
 |--------|-------------|------|------|
 | **A: Direct stdio** (Recommended) | CLI spawns agent, communicates via stdin/stdout JSON-RPC | Simple, matches ACP spec, no extra infra | Agent cannot access daemon services |
 | **B: Daemon-mediated** | CLI → daemon HTTP → agent stdio | Centralized, daemon can enforce policies | Adds latency, complexity, violates "daemon runtime is not ACP server" |
-| **C: Local API as tool server** | Agent calls Local API for workspace/file access | Rich tool access | V1.1+ scope, requires tool permission handling |
+| **C: Daemon API as tool server** | Agent calls Daemon API for workspace/file access | Rich tool access | V1.1+ scope, requires tool permission handling |
 
 **Decision: Option A for V1.0.**
 
 The ACP protocol is designed for direct stdio communication. The existing `DaemonClient` in `apps/nexus42/src/api/daemon_client.rs` provides HTTP access to the daemon for CLI-internal use (health checks, sync, etc.), but agents do NOT talk to the daemon in V1.0.
 
-### 4.2 V1.0 Local API Additions (Minimal)
+### 4.2 V1.0 Daemon API Additions (Minimal)
 
-No new Local API endpoints are required for V1.0 ACP integration. The existing daemon endpoints (`/v1/local/runtime/health`, `/v1/local/workspace`, etc.) are sufficient for CLI use.
+No new Daemon API endpoints are required for V1.0 ACP integration. The existing daemon endpoints (`/v1/local/runtime/health`, `/v1/local/workspace`, etc.) are sufficient for CLI use.
 
-### 4.3 V1.1+ Local API Expansion (Deferred)
+### 4.3 V1.1+ Daemon API Expansion (Deferred)
 
 The following endpoints may be added in V1.1+ to support agent tool access:
 
@@ -622,9 +622,9 @@ File: `schemas/acp-runtime/registry-manifest.schema.json`
 
 After creating the schema, run `pnpm run codegen` to generate Rust types in `crates/nexus-contracts/src/generated/` and TypeScript types in `packages/nexus-contracts/src/generated/`. The generated Rust types should be used in `apps/nexus42/src/acp/registry.rs`.
 
-### 7.3 No New Local API Schema for V1.0
+### 7.3 No New Daemon API Schema for V1.0
 
-As decided in §4, no new Local API endpoint schema is needed for V1.0. The existing daemon endpoints remain unchanged.
+As decided in §4, no new Daemon API endpoint schema is needed for V1.0. The existing daemon endpoints remain unchanged.
 
 ---
 

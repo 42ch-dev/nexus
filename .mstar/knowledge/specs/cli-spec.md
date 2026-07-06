@@ -12,7 +12,7 @@
 **V1.52 T-A P1 Draft overlay:** §6.2G.2 Legacy `creator kb --scope world` alias + deprecation for World KB CLI surface consolidation (closes R-V150KBED-01).
 **V1.54 P0 Draft overlay:** §6.2M ACP host write-tool CLI mappings — 6 new mutation-capable `nexus.*` host tools map to `creator world kb edit/adopt`, `creator world configure`, `creator works cron set`, `creator findings resolve`, and `creator pool` entry management (DF-46).
 **V1.64 P3 Draft overlay:** §6.3 daemon Web UI serving — `daemon start` logs Web UI URL; new `daemon ui`/`daemon web` convenience command; §7.1 first-run path updated. See also [web-ui.md](./web-ui.md) §11 and [daemon-runtime.md](./daemon-runtime.md) §4.4.
-**V1.65 Prepare amendment:** outline and chapter-structure editing becomes UI-first through the bundled Web UI chapter-content Local API. CLI parity for existing creator/run/chapter workflows is retained; no shipped CLI command is removed or renamed by this UI-first slice.
+**V1.65 Prepare amendment:** outline and chapter-structure editing becomes UI-first through the bundled Web UI chapter-content Daemon API. CLI parity for existing creator/run/chapter workflows is retained; no shipped CLI command is removed or renamed by this UI-first slice.
 
 ## 0. 文档定位
 
@@ -47,7 +47,7 @@
 
 - **产品名**：对外统一为 **Nexus**。
 - **CLI 可执行名**：**`nexus42`**（与 **42ch / Creative Hub** 品牌同源；下文命令示例一律使用 `nexus42`）。本地 daemon 采用 **single-binary runtime mode**（由 `nexus42 daemon start` 进入内部 daemon 进程模式，例如 `daemon-run`），不再要求独立对外产品二进制名。
-- **`v1-notes/ideas/` 与 `v1-notes/` 的扩展需求**：视为路线图输入。CLI 必须保证：**协议与 schema 的可扩展字段**、Local API / ACP 能力面的**演进位**、以及已写入合同的能力（如 **`research.*` 等 ACP 能力名**、context assembly、`manuscript_phase` 等）的**最小可用实现或安全默认（no-op）**，避免把后续实现空间钉死。
+- **`v1-notes/ideas/` 与 `v1-notes/` 的扩展需求**：视为路线图输入。CLI 必须保证：**协议与 schema 的可扩展字段**、Daemon API / ACP 能力面的**演进位**、以及已写入合同的能力（如 **`research.*` 等 ACP 能力名**、context assembly、`manuscript_phase` 等）的**最小可用实现或安全默认（no-op）**，避免把后续实现空间钉死。
 
 ### 0.2 V2 重定位（pre-release）
 
@@ -337,7 +337,7 @@ V1.23 结束时，KB / knowledge 相关 CLI 路由目标应固定为：
 | Manage User/global reference knowledge | `nexus42 creator knowledge ...` | authenticated User / Pairing context; optional Creator only as acting context, not owner | `nexus-knowledge` | Store/search/list user-scoped global knowledge/reference material. May be pulled into Moment assembly; promotion into World KB is an explicit cross-scope operation. |
 | Create / browse World narrative state | `nexus42 creator world create\|list\|show ...` | active `creator_id`, workspace_slug; `create` requires `--title` (`--name` alias) and narrative kind is implicit in V1.40 | `nexus-narrative` + `nexus-kb` | **V1.40 P0**: `create` returns `world_id` and persists World row. `list`/`show` are read-only. No local fork (PD-01: fork is platform-only). |
 | Seed demo data | `nexus42 creator demo-seed ...` | active `creator_id`, workspace_slug | `nexus-creator` + `nexus-narrative` + `nexus-kb` | Populate demo world + KB entries for testing. |
-| Assemble direct platform cloud context | `nexus42 platform context assemble` | `--world-id`; optional workspace/creator and include/limit flags | Future direct platform context assembly path | **Deferred (V1.26).** Platform cloud assembly is not yet available; CLI exits with clear guidance to use `assemble-moment`. It must not call the retired daemon context-assemble Local API. |
+| Assemble direct platform cloud context | `nexus42 platform context assemble` | `--world-id`; optional workspace/creator and include/limit flags | Future direct platform context assembly path | **Deferred (V1.26).** Platform cloud assembly is not yet available; CLI exits with clear guidance to use `assemble-moment`. It must not call the retired daemon context-assemble Daemon API. |
 | **Assemble local four-domain Moment snapshot (single SSOT)** | `nexus42 platform context assemble-moment` | optional `--world-id`, `--user-id`, `--branch-id`, `--event-id`; **frozen flags:** `--max-tokens`, `--no-fragments`, `--hint`, `--kb-limit`, `--kb-search`, `--kb-type`, `--knowledge-limit` | `assemble_moment` in `nexus-moment-context-assembly` reading Stage-0 context plus local narrative, World KB, and User knowledge slices | **Shipped (local, V1.26+).** Single assembly SSOT — replaces the retired `assemble-local` path. Runs in-process and calls `assemble_moment`; narrative and World KB are read through persistent local stores, while User knowledge reads from SQLite (V1.27+). No platform cloud assembly and no daemon context-assemble route. |
 
 Implementation task C4 should therefore treat `creator kb` as a routing/name-alignment task, not as permission for `nexus42` to own KB/domain storage long-term.
@@ -351,7 +351,7 @@ Implementation task C4 should therefore treat `creator kb` as a routing/name-ali
 
 - daemon runtime 是本地 supervisor，不是 ACP Agent/Server。
 - `daemon` 负责运行态控制，不承载 ACP 协议协商职责。
-- **Shipped:** `daemon schedule ...` is wired to the daemon orchestration schedules Local API (`/v1/local/orchestration/schedules/*`) via `commands/daemon/schedule.rs`.
+- **Shipped:** `daemon schedule ...` is wired to the daemon orchestration schedules Daemon API (`/v1/local/orchestration/schedules/*`) via `commands/daemon/schedule.rs`.
 - **Session control ownership:** `daemon schedule ...` is the primary orchestration CLI surface. It exercises the full sessions control plane through schedule operations: `current_session_id` points at the active orchestration session, and schedule signals cascade through the supervisor to the active session as described in [`creator-schedule-and-core-context.md`](./creator-schedule-and-core-context.md) §3.3.
 - **Removed:** `daemon orchestrate ...` is not a shipped compatibility surface. Do not document `daemon orchestrate run` in new plans or runbooks; use `daemon schedule ...` for shipped orchestration control unless a future plan intentionally introduces a new session-control wrapper.
 
@@ -381,13 +381,13 @@ These rejections happen **at daemon start**, not per-invocation — once the dae
 
 **V1.64 P3 amendment — Web UI serving and CLI entry:**
 
-`nexus42 daemon start` now serves the bundled local Web UI SPA at the server root (`http://localhost:<port>/`) from embedded assets (`rust-embed`). On startup the daemon logs both the Local API base URL and the Web UI URL:
+`nexus42 daemon start` now serves the bundled local Web UI SPA at the server root (`http://localhost:<port>/`) from embedded assets (`rust-embed`). On startup the daemon logs both the Daemon API base URL and the Web UI URL:
 
 ```
 $ nexus42 daemon start
 ✓ Daemon started successfully on port 8420
   PID: 12345
-  Local API: http://127.0.0.1:8420
+  Daemon API: http://127.0.0.1:8420
   Web UI:    http://127.0.0.1:8420/
 ```
 
@@ -399,7 +399,7 @@ A new convenience subcommand `nexus42 daemon ui` (alias `nexus42 daemon web`) st
 | `nexus42 daemon ui --port <N>` | Use a specific port (default: 8420) |
 | `nexus42 daemon web` | Alias for `nexus42 daemon ui` |
 
-The static SPA shell (HTML/JS/CSS) is unauthenticated — it carries no data. All data flows through the existing loopback Local API (`/v1/local/*`), which remains keyless on `localhost` per the V1.20 model. See [daemon-runtime.md](./daemon-runtime.md) §4.4 and [web-ui.md](./web-ui.md) §4 for the full serving model.
+The static SPA shell (HTML/JS/CSS) is unauthenticated — it carries no data. All data flows through the existing loopback Daemon API (`/v1/local/*`), which remains keyless on `localhost` per the V1.20 model. See [daemon-runtime.md](./daemon-runtime.md) §4.4 and [web-ui.md](./web-ui.md) §4 for the full serving model.
 
 **V1.65 authoring note:** chapter outline and structure editing is exposed first
 through the daemon-served Web UI (`/v1/local/works/{work_id}/chapters/*`). This
@@ -426,7 +426,7 @@ nexus42 creator run <PRESET_ID> [<WORK_ID>] [global flags] [preset args...]
 
 | Command | Purpose |
 | --- | --- |
-| `nexus42 creator run <preset_id> [<work_id>]` | Generic preset dispatch. FL-E stage-advance presets (`research`, `novel-writing`, `novel-chapter-review`, `kb-extract`) are routed to `stage_advance`; all other presets are scheduled directly via daemon Local API. `<work_id>` optional — defaults to pool `active` Work. |
+| `nexus42 creator run <preset_id> [<work_id>]` | Generic preset dispatch. FL-E stage-advance presets (`research`, `novel-writing`, `novel-chapter-review`, `kb-extract`) are routed to `stage_advance`; all other presets are scheduled directly via Daemon API. `<work_id>` optional — defaults to pool `active` Work. |
 
 **Global flags:**
 
@@ -449,7 +449,7 @@ Presets may declare `cli_args` with name, type (`integer`/`string`/`boolean`), `
 Rules:
 
 - Only presets declaring `run_intents` including `work_init` may be used as the **first** run on a new Work (see [orchestration-engine.md](./orchestration-engine.md) §7.7).
-- `creator run` creates/updates schedules via daemon Local API; it does **not** replace `daemon schedule` for power users.
+- `creator run` creates/updates schedules via Daemon API; it does **not** replace `daemon schedule` for power users.
 - When `work_id` is omitted, resolve [novel-writing/work-pool.md](./novel-writing/work-pool.md) `active` row → `work_id`; else fail with remediation to `creator works use`.
 - FL-E presets are identified via `stage_for_preset()` reverse mapping; the runner calls `stage_advance` with `force: false` (stage ordering enforced).
 
@@ -691,7 +691,7 @@ All write tools route through the same admission pipeline (`Allowlist → Active
 
 - `nexus42 daemon schedule add --preset <id> --creator <id> [--seed "..."]` — starts preset-driven workflows through schedules.
 
-**Local API** (shipped):
+**Daemon API** (shipped):
 
 - `GET /v1/local/presets`
 - `POST /v1/local/presets`
@@ -724,7 +724,7 @@ There is **no** top-level `nexus42 preset ...` command group. User creative entr
 
 操作主体：`sync` 的 `creator_id` 与 `workspace_slug` 必须对应当前活跃上下文；HTTP 优先 `Authorization: Bearer <creator_api_key>`，User 代操时使用 `Authorization: Bearer <user_access_token>` + `X-Creator-Id`。
 
-**架构边界（长期）**：`sync` 属于 **cloud 产品线**，由 CLI 调用 **`nexus-cloud-sync`** 完成 platform HTTP；daemon Local API **不得**承载 `/v1/local/sync/*` 或注册代理。见 [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md) §5–§6。
+**架构边界（长期）**：`sync` 属于 **cloud 产品线**，由 CLI 调用 **`nexus-cloud-sync`** 完成 platform HTTP；Daemon API **不得**承载 `/v1/local/sync/*` 或注册代理。见 [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md) §5–§6。
 
 ### 6.6 `nexus42 platform`（平台能力命令组）
 
@@ -736,7 +736,7 @@ There is **no** top-level `nexus42 preset ...` command group. User creative entr
 
 说明：
 
-- `platform context assemble` is **Deferred** in V1.26. Direct platform cloud assembly is not yet available; the command returns clear guidance to use `assemble-moment` instead. It must not call the retired daemon context-assemble Local API.
+- `platform context assemble` is **Deferred** in V1.26. Direct platform cloud assembly is not yet available; the command returns clear guidance to use `assemble-moment` instead. It must not call the retired daemon context-assemble Daemon API.
 - `platform context assemble-moment` is the **single local assembly SSOT** (shipped V1.26, hardened V1.27+). It is a four-domain Moment assembly command that calls `assemble_moment` in-process. Narrative and World KB slices read from persistent local stores; User knowledge reads from SQLite (V1.27+). It is distinct from the deferred platform cloud `assemble` path.
 - `publish.*` 表示内容跨平台边界动作，不与 `sync push` 混用。
 - `manuscript.*` / `publish.*` / `research.*` 作为 ACP 或 preset contract 保留，不再作为独立顶层命令组。
@@ -746,9 +746,9 @@ There is **no** top-level `nexus42 preset ...` command group. User creative entr
 | User intent | CLI group | ACP / preset contract |
 | --- | --- | --- |
 | Structured state sync | `nexus42 platform sync ...`（**V1.35**；legacy `nexus42 sync` deprecated alias） | `sync.*` + bundle/delta contracts |
-| Runtime orchestration control | `nexus42 daemon schedule ...` (**Shipped**) | schedule commands call daemon orchestration schedules Local API and own session control via `current_session_id` + supervisor signal cascade |
+| Runtime orchestration control | `nexus42 daemon schedule ...` (**Shipped**) | schedule commands call daemon orchestration schedules Daemon API and own session control via `current_session_id` + supervisor signal cascade |
 | ACP capability negotiation | `nexus42 acp ...` | registry/probe/session capability negotiation |
-| Context assembly snapshot | `nexus42 platform context assemble` (**Deferred platform cloud**); `nexus42 platform context assemble-moment` (**Shipped local four-domain Moment — single SSOT**) | shipped path is CLI in-process; `assemble-moment` calls local `assemble_moment` with persistent narrative / World KB stores and SQLite User knowledge. Frozen flags: `--max-tokens`, `--no-fragments`, `--hint`, `--kb-limit`, `--kb-search`, `--kb-type`, `--knowledge-limit`. Daemon context-assemble Local API is **Retired** (KCA-002 B2). `assemble-local` is **removed** in pre-release. |
+| Context assembly snapshot | `nexus42 platform context assemble` (**Deferred platform cloud**); `nexus42 platform context assemble-moment` (**Shipped local four-domain Moment — single SSOT**) | shipped path is CLI in-process; `assemble-moment` calls local `assemble_moment` with persistent narrative / World KB stores and SQLite User knowledge. Frozen flags: `--max-tokens`, `--no-fragments`, `--hint`, `--kb-limit`, `--kb-search`, `--kb-type`, `--knowledge-limit`. Daemon context-assemble Daemon API is **Retired** (KCA-002 B2). `assemble-local` is **removed** in pre-release. |
 | Manuscript read/write | 无顶层独立命令组 | `manuscript.*` ACP capabilities + preset roots |
 | Research / references | 无顶层独立命令组 | preset orchestration + `research.*` ACP tools |
 | Content publication | `nexus42 platform publish ...`（或 preset 显式动作） | `publish.*` + confirmation policy |

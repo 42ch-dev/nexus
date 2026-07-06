@@ -503,7 +503,7 @@ Future endpoint acceptance requires:
 
 ## 9. Evidence and V1.64 decisions
 
-The V1.63 Local API surface audit (historical name) identified:
+The V1.63 Daemon API surface audit (historical name) identified:
 
 - F-P1: Works uses offset/limit while peers use cursor pagination.
 - F-P2: Findings list endpoint lacks a response schema.

@@ -314,7 +314,16 @@ export function ConnectDaemonPage() {
             >
               <div className="flex items-start gap-3">
                 <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-700" aria-hidden />
-                <p className="text-copy-14">{fpState.message}</p>
+                <div className="space-y-2">
+                  <p className="text-copy-14">{fpState.message}</p>
+                  <p className="text-copy-14">
+                    Browsers cannot reliably distinguish an unreachable daemon from a
+                    rejected self-signed certificate, so fetching the certificate fingerprint
+                    may fail even when the daemon is running. For remote daemons that use a
+                    self-signed certificate, use the Nexus desktop app — it supports Trust On
+                    First Use (TOFU) and can store the certificate in the OS keychain.
+                  </p>
+                </div>
               </div>
             </div>
           )}

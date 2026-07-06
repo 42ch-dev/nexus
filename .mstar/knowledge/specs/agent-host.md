@@ -32,7 +32,7 @@ Define **`nexus-agent-host`**: the orchestration/facade above ACP and native CLI
 ```text
 OSS CLI (cli-spec)
   └─ nexus-daemon-runtime
-       ├─ /v1/local/agent-host/*  (Local API — normative surface per [daemon-runtime.md §2 layered surface](./daemon-runtime.md))
+       ├─ /v1/local/agent-host/*  (Daemon API — normative surface per [daemon-runtime.md §2 layered surface](./daemon-runtime.md))
        └─ Arc<dyn HostFacade>
             └─ nexus-agent-host
                  ├─ core: sessions, operations, lifecycle
@@ -61,7 +61,7 @@ Multica / OpenDesign are **reference architectures only**, not runtime dependenc
 ## 5. Capability & streaming
 
 1. Execution flows through normalized **`HostOperation`** / **`HostEvent`** (wire shapes in knowledge SSOT and future contracts).
-2. **Provider-native streaming, unified relay**: providers may use internal transports; daemon exposes a **single host event stream** to HTTP clients (e.g. SSE over Local API).
+2. **Provider-native streaming, unified relay**: providers may use internal transports; daemon exposes a **single host event stream** to HTTP clients (e.g. SSE over Daemon API).
 3. Cancel and health are **control-plane** actions on `HostFacade`, not execution operations.
 
 ---
@@ -83,7 +83,7 @@ Admission policy limits sessions, concurrent ops, and risky tool classes (detail
 1. Daemon can start/stop host subsystem with drain semantics.
 2. At least one ACP-backed session and one native adapter path (wave scope per program compass) under Managed-only rules.
 3. No code path advertises daemon or host as ACP Registry agent.
-4. Local API consumers use host-mediated operations only.
+4. Daemon API consumers use host-mediated operations only.
 
 Crate file tree, trait signatures, route list, and test matrix: **Appendix** below.
 

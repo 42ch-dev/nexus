@@ -20,7 +20,7 @@
 
 Preset orchestration drives **multi-step** creative work via schedules and capabilities (`acp.prompt`, `judge.llm`, `creator.read_memory`, …). External LLM agents can also **actively** request Nexus context during a session (tool calls). V1.34 defines a **single mediated path** through the daemon so that:
 
-- Permissions and workspace boundaries match Local API rules.
+- Permissions and workspace boundaries match Daemon API rules.
 - Audit trails exist for agent-initiated mutations.
 - The same handlers can serve HTTP tool execute and worker upcalls.
 
@@ -32,7 +32,7 @@ Preset orchestration drives **multi-step** creative work via schedules and capab
 
 | # | Decision |
 | --- | --- |
-| 1 | **Execution surface** = `nexus-daemon-runtime` `HostToolExecutor` + Local API handlers |
+| 1 | **Execution surface** = `nexus-daemon-runtime` `HostToolExecutor` + Daemon API handlers |
 | 2 | **Tool IDs** = `nexus.<domain>.<action>` aligned with [acp-capability-set.md](acp-capability-set.md) where applicable |
 | 3 | **CLI** is not an agent tool transport |
 | 4 | **Orchestration capabilities** and **host tools** may share handler implementations (registry) but different admission paths |
@@ -52,7 +52,7 @@ Preset orchestration drives **multi-step** creative work via schedules and capab
 [HostToolExecutor]
         │ permission.toml + workspace path rules + active creator
         ▼
-[Handler registry → Local API / domain services]
+[Handler registry → Daemon API / domain services]
 ```
 
 Preset path (unchanged):
@@ -123,7 +123,7 @@ Allowed patch fields:
 
 Rejected examples:
 
-- `current_stage`, `stage`, `stage_status`, `stage_started_at`, or `stage_completed_at` — direct stage mutation is forbidden; use the stage-advance Local API / CLI path defined by [creator-workflow.md](creator-workflow.md).
+- `current_stage`, `stage`, `stage_status`, `stage_started_at`, or `stage_completed_at` — direct stage mutation is forbidden; use the stage-advance Daemon API / CLI path defined by [creator-workflow.md](creator-workflow.md).
 - `creator_id`, `workspace_id`, `work_id`, or ownership fields — cross-creator reassignment is forbidden.
 - `run_intents`, schedule rows, preset ids, or capability grants — preset routing remains under orchestration policy, not an agent patch.
 - Manuscript/body replacement fields outside the `inspiration_log` append surface — full content persistence remains outside P3/P4 minimal tool scope.
@@ -385,7 +385,7 @@ Current repo snapshot checked for this spec:
 | --- | --- | --- |
 | `ToolExecutionRequest` / execute request `{ tool_name, parameters, session_id? }` | **Not codegen'd.** Existing shape is handwritten daemon runtime `ToolExecuteRequest`. | Add JSON Schema before replacing handwritten request DTO in P4/P5+ follow-up. Preserve compatibility with existing `fs/*` fields. |
 | `ToolExecutionResponse` / success `{ success, result }` | **Not codegen'd.** Existing shape is handwritten daemon runtime `ToolExecuteResponse`. | Add generated wrapper that can carry arbitrary handler result JSON while keeping stable `success`. |
-| `ToolExecutionError` / failure `{ success: false, error: { code, reason?, message?, details? } }` | **Not codegen'd.** Existing Local API error code enums live in runtime error handling, not generated contracts. | Add generated error envelope or reuse a future shared Local API error schema; include `FORBIDDEN`, `POLICY_BLOCKED`, `NOT_SUPPORTED`, `INVALID_INPUT`. |
+| `ToolExecutionError` / failure `{ success: false, error: { code, reason?, message?, details? } }` | **Not codegen'd.** Existing Daemon API error code enums live in runtime error handling, not generated contracts. | Add generated error envelope or reuse a future shared Daemon API error schema; include `FORBIDDEN`, `POLICY_BLOCKED`, `NOT_SUPPORTED`, `INVALID_INPUT`. |
 | `WorkerAgentToolRequest` `{ tool_name, args, request_id }` | **Not codegen'd.** Currently documented only in orchestration-engine §6.4. | Future schema should normalize `args` ↔ `parameters` mapping without creating a second dispatch type. |
 | `WorkerAgentToolRequestResult` `{ request_id, grant, output? }` | **Not codegen'd.** Currently documented only in orchestration-engine §6.4. | Future schema should wrap the same `ToolExecutionResponse` / `ToolExecutionError` result shape. |
 | `nexus.context.assemble` local result subset | **Partially present.** `ContextAssembleRequestV1` / `ContextAssembleResponseV1` exist, but are cloud/deferred and not the daemon tool response envelope. | P4 may reference local assembly domain types internally; generated tool contract still needs the wrapper + `POLICY_BLOCKED` behavior. |

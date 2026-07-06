@@ -9,7 +9,7 @@
 **Coordinates with**:
 
 - [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md) — crate owners for sync/memory capabilities (§5.2 target names; legacy `nexus-sync` / `nexus-domain` until V1.21)
-- [acp-client-tech-spec.md](acp-client-tech-spec.md) — §2.3 worker-delegated hosting amendment; §4 Local API additions; §11 `nexus-acp-host` crate spec
+- [acp-client-tech-spec.md](acp-client-tech-spec.md) — §2.3 worker-delegated hosting amendment; §4 Daemon API additions; §11 `nexus-acp-host` crate spec
 - [daemon-lifecycle-api.md](../../archived/knowledge/daemon-lifecycle-api.md) — full 6-state statig HSM closing TD-9
 - [architecture-alignment-review.md](../../archived/knowledge/architecture-alignment-review.md) — TD-9 status moves from "gap" to "closed via statig HSM in v2 lifecycle doc"
 
@@ -911,7 +911,7 @@ CLI and daemon `POST /v1/local/presets:validate` call these functions directly w
 ### 8.3 Caching and reloading
 
 - Loader caches `LoadedPreset` keyed by `source_hash`.
-- On `registry.refresh` capability call or the shipped Local API `POST /v1/local/presets/{id}:reload`, loader recomputes hash; if changed, invalidates cache and rebuilds. There is currently no top-level `nexus42 preset reload` CLI.
+- On `registry.refresh` capability call or the shipped Daemon API `POST /v1/local/presets/{id}:reload`, loader recomputes hash; if changed, invalidates cache and rebuilds. There is currently no top-level `nexus42 preset reload` CLI.
 - Running sessions continue on the previous graph (snapshot semantics); new sessions pick up the new graph.
 
 ### 8.4 `narrative.compute` capability and `combat-engine` preset (V1.62 P2 — Normative)
@@ -1143,7 +1143,7 @@ Owned by [daemon-lifecycle-api.md](daemon-lifecycle-api.md); A-track just consum
 In the same change window as each phase:
 
 - Phase 1 → commit [acp-client-tech-spec.md](acp-client-tech-spec.md) §11 (crate layout).
-- Phase 2 → commit §4.3 (Local API additions) in the same spec.
+- Phase 2 → commit §4.3 (Daemon API additions) in the same spec.
 - Phase 4 → commit [daemon-lifecycle-api.md](daemon-lifecycle-api.md).
 - Phase 3 → this document updated: move sections to "Delivered" once implemented.
 - **Phase 5b (new)** → WS7 lands [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md) implementation; engine consumes the `ScheduleSupervisor` signal path added in that spec's §4.

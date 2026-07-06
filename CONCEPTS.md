@@ -82,7 +82,7 @@ The standard protocol for agent-to-agent communication. Nexus is an **ACP client
 The adapter layer that translates between Nexus's internal capability model and external ACP agents. Allows Nexus to ask any ACP-compliant agent to perform tasks without being tied to a specific provider.
 
 ### Daemon Runtime
-The local background process within `nexus42` that manages the World KB SQLite database, schedules quality/knowledge loops, serves the **Daemon API** HTTP surface (Axum), and coordinates with the agent host. Starts with `nexus42 daemon start`. The surface was historically called "Local API" before V1.90.
+The local background process within `nexus42` that manages the World KB SQLite database, schedules quality/knowledge loops, serves the **Daemon API** HTTP surface (Axum), and coordinates with the agent host. Starts with `nexus42 daemon start`. The surface was historically called "Daemon API" before V1.90.
 
 ### Daemon API
 The HTTP surface served by the Daemon Runtime, reachable under `/v1/daemon/*` (previously `/v1/local/*`). It exposes world/knowledge, creator, orchestration, and manuscript endpoints to the CLI, web SPA, and desktop shell. By default it binds to loopback; remote bind requires both `NEXUS42_DAEMON_API_KEY` and `NEXUS_DAEMON_REMOTE_BIND=1`.

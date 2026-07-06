@@ -15,7 +15,7 @@ Nexus OSS specs describe a **local-first creative runtime** with optional cloud 
 ```text
 Identity & scope          →  who owns data (Creator, User, World, …)
 Architecture & contracts  →  which crate owns which concern; wire vs local types
-Runtime topology          →  CLI → daemon → Local API → ACP workers
+Runtime topology          →  CLI → daemon → Daemon API → ACP workers
 Persistence               →  state.db, reference store, workspace layout
 Orchestration             →  presets, capabilities, schedules, sessions
 Product surface (CLI)     →  command IA, entry paths, per-flag behavior

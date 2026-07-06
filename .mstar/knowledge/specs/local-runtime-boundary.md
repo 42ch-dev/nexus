@@ -9,7 +9,7 @@ This document defines boundaries between:
 
 - `nexus42` CLI（产品名 Nexus；见 [`cli-spec.md`](./cli-spec.md) §0.1）
 - daemon runtime mode (single-binary `nexus42`)
-- Nexus Local API / IPC
+- Nexus Daemon API / IPC
 - ACP sessions
 - Skills compatibility layer
 
@@ -28,7 +28,7 @@ Logical `nexus.*` capabilities are shared with platform-hosted creators; this do
 | User-owned agent | **ACP Agent** | Hosts tools/resources; executes model calls |
 | Nexus CLI / runtime | **ACP Client** | Spawns/connects agent; negotiates capabilities |
 | daemon runtime mode | None | Local supervisor; must not be advertised as ACP Agent |
-| Nexus Local API | None | Loopback IPC for CLI↔daemon and automation |
+| Nexus Daemon API | None | Loopback IPC for CLI↔daemon and automation |
 
 ---
 
@@ -66,25 +66,25 @@ Daemon runtime hosts agent sessions through a managed host subsystem with these 
 
 ---
 
-## 3. Nexus Local API vs ACP
+## 3. Nexus Daemon API vs ACP
 
-### 3.1 Why Local API exists
+### 3.1 Why Daemon API exists
 
 ACP is for agent integration. Nexus still needs a stable internal interface for:
 
 - CLI talking to daemon without spawning agents
 - Local automation or IDE plugins that should not pretend to be ACP Agents
 
-### 3.2 Local API characteristics
+### 3.2 Daemon API characteristics
 
 - Loopback-only by default
 - Minimal surface: workspace status, daemon health, orchestration/agent-host, local KB/memory — **no** sync or platform registration proxy (see [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md))
 - Auth: OS user boundary, with optional token / IPC artifacts under **`$HOME/.nexus42/run/`** (or workspace-scoped subpaths still rooted at `$HOME/.nexus42/`, never under `<workspace>/`)
 - Versioned schema: all stable endpoints live under `/v1/local/*` so TS / Rust codegen can share one contract
 
-### 3.2.1 Local API endpoint families
+### 3.2.1 Daemon API endpoint families
 
-The Local API is the **codegen-ready** internal contract between CLI, daemon, and local automation.
+The Daemon API is the **codegen-ready** internal contract between CLI, daemon, and local automation.
 
 **Routing policy (long-term):** [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md) §5. **Removal acceptance:** [v1.21 delivery compass](../../iterations/v1.21-local-platform-isolation-delivery-compass-v1.md).
 
@@ -104,7 +104,7 @@ The Local API is the **codegen-ready** internal contract between CLI, daemon, an
 | `/v1/local/orchestration/*` | Active | Sessions, capabilities, presets, schedules, core-context, history, and signal routes registered in `orchestration_routes()`. |
 | `/v1/local/agent-host/*` | Active | Health, providers, sessions, operations, cancel, events SSE, and internal tool-executions routes. |
 | `GET /v1/local/monitoring/pool` | Active | Protected monitoring route. |
-| `POST /v1/local/context/assemble` | **Retired (KCA-002 B2)** | Not registered in `api/mod.rs`; context assembly stays CLI in-process through `nexus-moment-context-assembly`, not daemon Local API. |
+| `POST /v1/local/context/assemble` | **Retired (KCA-002 B2)** | Not registered in `api/mod.rs`; context assembly stays CLI in-process through `nexus-moment-context-assembly`, not Daemon API. |
 | `GET /v1/local/research/sources` | **NotImplemented / Retired from active table** | Not registered in `api/mod.rs`; do not list as active until a handler exists. |
 | `POST /v1/local/research/scan` | **NotImplemented / Retired from active table** | Not registered in `api/mod.rs`; do not list as active until a handler exists. |
 | `POST /v1/local/agent-sessions/restart` | **Retired** | Not registered; shipped agent session control lives under `/v1/local/agent-host/*`. |
@@ -137,19 +137,19 @@ Rules:
 - `workspace_id` is mandatory for workspace-scoped actions
 - `error_code` should align with sync / conflict schemas where applicable
 - Research-specific routes may use the `/v1/local/*` namespace only after they are registered in the daemon router.
-- **V1.24 KCA-002 B2:** `POST /v1/local/context/assemble` is retired from the daemon Local API. CLI/platform context assembly should call `nexus-moment-context-assembly` in-process rather than proxying through the daemon.
+- **V1.24 KCA-002 B2:** `POST /v1/local/context/assemble` is retired from the Daemon API. CLI/platform context assembly should call `nexus-moment-context-assembly` in-process rather than proxying through the daemon.
 - **V1.2**：若请求体支持可选 **`as_of`**，Local 与 Platform HTTP **须**共享 **同一**字段语义与校验；不得仅在一侧出现私有历史参数。
 
 ### 3.3 Forbidden patterns
 
-- Exposing Nexus Local API as a public ACP endpoint
+- Exposing Nexus Daemon API as a public ACP endpoint
 - Implementing Nexus tools by re-entering ACP as Agent from daemon
-- Shipping ad-hoc CLI-only request/response shapes that bypass the versioned Local API contract
+- Shipping ad-hoc CLI-only request/response shapes that bypass the versioned Daemon API contract
 
 ### 3.4 Relationship diagram
 
 ```text
-CLI --Local API--> daemon runtime mode --ACP Client--> ACP Agent
+CLI --Daemon API--> daemon runtime mode --ACP Client--> ACP Agent
   |
   +-- sync / register / platform HTTP --> nexus-cloud-sync --> Platform HTTPS
   |
@@ -198,7 +198,7 @@ Skills packages let ecosystems without ACP call Nexus operations through their n
 
 - 1:1 name alignment: skill IDs mirror `nexus.*` capability IDs wherever possible
 - Version alignment: skill manifest embeds `nexus.acp_contract_version`
-- Behavior alignment: skills call Local API or CLI subprocess; they do not redefine semantics
+- Behavior alignment: skills call Daemon API or CLI subprocess; they do not redefine semantics
 
 ### 5.3 Non-goals
 
@@ -216,7 +216,7 @@ V1.53 cancelled the skills-export CLI/spec line (DF-50). Nexus keeps the static 
 ### 6.1 Threat model highlights
 
 - Local malicious agent may attempt filesystem exfiltration
-- Local malicious process may talk to Local API if socket permissions are weak
+- Local malicious process may talk to Daemon API if socket permissions are weak
 - Remote agent transport expands attack surface
 
 ### 6.2 Controls
@@ -239,10 +239,10 @@ V1.53 cancelled the skills-export CLI/spec line (DF-50). Nexus keeps the static 
 | Action | Preferred path |
 | --- | --- |
 | Agent reasons & writes manuscript via tools | ACP session |
-| User/script checks daemon health | Local API / CLI |
-| Sync structured deltas to platform | `nexus42 sync …` → **`nexus-cloud-sync`** (CLI/cloud line; not daemon Local API) |
+| User/script checks daemon health | Daemon API / CLI |
+| Sync structured deltas to platform | `nexus42 sync …` → **`nexus-cloud-sync`** (CLI/cloud line; not Daemon API) |
 | Discover agents | Registry integration |
-| Non-ACP tool ecosystem | Skills -> CLI/Local API |
+| Non-ACP tool ecosystem | Skills -> CLI/Daemon API |
 
 ---
 

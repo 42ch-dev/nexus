@@ -472,7 +472,7 @@ confirmed → (terminal; may be edited via creator world kb edit; deletion via c
 rejected → (terminal; archived)
 ```
 
-Invalid transitions return `422` with stable error code on Local API.
+Invalid transitions return `422` with stable error code on Daemon API.
 
 #### 5.5.3 Promotion gate (normative V1.50)
 

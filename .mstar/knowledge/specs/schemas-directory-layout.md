@@ -19,7 +19,7 @@
 
 ## 1. Normative tree (2026-06, post-V1.64 target)
 
-All paths are under repository root `schemas/`. Only **external-consumer** files belong here (see boundary doc): platform wire OR Local API cross-language contracts.
+All paths are under repository root `schemas/`. Only **external-consumer** files belong here (see boundary doc): platform wire OR Daemon API cross-language contracts.
 
 ```text
 schemas/
@@ -30,8 +30,8 @@ schemas/
 ├── platform/              # platform consumer-only
 │   ├── http-bff/          # platform HTTP request/response bodies (BFF contracts)
 │   └── sync/              # CLI ↔ platform sync protocol (bundle, delta, pull, conflict)
-└── local-api/             # external Local API clients (e.g. future WebApp/Web-UI, WASM modules)
-    ├── common/            # shared Local API envelopes (ErrorResponse, future common fragments)
+└── local-api/             # external Daemon API clients (e.g. future WebApp/Web-UI, WASM modules)
+    ├── common/            # shared Daemon API envelopes (ErrorResponse, future common fragments)
     ├── compute/           # compute module ABI envelopes (ComputeInput / ComputeOutput)
     ├── works/             # works CRUD schemas (V1.63 P1)
     │   └── chapters/      # chapter-content schemas (V1.65 target)
@@ -65,19 +65,19 @@ schemas/
 | **`platform/sync/`** | Cloud enhancement (bundle / pull / conflict) | `nexus-platform` | `nexus-cloud-sync` (`legacy-sync`) | **Yes** |
 | **`domain/`** | Wire entities embedded in bundles & platform bodies | `nexus-platform` (transitive via `$ref`) | All cloud-line crates + generated imports | **Yes** |
 | **`common/`** | Shared wire value objects | `nexus-platform` (when `$ref`'d) | Generated | **Yes** |
-| **`local-api/compute/`** | Local API — compute module ABI | External WASM modules + future WebApp | `nexus-wasm-host` (re-exports), compute modules | **Yes** |
-| **`local-api/common/`** | Local API — shared envelopes | Bundled local Web UI + future external Local API clients | `nexus-daemon-runtime` handlers via generated contracts | **Yes** |
-| **`local-api/works/`** | Local API — works CRUD | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
-| **`local-api/works/chapters/`** | Local API — chapter content and structure | Bundled local Web UI authoring surface + future Tauri shell | `nexus-daemon-runtime` chapter handlers | **Yes** |
-| **`local-api/kb/`** | Local API — KB entries CRUD | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
-| **`local-api/findings/`** | Local API — quality findings CRUD | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
-| **`local-api/schedule/`** | Local API — schedule + core-context CRUD | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
-| **`local-api/workspace/`** | Local API — workspace management CRUD | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
-| **`local-api/creators/`** | Local API — creator management CRUD | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
-| **`local-api/orchestration/`** | Local API — orchestration engine READ | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
-| **`local-api/preset-management/`** | Local API — preset management full surface | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
+| **`local-api/compute/`** | Daemon API — compute module ABI | External WASM modules + future WebApp | `nexus-wasm-host` (re-exports), compute modules | **Yes** |
+| **`local-api/common/`** | Daemon API — shared envelopes | Bundled local Web UI + future external Daemon API clients | `nexus-daemon-runtime` handlers via generated contracts | **Yes** |
+| **`local-api/works/`** | Daemon API — works CRUD | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
+| **`local-api/works/chapters/`** | Daemon API — chapter content and structure | Bundled local Web UI authoring surface + future Tauri shell | `nexus-daemon-runtime` chapter handlers | **Yes** |
+| **`local-api/kb/`** | Daemon API — KB entries CRUD | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
+| **`local-api/findings/`** | Daemon API — quality findings CRUD | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
+| **`local-api/schedule/`** | Daemon API — schedule + core-context CRUD | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
+| **`local-api/workspace/`** | Daemon API — workspace management CRUD | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
+| **`local-api/creators/`** | Daemon API — creator management CRUD | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
+| **`local-api/orchestration/`** | Daemon API — orchestration engine READ | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
+| **`local-api/preset-management/`** | Daemon API — preset management full surface | Future WebApp/Web-UI | `nexus-daemon-runtime` (future migration) | **Yes** |
 
-**Local product line** (daemon, orchestration, agent-host internal DTOs) MUST NOT add new subtrees under `schemas/` unless an **external** client (separate process / language boundary) consumes them. Add types under `crates/nexus-contracts/src/local/{acp_runtime,domain,orchestration,schedule}/`. The `local-api/` tree is reserved for cross-language Local API contracts (one subfolder per concern; V1.62 seeded `compute/`; V1.63 P1 added the six core CRUD resources; V1.63 P3 added orchestration + preset-management; V1.64 adds `common/` for shared Local API envelopes consumed by the bundled local Web UI and future clients).
+**Local product line** (daemon, orchestration, agent-host internal DTOs) MUST NOT add new subtrees under `schemas/` unless an **external** client (separate process / language boundary) consumes them. Add types under `crates/nexus-contracts/src/local/{acp_runtime,domain,orchestration,schedule}/`. The `local-api/` tree is reserved for cross-language Daemon API contracts (one subfolder per concern; V1.62 seeded `compute/`; V1.63 P1 added the six core CRUD resources; V1.63 P3 added orchestration + preset-management; V1.64 adds `common/` for shared Daemon API envelopes consumed by the bundled local Web UI and future clients).
 
 ---
 
@@ -86,7 +86,7 @@ schemas/
 ### 3.1 `platform/http-bff/`
 
 - One schema file per **platform HTTP** request or response shape (or shared response fragment), kebab-case basename.
-- **Not** daemon Local API proxies (V1.20 removed world/explore **daemon** routes; platform HTTP contracts **remain** wire here).
+- **Not** Daemon API proxies (V1.20 removed world/explore **daemon** routes; platform HTTP contracts **remain** wire here).
 - Grouping is **flat** (no `http-bff/explore/` subfolders) — use filename prefix: `explore-*`, `world-*`, `publish-*`, `notifications-*`, `context-assembly-v1`, etc.
 - `$id` / `$ref` URIs use `https://nexus42.invalid/schemas/platform/http-bff/...`.
 - Maintain [`platform/http-bff/README.md`](../../../schemas/platform/http-bff/README.md) index when adding files.
@@ -134,14 +134,14 @@ Wire entities aligned with platform `data-model-v1` §5–§10. Current inventor
 
 ### 3.5A `local-api/common/` (V1.64)
 
-- Shared Local API envelopes consumed across resource handlers and the bundled local Web UI.
+- Shared Daemon API envelopes consumed across resource handlers and the bundled local Web UI.
 - `error-response.schema.json` defines the canonical `ErrorResponse { code, message, details? }` envelope for non-2xx JSON responses.
 - `$id` / `$ref` URIs use `https://nexus42.invalid/schemas/local-api/common/...`.
 - Maintain `local-api/common/README.md` when the subtree is materialized. Surface conventions: [local-api-surface-conventions.md](./local-api-surface-conventions.md).
 
 ### 3.6 `local-api/{works,kb,findings,schedule,workspace,creators}/` (V1.63 P1)
 
-- Core CRUD Local API schemas for the daemon's `/v1/local/*` endpoints, promoted from inline handler DTOs to cross-language JSON Schema so the future WebApp/Web-UI can consume typed request/response shapes.
+- Core CRUD Daemon API schemas for the daemon's `/v1/local/*` endpoints, promoted from inline handler DTOs to cross-language JSON Schema so the future WebApp/Web-UI can consume typed request/response shapes.
 - **Per-resource subfolder** pattern (`local-api/works/`, `local-api/kb/`, etc.) — one folder per daemon resource, each with per-operation request/response schemas (e.g. `create-work-request.schema.json`, `list-works-response.schema.json`).
 - All schemas use `$id` / `$ref` URIs in `https://nexus42.invalid/schemas/local-api/<resource>/...`.
 - Cross-resource `$ref` uses the full URI (e.g. `https://nexus42.invalid/schemas/local-api/kb/pagination-info.schema.json`), consistent with `platform/http-bff/` convention.
@@ -170,7 +170,7 @@ The list response uses `items` + cursor pagination from day one. Body is
 read-only in V1.65; outline PUT and structure PATCH are writable surfaces.
 Detailed semantics: [chapter-content-local-api.md](./chapter-content-local-api.md).
 
-V1.65 also completes the preset-management Local API CRUD schema target by adding
+V1.65 also completes the preset-management Daemon API CRUD schema target by adding
 schemas for get/update/delete response surfaces under `local-api/preset-management/`
 (for example `get-preset-response`, `update-preset-request`,
 `update-preset-response`, and a delete/204 response convention if materialized).

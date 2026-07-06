@@ -1,10 +1,10 @@
-# Chapter Content Local API
+# Chapter Content Daemon API
 
 | Attribute | Value |
 | --- | --- |
 | **Status** | Draft — V1.65 Prepare contract for P0 implementation |
 | **Document class** | Draft overlay |
-| **Scope** | Chapter list/detail, outline read/write, structure PATCH, and body read-only Local API contracts under `/v1/local/works/{work_id}/chapters/*` |
+| **Scope** | Chapter list/detail, outline read/write, structure PATCH, and body read-only Daemon API contracts under `/v1/local/works/{work_id}/chapters/*` |
 | **Coordinates with** | [local-api-surface-conventions.md](./local-api-surface-conventions.md), [daemon-runtime.md](./daemon-runtime.md), [schemas-directory-layout.md](./schemas-directory-layout.md), [web-ui.md](./web-ui.md), `apps/web/DESIGN.md` |
 | **Implementation owner** | V1.65 P0 backend implementer; P2 Web UI consumes only via `NexusClient` |
 
@@ -18,7 +18,7 @@ The surface is intentionally split:
 
 - **Structure and outline are writable** in V1.65.
 - **Body markdown is read-only** — the AI owns prose writing via orchestration through the host-tool path; there is **no manual body editor** (the body-editor direction was rejected 2026-06-26 — Nexus is an AI-autonomous executor; see [canvas-strategy-surface.md](canvas-strategy-surface.md)). Any future human body interaction is a V1.68 canvas concern (structured/node-granular, no-raw-file-editing), not a per-chapter manual write route.
-- All routes stay under the Local API and are consumed through the frontend `NexusClient` interface; no browser-only filesystem assumptions are part of the contract.
+- All routes stay under the Daemon API and are consumed through the frontend `NexusClient` interface; no browser-only filesystem assumptions are part of the contract.
 
 ## 2. Existing implementation facts this contract builds on
 
@@ -30,7 +30,7 @@ The surface is intentionally split:
 
 ## 3. Endpoint summary
 
-All endpoints use the V1.64 Local API error convention: non-2xx responses are emitted as the daemon error wire envelope with `error` shaped by `schemas/local-api/common/error-response.schema.json`.
+All endpoints use the V1.64 Daemon API error convention: non-2xx responses are emitted as the daemon error wire envelope with `error` shaped by `schemas/local-api/common/error-response.schema.json`.
 
 | Method | Path | Purpose | Mutates file | Mutates DB |
 | --- | --- | --- | --- | --- |

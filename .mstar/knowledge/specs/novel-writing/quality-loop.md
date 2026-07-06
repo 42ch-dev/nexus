@@ -78,7 +78,7 @@ wont_fix → (terminal)
 duplicate → (terminal)
 ```
 
-Invalid transitions return `422` with stable error code on Local API (see §2.7 error classification).
+Invalid transitions return `422` with stable error code on Daemon API (see §2.7 error classification).
 
 ### 2.5 Actionable set for prompt consumer
 

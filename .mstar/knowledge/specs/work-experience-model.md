@@ -215,7 +215,7 @@ Shows: intake status, linked schedules, last session state, world binding.
 
 1. Load role with skills for interviewing / clarification.
 2. Multiple ACP turns until agent emits structured brief JSON (tool or delimiter contract).
-3. Persist brief on Work via Local API (P1/P2).
+3. Persist brief on Work via Daemon API (P1/P2).
 4. Validator checks §4 schema before marking intake complete.
 
 ### 7.3 Non-goals
