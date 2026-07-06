@@ -11,6 +11,9 @@ export * from './common/CommonTypes';
 
 // Per-schema modules (stable order: sorted schema paths at load time)
 export * from './common/VersionRef';
+export * from './daemon-api/agent-host/AgentScanEntry';
+export * from './daemon-api/agent-host/ScanRequest';
+export * from './daemon-api/agent-host/ScanResponse';
 export * from './daemon-api/canvas/outline/OutlineConflictError';
 export * from './daemon-api/canvas/outline/OutlinePatchChapterRequest';
 export * from './daemon-api/canvas/outline/OutlinePatchChapterSet';
@@ -209,6 +212,9 @@ export * from './platform/sync/SyncPullResponse';
 // Schema version constants
 export const SCHEMA_VERSIONS: Record<string, number> = {
   VersionRef: 1,
+  AgentScanEntry: 1,
+  ScanRequest: 1,
+  ScanResponse: 1,
   OutlineConflictError: 1,
   OutlinePatchChapterRequest: 1,
   OutlinePatchChapterSet: 1,

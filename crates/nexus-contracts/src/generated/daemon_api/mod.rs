@@ -1,3 +1,4 @@
+pub mod agent_host;
 pub mod canvas;
 pub mod common;
 pub mod compute;
@@ -13,6 +14,7 @@ pub mod schedule;
 pub mod works;
 pub mod workspace;
 
+pub use agent_host::*;
 pub use canvas::*;
 pub use common::*;
 pub use compute::*;
