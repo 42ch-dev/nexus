@@ -149,6 +149,10 @@ mod tests {
     use super::*;
     use std::sync::Mutex;
 
+    /// `mock_app()` returns the same app-data directory across invocations, so
+    /// fallback-file tests must run serially to avoid cross-test file races.
+    static FALLBACK_TEST_LOCK: Mutex<()> = Mutex::new(());
+
     #[derive(Clone, Copy)]
     enum StubResult {
         Ok,
@@ -219,9 +223,17 @@ mod tests {
         tauri::test::mock_app().handle().clone()
     }
 
+    fn cleanup_fallback(app: &tauri::AppHandle<tauri::test::MockRuntime>) {
+        if let Some(path) = fallback_path(app) {
+            let _ = std::fs::remove_file(path);
+        }
+    }
+
     #[test]
     fn get_returns_keychain_value_when_present() {
+        let _guard = FALLBACK_TEST_LOCK.lock().expect("lock");
         let app = mock_app();
+        cleanup_fallback(&app);
         let store = StubStore::new(
             Some(r#"{"endpointUrl":"https://x","apiKey":"k"}"#.to_owned()),
             StubResult::Ok,
@@ -240,7 +252,9 @@ mod tests {
 
     #[test]
     fn get_reads_fallback_file_when_keychain_has_no_entry() {
+        let _guard = FALLBACK_TEST_LOCK.lock().expect("lock");
         let app = mock_app();
+        cleanup_fallback(&app);
         let expected = r#"{"endpointUrl":"https://fallback","apiKey":"fk"}"#;
         write_fallback(&app, expected).expect("write fallback");
         let store = StubStore::new(None, StubResult::Ok, StubResult::Ok, StubResult::Ok);
@@ -253,7 +267,9 @@ mod tests {
 
     #[test]
     fn set_writes_keychain_and_removes_fallback_file() {
+        let _guard = FALLBACK_TEST_LOCK.lock().expect("lock");
         let app = mock_app();
+        cleanup_fallback(&app);
         write_fallback(&app, "stale").expect("write fallback");
         let store = StubStore::new(None, StubResult::Ok, StubResult::Ok, StubResult::Ok);
 
@@ -267,7 +283,9 @@ mod tests {
 
     #[test]
     fn set_falls_back_to_app_data_dir_when_keychain_is_unavailable() {
+        let _guard = FALLBACK_TEST_LOCK.lock().expect("lock");
         let app = mock_app();
+        cleanup_fallback(&app);
         let store = StubStore::new(None, StubResult::Ok, StubResult::Err, StubResult::Ok);
 
         let config = r#"{"endpointUrl":"https://x","apiKey":"k"}"#;
@@ -280,7 +298,9 @@ mod tests {
 
     #[test]
     fn delete_removes_keychain_and_fallback() {
+        let _guard = FALLBACK_TEST_LOCK.lock().expect("lock");
         let app = mock_app();
+        cleanup_fallback(&app);
         write_fallback(&app, "fallback").expect("write fallback");
         let store = StubStore::new(
             Some(r#"{"endpointUrl":"https://x","apiKey":"k"}"#.to_owned()),
