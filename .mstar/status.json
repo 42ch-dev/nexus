@@ -4,7 +4,7 @@
   "plans": [
     {
       "id": "2026-07-06-v1.93-prepare-spec-codification",
-      "status": "Todo",
+      "status": "Done",
       "title": "P-1 — Prepare: daemon-runtime.md §15.1 SAN-vs-bind-host policy codification (R-V192SPEC-001)",
       "file": ".mstar/plans/2026-07-06-v1.93-prepare-spec-codification.md",
       "type": "prepare",
@@ -20,7 +20,10 @@
           "2026-07-06-v1.93-tls-robustness",
           "2026-07-06-v1.93-remote-connection-polish"
         ],
-        "working_branch": "feature/v1.93-prepare"
+        "working_branch": "iteration/v1.93",
+        "done_at": "2026-07-06T13:00:00+0000",
+        "commit": "ed6993e9 (spec edits landed in iteration-start commit during Phase-1 review chain 5.2/5.3; P-1 execute verified all 5 precision gaps closed)",
+        "qc": "skipped — prepare/spec plan; QC consolidated at P-last on integrated HEAD"
       }
     },
     {
@@ -235,9 +238,15 @@
         "decision": "defer",
         "owner": "@architect",
         "target": "V1.93",
-        "tracking_link": ".mstar/plans/reports/2026-07-05-v1.92-closure/qc1.md S-004",
+        "tracking_link": ".mstar/plans/reports/2026-07-05-v1.92-closure/qc1.md §S-004",
         "note": "Helper docstring + partial spec note added during fix-wave; fully codify the SAN generation rule (loopback always + bind host + wildcard skip + rebinding limitation) as normative.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "commit": "ed6993e9",
+          "plan_id": "2026-07-06-v1.93-prepare-spec-codification",
+          "resolved_at": "2026-07-06T13:00:00+0000",
+          "evidence": "§15.1 SAN policy rules 1-6 + cert lifecycle rules 1-5 (incl. always-covered catalogue + §16.2 bidirectional cross-refs) codified normatively during V1.93 Phase-1 review chain (5.2 architect + 5.3 writing-specialist); P-1 execute verified all 5 precision gaps closed."
+        }
       },
       {
         "id": "R-V192HYG-001",
