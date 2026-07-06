@@ -489,7 +489,8 @@ const SCAN_VERSION_TIMEOUT: Duration = Duration::from_secs(2);
 /// For every binary command listed in `AgentEntry.distribution.binary.*.cmd`,
 /// this function checks whether the binary is on PATH and, if so, runs
 /// `<binary> --version` with a 2-second timeout. The result is a stable list
-/// sorted by binary name.
+/// of installed binaries, sorted by binary name. Missing binaries are omitted
+/// from the result so callers can treat presence as `installed: true`.
 ///
 /// # Safety boundary
 ///
@@ -552,7 +553,7 @@ async fn scan_local_installations_impl(
 
     let mut results = Vec::with_capacity(handles.len());
     for handle in handles {
-        if let Ok(installation) = handle.await {
+        if let Ok(Some(installation)) = handle.await {
             results.push(installation);
         }
     }
@@ -566,11 +567,14 @@ async fn scan_local_installations_impl(
 /// binary (the child process PATH is also overridden so the same binary is
 /// executed). This is test-only plumbing; production code passes an empty
 /// slice and relies on the process PATH.
+///
+/// Returns `None` when the binary is not found on PATH, otherwise the
+/// installation record including the best-effort version string.
 async fn probe_local_binary(
     binary: &str,
     timeout: Duration,
     path_dirs: &[PathBuf],
-) -> LocalInstallation {
+) -> Option<LocalInstallation> {
     let path_var = if path_dirs.is_empty() {
         None
     } else {
@@ -582,7 +586,11 @@ async fn probe_local_binary(
         |path| which::which_in(binary, Some(path), std::path::Path::new(".")).is_ok(),
     );
 
-    let version = if found {
+    if !found {
+        return None;
+    }
+
+    let version = {
         let mut cmd = Command::new(binary);
         cmd.arg("--version").kill_on_drop(true);
         if let Some(ref path) = path_var {
@@ -612,14 +620,12 @@ async fn probe_local_binary(
                 None
             }
         }
-    } else {
-        None
     };
 
-    LocalInstallation {
+    Some(LocalInstallation {
         binary: binary.to_string(),
         version,
-    }
+    })
 }
 
 #[cfg(test)]
@@ -1120,15 +1126,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn scan_local_installations_reports_missing_binary() {
+    async fn scan_local_installations_omits_missing_binary() {
         let tmp = tempfile::tempdir().expect("temp dir");
         // Do not add any shim.
         let registry = registry_with_binary("definitely-not-installed-42ch");
         let results =
             scan_local_installations_with_path(&registry, &[tmp.path().to_path_buf()]).await;
-        assert_eq!(results.len(), 1);
-        assert_eq!(results[0].binary, "definitely-not-installed-42ch");
-        assert!(!results[0].version.is_some());
+        assert!(results.is_empty());
     }
 
     #[tokio::test]

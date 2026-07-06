@@ -53,6 +53,12 @@ describe('SetupGate', () => {
     expect(screen.getByTestId('main-shell')).toBeInTheDocument();
   });
 
+  it('browser build does not flash the daemon splash', () => {
+    renderGate();
+    expect(screen.queryByText('Starting daemon…')).not.toBeInTheDocument();
+    expect(screen.getByTestId('main-shell')).toBeInTheDocument();
+  });
+
   it('redirects to /setup when setup has not been completed', async () => {
     renderGate({
       setupCompleted: false,

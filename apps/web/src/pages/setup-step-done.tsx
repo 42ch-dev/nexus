@@ -4,9 +4,10 @@ import { Button } from '@/components/ui/button';
 
 interface SetupStepDoneProps {
   onFinish: () => void;
+  isFinishing?: boolean;
 }
 
-export function SetupStepDone({ onFinish }: SetupStepDoneProps) {
+export function SetupStepDone({ onFinish, isFinishing }: SetupStepDoneProps) {
   return (
     <div className="flex flex-col items-center gap-6 text-center">
       <CheckCircle className="h-12 w-12 text-green-800" aria-hidden />
@@ -16,7 +17,9 @@ export function SetupStepDone({ onFinish }: SetupStepDoneProps) {
           Nexus is set up and the daemon is running. You can change these settings later from the app menu.
         </p>
       </div>
-      <Button variant="primary" onClick={onFinish}>Open Nexus</Button>
+      <Button variant="primary" onClick={onFinish} disabled={isFinishing}>
+        {isFinishing ? 'Finishing…' : 'Open Nexus'}
+      </Button>
     </div>
   );
 }

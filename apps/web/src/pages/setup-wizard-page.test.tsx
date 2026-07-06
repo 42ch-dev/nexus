@@ -125,4 +125,53 @@ describe('SetupWizardPage', () => {
     await waitFor(() => expect(setAgentProfile).toHaveBeenCalledWith('codex', 'codex'));
     await waitFor(() => expect(setSetupCompleted).toHaveBeenCalledWith(true));
   });
+
+  it('shows a toast and stays on the wizard when saving the profile fails', async () => {
+    const user = userEvent.setup();
+    const setAgentProfile = vi.fn(() => Promise.reject(new Error('permission denied')));
+    const setSetupCompleted = vi.fn(() => Promise.resolve());
+
+    useHandlers(
+      http.get('/v1/daemon/runtime/health', () => HttpResponse.json({ status: 'ok', version: 'test' })),
+      http.post('/v1/daemon/agent-host/scan', () => HttpResponse.json({
+          agents: [
+            {
+              name: 'codex',
+              registry_agent_id: 'openai/codex',
+              launch_command: 'codex',
+              installed: true,
+              version: '1.0.0',
+            },
+          ],
+        })),
+    );
+
+    renderInApp(
+      <>
+        <LocationDisplay />
+        <SetupWizardPage />
+      </>,
+      {
+        client: makeClient(),
+        desktop: makeDesktop({ setAgentProfile, setSetupCompleted }),
+        initialRouterEntries: ['/setup'],
+      },
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await waitFor(() => expect(screen.getByText('Daemon is running.')).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() => expect(screen.getByText('codex')).toBeInTheDocument());
+    await user.click(screen.getByText('codex'));
+    await user.click(screen.getAllByRole('button', { name: 'Continue' })[0]);
+
+    await waitFor(() => expect(screen.getByRole('heading', { name: 'You are ready' })).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Open Nexus' }));
+
+    await waitFor(() => expect(screen.getByText('Could not finish setup')).toBeInTheDocument());
+    expect(screen.getByText('permission denied')).toBeInTheDocument();
+    expect(setSetupCompleted).not.toHaveBeenCalled();
+    expect(screen.getByTestId('location')).toHaveTextContent('/setup');
+  });
 });

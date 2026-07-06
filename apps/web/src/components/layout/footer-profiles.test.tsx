@@ -204,4 +204,28 @@ describe('FooterProfiles', () => {
     await user.keyboard('{End}');
     expect(add).toHaveFocus();
   });
+
+  it('moves focus out of the toolbar on Escape', async () => {
+    const user = userEvent.setup();
+    useHandlers(
+      http.get('/v1/daemon/creators', () =>
+        HttpResponse.json({
+          items: [
+            { creator_id: 'creator-a', display_name: 'Alice' },
+            { creator_id: 'creator-b', display_name: 'Bob' },
+          ],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+    );
+
+    renderFooter();
+
+    const alice = await screen.findByTitle('Alice');
+    alice.focus();
+    expect(alice).toHaveFocus();
+
+    await user.keyboard('{Escape}');
+    expect(alice).not.toHaveFocus();
+  });
 });

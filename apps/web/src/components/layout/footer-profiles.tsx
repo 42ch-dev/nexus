@@ -19,8 +19,7 @@ import type { CreatorInfo } from '@42ch/nexus-contracts';
  * clicking the lone avatar is a no-op.
  *
  * Keyboard contract (web-ui.md §29.5): ArrowLeft/ArrowRight move focus between
- * avatars; Home/End jump to first/last. Only the focused button is in the Tab
- * sequence (roving tabindex); the toolbar container keeps focus once entered.
+ * avatars; Home/End jump to first/last; Escape moves focus out of the toolbar.
  */
 export function FooterProfiles() {
   const creators = useCreators();
@@ -60,6 +59,10 @@ export function FooterProfiles() {
       case 'End':
         event.preventDefault();
         focusAt(total - 1);
+        break;
+      case 'Escape':
+        event.preventDefault();
+        itemRefs.current[focusIndex]?.blur();
         break;
       default:
         break;

@@ -25,7 +25,7 @@ export function SetupGate({ children }: SetupGateProps) {
   const { completed, isLoading } = useSetupCompleted();
   const desktop = useDesktopCapabilities();
   const client = useNexusClient();
-  const [daemonReady, setDaemonReady] = useState(false);
+  const [daemonReady, setDaemonReady] = useState(() => !desktop);
   const [error, setError] = useState<string | null>(null);
 
   // Skip the splash entirely in browser builds; desktop builds wait for the
