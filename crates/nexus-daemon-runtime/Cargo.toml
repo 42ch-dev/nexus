@@ -63,6 +63,8 @@ axum-server = { version = "0.7", features = ["tls-rustls"] }
 rustls = { version = "0.23", features = ["aws-lc-rs"] }
 rcgen = "0.13"
 rustls-pemfile = "2"
+# V1.92 P0: parse persisted certificate SANs to detect bind-host mismatch.
+x509-parser = "0.17"
 
 [dev-dependencies]
 axum-test = "15"

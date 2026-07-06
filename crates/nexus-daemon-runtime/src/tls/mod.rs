@@ -43,13 +43,11 @@ pub async fn load_or_generate_tls_config(
     let cert_path = nexus_home_layout::tls_cert_path(home);
     let key_path = nexus_home_layout::tls_key_path(home);
 
-    if let Some(existing) = try_load_existing(&cert_path, &key_path).await {
-        let config = axum_server::tls_rustls::RustlsConfig::from_pem_file(&cert_path, &key_path)
-            .await
-            .context("failed to create RustlsConfig from persisted PEM")?;
+    if let Some((config, existing)) = try_load_existing(&cert_path, &key_path, bind_host).await {
         info!(
             cert_path = %cert_path.display(),
             fingerprint = %existing.fingerprint,
+            bind_host = %bind_host,
             "Loaded existing TLS certificate"
         );
         return Ok((config, existing));
@@ -60,9 +58,16 @@ pub async fn load_or_generate_tls_config(
 
 /// Attempt to reuse an existing certificate/key pair.
 ///
-/// Returns `None` if files are missing or cannot be parsed, signalling that a
-/// new pair should be generated.
-async fn try_load_existing(cert_path: &Path, key_path: &Path) -> Option<CertFingerprintResponse> {
+/// Returns `None` if files are missing, cannot be parsed, or do not cover the
+/// current `bind_host` as a SAN, signalling that a new pair should be generated.
+async fn try_load_existing(
+    cert_path: &Path,
+    key_path: &Path,
+    bind_host: &str,
+) -> Option<(
+    axum_server::tls_rustls::RustlsConfig,
+    CertFingerprintResponse,
+)> {
     let cert_bytes = fs::read(cert_path).await.ok()?;
     let key_bytes = fs::read(key_path).await.ok()?;
 
@@ -77,18 +82,30 @@ async fn try_load_existing(cert_path: &Path, key_path: &Path) -> Option<CertFing
     }
 
     // Verify the files form a usable TLS config before claiming success.
-    axum_server::tls_rustls::RustlsConfig::from_pem(cert_bytes.clone(), key_bytes.clone())
+    let config = axum_server::tls_rustls::RustlsConfig::from_pem(cert_bytes, key_bytes)
         .await
         .ok()?;
+
+    if !cert_covers_bind_host(&certs[0], bind_host) {
+        info!(
+            %bind_host,
+            cert_path = %cert_path.display(),
+            "Existing TLS certificate SAN does not cover current bind host; regenerating certificate"
+        );
+        return None;
+    }
 
     let fingerprint = fingerprint_from_der(&certs[0]);
     let created_at = cert_metadata_created_at(cert_path).await;
 
-    Some(CertFingerprintResponse {
-        fingerprint,
-        algorithm: "sha256".to_string(),
-        created_at,
-    })
+    Some((
+        config,
+        CertFingerprintResponse {
+            fingerprint,
+            algorithm: "sha256".to_string(),
+            created_at,
+        },
+    ))
 }
 
 /// Generate a fresh Ed25519 self-signed certificate, persist it, and return
@@ -203,6 +220,70 @@ fn build_subject_alt_names(bind_host: &str) -> Vec<rcgen::SanType> {
     sans
 }
 
+/// Check whether a persisted certificate's SAN list covers `bind_host`.
+///
+/// Loopback hosts and wildcard bind addresses are always considered covered
+/// (loopback SANs are always present; wildcards are intentionally not valid
+/// server names and are skipped at generation time).
+fn cert_covers_bind_host(cert_der: &[u8], bind_host: &str) -> bool {
+    use x509_parser::extensions::GeneralName;
+
+    let trimmed = bind_host.trim();
+    if trimmed.is_empty()
+        || trimmed.eq_ignore_ascii_case("localhost")
+        || trimmed == "0.0.0.0"
+        || trimmed == "::"
+    {
+        return true;
+    }
+    if let Ok(ip) = trimmed.parse::<std::net::IpAddr>() {
+        if ip.is_loopback() {
+            return true;
+        }
+    }
+
+    let Ok((_, cert)) = x509_parser::parse_x509_certificate(cert_der) else {
+        return false;
+    };
+
+    let sans = match cert.subject_alternative_name() {
+        Ok(Some(ext)) => &ext.value.general_names,
+        _ => return false,
+    };
+
+    let Ok(ip) = trimmed.parse::<std::net::IpAddr>() else {
+        return sans.iter().any(|gn| match gn {
+            GeneralName::DNSName(name) => name.eq_ignore_ascii_case(trimmed),
+            _ => false,
+        });
+    };
+
+    sans.iter().any(|gn| match gn {
+        GeneralName::IPAddress(der_bytes) => {
+            let der_bytes: &[u8] = der_bytes;
+            let parsed: Option<std::net::IpAddr> = match der_bytes.len() {
+                4 => {
+                    let arr: [u8; 4] = match der_bytes.try_into() {
+                        Ok(a) => a,
+                        Err(_) => return false,
+                    };
+                    Some(std::net::IpAddr::V4(std::net::Ipv4Addr::from(arr)))
+                }
+                16 => {
+                    let arr: [u8; 16] = match der_bytes.try_into() {
+                        Ok(a) => a,
+                        Err(_) => return false,
+                    };
+                    Some(std::net::IpAddr::V6(std::net::Ipv6Addr::from(arr)))
+                }
+                _ => None,
+            };
+            parsed == Some(ip)
+        }
+        _ => false,
+    })
+}
+
 /// Write `contents` to `path` with owner-only permissions (`0o600`).
 async fn write_private_file(path: &Path, contents: &[u8]) -> anyhow::Result<()> {
     fs::write(path, contents).await?;
@@ -267,6 +348,37 @@ mod tests {
             .await
             .expect("second load");
         assert_eq!(fp1.fingerprint, fp2.fingerprint);
+    }
+
+    #[tokio::test]
+    async fn rebind_to_different_host_regenerates_cert() {
+        ensure_crypto_provider();
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let home = tmp.path();
+
+        let (_config_a, fp_a) = load_or_generate_tls_config(home, "192.168.1.10")
+            .await
+            .expect("generate host A");
+        assert!(fp_a.fingerprint.starts_with("SHA256:"));
+
+        // Loading with a different bind host must regenerate the certificate
+        // so that its SAN covers the current host.
+        let (_config_b, fp_b) = load_or_generate_tls_config(home, "192.168.1.11")
+            .await
+            .expect("regenerate host B");
+        assert!(fp_b.fingerprint.starts_with("SHA256:"));
+        assert_ne!(fp_a.fingerprint, fp_b.fingerprint);
+
+        let cert_path = nexus_home_layout::tls_cert_path(home);
+        let cert_bytes = fs::read(&cert_path).await.expect("read cert");
+        let certs: Vec<Vec<u8>> = rustls_pemfile::certs(&mut cert_bytes.as_slice())
+            .collect::<Result<Vec<_>, _>>()
+            .expect("parse cert")
+            .into_iter()
+            .map(|cert| cert.to_vec())
+            .collect();
+        assert!(cert_covers_bind_host(&certs[0], "192.168.1.11"));
+        assert!(!cert_covers_bind_host(&certs[0], "192.168.1.10"));
     }
 
     #[test]
