@@ -32,12 +32,14 @@ fi
 mkdir -p "${DEST}"
 
 export SQLX_OFFLINE=true
+# Honor repo-root .envrc (CARGO_TARGET_DIR) when copying sidecar artifacts.
+CARGO_TARGET="${CARGO_TARGET_DIR:-${REPO_ROOT}/target}"
 
 for target in "${TARGETS[@]}"; do
   echo "==> Building nexus42 for ${target}..."
   rustup target add "${target}" 2>/dev/null || true
   cargo build --release -p nexus42 --target "${target}"
-  cp "${REPO_ROOT}/target/${target}/release/nexus42" "${DEST}/nexus42-${target}"
+  cp "${CARGO_TARGET}/${target}/release/nexus42" "${DEST}/nexus42-${target}"
   chmod +x "${DEST}/nexus42-${target}"
   echo "    -> ${DEST}/nexus42-${target}"
 done
