@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { AlertCircle, Fingerprint, Info, Shield, Wifi } from 'lucide-react';
+import { AlertCircle, CheckCircle, Fingerprint, Info, Shield, Wifi } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -54,6 +54,12 @@ export function ConnectDaemonPage() {
   const hasSavedConfig = Boolean(savedConfig);
   const savedEndpointMatches = savedConfig?.endpointUrl === normalizedUrl;
   const savedFingerprint = savedConfig?.pinnedFingerprint;
+  const reconnectWithMatch =
+    hasSavedConfig &&
+    savedEndpointMatches &&
+    savedFingerprint !== undefined &&
+    fpState.status === 'success' &&
+    savedFingerprint === fpState.response.fingerprint;
 
   const isLoopbackOnly =
     fpState.status === 'success' && fpState.response.fingerprint === '';
@@ -142,6 +148,17 @@ export function ConnectDaemonPage() {
             </p>
           </div>
         </div>
+        {reconnectWithMatch && (
+          <div
+            className="rounded-card border border-blue-700/20 bg-blue-700/10 p-4 text-gray-900"
+            data-testid="fingerprint-match-hint"
+          >
+            <div className="flex items-start gap-3">
+              <CheckCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-blue-700" aria-hidden />
+              <p className="text-copy-14">Fingerprint matches the trusted daemon.</p>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -199,7 +216,6 @@ export function ConnectDaemonPage() {
         </Button>
       );
     }
-    const isReconnect = hasSavedConfig && savedEndpointMatches && savedFingerprint === fpState.response.fingerprint;
     return (
       <Button
         type="button"
@@ -208,7 +224,7 @@ export function ConnectDaemonPage() {
         onClick={() => void activateConfig(fpState.response.fingerprint)}
         data-testid="trust-connect-button"
       >
-        {isReconnect ? 'Reconnect with these settings' : 'Trust this certificate and connect'}
+        {reconnectWithMatch ? 'Reconnect with these settings' : 'Trust this certificate and connect'}
       </Button>
     );
   }

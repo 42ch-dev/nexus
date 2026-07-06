@@ -304,7 +304,7 @@ describe('BrowserClient remote connection model (V1.92 P1)', () => {
     await expect(client.listWorks()).rejects.toMatchObject({
       name: 'NexusClientError',
       code: 'transport_unreachable',
-      message: 'Cannot reach the daemon at this address. Check that the URL and port are correct and that the daemon is running.',
+      message: 'Cannot reach the daemon at this address. This usually means the URL or port is wrong, the daemon is not running, or the browser blocked a self-signed certificate. For remote daemons using self-signed certificates, use the Nexus desktop app — it can trust the certificate and store it in the OS keychain.',
     });
   });
 
