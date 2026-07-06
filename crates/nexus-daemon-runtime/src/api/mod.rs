@@ -44,6 +44,10 @@ fn agent_host_routes() -> Router<WorkspaceState> {
             get(handlers::agent_host::list_providers),
         )
         .route(
+            "/v1/daemon/agent-host/scan",
+            post(handlers::agent_host::scan),
+        )
+        .route(
             "/v1/daemon/agent-host/sessions",
             post(handlers::agent_host::create_session).get(handlers::agent_host::list_sessions),
         )

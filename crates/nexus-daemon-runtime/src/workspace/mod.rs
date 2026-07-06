@@ -150,6 +150,19 @@ impl WorkspaceState {
         let cli_snapshot = crate::config::CliConfigSnapshot::load(&nexus_home)?;
         let runtime_mode = cli_snapshot.runtime_mode.unwrap_or(RuntimeMode::LocalOnly);
 
+        // Apply the same default workspace root as the CLI and desktop shell.
+        let workspace_path = cli_snapshot
+            .workspace_path
+            .clone()
+            .unwrap_or_else(crate::config::resolve_default_workspace_path);
+        if let Err(e) = std::fs::create_dir_all(&workspace_path) {
+            tracing::warn!(
+                path = %workspace_path.display(),
+                error = %e,
+                "failed to create default workspace root"
+            );
+        }
+
         let db_path = crate::config::resolve_state_db_path(&user_home, &nexus_home)?;
 
         if let Some(parent) = db_path.parent() {
@@ -171,7 +184,9 @@ impl WorkspaceState {
             db_path,
             started_at: std::time::Instant::now(),
             started_at_wall: chrono::Utc::now(),
-            workspace_path: Arc::new(std::sync::Mutex::new(None)),
+            workspace_path: Arc::new(std::sync::Mutex::new(Some(
+                workspace_path.to_string_lossy().to_string(),
+            ))),
             runtime_mode,
             lifecycle: Arc::new(None),
             engine: Arc::new(None),

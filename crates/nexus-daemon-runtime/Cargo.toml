@@ -20,6 +20,7 @@ nexus-orchestration = { path = "../nexus-orchestration" }
 # into `narrative.compute` via `CapabilityRegistry::with_runtime_deps_and_wasm`.
 nexus-wasm-host = { path = "../nexus-wasm-host" }
 nexus-agent-host = { path = "../nexus-agent-host" }
+nexus-acp-host = { path = "../nexus-acp-host" }
 nexus-creator-memory = { path = "../nexus-creator-memory" }
 nexus-narrative = { path = "../nexus-narrative" }
 nexus-kb = { path = "../nexus-kb" }
