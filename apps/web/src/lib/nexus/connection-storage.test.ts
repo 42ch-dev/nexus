@@ -66,10 +66,24 @@ describe('WebConnectionStorage', () => {
     expect(await storage.load()).toBeNull();
   });
 
-  it('returns null for incomplete configs', async () => {
-    window.localStorage.setItem('nexus-connection-config-v1', JSON.stringify({ endpointUrl: 'https://x' }));
+  it('clears a corrupt localStorage entry and returns null', async () => {
+    window.localStorage.setItem(
+      'nexus-connection-config-v1',
+      JSON.stringify({ endpointUrl: 123, apiKey: null, pinnedFingerprint: false }),
+    );
     const storage = createConnectionStorage();
     expect(await storage.load()).toBeNull();
+    expect(window.localStorage.getItem('nexus-connection-config-v1')).toBeNull();
+  });
+
+  it('clears an entry with an invalid pinned fingerprint', async () => {
+    window.localStorage.setItem(
+      'nexus-connection-config-v1',
+      JSON.stringify({ endpointUrl: 'https://x', apiKey: 'k', pinnedFingerprint: 123 }),
+    );
+    const storage = createConnectionStorage();
+    expect(await storage.load()).toBeNull();
+    expect(window.localStorage.getItem('nexus-connection-config-v1')).toBeNull();
   });
 });
 

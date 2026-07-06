@@ -50,18 +50,31 @@ async function tauriInvoke<T>(command: string, args?: Record<string, unknown>): 
   return tauri.core.invoke(command, args) as Promise<T>;
 }
 
-/** Web backend: localStorage. */
+/**
+ * Web backend: persists the connection config in `localStorage`.
+ *
+ * Trust-boundary note (daemon-runtime.md §16.5):
+ * - `localStorage` is readable by any script on the SPA origin, so an XSS
+ *   attacker could read the stored `apiKey`.
+ * - This is an accepted trade-off for the local-first web build: the API key
+ *   is user-entered and the trust boundary is the SPA itself.
+ * - The desktop build stores this value in the OS keychain / credential
+ *   manager instead; see `apps/desktop/src-tauri/src/connection_config.rs`.
+ */
 class WebConnectionStorage implements ConnectionStorage {
   async load(): Promise<ConnectionConfig | null> {
     if (typeof window === 'undefined') return null;
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     try {
-      const parsed = JSON.parse(raw) as ConnectionConfig;
-      // Minimal validation: must have endpoint + key.
-      if (!parsed.endpointUrl || !parsed.apiKey) return null;
+      const parsed = JSON.parse(raw) as unknown;
+      if (!isValidConnectionConfig(parsed)) {
+        await this.clear();
+        return null;
+      }
       return parsed;
     } catch {
+      await this.clear();
       return null;
     }
   }
@@ -83,10 +96,14 @@ class DesktopConnectionStorage implements ConnectionStorage {
     const raw = await tauriInvoke<string | null>('get_connection_config');
     if (!raw) return null;
     try {
-      const parsed = JSON.parse(raw) as ConnectionConfig;
-      if (!parsed.endpointUrl || !parsed.apiKey) return null;
+      const parsed = JSON.parse(raw) as unknown;
+      if (!isValidConnectionConfig(parsed)) {
+        await this.clear();
+        return null;
+      }
       return parsed;
     } catch {
+      await this.clear();
       return null;
     }
   }
@@ -98,6 +115,18 @@ class DesktopConnectionStorage implements ConnectionStorage {
   async clear(): Promise<void> {
     await tauriInvoke('delete_connection_config');
   }
+}
+
+/** Validate the raw parsed JSON has the minimal fields we require. */
+function isValidConnectionConfig(value: unknown): value is ConnectionConfig {
+  if (value === null || typeof value !== 'object') return false;
+  const c = value as Record<string, unknown>;
+  if (typeof c.endpointUrl !== 'string' || c.endpointUrl.length === 0) return false;
+  if (typeof c.apiKey !== 'string') return false;
+  if (c.pinnedFingerprint !== undefined && typeof c.pinnedFingerprint !== 'string') return false;
+  if (c.label !== undefined && typeof c.label !== 'string') return false;
+  if (c.active !== undefined && typeof c.active !== 'boolean') return false;
+  return true;
 }
 
 /** Select the appropriate storage backend for the current runtime. */
