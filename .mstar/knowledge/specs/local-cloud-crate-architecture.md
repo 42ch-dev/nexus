@@ -6,7 +6,7 @@
 | --- | --- |
 | **Status** | Active — V1.64 amendment: local Web UI workspace member + embedded asset edge |
 | **Document class** | Master |
-| **Scope** | Stable rules: local vs cloud product lines, crate responsibilities, contracts usage, dependency forbidden edges, current-vs-target wiring, Local API *classes* allowed/forbidden |
+| **Scope** | Stable rules: local vs cloud product lines, crate responsibilities, contracts usage, dependency forbidden edges, current-vs-target wiring, Daemon API *classes* allowed/forbidden |
 | **Scope model SSOT** | [entity-scope-model.md](./entity-scope-model.md) — authoritative for scope hierarchy, crate ownership, and `kb`/`knowledge` naming boundaries |
 | **Delivery compass** | Iteration-scoped milestones, phases, acceptance tests → [v1.21-local-platform-isolation-delivery-compass-v1.md](../../iterations/v1.21-local-platform-isolation-delivery-compass-v1.md) |
 | **Related** | [entity-scope-model.md](./entity-scope-model.md), [local-runtime-boundary.md](./local-runtime-boundary.md), [daemon-runtime.md](./daemon-runtime.md), [cli-spec.md](./cli-spec.md), [schemas-directory-layout.md](./schemas-directory-layout.md), [../schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md) |
@@ -22,7 +22,7 @@
 | Line | Purpose | Integration surface |
 | --- | --- | --- |
 | **Local product** | Orchestration, agent-host, workspace, Creator + Creator memory, World-scoped narrative KB, User-scoped knowledge, narrative graph, Moment context assembly | `nexus42 daemon` → `/v1/local/*` |
-| **Cloud enhancement** | Platform HTTP, bundle sync, registration, optional context Stage-1, User/Pairing persistence | `nexus-cloud-sync` + CLI cloud subcommands — **never** daemon Local API |
+| **Cloud enhancement** | Platform HTTP, bundle sync, registration, optional context Stage-1, User/Pairing persistence | `nexus-cloud-sync` + CLI cloud subcommands — **never** daemon Daemon API |
 
 **Hard isolation:** `nexus-daemon-runtime` MUST NOT depend on `nexus-cloud-sync` and MUST NOT register HTTP handlers that perform platform HTTP or proxy sync.
 
@@ -78,7 +78,7 @@ These crates are **not** split by the local/cloud program; they sit **under** al
 | **`nexus-cloud-domain`** | `User`, `Pairing` | Platform-bridge domain logic for User/Pairing invariants and mappings from contract types. No HTTP transport. | No HTTP; dependency of **`nexus-cloud-sync`** |
 | **`nexus-moment-context-assembly`** | `Moment` | Per-moment, pre-session context aggregation. **`assemble_moment` is the single local CLI SSOT** (V1.28+): aggregates Creator memory, narrative state, World KB assets, and User knowledge via `nexus42 platform context assemble-moment`. Stage0 / degradation / optional two-stage behavior are flags on that command (`assemble-local` **removed** pre-release). User knowledge reads from **SQLite** (V1.27+). Optional `cloud-stage` may merge future platform context; direct platform cloud assembly remains deferred. | Only with `cloud-stage` |
 | **`nexus-cloud-sync`** | Cloud transport for User/Pairing and sync bundles | Platform HTTP and sync transport. It MUST use `nexus-cloud-domain` for User/Pairing invariants. | N/A |
-| **`nexus-daemon-runtime`** | Runtime host, not entity owner | Local API, lifecycle, DB handles, orchestration, and agent-host. It MUST NOT own cloud transport or platform User/Pairing invariants. | **Forbidden** |
+| **`nexus-daemon-runtime`** | Runtime host, not entity owner | Daemon API, lifecycle, DB handles, orchestration, and agent-host. It MUST NOT own cloud transport or platform User/Pairing invariants. | **Forbidden** |
 | **`nexus-orchestration`** | Execution sessions/schedules, not hierarchy owner | Presets, schedules, workers, and capability registry. Carries `creator_id`/workspace/world references as execution context; does not redefine entity ownership. | No cloud-sync (sync capabilities stubbed locally) |
 | **`nexus42`** | CLI surface | User-facing command routing and wording. It invokes owning crates; it MUST NOT become a second domain implementation for scope rules. | CLI may use cloud-sync for cloud commands |
 
@@ -96,7 +96,7 @@ apps/web (Vite build → dist/)
       └─ nexus42 binary / nexus-daemon-runtime router static serving
 ```
 
-`rust-embed` is a build-time/static-asset edge only. It does not make the Web UI an owning Rust crate and does not permit the frontend to bypass the daemon Local API. `tower-http::ServeDir`-style serving may expose the unauthenticated SPA shell, but data remains behind `/v1/local/*` auth boundaries (see [daemon-runtime.md](./daemon-runtime.md) §4.4).
+`rust-embed` is a build-time/static-asset edge only. It does not make the Web UI an owning Rust crate and does not permit the frontend to bypass the daemon Daemon API. `tower-http::ServeDir`-style serving may expose the unauthenticated SPA shell, but data remains behind `/v1/local/*` auth boundaries (see [daemon-runtime.md](./daemon-runtime.md) §4.4).
 
 ### 3.3 Why `nexus-cloud-domain` (not `nexus-domain`)
 
@@ -208,7 +208,7 @@ nexus-cloud-sync ──► nexus-cloud-domain, nexus-contracts, nexus-home-layou
 
 **Current daemon/cloud boundary:** `nexus-daemon-runtime` has no `nexus-cloud-sync` or `nexus-cloud-domain` edge. This matches the forbidden-edge policy.
 
-**Current Web/cloud boundary (V1.64):** `apps/web` is local-only. It consumes generated Local API contracts and daemon loopback routes; it must not share code or runtime dependencies with private `nexus-platform` cloud surfaces.
+**Current Web/cloud boundary (V1.64):** `apps/web` is local-only. It consumes generated Daemon API contracts and daemon loopback routes; it must not share code or runtime dependencies with private `nexus-platform` cloud surfaces.
 
 ---
 
@@ -271,11 +271,11 @@ nexus-moment-context-assembly (default four-domain library target)
 
 ---
 
-## 6. Daemon Local API (principles)
+## 6. Daemon Daemon API (principles)
 
 Authoritative route list for a given release lives in **`crates/nexus-daemon-runtime/src/api/mod.rs`** and the active **iteration compass**.
 
-**Always allowed (local product):** runtime health/status, workspace, local creator listing/active/logout, local references, work-scope KB file-index APIs, memory pending-review, presets, orchestration, and agent-host (+ internal tool execution). Future World KB / User knowledge / Moment context surfaces may be local-only, but must be explicitly registered and documented; after KCA-002 B2, daemon context assembly is not an active Local API route.
+**Always allowed (local product):** runtime health/status, workspace, local creator listing/active/logout, local references, work-scope KB file-index APIs, memory pending-review, presets, orchestration, and agent-host (+ internal tool execution). Future World KB / User knowledge / Moment context surfaces may be local-only, but must be explicitly registered and documented; after KCA-002 B2, daemon context assembly is not an active Daemon API route.
 
 **Always forbidden on daemon:** `/sync/*`, `/creators/registrations*`, platform world/explore proxies, public `/acp/*` (use agent-host namespace), `nexus-cloud-sync`, `nexus-cloud-domain`, and platform HTTP paths.
 
@@ -297,7 +297,7 @@ These are runtime/product gaps after Cargo alignment, not missing dependency edg
 
 | Concern | Owner |
 | --- | --- |
-| Daemon control | Local API |
+| Daemon control | Daemon API |
 | Creator register/verify | `nexus-cloud-sync` (+ persist via Creator local state and `nexus-cloud-domain` target invariants) |
 | Bundle sync | `nexus-cloud-sync` (`legacy-sync` until redesigned) |
 | `local_only` context | `nexus-moment-context-assembly` Stage-0 |

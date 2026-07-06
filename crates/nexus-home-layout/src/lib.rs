@@ -404,7 +404,7 @@ pub fn acp_run_trace_file(home: &Path, run_id: &str) -> PathBuf {
 /// # Future expansion (DF-31 → DF-42)
 ///
 /// The current skeleton only validates path-safety. Future iterations
-/// (DF-42 full Local API redesign — pre-V1.90 historical reference) may add:
+/// (DF-42 full Daemon API redesign — pre-V1.90 historical reference) may add:
 /// - Workspace root boundary enforcement (canonicalize + prefix check)
 /// - Wildcard / glob pattern support
 /// - Symlink resolution

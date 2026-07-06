@@ -2,7 +2,7 @@
 
 **Status**: Normative — V1.77 Phase 2b (promoted from `novel-writing/findings-lifecycle.md` stub)  
 **Document class**: Master  
-**Scope**: Cross-profile findings lifecycle — 6-state status machine, `target_executor` routing semantics, and the UI remediation surface consuming the Local API PATCH route. Quality-loop produce side (review verdicts, finding creation, orchestration hooks) is owned by [novel-writing/quality-loop.md](novel-writing/quality-loop.md) §2 and is not duplicated here.  
+**Scope**: Cross-profile findings lifecycle — 6-state status machine, `target_executor` routing semantics, and the UI remediation surface consuming the Daemon API PATCH route. Quality-loop produce side (review verdicts, finding creation, orchestration hooks) is owned by [novel-writing/quality-loop.md](novel-writing/quality-loop.md) §2 and is not duplicated here.  
 **Coordinates with**:
 - [novel-writing/quality-loop.md](novel-writing/quality-loop.md) — producer side (review verdicts, finding creation, orchestration hooks, retention/prune)
 - [local-api-surface-conventions.md](local-api-surface-conventions.md) — findings PATCH surface conventions

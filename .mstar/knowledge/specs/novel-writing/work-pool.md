@@ -102,7 +102,7 @@ On `creator works pool inspiration add --title "..."`:
 
 ### 4.1 `set_pool_active` creator binding (shipped `156e669d`)
 
-Local API `set_pool_active` (and CLI `creator works use` / `pool promote --set-default`):
+Daemon API `set_pool_active` (and CLI `creator works use` / `pool promote --set-default`):
 
 - Request body **`creator_id` must match** the authenticated/active creator context.
 - Mismatch → **403 Forbidden** (not silent demote on wrong creator).

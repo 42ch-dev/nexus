@@ -15,7 +15,7 @@
 - [web-ui-design-requirements.md](web-ui-design-requirements.md) §6 (desktop shell surface design requirements)
 - [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md) / `host_tool_handlers.rs` (W-002 path-guard reference for `openWith`/`revealInFinder` scope)
 - `apps/web/DESIGN.md` (Desktop Shell Supplement — window/menu/dialog/context-menu/status tokens)
-- [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md) — `wire_contracts_changed: false` (V1.66); desktop-native methods are Tauri IPC, not Local API wire
+- [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md) — `wire_contracts_changed: false` (V1.66); desktop-native methods are Tauri IPC, not Daemon API wire
 
 ---
 

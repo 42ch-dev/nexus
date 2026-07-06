@@ -90,7 +90,7 @@ See [v1.45-creator-run-preset-unification-delivery-compass-v1.md](../../iteratio
 
 **Default if compass silent:** Option A. Option C requires `gitnexus_impact` before rename.
 
-**Related deferral:** DF-42 (Local API KB redesign) — out of V1.35 implement scope.
+**Related deferral:** DF-42 (Daemon API KB redesign) — out of V1.35 implement scope.
 
 ---
 

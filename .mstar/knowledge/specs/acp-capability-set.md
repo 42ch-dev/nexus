@@ -46,7 +46,7 @@ This spec is the logical catalog for `nexus.*` capabilities. Each entry lists th
 ```text
 [User] -> [nexus42 / daemon runtime] --ACP Client--> [Local/Remote ACP Agent]
                |
-               +-> [Nexus Local API / IPC]
+               +-> [Nexus Daemon API / IPC]
                +-> [ACP Registry]
 ```
 
