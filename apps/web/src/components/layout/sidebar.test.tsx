@@ -74,6 +74,22 @@ describe('Sidebar', () => {
     expect(screen.queryByRole('link', { name: /Daemon/i })).not.toBeInTheDocument();
   });
 
+  it('wraps tabs in a tablist and exposes the nav groups as a tabpanel', async () => {
+    useHandlers(
+      http.get('/v1/daemon/creators', () =>
+        HttpResponse.json({
+          items: [{ creator_id: 'creator-a', display_name: 'Alice' }],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+    );
+
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+
+    expect(screen.getByRole('tablist', { name: 'Primary navigation' })).toBeInTheDocument();
+    expect(screen.getByRole('tabpanel')).toHaveAttribute('aria-labelledby', 'creator');
+  });
+
   it('mounts the footer profile switcher', async () => {
     useHandlers(
       http.get('/v1/daemon/creators', () =>

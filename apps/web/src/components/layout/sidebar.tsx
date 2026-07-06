@@ -81,7 +81,11 @@ export function Sidebar() {
         <NexusLogo />
       </div>
 
-      <div className="grid grid-cols-2 gap-1 rounded-card bg-gray-alpha-100 p-1">
+      <div
+        className="grid grid-cols-2 gap-1 rounded-card bg-gray-alpha-100 p-1"
+        role="tablist"
+        aria-label="Primary navigation"
+      >
         <TabButton id="creator" label="Creator" active={activeTab === 'creator'} onClick={setActiveTab} />
         <TabButton
           id="orchestrator"
@@ -93,7 +97,11 @@ export function Sidebar() {
 
       <div className="my-1 h-px bg-gray-alpha-400" role="separator" />
 
-      <ul className="flex flex-1 flex-col gap-4 overflow-auto py-1">
+      <ul
+        className="flex flex-1 flex-col gap-4 overflow-auto py-1"
+        role="tabpanel"
+        aria-labelledby={activeTab}
+      >
         {groups.map((group) => (
           <NavGroup key={group.id} group={group} />
         ))}
@@ -120,6 +128,7 @@ function TabButton({
   return (
     <button
       type="button"
+      id={id}
       role="tab"
       aria-selected={active}
       onClick={() => onClick(id)}
