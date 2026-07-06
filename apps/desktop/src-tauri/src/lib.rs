@@ -32,7 +32,9 @@ mod sidecar;
 fn default_workspace_root() -> PathBuf {
     dirs::document_dir()
         .or_else(|| {
-            eprintln!("nexus-desktop: dirs::document_dir() returned None; falling back to ~/Documents");
+            eprintln!(
+                "nexus-desktop: dirs::document_dir() returned None; falling back to ~/Documents"
+            );
             dirs::home_dir().map(|home| home.join("Documents"))
         })
         .unwrap_or_else(|| {
@@ -122,7 +124,10 @@ fn resolve_workspace_root() -> Option<PathBuf> {
 
     let root = configured.unwrap_or_else(default_workspace_root);
     if let Err(e) = std::fs::create_dir_all(&root) {
-        eprintln!("nexus-desktop: failed to create workspace root {}: {e}", root.display());
+        eprintln!(
+            "nexus-desktop: failed to create workspace root {}: {e}",
+            root.display()
+        );
         // Return the path anyway so the rest of the app can surface the error.
     }
     Some(root)
@@ -269,12 +274,12 @@ fn read_setup_completed_at(path: &Path) -> anyhow::Result<Option<bool>> {
         #[serde(default)]
         setup_completed: Option<bool>,
     }
-    Ok(toml::from_str::<ConfigFile>(&content)?
-        .setup_completed)
+    Ok(toml::from_str::<ConfigFile>(&content)?.setup_completed)
 }
 
 fn write_setup_completed(value: bool) -> anyhow::Result<()> {
-    let path = nexus_config_path().ok_or_else(|| anyhow::anyhow!("cannot determine home directory"))?;
+    let path =
+        nexus_config_path().ok_or_else(|| anyhow::anyhow!("cannot determine home directory"))?;
     write_setup_completed_at(&path, value)
 }
 
@@ -284,10 +289,12 @@ fn write_setup_completed_at(path: &Path, value: bool) -> anyhow::Result<()> {
     }
 
     // Preserve existing keys by round-tripping through a toml edit document.
+    // TOML parse failures are propagated rather than falling back to an empty
+    // document, which would silently wipe persisted configuration on a
+    // partially-written or corrupt config file (greploop #3 P1).
     let mut doc = if path.exists() {
         let text = std::fs::read_to_string(path)?;
-        text.parse::<toml_edit::DocumentMut>()
-            .unwrap_or_else(|_| toml_edit::DocumentMut::new())
+        text.parse::<toml_edit::DocumentMut>()?
     } else {
         toml_edit::DocumentMut::new()
     };
@@ -325,10 +332,13 @@ fn write_agent_profile_at(
         std::fs::create_dir_all(parent)?;
     }
 
+    // Preserve existing keys by round-tripping through a toml edit document.
+    // TOML parse failures are propagated rather than falling back to an empty
+    // document, which would silently wipe persisted configuration on a
+    // partially-written or corrupt config file (greploop #3 P1).
     let mut doc = if path.exists() {
         let text = std::fs::read_to_string(path)?;
-        text.parse::<toml_edit::DocumentMut>()
-            .unwrap_or_else(|_| toml_edit::DocumentMut::new())
+        text.parse::<toml_edit::DocumentMut>()?
     } else {
         toml_edit::DocumentMut::new()
     };
@@ -594,6 +604,28 @@ mod tests {
     }
 
     #[test]
+    fn setup_completed_write_rejects_malformed_toml() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("config.toml");
+        let original = "workspace_path = \"/existing/workspace\"\nmalformed = \"unclosed\n";
+        std::fs::write(&config_path, original).expect("write malformed config");
+
+        let result = write_setup_completed_at(&config_path, true);
+        assert!(result.is_err(), "malformed TOML should be rejected");
+
+        // The corrupt file must NOT be overwritten with a single-key document.
+        let text = std::fs::read_to_string(&config_path).expect("read config");
+        assert!(
+            text.contains("workspace_path = \"/existing/workspace\""),
+            "existing keys must survive a failed write"
+        );
+        assert!(
+            !text.contains("setup_completed"),
+            "setup_completed must not be written on parse failure"
+        );
+    }
+
+    #[test]
     fn default_workspace_root_ends_with_nexus42_default() {
         let path = default_workspace_root();
         let s = path.to_string_lossy();
@@ -637,5 +669,28 @@ mod tests {
         assert!(text.contains("id = \"claude-cli\""));
         assert!(text.contains("protocol = \"native_cli\""));
         assert!(text.contains("command = \"claude\""));
+    }
+
+    #[test]
+    fn agent_profile_write_rejects_malformed_toml() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("agent-host").join("config.toml");
+        std::fs::create_dir_all(config_path.parent().unwrap()).expect("mkdir");
+        let original = "max_sessions = 2\nmalformed = \"unclosed\n";
+        std::fs::write(&config_path, original).expect("write malformed config");
+
+        let result = write_agent_profile_at(&config_path, "claude-cli", Some("claude"));
+        assert!(result.is_err(), "malformed TOML should be rejected");
+
+        // The corrupt file must NOT be overwritten with a single-provider document.
+        let text = std::fs::read_to_string(&config_path).expect("read config");
+        assert!(
+            text.contains("max_sessions = 2"),
+            "existing keys must survive a failed write"
+        );
+        assert!(
+            !text.contains("claude-cli"),
+            "agent profile must not be written on parse failure"
+        );
     }
 }
