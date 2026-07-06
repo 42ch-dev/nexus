@@ -565,7 +565,7 @@ export class BrowserClient implements NexusClient {
       // Network/transport failure (daemon down, CORS, DNS). The toast layer
       // surfaces `message`; `code` distinguishes it from an HTTP error.
       const message = this.baseUrl
-        ? 'Cannot reach the daemon at this address. Check that the URL and port are correct and that the daemon is running.'
+        ? 'Cannot reach the daemon at this address. This usually means the URL or port is wrong, the daemon is not running, or the browser blocked a self-signed certificate. For remote daemons using self-signed certificates, use the Nexus desktop app — it can trust the certificate and store it in the OS keychain.'
         : 'Cannot reach the local daemon. Is `nexus42 daemon start` running?';
       throw new NexusClientError(0, 'transport_unreachable', message, {
         cause: String(cause),
