@@ -846,6 +846,71 @@ mod tests {
     use crate::api::auth_middleware::DaemonApiConfig;
     use axum_test::TestServer;
 
+    /// Serialize agent-scan integration tests that mutate `PATH` so concurrent
+    /// probes do not see each other's shim directories.
+    static SCAN_PATH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Temporarily prepend a directory to `PATH`, restoring the previous value
+    /// on drop.
+    struct PathGuard {
+        previous: Option<String>,
+    }
+
+    impl PathGuard {
+        fn prepend(dir: &std::path::Path) -> Self {
+            let previous = std::env::var("PATH").ok();
+            let mut paths = vec![dir.to_path_buf()];
+            if let Some(ref existing) = previous {
+                paths.extend(std::env::split_paths(existing));
+            }
+            let new_path = std::env::join_paths(paths).expect("valid PATH");
+            std::env::set_var("PATH", new_path);
+            Self { previous }
+        }
+    }
+
+    impl Drop for PathGuard {
+        fn drop(&mut self) {
+            match self.previous {
+                Some(ref p) => std::env::set_var("PATH", p),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+    }
+
+    fn write_shim(dir: &std::path::Path, name: &str, script: &str) -> std::path::PathBuf {
+        let shim = dir.join(name);
+        std::fs::create_dir_all(dir).expect("create bin dir");
+        std::fs::write(&shim, script).expect("write shim");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = std::fs::Permissions::from_mode(0o755);
+            std::fs::set_permissions(&shim, perms).expect("chmod shim");
+        }
+        shim
+    }
+
+    async fn create_scan_test_app_with_installed() -> (TestServer, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let bin_dir = tmp.path().join("bin");
+        write_shim(
+            &bin_dir,
+            "nexus-scan-installed",
+            "#!/bin/sh\necho \"nexus-scan-installed 1.2.3\"\n",
+        );
+
+        let nexus_home = tmp.path().join(".nexus42");
+        write_registry_cache(&nexus_home);
+
+        let db_path = tmp.path().join("state.db");
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        let app = crate::api::create_router(state, DaemonApiConfig::keyless());
+        let server = TestServer::new(app).expect("TestServer should initialize");
+
+        (server, tmp)
+    }
+
     fn write_registry_cache(home: &std::path::Path) {
         let registry_dir = home.join("registry");
         std::fs::create_dir_all(&registry_dir).expect("create registry dir");
@@ -897,6 +962,7 @@ mod tests {
 
     #[tokio::test]
     async fn scan_endpoint_returns_200_with_frozen_shape() {
+        let _lock = SCAN_PATH_LOCK.lock().expect("lock scan tests");
         let (server, _tmp) = create_scan_test_app().await;
         let response = server
             .post("/v1/daemon/agent-host/scan")
@@ -935,8 +1001,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn scan_endpoint_accepts_filter_parameter() {
-        let (server, _tmp) = create_scan_test_app().await;
+    async fn scan_endpoint_filter_installed_keeps_only_installed() {
+        let _lock = SCAN_PATH_LOCK.lock().expect("lock scan tests");
+        let (server, tmp) = create_scan_test_app_with_installed().await;
+        let _path_guard = PathGuard::prepend(tmp.path().join("bin").as_path());
+
         let response = server
             .post("/v1/daemon/agent-host/scan")
             .json(&serde_json::json!({ "filter": "installed" }))
@@ -944,10 +1013,13 @@ mod tests {
         assert_eq!(response.status_code(), axum::http::StatusCode::OK);
 
         let body: ScanResponse = response.json();
-        // The real PATH is used, so we only verify the filter parameter is accepted
-        // and the response shape is valid. Filtering behavior on known installations
-        // is covered by unit tests in nexus-acp-host.
-        assert!(body.agents.iter().all(|a| a.installed));
+        assert_eq!(body.agents.len(), 1);
+        assert_eq!(
+            body.agents[0].registry_agent_id.as_deref(),
+            Some("installed-agent")
+        );
+        assert!(body.agents[0].installed);
+        assert!(body.agents[0].version.is_some());
     }
 
     // ── Agent scan unit tests ───────────────────────────────────────────────

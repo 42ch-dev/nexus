@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { useSetupCompleted } from '@/lib/setup-completed-context';
 import { useDesktopCapabilities } from '@/lib/client-context';
+import { useToast } from '@/lib/use-toast';
 import { SetupStepWelcome } from '@/pages/setup-step-welcome';
 import { SetupStepDaemon } from '@/pages/setup-step-daemon';
 import { SetupStepAgent } from '@/pages/setup-step-agent';
@@ -28,7 +29,9 @@ export function SetupWizardPage() {
   const navigate = useNavigate();
   const { markCompleted } = useSetupCompleted();
   const desktop = useDesktopCapabilities();
+  const { toast } = useToast();
   const [step, setStep] = useState<WizardStep>('welcome');
+  const [isFinishing, setIsFinishing] = useState(false);
   const [state, setState] = useState<WizardState>({
     workspaceRoot: '',
     selectedAgent: null,
@@ -36,14 +39,22 @@ export function SetupWizardPage() {
   });
 
   async function finish() {
-    if (desktop) {
-      const name = state.selectedAgent?.name ?? 'custom';
-      const launchCommand =
-        (state.selectedAgent?.launch_command ?? state.customLaunchCommand.trim()) || undefined;
-      await desktop.setAgentProfile(name, launchCommand);
+    setIsFinishing(true);
+    try {
+      if (desktop) {
+        const name = state.selectedAgent?.name ?? 'custom';
+        const launchCommand =
+          (state.selectedAgent?.launch_command ?? state.customLaunchCommand.trim()) || undefined;
+        await desktop.setAgentProfile(name, launchCommand);
+      }
+      markCompleted();
+      navigate('/works', { replace: true });
+    } catch (err) {
+      const description = err instanceof Error ? err.message : 'Failed to save agent profile.';
+      toast({ variant: 'error', title: 'Could not finish setup', description });
+    } finally {
+      setIsFinishing(false);
     }
-    markCompleted();
-    navigate('/works', { replace: true });
   }
 
   return (
@@ -72,7 +83,9 @@ export function SetupWizardPage() {
               onBack={() => setStep('daemon')}
             />
           )}
-          {step === 'done' && <SetupStepDone onFinish={finish} />}
+          {step === 'done' && (
+            <SetupStepDone onFinish={finish} isFinishing={isFinishing} />
+          )}
         </div>
       </div>
     </div>
