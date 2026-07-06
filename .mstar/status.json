@@ -1,15 +1,103 @@
 {
   "version": 1,
-  "updated_at": "2026-07-05T13:17:59+0000",
-  "plans": [],
+  "updated_at": "2026-07-06T12:00:00+0000",
+  "plans": [
+    {
+      "id": "2026-07-06-v1.93-prepare-spec-codification",
+      "status": "Todo",
+      "title": "P-1 — Prepare: daemon-runtime.md §15.1 SAN-vs-bind-host policy codification (R-V192SPEC-001)",
+      "file": ".mstar/plans/2026-07-06-v1.93-prepare-spec-codification.md",
+      "type": "prepare",
+      "owner": "@architect",
+      "metadata": {
+        "iteration": "V1.93",
+        "iteration_refs": "v1.93-remote-access-polish-delivery-compass-v1.md",
+        "spec_integration_branch": "iteration/v1.93",
+        "merge_target": "iteration/v1.93",
+        "primary_spec": "knowledge/specs/daemon-runtime.md",
+        "blocked_by": [],
+        "blocking": [
+          "2026-07-06-v1.93-tls-robustness",
+          "2026-07-06-v1.93-remote-connection-polish"
+        ],
+        "working_branch": "feature/v1.93-prepare"
+      }
+    },
+    {
+      "id": "2026-07-06-v1.93-tls-robustness",
+      "status": "Todo",
+      "title": "P0 — TLS Robustness: SAN invalidation on re-bind + graceful-shutdown grace cap (R-V192P0-001/002)",
+      "file": ".mstar/plans/2026-07-06-v1.93-tls-robustness.md",
+      "type": "implement",
+      "owner": "@fullstack-dev",
+      "metadata": {
+        "iteration": "V1.93",
+        "iteration_refs": "v1.93-remote-access-polish-delivery-compass-v1.md",
+        "spec_integration_branch": "iteration/v1.93",
+        "merge_target": "iteration/v1.93",
+        "primary_spec": "knowledge/specs/daemon-runtime.md",
+        "blocked_by": [
+          "2026-07-06-v1.93-prepare-spec-codification"
+        ],
+        "blocking": [
+          "2026-07-06-v1.93-closure"
+        ],
+        "working_branch": "feature/v1.93-tls-robustness"
+      }
+    },
+    {
+      "id": "2026-07-06-v1.93-remote-connection-polish",
+      "status": "Todo",
+      "title": "P1 — Remote-Connection Polish + Desktop Tests (R-V192P1-001/002/003 + R-V192UX-001)",
+      "file": ".mstar/plans/2026-07-06-v1.93-remote-connection-polish.md",
+      "type": "implement",
+      "owner": "@frontend-dev",
+      "metadata": {
+        "iteration": "V1.93",
+        "iteration_refs": "v1.93-remote-access-polish-delivery-compass-v1.md",
+        "spec_integration_branch": "iteration/v1.93",
+        "merge_target": "iteration/v1.93",
+        "primary_spec": "knowledge/specs/daemon-runtime.md",
+        "blocked_by": [
+          "2026-07-06-v1.93-prepare-spec-codification"
+        ],
+        "blocking": [
+          "2026-07-06-v1.93-closure"
+        ],
+        "working_branch": "feature/v1.93-remote-connection-polish"
+      }
+    },
+    {
+      "id": "2026-07-06-v1.93-closure",
+      "status": "Todo",
+      "title": "P-last — Closure: naming sweep (R-V192HYG-001) + QC tri-review + QA + compound + Profile B + PR",
+      "file": ".mstar/plans/2026-07-06-v1.93-closure.md",
+      "type": "closure",
+      "owner": "@project-manager",
+      "metadata": {
+        "iteration": "V1.93",
+        "iteration_refs": "v1.93-remote-access-polish-delivery-compass-v1.md",
+        "spec_integration_branch": "iteration/v1.93",
+        "merge_target": "iteration/v1.93",
+        "primary_spec": null,
+        "blocked_by": [
+          "2026-07-06-v1.93-tls-robustness",
+          "2026-07-06-v1.93-remote-connection-polish"
+        ],
+        "blocking": [],
+        "working_branch": "feature/v1.93-closure"
+      }
+    }
+  ],
   "metadata": {
-    "integration_branch_retired": true,
+    "integration_branch_retired": false,
     "last_integration_branch": "iteration/v1.92",
     "integration_merge_target": "main",
     "iteration_base_branch": "main",
     "target_branch": "main",
-    "latest_active_iteration": "V1.92",
-    "latest_active_compass": "v1.92-remote-access-hardening-delivery-compass-v1.md",
+    "integration_branch": "iteration/v1.93",
+    "latest_active_iteration": "V1.93",
+    "latest_active_compass": "v1.93-remote-access-polish-delivery-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
@@ -41,8 +129,7 @@
       "refreshed_at": "2026-07-06T03:55:00+0000",
       "refreshed_reason": "V1.92 merged via PR #120 (squash): V1.91 residuals 001-004 closed; 8 V1.93 residuals registered (R-V192P0-001/002, R-V192P1-001/002/003, R-V192UX-001, R-V192SPEC-001, R-V192HYG-001); R-V191P1-005 unchanged-deferred."
     },
-    "updated_at": "2026-07-06T03:55:00+0000",
-    "integration_branch": null
+    "updated_at": "2026-07-06T12:00:00+0000"
   },
   "residual_findings": {
     "2026-07-05-v1.91-findings-batch": [

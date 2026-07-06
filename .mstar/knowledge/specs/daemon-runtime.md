@@ -749,8 +749,11 @@ Permissions: daemon creates `~/.nexus42/tls/` with mode `0o700` on first boot; w
 **Subject Alternative Name (SAN) generation policy:**
 
 1. The generated certificate **always** includes loopback SANs: `127.0.0.1`, `::1`, and `localhost`. These are required so local clients and loopback-first generation always work.
-2. For a non-loopback concrete bind host, the certificate also includes the bind host as an IP SAN if it parses as an IPv4/IPv6 address, or as a DNS SAN otherwise.
+2. For a non-loopback concrete bind host, the certificate also includes the bind host as an IP SAN if it parses as an IPv4/IPv6 address (e.g. `192.168.1.42`, `fd00::1`), or as a DNS SAN otherwise (e.g. `nexus.local`).
 3. Wildcard bind addresses (`0.0.0.0` and `::`) are **not** added as SANs because they are not valid server names for TLS hostname validation.
+4. **`bind_host` is the literal value** passed to `--host` (or the config key) — the daemon performs **no DNS resolution** and no interface enumeration. The SAN set is derived from the string the user typed, not from any host-lookup or network-discovery step.
+5. If the `bind_host` is a hostname that is not a valid IA5 string (per `rcgen::Ia5String`), the hostname is **omitted from the SAN** and a warning is logged. The certificate is still generated with loopback SANs only — it will not pass strict hostname verification for the intended host, but certificate-fingerprint pinning (TOFU trust model, §16.2) remains available.
+6. **IPv6 addresses** (including link-local `fe80::` addresses and ULA `fd00::` addresses) are treated identically to IPv4 addresses: they are parsed as `std::net::IpAddr` and added as an IPAddress SAN. The `::1` loopback address is always present (rule 1); non-loopback IPv6 addresses are added per rule 2.
 
 **Cert lifecycle:**
 
@@ -759,7 +762,16 @@ Permissions: daemon creates `~/.nexus42/tls/` with mode `0o700` on first boot; w
 3. **Regeneration:**
    - Explicit user action: delete `~/.nexus42/tls/` → next boot regenerates.
    - Automatic on bind-host mismatch: if the persisted cert's SAN list does **not** cover the current `bind_host`, the daemon regenerates the cert with SANs for the new bind host and logs an `INFO` message stating that the cert was regenerated because the bind host changed. No automatic rotation or expiry check is performed otherwise (self-signed local trust anchor; expiry is informational).
+   - **Client impact (cross-reference §16.2 Phase 3):** regeneration produces a new certificate fingerprint. All previously-pinned clients will detect a fingerprint mismatch on their next connection, triggering the FingerprintGate re-pin warning (§16.2 Phase 3). This is **expected TOFU behaviour** — the cert legitimately changed because the daemon rebinded — and users must explicitly re-trust the new fingerprint through the existing FingerprintGate flow. The daemon does not retain the old fingerprint or attempt to silently migrate pins.
 4. **Startup log:** `tracing::info!("TLS certificate fingerprint: SHA256:aa:bb:cc:...")` — fingerprint logged once at boot for the author to copy.
+5. **Addresses always covered (never trigger regeneration):** the SAN validation treats the following `bind_host` values as always satisfied by the loopback SANs present in every certificate, and therefore **never triggers regeneration**:
+   - `127.0.0.1` (IPv4 loopback)
+   - `::1` (IPv6 loopback)
+   - `localhost`
+   - `0.0.0.0` (IPv4 wildcard — skipped at SAN generation, validated as always-covered by the loopback SANs)
+   - `::` (IPv6 wildcard — same treatment)
+   - Any other IPv4 or IPv6 address in the loopback range (`127.0.0.0/8`, `::1/128`)
+   - An empty or blank `bind_host` string (degenerate case)
 
 ### 15.2 Remote-bind gate with TLS (§14.2 amended)
 
@@ -862,9 +874,9 @@ The remote connection trust model is **Trust On First Use (TOFU)**, analogous to
 2. Client establishes TLS connection and verifies the served certificate's SHA-256 fingerprint matches the pinned value.
 3. No user interaction required — the pin is silently verified.
 
-**Phase 3 — Fingerprint changed (pinned fingerprint mismatch):**
+**Phase 3 — Fingerprint changed (pinned fingerprint mismatch, cross-reference §15.1):**
 
-This is the highest-stakes security moment. The client MUST block and display an explicit warning:
+This is the highest-stakes security moment. The client MUST block and display an explicit warning. Fingerprint changes can occur legitimately when the daemon rebinds to a different host and the certificate is regenerated with new SANs (§15.1 "Cert lifecycle" rule 3 — automatic regeneration on bind-host mismatch).
 
 1. Client detects that the served fingerprint does not match the pinned fingerprint.
 2. Client displays a warning: "The certificate for this daemon has changed. This can happen if the daemon was reinstalled or its certificate was deliberately rotated. It can also mean someone is intercepting your connection."
