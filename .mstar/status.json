@@ -28,7 +28,7 @@
     },
     {
       "id": "2026-07-06-v1.93-tls-robustness",
-      "status": "InReview",
+      "status": "Done",
       "title": "P0 — TLS Robustness: SAN invalidation on re-bind + graceful-shutdown grace cap (R-V192P0-001/002)",
       "file": ".mstar/plans/2026-07-06-v1.93-tls-robustness.md",
       "type": "implement",
@@ -49,12 +49,14 @@
         "inreview_at": "2026-07-06T14:00:00+0000",
         "impl_commit": "962d5847",
         "merged_to": "iteration/v1.93 @ ad049c97",
-        "qc": "consolidated at P-last on integrated HEAD"
+        "qc": "3/3 Approve (consolidated at P-last on integrated HEAD; QC1 revalidation Approve after fix-wave ef1b4efa)",
+        "qa": "Pass eb6f5393",
+        "done_at": "2026-07-06T16:00:00+0000"
       }
     },
     {
       "id": "2026-07-06-v1.93-remote-connection-polish",
-      "status": "InReview",
+      "status": "Done",
       "title": "P1 — Remote-Connection Polish + Desktop Tests (R-V192P1-001/002/003 + R-V192UX-001)",
       "file": ".mstar/plans/2026-07-06-v1.93-remote-connection-polish.md",
       "type": "implement",
@@ -75,7 +77,9 @@
         "inreview_at": "2026-07-06T14:00:00+0000",
         "impl_commit": "b6c38e05",
         "merged_to": "iteration/v1.93 @ 341cffa0",
-        "qc": "consolidated at P-last on integrated HEAD"
+        "qc": "3/3 Approve (consolidated at P-last on integrated HEAD; QC1 revalidation Approve after fix-wave ef1b4efa)",
+        "qa": "Pass eb6f5393",
+        "done_at": "2026-07-06T16:00:00+0000"
       }
     },
     {
@@ -121,24 +125,25 @@
     },
     "tech_debt_summary": {
       "updated_at": "2026-07-06",
-      "total_open": 9,
+      "total_open": 3,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 0,
-        "low": 7,
-        "nit": 2
+        "medium": 1,
+        "low": 1,
+        "nit": 1
       },
       "by_target": {
-        "V1.93": 8,
+        "V1.94": 2,
         "when list virtualisation lands": 1
       },
       "by_plan": {
-        "2026-07-05-v1.92-closure": 8,
-        "2026-07-05-v1.91-findings-batch": 1
+        "2026-07-05-v1.91-findings-batch": 1,
+        "2026-07-05-v1.92-closure": 1,
+        "2026-07-06-v1.93-closure": 1
       },
-      "refreshed_at": "2026-07-06T03:55:00+0000",
-      "refreshed_reason": "V1.92 merged via PR #120 (squash): V1.91 residuals 001-004 closed; 8 V1.93 residuals registered (R-V192P0-001/002, R-V192P1-001/002/003, R-V192UX-001, R-V192SPEC-001, R-V192HYG-001); R-V191P1-005 unchanged-deferred."
+      "refreshed_at": "2026-07-06T16:00:00+0000",
+      "refreshed_reason": "V1.93 Execute complete: 8 V1.93-targeted residuals resolved (R-V192P0-001/002, R-V192P1-001/002/003, R-V192UX-001, R-V192SPEC-001, R-V192HYG-001). Open: R-V191P1-005 (nit, list virtualisation), R-V192SEC-001 (medium, V1.94 — TOFU transport-binding), R-V193PL-001 (low, V1.94 spec-hygiene — /v1/local path literals)."
     },
     "updated_at": "2026-07-06T12:00:00+0000"
   },
@@ -170,7 +175,13 @@
         "target": "V1.93",
         "tracking_link": ".mstar/plans/reports/2026-07-05-v1.92-closure/qc1.md §Revalidation; qc3.md S-001",
         "note": "Cert reused from ~/.nexus42/tls/ without re-validating SAN vs current bind_host. Recovery today = manual delete of tls dir. Future: detect SAN/bind-host mismatch at load + regenerate.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "commit": "feff6f36 (code, V1.92) + 962d5847 (IPv6 SAN regression test, V1.93 P0)",
+          "plan_id": "2026-07-06-v1.93-tls-robustness",
+          "resolved_at": "2026-07-06T16:00:00+0000",
+          "evidence": "cert_covers_bind_host (tls/mod.rs:228) + try_load_existing None-fallthrough already shipped in V1.92 feff6f36; V1.93 P0 added ipv6_non_loopback_bind_host_is_covered_by_san regression test (tls/mod.rs:384); QC 3/3 Approve; QA Pass."
+        }
       },
       {
         "id": "R-V192P0-002",
@@ -183,7 +194,13 @@
         "target": "V1.93",
         "tracking_link": ".mstar/plans/reports/2026-07-05-v1.92-closure/qc3.md S-002",
         "note": "Plain-HTTP path honours shutdown_grace_ms; TLS path uses unbounded wait. One-line fix to thread the grace duration. Safer default (no mid-response drop) but inconsistent.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "commit": "feff6f36 (code, V1.92) + 962d5847 (grace-cap regression test, V1.93 P0)",
+          "plan_id": "2026-07-06-v1.93-tls-robustness",
+          "resolved_at": "2026-07-06T16:00:00+0000",
+          "evidence": "boot.rs graceful_shutdown(Some(shutdown_grace)) already shipped in V1.92 feff6f36; V1.93 P0 extracted const shutdown_grace_duration (boot.rs:138) + test shutdown_grace_duration_derived_from_config (boot.rs:1131); QC 3/3 Approve; QA Pass."
+        }
       },
       {
         "id": "R-V192P1-001",
@@ -196,7 +213,13 @@
         "target": "V1.93",
         "tracking_link": ".mstar/plans/reports/2026-07-05-v1.92-closure/qc1.md S-001",
         "note": "Add minimal schema/shape validation on load so a corrupt localStorage entry fails gracefully rather than feeding malformed config into the client.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "commit": "b6c38e05",
+          "plan_id": "2026-07-06-v1.93-remote-connection-polish",
+          "resolved_at": "2026-07-06T16:00:00+0000",
+          "evidence": "isValidConnectionConfig (connection-storage.ts:121) validates required/optional fields + discards corrupt entries; test connection-storage.test.ts:89; QC 3/3 Approve; QA Pass."
+        }
       },
       {
         "id": "R-V192P1-002",
@@ -209,7 +232,13 @@
         "target": "V1.93",
         "tracking_link": ".mstar/plans/reports/2026-07-05-v1.92-closure/qc3.md S-003",
         "note": "Browser fetch cannot tell cert-rejection from network error. Add a UI hint that the Nexus desktop app (TOFU-capable) is the supported remote-connection surface. Copy-only.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "commit": "b6c38e05",
+          "plan_id": "2026-07-06-v1.93-remote-connection-polish",
+          "resolved_at": "2026-07-06T16:00:00+0000",
+          "evidence": "connect-daemon-page.tsx:317 honest-limitation copy (browser cannot distinguish cert-reject from unreachable; desktop app is the TOFU surface); QC 3/3 Approve (qc2 security lens: copy accurate, no secret leak); QA Pass."
+        }
       },
       {
         "id": "R-V192P1-003",
@@ -222,7 +251,13 @@
         "target": "V1.93",
         "tracking_link": ".mstar/plans/reports/2026-07-05-v1.92-closure/qc1.md S-003",
         "note": "Add unit tests for the desktop connection-config (keychain vs app-data fallback) paths.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "commit": "feff6f36 (5 existing tests, V1.92) + b6c38e05 (gap-fill test, V1.93 P1)",
+          "plan_id": "2026-07-06-v1.93-remote-connection-polish",
+          "resolved_at": "2026-07-06T16:00:00+0000",
+          "evidence": "5 keychain/fallback tests existed (connection_config.rs ~lines 232-317, StubStore seam); V1.93 P1 added gap-fill get_returns_none_when_keychain_fails_generically_and_fallback_is_missing (line 322) covering Err(_e)=>Ok(read_fallback) path; QC 3/3 Approve; QA Pass (6 tests)."
+        }
       },
       {
         "id": "R-V192UX-001",
@@ -235,7 +270,13 @@
         "target": "V1.93",
         "tracking_link": ".mstar/plans/reports/2026-07-05-v1.92-closure/qc1.md S-002",
         "note": "Minor reassurance UX on the matching-pinned reconnect state.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "commit": "b6c38e05",
+          "plan_id": "2026-07-06-v1.93-remote-connection-polish",
+          "resolved_at": "2026-07-06T16:00:00+0000",
+          "evidence": "connect-daemon-page.tsx:151 'Fingerprint matches the trusted daemon.' reassurance hint on reconnectWithMatch + test connect-daemon-page.test.tsx:57; QC 3/3 Approve; QA Pass."
+        }
       },
       {
         "id": "R-V192SPEC-001",
@@ -267,7 +308,13 @@
         "target": "V1.93+",
         "tracking_link": ".mstar/plans/reports/2026-07-05-v1.92-closure/qc1.md §S-005",
         "note": "Sweep for any remaining stale 'Local API' / legacy naming in non-historical prose.",
-        "lifecycle": "open"
+        "lifecycle": "resolved",
+        "resolution": {
+          "commit": "09d0720b (sweep) + ef1b4efa (fix-wave for QC1 W-001/W-002)",
+          "plan_id": "2026-07-06-v1.93-closure",
+          "resolved_at": "2026-07-06T16:00:00+0000",
+          "evidence": "135 'Local API'->'Daemon API' renames across 27 live-prose files (09d0720b); fix-wave (ef1b4efa) corrected 6 double-naming stutters + 1 broken anchor (QC1 W-001/W-002); QC1 revalidation Approve; QA Pass. Note: pre-existing /v1/local/* path-string staleness in 12 specs tracked as R-V193PL-001 (not in this residual's scope — wire-path literals, V1.90 stragglers)."
+        }
       },
       {
         "id": "R-V192SEC-001",
@@ -280,6 +327,21 @@
         "target": "V1.94",
         "tracking_link": "https://github.com/42ch-dev/nexus/pull/120#pullrequestreview-4632744387",
         "note": "Attack path: an active MITM that terminates TLS on the trusted LAN can serve the stored fingerprint string via the unauthenticated /cert-fingerprint endpoint (the comparison happens over the same compromised fetch session), pass the FingerprintGate, then capture X-API-Key on subsequent authenticated calls. Browser fetch cannot expose the server cert for pinning (JS limitation) — the browser/web-app surface TOFU is inherently weaker and is a documented V1.92 trade-off (raw-browser remote = non-goal). The REAL resolution is desktop (Tauri) transport-layer cert pinning: route remote-daemon HTTP through a Rust reqwest+rustls client with a custom certificate verifier that checks the served cert's SHA-256 against pinnedFingerprint (danger_accept_invalid_certs + manual pin check, or a rustls ClientConfig with a pinned verifier). Not folded into V1.93 (convergence iteration; would change scope character + require re-clarify + re-QC). Medium severity bounded by the trusted-LAN threat model (V1.92 assumes trusted LAN; exploit requires active MITM on that LAN).",
+        "lifecycle": "open"
+      }
+    ],
+    "2026-07-06-v1.93-closure": [
+      {
+        "id": "R-V193PL-001",
+        "title": "Pre-existing stale /v1/local/* path-string literals in 12 specs while the API name is now 'Daemon API' (V1.90 rename left path literals un-swept)",
+        "severity": "low",
+        "source": "qc1 W-003 (V1.93 P-last consolidated QC)",
+        "scope": "knowledge/specs/ — local-runtime-boundary.md, agent-host.md, desktop-shell.md, creator-schedule-and-core-context.md, local-cloud-crate-architecture.md, + others (~12 files reference /v1/local/* for resources now at /v1/daemon/*)",
+        "decision": "defer",
+        "owner": "@writing-specialist + @architect",
+        "target": "V1.94 spec-hygiene pass",
+        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.93-closure/qc1.md §W-003",
+        "note": "Pre-existing from V1.90 (the Local API -> Daemon API rename updated the API NAME in most prose but left /v1/local/* path literals in ~12 specs; the actual wire paths are /v1/daemon/* per V1.90). V1.93's R-V192HYG-001 naming sweep made the name consistent, which reshaped the name/path mismatch into a visible spec self-disagreement. NOT a V1.93 regression (V1.93 was explicitly scoped to the API name, not wire-path literals). Defer to a dedicated spec-hygiene pass that verifies each path literal against the actual current wire paths (some /v1/local/* may be legitimately distinct scopes — needs per-path verification, not a blind find-replace).",
         "lifecycle": "open"
       }
     ]
