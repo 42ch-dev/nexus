@@ -1,12 +1,12 @@
 # Deferred Features — Cross-Version Tracker v2
 
-**Quick status**: **V1.93 shipped (2026-07-06 via PR #121, merge `aec54e98`)** — Remote-Access Polish & Residual Convergence (swept all 8 V1.92 residuals). V1.94 active (Desktop App Onboarding & IA Pass). Platform **paused**.
+**Quick status**: **V1.94 active (Phase 3 close done; PR pending Phase 4)** — Desktop App Onboarding & IA Pass (5 author-reported UX defects + tailwind-merge root cause fix). V1.93 shipped (2026-07-06 via PR #121, merge `aec54e98`). Platform **paused**.
 
-**V1.94 active (2026-07-06, Phase 1 in flight)**: Desktop App Onboarding & IA Pass — 5 structured author-reported UX defects swept as one first-impression story: setup wizard (workspace + daemon-ready + ACP agent detection), per-launch daemon-ready gate, two-tab sidebar IA (Creator | Orchestrator) + footer profile switcher, dark-bg → white-text button contrast fix, Strategies (Presets+Strategy) unification. Additive `POST /v1/daemon/agent-host/scan`. `@42ch/nexus-contracts` 0.20.0 → 0.21.0.
+**V1.94 closed (2026-07-06, Phase 3; PR Phase 4 next)**: Desktop App Onboarding & IA Pass — 4-step setup wizard + per-launch daemon-ready gate + two-tab sidebar IA (Creator | Orchestrator) + footer profile switcher + restart-icon daemon status bar + Strategies unification. Additive `POST /v1/daemon/agent-host/scan`. Mid-Phase-3 user clarification on contrast rule triggered audit that found the real root cause of the original button-contrast complaint: `tailwind-merge` was silently stripping `text-white` because it didn't recognize custom font-size tokens. Fix corrected both the symptom and a latent typography regression across 181 call sites. `@42ch/nexus-contracts` 0.20.0 → 0.21.0. QC 3/3 Approve (twice); QA Pass. 9 V1.95-deferred residuals registered.
 
 **Purpose**: Single source of truth for **open** and **backlog** features deferred from delivery compasses. Closed/shipped history lives in shipped archive.
 **Scope**: `nexus` OSS repository only.
-**Created**: 2026-04-21 · **Last updated**: 2026-07-06 (V1.94 iteration-start: V1.93 ship row added to archive; 3 open residuals re-queued V1.95)
+**Created**: 2026-04-21 · **Last updated**: 2026-07-06 (V1.94 iteration-close)
 
 ---
 
@@ -92,9 +92,9 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 ## 5) Quick index
 
-**Active iteration**: V1.94 — Desktop App Onboarding & IA Pass (Phase 1 in flight; compass [v1.94-desktop-onboarding-ia-pass-delivery-compass-v1.md](../iterations/v1.94-desktop-onboarding-ia-pass-delivery-compass-v1.md)).
+**Active iteration**: none (V1.94 Phase 3 close done; PR pending Phase 4; integration branch `iteration/v1.94` active until PR merges).
 
-**Latest shipped**: [V1.93](../iterations/v1.93-remote-access-polish-delivery-compass-v1.md) (Remote-Access Polish & Residual Convergence — PR [#121](https://github.com/42ch-dev/nexus/pull/121), merge `aec54e98` — 2026-07-06)
+**Latest shipped**: [V1.93](../iterations/v1.93-remote-access-polish-delivery-compass-v1.md) (Remote-Access Polish & Residual Convergence — PR [#121](https://github.com/42ch-dev/nexus/pull/121), merge `aec54e98` — 2026-07-06). V1.94 PR pending Phase 4.
 
 **Full iteration index**: [iterations/README.md](../iterations/README.md)
 

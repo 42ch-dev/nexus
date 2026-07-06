@@ -1,149 +1,51 @@
 {
   "version": 1,
-  "updated_at": "2026-07-06T17:30:00+0000",
-  "plans": [
-    {
-      "id": "2026-07-06-v1.94-prepare-specs-and-design",
-      "status": "Done",
-      "title": "P-1 — Prepare: desktop-shell §Setup Wizard + §ACP Agent Detection + web-ui §Information Architecture (V1.94) + DESIGN.md button invariant + agent-scan schemas",
-      "file": ".mstar/plans/2026-07-06-v1.94-prepare-specs-and-design.md",
-      "type": "prepare",
-      "owner": "@architect",
-      "metadata": {
-        "iteration": "V1.94",
-        "iteration_refs": "v1.94-desktop-onboarding-ia-pass-delivery-compass-v1.md",
-        "spec_integration_branch": "iteration/v1.94",
-        "merge_target": "iteration/v1.94",
-        "primary_spec": "knowledge/specs/desktop-shell.md",
-        "blocked_by": [],
-        "blocking": [
-          "2026-07-06-v1.94-backend-setup-runtime",
-          "2026-07-06-v1.94-frontend-onboarding-ia"
-        ],
-        "working_branch": "feature/v1.94-prepare",
-        "impl_commit": "3540f928",
-        "merged_to": "iteration/v1.94 @ 41580bb0",
-        "done_at": "2026-07-06T19:30:00+0000",
-        "qc": "skipped — prepare/spec plan; QC consolidated at P-last on integrated HEAD",
-        "verification": "pnpm run validate-schemas 201 valid; cargo check/clippy -p nexus-contracts green; cargo +nightly-2026-06-26 fmt --all --check green; pnpm --filter web typecheck/build green"
-      }
-    },
-    {
-      "id": "2026-07-06-v1.94-backend-setup-runtime",
-      "status": "Done",
-      "title": "P0 — Backend Setup Runtime + Agent Scan: POST /v1/daemon/agent-host/scan + workspace default ~/Documents/nexus42/default/ + setup_completed marker + per-launch daemon-ready gate",
-      "file": ".mstar/plans/2026-07-06-v1.94-backend-setup-runtime.md",
-      "type": "implement",
-      "owner": "@fullstack-dev",
-      "metadata": {
-        "iteration": "V1.94",
-        "iteration_refs": "v1.94-desktop-onboarding-ia-pass-delivery-compass-v1.md",
-        "spec_integration_branch": "iteration/v1.94",
-        "merge_target": "iteration/v1.94",
-        "primary_spec": "knowledge/specs/desktop-shell.md",
-        "blocked_by": ["2026-07-06-v1.94-prepare-specs-and-design"],
-        "blocking": ["2026-07-06-v1.94-closure"],
-        "working_branch": "feature/v1.94-backend-setup-runtime",
-        "impl_commit": "fc488322",
-        "merged_to": "iteration/v1.94 @ df67e5bb",
-        "inreview_at": "2026-07-06T20:00:00+0000",
-        "done_at": "2026-07-06T20:45:00+0000",
-        "qc": "consolidated at P-last on integrated HEAD f7af91bc",
-        "qa": "consolidated at P-last on integrated HEAD f7af91bc",
-        "verification": "cargo test --all green (160 acp-host + 421 daemon-runtime + 771 nexus42 + 27 desktop tauri); cargo clippy --all -D warnings green; cargo +nightly-2026-06-26 fmt --all --check green; pnpm validate-schemas 201; integrated HEAD re-verified all green"
-      }
-    },
-    {
-      "id": "2026-07-06-v1.94-frontend-onboarding-ia",
-      "status": "Done",
-      "title": "P1 — Frontend Onboarding + IA + Polish: 4-step setup wizard + sidebar tabs + footer profiles + daemon status simplification + button contrast audit + Strategies unification",
-      "file": ".mstar/plans/2026-07-06-v1.94-frontend-onboarding-ia.md",
-      "type": "implement",
-      "owner": "@frontend-dev",
-      "metadata": {
-        "iteration": "V1.94",
-        "iteration_refs": "v1.94-desktop-onboarding-ia-pass-delivery-compass-v1.md",
-        "spec_integration_branch": "iteration/v1.94",
-        "merge_target": "iteration/v1.94",
-        "primary_spec": "knowledge/specs/web-ui.md",
-        "blocked_by": ["2026-07-06-v1.94-prepare-specs-and-design"],
-        "blocking": ["2026-07-06-v1.94-closure"],
-        "working_branch": "feature/v1.94-frontend-onboarding-ia",
-        "impl_commit": "273863d2",
-        "merged_to": "iteration/v1.94 @ f7af91bc",
-        "inreview_at": "2026-07-06T20:00:00+0000",
-        "done_at": "2026-07-06T20:45:00+0000",
-        "qc": "consolidated at P-last on integrated HEAD f7af91bc",
-        "qa": "consolidated at P-last on integrated HEAD f7af91bc",
-        "note_pm_cleanup": "P1 subagent returned Completion Report with files modified but uncommitted in worktree; PM committed + pushed on behalf of the track (plan-management Git work, not implementation). Commit 273863d2 captures the full P1 surface.",
-        "verification": "pnpm --filter web test 470 pass (62 files); typecheck clean; build 3.57s; validate-schemas 201; integrated HEAD re-verified all green"
-      }
-    },
-    {
-      "id": "2026-07-06-v1.94-closure",
-      "status": "Todo",
-      "title": "P-last — Closure: QC tri-review + QA + compound + Profile B compaction + PR to main",
-      "file": ".mstar/plans/2026-07-06-v1.94-closure.md",
-      "type": "closure",
-      "owner": "@project-manager",
-      "metadata": {
-        "iteration": "V1.94",
-        "iteration_refs": "v1.94-desktop-onboarding-ia-pass-delivery-compass-v1.md",
-        "spec_integration_branch": "iteration/v1.94",
-        "merge_target": "iteration/v1.94",
-        "primary_spec": null,
-        "blocked_by": [
-          "2026-07-06-v1.94-backend-setup-runtime",
-          "2026-07-06-v1.94-frontend-onboarding-ia"
-        ],
-        "blocking": [],
-        "working_branch": "feature/v1.94-closure"
-      }
-    }
-  ],
+  "updated_at": "2026-07-06T22:30:00+0000",
+  "plans": [],
   "metadata": {
-    "integration_branch_retired": true,
-    "last_integration_branch": "iteration/v1.93",
+    "integration_branch_retired": false,
+    "last_integration_branch": "iteration/v1.94",
     "integration_merge_target": "main",
     "iteration_base_branch": "main",
     "target_branch": "main",
     "integration_branch": "iteration/v1.94",
-    "latest_active_iteration": "V1.94",
-    "latest_active_compass": "v1.94-desktop-onboarding-ia-pass-delivery-compass-v1.md",
+    "latest_active_iteration": null,
+    "latest_active_compass": null,
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.93",
-      "compass": "v1.93-remote-access-polish-delivery-compass-v1.md",
+      "iteration": "V1.94",
+      "compass": "v1.94-desktop-onboarding-ia-pass-delivery-compass-v1.md",
       "shipped_at": "2026-07-06",
-      "pr": "https://github.com/42ch-dev/nexus/pull/121",
-      "merge_commit": "aec54e98"
+      "pr": "pending — Phase 4 next",
+      "merge_commit": "pending"
     },
     "tech_debt_summary": {
       "updated_at": "2026-07-06",
-      "total_open": 3,
+      "total_open": 12,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 1,
-        "low": 1,
+        "low": 10,
         "nit": 1
       },
       "by_target": {
-        "V1.95": 2,
+        "V1.95": 11,
         "when list virtualisation lands": 1
       },
       "by_plan": {
         "2026-07-05-v1.91-findings-batch": 1,
         "2026-07-05-v1.92-closure": 1,
-        "2026-07-06-v1.93-closure": 1
+        "2026-07-06-v1.93-closure": 1,
+        "2026-07-06-v1.94-closure": 9
       },
-      "refreshed_at": "2026-07-06T17:30:00+0000",
-      "refreshed_reason": "V1.94 iteration-start: V1.93 plans archived to Profile B (4 Done plans moved to archived/plans/ + plans-done.json); 8 of 9 V1.92-closure resolved residuals moved to archived/residuals/2026-07-05-v1.92-closure.json (R-V192SEC-001 stays open). latest_ship updated to V1.93 (PR #121 aec54e98). 3 residuals stay open and re-queued to V1.95: R-V192SEC-001 (medium — TOFU transport-binding — security work, no UX overlap with V1.94 desktop-onboarding), R-V193PL-001 (low — /v1/local/* path-literal spec hygiene — spec-hygiene pass), R-V191P1-005 (nit — FindingsPage memoisation — unchanged, when list virtualisation lands)."
+      "refreshed_at": "2026-07-06T23:30:00+0000",
+      "refreshed_reason": "V1.94 iteration-close (Phase 3): 4 plans archived to Profile B; latest_ship → V1.94 (PR pending Phase 4); compass status: completed. 9 V1.95-deferred residuals registered under v1.94-closure: R-V194QC1-S101..S106 (6 qc1 Suggestions), R-V194QC2-S001/S002 (2 qc2 Suggestions), R-V194QC1R-S001 (1 qc1 revalidation soft). 3 prior residuals stay open: R-V192SEC-001 (medium, TOFU transport-binding, V1.95 — strongest candidate), R-V193PL-001 (low, /v1/local/* path-literal spec hygiene), R-V191P1-005 (nit, FindingsPage memoisation — unchanged). Total 12 open (1 medium + 10 low + 1 nit)."
     },
-    "updated_at": "2026-07-06T17:30:00+0000"
+    "updated_at": "2026-07-06T23:30:00+0000"
   },
   "residual_findings": {
     "2026-07-05-v1.91-findings-batch": [
@@ -157,7 +59,7 @@
         "owner": "@frontend-dev",
         "target": "when list virtualisation lands",
         "tracking_link": ".mstar/plans/reports/2026-07-05-v1.91-reading-chrome/qc3.md §S-004",
-        "note": "At the 100-item cap this is not user-visible; revisit when findings lists grow larger or virtualisation is introduced. [severity adjusted from info to nit at V1.91 closeout]",
+        "note": "At the 100-item cap this is not user-visible; revisit when findings lists grow larger or virtualisation is introduced.",
         "lifecycle": "open"
       }
     ],
@@ -172,7 +74,7 @@
         "owner": "@writing-specialist + @architect",
         "target": "V1.95 spec-hygiene pass",
         "tracking_link": ".mstar/plans/reports/2026-07-06-v1.93-closure/qc1.md §W-003",
-        "note": "Pre-existing from V1.90 (the Local API -> Daemon API rename updated the API NAME in most prose but left /v1/local/* path literals in ~12 specs; the actual wire paths are /v1/daemon/* per V1.90). V1.93's R-V192HYG-001 naming sweep made the name consistent, which reshaped the name/path mismatch into a visible spec self-disagreement. NOT a V1.93 regression (V1.93 was explicitly scoped to the API name, not wire-path literals). Defer to a dedicated spec-hygiene pass that verifies each path literal against the actual current wire paths (some /v1/local/* may be legitimately distinct scopes — needs per-path verification, not a blind find-replace). Re-queued from V1.94 (no overlap with V1.94 desktop-onboarding UX work).",
+        "note": "Pre-existing from V1.90. V1.93's R-V192HYG-001 naming sweep made the name consistent, which reshaped the name/path mismatch into a visible spec self-disagreement. Defer to a dedicated spec-hygiene pass.",
         "lifecycle": "open"
       }
     ],
@@ -182,12 +84,131 @@
         "title": "Resume TOFU fingerprint gate is in-band over the same (MITM-able) TLS fetch session — not transport-bound; buildClient() does not pass pinnedFingerprint to the HTTP transport",
         "severity": "medium",
         "source": "Cursor Security Automation — PR #120 review 4632744387 (merge-close, 2026-07-06)",
-        "scope": "apps/web/src/lib/nexus/use-resume-fingerprint-gate.ts (in-band /cert-fingerprint fetch + compare); apps/web/src/lib/client-context.tsx buildClient() (no pinnedFingerprint → transport); apps/desktop/src-tauri/ (no reqwest/rustls cert-pin for remote daemon)",
+        "scope": "apps/web/src/lib/nexus/use-resume-fingerprint-gate.ts; apps/web/src/lib/client-context.tsx buildClient(); apps/desktop/src-tauri/ (no reqwest/rustls cert-pin for remote daemon)",
         "decision": "defer",
         "owner": "@fullstack-dev + @frontend-dev",
         "target": "V1.95",
         "tracking_link": "https://github.com/42ch-dev/nexus/pull/120#pullrequestreview-4632744387",
-        "note": "Attack path: an active MITM that terminates TLS on the trusted LAN can serve the stored fingerprint string via the unauthenticated /cert-fingerprint endpoint (the comparison happens over the same compromised fetch session), pass the FingerprintGate, then capture X-API-Key on subsequent authenticated calls. Browser fetch cannot expose the server cert for pinning (JS limitation) — the browser/web-app surface TOFU is inherently weaker and is a documented V1.92 trade-off (raw-browser remote = non-goal). The REAL resolution is desktop (Tauri) transport-layer cert pinning: route remote-daemon HTTP through a Rust reqwest+rustls client with a custom certificate verifier that checks the served cert's SHA-256 against pinnedFingerprint. Originally target V1.94; re-queued to V1.95 because V1.94 scoped to desktop-onboarding UX work with no security-surface overlap. Medium severity bounded by the trusted-LAN threat model (V1.92 assumes trusted LAN; exploit requires active MITM on that LAN).",
+        "note": "The real resolution is desktop (Tauri) transport-layer cert pinning: route remote-daemon HTTP through a Rust reqwest+rustls client with a custom certificate verifier that checks the served cert's SHA-256 against pinnedFingerprint. Re-queued from V1.94 (no security-surface overlap with desktop-onboarding UX work).",
+        "lifecycle": "open"
+      }
+    ],
+    "2026-07-06-v1.94-closure": [
+      {
+        "id": "R-V194QC1-S101",
+        "title": "Setup-step-agent auto-select effect over-fires on every state change",
+        "severity": "low",
+        "source": "qc1 F-101 (V1.94 P-last consolidated QC)",
+        "scope": "apps/web/src/pages/setup-step-agent.tsx auto-select useEffect",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.95",
+        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-101",
+        "note": "Effect dependency array too broad; should only fire when scan result or user selection changes. Non-blocking; current behavior is correct but noisy.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V194QC1-S102",
+        "title": "Health-probe subscription duplicated between SetupGate and SetupStepDaemon",
+        "severity": "low",
+        "source": "qc1 F-102",
+        "scope": "apps/web/src/components/setup/setup-gate.tsx + apps/web/src/pages/setup-step-daemon.tsx",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.95",
+        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-102",
+        "note": "Two components subscribe to onDaemonStatusChanged independently; could be unified into a shared hook. Non-blocking; matches the daemon-ready-gate-pattern.md multi-observer model.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V194QC1-S103",
+        "title": "SetupStepWelcome swallows Tauri errors silently",
+        "severity": "low",
+        "source": "qc1 F-103",
+        "scope": "apps/web/src/pages/setup-step-welcome.tsx",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.95",
+        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-103",
+        "note": "Workspace detection failure path catches + swallows; should surface a toast or inline error. Non-blocking; default workspace fallback is safe.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V194QC1-S104",
+        "title": "Browser-fallback workspace string uses ~/… while Tauri returns absolute path",
+        "severity": "low",
+        "source": "qc1 F-104",
+        "scope": "apps/web/src/pages/setup-step-welcome.tsx display string",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.95",
+        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-104",
+        "note": "Display inconsistency between browser (~/Documents/…) and desktop (absolute path) builds. Non-blocking; cosmetic.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V194QC1-S105",
+        "title": "/strategy redirect drops preset ID",
+        "severity": "low",
+        "source": "qc1 F-105",
+        "scope": "apps/web/src/App.tsx /strategy redirect",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.95",
+        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-105",
+        "note": "Old /strategy deep links fall back to /strategies list rather than /strategies/:presetId because no lastActivePresetId is stored. Graceful degradation; non-blocking.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V194QC1-S106",
+        "title": "Sidebar nav data is open-ended with no compile-time guard",
+        "severity": "low",
+        "source": "qc1 F-106",
+        "scope": "apps/web/src/components/layout/sidebar.tsx NAV_ITEMS structure",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.95",
+        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-106",
+        "note": "NAV_ITEMS shape could be a typed const with exhaustive-struct enforcement. Non-blocking; current shape is correct.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V194QC2-S001",
+        "title": "Agent scan endpoint could expose optional force_refresh query param",
+        "severity": "low",
+        "source": "qc2 S-001 (V1.94 P-last consolidated QC)",
+        "scope": "crates/nexus-daemon-runtime/src/api/handlers/agent_host.rs scan handler",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.95",
+        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc2.md §S-001",
+        "note": "Currently always uses cached registry; a force_refresh=true param would let the wizard re-fetch on demand. Non-blocking; 24h stale-while-revalidate is the current policy.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V194QC2-S002",
+        "title": "Agent scan could batch --version probes via a single async joinset rather than sequential per-entry",
+        "severity": "low",
+        "source": "qc2 S-002",
+        "scope": "crates/nexus-acp-host/src/registry.rs scan_local_installations",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.95",
+        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc2.md §S-002",
+        "note": "Current implementation already uses bounded concurrency (≤4); a JoinSet would be idiomatic but the Semaphore approach is functionally equivalent. Non-blocking.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V194QC1R-S001",
+        "title": "set_agent_profile hardcodes the agent-host config path rather than reusing nexus_home_layout helper",
+        "severity": "low",
+        "source": "qc1 revalidation soft suggestion (V1.94 P-last fix-wave revalidation)",
+        "scope": "apps/desktop/src-tauri/src/lib.rs set_agent_profile",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.95",
+        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §Revalidation",
+        "note": "Matches the existing boot.rs:978 pattern (also hardcodes the path). A future hygiene pass should centralize via nexus_home_layout::agent_host_config_path(&home). Non-blocking.",
         "lifecycle": "open"
       }
     ]
