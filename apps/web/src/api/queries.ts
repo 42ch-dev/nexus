@@ -533,7 +533,7 @@ export function useSetActiveCreator() {
 export function useScanAgents(request?: ScanRequest) {
   const client = useNexusClient();
   return useQuery({
-    queryKey: queryKeys.agentHost.scan(),
+    queryKey: queryKeys.agentHost.scan(request),
     queryFn: async (): Promise<ScanResponse> => client.scanAgents(request),
   });
 }

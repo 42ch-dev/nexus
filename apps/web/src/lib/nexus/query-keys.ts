@@ -56,7 +56,8 @@ export const queryKeys = {
   },
   agentHost: {
     all: ['agentHost'] as const,
-    scan: () => [...queryKeys.agentHost.all, 'scan'] as const,
+    scan: (request?: { filter?: string; registry_refresh?: boolean }) =>
+      [...queryKeys.agentHost.all, 'scan', request?.filter ?? 'all', request?.registry_refresh ?? false] as const,
   },
   chapters: {
     all: ['chapters'] as const,
