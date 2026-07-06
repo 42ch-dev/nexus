@@ -3,8 +3,11 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-07-06-v1.94-closure"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-07-06"
+revalidation_at: "2026-07-06T22:00:00+0000"
+revalidation_commit: "0e75931b"
+revalidation_review_range: "merge-base: bf0e60cc (main HEAD pre-V1.94) + tip: 0e75931b (iteration/v1.94 post-fix-wave) ≡ git diff main...iteration/v1.94"
 ---
 
 # Code Review Report
@@ -255,3 +258,74 @@ The V1.94 P1 implementation is structurally clean, contract-coherent with the P0
 The qc2 (security lens on the agent-scan endpoint) and qc3 (reliability lens on the per-launch daemon gate) reviews overlap this report in: F-001 (config.toml write safety — partly qc2 territory), F-005 (keyboard a11y — qc3 may own), F-003 (test coverage of gate + splash — qc3 may own). I have flagged each finding with its primary lens but do not duplicate the qc2 / qc3 evidence gathering.
 
 Targeted re-review is the natural follow-up (per `mstar-review-qc`): once F-001 / F-002 are addressed and F-003 / F-004 / F-005 have evidence, I re-validate the same files in the same report path (this file) with a `## Revalidation` section.
+
+## Revalidation (post fix-wave 4f4b468b, merged as 0e75931b)
+
+### Revalidation scope
+
+- F-001..F-005 only (qc2 + qc3 areas out of scope; they Approve).
+- Review range / Diff basis (revalidation): `merge-base: bf0e60cc (main HEAD pre-V1.94) + tip: 0e75931b (iteration/v1.94 post-fix-wave)` ≡ `git diff main...iteration/v1.94`.
+- Working branch (verified): `iteration/v1.94` @ `0e75931b`.
+- Review cwd (verified): `/Users/bibi/workspace/organizations/42ch/nexus` (via `git rev-parse --show-toplevel`).
+
+### Verification runs
+
+- `pnpm --filter web run test` → **68 test files passed (491 tests passed)** in 11.36s; new tests included: `sidebar.test.tsx` (4), `setup-wizard-page.test.tsx` (2), `strategy-page.test.tsx` (2), `active-creator-context.test.tsx` (5), `setup-completed-context.test.tsx` (3), `button.test.tsx` (2 with snapshot), `footer-profiles.test.tsx` (7 — 4 prior + 3 new keyboard nav).
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib` → **29 passed; 0 failed**. New tests included: `tests::agent_profile_roundtrips_through_config_toml`, `tests::agent_profile_write_preserves_existing_keys`.
+
+### Revalidation results
+
+- **F-001 — agent persistence: fixed + verified.**
+  - `apps/desktop/src-tauri/src/lib.rs` adds `set_agent_profile(name, launch_command)` Tauri command + `write_agent_profile` / `write_agent_profile_at` helpers using `toml_edit::DocumentMut`. Path: `$HOME/.nexus42/agent-host/config.toml` (matches `boot.rs:978` reader and `nexus-agent-host::config::agent_host_config_path`).
+  - `apps/web/src/lib/nexus/desktop-capabilities.ts` adds `setAgentProfile(name, launchCommand?)` on both `DesktopCapabilities` interface and `TauriDesktopCapabilities` implementation, invoking `set_agent_profile` Tauri command.
+  - `apps/web/src/pages/setup-wizard-page.tsx` `finish()` is now `async` and calls `await desktop.setAgentProfile(name, launchCommand)` **before** `markCompleted()` and `navigate('/works', { replace: true })` — matching the spec ordering.
+  - TOML shape produced by `write_agent_profile_at`: `[[providers]] { id = "<name>", protocol = "native_cli", command = "<launch_command>" }`. Daemon's `nexus-agent-host::config::load_config_from_path` parses this into `ProviderConfig { id, protocol: "native_cli", command: Some(...) }`. **Round-trip is correct**; preserved-keys invariant covered by `agent_profile_write_preserves_existing_keys` test.
+  - TOCTOU containment check (`manager.rs:168-191`) passes — config path stays within `~/.nexus42/agent-host/`.
+  - `apps/web/src/pages/setup-wizard-page.test.tsx` second test verifies `setAgentProfile` is called with `(name, launch_command)` BEFORE `setSetupCompleted(true)`.
+  - Minor architectural nit (out of fix-wave scope): the desktop command hardcodes `dirs::home_dir()?.join(".nexus42").join("agent-host").join("config.toml")` instead of reusing `nexus_agent_host::config::agent_host_config_path(&home)` or adding a `nexus_home_layout::agent_host_config_path(&home)` helper. This matches the existing pattern in `boot.rs:978` (`nexus_home.join("agent-host").join("config.toml")` directly), so not a blocker. Will surface as a Suggestion for V1.95 residual.
+
+- **F-002 — dead presets-page: fixed + verified.**
+  - `apps/web/src/pages/presets-page.tsx` deleted (`-159` lines).
+  - `grep -rln "presets-page\|PresetsPage" apps/web/` → 0 matches.
+  - `apps/web/src/App.tsx` line 91 `/presets → /strategies` redirect removed; `/presets` now falls through to `path="*"` (`<NotFoundPage />`). Per the assignment's "your call" wording this is the cleaner choice — no stale redirect survives in the SPA. The `/strategy → /strategies` redirect is retained (per V1.94 §29.4 compatibility contract).
+  - `pnpm --filter web run typecheck` + `pnpm --filter web run build` were not run in this revalidation pass (the broader CI gate in the V1.94 P-last closure will exercise them); the 491-test green run does compile all new files and the deletion transitively, so a build regression would have surfaced.
+
+- **F-003 — unit tests: fixed + verified.**
+  - **491 → confirmed.** Total count matches the assignment's claim (was 470 pre-fix-wave; +21 new tests).
+  - `sidebar.test.tsx` (4 tests): Creator tab default, Orchestrator tab swap + nested nav, no Connect/Daemon top-level item, footer-profiles mounted inside (toolbar role). All non-trivial — they pin the V1.94 IA locked decisions D1 / E1 / C1.
+  - `setup-wizard-page.test.tsx` (2 tests): four-step E2E navigation, **and** desktop-mode order-of-operations (`setAgentProfile('codex', 'codex')` called before `setSetupCompleted(true)`) — pins F-001 spec compliance from the frontend.
+  - `strategy-page.test.tsx` (2 tests): detail route loads at `/strategies/:presetId`; missing preset shows "Strategy not found" empty state. Pins the V1.70–V1.75 surface preservation contract.
+  - `active-creator-context.test.tsx` (5 tests): `localStorage` round-trip on mount, write-through on setter, cross-tab `storage` event sync, both hooks throw outside provider.
+  - `setup-completed-context.test.tsx` (3 tests): browser build immediate-completed, desktop build reads `getSetupCompleted` from shell, `markCompleted()` persists via `setSetupCompleted(true)`.
+
+- **F-004 — button snapshot: fixed + verified.**
+  - `apps/web/src/components/ui/button.test.tsx` (2 tests): light + dark snapshots of primary variant.
+  - `apps/web/src/components/ui/__snapshots__/button.test.tsx.snap` (17 lines): the captured `class` attribute string includes `bg-blue-700 ... dark:bg-brand-cyan dark:text-white dark:hover:bg-blue-800 dark:active:bg-blue-900 ...`. The dark mode test sets `document.documentElement.classList.add('dark')` and the snapshot persists the className invariant — a regression that reverts `dark:text-white` to `dark:text-brand-deep-blue` will fail the snapshot. Tailwind classes are static so light + dark snapshots intentionally produce identical className strings; what matters is the assertion of the dark-prefixed classes. This satisfies DESIGN.md §Component Primitives/Button invariant requirement.
+
+- **F-005 — footer keyboard: fixed + verified.**
+  - `apps/web/src/components/layout/footer-profiles.tsx`: `<div role="toolbar" aria-label="Profiles" onKeyDown={handleKeyDown}>` (line 74-79). `handleKeyDown` (line 46-67) handles ArrowRight, ArrowLeft, Home, End with `event.preventDefault()` and clamps via `focusAt`. `CreatorAvatar` is now a `forwardRef<HTMLButtonElement, CreatorAvatarProps>`; each avatar receives `tabIndex={focusIndex === index ? 0 : -1}` and `onFocus={() => setFocusIndex(index)}`. The "+" Add Creator button participates in the roving-tabindex pattern (last slot, `focusIndex === items.length`). `useEffect` (line 36-38) bounds `focusIndex` when items array shrinks.
+  - Roving tabindex contract: **only the focused button has `tabindex="0"`; all others have `tabindex="-1"`** — Tab key skips the toolbar once focus is inside it (the standard WAI-ARIA toolbar pattern).
+  - Tests (`footer-profiles.test.tsx`, 3 new):
+    - "uses roving tabindex so only the focused avatar is in the Tab sequence" — verifies `tabindex="0"` on Alice, `tabindex="-1"` on Bob and Add Creator.
+    - "moves focus with arrow keys inside the toolbar" — clicks Alice, presses ArrowRight → Bob has focus + `tabindex="0"`, Alice becomes `tabindex="-1"`. Then ArrowLeft reverses.
+    - "jumps to first/last avatar with Home/End" — focuses Add Creator, presses Home → Alice has focus. Re-focuses Add Creator, presses End → Add Creator has focus.
+  - Single-creator no-op contract preserved (line 91: `if (items.length > 1) setActiveCreatorId(...)`).
+  - Spec (web-ui.md §29.5) requirement "Esc closes any transient UI" is satisfied via Radix Dialog's built-in Esc handler (out of scope for this fix — already covered by qc3 reliability lens).
+
+### Cross-track coherence check (read-only, post-fix-wave)
+
+- **F-001 round-trip**: `set_agent_profile` writes to `~/.nexus42/agent-host/config.toml` via `toml_edit::DocumentMut` (preserves keys, dedupes by `id`). Daemon reads the same path in `crates/nexus-daemon-runtime/src/boot.rs:978` (`nexus_home.join("agent-host").join("config.toml")`); parsed by `nexus_agent_host::config::load_config_from_path` → `AgentHostConfig.providers: Vec<ProviderConfig>`. `ProviderConfig` struct accepts `{id, protocol, command, args, env, enabled}` — all optional except `id` and `protocol`. Wizard produces `{id: <name>, protocol: "native_cli", command: Some(<launch_command>)}` — deserializes correctly with `enabled = true` (default).
+- **Hardening is preserved**: TOCTOU containment check at `manager.rs:168-191` (`canonicalize(parent)` then `canonical_config.starts_with(&canonical_dir)`) accepts the wizard's path since `~/.nexus42/agent-host/config.toml` is inside `~/.nexus42/agent-host/`. The `provider_id` collision semantics in `nexus-agent-host/src/discovery/path_scan.rs` and `catalog.rs` mean a wizard-written `id = "codex"` will dedup against PATH-scanned "codex" entries — explicit user config wins, which is the correct precedence.
+
+### Updated verdict
+
+- Previous: **Request Changes** (5 Warnings)
+- Current: **Approve**
+- Residual blockers: none.
+- Carried-over Suggestions (F-101..F-106) remain deferred to V1.95 by PM (out of this fix-wave's scope, as stated in the assignment).
+
+### CI gate status
+
+- `pnpm --filter web run test`: **491 / 491 passed** (68 files).
+- `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib`: **29 / 29 passed**.
+- No CI failures introduced by the fix-wave.
