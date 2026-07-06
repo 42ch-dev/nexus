@@ -28,7 +28,7 @@
     },
     {
       "id": "2026-07-06-v1.93-tls-robustness",
-      "status": "Todo",
+      "status": "InReview",
       "title": "P0 — TLS Robustness: SAN invalidation on re-bind + graceful-shutdown grace cap (R-V192P0-001/002)",
       "file": ".mstar/plans/2026-07-06-v1.93-tls-robustness.md",
       "type": "implement",
@@ -45,12 +45,16 @@
         "blocking": [
           "2026-07-06-v1.93-closure"
         ],
-        "working_branch": "feature/v1.93-tls-robustness"
+        "working_branch": "feature/v1.93-tls-robustness",
+        "inreview_at": "2026-07-06T14:00:00+0000",
+        "impl_commit": "962d5847",
+        "merged_to": "iteration/v1.93 @ ad049c97",
+        "qc": "consolidated at P-last on integrated HEAD"
       }
     },
     {
       "id": "2026-07-06-v1.93-remote-connection-polish",
-      "status": "Todo",
+      "status": "InReview",
       "title": "P1 — Remote-Connection Polish + Desktop Tests (R-V192P1-001/002/003 + R-V192UX-001)",
       "file": ".mstar/plans/2026-07-06-v1.93-remote-connection-polish.md",
       "type": "implement",
@@ -67,7 +71,11 @@
         "blocking": [
           "2026-07-06-v1.93-closure"
         ],
-        "working_branch": "feature/v1.93-remote-connection-polish"
+        "working_branch": "feature/v1.93-remote-connection-polish",
+        "inreview_at": "2026-07-06T14:00:00+0000",
+        "impl_commit": "b6c38e05",
+        "merged_to": "iteration/v1.93 @ 341cffa0",
+        "qc": "consolidated at P-last on integrated HEAD"
       }
     },
     {
