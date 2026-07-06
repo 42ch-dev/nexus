@@ -100,7 +100,7 @@ rounded:
 
 components:
   button:
-    primary: { backgroundColor: "{colors.brand-cyan}", textColor: "{colors.brand-deep-blue}", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.blue-800}", activeBackgroundColor: "{colors.blue-900}" }
+    primary: { backgroundColor: "{colors.brand-cyan}", textColor: "#ffffff", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.blue-800}", hoverTextColor: "#ffffff", activeBackgroundColor: "{colors.blue-900}", activeTextColor: "#ffffff" }
     secondary: { backgroundColor: "{colors.background-100}", textColor: "{colors.gray-1000}", borderColor: "{colors.gray-alpha-400}", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.background-200}", hoverBorderColor: "{colors.gray-alpha-500}" }
     tertiary: { backgroundColor: "transparent", textColor: "{colors.gray-1000}", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.gray-alpha-100}" }
     destructive: { backgroundColor: "{colors.red-800}", textColor: "#ffffff", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.red-700}", activeBackgroundColor: "{colors.red-900}" }
@@ -476,6 +476,41 @@ components:
       letterSpacing: "0.05em"
       color: "{colors.gray-900}"
       marginTop: "24px"
+
+  # ── V1.94 Footer Profile Switcher — dark values (same token names as DESIGN.md) ──
+  footer-profile:
+    avatar-size: "32px"
+    avatar-rounded: "{rounded.pill}"
+    avatar-bg: "{colors.gray-alpha-100}"
+    avatar-bg-hover: "{colors.gray-alpha-200}"
+    avatar-bg-active: "{colors.blue-700}"
+    avatar-text: "{colors.gray-1000}"
+    avatar-text-active: "#ffffff"
+    avatar-fallback-bg: "{colors.gray-alpha-200}"
+    avatar-fallback-text: "{colors.gray-700}"
+    add-button-bg: "transparent"
+    add-button-border: "{colors.gray-alpha-400}"
+    add-button-text: "{colors.gray-700}"
+    add-button-hover-bg: "{colors.gray-alpha-100}"
+    add-button-hover-border: "{colors.gray-alpha-500}"
+    add-button-hover-text: "{colors.gray-1000}"
+    gap: "{spacing.space-2}"
+
+  # ── V1.94 Setup Wizard Step Chrome — dark values (same token names as DESIGN.md) ──
+  setup-wizard-step:
+    step-circle-size: "32px"
+    step-circle-active-bg: "{colors.blue-700}"
+    step-circle-active-text: "#ffffff"
+    step-circle-complete-bg: "{colors.green-700}"
+    step-circle-complete-text: "#ffffff"
+    step-circle-pending-bg: "{colors.gray-alpha-100}"
+    step-circle-pending-text: "{colors.gray-700}"
+    step-connector: "{colors.gray-alpha-400}"
+    step-label-typography: "{typography.label-14}"
+    step-label-active-color: "{colors.gray-1000}"
+    step-label-pending-color: "{colors.gray-700}"
+    wizard-max-width: "640px"
+    wizard-padding: "{spacing.space-8}"
 ---
 
 # Nexus Local Web UI Design System — Dark Theme
@@ -488,10 +523,10 @@ components:
 | --- | --- | --- |
 | `brand-cyan` | `brand-cyan`, `blue-700` | Primary interactive, focus ring, nav accent |
 | `brand-cyan-800` | `blue-800` | Hover |
-| `brand-deep-blue` | `brand-deep-blue` | Primary button label on cyan fill |
-| `brand-white` | `brand-white` | Logo on deepest panels |
+| `brand-deep-blue` | `brand-deep-blue` | Logo text, not primary button (V1.94: primary is white-on-cyan) |
+| `brand-white` | `brand-white` | Logo on deepest panels; primary button text (white on cyan bg) |
 
-Dark primary button uses **cyan fill + deep blue text** (WCAG AA). `blue-*` names preserved for existing `{colors.blue-700}` consumers.
+Dark primary button uses **cyan fill + white text** (V1.94 contrast fix; was deep-blue text). `blue-*` names preserved for existing `{colors.blue-700}` consumers.
 
 Canvas/SOUL/World-KB brand-blue tokens resolve through `var(--color-blue-700)` and `color-mix(in srgb, var(--color-blue-700) N%, transparent)`. The `rgba(82,168,255,…)` frontmatter entries are reference approximations; CSS consumers use the variable chain — in the dark theme `--color-blue-700: #25d1e0` (brand-cyan). See DESIGN.md § Implementation Mapping.
 

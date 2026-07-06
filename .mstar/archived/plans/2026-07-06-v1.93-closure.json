@@ -1,0 +1,24 @@
+{
+  "id": "2026-07-06-v1.93-closure",
+  "status": "Done",
+  "title": "P-last — Closure: naming sweep (R-V192HYG-001) + QC tri-review + QA + compound + Profile B + PR",
+  "file": ".mstar/plans/2026-07-06-v1.93-closure.md",
+  "type": "closure",
+  "owner": "@project-manager",
+  "metadata": {
+    "iteration": "V1.93",
+    "iteration_refs": "v1.93-remote-access-polish-delivery-compass-v1.md",
+    "spec_integration_branch": "iteration/v1.93",
+    "merge_target": "iteration/v1.93",
+    "primary_spec": null,
+    "blocked_by": ["2026-07-06-v1.93-tls-robustness", "2026-07-06-v1.93-remote-connection-polish"],
+    "blocking": [],
+    "working_branch": "feature/v1.93-closure",
+    "done_at": "2026-07-06T16:30:00+0000",
+    "naming_sweep_commit": "09d0720b + fix-wave ef1b4efa",
+    "qc": "3/3 Approve (QC1 revalidation Approve after fix-wave ef1b4efa)",
+    "qa": "Pass eb6f5393",
+    "compound": "2 existing docs updated (surface-rename-hygiene-checklist + resolved-residual-verification); 0 new docs; 0 CONCEPTS entries",
+    "close_at": "2026-07-06T16:30:00+0000"
+  }
+}

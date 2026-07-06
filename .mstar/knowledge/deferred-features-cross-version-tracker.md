@@ -1,12 +1,12 @@
 # Deferred Features — Cross-Version Tracker v2
 
-**Quick status**: **V1.92 shipped (2026-07-05)** — Remote-Access Hardening (TLS for remote-bind + Remote Client Connection Model). V1.91 shipped (2026-07-05). Platform **paused**.
+**Quick status**: **V1.93 shipped (2026-07-06 via PR #121, merge `aec54e98`)** — Remote-Access Polish & Residual Convergence (swept all 8 V1.92 residuals). V1.94 active (Desktop App Onboarding & IA Pass). Platform **paused**.
 
-**V1.92 delivered (2026-07-06, merged via PR #120)**: TLS (auto self-signed Ed25519 cert via rcgen+rustls+axum-server; remote-bind gate fail-closed without cert) + remote client connection model (web-ui/desktop "Connect to Daemon"; endpoint + API key + TOFU cert-fingerprint pinning). CSRF resolved-by-design (header-key model). Swept V1.91 residuals 001/002/003/004. 8 low/nit V1.93 residuals registered.
+**V1.94 active (2026-07-06, Phase 1 in flight)**: Desktop App Onboarding & IA Pass — 5 structured author-reported UX defects swept as one first-impression story: setup wizard (workspace + daemon-ready + ACP agent detection), per-launch daemon-ready gate, two-tab sidebar IA (Creator | Orchestrator) + footer profile switcher, dark-bg → white-text button contrast fix, Strategies (Presets+Strategy) unification. Additive `POST /v1/daemon/agent-host/scan`. `@42ch/nexus-contracts` 0.20.0 → 0.21.0.
 
 **Purpose**: Single source of truth for **open** and **backlog** features deferred from delivery compasses. Closed/shipped history lives in shipped archive.
 **Scope**: `nexus` OSS repository only.
-**Created**: 2026-04-21 · **Last updated**: 2026-07-05 (V1.91 closeout: BL-13 marked shipped; companion batch triage delivered; V1.91 active → PR pending)
+**Created**: 2026-04-21 · **Last updated**: 2026-07-06 (V1.94 iteration-start: V1.93 ship row added to archive; 3 open residuals re-queued V1.95)
 
 ---
 
@@ -92,9 +92,9 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 ## 5) Quick index
 
-**Active iteration**: none (V1.92 shipped 2026-07-06 via PR #120, squash `feff6f36`).
+**Active iteration**: V1.94 — Desktop App Onboarding & IA Pass (Phase 1 in flight; compass [v1.94-desktop-onboarding-ia-pass-delivery-compass-v1.md](../iterations/v1.94-desktop-onboarding-ia-pass-delivery-compass-v1.md)).
 
-**Latest shipped**: [V1.92](../iterations/v1.92-remote-access-hardening-delivery-compass-v1.md) (Remote-Access Hardening — TLS + remote connection model, PR [#120](https://github.com/42ch-dev/nexus/pull/120) — 2026-07-06)
+**Latest shipped**: [V1.93](../iterations/v1.93-remote-access-polish-delivery-compass-v1.md) (Remote-Access Polish & Residual Convergence — PR [#121](https://github.com/42ch-dev/nexus/pull/121), merge `aec54e98` — 2026-07-06)
 
 **Full iteration index**: [iterations/README.md](../iterations/README.md)
 

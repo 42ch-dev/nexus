@@ -68,6 +68,9 @@ Repo-root `DESIGN.md` and `DESIGN.dark.md` — the cross-application source of t
 ### Reading Chrome
 The profile-specific, read-only typographic treatment applied to the manuscript reading surface in `apps/web`. Driven by `apps/web/DESIGN.md` `reading-chrome-*` tokens and the Work's `work_profile` (`novel`, `essay`, `game-bible`, `script`). Reading Chrome is strictly presentational: it never mutates `body_path`, outline, or timeline state.
 
+### Profile Switcher
+The sidebar footer UI component that lists Creator avatar icons and switches the active `creator_id` for the SPA's data queries. The daemon already supports multi-creator at the API level; the profile switcher is the missing UI. Single-creator case: exactly one avatar plus a "+" affordance to add a new Creator.
+
 ### @42ch/nexus-ui
 Publishable npm workspace package (`packages/nexus-ui`) exporting brand assets (SVG logos), token data, and CSS theme entry points. PNG logo sources are Git LFS–tracked for provenance; canonical SVGs are regular-git text. V1.83 ships assets/tokens/theme only — React component library deferred.
 
@@ -86,6 +89,12 @@ The local background process within `nexus42` that manages the World KB SQLite d
 
 ### Daemon API
 The HTTP surface served by the Daemon Runtime, reachable under `/v1/daemon/*` (previously `/v1/local/*`). It exposes world/knowledge, creator, orchestration, and manuscript endpoints to the CLI, web SPA, and desktop shell. By default it binds to loopback; remote bind requires both `NEXUS42_DAEMON_API_KEY` and `NEXUS_DAEMON_REMOTE_BIND=1`.
+
+### Setup Wizard
+The first-launch 4-step flow (welcome + workspace → daemon ready → ACP agent detection → done) gated by a `setup_completed` marker in `~/.nexus42/config.toml`. Triggers again if the marker is cleared. Every app launch (not only first) verifies the daemon is running before entering the main UI.
+
+### ACP Agent Detection
+The combined registry-list + PATH-scan operation the Daemon API exposes at `POST /v1/daemon/agent-host/scan`, returning candidate agents annotated with local-install availability. The scan probes only registry-known binary names, with bounded concurrency and short `--version` timeouts (no user-supplied commands are executed during scan).
 
 ### Local Database
 SQLite-based (via sqlx) persistent storage. Contains World KB tables, creator profiles, timeline data, and orchestration state. Single database per home directory.
@@ -147,3 +156,6 @@ Paths are relative to the repo root. Each entry links the term to its authoritat
 | Workspace (Canvas) | Canvas, Outline, Manuscript | [canvas-strategy-surface.md](.mstar/knowledge/specs/canvas-strategy-surface.md) |
 | Web UI | Desktop Shell, Daemon Runtime, NexusClient | [web-ui.md](.mstar/knowledge/specs/web-ui.md) |
 | Desktop Shell | Web UI, Sidecar, Tauri IPC | [desktop-shell.md](.mstar/knowledge/specs/desktop-shell.md) |
+| Setup Wizard | Desktop Shell, Daemon Runtime, ACP Agent Detection | [desktop-shell.md](.mstar/knowledge/specs/desktop-shell.md) |
+| ACP Agent Detection | Desktop Shell, Daemon API, ACP | [desktop-shell.md](.mstar/knowledge/specs/desktop-shell.md) |
+| Profile Switcher | Web UI, Creator | [web-ui.md](.mstar/knowledge/specs/web-ui.md) |

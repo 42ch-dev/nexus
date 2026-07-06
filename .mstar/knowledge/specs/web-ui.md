@@ -1,6 +1,6 @@
 # Local Web UI (Control Room + Setup → Content-Authoring) — Specification v1
 
-**Status**: Shipped (V1.65) — Control Room + Setup MVP (V1.64) **+ Content-Authoring UI stage (V1.65, §13)**: outline rich-text editor + chapter structure table + structure CRUD (slug/wc/volume/status; title display-only) + body read-only render + browser "Copy path" context menu. Tauri desktop shell + body full-text editor + "open-with" → **V1.66** (compass §0 Q5). QC tri-review Approve (fix-wave-1) + QA Pass. **+ V1.67 Surface Convergence & De-risk (§15)** + **V1.69 Design System Maturation & Canvas Draft** (`apps/web/DESIGN.md` Production + Canvas Draft) + **V1.70 Canvas Strategy Implement α (§16)** + **CI/desktop-build optimization** (parallel ops track; PR path filter narrowed + release-gated full build) + **V1.71 Canvas Strategy Write-Boundary (§17)** (Strategy patch routes, graphRevision conflict policy, conflict modal UX, canvas-write tokens) + **V1.72 Canvas Outline+Timeline β (§18)** (3 outline/timeline patch routes `outline.patch_structure` / `outline.patch_chapter` / `timeline.patch_event` + outlineRevision conflict policy + outline-flavored conflict modal UX + non-spatial alternate views + 8 outline/timeline canvas-write DESIGN.md tokens). V1.71 `wire_contracts_changed: TRUE` for Strategy; V1.72 `wire_contracts_changed: TRUE` for additive Outline+Timeline (`@42ch/nexus-contracts` 0.7.0 → 0.8.0); V1.73 `wire_contracts_changed: TRUE` for additive World KB (`@42ch/nexus-contracts` 0.8.0 → 0.9.0). **V1.74 Shipped** — Canvas World KB Relationships β (§20) with typed relationship edges, `world_kb.patch_relationship`, relationship inspector, non-spatial relationship table, and KB-flavored conflict modal reuse.
+**Status**: Shipped (V1.65) — Control Room + Setup MVP (V1.64) **+ Content-Authoring UI stage (V1.65, §13)**: outline rich-text editor + chapter structure table + structure CRUD (slug/wc/volume/status; title display-only) + body read-only render + browser "Copy path" context menu. Tauri desktop shell + body full-text editor + "open-with" → **V1.66** (compass §0 Q5). QC tri-review Approve (fix-wave-1) + QA Pass. **+ V1.67 Surface Convergence & De-risk (§15)** + **V1.69 Design System Maturation & Canvas Draft** (`apps/web/DESIGN.md` Production + Canvas Draft) + **V1.70 Canvas Strategy Implement α (§16)** + **CI/desktop-build optimization** (parallel ops track; PR path filter narrowed + release-gated full build) + **V1.71 Canvas Strategy Write-Boundary (§17)** (Strategy patch routes, graphRevision conflict policy, conflict modal UX, canvas-write tokens) + **V1.72 Canvas Outline+Timeline β (§18)** (3 outline/timeline patch routes `outline.patch_structure` / `outline.patch_chapter` / `timeline.patch_event` + outlineRevision conflict policy + outline-flavored conflict modal UX + non-spatial alternate views + 8 outline/timeline canvas-write DESIGN.md tokens). V1.71 `wire_contracts_changed: TRUE` for Strategy; V1.72 `wire_contracts_changed: TRUE` for additive Outline+Timeline (`@42ch/nexus-contracts` 0.7.0 → 0.8.0); V1.73 `wire_contracts_changed: TRUE` for additive World KB (`@42ch/nexus-contracts` 0.8.0 → 0.9.0). **V1.74 Shipped** — Canvas World KB Relationships β (§20) with typed relationship edges, `world_kb.patch_relationship`, relationship inspector, non-spatial relationship table, and KB-flavored conflict modal reuse. **V1.94 Draft amendment** — §29 Information Architecture (V1.94): two-tab sidebar, nested nav, footer Profiles switcher, daemon status bar simplification, Strategies unification, button contrast invariant.
 **Document class**: Feature line  
 **Created**: 2026-06-24  
 **Scope**: Nexus local Web UI product contract — placement (`apps/web`), stack, daemon-served model, `tauri-api` adapter boundary, MVP surface (Control Room + Setup), Content-Authoring stage (V1.65), Tauri / body-editor roadmap (V1.66), and strict separation from the private cloud SaaS  
@@ -994,3 +994,97 @@ When a highlight's stored offsets no longer fit the current body text (after a b
 - Annotation range reconciliation or fingerprinting across body edits.
 - Rich-text or threaded annotations on highlights.
 - Real-time sync or cloud features.
+
+---
+
+## 29. Information Architecture (V1.94)
+
+**Status**: Draft (V1.94) — normative contract frozen by P-1; implement authority P1.
+**Iteration compass**: [v1.94-desktop-onboarding-ia-pass-delivery-compass-v1.md](../../iterations/v1.94-desktop-onboarding-ia-pass-delivery-compass-v1.md) §1 (locked decisions D1, E1, F1, C1, G1) + §5 (acceptance criteria).
+
+### 29.1 Purpose
+
+Replace the V1.64 flat 10-item sidebar with a two-tab information architecture (Creator | Orchestrator) with nested nav, footer profile switcher, and simplified daemon status bar. The reshape addresses author-reported defects 3 (menu IA) and 4 (footer profiles) as one coherent IA pass.
+
+### 29.2 Sidebar — two-tab structure
+
+The sidebar renders at `lg`+ (≥961px) as a fixed left panel. Below `lg`, the two-tab structure collapses to a top dropdown or pill scroller.
+
+**Two top-level tabs** (composited as horizontal tab bar at the top of the sidebar):
+
+| Tab | Top-level items | Nested children |
+|-----|----------------|-----------------|
+| **Creator** | Works | (per-Work navigation nest: Chapters, Findings) |
+| | Creator | Memory, SOUL |
+| **Orchestrator** | Runtime | Sessions, Schedule, Capabilities |
+| | Strategies | (single entry: `/strategies` list → `/strategies/:presetId` canvas detail) |
+
+**Excluded from sidebar**:
+- **Connect** — moves to Settings (reachable from app menu or Settings page; not a sidebar item).
+- **Daemon status** — leaves sidebar; lives in the status bar (running = restart-icon only) and the main-banner (degraded/error).
+
+The old 10-item flat `NAV_ITEMS` array is retired. Tab switch swaps the visible nav items; the footer Profiles row is always visible regardless of active tab.
+
+### 29.3 Nested nav behaviour
+
+- Top-level items expand/collapse nested children.
+- Per-Work nested nav (Chapters, Findings) is contextual to the currently active Work.
+- Creator nested nav (Memory, SOUL) is static per the creator scope.
+- Runtime nested nav (Sessions, Schedule, Capabilities) is static.
+- Strategies is a single top-level entry under Orchestrator — no nesting; clicking opens `/strategies` list.
+
+### 29.4 Strategies unification
+
+The existing `/presets` (list) and `/strategy` (canvas) routes collapse to:
+
+- **`/strategies`** — list view (replaces `presets-page.tsx` as entry).
+- **`/strategies/:presetId`** — canvas detail view (preserves V1.70–V1.75 canvas surface verbatim).
+
+**Preservation invariant**: The full V1.70–V1.75 canvas surface is preserved verbatim at `/strategies/:presetId` — React Flow behaviour, write-boundary (strategy patch routes, graphRevision), conflict modals (strategy-flavored copy), non-spatial alternate views, keyboard paths, and all canvas-write DESIGN.md tokens. This is an entry-point reshape only; no canvas rewrite.
+
+**Redirect compatibility**: `/presets` → `/strategies` (301/302); `/strategy` → `/strategies/:presetId` (requires a stored active preset ID or redirects to list). Deep links from V1.70–V1.75 must resolve.
+
+### 29.5 Footer profile switcher
+
+Rendered at the bottom of the sidebar (always visible regardless of active tab). Slack/Chrome-style horizontal row of Creator avatar icons.
+
+**Interaction contract**:
+- **Click / Enter/Space**: switches `active_creator_id`; dependent queries refetch.
+- **Keyboard**: arrow-left/right to navigate avatars; Home/End for first/last; Esc closes any transient UI (modal, dropdown).
+- **"+" CTA**: opens a lightweight create-Creator modal consuming the existing `POST /v1/daemon/creators` endpoint.
+- **Single-Creator case**: exactly one avatar + "+". Clicking the single avatar is a no-op (no error toast). The "+" is the only call-to-action.
+- **Persistence**: `active_creator_id` stored in `localStorage` (key: `nexus:activeCreatorId`) for browser; Tauri store equivalent for desktop. Restored on reload.
+- **Avatar fallback**: initials (first character of `display_name`) or generic icon when no image; must be accessible (not color-only).
+
+### 29.6 Daemon status bar simplification
+
+The V1.64 5-state pill (`starting`/`healthy`/`degraded`/`stopped`/`error`) + always-enabled Start button is retired. The simplified contract:
+
+- **Running/healthy**: status bar shows **only** a restart-icon button (no pill, no state text, no Start button).
+- **Degraded/error/stopped/crash**: a **top-of-main-content banner** (`main-banner.tsx`, new) surfaces the failure with error detail + Restart CTA. Not a sidebar item.
+- **Never**: enabled-while-broken Start button; silent hang during daemon startup.
+
+The daemon status bar subscribes to `onDaemonStatusChanged` (existing Tauri event / daemon SSE).
+
+### 29.7 Button contrast invariant
+
+Recorded in `apps/web/DESIGN.md` §Component Primitives/Button and `apps/web/DESIGN.dark.md`:
+
+> **Every button (or button-like element) with a dark, primary, or saturated background MUST use light/white text in both light and dark themes.**
+
+The dark primary token fix: `dark:bg-brand-cyan dark:text-brand-deep-blue` → `dark:bg-brand-cyan dark:text-white` (matching hover/active). The `DESIGN.dark.md` frontmatter `components.button.primary.textColor` changes from `"{colors.brand-deep-blue}"` to `"#ffffff"`.
+
+P1 implements a sweep audit of all button call sites in `apps/web/src/**` for the dark-bg → light-text invariant. Vitest snapshot coverage (light + dark themes) gates regressions.
+
+### 29.8 Browser-build contract
+
+The wizard and per-launch daemon-ready gate are **desktop-first**:
+- **Desktop (Tauri)**: `setup_completed` read from Tauri command `get_setup_completed()`; wizard renders when false.
+- **Browser**: defaults `setup_completed = true` (i.e. no wizard). The daemon-ready gate is a no-op or instant pass. No Tauri command calls are assumed in the browser build. The browser SPA must not regress — existing Vite dev / static-serve flows continue unchanged.
+
+### 29.9 Non-goals
+
+- Full multi-creator CRUD / profile management (rename, delete, avatar upload) — footer switcher only selects existing or creates via existing endpoint.
+- Multi-workspace UI / workspace switcher.
+- Agent detection during non-first-launch.
+- Mobile full rewrite (the `<lg` collapse preserves the two-tab structure as a dropdown/pill scroller but is not optimized for touch-first patterns).

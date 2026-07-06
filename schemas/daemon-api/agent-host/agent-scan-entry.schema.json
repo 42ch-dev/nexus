@@ -1,0 +1,40 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/agent-host/agent-scan-entry.schema.json",
+  "schema_version": 1,
+  "title": "Nexus AgentScanEntry",
+  "description": "A single ACP agent entry annotated with local PATH-install availability. Returned by POST /v1/daemon/agent-host/scan. Each entry maps to one registry agent (or a custom wizard-supplied launch command) with install status and best-effort version.",
+  "type": "object",
+  "required": ["name", "installed"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Agent display name from the ACP registry."
+    },
+    "registry_agent_id": {
+      "type": ["string", "null"],
+      "description": "Matching ACP registry agent ID (e.g. 'claude-acp'). Null for custom wizard-supplied entries that have no registry match."
+    },
+    "launch_command": {
+      "type": ["string", "null"],
+      "description": "Known launch command for this agent. Sourced from the registry's per-platform binary cmd field (e.g. 'claude-acp') or supplied by the user in the wizard's custom path input. Null when neither is available."
+    },
+    "installed": {
+      "type": "boolean",
+      "description": "True when the binary referenced by launch_command (or derived from registry distribution metadata) is found on the system PATH via a which-equivalent lookup."
+    },
+    "version": {
+      "type": ["string", "null"],
+      "description": "Best-effort version string from a `--version` probe of the installed binary. Null when the binary is not installed, or when the version probe fails or times out (≤2s timeout)."
+    },
+    "description": {
+      "type": ["string", "null"],
+      "description": "Agent description from the ACP registry. Null when no registry entry exists (custom wizard entries)."
+    },
+    "icon_url": {
+      "type": ["string", "null"],
+      "description": "Agent icon URL from the ACP registry. Null when no registry entry or icon is available."
+    }
+  },
+  "additionalProperties": false
+}

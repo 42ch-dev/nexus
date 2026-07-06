@@ -541,6 +541,48 @@ components:
       color: "{colors.gray-900}"
       marginTop: "24px"
 ---
+  # ── V1.94 Footer Profile Switcher — sidebar footer avatar row tokens ──
+  # Avatar fallback uses initials (display_name first char) or a generic icon.
+  # Single-creator case: one avatar + "+". All tokens additive; no prior names
+  # modified. Token names frozen verbatim (do not rename). Dark values in
+  # DESIGN.dark.md.
+  footer-profile:
+    avatar-size: "32px"
+    avatar-rounded: "{rounded.pill}"
+    avatar-bg: "{colors.gray-alpha-100}"
+    avatar-bg-hover: "{colors.gray-alpha-200}"
+    avatar-bg-active: "{colors.blue-700}"
+    avatar-text: "{colors.gray-1000}"
+    avatar-text-active: "#ffffff"
+    avatar-fallback-bg: "{colors.gray-alpha-200}"
+    avatar-fallback-text: "{colors.gray-700}"
+    add-button-bg: "transparent"
+    add-button-border: "{colors.gray-alpha-400}"
+    add-button-text: "{colors.gray-700}"
+    add-button-hover-bg: "{colors.gray-alpha-100}"
+    add-button-hover-border: "{colors.gray-alpha-500}"
+    add-button-hover-text: "{colors.gray-1000}"
+    gap: "{spacing.space-2}"
+
+  # ── V1.94 Setup Wizard Step Chrome — step indicator tokens ──
+  # Steps render as numbered circles + connecting lines. Active/complete/pending
+  # states distinguish step progression. Token names frozen verbatim. Dark
+  # values in DESIGN.dark.md.
+  setup-wizard-step:
+    step-circle-size: "32px"
+    step-circle-active-bg: "{colors.blue-700}"
+    step-circle-active-text: "#ffffff"
+    step-circle-complete-bg: "{colors.green-700}"
+    step-circle-complete-text: "#ffffff"
+    step-circle-pending-bg: "{colors.gray-alpha-100}"
+    step-circle-pending-text: "{colors.gray-700}"
+    step-connector: "{colors.gray-alpha-400}"
+    step-label-typography: "{typography.label-14}"
+    step-label-active-color: "{colors.gray-1000}"
+    step-label-pending-color: "{colors.gray-700}"
+    wizard-max-width: "640px"
+    wizard-padding: "{spacing.space-8}"
+---
 
 # Nexus Local Web UI Design System
 
@@ -690,7 +732,15 @@ Component token values live in frontmatter `components:`. All components must ex
 
 ### Button
 
-Variants and sizes: see frontmatter `components.button`. The preset `Validate` action uses `primary` when it is the main form action, or `secondary` with a `blue-700` leading icon when paired with a separate save action. It must read as reassurance (“is this safe?”), not as a debug-only tool.
+Variants and sizes: see frontmatter `components.button`. The preset `Validate` action uses `primary` when it is the main form action, or `secondary` with a `blue-700` leading icon when paired with a separate save action. It must read as reassurance ("is this safe?"), not as a debug-only tool.
+
+#### Button Contrast Invariant (V1.94)
+
+> **Every button (or button-like element) with a dark, primary, or saturated background MUST use light/white text in both light and dark themes. No dark/primary/saturated background button may use a dark text color in either theme.**
+
+This invariant applies to all `button` variants, nav active states, banner CTAs, wizard primary CTAs, and any component with a `button-like` role (clickable, saturated background). The invariant is codified in the frontmatter tokens: `primary.textColor` = `#ffffff` in both themes; dark theme `brand-cyan` bg = `#ffffff` text. P1 audits all call sites in `apps/web/src/**`; vitest snapshot (light + dark) gates regressions.
+
+**Dark primary token fix (V1.94):** `dark:bg-brand-cyan dark:text-white` (was `dark:text-brand-deep-blue`). Hover/active text remains white.
 
 ### Input / Select / Textarea
 

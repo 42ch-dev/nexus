@@ -15,7 +15,9 @@
 - [web-ui-design-requirements.md](web-ui-design-requirements.md) §6 (desktop shell surface design requirements)
 - [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md) / `host_tool_handlers.rs` (W-002 path-guard reference for `openWith`/`revealInFinder` scope)
 - `apps/web/DESIGN.md` (Desktop Shell Supplement — window/menu/dialog/context-menu/status tokens)
-- [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md) — `wire_contracts_changed: false` (V1.66); desktop-native methods are Tauri IPC, not Daemon API wire
+- [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md) — `wire_contracts_changed: false` (V1.66); desktop-native methods are Tauri IPC, not Daemon API wire. **V1.94:** `wire_contracts_changed: true` (additive `POST /v1/daemon/agent-host/scan` schemas; `@42ch/nexus-contracts` 0.20.0 → 0.21.0).
+- [daemon-runtime.md](daemon-runtime.md) — health-probe plumbing reused for per-launch daemon-ready gate; `setup_completed` field additive to `~/.nexus42/config.toml`
+- [web-ui.md](web-ui.md) — sidebar IA (two-tab + nested nav + footer), daemon status bar simplification, Strategies unification, button contrast invariant
 
 ---
 
@@ -113,4 +115,109 @@ Window chrome / app menu / native dialogs / desktop context menu / daemon-status
 
 ---
 
-*Desktop shell feature-line spec. V1.66 Draft (Phase 2b `@architect`); flips Shipped (V1.66) at P-last. The compass is authoritative for scope/batching/residual tracking; this spec is the durable contract.*
+---
+
+## 13. Setup Wizard (V1.94)
+
+**Status**: Draft (V1.94) — normative contract frozen by P-1; implement authority P0 + P1.
+**Iteration compass**: [v1.94-desktop-onboarding-ia-pass-delivery-compass-v1.md](../../iterations/v1.94-desktop-onboarding-ia-pass-delivery-compass-v1.md) §1 (locked decisions A2+B1, C1, H1) + §5 (acceptance criteria).
+
+### 13.1 Purpose
+
+The desktop app's first-launch flow walks a new author through workspace creation, daemon startup, and ACP agent selection before entering the main UI. The wizard is gated by a `setup_completed` marker — absent or `false` → wizard; `true` → skip.
+
+### 13.2 Four-step flow
+
+| Step | Title | Action | UX states |
+|------|-------|--------|-----------|
+| 1 | Welcome + Workspace | Resolve default workspace (`~/Documents/nexus42/default/` via `dirs::document_dir()`); create directory if absent. Existing `~/.nexus42/config.toml` values are preserved — no forced migration. | Path display + "Use default" / "Choose custom" affordance. |
+| 2 | Daemon Ready | Start the bundled `nexus42` sidecar; poll `GET /v1/daemon/runtime/health` until healthy. Reuses the existing `HEALTH_START_TIMEOUT` (15s) + `SidecarManager` lifecycle from §7. | "Starting daemon…" transient → "Daemon ready" (success) OR error state distinguishing timeout vs port conflict vs crash. Never a silent hang. |
+| 3 | ACP Agent Detection | Call `POST /v1/daemon/agent-host/scan`; display registry entries annotated with PATH-install status. Default recommendation = first `installed: true` entry with "Recommended" badge. | Scanning transient → agent list with selectable cards (name, version, installed badge, "Recommended" badge) → "No agents found" state with custom `launch_command` input + "Continue with custom" CTA. |
+| 4 | Done | Persist the selected agent + `setup_completed = true` in `~/.nexus42/config.toml`; transition to main UI. | Confirmation screen; "Finish" CTA launches main UI. |
+
+### 13.3 `setup_completed` marker
+
+- **Location**: `~/.nexus42/config.toml` field `setup_completed: bool`.
+- **Semantics**: absent or `false` = first-launch (wizard); `true` = skip wizard, enter per-launch daemon-ready gate.
+- **Additive**: the field is optional; existing config files without it are treated as absent (= first-launch). TOML deserialiser must use `#[serde(default)]` or equivalent — the field must tolerate unknown config shapes.
+- **Persistence**: the Tauri shell writes `setup_completed = true` on wizard completion via the existing `set_setup_completed` command (P0). The CLI config path (`apps/nexus42/src/config.rs`) accepts the field additively.
+- **Reset**: Settings exposes a "Re-run setup" action that clears the marker. Missing marker = fail-safe to wizard.
+
+### 13.4 Per-launch daemon-ready gate
+
+Every app launch — not only first launch — gates entry to the main UI on a healthy daemon probe:
+
+- `setup_completed === true` → show a brief "Starting daemon…" splash (full-screen, minimal, not the main UI shell).
+- Poll `GET /v1/daemon/runtime/health` (reuses `wait_for_first_health` in `sidecar.rs`).
+- On first successful probe → transition to main UI.
+- On failure after `HEALTH_START_TIMEOUT` (15s) → error surface that distinguishes timeout, port conflict (port 8420 already in use), and daemon crash. The surface must:
+  - (i) Show clear copy distinguishing the failure mode.
+  - (ii) Offer an actionable next step (Restart CTA or "Kill conflicting process" hint).
+  - (iii) Never silently hang or show an enabled-while-broken Start button.
+- The wizard step 2 and the per-launch gate are two consumers of the same health-probe state machine; failure paths are plumbed by P0 (gate state + signals); visual copy is P1.
+
+### 13.5 Default workspace
+
+- **Path**: `~/Documents/nexus42/default/` (cross-platform via `dirs::document_dir()`).
+- **Fallback**: if `dirs::document_dir()` returns `None`, fall back to `dirs::home_dir().join("Documents").join("nexus42").join("default")` and log a warning.
+- **Resolution contract**: both `apps/nexus42/src/config.rs` (CLI/daemon-side) and `apps/desktop/src-tauri/src/lib.rs` (Tauri shell) MUST agree — the workspace-default resolver is shared by both.
+- **Existing installs**: `workspace_path` already set in `~/.nexus42/config.toml` is preserved verbatim. The default applies **only when `workspace_path` is unset**.
+
+---
+
+## 14. ACP Agent Detection (V1.94)
+
+**Status**: Draft (V1.94) — normative contract frozen by P-1; implement authority P0.
+
+### 14.1 Endpoint
+
+**`POST /v1/daemon/agent-host/scan`** — additive, no breaking change to existing agent-host routes.
+
+**Handler**: `crates/nexus-daemon-runtime/src/api/handlers/agent_host.rs` — new `scan` function, wired into the existing agent-host router (same route group as `health`, `sessions`).
+
+**Consumers**: P1 setup wizard step 3 (selectable agent cards); future Settings→Agent detection UI (deferred).
+
+### 14.2 Contract shapes
+
+Frozen in `schemas/daemon-api/agent-host/scan-request.schema.json` and `schemas/daemon-api/agent-host/scan-response.schema.json`:
+
+- **Request** (`AgentScanRequest`): optional `filter` (string enum: `"installed"` | `"all"`; default `"all"`); optional `registry_refresh` (bool; default `false` — uses cached registry data unless explicitly refreshed).
+- **Response** (`AgentScanResponse`): `agents: AgentScanEntry[]`. Each entry:
+  - `name` (string, required) — agent display name from registry.
+  - `registry_agent_id` (string | null) — matching ACP registry agent ID; null for custom entries.
+  - `launch_command` (string | null) — known launch command (from registry binary `cmd` or user-supplied); null when neither is available.
+  - `installed` (bool, required) — `true` when the binary referenced by `launch_command` is found on PATH.
+  - `version` (string | null) — best-effort `--version` probe result; null when probing fails or times out.
+  - `description` (string | null) — agent description from registry.
+  - `icon_url` (string | null) — agent icon URL from registry.
+
+### 14.3 PATH-probe safety boundary
+
+The scan is a read-only local operation executed by the daemon (not the frontend). It MUST observe the following safety constraints:
+
+1. **Registry-known binary names only**: the probe extracts binary names from the ACP registry cache (`crates/nexus-acp-host/src/registry.rs` → `AgentEntry.distribution.binary.<platform>.cmd`). No user-supplied commands are executed during scan.
+2. **Bounded concurrency**: probe at most N agents concurrently (recommended N=4); the probe is a `which`-equivalent PATH lookup followed by a `--version` subprocess call with a 2-second timeout per binary.
+3. **Short `--version` timeout**: each `--version` subprocess is spawned with a ≤2s timeout. A timeout or non-zero exit is treated as "version unknown" — the agent is still reported as `installed: true` if the PATH lookup succeeded.
+4. **No shell expansion**: binary names are executed directly (not through a shell); arguments are fixed (`--version` only); no `$PATH`, `~`, or other expansion.
+5. **No user-supplied commands during scan**: the `launch_command` field in the response is populated from registry data or supplied separately outside the scan; the scan's subprocess boundary never runs a user-provided string.
+
+**QC2 review note**: the PATH-probe execution boundary is reviewed by qc2 (security lens) at P-last. The constraints above are the architectural safety contract; implementers must not loosen them.
+
+### 14.4 Integration with registry cache
+
+The scan handler composes two existing subsystems:
+
+1. **`RegistryClient::get_registry()`** (`crates/nexus-acp-host/src/registry.rs`) — provides the cached agent list (stale-while-revalidate). The `registry_refresh: true` flag on the request forces `RegistryClient::refresh()` before scanning.
+2. **`scan_local_installations()`** (new helper in `crates/nexus-acp-host/src/registry.rs`) — PATH probe of registry-known binary names. Returns `Vec<LocalInstallation { binary, version: Option<String> }>`.
+
+The handler joins the registry list with the scan results to produce the annotated `AgentScanEntry[]`.
+
+### 14.5 Non-goals
+
+- Agent re-detection on non-first launch (deferred — scan is used by the wizard only; power-user re-scan is a Settings action).
+- Agent installation / download / update (registry-only detection; the user manages their own ACP agent binaries).
+- Full `AgentProfile` CRUD API (the wizard picks a default; CRUD is a separate future iteration).
+
+---
+
+*Desktop shell feature-line spec. V1.66 Draft (Phase 2b `@architect`); flips Shipped (V1.66) at P-last. **V1.94 amendment** (§13–14) adds Setup Wizard + ACP Agent Detection contracts; frozen by P-1. The compass is authoritative for scope/batching/residual tracking; this spec is the durable contract.*

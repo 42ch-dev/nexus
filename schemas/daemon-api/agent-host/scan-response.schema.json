@@ -1,0 +1,19 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/agent-host/scan-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus AgentScanResponse",
+  "description": "Response for POST /v1/daemon/agent-host/scan. Returns the ACP registry agent list annotated with local PATH-install availability. Additive V1.94 endpoint.",
+  "type": "object",
+  "required": ["agents"],
+  "properties": {
+    "agents": {
+      "type": "array",
+      "items": {
+        "$ref": "https://nexus42.invalid/schemas/daemon-api/agent-host/agent-scan-entry.schema.json"
+      },
+      "description": "List of ACP agent entries annotated with local PATH-install status. Includes both registry-known agents and any custom-launch-command entries from the wizard."
+    }
+  },
+  "additionalProperties": false
+}
