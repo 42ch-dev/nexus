@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-07-06-v1.93-closure"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-07-06"
 ---
 
@@ -179,3 +179,92 @@ Per `mstar-review-qc` § "门禁规则": Critical=0 but Warning > 0 → Request 
 - W-001, W-002, W-003 should be added to `residual_findings["2026-07-06-v1.93-closure"]` with `severity: high` (correctness of normative spec) — **only if the PM/QA elects to ship the closure without fixing them in this iteration**. My recommendation is to **fix in this iteration** (bounded scope, no behavioral risk) and not leave as open residual.
 - S-001 may be promoted to a `low` open residual and addressed in V1.94 P0 alongside the next `connection-storage` change.
 - S-002–S-006 are non-blocking; do not register.
+
+---
+
+## Revalidation (2026-07-06, targeted re-review post fix-wave)
+
+**Fix-wave commit reviewed:** `ef1b4efa` — "docs: V1.93 P-last fix-wave — correct naming-sweep double-replace (W-001) + broken anchor (W-002)"
+**Diff basis:** 7 files changed, 14 insertions(+), 14 deletions(-) — all `.md` (no runtime code, no test code)
+
+### Checkout verification
+
+- Working branch (verified): `iteration/v1.93` ✓
+- Review cwd (verified): `/Users/bibi/workspace/organizations/42ch/nexus` ✓
+- HEAD (verified): `ef1b4efa` — matches fix-wave commit ✓
+- `git rev-parse --short HEAD` → `ef1b4efa` ✓
+
+### W-001 (double-naming stutters) — **RESOLVED**
+
+**Independent re-grep (whole repo, scoped):**
+
+```
+$ rg -n "Daemon Daemon|daemon Daemon|Daemon daemon" .mstar/knowledge/specs/ CONCEPTS.md STRATEGY.md schemas/AGENTS.md crates/
+(no output — 0 hits)
+```
+
+Repo-wide sweep (`git grep -n -E "daemon Daemon|Daemon Daemon|Daemon daemon"`) returns 0 stutter hits in the current spec / runtime / crates / apps trees. The only mentions of the literal regex pattern are in:
+
+1. `.mstar/knowledge/conventions/surface-rename-hygiene-checklist.md:49` — a meta-checklist that documents the *pattern to search for* (intentional, this is a hygiene gate).
+2. Historical QC reports in `.mstar/plans/reports/2026-07-05-v1.90-closure/` and `.mstar/plans/reports/2026-07-06-v1.93-closure/` (this report) — audit trail of the W-001 issue and its fix; not source-of-truth normative spec text.
+
+Both are **acceptable**: the checklist is a guard (not a stutter), and the QC reports are retrospective references. No live normative spec carries a `Daemon Daemon` / `daemon Daemon` / `Daemon daemon` stutter.
+
+**Cross-check against V1.93 cumulative diff** (`git diff main...iteration/v1.93 -- .mstar/knowledge/specs/ | grep -E '^\+.*daemon Daemon' | wc -l` → `0`; same for `Daemon Daemon` and `Daemon daemon`) — the cumulative V1.93 diff introduces **zero** new stutters after the fix-wave. The 11 originally-flagged "daemon Daemon" / "Daemon Daemon" constructions are fully gone from the net diff.
+
+**Spot-check coherence (2-3 of the fixed sites, in-context):**
+
+- `.mstar/knowledge/specs/daemon-runtime.md:7` — now reads:
+  > "**V1.90 amendment** (§14: Daemon API remote bind gate; normative surface **renaming from Local API to Daemon API** with `/v1/daemon/` path prefix)"
+  ✓ Source/target unambiguous: "Local API" → "Daemon API" is the actual V1.90 amendment. No tautology.
+
+- `.mstar/knowledge/specs/daemon-runtime.md:552` (the V1.90 note inside §13) — now reads:
+  > "References to **'Local API'** in this section title and in V1.86 iteration names are historical only."
+  ✓ The legacy name (Local API) is correctly flagged as historical; the new surface (Daemon API) is correctly named in the section title and the note body. Intent restored.
+
+- `.mstar/knowledge/specs/local-cloud-crate-architecture.md:274` — now reads:
+  > `## 6. Daemon API (principles)`
+  ✓ No double word in heading; the `Daemon Local API` → `Daemon Daemon API` artifact is gone.
+
+- `.mstar/knowledge/specs/cli-spec.md:429, 452, 727` — three sites now read "...via Daemon API" / "...via Daemon API; it does not replace..." / "...Daemon API 不得承载...". All semantically clean: `daemon Daemon API` → `Daemon API`. (Note: the `via` / `不得承载` constructions still convey the right meaning — the daemon implements the Daemon API, not the other way around.)
+
+- `.mstar/knowledge/specs/local-runtime-boundary.md:107, 140, 243` — all three sites now read "...not Daemon API" / "...retired from the Daemon API" / "...not Daemon API". Clean.
+
+- `.mstar/knowledge/specs/creator-challenge-solver.md:9` — now reads: `**not** Daemon API.` Clean.
+
+- `.mstar/knowledge/specs/schemas-directory-layout.md:89` — now reads: `**Not** Daemon API proxies ...`. Clean.
+
+**Verdict on W-001:** All 6 cited files are corrected, all 11 additional "daemon Daemon" / "Daemon Daemon" constructions are resolved, no regressions introduced, and the cumulative V1.93 spec diff now contains zero stutters. **W-001 is RESOLVED.**
+
+### W-002 (broken anchor) — **RESOLVED**
+
+**Direct check:**
+
+```
+$ grep -n "4-local-api-contract-analysis\|4-daemon-api-contract-analysis" \
+    .mstar/knowledge/specs/acp-client-tech-spec.md
+16:4. [Daemon API Contract Analysis](#4-daemon-api-contract-analysis)
+
+$ grep -n "^## 4\." .mstar/knowledge/specs/acp-client-tech-spec.md
+300:## 4. Daemon API Contract Analysis
+```
+
+The TOC link slug `#4-daemon-api-contract-analysis` now matches the GitHub Markdown auto-generated anchor for the heading `## 4. Daemon API Contract Analysis`. The link is functional. **W-002 is RESOLVED.**
+
+### W-003 (URL prefix partial-rename / `/v1/local/*` stragglers) — **DEFERRED-PER-PM (acknowledged, not re-litigated)**
+
+Per PM direction, W-003 is accepted as a tracked residual for a future spec-hygiene pass. This is a pre-existing V1.90 straggler (12 spec files still cite `/v1/local/*`), not a V1.93 regression. PM owns the residual lifecycle entry in `residual_findings["2026-07-06-v1.93-closure"]` (this is the SSOT for open residuals per `.mstar/AGENTS.md` § Residual detail prose). As a QC reviewer I do not register or close `residual_findings` entries — I acknowledge PM's deferral and do not re-litigate.
+
+### Updated Verdict
+
+- Critical findings: **0**
+- Unresolved Warning findings: **0** (W-001 + W-002 both RESOLVED; W-003 deferred-per-PM is no longer blocking the QC verdict — the doc has shipped the bounded fixes for the in-iteration blockers)
+- Suggestion findings: 6 (unchanged from V1; non-blocking, no regression introduced by the fix-wave)
+
+Per `mstar-review-qc` § "门禁规则": Critical=0 and Warning=0 (unresolved) → **Approve**.
+
+**Final Verdict: Approve.**
+
+The fix-wave is surgical, scoped to the three concrete W-001/W-002 defect sites, and produces semantically correct spec text. The runtime code, tests, and refactors in V1.93 P0/P1 are clean; W-001/W-002 are no longer blockers. W-003 is tracked as a deferred residual under PM's lifecycle, which is the correct call for a pre-existing cross-iteration hygiene item.
+
+**No `qc1-rev2.md` file is created** — this revalidation lives in the same `qc1.md` per the targeted re-review rule (`mstar-roles/references/qc-specialist-shared.md` § "Targeted re-review (same report file)").

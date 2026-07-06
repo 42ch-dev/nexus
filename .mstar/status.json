@@ -265,8 +265,21 @@
         "decision": "defer",
         "owner": "@writing-specialist",
         "target": "V1.93+",
-        "tracking_link": ".mstar/plans/reports/2026-07-05-v1.92-closure/qc1.md S-005",
+        "tracking_link": ".mstar/plans/reports/2026-07-05-v1.92-closure/qc1.md §S-005",
         "note": "Sweep for any remaining stale 'Local API' / legacy naming in non-historical prose.",
+        "lifecycle": "open"
+      },
+      {
+        "id": "R-V192SEC-001",
+        "title": "Resume TOFU fingerprint gate is in-band over the same (MITM-able) TLS fetch session — not transport-bound; buildClient() does not pass pinnedFingerprint to the HTTP transport",
+        "severity": "medium",
+        "source": "Cursor Security Automation — PR #120 review 4632744387 (merge-close, 2026-07-06)",
+        "scope": "apps/web/src/lib/nexus/use-resume-fingerprint-gate.ts (in-band /cert-fingerprint fetch + compare); apps/web/src/lib/client-context.tsx buildClient() (no pinnedFingerprint → transport); apps/desktop/src-tauri/ (no reqwest/rustls cert-pin for remote daemon)",
+        "decision": "defer",
+        "owner": "@fullstack-dev + @frontend-dev",
+        "target": "V1.94",
+        "tracking_link": "https://github.com/42ch-dev/nexus/pull/120#pullrequestreview-4632744387",
+        "note": "Attack path: an active MITM that terminates TLS on the trusted LAN can serve the stored fingerprint string via the unauthenticated /cert-fingerprint endpoint (the comparison happens over the same compromised fetch session), pass the FingerprintGate, then capture X-API-Key on subsequent authenticated calls. Browser fetch cannot expose the server cert for pinning (JS limitation) — the browser/web-app surface TOFU is inherently weaker and is a documented V1.92 trade-off (raw-browser remote = non-goal). The REAL resolution is desktop (Tauri) transport-layer cert pinning: route remote-daemon HTTP through a Rust reqwest+rustls client with a custom certificate verifier that checks the served cert's SHA-256 against pinnedFingerprint (danger_accept_invalid_certs + manual pin check, or a rustls ClientConfig with a pinned verifier). Not folded into V1.93 (convergence iteration; would change scope character + require re-clarify + re-QC). Medium severity bounded by the trusted-LAN threat model (V1.92 assumes trusted LAN; exploit requires active MITM on that LAN).",
         "lifecycle": "open"
       }
     ]
