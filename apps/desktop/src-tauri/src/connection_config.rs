@@ -157,6 +157,7 @@ mod tests {
     enum StubResult {
         Ok,
         Err,
+        ErrOther,
     }
 
     struct StubStore {
@@ -193,6 +194,9 @@ mod tests {
                     }
                 }
                 StubResult::Err => Err(keyring::Error::NoEntry),
+                StubResult::ErrOther => Err(keyring::Error::PlatformFailure(Box::new(
+                    std::io::Error::new(std::io::ErrorKind::Other, "keychain unavailable"),
+                ))),
             }
         }
 
@@ -203,7 +207,7 @@ mod tests {
                     *guard = Some(password.to_owned());
                     Ok(())
                 }
-                StubResult::Err => Err(keyring::Error::NoEntry),
+                StubResult::Err | StubResult::ErrOther => Err(keyring::Error::NoEntry),
             }
         }
 
@@ -214,7 +218,7 @@ mod tests {
                     *guard = None;
                     Ok(())
                 }
-                StubResult::Err => Err(keyring::Error::NoEntry),
+                StubResult::Err | StubResult::ErrOther => Err(keyring::Error::NoEntry),
             }
         }
     }
@@ -313,5 +317,19 @@ mod tests {
 
         assert!(store.value.lock().expect("lock").is_none());
         assert!(!fallback_path(&app).unwrap().exists());
+    }
+
+    #[test]
+    fn get_returns_none_when_keychain_fails_generically_and_fallback_is_missing() {
+        let _guard = FALLBACK_TEST_LOCK.lock().expect("lock");
+        let app = mock_app();
+        cleanup_fallback(&app);
+        let store = StubStore::new(None, StubResult::ErrOther, StubResult::Ok, StubResult::Ok);
+
+        let result = get_connection_config_inner(&app, &store).expect("get should succeed");
+        assert!(
+            result.is_none(),
+            "a missing fallback after a keychain error should return None"
+        );
     }
 }

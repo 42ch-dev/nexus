@@ -54,6 +54,40 @@ describe('ConnectDaemonPage', () => {
     });
   });
 
+  it('shows a reassurance hint when reconnecting to a pinned-matching endpoint', async () => {
+    const setConfig = vi.fn().mockResolvedValue(undefined);
+    vi.spyOn(clientContext, 'useSetConnectionConfig').mockReturnValue(setConfig);
+    const saved: ConnectionConfig = {
+      endpointUrl: 'https://remote.example:8420',
+      apiKey: 'secret-key',
+      pinnedFingerprint: 'SHA256:aa:bb:cc',
+      active: true,
+    };
+    vi.spyOn(clientContext, 'useConnectionConfig').mockReturnValue(saved);
+
+    useHandlers(
+      http.get('https://remote.example:8420/v1/daemon/runtime/cert-fingerprint', () =>
+        HttpResponse.json({ fingerprint: 'SHA256:aa:bb:cc', algorithm: 'sha256' }),
+      ),
+    );
+
+    renderInApp(
+      <clientContext.ClientProvider
+        client={noopClient}
+        connectionConfig={saved}
+        onConnectionConfigChange={setConfig}
+      >
+        <ConnectDaemonPage />
+      </clientContext.ClientProvider>,
+    );
+
+    await userEvent.click(screen.getByTestId('fetch-fingerprint-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('fingerprint-match-hint')).toBeInTheDocument();
+    });
+  });
+
   it('shows a blocking warning when the fingerprint changes', async () => {
     const setConfig = vi.fn().mockResolvedValue(undefined);
     vi.spyOn(clientContext, 'useSetConnectionConfig').mockReturnValue(setConfig);
@@ -177,6 +211,8 @@ describe('ConnectDaemonPage', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('fingerprint-error')).toBeInTheDocument();
+      expect(screen.getByTestId('fingerprint-error')).toHaveTextContent('Trust On First Use');
+      expect(screen.getByTestId('fingerprint-error')).toHaveTextContent('desktop app');
     });
   });
 

@@ -85,6 +85,16 @@ describe('WebConnectionStorage', () => {
     expect(await storage.load()).toBeNull();
     expect(window.localStorage.getItem('nexus-connection-config-v1')).toBeNull();
   });
+
+  it('clears an entry missing required fields and returns null', async () => {
+    window.localStorage.setItem(
+      'nexus-connection-config-v1',
+      JSON.stringify({ apiKey: 'k' }),
+    );
+    const storage = createConnectionStorage();
+    expect(await storage.load()).toBeNull();
+    expect(window.localStorage.getItem('nexus-connection-config-v1')).toBeNull();
+  });
 });
 
 describe('DesktopConnectionStorage Tauri delegate', () => {
