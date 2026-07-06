@@ -104,7 +104,7 @@ The Daemon API is the **codegen-ready** internal contract between CLI, daemon, a
 | `/v1/local/orchestration/*` | Active | Sessions, capabilities, presets, schedules, core-context, history, and signal routes registered in `orchestration_routes()`. |
 | `/v1/local/agent-host/*` | Active | Health, providers, sessions, operations, cancel, events SSE, and internal tool-executions routes. |
 | `GET /v1/local/monitoring/pool` | Active | Protected monitoring route. |
-| `POST /v1/local/context/assemble` | **Retired (KCA-002 B2)** | Not registered in `api/mod.rs`; context assembly stays CLI in-process through `nexus-moment-context-assembly`, not daemon Daemon API. |
+| `POST /v1/local/context/assemble` | **Retired (KCA-002 B2)** | Not registered in `api/mod.rs`; context assembly stays CLI in-process through `nexus-moment-context-assembly`, not Daemon API. |
 | `GET /v1/local/research/sources` | **NotImplemented / Retired from active table** | Not registered in `api/mod.rs`; do not list as active until a handler exists. |
 | `POST /v1/local/research/scan` | **NotImplemented / Retired from active table** | Not registered in `api/mod.rs`; do not list as active until a handler exists. |
 | `POST /v1/local/agent-sessions/restart` | **Retired** | Not registered; shipped agent session control lives under `/v1/local/agent-host/*`. |
@@ -137,7 +137,7 @@ Rules:
 - `workspace_id` is mandatory for workspace-scoped actions
 - `error_code` should align with sync / conflict schemas where applicable
 - Research-specific routes may use the `/v1/local/*` namespace only after they are registered in the daemon router.
-- **V1.24 KCA-002 B2:** `POST /v1/local/context/assemble` is retired from the daemon Daemon API. CLI/platform context assembly should call `nexus-moment-context-assembly` in-process rather than proxying through the daemon.
+- **V1.24 KCA-002 B2:** `POST /v1/local/context/assemble` is retired from the Daemon API. CLI/platform context assembly should call `nexus-moment-context-assembly` in-process rather than proxying through the daemon.
 - **V1.2**：若请求体支持可选 **`as_of`**，Local 与 Platform HTTP **须**共享 **同一**字段语义与校验；不得仅在一侧出现私有历史参数。
 
 ### 3.3 Forbidden patterns
@@ -240,7 +240,7 @@ V1.53 cancelled the skills-export CLI/spec line (DF-50). Nexus keeps the static 
 | --- | --- |
 | Agent reasons & writes manuscript via tools | ACP session |
 | User/script checks daemon health | Daemon API / CLI |
-| Sync structured deltas to platform | `nexus42 sync …` → **`nexus-cloud-sync`** (CLI/cloud line; not daemon Daemon API) |
+| Sync structured deltas to platform | `nexus42 sync …` → **`nexus-cloud-sync`** (CLI/cloud line; not Daemon API) |
 | Discover agents | Registry integration |
 | Non-ACP tool ecosystem | Skills -> CLI/Daemon API |
 

@@ -426,7 +426,7 @@ nexus42 creator run <PRESET_ID> [<WORK_ID>] [global flags] [preset args...]
 
 | Command | Purpose |
 | --- | --- |
-| `nexus42 creator run <preset_id> [<work_id>]` | Generic preset dispatch. FL-E stage-advance presets (`research`, `novel-writing`, `novel-chapter-review`, `kb-extract`) are routed to `stage_advance`; all other presets are scheduled directly via daemon Daemon API. `<work_id>` optional — defaults to pool `active` Work. |
+| `nexus42 creator run <preset_id> [<work_id>]` | Generic preset dispatch. FL-E stage-advance presets (`research`, `novel-writing`, `novel-chapter-review`, `kb-extract`) are routed to `stage_advance`; all other presets are scheduled directly via Daemon API. `<work_id>` optional — defaults to pool `active` Work. |
 
 **Global flags:**
 
@@ -449,7 +449,7 @@ Presets may declare `cli_args` with name, type (`integer`/`string`/`boolean`), `
 Rules:
 
 - Only presets declaring `run_intents` including `work_init` may be used as the **first** run on a new Work (see [orchestration-engine.md](./orchestration-engine.md) §7.7).
-- `creator run` creates/updates schedules via daemon Daemon API; it does **not** replace `daemon schedule` for power users.
+- `creator run` creates/updates schedules via Daemon API; it does **not** replace `daemon schedule` for power users.
 - When `work_id` is omitted, resolve [novel-writing/work-pool.md](./novel-writing/work-pool.md) `active` row → `work_id`; else fail with remediation to `creator works use`.
 - FL-E presets are identified via `stage_for_preset()` reverse mapping; the runner calls `stage_advance` with `force: false` (stage ordering enforced).
 
@@ -724,7 +724,7 @@ There is **no** top-level `nexus42 preset ...` command group. User creative entr
 
 操作主体：`sync` 的 `creator_id` 与 `workspace_slug` 必须对应当前活跃上下文；HTTP 优先 `Authorization: Bearer <creator_api_key>`，User 代操时使用 `Authorization: Bearer <user_access_token>` + `X-Creator-Id`。
 
-**架构边界（长期）**：`sync` 属于 **cloud 产品线**，由 CLI 调用 **`nexus-cloud-sync`** 完成 platform HTTP；daemon Daemon API **不得**承载 `/v1/local/sync/*` 或注册代理。见 [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md) §5–§6。
+**架构边界（长期）**：`sync` 属于 **cloud 产品线**，由 CLI 调用 **`nexus-cloud-sync`** 完成 platform HTTP；Daemon API **不得**承载 `/v1/local/sync/*` 或注册代理。见 [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md) §5–§6。
 
 ### 6.6 `nexus42 platform`（平台能力命令组）
 

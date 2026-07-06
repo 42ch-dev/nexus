@@ -13,7 +13,7 @@
 1. [SDK Selection Decision](#1-sdk-selection-decision)
 2. [Integration Architecture](#2-integration-architecture)
 3. [Registry Integration Detailed Design](#3-registry-integration-detailed-design)
-4. [Daemon API Contract Analysis](#4-local-api-contract-analysis)
+4. [Daemon API Contract Analysis](#4-daemon-api-contract-analysis)
 5. [Skills / Capability Export](#5-skills--capability-export)
 6. [CLI Command Detailed Design](#6-cli-command-detailed-design)
 7. [Schema Definitions](#7-schema-definitions)

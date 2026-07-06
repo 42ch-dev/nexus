@@ -22,7 +22,7 @@
 | Line | Purpose | Integration surface |
 | --- | --- | --- |
 | **Local product** | Orchestration, agent-host, workspace, Creator + Creator memory, World-scoped narrative KB, User-scoped knowledge, narrative graph, Moment context assembly | `nexus42 daemon` → `/v1/local/*` |
-| **Cloud enhancement** | Platform HTTP, bundle sync, registration, optional context Stage-1, User/Pairing persistence | `nexus-cloud-sync` + CLI cloud subcommands — **never** daemon Daemon API |
+| **Cloud enhancement** | Platform HTTP, bundle sync, registration, optional context Stage-1, User/Pairing persistence | `nexus-cloud-sync` + CLI cloud subcommands — **never** Daemon API |
 
 **Hard isolation:** `nexus-daemon-runtime` MUST NOT depend on `nexus-cloud-sync` and MUST NOT register HTTP handlers that perform platform HTTP or proxy sync.
 
@@ -96,7 +96,7 @@ apps/web (Vite build → dist/)
       └─ nexus42 binary / nexus-daemon-runtime router static serving
 ```
 
-`rust-embed` is a build-time/static-asset edge only. It does not make the Web UI an owning Rust crate and does not permit the frontend to bypass the daemon Daemon API. `tower-http::ServeDir`-style serving may expose the unauthenticated SPA shell, but data remains behind `/v1/local/*` auth boundaries (see [daemon-runtime.md](./daemon-runtime.md) §4.4).
+`rust-embed` is a build-time/static-asset edge only. It does not make the Web UI an owning Rust crate and does not permit the frontend to bypass the Daemon API. `tower-http::ServeDir`-style serving may expose the unauthenticated SPA shell, but data remains behind `/v1/local/*` auth boundaries (see [daemon-runtime.md](./daemon-runtime.md) §4.4).
 
 ### 3.3 Why `nexus-cloud-domain` (not `nexus-domain`)
 
@@ -271,7 +271,7 @@ nexus-moment-context-assembly (default four-domain library target)
 
 ---
 
-## 6. Daemon Daemon API (principles)
+## 6. Daemon API (principles)
 
 Authoritative route list for a given release lives in **`crates/nexus-daemon-runtime/src/api/mod.rs`** and the active **iteration compass**.
 

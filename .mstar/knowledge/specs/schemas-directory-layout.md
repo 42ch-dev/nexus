@@ -86,7 +86,7 @@ schemas/
 ### 3.1 `platform/http-bff/`
 
 - One schema file per **platform HTTP** request or response shape (or shared response fragment), kebab-case basename.
-- **Not** daemon Daemon API proxies (V1.20 removed world/explore **daemon** routes; platform HTTP contracts **remain** wire here).
+- **Not** Daemon API proxies (V1.20 removed world/explore **daemon** routes; platform HTTP contracts **remain** wire here).
 - Grouping is **flat** (no `http-bff/explore/` subfolders) — use filename prefix: `explore-*`, `world-*`, `publish-*`, `notifications-*`, `context-assembly-v1`, etc.
 - `$id` / `$ref` URIs use `https://nexus42.invalid/schemas/platform/http-bff/...`.
 - Maintain [`platform/http-bff/README.md`](../../../schemas/platform/http-bff/README.md) index when adding files.

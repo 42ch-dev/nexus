@@ -4,7 +4,7 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — V1.65 Prepare amendment (bundled local Web UI serving + chapter-content Daemon API route family); **V1.66 Phase 2b amendment** (§12: Tauri sidecar mode launch/readiness/lifecycle contract); **V1.86 amendment** (§13: Daemon API trust-boundary security — Origin allowlist, deny-fs-without-workspace, component-wise path guard); **V1.90 amendment** (§14: Daemon API remote bind gate; normative surface renaming from Daemon API to Daemon API with `/v1/daemon/` path prefix); **V1.92 amendment** (§15–16: transport security (TLS) + remote client connection model) |
+| **Status** | Normative — V1.65 Prepare amendment (bundled local Web UI serving + chapter-content Daemon API route family); **V1.66 Phase 2b amendment** (§12: Tauri sidecar mode launch/readiness/lifecycle contract); **V1.86 amendment** (§13: Daemon API trust-boundary security — Origin allowlist, deny-fs-without-workspace, component-wise path guard); **V1.90 amendment** (§14: Daemon API remote bind gate; normative surface renaming from Local API to Daemon API with `/v1/daemon/` path prefix); **V1.92 amendment** (§15–16: transport security (TLS) + remote client connection model) |
 | **Document class** | Master |
 | **Normative scope** | Architecture boundaries, process model, subsystem responsibilities, pre-release constraints |
 | **Related** | [cli-spec.md](./cli-spec.md), [local-runtime-boundary.md](./local-runtime-boundary.md), [agent-host.md](./agent-host.md) |
@@ -549,7 +549,7 @@ In desktop mode, Tauri serves the bundled `apps/web/dist` via `build.frontendDis
 
 ## 13. Daemon API Trust-Boundary Security (V1.86)
 
-> **V1.90 note:** The surface was renamed to **Daemon API** and the path prefix to `/v1/daemon/*` in V1.90. The security rules described below apply unchanged to the renamed surface. References to "Daemon API" in this section title and in V1.86 iteration names are historical only.
+> **V1.90 note:** The surface was renamed to **Daemon API** and the path prefix to `/v1/daemon/*` in V1.90. The security rules described below apply unchanged to the renamed surface. References to "Local API" in this section title and in V1.86 iteration names are historical only.
 
 This section codifies the normative security contract for the daemon's Daemon API trust boundary. It closes the three-link attack chain identified in V1.86 (permissive CORS + keyless-localhost → remote-reach; fs/* bypass without workspace → arbitrary-file R/W; string-prefix path comparison → sibling-directory escape). The normative hooks in §4.4.3 (`require_api_key` on data routes) and §4.5 (W-002-style workspace path guard) already provide authority; this section adds the Origin gate, the deny-fs-without-workspace invariant, and the component-wise path guard requirement.
 
