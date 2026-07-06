@@ -297,6 +297,84 @@ fn write_setup_completed_at(path: &Path, value: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Path to the agent-host configuration file.
+///
+/// `$HOME/.nexus42/agent-host/config.toml`
+fn agent_profile_config_path() -> Option<PathBuf> {
+    let home = dirs::home_dir()?;
+    Some(home.join(".nexus42").join("agent-host").join("config.toml"))
+}
+
+/// Write the selected agent profile to `~/.nexus42/agent-host/config.toml`.
+///
+/// The profile is stored as a `native_cli` provider entry so the agent host
+/// subsystem can use it on the next daemon start. Existing provider entries with
+/// the same `id` are updated in place; other keys in the file are preserved.
+fn write_agent_profile(name: String, launch_command: Option<String>) -> anyhow::Result<()> {
+    let path = agent_profile_config_path()
+        .ok_or_else(|| anyhow::anyhow!("cannot determine home directory"))?;
+    write_agent_profile_at(&path, &name, launch_command.as_deref())
+}
+
+fn write_agent_profile_at(
+    path: &Path,
+    name: &str,
+    launch_command: Option<&str>,
+) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let mut doc = if path.exists() {
+        let text = std::fs::read_to_string(path)?;
+        text.parse::<toml_edit::DocumentMut>()
+            .unwrap_or_else(|_| toml_edit::DocumentMut::new())
+    } else {
+        toml_edit::DocumentMut::new()
+    };
+
+    if doc.get("providers").is_none() {
+        doc["providers"] = toml_edit::Item::ArrayOfTables(toml_edit::ArrayOfTables::new());
+    }
+
+    let providers = doc["providers"]
+        .as_array_of_tables_mut()
+        .ok_or_else(|| anyhow::anyhow!("providers is not an array of tables"))?;
+
+    let mut updated = false;
+    for provider in providers.iter_mut() {
+        if provider.get("id").and_then(|v| v.as_str()) == Some(name) {
+            if let Some(cmd) = launch_command {
+                provider["command"] = toml_edit::value(cmd);
+            } else {
+                provider.remove("command");
+            }
+            updated = true;
+            break;
+        }
+    }
+
+    if !updated {
+        let mut provider = toml_edit::Table::new();
+        provider["id"] = toml_edit::value(name);
+        provider["protocol"] = toml_edit::value("native_cli");
+        if let Some(cmd) = launch_command {
+            provider["command"] = toml_edit::value(cmd);
+        }
+        providers.push(provider);
+    }
+
+    std::fs::write(path, doc.to_string())?;
+    Ok(())
+}
+
+/// Persist the agent selected during setup wizard step 3.
+#[tauri::command]
+fn set_agent_profile(name: String, launch_command: Option<String>) -> Result<(), String> {
+    write_agent_profile(name, launch_command)
+        .map_err(|e| format!("failed to write agent profile: {e}"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // The workspace root is captured once at startup and stored as managed
@@ -347,6 +425,7 @@ pub fn run() {
             stop_daemon,
             get_setup_completed,
             set_setup_completed,
+            set_agent_profile,
             connection_config::get_connection_config,
             connection_config::set_connection_config,
             connection_config::delete_connection_config,
@@ -374,8 +453,8 @@ mod tests {
     //! daemon actually stores (`Works/<ref>/Stories/…`) and traversal attempts.
 
     use super::{
-        default_workspace_root, guard_path, read_setup_completed_at, write_setup_completed_at,
-        PathGuardError, WorkspaceRoot,
+        default_workspace_root, guard_path, read_setup_completed_at, write_agent_profile_at,
+        write_setup_completed_at, PathGuardError, WorkspaceRoot,
     };
     use std::fs;
     use std::path::PathBuf;
@@ -522,5 +601,41 @@ mod tests {
             s.ends_with("nexus42/default") || s.ends_with("nexus42\\default"),
             "default workspace root should end with nexus42/default, got: {s}"
         );
+    }
+
+    #[test]
+    fn agent_profile_roundtrips_through_config_toml() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("agent-host").join("config.toml");
+
+        write_agent_profile_at(&config_path, "codex-acp", Some("codex")).expect("write profile");
+        let text = std::fs::read_to_string(&config_path).expect("read config");
+        assert!(text.contains("id = \"codex-acp\""));
+        assert!(text.contains("protocol = \"native_cli\""));
+        assert!(text.contains("command = \"codex\""));
+
+        // Update same id preserves array length (one provider).
+        write_agent_profile_at(&config_path, "codex-acp", Some("codex --verbose"))
+            .expect("update profile");
+        let text = std::fs::read_to_string(&config_path).expect("read config");
+        assert!(text.contains("command = \"codex --verbose\""));
+        // Only one provider table should be present.
+        assert_eq!(text.matches("id = \"codex-acp\"").count(), 1);
+    }
+
+    #[test]
+    fn agent_profile_write_preserves_existing_keys() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("agent-host").join("config.toml");
+        std::fs::create_dir_all(config_path.parent().unwrap()).expect("mkdir");
+        std::fs::write(&config_path, "max_sessions = 2\n").expect("write initial config");
+
+        write_agent_profile_at(&config_path, "claude-cli", Some("claude")).expect("write profile");
+
+        let text = std::fs::read_to_string(&config_path).expect("read config");
+        assert!(text.contains("max_sessions = 2"));
+        assert!(text.contains("id = \"claude-cli\""));
+        assert!(text.contains("protocol = \"native_cli\""));
+        assert!(text.contains("command = \"claude\""));
     }
 }

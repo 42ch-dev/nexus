@@ -44,8 +44,8 @@ const WorldKbPage = lazy(() =>
  *
  * V1.94 adds the setup wizard (`/setup`) and per-launch daemon-ready gate. The
  * wizard is rendered outside the main shell; the main shell is shown only after
- * setup is complete and the daemon is reachable. `/presets` and `/strategy`
- * redirect to the unified `/strategies` list + `/strategies/:presetId` detail.
+ * setup is complete and the daemon is reachable. `/strategy` redirects to the
+ * unified `/strategies` list + `/strategies/:presetId` detail.
  */
 function AppRoutes() {
   return (
@@ -88,7 +88,6 @@ function AppRoutes() {
             </Suspense>
           }
         />
-        <Route path="presets" element={<Navigate to="/strategies" replace />} />
         <Route path="strategy" element={<Navigate to="/strategies" replace />} />
         <Route path="connect" element={<ConnectDaemonPage />} />
         <Route path="*" element={<NotFoundPage />} />

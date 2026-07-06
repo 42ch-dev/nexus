@@ -117,4 +117,91 @@ describe('FooterProfiles', () => {
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(posted).toBe(true);
   });
+
+  it('uses roving tabindex so only the focused avatar is in the Tab sequence', async () => {
+    useHandlers(
+      http.get('/v1/daemon/creators', () =>
+        HttpResponse.json({
+          items: [
+            { creator_id: 'creator-a', display_name: 'Alice' },
+            { creator_id: 'creator-b', display_name: 'Bob' },
+          ],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+    );
+
+    renderFooter();
+
+    const alice = await screen.findByTitle('Alice');
+    const bob = screen.getByTitle('Bob');
+    const add = screen.getByRole('button', { name: 'Add creator' });
+
+    expect(alice).toHaveAttribute('tabindex', '0');
+    expect(bob).toHaveAttribute('tabindex', '-1');
+    expect(add).toHaveAttribute('tabindex', '-1');
+  });
+
+  it('moves focus with arrow keys inside the toolbar', async () => {
+    const user = userEvent.setup();
+    useHandlers(
+      http.get('/v1/daemon/creators', () =>
+        HttpResponse.json({
+          items: [
+            { creator_id: 'creator-a', display_name: 'Alice' },
+            { creator_id: 'creator-b', display_name: 'Bob' },
+          ],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+    );
+
+    renderFooter();
+
+    const alice = await screen.findByTitle('Alice');
+    const bob = screen.getByTitle('Bob');
+
+    await user.click(alice);
+    expect(alice).toHaveFocus();
+
+    await user.keyboard('{ArrowRight}');
+    expect(bob).toHaveFocus();
+    expect(bob).toHaveAttribute('tabindex', '0');
+    expect(alice).toHaveAttribute('tabindex', '-1');
+
+    await user.keyboard('{ArrowLeft}');
+    expect(alice).toHaveFocus();
+    expect(alice).toHaveAttribute('tabindex', '0');
+    expect(bob).toHaveAttribute('tabindex', '-1');
+  });
+
+  it('jumps to first/last avatar with Home/End', async () => {
+    const user = userEvent.setup();
+    useHandlers(
+      http.get('/v1/daemon/creators', () =>
+        HttpResponse.json({
+          items: [
+            { creator_id: 'creator-a', display_name: 'Alice' },
+            { creator_id: 'creator-b', display_name: 'Bob' },
+          ],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+    );
+
+    renderFooter();
+
+    const alice = await screen.findByTitle('Alice');
+    const add = screen.getByRole('button', { name: 'Add creator' });
+
+    add.focus();
+    expect(add).toHaveFocus();
+
+    await user.keyboard('{Home}');
+    expect(alice).toHaveFocus();
+
+    add.focus();
+    await user.keyboard('{End}');
+    expect(add).toHaveFocus();
+  });
 });
