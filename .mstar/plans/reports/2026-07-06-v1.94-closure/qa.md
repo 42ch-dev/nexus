@@ -51,3 +51,26 @@
 ## §5 Verdict
 - **Pass**
 - Open issues (if any): none (all §5 criteria satisfied with reproducible evidence; 5/5 defects verified end-to-end; QC 3/3 Approve already landed).
+
+## Post-audit revalidation (HEAD 6d002e15)
+
+The user clarified the button contrast rule (background-driven, not mode-driven). Two merges landed after the initial QA Pass at `4e69cb09`:
+
+1. **`378ac8f1`** — correction: dark-mode primary reverted to `dark:text-brand-deep-blue` on cyan bg.
+2. **`6d002e15`** — full audit: 4 DESIGN.md token violations + 6 component fixes + **tailwind-merge root cause fix** (the real reason primary buttons lost white text — `text-button-14` was being misclassified as a text-color class).
+
+### Revalidation approach
+- Full test suite re-run on integrated HEAD `6d002e15`: **494 pass** (was 491; +3 from new utils.test.ts + button.test.tsx updates).
+- qc1 second revalidation: Approve (committed `6d002e15`).
+- tailwind-merge fix verified by repro:
+  - Before: `twMerge('bg-blue-700 text-white text-button-14')` → `"bg-blue-700 text-button-14"` (text-white stripped)
+  - After: `twMerge('bg-blue-700 text-white text-button-14')` → `"bg-blue-700 text-white text-button-14"` (both preserved)
+- Side-effect: the fix also corrects a latent typography regression across 181 occurrences in `apps/web/src/` where `text-{copy,heading,label}-*` tokens were being stripped by the same bug.
+
+### Updated verdict
+- Previous: Pass (12/12 acceptance + 5/5 defects at HEAD 4e69cb09)
+- Current: **Pass** — all criteria still satisfied; the audit changes are corrections, not regressions. The tailwind-merge root cause fix is the highest-value piece: it closes the original user defect #2 at its true source.
+
+### Follow-up (V1.95)
+- One out-of-scope contrast borderline flagged by qc1: `conflict-modal-base.tsx` "Use current" button light-mode text on `#e5484d` is ~4.0:1 (AA borderline). Pre-existing UX contract; defer to V1.95 design pass.
+- 9 prior V1.95 residuals remain open (qc1 F-101..F-106 + qc2 S-001/S-002 + qc1R-S001).
