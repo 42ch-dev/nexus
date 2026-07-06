@@ -130,6 +130,15 @@ impl DaemonConfig {
     }
 }
 
+/// Compute the graceful shutdown duration from daemon config.
+///
+/// Centralizes the mapping from `shutdown_grace_ms` to the `Duration` passed
+/// to the TLS server's `Handle::graceful_shutdown`.
+#[must_use]
+const fn shutdown_grace_duration(config: &DaemonConfig) -> Duration {
+    Duration::from_millis(config.shutdown_grace_ms)
+}
+
 /// Run the daemon runtime to completion.
 ///
 /// This is the main daemon entry point, extracted from the former standalone daemon
@@ -839,7 +848,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     tracing::info!("Lifecycle started");
 
     // Spawn HTTP/Unix server
-    let shutdown_grace = Duration::from_millis(config.shutdown_grace_ms);
+    let shutdown_grace = shutdown_grace_duration(&config);
     let _server_result = tokio::spawn(async move {
         match transport {
             Transport::Http { port, host } => {
@@ -1116,5 +1125,21 @@ mod tests {
         // Cleanup so later tests see a clean environment.
         std::env::remove_var("NEXUS42_DAEMON_API_KEY");
         std::env::remove_var("NEXUS_DAEMON_REMOTE_BIND");
+    }
+
+    #[test]
+    fn shutdown_grace_duration_derived_from_config() {
+        let config = DaemonConfig {
+            port: 8420,
+            host: "127.0.0.1".to_string(),
+            socket_path: None,
+            verbose: false,
+            shutdown_grace_ms: 1234,
+            cdn_url: None,
+        };
+        assert_eq!(
+            shutdown_grace_duration(&config),
+            Duration::from_millis(1234)
+        );
     }
 }
