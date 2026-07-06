@@ -2,7 +2,7 @@
 
 **Quick status**: **V1.92 shipped (2026-07-05)** — Remote-Access Hardening (TLS for remote-bind + Remote Client Connection Model). V1.91 shipped (2026-07-05). Platform **paused**.
 
-**V1.92 delivered (2026-07-05)**: TLS (auto self-signed Ed25519 cert via rcgen+rustls+axum-server; remote-bind gate fail-closed without cert) + remote client connection model (web-ui/desktop "Connect to Daemon"; endpoint + API key + TOFU cert-fingerprint pinning). CSRF resolved-by-design (header-key model). Swept V1.91 residuals 001/002/003/004. 8 low/nit V1.93 residuals registered. PR pending.
+**V1.92 delivered (2026-07-06, merged via PR #120)**: TLS (auto self-signed Ed25519 cert via rcgen+rustls+axum-server; remote-bind gate fail-closed without cert) + remote client connection model (web-ui/desktop "Connect to Daemon"; endpoint + API key + TOFU cert-fingerprint pinning). CSRF resolved-by-design (header-key model). Swept V1.91 residuals 001/002/003/004. 8 low/nit V1.93 residuals registered.
 
 **Purpose**: Single source of truth for **open** and **backlog** features deferred from delivery compasses. Closed/shipped history lives in shipped archive.
 **Scope**: `nexus` OSS repository only.
@@ -92,9 +92,9 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 ## 5) Quick index
 
-**Active iteration**: V1.92 shipped (2026-07-05) — Remote-Access Hardening (TLS + remote connection model). PR pending.
+**Active iteration**: none (V1.92 shipped 2026-07-06 via PR #120, squash `feff6f36`).
 
-**Latest shipped**: [V1.91](../iterations/v1.91-reading-chrome-and-findings-batch-delivery-compass-v1.md) (reading chrome + findings batch, PR #119 — 2026-07-05)
+**Latest shipped**: [V1.92](../iterations/v1.92-remote-access-hardening-delivery-compass-v1.md) (Remote-Access Hardening — TLS + remote connection model, PR [#120](https://github.com/42ch-dev/nexus/pull/120) — 2026-07-06)
 
 **Full iteration index**: [iterations/README.md](../iterations/README.md)
 
