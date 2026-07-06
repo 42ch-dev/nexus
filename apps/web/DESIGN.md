@@ -734,13 +734,22 @@ Component token values live in frontmatter `components:`. All components must ex
 
 Variants and sizes: see frontmatter `components.button`. The preset `Validate` action uses `primary` when it is the main form action, or `secondary` with a `blue-700` leading icon when paired with a separate save action. It must read as reassurance ("is this safe?"), not as a debug-only tool.
 
-#### Button Contrast Invariant (V1.94)
+#### Button Contrast Invariant (V1.94 corrected)
 
-> **Every button (or button-like element) with a dark, primary, or saturated background MUST use light/white text in both light and dark themes. No dark/primary/saturated background button may use a dark text color in either theme.**
+> **Background decides text color, independent of light/dark mode.**
+>
+> - **Dark background** (deep blue, red, dark gray, saturated dark colors) → **light/white text**.
+> - **Light/bright background** (cyan, light gray, pastels) → **dark text**.
+> - **Mode does not decide text color directly.** The same button may use dark text in light mode and dark text in dark mode if its background is light in both (e.g. a cyan fill is light in both themes → dark text in both).
+>
+> Practical applications:
+> - Light mode primary `bg-blue-700` (dark) → `text-white` (light).
+> - Dark mode primary `dark:bg-brand-cyan` (light/bright) → `dark:text-brand-deep-blue` (dark).
+> - Destructive `bg-red-800` (dark) → `text-white` (light), unchanged across modes.
 
-This invariant applies to all `button` variants, nav active states, banner CTAs, wizard primary CTAs, and any component with a `button-like` role (clickable, saturated background). The invariant is codified in the frontmatter tokens: `primary.textColor` = `#ffffff` in both themes; dark theme `brand-cyan` bg = `#ffffff` text. P1 audits all call sites in `apps/web/src/**`; vitest snapshot (light + dark) gates regressions.
+This invariant applies to all `button` variants, nav active states, banner CTAs, wizard primary CTAs, and any component with a `button-like` role (clickable, saturated background). The invariant is codified in the frontmatter tokens: `primary.textColor` = `#ffffff` in the light theme because the light-theme fill is dark; `DESIGN.dark.md` `primary.textColor` = `{colors.brand-deep-blue}` because the dark-theme fill (`brand-cyan`) is light/bright. P1 audits all call sites in `apps/web/src/**`; vitest snapshot (light + dark) gates regressions.
 
-**Dark primary token fix (V1.94):** `dark:bg-brand-cyan dark:text-white` (was `dark:text-brand-deep-blue`). Hover/active text remains white.
+**Dark primary token fix (V1.94):** `dark:bg-brand-cyan dark:text-brand-deep-blue` (was `dark:text-white`). Hover/active text remains `brand-deep-blue`.
 
 ### Input / Select / Textarea
 

@@ -100,7 +100,7 @@ rounded:
 
 components:
   button:
-    primary: { backgroundColor: "{colors.brand-cyan}", textColor: "#ffffff", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.blue-800}", hoverTextColor: "#ffffff", activeBackgroundColor: "{colors.blue-900}", activeTextColor: "#ffffff" }
+    primary: { backgroundColor: "{colors.brand-cyan}", textColor: "{colors.brand-deep-blue}", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.blue-800}", hoverTextColor: "{colors.brand-deep-blue}", activeBackgroundColor: "{colors.blue-900}", activeTextColor: "{colors.brand-deep-blue}" }
     secondary: { backgroundColor: "{colors.background-100}", textColor: "{colors.gray-1000}", borderColor: "{colors.gray-alpha-400}", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.background-200}", hoverBorderColor: "{colors.gray-alpha-500}" }
     tertiary: { backgroundColor: "transparent", textColor: "{colors.gray-1000}", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.gray-alpha-100}" }
     destructive: { backgroundColor: "{colors.red-800}", textColor: "#ffffff", borderColor: "none", rounded: "{rounded.control}", height: "40px", typography: "{typography.button-14}", hoverBackgroundColor: "{colors.red-700}", activeBackgroundColor: "{colors.red-900}" }
@@ -523,10 +523,10 @@ components:
 | --- | --- | --- |
 | `brand-cyan` | `brand-cyan`, `blue-700` | Primary interactive, focus ring, nav accent |
 | `brand-cyan-800` | `blue-800` | Hover |
-| `brand-deep-blue` | `brand-deep-blue` | Logo text, not primary button (V1.94: primary is white-on-cyan) |
-| `brand-white` | `brand-white` | Logo on deepest panels; primary button text (white on cyan bg) |
+| `brand-deep-blue` | `brand-deep-blue` | Logo text; primary button text on cyan fill |
+| `brand-white` | `brand-white` | Logo on deepest panels |
 
-Dark primary button uses **cyan fill + white text** (V1.94 contrast fix; was deep-blue text). `blue-*` names preserved for existing `{colors.blue-700}` consumers.
+Dark primary button uses **cyan fill + deep-blue text** (V1.94 contrast correction; was white-on-cyan). `blue-*` names preserved for existing `{colors.blue-700}` consumers.
 
 Canvas/SOUL/World-KB brand-blue tokens resolve through `var(--color-blue-700)` and `color-mix(in srgb, var(--color-blue-700) N%, transparent)`. The `rgba(82,168,255,…)` frontmatter entries are reference approximations; CSS consumers use the variable chain — in the dark theme `--color-blue-700: #25d1e0` (brand-cyan). See DESIGN.md § Implementation Mapping.
 

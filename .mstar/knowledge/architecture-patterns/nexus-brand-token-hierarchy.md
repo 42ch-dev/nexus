@@ -1,12 +1,13 @@
 ---
 module: packages/nexus-ui + apps/web + repo-root DESIGN
-date: 2026-07-02
+date: 2026-07-06
 problem_type: architecture-pattern
 category: architecture-patterns
 severity: medium
-plan_id: V1.83-P-last (compound of brand UI foundation iteration)
-tags: [brand, design-tokens, nexus-ui, design-md, git-lfs, svg, npm-package]
-applies_when: adding or consuming cross-application Nexus brand assets/tokens (new product surface, platform package, or Web shell refresh)
+plan_id: V1.83-P-last (compound of brand UI foundation iteration); V1.94-P-last (contrast rule correction)
+tags: [brand, design-tokens, nexus-ui, design-md, git-lfs, svg, npm-package, button-contrast, dark-theme]
+applies_when: adding or consuming cross-application Nexus brand assets/tokens (new product surface, platform package, or Web shell refresh); also when defining any button background/text colour combination
+last_updated: 2026-07-06 (V1.94 correction: button contrast rule is background-driven, not mode-driven; dark-mode primary keeps deep-blue text on cyan)
 ---
 
 # Nexus Brand Token Hierarchy
@@ -34,9 +35,21 @@ Brand consumption follows **four layers**, top to bottom:
 | SVG logos (canonical) | Regular git text under `assets/logos/*.svg` | Exported via `@42ch/nexus-ui` |
 | Token/theme | `tokens.ts`, `theme.css` | Imported by apps via public exports |
 
-### Contrast rule (V1.83 locked)
+### Contrast rule (V1.94 clarification — background-driven)
 
-Cyan `#25D1E0` is **accent-only on white** (~1.9:1 — fails AA as body text). Primary actions on light surfaces use deep blue `#1E3A5F`. Dark mode primary button: cyan fill + deep blue text.
+**V1.83 locked rule (still normative)**: "Cyan `#25D1E0` is accent-only on white (~1.9:1 — fails AA as body text). Primary actions on light surfaces use deep blue `#1E3A5F`. Dark mode primary button: **cyan fill + deep blue text.**"
+
+**V1.94 clarification**: The contrast rule is **mode-independent** — the background color decides the text color, not the theme. Dark/primary/saturated backgrounds → light/white text; light/bright backgrounds → dark text. Cyan `#25D1E0` is a light/bright background, so the dark-mode primary button correctly uses deep-blue text.
+
+Practical application:
+- Light mode primary: `bg-blue-700 text-white` (unchanged since V1.83).
+- Dark mode primary: `dark:bg-brand-cyan dark:text-brand-deep-blue` (V1.94 correction; was `dark:text-white`).
+- Secondary/tertiary/destructive: existing token mapping preserved.
+- Cyan as accent-only-on-white rule for **body text** still holds (cyan ~1.9:1 on white fails AA for body copy). The V1.94 correction narrows the V1.83 rule to body text only; **button labels** follow the background-driven contrast rule.
+
+### Audit pattern (V1.94)
+
+When introducing the rule or changing any button token: write a vitest snapshot test that captures the rendered `className` for every variant in both themes, plus explicit assertions that encode the background-driven rule. A regression that reverts `dark:text-brand-deep-blue` to `dark:text-white` on the cyan fill will fail the snapshot and the explicit assertions. Reference: `apps/web/src/components/ui/button.test.tsx`.
 
 ### Prebuild chain
 
