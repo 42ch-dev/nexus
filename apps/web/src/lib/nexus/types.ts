@@ -40,6 +40,7 @@ import type {
   CountPendingReviewsResponse,
   CreateWorkRequest,
   CreateWorkResponse,
+  CreatorDetail,
   DeletePendingReviewResponse,
   EditCoreContextRequest,
   EditCoreContextResponse,
@@ -50,6 +51,8 @@ import type {
   ListCapabilitiesResponse,
   ListChaptersQuery,
   ListChaptersResponse,
+  ListCreatorsQuery,
+  ListCreatorsResponse,
   ListFindingsQuery,
   ListFindingsResponse,
   ListMemoryFragmentsQuery,
@@ -81,7 +84,11 @@ import type {
   ReviewResponse,
   ScaffoldPresetRequest,
   ScaffoldPresetResponse,
+  ScanRequest,
+  ScanResponse,
   SessionDetailResponse,
+  SetActiveCreatorRequest,
+  SetActiveCreatorResponse,
   SignalScheduleRequest,
   SignalScheduleResponse,
   SoulNarrativeRequest,
@@ -138,6 +145,22 @@ export interface NexusClient {
    * access (V1.92 P1).
    */
   certFingerprint(): Promise<CertFingerprintResponse>;
+  // ── Creators (V1.94 P1) ────────────────────────────────────────────────────
+  /** `GET /v1/daemon/creators` — cursor list of local creators. */
+  listCreators(query?: ListCreatorsQuery): Promise<ListCreatorsResponse>;
+  /**
+   * `POST /v1/daemon/creators` — create a new local creator.
+   * V1.94: the generated request type is not yet available; the wire shape is
+   * `{ display_name: string }` and the response is {@link CreatorDetail}.
+   */
+  createCreator(request: { display_name: string }): Promise<CreatorDetail>;
+  /** `POST /v1/daemon/creators/active` — switch the daemon's active creator. */
+  setActiveCreator(request: SetActiveCreatorRequest): Promise<SetActiveCreatorResponse>;
+
+  // ── Agent host (V1.94 P1) ──────────────────────────────────────────────────
+  /** `POST /v1/daemon/agent-host/scan` — detect locally available ACP agents. */
+  scanAgents(request?: ScanRequest): Promise<ScanResponse>;
+
   /** `GET /v1/daemon/works` — cursor list (F-P1/F-P3/F-F1; canonical `items` key). */
   listWorks(query?: ListWorksQuery): Promise<ListWorksResponse>;
   /** `GET /v1/daemon/works/{work_id}` — full detail. */
@@ -406,8 +429,11 @@ export interface NexusClient {
 export type {
   CapabilityInfo,
   CountPendingReviewsResponse,
+  CreatorDetail,
   DeletePendingReviewResponse,
   FindingDetailResponse,
+  ListCreatorsQuery,
+  ListCreatorsResponse,
   ListMemoryFragmentsQuery,
   ListPendingReviewsQuery,
   MemoryFragmentInfo,
@@ -420,6 +446,10 @@ export type {
   ReadingProgressResponse,
   ReviewRequest,
   ReviewResponse,
+  ScanRequest,
+  ScanResponse,
+  SetActiveCreatorRequest,
+  SetActiveCreatorResponse,
   SoulNarrativeRequest,
   SoulNarrativeResponse,
   UpdateFindingRequest,

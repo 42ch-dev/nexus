@@ -11,6 +11,8 @@ import type { ReactElement, ReactNode } from 'react';
 import { MemoryRouter } from 'react-router-dom';
 
 import { ClientProvider } from '@/lib/client-context';
+import { ActiveCreatorProvider } from '@/lib/active-creator-context';
+import { SetupCompletedProvider } from '@/lib/setup-completed-context';
 import type { NexusClient } from '@/lib/nexus';
 import type { DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
 import { ToastProvider, Toaster } from '@/lib/use-toast';
@@ -43,11 +45,23 @@ interface RenderInAppOptions extends Omit<RenderOptions, 'wrapper'> {
   desktop?: DesktopCapabilities | null;
   queryClient?: QueryClient;
   initialRouterEntries?: string[];
+  /** Initial active creator id for the footer profile switcher context. */
+  activeCreatorId?: string | null;
+  /** Initial setup-completed value for the setup gate context. */
+  setupCompleted?: boolean;
 }
 
 export function renderInApp(
   ui: ReactElement,
-  { client, desktop, queryClient, initialRouterEntries = ['/'], ...rest }: RenderInAppOptions = {},
+  {
+    client,
+    desktop,
+    queryClient,
+    initialRouterEntries = ['/'],
+    activeCreatorId,
+    setupCompleted,
+    ...rest
+  }: RenderInAppOptions = {},
 ) {
   const qc = queryClient ?? makeQueryClient();
   const activeClient = client ?? noopClient;
@@ -57,10 +71,14 @@ export function renderInApp(
       <QueryClientProvider client={qc}>
         <MemoryRouter initialEntries={initialRouterEntries}>
           <ClientProvider client={activeClient} desktop={desktop ?? null} connectionConfig={null}>
-            <ToastProvider>
-              {children}
-              <Toaster />
-            </ToastProvider>
+            <ActiveCreatorProvider initialCreatorId={activeCreatorId}>
+              <SetupCompletedProvider initialCompleted={setupCompleted}>
+                <ToastProvider>
+                  {children}
+                  <Toaster />
+                </ToastProvider>
+              </SetupCompletedProvider>
+            </ActiveCreatorProvider>
           </ClientProvider>
         </MemoryRouter>
       </QueryClientProvider>

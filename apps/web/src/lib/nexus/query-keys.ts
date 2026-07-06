@@ -48,6 +48,16 @@ export const queryKeys = {
     details: () => [...queryKeys.presets.all, 'detail'] as const,
     detail: (presetId: string) => [...queryKeys.presets.details(), presetId] as const,
   },
+  // V1.94 — Creator profile switcher + agent scan.
+  creators: {
+    all: ['creators'] as const,
+    list: (query?: object) => [...queryKeys.creators.all, 'list', query ?? {}] as const,
+    active: () => [...queryKeys.creators.all, 'active'] as const,
+  },
+  agentHost: {
+    all: ['agentHost'] as const,
+    scan: () => [...queryKeys.agentHost.all, 'scan'] as const,
+  },
   chapters: {
     all: ['chapters'] as const,
     lists: () => [...queryKeys.chapters.all, 'list'] as const,

@@ -1,94 +1,23 @@
 /**
  * Desktop daemon status bar — persistent footer strip for the desktop shell.
  *
- * DESIGN.md "Daemon Status Indicator" §6.5:
- *   - 5 states: starting / running / degraded / stopped / error.
- *   - Text + color (never color alone).
- *   - Manual Restart Daemon action; confirmation on stop because it interrupts
- *     running orchestration.
+ * V1.94 simplification: when the daemon is running, the status bar shows only
+ * a restart-icon button (no pill, no state text, no enabled Start button). The
+ * restart action still confirms because it interrupts running orchestration.
+ * Degraded / stopped / error states are surfaced by the top-of-main-content
+ * {@link MainBanner}, not this footer bar.
  *
- * Browser build: this component returns `null`; the header
- * `DaemonHealthIndicator` handles the passive browser health probe.
+ * Browser build: returns `null`.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { RefreshCw } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { useDesktopCapabilities } from '@/lib/client-context';
 import type { DaemonStatus } from '@/lib/nexus/desktop-capabilities';
 import { useToast } from '@/lib/use-toast';
 
-/** Low-frequency fallback re-sync for missed Tauri lifecycle events.
- *
- * V1.66 removed the 5 s React poll loop in favor of Rust→JS events. A missed
- * event (e.g. listener registered after the transition, or emit failure) can
- * leave the footer stale indefinitely. This calm interval self-heals those
- * cases without competing with the primary event path (qc3 W-1).
- */
 const STATUS_SYNC_INTERVAL_MS = 10_000;
-
-interface StateDisplay {
-  label: string;
-  helper: string;
-}
-
-function displayFor(status: DaemonStatus): StateDisplay {
-  switch (status.state) {
-    case 'starting':
-      return {
-        label: 'Daemon starting…',
-        helper: status.detail ?? 'Nexus is starting the local daemon.',
-      };
-    case 'running':
-      return {
-        label: 'Daemon running',
-        helper: status.detail ?? 'Daemon API is reachable on the configured port.',
-      };
-    case 'degraded':
-      return {
-        label: 'Daemon reconnecting',
-        helper: status.detail ?? 'Nexus is retrying the local daemon connection.',
-      };
-    case 'stopped':
-      return {
-        label: 'Daemon stopped',
-        helper: status.detail ?? 'Restart the daemon to use local workspace features.',
-      };
-    case 'error': {
-      // Rust sets detail to a port-conflict message or the generic boot-failure
-      // copy per daemon-runtime.md §12.2. Surface the distinction in the pill.
-      const generic =
-        status.detail ??
-        'Nexus could not start its background service. Check the logs or try restarting.';
-      const isPortConflict =
-        typeof status.detail === 'string' && status.detail.includes('port') && status.detail.includes('already in use');
-      return {
-        label: isPortConflict ? 'Port unavailable' : 'Daemon did not start',
-        helper: generic,
-      };
-    }
-    default:
-      return {
-        label: 'Daemon status unknown',
-        helper: 'Nexus is checking the local daemon.',
-      };
-  }
-}
-
-function statusPillClass(state: DaemonStatus['state']): string {
-  switch (state) {
-    case 'running':
-      return 'bg-[color-mix(in_srgb,var(--color-green-700)_10%,transparent)] text-green-1000 border-[color-mix(in_srgb,var(--color-green-700)_30%,transparent)]';
-    case 'starting':
-      return 'bg-[color-mix(in_srgb,var(--color-teal-700)_10%,transparent)] text-teal-1000 border-[color-mix(in_srgb,var(--color-teal-700)_30%,transparent)]';
-    case 'degraded':
-      return 'bg-[color-mix(in_srgb,var(--color-amber-700)_12%,transparent)] text-amber-1000 border-[color-mix(in_srgb,var(--color-amber-700)_30%,transparent)]';
-    case 'stopped':
-    case 'error':
-      return 'bg-[color-mix(in_srgb,var(--color-red-700)_12%,transparent)] text-red-1000 border-[color-mix(in_srgb,var(--color-red-700)_30%,transparent)]';
-    default:
-      return 'bg-gray-alpha-100 text-gray-900 border-gray-alpha-300';
-  }
-}
 
 export function DaemonStatusBar() {
   const desktop = useDesktopCapabilities();
@@ -109,34 +38,22 @@ export function DaemonStatusBar() {
 
   useEffect(() => {
     mounted.current = true;
-    // R-V167PSEC-QC1-S-UNMOUNT: `setup()` is async, but the cleanup closure
-    // runs synchronously on unmount. If the component unmounts *during* an
-    // `await` (before `unlisten`/`syncInterval` are assigned), the cleanup
-    // would see both as `undefined` and the subscription/interval created
-    // afterwards would leak (interval keeps firing refresh() on a dead
-    // component; listener never detached). The `cancelled` flag is checked
-    // after each await so a late-resolving setup cleans up immediately.
     let cancelled = false;
     let unlisten: (() => void) | undefined;
     let syncInterval: ReturnType<typeof setInterval> | undefined;
 
     const setup = async () => {
       if (!desktop) return;
-      // Fetch initial status immediately, then subscribe to Rust-side events
-      // for live updates (QC1-S1 replaces the 5 s React poll loop).
       await refresh();
       if (cancelled) return;
       unlisten = await desktop.onDaemonStatusChanged((next) => {
         if (mounted.current) setStatus(next);
       });
       if (cancelled) {
-        // Unmounted while subscribing — detach the listener we just opened.
         unlisten();
         unlisten = undefined;
         return;
       }
-      // Calm fallback re-sync: if an event is missed, the next tick refreshes
-      // from the health endpoint without competing with the event path.
       syncInterval = setInterval(() => {
         void refresh();
       }, STATUS_SYNC_INTERVAL_MS);
@@ -153,62 +70,40 @@ export function DaemonStatusBar() {
 
   if (!desktop) return null;
 
-  const display = status ? displayFor(status) : { label: 'Daemon status unknown', helper: 'Nexus is checking the local daemon.' };
   const state = status?.state ?? 'starting';
-  const actionLabel = state === 'running' || state === 'degraded' ? 'Restart Daemon' : 'Start Daemon';
+  if (state !== 'running') return null;
 
-  const handleAction = async () => {
+  const handleRestart = async () => {
     if (!desktop) return;
-    const willRestart = state === 'running' || state === 'degraded';
-    if (willRestart) {
-      const confirmed = window.confirm(
-        'Restarting the daemon will interrupt any running orchestration. Continue?',
-      );
-      if (!confirmed) return;
-    }
+    const confirmed = window.confirm(
+      'Restarting the daemon will interrupt any running orchestration. Continue?',
+    );
+    if (!confirmed) return;
     setIsLoading(true);
     try {
-      if (willRestart) {
-        // A real restart: stop (graceful SIGTERM → timeout → SIGKILL) then
-        // start. Calling startDaemon() while running is a no-op because Rust
-        // manager.start() early-returns when the state is Running/Starting.
-        await desktop.stopDaemon();
-      }
+      await desktop.stopDaemon();
       await desktop.startDaemon();
       await refresh();
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      toast({
-        variant: 'error',
-        title: 'Daemon action failed',
-        description: message,
-      });
+      toast({ variant: 'error', title: 'Daemon restart failed', description: message });
     } finally {
       setIsLoading(false);
     }
   };
 
   return (
-    <div className="flex items-center justify-between gap-4 border-t border-gray-alpha-400 bg-background-100 px-4 py-2 md:px-6">
-      <div className="flex min-w-0 items-center gap-3">
-        <span
-          className={`inline-flex h-6 items-center rounded-pill border px-2 text-label-12 font-semibold whitespace-nowrap ${statusPillClass(state)}`}
-        >
-          {display.label}
-        </span>
-        <span className="truncate text-copy-13 text-gray-900">{display.helper}</span>
-        {status?.port ? (
-          <span className="hidden text-copy-13-mono text-gray-700 md:inline">port {status.port}</span>
-        ) : null}
-      </div>
+    <div className="flex items-center justify-end border-t border-gray-alpha-400 bg-background-100 px-4 py-2 md:px-6">
       <Button
-        variant="secondary"
+        type="button"
+        variant="tertiary"
         size="small"
-        onClick={handleAction}
+        onClick={handleRestart}
         disabled={isLoading}
-        aria-label={actionLabel}
+        aria-label="Restart daemon"
+        title="Restart daemon"
       >
-        {isLoading ? 'Working…' : actionLabel}
+        <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} aria-hidden />
       </Button>
     </div>
   );

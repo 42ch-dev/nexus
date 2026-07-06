@@ -24,6 +24,8 @@ import type {
   FindingDetailResponse,
   ListCapabilitiesQuery,
   ListChaptersQuery,
+  ListCreatorsQuery,
+  ListCreatorsResponse,
   ListFindingsQuery,
   ListMemoryFragmentsQuery,
   ListPendingReviewsQuery,
@@ -42,6 +44,8 @@ import type {
   ReadingProgressResponse,
   ReviewResponse,
   ScaffoldPresetRequest,
+  ScanRequest,
+  ScanResponse,
   SoulNarrativeResponse,
   UpdateFindingRequest,
   ValidatePresetRequest,
@@ -55,6 +59,7 @@ import { NexusClientError } from '@/lib/nexus';
 import { shortId } from '@/lib/format';
 import { queryKeys } from '@/lib/nexus/query-keys';
 import { useCallback, useEffect, useRef } from 'react';
+import { useActiveCreatorId as useActiveCreatorIdFromContext } from '@/lib/active-creator-context';
 
 /** Default page size for cursor-paginated lists. */
 export const DEFAULT_PAGE_SIZE = 20;
@@ -475,34 +480,65 @@ export function usePatchChapter(workId: string | undefined) {
   });
 }
 
-// ── Creator Memory review-loop (V1.78) ───────────────────────────────────────
-
 /**
- * Resolve the active creator id from the most recent session/schedule. The
- * daemon model is single-active-creator (config.toml); every memory endpoint
- * rejects a `creator_id` that does not match the active creator with 403. There
- * is no dedicated active-creator accessor in the client surface today, so the
- * Memory page mirrors the canvas's `useDerivedCreatorId` derivation
- * (`apps/web/src/lib/canvas/use-strategy-data.ts:76`) — it reads the creator_id
- * off existing sessions/schedules, which are themselves creator-scoped. Returns
- * `undefined` until sessions load (the page gates memory calls on a defined id).
+ * Resolve the active creator id from client context.
  *
- * Compass Phase 2b open item #1 (`creator_id` UI source): this is the chosen
- * wiring. A first-class active-creator endpoint/context is a future surface.
+ * V1.94: the footer profile switcher stores the selected creator id in
+ * {@link ActiveCreatorProvider} (backed by localStorage / Tauri store). Memory
+ * and other creator-scoped queries read that value. When no explicit selection
+ * exists yet, callers can fall back to deriving one from sessions or creators.
  */
 export function useActiveCreatorId(): string | undefined {
-  const client = useNexusClient();
-  const sessions = useQuery({
-    // Borrow the sessions list key (single page) — do not introduce a parallel
-    // creator query; the derivation is a projection over existing data.
-    queryKey: [...queryKeys.sessions.all, 'for-creator-derivation'],
-    queryFn: async () => {
-      const res = await client.listSessions({ limit: 1 });
-      return res.items;
-    },
-  });
-  return sessions.data?.[0]?.creator_id;
+  return useActiveCreatorIdFromContext() ?? undefined;
 }
+
+// ── Creators (V1.94 P1) ──────────────────────────────────────────────────────
+
+export function useCreators(query?: ListCreatorsQuery) {
+  const client = useNexusClient();
+  return useQuery({
+    queryKey: queryKeys.creators.list(query),
+    queryFn: async (): Promise<ListCreatorsResponse> => client.listCreators(query),
+  });
+}
+
+export function useCreateCreator() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (request: { display_name: string }) => client.createCreator(request),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.creators.all });
+    },
+    onError: (error) => errorToast(error, 'Could not create Creator'),
+  });
+}
+
+export function useSetActiveCreator() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (creatorId: string) => client.setActiveCreator({ creator_id: creatorId }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.creators.all });
+    },
+    onError: (error) => errorToast(error, 'Could not switch Creator'),
+  });
+}
+
+// ── Agent host (V1.94 P1) ────────────────────────────────────────────────────
+
+export function useScanAgents(request?: ScanRequest) {
+  const client = useNexusClient();
+  return useQuery({
+    queryKey: queryKeys.agentHost.scan(),
+    queryFn: async (): Promise<ScanResponse> => client.scanAgents(request),
+  });
+}
+
+// ── Creator Memory review-loop (V1.78) ───────────────────────────────────────
 
 /** Pending-review count badge refresh cadence (live count indicator). */
 const MEMORY_COUNT_POLL_MS = 10_000;
