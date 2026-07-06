@@ -22,6 +22,9 @@ pub use platform::*;
 /// Schema version constants
 pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("VersionRef", 1),
+    ("AgentScanEntry", 1),
+    ("ScanRequest", 1),
+    ("ScanResponse", 1),
     ("OutlineConflictError", 1),
     ("OutlinePatchChapterRequest", 1),
     ("OutlinePatchChapterSet", 1),
