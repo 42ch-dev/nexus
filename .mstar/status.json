@@ -4,7 +4,7 @@
   "plans": [
     {
       "id": "2026-07-06-v1.94-prepare-specs-and-design",
-      "status": "Todo",
+      "status": "Done",
       "title": "P-1 — Prepare: desktop-shell §Setup Wizard + §ACP Agent Detection + web-ui §Information Architecture (V1.94) + DESIGN.md button invariant + agent-scan schemas",
       "file": ".mstar/plans/2026-07-06-v1.94-prepare-specs-and-design.md",
       "type": "prepare",
@@ -20,12 +20,17 @@
           "2026-07-06-v1.94-backend-setup-runtime",
           "2026-07-06-v1.94-frontend-onboarding-ia"
         ],
-        "working_branch": "feature/v1.94-prepare"
+        "working_branch": "feature/v1.94-prepare",
+        "impl_commit": "3540f928",
+        "merged_to": "iteration/v1.94 @ 41580bb0",
+        "done_at": "2026-07-06T19:30:00+0000",
+        "qc": "skipped — prepare/spec plan; QC consolidated at P-last on integrated HEAD",
+        "verification": "pnpm run validate-schemas 201 valid; cargo check/clippy -p nexus-contracts green; cargo +nightly-2026-06-26 fmt --all --check green; pnpm --filter web typecheck/build green"
       }
     },
     {
       "id": "2026-07-06-v1.94-backend-setup-runtime",
-      "status": "Todo",
+      "status": "Done",
       "title": "P0 — Backend Setup Runtime + Agent Scan: POST /v1/daemon/agent-host/scan + workspace default ~/Documents/nexus42/default/ + setup_completed marker + per-launch daemon-ready gate",
       "file": ".mstar/plans/2026-07-06-v1.94-backend-setup-runtime.md",
       "type": "implement",
@@ -36,18 +41,21 @@
         "spec_integration_branch": "iteration/v1.94",
         "merge_target": "iteration/v1.94",
         "primary_spec": "knowledge/specs/desktop-shell.md",
-        "blocked_by": [
-          "2026-07-06-v1.94-prepare-specs-and-design"
-        ],
-        "blocking": [
-          "2026-07-06-v1.94-closure"
-        ],
-        "working_branch": "feature/v1.94-backend-setup-runtime"
+        "blocked_by": ["2026-07-06-v1.94-prepare-specs-and-design"],
+        "blocking": ["2026-07-06-v1.94-closure"],
+        "working_branch": "feature/v1.94-backend-setup-runtime",
+        "impl_commit": "fc488322",
+        "merged_to": "iteration/v1.94 @ df67e5bb",
+        "inreview_at": "2026-07-06T20:00:00+0000",
+        "done_at": "2026-07-06T20:45:00+0000",
+        "qc": "consolidated at P-last on integrated HEAD f7af91bc",
+        "qa": "consolidated at P-last on integrated HEAD f7af91bc",
+        "verification": "cargo test --all green (160 acp-host + 421 daemon-runtime + 771 nexus42 + 27 desktop tauri); cargo clippy --all -D warnings green; cargo +nightly-2026-06-26 fmt --all --check green; pnpm validate-schemas 201; integrated HEAD re-verified all green"
       }
     },
     {
       "id": "2026-07-06-v1.94-frontend-onboarding-ia",
-      "status": "Todo",
+      "status": "Done",
       "title": "P1 — Frontend Onboarding + IA + Polish: 4-step setup wizard + sidebar tabs + footer profiles + daemon status simplification + button contrast audit + Strategies unification",
       "file": ".mstar/plans/2026-07-06-v1.94-frontend-onboarding-ia.md",
       "type": "implement",
@@ -58,13 +66,17 @@
         "spec_integration_branch": "iteration/v1.94",
         "merge_target": "iteration/v1.94",
         "primary_spec": "knowledge/specs/web-ui.md",
-        "blocked_by": [
-          "2026-07-06-v1.94-prepare-specs-and-design"
-        ],
-        "blocking": [
-          "2026-07-06-v1.94-closure"
-        ],
-        "working_branch": "feature/v1.94-frontend-onboarding-ia"
+        "blocked_by": ["2026-07-06-v1.94-prepare-specs-and-design"],
+        "blocking": ["2026-07-06-v1.94-closure"],
+        "working_branch": "feature/v1.94-frontend-onboarding-ia",
+        "impl_commit": "273863d2",
+        "merged_to": "iteration/v1.94 @ f7af91bc",
+        "inreview_at": "2026-07-06T20:00:00+0000",
+        "done_at": "2026-07-06T20:45:00+0000",
+        "qc": "consolidated at P-last on integrated HEAD f7af91bc",
+        "qa": "consolidated at P-last on integrated HEAD f7af91bc",
+        "note_pm_cleanup": "P1 subagent returned Completion Report with files modified but uncommitted in worktree; PM committed + pushed on behalf of the track (plan-management Git work, not implementation). Commit 273863d2 captures the full P1 surface.",
+        "verification": "pnpm --filter web test 470 pass (62 files); typecheck clean; build 3.57s; validate-schemas 201; integrated HEAD re-verified all green"
       }
     },
     {
