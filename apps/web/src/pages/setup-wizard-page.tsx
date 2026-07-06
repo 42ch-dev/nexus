@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 import { useSetupCompleted } from '@/lib/setup-completed-context';
+import { useDesktopCapabilities } from '@/lib/client-context';
 import { SetupStepWelcome } from '@/pages/setup-step-welcome';
 import { SetupStepDaemon } from '@/pages/setup-step-daemon';
 import { SetupStepAgent } from '@/pages/setup-step-agent';
@@ -20,11 +21,13 @@ export interface WizardState {
  * First-launch 4-step setup wizard.
  *
  * Steps: welcome + workspace → daemon ready → agent detection → done.
- * Finishing flips `setup_completed` to true and lands the author in the main UI.
+ * Finishing persists the selected agent profile (desktop only), flips
+ * `setup_completed` to true, and lands the author in the main UI.
  */
 export function SetupWizardPage() {
   const navigate = useNavigate();
   const { markCompleted } = useSetupCompleted();
+  const desktop = useDesktopCapabilities();
   const [step, setStep] = useState<WizardStep>('welcome');
   const [state, setState] = useState<WizardState>({
     workspaceRoot: '',
@@ -32,7 +35,13 @@ export function SetupWizardPage() {
     customLaunchCommand: '',
   });
 
-  function finish() {
+  async function finish() {
+    if (desktop) {
+      const name = state.selectedAgent?.name ?? 'custom';
+      const launchCommand =
+        (state.selectedAgent?.launch_command ?? state.customLaunchCommand.trim()) || undefined;
+      await desktop.setAgentProfile(name, launchCommand);
+    }
     markCompleted();
     navigate('/works', { replace: true });
   }
