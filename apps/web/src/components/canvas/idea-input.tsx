@@ -113,7 +113,7 @@ export function IdeaInput({ presetId, creatorId, scheduleId, onArtifact }: IdeaI
                 className={[
                   'rounded-control px-2.5 py-1 text-button-12 transition-colors duration-state ease-standard',
                   effectiveVerb === v
-                    ? 'bg-purple-700 text-white'
+                    ? 'bg-purple-700 text-white dark:text-brand-deep-blue'
                     : 'bg-gray-alpha-100 text-gray-900 hover:bg-gray-alpha-200',
                   disabled ? 'cursor-not-allowed opacity-40' : '',
                 ].join(' ')}
