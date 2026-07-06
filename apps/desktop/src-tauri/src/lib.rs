@@ -25,6 +25,24 @@ use tauri::{AppHandle, State};
 mod connection_config;
 mod sidecar;
 
+/// Default workspace root when `workspace_path` is unset in `~/.nexus42/config.toml`.
+///
+/// Mirrors [`apps/nexus42/src/config.rs::resolve_default_workspace_path`] so the
+/// Tauri shell and CLI/daemon agree on first-launch workspace location.
+fn default_workspace_root() -> PathBuf {
+    dirs::document_dir()
+        .or_else(|| {
+            eprintln!("nexus-desktop: dirs::document_dir() returned None; falling back to ~/Documents");
+            dirs::home_dir().map(|home| home.join("Documents"))
+        })
+        .unwrap_or_else(|| {
+            eprintln!("nexus-desktop: dirs::home_dir() returned None; using relative fallback");
+            PathBuf::from("Documents")
+        })
+        .join("nexus42")
+        .join("default")
+}
+
 /// Path-guard rejection reason surfaced to the JS layer. Serializes as
 /// `{ code, message }` so the SPA reads a stable envelope (mirrors the Local
 /// API `ErrorResponse` shape). Plain-language copy per design-requirements §6.4
@@ -82,22 +100,32 @@ struct WorkspaceRoot(Option<PathBuf>);
 /// Resolve the active workspace root exactly as the daemon/CLI do: read
 /// `~/.nexus42/config.toml` and return its `workspace_path`.
 ///
-/// Kept deliberately narrow (string-only parse) so this standalone Tauri crate
-/// does not depend on the `nexus42` config type graph. If the file is absent,
-/// unreadable, or lacks `workspace_path`, this returns `None` and the path
-/// guard denies by default (fail-closed).
+/// If `workspace_path` is unset, this function falls back to
+/// `~/Documents/nexus42/default/` (cross-platform via `dirs::document_dir()`) and
+/// creates the directory if absent. The fallback matches
+/// [`apps/nexus42/src/config.rs::resolve_default_workspace_path`].
 fn resolve_workspace_root() -> Option<PathBuf> {
     let home = dirs::home_dir()?;
     let config_path = home.join(".nexus42").join("config.toml");
-    let content = std::fs::read_to_string(&config_path).ok()?;
-    #[derive(serde::Deserialize)]
-    struct ConfigFile {
-        workspace_path: Option<PathBuf>,
+
+    let configured = std::fs::read_to_string(&config_path)
+        .ok()
+        .and_then(|content| {
+            #[derive(serde::Deserialize)]
+            struct ConfigFile {
+                workspace_path: Option<PathBuf>,
+            }
+            toml::from_str::<ConfigFile>(&content).ok()
+        })
+        .and_then(|cfg| cfg.workspace_path)
+        .filter(|p| !p.as_os_str().is_empty());
+
+    let root = configured.unwrap_or_else(default_workspace_root);
+    if let Err(e) = std::fs::create_dir_all(&root) {
+        eprintln!("nexus-desktop: failed to create workspace root {}: {e}", root.display());
+        // Return the path anyway so the rest of the app can surface the error.
     }
-    toml::from_str::<ConfigFile>(&content)
-        .ok()?
-        .workspace_path
-        .filter(|p| !p.as_os_str().is_empty())
+    Some(root)
 }
 
 /// Authoritative path guard (compass §5 #8, desktop-shell.md §9).
@@ -211,6 +239,64 @@ async fn stop_daemon(manager: State<'_, sidecar::SidecarManager>) -> Result<(), 
     manager.stop().await
 }
 
+/// Read `~/.nexus42/config.toml` and return the `setup_completed` marker.
+/// Missing field is treated as `false` (first-launch semantics).
+#[tauri::command]
+fn get_setup_completed() -> bool {
+    read_setup_completed().unwrap_or(false)
+}
+
+/// Write `setup_completed` to `~/.nexus42/config.toml`.
+#[tauri::command]
+fn set_setup_completed(value: bool) -> Result<(), String> {
+    write_setup_completed(value).map_err(|e| format!("failed to write setup_completed: {e}"))
+}
+
+fn nexus_config_path() -> Option<PathBuf> {
+    let home = dirs::home_dir()?;
+    Some(home.join(".nexus42").join("config.toml"))
+}
+
+fn read_setup_completed() -> Option<bool> {
+    let path = nexus_config_path()?;
+    read_setup_completed_at(&path).ok()?
+}
+
+fn read_setup_completed_at(path: &Path) -> anyhow::Result<Option<bool>> {
+    let content = std::fs::read_to_string(path)?;
+    #[derive(serde::Deserialize, Default)]
+    struct ConfigFile {
+        #[serde(default)]
+        setup_completed: Option<bool>,
+    }
+    Ok(toml::from_str::<ConfigFile>(&content)?
+        .setup_completed)
+}
+
+fn write_setup_completed(value: bool) -> anyhow::Result<()> {
+    let path = nexus_config_path().ok_or_else(|| anyhow::anyhow!("cannot determine home directory"))?;
+    write_setup_completed_at(&path, value)
+}
+
+fn write_setup_completed_at(path: &Path, value: bool) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    // Preserve existing keys by round-tripping through a toml edit document.
+    let mut doc = if path.exists() {
+        let text = std::fs::read_to_string(path)?;
+        text.parse::<toml_edit::DocumentMut>()
+            .unwrap_or_else(|_| toml_edit::DocumentMut::new())
+    } else {
+        toml_edit::DocumentMut::new()
+    };
+
+    doc["setup_completed"] = toml_edit::value(value);
+    std::fs::write(path, doc.to_string())?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // The workspace root is captured once at startup and stored as managed
@@ -259,6 +345,8 @@ pub fn run() {
             get_daemon_status,
             start_daemon,
             stop_daemon,
+            get_setup_completed,
+            set_setup_completed,
             connection_config::get_connection_config,
             connection_config::set_connection_config,
             connection_config::delete_connection_config,
@@ -285,7 +373,10 @@ mod tests {
     //! against a temp workspace root, incl. the workspace-relative form the
     //! daemon actually stores (`Works/<ref>/Stories/…`) and traversal attempts.
 
-    use super::{guard_path, PathGuardError, WorkspaceRoot};
+    use super::{
+        default_workspace_root, guard_path, read_setup_completed_at, write_setup_completed_at,
+        PathGuardError, WorkspaceRoot,
+    };
     use std::fs;
     use std::path::PathBuf;
 
@@ -391,5 +482,45 @@ mod tests {
         let err =
             guard_path("Works/WRK/Stories/does-not-exist.md", &ws).expect_err("nonexistent denied");
         assert!(matches!(err, PathGuardError::PathUnresolvable));
+    }
+
+    #[test]
+    fn setup_completed_roundtrips_through_config_toml() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("config.toml");
+
+        write_setup_completed_at(&config_path, true).expect("write true");
+        assert_eq!(read_setup_completed_at(&config_path).unwrap(), Some(true));
+
+        write_setup_completed_at(&config_path, false).expect("write false");
+        assert_eq!(read_setup_completed_at(&config_path).unwrap(), Some(false));
+    }
+
+    #[test]
+    fn setup_completed_write_preserves_existing_keys() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("config.toml");
+        std::fs::write(
+            &config_path,
+            "workspace_path = \"/existing/workspace\"\nruntime_mode = \"local_only\"\n",
+        )
+        .expect("write initial config");
+
+        write_setup_completed_at(&config_path, true).expect("write setup_completed");
+
+        let text = std::fs::read_to_string(&config_path).expect("read config");
+        assert!(text.contains("workspace_path = \"/existing/workspace\""));
+        assert!(text.contains("runtime_mode = \"local_only\""));
+        assert!(text.contains("setup_completed = true"));
+    }
+
+    #[test]
+    fn default_workspace_root_ends_with_nexus42_default() {
+        let path = default_workspace_root();
+        let s = path.to_string_lossy();
+        assert!(
+            s.ends_with("nexus42/default") || s.ends_with("nexus42\\default"),
+            "default workspace root should end with nexus42/default, got: {s}"
+        );
     }
 }

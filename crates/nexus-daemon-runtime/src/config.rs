@@ -9,6 +9,22 @@ use std::path::{Path, PathBuf};
 
 const DEFAULT_WORKSPACE_SLUG: &str = "default";
 
+/// Resolve the default workspace root when `workspace_path` is unset.
+#[must_use]
+pub fn resolve_default_workspace_path() -> PathBuf {
+    dirs::document_dir()
+        .or_else(|| {
+            tracing::warn!("dirs::document_dir() returned None; falling back to ~/Documents");
+            dirs::home_dir().map(|home| home.join("Documents"))
+        })
+        .unwrap_or_else(|| {
+            tracing::warn!("dirs::home_dir() returned None; using relative fallback");
+            PathBuf::from("Documents")
+        })
+        .join("nexus42")
+        .join("default")
+}
+
 #[derive(Debug, Serialize, Deserialize, Default)]
 pub struct CliConfigSnapshot {
     #[serde(default)]
@@ -17,6 +33,8 @@ pub struct CliConfigSnapshot {
     pub active_workspace_slug_by_creator: HashMap<String, String>,
     #[serde(default)]
     pub runtime_mode: Option<RuntimeMode>,
+    #[serde(default)]
+    pub workspace_path: Option<PathBuf>,
 }
 
 impl CliConfigSnapshot {
