@@ -55,12 +55,14 @@ export function renderInApp(
   function Wrapper({ children }: { children: ReactNode }): ReactElement {
     return (
       <QueryClientProvider client={qc}>
-        <ClientProvider client={activeClient} desktop={desktop ?? null} connectionConfig={null}>
-          <ToastProvider>
-            <MemoryRouter initialEntries={initialRouterEntries}>{children}</MemoryRouter>
-            <Toaster />
-          </ToastProvider>
-        </ClientProvider>
+        <MemoryRouter initialEntries={initialRouterEntries}>
+          <ClientProvider client={activeClient} desktop={desktop ?? null} connectionConfig={null}>
+            <ToastProvider>
+              {children}
+              <Toaster />
+            </ToastProvider>
+          </ClientProvider>
+        </MemoryRouter>
       </QueryClientProvider>
     );
   }

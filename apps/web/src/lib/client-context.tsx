@@ -1,4 +1,12 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
 
 import { BrowserClient, type NexusClient } from '@/lib/nexus';
 import { TauriClient } from '@/lib/nexus/tauri-client';
@@ -8,6 +16,12 @@ import {
   createConnectionStorage,
   type ConnectionConfig,
 } from '@/lib/nexus/connection-storage';
+import {
+  useResumeFingerprintGate,
+  type ResumeFingerprintGateState,
+} from '@/lib/nexus/use-resume-fingerprint-gate';
+import { Button } from '@/components/ui/button';
+import { LoadingState, ErrorState } from '@/components/ui/states';
 
 /**
  * Provides the active {@link NexusClient} (and, in desktop mode, a
@@ -30,6 +44,7 @@ const ConnectionConfigContext = createContext<ConnectionConfig | null>(null);
 const SetConnectionConfigContext = createContext<
   ((config: ConnectionConfig | null) => Promise<void>) | null
 >(null);
+const FingerprintGateContext = createContext<ResumeFingerprintGateState | null>(null);
 
 export interface ClientProviderProps {
   /** Override the NexusClient (tests). If omitted, the factory selects. */
@@ -40,6 +55,8 @@ export interface ClientProviderProps {
   connectionConfig?: ConnectionConfig | null;
   /** Override the config setter (tests). */
   onConnectionConfigChange?: (config: ConnectionConfig | null) => Promise<void>;
+  /** Override fetch for the fingerprint gate (tests). */
+  fetchImpl?: typeof fetch;
   children: ReactNode;
 }
 
@@ -70,11 +87,78 @@ export function selectClients(): ResolvedClients {
   return { client: tauri, desktop };
 }
 
+/**
+ * Resume-time TOFU gate shell (daemon-runtime.md §16.2 Phases 2–3).
+ *
+ * Blocks the app from mounting any screen that may issue authenticated daemon
+ * requests until a pinned remote fingerprint is re-verified. Local mode and
+ * configs without a pinned fingerprint bypass the gate. Mismatch is resolved
+ * by redirecting to `/connect` so the user can re-pin.
+ */
+function FingerprintGate({
+  fetchImpl,
+  children,
+}: {
+  fetchImpl?: typeof fetch;
+  children: ReactNode;
+}) {
+  const config = useConnectionConfig();
+  const { state, verify } = useResumeFingerprintGate(config, { fetchImpl });
+  const navigate = useNavigate();
+  const location = useLocation();
+
+  // The connect screen is the re-pin / local-mode fallback path. Allow it to
+  // mount even when the saved remote fingerprint no longer matches so the user
+  // can recover without a hard lockout.
+  const isConnectRoute = location.pathname === '/connect';
+
+  useEffect(() => {
+    if (state.status === 'mismatch' && !isConnectRoute) {
+      navigate('/connect', { replace: true });
+    }
+  }, [state.status, navigate, isConnectRoute]);
+
+  if (!isConnectRoute && state.status === 'verifying') {
+    return (
+      <div className="flex min-h-screen items-center justify-center p-6">
+        <LoadingState label="Verifying daemon identity…" />
+      </div>
+    );
+  }
+
+  if (!isConnectRoute && state.status === 'fetch-failed') {
+    return (
+      <div className="flex min-h-screen items-center justify-center p-6">
+        <div className="w-full max-w-md">
+          <ErrorState
+            title="Could not verify daemon identity"
+            description={state.message}
+            onRetry={() => void verify()}
+            retryLabel="Try again"
+          />
+          <div className="mt-4 flex justify-center">
+            <Button variant="secondary" onClick={() => navigate('/connect')}>
+              Reconnect to daemon
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <FingerprintGateContext.Provider value={state}>
+      {children}
+    </FingerprintGateContext.Provider>
+  );
+}
+
 export function ClientProvider({
   client,
   desktop,
   connectionConfig: injectedConfig,
   onConnectionConfigChange: injectedSetter,
+  fetchImpl,
   children,
 }: ClientProviderProps) {
   const [storedConfig, setStoredConfig] = useState<ConnectionConfig | null>(null);
@@ -132,7 +216,11 @@ export function ClientProvider({
       <DesktopContext.Provider value={value.desktop}>
         <ConnectionConfigContext.Provider value={config}>
           <SetConnectionConfigContext.Provider value={setConfig}>
-            {children}
+            {client ? (
+              children
+            ) : (
+              <FingerprintGate fetchImpl={fetchImpl}>{children}</FingerprintGate>
+            )}
           </SetConnectionConfigContext.Provider>
         </ConnectionConfigContext.Provider>
       </DesktopContext.Provider>
@@ -165,4 +253,12 @@ export function useSetConnectionConfig(): (config: ConnectionConfig | null) => P
   const setter = useContext(SetConnectionConfigContext);
   if (!setter) throw new Error('useSetConnectionConfig must be used within a ClientProvider');
   return setter;
+}
+
+/**
+ * Exposes the resume-time fingerprint gate state for screens that need to
+ * reason about verification status (e.g. tests, diagnostics).
+ */
+export function useFingerprintGateState(): ResumeFingerprintGateState | null {
+  return useContext(FingerprintGateContext);
 }

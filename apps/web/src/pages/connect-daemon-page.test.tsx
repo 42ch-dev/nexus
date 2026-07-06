@@ -4,7 +4,7 @@ import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { ConnectDaemonPage } from '@/pages/connect-daemon-page';
-import { renderInApp } from '@/test/test-providers';
+import { renderInApp, noopClient } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 import type { ConnectionConfig } from '@/lib/nexus/connection-storage';
 import * as clientContext from '@/lib/client-context';
@@ -72,7 +72,11 @@ describe('ConnectDaemonPage', () => {
     );
 
     renderInApp(
-      <clientContext.ClientProvider connectionConfig={saved} onConnectionConfigChange={setConfig}>
+      <clientContext.ClientProvider
+        client={noopClient}
+        connectionConfig={saved}
+        onConnectionConfigChange={setConfig}
+      >
         <ConnectDaemonPage />
       </clientContext.ClientProvider>,
     );
@@ -98,7 +102,11 @@ describe('ConnectDaemonPage', () => {
     vi.spyOn(clientContext, 'useConnectionConfig').mockReturnValue(saved);
 
     renderInApp(
-      <clientContext.ClientProvider connectionConfig={saved} onConnectionConfigChange={setConfig}>
+      <clientContext.ClientProvider
+        client={noopClient}
+        connectionConfig={saved}
+        onConnectionConfigChange={setConfig}
+      >
         <ConnectDaemonPage />
       </clientContext.ClientProvider>,
     );
