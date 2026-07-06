@@ -83,7 +83,7 @@ export function SetupGate({ children }: SetupGateProps) {
     return <Navigate to="/setup" replace />;
   }
 
-  if (completed && !daemonReady) {
+  if (!daemonReady) {
     return <DaemonReadySplash error={error} onRetry={() => window.location.reload()} />;
   }
 
