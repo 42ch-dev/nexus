@@ -833,3 +833,30 @@ pub async fn prune_findings_handler(
         now_epoch,
     }))
 }
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashSet;
+
+    /// G#3: the hand-maintained allowed-key list in [`validate_batch_patch_keys`]
+    /// must stay in sync with the generated `FindingBatchPatch` struct. If a new
+    /// field is added to the schema without updating the validator, this test
+    /// fails loudly.
+    #[test]
+    fn batch_patch_allowed_keys_match_generated_struct_fields() {
+        let patch = nexus_contracts::FindingBatchPatch {
+            status: Some("open".to_string()),
+            target_executor: Some("write".to_string()),
+        };
+        let value = serde_json::to_value(&patch).expect("serialize FindingBatchPatch");
+        let object = value.as_object().expect("patch serializes to object");
+
+        let allowed: HashSet<&'static str> = ["status", "target_executor"].into_iter().collect();
+        let actual: HashSet<&str> = object.keys().map(String::as_str).collect();
+
+        assert_eq!(
+            allowed, actual,
+            "validate_batch_patch_keys allowed set must match FindingBatchPatch serde field names"
+        );
+    }
+}

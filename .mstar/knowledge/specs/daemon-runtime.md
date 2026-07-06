@@ -746,11 +746,19 @@ Permissions: daemon creates `~/.nexus42/tls/` with mode `0o700` on first boot; w
 2. If the bind address is non-loopback → load or generate TLS cert → `axum_server::bind_rustls(addr, config)`.
 3. The rest of the `axum::serve(listener, app).with_graceful_shutdown(...)` block is unchanged — `bind_rustls` returns a type that satisfies `tokio::Listener`.
 
+**Subject Alternative Name (SAN) generation policy:**
+
+1. The generated certificate **always** includes loopback SANs: `127.0.0.1`, `::1`, and `localhost`. These are required so local clients and loopback-first generation always work.
+2. For a non-loopback concrete bind host, the certificate also includes the bind host as an IP SAN if it parses as an IPv4/IPv6 address, or as a DNS SAN otherwise.
+3. Wildcard bind addresses (`0.0.0.0` and `::`) are **not** added as SANs because they are not valid server names for TLS hostname validation.
+
 **Cert lifecycle:**
 
 1. **Boot:** check if `~/.nexus42/tls/cert.pem` + `key.pem` exist → load via `rustls-pemfile` → `RustlsConfig::from_pem`. If not → generate via `rcgen` (Ed25519 `KeyPair`, `CertificateParams` with `CommonName = "nexus42-daemon"`, `self_signed`) → persist → load.
-2. **Reuse:** cert is loaded from disk on every boot; same cert survives daemon restarts.
-3. **Regeneration:** explicit user action only (delete `~/.nexus42/tls/` → next boot regenerates). No automatic rotation, no expiry check (self-signed local trust anchor; expiry is informational).
+2. **Reuse:** cert is loaded from disk on every boot; same cert survives daemon restarts **as long as its SAN list covers the current `bind_host`**.
+3. **Regeneration:**
+   - Explicit user action: delete `~/.nexus42/tls/` → next boot regenerates.
+   - Automatic on bind-host mismatch: if the persisted cert's SAN list does **not** cover the current `bind_host`, the daemon regenerates the cert with SANs for the new bind host and logs an `INFO` message stating that the cert was regenerated because the bind host changed. No automatic rotation or expiry check is performed otherwise (self-signed local trust anchor; expiry is informational).
 4. **Startup log:** `tracing::info!("TLS certificate fingerprint: SHA256:aa:bb:cc:...")` — fingerprint logged once at boot for the author to copy.
 
 ### 15.2 Remote-bind gate with TLS (§14.2 amended)

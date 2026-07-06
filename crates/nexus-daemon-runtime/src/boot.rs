@@ -6,6 +6,7 @@
 
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 use crate::api;
 use crate::lifecycle::{Event, Lifecycle, StatigLifecycle, SubsystemKind};
@@ -838,18 +839,19 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     tracing::info!("Lifecycle started");
 
     // Spawn HTTP/Unix server
+    let shutdown_grace = Duration::from_millis(config.shutdown_grace_ms);
     let _server_result = tokio::spawn(async move {
         match transport {
             Transport::Http { port, host } => {
                 let addr = format!("{host}:{port}");
-                if let Some(config) = tls_config {
+                if let Some(tls_cfg) = tls_config {
                     let socket_addr = tokio::net::lookup_host(&addr)
                         .await?
                         .next()
                         .ok_or_else(|| anyhow::anyhow!("failed to resolve bind address {addr}"))?;
 
                     let handle = axum_server::Handle::new();
-                    let server = axum_server::bind_rustls(socket_addr, config)
+                    let server = axum_server::bind_rustls(socket_addr, tls_cfg)
                         .handle(handle.clone())
                         .serve(app.into_make_service());
                     let server_handle = tokio::spawn(server);
@@ -859,7 +861,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                     tracing::info!("Press Ctrl+C to stop");
 
                     shutdown_notify.notified().await;
-                    handle.graceful_shutdown(None);
+                    handle.graceful_shutdown(Some(shutdown_grace));
                     let _ = server_handle.await;
                 } else {
                     let listener = tokio::net::TcpListener::bind(&addr).await?;
