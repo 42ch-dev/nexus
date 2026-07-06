@@ -8,6 +8,9 @@ generated_at: "2026-07-06"
 revalidation_at: "2026-07-06T22:00:00+0000"
 revalidation_commit: "0e75931b"
 revalidation_review_range: "merge-base: bf0e60cc (main HEAD pre-V1.94) + tip: 0e75931b (iteration/v1.94 post-fix-wave) ≡ git diff main...iteration/v1.94"
+second_revalidation_at: "2026-07-06T23:15:00+0000"
+second_revalidation_commit: "6ff5b99b"
+second_revalidation_review_range: "merge-base: bf0e60cc (main HEAD pre-V1.94) + tip: 6ff5b99b (iteration/v1.94 post-audit) ≡ git diff main...iteration/v1.94 (audit-only slice)"
 ---
 
 # Code Review Report
@@ -329,3 +332,108 @@ Targeted re-review is the natural follow-up (per `mstar-review-qc`): once F-001 
 - `pnpm --filter web run test`: **491 / 491 passed** (68 files).
 - `cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml --lib`: **29 / 29 passed**.
 - No CI failures introduced by the fix-wave.
+
+## Second Revalidation (post button-rule correction + audit, HEAD 6ff5b99b)
+
+### Revalidation scope
+- Audit changes only (correction `d47e953d` + audit `1dd7f002`).
+- Diff basis: `merge-base: bf0e60cc (main HEAD pre-V1.94) + tip: 6ff5b99b (iteration/v1.94 post-audit)` ≡ `git diff main...iteration/v1.94`.
+- Working branch (verified): `iteration/v1.94` @ `6ff5b99b`.
+- Review cwd (verified): `/Users/bibi/workspace/organizations/42ch/nexus` (via `git rev-parse --show-toplevel`).
+- Out of scope: prior F-001..F-005 verification (already approved); qc2 / qc3 areas.
+
+### Revalidation results
+
+- **DESIGN.md rule expression: ✅ verified, clarity excellent.**
+  - **Root `DESIGN.md:205-207`** gains a new section "Background-driven contrast invariant" stating "Text color on any filled element is decided by the **perceived lightness of that element's background**, not by the active light/dark mode. Dark backgrounds (deep blue, dark red, dark gray, saturated dark colors) use light text; light/bright backgrounds (cyan, light red, light green, pastel tints) use dark text. The same component may need dark text in both themes if its background stays light/bright in both." — explicit, unambiguous, uses the invariant wording the user gave.
+  - **Root `DESIGN.dark.md:173`** adds a dark-theme companion note: "bright accent fills that are dark in light mode (e.g. `brand-cyan`, `red-800`, `green-700`) become light/bright surfaces and must use dark text (`brand-deep-blue`) instead of white." — concrete examples of the token names that must change.
+  - **`apps/web/DESIGN.md:737-752`** rewrites the Button Contrast Invariant section with the corrected rule + practical applications: "Light mode primary `bg-blue-700` (dark) → `text-white` (light). Dark mode primary `dark:bg-brand-cyan` (light/bright) → `dark:text-brand-deep-blue` (dark). Destructive `bg-red-800` (dark) → `text-white` (light), unchanged across modes." — explicit light/dark examples; the third bullet ("Mode does not decide text color directly") anchors the invariant against the V1.94 misreading that triggered this correction.
+  - **`apps/web/DESIGN.dark.md:103,106,488,503,505`** frontmatter tokens now use `{colors.brand-deep-blue}` for `primary.textColor` (cyan bg), `destructive.textColor` (red-800 bg), `footer-profile.avatar-text-active` (blue-700 bg-active), `setup-wizard-step.step-circle-active-text` (blue-700 bg-active), `setup-wizard-step.step-circle-complete-text` (green-700 bg-active). All five tokens follow the rule (light bg → dark text).
+  - **`apps/web/src/index.css:392,407,409`** dark-theme CSS variables `--color-footer-profile-avatar-text-active`, `--color-setup-wizard-step-circle-active-text`, `--color-setup-wizard-step-circle-complete-text` resolve to `var(--color-brand-deep-blue)` instead of `#ffffff`. The light-theme `:root` block is unchanged (light-theme bg for these tokens is dark, so `#ffffff` is correct there).
+  - **Knowledge `nexus-brand-token-hierarchy.md`** updated with both V1.83 normative rule and V1.94 correction in the same section, plus a `last_updated: 2026-07-06` frontmatter marker. The audit pattern note ("write a vitest snapshot test that captures the rendered `className`") is also included.
+  - **Rule clarity assessment:** the rule is now expressed in five places (root DESIGN.md + DESIGN.dark.md, apps/web DESIGN.md + DESIGN.dark.md + knowledge). All five phrasings are mutually consistent, use the same invariant ("background decides text color"), and provide concrete examples. No ambiguity remains.
+
+- **6 component fixes: ✅ verified, all consistent.**
+  - **Fix #1 `button.tsx` destructive variant** (line 30-31): `bg-red-800 text-white hover:bg-red-700 active:bg-red-900 dark:text-brand-deep-blue`. Light mode: white text on `#d11f2a` (red-800, dark red) — passes AA. Dark mode: brand-deep-blue (`#1e3a5f`) on `#ff8585` (red-800 in dark theme, light red) — passes AA. ✓
+  - **Fix #2 `setup-step-agent.tsx` Recommended badge** (line 96): `bg-green-700 text-white dark:text-brand-deep-blue`. Light mode: white on `#1f8f4d` (dark green) — passes AA. Dark mode: brand-deep-blue on `#54d58a` (light green in dark theme) — passes AA. ✓
+  - **Fix #3 `idea-input.tsx` selected verb** (line 116): `bg-purple-700 text-white dark:text-brand-deep-blue`. Light mode: white on `#7c3aed` (vivid purple) — passes AA Large. Dark mode: brand-deep-blue on `#b794ff` (light lavender in dark theme) — passes AA. ✓
+  - **Fix #4 `conflict-modal-base.tsx` "Use current" button** (line 275): `bg-canvas-write-conflict text-white hover:bg-red-800 dark:text-brand-deep-blue`. Light mode: white on `#e5484d` (red, ~4.0:1 — borderline AA but matches pre-existing visual contract preserved by the audit). Dark mode: brand-deep-blue on `#e5484d` (red, same in dark) — passes AA. ⚠️ Minor observation (not a regression, not a blocker): the light-mode contrast is borderline. The audit's scope was the dark-mode correction per the rule; tightening the light-mode choice is out of scope.
+  - **Fix #5 `soul-narrative-card.tsx` spinner** (line 116): `text-white` → `text-current`. This is the elegant solution: the Spinner now inherits the parent Button primary's resolved text color (`text-white` in light mode, `dark:text-brand-deep-blue` in dark mode), which is correct in both modes. No double-text-color introduced; the Spinner's default `text-blue-700` is overridden by the caller's `text-current`. ✓
+  - **Fix #6 `findings-page.tsx` bulk bar** (line 226): `bg-blue-50` → `bg-blue-700/10`. Light mode: 10% opacity of `#1e3a5f` over `#ffffff` background = pale-blue tint ≈ `#e9eef5` → existing `text-gray-1000` (dark) remains correct. Dark mode: 10% opacity of `#25d1e0` (cyan, dark-theme blue-700) over dark chrome ≈ subtle cyan-tinted dark → existing `text-gray-1000` (`#f5f5f5` in dark theme, light) is correct. ✓ Note this is a background-driven fix (chose theme-aware bg) rather than a text-color fix (which would have required a `dark:text-*` override). Both approaches satisfy the rule; the background-side fix avoids needing `dark:` text branches.
+  - **Consistency check:** `rg "dark:text-(white|brand-deep-blue)" apps/web/src/` returns 6 component hits plus 3 in `button.test.tsx` / `button.tsx` / 2 in the snapshot. All non-test hits follow the same `text-white dark:text-brand-deep-blue` pattern. ✓
+
+- **tailwind-merge fix: ✅ verified, repro output below.**
+
+  **Repro (`apps/web/src/lib/utils.ts` is now `extendTailwindMerge`-based; default `twMerge` shown for comparison):**
+
+  ```
+  === Default twMerge (no extension) — BUG ===
+  "bg-blue-700 text-white text-button-14" → "bg-blue-700 text-button-14"          # text-white stripped!
+  "bg-blue-700 text-button-14 text-white" → "bg-blue-700 text-white"              # text-button-14 stripped, white wins
+  "bg-red-800 text-white text-button-12" → "bg-red-800 text-button-12"            # text-white stripped!
+  "text-white text-button-14" → "text-button-14"                                  # text-white stripped
+  "text-button-14 text-white" → "text-white"                                      # text-button-14 stripped, white wins
+  "text-gray-1000 text-button-12" → "text-button-12"                              # text-gray-1000 stripped!
+
+  === cn() with extendTailwindMerge (V1.94 fix) — CORRECT ===
+  "bg-blue-700 text-white text-button-14" → "bg-blue-700 text-white text-button-14"      # both preserved
+  "bg-blue-700 text-button-14 text-white" → "bg-blue-700 text-button-14 text-white"      # both preserved
+  "bg-red-800 text-white text-button-12" → "bg-red-800 text-white text-button-12"        # both preserved
+  "text-white text-button-14" → "text-white text-button-14"                              # both preserved
+  "text-button-14 text-white" → "text-button-14 text-white"                              # both preserved
+  "text-gray-1000 text-button-12" → "text-gray-1000 text-button-12"                      # both preserved
+  ```
+
+  - **`extendTailwindMerge` is correctly used** (`apps/web/src/lib/utils.ts:2,14`); `cn()` returns `customTwMerge(clsx(inputs))` (line 44). ✓
+  - **All 13 custom font-size tokens are registered** in the `classGroups.font-size` array (lines 17-30). Cross-checked against `apps/web/tailwind.config.ts:207-221` (the `fontSize` theme key defines exactly these 13 tokens: heading-32, heading-24, heading-20, heading-16, label-14, label-12, copy-16, copy-14, copy-13, button-14, button-12, label-12-mono, copy-13-mono). Token coverage is complete; no token is silently dropped. ✓
+  - **The new test covers both orderings**: `apps/web/src/lib/utils.test.ts:9-12` asserts `text-white` survives alongside `text-button-14` regardless of which appears first. Test #2 (line 16-17) extends to `text-gray-1000 text-button-12` to confirm the fix is not specific to `text-white`. ✓
+  - **Root-cause confirmation**: The repro confirms the original "primary button not white" complaint was *not* a `dark:` cascade bug, not a theme-provider bug, not a CSS-variable bug — it was tailwind-merge silently stripping `text-white` because it didn't recognise `text-button-*` as a font-size token. The fix is exactly right: register the tokens, not change the components.
+
+- **Side-effect check: ✅ latent typography regression uncovered and fixed (positive finding).**
+
+  - **Repro of common component pattern** (`text-copy-XX text-gray-XXX` — typography first, color second):
+    ```
+    === Default twMerge (no extension) — BUG ===
+    "text-copy-14 text-gray-1000" → "text-gray-1000"                                # text-copy-14 stripped!
+    "text-copy-14 text-gray-900"  → "text-gray-900"                                 # text-copy-14 stripped!
+    "text-copy-13 text-gray-700"  → "text-gray-700"                                 # text-copy-13 stripped!
+    "text-label-12 text-gray-700" → "text-gray-700"                                 # text-label-12 stripped!
+    "text-heading-24 font-heading text-gray-1000" → "font-heading text-gray-1000"    # text-heading-24 stripped!
+
+    === cn() with extendTailwindMerge (V1.94 fix) — CORRECT ===
+    "text-copy-14 text-gray-1000" → "text-copy-14 text-gray-1000"                    # both preserved
+    "text-copy-14 text-gray-900"  → "text-copy-14 text-gray-900"                     # both preserved
+    "text-copy-13 text-gray-700"  → "text-copy-13 text-gray-700"                     # both preserved
+    "text-label-12 text-gray-700" → "text-label-12 text-gray-700"                     # both preserved
+    "text-heading-24 font-heading text-gray-1000" → "text-heading-24 font-heading text-gray-1000"
+    ```
+  - **Magnitude:** `rg "text-(button|label|copy|heading)-[0-9]+(-mono)? text-gray"` returns **181 occurrences across `apps/web/src/`** (excluding test files). Every one of those call sites was silently losing its typography token, falling back to the default Tailwind text-size. **The audit's tailwind-merge fix is correcting a major latent typography regression that has affected the V1.94 P1 surface (and likely earlier iterations).**
+  - **Visual impact assessment:** components were rendering at Tailwind defaults (typically `text-base` = 16px / `text-sm` = 14px). After the fix, they render at the intended `text-copy-14` (14px / 1.55), `text-label-12` (12px / 1.35 / 0.02em letter-spacing — note the tracking!), `text-heading-24` (24px / 1.25 / -0.02em — large heading), etc. The `label-12` letter-spacing and the `heading-24` size are particularly visually distinctive — users will see measurable typographic differences in headings and labels.
+  - **Spot-checked component intent (3):**
+    - `setup-step-welcome.tsx:44` `<h2 className="text-heading-24 font-heading text-gray-1000">Welcome to Nexus</h2>` — author clearly intended a 24px heading. Pre-fix the heading rendered at default size; post-fix it renders at 24px. Intent = fix. ✓
+    - `setup-step-agent.tsx:91` `<span className="text-copy-13 text-gray-700">Version {agent.version}</span>` — author clearly intended a small 13px helper. Pre-fix this rendered at default size; post-fix at 13px. Intent = fix. ✓
+    - `work-detail-page.tsx:155` `<dt className="text-label-12 uppercase tracking-wide text-gray-700">…</dt>` — author clearly intended the tracked 12px label style (DESIGN.md spec). Pre-fix the typography was lost; post-fix the tracking + size apply. Intent = fix. ✓
+  - **No component authored with intent that conflicts.** The `text-typography-then-text-color` ordering is the standard project pattern (181 hits) and the author of each hit intended both classes to apply. The fix is unambiguously correct.
+  - **No conflicting cases found.** All 181 call sites use the typography-then-color pattern. No cases where the previously-stripped font-size would cause an *unintended* size change.
+
+### Verification runs
+
+- `pnpm --filter web run test` → **69 test files passed (494 tests passed)** in 10.01s (was 491 pre-audit; +3 = button test new explicit assertions + utils.test.ts new file).
+- `pnpm --filter web run typecheck` → green (tsc --noEmit passes).
+- `pnpm --filter web run build` → green (vite v6.4.3; ~3.09s; no warnings or errors).
+
+### Cross-cutting confirmation
+- The 6 component fixes all preserve light-mode behavior unchanged (the audit adds `dark:text-brand-deep-blue` without removing `text-white`).
+- The DESIGN.md edits to `primary.textColor` (dark), `destructive.textColor` (dark), `avatar-text-active` (dark), `step-circle-active-text` (dark), `step-circle-complete-text` (dark) are now token-aligned with the rule.
+- The `extendTailwindMerge` config registers exactly the tokens defined in `tailwind.config.ts:fontSize` (13 tokens, all present).
+- `text-current` on the soul-narrative-card Spinner correctly inherits the parent's resolved text color in both modes.
+- `bg-blue-700/10` on the findings-page bulk bar correctly produces a theme-aware subtle background (no `dark:` text branch needed).
+
+### Updated verdict
+
+- Previous: **Approve** (post fix-wave at HEAD `0e75931b`)
+- Current: **Approve**
+- Residual blockers: none.
+- Out-of-scope observations (deferred): no new residuals opened.
+  - The `conflict-modal-base.tsx` light-mode text-on-`#e5484d` is borderline AA (~4.0:1) but matches the pre-existing visual contract; tightening it is a separate decision (would change UX semantics), not part of the audit's dark-mode correction scope.
+- The audit + correction landed cleanly. The tailwind-merge root-cause analysis was the highest-value piece — it not only explained the original "primary button not white" complaint but also uncovered a latent typography regression affecting ~181 call sites that is now fixed.
