@@ -14,6 +14,7 @@ export type WizardStep = 'welcome' | 'daemon' | 'agent' | 'done';
 
 export interface WizardState {
   workspaceRoot: string;
+  workspacePicked?: boolean;
   selectedAgent: AgentScanEntry | null;
   customLaunchCommand: string;
 }
@@ -58,10 +59,12 @@ export function SetupWizardPage() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-background-100 p-6">
-      <div className="w-full max-w-setup-wizard-step-wizard-max-width rounded-card border border-gray-alpha-400 bg-background-100 p-setup-wizard-step-wizard-padding shadow-modal">
-        <StepIndicator currentStep={step} />
-        <div className="mt-8">
+    <div className="flex min-h-screen bg-background-100 p-6">
+      <div className="flex w-full gap-6">
+        <aside className="w-52 flex-shrink-0">
+          <StepIndicator currentStep={step} />
+        </aside>
+        <main className="flex-1 max-w-setup-wizard-step-wizard-max-width rounded-card border border-gray-alpha-400 bg-background-100 p-setup-wizard-step-wizard-padding shadow-modal">
           {step === 'welcome' && (
             <SetupStepWelcome
               state={state}
@@ -86,7 +89,7 @@ export function SetupWizardPage() {
           {step === 'done' && (
             <SetupStepDone onFinish={finish} isFinishing={isFinishing} />
           )}
-        </div>
+        </main>
       </div>
     </div>
   );
@@ -102,25 +105,33 @@ function StepIndicator({ currentStep }: { currentStep: WizardStep }) {
   const currentIndex = steps.findIndex((s) => s.id === currentStep);
 
   return (
-    <div className="flex items-center justify-between gap-2">
-      {steps.map((s, index) => {
-        const status = index < currentIndex ? 'complete' : index === currentIndex ? 'active' : 'pending';
-        return (
-          <div key={s.id} className="flex flex-1 items-center gap-2">
-            <div className="flex flex-col items-center gap-1">
-              <span
-                className={[
-                  'flex h-setup-wizard-step-circle-size w-setup-wizard-step-circle-size items-center justify-center rounded-full text-button-14 font-button transition-colors',
-                  status === 'active'
-                    ? 'bg-setup-wizard-step-circle-active-bg text-setup-wizard-step-circle-active-text'
-                    : status === 'complete'
-                      ? 'bg-setup-wizard-step-circle-complete-bg text-setup-wizard-step-circle-complete-text'
-                      : 'bg-setup-wizard-step-circle-pending-bg text-setup-wizard-step-circle-pending-text',
-                ].join(' ')}
-                aria-current={status === 'active' ? 'step' : undefined}
-              >
-                {index + 1}
-              </span>
+    <nav aria-label="Setup progress">
+      <ol className="flex flex-col">
+        {steps.map((s, index) => {
+          const status = index < currentIndex ? 'complete' : index === currentIndex ? 'active' : 'pending';
+          return (
+            <li
+              key={s.id}
+              className="flex h-14 items-center gap-3"
+              aria-current={status === 'active' ? 'step' : undefined}
+            >
+              <div className="flex h-full flex-col items-center">
+                <span
+                  className={[
+                    'flex h-setup-wizard-step-circle-size w-setup-wizard-step-circle-size items-center justify-center rounded-full text-button-14 font-button transition-colors',
+                    status === 'active'
+                      ? 'bg-setup-wizard-step-circle-active-bg text-setup-wizard-step-circle-active-text'
+                      : status === 'complete'
+                        ? 'bg-setup-wizard-step-circle-complete-bg text-setup-wizard-step-circle-complete-text'
+                        : 'bg-setup-wizard-step-circle-pending-bg text-setup-wizard-step-circle-pending-text',
+                  ].join(' ')}
+                >
+                  {index + 1}
+                </span>
+                {index < steps.length - 1 && (
+                  <div className="w-px flex-1 bg-setup-wizard-step-connector" aria-hidden />
+                )}
+              </div>
               <span
                 className={[
                   'text-setup-wizard-step-label-typography',
@@ -131,16 +142,10 @@ function StepIndicator({ currentStep }: { currentStep: WizardStep }) {
               >
                 {s.label}
               </span>
-            </div>
-            {index < steps.length - 1 && (
-              <div
-                className="h-px flex-1 bg-setup-wizard-step-connector"
-                aria-hidden
-              />
-            )}
-          </div>
-        );
-      })}
-    </div>
+            </li>
+          );
+        })}
+      </ol>
+    </nav>
   );
 }

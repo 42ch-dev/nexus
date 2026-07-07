@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button';
 import { useDesktopCapabilities } from '@/lib/client-context';
 import type { WizardState } from '@/pages/setup-wizard-page';
 
+const DEFAULT_WORKSPACE = '~/Documents/nexus/default';
+
 interface SetupStepWelcomeProps {
   state: WizardState;
   onChange: (state: WizardState) => void;
@@ -14,10 +16,11 @@ interface SetupStepWelcomeProps {
 export function SetupStepWelcome({ state, onChange, onNext }: SetupStepWelcomeProps) {
   const desktop = useDesktopCapabilities();
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!desktop) {
-      onChange({ ...state, workspaceRoot: '~/Documents/nexus42/default' });
+      onChange({ ...state, workspaceRoot: DEFAULT_WORKSPACE });
       setLoading(false);
       return;
     }
@@ -28,7 +31,7 @@ export function SetupStepWelcome({ state, onChange, onNext }: SetupStepWelcomePr
         if (!cancelled) onChange({ ...state, workspaceRoot: root });
       })
       .catch(() => {
-        if (!cancelled) onChange({ ...state, workspaceRoot: '~/Documents/nexus42/default' });
+        if (!cancelled) onChange({ ...state, workspaceRoot: DEFAULT_WORKSPACE });
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -37,6 +40,43 @@ export function SetupStepWelcome({ state, onChange, onNext }: SetupStepWelcomePr
       cancelled = true;
     };
   }, [desktop, onChange]);
+
+  async function browse() {
+    if (!desktop) return;
+    setLoading(true);
+    setError(null);
+    try {
+      const selected = await desktop.pickDirectory(state.workspaceRoot || DEFAULT_WORKSPACE);
+      if (selected) {
+        onChange({ ...state, workspaceRoot: selected, workspacePicked: true });
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message || 'Could not open the folder picker.');
+      console.error('Failed to pick directory:', err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function continueToNext() {
+    setError(null);
+    if (!desktop) {
+      onNext();
+      return;
+    }
+    if (shouldPersistWorkspacePath(state.workspaceRoot, state.workspacePicked)) {
+      try {
+        await desktop.setWorkspacePath(state.workspaceRoot);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setError(message || 'Could not save the workspace path.');
+        console.error('Failed to persist workspace path:', err);
+        return;
+      }
+    }
+    onNext();
+  }
 
   return (
     <div className="flex flex-col gap-6">
@@ -55,11 +95,38 @@ export function SetupStepWelcome({ state, onChange, onNext }: SetupStepWelcomePr
         </div>
       </div>
 
-      <div className="flex justify-end">
-        <Button variant="primary" onClick={onNext} disabled={loading || !state.workspaceRoot}>
+      {error && (
+        <p className="text-copy-14 text-red-800" role="alert">
+          {error}
+        </p>
+      )}
+
+      <div className="flex justify-between">
+        {desktop ? (
+          <Button
+            variant="secondary"
+            onClick={browse}
+            disabled={loading}
+          >
+            Browse…
+          </Button>
+        ) : (
+          <span />
+        )}
+        <Button variant="primary" onClick={continueToNext} disabled={loading || !state.workspaceRoot}>
           Continue
         </Button>
       </div>
     </div>
   );
+}
+
+function shouldPersistWorkspacePath(path: string, picked?: boolean): boolean {
+  if (!path) return false;
+  // Always persist paths the user explicitly selected via the picker.
+  if (picked) return true;
+  // Overwrite known stale defaults without requiring a picker interaction.
+  const isOldDefault = path.includes('Documents/nexus42/');
+  const isLegacyV193 = path.includes('nexus/local/default');
+  return isOldDefault || isLegacyV193;
 }

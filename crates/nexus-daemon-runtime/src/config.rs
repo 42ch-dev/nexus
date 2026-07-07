@@ -10,6 +10,8 @@ use std::path::{Path, PathBuf};
 const DEFAULT_WORKSPACE_SLUG: &str = "default";
 
 /// Resolve the default workspace root when `workspace_path` is unset.
+///
+/// Mirrors the CLI default: `dirs::document_dir().join("nexus").join("default")`.
 #[must_use]
 pub fn resolve_default_workspace_path() -> PathBuf {
     dirs::document_dir()
@@ -21,7 +23,7 @@ pub fn resolve_default_workspace_path() -> PathBuf {
             tracing::warn!("dirs::home_dir() returned None; using relative fallback");
             PathBuf::from("Documents")
         })
-        .join("nexus42")
+        .join("nexus")
         .join("default")
 }
 

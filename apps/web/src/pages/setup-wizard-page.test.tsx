@@ -19,13 +19,19 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
     openWith: () => Promise.resolve(),
     revealInFinder: () => Promise.resolve(),
     getDaemonStatus: () => Promise.resolve({ state: 'running', port: 8420 }),
-    onDaemonStatusChanged: () => Promise.resolve(() => {}),
+    onDaemonStatusChanged: (callback) => {
+      callback({ state: 'running', port: 8420 });
+      return Promise.resolve(() => {});
+    },
     startDaemon: () => Promise.resolve(),
     stopDaemon: () => Promise.resolve(),
+    resetLocalDatabase: () => Promise.resolve(),
     getSetupCompleted: () => Promise.resolve(false),
     setSetupCompleted: () => Promise.resolve(),
     setAgentProfile: () => Promise.resolve(),
     getWorkspaceRoot: () => Promise.resolve('/tmp/nexus'),
+    pickDirectory: () => Promise.resolve(null),
+    setWorkspacePath: () => Promise.resolve(),
     ...overrides,
   };
 }
@@ -36,6 +42,35 @@ function LocationDisplay() {
 }
 
 describe('SetupWizardPage', () => {
+  it('renders a left-sidebar vertical step indicator and a card content area', () => {
+    renderInApp(
+      <SetupWizardPage />,
+      { client: makeClient(), initialRouterEntries: ['/setup'] },
+    );
+
+    // Step indicator is a vertical list inside a fixed left sidebar.
+    const nav = screen.getByRole('navigation', { name: 'Setup progress' });
+    const list = nav.querySelector('ol');
+    expect(list).toHaveClass('flex-col');
+
+    // Active step carries aria-current="step".
+    const activeStep = screen.getByRole('listitem', { current: 'step' });
+    expect(activeStep).toHaveTextContent('1');
+    expect(activeStep).toHaveTextContent('Welcome');
+
+    // Step circle uses the sizing-token utilities.
+    const circle = screen.getByText('1').closest('span');
+    expect(circle).toHaveClass('h-setup-wizard-step-circle-size');
+    expect(circle).toHaveClass('w-setup-wizard-step-circle-size');
+
+    // Content area is the card with the padding-token and max-width-token utilities.
+    const main = screen.getByRole('main');
+    expect(main).toHaveClass('rounded-card');
+    expect(main).toHaveClass('shadow-modal');
+    expect(main).toHaveClass('p-setup-wizard-step-wizard-padding');
+    expect(main).toHaveClass('max-w-setup-wizard-step-wizard-max-width');
+  });
+
   it('moves through the four steps and finishes', async () => {
     const user = userEvent.setup();
 

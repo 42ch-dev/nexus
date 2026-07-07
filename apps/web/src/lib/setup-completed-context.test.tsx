@@ -30,10 +30,13 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
     onDaemonStatusChanged: () => Promise.resolve(() => {}),
     startDaemon: () => Promise.resolve(),
     stopDaemon: () => Promise.resolve(),
+    resetLocalDatabase: () => Promise.resolve(),
     getSetupCompleted: () => Promise.resolve(false),
     setSetupCompleted: () => Promise.resolve(),
     setAgentProfile: () => Promise.resolve(),
     getWorkspaceRoot: () => Promise.resolve('/tmp/nexus'),
+    pickDirectory: () => Promise.resolve(null),
+    setWorkspacePath: () => Promise.resolve(),
     ...overrides,
   };
 }

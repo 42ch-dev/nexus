@@ -102,6 +102,14 @@ describe('TauriDesktopCapabilities', () => {
     restoreTauri();
   });
 
+  it('resetLocalDatabase invokes reset_local_database', async () => {
+    const { invoke } = mockTauri(() => Promise.resolve(undefined));
+    const caps = new TauriDesktopCapabilities();
+    await caps.resetLocalDatabase();
+    expect(invoke).toHaveBeenCalledWith('reset_local_database', undefined);
+    restoreTauri();
+  });
+
   it('onDaemonStatusChanged listens for nexus://daemon-status-changed events', async () => {
     const handler = vi.fn();
     const listen = vi.fn().mockImplementation((event, cb) => {

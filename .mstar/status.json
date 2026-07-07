@@ -1,16 +1,53 @@
 {
   "version": 1,
-  "updated_at": "2026-07-06T22:30:00+0000",
-  "plans": [],
+  "updated_at": "2026-07-07T11:00:00+0000",
+  "plans": [
+    {
+      "id": "2026-07-07-v1.95-prepare-specs",
+      "status": "Done",
+      "title": "P-1 — Prepare: spec amendments for ClientProvider fix + daemon error surfacing + layout redesign",
+      "file": ".mstar/plans/2026-07-07-v1.95-prepare-specs.md",
+      "type": "prepare",
+      "owner": "@architect",
+      "metadata": {
+        "iteration": "V1.95",
+        "iteration_refs": "v1.95-setup-wizard-bugfix-delivery-compass-v1.md",
+        "spec_integration_branch": "iteration/v1.95",
+        "merge_target": "iteration/v1.95",
+        "primary_spec": "knowledge/specs/desktop-shell.md",
+        "blocked_by": [],
+        "blocking": ["2026-07-07-v1.95-implement-fixes"],
+        "working_branch": "feature/v1.95-prepare"
+      }
+    },
+    {
+      "id": "2026-07-07-v1.95-implement-fixes",
+      "status": "Done",
+      "title": "P0 — Implement all 6 V1.94 setup-wizard bug fixes: ClientProvider + daemon error + CSS tokens + layout + directory picker + workspace path + DB separation",
+      "file": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md",
+      "type": "implement",
+      "owner": "@fullstack-dev",
+      "metadata": {
+        "iteration": "V1.95",
+        "iteration_refs": "v1.95-setup-wizard-bugfix-delivery-compass-v1.md",
+        "spec_integration_branch": "iteration/v1.95",
+        "merge_target": "iteration/v1.95",
+        "primary_spec": "knowledge/specs/desktop-shell.md",
+        "blocked_by": ["2026-07-07-v1.95-prepare-specs"],
+        "blocking": [],
+        "working_branch": "feature/v1.95-implement-fixes"
+      }
+    }
+  ],
   "metadata": {
-    "integration_branch_retired": false,
+    "integration_branch_retired": true,
     "last_integration_branch": "iteration/v1.94",
     "integration_merge_target": "main",
     "iteration_base_branch": "main",
     "target_branch": "main",
-    "integration_branch": "iteration/v1.94",
-    "latest_active_iteration": null,
-    "latest_active_compass": null,
+    "integration_branch": "iteration/v1.95",
+    "latest_active_iteration": "V1.95",
+    "latest_active_compass": "v1.95-setup-wizard-bugfix-delivery-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
@@ -19,198 +56,60 @@
       "iteration": "V1.94",
       "compass": "v1.94-desktop-onboarding-ia-pass-delivery-compass-v1.md",
       "shipped_at": "2026-07-06",
-      "pr": "pending — Phase 4 next",
-      "merge_commit": "pending"
+      "pr": "https://github.com/42ch-dev/nexus/pull/122",
+      "merge_commit": "7c61c033"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-07-06",
-      "total_open": 12,
-      "by_severity": {
-        "critical": 0,
-        "high": 0,
-        "medium": 1,
-        "low": 10,
-        "nit": 1
-      },
-      "by_target": {
-        "V1.95": 11,
-        "when list virtualisation lands": 1
-      },
+      "updated_at": "2026-07-07",
+      "total_open": 18,
+      "by_severity": { "critical": 0, "high": 0, "medium": 2, "low": 14, "nit": 2 },
+      "by_target": { "V1.95": 17, "when list virtualisation lands": 1 },
       "by_plan": {
         "2026-07-05-v1.91-findings-batch": 1,
         "2026-07-05-v1.92-closure": 1,
         "2026-07-06-v1.93-closure": 1,
-        "2026-07-06-v1.94-closure": 9
+        "2026-07-06-v1.94-closure": 9,
+        "2026-07-07-v1.95-implement-fixes": 6
       },
-      "refreshed_at": "2026-07-06T23:30:00+0000",
-      "refreshed_reason": "V1.94 iteration-close (Phase 3): 4 plans archived to Profile B; latest_ship → V1.94 (PR pending Phase 4); compass status: completed. 9 V1.95-deferred residuals registered under v1.94-closure: R-V194QC1-S101..S106 (6 qc1 Suggestions), R-V194QC2-S001/S002 (2 qc2 Suggestions), R-V194QC1R-S001 (1 qc1 revalidation soft). 3 prior residuals stay open: R-V192SEC-001 (medium, TOFU transport-binding, V1.95 — strongest candidate), R-V193PL-001 (low, /v1/local/* path-literal spec hygiene), R-V191P1-005 (nit, FindingsPage memoisation — unchanged). Total 12 open (1 medium + 10 low + 1 nit)."
+      "refreshed_at": "2026-07-07T16:10:00+0000",
+      "refreshed_reason": "V1.95 implement QC tri consolidated: 6 new residuals (2 architect + 2 QC3 PM-accepted + 1 QC3 timeout + 1 QC1 test-parity). QC verdict Approve with residuals."
     },
-    "updated_at": "2026-07-06T23:30:00+0000"
+    "updated_at": "2026-07-07T16:10:00+0000"
   },
   "residual_findings": {
     "2026-07-05-v1.91-findings-batch": [
-      {
-        "id": "R-V191P1-005",
-        "title": "FindingsPage recomputes allSelected / someSelected on every render without memoisation",
-        "severity": "nit",
-        "source": "qc3 S-004",
-        "scope": "apps/web/src/pages/findings-page.tsx selection derivation",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "when list virtualisation lands",
+      { "id": "R-V191P1-005", "title": "FindingsPage recomputes allSelected / someSelected on every render without memoisation", "severity": "nit", "decision": "defer", "owner": "@frontend-dev", "target": "when list virtualisation lands", "lifecycle": "open",
         "tracking_link": ".mstar/plans/reports/2026-07-05-v1.91-reading-chrome/qc3.md §S-004",
-        "note": "At the 100-item cap this is not user-visible; revisit when findings lists grow larger or virtualisation is introduced.",
-        "lifecycle": "open"
-      }
+        "note": "At the 100-item cap this is not user-visible." }
     ],
     "2026-07-06-v1.93-closure": [
-      {
-        "id": "R-V193PL-001",
-        "title": "Pre-existing stale /v1/local/* path-string literals in 12 specs while the API name is now 'Daemon API' (V1.90 rename left path literals un-swept)",
-        "severity": "low",
-        "source": "qc1 W-003 (V1.93 P-last consolidated QC)",
-        "scope": "knowledge/specs/ — local-runtime-boundary.md, agent-host.md, desktop-shell.md, creator-schedule-and-core-context.md, local-cloud-crate-architecture.md, + others (~12 files reference /v1/local/* for resources now at /v1/daemon/*)",
-        "decision": "defer",
-        "owner": "@writing-specialist + @architect",
-        "target": "V1.95 spec-hygiene pass",
+      { "id": "R-V193PL-001", "title": "Pre-existing stale /v1/local/* path-string literals in 12 specs", "severity": "low", "decision": "defer", "owner": "@writing-specialist + @architect", "target": "V1.96 spec-hygiene pass", "lifecycle": "open",
         "tracking_link": ".mstar/plans/reports/2026-07-06-v1.93-closure/qc1.md §W-003",
-        "note": "Pre-existing from V1.90. V1.93's R-V192HYG-001 naming sweep made the name consistent, which reshaped the name/path mismatch into a visible spec self-disagreement. Defer to a dedicated spec-hygiene pass.",
-        "lifecycle": "open"
-      }
+        "note": "Pre-existing from V1.90." }
     ],
     "2026-07-05-v1.92-closure": [
-      {
-        "id": "R-V192SEC-001",
-        "title": "Resume TOFU fingerprint gate is in-band over the same (MITM-able) TLS fetch session — not transport-bound; buildClient() does not pass pinnedFingerprint to the HTTP transport",
-        "severity": "medium",
-        "source": "Cursor Security Automation — PR #120 review 4632744387 (merge-close, 2026-07-06)",
-        "scope": "apps/web/src/lib/nexus/use-resume-fingerprint-gate.ts; apps/web/src/lib/client-context.tsx buildClient(); apps/desktop/src-tauri/ (no reqwest/rustls cert-pin for remote daemon)",
-        "decision": "defer",
-        "owner": "@fullstack-dev + @frontend-dev",
-        "target": "V1.95",
+      { "id": "R-V192SEC-001", "title": "Resume TOFU fingerprint gate is in-band over the same (MITM-able) TLS fetch session", "severity": "medium", "decision": "defer", "owner": "@fullstack-dev + @frontend-dev", "target": "V1.96", "lifecycle": "open",
         "tracking_link": "https://github.com/42ch-dev/nexus/pull/120#pullrequestreview-4632744387",
-        "note": "The real resolution is desktop (Tauri) transport-layer cert pinning: route remote-daemon HTTP through a Rust reqwest+rustls client with a custom certificate verifier that checks the served cert's SHA-256 against pinnedFingerprint. Re-queued from V1.94 (no security-surface overlap with desktop-onboarding UX work).",
-        "lifecycle": "open"
-      }
+        "note": "Desktop Tauri reqwest+rustls transport-layer cert pinning." }
     ],
     "2026-07-06-v1.94-closure": [
-      {
-        "id": "R-V194QC1-S101",
-        "title": "Setup-step-agent auto-select effect over-fires on every state change",
-        "severity": "low",
-        "source": "qc1 F-101 (V1.94 P-last consolidated QC)",
-        "scope": "apps/web/src/pages/setup-step-agent.tsx auto-select useEffect",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "V1.95",
-        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-101",
-        "note": "Effect dependency array too broad; should only fire when scan result or user selection changes. Non-blocking; current behavior is correct but noisy.",
-        "lifecycle": "open"
-      },
-      {
-        "id": "R-V194QC1-S102",
-        "title": "Health-probe subscription duplicated between SetupGate and SetupStepDaemon",
-        "severity": "low",
-        "source": "qc1 F-102",
-        "scope": "apps/web/src/components/setup/setup-gate.tsx + apps/web/src/pages/setup-step-daemon.tsx",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "V1.95",
-        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-102",
-        "note": "Two components subscribe to onDaemonStatusChanged independently; could be unified into a shared hook. Non-blocking; matches the daemon-ready-gate-pattern.md multi-observer model.",
-        "lifecycle": "open"
-      },
-      {
-        "id": "R-V194QC1-S103",
-        "title": "SetupStepWelcome swallows Tauri errors silently",
-        "severity": "low",
-        "source": "qc1 F-103",
-        "scope": "apps/web/src/pages/setup-step-welcome.tsx",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "V1.95",
-        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-103",
-        "note": "Workspace detection failure path catches + swallows; should surface a toast or inline error. Non-blocking; default workspace fallback is safe.",
-        "lifecycle": "open"
-      },
-      {
-        "id": "R-V194QC1-S104",
-        "title": "Browser-fallback workspace string uses ~/… while Tauri returns absolute path",
-        "severity": "low",
-        "source": "qc1 F-104",
-        "scope": "apps/web/src/pages/setup-step-welcome.tsx display string",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "V1.95",
-        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-104",
-        "note": "Display inconsistency between browser (~/Documents/…) and desktop (absolute path) builds. Non-blocking; cosmetic.",
-        "lifecycle": "open"
-      },
-      {
-        "id": "R-V194QC1-S105",
-        "title": "/strategy redirect drops preset ID",
-        "severity": "low",
-        "source": "qc1 F-105",
-        "scope": "apps/web/src/App.tsx /strategy redirect",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "V1.95",
-        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-105",
-        "note": "Old /strategy deep links fall back to /strategies list rather than /strategies/:presetId because no lastActivePresetId is stored. Graceful degradation; non-blocking.",
-        "lifecycle": "open"
-      },
-      {
-        "id": "R-V194QC1-S106",
-        "title": "Sidebar nav data is open-ended with no compile-time guard",
-        "severity": "low",
-        "source": "qc1 F-106",
-        "scope": "apps/web/src/components/layout/sidebar.tsx NAV_ITEMS structure",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "V1.95",
-        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-106",
-        "note": "NAV_ITEMS shape could be a typed const with exhaustive-struct enforcement. Non-blocking; current shape is correct.",
-        "lifecycle": "open"
-      },
-      {
-        "id": "R-V194QC2-S001",
-        "title": "Agent scan endpoint could expose optional force_refresh query param",
-        "severity": "low",
-        "source": "qc2 S-001 (V1.94 P-last consolidated QC)",
-        "scope": "crates/nexus-daemon-runtime/src/api/handlers/agent_host.rs scan handler",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target": "V1.95",
-        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc2.md §S-001",
-        "note": "Currently always uses cached registry; a force_refresh=true param would let the wizard re-fetch on demand. Non-blocking; 24h stale-while-revalidate is the current policy.",
-        "lifecycle": "open"
-      },
-      {
-        "id": "R-V194QC2-S002",
-        "title": "Agent scan could batch --version probes via a single async joinset rather than sequential per-entry",
-        "severity": "low",
-        "source": "qc2 S-002",
-        "scope": "crates/nexus-acp-host/src/registry.rs scan_local_installations",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target": "V1.95",
-        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc2.md §S-002",
-        "note": "Current implementation already uses bounded concurrency (≤4); a JoinSet would be idiomatic but the Semaphore approach is functionally equivalent. Non-blocking.",
-        "lifecycle": "open"
-      },
-      {
-        "id": "R-V194QC1R-S001",
-        "title": "set_agent_profile hardcodes the agent-host config path rather than reusing nexus_home_layout helper",
-        "severity": "low",
-        "source": "qc1 revalidation soft suggestion (V1.94 P-last fix-wave revalidation)",
-        "scope": "apps/desktop/src-tauri/src/lib.rs set_agent_profile",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target": "V1.95",
-        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §Revalidation",
-        "note": "Matches the existing boot.rs:978 pattern (also hardcodes the path). A future hygiene pass should centralize via nexus_home_layout::agent_host_config_path(&home). Non-blocking.",
-        "lifecycle": "open"
-      }
+      { "id": "R-V194QC1-S101", "title": "Setup-step-agent auto-select effect over-fires on every state change", "severity": "low", "decision": "defer", "owner": "@frontend-dev", "target": "V1.96", "lifecycle": "open", "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-101", "note": "Non-blocking." },
+      { "id": "R-V194QC1-S102", "title": "Health-probe subscription duplicated between SetupGate and SetupStepDaemon", "severity": "low", "decision": "defer", "owner": "@frontend-dev", "target": "V1.96", "lifecycle": "open", "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-102", "note": "Non-blocking." },
+      { "id": "R-V194QC1-S103", "title": "SetupStepWelcome swallows Tauri errors silently", "severity": "low", "decision": "defer", "owner": "@frontend-dev", "target": "V1.96", "lifecycle": "open", "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-103", "note": "Non-blocking." },
+      { "id": "R-V194QC1-S104", "title": "Browser-fallback workspace string uses ~/… while Tauri returns absolute path", "severity": "low", "decision": "defer", "owner": "@frontend-dev", "target": "V1.96", "lifecycle": "open", "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-104", "note": "Non-blocking." },
+      { "id": "R-V194QC1-S105", "title": "/strategy redirect drops preset ID", "severity": "low", "decision": "defer", "owner": "@frontend-dev", "target": "V1.96", "lifecycle": "open", "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-105", "note": "Non-blocking." },
+      { "id": "R-V194QC1-S106", "title": "Sidebar nav data is open-ended with no compile-time guard", "severity": "low", "decision": "defer", "owner": "@frontend-dev", "target": "V1.96", "lifecycle": "open", "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-106", "note": "Non-blocking." },
+      { "id": "R-V194QC2-S001", "title": "Agent scan endpoint could expose optional force_refresh query param", "severity": "low", "decision": "defer", "owner": "@fullstack-dev", "target": "V1.96", "lifecycle": "open", "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc2.md §S-001", "note": "Non-blocking." },
+      { "id": "R-V194QC2-S002", "title": "Agent scan could batch --version probes via async joinset", "severity": "low", "decision": "defer", "owner": "@fullstack-dev", "target": "V1.96", "lifecycle": "open", "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc2.md §S-002", "note": "Non-blocking." },
+      { "id": "R-V194QC1R-S001", "title": "set_agent_profile hardcodes config path rather than reusing nexus_home_layout helper", "severity": "low", "decision": "defer", "owner": "@fullstack-dev", "target": "V1.96", "lifecycle": "open", "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §Revalidation", "note": "Non-blocking." }
+    ],
+    "2026-07-07-v1.95-implement-fixes": [
+      { "id": "R-V195-ARCH-DUPLICATE-DEFAULTS", "title": "Triplicate resolve_default_workspace_path/default_workspace_root (apps/nexus42, nexus-daemon-runtime, desktop src-tauri) — consolidate into nexus-home-layout", "severity": "low", "decision": "defer", "owner": "@fullstack-dev", "target": "V1.96", "lifecycle": "open", "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md §Architecture residual", "note": "V1.95 fixed brand nexus42->nexus in all 3; structural consolidation deferred." },
+      { "id": "R-V195-ARCH-STRERR-GAP", "title": "SidecarManager discards _rx from command.spawn() — daemon stderr (real crash reason) never captured; wizard shows generic error", "severity": "medium", "decision": "defer", "owner": "@fullstack-dev", "target": "V1.96", "lifecycle": "open", "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md §Architecture residual", "note": "T3 surfaces detail verbatim but stderr is not captured; reset button is the pragmatic recovery." },
+      { "id": "R-V195QC3-W002", "title": "reset_local_database deletes files in a loop without atomicity/rollback; mid-deletion failure leaves partial state", "severity": "low", "decision": "accept", "owner": "@fullstack-dev", "target": "V1.96", "lifecycle": "open", "tracking_link": ".mstar/plans/reports/2026-07-07-v1.95-implement-fixes/qc3.md §W2", "note": "PM-accepted: recovery-wipe semantics; daemon recreates fresh DBs on boot regardless; partial wipe recoverable." },
+      { "id": "R-V195QC3-W003", "title": "set_workspace_path writes directly without temp-file-then-rename; crash mid-write could corrupt config.toml", "severity": "low", "decision": "accept", "owner": "@fullstack-dev", "target": "V1.96", "lifecycle": "open", "tracking_link": ".mstar/plans/reports/2026-07-07-v1.95-implement-fixes/qc3.md §W3", "note": "PM-accepted: matches existing write_setup_completed_at/write_agent_profile_at pattern (all std::fs::write); codebase-wide hardening is V1.96." },
+      { "id": "R-V195QC3-S001", "title": "Setup daemon step has no timeout — if sidecar never emits a status event, wizard hangs indefinitely", "severity": "low", "decision": "defer", "owner": "@frontend-dev", "target": "V1.96", "lifecycle": "open", "tracking_link": ".mstar/plans/reports/2026-07-07-v1.95-implement-fixes/qc3.md §Suggestion", "note": "useEffect cleanup unsubscribes; no hard timeout." },
+      { "id": "R-V195QC1-S002", "title": "No dedicated malformed-TOML unit test for write_workspace_path_at (mirrors sibling-writer tests)", "severity": "nit", "decision": "defer", "owner": "@fullstack-dev", "target": "V1.96", "lifecycle": "open", "tracking_link": ".mstar/plans/reports/2026-07-07-v1.95-implement-fixes/qc1.md §S-002", "note": "Implementation correct; integration-covered; test-parity with siblings is polish." }
     ]
   }
 }

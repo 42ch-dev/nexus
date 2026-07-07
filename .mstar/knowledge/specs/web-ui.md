@@ -1088,3 +1088,36 @@ The wizard and per-launch daemon-ready gate are **desktop-first**:
 - Multi-workspace UI / workspace switcher.
 - Agent detection during non-first-launch.
 - Mobile full rewrite (the `<lg` collapse preserves the two-tab structure as a dropdown/pill scroller but is not optimized for touch-first patterns).
+
+### 29.10 V1.95 Amendments
+
+#### 29.10.1 Setup wizard layout redesign
+
+The setup wizard moves from a centered card with horizontal steps at the top to a left‑sidebar vertical step indicator with content on the right:
+
+- Steps: Welcome (workspace selection), Daemon (status/error/reset), Agent (detection/selection), Done.
+- The wizard fills the entire window (no `min-h-screen items-center justify-center`).
+- Step indicators are a vertical list in a fixed left panel (`w-52`), with the current step highlighted.
+- Content area keeps the card chrome (border, shadow, background).
+
+#### 29.10.2 Setup wizard workspace selection with native directory picker
+
+Step 1 (Welcome) now includes a native directory picker (Tauri `@tauri-apps/plugin-dialog` `open({ directory: true })`) to let the user select a custom workspace path:
+
+- Default workspace path: `~/Documents/nexus/default` (brand `nexus/`, not `nexus42/`; system home remains `~/.nexus42/`).
+- Stale path overwrite: if the existing `workspace_path` matches `~/Documents/nexus42/default` or `~/Documents/nexus/local/default`, it is overwritten with the new default; custom user-set paths are preserved.
+- Browser build hides the directory picker button (no native dialogs).
+
+#### 29.10.3 FingerprintGate setup route bypass
+
+The `FingerprintGate` adds `/setup` to its bypass routes (alongside `/connect`), so the wizard can render before any remote config exists without timing risks.
+
+#### 29.10.4 ClientProvider immediate TauriClient for desktop
+
+On desktop builds, `ClientProvider` returns `TauriClient` + `TauriDesktopCapabilities` immediately in the `!loaded` branch (no temporary `BrowserClient`), avoiding the "Request failed: The string did not match the expected pattern" error from same‑origin `/v1/daemon/runtime/health` calls in the Tauri webview.
+
+#### 29.10.5 Daemon error surfacing + migration‑mismatch recovery
+
+- Wizard step 2 (Daemon) surfaces the real error detail from `SidecarManager` (not a generic message).
+- When the daemon fails to start (e.g., migration checksum mismatch), the wizard offers an **opt‑in "Reset local database" button** that clears the daemon state in `~/.nexus42/` (no user creative files touched) and retries daemon start.
+- The button copy clearly states: "This will clear the daemon's local state database (config, registry cache). Your creative files in the workspace are not affected."

@@ -110,7 +110,7 @@ function FingerprintGate({
   // The connect screen is the re-pin / local-mode fallback path. Allow it to
   // mount even when the saved remote fingerprint no longer matches so the user
   // can recover without a hard lockout.
-  const isConnectRoute = location.pathname === '/connect';
+  const isConnectRoute = location.pathname === '/connect' || location.pathname === '/setup';
 
   useEffect(() => {
     if (state.status === 'mismatch' && !isConnectRoute) {
@@ -204,7 +204,12 @@ export function ClientProvider({
 
   const value = useMemo<ResolvedClients>(() => {
     if (client) return { client, desktop: desktop ?? null };
-    if (!loaded) return { client: new BrowserClient(), desktop: null };
+    if (!loaded) {
+      if (isDesktop) {
+        return { client: new TauriClient(), desktop: new TauriDesktopCapabilities() };
+      }
+      return { client: new BrowserClient(), desktop: null };
+    }
     return {
       client: buildClient(config, isDesktop),
       desktop: isDesktop ? new TauriDesktopCapabilities() : null,
