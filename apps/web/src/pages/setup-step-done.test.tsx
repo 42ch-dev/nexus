@@ -1,0 +1,56 @@
+import { describe, expect, it, vi } from 'vitest';
+import { screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+
+import { SetupStepDone } from '@/pages/setup-step-done';
+import { renderInApp } from '@/test/test-providers';
+
+describe('SetupStepDone', () => {
+  it('renders the completion message and the Finish button', async () => {
+    renderInApp(<SetupStepDone onFinish={vi.fn()} />, {
+      initialRouterEntries: ['/setup'],
+    });
+
+    expect(screen.getByText('You are ready')).toBeInTheDocument();
+    expect(
+      screen.getByText(/Nexus is set up and the daemon is running/),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open Nexus' })).toBeInTheDocument();
+  });
+
+  it('calls onFinish when the Finish button is clicked', async () => {
+    const user = userEvent.setup();
+    const onFinish = vi.fn();
+
+    renderInApp(<SetupStepDone onFinish={onFinish} />, {
+      initialRouterEntries: ['/setup'],
+    });
+
+    const finishButton = screen.getByRole('button', { name: 'Open Nexus' });
+    await user.click(finishButton);
+
+    await waitFor(() => expect(onFinish).toHaveBeenCalled());
+  });
+
+  it('shows a loading state when isFinishing is true', async () => {
+    renderInApp(<SetupStepDone onFinish={vi.fn()} isFinishing />, {
+      initialRouterEntries: ['/setup'],
+    });
+
+    const finishButton = await waitFor(() =>
+      screen.getByRole('button', { name: 'Finishing…' }),
+    );
+    expect(finishButton).toBeDisabled();
+  });
+
+  it('renders the Finish button as a wide prominent bottom CTA', async () => {
+    renderInApp(<SetupStepDone onFinish={vi.fn()} />, {
+      initialRouterEntries: ['/setup'],
+    });
+
+    const finishButton = await waitFor(() =>
+      screen.getByRole('button', { name: 'Open Nexus' }),
+    );
+    expect(finishButton).toHaveClass('w-full', 'max-w-setup-wizard-surface-cta-primary-max-width');
+  });
+});

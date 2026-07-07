@@ -3,6 +3,8 @@ import { Loader2, RefreshCw } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { useNexusClient, useDesktopCapabilities } from '@/lib/client-context';
+import { errorMessage } from '@/lib/error-message';
+import type { DaemonStatus } from '@/lib/nexus/desktop-capabilities';
 
 interface SetupStepDaemonProps {
   onNext: () => void;
@@ -18,17 +20,24 @@ export function SetupStepDaemon({ onNext, onBack }: SetupStepDaemonProps) {
 
   useEffect(() => {
     if (ready) return;
+
     let cancelled = false;
     let unsub: (() => void) | undefined;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
-    async function probe() {
-      try {
-        await client.health();
-        if (!cancelled) setReady(true);
-      } catch (err) {
-        if (!cancelled) {
-          setError(errorMessage(err) || 'Could not reach the daemon.');
-        }
+    function applyStatus(status: DaemonStatus) {
+      if (cancelled) return;
+      if (status.state === 'running' || status.state === 'degraded') {
+        setReady(true);
+        setError(null);
+        clearTimeout(timeoutId);
+      } else if (status.state === 'starting') {
+        setReady(false);
+        setError(null);
+      } else if (status.state === 'error' || status.state === 'stopped') {
+        setReady(false);
+        setError(status.detail ?? `Daemon is ${status.state}.`);
+        clearTimeout(timeoutId);
       }
     }
 
@@ -38,30 +47,74 @@ export function SetupStepDaemon({ onNext, onBack }: SetupStepDaemonProps) {
         return;
       }
       try {
+        const status = await desktop.getDaemonStatus();
+        applyStatus(status);
+        if (cancelled || status.state === 'running' || status.state === 'degraded') return;
         unsub = await desktop.onDaemonStatusChanged((status) => {
-          if (cancelled) return;
-          if (status.state === 'running') {
-            setReady(true);
-            setError(null);
-          } else if (status.state === 'error' || status.state === 'stopped') {
-            setError(status.detail ?? `Daemon is ${status.state}.`);
-          }
+          applyStatus(status);
         });
       } catch {
-        // Fall back to polling.
+        if (cancelled) return;
         await probe();
       }
     }
 
+    async function probe() {
+      try {
+        await client.health();
+        if (!cancelled) {
+          setReady(true);
+          setError(null);
+          if (timeoutId) clearTimeout(timeoutId);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setReady(false);
+          setError(errorMessage(err) || 'Could not reach the daemon.');
+          if (timeoutId) clearTimeout(timeoutId);
+        }
+      }
+    }
+
+    timeoutId = setTimeout(() => {
+      if (cancelled) return;
+      if (!desktop) {
+        setError('Daemon is taking longer than expected to start.');
+        return;
+      }
+      void desktop
+        .getDaemonStatus()
+        .then((status) => {
+          if (cancelled) return;
+          applyStatus(status);
+          if (
+            status.state !== 'running' &&
+            status.state !== 'degraded' &&
+            status.state !== 'error' &&
+            status.state !== 'stopped'
+          ) {
+            setError(
+              'Daemon is taking longer than expected to start. You can retry or reset the local database.',
+            );
+          }
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setError('Could not determine daemon status. Try retrying.');
+        });
+    }, 25_000);
+
     void subscribe();
     return () => {
       cancelled = true;
+      clearTimeout(timeoutId);
       unsub?.();
     };
   }, [client, desktop, ready, retryToken]);
 
   function retry() {
     setError(null);
+    setRetryToken((n) => n + 1);
     if (desktop) {
       void desktop.startDaemon();
     } else {
@@ -82,13 +135,6 @@ export function SetupStepDaemon({ onNext, onBack }: SetupStepDaemonProps) {
     }
   }
 
-  function errorMessage(err: unknown): string {
-    if (err && typeof err === 'object' && 'message' in err) {
-      return String((err as { message: string }).message);
-    }
-    return err instanceof Error ? err.message : String(err);
-  }
-
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
@@ -101,7 +147,7 @@ export function SetupStepDaemon({ onNext, onBack }: SetupStepDaemonProps) {
       <div className="flex min-h-[120px] flex-col items-center justify-center gap-3 rounded-card border border-gray-alpha-400 bg-background-200 p-6 text-center">
         {error ? (
           <>
-            <p className="text-copy-14 text-red-800">{error}</p>
+            <p className="whitespace-pre-wrap break-words text-copy-14 text-red-800">{error}</p>
             <div className="flex flex-col items-center gap-2">
               <Button variant="secondary" onClick={retry}>
                 <RefreshCw className="h-4 w-4" aria-hidden />
@@ -129,10 +175,17 @@ export function SetupStepDaemon({ onNext, onBack }: SetupStepDaemonProps) {
         )}
       </div>
 
-      <div className="flex justify-between">
-        <Button variant="tertiary" onClick={onBack}>Back</Button>
-        <Button variant="primary" onClick={onNext} disabled={!ready}>
+      <div className="flex flex-col gap-setup-wizard-surface-cta-container-gap mt-auto">
+        <Button
+          variant="primary"
+          onClick={onNext}
+          disabled={!ready}
+          className="w-full max-w-setup-wizard-surface-cta-primary-max-width"
+        >
           Continue
+        </Button>
+        <Button variant="tertiary" onClick={onBack} className="self-start">
+          Back
         </Button>
       </div>
     </div>

@@ -17,6 +17,7 @@
  * screens hide the desktop-only affordances (Copy Path stays — it is plain
  * clipboard write, browser + desktop).
  */
+import { errorMessage } from '@/lib/error-message';
 import type { DaemonHealth } from './types';
 
 /** Structured error thrown by desktop capability methods. Mirrors the Rust
@@ -132,8 +133,8 @@ function asDesktopError(err: unknown): DesktopCapabilityError {
     const e = err as { code: string; message: string };
     return { code: e.code as DesktopCapabilityError['code'], message: e.message };
   }
-  const message = err instanceof Error ? err.message : String(err);
-  return { code: 'invoke_failed', message: message || 'Desktop command failed.' };
+  const message = errorMessage(err) || 'Desktop command failed.';
+  return { code: 'invoke_failed', message };
 }
 
 /**

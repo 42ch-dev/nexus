@@ -497,7 +497,10 @@ components:
     gap: "{spacing.space-2}"
 
   # ── V1.94 Setup Wizard Step Chrome — dark values (same token names as DESIGN.md) ──
+  # V1.96 addition: step-row-height (same value as light — row height is
+  # structural, not color-dependent).
   setup-wizard-step:
+    step-row-height: "40px"
     step-circle-size: "32px"
     step-circle-active-bg: "{colors.blue-700}"
     step-circle-active-text: "{colors.brand-deep-blue}"
@@ -511,6 +514,43 @@ components:
     step-label-pending-color: "{colors.gray-700}"
     wizard-max-width: "640px"
     wizard-padding: "{spacing.space-8}"
+
+  # ── V1.96 Setup Wizard Surface — dark values (same token names as DESIGN.md) ──
+  # Integrated card chrome + component tokens. Dark-tuned background/border/divider
+  # values so the single-card container stays legible against the dark viewport.
+  # Inline input row uses dark-tuned alpha grays for bg/border and light foreground
+  # text. Motion/structural tokens (widths, padding, gap, height) are identical
+  # to light — theme-independent.
+  setup-wizard-surface:
+    # ── Integrated card chrome ──
+    card-bg: "{colors.background-100}"
+    card-border: "{colors.gray-alpha-400}"
+    card-shadow: "shadow-modal"
+    card-rounded: "{rounded.popover}"
+    # ── Step panel (left side of integrated card) — divider dark-tuned ──
+    step-panel-width: "208px"
+    step-panel-right-divider: "{colors.gray-alpha-200}"
+    step-panel-padding-x: "{spacing.space-6}"
+    step-panel-padding-y: "{spacing.space-8}"
+    # ── Content panel (right side of integrated card) ──
+    content-panel-padding-x: "{spacing.space-10}"
+    content-panel-padding-y: "{spacing.space-8}"
+    # ── Inline input row (Step 1 workspace location) — dark-tuned ──
+    input-row-gap: "{spacing.space-3}"
+    input-row-min-height: "48px"
+    input-row-bg: "{colors.background-200}"
+    input-row-border: "{colors.gray-alpha-400}"
+    input-row-rounded: "{rounded.control}"
+    input-row-padding-x: "{spacing.space-4}"
+    input-row-padding-y: "{spacing.space-3}"
+    input-row-label-color: "{colors.gray-700}"
+    input-row-path-color: "{colors.gray-1000}"
+    input-row-icon-color: "{colors.blue-700}"
+    # ── Primary bottom CTA (same structural sizes as light) ──
+    cta-primary-max-width: "400px"
+    cta-container-gap: "{spacing.space-4}"
+    # ── Motion (consumes existing motion tokens; same as light) ──
+    step-transition-duration: "duration-state"
 ---
 
 # Nexus Local Web UI Design System — Dark Theme

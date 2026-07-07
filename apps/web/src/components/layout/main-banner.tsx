@@ -3,6 +3,7 @@ import { RefreshCw } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { useDesktopCapabilities } from '@/lib/client-context';
+import { errorMessage } from '@/lib/error-message';
 import type { DaemonStatus } from '@/lib/nexus/desktop-capabilities';
 import { useToast } from '@/lib/use-toast';
 
@@ -82,7 +83,7 @@ export function MainBanner() {
       await desktop.startDaemon();
       await refresh();
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err) || 'Daemon restart failed.';
       toast({ variant: 'error', title: 'Daemon restart failed', description: message });
     } finally {
       setIsLoading(false);

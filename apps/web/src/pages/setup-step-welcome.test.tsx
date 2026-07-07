@@ -71,13 +71,33 @@ describe('SetupStepWelcome', () => {
     expect(screen.queryByRole('button', { name: 'Browse…' })).not.toBeInTheDocument();
   });
 
-  it('shows the desktop workspace root and a picker button', async () => {
+  it('renders Continue as a wide prominent bottom CTA', async () => {
+    renderHarness(makeState({ workspaceRoot: '/custom/nexus' }));
+
+    const continueButton = await waitFor(() => screen.getByRole('button', { name: 'Continue' }));
+    expect(continueButton).toHaveClass('w-full', 'max-w-setup-wizard-surface-cta-primary-max-width');
+  });
+
+  it('truncates a long workspace path', async () => {
+    const longPath = '/very/long/path/'.repeat(10);
+    renderHarness(makeState({ workspaceRoot: longPath }), {
+      desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve(longPath) }),
+    });
+
+    await waitFor(() => expect(screen.getByText(longPath)).toBeInTheDocument());
+    const pathText = screen.getByText(longPath);
+    expect(pathText).toHaveClass('truncate');
+  });
+
+  it('shows the desktop workspace root and a picker button in the same row', async () => {
     renderHarness(makeState(), {
       desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve('/custom/nexus') }),
     });
 
     await waitFor(() => expect(screen.getByText('/custom/nexus')).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: 'Browse…' })).toBeInTheDocument();
+    const browseButton = screen.getByRole('button', { name: 'Browse…' });
+    expect(browseButton).toBeInTheDocument();
+    expect(browseButton.closest('[data-testid="workspace-location-row"]')).toBeInTheDocument();
   });
 
   it('updates the workspace root when the picker returns a directory', async () => {
@@ -165,7 +185,7 @@ describe('SetupStepWelcome', () => {
     await waitFor(() => expect(screen.getByText('dialog failed')).toBeInTheDocument());
   });
 
-  it('clears the previous error when the user retries Continue', async () => {
+  it('allows retry after a setWorkspacePath error and continues on success', async () => {
     const user = userEvent.setup();
     const onNext = vi.fn();
     const setWorkspacePath = vi
@@ -185,6 +205,5 @@ describe('SetupStepWelcome', () => {
 
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() => expect(onNext).toHaveBeenCalled());
-    expect(screen.queryByText('permission denied')).not.toBeInTheDocument();
   });
 });

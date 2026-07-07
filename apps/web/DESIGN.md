@@ -568,7 +568,10 @@ components:
   # Steps render as numbered circles + connecting lines. Active/complete/pending
   # states distinguish step progression. Token names frozen verbatim. Dark
   # values in DESIGN.dark.md.
+  # V1.96 addition: step-row-height enforces the per-row horizontal baseline
+  # alignment invariant (circle + label share the same baseline).
   setup-wizard-step:
+    step-row-height: "40px"
     step-circle-size: "32px"
     step-circle-active-bg: "{colors.blue-700}"
     step-circle-active-text: "#ffffff"
@@ -582,6 +585,46 @@ components:
     step-label-pending-color: "{colors.gray-700}"
     wizard-max-width: "640px"
     wizard-padding: "{spacing.space-8}"
+
+  # ── V1.96 Setup Wizard Surface — integrated card chrome + component tokens ──
+  # Centered, single-card IA: step indicator + content share one bordered/shadowed
+  # container (one border/shadow/bg wrapping both; internal divider, not separate
+  # cards). Step indicator alignment: per-row fixed height so circle and label
+  # share the same horizontal baseline. Inline input row: folder icon + label +
+  # path + Browse button on one tightly-coupled row. Primary bottom CTA: wide
+  # prominent Continue/Finish; Back as smaller secondary adjacent. Motion:
+  # reduced-motion-safe step transitions consuming existing motion tokens.
+  # Token names frozen verbatim (do not rename). Dark values in DESIGN.dark.md.
+  setup-wizard-surface:
+    # ── Integrated card chrome ──
+    card-bg: "{colors.background-100}"
+    card-border: "{colors.gray-alpha-400}"
+    card-shadow: "shadow-modal"
+    card-rounded: "{rounded.popover}"
+    # ── Step panel (left side of integrated card) ──
+    step-panel-width: "208px"
+    step-panel-right-divider: "{colors.gray-alpha-200}"
+    step-panel-padding-x: "{spacing.space-6}"
+    step-panel-padding-y: "{spacing.space-8}"
+    # ── Content panel (right side of integrated card) ──
+    content-panel-padding-x: "{spacing.space-10}"
+    content-panel-padding-y: "{spacing.space-8}"
+    # ── Inline input row (Step 1 workspace location) ──
+    input-row-gap: "{spacing.space-3}"
+    input-row-min-height: "48px"
+    input-row-bg: "{colors.background-200}"
+    input-row-border: "{colors.gray-alpha-400}"
+    input-row-rounded: "{rounded.control}"
+    input-row-padding-x: "{spacing.space-4}"
+    input-row-padding-y: "{spacing.space-3}"
+    input-row-label-color: "{colors.gray-700}"
+    input-row-path-color: "{colors.gray-1000}"
+    input-row-icon-color: "{colors.blue-700}"
+    # ── Primary bottom CTA ──
+    cta-primary-max-width: "400px"
+    cta-container-gap: "{spacing.space-4}"
+    # ── Motion (consumes existing motion tokens) ──
+    step-transition-duration: "duration-state"
 ---
 
 # Nexus Local Web UI Design System
@@ -840,6 +883,90 @@ Copy-path behavior:
 - The action label is `Copy Path`; success toast is `Path copied`.
 - If clipboard write fails, show `Path not copied. Copy it manually from the details panel.`
 - Menu items must be keyboard reachable from the row/body read-only surface.
+
+---
+
+## Setup Wizard Surface (V1.96 — Level 3 Production)
+
+The setup wizard is the user's first interaction with Nexus. After V1.95's left-sidebar layout proved visually unrefined (left-aligned, disconnected panels, step indicator misalignment), V1.96 redesigns the wizard as a centered, integrated single-card surface at Level 3 Production completeness. All token values live in frontmatter `components.setup-wizard-surface` and `components.setup-wizard-step`. The dark theme shares the same token names with dark-tuned values in [`DESIGN.dark.md`](DESIGN.dark.md).
+
+### Layout shell
+
+- The wizard card is centered in the viewport both horizontally and vertically (`items-center justify-center` on the outer flex container, plus a `max-w-*` constraint on the card).
+- The step indicator list (left panel) and the current step's content area (right panel) live inside **one shared card chrome** container — a single element with `card-bg`, `card-border`, `card-shadow`, and `card-rounded`. An internal vertical `step-panel-right-divider` separates the panels visually; they are not two disconnected cards.
+- The V1.94 `aside` + `main` two-element layout is replaced with one `<div>` card wrapping both panels internally.
+
+**Sizing tokens and theme-key routing** (guardrail from V1.95 compound doc `tailwind-theme-key-routing-for-sizing-tokens.md`):
+
+| Token | Theme key | Utility | JSX consumer example |
+| --- | --- | --- | --- |
+| `wizard-max-width` (preserved) | `maxWidth` | `max-w-setup-wizard-step-wizard-max-width` | Outer card container |
+| `wizard-padding` (preserved, re-purposed as content padding) | `padding` | `p-setup-wizard-step-wizard-padding` | Card inner padding |
+| `step-panel-width` | `spacing` | `w-[--color-setup-wizard-surface-step-panel-width]` | Step indicator panel |
+| `step-row-height` | `spacing` | `h-setup-wizard-step-row-height` | Per-row fixed height |
+| `step-circle-size` (preserved) | `spacing` | `h-setup-wizard-step-circle-size w-setup-wizard-step-circle-size` | Circle marker |
+| `step-label-typography` (preserved) | `fontSize` | `text-setup-wizard-step-label-typography` | Step label |
+| `input-row-min-height` | `spacing` | `min-h-setup-wizard-surface-input-row-min-height` | Inline input row |
+| `cta-primary-max-width` | `maxWidth` | `max-w-setup-wizard-surface-cta-primary-max-width` | Bottom CTA |
+
+### Step indicator alignment
+
+The V1.95 layout bug: the `<li>` had `flex h-14 items-center` but the inner circle container was `flex h-full flex-col` — the circle sat at the top of the 56px row while the label was vertically centered, causing visible horizontal misalignment between circle and label.
+
+**V1.96 invariant**: every `StepIndicator` `<li>` row has a fixed height (`step-row-height: 40px`) and uses `flex items-center`. The circle (`step-circle-size: 32px`) and the label share the same horizontal baseline. The connector line between circles is rendered as an absolutely-positioned vertical rule behind the circles, not as a flex child forcing a column layout.
+
+- Circle states (preserved from V1.94): `active` (blue filled background, white text), `complete` (green filled, white text), `pending` (gray-alpha background, gray-700 text).
+- Connector: `w-px` width, color from `step-connector`.
+- Label: typography from `step-label-typography`; color from `step-label-active-color` or `step-label-pending-color`. Employs `truncate` to handle long step names.
+
+### Inline input row pattern (Step 1)
+
+The workspace location affordance is one tightly-coupled inline row:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ 📂  Workspace location  ~/Documents/nexus/default  [Browse…] │
+└─────────────────────────────────────────────────────────┘
+```
+
+- **Container**: `input-row-bg` background, `input-row-border` border, `input-row-rounded` corners, `input-row-padding-x`/`input-row-padding-y` padding, `input-row-min-height` minimum height.
+- **Icon**: folder icon in `input-row-icon-color`, `h-5 w-5`.
+- **Label**: "Workspace location" in `input-row-label-color`, `text-label-12`.
+- **Path**: resolved path text in `input-row-path-color`, `text-copy-14`, `truncate`.
+- **Browse button**: `variant="secondary"` (consumes existing `button.secondary` tokens), placed with `input-row-gap` spacing from the path.
+- **Loading state**: shows "Resolving…" as placeholder text; Browse button disabled.
+- Errors fire via **global toast** (error variant), not inline `<p role="alert">`. The existing `components.toast` tokens cover the visual surface.
+
+### Primary bottom CTA pattern
+
+Each wizard step ends with a bottom action bar:
+
+- **Primary action** (Continue/Finish): wide, prominent button. Consumes `button.primary` basis with `max-w-setup-wizard-surface-cta-primary-max-width` constraint (centered within the content panel). Span available width up to the max; `w-full` below that.
+- **Secondary action** (Back): smaller tertiary button (`button.tertiary` basis), placed to the left of or above the primary CTA in a compact pair.
+- **Container**: flex column/split layout with `cta-container-gap` between Back and Continue.
+- **Consistency**: same pattern across Steps 1–4.
+
+### Toast surface coverage
+
+The wizard's error surfacing uses the page-level `useToast()` already wired in `setup-wizard-page.tsx`. The existing `components.toast` tokens provide the complete visual surface:
+
+- `toast.backgroundColor` / `toast.borderColor` / `toast.shadow` / `toast.rounded` — container chrome.
+- `toast.titleTypography` / `toast.bodyTypography` — text stack.
+- Error variant uses a red-700 accent bar (consuming the semantic `red-*` accent scale).
+
+No new toast tokens are required. Step components route errors through the `toast({ variant: 'error', title, description })` API — they must not maintain inline `<p role="alert">` blocks.
+
+### Motion
+
+Step transitions consume the existing motion tokens:
+
+- `step-transition-duration` references `duration-state` (120ms) — applied to step content fade/swap.
+- Respects `prefers-reduced-motion: reduce`: no transform/opacity transition when the user has indicated reduced motion.
+- No elaborate animations. The transition is a subtle opacity crossfade sufficient to signal "the step changed" without decoration.
+
+### Dark theme parity
+
+Every token in `setup-wizard-surface` and the `setup-wizard-step` addition has a matching entry in [`DESIGN.dark.md`](DESIGN.dark.md) with the same token name and a dark-tuned value. Structural tokens (widths, heights, padding, gap) are identical across themes — only color-dependent values differ (backgrounds, borders, dividers, text colors). All entries pass WCAG AA contrast (≥4.5:1 for text, ≥3:1 for UI components).
 
 ---
 

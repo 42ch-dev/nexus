@@ -19,7 +19,7 @@ export function DaemonReadySplash({ error, onRetry }: DaemonReadySplashProps) {
         {error ? (
           <>
             <h1 className="text-heading-24 font-heading text-gray-1000">Daemon not ready</h1>
-            <p className="text-copy-14 text-gray-900">{error}</p>
+            <p className="whitespace-pre-wrap break-words text-copy-14 text-gray-900">{error}</p>
             <Button variant="primary" onClick={onRetry}>
               <RefreshCw className="h-4 w-4" aria-hidden />
               Restart Nexus

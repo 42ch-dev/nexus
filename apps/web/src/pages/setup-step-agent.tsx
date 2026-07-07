@@ -115,10 +115,17 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
         )}
       </div>
 
-      <div className="flex justify-between">
-        <Button variant="tertiary" onClick={onBack}>Back</Button>
-        <Button variant="primary" onClick={onNext} disabled={!canContinue}>
+      <div className="flex flex-col gap-setup-wizard-surface-cta-container-gap mt-auto">
+        <Button
+          variant="primary"
+          onClick={onNext}
+          disabled={!canContinue}
+          className="w-full max-w-setup-wizard-surface-cta-primary-max-width"
+        >
           Continue
+        </Button>
+        <Button variant="tertiary" onClick={onBack} className="self-start">
+          Back
         </Button>
       </div>
     </div>

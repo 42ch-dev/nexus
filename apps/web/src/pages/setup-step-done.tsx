@@ -17,9 +17,16 @@ export function SetupStepDone({ onFinish, isFinishing }: SetupStepDoneProps) {
           Nexus is set up and the daemon is running. You can change these settings later from the app menu.
         </p>
       </div>
-      <Button variant="primary" onClick={onFinish} disabled={isFinishing}>
-        {isFinishing ? 'Finishing…' : 'Open Nexus'}
-      </Button>
+      <div className="flex flex-col gap-setup-wizard-surface-cta-container-gap mt-auto">
+        <Button
+          variant="primary"
+          onClick={onFinish}
+          disabled={isFinishing}
+          className="w-full max-w-setup-wizard-surface-cta-primary-max-width"
+        >
+          {isFinishing ? 'Finishing…' : 'Open Nexus'}
+        </Button>
+      </div>
     </div>
   );
 }

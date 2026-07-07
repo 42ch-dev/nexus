@@ -102,6 +102,18 @@ const config: Config = {
           'label-active-color': cv('setup-wizard-step-label-active-color'),
           'label-pending-color': cv('setup-wizard-step-label-pending-color'),
         },
+        // V1.96 Setup Wizard Surface — integrated card chrome + inline input row
+        // (DESIGN.md frontmatter `components.setup-wizard-surface`).
+        'setup-wizard-surface': {
+          'card-bg': cv('setup-wizard-surface-card-bg'),
+          'card-border': cv('setup-wizard-surface-card-border'),
+          'step-panel-right-divider': cv('setup-wizard-surface-step-panel-right-divider'),
+          'input-row-bg': cv('setup-wizard-surface-input-row-bg'),
+          'input-row-border': cv('setup-wizard-surface-input-row-border'),
+          'input-row-label-color': cv('setup-wizard-surface-input-row-label-color'),
+          'input-row-path-color': cv('setup-wizard-surface-input-row-path-color'),
+          'input-row-icon-color': cv('setup-wizard-surface-input-row-icon-color'),
+        },
         // Accent scales — DESIGN.md §Colors/Accent Scales.
         blue: {
           700: cv('blue-700'),
@@ -255,14 +267,28 @@ const config: Config = {
       // V1.95 Setup Wizard Step Chrome — sizing tokens must live under their
       // proper Tailwind theme keys to generate max-w-*, p-*, h-*, w-* utilities.
       // They are still sourced from --color-* CSS variables per DESIGN.md.
+      // V1.96 adds the setup-wizard-surface sizing tokens and the step-row-height
+      // token to the existing setup-wizard-step group.
       spacing: {
         'setup-wizard-step-circle-size': cv('setup-wizard-step-circle-size'),
+        'setup-wizard-step-row-height': cv('setup-wizard-step-row-height'),
+        'setup-wizard-surface-step-panel-width': cv('setup-wizard-surface-step-panel-width'),
+        'setup-wizard-surface-input-row-min-height': cv('setup-wizard-surface-input-row-min-height'),
+        'setup-wizard-surface-input-row-gap': cv('setup-wizard-surface-input-row-gap'),
+        'setup-wizard-surface-cta-container-gap': cv('setup-wizard-surface-cta-container-gap'),
       },
       maxWidth: {
         'setup-wizard-step-wizard-max-width': cv('setup-wizard-wizard-max-width'),
+        'setup-wizard-surface-cta-primary-max-width': cv('setup-wizard-surface-cta-primary-max-width'),
       },
       padding: {
         'setup-wizard-step-wizard-padding': cv('setup-wizard-wizard-padding'),
+        'setup-wizard-surface-step-panel-padding-x': cv('setup-wizard-surface-step-panel-padding-x'),
+        'setup-wizard-surface-step-panel-padding-y': cv('setup-wizard-surface-step-panel-padding-y'),
+        'setup-wizard-surface-content-panel-padding-x': cv('setup-wizard-surface-content-panel-padding-x'),
+        'setup-wizard-surface-content-panel-padding-y': cv('setup-wizard-surface-content-panel-padding-y'),
+        'setup-wizard-surface-input-row-padding-x': cv('setup-wizard-surface-input-row-padding-x'),
+        'setup-wizard-surface-input-row-padding-y': cv('setup-wizard-surface-input-row-padding-y'),
       },
     },
   },
