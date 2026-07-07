@@ -32,7 +32,7 @@ The naive implementation would create two independent health-probe polls or two 
 |------|--------|
 | Subscribe to `onDaemonStatusChanged`; do not add `is_daemon_ready()` commands | The event already carries `state`; a synchronous command would race with the state machine and lie during transitions |
 | Treat `state: "running"` as the only "gate open" signal | `starting` is not ready (health probe pending); `degraded`/`error`/`stopped` are explicit failures |
-| Surface failure paths explicitly (`error`, `stopped`, 15s timeout) | Silent hangs are the worst UX; the wizard step 2 and the per-launch splash both need actionable CTAs (Restart, Open Logs, etc.) |
+| Surface failure paths explicitly (`error`, `stopped`, timeout) | Silent hangs are the worst UX; the wizard step 2 and the per-launch splash both need actionable CTAs (Restart, Open Logs, etc.). V1.96 changed the wizard timeout from 15s to 25s with a mount-time probe — see `desktop-shell.md` §13.7.5. |
 | Two consumers can coexist without coordination | The event is fan-out; each consumer maintains its own UI state but reads the same lifecycle signal |
 | Do not call `start_daemon()` from a consumer unless you intend to reset the crash budget | `start_daemon()` resets `restart_count`; `start()` does not. The wizard may reset (user-initiated); the per-launch splash must not (automatic) |
 
@@ -51,6 +51,8 @@ The naive implementation would create two independent health-probe polls or two 
 ## Examples
 
 - **Setup Wizard Step 2** (`apps/web/src/pages/setup-step-daemon.tsx`): subscribes via `useDaemonStatus()`; renders "Starting daemon…" while `state === "starting"`; advances on `"running"`; surfaces error CTA on `"error"` or after 15s.
+
+  > **V1.96 update**: the wizard step 2 now uses a mount-time state probe (`getDaemonStatus()` before subscribing), an explicit `'starting'` branch, and a 25s hard timeout (not 15s). The 15s timeout is historical (V1.94 original). See `desktop-shell.md` §13.7.5 for current behavior.
 - **Per-launch splash** (`apps/web/src/components/setup/setup-gate.tsx`): returning-user path; same subscription; brief splash → main UI on `"running"`.
 - **Crash banner** (`apps/web/src/components/layout/main-banner.tsx`): long-running-session consumer; appears when state degrades from `"running"` to `"degraded"`/`"error"`/`"stopped"`.
 

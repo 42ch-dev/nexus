@@ -1091,14 +1091,16 @@ The wizard and per-launch daemon-ready gate are **desktop-first**:
 
 ### 29.10 V1.95 Amendments
 
-#### 29.10.1 Setup wizard layout redesign
+#### 29.10.1 Setup wizard layout redesign (V1.95 shipped behavior)
 
-The setup wizard moves from a centered card with horizontal steps at the top to a left‑sidebar vertical step indicator with content on the right:
+The setup wizard moves from a centered card with horizontal steps at the top to a left‑sidebar vertical step indicator with content on the right (V1.95 delivery):
 
 - Steps: Welcome (workspace selection), Daemon (status/error/reset), Agent (detection/selection), Done.
 - The wizard fills the entire window (no `min-h-screen items-center justify-center`).
 - Step indicators are a vertical list in a fixed left panel (`w-52`), with the current step highlighted.
 - Content area keeps the card chrome (border, shadow, background).
+
+**Note**: V1.96 reworks the wizard to a centered, integrated single-card IA (see §29.11). The V1.95 description is retained for historical traceability only.
 
 #### 29.10.2 Setup wizard workspace selection with native directory picker
 
@@ -1121,3 +1123,43 @@ On desktop builds, `ClientProvider` returns `TauriClient` + `TauriDesktopCapabil
 - Wizard step 2 (Daemon) surfaces the real error detail from `SidecarManager` (not a generic message).
 - When the daemon fails to start (e.g., migration checksum mismatch), the wizard offers an **opt‑in "Reset local database" button** that clears the daemon state in `~/.nexus42/` (no user creative files touched) and retries daemon start.
 - The button copy clearly states: "This will clear the daemon's local state database (config, registry cache). Your creative files in the workspace are not affected."
+
+### 29.11 V1.96 Amendments — Setup Wizard Surface rework & daemon diagnostic chain (IA)
+
+**Product behavior (author-visible).** These describe the IA and interaction patterns after V1.96. Token names, component implementation, and daemon-side capture details live in DESIGN.md and the implement plan, not here.
+
+#### 29.11.1 Centered integrated card IA
+
+- The wizard viewport is centered (horizontal + vertical) rather than left-aligned or edge-to-edge fill.
+- Step indicator list and step content share a **single card chrome** container (one bordered, shadowed, background block). They are not separate sidebar + content panels.
+- Within each step indicator row the marker (circle/number) and label text sit on the same horizontal baseline.
+
+#### 29.11.2 Inline workspace location row (Step 1)
+
+- Workspace location is rendered as one inline affordance group:
+  - Icon + label + resolved path + Browse button appear together on a single row (or tightly coupled rows inside the same visual block).
+- The Browse control is visually adjacent to the path value (strong location-to-action association).
+
+#### 29.11.3 Unified toast error surface + shared helper
+
+- Tauri invoke errors (picker, workspace persist, daemon status, finish, etc.) **never** render as inline `<p role="alert">` text inside a step.
+- All such errors surface via the page-level toast (error variant).
+- A shared `errorMessage(err)` helper (consumed by every wizard step) turns Tauri `{ message }` objects, `Error` instances, and strings into readable text. The literal `[object Object]` string does not appear.
+
+#### 29.11.4 Primary bottom CTA pattern
+
+- Each step places its primary action ("Continue", "Finish", …) as a wide, prominent button at the bottom of the card content area.
+- The secondary "Back" action is a smaller/tertiary button placed next to the primary.
+- The pattern is consistent across all four steps.
+
+#### 29.11.5 Daemon diagnostic UX (Step 2)
+
+- The wizard does not remain stuck in "Starting daemon…" after subscription.
+- The status callback explicitly handles the `'starting'` state (treated as in-progress).
+- A hard timeout (≤30 s) fires a "Taking longer than expected" state exposing Retry / Reset actions if no terminal state arrives.
+- On `error`, the `detail` shown contains the **real stderr** captured from the sidecar (clearly distinguishable from generic wrapper text).
+- V1.95 fixes (immediate TauriClient, Reset local database, stale workspace handling) remain effective.
+
+#### 29.11.6 Preservation
+
+All V1.95 amendments (ClientProvider, migration reset, workspace default rules, FingerprintGate bypass) continue to apply. V1.96 adds the centered-integrated IA and the diagnostic surfacing improvements.

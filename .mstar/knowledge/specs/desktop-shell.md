@@ -132,6 +132,8 @@ The desktop app's first-launch flow walks a new author through workspace creatio
 |------|-------|--------|-----------|
 | 1 | Welcome + Workspace | Resolve default workspace (`~/Documents/nexus/default/` via `dirs::document_dir()`); create directory if absent. Existing `~/.nexus42/config.toml` values are preserved — no forced migration unless stale pattern. | Path display + native directory picker ("Browse…") + "Use default" affordance. |
 | 2 | Daemon Ready | Start the bundled `nexus42` sidecar; poll `GET /v1/daemon/runtime/health` until healthy. Reuses the existing `HEALTH_START_TIMEOUT` (15s) + `SidecarManager` lifecycle from §7. | "Starting daemon…" transient → "Daemon ready" (success) OR error state distinguishing timeout vs port conflict vs crash. Never a silent hang. |
+
+> **V1.96 update**: the wizard-side daemon-wait logic is now subscription-based (not polling) with a mount-time state probe, explicit `'starting'` branch, and a 25s hard timeout. See §13.7.5 for the current behavior. The polling/15s description above is historical (V1.94 original).
 | 3 | ACP Agent Detection | Call `POST /v1/daemon/agent-host/scan`; display registry entries annotated with PATH-install status. Default recommendation = first `installed: true` entry with "Recommended" badge. | Scanning transient → agent list with selectable cards (name, version, installed badge, "Recommended" badge) → "No agents found" state with custom `launch_command` input + "Continue with custom" CTA. |
 | 4 | Done | Persist the selected agent + `setup_completed = true` in `~/.nexus42/config.toml`; transition to main UI. | Confirmation screen; "Finish" CTA launches main UI. |
 
@@ -165,14 +167,16 @@ Every app launch — not only first launch — gates entry to the main UI on a h
 
 ### 13.6 V1.95 Amendments
 
-#### 13.6.1 Setup wizard layout redesign
+#### 13.6.1 Setup wizard layout redesign (V1.95 shipped behavior)
 
-The setup wizard moves from a centered card with horizontal steps at the top to a left‑sidebar vertical step indicator with content on the right:
+The setup wizard moves from a centered card with horizontal steps at the top to a left‑sidebar vertical step indicator with content on the right (V1.95 delivery):
 
 - Steps: Welcome (workspace selection), Daemon (status/error/reset), Agent (detection/selection), Done.
 - The wizard fills the entire window (no `min-h-screen items-center justify-center`).
 - Step indicators are a vertical list in a fixed left panel (`w-52`), with the current step highlighted.
 - Content area keeps the card chrome (border, shadow, background).
+
+**Note**: V1.96 reworks this to a centered, integrated single-card IA (see §13.7). The V1.95 description is retained for historical traceability only.
 
 #### 13.6.2 Setup wizard workspace selection with native directory picker
 
@@ -195,6 +199,60 @@ On desktop builds, `ClientProvider` returns `TauriClient` + `TauriDesktopCapabil
 - Wizard step 2 (Daemon) surfaces the real error detail from `SidecarManager` (not a generic message).
 - When the daemon fails to start (e.g., migration checksum mismatch), the wizard offers an **opt‑in "Reset local database" button** that clears the daemon state in `~/.nexus42/` (no user creative files touched) and retries daemon start.
 - The button copy clearly states: "This will clear the daemon's local state database (config, registry cache). Your creative files in the workspace are not affected."
+
+### 13.7 V1.96 Amendments — Setup Wizard Surface rework & daemon diagnostic chain
+
+**Product behavior target (author-visible).** These describe what the user sees and does after the V1.96 changes. Technical token names, React implementation, and Rust sidecar mechanics are out of scope for this spec (see DESIGN.md and the implement plan).
+
+#### 13.7.1 Centered, integrated card layout
+
+- The entire wizard is centered in the viewport (both horizontally and vertically) rather than left-aligned or window-filling without centering.
+- The step indicator list and the current step's content area live inside **one shared card chrome** (single container element with border, shadow, and background). The step list and content are not two disconnected panels.
+- In the step indicator, the circle (number or completion marker) and the step label text align on the same horizontal baseline within each row (no vertical offset between circle and label).
+
+#### 13.7.2 Inline workspace location row (Step 1)
+
+- The workspace location is presented as a single inline affordance:
+  - Folder icon + "Workspace location" label + current resolved path + "Browse…" button appear grouped on one row (or two tightly coupled rows inside the same visual block).
+- The Browse button is visually adjacent to the path text (strong association between location display and the action that changes it).
+- Browser builds continue to hide the native picker button.
+
+#### 13.7.3 Global unified toast + shared error helper (all steps)
+
+- Actionable errors originating from Tauri invokes (`pickDirectory`, `setWorkspacePath`, daemon status, finish, etc.) are **never** shown as inline `<p role="alert">` text inside a step.
+- All such errors route through the page-level `useToast()` (variant "error").
+- A shared `errorMessage(err: unknown)` helper (used by every wizard step) correctly turns Tauri error objects (`{ message: "..." }`), native `Error` instances, and plain strings into a human string. The literal text `[object Object]` never appears for these failures.
+- The daemon step's prior inline error logic is updated for consistency with the global toast pattern.
+
+#### 13.7.4 Primary bottom CTA pattern (all steps)
+
+- Navigation controls sit at the bottom of each step's content area.
+- The primary action ("Continue", "Finish", or equivalent) is a wide, prominent button that spans most or all of the available width inside the card (or a constrained max-width per the surface rules).
+- The secondary "Back" action is a smaller tertiary/secondary button placed adjacent to the primary (typically left of it or in a compact pair).
+- The pattern is applied consistently to Steps 1–4.
+
+#### 13.7.5 Daemon diagnostic UX (Step 2)
+
+- The wizard **never** hangs indefinitely in the "Starting daemon…" transient after the SPA has subscribed.
+- The subscription callback explicitly branches on `state === 'starting'` (treated as progress; the default transient UI remains appropriate).
+- A hard bounded timeout applies (≤30 s from step entry or from the moment subscription is established). If no terminal state (`running` / `error` / `stopped`) has arrived by then, the UI surfaces a "Taking longer than expected" state that exposes visible Retry and Reset actions.
+- When the daemon reaches `error`, the surfaced `detail` contains the **verbatim stderr** captured from the sidecar (clearly prefixed or appended so the real output — e.g. migration failure, missing config, port conflict — is visible to the author). Generic SidecarManager strings are only a fallback when no stderr was captured.
+- V1.95 fixes (ClientProvider immediate TauriClient, opt-in Reset local database, workspace-path stale-pattern handling) remain in effect and are not regressed.
+
+##### 13.7.5.1 Technical invariant — mount-time state probe (React lifecycle contract)
+
+The `SetupStepDaemon` `useEffect` MUST call `desktop.getDaemonStatus()` on mount **before** subscribing via `desktop.onDaemonStatusChanged`. On a clean first launch the daemon exits within milliseconds; the SidecarManager transitions to Error and fires `notify()` before the SPA subscribes. Without an initial probe, the SPA never learns about the Error and the timeout is the only escape. The mount-time probe catches the "event already fired" scenario without waiting 25s.
+
+The `useEffect` cleanup MUST:
+- Set a `cancelled` flag to prevent state updates after unmount.
+- Call `unsub?.()` to tear down the daemon status listener.
+- Call `clearTimeout(timer)` to cancel any in-flight hard timeout.
+
+These are React lifecycle invariants, not product-behavior requirements; they are recorded here so the implement plan and code review are aligned.
+
+#### 13.7.6 Preservation of prior fixes
+
+V1.95 amendments (ClientProvider, migration-reset button, workspace default + stale overwrite, FingerprintGate bypass) continue to ship. V1.96 adds the surface and diagnostic improvements on top of them.
 
 ---
 
