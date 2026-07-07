@@ -26,6 +26,7 @@ function makeDesktop(impl: Partial<DesktopCapabilities> = {}): DesktopCapabiliti
     onDaemonStatusChanged: vi.fn().mockResolvedValue(() => {}),
     startDaemon: vi.fn().mockResolvedValue(undefined),
     stopDaemon: vi.fn().mockResolvedValue(undefined),
+    resetLocalDatabase: vi.fn().mockResolvedValue(undefined),
     getSetupCompleted: vi.fn().mockResolvedValue(true),
     setSetupCompleted: vi.fn().mockResolvedValue(undefined),
     setAgentProfile: vi.fn().mockResolvedValue(undefined),

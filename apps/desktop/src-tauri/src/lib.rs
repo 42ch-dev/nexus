@@ -385,6 +385,59 @@ fn set_agent_profile(name: String, launch_command: Option<String>) -> Result<(),
         .map_err(|e| format!("failed to write agent profile: {e}"))
 }
 
+/// Wipe the daemon's local state DB(s) under `~/.nexus42/creators/*/workspaces/*/`,
+/// plus their SQLite WAL/SHM siblings.
+///
+/// This is a glob-only reset: it covers the setup-wizard scenario (no active
+/// creator yet) by deleting every `state.db` under each creator/workspace. Only
+/// files exactly named `state.db`, `state.db-wal`, or `state.db-shm` are removed;
+/// the user workspace (`~/Documents/nexus/...`) is never touched.
+#[tauri::command]
+fn reset_local_database() -> Result<(), String> {
+    let home = dirs::home_dir().ok_or("cannot determine home directory")?;
+    reset_local_database_at(&home)
+        .map(|_| ())
+        .map_err(|e| format!("failed to reset local database: {e}"))
+}
+
+fn reset_local_database_at(home: &Path) -> std::io::Result<usize> {
+    let creators_dir = home.join(".nexus42").join("creators");
+    if !creators_dir.is_dir() {
+        return Ok(0);
+    }
+
+    let mut wiped = 0;
+    for creator in std::fs::read_dir(creators_dir)? {
+        let creator = creator?;
+        if !creator.file_type()?.is_dir() {
+            continue;
+        }
+        let workspaces_dir = creator.path().join("workspaces");
+        if !workspaces_dir.is_dir() {
+            continue;
+        }
+        for workspace in std::fs::read_dir(workspaces_dir)? {
+            let workspace = workspace?;
+            if !workspace.file_type()?.is_dir() {
+                continue;
+            }
+            for name in ["state.db", "state.db-wal", "state.db-shm"] {
+                let path = workspace.path().join(name);
+                match std::fs::remove_file(&path) {
+                    Ok(()) => {
+                        if name == "state.db" {
+                            wiped += 1;
+                        }
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(e) => return Err(e),
+                }
+            }
+        }
+    }
+    Ok(wiped)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // The workspace root is captured once at startup and stored as managed
@@ -433,6 +486,7 @@ pub fn run() {
             get_daemon_status,
             start_daemon,
             stop_daemon,
+            reset_local_database,
             get_setup_completed,
             set_setup_completed,
             set_agent_profile,
@@ -463,8 +517,8 @@ mod tests {
     //! daemon actually stores (`Works/<ref>/Stories/…`) and traversal attempts.
 
     use super::{
-        default_workspace_root, guard_path, read_setup_completed_at, write_agent_profile_at,
-        write_setup_completed_at, PathGuardError, WorkspaceRoot,
+        default_workspace_root, guard_path, read_setup_completed_at, reset_local_database_at,
+        write_agent_profile_at, write_setup_completed_at, PathGuardError, WorkspaceRoot,
     };
     use std::fs;
     use std::path::PathBuf;
@@ -692,5 +746,46 @@ mod tests {
             !text.contains("claude-cli"),
             "agent profile must not be written on parse failure"
         );
+    }
+
+    #[test]
+    fn reset_local_database_wipes_only_state_db_under_nexus42() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let home = tmp.path();
+
+        // Simulate the ADR-014 layout: ~/.nexus42/creators/<id>/workspaces/<slug>/state.db
+        let db_dir = home
+            .join(".nexus42")
+            .join("creators")
+            .join("creator-1")
+            .join("workspaces")
+            .join("default");
+        std::fs::create_dir_all(&db_dir).expect("mkdir db dir");
+        std::fs::write(db_dir.join("state.db"), "db").expect("write state.db");
+        std::fs::write(db_dir.join("state.db-wal"), "wal").expect("write wal");
+        std::fs::write(db_dir.join("state.db-shm"), "shm").expect("write shm");
+
+        // A file outside the ~/.nexus42 tree must be untouched (e.g. user workspace).
+        let user_workspace = home.join("Documents").join("nexus").join("default");
+        std::fs::create_dir_all(&user_workspace).expect("mkdir user workspace");
+        let user_file = user_workspace.join("creative.md");
+        std::fs::write(&user_file, "creative").expect("write creative file");
+
+        let wiped = reset_local_database_at(home).expect("reset should succeed");
+        assert_eq!(wiped, 1, "one main state.db should be wiped");
+
+        assert!(
+            !db_dir.join("state.db").exists(),
+            "state.db should be deleted"
+        );
+        assert!(
+            !db_dir.join("state.db-wal").exists(),
+            "state.db-wal should be deleted"
+        );
+        assert!(
+            !db_dir.join("state.db-shm").exists(),
+            "state.db-shm should be deleted"
+        );
+        assert!(user_file.exists(), "user workspace files must be untouched");
     }
 }

@@ -26,7 +26,7 @@ export function SetupStepDaemon({ onNext, onBack }: SetupStepDaemonProps) {
         if (!cancelled) setReady(true);
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Could not reach the daemon.');
+          setError(errorMessage(err) || 'Could not reach the daemon.');
         }
       }
     }
@@ -48,8 +48,8 @@ export function SetupStepDaemon({ onNext, onBack }: SetupStepDaemonProps) {
         });
       } catch {
         // Fall back to polling.
+        await probe();
       }
-      await probe();
     }
 
     void subscribe();
@@ -68,6 +68,24 @@ export function SetupStepDaemon({ onNext, onBack }: SetupStepDaemonProps) {
     }
   }
 
+  async function reset() {
+    if (!desktop) return;
+    setError(null);
+    try {
+      await desktop.resetLocalDatabase();
+      await desktop.startDaemon();
+    } catch (err) {
+      setError(errorMessage(err) || 'Failed to reset local database.');
+    }
+  }
+
+  function errorMessage(err: unknown): string {
+    if (err && typeof err === 'object' && 'message' in err) {
+      return String((err as { message: string }).message);
+    }
+    return err instanceof Error ? err.message : String(err);
+  }
+
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
@@ -81,10 +99,22 @@ export function SetupStepDaemon({ onNext, onBack }: SetupStepDaemonProps) {
         {error ? (
           <>
             <p className="text-copy-14 text-red-800">{error}</p>
-            <Button variant="secondary" onClick={retry}>
-              <RefreshCw className="h-4 w-4" aria-hidden />
-              Retry
-            </Button>
+            <div className="flex flex-col items-center gap-2">
+              <Button variant="secondary" onClick={retry}>
+                <RefreshCw className="h-4 w-4" aria-hidden />
+                Retry
+              </Button>
+              {desktop && (
+                <>
+                  <Button variant="tertiary" onClick={reset}>
+                    Reset local database
+                  </Button>
+                  <p className="max-w-[320px] text-copy-12 text-gray-800">
+                    This will clear the daemon&apos;s local state database (config, registry cache). Your creative files in the workspace are not affected.
+                  </p>
+                </>
+              )}
+            </div>
           </>
         ) : ready ? (
           <p className="text-copy-14 text-green-800">Daemon is running.</p>

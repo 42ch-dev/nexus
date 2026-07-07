@@ -19,9 +19,13 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
     openWith: () => Promise.resolve(),
     revealInFinder: () => Promise.resolve(),
     getDaemonStatus: () => Promise.resolve({ state: 'running', port: 8420 }),
-    onDaemonStatusChanged: () => Promise.resolve(() => {}),
+    onDaemonStatusChanged: (callback) => {
+      callback({ state: 'running', port: 8420 });
+      return Promise.resolve(() => {});
+    },
     startDaemon: () => Promise.resolve(),
     stopDaemon: () => Promise.resolve(),
+    resetLocalDatabase: () => Promise.resolve(),
     getSetupCompleted: () => Promise.resolve(false),
     setSetupCompleted: () => Promise.resolve(),
     setAgentProfile: () => Promise.resolve(),

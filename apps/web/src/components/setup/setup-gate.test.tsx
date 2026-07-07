@@ -22,6 +22,7 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
     onDaemonStatusChanged: () => Promise.resolve(() => {}),
     startDaemon: () => Promise.resolve(),
     stopDaemon: () => Promise.resolve(),
+    resetLocalDatabase: () => Promise.resolve(),
     getSetupCompleted: () => Promise.resolve(true),
     setSetupCompleted: () => Promise.resolve(),
     setAgentProfile: () => Promise.resolve(),

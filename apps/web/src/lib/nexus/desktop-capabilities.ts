@@ -66,6 +66,11 @@ export interface DesktopCapabilities {
   /** Stop the owned sidecar. */
   stopDaemon(): Promise<void>;
   /**
+   * Wipe the daemon's local state database(s) under `~/.nexus42/` so the daemon
+   * can boot fresh. Creative files in the workspace are untouched.
+   */
+  resetLocalDatabase(): Promise<void>;
+  /**
    * Whether the first-launch setup wizard has been completed.
    * Browser build defaults to `true`; desktop reads from Tauri config store.
    */
@@ -173,6 +178,14 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
   async stopDaemon(): Promise<void> {
     try {
       await tauriInvoke().core.invoke<void>('stop_daemon', undefined);
+    } catch (err) {
+      throw asDesktopError(err);
+    }
+  }
+
+  async resetLocalDatabase(): Promise<void> {
+    try {
+      await tauriInvoke().core.invoke<void>('reset_local_database', undefined);
     } catch (err) {
       throw asDesktopError(err);
     }

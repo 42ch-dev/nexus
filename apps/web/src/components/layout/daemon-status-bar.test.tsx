@@ -34,6 +34,7 @@ function makeDesktop(
     }),
     startDaemon: vi.fn().mockResolvedValue(undefined),
     stopDaemon: vi.fn().mockResolvedValue(undefined),
+    resetLocalDatabase: vi.fn().mockResolvedValue(undefined),
     ...impl,
     // Expose a test-only trigger so event-driven updates can be simulated.
     _triggerStatusChange: trigger,
