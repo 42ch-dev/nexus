@@ -33,6 +33,23 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
 }
 
 describe('SetupStepDaemon', () => {
+  it('renders Continue as a wide prominent CTA and Back as a smaller tertiary button', async () => {
+    useHandlers(
+      http.get('/v1/daemon/runtime/health', () => HttpResponse.json({ status: 'ok', version: 'test' })),
+    );
+
+    renderInApp(<SetupStepDaemon onNext={() => {}} onBack={() => {}} />, {
+      client: makeClient(),
+      initialRouterEntries: ['/setup'],
+    });
+
+    const continueButton = await waitFor(() => screen.getByRole('button', { name: 'Continue' }));
+    expect(continueButton).toHaveClass('w-full', 'max-w-setup-wizard-surface-cta-primary-max-width');
+
+    const backButton = screen.getByRole('button', { name: 'Back' });
+    expect(backButton).toHaveClass('self-start');
+  });
+
   it('uses the HTTP health probe in browser mode and reaches the running state', async () => {
     useHandlers(
       http.get('/v1/daemon/runtime/health', () => HttpResponse.json({ status: 'ok', version: 'test' })),

@@ -110,9 +110,13 @@ export function SetupStepWelcome({ state, onChange, onNext }: SetupStepWelcomePr
         )}
       </div>
 
-      <div className="flex justify-between">
-        <span />
-        <Button variant="primary" onClick={continueToNext} disabled={loading || !state.workspaceRoot}>
+      <div className="flex flex-col gap-setup-wizard-surface-cta-container-gap mt-auto">
+        <Button
+          variant="primary"
+          onClick={continueToNext}
+          disabled={loading || !state.workspaceRoot}
+          className="w-full max-w-setup-wizard-surface-cta-primary-max-width"
+        >
           Continue
         </Button>
       </div>

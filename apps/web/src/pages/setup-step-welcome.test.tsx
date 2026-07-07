@@ -71,6 +71,13 @@ describe('SetupStepWelcome', () => {
     expect(screen.queryByRole('button', { name: 'Browse…' })).not.toBeInTheDocument();
   });
 
+  it('renders Continue as a wide prominent bottom CTA', async () => {
+    renderHarness(makeState({ workspaceRoot: '/custom/nexus' }));
+
+    const continueButton = await waitFor(() => screen.getByRole('button', { name: 'Continue' }));
+    expect(continueButton).toHaveClass('w-full', 'max-w-setup-wizard-surface-cta-primary-max-width');
+  });
+
   it('truncates a long workspace path', async () => {
     const longPath = '/very/long/path/'.repeat(10);
     renderHarness(makeState({ workspaceRoot: longPath }), {
