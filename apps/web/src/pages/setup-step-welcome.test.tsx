@@ -71,13 +71,26 @@ describe('SetupStepWelcome', () => {
     expect(screen.queryByRole('button', { name: 'Browse…' })).not.toBeInTheDocument();
   });
 
-  it('shows the desktop workspace root and a picker button', async () => {
+  it('truncates a long workspace path', async () => {
+    const longPath = '/very/long/path/'.repeat(10);
+    renderHarness(makeState({ workspaceRoot: longPath }), {
+      desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve(longPath) }),
+    });
+
+    await waitFor(() => expect(screen.getByText(longPath)).toBeInTheDocument());
+    const pathText = screen.getByText(longPath);
+    expect(pathText).toHaveClass('truncate');
+  });
+
+  it('shows the desktop workspace root and a picker button in the same row', async () => {
     renderHarness(makeState(), {
       desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve('/custom/nexus') }),
     });
 
     await waitFor(() => expect(screen.getByText('/custom/nexus')).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: 'Browse…' })).toBeInTheDocument();
+    const browseButton = screen.getByRole('button', { name: 'Browse…' });
+    expect(browseButton).toBeInTheDocument();
+    expect(browseButton.closest('[data-testid="workspace-location-row"]')).toBeInTheDocument();
   });
 
   it('updates the workspace root when the picker returns a directory', async () => {

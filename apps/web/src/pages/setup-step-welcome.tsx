@@ -87,26 +87,31 @@ export function SetupStepWelcome({ state, onChange, onNext }: SetupStepWelcomePr
         </p>
       </div>
 
-      <div className="flex items-center gap-3 rounded-card border border-gray-alpha-400 bg-background-200 p-4">
-        <FolderOpen className="h-5 w-5 text-blue-700" aria-hidden />
-        <div className="flex flex-col">
-          <span className="text-label-12 text-gray-700">Workspace location</span>
-          <span className="text-copy-14 text-gray-1000">{loading ? 'Resolving…' : state.workspaceRoot}</span>
+      <div
+        className="flex min-h-setup-wizard-surface-input-row-min-height items-center gap-setup-wizard-surface-input-row-gap rounded-control border border-setup-wizard-surface-input-row-border bg-setup-wizard-surface-input-row-bg px-setup-wizard-surface-input-row-padding-x py-setup-wizard-surface-input-row-padding-y"
+        data-testid="workspace-location-row"
+      >
+        <FolderOpen className="h-5 w-5 text-setup-wizard-surface-input-row-icon-color" aria-hidden />
+        <div className="flex flex-1 flex-col">
+          <span className="text-label-12 text-setup-wizard-surface-input-row-label-color">Workspace location</span>
+          <span className="text-copy-14 text-setup-wizard-surface-input-row-path-color truncate">
+            {loading ? 'Resolving…' : state.workspaceRoot}
+          </span>
         </div>
-      </div>
-
-      <div className="flex justify-between">
-        {desktop ? (
+        {desktop && (
           <Button
             variant="secondary"
             onClick={browse}
             disabled={loading}
+            className="flex-shrink-0"
           >
             Browse…
           </Button>
-        ) : (
-          <span />
         )}
+      </div>
+
+      <div className="flex justify-between">
+        <span />
         <Button variant="primary" onClick={continueToNext} disabled={loading || !state.workspaceRoot}>
           Continue
         </Button>
