@@ -1,7 +1,7 @@
 # Daemon Startup RCA Strategy — V1.96
 
 **Document class**: iteration workspace guide (`.mstar/iterations/v1.96/guides/`).
-Promote to `knowledge/` at iteration-close via `mstar-compound` if reusable.
+**Promoted to**: `knowledge/architecture-patterns/daemon-ready-gate-pattern.md` § "V1.96 refinements" (Rules 5-8 + anti-patterns) at V1.96 iteration-close. This file is kept as an iteration-scoped snapshot with full RCA details (code sketches, line citations); durable pattern guidance lives in the knowledge doc.
 
 **Authority**: this guide records confirmed root causes and the stderr-capture
 implementation strategy. The implement plan's T3 and T4 tasks are the execution

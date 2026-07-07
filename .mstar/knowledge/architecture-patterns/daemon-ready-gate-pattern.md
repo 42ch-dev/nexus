@@ -1,12 +1,13 @@
 ---
 module: apps/desktop/src-tauri + apps/web (setup-gate, daemon-status-bar, main-banner)
 date: 2026-07-06
+last_updated: 2026-07-07
 problem_type: architecture-pattern
 category: architecture-patterns
 severity: medium
-plan_id: V1.94-P-last (compound of desktop onboarding & IA pass)
-tags: [daemon-runtime, sidecar, health-probe, desktop-shell, setup-wizard, daemon-status-bar, gate, two-consumer-pattern]
-applies_when: gating main-UI entry on daemon readiness; designing any "wait for service X before entering app" UX; or wiring two consumers to a single lifecycle event stream
+plan_id: V1.94-P-last (compound of desktop onboarding & IA pass); V1.96 refinements from 2026-07-07-v1.96-implement-rework
+tags: [daemon-runtime, sidecar, health-probe, desktop-shell, setup-wizard, daemon-status-bar, gate, two-consumer-pattern, late-subscription-race, stderr-capture, bounded-timeout]
+applies_when: gating main-UI entry on daemon readiness; designing any "wait for service X before entering app" UX; wiring observers to a process lifecycle event stream that may fire before subscription; surfacing supervised-process crash reasons to the user
 ---
 
 # Daemon-Ready Gate Pattern (Per-Launch + Setup Wizard Step 2)
@@ -62,3 +63,54 @@ The naive implementation would create two independent health-probe polls or two 
 - ❌ Polling `GET /v1/daemon/runtime/health` from the SPA (duplicates `SidecarManager`'s own probe).
 - ❌ Two consumers calling `start_daemon()` independently (budget-reset semantics differ; can mask crash loops).
 - ❌ Treating `starting` as "ready" (health probe may still fail; main UI would render against an unreachable daemon).
+- ❌ **Subscribing without a mount-time state probe** (V1.96 regression root cause #1 — the daemon may have already transitioned before the SPA subscribed; the event is lost; the UI hangs forever). See "V1.96 refinements" below.
+- ❌ **Leaving a state-enum branch implicit** (V1.96 regression root cause #2 — the `'starting'` branch was missing → callback was silent → no state update → UI stuck). Every state must have an explicit branch.
+- ❌ **Discarding the supervised process's stderr** (V1.96 residual `R-V195-ARCH-STRERR-GAP` — the daemon's real crash reason was never captured; the wizard showed a generic "Daemon did not start" message).
+
+## V1.96 refinements: late-subscription race + diagnostic surfacing
+
+V1.96 (plan `2026-07-07-v1.96-implement-rework`) hit a P0 blocker: the setup wizard Step 2 hung indefinitely in "Starting daemon…" on a clean `~/.nexus42/` first launch. RCA revealed **three** consumer-side root causes (the daemon does NOT hang — it crashes within milliseconds when `WorkspaceState::initialize()` finds no `active_creator_id`; the wizard just never learns about it). The fixes distill into four durable rules that apply to **any** observer of a process lifecycle event stream, not just the daemon-ready gate.
+
+### Rule 5: probe current state on mount, BEFORE subscribing
+
+The daemon auto-starts at Tauri boot (`lib.rs` setup hook), which runs **before** the SPA's React tree mounts. By the time the SPA subscribes to `onDaemonStatusChanged`, the daemon may have already transitioned to `running` (normal) or `error` (crashed on boot). The first event the SPA would otherwise receive is `state: 'starting'` — but if the daemon already exited, even that event was emitted before subscription and is lost.
+
+**Pattern**: call `getDaemonStatus()` (or the equivalent one-shot current-state command) on mount, apply the result, THEN subscribe for future transitions. If the mount-probe already returns a terminal state, the UI is immediately correct; the subscription is still attached for later restart/recovery events.
+
+```tsx
+useEffect(() => {
+  let cancelled = false;
+  let unsub;
+  // 1. Probe current state first
+  desktop.getDaemonStatus().then(s => { if (!cancelled) applyStatus(s); });
+  // 2. Then subscribe for future transitions
+  desktop.onDaemonStatusChanged(s => { if (!cancelled) applyStatus(s); }).then(u => unsub = u);
+  return () => { cancelled = true; unsub?.(); };
+}, []);
+```
+
+### Rule 6: every state-enum branch must be explicit (even no-ops)
+
+The V1.96 bug had a callback shaped like `if (running) {...} else if (error || stopped) {...}` with **no** `'starting'` and **no** `'degraded'` branch. The first event after subscription was `'starting'` → no branch matched → no state update → `setReady(false)` stayed → UI stuck forever.
+
+**Pattern**: factor status handling into a single `applyStatus(status)` function that covers **every** state in the enum. No-op branches (`'starting'` → keep the spinner) are explicit, not implicit fall-through silence. This also lets the mount-probe and the subscription share one code path (no drift).
+
+### Rule 7: bound the wait with a hard timeout that RE-PROBES
+
+A consumer that subscribes and waits can hang forever if no terminal event arrives (event lost, process stuck in initialization, subscription silently dropped). A hard timeout (V1.96 uses 25s; the SidecarManager's own health timeout is 15s — the consumer timeout should be LONGER to give the state machine room) prevents indefinite hangs.
+
+**Pattern**: `setTimeout(() => { re-probe getDaemonStatus(); if still non-terminal → surface "taking longer than expected" }, 25_000)`. The re-probe before declaring timeout avoids misreporting when the process silently transitioned between mount-probe and timeout fire. Clear the timeout in the effect cleanup.
+
+### Rule 8: capture the supervised process's stderr (bounded tail)
+
+When the daemon fails to start, `DaemonStatus.detail` originally carried only generic SidecarManager messages ("Daemon did not start. Check the logs or try restarting.") — the **real** crash reason (SQLite migration mismatch, missing config, port bind failure, binary missing) was written to the daemon's stderr but never captured. The `_rx` event receiver from `command.spawn()` was discarded.
+
+**Pattern**: spawn a bounded async task that drains the `_rx` receiver, accumulates a tail capped at ~2 KiB (nearest newline boundary — keep the tail, drop the head), and appends it verbatim to `DaemonStatus.detail` on the Error transition. Keep the generic message as fallback when stderr is empty. Run the drain concurrently with `wait_for_first_health` — do NOT block the spawn path. The consumer renders `detail` with `whitespace-pre-wrap` so the multi-line stderr survives the browser's default `white-space: normal` collapse.
+
+### Why these four rules compound
+
+Rules 5+6+7 together make the consumer resilient to **any** timing of the event stream: late subscription (5), partial coverage (6), or total event loss (7). Rule 8 makes the failure **actionable**: the user reads the real crash reason and can act (reset the DB, free the port, install the binary) instead of staring at "Daemon did not start." Without rule 8, even a perfectly-timed subscription surfaces an unhelpful generic message.
+
+### Source
+
+Distilled from V1.96 plan `2026-07-07-v1.96-implement-rework` (T3 sidecar stderr capture + T4 mount-probe/starting-branch/timeout/detail-render). Iteration-scoped RCA with code sketches: `.mstar/iterations/v1.96/guides/daemon-startup-rca.md` (snapshot; promoted here).
