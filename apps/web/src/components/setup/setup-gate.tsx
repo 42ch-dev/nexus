@@ -4,6 +4,7 @@ import { Navigate } from 'react-router-dom';
 import { useSetupCompleted } from '@/lib/setup-completed-context';
 import { useDesktopCapabilities } from '@/lib/client-context';
 import { useNexusClient } from '@/lib/client-context';
+import { errorMessage } from '@/lib/error-message';
 import { DaemonReadySplash } from '@/components/setup/daemon-ready-splash';
 import type { ReactNode } from 'react';
 
@@ -46,7 +47,7 @@ export function SetupGate({ children }: SetupGateProps) {
         if (!cancelled) setDaemonReady(true);
       } catch (err) {
         if (!cancelled) {
-          setError(err instanceof Error ? err.message : 'Daemon is not responding.');
+          setError(errorMessage(err) || 'Daemon is not responding.');
         }
       }
     }

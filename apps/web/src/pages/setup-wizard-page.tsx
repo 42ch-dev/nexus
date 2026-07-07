@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 
 import { useSetupCompleted } from '@/lib/setup-completed-context';
 import { useDesktopCapabilities } from '@/lib/client-context';
+import { errorMessage } from '@/lib/error-message';
 import { useToast } from '@/lib/use-toast';
 import { SetupStepWelcome } from '@/pages/setup-step-welcome';
 import { SetupStepDaemon } from '@/pages/setup-step-daemon';
@@ -51,7 +52,7 @@ export function SetupWizardPage() {
       markCompleted();
       navigate('/works', { replace: true });
     } catch (err) {
-      const description = err instanceof Error ? err.message : 'Failed to save agent profile.';
+      const description = errorMessage(err) || 'Failed to save agent profile.';
       toast({ variant: 'error', title: 'Could not finish setup', description });
     } finally {
       setIsFinishing(false);
