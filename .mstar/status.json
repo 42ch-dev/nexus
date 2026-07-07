@@ -59,6 +59,24 @@
         "blocking": [],
         "working_branch": "feature/v1.96-implement-rework"
       }
+    },
+    {
+      "id": "2026-07-07-v1.97-desktop-first-launch-hardening",
+      "status": "Todo",
+      "title": "P0 — Desktop first-launch reliability hardening: setup wizard containment, folder picker IPC, sidecar startup state, and hard smoke gate",
+      "file": ".mstar/plans/2026-07-07-v1.97-desktop-first-launch-hardening.md",
+      "type": "implement",
+      "owner": "@fullstack-dev",
+      "metadata": {
+        "iteration": "V1.97",
+        "iteration_refs": "v1.97-desktop-first-launch-hardening-compass-v1.md",
+        "spec_integration_branch": "iteration/v1.97",
+        "merge_target": "iteration/v1.97",
+        "primary_spec": "knowledge/specs/desktop-shell.md",
+        "blocked_by": [],
+        "blocking": [],
+        "working_branch": "feature/v1.97-desktop-first-launch-hardening"
+      }
     }
   ],
   "metadata": {
@@ -66,10 +84,11 @@
     "last_integration_branch": "iteration/v1.95",
     "integration_merge_target": "main",
     "iteration_base_branch": "main",
+    "spec_integration_branch": "iteration/v1.97",
     "target_branch": "main",
     "integration_branch": "iteration/v1.96",
-    "latest_active_iteration": "V1.96",
-    "latest_active_compass": "v1.96-setup-wizard-rework-and-daemon-diagnostic-delivery-compass-v1.md",
+    "latest_active_iteration": "V1.97",
+    "latest_active_compass": "v1.97-desktop-first-launch-hardening-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
@@ -105,7 +124,7 @@
       "refreshed_at": "2026-07-07T16:10:00+0000",
       "refreshed_reason": "V1.95 implement QC tri consolidated: 6 new residuals (2 architect + 2 QC3 PM-accepted + 1 QC3 timeout + 1 QC1 test-parity). QC verdict Approve with residuals."
     },
-    "updated_at": "2026-07-07T20:30:00+0000"
+    "updated_at": "2026-07-07T23:20:00+0800"
   },
   "residual_findings": {
     "2026-07-05-v1.91-findings-batch": [
