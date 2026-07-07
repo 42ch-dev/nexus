@@ -98,6 +98,7 @@ describe('SetupStepWelcome', () => {
     const browseButton = screen.getByRole('button', { name: 'Browse…' });
     expect(browseButton).toBeInTheDocument();
     expect(browseButton.closest('[data-testid="workspace-location-row"]')).toBeInTheDocument();
+    expect(screen.getByText('/custom/nexus').parentElement).toHaveClass('min-w-0');
   });
 
   it('updates the workspace root when the picker returns a directory', async () => {

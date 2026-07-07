@@ -108,7 +108,7 @@ impl SidecarManager {
     pub fn new(port: u16) -> Self {
         Self(Arc::new(Mutex::new(SidecarInner {
             port,
-            state: DaemonState::Starting,
+            state: DaemonState::Stopped,
             version: None,
             detail: None,
             owned: false,
@@ -217,7 +217,9 @@ impl SidecarManager {
         reset_budget: bool,
     ) -> Result<(), String> {
         let mut inner = self.0.lock().await;
-        if inner.state == DaemonState::Running || inner.state == DaemonState::Starting {
+        if inner.state == DaemonState::Running
+            || (inner.state == DaemonState::Starting && inner.child.is_some())
+        {
             return Ok(());
         }
         inner.state = DaemonState::Starting;
@@ -623,7 +625,10 @@ fn process_alive(_pid: u32) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{backoff, drain_stderr, format_error_detail, resolve_port, trim_stderr_tail, DaemonState, MAX_RESTART_ATTEMPTS, STDERR_TAIL_MAX_BYTES};
+    use super::{
+        backoff, drain_stderr, format_error_detail, resolve_port, trim_stderr_tail, DaemonState,
+        MAX_RESTART_ATTEMPTS, STDERR_TAIL_MAX_BYTES,
+    };
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -699,6 +704,13 @@ mod tests {
         // is returned as-is even though nothing is listening on the port.
         assert_eq!(status.state, DaemonState::Running);
         assert_eq!(status.version.as_deref(), Some("1.0.0"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn new_manager_starts_from_stopped_state() {
+        let manager = crate::sidecar::SidecarManager::new(63341);
+        let status = manager.status().await;
+        assert_eq!(status.state, DaemonState::Stopped);
     }
 
     #[test]
@@ -865,6 +877,26 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn new_manager_start_attaches_when_health_ready() {
+        // Regression: new() used to initialize as Starting, and start() treated
+        // Starting as "already in progress" even when no child had been spawned.
+        let app = tauri::test::mock_app();
+        let port = 63342;
+        let manager = crate::sidecar::SidecarManager::new(port);
+
+        let server = spawn_health_server(port).await;
+        manager
+            .start(app.handle())
+            .await
+            .expect("attach should succeed");
+        let _ = tokio::time::timeout(Duration::from_secs(1), server).await;
+
+        let inner = manager.0.lock().await;
+        assert_eq!(inner.state, DaemonState::Running);
+        assert!(!inner.owned);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn crash_restart_stops_when_budget_exhausted() {
         // When the crash budget is already exhausted, handle_crash must not try
         // to restart and must land in Stopped (qc3 W-2).
@@ -906,9 +938,11 @@ mod tests {
 
         let line = format!("{}\n", "x".repeat(100));
         for _ in 0..30 {
-            tx.send(tauri_plugin_shell::process::CommandEvent::Stderr(line.clone().into_bytes()))
-                .await
-                .expect("send should succeed");
+            tx.send(tauri_plugin_shell::process::CommandEvent::Stderr(
+                line.clone().into_bytes(),
+            ))
+            .await
+            .expect("send should succeed");
         }
         drop(tx);
         drain.await.expect("drain task should complete");
@@ -919,7 +953,10 @@ mod tests {
             "tail length {} exceeds {STDERR_TAIL_MAX_BYTES}",
             tail.len()
         );
-        assert!(tail.ends_with('\n'), "tail should end at a newline boundary");
+        assert!(
+            tail.ends_with('\n'),
+            "tail should end at a newline boundary"
+        );
     }
 
     #[test]
@@ -939,7 +976,10 @@ mod tests {
 
         trim_stderr_tail(&mut buf);
 
-        assert_eq!(buf, suffix, "tail should resume from the next char boundary");
+        assert_eq!(
+            buf, suffix,
+            "tail should resume from the next char boundary"
+        );
         assert!(buf.len() <= STDERR_TAIL_MAX_BYTES);
     }
 
