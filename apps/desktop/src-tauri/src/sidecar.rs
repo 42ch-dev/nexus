@@ -897,6 +897,63 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn starting_without_child_does_not_suppress_attach() {
+        // Regression: Starting with no owned child must not short-circuit a
+        // real attach/spawn attempt. The state can only suppress work when it
+        // already carries an owned child handle.
+        let app = tauri::test::mock_app();
+        let port = 63343;
+        let manager = crate::sidecar::SidecarManager::new(port);
+        {
+            let mut inner = manager.0.lock().await;
+            inner.state = DaemonState::Starting;
+            inner.owned = false;
+            inner.child = None;
+        }
+
+        let server = spawn_health_server(port).await;
+        manager
+            .start(app.handle())
+            .await
+            .expect("attach should succeed");
+        let _ = tokio::time::timeout(Duration::from_secs(1), server).await;
+
+        let inner = manager.0.lock().await;
+        assert_eq!(inner.state, DaemonState::Running);
+        assert!(!inner.owned);
+        assert!(inner.child.is_none());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn error_state_retries_and_attaches_when_health_ready() {
+        // Error is a retryable state. A manual restart must clear the budget
+        // and attach to a healthy daemon without fabricating ownership.
+        let app = tauri::test::mock_app();
+        let port = 63344;
+        let manager = crate::sidecar::SidecarManager::new(port);
+        {
+            let mut inner = manager.0.lock().await;
+            inner.state = DaemonState::Error;
+            inner.restart_count = MAX_RESTART_ATTEMPTS;
+            inner.detail = Some("previous failure".to_string());
+        }
+
+        let server = spawn_health_server(port).await;
+        manager
+            .start_daemon(app.handle())
+            .await
+            .expect("attach should succeed");
+        let _ = tokio::time::timeout(Duration::from_secs(1), server).await;
+
+        let inner = manager.0.lock().await;
+        assert_eq!(inner.state, DaemonState::Running);
+        assert!(!inner.owned);
+        assert!(inner.child.is_none());
+        assert_eq!(inner.restart_count, 0);
+        assert!(inner.detail.is_none());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn crash_restart_stops_when_budget_exhausted() {
         // When the crash budget is already exhausted, handle_crash must not try
         // to restart and must land in Stopped (qc3 W-2).
