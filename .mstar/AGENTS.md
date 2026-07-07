@@ -14,7 +14,7 @@ On conflicts (user has not overridden): **1** current instruction → **2** root
 |--------|------------------|
 | `{HARNESS_DIR}` | `.mstar/` |
 | `{PLAN_DIR}` | `plans/` |
-| `{SDD_DIR}` | `sdd/<plan-id>/` (gitignored) |
+| `{SDD_DIR}` | `sdd/<plan-id>/` — **ephemeral scratch** (gitignored; not handoff) |
 | `{ITERATION_DIR}` | `iterations/` |
 | `{KNOWLEDGE_DIR}` | `knowledge/` |
 | `{SPECS_DIR}` | **`knowledge/specs/`** — not repo-root `specs/` (upstream default). Wire contracts: repo-root `schemas/` |
@@ -25,13 +25,13 @@ On conflicts (user has not overridden): **1** current instruction → **2** root
 
 | Path | Writers | Purpose |
 |------|---------|---------|
-| `{SDD_DIR}` | Implementers (SDD default), PM | Per-task briefs, reports, `progress.md`, review diffs |
+| `{SDD_DIR}` | Implementers (SDD default), PM | Session-local briefs, reports, `progress.md`, review diffs — **not** clone handoff |
 | `plans/<plan-id>-*.md` | Implementers (checkboxes), PM | Main plan — not SDD bodies |
 | `plans/reports/<plan-id>/` | `qc-specialist*`, PM, QA | Plan-level L3 QC/QA only |
 
 **SDD default:** implementors write `{SDD_DIR}`, not `plans/reports/`. Inline/hotfix: no `{SDD_DIR}`.
 
-**Reachability:** harness handoff artifacts must be git-tracked and clone-safe.
+**Reachability:** git-tracked harness handoff (`plans/`, `plans/reports/`, `status.json`, compasses, etc.) must survive a fresh `git clone`. **`{SDD_DIR}` is excluded** — ephemeral working space; plan QC uses merged code + `plans/reports/`, not SDD scratch files.
 
 **Content:** `docs/` = human contributor docs; `{ITERATION_DIR}` = compasses; `{KNOWLEDGE_DIR}` layout → [`knowledge/AGENTS.md`](knowledge/AGENTS.md).
 
