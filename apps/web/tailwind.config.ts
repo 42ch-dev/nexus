@@ -92,7 +92,6 @@ const config: Config = {
           gap: cv('footer-profile-gap'),
         },
         'setup-wizard-step': {
-          'circle-size': cv('setup-wizard-step-circle-size'),
           'circle-active-bg': cv('setup-wizard-step-circle-active-bg'),
           'circle-active-text': cv('setup-wizard-step-circle-active-text'),
           'circle-complete-bg': cv('setup-wizard-step-circle-complete-bg'),
@@ -100,11 +99,8 @@ const config: Config = {
           'circle-pending-bg': cv('setup-wizard-step-circle-pending-bg'),
           'circle-pending-text': cv('setup-wizard-step-circle-pending-text'),
           connector: cv('setup-wizard-step-connector'),
-          'label-typography': cv('setup-wizard-step-label-typography'),
           'label-active-color': cv('setup-wizard-step-label-active-color'),
           'label-pending-color': cv('setup-wizard-step-label-pending-color'),
-          'wizard-max-width': cv('setup-wizard-wizard-max-width'),
-          'wizard-padding': cv('setup-wizard-wizard-padding'),
         },
         // Accent scales — DESIGN.md §Colors/Accent Scales.
         blue: {
@@ -218,6 +214,11 @@ const config: Config = {
         'button-12': ['12px', { lineHeight: '1', letterSpacing: '0.01em' }],
         'label-12-mono': ['12px', { lineHeight: '1.4' }],
         'copy-13-mono': ['13px', { lineHeight: '1.5' }],
+        // V1.95 Setup Wizard step label — font-size token, not a color.
+        'setup-wizard-step-label-typography': [
+          cv('setup-wizard-step-label-typography'),
+          { lineHeight: '1' },
+        ],
       },
       fontWeight: {
         // DESIGN.md uses 550 / 650 (non-standard but valid).
@@ -250,6 +251,18 @@ const config: Config = {
         popover: '12px',
         fullscreen: '16px',
         pill: '9999px',
+      },
+      // V1.95 Setup Wizard Step Chrome — sizing tokens must live under their
+      // proper Tailwind theme keys to generate max-w-*, p-*, h-*, w-* utilities.
+      // They are still sourced from --color-* CSS variables per DESIGN.md.
+      spacing: {
+        'setup-wizard-step-circle-size': cv('setup-wizard-step-circle-size'),
+      },
+      maxWidth: {
+        'setup-wizard-step-wizard-max-width': cv('setup-wizard-wizard-max-width'),
+      },
+      padding: {
+        'setup-wizard-step-wizard-padding': cv('setup-wizard-wizard-padding'),
       },
     },
   },
