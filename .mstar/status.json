@@ -16,7 +16,9 @@
         "merge_target": "iteration/v1.95",
         "primary_spec": "knowledge/specs/desktop-shell.md",
         "blocked_by": [],
-        "blocking": ["2026-07-07-v1.95-implement-fixes"],
+        "blocking": [
+          "2026-07-07-v1.95-implement-fixes"
+        ],
         "working_branch": "feature/v1.95-prepare"
       }
     },
@@ -33,14 +35,16 @@
         "spec_integration_branch": "iteration/v1.95",
         "merge_target": "iteration/v1.95",
         "primary_spec": "knowledge/specs/desktop-shell.md",
-        "blocked_by": ["2026-07-07-v1.95-prepare-specs"],
+        "blocked_by": [
+          "2026-07-07-v1.95-prepare-specs"
+        ],
         "blocking": [],
         "working_branch": "feature/v1.95-implement-fixes"
       }
     },
     {
       "id": "2026-07-07-v1.96-implement-rework",
-      "status": "Todo",
+      "status": "InReview",
       "title": "P0 — Implement 3 V1.96 setup-wizard rework clusters: layout redesign + Step1 UX + daemon diagnostic chain (stderr capture + subscribe/timeout fix)",
       "file": ".mstar/plans/2026-07-07-v1.96-implement-rework.md",
       "type": "implement",
@@ -80,8 +84,17 @@
     "tech_debt_summary": {
       "updated_at": "2026-07-07",
       "total_open": 18,
-      "by_severity": { "critical": 0, "high": 0, "medium": 2, "low": 14, "nit": 2 },
-      "by_target": { "V1.95": 17, "when list virtualisation lands": 1 },
+      "by_severity": {
+        "critical": 0,
+        "high": 0,
+        "medium": 2,
+        "low": 14,
+        "nit": 2
+      },
+      "by_target": {
+        "V1.95": 17,
+        "when list virtualisation lands": 1
+      },
       "by_plan": {
         "2026-07-05-v1.91-findings-batch": 1,
         "2026-07-05-v1.92-closure": 1,
@@ -92,42 +105,279 @@
       "refreshed_at": "2026-07-07T16:10:00+0000",
       "refreshed_reason": "V1.95 implement QC tri consolidated: 6 new residuals (2 architect + 2 QC3 PM-accepted + 1 QC3 timeout + 1 QC1 test-parity). QC verdict Approve with residuals."
     },
-    "updated_at": "2026-07-07T16:10:00+0000"
+    "updated_at": "2026-07-07T20:10:00+0000"
   },
   "residual_findings": {
     "2026-07-05-v1.91-findings-batch": [
-      { "id": "R-V191P1-005", "title": "FindingsPage recomputes allSelected / someSelected on every render without memoisation", "severity": "nit", "decision": "defer", "owner": "@frontend-dev", "target": "when list virtualisation lands", "lifecycle": "open",
+      {
+        "id": "R-V191P1-005",
+        "title": "FindingsPage recomputes allSelected / someSelected on every render without memoisation",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "when list virtualisation lands",
+        "lifecycle": "open",
         "tracking_link": ".mstar/plans/reports/2026-07-05-v1.91-reading-chrome/qc3.md §S-004",
-        "note": "At the 100-item cap this is not user-visible." }
+        "note": "At the 100-item cap this is not user-visible."
+      }
     ],
     "2026-07-06-v1.93-closure": [
-      { "id": "R-V193PL-001", "title": "Pre-existing stale /v1/local/* path-string literals in 12 specs", "severity": "low", "decision": "defer", "owner": "@writing-specialist + @architect", "target": "V1.96 spec-hygiene pass", "lifecycle": "open",
+      {
+        "id": "R-V193PL-001",
+        "title": "Pre-existing stale /v1/local/* path-string literals in 12 specs",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@writing-specialist + @architect",
+        "target": "V1.96 spec-hygiene pass",
+        "lifecycle": "open",
         "tracking_link": ".mstar/plans/reports/2026-07-06-v1.93-closure/qc1.md §W-003",
-        "note": "Pre-existing from V1.90." }
+        "note": "Pre-existing from V1.90."
+      }
     ],
     "2026-07-05-v1.92-closure": [
-      { "id": "R-V192SEC-001", "title": "Resume TOFU fingerprint gate is in-band over the same (MITM-able) TLS fetch session", "severity": "medium", "decision": "defer", "owner": "@fullstack-dev + @frontend-dev", "target": "V1.96", "lifecycle": "open",
+      {
+        "id": "R-V192SEC-001",
+        "title": "Resume TOFU fingerprint gate is in-band over the same (MITM-able) TLS fetch session",
+        "severity": "medium",
+        "decision": "defer",
+        "owner": "@fullstack-dev + @frontend-dev",
+        "target": "V1.96",
+        "lifecycle": "open",
         "tracking_link": "https://github.com/42ch-dev/nexus/pull/120#pullrequestreview-4632744387",
-        "note": "Desktop Tauri reqwest+rustls transport-layer cert pinning." }
+        "note": "Desktop Tauri reqwest+rustls transport-layer cert pinning."
+      }
     ],
     "2026-07-06-v1.94-closure": [
-      { "id": "R-V194QC1-S101", "title": "Setup-step-agent auto-select effect over-fires on every state change", "severity": "low", "decision": "defer", "owner": "@frontend-dev", "target": "V1.96", "lifecycle": "open", "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-101", "note": "Non-blocking." },
-      { "id": "R-V194QC1-S102", "title": "Health-probe subscription duplicated between SetupGate and SetupStepDaemon", "severity": "low", "decision": "defer", "owner": "@frontend-dev", "target": "V1.96", "lifecycle": "open", "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-102", "note": "Non-blocking." },
-      { "id": "R-V194QC1-S103", "title": "SetupStepWelcome swallows Tauri errors silently", "severity": "low", "decision": "defer", "owner": "@frontend-dev", "target": "V1.96", "lifecycle": "open", "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-103", "note": "Non-blocking." },
-      { "id": "R-V194QC1-S104", "title": "Browser-fallback workspace string uses ~/… while Tauri returns absolute path", "severity": "low", "decision": "defer", "owner": "@frontend-dev", "target": "V1.96", "lifecycle": "open", "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-104", "note": "Non-blocking." },
-      { "id": "R-V194QC1-S105", "title": "/strategy redirect drops preset ID", "severity": "low", "decision": "defer", "owner": "@frontend-dev", "target": "V1.96", "lifecycle": "open", "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-105", "note": "Non-blocking." },
-      { "id": "R-V194QC1-S106", "title": "Sidebar nav data is open-ended with no compile-time guard", "severity": "low", "decision": "defer", "owner": "@frontend-dev", "target": "V1.96", "lifecycle": "open", "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-106", "note": "Non-blocking." },
-      { "id": "R-V194QC2-S001", "title": "Agent scan endpoint could expose optional force_refresh query param", "severity": "low", "decision": "defer", "owner": "@fullstack-dev", "target": "V1.96", "lifecycle": "open", "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc2.md §S-001", "note": "Non-blocking." },
-      { "id": "R-V194QC2-S002", "title": "Agent scan could batch --version probes via async joinset", "severity": "low", "decision": "defer", "owner": "@fullstack-dev", "target": "V1.96", "lifecycle": "open", "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc2.md §S-002", "note": "Non-blocking." },
-      { "id": "R-V194QC1R-S001", "title": "set_agent_profile hardcodes config path rather than reusing nexus_home_layout helper", "severity": "low", "decision": "defer", "owner": "@fullstack-dev", "target": "V1.96", "lifecycle": "open", "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §Revalidation", "note": "Non-blocking." }
+      {
+        "id": "R-V194QC1-S101",
+        "title": "Setup-step-agent auto-select effect over-fires on every state change",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.96",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-101",
+        "note": "Non-blocking."
+      },
+      {
+        "id": "R-V194QC1-S102",
+        "title": "Health-probe subscription duplicated between SetupGate and SetupStepDaemon",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.96",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-102",
+        "note": "Non-blocking."
+      },
+      {
+        "id": "R-V194QC1-S103",
+        "title": "SetupStepWelcome swallows Tauri errors silently",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.96",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-103",
+        "note": "Non-blocking."
+      },
+      {
+        "id": "R-V194QC1-S104",
+        "title": "Browser-fallback workspace string uses ~/… while Tauri returns absolute path",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.96",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-104",
+        "note": "Non-blocking."
+      },
+      {
+        "id": "R-V194QC1-S105",
+        "title": "/strategy redirect drops preset ID",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.96",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-105",
+        "note": "Non-blocking."
+      },
+      {
+        "id": "R-V194QC1-S106",
+        "title": "Sidebar nav data is open-ended with no compile-time guard",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.96",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-106",
+        "note": "Non-blocking."
+      },
+      {
+        "id": "R-V194QC2-S001",
+        "title": "Agent scan endpoint could expose optional force_refresh query param",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.96",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc2.md §S-001",
+        "note": "Non-blocking."
+      },
+      {
+        "id": "R-V194QC2-S002",
+        "title": "Agent scan could batch --version probes via async joinset",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.96",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc2.md §S-002",
+        "note": "Non-blocking."
+      },
+      {
+        "id": "R-V194QC1R-S001",
+        "title": "set_agent_profile hardcodes config path rather than reusing nexus_home_layout helper",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.96",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §Revalidation",
+        "note": "Non-blocking."
+      }
     ],
     "2026-07-07-v1.95-implement-fixes": [
-      { "id": "R-V195-ARCH-DUPLICATE-DEFAULTS", "title": "Triplicate resolve_default_workspace_path/default_workspace_root (apps/nexus42, nexus-daemon-runtime, desktop src-tauri) — consolidate into nexus-home-layout", "severity": "low", "decision": "defer", "owner": "@fullstack-dev", "target": "V1.96", "lifecycle": "open", "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md §Architecture residual", "note": "V1.95 fixed brand nexus42->nexus in all 3; structural consolidation deferred." },
-      { "id": "R-V195-ARCH-STRERR-GAP", "title": "SidecarManager discards _rx from command.spawn() — daemon stderr (real crash reason) never captured; wizard shows generic error", "severity": "medium", "decision": "defer", "owner": "@fullstack-dev", "target": "V1.96", "lifecycle": "open", "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md §Architecture residual", "note": "T3 surfaces detail verbatim but stderr is not captured; reset button is the pragmatic recovery." },
-      { "id": "R-V195QC3-W002", "title": "reset_local_database deletes files in a loop without atomicity/rollback; mid-deletion failure leaves partial state", "severity": "low", "decision": "accept", "owner": "@fullstack-dev", "target": "V1.96", "lifecycle": "open", "tracking_link": ".mstar/plans/reports/2026-07-07-v1.95-implement-fixes/qc3.md §W2", "note": "PM-accepted: recovery-wipe semantics; daemon recreates fresh DBs on boot regardless; partial wipe recoverable." },
-      { "id": "R-V195QC3-W003", "title": "set_workspace_path writes directly without temp-file-then-rename; crash mid-write could corrupt config.toml", "severity": "low", "decision": "accept", "owner": "@fullstack-dev", "target": "V1.96", "lifecycle": "open", "tracking_link": ".mstar/plans/reports/2026-07-07-v1.95-implement-fixes/qc3.md §W3", "note": "PM-accepted: matches existing write_setup_completed_at/write_agent_profile_at pattern (all std::fs::write); codebase-wide hardening is V1.96." },
-      { "id": "R-V195QC3-S001", "title": "Setup daemon step has no timeout — if sidecar never emits a status event, wizard hangs indefinitely", "severity": "low", "decision": "defer", "owner": "@frontend-dev", "target": "V1.96", "lifecycle": "open", "tracking_link": ".mstar/plans/reports/2026-07-07-v1.95-implement-fixes/qc3.md §Suggestion", "note": "useEffect cleanup unsubscribes; no hard timeout." },
-      { "id": "R-V195QC1-S002", "title": "No dedicated malformed-TOML unit test for write_workspace_path_at (mirrors sibling-writer tests)", "severity": "nit", "decision": "defer", "owner": "@fullstack-dev", "target": "V1.96", "lifecycle": "open", "tracking_link": ".mstar/plans/reports/2026-07-07-v1.95-implement-fixes/qc1.md §S-002", "note": "Implementation correct; integration-covered; test-parity with siblings is polish." }
+      {
+        "id": "R-V195-ARCH-DUPLICATE-DEFAULTS",
+        "title": "Triplicate resolve_default_workspace_path/default_workspace_root (apps/nexus42, nexus-daemon-runtime, desktop src-tauri) — consolidate into nexus-home-layout",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.96",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md §Architecture residual",
+        "note": "V1.95 fixed brand nexus42->nexus in all 3; structural consolidation deferred."
+      },
+      {
+        "id": "R-V195-ARCH-STRERR-GAP",
+        "title": "SidecarManager discards _rx from command.spawn() — daemon stderr (real crash reason) never captured; wizard shows generic error",
+        "severity": "medium",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.96",
+        "lifecycle": "resolved",
+        "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md §Architecture residual",
+        "note": "T3 surfaces detail verbatim but stderr is not captured; reset button is the pragmatic recovery.",
+        "closed_at": "2026-07-07",
+        "closed_by": "V1.96",
+        "closure_note": "Closed by V1.96 plan QC Approve — stderr capture (T3)"
+      },
+      {
+        "id": "R-V195QC3-W002",
+        "title": "reset_local_database deletes files in a loop without atomicity/rollback; mid-deletion failure leaves partial state",
+        "severity": "low",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target": "V1.96",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/reports/2026-07-07-v1.95-implement-fixes/qc3.md §W2",
+        "note": "PM-accepted: recovery-wipe semantics; daemon recreates fresh DBs on boot regardless; partial wipe recoverable."
+      },
+      {
+        "id": "R-V195QC3-W003",
+        "title": "set_workspace_path writes directly without temp-file-then-rename; crash mid-write could corrupt config.toml",
+        "severity": "low",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target": "V1.96",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/reports/2026-07-07-v1.95-implement-fixes/qc3.md §W3",
+        "note": "PM-accepted: matches existing write_setup_completed_at/write_agent_profile_at pattern (all std::fs::write); codebase-wide hardening is V1.96."
+      },
+      {
+        "id": "R-V195QC3-S001",
+        "title": "Setup daemon step has no timeout — if sidecar never emits a status event, wizard hangs indefinitely",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.96",
+        "lifecycle": "resolved",
+        "tracking_link": ".mstar/plans/reports/2026-07-07-v1.95-implement-fixes/qc3.md §Suggestion",
+        "note": "useEffect cleanup unsubscribes; no hard timeout.",
+        "closed_at": "2026-07-07",
+        "closed_by": "V1.96",
+        "closure_note": "Closed by V1.96 plan QC Approve — wizard timeout + starting branch (T4)"
+      },
+      {
+        "id": "R-V195QC1-S002",
+        "title": "No dedicated malformed-TOML unit test for write_workspace_path_at (mirrors sibling-writer tests)",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.96",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/reports/2026-07-07-v1.95-implement-fixes/qc1.md §S-002",
+        "note": "Implementation correct; integration-covered; test-parity with siblings is polish."
+      }
+    ],
+    "2026-07-07-v1.96-implement-rework": [
+      {
+        "id": "R-V196QC3-W001",
+        "title": "Stderr drain task race window on fast-crash (intermediate stderr_tail read before drain finishes Terminated)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.97",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/reports/2026-07-07-v1.96-implement-rework/qc3.md §W-1",
+        "note": "Sub-millisecond window; low practical impact."
+      },
+      {
+        "id": "R-V196QC1-S002",
+        "title": "rounded-control inlined in setup-step-welcome.tsx where DESIGN.md supplies input-row-rounded token",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.97",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/reports/2026-07-07-v1.96-implement-rework/qc1.md §S-002",
+        "note": "Single-line blast radius; V1.97 polish."
+      },
+      {
+        "id": "R-V196QC1-S004",
+        "title": "format_error_detail composes free-form String rather than structured envelope",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.97+",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/reports/2026-07-07-v1.96-implement-rework/qc1.md §S-004",
+        "note": "Future 'copy error details' support button."
+      },
+      {
+        "id": "R-V196QC3-S001",
+        "title": "Multi-line stderr test asserts textContent but not getComputedStyle().whiteSpace === 'pre-wrap'",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.97",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/reports/2026-07-07-v1.96-implement-rework/qc3.md §S-1",
+        "note": "Would not catch className regression."
+      },
+      {
+        "id": "R-V196QC1-S001",
+        "title": "path-context-menu.tsx has near-duplicate inline errorMessage() (slight variant)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.97",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/reports/2026-07-07-v1.96-implement-rework/qc1.md §S-001",
+        "note": "Different fallback semantics; consolidation candidate."
+      }
     ]
   }
 }
