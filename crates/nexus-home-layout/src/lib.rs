@@ -551,6 +551,14 @@ mod tests {
     }
 
     #[test]
+    fn db_separation_workspace_state_and_shared_global_are_distinct() {
+        let home = PathBuf::from("/h");
+        let workspace_db = workspace_state_db_path(&home, "c", "w");
+        let shared_db = shared_global_db_path(&home);
+        assert_ne!(workspace_db, shared_db, "workspace DB and shared global DB must never resolve to the same path");
+    }
+
+    #[test]
     fn user_preset_base_dir_layout() {
         let home = PathBuf::from("/fake/home");
         assert_eq!(

@@ -31,6 +31,8 @@ function makeDesktop(impl: Partial<DesktopCapabilities> = {}): DesktopCapabiliti
     setSetupCompleted: vi.fn().mockResolvedValue(undefined),
     setAgentProfile: vi.fn().mockResolvedValue(undefined),
     getWorkspaceRoot: vi.fn().mockResolvedValue('~/Documents/nexus42/default'),
+    pickDirectory: vi.fn().mockResolvedValue(null),
+    setWorkspacePath: vi.fn().mockResolvedValue(undefined),
     ...impl,
   };
 }

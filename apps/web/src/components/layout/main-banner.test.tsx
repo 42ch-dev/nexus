@@ -26,6 +26,8 @@ function makeDesktop(
     setSetupCompleted: vi.fn().mockResolvedValue(undefined),
     setAgentProfile: vi.fn().mockResolvedValue(undefined),
     getWorkspaceRoot: vi.fn().mockResolvedValue('~/Documents/nexus42/default'),
+    pickDirectory: vi.fn().mockResolvedValue(null),
+    setWorkspacePath: vi.fn().mockResolvedValue(undefined),
     getDaemonStatus: vi.fn().mockResolvedValue(status),
     onDaemonStatusChanged: vi.fn().mockImplementation((cb) => {
       listeners.add(cb);

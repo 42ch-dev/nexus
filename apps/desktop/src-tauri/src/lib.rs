@@ -21,6 +21,7 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use tauri::{AppHandle, State};
+use tauri_plugin_dialog::DialogExt;
 
 mod connection_config;
 mod sidecar;
@@ -41,7 +42,7 @@ fn default_workspace_root() -> PathBuf {
             eprintln!("nexus-desktop: dirs::home_dir() returned None; using relative fallback");
             PathBuf::from("Documents")
         })
-        .join("nexus42")
+        .join("nexus")
         .join("default")
 }
 
@@ -103,7 +104,7 @@ struct WorkspaceRoot(Option<PathBuf>);
 /// `~/.nexus42/config.toml` and return its `workspace_path`.
 ///
 /// If `workspace_path` is unset, this function falls back to
-/// `~/Documents/nexus42/default/` (cross-platform via `dirs::document_dir()`) and
+/// `~/Documents/nexus/default/` (cross-platform via `dirs::document_dir()`) and
 /// creates the directory if absent. The fallback matches
 /// [`apps/nexus42/src/config.rs::resolve_default_workspace_path`].
 fn resolve_workspace_root() -> Option<PathBuf> {
@@ -438,6 +439,47 @@ fn reset_local_database_at(home: &Path) -> std::io::Result<usize> {
     Ok(wiped)
 }
 
+/// Open a native directory picker and return the selected path, or `None` if the
+/// user cancelled. The `default_path` is used as the starting directory.
+#[tauri::command]
+async fn pick_directory(app: AppHandle, default_path: String) -> Result<Option<String>, String> {
+    let picked = app
+        .dialog()
+        .file()
+        .set_directory(&default_path)
+        .blocking_pick_folder();
+    Ok(picked.map(|p| p.to_string_lossy().to_string()))
+}
+
+/// Write `workspace_path` to `~/.nexus42/config.toml`, preserving other keys.
+#[tauri::command]
+fn set_workspace_path(path: String) -> Result<(), String> {
+    let config_path = nexus_config_path().ok_or("cannot determine home directory")?;
+    write_workspace_path_at(&config_path, &path)
+        .map_err(|e| format!("failed to write workspace_path: {e}"))
+}
+
+fn write_workspace_path_at(path: &Path, value: &str) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    // Preserve existing keys by round-tripping through a toml edit document.
+    // TOML parse failures are propagated rather than falling back to an empty
+    // document, which would silently wipe persisted configuration on a
+    // partially-written or corrupt config file.
+    let mut doc = if path.exists() {
+        let text = std::fs::read_to_string(path)?;
+        text.parse::<toml_edit::DocumentMut>()?
+    } else {
+        toml_edit::DocumentMut::new()
+    };
+
+    doc["workspace_path"] = toml_edit::value(value);
+    std::fs::write(path, doc.to_string())?;
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // The workspace root is captured once at startup and stored as managed
@@ -462,6 +504,8 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        // Dialog plugin provides the native folder picker via Rust extension traits.
+        .plugin(tauri_plugin_dialog::init())
         // Shell plugin drives the bundled `nexus42` sidecar via
         // `tauri_plugin_shell::ShellExt::sidecar` (P1).
         .plugin(tauri_plugin_shell::init())
@@ -487,6 +531,8 @@ pub fn run() {
             start_daemon,
             stop_daemon,
             reset_local_database,
+            pick_directory,
+            set_workspace_path,
             get_setup_completed,
             set_setup_completed,
             set_agent_profile,
@@ -680,12 +726,12 @@ mod tests {
     }
 
     #[test]
-    fn default_workspace_root_ends_with_nexus42_default() {
+    fn default_workspace_root_ends_with_nexus_default() {
         let path = default_workspace_root();
         let s = path.to_string_lossy();
         assert!(
-            s.ends_with("nexus42/default") || s.ends_with("nexus42\\default"),
-            "default workspace root should end with nexus42/default, got: {s}"
+            s.ends_with("nexus/default") || s.ends_with("nexus\\default"),
+            "default workspace root should end with nexus/default, got: {s}"
         );
     }
 

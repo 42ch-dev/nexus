@@ -73,9 +73,9 @@ pub const DEFAULT_WORKSPACE_SLUG: &str = "default";
 /// Resolve the effective workspace root path.
 ///
 /// Returns [`CliConfig.workspace_path`] when it is set. Otherwise falls back to
-/// `dirs::document_dir().join("nexus42").join("default")`, matching the desktop
+/// `dirs::document_dir().join("nexus").join("default")`, matching the desktop
 /// shell's first-launch default. If `document_dir()` returns `None`, falls back
-/// to `dirs::home_dir().join("Documents").join("nexus42").join("default")` and
+/// to `dirs::home_dir().join("Documents").join("nexus").join("default")` and
 /// logs a warning.
 #[must_use]
 pub fn resolve_default_workspace_path() -> PathBuf {
@@ -88,7 +88,7 @@ pub fn resolve_default_workspace_path() -> PathBuf {
             tracing::warn!("dirs::home_dir() returned None; using relative fallback");
             PathBuf::from("Documents")
         })
-        .join("nexus42")
+        .join("nexus")
         .join("default")
 }
 
@@ -107,7 +107,7 @@ impl CliConfig {
     /// Resolve the effective workspace root path.
     ///
     /// Returns the configured [`workspace_path`](Self::workspace_path) if set,
-    /// otherwise the cross-platform default (`~/Documents/nexus42/default/`).
+    /// otherwise the cross-platform default (`~/Documents/nexus/default/`).
     #[must_use]
     pub fn resolve_workspace_path(&self) -> PathBuf {
         self.workspace_path
@@ -622,12 +622,12 @@ mod tests {
     }
 
     #[test]
-    fn resolve_default_workspace_path_ends_with_nexus42_default() {
+    fn resolve_default_workspace_path_ends_with_nexus_default() {
         let path = resolve_default_workspace_path();
         let s = path.to_string_lossy();
         assert!(
-            s.ends_with("nexus42/default") || s.ends_with("nexus42\\default"),
-            "default workspace path should end with nexus42/default, got: {s}"
+            s.ends_with("nexus/default") || s.ends_with("nexus\\default"),
+            "default workspace path should end with nexus/default, got: {s}"
         );
     }
 
@@ -652,8 +652,8 @@ mod tests {
         let path = cfg.resolve_workspace_path();
         let s = path.to_string_lossy();
         assert!(
-            s.ends_with("nexus42/default") || s.ends_with("nexus42\\default"),
-            "fallback workspace path should end with nexus42/default, got: {s}"
+            s.ends_with("nexus/default") || s.ends_with("nexus\\default"),
+            "fallback workspace path should end with nexus/default, got: {s}"
         );
     }
 

@@ -71,6 +71,16 @@ export interface DesktopCapabilities {
    */
   resetLocalDatabase(): Promise<void>;
   /**
+   * Open a native directory picker starting at `defaultPath` and return the
+   * selected directory path, or `null` if the user cancelled.
+   */
+  pickDirectory(defaultPath: string): Promise<string | null>;
+  /**
+   * Persist the chosen workspace path to `~/.nexus42/config.toml` so the daemon
+   * and CLI agree on the active workspace root.
+   */
+  setWorkspacePath(path: string): Promise<void>;
+  /**
    * Whether the first-launch setup wizard has been completed.
    * Browser build defaults to `true`; desktop reads from Tauri config store.
    */
@@ -186,6 +196,22 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
   async resetLocalDatabase(): Promise<void> {
     try {
       await tauriInvoke().core.invoke<void>('reset_local_database', undefined);
+    } catch (err) {
+      throw asDesktopError(err);
+    }
+  }
+
+  async pickDirectory(defaultPath: string): Promise<string | null> {
+    try {
+      return await tauriInvoke().core.invoke<string | null>('pick_directory', { default_path: defaultPath });
+    } catch (err) {
+      throw asDesktopError(err);
+    }
+  }
+
+  async setWorkspacePath(path: string): Promise<void> {
+    try {
+      await tauriInvoke().core.invoke<void>('set_workspace_path', { path });
     } catch (err) {
       throw asDesktopError(err);
     }

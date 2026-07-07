@@ -14,6 +14,7 @@ export type WizardStep = 'welcome' | 'daemon' | 'agent' | 'done';
 
 export interface WizardState {
   workspaceRoot: string;
+  workspacePicked?: boolean;
   selectedAgent: AgentScanEntry | null;
   customLaunchCommand: string;
 }
