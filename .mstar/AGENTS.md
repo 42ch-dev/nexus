@@ -2,9 +2,11 @@
 
 > Project rules: root [`AGENTS.md`](../AGENTS.md). Runtime harness: upstream `mstar-*` skills.
 
-## Source priority
+## Conflict resolution priority
 
-1. Current user instruction → 2. Root `AGENTS.md` → 3. This file → 4. `mstar-*` skills
+On conflicts (user has not overridden): **1** current instruction → **2** root `AGENTS.md` → **3** this file → **4** `mstar-*` skills. Higher number yields to lower.
+
+**Read order (not precedence):** load `mstar-harness-core` first for harness context; then other `mstar-*` on demand per its role matrix.
 
 ## Concepts (path deviations)
 
@@ -16,8 +18,6 @@
 | `{ITERATION_DIR}` | `iterations/` |
 | `{KNOWLEDGE_DIR}` | `knowledge/` |
 | `{SPECS_DIR}` | **`knowledge/specs/`** — not repo-root `specs/` (upstream default). Wire contracts: repo-root `schemas/` |
-
-**Load order:** `mstar-harness-core` first; other `mstar-*` on demand per its role matrix.
 
 ## Layout & write boundaries
 
