@@ -4,6 +4,7 @@ import { Loader2, RefreshCw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useNexusClient, useDesktopCapabilities } from '@/lib/client-context';
 import { errorMessage } from '@/lib/error-message';
+import type { DaemonStatus } from '@/lib/nexus/desktop-capabilities';
 
 interface SetupStepDaemonProps {
   onNext: () => void;
@@ -19,17 +20,24 @@ export function SetupStepDaemon({ onNext, onBack }: SetupStepDaemonProps) {
 
   useEffect(() => {
     if (ready) return;
+
     let cancelled = false;
     let unsub: (() => void) | undefined;
+    let timeoutId: ReturnType<typeof setTimeout> | undefined;
 
-    async function probe() {
-      try {
-        await client.health();
-        if (!cancelled) setReady(true);
-      } catch (err) {
-        if (!cancelled) {
-          setError(errorMessage(err) || 'Could not reach the daemon.');
-        }
+    function applyStatus(status: DaemonStatus) {
+      if (cancelled) return;
+      if (status.state === 'running' || status.state === 'degraded') {
+        setReady(true);
+        setError(null);
+        clearTimeout(timeoutId);
+      } else if (status.state === 'starting') {
+        setReady(false);
+        setError(null);
+      } else if (status.state === 'error' || status.state === 'stopped') {
+        setReady(false);
+        setError(status.detail ?? `Daemon is ${status.state}.`);
+        clearTimeout(timeoutId);
       }
     }
 
@@ -39,30 +47,50 @@ export function SetupStepDaemon({ onNext, onBack }: SetupStepDaemonProps) {
         return;
       }
       try {
+        const status = await desktop.getDaemonStatus();
+        applyStatus(status);
+        if (cancelled || status.state === 'running' || status.state === 'degraded') return;
         unsub = await desktop.onDaemonStatusChanged((status) => {
-          if (cancelled) return;
-          if (status.state === 'running') {
-            setReady(true);
-            setError(null);
-          } else if (status.state === 'error' || status.state === 'stopped') {
-            setError(status.detail ?? `Daemon is ${status.state}.`);
-          }
+          applyStatus(status);
         });
       } catch {
-        // Fall back to polling.
+        if (cancelled) return;
         await probe();
       }
     }
 
+    async function probe() {
+      try {
+        await client.health();
+        if (!cancelled) {
+          setReady(true);
+          setError(null);
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setReady(false);
+          setError(errorMessage(err) || 'Could not reach the daemon.');
+        }
+      }
+    }
+
+    timeoutId = setTimeout(() => {
+      if (cancelled) return;
+      setReady(false);
+      setError('Daemon took too long to start.');
+    }, 25_000);
+
     void subscribe();
     return () => {
       cancelled = true;
+      clearTimeout(timeoutId);
       unsub?.();
     };
   }, [client, desktop, ready, retryToken]);
 
   function retry() {
     setError(null);
+    setRetryToken((n) => n + 1);
     if (desktop) {
       void desktop.startDaemon();
     } else {
