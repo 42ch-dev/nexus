@@ -56,21 +56,13 @@ Narrative (ship stories, QC summaries, refresh rationales) → **`notes.json`**,
 
 **`tech_debt_summary`:** optional rollup per `mstar-plan-artifacts/references/status-and-residuals.md` — `total_open`, `by_severity`, `by_target`, `by_plan`, `updated_at` only. Refresh with `tech-debt-rollup.sh`; do **not** add `refreshed_reason`, `*_ship_note`, or similar prose fields.
 
-**Branch metadata (canonical):** `iteration_base_branch`, `spec_integration_branch`, `target_branch`; per-plan `working_branch`, `merge_target`. Resolution → `mstar-iteration` §2.3.
+**Branch metadata:** upstream canonical fields only (`iteration_base_branch`, `spec_integration_branch`, `target_branch`; per-plan `working_branch`, `merge_target`) — see `mstar-iteration` §2.3, `mstar-plan-artifacts/references/status-and-residuals.md`. Branch names and Git workflow → `mstar-branch-worktree`, `mstar-plan-conventions`.
 
-**Nexus lifecycle pointers (structured):** `latest_ship`, `latest_active_iteration`, `integration_branch_retired`, `last_integration_branch` — IDs/paths/dates only.
+**Legacy keys (`integration_branch`, `integration_merge_target`):** tolerated in archived JSON; **do not write on new iterations**.
 
-**Legacy keys (`integration_branch`, `integration_merge_target`):** tolerated in archived JSON and old closeouts; **do not write on new iterations**. Migrate reads to canonical names above.
+### Git & PR merge policy
 
-### Git naming & merge policy
-
-| Kind | Pattern | Merge to `main` |
-|------|---------|-----------------|
-| Spec integration | `iteration/{ver}` | Squash PR (root `AGENTS.md` iteration landing) |
-| Plan topic | `feature/{ver}-{plan-slug}` | via integration branch |
-| Hotfix | `fix/{short-name}` | **Merge commit** PR (audit provenance — exception to squash) |
-
-Single-plan iterations may use one branch for topic + integration. Workflow → `mstar-iteration`, `mstar-branch-worktree`.
+All landings on the protected branch (`target_branch`, usually `main`) via **GitHub PR with squash merge** — iteration integration, plan topics (via integration), and hotfixes. Branch naming → upstream (`mstar-iteration`, `mstar-branch-worktree`); PM assigns explicit names in Assignment.
 
 ### Profile B compaction
 
@@ -85,9 +77,9 @@ Adopted (`mstar-plan-artifacts/references/done-compaction.md` Template B): hot `
 ### Post-merge hotfix
 
 1. Register `residual_findings` before branching.
-2. `fix/<short-name>` from current `main` HEAD.
+2. `fix/*` from current `main` HEAD (PM-named per `mstar-branch-worktree`).
 3. Surgical fix + regression test; verify per root `AGENTS.md` Development Policy.
-4. Merge-commit PR; update `status.json`. Prepare compression → `mstar-phase-gates`.
+4. Squash-merge PR to `main`; update `status.json`. Prepare compression → `mstar-phase-gates`.
 
 ### Pre-existing failure claims (PM override)
 

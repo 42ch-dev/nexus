@@ -21,7 +21,7 @@ This repo is a **consumer** of Morning Star, not the harness maintenance repo.
 | Layer | File | Holds |
 |-------|------|-------|
 | Project | Root `AGENTS.md` (this file) | Repo identity, tech stack, build/test policy, git hygiene, crate index |
-| Harness | [`.mstar/AGENTS.md`](.mstar/AGENTS.md) | `{HARNESS_DIR}` path symbols, content boundaries, iteration branch metadata, Profile B compaction, project deviations |
+| Harness | [`.mstar/AGENTS.md`](.mstar/AGENTS.md) | Path symbols, content boundaries, Profile B compaction, Nexus-only deviations |
 | Runtime | `mstar-*` skills (Cursor plugin / OpenCode bundle) | State machine, phase gates, dispatch, QC/QA, SDD, iteration Phase 1–5 |
 
 **Do not** duplicate harness runtime rules in root `AGENTS.md`. **Do not** put dynamic plan progress, residuals detail, or QC conclusions in root `AGENTS.md` — use `status.json`, `notes.json`, and plan docs under `.mstar/plans/`.
@@ -133,7 +133,8 @@ git submodule update --init --recursive   # after pull if skill dirs are empty
 
 | Rule | Practice |
 |------|----------|
-| Iteration landing | Merge `spec_integration_branch` → `target_branch` via PR (squash merge target: one commit per iteration on `main`) |
+| Iteration landing | Squash-merge PR: `spec_integration_branch` → `target_branch` |
+| Hotfix landing | Squash-merge PR: `fix/*` → `target_branch` |
 | Harness updates | Batch PM/status changes into **one commit** per closeout — no micro-commits on `status.json` |
 | `status.json` size | Before P-last: `wc -c .mstar/status.json` **< 20_000** bytes |
 | Resolved residuals | `lifecycle: resolved` findings **must** move to `.mstar/archived/residuals/<plan-id>.json`; only open/deferred stay in `status.json` |
@@ -155,7 +156,7 @@ If `.git` exceeds ~100 MiB or clone slows again: consider `git filter-repo` or a
 
 **Anti-patterns:** micro-commits on bloated `status.json`; leaving resolved rows in `residual_findings`; per-worktree `target/` without cleanup; developer clone with `--no-recurse-submodules` and no follow-up `submodule update`; `cargo build --all` inside every worktree during daily iteration.
 
-**Merge discipline:** All iteration integration branches (`spec_integration_branch`, commonly `iteration/{ver}`) **must** merge into `target_branch` (commonly `main`) via a GitHub Pull Request — never by local `git merge` directly to the protected branch. Rationale: this is a public open-source repo; PRs provide review trail, CI gate, and merge commit provenance that local merges cannot.
+**Merge discipline:** All PRs to the protected branch (`target_branch`, usually `main`) — iteration integration, hotfixes, etc. — use **squash merge** via GitHub PR; never local `git merge` directly to the protected branch. Branch policy and naming → `.mstar/AGENTS.md` + upstream `mstar-iteration` / `mstar-branch-worktree`.
 
 ## Versioning Policy
 
