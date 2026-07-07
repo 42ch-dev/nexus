@@ -501,10 +501,13 @@ fn backoff(attempt: u32) -> Duration {
 fn trim_stderr_tail(buf: &mut String) {
     if buf.len() > STDERR_TAIL_MAX_BYTES {
         let keep_start = buf.len().saturating_sub(STDERR_TAIL_MAX_BYTES);
-        if let Some(nl) = buf[keep_start..].find('\n') {
-            buf.replace_range(..keep_start + nl + 1, "");
+        // Snap to a UTF-8 char boundary so buf[keep_start..] doesn't panic on
+        // multibyte input (daemon logs may contain Unicode paths, accented letters).
+        let safe_start = buf.ceil_char_boundary(keep_start);
+        if let Some(nl) = buf[safe_start..].find('\n') {
+            buf.replace_range(..safe_start + nl + 1, "");
         } else {
-            buf.replace_range(..keep_start, "");
+            buf.replace_range(..safe_start, "");
         }
     }
 }
@@ -620,7 +623,7 @@ fn process_alive(_pid: u32) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{backoff, drain_stderr, format_error_detail, resolve_port, DaemonState, MAX_RESTART_ATTEMPTS, STDERR_TAIL_MAX_BYTES};
+    use super::{backoff, drain_stderr, format_error_detail, resolve_port, trim_stderr_tail, DaemonState, MAX_RESTART_ATTEMPTS, STDERR_TAIL_MAX_BYTES};
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -917,6 +920,27 @@ mod tests {
             tail.len()
         );
         assert!(tail.ends_with('\n'), "tail should end at a newline boundary");
+    }
+
+    #[test]
+    fn stderr_tail_safely_snaps_to_char_boundary() {
+        // Build a 2050-byte buffer where the raw 2048-byte cutoff falls inside
+        // the middle byte of a 3-byte UTF-8 character. Without boundary
+        // snapping, the function would panic on a non-char-boundary slice.
+        let multibyte = "中"; // 3-byte UTF-8
+        let prefix = "x";
+        let suffix = "y".repeat(2046);
+        let mut buf = format!("{prefix}{multibyte}{suffix}");
+        let keep_start = buf.len().saturating_sub(STDERR_TAIL_MAX_BYTES);
+        assert!(
+            !buf.is_char_boundary(keep_start),
+            "test precondition: keep_start should split a multibyte char"
+        );
+
+        trim_stderr_tail(&mut buf);
+
+        assert_eq!(buf, suffix, "tail should resume from the next char boundary");
+        assert!(buf.len() <= STDERR_TAIL_MAX_BYTES);
     }
 
     #[test]

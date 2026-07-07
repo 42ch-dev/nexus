@@ -65,11 +65,13 @@ export function SetupStepDaemon({ onNext, onBack }: SetupStepDaemonProps) {
         if (!cancelled) {
           setReady(true);
           setError(null);
+          if (timeoutId) clearTimeout(timeoutId);
         }
       } catch (err) {
         if (!cancelled) {
           setReady(false);
           setError(errorMessage(err) || 'Could not reach the daemon.');
+          if (timeoutId) clearTimeout(timeoutId);
         }
       }
     }
