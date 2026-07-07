@@ -140,7 +140,7 @@ git submodule update --init --recursive   # after pull if skill dirs are empty
 | Codegen | Schema changes and generated output in the **same commit** (see [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md)) |
 | Never commit | `target/`, `.worktrees/`, `node_modules/` (gitignored — agents must self-check) |
 
-Harness field rules (`plans[]` non-Done only, `notes.json` for narrative): [`.mstar/AGENTS.md`](.mstar/AGENTS.md) § Plan compaction / `status.json` field discipline.
+Harness field rules (`plans[]` non-Done only, `notes.json` for narrative): [`.mstar/AGENTS.md`](.mstar/AGENTS.md) § `status.json` — structured metadata only.
 
 **Periodic maintenance (monthly or every ~5 iterations):**
 
