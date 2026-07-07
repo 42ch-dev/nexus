@@ -1,4 +1,4 @@
-import { http, HttpResponse } from 'msw';
+import { useCallback, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -6,6 +6,7 @@ import userEvent from '@testing-library/user-event';
 import { SetupStepWelcome } from '@/pages/setup-step-welcome';
 import { renderInApp } from '@/test/test-providers';
 import type { DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
+import type { WizardState } from '@/pages/setup-wizard-page';
 
 function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapabilities {
   return {
@@ -26,95 +27,104 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
   };
 }
 
+function makeState(overrides: Partial<WizardState> = {}): WizardState {
+  return {
+    workspaceRoot: '',
+    selectedAgent: null,
+    customLaunchCommand: '',
+    ...overrides,
+  };
+}
+
+interface HarnessProps {
+  initial: WizardState;
+  onNext?: () => void;
+}
+
+function Harness({ initial, onNext = vi.fn() }: HarnessProps) {
+  const [state, setState] = useState<WizardState>(initial);
+  const onChange = useCallback((next: WizardState) => setState(next), []);
+  return (
+    <SetupStepWelcome
+      state={state}
+      onChange={onChange}
+      onNext={onNext}
+    />
+  );
+}
+
+function renderHarness(
+  initial: WizardState,
+  options: { desktop?: DesktopCapabilities; onNext?: () => void } = {},
+) {
+  return renderInApp(<Harness initial={initial} onNext={options.onNext} />, {
+    desktop: options.desktop,
+    initialRouterEntries: ['/setup'],
+  });
+}
+
 describe('SetupStepWelcome', () => {
-  it('uses the hardcoded fallback in browser mode and hides the picker', () => {
-    const onChange = vi.fn();
-    const onNext = vi.fn();
+  it('uses the hardcoded fallback in browser mode and hides the picker', async () => {
+    renderHarness(makeState());
 
-    renderInApp(
-      <SetupStepWelcome state={{ workspaceRoot: '' }} onChange={onChange} onNext={onNext} />,
-      { initialRouterEntries: ['/setup'] },
-    );
-
-    expect(screen.getByText('~/Documents/nexus/default')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('~/Documents/nexus/default')).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: 'Browse…' })).not.toBeInTheDocument();
   });
 
   it('shows the desktop workspace root and a picker button', async () => {
-    const onChange = vi.fn();
-    const onNext = vi.fn();
+    renderHarness(makeState(), {
+      desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve('/custom/nexus') }),
+    });
 
-    renderInApp(
-      <SetupStepWelcome state={{ workspaceRoot: '' }} onChange={onChange} onNext={onNext} />,
-      {
-        desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve('/custom/nexus') }),
-        initialRouterEntries: ['/setup'],
-      },
-    );
-
-    await waitFor(() =>
-      expect(screen.getByText('/custom/nexus')).toBeInTheDocument(),
-    );
+    await waitFor(() => expect(screen.getByText('/custom/nexus')).toBeInTheDocument());
     expect(screen.getByRole('button', { name: 'Browse…' })).toBeInTheDocument();
   });
 
   it('updates the workspace root when the picker returns a directory', async () => {
     const user = userEvent.setup();
-    const onChange = vi.fn();
-    const onNext = vi.fn();
     const pickDirectory = vi.fn(() => Promise.resolve('/picked/workspace'));
 
-    renderInApp(
-      <SetupStepWelcome state={{ workspaceRoot: '' }} onChange={onChange} onNext={onNext} />,
-      {
-        desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve('/custom/nexus'), pickDirectory }),
-        initialRouterEntries: ['/setup'],
-      },
-    );
+    renderHarness(makeState(), {
+      desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve('/custom/nexus'), pickDirectory }),
+    });
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Browse…' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Browse…' }));
 
     await waitFor(() => expect(pickDirectory).toHaveBeenCalledWith('/custom/nexus'));
     await waitFor(() =>
-      expect(onChange).toHaveBeenCalledWith({ workspaceRoot: '/picked/workspace' }),
+      expect(screen.getByText('/picked/workspace')).toBeInTheDocument(),
     );
   });
 
   it('writes the workspace path on Continue when the path is stale', async () => {
     const user = userEvent.setup();
-    const onChange = vi.fn();
     const onNext = vi.fn();
     const setWorkspacePath = vi.fn(() => Promise.resolve());
+    const stalePath = '/Users/x/Documents/nexus42/default';
 
-    renderInApp(
-      <SetupStepWelcome state={{ workspaceRoot: '/Users/x/Documents/nexus42/default' }} onChange={onChange} onNext={onNext} />,
-      {
-        desktop: makeDesktop({ setWorkspacePath }),
-        initialRouterEntries: ['/setup'],
-      },
-    );
+    renderHarness(makeState({ workspaceRoot: stalePath }), {
+      desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve(stalePath), setWorkspacePath }),
+      onNext,
+    });
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Continue' }));
 
-    await waitFor(() => expect(setWorkspacePath).toHaveBeenCalledWith('/Users/x/Documents/nexus42/default'));
+    await waitFor(() => expect(setWorkspacePath).toHaveBeenCalledWith(stalePath));
     await waitFor(() => expect(onNext).toHaveBeenCalled());
   });
 
   it('does not write the workspace path when it is a custom non-stale path', async () => {
     const user = userEvent.setup();
-    const onChange = vi.fn();
     const onNext = vi.fn();
     const setWorkspacePath = vi.fn(() => Promise.resolve());
+    const customPath = '/Users/x/MyCreative/Nexus';
 
-    renderInApp(
-      <SetupStepWelcome state={{ workspaceRoot: '/Users/x/MyCreative/Nexus' }} onChange={onChange} onNext={onNext} />,
-      {
-        desktop: makeDesktop({ setWorkspacePath }),
-        initialRouterEntries: ['/setup'],
-      },
-    );
+    renderHarness(makeState({ workspaceRoot: customPath }), {
+      desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve(customPath), setWorkspacePath }),
+      onNext,
+    });
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Continue' }));

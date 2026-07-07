@@ -93,7 +93,6 @@ export function SetupStepWelcome({ state, onChange, onNext }: SetupStepWelcomePr
             variant="secondary"
             onClick={browse}
             disabled={loading}
-            aria-label="Browse for a workspace folder"
           >
             Browse…
           </Button>

@@ -448,7 +448,13 @@ async fn pick_directory(app: AppHandle, default_path: String) -> Result<Option<S
         .file()
         .set_directory(&default_path)
         .blocking_pick_folder();
-    Ok(picked.map(|p| p.to_string_lossy().to_string()))
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let path = picked
+        .into_path()
+        .map_err(|e| format!("invalid directory path: {e}"))?;
+    Ok(Some(path.to_string_lossy().to_string()))
 }
 
 /// Write `workspace_path` to `~/.nexus42/config.toml`, preserving other keys.
