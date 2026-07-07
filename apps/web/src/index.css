@@ -183,6 +183,40 @@
     --color-reading-selection-toolbar-text: var(--color-gray-1000);
     --color-reading-selection-toolbar-shadow: 0px 4px 12px rgba(0, 0, 0, 0.12);
 
+    /* V1.94 Footer Profile Switcher — sidebar footer avatar row tokens
+       (DESIGN.md). */
+    --color-footer-profile-avatar-size: 32px;
+    --color-footer-profile-avatar-rounded: 9999px;
+    --color-footer-profile-avatar-bg: var(--color-gray-alpha-100);
+    --color-footer-profile-avatar-bg-hover: var(--color-gray-alpha-200);
+    --color-footer-profile-avatar-bg-active: var(--color-blue-700);
+    --color-footer-profile-avatar-text: var(--color-gray-1000);
+    --color-footer-profile-avatar-text-active: #ffffff;
+    --color-footer-profile-avatar-fallback-bg: var(--color-gray-alpha-200);
+    --color-footer-profile-avatar-fallback-text: var(--color-gray-700);
+    --color-footer-profile-add-button-bg: transparent;
+    --color-footer-profile-add-button-border: var(--color-gray-alpha-400);
+    --color-footer-profile-add-button-text: var(--color-gray-700);
+    --color-footer-profile-add-button-hover-bg: var(--color-gray-alpha-100);
+    --color-footer-profile-add-button-hover-border: var(--color-gray-alpha-500);
+    --color-footer-profile-add-button-hover-text: var(--color-gray-1000);
+    --color-footer-profile-gap: 8px;
+
+    /* V1.94 Setup Wizard Step Chrome — step indicator tokens (DESIGN.md). */
+    --color-setup-wizard-step-circle-size: 32px;
+    --color-setup-wizard-step-circle-active-bg: var(--color-blue-700);
+    --color-setup-wizard-step-circle-active-text: #ffffff;
+    --color-setup-wizard-step-circle-complete-bg: var(--color-green-700);
+    --color-setup-wizard-step-circle-complete-text: #ffffff;
+    --color-setup-wizard-step-circle-pending-bg: var(--color-gray-alpha-100);
+    --color-setup-wizard-step-circle-pending-text: var(--color-gray-700);
+    --color-setup-wizard-step-connector: var(--color-gray-alpha-400);
+    --color-setup-wizard-step-label-typography: 14px;
+    --color-setup-wizard-step-label-active-color: var(--color-gray-1000);
+    --color-setup-wizard-step-label-pending-color: var(--color-gray-700);
+    --color-setup-wizard-wizard-max-width: 640px;
+    --color-setup-wizard-wizard-padding: 32px;
+
     /* Elevation — DESIGN.md §Elevation */
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04);
     --shadow-popover: 0 1px 1px rgba(0, 0, 0, 0.03), 0 8px 24px -12px rgba(0, 0, 0, 0.18);
@@ -346,6 +380,41 @@
     --color-reading-selection-toolbar-border: var(--color-gray-alpha-500);
     --color-reading-selection-toolbar-text: var(--color-gray-1000);
     --color-reading-selection-toolbar-shadow: 0px 4px 12px rgba(0, 0, 0, 0.40);
+
+    /* V1.94 Footer Profile Switcher — dark values (DESIGN.dark.md).
+       Same token names as :root; values derive from dark gray-alpha scale. */
+    --color-footer-profile-avatar-size: 32px;
+    --color-footer-profile-avatar-rounded: 9999px;
+    --color-footer-profile-avatar-bg: var(--color-gray-alpha-100);
+    --color-footer-profile-avatar-bg-hover: var(--color-gray-alpha-200);
+    --color-footer-profile-avatar-bg-active: var(--color-blue-700);
+    --color-footer-profile-avatar-text: var(--color-gray-1000);
+    --color-footer-profile-avatar-text-active: var(--color-brand-deep-blue);
+    --color-footer-profile-avatar-fallback-bg: var(--color-gray-alpha-200);
+    --color-footer-profile-avatar-fallback-text: var(--color-gray-700);
+    --color-footer-profile-add-button-bg: transparent;
+    --color-footer-profile-add-button-border: var(--color-gray-alpha-400);
+    --color-footer-profile-add-button-text: var(--color-gray-700);
+    --color-footer-profile-add-button-hover-bg: var(--color-gray-alpha-100);
+    --color-footer-profile-add-button-hover-border: var(--color-gray-alpha-500);
+    --color-footer-profile-add-button-hover-text: var(--color-gray-1000);
+    --color-footer-profile-gap: 8px;
+
+    /* V1.94 Setup Wizard Step Chrome — dark values (DESIGN.dark.md).
+       Same token names as :root; values derive from dark accent scales. */
+    --color-setup-wizard-step-circle-size: 32px;
+    --color-setup-wizard-step-circle-active-bg: var(--color-blue-700);
+    --color-setup-wizard-step-circle-active-text: var(--color-brand-deep-blue);
+    --color-setup-wizard-step-circle-complete-bg: var(--color-green-700);
+    --color-setup-wizard-step-circle-complete-text: var(--color-brand-deep-blue);
+    --color-setup-wizard-step-circle-pending-bg: var(--color-gray-alpha-100);
+    --color-setup-wizard-step-circle-pending-text: var(--color-gray-700);
+    --color-setup-wizard-step-connector: var(--color-gray-alpha-400);
+    --color-setup-wizard-step-label-typography: 14px;
+    --color-setup-wizard-step-label-active-color: var(--color-gray-1000);
+    --color-setup-wizard-step-label-pending-color: var(--color-gray-700);
+    --color-setup-wizard-wizard-max-width: 640px;
+    --color-setup-wizard-wizard-padding: 32px;
 
     /* Elevation */
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);

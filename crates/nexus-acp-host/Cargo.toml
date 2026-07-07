@@ -27,6 +27,7 @@ async-broadcast = "0.7"
 toml = "0.8"
 toml_edit = "0.22"
 nexus-contracts = { path = "../nexus-contracts" }
+which = "7"
 # Unix signal handling for graceful shutdown (only on Unix platforms)
 [target.'cfg(unix)'.dependencies]
 nix = { version = "0.28", features = ["signal", "process"] }

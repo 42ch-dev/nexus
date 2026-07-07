@@ -1,0 +1,87 @@
+{
+  "plan_id": "2026-07-05-v1.92-closure",
+  "archived_at": "2026-07-06T17:30:00+0000",
+  "archived_reason": "V1.94 iteration-start residual hygiene: 8 of 9 V1.92-closure residuals resolved during V1.93 (R-V192P0-001/002, R-V192P1-001/002/003, R-V192UX-001, R-V192SPEC-001, R-V192HYG-001) — moved to archive per 'only open/deferred stay in status.json' rule. R-V192SEC-001 (medium, open, target V1.95) stays in status.json under the same plan-id key.",
+  "resolved": [
+    {
+      "id": "R-V192P0-001",
+      "title": "Re-bind to a different host does not invalidate/regenerate the persisted TLS cert SAN",
+      "severity": "low",
+      "resolution": {
+        "commit": "feff6f36 (code, V1.92) + 962d5847 (IPv6 SAN regression test, V1.93 P0)",
+        "plan_id": "2026-07-06-v1.93-tls-robustness",
+        "resolved_at": "2026-07-06T16:00:00+0000"
+      }
+    },
+    {
+      "id": "R-V192P0-002",
+      "title": "TLS listener graceful_shutdown passes None — ignores shutdown_grace_ms cap",
+      "severity": "low",
+      "resolution": {
+        "commit": "feff6f36 (code, V1.92) + 962d5847 (grace-cap regression test, V1.93 P0)",
+        "plan_id": "2026-07-06-v1.93-tls-robustness",
+        "resolved_at": "2026-07-06T16:00:00+0000"
+      }
+    },
+    {
+      "id": "R-V192P1-001",
+      "title": "connection-storage load does not validate the parsed config shape (shallow)",
+      "severity": "low",
+      "resolution": {
+        "commit": "b6c38e05",
+        "plan_id": "2026-07-06-v1.93-remote-connection-polish",
+        "resolved_at": "2026-07-06T16:00:00+0000"
+      }
+    },
+    {
+      "id": "R-V192P1-002",
+      "title": "Fingerprint fetch error cannot distinguish self-signed-cert rejection from unreachable daemon (browser)",
+      "severity": "low",
+      "resolution": {
+        "commit": "b6c38e05",
+        "plan_id": "2026-07-06-v1.93-remote-connection-polish",
+        "resolved_at": "2026-07-06T16:00:00+0000"
+      }
+    },
+    {
+      "id": "R-V192P1-003",
+      "title": "apps/desktop/src-tauri/src/connection_config.rs has no unit tests",
+      "severity": "low",
+      "resolution": {
+        "commit": "feff6f36 (5 existing tests, V1.92) + b6c38e05 (gap-fill test, V1.93 P1)",
+        "plan_id": "2026-07-06-v1.93-remote-connection-polish",
+        "resolved_at": "2026-07-06T16:00:00+0000"
+      }
+    },
+    {
+      "id": "R-V192UX-001",
+      "title": "Reconnect-to-same-endpoint path could surface a 'pinned fingerprint matches' hint",
+      "severity": "nit",
+      "resolution": {
+        "commit": "b6c38e05",
+        "plan_id": "2026-07-06-v1.93-remote-connection-polish",
+        "resolved_at": "2026-07-06T16:00:00+0000"
+      }
+    },
+    {
+      "id": "R-V192SPEC-001",
+      "title": "Spec §15.1 should fully codify SAN-vs-bind-host policy + rebinding behavior",
+      "severity": "low",
+      "resolution": {
+        "commit": "ed6993e9",
+        "plan_id": "2026-07-06-v1.93-prepare-spec-codification",
+        "resolved_at": "2026-07-06T13:00:00+0000"
+      }
+    },
+    {
+      "id": "R-V192HYG-001",
+      "title": "Legacy naming stragglers cross-directory audit (e.g. residual 'Local API' references)",
+      "severity": "nit",
+      "resolution": {
+        "commit": "09d0720b (sweep) + ef1b4efa (fix-wave for QC1 W-001/W-002)",
+        "plan_id": "2026-07-06-v1.93-closure",
+        "resolved_at": "2026-07-06T16:30:00+0000"
+      }
+    }
+  ]
+}

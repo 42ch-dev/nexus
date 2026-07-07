@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Plus, RefreshCw, ShieldCheck, Sparkles } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
@@ -12,25 +13,28 @@ import { ScaffoldPresetDialog } from './dialogs/scaffold-preset-dialog';
 import { ValidatePresetDialog } from './dialogs/validate-preset-dialog';
 
 /**
- * Preset management (Setup — CRUD) — web-ui.md §6.2 #7.
+ * Strategies list — unified entry point for Presets + Strategy canvas.
  *
- * Lists presets grouped by source (embedded / system / user) and offers the
- * actions the Daemon API exposes today: scaffold (create), validate (dry-run,
- * product-priority #1), and reload. Get/update/delete are not yet exposed by
- * the daemon (no routes/contracts); that gap is tracked as a residual.
+ * Lists presets grouped by source. Selecting a row navigates to the canvas
+ * detail at `/strategies/:presetId`. The canvas surface itself is preserved
+ * verbatim from the previous `/strategy` route.
  */
-export function PresetsPage() {
+export function StrategiesPage() {
   const presets = usePresets();
   const reload = useReloadPreset();
+  const navigate = useNavigate();
   const [scaffoldOpen, setScaffoldOpen] = useState(false);
   const [validateOpen, setValidateOpen] = useState(false);
 
   return (
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <p className="text-copy-14 text-gray-900">
-          Validate a preset before running it — the dry-run is the safest way to confirm it is ready.
-        </p>
+        <div>
+          <h1 className="text-heading-24 font-heading text-gray-1000">Strategies</h1>
+          <p className="text-copy-14 text-gray-900">
+            Validate a preset before running it — the dry-run is the safest way to confirm it is ready.
+          </p>
+        </div>
         <div className="flex items-center gap-2">
           <Button type="button" variant="secondary" size="small" onClick={() => setValidateOpen(true)}>
             <ShieldCheck className="h-4 w-4" aria-hidden />
@@ -68,6 +72,7 @@ export function PresetsPage() {
             description="Presets you scaffolded and edit."
             presets={presets.data.user}
             onReload={(id) => reload.mutate(id)}
+            onSelect={(id) => navigate(`/strategies/${encodeURIComponent(id)}`)}
             reloadingId={reload.isPending ? reload.variables : undefined}
             empty="No user presets yet. Scaffold one to start."
           />
@@ -76,6 +81,7 @@ export function PresetsPage() {
             description="Discovered from the local home layout."
             presets={presets.data.system}
             onReload={(id) => reload.mutate(id)}
+            onSelect={(id) => navigate(`/strategies/${encodeURIComponent(id)}`)}
             reloadingId={reload.isPending ? reload.variables : undefined}
             empty="No system presets discovered."
           />
@@ -84,6 +90,7 @@ export function PresetsPage() {
             description="Bundled with the runtime."
             presets={presets.data.embedded}
             onReload={(id) => reload.mutate(id)}
+            onSelect={(id) => navigate(`/strategies/${encodeURIComponent(id)}`)}
             reloadingId={reload.isPending ? reload.variables : undefined}
             empty="No embedded presets."
           />
@@ -101,6 +108,7 @@ function PresetGroup({
   description,
   presets,
   onReload,
+  onSelect,
   reloadingId,
   empty,
 }: {
@@ -108,6 +116,7 @@ function PresetGroup({
   description: string;
   presets: PresetSummary[];
   onReload: (id: string) => void;
+  onSelect: (id: string) => void;
   reloadingId: string | undefined;
   empty: string;
 }) {
@@ -127,7 +136,11 @@ function PresetGroup({
                 key={p.id}
                 className="flex flex-wrap items-center justify-between gap-2 rounded-card border border-gray-alpha-400 p-3"
               >
-                <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => onSelect(p.id)}
+                  className="flex items-center gap-2 text-left"
+                >
                   <Sparkles className="h-4 w-4 text-purple-700" aria-hidden />
                   <span className="text-copy-13-mono text-gray-1000">{p.id}</span>
                   {p.run_intents && p.run_intents.length > 0 && (
@@ -139,7 +152,7 @@ function PresetGroup({
                       ))}
                     </div>
                   )}
-                </div>
+                </button>
                 <Button
                   type="button"
                   variant="tertiary"

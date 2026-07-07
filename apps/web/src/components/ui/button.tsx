@@ -24,8 +24,11 @@ const buttonVariants = cva(
           'bg-background-100 text-gray-1000 border border-gray-alpha-400 hover:bg-background-200 hover:border-gray-alpha-500',
         // tertiary: transparent, gray-1000 text; hover gray-alpha-100
         tertiary: 'bg-transparent text-gray-1000 hover:bg-gray-alpha-100',
-        // destructive: red-800 bg, white text; hover red-700
-        destructive: 'bg-red-800 text-white hover:bg-red-700 active:bg-red-900',
+        // destructive: red-800 bg, white text (light) / deep-blue text (dark);
+        // red-800 is dark in light mode and bright in dark mode, so text follows
+        // the fill per the background-driven contrast invariant.
+        destructive:
+          'bg-red-800 text-white hover:bg-red-700 active:bg-red-900 dark:text-brand-deep-blue',
       },
       size: {
         // small: 32px height + button-12

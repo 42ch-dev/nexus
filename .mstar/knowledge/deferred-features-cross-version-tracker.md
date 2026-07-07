@@ -1,12 +1,12 @@
 # Deferred Features — Cross-Version Tracker v2
 
-**Quick status**: **V1.92 shipped (2026-07-05)** — Remote-Access Hardening (TLS for remote-bind + Remote Client Connection Model). V1.91 shipped (2026-07-05). Platform **paused**.
+**Quick status**: **V1.94 active (Phase 3 close done; PR pending Phase 4)** — Desktop App Onboarding & IA Pass (5 author-reported UX defects + tailwind-merge root cause fix). V1.93 shipped (2026-07-06 via PR #121, merge `aec54e98`). Platform **paused**.
 
-**V1.92 delivered (2026-07-06, merged via PR #120)**: TLS (auto self-signed Ed25519 cert via rcgen+rustls+axum-server; remote-bind gate fail-closed without cert) + remote client connection model (web-ui/desktop "Connect to Daemon"; endpoint + API key + TOFU cert-fingerprint pinning). CSRF resolved-by-design (header-key model). Swept V1.91 residuals 001/002/003/004. 8 low/nit V1.93 residuals registered.
+**V1.94 closed (2026-07-06, Phase 3; PR Phase 4 next)**: Desktop App Onboarding & IA Pass — 4-step setup wizard + per-launch daemon-ready gate + two-tab sidebar IA (Creator | Orchestrator) + footer profile switcher + restart-icon daemon status bar + Strategies unification. Additive `POST /v1/daemon/agent-host/scan`. Mid-Phase-3 user clarification on contrast rule triggered audit that found the real root cause of the original button-contrast complaint: `tailwind-merge` was silently stripping `text-white` because it didn't recognize custom font-size tokens. Fix corrected both the symptom and a latent typography regression across 181 call sites. `@42ch/nexus-contracts` 0.20.0 → 0.21.0. QC 3/3 Approve (twice); QA Pass. 9 V1.95-deferred residuals registered.
 
 **Purpose**: Single source of truth for **open** and **backlog** features deferred from delivery compasses. Closed/shipped history lives in shipped archive.
 **Scope**: `nexus` OSS repository only.
-**Created**: 2026-04-21 · **Last updated**: 2026-07-05 (V1.91 closeout: BL-13 marked shipped; companion batch triage delivered; V1.91 active → PR pending)
+**Created**: 2026-04-21 · **Last updated**: 2026-07-06 (V1.94 iteration-close)
 
 ---
 
@@ -92,9 +92,9 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 ## 5) Quick index
 
-**Active iteration**: none (V1.92 shipped 2026-07-06 via PR #120, squash `feff6f36`).
+**Active iteration**: none (V1.94 Phase 3 close done; PR pending Phase 4; integration branch `iteration/v1.94` active until PR merges).
 
-**Latest shipped**: [V1.92](../iterations/v1.92-remote-access-hardening-delivery-compass-v1.md) (Remote-Access Hardening — TLS + remote connection model, PR [#120](https://github.com/42ch-dev/nexus/pull/120) — 2026-07-06)
+**Latest shipped**: [V1.93](../iterations/v1.93-remote-access-polish-delivery-compass-v1.md) (Remote-Access Polish & Residual Convergence — PR [#121](https://github.com/42ch-dev/nexus/pull/121), merge `aec54e98` — 2026-07-06). V1.94 PR pending Phase 4.
 
 **Full iteration index**: [iterations/README.md](../iterations/README.md)
 

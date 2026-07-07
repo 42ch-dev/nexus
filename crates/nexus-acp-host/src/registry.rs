@@ -35,10 +35,12 @@
 #![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use anyhow::Context;
 use serde::{Deserialize, Serialize};
+use tokio::process::Command;
 use tracing::{info, warn};
 
 // Import local registry manifest types (moved from generated per WS5)
@@ -463,6 +465,175 @@ impl Default for RegistryClient {
     fn default() -> Self {
         Self::new().expect("Failed to create default RegistryClient")
     }
+}
+
+// ── Local Installation Scan ──────────────────────────────────────────
+
+/// Result of probing a single registry-known binary for PATH availability.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalInstallation {
+    /// The binary name probed (e.g. `"codex-acp"`).
+    pub binary: String,
+    /// Best-effort version string from `<binary> --version`, if probing succeeded.
+    pub version: Option<String>,
+}
+
+/// Maximum concurrent PATH/version probes during a scan.
+const SCAN_MAX_CONCURRENT: usize = 4;
+
+/// Per-probe timeout for `<binary> --version`.
+const SCAN_VERSION_TIMEOUT: Duration = Duration::from_secs(2);
+
+/// Scan the local PATH for registry-known ACP agent binaries.
+///
+/// For every binary command listed in `AgentEntry.distribution.binary.*.cmd`,
+/// this function checks whether the binary is on PATH and, if so, runs
+/// `<binary> --version` with a 2-second timeout. The result is a stable list
+/// of installed binaries, sorted by binary name. Missing binaries are omitted
+/// from the result so callers can treat presence as `installed: true`.
+///
+/// # Safety boundary
+///
+/// - Only registry-known binary names are probed; no user-supplied commands.
+/// - No shell expansion; binaries are executed directly with a fixed `--version`
+///   argument.
+/// - Concurrency is bounded to [`SCAN_MAX_CONCURRENT`].
+/// - Each probe is capped at [`SCAN_VERSION_TIMEOUT`].
+pub async fn scan_local_installations(registry: &Registry) -> Vec<LocalInstallation> {
+    scan_local_installations_impl(registry, &[]).await
+}
+
+async fn scan_local_installations_impl(
+    registry: &Registry,
+    path_dirs: &[PathBuf],
+) -> Vec<LocalInstallation> {
+    use std::collections::HashSet;
+    use tokio::sync::Semaphore;
+
+    // Collect unique binary names across all platforms. We deliberately do not
+    // restrict this to the current platform so the scan behaves deterministically
+    // regardless of where the daemon runs.
+    let mut binaries = HashSet::new();
+    for agent in &registry.agents {
+        let Some(binary) = agent.distribution.binary.as_ref() else {
+            continue;
+        };
+        for pb in [
+            &binary.darwin_aarch64,
+            &binary.darwin_x86_64,
+            &binary.linux_aarch64,
+            &binary.linux_x86_64,
+            &binary.windows_aarch64,
+            &binary.windows_x86_64,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            binaries.insert(pb.cmd.clone());
+        }
+    }
+
+    let semaphore = Arc::new(Semaphore::new(SCAN_MAX_CONCURRENT));
+    let mut handles = Vec::with_capacity(binaries.len());
+
+    for binary in binaries {
+        let permit = semaphore
+            .clone()
+            .acquire_owned()
+            .await
+            .expect("semaphore should not be closed");
+        let path_dirs = path_dirs.to_vec();
+        let handle = tokio::spawn(async move {
+            // Hold the permit for the duration of the probe.
+            let _permit = permit;
+            probe_local_binary(&binary, SCAN_VERSION_TIMEOUT, &path_dirs).await
+        });
+        handles.push(handle);
+    }
+
+    let mut results = Vec::with_capacity(handles.len());
+    for handle in handles {
+        if let Ok(Some(installation)) = handle.await {
+            results.push(installation);
+        }
+    }
+    results.sort_by(|a, b| a.binary.cmp(&b.binary));
+    results
+}
+
+/// Probe a single binary for PATH presence and `--version` output.
+///
+/// `path_dirs`, when non-empty, overrides the directories searched for the
+/// binary (the child process PATH is also overridden so the same binary is
+/// executed). This is test-only plumbing; production code passes an empty
+/// slice and relies on the process PATH.
+///
+/// Returns `None` when the binary is not found on PATH, otherwise the
+/// installation record including the best-effort version string.
+async fn probe_local_binary(
+    binary: &str,
+    timeout: Duration,
+    path_dirs: &[PathBuf],
+) -> Option<LocalInstallation> {
+    let path_var = if path_dirs.is_empty() {
+        None
+    } else {
+        std::env::join_paths(path_dirs).ok()
+    };
+
+    let found = path_var.as_deref().map_or_else(
+        || which::which(binary).is_ok(),
+        |path| which::which_in(binary, Some(path), std::path::Path::new(".")).is_ok(),
+    );
+
+    if !found {
+        return None;
+    }
+
+    let version = {
+        let mut cmd = Command::new(binary);
+        cmd.arg("--version").kill_on_drop(true);
+        if let Some(ref path) = path_var {
+            cmd.env("PATH", path);
+        }
+        match tokio::time::timeout(timeout, cmd.output()).await {
+            Ok(Ok(output)) if output.status.success() => String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .next()
+                .map(str::trim)
+                .filter(|line| !line.is_empty())
+                .map(std::string::ToString::to_string),
+            Ok(Ok(output)) => {
+                tracing::debug!(
+                    binary = %binary,
+                    code = ?output.status.code(),
+                    "binary --version exited with non-zero status"
+                );
+                None
+            }
+            Ok(Err(e)) => {
+                tracing::debug!(binary = %binary, error = %e, "failed to spawn --version probe");
+                None
+            }
+            Err(_) => {
+                tracing::debug!(binary = %binary, "--version probe timed out");
+                None
+            }
+        }
+    };
+
+    Some(LocalInstallation {
+        binary: binary.to_string(),
+        version,
+    })
+}
+
+#[cfg(test)]
+async fn scan_local_installations_with_path(
+    registry: &Registry,
+    path_dirs: &[PathBuf],
+) -> Vec<LocalInstallation> {
+    scan_local_installations_impl(registry, path_dirs).await
 }
 
 // ── Tests ────────────────────────────────────────────────────────────
@@ -892,5 +1063,97 @@ mod tests {
         let json = serde_json::to_string(&original).unwrap();
         let deserialized: Registry = serde_json::from_str(&json).unwrap();
         assert_eq!(original, deserialized);
+    }
+
+    // ── Local Installation Scan Tests ─────────────────────────────
+
+    fn make_shim(tmp: &tempfile::TempDir, name: &str, script: &str) -> std::path::PathBuf {
+        let shim = tmp.path().join(name);
+        std::fs::write(&shim, script).expect("write shim");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = std::fs::Permissions::from_mode(0o755);
+            std::fs::set_permissions(&shim, perms).expect("chmod shim");
+        }
+        shim
+    }
+
+    fn registry_with_binary(cmd: &str) -> Registry {
+        Registry {
+            version: "1.0.0".to_string(),
+            agents: vec![AgentEntry {
+                id: "test-agent".to_string(),
+                name: "Test Agent".to_string(),
+                version: "1.0.0".to_string(),
+                description: None,
+                repository: None,
+                authors: None,
+                license: None,
+                icon: None,
+                distribution: Distribution {
+                    npx: None,
+                    binary: Some(BinaryDistribution {
+                        darwin_aarch64: Some(PlatformBinary {
+                            archive: "https://example.com/agent.tar.gz".to_string(),
+                            cmd: cmd.to_string(),
+                            args: None,
+                        }),
+                        darwin_x86_64: None,
+                        linux_aarch64: None,
+                        linux_x86_64: None,
+                        windows_aarch64: None,
+                        windows_x86_64: None,
+                    }),
+                },
+            }],
+            extensions: None,
+        }
+    }
+
+    #[tokio::test]
+    async fn scan_local_installations_finds_installed_binary() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        make_shim(&tmp, "test-agent", "#!/bin/sh\necho \"test-agent 1.2.3\"\n");
+
+        let registry = registry_with_binary("test-agent");
+        let results =
+            scan_local_installations_with_path(&registry, &[tmp.path().to_path_buf()]).await;
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].binary, "test-agent");
+        assert!(results[0].version.is_some());
+        assert_eq!(results[0].version.as_deref(), Some("test-agent 1.2.3"));
+    }
+
+    #[tokio::test]
+    async fn scan_local_installations_omits_missing_binary() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        // Do not add any shim.
+        let registry = registry_with_binary("definitely-not-installed-42ch");
+        let results =
+            scan_local_installations_with_path(&registry, &[tmp.path().to_path_buf()]).await;
+        assert!(results.is_empty());
+    }
+
+    #[tokio::test]
+    async fn scan_local_installations_handles_timeout() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        make_shim(
+            &tmp,
+            "slow-agent",
+            "#!/bin/sh\n/bin/sleep 5\necho \"slow-agent 9.9.9\"\n",
+        );
+
+        let registry = registry_with_binary("slow-agent");
+        let start = std::time::Instant::now();
+        let results =
+            scan_local_installations_with_path(&registry, &[tmp.path().to_path_buf()]).await;
+        let elapsed = start.elapsed();
+        // The probe should time out at 2 s, not wait for the 5 s shim.
+        assert!(elapsed < Duration::from_secs(3));
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].binary, "slow-agent");
+        // Found on PATH but version probe timed out.
+        assert!(results[0].version.is_none());
     }
 }

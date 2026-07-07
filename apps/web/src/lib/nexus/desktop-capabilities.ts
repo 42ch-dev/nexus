@@ -65,6 +65,17 @@ export interface DesktopCapabilities {
   startDaemon(): Promise<void>;
   /** Stop the owned sidecar. */
   stopDaemon(): Promise<void>;
+  /**
+   * Whether the first-launch setup wizard has been completed.
+   * Browser build defaults to `true`; desktop reads from Tauri config store.
+   */
+  getSetupCompleted(): Promise<boolean>;
+  /** Mark setup as completed (desktop only). */
+  setSetupCompleted(value: boolean): Promise<void>;
+  /** Persist the agent profile selected during setup (desktop only). */
+  setAgentProfile(name: string, launchCommand?: string): Promise<void>;
+  /** Resolve the default workspace root path (desktop only). */
+  getWorkspaceRoot(): Promise<string>;
 }
 
 /**
@@ -162,6 +173,38 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
   async stopDaemon(): Promise<void> {
     try {
       await tauriInvoke().core.invoke<void>('stop_daemon', undefined);
+    } catch (err) {
+      throw asDesktopError(err);
+    }
+  }
+
+  async getSetupCompleted(): Promise<boolean> {
+    try {
+      return await tauriInvoke().core.invoke<boolean>('get_setup_completed');
+    } catch (err) {
+      throw asDesktopError(err);
+    }
+  }
+
+  async setSetupCompleted(value: boolean): Promise<void> {
+    try {
+      await tauriInvoke().core.invoke<void>('set_setup_completed', { value });
+    } catch (err) {
+      throw asDesktopError(err);
+    }
+  }
+
+  async setAgentProfile(name: string, launchCommand?: string): Promise<void> {
+    try {
+      await tauriInvoke().core.invoke<void>('set_agent_profile', { name, launch_command: launchCommand });
+    } catch (err) {
+      throw asDesktopError(err);
+    }
+  }
+
+  async getWorkspaceRoot(): Promise<string> {
+    try {
+      return await tauriInvoke().core.invoke<string>('get_workspace_root');
     } catch (err) {
       throw asDesktopError(err);
     }

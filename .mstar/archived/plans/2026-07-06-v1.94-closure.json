@@ -1,0 +1,26 @@
+{
+  "id": "2026-07-06-v1.94-closure",
+  "status": "Done",
+  "title": "P-last — Closure: QC tri-review (3/3 Approve after fix-wave) + QA Pass + compound (2 new + 1 updated) + Profile B + PR",
+  "file": ".mstar/plans/2026-07-06-v1.94-closure.md",
+  "type": "closure",
+  "owner": "@project-manager",
+  "metadata": {
+    "iteration": "V1.94",
+    "iteration_refs": "v1.94-desktop-onboarding-ia-pass-delivery-compass-v1.md",
+    "spec_integration_branch": "iteration/v1.94",
+    "merge_target": "iteration/v1.94",
+    "primary_spec": null,
+    "blocked_by": ["2026-07-06-v1.94-backend-setup-runtime", "2026-07-06-v1.94-frontend-onboarding-ia"],
+    "blocking": [],
+    "working_branch": "feature/v1.94-closure",
+    "fix_wave_commit": "4f4b468b (qc1 W001-W005: agent persistence + dead presets-page + unit tests + button snapshot + footer keyboard)",
+    "merged_to": "iteration/v1.94 @ 0e75931b (fix-wave merge); 139b1c48 (qc-consolidated); 4e69cb09 (QA)",
+    "qc": "3/3 Approve (qc1 revalidation b5ae306b; qc2 d016b8df; qc3 b4a8938b); qc-consolidated.md committed 139b1c48",
+    "qa": "Pass 4e69cb09 — 12/12 acceptance criteria + 5/5 author defects verified; 491 web tests; cargo test --all green; clippy/fmt clean; validate-schemas 201",
+    "compound": "2 new docs (daemon-ready-gate-pattern + local-environment-scan-safety-boundary) + 1 updated (nexus-brand-token-hierarchy: V1.94 supersedes V1.83 dark-mode contrast rule); 0 new CONCEPTS entries (terms added in Phase 1 review chain)",
+    "residuals_new_v195": 9 (6 qc1 Suggestions F-101..F-106 + 2 qc2 Suggestions + 1 qc1 revalidation soft)",
+    "done_at": "2026-07-06T22:30:00+0000",
+    "close_at": "2026-07-06T22:30:00+0000"
+  }
+}

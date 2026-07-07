@@ -455,7 +455,7 @@ fn backoff(attempt: u32) -> Duration {
 }
 
 async fn probe_health(port: u16) -> Option<DaemonHealth> {
-        let url = format!("http://127.0.0.1:{port}/v1/daemon/runtime/health");
+    let url = format!("http://127.0.0.1:{port}/v1/daemon/runtime/health");
     let client = HEALTH_CLIENT.get_or_init(|| {
         reqwest::Client::builder()
             .timeout(HEALTH_PROBE_TIMEOUT)

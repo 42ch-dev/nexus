@@ -1,0 +1,17 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`Button > matches the primary variant snapshot in dark mode 1`] = `
+<button
+  class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-control font-button transition-colors duration-state ease-standard disabled:pointer-events-none disabled:bg-gray-100 disabled:text-gray-700 focus-visible:outline-none bg-blue-700 text-white hover:bg-blue-800 active:bg-blue-900 dark:bg-brand-cyan dark:text-brand-deep-blue dark:hover:bg-blue-800 dark:active:bg-blue-900 h-10 px-4 text-button-14"
+>
+  Continue
+</button>
+`;
+
+exports[`Button > matches the primary variant snapshot in light mode 1`] = `
+<button
+  class="inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-control font-button transition-colors duration-state ease-standard disabled:pointer-events-none disabled:bg-gray-100 disabled:text-gray-700 focus-visible:outline-none bg-blue-700 text-white hover:bg-blue-800 active:bg-blue-900 dark:bg-brand-cyan dark:text-brand-deep-blue dark:hover:bg-blue-800 dark:active:bg-blue-900 h-10 px-4 text-button-14"
+>
+  Continue
+</button>
+`;

@@ -39,6 +39,11 @@ pub struct CliConfig {
     #[serde(default = "default_runtime_mode")]
     pub runtime_mode: DomainRuntimeMode,
 
+    /// Whether the desktop setup wizard has been completed.
+    /// Absent or `false` = first-launch wizard; `true` = skip wizard.
+    #[serde(default)]
+    pub setup_completed: Option<bool>,
+
     /// Persisted degradation guard state (inline in config.toml for V1.2 MVP).
     /// Written by the daemon/runtime when degradation occurs; read-only for CLI display.
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -65,6 +70,28 @@ fn default_runtime_mode() -> DomainRuntimeMode {
 /// Default workspace slug when none is stored for a creator.
 pub const DEFAULT_WORKSPACE_SLUG: &str = "default";
 
+/// Resolve the effective workspace root path.
+///
+/// Returns [`CliConfig.workspace_path`] when it is set. Otherwise falls back to
+/// `dirs::document_dir().join("nexus42").join("default")`, matching the desktop
+/// shell's first-launch default. If `document_dir()` returns `None`, falls back
+/// to `dirs::home_dir().join("Documents").join("nexus42").join("default")` and
+/// logs a warning.
+#[must_use]
+pub fn resolve_default_workspace_path() -> PathBuf {
+    dirs::document_dir()
+        .or_else(|| {
+            tracing::warn!("dirs::document_dir() returned None; falling back to ~/Documents");
+            dirs::home_dir().map(|home| home.join("Documents"))
+        })
+        .unwrap_or_else(|| {
+            tracing::warn!("dirs::home_dir() returned None; using relative fallback");
+            PathBuf::from("Documents")
+        })
+        .join("nexus42")
+        .join("default")
+}
+
 /// Valid configuration keys for `nexus42 config` commands.
 /// MVP: only top-level fields with simple types; nested keys are not supported.
 pub const VALID_CONFIG_KEYS: &[&str] = &[
@@ -73,9 +100,21 @@ pub const VALID_CONFIG_KEYS: &[&str] = &[
     "platform_url",
     "daemon_url",
     "runtime_mode",
+    "setup_completed",
 ];
 
 impl CliConfig {
+    /// Resolve the effective workspace root path.
+    ///
+    /// Returns the configured [`workspace_path`](Self::workspace_path) if set,
+    /// otherwise the cross-platform default (`~/Documents/nexus42/default/`).
+    #[must_use]
+    pub fn resolve_workspace_path(&self) -> PathBuf {
+        self.workspace_path
+            .clone()
+            .unwrap_or_else(resolve_default_workspace_path)
+    }
+
     /// Load configuration from the standard location.
     ///
     /// Migration: if `config.toml` does not exist but `config.json` does,
@@ -240,6 +279,10 @@ impl CliConfig {
                 self.daemon_url.clone()
             }),
             "runtime_mode" => Ok(self.runtime_mode.to_string()),
+            "setup_completed" => Ok(self
+                .setup_completed
+                .map(|v| v.to_string())
+                .unwrap_or_default()),
             _ => Err(anyhow::anyhow!("Unsupported config key: {key}")),
         }
     }
@@ -279,6 +322,16 @@ impl CliConfig {
                 self.runtime_mode = DomainRuntimeMode::parse(value)
                     .map_err(|e| anyhow::anyhow!("Invalid runtime_mode '{value}': {e}"))?;
             }
+            "setup_completed" => {
+                self.setup_completed =
+                    if value.is_empty() {
+                        None
+                    } else {
+                        Some(value.parse().map_err(|e| {
+                            anyhow::anyhow!("Invalid setup_completed '{value}': {e}")
+                        })?)
+                    };
+            }
             _ => Err(anyhow::anyhow!("Unsupported config key: {key}"))?,
         }
         Ok(())
@@ -308,6 +361,9 @@ impl CliConfig {
             }
             "runtime_mode" => {
                 self.runtime_mode = default_runtime_mode();
+            }
+            "setup_completed" => {
+                self.setup_completed = None;
             }
             _ => Err(anyhow::anyhow!("Unsupported config key: {key}"))?,
         }
@@ -562,6 +618,103 @@ mod tests {
         assert!(VALID_CONFIG_KEYS.contains(&"daemon_url"));
         assert!(VALID_CONFIG_KEYS.contains(&"workspace_path"));
         assert!(VALID_CONFIG_KEYS.contains(&"active_creator_id"));
+        assert!(VALID_CONFIG_KEYS.contains(&"setup_completed"));
+    }
+
+    #[test]
+    fn resolve_default_workspace_path_ends_with_nexus42_default() {
+        let path = resolve_default_workspace_path();
+        let s = path.to_string_lossy();
+        assert!(
+            s.ends_with("nexus42/default") || s.ends_with("nexus42\\default"),
+            "default workspace path should end with nexus42/default, got: {s}"
+        );
+    }
+
+    #[test]
+    fn resolve_workspace_path_uses_configured_value() {
+        let cfg = CliConfig {
+            workspace_path: Some(PathBuf::from("/custom/workspace")),
+            ..Default::default()
+        };
+        assert_eq!(
+            cfg.resolve_workspace_path(),
+            PathBuf::from("/custom/workspace")
+        );
+    }
+
+    #[test]
+    fn resolve_workspace_path_falls_back_to_default_when_unset() {
+        let cfg = CliConfig {
+            workspace_path: None,
+            ..Default::default()
+        };
+        let path = cfg.resolve_workspace_path();
+        let s = path.to_string_lossy();
+        assert!(
+            s.ends_with("nexus42/default") || s.ends_with("nexus42\\default"),
+            "fallback workspace path should end with nexus42/default, got: {s}"
+        );
+    }
+
+    #[test]
+    fn setup_completed_roundtrips_via_toml() {
+        let cfg = CliConfig {
+            setup_completed: Some(true),
+            ..Default::default()
+        };
+        let toml_str = toml::to_string(&cfg).expect("toml serialize");
+        let back: CliConfig = toml::from_str(&toml_str).expect("toml deserialize");
+        assert_eq!(back.setup_completed, Some(true));
+    }
+
+    #[test]
+    fn setup_completed_absent_key_loads_as_none() {
+        let toml_str = "runtime_mode = \"local_only\"";
+        let cfg: CliConfig = toml::from_str(toml_str).unwrap();
+        assert!(cfg.setup_completed.is_none());
+    }
+
+    #[test]
+    fn get_setup_completed_returns_value_or_empty() {
+        let cfg = CliConfig {
+            setup_completed: Some(true),
+            ..Default::default()
+        };
+        assert_eq!(cfg.get("setup_completed").unwrap(), "true");
+
+        let cfg = CliConfig::default();
+        assert_eq!(cfg.get("setup_completed").unwrap(), "");
+    }
+
+    #[test]
+    fn set_setup_completed_updates_value() {
+        let mut cfg = CliConfig::default();
+        cfg.set("setup_completed", "true").unwrap();
+        assert_eq!(cfg.setup_completed, Some(true));
+
+        cfg.set("setup_completed", "false").unwrap();
+        assert_eq!(cfg.setup_completed, Some(false));
+
+        cfg.set("setup_completed", "").unwrap();
+        assert!(cfg.setup_completed.is_none());
+    }
+
+    #[test]
+    fn set_setup_completed_rejects_invalid_value() {
+        let mut cfg = CliConfig::default();
+        let err = cfg.set("setup_completed", "maybe").unwrap_err();
+        assert!(err.to_string().contains("Invalid setup_completed"));
+    }
+
+    #[test]
+    fn unset_setup_completed_clears_it() {
+        let mut cfg = CliConfig {
+            setup_completed: Some(true),
+            ..Default::default()
+        };
+        cfg.unset("setup_completed").unwrap();
+        assert!(cfg.setup_completed.is_none());
     }
 
     #[test]

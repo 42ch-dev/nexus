@@ -32,6 +32,7 @@ keyring = "2"
 # `~/.nexus42/config.toml` → `workspace_path`.
 dirs = "5"
 toml = "0.8"
+toml_edit = "0.22"
 # The standalone opener engine (same crate tauri-plugin-opener wraps). Used by
 # the custom `open_with`/`reveal_in_finder` commands AFTER the runtime path
 # guard accepts the path — calling it directly avoids coupling to the plugin's

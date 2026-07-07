@@ -1,0 +1,26 @@
+{
+  "id": "2026-07-06-v1.94-frontend-onboarding-ia",
+  "status": "Done",
+  "title": "P1 — Frontend Onboarding + IA + Polish: 4-step setup wizard + sidebar tabs + footer profiles + daemon status simplification + button contrast audit + Strategies unification",
+  "file": ".mstar/plans/2026-07-06-v1.94-frontend-onboarding-ia.md",
+  "type": "implement",
+  "owner": "@frontend-dev",
+  "metadata": {
+    "iteration": "V1.94",
+    "iteration_refs": "v1.94-desktop-onboarding-ia-pass-delivery-compass-v1.md",
+    "spec_integration_branch": "iteration/v1.94",
+    "merge_target": "iteration/v1.94",
+    "primary_spec": "knowledge/specs/web-ui.md",
+    "blocked_by": ["2026-07-06-v1.94-prepare-specs-and-design"],
+    "blocking": ["2026-07-06-v1.94-closure"],
+    "working_branch": "feature/v1.94-frontend-onboarding-ia",
+    "impl_commit": "273863d2",
+    "merged_to": "iteration/v1.94 @ f7af91bc",
+    "inreview_at": "2026-07-06T20:00:00+0000",
+    "done_at": "2026-07-06T20:45:00+0000",
+    "qc": "3/3 Approve (consolidated at P-last on integrated HEAD 139b1c48; qc1 revalidation Approve after fix-wave 4f4b468b)",
+    "qa": "Pass (4e69cb09)",
+    "note_pm_cleanup": "P1 subagent returned Completion Report with files modified but uncommitted in worktree; PM committed + pushed on behalf of the track (plan-management Git work, not implementation). Commit 273863d2 captures the full P1 surface.",
+    "verification": "pnpm --filter web test 470 -> 491 pass after fix-wave; typecheck/build clean"
+  }
+}

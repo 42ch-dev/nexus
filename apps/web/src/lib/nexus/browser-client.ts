@@ -22,6 +22,7 @@ import type {
   CountPendingReviewsResponse,
   CreateWorkRequest,
   CreateWorkResponse,
+  CreatorDetail,
   DeletePendingReviewResponse,
   EditCoreContextRequest,
   EditCoreContextResponse,
@@ -32,6 +33,8 @@ import type {
   ListCapabilitiesResponse,
   ListChaptersQuery,
   ListChaptersResponse,
+  ListCreatorsQuery,
+  ListCreatorsResponse,
   ListFindingsQuery,
   ListFindingsResponse,
   ListMemoryFragmentsQuery,
@@ -61,7 +64,11 @@ import type {
   ReviewResponse,
   ScaffoldPresetRequest,
   ScaffoldPresetResponse,
+  ScanRequest,
+  ScanResponse,
   SessionDetailResponse,
+  SetActiveCreatorRequest,
+  SetActiveCreatorResponse,
   SignalScheduleRequest,
   SignalScheduleResponse,
   SoulNarrativeRequest,
@@ -148,6 +155,20 @@ export class BrowserClient implements NexusClient {
     // reachable so clients can perform TOFU verification before sending the
     // API key. It is the only daemon route that deliberately omits the key.
     return this.request<CertFingerprintResponse>('GET', '/v1/daemon/runtime/cert-fingerprint', undefined, false);
+  }
+
+  // ── Creators + Agent host (V1.94 P1) ───────────────────────────────────────
+  listCreators(query?: ListCreatorsQuery): Promise<ListCreatorsResponse> {
+    return this.get<ListCreatorsResponse>('/v1/daemon/creators', query);
+  }
+  createCreator(request: { display_name: string }): Promise<CreatorDetail> {
+    return this.post<CreatorDetail>('/v1/daemon/creators', request);
+  }
+  setActiveCreator(request: SetActiveCreatorRequest): Promise<SetActiveCreatorResponse> {
+    return this.post<SetActiveCreatorResponse>('/v1/daemon/creators/active', request);
+  }
+  scanAgents(request?: ScanRequest): Promise<ScanResponse> {
+    return this.post<ScanResponse>('/v1/daemon/agent-host/scan', request);
   }
 
   // ── Works ──────────────────────────────────────────────────────────────────

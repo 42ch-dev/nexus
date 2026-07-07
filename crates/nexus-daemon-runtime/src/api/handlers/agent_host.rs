@@ -12,6 +12,7 @@
 //! - POST   /v1/daemon/agent-host/operations/{operation_id}:cancel — Cancel in-flight operation
 //! - GET    /v1/daemon/agent-host/sessions/{session_id}/events     — SSE event stream
 
+use std::collections::HashMap;
 use std::convert::Infallible;
 use std::sync::Arc;
 
@@ -19,6 +20,9 @@ use axum::extract::{Path, Query, State};
 use axum::response::sse::{Event, KeepAlive, Sse};
 use axum::Json;
 use futures_util::StreamExt;
+use nexus_contracts::generated::daemon_api::agent_host::{
+    AgentScanEntry, ScanRequest, ScanResponse,
+};
 use nexus_contracts::PaginationInfo;
 use serde::{Deserialize, Serialize};
 use tokio_stream::Stream;
@@ -519,6 +523,113 @@ fn event_matches_session(
 }
 
 // ---------------------------------------------------------------------------
+// Agent scan
+// ---------------------------------------------------------------------------
+
+/// POST /v1/daemon/agent-host/scan
+///
+/// Returns the ACP registry agent list annotated with local PATH-install
+/// availability. Combines the cached registry with [`scan_local_installations`].
+/// The request can refresh the registry cache and/or filter to installed agents.
+pub async fn scan(
+    State(state): State<WorkspaceState>,
+    Json(req): Json<ScanRequest>,
+) -> Result<Json<ScanResponse>, NexusApiError> {
+    let cache_dir = state.nexus_home().join("registry");
+    let registry_client = nexus_acp_host::registry::RegistryClient::with_cache_dir(cache_dir)
+        .map_err(|e| NexusApiError::Internal {
+            code: "REGISTRY_CLIENT_ERROR".into(),
+            message: format!("failed to create registry client: {e}"),
+        })?;
+
+    let registry = if req.registry_refresh.unwrap_or(false) {
+        registry_client.refresh().await
+    } else {
+        registry_client.get_registry().await
+    }
+    .map_err(|e| NexusApiError::Internal {
+        code: "REGISTRY_FETCH_ERROR".into(),
+        message: format!("failed to fetch ACP registry: {e}"),
+    })?;
+
+    let installations = nexus_acp_host::registry::scan_local_installations(&registry).await;
+    let by_binary: HashMap<String, nexus_acp_host::registry::LocalInstallation> = installations
+        .into_iter()
+        .map(|li| (li.binary.clone(), li))
+        .collect();
+
+    let mut agents: Vec<AgentScanEntry> = registry
+        .agents
+        .into_iter()
+        .map(|agent| build_scan_entry(agent, &by_binary))
+        .collect();
+
+    if req.filter.as_deref() == Some("installed") {
+        agents.retain(|a| a.installed);
+    }
+
+    Ok(Json(ScanResponse { agents }))
+}
+
+/// Build an [`AgentScanEntry`] from a registry agent plus PATH probe results.
+fn build_scan_entry(
+    agent: nexus_acp_host::registry::AgentEntry,
+    by_binary: &HashMap<String, nexus_acp_host::registry::LocalInstallation>,
+) -> AgentScanEntry {
+    let platform_cmds = agent
+        .distribution
+        .binary
+        .as_ref()
+        .map_or_else(Vec::new, platform_binary_commands);
+
+    // Pick the first installed command, otherwise the first known command.
+    let launch_command = platform_cmds
+        .iter()
+        .find(|cmd| by_binary.contains_key(*cmd))
+        .or_else(|| platform_cmds.first())
+        .cloned();
+
+    let installed = platform_cmds.iter().any(|cmd| by_binary.contains_key(cmd));
+
+    let version = launch_command
+        .as_ref()
+        .and_then(|cmd| by_binary.get(cmd))
+        .and_then(|li| li.version.clone());
+
+    AgentScanEntry {
+        name: agent.name,
+        registry_agent_id: Some(agent.id),
+        launch_command,
+        installed,
+        version,
+        description: agent.description,
+        icon_url: agent.icon,
+    }
+}
+
+/// Return the ordered list of binary commands for an agent's binary distribution.
+fn platform_binary_commands(binary: &nexus_acp_host::registry::BinaryDistribution) -> Vec<String> {
+    let mut cmds = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for pb in [
+        &binary.darwin_aarch64,
+        &binary.darwin_x86_64,
+        &binary.linux_aarch64,
+        &binary.linux_x86_64,
+        &binary.windows_aarch64,
+        &binary.windows_x86_64,
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if seen.insert(pb.cmd.clone()) {
+            cmds.push(pb.cmd.clone());
+        }
+    }
+    cmds
+}
+
+// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -728,5 +839,340 @@ mod tests {
     async fn parse_operation_id_rejects_invalid() {
         assert!(parse_operation_id("garbage").is_err());
         assert!(parse_operation_id("").is_err());
+    }
+
+    // ── Agent scan integration tests ────────────────────────────────────────
+
+    use crate::api::auth_middleware::DaemonApiConfig;
+    use axum_test::TestServer;
+
+    /// Serialize agent-scan integration tests that mutate `PATH` so concurrent
+    /// probes do not see each other's shim directories.
+    static SCAN_PATH_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    /// Temporarily prepend a directory to `PATH`, restoring the previous value
+    /// on drop.
+    struct PathGuard {
+        previous: Option<String>,
+    }
+
+    impl PathGuard {
+        fn prepend(dir: &std::path::Path) -> Self {
+            let previous = std::env::var("PATH").ok();
+            let mut paths = vec![dir.to_path_buf()];
+            if let Some(ref existing) = previous {
+                paths.extend(std::env::split_paths(existing));
+            }
+            let new_path = std::env::join_paths(paths).expect("valid PATH");
+            std::env::set_var("PATH", new_path);
+            Self { previous }
+        }
+    }
+
+    impl Drop for PathGuard {
+        fn drop(&mut self) {
+            match self.previous {
+                Some(ref p) => std::env::set_var("PATH", p),
+                None => std::env::remove_var("PATH"),
+            }
+        }
+    }
+
+    fn write_shim(dir: &std::path::Path, name: &str, script: &str) -> std::path::PathBuf {
+        let shim = dir.join(name);
+        std::fs::create_dir_all(dir).expect("create bin dir");
+        std::fs::write(&shim, script).expect("write shim");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let perms = std::fs::Permissions::from_mode(0o755);
+            std::fs::set_permissions(&shim, perms).expect("chmod shim");
+        }
+        shim
+    }
+
+    async fn create_scan_test_app_with_installed() -> (TestServer, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let bin_dir = tmp.path().join("bin");
+        write_shim(
+            &bin_dir,
+            "nexus-scan-installed",
+            "#!/bin/sh\necho \"nexus-scan-installed 1.2.3\"\n",
+        );
+
+        let nexus_home = tmp.path().join(".nexus42");
+        write_registry_cache(&nexus_home);
+
+        let db_path = tmp.path().join("state.db");
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        let app = crate::api::create_router(state, DaemonApiConfig::keyless());
+        let server = TestServer::new(app).expect("TestServer should initialize");
+
+        (server, tmp)
+    }
+
+    fn write_registry_cache(home: &std::path::Path) {
+        let registry_dir = home.join("registry");
+        std::fs::create_dir_all(&registry_dir).expect("create registry dir");
+
+        let registry_json = r#"{
+            "version": "1.0.0",
+            "agents": [
+                {
+                    "id": "installed-agent",
+                    "name": "Installed Agent",
+                    "version": "1.0.0",
+                    "distribution": {
+                        "binary": {
+                            "darwin-aarch64": { "archive": "https://example.com/i.tar.gz", "cmd": "nexus-scan-installed" }
+                        }
+                    }
+                },
+                {
+                    "id": "missing-agent",
+                    "name": "Missing Agent",
+                    "version": "2.0.0",
+                    "distribution": {
+                        "binary": {
+                            "darwin-aarch64": { "archive": "https://example.com/m.tar.gz", "cmd": "nexus-scan-missing-42ch" }
+                        }
+                    }
+                }
+            ],
+            "extensions": []
+        }"#;
+        std::fs::write(registry_dir.join("cache.json"), registry_json).expect("write cache");
+
+        let meta_json = r#"{"fetched_at":"2026-07-06T00:00:00Z","registry_version":"1.0.0"}"#;
+        std::fs::write(registry_dir.join("cache_meta.json"), meta_json).expect("write meta");
+    }
+
+    async fn create_scan_test_app() -> (TestServer, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let nexus_home = tmp.path().join(".nexus42");
+        write_registry_cache(&nexus_home);
+
+        let db_path = tmp.path().join("state.db");
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        let app = crate::api::create_router(state, DaemonApiConfig::keyless());
+        let server = TestServer::new(app).expect("TestServer should initialize");
+
+        (server, tmp)
+    }
+
+    #[tokio::test]
+    async fn scan_endpoint_returns_200_with_frozen_shape() {
+        let _lock = SCAN_PATH_LOCK.lock().expect("lock scan tests");
+        let (server, _tmp) = create_scan_test_app().await;
+        let response = server
+            .post("/v1/daemon/agent-host/scan")
+            .json(&serde_json::json!({}))
+            .await;
+        assert_eq!(response.status_code(), axum::http::StatusCode::OK);
+
+        let body: ScanResponse = response.json();
+        assert_eq!(body.agents.len(), 2);
+
+        let installed = body
+            .agents
+            .iter()
+            .find(|a| a.registry_agent_id.as_deref() == Some("installed-agent"))
+            .expect("installed agent");
+        assert_eq!(installed.name, "Installed Agent");
+        assert_eq!(
+            installed.registry_agent_id.as_deref(),
+            Some("installed-agent")
+        );
+        assert_eq!(
+            installed.launch_command.as_deref(),
+            Some("nexus-scan-installed")
+        );
+
+        let missing = body
+            .agents
+            .iter()
+            .find(|a| a.registry_agent_id.as_deref() == Some("missing-agent"))
+            .expect("missing agent");
+        assert_eq!(missing.name, "Missing Agent");
+        assert_eq!(
+            missing.launch_command.as_deref(),
+            Some("nexus-scan-missing-42ch")
+        );
+    }
+
+    #[tokio::test]
+    async fn scan_endpoint_filter_installed_keeps_only_installed() {
+        let _lock = SCAN_PATH_LOCK.lock().expect("lock scan tests");
+        let (server, tmp) = create_scan_test_app_with_installed().await;
+        let _path_guard = PathGuard::prepend(tmp.path().join("bin").as_path());
+
+        let response = server
+            .post("/v1/daemon/agent-host/scan")
+            .json(&serde_json::json!({ "filter": "installed" }))
+            .await;
+        assert_eq!(response.status_code(), axum::http::StatusCode::OK);
+
+        let body: ScanResponse = response.json();
+        assert_eq!(body.agents.len(), 1);
+        assert_eq!(
+            body.agents[0].registry_agent_id.as_deref(),
+            Some("installed-agent")
+        );
+        assert!(body.agents[0].installed);
+        assert!(body.agents[0].version.is_some());
+    }
+
+    // ── Agent scan unit tests ───────────────────────────────────────────────
+
+    #[test]
+    fn build_scan_entry_marks_installed_when_binary_on_path() {
+        let agent = nexus_acp_host::registry::AgentEntry {
+            id: "test".to_string(),
+            name: "Test".to_string(),
+            version: "1.0.0".to_string(),
+            description: None,
+            repository: None,
+            authors: None,
+            license: None,
+            icon: None,
+            distribution: nexus_acp_host::registry::Distribution {
+                npx: None,
+                binary: Some(nexus_acp_host::registry::BinaryDistribution {
+                    darwin_aarch64: Some(nexus_acp_host::registry::PlatformBinary {
+                        archive: "https://example.com/a.tar.gz".to_string(),
+                        cmd: "test-cmd".to_string(),
+                        args: None,
+                    }),
+                    darwin_x86_64: None,
+                    linux_aarch64: None,
+                    linux_x86_64: None,
+                    windows_aarch64: None,
+                    windows_x86_64: None,
+                }),
+            },
+        };
+
+        let mut by_binary = HashMap::new();
+        by_binary.insert(
+            "test-cmd".to_string(),
+            nexus_acp_host::registry::LocalInstallation {
+                binary: "test-cmd".to_string(),
+                version: Some("test-cmd 1.2.3".to_string()),
+            },
+        );
+
+        let entry = build_scan_entry(agent, &by_binary);
+        assert!(entry.installed);
+        assert_eq!(entry.launch_command.as_deref(), Some("test-cmd"));
+        assert_eq!(entry.version.as_deref(), Some("test-cmd 1.2.3"));
+    }
+
+    #[test]
+    fn build_scan_entry_marks_missing_when_binary_not_on_path() {
+        let agent = nexus_acp_host::registry::AgentEntry {
+            id: "test".to_string(),
+            name: "Test".to_string(),
+            version: "1.0.0".to_string(),
+            description: Some("desc".to_string()),
+            repository: None,
+            authors: None,
+            license: None,
+            icon: Some("https://example.com/icon.svg".to_string()),
+            distribution: nexus_acp_host::registry::Distribution {
+                npx: None,
+                binary: Some(nexus_acp_host::registry::BinaryDistribution {
+                    darwin_aarch64: Some(nexus_acp_host::registry::PlatformBinary {
+                        archive: "https://example.com/a.tar.gz".to_string(),
+                        cmd: "missing-cmd".to_string(),
+                        args: None,
+                    }),
+                    darwin_x86_64: None,
+                    linux_aarch64: None,
+                    linux_x86_64: None,
+                    windows_aarch64: None,
+                    windows_x86_64: None,
+                }),
+            },
+        };
+
+        let by_binary = HashMap::new();
+        let entry = build_scan_entry(agent, &by_binary);
+        assert!(!entry.installed);
+        assert_eq!(entry.launch_command.as_deref(), Some("missing-cmd"));
+        assert!(entry.version.is_none());
+    }
+
+    #[test]
+    fn build_scan_entry_prefers_installed_command() {
+        let agent = nexus_acp_host::registry::AgentEntry {
+            id: "test".to_string(),
+            name: "Test".to_string(),
+            version: "1.0.0".to_string(),
+            description: None,
+            repository: None,
+            authors: None,
+            license: None,
+            icon: None,
+            distribution: nexus_acp_host::registry::Distribution {
+                npx: None,
+                binary: Some(nexus_acp_host::registry::BinaryDistribution {
+                    darwin_aarch64: Some(nexus_acp_host::registry::PlatformBinary {
+                        archive: "https://example.com/a.tar.gz".to_string(),
+                        cmd: "first".to_string(),
+                        args: None,
+                    }),
+                    darwin_x86_64: Some(nexus_acp_host::registry::PlatformBinary {
+                        archive: "https://example.com/b.tar.gz".to_string(),
+                        cmd: "second".to_string(),
+                        args: None,
+                    }),
+                    linux_aarch64: None,
+                    linux_x86_64: None,
+                    windows_aarch64: None,
+                    windows_x86_64: None,
+                }),
+            },
+        };
+
+        let mut by_binary = HashMap::new();
+        by_binary.insert(
+            "second".to_string(),
+            nexus_acp_host::registry::LocalInstallation {
+                binary: "second".to_string(),
+                version: Some("second 2.0.0".to_string()),
+            },
+        );
+
+        let entry = build_scan_entry(agent, &by_binary);
+        assert!(entry.installed);
+        assert_eq!(entry.launch_command.as_deref(), Some("second"));
+        assert_eq!(entry.version.as_deref(), Some("second 2.0.0"));
+    }
+
+    #[test]
+    fn platform_binary_commands_dedupes_and_orders() {
+        let binary = nexus_acp_host::registry::BinaryDistribution {
+            darwin_aarch64: Some(nexus_acp_host::registry::PlatformBinary {
+                archive: "https://example.com/a.tar.gz".to_string(),
+                cmd: "cmd".to_string(),
+                args: None,
+            }),
+            darwin_x86_64: Some(nexus_acp_host::registry::PlatformBinary {
+                archive: "https://example.com/b.tar.gz".to_string(),
+                cmd: "cmd".to_string(),
+                args: None,
+            }),
+            linux_aarch64: Some(nexus_acp_host::registry::PlatformBinary {
+                archive: "https://example.com/c.tar.gz".to_string(),
+                cmd: "linux-cmd".to_string(),
+                args: None,
+            }),
+            linux_x86_64: None,
+            windows_aarch64: None,
+            windows_x86_64: None,
+        };
+
+        let cmds = platform_binary_commands(&binary);
+        assert_eq!(cmds, vec!["cmd".to_string(), "linux-cmd".to_string()]);
     }
 }

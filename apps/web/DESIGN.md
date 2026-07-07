@@ -541,6 +541,48 @@ components:
       color: "{colors.gray-900}"
       marginTop: "24px"
 ---
+  # ── V1.94 Footer Profile Switcher — sidebar footer avatar row tokens ──
+  # Avatar fallback uses initials (display_name first char) or a generic icon.
+  # Single-creator case: one avatar + "+". All tokens additive; no prior names
+  # modified. Token names frozen verbatim (do not rename). Dark values in
+  # DESIGN.dark.md.
+  footer-profile:
+    avatar-size: "32px"
+    avatar-rounded: "{rounded.pill}"
+    avatar-bg: "{colors.gray-alpha-100}"
+    avatar-bg-hover: "{colors.gray-alpha-200}"
+    avatar-bg-active: "{colors.blue-700}"
+    avatar-text: "{colors.gray-1000}"
+    avatar-text-active: "#ffffff"
+    avatar-fallback-bg: "{colors.gray-alpha-200}"
+    avatar-fallback-text: "{colors.gray-700}"
+    add-button-bg: "transparent"
+    add-button-border: "{colors.gray-alpha-400}"
+    add-button-text: "{colors.gray-700}"
+    add-button-hover-bg: "{colors.gray-alpha-100}"
+    add-button-hover-border: "{colors.gray-alpha-500}"
+    add-button-hover-text: "{colors.gray-1000}"
+    gap: "{spacing.space-2}"
+
+  # ── V1.94 Setup Wizard Step Chrome — step indicator tokens ──
+  # Steps render as numbered circles + connecting lines. Active/complete/pending
+  # states distinguish step progression. Token names frozen verbatim. Dark
+  # values in DESIGN.dark.md.
+  setup-wizard-step:
+    step-circle-size: "32px"
+    step-circle-active-bg: "{colors.blue-700}"
+    step-circle-active-text: "#ffffff"
+    step-circle-complete-bg: "{colors.green-700}"
+    step-circle-complete-text: "#ffffff"
+    step-circle-pending-bg: "{colors.gray-alpha-100}"
+    step-circle-pending-text: "{colors.gray-700}"
+    step-connector: "{colors.gray-alpha-400}"
+    step-label-typography: "{typography.label-14}"
+    step-label-active-color: "{colors.gray-1000}"
+    step-label-pending-color: "{colors.gray-700}"
+    wizard-max-width: "640px"
+    wizard-padding: "{spacing.space-8}"
+---
 
 # Nexus Local Web UI Design System
 
@@ -690,7 +732,24 @@ Component token values live in frontmatter `components:`. All components must ex
 
 ### Button
 
-Variants and sizes: see frontmatter `components.button`. The preset `Validate` action uses `primary` when it is the main form action, or `secondary` with a `blue-700` leading icon when paired with a separate save action. It must read as reassurance (“is this safe?”), not as a debug-only tool.
+Variants and sizes: see frontmatter `components.button`. The preset `Validate` action uses `primary` when it is the main form action, or `secondary` with a `blue-700` leading icon when paired with a separate save action. It must read as reassurance ("is this safe?"), not as a debug-only tool.
+
+#### Button Contrast Invariant (V1.94 corrected)
+
+> **Background decides text color, independent of light/dark mode.**
+>
+> - **Dark background** (deep blue, red, dark gray, saturated dark colors) → **light/white text**.
+> - **Light/bright background** (cyan, light gray, pastels) → **dark text**.
+> - **Mode does not decide text color directly.** The same button may use dark text in light mode and dark text in dark mode if its background is light in both (e.g. a cyan fill is light in both themes → dark text in both).
+>
+> Practical applications:
+> - Light mode primary `bg-blue-700` (dark) → `text-white` (light).
+> - Dark mode primary `dark:bg-brand-cyan` (light/bright) → `dark:text-brand-deep-blue` (dark).
+> - Destructive `bg-red-800` (dark) → `text-white` (light), unchanged across modes.
+
+This invariant applies to all `button` variants, nav active states, banner CTAs, wizard primary CTAs, and any component with a `button-like` role (clickable, saturated background). The invariant is codified in the frontmatter tokens: `primary.textColor` = `#ffffff` in the light theme because the light-theme fill is dark; `DESIGN.dark.md` `primary.textColor` = `{colors.brand-deep-blue}` because the dark-theme fill (`brand-cyan`) is light/bright. P1 audits all call sites in `apps/web/src/**`; vitest snapshot (light + dark) gates regressions.
+
+**Dark primary token fix (V1.94):** `dark:bg-brand-cyan dark:text-brand-deep-blue` (was `dark:text-white`). Hover/active text remains `brand-deep-blue`.
 
 ### Input / Select / Textarea
 

@@ -113,7 +113,7 @@ function GeneratingState() {
         <span className="h-4 w-5/6 animate-pulse rounded-control bg-background-300" />
       </div>
       <Button variant="primary" disabled data-testid="soul-narrative-reflect">
-        <Spinner className="text-white" />
+        <Spinner className="text-current" />
         Reflecting…
       </Button>
     </div>
