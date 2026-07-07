@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-07-07-v1.96-implement-rework"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-07-07"
 ---
 
@@ -128,3 +128,27 @@ generated_at: "2026-07-07"
 
 **Blocking items to resolve before approval:**
 1. **C-1**: Import `errorMessage` in `setup-wizard-page.tsx` and use it in the `finish()` catch handler.
+
+## Revalidation (fix-wave 1)
+
+- **Commit**: `acbbbe1a`
+- **Scope**: C-1 only (targeted re-review per PM instruction)
+
+### C-1: `setup-wizard-page.tsx` `finish()` error handling — ✅ Fixed
+
+- `setup-wizard-page.tsx:55`: now uses `errorMessage(err) || 'Failed to save agent profile.'` — correct.
+- `setup-gate.tsx:50`: now uses `errorMessage(err) || 'Daemon is not responding.'` — correct (also addresses qc1 S-001).
+- Both files import `errorMessage` from `@/lib/error-message`.
+- `rg "instanceof Error"` on both files: **0 hits**.
+
+The fix exactly matches the prescribed remediation. No residual `instanceof Error` pattern remains in either file.
+
+### Updated verdict
+
+| Severity | Count |
+|----------|-------|
+| 🔴 Critical | 0 |
+| 🟡 Warning | 2 (non-blocking) |
+| 🟢 Suggestion | 2 (non-blocking) |
+
+**Verdict**: ✅ **Approve** — C-1 resolved. W-1, W-2, S-1, S-3 remain as non-blocking items for PM to register as residuals or address in a follow-up.
