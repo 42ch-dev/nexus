@@ -132,4 +132,59 @@ describe('SetupStepWelcome', () => {
     await waitFor(() => expect(onNext).toHaveBeenCalled());
     expect(setWorkspacePath).not.toHaveBeenCalled();
   });
+
+  it('surfaces a setWorkspacePath error and stays on the step', async () => {
+    const user = userEvent.setup();
+    const onNext = vi.fn();
+    const setWorkspacePath = vi.fn(() => Promise.reject(new Error('permission denied')));
+    const stalePath = '/Users/x/Documents/nexus42/default';
+
+    renderHarness(makeState({ workspaceRoot: stalePath }), {
+      desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve(stalePath), setWorkspacePath }),
+      onNext,
+    });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() => expect(screen.getByText('permission denied')).toBeInTheDocument());
+    expect(onNext).not.toHaveBeenCalled();
+  });
+
+  it('surfaces a pickDirectory error and stays on the step', async () => {
+    const user = userEvent.setup();
+    const pickDirectory = vi.fn(() => Promise.reject(new Error('dialog failed')));
+
+    renderHarness(makeState(), {
+      desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve('/custom/nexus'), pickDirectory }),
+    });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Browse…' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Browse…' }));
+
+    await waitFor(() => expect(screen.getByText('dialog failed')).toBeInTheDocument());
+  });
+
+  it('clears the previous error when the user retries Continue', async () => {
+    const user = userEvent.setup();
+    const onNext = vi.fn();
+    const setWorkspacePath = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('permission denied'))
+      .mockResolvedValueOnce(undefined);
+    const stalePath = '/Users/x/Documents/nexus42/default';
+
+    renderHarness(makeState({ workspaceRoot: stalePath }), {
+      desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve(stalePath), setWorkspacePath }),
+      onNext,
+    });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await waitFor(() => expect(screen.getByText('permission denied')).toBeInTheDocument());
+
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await waitFor(() => expect(onNext).toHaveBeenCalled());
+    expect(screen.queryByText('permission denied')).not.toBeInTheDocument();
+  });
 });

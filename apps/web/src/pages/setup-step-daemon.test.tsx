@@ -113,4 +113,41 @@ describe('SetupStepDaemon', () => {
     await waitFor(() => expect(screen.getByText('permission denied')).toBeInTheDocument());
     expect(startDaemon).not.toHaveBeenCalled();
   });
+
+  it('re-probes after reset when the subscription threw on mount', async () => {
+    const user = userEvent.setup();
+    const resetLocalDatabase = vi.fn(() => Promise.resolve());
+    const startDaemon = vi.fn(() => Promise.resolve());
+    let healthCalls = 0;
+
+    useHandlers(
+      http.get('/v1/daemon/runtime/health', () => {
+        healthCalls += 1;
+        // Succeed only on the second probe (after reset).
+        if (healthCalls >= 2) {
+          return HttpResponse.json({ status: 'ok', version: 'test' });
+        }
+        return HttpResponse.error();
+      }),
+    );
+
+    const onDaemonStatusChanged = vi.fn(() => Promise.reject(new Error('subscription failed')));
+
+    renderInApp(<SetupStepDaemon onNext={() => {}} onBack={() => {}} />, {
+      client: makeClient(),
+      desktop: makeDesktop({ onDaemonStatusChanged, resetLocalDatabase, startDaemon }),
+      initialRouterEntries: ['/setup'],
+    });
+
+    // First mount: subscription throws, probe fails → error state.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument());
+    expect(healthCalls).toBeGreaterThanOrEqual(1);
+
+    await user.click(screen.getByRole('button', { name: 'Reset local database' }));
+
+    await waitFor(() => expect(screen.getByText('Daemon is running.')).toBeInTheDocument());
+    expect(healthCalls).toBeGreaterThanOrEqual(2);
+    await waitFor(() => expect(resetLocalDatabase).toHaveBeenCalled());
+    await waitFor(() => expect(startDaemon).toHaveBeenCalled());
+  });
 });

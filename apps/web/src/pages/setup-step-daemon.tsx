@@ -14,6 +14,7 @@ export function SetupStepDaemon({ onNext, onBack }: SetupStepDaemonProps) {
   const desktop = useDesktopCapabilities();
   const [ready, setReady] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [retryToken, setRetryToken] = useState(0);
 
   useEffect(() => {
     if (ready) return;
@@ -57,7 +58,7 @@ export function SetupStepDaemon({ onNext, onBack }: SetupStepDaemonProps) {
       cancelled = true;
       unsub?.();
     };
-  }, [client, desktop, ready]);
+  }, [client, desktop, ready, retryToken]);
 
   function retry() {
     setError(null);
@@ -74,6 +75,8 @@ export function SetupStepDaemon({ onNext, onBack }: SetupStepDaemonProps) {
     try {
       await desktop.resetLocalDatabase();
       await desktop.startDaemon();
+      // Force the effect to re-run so it re-subscribes (or probes) after reset.
+      setRetryToken((n) => n + 1);
     } catch (err) {
       setError(errorMessage(err) || 'Failed to reset local database.');
     }

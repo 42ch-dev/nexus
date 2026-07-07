@@ -16,6 +16,7 @@ interface SetupStepWelcomeProps {
 export function SetupStepWelcome({ state, onChange, onNext }: SetupStepWelcomeProps) {
   const desktop = useDesktopCapabilities();
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!desktop) {
@@ -43,17 +44,23 @@ export function SetupStepWelcome({ state, onChange, onNext }: SetupStepWelcomePr
   async function browse() {
     if (!desktop) return;
     setLoading(true);
+    setError(null);
     try {
       const selected = await desktop.pickDirectory(state.workspaceRoot || DEFAULT_WORKSPACE);
       if (selected) {
         onChange({ ...state, workspaceRoot: selected, workspacePicked: true });
       }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message || 'Could not open the folder picker.');
+      console.error('Failed to pick directory:', err);
     } finally {
       setLoading(false);
     }
   }
 
   async function continueToNext() {
+    setError(null);
     if (!desktop) {
       onNext();
       return;
@@ -62,7 +69,8 @@ export function SetupStepWelcome({ state, onChange, onNext }: SetupStepWelcomePr
       try {
         await desktop.setWorkspacePath(state.workspaceRoot);
       } catch (err) {
-        // Surface the error and stay on the step so the user can retry.
+        const message = err instanceof Error ? err.message : String(err);
+        setError(message || 'Could not save the workspace path.');
         console.error('Failed to persist workspace path:', err);
         return;
       }
@@ -86,6 +94,12 @@ export function SetupStepWelcome({ state, onChange, onNext }: SetupStepWelcomePr
           <span className="text-copy-14 text-gray-1000">{loading ? 'Resolving…' : state.workspaceRoot}</span>
         </div>
       </div>
+
+      {error && (
+        <p className="text-copy-14 text-red-800" role="alert">
+          {error}
+        </p>
+      )}
 
       <div className="flex justify-between">
         {desktop ? (
