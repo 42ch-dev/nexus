@@ -130,7 +130,7 @@ The desktop app's first-launch flow walks a new author through workspace creatio
 
 | Step | Title | Action | UX states |
 |------|-------|--------|-----------|
-| 1 | Welcome + Workspace | Resolve default workspace (`~/Documents/nexus42/default/` via `dirs::document_dir()`); create directory if absent. Existing `~/.nexus42/config.toml` values are preserved — no forced migration. | Path display + "Use default" / "Choose custom" affordance. |
+| 1 | Welcome + Workspace | Resolve default workspace (`~/Documents/nexus/default/` via `dirs::document_dir()`); create directory if absent. Existing `~/.nexus42/config.toml` values are preserved — no forced migration unless stale pattern. | Path display + native directory picker ("Browse…") + "Use default" affordance. |
 | 2 | Daemon Ready | Start the bundled `nexus42` sidecar; poll `GET /v1/daemon/runtime/health` until healthy. Reuses the existing `HEALTH_START_TIMEOUT` (15s) + `SidecarManager` lifecycle from §7. | "Starting daemon…" transient → "Daemon ready" (success) OR error state distinguishing timeout vs port conflict vs crash. Never a silent hang. |
 | 3 | ACP Agent Detection | Call `POST /v1/daemon/agent-host/scan`; display registry entries annotated with PATH-install status. Default recommendation = first `installed: true` entry with "Recommended" badge. | Scanning transient → agent list with selectable cards (name, version, installed badge, "Recommended" badge) → "No agents found" state with custom `launch_command` input + "Continue with custom" CTA. |
 | 4 | Done | Persist the selected agent + `setup_completed = true` in `~/.nexus42/config.toml`; transition to main UI. | Confirmation screen; "Finish" CTA launches main UI. |
@@ -158,10 +158,43 @@ Every app launch — not only first launch — gates entry to the main UI on a h
 
 ### 13.5 Default workspace
 
-- **Path**: `~/Documents/nexus42/default/` (cross-platform via `dirs::document_dir()`).
-- **Fallback**: if `dirs::document_dir()` returns `None`, fall back to `dirs::home_dir().join("Documents").join("nexus42").join("default")` and log a warning.
+- **Path**: `~/Documents/nexus/default/` (cross-platform via `dirs::document_dir()`).
+- **Fallback**: if `dirs::document_dir()` returns `None`, fall back to `dirs::home_dir().join("Documents").join("nexus").join("default")` and log a warning.
 - **Resolution contract**: both `apps/nexus42/src/config.rs` (CLI/daemon-side) and `apps/desktop/src-tauri/src/lib.rs` (Tauri shell) MUST agree — the workspace-default resolver is shared by both.
-- **Existing installs**: `workspace_path` already set in `~/.nexus42/config.toml` is preserved verbatim. The default applies **only when `workspace_path` is unset**.
+- **Existing installs**: `workspace_path` already set in `~/.nexus42/config.toml` is preserved verbatim unless it matches known stale patterns (`nexus42/default` or `nexus/local/default`), in which case it's overwritten with the new default. The default applies **only when `workspace_path` is unset** or matches a stale pattern.
+
+### 13.6 V1.95 Amendments
+
+#### 13.6.1 Setup wizard layout redesign
+
+The setup wizard moves from a centered card with horizontal steps at the top to a left‑sidebar vertical step indicator with content on the right:
+
+- Steps: Welcome (workspace selection), Daemon (status/error/reset), Agent (detection/selection), Done.
+- The wizard fills the entire window (no `min-h-screen items-center justify-center`).
+- Step indicators are a vertical list in a fixed left panel (`w-52`), with the current step highlighted.
+- Content area keeps the card chrome (border, shadow, background).
+
+#### 13.6.2 Setup wizard workspace selection with native directory picker
+
+Step 1 (Welcome) now includes a native directory picker (Tauri `@tauri-apps/plugin-dialog` `open({ directory: true })`) to let the user select a custom workspace path:
+
+- Default workspace path: `~/Documents/nexus/default` (brand `nexus/`, not `nexus42/`; system home remains `~/.nexus42/`).
+- Stale path overwrite: if the existing `workspace_path` matches `~/Documents/nexus42/default` or `~/Documents/nexus/local/default`, it is overwritten with the new default; custom user‑set paths are preserved.
+- Browser build hides the directory picker button (no native dialogs).
+
+#### 13.6.3 FingerprintGate setup route bypass
+
+The `FingerprintGate` adds `/setup` to its bypass routes (alongside `/connect`), so the wizard can render before any remote config exists without timing risks.
+
+#### 13.6.4 ClientProvider immediate TauriClient for desktop
+
+On desktop builds, `ClientProvider` returns `TauriClient` + `TauriDesktopCapabilities` immediately in the `!loaded` branch (no temporary `BrowserClient`), avoiding the "Request failed: The string did not match the expected pattern" error from same‑origin `/v1/daemon/runtime/health` calls in the Tauri webview.
+
+#### 13.6.5 Daemon error surfacing + migration‑mismatch recovery
+
+- Wizard step 2 (Daemon) surfaces the real error detail from `SidecarManager` (not a generic message).
+- When the daemon fails to start (e.g., migration checksum mismatch), the wizard offers an **opt‑in "Reset local database" button** that clears the daemon state in `~/.nexus42/` (no user creative files touched) and retries daemon start.
+- The button copy clearly states: "This will clear the daemon's local state database (config, registry cache). Your creative files in the workspace are not affected."
 
 ---
 

@@ -125,7 +125,7 @@ Rules:
 - Second acquirer: fail closed with holder + `creator works status` hint.
 - **Independent** of completion-lock (both may apply).
 
-Daemon Local API and `nexus.work.patch` **must** use the same acquire/release paths as CLI.
+Daemon API and `nexus.work.patch` **must** use the same acquire/release paths as CLI.
 
 ### 4.2 Production acquire contract (V1.42 P0 — Implemented)
 
