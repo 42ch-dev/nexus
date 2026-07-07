@@ -42,15 +42,15 @@ function LocationDisplay() {
 }
 
 describe('SetupWizardPage', () => {
-  it('renders a left-sidebar vertical step indicator and a card content area', () => {
+  it('renders a centered integrated card with step indicator and content area', () => {
     renderInApp(
       <SetupWizardPage />,
       { client: makeClient(), initialRouterEntries: ['/setup'] },
     );
 
-    // Step indicator is a vertical list inside a fixed left sidebar.
-    const nav = screen.getByRole('navigation', { name: 'Setup progress' });
-    const list = nav.querySelector('ol');
+    // Step indicator is a vertical list inside the left panel of the integrated card.
+    const innerNav = screen.getByRole('navigation', { name: 'Setup progress' });
+    const list = innerNav.querySelector('ol');
     expect(list).toHaveClass('flex-col');
 
     // Active step carries aria-current="step".
@@ -63,12 +63,58 @@ describe('SetupWizardPage', () => {
     expect(circle).toHaveClass('h-setup-wizard-step-circle-size');
     expect(circle).toHaveClass('w-setup-wizard-step-circle-size');
 
-    // Content area is the card with the padding-token and max-width-token utilities.
+    // The integrated card wraps both the step indicator panel and the content panel.
     const main = screen.getByRole('main');
-    expect(main).toHaveClass('rounded-card');
-    expect(main).toHaveClass('shadow-modal');
-    expect(main).toHaveClass('p-setup-wizard-step-wizard-padding');
-    expect(main).toHaveClass('max-w-setup-wizard-step-wizard-max-width');
+    const card = main.parentElement;
+    expect(card).toContainElement(innerNav);
+    expect(card).toHaveClass('max-w-setup-wizard-step-wizard-max-width');
+    expect(card).toHaveClass('rounded-popover');
+    expect(card).toHaveClass('shadow-modal');
+    expect(card).toHaveClass('bg-setup-wizard-surface-card-bg');
+    expect(card).toHaveClass('border-setup-wizard-surface-card-border');
+
+    // The card is centered inside the outer shell.
+    const outer = card?.parentElement;
+    expect(outer).toHaveClass('items-center');
+    expect(outer).toHaveClass('justify-center');
+    expect(outer).toHaveClass('min-h-screen');
+
+    // The content panel is a flex column so T6's mt-auto CTA pins to the bottom.
+    expect(main).toHaveClass('flex-col');
+    expect(main).toHaveClass('flex-1');
+  });
+
+  it('aligns step indicator circles and labels on the same baseline and renders connectors between steps', () => {
+    renderInApp(
+      <SetupWizardPage />,
+      { client: makeClient(), initialRouterEntries: ['/setup'] },
+    );
+
+    const steps = screen.getAllByRole('listitem');
+    expect(steps).toHaveLength(4);
+
+    steps.forEach((li, index) => {
+      // Row uses a fixed height and centers its direct children (circle + label).
+      expect(li).toHaveClass('items-center');
+      expect(li).toHaveClass('h-setup-wizard-step-row-height');
+
+      // Circle and label are direct siblings under the same centered row.
+      const spans = Array.from(li.children).filter((child) => child.tagName === 'SPAN');
+      expect(spans).toHaveLength(2);
+      expect(spans[0]).toHaveTextContent(String(index + 1));
+      expect(spans[1]).toHaveTextContent(['Welcome', 'Daemon', 'Agent', 'Done'][index]);
+    });
+
+    // Each non-final step has an absolutely-positioned connector behind the circle.
+    for (let i = 0; i < 3; i++) {
+      const connector = steps[i].querySelector('div[aria-hidden="true"]');
+      expect(connector).toBeInTheDocument();
+      expect(connector).toHaveClass('w-px');
+      expect(connector).toHaveClass('bg-setup-wizard-step-connector');
+    }
+
+    // The last step has no connector.
+    expect(steps[3].querySelector('div[aria-hidden="true"]')).not.toBeInTheDocument();
   });
 
   it('moves through the four steps and finishes', async () => {
