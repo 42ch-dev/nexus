@@ -3,6 +3,8 @@ import { FolderOpen } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { useDesktopCapabilities } from '@/lib/client-context';
+import { errorMessage } from '@/lib/error-message';
+import { useToast } from '@/lib/use-toast';
 import type { WizardState } from '@/pages/setup-wizard-page';
 
 const DEFAULT_WORKSPACE = '~/Documents/nexus/default';
@@ -16,7 +18,7 @@ interface SetupStepWelcomeProps {
 export function SetupStepWelcome({ state, onChange, onNext }: SetupStepWelcomeProps) {
   const desktop = useDesktopCapabilities();
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { toast } = useToast();
 
   useEffect(() => {
     if (!desktop) {
@@ -44,15 +46,14 @@ export function SetupStepWelcome({ state, onChange, onNext }: SetupStepWelcomePr
   async function browse() {
     if (!desktop) return;
     setLoading(true);
-    setError(null);
     try {
       const selected = await desktop.pickDirectory(state.workspaceRoot || DEFAULT_WORKSPACE);
       if (selected) {
         onChange({ ...state, workspaceRoot: selected, workspacePicked: true });
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      setError(message || 'Could not open the folder picker.');
+      const message = errorMessage(err) || 'Could not open the folder picker.';
+      toast({ variant: 'error', title: 'Folder picker', description: message });
       console.error('Failed to pick directory:', err);
     } finally {
       setLoading(false);
@@ -60,7 +61,6 @@ export function SetupStepWelcome({ state, onChange, onNext }: SetupStepWelcomePr
   }
 
   async function continueToNext() {
-    setError(null);
     if (!desktop) {
       onNext();
       return;
@@ -69,8 +69,8 @@ export function SetupStepWelcome({ state, onChange, onNext }: SetupStepWelcomePr
       try {
         await desktop.setWorkspacePath(state.workspaceRoot);
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        setError(message || 'Could not save the workspace path.');
+        const message = errorMessage(err) || 'Could not save the workspace path.';
+        toast({ variant: 'error', title: 'Workspace path', description: message });
         console.error('Failed to persist workspace path:', err);
         return;
       }
@@ -87,33 +87,36 @@ export function SetupStepWelcome({ state, onChange, onNext }: SetupStepWelcomePr
         </p>
       </div>
 
-      <div className="flex items-center gap-3 rounded-card border border-gray-alpha-400 bg-background-200 p-4">
-        <FolderOpen className="h-5 w-5 text-blue-700" aria-hidden />
-        <div className="flex flex-col">
-          <span className="text-label-12 text-gray-700">Workspace location</span>
-          <span className="text-copy-14 text-gray-1000">{loading ? 'Resolving…' : state.workspaceRoot}</span>
+      <div
+        className="flex min-h-setup-wizard-surface-input-row-min-height items-center gap-setup-wizard-surface-input-row-gap rounded-control border border-setup-wizard-surface-input-row-border bg-setup-wizard-surface-input-row-bg px-setup-wizard-surface-input-row-padding-x py-setup-wizard-surface-input-row-padding-y"
+        data-testid="workspace-location-row"
+      >
+        <FolderOpen className="h-5 w-5 text-setup-wizard-surface-input-row-icon-color" aria-hidden />
+        <div className="flex flex-1 flex-col">
+          <span className="text-label-12 text-setup-wizard-surface-input-row-label-color">Workspace location</span>
+          <span className="text-copy-14 text-setup-wizard-surface-input-row-path-color truncate">
+            {loading ? 'Resolving…' : state.workspaceRoot}
+          </span>
         </div>
-      </div>
-
-      {error && (
-        <p className="text-copy-14 text-red-800" role="alert">
-          {error}
-        </p>
-      )}
-
-      <div className="flex justify-between">
-        {desktop ? (
+        {desktop && (
           <Button
             variant="secondary"
             onClick={browse}
             disabled={loading}
+            className="flex-shrink-0"
           >
             Browse…
           </Button>
-        ) : (
-          <span />
         )}
-        <Button variant="primary" onClick={continueToNext} disabled={loading || !state.workspaceRoot}>
+      </div>
+
+      <div className="flex flex-col gap-setup-wizard-surface-cta-container-gap mt-auto">
+        <Button
+          variant="primary"
+          onClick={continueToNext}
+          disabled={loading || !state.workspaceRoot}
+          className="w-full max-w-setup-wizard-surface-cta-primary-max-width"
+        >
           Continue
         </Button>
       </div>

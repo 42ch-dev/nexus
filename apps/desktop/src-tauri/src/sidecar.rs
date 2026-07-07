@@ -29,6 +29,10 @@ const RESTART_BACKOFF_MAX: Duration = Duration::from_secs(8);
 const MAX_RESTART_ATTEMPTS: u32 = 5;
 const STOP_GRACEFUL_TIMEOUT: Duration = Duration::from_secs(5);
 const HEALTH_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+/// Maximum bytes of daemon stderr to retain for diagnostic surfacing.
+/// Capped to avoid unbounded buffering; truncated at the nearest newline
+/// boundary at or below this size (keep the tail, drop the head).
+const STDERR_TAIL_MAX_BYTES: usize = 2 * 1024;
 /// Tauri event emitted whenever the daemon lifecycle state changes. The SPA
 /// subscribes via `window.__TAURI__.event.listen` instead of polling.
 const DAEMON_STATUS_EVENT: &str = "nexus://daemon-status-changed";
@@ -88,6 +92,11 @@ struct SidecarInner {
     /// App handle used to emit lifecycle state events to the SPA. `None` in
     /// unit tests that do not construct a Tauri app.
     app_handle: Option<tauri::AppHandle<tauri::Wry>>,
+    /// Bounded tail of the daemon's stderr output, captured for
+    /// diagnostic surfacing on Error transitions. Capped at
+    /// STDERR_TAIL_MAX_BYTES (nearest newline boundary). Cleared on
+    /// each new spawn.
+    stderr_tail: Option<String>,
 }
 
 /// Thread-safe handle to the sidecar lifecycle state.
@@ -107,6 +116,7 @@ impl SidecarManager {
             stop_requested: false,
             restart_count: 0,
             app_handle: None,
+            stderr_tail: None,
         })))
     }
 
@@ -212,6 +222,7 @@ impl SidecarManager {
         }
         inner.state = DaemonState::Starting;
         inner.detail = None;
+        inner.stderr_tail = None;
         inner.stop_requested = false;
         if reset_budget {
             inner.restart_count = 0;
@@ -243,11 +254,24 @@ impl SidecarManager {
                 &port.to_string(),
             ]);
 
-        let (_rx, child) = command
+        let (rx, child) = command
             .spawn()
             .map_err(|e| format!("failed to spawn sidecar: {e}"))?;
 
         let pid = child.pid();
+
+        let stderr_tail = Arc::new(Mutex::new(String::new()));
+        let stderr_tail_for_drain = stderr_tail.clone();
+        let inner_for_drain = self.0.clone();
+        tauri::async_runtime::spawn(async move {
+            drain_stderr(rx, stderr_tail_for_drain.clone()).await;
+            let tail = {
+                let lock = stderr_tail_for_drain.lock().await;
+                lock.clone()
+            };
+            let mut inner = inner_for_drain.lock().await;
+            inner.stderr_tail = Some(tail);
+        });
 
         {
             let mut inner = self.0.lock().await;
@@ -271,11 +295,26 @@ impl SidecarManager {
             self.spawn_monitor(app.clone(), pid);
             Ok(())
         } else {
-            let mut inner = self.0.lock().await;
-            if let Some(child) = inner.child.take() {
+            // Take the child handle out and kill it, then release the inner lock
+            // so the stderr drain task can finish without a lock-order deadlock.
+            let child = {
+                let mut inner = self.0.lock().await;
+                inner.owned = false;
+                inner.child.take()
+            };
+            if let Some(child) = child {
                 let _ = child.kill();
             }
-            inner.owned = false;
+
+            // Build the diagnostic message outside the inner lock.
+            let stderr_snapshot = {
+                let stderr = stderr_tail.lock().await;
+                if stderr.is_empty() {
+                    None
+                } else {
+                    Some(stderr.trim().to_string())
+                }
+            };
             let conflict = tcp_reachable(port).await;
             let message = if conflict {
                 format!(
@@ -285,6 +324,9 @@ impl SidecarManager {
             } else {
                 "Daemon did not start. Check the logs or try restarting.".to_string()
             };
+            let message = format_error_detail(message.as_str(), stderr_snapshot.as_deref());
+
+            let mut inner = self.0.lock().await;
             inner.state = DaemonState::Error;
             inner.detail = Some(message.clone());
             drop(inner);
@@ -454,6 +496,59 @@ fn backoff(attempt: u32) -> Duration {
     delay
 }
 
+/// Truncate `buf` to keep at most `STDERR_TAIL_MAX_BYTES` at the tail, cutting
+/// at the nearest newline boundary so we don't surface a partial line.
+fn trim_stderr_tail(buf: &mut String) {
+    if buf.len() > STDERR_TAIL_MAX_BYTES {
+        let keep_start = buf.len().saturating_sub(STDERR_TAIL_MAX_BYTES);
+        if let Some(nl) = buf[keep_start..].find('\n') {
+            buf.replace_range(..keep_start + nl + 1, "");
+        } else {
+            buf.replace_range(..keep_start, "");
+        }
+    }
+}
+
+/// Drain the command's stderr event stream into a bounded tail buffer.
+/// Runs concurrently with the health probe so it never blocks the spawn path.
+async fn drain_stderr(
+    mut rx: tokio::sync::mpsc::Receiver<tauri_plugin_shell::process::CommandEvent>,
+    tail: Arc<Mutex<String>>,
+) {
+    let mut buf = String::new();
+    while let Some(event) = rx.recv().await {
+        match event {
+            tauri_plugin_shell::process::CommandEvent::Stderr(bytes) => {
+                buf.push_str(&String::from_utf8_lossy(&bytes));
+                trim_stderr_tail(&mut buf);
+            }
+            tauri_plugin_shell::process::CommandEvent::Terminated(payload) => {
+                tracing::debug!(
+                    code = payload.code,
+                    signal = payload.signal,
+                    "sidecar stderr task saw termination"
+                );
+                break;
+            }
+            tauri_plugin_shell::process::CommandEvent::Error(err) => {
+                tracing::debug!(error = err, "sidecar command event error");
+            }
+            _ => {}
+        }
+    }
+    let mut lock = tail.lock().await;
+    *lock = buf;
+}
+
+/// Combine the generic error message with captured stderr when present.
+fn format_error_detail(message: &str, stderr: Option<&str>) -> String {
+    if let Some(stderr) = stderr.filter(|s| !s.trim().is_empty()) {
+        format!("{message}\n\nDaemon output:\n{}", stderr.trim())
+    } else {
+        message.to_string()
+    }
+}
+
 async fn probe_health(port: u16) -> Option<DaemonHealth> {
     let url = format!("http://127.0.0.1:{port}/v1/daemon/runtime/health");
     let client = HEALTH_CLIENT.get_or_init(|| {
@@ -525,8 +620,11 @@ fn process_alive(_pid: u32) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{backoff, resolve_port, DaemonState, MAX_RESTART_ATTEMPTS};
+    use super::{backoff, drain_stderr, format_error_detail, resolve_port, DaemonState, MAX_RESTART_ATTEMPTS, STDERR_TAIL_MAX_BYTES};
+    use std::sync::Arc;
     use std::time::Duration;
+
+    use tokio::sync::Mutex;
 
     // `resolve_port` reads `NEXUS_DAEMON_PORT`, which is process-global. These
     // tests must run serially so one test's env mutation does not leak into the
@@ -789,6 +887,83 @@ mod tests {
             .as_deref()
             .unwrap_or("")
             .contains("stopped repeatedly"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn stderr_tail_capped_at_2kib() {
+        // Feed a stderr stream that exceeds 2 KiB and verify the retained tail
+        // is capped at the nearest newline boundary.
+        let (tx, rx) = tokio::sync::mpsc::channel(32);
+        let tail = Arc::new(Mutex::new(String::new()));
+        let tail_for_task = tail.clone();
+
+        let drain = tokio::spawn(async move {
+            drain_stderr(rx, tail_for_task).await;
+        });
+
+        let line = format!("{}\n", "x".repeat(100));
+        for _ in 0..30 {
+            tx.send(tauri_plugin_shell::process::CommandEvent::Stderr(line.clone().into_bytes()))
+                .await
+                .expect("send should succeed");
+        }
+        drop(tx);
+        drain.await.expect("drain task should complete");
+
+        let tail = tail.lock().await;
+        assert!(
+            tail.len() <= STDERR_TAIL_MAX_BYTES,
+            "tail length {} exceeds {STDERR_TAIL_MAX_BYTES}",
+            tail.len()
+        );
+        assert!(tail.ends_with('\n'), "tail should end at a newline boundary");
+    }
+
+    #[test]
+    fn error_detail_includes_stderr_when_nonempty() {
+        let detail = format_error_detail(
+            "Daemon did not start. Check the logs or try restarting.",
+            Some("migration X failed"),
+        );
+        assert!(detail.contains("Daemon did not start"));
+        assert!(detail.contains("Daemon output:"));
+        assert!(detail.contains("migration X failed"));
+    }
+
+    #[test]
+    fn error_detail_uses_generic_fallback_when_stderr_empty() {
+        let detail = format_error_detail(
+            "Daemon did not start. Check the logs or try restarting.",
+            None,
+        );
+        assert_eq!(
+            detail,
+            "Daemon did not start. Check the logs or try restarting."
+        );
+        assert!(!detail.contains("Daemon output:"));
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn stderr_tail_resets_on_new_spawn() {
+        let app = tauri::test::mock_app();
+        let port = 63340;
+        let manager = crate::sidecar::SidecarManager::new(port);
+        {
+            let mut inner = manager.0.lock().await;
+            inner.state = DaemonState::Stopped;
+            inner.stderr_tail = Some("first spawn stderr".to_string());
+        }
+
+        let server = spawn_health_server(port).await;
+        manager
+            .start_daemon(app.handle())
+            .await
+            .expect("attach should succeed");
+        let _ = tokio::time::timeout(Duration::from_secs(1), server).await;
+
+        let inner = manager.0.lock().await;
+        assert_eq!(inner.stderr_tail, None);
+        assert_eq!(inner.state, DaemonState::Running);
     }
 
     /// One-shot loopback HTTP server for tests that need a healthy daemon probe.

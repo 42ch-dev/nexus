@@ -216,6 +216,29 @@
     --color-setup-wizard-step-label-pending-color: var(--color-gray-700);
     --color-setup-wizard-wizard-max-width: 640px;
     --color-setup-wizard-wizard-padding: 32px;
+    --color-setup-wizard-step-row-height: 40px;
+
+    /* V1.96 Setup Wizard Surface — integrated card chrome + inline input row
+       (DESIGN.md frontmatter `components.setup-wizard-surface`). */
+    --color-setup-wizard-surface-card-bg: var(--color-background-100);
+    --color-setup-wizard-surface-card-border: var(--color-gray-alpha-400);
+    --color-setup-wizard-surface-step-panel-right-divider: var(--color-gray-alpha-200);
+    --color-setup-wizard-surface-step-panel-width: 208px;
+    --color-setup-wizard-surface-step-panel-padding-x: 24px;
+    --color-setup-wizard-surface-step-panel-padding-y: 32px;
+    --color-setup-wizard-surface-content-panel-padding-x: 40px;
+    --color-setup-wizard-surface-content-panel-padding-y: 32px;
+    --color-setup-wizard-surface-input-row-bg: var(--color-background-200);
+    --color-setup-wizard-surface-input-row-border: var(--color-gray-alpha-400);
+    --color-setup-wizard-surface-input-row-min-height: 48px;
+    --color-setup-wizard-surface-input-row-gap: 12px;
+    --color-setup-wizard-surface-input-row-padding-x: 16px;
+    --color-setup-wizard-surface-input-row-padding-y: 12px;
+    --color-setup-wizard-surface-input-row-label-color: var(--color-gray-700);
+    --color-setup-wizard-surface-input-row-path-color: var(--color-gray-1000);
+    --color-setup-wizard-surface-input-row-icon-color: var(--color-blue-700);
+    --color-setup-wizard-surface-cta-primary-max-width: 400px;
+    --color-setup-wizard-surface-cta-container-gap: 16px;
 
     /* Elevation — DESIGN.md §Elevation */
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04);
@@ -415,6 +438,30 @@
     --color-setup-wizard-step-label-pending-color: var(--color-gray-700);
     --color-setup-wizard-wizard-max-width: 640px;
     --color-setup-wizard-wizard-padding: 32px;
+    --color-setup-wizard-step-row-height: 40px;
+
+    /* V1.96 Setup Wizard Surface — dark values (DESIGN.dark.md).
+       Same token names as :root; structural values identical, color values
+       derive from the dark theme scales. */
+    --color-setup-wizard-surface-card-bg: var(--color-background-100);
+    --color-setup-wizard-surface-card-border: var(--color-gray-alpha-400);
+    --color-setup-wizard-surface-step-panel-right-divider: var(--color-gray-alpha-200);
+    --color-setup-wizard-surface-step-panel-width: 208px;
+    --color-setup-wizard-surface-step-panel-padding-x: 24px;
+    --color-setup-wizard-surface-step-panel-padding-y: 32px;
+    --color-setup-wizard-surface-content-panel-padding-x: 40px;
+    --color-setup-wizard-surface-content-panel-padding-y: 32px;
+    --color-setup-wizard-surface-input-row-bg: var(--color-background-200);
+    --color-setup-wizard-surface-input-row-border: var(--color-gray-alpha-400);
+    --color-setup-wizard-surface-input-row-min-height: 48px;
+    --color-setup-wizard-surface-input-row-gap: 12px;
+    --color-setup-wizard-surface-input-row-padding-x: 16px;
+    --color-setup-wizard-surface-input-row-padding-y: 12px;
+    --color-setup-wizard-surface-input-row-label-color: var(--color-gray-700);
+    --color-setup-wizard-surface-input-row-path-color: var(--color-gray-1000);
+    --color-setup-wizard-surface-input-row-icon-color: var(--color-blue-700);
+    --color-setup-wizard-surface-cta-primary-max-width: 400px;
+    --color-setup-wizard-surface-cta-container-gap: 16px;
 
     /* Elevation */
     --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
