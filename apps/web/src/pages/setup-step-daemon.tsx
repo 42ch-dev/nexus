@@ -76,8 +76,30 @@ export function SetupStepDaemon({ onNext, onBack }: SetupStepDaemonProps) {
 
     timeoutId = setTimeout(() => {
       if (cancelled) return;
-      setReady(false);
-      setError('Daemon took too long to start.');
+      if (!desktop) {
+        setError('Daemon is taking longer than expected to start.');
+        return;
+      }
+      void desktop
+        .getDaemonStatus()
+        .then((status) => {
+          if (cancelled) return;
+          applyStatus(status);
+          if (
+            status.state !== 'running' &&
+            status.state !== 'degraded' &&
+            status.state !== 'error' &&
+            status.state !== 'stopped'
+          ) {
+            setError(
+              'Daemon is taking longer than expected to start. You can retry or reset the local database.',
+            );
+          }
+        })
+        .catch(() => {
+          if (cancelled) return;
+          setError('Could not determine daemon status. Try retrying.');
+        });
     }, 25_000);
 
     void subscribe();
@@ -123,7 +145,7 @@ export function SetupStepDaemon({ onNext, onBack }: SetupStepDaemonProps) {
       <div className="flex min-h-[120px] flex-col items-center justify-center gap-3 rounded-card border border-gray-alpha-400 bg-background-200 p-6 text-center">
         {error ? (
           <>
-            <p className="text-copy-14 text-red-800">{error}</p>
+            <p className="whitespace-pre-wrap break-words text-copy-14 text-red-800">{error}</p>
             <div className="flex flex-col items-center gap-2">
               <Button variant="secondary" onClick={retry}>
                 <RefreshCw className="h-4 w-4" aria-hidden />

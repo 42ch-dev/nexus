@@ -1,6 +1,6 @@
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { SetupStepDaemon } from '@/pages/setup-step-daemon';
@@ -209,8 +209,12 @@ describe('SetupStepDaemon', () => {
     });
 
     await waitFor(() => expect(getDaemonStatus).toHaveBeenCalled());
-    await vi.advanceTimersByTimeAsync(25_000);
-    await waitFor(() => expect(screen.getByText('Daemon took too long to start.')).toBeInTheDocument());
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(25_000);
+    });
+    await waitFor(() =>
+      expect(screen.getByText(/Daemon is taking longer than expected to start/)).toBeInTheDocument(),
+    );
     vi.useRealTimers();
   });
 
@@ -249,5 +253,52 @@ describe('SetupStepDaemon', () => {
     await user.click(screen.getByRole('button', { name: 'Retry' }));
     await waitFor(() => expect(startDaemon).toHaveBeenCalled());
     await waitFor(() => expect(screen.getByText('Daemon is running.')).toBeInTheDocument());
+  });
+
+  it('clears timeout on unmount', async () => {
+    vi.useFakeTimers();
+    const consoleSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const getDaemonStatus = vi.fn(() => Promise.resolve({ state: 'starting', port: 8420 } as DaemonStatus));
+    const onDaemonStatusChanged = vi.fn(() => Promise.resolve(() => {}));
+
+    const { unmount } = renderInApp(<SetupStepDaemon onNext={() => {}} onBack={() => {}} />, {
+      client: makeClient(),
+      desktop: makeDesktop({ getDaemonStatus, onDaemonStatusChanged }),
+      initialRouterEntries: ['/setup'],
+    });
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0);
+    });
+    expect(getDaemonStatus).toHaveBeenCalled();
+
+    unmount();
+    act(() => {
+      vi.advanceTimersByTime(25_000);
+    });
+
+    expect(
+      consoleSpy.mock.calls.some((call) => String(call[0]).includes('unmounted component')),
+    ).toBe(false);
+    consoleSpy.mockRestore();
+    vi.useRealTimers();
+  });
+
+  it('renders error detail verbatim including stderr tail', async () => {
+    const detail = 'Daemon did not start.\n\nDaemon output:\nmigration 202606070001 was previously applied';
+    const getDaemonStatus = vi.fn(() => Promise.resolve({ state: 'starting', port: 8420 } as DaemonStatus));
+    const onDaemonStatusChanged = vi.fn((callback: (status: DaemonStatus) => void) => {
+      callback({ state: 'error', port: 8420, detail });
+      return Promise.resolve(() => {});
+    });
+
+    renderInApp(<SetupStepDaemon onNext={() => {}} onBack={() => {}} />, {
+      client: makeClient(),
+      desktop: makeDesktop({ getDaemonStatus, onDaemonStatusChanged }),
+      initialRouterEntries: ['/setup'],
+    });
+
+    await waitFor(() => expect(screen.getByText(/Daemon did not start/)).toBeInTheDocument());
+    expect(screen.getByText(/migration 202606070001 was previously applied/)).toBeInTheDocument();
   });
 });
