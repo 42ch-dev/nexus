@@ -3,6 +3,7 @@ import { Loader2, RefreshCw } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { useNexusClient, useDesktopCapabilities } from '@/lib/client-context';
+import { errorMessage } from '@/lib/error-message';
 
 interface SetupStepDaemonProps {
   onNext: () => void;
@@ -80,13 +81,6 @@ export function SetupStepDaemon({ onNext, onBack }: SetupStepDaemonProps) {
     } catch (err) {
       setError(errorMessage(err) || 'Failed to reset local database.');
     }
-  }
-
-  function errorMessage(err: unknown): string {
-    if (err && typeof err === 'object' && 'message' in err) {
-      return String((err as { message: string }).message);
-    }
-    return err instanceof Error ? err.message : String(err);
   }
 
   return (

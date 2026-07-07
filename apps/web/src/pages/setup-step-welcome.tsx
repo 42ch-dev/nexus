@@ -3,6 +3,7 @@ import { FolderOpen } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { useDesktopCapabilities } from '@/lib/client-context';
+import { errorMessage } from '@/lib/error-message';
 import type { WizardState } from '@/pages/setup-wizard-page';
 
 const DEFAULT_WORKSPACE = '~/Documents/nexus/default';
@@ -51,7 +52,7 @@ export function SetupStepWelcome({ state, onChange, onNext }: SetupStepWelcomePr
         onChange({ ...state, workspaceRoot: selected, workspacePicked: true });
       }
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       setError(message || 'Could not open the folder picker.');
       console.error('Failed to pick directory:', err);
     } finally {
@@ -69,7 +70,7 @@ export function SetupStepWelcome({ state, onChange, onNext }: SetupStepWelcomePr
       try {
         await desktop.setWorkspacePath(state.workspaceRoot);
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
+        const message = errorMessage(err);
         setError(message || 'Could not save the workspace path.');
         console.error('Failed to persist workspace path:', err);
         return;
