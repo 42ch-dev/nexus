@@ -1,10 +1,29 @@
-import { describe, expect, it, vi, type Mock } from 'vitest';
+import { describe, expect, it, vi, beforeEach, type Mock } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 
 import { ClientProvider, useNexusClient, useFingerprintGateState } from '@/lib/client-context';
 import type { ConnectionConfig } from '@/lib/nexus/connection-storage';
+import { isDesktopBuild } from '@/lib/nexus/detect';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+
+vi.mock('@/lib/nexus/detect', () => ({
+  isDesktopBuild: vi.fn(),
+}));
+
+vi.mock('@/lib/nexus/connection-storage', async () => {
+  const actual = await vi.importActual<typeof import('@/lib/nexus/connection-storage')>(
+    '@/lib/nexus/connection-storage',
+  );
+  return {
+    ...actual,
+    createConnectionStorage: vi.fn(() => ({
+      load: vi.fn(() => new Promise<ConnectionConfig | null>(() => {})),
+      save: vi.fn(async () => {}),
+      clear: vi.fn(async () => {}),
+    })),
+  };
+});
 
 function makeFetchImpl(response: { fingerprint: string }, status = 200): typeof fetch {
   return vi.fn(async () =>
@@ -62,7 +81,7 @@ function makeQueryClient(): QueryClient {
 }
 
 function renderWithGate(
-  config: ConnectionConfig | null,
+  config: ConnectionConfig | null | undefined,
   fetchImpl?: typeof fetch,
   initialEntries: string[] = ['/'],
 ) {
@@ -73,6 +92,7 @@ function renderWithGate(
           <Routes>
             <Route path="/" element={<TestChild />} />
             <Route path="/connect" element={<div data-testid="connect-page">Connect</div>} />
+            <Route path="/setup" element={<TestChild />} />
           </Routes>
           <RouteSpy />
         </ClientProvider>
@@ -82,6 +102,10 @@ function renderWithGate(
 }
 
 describe('ClientProvider resume-time fingerprint gate', () => {
+  beforeEach(() => {
+    vi.mocked(isDesktopBuild).mockReturnValue(false);
+  });
+
   it('bypasses the gate for local mode and renders children immediately', async () => {
     const fetchImpl = makeFetchImpl({ fingerprint: 'abc' });
     renderWithGate(null, fetchImpl);
@@ -188,5 +212,35 @@ describe('ClientProvider resume-time fingerprint gate', () => {
     expect(await screen.findByTestId('child')).toBeInTheDocument();
     expect(screen.getByTestId('gate-status')).toHaveTextContent('verified');
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it('selects TauriClient on first render while config is loading in desktop build', () => {
+    vi.mocked(isDesktopBuild).mockReturnValue(true);
+    renderWithGate(undefined, undefined, ['/']);
+
+    expect(screen.getByTestId('client-type')).toHaveTextContent('TauriClient');
+  });
+
+  it('treats /setup as a bypass route for the fingerprint gate', async () => {
+    const fetchImpl = makeSequenceFetchImpl([new Error('Daemon unreachable')]);
+    const config: ConnectionConfig = {
+      endpointUrl: 'https://remote.example.com',
+      apiKey: 'key-1',
+      pinnedFingerprint: 'stored-fingerprint',
+      active: true,
+    };
+    renderWithGate(config, fetchImpl, ['/setup']);
+
+    // Children render immediately on /setup, even while verifying, and no
+    // loading or error shell is shown.
+    expect(await screen.findByTestId('child')).toBeInTheDocument();
+    expect(screen.queryByText('Verifying daemon identity…')).not.toBeInTheDocument();
+    expect(screen.queryByText('Could not verify daemon identity')).not.toBeInTheDocument();
+
+    // After the fetch fails, children remain mounted and the gate still does
+    // not block the route.
+    await waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1));
+    expect(screen.getByTestId('child')).toBeInTheDocument();
+    expect(screen.queryByText('Could not verify daemon identity')).not.toBeInTheDocument();
   });
 });
