@@ -441,13 +441,21 @@ fn reset_local_database_at(home: &Path) -> std::io::Result<usize> {
 
 /// Open a native directory picker and return the selected path, or `None` if the
 /// user cancelled. The `default_path` is used as the starting directory.
+///
+/// Uses the async callback API so the tokio runtime keeps processing events
+/// (e.g. daemon status updates) while the native modal is open.
 #[tauri::command]
 async fn pick_directory(app: AppHandle, default_path: String) -> Result<Option<String>, String> {
-    let picked = app
-        .dialog()
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    app.dialog()
         .file()
         .set_directory(&default_path)
-        .blocking_pick_folder();
+        .pick_folder(move |folder| {
+            let _ = tx.send(folder);
+        });
+    let picked = rx
+        .await
+        .map_err(|e| format!("dialog result channel closed: {e}"))?;
     let Some(picked) = picked else {
         return Ok(None);
     };
