@@ -4,6 +4,7 @@ import { FolderOpen } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useDesktopCapabilities } from '@/lib/client-context';
 import { errorMessage } from '@/lib/error-message';
+import { useToast } from '@/lib/use-toast';
 import type { WizardState } from '@/pages/setup-wizard-page';
 
 const DEFAULT_WORKSPACE = '~/Documents/nexus/default';
@@ -17,7 +18,7 @@ interface SetupStepWelcomeProps {
 export function SetupStepWelcome({ state, onChange, onNext }: SetupStepWelcomeProps) {
   const desktop = useDesktopCapabilities();
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { toast } = useToast();
 
   useEffect(() => {
     if (!desktop) {
@@ -45,15 +46,14 @@ export function SetupStepWelcome({ state, onChange, onNext }: SetupStepWelcomePr
   async function browse() {
     if (!desktop) return;
     setLoading(true);
-    setError(null);
     try {
       const selected = await desktop.pickDirectory(state.workspaceRoot || DEFAULT_WORKSPACE);
       if (selected) {
         onChange({ ...state, workspaceRoot: selected, workspacePicked: true });
       }
     } catch (err) {
-      const message = errorMessage(err);
-      setError(message || 'Could not open the folder picker.');
+      const message = errorMessage(err) || 'Could not open the folder picker.';
+      toast({ variant: 'error', title: 'Folder picker', description: message });
       console.error('Failed to pick directory:', err);
     } finally {
       setLoading(false);
@@ -61,7 +61,6 @@ export function SetupStepWelcome({ state, onChange, onNext }: SetupStepWelcomePr
   }
 
   async function continueToNext() {
-    setError(null);
     if (!desktop) {
       onNext();
       return;
@@ -70,8 +69,8 @@ export function SetupStepWelcome({ state, onChange, onNext }: SetupStepWelcomePr
       try {
         await desktop.setWorkspacePath(state.workspaceRoot);
       } catch (err) {
-        const message = errorMessage(err);
-        setError(message || 'Could not save the workspace path.');
+        const message = errorMessage(err) || 'Could not save the workspace path.';
+        toast({ variant: 'error', title: 'Workspace path', description: message });
         console.error('Failed to persist workspace path:', err);
         return;
       }
@@ -95,12 +94,6 @@ export function SetupStepWelcome({ state, onChange, onNext }: SetupStepWelcomePr
           <span className="text-copy-14 text-gray-1000">{loading ? 'Resolving…' : state.workspaceRoot}</span>
         </div>
       </div>
-
-      {error && (
-        <p className="text-copy-14 text-red-800" role="alert">
-          {error}
-        </p>
-      )}
 
       <div className="flex justify-between">
         {desktop ? (

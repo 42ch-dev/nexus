@@ -12,6 +12,8 @@
  */
 import { parse as parseYaml } from 'yaml';
 
+import { errorMessage } from '@/lib/error-message';
+
 /** Converge (merge-point) strategy — orchestration-engine.md §7.5. */
 export type ConvergeStrategy = 'wait_for_all' | 'first_completed' | 'any';
 
@@ -99,9 +101,7 @@ export function parsePresetYaml(yaml: string): ParsedPreset {
   try {
     root = parseYaml(yaml);
   } catch (err) {
-    problems.push(
-      `preset.yaml could not be parsed: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    problems.push(`preset.yaml could not be parsed: ${errorMessage(err) || 'unknown error'}`);
     return { manifest: { preset: { id: 'unknown' }, states: [] }, problems };
   }
 
