@@ -2,20 +2,37 @@
 
 > For project-level rules, tech stack, and domain-specific conventions, see the root [`AGENTS.md`](../AGENTS.md).
 
+## Source priority
+
+1. Current user instruction
+2. Root [`AGENTS.md`](../AGENTS.md)
+3. This file
+4. Upstream `mstar-*` skills (runtime SSOT for harness behavior)
+
 ## Concepts
 
-| Symbol | Meaning | Path |
-|--------|---------|------|
+| Symbol | Meaning | Path (this repo) |
+|--------|---------|------------------|
 | `{HARNESS_DIR}` | Root of engineering harness (this tree) | `.mstar/` |
 | `{PLAN_DIR}` | Plan documents and QC/QA reports | `plans/` |
+| `{SDD_DIR}` | SDD runtime scratch (gitignored) | `sdd/<plan-id>/` |
 | `{ITERATION_DIR}` | Iteration-level compass specs (version scope/acceptance/risk) | `iterations/` |
-| `{KNOWLEDGE_DIR}` | Knowledge root + [`knowledge/specs/`](knowledge/specs/README.md) (functional/normative specs) | `knowledge/` |
+| `{KNOWLEDGE_DIR}` | Knowledge root (cross-cutting policy + trackers) | `knowledge/` |
+| `{SPECS_DIR}` | Frozen functional/normative OSS specs | `knowledge/specs/` (see deviation below) |
 
 ## Upstream Harness
 
 This repo follows the **[Morning Star (mstar-harness)](https://github.com/btspoony/mstar-harness)** framework. Default harness behavior lives in upstream `mstar-*` skills; this file records **project-specific deviations** only.
 
-**Load order (harness work):** Read `mstar-harness-core`, then `mstar-plan-conventions` (+ `mstar-review-qc` when touching `InReview` or QC reports). State machine, QC triple-review timing, and multi-batch rules are **not** duplicated here.
+**Load order (harness work):** Read `mstar-harness-core`, then load topic skills **only as needed** (do not read all `mstar-*` skills by default):
+
+| Role / task | After core, typically also read |
+|-------------|----------------------------------|
+| `@project-manager` | `mstar-dispatch-gates`, `mstar-phase-gates`, `mstar-plan-conventions`, `mstar-plan-artifacts`; iteration work → `mstar-iteration`; parallel Git → `mstar-branch-worktree`; QC dispatch → `mstar-review-qc` |
+| Implement / QC / QA / ops | `mstar-coding-behavior` + role ref; Git writes → `mstar-branch-worktree`; plan paths → `mstar-plan-conventions`; status/residual → `mstar-plan-artifacts`; QC/QA → `mstar-review-qc` |
+| Leaf executor | Above + **`mstar-dispatch-gates`** (anti-recursion) |
+
+State machine, QC triple-review timing, SDD serial rules, and iteration Phase 1–5 are **not** duplicated here — see upstream skills.
 
 ### Editing this file
 
@@ -37,23 +54,41 @@ Each plan is a **single `.md` file** under `plans/` — **never** a directory. Q
 
 **Rule**: `plans/reports/` is the **single** reports root. A `plans/<plan-id>/` directory must not exist — the plan itself is the `.md` file.
 
+### Who writes where (implement vs QC)
+
+| Path | Typical writers | Content |
+|------|-----------------|--------|
+| **`{SDD_DIR}`** (`sdd/<plan-id>/`, gitignored) | **Implementers** (SDD default), PM via `mstar-sdd` scripts, task reviewers (ledger) | `task-N-brief.md`, `task-N-report.md`, `progress.md`, branch review diffs, `implementer-session.json` |
+| **`plans/<plan-id>-<name>.md`** | Implementers (checkboxes only), PM, architect, product-manager | Main plan tasks, decisions — **not** per-task SDD bodies |
+| **`plans/reports/<plan-id>/`** | **`qc-specialist*`** (QC tri), PM (`qc-consolidated.md`), QA | `qc1.md`…`qc3.md`, `qc-consolidated.md`, `qc.md` (inline/hotfix) — **plan-level L3 audit** |
+
+**Default (`Execution mode: sdd`):** implementors **do not** write implementation artifacts under `plans/reports/`. Per-task handoff lives in **`{SDD_DIR}`** only; dispatch prompts reference file paths there (`mstar-sdd` · `references/file-handoffs.md`). Plan QC runs **after** all tasks pass L2 review, then QC writes to `plans/reports/<plan-id>/`.
+
+**Exceptions:** `Execution mode: inline` / hotfix — no `{SDD_DIR}` scratch; a single `qc.md` may land in `plans/reports/` after delivery. PM may point QC at a review-package diff under `{SDD_DIR}` without copying SDD bodies into reports.
+
 ## Reachability
 
 Git-tracked docs and plans must be openable after a fresh `git clone`: no `.gitignore`-d paths, machine-specific absolute paths, or untracked sibling directories as sole authorities. Use repo-relative paths or stable public URLs.
 
-## Content Boundary: `docs/` vs `{ITERATION_DIR}` vs `{KNOWLEDGE_DIR}`
+## Content Boundary: `docs/` vs harness subtrees
 
-- **`docs/`** (repo root): end-user and contributor documentation (installation, quickstart, architecture overview, contributing). **Do NOT** place architecture review reports, per-plan design decisions, or plan inputs/outputs here.
-- **`{ITERATION_DIR}`**: iteration-level specs for a delivery version — including `*-delivery-compass-*.md` and legacy `v1.*` compass artifacts (overview, matrix, program notes). Indexed in [`iterations/README.md`](iterations/README.md).
-- **`knowledge/specs/`**: functional and normative OSS specs (migrated from platform `v1-spec/local/`). Index: [`knowledge/specs/README.md`](knowledge/specs/README.md).
-- **`{KNOWLEDGE_DIR}`** (root files): cross-cutting rules and trackers only — see [`knowledge/README.md`](knowledge/README.md). Layout: [`knowledge/AGENTS.md`](knowledge/AGENTS.md).
+| Area | Content | Must not |
+|------|---------|----------|
+| **`docs/`** (repo root) | End-user and contributor documentation (installation, quickstart, architecture overview, contributing) | Architecture review reports, per-plan design decisions, plan I/O |
+| **`{ITERATION_DIR}`** | Iteration compass snapshots (`*-delivery-compass-*.md`, legacy `v1.*` artifacts). Index: [`iterations/README.md`](iterations/README.md) | Become permanent spec without P5 merge |
+| **`{SPECS_DIR}`** (`knowledge/specs/`) | Frozen functional/normative OSS specs (migrated from platform `v1-spec/local/`). Index: [`knowledge/specs/README.md`](knowledge/specs/README.md) | Runtime knowledge, iteration audit evidence |
+| **`{KNOWLEDGE_DIR}`** (root files) | Cross-cutting rules and trackers only — see [`knowledge/README.md`](knowledge/README.md). Layout: [`knowledge/AGENTS.md`](knowledge/AGENTS.md) | Restate normative command/API detail from specs |
+| **`{PLAN_DIR}/`** | Main plans + `reports/` (QC/QA audit chain only) | SDD task briefs/reports, implementor scratch |
+| **`{SDD_DIR}`** | SDD per-plan scratch (gitignored) — **default implementor write target** | Committed handoff artifacts, QC reports |
+
+**`{SPECS_DIR}` deviation:** Morning Star default resolves repo-root `specs/` (else `designs/`). In this repo, **`{SPECS_DIR}` = `{KNOWLEDGE_DIR}/specs/`** — wire JSON Schema contracts remain in repo-root `schemas/` (see root [`AGENTS.md`](../AGENTS.md)).
 
 ## Pre-merge Checklist (this repository)
 
 1. Update `status.json` (plans, residuals, gates, timeline)
 2. Run `pnpm run codegen` and commit regenerated output if `schemas/` changed
 3. Update `roadmap.md` in `nexus-platform` if a plan is marked `Done`
-4. Archive Done plan rows per `mstar-plan-conventions` (`references/done-compaction.md`, Profile B)
+4. Archive Done plan rows per `mstar-plan-artifacts` (`references/done-compaction.md`, Profile B)
 5. **Size gate:** before P-last, verify `wc -c .mstar/status.json` < 20_000; archive all `lifecycle: resolved` findings to `archived/residuals/`. Full clone/worktree/commit discipline: root [`AGENTS.md`](../AGENTS.md) § Git & repository hygiene.
 
 ## Project-Specific Deviations
@@ -73,38 +108,42 @@ Git-tracked docs and plans must be openable after a fresh `git clone`: no `.giti
 
 **Audit trail preservation**: removing a forbidden narrative field never loses information — the underlying facts remain in `plans[]` (structured), `residual_findings` (per-finding lifecycle), `archived/plans/` (per-plan snapshots), and `notes.json` (timeline). Record the removal in `notes.json` for traceability.
 
-### Multi-plan iteration branches (harness convention)
+### Iteration branch model (Spec integration + per-plan topics)
 
-When an active delivery compass has **two or more** locked implement plans in the **same repo**, this project uses a **two-tier branch model** (aligned with Morning Star `mstar-branch-worktree` — plan integration branch + per-plan topic branches):
+Formal iterations use Morning Star **`mstar-iteration`** + **`mstar-plan-conventions`** Spec-driven branch metadata. This project’s **two-tier** model (Spec integration line + per-plan topic branches) maps to upstream field names as follows:
 
 | Tier | Field (`status.json`) | Purpose |
 | --- | --- | --- |
-| **Iteration integration** | `metadata.integration_branch` | Single line where all plan work lands before QC/QA; also the **`Working branch`** in QC/QA Assignments |
-| **Final landing** | `metadata.integration_merge_target` | Usually `main`; integration branch merges here via PR after iteration sign-off |
+| **Iteration base** | `metadata.iteration_base_branch` | Ancestor ref used to **create** the Spec integration branch — **not** assumed `main`/`master`; must be explicit in compass + metadata |
+| **Spec integration** | `metadata.spec_integration_branch` (plan mirror: `plans[].metadata.spec_integration_branch`) | Single line where all plan work lands before iteration-close; QC/QA **`Working branch`** when reviewing integrated iteration scope |
+| **Final PR target** | `metadata.target_branch` | Branch the iteration PR merges into after sign-off (usually `main`; must be explicit) |
 | **Per plan** | `plans[].working_branch` | Topic branch for that plan’s commits only |
-| **Per plan** | `plans[].merge_target` | Must equal `metadata.integration_branch` for the same iteration |
+| **Per plan** | `plans[].merge_target` | Must equal `spec_integration_branch` for the same iteration |
 
-**Naming**:
+**Legacy aliases (read-only migration):** older rows may still carry `metadata.integration_branch` or `metadata.integration_merge_target`. Treat them as mirrors of `spec_integration_branch` and `target_branch` respectively; **new writes** use the upstream names only.
 
-- Integration: `iteration/{ver}` (e.g. `iteration/v1.51`)
+**Naming (this repo):**
+
+- Spec integration: `iteration/{ver}` (e.g. `iteration/v1.51`)
 - Topic: `feature/{ver}-{plan-slug}` where `<plan-slug>` is the plan title slug without date prefix
 - Hotfix: `fix/{short-name}`
 
 **PM / implement rules:**
 
-1. Create the **integration branch** from `integration_merge_target` (typically `main`) before the first plan implement dispatch.
-2. Each plan Assignment uses **`Working branch: create <topic-branch> from <integration-branch>`** (or `from` integration `HEAD` after prior plans merged).
-3. On plan completion, merge topic branch into **`integration_branch`**; resolve conflicts on the integration branch, not on `main`.
-4. Do **not** point QC/QA at a topic branch unless only that plan is in scope for a partial review (exception must be written in Assignment).
-5. Same-repo **parallel** plans: one **git worktree** per topic branch; see `mstar-branch-worktree`.
+1. **Branch metadata gate:** before first implement dispatch, root `metadata.iteration_base_branch`, `metadata.target_branch`, and plan `metadata.spec_integration_branch` must be recorded (compass frontmatter mirrors the same names). **Do not** silently default to `main` — see `mstar-iteration` §2.3 resolution chain.
+2. Create **`spec_integration_branch`** with `git checkout -b <spec_integration_branch> <iteration_base_branch>` (or checkout if it already exists).
+3. Each plan Assignment uses **`Working branch: create <topic-branch> from <spec_integration_branch>`** (or `from` integration `HEAD` after prior plans merged).
+4. On plan completion, merge topic branch into **`spec_integration_branch`**; resolve conflicts on the integration branch, not on `target_branch`.
+5. Do **not** point QC/QA at a topic branch unless only that plan is in scope for a partial review (exception must be written in Assignment). **`Review range` / `Diff basis`** merge-base uses `target_branch` or PM-specified ref — not assumed `origin/main`.
+6. Same-repo **parallel** plans: one **git worktree** per topic branch; see `mstar-branch-worktree`.
 
-**Single-plan iterations** may use one branch for both roles: set `working_branch` and `integration_branch` to the same name, and omit separate topic branches.
+**Single-plan iterations** may collapse roles: set `working_branch` and `spec_integration_branch` to the same name, and omit separate topic branches.
 
-**SSOT:** active compass §Branch policy table + `status.json` for the iteration. If compass and `status.json` disagree, fix before dispatch.
+**SSOT:** active compass §Branch policy table + `status.json` for the iteration. Resolution order: `status.json` metadata → compass frontmatter → ask user. If compass and `status.json` disagree, fix before dispatch.
 
 ### Plan compaction profile
 
-**Profile B** — Morning Star `mstar-plan-conventions` → `references/done-compaction.md` (Template B). `status.json.plans[]` keeps **non-`Done`** plans only; historical `Done` plans live in the archive.
+**Profile B** — Morning Star `mstar-plan-artifacts` → `references/done-compaction.md` (Template B). `status.json.plans[]` keeps **non-`Done`** plans only; historical `Done` plans live in the archive.
 
 **Layout invariant** (enforce on every Profile B compaction):
 
@@ -134,7 +173,7 @@ When an active delivery compass has **two or more** locked implement plans in th
 
 ### Residual detail prose (`plans/residuals/`)
 
-Optional Markdown under `plans/residuals/<plan-id>/`, named `<finding-id>-<short-label>.md`; supplements root `residual_findings` (see upstream `mstar-plan-conventions`). Archive prose with structured JSON to `archived/residuals/<plan-id>.json` when closed.
+Optional Markdown under `plans/residuals/<plan-id>/`, named `<finding-id>-<short-label>.md`; supplements root `residual_findings` (canonical schema: `mstar-plan-artifacts/references/status-and-residuals.md`). Archive prose with structured JSON to `archived/residuals/<plan-id>.json` when closed.
 
 ### Post-merge hotfix pattern
 
@@ -176,7 +215,7 @@ against **current `main` HEAD**, not against a stale base commit:
 | Step | Action |
 |------|--------|
 | 1 | Identify the failing test(s) and the failure mode |
-| 2 | Run the test against `origin/main` (or `integration_merge_target`) |
+| 2 | Run the test against `origin/main` (or `metadata.target_branch`) |
 | 3 | If the test **passes on current main** → the "pre-existing" claim is **FALSE**; the failure is attributable to the iteration under review |
 | 4 | If the test **fails on current main** → the "pre-existing" claim is **TRUE**; document the failure base SHA + reproduce command, then proceed with the PM-override |
 | 5 | If the test is **flaky** → use a fixed seed or document the flake rate, do not claim "pre-existing" without a deterministic reproduction |

@@ -2,7 +2,7 @@
 
 Behavioral rules for the harness **knowledge** tree. **Do not** duplicate file indexes here — discover documents via [`README.md`](README.md), [`specs/README.md`](specs/README.md), or directory listing.
 
-> Project and crate rules: root [`AGENTS.md`](../../AGENTS.md). Harness layout: [`.mstar/AGENTS.md`](../AGENTS.md).
+> Project and crate rules: root [`AGENTS.md`](../../AGENTS.md). Harness layout and path symbols (`{SPECS_DIR}` = `knowledge/specs/` in this repo): [`.mstar/AGENTS.md`](../AGENTS.md).
 
 ---
 
