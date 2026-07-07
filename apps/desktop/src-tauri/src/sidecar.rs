@@ -246,7 +246,7 @@ impl SidecarManager {
 
         let command = app
             .shell()
-            .sidecar("binaries/nexus42")
+            .sidecar("nexus42")
             .map_err(|e| format!("failed to resolve sidecar binary: {e}"))?
             .args([
                 "daemon",
