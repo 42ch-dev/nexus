@@ -28,6 +28,8 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
     getWorkspaceRoot: () => Promise.resolve('/tmp/nexus'),
     pickDirectory: () => Promise.resolve(null),
     setWorkspacePath: () => Promise.resolve(),
+    ensureSetupBootstrap: () =>
+      Promise.resolve({ creator_id: 'ctr_local1234567890ab', already_bootstrapped: false }),
     ...overrides,
   };
 }
@@ -317,5 +319,34 @@ describe('SetupStepDaemon', () => {
 
     await waitFor(() => expect(screen.getByText(/Daemon did not start/)).toBeInTheDocument());
     expect(screen.getByText(/migration 202606070001 was previously applied/)).toBeInTheDocument();
+  });
+
+  it('auto-starts the daemon on clean-state when status is stopped', async () => {
+    const startDaemon = vi.fn(() => Promise.resolve());
+    const getDaemonStatus = vi
+      .fn()
+      .mockResolvedValueOnce({ state: 'stopped', port: 8420 } as DaemonStatus)
+      .mockResolvedValueOnce({ state: 'starting', port: 8420 } as DaemonStatus);
+    let emitStatus: (status: DaemonStatus) => void;
+    const onDaemonStatusChanged = vi.fn((callback: (status: DaemonStatus) => void) => {
+      emitStatus = callback;
+      return Promise.resolve(() => {});
+    });
+
+    renderInApp(<SetupStepDaemon onNext={() => {}} onBack={() => {}} />, {
+      client: makeClient(),
+      desktop: makeDesktop({ startDaemon, getDaemonStatus, onDaemonStatusChanged }),
+      initialRouterEntries: ['/setup'],
+    });
+
+    await waitFor(() => expect(startDaemon).toHaveBeenCalled());
+    // Should show loading state, not the stopped error.
+    expect(screen.getByText('Starting daemon…')).toBeInTheDocument();
+
+    // Simulate daemon reaching running after auto-start.
+    await waitFor(() => {
+      emitStatus!({ state: 'running', port: 8420, version: 'test' });
+    });
+    await waitFor(() => expect(screen.getByText('Daemon is running.')).toBeInTheDocument());
   });
 });

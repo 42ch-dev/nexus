@@ -34,11 +34,13 @@ export function SetupStepDaemon({ onNext, onBack }: SetupStepDaemonProps) {
       } else if (status.state === 'starting') {
         setReady(false);
         setError(null);
-      } else if (status.state === 'error' || status.state === 'stopped') {
+      } else if (status.state === 'error') {
         setReady(false);
         setError(status.detail ?? `Daemon is ${status.state}.`);
         clearTimeout(timeoutId);
       }
+      // 'stopped' is handled inline in subscribe() — do not surface as error here
+      // because the clean-state path auto-starts the daemon.
     }
 
     async function subscribe() {
@@ -48,8 +50,31 @@ export function SetupStepDaemon({ onNext, onBack }: SetupStepDaemonProps) {
       }
       try {
         const status = await desktop.getDaemonStatus();
-        applyStatus(status);
-        if (cancelled || status.state === 'running' || status.state === 'degraded') return;
+        if (cancelled || status.state === 'running' || status.state === 'degraded') {
+          setReady(true);
+          setError(null);
+          return;
+        }
+
+        if (status.state === 'starting') {
+          setReady(false);
+          setError(null);
+        } else if (status.state === 'error') {
+          setReady(false);
+          setError(status.detail ?? `Daemon is ${status.state}.`);
+        }
+
+        // Clean-state path: daemon was never auto-started by .setup().
+        // Start it now so the wizard reaches the running state.
+        if (status.state === 'stopped' || status.state === 'error') {
+          try {
+            await desktop.startDaemon();
+          } catch {
+            // startDaemon failure surfaces through the status subscription
+            // or the retry button below.
+          }
+        }
+
         unsub = await desktop.onDaemonStatusChanged((status) => {
           applyStatus(status);
         });

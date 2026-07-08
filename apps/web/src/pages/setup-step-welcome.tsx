@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { FolderOpen } from 'lucide-react';
+import { FolderOpen, Loader2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { useDesktopCapabilities } from '@/lib/client-context';
@@ -18,6 +18,7 @@ interface SetupStepWelcomeProps {
 export function SetupStepWelcome({ state, onChange, onNext }: SetupStepWelcomeProps) {
   const desktop = useDesktopCapabilities();
   const [loading, setLoading] = useState(true);
+  const [bootstrapping, setBootstrapping] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -75,7 +76,28 @@ export function SetupStepWelcome({ state, onChange, onNext }: SetupStepWelcomePr
         return;
       }
     }
-    onNext();
+    setBootstrapping(true);
+    try {
+      const result = await desktop.ensureSetupBootstrap();
+      if (!result.already_bootstrapped) {
+        toast({
+          variant: 'info',
+          title: 'Local workspace prepared',
+          description: `Creator identity created (${result.creator_id}).`,
+        });
+      }
+      onNext();
+    } catch (err) {
+      const message = errorMessage(err) || 'Could not prepare your local workspace.';
+      toast({
+        variant: 'error',
+        title: 'Local workspace bootstrap failed',
+        description: `${message} Try again or reset the local database from the next step.`,
+      });
+      console.error('Bootstrap failed:', err);
+    } finally {
+      setBootstrapping(false);
+    }
   }
 
   return (
@@ -114,10 +136,17 @@ export function SetupStepWelcome({ state, onChange, onNext }: SetupStepWelcomePr
         <Button
           variant="primary"
           onClick={continueToNext}
-          disabled={loading || !state.workspaceRoot}
+          disabled={loading || bootstrapping || !state.workspaceRoot}
           className="w-full max-w-setup-wizard-surface-cta-primary-max-width"
         >
-          Continue
+          {bootstrapping ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+              Preparing workspace…
+            </>
+          ) : (
+            'Continue'
+          )}
         </Button>
       </div>
     </div>
