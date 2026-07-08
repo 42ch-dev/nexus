@@ -18,7 +18,8 @@
     /* Path aliases (match vite.config.ts) */
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*", "../web/src/*"],
+      "@/*": ["./src/*"],
+      "@/lib/utils": ["../web/src/lib/utils.ts"],
       "@web-ui/*": ["../web/src/components/ui/*"],
       "@web-lib/utils": ["../web/src/lib/utils.ts"]
     },

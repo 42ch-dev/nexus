@@ -100,7 +100,7 @@ import nexusLogo from '@42ch/nexus-ui/assets/logos/logo-primary.svg';
 
 - Export paths are stable public API — future `nexus-platform` and other surfaces should import only documented entries.
 - Do not deep-import `src/` or undocumented paths.
-- Full brand token SSOT: root `DESIGN.md` / `DESIGN.dark.md` (P1). Web-specific mappings: `apps/web/DESIGN*.md` (P1/P2).
+- Full brand token SSOT: root `DESIGN.md` / `DESIGN.dark.md` — all app surfaces consume these directly.
 
 ## Development
 

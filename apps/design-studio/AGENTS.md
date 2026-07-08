@@ -62,3 +62,21 @@ No daemon or Tauri required.
 - Read-only gallery — no YAML write-back, no localStorage token overrides
 - App chrome shows **Read-only · edit `DESIGN.md`** (repo-root SSOT helper)
 - Voice & Content and Surfaces fixture strings: [IA guide §4.4–§4.5](../../.mstar/iterations/v1.98/guides/design-studio-information-architecture.md) — sourced from DESIGN § Voice & Content and shipped product copy
+
+## Audiences
+
+| Audience | Role |
+| --- | --- |
+| Contributors (design-minded maintainers) | Tune colors, typography, spacing, and component tokens |
+| Frontend developers | Pick correct variant/state when building screens; use component matrix as reference |
+| Brand / VI reviewers | Confirm logo usage, clear space, and theme.css alignment |
+| Authors (local Web UI users) | **Not in scope** — studio is not bundled in `nexus42` or desktop installer |
+
+See [design-studio.md spec §2](../../.mstar/knowledge/specs/design-studio.md#2-audiences) for audience job-to-be-done detail.
+
+## Tests
+
+- Runner: Vitest 3 with jsdom + @testing-library/react — mirrors `apps/web` conventions
+- Config: `vitest.config.ts` (resolve aliases match `vite.config.ts`; setup in `src/test/setup.ts`)
+- Scope: smoke tests for App shell render, theme toggle, and gallery section routing — see `src/App.test.tsx`
+- Run: `pnpm --filter design-studio test` (CI-compatible; no daemon required)
