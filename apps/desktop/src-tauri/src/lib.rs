@@ -3,17 +3,19 @@
 //! Scope (V1.66 P0): wraps the bundled `apps/web/dist` (served via
 //! `build.frontendDist`) and exposes the desktop-only `NexusClient` extensions
 //! the browser sandbox cannot perform (compass §5 #1/#8, desktop-shell.md
-//! §5/§9). The two custom commands are `open_with(path)` (open in the system
+//! §5/§9). Custom commands include `open_with(path)` (open in the system
 //! default editor) and `reveal_in_finder(path)` (reveal in Finder).
 //!
-//! Both commands enforce an AUTHORITATIVE runtime path guard (canonicalize +
-//! prefix-check against the active workspace root) before delegating to the
-//! opener engine. The Tauri capability/opener `scope` is defense-in-depth only
-//! — it is static and cannot encode a dynamic workspace root (§5 #8).
+//! Both path-guard commands enforce an AUTHORITATIVE runtime path guard
+//! (canonicalize + prefix-check against the active workspace root) before
+//! delegating to the opener engine. The Tauri capability/opener `scope` is
+//! defense-in-depth only — it is static and cannot encode a dynamic workspace
+//! root (§5 #8).
 //!
-//! Daemon lifecycle (sidecar autostart/stop/restart) is P1 and intentionally
-//! absent here; P0 runs against an externally-started daemon
-//! (`nexus42 daemon start --foreground`).
+//! Daemon lifecycle (sidecar autostart/stop/restart) is owned here via
+//! `SidecarManager`. The `.setup()` hook auto-starts the daemon only when
+//! `setup_completed` is `true` (existing install); on clean-state first launch
+//! the wizard owns the daemon start after `ensure_setup_bootstrap`.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -494,6 +496,116 @@ fn write_workspace_path_at(path: &Path, value: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+// ── Setup bootstrap (V1.100 P0) ────────────────────────────────────────
+
+/// Returned by `ensure_setup_bootstrap` to inform the wizard whether bootstrap
+/// created a new creator ID or detected an already-bootstrapped state.
+#[derive(Debug, Clone, Serialize)]
+struct BootstrapResult {
+    creator_id: String,
+    already_bootstrapped: bool,
+}
+
+/// Generate a `ctr_local` + 12 random hex chars creator ID, matching the
+/// generation pattern in `nexus-creator/src/local_identity.rs:214-221`.
+fn generate_local_creator_id() -> String {
+    let random: String = uuid::Uuid::new_v4()
+        .to_string()
+        .replace('-', "")
+        .chars()
+        .take(12)
+        .collect();
+    format!("ctr_local{random}")
+}
+
+/// Read the current bootstrap state from a config.toml path.
+///
+/// Returns `(active_creator_id, active_workspace_slug)` — both `Option`.
+fn read_bootstrap_state(path: &Path) -> anyhow::Result<(Option<String>, Option<String>)> {
+    if !path.exists() {
+        return Ok((None, None));
+    }
+    let content = std::fs::read_to_string(path)?;
+    #[derive(serde::Deserialize, Default)]
+    struct ConfigFile {
+        #[serde(default)]
+        active_creator_id: Option<String>,
+        #[serde(default)]
+        active_workspace_slug_by_creator: Option<std::collections::HashMap<String, String>>,
+    }
+    let cfg = toml::from_str::<ConfigFile>(&content)?;
+    let slug = cfg
+        .active_workspace_slug_by_creator
+        .as_ref()
+        .and_then(|map| cfg.active_creator_id.as_ref().and_then(|id| map.get(id).cloned()));
+    Ok((cfg.active_creator_id, slug))
+}
+
+/// Idempotent creator/workspace bootstrap to `~/.nexus42/config.toml`.
+///
+/// On first call (no `active_creator_id` in config):
+///   - generates a new `ctr_local*` creator ID
+///   - writes `active_creator_id` + `active_workspace_slug_by_creator` to config.toml
+///   - returns `already_bootstrapped: false`
+///
+/// On subsequent calls (creator ID already present):
+///   - returns the existing `creator_id` with `already_bootstrapped: true`
+///   - never overwrites an existing `active_creator_id`
+fn ensure_setup_bootstrap_at(path: &Path) -> anyhow::Result<BootstrapResult> {
+    let (existing_id, _slug) = read_bootstrap_state(path)?;
+
+    if let Some(creator_id) = existing_id {
+        return Ok(BootstrapResult {
+            creator_id,
+            already_bootstrapped: true,
+        });
+    }
+
+    // Generate new creator ID.
+    let creator_id = generate_local_creator_id();
+
+    // Write to config.toml, preserving existing keys via toml_edit round-trip.
+    // TOML parse failures are propagated rather than silently wiping the file.
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let mut doc = if path.exists() {
+        let text = std::fs::read_to_string(path)?;
+        text.parse::<toml_edit::DocumentMut>()?
+    } else {
+        toml_edit::DocumentMut::new()
+    };
+
+    doc["active_creator_id"] = toml_edit::value(&creator_id);
+
+    // Write the [active_workspace_slug_by_creator] table with the new creator.
+    if doc.get("active_workspace_slug_by_creator").is_none() {
+        doc["active_workspace_slug_by_creator"] = toml_edit::Item::Table(toml_edit::Table::new());
+    }
+    doc["active_workspace_slug_by_creator"][&creator_id] = toml_edit::value("default");
+
+    std::fs::write(path, doc.to_string())?;
+
+    Ok(BootstrapResult {
+        creator_id,
+        already_bootstrapped: false,
+    })
+}
+
+/// Desktop-only Tauri IPC command: bootstrap the minimum creator/workspace
+/// state (`active_creator_id` + `active_workspace_slug_by_creator` in
+/// `~/.nexus42/config.toml`) so the daemon can start without "No active
+/// creator". Idempotent — if a creator ID already exists, returns it without
+/// overwriting.
+///
+/// See `.mstar/iterations/v1.100/specs/desktop-first-launch-bootstrap.md`.
+#[tauri::command]
+fn ensure_setup_bootstrap() -> Result<BootstrapResult, String> {
+    let config_path = nexus_config_path().ok_or("cannot determine home directory")?;
+    ensure_setup_bootstrap_at(&config_path).map_err(|e| format!("bootstrap failed: {e}"))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // The workspace root is captured once at startup and stored as managed
@@ -528,13 +640,18 @@ pub fn run() {
         .manage(sidecar_manager.clone())
         .setup(move |app| {
             setup_manager.set_app_handle(app.handle().clone());
-            let manager = setup_manager.clone();
-            let handle = app.handle().clone();
-            tauri::async_runtime::spawn(async move {
-                if let Err(e) = manager.start(&handle).await {
-                    eprintln!("nexus-desktop: sidecar failed to start: {e}");
-                }
-            });
+            // Gate daemon auto-start behind setup_completed.
+            // - true (existing install): preserve current auto-start/attach behavior.
+            // - false / absent (clean-state): no-op; wizard owns daemon start after bootstrap.
+            if read_setup_completed().unwrap_or(false) {
+                let manager = setup_manager.clone();
+                let handle = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Err(e) = manager.start(&handle).await {
+                        eprintln!("nexus-desktop: sidecar failed to start: {e}");
+                    }
+                });
+            }
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -550,6 +667,7 @@ pub fn run() {
             get_setup_completed,
             set_setup_completed,
             set_agent_profile,
+            ensure_setup_bootstrap,
             connection_config::get_connection_config,
             connection_config::set_connection_config,
             connection_config::delete_connection_config,
@@ -579,6 +697,10 @@ mod tests {
     use super::{
         default_workspace_root, guard_path, read_setup_completed_at, reset_local_database_at,
         write_agent_profile_at, write_setup_completed_at, PathGuardError, WorkspaceRoot,
+    };
+    use super::{
+        ensure_setup_bootstrap_at, generate_local_creator_id, read_bootstrap_state,
+        write_workspace_path_at,
     };
     use std::fs;
     use std::path::PathBuf;
@@ -847,5 +969,186 @@ mod tests {
             "state.db-shm should be deleted"
         );
         assert!(user_file.exists(), "user workspace files must be untouched");
+    }
+
+    // ── V1.100 P0: setup bootstrap tests ────────────────────────────────
+    // Pins three lifecycle branches per
+    // `.mstar/iterations/v1.100/specs/desktop-first-launch-bootstrap.md`
+    // § Verification Strategy:
+    //   1. setup_completed=false → .setup() does NOT auto-start sidecar
+    //   2. setup_completed=true  → preserves auto-start/attach behavior
+    //   3. ensure_setup_bootstrap idempotency
+    //   4. Bootstrap failure: config write failure → no partial/corrupt state
+    //
+    // Branch 1 + 2 are tested via the read_setup_completed boolean logic
+    // that gates .setup() (the Tauri closure itself is integration-tested
+    // via interactive smoke, T4).
+
+    #[test]
+    fn setup_completed_absent_means_no_auto_start() {
+        // Clean-state: no config file → read_setup_completed returns None
+        // → .setup() treats as false → no sidecar spawn.
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("config.toml");
+
+        // No config file exists → read returns Err (which .setup() handles
+        // via unwrap_or(false) → effectively false → no sidecar spawn).
+        assert!(read_setup_completed_at(&config_path).is_err());
+
+        // Write setup_completed = false explicitly — same gating semantics.
+        write_setup_completed_at(&config_path, false).expect("write false");
+        assert_eq!(read_setup_completed_at(&config_path).unwrap(), Some(false));
+    }
+
+    #[test]
+    fn setup_completed_true_preserves_auto_start_behavior() {
+        // Existing install: setup_completed = true → .setup() auto-starts
+        // the sidecar (current behavior, byte-for-byte preserved).
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("config.toml");
+
+        write_setup_completed_at(&config_path, true).expect("write true");
+        assert_eq!(read_setup_completed_at(&config_path).unwrap(), Some(true));
+    }
+
+    #[test]
+    fn bootstrap_creates_creator_id_on_first_call() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("config.toml");
+
+        let result =
+            ensure_setup_bootstrap_at(&config_path).expect("first bootstrap should succeed");
+        assert!(!result.already_bootstrapped);
+        assert!(result.creator_id.starts_with("ctr_local"));
+        assert_eq!(result.creator_id.len(), 21); // "ctr_local" + 12 hex
+
+        // Config must contain both keys.
+        let text = std::fs::read_to_string(&config_path).expect("read config");
+        assert!(text.contains("active_creator_id"));
+        assert!(text.contains(&result.creator_id));
+        assert!(text.contains("active_workspace_slug_by_creator"));
+        assert!(text.contains("default"));
+    }
+
+    #[test]
+    fn bootstrap_is_idempotent() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("config.toml");
+
+        let first =
+            ensure_setup_bootstrap_at(&config_path).expect("first bootstrap should succeed");
+        assert!(!first.already_bootstrapped);
+
+        let second =
+            ensure_setup_bootstrap_at(&config_path).expect("second bootstrap should succeed");
+        assert!(second.already_bootstrapped);
+        assert_eq!(second.creator_id, first.creator_id);
+
+        // Verify the config still has exactly one creator_id.
+        let text = std::fs::read_to_string(&config_path).expect("read config");
+        let count = text.matches("active_creator_id").count();
+        assert_eq!(count, 1, "should have exactly one active_creator_id key");
+    }
+
+    #[test]
+    fn bootstrap_preserves_existing_config_keys() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("config.toml");
+
+        // Pre-populate with keys written by wizard step 1 (set_workspace_path).
+        write_workspace_path_at(&config_path, "/tmp/test-workspace")
+            .expect("write workspace_path");
+        write_setup_completed_at(&config_path, false).expect("write setup_completed");
+
+        let result =
+            ensure_setup_bootstrap_at(&config_path).expect("bootstrap should succeed");
+        assert!(!result.already_bootstrapped);
+
+        let text = std::fs::read_to_string(&config_path).expect("read config");
+        assert!(
+            text.contains("workspace_path = \"/tmp/test-workspace\""),
+            "workspace_path must survive bootstrap"
+        );
+        assert!(text.contains("active_creator_id"));
+        assert!(text.contains("active_workspace_slug_by_creator"));
+    }
+
+    #[test]
+    fn bootstrap_rejects_malformed_toml() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("config.toml");
+        let original = "workspace_path = \"/existing/workspace\"\nmalformed = \"unclosed\n";
+        std::fs::write(&config_path, original).expect("write malformed config");
+
+        let result = ensure_setup_bootstrap_at(&config_path);
+        assert!(result.is_err(), "malformed TOML must be rejected");
+
+        // The corrupt file must NOT be overwritten.
+        let text = std::fs::read_to_string(&config_path).expect("read config");
+        assert!(
+            text.contains("workspace_path = \"/existing/workspace\""),
+            "existing keys must survive a failed bootstrap"
+        );
+        assert!(
+            !text.contains("active_creator_id"),
+            "bootstrap must not write on parse failure"
+        );
+    }
+
+    #[test]
+    fn bootstrap_reads_existing_creator_id_as_already_bootstrapped() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("config.toml");
+
+        // Simulate an already-bootstrapped config with a creator ID.
+        let (creator_id, _slug) = read_bootstrap_state(&config_path).expect("read state");
+        assert!(creator_id.is_none(), "clean config has no creator");
+
+        // Write a pre-existing creator ID directly (simulating a previous bootstrap).
+        std::fs::write(
+            &config_path,
+            "active_creator_id = \"ctr_localABCD1234EF56\"\n",
+        )
+        .expect("write pre-bootstrapped config");
+
+        let (creator_id, _slug) = read_bootstrap_state(&config_path).expect("read state");
+        assert_eq!(creator_id.as_deref(), Some("ctr_localABCD1234EF56"));
+
+        // ensure_setup_bootstrap must detect and return already_bootstrapped.
+        let result =
+            ensure_setup_bootstrap_at(&config_path).expect("bootstrap should succeed");
+        assert!(result.already_bootstrapped);
+        assert_eq!(result.creator_id, "ctr_localABCD1234EF56");
+    }
+
+    #[test]
+    fn generate_local_creator_id_matches_pattern() {
+        // Verify the generation matches the `ctr_local` + 12 hex chars contract.
+        for _ in 0..20 {
+            let id = generate_local_creator_id();
+            assert!(
+                id.starts_with("ctr_local"),
+                "ID '{id}' should start with ctr_local"
+            );
+            assert_eq!(id.len(), 21, "ID '{id}': ctr_local + 12 hex chars = 21");
+            let hex_part = &id[9..]; // strip "ctr_local"
+            assert!(
+                hex_part.chars().all(|c| c.is_ascii_hexdigit()),
+                "ID '{id}' hex part should be all hex digits"
+            );
+        }
+    }
+
+    #[test]
+    fn bootstrap_writes_active_workspace_slug_table() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("config.toml");
+
+        let result =
+            ensure_setup_bootstrap_at(&config_path).expect("bootstrap should succeed");
+
+        let (creator_id, slug) = read_bootstrap_state(&config_path).expect("read state");
+        assert_eq!(creator_id.as_deref(), Some(result.creator_id.as_str()));
+        assert_eq!(slug.as_deref(), Some("default"));
     }
 }
