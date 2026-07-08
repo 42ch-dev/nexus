@@ -59,19 +59,26 @@ export function SetupStepDaemon({ onNext, onBack }: SetupStepDaemonProps) {
         if (status.state === 'starting') {
           setReady(false);
           setError(null);
-        } else if (status.state === 'error') {
-          setReady(false);
-          setError(status.detail ?? `Daemon is ${status.state}.`);
         }
 
-        // Clean-state path: daemon was never auto-started by .setup().
-        // Start it now so the wizard reaches the running state.
+        // Clean-state path (stopped) or existing-install crash recovery
+        // (error): auto-start the daemon before subscribing.  Don't surface
+        // an 'error' detail optimistically — the auto-start may recover, and
+        // if it doesn't, the catch block below surfaces the actionable error.
         if (status.state === 'stopped' || status.state === 'error') {
           try {
             await desktop.startDaemon();
-          } catch {
-            // startDaemon failure surfaces through the status subscription
-            // or the retry button below.
+          } catch (err) {
+            // Surface the sidecar-launch failure immediately — the status
+            // subscription won't help when the daemon process isn't running,
+            // and the 25s timeout message is too generic.
+            if (!cancelled) {
+              setError(
+                `Could not start the local service: ${errorMessage(err) || 'unknown error'}. ` +
+                  'Retry or reset the local database.',
+              );
+            }
+            return;
           }
         }
 
