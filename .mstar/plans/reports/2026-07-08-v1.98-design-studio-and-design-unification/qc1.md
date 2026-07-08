@@ -3,7 +3,7 @@ report_kind: qc
 reviewer: qc-specialist
 reviewer_index: 1
 plan_id: "2026-07-08-v1.98-design-studio-and-design-unification"
-verdict: "Request Changes"
+verdict: "Approve"
 generated_at: "2026-07-08"
 ---
 
@@ -100,8 +100,76 @@ None.
 | 🟡 Warning | 1 |
 | 🟢 Suggestion | 2 |
 
-**Verdict**: **Request Changes**
+**Verdict**: **Request Changes** *(see `## Revalidation` below — current verdict after fix dispatch is **Approve**; the body above captures the pre-fix state.)*
 
 The branch cleanly delivers the V1.98 architecture: single root DESIGN SSOT, shared `@nexus/design-tokens` package consumed by both web and studio via the same preset and `tokens.css`, no duplicate `theme.extend`, no schema/wire drift, no daemon coupling, no `nexus42`/`components/layout`/`pages/lib/nexus` leak, all tests green, build green, drift register empty. Architecture coherence, boundary integrity, token parity, and Done Definition coverage all PASS.
 
 The lone Warning (F-QC1-W001) is a one-line studio-local defect: `bg-gray-alpha-150` in `TopNav` resolves to no CSS rule because the color shade is not registered in the shared preset (gray-alpha scale is `{100, 200, 300, 400, 500, 600}`). Production CSS bundle confirms the rule is missing. The active top-nav link therefore lacks the visual highlight users expect when navigating gallery sections. This is a localized chrome defect (no data, security, or wire impact), but per the reviewer verdict rules an unresolved Warning → Request Changes. Fix path is a single string substitution to a defined shade (e.g. `bg-gray-alpha-100` or `bg-gray-alpha-200`) — no token or spec change required, fits within a follow-up mini-commit on this branch before merge.
+
+---
+
+## Revalidation
+
+**Scope of this section**: targeted re-review of F-QC1-W001 after the fix dispatch. Diff basis: `c35c3200..522cc467` on top of the original branch diff `908de272...c35c3200`. Working branch (verified): `feature/v1.98-design-studio-and-design-unification`. Working-tree HEAD (verified): `522cc4673a8e7a3afcb74aa22976a10663f21783`. Review cwd (verified): `/Users/bibi/workspace/organizations/42ch/nexus` (root via `git rev-parse --show-toplevel`). QC mode: targeted re-review of qc1's own finding (single-seat, this report file only — `## Revalidation` appended, no new file created per `qc-specialist-shared.md` §"Targeted re-review").
+
+**Commits in scope**: `git log c35c3200..522cc467 --oneline` returns 4 commits — `522cc467` (fix), plus the three QC report commits (`718b2f93` qc1, `5e87bb58` qc3, `c2a1706a` qc2 already noted in original review). Only `522cc467` is a source commit; the others touch `plans/reports/...` only (out of QC source-review scope).
+
+### F-QC1-W001 — RESOLVED
+
+**Evidence chain**:
+
+1. **Source fix** — `apps/design-studio/src/components/nav.tsx:28` now reads:
+
+   ```ts
+   ? 'bg-gray-alpha-200 text-gray-1000 font-medium'
+   ```
+
+   `git show 522cc467 -- apps/design-studio/src/components/nav.tsx` confirms the single-line replacement `bg-gray-alpha-150 → bg-gray-alpha-200`. No other class strings changed. Confidence: **High**.
+
+2. **Shade registration** — `tooling/design-tokens/tailwind.preset.ts:46-53` registers `gray-alpha: { 100, 200, 300, 400, 500, 600 }`. `200` is a registered shade, so Tailwind 3 JIT will emit a rule. Confidence: **High**.
+
+3. **No leftover 150 references** — `git grep -n "gray-alpha-150"` across the working tree (excluding `.md`, `dist/`, `node_modules/`) returns **zero matches**. The orphan shade is fully gone. Confidence: **High**.
+
+4. **Production CSS bundle** — `pnpm --filter design-studio build` ran green (1660 modules, 1.19s, `dist/assets/index-vbuikuWy.css` 33.65 kB). Grepping the bundle for `.bg-gray-alpha-` rules yields:
+
+   ```text
+   .bg-gray-alpha-100 { background-color: var(--color-gray-alpha-100) }
+   .bg-gray-alpha-200 { background-color: var(--color-gray-alpha-200) }
+   .bg-gray-alpha-400 { background-color: var(--color-gray-alpha-400) }
+   ```
+
+   `.bg-gray-alpha-200` is now present, which the previously-missing active-nav selector will match. `--color-gray-alpha-200` is defined in both `:root` and `.dark` blocks (`rgba(0,0,0,.06)` / `rgba(255,255,255,.08)`), so light and dark themes both resolve. Confidence: **High**.
+
+5. **Tests** — `pnpm --filter design-studio test` reports `11 passed (11)` in 829 ms (Vitest 3.2.6). No test changes were needed; the existing App smoke suite already exercises the TopNav component indirectly. Confidence: **High**.
+
+### Architecture / maintainability check on the fix commit (qc1 scope guardrail)
+
+The fix commit `522cc467` is titled *"fix(design-studio): QC W001 nav active shade + rAF cleanup (tokens swatches)"* and touches 2 files, 5 insertions, 3 deletions (`apps/design-studio/src/components/nav.tsx` +1/-1; `apps/design-studio/src/pages/tokens.tsx` +4/-2). For the qc1 architecture/maintainability lens:
+
+- **nav.tsx delta**: a single class-string substitution to a token already defined in `tooling/design-tokens/tailwind.preset.ts`. No new patterns, no new dependencies, no import drift, no boundary change. Maintains the "use preset shade verbatim, no inline hex" rule.
+- **tokens.tsx delta**: the qc3 rAF cleanup (ColorSwatch + ElevationCard `useEffect`) is **qc3's scope** and I leave the verdict there to qc3. From qc1's lens I only confirm: (a) the cleanup is local to two presentation components and adds no new abstraction or file; (b) the pattern (`const rafId = requestAnimationFrame(...); return () => cancelAnimationFrame(rafId)`) is identical across both components — consistent, no invented helper; (c) no schema/wire/SSOT/theme.controller boundary is touched; (d) the existing `eslint-disable-next-line react-hooks/exhaustive-deps` comment is preserved. **No qc1 architecture/maintainability regression**.
+
+### Updated verdict
+
+| Field | Pre-fix | Post-fix |
+|-------|---------|----------|
+| 🔴 Critical | 0 | 0 |
+| 🟡 Warning (unresolved) | 1 | **0** |
+| 🟢 Suggestion | 2 | 2 (carried forward, unchanged) |
+| **Verdict** | Request Changes | **Approve** |
+
+**Updated Verdict**: **Approve**
+
+Rationale: F-QC1-W001 is the only blocker on this branch and it has been resolved with surgical precision (one-line class-string fix to a registered shade). Evidence chain complete (source fix + preset registration + zero orphan-150 refs in tree + production CSS rule present + tests green + no architecture/maintainability regression in scope). Two unrelated Suggestions (F-QC1-S001 Surfaces third fixture, F-QC1-S002 tsconfig exact-match alias) remain open as minor maintainability records but neither triggers a Warning per verdict rules (`Approve` requires only Critical = 0 and Warning = 0 unresolved, which is satisfied). Branch is cleared for merge per `qc-specialist-shared.md` §Verdict rules.
+
+### Source Trace (revalidation)
+
+- **F-QC1-W001 (resolved)**:
+  - Source Type: source diff + production-bundle re-inspection
+  - Source Reference:
+    - `git show 522cc467 -- apps/design-studio/src/components/nav.tsx` — one-line substitution
+    - `tooling/design-tokens/tailwind.preset.ts:48` — `200: cv('gray-alpha-200')`
+    - `apps/design-studio/dist/assets/index-vbuikuWy.css` — `.bg-gray-alpha-200{background-color:var(--color-gray-alpha-200)}` rule present
+    - `git grep -n "gray-alpha-150"` (excl. `.md`, `dist`, `node_modules`) — zero matches
+    - `pnpm --filter design-studio test` — 11/11 PASS
+  - Confidence: **High**
