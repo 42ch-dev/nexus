@@ -164,6 +164,57 @@ Use this template during P0/P1/P2 rather than relying on memory:
 | Boundary check | Which forbidden imports were checked absent? |
 | Remaining caveat | What must be revisited before treating this as a durable pattern? |
 
+## V1.99 Validation Evidence (Captured)
+
+This section records actual outcomes from P0 (Component Promotion) and P1 (Surfaces Visual Direction) to ground P2 codification in evidence. Data sourced from plan gate summaries, QA acceptance reports, and post-edit source inspection (2026-07-08).
+
+### 1. Component Promotion Evidence (P0)
+
+**For Button, Badge, Card** (first-batch primitives per P-1 boundary):
+
+| Evidence | Value |
+| --- | --- |
+| Component or surface | Button, Badge, Card composed/validated in Design Studio via `components.tsx`, `surfaces.tsx`, `voice.tsx` (all import directly from `@42ch/nexus-ui`). |
+| Studio acceptance | Build: 5/5 green (package + web + design-studio). Tests: 43/43 (package), 548/548 (web), 11/11 (studio). Visual/behavioral parity: identical class output and `cn` semantics to pre-promotion; contrast invariants verified in web re-export tests. |
+| Promotion decision | `promote` (all three). |
+| Package path | Named root exports from `@42ch/nexus-ui`: `export { Button, type ButtonProps } from './components/button';` (similar for Badge, Card + sub-primitives). See `packages/nexus-ui/src/index.ts`. |
+| Web integration | Thin re-export wrappers in `apps/web/src/components/ui/` (e.g., `button.tsx`: 9-line `export { Button, type ButtonProps } from '@42ch/nexus-ui';`). App-specific behavior/tests remain in web. |
+| Boundary check | Zero forbidden imports verified: `grep -r "@web-ui/button|@web-ui/badge|@web-ui/card" apps/design-studio/src/` → NO MATCHES. No variant helpers (`buttonVariants`) leaked to web. |
+| Remaining caveat | `Input`, `Label`, `Textarea` deferred to Form Field slice (explicitly not promoted). |
+
+### 2. Surfaces Visual Iteration Evidence (P1)
+
+**For /surfaces redesign** (SetupWizardFixture + AppShellFixture + DaemonStatusStrip):
+
+| Evidence | Value |
+| --- | --- |
+| Component or surface | Setup wizard step card (SetupWizardFixture) and App shell chrome (AppShellFixture) composed as studio-local View fixtures in `apps/design-studio/src/pages/surfaces.tsx`. |
+| Studio acceptance | 9/9 observable checklist items PASS in both themes (verified by QA): light/dark intentional, keyboard focus visible, no unregistered tokens (except documented fixture-local `min-h-[420px]`/`min-h-[440px]`), hierarchy readable, CTAs findable, daemon-free, no forbidden imports, copy aligned with DESIGN.md Voice & Content. Build green; 23/23 tests pass. |
+| Promotion decision | N/A (surfaces are fixtures, not primitives). Setup card elements classified per guide: `Card`/`Button` = promoted; stepper/workspace row = studio-local fixture; Label = transitional `@web-ui/label`. |
+| Package path | N/A for fixtures. Promoted primitives inside use `@42ch/nexus-ui` root exports. |
+| Web integration | None (surfaces remain studio-only per Stage 1A boundary). Future web integration would replace static data with real behavior while preserving primitive imports. |
+| Boundary check | Zero forbidden imports: actual imports limited to `Badge, Button, Card` from `@42ch/nexus-ui` and `Label` from `@web-ui/label` (transitional). Grep confirmed no `apps/web`, `@42ch/nexus-contracts`, tauri, `invoke`, `NexusClient` (except explanatory comment string). |
+| Remaining caveat | `@web-ui/label` usage is transitional for deferred Label (Form Field slice); fixture-local min-heights documented as intentional exceptions. |
+
+### 3. Workflow Failures or Caveats (P0/P1)
+
+- **Scope exceedance (acceptable):** P0 T1 implementer created full component implementations in `packages/nexus-ui` rather than minimal stubs. This was functionally correct and accepted (APIs identical), but deviated from "move or reimplement" minimal intent. Noted for future slice discipline.
+- **QC residual (R-V199P1QC1-S001):** `@web-ui/label` import in `surfaces.tsx` lacks explicit transitional annotation comment (QC1). Matches plan expectation of transitional use but annotation missing.
+- **Duplication (post-V1.99):** `cn` helper is byte-identical between `packages/nexus-ui/src/lib/cn.ts` and `apps/web/src/lib/utils.ts` (with duplicated `extendTailwindMerge` config). QC residuals R-V199QC1-S001 / R-V199QC3-F001 defer consolidation to `@nexus/design-tokens` or similar.
+- **No other failures:** All builds/tests green, boundaries clean, visual parity confirmed, QA gate PASS for both plans.
+
+This evidence directly informs T2–T4 codification (AGENTS.md updates, transitional policy enforcement, etc.).
+
+### 4. Post-Validation Decisions
+
+#### Knowledge Promotion Decision
+
+Confirmed: knowledge promotion is **deferred to iteration-close** (`mstar-compound`). The studio-first workflow pattern is a candidate for compound promotion, conditional on proving reusable across future Nexus UI iterations (not just V1.99). No `.mstar/knowledge/**` content is created during this iteration's execution phase.
+
+#### Skill Decision
+
+Confirmed: **No skill creation.** The `mstar-skill-authoring` purpose test returns negative — the workflow is repo-specific (Nexus Design Studio → `@42ch/nexus-ui` → `apps/web`) and has not proven reusable beyond this repo. Better captured in AGENTS.md guidance + iteration-close knowledge. The locked default stands; neither override condition (external reuse evidence, PM approval) is met.
+
 ## Durable Landing Options
 
 At iteration-close, choose the lightest durable surface that matches what V1.99 proves:

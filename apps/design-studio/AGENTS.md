@@ -46,6 +46,7 @@ Gallery **displays** shadcn primitives from `apps/web/src/components/ui/*` witho
 - Declare matching Radix/CVA peer versions in `package.json` (same majors as `apps/web`)
 - V1.99 decoupling rule: once a primitive is promoted into `@42ch/nexus-ui`, Studio must import it from `@42ch/nexus-ui`, not `@web-ui/*`
 - Unpromoted primitives may remain on `@web-ui/*` until a later promotion or explicit keep-studio/keep-web decision
+- **Transitional annotation required:** every unpromoted `@web-ui/*` import in Studio source files must carry an inline comment identifying the blocking criteria for promotion (e.g., `// @web-ui/label — transitional until Form Field slice locks label/control/helper/error composition`). This ensures the dependency's temporary status and promotion trigger are visible to future contributors.
 
 ## Dev commands
 
