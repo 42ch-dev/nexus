@@ -100,7 +100,7 @@
     },
     {
       "id": "2026-07-08-v1.98-design-studio-and-design-unification",
-      "status": "Todo",
+      "status": "Done",
       "title": "P0 — Implement design-studio app + DESIGN merge + web consumer migration",
       "file": ".mstar/plans/2026-07-08-v1.98-design-studio-and-design-unification.md",
       "type": "implement",
@@ -115,7 +115,11 @@
           "2026-07-08-v1.98-prepare-design-studio"
         ],
         "blocking": [],
-        "working_branch": "feature/v1.98-design-studio-and-design-unification"
+        "working_branch": "feature/v1.98-design-studio-and-design-unification",
+        "done_at": "2026-07-08",
+        "qc_verdict": "Approve (tri, post-fix revalidation)",
+        "qa_verdict": "Pass",
+        "wire_contracts_changed": false
       }
     }
   ],
