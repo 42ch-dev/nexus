@@ -18,6 +18,7 @@ Publishable npm workspace package for Nexus brand assets, design tokens, theme C
 - **Must not** duplicate the full DESIGN.md token contract — root `DESIGN.md` / `DESIGN.dark.md` own normative cross-app tokens; this package references token-backed class names and keeps only the existing brand primitive slice in `theme.css`
 - **Must not** import `.svg` files in package source — tsup/esbuild cannot resolve `.svg` imports. Components that need SVG assets use consumer-provided `src` prop (NexusLogo) or hand-authored JSX (NexusMark) for bundler-agnostic portability.
 - **Must not** import `.png` or other runtime assets from component source. Keep assets behind documented public asset exports or consumer-resolved `src` props.
+- **Must** own its own `cn` helper (`clsx` + `tailwind-merge` with DESIGN.md token class-group extension) for class composition. It **must not** import from `apps/web/src/lib/utils.ts` or any app-local utility.
 
 ## Dependencies
 

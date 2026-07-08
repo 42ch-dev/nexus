@@ -1,20 +1,20 @@
 {
   "version": 1,
-  "updated_at": "2026-07-08T18:40:00+0800",
+  "updated_at": "2026-07-08T19:10:00+0800",
   "plans": [
     {
       "id": "2026-07-08-v1.99-prepare-visual-system-deepening",
       "title": "P-1 — Prepare: Visual System Deepening Contract",
       "file": ".mstar/plans/2026-07-08-v1.99-prepare-visual-system-deepening.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": ["@product-manager", "@architect", "@writing-specialist"],
-      "progress": 0,
+      "progress": 100,
       "tags": ["V1.99", "prepare", "design-system", "nexus-ui", "design-studio"],
       "created_at": "2026-07-08",
       "updated_at": "2026-07-08",
-      "done_at": null,
-      "notes": "Prepare plan for UI component promotion boundary, surfaces visual direction, and studio-first workflow contract.",
+      "done_at": "2026-07-08",
+      "notes": "Prepare plan for UI component promotion boundary, surfaces visual direction, and studio-first workflow contract. Done: contract locked via sequential specialist review (architect→product-manager→writing-specialist).",
       "metadata": {
         "priority": "high",
         "spec_integration_branch": "iteration/v1.99",
@@ -162,7 +162,7 @@
         "2026-07-07-v1.97-desktop-first-launch-hardening": 5
       }
     },
-    "updated_at": "2026-07-08T18:40:00+0800"
+    "updated_at": "2026-07-08T19:10:00+0800"
   },
   "residual_findings": {
     "2026-07-05-v1.91-findings-batch": [
