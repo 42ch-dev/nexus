@@ -8,7 +8,7 @@
 #   § Guardrail implementation
 #   § Promoted-wrapper forbidden imports
 #   § Design Studio forbidden imports + transitional @web-ui/* annotation policy
-#   § cn-parity test (R-V199QC1-S001): byte-level parity between package cn.ts and web utils.ts
+#   § cn-parity test (R-V199QC1-S001): behavioral SSOT check (one authority for extendTailwindMerge; web re-exports)
 #
 # Precedent: tooling/check-schema-drift.sh (set -euo pipefail + grep + exit 1)
 
