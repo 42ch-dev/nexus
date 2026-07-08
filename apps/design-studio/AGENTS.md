@@ -41,7 +41,7 @@ Parent rules: [`../AGENTS.md`](../AGENTS.md) (apps placement), root [`AGENTS.md`
 Gallery **displays** shadcn primitives from `apps/web/src/components/ui/*` without migrating them to `@42ch/nexus-ui`. This coupling is **intentional and transitional**:
 
 - Import only presentational primitives (`button`, `dialog`, `tabs`, …)
-- Prefer `@web-ui/<module>` direct imports; barrel (`@web-ui` via `index.ts`) after `tabs` export lands in P0 T1
+- `tabs` barrel export landed in P0 T1 (commit `55dd06cc`); use `@web-ui/<module>` direct imports or barrel as needed
 - Declare matching Radix/CVA peer versions in `package.json` (same majors as `apps/web`)
 - Future decoupling (extract shared UI package) is **out of V1.98** — track in iteration compass if needed
 
@@ -57,7 +57,7 @@ No daemon or Tauri required.
 
 ## Conventions
 
-- TypeScript strict; match `apps/web` toolchain (Vite 6, React 18, Tailwind 3)
+- TypeScript strict; match `apps/web` toolchain (Vite 6, React 18, Tailwind 3, react-router-dom v6)
 - Theme toggle: `class` strategy on `<html>` — mirrors web `theme-provider` behavior
 - Read-only gallery — no YAML write-back, no localStorage token overrides
 - App chrome shows **Read-only · edit `DESIGN.md`** (repo-root SSOT helper)

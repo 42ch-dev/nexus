@@ -1,0 +1,55 @@
+/*
+ * Nexus Design Studio — global styles.
+ *
+ * Design tokens are imported from the shared @nexus/design-tokens workspace
+ * package (CSS variable layers + Tailwind preset). The design SSOT is
+ * repo-root DESIGN.md / DESIGN.dark.md. Do not invent tokens here —
+ * if a token is missing, report it.
+ *
+ * No duplicate theme.extend block — all tokens come from the shared preset.
+ */
+
+@import '@nexus/design-tokens/tokens.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: var(--font-sans);
+    color: var(--color-gray-1000);
+    background-color: var(--color-background-100);
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+  }
+
+  code,
+  kbd,
+  samp,
+  pre {
+    font-family: var(--font-mono);
+  }
+
+  :where(button, a, input, select, textarea, [tabindex]):focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--color-background-100), 0 0 0 4px var(--color-blue-700);
+    border-radius: var(--radius-control, 6px);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
