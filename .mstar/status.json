@@ -94,24 +94,29 @@
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
-      "iteration": "V1.95",
-      "compass": "v1.95-setup-wizard-bugfix-delivery-compass-v1.md",
-      "shipped_at": "2026-07-07",
-      "pr": "https://github.com/42ch-dev/nexus/pull/124",
-      "merge_commit": "fa4815fb"
+      "iteration": "V1.97",
+      "compass": "v1.97-desktop-first-launch-hardening-compass-v1.md",
+      "shipped_at": "2026-07-08",
+      "pr": "https://github.com/42ch-dev/nexus/pull/126",
+      "merge_commit": "901191a1"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-07-07",
-      "total_open": 18,
+      "updated_at": "2026-07-08",
+      "total_open": 26,
       "by_severity": {
         "critical": 0,
-        "high": 0,
+        "high": 1,
         "medium": 2,
-        "low": 14,
-        "nit": 2
+        "low": 19,
+        "nit": 4
       },
       "by_target": {
-        "V1.95": 17,
+        "V1.96": 14,
+        "V1.96 spec-hygiene pass": 1,
+        "V1.97": 4,
+        "V1.97+": 1,
+        "V1.98": 4,
+        "V1.98+": 1,
         "when list virtualisation lands": 1
       },
       "by_plan": {
@@ -119,10 +124,10 @@
         "2026-07-05-v1.92-closure": 1,
         "2026-07-06-v1.93-closure": 1,
         "2026-07-06-v1.94-closure": 9,
-        "2026-07-07-v1.95-implement-fixes": 6
-      },
-      "refreshed_at": "2026-07-07T16:10:00+0000",
-      "refreshed_reason": "V1.95 implement QC tri consolidated: 6 new residuals (2 architect + 2 QC3 PM-accepted + 1 QC3 timeout + 1 QC1 test-parity). QC verdict Approve with residuals."
+        "2026-07-07-v1.95-implement-fixes": 4,
+        "2026-07-07-v1.96-implement-rework": 5,
+        "2026-07-07-v1.97-desktop-first-launch-hardening": 5
+      }
     },
     "updated_at": "2026-07-07T23:20:00+0800"
   },
