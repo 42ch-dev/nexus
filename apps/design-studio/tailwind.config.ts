@@ -13,7 +13,11 @@ import preset from '@nexus/design-tokens/tailwind.preset';
 const config: Config = {
   presets: [preset],
   darkMode: 'class',
-  content: ['./index.html', './src/**/*.{ts,tsx}'],
+  content: [
+    './index.html',
+    './src/**/*.{ts,tsx}',
+    '../web/src/components/ui/**/*.{ts,tsx}',
+  ],
   theme: {
     screens: {
       sm: '401px',
