@@ -33,15 +33,15 @@
       "id": "2026-07-08-v1.99-nexus-ui-component-promotion",
       "title": "P0 — @42ch/nexus-ui Component Promotion",
       "file": ".mstar/plans/2026-07-08-v1.99-nexus-ui-component-promotion.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": ["@frontend-dev", "@qc-specialist", "@qa-engineer"],
-      "progress": 0,
+      "progress": 100,
       "tags": ["V1.99", "frontend", "nexus-ui", "component-library"],
       "created_at": "2026-07-08",
       "updated_at": "2026-07-08",
-      "done_at": null,
-      "notes": "First-batch shared UI primitive promotion after P-1 boundary lock.",
+      "done_at": "2026-07-08",
+      "notes": "First-batch shared UI primitive promotion after P-1 boundary lock. Done: Button/Badge/Card promoted to @42ch/nexus-ui, both consumers updated, QC tri Approve, QA Pass.",
       "metadata": {
         "priority": "high",
         "blocked_by_plan_id": "2026-07-08-v1.99-prepare-visual-system-deepening",
@@ -434,6 +434,41 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.96-implement-rework.md",
         "note": "Different fallback semantics; consolidation candidate. QC source: §S-001"
+      }
+    ],
+    "2026-07-08-v1.99-nexus-ui-component-promotion": [
+      {
+        "id": "R-V199QC1-S001",
+        "title": "Package cn.ts is byte-identical to apps/web utils.ts — add cross-reference comment to document the drift invariant",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.99",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-08-v1.99-nexus-ui-component-promotion/review/qc1.md",
+        "note": "Non-blocking. QC source: qc1 S-001"
+      },
+      {
+        "id": "R-V199QC1-S002",
+        "title": "Web re-export wrappers have no compile-time guard against re-introducing local cn dependency",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.99",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-08-v1.99-nexus-ui-component-promotion/review/qc1.md",
+        "note": "Non-blocking. QC source: qc1 S-002"
+      },
+      {
+        "id": "R-V199QC3-F001",
+        "title": "extendTailwindMerge config duplicated between package and apps/web — future consolidation to @nexus/design-tokens",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.99",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-08-v1.99-nexus-ui-component-promotion/review/qc3.md",
+        "note": "Non-blocking. QC source: qc3 F-001"
       }
     ],
     "2026-07-07-v1.97-desktop-first-launch-hardening": [
