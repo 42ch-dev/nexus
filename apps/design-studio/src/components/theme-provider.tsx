@@ -62,11 +62,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         setResolvedTheme(resolveTheme(next));
       },
       toggleTheme: () => {
-        setThemeState((prev) => {
-          const next = resolveTheme(prev) === 'dark' ? 'light' : 'dark';
-          setResolvedTheme(next);
-          return next;
-        });
+        const next = resolvedTheme === 'dark' ? 'light' : 'dark';
+        setThemeState(next);
+        setResolvedTheme(next);
       },
     }),
     [theme, resolvedTheme],

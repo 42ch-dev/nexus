@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom';
+import { Link, Routes, Route } from 'react-router-dom';
 import { TopNav } from '@/components/nav';
 import { ThemeToggle } from '@/components/theme-toggle';
 import { HomePage } from '@/pages/home';
@@ -22,9 +22,9 @@ export function App() {
       <header className="sticky top-0 z-10 border-b border-gray-alpha-200 bg-background-100/80 backdrop-blur-sm">
         <div className="max-w-6xl mx-auto flex items-center justify-between px-4 h-12">
           <div className="flex items-center gap-6">
-            <a href="/" className="text-heading-16 font-semibold text-gray-1000 no-underline hover:opacity-80 transition-opacity">
+            <Link to="/" className="text-heading-16 font-semibold text-gray-1000 no-underline hover:opacity-80 transition-opacity">
               Nexus Design Studio
-            </a>
+            </Link>
             <TopNav />
           </div>
           <ThemeToggle />
