@@ -8,6 +8,7 @@
 #   § Guardrail implementation
 #   § Promoted-wrapper forbidden imports
 #   § Design Studio forbidden imports + transitional @web-ui/* annotation policy
+#   § cn-parity test (R-V199QC1-S001): byte-level parity between package cn.ts and web utils.ts
 #
 # Precedent: tooling/check-schema-drift.sh (set -euo pipefail + grep + exit 1)
 
@@ -34,6 +35,8 @@ forbid() {
 }
 
 # ── helper: check that every @web-ui/* import line in a file carries a transitional annotation ──
+# Convention (per apps/design-studio/AGENTS.md): annotation must be on the SAME LINE as the import.
+# "transitional" keyword is the canonical signal; both // @web-ui/<name> — transitional … and // transitional — … are accepted.
 check_webui_annotations() {
   local file="$1"
   local webui_lines
@@ -103,7 +106,7 @@ else
     "import\s+.*\bclass-variance-authority\b" \
     "import\s+.*\btailwind-merge\b" \
     "import\s+.*from\s+['\"]@/lib/" \
-    "import\s+.*from\s+['\"]\.\.\/lib/" \
+    "import\s+.*from\s+['\"][^'\"]*\.\.\/lib/" \
     "import\s+.*from\s+['\"]@42ch/nexus-ui/src/"; do
     forbid "Wrapper imports forbidden dependency" "$pattern" "${WRAPPER_EXISTING[@]}"
   done
@@ -187,7 +190,39 @@ else
 fi
 
 echo ""
+echo "==> Checking cn-parity (package ↔ web)..."
 
+check_cn_parity() {
+  local pkg_cn="packages/nexus-ui/src/lib/cn.ts"
+  local web_cn="apps/web/src/lib/utils.ts"
+
+  if [ ! -f "$pkg_cn" ]; then
+    echo "❌ cn-parity: missing $pkg_cn"
+    VIOLATIONS=$((VIOLATIONS + 1))
+    return
+  fi
+  if [ ! -f "$web_cn" ]; then
+    echo "❌ cn-parity: missing $web_cn"
+    VIOLATIONS=$((VIOLATIONS + 1))
+    return
+  fi
+
+  # diff returns 0 when files are identical, 1 when they differ.
+  # Wrapping in `if` prevents set -e from triggering on diff's non-zero exit.
+  if diff -q "$pkg_cn" "$web_cn" > /dev/null 2>&1; then
+    echo "   ✅ $pkg_cn ↔ $web_cn: byte-identical (pass)."
+    return
+  fi
+
+  echo "❌ cn-parity: $pkg_cn differs from $web_cn"
+  diff "$pkg_cn" "$web_cn" 2>/dev/null || true
+  VIOLATIONS=$((VIOLATIONS + 1))
+}
+
+check_cn_parity
+
+echo ""
+echo ""
 # ── Summary ──
 if [ "$VIOLATIONS" -eq 0 ]; then
   echo "✅ All UI guardrail checks passed."
