@@ -1,12 +1,12 @@
-# Web UI — Design Requirements (input brief for `apps/web/DESIGN.md`)
+# Web UI — Design Requirements (input brief for repo-root `DESIGN.md`)
 
 **Status**: Input brief (Prepare Phase 2b) — **not** the DESIGN.md itself  
 **Author**: `@product-manager`  
-**Consumer**: `@architect` (authors `apps/web/DESIGN.md`, the design-token SSOT; completeness level **Standard** per compass §5 item #6)  
+**Consumer**: `@architect` (authors repo-root [`DESIGN.md`](../../../DESIGN.md), the design-token SSOT; completeness level **Standard** per compass §5 item #6) *(V1.98: sole SSOT — former `apps/web/DESIGN*.md` retired)*  
 **Iteration**: V1.64 (V1.65 authoring-surface amendment appended in §5)  
 **Drives**: [web-ui.md](web-ui.md) §6 (MVP surface) — the screens whose look/feel this brief constrains
 
-> This document captures the **product and design intent** the design system must serve. It deliberately does **not** specify token values (colors, type scale, spacing units) — those are `@architect`'s job in `apps/web/DESIGN.md`. It states *what the UI must feel like and for whom*, so the token system can be derived rather than guessed.
+> This document captures the **product and design intent** the design system must serve. It deliberately does **not** specify token values (colors, type scale, spacing units) — those are `@architect`'s job in repo-root `DESIGN.md`. It states *what the UI must feel like and for whom*, so the token system can be derived rather than guessed.
 
 ---
 
@@ -55,7 +55,7 @@ Dark mode is **first-class**: the token system must define light **and** dark fr
 
 ## 5. V1.65 authoring surface — component design requirements
 
-V1.65 adds the first **authoring-write** surfaces to the UI (see [web-ui.md](web-ui.md) §13). These introduce three new component classes whose look/feel the design system must serve. As in §1–§4, this section fixes *product intent and constraints* — token values remain `@architect`'s job in `apps/web/DESIGN.md` (a **Standard+ increment** this iteration; Production-level polish/animations stay V1.66 per compass §5 item #6/#7).
+V1.65 adds the first **authoring-write** surfaces to the UI (see [web-ui.md](web-ui.md) §13). These introduce three new component classes whose look/feel the design system must serve. As in §1–§4, this section fixes *product intent and constraints* — token values remain `@architect`'s job in repo-root `DESIGN.md` (a **Standard+ increment** this iteration; Production-level polish/animations stay V1.66 per compass §5 item #6/#7). *(Authored under `apps/web/DESIGN.md` pre-V1.98; merged to repo root in V1.98.)*
 
 ### 5.1 Rich-text outline editor
 
@@ -92,8 +92,8 @@ All three V1.65 component classes — editor, table, context menu — must ship 
 
 ## What this brief deliberately does NOT decide
 
-- Token values (colors, type scale, spacing, radii, elevation, motion durations) → `apps/web/DESIGN.md` (`@architect`).
-- Component inventory beyond "strong tables + strong forms + status/severity primitives + loading/empty/error states" (V1.64) plus the V1.65 "editor + structure table + read-only context menu" increment (§5) → `apps/web/DESIGN.md`.
+- Token values (colors, type scale, spacing, radii, elevation, motion durations) → repo-root [`DESIGN.md`](../../../DESIGN.md) (`@architect`).
+- Component inventory beyond "strong tables + strong forms + status/severity primitives + loading/empty/error states" (V1.64) plus the V1.65 "editor + structure table + read-only context menu" increment (§5) → repo-root `DESIGN.md`.
 - Completeness level beyond **Standard** for V1.64 + **Standard+ increment** for V1.65 authoring components (Production-level polish/animations are V1.66, compass §5 item #6/#7).
 
 ## Open inputs `@architect` should resolve in DESIGN.md
@@ -107,13 +107,13 @@ All three V1.65 component classes — editor, table, context menu — must ship 
 
 ---
 
-*Input brief only. The authoritative design system is `apps/web/DESIGN.md`, owned by `@architect`. This brief exists so the design system is derived from product intent rather than aesthetics-in-a-vacuum.*
+*Input brief only. The authoritative design system is repo-root `DESIGN.md`, owned by `@architect`. This brief exists so the design system is derived from product intent rather than aesthetics-in-a-vacuum.*
 
 ---
 
 ## 6. V1.66 desktop shell surface — component design requirements
 
-V1.66 wraps the V1.65 SPA in a Tauri v2 desktop shell (see [web-ui.md](web-ui.md) §14; contract: [desktop-shell.md](desktop-shell.md)). The shell introduces surface classes whose look/feel the design system must serve. As in §1–§5, this section fixes *product intent and constraints* — token values remain `@architect`'s in `apps/web/DESIGN.md` (**Standard+ desktop supplement** this iteration; Production polish — custom title bar, animated transitions, system tray — stays V1.67+).
+V1.66 wraps the V1.65 SPA in a Tauri v2 desktop shell (see [web-ui.md](web-ui.md) §14; contract: [desktop-shell.md](desktop-shell.md)). The shell introduces surface classes whose look/feel the design system must serve. As in §1–§5, this section fixes *product intent and constraints* — token values remain `@architect`'s in repo-root `DESIGN.md` **Desktop Shell Supplement** *(authored under `apps/web/DESIGN.md` pre-V1.98)* (**Standard+ desktop supplement** this iteration; Production polish — custom title bar, animated transitions, system tray — stays V1.67+).
 
 ### 6.1 Window chrome
 
@@ -161,7 +161,7 @@ All V1.66 surface classes — window chrome, app menu, native dialogs, desktop c
 
 ---
 
-### Open inputs `@architect` resolves in `apps/web/DESIGN.md` (V1.66 desktop supplement)
+### Open inputs `@architect` resolves in repo-root `DESIGN.md` Desktop Shell Supplement (V1.66)
 
 1. Window-chrome tokens (title bar, traffic-light safe-area, min/default window size) — light + dark.
 2. App-menu typography + daemon-status indicator visual treatment (the non-blocking-but-unmissable error/degraded treatment is the highest product-priority design decision in the V1.66 increment).

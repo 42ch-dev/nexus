@@ -1,6 +1,6 @@
 # Local Web UI (Control Room + Setup → Content-Authoring) — Specification v1
 
-**Status**: Shipped (V1.65) — Control Room + Setup MVP (V1.64) **+ Content-Authoring UI stage (V1.65, §13)**: outline rich-text editor + chapter structure table + structure CRUD (slug/wc/volume/status; title display-only) + body read-only render + browser "Copy path" context menu. Tauri desktop shell + body full-text editor + "open-with" → **V1.66** (compass §0 Q5). QC tri-review Approve (fix-wave-1) + QA Pass. **+ V1.67 Surface Convergence & De-risk (§15)** + **V1.69 Design System Maturation & Canvas Draft** (`apps/web/DESIGN.md` Production + Canvas Draft) + **V1.70 Canvas Strategy Implement α (§16)** + **CI/desktop-build optimization** (parallel ops track; PR path filter narrowed + release-gated full build) + **V1.71 Canvas Strategy Write-Boundary (§17)** (Strategy patch routes, graphRevision conflict policy, conflict modal UX, canvas-write tokens) + **V1.72 Canvas Outline+Timeline β (§18)** (3 outline/timeline patch routes `outline.patch_structure` / `outline.patch_chapter` / `timeline.patch_event` + outlineRevision conflict policy + outline-flavored conflict modal UX + non-spatial alternate views + 8 outline/timeline canvas-write DESIGN.md tokens). V1.71 `wire_contracts_changed: TRUE` for Strategy; V1.72 `wire_contracts_changed: TRUE` for additive Outline+Timeline (`@42ch/nexus-contracts` 0.7.0 → 0.8.0); V1.73 `wire_contracts_changed: TRUE` for additive World KB (`@42ch/nexus-contracts` 0.8.0 → 0.9.0). **V1.74 Shipped** — Canvas World KB Relationships β (§20) with typed relationship edges, `world_kb.patch_relationship`, relationship inspector, non-spatial relationship table, and KB-flavored conflict modal reuse. **V1.94 Draft amendment** — §29 Information Architecture (V1.94): two-tab sidebar, nested nav, footer Profiles switcher, daemon status bar simplification, Strategies unification, button contrast invariant.
+**Status**: Shipped (V1.65) — Control Room + Setup MVP (V1.64) **+ Content-Authoring UI stage (V1.65, §13)**: outline rich-text editor + chapter structure table + structure CRUD (slug/wc/volume/status; title display-only) + body read-only render + browser "Copy path" context menu. Tauri desktop shell + body full-text editor + "open-with" → **V1.66** (compass §0 Q5). QC tri-review Approve (fix-wave-1) + QA Pass. **+ V1.67 Surface Convergence & De-risk (§15)** + **V1.69 Design System Maturation & Canvas Draft** (`apps/web/DESIGN.md` Production + Canvas Draft) + **V1.70 Canvas Strategy Implement α (§16)** + **CI/desktop-build optimization** (parallel ops track; PR path filter narrowed + release-gated full build) + **V1.71 Canvas Strategy Write-Boundary (§17)** (Strategy patch routes, graphRevision conflict policy, conflict modal UX, canvas-write tokens) + **V1.72 Canvas Outline+Timeline β (§18)** (3 outline/timeline patch routes `outline.patch_structure` / `outline.patch_chapter` / `timeline.patch_event` + outlineRevision conflict policy + outline-flavored conflict modal UX + non-spatial alternate views + 8 outline/timeline canvas-write DESIGN.md tokens). V1.71 `wire_contracts_changed: TRUE` for Strategy; V1.72 `wire_contracts_changed: TRUE` for additive Outline+Timeline (`@42ch/nexus-contracts` 0.7.0 → 0.8.0); V1.73 `wire_contracts_changed: TRUE` for additive World KB (`@42ch/nexus-contracts` 0.8.0 → 0.9.0). **V1.74 Shipped** — Canvas World KB Relationships β (§20) with typed relationship edges, `world_kb.patch_relationship`, relationship inspector, non-spatial relationship table, and KB-flavored conflict modal reuse. **V1.94 Draft amendment** — §29 Information Architecture (V1.94): two-tab sidebar, nested nav, footer Profiles switcher, daemon status bar simplification, Strategies unification, button contrast invariant. **V1.98 Draft amendment** — §30 Design Studio dev surface (auxiliary gallery app; not author-facing).
 **Document class**: Feature line  
 **Created**: 2026-06-24  
 **Scope**: Nexus local Web UI product contract — placement (`apps/web`), stack, daemon-served model, `tauri-api` adapter boundary, MVP surface (Control Room + Setup), Content-Authoring stage (V1.65), Tauri / body-editor roadmap (V1.66), and strict separation from the private cloud SaaS  
@@ -12,7 +12,7 @@
 - [daemon-runtime.md](daemon-runtime.md) §2 (normative layering) — static-asset serving on the axum router
 - [../schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md) — the bundled UI is a first-class external consumer of `@42ch/nexus-contracts`
 - [local-cloud-crate-architecture.md](local-cloud-crate-architecture.md) §1 — strict local-product vs cloud-product separation
-- `apps/web/DESIGN.md` (NEW, project-level, `@architect`-authored) — design tokens this UI consumes
+- Repo-root [`DESIGN.md`](../../../DESIGN.md) + [`DESIGN.dark.md`](../../../DESIGN.dark.md) — sole normative DESIGN pair *(V1.98: supersedes former `apps/web/DESIGN*.md` — see §30)*
 - [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md) (NEW, `@architect`-authored Master) — cursor pagination / `ErrorResponse` / naming conventions the UI data layer relies on
 
 ---
@@ -1068,7 +1068,7 @@ The daemon status bar subscribes to `onDaemonStatusChanged` (existing Tauri even
 
 ### 29.7 Button contrast invariant
 
-Recorded in `apps/web/DESIGN.md` §Component Primitives/Button and `apps/web/DESIGN.dark.md`:
+Recorded in repo-root [`DESIGN.md`](../../../DESIGN.md) §Component Primitives/Button and [`DESIGN.dark.md`](../../../DESIGN.dark.md):
 
 > **Every button (or button-like element) with a dark, primary, or saturated background MUST use light/white text in both light and dark themes.**
 
@@ -1180,3 +1180,44 @@ All V1.95 amendments (ClientProvider, migration reset, workspace default rules, 
 - The native Browse path uses the existing desktop capability/IPC boundary. The frontend sends `defaultPath` to the Tauri command and does not introduce a second argument shape or compatibility shim.
 - The daemon step observes existing desktop daemon-status state and `detail` only. It must not require new daemon API fields, generated schemas, or contract package changes.
 - Clean-state smoke and existing-install smoke are hard product verification gates, not new UI features. Their evidence may be captured manually or with automation, but unit tests alone do not prove the author-visible first-launch path.
+
+### 30. V1.98 Amendments — Design Studio dev surface (not author-facing)
+
+**Product classification.** `apps/design-studio` is a **contributor/dev auxiliary app** — a read-only gallery for the unified DESIGN SSOT, brand VI, and `apps/web` UI primitives. It is **not** part of the local Web UI product surface authors use. Authors do not receive a Design Studio nav item, route, or menu entry in Control Room, Setup, or desktop shell.
+
+**Normative spec:** [`design-studio.md`](design-studio.md) · **IA:** [design-studio-information-architecture.md](../../iterations/v1.98/guides/design-studio-information-architecture.md) · **Merge rules:** [design-unification.md](../../iterations/v1.98/specs/design-unification.md) · **Compass:** [v1.98-design-studio-and-design-unification-compass-v1.md](../../iterations/v1.98-design-studio-and-design-unification-compass-v1.md).
+
+#### 30.1 DESIGN SSOT move (web consumer)
+
+- After V1.98 merge, **repo-root** [`DESIGN.md`](../../../DESIGN.md) + [`DESIGN.dark.md`](../../../DESIGN.dark.md) are the sole normative DESIGN pair.
+- Former `apps/web/DESIGN.md` and `apps/web/DESIGN.dark.md` are **deleted**; `src/index.css`, `tailwind.config.ts`, and AGENTS references consume the root SSOT via `@nexus/design-tokens`.
+- Token **names** preserved verbatim where possible to minimize CSS churn; value changes from merge audit are documented in [`design-unification.md`](../../iterations/v1.98/specs/design-unification.md) §9.
+- `apps/web` behavior and author-visible UI remain the product contract in §§1–29; only the token **source path** changes.
+
+#### 30.2 What design-studio is (and is not)
+
+| Dimension | `apps/web` (this spec) | `apps/design-studio` |
+| --- | --- | --- |
+| Audience | Authors on local product | Contributors / frontend devs |
+| Serving | Daemon rust-embed + Tauri bundle | Standalone `pnpm dev` only |
+| Data | Daemon API / `NexusClient` | Static fixtures; no wire contracts |
+| DESIGN role | Consumer | Read-only mirror + gallery |
+| Shipped in `nexus42` | Yes | **No** |
+
+#### 30.3 Author invariants (unchanged)
+
+- No new screens, routes, or settings in the author Web UI for design-studio.
+- Setup wizard, Control Room IA (§29), and daemon status behavior unchanged by studio work.
+- Desktop clean-state / first-launch hardening deferred to **V1.99** (`R-V197-SMOKE-CLEAN-STATE`) — not delivered via design-studio.
+
+#### 30.4 Contributor workflow (cross-reference)
+
+Token tuning: edit repo-root [`DESIGN.md`](../../../DESIGN.md) pair on disk → refresh design-studio → validate gallery → verify `apps/web` test/build. Full steps in [`design-studio.md`](design-studio.md) §4.2.
+
+#### 30.5 Non-goals
+
+- Bundling design-studio into daemon static assets or desktop installer
+- Exposing studio URL from `nexus42 daemon ui` or author-facing docs as a product feature
+- Live token editor or YAML write-back from studio UI
+- Migrating `components/ui/*` into `@42ch/nexus-ui`
+- `wire_contracts_changed: true` — V1.98 is frontend/docs only

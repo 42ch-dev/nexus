@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-07-07T17:30:00+0000",
+  "updated_at": "2026-07-08T04:00:00+0000",
   "plans": [
     {
       "id": "2026-07-07-v1.95-prepare-specs",
@@ -77,18 +77,58 @@
         "blocking": [],
         "working_branch": "feature/v1.97-desktop-first-launch-hardening"
       }
+    },
+    {
+      "id": "2026-07-08-v1.98-prepare-design-studio",
+      "status": "Done",
+      "title": "P-1 — Prepare: DESIGN unification spec + design-studio contract",
+      "file": ".mstar/plans/2026-07-08-v1.98-prepare-design-studio.md",
+      "type": "prepare",
+      "owner": "@architect",
+      "metadata": {
+        "iteration": "V1.98",
+        "iteration_refs": "v1.98-design-studio-and-design-unification-compass-v1.md",
+        "spec_integration_branch": "iteration/v1.98",
+        "merge_target": "iteration/v1.98",
+        "primary_spec": "iterations/v1.98/specs/design-unification.md",
+        "blocked_by": [],
+        "blocking": [
+          "2026-07-08-v1.98-design-studio-and-design-unification"
+        ],
+        "working_branch": "feature/v1.98-prepare-design-studio"
+      }
+    },
+    {
+      "id": "2026-07-08-v1.98-design-studio-and-design-unification",
+      "status": "Todo",
+      "title": "P0 — Implement design-studio app + DESIGN merge + web consumer migration",
+      "file": ".mstar/plans/2026-07-08-v1.98-design-studio-and-design-unification.md",
+      "type": "implement",
+      "owner": "@frontend-dev",
+      "metadata": {
+        "iteration": "V1.98",
+        "iteration_refs": "v1.98-design-studio-and-design-unification-compass-v1.md",
+        "spec_integration_branch": "iteration/v1.98",
+        "merge_target": "iteration/v1.98",
+        "primary_spec": "knowledge/specs/design-studio.md",
+        "blocked_by": [
+          "2026-07-08-v1.98-prepare-design-studio"
+        ],
+        "blocking": [],
+        "working_branch": "feature/v1.98-design-studio-and-design-unification"
+      }
     }
   ],
   "metadata": {
     "integration_branch_retired": true,
-    "last_integration_branch": "iteration/v1.95",
+    "last_integration_branch": "iteration/v1.97",
     "integration_merge_target": "main",
     "iteration_base_branch": "main",
-    "spec_integration_branch": "iteration/v1.97",
+    "spec_integration_branch": "iteration/v1.98",
     "target_branch": "main",
-    "integration_branch": "iteration/v1.96",
-    "latest_active_iteration": "V1.97",
-    "latest_active_compass": "v1.97-desktop-first-launch-hardening-compass-v1.md",
+    "integration_branch": "iteration/v1.98",
+    "latest_active_iteration": "V1.98",
+    "latest_active_compass": "v1.98-design-studio-and-design-unification-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",

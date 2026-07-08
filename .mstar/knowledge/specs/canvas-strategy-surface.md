@@ -268,7 +268,7 @@ TipTap remains useful as an in-node editor for prompt snippets, outline fragment
 
 ### 3.6 Canvas → DESIGN.md token contract (B4)
 
-V1.69 freezes the minimal credible token names that V1.70 canvas implementation will need. `apps/web/DESIGN.md` and `apps/web/DESIGN.dark.md` stub these as commented LEVEL placeholders; V1.70 assigns concrete values when implementing the canvas.
+V1.69 freezes the minimal credible token names that V1.70 canvas implementation will need. Repo-root [`DESIGN.md`](../../../DESIGN.md) + [`DESIGN.dark.md`](../../../DESIGN.dark.md) stub these as commented LEVEL placeholders (formerly under `apps/web/` pre-V1.98); V1.70 assigns concrete values when implementing the canvas.
 
 | Token | Intent |
 | --- | --- |
