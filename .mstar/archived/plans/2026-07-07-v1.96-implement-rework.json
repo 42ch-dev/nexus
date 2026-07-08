@@ -1,0 +1,22 @@
+{
+  "plan": {
+    "id": "2026-07-07-v1.96-implement-rework",
+    "status": "Done",
+    "title": "P0 — Implement 3 V1.96 setup-wizard rework clusters: layout redesign + Step1 UX + daemon diagnostic chain (stderr capture + subscribe/timeout fix)",
+    "file": ".mstar/plans/2026-07-07-v1.96-implement-rework.md",
+    "type": "implement",
+    "owner": "@fullstack-dev",
+    "metadata": {
+      "iteration": "V1.96",
+      "iteration_refs": "v1.96-setup-wizard-rework-and-daemon-diagnostic-delivery-compass-v1.md",
+      "spec_integration_branch": "iteration/v1.96",
+      "merge_target": "iteration/v1.96",
+      "primary_spec": "knowledge/specs/desktop-shell.md",
+      "blocked_by": [],
+      "blocking": [],
+      "working_branch": "feature/v1.96-implement-rework"
+    }
+  },
+  "archived_at": "2026-07-08",
+  "archived_reason": "Profile B compaction at V1.98 iteration-close (status=Done)"
+}

@@ -1,0 +1,25 @@
+{
+  "name": "@nexus/design-tokens",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Shared Tailwind preset + CSS variable layers for all Nexus product surfaces",
+  "author": "42ch",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./tailwind.preset.ts",
+  "exports": {
+    ".": "./tailwind.preset.ts",
+    "./tailwind.preset": "./tailwind.preset.ts",
+    "./tokens.css": "./src/tokens.css"
+  },
+  "dependencies": {
+    "@42ch/nexus-ui": "workspace:*"
+  },
+  "peerDependencies": {
+    "tailwindcss": "^3.4.0"
+  },
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=8.0.0"
+  }
+}

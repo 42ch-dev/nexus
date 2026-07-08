@@ -408,8 +408,15 @@
     "2026-07-06-v1.94-prepare-specs-and-design",
     "2026-07-06-v1.94-backend-setup-runtime",
     "2026-07-06-v1.94-frontend-onboarding-ia",
-    "2026-07-06-v1.94-closure"
-  ],  "iteration_summaries": {
+    "2026-07-06-v1.94-closure",
+    "2026-07-07-v1.95-prepare-specs",
+    "2026-07-07-v1.95-implement-fixes",
+    "2026-07-07-v1.96-implement-rework",
+    "2026-07-07-v1.97-desktop-first-launch-hardening",
+    "2026-07-08-v1.98-prepare-design-studio",
+    "2026-07-08-v1.98-design-studio-and-design-unification"
+  ],
+  "iteration_summaries": {
     "v1.45": {
       "shipped_at": "2026-06-14 (P-last closeout, pre-PR)",
       "compass": ".mstar/iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md",

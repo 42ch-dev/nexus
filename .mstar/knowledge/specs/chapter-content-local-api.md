@@ -5,7 +5,7 @@
 | **Status** | Draft — V1.65 Prepare contract for P0 implementation |
 | **Document class** | Draft overlay |
 | **Scope** | Chapter list/detail, outline read/write, structure PATCH, and body read-only Daemon API contracts under `/v1/local/works/{work_id}/chapters/*` |
-| **Coordinates with** | [local-api-surface-conventions.md](./local-api-surface-conventions.md), [daemon-runtime.md](./daemon-runtime.md), [schemas-directory-layout.md](./schemas-directory-layout.md), [web-ui.md](./web-ui.md), `apps/web/DESIGN.md` |
+| **Coordinates with** | [local-api-surface-conventions.md](./local-api-surface-conventions.md), [daemon-runtime.md](./daemon-runtime.md), [schemas-directory-layout.md](./schemas-directory-layout.md), [web-ui.md](./web-ui.md), repo-root [`DESIGN.md`](../../../DESIGN.md) |
 | **Implementation owner** | V1.65 P0 backend implementer; P2 Web UI consumes only via `NexusClient` |
 
 ---

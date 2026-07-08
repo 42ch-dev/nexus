@@ -14,7 +14,7 @@
 - [local-api-surface-conventions.md](local-api-surface-conventions.md) §9 (local daemon port discovery)
 - [web-ui-design-requirements.md](web-ui-design-requirements.md) §6 (desktop shell surface design requirements)
 - [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md) / `host_tool_handlers.rs` (W-002 path-guard reference for `openWith`/`revealInFinder` scope)
-- `apps/web/DESIGN.md` (Desktop Shell Supplement — window/menu/dialog/context-menu/status tokens)
+- [repo-root `DESIGN.md`](../../../DESIGN.md) + [`DESIGN.dark.md`](../../../DESIGN.dark.md) — Desktop Shell Supplement (window/menu/dialog/context-menu/status tokens) *(V1.98: sole SSOT; former `apps/web/DESIGN*.md` retired)*
 - [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md) — `wire_contracts_changed: false` (V1.66); desktop-native methods are Tauri IPC, not Daemon API wire. **V1.94:** `wire_contracts_changed: true` (additive `POST /v1/daemon/agent-host/scan` schemas; `@42ch/nexus-contracts` 0.20.0 → 0.21.0).
 - [daemon-runtime.md](daemon-runtime.md) — health-probe plumbing reused for per-launch daemon-ready gate; `setup_completed` field additive to `~/.nexus42/config.toml`
 - [web-ui.md](web-ui.md) — sidebar IA (two-tab + nested nav + footer), daemon status bar simplification, Strategies unification, button contrast invariant
@@ -92,7 +92,7 @@ Browser build: "Copy Path" only (no greyed-out teasing of unavailable actions).
 
 ## 10. Design requirements
 
-Window chrome / app menu / native dialogs / desktop context menu / daemon-status indicator tokens in `apps/web/DESIGN.md` **Desktop Shell Supplement (V1.66 Standard+)**. Product intent + constraints in [web-ui-design-requirements.md](web-ui-design-requirements.md) §6. System tray: none in V1.66.
+Window chrome / app menu / native dialogs / desktop context menu / daemon-status indicator tokens in repo-root [`DESIGN.md`](../../../DESIGN.md) **Desktop Shell Supplement (V1.66 Standard+)**. Product intent + constraints in [web-ui-design-requirements.md](web-ui-design-requirements.md) §6. System tray: none in V1.66.
 
 ## 11. Build + CI
 
