@@ -75,6 +75,8 @@ Per V1.99 compass Grill-Me lock: **promote `Button`, `Badge`, and `Card`; defer 
 
 **Deferred-owner:** P-1 does not assign a specific plan ID. The revisit trigger is the Form Field slice, which must demonstrate at least two Web consumers and one Studio fixture before reopening these three for promotion.
 
+> **Update (V1.100 T1 — 2026-07-08):** The Form Field contract is now locked — see `.mstar/iterations/v1.100/specs/form-field-contract.md`. Implementation proceeds in plan `2026-07-08-v1.100-form-field-component-promotion` (P2). The contract defines precise label/control association, `aria-invalid`/`aria-describedby` ownership, helper/error/required semantics, wrapper strategy, and confirms no stateful `FormField` in this iteration.
+
 ### Out of Scope (never candidates)
 
 Any component whose main value comes from app copy, daemon status, route state, setup progression, or shell layout. These are not listed in the non-promotion record — the exclusion rules in §Exclusions are the SSOT.
