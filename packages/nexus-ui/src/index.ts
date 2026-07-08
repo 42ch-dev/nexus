@@ -32,3 +32,8 @@ export {
   CardDescription,
   CardContent,
 } from './components/card';
+
+// V1.100 P2 — promoted form-field presentational primitives
+export { Input, type InputProps } from './components/input';
+export { Label, type LabelProps } from './components/label';
+export { Textarea, type TextareaProps } from './components/textarea';
