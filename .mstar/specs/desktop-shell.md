@@ -278,6 +278,35 @@ The desktop sidecar manager state machine uses process ownership as the boundary
 
 V1.97 does not change daemon routes, JSON schemas, generated TypeScript/Rust contracts, or `@42ch/nexus-contracts`. The wizard and desktop shell continue to use existing desktop status/detail capabilities and daemon health probes.
 
+### 13.9 V1.100 Amendments — Clean-state first-launch bootstrap (P0)
+
+**Product behavior target.** A clean desktop install must complete the full wizard path without a pre-daemon `No active creator` failure. A new bootstrap substep between workspace selection and daemon start creates the minimum creator/workspace state the daemon requires to boot.
+
+**Contract location:** The authoritative implementation-ready contract is [`.mstar/iterations/v1.100/specs/desktop-first-launch-bootstrap.md`](../../iterations/v1.100/specs/desktop-first-launch-bootstrap.md). This section records the product behavior; the iteration contract is SSOT for implementation details (bootstrap mechanism, daemon-start timing matrix, minimum state, idempotency contract, reuse targets).
+
+#### 13.9.1 Wizard flow change
+
+A new bootstrap substep is inserted between step 1 (Welcome + Workspace) and step 2 (Daemon):
+
+| Step | Title | What changed |
+|------|-------|-------------|
+| 1 | Welcome + Workspace | **Unchanged.** Workspace selection and `setWorkspacePath()` persist as before. |
+| **1→2** | **Bootstrap (new)** | **New.** Wizard calls `ensureSetupBootstrap()` via desktop IPC. On clean state, generates a persistent creator ID and writes minimum config (`active_creator_id`, `active_workspace_slug_by_creator`) to `~/.nexus42/config.toml`. On re-run or partial state, detects existing creator and skips generation (idempotent). Failure blocks advance to step 2. |
+| 2 | Daemon Ready | **Unchanged in behavior.** The daemon now boots successfully because creator state exists. Start, probe, error surfacing, and reset work as before. |
+| 3 | ACP Agent Detection | **Unchanged.** |
+| 4 | Done | **Unchanged.** |
+
+#### 13.9.2 `.setup()` daemon auto-start gating
+
+The Tauri `.setup()` hook in `apps/desktop/src-tauri/src/lib.rs` now reads `setup_completed` before spawning the sidecar:
+
+- `setup_completed = true` (existing install): **preserved** — auto-start as before (no regression).
+- `setup_completed = false` or absent (clean state): **skip** — wizard owns daemon start via the step 2 `startDaemon` IPC.
+
+#### 13.9.3 Contract boundary
+
+V1.100 does not change daemon routes, JSON schemas, generated TypeScript/Rust contracts, or `@42ch/nexus-contracts` (`wire_contracts_changed: false`). The bootstrap is Tauri IPC only — it writes to `~/.nexus42/config.toml` through the existing Tauri Rust layer; the daemon reads the same config file it already reads at boot. No daemon boot-without-creator mode is introduced.
+
 ---
 
 ## 14. ACP Agent Detection (V1.94)
