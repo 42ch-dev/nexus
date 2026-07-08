@@ -18,4 +18,4 @@ V1.63 P1 — promoted from inline handler DTOs in `crates/nexus-daemon-runtime/s
 ## Related
 
 - **Consumer:** `@42ch/nexus-contracts` (npm) — generated TypeScript types
-- **Layout spec:** `.mstar/knowledge/specs/schemas-directory-layout.md`
+- **Layout spec:** `.mstar/specs/schemas-directory-layout.md`

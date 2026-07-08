@@ -177,3 +177,7 @@ target
 
 .gitnexus
 .gh-user
+
+# Morning Star harness — SDD scratch + review bundles (ephemeral; not clone handoff)
+.mstar/sdd/
+.agents/sdd/

@@ -1146,7 +1146,7 @@ mod tests {
     }
 
     /// R-V146P1-QC3-S4 regression guard: no user-facing remediation string
-    /// produced by any gate helper may embed raw `.mstar/knowledge/specs/`
+    /// produced by any gate helper may embed raw `.mstar/specs/`
     /// paths. Exercises every `work_field_remediation` branch plus the
     /// filesystem and `previous_preset` helpers.
     #[tokio::test]

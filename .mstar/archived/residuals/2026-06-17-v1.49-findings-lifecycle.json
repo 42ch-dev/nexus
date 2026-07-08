@@ -35,7 +35,7 @@
       "owner": "@fullstack-dev",
       "target": "V1.50",
       "target_date": "V1.50",
-      "tracking_link": ".mstar/plans/reports/2026-06-17-v1.49-findings-lifecycle/completion.md \u00a7Residual additions",
+      "tracking_link": ".mstar/plans/2026-06-17-v1.49-findings-lifecycle.md \u00a7Residual additions",
       "note": "V1.49 P0 widened DAO SQL + auto_chain consumer; CLI client-side fetch at run.rs::assemble_open_findings_block still hard-codes `?status=open`. Suggested fix at V1.50: extend Local API ListFindingsQuery.status to accept comma-separated list (or add `:actionable` endpoint) + update CLI to pass `open,triaged` + CLI integration test. Auto-chain path (production) is unaffected \u2014 already uses widened DAO filter.",
       "lifecycle": "resolved",
       "closed_at": "2026-06-18",

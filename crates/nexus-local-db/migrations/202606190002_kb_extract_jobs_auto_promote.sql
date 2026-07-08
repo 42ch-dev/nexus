@@ -1,8 +1,8 @@
 -- V1.52 T-A P0: Audit columns for high-confidence auto-promoted KB candidates.
 --
 -- Plan: `.mstar/plans/2026-06-19-v1.52-outline-five-q-and-auto-promote.md`
--- Spec: `.mstar/knowledge/specs/novel-writing/quality-loop.md` §5.6
---       `.mstar/knowledge/specs/entity-scope-model.md` §5.5
+-- Spec: `.mstar/specs/novel-writing/quality-loop.md` §5.6
+--       `.mstar/specs/entity-scope-model.md` §5.5
 --
 -- When `creator world kb adopt --auto <world_ref>` promotes a pending candidate
 -- without human confirmation, it writes these three columns so the decision is

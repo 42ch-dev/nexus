@@ -11,7 +11,7 @@
       "iteration_refs": "v1.97-desktop-first-launch-hardening-compass-v1.md",
       "spec_integration_branch": "iteration/v1.97",
       "merge_target": "iteration/v1.97",
-      "primary_spec": "knowledge/specs/desktop-shell.md",
+      "primary_spec": "specs/desktop-shell.md",
       "blocked_by": [],
       "blocking": [],
       "working_branch": "feature/v1.97-desktop-first-launch-hardening"

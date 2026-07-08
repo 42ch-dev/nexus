@@ -2,7 +2,7 @@
 //!
 //! Implements the producer-side parsing contract from
 //! `.mstar/archived/knowledge/novel-findings-maturity.md` §1 and the vocabulary
-//! table in `.mstar/knowledge/specs/novel-writing/quality-loop.md` §8 / §2.1.
+//! table in `.mstar/specs/novel-writing/quality-loop.md` §8 / §2.1.
 //!
 //! ## Hermeticity
 //!

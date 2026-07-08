@@ -1,5 +1,5 @@
 -- V1.50 T-A P3 (T1): per-Work auto-chronology opt-in flag.
--- Spec: .mstar/knowledge/specs/novel-writing/auto-chronology.md §2.1.
+-- Spec: .mstar/specs/novel-writing/auto-chronology.md §2.1.
 --
 -- Adds `works.auto_chronology BOOLEAN NOT NULL DEFAULT 0`. When true, the
 -- daemon `auto_chronology_tick` task (5-min interval) checks the Work for

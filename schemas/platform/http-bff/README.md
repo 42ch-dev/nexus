@@ -23,4 +23,4 @@ Request/response JSON Schemas for **platform BFF HTTP** bodies (`nexus-platform`
 
 **Consumer:** `@42ch/nexus-contracts` (npm) + `nexus-cloud-sync` Rust HTTP client.
 
-**Layout spec:** [schemas-directory-layout.md](../../../.mstar/knowledge/specs/schemas-directory-layout.md) §3.1.
+**Layout spec:** [schemas-directory-layout.md](../../../.mstar/specs/schemas-directory-layout.md) §3.1.

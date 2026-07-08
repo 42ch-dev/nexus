@@ -16,7 +16,7 @@
   "task_category": "hygiene",
   "created_at": "2026-06-17",
   "updated_at": "2026-06-18T01:15:00+08:00",
-  "t1_completion": ".mstar/plans/reports/2026-06-17-v1.49-hygiene-and-closeout/t1-wl-a-completion.md",
+  "t1_completion": ".mstar/plans/2026-06-17-v1.49-hygiene-and-closeout.md",
   "t1_commits": [
     "d77a3627",
     "3e1c12af",
@@ -52,7 +52,7 @@
           "fb52ea11",
           "18e4a4db"
         ],
-        "completion_report": ".mstar/plans/reports/2026-06-17-v1.49-hygiene-and-closeout/t1-wl-a-completion.md",
+        "completion_report": ".mstar/plans/2026-06-17-v1.49-hygiene-and-closeout.md",
         "residuals_closed": [
           "R-V146P0-QC1-S2",
           "R-V146P0-QC2-S1",
@@ -83,7 +83,7 @@
           "i9j0k1l2",
           "m3n4o5p6"
         ],
-        "completion_report": ".mstar/plans/reports/2026-06-17-v1.49-hygiene-and-closeout/t2-overlay-completion.md"
+        "completion_report": ".mstar/plans/2026-06-17-v1.49-hygiene-and-closeout.md"
       },
       "T3": {
         "task": "Residual bulk defer to V1.50 (4 V1.46 lows)",
@@ -97,7 +97,7 @@
           "035c97ca",
           "0354cc89"
         ],
-        "completion_report": ".mstar/plans/reports/2026-06-17-v1.49-hygiene-and-closeout/t4-tracker-completion.md"
+        "completion_report": ".mstar/plans/2026-06-17-v1.49-hygiene-and-closeout.md"
       },
       "T5": {
         "task": "Profile B full compaction",

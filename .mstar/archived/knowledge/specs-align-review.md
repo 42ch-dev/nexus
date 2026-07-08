@@ -6,7 +6,7 @@
 **Scope**: Frozen **v1-spec** tree (resolve locally via `.mstar/local-paths.json` → private design checkout; **do not** paste that path into committed artifacts) vs **this repository** (`schemas/`, `crates/`, `packages/`, CLI/daemon).  
 **Non-scope**: `nexus-platform` runtime code, production OpenAPI YAML, Web UI — except **explicit cross-repo caveats** in §6.
 
-**Related**: [architecture-alignment-review.md](architecture-alignment-review.md) (§2.2 refreshed 2026-04-10), [v1.1-overview-v2.md](../../iterations/v1.1-overview-v2.md), [canonical-hash.md](canonical-hash.md), [`.mstar/plans/reports/2026-04-10-v1-spec-wire-schema-sprint/coverage-matrix.md`](../reports/2026-04-10-v1-spec-wire-schema-sprint/coverage-matrix.md), [`.mstar/plans/reports/2026-04-10-v1-spec-openapi-freeze-checklist/plan-21-openapi-freeze-checklist.md`](../reports/2026-04-10-v1-spec-openapi-freeze-checklist/plan-21-openapi-freeze-checklist.md).
+**Related**: [architecture-alignment-review.md](architecture-alignment-review.md) (§2.2 refreshed 2026-04-10), [v1.1-overview-v2.md](../../iterations/v1.1-overview-v2.md), [canonical-hash.md](canonical-hash.md), [`.mstar/plans/2026-04-10-v1-spec-wire-schema-sprint.md), [`.mstar/plans/2026-04-10-v1-spec-openapi-freeze-checklist.md).
 
 ---
 

@@ -19,7 +19,7 @@
       "updated_at": "2026-06-13T18:30:00+08:00",
       "done_at": "2026-06-13T18:30:00+08:00",
       "notes": [
-        "P-last executed end-to-end 2026-06-13. T1: spec promotions (novel-manuscript-audit + novel-quality-loop Draft overlay → Shipped Feature line). T2: DF-69 closure → shipped archive (R-V143P0-002 lifecycle:resolved in P1). T3: residual closure audit (R-V144P0-001..010 + R-V144P1-001..006 → resolved; R-V141P0-05 + R-V141P1-14 → waived; R-V142P1-QC1-F-002/F-004 → resolved). T4: status.json closeout (v1_44_iteration_complete: true; tech_debt_summary refreshed; v1_44_ship metadata). T5: iterations/README.md + knowledge/specs/README.md updated to V1.44 Shipped. T6: Profile B plan compaction (5 Done plans archived). T7: PM signoff; PR iteration/v1.44 → main pending user push authorization."
+        "P-last executed end-to-end 2026-06-13. T1: spec promotions (novel-manuscript-audit + novel-quality-loop Draft overlay → Shipped Feature line). T2: DF-69 closure → shipped archive (R-V143P0-002 lifecycle:resolved in P1). T3: residual closure audit (R-V144P0-001..010 + R-V144P1-001..006 → resolved; R-V141P0-05 + R-V141P1-14 → waived; R-V142P1-QC1-F-002/F-004 → resolved). T4: status.json closeout (v1_44_iteration_complete: true; tech_debt_summary refreshed; v1_44_ship metadata). T5: iterations/README.md + specs/README.md updated to V1.44 Shipped. T6: Profile B plan compaction (5 Done plans archived). T7: PM signoff; PR iteration/v1.44 → main pending user push authorization."
       ]
     }
   },

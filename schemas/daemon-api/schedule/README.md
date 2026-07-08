@@ -20,4 +20,4 @@ V1.63 P1 — promoted from hand-written DTOs in `crates/nexus-contracts/src/loca
 ## Related
 
 - **Consumer:** `@42ch/nexus-contracts` (npm) — generated TypeScript types
-- **Layout spec:** `.mstar/knowledge/specs/schemas-directory-layout.md`
+- **Layout spec:** `.mstar/specs/schemas-directory-layout.md`

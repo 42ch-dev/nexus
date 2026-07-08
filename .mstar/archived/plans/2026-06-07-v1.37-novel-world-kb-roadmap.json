@@ -15,12 +15,12 @@
     "merge_target": "iteration/v1.37",
     "metadata": {
       "iteration_compass": ".mstar/iterations/v1.37-novel-writing-foundation-delivery-compass-v1.md",
-      "primary_spec": ".mstar/knowledge/specs/novel-writing/workflow-profile.md",
+      "primary_spec": ".mstar/specs/novel-writing/workflow-profile.md",
       "spec_refs": [
-        ".mstar/knowledge/specs/entity-scope-model.md",
-        ".mstar/knowledge/specs/work-experience-model.md",
-        ".mstar/knowledge/specs/creator-workflow.md",
-        ".mstar/knowledge/specs/local-db-schema.md"
+        ".mstar/specs/entity-scope-model.md",
+        ".mstar/specs/work-experience-model.md",
+        ".mstar/specs/creator-workflow.md",
+        ".mstar/specs/local-db-schema.md"
       ],
       "depends_on": [
         "2026-06-07-v1.37-novel-foundation-first"
@@ -36,8 +36,8 @@
       "status_transition": "Todo → InProgress → InReview → Done on 2026-06-08 after T1–T9 spec/tracker amendments + single QC review",
       "scope_decision": "roadmap-only — spec/tracker/plan amendments; no code, schema migration, preset YAML, CLI implementation, prompt runtime, validator, or kb-extract binding in P2",
       "spec_amendments": [
-        ".mstar/knowledge/specs/entity-scope-model.md §5.1.1",
-        ".mstar/knowledge/specs/novel-writing/workflow-profile.md §3.5.1"
+        ".mstar/specs/entity-scope-model.md §5.1.1",
+        ".mstar/specs/novel-writing/workflow-profile.md §3.5.1"
       ],
       "shipped": [
         "entity-scope-model.md: extended §5.4 with narrative World KB item taxonomy (foundation, background, character, location, society, rules, economy) + minimum-viable schemas",
@@ -46,7 +46,7 @@
         "Deferred tracker: DF-63 disposition updated to 'V1.37 P2 roadmap-only; implementation deferred to V1.37+' with 5 work items enumerated",
         "Plan markdown: status updated to Done with roadmap-only scope decision recorded"
       ],
-      "qc_report": ".mstar/plans/reports/2026-06-07-v1.37-novel-world-kb-roadmap/qc1.md (Approve)"
+      "qc_report": ".mstar/plans/2026-06-07-v1.37-novel-world-kb-roadmap.md (Approve)"
     }
   },
   "qc": "single qc-specialist review (docs-only) Approve — 5/5 ACs, no V1.36/P0/P1 contradiction",

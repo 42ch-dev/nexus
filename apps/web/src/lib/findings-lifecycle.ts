@@ -2,7 +2,7 @@
  * Findings lifecycle — client-side mirror of the server-enforced 6-state status
  * machine.
  *
- * Spec: `.mstar/knowledge/specs/findings-lifecycle.md` §2. The DAO enforces
+ * Spec: `.mstar/specs/findings-lifecycle.md` §2. The DAO enforces
  * transition adjacency on every PATCH
  * (`crates/nexus-local-db/src/findings.rs:172` — `is_valid_transition()`); an
  * illegal transition is rejected with HTTP 422 `INVALID_TRANSITION`. The UI

@@ -17,7 +17,7 @@
     "wave_0_spec": ".mstar/archived/knowledge/acp-client-tech-spec.md",
     "spec_refs": [
       ".mstar/archived/knowledge/acp-client-tech-spec.md",
-      ".mstar/knowledge/specs/orchestration-engine.md",
+      ".mstar/specs/orchestration-engine.md",
       ".mstar/iterations/v1.4-delivery-compass-v1.md"
     ],
     "effort_agent_oriented": "M (1-2 agent sessions)",

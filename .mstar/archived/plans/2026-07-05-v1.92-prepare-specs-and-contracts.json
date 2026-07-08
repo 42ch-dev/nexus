@@ -10,7 +10,7 @@
     "iteration_refs": "v1.92-remote-access-hardening-delivery-compass-v1.md",
     "spec_integration_branch": "iteration/v1.92",
     "merge_target": "iteration/v1.92",
-    "primary_spec": "knowledge/specs/daemon-runtime.md",
+    "primary_spec": "specs/daemon-runtime.md",
     "blocked_by": [],
     "blocking": [
       "2026-07-05-v1.92-tls-remote-bind",

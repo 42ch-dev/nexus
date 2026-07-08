@@ -3,7 +3,7 @@
 //! Implements the per-Work cron config layer for novel-writing three-role
 //! staggering. Foundation only — cron *firing* into the auto-chain is T-A P1.
 //!
-//! Spec: `.mstar/knowledge/specs/novel-writing/cron-staggering.md` §2 / §3.
+//! Spec: `.mstar/specs/novel-writing/cron-staggering.md` §2 / §3.
 //!
 //! ## Architecture (foundation slice)
 //!

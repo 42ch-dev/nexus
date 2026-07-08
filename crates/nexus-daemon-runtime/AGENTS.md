@@ -26,7 +26,7 @@ All handlers MUST return `NexusApiError` (or a type that converts `Into<NexusApi
 
 ## Architecture Reference
 
-See `.mstar/knowledge/specs/daemon-runtime.md` — Sections 2.2, 3.1, 3.3
+See `.mstar/specs/daemon-runtime.md` — Sections 2.2, 3.1, 3.3
 for the layering, crate structure, and workspace cleanup governing this crate.
 
 ## sqlx Compile-Time Macros (Mandatory)
@@ -51,7 +51,7 @@ All new sqlx queries **MUST** use compile-time checked macros (`sqlx::query!`, `
 
 ## Runtime Lock Acquire / Release Order (Mandatory — V1.42.1 hotfix rule)
 
-> **Spec:** `.mstar/knowledge/specs/novel-writing/multi-work-lifecycle.md` §4.2 — single-writer contract
+> **Spec:** `.mstar/specs/novel-writing/multi-work-lifecycle.md` §4.2 — single-writer contract
 > for the per-Work `runtime_lock_holder` column.
 
 The `RuntimeLockGuard` (in `src/api/handlers/works.rs`) is an RAII guard that

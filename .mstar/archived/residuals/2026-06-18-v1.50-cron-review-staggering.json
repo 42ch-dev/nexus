@@ -49,7 +49,7 @@
       "owner": "@writing-specialist or @project-manager",
       "target": "V1.50 P-last (plan archive + spec reconcile)",
       "target_date": "V1.50 P-last",
-      "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-cron-review-staggering/qc1.md \u00a7S-001",
+      "tracking_link": ".mstar/plans/2026-06-18-v1.50-cron-review-staggering.md \u00a7S-001",
       "note": "Doc-only reconcile: implementer correctly avoided dead code per surgical principle; outcome is stronger than plan's literal requirement. At plan archive time, update Goal 4 + AC3 to reflect the real contract (T-B P1 hook is independent of T-A P2).",
       "lifecycle": "resolved",
       "_plan_id": "2026-06-18-v1.50-cron-review-staggering",

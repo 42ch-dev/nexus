@@ -1,6 +1,6 @@
 //! Hermetic integration test for the auto-chronology tick (V1.50 T-A P3, T7).
 //!
-//! Spec: `.mstar/knowledge/specs/novel-writing/auto-chronology.md` §3 / §4.
+//! Spec: `.mstar/specs/novel-writing/auto-chronology.md` §3 / §4.
 //! AC §4.2: positive (all finalized + intake complete → advance) + 4 negative
 //! edge cases + crash recovery.
 //!

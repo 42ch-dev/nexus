@@ -14,7 +14,7 @@
     "latest_active_compass": "v1.98-design-studio-and-design-unification-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
-    "spec_refs_index": ".mstar/knowledge/specs/README.md",
+    "spec_refs_index": ".mstar/specs/README.md",
     "pre_iteration_hotfix": null,
     "latest_ship": {
       "iteration": "V1.97",
@@ -64,8 +64,8 @@
         "owner": "@frontend-dev",
         "target": "when list virtualisation lands",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/reports/2026-07-05-v1.91-reading-chrome/qc3.md §S-004",
-        "note": "At the 100-item cap this is not user-visible."
+        "tracking_link": ".mstar/plans/2026-07-05-v1.91-findings-batch.md",
+        "note": "At the 100-item cap this is not user-visible. QC source: §S-004"
       }
     ],
     "2026-07-06-v1.93-closure": [
@@ -77,8 +77,8 @@
         "owner": "@writing-specialist + @architect",
         "target": "V1.96 spec-hygiene pass",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.93-closure/qc1.md §W-003",
-        "note": "Pre-existing from V1.90."
+        "tracking_link": ".mstar/plans/2026-07-06-v1.93-closure.md",
+        "note": "Pre-existing from V1.90. QC source: §W-003"
       }
     ],
     "2026-07-05-v1.92-closure": [
@@ -103,8 +103,8 @@
         "owner": "@frontend-dev",
         "target": "V1.96",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-101",
-        "note": "Non-blocking."
+        "tracking_link": ".mstar/plans/2026-07-06-v1.94-closure.md",
+        "note": "Non-blocking. QC source: §F-101"
       },
       {
         "id": "R-V194QC1-S102",
@@ -114,8 +114,8 @@
         "owner": "@frontend-dev",
         "target": "V1.96",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-102",
-        "note": "Non-blocking."
+        "tracking_link": ".mstar/plans/2026-07-06-v1.94-closure.md",
+        "note": "Non-blocking. QC source: §F-102"
       },
       {
         "id": "R-V194QC1-S103",
@@ -125,8 +125,8 @@
         "owner": "@frontend-dev",
         "target": "V1.96",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-103",
-        "note": "Non-blocking."
+        "tracking_link": ".mstar/plans/2026-07-06-v1.94-closure.md",
+        "note": "Non-blocking. QC source: §F-103"
       },
       {
         "id": "R-V194QC1-S104",
@@ -136,8 +136,8 @@
         "owner": "@frontend-dev",
         "target": "V1.96",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-104",
-        "note": "Non-blocking."
+        "tracking_link": ".mstar/plans/2026-07-06-v1.94-closure.md",
+        "note": "Non-blocking. QC source: §F-104"
       },
       {
         "id": "R-V194QC1-S105",
@@ -147,8 +147,8 @@
         "owner": "@frontend-dev",
         "target": "V1.96",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-105",
-        "note": "Non-blocking."
+        "tracking_link": ".mstar/plans/2026-07-06-v1.94-closure.md",
+        "note": "Non-blocking. QC source: §F-105"
       },
       {
         "id": "R-V194QC1-S106",
@@ -158,8 +158,8 @@
         "owner": "@frontend-dev",
         "target": "V1.96",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §F-106",
-        "note": "Non-blocking."
+        "tracking_link": ".mstar/plans/2026-07-06-v1.94-closure.md",
+        "note": "Non-blocking. QC source: §F-106"
       },
       {
         "id": "R-V194QC2-S001",
@@ -169,8 +169,8 @@
         "owner": "@fullstack-dev",
         "target": "V1.96",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc2.md §S-001",
-        "note": "Non-blocking."
+        "tracking_link": ".mstar/plans/2026-07-06-v1.94-closure.md",
+        "note": "Non-blocking. QC source: §S-001"
       },
       {
         "id": "R-V194QC2-S002",
@@ -180,8 +180,8 @@
         "owner": "@fullstack-dev",
         "target": "V1.96",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc2.md §S-002",
-        "note": "Non-blocking."
+        "tracking_link": ".mstar/plans/2026-07-06-v1.94-closure.md",
+        "note": "Non-blocking. QC source: §S-002"
       },
       {
         "id": "R-V194QC1R-S001",
@@ -191,8 +191,8 @@
         "owner": "@fullstack-dev",
         "target": "V1.96",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/reports/2026-07-06-v1.94-closure/qc1.md §Revalidation",
-        "note": "Non-blocking."
+        "tracking_link": ".mstar/plans/2026-07-06-v1.94-closure.md",
+        "note": "Non-blocking. QC source: §Revalidation"
       }
     ],
     "2026-07-07-v1.95-implement-fixes": [
@@ -229,8 +229,8 @@
         "owner": "@fullstack-dev",
         "target": "V1.96",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/reports/2026-07-07-v1.95-implement-fixes/qc3.md §W2",
-        "note": "PM-accepted: recovery-wipe semantics; daemon recreates fresh DBs on boot regardless; partial wipe recoverable."
+        "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md",
+        "note": "PM-accepted: recovery-wipe semantics; daemon recreates fresh DBs on boot regardless; partial wipe recoverable. QC source: §W2"
       },
       {
         "id": "R-V195QC3-W003",
@@ -240,8 +240,8 @@
         "owner": "@fullstack-dev",
         "target": "V1.96",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/reports/2026-07-07-v1.95-implement-fixes/qc3.md §W3",
-        "note": "PM-accepted: matches existing write_setup_completed_at/write_agent_profile_at pattern (all std::fs::write); codebase-wide hardening is V1.96."
+        "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md",
+        "note": "PM-accepted: matches existing write_setup_completed_at/write_agent_profile_at pattern (all std::fs::write); codebase-wide hardening is V1.96. QC source: §W3"
       },
       {
         "id": "R-V195QC3-S001",
@@ -251,8 +251,8 @@
         "owner": "@frontend-dev",
         "target": "V1.96",
         "lifecycle": "resolved",
-        "tracking_link": ".mstar/plans/reports/2026-07-07-v1.95-implement-fixes/qc3.md §Suggestion",
-        "note": "useEffect cleanup unsubscribes; no hard timeout.",
+        "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md",
+        "note": "useEffect cleanup unsubscribes; no hard timeout. QC source: §Suggestion",
         "closed_at": "2026-07-07",
         "closed_by": "V1.96",
         "closure_note": "Closed by V1.96 plan QC Approve — wizard timeout + starting branch (T4)"
@@ -265,8 +265,8 @@
         "owner": "@fullstack-dev",
         "target": "V1.96",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/reports/2026-07-07-v1.95-implement-fixes/qc1.md §S-002",
-        "note": "Implementation correct; integration-covered; test-parity with siblings is polish."
+        "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md",
+        "note": "Implementation correct; integration-covered; test-parity with siblings is polish. QC source: §S-002"
       }
     ],
     "2026-07-07-v1.96-implement-rework": [
@@ -278,8 +278,8 @@
         "owner": "@fullstack-dev",
         "target": "V1.97",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/reports/2026-07-07-v1.96-implement-rework/qc3.md §W-1",
-        "note": "Sub-millisecond window; low practical impact."
+        "tracking_link": ".mstar/plans/2026-07-07-v1.96-implement-rework.md",
+        "note": "Sub-millisecond window; low practical impact. QC source: §W-1"
       },
       {
         "id": "R-V196QC1-S002",
@@ -289,8 +289,8 @@
         "owner": "@frontend-dev",
         "target": "V1.97",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/reports/2026-07-07-v1.96-implement-rework/qc1.md §S-002",
-        "note": "Single-line blast radius; V1.97 polish."
+        "tracking_link": ".mstar/plans/2026-07-07-v1.96-implement-rework.md",
+        "note": "Single-line blast radius; V1.97 polish. QC source: §S-002"
       },
       {
         "id": "R-V196QC1-S004",
@@ -300,8 +300,8 @@
         "owner": "@fullstack-dev",
         "target": "V1.97+",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/reports/2026-07-07-v1.96-implement-rework/qc1.md §S-004",
-        "note": "Future 'copy error details' support button."
+        "tracking_link": ".mstar/plans/2026-07-07-v1.96-implement-rework.md",
+        "note": "Future 'copy error details' support button. QC source: §S-004"
       },
       {
         "id": "R-V196QC3-S001",
@@ -311,8 +311,8 @@
         "owner": "@frontend-dev",
         "target": "V1.97",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/reports/2026-07-07-v1.96-implement-rework/qc3.md §S-1",
-        "note": "Would not catch className regression."
+        "tracking_link": ".mstar/plans/2026-07-07-v1.96-implement-rework.md",
+        "note": "Would not catch className regression. QC source: §S-1"
       },
       {
         "id": "R-V196QC1-S001",
@@ -322,8 +322,8 @@
         "owner": "@frontend-dev",
         "target": "V1.97",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/reports/2026-07-07-v1.96-implement-rework/qc1.md §S-001",
-        "note": "Different fallback semantics; consolidation candidate."
+        "tracking_link": ".mstar/plans/2026-07-07-v1.96-implement-rework.md",
+        "note": "Different fallback semantics; consolidation candidate. QC source: §S-001"
       }
     ],
     "2026-07-07-v1.97-desktop-first-launch-hardening": [
@@ -335,8 +335,8 @@
         "owner": "@architect + @fullstack-dev",
         "target": "V1.99",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/reports/2026-07-07-v1.97-desktop-first-launch-hardening/qc-consolidated.md §R-V197-SMOKE-CLEAN-STATE",
-        "note": "Pre-existing product/arch gap exposed by V1.97 smoke (spawn-name fix made daemon reachable). V1.97 ships the spawn-name fix; creator-bootstrap design deferred. Needs architect: gate daemon auto-start behind setup_completed + wizard creator-init."
+        "tracking_link": ".mstar/plans/2026-07-07-v1.97-desktop-first-launch-hardening.md",
+        "note": "Pre-existing product/arch gap exposed by V1.97 smoke (spawn-name fix made daemon reachable). V1.97 ships the spawn-name fix; creator-bootstrap design deferred. Needs architect: gate daemon auto-start behind setup_completed + wizard creator-init. QC source: §R-V197-SMOKE-CLEAN-STATE"
       },
       {
         "id": "R-V197-SMOKE-UI",
@@ -346,8 +346,8 @@
         "owner": "@qa-engineer",
         "target": "V1.99",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/reports/2026-07-07-v1.97-desktop-first-launch-hardening/qc-consolidated.md §R-V197-SMOKE-UI",
-        "note": "Attach path + unit tests verified; wizard/UI flow not. Manual or automated desktop smoke on interactive host in V1.98."
+        "tracking_link": ".mstar/plans/2026-07-07-v1.97-desktop-first-launch-hardening.md",
+        "note": "Attach path + unit tests verified; wizard/UI flow not. Manual or automated desktop smoke on interactive host in V1.98. QC source: §R-V197-SMOKE-UI"
       },
       {
         "id": "R-V197QC3-W001",
@@ -357,8 +357,8 @@
         "owner": "@fullstack-dev",
         "target": "V1.99+",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/reports/2026-07-07-v1.97-desktop-first-launch-hardening/qc3.md §W-001",
-        "note": "No error lost; consolidate to single storage path in future iteration."
+        "tracking_link": ".mstar/plans/2026-07-07-v1.97-desktop-first-launch-hardening.md",
+        "note": "No error lost; consolidate to single storage path in future iteration. QC source: §W-001"
       },
       {
         "id": "R-V197QC3-W002",
@@ -368,8 +368,8 @@
         "owner": "@fullstack-dev",
         "target": "V1.99",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/reports/2026-07-07-v1.97-desktop-first-launch-hardening/qc3.md §W-002",
-        "note": "Same code path as start_daemon; budget-not-reset implicitly covered by crash_restart_stops_when_budget_exhausted."
+        "tracking_link": ".mstar/plans/2026-07-07-v1.97-desktop-first-launch-hardening.md",
+        "note": "Same code path as start_daemon; budget-not-reset implicitly covered by crash_restart_stops_when_budget_exhausted. QC source: §W-002"
       },
       {
         "id": "R-V197-CLIPPY",
@@ -379,8 +379,8 @@
         "owner": "@fullstack-dev",
         "target": "V1.99",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/reports/2026-07-07-v1.97-desktop-first-launch-hardening/qc-consolidated.md §R-V197-CLIPPY",
-        "note": "Not introduced by V1.97; strict clippy -D warnings fails on this pre-existing lint."
+        "tracking_link": ".mstar/plans/2026-07-07-v1.97-desktop-first-launch-hardening.md",
+        "note": "Not introduced by V1.97; strict clippy -D warnings fails on this pre-existing lint. QC source: §R-V197-CLIPPY"
       }
     ]
   }

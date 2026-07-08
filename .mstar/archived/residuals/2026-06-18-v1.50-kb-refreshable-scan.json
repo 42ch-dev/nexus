@@ -31,7 +31,7 @@
       "owner": "@project-manager",
       "target": "V1.50 P2 merge time",
       "target_date": "V1.50 P2 merge time",
-      "tracking_link": ".mstar/plans/reports/2026-06-18-v1.50-kb-refreshable-scan/qc1.md \u00a7W-001",
+      "tracking_link": ".mstar/plans/2026-06-18-v1.50-kb-refreshable-scan.md \u00a7W-001",
       "note": "PM must pick the canonical migration-number mapping. Both branches renumbered the same 202606180002 to 202606180003 (idempotent content). Net effect on a fresh merge: one renumber; conflict-free. PM should accept either branch's renumber as-is at merge.",
       "lifecycle": "resolved",
       "closed_at": "2026-06-18",

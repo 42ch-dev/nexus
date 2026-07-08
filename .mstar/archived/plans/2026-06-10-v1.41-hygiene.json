@@ -37,7 +37,7 @@
         "13 waives with WAIVER/SAFETY comments: R-V133P3-03, R-V133P3-04, R-V140P0-S2, R-V140P1-S3..S5, R-V140P2-S1, R-V140P2-S3, R-V140P3-S4, R-V140P3-S5",
         "7 defers to V1.42: R-V140P0-S3 (sqlx ops), R-V140P1-S6 (benchmarks), R-V140P2-S2 (e2e integration test), R-V140P3-S1..S3 (test-only enhancements), R-V140P4-INFRA (.sqlx/ refresh)",
         "1 excluded: R-V140P4-W2 (PM-accepted waiver; stays deferred)",
-        "Completion report at .mstar/plans/reports/2026-06-10-v1.41-hygiene/completion-report.md",
+        "Completion report at .mstar/plans/2026-06-10-v1.41-hygiene.md",
         "PM-side closeout: 35 residuals closed (canonical lifecycle + closed_at + closure_note + closure_evidence); 9 archive JSON files written; status.json total_open 120 -> 91"
       ],
       "closed_residuals": [
@@ -59,11 +59,11 @@
         "7ea75fa8 docs(harness): append §10 Fix Wave to completion report"
       ],
       "qc_reports": [
-        ".mstar/plans/reports/2026-06-10-v1.41-hygiene/qc1.md (Approve)",
-        ".mstar/plans/reports/2026-06-10-v1.41-hygiene/qc2.md (initial Request Changes + Revalidation Approve)",
-        ".mstar/plans/reports/2026-06-10-v1.41-hygiene/qc3.md (initial Request Changes + Revalidation Approve)",
-        ".mstar/plans/reports/2026-06-10-v1.41-hygiene/qc-consolidated.md (Approve post-fix-wave)",
-        ".mstar/plans/reports/2026-06-10-v1.41-hygiene/qa.md (initial Request Changes + Re-verification with PM-override documented)"
+        ".mstar/plans/2026-06-10-v1.41-hygiene.md (Approve)",
+        ".mstar/plans/2026-06-10-v1.41-hygiene.md (initial Request Changes + Revalidation Approve)",
+        ".mstar/plans/2026-06-10-v1.41-hygiene.md (initial Request Changes + Revalidation Approve)",
+        ".mstar/plans/2026-06-10-v1.41-hygiene.md (Approve post-fix-wave)",
+        ".mstar/plans/2026-06-10-v1.41-hygiene.md (initial Request Changes + Re-verification with PM-override documented)"
       ]
     }
   },

@@ -11,10 +11,10 @@
     "working_branch": "feature/v1.90-daemon-api-rename-frontend",
     "worktree_path": ".worktrees/feature-v1.90-daemon-api-rename-frontend",
     "merge_commit": "39ec24e0",
-    "primary_spec": ".mstar/knowledge/specs/web-ui.md",
+    "primary_spec": ".mstar/specs/web-ui.md",
     "spec_refs": [
       "apps/web/AGENTS.md",
-      ".mstar/knowledge/specs/daemon-api-surface-conventions.md"
+      ".mstar/specs/daemon-api-surface-conventions.md"
     ]
   }
 }

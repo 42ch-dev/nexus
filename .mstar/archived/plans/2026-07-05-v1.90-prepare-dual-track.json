@@ -8,10 +8,10 @@
     ],
     "spec_integration_branch": "iteration/v1.90",
     "merge_target": "iteration/v1.90",
-    "primary_spec": ".mstar/knowledge/specs/daemon-runtime.md",
+    "primary_spec": ".mstar/specs/daemon-runtime.md",
     "spec_refs": [
-      ".mstar/knowledge/specs/web-ui.md",
-      ".mstar/knowledge/specs/local-api-surface-conventions.md",
+      ".mstar/specs/web-ui.md",
+      ".mstar/specs/local-api-surface-conventions.md",
       "schemas/AGENTS.md",
       "apps/web/AGENTS.md",
       "crates/nexus-daemon-runtime/AGENTS.md"

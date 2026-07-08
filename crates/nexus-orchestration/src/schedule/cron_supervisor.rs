@@ -1,7 +1,7 @@
 //! `schedule::cron_supervisor` — daemon-side cron evaluator for the
 //! novel-writing three-role staggering (V1.50 T-A P1).
 //!
-//! Spec: `.mstar/knowledge/specs/novel-writing/cron-staggering.md` §4.
+//! Spec: `.mstar/specs/novel-writing/cron-staggering.md` §4.
 //!
 //! ## Role
 //!

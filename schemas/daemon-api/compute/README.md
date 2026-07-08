@@ -14,8 +14,8 @@ V1.62 (2026-06-23) moved these from `schemas/compute/` into `schemas/daemon-api/
 ## Related
 
 - **Module authoring + `manifest.json` `schemas` block:** [modules/README.md](../../../modules/README.md)
-- **Compute ABI normative spec:** `.mstar/knowledge/specs/compute-module-abi.md` (V1.62 P2 — placeholder until authored)
+- **Compute ABI normative spec:** `.mstar/specs/compute-module-abi.md` (V1.62 P2 — placeholder until authored)
 - **Runtime host:** `crates/nexus-wasm-host/` (re-exports `ComputeInput` / `ComputeOutput` from `nexus-contracts`)
-- **Layout spec:** [schemas-directory-layout.md](../../../.mstar/knowledge/specs/schemas-directory-layout.md) §3.5
+- **Layout spec:** [schemas-directory-layout.md](../../../.mstar/specs/schemas-directory-layout.md) §3.5
 
 **Consumer:** `@42ch/nexus-contracts` (npm) + `nexus-wasm-host` Rust crate (re-exports the generated types) + external WASM compute modules.

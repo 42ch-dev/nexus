@@ -15,5 +15,5 @@
   "started_at": "2026-06-20T00:00:00Z",
   "done_at": "2026-06-20T18:00:00Z",
   "qc_dispatched_at": "2026-06-20T18:00:00Z",
-  "qc_reports_path": ".mstar/plans/reports/2026-06-22-v1.53-spec-hygiene-closeout/"
+  "review_bundle": ".mstar/sdd/2026-06-22-v1.53-spec-hygiene-closeout/review/"
 }

@@ -1,6 +1,6 @@
 -- V1.49 P0 (F6) — extend `findings.status` lifecycle.
 --
--- Implements `.mstar/knowledge/specs/novel-writing/findings-lifecycle.md` §2
+-- Implements `.mstar/specs/novel-writing/findings-lifecycle.md` §2
 -- (Draft overlay V1.49): the status enum grows from the V1.39 three-state
 -- minimum (`open`, `resolved`, `wont_fix`) to a six-state lifecycle:
 --

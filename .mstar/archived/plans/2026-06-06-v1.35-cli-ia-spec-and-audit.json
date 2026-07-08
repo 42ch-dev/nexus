@@ -15,7 +15,7 @@
     "merge_target": "iteration/v1.35",
     "metadata": {
       "iteration_compass": ".mstar/iterations/v1.35-cli-ia-and-product-polish-delivery-compass-v1.md",
-      "primary_spec": ".mstar/knowledge/specs/cli-command-ia.md",
+      "primary_spec": ".mstar/specs/cli-command-ia.md",
       "description": "P1 — IA spec, audit, cli-spec §6–§7 (docs only)",
       "done_at": "2026-06-06T22:00:00+08:00"
     }

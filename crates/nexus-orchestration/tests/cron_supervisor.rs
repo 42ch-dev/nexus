@@ -1,6 +1,6 @@
 //! Hermetic tests for the daemon-side cron evaluator (V1.50 T-A P1).
 //!
-//! Spec: `.mstar/knowledge/specs/novel-writing/cron-staggering.md` §4.
+//! Spec: `.mstar/specs/novel-writing/cron-staggering.md` §4.
 //! Plan acceptance criteria §1 (fire/skip/idempotent), §3 (synthetic tick),
 //! §4 (same-minute double fire), §5 (TOCTOU), §6 (partial index).
 

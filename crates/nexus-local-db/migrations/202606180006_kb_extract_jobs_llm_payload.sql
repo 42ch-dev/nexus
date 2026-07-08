@@ -1,8 +1,8 @@
 -- V1.51 T-A P0: Extend kb_extract_jobs with LLM extraction metadata.
 --
 -- Plan: `.mstar/plans/2026-06-18-v1.51-llm-extraction.md`
--- Spec: `.mstar/knowledge/specs/llm-extract.md` §3.2
---       `.mstar/knowledge/specs/entity-scope-model.md` §5.5.6
+-- Spec: `.mstar/specs/llm-extract.md` §3.2
+--       `.mstar/specs/entity-scope-model.md` §5.5.6
 --
 -- Closes R-V150KBED-01: the V1.50 heuristic defaulted every review-time
 -- candidate to `block_type_guess='character'`. V1.51 swaps the heuristic for

@@ -11,7 +11,7 @@
       "iteration_refs": "v1.95-setup-wizard-bugfix-delivery-compass-v1.md",
       "spec_integration_branch": "iteration/v1.95",
       "merge_target": "iteration/v1.95",
-      "primary_spec": "knowledge/specs/desktop-shell.md",
+      "primary_spec": "specs/desktop-shell.md",
       "blocked_by": [
         "2026-07-07-v1.95-prepare-specs"
       ],

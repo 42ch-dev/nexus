@@ -11,7 +11,7 @@
       "iteration_refs": "v1.98-design-studio-and-design-unification-compass-v1.md",
       "spec_integration_branch": "iteration/v1.98",
       "merge_target": "iteration/v1.98",
-      "primary_spec": "knowledge/specs/design-studio.md",
+      "primary_spec": "specs/design-studio.md",
       "blocked_by": [
         "2026-07-08-v1.98-prepare-design-studio"
       ],

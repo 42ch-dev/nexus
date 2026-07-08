@@ -10,7 +10,7 @@
     "iteration_refs": "v1.93-remote-access-polish-delivery-compass-v1.md",
     "spec_integration_branch": "iteration/v1.93",
     "merge_target": "iteration/v1.93",
-    "primary_spec": "knowledge/specs/daemon-runtime.md",
+    "primary_spec": "specs/daemon-runtime.md",
     "blocked_by": [],
     "blocking": ["2026-07-06-v1.93-tls-robustness", "2026-07-06-v1.93-remote-connection-polish"],
     "working_branch": "iteration/v1.93",

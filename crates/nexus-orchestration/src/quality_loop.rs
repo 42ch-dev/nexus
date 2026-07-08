@@ -1,8 +1,8 @@
 //! Review-time KB candidate extraction (V1.50 T-B P1; V1.51 T-A P0 LLM swap).
 //!
 //! Implements the review-time hook referenced by
-//! [`novel-writing/cron-staggering.md` §4.4](../../.mstar/knowledge/specs/novel-writing/cron-staggering.md)
-//! and [`entity-scope-model.md` §5.5](../../.mstar/knowledge/specs/entity-scope-model.md).
+//! [`novel-writing/cron-staggering.md` §4.4](../../.mstar/specs/novel-writing/cron-staggering.md)
+//! and [`entity-scope-model.md` §5.5](../../.mstar/specs/entity-scope-model.md).
 //!
 //! # Two pathways (V1.51)
 //!

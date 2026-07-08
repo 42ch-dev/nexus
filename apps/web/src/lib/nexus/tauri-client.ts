@@ -1,7 +1,7 @@
 /**
  * `TauriClient` — V1.66 desktop shell `NexusClient` implementation.
  *
- * Spec: [desktop-shell.md](../../../../../.mstar/knowledge/specs/desktop-shell.md)
+ * Spec: [desktop-shell.md](../../../../../.mstar/specs/desktop-shell.md)
  * §5; compass §5 #1 LOCKED. Architecture: **thin desktop-augmentation over
  * `BrowserClient`** — the `NexusClient` data methods reuse the identical HTTP
  * transport to the localhost daemon (`http://127.0.0.1:<resolvedPort>/v1/daemon/*`),

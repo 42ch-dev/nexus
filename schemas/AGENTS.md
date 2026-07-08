@@ -2,11 +2,11 @@
 
 This directory is the **single truth source** for types consumed by an **external client** (cross-language / cross-process boundary): `nexus-platform` (wire) and external Daemon API clients (e.g. the future WebApp/Web-UI; WASM compute modules). All Rust and TypeScript types here are generated from JSON Schema.
 
-**Layout (folders):** [`.mstar/knowledge/specs/schemas-directory-layout.md`](../.mstar/knowledge/specs/schemas-directory-layout.md) — tree index in [README.md](README.md).
+**Layout (folders):** [`.mstar/specs/schemas-directory-layout.md`](../.mstar/specs/schemas-directory-layout.md) — tree index in [README.md](README.md).
 
 **Not in `schemas/`**: a type belongs here **only if** an external client consumes it. Local-only types (`/v1/daemon/*` daemon DTOs that are not cross-language, orchestration, ACP registry, worker IPC, on-disk/SQLite records) live as hand-written Rust in `crates/nexus-contracts/src/local/`. The `local/` module name refers to "local-only internal types" — it is **not** the "Local API" surface (that surface is now the Daemon API; see V1.90). See [`.mstar/knowledge/schemas-external-consumer-boundary.md`](../.mstar/knowledge/schemas-external-consumer-boundary.md).
 
-**Cloud line only:** daemon internal Daemon API must not add schemas here unless an external client consumes them; sync/register go through `nexus-cloud-sync` per [local-cloud-crate-architecture.md](../.mstar/knowledge/specs/local-cloud-crate-architecture.md). The `daemon-api/` subtree is reserved for cross-language Daemon API contracts (e.g. `daemon-api/compute/` for the WASM compute ABI).
+**Cloud line only:** daemon internal Daemon API must not add schemas here unless an external client consumes them; sync/register go through `nexus-cloud-sync` per [local-cloud-crate-architecture.md](../.mstar/specs/local-cloud-crate-architecture.md). The `daemon-api/` subtree is reserved for cross-language Daemon API contracts (e.g. `daemon-api/compute/` for the WASM compute ABI).
 
 ## Schema URI Placeholder
 

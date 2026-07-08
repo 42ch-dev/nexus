@@ -17,7 +17,7 @@
   "created_at": "2026-04-10",
   "updated_at": "2026-04-10",
   "done_at": "2026-04-10",
-  "notes": "Delivered: schemas platform/world-fork-*, world-snapshot-*; SyncClient fork_world/snapshot_world (POST /v1/worlds/fork|snapshot); daemon POST /v1/local/world/fork|snapshot; CLI `nexus42 world fork` / `world snapshot` (--dry-run, fork --yes). QC self: .mstar/plans/reports/2026-04-10-cli-fork-world-snapshot-parity/2026-04-10-cli-fork-world-snapshot-parity-qc-self-20260410.md. Branch: feature/cli-fork-world-snapshot-parity.",
+  "notes": "Delivered: schemas platform/world-fork-*, world-snapshot-*; SyncClient fork_world/snapshot_world (POST /v1/worlds/fork|snapshot); daemon POST /v1/local/world/fork|snapshot; CLI `nexus42 world fork` / `world snapshot` (--dry-run, fork --yes). QC self: .mstar/plans/2026-04-10-cli-fork-world-snapshot-parity.md Branch: feature/cli-fork-world-snapshot-parity.",
   "metadata": {
     "priority": "high",
     "platform_capability_ref": "11-fork-api (conceptual cross-repo id)",
@@ -34,7 +34,7 @@
       "fmt": "passed (nightly rustfmt)",
       "typecheck": "passed (pnpm)",
       "codegen": "passed",
-      "qc_self_report": ".mstar/plans/reports/2026-04-10-cli-fork-world-snapshot-parity/2026-04-10-cli-fork-world-snapshot-parity-qc-self-20260410.md"
+      "qc_self_report": ".mstar/plans/2026-04-10-cli-fork-world-snapshot-parity.md"
     }
   }
 }

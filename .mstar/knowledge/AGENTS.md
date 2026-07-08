@@ -1,8 +1,8 @@
 # Knowledge — AGENTS.md
 
-Behavioral rules for the harness **knowledge** tree. **Do not** duplicate file indexes here — discover documents via [`README.md`](README.md), [`specs/README.md`](specs/README.md), or directory listing.
+Behavioral rules for the harness **knowledge** tree. **Do not** duplicate file indexes here — discover documents via [`README.md`](README.md) or directory listing.
 
-> Project and crate rules: root [`AGENTS.md`](../../AGENTS.md). Harness layout and path symbols (`{SPECS_DIR}` = `knowledge/specs/` in this repo): [`.mstar/AGENTS.md`](../AGENTS.md).
+> Project and crate rules: root [`AGENTS.md`](../../AGENTS.md). Harness layout and path symbols (`{SPECS_DIR}` = `specs/`): [`.mstar/AGENTS.md`](../AGENTS.md).
 
 ---
 
@@ -12,7 +12,7 @@ Behavioral rules for the harness **knowledge** tree. **Do not** duplicate file i
 
 | Kind of content | Where | Must not |
 | --- | --- | --- |
-| CLI / daemon / ACP / orchestration **behavior contracts** | `specs/` | Live in knowledge root or compass long-term |
+| CLI / daemon / ACP / orchestration **behavior contracts** | [`../specs/`](../specs/) (`{SPECS_DIR}`) | Live in knowledge root or compass long-term |
 | Schema ↔ contracts boundary, crate policy, trackers | `knowledge/` root | Restate normative command/API detail |
 | Iteration scope, grill decisions, audit evidence | `iterations/` | Become permanent spec without P5 merge |
 | Open plans, residuals, branch names | `status.json` | Drift from compass without explicit update |
@@ -21,11 +21,11 @@ End-user docs stay in repo-root `docs/`.
 
 ---
 
-## Specs subtree
+## Specs (`{SPECS_DIR}`)
 
-All normative OSS specs live under `specs/` — **flat by default**, with the **`novel-writing/`** subtree for `work_profile: novel` (see [specs/novel-writing/README.md](specs/novel-writing/README.md)). Rules for creating, merging, and retiring specs: [`specs/AGENTS.md`](specs/AGENTS.md).
+Normative OSS specs live in **[`../specs/`](../specs/)** — not under `knowledge/`. Rules: [`../specs/AGENTS.md`](../specs/AGENTS.md).
 
-When implementing runtime behavior, read the active iteration compass (or `metadata.latest_ship.compass` between iterations), [specs/README.md](specs/README.md), then the cited spec bodies. Platform ADRs live in **`nexus-platform`** when this repo points outward.
+When implementing runtime behavior, read the active iteration compass (or `metadata.latest_ship.compass` between iterations), [`../specs/README.md`](../specs/README.md), then the cited spec bodies.
 
 **Do not silently diverge** from a cited spec; record change via spec revision, plan residual, or ADR.
 

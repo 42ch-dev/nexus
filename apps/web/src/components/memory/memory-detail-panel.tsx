@@ -1,7 +1,7 @@
 /**
  * Memory detail/inspector panel — V1.78 Creator Memory review-loop surface.
  *
- * Spec: `.mstar/knowledge/specs/web-ui.md` §24 + compass D-UX LOCKED. Read-only
+ * Spec: `.mstar/specs/web-ui.md` §24 + compass D-UX LOCKED. Read-only
  * context for the selected pending-review row, matching the V1.77
  * `FindingDetailPanel` layout (detail-panel + row-action hybrid). The Memory
  * surface is review/consume-only: there is no inline edit here (unlike

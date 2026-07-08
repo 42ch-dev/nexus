@@ -31,7 +31,7 @@ impl Schema {
         // removal is planned for V1.61+ (outbox-consolidation.md §6).
         tracing::warn!(
             "legacy outbox table deprecated — zero active consumers; phased removal planned post-V1.59. \
-             See .mstar/knowledge/specs/outbox-consolidation.md §6."
+             See .mstar/specs/outbox-consolidation.md §6."
         );
         Ok(pool)
     }

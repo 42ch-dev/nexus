@@ -7,17 +7,17 @@
   "merge_target": "iteration/v1.88",
   "primary_spec": ".mstar/iterations/v1.88-frontend-slate-clear-and-reliability-cleanup-delivery-compass-v1.md",
   "qc_reports": {
-    "qc1": ".mstar/plans/reports/2026-07-03-v1.88-frontend-slate-clear-and-reliability-cleanup/qc1.md",
-    "qc2": ".mstar/plans/reports/2026-07-03-v1.88-frontend-slate-clear-and-reliability-cleanup/qc2.md",
-    "qc3": ".mstar/plans/reports/2026-07-03-v1.88-frontend-slate-clear-and-reliability-cleanup/qc3.md",
-    "consolidated": ".mstar/plans/reports/2026-07-03-v1.88-frontend-slate-clear-and-reliability-cleanup/qc-consolidated.md"
+    "qc1": ".mstar/plans/2026-07-03-v1.88-frontend-slate-clear-and-reliability-cleanup.md",
+    "qc2": ".mstar/plans/2026-07-03-v1.88-frontend-slate-clear-and-reliability-cleanup.md",
+    "qc3": ".mstar/plans/2026-07-03-v1.88-frontend-slate-clear-and-reliability-cleanup.md",
+    "consolidated": ".mstar/plans/2026-07-03-v1.88-frontend-slate-clear-and-reliability-cleanup.md"
   },
   "metadata": {
     "iteration_refs": "V1.88",
     "spec_integration_branch": "iteration/v1.88",
     "wire_contracts_changed": false
   },
-  "qa_report": ".mstar/plans/reports/2026-07-03-v1.88-frontend-slate-clear-and-reliability-cleanup/qa.md",
+  "qa_report": ".mstar/plans/2026-07-03-v1.88-frontend-slate-clear-and-reliability-cleanup.md",
   "merge_commit": "6ccc1c3a",
   "completed_at": "2026-07-04",
   "completion_note": "V1.88 shipped: P0 frontend residuals + P1 reliability residuals + T7 tracker hygiene. QC tri-review 3/3 Approve; QA Pass; wire_contracts_changed: false.",

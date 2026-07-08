@@ -1,6 +1,6 @@
 # `schemas/` — External-Consumer JSON Schema Tree
 
-**Authority:** [`.mstar/knowledge/specs/schemas-directory-layout.md`](../.mstar/knowledge/specs/schemas-directory-layout.md) (folder layout) + [`.mstar/knowledge/schemas-external-consumer-boundary.md`](../.mstar/knowledge/schemas-external-consumer-boundary.md) (external-consumer vs local-only rule).
+**Authority:** [`.mstar/specs/schemas-directory-layout.md`](../.mstar/specs/schemas-directory-layout.md) (folder layout) + [`.mstar/knowledge/schemas-external-consumer-boundary.md`](../.mstar/knowledge/schemas-external-consumer-boundary.md) (external-consumer vs local-only rule).
 
 **Local-only types** live in `crates/nexus-contracts/src/local/` — not under `schemas/`.
 
@@ -50,4 +50,4 @@ After any edit under `schemas/`, run **codegen** and commit `crates/nexus-contra
 | **Daemon API** (external WASM modules; future WebApp/Web-UI) | **Yes** — `daemon-api/compute/` (V1.62), `daemon-api/common/` (F-E1 V1.64), `daemon-api/{works,kb,findings,schedule,workspace,creators}/` (V1.63 P1), `daemon-api/{orchestration,preset-management}/` (V1.63 P3) |
 | **Local** (daemon `/v1/daemon/*`, orchestration, ACP) | **No** — `nexus-contracts/src/local/` |
 
-See [local-cloud-crate-architecture.md](../.mstar/knowledge/specs/local-cloud-crate-architecture.md).
+See [local-cloud-crate-architecture.md](../.mstar/specs/local-cloud-crate-architecture.md).

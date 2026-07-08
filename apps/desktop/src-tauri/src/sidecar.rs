@@ -7,8 +7,8 @@
 //!   - Restart-on-crash with bounded exponential backoff.
 //!   - Readiness via `GET /v1/daemon/runtime/health` (no stdout parsing).
 //!
-//! Spec: `.mstar/knowledge/specs/daemon-runtime.md` §12 and
-//! `.mstar/knowledge/specs/desktop-shell.md` §7/§8.
+//! Spec: `.mstar/specs/daemon-runtime.md` §12 and
+//! `.mstar/specs/desktop-shell.md` §7/§8.
 
 use std::sync::Arc;
 use std::time::Duration;

@@ -9,7 +9,7 @@
   "working_branch": "feature/v1.86-local-api-trust-hardening",
   "merge_target": "iteration/v1.86",
   "qc_reports": [
-    ".mstar/plans/reports/2026-07-03-v1.86-local-api-trust-hardening/qc1.md",
+    ".mstar/plans/2026-07-03-v1.86-local-api-trust-hardening.md",
     "qc2.md",
     "qc3.md",
     "qc-consolidated.md"

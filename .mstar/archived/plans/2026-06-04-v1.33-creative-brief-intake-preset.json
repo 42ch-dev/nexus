@@ -15,7 +15,7 @@
     "merge_target": "feature/v1.33-work-experience-loop",
     "metadata": {
       "iteration_compass": ".mstar/iterations/v1.33-work-experience-loop-delivery-compass-v1.md",
-      "primary_spec": ".mstar/knowledge/specs/work-experience-model.md",
+      "primary_spec": ".mstar/specs/work-experience-model.md",
       "depends_on": [
         "2026-06-04-v1.33-work-model-and-creator-run",
         "2026-06-04-v1.33-llm-judge-runtime-fix"

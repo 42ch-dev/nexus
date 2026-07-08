@@ -1143,7 +1143,7 @@ mod tests {
         // Parse capability IDs from acp-capability-set.md tables
         let catalog_path = concat!(
             env!("CARGO_MANIFEST_DIR"),
-            "/../../.mstar/knowledge/specs/acp-capability-set.md"
+            "/../../.mstar/specs/acp-capability-set.md"
         );
         let catalog_content =
             std::fs::read_to_string(catalog_path).expect("acp-capability-set.md must be readable");

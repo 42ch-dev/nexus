@@ -15,10 +15,10 @@
     "residuals_target": ["R-M1-W03", "R-M1-W04", "R-M1-W05", "R-M1-W06"],
     "residuals_closed": ["R-M1-W03", "R-M1-W04", "R-M1-W05", "R-M1-W06"],
     "qc_reports": [
-      ".mstar/plans/reports/2026-04-30-v1.12-theme-a-preset-completion/2026-04-30-v1.12-theme-a-preset-completion-qc1.md",
-      ".mstar/plans/reports/2026-04-30-v1.12-theme-a-preset-completion/2026-04-30-v1.12-theme-a-preset-completion-qc2.md",
-      ".mstar/plans/reports/2026-04-30-v1.12-theme-a-preset-completion/2026-04-30-v1.12-theme-a-preset-completion-qc3.md"
+      ".mstar/plans/2026-04-30-v1.12-theme-a-preset-completion.md",
+      ".mstar/plans/2026-04-30-v1.12-theme-a-preset-completion.md",
+      ".mstar/plans/2026-04-30-v1.12-theme-a-preset-completion.md"
     ],
-    "qa_report": ".mstar/plans/reports/2026-04-30-v1.12-theme-a-preset-completion/2026-04-30-v1.12-theme-a-preset-completion-qa.md"
+    "qa_report": ".mstar/plans/2026-04-30-v1.12-theme-a-preset-completion.md"
   }
 }

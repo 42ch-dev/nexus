@@ -18,7 +18,7 @@
 # pathway runs when a worker is available; the heuristic remains the
 # no-worker fallback. Extracted candidates carry an LLM-judged block_type,
 # confidence, and a verbatim source_quote, surfaced on `creator world kb
-# adopt`. Closes R-V150KBED-01. See `knowledge/specs/llm-extract.md` §5.
+# adopt`. Closes R-V150KBED-01. See `specs/llm-extract.md` §5.
 #
 # NOTE: The original plan (T8) described a `schedule.enqueue_child` approach
 # with parent dependency, but the shipped design uses direct capability

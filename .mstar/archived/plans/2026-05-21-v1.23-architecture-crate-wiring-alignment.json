@@ -22,12 +22,12 @@
     "merge_target": "main",
     "primary_spec": ".mstar/plans/2026-05-21-v1.23-architecture-crate-wiring-alignment.md",
     "spec_refs": [
-      ".mstar/knowledge/specs/entity-scope-model.md",
-      ".mstar/knowledge/specs/local-cloud-crate-architecture.md",
-      ".mstar/knowledge/specs/cli-spec.md",
-      ".mstar/knowledge/specs/daemon-runtime.md",
-      ".mstar/knowledge/specs/orchestration-engine.md",
-      ".mstar/knowledge/specs/local-db-schema.md",
+      ".mstar/specs/entity-scope-model.md",
+      ".mstar/specs/local-cloud-crate-architecture.md",
+      ".mstar/specs/cli-spec.md",
+      ".mstar/specs/daemon-runtime.md",
+      ".mstar/specs/orchestration-engine.md",
+      ".mstar/specs/local-db-schema.md",
       ".mstar/knowledge/deferred-features-cross-version-tracker.md",
       "docs/ARCHITECTURE.md"
     ],

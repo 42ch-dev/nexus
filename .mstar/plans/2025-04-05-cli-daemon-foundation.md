@@ -13,7 +13,7 @@
 
 **Branch Strategy:** Feature branch `feature/v1.0-cli-daemon` from `main`
 
-**Architecture Review:** See `.mstar/plans/reports/2025-04-05-phase1-review/2025-04-05-phase1-architect-review.md` for detailed review and constraints.
+**Architecture Review:** See `.mstar/plans/2025-04-05-phase1-review.md for detailed review and constraints.
 
 ---
 

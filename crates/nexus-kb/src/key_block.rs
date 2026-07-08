@@ -24,7 +24,7 @@ use std::str::FromStr;
 /// `Character`, `Item`, `Faction`, `Ability`, `Species`. Per-module
 /// attribute/state shapes are declared by each compute module's
 /// `manifest.json` `schemas` block (V1.62 — see `modules/README.md` and
-/// `.mstar/knowledge/specs/compute-module-abi.md`). `environment` is NOT
+/// `.mstar/specs/compute-module-abi.md`). `environment` is NOT
 /// a valid `BlockType` enum variant and is not included.
 ///
 /// When [`computable`](Self::computable) is `Some(true)`, the body SHOULD

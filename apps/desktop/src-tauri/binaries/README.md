@@ -34,4 +34,4 @@ use `SIDECAR_TARGETS=...` to build `x86_64-apple-darwin` or a universal pair.
 ```
 
 Tauri resolves the correct arch suffix at bundle time. See
-`.mstar/knowledge/specs/desktop-shell.md` §7 (sidecar lifecycle).
+`.mstar/specs/desktop-shell.md` §7 (sidecar lifecycle).

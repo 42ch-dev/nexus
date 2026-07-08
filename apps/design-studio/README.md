@@ -63,7 +63,7 @@ For detailed rules see [`AGENTS.md`](./AGENTS.md).
 
 ## Docs
 
-- [Studio spec](../../.mstar/knowledge/specs/design-studio.md) — product contract, audiences, boundaries
+- [Studio spec](../../.mstar/specs/design-studio.md) — product contract, audiences, boundaries
 - [IA guide](../../.mstar/iterations/v1.98/guides/design-studio-information-architecture.md) — gallery section design
 - [Design unification spec](../../.mstar/iterations/v1.98/specs/design-unification.md) — merge rules (architect-owned)
 - [DESIGN.md SSOT](../../DESIGN.md) — sole normative design token source

@@ -1,7 +1,7 @@
 //! Hermetic CLI integration tests for `creator works chronology` (V1.50 T-A P3 T7).
 //!
 //! Plan: `.mstar/plans/2026-06-18-v1.50-auto-chronology.md`
-//! Spec: `.mstar/knowledge/specs/novel-writing/auto-chronology.md` §2.2.
+//! Spec: `.mstar/specs/novel-writing/auto-chronology.md` §2.2.
 //!
 //! Covers set/show/advance round-trip (AC §8). Two test layers, all hermetic
 //! (no daemon), mirroring `cron_cli.rs`:
