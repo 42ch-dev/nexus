@@ -3,11 +3,11 @@ import { useState, type ReactNode } from 'react';
 import { cn } from '@web-lib/utils';
 
 import { Badge, Button, Card, CardHeader, CardTitle, CardDescription, CardContent } from '@42ch/nexus-ui';
-import { Dialog, DialogTrigger, DialogContent } from '@web-ui/dialog';
-import { Input } from '@web-ui/input';
-import { Label } from '@web-ui/label';
-import { Select } from '@web-ui/select';
-import { Spinner, LoadingState, EmptyState, ErrorState } from '@web-ui/states';
+import { Dialog, DialogTrigger, DialogContent } from '@web-ui/dialog'; // transitional — keep-web (Radix portal/focus-trap beyond presentational scope)
+import { Input } from '@web-ui/input'; // transitional — deferred to Form Field slice (form-field contract incomplete per Grill-Me lock)
+import { Label } from '@web-ui/label'; // transitional — deferred to Form Field slice (label/control/helper/error composition)
+import { Select } from '@web-ui/select'; // transitional — keep-web (native select wrapper; no cross-app demand proven yet)
+import { Spinner, LoadingState, EmptyState, ErrorState } from '@web-ui/states'; // transitional — keep-web (lucide-react asset boundary; product copy & app-composition callbacks)
 import {
   Table,
   TableHeader,
@@ -15,9 +15,9 @@ import {
   TableRow,
   TableHead,
   TableCell,
-} from '@web-ui/table';
-import { Tabs, TabsList, TabsTrigger, TabsContent } from '@web-ui/tabs';
-import { Textarea } from '@web-ui/textarea';
+} from '@web-ui/table'; // transitional — keep-web (responsive overflow wrapper; not in V1.99 first batch)
+import { Tabs, TabsList, TabsTrigger, TabsContent } from '@web-ui/tabs'; // transitional — keep-web (compound component owns selection state; not purely presentational)
+import { Textarea } from '@web-ui/textarea'; // transitional — deferred to Form Field slice (form-field contract incomplete per Grill-Me lock)
 
 /* ------------------------------------------------------------------ */
 /*  Shared helpers                                                      */
