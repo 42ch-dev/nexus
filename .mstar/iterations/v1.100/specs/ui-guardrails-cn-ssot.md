@@ -97,7 +97,7 @@ Files under `apps/design-studio/src/**` **MUST NOT** import:
 - `@42ch/nexus-ui` (public exports) — promoted primitives (Badge, Button, Card, and future Input/Label/Textarea)
 - `@nexus/design-tokens` — shared CSS + Tailwind preset
 - `@web-ui/*` — transitional, only for unpromoted presentational primitives with inline annotation
-- `@web-lib/utils` — `cn()` only, transitional until T3 SSOT consolidation
+- `@web-lib/utils` — `cn()` only; **no longer used after T3 consolidation** (Studio imports `cn` from `@42ch/nexus-ui` directly). Alias retained in `tsconfig`/`vite`/`vitest` config for back-compat; no Studio source imports remain.
 - `@/*` — studio-local routes, fixtures, gallery layout
 
 ### Design Studio transitional `@web-ui/*` policy (locked)
@@ -151,9 +151,13 @@ The class-merge token group list has one V1.100 authority: **`@42ch/nexus-ui/src
 
 **Hard invariant:** The `extendTailwindMerge` class-group extension list must exist in exactly one place — `packages/nexus-ui/src/lib/cn.ts`. No second copy in Web, Studio, or design-tokens.
 
-### cn-parity test (T2 writes regardless of export path)
+### cn-parity test (T2 writes; T3 updates when preferred path taken)
 
-A shell-script check in `tooling/check-ui-guardrails.sh` (or a sibling script) verifies byte-level parity between the package `cn.ts` and `apps/web/src/lib/utils.ts`. If the files differ, the check fails with a diff. This closes `R-V199QC1-S001`.
+> **Update (T3):** The preferred path was taken — `cn` is a public `@42ch/nexus-ui` export and `apps/web/src/lib/utils.ts` is a thin re-export. Byte-level parity no longer applies (the two files differ by design: one implements, one re-exports). The check was therefore upgraded from byte-diff to a **behavioral SSOT verification** in `tooling/check-ui-guardrails.sh` (`check_cn_parity`) asserting: (1) `packages/nexus-ui/src/lib/cn.ts` owns `extendTailwindMerge`; (2) the package barrel exports `cn`; (3) web `utils.ts` re-exports from `@42ch/nexus-ui`; (4) web `utils.ts` has no local `tailwind-merge` import; (5) no `extendTailwindMerge` duplicates exist under `apps/`. This closes `R-V199QC1-S001` more strongly than parity-testing: the duplication is gone, not just guarded.
+
+The byte-level parity language below describes the **fallback path only** (not taken in T3); it is retained for reference in case the public export is ever reverted.
+
+A shell-script check in `tooling/check-ui-guardrails.sh` verifies the cn SSOT relationship (see behavioral invariants above). On the fallback path only, it would verify byte-level parity and fail with a diff.
 
 ### Class-group extension list (frozen)
 
@@ -167,7 +171,7 @@ A shell-script check in `tooling/check-ui-guardrails.sh` (or a sibling script) v
 ]
 ```
 
-Any new DESIGN.md `fontSize` token must be added here. The guardrail parity check ensures both copies stay synchronized.
+Any new DESIGN.md `fontSize` token must be added here. The behavioral SSOT check (`check_cn_parity`) ensures this remains the single source.
 
 ## P2 Wrapper/Direct-Import Rule (locked)
 
@@ -195,7 +199,7 @@ This rule is **locked** by T1 so P2 cannot reopen the architecture decision:
 - CI job `ui-guardrails` runs on PRs to `main` and fails on violations.
 - The chosen class-merge authority is `@42ch/nexus-ui/src/lib/cn.ts`, and Web/Studio consumers either import/re-export it or carry a named temporary parity residual with a diff/sync test.
 - P2 can cite the approved wrapper/direct-import strategy without reopening the architecture decision.
-- `cn.ts` ↔ `utils.ts` byte-parity is checked mechanically (shell diff or test) — not by reviewer instruction.
+- The cn SSOT relationship is checked mechanically by `tooling/check-ui-guardrails.sh` (`check_cn_parity` behavioral invariants: package owns `extendTailwindMerge`, barrel exports `cn`, web re-exports, no duplicates) — not by reviewer instruction.
 
 ## Non-Goals
 
@@ -219,6 +223,6 @@ T2 should create `tooling/check-ui-guardrails.sh` following the same `set -eu` +
 
 | Residual | Severity | How P1 closes it | Owning task |
 |----------|----------|------------------|-------------|
-| `R-V199QC1-S001` | low | cn-parity diff check in `check-ui-guardrails.sh` or Vitest sync test | T2 |
+| `R-V199QC1-S001` | low | T3 took preferred path: web `utils.ts` is a thin re-export; behavioral SSOT check (`check_cn_parity`) in `check-ui-guardrails.sh` verifies single-source authority. Duplication physically eliminated. | T3 (consolidation) + T2 (behavioral check) |
 | `R-V199QC1-S002` | low | Promoted-wrapper forbidden-import guardrail catches local `cn`/`clsx`/`tw-merge` | T2 |
 | `R-V199QC3-F001` | low | T3 consolidates `extendTailwindMerge` behind `@42ch/nexus-ui`; T2 cn-parity check ensures no divergence until consolidation | T2 (parity) + T3 (consolidation) |
