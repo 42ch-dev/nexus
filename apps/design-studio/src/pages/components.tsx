@@ -1,9 +1,7 @@
 import { useState, type ReactNode } from 'react';
 
-import { cn, Badge, Button, Card, CardHeader, CardTitle, CardDescription, CardContent } from '@42ch/nexus-ui';
+import { cn, Badge, Button, Card, CardHeader, CardTitle, CardDescription, CardContent, Input, Label, Textarea } from '@42ch/nexus-ui';
 import { Dialog, DialogTrigger, DialogContent } from '@web-ui/dialog'; // transitional — keep-web (Radix portal/focus-trap beyond presentational scope)
-import { Input } from '@web-ui/input'; // transitional — deferred to Form Field slice (form-field contract incomplete per Grill-Me lock)
-import { Label } from '@web-ui/label'; // transitional — deferred to Form Field slice (label/control/helper/error composition)
 import { Select } from '@web-ui/select'; // transitional — keep-web (native select wrapper; no cross-app demand proven yet)
 import { Spinner, LoadingState, EmptyState, ErrorState } from '@web-ui/states'; // transitional — keep-web (lucide-react asset boundary; product copy & app-composition callbacks)
 import {
@@ -15,7 +13,6 @@ import {
   TableCell,
 } from '@web-ui/table'; // transitional — keep-web (responsive overflow wrapper; not in V1.99 first batch)
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@web-ui/tabs'; // transitional — keep-web (compound component owns selection state; not purely presentational)
-import { Textarea } from '@web-ui/textarea'; // transitional — deferred to Form Field slice (form-field contract incomplete per Grill-Me lock)
 
 /* ------------------------------------------------------------------ */
 /*  Shared helpers                                                      */
@@ -84,6 +81,7 @@ function SubNav() {
     { label: 'Table', href: '#comp-table' },
     { label: 'Tabs', href: '#comp-tabs' },
     { label: 'Textarea', href: '#comp-textarea' },
+    { label: 'Form Field', href: '#comp-form-field' },
   ];
 
   return (
@@ -584,6 +582,106 @@ function TextareaSection() {
 }
 
 /* ------------------------------------------------------------------ */
+/*  12. Form Field (composition fixture)                                  */
+/* ------------------------------------------------------------------ */
+
+function FormFieldSection() {
+  const [hasError, setHasError] = useState(false);
+  const fieldId = 'ff-name';
+  const helperId = `${fieldId}-helper`;
+  const errorId = `${fieldId}-error`;
+
+  return (
+    <section>
+      <SectionHeading id="comp-form-field">Form Field (composition)</SectionHeading>
+      <p className="text-copy-16 text-gray-700 mb-6">
+        Composition fixture demonstrating the locked form-field contract:
+        app-owned IDs,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">htmlFor</code>
+        /<code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">id</code>{' '}
+        association,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">aria-describedby</code>{' '}
+        wiring, required/optional indicators, and conditional error with{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">role=&quot;alert&quot;</code>.
+        All IDs and copy are app-owned — the package controls are pure presentational.
+      </p>
+
+      {/* Standard composition with error toggle */}
+      <p className="text-label-14 text-gray-900 mb-4">
+        Standard composition — label, control, helper, error
+      </p>
+      <MatrixCard className="mb-6">
+        <div className="flex flex-col gap-2 max-w-md">
+          <Label htmlFor={fieldId}>Work title</Label>
+          <Input
+            id={fieldId}
+            invalid={hasError}
+            aria-describedby={`${helperId} ${errorId}`}
+            placeholder="Enter work title…"
+            defaultValue="The Lost City"
+          />
+          <p id={helperId} className="text-copy-13 text-gray-700">
+            Must be between 3 and 50 characters.
+          </p>
+          {hasError && (
+            <p id={errorId} role="alert" className="text-copy-13 text-red-700">
+              Name is required.
+            </p>
+          )}
+        </div>
+
+        <div className="mt-4">
+          <Button
+            variant="secondary"
+            size="small"
+            onClick={() => setHasError((v) => !v)}
+          >
+            {hasError ? 'Clear error' : 'Trigger error'}
+          </Button>
+        </div>
+      </MatrixCard>
+
+      {/* Required/optional + disabled */}
+      <p className="text-label-14 text-gray-900 mb-4">
+        Required, optional, and disabled variants
+      </p>
+      <MatrixCard>
+        <div className="flex flex-col gap-6 max-w-md">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="ff-email">
+              Email address <span className="text-red-700">*</span>
+            </Label>
+            <Input
+              id="ff-email"
+              required
+              aria-describedby="ff-email-helper"
+              placeholder="you@example.com"
+            />
+            <p id="ff-email-helper" className="text-copy-13 text-gray-700">
+              We will never share your email.
+            </p>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="ff-bio">
+              Bio <span className="text-gray-700 font-normal">(optional)</span>
+            </Label>
+            <Textarea
+              id="ff-bio"
+              disabled
+              aria-describedby="ff-bio-helper"
+              placeholder="Tell us about yourself…"
+            />
+            <p id="ff-bio-helper" className="text-copy-13 text-gray-700">
+              This field is disabled in the current context.
+            </p>
+          </div>
+        </div>
+      </MatrixCard>
+    </section>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Page                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -618,10 +716,15 @@ export function ComponentsPage() {
       <TableSection />
       <TabsSection />
       <TextareaSection />
+      <FormFieldSection />
 
       <p className="text-copy-13 text-gray-500 mt-12 pt-8 border-t border-gray-alpha-200">
-        11/11 primitive modules from the <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">apps/web/src/components/ui</code> barrel — all rendered
-        live via <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>{' '}
+        6 promoted (Badge, Button, Card, Input, Label, Textarea) + 5
+        transitional (Dialog, Select, States, Table, Tabs) = 11 primitive
+        modules from the{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">apps/web/src/components/ui</code>{' '}
+        barrel — all rendered live via{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>{' '}
         (promoted) and{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@web-ui/*</code>{' '}
         (transitional).

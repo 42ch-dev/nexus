@@ -179,7 +179,7 @@ else
   # These must be imported from @42ch/nexus-ui, not @web-ui/*
   echo ""
   echo "   Checking @web-ui/* for already-promoted primitives..."
-  for promoted in button badge card; do
+  for promoted in button badge card input label textarea; do
     matches=$(grep -nE "import\s+.*from\s+['\"]@web-ui/$promoted['\"]" "${STUDIO_FILES[@]}" 2>/dev/null || true)
     if [ -n "$matches" ]; then
       echo "❌ Studio: imports already-promoted primitive @web-ui/$promoted (use @42ch/nexus-ui)"
