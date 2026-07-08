@@ -1,8 +1,6 @@
 import { useState, type ReactNode } from 'react';
 
-import { cn } from '@web-lib/utils';
-
-import { Badge, Button, Card, CardHeader, CardTitle, CardDescription, CardContent } from '@42ch/nexus-ui';
+import { cn, Badge, Button, Card, CardHeader, CardTitle, CardDescription, CardContent } from '@42ch/nexus-ui';
 import { Dialog, DialogTrigger, DialogContent } from '@web-ui/dialog'; // transitional — keep-web (Radix portal/focus-trap beyond presentational scope)
 import { Input } from '@web-ui/input'; // transitional — deferred to Form Field slice (form-field contract incomplete per Grill-Me lock)
 import { Label } from '@web-ui/label'; // transitional — deferred to Form Field slice (label/control/helper/error composition)

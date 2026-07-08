@@ -142,15 +142,15 @@
       "id": "2026-07-08-v1.100-ui-hygiene-guardrails",
       "title": "P1 — UI Hygiene Guardrails and cn SSOT",
       "file": ".mstar/plans/2026-07-08-v1.100-ui-hygiene-guardrails.md",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "@project-manager",
       "agents": ["@architect", "@frontend-dev", "@qc-specialist", "@qa-engineer"],
-      "progress": 0,
+      "progress": 90,
       "tags": ["V1.100", "ui", "guardrails", "nexus-ui", "design-studio"],
       "created_at": "2026-07-08",
       "updated_at": "2026-07-08",
       "done_at": null,
-      "notes": "Closes V1.99 package hygiene residuals and establishes wrapper / Design Studio / class-merge guardrails that enable P2 and future UI promotion.",
+      "notes": "Closes V1.99 package hygiene residuals and establishes wrapper / Design Studio / class-merge guardrails that enable P2 and future UI promotion. InReview: SDD T1-T4 done + task-reviewed; QC tri Approve with residuals (0 Critical/Important); 3 V1.99 residuals resolved; 5 deferrable P1 residuals registered. Awaiting QA gate.",
       "metadata": {
         "priority": "high",
         "spec_integration_branch": "iteration/v1.100",
@@ -540,9 +540,12 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.99",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/sdd/2026-07-08-v1.99-nexus-ui-component-promotion/review/qc1.md",
-        "note": "Non-blocking. QC source: qc1 S-001"
+        "lifecycle": "resolved",
+        "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
+        "note": "Non-blocking. QC source: qc1 S-001. V1.100 rejects @nexus/design-tokens as the authority while it depends on @42ch/nexus-ui.",
+        "closed_at": "2026-07-08",
+        "closed_by": "P1",
+        "closure_note": "Closed by P1 T3 — preferred path taken: web utils.ts is a thin re-export of cn from @42ch/nexus-ui; duplication physically eliminated. Behavioral SSOT check (check_cn_parity) verifies single-source authority."
       },
       {
         "id": "R-V199QC1-S002",
@@ -551,9 +554,12 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.99",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/sdd/2026-07-08-v1.99-nexus-ui-component-promotion/review/qc1.md",
-        "note": "Non-blocking. QC source: qc1 S-002"
+        "lifecycle": "resolved",
+        "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
+        "note": "Non-blocking. QC source: qc1 S-002",
+        "closed_at": "2026-07-08",
+        "closed_by": "P1",
+        "closure_note": "Closed by P1 T2 — promoted-wrapper forbidden-import guardrail (check-ui-guardrails.sh) catches clsx/cva/tailwind-merge/@/lib/*/deep imports in CI; failure-fixture proven."
       },
       {
         "id": "R-V199QC3-F001",
@@ -562,9 +568,12 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.99",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/sdd/2026-07-08-v1.99-nexus-ui-component-promotion/review/qc3.md",
-        "note": "Non-blocking. QC source: qc3 F-001. V1.100 rejects @nexus/design-tokens as the authority while it depends on @42ch/nexus-ui."
+        "lifecycle": "resolved",
+        "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
+        "note": "Non-blocking. QC source: qc3 F-001. V1.100 rejects @nexus/design-tokens as the authority while it depends on @42ch/nexus-ui.",
+        "closed_at": "2026-07-08",
+        "closed_by": "P1",
+        "closure_note": "Closed by P1 T3 — extendTailwindMerge exists only in packages/nexus-ui/src/lib/cn.ts; web utils.ts re-exports cn; dupe scan clean. Behavioral SSOT check guards drift."
       }
     ],
     "2026-07-07-v1.97-desktop-first-launch-hardening": [
@@ -622,6 +631,63 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.97-desktop-first-launch-hardening.md",
         "note": "Not introduced by V1.97; strict clippy -D warnings fails on this pre-existing lint. QC source: §R-V197-CLIPPY"
+      }
+    ],
+    "2026-07-08-v1.100-ui-hygiene-guardrails": [
+      {
+        "id": "R-V1100P1QC1-W002",
+        "title": "Promoted-primitive list duplicated in 3 places (script WRAPPER_CANDIDATES, script promoted loop, spec table) — P2 promotion requires coordinated 3-location edits",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "P2",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
+        "note": "Fix: single PROMOTED_PRIMITIVES array at top of check-ui-guardrails.sh. P2 adds input/label/textarea anyway. QC source: qc1 W-002"
+      },
+      {
+        "id": "R-V1100P1QC2-W001",
+        "title": "Static-only detection (grep) cannot catch dynamic import()/require() bypasses of forbidden imports",
+        "severity": "low",
+        "decision": "accept",
+        "owner": "@frontend-dev",
+        "target": "post-V1.100",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
+        "note": "Inherent limitation of shell-grep mechanism; matches check-schema-drift.sh precedent. No current bypass in tree. QC source: qc2 W-001"
+      },
+      {
+        "id": "R-V1100P1QC2-W002",
+        "title": "cn-dupe scan scoped to apps/ only, not tooling/ — accidental tooling duplication would not fail the gate",
+        "severity": "nit",
+        "decision": "accept",
+        "owner": "@frontend-dev",
+        "target": "post-V1.100",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
+        "note": "Architecture decision + packages/nexus-ui/AGENTS.md forbid tooling duplication. Low risk. QC source: qc2 W-002"
+      },
+      {
+        "id": "R-V1100P1QC3-S001",
+        "title": "No automated regression test for check-ui-guardrails.sh itself (patterns verified manually only)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.100",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
+        "note": "Script is simple grep; failure fixtures proven manually. Add bats/shell self-test if guardrail grows. QC source: qc3 S-001"
+      },
+      {
+        "id": "R-V1100P1QC3-S003",
+        "title": "Vacuously-passing warnings on empty dirs could mask misconfiguration if WRAPPER_DIR/STUDIO_SRC paths change",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.100",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
+        "note": "Fail-on-missing-dir would be stricter. Low risk — dir renames caught by other CI jobs. QC source: qc3 S-003"
       }
     ]
   }
