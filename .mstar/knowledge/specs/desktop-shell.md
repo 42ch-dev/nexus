@@ -254,6 +254,30 @@ These are React lifecycle invariants, not product-behavior requirements; they ar
 
 V1.95 amendments (ClientProvider, migration-reset button, workspace default + stale overwrite, FingerprintGate bypass) continue to ship. V1.96 adds the surface and diagnostic improvements on top of them.
 
+### 13.8 V1.97 Amendments — First-launch reliability hardening
+
+**Product behavior target (author-visible).** A clean desktop install must not strand the author in an unbounded starting state. The wizard may succeed or surface a daemon failure, but the outcome must be observable, bounded, and actionable.
+
+- Step 1 remains contained at desktop window sizes: the step list does not crowd the content area, card bounds hold, and long workspace paths truncate instead of expanding the layout.
+- The Browse action calls the native directory picker with the desktop command's expected `defaultPath` argument. A casing mismatch such as `default_path` is a product-blocking failure because it prevents workspace selection.
+- On clean first launch, the sidecar lifecycle cannot rely on a stale or synthetic `Starting` state. If no owned child process exists and no spawn attempt is in progress, desktop launch must either attempt a real daemon start or surface a bounded error state with recovery copy.
+- Existing-install launches preserve V1.95/V1.96 setup behavior: `setup_completed`, workspace path preservation/stale overwrite rules, reset-local-database recovery, and daemon diagnostics.
+- V1.97 does not expand desktop distribution scope: signing, notarization, auto-update, GitHub Releases, multi-OS release hardening, tray/menu-bar, and native notifications remain out of scope.
+
+#### 13.8.1 Technical invariant — sidecar startup state machine
+
+The desktop sidecar manager state machine uses process ownership as the boundary between attach and spawn:
+
+- A newly constructed `SidecarManager` starts in `Stopped` with no owned child. It MUST NOT initialize to `Starting` as a synthetic "maybe starting" placeholder.
+- `Starting` means a spawn attempt is in progress or the desktop app already owns and monitors a child during health probing. `start_with_budget` may return early for `Starting` only when the manager still owns and monitors a child (`child.is_some()`).
+- `Starting` with no owned child is invalid. It must not suppress a new spawn attempt, retry path, or bounded error transition.
+- Attaching to an already healthy daemon on the resolved port is allowed, but attach does not imply child ownership. App quit/stop may terminate only a child spawned and tracked by this desktop session.
+- `Stopped` and `Error` remain retryable states. Retry/Reset actions must be able to re-enter the attach/spawn flow and then either reach health or surface a bounded diagnostic failure.
+
+#### 13.8.2 Contract boundary
+
+V1.97 does not change daemon routes, JSON schemas, generated TypeScript/Rust contracts, or `@42ch/nexus-contracts`. The wizard and desktop shell continue to use existing desktop status/detail capabilities and daemon health probes.
+
 ---
 
 ## 14. ACP Agent Detection (V1.94)

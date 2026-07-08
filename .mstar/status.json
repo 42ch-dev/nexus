@@ -59,6 +59,24 @@
         "blocking": [],
         "working_branch": "feature/v1.96-implement-rework"
       }
+    },
+    {
+      "id": "2026-07-07-v1.97-desktop-first-launch-hardening",
+      "status": "Done",
+      "title": "P0 — Desktop first-launch reliability hardening: setup wizard containment, folder picker IPC, sidecar startup state, and hard smoke gate",
+      "file": ".mstar/plans/2026-07-07-v1.97-desktop-first-launch-hardening.md",
+      "type": "implement",
+      "owner": "@fullstack-dev",
+      "metadata": {
+        "iteration": "V1.97",
+        "iteration_refs": "v1.97-desktop-first-launch-hardening-compass-v1.md",
+        "spec_integration_branch": "iteration/v1.97",
+        "merge_target": "iteration/v1.97",
+        "primary_spec": "knowledge/specs/desktop-shell.md",
+        "blocked_by": [],
+        "blocking": [],
+        "working_branch": "feature/v1.97-desktop-first-launch-hardening"
+      }
     }
   ],
   "metadata": {
@@ -66,10 +84,11 @@
     "last_integration_branch": "iteration/v1.95",
     "integration_merge_target": "main",
     "iteration_base_branch": "main",
+    "spec_integration_branch": "iteration/v1.97",
     "target_branch": "main",
     "integration_branch": "iteration/v1.96",
-    "latest_active_iteration": "V1.96",
-    "latest_active_compass": "v1.96-setup-wizard-rework-and-daemon-diagnostic-delivery-compass-v1.md",
+    "latest_active_iteration": "V1.97",
+    "latest_active_compass": "v1.97-desktop-first-launch-hardening-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/knowledge/specs/README.md",
@@ -105,7 +124,7 @@
       "refreshed_at": "2026-07-07T16:10:00+0000",
       "refreshed_reason": "V1.95 implement QC tri consolidated: 6 new residuals (2 architect + 2 QC3 PM-accepted + 1 QC3 timeout + 1 QC1 test-parity). QC verdict Approve with residuals."
     },
-    "updated_at": "2026-07-07T20:30:00+0000"
+    "updated_at": "2026-07-07T23:20:00+0800"
   },
   "residual_findings": {
     "2026-07-05-v1.91-findings-batch": [
@@ -377,6 +396,63 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/reports/2026-07-07-v1.96-implement-rework/qc1.md §S-001",
         "note": "Different fallback semantics; consolidation candidate."
+      }
+    ],
+    "2026-07-07-v1.97-desktop-first-launch-hardening": [
+      {
+        "id": "R-V197-SMOKE-CLEAN-STATE",
+        "title": "Clean-state desktop first-launch blocked: .setup() auto-starts daemon unconditionally; daemon exits 'No active creator'; wizard has no creator-bootstrap invoke",
+        "severity": "high",
+        "decision": "defer",
+        "owner": "@architect + @fullstack-dev",
+        "target": "V1.98",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/reports/2026-07-07-v1.97-desktop-first-launch-hardening/qc-consolidated.md §R-V197-SMOKE-CLEAN-STATE",
+        "note": "Pre-existing product/arch gap exposed by V1.97 smoke (spawn-name fix made daemon reachable). V1.97 ships the spawn-name fix; creator-bootstrap design deferred. Needs architect: gate daemon auto-start behind setup_completed + wizard creator-init."
+      },
+      {
+        "id": "R-V197-SMOKE-UI",
+        "title": "Full desktop UI smoke (clean-state + existing-install wizard observation) requires interactive macOS host; headless session cannot drive native Tauri window",
+        "severity": "medium",
+        "decision": "defer",
+        "owner": "@qa-engineer",
+        "target": "V1.98",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/reports/2026-07-07-v1.97-desktop-first-launch-hardening/qc-consolidated.md §R-V197-SMOKE-UI",
+        "note": "Attach path + unit tests verified; wizard/UI flow not. Manual or automated desktop smoke on interactive host in V1.98."
+      },
+      {
+        "id": "R-V197QC3-W001",
+        "title": "Stderr drain dual-storage (Arc<Mutex<String>> + inner.stderr_tail) confusing but not buggy; preserves V1.96 R-V196QC3-W001 sub-ms race",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.98+",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/reports/2026-07-07-v1.97-desktop-first-launch-hardening/qc3.md §W-001",
+        "note": "No error lost; consolidate to single storage path in future iteration."
+      },
+      {
+        "id": "R-V197QC3-W002",
+        "title": "Missing test for start() (auto, no budget reset) from Error state",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.98",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/reports/2026-07-07-v1.97-desktop-first-launch-hardening/qc3.md §W-002",
+        "note": "Same code path as start_daemon; budget-not-reset implicitly covered by crash_restart_stops_when_budget_exhausted."
+      },
+      {
+        "id": "R-V197-CLIPPY",
+        "title": "Pre-existing clippy io-other-error lint at apps/desktop/src-tauri/src/connection_config.rs:198",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.98",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/reports/2026-07-07-v1.97-desktop-first-launch-hardening/qc-consolidated.md §R-V197-CLIPPY",
+        "note": "Not introduced by V1.97; strict clippy -D warnings fails on this pre-existing lint."
       }
     ]
   }

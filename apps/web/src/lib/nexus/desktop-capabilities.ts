@@ -204,7 +204,7 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
 
   async pickDirectory(defaultPath: string): Promise<string | null> {
     try {
-      return await tauriInvoke().core.invoke<string | null>('pick_directory', { default_path: defaultPath });
+      return await tauriInvoke().core.invoke<string | null>('pick_directory', { defaultPath });
     } catch (err) {
       throw asDesktopError(err);
     }
@@ -236,7 +236,7 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
 
   async setAgentProfile(name: string, launchCommand?: string): Promise<void> {
     try {
-      await tauriInvoke().core.invoke<void>('set_agent_profile', { name, launch_command: launchCommand });
+      await tauriInvoke().core.invoke<void>('set_agent_profile', { name, launchCommand });
     } catch (err) {
       throw asDesktopError(err);
     }

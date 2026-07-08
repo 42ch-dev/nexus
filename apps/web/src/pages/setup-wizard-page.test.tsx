@@ -68,6 +68,7 @@ describe('SetupWizardPage', () => {
     const card = main.parentElement;
     expect(card).toContainElement(innerNav);
     expect(card).toHaveClass('max-w-setup-wizard-step-wizard-max-width');
+    expect(card).toHaveClass('overflow-hidden');
     expect(card).toHaveClass('rounded-popover');
     expect(card).toHaveClass('shadow-modal');
     expect(card).toHaveClass('bg-setup-wizard-surface-card-bg');
@@ -82,6 +83,7 @@ describe('SetupWizardPage', () => {
     // The content panel is a flex column so T6's mt-auto CTA pins to the bottom.
     expect(main).toHaveClass('flex-col');
     expect(main).toHaveClass('flex-1');
+    expect(main).toHaveClass('min-w-0');
   });
 
   it('aligns step indicator circles and labels on the same baseline and renders connectors between steps', () => {

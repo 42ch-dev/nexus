@@ -92,7 +92,7 @@ export function SetupStepWelcome({ state, onChange, onNext }: SetupStepWelcomePr
         data-testid="workspace-location-row"
       >
         <FolderOpen className="h-5 w-5 text-setup-wizard-surface-input-row-icon-color" aria-hidden />
-        <div className="flex flex-1 flex-col">
+        <div className="flex min-w-0 flex-1 flex-col">
           <span className="text-label-12 text-setup-wizard-surface-input-row-label-color">Workspace location</span>
           <span className="text-copy-14 text-setup-wizard-surface-input-row-path-color truncate">
             {loading ? 'Resolving…' : state.workspaceRoot}

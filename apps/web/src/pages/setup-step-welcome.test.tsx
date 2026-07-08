@@ -78,7 +78,7 @@ describe('SetupStepWelcome', () => {
     expect(continueButton).toHaveClass('w-full', 'max-w-setup-wizard-surface-cta-primary-max-width');
   });
 
-  it('truncates a long workspace path', async () => {
+  it('truncates a long workspace path inside a shrinkable input row', async () => {
     const longPath = '/very/long/path/'.repeat(10);
     renderHarness(makeState({ workspaceRoot: longPath }), {
       desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve(longPath) }),
@@ -86,7 +86,20 @@ describe('SetupStepWelcome', () => {
 
     await waitFor(() => expect(screen.getByText(longPath)).toBeInTheDocument());
     const pathText = screen.getByText(longPath);
+    const pathContainer = pathText.parentElement;
+
+    // Truncation requires overflow:hidden + text-overflow:ellipsis + white-space:nowrap.
     expect(pathText).toHaveClass('truncate');
+    // The flex child must be allowed to shrink below its intrinsic width so the
+    // long path does not push the row past the right edge of the card.
+    expect(pathContainer).toHaveClass('min-w-0');
+    expect(pathContainer).toHaveClass('flex-1');
+    expect(pathContainer?.parentElement).toHaveAttribute('data-testid', 'workspace-location-row');
+
+    // The Browse button keeps its intrinsic width so the path container absorbs
+    // all available horizontal space in the row.
+    const browseButton = screen.getByRole('button', { name: 'Browse…' });
+    expect(browseButton).toHaveClass('flex-shrink-0');
   });
 
   it('shows the desktop workspace root and a picker button in the same row', async () => {
@@ -98,6 +111,7 @@ describe('SetupStepWelcome', () => {
     const browseButton = screen.getByRole('button', { name: 'Browse…' });
     expect(browseButton).toBeInTheDocument();
     expect(browseButton.closest('[data-testid="workspace-location-row"]')).toBeInTheDocument();
+    expect(screen.getByText('/custom/nexus').parentElement).toHaveClass('min-w-0');
   });
 
   it('updates the workspace root when the picker returns a directory', async () => {

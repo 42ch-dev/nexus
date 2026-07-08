@@ -18,7 +18,7 @@
       "identifier": "shell:allow-execute",
       "allow": [
         {
-          "name": "binaries/nexus42",
+          "name": "nexus42",
           "sidecar": true,
           "args": [
             "daemon",

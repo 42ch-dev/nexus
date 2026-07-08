@@ -110,6 +110,29 @@ describe('TauriDesktopCapabilities', () => {
     restoreTauri();
   });
 
+  it('pickDirectory invokes pick_directory with Tauri camelCase args', async () => {
+    const defaultPath = '/Users/example/Documents/nexus/default';
+    const { invoke } = mockTauri(() => Promise.resolve(defaultPath));
+    const caps = new TauriDesktopCapabilities();
+    const selected = await caps.pickDirectory(defaultPath);
+    expect(selected).toBe(defaultPath);
+    expect(invoke).toHaveBeenCalledWith('pick_directory', {
+      defaultPath,
+    });
+    restoreTauri();
+  });
+
+  it('setAgentProfile invokes set_agent_profile with Tauri camelCase args', async () => {
+    const { invoke } = mockTauri(() => Promise.resolve(undefined));
+    const caps = new TauriDesktopCapabilities();
+    await caps.setAgentProfile('claude-code', '/usr/local/bin/claude');
+    expect(invoke).toHaveBeenCalledWith('set_agent_profile', {
+      name: 'claude-code',
+      launchCommand: '/usr/local/bin/claude',
+    });
+    restoreTauri();
+  });
+
   it('onDaemonStatusChanged listens for nexus://daemon-status-changed events', async () => {
     const handler = vi.fn();
     const listen = vi.fn().mockImplementation((event, cb) => {

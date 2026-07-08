@@ -1,12 +1,12 @@
 ---
 module: apps/desktop/src-tauri + apps/web (setup-gate, daemon-status-bar, main-banner)
 date: 2026-07-06
-last_updated: 2026-07-07
+last_updated: 2026-07-08
 problem_type: architecture-pattern
 category: architecture-patterns
 severity: medium
-plan_id: V1.94-P-last (compound of desktop onboarding & IA pass); V1.96 refinements from 2026-07-07-v1.96-implement-rework
-tags: [daemon-runtime, sidecar, health-probe, desktop-shell, setup-wizard, daemon-status-bar, gate, two-consumer-pattern, late-subscription-race, stderr-capture, bounded-timeout]
+plan_id: V1.94-P-last (compound of desktop onboarding & IA pass); V1.96 refinements from 2026-07-07-v1.96-implement-rework; V1.97 refinements from 2026-07-07-v1.97-desktop-first-launch-hardening
+tags: [daemon-runtime, sidecar, health-probe, desktop-shell, setup-wizard, daemon-status-bar, gate, two-consumer-pattern, late-subscription-race, stderr-capture, bounded-timeout, tauri-v2-sidecar-resolution, stopped-initial-state, attach-without-ownership]
 applies_when: gating main-UI entry on daemon readiness; designing any "wait for service X before entering app" UX; wiring observers to a process lifecycle event stream that may fire before subscription; surfacing supervised-process crash reasons to the user
 ---
 
@@ -114,3 +114,55 @@ Rules 5+6+7 together make the consumer resilient to **any** timing of the event 
 ### Source
 
 Distilled from V1.96 plan `2026-07-07-v1.96-implement-rework` (T3 sidecar stderr capture + T4 mount-probe/starting-branch/timeout/detail-render). Iteration-scoped RCA with code sketches: `.mstar/iterations/v1.96/guides/daemon-startup-rca.md` (snapshot; promoted here).
+
+## V1.97 refinements: initial-state correctness + Tauri v2 spawn-name resolution
+
+V1.97 (plan `2026-07-07-v1.97-desktop-first-launch-hardening`) ran the first real clean-state desktop smoke against the bundled sidecar and found **two latent first-launch blockers** that had been present since V1.66 but never surfaced (no prior iteration had actually spawned the sidecar end-to-end). Both distil into durable rules that apply to the supervisor state machine and the Tauri shell-plugin contract.
+
+### Rule 9: a freshly constructed SidecarManager starts in `Stopped`, never `Starting`
+
+`SidecarManager::new` has no owned child process. Defaulting its initial state to `Starting` is an **invalid compound state** (`Starting` + `child.is_none()`): it implies a spawn is in progress when none is, and — critically — it causes `start_with_budget` to short-circuit and never attempt a real spawn. The desktop app would report "Starting daemon…" forever on a clean launch while never actually spawning anything.
+
+**Pattern**: the initial state of any supervisor that does not yet own the supervised process is the inactive terminal (`Stopped`), not a transient "in progress" state. Transient states (`Starting`) are only valid while a spawn attempt is actually in progress or an owned child is being health-probed.
+
+### Rule 10: the `Starting` short-circuit must be gated on `child.is_some()`
+
+Even with a correct initial state, `start_with_budget` typically has a "don't double-spawn" short-circuit: `if state == Starting { return }`. That guard must additionally require `inner.child.is_some()` — otherwise a stale `Starting` (e.g. left over from a failed spawn that never cleared) silently suppresses every subsequent spawn/retry. `Starting` + `child.is_none()` is invalid and must NOT block a real spawn attempt.
+
+**Pattern**:
+```rust
+// WRONG: a stale Starting suppresses all real spawns
+if state == Starting { return Ok(()); }
+// RIGHT: only short-circuit when an owned child is actually being supervised
+if state == Starting && inner.child.is_some() { return Ok(()); }
+```
+
+### Rule 11: Tauri v2 `app.shell().sidecar(name)` takes the FILENAME, not the `externalBin` path
+
+This was the more severe latent blocker. `bundle.externalBin` in `tauri.conf.json` lists **build-time source paths** (e.g. `["binaries/nexus42"]`); Tauri appends the target-triple suffix (`nexus42-aarch64-apple-darwin`) at bundle time. But the **runtime** Rust API `tauri_plugin_shell::ShellExt::sidecar()` "expects only the filename of the sidecar, not its full path" (Tauri v2 docs, `https://v2.tauri.app/develop/sidecar`). The desktop shell had called `app.shell().sidecar("binaries/nexus42")` since V1.66 — which **never resolves**, so the bundled daemon was never spawnable from the desktop app. The error (`failed to spawn sidecar: No such file or directory (os error 2)`) only appeared once V1.97 actually ran a clean-state smoke.
+
+The matching `tauri-plugin-shell` capability scope (`shell:allow-execute`, `sidecar: true`) registers a `name` that must be **byte-identical** to the `sidecar()` argument — so both must be the bare filename (`"nexus42"`), while `bundle.externalBin` keeps the source-relative path (`"binaries/nexus42"`).
+
+**Pattern**:
+```rust
+// tauri.conf.json  (build-time source path — UNCHANGED)
+//   "bundle": { "externalBin": ["binaries/nexus42"] }
+// sidecar.rs (runtime — filename only)
+let command = app.shell().sidecar("nexus42")?;   // NOT "binaries/nexus42"
+// capabilities/main.json (scope name must match the sidecar() arg)
+//   { "name": "nexus42", "sidecar": true, "args": [...] }
+```
+
+> **JS vs Rust asymmetry (footgun):** the JavaScript `Command.sidecar('binaries/my-sidecar', ...)` API *does* accept the path-form string matching the `externalBin` entry. The Rust `app.shell().sidecar()` does NOT. When porting a sidecar between JS-triggered and Rust-triggered spawn sites, re-derive the argument from the docs — do not copy it across the language boundary.
+
+### Rule 12: attaching to a healthy daemon must not fabricate an owned child handle
+
+The attach path (daemon already running on the resolved port, e.g. user ran `nexus42 daemon start` first, or a prior desktop session left it running) may report `state: Running` — but it must set `owned: false` and must NOT insert a child handle. Stop/quit cleanup terminates **only** processes the desktop app actually spawned. This preserves existing-install attach behavior without risking killing an unrelated user-started daemon.
+
+### Why these compound
+
+Rules 9 + 10 fix the supervisor state machine so a real spawn is actually attempted. Rule 11 fixes the framework-contract misuse so the spawn can actually resolve the binary. Rule 12 keeps attach honest. Together they make the desktop clean-state first-launch path **reachable** — before V1.97 it was silently broken at two layers (state machine never spawned, and even if it had, the sidecar name would not resolve). The deeper remaining gap (the daemon requires an active creator to boot, and the desktop wizard does not bootstrap one before the `.setup()` auto-start — see residual `R-V197-SMOKE-CLEAN-STATE`) is a product-architecture deferral tracked for V1.98, not a state-machine or shell-contract rule.
+
+### Source
+
+Distilled from V1.97 plan `2026-07-07-v1.97-desktop-first-launch-hardening` (T1 prototype intake + T4 sidecar FSM + T5 sidecar spawn-name fix `ab618ee9`, verified by clean-state smoke re-run). Tauri v2 sidecar resolution rule confirmed against `https://v2.tauri.app/develop/sidecar` ("expects only the filename of the sidecar, not its full path"). Iteration-scoped invariants + prototype intake rule: `.mstar/iterations/v1.97/guides/sidecar-startup-state-machine.md` (snapshot; durable rules promoted here).

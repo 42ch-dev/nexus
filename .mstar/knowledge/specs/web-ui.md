@@ -1163,3 +1163,20 @@ On desktop builds, `ClientProvider` returns `TauriClient` + `TauriDesktopCapabil
 #### 29.11.6 Preservation
 
 All V1.95 amendments (ClientProvider, migration reset, workspace default rules, FingerprintGate bypass) continue to apply. V1.96 adds the centered-integrated IA and the diagnostic surfacing improvements.
+
+### 29.12 V1.97 Amendments — First-launch reliability hardening
+
+**Product behavior (author-visible).** V1.97 keeps the V1.96 wizard IA but hardens the first-launch path so a new author either completes setup or reaches a bounded, actionable recovery state.
+
+- Step 1 remains visually calm at desktop window sizes: the step list does not crowd content, the card does not overflow the viewport or right edge, and long workspace paths truncate inside the workspace location affordance.
+- Browse remains a desktop-only native picker affordance and must pass the expected `defaultPath` argument to the Tauri command. If the picker cannot open, the user sees a readable toast/error, not a raw missing-key failure.
+- The daemon step never treats indefinite progress as success. Clean-state launch must reach `running`, an actionable `error`, or a visible timeout/retry/reset state within the bounded V1.96 timeout behavior.
+- Existing-install launch preserves prior setup guarantees: `setup_completed` skip behavior, workspace path preservation unless stale, reset-local-database recovery, and daemon stderr/diagnostic visibility.
+- V1.97 does not add new onboarding steps, settings surfaces, daemon API fields, schema/contract changes, signing/update flows, or default-path consolidation work.
+
+#### 29.12.1 Implementation invariants
+
+- The workspace-location row must be flex-safe at desktop window sizes: content containers that hold the resolved path can shrink, and the path truncates inside the card instead of expanding the right edge.
+- The native Browse path uses the existing desktop capability/IPC boundary. The frontend sends `defaultPath` to the Tauri command and does not introduce a second argument shape or compatibility shim.
+- The daemon step observes existing desktop daemon-status state and `detail` only. It must not require new daemon API fields, generated schemas, or contract package changes.
+- Clean-state smoke and existing-install smoke are hard product verification gates, not new UI features. Their evidence may be captured manually or with automation, but unit tests alone do not prove the author-visible first-launch path.
