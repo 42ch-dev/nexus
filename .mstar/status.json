@@ -1,128 +1,7 @@
 {
   "version": 1,
   "updated_at": "2026-07-08T04:00:00+0000",
-  "plans": [
-    {
-      "id": "2026-07-07-v1.95-prepare-specs",
-      "status": "Done",
-      "title": "P-1 — Prepare: spec amendments for ClientProvider fix + daemon error surfacing + layout redesign",
-      "file": ".mstar/plans/2026-07-07-v1.95-prepare-specs.md",
-      "type": "prepare",
-      "owner": "@architect",
-      "metadata": {
-        "iteration": "V1.95",
-        "iteration_refs": "v1.95-setup-wizard-bugfix-delivery-compass-v1.md",
-        "spec_integration_branch": "iteration/v1.95",
-        "merge_target": "iteration/v1.95",
-        "primary_spec": "knowledge/specs/desktop-shell.md",
-        "blocked_by": [],
-        "blocking": [
-          "2026-07-07-v1.95-implement-fixes"
-        ],
-        "working_branch": "feature/v1.95-prepare"
-      }
-    },
-    {
-      "id": "2026-07-07-v1.95-implement-fixes",
-      "status": "Done",
-      "title": "P0 — Implement all 6 V1.94 setup-wizard bug fixes: ClientProvider + daemon error + CSS tokens + layout + directory picker + workspace path + DB separation",
-      "file": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md",
-      "type": "implement",
-      "owner": "@fullstack-dev",
-      "metadata": {
-        "iteration": "V1.95",
-        "iteration_refs": "v1.95-setup-wizard-bugfix-delivery-compass-v1.md",
-        "spec_integration_branch": "iteration/v1.95",
-        "merge_target": "iteration/v1.95",
-        "primary_spec": "knowledge/specs/desktop-shell.md",
-        "blocked_by": [
-          "2026-07-07-v1.95-prepare-specs"
-        ],
-        "blocking": [],
-        "working_branch": "feature/v1.95-implement-fixes"
-      }
-    },
-    {
-      "id": "2026-07-07-v1.96-implement-rework",
-      "status": "Done",
-      "title": "P0 — Implement 3 V1.96 setup-wizard rework clusters: layout redesign + Step1 UX + daemon diagnostic chain (stderr capture + subscribe/timeout fix)",
-      "file": ".mstar/plans/2026-07-07-v1.96-implement-rework.md",
-      "type": "implement",
-      "owner": "@fullstack-dev",
-      "metadata": {
-        "iteration": "V1.96",
-        "iteration_refs": "v1.96-setup-wizard-rework-and-daemon-diagnostic-delivery-compass-v1.md",
-        "spec_integration_branch": "iteration/v1.96",
-        "merge_target": "iteration/v1.96",
-        "primary_spec": "knowledge/specs/desktop-shell.md",
-        "blocked_by": [],
-        "blocking": [],
-        "working_branch": "feature/v1.96-implement-rework"
-      }
-    },
-    {
-      "id": "2026-07-07-v1.97-desktop-first-launch-hardening",
-      "status": "Done",
-      "title": "P0 — Desktop first-launch reliability hardening: setup wizard containment, folder picker IPC, sidecar startup state, and hard smoke gate",
-      "file": ".mstar/plans/2026-07-07-v1.97-desktop-first-launch-hardening.md",
-      "type": "implement",
-      "owner": "@fullstack-dev",
-      "metadata": {
-        "iteration": "V1.97",
-        "iteration_refs": "v1.97-desktop-first-launch-hardening-compass-v1.md",
-        "spec_integration_branch": "iteration/v1.97",
-        "merge_target": "iteration/v1.97",
-        "primary_spec": "knowledge/specs/desktop-shell.md",
-        "blocked_by": [],
-        "blocking": [],
-        "working_branch": "feature/v1.97-desktop-first-launch-hardening"
-      }
-    },
-    {
-      "id": "2026-07-08-v1.98-prepare-design-studio",
-      "status": "Done",
-      "title": "P-1 — Prepare: DESIGN unification spec + design-studio contract",
-      "file": ".mstar/plans/2026-07-08-v1.98-prepare-design-studio.md",
-      "type": "prepare",
-      "owner": "@architect",
-      "metadata": {
-        "iteration": "V1.98",
-        "iteration_refs": "v1.98-design-studio-and-design-unification-compass-v1.md",
-        "spec_integration_branch": "iteration/v1.98",
-        "merge_target": "iteration/v1.98",
-        "primary_spec": "iterations/v1.98/specs/design-unification.md",
-        "blocked_by": [],
-        "blocking": [
-          "2026-07-08-v1.98-design-studio-and-design-unification"
-        ],
-        "working_branch": "feature/v1.98-prepare-design-studio"
-      }
-    },
-    {
-      "id": "2026-07-08-v1.98-design-studio-and-design-unification",
-      "status": "Done",
-      "title": "P0 — Implement design-studio app + DESIGN merge + web consumer migration",
-      "file": ".mstar/plans/2026-07-08-v1.98-design-studio-and-design-unification.md",
-      "type": "implement",
-      "owner": "@frontend-dev",
-      "metadata": {
-        "iteration": "V1.98",
-        "iteration_refs": "v1.98-design-studio-and-design-unification-compass-v1.md",
-        "spec_integration_branch": "iteration/v1.98",
-        "merge_target": "iteration/v1.98",
-        "primary_spec": "knowledge/specs/design-studio.md",
-        "blocked_by": [
-          "2026-07-08-v1.98-prepare-design-studio"
-        ],
-        "blocking": [],
-        "working_branch": "feature/v1.98-design-studio-and-design-unification",
-        "done_at": "2026-07-08",
-        "qc_verdict": "Approve (tri, post-fix revalidation)",
-        "qa_verdict": "Pass",
-        "wire_contracts_changed": false
-      }
-    }
-  ],
+  "plans": [],
   "metadata": {
     "integration_branch_retired": true,
     "last_integration_branch": "iteration/v1.97",
@@ -173,7 +52,7 @@
         "2026-07-07-v1.97-desktop-first-launch-hardening": 5
       }
     },
-    "updated_at": "2026-07-07T23:20:00+0800"
+    "updated_at": "2026-07-08T16:45:00+0800"
   },
   "residual_findings": {
     "2026-07-05-v1.91-findings-batch": [
@@ -454,7 +333,7 @@
         "severity": "high",
         "decision": "defer",
         "owner": "@architect + @fullstack-dev",
-        "target": "V1.98",
+        "target": "V1.99",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/reports/2026-07-07-v1.97-desktop-first-launch-hardening/qc-consolidated.md §R-V197-SMOKE-CLEAN-STATE",
         "note": "Pre-existing product/arch gap exposed by V1.97 smoke (spawn-name fix made daemon reachable). V1.97 ships the spawn-name fix; creator-bootstrap design deferred. Needs architect: gate daemon auto-start behind setup_completed + wizard creator-init."
@@ -465,7 +344,7 @@
         "severity": "medium",
         "decision": "defer",
         "owner": "@qa-engineer",
-        "target": "V1.98",
+        "target": "V1.99",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/reports/2026-07-07-v1.97-desktop-first-launch-hardening/qc-consolidated.md §R-V197-SMOKE-UI",
         "note": "Attach path + unit tests verified; wizard/UI flow not. Manual or automated desktop smoke on interactive host in V1.98."
@@ -476,7 +355,7 @@
         "severity": "low",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.98+",
+        "target": "V1.99+",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/reports/2026-07-07-v1.97-desktop-first-launch-hardening/qc3.md §W-001",
         "note": "No error lost; consolidate to single storage path in future iteration."
@@ -487,7 +366,7 @@
         "severity": "nit",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.98",
+        "target": "V1.99",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/reports/2026-07-07-v1.97-desktop-first-launch-hardening/qc3.md §W-002",
         "note": "Same code path as start_daemon; budget-not-reset implicitly covered by crash_restart_stops_when_budget_exhausted."
@@ -498,7 +377,7 @@
         "severity": "low",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.98",
+        "target": "V1.99",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/reports/2026-07-07-v1.97-desktop-first-launch-hardening/qc-consolidated.md §R-V197-CLIPPY",
         "note": "Not introduced by V1.97; strict clippy -D warnings fails on this pre-existing lint."
