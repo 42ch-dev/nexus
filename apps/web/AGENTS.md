@@ -56,8 +56,11 @@ and consumed by the screens. Remaining gaps the UI adapts around:
 
 - **TypeScript strict.** No `any` for wire shapes; prefer generated types.
 - **Styling**: Tailwind utilities referencing DESIGN.md theme keys; compose with
-  `cn()` (`src/lib/utils.ts`). Component primitives live in `src/components/ui/`
-  and read from the DESIGN.md component tables.
+  `cn()` (`src/lib/utils.ts`). App-owned component primitives live in
+  `src/components/ui/` and read from the DESIGN.md component tables. V1.99-approved
+  shared presentational primitives may be consumed from `@42ch/nexus-ui` directly
+  or through thin app-local wrappers/re-exports; app behavior, routing, daemon data,
+  and product copy stay in `apps/web`.
 - **Accessibility (WCAG 2.1 AA floor)**: keep keyboard paths, the global
   focus-visible ring (`src/index.css`), visible labels (no icon-only nav), and
   reduced-motion handling. DESIGN.md dark/light tokens must both pass contrast.

@@ -38,6 +38,6 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | [architecture-patterns/resolved-residual-verification.md](architecture-patterns/resolved-residual-verification.md) | Residual lifecycle is a claim, not a guarantee — verify against current `main` HEAD: a `resolved` residual may be insufficient/regressed (V1.86), AND a `deferred`-to-V1.(N+1) residual may already be satisfied by V1.N's fix-wave (V1.93 symmetric case) |
 | [architecture-patterns/tailwind-theme-key-routing-for-sizing-tokens.md](architecture-patterns/tailwind-theme-key-routing-for-sizing-tokens.md) | Tailwind theme-key routing for sizing tokens — a token under `theme.extend.colors` generates only color utilities; `max-w-*`/`p-*`/`h-*`/`w-*` must be registered under `maxWidth`/`padding`/`spacing` or Tailwind silently emits nothing (V1.95 setup-wizard layout-fix distilled) |
 
-**All OSS feature specs:** [`specs/README.md`](specs/README.md) (full index by domain).
+**All OSS feature specs:** [`../specs/README.md`](../specs/README.md) (full index by domain).
 
 **Archived:** [`.mstar/archived/knowledge/`](../archived/knowledge/README.md) · [shipped-features-tracker](../archived/shipped-features-tracker.md)

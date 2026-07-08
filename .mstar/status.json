@@ -1,17 +1,126 @@
 {
   "version": 1,
-  "updated_at": "2026-07-08T04:00:00+0000",
-  "plans": [],
+  "updated_at": "2026-07-08T18:40:00+0800",
+  "plans": [
+    {
+      "id": "2026-07-08-v1.99-prepare-visual-system-deepening",
+      "title": "P-1 — Prepare: Visual System Deepening Contract",
+      "file": ".mstar/plans/2026-07-08-v1.99-prepare-visual-system-deepening.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": ["@product-manager", "@architect", "@writing-specialist"],
+      "progress": 0,
+      "tags": ["V1.99", "prepare", "design-system", "nexus-ui", "design-studio"],
+      "created_at": "2026-07-08",
+      "updated_at": "2026-07-08",
+      "done_at": null,
+      "notes": "Prepare plan for UI component promotion boundary, surfaces visual direction, and studio-first workflow contract.",
+      "metadata": {
+        "priority": "high",
+        "spec_integration_branch": "iteration/v1.99",
+        "merge_target": "iteration/v1.99",
+        "iteration_compass": ".mstar/iterations/v1.99-design-system-deepening-compass-v1.md",
+        "iteration_refs": [
+          ".mstar/iterations/v1.99/specs/component-promotion-boundary.md",
+          ".mstar/iterations/v1.99/guides/studio-first-ui-workflow.md"
+        ],
+        "primary_spec": ".mstar/iterations/v1.99/specs/component-promotion-boundary.md",
+        "branch_policy": "Plan branches merge to iteration/v1.99; final PR targets main.",
+        "qa_gate": "N/A"
+      }
+    },
+    {
+      "id": "2026-07-08-v1.99-nexus-ui-component-promotion",
+      "title": "P0 — @42ch/nexus-ui Component Promotion",
+      "file": ".mstar/plans/2026-07-08-v1.99-nexus-ui-component-promotion.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": ["@frontend-dev", "@qc-specialist", "@qa-engineer"],
+      "progress": 0,
+      "tags": ["V1.99", "frontend", "nexus-ui", "component-library"],
+      "created_at": "2026-07-08",
+      "updated_at": "2026-07-08",
+      "done_at": null,
+      "notes": "First-batch shared UI primitive promotion after P-1 boundary lock.",
+      "metadata": {
+        "priority": "high",
+        "blocked_by_plan_id": "2026-07-08-v1.99-prepare-visual-system-deepening",
+        "spec_integration_branch": "iteration/v1.99",
+        "merge_target": "iteration/v1.99",
+        "iteration_compass": ".mstar/iterations/v1.99-design-system-deepening-compass-v1.md",
+        "iteration_refs": [
+          ".mstar/iterations/v1.99/specs/component-promotion-boundary.md",
+          ".mstar/iterations/v1.99/guides/studio-first-ui-workflow.md"
+        ],
+        "primary_spec": ".mstar/iterations/v1.99/specs/component-promotion-boundary.md",
+        "execution_mode": "sdd",
+        "qa_gate": "mandatory"
+      }
+    },
+    {
+      "id": "2026-07-08-v1.99-surfaces-visual-direction",
+      "title": "P1 — Design Studio Surfaces Visual Direction",
+      "file": ".mstar/plans/2026-07-08-v1.99-surfaces-visual-direction.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": ["@frontend-dev", "@qc-specialist", "@qa-engineer"],
+      "progress": 0,
+      "tags": ["V1.99", "visual", "design-studio", "surfaces"],
+      "created_at": "2026-07-08",
+      "updated_at": "2026-07-08",
+      "done_at": null,
+      "notes": "Visual polish and usability pass for apps/design-studio /surfaces.",
+      "metadata": {
+        "priority": "high",
+        "blocked_by_plan_id": "2026-07-08-v1.99-prepare-visual-system-deepening",
+        "spec_integration_branch": "iteration/v1.99",
+        "merge_target": "iteration/v1.99",
+        "iteration_compass": ".mstar/iterations/v1.99-design-system-deepening-compass-v1.md",
+        "iteration_refs": [
+          ".mstar/iterations/v1.99/guides/studio-first-ui-workflow.md"
+        ],
+        "primary_spec": ".mstar/specs/design-studio.md",
+        "execution_mode": "sdd",
+        "qa_gate": "mandatory"
+      }
+    },
+    {
+      "id": "2026-07-08-v1.99-studio-first-ui-workflow",
+      "title": "P2 — Studio-First UI Workflow Codification",
+      "file": ".mstar/plans/2026-07-08-v1.99-studio-first-ui-workflow.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": ["@product-manager", "@architect", "@writing-specialist"],
+      "progress": 0,
+      "tags": ["V1.99", "workflow", "documentation", "skills-evaluation"],
+      "created_at": "2026-07-08",
+      "updated_at": "2026-07-08",
+      "done_at": null,
+      "notes": "Evidence-backed workflow codification after P0/P1 validation.",
+      "metadata": {
+        "priority": "medium",
+        "blocked_by_plan_id": "2026-07-08-v1.99-nexus-ui-component-promotion",
+        "dependency": "Also depends on 2026-07-08-v1.99-surfaces-visual-direction evidence.",
+        "spec_integration_branch": "iteration/v1.99",
+        "merge_target": "iteration/v1.99",
+        "iteration_compass": ".mstar/iterations/v1.99-design-system-deepening-compass-v1.md",
+        "iteration_refs": [
+          ".mstar/iterations/v1.99/guides/studio-first-ui-workflow.md"
+        ],
+        "primary_spec": ".mstar/iterations/v1.99/guides/studio-first-ui-workflow.md",
+        "execution_mode": "inline",
+        "qa_gate": "mandatory"
+      }
+    }
+  ],
   "metadata": {
     "integration_branch_retired": true,
     "last_integration_branch": "iteration/v1.97",
-    "integration_merge_target": "main",
     "iteration_base_branch": "main",
-    "spec_integration_branch": "iteration/v1.98",
+    "spec_integration_branch": "iteration/v1.99",
     "target_branch": "main",
-    "integration_branch": "iteration/v1.98",
-    "latest_active_iteration": "V1.98",
-    "latest_active_compass": "v1.98-design-studio-and-design-unification-compass-v1.md",
+    "latest_active_iteration": "V1.99",
+    "latest_active_compass": "v1.99-design-system-deepening-compass-v1.md",
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/specs/README.md",
@@ -40,6 +149,7 @@
         "V1.97+": 1,
         "V1.98": 4,
         "V1.98+": 1,
+        "post-V1.99": 4,
         "when list virtualisation lands": 1
       },
       "by_plan": {
@@ -52,7 +162,7 @@
         "2026-07-07-v1.97-desktop-first-launch-hardening": 5
       }
     },
-    "updated_at": "2026-07-08T16:45:00+0800"
+    "updated_at": "2026-07-08T18:40:00+0800"
   },
   "residual_findings": {
     "2026-07-05-v1.91-findings-batch": [
@@ -333,7 +443,7 @@
         "severity": "high",
         "decision": "defer",
         "owner": "@architect + @fullstack-dev",
-        "target": "V1.99",
+        "target": "post-V1.99",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.97-desktop-first-launch-hardening.md",
         "note": "Pre-existing product/arch gap exposed by V1.97 smoke (spawn-name fix made daemon reachable). V1.97 ships the spawn-name fix; creator-bootstrap design deferred. Needs architect: gate daemon auto-start behind setup_completed + wizard creator-init. QC source: §R-V197-SMOKE-CLEAN-STATE"
@@ -344,7 +454,7 @@
         "severity": "medium",
         "decision": "defer",
         "owner": "@qa-engineer",
-        "target": "V1.99",
+        "target": "post-V1.99",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.97-desktop-first-launch-hardening.md",
         "note": "Attach path + unit tests verified; wizard/UI flow not. Manual or automated desktop smoke on interactive host in V1.98. QC source: §R-V197-SMOKE-UI"
@@ -366,7 +476,7 @@
         "severity": "nit",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.99",
+        "target": "post-V1.99",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.97-desktop-first-launch-hardening.md",
         "note": "Same code path as start_daemon; budget-not-reset implicitly covered by crash_restart_stops_when_budget_exhausted. QC source: §W-002"
@@ -377,7 +487,7 @@
         "severity": "low",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.99",
+        "target": "post-V1.99",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.97-desktop-first-launch-hardening.md",
         "note": "Not introduced by V1.97; strict clippy -D warnings fails on this pre-existing lint. QC source: §R-V197-CLIPPY"

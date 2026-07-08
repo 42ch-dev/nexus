@@ -1208,7 +1208,7 @@ All V1.95 amendments (ClientProvider, migration reset, workspace default rules, 
 
 - No new screens, routes, or settings in the author Web UI for design-studio.
 - Setup wizard, Control Room IA (§29), and daemon status behavior unchanged by studio work.
-- Desktop clean-state / first-launch hardening deferred to **V1.99** (`R-V197-SMOKE-CLEAN-STATE`) — not delivered via design-studio.
+- Desktop clean-state / first-launch hardening remains deferred from the active V1.99 design-system iteration unless user direction changes again; it is not delivered via Design Studio.
 
 #### 30.4 Contributor workflow (cross-reference)
 
@@ -1219,5 +1219,5 @@ Token tuning: edit repo-root [`DESIGN.md`](../../../DESIGN.md) pair on disk → 
 - Bundling design-studio into daemon static assets or desktop installer
 - Exposing studio URL from `nexus42 daemon ui` or author-facing docs as a product feature
 - Live token editor or YAML write-back from studio UI
-- Migrating `components/ui/*` into `@42ch/nexus-ui`
+- Unbounded migration of `components/ui/*` into `@42ch/nexus-ui`; V1.99 handles only approved pure presentational primitives through the component-promotion boundary.
 - `wire_contracts_changed: true` — V1.98 is frontend/docs only

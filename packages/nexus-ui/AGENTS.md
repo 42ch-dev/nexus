@@ -1,6 +1,6 @@
 # @42ch/nexus-ui — AGENTS.md
 
-Publishable npm workspace package for Nexus brand assets, design tokens, theme CSS, and **React brand components** (`<NexusLogo>`, `<NexusMark>`). V1.83 shipped the assets/tokens/theme foundation; V1.87 promoted the package to a React component library (adds `react` / `react-dom` as peer deps).
+Publishable npm workspace package for Nexus brand assets, design tokens, theme CSS, **React brand components** (`<NexusLogo>`, `<NexusMark>`), and V1.99-approved pure presentational primitives. V1.83 shipped the assets/tokens/theme foundation; V1.87 promoted the package to a React component library (adds `react` / `react-dom` as peer deps); V1.99 may promote a small UI primitive batch under the component-promotion boundary.
 
 ## Purpose
 
@@ -8,19 +8,23 @@ Publishable npm workspace package for Nexus brand assets, design tokens, theme C
 - Machine-consumable brand token constants (`src/tokens.ts`)
 - Optional CSS custom properties (`theme.css`)
 - React brand primitive components (`<NexusLogo>`, `<NexusMark>`) — presentational only, no theme context
+- Approved React UI primitives that are pure presentational, token-driven, and reusable across `apps/design-studio` and `apps/web`
 
 ## Boundaries
 
-- **Must not** import from `apps/web`, `nexus-platform`, or app routing/state
-- **Must not** export shadcn wrappers, layout primitives, or Web-only primitives
-- **Must not** duplicate the full DESIGN.md token contract — root `DESIGN.md` / `DESIGN.dark.md` (P1) own normative cross-app tokens; this package exposes a minimal brand primitive slice
+- **Must not** import from `apps/web`, `apps/design-studio`, `nexus-platform`, app aliases, daemon clients, app routing/state, Tauri IPC, or localStorage
+- **Must not** export product screens, layout shells, Web-only primitives, data-aware controls, or app chrome
+- **May** export V1.99-approved presentational primitives only when the active plan/spec records the component in the first-batch promotion list
+- **Must not** duplicate the full DESIGN.md token contract — root `DESIGN.md` / `DESIGN.dark.md` own normative cross-app tokens; this package references token-backed class names and keeps only the existing brand primitive slice in `theme.css`
 - **Must not** import `.svg` files in package source — tsup/esbuild cannot resolve `.svg` imports. Components that need SVG assets use consumer-provided `src` prop (NexusLogo) or hand-authored JSX (NexusMark) for bundler-agnostic portability.
+- **Must not** import `.png` or other runtime assets from component source. Keep assets behind documented public asset exports or consumer-resolved `src` props.
 
 ## Dependencies
 
 - **Runtime/peer**: `react` (>=18), `react-dom` (>=18) — peer deps only (consumers ship React)
-- **Dev-only**: `typescript`, `tsup`, `@types/react`, `@types/react-dom`
-- Consumers: `apps/web` (workspace); future `nexus-platform` surfaces via public exports
+- **Runtime/package deps**: non-singleton implementation helpers are allowed only when imported by promoted primitives (for example `class-variance-authority`, `@radix-ui/react-slot`, `clsx`, `tailwind-merge`). Do not make these peer dependencies unless consumers must share a singleton instance.
+- **Dev-only**: `typescript`, `tsup`, `@types/react`, `@types/react-dom`, package tests
+- Consumers: `apps/web` and `apps/design-studio` (workspace); future external surfaces via public exports
 
 ## Asset policy
 
@@ -32,6 +36,13 @@ Publishable npm workspace package for Nexus brand assets, design tokens, theme C
 ## Public exports
 
 Documented in `package.json` `exports` and `README.md`. Do not rely on undocumented internal paths.
+
+### V1.99 primitive export strategy
+
+- First-batch primitives use named exports from `@42ch/nexus-ui` through `src/index.ts`.
+- Do not add per-component deep public subpaths unless the active plan explicitly locks that API.
+- Keep `src/components/*` internal; consumers must not deep-import package source files.
+- If apps need app-specific behavior, keep a thin wrapper in the app and import the presentational primitive from the package.
 
 ### Component export strategy
 
