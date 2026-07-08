@@ -33,9 +33,16 @@ Parent rules: [`../AGENTS.md`](../AGENTS.md) (apps placement), root [`AGENTS.md`
 - `apps/web/src/lib/nexus/**` — no `NexusClient`, no daemon transport
 - `apps/web/src/pages/**` — no product screens
 - `apps/web/src/components/layout/**` — use studio-local Surfaces fixtures instead
-- `apps/web` route definitions, app providers, product hooks, Tauri helpers, and localStorage-backed product state
+- `apps/web/src/hooks/**` — no product hooks
+- `apps/web/src/(providers|contexts)/**` — no app providers
 - `@42ch/nexus-contracts` — no wire DTOs
+- `@42ch/nexus-ui/src/*` — deep import; use public package API only
+- `@tauri-apps/*` — desktop-only; studio is a browser SPA
+- `@web-ui/button`, `@web-ui/badge`, `@web-ui/card` — already-promoted; import from `@42ch/nexus-ui`
 - Inventing design tokens not in root DESIGN pair
+- **Any `@web-ui/*` import without a transitional annotation** (`// transitional — …` or `// @web-ui/<name> — transitional …`)
+
+**Guardrails:** `tooling/check-ui-guardrails.sh` (CI job `ui-guardrails`) enforces these boundaries mechanically.
 
 ## Transitional `apps/web` UI import policy (V1.98 → V1.99)
 

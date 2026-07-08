@@ -12,6 +12,8 @@ Publishable npm workspace package for Nexus brand assets, design tokens, theme C
 
 ## Boundaries
 
+- **Consumer wrappers** under `apps/web/src/components/ui/` that re-export from this package (`button.tsx`, `badge.tsx`, `card.tsx`; future: `input.tsx`, `label.tsx`, `textarea.tsx`) **must not** import `clsx`, `class-variance-authority`, `tailwind-merge`, `@/lib/*`, or deep-import `@42ch/nexus-ui/src/*`. The package is the sole class-merge authority (`cn`). Enforced by `tooling/check-ui-guardrails.sh` (CI job `ui-guardrails`).
+
 - **Must not** import from `apps/web`, `apps/design-studio`, `nexus-platform`, app aliases, daemon clients, app routing/state, Tauri IPC, or localStorage
 - **Must not** export product screens, layout shells, Web-only primitives, data-aware controls, or app chrome
 - **May** export V1.99-approved presentational primitives only when the active plan/spec records the component in the first-batch promotion list
