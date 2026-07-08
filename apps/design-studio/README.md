@@ -19,7 +19,7 @@ on 5173).
 | --- | --- | --- |
 | **Tokens** | `/tokens` | Colors (brand, gray, blue, red, amber, green, teal), typography scale, spacing, radius, elevation |
 | **Brand VI** | `/brand` | All four `@42ch/nexus-ui` logo variants + `NexusMark` + theme.css swatches + clear-space guidance |
-| **Components** | `/components` | All 11 `apps/web/src/components/ui/*` primitives with variant/state matrices |
+| **Components** | `/components` | All 11 `apps/web/src/components/ui/*` primitives with variant/state matrices — promoted primitives (Button, Badge, Card) imported from `@42ch/nexus-ui`; unpromoted primitives remain on `@web-ui/*` (transitional) |
 | **Voice & Content** | `/voice` | Labeled writing-pattern specimens from `DESIGN.md` §Voice & Content |
 | **Surfaces** | `/surfaces` | Setup wizard step card + App shell chrome fixtures (studio-local; no daemon data) |
 
@@ -55,7 +55,7 @@ No daemon or Tauri required for any command.
 ## Architecture
 
 - **CSS pipeline**: shared `@nexus/design-tokens` workspace package (`tooling/design-tokens`) — Tailwind preset + `tokens.css`
-- **Import surface**: `@web-ui/*` (apps/web shadcn primitives), `@web-lib/utils` (`cn()` only), `@42ch/nexus-ui` (brand layer), `@nexus/design-tokens` (CSS + preset)
+- **Import surface**: `@42ch/nexus-ui` (promoted primitives: Button, Badge, Card + brand layer), `@web-ui/*` (transitional unpromoted primitives: Dialog, Input, Label, Select, States, Table, Tabs, Textarea), `@web-lib/utils` (`cn()` only), `@nexus/design-tokens` (CSS + preset)
 - **Toolchain**: Vite 6 + React 18 + TypeScript strict + Tailwind 3 + Vitest 3 — mirrors `apps/web`
 - **Boundaries**: no daemon transport, no `NexusClient`, no `@42ch/nexus-contracts`, no product-page imports
 
