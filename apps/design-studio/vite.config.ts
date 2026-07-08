@@ -24,6 +24,9 @@ export default defineConfig({
   },
   resolve: {
     alias: {
+      // web components import @/lib/utils — resolve it to apps/web before the
+      // general `@` -> design-studio/src alias catches it.
+      '@/lib/utils': path.resolve(__dirname, '../web/src/lib/utils'),
       '@': path.resolve(__dirname, './src'),
       '@web-ui': path.resolve(__dirname, '../web/src/components/ui'),
       '@web-lib/utils': path.resolve(__dirname, '../web/src/lib/utils'),
