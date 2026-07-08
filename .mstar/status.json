@@ -168,15 +168,15 @@
       "id": "2026-07-08-v1.100-form-field-component-promotion",
       "title": "P2 — Form Field Component Promotion",
       "file": ".mstar/plans/2026-07-08-v1.100-form-field-component-promotion.md",
-      "status": "Todo",
+      "status": "InReview",
       "owner": "@project-manager",
       "agents": ["@architect", "@frontend-dev", "@qc-specialist", "@qa-engineer"],
-      "progress": 0,
+      "progress": 90,
       "tags": ["V1.100", "ui", "forms", "nexus-ui", "design-system"],
       "created_at": "2026-07-08",
       "updated_at": "2026-07-08",
       "done_at": null,
-      "notes": "Promotes Input/Label/Textarea by resolving field semantics and app/package ownership after P1 guardrails.",
+      "notes": "Promotes Input/Label/Textarea by resolving field semantics and app/package ownership after P1 guardrails. InReview: SDD T1-T4 done + task-reviewed; QC tri clean Approve (0 Critical/Important/Warning); V1.99 deferral reason closed; 1 nit residual registered. Awaiting QA gate.",
       "metadata": {
         "priority": "medium",
         "blocked_by_plan_id": "2026-07-08-v1.100-ui-hygiene-guardrails",
@@ -688,6 +688,17 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
         "note": "Fail-on-missing-dir would be stricter. Low risk — dir renames caught by other CI jobs. QC source: qc3 S-003"
+      },
+      {
+        "id": "R-V1100P2QC3-S001",
+        "title": "Stale comment in check-ui-guardrails.sh:75-76 says 'P2 will promote' but P2 has promoted input/label/textarea",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.100",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-08-v1.100-form-field-component-promotion/review/qc-consolidated.md",
+        "note": "Factual inaccuracy now; trivial cleanup on next script touch. QC source: P2 qc3 S-001"
       }
     ]
   }
