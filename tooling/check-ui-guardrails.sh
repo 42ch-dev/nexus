@@ -190,33 +190,79 @@ else
 fi
 
 echo ""
-echo "==> Checking cn-parity (package ↔ web)..."
+echo "==> Checking cn consolidation (package ↔ web)..."
 
 check_cn_parity() {
   local pkg_cn="packages/nexus-ui/src/lib/cn.ts"
+  local pkg_barrel="packages/nexus-ui/src/index.ts"
   local web_cn="apps/web/src/lib/utils.ts"
 
+  # ── 1. Package cn.ts must exist and own the extendTailwindMerge config ──
   if [ ! -f "$pkg_cn" ]; then
-    echo "❌ cn-parity: missing $pkg_cn"
+    echo "❌ cn consolidation: missing $pkg_cn"
     VIOLATIONS=$((VIOLATIONS + 1))
     return
   fi
+  if ! grep -q 'extendTailwindMerge' "$pkg_cn" 2>/dev/null; then
+    echo "❌ cn consolidation: $pkg_cn does not contain extendTailwindMerge (expected SSOT)"
+    VIOLATIONS=$((VIOLATIONS + 1))
+    return
+  fi
+  echo "   ✅ $pkg_cn owns extendTailwindMerge (SSOT)."
+
+  # ── 2. Package barrel must export cn ──
+  if ! grep -qE "export\s+\{\s*cn\s*\}" "$pkg_barrel" 2>/dev/null; then
+    echo "❌ cn consolidation: $pkg_barrel does not export cn"
+    VIOLATIONS=$((VIOLATIONS + 1))
+    return
+  fi
+  echo "   ✅ $pkg_barrel exports cn."
+
+  # ── 3. Web utils.ts must be a thin re-export (no local implementation) ──
   if [ ! -f "$web_cn" ]; then
-    echo "❌ cn-parity: missing $web_cn"
+    echo "❌ cn consolidation: missing $web_cn"
     VIOLATIONS=$((VIOLATIONS + 1))
     return
   fi
 
-  # diff returns 0 when files are identical, 1 when they differ.
-  # Wrapping in `if` prevents set -e from triggering on diff's non-zero exit.
-  if diff -q "$pkg_cn" "$web_cn" > /dev/null 2>&1; then
-    echo "   ✅ $pkg_cn ↔ $web_cn: byte-identical (pass)."
-    return
+  # Re-export check: must import/re-export cn from @42ch/nexus-ui
+  if ! grep -qE "export\s+\{\s*cn\s*\}\s*from\s+['\"]@42ch/nexus-ui['\"]" "$web_cn" 2>/dev/null; then
+    echo "❌ cn consolidation: $web_cn must re-export cn from @42ch/nexus-ui (e.g. 'export { cn } from \"@42ch/nexus-ui\"')"
+    VIOLATIONS=$((VIOLATIONS + 1))
+  else
+    echo "   ✅ $web_cn re-exports cn from @42ch/nexus-ui."
   fi
 
-  echo "❌ cn-parity: $pkg_cn differs from $web_cn"
-  diff "$pkg_cn" "$web_cn" 2>/dev/null || true
-  VIOLATIONS=$((VIOLATIONS + 1))
+  # Must NOT contain a local extendTailwindMerge implementation.
+  # Check for actual import/require of tailwind-merge (not just the word in comments).
+  if grep -qE "(import|require).*tailwind-merge" "$web_cn" 2>/dev/null; then
+    echo "❌ cn consolidation: $web_cn imports tailwind-merge locally (must delegate to @42ch/nexus-ui)"
+    VIOLATIONS=$((VIOLATIONS + 1))
+  else
+    echo "   ✅ $web_cn has no local tailwind-merge import."
+  fi
+
+  # ── 4. No other file duplicates extendTailwindMerge config ──
+  # Search for duplicate extendTailwindMerge across the repo (exclude the SSOT file).
+  local dupes
+  dupes=$(grep -rl 'extendTailwindMerge' apps/ --include='*.ts' --include='*.tsx' 2>/dev/null | grep -v 'node_modules' | grep -v 'packages/nexus-ui/src/lib/cn.ts' || true)
+  if [ -n "$dupes" ]; then
+    for d in $dupes; do
+      # Files that are re-exports with just 'export { cn } from...' are fine
+      if grep -qE "from\s+['\"]@42ch/nexus-ui['\"]" "$d" 2>/dev/null && ! grep -qE "import.*extendTailwindMerge" "$d" 2>/dev/null; then
+        continue
+      fi
+      # Any other file with extendTailwindMerge is a duplicate
+      if grep -qE "import.*extendTailwindMerge|require.*extendTailwindMerge|from.*tailwind-merge" "$d" 2>/dev/null; then
+        echo "❌ cn consolidation: duplicate extendTailwindMerge config in $d (authority is $pkg_cn)"
+        VIOLATIONS=$((VIOLATIONS + 1))
+      fi
+    done
+  fi
+  if [ "${dupes:-}" = "" ] || [ "$VIOLATIONS" -eq 0 ]; then
+    # Re-check: only flag increase means a dupe was found; avoid noisy "pass" when no-dupes but other violations exist.
+    : # pass — no new violations from dupe scan
+  fi
 }
 
 check_cn_parity

@@ -1,8 +1,6 @@
 import type { ReactNode } from 'react';
 
-import { cn } from '@web-lib/utils';
-
-import { Badge, Button, Card } from '@42ch/nexus-ui';
+import { cn, Badge, Button, Card } from '@42ch/nexus-ui';
 import { Label } from '@web-ui/label'; // transitional — pending Form Field slice that will promote Label with label/control/helper/error composition
 
 /* ------------------------------------------------------------------ */
