@@ -236,7 +236,7 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
 
   async setAgentProfile(name: string, launchCommand?: string): Promise<void> {
     try {
-      await tauriInvoke().core.invoke<void>('set_agent_profile', { name, launch_command: launchCommand });
+      await tauriInvoke().core.invoke<void>('set_agent_profile', { name, launchCommand });
     } catch (err) {
       throw asDesktopError(err);
     }

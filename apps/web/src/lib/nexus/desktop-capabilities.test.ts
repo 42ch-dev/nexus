@@ -122,6 +122,17 @@ describe('TauriDesktopCapabilities', () => {
     restoreTauri();
   });
 
+  it('setAgentProfile invokes set_agent_profile with Tauri camelCase args', async () => {
+    const { invoke } = mockTauri(() => Promise.resolve(undefined));
+    const caps = new TauriDesktopCapabilities();
+    await caps.setAgentProfile('claude-code', '/usr/local/bin/claude');
+    expect(invoke).toHaveBeenCalledWith('set_agent_profile', {
+      name: 'claude-code',
+      launchCommand: '/usr/local/bin/claude',
+    });
+    restoreTauri();
+  });
+
   it('onDaemonStatusChanged listens for nexus://daemon-status-changed events', async () => {
     const handler = vi.fn();
     const listen = vi.fn().mockImplementation((event, cb) => {
