@@ -89,14 +89,14 @@ function StepCircle({
 }) {
   return (
     <div className="flex items-center gap-3">
-      {/* Step circle */}
+      {/* Step circle — DESIGN.md §setup-wizard-step tokens */}
       <div
         className={cn(
-          'w-8 h-8 rounded-full flex items-center justify-center shrink-0',
+          'w-setup-wizard-step-circle-size h-setup-wizard-step-circle-size rounded-full flex items-center justify-center shrink-0',
           'text-label-14 font-semibold',
           state === 'active'
-            ? 'bg-blue-700 text-white'
-            : 'bg-gray-alpha-100 text-gray-700',
+            ? 'bg-setup-wizard-step-circle-active-bg text-setup-wizard-step-circle-active-text'
+            : 'bg-setup-wizard-step-circle-pending-bg text-setup-wizard-step-circle-pending-text',
         )}
         aria-current={state === 'active' ? 'step' : undefined}
       >
@@ -118,11 +118,13 @@ function StepCircle({
           </svg>
         )}
       </div>
-      {/* Step label */}
+      {/* Step label — DESIGN.md §setup-wizard-step tokens */}
       <span
         className={cn(
           'text-label-14',
-          state === 'active' ? 'text-gray-1000 font-medium' : 'text-gray-700',
+          state === 'active'
+            ? 'text-setup-wizard-step-label-active-color font-medium'
+            : 'text-setup-wizard-step-label-pending-color',
         )}
       >
         {label}
@@ -133,8 +135,8 @@ function StepCircle({
 
 function StepConnector() {
   return (
-    <div className="flex items-center pl-[15px] h-6">
-      <div className="w-[2px] h-full bg-gray-alpha-400 rounded-full" />
+    <div className="flex justify-center h-6" aria-hidden="true">
+      <div className="w-0.5 h-full bg-setup-wizard-step-connector rounded-full" />
     </div>
   );
 }
@@ -142,10 +144,12 @@ function StepConnector() {
 function SetupWizardFixture() {
   return (
     <div className="flex items-center justify-center min-h-[420px] p-4">
-      {/* Outer card — integrated wizard surface per DESIGN.md §Setup Wizard Surface */}
-      <Card className="flex flex-col sm:flex-row w-full max-w-[640px] p-0 shadow-modal rounded-popover overflow-hidden">
+      {/* Outer card — integrated wizard surface per DESIGN.md §Setup Wizard Surface
+          All dimensions use registered setup-wizard-* tokens from the
+          @nexus/design-tokens preset. */}
+      <Card className="flex flex-col sm:flex-row w-full max-w-setup-wizard-step-wizard-max-width p-0 shadow-modal rounded-popover overflow-hidden">
         {/* ── Left panel: step indicator list ── */}
-        <div className="w-full sm:w-[208px] shrink-0 border-b sm:border-b-0 sm:border-r border-gray-alpha-200 bg-background-100 p-6">
+        <div className="w-full sm:w-setup-wizard-surface-step-panel-width shrink-0 border-b sm:border-b-0 sm:border-r border-gray-alpha-200 bg-background-100 py-8 px-6">
           <div className="space-y-1">
             {SETUP_STEPS.map((step, idx) => (
               <div key={step.label}>
@@ -157,27 +161,27 @@ function SetupWizardFixture() {
         </div>
 
         {/* ── Right panel: current step content (Welcome) ── */}
-        <div className="flex-1 p-8 sm:p-10 bg-background-100 min-w-0">
-          <h3 className="text-heading-24 font-semibold text-gray-1000 mb-2">
+        <div className="flex-1 py-8 px-10 bg-background-100 min-w-0">
+          <h3 className="text-heading-24 font-semibold text-gray-1000 mb-6">
             Welcome to Nexus
           </h3>
-          <p className="text-copy-16 text-gray-700 mb-8 leading-relaxed">
+          <p className="text-copy-16 text-gray-700 mb-6 leading-relaxed">
             Nexus needs a workspace folder for your creative projects. We will
             create it if it does not exist.
           </p>
 
           {/* Inline input row */}
-          <Label className="block mb-1.5 text-label-14 text-gray-700">
+          <Label className="block mb-2 text-label-14 text-gray-700">
             Workspace location
           </Label>
-          <div className="flex items-center gap-2 mb-8">
-            <div className="flex-1 flex items-center gap-3 h-12 px-4 rounded-control bg-background-200 border border-gray-alpha-400 text-copy-14">
+          <div className="flex items-center gap-2 mb-6">
+            <div className="flex-1 flex items-center gap-3 min-h-setup-wizard-surface-input-row-min-height px-4 rounded-control bg-background-200 border border-gray-alpha-400 text-copy-14">
               <svg
                 width="16"
                 height="16"
                 viewBox="0 0 16 16"
                 fill="none"
-                className="text-blue-700 shrink-0"
+                className="text-setup-wizard-surface-input-row-icon-color shrink-0"
                 aria-hidden="true"
               >
                 <path
@@ -196,9 +200,12 @@ function SetupWizardFixture() {
             </Button>
           </div>
 
-          {/* Primary CTA */}
-          <div className="flex items-center gap-3">
-            <Button variant="primary" className="max-w-[400px] w-full">
+          {/* Primary CTA — max-width from setup-wizard-surface token */}
+          <div className="flex items-center gap-4">
+            <Button
+              variant="primary"
+              className="max-w-setup-wizard-surface-cta-primary-max-width w-full"
+            >
               Continue
             </Button>
           </div>
@@ -232,9 +239,9 @@ function AppShellFixture() {
 
   return (
     <div className="flex min-h-[440px] border border-gray-alpha-300 rounded-card bg-background-100 overflow-hidden">
-      {/* ── Sidebar ── */}
-      <div className="w-[248px] shrink-0 border-r border-gray-alpha-200 bg-background-100 flex flex-col">
-        {/* Top tabs */}
+      {/* ── Sidebar — DESIGN.md §Sidebar Nav ── */}
+      <div className="w-sidebar-nav-width shrink-0 border-r border-gray-alpha-200 bg-background-100 flex flex-col">
+        {/* Top tabs — DESIGN.md §shell-nav */}
         <div className="flex border-b border-gray-alpha-200">
           {SHELL_TABS.map((tab) => (
             <button
@@ -244,8 +251,8 @@ function AppShellFixture() {
               className={cn(
                 'flex-1 text-center py-3 text-label-14 font-medium border-b-2 transition-colors',
                 tab.active
-                  ? 'text-gray-1000 border-blue-700'
-                  : 'text-gray-700 border-transparent hover:text-gray-900',
+                  ? 'text-gray-1000 border-blue-700 bg-gray-alpha-100'
+                  : 'text-gray-700 border-transparent hover:text-gray-900 hover:bg-gray-alpha-100',
               )}
             >
               {tab.label}
@@ -253,14 +260,14 @@ function AppShellFixture() {
           ))}
         </div>
 
-        {/* Nav groups */}
-        <div className="flex-1 overflow-auto p-3 space-y-1">
+        {/* Nav groups — DESIGN.md §Sidebar Nav */}
+        <nav className="flex-1 overflow-auto p-3 space-y-1">
           {activeNav.map((item) => (
             <div key={item.label}>
               {/* Group label */}
               <div
                 className={cn(
-                  'flex items-center h-9 px-3 rounded-control text-label-14 transition-colors',
+                  'flex items-center h-sidebar-nav-item-height px-3 rounded-control text-label-14 transition-colors',
                   item.active
                     ? 'bg-gray-alpha-100 text-gray-1000'
                     : 'text-gray-700 hover:bg-gray-alpha-100 hover:text-gray-1000',
@@ -273,7 +280,7 @@ function AppShellFixture() {
                     height="12"
                     viewBox="0 0 12 12"
                     fill="none"
-                    className="ml-auto shrink-0 text-gray-500"
+                    className="ml-auto shrink-0 text-gray-600"
                     aria-hidden="true"
                   >
                     <path
@@ -294,7 +301,7 @@ function AppShellFixture() {
                   <div
                     key={child.label}
                     className={cn(
-                      'flex items-center h-9 pl-6 pr-3 ml-3 rounded-control text-label-14',
+                      'flex items-center h-sidebar-nav-item-height pl-6 pr-3 ml-3 rounded-control text-label-14',
                       'text-gray-1000 bg-gray-alpha-100 border-l-2 border-l-blue-700',
                     )}
                   >
@@ -303,7 +310,7 @@ function AppShellFixture() {
                 ))}
             </div>
           ))}
-        </div>
+        </nav>
 
         {/* Footer — profile avatar row stub */}
         <div className="border-t border-gray-alpha-200 p-3 flex items-center gap-2">
@@ -312,7 +319,7 @@ function AppShellFixture() {
             <span className="text-label-14 text-gray-1000 truncate">
               Local Creator
             </span>
-            <span className="text-copy-13 text-gray-500 truncate">
+            <span className="text-copy-13 text-gray-700 truncate">
               Profiles
             </span>
           </div>
@@ -342,14 +349,17 @@ function AppShellFixture() {
         </div>
       </div>
 
-      {/* ── Main content area (empty — fixture shows chrome only) ── */}
-      <div className="flex-1 bg-background-200 flex flex-col items-center justify-center min-w-0">
-        <p className="text-copy-14 text-gray-500 mb-1">
-          Content area
-        </p>
-        <p className="text-copy-13 text-gray-400">
-          This fixture shows app-shell chrome only
-        </p>
+      {/* ── Main content area — recessed background, placeholder indicates active workspace ── */}
+      <div className="flex-1 bg-background-200 flex flex-col items-center justify-center min-w-0 p-8">
+        <div className="border-2 border-dashed border-gray-alpha-300 rounded-card w-full max-w-md p-8 text-center">
+          <p className="text-copy-14 text-gray-700 mb-1">
+            Content panel
+          </p>
+          <p className="text-copy-13 text-gray-500">
+            Active workspace — editor, canvas, or dashboard — rendered by the
+            product shell at runtime. Not part of this fixture.
+          </p>
+        </div>
       </div>
     </div>
   );
