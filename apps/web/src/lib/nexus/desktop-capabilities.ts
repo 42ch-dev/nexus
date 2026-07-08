@@ -204,7 +204,7 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
 
   async pickDirectory(defaultPath: string): Promise<string | null> {
     try {
-      return await tauriInvoke().core.invoke<string | null>('pick_directory', { default_path: defaultPath });
+      return await tauriInvoke().core.invoke<string | null>('pick_directory', { defaultPath });
     } catch (err) {
       throw asDesktopError(err);
     }
