@@ -1,11 +1,12 @@
-# Iteration Specs
+# Iterations
 
-Iteration-level specifications for Nexus delivery tracks.
+Iteration-level compasses, workspaces, and specs for Nexus delivery tracks.
 
 This directory holds all iteration-scoped specs, including:
 
 - `*-delivery-compass-*.md` — version delivery compasses (scope, milestones, acceptance, risk)
 - Legacy `v1.*` compass artifacts (overview, matrix, program notes) with non-standard names
+- `v1.*/` workspaces — iteration-scoped guides and specs that are not yet promoted to `.mstar/specs/` or `.mstar/knowledge/`
 
 Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowledge/`](../knowledge/README.md).
 
@@ -109,6 +110,7 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | [v1.97-desktop-first-launch-hardening-compass-v1.md](v1.97-desktop-first-launch-hardening-compass-v1.md) | V1.97 | **Completed** (2026-07-08) — Desktop First-Launch Reliability Hardening. Shipped sidecar FSM correctness + **sidecar spawn-name fix** (latent first-launch blocker since V1.66; Tauri v2 `sidecar()` takes filename only) + folder-picker IPC casing + setup-wizard layout containment + path hygiene. QC Approve with residuals; QA accept with carry-over. Hard desktop smoke initially targeted V1.99, but the active V1.99 direction superseded that target: no-creator clean-state gap (R-V197-SMOKE-CLEAN-STATE, high) + headless UI smoke (R-V197-SMOKE-UI, medium) remain deferred. |
 | [v1.98-design-studio-and-design-unification-compass-v1.md](v1.98-design-studio-and-design-unification-compass-v1.md) | V1.98 | **Completed** (2026-07-08) — Design Studio & DESIGN Unification. Standalone `apps/design-studio` gallery + DESIGN SSOT unified to repo root + `@nexus/design-tokens` shared pipeline. QC tri Approve + QA Pass. `wire_contracts_changed: false`. |
 | [v1.99-design-system-deepening-compass-v1.md](v1.99-design-system-deepening-compass-v1.md) | V1.99 | **Completed** (2026-07-08) — Design System Deepening. Promoted Button/Badge/Card to `@42ch/nexus-ui`, redesigned `/surfaces` with registered tokens, codified studio-first workflow. Integration branch `iteration/v1.99`; target `main`. |
+| [v1.100-delivery-compass.md](v1.100-delivery-compass.md) | V1.100 | **Locked prepare** (2026-07-08) — UI Completion: Desktop clean-state first-launch + UI guardrails/`cn` SSOT + Form Field component promotion. Integration branch `iteration/v1.100`; target `main`. |
 
 ### Legacy `v1.*` iteration artifacts
 
