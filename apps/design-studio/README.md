@@ -19,12 +19,29 @@ on 5173).
 | --- | --- | --- |
 | **Tokens** | `/tokens` | Colors (brand, gray, blue, red, amber, green, teal), typography scale, spacing, radius, elevation |
 | **Brand VI** | `/brand` | All four `@42ch/nexus-ui` logo variants + `NexusMark` + theme.css swatches + clear-space guidance |
-| **Components** | `/components` | All 11 `apps/web/src/components/ui/*` primitives with variant/state matrices |
+| **Components** | `/components` | All 11 `apps/web/src/components/ui/*` primitives with variant/state matrices — promoted primitives (Button, Badge, Card) imported from `@42ch/nexus-ui`; unpromoted primitives remain on `@web-ui/*` (transitional) |
 | **Voice & Content** | `/voice` | Labeled writing-pattern specimens from `DESIGN.md` §Voice & Content |
 | **Surfaces** | `/surfaces` | Setup wizard step card + App shell chrome fixtures (studio-local; no daemon data) |
 
 Every value is driven by the repo-root `DESIGN.md` / `DESIGN.dark.md` SSOT.
 Edit those files in your IDE, then refresh the studio to see the effect.
+
+## Visual review (surfaces)
+
+The `/surfaces` page is the primary visual-review target for product-surface
+decisions before they enter `apps/web`:
+
+1. Open studio at `/surfaces` in both light and dark themes.
+2. Verify that every color, border, background, and accent uses only registered
+   DESIGN token scale steps — no raw hex, no arbitrary bracket values.
+3. Verify keyboard focus is visible on all interactive elements (Tab through
+   every button — each should show the two-layer focus ring).
+4. Verify text hierarchy is readable at a glance: heading-24 titles, copy-16
+   body, label-14 UI labels.
+5. Verify CTAs are findable — the primary action should be the strongest visual
+   target in its area.
+6. Verify type contrast passes in both themes (see DESIGN.md and
+   DESIGN.dark.md §Contrast review).
 
 ## Light / dark toggle
 
@@ -55,7 +72,7 @@ No daemon or Tauri required for any command.
 ## Architecture
 
 - **CSS pipeline**: shared `@nexus/design-tokens` workspace package (`tooling/design-tokens`) — Tailwind preset + `tokens.css`
-- **Import surface**: `@web-ui/*` (apps/web shadcn primitives), `@web-lib/utils` (`cn()` only), `@42ch/nexus-ui` (brand layer), `@nexus/design-tokens` (CSS + preset)
+- **Import surface**: `@42ch/nexus-ui` (promoted primitives: Button, Badge, Card + brand layer), `@web-ui/*` (transitional unpromoted primitives: Dialog, Input, Label, Select, States, Table, Tabs, Textarea), `@web-lib/utils` (`cn()` only), `@nexus/design-tokens` (CSS + preset)
 - **Toolchain**: Vite 6 + React 18 + TypeScript strict + Tailwind 3 + Vitest 3 — mirrors `apps/web`
 - **Boundaries**: no daemon transport, no `NexusClient`, no `@42ch/nexus-contracts`, no product-page imports
 

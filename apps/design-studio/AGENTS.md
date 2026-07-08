@@ -23,9 +23,9 @@ Parent rules: [`../AGENTS.md`](../AGENTS.md) (apps placement), root [`AGENTS.md`
 | Alias | Resolves to | Use |
 | --- | --- | --- |
 | `@/*` | `./src/*` | Studio routes, fixtures, gallery layout |
-| `@web-ui/*` | `../web/src/components/ui/*` | Gallery component matrices |
+| `@web-ui/*` | `../web/src/components/ui/*` | Transitional gallery source for not-yet-promoted primitives |
 | `@web-lib/utils` | `../web/src/lib/utils.ts` | `cn()` only |
-| `@42ch/nexus-ui` | workspace package | Brand VI (logos, mark, theme.css) |
+| `@42ch/nexus-ui` | workspace package | Brand VI plus V1.99-approved presentational primitives through public exports |
 | `@nexus/design-tokens` | `tooling/design-tokens` | Shared CSS + Tailwind preset |
 
 ### Forbidden
@@ -33,17 +33,20 @@ Parent rules: [`../AGENTS.md`](../AGENTS.md) (apps placement), root [`AGENTS.md`
 - `apps/web/src/lib/nexus/**` — no `NexusClient`, no daemon transport
 - `apps/web/src/pages/**` — no product screens
 - `apps/web/src/components/layout/**` — use studio-local Surfaces fixtures instead
+- `apps/web` route definitions, app providers, product hooks, Tauri helpers, and localStorage-backed product state
 - `@42ch/nexus-contracts` — no wire DTOs
 - Inventing design tokens not in root DESIGN pair
 
-## Transitional `apps/web` UI import policy (V1.98)
+## Transitional `apps/web` UI import policy (V1.98 → V1.99)
 
 Gallery **displays** shadcn primitives from `apps/web/src/components/ui/*` without migrating them to `@42ch/nexus-ui`. This coupling is **intentional and transitional**:
 
 - Import only presentational primitives (`button`, `dialog`, `tabs`, …)
 - `tabs` barrel export landed in P0 T1 (commit `55dd06cc`); use `@web-ui/<module>` direct imports or barrel as needed
 - Declare matching Radix/CVA peer versions in `package.json` (same majors as `apps/web`)
-- Future decoupling (extract shared UI package) is **out of V1.98** — track in iteration compass if needed
+- V1.99 decoupling rule: once a primitive is promoted into `@42ch/nexus-ui`, Studio must import it from `@42ch/nexus-ui`, not `@web-ui/*`
+- Unpromoted primitives may remain on `@web-ui/*` until a later promotion or explicit keep-studio/keep-web decision
+- **Transitional annotation required:** every unpromoted `@web-ui/*` import in Studio source files must carry an inline comment identifying the blocking criteria for promotion (e.g., `// @web-ui/label — transitional until Form Field slice locks label/control/helper/error composition`). This ensures the dependency's temporary status and promotion trigger are visible to future contributors.
 
 ## Dev commands
 

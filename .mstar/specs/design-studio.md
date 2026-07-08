@@ -1,18 +1,21 @@
 # Design Studio — Specification v0 (Draft)
 
-**Status**: Draft (V1.98) — product contract; P-1 Prepare complete; P0 implements gallery  
+**Status**: Draft (V1.98) with V1.99 boundary amendment in progress — product contract
 **Document class**: Dev-surface auxiliary app (not author-facing product)  
 **Created**: 2026-07-08 (`@product-manager`)  
-**Scope**: `apps/design-studio` — read-only gallery for Nexus DESIGN SSOT, brand VI, and `apps/web` UI primitives  
+**Scope**: `apps/design-studio` — read-only gallery and visual proving ground for Nexus DESIGN SSOT, brand VI, shared presentational primitives, and representative surface fixtures
 **Iteration compass**: [v1.98-design-studio-and-design-unification-compass-v1.md](../../iterations/v1.98-design-studio-and-design-unification-compass-v1.md)  
+**V1.99 compass**: [v1.99-design-system-deepening-compass-v1.md](../../iterations/v1.99-design-system-deepening-compass-v1.md)
 **IA guide**: [design-studio-information-architecture.md](../../iterations/v1.98/guides/design-studio-information-architecture.md)  
 **Coordinates with**:
 
 - Repo-root [`DESIGN.md`](../../../DESIGN.md) + [`DESIGN.dark.md`](../../../DESIGN.dark.md) — sole normative token SSOT after V1.98 merge
 - [`web-ui.md`](web-ui.md) §30 — V1.98 stage note (studio is dev tooling, not Control Room feature)
 - [`design-unification.md`](../../iterations/v1.98/specs/design-unification.md) — merge rules (architect-owned, P-1)
-- `@42ch/nexus-ui` — brand layer only (logos, marks, `theme.css` swatches)
-- `apps/web/src/components/ui/*` — gallery display source for shadcn primitives (no package migration)
+- [`component-promotion-boundary.md`](../../iterations/v1.99/specs/component-promotion-boundary.md) — V1.99 draft boundary for selected pure presentational primitives in `@42ch/nexus-ui`
+- [`studio-first-ui-workflow.md`](../../iterations/v1.99/guides/studio-first-ui-workflow.md) — V1.99 validation path from studio fixtures to package promotion to Web integration
+- `@42ch/nexus-ui` — brand layer plus V1.99-approved presentational primitives only
+- `apps/web/src/components/ui/*` — transitional gallery source for primitives not yet promoted
 
 ---
 
@@ -23,6 +26,8 @@ Contributors and frontend implementers need a **single visual workspace** to val
 Design Studio is a **standalone Vite + React SPA** (`apps/design-studio`) that mirrors the unified DESIGN contract. It is a **read-only showcase**: token edits happen in repo-root `DESIGN.md` / `DESIGN.dark.md` on disk; refresh the dev server to see updates. App chrome displays **Read-only · edit `DESIGN.md`** as a persistent helper (see IA guide §2).
 
 **Product outcome (V1.98):** tuning UI/UX/brand no longer requires mental diffing of YAML frontmatter or hunting component usage across `apps/web`. One gallery, one DESIGN SSOT, measurable parity with the shipped Web UI.
+
+**Product outcome (V1.99):** Design Studio becomes the first visual proving ground for reusable View-level UI. Accepted presentational primitives may graduate into `@42ch/nexus-ui`; app behavior, daemon state, routing, and full product shells still graduate only through `apps/web`.
 
 ---
 
@@ -51,11 +56,12 @@ Design Studio is a **standalone Vite + React SPA** (`apps/design-studio`) that m
 | --- | --- | --- |
 | Root `DESIGN.md` / `DESIGN.dark.md` | Yes | SSOT; consumed via `@nexus/design-tokens` CSS pipeline |
 | `@nexus/design-tokens` | Yes | Shared `tokens.css` + Tailwind preset with `apps/web` |
-| `@42ch/nexus-ui` | Yes | Brand VI gallery only |
-| `@web-ui/*` → `apps/web/src/components/ui/*` | Yes (transitional) | Vite/TS alias; see `design-unification.md` §7 |
+| `@42ch/nexus-ui` | Yes | Brand VI plus V1.99-approved pure presentational primitives, via public package exports only |
+| `@web-ui/*` → `apps/web/src/components/ui/*` | Yes (transitional) | Vite/TS alias for not-yet-promoted primitives only; promoted primitives should use `@42ch/nexus-ui` |
 | `@web-lib/utils` → `apps/web/src/lib/utils.ts` | Yes | `cn()` helper only |
 | `apps/web` screens, routing, `NexusClient`, daemon hooks | **No** | Prevents studio becoming a second product shell |
 | `apps/web/src/components/layout/**` | **No** | Surfaces slice uses studio-local chrome fixtures |
+| `apps/web` app providers, route definitions, product hooks, localStorage-backed product state, Tauri helpers | **No** | Studio fixtures stay daemon-independent and behavior-free |
 | Live token override, localStorage theme hacks, YAML write-back | **No** | V1.98 read-only invariant |
 
 ### 3.3 Toolchain alignment with `apps/web`
@@ -79,8 +85,11 @@ Design Studio is a **standalone Vite + React SPA** (`apps/design-studio`) that m
 
 ### 3.5 Relationship to `@42ch/nexus-ui`
 
-- **Brand layer only** — logos, marks, `brandColors`, `theme.css`
-- **Do not** migrate shadcn `components/ui/*` into `nexus-ui` in V1.98 (V1.87 boundary preserved)
+- **V1.98 baseline:** brand layer only — logos, marks, `brandColors`, `theme.css`
+- **V1.99 amendment:** selected pure presentational primitives may move into `@42ch/nexus-ui` only through the component-promotion boundary draft and follow-up package rule updates.
+- **Still forbidden:** app shells, page components, daemon-aware controls, route-aware components, and Web-only behavior must not move into `@42ch/nexus-ui`.
+- **Transition rule:** Design Studio may consume both `@42ch/nexus-ui` and `@web-ui/*` while V1.99 proves the first promotion batch. Promoted primitives should stop using `@web-ui/*` in Studio.
+- **Fixture rule:** setup steppers, workspace-row mocks, shell chrome, daemon status strips, nav groups, and page-section compositions remain studio-local unless a smaller primitive beneath them is explicitly promoted by the V1.99 boundary.
 
 ---
 
@@ -134,10 +143,10 @@ Section nav labels and per-component matrix: [IA guide](../../iterations/v1.98/g
 - Not shipped inside `nexus42` binary or desktop installer
 - No Storybook adoption
 - No live token editor, drag-and-drop theme builder, or YAML export/write-back
-- No migration of shadcn primitives into `@42ch/nexus-ui`
+- No unbounded migration of shadcn primitives into `@42ch/nexus-ui`; V1.99 allows only approved pure presentational primitives
 - No daemon/Tauri integration, schema changes, or `@42ch/nexus-contracts` bump
 - Not a replacement for `apps/web` product QA — studio complements, does not gate author flows
-- Desktop clean-state / first-launch work → **V1.99** (not studio scope)
+- Desktop clean-state / first-launch work remains outside Design Studio scope and is deferred from the active V1.99 design-system iteration unless user direction changes again
 
 ---
 
@@ -150,6 +159,14 @@ Section nav labels and per-component matrix: [IA guide](../../iterations/v1.98/g
 - [ ] Voice & Content section shows ≥3 labeled specimens matching IA guide §4.4 fixture strings
 - [ ] Surface slices: Setup step card + App shell chrome per IA guide §4.5 — identifiable without live routing
 - [ ] `wire_contracts_changed: false`
+
+### V1.99 additional acceptance hooks
+
+- [ ] At least one approved presentational primitive is consumed from `@42ch/nexus-ui` in Studio instead of `@web-ui/*`
+- [ ] `/surfaces` functions as a visual proving ground for setup/shell direction without importing Web layout or daemon code
+- [ ] Each Studio fixture that influences Web has a recorded decision: promote to package, keep in Web, keep in Studio, or defer
+- [ ] Promoted primitives use public `@42ch/nexus-ui` exports; unpromoted primitives are the only allowed remaining `@web-ui/*` usage
+- [ ] `/surfaces` fixture sections record whether they are `promoted primitive`, `studio-local fixture`, `web-only wrapper`, or `future web product component`
 
 ---
 

@@ -245,6 +245,9 @@ const preset: Partial<Config> = {
         'setup-wizard-surface-input-row-min-height': cv('setup-wizard-surface-input-row-min-height'),
         'setup-wizard-surface-input-row-gap': cv('setup-wizard-surface-input-row-gap'),
         'setup-wizard-surface-cta-container-gap': cv('setup-wizard-surface-cta-container-gap'),
+        // V1.99 P1: sidebar-nav sizing tokens (DESIGN.md §sidebar-nav)
+        'sidebar-nav-width': cv('sidebar-nav-width'),
+        'sidebar-nav-item-height': cv('sidebar-nav-item-height'),
       },
       maxWidth: {
         'setup-wizard-step-wizard-max-width': cv('setup-wizard-wizard-max-width'),

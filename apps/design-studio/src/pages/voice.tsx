@@ -2,8 +2,7 @@ import type { ReactNode } from 'react';
 
 import { cn } from '@web-lib/utils';
 
-import { Card } from '@web-ui/card';
-import { Badge } from '@web-ui/badge';
+import { Badge, Card } from '@42ch/nexus-ui';
 
 /* ------------------------------------------------------------------ */
 /*  Data — Voice & Content specimens from DESIGN.md §Voice & Content   */

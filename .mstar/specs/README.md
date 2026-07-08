@@ -3,8 +3,8 @@
 Functional and normative specifications for the Nexus OSS repo.
 
 **Rules (invariants):** [AGENTS.md](AGENTS.md)  
-**Machine state:** [`.mstar/status.json`](../../status.json) → `metadata.latest_ship` / `metadata.latest_active_compass`; wave-0 spec per active compass §Normative specs; full index is this README  
-**Not here:** trackers and schema-boundary policy → [knowledge root](../README.md); delivery evidence → [iterations](../../iterations/README.md)
+**Machine state:** [`.mstar/status.json`](../status.json) → `metadata.latest_ship` / `metadata.latest_active_compass`; wave-0 spec per active compass §Normative specs; full index is this README
+**Not here:** trackers and schema-boundary policy → [knowledge root](../knowledge/README.md); delivery evidence → [iterations](../iterations/README.md)
 
 ---
 
@@ -66,7 +66,7 @@ Spec files live **flat** in this directory except **`novel-writing/`** — the n
 | [schemas-directory-layout.md](schemas-directory-layout.md) | Master | Normative — V1.64 Shipped (local-api common + findings list-response) |
 | [local-api-surface-conventions.md](local-api-surface-conventions.md) | Master | Normative — **V1.67 amended** (§3.2 casing ratification, §4 `items` enforcement, §5 sort-param contract; 0.5.0→0.6.0) |
 
-Also: [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md) (knowledge root).
+Also: [schemas-external-consumer-boundary.md](../knowledge/schemas-external-consumer-boundary.md) (knowledge root).
 
 ### Runtime and persistence
 
@@ -114,6 +114,7 @@ Also: [schemas-external-consumer-boundary.md](../schemas-external-consumer-bound
 | **[novel-writing/](novel-writing/README.md)** | Feature subtree | **`work_profile: novel`** — see [novel-writing/README.md](novel-writing/README.md) for per-file index (workflow-profile, quality-loop, author-experience, overlays, …) |
 | [essay-profile.md](essay-profile.md) | Feature line | Draft (V1.52) — `work_profile: essay` first non-novel profile |
 | [web-ui.md](web-ui.md) | Feature line | **Shipped (V1.65)** — local Web UI product contract (`apps/web` React/Vite SPA, daemon-served, Tauri-ready); Control Room + Setup (V1.64) + Content-Authoring UI stage (V1.65 §13) + Desktop Shell stage (V1.66 §14, Shipped) + Surface Convergence & De-risk stage (V1.67 §15, Shipped) + V1.69 Design System Maturation & Canvas Draft + **V1.70 Canvas Strategy Implement (α) stage (V1.70 §16, Shipped)** + CI/desktop-build optimization (parallel ops track). |
+| [design-studio.md](design-studio.md) | Feature line | Draft (V1.98) with V1.99 boundary amendment — standalone contributor/dev gallery and visual proving ground; not author-facing product UI |
 | [desktop-shell.md](desktop-shell.md) | Feature line | **Shipped (V1.66)** — Tauri v2 desktop shell contract (`apps/desktop` wrapper, `TauriClient`, sidecar lifecycle, port discovery, native file actions + path guard); macOS-first unsigned dev build |
 | [creator-run-preset-entry.md](creator-run-preset-entry.md) | Master | **Shipped (V1.45)** — `creator run <preset_id>` generic entry; wave 0 for V1.45 CLI IA (promoted P-last) |
 | [creator-challenge-solver.md](creator-challenge-solver.md) | Master | Normative |
@@ -207,16 +208,16 @@ Cite **`nexus-platform`** `v1-spec/` for cloud product, shared ADRs, and archite
 
 | Former spec | Superseded by |
 | --- | --- |
-| [daemon-api-workspace-write-architecture.md](../../archived/knowledge/daemon-api-workspace-write-architecture.md) | Stale — historical |
-| [local-fs-layout-creator-workspace.md](../../archived/knowledge/local-fs-layout-creator-workspace.md) | Pointer stub |
+| [daemon-api-workspace-write-architecture.md](../archived/knowledge/daemon-api-workspace-write-architecture.md) | Stale — historical |
+| [local-fs-layout-creator-workspace.md](../archived/knowledge/local-fs-layout-creator-workspace.md) | Pointer stub |
 | `nexus42-single-binary-daemon-runtime-architecture.md` | [daemon-runtime.md](daemon-runtime.md) |
 | `agent-host-architecture.md` | [agent-host.md](agent-host.md) §8 |
-| [fl-d-conditional-routing-exploration-v1.35-prepare.md](../../archived/knowledge/fl-d-conditional-routing-exploration-v1.35-prepare.md) | [preset-conditional-routing.md](preset-conditional-routing.md) |
-| [archived/knowledge/novel-findings-maturity.md](../../archived/knowledge/novel-findings-maturity.md) | [novel-writing/quality-loop.md](novel-writing/quality-loop.md) §9 |
-| [archived/knowledge/body-editor.md](../../archived/knowledge/body-editor.md) | [canvas-strategy-surface.md](canvas-strategy-surface.md) (2026-06-26 — body-editor direction rejected) |
-| [archived/knowledge/non-novel-profiles-roadmap.md](../../archived/knowledge/non-novel-profiles-roadmap.md) | [game-bible-profile.md](game-bible-profile.md) + [script-profile.md](script-profile.md) + [essay-profile.md](essay-profile.md) (all targets shipped) |
-| [archived/knowledge/novel-writing/findings-lifecycle.md](../../archived/knowledge/novel-writing/findings-lifecycle.md) | [novel-writing/quality-loop.md](novel-writing/quality-loop.md) §2 |
-| [archived/knowledge/novel-writing/narrative-indexes.md](../../archived/knowledge/novel-writing/narrative-indexes.md) | [novel-writing/workflow-profile.md](novel-writing/workflow-profile.md) §4.6 |
+| [fl-d-conditional-routing-exploration-v1.35-prepare.md](../archived/knowledge/fl-d-conditional-routing-exploration-v1.35-prepare.md) | [preset-conditional-routing.md](preset-conditional-routing.md) |
+| [archived/knowledge/novel-findings-maturity.md](../archived/knowledge/novel-findings-maturity.md) | [novel-writing/quality-loop.md](novel-writing/quality-loop.md) §9 |
+| [archived/knowledge/body-editor.md](../archived/knowledge/body-editor.md) | [canvas-strategy-surface.md](canvas-strategy-surface.md) (2026-06-26 — body-editor direction rejected) |
+| [archived/knowledge/non-novel-profiles-roadmap.md](../archived/knowledge/non-novel-profiles-roadmap.md) | [game-bible-profile.md](game-bible-profile.md) + [script-profile.md](script-profile.md) + [essay-profile.md](essay-profile.md) (all targets shipped) |
+| [archived/knowledge/novel-writing/findings-lifecycle.md](../archived/knowledge/novel-writing/findings-lifecycle.md) | [novel-writing/quality-loop.md](novel-writing/quality-loop.md) §2 |
+| [archived/knowledge/novel-writing/narrative-indexes.md](../archived/knowledge/novel-writing/narrative-indexes.md) | [novel-writing/workflow-profile.md](novel-writing/workflow-profile.md) §4.6 |
 
 **Former filename:** `local-platform-isolation-and-crate-architecture.md` → `local-cloud-crate-architecture.md` (2026-05-20).
 
