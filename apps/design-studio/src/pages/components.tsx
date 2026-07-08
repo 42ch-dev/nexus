@@ -2,15 +2,7 @@ import { useState, type ReactNode } from 'react';
 
 import { cn } from '@web-lib/utils';
 
-import { Badge } from '@web-ui/badge';
-import { Button } from '@web-ui/button';
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardDescription,
-  CardContent,
-} from '@web-ui/card';
+import { Badge, Button, Card, CardHeader, CardTitle, CardDescription, CardContent } from '@42ch/nexus-ui';
 import { Dialog, DialogTrigger, DialogContent } from '@web-ui/dialog';
 import { Input } from '@web-ui/input';
 import { Label } from '@web-ui/label';
@@ -608,8 +600,11 @@ export function ComponentsPage() {
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           apps/web/src/components/ui
         </code>{' '}
-        — live variant/state matrices per IA guide §4.3 and DESIGN.md. Every
-        component is imported via <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@web-ui/*</code>;
+        — live variant/state matrices per IA guide §4.3 and DESIGN.md.         Every
+        component is imported via <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>{' '}
+        (promoted) or{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@web-ui/*</code>{' '}
+        (transitional);
         interactive controls (Dialog, Tabs) are functional.
       </p>
       <SubNav />
@@ -628,7 +623,10 @@ export function ComponentsPage() {
 
       <p className="text-copy-13 text-gray-500 mt-12 pt-8 border-t border-gray-alpha-200">
         11/11 primitive modules from the <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">apps/web/src/components/ui</code> barrel — all rendered
-        live via <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@web-ui/*</code> aliases.
+        live via <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>{' '}
+        (promoted) and{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@web-ui/*</code>{' '}
+        (transitional).
         No primitives are migrated, copied, or re-implemented in this gallery.
       </p>
     </div>

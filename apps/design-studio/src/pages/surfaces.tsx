@@ -2,9 +2,7 @@ import type { ReactNode } from 'react';
 
 import { cn } from '@web-lib/utils';
 
-import { Badge } from '@web-ui/badge';
-import { Button } from '@web-ui/button';
-import { Card } from '@web-ui/card';
+import { Badge, Button, Card } from '@42ch/nexus-ui';
 import { Label } from '@web-ui/label';
 
 /* ------------------------------------------------------------------ */
@@ -65,9 +63,13 @@ function SurfaceLabel({
       <p className="text-copy-14 text-gray-700 mb-6">
         Studio-local fixture composed from{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @42ch/nexus-ui
+        </code>{' '}
+        (promoted) and{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @web-ui/*
         </code>{' '}
-        primitives — static copy per IA guide §4.5. No daemon data, no live
+        (transitional) primitives — static copy per IA guide §4.5. No daemon data, no live
         routing, no product-page imports.
       </p>
     </section>
@@ -391,9 +393,13 @@ export function SurfacesPage() {
         Real product-surface slices — Setup wizard step card and App shell
         chrome, composed as studio-local fixtures from{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @42ch/nexus-ui
+        </code>{' '}
+        (promoted) and{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @web-ui/*
         </code>{' '}
-        primitives per IA guide §4.5. No daemon data, no live routing, and no
+        (transitional) primitives per IA guide §4.5. No daemon data, no live routing, and no
         product-page imports (
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           pages/
@@ -451,10 +457,14 @@ export function SurfacesPage() {
         <SurfaceHeading>Daemon status strip</SurfaceHeading>
         <p className="text-copy-14 text-gray-700 mb-6">
           Healthy daemon status affordance — green dot, badge, helper text.
-          Composed from{' '}
-          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-            @web-ui/badge
-          </code>{' '}
+        Composed from{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @42ch/nexus-ui
+        </code>{' '}
+        +{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-ui/*
+        </code>{' '}
           with inline markup. Per DESIGN.md{' '}
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
             components.daemon-status-indicator
@@ -467,8 +477,13 @@ export function SurfacesPage() {
       <p className="text-copy-13 text-gray-500 mt-12 pt-8 border-t border-gray-alpha-200">
         2 surface fixtures (Setup step card + App shell chrome) composed from{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @42ch/nexus-ui
+        </code>{' '}
+        (promoted) and{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @web-ui/*
         </code>{' '}
+        (transitional)
         primitives + layout CSS. No live product pages, no{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           components/layout/

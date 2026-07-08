@@ -55,6 +55,12 @@
     "test": "vitest run",
     "test:watch": "vitest"
   },
+  "dependencies": {
+    "@radix-ui/react-slot": "^1.1.1",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^2.6.0"
+  },
   "peerDependencies": {
     "react": ">=18.0.0",
     "react-dom": ">=18.0.0"
