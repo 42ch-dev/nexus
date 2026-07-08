@@ -41,7 +41,7 @@ Parent rules: [`../AGENTS.md`](../AGENTS.md) (apps placement), root [`AGENTS.md`
 Gallery **displays** shadcn primitives from `apps/web/src/components/ui/*` without migrating them to `@42ch/nexus-ui`. This coupling is **intentional and transitional**:
 
 - Import only presentational primitives (`button`, `dialog`, `tabs`, …)
-- Prefer `@web-ui/<module>` direct imports; barrel (`@web-ui` via `index.ts`) after `tabs` export lands in P0 T1
+- `tabs` barrel export landed in P0 T1 (commit `55dd06cc`); use `@web-ui/<module>` direct imports or barrel as needed
 - Declare matching Radix/CVA peer versions in `package.json` (same majors as `apps/web`)
 - Future decoupling (extract shared UI package) is **out of V1.98** — track in iteration compass if needed
 
@@ -57,8 +57,26 @@ No daemon or Tauri required.
 
 ## Conventions
 
-- TypeScript strict; match `apps/web` toolchain (Vite 6, React 18, Tailwind 3)
+- TypeScript strict; match `apps/web` toolchain (Vite 6, React 18, Tailwind 3, react-router-dom v6)
 - Theme toggle: `class` strategy on `<html>` — mirrors web `theme-provider` behavior
 - Read-only gallery — no YAML write-back, no localStorage token overrides
 - App chrome shows **Read-only · edit `DESIGN.md`** (repo-root SSOT helper)
 - Voice & Content and Surfaces fixture strings: [IA guide §4.4–§4.5](../../.mstar/iterations/v1.98/guides/design-studio-information-architecture.md) — sourced from DESIGN § Voice & Content and shipped product copy
+
+## Audiences
+
+| Audience | Role |
+| --- | --- |
+| Contributors (design-minded maintainers) | Tune colors, typography, spacing, and component tokens |
+| Frontend developers | Pick correct variant/state when building screens; use component matrix as reference |
+| Brand / VI reviewers | Confirm logo usage, clear space, and theme.css alignment |
+| Authors (local Web UI users) | **Not in scope** — studio is not bundled in `nexus42` or desktop installer |
+
+See [design-studio.md spec §2](../../.mstar/knowledge/specs/design-studio.md#2-audiences) for audience job-to-be-done detail.
+
+## Tests
+
+- Runner: Vitest 3 with jsdom + @testing-library/react — mirrors `apps/web` conventions
+- Config: `vitest.config.ts` (resolve aliases match `vite.config.ts`; setup in `src/test/setup.ts`)
+- Scope: smoke tests for App shell render, theme toggle, and gallery section routing — see `src/App.test.tsx`
+- Run: `pnpm --filter design-studio test` (CI-compatible; no daemon required)

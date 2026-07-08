@@ -48,8 +48,7 @@ in `src-tauri/build.rs` if the sidecar binary for the current target is missing.
   port discovery, capability detection, scope-whitelist path guard).
 - **Iteration compass**: [`.mstar/iterations/v1.66-tauri-desktop-shell-delivery-compass-v1.md`](../../.mstar/iterations/v1.66-tauri-desktop-shell-delivery-compass-v1.md)
   §5 (LOCKED design items).
-- **Design tokens**: [`apps/web/DESIGN.md`](../web/DESIGN.md) "Desktop Shell
-  Supplement (V1.66 Standard+)" — single design-system SSOT (compass §5 #6).
+- **Design tokens**: Repo-root [`DESIGN.md`](../../DESIGN.md) + [`DESIGN.dark.md`](../../DESIGN.dark.md) — sole design-system SSOT (V1.98 unified; former `apps/web/DESIGN*.md` retired).
 - **Wire contracts unchanged** (`wire_contracts_changed: false`, compass §5 #5):
   desktop-native methods are Tauri IPC / app-side process control, **not** Local
   API HTTP. Do **not** add `schemas/` for desktop behavior.

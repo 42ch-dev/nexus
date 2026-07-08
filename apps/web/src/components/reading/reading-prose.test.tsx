@@ -3,7 +3,7 @@
  *
  * Asserts that each shipped work profile (`novel`, `essay`, `game-bible`,
  * `script`) renders with at least two distinct, token-driven visual markers
- * sourced from `apps/web/DESIGN.md` reading-chrome tokens. Unknown profiles
+ * sourced from root `DESIGN.md` reading-chrome tokens. Unknown profiles
  * fall back to `novel` chrome.
  */
 import { describe, expect, it } from 'vitest';

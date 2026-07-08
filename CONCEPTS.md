@@ -63,10 +63,10 @@ The process: persist new text → extract structured knowledge → promote to Wo
 ## Brand & Design
 
 ### Brand DESIGN SSOT
-Repo-root `DESIGN.md` and `DESIGN.dark.md` — the cross-application source of truth for Nexus brand tokens, VI palette, logo usage rules, and accessibility intent. App-specific files (e.g. `apps/web/DESIGN.md`) are **consumption mappings** that derive from this layer; they must not redefine shared brand values.
+Repo-root `DESIGN.md` and `DESIGN.dark.md` — the cross-application source of truth for Nexus brand tokens, VI palette, logo usage rules, and accessibility intent. All app surfaces derive from this layer; they must not redefine shared brand values.
 
 ### Reading Chrome
-The profile-specific, read-only typographic treatment applied to the manuscript reading surface in `apps/web`. Driven by `apps/web/DESIGN.md` `reading-chrome-*` tokens and the Work's `work_profile` (`novel`, `essay`, `game-bible`, `script`). Reading Chrome is strictly presentational: it never mutates `body_path`, outline, or timeline state.
+The profile-specific, read-only typographic treatment applied to the manuscript reading surface in `apps/web`. Driven by `DESIGN.md` `reading-chrome-*` tokens and the Work's `work_profile` (`novel`, `essay`, `game-bible`, `script`). Reading Chrome is strictly presentational: it never mutates `body_path`, outline, or timeline state.
 
 ### Profile Switcher
 The sidebar footer UI component that lists Creator avatar icons and switches the active `creator_id` for the SPA's data queries. The daemon already supports multi-creator at the API level; the profile switcher is the missing UI. Single-creator case: exactly one avatar plus a "+" affordance to add a new Creator.
