@@ -3,8 +3,9 @@ report_kind: qc
 reviewer: qc-specialist-3
 reviewer_index: 3
 plan_id: "2026-07-08-v1.98-design-studio-and-design-unification"
-verdict: "Approve with residuals"
+verdict: "Approve"
 generated_at: "2026-07-08"
+revalidated_at: "2026-07-08"
 ---
 
 # Code Review Report — QC3 (Performance & Reliability)
@@ -133,6 +134,40 @@ useEffect(() => {
 ### Residuals to register
 
 1. **W-001**: `requestAnimationFrame` cleanup missing in `ColorSwatch` and `ElevationCard` — fix in follow-up or next iteration.
+
+---
+
+## Revalidation (targeted re-review)
+
+**Revalidation range:** `c35c3200..522cc467` (fix commit + qc report commits)
+**Revalidation timestamp:** 2026-07-08T13:36:00Z
+
+### F-QC3-W001: requestAnimationFrame cleanup — RESOLVED ✅
+
+**Evidence:** Both `useEffect` blocks in `tokens.tsx` now store the rAF id and return a cleanup function:
+
+- **ColorSwatch** (line 235–236): `const rafId = requestAnimationFrame(...)` + `return () => cancelAnimationFrame(rafId);`
+- **ElevationCard** (line 312–313): `const rafId = requestAnimationFrame(...)` + `return () => cancelAnimationFrame(rafId);`
+
+The cleanup function is returned directly from `useEffect`, so React will call it on unmount and before re-running the effect on dependency change. This correctly prevents the state update on unmounted component.
+
+### Regression check: theme toggle ✅
+
+All 11 design-studio tests pass (including theme toggle smoke test). The rAF cleanup addition does not affect the CSS var re-read logic — the callback body is unchanged, only the id storage and cleanup were added.
+
+### nav.tsx change (qc1 scope) ✅
+
+The fix commit also changed `nav.tsx` (active nav shade `bg-gray-alpha-150` → `bg-gray-alpha-200`). This is a purely cosmetic CSS class change — no reliability or performance impact. No regression from this change.
+
+### Updated verdict
+
+| Severity | Count |
+|---|---|
+| 🔴 Critical | 0 |
+| 🟡 Warning | 0 (resolved) |
+| 🟢 Suggestion | 2 (unchanged) |
+
+**Verdict: Approve** (upgraded from Approve with residuals — W-001 is resolved).
 
 ---
 
