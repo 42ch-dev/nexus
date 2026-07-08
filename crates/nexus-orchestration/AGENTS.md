@@ -50,4 +50,4 @@ The validation path should check a preset YAML/bundle for:
 
 ## Design Reference
 
-Full design: `.mstar/knowledge/specs/orchestration-engine.md` (sections 7–9 cover presets, loader, validation).
+Full design: `.mstar/specs/orchestration-engine.md` (sections 7–9 cover presets, loader, validation).

@@ -8,7 +8,7 @@ On conflicts (user has not overridden): **1** current instruction → **2** root
 
 **Read order (not precedence):** load `mstar-harness-core` first for harness context; then other `mstar-*` on demand per its role matrix.
 
-## Concepts (path deviations)
+## Concepts (path symbols)
 
 | Symbol | Path (this repo) |
 |--------|------------------|
@@ -16,24 +16,28 @@ On conflicts (user has not overridden): **1** current instruction → **2** root
 | `{PLAN_DIR}` | `plans/` |
 | `{SDD_DIR}` | `sdd/<plan-id>/` — **ephemeral scratch** (gitignored; not handoff) |
 | `{ITERATION_DIR}` | `iterations/` |
-| `{KNOWLEDGE_DIR}` | `knowledge/` |
-| `{SPECS_DIR}` | **`knowledge/specs/`** — not repo-root `specs/` (upstream default). Wire contracts: repo-root `schemas/` |
+| `{KNOWLEDGE_DIR}` | `knowledge/` — cross-cutting patterns, conventions, compound output |
+| `{SPECS_DIR}` | **`specs/`** — frozen normative specs / ADR (upstream default). Wire contracts: repo-root `schemas/` |
 
 ## Layout & write boundaries
 
-**Plans:** one `.md` file per plan under `plans/` — never `plans/<plan-id>/` as a directory. QC reports: `plans/reports/<plan-id>/` only. Layout details → `mstar-plan-artifacts/references/plan-files-and-reports.md`.
+**Plans:** one `.md` file per plan under `plans/` — never `plans/<plan-id>/` as a directory. Layout details → `mstar-plan-artifacts/references/plan-files-and-reports.md`.
 
 | Path | Writers | Purpose |
 |------|---------|---------|
-| `{SDD_DIR}` | Implementers (SDD default), PM | Session-local briefs, reports, `progress.md`, review diffs — **not** clone handoff |
-| `plans/<plan-id>-*.md` | Implementers (checkboxes), PM | Main plan — not SDD bodies |
-| `plans/reports/<plan-id>/` | `qc-specialist*`, PM, QA | Plan-level L3 QC/QA only |
+| `{SDD_DIR}` | Implementers (SDD default), PM | Session-local briefs, per-task reports, `progress.md`, review diffs — **not** clone handoff |
+| `{SDD_DIR}/review/` | `qc-specialist*`, PM, QA | QC/QA **raw process reports** (gitignored review bundle) |
+| `plans/<plan-id>-*.md` | Implementers (checkboxes), PM | Main plan — durable gate summaries live here |
+| `specs/` | product-manager, architect, writing-specialist | Long-lived normative specs; plan `primary_spec` / `spec_refs` |
+| `knowledge/` | `mstar-compound`, writing-specialist | Cross-iteration patterns — **not** normative product contracts |
 
-**SDD default:** implementors write `{SDD_DIR}`, not `plans/reports/`. Inline/hotfix: no `{SDD_DIR}`.
+**SDD default:** implementors and QC/QA write `{SDD_DIR}` (including `review/`). Inline/hotfix: no `{SDD_DIR}` unless Assignment says otherwise.
 
-**Reachability:** git-tracked harness handoff (`plans/`, `plans/reports/`, `status.json`, compasses, etc.) must survive a fresh `git clone`. **`{SDD_DIR}` is excluded** — ephemeral working space; plan QC uses merged code + `plans/reports/`, not SDD scratch files.
+**Reachability:** git-tracked harness handoff (`plans/`, `specs/`, `status.json`, compasses, archived snapshots, etc.) must survive a fresh `git clone`. **`{SDD_DIR}` is excluded** — ephemeral working space; durable QC decisions are summarized on the main plan (`## Review Gate Summary` / `## QA Gate Summary`) and in `status.json` `residual_findings`.
 
-**Content:** `docs/` = human contributor docs; `{ITERATION_DIR}` = compasses; `{KNOWLEDGE_DIR}` layout → [`knowledge/AGENTS.md`](knowledge/AGENTS.md).
+**Legacy:** `plans/reports/` was the pre-V1.99 tracked QC path. It is **retired** — do not create new files there. Historical raw reports may exist locally under `.mstar/sdd/<plan-id>/review/` after migration.
+
+**Content:** `docs/` = human contributor docs; `{ITERATION_DIR}` = compasses + per-iteration workspace; `{KNOWLEDGE_DIR}` layout → [`knowledge/AGENTS.md`](knowledge/AGENTS.md); `{SPECS_DIR}` layout → [`specs/AGENTS.md`](specs/AGENTS.md).
 
 ## Pre-merge checklist
 
@@ -73,6 +77,8 @@ Adopted (`mstar-plan-artifacts/references/done-compaction.md` Template B): hot `
 ### Residual detail prose (optional)
 
 `plans/residuals/<plan-id>/<finding-id>-<label>.md` supplements root `residual_findings`. Archive closed rows → `archived/residuals/<plan-id>.json`.
+
+**`tracking_link`:** point to durable surfaces — `.mstar/plans/<plan-id>.md` (gate summary) or `.mstar/status.json` `residual_findings[<plan-id>]` — not gitignored `{SDD_DIR}/review/` paths.
 
 ### Post-merge hotfix
 

@@ -34,8 +34,8 @@
       "wave_0_spec": ".mstar/knowledge/restructured-context-assembly.md",
       "dependency": "cli-daemon-foundation (Done), sync-contract (Done), acp-client (Done)",
       "qc_status": "APPROVE — status.json key, fmt, import path fixed",
-      "qc_report": ".mstar/plans/reports/2025-04-05-context-assembly/2025-04-05-context-assembly-qc-consolidated.md",
-      "qa_report": ".mstar/plans/reports/2025-04-05-context-assembly/2025-04-05-context-assembly-qa.md",
+      "qc_report": ".mstar/plans/2025-04-05-context-assembly.md",
+      "qa_report": ".mstar/plans/2025-04-05-context-assembly.md",
       "qa_status": "PASS — all 12 acceptance criteria met, 425 workspace tests pass",
       "residual_summary": "11 V1.1+ residuals (QC-#1 L1-L7, QC-#2 H2-H3, QC-#3 M3-M4)",
       "tests": {

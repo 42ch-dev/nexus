@@ -1,5 +1,5 @@
 -- V1.50 T-A P0 (T1) — per-Work cron configuration column.
--- Spec: .mstar/knowledge/specs/novel-writing/cron-staggering.md §2.1 (Draft V1.50).
+-- Spec: .mstar/specs/novel-writing/cron-staggering.md §2.1 (Draft V1.50).
 --
 -- Adds `works.schedule_json TEXT NULL` for per-Work cron configuration of
 -- the novel-writing three-role staggering (`brainstorm` / `write` / `review`).

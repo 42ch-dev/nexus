@@ -8,7 +8,7 @@
       "title": "entity-scope-model.md \u00a75.5 spec amendment (computable flag semantics + structured validation mode) not yet committed",
       "severity": "low",
       "source": "qc1 (architecture/maintainability) S-001",
-      "scope": ".mstar/knowledge/specs/entity-scope-model.md \u00a75.5 (Master spec; compass \u00a72 marks it as P1 normative work)",
+      "scope": ".mstar/specs/entity-scope-model.md \u00a75.5 (Master spec; compass \u00a72 marks it as P1 normative work)",
       "decision": "defer",
       "owner": "@project-manager",
       "target": "V1.61 P-last",

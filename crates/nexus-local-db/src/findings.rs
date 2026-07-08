@@ -227,7 +227,7 @@ pub const SUGGESTED_FINDING_KINDS: &[&str] =
 /// are rejected with [`LocalDbError::ConstraintViolation`].
 ///
 /// V1.48 P0 T4: expanded to include `plot_hole` and `world_inconsistency`
-/// per `.mstar/knowledge/specs/novel-writing/quality-loop.md` §2.1 (the V1.47 P0
+/// per `.mstar/specs/novel-writing/quality-loop.md` §2.1 (the V1.47 P0
 /// quick-closure missed these spec-listed kinds; the producer's
 /// `review-report.md` parser emits them and the DB layer must accept).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

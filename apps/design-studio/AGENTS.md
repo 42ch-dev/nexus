@@ -13,7 +13,7 @@ Parent rules: [`../AGENTS.md`](../AGENTS.md) (apps placement), root [`AGENTS.md`
 
 - Design tokens: repo-root [`DESIGN.md`](../../DESIGN.md) + [`DESIGN.dark.md`](../../DESIGN.dark.md) only
 - CSS projection: [`@nexus/design-tokens`](../../tooling/design-tokens) (`tokens.css` + Tailwind preset) — shared with `apps/web`
-- Normative spec: [`.mstar/knowledge/specs/design-studio.md`](../../.mstar/knowledge/specs/design-studio.md)
+- Normative spec: [`.mstar/specs/design-studio.md`](../../.mstar/specs/design-studio.md)
 - Merge rules: [`.mstar/iterations/v1.98/specs/design-unification.md`](../../.mstar/iterations/v1.98/specs/design-unification.md)
 
 ## Import boundaries (HARD)
@@ -72,7 +72,7 @@ No daemon or Tauri required.
 | Brand / VI reviewers | Confirm logo usage, clear space, and theme.css alignment |
 | Authors (local Web UI users) | **Not in scope** — studio is not bundled in `nexus42` or desktop installer |
 
-See [design-studio.md spec §2](../../.mstar/knowledge/specs/design-studio.md#2-audiences) for audience job-to-be-done detail.
+See [design-studio.md spec §2](../../.mstar/specs/design-studio.md#2-audiences) for audience job-to-be-done detail.
 
 ## Tests
 

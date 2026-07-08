@@ -57,7 +57,7 @@ rg -nE '/v1/local/'             # old route prefix
 
 ```sh
 # after renaming a heading, find TOC/inline links whose slug still reflects the old name
-rg -n '#local-api-contract|<old-heading-slug>' docs/ .mstar/knowledge/specs/
+rg -n '#local-api-contract|<old-heading-slug>' docs/ .mstar/specs/
 ```
 
 A renamed heading whose TOC entry text was updated but whose `#slug` was not produces a silently-broken in-page link.

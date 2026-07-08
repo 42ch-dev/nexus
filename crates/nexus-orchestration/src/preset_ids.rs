@@ -18,7 +18,7 @@
 /// - [`crate::preset::validation::STAGE_PRESET_ALLOWLIST`] (review stage
 ///   allowlist entry)
 ///
-/// See `.mstar/knowledge/specs/novel-writing/quality-loop.md` §3 for the normative
+/// See `.mstar/specs/novel-writing/quality-loop.md` §3 for the normative
 /// preset table.
 pub const NOVEL_CHAPTER_REVIEW_PRESET_ID: &str = "novel-chapter-review";
 
@@ -31,7 +31,7 @@ pub const NOVEL_CHAPTER_REVIEW_PRESET_ID: &str = "novel-chapter-review";
 /// - [`crate::schedule::supervisor::ScheduleSupervisor::on_schedule_terminal`]
 ///   (terminal guard for the promotion hook)
 ///
-/// See `.mstar/knowledge/specs/novel-writing/workflow-profile.md` for the
+/// See `.mstar/specs/novel-writing/workflow-profile.md` for the
 /// normative preset table.
 pub const NOVEL_WRITING_PRESET_ID: &str = "novel-writing";
 
@@ -71,7 +71,7 @@ pub const NOVEL_WRITE_PRESET_ID: &str = "novel-write";
 /// - [`crate::schedule::supervisor::ScheduleSupervisor::on_schedule_terminal`]
 ///   (terminal guard for the T-B P1 extraction hook)
 ///
-/// See `.mstar/knowledge/specs/novel-writing/cron-staggering.md` §2.1 for the
+/// See `.mstar/specs/novel-writing/cron-staggering.md` §2.1 for the
 /// role→preset mapping.
 pub const NOVEL_REVIEW_MASTER_PRESET_ID: &str = "novel-review-master";
 
@@ -84,7 +84,7 @@ pub const NOVEL_REVIEW_MASTER_PRESET_ID: &str = "novel-review-master";
 /// - [`crate::preset::validation::STAGE_PRESET_ALLOWLIST`] (produce stage)
 /// - Schedule supervisor (terminal guard for completion hooks)
 ///
-/// See `.mstar/knowledge/specs/game-bible-profile.md` §5 for the stage chain.
+/// See `.mstar/specs/game-bible-profile.md` §5 for the stage chain.
 pub const DESIGN_WRITING_PRESET_ID: &str = "design-writing";
 
 #[cfg(test)]

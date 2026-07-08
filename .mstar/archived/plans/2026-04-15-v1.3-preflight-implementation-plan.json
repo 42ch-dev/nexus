@@ -25,7 +25,7 @@
     "dependency": [
       "2026-04-14-v1.2-regression-suite"
     ],
-    "plan_source": ".mstar/plans/reports/v1.2-program-review/v1.2-program-review-qc-consolidated.md",
+    "plan_source": ".mstar/plans/v1.2-program-review.md",
     "working_branch": "feature/v1.3-preflight",
     "gates": {
       "qc_status": "Approve (C-001 fixed, W-001~W-007 fixed, W-003 ignored)",

@@ -5,7 +5,7 @@
 //! `sqlx::SqlitePool` — they do NOT depend on `nexus-cloud-sync`.
 //!
 //! Semantics and test vectors are documented in the Draft overlay spec:
-//! `.mstar/knowledge/specs/outbox-consolidation.md` §4–5.
+//! `.mstar/specs/outbox-consolidation.md` §4–5.
 
 use crate::capability::{Capability, CapabilityError};
 use async_trait::async_trait;

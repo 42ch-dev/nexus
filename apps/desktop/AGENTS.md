@@ -43,7 +43,7 @@ in `src-tauri/build.rs` if the sidecar binary for the current target is missing.
 
 ## SSOT & authority
 
-- **Contract**: [`.mstar/knowledge/specs/desktop-shell.md`](../../.mstar/knowledge/specs/desktop-shell.md)
+- **Contract**: [`.mstar/specs/desktop-shell.md`](../../.mstar/specs/desktop-shell.md)
   (the feature-line spec — `NexusClient` desktop extensions, sidecar lifecycle,
   port discovery, capability detection, scope-whitelist path guard).
 - **Iteration compass**: [`.mstar/iterations/v1.66-tauri-desktop-shell-delivery-compass-v1.md`](../../.mstar/iterations/v1.66-tauri-desktop-shell-delivery-compass-v1.md)

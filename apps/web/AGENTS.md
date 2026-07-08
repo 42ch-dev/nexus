@@ -17,7 +17,7 @@ Tauri-ready. Parent rules: [`../../AGENTS.md`](../../AGENTS.md) (repo),
 ## SSOT & authority
 
 - **Design tokens**: Root [`DESIGN.md`](../../DESIGN.md) + [`DESIGN.dark.md`](../../DESIGN.dark.md) are the **sole normative SSOT** (Production completeness). Shared CSS variables + Tailwind preset live in `tooling/design-tokens` (`@nexus/design-tokens`). `src/index.css` + `tailwind.config.ts` *consume* them via `@import '@nexus/design-tokens/tokens.css'` and the shared preset; they do not invent tokens. If a token you need is missing, **report** it to the architect — do not fabricate a value.
-- **Product contract**: [`web-ui.md`](../../.mstar/knowledge/specs/web-ui.md).
+- **Product contract**: [`web-ui.md`](../../.mstar/specs/web-ui.md).
 - **Transport boundary**: the `NexusClient` interface
   (`src/lib/nexus/types.ts`). Screens must depend only on the interface, never
   on `fetch`/`invoke` directly — that is what keeps the V1.65 Tauri shell a

@@ -1,7 +1,7 @@
 //! V1.51 T-A P2 — `creator world kb pending --missing-only` integration tests.
 //!
 //! Plan: `.mstar/plans/2026-06-18-v1.51-missing-kb-detection.md`
-//! Spec: `.mstar/knowledge/specs/cli-spec.md` §6.2G (V1.51 T-A P2 amendment)
+//! Spec: `.mstar/specs/cli-spec.md` §6.2G (V1.51 T-A P2 amendment)
 //!
 //! Drives `nexus42::commands::creator::world::kb::kb_pending` directly against a
 //! fresh temp DB + workspace directory.

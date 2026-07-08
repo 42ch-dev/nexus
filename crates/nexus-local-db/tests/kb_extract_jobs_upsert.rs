@@ -2,7 +2,7 @@
 //! primitives in `nexus_local_db::kb_extract_job`.
 //!
 //! Plan: `.mstar/plans/2026-06-18-v1.50-kb-refreshable-scan.md` §5 T1/T5
-//! Spec: `.mstar/knowledge/specs/entity-scope-model.md` §5.5
+//! Spec: `.mstar/specs/entity-scope-model.md` §5.5
 //!
 //! Covers:
 //! - **Idempotency**: `upsert_pending_candidate` Inserts on first call,

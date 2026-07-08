@@ -1,8 +1,8 @@
 //! V1.51 T-A P0 — `novel-review-master` review-time LLM extraction E2E.
 //!
 //! Plan: `.mstar/plans/2026-06-18-v1.51-llm-extraction.md` (T7)
-//! Spec: `.mstar/knowledge/specs/llm-extract.md` §5,
-//!       `.mstar/knowledge/specs/entity-scope-model.md` §5.5.6
+//! Spec: `.mstar/specs/llm-extract.md` §5,
+//!       `.mstar/specs/entity-scope-model.md` §5.5.6
 //!
 //! Exercises the full review-time pathway for `novel-review-master`:
 //! chapter prose → `nexus.llm.extract` (mock worker) → `kb_extract_jobs`

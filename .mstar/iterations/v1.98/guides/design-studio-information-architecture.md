@@ -2,7 +2,7 @@
 
 **Status**: Draft (P-1 — product IA + architect technical notes)  
 **Owner**: `@product-manager` (product framing) · `@architect` (technical alignment)  
-**Consumers**: [`design-studio.md`](../../knowledge/specs/design-studio.md), P0 implement plan T2–T6  
+**Consumers**: [`design-studio.md`](../../specs/design-studio.md), P0 implement plan T2–T6  
 **Normative DESIGN SSOT**: repo-root [`DESIGN.md`](../../../../DESIGN.md) + [`DESIGN.dark.md`](../../../../DESIGN.dark.md) (post-V1.98 merge)  
 **Last updated**: 2026-07-08
 

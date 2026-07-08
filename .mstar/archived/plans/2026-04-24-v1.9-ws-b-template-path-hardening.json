@@ -14,11 +14,11 @@
   "metadata": {
     "residuals_closed": ["R-WC-001"],
     "qc_reports": [
-      ".mstar/plans/reports/2026-04-24-v1.9-ws-b/2026-04-24-v1.9-ws-b-qc1.md",
-      ".mstar/plans/reports/2026-04-24-v1.9-ws-b/2026-04-24-v1.9-ws-b-qc2.md",
-      ".mstar/plans/reports/2026-04-24-v1.9-ws-b/2026-04-24-v1.9-ws-b-qc3.md",
-      ".mstar/plans/reports/2026-04-24-v1.9-ws-b/2026-04-24-v1.9-ws-b-qc1-wave2.md"
+      ".mstar/plans/2026-04-24-v1.9-ws-b.md",
+      ".mstar/plans/2026-04-24-v1.9-ws-b.md",
+      ".mstar/plans/2026-04-24-v1.9-ws-b.md",
+      ".mstar/plans/2026-04-24-v1.9-ws-b.md"
     ],
-    "qa_report": ".mstar/plans/reports/2026-04-24-v1.9-ws-b/2026-04-24-v1.9-ws-b-qa.md"
+    "qa_report": ".mstar/plans/2026-04-24-v1.9-ws-b.md"
   }
 }

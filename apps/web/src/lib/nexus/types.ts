@@ -1,7 +1,7 @@
 /**
  * `tauri-api` adapter boundary — the `NexusClient` interface.
  *
- * Spec: `.mstar/knowledge/specs/web-ui.md` §5. All daemon access from the UI
+ * Spec: `.mstar/specs/web-ui.md` §5. All daemon access from the UI
  * goes through this interface; core screen logic never calls `fetch`/`invoke`
  * directly. This is what makes the V1.65 Tauri desktop shell a one-impl swap
  * (`BrowserClient` → `TauriClient`) instead of a rewrite.

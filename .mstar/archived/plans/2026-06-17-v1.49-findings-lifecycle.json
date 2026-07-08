@@ -10,11 +10,11 @@
   "working_branch": "feature/v1.49-findings-lifecycle",
   "merge_target": "iteration/v1.49",
   "iteration_compass": ".mstar/iterations/v1.49-novel-narrative-maturity-and-author-desk-delivery-compass-v1.md",
-  "primary_spec": ".mstar/knowledge/specs/novel-writing/findings-lifecycle.md",
+  "primary_spec": ".mstar/specs/novel-writing/findings-lifecycle.md",
   "task_category": "feature",
   "created_at": "2026-06-17",
   "updated_at": "2026-06-17T19:10:00+08:00",
-  "completion_report": ".mstar/plans/reports/2026-06-17-v1.49-findings-lifecycle/completion.md",
+  "completion_report": ".mstar/plans/2026-06-17-v1.49-findings-lifecycle.md",
   "completion_commits": [
     "237eec20",
     "613ef56e",

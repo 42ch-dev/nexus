@@ -14,7 +14,7 @@
   "depends_on": [
     "P-1 PM signoff"
   ],
-  "qc_status": "tri-review done — Approve with comments (6 medium, 13 low) — see .mstar/plans/reports/2026-06-22-v1.56-df31-df42-full-redesign/qc-consolidated.md",
+  "qc_status": "tri-review done — Approve with comments (6 medium, 13 low) — see .mstar/plans/2026-06-22-v1.56-df31-df42-full-redesign.md",
   "qa_status": "mid-QA Fail on Gate 2 (sqlx cache) + Gate 4 (fmt) — both PM-fixed; functional ACs all green per qa-engineer note",
   "qc_completed_at": "2026-06-22",
   "done_at": "2026-06-22",

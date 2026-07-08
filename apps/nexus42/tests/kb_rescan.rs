@@ -3,7 +3,7 @@
 //!
 //! Plan: `.mstar/plans/2026-06-18-v1.51-cross-chapter-rescan.md`
 //! Spec: `.mstar/knowledge/world-kb-runtime-architecture.md` §5.5.1
-//! CLI:   `.mstar/knowledge/specs/cli-spec.md` §6.2G (`--work` amendment)
+//! CLI:   `.mstar/specs/cli-spec.md` §6.2G (`--work` amendment)
 //!
 //! Drives `nexus42::commands::creator::kb::rescan::kb_rescan_work_hermetic`
 //! against a fresh temp DB + temp workspace so the work-scoped rescan can be

@@ -6,7 +6,7 @@ Workspace for V1.97 Desktop First-Launch Reliability Hardening.
 
 This directory holds iteration-scoped guides, smoke notes, and spec drafts created during Phase 1 Review & Edit or Phase 2 execution for V1.97 Desktop First-Launch Reliability Hardening. Do not add new durable knowledge documents during iteration-start; candidates for long-term reuse are promoted through `mstar-compound` at iteration-close.
 
-The workspace is for iteration evidence and drafts only. Durable product contracts for this slice live in existing specs under `knowledge/specs/`; execution scope and gates live in the compass and SDD plan.
+The workspace is for iteration evidence and drafts only. Durable product contracts for this slice live in existing specs under `specs/`; execution scope and gates live in the compass and SDD plan.
 
 ## Index
 

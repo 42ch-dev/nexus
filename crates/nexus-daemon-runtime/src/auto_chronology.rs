@@ -1,7 +1,7 @@
 //! `auto_chronology` — daemon background task for per-Work volume auto-advance
 //! on finish (V1.50 T-A P3).
 //!
-//! Spec: `.mstar/knowledge/specs/novel-writing/auto-chronology.md` §3 / §4.
+//! Spec: `.mstar/specs/novel-writing/auto-chronology.md` §3 / §4.
 //!
 //! ## Role
 //!

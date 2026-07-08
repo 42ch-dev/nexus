@@ -1,6 +1,6 @@
 # Nexus Architecture
 
-High-level map of the **nexus** open-source monorepo: wire contracts, Rust workspace crates, entity-scope ownership, and how crates connect at build time. Normative scope and naming rules live in [`.mstar/knowledge/specs/entity-scope-model.md`](../.mstar/knowledge/specs/entity-scope-model.md); long-term local/cloud crate rules live in [`.mstar/knowledge/specs/local-cloud-crate-architecture.md`](../.mstar/knowledge/specs/local-cloud-crate-architecture.md).
+High-level map of the **nexus** open-source monorepo: wire contracts, Rust workspace crates, entity-scope ownership, and how crates connect at build time. Normative scope and naming rules live in [`.mstar/specs/entity-scope-model.md`](../.mstar/specs/entity-scope-model.md); long-term local/cloud crate rules live in [`.mstar/specs/local-cloud-crate-architecture.md`](../.mstar/specs/local-cloud-crate-architecture.md).
 
 This document separates **Cargo dependency wiring** (what compiles and links) from **product integration** (what CLI commands and daemon HTTP handlers actually call). A full knowledge↔crates drift audit lives in [`.mstar/iterations/v1.24-knowledge-crates-alignment-audit-compass-v1.md`](../.mstar/iterations/v1.24-knowledge-crates-alignment-audit-compass-v1.md) (evidence date **2026-05-25**).
 
@@ -14,8 +14,8 @@ This document separates **Cargo dependency wiring** (what compiles and links) fr
 | Product surfaces | `apps/*` | Polyglot product binaries + clients (`nexus42`, `desktop`, `web`) |
 | Rust libraries | `crates/*` | Workspace library crates (see below) |
 | Codegen / validation | `tooling/` | `pnpm run codegen`, schema checks |
-| Normative OSS specs | `.mstar/knowledge/specs/` | CLI, daemon, orchestration, sync contracts |
-| End-user docs | `docs/` | Install, contributing, this file. Author happy path: [`novel-writing/author-experience.md`](../.mstar/knowledge/specs/novel-writing/author-experience.md) §3; CLI workflows: [`creator-run-preset-entry.md`](../.mstar/knowledge/specs/creator-run-preset-entry.md) |
+| Normative OSS specs | `.mstar/specs/` | CLI, daemon, orchestration, sync contracts |
+| End-user docs | `docs/` | Install, contributing, this file. Author happy path: [`novel-writing/author-experience.md`](../.mstar/specs/novel-writing/author-experience.md) §3; CLI workflows: [`creator-run-preset-entry.md`](../.mstar/specs/creator-run-preset-entry.md) |
 
 ## Truth source: JSON Schema
 
@@ -28,7 +28,7 @@ schemas/*.json
         → packages/nexus-contracts/               (TypeScript / npm)
 ```
 
-Local-only types (daemon HTTP, schedules, orchestration IPC) are hand-written under `crates/nexus-contracts/src/local/` and are **not** generated from `schemas/`. See [`.mstar/knowledge/schemas-external-consumer-boundary.md`](../.mstar/knowledge/schemas-external-consumer-boundary.md) and [`.mstar/knowledge/specs/schemas-directory-layout.md`](../.mstar/knowledge/specs/schemas-directory-layout.md).
+Local-only types (daemon HTTP, schedules, orchestration IPC) are hand-written under `crates/nexus-contracts/src/local/` and are **not** generated from `schemas/`. See [`.mstar/knowledge/schemas-external-consumer-boundary.md`](../.mstar/knowledge/schemas-external-consumer-boundary.md) and [`.mstar/specs/schemas-directory-layout.md`](../.mstar/specs/schemas-directory-layout.md).
 
 **Design principles**
 
@@ -47,7 +47,7 @@ Local-only types (daemon HTTP, schedules, orchestration IPC) are hand-written un
 
 ## Entity scope hierarchy
 
-V1.23 uses the scope model in [`entity-scope-model.md`](../.mstar/knowledge/specs/entity-scope-model.md) as the normative ownership map:
+V1.23 uses the scope model in [`entity-scope-model.md`](../.mstar/specs/entity-scope-model.md) as the normative ownership map:
 
 ```text
 Global
@@ -106,10 +106,10 @@ Introduced in the V1.21 split; **linked in `Cargo.toml` since V1.23 alignment** 
 | Crate | Scope / role | Cargo reachability | Product integration (2026-05-25) |
 | --- | --- | --- | --- |
 | `nexus-kb` | **World KB** graph: KeyBlocks, SourceAnchors, `KbStore` | `nexus-narrative`, `nexus-moment-context-assembly`, `nexus-daemon-runtime` | Used by moment-assembly and narrative read-only routes; `GET /v1/daemon/narrative/*` exposes World KB reads via `nexus-narrative` gateway. `/v1/daemon/kb/*` remains **work file index** (not `nexus-kb`) |
-| `nexus-narrative` | `World`, `Timeline`, `Event`: worlds, forks, timelines, manuscripts | `nexus-moment-context-assembly`, `nexus-daemon-runtime` | `NarrativeGateway` powers `GET /v1/daemon/narrative/*` (read-only). **World fork is platform-only** (PD-01; see [`entity-scope-model.md`](../.mstar/knowledge/specs/entity-scope-model.md)); no local fork CLI. |
+| `nexus-narrative` | `World`, `Timeline`, `Event`: worlds, forks, timelines, manuscripts | `nexus-moment-context-assembly`, `nexus-daemon-runtime` | `NarrativeGateway` powers `GET /v1/daemon/narrative/*` (read-only). **World fork is platform-only** (PD-01; see [`entity-scope-model.md`](../.mstar/specs/entity-scope-model.md)); no local fork CLI. |
 | `nexus-knowledge` | **User knowledge** entries + reference-source types | `nexus-moment-context-assembly`, `nexus-daemon-runtime` | SQLite persistence shipped V1.27; `GET /v1/daemon/references` lists via **`nexus-local-db`** |
 
-CLI `nexus42 creator kb` and daemon `/v1/daemon/kb/entries` implement the **CLI local work KB index** (files under `~/.nexus42/.../kb/`) — **not** `nexus-kb`. World KB scope (`--scope world`) routes to `nexus-narrative` + `nexus-kb` through the narrative read-only API. **World fork is platform-only** (PD-01; no local fork CLI — see [`entity-scope-model.md`](../.mstar/knowledge/specs/entity-scope-model.md)). See [`entity-scope-model.md` §5](../.mstar/knowledge/specs/entity-scope-model.md#5-naming-clarifications) and audit compass **KCA-003**.
+CLI `nexus42 creator kb` and daemon `/v1/daemon/kb/entries` implement the **CLI local work KB index** (files under `~/.nexus42/.../kb/`) — **not** `nexus-kb`. World KB scope (`--scope world`) routes to `nexus-narrative` + `nexus-kb` through the narrative read-only API. **World fork is platform-only** (PD-01; no local fork CLI — see [`entity-scope-model.md`](../.mstar/specs/entity-scope-model.md)). See [`entity-scope-model.md` §5](../.mstar/specs/entity-scope-model.md#5-naming-clarifications) and audit compass **KCA-003**.
 
 ### Executable surface
 
@@ -163,7 +163,7 @@ nexus-cloud-sync ──► nexus-cloud-domain
 
 **Narrative ↔ KB:** `nexus-narrative` → `nexus-kb` only (narrative coordinates World-scoped KB graph).
 
-Normative spec §4 in [`local-cloud-crate-architecture.md`](../.mstar/knowledge/specs/local-cloud-crate-architecture.md) is refreshed to match this graph; remaining discrepancies are tracked as product-integration gaps in [v1.24 audit compass](../.mstar/iterations/v1.24-knowledge-crates-alignment-audit-compass-v1.md).
+Normative spec §4 in [`local-cloud-crate-architecture.md`](../.mstar/specs/local-cloud-crate-architecture.md) is refreshed to match this graph; remaining discrepancies are tracked as product-integration gaps in [v1.24 audit compass](../.mstar/iterations/v1.24-knowledge-crates-alignment-audit-compass-v1.md).
 
 ## Product integration gaps (runtime behavior, 2026-05-25)
 
@@ -183,7 +183,7 @@ See [v1.24-knowledge-crates-alignment-audit-compass-v1.md](../.mstar/iterations/
 
 ## CLI command groups (frozen surface)
 
-Six top-level groups ([`cli-spec.md`](../.mstar/knowledge/specs/cli-spec.md) §6):
+Six top-level groups ([`cli-spec.md`](../.mstar/specs/cli-spec.md) §6):
 
 | Group | Role |
 | --- | --- |
@@ -206,7 +206,7 @@ No second handwritten DTO set in platform — types must come from this repo’s
 
 ## Daemon API authority
 
-**Authoritative route list:** `crates/nexus-daemon-runtime/src/api/mod.rs` (registered routes). [`.mstar/knowledge/specs/local-runtime-boundary.md`](../.mstar/knowledge/specs/local-runtime-boundary.md) §3.2.1 is refreshed to mark unregistered context/research/agent-session rows as retired or not implemented (audit **KCA-002**, **KCA-006**).
+**Authoritative route list:** `crates/nexus-daemon-runtime/src/api/mod.rs` (registered routes). [`.mstar/specs/local-runtime-boundary.md`](../.mstar/specs/local-runtime-boundary.md) §3.2.1 is refreshed to mark unregistered context/research/agent-session rows as retired or not implemented (audit **KCA-002**, **KCA-006**).
 
 ### Registered route families (2026-05-25)
 
@@ -283,12 +283,12 @@ The CLI crate `nexus42` is a **command/router layer**. It does not own domain st
 
 | Topic | Document |
 | --- | --- |
-| Entity scopes, crate ownership, KB / knowledge naming | [entity-scope-model.md](../.mstar/knowledge/specs/entity-scope-model.md) |
-| Crate responsibilities & forbidden deps | [local-cloud-crate-architecture.md](../.mstar/knowledge/specs/local-cloud-crate-architecture.md) |
-| Daemon layering | [daemon-runtime.md](../.mstar/knowledge/specs/daemon-runtime.md) |
-| Orchestration | [orchestration-engine.md](../.mstar/knowledge/specs/orchestration-engine.md) |
-| CLI behavior | [cli-spec.md](../.mstar/knowledge/specs/cli-spec.md) |
-| Spec index | [specs/README.md](../.mstar/knowledge/specs/README.md) |
+| Entity scopes, crate ownership, KB / knowledge naming | [entity-scope-model.md](../.mstar/specs/entity-scope-model.md) |
+| Crate responsibilities & forbidden deps | [local-cloud-crate-architecture.md](../.mstar/specs/local-cloud-crate-architecture.md) |
+| Daemon layering | [daemon-runtime.md](../.mstar/specs/daemon-runtime.md) |
+| Orchestration | [orchestration-engine.md](../.mstar/specs/orchestration-engine.md) |
+| CLI behavior | [cli-spec.md](../.mstar/specs/cli-spec.md) |
+| Spec index | [specs/README.md](../.mstar/specs/README.md) |
 | Per-crate rules | `crates/*/AGENTS.md` |
 | Knowledge↔crates audit (V1.24) | [v1.24-knowledge-crates-alignment-audit-compass-v1.md](../.mstar/iterations/v1.24-knowledge-crates-alignment-audit-compass-v1.md) |
 | V1.23 wiring reference | [v1.23-architecture-crate-wiring-reference-compass-v1.md](../.mstar/iterations/v1.23-architecture-crate-wiring-reference-compass-v1.md) |

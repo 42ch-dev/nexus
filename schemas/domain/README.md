@@ -8,7 +8,7 @@
 - User / Pairing → `nexus-cloud-domain`
 - Narrative / KB on wire → `nexus-narrative`, `nexus-kb`, etc.
 
-**Layout:** [schemas-directory-layout.md](../../.mstar/knowledge/specs/schemas-directory-layout.md) §3.3.
+**Layout:** [schemas-directory-layout.md](../../.mstar/specs/schemas-directory-layout.md) §3.3.
 
 ## Schemas
 

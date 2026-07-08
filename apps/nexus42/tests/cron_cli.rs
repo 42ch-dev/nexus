@@ -1,7 +1,7 @@
 //! Hermetic CLI integration tests for `creator works cron` (V1.50 T-A P0 T6).
 //!
 //! Plan: `.mstar/plans/2026-06-18-v1.50-cron-foundation.md`
-//! Spec: `.mstar/knowledge/specs/novel-writing/cron-staggering.md` §3.
+//! Spec: `.mstar/specs/novel-writing/cron-staggering.md` §3.
 //!
 //! Covers AC #3 (set/show/list), AC #4 (round-trip through DAO), and AC #5
 //! (validation surface). Two test layers, all hermetic (no daemon):

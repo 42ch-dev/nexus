@@ -15,7 +15,7 @@
     "merge_target": "iteration/v1.39",
     "metadata": {
       "iteration_compass": ".mstar/iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md",
-      "primary_spec": ".mstar/knowledge/specs/novel-writing/quality-loop.md",
+      "primary_spec": ".mstar/specs/novel-writing/quality-loop.md",
       "depends_on": [
         "2026-06-09-v1.39-harness-docs-prepare",
         "2026-06-09-v1.39-research-stage-wiring"
@@ -59,10 +59,10 @@
         "9e3a4952 fix(local-db,v1.39-p1): add (work_id, chapter, status) index + test (QC C-1 fix)"
       ],
       "qc_reports": [
-        ".mstar/plans/reports/2026-06-09-v1.39-findings-and-review-routing/qc-consolidated.md (Approve post C-1 fix)",
-        ".mstar/plans/reports/2026-06-09-v1.39-findings-and-review-routing/qc1.md (Approve)",
-        ".mstar/plans/reports/2026-06-09-v1.39-findings-and-review-routing/qc2.md (Approve)",
-        ".mstar/plans/reports/2026-06-09-v1.39-findings-and-review-routing/qc3.md (Request Changes)"
+        ".mstar/plans/2026-06-09-v1.39-findings-and-review-routing.md (Approve post C-1 fix)",
+        ".mstar/plans/2026-06-09-v1.39-findings-and-review-routing.md (Approve)",
+        ".mstar/plans/2026-06-09-v1.39-findings-and-review-routing.md (Approve)",
+        ".mstar/plans/2026-06-09-v1.39-findings-and-review-routing.md (Request Changes)"
       ]
     }
   },

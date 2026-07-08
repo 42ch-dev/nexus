@@ -11,7 +11,7 @@
   "working_branch": "feature/v1.50-cron-brainstorm-write",
   "merge_target": "iteration/v1.50",
   "iteration_compass": ".mstar/iterations/v1.50-novel-author-production-loop-and-world-kb-closure-delivery-compass-v1.md",
-  "primary_spec": ".mstar/knowledge/specs/novel-writing/cron-staggering.md",
+  "primary_spec": ".mstar/specs/novel-writing/cron-staggering.md",
   "task_category": "feature",
   "depends_on": [
     "2026-06-18-v1.50-cron-foundation"

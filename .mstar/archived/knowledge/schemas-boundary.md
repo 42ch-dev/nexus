@@ -1,8 +1,8 @@
 # `schemas/` Boundary — Specification v1
 
-> **Superseded for directory layout (2026-05-20):** Current OSS tree and folder names → [schemas-directory-layout.md](../../knowledge/specs/schemas-directory-layout.md). Sync wire lives under **`schemas/cloud-sync/`** (formerly `schemas/cli-sync/`). **`schemas/meta/`** removed (type in `src/local/meta.rs`). The audit table in §5.2 below uses updated paths where mechanically aligned; treat this file as historical boundary methodology + audit snapshot.
+> **Superseded for directory layout (2026-05-20):** Current OSS tree and folder names → [schemas-directory-layout.md](../../specs/schemas-directory-layout.md). Sync wire lives under **`schemas/cloud-sync/`** (formerly `schemas/cli-sync/`). **`schemas/meta/`** removed (type in `src/local/meta.rs`). The audit table in §5.2 below uses updated paths where mechanically aligned; treat this file as historical boundary methodology + audit snapshot.
 
-**Status**: Archived — boundary methodology; layout SSOT is [schemas-directory-layout.md](../../knowledge/specs/schemas-directory-layout.md) + [schemas-external-consumer-boundary.md](../../knowledge/schemas-external-consumer-boundary.md).
+**Status**: Archived — boundary methodology; layout SSOT is [schemas-directory-layout.md](../../specs/schemas-directory-layout.md) + [schemas-external-consumer-boundary.md](../../knowledge/schemas-external-consumer-boundary.md).
 **Author**: @project-manager (2026-04-17 prep-phase spec) — to be co-signed by @architect before WS5 implement.
 **Scope**: The **boundary rule** and **local-type placement convention** for nexus OSS contracts.
 **Alignment source**: `{v1-spec}/schema/codegen-strategy-v1.md` §3 — this document is the in-repo SSOT for the decision that v1-spec §3 explicitly **delegates to the contract repo** ("是否在 `nexus` JSON Schema + `@42ch/nexus-contracts` 生成，由合约仓单独推进并对齐本稿"). No v1-spec update is required for the boundary rule itself; a future v1.4 roadmap / ADR update may cite this doc for traceability.
@@ -276,7 +276,7 @@ This sketch is the PM's best-guess starting point for WS5's auditor. It is **not
 **Expected orchestration-era additions (V1.4 WS2/WS3 new; all local):**
 
 - Preset manifest types (`PresetManifest`, `StateDefinition`, `GraphNode`, …)
-- Capability input/output schemas (declared in Rust constants per ../../knowledge/specs/orchestration-engine.md §5.3)
+- Capability input/output schemas (declared in Rust constants per ../../specs/orchestration-engine.md §5.3)
 - Orchestration session state records (rows in `orchestration_sessions` table)
 - Worker IPC frame types
 - Creator Schedule types (V1.4 WS7; see [creator-schedule-and-core-context.md](creator-schedule-and-core-context.md))
@@ -360,7 +360,7 @@ If this doc's rule changes in a way that materially affects platform (e.g. recla
 Internal:
 
 - [v1.4-delivery-compass-v1.md](../../iterations/v1.4-delivery-compass-v1.md) §4 WS5 — scope, milestones, evidence
-- [orchestration-engine.md](../../knowledge/specs/orchestration-engine.md) §5.3 — capability schemas are local per this doc
+- [orchestration-engine.md](../../specs/orchestration-engine.md) §5.3 — capability schemas are local per this doc
 - [architecture-alignment-review.md](architecture-alignment-review.md) — live TD resolution matrix
 
 External (v1-spec, read via `.mstar/local-paths.json → specs_root.v1-spec`):

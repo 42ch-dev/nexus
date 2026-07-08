@@ -6,7 +6,7 @@ Query + React Router. Transport-agnostic via the `NexusClient` adapter
 (`BrowserClient` today; `TauriClient` in V1.65). This is an OSS local-first
 surface — **not** the private cloud SaaS.
 
-- Product contract: [`knowledge/specs/web-ui.md`](../../.mstar/knowledge/specs/web-ui.md)
+- Product contract: [`specs/web-ui.md`](../../.mstar/specs/web-ui.md)
 - Design tokens (SSOT): [`DESIGN.md`](../../DESIGN.md)
 - Plan: [`2026-06-24-v1.64-web-app-scaffold.md`](../../.mstar/plans/2026-06-24-v1.64-web-app-scaffold.md)
 - Frontend conventions: [`AGENTS.md`](./AGENTS.md)

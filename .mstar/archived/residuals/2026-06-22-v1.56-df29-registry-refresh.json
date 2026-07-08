@@ -122,7 +122,7 @@
       "note": "Deferrable low; surfaced by PM pre-QC + mid-QA hygiene. No blocking \u2014 V1.56 P1 marked Approve.",
       "lifecycle": "resolved",
       "closed_at": "2026-06-22",
-      "closure_note": "V1.58 P0 closed: .sqlx/ cache hygiene protocol documented in .mstar/knowledge/specs/daemon-runtime.md \u00a7V1.58 P0 Draft overlay lines 169-221; explicitly notes --tests flag is critical for test query! macros (lines 181-188, 206-211) and --workspace -- --tests ordering requirement.",
+      "closure_note": "V1.58 P0 closed: .sqlx/ cache hygiene protocol documented in .mstar/specs/daemon-runtime.md \u00a7V1.58 P0 Draft overlay lines 169-221; explicitly notes --tests flag is critical for test query! macros (lines 181-188, 206-211) and --workspace -- --tests ordering requirement.",
       "closure_evidence": "V1.58 forensic audit 2026-06-22; verified on main @ a0d2e503",
       "resolution": {
         "plan_id": "2026-06-22-v1.58-workspace-occ-hardening",

@@ -22,5 +22,5 @@ V1.71 — promoted from the Draft write-boundary contract in `canvas-strategy-su
 
 - **Consumer:** `@42ch/nexus-contracts` (npm) — generated TypeScript types
 - **Handlers:** `crates/nexus-daemon-runtime/src/api/handlers/strategy.rs`
-- **Specs:** `.mstar/knowledge/specs/canvas-strategy-surface.md` §3.5, `.mstar/knowledge/specs/daemon-api-surface-conventions.md` §7
+- **Specs:** `.mstar/specs/canvas-strategy-surface.md` §3.5, `.mstar/specs/daemon-api-surface-conventions.md` §7
 - **Compass:** `.mstar/iterations/v1.71-canvas-strategy-write-boundary-and-hygiene-compass-v1.md` §1.1 Track A

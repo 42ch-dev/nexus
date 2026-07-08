@@ -648,7 +648,7 @@ components:
 
 Nexus Local Web UI is a restrained, author-focused design system for the local-first **Control Room + Setup + Authoring** SPA. It should feel calm and trustworthy: quiet surfaces, dense but readable data, explicit status language, and high-confidence controls for local creative runtime work without making writers feel like they are operating infrastructure.
 
-Product inputs from `.mstar/knowledge/specs/web-ui-design-requirements.md`:
+Product inputs from `.mstar/specs/web-ui-design-requirements.md`:
 
 - Primary persona: writers/authors, not engineers; calm and focused over dashboard anxiety.
 - Control Room screens are data-dense; Setup screens are form-dense with first-class validation and destructive-action confirmation.

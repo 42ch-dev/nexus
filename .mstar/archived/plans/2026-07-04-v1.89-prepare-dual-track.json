@@ -26,6 +26,6 @@
     "iteration_refs": [
       "V1.89"
     ],
-    "primary_spec": ".mstar/knowledge/specs/web-ui.md"
+    "primary_spec": ".mstar/specs/web-ui.md"
   }
 }

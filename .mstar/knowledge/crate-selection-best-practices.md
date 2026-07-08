@@ -290,7 +290,7 @@ let config: Config = figment.extract()?;
 When a decision in §2 needs to change (new requirement, crate EOL, security advisory, etc.):
 
 1. **Problem statement + candidates** — describe what the current decision fails to cover; enumerate at least two candidates (may include "keep current").
-2. **Comparison** — evaluate across the same dimensions used in this document's research log (dep footprint, safety, async fit, error quality, test cost, maintenance risk). Record in a new entry under `.mstar/plans/reports/<YYYY-MM-DD-crate-<topic>-research>/research-log.md`.
+2. **Comparison** — evaluate across the same dimensions used in this document's research log (dep footprint, safety, async fit, error quality, test cost, maintenance risk). Record in a new entry under `.mstar/plans/<YYYY-MM-DD-crate-<topic>-research>.md
 3. **Decision** — update the affected row in §2, bump this file to `v<N+1>` if the change is substantive (otherwise in-place amendment with a dated note is fine), and update consumers per §5.
 4. **Impact tracking** — any code / plan changes flow through the normal plan system; they do not bypass this document.
 
@@ -316,7 +316,7 @@ Before editing any of the above in a way that changes crate selection, update **
 
 - Research log (archival): [`../reports/2026-04-17-crate-selection-research/research-log.md`](../reports/2026-04-17-crate-selection-research/research-log.md)
 - V1.4 delivery compass: [`v1.4-delivery-compass-v1.md`](../iterations/v1.4-delivery-compass-v1.md)
-- Orchestration engine SSOT: [`orchestration-engine.md`](../knowledge/specs/orchestration-engine.md)
+- Orchestration engine SSOT: [`orchestration-engine.md`](../specs/orchestration-engine.md)
 - Schedule / core context SSOT: [`creator-schedule-and-core-context.md`](creator-schedule-and-core-context.md)
 - Local DB ownership: [`local-db-refactor.md`](archived/knowledge/local-db-refactor.md)
 - Device flow deferral: [`device-flow-oauth-scope-v1.md`](device-flow-oauth-scope-v1.md)

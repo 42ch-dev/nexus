@@ -11,7 +11,7 @@
   "working_branch": "feature/v1.50-kb-auto-promotion",
   "merge_target": "iteration/v1.50",
   "iteration_compass": ".mstar/iterations/v1.50-novel-author-production-loop-and-world-kb-closure-delivery-compass-v1.md",
-  "primary_spec": ".mstar/knowledge/specs/entity-scope-model.md",
+  "primary_spec": ".mstar/specs/entity-scope-model.md",
   "task_category": "feature",
   "depends_on": [
     "2026-06-18-v1.50-kb-editor-cli"

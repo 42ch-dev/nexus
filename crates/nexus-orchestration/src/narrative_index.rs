@@ -1,7 +1,7 @@
 //! Narrative indexes runtime — F### foreshadowing + E### event index (V1.49 P1).
 //!
 //! Implements the minimum viable index runtime described in
-//! `.mstar/knowledge/specs/novel-writing/narrative-indexes.md` (Draft V1.49):
+//! `.mstar/specs/novel-writing/narrative-indexes.md` (Draft V1.49):
 //! parse / serialize the `Works/<work_ref>/Outlines/foreshadowing.md` table,
 //! allocate sequential `F###` ids, promote inline declarations authored in a
 //! chapter outline's `## Foreshadowing Touched (F###)` section, and expose a

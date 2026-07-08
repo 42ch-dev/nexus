@@ -1,5 +1,5 @@
 -- V1.50 T-A P1 (S-001) — partial index on `works.schedule_json`.
--- Spec: .mstar/knowledge/specs/novel-writing/cron-staggering.md §4.1.
+-- Spec: .mstar/specs/novel-writing/cron-staggering.md §4.1.
 --
 -- NOTE: this migration was originally numbered `202606180002` (R-V150KBED-06),
 -- colliding with `202606180002_kb_extract_jobs_extend.sql` (V1.50 T-B P1).

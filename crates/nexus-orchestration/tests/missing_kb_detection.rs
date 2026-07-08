@@ -1,7 +1,7 @@
 //! V1.51 T-A P2 — finalize-time missing-KB detection integration tests.
 //!
 //! Plan: `.mstar/plans/2026-06-18-v1.51-missing-kb-detection.md`
-//! Spec: `.mstar/knowledge/specs/novel-writing/quality-loop.md` §5.5
+//! Spec: `.mstar/specs/novel-writing/quality-loop.md` §5.5
 //!
 //! Covers:
 //! - AC1: `novel-writing` schedule completion triggers missing-KB detection.

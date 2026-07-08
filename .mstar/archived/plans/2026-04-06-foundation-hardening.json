@@ -46,8 +46,8 @@
         "task_5": "done"
       },
       "qc_status": "APPROVE — 4 blocking items fixed (ffaaba8)",
-      "qc_report": ".mstar/plans/reports/2026-04-06-foundation-hardening/2026-04-06-foundation-hardening-qc-consolidated.md",
-      "qa_report": ".mstar/plans/reports/2026-04-06-foundation-hardening/2026-04-06-foundation-hardening-qa.md",
+      "qc_report": ".mstar/plans/2026-04-06-foundation-hardening.md",
+      "qa_report": ".mstar/plans/2026-04-06-foundation-hardening.md",
       "qa_status": "CONDITIONAL PASS — all acceptance criteria met",
       "files_changed": "30 files (1,822 insertions, 336 deletions)",
       "commits": "2 commits (1b8e849..ffaaba8) + merge"

@@ -18,7 +18,7 @@
 //!
 //! Spec refs:
 //! - [archived/knowledge/novel-findings-maturity.md §3 / §4](../../../../../.mstar/archived/knowledge/novel-findings-maturity.md)
-//! - [novel-writing/workflow-profile.md §5.5.4](../../../../../.mstar/knowledge/specs/novel-writing/workflow-profile.md)
+//! - [novel-writing/workflow-profile.md §5.5.4](../../../../../.mstar/specs/novel-writing/workflow-profile.md)
 
 use std::io::IsTerminal;
 

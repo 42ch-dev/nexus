@@ -1,6 +1,6 @@
 //! Auto-chronology advance engine (V1.50 T-A P3, T2–T6).
 //!
-//! Spec: `.mstar/knowledge/specs/novel-writing/auto-chronology.md` §3 / §4.
+//! Spec: `.mstar/specs/novel-writing/auto-chronology.md` §3 / §4.
 //!
 //! ## Role
 //!

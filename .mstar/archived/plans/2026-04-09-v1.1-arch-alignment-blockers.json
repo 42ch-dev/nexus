@@ -53,15 +53,15 @@
       },
       "residual_summary": "2 open: ALIGN-HASH-01 (cross-stack golden vectors); ARCH-SYNC-D1 deferred optional daemon SyncClient push",
       "implementation_tip": "refresh at commit after landing A1+A2 sync push + status envelope fixes",
-      "qc_rereview_report": ".mstar/plans/reports/2026-04-09-v1.1-arch-alignment-blockers/2026-04-09-v1.1-arch-alignment-blockers-qc-rereview.md",
-      "qa_report": ".mstar/plans/reports/2026-04-09-v1.1-arch-alignment-blockers/2026-04-09-v1.1-arch-alignment-blockers-qa.md",
-      "qc_residuals_batch_consolidated": ".mstar/plans/reports/2026-04-09-v1.1-arch-alignment-blockers/2026-04-09-v1.1-alignment-residuals-qc-consolidated.md",
+      "qc_rereview_report": ".mstar/plans/2026-04-09-v1.1-arch-alignment-blockers.md",
+      "qa_report": ".mstar/plans/2026-04-09-v1.1-arch-alignment-blockers.md",
+      "qc_residuals_batch_consolidated": ".mstar/plans/2026-04-09-v1.1-arch-alignment-blockers.md",
       "qc_residuals_batch": [
-        ".mstar/plans/reports/2026-04-09-v1.1-arch-alignment-blockers/2026-04-09-v1.1-alignment-residuals-qc1.md",
-        ".mstar/plans/reports/2026-04-09-v1.1-arch-alignment-blockers/2026-04-09-v1.1-alignment-residuals-qc2.md",
-        ".mstar/plans/reports/2026-04-09-v1.1-arch-alignment-blockers/2026-04-09-v1.1-alignment-residuals-qc3.md"
+        ".mstar/plans/2026-04-09-v1.1-arch-alignment-blockers.md",
+        ".mstar/plans/2026-04-09-v1.1-arch-alignment-blockers.md",
+        ".mstar/plans/2026-04-09-v1.1-arch-alignment-blockers.md"
       ],
-      "qa_residuals_batch_report": ".mstar/plans/reports/2026-04-09-v1.1-arch-alignment-blockers/2026-04-09-v1.1-alignment-residuals-qa.md"
+      "qa_residuals_batch_report": ".mstar/plans/2026-04-09-v1.1-arch-alignment-blockers.md"
     }
   },
   "snapshot_pre_ultra_done": {
@@ -102,15 +102,15 @@
         "qa_status": "pass_residuals_batch_2026-04-08",
         "merge_to_main": "ready"
       },
-      "qc_rereview_report": ".mstar/plans/reports/2026-04-09-v1.1-arch-alignment-blockers/2026-04-09-v1.1-arch-alignment-blockers-qc-rereview.md",
-      "qa_report": ".mstar/plans/reports/2026-04-09-v1.1-arch-alignment-blockers/2026-04-09-v1.1-arch-alignment-blockers-qa.md",
-      "qc_residuals_batch_consolidated": ".mstar/plans/reports/2026-04-09-v1.1-arch-alignment-blockers/2026-04-09-v1.1-alignment-residuals-qc-consolidated.md",
+      "qc_rereview_report": ".mstar/plans/2026-04-09-v1.1-arch-alignment-blockers.md",
+      "qa_report": ".mstar/plans/2026-04-09-v1.1-arch-alignment-blockers.md",
+      "qc_residuals_batch_consolidated": ".mstar/plans/2026-04-09-v1.1-arch-alignment-blockers.md",
       "qc_residuals_batch": [
-        ".mstar/plans/reports/2026-04-09-v1.1-arch-alignment-blockers/2026-04-09-v1.1-alignment-residuals-qc1.md",
-        ".mstar/plans/reports/2026-04-09-v1.1-arch-alignment-blockers/2026-04-09-v1.1-alignment-residuals-qc2.md",
-        ".mstar/plans/reports/2026-04-09-v1.1-arch-alignment-blockers/2026-04-09-v1.1-alignment-residuals-qc3.md"
+        ".mstar/plans/2026-04-09-v1.1-arch-alignment-blockers.md",
+        ".mstar/plans/2026-04-09-v1.1-arch-alignment-blockers.md",
+        ".mstar/plans/2026-04-09-v1.1-arch-alignment-blockers.md"
       ],
-      "qa_residuals_batch_report": ".mstar/plans/reports/2026-04-09-v1.1-arch-alignment-blockers/2026-04-09-v1.1-alignment-residuals-qa.md"
+      "qa_residuals_batch_report": ".mstar/plans/2026-04-09-v1.1-arch-alignment-blockers.md"
     }
   }
 }

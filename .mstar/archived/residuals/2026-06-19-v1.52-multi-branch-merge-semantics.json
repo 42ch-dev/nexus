@@ -12,7 +12,7 @@
       "decision": "fix",
       "owner": "@fullstack-dev-2",
       "target": "V1.52 T-B P1 fix-wave",
-      "tracking_link": ".mstar/plans/reports/2026-06-19-v1.52-multi-branch-merge-semantics/qc1.md",
+      "tracking_link": ".mstar/plans/2026-06-19-v1.52-multi-branch-merge-semantics.md",
       "lifecycle": "resolved",
       "closed_at": "2026-06-19",
       "closure_note": "T-B P1 fix-wave (commit 3ab67781): changed gate from if let Some(merge_kind) to if expected_incoming > 0 { merge_kind.unwrap_or_default() }. Added test merge_wait_all_default_enforced_when_merge_absent.",

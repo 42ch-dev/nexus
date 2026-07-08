@@ -20,4 +20,4 @@ V1.62 (2026-06-23) consolidated this folder: sync-payload files moved here from 
 
 **Consumer:** `@42ch/nexus-contracts` (npm) + `nexus-cloud-sync` Rust (`legacy-sync`).
 
-**Layout spec:** [schemas-directory-layout.md](../../../.mstar/knowledge/specs/schemas-directory-layout.md) §3.2.
+**Layout spec:** [schemas-directory-layout.md](../../../.mstar/specs/schemas-directory-layout.md) §3.2.

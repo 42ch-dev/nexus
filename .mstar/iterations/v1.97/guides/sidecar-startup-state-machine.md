@@ -1,10 +1,10 @@
 # V1.97 Sidecar Startup State Machine Handoff
 
-> **Promoted to:** `.mstar/knowledge/architecture-patterns/daemon-ready-gate-pattern.md` (V1.97 refinements, Rules 9-12). This file is an iteration-scoped snapshot retained for V1.97 history; durable invariants live in the knowledge doc + `knowledge/specs/desktop-shell.md` §13.8.
+> **Promoted to:** `.mstar/knowledge/architecture-patterns/daemon-ready-gate-pattern.md` (V1.97 refinements, Rules 9-12). This file is an iteration-scoped snapshot retained for V1.97 history; durable invariants live in the knowledge doc + `specs/desktop-shell.md` §13.8.
 
 ## Purpose
 
-This guide is the iteration-scoped architecture handoff for V1.97 Desktop First-Launch Reliability Hardening. Durable product contracts live in `knowledge/specs/desktop-shell.md` §13.8 and `knowledge/specs/web-ui.md` §29.12; this file captures implementation and QC detail for the active iteration. Do not copy it into `knowledge/` during iteration-start; the iteration-close compound pass decides whether any lesson becomes durable knowledge.
+This guide is the iteration-scoped architecture handoff for V1.97 Desktop First-Launch Reliability Hardening. Durable product contracts live in `specs/desktop-shell.md` §13.8 and `specs/web-ui.md` §29.12; this file captures implementation and QC detail for the active iteration. Do not copy it into `knowledge/` during iteration-start; the iteration-close compound pass decides whether any lesson becomes durable knowledge.
 
 ## State Machine Invariants
 

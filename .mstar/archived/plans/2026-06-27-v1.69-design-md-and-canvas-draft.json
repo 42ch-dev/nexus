@@ -20,8 +20,8 @@
     "iteration_compass": "v1.69-design-system-maturation-and-canvas-draft-compass-v1.md",
     "primary_spec": "apps/web/DESIGN.md",
     "spec_refs": [
-      ".mstar/knowledge/specs/canvas-strategy-surface.md",
-      ".mstar/knowledge/specs/web-ui.md"
+      ".mstar/specs/canvas-strategy-surface.md",
+      ".mstar/specs/web-ui.md"
     ],
     "completed_at": "2026-06-27 (PM sign-off — docs/spec-only, QC skipped with rationale)",
     "merge_commit": "c43bb114",

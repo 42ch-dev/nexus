@@ -11,9 +11,9 @@
     "working_branch": "feature/v1.90-daemon-api-rename-backend",
     "worktree_path": ".worktrees/feature-v1.90-daemon-api-rename-backend",
     "merge_commit": "c2f4bd97",
-    "primary_spec": ".mstar/knowledge/specs/daemon-runtime.md",
+    "primary_spec": ".mstar/specs/daemon-runtime.md",
     "spec_refs": [
-      ".mstar/knowledge/specs/daemon-api-surface-conventions.md",
+      ".mstar/specs/daemon-api-surface-conventions.md",
       "schemas/AGENTS.md",
       "crates/nexus-daemon-runtime/AGENTS.md"
     ]

@@ -1,7 +1,7 @@
 /**
  * Finding detail/inspector panel — V1.77 findings-remediation surface.
  *
- * Spec: `.mstar/knowledge/specs/web-ui.md` §23 + `findings-lifecycle.md` §4.
+ * Spec: `.mstar/specs/web-ui.md` §23 + `findings-lifecycle.md` §4.
  * Three remediation affordances consuming `PATCH .../findings/{id}`:
  *   1. Status transitions (6-state; invalid disabled per server adjacency).
  *   2. `target_executor` assignment (brainstorm/write/master/none).
