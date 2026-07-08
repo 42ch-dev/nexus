@@ -232,7 +232,8 @@ function ColorSwatch({ token }: { token: ColorToken }) {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       // Defer to next frame so CSS vars have been swapped.
-      requestAnimationFrame(() => setComputed(resolveSwatchColor(token.varName)));
+      const rafId = requestAnimationFrame(() => setComputed(resolveSwatchColor(token.varName)));
+      return () => cancelAnimationFrame(rafId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedTheme, token.varName]);
@@ -308,7 +309,8 @@ function ElevationCard({ token }: { token: ElevationToken }) {
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      requestAnimationFrame(() => setComputed(readCSSVar(token.varName)));
+      const rafId = requestAnimationFrame(() => setComputed(readCSSVar(token.varName)));
+      return () => cancelAnimationFrame(rafId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedTheme, token.varName]);

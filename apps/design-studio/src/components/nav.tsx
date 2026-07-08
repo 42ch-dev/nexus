@@ -25,7 +25,7 @@ export function TopNav() {
           className={({ isActive }) =>
             `px-3 py-1.5 rounded-md text-label-14 transition-colors ${
               isActive
-                ? 'bg-gray-alpha-150 text-gray-1000 font-medium'
+                ? 'bg-gray-alpha-200 text-gray-1000 font-medium'
                 : 'text-gray-700 hover:text-gray-1000 hover:bg-gray-alpha-100'
             }`
           }
