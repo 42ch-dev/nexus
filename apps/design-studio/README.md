@@ -26,6 +26,23 @@ on 5173).
 Every value is driven by the repo-root `DESIGN.md` / `DESIGN.dark.md` SSOT.
 Edit those files in your IDE, then refresh the studio to see the effect.
 
+## Visual review (surfaces)
+
+The `/surfaces` page is the primary visual-review target for product-surface
+decisions before they enter `apps/web`:
+
+1. Open studio at `/surfaces` in both light and dark themes.
+2. Verify that every color, border, background, and accent uses only registered
+   DESIGN token scale steps — no raw hex, no arbitrary bracket values.
+3. Verify keyboard focus is visible on all interactive elements (Tab through
+   every button — each should show the two-layer focus ring).
+4. Verify text hierarchy is readable at a glance: heading-24 titles, copy-16
+   body, label-14 UI labels.
+5. Verify CTAs are findable — the primary action should be the strongest visual
+   target in its area.
+6. Verify type contrast passes in both themes (see DESIGN.md and
+   DESIGN.dark.md §Contrast review).
+
 ## Light / dark toggle
 
 The theme toggle in the header switches between `DESIGN.md` (light) and

@@ -239,9 +239,9 @@ function AppShellFixture() {
 
   return (
     <div className="flex min-h-[440px] border border-gray-alpha-300 rounded-card bg-background-100 overflow-hidden">
-      {/* ── Sidebar ── */}
-      <div className="w-[248px] shrink-0 border-r border-gray-alpha-200 bg-background-100 flex flex-col">
-        {/* Top tabs */}
+      {/* ── Sidebar — DESIGN.md §Sidebar Nav ── */}
+      <div className="w-sidebar-nav-width shrink-0 border-r border-gray-alpha-200 bg-background-100 flex flex-col">
+        {/* Top tabs — DESIGN.md §shell-nav */}
         <div className="flex border-b border-gray-alpha-200">
           {SHELL_TABS.map((tab) => (
             <button
@@ -251,8 +251,8 @@ function AppShellFixture() {
               className={cn(
                 'flex-1 text-center py-3 text-label-14 font-medium border-b-2 transition-colors',
                 tab.active
-                  ? 'text-gray-1000 border-blue-700'
-                  : 'text-gray-700 border-transparent hover:text-gray-900',
+                  ? 'text-gray-1000 border-blue-700 bg-gray-alpha-100'
+                  : 'text-gray-700 border-transparent hover:text-gray-900 hover:bg-gray-alpha-100',
               )}
             >
               {tab.label}
@@ -260,14 +260,14 @@ function AppShellFixture() {
           ))}
         </div>
 
-        {/* Nav groups */}
-        <div className="flex-1 overflow-auto p-3 space-y-1">
+        {/* Nav groups — DESIGN.md §Sidebar Nav */}
+        <nav className="flex-1 overflow-auto p-3 space-y-1">
           {activeNav.map((item) => (
             <div key={item.label}>
               {/* Group label */}
               <div
                 className={cn(
-                  'flex items-center h-9 px-3 rounded-control text-label-14 transition-colors',
+                  'flex items-center h-sidebar-nav-item-height px-3 rounded-control text-label-14 transition-colors',
                   item.active
                     ? 'bg-gray-alpha-100 text-gray-1000'
                     : 'text-gray-700 hover:bg-gray-alpha-100 hover:text-gray-1000',
@@ -280,7 +280,7 @@ function AppShellFixture() {
                     height="12"
                     viewBox="0 0 12 12"
                     fill="none"
-                    className="ml-auto shrink-0 text-gray-500"
+                    className="ml-auto shrink-0 text-gray-600"
                     aria-hidden="true"
                   >
                     <path
@@ -301,7 +301,7 @@ function AppShellFixture() {
                   <div
                     key={child.label}
                     className={cn(
-                      'flex items-center h-9 pl-6 pr-3 ml-3 rounded-control text-label-14',
+                      'flex items-center h-sidebar-nav-item-height pl-6 pr-3 ml-3 rounded-control text-label-14',
                       'text-gray-1000 bg-gray-alpha-100 border-l-2 border-l-blue-700',
                     )}
                   >
@@ -310,7 +310,7 @@ function AppShellFixture() {
                 ))}
             </div>
           ))}
-        </div>
+        </nav>
 
         {/* Footer — profile avatar row stub */}
         <div className="border-t border-gray-alpha-200 p-3 flex items-center gap-2">
@@ -319,7 +319,7 @@ function AppShellFixture() {
             <span className="text-label-14 text-gray-1000 truncate">
               Local Creator
             </span>
-            <span className="text-copy-13 text-gray-500 truncate">
+            <span className="text-copy-13 text-gray-700 truncate">
               Profiles
             </span>
           </div>
@@ -349,14 +349,17 @@ function AppShellFixture() {
         </div>
       </div>
 
-      {/* ── Main content area (empty — fixture shows chrome only) ── */}
-      <div className="flex-1 bg-background-200 flex flex-col items-center justify-center min-w-0">
-        <p className="text-copy-14 text-gray-500 mb-1">
-          Content area
-        </p>
-        <p className="text-copy-13 text-gray-400">
-          This fixture shows app-shell chrome only
-        </p>
+      {/* ── Main content area — recessed background, placeholder indicates active workspace ── */}
+      <div className="flex-1 bg-background-200 flex flex-col items-center justify-center min-w-0 p-8">
+        <div className="border-2 border-dashed border-gray-alpha-300 rounded-card w-full max-w-md p-8 text-center">
+          <p className="text-copy-14 text-gray-700 mb-1">
+            Content panel
+          </p>
+          <p className="text-copy-13 text-gray-500">
+            Active workspace — editor, canvas, or dashboard — rendered by the
+            product shell at runtime. Not part of this fixture.
+          </p>
+        </div>
       </div>
     </div>
   );

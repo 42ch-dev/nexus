@@ -1,10 +1,12 @@
 /**
- * Design Studio smoke tests — T7 task-7-brief.md.
+ * Design Studio smoke tests — T7 + T4 surface-fixture coverage.
  *
  * Coverage:
  *   1. App renders the landing page (HomePage) with section links.
  *   2. Theme toggle switches light ↔ dark and applies the `.dark` class.
  *   3. Each gallery section route renders its heading.
+ *   4. Surfaces page renders setup wizard and app shell fixtures with
+ *      expected labels and structural elements.
  *
  * These tests catch route/render regressions without snapshot-exhausting every
  * swatch or component variant. Follow apps/web conventions: vitest + jsdom +
@@ -134,4 +136,95 @@ describe('Gallery section rendering', () => {
       expect(screen.getAllByText(heading).length).toBeGreaterThanOrEqual(1);
     },
   );
+});
+
+/* ---- surfaces page fixtures (T4) ---------------------------------------- */
+
+describe('Surfaces page — setup wizard fixture', () => {
+  beforeEach(() => {
+    mockMatchMedia(false);
+    renderStudio('/surfaces');
+  });
+
+  it('renders the Welcome heading inside the setup card', () => {
+    expect(
+      screen.getByRole('heading', { name: 'Welcome to Nexus' }),
+    ).toBeInTheDocument();
+  });
+
+  it('renders all four setup step labels', () => {
+    for (const step of ['Welcome', 'Daemon', 'Agent', 'Done']) {
+      // Step labels appear in the step panel — match any element
+      // containing the label text.  Use getAllByText since the step
+      // label "Welcome" also appears in the heading; at least one
+      // instance must exist in the step panel context.
+      expect(screen.getAllByText(step).length).toBeGreaterThanOrEqual(1);
+    }
+  });
+
+  it('renders the workspace location label and path', () => {
+    expect(screen.getByText('Workspace location')).toBeInTheDocument();
+    expect(
+      screen.getByText('~/Documents/nexus/default'),
+    ).toBeInTheDocument();
+  });
+
+  it('renders Continue primary CTA', () => {
+    expect(
+      screen.getByRole('button', { name: 'Continue' }),
+    ).toBeInTheDocument();
+  });
+
+  it('renders Browse secondary action', () => {
+    expect(
+      screen.getByRole('button', { name: 'Browse…' }),
+    ).toBeInTheDocument();
+  });
+});
+
+describe('Surfaces page — app shell fixture', () => {
+  beforeEach(() => {
+    mockMatchMedia(false);
+    renderStudio('/surfaces');
+  });
+
+  it('renders Creator and Orchestrator tabs', () => {
+    expect(screen.getByText('Creator')).toBeInTheDocument();
+    expect(screen.getByText('Orchestrator')).toBeInTheDocument();
+  });
+
+  it('renders Works nav group and All Works child', () => {
+    // "Works" appears as a nav group label — verify at least one instance.
+    expect(screen.getAllByText('Works').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('All Works')).toBeInTheDocument();
+  });
+
+  it('renders Worlds and Findings nav groups', () => {
+    expect(screen.getByText('Worlds')).toBeInTheDocument();
+    expect(screen.getByText('Findings')).toBeInTheDocument();
+  });
+
+  it('renders the profile footer with creator name', () => {
+    expect(screen.getByText('Local Creator')).toBeInTheDocument();
+  });
+
+  it('renders add-profile button with accessible label', () => {
+    expect(
+      screen.getByRole('button', { name: 'Add profile' }),
+    ).toBeInTheDocument();
+  });
+
+  it('renders content panel placeholder', () => {
+    expect(screen.getByText('Content panel')).toBeInTheDocument();
+  });
+});
+
+describe('Surfaces page — daemon status strip', () => {
+  it('renders daemon status heading and healthy badge', () => {
+    mockMatchMedia(false);
+    renderStudio('/surfaces');
+
+    expect(screen.getByText('Daemon running')).toBeInTheDocument();
+    expect(screen.getByText('healthy')).toBeInTheDocument();
+  });
 });
