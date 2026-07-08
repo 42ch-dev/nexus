@@ -104,7 +104,7 @@ Files under `apps/design-studio/src/**` **MUST NOT** import:
 
 After P1, `@web-ui/*` imports in `apps/design-studio/src/**` are **allowed only** when:
 
-1. The imported primitive is **not yet promoted** to `@42ch/nexus-ui` (i.e., not one of: Button, Badge, Card; future: Input, Label, Textarea).
+1. The imported primitive is **not yet promoted** to `@42ch/nexus-ui` (i.e., not one of: Button, Badge, Card, Input, Label, Textarea).
 2. Every `@web-ui/*` import carries an **inline transitional annotation** identifying the blocking criteria for promotion. Format: `// @web-ui/<name> — transitional <until/because> <criteria>`.
 
 **Current unpromoted primitives and their transitional rationale** (as of P1 T1 file audit):
@@ -112,13 +112,13 @@ After P1, `@web-ui/*` imports in `apps/design-studio/src/**` are **allowed only*
 | Import | Annotation | Promotion trigger |
 |--------|------------|-------------------|
 | `@web-ui/dialog` | `keep-web` | Radix portal/focus-trap beyond presentational scope; keep in web |
-| `@web-ui/input` | `transitional until Form Field slice` | P2 promotes Input as part of form-field contract |
-| `@web-ui/label` | `transitional until Form Field slice` | P2 promotes Label as part of form-field contract |
+| `@web-ui/input` | ~~`transitional until Form Field slice`~~ **promoted (P2 T3)** | Import from `@42ch/nexus-ui`; `@web-ui/input` is now forbidden |
+| `@web-ui/label` | ~~`transitional until Form Field slice`~~ **promoted (P2 T3)** | Import from `@42ch/nexus-ui`; `@web-ui/label` is now forbidden |
 | `@web-ui/select` | `keep-web` | Native select wrapper; no cross-app demand proven yet |
 | `@web-ui/states` | `keep-web` | lucide-react asset boundary; product copy & app-composition callbacks |
 | `@web-ui/table` | `keep-web` | Data-aware table; not purely presentational |
 | `@web-ui/tabs` | `keep-web` | Compound component owns selection state; not purely presentational |
-| `@web-ui/textarea` | `transitional until Form Field slice` | P2 promotes Textarea as part of form-field contract |
+| `@web-ui/textarea` | ~~`transitional until Form Field slice`~~ **promoted (P2 T3)** | Import from `@42ch/nexus-ui`; `@web-ui/textarea` is now forbidden |
 
 The guardrail must **not** flag legitimately annotated `@web-ui/*` imports for unpromoted primitives. It must **flag** missing annotations, mistaken `@web-ui/*` imports of already-promoted primitives (e.g., `@web-ui/button`), and any `@web-ui/*` import not in the transitional-annotation format.
 

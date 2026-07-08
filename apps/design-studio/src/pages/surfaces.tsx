@@ -1,7 +1,6 @@
 import type { ReactNode } from 'react';
 
-import { cn, Badge, Button, Card } from '@42ch/nexus-ui';
-import { Label } from '@web-ui/label'; // transitional — pending Form Field slice that will promote Label with label/control/helper/error composition
+import { cn, Badge, Button, Card, Label } from '@42ch/nexus-ui';
 
 /* ------------------------------------------------------------------ */
 /*  Data — IA guide §4.5 fixtures (canonical copy strings)              */
