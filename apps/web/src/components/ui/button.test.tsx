@@ -20,10 +20,9 @@ describe('Button', () => {
     expect(container.firstChild).toMatchSnapshot();
   });
 
-  it('matches the primary variant snapshot in dark mode', () => {
-    document.documentElement.classList.add('dark');
-    const { container } = render(<Button variant="primary">Continue</Button>);
-    expect(container.firstChild).toMatchSnapshot();
-    document.documentElement.classList.remove('dark');
-  });
+  // No separate dark-mode snapshot: in jsdom, Tailwind's `dark:*` variant
+  // classes are always present in the className attribute regardless of whether
+  // `.dark` is added to document.documentElement. Both light and dark snapshots
+  // render identical HTML, so a second snapshot is misleading. The light-mode
+  // snapshot above already covers the full class structure including dark variants.
 });

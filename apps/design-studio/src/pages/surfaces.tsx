@@ -52,30 +52,6 @@ function SurfaceHeading({ children }: { children: ReactNode }) {
   );
 }
 
-function SurfaceLabel({
-  children,
-}: {
-  children: ReactNode;
-}) {
-  return (
-    <section>
-      <SurfaceHeading>{children}</SurfaceHeading>
-      <p className="text-copy-14 text-gray-700 mb-6">
-        Studio-local fixture composed from{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @42ch/nexus-ui
-        </code>{' '}
-        (promoted) and{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @web-ui/*
-        </code>{' '}
-        (transitional) primitives — static copy per IA guide §4.5. No daemon data, no live
-        routing, no product-page imports.
-      </p>
-    </section>
-  );
-}
-
 /* ------------------------------------------------------------------ */
 /*  Fixture 1 — Setup wizard step card                                  */
 /* ------------------------------------------------------------------ */
@@ -442,25 +418,24 @@ export function SurfacesPage() {
       </section>
 
       {/* 2. App shell chrome */}
-      <SurfaceLabel>
-        App shell chrome
-      </SurfaceLabel>
-
-      <p className="text-copy-14 text-gray-700 mb-6">
-        Sidebar tab strip (Creator / Orchestrator), one expanded nav group
-        (Works → All Works), footer profile avatar row stub, and slim daemon
-        status strip — chrome only, no live routing or{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          NexusClient
-        </code>
-        . Composed from{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @web-ui/*
-        </code>{' '}
-        primitives + inline SVG icons; no layout component imports.
-      </p>
-
-      <AppShellFixture />
+      <section>
+        <SurfaceHeading>App shell chrome</SurfaceHeading>
+        <p className="text-copy-14 text-gray-700 mb-6">
+          Sidebar tab strip (Creator / Orchestrator), one expanded nav group
+          (Works → All Works), footer profile avatar row stub, and daemon
+          status strip — studio-local chrome fixtures built with inline HTML/SVG
+          and Badge from{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            @42ch/nexus-ui
+          </code>{' '}
+          for the daemon status strip. No live routing, no{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            NexusClient
+          </code>
+          , and no layout component imports.
+        </p>
+        <AppShellFixture />
+      </section>
 
       {/* Daemon status strip */}
       <section className="mt-6">
