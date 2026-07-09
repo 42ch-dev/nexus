@@ -498,7 +498,7 @@
       "id": "2026-07-09-v1.102-ui-hygiene",
       "title": "P2 — UI Hygiene + Surfaces Polish (Stretch)",
       "file": ".mstar/plans/2026-07-09-v1.102-ui-hygiene.md",
-      "status": "InProgress",
+      "status": "InReview",
       "owner": "@project-manager",
       "agents": [
         "@product-manager",
@@ -507,7 +507,7 @@
         "@qc-specialist",
         "@qa-engineer"
       ],
-      "progress": 5,
+      "progress": 95,
       "tags": [
         "V1.102",
         "surfaces",
@@ -516,7 +516,7 @@
       ],
       "created_at": "2026-07-09",
       "updated_at": "2026-07-09",
-      "notes": "Stretch running — Task 1 Surfaces menu",
+      "notes": "QA Pass with residuals; recommend Done",
       "metadata": {
         "priority": "medium",
         "tier": "stretch",
@@ -1281,6 +1281,32 @@
         "summary": "Mapping extract / Studio Save CTA polish optional",
         "source": "qc-tri",
         "plan_id": "2026-07-09-v1.102-settings-shell"
+      }
+    ],
+    "2026-07-09-v1.102-ui-hygiene": [
+      {
+        "id": "R-V1102P2QC-S001",
+        "severity": "suggestion",
+        "lifecycle": "open",
+        "summary": "Stale Surfaces daemon helper/blurb copy",
+        "source": "qc-tri",
+        "plan_id": "2026-07-09-v1.102-ui-hygiene"
+      },
+      {
+        "id": "R-V1102P2QC-S002",
+        "severity": "suggestion",
+        "lifecycle": "open",
+        "summary": "Studio vs App Restart label density parity",
+        "source": "qc-tri",
+        "plan_id": "2026-07-09-v1.102-ui-hygiene"
+      },
+      {
+        "id": "R-V1102P2QC-S003",
+        "severity": "suggestion",
+        "lifecycle": "open",
+        "summary": "Soft running Badge semantic reuse for Installed/healthy",
+        "source": "qc-tri",
+        "plan_id": "2026-07-09-v1.102-ui-hygiene"
       }
     ]
   }
