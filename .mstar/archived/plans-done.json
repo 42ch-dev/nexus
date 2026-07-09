@@ -428,7 +428,8 @@
     "2026-07-09-v1.102-badge-soft-solid",
     "2026-07-09-v1.102-settings-shell",
     "2026-07-09-v1.102-ui-hygiene",
-    "2026-07-09-v1.103-settings-shell-nav"
+    "2026-07-09-v1.103-settings-shell-nav",
+    "2026-07-09-v1.103-settings-agent-preselect"
   ],
   "iteration_summaries": {
     "v1.45": {

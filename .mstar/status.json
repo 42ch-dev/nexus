@@ -3,47 +3,6 @@
   "updated_at": "2026-07-09T13:25:00+0800",
   "plans": [
     {
-      "id": "2026-07-09-v1.103-settings-agent-preselect",
-      "title": "P1 — Settings Agent Section + getAgentProfile",
-      "file": ".mstar/plans/2026-07-09-v1.103-settings-agent-preselect.md",
-      "status": "InReview",
-      "owner": "@project-manager",
-      "agents": [
-        "@frontend-dev",
-        "@fullstack-dev",
-        "@qc-specialist",
-        "@qa-engineer"
-      ],
-      "progress": 92,
-      "tags": [
-        "V1.103",
-        "settings",
-        "agent",
-        "tauri"
-      ],
-      "created_at": "2026-07-09",
-      "updated_at": "2026-07-09",
-      "notes": "QC tri Approve after fix-wave ba5a9686. Awaiting QA.",
-      "metadata": {
-        "priority": "high",
-        "tier": "must",
-        "blocked_by_plan_id": "2026-07-09-v1.103-settings-shell-nav",
-        "spec_integration_branch": "iteration/v1.103",
-        "merge_target": "iteration/v1.103",
-        "iteration_compass": ".mstar/iterations/v1.103-delivery-compass.md",
-        "iteration_refs": [
-          ".mstar/iterations/v1.103/specs/settings-agent-section.md",
-          ".mstar/iterations/v1.103/specs/settings-shell-ia.md"
-        ],
-        "primary_spec": ".mstar/iterations/v1.103/specs/settings-agent-section.md",
-        "execution_mode": "sdd",
-        "qa_gate": "mandatory",
-        "wire_contracts_changed": false,
-        "working_branch": "feat/v1.103-settings-agent-preselect",
-        "sdd_dir": ".mstar/sdd/2026-07-09-v1.103-settings-agent-preselect"
-      }
-    },
-    {
       "id": "2026-07-09-v1.103-settings-connection",
       "title": "P2 — Settings Connection + /connect Redirect",
       "file": ".mstar/plans/2026-07-09-v1.103-settings-connection.md",
@@ -220,7 +179,7 @@
         "2026-07-09-v1.102-settings-shell": 5
       }
     },
-    "updated_at": "2026-07-09T19:40:00+0800"
+    "updated_at": "2026-07-09T20:10:00+0800"
   },
   "residual_findings": {
     "2026-07-05-v1.91-findings-batch": [
