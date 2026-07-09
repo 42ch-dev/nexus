@@ -15,7 +15,6 @@ const ROUTE_TITLES: Record<string, string> = {
   '/memory': 'Memory',
   '/settings': 'Settings',
   '/strategies': 'Strategies',
-  '/connect': 'Connect',
 };
 
 const MOBILE_NAV = [

@@ -1,19 +1,19 @@
 {
   "version": 1,
-  "updated_at": "2026-07-09T13:25:00+0800",
+  "updated_at": "2026-07-09",
   "plans": [
     {
       "id": "2026-07-09-v1.103-settings-connection",
       "title": "P2 — Settings Connection + /connect Redirect",
       "file": ".mstar/plans/2026-07-09-v1.103-settings-connection.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@frontend-dev",
         "@qc-specialist",
         "@qa-engineer"
       ],
-      "progress": 0,
+      "progress": 95,
       "tags": [
         "V1.103",
         "settings",
@@ -22,7 +22,7 @@
       ],
       "created_at": "2026-07-09",
       "updated_at": "2026-07-09",
-      "notes": "Must. Move Connect UI into Settings; permanent /connect → /settings/connection redirect (C1).",
+      "notes": "QC 3/3 Approve; QA Pass. Ready to merge.",
       "metadata": {
         "priority": "high",
         "tier": "must",
@@ -37,7 +37,9 @@
         "primary_spec": ".mstar/iterations/v1.103/specs/settings-connection-section.md",
         "execution_mode": "sdd",
         "qa_gate": "mandatory",
-        "wire_contracts_changed": false
+        "wire_contracts_changed": false,
+        "working_branch": "feat/v1.103-settings-connection",
+        "sdd_dir": ".mstar/sdd/2026-07-09-v1.103-settings-connection"
       }
     },
     {
@@ -138,48 +140,51 @@
     },
     "tech_debt_summary": {
       "updated_at": "2026-07-09",
-      "total_open": 51,
+      "total_open": 57,
       "by_severity": {
         "critical": 0,
         "high": 0,
         "medium": 1,
         "low": 24,
-        "nit": 23,
-        "suggestion": 3
+        "nit": 24
       },
       "by_target": {
-        "when list virtualisation lands": 1,
-        "V1.96 spec-hygiene pass": 1,
+        "V1.101 P1 or V1.102": 1,
+        "V1.102+": 1,
+        "V1.103 P4": 1,
         "V1.96": 14,
+        "V1.96 spec-hygiene pass": 1,
         "V1.97": 4,
         "V1.97+": 1,
         "V1.99+": 1,
-        "post-V1.99": 2,
+        "accept": 3,
         "post-V1.100": 8,
-        "V1.102+": 1,
-        "V1.101 P1 or V1.102": 1,
         "post-V1.101": 8,
-        "accept": 1,
-        "unspecified": 8
+        "post-V1.99": 2,
+        "unspecified": 11,
+        "when list virtualisation lands": 1
       },
       "by_plan": {
         "2026-07-05-v1.91-findings-batch": 1,
-        "2026-07-06-v1.93-closure": 1,
         "2026-07-05-v1.92-closure": 1,
+        "2026-07-06-v1.93-closure": 1,
         "2026-07-06-v1.94-closure": 9,
         "2026-07-07-v1.95-implement-fixes": 4,
         "2026-07-07-v1.96-implement-rework": 5,
         "2026-07-07-v1.97-desktop-first-launch-hardening": 3,
-        "2026-07-08-v1.100-ui-hygiene-guardrails": 5,
         "2026-07-08-v1.100-desktop-clean-state-first-launch": 3,
+        "2026-07-08-v1.100-ui-hygiene-guardrails": 5,
         "2026-07-09-v1.101-agent-detection-picker": 4,
-        "2026-07-09-v1.101-setup-wizard-ui-polish": 2,
         "2026-07-09-v1.101-select-component-promotion": 5,
+        "2026-07-09-v1.101-setup-wizard-ui-polish": 2,
         "2026-07-09-v1.102-badge-soft-solid": 3,
-        "2026-07-09-v1.102-settings-shell": 5
+        "2026-07-09-v1.102-settings-shell": 5,
+        "2026-07-09-v1.102-ui-hygiene": 3,
+        "2026-07-09-v1.103-settings-agent-preselect": 1,
+        "2026-07-09-v1.103-settings-shell-nav": 2
       }
     },
-    "updated_at": "2026-07-09T20:10:00+0800"
+    "updated_at": "2026-07-09T20:50:00+0800"
   },
   "residual_findings": {
     "2026-07-05-v1.91-findings-batch": [
@@ -891,15 +896,6 @@
     ],
     "2026-07-09-v1.103-settings-shell-nav": [
       {
-        "id": "R-V1103P0QC-S001",
-        "severity": "suggestion",
-        "lifecycle": "open",
-        "title": "Legacy health-indicator still links /connect",
-        "summary": "Health indicator may still deep-link /connect; redirect works but entry should prefer /settings/connection",
-        "target": "V1.103 P2 or accept",
-        "source": "qc1"
-      },
-      {
         "id": "R-V1103P0QC-S002",
         "severity": "suggestion",
         "lifecycle": "open",
@@ -907,24 +903,6 @@
         "summary": "Keep Studio SETTINGS_SHELL_SECTIONS aligned with App MUST_SECTIONS when P4 adds Workspace",
         "target": "V1.103 P4",
         "source": "qc1"
-      },
-      {
-        "id": "R-V1103P0QC-S003",
-        "severity": "nit",
-        "lifecycle": "open",
-        "title": "Dead ROUTE_TITLES[/connect] entry",
-        "summary": "Optional cleanup of unused /connect title map after permanent redirect",
-        "target": "accept",
-        "source": "qc1"
-      },
-      {
-        "id": "R-V1103P0QC-S004",
-        "severity": "suggestion",
-        "lifecycle": "open",
-        "title": "Connection post-activate still navigates to /",
-        "summary": "P2 should keep authors on /settings/connection after activate/revert (F-004)",
-        "target": "V1.103 P2",
-        "source": "qc2"
       },
       {
         "id": "R-V1103P0QC-S005",
@@ -945,6 +923,17 @@
         "summary": "qc1 F-003 shared helper extract non-blocking",
         "target": "accept",
         "source": "qc1"
+      }
+    ],
+    "2026-07-09-v1.103-settings-connection": [
+      {
+        "id": "R-V1103P2QC-S001",
+        "severity": "suggestion",
+        "lifecycle": "open",
+        "title": "Optional FingerprintGate /connect allowlist cleanup",
+        "summary": "qc3 suggestion: drop stale /connect from bypass allowlist",
+        "target": "accept",
+        "source": "qc3"
       }
     ]
   }

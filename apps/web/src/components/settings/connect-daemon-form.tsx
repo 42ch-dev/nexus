@@ -1,10 +1,23 @@
+/**
+ * Connect-to-Daemon form — extracted from legacy ConnectDaemonPage (V1.103 P2).
+ *
+ * Hosted under Settings → Connection. Implements the four author-visible
+ * states locked in daemon-runtime.md §16.2. Post activate/revert stays on
+ * `/settings/connection` (toast only — no navigate away).
+ *
+ * Author-facing copy: settings-connection-section.md.
+ */
+
 import { useEffect, useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { AlertCircle, CheckCircle, Fingerprint, Info, Shield, Wifi } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
-  Card, CardContent, CardDescription, CardHeader, CardTitle,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
 } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -17,20 +30,21 @@ import {
 import { useConnectionConfig, useSetConnectionConfig } from '@/lib/client-context';
 import { useFingerprint } from '@/lib/nexus/use-fingerprint';
 
-/**
- * "Connect to Daemon" setup screen (V1.92 P1).
- *
- * Implements the four author-visible states locked in daemon-runtime.md §16.2:
- *   1. First-use (no pinned fingerprint).
- *   2. Subsequent connect to the same endpoint with a matching pinned fingerprint.
- *   3. Fingerprint changed on a pinned endpoint — blocking warning box.
- *   4. Revert to local — de-activate remote config without deleting it.
- *
- * The screen consumes DESIGN.md `connection-setup.*` tokens for callouts and the
- * fingerprint block.
- */
-export function ConnectDaemonPage() {
-  const navigate = useNavigate();
+/** Locked by settings-connection-section.md */
+const FORM_CARD_DESCRIPTION =
+  'Enter the remote daemon URL and API key. Local mode remains available — you can revert here at any time.';
+
+const URL_FIELD_HELPER =
+  'The full HTTPS address of the daemon, including port.';
+
+const API_KEY_HELPER_PREFIX = 'The API key from the daemon machine (';
+const API_KEY_HELPER_COMMAND = 'nexus42 daemon api-key';
+const API_KEY_HELPER_SUFFIX = ' on that host).';
+
+const FINGERPRINT_TRUST_HELPER =
+  'Confirm the certificate fingerprint matches what you see on the daemon machine before connecting.';
+
+export function ConnectDaemonForm() {
   const { toast } = useToast();
   const savedConfig = useConnectionConfig();
   const setConfig = useSetConnectionConfig();
@@ -95,7 +109,7 @@ export function ConnectDaemonPage() {
       title: 'Connected to daemon',
       description: `Using ${next.endpointUrl}`,
     });
-    navigate('/');
+    // Stay on /settings/connection — no navigate away (V1.103 lock).
   }
 
   async function handleRevertToLocal() {
@@ -108,7 +122,7 @@ export function ConnectDaemonPage() {
       title: 'Using local daemon',
       description: 'Remote settings are saved but inactive.',
     });
-    navigate('/');
+    // Stay on /settings/connection — no navigate away (V1.103 lock).
   }
 
   function renderFingerprintBlock() {
@@ -131,6 +145,7 @@ export function ConnectDaemonPage() {
     }
     return (
       <div className="space-y-4">
+        <p className="text-copy-13 text-gray-700">{FINGERPRINT_TRUST_HELPER}</p>
         <div
           className="rounded-control border border-gray-alpha-400 bg-background-200 p-3 font-mono text-[13px] font-normal leading-relaxed text-gray-1000"
           data-testid="fingerprint-block"
@@ -183,9 +198,13 @@ export function ConnectDaemonPage() {
                 type="button"
                 variant="primary"
                 size="small"
-                onClick={() => void activateConfig(fpState.status === 'success' ? fpState.response.fingerprint : undefined)}
+                onClick={() =>
+                  void activateConfig(
+                    fpState.status === 'success' ? fpState.response.fingerprint : undefined,
+                  )
+                }
               >
-                Trust the new certificate and continue
+                Trust the New Certificate and Continue
               </Button>
               <Button
                 type="button"
@@ -193,7 +212,7 @@ export function ConnectDaemonPage() {
                 size="small"
                 onClick={() => resetFp()}
               >
-                Cancel and keep using the old certificate
+                Cancel and Keep Using the Old Certificate
               </Button>
             </div>
           </div>
@@ -212,7 +231,7 @@ export function ConnectDaemonPage() {
           size="default"
           onClick={() => void handleRevertToLocal()}
         >
-          Use local daemon
+          Use Local Daemon
         </Button>
       );
     }
@@ -224,140 +243,142 @@ export function ConnectDaemonPage() {
         onClick={() => void activateConfig(fpState.response.fingerprint)}
         data-testid="trust-connect-button"
       >
-        {reconnectWithMatch ? 'Reconnect with these settings' : 'Trust this certificate and connect'}
+        {reconnectWithMatch
+          ? 'Reconnect With These Settings'
+          : 'Trust This Certificate and Connect'}
       </Button>
     );
   }
 
   return (
-    <div className="mx-auto max-w-2xl py-8">
-      <Card className="shadow-card">
-        <CardHeader>
+    <Card className="shadow-card" data-testid="connect-daemon-form">
+      <CardHeader>
+        <div className="flex items-center gap-2">
+          <Wifi className="h-5 w-5 text-blue-700" aria-hidden />
+          <CardTitle>Connect to Daemon</CardTitle>
+        </div>
+        <CardDescription>{FORM_CARD_DESCRIPTION}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <div className="space-y-2">
+          <Label htmlFor="daemon-url">Daemon URL</Label>
+          <Input
+            id="daemon-url"
+            type="url"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://192.168.1.42:8420"
+            data-testid="daemon-url-input"
+          />
+          <p className="text-copy-13 text-gray-700">{URL_FIELD_HELPER}</p>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="api-key">API Key</Label>
+          <Input
+            id="api-key"
+            type={showKey ? 'text' : 'password'}
+            value={apiKey}
+            onChange={(e) => setApiKey(e.target.value)}
+            placeholder="Enter the API key from the daemon machine"
+            data-testid="api-key-input"
+          />
+          <p className="text-copy-13 text-gray-700">
+            {API_KEY_HELPER_PREFIX}
+            <code className="rounded-control bg-background-200 px-1 py-0.5 font-mono text-[13px]">
+              {API_KEY_HELPER_COMMAND}
+            </code>
+            {API_KEY_HELPER_SUFFIX}
+          </p>
           <div className="flex items-center gap-2">
-            <Wifi className="h-5 w-5 text-blue-700" aria-hidden />
-            <CardTitle>Connect to Daemon</CardTitle>
-          </div>
-          <CardDescription>
-            Connect this app to a remote Nexus daemon. Local mode stays the default
-            until you complete setup.
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-6">
-          <div className="space-y-2">
-            <Label htmlFor="daemon-url">Daemon URL</Label>
-            <Input
-              id="daemon-url"
-              type="url"
-              value={url}
-              onChange={(e) => setUrl(e.target.value)}
-              placeholder="https://192.168.1.42:8420"
-              data-testid="daemon-url-input"
-            />
-            <p className="text-[13px] text-gray-600">
-              The full HTTPS address of the daemon, including port.
-            </p>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="api-key">API Key</Label>
-            <Input
-              id="api-key"
-              type={showKey ? 'text' : 'password'}
-              value={apiKey}
-              onChange={(e) => setApiKey(e.target.value)}
-              placeholder="Enter the API key from the daemon machine"
-              data-testid="api-key-input"
-            />
-            <div className="flex items-center gap-2">
-              <Button
-                type="button"
-                variant="tertiary"
-                size="small"
-                onClick={() => setShowKey((s) => !s)}
-              >
-                {showKey ? 'Hide key' : 'Show key'}
-              </Button>
-            </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="connection-label">Label (optional)</Label>
-            <Input
-              id="connection-label"
-              type="text"
-              value={label}
-              onChange={(e) => setLabel(e.target.value)}
-              placeholder={endpointLabel(normalizedUrl)}
-              data-testid="connection-label-input"
-            />
-          </div>
-
-          <div className="rounded-card border border-gray-alpha-300 bg-gray-alpha-100 p-4 text-gray-800">
-            <div className="flex items-start gap-3">
-              <Info className="mt-0.5 h-5 w-5 flex-shrink-0 text-gray-600" aria-hidden />
-              <p className="text-copy-14">
-                If you are connecting from a browser tab to a remote daemon, your
-                serving origin must be listed in the daemon&apos;s{' '}
-                <code className="rounded-control bg-background-200 px-1 py-0.5 font-mono text-[13px]">
-                  NEXUS_DAEMON_ALLOWED_ORIGINS
-                </code>{' '}
-                setting. Desktop apps are allowed automatically.
-              </p>
-            </div>
-          </div>
-
-          {fpState.status === 'error' && (
-            <div
-              className="rounded-card border border-red-700/20 bg-red-700/10 p-4 text-gray-900"
-              role="alert"
-              data-testid="fingerprint-error"
-            >
-              <div className="flex items-start gap-3">
-                <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-700" aria-hidden />
-                <div className="space-y-2">
-                  <p className="text-copy-14">{fpState.message}</p>
-                  <p className="text-copy-14">
-                    Browsers cannot reliably distinguish an unreachable daemon from a
-                    rejected self-signed certificate, so fetching the certificate fingerprint
-                    may fail even when the daemon is running. For remote daemons that use a
-                    self-signed certificate, use the Nexus desktop app — it supports Trust On
-                    First Use (TOFU) and can store the certificate in the OS keychain.
-                  </p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {renderFingerprintBlock()}
-          {renderMismatchWarning()}
-
-          <div className="flex flex-wrap items-center gap-3 pt-2">
             <Button
               type="button"
-              variant="secondary"
-              size="default"
-              onClick={() => void handleFetchFingerprint()}
-              disabled={fpState.status === 'loading' || !normalizedUrl}
-              data-testid="fetch-fingerprint-button"
+              variant="tertiary"
+              size="small"
+              onClick={() => setShowKey((s) => !s)}
             >
-              <Fingerprint className="h-4 w-4" aria-hidden />
-              {fpState.status === 'loading' ? 'Fetching fingerprint…' : 'Fetch fingerprint'}
+              {showKey ? 'Hide key' : 'Show key'}
             </Button>
-            {renderPrimaryAction()}
-            {hasSavedConfig && (
-              <Button
-                type="button"
-                variant="tertiary"
-                size="default"
-                onClick={() => void handleRevertToLocal()}
-                data-testid="revert-local-button"
-              >
-                Revert to local
-              </Button>
-            )}
           </div>
-        </CardContent>
-      </Card>
-    </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="connection-label">Label (optional)</Label>
+          <Input
+            id="connection-label"
+            type="text"
+            value={label}
+            onChange={(e) => setLabel(e.target.value)}
+            placeholder={endpointLabel(normalizedUrl)}
+            data-testid="connection-label-input"
+          />
+        </div>
+
+        <div className="rounded-card border border-gray-alpha-300 bg-gray-alpha-100 p-4 text-gray-800">
+          <div className="flex items-start gap-3">
+            <Info className="mt-0.5 h-5 w-5 flex-shrink-0 text-gray-600" aria-hidden />
+            <p className="text-copy-14">
+              If you are connecting from a browser tab to a remote daemon, your
+              serving origin must be listed in the daemon&apos;s{' '}
+              <code className="rounded-control bg-background-200 px-1 py-0.5 font-mono text-[13px]">
+                NEXUS_DAEMON_ALLOWED_ORIGINS
+              </code>{' '}
+              setting. Desktop apps are allowed automatically.
+            </p>
+          </div>
+        </div>
+
+        {fpState.status === 'error' && (
+          <div
+            className="rounded-card border border-red-700/20 bg-red-700/10 p-4 text-gray-900"
+            role="alert"
+            data-testid="fingerprint-error"
+          >
+            <div className="flex items-start gap-3">
+              <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-700" aria-hidden />
+              <div className="space-y-2">
+                <p className="text-copy-14">{fpState.message}</p>
+                <p className="text-copy-14">
+                  Browsers cannot reliably distinguish an unreachable daemon from a
+                  rejected self-signed certificate, so fetching the certificate fingerprint
+                  may fail even when the daemon is running. For remote daemons that use a
+                  self-signed certificate, use the Nexus desktop app — it supports Trust On
+                  First Use (TOFU) and can store the certificate in the OS keychain.
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {renderFingerprintBlock()}
+        {renderMismatchWarning()}
+
+        <div className="flex flex-wrap items-center gap-3 pt-2">
+          <Button
+            type="button"
+            variant="secondary"
+            size="default"
+            onClick={() => void handleFetchFingerprint()}
+            disabled={fpState.status === 'loading' || !normalizedUrl}
+            data-testid="fetch-fingerprint-button"
+          >
+            <Fingerprint className="h-4 w-4" aria-hidden />
+            {fpState.status === 'loading' ? 'Fetching fingerprint…' : 'Fetch fingerprint'}
+          </Button>
+          {renderPrimaryAction()}
+          {hasSavedConfig && (
+            <Button
+              type="button"
+              variant="tertiary"
+              size="default"
+              onClick={() => void handleRevertToLocal()}
+              data-testid="revert-local-button"
+            >
+              Use Local Daemon
+            </Button>
+          )}
+        </div>
+      </CardContent>
+    </Card>
   );
 }
