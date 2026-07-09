@@ -465,7 +465,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     expect(within(sectionNav).queryByText('Workspace')).not.toBeInTheDocument();
   });
 
-  it('defaults to Agent section with empty frame and locked shell helper', () => {
+  it('defaults to Agent section with preselected Agent body and locked shell helper', () => {
     const hostRoot = screen.getByTestId('settings-host-fixtures');
     const shellPages = within(hostRoot).getAllByTestId(
       'settings-shell-page-chrome',
@@ -475,9 +475,11 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
       within(hostRoot).getByTestId('settings-section-nav-agent'),
     ).toHaveAttribute('aria-current', 'page');
     const outlet = within(hostRoot).getByTestId('settings-shell-outlet');
+    const agentSection = within(outlet).getByTestId('settings-agent-section');
+    expect(agentSection).toHaveAttribute('data-preselected', 'codex');
     expect(
-      within(outlet).getByTestId('settings-section-frame-agent'),
-    ).toBeInTheDocument();
+      within(outlet).queryByTestId('settings-section-frame-agent'),
+    ).not.toBeInTheDocument();
     expect(
       within(hostRoot).getAllByText(
         /Manage your local agent, daemon connection, and setup options/i,
@@ -502,7 +504,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
       within(outlet).getByTestId('settings-section-frame-connection'),
     ).toBeInTheDocument();
     expect(
-      within(outlet).queryByTestId('settings-section-frame-agent'),
+      within(outlet).queryByTestId('settings-agent-section'),
     ).not.toBeInTheDocument();
   });
 
@@ -519,6 +521,31 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     expect(
       within(framesRoot).getByTestId('settings-section-frame-setup'),
     ).toBeInTheDocument();
+  });
+
+  it('renders Agent section fixture with locked helper, preselected Codex, and Save Agent', () => {
+    const agentRoot = screen.getByTestId(
+      'settings-host-fixture-agent-section',
+    );
+    const section = within(agentRoot).getByTestId('settings-agent-section');
+    expect(section).toHaveAttribute('data-preselected', 'codex');
+    expect(
+      within(agentRoot).getByText(
+        /Choose which local ACP agent Nexus uses for creative work/i,
+      ),
+    ).toBeInTheDocument();
+    const pressed = within(agentRoot)
+      .getAllByTestId('agent-card-select-codex')
+      .filter((el) => el.getAttribute('aria-pressed') === 'true');
+    expect(pressed.length).toBeGreaterThanOrEqual(1);
+    // Preselect is Codex, not the first-installed Claude default.
+    const claudePressed = within(agentRoot)
+      .getAllByTestId('agent-card-select-claude-code')
+      .filter((el) => el.getAttribute('aria-pressed') === 'true');
+    expect(claudePressed.length).toBe(0);
+    expect(
+      within(agentRoot).getByTestId('settings-save-agent'),
+    ).toHaveTextContent('Save Agent');
   });
 
   it('retains AgentPicker thin-host reference for P1', () => {

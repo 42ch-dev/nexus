@@ -1,18 +1,18 @@
 /**
- * Studio fixtures for Settings shell chrome (V1.103 P0 Task 2).
+ * Studio fixtures for Settings shell chrome (V1.103) + Agent section body (P1).
  *
  * Studio-local shell + page chrome only — no apps/web pages/, layout/, hooks,
  * or daemon client. Section nav labels locked by settings-shell-ia.md.
  * Workspace nav is absent until P4 Stretch runs.
  *
- * V1.102 thin-host AgentPicker chrome is retained as a secondary reference
- * for P1 Agent section body work.
+ * P1 Agent section fixture is props-driven with a preselected agent card
+ * (saved-profile visual state). No App IPC / Tauri in Studio.
  */
 
 import { useState, type ReactNode } from 'react';
 
 import { Bot, RotateCcw, Settings, Wifi, type LucideIcon } from 'lucide-react';
-import { cn } from '@42ch/nexus-ui';
+import { Button, cn } from '@42ch/nexus-ui';
 
 import {
   AgentPicker,
@@ -32,7 +32,7 @@ const SETTINGS_SECTIONS: {
     id: 'agent',
     label: 'Agent',
     icon: Bot,
-    emptyHint: 'Agent section body mounts here (P1).',
+    emptyHint: 'Agent section body mounts in the shell outlet (see Agent section fixture).',
   },
   {
     id: 'connection',
@@ -50,6 +50,17 @@ const SETTINGS_SECTIONS: {
 
 const SHELL_HELPER =
   'Manage your local agent, daemon connection, and setup options from one place.';
+
+/** Locked by settings-agent-section.md — section body helper (sentence case). */
+const AGENT_SECTION_HELPER =
+  'Choose which local ACP agent Nexus uses for creative work.';
+
+/**
+ * Preselected saved-profile id for the Agent section fixture.
+ * Codex (not first-installed Claude) so the visual reads as G1 preselect,
+ * not the V1.102 first-installed default.
+ */
+const PRESELECTED_AGENT_ID = 'codex';
 
 const FIXTURE_AGENTS: AgentPickerItem[] = [
   {
@@ -221,8 +232,12 @@ function SettingsHostPageChrome({ children }: { children: ReactNode }) {
   );
 }
 
-function InteractiveSettingsPicker() {
-  const [selectedId, setSelectedId] = useState<string | null>('claude-code');
+function InteractiveSettingsPicker({
+  initialSelectedId = 'claude-code',
+}: {
+  initialSelectedId?: string | null;
+}) {
+  const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId);
   const [custom, setCustom] = useState('');
   return (
     <AgentPicker
@@ -236,6 +251,53 @@ function InteractiveSettingsPicker() {
   );
 }
 
+/**
+ * Agent section body chrome — mirrors apps/web SettingsAgentSection layout
+ * (helper + picker + Save Agent) without scan/IPC.
+ */
+function SettingsAgentSectionChrome({
+  initialSelectedId = PRESELECTED_AGENT_ID,
+}: {
+  initialSelectedId?: string | null;
+}) {
+  const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId);
+  const [custom, setCustom] = useState('');
+  const canSave = Boolean(selectedId || custom.trim());
+
+  return (
+    <div
+      className="flex flex-col gap-6"
+      data-testid="settings-agent-section"
+      data-preselected={initialSelectedId ?? undefined}
+    >
+      <div className="flex flex-col gap-2">
+        <h3 className="text-heading-16 font-heading text-gray-1000">Agent</h3>
+        <p className="text-copy-14 text-gray-900">{AGENT_SECTION_HELPER}</p>
+      </div>
+      <div data-testid="settings-host-picker-region">
+        <AgentPicker
+          status="ready"
+          agents={FIXTURE_AGENTS}
+          selectedId={selectedId}
+          onSelect={setSelectedId}
+          customLaunchValue={custom}
+          onCustomLaunchChange={setCustom}
+        />
+      </div>
+      <div className="flex items-center gap-3">
+        <Button
+          variant="primary"
+          type="button"
+          disabled={!canSave}
+          data-testid="settings-save-agent"
+        >
+          Save Agent
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function InteractiveSettingsShellPage() {
   const [active, setActive] = useState<SettingsSectionId>('agent');
   return (
@@ -243,7 +305,11 @@ function InteractiveSettingsShellPage() {
       activeSection={active}
       onSectionChange={setActive}
     >
-      <SettingsEmptySectionFrame sectionId={active} />
+      {active === 'agent' ? (
+        <SettingsAgentSectionChrome />
+      ) : (
+        <SettingsEmptySectionFrame sectionId={active} />
+      )}
     </SettingsShellPageChrome>
   );
 }
@@ -339,10 +405,27 @@ export function SettingsHostFixtures() {
         <p className="text-copy-13 text-gray-700 mb-4">
           Footer utility Settings (lucide) above profiles; main panel is the
           Settings shell — title, helper, section nav (Agent / Connection /
-          Setup), and an empty section frame. Workspace nav is absent until P4.
-          Default section is Agent.
+          Setup). Default Agent outlet shows the preselected Agent section
+          body. Workspace nav is absent until P4.
         </p>
         <SettingsShellChromeFixture />
+      </div>
+
+      <div
+        className="rounded-card border border-gray-alpha-200 bg-background-100 p-4"
+        data-testid="settings-host-fixture-agent-section"
+      >
+        <h4 className="text-heading-16 font-heading text-gray-1000 mb-1">
+          Agent section (preselected)
+        </h4>
+        <p className="text-copy-13 text-gray-700 mb-4">
+          Section chrome with locked helper copy, AgentPicker, and Save Agent.
+          Codex starts selected to show saved-profile preselect (G1 visual) —
+          props-driven only; no App IPC.
+        </p>
+        <div className="bg-background-200 rounded-card p-6">
+          <SettingsAgentSectionChrome />
+        </div>
       </div>
 
       <div
@@ -353,8 +436,8 @@ export function SettingsHostFixtures() {
           Empty section frames
         </h4>
         <p className="text-copy-13 text-gray-700 mb-4">
-          Static empty outlet frames for Agent, Connection, and Setup — App
-          section bodies land in later plans.
+          Static empty outlet frames for Connection and Setup (and Agent
+          placeholder). App Connection/Setup bodies land in later plans.
         </p>
         <div className="grid grid-cols-1 gap-4">
           {SETTINGS_SECTIONS.map(({ id }) => (
@@ -371,8 +454,8 @@ export function SettingsHostFixtures() {
           Agent body reference (thin host)
         </h4>
         <p className="text-copy-13 text-gray-700 mb-4">
-          V1.102 thin-host AgentPicker chrome retained for P1 Agent section
-          body reference — not the P0 shell claim.
+          V1.102 thin-host AgentPicker chrome retained as a secondary
+          reference — not the P1 Agent section claim.
         </p>
         <div className="bg-background-200 rounded-card p-6">
           <SettingsHostPageChrome>
