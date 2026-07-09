@@ -3,46 +3,6 @@
   "updated_at": "2026-07-09",
   "plans": [
     {
-      "id": "2026-07-09-v1.103-settings-connection",
-      "title": "P2 — Settings Connection + /connect Redirect",
-      "file": ".mstar/plans/2026-07-09-v1.103-settings-connection.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@frontend-dev",
-        "@qc-specialist",
-        "@qa-engineer"
-      ],
-      "progress": 95,
-      "tags": [
-        "V1.103",
-        "settings",
-        "connect",
-        "remote"
-      ],
-      "created_at": "2026-07-09",
-      "updated_at": "2026-07-09",
-      "notes": "QC 3/3 Approve; QA Pass. Ready to merge.",
-      "metadata": {
-        "priority": "high",
-        "tier": "must",
-        "blocked_by_plan_id": "2026-07-09-v1.103-settings-shell-nav",
-        "spec_integration_branch": "iteration/v1.103",
-        "merge_target": "iteration/v1.103",
-        "iteration_compass": ".mstar/iterations/v1.103-delivery-compass.md",
-        "iteration_refs": [
-          ".mstar/iterations/v1.103/specs/settings-connection-section.md",
-          ".mstar/iterations/v1.103/specs/settings-shell-ia.md"
-        ],
-        "primary_spec": ".mstar/iterations/v1.103/specs/settings-connection-section.md",
-        "execution_mode": "sdd",
-        "qa_gate": "mandatory",
-        "wire_contracts_changed": false,
-        "working_branch": "feat/v1.103-settings-connection",
-        "sdd_dir": ".mstar/sdd/2026-07-09-v1.103-settings-connection"
-      }
-    },
-    {
       "id": "2026-07-09-v1.103-settings-rerun-setup",
       "title": "P3 — Settings Setup Re-run",
       "file": ".mstar/plans/2026-07-09-v1.103-settings-rerun-setup.md",
@@ -184,7 +144,7 @@
         "2026-07-09-v1.103-settings-shell-nav": 2
       }
     },
-    "updated_at": "2026-07-09T20:50:00+0800"
+    "updated_at": "2026-07-09T21:10:00+0800"
   },
   "residual_findings": {
     "2026-07-05-v1.91-findings-batch": [
