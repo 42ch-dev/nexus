@@ -1,0 +1,21 @@
+{
+  "plan_id": "2026-07-10-v1.105-daemon-fullscreen-gate",
+  "schema_version": 1,
+  "archived_at": "2026-07-10T01:30:00+0800",
+  "archived_reason": "V1.105 P1 Task 2: bootstrap moved to Workspace Continue via setup-step-workspace.tsx (closes R-V1105P0-001 timing).",
+  "entries": [
+    {
+      "id": "R-V1105P0-001",
+      "title": "Clean-state: D2 auto-start before ensureSetupBootstrap; gate blocks wizard until P1 moves bootstrap to Workspace Continue",
+      "severity": "medium",
+      "lifecycle": "resolved",
+      "closed_at": "2026-07-10",
+      "closed_by": "2026-07-10-v1.105-wizard-ia-reorder",
+      "source_plan_id": "2026-07-10-v1.105-daemon-fullscreen-gate",
+      "tracking_link": ".mstar/plans/2026-07-10-v1.105-wizard-ia-reorder.md",
+      "archived_at": "2026-07-10",
+      "closure_note": "ensureSetupBootstrap now runs only on SetupStepWorkspace Continue (extracted from Welcome). Orchestrator still uses legacy welcome slot until Task 3 reorder; bootstrap ownership is on the workspace module.",
+      "closure_evidence": "apps/web/src/pages/setup-step-workspace.tsx; setup-step-workspace.test.tsx persist/bootstrap order"
+    }
+  ]
+}

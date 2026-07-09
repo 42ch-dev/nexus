@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-import { SetupStepWelcome } from '@/pages/setup-step-welcome';
+import { SetupStepWorkspace } from '@/pages/setup-step-workspace';
 import { renderInApp } from '@/test/test-providers';
 import type { DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
 import type { WizardState } from '@/pages/setup-wizard-page';
@@ -41,36 +41,55 @@ function makeState(overrides: Partial<WizardState> = {}): WizardState {
 interface HarnessProps {
   initial: WizardState;
   onNext?: () => void;
+  onBack?: () => void;
 }
 
-function Harness({ initial, onNext = vi.fn() }: HarnessProps) {
+function Harness({ initial, onNext = vi.fn(), onBack = vi.fn() }: HarnessProps) {
   const [state, setState] = useState<WizardState>(initial);
   const onChange = useCallback((next: WizardState) => setState(next), []);
   return (
-    <SetupStepWelcome
+    <SetupStepWorkspace
       state={state}
       onChange={onChange}
       onNext={onNext}
+      onBack={onBack}
     />
   );
 }
 
 function renderHarness(
   initial: WizardState,
-  options: { desktop?: DesktopCapabilities; onNext?: () => void } = {},
+  options: { desktop?: DesktopCapabilities; onNext?: () => void; onBack?: () => void } = {},
 ) {
-  return renderInApp(<Harness initial={initial} onNext={options.onNext} />, {
-    desktop: options.desktop,
-    initialRouterEntries: ['/setup'],
-  });
+  return renderInApp(
+    <Harness initial={initial} onNext={options.onNext} onBack={options.onBack} />,
+    {
+      desktop: options.desktop,
+      initialRouterEntries: ['/setup'],
+    },
+  );
 }
 
-describe('SetupStepWelcome', () => {
+describe('SetupStepWorkspace', () => {
   it('uses the hardcoded fallback in browser mode and hides the picker', async () => {
     renderHarness(makeState());
 
     await waitFor(() => expect(screen.getByText('~/Documents/nexus/default')).toBeInTheDocument());
     expect(screen.queryByRole('button', { name: 'Browse…' })).not.toBeInTheDocument();
+  });
+
+  it('renders Choose a workspace heading and Back to Agent CTA', async () => {
+    const onBack = vi.fn();
+    renderHarness(makeState({ workspaceRoot: '/custom/nexus' }), { onBack });
+
+    expect(screen.getByRole('heading', { name: 'Choose a workspace' })).toBeInTheDocument();
+    const backButton = screen.getByRole('button', { name: 'Back' });
+    expect(backButton).toBeInTheDocument();
+    expect(backButton).not.toHaveTextContent('Back');
+
+    const user = userEvent.setup();
+    await user.click(backButton);
+    expect(onBack).toHaveBeenCalled();
   });
 
   it('renders Continue as a wide prominent bottom CTA', async () => {
@@ -90,16 +109,11 @@ describe('SetupStepWelcome', () => {
     const pathText = screen.getByText(longPath);
     const pathContainer = pathText.parentElement;
 
-    // Truncation requires overflow:hidden + text-overflow:ellipsis + white-space:nowrap.
     expect(pathText).toHaveClass('truncate');
-    // The flex child must be allowed to shrink below its intrinsic width so the
-    // long path does not push the row past the right edge of the card.
     expect(pathContainer).toHaveClass('min-w-0');
     expect(pathContainer).toHaveClass('flex-1');
     expect(pathContainer?.parentElement).toHaveAttribute('data-testid', 'workspace-location-row');
 
-    // The Browse button keeps its intrinsic width so the path container absorbs
-    // all available horizontal space in the row.
     const browseButton = screen.getByRole('button', { name: 'Browse…' });
     expect(browseButton).toHaveClass('flex-shrink-0');
   });
@@ -247,13 +261,12 @@ describe('SetupStepWelcome', () => {
     await waitFor(() => expect(setWorkspacePath).toHaveBeenCalledWith(stalePath));
     await waitFor(() => expect(ensureSetupBootstrap).toHaveBeenCalled());
     await waitFor(() => expect(onNext).toHaveBeenCalled());
-    // Bootstrap runs after workspace persist: verify call order.
     const setCallOrder = setWorkspacePath.mock.invocationCallOrder[0];
     const bootstrapCallOrder = ensureSetupBootstrap.mock.invocationCallOrder[0];
     expect(setCallOrder).toBeLessThan(bootstrapCallOrder);
   });
 
-  it('surfaces bootstrap error and stays on the welcome step', async () => {
+  it('surfaces bootstrap error and stays on the workspace step', async () => {
     const user = userEvent.setup();
     const onNext = vi.fn();
     const ensureSetupBootstrap = vi.fn(() => Promise.reject(new Error('config write failed')));
@@ -288,7 +301,6 @@ describe('SetupStepWelcome', () => {
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() => expect(screen.getByText(/config write failed/)).toBeInTheDocument());
 
-    // After error, loading resets and Continue is re-enabled.
     await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() => expect(onNext).toHaveBeenCalled());

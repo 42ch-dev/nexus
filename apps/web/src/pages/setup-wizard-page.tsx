@@ -5,12 +5,13 @@ import { useSetupCompleted } from '@/lib/setup-completed-context';
 import { useDesktopCapabilities } from '@/lib/client-context';
 import { errorMessage } from '@/lib/error-message';
 import { useToast } from '@/lib/use-toast';
-import { SetupStepWelcome } from '@/pages/setup-step-welcome';
+import { SetupStepWorkspace } from '@/pages/setup-step-workspace';
 import { SetupStepDaemon } from '@/pages/setup-step-daemon';
 import { SetupStepAgent } from '@/pages/setup-step-agent';
 import { SetupStepDone } from '@/pages/setup-step-done';
 import type { AgentScanEntry } from '@42ch/nexus-contracts';
 
+/** Step ids still include legacy welcome/daemon until Task 3 reorders to Agent→Workspace→Done. */
 export type WizardStep = 'welcome' | 'daemon' | 'agent' | 'done';
 
 export interface WizardState {
@@ -21,11 +22,11 @@ export interface WizardState {
 }
 
 /**
- * First-launch 4-step setup wizard.
+ * First-launch setup wizard.
  *
- * Steps: welcome + workspace → daemon ready → agent detection → done.
- * Finishing persists the selected agent profile (desktop only), flips
- * `setup_completed` to true, and lands the author in the main UI.
+ * Workspace step owns path + `ensureSetupBootstrap` on Continue (V1.105 P1).
+ * Full Agent→Workspace→Done reorder lands in Task 3; until then the machine
+ * still starts on the legacy `welcome` slot rendering `SetupStepWorkspace`.
  */
 export function SetupWizardPage() {
   const navigate = useNavigate();
@@ -67,7 +68,7 @@ export function SetupWizardPage() {
         </aside>
         <main className="flex min-w-0 flex-1 flex-col px-setup-wizard-surface-content-panel-padding-x py-setup-wizard-surface-content-panel-padding-y">
           {step === 'welcome' && (
-            <SetupStepWelcome
+            <SetupStepWorkspace
               state={state}
               onChange={setState}
               onNext={() => setStep('daemon')}

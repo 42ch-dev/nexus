@@ -915,17 +915,6 @@
     ],
     "2026-07-10-v1.105-daemon-fullscreen-gate": [
       {
-        "id": "R-V1105P0-001",
-        "title": "Clean-state: D2 auto-start before ensureSetupBootstrap; gate blocks wizard until P1 moves bootstrap to Workspace Continue",
-        "severity": "medium",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target": "V1.105 P1",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-10-v1.105-wizard-ia-reorder.md",
-        "note": "QC1 W-001 / QC3-001. Architect §13.10.3 intentional sequencing; P0 ships D2+gate as locked."
-      },
-      {
         "id": "R-V1105P0-002",
         "title": "setup-step-daemon.tsx still calls startDaemon on error/reset until P1 retires Daemon wizard step",
         "severity": "low",

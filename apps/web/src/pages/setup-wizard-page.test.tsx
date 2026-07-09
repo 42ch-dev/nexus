@@ -242,8 +242,8 @@ describe('SetupWizardPage', () => {
       { client: makeClient(), initialRouterEntries: ['/setup'] },
     );
 
-    // Welcome step
-    expect(screen.getByRole('heading', { name: 'Welcome to Nexus' })).toBeInTheDocument();
+    // Workspace step (extracted from Welcome; full IA reorder in Task 3)
+    expect(screen.getByRole('heading', { name: 'Choose a workspace' })).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: 'Continue' }));
 
     // Daemon step

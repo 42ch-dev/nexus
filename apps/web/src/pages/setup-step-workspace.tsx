@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { FolderOpen, Loader2 } from 'lucide-react';
+import { ChevronLeft, FolderOpen, Loader2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { useDesktopCapabilities } from '@/lib/client-context';
@@ -9,13 +9,26 @@ import type { WizardState } from '@/pages/setup-wizard-page';
 
 const DEFAULT_WORKSPACE = '~/Documents/nexus/default';
 
-interface SetupStepWelcomeProps {
+interface SetupStepWorkspaceProps {
   state: WizardState;
   onChange: (state: WizardState) => void;
   onNext: () => void;
+  /** Back → Agent (required after Task 3 reorder; optional while workspace still occupies first slot). */
+  onBack?: () => void;
 }
 
-export function SetupStepWelcome({ state, onChange, onNext }: SetupStepWelcomeProps) {
+/**
+ * Wizard Workspace step — default path, optional Browse, bootstrap on Continue.
+ *
+ * Bootstrap timing (R-V1105P0-001 / V1.105 P1): `ensureSetupBootstrap` runs only
+ * when the author clicks Continue on this step (after P0 gate Ready).
+ */
+export function SetupStepWorkspace({
+  state,
+  onChange,
+  onNext,
+  onBack,
+}: SetupStepWorkspaceProps) {
   const desktop = useDesktopCapabilities();
   const [loading, setLoading] = useState(true);
   const [bootstrapping, setBootstrapping] = useState(false);
@@ -103,7 +116,7 @@ export function SetupStepWelcome({ state, onChange, onNext }: SetupStepWelcomePr
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-2">
-        <h2 className="text-heading-24 font-heading text-gray-1000">Welcome to Nexus</h2>
+        <h2 className="text-heading-24 font-heading text-gray-1000">Choose a workspace</h2>
         <p className="text-copy-14 text-gray-900">
           Nexus needs a workspace folder for your creative projects. We will create it if it does not exist.
         </p>
@@ -137,6 +150,11 @@ export function SetupStepWelcome({ state, onChange, onNext }: SetupStepWelcomePr
         data-testid="wizard-cta-row"
         data-layout="horizontal-adjacent"
       >
+        {onBack && (
+          <Button variant="tertiary" onClick={onBack} aria-label="Back" className="px-2">
+            <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        )}
         <Button
           variant="primary"
           onClick={continueToNext}
