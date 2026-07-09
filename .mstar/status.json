@@ -110,7 +110,24 @@
         "phase": "V1.105",
         "blocked_by_plan_id": "2026-07-10-v1.105-wizard-ia-reorder",
         "sdd_dir": ".mstar/sdd/2026-07-10-v1.105-portrait-shell-steps/",
-        "working_branch": "feature/v1.105-portrait-shell-steps"
+        "working_branch": "feature/v1.105-portrait-shell-steps",
+        "task_commits": [
+          {
+            "task_id": "T1",
+            "base": "7ef395103cee3bcee52a739ddf08ee1be8568978",
+            "head": "8fcaccae4ad7567a3f924ac3a1c8c7295591ccc5"
+          },
+          {
+            "task_id": "T2",
+            "base": "8fcaccae4ad7567a3f924ac3a1c8c7295591ccc5",
+            "head": "13259fa4f710252fdc9bd676ea8a0a99c372c92f"
+          },
+          {
+            "task_id": "T3",
+            "base": "13259fa4f710252fdc9bd676ea8a0a99c372c92f",
+            "head": "9831d1c7aa09f2fc0b6605b3b1a19a2303c551b7"
+          }
+        ]
       }
     }
   ],
