@@ -16,10 +16,17 @@ interface SetupCompletedContextValue {
   isLoading: boolean;
   /**
    * Persist and sync setup-completed state (desktop IPC when available).
-   * Used by wizard finish (`true`) and Settings Re-run Setup (`false`).
+   *
+   * - `true` (wizard finish): optimistic React state first so SetupGate does not
+   *   bounce `/works` → `/setup` while IPC is in flight; IPC failure rolls back.
+   * - `false` (Settings Re-run R1): await IPC success, then sync React state so
+   *   gated routes never see a stale `completed: true` after clear.
    */
   setCompleted: (value: boolean) => Promise<void>;
-  /** Mark setup as completed — delegates to {@link setCompleted}(true). */
+  /**
+   * Mark setup as completed — fire-and-forget {@link setCompleted}(true).
+   * Safe with SetupGate because `true` is applied optimistically.
+   */
   markCompleted: () => void;
 }
 
@@ -74,11 +81,25 @@ export function SetupCompletedProvider({
 
   const setCompleted = useCallback(
     async (value: boolean) => {
-      if (desktop) {
-        await desktop.setSetupCompleted(value);
+      if (value) {
+        // Optimistic: wizard finish navigates to gated routes immediately.
+        setCompletedState(true);
+        if (desktop) {
+          try {
+            await desktop.setSetupCompleted(true);
+          } catch (err) {
+            setCompletedState(false);
+            throw err;
+          }
+        }
+        return;
       }
-      // Sync React state after successful IPC (or immediately in browser).
-      setCompletedState(value);
+
+      // R1 clear: await IPC before React state so gated UI never sees stale true.
+      if (desktop) {
+        await desktop.setSetupCompleted(false);
+      }
+      setCompletedState(false);
     },
     [desktop],
   );

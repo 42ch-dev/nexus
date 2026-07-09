@@ -11,7 +11,9 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { useDesktopCapabilities } from '@/lib/client-context';
+import { errorMessage } from '@/lib/error-message';
 import { useSetupCompleted } from '@/lib/setup-completed-context';
+import { useToast } from '@/lib/use-toast';
 
 /** Locked by settings-setup-section.md — section body helper (sentence case). */
 const SETUP_SECTION_HELPER =
@@ -32,6 +34,7 @@ export function SettingsSetupSection() {
   const desktop = useDesktopCapabilities();
   const { setCompleted } = useSetupCompleted();
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [isConfirming, setIsConfirming] = useState(false);
 
@@ -39,10 +42,17 @@ export function SettingsSetupSection() {
     if (!desktop || isConfirming) return;
     setIsConfirming(true);
     try {
-      // R1: IPC + context sync inside setCompleted, then navigate.
+      // R1: await clear (IPC + context) then navigate. Failure stays on Settings.
       await setCompleted(false);
       setConfirmOpen(false);
       navigate('/setup', { replace: true });
+    } catch (err) {
+      const description = errorMessage(err) || 'Could not clear the setup marker.';
+      toast({
+        variant: 'error',
+        title: 'Could not re-run setup',
+        description,
+      });
     } finally {
       setIsConfirming(false);
     }
@@ -87,7 +97,14 @@ export function SettingsSetupSection() {
         </div>
       )}
 
-      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+      <Dialog
+        open={confirmOpen}
+        onOpenChange={(open) => {
+          // Ignore dismiss while IPC is in flight (Escape / overlay / X).
+          if (isConfirming) return;
+          setConfirmOpen(open);
+        }}
+      >
         <DialogContent title={SETUP_CONFIRM_TITLE} description={SETUP_CONFIRM_BODY}>
           <div
             className="flex justify-end gap-3"

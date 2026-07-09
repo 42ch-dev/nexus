@@ -193,4 +193,44 @@ describe('SettingsSetupSection', () => {
       'page',
     );
   });
+
+  it('shows a toast and stays on Setup when clear IPC fails', async () => {
+    const user = userEvent.setup();
+    const setSetupCompleted = vi.fn(() => Promise.reject(new Error('ipc unavailable')));
+    const resetLocalDatabase = vi.fn(() => Promise.resolve());
+
+    renderInApp(
+      <>
+        <CompletedProbe />
+        <Routes>
+          {settingsRouteTree}
+          <Route path="setup" element={<div data-testid="setup-wizard">Wizard</div>} />
+        </Routes>
+      </>,
+      {
+        client: makeClient(),
+        desktop: makeDesktop({ setSetupCompleted, resetLocalDatabase }),
+        initialRouterEntries: ['/settings/setup'],
+        setupCompleted: true,
+      },
+    );
+
+    await user.click(screen.getByTestId('settings-rerun-setup'));
+    const dialog = screen.getByRole('dialog');
+    await user.click(
+      within(dialog).getByTestId('settings-rerun-setup-confirm-action'),
+    );
+
+    await waitFor(() =>
+      expect(screen.getByText('Could not re-run setup')).toBeInTheDocument(),
+    );
+    expect(screen.getByText('ipc unavailable')).toBeInTheDocument();
+    expect(setSetupCompleted).toHaveBeenCalledWith(false);
+    expect(resetLocalDatabase).not.toHaveBeenCalled();
+    expect(screen.getByTestId('setup-completed')).toHaveTextContent('true');
+    expect(screen.getByTestId('settings-setup-section')).toBeInTheDocument();
+    expect(screen.queryByTestId('setup-wizard')).not.toBeInTheDocument();
+    // Dialog stays open so the author can retry or cancel.
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
 });

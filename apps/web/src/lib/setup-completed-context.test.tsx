@@ -15,6 +15,14 @@ function TestController() {
       <span data-testid="loading">{isLoading ? 'true' : 'false'}</span>
       <button onClick={() => markCompleted()}>Finish</button>
       <button onClick={() => void setCompleted(false)}>Clear</button>
+      <button
+        onClick={() => {
+          // Await path so IPC rejection is handled (rollback assertion).
+          void setCompleted(true).catch(() => undefined);
+        }}
+      >
+        FinishTracked
+      </button>
     </div>
   );
 }
@@ -74,9 +82,15 @@ describe('SetupCompletedProvider', () => {
     await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'));
   });
 
-  it('markCompleted persists through the desktop shell', async () => {
+  it('markCompleted sets completed true before IPC resolves (SetupGate-safe)', async () => {
     const user = userEvent.setup();
-    const setSetupCompleted = vi.fn(() => Promise.resolve());
+    let resolveIpc!: () => void;
+    const setSetupCompleted = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveIpc = resolve;
+        }),
+    );
 
     renderInApp(
       <SetupCompletedProvider>
@@ -91,13 +105,22 @@ describe('SetupCompletedProvider', () => {
     await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'));
     await user.click(screen.getByRole('button', { name: 'Finish' }));
 
-    await waitFor(() => expect(screen.getByTestId('completed')).toHaveTextContent('true'));
+    // Optimistic: React state flips before IPC settles so gated navigate is safe.
+    expect(screen.getByTestId('completed')).toHaveTextContent('true');
     expect(setSetupCompleted).toHaveBeenCalledWith(true);
+    resolveIpc();
+    await waitFor(() => expect(screen.getByTestId('completed')).toHaveTextContent('true'));
   });
 
-  it('setCompleted(false) clears marker via desktop shell and syncs state', async () => {
+  it('setCompleted(false) awaits IPC before clearing React state', async () => {
     const user = userEvent.setup();
-    const setSetupCompleted = vi.fn(() => Promise.resolve());
+    let resolveIpc!: () => void;
+    const setSetupCompleted = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveIpc = resolve;
+        }),
+    );
 
     renderInApp(
       <SetupCompletedProvider initialCompleted>
@@ -112,7 +135,31 @@ describe('SetupCompletedProvider', () => {
     expect(screen.getByTestId('completed')).toHaveTextContent('true');
     await user.click(screen.getByRole('button', { name: 'Clear' }));
 
-    await waitFor(() => expect(screen.getByTestId('completed')).toHaveTextContent('false'));
+    // R1: stay true until IPC succeeds — avoids stale true after clear.
     expect(setSetupCompleted).toHaveBeenCalledWith(false);
+    expect(screen.getByTestId('completed')).toHaveTextContent('true');
+    resolveIpc();
+    await waitFor(() => expect(screen.getByTestId('completed')).toHaveTextContent('false'));
+  });
+
+  it('setCompleted(true) rolls back React state when IPC fails', async () => {
+    const user = userEvent.setup();
+    const setSetupCompleted = vi.fn(() => Promise.reject(new Error('disk full')));
+
+    renderInApp(
+      <SetupCompletedProvider>
+        <TestController />
+      </SetupCompletedProvider>,
+      {
+        client: makeClient(),
+        desktop: makeDesktop({ setSetupCompleted }),
+      },
+    );
+
+    await waitFor(() => expect(screen.getByTestId('loading')).toHaveTextContent('false'));
+    await user.click(screen.getByRole('button', { name: 'FinishTracked' }));
+
+    await waitFor(() => expect(screen.getByTestId('completed')).toHaveTextContent('false'));
+    expect(setSetupCompleted).toHaveBeenCalledWith(true);
   });
 });
