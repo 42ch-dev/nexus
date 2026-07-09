@@ -454,7 +454,7 @@
       "id": "2026-07-09-v1.102-settings-shell",
       "title": "P1 — thin Settings host (DF-70 Slice A)",
       "file": ".mstar/plans/2026-07-09-v1.102-settings-shell.md",
-      "status": "InReview",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@product-manager",
@@ -464,7 +464,7 @@
         "@qc-specialist",
         "@qa-engineer"
       ],
-      "progress": 85,
+      "progress": 100,
       "tags": [
         "V1.102",
         "settings",
@@ -474,7 +474,7 @@
       ],
       "created_at": "2026-07-09",
       "updated_at": "2026-07-09",
-      "notes": "QA Pass with residuals; recommend Done after merge",
+      "notes": "Done — QC Approve w/ residuals; QA Pass w/ residuals; merge to iteration/v1.102",
       "metadata": {
         "priority": "high",
         "tier": "must",
