@@ -19,6 +19,11 @@ cd "$ROOT"
 
 VIOLATIONS=0
 
+# Single SSOT for promoted UI primitives (R-V1100P1QC1-W002).
+# Drives both wrapper-candidate paths and Studio @web-ui/* bans.
+# When promoting a new primitive: append here only — do not duplicate lists below.
+PROMOTED_PRIMITIVES=(button badge card input label textarea select)
+
 # ── helper: check file(s) for forbidden pattern ──
 # Usage: forbid "label" "pattern" file1 [file2 ...]
 #   "pattern" is an egrep regex; use single quotes.
@@ -72,19 +77,13 @@ check_webui_annotations() {
 
 echo "==> Checking promoted-wrapper forbidden imports..."
 
-# Wrapper file list — files that re-export from @42ch/nexus-ui.
-# Promoted: button, badge, card, input, label, textarea, select.
+# Wrapper file list — derived from PROMOTED_PRIMITIVES (SSOT above).
 # A file is a "wrapper" iff it contains a re-export from @42ch/nexus-ui.
 WRAPPER_DIR="apps/web/src/components/ui"
-WRAPPER_CANDIDATES=(
-  "$WRAPPER_DIR/button.tsx"
-  "$WRAPPER_DIR/badge.tsx"
-  "$WRAPPER_DIR/card.tsx"
-  "$WRAPPER_DIR/input.tsx"
-  "$WRAPPER_DIR/label.tsx"
-  "$WRAPPER_DIR/textarea.tsx"
-  "$WRAPPER_DIR/select.tsx"
-)
+WRAPPER_CANDIDATES=()
+for name in "${PROMOTED_PRIMITIVES[@]}"; do
+  WRAPPER_CANDIDATES+=("$WRAPPER_DIR/${name}.tsx")
+done
 
 WRAPPER_EXISTING=()
 for f in "${WRAPPER_CANDIDATES[@]}"; do
@@ -176,11 +175,11 @@ else
     check_webui_annotations "$f"
   done
 
-  # ── @web-ui/* for already-promoted primitives (Button, Badge, Card) ──
+  # ── @web-ui/* for already-promoted primitives (from PROMOTED_PRIMITIVES) ──
   # These must be imported from @42ch/nexus-ui, not @web-ui/*
   echo ""
   echo "   Checking @web-ui/* for already-promoted primitives..."
-  for promoted in button badge card input label textarea select; do
+  for promoted in "${PROMOTED_PRIMITIVES[@]}"; do
     matches=$(grep -nE "['\"]@web-ui/$promoted['\"]" "${STUDIO_FILES[@]}" 2>/dev/null || true)
     if [ -n "$matches" ]; then
       echo "❌ Studio: imports already-promoted primitive @web-ui/$promoted (use @42ch/nexus-ui)"

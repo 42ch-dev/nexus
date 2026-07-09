@@ -1,0 +1,17 @@
+{
+  "plan_id": "2026-07-08-v1.100-ui-hygiene-guardrails",
+  "entries": [
+    {
+      "id": "R-V1100P1QC1-W002",
+      "title": "Promoted-primitive list duplicated in 3 places (script WRAPPER_CANDIDATES, script promoted loop, spec table) — P2 promotion requires coordinated 3-location edits",
+      "severity": "low",
+      "decision": "fix",
+      "owner": "@frontend-dev",
+      "target": "V1.102",
+      "lifecycle": "resolved",
+      "tracking_link": ".mstar/plans/2026-07-09-v1.102-ui-hygiene.md",
+      "note": "Resolved in V1.102 P2 Task 4: single PROMOTED_PRIMITIVES array drives WRAPPER_CANDIDATES + Studio @web-ui ban loop.",
+      "archived_at": "2026-07-09"
+    }
+  ]
+}
