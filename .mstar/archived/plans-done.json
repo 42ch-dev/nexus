@@ -430,7 +430,9 @@
     "2026-07-09-v1.102-ui-hygiene",
     "2026-07-09-v1.103-settings-shell-nav",
     "2026-07-09-v1.103-settings-agent-preselect",
-    "2026-07-09-v1.103-settings-connection"
+    "2026-07-09-v1.103-settings-connection",
+    "2026-07-09-v1.103-settings-rerun-setup",
+    "2026-07-09-v1.103-settings-workspace"
   ],
   "iteration_summaries": {
     "v1.45": {
