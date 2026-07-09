@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-07-09T16:40:00+0800",
+  "updated_at": "2026-07-09T17:10:00+0800",
   "plans": [
     {
       "id": "2026-07-08-v1.99-prepare-visual-system-deepening",
@@ -357,7 +357,7 @@
         "@qc-specialist",
         "@qa-engineer"
       ],
-      "progress": 5,
+      "progress": 90,
       "tags": [
         "V1.101",
         "design-system",
@@ -367,7 +367,7 @@
       ],
       "created_at": "2026-07-09",
       "updated_at": "2026-07-09",
-      "notes": "Stretch. Deferrable to V1.102 after P0+P1. Select only.",
+      "notes": "Stretch Done path (not deferred). T1–T3 shipped; T4 placeholders for QC/QA. Plan status stays InProgress until PM after QC/QA.",
       "metadata": {
         "priority": "medium",
         "blocked_by_plan_id": "2026-07-09-v1.101-setup-wizard-ui-polish",
