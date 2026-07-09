@@ -6,7 +6,14 @@ import { TokensPage } from '@/pages/tokens';
 import { BrandPage } from '@/pages/brand';
 import { ComponentsPage } from '@/pages/components';
 import { VoicePage } from '@/pages/voice';
-import { SurfacesPage } from '@/pages/surfaces';
+import {
+  SurfacesAgentPickerPage,
+  SurfacesDaemonPage,
+  SurfacesIndexPage,
+  SurfacesLayout,
+  SurfacesSetupPage,
+  SurfacesShellPage,
+} from '@/pages/surfaces';
 
 /**
  * App shell for the Nexus Design Studio.
@@ -14,6 +21,9 @@ import { SurfacesPage } from '@/pages/surfaces';
  * Persistent header with product mark, top nav (5 gallery sections), and
  * theme toggle. Body renders the active route. Footer shows the read-only
  * SSOT hint per IA guide §2.
+ *
+ * Surfaces uses nested Studio-only section routes (V1.102 P2) — not App
+ * Settings IA.
  */
 export function App() {
   return (
@@ -39,7 +49,13 @@ export function App() {
           <Route path="/brand" element={<BrandPage />} />
           <Route path="/components" element={<ComponentsPage />} />
           <Route path="/voice" element={<VoicePage />} />
-          <Route path="/surfaces" element={<SurfacesPage />} />
+          <Route path="/surfaces" element={<SurfacesLayout />}>
+            <Route index element={<SurfacesIndexPage />} />
+            <Route path="setup" element={<SurfacesSetupPage />} />
+            <Route path="shell" element={<SurfacesShellPage />} />
+            <Route path="agent-picker" element={<SurfacesAgentPickerPage />} />
+            <Route path="daemon" element={<SurfacesDaemonPage />} />
+          </Route>
         </Routes>
       </main>
 

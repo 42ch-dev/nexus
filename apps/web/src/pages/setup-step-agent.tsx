@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from 'react';
+import { ChevronLeft } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -189,8 +190,8 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
         data-testid="wizard-cta-row"
         data-layout="horizontal-adjacent"
       >
-        <Button variant="tertiary" onClick={onBack}>
-          Back
+        <Button variant="tertiary" onClick={onBack} aria-label="Back" className="px-2">
+          <ChevronLeft className="h-4 w-4" aria-hidden="true" />
         </Button>
         <Button
           variant="primary"

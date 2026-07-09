@@ -1,17 +1,16 @@
 /**
  * Desktop daemon status bar — persistent footer strip for the desktop shell.
  *
- * V1.94 simplification: when the daemon is running, the status bar shows only
- * a restart-icon button (no pill, no state text, no enabled Start button). The
- * restart action still confirms because it interrupts running orchestration.
- * Degraded / stopped / error states are surfaced by the top-of-main-content
- * {@link MainBanner}, not this footer bar.
+ * V1.102: single-line footer — left = status dot + short title + soft Badge;
+ * right = Restart control. No secondary description. Non-running states remain
+ * surfaced by the top-of-main-content {@link MainBanner}, not this footer bar.
  *
  * Browser build: returns `null`.
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
 
+import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { useDesktopCapabilities } from '@/lib/client-context';
 import { errorMessage } from '@/lib/error-message';
@@ -94,7 +93,17 @@ export function DaemonStatusBar() {
   };
 
   return (
-    <div className="flex items-center justify-end border-t border-gray-alpha-400 bg-background-100 px-4 py-2 md:px-6">
+    <div
+      className="flex items-center justify-between gap-3 border-t border-gray-alpha-400 bg-background-100 px-4 py-2 md:px-6"
+      data-testid="daemon-status-bar"
+    >
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="h-2 w-2 shrink-0 rounded-full bg-green-700" aria-hidden />
+        <span className="truncate text-label-14 text-gray-1000">Daemon running</span>
+        <Badge variant="running" tone="soft">
+          healthy
+        </Badge>
+      </div>
       <Button
         type="button"
         variant="tertiary"
@@ -105,6 +114,7 @@ export function DaemonStatusBar() {
         title="Restart daemon"
       >
         <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} aria-hidden />
+        <span className="sr-only">Restart</span>
       </Button>
     </div>
   );

@@ -5,7 +5,7 @@
  *   1. App renders the landing page (HomePage) with section links.
  *   2. Theme toggle switches light ↔ dark and applies the `.dark` class.
  *   3. Each gallery section route renders its heading.
- *   4. Surfaces page renders setup wizard and app shell fixtures with
+ *   4. Surfaces nested section routes (V1.102 P2) render fixtures with
  *      expected labels and structural elements.
  *
  * These tests catch route/render regressions without snapshot-exhausting every
@@ -138,12 +138,71 @@ describe('Gallery section rendering', () => {
   );
 });
 
+/* ---- surfaces section menu / deep links (V1.102 P2 Task 1) -------------- */
+
+const SURFACES_SECTION_ROUTES = [
+  { route: '/surfaces', testId: 'surfaces-index', linkLabel: 'Overview' },
+  { route: '/surfaces/setup', testId: 'surfaces-setup', linkLabel: 'Setup' },
+  { route: '/surfaces/shell', testId: 'surfaces-shell', linkLabel: 'Shell' },
+  {
+    route: '/surfaces/agent-picker',
+    testId: 'surfaces-agent-picker',
+    linkLabel: 'AgentPicker',
+  },
+  { route: '/surfaces/daemon', testId: 'surfaces-daemon', linkLabel: 'Daemon' },
+] as const;
+
+describe('Surfaces section menu — deep links', () => {
+  it.each(SURFACES_SECTION_ROUTES)(
+    'renders $testId at $route with section nav',
+    ({ route, testId, linkLabel }) => {
+      mockMatchMedia(false);
+      renderStudio(route);
+
+      expect(screen.getByTestId(testId)).toBeInTheDocument();
+      const sectionNav = screen.getByTestId('surfaces-section-nav');
+      expect(sectionNav).toBeInTheDocument();
+      expect(
+        within(sectionNav).getByRole('link', { name: linkLabel }),
+      ).toHaveAttribute('aria-current', 'page');
+      // Top gallery Surfaces link stays active for nested section routes.
+      const galleryNav = screen.getByRole('navigation', {
+        name: 'Gallery sections',
+      });
+      expect(
+        within(galleryNav).getByRole('link', { name: 'Surfaces' }),
+      ).toHaveAttribute('aria-current', 'page');
+    },
+  );
+
+  it('index lists deep links to each Surfaces section', () => {
+    mockMatchMedia(false);
+    renderStudio('/surfaces');
+    const index = screen.getByTestId('surfaces-index');
+    expect(within(index).getByRole('link', { name: /Setup/ })).toHaveAttribute(
+      'href',
+      '/surfaces/setup',
+    );
+    expect(within(index).getByRole('link', { name: /Shell/ })).toHaveAttribute(
+      'href',
+      '/surfaces/shell',
+    );
+    expect(
+      within(index).getByRole('link', { name: /AgentPicker/ }),
+    ).toHaveAttribute('href', '/surfaces/agent-picker');
+    expect(within(index).getByRole('link', { name: /Daemon/ })).toHaveAttribute(
+      'href',
+      '/surfaces/daemon',
+    );
+  });
+});
+
 /* ---- surfaces page fixtures (T4) ---------------------------------------- */
 
 describe('Surfaces page — setup wizard chrome fixtures', () => {
   beforeEach(() => {
     mockMatchMedia(false);
-    renderStudio('/surfaces');
+    renderStudio('/surfaces/setup');
   });
 
   it('renders the wizard chrome section heading', () => {
@@ -199,25 +258,26 @@ describe('Surfaces page — setup wizard chrome fixtures', () => {
     expect(daemonCta).toHaveClass('flex', 'items-center');
     expect(daemonCta).not.toHaveClass('flex-col');
 
-    const daemonButtons = daemonCta?.querySelectorAll('button');
-    expect(daemonButtons?.[0]).toHaveTextContent('Back');
-    expect(daemonButtons?.[1]).toHaveTextContent('Continue');
+    const daemonBack = daemonCta?.querySelector('button[aria-label="Back"]');
+    expect(daemonBack).toBeInTheDocument();
+    expect(daemonBack).not.toHaveTextContent('Back');
+    expect(daemonCta?.querySelectorAll('button')[1]).toHaveTextContent('Continue');
 
     const agentCard = screen.getByTestId('wizard-chrome-card-agent');
     const agentCta = agentCard.querySelector('[data-testid="wizard-cta-row"]');
-    expect(agentCta?.querySelectorAll('button')[0]).toHaveTextContent('Back');
+    expect(agentCta?.querySelector('button[aria-label="Back"]')).toBeInTheDocument();
   });
 
   it('omits Back on welcome and done', () => {
     const welcomeCard = screen.getByTestId('wizard-chrome-card-welcome');
     expect(
-      welcomeCard.querySelector('[data-testid="wizard-cta-row"]')?.textContent,
-    ).not.toMatch(/Back/);
+      welcomeCard.querySelector('[data-testid="wizard-cta-row"] button[aria-label="Back"]'),
+    ).not.toBeInTheDocument();
 
     const doneCard = screen.getByTestId('wizard-chrome-card-done');
     expect(
-      doneCard.querySelector('[data-testid="wizard-cta-row"]')?.textContent,
-    ).not.toMatch(/Back/);
+      doneCard.querySelector('[data-testid="wizard-cta-row"] button[aria-label="Back"]'),
+    ).not.toBeInTheDocument();
     expect(doneCard.querySelector('[data-testid="wizard-cta-row"]')).toHaveTextContent(
       'Open Nexus',
     );
@@ -229,15 +289,32 @@ describe('Surfaces page — setup wizard chrome fixtures', () => {
     );
     expect(screen.getAllByTestId('daemon-chip-running').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Daemon is running.')).toBeInTheDocument();
-    expect(screen.getByTestId('daemon-chip-error')).toHaveTextContent(/taking longer/i);
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    const errorChip = screen.getByTestId('daemon-chip-error');
+    expect(errorChip).toHaveTextContent(/taking longer/i);
+    expect(within(errorChip).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    // Retry is first; concise left-aligned small copy below.
+    const errorChildren = Array.from(errorChip.children);
+    expect(errorChildren[0]?.querySelector('button')).toHaveTextContent('Retry');
+    expect(errorChildren[1]?.tagName).toBe('P');
+    expect(errorChildren[1]).toHaveClass('text-left', 'text-copy-12');
+  });
+
+  it('starts step connectors below each circle (nothing above step 1)', () => {
+    const welcomeCard = screen.getByTestId('wizard-chrome-card-welcome');
+    const connectors = welcomeCard.querySelectorAll('[data-testid="step-connector"]');
+    expect(connectors.length).toBe(3);
+    connectors.forEach((el) => {
+      expect(el).toHaveStyle({
+        top: 'calc(50% + var(--color-setup-wizard-step-circle-size) / 2)',
+      });
+    });
   });
 });
 
 describe('Surfaces page — app shell fixture', () => {
   beforeEach(() => {
     mockMatchMedia(false);
-    renderStudio('/surfaces');
+    renderStudio('/surfaces/shell');
   });
 
   it('renders Creator and Orchestrator tabs', () => {
@@ -273,12 +350,19 @@ describe('Surfaces page — app shell fixture', () => {
 });
 
 describe('Surfaces page — daemon status strip', () => {
-  it('renders daemon status heading and healthy badge', () => {
+  it('renders single-line status + soft badge + Restart (no description)', () => {
     mockMatchMedia(false);
-    renderStudio('/surfaces');
+    renderStudio('/surfaces/daemon');
 
-    expect(screen.getByText('Daemon running')).toBeInTheDocument();
-    expect(screen.getByText('healthy')).toBeInTheDocument();
+    const strip = screen.getByTestId('daemon-status-strip');
+    expect(within(strip).getByText('Daemon running')).toBeInTheDocument();
+    expect(within(strip).getByText('healthy')).toBeInTheDocument();
+    expect(
+      within(strip).getByRole('button', { name: 'Restart daemon' }),
+    ).toBeInTheDocument();
+    expect(
+      within(strip).queryByText(/Daemon API is reachable/i),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -287,7 +371,7 @@ describe('Surfaces page — daemon status strip', () => {
 describe('Surfaces page — AgentPicker fixtures', () => {
   beforeEach(() => {
     mockMatchMedia(false);
-    renderStudio('/surfaces');
+    renderStudio('/surfaces/agent-picker');
   });
 
   it('renders the AgentPicker section heading', () => {
@@ -346,7 +430,8 @@ describe('Surfaces page — AgentPicker fixtures', () => {
 describe('Surfaces page — Settings thin host fixtures', () => {
   beforeEach(() => {
     mockMatchMedia(false);
-    renderStudio('/surfaces');
+    // Settings thin host remains discoverable under Shell (Studio-only).
+    renderStudio('/surfaces/shell');
   });
 
   it('renders the Settings thin host section heading', () => {
@@ -376,7 +461,7 @@ describe('Surfaces page — Settings thin host fixtures', () => {
       ).length,
     ).toBeGreaterThanOrEqual(2);
     // Thin host must not include wizard Back/Continue chrome (wizard CTAs live
-    // in the separate Setup — Wizard chrome section on the same Surfaces page).
+    // on /surfaces/setup).
     expect(
       within(hostRoot).queryByTestId('wizard-cta-row'),
     ).not.toBeInTheDocument();

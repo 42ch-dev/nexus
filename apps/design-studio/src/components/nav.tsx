@@ -4,8 +4,9 @@ import { NavLink } from 'react-router-dom';
  * Primary navigation skeleton for the Design Studio.
  *
  * Five gallery routes per IA guide §3: Tokens, Brand, Components, Voice,
- * Surfaces. One-click reachable from the persistent header — no nested product
- * routes beyond optional in-section anchors (T3–T6).
+ * Surfaces. Surfaces keeps nested Studio-only section routes under
+ * `/surfaces/*` (V1.102 P2); the top-nav Surfaces link stays active for all
+ * of them.
  */
 const NAV_ITEMS = [
   { label: 'Tokens', path: '/tokens' },

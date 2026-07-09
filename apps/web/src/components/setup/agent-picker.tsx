@@ -7,13 +7,16 @@
  *
  * Settings-reusable (DF-70): future Settings may mount the same component
  * without importing setup wizard pages.
+ *
+ * V1.102 chrome: soft Installed Badge, ArrowUpRight outbound icons at label
+ * cap-height, hollow/lit selection dots, muted not-installed cards.
  */
 
-import { ExternalLink, Loader2, Terminal } from 'lucide-react';
+import { ArrowUpRight, Loader2, Terminal } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { cn } from '@/lib/utils';
-import { Input, Label } from '@42ch/nexus-ui';
+import { Badge, Input, Label } from '@42ch/nexus-ui';
 
 /** Local view-model for one agent card — owned by this module (not wire DTOs). */
 export interface AgentPickerItem {
@@ -175,7 +178,6 @@ function AgentCard({
   onSelect?: (id: string) => void;
 }) {
   const selectable = agent.installed;
-  const statusLabel = agent.installed ? 'Installed' : 'Not installed';
 
   // Outbound links must NOT be descendants of the select <button> (QC B2 /
   // nested interactive content). Card chrome is a div; selection is a sibling
@@ -190,7 +192,7 @@ function AgentCard({
           ? selected
             ? 'border-blue-700 bg-blue-700/8'
             : 'border-gray-alpha-400 bg-background-100'
-          : 'border-gray-alpha-400 bg-background-100 opacity-90',
+          : 'border-gray-alpha-400 bg-background-100 opacity-60',
       )}
     >
       {selectable ? (
@@ -204,16 +206,22 @@ function AgentCard({
             'hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700',
           )}
         >
-          <AgentCardIdentity agent={agent} selected={selected} statusLabel={statusLabel} />
+          <AgentCardIdentity agent={agent} selected={selected} />
         </button>
       ) : (
         <div className="flex w-full items-start justify-between gap-2">
-          <AgentCardIdentity agent={agent} selected={selected} statusLabel={statusLabel} />
+          <AgentCardIdentity agent={agent} selected={selected} />
         </div>
       )}
 
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
-        <span className="text-copy-13 text-gray-700">{statusLabel}</span>
+        {agent.installed ? (
+          <Badge variant="running" tone="soft" data-testid={`agent-card-installed-badge-${agent.id}`}>
+            Installed
+          </Badge>
+        ) : (
+          <span className="text-copy-13 text-gray-700">Not installed</span>
+        )}
         {agent.installUrl ? (
           <OutboundLink href={agent.installUrl} label="Install" />
         ) : null}
@@ -228,11 +236,9 @@ function AgentCard({
 function AgentCardIdentity({
   agent,
   selected,
-  statusLabel,
 }: {
   agent: AgentPickerItem;
   selected: boolean;
-  statusLabel: string;
 }) {
   return (
     <>
@@ -249,31 +255,48 @@ function AgentCardIdentity({
           </span>
         ) : null}
       </div>
-      <StatusDot installed={agent.installed} selected={selected} label={statusLabel} />
+      <StatusDot installed={agent.installed} selected={selected} />
     </>
   );
 }
 
+/**
+ * Selection affordance: hollow outline when installed-unselected; filled/lit
+ * when selected; muted solid when not installed (non-selectable).
+ */
 function StatusDot({
   installed,
   selected,
-  label,
 }: {
   installed: boolean;
   selected: boolean;
-  label: string;
 }) {
+  const label = installed
+    ? selected
+      ? 'Selected'
+      : 'Installed'
+    : 'Not installed';
+
   return (
     <span
       className="relative mt-0.5 inline-flex h-2.5 w-2.5 shrink-0"
       title={label}
       aria-hidden
+      data-testid="agent-status-dot"
+      data-dot={
+        !installed ? 'muted' : selected ? 'lit' : 'hollow'
+      }
     >
       <span
         className={cn(
           'absolute inset-0 rounded-full',
-          installed ? 'bg-green-700' : 'bg-gray-500',
-          selected && 'ring-2 ring-blue-700 ring-offset-2 ring-offset-background-100',
+          !installed && 'bg-gray-500',
+          installed &&
+            selected &&
+            'bg-green-700 ring-2 ring-blue-700 ring-offset-2 ring-offset-background-100',
+          installed &&
+            !selected &&
+            'border-[1.5px] border-green-700 bg-transparent',
         )}
       />
     </span>
@@ -286,10 +309,10 @@ function OutboundLink({ href, label }: { href: string; label: string }) {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex items-center gap-1 text-label-14 font-medium text-blue-700 transition-colors hover:text-blue-800"
+      className="inline-flex items-center gap-1 text-label-14 font-medium leading-none text-blue-700 transition-colors hover:text-blue-800"
     >
       {label}
-      <ExternalLink className="h-3 w-3" aria-hidden />
+      <ArrowUpRight className="h-[1em] w-[1em] shrink-0" aria-hidden />
     </a>
   );
 }

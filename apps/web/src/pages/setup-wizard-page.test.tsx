@@ -109,16 +109,20 @@ describe('SetupWizardPage', () => {
       expect(spans[1]).toHaveTextContent(['Welcome', 'Daemon', 'Agent', 'Done'][index]);
     });
 
-    // Each non-final step has an absolutely-positioned connector behind the circle.
+    // Each non-final step has an absolutely-positioned connector behind the circle,
+    // starting below the circle so nothing paints above step 1.
     for (let i = 0; i < 3; i++) {
-      const connector = steps[i].querySelector('div[aria-hidden="true"]');
+      const connector = steps[i].querySelector('[data-testid="step-connector"]');
       expect(connector).toBeInTheDocument();
       expect(connector).toHaveClass('w-px');
       expect(connector).toHaveClass('bg-setup-wizard-step-connector');
+      expect(connector).toHaveStyle({
+        top: 'calc(50% + var(--color-setup-wizard-step-circle-size) / 2)',
+      });
     }
 
     // The last step has no connector.
-    expect(steps[3].querySelector('div[aria-hidden="true"]')).not.toBeInTheDocument();
+    expect(steps[3].querySelector('[data-testid="step-connector"]')).not.toBeInTheDocument();
   });
 
   it('maps Steps complete/active/pending statuses as the wizard advances', async () => {
@@ -174,7 +178,8 @@ describe('SetupWizardPage', () => {
 
     const daemonCta = screen.getByTestId('wizard-cta-row');
     expect(daemonCta).toHaveAttribute('data-layout', 'horizontal-adjacent');
-    expect(daemonCta.querySelectorAll('button')[0]).toHaveTextContent('Back');
+    expect(daemonCta.querySelector('button[aria-label="Back"]')).toBeInTheDocument();
+    expect(daemonCta.querySelector('button[aria-label="Back"]')).not.toHaveTextContent('Back');
 
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() => expect(screen.getByText('codex')).toBeInTheDocument());
@@ -206,7 +211,7 @@ describe('SetupWizardPage', () => {
       'data-step-status',
       'active',
     );
-    expect(screen.getByTestId('wizard-cta-row').textContent).not.toMatch(/Back/);
+    expect(screen.getByTestId('wizard-cta-row').querySelector('button[aria-label="Back"]')).not.toBeInTheDocument();
   });
 
   it('moves through the four steps and finishes', async () => {

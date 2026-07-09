@@ -498,7 +498,7 @@
       "id": "2026-07-09-v1.102-ui-hygiene",
       "title": "P2 — UI Hygiene + Surfaces Polish (Stretch)",
       "file": ".mstar/plans/2026-07-09-v1.102-ui-hygiene.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@product-manager",
@@ -507,7 +507,7 @@
         "@qc-specialist",
         "@qa-engineer"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "V1.102",
         "surfaces",
@@ -516,7 +516,7 @@
       ],
       "created_at": "2026-07-09",
       "updated_at": "2026-07-09",
-      "notes": "Stretch. Deferrable. Surfaces menu + chrome polish + guardrails.",
+      "notes": "Done — Stretch Surfaces polish; QC/QA Pass with residuals; merge to iteration/v1.102",
       "metadata": {
         "priority": "medium",
         "tier": "stretch",
@@ -531,7 +531,9 @@
         "primary_spec": ".mstar/iterations/v1.102/specs/surfaces-polish-contract.md",
         "execution_mode": "sdd",
         "qa_gate": "mandatory",
-        "wire_contracts_changed": false
+        "wire_contracts_changed": false,
+        "working_branch": "feat/v1.102-ui-hygiene",
+        "sdd_dir": ".mstar/sdd/2026-07-09-v1.102-ui-hygiene"
       }
     }
   ],
@@ -556,14 +558,46 @@
     },
     "tech_debt_summary": {
       "updated_at": "2026-07-09",
-      "total_open": 39,
+      "total_open": 51,
       "by_severity": {
-        "nit": 14,
+        "critical": 0,
+        "high": 0,
+        "medium": 1,
         "low": 24,
-        "medium": 1
+        "nit": 23,
+        "suggestion": 3
       },
-      "by_target": {},
-      "by_plan": {}
+      "by_target": {
+        "when list virtualisation lands": 1,
+        "V1.96 spec-hygiene pass": 1,
+        "V1.96": 14,
+        "V1.97": 4,
+        "V1.97+": 1,
+        "V1.99+": 1,
+        "post-V1.99": 2,
+        "post-V1.100": 8,
+        "V1.102+": 1,
+        "V1.101 P1 or V1.102": 1,
+        "post-V1.101": 8,
+        "accept": 1,
+        "unspecified": 8
+      },
+      "by_plan": {
+        "2026-07-05-v1.91-findings-batch": 1,
+        "2026-07-06-v1.93-closure": 1,
+        "2026-07-05-v1.92-closure": 1,
+        "2026-07-06-v1.94-closure": 9,
+        "2026-07-07-v1.95-implement-fixes": 4,
+        "2026-07-07-v1.96-implement-rework": 5,
+        "2026-07-07-v1.97-desktop-first-launch-hardening": 3,
+        "2026-07-08-v1.100-ui-hygiene-guardrails": 5,
+        "2026-07-08-v1.100-desktop-clean-state-first-launch": 3,
+        "2026-07-09-v1.101-agent-detection-picker": 4,
+        "2026-07-09-v1.101-setup-wizard-ui-polish": 2,
+        "2026-07-09-v1.101-select-component-promotion": 5,
+        "2026-07-09-v1.102-badge-soft-solid": 3,
+        "2026-07-09-v1.102-settings-shell": 5
+      }
     },
     "updated_at": "2026-07-09T14:50:00+0800"
   },
@@ -964,17 +998,6 @@
     ],
     "2026-07-08-v1.100-ui-hygiene-guardrails": [
       {
-        "id": "R-V1100P1QC1-W002",
-        "title": "Promoted-primitive list duplicated in 3 places (script WRAPPER_CANDIDATES, script promoted loop, spec table) — P2 promotion requires coordinated 3-location edits",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.101",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
-        "note": "Fix: single PROMOTED_PRIMITIVES array at top of check-ui-guardrails.sh. P2 adds input/label/textarea anyway. QC source: qc1 W-002 V1.101 P2 updated select in both script sites but did not introduce single PROMOTED_PRIMITIVES array (QC1 S-001)."
-      },
-      {
         "id": "R-V1100P1QC2-W001",
         "title": "Static-only detection (grep) cannot catch dynamic import()/require() bypasses of forbidden imports",
         "severity": "low",
@@ -1258,6 +1281,32 @@
         "summary": "Mapping extract / Studio Save CTA polish optional",
         "source": "qc-tri",
         "plan_id": "2026-07-09-v1.102-settings-shell"
+      }
+    ],
+    "2026-07-09-v1.102-ui-hygiene": [
+      {
+        "id": "R-V1102P2QC-S001",
+        "severity": "suggestion",
+        "lifecycle": "open",
+        "summary": "Stale Surfaces daemon helper/blurb copy",
+        "source": "qc-tri",
+        "plan_id": "2026-07-09-v1.102-ui-hygiene"
+      },
+      {
+        "id": "R-V1102P2QC-S002",
+        "severity": "suggestion",
+        "lifecycle": "open",
+        "summary": "Studio vs App Restart label density parity",
+        "source": "qc-tri",
+        "plan_id": "2026-07-09-v1.102-ui-hygiene"
+      },
+      {
+        "id": "R-V1102P2QC-S003",
+        "severity": "suggestion",
+        "lifecycle": "open",
+        "summary": "Soft running Badge semantic reuse for Installed/healthy",
+        "source": "qc-tri",
+        "plan_id": "2026-07-09-v1.102-ui-hygiene"
       }
     ]
   }

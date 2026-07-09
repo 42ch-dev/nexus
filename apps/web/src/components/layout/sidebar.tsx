@@ -66,8 +66,11 @@ const ORCHESTRATOR_GROUPS: NavGroup[] = [
  * Sidebar nav — V1.94 two-tab IA (Creator | Orchestrator).
  *
  * Width 248px, background-100, divider gray-alpha-400. Footer profile switcher
- * is always visible at the bottom of the sidebar. Active item uses DESIGN.md
- * tokens: gray-alpha-100 fill + gray-1000 text + left blue-700 bar.
+ * is always visible at the bottom of the sidebar.
+ *
+ * V1.102 aesthetic: quieter inactive leaf rows; selected leaf uses soft
+ * `activeBackgroundColor` + short/thin `activeBarColor`; parent groups are
+ * disclosure labels only (no competing fill) — DESIGN.md `sidebar-nav`.
  */
 export function Sidebar() {
   const [activeTab, setActiveTab] = useState<TabId>('creator');
@@ -115,10 +118,10 @@ export function Sidebar() {
           data-testid="settings-footer-utility-link"
           className={({ isActive }) =>
             cn(
-              'group relative flex h-9 items-center gap-2 rounded-control px-3 text-label-14 transition-colors duration-state ease-standard',
+              'group relative flex h-sidebar-nav-item-height items-center gap-2 rounded-control px-3 text-label-14 transition-colors duration-state ease-standard',
               isActive
                 ? 'bg-gray-alpha-100 text-gray-1000'
-                : 'text-gray-800 hover:bg-gray-alpha-100 hover:text-gray-1000',
+                : 'text-gray-600 hover:bg-gray-alpha-100 hover:text-gray-900',
             )
           }
         >
@@ -127,7 +130,7 @@ export function Sidebar() {
               {isActive && (
                 <span
                   aria-hidden
-                  className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-pill bg-blue-700"
+                  className="absolute left-0 top-1/2 h-5 w-[2px] -translate-y-1/2 rounded-pill bg-blue-700"
                 />
               )}
               <Settings className="h-4 w-4 shrink-0" aria-hidden />
@@ -177,11 +180,12 @@ function NavGroup({ group }: { group: NavGroup }) {
 
   return (
     <li className="flex flex-col gap-1">
+      {/* Parent = group/disclosure label only — no competing selected fill */}
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="flex items-center gap-1 px-3 py-1 text-label-12 font-medium uppercase tracking-wide text-gray-700"
+        className="flex items-center gap-1 px-3 py-1 text-label-12 font-medium uppercase tracking-wide text-gray-600"
       >
         {hasMultiple && (open ? (
           <ChevronDown className="h-3.5 w-3.5" aria-hidden />
@@ -191,7 +195,7 @@ function NavGroup({ group }: { group: NavGroup }) {
         {group.label}
       </button>
       {open && (
-        <ul className="flex flex-col gap-1">
+        <ul className="flex flex-col gap-0.5">
           {group.items.map((item) => (
             <NavItemLink key={item.to} item={item} />
           ))}
@@ -209,10 +213,10 @@ function NavItemLink({ item }: { item: NavItem }) {
         to={item.to}
         className={({ isActive }) =>
           cn(
-            'group relative flex h-9 items-center gap-2 rounded-control px-3 text-label-14 transition-colors duration-state ease-standard',
+            'group relative flex h-sidebar-nav-item-height items-center gap-2 rounded-control px-3 text-label-14 transition-colors duration-state ease-standard',
             isActive
               ? 'bg-gray-alpha-100 text-gray-1000'
-              : 'text-gray-800 hover:bg-gray-alpha-100 hover:text-gray-1000',
+              : 'text-gray-600 hover:bg-gray-alpha-100 hover:text-gray-900',
           )
         }
       >
@@ -221,10 +225,14 @@ function NavItemLink({ item }: { item: NavItem }) {
             {isActive && (
               <span
                 aria-hidden
-                className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-pill bg-blue-700"
+                data-testid="sidebar-active-bar"
+                className="absolute left-0 top-1/2 h-5 w-[2px] -translate-y-1/2 rounded-pill bg-blue-700"
               />
             )}
-            <Icon className="h-4 w-4 shrink-0" aria-hidden />
+            <Icon
+              className={cn('h-4 w-4 shrink-0', isActive ? 'opacity-100' : 'opacity-70')}
+              aria-hidden
+            />
             <span>{item.label}</span>
           </>
         )}
