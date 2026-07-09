@@ -19,7 +19,7 @@ Locked for Tasks 2–3 — no product reopen:
 
 **Pre-P0 baseline (do not preserve):** today `SetupGate` waits for daemon only on the completed-setup path; `/setup` can mount without that wait. P0 inverts this — Ready is required before **either** route tree renders on desktop.
 
-**Recovery default for Task 3:** prefer reload + `resetLocalDatabase` parity with V1.96/V1.97 splash error paths; do **not** make wizard/`startDaemon` the clean-state happy path. Gate may call `startDaemon` only in an explicit recovery branch if needed during implement.
+**Recovery (Task 3 locked):** Happy path never calls `startDaemon`. Retry = `window.location.reload()`. Reset = `resetLocalDatabase` then reload — **no** post-reset `startDaemon` (D2 `.setup()` always-starts on reload).
 
 ## Goal
 
