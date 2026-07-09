@@ -1,18 +1,37 @@
 /**
- * Studio fixtures for Settings shell chrome (V1.103) + Agent section body (P1).
+ * Studio fixtures for Settings shell chrome (V1.103) + Agent (P1) +
+ * Connection (P2) section bodies.
  *
  * Studio-local shell + page chrome only — no apps/web pages/, layout/, hooks,
  * or daemon client. Section nav labels locked by settings-shell-ia.md.
  * Workspace nav is absent until P4 Stretch runs.
  *
  * P1 Agent section fixture is props-driven with a preselected agent card
- * (saved-profile visual state). No App IPC / Tauri in Studio.
+ * (saved-profile visual state). P2 Connection section fixture shows locked
+ * helper copy + form chrome placeholder. No App IPC / Tauri in Studio.
  */
 
 import { useState, type ReactNode } from 'react';
 
-import { Bot, RotateCcw, Settings, Wifi, type LucideIcon } from 'lucide-react';
-import { Button, cn } from '@42ch/nexus-ui';
+import {
+  Bot,
+  Fingerprint,
+  RotateCcw,
+  Settings,
+  Wifi,
+  type LucideIcon,
+} from 'lucide-react';
+import {
+  Button,
+  Card,
+  CardContent,
+  CardDescription,
+  CardHeader,
+  CardTitle,
+  cn,
+  Input,
+  Label,
+} from '@42ch/nexus-ui';
 
 import {
   AgentPicker,
@@ -38,7 +57,8 @@ const SETTINGS_SECTIONS: {
     id: 'connection',
     label: 'Connection',
     icon: Wifi,
-    emptyHint: 'Connection section body mounts here (P2).',
+    emptyHint:
+      'Connection section body mounts in the shell outlet (see Connection section fixture).',
   },
   {
     id: 'setup',
@@ -55,6 +75,28 @@ const SHELL_HELPER =
 const AGENT_SECTION_HELPER =
   'Choose which local ACP agent Nexus uses for creative work.';
 
+/** Locked by settings-connection-section.md — section body helper (sentence case). */
+const CONNECTION_SECTION_HELPER =
+  'Connect this app to a remote Nexus daemon. Your local daemon stays the default until you activate a remote connection.';
+
+const CONNECTION_FORM_DESCRIPTION =
+  'Enter the remote daemon URL and API key. Local mode remains available — you can revert here at any time.';
+
+const CONNECTION_URL_HELPER =
+  'The full HTTPS address of the daemon, including port.';
+
+const CONNECTION_API_KEY_HELPER_PREFIX =
+  'The API key from the daemon machine (';
+const CONNECTION_API_KEY_HELPER_COMMAND = 'nexus42 daemon api-key';
+const CONNECTION_API_KEY_HELPER_SUFFIX = ' on that host).';
+
+const CONNECTION_FINGERPRINT_HELPER =
+  'Confirm the certificate fingerprint matches what you see on the daemon machine before connecting.';
+
+/** Fixture-only sample values — visual chrome, not live connection state. */
+const FIXTURE_DAEMON_URL = 'https://192.168.1.42:8420';
+const FIXTURE_API_KEY = '••••••••••••••••';
+const FIXTURE_FINGERPRINT = 'SHA256:aa:bb:cc:dd:ee:ff';
 /**
  * Preselected saved-profile id for the Agent section fixture.
  * Codex (not first-installed Claude) so the visual reads as G1 preselect,
@@ -298,6 +340,121 @@ function SettingsAgentSectionChrome({
   );
 }
 
+/**
+ * Connection section body chrome — locked helper + Connect-to-Daemon form
+ * placeholder (settings-connection-section.md). Props-driven only; no App IPC.
+ */
+function SettingsConnectionSectionChrome() {
+  const [showKey, setShowKey] = useState(false);
+
+  return (
+    <div
+      className="flex flex-col gap-6"
+      data-testid="settings-connection-section"
+    >
+      <div className="flex flex-col gap-2">
+        <h3 className="text-heading-16 font-heading text-gray-1000">
+          Connection
+        </h3>
+        <p className="text-copy-14 text-gray-900">{CONNECTION_SECTION_HELPER}</p>
+      </div>
+
+      <Card className="shadow-card" data-testid="settings-connection-form-chrome">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <Wifi className="h-5 w-5 text-blue-700" aria-hidden="true" />
+            <CardTitle>Connect to Daemon</CardTitle>
+          </div>
+          <CardDescription>{CONNECTION_FORM_DESCRIPTION}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <div className="space-y-2">
+            <Label htmlFor="studio-daemon-url">Daemon URL</Label>
+            <Input
+              id="studio-daemon-url"
+              type="url"
+              defaultValue={FIXTURE_DAEMON_URL}
+              placeholder="https://192.168.1.42:8420"
+              data-testid="daemon-url-input"
+              readOnly
+            />
+            <p className="text-copy-13 text-gray-700">{CONNECTION_URL_HELPER}</p>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="studio-api-key">API Key</Label>
+            <Input
+              id="studio-api-key"
+              type={showKey ? 'text' : 'password'}
+              defaultValue={FIXTURE_API_KEY}
+              placeholder="Enter the API key from the daemon machine"
+              data-testid="api-key-input"
+              readOnly
+            />
+            <p className="text-copy-13 text-gray-700">
+              {CONNECTION_API_KEY_HELPER_PREFIX}
+              <code className="rounded-control bg-background-200 px-1 py-0.5 font-mono text-[13px]">
+                {CONNECTION_API_KEY_HELPER_COMMAND}
+              </code>
+              {CONNECTION_API_KEY_HELPER_SUFFIX}
+            </p>
+            <div className="flex items-center gap-2">
+              <Button
+                type="button"
+                variant="tertiary"
+                size="small"
+                onClick={() => setShowKey((s) => !s)}
+              >
+                {showKey ? 'Hide key' : 'Show key'}
+              </Button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-copy-13 text-gray-700">
+              {CONNECTION_FINGERPRINT_HELPER}
+            </p>
+            <div
+              className="rounded-control border border-gray-alpha-400 bg-background-200 p-3 font-mono text-[13px] font-normal leading-relaxed text-gray-1000"
+              data-testid="fingerprint-block"
+            >
+              {FIXTURE_FINGERPRINT}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 pt-2">
+            <Button
+              type="button"
+              variant="secondary"
+              size="default"
+              data-testid="fetch-fingerprint-button"
+            >
+              <Fingerprint className="h-4 w-4" aria-hidden="true" />
+              Fetch fingerprint
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              size="default"
+              data-testid="trust-connect-button"
+            >
+              Trust This Certificate and Connect
+            </Button>
+            <Button
+              type="button"
+              variant="tertiary"
+              size="default"
+              data-testid="revert-local-button"
+            >
+              Use Local Daemon
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function InteractiveSettingsShellPage() {
   const [active, setActive] = useState<SettingsSectionId>('agent');
   return (
@@ -307,6 +464,8 @@ function InteractiveSettingsShellPage() {
     >
       {active === 'agent' ? (
         <SettingsAgentSectionChrome />
+      ) : active === 'connection' ? (
+        <SettingsConnectionSectionChrome />
       ) : (
         <SettingsEmptySectionFrame sectionId={active} />
       )}
@@ -406,7 +565,8 @@ export function SettingsHostFixtures() {
           Footer utility Settings (lucide) above profiles; main panel is the
           Settings shell — title, helper, section nav (Agent / Connection /
           Setup). Default Agent outlet shows the preselected Agent section
-          body. Workspace nav is absent until P4.
+          body; Connection outlet shows Connection section chrome. Workspace
+          nav is absent until P4.
         </p>
         <SettingsShellChromeFixture />
       </div>
@@ -430,14 +590,32 @@ export function SettingsHostFixtures() {
 
       <div
         className="rounded-card border border-gray-alpha-200 bg-background-100 p-4"
+        data-testid="settings-host-fixture-connection-section"
+      >
+        <h4 className="text-heading-16 font-heading text-gray-1000 mb-1">
+          Connection section
+        </h4>
+        <p className="text-copy-13 text-gray-700 mb-4">
+          Section chrome with locked helper copy and Connect-to-Daemon form
+          placeholder (URL / API key / fingerprint helpers + Title Case CTAs).
+          Fixture-driven only; no App IPC.
+        </p>
+        <div className="bg-background-200 rounded-card p-6">
+          <SettingsConnectionSectionChrome />
+        </div>
+      </div>
+
+      <div
+        className="rounded-card border border-gray-alpha-200 bg-background-100 p-4"
         data-testid="settings-host-fixture-section-frames"
       >
         <h4 className="text-heading-16 font-heading text-gray-1000 mb-1">
           Empty section frames
         </h4>
         <p className="text-copy-13 text-gray-700 mb-4">
-          Static empty outlet frames for Connection and Setup (and Agent
-          placeholder). App Connection/Setup bodies land in later plans.
+          Static empty outlet frames for Agent / Connection / Setup
+          placeholders. Shell outlet mounts Agent and Connection bodies; Setup
+          body lands in P3.
         </p>
         <div className="grid grid-cols-1 gap-4">
           {SETTINGS_SECTIONS.map(({ id }) => (

@@ -492,7 +492,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('switches empty section frames when section nav is clicked', () => {
+  it('switches to Connection section chrome when section nav is clicked', () => {
     const hostRoot = screen.getByTestId('settings-host-fixtures');
     const outlet = within(hostRoot).getByTestId('settings-shell-outlet');
     const connectionTab = within(hostRoot).getByTestId(
@@ -501,8 +501,11 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     fireEvent.click(connectionTab);
     expect(connectionTab).toHaveAttribute('aria-current', 'page');
     expect(
-      within(outlet).getByTestId('settings-section-frame-connection'),
+      within(outlet).getByTestId('settings-connection-section'),
     ).toBeInTheDocument();
+    expect(
+      within(outlet).queryByTestId('settings-section-frame-connection'),
+    ).not.toBeInTheDocument();
     expect(
       within(outlet).queryByTestId('settings-agent-section'),
     ).not.toBeInTheDocument();
@@ -546,6 +549,51 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     expect(
       within(agentRoot).getByTestId('settings-save-agent'),
     ).toHaveTextContent('Save Agent');
+  });
+
+  it('renders Connection section fixture with locked helper and form chrome', () => {
+    const connectionRoot = screen.getByTestId(
+      'settings-host-fixture-connection-section',
+    );
+    expect(
+      within(connectionRoot).getByTestId('settings-connection-section'),
+    ).toBeInTheDocument();
+    expect(
+      within(connectionRoot).getByText(
+        /Connect this app to a remote Nexus daemon\. Your local daemon stays the default/i,
+      ),
+    ).toBeInTheDocument();
+    const form = within(connectionRoot).getByTestId(
+      'settings-connection-form-chrome',
+    );
+    expect(within(form).getByText('Connect to Daemon')).toBeInTheDocument();
+    expect(
+      within(form).getByText(
+        /Enter the remote daemon URL and API key\. Local mode remains available/i,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(form).getByText(
+        /The full HTTPS address of the daemon, including port/i,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(form).getByText(/The API key from the daemon machine/i),
+    ).toBeInTheDocument();
+    expect(
+      within(form).getByText('nexus42 daemon api-key'),
+    ).toBeInTheDocument();
+    expect(
+      within(form).getByText(
+        /Confirm the certificate fingerprint matches what you see on the daemon machine/i,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(form).getByTestId('trust-connect-button'),
+    ).toHaveTextContent('Trust This Certificate and Connect');
+    expect(
+      within(form).getByTestId('revert-local-button'),
+    ).toHaveTextContent('Use Local Daemon');
   });
 
   it('retains AgentPicker thin-host reference for P1', () => {
