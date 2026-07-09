@@ -421,7 +421,10 @@
       "by_target": {},
       "by_plan": {}
     },
-    "updated_at": "2026-07-09T14:50:00+0800"
+    "updated_at": "2026-07-09T14:50:00+0800",
+    "active_iteration": "V1.101",
+    "iteration_status": "completed",
+    "iteration_close_date": "2026-07-09"
   },
   "residual_findings": {
     "2026-07-05-v1.91-findings-batch": [

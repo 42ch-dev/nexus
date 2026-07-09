@@ -1,5 +1,7 @@
 # Studio-First: Visual Then App (V1.101)
 
+> **Promoted to:** `.mstar/knowledge/architecture-patterns/ui-component-promotion-workflow.md` § V1.101 Extension (compound V1.101). This file remains the iteration workspace snapshot.
+
 ## Rule
 
 For every UI-visual change in this iteration:

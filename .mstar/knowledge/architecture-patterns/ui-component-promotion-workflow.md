@@ -1,11 +1,12 @@
 ---
 module: nexus-ui
 date: 2026-07-08
+last_updated: 2026-07-09
 problem_type: architecture_decision
 category: architecture-patterns
 severity: medium
-plan_id: 2026-07-08-v1.99-nexus-ui-component-promotion
-tags: [nexus-ui, component-promotion, design-studio, presentational-primitives, package-boundary]
+plan_id: 2026-07-08-v1.99-nexus-ui-component-promotion; V1.100 guardrails+form-fields; V1.101 Select + AgentPicker placement
+tags: [nexus-ui, component-promotion, design-studio, presentational-primitives, package-boundary, agent-picker, select, studio-first]
 applies_when: promoting a UI primitive from app ownership into @42ch/nexus-ui, or deciding where a new UI component should live
 ---
 
@@ -85,3 +86,12 @@ V1.100 (P1 + P2) hardened the promotion workflow from reviewer-instruction to **
 3. **Form-field promotion is semantics-first, not lift-and-shift.** V1.99 deferred Input/Label/Textarea because moving code without locking helper/error/required semantics "would only move code." V1.100 P2 locked an explicit contract first: label/control association (`htmlFor`+`id`, **app-owned** id generation), `invalid`→`aria-invalid="true"` (`invalid || undefined` coercion so false/omitted omits the attribute), `aria-describedby` **app-wired**, helper/error/required copy **app-owned**, **no stateful `FormField` package export**. The package owns only the presentational surface + native attribute passthrough. Promote the contract BEFORE the code.
 
 **Promotion checklist (locked, reusable):** move source+tests → `packages/nexus-ui/src/components/`; add to barrel; Web wrapper = thin re-export; Studio switches `@web-ui/<name>` → `@42ch/nexus-ui`; update the guardrail promoted set + transitional table. See `.mstar/iterations/v1.100/specs/ui-guardrails-cn-ssot.md` § "Promotion checklist" (iteration snapshot).
+
+## V1.101 Extension — Select promotion + app-shared vs package placement
+
+V1.101 proved two complementary placement rules on the same studio-first track:
+
+1. **`Select` is a package promotion (Stretch P2).** Same semantics-first ladder as V1.100 form fields: lock a11y/composition contract → Studio fixtures → `@42ch/nexus-ui` presentational export + tests → Studio-direct import → Web thin re-export → update `tooling/check-ui-guardrails.sh` + Studio README import surface. Transitional `@web-ui/*` remains only for unpromoted keep-web primitives (Dialog, States, Table, Tabs). **Docs must match guardrails** — listing a promoted primitive under `@web-ui/*` in README is a QC blocker even when code is correct.
+2. **`AgentPicker` is app-shared, not package (Must P0).** Reusable across wizard (and future Settings host) at `apps/web/src/components/setup/agent-picker.tsx`, but it composes scan/profile/outbound-link product semantics — **do not** promote to `@42ch/nexus-ui` until the surface is presentational-only. Studio may import via a scoped alias; Settings shell remains **DF-70**.
+
+**Studio-first + smoke separation (process):** UI-visual work = Studio fixtures → visual acceptance → App wiring on a separate track. Interactive macOS desktop smoke is a **human gate**, not an automated Done / CI blocker. Distilled from `.mstar/iterations/v1.101/guides/studio-first-visual-then-app.md` (workspace snapshot).

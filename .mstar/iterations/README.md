@@ -111,7 +111,7 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | [v1.98-design-studio-and-design-unification-compass-v1.md](v1.98-design-studio-and-design-unification-compass-v1.md) | V1.98 | **Completed** (2026-07-08) — Design Studio & DESIGN Unification. Standalone `apps/design-studio` gallery + DESIGN SSOT unified to repo root + `@nexus/design-tokens` shared pipeline. QC tri Approve + QA Pass. `wire_contracts_changed: false`. |
 | [v1.99-design-system-deepening-compass-v1.md](v1.99-design-system-deepening-compass-v1.md) | V1.99 | **Completed** (2026-07-08) — Design System Deepening. Promoted Button/Badge/Card to `@42ch/nexus-ui`, redesigned `/surfaces` with registered tokens, codified studio-first workflow. Integration branch `iteration/v1.99`; target `main`. |
 | [v1.100-delivery-compass.md](v1.100-delivery-compass.md) | V1.100 | **Delivered** (2026-07-09) — UI Completion: Desktop clean-state first-launch (bootstrap-gated) + UI guardrails/`cn` SSOT + Form Field component promotion. All 3 plans Done + QA Pass. Integration branch `iteration/v1.100`; target `main`. |
-| [v1.101-delivery-compass.md](v1.101-delivery-compass.md) | V1.101 | **Active** (2026-07-09) — Desktop setup polish + AgentPicker (Must) + Select stretch. Studio-first visual→App; Settings shell deferred (DF-70). Integration branch `iteration/v1.101`; target `main`. |
+| [v1.101-delivery-compass.md](v1.101-delivery-compass.md) | V1.101 | **completed** (2026-07-09) — Desktop setup polish + AgentPicker (Must) + Select stretch shipped. Studio-first; Settings shell remains DF-70. Integration `iteration/v1.101` → `main`. |
 
 ### Active iteration workspaces
 

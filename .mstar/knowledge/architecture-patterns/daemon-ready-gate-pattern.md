@@ -1,12 +1,12 @@
 ---
 module: apps/desktop/src-tauri + apps/web (setup-gate, daemon-status-bar, main-banner)
 date: 2026-07-06
-last_updated: 2026-07-08
+last_updated: 2026-07-09
 problem_type: architecture-pattern
 category: architecture-patterns
 severity: medium
-plan_id: V1.94-P-last (compound of desktop onboarding & IA pass); V1.96 refinements from 2026-07-07-v1.96-implement-rework; V1.97 refinements from 2026-07-07-v1.97-desktop-first-launch-hardening
-tags: [daemon-runtime, sidecar, health-probe, desktop-shell, setup-wizard, daemon-status-bar, gate, two-consumer-pattern, late-subscription-race, stderr-capture, bounded-timeout, tauri-v2-sidecar-resolution, stopped-initial-state, attach-without-ownership]
+plan_id: V1.94-P-last (compound of desktop onboarding & IA pass); V1.96 refinements from 2026-07-07-v1.96-implement-rework; V1.97 refinements from 2026-07-07-v1.97-desktop-first-launch-hardening; V1.101 Class B PATH enrichment
+tags: [daemon-runtime, sidecar, health-probe, desktop-shell, setup-wizard, daemon-status-bar, gate, two-consumer-pattern, late-subscription-race, stderr-capture, bounded-timeout, tauri-v2-sidecar-resolution, stopped-initial-state, attach-without-ownership, path-enrichment, agent-scan]
 applies_when: gating main-UI entry on daemon readiness; designing any "wait for service X before entering app" UX; wiring observers to a process lifecycle event stream that may fire before subscription; surfacing supervised-process crash reasons to the user
 ---
 
@@ -178,6 +178,22 @@ V1.97 made the daemon reachable but exposed the next clean-state blocker: `.setu
 
 > Residual `R-V197-SMOKE-CLEAN-STATE` is **closed by V1.100 P0** (interactive macOS clean-state smoke confirmed daemon reaches `running`).
 
+### Rule 14 (V1.101): enrich process PATH at daemon boot for agent CLI discovery (Class B) — no schemas/
+
+V1.101 P0 closed `R-V1100P0SMOKE-AGENT-SCAN`: macOS GUI / Tauri-launched daemons often inherit a minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin`). Homebrew and user-local ACP agent CLIs under `/opt/homebrew/bin`, `~/.local/bin`, `~/.cargo/bin`, asdf/mise shims, etc. are then invisible to `which::which` during `POST /v1/daemon/agent-host/scan`, so the setup AgentPicker shows empty even when agents are installed in a login shell.
+
+**Pattern:** merge a **login-shell-equivalent** set of common user bin dirs into the **process** `PATH` **once at daemon boot** (before any scan probe). Implementation: `crates/nexus-daemon-runtime/src/path_enrichment.rs`, invoked from `run_daemon`. No shell-out; only existing directories are appended; idempotent merge.
+
+| Class | Meaning | Fix locus |
+|-------|---------|-----------|
+| **A** | Scan API / UI wiring broken | App / handler |
+| **B** | Daemon PATH/env incomplete vs login shell | **Process PATH enrichment at daemon/sidecar start** (this rule) |
+| **C** | Product gap (custom launch only) | Document escape hatch; do not invent schema |
+
+**Hard stop:** Class B must **not** add wire fields, query params, or `schemas/` changes. Prefer process env enrichment over teaching the SPA about PATH. Exotic layouts still use custom-launch.
+
+**Anti-patterns:** ❌ Proposing a scan schema change for “extra PATH”; ❌ shelling out to `echo $PATH` / login shell on every scan; ❌ duplicating enrichment only in the Tauri sidecar without covering `nexus42 daemon start`.
+
 ### Source
 
-Distilled from V1.97 plan `2026-07-07-v1.97-desktop-first-launch-hardening` (T1 prototype intake + T4 sidecar FSM + T5 sidecar spawn-name fix `ab618ee9`, verified by clean-state smoke re-run). Tauri v2 sidecar resolution rule confirmed against `https://v2.tauri.app/develop/sidecar` ("expects only the filename of the sidecar, not its full path"). Iteration-scoped invariants + prototype intake rule: `.mstar/iterations/v1.97/guides/sidecar-startup-state-machine.md` (snapshot; durable rules promoted here). **Rule 13 distilled from V1.100 P0** plan `2026-07-08-v1.100-desktop-clean-state-first-launch` (T1 contract + T2 `ensure_setup_bootstrap` + gating; verified by clean-state smoke 2026-07-09).
+Distilled from V1.97 plan `2026-07-07-v1.97-desktop-first-launch-hardening` (T1 prototype intake + T4 sidecar FSM + T5 sidecar spawn-name fix `ab618ee9`, verified by clean-state smoke re-run). Tauri v2 sidecar resolution rule confirmed against `https://v2.tauri.app/develop/sidecar` ("expects only the filename of the sidecar, not its full path"). Iteration-scoped invariants + prototype intake rule: `.mstar/iterations/v1.97/guides/sidecar-startup-state-machine.md` (snapshot; durable rules promoted here). **Rule 13 distilled from V1.100 P0** plan `2026-07-08-v1.100-desktop-clean-state-first-launch` (T1 contract + T2 `ensure_setup_bootstrap` + gating; verified by clean-state smoke 2026-07-09). **Rule 14 distilled from V1.101 P0** plan `2026-07-09-v1.101-agent-detection-picker` (`path_enrichment.rs` + AgentPicker scan path; residual `R-V1100P0SMOKE-AGENT-SCAN` closed).
