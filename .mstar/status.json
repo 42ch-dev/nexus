@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-07-09T14:30:00+0800",
+  "updated_at": "2026-07-09T16:30:00+0800",
   "plans": [
     {
       "id": "2026-07-08-v1.99-prepare-visual-system-deepening",
@@ -309,7 +309,7 @@
       "id": "2026-07-09-v1.101-setup-wizard-ui-polish",
       "title": "P1 — Setup Wizard UI Polish",
       "file": ".mstar/plans/2026-07-09-v1.101-setup-wizard-ui-polish.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@product-manager",
@@ -317,7 +317,7 @@
         "@qc-specialist",
         "@qa-engineer"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "V1.101",
         "desktop",
@@ -327,7 +327,7 @@
       ],
       "created_at": "2026-07-09",
       "updated_at": "2026-07-09",
-      "notes": "Must. Closes BACK/STEPS/POLL smoke residuals. Studio then App. Poll=timing only.",
+      "notes": "Done: SDD T1-T4 + QC Approve (fix-wave-1) + QA Pass. BACK/STEPS/POLL closed. Residuals R-V1101P1-001..002 nit.",
       "metadata": {
         "priority": "high",
         "spec_integration_branch": "iteration/v1.101",
@@ -340,8 +340,10 @@
         "primary_spec": ".mstar/iterations/v1.101/specs/setup-wizard-ui-polish.md",
         "execution_mode": "sdd",
         "qa_gate": "mandatory",
-        "stretch": false
-      }
+        "stretch": false,
+        "working_branch": "plan/v1.101-p1-setup-wizard-ui-polish"
+      },
+      "done_at": "2026-07-09"
     },
     {
       "id": "2026-07-09-v1.101-select-component-promotion",
@@ -404,37 +406,16 @@
     },
     "tech_debt_summary": {
       "updated_at": "2026-07-09",
-      "total_open": 40,
+      "total_open": 39,
       "by_severity": {
-        "nit": 12,
-        "low": 27,
+        "nit": 14,
+        "low": 24,
         "medium": 1
       },
-      "by_target": {
-        "P2": 1,
-        "V1.101+ (desktop UI polish)": 3,
-        "V1.96": 14,
-        "V1.96 spec-hygiene pass": 1,
-        "V1.97": 4,
-        "V1.97+": 1,
-        "V1.99+": 1,
-        "post-V1.100": 8,
-        "post-V1.99": 2,
-        "when list virtualisation lands": 1
-      },
-      "by_plan": {
-        "2026-07-05-v1.91-findings-batch": 1,
-        "2026-07-05-v1.92-closure": 1,
-        "2026-07-06-v1.93-closure": 1,
-        "2026-07-06-v1.94-closure": 9,
-        "2026-07-07-v1.95-implement-fixes": 4,
-        "2026-07-07-v1.96-implement-rework": 5,
-        "2026-07-07-v1.97-desktop-first-launch-hardening": 3,
-        "2026-07-08-v1.100-desktop-clean-state-first-launch": 6,
-        "2026-07-08-v1.100-ui-hygiene-guardrails": 6
-      }
+      "by_target": {},
+      "by_plan": {}
     },
-    "updated_at": "2026-07-09T14:30:00+0800"
+    "updated_at": "2026-07-09T14:50:00+0800"
   },
   "residual_findings": {
     "2026-07-05-v1.91-findings-batch": [
@@ -932,39 +913,6 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/sdd/2026-07-08-v1.100-desktop-clean-state-first-launch/review/qc-consolidated.md",
         "note": "Not blocking; defer to a dep-slim pass. QC source: P0 qc3 S-002"
-      },
-      {
-        "id": "R-V1100P0SMOKE-UI-BACK",
-        "title": "Setup wizard Back button position is incorrect (smoke observation)",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "V1.101+ (desktop UI polish)",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-08-v1.100-desktop-clean-state-first-launch.md",
-        "note": "Pre-existing UI issue surfaced during V1.100 P0 clean-state smoke. Not introduced by P0 bootstrap work. User requested deferral to future UI iteration."
-      },
-      {
-        "id": "R-V1100P0SMOKE-UI-STEPS",
-        "title": "Setup wizard sidebar Steps indicator displays abnormally (smoke observation)",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "V1.101+ (desktop UI polish)",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-08-v1.100-desktop-clean-state-first-launch.md",
-        "note": "Pre-existing UI issue surfaced during V1.100 P0 smoke. Not introduced by P0. Defer to future UI iteration."
-      },
-      {
-        "id": "R-V1100P0SMOKE-UI-POLL",
-        "title": "Daemon status detection interval inconsistent: fast Back-re-entry shows 'running' immediately, but waiting shows delay before 'running' — polling interval / race issue",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "V1.101+ (desktop UI polish)",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-08-v1.100-desktop-clean-state-first-launch.md",
-        "note": "Pre-existing polling/timing issue in setup-step-daemon status subscription. Not a P0 blocker (daemon does reach running). Defer to future UI iteration."
       }
     ],
     "2026-07-09-v1.101-agent-detection-picker": [
@@ -1011,6 +959,30 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-09-v1.101-agent-detection-picker.md",
         "note": "QC1 F-005 process note; squash/integration scope hygiene."
+      }
+    ],
+    "2026-07-09-v1.101-setup-wizard-ui-polish": [
+      {
+        "id": "R-V1101P1-001",
+        "title": "Optional Back click-through polish from QC2 F-002",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.101",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-09-v1.101-setup-wizard-ui-polish.md",
+        "note": "Non-blocking QC suggestion after Approve."
+      },
+      {
+        "id": "R-V1101P1-002",
+        "title": "data-layout on single-button CTAs (welcome/done)",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.101",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-09-v1.101-setup-wizard-ui-polish.md",
+        "note": "QC2 F-003 suggestion."
       }
     ]
   }

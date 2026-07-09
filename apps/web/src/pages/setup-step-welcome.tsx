@@ -132,7 +132,11 @@ export function SetupStepWelcome({ state, onChange, onNext }: SetupStepWelcomePr
         )}
       </div>
 
-      <div className="flex flex-col gap-setup-wizard-surface-cta-container-gap mt-auto">
+      <div
+        className="mt-auto flex items-center gap-setup-wizard-surface-cta-container-gap"
+        data-testid="wizard-cta-row"
+        data-layout="horizontal-adjacent"
+      >
         <Button
           variant="primary"
           onClick={continueToNext}

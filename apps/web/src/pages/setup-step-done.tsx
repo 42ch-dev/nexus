@@ -17,7 +17,11 @@ export function SetupStepDone({ onFinish, isFinishing }: SetupStepDoneProps) {
           Nexus is set up and the daemon is running. You can change these settings later from the app menu.
         </p>
       </div>
-      <div className="flex flex-col gap-setup-wizard-surface-cta-container-gap mt-auto">
+      <div
+        className="mt-auto flex items-center gap-setup-wizard-surface-cta-container-gap"
+        data-testid="wizard-cta-row"
+        data-layout="horizontal-adjacent"
+      >
         <Button
           variant="primary"
           onClick={onFinish}

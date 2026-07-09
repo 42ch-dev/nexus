@@ -140,45 +140,97 @@ describe('Gallery section rendering', () => {
 
 /* ---- surfaces page fixtures (T4) ---------------------------------------- */
 
-describe('Surfaces page — setup wizard fixture', () => {
+describe('Surfaces page — setup wizard chrome fixtures', () => {
   beforeEach(() => {
     mockMatchMedia(false);
     renderStudio('/surfaces');
   });
 
-  it('renders the Welcome heading inside the setup card', () => {
+  it('renders the wizard chrome section heading', () => {
     expect(
-      screen.getByRole('heading', { name: 'Welcome to Nexus' }),
+      screen.getByRole('heading', { name: 'Setup — Wizard chrome' }),
     ).toBeInTheDocument();
   });
 
-  it('renders all four setup step labels', () => {
-    for (const step of ['Welcome', 'Daemon', 'Agent', 'Done']) {
-      // Step labels appear in the step panel — match any element
-      // containing the label text.  Use getAllByText since the step
-      // label "Welcome" also appears in the heading; at least one
-      // instance must exist in the step panel context.
-      expect(screen.getAllByText(step).length).toBeGreaterThanOrEqual(1);
-    }
+  it('covers welcome / daemon / agent / done step matrices', () => {
+    expect(screen.getByTestId('wizard-chrome-steps-welcome')).toBeInTheDocument();
+    expect(screen.getByTestId('wizard-chrome-steps-daemon')).toBeInTheDocument();
+    expect(screen.getByTestId('wizard-chrome-steps-agent')).toBeInTheDocument();
+    expect(screen.getByTestId('wizard-chrome-steps-done')).toBeInTheDocument();
   });
 
-  it('renders the workspace location label and path', () => {
-    expect(screen.getByText('Workspace location')).toBeInTheDocument();
-    expect(
-      screen.getByText('~/Documents/nexus/default'),
-    ).toBeInTheDocument();
+  it('maps step statuses for the agent-active matrix', () => {
+    const card = screen.getByTestId('wizard-chrome-card-agent');
+    expect(card.querySelector('[data-step-id="welcome"]')).toHaveAttribute(
+      'data-step-status',
+      'complete',
+    );
+    expect(card.querySelector('[data-step-id="daemon"]')).toHaveAttribute(
+      'data-step-status',
+      'complete',
+    );
+    expect(card.querySelector('[data-step-id="agent"]')).toHaveAttribute(
+      'data-step-status',
+      'active',
+    );
+    expect(card.querySelector('[data-step-id="done"]')).toHaveAttribute(
+      'data-step-status',
+      'pending',
+    );
   });
 
-  it('renders Continue primary CTA', () => {
-    expect(
-      screen.getByRole('button', { name: 'Continue' }),
-    ).toBeInTheDocument();
+  it('shows numbered step circles (1–4) on the welcome fixture', () => {
+    const card = screen.getByTestId('wizard-chrome-card-welcome');
+    const circles = card.querySelectorAll('[data-step-id] span.rounded-full');
+    expect(circles).toHaveLength(4);
+    expect(circles[0]).toHaveTextContent('1');
+    expect(circles[1]).toHaveTextContent('2');
+    expect(circles[2]).toHaveTextContent('3');
+    expect(circles[3]).toHaveTextContent('4');
   });
 
-  it('renders Browse secondary action', () => {
+  it('uses a single horizontal Back / Continue CTA row on daemon and agent', () => {
+    const daemonCard = screen
+      .getByTestId('wizard-chrome-steps-daemon')
+      .querySelector('[data-testid="wizard-chrome-card-daemon"]');
+    expect(daemonCard).not.toBeNull();
+    const daemonCta = daemonCard!.querySelector('[data-testid="wizard-cta-row"]');
+    expect(daemonCta).toHaveAttribute('data-layout', 'horizontal-adjacent');
+    expect(daemonCta).toHaveClass('flex', 'items-center');
+    expect(daemonCta).not.toHaveClass('flex-col');
+
+    const daemonButtons = daemonCta?.querySelectorAll('button');
+    expect(daemonButtons?.[0]).toHaveTextContent('Back');
+    expect(daemonButtons?.[1]).toHaveTextContent('Continue');
+
+    const agentCard = screen.getByTestId('wizard-chrome-card-agent');
+    const agentCta = agentCard.querySelector('[data-testid="wizard-cta-row"]');
+    expect(agentCta?.querySelectorAll('button')[0]).toHaveTextContent('Back');
+  });
+
+  it('omits Back on welcome and done', () => {
+    const welcomeCard = screen.getByTestId('wizard-chrome-card-welcome');
     expect(
-      screen.getByRole('button', { name: 'Browse…' }),
-    ).toBeInTheDocument();
+      welcomeCard.querySelector('[data-testid="wizard-cta-row"]')?.textContent,
+    ).not.toMatch(/Back/);
+
+    const doneCard = screen.getByTestId('wizard-chrome-card-done');
+    expect(
+      doneCard.querySelector('[data-testid="wizard-cta-row"]')?.textContent,
+    ).not.toMatch(/Back/);
+    expect(doneCard.querySelector('[data-testid="wizard-cta-row"]')).toHaveTextContent(
+      'Open Nexus',
+    );
+  });
+
+  it('covers daemon starting / running / error chips', () => {
+    expect(screen.getByTestId('daemon-chip-starting')).toHaveTextContent(
+      'Starting daemon…',
+    );
+    expect(screen.getAllByTestId('daemon-chip-running').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getByText('Daemon is running.')).toBeInTheDocument();
+    expect(screen.getByTestId('daemon-chip-error')).toHaveTextContent(/taking longer/i);
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
   });
 });
 

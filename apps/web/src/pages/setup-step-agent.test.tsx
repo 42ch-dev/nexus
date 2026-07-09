@@ -277,7 +277,7 @@ describe('SetupStepAgent', () => {
     expect(screen.getByTestId('agent-picker-custom-launch')).toBeInTheDocument();
   });
 
-  it('renders Continue as a wide prominent CTA and Back as a smaller tertiary button', async () => {
+  it('renders Continue as a wide prominent CTA and Back adjacent in a horizontal row', async () => {
     useHandlers(
       http.post('/v1/daemon/agent-host/scan', () => HttpResponse.json({ agents: [] })),
     );
@@ -291,8 +291,14 @@ describe('SetupStepAgent', () => {
     const continueButton = screen.getByRole('button', { name: 'Continue' });
     expect(continueButton).toHaveClass('w-full', 'max-w-setup-wizard-surface-cta-primary-max-width');
 
-    const backButton = screen.getByRole('button', { name: 'Back' });
-    expect(backButton).toHaveClass('self-start');
+    const cta = screen.getByTestId('wizard-cta-row');
+    expect(cta).toHaveAttribute('data-layout', 'horizontal-adjacent');
+    expect(cta).toHaveClass('flex', 'items-center');
+    expect(cta).not.toHaveClass('flex-col');
+
+    const buttons = cta.querySelectorAll('button');
+    expect(buttons[0]).toHaveTextContent('Back');
+    expect(buttons[1]).toHaveTextContent('Continue');
   });
 
   it('updates state when a custom launch command is typed', async () => {

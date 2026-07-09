@@ -121,6 +121,94 @@ describe('SetupWizardPage', () => {
     expect(steps[3].querySelector('div[aria-hidden="true"]')).not.toBeInTheDocument();
   });
 
+  it('maps Steps complete/active/pending statuses as the wizard advances', async () => {
+    const user = userEvent.setup();
+
+    useHandlers(
+      http.get('/v1/daemon/runtime/health', () => HttpResponse.json({ status: 'ok', version: 'test' })),
+      http.post('/v1/daemon/agent-host/scan', () =>
+        HttpResponse.json({
+          agents: [
+            {
+              name: 'codex',
+              registry_agent_id: 'openai/codex',
+              launch_command: 'codex',
+              installed: true,
+              version: '1.0.0',
+            },
+          ],
+        }),
+      ),
+    );
+
+    renderInApp(<SetupWizardPage />, {
+      client: makeClient(),
+      initialRouterEntries: ['/setup'],
+    });
+
+    const progress = screen.getByRole('navigation', { name: 'Setup progress' });
+    expect(progress.querySelector('[data-step-id="welcome"]')).toHaveAttribute(
+      'data-step-status',
+      'active',
+    );
+    expect(progress.querySelector('[data-step-id="daemon"]')).toHaveAttribute(
+      'data-step-status',
+      'pending',
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await waitFor(() => expect(screen.getByText('Daemon is running.')).toBeInTheDocument());
+
+    expect(progress.querySelector('[data-step-id="welcome"]')).toHaveAttribute(
+      'data-step-status',
+      'complete',
+    );
+    expect(progress.querySelector('[data-step-id="daemon"]')).toHaveAttribute(
+      'data-step-status',
+      'active',
+    );
+    expect(progress.querySelector('[data-step-id="agent"]')).toHaveAttribute(
+      'data-step-status',
+      'pending',
+    );
+
+    const daemonCta = screen.getByTestId('wizard-cta-row');
+    expect(daemonCta).toHaveAttribute('data-layout', 'horizontal-adjacent');
+    expect(daemonCta.querySelectorAll('button')[0]).toHaveTextContent('Back');
+
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await waitFor(() => expect(screen.getByText('codex')).toBeInTheDocument());
+
+    expect(progress.querySelector('[data-step-id="daemon"]')).toHaveAttribute(
+      'data-step-status',
+      'complete',
+    );
+    expect(progress.querySelector('[data-step-id="agent"]')).toHaveAttribute(
+      'data-step-status',
+      'active',
+    );
+    expect(progress.querySelector('[data-step-id="done"]')).toHaveAttribute(
+      'data-step-status',
+      'pending',
+    );
+
+    await user.click(screen.getByText('codex'));
+    await user.click(screen.getAllByRole('button', { name: 'Continue' })[0]);
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'You are ready' })).toBeInTheDocument(),
+    );
+
+    expect(progress.querySelector('[data-step-id="agent"]')).toHaveAttribute(
+      'data-step-status',
+      'complete',
+    );
+    expect(progress.querySelector('[data-step-id="done"]')).toHaveAttribute(
+      'data-step-status',
+      'active',
+    );
+    expect(screen.getByTestId('wizard-cta-row').textContent).not.toMatch(/Back/);
+  });
+
   it('moves through the four steps and finishes', async () => {
     const user = userEvent.setup();
 

@@ -184,7 +184,14 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
         emptyTitle="No agents found on PATH."
       />
 
-      <div className="flex flex-col gap-setup-wizard-surface-cta-container-gap mt-auto">
+      <div
+        className="mt-auto flex items-center gap-setup-wizard-surface-cta-container-gap"
+        data-testid="wizard-cta-row"
+        data-layout="horizontal-adjacent"
+      >
+        <Button variant="tertiary" onClick={onBack}>
+          Back
+        </Button>
         <Button
           variant="primary"
           onClick={onNext}
@@ -192,9 +199,6 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
           className="w-full max-w-setup-wizard-surface-cta-primary-max-width"
         >
           Continue
-        </Button>
-        <Button variant="tertiary" onClick={onBack} className="self-start">
-          Back
         </Button>
       </div>
     </div>
