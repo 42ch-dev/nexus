@@ -498,7 +498,7 @@
       "id": "2026-07-09-v1.102-ui-hygiene",
       "title": "P2 — UI Hygiene + Surfaces Polish (Stretch)",
       "file": ".mstar/plans/2026-07-09-v1.102-ui-hygiene.md",
-      "status": "InReview",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@product-manager",
@@ -507,7 +507,7 @@
         "@qc-specialist",
         "@qa-engineer"
       ],
-      "progress": 95,
+      "progress": 100,
       "tags": [
         "V1.102",
         "surfaces",
@@ -516,7 +516,7 @@
       ],
       "created_at": "2026-07-09",
       "updated_at": "2026-07-09",
-      "notes": "QA Pass with residuals; recommend Done",
+      "notes": "Done — Stretch Surfaces polish; QC/QA Pass with residuals; merge to iteration/v1.102",
       "metadata": {
         "priority": "medium",
         "tier": "stretch",
