@@ -6,12 +6,12 @@
       "id": "2026-07-09-v1.104-settings-workspace",
       "title": "P0 — Settings Workspace path (W2)",
       "file": "plans/2026-07-09-v1.104-settings-workspace.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@frontend-dev"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.104",
         "settings",
@@ -20,7 +20,7 @@
       ],
       "created_at": "2026-07-09",
       "updated_at": "2026-07-09",
-      "done_at": null,
+      "done_at": "2026-07-10",
       "notes": "",
       "metadata": {
         "iteration_refs": [
@@ -855,6 +855,78 @@
         "target": "accept",
         "source": "qc3",
         "decision": "defer"
+      }
+    ],
+    "2026-07-09-v1.104-settings-workspace": [
+      {
+        "id": "R-V1104QC-S001",
+        "severity": "nit",
+        "lifecycle": "open",
+        "title": "Redundant ternary in test mock (defaultPath === INITIAL_PATH ? PICKED_PATH : PICKED_PATH)",
+        "source": "qc1",
+        "decision": "defer",
+        "target": "post-V1.104",
+        "note": "Collapse to single-branch or add cancel-path test case. QC1 S-1."
+      },
+      {
+        "id": "R-V1104QC-S002",
+        "severity": "suggestion",
+        "lifecycle": "open",
+        "title": "Seven locked copy constants duplicated between apps/web and apps/design-studio fixture",
+        "source": "qc1",
+        "decision": "defer",
+        "target": "post-V1.104",
+        "note": "Matches existing Setup/Connection pattern; shared settings-copy.ts would centralize. QC1 S-2."
+      },
+      {
+        "id": "R-V1104QC-S003",
+        "severity": "suggestion",
+        "lifecycle": "open",
+        "title": "SHELL_HELPER copy does not mention Workspace",
+        "source": "qc1",
+        "decision": "defer",
+        "target": "post-V1.104",
+        "note": "Locked by spec; future copy delta. QC1 S-3."
+      },
+      {
+        "id": "R-V1104QC-S004",
+        "severity": "low",
+        "lifecycle": "open",
+        "title": "saved state never cleared on subsequent Change Folder entry/cancel/error",
+        "source": "qc2",
+        "decision": "defer",
+        "target": "post-V1.104",
+        "note": "Honesty banner can linger after a later failed gesture. QC2 Minor-1."
+      },
+      {
+        "id": "R-V1104QC-S005",
+        "severity": "low",
+        "lifecycle": "open",
+        "title": "Load failure leaves path empty with no fallback; picker would pass empty defaultPath",
+        "source": "qc2",
+        "decision": "defer",
+        "target": "post-V1.104",
+        "note": "Wizard has DEFAULT fallback; workspace section does not. QC2 Minor-2."
+      },
+      {
+        "id": "R-V1104QC-W001",
+        "severity": "low",
+        "lifecycle": "open",
+        "title": "handleChangeFolder recreated on every render (no useCallback)",
+        "source": "qc3",
+        "decision": "defer",
+        "target": "post-V1.104",
+        "note": "No measurable impact at current scale; would break React.memo if Button were wrapped. QC3 W-1."
+      },
+      {
+        "id": "R-V1104QC-S006",
+        "severity": "suggestion",
+        "lifecycle": "open",
+        "title": "getWorkspaceRoot rejection leaves path empty; user can still click Change Folder with empty defaultPath",
+        "source": "qc3",
+        "decision": "defer",
+        "target": "post-V1.104",
+        "note": "Consider disabling button or showing inline retry on load failure. QC3 S-2."
       }
     ]
   }
