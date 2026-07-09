@@ -13,6 +13,7 @@ const ROUTE_TITLES: Record<string, string> = {
   '/capabilities': 'Capabilities',
   '/findings': 'Findings',
   '/memory': 'Memory',
+  '/settings': 'Settings',
   '/strategies': 'Strategies',
   '/connect': 'Connect',
 };
@@ -24,6 +25,7 @@ const MOBILE_NAV = [
   { to: '/capabilities', label: 'Capabilities' },
   { to: '/memory', label: 'Memory' },
   { to: '/strategies', label: 'Strategies' },
+  { to: '/settings', label: 'Settings' },
 ];
 
 /** Resolve the header title from the active top-level route. */
