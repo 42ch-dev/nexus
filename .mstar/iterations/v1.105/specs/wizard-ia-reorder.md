@@ -1,6 +1,6 @@
 # Wizard IA Reorder (V1.105 P1)
 
-**Status:** architect-locked (Phase 1 §5.2); writing-polished (§5.3)  
+**Status:** IA contract locked (Task 1 confirm); architect-locked (Phase 1 §5.2); writing-polished (§5.3)  
 **Plan:** `2026-07-10-v1.105-wizard-ia-reorder`  
 **Compass:** [`v1.105-delivery-compass.md`](../../v1.105-delivery-compass.md)  
 **Depends on:** [`daemon-fullscreen-gate.md`](daemon-fullscreen-gate.md)  
@@ -58,6 +58,17 @@ const [step, setStep] = useState<WizardStep>('agent');
 | Done Finish | Author clicks Open Nexus | `setAgentProfile` + `markCompleted` / `setSetupCompleted(true)` → `navigate('/works')` |
 
 **Bootstrap timing lock:** `ensureSetupBootstrap` runs **only** on Workspace **Continue** — not on Agent Continue, not on app open, not on Welcome (retired).
+
+### R-V1105P0-001 timing confirmation (P0 residual → P1)
+
+P0 ships D2 auto-start + `DaemonLaunchGate` and **blocks** `/setup` until Ready. That leaves clean-state bootstrap still on Welcome Continue today — intentional deferral tracked as **R-V1105P0-001**.
+
+| Phase | When | What runs |
+|-------|------|-----------|
+| P0 (shipped) | App open / Re-run → gate | D2 `startDaemon` + Ready; wizard not shown until Ready |
+| P1 (this plan) | Workspace **Continue** (after gate Ready) | `setWorkspacePath` (when persist rules say so) → `ensureSetupBootstrap` → advance to `done` |
+
+**Contract:** Bootstrap is **after** gate Ready and **on** Workspace Continue — never before Ready, never on Agent Continue. Code move lands in Task 2 (`setup-step-workspace.tsx`); residual closes when that extraction ships.
 
 ## Back navigation (architect-locked)
 

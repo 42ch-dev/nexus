@@ -44,7 +44,7 @@ interface HarnessProps {
   onBack?: () => void;
 }
 
-function Harness({ initial, onNext = vi.fn(), onBack = vi.fn() }: HarnessProps) {
+function Harness({ initial, onNext = vi.fn(), onBack }: HarnessProps) {
   const [state, setState] = useState<WizardState>(initial);
   const onChange = useCallback((next: WizardState) => setState(next), []);
   return (
@@ -201,7 +201,6 @@ describe('SetupStepAgent', () => {
         state={makeState()}
         onChange={onChange}
         onNext={vi.fn()}
-        onBack={vi.fn()}
       />,
       { client: makeClient(), initialRouterEntries: ['/setup'] },
     );
@@ -231,7 +230,6 @@ describe('SetupStepAgent', () => {
         state={makeState()}
         onChange={onChange}
         onNext={vi.fn()}
-        onBack={vi.fn()}
       />,
       { client: makeClient(), initialRouterEntries: ['/setup'] },
     );
@@ -277,7 +275,7 @@ describe('SetupStepAgent', () => {
     expect(screen.getByTestId('agent-picker-custom-launch')).toBeInTheDocument();
   });
 
-  it('renders Continue as a wide prominent CTA and Back adjacent in a horizontal row', async () => {
+  it('renders Continue as a wide prominent CTA without Back on the first step', async () => {
     useHandlers(
       http.post('/v1/daemon/agent-host/scan', () => HttpResponse.json({ agents: [] })),
     );
@@ -295,11 +293,7 @@ describe('SetupStepAgent', () => {
     expect(cta).toHaveAttribute('data-layout', 'horizontal-adjacent');
     expect(cta).toHaveClass('flex', 'items-center');
     expect(cta).not.toHaveClass('flex-col');
-
-    const buttons = cta.querySelectorAll('button');
-    expect(buttons[0]).toHaveAttribute('aria-label', 'Back');
-    expect(buttons[0]).not.toHaveTextContent('Back');
-    expect(buttons[1]).toHaveTextContent('Continue');
+    expect(cta.querySelector('button[aria-label="Back"]')).not.toBeInTheDocument();
   });
 
   it('updates state when a custom launch command is typed', async () => {

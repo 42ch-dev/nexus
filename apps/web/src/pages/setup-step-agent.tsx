@@ -17,7 +17,8 @@ interface SetupStepAgentProps {
   state: WizardState;
   onChange: (state: WizardState) => void;
   onNext: () => void;
-  onBack: () => void;
+  /** Hidden on first step (Agent); omit so Back is not shown. */
+  onBack?: () => void;
 }
 
 /** Base picker id for a scan entry (registry id preferred). */
@@ -190,9 +191,11 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
         data-testid="wizard-cta-row"
         data-layout="horizontal-adjacent"
       >
-        <Button variant="tertiary" onClick={onBack} aria-label="Back" className="px-2">
-          <ChevronLeft className="h-4 w-4" aria-hidden="true" />
-        </Button>
+        {onBack && (
+          <Button variant="tertiary" onClick={onBack} aria-label="Back" className="px-2">
+            <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        )}
         <Button
           variant="primary"
           onClick={onNext}

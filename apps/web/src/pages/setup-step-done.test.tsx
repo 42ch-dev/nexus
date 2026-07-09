@@ -12,9 +12,7 @@ describe('SetupStepDone', () => {
     });
 
     expect(screen.getByText('You are ready')).toBeInTheDocument();
-    expect(
-      screen.getByText(/Nexus is set up and the daemon is running/),
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Nexus is set up and ready/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open Nexus' })).toBeInTheDocument();
   });
 
@@ -30,6 +28,20 @@ describe('SetupStepDone', () => {
     await user.click(finishButton);
 
     await waitFor(() => expect(onFinish).toHaveBeenCalled());
+  });
+
+  it('calls onBack when Back is clicked', async () => {
+    const user = userEvent.setup();
+    const onBack = vi.fn();
+
+    renderInApp(<SetupStepDone onFinish={vi.fn()} onBack={onBack} />, {
+      initialRouterEntries: ['/setup'],
+    });
+
+    const backButton = screen.getByRole('button', { name: 'Back' });
+    expect(backButton).not.toHaveTextContent('Back');
+    await user.click(backButton);
+    expect(onBack).toHaveBeenCalled();
   });
 
   it('shows a loading state when isFinishing is true', async () => {

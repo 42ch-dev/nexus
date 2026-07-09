@@ -45,29 +45,54 @@ function LocationDisplay() {
   return <div data-testid="location">{location.pathname}</div>;
 }
 
+function useWizardScanHandlers() {
+  useHandlers(
+    http.get('/v1/daemon/runtime/health', () => HttpResponse.json({ status: 'ok', version: 'test' })),
+    http.post('/v1/daemon/agent-host/scan', () =>
+      HttpResponse.json({
+        agents: [
+          {
+            name: 'codex',
+            registry_agent_id: 'openai/codex',
+            launch_command: 'codex',
+            installed: true,
+            version: '1.0.0',
+          },
+        ],
+      }),
+    ),
+  );
+}
+
+async function advanceAgentToWorkspace(user: ReturnType<typeof userEvent.setup>) {
+  await waitFor(() => expect(screen.getByText('codex')).toBeInTheDocument());
+  await user.click(screen.getByText('codex'));
+  await user.click(screen.getAllByRole('button', { name: 'Continue' })[0]);
+  await waitFor(() =>
+    expect(screen.getByRole('heading', { name: 'Choose a workspace' })).toBeInTheDocument(),
+  );
+}
+
 describe('SetupWizardPage', () => {
   it('renders a centered integrated card with step indicator and content area', () => {
+    useWizardScanHandlers();
     renderInApp(
       <SetupWizardPage />,
       { client: makeClient(), initialRouterEntries: ['/setup'] },
     );
 
-    // Step indicator is a vertical list inside the left panel of the integrated card.
     const innerNav = screen.getByRole('navigation', { name: 'Setup progress' });
     const list = innerNav.querySelector('ol');
     expect(list).toHaveClass('flex-col');
 
-    // Active step carries aria-current="step".
     const activeStep = screen.getByRole('listitem', { current: 'step' });
     expect(activeStep).toHaveTextContent('1');
-    expect(activeStep).toHaveTextContent('Welcome');
+    expect(activeStep).toHaveTextContent('Agent');
 
-    // Step circle uses the sizing-token utilities.
     const circle = screen.getByText('1').closest('span');
     expect(circle).toHaveClass('h-setup-wizard-step-circle-size');
     expect(circle).toHaveClass('w-setup-wizard-step-circle-size');
 
-    // The integrated card wraps both the step indicator panel and the content panel.
     const main = screen.getByRole('main');
     const card = main.parentElement;
     expect(card).toContainElement(innerNav);
@@ -78,42 +103,37 @@ describe('SetupWizardPage', () => {
     expect(card).toHaveClass('bg-setup-wizard-surface-card-bg');
     expect(card).toHaveClass('border-setup-wizard-surface-card-border');
 
-    // The card is centered inside the outer shell.
     const outer = card?.parentElement;
     expect(outer).toHaveClass('items-center');
     expect(outer).toHaveClass('justify-center');
     expect(outer).toHaveClass('min-h-screen');
 
-    // The content panel is a flex column so T6's mt-auto CTA pins to the bottom.
     expect(main).toHaveClass('flex-col');
     expect(main).toHaveClass('flex-1');
     expect(main).toHaveClass('min-w-0');
   });
 
   it('aligns step indicator circles and labels on the same baseline and renders connectors between steps', () => {
+    useWizardScanHandlers();
     renderInApp(
       <SetupWizardPage />,
       { client: makeClient(), initialRouterEntries: ['/setup'] },
     );
 
     const steps = screen.getAllByRole('listitem');
-    expect(steps).toHaveLength(4);
+    expect(steps).toHaveLength(3);
 
     steps.forEach((li, index) => {
-      // Row uses a fixed height and centers its direct children (circle + label).
       expect(li).toHaveClass('items-center');
       expect(li).toHaveClass('h-setup-wizard-step-row-height');
 
-      // Circle and label are direct siblings under the same centered row.
       const spans = Array.from(li.children).filter((child) => child.tagName === 'SPAN');
       expect(spans).toHaveLength(2);
       expect(spans[0]).toHaveTextContent(String(index + 1));
-      expect(spans[1]).toHaveTextContent(['Welcome', 'Daemon', 'Agent', 'Done'][index]);
+      expect(spans[1]).toHaveTextContent(['Agent', 'Workspace', 'Done'][index]);
     });
 
-    // Each non-final step has an absolutely-positioned connector behind the circle,
-    // starting below the circle so nothing paints above step 1.
-    for (let i = 0; i < 3; i++) {
+    for (let i = 0; i < 2; i++) {
       const connector = steps[i].querySelector('[data-testid="step-connector"]');
       expect(connector).toBeInTheDocument();
       expect(connector).toHaveClass('w-px');
@@ -123,29 +143,12 @@ describe('SetupWizardPage', () => {
       });
     }
 
-    // The last step has no connector.
-    expect(steps[3].querySelector('[data-testid="step-connector"]')).not.toBeInTheDocument();
+    expect(steps[2].querySelector('[data-testid="step-connector"]')).not.toBeInTheDocument();
   });
 
   it('maps Steps complete/active/pending statuses as the wizard advances', async () => {
     const user = userEvent.setup();
-
-    useHandlers(
-      http.get('/v1/daemon/runtime/health', () => HttpResponse.json({ status: 'ok', version: 'test' })),
-      http.post('/v1/daemon/agent-host/scan', () =>
-        HttpResponse.json({
-          agents: [
-            {
-              name: 'codex',
-              registry_agent_id: 'openai/codex',
-              launch_command: 'codex',
-              installed: true,
-              version: '1.0.0',
-            },
-          ],
-        }),
-      ),
-    );
+    useWizardScanHandlers();
 
     renderInApp(<SetupWizardPage />, {
       client: makeClient(),
@@ -153,44 +156,23 @@ describe('SetupWizardPage', () => {
     });
 
     const progress = screen.getByRole('navigation', { name: 'Setup progress' });
-    expect(progress.querySelector('[data-step-id="welcome"]')).toHaveAttribute(
+    expect(progress.querySelector('[data-step-id="agent"]')).toHaveAttribute(
       'data-step-status',
       'active',
     );
-    expect(progress.querySelector('[data-step-id="daemon"]')).toHaveAttribute(
+    expect(progress.querySelector('[data-step-id="workspace"]')).toHaveAttribute(
       'data-step-status',
       'pending',
     );
+    expect(screen.getByTestId('wizard-cta-row').querySelector('button[aria-label="Back"]')).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: 'Continue' }));
-    await waitFor(() => expect(screen.getByText('Daemon is running.')).toBeInTheDocument());
+    await advanceAgentToWorkspace(user);
 
-    expect(progress.querySelector('[data-step-id="welcome"]')).toHaveAttribute(
+    expect(progress.querySelector('[data-step-id="agent"]')).toHaveAttribute(
       'data-step-status',
       'complete',
     );
-    expect(progress.querySelector('[data-step-id="daemon"]')).toHaveAttribute(
-      'data-step-status',
-      'active',
-    );
-    expect(progress.querySelector('[data-step-id="agent"]')).toHaveAttribute(
-      'data-step-status',
-      'pending',
-    );
-
-    const daemonCta = screen.getByTestId('wizard-cta-row');
-    expect(daemonCta).toHaveAttribute('data-layout', 'horizontal-adjacent');
-    expect(daemonCta.querySelector('button[aria-label="Back"]')).toBeInTheDocument();
-    expect(daemonCta.querySelector('button[aria-label="Back"]')).not.toHaveTextContent('Back');
-
-    await user.click(screen.getByRole('button', { name: 'Continue' }));
-    await waitFor(() => expect(screen.getByText('codex')).toBeInTheDocument());
-
-    expect(progress.querySelector('[data-step-id="daemon"]')).toHaveAttribute(
-      'data-step-status',
-      'complete',
-    );
-    expect(progress.querySelector('[data-step-id="agent"]')).toHaveAttribute(
+    expect(progress.querySelector('[data-step-id="workspace"]')).toHaveAttribute(
       'data-step-status',
       'active',
     );
@@ -199,13 +181,17 @@ describe('SetupWizardPage', () => {
       'pending',
     );
 
-    await user.click(screen.getByText('codex'));
-    await user.click(screen.getAllByRole('button', { name: 'Continue' })[0]);
+    const workspaceCta = screen.getByTestId('wizard-cta-row');
+    expect(workspaceCta).toHaveAttribute('data-layout', 'horizontal-adjacent');
+    expect(workspaceCta.querySelector('button[aria-label="Back"]')).toBeInTheDocument();
+    expect(workspaceCta.querySelector('button[aria-label="Back"]')).not.toHaveTextContent('Back');
+
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'You are ready' })).toBeInTheDocument(),
     );
 
-    expect(progress.querySelector('[data-step-id="agent"]')).toHaveAttribute(
+    expect(progress.querySelector('[data-step-id="workspace"]')).toHaveAttribute(
       'data-step-status',
       'complete',
     );
@@ -213,26 +199,12 @@ describe('SetupWizardPage', () => {
       'data-step-status',
       'active',
     );
-    expect(screen.getByTestId('wizard-cta-row').querySelector('button[aria-label="Back"]')).not.toBeInTheDocument();
+    expect(screen.getByTestId('wizard-cta-row').querySelector('button[aria-label="Back"]')).toBeInTheDocument();
   });
 
-  it('moves through the four steps and finishes', async () => {
+  it('moves through Agent → Workspace → Done and finishes', async () => {
     const user = userEvent.setup();
-
-    useHandlers(
-      http.get('/v1/daemon/runtime/health', () => HttpResponse.json({ status: 'ok', version: 'test' })),
-      http.post('/v1/daemon/agent-host/scan', () => HttpResponse.json({
-          agents: [
-            {
-              name: 'codex',
-              registry_agent_id: 'openai/codex',
-              launch_command: 'codex',
-              installed: true,
-              version: '1.0.0',
-            },
-          ],
-        })),
-    );
+    useWizardScanHandlers();
 
     renderInApp(
       <>
@@ -242,45 +214,49 @@ describe('SetupWizardPage', () => {
       { client: makeClient(), initialRouterEntries: ['/setup'] },
     );
 
-    // Welcome step
-    expect(screen.getByRole('heading', { name: 'Welcome to Nexus' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Choose an ACP agent' })).toBeInTheDocument();
+    await advanceAgentToWorkspace(user);
+
     await user.click(screen.getByRole('button', { name: 'Continue' }));
 
-    // Daemon step
-    await waitFor(() => expect(screen.getByText('Daemon is running.')).toBeInTheDocument());
-    await user.click(screen.getByRole('button', { name: 'Continue' }));
-
-    // Agent step
-    await waitFor(() => expect(screen.getByText('codex')).toBeInTheDocument());
-    await user.click(screen.getByText('codex'));
-    await user.click(screen.getAllByRole('button', { name: 'Continue' })[0]);
-
-    // Done step
     await waitFor(() => expect(screen.getByRole('heading', { name: 'You are ready' })).toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: 'Open Nexus' }));
 
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/works'));
   });
 
+  it('navigates Back from Workspace to Agent and from Done to Workspace', async () => {
+    const user = userEvent.setup();
+    useWizardScanHandlers();
+
+    renderInApp(<SetupWizardPage />, {
+      client: makeClient(),
+      initialRouterEntries: ['/setup'],
+    });
+
+    await advanceAgentToWorkspace(user);
+    await user.click(screen.getByRole('button', { name: 'Back' }));
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Choose an ACP agent' })).toBeInTheDocument(),
+    );
+
+    await advanceAgentToWorkspace(user);
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'You are ready' })).toBeInTheDocument(),
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Back' }));
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'Choose a workspace' })).toBeInTheDocument(),
+    );
+  });
+
   it('persists the selected agent profile on desktop before finishing', async () => {
     const user = userEvent.setup();
     const setAgentProfile = vi.fn(() => Promise.resolve());
     const setSetupCompleted = vi.fn(() => Promise.resolve());
-
-    useHandlers(
-      http.get('/v1/daemon/runtime/health', () => HttpResponse.json({ status: 'ok', version: 'test' })),
-      http.post('/v1/daemon/agent-host/scan', () => HttpResponse.json({
-          agents: [
-            {
-              name: 'codex',
-              registry_agent_id: 'openai/codex',
-              launch_command: 'codex',
-              installed: true,
-              version: '1.0.0',
-            },
-          ],
-        })),
-    );
+    useWizardScanHandlers();
 
     renderInApp(
       <SetupWizardPage />,
@@ -291,13 +267,8 @@ describe('SetupWizardPage', () => {
       },
     );
 
+    await advanceAgentToWorkspace(user);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
-    await waitFor(() => expect(screen.getByText('Daemon is running.')).toBeInTheDocument());
-    await user.click(screen.getByRole('button', { name: 'Continue' }));
-
-    await waitFor(() => expect(screen.getByText('codex')).toBeInTheDocument());
-    await user.click(screen.getByText('codex'));
-    await user.click(screen.getAllByRole('button', { name: 'Continue' })[0]);
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'You are ready' })).toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: 'Open Nexus' }));
@@ -310,21 +281,7 @@ describe('SetupWizardPage', () => {
     const user = userEvent.setup();
     const setAgentProfile = vi.fn(() => Promise.reject(new Error('permission denied')));
     const setSetupCompleted = vi.fn(() => Promise.resolve());
-
-    useHandlers(
-      http.get('/v1/daemon/runtime/health', () => HttpResponse.json({ status: 'ok', version: 'test' })),
-      http.post('/v1/daemon/agent-host/scan', () => HttpResponse.json({
-          agents: [
-            {
-              name: 'codex',
-              registry_agent_id: 'openai/codex',
-              launch_command: 'codex',
-              installed: true,
-              version: '1.0.0',
-            },
-          ],
-        })),
-    );
+    useWizardScanHandlers();
 
     renderInApp(
       <>
@@ -338,13 +295,8 @@ describe('SetupWizardPage', () => {
       },
     );
 
+    await advanceAgentToWorkspace(user);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
-    await waitFor(() => expect(screen.getByText('Daemon is running.')).toBeInTheDocument());
-    await user.click(screen.getByRole('button', { name: 'Continue' }));
-
-    await waitFor(() => expect(screen.getByText('codex')).toBeInTheDocument());
-    await user.click(screen.getByText('codex'));
-    await user.click(screen.getAllByRole('button', { name: 'Continue' })[0]);
 
     await waitFor(() => expect(screen.getByRole('heading', { name: 'You are ready' })).toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: 'Open Nexus' }));
@@ -365,25 +317,7 @@ describe('SetupWizardPage', () => {
         }),
     );
     const setAgentProfile = vi.fn(() => Promise.resolve());
-
-    useHandlers(
-      http.get('/v1/daemon/runtime/health', () =>
-        HttpResponse.json({ status: 'ok', version: 'test' }),
-      ),
-      http.post('/v1/daemon/agent-host/scan', () =>
-        HttpResponse.json({
-          agents: [
-            {
-              name: 'codex',
-              registry_agent_id: 'openai/codex',
-              launch_command: 'codex',
-              installed: true,
-              version: '1.0.0',
-            },
-          ],
-        }),
-      ),
-    );
+    useWizardScanHandlers();
 
     renderInApp(
       <>
@@ -408,18 +342,13 @@ describe('SetupWizardPage', () => {
       },
     );
 
+    await advanceAgentToWorkspace(user);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
-    await waitFor(() => expect(screen.getByText('Daemon is running.')).toBeInTheDocument());
-    await user.click(screen.getByRole('button', { name: 'Continue' }));
-    await waitFor(() => expect(screen.getByText('codex')).toBeInTheDocument());
-    await user.click(screen.getByText('codex'));
-    await user.click(screen.getAllByRole('button', { name: 'Continue' })[0]);
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: 'You are ready' })).toBeInTheDocument(),
     );
     await user.click(screen.getByRole('button', { name: 'Open Nexus' }));
 
-    // Optimistic completed:true must beat SetupGate before IPC resolves.
     await waitFor(() => expect(screen.getByTestId('main-shell')).toBeInTheDocument());
     expect(screen.getByTestId('location')).toHaveTextContent('/works');
     expect(setSetupCompleted).toHaveBeenCalledWith(true);

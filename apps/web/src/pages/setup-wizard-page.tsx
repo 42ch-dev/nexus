@@ -5,13 +5,13 @@ import { useSetupCompleted } from '@/lib/setup-completed-context';
 import { useDesktopCapabilities } from '@/lib/client-context';
 import { errorMessage } from '@/lib/error-message';
 import { useToast } from '@/lib/use-toast';
-import { SetupStepWelcome } from '@/pages/setup-step-welcome';
-import { SetupStepDaemon } from '@/pages/setup-step-daemon';
 import { SetupStepAgent } from '@/pages/setup-step-agent';
+import { SetupStepWorkspace } from '@/pages/setup-step-workspace';
 import { SetupStepDone } from '@/pages/setup-step-done';
 import type { AgentScanEntry } from '@42ch/nexus-contracts';
 
-export type WizardStep = 'welcome' | 'daemon' | 'agent' | 'done';
+/** V1.105 P1: Agent → Workspace → Done (Welcome/Daemon retired). */
+export type WizardStep = 'agent' | 'workspace' | 'done';
 
 export interface WizardState {
   workspaceRoot: string;
@@ -21,18 +21,17 @@ export interface WizardState {
 }
 
 /**
- * First-launch 4-step setup wizard.
+ * First-launch setup wizard — Agent → Workspace → Done.
  *
- * Steps: welcome + workspace → daemon ready → agent detection → done.
- * Finishing persists the selected agent profile (desktop only), flips
- * `setup_completed` to true, and lands the author in the main UI.
+ * Daemon readiness is owned by P0 `DaemonLaunchGate` (not a wizard step).
+ * Workspace Continue runs `ensureSetupBootstrap` (R-V1105P0-001).
  */
 export function SetupWizardPage() {
   const navigate = useNavigate();
   const { markCompleted } = useSetupCompleted();
   const desktop = useDesktopCapabilities();
   const { toast } = useToast();
-  const [step, setStep] = useState<WizardStep>('welcome');
+  const [step, setStep] = useState<WizardStep>('agent');
   const [isFinishing, setIsFinishing] = useState(false);
   const [state, setState] = useState<WizardState>({
     workspaceRoot: '',
@@ -66,29 +65,27 @@ export function SetupWizardPage() {
           <StepIndicator currentStep={step} />
         </aside>
         <main className="flex min-w-0 flex-1 flex-col px-setup-wizard-surface-content-panel-padding-x py-setup-wizard-surface-content-panel-padding-y">
-          {step === 'welcome' && (
-            <SetupStepWelcome
-              state={state}
-              onChange={setState}
-              onNext={() => setStep('daemon')}
-            />
-          )}
-          {step === 'daemon' && (
-            <SetupStepDaemon
-              onNext={() => setStep('agent')}
-              onBack={() => setStep('welcome')}
-            />
-          )}
           {step === 'agent' && (
             <SetupStepAgent
               state={state}
               onChange={setState}
+              onNext={() => setStep('workspace')}
+            />
+          )}
+          {step === 'workspace' && (
+            <SetupStepWorkspace
+              state={state}
+              onChange={setState}
               onNext={() => setStep('done')}
-              onBack={() => setStep('daemon')}
+              onBack={() => setStep('agent')}
             />
           )}
           {step === 'done' && (
-            <SetupStepDone onFinish={finish} isFinishing={isFinishing} />
+            <SetupStepDone
+              onFinish={finish}
+              onBack={() => setStep('workspace')}
+              isFinishing={isFinishing}
+            />
           )}
         </main>
       </div>
@@ -104,9 +101,8 @@ export function SetupWizardPage() {
  */
 function StepIndicator({ currentStep }: { currentStep: WizardStep }) {
   const steps: { id: WizardStep; label: string }[] = [
-    { id: 'welcome', label: 'Welcome' },
-    { id: 'daemon', label: 'Daemon' },
     { id: 'agent', label: 'Agent' },
+    { id: 'workspace', label: 'Workspace' },
     { id: 'done', label: 'Done' },
   ];
   const currentIndex = steps.findIndex((s) => s.id === currentStep);
