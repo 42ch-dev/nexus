@@ -20,6 +20,7 @@ export default defineConfig({
       '@/lib/utils': path.resolve(__dirname, '../web/src/lib/utils'),
       '@': path.resolve(__dirname, './src'),
       '@web-ui': path.resolve(__dirname, '../web/src/components/ui'),
+      '@web-setup': path.resolve(__dirname, '../web/src/components/setup'),
       '@web-lib/utils': path.resolve(__dirname, '../web/src/lib/utils'),
     },
   },

@@ -74,6 +74,7 @@ nexus-orchestration = { path = "../nexus-orchestration" }
 serial_test = "3"
 criterion = { version = "0.5", features = ["html_reports"] }
 tokio-rustls = "0.26"
+which = { workspace = true }
 
 [[bench]]
 name = "dispatch_latency"

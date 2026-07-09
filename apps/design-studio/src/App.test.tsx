@@ -229,6 +229,65 @@ describe('Surfaces page — daemon status strip', () => {
   });
 });
 
+/* ---- surfaces page — AgentPicker fixtures (V1.101 P0 Task 2) ------------ */
+
+describe('Surfaces page — AgentPicker fixtures', () => {
+  beforeEach(() => {
+    mockMatchMedia(false);
+    renderStudio('/surfaces');
+  });
+
+  it('renders the AgentPicker section heading', () => {
+    expect(
+      screen.getByRole('heading', { name: 'Setup — AgentPicker' }),
+    ).toBeInTheDocument();
+  });
+
+  it('covers loading, empty, and error states', () => {
+    expect(screen.getByText('Scanning for local ACP agents…')).toBeInTheDocument();
+    expect(screen.getByText('No agents found on PATH')).toBeInTheDocument();
+    expect(screen.getByText('Could not scan for agents')).toBeInTheDocument();
+  });
+
+  it('shows custom launch on empty and error', () => {
+    const customFields = screen.getAllByTestId('agent-picker-custom-launch');
+    expect(customFields.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('renders installed and not-installed cards in mixed fixture', () => {
+    const installed = screen.getAllByTestId('agent-card-claude-code');
+    expect(installed.length).toBeGreaterThanOrEqual(1);
+    expect(installed[0]).toHaveAttribute('data-installed', 'true');
+
+    const missing = screen.getAllByTestId('agent-card-gemini-cli');
+    expect(missing.length).toBeGreaterThanOrEqual(1);
+    expect(missing[0]).toHaveAttribute('data-installed', 'false');
+  });
+
+  it('hides outbound links when URLs are missing (Cursor Agent)', () => {
+    const hiddenLinksCard = screen.getByTestId('agent-card-cursor-agent');
+    expect(hiddenLinksCard.querySelector('a')).toBeNull();
+  });
+
+  it('shows Install outbound link when URL is present', () => {
+    expect(screen.getAllByRole('link', { name: /Install/i }).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('keeps Install links outside select buttons', () => {
+    const selects = screen.getAllByTestId(/^agent-card-select-/);
+    for (const select of selects) {
+      expect(select.querySelector('a')).toBeNull();
+    }
+  });
+
+  it('marks selected fixture with aria-pressed', () => {
+    const pressed = screen
+      .getAllByTestId('agent-card-select-claude-code')
+      .filter((el) => el.getAttribute('aria-pressed') === 'true');
+    expect(pressed.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
 /* ---- components page — form-field composition fixture (P2 T3) ----------- */
 
 describe('Components page — form-field composition fixture', () => {

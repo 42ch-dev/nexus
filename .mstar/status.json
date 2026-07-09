@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-07-09T11:40:00+0800",
+  "updated_at": "2026-07-09T14:30:00+0800",
   "plans": [
     {
       "id": "2026-07-08-v1.99-prepare-visual-system-deepening",
@@ -267,7 +267,7 @@
       "id": "2026-07-09-v1.101-agent-detection-picker",
       "title": "P0 — Agent Detection & AgentPicker",
       "file": ".mstar/plans/2026-07-09-v1.101-agent-detection-picker.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@product-manager",
@@ -277,7 +277,7 @@
         "@qc-specialist",
         "@qa-engineer"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "V1.101",
         "desktop",
@@ -287,7 +287,7 @@
       ],
       "created_at": "2026-07-09",
       "updated_at": "2026-07-09",
-      "notes": "Must. Closes R-V1100P0SMOKE-AGENT-SCAN. Studio visual then App wiring. Settings shell deferred DF-70.",
+      "notes": "Done: SDD T1-T4 + QC Approve with residuals (fix-wave-1) + QA Pass. R-V1100P0SMOKE-AGENT-SCAN resolved. Residuals R-V1101P0-001..004.",
       "metadata": {
         "priority": "high",
         "spec_integration_branch": "iteration/v1.101",
@@ -300,8 +300,10 @@
         "primary_spec": ".mstar/iterations/v1.101/specs/agent-picker-and-detection.md",
         "execution_mode": "sdd",
         "qa_gate": "mandatory",
-        "stretch": false
-      }
+        "stretch": false,
+        "working_branch": "plan/v1.101-p0-agent-detection-picker"
+      },
+      "done_at": "2026-07-09"
     },
     {
       "id": "2026-07-09-v1.101-setup-wizard-ui-polish",
@@ -401,23 +403,23 @@
       "merge_commit": "901191a1"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-07-08",
-      "total_open": 26,
+      "updated_at": "2026-07-09",
+      "total_open": 40,
       "by_severity": {
-        "critical": 0,
-        "high": 1,
-        "medium": 2,
-        "low": 19,
-        "nit": 4
+        "nit": 12,
+        "low": 27,
+        "medium": 1
       },
       "by_target": {
+        "P2": 1,
+        "V1.101+ (desktop UI polish)": 3,
         "V1.96": 14,
         "V1.96 spec-hygiene pass": 1,
         "V1.97": 4,
         "V1.97+": 1,
-        "V1.98": 4,
-        "V1.98+": 1,
-        "post-V1.99": 4,
+        "V1.99+": 1,
+        "post-V1.100": 8,
+        "post-V1.99": 2,
         "when list virtualisation lands": 1
       },
       "by_plan": {
@@ -427,10 +429,12 @@
         "2026-07-06-v1.94-closure": 9,
         "2026-07-07-v1.95-implement-fixes": 4,
         "2026-07-07-v1.96-implement-rework": 5,
-        "2026-07-07-v1.97-desktop-first-launch-hardening": 5
+        "2026-07-07-v1.97-desktop-first-launch-hardening": 3,
+        "2026-07-08-v1.100-desktop-clean-state-first-launch": 6,
+        "2026-07-08-v1.100-ui-hygiene-guardrails": 6
       }
     },
-    "updated_at": "2026-07-09T11:40:00+0800"
+    "updated_at": "2026-07-09T14:30:00+0800"
   },
   "residual_findings": {
     "2026-07-05-v1.91-findings-batch": [
@@ -961,17 +965,52 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-08-v1.100-desktop-clean-state-first-launch.md",
         "note": "Pre-existing polling/timing issue in setup-step-daemon status subscription. Not a P0 blocker (daemon does reach running). Defer to future UI iteration."
+      }
+    ],
+    "2026-07-09-v1.101-agent-detection-picker": [
+      {
+        "id": "R-V1101P0-001",
+        "title": "@web-setup/* aliases entire components/setup/ tree — prefer file-scoped alias or guardrail",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.102+",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-09-v1.101-agent-detection-picker.md",
+        "note": "QC3 F-003. Current fixtures only import agent-picker; directory alias could pull wizard modules into Studio."
       },
       {
-        "id": "R-V1100P0SMOKE-AGENT-SCAN",
-        "title": "Agent selection step does not display locally-available agent CLIs (smoke observation)",
-        "severity": "medium",
+        "id": "R-V1101P0-002",
+        "title": "desktop-shell.md still describes Recommended badge; UI uses status dots / auto-select",
+        "severity": "nit",
         "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target": "V1.101+ (agent detection)",
+        "owner": "@writing-specialist",
+        "target": "V1.101 P1 or V1.102",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-08-v1.100-desktop-clean-state-first-launch.md",
-        "note": "Agent scan/detection in setup wizard does not surface local agent CLIs. Pre-existing; beyond P0 bootstrap scope. Defer to a dedicated agent-detection iteration."
+        "tracking_link": ".mstar/plans/2026-07-09-v1.101-agent-detection-picker.md",
+        "note": "QC2 F-006 doc drift."
+      },
+      {
+        "id": "R-V1101P0-003",
+        "title": "Document Class B PATH enrichment locus + finite common-dir / custom-launch escape hatch",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@architect",
+        "target": "post-V1.101",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-09-v1.101-agent-detection-picker.md",
+        "note": "QC1 F-003 / QC3 F-004. asdf/mise added in fix-wave; exotic PATH still custom-launch."
+      },
+      {
+        "id": "R-V1101P0-004",
+        "title": "P0 feature branch diff includes sibling V1.101 plan/spec scaffolding from iteration-start",
+        "severity": "nit",
+        "decision": "accept",
+        "owner": "@project-manager",
+        "target": "accept",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-09-v1.101-agent-detection-picker.md",
+        "note": "QC1 F-005 process note; squash/integration scope hygiene."
       }
     ]
   }
