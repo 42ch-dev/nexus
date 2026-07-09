@@ -90,6 +90,12 @@ export interface DesktopCapabilities {
   setSetupCompleted(value: boolean): Promise<void>;
   /** Persist the agent profile selected during setup (desktop only). */
   setAgentProfile(name: string, launchCommand?: string): Promise<void>;
+  /**
+   * Read the saved agent profile for Settings preselect (desktop only).
+   * Returns `null` when missing, unreadable, or no `native_cli` provider —
+   * invoke transport errors are also surfaced as `null` so preselect never crashes.
+   */
+  getAgentProfile(): Promise<{ name: string; launchCommand?: string } | null>;
   /** Resolve the default workspace root path (desktop only). */
   getWorkspaceRoot(): Promise<string>;
   /**
@@ -256,6 +262,17 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
       await tauriInvoke().core.invoke<void>('set_agent_profile', { name, launchCommand });
     } catch (err) {
       throw asDesktopError(err);
+    }
+  }
+
+  async getAgentProfile(): Promise<{ name: string; launchCommand?: string } | null> {
+    try {
+      return await tauriInvoke().core.invoke<{ name: string; launchCommand?: string } | null>(
+        'get_agent_profile',
+      );
+    } catch {
+      // Preselect path: treat invoke/transport failures as "no saved profile".
+      return null;
     }
   }
 

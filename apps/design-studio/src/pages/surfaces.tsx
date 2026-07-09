@@ -423,9 +423,10 @@ export function SurfacesShellPage() {
           (lucide) above profiles, plus section nav (
           <strong className="font-medium text-gray-1000">Agent</strong> /{' '}
           <strong className="font-medium text-gray-1000">Connection</strong> /{' '}
-          <strong className="font-medium text-gray-1000">Setup</strong>) and empty
-          section frames. Workspace nav is absent until P4 Stretch. Default
-          section is Agent. No App nested-route wiring, no daemon, no product{' '}
+          <strong className="font-medium text-gray-1000">Setup</strong>). Default
+          Agent outlet shows the preselected Agent section body (G1 visual);
+          Connection/Setup keep empty frames. Workspace nav is absent until P4
+          Stretch. No App IPC, no daemon, no product{' '}
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
             pages/
           </code>{' '}

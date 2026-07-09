@@ -29,6 +29,7 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
     getSetupCompleted: () => Promise.resolve(false),
     setSetupCompleted: () => Promise.resolve(),
     setAgentProfile: () => Promise.resolve(),
+    getAgentProfile: () => Promise.resolve(null),
     getWorkspaceRoot: () => Promise.resolve('/tmp/nexus'),
     pickDirectory: () => Promise.resolve(null),
     setWorkspacePath: () => Promise.resolve(),
