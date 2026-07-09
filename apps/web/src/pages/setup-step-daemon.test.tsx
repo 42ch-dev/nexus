@@ -303,7 +303,65 @@ describe('SetupStepDaemon', () => {
     await waitFor(() =>
       expect(screen.getByText(/Daemon is taking longer than expected to start/)).toBeInTheDocument(),
     );
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    expect(screen.queryByText('Starting daemon…')).not.toBeInTheDocument();
     vi.useRealTimers();
+  });
+
+  it('surfaces Retry when the 25s re-probe returns stopped (no permanent spinner)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const getDaemonStatus = vi
+      .fn()
+      .mockResolvedValueOnce({ state: 'starting', port: 8420 } as DaemonStatus)
+      .mockResolvedValueOnce({ state: 'stopped', port: 8420 } as DaemonStatus);
+    const onDaemonStatusChanged = vi.fn(() => Promise.resolve(() => {}));
+
+    renderInApp(<SetupStepDaemon onNext={() => {}} onBack={() => {}} />, {
+      client: makeClient(),
+      desktop: makeDesktop({ getDaemonStatus, onDaemonStatusChanged }),
+      initialRouterEntries: ['/setup'],
+    });
+
+    await waitFor(() => expect(getDaemonStatus).toHaveBeenCalled());
+    expect(screen.getByText('Starting daemon…')).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(25_000);
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText(/Daemon is taking longer than expected to start/)).toBeInTheDocument(),
+    );
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    expect(screen.queryByText('Starting daemon…')).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it('unsubscribes when unmount races ahead of onDaemonStatusChanged resolving', async () => {
+    let resolveListen!: (unlisten: () => void) => void;
+    const unlisten = vi.fn();
+    const getDaemonStatus = vi.fn(() => Promise.resolve({ state: 'starting', port: 8420 } as DaemonStatus));
+    const onDaemonStatusChanged = vi.fn(
+      () =>
+        new Promise<() => void>((resolve) => {
+          resolveListen = resolve;
+        }),
+    );
+
+    const { unmount } = renderInApp(<SetupStepDaemon onNext={() => {}} onBack={() => {}} />, {
+      client: makeClient(),
+      desktop: makeDesktop({ getDaemonStatus, onDaemonStatusChanged }),
+      initialRouterEntries: ['/setup'],
+    });
+
+    await waitFor(() => expect(onDaemonStatusChanged).toHaveBeenCalledTimes(1));
+    unmount();
+
+    await act(async () => {
+      resolveListen(unlisten);
+    });
+
+    expect(unlisten).toHaveBeenCalledTimes(1);
   });
 
   it('surfaces getDaemonStatus errors as fallback to polling', async () => {

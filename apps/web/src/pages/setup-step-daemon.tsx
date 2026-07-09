@@ -121,9 +121,16 @@ export function SetupStepDaemon({ onNext, onBack }: SetupStepDaemonProps) {
         }
 
         // At most one active subscription for this mount (cleanup unsubscribes).
-        unsub = await desktop.onDaemonStatusChanged((next) => {
+        const listen = await desktop.onDaemonStatusChanged((next) => {
           applyStatus(next);
         });
+        // B1: if cleanup ran while await was in flight, unlisten immediately —
+        // otherwise the listener leaks across remount/retry.
+        if (cancelled) {
+          listen();
+          return;
+        }
+        unsub = listen;
       } catch {
         if (cancelled) return;
         await probe();
@@ -133,6 +140,7 @@ export function SetupStepDaemon({ onNext, onBack }: SetupStepDaemonProps) {
     timeoutId = setTimeout(() => {
       if (cancelled) return;
       if (!desktop) {
+        setReady(false);
         setError('Daemon is taking longer than expected to start.');
         return;
       }
@@ -140,21 +148,27 @@ export function SetupStepDaemon({ onNext, onBack }: SetupStepDaemonProps) {
         .getDaemonStatus()
         .then((status) => {
           if (cancelled) return;
-          applyStatus(status);
-          if (
-            status.state !== 'running' &&
-            status.state !== 'degraded' &&
-            status.state !== 'error' &&
-            status.state !== 'stopped'
-          ) {
-            setError(
-              'Daemon is taking longer than expected to start. You can retry or reset the local database.',
-            );
+          if (status.state === 'running' || status.state === 'degraded') {
+            applyStatus(status);
+            return;
           }
+          if (status.state === 'error') {
+            applyStatus(status);
+            return;
+          }
+          // B2: starting/stopped (or any other non-ready state) after the
+          // bounded wait must surface Retry — never leave a permanent spinner.
+          setReady(false);
+          setError(
+            'Daemon is taking longer than expected to start. You can retry or reset the local database.',
+          );
+          clearWaitTimeout();
         })
         .catch(() => {
           if (cancelled) return;
+          setReady(false);
           setError('Could not determine daemon status. Try retrying.');
+          clearWaitTimeout();
         });
     }, 25_000);
 
