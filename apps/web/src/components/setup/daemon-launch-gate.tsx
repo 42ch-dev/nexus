@@ -121,6 +121,8 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
 
     timeoutId = setTimeout(() => {
       if (cancelled) return;
+      // Timer already fired — clear the handle without clearTimeout (no-op).
+      timeoutId = undefined;
       void cap
         .getDaemonStatus()
         .then((status) => {
@@ -132,20 +134,17 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
           if (status.state === 'error') {
             setDaemonReady(false);
             setError(status.detail ?? `Daemon is ${status.state}.`);
-            clearWaitTimeout();
             return;
           }
           setDaemonReady(false);
           setError(
             'Daemon is taking longer than expected to start. You can retry or reset the local database.',
           );
-          clearWaitTimeout();
         })
         .catch(() => {
           if (cancelled) return;
           setDaemonReady(false);
           setError('Could not determine daemon status. Try retrying.');
-          clearWaitTimeout();
         });
     }, WAIT_TIMEOUT_MS);
 
