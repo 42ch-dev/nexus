@@ -318,7 +318,7 @@ V1.100 does not change daemon routes, JSON schemas, generated TypeScript/Rust co
 
 **Handler**: `crates/nexus-daemon-runtime/src/api/handlers/agent_host.rs` — new `scan` function, wired into the existing agent-host router (same route group as `health`, `sessions`).
 
-**Consumers**: Setup wizard agent step (V1.101 Must / P0 — app-shared `AgentPicker` at `apps/web/src/components/setup/agent-picker.tsx`); future Settings→Agent detection UI deferred as **DF-70** (Settings shell not shipped in V1.101).
+**Consumers**: Setup wizard agent step (V1.101 Must / P0 — app-shared `AgentPicker` at `apps/web/src/components/setup/agent-picker.tsx`); **V1.102 Must / P1** thin Settings host (`/settings`) remounts the same picker for post-setup agent change. Fuller multi-section Settings IA remains deferred under **DF-70**.
 
 ### 14.2 Contract shapes
 
@@ -357,9 +357,9 @@ The handler joins the registry list with the scan results to produce the annotat
 
 ### 14.5 Non-goals
 
-- Agent re-detection on non-first launch (deferred — scan is used by the wizard only; power-user re-scan is a Settings action).
 - Agent installation / download / update (registry-only detection; the user manages their own ACP agent binaries).
-- Full `AgentProfile` CRUD API (the wizard picks a default; CRUD is a separate future iteration).
+- Full `AgentProfile` CRUD API (wizard + thin Settings host write the default profile via desktop `setAgentProfile`; broader CRUD remains a separate future iteration).
+- Full multi-section Settings IA / BYOK / AgentPicker package promotion (out of V1.102 thin-host slice; see DF-70).
 
 ---
 
