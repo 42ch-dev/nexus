@@ -6,7 +6,7 @@
       "id": "2026-07-09-v1.103-settings-shell-nav",
       "title": "P0 — Settings Shell & Section Nav (S3)",
       "file": ".mstar/plans/2026-07-09-v1.103-settings-shell-nav.md",
-      "status": "InProgress",
+      "status": "InReview",
       "owner": "@project-manager",
       "agents": [
         "@frontend-dev",
@@ -14,7 +14,7 @@
         "@qc-specialist",
         "@qa-engineer"
       ],
-      "progress": 5,
+      "progress": 92,
       "tags": [
         "V1.103",
         "settings",
@@ -23,7 +23,7 @@
       ],
       "created_at": "2026-07-09",
       "updated_at": "2026-07-09",
-      "notes": "Must. Settings host shell + secondary section nav + route skeleton. Studio-first.",
+      "notes": "QC tri Approve after fix-wave (qc2 F-001/F-002). Awaiting QA.",
       "metadata": {
         "priority": "high",
         "tier": "must",
@@ -258,7 +258,7 @@
         "2026-07-09-v1.102-settings-shell": 5
       }
     },
-    "updated_at": "2026-07-09T17:35:00+0800"
+    "updated_at": "2026-07-09T18:30:00+0800"
   },
   "residual_findings": {
     "2026-07-05-v1.91-findings-batch": [
@@ -966,6 +966,53 @@
         "summary": "Soft running Badge semantic reuse for Installed/healthy",
         "source": "qc-tri",
         "plan_id": "2026-07-09-v1.102-ui-hygiene"
+      }
+    ],
+    "2026-07-09-v1.103-settings-shell-nav": [
+      {
+        "id": "R-V1103P0QC-S001",
+        "severity": "suggestion",
+        "lifecycle": "open",
+        "title": "Legacy health-indicator still links /connect",
+        "summary": "Health indicator may still deep-link /connect; redirect works but entry should prefer /settings/connection",
+        "target": "V1.103 P2 or accept",
+        "source": "qc1"
+      },
+      {
+        "id": "R-V1103P0QC-S002",
+        "severity": "suggestion",
+        "lifecycle": "open",
+        "title": "Studio vs web section-list drift risk",
+        "summary": "Keep Studio SETTINGS_SHELL_SECTIONS aligned with App MUST_SECTIONS when P4 adds Workspace",
+        "target": "V1.103 P4",
+        "source": "qc1"
+      },
+      {
+        "id": "R-V1103P0QC-S003",
+        "severity": "nit",
+        "lifecycle": "open",
+        "title": "Dead ROUTE_TITLES[/connect] entry",
+        "summary": "Optional cleanup of unused /connect title map after permanent redirect",
+        "target": "accept",
+        "source": "qc1"
+      },
+      {
+        "id": "R-V1103P0QC-S004",
+        "severity": "suggestion",
+        "lifecycle": "open",
+        "title": "Connection post-activate still navigates to /",
+        "summary": "P2 should keep authors on /settings/connection after activate/revert (F-004)",
+        "target": "V1.103 P2",
+        "source": "qc2"
+      },
+      {
+        "id": "R-V1103P0QC-S005",
+        "severity": "nit",
+        "lifecycle": "open",
+        "title": "Optional nav role query in Vitest",
+        "summary": "Assert getByRole navigation Settings sections",
+        "target": "accept",
+        "source": "qc2"
       }
     ]
   }
