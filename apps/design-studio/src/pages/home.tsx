@@ -33,7 +33,7 @@ export function HomePage() {
           { label: 'Brand', path: '/brand', desc: 'VI: logos, mark, theme.css swatches' },
           { label: 'Components', path: '/components', desc: 'UI primitive variant/state matrix' },
           { label: 'Voice', path: '/voice', desc: 'Voice & Content rule specimens' },
-          { label: 'Surfaces', path: '/surfaces', desc: 'Real chrome slices: Setup + App shell' },
+          { label: 'Surfaces', path: '/surfaces', desc: 'Chrome slices by section: Setup, Shell, AgentPicker, Daemon' },
         ].map(({ label, path, desc }) => (
           <Link
             key={path}

@@ -498,7 +498,7 @@
       "id": "2026-07-09-v1.102-ui-hygiene",
       "title": "P2 — UI Hygiene + Surfaces Polish (Stretch)",
       "file": ".mstar/plans/2026-07-09-v1.102-ui-hygiene.md",
-      "status": "Todo",
+      "status": "InProgress",
       "owner": "@project-manager",
       "agents": [
         "@product-manager",
@@ -507,7 +507,7 @@
         "@qc-specialist",
         "@qa-engineer"
       ],
-      "progress": 0,
+      "progress": 5,
       "tags": [
         "V1.102",
         "surfaces",
@@ -516,7 +516,7 @@
       ],
       "created_at": "2026-07-09",
       "updated_at": "2026-07-09",
-      "notes": "Stretch. Deferrable. Surfaces menu + chrome polish + guardrails.",
+      "notes": "Stretch running — Task 1 Surfaces menu",
       "metadata": {
         "priority": "medium",
         "tier": "stretch",
@@ -531,7 +531,9 @@
         "primary_spec": ".mstar/iterations/v1.102/specs/surfaces-polish-contract.md",
         "execution_mode": "sdd",
         "qa_gate": "mandatory",
-        "wire_contracts_changed": false
+        "wire_contracts_changed": false,
+        "working_branch": "feat/v1.102-ui-hygiene",
+        "sdd_dir": ".mstar/sdd/2026-07-09-v1.102-ui-hygiene"
       }
     }
   ],

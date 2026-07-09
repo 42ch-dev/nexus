@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { NavLink, Outlet } from 'react-router-dom';
 
 import { cn, Badge } from '@42ch/nexus-ui';
 
@@ -34,6 +35,39 @@ const CREATOR_NAV: ShellNavItem[] = [
 //   { label: 'Capabilities' },
 // ];
 
+const SURFACES_SECTIONS = [
+  {
+    label: 'Overview',
+    path: '/surfaces',
+    end: true,
+    desc: 'Index of Studio surface chrome slices',
+  },
+  {
+    label: 'Setup',
+    path: '/surfaces/setup',
+    end: false,
+    desc: 'Setup wizard chrome (Steps / Back+Continue / daemon chips)',
+  },
+  {
+    label: 'Shell',
+    path: '/surfaces/shell',
+    end: false,
+    desc: 'App shell sidebar + Settings thin host',
+  },
+  {
+    label: 'AgentPicker',
+    path: '/surfaces/agent-picker',
+    end: false,
+    desc: 'AgentPicker visual states',
+  },
+  {
+    label: 'Daemon',
+    path: '/surfaces/daemon',
+    end: false,
+    desc: 'Daemon status strip',
+  },
+] as const;
+
 /* ------------------------------------------------------------------ */
 /*  Sub-components — shared                                            */
 /* ------------------------------------------------------------------ */
@@ -43,6 +77,72 @@ function SurfaceHeading({ children }: { children: ReactNode }) {
     <h3 className="text-heading-20 font-semibold text-gray-1000 mb-2 scroll-mt-16">
       {children}
     </h3>
+  );
+}
+
+function SurfacesSectionNav() {
+  return (
+    <nav
+      aria-label="Surfaces sections"
+      className="flex flex-wrap gap-1 mb-8 pb-4 border-b border-gray-alpha-200"
+      data-testid="surfaces-section-nav"
+    >
+      {SURFACES_SECTIONS.map(({ label, path, end }) => (
+        <NavLink
+          key={path}
+          to={path}
+          end={end}
+          className={({ isActive }) =>
+            cn(
+              'px-3 py-1.5 rounded-md text-label-14 transition-colors',
+              isActive
+                ? 'bg-gray-alpha-200 text-gray-1000 font-medium'
+                : 'text-gray-700 hover:text-gray-1000 hover:bg-gray-alpha-100',
+            )
+          }
+        >
+          {label}
+        </NavLink>
+      ))}
+    </nav>
+  );
+}
+
+/**
+ * Shared Surfaces chrome: page title + Studio-only section menu.
+ * Nested routes render via Outlet (V1.102 P2 Surfaces IA).
+ */
+export function SurfacesLayout() {
+  return (
+    <div className="max-w-6xl mx-auto py-8 px-4">
+      <h2 className="text-heading-24 font-semibold text-gray-1000 mb-2">
+        Surfaces
+      </h2>
+      <p className="text-copy-16 text-gray-700 mb-6">
+        Real product-surface slices — Setup wizard step card and App shell
+        chrome, composed as studio-local fixtures from{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @42ch/nexus-ui
+        </code>{' '}
+        (promoted) and{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-ui/*
+        </code>{' '}
+        (transitional) primitives per IA guide §4.5. No daemon data, no live
+        routing, and no product-page imports (
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          pages/
+        </code>{' '}
+        or{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          components/layout/
+        </code>
+        ). Studio-only deep links — not App Settings IA.
+      </p>
+
+      <SurfacesSectionNav />
+      <Outlet />
+    </div>
   );
 }
 
@@ -183,9 +283,7 @@ function AppShellFixture() {
       {/* ── Main content area — recessed background, placeholder indicates active workspace ── */}
       <div className="flex-1 bg-background-200 flex flex-col items-center justify-center min-w-0 p-8">
         <div className="border-2 border-dashed border-gray-alpha-300 rounded-card w-full max-w-md p-8 text-center">
-          <p className="text-copy-14 text-gray-700 mb-1">
-            Content panel
-          </p>
+          <p className="text-copy-14 text-gray-700 mb-1">Content panel</p>
           <p className="text-copy-13 text-gray-500">
             Active workspace — editor, canvas, or dashboard — rendered by the
             product shell at runtime. Not part of this fixture.
@@ -197,7 +295,7 @@ function AppShellFixture() {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Fixture 3 — Daemon status strip (healthy sample)                    */
+/*  Fixture — Daemon status strip (healthy sample)                      */
 /* ------------------------------------------------------------------ */
 
 function DaemonStatusStrip() {
@@ -221,145 +319,36 @@ function DaemonStatusStrip() {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Page                                                                */
+/*  Section pages                                                       */
 /* ------------------------------------------------------------------ */
 
-export function SurfacesPage() {
+export function SurfacesIndexPage() {
   return (
-    <div className="max-w-6xl mx-auto py-8 px-4">
-      <h2 className="text-heading-24 font-semibold text-gray-1000 mb-2">
-        Surfaces
-      </h2>
-      <p className="text-copy-16 text-gray-700 mb-6">
-        Real product-surface slices — Setup wizard step card and App shell
-        chrome, composed as studio-local fixtures from{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @42ch/nexus-ui
-        </code>{' '}
-        (promoted) and{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @web-ui/*
-        </code>{' '}
-        (transitional) primitives per IA guide §4.5. No daemon data, no live routing, and no
-        product-page imports (
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          pages/
-        </code>{' '}
-        or{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          components/layout/
-        </code>
-        ).
+    <div data-testid="surfaces-index">
+      <p className="text-copy-14 text-gray-700 mb-6">
+        Jump to a Surfaces section for focused chrome review. Deep links are
+        Studio-only — they are not App Settings IA.
       </p>
-
-      {/* 1. Setup wizard chrome polish (V1.101 P1) */}
-      <section>
-        <SurfaceHeading>Setup — Wizard chrome</SurfaceHeading>
-        <p className="text-copy-14 text-gray-700 mb-6">
-          Studio-local chrome fixtures for V1.101 P1 polish contract §8: Steps
-          matrices (welcome / daemon / agent / done) with numbered
-          complete/active/pending circles, normative Back+Continue horizontal
-          CTA row, and daemon status chips (starting / running / error). Tokens
-          from{' '}
-          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-            components.setup-wizard-step
-          </code>{' '}
-          and{' '}
-          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-            components.setup-wizard-surface
-          </code>
-          . Static — no Tauri IPC, no daemon wiring, no App page imports.
-        </p>
-        <SetupWizardChromeFixtures />
-      </section>
-
-      {/* 2. App shell chrome */}
-      <section>
-        <SurfaceHeading>App shell chrome</SurfaceHeading>
-        <p className="text-copy-14 text-gray-700 mb-6">
-          Sidebar tab strip (Creator / Orchestrator), one expanded nav group
-          (Works → All Works), footer profile avatar row stub, and daemon
-          status strip — studio-local chrome fixtures built with inline HTML/SVG
-          and Badge from{' '}
-          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-            @42ch/nexus-ui
-          </code>{' '}
-          for the daemon status strip. No live routing, no{' '}
-          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-            NexusClient
-          </code>
-          , and no layout component imports.
-        </p>
-        <AppShellFixture />
-      </section>
-
-      {/* 3. AgentPicker visual states (V1.101 P0) */}
-      <section className="mt-10">
-        <SurfaceHeading>Setup — AgentPicker</SurfaceHeading>
-        <p className="text-copy-14 text-gray-700 mb-6">
-          Presentational card grid from{' '}
-          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-            @web-setup/agent-picker
-          </code>{' '}
-          (apps/web setup composition — not{' '}
-          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-            @42ch/nexus-ui
-          </code>
-          ). Props-driven fixtures: loading, installed grid, mixed, empty, error,
-          selected. No contracts, no daemon client.
-        </p>
-        <AgentPickerFixtures />
-      </section>
-
-      {/* 4. Thin Settings host (V1.102 P1) */}
-      <section className="mt-10">
-        <SurfaceHeading>Settings — Thin host</SurfaceHeading>
-        <p className="text-copy-14 text-gray-700 mb-6">
-          Studio-local chrome for DF-70 slice A: footer utility{' '}
-          <strong className="font-medium text-gray-1000">Settings</strong>{' '}
-          (lucide) above profiles, plus a thin host page mounting{' '}
-          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-            @web-setup/agent-picker
-          </code>{' '}
-          with fixture props. Not a wizard re-run — no Steps / Back+Continue.
-          No daemon, no product{' '}
-          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-            pages/
-          </code>{' '}
-          or{' '}
-          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-            components/layout/
-          </code>{' '}
-          imports.
-        </p>
-        <SettingsHostFixtures />
-      </section>
-
-      {/* Daemon status strip */}
-      <section className="mt-6">
-        <SurfaceHeading>Daemon status strip</SurfaceHeading>
-        <p className="text-copy-14 text-gray-700 mb-6">
-          Healthy daemon status affordance — green dot, badge, helper text.
-        Composed from{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @42ch/nexus-ui
-        </code>{' '}
-        +{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @web-ui/*
-        </code>{' '}
-          with inline markup. Per DESIGN.md{' '}
-          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-            components.daemon-status-indicator
-          </code>{' '}
-          tokens.
-        </p>
-        <DaemonStatusStrip />
-      </section>
-
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {SURFACES_SECTIONS.filter((s) => s.path !== '/surfaces').map(
+          ({ label, path, desc }) => (
+            <NavLink
+              key={path}
+              to={path}
+              className="block p-4 rounded-lg border border-gray-alpha-200 hover:border-gray-alpha-400 transition-colors no-underline"
+            >
+              <h3 className="text-heading-16 font-medium mb-1 text-gray-1000">
+                {label}
+              </h3>
+              <p className="text-copy-14 text-gray-700">{desc}</p>
+            </NavLink>
+          ),
+        )}
+      </div>
       <p className="text-copy-13 text-gray-500 mt-12 pt-8 border-t border-gray-alpha-200">
         Surface fixtures: Setup wizard chrome, App shell chrome, AgentPicker
-        states, Settings thin host, daemon status strip. Composed from{' '}
+        states, Settings thin host (under Shell), daemon status strip. Composed
+        from{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @42ch/nexus-ui
         </code>
@@ -378,5 +367,118 @@ export function SurfacesPage() {
         imports, no daemon wiring.
       </p>
     </div>
+  );
+}
+
+export function SurfacesSetupPage() {
+  return (
+    <section data-testid="surfaces-setup">
+      <SurfaceHeading>Setup — Wizard chrome</SurfaceHeading>
+      <p className="text-copy-14 text-gray-700 mb-6">
+        Studio-local chrome fixtures for V1.101 P1 polish contract §8: Steps
+        matrices (welcome / daemon / agent / done) with numbered
+        complete/active/pending circles, normative Back+Continue horizontal CTA
+        row, and daemon status chips (starting / running / error). Tokens from{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          components.setup-wizard-step
+        </code>{' '}
+        and{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          components.setup-wizard-surface
+        </code>
+        . Static — no Tauri IPC, no daemon wiring, no App page imports.
+      </p>
+      <SetupWizardChromeFixtures />
+    </section>
+  );
+}
+
+export function SurfacesShellPage() {
+  return (
+    <div data-testid="surfaces-shell">
+      <section>
+        <SurfaceHeading>App shell chrome</SurfaceHeading>
+        <p className="text-copy-14 text-gray-700 mb-6">
+          Sidebar tab strip (Creator / Orchestrator), one expanded nav group
+          (Works → All Works), footer profile avatar row stub — studio-local
+          chrome fixtures built with inline HTML/SVG. No live routing, no{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            NexusClient
+          </code>
+          , and no layout component imports.
+        </p>
+        <AppShellFixture />
+      </section>
+
+      {/* Settings thin host stays discoverable under Shell (V1.102 P1) */}
+      <section className="mt-10">
+        <SurfaceHeading>Settings — Thin host</SurfaceHeading>
+        <p className="text-copy-14 text-gray-700 mb-6">
+          Studio-local chrome for DF-70 slice A: footer utility{' '}
+          <strong className="font-medium text-gray-1000">Settings</strong>{' '}
+          (lucide) above profiles, plus a thin host page mounting{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            @web-setup/agent-picker
+          </code>{' '}
+          with fixture props. Not a wizard re-run — no Steps / Back+Continue. No
+          daemon, no product{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            pages/
+          </code>{' '}
+          or{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            components/layout/
+          </code>{' '}
+          imports.
+        </p>
+        <SettingsHostFixtures />
+      </section>
+    </div>
+  );
+}
+
+export function SurfacesAgentPickerPage() {
+  return (
+    <section className="mt-0" data-testid="surfaces-agent-picker">
+      <SurfaceHeading>Setup — AgentPicker</SurfaceHeading>
+      <p className="text-copy-14 text-gray-700 mb-6">
+        Presentational card grid from{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-setup/agent-picker
+        </code>{' '}
+        (apps/web setup composition — not{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @42ch/nexus-ui
+        </code>
+        ). Props-driven fixtures: loading, installed grid, mixed, empty, error,
+        selected. No contracts, no daemon client.
+      </p>
+      <AgentPickerFixtures />
+    </section>
+  );
+}
+
+export function SurfacesDaemonPage() {
+  return (
+    <section data-testid="surfaces-daemon">
+      <SurfaceHeading>Daemon status strip</SurfaceHeading>
+      <p className="text-copy-14 text-gray-700 mb-6">
+        Healthy daemon status affordance — green dot, badge, helper text.
+        Composed from{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @42ch/nexus-ui
+        </code>{' '}
+        +{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-ui/*
+        </code>{' '}
+        with inline markup. Per DESIGN.md{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          components.daemon-status-indicator
+        </code>{' '}
+        tokens.
+      </p>
+      <DaemonStatusStrip />
+    </section>
   );
 }
