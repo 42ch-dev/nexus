@@ -379,10 +379,10 @@ export function SurfacesSetupPage() {
     <section data-testid="surfaces-setup">
       <SurfaceHeading>Setup — Wizard chrome</SurfaceHeading>
       <p className="text-copy-14 text-gray-700 mb-6">
-        Studio-local chrome fixtures for V1.101 P1 polish contract §8: Steps
-        matrices (welcome / daemon / agent / done) with numbered
-        complete/active/pending circles, normative Back+Continue horizontal CTA
-        row, and daemon status chips (starting / running / error). Tokens from{' '}
+        Studio-local chrome fixtures for V1.105 P2 portrait shell: fixed
+        480×min(720px, 85vh) card, top horizontal Steps (Agent / Workspace /
+        Done), scrollable agent-list overflow, normative Back+Continue CTA.
+        Tokens from{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           components.setup-wizard-step
         </code>{' '}

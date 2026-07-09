@@ -1,0 +1,21 @@
+{
+  "plan_id": "2026-07-10-v1.105-portrait-shell-steps",
+  "schema_version": 1,
+  "archived_at": "2026-07-10T01:50:00+0800",
+  "archived_reason": "V1.105 P2 Task 2: Studio fixtures updated to Agent/Workspace/Done portrait + top Steps.",
+  "entries": [
+    {
+      "id": "R-V1105P1-003",
+      "title": "Design Studio still has 4-step wizard fixtures until P2",
+      "severity": "nit",
+      "lifecycle": "resolved",
+      "closed_at": "2026-07-10",
+      "closed_by": "2026-07-10-v1.105-portrait-shell-steps",
+      "source_plan_id": "2026-07-10-v1.105-wizard-ia-reorder",
+      "tracking_link": ".mstar/plans/2026-07-10-v1.105-portrait-shell-steps.md",
+      "archived_at": "2026-07-10",
+      "closure_note": "WizardStepId is agent|workspace|done; TopStepIndicator replaces left rail; overflow fixture added.",
+      "closure_evidence": "apps/design-studio/src/fixtures/setup-wizard-chrome-fixtures.tsx; apps/design-studio/src/App.test.tsx"
+    }
+  ]
+}
