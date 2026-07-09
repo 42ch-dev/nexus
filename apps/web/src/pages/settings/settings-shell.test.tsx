@@ -200,7 +200,7 @@ describe('Settings shell routes', () => {
     );
   });
 
-  it('mounts Connection section outlet', async () => {
+  it('mounts Connection section outlet with form chrome', async () => {
     useHandlers(scanHandler(), creatorsHandler());
 
     renderInApp(
@@ -214,13 +214,19 @@ describe('Settings shell routes', () => {
     );
 
     expect(screen.getByTestId('settings-connection-section')).toBeInTheDocument();
+    expect(screen.getByTestId('connect-daemon-form')).toBeInTheDocument();
     expect(screen.getByTestId('settings-section-nav-connection')).toHaveAttribute(
       'aria-current',
       'page',
     );
+    expect(
+      screen.getByText(
+        /Connect this app to a remote Nexus daemon\. Your local daemon stays the default/i,
+      ),
+    ).toBeInTheDocument();
   });
 
-  it('redirects /connect to /settings/connection', async () => {
+  it('permanently redirects /connect to /settings/connection', async () => {
     useHandlers(scanHandler(), creatorsHandler());
 
     renderInApp(
@@ -239,6 +245,11 @@ describe('Settings shell routes', () => {
 
     await waitFor(() =>
       expect(screen.getByTestId('settings-connection-section')).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId('connect-daemon-form')).toBeInTheDocument();
+    expect(screen.getByTestId('settings-section-nav-connection')).toHaveAttribute(
+      'aria-current',
+      'page',
     );
   });
 
