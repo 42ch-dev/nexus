@@ -6,14 +6,14 @@
       "id": "2026-07-09-v1.103-settings-rerun-setup",
       "title": "P3 — Settings Setup Re-run",
       "file": ".mstar/plans/2026-07-09-v1.103-settings-rerun-setup.md",
-      "status": "Todo",
+      "status": "InProgress",
       "owner": "@project-manager",
       "agents": [
         "@frontend-dev",
         "@qc-specialist",
         "@qa-engineer"
       ],
-      "progress": 0,
+      "progress": 5,
       "tags": [
         "V1.103",
         "settings",
@@ -36,7 +36,9 @@
         "primary_spec": ".mstar/iterations/v1.103/specs/settings-setup-section.md",
         "execution_mode": "sdd",
         "qa_gate": "mandatory",
-        "wire_contracts_changed": false
+        "wire_contracts_changed": false,
+        "working_branch": "feat/v1.103-settings-rerun-setup",
+        "sdd_dir": ".mstar/sdd/2026-07-09-v1.103-settings-rerun-setup"
       }
     },
     {
@@ -144,7 +146,7 @@
         "2026-07-09-v1.103-settings-shell-nav": 2
       }
     },
-    "updated_at": "2026-07-09T21:10:00+0800"
+    "updated_at": "2026-07-09T21:15:00+0800"
   },
   "residual_findings": {
     "2026-07-05-v1.91-findings-batch": [

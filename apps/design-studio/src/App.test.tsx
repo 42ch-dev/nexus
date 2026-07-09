@@ -511,6 +511,23 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).not.toBeInTheDocument();
   });
 
+  it('switches to Setup section chrome when section nav is clicked', () => {
+    const hostRoot = screen.getByTestId('settings-host-fixtures');
+    const outlet = within(hostRoot).getByTestId('settings-shell-outlet');
+    const setupTab = within(hostRoot).getByTestId('settings-section-nav-setup');
+    fireEvent.click(setupTab);
+    expect(setupTab).toHaveAttribute('aria-current', 'page');
+    expect(
+      within(outlet).getByTestId('settings-setup-section'),
+    ).toBeInTheDocument();
+    expect(
+      within(outlet).queryByTestId('settings-section-frame-setup'),
+    ).not.toBeInTheDocument();
+    expect(
+      within(outlet).getByTestId('settings-rerun-setup'),
+    ).toHaveTextContent('Re-run Setup');
+  });
+
   it('renders static empty frames for all three Must sections', () => {
     const framesRoot = screen.getByTestId(
       'settings-host-fixture-section-frames',
@@ -594,6 +611,80 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     expect(
       within(form).getByTestId('revert-local-button'),
     ).toHaveTextContent('Use Local Daemon');
+  });
+
+  it('renders Setup section fixture with locked helper and Re-run Setup CTA', () => {
+    const setupRoot = screen.getByTestId(
+      'settings-host-fixture-setup-section',
+    );
+    const section = within(setupRoot).getByTestId('settings-setup-section');
+    expect(section).toHaveAttribute('data-desktop', 'true');
+    expect(
+      within(setupRoot).getByText(
+        /Return to the first-run wizard to walk through setup steps again\. Your workspace and agent choices are kept/i,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(setupRoot).getByTestId('settings-rerun-setup'),
+    ).toHaveTextContent('Re-run Setup');
+  });
+
+  it('opens Re-run Setup confirm dialog with locked copy and Title Case CTAs', () => {
+    const setupRoot = screen.getByTestId(
+      'settings-host-fixture-setup-section',
+    );
+    fireEvent.click(within(setupRoot).getByTestId('settings-rerun-setup'));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Re-run Setup?')).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(
+        /This restarts the setup wizard from the beginning\. Your workspace path and agent profile are not deleted/i,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByTestId('settings-rerun-setup-cancel'),
+    ).toHaveTextContent('Cancel');
+    expect(
+      within(dialog).getByTestId('settings-rerun-setup-confirm-action'),
+    ).toHaveTextContent('Re-run Setup');
+    // Close so Radix aria-hidden does not leak into later tests in this suite.
+    fireEvent.click(within(dialog).getByTestId('settings-rerun-setup-cancel'));
+  });
+
+  it('renders Setup confirm dialog fixture open for visual acceptance', () => {
+    const confirmRoot = screen.getByTestId(
+      'settings-host-fixture-setup-confirm',
+    );
+    const chrome = within(confirmRoot).getByTestId(
+      'settings-rerun-setup-confirm-chrome',
+    );
+    expect(within(chrome).getByText('Re-run Setup?')).toBeInTheDocument();
+    expect(
+      within(chrome).getByText(
+        /This restarts the setup wizard from the beginning\. Your workspace path and agent profile are not deleted/i,
+      ),
+    ).toBeInTheDocument();
+    expect(within(chrome).getByText('Cancel')).toBeInTheDocument();
+    expect(within(chrome).getByText('Re-run Setup')).toBeInTheDocument();
+  });
+
+  it('renders Setup browser-only fixture with disabled CTA and honest helper', () => {
+    const browserRoot = screen.getByTestId(
+      'settings-host-fixture-setup-browser',
+    );
+    const section = within(browserRoot).getByTestId('settings-setup-section');
+    expect(section).toHaveAttribute('data-desktop', 'false');
+    expect(
+      within(browserRoot).getByText(
+        /Re-run setup is available on the desktop app only/i,
+      ),
+    ).toBeInTheDocument();
+    const cta = within(browserRoot).getByTestId('settings-rerun-setup');
+    expect(cta).toBeDisabled();
+    expect(cta).toHaveAttribute(
+      'title',
+      'Open the Nexus desktop app to re-run setup.',
+    );
   });
 
   it('retains AgentPicker thin-host reference for P1', () => {

@@ -14,7 +14,19 @@ interface SetupCompletedContextValue {
   completed: boolean;
   /** True while the desktop shell is being queried for the initial value. */
   isLoading: boolean;
-  /** Mark setup as completed (persists via the desktop shell when available). */
+  /**
+   * Persist and sync setup-completed state (desktop IPC when available).
+   *
+   * - `true` (wizard finish): optimistic React state first so SetupGate does not
+   *   bounce `/works` → `/setup` while IPC is in flight; IPC failure rolls back.
+   * - `false` (Settings Re-run R1): await IPC success, then sync React state so
+   *   gated routes never see a stale `completed: true` after clear.
+   */
+  setCompleted: (value: boolean) => Promise<void>;
+  /**
+   * Mark setup as completed — fire-and-forget {@link setCompleted}(true).
+   * Safe with SetupGate because `true` is applied optimistically.
+   */
   markCompleted: () => void;
 }
 
@@ -33,14 +45,15 @@ export interface SetupCompletedProviderProps {
  * run their own daemon and skip the wizard.
  *
  * Desktop build: reads the `get_setup_completed` Tauri command on mount and
- * writes back via `set_setup_completed` when the user finishes the wizard.
+ * writes back via `set_setup_completed` when the user finishes the wizard or
+ * re-runs setup from Settings.
  */
 export function SetupCompletedProvider({
   children,
   initialCompleted,
 }: SetupCompletedProviderProps) {
   const desktop = useDesktopCapabilities();
-  const [completed, setCompleted] = useState(initialCompleted ?? !desktop);
+  const [completed, setCompletedState] = useState(initialCompleted ?? !desktop);
   const [isLoading, setIsLoading] = useState(Boolean(desktop) && initialCompleted === undefined);
 
   useEffect(() => {
@@ -50,13 +63,13 @@ export function SetupCompletedProvider({
       .getSetupCompleted()
       .then((value) => {
         if (cancelled) return;
-        setCompleted(value);
+        setCompletedState(value);
       })
       .catch(() => {
         if (cancelled) return;
         // Fail open: if the desktop command is missing, treat setup as done so
         // the app does not hang on the wizard gate.
-        setCompleted(true);
+        setCompletedState(true);
       })
       .finally(() => {
         if (!cancelled) setIsLoading(false);
@@ -66,15 +79,37 @@ export function SetupCompletedProvider({
     };
   }, [desktop, initialCompleted]);
 
+  const setCompleted = useCallback(
+    async (value: boolean) => {
+      if (value) {
+        // Optimistic: wizard finish navigates to gated routes immediately.
+        setCompletedState(true);
+        if (desktop) {
+          try {
+            await desktop.setSetupCompleted(true);
+          } catch (err) {
+            setCompletedState(false);
+            throw err;
+          }
+        }
+        return;
+      }
+
+      // R1 clear: await IPC before React state so gated UI never sees stale true.
+      if (desktop) {
+        await desktop.setSetupCompleted(false);
+      }
+      setCompletedState(false);
+    },
+    [desktop],
+  );
+
   const markCompleted = useCallback(() => {
-    setCompleted(true);
-    if (desktop) {
-      void desktop.setSetupCompleted(true);
-    }
-  }, [desktop]);
+    void setCompleted(true);
+  }, [setCompleted]);
 
   return (
-    <SetupCompletedContext.Provider value={{ completed, isLoading, markCompleted }}>
+    <SetupCompletedContext.Provider value={{ completed, isLoading, setCompleted, markCompleted }}>
       {children}
     </SetupCompletedContext.Provider>
   );
