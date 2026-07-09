@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Loader2, RefreshCw } from 'lucide-react';
+import { ChevronLeft, Loader2, RefreshCw } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
 import { useNexusClient, useDesktopCapabilities } from '@/lib/client-context';
 import { errorMessage } from '@/lib/error-message';
 import type { DaemonStatus } from '@/lib/nexus/desktop-capabilities';
-
+import { cn } from '@/lib/utils';
 interface SetupStepDaemonProps {
   onNext: () => void;
   onBack: () => void;
@@ -216,26 +216,33 @@ export function SetupStepDaemon({ onNext, onBack }: SetupStepDaemonProps) {
         </p>
       </div>
 
-      <div className="flex min-h-[120px] flex-col items-center justify-center gap-3 rounded-card border border-gray-alpha-400 bg-background-200 p-6 text-center">
+      <div
+        className={cn(
+          'flex min-h-[120px] flex-col gap-3 rounded-card border border-gray-alpha-400 bg-background-200 p-6',
+          error ? 'items-stretch justify-center' : 'items-center justify-center text-center',
+        )}
+      >
         {error ? (
           <>
-            <p className="whitespace-pre-wrap break-words text-copy-14 text-red-800">{error}</p>
-            <div className="flex flex-col items-center gap-2">
+            <div className="flex justify-center">
               <Button variant="secondary" onClick={retry}>
                 <RefreshCw className="h-4 w-4" aria-hidden />
                 Retry
               </Button>
-              {desktop && (
-                <>
-                  <Button variant="tertiary" onClick={reset}>
-                    Reset local database
-                  </Button>
-                  <p className="max-w-[320px] text-copy-12 text-gray-800">
-                    This will clear the daemon&apos;s local state database (config, registry cache). Your creative files in the workspace are not affected.
-                  </p>
-                </>
-              )}
             </div>
+            <p className="whitespace-pre-wrap break-words text-left text-copy-12 leading-snug text-red-800">
+              {error}
+            </p>
+            {desktop && (
+              <div className="flex flex-col items-center gap-2">
+                <Button variant="tertiary" onClick={reset}>
+                  Reset local database
+                </Button>
+                <p className="max-w-[320px] text-center text-copy-12 text-gray-800">
+                  This will clear the daemon&apos;s local state database (config, registry cache). Your creative files in the workspace are not affected.
+                </p>
+              </div>
+            )}
           </>
         ) : ready ? (
           <p className="text-copy-14 text-green-800">Daemon is running.</p>
@@ -252,8 +259,8 @@ export function SetupStepDaemon({ onNext, onBack }: SetupStepDaemonProps) {
         data-testid="wizard-cta-row"
         data-layout="horizontal-adjacent"
       >
-        <Button variant="tertiary" onClick={onBack}>
-          Back
+        <Button variant="tertiary" onClick={onBack} aria-label="Back" className="px-2">
+          <ChevronLeft className="h-4 w-4" aria-hidden="true" />
         </Button>
         <Button
           variant="primary"

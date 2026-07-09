@@ -258,25 +258,26 @@ describe('Surfaces page — setup wizard chrome fixtures', () => {
     expect(daemonCta).toHaveClass('flex', 'items-center');
     expect(daemonCta).not.toHaveClass('flex-col');
 
-    const daemonButtons = daemonCta?.querySelectorAll('button');
-    expect(daemonButtons?.[0]).toHaveTextContent('Back');
-    expect(daemonButtons?.[1]).toHaveTextContent('Continue');
+    const daemonBack = daemonCta?.querySelector('button[aria-label="Back"]');
+    expect(daemonBack).toBeInTheDocument();
+    expect(daemonBack).not.toHaveTextContent('Back');
+    expect(daemonCta?.querySelectorAll('button')[1]).toHaveTextContent('Continue');
 
     const agentCard = screen.getByTestId('wizard-chrome-card-agent');
     const agentCta = agentCard.querySelector('[data-testid="wizard-cta-row"]');
-    expect(agentCta?.querySelectorAll('button')[0]).toHaveTextContent('Back');
+    expect(agentCta?.querySelector('button[aria-label="Back"]')).toBeInTheDocument();
   });
 
   it('omits Back on welcome and done', () => {
     const welcomeCard = screen.getByTestId('wizard-chrome-card-welcome');
     expect(
-      welcomeCard.querySelector('[data-testid="wizard-cta-row"]')?.textContent,
-    ).not.toMatch(/Back/);
+      welcomeCard.querySelector('[data-testid="wizard-cta-row"] button[aria-label="Back"]'),
+    ).not.toBeInTheDocument();
 
     const doneCard = screen.getByTestId('wizard-chrome-card-done');
     expect(
-      doneCard.querySelector('[data-testid="wizard-cta-row"]')?.textContent,
-    ).not.toMatch(/Back/);
+      doneCard.querySelector('[data-testid="wizard-cta-row"] button[aria-label="Back"]'),
+    ).not.toBeInTheDocument();
     expect(doneCard.querySelector('[data-testid="wizard-cta-row"]')).toHaveTextContent(
       'Open Nexus',
     );
@@ -288,8 +289,25 @@ describe('Surfaces page — setup wizard chrome fixtures', () => {
     );
     expect(screen.getAllByTestId('daemon-chip-running').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Daemon is running.')).toBeInTheDocument();
-    expect(screen.getByTestId('daemon-chip-error')).toHaveTextContent(/taking longer/i);
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    const errorChip = screen.getByTestId('daemon-chip-error');
+    expect(errorChip).toHaveTextContent(/taking longer/i);
+    expect(within(errorChip).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    // Retry is first; concise left-aligned small copy below.
+    const errorChildren = Array.from(errorChip.children);
+    expect(errorChildren[0]?.querySelector('button')).toHaveTextContent('Retry');
+    expect(errorChildren[1]?.tagName).toBe('P');
+    expect(errorChildren[1]).toHaveClass('text-left', 'text-copy-12');
+  });
+
+  it('starts step connectors below each circle (nothing above step 1)', () => {
+    const welcomeCard = screen.getByTestId('wizard-chrome-card-welcome');
+    const connectors = welcomeCard.querySelectorAll('[data-testid="step-connector"]');
+    expect(connectors.length).toBe(3);
+    connectors.forEach((el) => {
+      expect(el).toHaveStyle({
+        top: 'calc(50% + var(--color-setup-wizard-step-circle-size) / 2)',
+      });
+    });
   });
 });
 

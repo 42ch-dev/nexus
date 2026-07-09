@@ -54,7 +54,8 @@ describe('SetupStepDaemon', () => {
     expect(cta).not.toHaveClass('flex-col');
 
     const buttons = cta.querySelectorAll('button');
-    expect(buttons[0]).toHaveTextContent('Back');
+    expect(buttons[0]).toHaveAttribute('aria-label', 'Back');
+    expect(buttons[0]).not.toHaveTextContent('Back');
     expect(buttons[1]).toHaveTextContent('Continue');
   });
 
@@ -87,7 +88,15 @@ describe('SetupStepDaemon', () => {
     });
 
     await waitFor(() => expect(screen.getByText(detail)).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    const retry = screen.getByRole('button', { name: 'Retry' });
+    expect(retry).toBeInTheDocument();
+    // Retry is centered above the left-aligned small error copy.
+    const statusRegion = retry.closest('.rounded-card');
+    expect(statusRegion).not.toBeNull();
+    const regionChildren = Array.from(statusRegion!.children);
+    expect(regionChildren[0]?.querySelector('button')).toBe(retry);
+    expect(regionChildren[1]?.tagName).toBe('P');
+    expect(regionChildren[1]).toHaveClass('text-left', 'text-copy-12');
     expect(screen.getByRole('button', { name: 'Reset local database' })).toBeInTheDocument();
     expect(
       screen.getByText(/This will clear the daemon's local state database.*Your creative files.*not affected/),

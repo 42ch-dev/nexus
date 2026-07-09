@@ -297,7 +297,8 @@ describe('SetupStepAgent', () => {
     expect(cta).not.toHaveClass('flex-col');
 
     const buttons = cta.querySelectorAll('button');
-    expect(buttons[0]).toHaveTextContent('Back');
+    expect(buttons[0]).toHaveAttribute('aria-label', 'Back');
+    expect(buttons[0]).not.toHaveTextContent('Back');
     expect(buttons[1]).toHaveTextContent('Continue');
   });
 
