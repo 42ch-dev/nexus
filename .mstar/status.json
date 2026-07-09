@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-07-09T17:30:00+0800",
+  "updated_at": "2026-07-09T13:25:00+0800",
   "plans": [
     {
       "id": "2026-07-08-v1.99-prepare-visual-system-deepening",
@@ -349,7 +349,7 @@
       "id": "2026-07-09-v1.101-select-component-promotion",
       "title": "P2 — Select Component Promotion (Stretch)",
       "file": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
-      "status": "InReview",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@architect",
@@ -357,7 +357,7 @@
         "@qc-specialist",
         "@qa-engineer"
       ],
-      "progress": 90,
+      "progress": 100,
       "tags": [
         "V1.101",
         "design-system",
@@ -367,7 +367,7 @@
       ],
       "created_at": "2026-07-09",
       "updated_at": "2026-07-09",
-      "notes": "QC tri Approve after fix-wave-1 (0205f3ab). Residuals R-V1101P2-001..005 registered. QA mandatory pending.",
+      "notes": "QA Pass @ 0205f3ab (acceptance-only). QC Approve. Residuals R-V1101P2-001..005 defer open; R-V1100P1QC1-W002 pre-existing.",
       "metadata": {
         "priority": "medium",
         "blocked_by_plan_id": "2026-07-09-v1.101-setup-wizard-ui-polish",
@@ -385,8 +385,10 @@
         "working_branch": "plan/v1.101-p2-select-component-promotion",
         "feature_branch": "plan/v1.101-p2-select-component-promotion",
         "product_head": "0205f3ab",
-        "qc_decision": "Approve"
-      }
+        "qc_decision": "Approve",
+        "qa_decision": "Pass"
+      },
+      "done_at": "2026-07-09"
     }
   ],
   "metadata": {
