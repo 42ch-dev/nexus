@@ -92,8 +92,10 @@ export function SettingsAgentSection() {
   useEffect(() => {
     if (didInitDefault) return;
     if (scan.isLoading || scan.isError) return;
-    const scanned = scan.data?.agents;
-    if (scanned === undefined) return;
+    const scannedMaybe = scan.data?.agents;
+    if (scannedMaybe === undefined) return;
+    // Re-bind after the guard — TS does not narrow across nested async closures.
+    const scanned: AgentScanEntry[] = scannedMaybe;
 
     let cancelled = false;
 
