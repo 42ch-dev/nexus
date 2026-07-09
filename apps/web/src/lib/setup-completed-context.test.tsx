@@ -8,12 +8,13 @@ import type { DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
 import { BrowserClient } from '@/lib/nexus';
 
 function TestController() {
-  const { completed, isLoading, markCompleted } = useSetupCompleted();
+  const { completed, isLoading, markCompleted, setCompleted } = useSetupCompleted();
   return (
     <div>
       <span data-testid="completed">{completed ? 'true' : 'false'}</span>
       <span data-testid="loading">{isLoading ? 'true' : 'false'}</span>
       <button onClick={() => markCompleted()}>Finish</button>
+      <button onClick={() => void setCompleted(false)}>Clear</button>
     </div>
   );
 }
@@ -92,5 +93,26 @@ describe('SetupCompletedProvider', () => {
 
     await waitFor(() => expect(screen.getByTestId('completed')).toHaveTextContent('true'));
     expect(setSetupCompleted).toHaveBeenCalledWith(true);
+  });
+
+  it('setCompleted(false) clears marker via desktop shell and syncs state', async () => {
+    const user = userEvent.setup();
+    const setSetupCompleted = vi.fn(() => Promise.resolve());
+
+    renderInApp(
+      <SetupCompletedProvider initialCompleted>
+        <TestController />
+      </SetupCompletedProvider>,
+      {
+        client: makeClient(),
+        desktop: makeDesktop({ setSetupCompleted }),
+      },
+    );
+
+    expect(screen.getByTestId('completed')).toHaveTextContent('true');
+    await user.click(screen.getByRole('button', { name: 'Clear' }));
+
+    await waitFor(() => expect(screen.getByTestId('completed')).toHaveTextContent('false'));
+    expect(setSetupCompleted).toHaveBeenCalledWith(false);
   });
 });
