@@ -317,9 +317,10 @@ fn agent_profile_config_path() -> Option<PathBuf> {
 
 /// Write the selected agent profile to `~/.nexus42/agent-host/config.toml`.
 ///
-/// The profile is stored as a `native_cli` provider entry so the agent host
-/// subsystem can use it on the next daemon start. Existing provider entries with
-/// the same `id` are updated in place; other keys in the file are preserved.
+/// The profile is stored as the sole `native_cli` provider entry so the agent
+/// host subsystem and Settings `get_agent_profile` (first `native_cli`) agree on
+/// the active choice. Prior `native_cli` rows are removed (upsert/replace);
+/// non-`native_cli` providers and other top-level keys are preserved.
 fn write_agent_profile(name: String, launch_command: Option<String>) -> anyhow::Result<()> {
     let path = agent_profile_config_path()
         .ok_or_else(|| anyhow::anyhow!("cannot determine home directory"))?;
@@ -354,28 +355,28 @@ fn write_agent_profile_at(
         .as_array_of_tables_mut()
         .ok_or_else(|| anyhow::anyhow!("providers is not an array of tables"))?;
 
-    let mut updated = false;
-    for provider in providers.iter_mut() {
-        if provider.get("id").and_then(|v| v.as_str()) == Some(name) {
-            if let Some(cmd) = launch_command {
-                provider["command"] = toml_edit::value(cmd);
-            } else {
-                provider.remove("command");
-            }
-            updated = true;
-            break;
+    // Upsert/replace: keep a single active native_cli so first-entry read
+    // matches the last Save (Settings reopen preselect).
+    let mut idx = providers.len();
+    while idx > 0 {
+        idx -= 1;
+        let is_native_cli = providers
+            .get(idx)
+            .and_then(|p| p.get("protocol"))
+            .and_then(|v| v.as_str())
+            == Some("native_cli");
+        if is_native_cli {
+            providers.remove(idx);
         }
     }
 
-    if !updated {
-        let mut provider = toml_edit::Table::new();
-        provider["id"] = toml_edit::value(name);
-        provider["protocol"] = toml_edit::value("native_cli");
-        if let Some(cmd) = launch_command {
-            provider["command"] = toml_edit::value(cmd);
-        }
-        providers.push(provider);
+    let mut provider = toml_edit::Table::new();
+    provider["id"] = toml_edit::value(name);
+    provider["protocol"] = toml_edit::value("native_cli");
+    if let Some(cmd) = launch_command {
+        provider["command"] = toml_edit::value(cmd);
     }
+    providers.push(provider);
 
     std::fs::write(path, doc.to_string())?;
     Ok(())
@@ -423,7 +424,11 @@ fn read_agent_profile_at(path: &Path) -> Option<AgentProfile> {
         if protocol != Some("native_cli") {
             continue;
         }
-        let name = provider.get("id").and_then(|v| v.as_str())?;
+        // Skip malformed rows (missing/empty id) so a later valid native_cli
+        // can still preselect (qc3 F-002).
+        let Some(name) = provider.get("id").and_then(|v| v.as_str()) else {
+            continue;
+        };
         if name.is_empty() {
             continue;
         }
@@ -994,6 +999,117 @@ mod tests {
             profile,
             Some(AgentProfile {
                 name: "codex-acp".to_owned(),
+                launch_command: Some("codex".to_owned()),
+            })
+        );
+    }
+
+    #[test]
+    fn agent_profile_write_replaces_prior_native_cli_so_read_returns_latest() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("agent-host").join("config.toml");
+
+        write_agent_profile_at(&config_path, "claude-cli", Some("claude")).expect("write A");
+        write_agent_profile_at(&config_path, "codex", Some("codex")).expect("write B");
+
+        let profile = read_agent_profile_at(&config_path);
+        assert_eq!(
+            profile,
+            Some(AgentProfile {
+                name: "codex".to_owned(),
+                launch_command: Some("codex".to_owned()),
+            }),
+            "Save B after A must round-trip for Settings reopen preselect"
+        );
+
+        let text = std::fs::read_to_string(&config_path).expect("read config");
+        assert_eq!(
+            text.matches("protocol = \"native_cli\"").count(),
+            1,
+            "only one native_cli provider should remain"
+        );
+        assert!(!text.contains("claude-cli"));
+    }
+
+    #[test]
+    fn agent_profile_write_custom_launch_round_trips() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("agent-host").join("config.toml");
+
+        write_agent_profile_at(&config_path, "claude-cli", Some("claude")).expect("write A");
+        write_agent_profile_at(&config_path, "custom", Some("/usr/local/bin/my-agent"))
+            .expect("write custom");
+
+        let profile = read_agent_profile_at(&config_path);
+        assert_eq!(
+            profile,
+            Some(AgentProfile {
+                name: "custom".to_owned(),
+                launch_command: Some("/usr/local/bin/my-agent".to_owned()),
+            })
+        );
+    }
+
+    #[test]
+    fn agent_profile_write_preserves_non_native_cli_providers() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("agent-host").join("config.toml");
+        std::fs::create_dir_all(config_path.parent().unwrap()).expect("mkdir");
+        std::fs::write(
+            &config_path,
+            r#"
+[[providers]]
+id = "http-agent"
+protocol = "http"
+
+[[providers]]
+id = "claude-cli"
+protocol = "native_cli"
+command = "claude"
+"#,
+        )
+        .expect("write config");
+
+        write_agent_profile_at(&config_path, "codex", Some("codex")).expect("replace native_cli");
+
+        let text = std::fs::read_to_string(&config_path).expect("read config");
+        assert!(text.contains("http-agent"));
+        assert!(text.contains("protocol = \"http\""));
+        assert!(text.contains("id = \"codex\""));
+        assert!(!text.contains("claude-cli"));
+        assert_eq!(
+            read_agent_profile_at(&config_path),
+            Some(AgentProfile {
+                name: "codex".to_owned(),
+                launch_command: Some("codex".to_owned()),
+            })
+        );
+    }
+
+    #[test]
+    fn agent_profile_read_skips_native_cli_row_without_id() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("agent-host").join("config.toml");
+        std::fs::create_dir_all(config_path.parent().unwrap()).expect("mkdir");
+        std::fs::write(
+            &config_path,
+            r#"
+[[providers]]
+protocol = "native_cli"
+command = "broken"
+
+[[providers]]
+id = "codex"
+protocol = "native_cli"
+command = "codex"
+"#,
+        )
+        .expect("write config");
+
+        assert_eq!(
+            read_agent_profile_at(&config_path),
+            Some(AgentProfile {
+                name: "codex".to_owned(),
                 launch_command: Some("codex".to_owned()),
             })
         );

@@ -7,7 +7,7 @@
  * Browser: picker mounts; skip saved-profile preselect; desktop-only save toast.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -82,6 +82,8 @@ export function SettingsAgentSection() {
   const [customLaunchCommand, setCustomLaunchCommand] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [didInitDefault, setDidInitDefault] = useState(false);
+  /** Author touched picker before async preselect finished — skip late apply. */
+  const userTouchedRef = useRef(false);
 
   // G1: after scan settles, desktop preselects via getAgentProfile (match by
   // name). Null/unreadable → first-installed fallback. Browser skips read.
@@ -99,6 +101,11 @@ export function SettingsAgentSection() {
       if (desktop) {
         const profile = await desktop.getAgentProfile();
         if (cancelled) return;
+        // qc2 F-002: do not overwrite a selection the author already made.
+        if (userTouchedRef.current) {
+          setDidInitDefault(true);
+          return;
+        }
         if (
           profile &&
           applySavedProfile(
@@ -114,6 +121,10 @@ export function SettingsAgentSection() {
       }
 
       if (cancelled) return;
+      if (userTouchedRef.current) {
+        setDidInitDefault(true);
+        return;
+      }
       const fallback = scanned.find((a) => a.installed) ?? null;
       if (fallback) {
         setSelectedAgent(fallback);
@@ -149,11 +160,13 @@ export function SettingsAgentSection() {
   function selectById(id: string) {
     const agent = agentsById.get(id);
     if (!agent?.installed) return;
+    userTouchedRef.current = true;
     setSelectedAgent(agent);
     setCustomLaunchCommand('');
   }
 
   function handleUseCustom(command: string) {
+    userTouchedRef.current = true;
     setSelectedAgent(null);
     setCustomLaunchCommand(command);
   }

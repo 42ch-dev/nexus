@@ -151,6 +151,58 @@ describe('SettingsAgentSection preselect (G1)', () => {
     expect(screen.queryByTestId('settings-agent-browser-helper')).not.toBeInTheDocument();
   });
 
+  it('does not overwrite author selection made before async preselect resolves', async () => {
+    const user = userEvent.setup();
+    let resolveProfile: (value: { name: string; launchCommand?: string } | null) => void =
+      () => {};
+    const getAgentProfile = vi.fn(
+      () =>
+        new Promise<{ name: string; launchCommand?: string } | null>((resolve) => {
+          resolveProfile = resolve;
+        }),
+    );
+    useHandlers(scanHandler(), creatorsHandler());
+
+    renderInApp(
+      <Routes>{settingsRouteTree}</Routes>,
+      {
+        client: makeClient(),
+        desktop: makeDesktop({ getAgentProfile }),
+        initialRouterEntries: ['/settings/agent'],
+      },
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId('agent-card-openai/codex')).toBeInTheDocument(),
+    );
+
+    await user.click(screen.getByTestId('agent-card-select-openai/codex'));
+
+    await waitFor(() => {
+      const pressed = screen
+        .getAllByTestId('agent-card-select-openai/codex')
+        .filter((el) => el.getAttribute('aria-pressed') === 'true');
+      expect(pressed.length).toBeGreaterThanOrEqual(1);
+    });
+
+    // Late profile would prefer Claude (first-installed name) if applied.
+    resolveProfile({ name: 'claude-code', launchCommand: 'claude' });
+
+    await waitFor(() => expect(getAgentProfile).toHaveBeenCalled());
+
+    // Author's Codex click must stick — late preselect must not snap back.
+    await waitFor(() => {
+      const codexPressed = screen
+        .getAllByTestId('agent-card-select-openai/codex')
+        .filter((el) => el.getAttribute('aria-pressed') === 'true');
+      expect(codexPressed.length).toBeGreaterThanOrEqual(1);
+    });
+    const claudePressed = screen
+      .getAllByTestId('agent-card-select-anthropic/claude-code')
+      .filter((el) => el.getAttribute('aria-pressed') === 'true');
+    expect(claudePressed.length).toBe(0);
+  });
+
   it('falls back to first installed when getAgentProfile returns null', async () => {
     const getAgentProfile = vi.fn(() => Promise.resolve(null));
     useHandlers(scanHandler(), creatorsHandler());
