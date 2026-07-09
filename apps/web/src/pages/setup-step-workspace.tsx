@@ -105,7 +105,7 @@ export function SetupStepWorkspace({
       toast({
         variant: 'error',
         title: 'Local workspace bootstrap failed',
-        description: `${message} Try again or reset the local database from the next step.`,
+        description: `${message} Retry Continue, or restart the app and use Reset local database on the daemon wait splash if the problem persists.`,
       });
       console.error('Bootstrap failed:', err);
     } finally {

@@ -280,7 +280,11 @@ describe('SetupStepWorkspace', () => {
     await user.click(screen.getByRole('button', { name: 'Continue' }));
 
     await waitFor(() => expect(screen.getByText(/config write failed/)).toBeInTheDocument());
-    await waitFor(() => expect(screen.getByText(/Try again or reset/)).toBeInTheDocument());
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Retry Continue, or restart the app and use Reset local database/),
+      ).toBeInTheDocument(),
+    );
     expect(onNext).not.toHaveBeenCalled();
   });
 
