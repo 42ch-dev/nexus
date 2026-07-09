@@ -75,6 +75,7 @@ export function SettingsWorkspaceSection() {
 
   async function handleChangeFolder() {
     if (!desktop) return;
+    setSaved(false);
     setSaving(true);
     try {
       const selected = await desktop.pickDirectory(path);

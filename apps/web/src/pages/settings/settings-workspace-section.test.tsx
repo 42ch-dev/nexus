@@ -90,6 +90,32 @@ describe('SettingsWorkspaceSection', () => {
     expect(screen.getByTestId('settings-workspace-path')).toHaveValue(PICKED_PATH);
   });
 
+  it('returns to idle state when picker is cancelled (pickDirectory returns null)', async () => {
+    const user = userEvent.setup();
+    const desktop = makeDesktopCapabilities();
+    vi.mocked(desktop.pickDirectory).mockResolvedValue(null);
+
+    renderInApp(<SettingsWorkspaceSection />, { desktop });
+
+    await waitFor(() =>
+      expect(screen.getByTestId('settings-workspace-path')).toHaveValue(
+        INITIAL_PATH,
+      ),
+    );
+
+    await user.click(screen.getByTestId('settings-change-folder'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('settings-change-folder')).not.toBeDisabled(),
+    );
+    expect(desktop.pickDirectory).toHaveBeenCalledWith(INITIAL_PATH);
+    expect(desktop.setWorkspacePath).not.toHaveBeenCalled();
+    expect(screen.getByTestId('settings-workspace-path')).toHaveValue(INITIAL_PATH);
+    expect(
+      screen.queryByTestId('settings-workspace-saved-honesty'),
+    ).not.toBeInTheDocument();
+  });
+
   it('shows disabled change action and browser-only helper when desktop is null', async () => {
     renderInApp(<SettingsWorkspaceSection />, { desktop: null });
 
