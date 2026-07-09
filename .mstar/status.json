@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-07-09T16:00:00+0800",
+  "updated_at": "2026-07-09T16:30:00+0800",
   "plans": [
     {
       "id": "2026-07-08-v1.99-prepare-visual-system-deepening",
@@ -309,7 +309,7 @@
       "id": "2026-07-09-v1.101-setup-wizard-ui-polish",
       "title": "P1 — Setup Wizard UI Polish",
       "file": ".mstar/plans/2026-07-09-v1.101-setup-wizard-ui-polish.md",
-      "status": "InReview",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@product-manager",
@@ -317,7 +317,7 @@
         "@qc-specialist",
         "@qa-engineer"
       ],
-      "progress": 95,
+      "progress": 100,
       "tags": [
         "V1.101",
         "desktop",
@@ -327,7 +327,7 @@
       ],
       "created_at": "2026-07-09",
       "updated_at": "2026-07-09",
-      "notes": "QC tri Approve after fix-wave-1 (b3adcadb). QA pending. Residuals R-V1101P1-001..002 nit.",
+      "notes": "Done: SDD T1-T4 + QC Approve (fix-wave-1) + QA Pass. BACK/STEPS/POLL closed. Residuals R-V1101P1-001..002 nit.",
       "metadata": {
         "priority": "high",
         "spec_integration_branch": "iteration/v1.101",
@@ -342,7 +342,8 @@
         "qa_gate": "mandatory",
         "stretch": false,
         "working_branch": "plan/v1.101-p1-setup-wizard-ui-polish"
-      }
+      },
+      "done_at": "2026-07-09"
     },
     {
       "id": "2026-07-09-v1.101-select-component-promotion",
