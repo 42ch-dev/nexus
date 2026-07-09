@@ -16,6 +16,7 @@
 - [`studio-first-ui-workflow.md`](../iterations/v1.99/guides/studio-first-ui-workflow.md) — V1.99 validation path from studio fixtures to package promotion to Web integration
 - [`studio-first-visual-then-app.md`](../iterations/v1.101/guides/studio-first-visual-then-app.md) — V1.101 process note (Studio visual → App wiring; human smoke separate)
 - [`studio-first-visual-then-app.md`](../iterations/v1.102/guides/studio-first-visual-then-app.md) — V1.102 process note (same discipline; Badge tone + Settings chrome + optional Surfaces Stretch)
+- [`studio-first-visual-then-app.md`](../iterations/v1.103/guides/studio-first-visual-then-app.md) — V1.103 process note (Settings shell + section fixtures; DESIGN Voice copy tables in section specs)
 - `@42ch/nexus-ui` — brand layer plus approved presentational primitives (V1.99 Button/Badge/Card; V1.100 form fields; V1.101 `Select`; V1.102 Badge `tone` soft/solid)
 - `apps/web/src/components/ui/*` — transitional gallery source for primitives not yet promoted
 - `apps/web/src/components/setup/*` — app-shared setup compositions (e.g. `AgentPicker`); Studio may import via gallery alias — **not** `@42ch/nexus-ui`

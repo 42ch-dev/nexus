@@ -3,548 +3,205 @@
   "updated_at": "2026-07-09T13:25:00+0800",
   "plans": [
     {
-      "id": "2026-07-08-v1.99-prepare-visual-system-deepening",
-      "title": "P-1 — Prepare: Visual System Deepening Contract",
-      "file": ".mstar/plans/2026-07-08-v1.99-prepare-visual-system-deepening.md",
-      "status": "Done",
+      "id": "2026-07-09-v1.103-settings-shell-nav",
+      "title": "P0 — Settings Shell & Section Nav (S3)",
+      "file": ".mstar/plans/2026-07-09-v1.103-settings-shell-nav.md",
+      "status": "Todo",
       "owner": "@project-manager",
       "agents": [
-        "@product-manager",
+        "@frontend-dev",
         "@architect",
-        "@writing-specialist"
-      ],
-      "progress": 100,
-      "tags": [
-        "V1.99",
-        "prepare",
-        "design-system",
-        "nexus-ui",
-        "design-studio"
-      ],
-      "created_at": "2026-07-08",
-      "updated_at": "2026-07-08",
-      "done_at": "2026-07-08",
-      "notes": "Prepare plan for UI component promotion boundary, surfaces visual direction, and studio-first workflow contract. Done: contract locked via sequential specialist review (architect→product-manager→writing-specialist).",
-      "metadata": {
-        "priority": "high",
-        "spec_integration_branch": "iteration/v1.99",
-        "merge_target": "iteration/v1.99",
-        "iteration_compass": ".mstar/iterations/v1.99-design-system-deepening-compass-v1.md",
-        "iteration_refs": [
-          ".mstar/iterations/v1.99/specs/component-promotion-boundary.md",
-          ".mstar/iterations/v1.99/guides/studio-first-ui-workflow.md"
-        ],
-        "primary_spec": ".mstar/iterations/v1.99/specs/component-promotion-boundary.md",
-        "branch_policy": "Plan branches merge to iteration/v1.99; final PR targets main.",
-        "qa_gate": "N/A"
-      }
-    },
-    {
-      "id": "2026-07-08-v1.99-nexus-ui-component-promotion",
-      "title": "P0 — @42ch/nexus-ui Component Promotion",
-      "file": ".mstar/plans/2026-07-08-v1.99-nexus-ui-component-promotion.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@frontend-dev",
         "@qc-specialist",
         "@qa-engineer"
       ],
-      "progress": 100,
+      "progress": 0,
       "tags": [
-        "V1.99",
-        "frontend",
-        "nexus-ui",
-        "component-library"
-      ],
-      "created_at": "2026-07-08",
-      "updated_at": "2026-07-08",
-      "done_at": "2026-07-08",
-      "notes": "First-batch shared UI primitive promotion after P-1 boundary lock. Done: Button/Badge/Card promoted to @42ch/nexus-ui, both consumers updated, QC tri Approve, QA Pass.",
-      "metadata": {
-        "priority": "high",
-        "blocked_by_plan_id": "2026-07-08-v1.99-prepare-visual-system-deepening",
-        "spec_integration_branch": "iteration/v1.99",
-        "merge_target": "iteration/v1.99",
-        "iteration_compass": ".mstar/iterations/v1.99-design-system-deepening-compass-v1.md",
-        "iteration_refs": [
-          ".mstar/iterations/v1.99/specs/component-promotion-boundary.md",
-          ".mstar/iterations/v1.99/guides/studio-first-ui-workflow.md"
-        ],
-        "primary_spec": ".mstar/iterations/v1.99/specs/component-promotion-boundary.md",
-        "execution_mode": "sdd",
-        "qa_gate": "mandatory"
-      }
-    },
-    {
-      "id": "2026-07-08-v1.99-surfaces-visual-direction",
-      "title": "P1 — Design Studio Surfaces Visual Direction",
-      "file": ".mstar/plans/2026-07-08-v1.99-surfaces-visual-direction.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@frontend-dev",
-        "@qc-specialist",
-        "@qa-engineer"
-      ],
-      "progress": 100,
-      "tags": [
-        "V1.99",
-        "visual",
-        "design-studio",
-        "surfaces"
-      ],
-      "created_at": "2026-07-08",
-      "updated_at": "2026-07-08",
-      "done_at": "2026-07-08",
-      "notes": "Visual polish and usability pass for apps/design-studio /surfaces. Done: setup+shell redesigned with registered tokens, QC tri Approve, QA Pass (9/9 checklist).",
-      "metadata": {
-        "priority": "high",
-        "blocked_by_plan_id": "2026-07-08-v1.99-prepare-visual-system-deepening",
-        "spec_integration_branch": "iteration/v1.99",
-        "merge_target": "iteration/v1.99",
-        "iteration_compass": ".mstar/iterations/v1.99-design-system-deepening-compass-v1.md",
-        "iteration_refs": [
-          ".mstar/iterations/v1.99/guides/studio-first-ui-workflow.md"
-        ],
-        "primary_spec": ".mstar/specs/design-studio.md",
-        "execution_mode": "sdd",
-        "qa_gate": "mandatory"
-      }
-    },
-    {
-      "id": "2026-07-08-v1.99-studio-first-ui-workflow",
-      "title": "P2 — Studio-First UI Workflow Codification",
-      "file": ".mstar/plans/2026-07-08-v1.99-studio-first-ui-workflow.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@product-manager",
-        "@architect",
-        "@writing-specialist"
-      ],
-      "progress": 100,
-      "tags": [
-        "V1.99",
-        "workflow",
-        "documentation",
-        "skills-evaluation"
-      ],
-      "created_at": "2026-07-08",
-      "updated_at": "2026-07-08",
-      "done_at": "2026-07-08",
-      "notes": "Evidence-backed workflow codification after P0/P1 validation. Done: evidence captured, AGENTS rule added, annotations fixed, knowledge/skill decisions locked.",
-      "metadata": {
-        "priority": "medium",
-        "blocked_by_plan_id": "2026-07-08-v1.99-nexus-ui-component-promotion",
-        "dependency": "Also depends on 2026-07-08-v1.99-surfaces-visual-direction evidence.",
-        "spec_integration_branch": "iteration/v1.99",
-        "merge_target": "iteration/v1.99",
-        "iteration_compass": ".mstar/iterations/v1.99-design-system-deepening-compass-v1.md",
-        "iteration_refs": [
-          ".mstar/iterations/v1.99/guides/studio-first-ui-workflow.md"
-        ],
-        "primary_spec": ".mstar/iterations/v1.99/guides/studio-first-ui-workflow.md",
-        "execution_mode": "inline",
-        "qa_gate": "mandatory"
-      }
-    },
-    {
-      "id": "2026-07-08-v1.100-desktop-clean-state-first-launch",
-      "title": "P0 — Desktop Clean-State First-Launch Completion",
-      "file": ".mstar/plans/2026-07-08-v1.100-desktop-clean-state-first-launch.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@architect",
-        "@fullstack-dev",
-        "@frontend-dev",
-        "@qc-specialist",
-        "@qa-engineer"
-      ],
-      "progress": 100,
-      "tags": [
-        "V1.100",
-        "desktop",
-        "first-launch",
-        "setup-wizard",
-        "ui"
-      ],
-      "created_at": "2026-07-08",
-      "updated_at": "2026-07-09",
-      "done_at": "2026-07-09",
-      "notes": "Closes deferred desktop clean-state first-launch gap. Done: SDD T1-T3 + QC tri Approve + interactive macOS clean-state smoke (user confirmed daemon reached 'running'; No active creator blocker resolved). R-V197-SMOKE-CLEAN-STATE/UI resolved. 4 pre-existing UI/agent-scan findings registered for V1.101+.",
-      "metadata": {
-        "priority": "high",
-        "spec_integration_branch": "iteration/v1.100",
-        "merge_target": "iteration/v1.100",
-        "iteration_compass": ".mstar/iterations/v1.100-delivery-compass.md",
-        "iteration_refs": [
-          ".mstar/iterations/v1.100/specs/desktop-first-launch-bootstrap.md"
-        ],
-        "primary_spec": ".mstar/iterations/v1.100/specs/desktop-first-launch-bootstrap.md",
-        "execution_mode": "sdd",
-        "qa_gate": "mandatory"
-      }
-    },
-    {
-      "id": "2026-07-08-v1.100-ui-hygiene-guardrails",
-      "title": "P1 — UI Hygiene Guardrails and cn SSOT",
-      "file": ".mstar/plans/2026-07-08-v1.100-ui-hygiene-guardrails.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@architect",
-        "@frontend-dev",
-        "@qc-specialist",
-        "@qa-engineer"
-      ],
-      "progress": 100,
-      "tags": [
-        "V1.100",
-        "ui",
-        "guardrails",
-        "nexus-ui",
-        "design-studio"
-      ],
-      "created_at": "2026-07-08",
-      "updated_at": "2026-07-08",
-      "done_at": "2026-07-08",
-      "notes": "Closes V1.99 package hygiene residuals and establishes wrapper / Design Studio / class-merge guardrails that enable P2 and future UI promotion. Done: shell-script guardrails (wrapper + Studio boundary + cn SSOT) + CI job + cn consolidation behind @42ch/nexus-ui; QC tri Approve with residuals; QA Pass (9/9); 3 V1.99 residuals resolved; 5 deferrable P1 residuals registered.",
-      "metadata": {
-        "priority": "high",
-        "spec_integration_branch": "iteration/v1.100",
-        "merge_target": "iteration/v1.100",
-        "iteration_compass": ".mstar/iterations/v1.100-delivery-compass.md",
-        "iteration_refs": [
-          ".mstar/iterations/v1.100/specs/ui-guardrails-cn-ssot.md"
-        ],
-        "primary_spec": ".mstar/iterations/v1.100/specs/ui-guardrails-cn-ssot.md",
-        "execution_mode": "sdd",
-        "qa_gate": "mandatory"
-      }
-    },
-    {
-      "id": "2026-07-08-v1.100-form-field-component-promotion",
-      "title": "P2 — Form Field Component Promotion",
-      "file": ".mstar/plans/2026-07-08-v1.100-form-field-component-promotion.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@architect",
-        "@frontend-dev",
-        "@qc-specialist",
-        "@qa-engineer"
-      ],
-      "progress": 100,
-      "tags": [
-        "V1.100",
-        "ui",
-        "forms",
-        "nexus-ui",
-        "design-system"
-      ],
-      "created_at": "2026-07-08",
-      "updated_at": "2026-07-08",
-      "done_at": "2026-07-08",
-      "notes": "Promotes Input/Label/Textarea by resolving field semantics and app/package ownership after P1 guardrails. Done: locked form-field contract + promoted presentational controls + Studio direct imports + Web thin re-exports; QC tri clean Approve; QA Pass (8/8); V1.99 deferral reason closed; 1 nit residual registered.",
-      "metadata": {
-        "priority": "medium",
-        "blocked_by_plan_id": "2026-07-08-v1.100-ui-hygiene-guardrails",
-        "spec_integration_branch": "iteration/v1.100",
-        "merge_target": "iteration/v1.100",
-        "iteration_compass": ".mstar/iterations/v1.100-delivery-compass.md",
-        "iteration_refs": [
-          ".mstar/iterations/v1.100/specs/form-field-contract.md",
-          ".mstar/iterations/v1.100/specs/ui-guardrails-cn-ssot.md"
-        ],
-        "primary_spec": ".mstar/iterations/v1.100/specs/form-field-contract.md",
-        "execution_mode": "sdd",
-        "qa_gate": "mandatory"
-      }
-    },
-    {
-      "id": "2026-07-09-v1.101-agent-detection-picker",
-      "title": "P0 — Agent Detection & AgentPicker",
-      "file": ".mstar/plans/2026-07-09-v1.101-agent-detection-picker.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@product-manager",
-        "@architect",
-        "@frontend-dev",
-        "@fullstack-dev",
-        "@qc-specialist",
-        "@qa-engineer"
-      ],
-      "progress": 100,
-      "tags": [
-        "V1.101",
-        "desktop",
-        "setup",
-        "agent-picker",
-        "studio-first"
-      ],
-      "created_at": "2026-07-09",
-      "updated_at": "2026-07-09",
-      "notes": "Done: SDD T1-T4 + QC Approve with residuals (fix-wave-1) + QA Pass. R-V1100P0SMOKE-AGENT-SCAN resolved. Residuals R-V1101P0-001..004.",
-      "metadata": {
-        "priority": "high",
-        "spec_integration_branch": "iteration/v1.101",
-        "merge_target": "iteration/v1.101",
-        "iteration_compass": ".mstar/iterations/v1.101-delivery-compass.md",
-        "iteration_refs": [
-          ".mstar/iterations/v1.101/specs/agent-picker-and-detection.md",
-          ".mstar/iterations/v1.101/guides/studio-first-visual-then-app.md"
-        ],
-        "primary_spec": ".mstar/iterations/v1.101/specs/agent-picker-and-detection.md",
-        "execution_mode": "sdd",
-        "qa_gate": "mandatory",
-        "stretch": false,
-        "working_branch": "plan/v1.101-p0-agent-detection-picker"
-      },
-      "done_at": "2026-07-09"
-    },
-    {
-      "id": "2026-07-09-v1.101-setup-wizard-ui-polish",
-      "title": "P1 — Setup Wizard UI Polish",
-      "file": ".mstar/plans/2026-07-09-v1.101-setup-wizard-ui-polish.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@product-manager",
-        "@frontend-dev",
-        "@qc-specialist",
-        "@qa-engineer"
-      ],
-      "progress": 100,
-      "tags": [
-        "V1.101",
-        "desktop",
-        "setup",
-        "ui-polish",
-        "studio-first"
-      ],
-      "created_at": "2026-07-09",
-      "updated_at": "2026-07-09",
-      "notes": "Done: SDD T1-T4 + QC Approve (fix-wave-1) + QA Pass. BACK/STEPS/POLL closed. Residuals R-V1101P1-001..002 nit.",
-      "metadata": {
-        "priority": "high",
-        "spec_integration_branch": "iteration/v1.101",
-        "merge_target": "iteration/v1.101",
-        "iteration_compass": ".mstar/iterations/v1.101-delivery-compass.md",
-        "iteration_refs": [
-          ".mstar/iterations/v1.101/specs/setup-wizard-ui-polish.md",
-          ".mstar/iterations/v1.101/guides/studio-first-visual-then-app.md"
-        ],
-        "primary_spec": ".mstar/iterations/v1.101/specs/setup-wizard-ui-polish.md",
-        "execution_mode": "sdd",
-        "qa_gate": "mandatory",
-        "stretch": false,
-        "working_branch": "plan/v1.101-p1-setup-wizard-ui-polish"
-      },
-      "done_at": "2026-07-09"
-    },
-    {
-      "id": "2026-07-09-v1.101-select-component-promotion",
-      "title": "P2 — Select Component Promotion (Stretch)",
-      "file": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@architect",
-        "@frontend-dev",
-        "@qc-specialist",
-        "@qa-engineer"
-      ],
-      "progress": 100,
-      "tags": [
-        "V1.101",
-        "design-system",
-        "nexus-ui",
-        "select",
-        "stretch"
-      ],
-      "created_at": "2026-07-09",
-      "updated_at": "2026-07-09",
-      "notes": "QA Pass @ 0205f3ab (acceptance-only). QC Approve. Residuals R-V1101P2-001..005 defer open; R-V1100P1QC1-W002 pre-existing.",
-      "metadata": {
-        "priority": "medium",
-        "blocked_by_plan_id": "2026-07-09-v1.101-setup-wizard-ui-polish",
-        "spec_integration_branch": "iteration/v1.101",
-        "merge_target": "iteration/v1.101",
-        "iteration_compass": ".mstar/iterations/v1.101-delivery-compass.md",
-        "iteration_refs": [
-          ".mstar/iterations/v1.101/specs/select-promotion-contract.md",
-          ".mstar/iterations/v1.101/guides/studio-first-visual-then-app.md"
-        ],
-        "primary_spec": ".mstar/iterations/v1.101/specs/select-promotion-contract.md",
-        "execution_mode": "sdd",
-        "qa_gate": "mandatory",
-        "stretch": true,
-        "working_branch": "plan/v1.101-p2-select-component-promotion",
-        "feature_branch": "plan/v1.101-p2-select-component-promotion",
-        "product_head": "0205f3ab",
-        "qc_decision": "Approve",
-        "qa_decision": "Pass"
-      },
-      "done_at": "2026-07-09"
-    },
-    {
-      "id": "2026-07-09-v1.102-badge-soft-solid",
-      "title": "P0 — Badge Soft / Solid Tone",
-      "file": ".mstar/plans/2026-07-09-v1.102-badge-soft-solid.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@product-manager",
-        "@architect",
-        "@frontend-dev",
-        "@qc-specialist",
-        "@qa-engineer"
-      ],
-      "progress": 100,
-      "tags": [
-        "V1.102",
-        "badge",
-        "nexus-ui",
-        "design-studio",
-        "must"
-      ],
-      "created_at": "2026-07-09",
-      "updated_at": "2026-07-09",
-      "notes": "Done — QC Approve w/ residuals; QA Pass w/ residuals; merged to iteration/v1.102",
-      "metadata": {
-        "priority": "high",
-        "tier": "must",
-        "spec_integration_branch": "iteration/v1.102",
-        "merge_target": "iteration/v1.102",
-        "iteration_compass": ".mstar/iterations/v1.102-delivery-compass.md",
-        "iteration_refs": [
-          ".mstar/iterations/v1.102/specs/badge-soft-solid-contract.md",
-          ".mstar/iterations/v1.102/guides/studio-first-visual-then-app.md"
-        ],
-        "primary_spec": ".mstar/iterations/v1.102/specs/badge-soft-solid-contract.md",
-        "execution_mode": "sdd",
-        "qa_gate": "mandatory",
-        "wire_contracts_changed": false,
-        "working_branch": "feat/v1.102-badge-soft-solid",
-        "sdd_dir": ".mstar/sdd/2026-07-09-v1.102-badge-soft-solid",
-        "task_commits": [
-          {
-            "task": 1,
-            "sha": "8c62bc4c"
-          },
-          {
-            "task": 2,
-            "sha": "ffa84feb"
-          },
-          {
-            "task": 3,
-            "sha": "d8d4469a"
-          },
-          {
-            "task": 4,
-            "sha": "a4660999"
-          }
-        ]
-      }
-    },
-    {
-      "id": "2026-07-09-v1.102-settings-shell",
-      "title": "P1 — thin Settings host (DF-70 Slice A)",
-      "file": ".mstar/plans/2026-07-09-v1.102-settings-shell.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@product-manager",
-        "@architect",
-        "@frontend-dev",
-        "@fullstack-dev",
-        "@qc-specialist",
-        "@qa-engineer"
-      ],
-      "progress": 100,
-      "tags": [
-        "V1.102",
+        "V1.103",
         "settings",
-        "agent-picker",
-        "df-70",
-        "must"
+        "DF-70",
+        "ia"
       ],
       "created_at": "2026-07-09",
       "updated_at": "2026-07-09",
-      "notes": "Done — QC Approve w/ residuals; QA Pass w/ residuals; merge to iteration/v1.102",
+      "notes": "Must. Settings host shell + secondary section nav + route skeleton. Studio-first.",
       "metadata": {
         "priority": "high",
         "tier": "must",
-        "blocked_by_plan_id": "2026-07-09-v1.102-badge-soft-solid",
-        "spec_integration_branch": "iteration/v1.102",
-        "merge_target": "iteration/v1.102",
-        "iteration_compass": ".mstar/iterations/v1.102-delivery-compass.md",
+        "spec_integration_branch": "iteration/v1.103",
+        "merge_target": "iteration/v1.103",
+        "iteration_compass": ".mstar/iterations/v1.103-delivery-compass.md",
         "iteration_refs": [
-          ".mstar/iterations/v1.102/specs/settings-thin-host.md",
-          ".mstar/iterations/v1.102/guides/studio-first-visual-then-app.md"
+          ".mstar/iterations/v1.103/specs/settings-shell-ia.md",
+          ".mstar/iterations/v1.103/guides/studio-first-visual-then-app.md"
         ],
-        "primary_spec": ".mstar/iterations/v1.102/specs/settings-thin-host.md",
+        "primary_spec": ".mstar/iterations/v1.103/specs/settings-shell-ia.md",
         "execution_mode": "sdd",
         "qa_gate": "mandatory",
-        "wire_contracts_changed": false,
-        "working_branch": "feat/v1.102-settings-shell",
-        "sdd_dir": ".mstar/sdd/2026-07-09-v1.102-settings-shell"
+        "wire_contracts_changed": false
       }
     },
     {
-      "id": "2026-07-09-v1.102-ui-hygiene",
-      "title": "P2 — UI Hygiene + Surfaces Polish (Stretch)",
-      "file": ".mstar/plans/2026-07-09-v1.102-ui-hygiene.md",
-      "status": "Done",
+      "id": "2026-07-09-v1.103-settings-agent-preselect",
+      "title": "P1 — Settings Agent Section + getAgentProfile",
+      "file": ".mstar/plans/2026-07-09-v1.103-settings-agent-preselect.md",
+      "status": "Todo",
       "owner": "@project-manager",
       "agents": [
-        "@product-manager",
-        "@architect",
+        "@frontend-dev",
+        "@fullstack-dev",
+        "@qc-specialist",
+        "@qa-engineer"
+      ],
+      "progress": 0,
+      "tags": [
+        "V1.103",
+        "settings",
+        "agent",
+        "tauri"
+      ],
+      "created_at": "2026-07-09",
+      "updated_at": "2026-07-09",
+      "notes": "Must. Agent section default landing + Tauri-only getAgentProfile preselect (G1).",
+      "metadata": {
+        "priority": "high",
+        "tier": "must",
+        "blocked_by_plan_id": "2026-07-09-v1.103-settings-shell-nav",
+        "spec_integration_branch": "iteration/v1.103",
+        "merge_target": "iteration/v1.103",
+        "iteration_compass": ".mstar/iterations/v1.103-delivery-compass.md",
+        "iteration_refs": [
+          ".mstar/iterations/v1.103/specs/settings-agent-section.md",
+          ".mstar/iterations/v1.103/specs/settings-shell-ia.md"
+        ],
+        "primary_spec": ".mstar/iterations/v1.103/specs/settings-agent-section.md",
+        "execution_mode": "sdd",
+        "qa_gate": "mandatory",
+        "wire_contracts_changed": false
+      }
+    },
+    {
+      "id": "2026-07-09-v1.103-settings-connection",
+      "title": "P2 — Settings Connection + /connect Redirect",
+      "file": ".mstar/plans/2026-07-09-v1.103-settings-connection.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
         "@frontend-dev",
         "@qc-specialist",
         "@qa-engineer"
       ],
-      "progress": 100,
+      "progress": 0,
       "tags": [
-        "V1.102",
-        "surfaces",
-        "hygiene",
+        "V1.103",
+        "settings",
+        "connect",
+        "remote"
+      ],
+      "created_at": "2026-07-09",
+      "updated_at": "2026-07-09",
+      "notes": "Must. Move Connect UI into Settings; permanent /connect → /settings/connection redirect (C1).",
+      "metadata": {
+        "priority": "high",
+        "tier": "must",
+        "blocked_by_plan_id": "2026-07-09-v1.103-settings-shell-nav",
+        "spec_integration_branch": "iteration/v1.103",
+        "merge_target": "iteration/v1.103",
+        "iteration_compass": ".mstar/iterations/v1.103-delivery-compass.md",
+        "iteration_refs": [
+          ".mstar/iterations/v1.103/specs/settings-connection-section.md",
+          ".mstar/iterations/v1.103/specs/settings-shell-ia.md"
+        ],
+        "primary_spec": ".mstar/iterations/v1.103/specs/settings-connection-section.md",
+        "execution_mode": "sdd",
+        "qa_gate": "mandatory",
+        "wire_contracts_changed": false
+      }
+    },
+    {
+      "id": "2026-07-09-v1.103-settings-rerun-setup",
+      "title": "P3 — Settings Setup Re-run",
+      "file": ".mstar/plans/2026-07-09-v1.103-settings-rerun-setup.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@frontend-dev",
+        "@qc-specialist",
+        "@qa-engineer"
+      ],
+      "progress": 0,
+      "tags": [
+        "V1.103",
+        "settings",
+        "setup"
+      ],
+      "created_at": "2026-07-09",
+      "updated_at": "2026-07-09",
+      "notes": "Must. Re-run setup (R1): confirm → clear setup_completed → navigate /setup.",
+      "metadata": {
+        "priority": "high",
+        "tier": "must",
+        "blocked_by_plan_id": "2026-07-09-v1.103-settings-shell-nav",
+        "spec_integration_branch": "iteration/v1.103",
+        "merge_target": "iteration/v1.103",
+        "iteration_compass": ".mstar/iterations/v1.103-delivery-compass.md",
+        "iteration_refs": [
+          ".mstar/iterations/v1.103/specs/settings-setup-section.md",
+          ".mstar/iterations/v1.103/specs/settings-shell-ia.md"
+        ],
+        "primary_spec": ".mstar/iterations/v1.103/specs/settings-setup-section.md",
+        "execution_mode": "sdd",
+        "qa_gate": "mandatory",
+        "wire_contracts_changed": false
+      }
+    },
+    {
+      "id": "2026-07-09-v1.103-settings-workspace",
+      "title": "P4 Stretch — Settings Workspace Path",
+      "file": ".mstar/plans/2026-07-09-v1.103-settings-workspace.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@frontend-dev",
+        "@qc-specialist",
+        "@qa-engineer"
+      ],
+      "progress": 0,
+      "tags": [
+        "V1.103",
+        "settings",
+        "workspace",
         "stretch"
       ],
       "created_at": "2026-07-09",
       "updated_at": "2026-07-09",
-      "notes": "Done — Stretch Surfaces polish; QC/QA Pass with residuals; merge to iteration/v1.102",
+      "notes": "Stretch (W2). Editable workspace path + honest reload/restart copy. Whole-plan defer allowed.",
       "metadata": {
         "priority": "medium",
         "tier": "stretch",
-        "blocked_by_plan_id": "2026-07-09-v1.102-settings-shell",
-        "spec_integration_branch": "iteration/v1.102",
-        "merge_target": "iteration/v1.102",
-        "iteration_compass": ".mstar/iterations/v1.102-delivery-compass.md",
+        "blocked_by_plan_id": "2026-07-09-v1.103-settings-shell-nav",
+        "dependency": "Prefer after Must P1–P3 automated paths Done unless PM capacity exception.",
+        "spec_integration_branch": "iteration/v1.103",
+        "merge_target": "iteration/v1.103",
+        "iteration_compass": ".mstar/iterations/v1.103-delivery-compass.md",
         "iteration_refs": [
-          ".mstar/iterations/v1.102/specs/surfaces-polish-contract.md",
-          ".mstar/iterations/v1.102/guides/studio-first-visual-then-app.md"
+          ".mstar/iterations/v1.103/specs/settings-workspace-section.md",
+          ".mstar/iterations/v1.103/specs/settings-shell-ia.md"
         ],
-        "primary_spec": ".mstar/iterations/v1.102/specs/surfaces-polish-contract.md",
+        "primary_spec": ".mstar/iterations/v1.103/specs/settings-workspace-section.md",
         "execution_mode": "sdd",
         "qa_gate": "mandatory",
-        "wire_contracts_changed": false,
-        "working_branch": "feat/v1.102-ui-hygiene",
-        "sdd_dir": ".mstar/sdd/2026-07-09-v1.102-ui-hygiene"
+        "wire_contracts_changed": false
       }
     }
   ],
   "metadata": {
-    "integration_branch_retired": true,
+    "integration_branch_retired": false,
     "last_integration_branch": "iteration/v1.97",
     "iteration_base_branch": "main",
-    "spec_integration_branch": "iteration/v1.102",
+    "spec_integration_branch": "iteration/v1.103",
     "target_branch": "main",
-    "latest_active_iteration": "V1.102",
-    "latest_active_compass": "v1.102-delivery-compass.md",
+    "latest_active_iteration": "V1.103",
+    "latest_active_compass": "v1.103-delivery-compass.md",
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/specs/README.md",
@@ -599,7 +256,7 @@
         "2026-07-09-v1.102-settings-shell": 5
       }
     },
-    "updated_at": "2026-07-09T14:50:00+0800"
+    "updated_at": "2026-07-09T17:20:00+0800"
   },
   "residual_findings": {
     "2026-07-05-v1.91-findings-batch": [

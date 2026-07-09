@@ -142,7 +142,7 @@ The desktop app's first-launch flow walks a new author through workspace creatio
 - **Semantics**: absent or `false` = first-launch (wizard); `true` = skip wizard, enter per-launch daemon-ready gate.
 - **Additive**: the field is optional; existing config files without it are treated as absent (= first-launch). TOML deserialiser must use `#[serde(default)]` or equivalent — the field must tolerate unknown config shapes.
 - **Persistence**: the Tauri shell writes `setup_completed = true` on wizard completion via the existing `set_setup_completed` command (P0). The CLI config path (`apps/nexus42/src/config.rs`) accepts the field additively.
-- **Reset**: Settings exposes a "Re-run setup" action that clears the marker. Missing marker = fail-safe to wizard.
+- **Reset**: Settings → **Setup** exposes **Re-run Setup**, which clears the `setup_completed` marker (R1). Missing marker = fail-safe to wizard. **V1.103 implement authority:** [settings-setup-section.md](../iterations/v1.103/specs/settings-setup-section.md).
 
 ### 13.4 Per-launch daemon-ready gate
 
@@ -318,7 +318,7 @@ V1.100 does not change daemon routes, JSON schemas, generated TypeScript/Rust co
 
 **Handler**: `crates/nexus-daemon-runtime/src/api/handlers/agent_host.rs` — new `scan` function, wired into the existing agent-host router (same route group as `health`, `sessions`).
 
-**Consumers**: Setup wizard agent step (V1.101 Must / P0 — app-shared `AgentPicker` at `apps/web/src/components/setup/agent-picker.tsx`); **V1.102 Must / P1** thin Settings host (`/settings`) remounts the same picker for post-setup agent change. Fuller multi-section Settings IA remains deferred under **DF-70**.
+**Consumers**: Setup wizard agent step (V1.101 Must / P0 — app-shared `AgentPicker` at `apps/web/src/components/setup/agent-picker.tsx`); **V1.102** thin Settings host (`/settings`) remounts the same picker for post-setup agent change; **V1.103** deepens into S3 Settings shell with `/settings/agent` + `getAgentProfile` preselect (G1). **Current IA authority:** [settings-shell-ia.md](../iterations/v1.103/specs/settings-shell-ia.md) + [settings-agent-section.md](../iterations/v1.103/specs/settings-agent-section.md). Execution-mode matrix remains deferred post-V1.103 (DF-70).
 
 ### 14.2 Contract shapes
 
@@ -358,8 +358,8 @@ The handler joins the registry list with the scan results to produce the annotat
 ### 14.5 Non-goals
 
 - Agent installation / download / update (registry-only detection; the user manages their own ACP agent binaries).
-- Full `AgentProfile` CRUD API (wizard + thin Settings host write the default profile via desktop `setAgentProfile`; broader CRUD remains a separate future iteration).
-- Full multi-section Settings IA / BYOK / AgentPicker package promotion (out of V1.102 thin-host slice; see DF-70).
+- Full `AgentProfile` CRUD API (wizard + Settings Agent section write the default profile via desktop `setAgentProfile`; broader CRUD remains a separate future iteration).
+- Execution-mode matrix / BYOK / AgentPicker package promotion (out of V1.103 scope; see [V1.103 compass](../iterations/v1.103-delivery-compass.md) Non-Goals). Multi-section Settings shell for Agent/Connection/Setup is **in scope V1.103** — not a non-goal here.
 
 ---
 

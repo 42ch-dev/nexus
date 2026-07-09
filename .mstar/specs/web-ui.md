@@ -1020,7 +1020,7 @@ The sidebar renders at `lg`+ (≥961px) as a fixed left panel. Below `lg`, the t
 | | Strategies | (single entry: `/strategies` list → `/strategies/:presetId` canvas detail) |
 
 **Excluded from sidebar**:
-- **Connect** — moves to Settings (reachable from app menu or Settings page; not a sidebar item).
+- **Connect** — Settings → **Connection** (`/settings/connection`); legacy `/connect` permanently redirects (V1.103 C1). Not a sidebar item. **Implement authority:** [settings-connection-section.md](../iterations/v1.103/specs/settings-connection-section.md).
 - **Daemon status** — leaves sidebar; lives in the status bar (running = restart-icon only) and the main-banner (degraded/error).
 
 The old 10-item flat `NAV_ITEMS` array is retired. Tab switch swaps the visible nav items; the footer Profiles row is always visible regardless of active tab.
