@@ -52,6 +52,8 @@ Treat local daemon readiness as an **application-level fullscreen launch require
 | Setup marker routing | `apps/web/src/components/setup/setup-gate.tsx` | **After** outer gate passes: `!completed` → `<Navigate to="/setup" />`; `completed` → `children`. **Remove** splash/subscribe logic (moved to `DaemonLaunchGate`). |
 | Route wiring | `apps/web/src/App.tsx` | `SetupCompletedProvider` → `DaemonLaunchGate` → `Routes`. `/setup` and `SetupGate`-wrapped main shell are **siblings** under `DaemonLaunchGate`. |
 | Wizard daemon step (retire) | `apps/web/src/pages/setup-step-daemon.tsx` | **Not** a wizard step after P1; P0 migrates wait/recovery UX to gate; file deleted or demoted in P1. **Must not** remain the clean-state `startDaemon` happy path. |
+| Setup marker IPC | `apps/web/src/lib/setup-completed-context.tsx`, `apps/web/src/lib/nexus/desktop-capabilities.ts` | Unchanged read/write of `setup_completed`. |
+| Re-run entry | `apps/web/src/pages/settings/settings-setup-section.tsx` | R1 unchanged: `setCompleted(false)` → `navigate('/setup')`; gate intercepts before wizard mounts. |
 
 ## P1 handoff (Task 4)
 
@@ -61,8 +63,6 @@ P0 delivered ownership of sidecar start + Ready wait outside the wizard. P1 must
 2. **Delete or demote** `setup-step-daemon.tsx` (+ shrink/delete `setup-step-daemon.test.tsx`). Do not keep it as the clean-state start owner.
 3. **P0 already true:** launch happy path uses Tauri D2 + `DaemonLaunchGate` only — no wizard `startDaemon`. Gate recovery = reload or `resetLocalDatabase`→reload.
 4. Until P1 lands, the wizard may still render the Daemon step if navigated there; that residual is acceptable and is **not** the launch happy path (outer gate reaches Ready before `/setup` mounts).
-| Setup marker IPC | `apps/web/src/lib/setup-completed-context.tsx`, `apps/web/src/lib/nexus/desktop-capabilities.ts` | Unchanged read/write of `setup_completed`. |
-| Re-run entry | `apps/web/src/pages/settings/settings-setup-section.tsx` | R1 unchanged: `setCompleted(false)` → `navigate('/setup')`; gate intercepts before wizard mounts. |
 
 ## SetupGate sequencing (normative)
 
