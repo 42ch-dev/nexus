@@ -19,19 +19,38 @@ interface SetupStepAgentProps {
   onBack: () => void;
 }
 
-/** Stable picker id for an scan entry (registry id preferred). */
+/** Base picker id for a scan entry (registry id preferred). */
 export function agentPickerId(agent: AgentScanEntry): string {
   return (agent.registry_agent_id?.trim() || agent.name).trim();
+}
+
+/**
+ * Assign collision-safe picker ids for a scan list.
+ *
+ * Duplicate `registry_agent_id` / name values get a `#n` suffix so map lookups
+ * and React keys stay unique (QC B6).
+ */
+export function assignCollisionSafePickerIds(
+  agents: AgentScanEntry[],
+): string[] {
+  const seen = new Map<string, number>();
+  return agents.map((agent) => {
+    const base = agentPickerId(agent);
+    const count = seen.get(base) ?? 0;
+    seen.set(base, count + 1);
+    return count === 0 ? base : `${base}#${count}`;
+  });
 }
 
 /** Map wire scan entries → presentational picker items (+ static URL table). */
 export function mapScanEntriesToPickerItems(
   agents: AgentScanEntry[],
 ): AgentPickerItem[] {
-  return agents.map((agent) => {
+  const ids = assignCollisionSafePickerIds(agents);
+  return agents.map((agent, index) => {
     const urls = lookupAgentOutboundUrls(agent.registry_agent_id, agent.name);
     return {
-      id: agentPickerId(agent),
+      id: ids[index]!,
       name: agent.name,
       version: agent.version,
       description: agent.description,
@@ -40,6 +59,20 @@ export function mapScanEntriesToPickerItems(
       docsUrl: urls.docsUrl ?? null,
     };
   });
+}
+
+/**
+ * Build a collision-safe id → scan-entry map (same ids as picker items).
+ */
+export function buildAgentsByPickerId(
+  agents: AgentScanEntry[],
+): Map<string, AgentScanEntry> {
+  const ids = assignCollisionSafePickerIds(agents);
+  const map = new Map<string, AgentScanEntry>();
+  agents.forEach((agent, index) => {
+    map.set(ids[index]!, agent);
+  });
+  return map;
 }
 
 function resolvePickerStatus(
@@ -59,45 +92,72 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
   const pickerItems = useMemo(() => mapScanEntriesToPickerItems(agents), [agents]);
   const status = resolvePickerStatus(scan.isLoading, scan.isError, agents.length);
 
-  const agentsById = useMemo(() => {
-    const map = new Map<string, AgentScanEntry>();
-    for (const agent of agents) {
-      map.set(agentPickerId(agent), agent);
-    }
-    return map;
-  }, [agents]);
+  const agentsById = useMemo(() => buildAgentsByPickerId(agents), [agents]);
 
   const firstInstalled = useMemo(
     () => agents.find((a) => a.installed) ?? null,
     [agents],
   );
 
+  const selectedAgent = state.selectedAgent;
+  const customLaunchCommand = state.customLaunchCommand;
+  const workspaceRoot = state.workspaceRoot;
+  const workspacePicked = state.workspacePicked;
+
   // Default to the first installed agent (profile path).
+  // Narrow deps (QC B3): do not depend on the whole `state` object.
   useEffect(() => {
-    if (state.selectedAgent || state.customLaunchCommand) return;
+    if (selectedAgent || customLaunchCommand.trim()) return;
     if (!firstInstalled) return;
-    onChange({ ...state, selectedAgent: firstInstalled });
-  }, [firstInstalled, state, onChange]);
+    onChange({
+      workspaceRoot,
+      workspacePicked,
+      selectedAgent: firstInstalled,
+      customLaunchCommand: '',
+    });
+  }, [
+    firstInstalled,
+    selectedAgent,
+    customLaunchCommand,
+    workspaceRoot,
+    workspacePicked,
+    onChange,
+  ]);
 
   function selectById(id: string) {
     const agent = agentsById.get(id);
     if (!agent?.installed) return;
-    onChange({ ...state, selectedAgent: agent, customLaunchCommand: '' });
+    onChange({
+      workspaceRoot,
+      workspacePicked,
+      selectedAgent: agent,
+      customLaunchCommand: '',
+    });
   }
 
   function useCustom(command: string) {
     onChange({
-      ...state,
+      workspaceRoot,
+      workspacePicked,
       selectedAgent: null,
       customLaunchCommand: command,
     });
   }
 
-  const selectedId = state.selectedAgent
-    ? agentPickerId(state.selectedAgent)
-    : null;
+  const selectedId = useMemo(() => {
+    if (!selectedAgent) return null;
+    for (const [id, agent] of agentsById) {
+      if (
+        agent.registry_agent_id === selectedAgent.registry_agent_id &&
+        agent.name === selectedAgent.name
+      ) {
+        return id;
+      }
+    }
+    return agentPickerId(selectedAgent);
+  }, [selectedAgent, agentsById]);
 
-  const canContinue = Boolean(state.selectedAgent || state.customLaunchCommand.trim());
+  const canContinue = Boolean(selectedAgent || customLaunchCommand.trim());
 
   return (
     <div className="flex flex-col gap-6">
@@ -113,7 +173,7 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
         agents={status === 'ready' ? pickerItems : []}
         selectedId={selectedId}
         onSelect={selectById}
-        customLaunchValue={state.customLaunchCommand}
+        customLaunchValue={customLaunchCommand}
         onCustomLaunchChange={useCustom}
         errorDescription={
           scan.isError

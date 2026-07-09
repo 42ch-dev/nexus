@@ -1,6 +1,6 @@
 /**
- * AgentPicker presentational unit tests (V1.101 Task 2).
- * Wiring/persistence coverage belongs to Task 3.
+ * AgentPicker presentational unit tests (V1.101 Task 2 + fix-wave B2).
+ * Wiring/persistence coverage belongs to Task 3 / setup-step-agent tests.
  */
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -13,7 +13,7 @@ import {
 
 const AGENTS: AgentPickerItem[] = [
   {
-    id: 'claude-code',
+    id: 'claude-acp',
     name: 'Claude Code',
     version: '1.0.0',
     installed: true,
@@ -50,11 +50,29 @@ describe('AgentPicker', () => {
       />,
     );
 
-    await user.click(screen.getByTestId('agent-card-claude-code'));
-    expect(onSelect).toHaveBeenCalledWith('claude-code');
+    await user.click(screen.getByTestId('agent-card-select-claude-acp'));
+    expect(onSelect).toHaveBeenCalledWith('claude-acp');
 
-    // Not-installed is a div, not a button — click should not select.
+    // Not-installed has no select button.
+    expect(screen.queryByTestId('agent-card-select-missing')).toBeNull();
     expect(screen.getByTestId('agent-card-missing').tagName).toBe('DIV');
+  });
+
+  it('keeps Install/Docs links outside the select button (B2)', () => {
+    render(
+      <AgentPicker
+        status="ready"
+        agents={AGENTS}
+        onSelect={() => undefined}
+        customLaunchValue=""
+        onCustomLaunchChange={() => undefined}
+      />,
+    );
+    const select = screen.getByTestId('agent-card-select-claude-acp');
+    expect(select.querySelector('a')).toBeNull();
+    const card = screen.getByTestId('agent-card-claude-acp');
+    expect(card.querySelector('a[href="https://example.com/install"]')).not.toBeNull();
+    expect(card.querySelector('a[href="https://example.com/docs"]')).not.toBeNull();
   });
 
   it('hides install/docs when URLs missing and shows when present', () => {

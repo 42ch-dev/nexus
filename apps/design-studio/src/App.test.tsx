@@ -273,9 +273,16 @@ describe('Surfaces page — AgentPicker fixtures', () => {
     expect(screen.getAllByRole('link', { name: /Install/i }).length).toBeGreaterThanOrEqual(1);
   });
 
+  it('keeps Install links outside select buttons', () => {
+    const selects = screen.getAllByTestId(/^agent-card-select-/);
+    for (const select of selects) {
+      expect(select.querySelector('a')).toBeNull();
+    }
+  });
+
   it('marks selected fixture with aria-pressed', () => {
     const pressed = screen
-      .getAllByTestId('agent-card-claude-code')
+      .getAllByTestId('agent-card-select-claude-code')
       .filter((el) => el.getAttribute('aria-pressed') === 'true');
     expect(pressed.length).toBeGreaterThanOrEqual(1);
   });

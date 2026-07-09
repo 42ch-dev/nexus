@@ -30,6 +30,9 @@ pub fn login_equivalent_bin_dirs() -> Vec<PathBuf> {
             ".cargo/bin",
             ".npm-global/bin",
             ".bun/bin",
+            // Version-manager shims (existence-gated; QC B5).
+            ".asdf/shims",
+            ".local/share/mise/shims",
         ] {
             let candidate = home.join(rel);
             if candidate.is_dir() {
@@ -242,6 +245,35 @@ mod tests {
         match previous {
             Some(p) => env::set_var("PATH", p),
             None => env::remove_var("PATH"),
+        }
+    }
+
+    #[test]
+    fn login_equivalent_bin_dirs_includes_asdf_and_mise_when_present() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        let asdf = home.join(".asdf/shims");
+        let mise = home.join(".local/share/mise/shims");
+        std::fs::create_dir_all(&asdf).unwrap();
+        std::fs::create_dir_all(&mise).unwrap();
+
+        let _guard = PATH_TEST_LOCK.lock().unwrap();
+        let previous_home = env::var_os("HOME");
+        env::set_var("HOME", home);
+
+        let dirs = login_equivalent_bin_dirs();
+        assert!(
+            dirs.iter().any(|d| d.ends_with(".asdf/shims")),
+            "expected asdf shims in {dirs:?}"
+        );
+        assert!(
+            dirs.iter().any(|d| d.ends_with(".local/share/mise/shims")),
+            "expected mise shims in {dirs:?}"
+        );
+
+        match previous_home {
+            Some(p) => env::set_var("HOME", p),
+            None => env::remove_var("HOME"),
         }
     }
 }

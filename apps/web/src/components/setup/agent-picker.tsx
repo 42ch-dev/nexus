@@ -177,24 +177,40 @@ function AgentCard({
   const selectable = agent.installed;
   const statusLabel = agent.installed ? 'Installed' : 'Not installed';
 
-  const body = (
-    <>
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex min-w-0 flex-col gap-0.5">
-          <span className="truncate text-copy-14 font-medium text-gray-1000">
-            {agent.name}
-          </span>
-          {agent.version ? (
-            <span className="text-copy-13 text-gray-700">Version {agent.version}</span>
-          ) : null}
-          {agent.description ? (
-            <span className="line-clamp-2 text-copy-13 text-gray-700">
-              {agent.description}
-            </span>
-          ) : null}
+  // Outbound links must NOT be descendants of the select <button> (QC B2 /
+  // nested interactive content). Card chrome is a div; selection is a sibling
+  // button that covers the identity region only.
+  return (
+    <div
+      data-testid={`agent-card-${agent.id}`}
+      data-installed={selectable ? 'true' : 'false'}
+      className={cn(
+        'flex w-full flex-col rounded-control border p-3 text-left',
+        selectable
+          ? selected
+            ? 'border-blue-700 bg-blue-700/8'
+            : 'border-gray-alpha-400 bg-background-100'
+          : 'border-gray-alpha-400 bg-background-100 opacity-90',
+      )}
+    >
+      {selectable ? (
+        <button
+          type="button"
+          onClick={() => onSelect?.(agent.id)}
+          aria-pressed={selected}
+          data-testid={`agent-card-select-${agent.id}`}
+          className={cn(
+            'flex w-full items-start justify-between gap-2 rounded-sm text-left transition-colors duration-state ease-standard',
+            'hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700',
+          )}
+        >
+          <AgentCardIdentity agent={agent} selected={selected} statusLabel={statusLabel} />
+        </button>
+      ) : (
+        <div className="flex w-full items-start justify-between gap-2">
+          <AgentCardIdentity agent={agent} selected={selected} statusLabel={statusLabel} />
         </div>
-        <StatusDot installed={agent.installed} selected={selected} label={statusLabel} />
-      </div>
+      )}
 
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
         <span className="text-copy-13 text-gray-700">{statusLabel}</span>
@@ -205,37 +221,36 @@ function AgentCard({
           <OutboundLink href={agent.docsUrl} label="Docs" />
         ) : null}
       </div>
-    </>
-  );
-
-  if (selectable) {
-    return (
-      <button
-        type="button"
-        onClick={() => onSelect?.(agent.id)}
-        aria-pressed={selected}
-        data-testid={`agent-card-${agent.id}`}
-        data-installed="true"
-        className={cn(
-          'flex w-full flex-col rounded-control border p-3 text-left transition-colors duration-state ease-standard',
-          selected
-            ? 'border-blue-700 bg-blue-700/8'
-            : 'border-gray-alpha-400 bg-background-100 hover:bg-gray-alpha-100',
-        )}
-      >
-        {body}
-      </button>
-    );
-  }
-
-  return (
-    <div
-      data-testid={`agent-card-${agent.id}`}
-      data-installed="false"
-      className="flex w-full flex-col rounded-control border border-gray-alpha-400 bg-background-100 p-3 text-left opacity-90"
-    >
-      {body}
     </div>
+  );
+}
+
+function AgentCardIdentity({
+  agent,
+  selected,
+  statusLabel,
+}: {
+  agent: AgentPickerItem;
+  selected: boolean;
+  statusLabel: string;
+}) {
+  return (
+    <>
+      <div className="flex min-w-0 flex-col gap-0.5">
+        <span className="truncate text-copy-14 font-medium text-gray-1000">
+          {agent.name}
+        </span>
+        {agent.version ? (
+          <span className="text-copy-13 text-gray-700">Version {agent.version}</span>
+        ) : null}
+        {agent.description ? (
+          <span className="line-clamp-2 text-copy-13 text-gray-700">
+            {agent.description}
+          </span>
+        ) : null}
+      </div>
+      <StatusDot installed={agent.installed} selected={selected} label={statusLabel} />
+    </>
   );
 }
 
@@ -272,7 +287,6 @@ function OutboundLink({ href, label }: { href: string; label: string }) {
       target="_blank"
       rel="noopener noreferrer"
       className="inline-flex items-center gap-1 text-label-14 font-medium text-blue-700 transition-colors hover:text-blue-800"
-      onClick={(e) => e.stopPropagation()}
     >
       {label}
       <ExternalLink className="h-3 w-3" aria-hidden />
