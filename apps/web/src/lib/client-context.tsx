@@ -93,7 +93,7 @@ export function selectClients(): ResolvedClients {
  * Blocks the app from mounting any screen that may issue authenticated daemon
  * requests until a pinned remote fingerprint is re-verified. Local mode and
  * configs without a pinned fingerprint bypass the gate. Mismatch is resolved
- * by redirecting to `/connect` so the user can re-pin.
+ * by redirecting to `/settings/connection` so the user can re-pin.
  */
 function FingerprintGate({
   fetchImpl,
@@ -107,14 +107,17 @@ function FingerprintGate({
   const navigate = useNavigate();
   const location = useLocation();
 
-  // The connect screen is the re-pin / local-mode fallback path. Allow it to
-  // mount even when the saved remote fingerprint no longer matches so the user
-  // can recover without a hard lockout.
-  const isConnectRoute = location.pathname === '/connect' || location.pathname === '/setup';
+  // Connection re-pin lives under Settings (V1.103). Allow the recovery path
+  // (and legacy `/connect` while it redirects) to mount on fingerprint mismatch
+  // so the author is not hard-locked out of re-pinning.
+  const isConnectRoute =
+    location.pathname === '/connect' ||
+    location.pathname === '/settings/connection' ||
+    location.pathname === '/setup';
 
   useEffect(() => {
     if (state.status === 'mismatch' && !isConnectRoute) {
-      navigate('/connect', { replace: true });
+      navigate('/settings/connection', { replace: true });
     }
   }, [state.status, navigate, isConnectRoute]);
 
@@ -137,7 +140,7 @@ function FingerprintGate({
             retryLabel="Try again"
           />
           <div className="mt-4 flex justify-center">
-            <Button variant="secondary" onClick={() => navigate('/connect')}>
+            <Button variant="secondary" onClick={() => navigate('/settings/connection')}>
               Reconnect to daemon
             </Button>
           </div>

@@ -1,13 +1,16 @@
 /**
- * SettingsPage — thin host route + AgentPicker mount + setAgentProfile persist.
+ * Settings shell — nested routes, section nav, Agent body, /connect redirect.
  */
 import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes } from 'react-router-dom';
 
-import { SettingsPage } from '@/pages/settings-page';
+import { SettingsAgentSection } from '@/pages/settings/settings-agent-section';
+import { SettingsConnectionSection } from '@/pages/settings/settings-connection-section';
+import { SettingsSetupSection } from '@/pages/settings/settings-setup-section';
+import { SettingsShellLayout } from '@/pages/settings/settings-shell-layout';
 import { RootLayout } from '@/components/layout/root-layout';
 import { ThemeProvider } from '@/components/theme-provider';
 import { renderInApp } from '@/test/test-providers';
@@ -100,16 +103,38 @@ function creatorsHandler() {
   );
 }
 
-describe('SettingsPage', () => {
-  it('renders thin host chrome and mounts AgentPicker (browser, no desktop)', async () => {
+function healthHandler() {
+  return http.get('/v1/daemon/runtime/health', () =>
+    HttpResponse.json({ status: 'ok', version: 'test' }),
+  );
+}
+
+/** Nested settings tree matching App.tsx (P0 — no workspace). */
+const settingsRouteTree = (
+  <Route path="settings" element={<SettingsShellLayout />}>
+    <Route index element={<Navigate to="agent" replace />} />
+    <Route path="agent" element={<SettingsAgentSection />} />
+    <Route path="connection" element={<SettingsConnectionSection />} />
+    <Route path="setup" element={<SettingsSetupSection />} />
+  </Route>
+);
+
+describe('SettingsAgentSection', () => {
+  it('renders AgentPicker body (browser, no desktop)', async () => {
     useHandlers(scanHandler(), creatorsHandler());
 
-    renderInApp(<SettingsPage />, {
-      client: makeClient(),
-      initialRouterEntries: ['/settings'],
-    });
+    renderInApp(
+      <Routes>
+        {settingsRouteTree}
+      </Routes>,
+      {
+        client: makeClient(),
+        initialRouterEntries: ['/settings/agent'],
+      },
+    );
 
-    expect(screen.getByTestId('settings-page')).toBeInTheDocument();
+    expect(screen.getByTestId('settings-shell')).toBeInTheDocument();
+    expect(screen.getByTestId('settings-agent-section')).toBeInTheDocument();
     expect(
       screen.getByRole('heading', { name: 'Settings', level: 1 }),
     ).toBeInTheDocument();
@@ -126,11 +151,16 @@ describe('SettingsPage', () => {
     const setAgentProfile = vi.fn(() => Promise.resolve());
     useHandlers(scanHandler(), creatorsHandler());
 
-    renderInApp(<SettingsPage />, {
-      client: makeClient(),
-      desktop: makeDesktop({ setAgentProfile }),
-      initialRouterEntries: ['/settings'],
-    });
+    renderInApp(
+      <Routes>
+        {settingsRouteTree}
+      </Routes>,
+      {
+        client: makeClient(),
+        desktop: makeDesktop({ setAgentProfile }),
+        initialRouterEntries: ['/settings/agent'],
+      },
+    );
 
     await waitFor(() =>
       expect(screen.getByTestId('agent-card-openai/codex')).toBeInTheDocument(),
@@ -148,11 +178,16 @@ describe('SettingsPage', () => {
     const user = userEvent.setup();
     useHandlers(scanHandler(), creatorsHandler());
 
-    renderInApp(<SettingsPage />, {
-      client: makeClient(),
-      desktop: null,
-      initialRouterEntries: ['/settings'],
-    });
+    renderInApp(
+      <Routes>
+        {settingsRouteTree}
+      </Routes>,
+      {
+        client: makeClient(),
+        desktop: null,
+        initialRouterEntries: ['/settings/agent'],
+      },
+    );
 
     await waitFor(() =>
       expect(screen.getByTestId('agent-card-openai/codex')).toBeInTheDocument(),
@@ -164,26 +199,139 @@ describe('SettingsPage', () => {
   });
 });
 
-describe('Settings route + shell nav', () => {
+describe('Settings shell routes', () => {
   beforeEach(() => {
     mockMatchMedia(false);
     window.localStorage.clear();
   });
 
-  it('exposes Settings in sidebar footer utility and opens /settings', async () => {
-    const user = userEvent.setup();
-    useHandlers(
-      scanHandler(),
-      creatorsHandler(),
-      http.get('/v1/daemon/runtime/health', () =>
-        HttpResponse.json({ status: 'ok', version: 'test' }),
-      ),
+  it('redirects /settings index to Agent section', async () => {
+    useHandlers(scanHandler(), creatorsHandler());
+
+    renderInApp(
+      <Routes>
+        {settingsRouteTree}
+      </Routes>,
+      {
+        client: makeClient(),
+        initialRouterEntries: ['/settings'],
+      },
     );
+
+    await waitFor(() =>
+      expect(screen.getByTestId('settings-agent-section')).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId('settings-section-nav-agent')).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+  });
+
+  it('renders section nav with Agent, Connection, Setup (no Workspace)', () => {
+    useHandlers(scanHandler(), creatorsHandler());
+
+    renderInApp(
+      <Routes>
+        {settingsRouteTree}
+      </Routes>,
+      {
+        client: makeClient(),
+        initialRouterEntries: ['/settings/agent'],
+      },
+    );
+
+    const nav = screen.getByTestId('settings-section-nav');
+    expect(within(nav).getByTestId('settings-section-nav-agent')).toHaveTextContent(
+      'Agent',
+    );
+    expect(
+      within(nav).getByTestId('settings-section-nav-connection'),
+    ).toHaveTextContent('Connection');
+    expect(within(nav).getByTestId('settings-section-nav-setup')).toHaveTextContent(
+      'Setup',
+    );
+    expect(
+      within(nav).queryByTestId('settings-section-nav-workspace'),
+    ).not.toBeInTheDocument();
+    expect(within(nav).queryByText('Workspace')).not.toBeInTheDocument();
+  });
+
+  it('switches outlet when section nav is clicked', async () => {
+    const user = userEvent.setup();
+    useHandlers(scanHandler(), creatorsHandler());
+
+    renderInApp(
+      <Routes>
+        {settingsRouteTree}
+      </Routes>,
+      {
+        client: makeClient(),
+        initialRouterEntries: ['/settings/agent'],
+      },
+    );
+
+    await user.click(screen.getByTestId('settings-section-nav-setup'));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('settings-setup-section')).toBeInTheDocument(),
+    );
+    expect(screen.queryByTestId('settings-agent-section')).not.toBeInTheDocument();
+    expect(screen.getByTestId('settings-section-nav-setup')).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+  });
+
+  it('mounts Connection section outlet', async () => {
+    useHandlers(scanHandler(), creatorsHandler());
+
+    renderInApp(
+      <Routes>
+        {settingsRouteTree}
+      </Routes>,
+      {
+        client: makeClient(),
+        initialRouterEntries: ['/settings/connection'],
+      },
+    );
+
+    expect(screen.getByTestId('settings-connection-section')).toBeInTheDocument();
+    expect(screen.getByTestId('settings-section-nav-connection')).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+  });
+
+  it('redirects /connect to /settings/connection', async () => {
+    useHandlers(scanHandler(), creatorsHandler());
+
+    renderInApp(
+      <Routes>
+        {settingsRouteTree}
+        <Route
+          path="connect"
+          element={<Navigate to="/settings/connection" replace />}
+        />
+      </Routes>,
+      {
+        client: makeClient(),
+        initialRouterEntries: ['/connect'],
+      },
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId('settings-connection-section')).toBeInTheDocument(),
+    );
+  });
+
+  it('exposes Settings in sidebar footer utility and opens Agent via /settings', async () => {
+    const user = userEvent.setup();
+    useHandlers(scanHandler(), creatorsHandler(), healthHandler());
 
     renderInApp(
       <Routes>
         <Route element={<LayoutWithTheme />}>
-          <Route path="settings" element={<SettingsPage />} />
+          {settingsRouteTree}
           <Route path="works" element={<div>Works stub</div>} />
         </Route>
       </Routes>,
@@ -201,10 +349,10 @@ describe('Settings route + shell nav', () => {
     await user.click(settingsLink);
 
     await waitFor(() =>
-      expect(screen.getByTestId('settings-page')).toBeInTheDocument(),
+      expect(screen.getByTestId('settings-agent-section')).toBeInTheDocument(),
     );
     expect(
-      within(screen.getByTestId('settings-page')).getByRole('heading', {
+      within(screen.getByTestId('settings-shell')).getByRole('heading', {
         name: 'Settings',
         level: 1,
       }),
@@ -212,12 +360,7 @@ describe('Settings route + shell nav', () => {
   });
 
   it('includes Settings in mobile nav', () => {
-    useHandlers(
-      creatorsHandler(),
-      http.get('/v1/daemon/runtime/health', () =>
-        HttpResponse.json({ status: 'ok', version: 'test' }),
-      ),
-    );
+    useHandlers(creatorsHandler(), healthHandler());
 
     renderInApp(
       <Routes>
@@ -233,7 +376,6 @@ describe('Settings route + shell nav', () => {
       },
     );
 
-    // Mobile strip + desktop footer both expose Settings; assert at least one link.
     const links = screen.getAllByRole('link', { name: 'Settings' });
     expect(links.length).toBeGreaterThanOrEqual(1);
     expect(links.some((el) => el.getAttribute('href') === '/settings')).toBe(

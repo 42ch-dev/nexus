@@ -91,7 +91,11 @@ function renderWithGate(
         <ClientProvider connectionConfig={config} fetchImpl={fetchImpl}>
           <Routes>
             <Route path="/" element={<TestChild />} />
-            <Route path="/connect" element={<div data-testid="connect-page">Connect</div>} />
+            <Route
+              path="/settings/connection"
+              element={<div data-testid="connect-page">Connect</div>}
+            />
+            <Route path="/connect" element={<div data-testid="legacy-connect">Legacy</div>} />
             <Route path="/setup" element={<TestChild />} />
           </Routes>
           <RouteSpy />
@@ -151,7 +155,7 @@ describe('ClientProvider resume-time fingerprint gate', () => {
     expect(requestUrl).toBe('https://remote.example.com/v1/daemon/runtime/cert-fingerprint');
   });
 
-  it('redirects to /connect on fingerprint mismatch and does not mount children', async () => {
+  it('redirects to /settings/connection on fingerprint mismatch and does not mount children', async () => {
     const fetchImpl = makeFetchImpl({ fingerprint: 'served-fingerprint' });
     const config: ConnectionConfig = {
       endpointUrl: 'https://remote.example.com',
@@ -162,7 +166,9 @@ describe('ClientProvider resume-time fingerprint gate', () => {
     renderWithGate(config, fetchImpl);
 
     await waitFor(() => {
-      expect(screen.getByTestId('current-path')).toHaveTextContent('/connect');
+      expect(screen.getByTestId('current-path')).toHaveTextContent(
+        '/settings/connection',
+      );
     });
 
     expect(screen.queryByTestId('child')).not.toBeInTheDocument();
