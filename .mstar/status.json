@@ -44,7 +44,12 @@
           {
             "task_id": "T5",
             "base": "eb4acd4cc77decd5d3082c2e4e3abc3c79d5201a",
-            "head": "1f14c35fea7f856a8c13f92842604e462774e939"
+            "head": "998d4de714f9608c1015806cb0d03927b7cf8e09"
+          },
+          {
+            "task_id": "T4",
+            "base": "8eb7fdeccf50f0d178b56f9c0d047344a8c0b2c2",
+            "head": "eb4acd4cc77decd5d3082c2e4e3abc3c79d5201a"
           }
         ]
       }
