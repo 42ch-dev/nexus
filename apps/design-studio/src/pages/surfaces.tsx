@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 
-import { cn, Badge } from '@42ch/nexus-ui';
+import { cn, Badge, Button } from '@42ch/nexus-ui';
 
 import { AgentPickerFixtures } from '@/fixtures/agent-picker-fixtures';
 import { SettingsHostFixtures } from '@/fixtures/settings-host-fixtures';
@@ -191,17 +191,15 @@ function AppShellFixture() {
           ))}
         </div>
 
-        {/* Nav groups — DESIGN.md §Sidebar Nav */}
-        <nav className="flex-1 overflow-auto p-3 space-y-1">
+        {/* Nav groups — DESIGN.md §Sidebar Nav (V1.102: quiet inactive, leaf selected) */}
+        <nav className="flex-1 overflow-auto p-3 space-y-3">
           {activeNav.map((item) => (
-            <div key={item.label}>
-              {/* Group label */}
+            <div key={item.label} className="flex flex-col gap-1">
+              {/* Parent = group/disclosure label only — no competing fill */}
               <div
                 className={cn(
-                  'flex items-center h-sidebar-nav-item-height px-3 rounded-control text-label-14 transition-colors',
-                  item.active
-                    ? 'bg-gray-alpha-100 text-gray-1000'
-                    : 'text-gray-700 hover:bg-gray-alpha-100 hover:text-gray-1000',
+                  'flex items-center h-sidebar-nav-item-height gap-1 px-3 text-label-12 font-medium uppercase tracking-wide',
+                  'text-gray-600',
                 )}
               >
                 <span className="truncate">{item.label}</span>
@@ -211,11 +209,11 @@ function AppShellFixture() {
                     height="12"
                     viewBox="0 0 12 12"
                     fill="none"
-                    className="ml-auto shrink-0 text-gray-600"
+                    className="ml-auto shrink-0 text-gray-500"
                     aria-hidden="true"
                   >
                     <path
-                      d="M4 2L8 6L4 10"
+                      d="M3 4.5L6 7.5L9 4.5"
                       stroke="currentColor"
                       strokeWidth="1.5"
                       strokeLinecap="round"
@@ -225,17 +223,22 @@ function AppShellFixture() {
                 )}
               </div>
 
-              {/* Nested items */}
+              {/* Nested leaf — selected uses soft activeBackground + short activeBar */}
               {item.children &&
                 item.active &&
                 item.children.map((child) => (
                   <div
                     key={child.label}
                     className={cn(
-                      'flex items-center h-sidebar-nav-item-height pl-6 pr-3 ml-3 rounded-control text-label-14',
-                      'text-gray-1000 bg-gray-alpha-100 border-l-2 border-l-blue-700',
+                      'relative flex items-center h-sidebar-nav-item-height rounded-control pl-6 pr-3 text-label-14',
+                      // DESIGN.md sidebar-nav: activeBackgroundColor + activeTextColor + activeBarColor
+                      'bg-gray-alpha-100 text-gray-1000',
                     )}
                   >
+                    <span
+                      aria-hidden
+                      className="absolute left-0 top-1/2 h-5 w-[2px] -translate-y-1/2 rounded-pill bg-blue-700"
+                    />
                     <span className="truncate">{child.label}</span>
                   </div>
                 ))}
@@ -298,22 +301,23 @@ function AppShellFixture() {
 /*  Fixture — Daemon status strip (healthy sample)                      */
 /* ------------------------------------------------------------------ */
 
+/** Single-line footer strip — left status + soft Badge; right Restart (V1.102). */
 function DaemonStatusStrip() {
   return (
-    <div className="border border-gray-alpha-300 rounded-card bg-background-100 p-4">
-      <div className="flex items-start gap-3">
-        {/* Status dot */}
-        <div className="mt-1 w-2.5 h-2.5 rounded-full bg-green-700 shrink-0" />
-        <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-label-14 text-gray-1000">Daemon running</span>
-            <Badge variant="running">healthy</Badge>
-          </div>
-          <p className="text-copy-14 text-gray-700">
-            Daemon API is reachable on the configured port.
-          </p>
-        </div>
+    <div
+      className="flex items-center justify-between gap-3 border border-gray-alpha-300 rounded-card bg-background-100 px-4 py-2"
+      data-testid="daemon-status-strip"
+    >
+      <div className="flex min-w-0 items-center gap-2">
+        <span className="h-2 w-2 shrink-0 rounded-full bg-green-700" aria-hidden />
+        <span className="truncate text-label-14 text-gray-1000">Daemon running</span>
+        <Badge variant="running" tone="soft">
+          healthy
+        </Badge>
       </div>
+      <Button variant="tertiary" size="small" type="button" aria-label="Restart daemon">
+        Restart
+      </Button>
     </div>
   );
 }

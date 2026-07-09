@@ -96,6 +96,71 @@ describe('AgentPicker', () => {
     expect(screen.getByTestId('agent-card-missing').querySelector('a')).toBeNull();
   });
 
+  it('shows soft Installed Badge and mutes not-installed cards', () => {
+    render(
+      <AgentPicker
+        status="ready"
+        agents={AGENTS}
+        selectedId={null}
+        onSelect={() => undefined}
+        customLaunchValue=""
+        onCustomLaunchChange={() => undefined}
+      />,
+    );
+    expect(screen.getByTestId('agent-card-installed-badge-claude-acp')).toHaveTextContent(
+      'Installed',
+    );
+    expect(screen.getByTestId('agent-card-missing')).toHaveClass('opacity-60');
+    expect(screen.getByText('Not installed')).toBeInTheDocument();
+  });
+
+  it('uses hollow dot when installed-unselected and lit when selected', () => {
+    const { rerender } = render(
+      <AgentPicker
+        status="ready"
+        agents={AGENTS}
+        selectedId={null}
+        onSelect={() => undefined}
+        customLaunchValue=""
+        onCustomLaunchChange={() => undefined}
+      />,
+    );
+    const installedCard = screen.getByTestId('agent-card-claude-acp');
+    expect(installedCard.querySelector('[data-dot="hollow"]')).not.toBeNull();
+
+    rerender(
+      <AgentPicker
+        status="ready"
+        agents={AGENTS}
+        selectedId="claude-acp"
+        onSelect={() => undefined}
+        customLaunchValue=""
+        onCustomLaunchChange={() => undefined}
+      />,
+    );
+    expect(
+      screen.getByTestId('agent-card-claude-acp').querySelector('[data-dot="lit"]'),
+    ).not.toBeNull();
+    expect(
+      screen.getByTestId('agent-card-missing').querySelector('[data-dot="muted"]'),
+    ).not.toBeNull();
+  });
+
+  it('uses ArrowUpRight outbound icons sized to label cap-height', () => {
+    render(
+      <AgentPicker
+        status="ready"
+        agents={AGENTS}
+        onSelect={() => undefined}
+        customLaunchValue=""
+        onCustomLaunchChange={() => undefined}
+      />,
+    );
+    const install = screen.getByRole('link', { name: /Install/i });
+    const icon = install.querySelector('svg');
+    expect(icon).toHaveClass('h-[1em]', 'w-[1em]');
+  });
+
   it('shows custom launch on empty and error', () => {
     const { rerender } = render(
       <AgentPicker

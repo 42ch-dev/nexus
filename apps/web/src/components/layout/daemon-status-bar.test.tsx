@@ -1,9 +1,9 @@
 /**
  * DaemonStatusBar lifecycle-action tests.
  *
- * V1.94 simplification: the status bar renders only when the daemon is running,
- * showing a restart-icon button (no pill, no state text). Non-running states are
- * surfaced by the top-of-main-content {@link MainBanner}.
+ * V1.102: single-line footer with left status + soft Badge and right Restart.
+ * Renders only when the daemon is running; non-running states are surfaced by
+ * the top-of-main-content {@link MainBanner}.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
@@ -49,7 +49,7 @@ describe('DaemonStatusBar lifecycle action', () => {
     expect(container.firstChild).toBeNull();
   });
 
-  it('running daemon shows a restart-icon button and stops then starts when confirmed', async () => {
+  it('running daemon shows single-line status + soft badge + Restart and stops then starts when confirmed', async () => {
     const startDaemon = vi.fn().mockResolvedValue(undefined);
     const stopDaemon = vi.fn().mockResolvedValue(undefined);
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
@@ -57,6 +57,11 @@ describe('DaemonStatusBar lifecycle action', () => {
     renderInApp(<DaemonStatusBar />, {
       desktop: makeDesktop({ state: 'running' }, { startDaemon, stopDaemon }),
     });
+
+    const bar = await screen.findByTestId('daemon-status-bar');
+    expect(bar).toHaveTextContent('Daemon running');
+    expect(bar).toHaveTextContent('healthy');
+    expect(bar).not.toHaveTextContent(/reachable/i);
 
     const button = await screen.findByRole('button', { name: /Restart daemon/i });
     expect(button).toBeInTheDocument();

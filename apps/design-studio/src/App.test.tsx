@@ -350,12 +350,19 @@ describe('Surfaces page — app shell fixture', () => {
 });
 
 describe('Surfaces page — daemon status strip', () => {
-  it('renders daemon status heading and healthy badge', () => {
+  it('renders single-line status + soft badge + Restart (no description)', () => {
     mockMatchMedia(false);
     renderStudio('/surfaces/daemon');
 
-    expect(screen.getByText('Daemon running')).toBeInTheDocument();
-    expect(screen.getByText('healthy')).toBeInTheDocument();
+    const strip = screen.getByTestId('daemon-status-strip');
+    expect(within(strip).getByText('Daemon running')).toBeInTheDocument();
+    expect(within(strip).getByText('healthy')).toBeInTheDocument();
+    expect(
+      within(strip).getByRole('button', { name: 'Restart daemon' }),
+    ).toBeInTheDocument();
+    expect(
+      within(strip).queryByText(/Daemon API is reachable/i),
+    ).not.toBeInTheDocument();
   });
 });
 
