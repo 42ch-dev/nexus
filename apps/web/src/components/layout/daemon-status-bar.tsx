@@ -114,7 +114,6 @@ export function DaemonStatusBar() {
         title="Restart daemon"
       >
         <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} aria-hidden />
-        <span className="sr-only">Restart</span>
       </Button>
     </div>
   );

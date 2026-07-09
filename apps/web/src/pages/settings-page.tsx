@@ -95,7 +95,7 @@ export function SettingsPage() {
     setCustomLaunchCommand('');
   }
 
-  function useCustom(command: string) {
+  function handleUseCustom(command: string) {
     setSelectedAgent(null);
     setCustomLaunchCommand(command);
   }
@@ -150,7 +150,7 @@ export function SettingsPage() {
           selectedId={selectedId}
           onSelect={selectById}
           customLaunchValue={customLaunchCommand}
-          onCustomLaunchChange={useCustom}
+          onCustomLaunchChange={handleUseCustom}
           errorDescription={
             scan.isError
               ? errorMessage(scan.error) ||
