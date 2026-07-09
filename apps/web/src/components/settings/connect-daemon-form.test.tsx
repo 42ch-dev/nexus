@@ -158,6 +158,72 @@ describe('ConnectDaemonForm', () => {
     expect(mockedNavigate).not.toHaveBeenCalled();
   });
 
+  it('shows an error toast when activate setConfig rejects', async () => {
+    const setConfig = vi.fn().mockRejectedValue(new Error('storage write failed'));
+    vi.spyOn(clientContext, 'useSetConnectionConfig').mockReturnValue(setConfig);
+    vi.spyOn(clientContext, 'useConnectionConfig').mockReturnValue(null);
+
+    useHandlers(
+      http.get('https://remote.example:8420/v1/daemon/runtime/cert-fingerprint', () =>
+        HttpResponse.json({ fingerprint: 'SHA256:aa:bb:cc', algorithm: 'sha256' }),
+      ),
+    );
+
+    renderInApp(
+      <clientContext.ClientProvider connectionConfig={null} onConnectionConfigChange={setConfig}>
+        <ConnectDaemonForm />
+      </clientContext.ClientProvider>,
+    );
+
+    await userEvent.type(screen.getByTestId('daemon-url-input'), 'https://remote.example:8420');
+    await userEvent.type(screen.getByTestId('api-key-input'), 'secret-key');
+    await userEvent.click(screen.getByTestId('fetch-fingerprint-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('trust-connect-button')).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByTestId('trust-connect-button'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Could not connect to daemon')).toBeInTheDocument();
+    });
+    expect(screen.getByText('storage write failed')).toBeInTheDocument();
+    expect(screen.queryByText('Connected to daemon')).not.toBeInTheDocument();
+    expect(mockedNavigate).not.toHaveBeenCalled();
+  });
+
+  it('shows an error toast when revert setConfig rejects', async () => {
+    const setConfig = vi.fn().mockRejectedValue(new Error('storage write failed'));
+    vi.spyOn(clientContext, 'useSetConnectionConfig').mockReturnValue(setConfig);
+    const saved: ConnectionConfig = {
+      endpointUrl: 'https://remote.example:8420',
+      apiKey: 'secret-key',
+      pinnedFingerprint: 'SHA256:aa:bb:cc',
+      active: true,
+    };
+    vi.spyOn(clientContext, 'useConnectionConfig').mockReturnValue(saved);
+
+    renderInApp(
+      <clientContext.ClientProvider
+        client={noopClient}
+        connectionConfig={saved}
+        onConnectionConfigChange={setConfig}
+      >
+        <ConnectDaemonForm />
+      </clientContext.ClientProvider>,
+    );
+
+    await userEvent.click(screen.getByTestId('revert-local-button'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Could not switch to local daemon')).toBeInTheDocument();
+    });
+    expect(screen.getByText('storage write failed')).toBeInTheDocument();
+    expect(screen.queryByText('Using local daemon')).not.toBeInTheDocument();
+    expect(mockedNavigate).not.toHaveBeenCalled();
+  });
+
   it('shows the loopback-only info note when the daemon has no TLS cert', async () => {
     const setConfig = vi.fn().mockResolvedValue(undefined);
     vi.spyOn(clientContext, 'useSetConnectionConfig').mockReturnValue(setConfig);

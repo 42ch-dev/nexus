@@ -3,6 +3,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from 'react';
@@ -168,10 +169,13 @@ export function ClientProvider({
   const [loaded, setLoaded] = useState(false);
   const storage = useMemo(() => createConnectionStorage(), []);
   const isDesktop = useMemo(() => isDesktopBuild(), []);
+  // Keep a live ref so setConfig can roll back optimistic updates without a stale closure.
+  const storedConfigRef = useRef<ConnectionConfig | null>(null);
 
   useEffect(() => {
     if (injectedConfig !== undefined) {
       setStoredConfig(injectedConfig);
+      storedConfigRef.current = injectedConfig;
       setLoaded(true);
       return;
     }
@@ -181,6 +185,7 @@ export function ClientProvider({
       .then((cfg) => {
         if (cancelled) return;
         setStoredConfig(cfg);
+        storedConfigRef.current = cfg;
         setLoaded(true);
       })
       .catch(() => setLoaded(true));
@@ -195,11 +200,19 @@ export function ClientProvider({
     () =>
       injectedSetter ??
       (async (next: ConnectionConfig | null) => {
+        const previous = storedConfigRef.current;
         setStoredConfig(next);
-        if (next === null) {
-          await storage.clear();
-        } else {
-          await storage.save(next);
+        storedConfigRef.current = next;
+        try {
+          if (next === null) {
+            await storage.clear();
+          } else {
+            await storage.save(next);
+          }
+        } catch (err) {
+          setStoredConfig(previous);
+          storedConfigRef.current = previous;
+          throw err;
         }
       }),
     [injectedSetter, storage],

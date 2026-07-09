@@ -239,6 +239,7 @@ export function SettingsAgentSection() {
 
       <div className="flex items-center gap-3">
         <Button
+          type="button"
           variant="primary"
           onClick={() => void saveProfile()}
           disabled={!canSave || isSaving}

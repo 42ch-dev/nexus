@@ -22,6 +22,7 @@ import {
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/lib/use-toast';
+import { errorMessage } from '@/lib/error-message';
 import {
   normalizeEndpointUrl,
   endpointLabel,
@@ -103,26 +104,44 @@ export function ConnectDaemonForm() {
       active: true,
       pinnedFingerprint: nextFingerprint,
     };
-    await setConfig(next);
-    toast({
-      variant: 'success',
-      title: 'Connected to daemon',
-      description: `Using ${next.endpointUrl}`,
-    });
-    // Stay on /settings/connection — no navigate away (V1.103 lock).
+    try {
+      await setConfig(next);
+      toast({
+        variant: 'success',
+        title: 'Connected to daemon',
+        description: `Using ${next.endpointUrl}`,
+      });
+      // Stay on /settings/connection — no navigate away (V1.103 lock).
+    } catch (err) {
+      const description = errorMessage(err) || 'Failed to save connection settings.';
+      toast({
+        variant: 'error',
+        title: 'Could not connect to daemon',
+        description,
+      });
+    }
   }
 
   async function handleRevertToLocal() {
-    if (savedConfig) {
-      // De-activate without deleting, so the saved entry can be re-activated later.
-      await setConfig({ ...savedConfig, active: false });
+    try {
+      if (savedConfig) {
+        // De-activate without deleting, so the saved entry can be re-activated later.
+        await setConfig({ ...savedConfig, active: false });
+      }
+      toast({
+        variant: 'info',
+        title: 'Using local daemon',
+        description: 'Remote settings are saved but inactive.',
+      });
+      // Stay on /settings/connection — no navigate away (V1.103 lock).
+    } catch (err) {
+      const description = errorMessage(err) || 'Failed to switch to local daemon.';
+      toast({
+        variant: 'error',
+        title: 'Could not switch to local daemon',
+        description,
+      });
     }
-    toast({
-      variant: 'info',
-      title: 'Using local daemon',
-      description: 'Remote settings are saved but inactive.',
-    });
-    // Stay on /settings/connection — no navigate away (V1.103 lock).
   }
 
   function renderFingerprintBlock() {
