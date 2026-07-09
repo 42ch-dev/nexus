@@ -73,8 +73,7 @@ check_webui_annotations() {
 echo "==> Checking promoted-wrapper forbidden imports..."
 
 # Wrapper file list — files that re-export from @42ch/nexus-ui.
-# P1 wrappers (promoted): button, badge, card.
-# P2 will promote input, label, textarea — add them here after promotion.
+# Promoted: button, badge, card, input, label, textarea, select.
 # A file is a "wrapper" iff it contains a re-export from @42ch/nexus-ui.
 WRAPPER_DIR="apps/web/src/components/ui"
 WRAPPER_CANDIDATES=(
@@ -84,6 +83,7 @@ WRAPPER_CANDIDATES=(
   "$WRAPPER_DIR/input.tsx"
   "$WRAPPER_DIR/label.tsx"
   "$WRAPPER_DIR/textarea.tsx"
+  "$WRAPPER_DIR/select.tsx"
 )
 
 WRAPPER_EXISTING=()
@@ -180,7 +180,7 @@ else
   # These must be imported from @42ch/nexus-ui, not @web-ui/*
   echo ""
   echo "   Checking @web-ui/* for already-promoted primitives..."
-  for promoted in button badge card input label textarea; do
+  for promoted in button badge card input label textarea select; do
     matches=$(grep -nE "['\"]@web-ui/$promoted['\"]" "${STUDIO_FILES[@]}" 2>/dev/null || true)
     if [ -n "$matches" ]; then
       echo "❌ Studio: imports already-promoted primitive @web-ui/$promoted (use @42ch/nexus-ui)"

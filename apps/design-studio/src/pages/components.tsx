@@ -1,8 +1,20 @@
 import { useState, type ReactNode } from 'react';
 
-import { cn, Badge, Button, Card, CardHeader, CardTitle, CardDescription, CardContent, Input, Label, Textarea } from '@42ch/nexus-ui';
+import {
+  cn,
+  Badge,
+  Button,
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+  Input,
+  Label,
+  Textarea,
+  Select,
+} from '@42ch/nexus-ui';
 import { Dialog, DialogTrigger, DialogContent } from '@web-ui/dialog'; // transitional — keep-web (Radix portal/focus-trap beyond presentational scope)
-import { Select } from '@web-ui/select'; // transitional — keep-web until V1.101 P2 Task 3 promotes Select to @42ch/nexus-ui (native select; Studio fixtures accept before package move)
 import { Spinner, LoadingState, EmptyState, ErrorState } from '@web-ui/states'; // transitional — keep-web (lucide-react asset boundary; product copy & app-composition callbacks)
 import {
   Table,
@@ -367,11 +379,10 @@ function SelectOptionList({ options }: { options: string[] }) {
 }
 
 /**
- * Select gallery — V1.101 P2 Task 2 visual acceptance fixtures.
+ * Select gallery — V1.101 P2 visual acceptance fixtures.
  *
- * Source until Task 3: `@web-ui/select` (apps/web native wrapper). After
- * package promotion, switch this import to `@42ch/nexus-ui` and drop the
- * transitional annotation.
+ * Source: `@42ch/nexus-ui` (promoted native `<select>`). Web keeps a thin
+ * re-export under `apps/web/src/components/ui/select.tsx`.
  *
  * Open/expanded is UA-owned for native `<select>` — no package `open` prop.
  * The “open (manual)” row documents keyboard/pointer acceptance; automated
@@ -394,11 +405,11 @@ function SelectSection() {
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           input-select-textarea
         </code>{' '}
-        tokens. Still imported via{' '}
+        tokens. Imported directly from{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          @web-ui/select
-        </code>{' '}
-        until Task 3 promotes the package.
+          @42ch/nexus-ui
+        </code>
+        .
       </p>
       <p className="text-copy-13 text-gray-500 mb-6">
         Open listbox chrome is UA-owned — Tab to the control, then Space /
@@ -838,8 +849,8 @@ export function ComponentsPage() {
       <FormFieldSection />
 
       <p className="text-copy-13 text-gray-500 mt-12 pt-8 border-t border-gray-alpha-200">
-        6 promoted (Badge, Button, Card, Input, Label, Textarea) + 5
-        transitional (Dialog, Select, States, Table, Tabs) = 11 primitive
+        7 promoted (Badge, Button, Card, Input, Label, Textarea, Select) + 4
+        transitional (Dialog, States, Table, Tabs) = 11 primitive
         modules from the{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">apps/web/src/components/ui</code>{' '}
         barrel — all rendered live via{' '}

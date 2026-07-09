@@ -1,6 +1,6 @@
 # @42ch/nexus-ui
 
-Nexus brand assets, design tokens, theme helpers, **React brand components** (`<NexusLogo>`, `<NexusMark>`), and **V1.99-approved presentational UI primitives** (`<Button>`, `<Badge>`, `<Card>`). Ships as a workspace package consumed by `apps/web` and `apps/design-studio`.
+Nexus brand assets, design tokens, theme helpers, **React brand components** (`<NexusLogo>`, `<NexusMark>`), and **presentational UI primitives** (`<Button>`, `<Badge>`, `<Card>`, `<Input>`, `<Label>`, `<Textarea>`, `<Select>`). Ships as a workspace package consumed by `apps/web` and `apps/design-studio`.
 
 ## Install (workspace)
 
@@ -12,7 +12,7 @@ pnpm add @42ch/nexus-ui --workspace
 
 | Entry | Description |
 |-------|-------------|
-| `@42ch/nexus-ui` | Brand token constants (`brandColors`, `logoVariants`, sizing guidance) + React components (`<NexusLogo>`, `<NexusMark>`, `<Button>`, `<Badge>`, `<Card>`) |
+| `@42ch/nexus-ui` | Brand token constants (`brandColors`, `logoVariants`, sizing guidance) + React components (`<NexusLogo>`, `<NexusMark>`, promoted UI primitives, `cn`) |
 | `@42ch/nexus-ui/tokens` | Same token module (direct import) |
 | `@42ch/nexus-ui/theme.css` | Brand CSS custom properties (`--nexus-brand-*`) |
 | `@42ch/nexus-ui/assets/logos/logo-primary.svg` | Deep blue mark (`#1E3A5F`, flat primary) for light backgrounds |
@@ -20,19 +20,23 @@ pnpm add @42ch/nexus-ui --workspace
 | `@42ch/nexus-ui/assets/logos/logo-white.svg` | White mark (`#FFFFFF`) |
 | `@42ch/nexus-ui/assets/logos/logo-mono.svg` | Monotone mark (`currentColor`) |
 
-### V1.99 promoted primitives
+### Promoted primitives
 
 | Component | Import | Variants | Notes |
 |-----------|--------|----------|-------|
 | `Button` | `import { Button } from '@42ch/nexus-ui'` | `variant` (`primary`, `secondary`, `tertiary`, `destructive`) + `size` (`small`, `default`, `large`) + `asChild` | Presentational only; no daemon or routing state |
 | `Badge` | `import { Badge } from '@42ch/nexus-ui'` | `variant` (`neutral`, `running`, `queued`, `warning`, `error`, `preset`) | 24px status pill; uses DESIGN.md semantic color tokens |
 | `Card` | `import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@42ch/nexus-ui'` | Five related sub-primitives; no variant axis | `Card` wraps content with border + shadow; `CardHeader`/`CardContent` layout helpers |
+| `Input` | `import { Input } from '@42ch/nexus-ui'` | `invalid?: boolean` + native input attrs | V1.100 form-field contract; app owns id/describedby/copy |
+| `Label` | `import { Label } from '@42ch/nexus-ui'` | Native label attrs (`htmlFor`) | Presentational `<label>`; app owns association IDs |
+| `Textarea` | `import { Textarea } from '@42ch/nexus-ui'` | `invalid?: boolean` + native textarea attrs | Same invalid/`aria-invalid` pattern as Input |
+| `Select` | `import { Select } from '@42ch/nexus-ui'` | `invalid?: boolean` + native select attrs | V1.101 native `<select>`; app owns `<option>` children; no Radix compound parts |
 
 All primitives are named root exports — no deep subpath imports. Variant helpers (`buttonVariants`, `badgeVariants`) are internal implementation details; do not import them from the package.
 
 ### Transitional policy for unpromoted primitives
 
-Components that have NOT been promoted to `@42ch/nexus-ui` remain in `apps/web/src/components/ui/` and can be imported through the project-local `@/components/ui` alias or the `@web-ui/*` barrel. Deferred components (`Input`, `Label`, `Textarea`) will be revisited as a Form Field slice in a future iteration. Components classified `keep-web` (`Dialog`, `Tabs`, `Select`, `Table`, `States`) are not expected to move to the shared package in V1.99.
+Components that have NOT been promoted to `@42ch/nexus-ui` remain in `apps/web/src/components/ui/` and can be imported through the project-local `@/components/ui` alias or the `@web-ui/*` barrel. Components classified `keep-web` (`Dialog`, `Tabs`, `Table`, `States`) stay app-owned until a future promotion plan locks their contract.
 
 PNG source references (`logo_dark.png`, `logo_light.png`, `logo_white.png`) live under `assets/logos/` for provenance and are tracked via Git LFS. **Consumers should use SVG variants**, not PNGs, in product UI.
 
@@ -167,12 +171,13 @@ pnpm --filter @42ch/nexus-ui run typecheck
 ### Current API (0.2.0)
 
 - **React brand components**: `<NexusLogo variant="..." src="...">` (presentational, explicit variant, `<img>`-based) and `<NexusMark>` (inline mono SVG, `currentColor`). React 18+ peer deps.
-- **UI primitives (first batch)**: `<Button>`, `<Badge>`, `<Card>` — pure presentational, token-driven, compatible with both `apps/web` and `apps/design-studio`. Variant helpers stay internal; no deep subpath exports.
-- **Class composition**: package-local `cn` helper with DESIGN.md token class-group extension via `tailwind-merge`.
+- **UI primitives**: `<Button>`, `<Badge>`, `<Card>`, `<Input>`, `<Label>`, `<Textarea>`, `<Select>` — pure presentational, token-driven, compatible with both `apps/web` and `apps/design-studio`. Variant helpers stay internal; no deep subpath exports.
+- **Class composition**: package-local `cn` helper with DESIGN.md token class-group extension via `tailwind-merge` (public `cn` export).
 
 ### Deferred
 
-- **Form-field slice**: `Input`, `Label`, `Textarea` — deferred per V1.99 Grill-Me lock. Revisit trigger: Form Field slice demonstrating ≥2 Web consumers + 1 Studio fixture.
 - Layout primitives (Header/Sidebar/RootLayout) — coupled to app routing/state.
 - npm publish (workspace-only for now).
 - ThemeProvider consolidation into this package.
+- Field groups / FormField composition — out of package scope (app-owned).
+- Radix compound Select (Trigger/Value/Item) — separate future plan if needed.
