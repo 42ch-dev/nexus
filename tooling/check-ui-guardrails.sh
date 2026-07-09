@@ -40,7 +40,7 @@ forbid() {
 check_webui_annotations() {
   local file="$1"
   local webui_lines
-  webui_lines=$(grep -nE "import\s+.*from\s+['\"]@web-ui/" "$file" 2>/dev/null || true)
+  webui_lines=$(grep -nE "from\s+['\"]@web-ui/" "$file" 2>/dev/null || true)
   if [ -z "$webui_lines" ]; then
     return 0
   fi
@@ -180,7 +180,7 @@ else
   echo ""
   echo "   Checking @web-ui/* for already-promoted primitives..."
   for promoted in button badge card input label textarea; do
-    matches=$(grep -nE "import\s+.*from\s+['\"]@web-ui/$promoted['\"]" "${STUDIO_FILES[@]}" 2>/dev/null || true)
+    matches=$(grep -nE "from\s+['\"]@web-ui/$promoted['\"]" "${STUDIO_FILES[@]}" 2>/dev/null || true)
     if [ -n "$matches" ]; then
       echo "❌ Studio: imports already-promoted primitive @web-ui/$promoted (use @42ch/nexus-ui)"
       echo "$matches"
