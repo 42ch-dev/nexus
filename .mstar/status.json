@@ -116,15 +116,15 @@
       "id": "2026-07-08-v1.100-desktop-clean-state-first-launch",
       "title": "P0 — Desktop Clean-State First-Launch Completion",
       "file": ".mstar/plans/2026-07-08-v1.100-desktop-clean-state-first-launch.md",
-      "status": "InReview",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": ["@architect", "@fullstack-dev", "@frontend-dev", "@qc-specialist", "@qa-engineer"],
-      "progress": 80,
+      "progress": 100,
       "tags": ["V1.100", "desktop", "first-launch", "setup-wizard", "ui"],
       "created_at": "2026-07-08",
-      "updated_at": "2026-07-08",
-      "done_at": null,
-      "notes": "Closes deferred desktop clean-state first-launch gap. InReview: SDD T1-T3 done + task-reviewed; QC tri Approve (0 Critical/Important; W-001/W-002 fixed); automated gates green (cargo 50, clippy clean, web 554). BLOCKED at QA smoke gate: R-V197-SMOKE-CLEAN-STATE/UI require interactive macOS evidence (escalated to user).",
+      "updated_at": "2026-07-09",
+      "done_at": "2026-07-09",
+      "notes": "Closes deferred desktop clean-state first-launch gap. Done: SDD T1-T3 + QC tri Approve + interactive macOS clean-state smoke (user confirmed daemon reached 'running'; No active creator blocker resolved). R-V197-SMOKE-CLEAN-STATE/UI resolved. 4 pre-existing UI/agent-scan findings registered for V1.101+.",
       "metadata": {
         "priority": "high",
         "spec_integration_branch": "iteration/v1.100",
@@ -584,9 +584,12 @@
         "decision": "defer",
         "owner": "@architect + @fullstack-dev",
         "target": "post-V1.99",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-07-v1.97-desktop-first-launch-hardening.md",
-        "note": "Pre-existing product/arch gap exposed by V1.97 smoke (spawn-name fix made daemon reachable). V1.97 ships the spawn-name fix; creator-bootstrap design deferred. Needs architect: gate daemon auto-start behind setup_completed + wizard creator-init. QC source: §R-V197-SMOKE-CLEAN-STATE"
+        "lifecycle": "resolved",
+        "tracking_link": ".mstar/plans/2026-07-08-v1.100-desktop-clean-state-first-launch.md",
+        "note": "Pre-existing product/arch gap exposed by V1.97 smoke (spawn-name fix made daemon reachable). V1.97 ships the spawn-name fix; creator-bootstrap design deferred. Needs architect: gate daemon auto-start behind setup_completed + wizard creator-init. QC source: §R-V197-SMOKE-CLEAN-STATE",
+        "closed_at": "2026-07-09",
+        "closed_by": "V1.100 P0",
+        "closure_note": "Closed by V1.100 P0 — interactive macOS clean-state smoke: user confirmed daemon reached 'Daemon is running' after wizard bootstrap; No active creator blocker resolved. ensure_setup_bootstrap + .setup() gating shipped."
       },
       {
         "id": "R-V197-SMOKE-UI",
@@ -595,9 +598,12 @@
         "decision": "defer",
         "owner": "@qa-engineer",
         "target": "post-V1.99",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-07-v1.97-desktop-first-launch-hardening.md",
-        "note": "Attach path + unit tests verified; wizard/UI flow not. Manual or automated desktop smoke on interactive host in V1.98. QC source: §R-V197-SMOKE-UI"
+        "lifecycle": "resolved",
+        "tracking_link": ".mstar/plans/2026-07-08-v1.100-desktop-clean-state-first-launch.md",
+        "note": "Attach path + unit tests verified; wizard/UI flow not. Manual or automated desktop smoke on interactive host in V1.98. QC source: §R-V197-SMOKE-UI",
+        "closed_at": "2026-07-09",
+        "closed_by": "V1.100 P0",
+        "closure_note": "Closed by V1.100 P0 — clean-state interactive macOS smoke captured (user: daemon reached running). Existing-install path is byte-for-byte code-preserved (QC1/QC2 verified .setup() true-branch) + clean-state smoke confirmed daemon reachability. User chose to continue rather than run a separate existing-install pass; UI polish findings registered as separate residuals."
       },
       {
         "id": "R-V197QC3-W001",
@@ -734,6 +740,50 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/sdd/2026-07-08-v1.100-desktop-clean-state-first-launch/review/qc-consolidated.md",
         "note": "Not blocking; defer to a dep-slim pass. QC source: P0 qc3 S-002"
+      },
+      {
+        "id": "R-V1100P0SMOKE-UI-BACK",
+        "title": "Setup wizard Back button position is incorrect (smoke observation)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.101+ (desktop UI polish)",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-08-v1.100-desktop-clean-state-first-launch.md",
+        "note": "Pre-existing UI issue surfaced during V1.100 P0 clean-state smoke. Not introduced by P0 bootstrap work. User requested deferral to future UI iteration."
+      },
+      {
+        "id": "R-V1100P0SMOKE-UI-STEPS",
+        "title": "Setup wizard sidebar Steps indicator displays abnormally (smoke observation)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.101+ (desktop UI polish)",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-08-v1.100-desktop-clean-state-first-launch.md",
+        "note": "Pre-existing UI issue surfaced during V1.100 P0 smoke. Not introduced by P0. Defer to future UI iteration."
+      },
+      {
+        "id": "R-V1100P0SMOKE-UI-POLL",
+        "title": "Daemon status detection interval inconsistent: fast Back-re-entry shows 'running' immediately, but waiting shows delay before 'running' — polling interval / race issue",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.101+ (desktop UI polish)",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-08-v1.100-desktop-clean-state-first-launch.md",
+        "note": "Pre-existing polling/timing issue in setup-step-daemon status subscription. Not a P0 blocker (daemon does reach running). Defer to future UI iteration."
+      },
+      {
+        "id": "R-V1100P0SMOKE-AGENT-SCAN",
+        "title": "Agent selection step does not display locally-available agent CLIs (smoke observation)",
+        "severity": "medium",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.101+ (agent detection)",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-08-v1.100-desktop-clean-state-first-launch.md",
+        "note": "Agent scan/detection in setup wizard does not surface local agent CLIs. Pre-existing; beyond P0 bootstrap scope. Defer to a dedicated agent-detection iteration."
       }
     ]
   }
