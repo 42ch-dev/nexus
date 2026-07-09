@@ -3,46 +3,6 @@
   "updated_at": "2026-07-09T13:25:00+0800",
   "plans": [
     {
-      "id": "2026-07-09-v1.103-settings-shell-nav",
-      "title": "P0 — Settings Shell & Section Nav (S3)",
-      "file": ".mstar/plans/2026-07-09-v1.103-settings-shell-nav.md",
-      "status": "InReview",
-      "owner": "@project-manager",
-      "agents": [
-        "@frontend-dev",
-        "@architect",
-        "@qc-specialist",
-        "@qa-engineer"
-      ],
-      "progress": 92,
-      "tags": [
-        "V1.103",
-        "settings",
-        "DF-70",
-        "ia"
-      ],
-      "created_at": "2026-07-09",
-      "updated_at": "2026-07-09",
-      "notes": "QC tri Approve after fix-wave (qc2 F-001/F-002). Awaiting QA.",
-      "metadata": {
-        "priority": "high",
-        "tier": "must",
-        "spec_integration_branch": "iteration/v1.103",
-        "merge_target": "iteration/v1.103",
-        "iteration_compass": ".mstar/iterations/v1.103-delivery-compass.md",
-        "iteration_refs": [
-          ".mstar/iterations/v1.103/specs/settings-shell-ia.md",
-          ".mstar/iterations/v1.103/guides/studio-first-visual-then-app.md"
-        ],
-        "primary_spec": ".mstar/iterations/v1.103/specs/settings-shell-ia.md",
-        "execution_mode": "sdd",
-        "qa_gate": "mandatory",
-        "wire_contracts_changed": false,
-        "working_branch": "feat/v1.103-settings-shell-nav",
-        "sdd_dir": ".mstar/sdd/2026-07-09-v1.103-settings-shell-nav"
-      }
-    },
-    {
       "id": "2026-07-09-v1.103-settings-agent-preselect",
       "title": "P1 — Settings Agent Section + getAgentProfile",
       "file": ".mstar/plans/2026-07-09-v1.103-settings-agent-preselect.md",
@@ -258,7 +218,7 @@
         "2026-07-09-v1.102-settings-shell": 5
       }
     },
-    "updated_at": "2026-07-09T18:30:00+0800"
+    "updated_at": "2026-07-09T18:55:00+0800"
   },
   "residual_findings": {
     "2026-07-05-v1.91-findings-batch": [
