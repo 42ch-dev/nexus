@@ -1,0 +1,48 @@
+{
+  "plan_id": "2026-07-09-v1.103-settings-shell-nav",
+  "schema_version": 1,
+  "entries": [
+    {
+      "id": "R-V1103P0QC-S001",
+      "severity": "suggestion",
+      "lifecycle": "resolved",
+      "title": "Legacy health-indicator still links /connect",
+      "summary": "Health indicator may still deep-link /connect; redirect works but entry should prefer /settings/connection",
+      "target": "V1.103 P2 or accept",
+      "source": "qc1",
+      "closed_at": "2026-07-09",
+      "closure_note": "DaemonHealthIndicator Link now targets /settings/connection (61a559d0).",
+      "closure_evidence": "commit 61a559d0; web Vitest 601/601",
+      "archived_at": "2026-07-09",
+      "plan_id": "2026-07-09-v1.103-settings-shell-nav"
+    },
+    {
+      "id": "R-V1103P0QC-S003",
+      "severity": "nit",
+      "lifecycle": "resolved",
+      "title": "Dead ROUTE_TITLES[/connect] entry",
+      "summary": "Optional cleanup of unused /connect title map after permanent redirect",
+      "target": "accept",
+      "source": "qc1",
+      "closed_at": "2026-07-09",
+      "closure_note": "Removed unused ROUTE_TITLES[/connect] entry from root-layout (61a559d0).",
+      "closure_evidence": "commit 61a559d0",
+      "archived_at": "2026-07-09",
+      "plan_id": "2026-07-09-v1.103-settings-shell-nav"
+    },
+    {
+      "id": "R-V1103P0QC-S004",
+      "severity": "suggestion",
+      "lifecycle": "resolved",
+      "title": "Connection post-activate still navigates to /",
+      "summary": "P2 should keep authors on /settings/connection after activate/revert (F-004)",
+      "target": "V1.103 P2",
+      "source": "qc2",
+      "closed_at": "2026-07-09",
+      "closure_note": "ConnectDaemonForm activate/revert toast-only; no navigate away from /settings/connection (5d13f5ac).",
+      "closure_evidence": "commit 5d13f5ac; connect-daemon-form.test.tsx stay-on-section asserts",
+      "archived_at": "2026-07-09",
+      "plan_id": "2026-07-09-v1.103-settings-shell-nav"
+    }
+  ]
+}
