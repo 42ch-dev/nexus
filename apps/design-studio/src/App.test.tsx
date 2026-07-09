@@ -12,7 +12,7 @@
  * swatch or component variant. Follow apps/web conventions: vitest + jsdom +
  * @testing-library/react.
  */
-import { act, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -425,18 +425,18 @@ describe('Surfaces page — AgentPicker fixtures', () => {
   });
 });
 
-/* ---- surfaces page — Settings thin host (V1.102 P1 Task 2) -------------- */
+/* ---- surfaces page — Settings shell chrome (V1.103 P0 Task 2) ----------- */
 
-describe('Surfaces page — Settings thin host fixtures', () => {
+describe('Surfaces page — Settings shell chrome fixtures', () => {
   beforeEach(() => {
     mockMatchMedia(false);
-    // Settings thin host remains discoverable under Shell (Studio-only).
+    // Settings shell chrome remains discoverable under Shell (Studio-only).
     renderStudio('/surfaces/shell');
   });
 
-  it('renders the Settings thin host section heading', () => {
+  it('renders the Settings shell chrome section heading', () => {
     expect(
-      screen.getByRole('heading', { name: 'Settings — Thin host' }),
+      screen.getByRole('heading', { name: 'Settings — Shell chrome' }),
     ).toBeInTheDocument();
   });
 
@@ -447,27 +447,81 @@ describe('Surfaces page — Settings thin host fixtures', () => {
     expect(link).toHaveAttribute('aria-current', 'page');
   });
 
-  it('renders thin host page chrome (title + helper, not wizard CTAs)', () => {
+  it('renders section nav with Agent, Connection, Setup (no Workspace)', () => {
     const hostRoot = screen.getByTestId('settings-host-fixtures');
-    const pages = within(hostRoot).getAllByTestId('settings-host-page-chrome');
-    expect(pages.length).toBeGreaterThanOrEqual(2);
+    const sectionNav = within(hostRoot).getByTestId('settings-section-nav');
     expect(
-      within(hostRoot).getAllByRole('heading', { name: 'Settings', level: 2 })
-        .length,
-    ).toBeGreaterThanOrEqual(1);
+      within(sectionNav).getByTestId('settings-section-nav-agent'),
+    ).toHaveTextContent('Agent');
+    expect(
+      within(sectionNav).getByTestId('settings-section-nav-connection'),
+    ).toHaveTextContent('Connection');
+    expect(
+      within(sectionNav).getByTestId('settings-section-nav-setup'),
+    ).toHaveTextContent('Setup');
+    expect(
+      within(sectionNav).queryByTestId('settings-section-nav-workspace'),
+    ).not.toBeInTheDocument();
+    expect(within(sectionNav).queryByText('Workspace')).not.toBeInTheDocument();
+  });
+
+  it('defaults to Agent section with empty frame and locked shell helper', () => {
+    const hostRoot = screen.getByTestId('settings-host-fixtures');
+    const shellPages = within(hostRoot).getAllByTestId(
+      'settings-shell-page-chrome',
+    );
+    expect(shellPages.length).toBeGreaterThanOrEqual(1);
+    expect(
+      within(hostRoot).getByTestId('settings-section-nav-agent'),
+    ).toHaveAttribute('aria-current', 'page');
+    const outlet = within(hostRoot).getByTestId('settings-shell-outlet');
+    expect(
+      within(outlet).getByTestId('settings-section-frame-agent'),
+    ).toBeInTheDocument();
     expect(
       within(hostRoot).getAllByText(
-        /Change the local agent Nexus uses after setup/i,
+        /Manage your local agent, daemon connection, and setup options/i,
       ).length,
-    ).toBeGreaterThanOrEqual(2);
-    // Thin host must not include wizard Back/Continue chrome (wizard CTAs live
+    ).toBeGreaterThanOrEqual(1);
+    // Shell must not include wizard Back/Continue chrome (wizard CTAs live
     // on /surfaces/setup).
     expect(
       within(hostRoot).queryByTestId('wizard-cta-row'),
     ).not.toBeInTheDocument();
   });
 
-  it('mounts AgentPicker with fixture data inside the host', () => {
+  it('switches empty section frames when section nav is clicked', () => {
+    const hostRoot = screen.getByTestId('settings-host-fixtures');
+    const outlet = within(hostRoot).getByTestId('settings-shell-outlet');
+    const connectionTab = within(hostRoot).getByTestId(
+      'settings-section-nav-connection',
+    );
+    fireEvent.click(connectionTab);
+    expect(connectionTab).toHaveAttribute('aria-current', 'page');
+    expect(
+      within(outlet).getByTestId('settings-section-frame-connection'),
+    ).toBeInTheDocument();
+    expect(
+      within(outlet).queryByTestId('settings-section-frame-agent'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('renders static empty frames for all three Must sections', () => {
+    const framesRoot = screen.getByTestId(
+      'settings-host-fixture-section-frames',
+    );
+    expect(
+      within(framesRoot).getByTestId('settings-section-frame-agent'),
+    ).toBeInTheDocument();
+    expect(
+      within(framesRoot).getByTestId('settings-section-frame-connection'),
+    ).toBeInTheDocument();
+    expect(
+      within(framesRoot).getByTestId('settings-section-frame-setup'),
+    ).toBeInTheDocument();
+  });
+
+  it('retains AgentPicker thin-host reference for P1', () => {
     const regions = screen.getAllByTestId('settings-host-picker-region');
     expect(regions.length).toBeGreaterThanOrEqual(1);
     const cards = screen.getAllByTestId('agent-card-claude-code');

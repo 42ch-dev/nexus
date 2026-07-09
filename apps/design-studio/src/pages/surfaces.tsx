@@ -52,7 +52,7 @@ const SURFACES_SECTIONS = [
     label: 'Shell',
     path: '/surfaces/shell',
     end: false,
-    desc: 'App shell sidebar + Settings thin host',
+    desc: 'App shell sidebar + Settings shell chrome',
   },
   {
     label: 'AgentPicker',
@@ -351,7 +351,7 @@ export function SurfacesIndexPage() {
       </div>
       <p className="text-copy-13 text-gray-500 mt-12 pt-8 border-t border-gray-alpha-200">
         Surface fixtures: Setup wizard chrome, App shell chrome, AgentPicker
-        states, Settings thin host (under Shell), daemon status strip. Composed
+        states, Settings shell chrome (under Shell), daemon status strip. Composed
         from{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @42ch/nexus-ui
@@ -414,18 +414,18 @@ export function SurfacesShellPage() {
         <AppShellFixture />
       </section>
 
-      {/* Settings thin host stays discoverable under Shell (V1.102 P1) */}
+      {/* Settings shell chrome stays discoverable under Shell (V1.103 P0) */}
       <section className="mt-10">
-        <SurfaceHeading>Settings — Thin host</SurfaceHeading>
+        <SurfaceHeading>Settings — Shell chrome</SurfaceHeading>
         <p className="text-copy-14 text-gray-700 mb-6">
-          Studio-local chrome for DF-70 slice A: footer utility{' '}
+          Studio-local chrome for DF-70 Settings shell: footer utility{' '}
           <strong className="font-medium text-gray-1000">Settings</strong>{' '}
-          (lucide) above profiles, plus a thin host page mounting{' '}
-          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-            @web-setup/agent-picker
-          </code>{' '}
-          with fixture props. Not a wizard re-run — no Steps / Back+Continue. No
-          daemon, no product{' '}
+          (lucide) above profiles, plus section nav (
+          <strong className="font-medium text-gray-1000">Agent</strong> /{' '}
+          <strong className="font-medium text-gray-1000">Connection</strong> /{' '}
+          <strong className="font-medium text-gray-1000">Setup</strong>) and empty
+          section frames. Workspace nav is absent until P4 Stretch. Default
+          section is Agent. No App nested-route wiring, no daemon, no product{' '}
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
             pages/
           </code>{' '}

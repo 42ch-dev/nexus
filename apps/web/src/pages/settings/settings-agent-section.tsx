@@ -1,9 +1,10 @@
 /**
- * Thin Settings host — DF-70 slice A (V1.102 P1).
+ * Settings Agent section — V1.103 P0 scaffold (body from V1.102 thin host).
  *
- * Mounts app-shared AgentPicker under RootLayout. Not a setup wizard re-run:
- * no Steps / Welcome / Daemon / Done. Persist via DesktopCapabilities.setAgentProfile
- * (setup finish() parity). Browser build: picker mounts; persist is a no-op toast.
+ * Mounts app-shared AgentPicker under SettingsShellLayout outlet.
+ * Persist via DesktopCapabilities.setAgentProfile (setup finish() parity).
+ * Browser build: picker mounts; persist is a no-op toast.
+ * P1 adds getAgentProfile preselect.
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -35,7 +36,7 @@ function resolvePickerStatus(
   return 'ready';
 }
 
-export function SettingsPage() {
+export function SettingsAgentSection() {
   const desktop = useDesktopCapabilities();
   const { toast } = useToast();
   const scan = useScanAgents({ filter: 'all', registry_refresh: true });
@@ -54,7 +55,7 @@ export function SettingsPage() {
     [agents],
   );
 
-  // Default selection to first installed (setup parity). No getAgentProfile in Must.
+  // Default selection to first installed (setup parity). No getAgentProfile in Must P0.
   useEffect(() => {
     if (didInitDefault) return;
     if (scan.isLoading || scan.isError) return;
@@ -134,15 +135,7 @@ export function SettingsPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6 max-w-2xl" data-testid="settings-page">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-heading-24 font-heading text-gray-1000">Settings</h1>
-        <p className="text-copy-14 text-gray-900">
-          Change the local agent Nexus uses after setup. Select a discovered agent
-          or provide a custom launch command.
-        </p>
-      </div>
-
+    <div className="flex flex-col gap-6" data-testid="settings-agent-section">
       <div data-testid="settings-host-picker-region">
         <AgentPicker
           status={status}
