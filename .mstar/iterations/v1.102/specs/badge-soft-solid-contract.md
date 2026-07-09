@@ -40,20 +40,19 @@ Default `tone="soft"` preserves all existing callers (`StatusBadge`, `ChapterSta
 
 ## Solid
 
-- Solid semantic fill + **`#ffffff`** / `text-white` text (Button contrast rule).
-- No visible border (`border-transparent`).
-- Light palette (locked):
+- Solid semantic fill + high-contrast text; no visible border (`border-transparent`).
+- Light palette (locked) — white text on dark fills:
 
-| variant | background |
-|---------|------------|
-| neutral | `gray-1000` |
-| running | `green-700` |
-| queued | `teal-700` |
-| warning | `amber-700` |
-| error | `red-800` |
-| preset | `purple-700` |
+| variant | background | text |
+|---------|------------|------|
+| neutral | `gray-1000` | `#ffffff` |
+| running | `green-700` | `#ffffff` |
+| queued | `teal-700` | `#ffffff` |
+| warning | `amber-700` | `#ffffff` |
+| error | `red-800` | `#ffffff` |
+| preset | `purple-700` | `#ffffff` |
 
-- Dark: map in `DESIGN.dark.md` with sufficient contrast (use existing dark semantic scales; solid text remains white).
+- Dark: map in `DESIGN.dark.md` with sufficient contrast (Button Contrast Invariant). Bright dark-theme semantic fills use `brand-deep-blue` text (white fails AA); dark neutral solid uses `gray-200` + `#ffffff`.
 
 ## DESIGN SSOT
 
@@ -69,7 +68,7 @@ Default `tone="soft"` preserves all existing callers (`StatusBadge`, `ChapterSta
 ## Acceptance (Must)
 
 1. Soft borders visibly distinct on light backgrounds per Soft rules above.
-2. Solid tone for all six variants with white text and no visible border (light + dark DESIGN maps).
+2. Solid tone for all six variants with high-contrast text and no visible border (light white text; dark AA pairs per DESIGN.dark.md).
 3. Default soft; omitting `tone` does not require caller changes.
 4. Studio Soft + Solid matrices present; `VariantLabel` label-only.
 5. Package tests + README cover `tone`.

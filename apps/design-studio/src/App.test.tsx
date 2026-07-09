@@ -404,6 +404,33 @@ describe('Components page — form-field composition fixture', () => {
   });
 });
 
+/* ---- components page — Badge soft/solid matrix (V1.102 P0 Task 3) -------- */
+
+describe('Components page — Badge soft/solid matrix', () => {
+  beforeEach(() => {
+    mockMatchMedia(false);
+    renderStudio('/components');
+  });
+
+  it('renders Soft and Solid matrix headings under Badge', () => {
+    expect(screen.getByRole('heading', { name: 'Badge' })).toBeInTheDocument();
+    expect(screen.getByTestId('badge-fixtures')).toBeInTheDocument();
+    expect(screen.getByText('Soft (default)')).toBeInTheDocument();
+    expect(screen.getByText('Solid')).toBeInTheDocument();
+  });
+
+  it('renders six solid samples with solid tone classes', () => {
+    const variants = ['neutral', 'running', 'queued', 'warning', 'error', 'preset'] as const;
+    for (const variant of variants) {
+      const badge = screen.getByTestId(`badge-solid-${variant}`);
+      expect(badge).toHaveClass('border-transparent');
+      expect(badge).toHaveClass('text-white');
+    }
+    expect(screen.getByTestId('badge-solid-running')).toHaveClass('bg-green-700');
+    expect(screen.getByTestId('badge-solid-running')).toHaveClass('dark:text-brand-deep-blue');
+  });
+});
+
 /* ---- components page — Select fixtures (V1.101 P2 Task 2) --------------- */
 
 describe('Components page — Select fixtures', () => {
