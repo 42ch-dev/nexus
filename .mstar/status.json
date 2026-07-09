@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-07-09T16:30:00+0800",
+  "updated_at": "2026-07-09T13:25:00+0800",
   "plans": [
     {
       "id": "2026-07-08-v1.99-prepare-visual-system-deepening",
@@ -349,7 +349,7 @@
       "id": "2026-07-09-v1.101-select-component-promotion",
       "title": "P2 — Select Component Promotion (Stretch)",
       "file": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@architect",
@@ -357,7 +357,7 @@
         "@qc-specialist",
         "@qa-engineer"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "V1.101",
         "design-system",
@@ -367,7 +367,7 @@
       ],
       "created_at": "2026-07-09",
       "updated_at": "2026-07-09",
-      "notes": "Stretch. Deferrable to V1.102 after P0+P1. Select only.",
+      "notes": "QA Pass @ 0205f3ab (acceptance-only). QC Approve. Residuals R-V1101P2-001..005 defer open; R-V1100P1QC1-W002 pre-existing.",
       "metadata": {
         "priority": "medium",
         "blocked_by_plan_id": "2026-07-09-v1.101-setup-wizard-ui-polish",
@@ -381,8 +381,14 @@
         "primary_spec": ".mstar/iterations/v1.101/specs/select-promotion-contract.md",
         "execution_mode": "sdd",
         "qa_gate": "mandatory",
-        "stretch": true
-      }
+        "stretch": true,
+        "working_branch": "plan/v1.101-p2-select-component-promotion",
+        "feature_branch": "plan/v1.101-p2-select-component-promotion",
+        "product_head": "0205f3ab",
+        "qc_decision": "Approve",
+        "qa_decision": "Pass"
+      },
+      "done_at": "2026-07-09"
     }
   ],
   "metadata": {
@@ -819,10 +825,10 @@
         "severity": "low",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "P2",
+        "target": "post-V1.101",
         "lifecycle": "open",
         "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
-        "note": "Fix: single PROMOTED_PRIMITIVES array at top of check-ui-guardrails.sh. P2 adds input/label/textarea anyway. QC source: qc1 W-002"
+        "note": "Fix: single PROMOTED_PRIMITIVES array at top of check-ui-guardrails.sh. P2 adds input/label/textarea anyway. QC source: qc1 W-002 V1.101 P2 updated select in both script sites but did not introduce single PROMOTED_PRIMITIVES array (QC1 S-001)."
       },
       {
         "id": "R-V1100P1QC2-W001",
@@ -983,6 +989,63 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-09-v1.101-setup-wizard-ui-polish.md",
         "note": "QC2 F-003 suggestion."
+      }
+    ],
+    "2026-07-09-v1.101-select-component-promotion": [
+      {
+        "id": "R-V1101P2-001",
+        "title": "Studio AGENTS transitional prose still generic (V1.98→V1.99) while Forbidden lists Select as promoted",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.101",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
+        "note": "QC3-S001 after revalidation Approve. Non-blocking."
+      },
+      {
+        "id": "R-V1101P2-002",
+        "title": "Studio AGENTS Allowed table still says “V1.99-approved presentational primitives”",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.101",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
+        "note": "QC1 S-002. Optional doc tidy."
+      },
+      {
+        "id": "R-V1101P2-003",
+        "title": "Studio invalid Select fixture uses -helper suffix on role=alert error node",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.101",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
+        "note": "QC2 F-001. Prefer …-error for parity with form-field fixtures."
+      },
+      {
+        "id": "R-V1101P2-004",
+        "title": "Package Select tests lack consumer aria-invalid override case (Input parity)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.101",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
+        "note": "QC2 F-002. Behavior matches Input; explicit override test would lock spread-order."
+      },
+      {
+        "id": "R-V1101P2-005",
+        "title": "packages/nexus-ui/src/index.ts header still frames package as V1.99-approved",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.101",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
+        "note": "QC2 F-003. Cosmetic; Select export comment already cites V1.101."
       }
     ]
   }

@@ -1,34 +1,10 @@
-import { forwardRef, type SelectHTMLAttributes } from 'react';
-
-import { cn } from '@/lib/utils';
-
 /**
- * Select — native styled select, DESIGN.md §Component Primitives/Select.
+ * Select — DESIGN.md §Component Primitives/Select.
  *
- * Uses the native element for accessibility (keyboard, screen-reader) and
- * applies the DESIGN.md control styling. Height 40px, background-100,
- * gray-1000 text, gray-alpha-400 border, radius-control.
+ * Re-exported from @42ch/nexus-ui (V1.101 P2 promotion).
+ * The package owns the presentational implementation; this file is a thin
+ * re-export wrapper to avoid call-site churn in apps/web.
+ * Add app-specific Select behavior (options, labels, data wiring, validation)
+ * here only — never in the package.
  */
-export interface SelectProps extends SelectHTMLAttributes<HTMLSelectElement> {
-  invalid?: boolean;
-}
-
-export const Select = forwardRef<HTMLSelectElement, SelectProps>(
-  ({ className, invalid, children, ...props }, ref) => (
-    <select
-      ref={ref}
-      aria-invalid={invalid || undefined}
-      className={cn(
-        'h-10 w-full rounded-control border bg-background-100 px-3 text-copy-14 text-gray-1000 transition-colors duration-state ease-standard',
-        'focus-visible:border-blue-700',
-        'disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed',
-        invalid ? 'border-red-700' : 'border-gray-alpha-400',
-        className,
-      )}
-      {...props}
-    >
-      {children}
-    </select>
-  ),
-);
-Select.displayName = 'Select';
+export { Select, type SelectProps } from '@42ch/nexus-ui';
