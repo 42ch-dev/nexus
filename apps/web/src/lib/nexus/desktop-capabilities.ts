@@ -92,6 +92,12 @@ export interface DesktopCapabilities {
   setAgentProfile(name: string, launchCommand?: string): Promise<void>;
   /** Resolve the default workspace root path (desktop only). */
   getWorkspaceRoot(): Promise<string>;
+  /**
+   * Bootstrap local creator/workspace state before daemon start.
+   * Idempotent: if a creator ID already exists, returns it without overwriting.
+   * Browser build: no-op — wizard skips this step when {@link useDesktopCapabilities} is `null`.
+   */
+  ensureSetupBootstrap(): Promise<{ creator_id: string; already_bootstrapped: boolean }>;
 }
 
 /**
@@ -213,6 +219,17 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
   async setWorkspacePath(path: string): Promise<void> {
     try {
       await tauriInvoke().core.invoke<void>('set_workspace_path', { path });
+    } catch (err) {
+      throw asDesktopError(err);
+    }
+  }
+
+  async ensureSetupBootstrap(): Promise<{ creator_id: string; already_bootstrapped: boolean }> {
+    try {
+      return await tauriInvoke().core.invoke<{ creator_id: string; already_bootstrapped: boolean }>(
+        'ensure_setup_bootstrap',
+        undefined,
+      );
     } catch (err) {
       throw asDesktopError(err);
     }

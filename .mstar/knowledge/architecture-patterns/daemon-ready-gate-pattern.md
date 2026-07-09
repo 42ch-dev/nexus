@@ -163,6 +163,21 @@ The attach path (daemon already running on the resolved port, e.g. user ran `nex
 
 Rules 9 + 10 fix the supervisor state machine so a real spawn is actually attempted. Rule 11 fixes the framework-contract misuse so the spawn can actually resolve the binary. Rule 12 keeps attach honest. Together they make the desktop clean-state first-launch path **reachable** — before V1.97 it was silently broken at two layers (state machine never spawned, and even if it had, the sidecar name would not resolve). The deeper remaining gap (the daemon requires an active creator to boot, and the desktop wizard does not bootstrap one before the `.setup()` auto-start — see residual `R-V197-SMOKE-CLEAN-STATE`) is a product-architecture deferral tracked for V1.98, not a state-machine or shell-contract rule.
 
+### Rule 13 (V1.100): gate `.setup()` auto-start behind `setup_completed`; bootstrap creator/workspace via Tauri IPC BEFORE daemon start
+
+V1.97 made the daemon reachable but exposed the next clean-state blocker: `.setup()` unconditionally auto-started the sidecar, but on a fresh `~/.nexus42/` there is no `active_creator_id`, so the daemon exits `No active creator`. The wizard had no creator-bootstrap step.
+
+**Pattern:** gate the launch-time auto-start on setup completion; let the wizard persist workspace + bootstrap minimum creator/workspace state through a **desktop-only Tauri IPC command** (`ensure_setup_bootstrap`), THEN start the daemon.
+
+| State | `.setup()` auto-start? | Bootstrap | Daemon start |
+|-------|------------------------|-----------|--------------|
+| `setup_completed=false` (clean) | **SKIP** | wizard, after workspace persist | wizard daemon step |
+| `setup_completed=true` (existing) | **AUTO-START** (preserved byte-for-byte) | N/A | `.setup()` spawns |
+
+**Bootstrap contract:** write only the minimum `config.toml` keys the daemon needs to not exit `No active creator` (`active_creator_id` + `active_workspace_slug_by_creator`); the daemon auto-creates `state.db`. The bootstrap is **idempotent** (never overwrites an existing `active_creator_id`; returns `already_bootstrapped`), uses `toml_edit` round-trip to preserve other keys, and reuses existing config helpers — do NOT invent a parallel config/db path. **No wire contracts:** this is Tauri IPC + local config only; it must NOT add a daemon HTTP endpoint, a daemon boot-without-creator mode, or any `schemas/` change.
+
+> Residual `R-V197-SMOKE-CLEAN-STATE` is **closed by V1.100 P0** (interactive macOS clean-state smoke confirmed daemon reaches `running`).
+
 ### Source
 
-Distilled from V1.97 plan `2026-07-07-v1.97-desktop-first-launch-hardening` (T1 prototype intake + T4 sidecar FSM + T5 sidecar spawn-name fix `ab618ee9`, verified by clean-state smoke re-run). Tauri v2 sidecar resolution rule confirmed against `https://v2.tauri.app/develop/sidecar` ("expects only the filename of the sidecar, not its full path"). Iteration-scoped invariants + prototype intake rule: `.mstar/iterations/v1.97/guides/sidecar-startup-state-machine.md` (snapshot; durable rules promoted here).
+Distilled from V1.97 plan `2026-07-07-v1.97-desktop-first-launch-hardening` (T1 prototype intake + T4 sidecar FSM + T5 sidecar spawn-name fix `ab618ee9`, verified by clean-state smoke re-run). Tauri v2 sidecar resolution rule confirmed against `https://v2.tauri.app/develop/sidecar` ("expects only the filename of the sidecar, not its full path"). Iteration-scoped invariants + prototype intake rule: `.mstar/iterations/v1.97/guides/sidecar-startup-state-machine.md` (snapshot; durable rules promoted here). **Rule 13 distilled from V1.100 P0** plan `2026-07-08-v1.100-desktop-clean-state-first-launch` (T1 contract + T2 `ensure_setup_bootstrap` + gating; verified by clean-state smoke 2026-07-09).

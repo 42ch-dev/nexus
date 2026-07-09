@@ -73,5 +73,15 @@ V1.99 validated this workflow with a focused first batch: **Button, Badge, Card*
 
 ## Known Limitations
 
-- `cn` helper is duplicated between `packages/nexus-ui/src/lib/cn.ts` and `apps/web/src/lib/utils.ts` (byte-identical `extendTailwindMerge` config). Future consolidation to `@nexus/design-tokens` is tracked as a post-V1.99 residual.
+- ~~`cn` helper is duplicated between `packages/nexus-ui/src/lib/cn.ts` and `apps/web/src/lib/utils.ts` (byte-identical `extendTailwindMerge` config). Future consolidation to `@nexus/design-tokens` is tracked as a post-V1.99 residual.~~ **RESOLVED V1.100 (P1):** `cn` is now a public `@42ch/nexus-ui` export; `apps/web/src/lib/utils.ts` is a thin re-export. `@nexus/design-tokens` was rejected as the authority because it already depends on `@42ch/nexus-ui` (would cycle). A behavioral SSOT check (`tooling/check-ui-guardrails.sh`) verifies single-source authority.
 - Variant helpers (`buttonVariants`, `badgeVariants`) stay internal to the package. If a consumer needs them, that's a signal the promotion boundary needs review.
+
+## V1.100 Extension — Mechanically-Enforced Guardrails + Semantics-First Form Fields
+
+V1.100 (P1 + P2) hardened the promotion workflow from reviewer-instruction to **mechanically-enforced** and proved it on a **semantics-first** second slice:
+
+1. **Guardrails are now a shell script + CI job** (`tooling/check-ui-guardrails.sh`), not manual grep. It catches: promoted-wrapper forbidden imports (`clsx`/`cva`/`tailwind-merge`/`@/lib/*`/deep `@42ch/nexus-ui/src/*`), Design Studio boundary violations (web pages/daemon/Tauri), missing/invalid `@web-ui/*` transitional annotations, and cn-SSOT drift. A new primitive auto-enters the guard set upon promotion (wrapper auto-detected by re-export content). **Lesson:** a `set -euo pipefail` grep script modeled on `check-schema-drift.sh` is the right ladder rung — scoped ESLint was overkill; Vitest-only can't catch unintended additions on unmodified files.
+2. **cn class-merge config has one authority** (`@42ch/nexus-ui/src/lib/cn.ts`). Do NOT move it to `@nexus/design-tokens` while design-tokens depends on the UI package (cycle). Public `cn` export via the barrel; deep imports forbidden.
+3. **Form-field promotion is semantics-first, not lift-and-shift.** V1.99 deferred Input/Label/Textarea because moving code without locking helper/error/required semantics "would only move code." V1.100 P2 locked an explicit contract first: label/control association (`htmlFor`+`id`, **app-owned** id generation), `invalid`→`aria-invalid="true"` (`invalid || undefined` coercion so false/omitted omits the attribute), `aria-describedby` **app-wired**, helper/error/required copy **app-owned**, **no stateful `FormField` package export**. The package owns only the presentational surface + native attribute passthrough. Promote the contract BEFORE the code.
+
+**Promotion checklist (locked, reusable):** move source+tests → `packages/nexus-ui/src/components/`; add to barrel; Web wrapper = thin re-export; Studio switches `@web-ui/<name>` → `@42ch/nexus-ui`; update the guardrail promoted set + transitional table. See `.mstar/iterations/v1.100/specs/ui-guardrails-cn-ssot.md` § "Promotion checklist" (iteration snapshot).

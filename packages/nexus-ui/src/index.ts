@@ -5,6 +5,11 @@
  * V1.99 P0 ships: `<Button>`, `<Badge>`, `<Card>` (+ sub-primitives).
  */
 
+// Class-merge utility — the V1.100 SSOT for cn / extendTailwindMerge.
+// Consumers (apps/web, apps/design-studio) import or re-export from here;
+// deep imports from @42ch/nexus-ui/src/* are forbidden.
+export { cn } from './lib/cn';
+
 export {
   brandColors,
   logoClearSpaceRatio,
@@ -27,3 +32,8 @@ export {
   CardDescription,
   CardContent,
 } from './components/card';
+
+// V1.100 P2 — promoted form-field presentational primitives
+export { Input, type InputProps } from './components/input';
+export { Label, type LabelProps } from './components/label';
+export { Textarea, type TextareaProps } from './components/textarea';

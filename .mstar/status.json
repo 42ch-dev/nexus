@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-07-08T19:10:00+0800",
+  "updated_at": "2026-07-08T21:41:00+0800",
   "plans": [
     {
       "id": "2026-07-08-v1.99-prepare-visual-system-deepening",
@@ -111,16 +111,96 @@
         "execution_mode": "inline",
         "qa_gate": "mandatory"
       }
+    },
+    {
+      "id": "2026-07-08-v1.100-desktop-clean-state-first-launch",
+      "title": "P0 — Desktop Clean-State First-Launch Completion",
+      "file": ".mstar/plans/2026-07-08-v1.100-desktop-clean-state-first-launch.md",
+      "status": "Done",
+      "owner": "@project-manager",
+      "agents": ["@architect", "@fullstack-dev", "@frontend-dev", "@qc-specialist", "@qa-engineer"],
+      "progress": 100,
+      "tags": ["V1.100", "desktop", "first-launch", "setup-wizard", "ui"],
+      "created_at": "2026-07-08",
+      "updated_at": "2026-07-09",
+      "done_at": "2026-07-09",
+      "notes": "Closes deferred desktop clean-state first-launch gap. Done: SDD T1-T3 + QC tri Approve + interactive macOS clean-state smoke (user confirmed daemon reached 'running'; No active creator blocker resolved). R-V197-SMOKE-CLEAN-STATE/UI resolved. 4 pre-existing UI/agent-scan findings registered for V1.101+.",
+      "metadata": {
+        "priority": "high",
+        "spec_integration_branch": "iteration/v1.100",
+        "merge_target": "iteration/v1.100",
+        "iteration_compass": ".mstar/iterations/v1.100-delivery-compass.md",
+        "iteration_refs": [
+          ".mstar/iterations/v1.100/specs/desktop-first-launch-bootstrap.md"
+        ],
+        "primary_spec": ".mstar/iterations/v1.100/specs/desktop-first-launch-bootstrap.md",
+        "execution_mode": "sdd",
+        "qa_gate": "mandatory"
+      }
+    },
+    {
+      "id": "2026-07-08-v1.100-ui-hygiene-guardrails",
+      "title": "P1 — UI Hygiene Guardrails and cn SSOT",
+      "file": ".mstar/plans/2026-07-08-v1.100-ui-hygiene-guardrails.md",
+      "status": "Done",
+      "owner": "@project-manager",
+      "agents": ["@architect", "@frontend-dev", "@qc-specialist", "@qa-engineer"],
+      "progress": 100,
+      "tags": ["V1.100", "ui", "guardrails", "nexus-ui", "design-studio"],
+      "created_at": "2026-07-08",
+      "updated_at": "2026-07-08",
+      "done_at": "2026-07-08",
+      "notes": "Closes V1.99 package hygiene residuals and establishes wrapper / Design Studio / class-merge guardrails that enable P2 and future UI promotion. Done: shell-script guardrails (wrapper + Studio boundary + cn SSOT) + CI job + cn consolidation behind @42ch/nexus-ui; QC tri Approve with residuals; QA Pass (9/9); 3 V1.99 residuals resolved; 5 deferrable P1 residuals registered.",
+      "metadata": {
+        "priority": "high",
+        "spec_integration_branch": "iteration/v1.100",
+        "merge_target": "iteration/v1.100",
+        "iteration_compass": ".mstar/iterations/v1.100-delivery-compass.md",
+        "iteration_refs": [
+          ".mstar/iterations/v1.100/specs/ui-guardrails-cn-ssot.md"
+        ],
+        "primary_spec": ".mstar/iterations/v1.100/specs/ui-guardrails-cn-ssot.md",
+        "execution_mode": "sdd",
+        "qa_gate": "mandatory"
+      }
+    },
+    {
+      "id": "2026-07-08-v1.100-form-field-component-promotion",
+      "title": "P2 — Form Field Component Promotion",
+      "file": ".mstar/plans/2026-07-08-v1.100-form-field-component-promotion.md",
+      "status": "Done",
+      "owner": "@project-manager",
+      "agents": ["@architect", "@frontend-dev", "@qc-specialist", "@qa-engineer"],
+      "progress": 100,
+      "tags": ["V1.100", "ui", "forms", "nexus-ui", "design-system"],
+      "created_at": "2026-07-08",
+      "updated_at": "2026-07-08",
+      "done_at": "2026-07-08",
+      "notes": "Promotes Input/Label/Textarea by resolving field semantics and app/package ownership after P1 guardrails. Done: locked form-field contract + promoted presentational controls + Studio direct imports + Web thin re-exports; QC tri clean Approve; QA Pass (8/8); V1.99 deferral reason closed; 1 nit residual registered.",
+      "metadata": {
+        "priority": "medium",
+        "blocked_by_plan_id": "2026-07-08-v1.100-ui-hygiene-guardrails",
+        "spec_integration_branch": "iteration/v1.100",
+        "merge_target": "iteration/v1.100",
+        "iteration_compass": ".mstar/iterations/v1.100-delivery-compass.md",
+        "iteration_refs": [
+          ".mstar/iterations/v1.100/specs/form-field-contract.md",
+          ".mstar/iterations/v1.100/specs/ui-guardrails-cn-ssot.md"
+        ],
+        "primary_spec": ".mstar/iterations/v1.100/specs/form-field-contract.md",
+        "execution_mode": "sdd",
+        "qa_gate": "mandatory"
+      }
     }
   ],
   "metadata": {
     "integration_branch_retired": true,
     "last_integration_branch": "iteration/v1.97",
     "iteration_base_branch": "main",
-    "spec_integration_branch": "iteration/v1.99",
+    "spec_integration_branch": "iteration/v1.100",
     "target_branch": "main",
-    "latest_active_iteration": "V1.99",
-    "latest_active_compass": "v1.99-design-system-deepening-compass-v1.md",
+    "latest_active_iteration": "V1.100",
+    "latest_active_compass": "v1.100-delivery-compass.md",
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/specs/README.md",
@@ -162,7 +242,7 @@
         "2026-07-07-v1.97-desktop-first-launch-hardening": 5
       }
     },
-    "updated_at": "2026-07-08T19:10:00+0800"
+    "updated_at": "2026-07-08T21:41:00+0800"
   },
   "residual_findings": {
     "2026-07-05-v1.91-findings-batch": [
@@ -460,9 +540,12 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.99",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/sdd/2026-07-08-v1.99-nexus-ui-component-promotion/review/qc1.md",
-        "note": "Non-blocking. QC source: qc1 S-001"
+        "lifecycle": "resolved",
+        "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
+        "note": "Non-blocking. QC source: qc1 S-001. V1.100 rejects @nexus/design-tokens as the authority while it depends on @42ch/nexus-ui.",
+        "closed_at": "2026-07-08",
+        "closed_by": "P1",
+        "closure_note": "Closed by P1 T3 — preferred path taken: web utils.ts is a thin re-export of cn from @42ch/nexus-ui; duplication physically eliminated. Behavioral SSOT check (check_cn_parity) verifies single-source authority."
       },
       {
         "id": "R-V199QC1-S002",
@@ -471,20 +554,26 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.99",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/sdd/2026-07-08-v1.99-nexus-ui-component-promotion/review/qc1.md",
-        "note": "Non-blocking. QC source: qc1 S-002"
+        "lifecycle": "resolved",
+        "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
+        "note": "Non-blocking. QC source: qc1 S-002",
+        "closed_at": "2026-07-08",
+        "closed_by": "P1",
+        "closure_note": "Closed by P1 T2 — promoted-wrapper forbidden-import guardrail (check-ui-guardrails.sh) catches clsx/cva/tailwind-merge/@/lib/*/deep imports in CI; failure-fixture proven."
       },
       {
         "id": "R-V199QC3-F001",
-        "title": "extendTailwindMerge config duplicated between package and apps/web — future consolidation to @nexus/design-tokens",
+        "title": "extendTailwindMerge config duplicated between package and apps/web — consolidate behind the approved class-merge SSOT",
         "severity": "low",
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.99",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/sdd/2026-07-08-v1.99-nexus-ui-component-promotion/review/qc3.md",
-        "note": "Non-blocking. QC source: qc3 F-001"
+        "lifecycle": "resolved",
+        "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
+        "note": "Non-blocking. QC source: qc3 F-001. V1.100 rejects @nexus/design-tokens as the authority while it depends on @42ch/nexus-ui.",
+        "closed_at": "2026-07-08",
+        "closed_by": "P1",
+        "closure_note": "Closed by P1 T3 — extendTailwindMerge exists only in packages/nexus-ui/src/lib/cn.ts; web utils.ts re-exports cn; dupe scan clean. Behavioral SSOT check guards drift."
       }
     ],
     "2026-07-07-v1.97-desktop-first-launch-hardening": [
@@ -495,9 +584,12 @@
         "decision": "defer",
         "owner": "@architect + @fullstack-dev",
         "target": "post-V1.99",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-07-v1.97-desktop-first-launch-hardening.md",
-        "note": "Pre-existing product/arch gap exposed by V1.97 smoke (spawn-name fix made daemon reachable). V1.97 ships the spawn-name fix; creator-bootstrap design deferred. Needs architect: gate daemon auto-start behind setup_completed + wizard creator-init. QC source: §R-V197-SMOKE-CLEAN-STATE"
+        "lifecycle": "resolved",
+        "tracking_link": ".mstar/plans/2026-07-08-v1.100-desktop-clean-state-first-launch.md",
+        "note": "Pre-existing product/arch gap exposed by V1.97 smoke (spawn-name fix made daemon reachable). V1.97 ships the spawn-name fix; creator-bootstrap design deferred. Needs architect: gate daemon auto-start behind setup_completed + wizard creator-init. QC source: §R-V197-SMOKE-CLEAN-STATE",
+        "closed_at": "2026-07-09",
+        "closed_by": "V1.100 P0",
+        "closure_note": "Closed by V1.100 P0 — interactive macOS clean-state smoke: user confirmed daemon reached 'Daemon is running' after wizard bootstrap; No active creator blocker resolved. ensure_setup_bootstrap + .setup() gating shipped."
       },
       {
         "id": "R-V197-SMOKE-UI",
@@ -506,9 +598,12 @@
         "decision": "defer",
         "owner": "@qa-engineer",
         "target": "post-V1.99",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-07-v1.97-desktop-first-launch-hardening.md",
-        "note": "Attach path + unit tests verified; wizard/UI flow not. Manual or automated desktop smoke on interactive host in V1.98. QC source: §R-V197-SMOKE-UI"
+        "lifecycle": "resolved",
+        "tracking_link": ".mstar/plans/2026-07-08-v1.100-desktop-clean-state-first-launch.md",
+        "note": "Attach path + unit tests verified; wizard/UI flow not. Manual or automated desktop smoke on interactive host in V1.98. QC source: §R-V197-SMOKE-UI",
+        "closed_at": "2026-07-09",
+        "closed_by": "V1.100 P0",
+        "closure_note": "Closed by V1.100 P0 — clean-state interactive macOS smoke captured (user: daemon reached running). Existing-install path is byte-for-byte code-preserved (QC1/QC2 verified .setup() true-branch) + clean-state smoke confirmed daemon reachability. User chose to continue rather than run a separate existing-install pass; UI polish findings registered as separate residuals."
       },
       {
         "id": "R-V197QC3-W001",
@@ -542,6 +637,153 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.97-desktop-first-launch-hardening.md",
         "note": "Not introduced by V1.97; strict clippy -D warnings fails on this pre-existing lint. QC source: §R-V197-CLIPPY"
+      }
+    ],
+    "2026-07-08-v1.100-ui-hygiene-guardrails": [
+      {
+        "id": "R-V1100P1QC1-W002",
+        "title": "Promoted-primitive list duplicated in 3 places (script WRAPPER_CANDIDATES, script promoted loop, spec table) — P2 promotion requires coordinated 3-location edits",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "P2",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
+        "note": "Fix: single PROMOTED_PRIMITIVES array at top of check-ui-guardrails.sh. P2 adds input/label/textarea anyway. QC source: qc1 W-002"
+      },
+      {
+        "id": "R-V1100P1QC2-W001",
+        "title": "Static-only detection (grep) cannot catch dynamic import()/require() bypasses of forbidden imports",
+        "severity": "low",
+        "decision": "accept",
+        "owner": "@frontend-dev",
+        "target": "post-V1.100",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
+        "note": "Inherent limitation of shell-grep mechanism; matches check-schema-drift.sh precedent. No current bypass in tree. QC source: qc2 W-001"
+      },
+      {
+        "id": "R-V1100P1QC2-W002",
+        "title": "cn-dupe scan scoped to apps/ only, not tooling/ — accidental tooling duplication would not fail the gate",
+        "severity": "nit",
+        "decision": "accept",
+        "owner": "@frontend-dev",
+        "target": "post-V1.100",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
+        "note": "Architecture decision + packages/nexus-ui/AGENTS.md forbid tooling duplication. Low risk. QC source: qc2 W-002"
+      },
+      {
+        "id": "R-V1100P1QC3-S001",
+        "title": "No automated regression test for check-ui-guardrails.sh itself (patterns verified manually only)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.100",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
+        "note": "Script is simple grep; failure fixtures proven manually. Add bats/shell self-test if guardrail grows. QC source: qc3 S-001"
+      },
+      {
+        "id": "R-V1100P1QC3-S003",
+        "title": "Vacuously-passing warnings on empty dirs could mask misconfiguration if WRAPPER_DIR/STUDIO_SRC paths change",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.100",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
+        "note": "Fail-on-missing-dir would be stricter. Low risk — dir renames caught by other CI jobs. QC source: qc3 S-003"
+      },
+      {
+        "id": "R-V1100P2QC3-S001",
+        "title": "Stale comment in check-ui-guardrails.sh:75-76 says 'P2 will promote' but P2 has promoted input/label/textarea",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.100",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-08-v1.100-form-field-component-promotion/review/qc-consolidated.md",
+        "note": "Factual inaccuracy now; trivial cleanup on next script touch. QC source: P2 qc3 S-001"
+      }
+    ],
+    "2026-07-08-v1.100-desktop-clean-state-first-launch": [
+      {
+        "id": "R-V1100P0QC1-S001",
+        "title": "Contract says rerun-setup 'still writes workspace_path' but impl early-returns when creator exists; benign (wizard step 1 persists workspace_path first)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@architect",
+        "target": "post-V1.100",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-08-v1.100-desktop-clean-state-first-launch/review/qc-consolidated.md",
+        "note": "Contract-vs-impl doc gap; benign in practice. QC source: P0 qc1 S-1"
+      },
+      {
+        "id": "R-V1100P0QC3-S001",
+        "title": "Double-read of config.toml in bootstrap write path",
+        "severity": "nit",
+        "decision": "accept",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.100",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-08-v1.100-desktop-clean-state-first-launch/review/qc-consolidated.md",
+        "note": "Once-per-launch; negligible. QC source: P0 qc3 S-001"
+      },
+      {
+        "id": "R-V1100P0QC3-S002",
+        "title": "uuid dep (~150KB) added for 12 hex chars; could use existing fastrand",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.100",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-08-v1.100-desktop-clean-state-first-launch/review/qc-consolidated.md",
+        "note": "Not blocking; defer to a dep-slim pass. QC source: P0 qc3 S-002"
+      },
+      {
+        "id": "R-V1100P0SMOKE-UI-BACK",
+        "title": "Setup wizard Back button position is incorrect (smoke observation)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.101+ (desktop UI polish)",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-08-v1.100-desktop-clean-state-first-launch.md",
+        "note": "Pre-existing UI issue surfaced during V1.100 P0 clean-state smoke. Not introduced by P0 bootstrap work. User requested deferral to future UI iteration."
+      },
+      {
+        "id": "R-V1100P0SMOKE-UI-STEPS",
+        "title": "Setup wizard sidebar Steps indicator displays abnormally (smoke observation)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.101+ (desktop UI polish)",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-08-v1.100-desktop-clean-state-first-launch.md",
+        "note": "Pre-existing UI issue surfaced during V1.100 P0 smoke. Not introduced by P0. Defer to future UI iteration."
+      },
+      {
+        "id": "R-V1100P0SMOKE-UI-POLL",
+        "title": "Daemon status detection interval inconsistent: fast Back-re-entry shows 'running' immediately, but waiting shows delay before 'running' — polling interval / race issue",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.101+ (desktop UI polish)",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-08-v1.100-desktop-clean-state-first-launch.md",
+        "note": "Pre-existing polling/timing issue in setup-step-daemon status subscription. Not a P0 blocker (daemon does reach running). Defer to future UI iteration."
+      },
+      {
+        "id": "R-V1100P0SMOKE-AGENT-SCAN",
+        "title": "Agent selection step does not display locally-available agent CLIs (smoke observation)",
+        "severity": "medium",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.101+ (agent detection)",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-08-v1.100-desktop-clean-state-first-launch.md",
+        "note": "Agent scan/detection in setup wizard does not surface local agent CLIs. Pre-existing; beyond P0 bootstrap scope. Defer to a dedicated agent-detection iteration."
       }
     ]
   }

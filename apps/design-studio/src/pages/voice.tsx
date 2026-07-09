@@ -1,8 +1,6 @@
 import type { ReactNode } from 'react';
 
-import { cn } from '@web-lib/utils';
-
-import { Badge, Card } from '@42ch/nexus-ui';
+import { cn, Badge, Card } from '@42ch/nexus-ui';
 
 /* ------------------------------------------------------------------ */
 /*  Data — Voice & Content specimens from DESIGN.md §Voice & Content   */

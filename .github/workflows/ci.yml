@@ -215,6 +215,14 @@ jobs:
       - name: Run schema consistency checks
         run: bash tooling/check-schema-drift.sh
 
+  ui-guardrails:
+    name: UI guardrails — wrapper drift & Studio boundaries
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - name: Check promoted-wrapper forbidden imports & Studio boundaries
+        run: bash tooling/check-ui-guardrails.sh
+
   rust-tests:
     name: Rust tests (${{ matrix.group }})
     runs-on: ubuntu-latest

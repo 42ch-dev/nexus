@@ -33,9 +33,16 @@ Parent rules: [`../AGENTS.md`](../AGENTS.md) (apps placement), root [`AGENTS.md`
 - `apps/web/src/lib/nexus/**` — no `NexusClient`, no daemon transport
 - `apps/web/src/pages/**` — no product screens
 - `apps/web/src/components/layout/**` — use studio-local Surfaces fixtures instead
-- `apps/web` route definitions, app providers, product hooks, Tauri helpers, and localStorage-backed product state
+- `apps/web/src/hooks/**` — no product hooks
+- `apps/web/src/(providers|contexts)/**` — no app providers
 - `@42ch/nexus-contracts` — no wire DTOs
+- `@42ch/nexus-ui/src/*` — deep import; use public package API only
+- `@tauri-apps/*` — desktop-only; studio is a browser SPA
+- `@web-ui/button`, `@web-ui/badge`, `@web-ui/card` — already-promoted; import from `@42ch/nexus-ui`
 - Inventing design tokens not in root DESIGN pair
+- **Any `@web-ui/*` import without a transitional annotation** (`// transitional — …` or `// @web-ui/<name> — transitional …`)
+
+**Guardrails:** `tooling/check-ui-guardrails.sh` (CI job `ui-guardrails`) enforces these boundaries mechanically.
 
 ## Transitional `apps/web` UI import policy (V1.98 → V1.99)
 
@@ -47,6 +54,7 @@ Gallery **displays** shadcn primitives from `apps/web/src/components/ui/*` witho
 - V1.99 decoupling rule: once a primitive is promoted into `@42ch/nexus-ui`, Studio must import it from `@42ch/nexus-ui`, not `@web-ui/*`
 - Unpromoted primitives may remain on `@web-ui/*` until a later promotion or explicit keep-studio/keep-web decision
 - **Transitional annotation required:** every unpromoted `@web-ui/*` import in Studio source files must carry an inline comment identifying the blocking criteria for promotion (e.g., `// @web-ui/label — transitional until Form Field slice locks label/control/helper/error composition`). This ensures the dependency's temporary status and promotion trigger are visible to future contributors.
+- **Annotation placement:** the `// transitional` marker must appear on the **line containing the module path** (the `'@web-ui/<name>'` line). This is the most robust anchor — the quoted module specifier is a single lexical token that cannot be split across lines, so it covers single-line, multiline, and any `from`/path split. Placing the annotation on the line above the import is not valid under this convention. The guardrail in `tooling/check-ui-guardrails.sh` enforces this by checking the quoted module path line itself for the `transitional` keyword.
 
 ## Dev commands
 

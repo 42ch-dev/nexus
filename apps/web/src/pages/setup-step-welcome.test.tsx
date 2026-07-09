@@ -23,6 +23,7 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
     getWorkspaceRoot: () => Promise.resolve('/tmp/nexus'),
     pickDirectory: () => Promise.resolve(null),
     setWorkspacePath: () => Promise.resolve(),
+    ensureSetupBootstrap: () => Promise.resolve({ creator_id: 'ctr_local1234567890ab', already_bootstrapped: false }),
     ...overrides,
   };
 }
@@ -217,6 +218,88 @@ describe('SetupStepWelcome', () => {
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() => expect(screen.getByText('permission denied')).toBeInTheDocument());
 
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await waitFor(() => expect(onNext).toHaveBeenCalled());
+  });
+
+  it('calls ensureSetupBootstrap after workspace persist and advances on success', async () => {
+    const user = userEvent.setup();
+    const onNext = vi.fn();
+    const setWorkspacePath = vi.fn(() => Promise.resolve());
+    const ensureSetupBootstrap = vi.fn(() =>
+      Promise.resolve({ creator_id: 'ctr_local1234567890ab', already_bootstrapped: false }),
+    );
+    const stalePath = '/Users/x/Documents/nexus42/default';
+
+    renderHarness(makeState({ workspaceRoot: stalePath }), {
+      desktop: makeDesktop({
+        getWorkspaceRoot: () => Promise.resolve(stalePath),
+        setWorkspacePath,
+        ensureSetupBootstrap,
+      }),
+      onNext,
+    });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() => expect(setWorkspacePath).toHaveBeenCalledWith(stalePath));
+    await waitFor(() => expect(ensureSetupBootstrap).toHaveBeenCalled());
+    await waitFor(() => expect(onNext).toHaveBeenCalled());
+    // Bootstrap runs after workspace persist: verify call order.
+    const setCallOrder = setWorkspacePath.mock.invocationCallOrder[0];
+    const bootstrapCallOrder = ensureSetupBootstrap.mock.invocationCallOrder[0];
+    expect(setCallOrder).toBeLessThan(bootstrapCallOrder);
+  });
+
+  it('surfaces bootstrap error and stays on the welcome step', async () => {
+    const user = userEvent.setup();
+    const onNext = vi.fn();
+    const ensureSetupBootstrap = vi.fn(() => Promise.reject(new Error('config write failed')));
+
+    renderHarness(makeState({ workspaceRoot: '/custom/nexus' }), {
+      desktop: makeDesktop({ ensureSetupBootstrap }),
+      onNext,
+    });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() => expect(screen.getByText(/config write failed/)).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/Try again or reset/)).toBeInTheDocument());
+    expect(onNext).not.toHaveBeenCalled();
+  });
+
+  it('retries bootstrap after failure and advances on success', async () => {
+    const user = userEvent.setup();
+    const onNext = vi.fn();
+    const ensureSetupBootstrap = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('config write failed'))
+      .mockResolvedValueOnce({ creator_id: 'ctr_local1234567890ab', already_bootstrapped: false });
+
+    renderHarness(makeState({ workspaceRoot: '/custom/nexus' }), {
+      desktop: makeDesktop({ ensureSetupBootstrap }),
+      onNext,
+    });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await waitFor(() => expect(screen.getByText(/config write failed/)).toBeInTheDocument());
+
+    // After error, loading resets and Continue is re-enabled.
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await waitFor(() => expect(onNext).toHaveBeenCalled());
+  });
+
+  it('skips bootstrap in browser mode and advances directly', async () => {
+    const user = userEvent.setup();
+    const onNext = vi.fn();
+
+    renderHarness(makeState({ workspaceRoot: '/tmp/nexus' }), { onNext });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() => expect(onNext).toHaveBeenCalled());
   });

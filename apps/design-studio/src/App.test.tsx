@@ -228,3 +228,67 @@ describe('Surfaces page — daemon status strip', () => {
     expect(screen.getByText('healthy')).toBeInTheDocument();
   });
 });
+
+/* ---- components page — form-field composition fixture (P2 T3) ----------- */
+
+describe('Components page — form-field composition fixture', () => {
+  beforeEach(() => {
+    mockMatchMedia(false);
+    renderStudio('/components');
+  });
+
+  it('renders the form-field composition section heading', () => {
+    expect(
+      screen.getByRole('heading', { name: 'Form Field (composition)' }),
+    ).toBeInTheDocument();
+  });
+
+  it('demonstrates label/control association via htmlFor/id', () => {
+    const label = screen.getByText('Work title');
+    expect(label.tagName).toBe('LABEL');
+    expect(label).toHaveAttribute('for', 'ff-name');
+
+    const input = screen.getByPlaceholderText('Enter work title…');
+    expect(input).toHaveAttribute('id', 'ff-name');
+    expect(input).toHaveAttribute('aria-describedby');
+  });
+
+  it('renders helper text with app-owned id', () => {
+    const helper = screen.getByText('Must be between 3 and 50 characters.');
+    expect(helper).toHaveAttribute('id', 'ff-name-helper');
+  });
+
+  it('does not show error message initially', () => {
+    // ErrorState from StatesSection also has role="alert" — check specifically
+    // that our form-field error element (ff-name-error) is absent.
+    expect(screen.queryByText('Name is required.')).not.toBeInTheDocument();
+  });
+
+  it('shows error message with role="alert" after triggering error', () => {
+    const btn = screen.getByRole('button', { name: 'Trigger error' });
+    act(() => btn.click());
+
+    // There are two role="alert" on the page (ErrorState + our triggered error).
+    // Query specifically for our error element by id.
+    const error = document.getElementById('ff-name-error');
+    expect(error).toBeInTheDocument();
+    expect(error).toHaveTextContent('Name is required.');
+    expect(error).toHaveAttribute('role', 'alert');
+  });
+
+  it('renders required field indicator (*)', () => {
+    expect(screen.getByText('*')).toBeInTheDocument();
+    // The required input should have the required attribute
+    const emailInput = screen.getByPlaceholderText('you@example.com');
+    expect(emailInput).toBeRequired();
+  });
+
+  it('renders optional field indicator', () => {
+    expect(screen.getByText('(optional)')).toBeInTheDocument();
+  });
+
+  it('renders disabled textarea', () => {
+    const bio = screen.getByPlaceholderText('Tell us about yourself…');
+    expect(bio).toBeDisabled();
+  });
+});

@@ -28,6 +28,8 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
     getWorkspaceRoot: () => Promise.resolve('/tmp/nexus'),
     pickDirectory: () => Promise.resolve(null),
     setWorkspacePath: () => Promise.resolve(),
+    ensureSetupBootstrap: () =>
+      Promise.resolve({ creator_id: 'ctr_local1234567890ab', already_bootstrapped: false }),
     ...overrides,
   };
 }
@@ -251,24 +253,32 @@ describe('SetupStepDaemon', () => {
     await waitFor(() => expect(screen.getByText('Daemon is running.')).toBeInTheDocument());
   });
 
-  it('clears error and re-subscribes when retry is clicked', async () => {
-    const user = userEvent.setup();
+  it('recovers via auto-start when mount status is error instead of surfacing the detail', async () => {
     const startDaemon = vi.fn(() => Promise.resolve());
     const getDaemonStatus = vi
       .fn()
-      .mockResolvedValueOnce({ state: 'error', port: 8420, detail: 'port conflict' } as DaemonStatus)
-      .mockResolvedValueOnce({ state: 'running', port: 8420, version: 'test' } as DaemonStatus);
-    const onDaemonStatusChanged = vi.fn(() => Promise.resolve(() => {}));
+      .mockResolvedValueOnce({ state: 'error', port: 8420, detail: 'port conflict' } as DaemonStatus);
+    let emitStatus: (status: DaemonStatus) => void;
+    const onDaemonStatusChanged = vi.fn((callback: (status: DaemonStatus) => void) => {
+      emitStatus = callback;
+      return Promise.resolve(() => {});
+    });
 
     renderInApp(<SetupStepDaemon onNext={() => {}} onBack={() => {}} />, {
       client: makeClient(),
-      desktop: makeDesktop({ getDaemonStatus, onDaemonStatusChanged, startDaemon }),
+      desktop: makeDesktop({ startDaemon, getDaemonStatus, onDaemonStatusChanged }),
       initialRouterEntries: ['/setup'],
     });
 
-    await waitFor(() => expect(screen.getByText('port conflict')).toBeInTheDocument());
-    await user.click(screen.getByRole('button', { name: 'Retry' }));
     await waitFor(() => expect(startDaemon).toHaveBeenCalled());
+    // Error detail should NOT be surfaced — auto-start handled the recovery.
+    expect(screen.queryByText('port conflict')).not.toBeInTheDocument();
+    expect(screen.getByText('Starting daemon…')).toBeInTheDocument();
+
+    // Daemon recovers after auto-start.
+    await waitFor(() => {
+      emitStatus!({ state: 'running', port: 8420, version: 'test' });
+    });
     await waitFor(() => expect(screen.getByText('Daemon is running.')).toBeInTheDocument());
   });
 
@@ -317,5 +327,91 @@ describe('SetupStepDaemon', () => {
 
     await waitFor(() => expect(screen.getByText(/Daemon did not start/)).toBeInTheDocument());
     expect(screen.getByText(/migration 202606070001 was previously applied/)).toBeInTheDocument();
+  });
+
+  it('auto-starts the daemon on clean-state when status is stopped', async () => {
+    const startDaemon = vi.fn(() => Promise.resolve());
+    const getDaemonStatus = vi
+      .fn()
+      .mockResolvedValueOnce({ state: 'stopped', port: 8420 } as DaemonStatus)
+      .mockResolvedValueOnce({ state: 'starting', port: 8420 } as DaemonStatus);
+    let emitStatus: (status: DaemonStatus) => void;
+    const onDaemonStatusChanged = vi.fn((callback: (status: DaemonStatus) => void) => {
+      emitStatus = callback;
+      return Promise.resolve(() => {});
+    });
+
+    renderInApp(<SetupStepDaemon onNext={() => {}} onBack={() => {}} />, {
+      client: makeClient(),
+      desktop: makeDesktop({ startDaemon, getDaemonStatus, onDaemonStatusChanged }),
+      initialRouterEntries: ['/setup'],
+    });
+
+    await waitFor(() => expect(startDaemon).toHaveBeenCalled());
+    // Should show loading state, not the stopped error.
+    expect(screen.getByText('Starting daemon…')).toBeInTheDocument();
+
+    // Simulate daemon reaching running after auto-start.
+    await waitFor(() => {
+      emitStatus!({ state: 'running', port: 8420, version: 'test' });
+    });
+    await waitFor(() => expect(screen.getByText('Daemon is running.')).toBeInTheDocument());
+  });
+
+  it('auto-starts the daemon on clean-state when status is error', async () => {
+    const startDaemon = vi.fn(() => Promise.resolve());
+    const getDaemonStatus = vi
+      .fn()
+      .mockResolvedValueOnce({
+        state: 'error',
+        port: 8420,
+        detail: 'Daemon did not start: port conflict',
+      } as DaemonStatus)
+      .mockResolvedValueOnce({ state: 'starting', port: 8420 } as DaemonStatus);
+    let emitStatus: (status: DaemonStatus) => void;
+    const onDaemonStatusChanged = vi.fn((callback: (status: DaemonStatus) => void) => {
+      emitStatus = callback;
+      return Promise.resolve(() => {});
+    });
+
+    renderInApp(<SetupStepDaemon onNext={() => {}} onBack={() => {}} />, {
+      client: makeClient(),
+      desktop: makeDesktop({ startDaemon, getDaemonStatus, onDaemonStatusChanged }),
+      initialRouterEntries: ['/setup'],
+    });
+
+    await waitFor(() => expect(startDaemon).toHaveBeenCalled());
+    // Should show loading state, not the error detail.
+    expect(screen.getByText('Starting daemon…')).toBeInTheDocument();
+    expect(screen.queryByText('port conflict')).not.toBeInTheDocument();
+
+    // Simulate daemon reaching running after auto-start.
+    await waitFor(() => {
+      emitStatus!({ state: 'running', port: 8420, version: 'test' });
+    });
+    await waitFor(() => expect(screen.getByText('Daemon is running.')).toBeInTheDocument());
+  });
+
+  it('surfaces auto-start failure immediately when startDaemon throws', async () => {
+    const startDaemon = vi.fn(() => Promise.reject(new Error('sidecar launch failed')));
+    const getDaemonStatus = vi
+      .fn()
+      .mockResolvedValueOnce({ state: 'stopped', port: 8420 } as DaemonStatus);
+    const onDaemonStatusChanged = vi.fn(() => Promise.resolve(() => {}));
+
+    renderInApp(<SetupStepDaemon onNext={() => {}} onBack={() => {}} />, {
+      client: makeClient(),
+      desktop: makeDesktop({ startDaemon, getDaemonStatus, onDaemonStatusChanged }),
+      initialRouterEntries: ['/setup'],
+    });
+
+    await waitFor(() => expect(startDaemon).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(
+        screen.getByText(/Could not start the local service.*sidecar launch failed/),
+      ).toBeInTheDocument(),
+    );
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    expect(screen.queryByText('Starting daemon…')).not.toBeInTheDocument();
   });
 });
