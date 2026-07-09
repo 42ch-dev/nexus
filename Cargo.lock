@@ -2739,6 +2739,7 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "uuid",
+ "which 8.0.2",
  "x509-parser",
 ]
 

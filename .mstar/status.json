@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-07-09T11:40:00+0800",
+  "updated_at": "2026-07-09T12:05:00+0800",
   "plans": [
     {
       "id": "2026-07-08-v1.99-prepare-visual-system-deepening",
@@ -267,7 +267,7 @@
       "id": "2026-07-09-v1.101-agent-detection-picker",
       "title": "P0 — Agent Detection & AgentPicker",
       "file": ".mstar/plans/2026-07-09-v1.101-agent-detection-picker.md",
-      "status": "Todo",
+      "status": "InProgress",
       "owner": "@project-manager",
       "agents": [
         "@product-manager",
@@ -277,7 +277,7 @@
         "@qc-specialist",
         "@qa-engineer"
       ],
-      "progress": 0,
+      "progress": 5,
       "tags": [
         "V1.101",
         "desktop",
@@ -300,7 +300,8 @@
         "primary_spec": ".mstar/iterations/v1.101/specs/agent-picker-and-detection.md",
         "execution_mode": "sdd",
         "qa_gate": "mandatory",
-        "stretch": false
+        "stretch": false,
+        "working_branch": "plan/v1.101-p0-agent-detection-picker"
       }
     },
     {
@@ -430,7 +431,7 @@
         "2026-07-07-v1.97-desktop-first-launch-hardening": 5
       }
     },
-    "updated_at": "2026-07-09T11:40:00+0800"
+    "updated_at": "2026-07-09T12:05:00+0800"
   },
   "residual_findings": {
     "2026-07-05-v1.91-findings-batch": [
