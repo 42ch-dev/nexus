@@ -16,7 +16,7 @@ export function SettingsSetupSection() {
       <RotateCcw className="size-8 text-gray-500" aria-hidden="true" />
       <p className="text-heading-16 font-heading text-gray-1000">Setup</p>
       <p className="text-copy-13 text-gray-700 max-w-sm">
-        Setup options will appear here.
+        Re-run Setup will appear here (P3).
       </p>
     </div>
   );

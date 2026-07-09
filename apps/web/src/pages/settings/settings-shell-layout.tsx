@@ -37,7 +37,8 @@ export function SettingsShellLayout() {
       data-testid="settings-shell"
     >
       <div className="flex flex-col gap-2">
-        <h1 className="text-heading-24 font-heading text-gray-1000">Settings</h1>
+        {/* Visual page title; document h1 lives in RootLayout Header. */}
+        <h2 className="text-heading-24 font-heading text-gray-1000">Settings</h2>
         <p className="text-copy-14 text-gray-900">{SHELL_HELPER}</p>
       </div>
 

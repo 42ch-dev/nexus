@@ -136,7 +136,7 @@ describe('SettingsAgentSection', () => {
     expect(screen.getByTestId('settings-shell')).toBeInTheDocument();
     expect(screen.getByTestId('settings-agent-section')).toBeInTheDocument();
     expect(
-      screen.getByRole('heading', { name: 'Settings', level: 1 }),
+      screen.getByRole('heading', { name: 'Settings', level: 2 }),
     ).toBeInTheDocument();
     expect(screen.getByTestId('settings-host-picker-region')).toBeInTheDocument();
     expect(screen.queryByTestId('wizard-cta-row')).not.toBeInTheDocument();
@@ -354,7 +354,7 @@ describe('Settings shell routes', () => {
     expect(
       within(screen.getByTestId('settings-shell')).getByRole('heading', {
         name: 'Settings',
-        level: 1,
+        level: 2,
       }),
     ).toBeInTheDocument();
   });
