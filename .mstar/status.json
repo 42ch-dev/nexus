@@ -6,7 +6,7 @@
       "id": "2026-07-09-v1.103-settings-agent-preselect",
       "title": "P1 — Settings Agent Section + getAgentProfile",
       "file": ".mstar/plans/2026-07-09-v1.103-settings-agent-preselect.md",
-      "status": "InProgress",
+      "status": "InReview",
       "owner": "@project-manager",
       "agents": [
         "@frontend-dev",
@@ -14,7 +14,7 @@
         "@qc-specialist",
         "@qa-engineer"
       ],
-      "progress": 5,
+      "progress": 92,
       "tags": [
         "V1.103",
         "settings",
@@ -23,7 +23,7 @@
       ],
       "created_at": "2026-07-09",
       "updated_at": "2026-07-09",
-      "notes": "Must. Agent section default landing + Tauri-only getAgentProfile preselect (G1).",
+      "notes": "QC tri Approve after fix-wave ba5a9686. Awaiting QA.",
       "metadata": {
         "priority": "high",
         "tier": "must",
@@ -220,7 +220,7 @@
         "2026-07-09-v1.102-settings-shell": 5
       }
     },
-    "updated_at": "2026-07-09T19:00:00+0800"
+    "updated_at": "2026-07-09T19:40:00+0800"
   },
   "residual_findings": {
     "2026-07-05-v1.91-findings-batch": [
@@ -975,6 +975,17 @@
         "summary": "Assert getByRole navigation Settings sections",
         "target": "accept",
         "source": "qc2"
+      }
+    ],
+    "2026-07-09-v1.103-settings-agent-preselect": [
+      {
+        "id": "R-V1103P1QC-S001",
+        "severity": "suggestion",
+        "lifecycle": "open",
+        "title": "Optional extract shared agent mapping helpers",
+        "summary": "qc1 F-003 shared helper extract non-blocking",
+        "target": "accept",
+        "source": "qc1"
       }
     ]
   }
