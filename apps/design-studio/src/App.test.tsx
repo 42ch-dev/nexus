@@ -12,7 +12,7 @@
  * swatch or component variant. Follow apps/web conventions: vitest + jsdom +
  * @testing-library/react.
  */
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -241,8 +241,9 @@ describe('Surfaces page — app shell fixture', () => {
   });
 
   it('renders Creator and Orchestrator tabs', () => {
-    expect(screen.getByText('Creator')).toBeInTheDocument();
-    expect(screen.getByText('Orchestrator')).toBeInTheDocument();
+    // App shell + Settings host fixtures both stub Creator/Orchestrator tabs.
+    expect(screen.getAllByText('Creator').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('Orchestrator').length).toBeGreaterThanOrEqual(1);
   });
 
   it('renders Works nav group and All Works child', () => {
@@ -252,12 +253,12 @@ describe('Surfaces page — app shell fixture', () => {
   });
 
   it('renders Worlds and Findings nav groups', () => {
-    expect(screen.getByText('Worlds')).toBeInTheDocument();
-    expect(screen.getByText('Findings')).toBeInTheDocument();
+    expect(screen.getAllByText('Worlds').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('Findings').length).toBeGreaterThanOrEqual(1);
   });
 
   it('renders the profile footer with creator name', () => {
-    expect(screen.getByText('Local Creator')).toBeInTheDocument();
+    expect(screen.getAllByText('Local Creator').length).toBeGreaterThanOrEqual(1);
   });
 
   it('renders add-profile button with accessible label', () => {
@@ -337,6 +338,58 @@ describe('Surfaces page — AgentPicker fixtures', () => {
       .getAllByTestId('agent-card-select-claude-code')
       .filter((el) => el.getAttribute('aria-pressed') === 'true');
     expect(pressed.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+/* ---- surfaces page — Settings thin host (V1.102 P1 Task 2) -------------- */
+
+describe('Surfaces page — Settings thin host fixtures', () => {
+  beforeEach(() => {
+    mockMatchMedia(false);
+    renderStudio('/surfaces');
+  });
+
+  it('renders the Settings thin host section heading', () => {
+    expect(
+      screen.getByRole('heading', { name: 'Settings — Thin host' }),
+    ).toBeInTheDocument();
+  });
+
+  it('renders shell chrome with footer utility Settings link', () => {
+    expect(screen.getByTestId('settings-shell-chrome')).toBeInTheDocument();
+    const link = screen.getByTestId('settings-footer-utility-link');
+    expect(link).toHaveTextContent('Settings');
+    expect(link).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('renders thin host page chrome (title + helper, not wizard CTAs)', () => {
+    const hostRoot = screen.getByTestId('settings-host-fixtures');
+    const pages = within(hostRoot).getAllByTestId('settings-host-page-chrome');
+    expect(pages.length).toBeGreaterThanOrEqual(2);
+    expect(
+      within(hostRoot).getAllByRole('heading', { name: 'Settings', level: 2 })
+        .length,
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      within(hostRoot).getAllByText(
+        /Change the local agent Nexus uses after setup/i,
+      ).length,
+    ).toBeGreaterThanOrEqual(2);
+    // Thin host must not include wizard Back/Continue chrome (wizard CTAs live
+    // in the separate Setup — Wizard chrome section on the same Surfaces page).
+    expect(
+      within(hostRoot).queryByTestId('wizard-cta-row'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('mounts AgentPicker with fixture data inside the host', () => {
+    const regions = screen.getAllByTestId('settings-host-picker-region');
+    expect(regions.length).toBeGreaterThanOrEqual(1);
+    const cards = screen.getAllByTestId('agent-card-claude-code');
+    expect(cards.length).toBeGreaterThanOrEqual(1);
+    expect(
+      screen.getAllByTestId('agent-picker-custom-launch').length,
+    ).toBeGreaterThanOrEqual(1);
   });
 });
 

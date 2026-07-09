@@ -13,6 +13,7 @@ import { MemoryPage } from '@/pages/memory-page';
 import { NotFoundPage } from '@/pages/not-found-page';
 import { SchedulePage } from '@/pages/schedule-page';
 import { SessionsPage } from '@/pages/sessions-page';
+import { SettingsPage } from '@/pages/settings-page';
 import { WorkDetailPage } from '@/pages/work-detail-page';
 import { WorksPage } from '@/pages/works-page';
 import { ConnectDaemonPage } from '@/pages/connect-daemon-page';
@@ -79,6 +80,7 @@ function AppRoutes() {
         <Route path="capabilities" element={<CapabilitiesPage />} />
         <Route path="findings" element={<FindingsPage />} />
         <Route path="memory" element={<MemoryPage />} />
+        <Route path="settings" element={<SettingsPage />} />
         <Route path="strategies" element={<StrategiesPage />} />
         <Route
           path="strategies/:presetId"

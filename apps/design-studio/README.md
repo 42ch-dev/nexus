@@ -21,7 +21,7 @@ on 5173).
 | **Brand VI** | `/brand` | All four `@42ch/nexus-ui` logo variants + `NexusMark` + theme.css swatches + clear-space guidance |
 | **Components** | `/components` | All 11 `apps/web/src/components/ui/*` primitives with variant/state matrices — promoted primitives (Button, Badge, Card, Input, Label, Textarea, Select) imported from `@42ch/nexus-ui`; unpromoted remain on `@web-ui/*` (Dialog, States, Table, Tabs) |
 | **Voice & Content** | `/voice` | Labeled writing-pattern specimens from `DESIGN.md` §Voice & Content |
-| **Surfaces** | `/surfaces` | Setup wizard step card + App shell chrome fixtures (studio-local; no daemon data) |
+| **Surfaces** | `/surfaces` | Setup wizard, App shell, AgentPicker, Settings thin host fixtures (studio-local; no daemon data) |
 
 Every value is driven by the repo-root `DESIGN.md` / `DESIGN.dark.md` SSOT.
 Edit those files in your IDE, then refresh the studio to see the effect.

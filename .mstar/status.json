@@ -454,7 +454,7 @@
       "id": "2026-07-09-v1.102-settings-shell",
       "title": "P1 — thin Settings host (DF-70 Slice A)",
       "file": ".mstar/plans/2026-07-09-v1.102-settings-shell.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@product-manager",
@@ -464,7 +464,7 @@
         "@qc-specialist",
         "@qa-engineer"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "V1.102",
         "settings",
@@ -474,7 +474,7 @@
       ],
       "created_at": "2026-07-09",
       "updated_at": "2026-07-09",
-      "notes": "Must. Thin Settings host mounting app-shared AgentPicker.",
+      "notes": "Done — QC Approve w/ residuals; QA Pass w/ residuals; merge to iteration/v1.102",
       "metadata": {
         "priority": "high",
         "tier": "must",
@@ -489,7 +489,9 @@
         "primary_spec": ".mstar/iterations/v1.102/specs/settings-thin-host.md",
         "execution_mode": "sdd",
         "qa_gate": "mandatory",
-        "wire_contracts_changed": false
+        "wire_contracts_changed": false,
+        "working_branch": "feat/v1.102-settings-shell",
+        "sdd_dir": ".mstar/sdd/2026-07-09-v1.102-settings-shell"
       }
     },
     {
@@ -1214,6 +1216,48 @@
         "summary": "Optional README note for dark solid AA text",
         "source": "qc2",
         "plan_id": "2026-07-09-v1.102-badge-soft-solid"
+      }
+    ],
+    "2026-07-09-v1.102-settings-shell": [
+      {
+        "id": "R-V1102P1QC-S001",
+        "severity": "nit",
+        "lifecycle": "open",
+        "summary": "Mobile nav assert specificity",
+        "source": "qc-tri",
+        "plan_id": "2026-07-09-v1.102-settings-shell"
+      },
+      {
+        "id": "R-V1102P1QC-S002",
+        "severity": "nit",
+        "lifecycle": "open",
+        "summary": "Custom-launch persist test optional",
+        "source": "qc-tri",
+        "plan_id": "2026-07-09-v1.102-settings-shell"
+      },
+      {
+        "id": "R-V1102P1QC-S003",
+        "severity": "nit",
+        "lifecycle": "open",
+        "summary": "Settings reject-path test optional",
+        "source": "qc-tri",
+        "plan_id": "2026-07-09-v1.102-settings-shell"
+      },
+      {
+        "id": "R-V1102P1QC-S004",
+        "severity": "nit",
+        "lifecycle": "open",
+        "summary": "getAgentProfile preselect deferred per spec",
+        "source": "qc-tri",
+        "plan_id": "2026-07-09-v1.102-settings-shell"
+      },
+      {
+        "id": "R-V1102P1QC-S005",
+        "severity": "nit",
+        "lifecycle": "open",
+        "summary": "Mapping extract / Studio Save CTA polish optional",
+        "source": "qc-tri",
+        "plan_id": "2026-07-09-v1.102-settings-shell"
       }
     ]
   }

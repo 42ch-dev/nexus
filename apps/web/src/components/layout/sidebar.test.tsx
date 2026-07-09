@@ -106,4 +106,23 @@ describe('Sidebar', () => {
       expect(screen.getByRole('toolbar', { name: 'Profiles' })).toBeInTheDocument(),
     );
   });
+
+  it('exposes Settings as a footer utility link above profiles', async () => {
+    useHandlers(
+      http.get('/v1/daemon/creators', () =>
+        HttpResponse.json({
+          items: [{ creator_id: 'creator-a', display_name: 'Alice' }],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+    );
+
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+
+    const link = screen.getByTestId('settings-footer-utility-link');
+    expect(link).toHaveAttribute('href', '/settings');
+    expect(link).toHaveTextContent('Settings');
+    // Settings stays visible on Creator tab (not tab-scoped).
+    expect(screen.getByRole('tab', { name: 'Creator', selected: true })).toBeInTheDocument();
+  });
 });

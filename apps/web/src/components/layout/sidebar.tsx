@@ -8,6 +8,7 @@ import {
   ChevronRight,
   Layers,
   ListChecks,
+  Settings,
   Sparkles,
   type LucideIcon,
 } from 'lucide-react';
@@ -107,7 +108,33 @@ export function Sidebar() {
         ))}
       </ul>
 
-      <div className="mt-auto border-t border-gray-alpha-400 pt-3">
+      <div className="mt-auto border-t border-gray-alpha-400 pt-3 flex flex-col gap-2">
+        {/* Footer utility — Settings is cross-cutting (not tab-scoped). */}
+        <NavLink
+          to="/settings"
+          data-testid="settings-footer-utility-link"
+          className={({ isActive }) =>
+            cn(
+              'group relative flex h-9 items-center gap-2 rounded-control px-3 text-label-14 transition-colors duration-state ease-standard',
+              isActive
+                ? 'bg-gray-alpha-100 text-gray-1000'
+                : 'text-gray-800 hover:bg-gray-alpha-100 hover:text-gray-1000',
+            )
+          }
+        >
+          {({ isActive }) => (
+            <>
+              {isActive && (
+                <span
+                  aria-hidden
+                  className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-pill bg-blue-700"
+                />
+              )}
+              <Settings className="h-4 w-4 shrink-0" aria-hidden />
+              <span>Settings</span>
+            </>
+          )}
+        </NavLink>
         <FooterProfiles />
       </div>
     </nav>
