@@ -114,7 +114,7 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | [v1.101-delivery-compass.md](v1.101-delivery-compass.md) | V1.101 | **completed** (2026-07-09) — Desktop setup polish + AgentPicker (Must) + Select stretch shipped. Studio-first; Settings shell remains DF-70. Integration `iteration/v1.101` → `main`. |
 | [v1.102-delivery-compass.md](v1.102-delivery-compass.md) | V1.102 | **completed** (2026-07-09) — Badge soft/solid + thin Settings host + Surfaces polish Stretch. Integration `iteration/v1.102` → PR `main`. |
 | [v1.103-delivery-compass.md](v1.103-delivery-compass.md) | V1.103 | **completed** (2026-07-09) — Settings shell deepening Must (P0–P3); Stretch Workspace deferred → V1.104+. Integration `iteration/v1.103` → `main`. |
-| [v1.105-delivery-compass.md](v1.105-delivery-compass.md) | V1.105 | **locked** (2026-07-10) — First-launch wizard reshape: app-level Daemon gate + Agent→Workspace→Done + portrait shell. Integration `iteration/v1.105` → `main`. |
+| [v1.105-delivery-compass.md](v1.105-delivery-compass.md) | V1.105 | **completed** (2026-07-10) — First-launch wizard reshape: app-level Daemon gate + Agent→Workspace→Done + portrait shell. Integration `iteration/v1.105` → `main`. |
 
 ### Active iteration workspaces
 

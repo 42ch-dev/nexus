@@ -1,16 +1,16 @@
 ---
 module: apps/desktop/src-tauri + apps/web (setup-gate, daemon-status-bar, main-banner)
 date: 2026-07-06
-last_updated: 2026-07-09
+last_updated: 2026-07-10
 problem_type: architecture-pattern
 category: architecture-patterns
 severity: medium
-plan_id: V1.94-P-last (compound of desktop onboarding & IA pass); V1.96 refinements from 2026-07-07-v1.96-implement-rework; V1.97 refinements from 2026-07-07-v1.97-desktop-first-launch-hardening; V1.101 Class B PATH enrichment
-tags: [daemon-runtime, sidecar, health-probe, desktop-shell, setup-wizard, daemon-status-bar, gate, two-consumer-pattern, late-subscription-race, stderr-capture, bounded-timeout, tauri-v2-sidecar-resolution, stopped-initial-state, attach-without-ownership, path-enrichment, agent-scan]
+plan_id: V1.94-P-last (compound of desktop onboarding & IA pass); V1.96 refinements from 2026-07-07-v1.96-implement-rework; V1.97 refinements from 2026-07-07-v1.97-desktop-first-launch-hardening; V1.101 Class B PATH enrichment; V1.105 DaemonLaunchGate + D2 always-start
+tags: [daemon-runtime, sidecar, health-probe, desktop-shell, setup-wizard, daemon-status-bar, gate, two-consumer-pattern, late-subscription-race, stderr-capture, bounded-timeout, tauri-v2-sidecar-resolution, stopped-initial-state, attach-without-ownership, path-enrichment, agent-scan, daemon-launch-gate, d2-always-start]
 applies_when: gating main-UI entry on daemon readiness; designing any "wait for service X before entering app" UX; wiring observers to a process lifecycle event stream that may fire before subscription; surfacing supervised-process crash reasons to the user
 ---
 
-# Daemon-Ready Gate Pattern (Per-Launch + Setup Wizard Step 2)
+# Daemon-Ready Gate Pattern (App-Level Launch Gate)
 
 **Track**: Knowledge (durable guidance distilled from V1.94 Desktop App Onboarding & IA Pass).
 
@@ -18,10 +18,11 @@ applies_when: gating main-UI entry on daemon readiness; designing any "wait for 
 
 V1.66 (Tauri Desktop Shell) shipped a `SidecarManager` that auto-starts the bundled `nexus42` daemon and exposes a single lifecycle event stream `onDaemonStatusChanged` carrying `DaemonStatus { state, version, port, detail }`. States: `starting → running → degraded → stopped → error`.
 
-V1.94 introduced **two distinct consumers** of that single event stream:
+V1.94 introduced **two distinct consumers** of that single event stream (wizard step + per-launch splash). **V1.105 collapses wait ownership into one outer app-level gate:**
 
-1. **Setup Wizard Step 2** (first-launch only) — the wizard's daemon-ready step observes the event until `state: "running"`, then advances to step 3 (ACP Agent Detection). Failure paths (`error`, timeout) surface an actionable CTA inside the wizard.
-2. **Per-launch daemon-ready splash** (every launch, including returning users) — a brief splash that gates main-UI entry until `state: "running"`. Returning users (`setup_completed === true`) see this splash instead of the wizard.
+1. **`DaemonLaunchGate`** (every launch) — fullscreen splash until Ready; wraps **all** routes including `/setup`.
+2. **`SetupGate`** (marker only) — after Ready, routes incomplete setup to `/setup` vs main UI. **No splash.**
+3. **Setup wizard** — Agent → Workspace → Done only; **no** Daemon wizard step (`setup-step-daemon.tsx` deleted).
 
 The naive implementation would create two independent health-probe polls or two Tauri commands ("is the daemon ready yet?"). Both are wrong: they compete with the existing `SidecarManager` state machine, can deadlock on the 15s `HEALTH_START_TIMEOUT` boundary, and drift from the source of truth.
 
@@ -51,10 +52,9 @@ The naive implementation would create two independent health-probe polls or two 
 
 ## Examples
 
-- **Setup Wizard Step 2** (`apps/web/src/pages/setup-step-daemon.tsx`): subscribes via `useDaemonStatus()`; renders "Starting daemon…" while `state === "starting"`; advances on `"running"`; surfaces error CTA on `"error"` or after 15s.
-
-  > **V1.96 update**: the wizard step 2 now uses a mount-time state probe (`getDaemonStatus()` before subscribing), an explicit `'starting'` branch, and a 25s hard timeout (not 15s). The 15s timeout is historical (V1.94 original). See `desktop-shell.md` §13.7.5 for current behavior.
-- **Per-launch splash** (`apps/web/src/components/setup/setup-gate.tsx`): returning-user path; same subscription; brief splash → main UI on `"running"`.
+- **Outer launch gate (V1.105 current)** (`apps/web/src/components/setup/daemon-launch-gate.tsx` + `daemon-ready-splash.tsx`): mount-time `getDaemonStatus` + `onDaemonStatusChanged`; 25s timeout; retry = reload; reset = `resetLocalDatabase` + reload; **no** happy-path `startDaemon` (D2 always-starts in Tauri `.setup()`).
+- **Marker routing (V1.105)** (`apps/web/src/components/setup/setup-gate.tsx`): after outer gate Ready — `!setup_completed` → `/setup`; else main shell. No splash/subscribe.
+- **Historical — Setup Wizard Step 2** (`setup-step-daemon.tsx`, deleted in V1.105 P1): previously owned wait+`startDaemon` inside the wizard. Do not reintroduce.
 - **Crash banner** (`apps/web/src/components/layout/main-banner.tsx`): long-running-session consumer; appears when state degrades from `"running"` to `"degraded"`/`"error"`/`"stopped"`.
 
 ## Anti-patterns
@@ -163,22 +163,25 @@ The attach path (daemon already running on the resolved port, e.g. user ran `nex
 
 Rules 9 + 10 fix the supervisor state machine so a real spawn is actually attempted. Rule 11 fixes the framework-contract misuse so the spawn can actually resolve the binary. Rule 12 keeps attach honest. Together they make the desktop clean-state first-launch path **reachable** — before V1.97 it was silently broken at two layers (state machine never spawned, and even if it had, the sidecar name would not resolve). The deeper remaining gap (the daemon requires an active creator to boot, and the desktop wizard does not bootstrap one before the `.setup()` auto-start — see residual `R-V197-SMOKE-CLEAN-STATE`) is a product-architecture deferral tracked for V1.98, not a state-machine or shell-contract rule.
 
-### Rule 13 (V1.100): gate `.setup()` auto-start behind `setup_completed`; bootstrap creator/workspace via Tauri IPC BEFORE daemon start
+### Rule 13 (V1.100, historical): gate `.setup()` auto-start behind `setup_completed`
 
-> **Superseded by V1.105 D2 (§13.10.1 in `desktop-shell.md`).** Sidecar auto-start is now **unconditional** on every launch; bootstrap runs on Workspace **Continue** in the three-step wizard. Full knowledge rewrite at iteration-close compound — do not treat Rule 13 as current product behavior.
+> **Superseded by Rule 15 (V1.105 D2).** Kept for archaeology only.
 
-V1.97 made the daemon reachable but exposed the next clean-state blocker: `.setup()` unconditionally auto-started the sidecar, but on a fresh `~/.nexus42/` there is no `active_creator_id`, so the daemon exits `No active creator`. The wizard had no creator-bootstrap step.
+### Rule 15 (V1.105): always auto-start sidecar; outer `DaemonLaunchGate`; bootstrap on Workspace Continue
 
-**Pattern:** gate the launch-time auto-start on setup completion; let the wizard persist workspace + bootstrap minimum creator/workspace state through a **desktop-only Tauri IPC command** (`ensure_setup_bootstrap`), THEN start the daemon.
+| Lock | Value |
+|------|-------|
+| Auto-start | Tauri `.setup()` **always** `SidecarManager::start` — ignore `setup_completed` |
+| Wait UX | Outer `DaemonLaunchGate` before `/setup` **and** main UI |
+| Marker | Inner `SetupGate` routes by `setup_completed` only |
+| Bootstrap | `ensureSetupBootstrap` on Workspace **Continue** (after Ready), not before daemon start |
+| Wizard | Agent → Workspace → Done; no Daemon step; no happy-path `startDaemon` |
 
-| State | `.setup()` auto-start? | Bootstrap | Daemon start |
-|-------|------------------------|-----------|--------------|
-| `setup_completed=false` (clean) | **SKIP** | wizard, after workspace persist | wizard daemon step |
-| `setup_completed=true` (existing) | **AUTO-START** (preserved byte-for-byte) | N/A | `.setup()` spawns |
+**Why:** Authors must pick an ACP Agent first, but scan needs a Ready daemon. Making wait app-level (not a wizard preference) keeps the product narrative honest while preserving the V1.100 bootstrap IPC contract at a later step.
 
-**Bootstrap contract:** write only the minimum `config.toml` keys the daemon needs to not exit `No active creator` (`active_creator_id` + `active_workspace_slug_by_creator`); the daemon auto-creates `state.db`. The bootstrap is **idempotent** (never overwrites an existing `active_creator_id`; returns `already_bootstrapped`), uses `toml_edit` round-trip to preserve other keys, and reuses existing config helpers — do NOT invent a parallel config/db path. **No wire contracts:** this is Tauri IPC + local config only; it must NOT add a daemon HTTP endpoint, a daemon boot-without-creator mode, or any `schemas/` change.
+**Source:** V1.105 plans `2026-07-10-v1.105-daemon-fullscreen-gate` + `wizard-ia-reorder` + `portrait-shell-steps`; masters `desktop-shell.md` §13.10 / `web-ui.md` §29.13.
 
-> Residual `R-V197-SMOKE-CLEAN-STATE` is **closed by V1.100 P0** (interactive macOS clean-state smoke confirmed daemon reaches `running`).
+> Residual `R-V197-SMOKE-CLEAN-STATE` was closed by V1.100 P0. V1.105 moves bootstrap **after** Ready (Workspace Continue) while keeping always-start — clean-state Ready may still fail until creator exists; authors recover via splash reset/reload after Workspace bootstrap on a subsequent attempt, or complete Workspace Continue once Ready is reached on partial state.
 
 ### Rule 14 (V1.101): enrich process PATH at daemon boot for agent CLI discovery (Class B) — no schemas/
 
@@ -198,4 +201,4 @@ V1.101 P0 closed `R-V1100P0SMOKE-AGENT-SCAN`: macOS GUI / Tauri-launched daemons
 
 ### Source
 
-Distilled from V1.97 plan `2026-07-07-v1.97-desktop-first-launch-hardening` (T1 prototype intake + T4 sidecar FSM + T5 sidecar spawn-name fix `ab618ee9`, verified by clean-state smoke re-run). Tauri v2 sidecar resolution rule confirmed against `https://v2.tauri.app/develop/sidecar` ("expects only the filename of the sidecar, not its full path"). Iteration-scoped invariants + prototype intake rule: `.mstar/iterations/v1.97/guides/sidecar-startup-state-machine.md` (snapshot; durable rules promoted here). **Rule 13 distilled from V1.100 P0** plan `2026-07-08-v1.100-desktop-clean-state-first-launch` (T1 contract + T2 `ensure_setup_bootstrap` + gating; verified by clean-state smoke 2026-07-09). **Rule 14 distilled from V1.101 P0** plan `2026-07-09-v1.101-agent-detection-picker` (`path_enrichment.rs` + AgentPicker scan path; residual `R-V1100P0SMOKE-AGENT-SCAN` closed).
+Distilled from V1.97 plan `2026-07-07-v1.97-desktop-first-launch-hardening` (T1 prototype intake + T4 sidecar FSM + T5 sidecar spawn-name fix `ab618ee9`, verified by clean-state smoke re-run). Tauri v2 sidecar resolution rule confirmed against `https://v2.tauri.app/develop/sidecar` ("expects only the filename of the sidecar, not its full path"). Iteration-scoped invariants + prototype intake rule: `.mstar/iterations/v1.97/guides/sidecar-startup-state-machine.md` (snapshot; durable rules promoted here). **Rule 13 distilled from V1.100 P0** plan `2026-07-08-v1.100-desktop-clean-state-first-launch` (T1 contract + T2 `ensure_setup_bootstrap` + gating; verified by clean-state smoke 2026-07-09). **Rule 14 distilled from V1.101 P0** plan `2026-07-09-v1.101-agent-detection-picker` (`path_enrichment.rs` + AgentPicker scan path; residual `R-V1100P0SMOKE-AGENT-SCAN` closed). **Rule 15 distilled from V1.105** P0–P2 (`DaemonLaunchGate`, D2 always-start, Agent→Workspace→Done, portrait shell).
