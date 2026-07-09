@@ -27,7 +27,6 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
   const client = useNexusClient();
   const [daemonReady, setDaemonReady] = useState(() => !desktop);
   const [error, setError] = useState<string | null>(null);
-  const [retryToken, setRetryToken] = useState(0);
   const [resetBusy, setResetBusy] = useState(false);
 
   useEffect(() => {
@@ -154,7 +153,7 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
       clearWaitTimeout();
       unsub?.();
     };
-  }, [client, desktop, retryToken]);
+  }, [client, desktop]);
 
   function retry() {
     // Reload re-enters Tauri `.setup()` always-start (D2). No startDaemon.
@@ -172,8 +171,9 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
       window.location.reload();
     } catch (err) {
       setResetBusy(false);
+      // Keep the error until Restart (reload). Do not re-subscribe here —
+      // that would re-run applyStatus and clear the reset-failure message.
       setError(errorMessage(err) || 'Failed to reset local database.');
-      setRetryToken((n) => n + 1);
     }
   }
 

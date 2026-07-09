@@ -183,4 +183,41 @@ describe('DaemonLaunchGate', () => {
     expect(startDaemon).not.toHaveBeenCalled();
     expect(reloadSpy).toHaveBeenCalled();
   });
+
+  it('keeps reset-failure error without re-subscribing (no retryToken bump)', async () => {
+    healthUnavailable();
+    const user = userEvent.setup();
+    const startDaemon = vi.fn(() => Promise.resolve());
+    const resetLocalDatabase = vi.fn(() => Promise.reject(new Error('reset denied')));
+    const onDaemonStatusChanged = vi.fn(() => Promise.resolve(() => {}));
+    const getDaemonStatus = vi.fn(() =>
+      Promise.resolve({
+        state: 'error',
+        port: 8420,
+        detail: 'sidecar crashed',
+      } as DaemonStatus),
+    );
+
+    renderGate({
+      desktop: makeDesktop({
+        startDaemon,
+        resetLocalDatabase,
+        getDaemonStatus,
+        onDaemonStatusChanged,
+      }),
+    });
+
+    await waitFor(() => expect(screen.getByText('Daemon not ready')).toBeInTheDocument());
+    expect(screen.getByText('sidecar crashed')).toBeInTheDocument();
+    const subscribeCallsBefore = onDaemonStatusChanged.mock.calls.length;
+
+    await user.click(screen.getByRole('button', { name: /Reset local database/i }));
+    await waitFor(() => expect(resetLocalDatabase).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByText('reset denied')).toBeInTheDocument());
+
+    // Failure must not re-run the wait effect (which would clear the error via applyStatus).
+    expect(onDaemonStatusChanged.mock.calls.length).toBe(subscribeCallsBefore);
+    expect(startDaemon).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: /Restart Nexus/i })).toBeInTheDocument();
+  });
 });
