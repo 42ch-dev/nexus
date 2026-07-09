@@ -981,10 +981,10 @@ The setup wizard is the user's first interaction with Nexus. V1.96 introduced a 
 
 ### Layout shell (V1.105)
 
-- Portrait card: **480px** max width (`wizard-max-width`), **min(720px, 85vh)** height (`wizard-max-height` + viewport cap).
-- **Top horizontal** step indicator (`TopStepIndicator`) — three steps: Agent, Workspace, Done.
-- Step content scrolls inside the card; primary CTA remains bottom-anchored in the step column.
-- Left step rail (`step-panel-width` 208px) **retired** for wizard chrome.
+- Portrait card: **480px** max width (`wizard-max-width` → `max-w-setup-wizard-step-wizard-max-width`), **min(720px, 85vh)** height (`wizard-max-height` → `h-setup-wizard-wizard-max-height` + `max-h-[85vh]`).
+- **Top horizontal** step indicator (`TopStepIndicator`) above scrollable step content — labels **Agent** / **Workspace** / **Done** (`agent` / `workspace` / `done`); states `complete` / `active` / `pending` reuse `setup-wizard-step-circle-*` and `setup-wizard-step-label-*`; horizontal `flex` row with optional short connectors (`setup-wizard-step-connector` color).
+- Step body: `flex-1 min-h-0 overflow-y-auto`; primary CTA stays bottom-anchored (`mt-auto` on `data-testid="wizard-cta-row"`).
+- Left step rail (`step-panel-width` 208px / `w-setup-wizard-surface-step-panel-width`) **retired** for wizard chrome — do not reference `step-panel-*` or vertical connectors in P2 wizard layout.
 
 ### Layout shell (V1.96 legacy — superseded by V1.105 for wizard)
 

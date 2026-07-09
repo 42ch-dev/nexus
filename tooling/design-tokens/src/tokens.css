@@ -202,7 +202,8 @@
   --color-setup-wizard-step-label-typography: 14px;
   --color-setup-wizard-step-label-active-color: var(--color-gray-1000);
   --color-setup-wizard-step-label-pending-color: var(--color-gray-700);
-  --color-setup-wizard-wizard-max-width: 640px;
+  --color-setup-wizard-wizard-max-width: 480px;
+  --color-setup-wizard-wizard-max-height: 720px;
   --color-setup-wizard-wizard-padding: 32px;
   --color-setup-wizard-step-row-height: 40px;
 
@@ -418,7 +419,8 @@
   --color-setup-wizard-step-label-typography: 14px;
   --color-setup-wizard-step-label-active-color: var(--color-gray-1000);
   --color-setup-wizard-step-label-pending-color: var(--color-gray-700);
-  --color-setup-wizard-wizard-max-width: 640px;
+  --color-setup-wizard-wizard-max-width: 480px;
+  --color-setup-wizard-wizard-max-height: 720px;
   --color-setup-wizard-wizard-padding: 32px;
   --color-setup-wizard-step-row-height: 40px;
 
