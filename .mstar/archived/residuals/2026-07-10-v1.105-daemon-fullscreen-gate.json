@@ -1,8 +1,8 @@
 {
   "plan_id": "2026-07-10-v1.105-daemon-fullscreen-gate",
   "schema_version": 1,
-  "archived_at": "2026-07-10T01:30:00+0800",
-  "archived_reason": "V1.105 P1 Task 2: bootstrap moved to Workspace Continue via setup-step-workspace.tsx (closes R-V1105P0-001 timing).",
+  "archived_at": "2026-07-10T01:35:00+0800",
+  "archived_reason": "V1.105 P1 Tasks 2–3: bootstrap on Workspace Continue; Daemon wizard step retired.",
   "entries": [
     {
       "id": "R-V1105P0-001",
@@ -14,8 +14,21 @@
       "source_plan_id": "2026-07-10-v1.105-daemon-fullscreen-gate",
       "tracking_link": ".mstar/plans/2026-07-10-v1.105-wizard-ia-reorder.md",
       "archived_at": "2026-07-10",
-      "closure_note": "ensureSetupBootstrap now runs only on SetupStepWorkspace Continue (extracted from Welcome). Orchestrator still uses legacy welcome slot until Task 3 reorder; bootstrap ownership is on the workspace module.",
-      "closure_evidence": "apps/web/src/pages/setup-step-workspace.tsx; setup-step-workspace.test.tsx persist/bootstrap order"
+      "closure_note": "ensureSetupBootstrap runs only on SetupStepWorkspace Continue.",
+      "closure_evidence": "apps/web/src/pages/setup-step-workspace.tsx; setup-step-workspace.test.tsx"
+    },
+    {
+      "id": "R-V1105P0-002",
+      "title": "setup-step-daemon.tsx still calls startDaemon on error/reset until P1 retires Daemon wizard step",
+      "severity": "low",
+      "lifecycle": "resolved",
+      "closed_at": "2026-07-10",
+      "closed_by": "2026-07-10-v1.105-wizard-ia-reorder",
+      "source_plan_id": "2026-07-10-v1.105-daemon-fullscreen-gate",
+      "tracking_link": ".mstar/plans/2026-07-10-v1.105-wizard-ia-reorder.md",
+      "archived_at": "2026-07-10",
+      "closure_note": "Deleted setup-step-daemon.tsx; wizard is Agent→Workspace→Done. Daemon start owned by P0 DaemonLaunchGate only.",
+      "closure_evidence": "apps/web/src/pages/setup-wizard-page.tsx; deleted setup-step-daemon.tsx"
     }
   ]
 }

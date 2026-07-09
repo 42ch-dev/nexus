@@ -915,17 +915,6 @@
     ],
     "2026-07-10-v1.105-daemon-fullscreen-gate": [
       {
-        "id": "R-V1105P0-002",
-        "title": "setup-step-daemon.tsx still calls startDaemon on error/reset until P1 retires Daemon wizard step",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "V1.105 P1",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-10-v1.105-wizard-ia-reorder.md",
-        "note": "QC2 S006 / QC3-002. Task 4 handoff."
-      },
-      {
         "id": "R-V1105P0-003",
         "title": "DaemonLaunchGate timeout callback can race after markReady (ready→error)",
         "severity": "low",
