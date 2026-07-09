@@ -282,9 +282,40 @@ describe('SetupStepWorkspace', () => {
     await waitFor(() => expect(screen.getByText(/config write failed/)).toBeInTheDocument());
     await waitFor(() =>
       expect(
-        screen.getByText(/Retry Continue, or restart the app and use Reset local database/),
+        screen.getByText(/Retry Continue, or use Reset local database below if the problem persists/),
       ).toBeInTheDocument(),
     );
+    expect(screen.getByRole('button', { name: 'Reset local database' })).toBeInTheDocument();
+    expect(onNext).not.toHaveBeenCalled();
+  });
+
+  it('reset local database after bootstrap failure reloads without startDaemon', async () => {
+    const user = userEvent.setup();
+    const onNext = vi.fn();
+    const ensureSetupBootstrap = vi.fn(() => Promise.reject(new Error('config write failed')));
+    const resetLocalDatabase = vi.fn(() => Promise.resolve());
+    const startDaemon = vi.fn(() => Promise.resolve());
+    const reloadSpy = vi.fn();
+    Object.defineProperty(window, 'location', {
+      value: { ...window.location, reload: reloadSpy },
+      writable: true,
+    });
+
+    renderHarness(makeState({ workspaceRoot: '/custom/nexus' }), {
+      desktop: makeDesktop({ ensureSetupBootstrap, resetLocalDatabase, startDaemon }),
+      onNext,
+    });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Reset local database' })).toBeInTheDocument(),
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Reset local database' }));
+    await waitFor(() => expect(resetLocalDatabase).toHaveBeenCalled());
+    expect(startDaemon).not.toHaveBeenCalled();
+    expect(reloadSpy).toHaveBeenCalled();
     expect(onNext).not.toHaveBeenCalled();
   });
 
@@ -304,10 +335,12 @@ describe('SetupStepWorkspace', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() => expect(screen.getByText(/config write failed/)).toBeInTheDocument());
+    expect(screen.getByRole('button', { name: 'Reset local database' })).toBeInTheDocument();
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() => expect(onNext).toHaveBeenCalled());
+    expect(screen.queryByRole('button', { name: 'Reset local database' })).not.toBeInTheDocument();
   });
 
   it('skips bootstrap in browser mode and advances directly', async () => {

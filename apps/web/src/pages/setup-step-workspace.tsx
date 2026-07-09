@@ -32,6 +32,8 @@ export function SetupStepWorkspace({
   const desktop = useDesktopCapabilities();
   const [loading, setLoading] = useState(true);
   const [bootstrapping, setBootstrapping] = useState(false);
+  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  const [resetBusy, setResetBusy] = useState(false);
   const { toast } = useToast();
 
   useEffect(() => {
@@ -90,6 +92,7 @@ export function SetupStepWorkspace({
       }
     }
     setBootstrapping(true);
+    setBootstrapError(null);
     try {
       const result = await desktop.ensureSetupBootstrap();
       if (!result.already_bootstrapped) {
@@ -99,17 +102,39 @@ export function SetupStepWorkspace({
           description: `Creator identity created (${result.creator_id}).`,
         });
       }
+      setBootstrapError(null);
       onNext();
     } catch (err) {
       const message = errorMessage(err) || 'Could not prepare your local workspace.';
+      setBootstrapError(message);
       toast({
         variant: 'error',
         title: 'Local workspace bootstrap failed',
-        description: `${message} Retry Continue, or restart the app and use Reset local database on the daemon wait splash if the problem persists.`,
+        description: `${message} Retry Continue, or use Reset local database below if the problem persists.`,
       });
       console.error('Bootstrap failed:', err);
     } finally {
       setBootstrapping(false);
+    }
+  }
+
+  async function resetLocalDatabase() {
+    if (!desktop) return;
+    setResetBusy(true);
+    try {
+      await desktop.resetLocalDatabase();
+      // Explicit D2 decision: do NOT call startDaemon after reset — reload
+      // re-runs `.setup()` which always starts/attaches the sidecar.
+      window.location.reload();
+    } catch (err) {
+      setResetBusy(false);
+      const message = errorMessage(err) || 'Failed to reset local database.';
+      toast({
+        variant: 'error',
+        title: 'Reset local database',
+        description: message,
+      });
+      console.error('Failed to reset local database:', err);
     }
   }
 
@@ -160,7 +185,7 @@ export function SetupStepWorkspace({
         <Button
           variant="primary"
           onClick={continueToNext}
-          disabled={loading || bootstrapping || !state.workspaceRoot}
+          disabled={loading || bootstrapping || resetBusy || !state.workspaceRoot}
           className="w-full max-w-setup-wizard-surface-cta-primary-max-width"
         >
           {bootstrapping ? (
@@ -172,6 +197,22 @@ export function SetupStepWorkspace({
             'Continue'
           )}
         </Button>
+        {bootstrapError && desktop ? (
+          <Button
+            variant="tertiary"
+            onClick={() => void resetLocalDatabase()}
+            disabled={loading || bootstrapping || resetBusy}
+          >
+            {resetBusy ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
+                Resetting…
+              </>
+            ) : (
+              'Reset local database'
+            )}
+          </Button>
+        ) : null}
       </div>
     </div>
   );
