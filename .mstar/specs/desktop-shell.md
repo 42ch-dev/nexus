@@ -4,18 +4,17 @@
 **Document class**: Feature line
 **Created**: 2026-06-25 (Phase 2b, `@architect`)
 **Scope**: Nexus desktop shell contract — `apps/desktop` Tauri v2 wrapper, SPA adapter selection (`TauriClient`), desktop-only `NexusClient` extensions, native file actions + path guard, bundled `nexus42` sidecar lifecycle, port discovery, capability detection, macOS-first unsigned dev build. V1.67+ deferrals (signing, multi-OS, auto-update, in-process lib link, body editor) recorded in §2.
-**Iteration compass**: [v1.66-tauri-desktop-shell-delivery-compass-v1.md](../../iterations/v1.66-tauri-desktop-shell-delivery-compass-v1.md) (scope/roadmap SSOT — §0 grill decisions, §1.1 Track A, §5 locked design items)
+**Iteration compass**: [v1.66-tauri-desktop-shell-delivery-compass-v1.md](../iterations/v1.66-tauri-desktop-shell-delivery-compass-v1.md) (scope/roadmap SSOT — §0 grill decisions, §1.1 Track A, §5 locked design items)
 
 **Coordinates with**:
 
 - [web-ui.md](web-ui.md) §14 (Desktop Shell stage — product UX + user stories + capability table delta)
 - [web-ui-design-requirements.md](web-ui-design-requirements.md) §6 (desktop shell surface design requirements)
 - [daemon-runtime.md](daemon-runtime.md) §12 (Tauri sidecar mode — daemon-side launch/readiness/lifecycle)
-- [local-api-surface-conventions.md](local-api-surface-conventions.md) §9 (local daemon port discovery)
-- [web-ui-design-requirements.md](web-ui-design-requirements.md) §6 (desktop shell surface design requirements)
+- [daemon-api-surface-conventions.md](daemon-api-surface-conventions.md) §9 (local daemon port discovery; `local-api-surface-conventions.md` is a V1.90 redirect stub)
 - [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md) / `host_tool_handlers.rs` (W-002 path-guard reference for `openWith`/`revealInFinder` scope)
-- [repo-root `DESIGN.md`](../../../DESIGN.md) + [`DESIGN.dark.md`](../../../DESIGN.dark.md) — Desktop Shell Supplement (window/menu/dialog/context-menu/status tokens) *(V1.98: sole SSOT; former `apps/web/DESIGN*.md` retired)*
-- [schemas-external-consumer-boundary.md](../schemas-external-consumer-boundary.md) — `wire_contracts_changed: false` (V1.66); desktop-native methods are Tauri IPC, not Daemon API wire. **V1.94:** `wire_contracts_changed: true` (additive `POST /v1/daemon/agent-host/scan` schemas; `@42ch/nexus-contracts` 0.20.0 → 0.21.0).
+- [repo-root `DESIGN.md`](../../DESIGN.md) + [`DESIGN.dark.md`](../../DESIGN.dark.md) — Desktop Shell Supplement (window/menu/dialog/context-menu/status tokens) *(V1.98: sole SSOT; former `apps/web/DESIGN*.md` retired)*
+- [schemas-external-consumer-boundary.md](../knowledge/schemas-external-consumer-boundary.md) — `wire_contracts_changed: false` (V1.66); desktop-native methods are Tauri IPC, not Daemon API wire. **V1.94:** `wire_contracts_changed: true` (additive `POST /v1/daemon/agent-host/scan` schemas; `@42ch/nexus-contracts` 0.20.0 → 0.21.0).
 - [daemon-runtime.md](daemon-runtime.md) — health-probe plumbing reused for per-launch daemon-ready gate; `setup_completed` field additive to `~/.nexus42/config.toml`
 - [web-ui.md](web-ui.md) — sidebar IA (two-tab + nested nav + footer), daemon status bar simplification, Strategies unification, button contrast invariant
 
@@ -92,7 +91,7 @@ Browser build: "Copy Path" only (no greyed-out teasing of unavailable actions).
 
 ## 10. Design requirements
 
-Window chrome / app menu / native dialogs / desktop context menu / daemon-status indicator tokens in repo-root [`DESIGN.md`](../../../DESIGN.md) **Desktop Shell Supplement (V1.66 Standard+)**. Product intent + constraints in [web-ui-design-requirements.md](web-ui-design-requirements.md) §6. System tray: none in V1.66.
+Window chrome / app menu / native dialogs / desktop context menu / daemon-status indicator tokens in repo-root [`DESIGN.md`](../../DESIGN.md) **Desktop Shell Supplement (V1.66 Standard+)**. Product intent + constraints in [web-ui-design-requirements.md](web-ui-design-requirements.md) §6. System tray: none in V1.66.
 
 ## 11. Build + CI
 
@@ -120,7 +119,7 @@ Window chrome / app menu / native dialogs / desktop context menu / daemon-status
 ## 13. Setup Wizard (V1.94)
 
 **Status**: Draft (V1.94) — normative contract frozen by P-1; implement authority P0 + P1.
-**Iteration compass**: [v1.94-desktop-onboarding-ia-pass-delivery-compass-v1.md](../../iterations/v1.94-desktop-onboarding-ia-pass-delivery-compass-v1.md) §1 (locked decisions A2+B1, C1, H1) + §5 (acceptance criteria).
+**Iteration compass**: [v1.94-desktop-onboarding-ia-pass-delivery-compass-v1.md](../iterations/v1.94-desktop-onboarding-ia-pass-delivery-compass-v1.md) §1 (locked decisions A2+B1, C1, H1) + §5 (acceptance criteria).
 
 ### 13.1 Purpose
 
@@ -282,7 +281,7 @@ V1.97 does not change daemon routes, JSON schemas, generated TypeScript/Rust con
 
 **Product behavior target.** A clean desktop install must complete the full wizard path without a pre-daemon `No active creator` failure. A new bootstrap substep between workspace selection and daemon start creates the minimum creator/workspace state the daemon requires to boot.
 
-**Contract location:** The authoritative implementation-ready contract is [`.mstar/iterations/v1.100/specs/desktop-first-launch-bootstrap.md`](../../iterations/v1.100/specs/desktop-first-launch-bootstrap.md). This section records the product behavior; the iteration contract is SSOT for implementation details (bootstrap mechanism, daemon-start timing matrix, minimum state, idempotency contract, reuse targets).
+**Contract location:** The authoritative implementation-ready contract is [`.mstar/iterations/v1.100/specs/desktop-first-launch-bootstrap.md`](../iterations/v1.100/specs/desktop-first-launch-bootstrap.md). This section records the product behavior; the iteration contract is SSOT for implementation details (bootstrap mechanism, daemon-start timing matrix, minimum state, idempotency contract, reuse targets).
 
 #### 13.9.1 Wizard flow change
 
@@ -319,7 +318,7 @@ V1.100 does not change daemon routes, JSON schemas, generated TypeScript/Rust co
 
 **Handler**: `crates/nexus-daemon-runtime/src/api/handlers/agent_host.rs` — new `scan` function, wired into the existing agent-host router (same route group as `health`, `sessions`).
 
-**Consumers**: P1 setup wizard step 3 (selectable agent cards); future Settings→Agent detection UI (deferred).
+**Consumers**: Setup wizard agent step (V1.101 Must / P0 — app-shared `AgentPicker` at `apps/web/src/components/setup/agent-picker.tsx`); future Settings→Agent detection UI deferred as **DF-70** (Settings shell not shipped in V1.101).
 
 ### 14.2 Contract shapes
 

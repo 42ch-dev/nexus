@@ -62,9 +62,9 @@ export function SetupWizardPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background-100 p-6">
       <div className="flex w-full max-w-setup-wizard-step-wizard-max-width overflow-hidden rounded-popover border border-setup-wizard-surface-card-border bg-setup-wizard-surface-card-bg shadow-modal">
-        <nav className="flex-shrink-0 w-setup-wizard-surface-step-panel-width border-r border-r-setup-wizard-surface-step-panel-right-divider px-setup-wizard-surface-step-panel-padding-x py-setup-wizard-surface-step-panel-padding-y">
+        <aside className="flex-shrink-0 w-setup-wizard-surface-step-panel-width border-r border-r-setup-wizard-surface-step-panel-right-divider px-setup-wizard-surface-step-panel-padding-x py-setup-wizard-surface-step-panel-padding-y">
           <StepIndicator currentStep={step} />
-        </nav>
+        </aside>
         <main className="flex min-w-0 flex-1 flex-col px-setup-wizard-surface-content-panel-padding-x py-setup-wizard-surface-content-panel-padding-y">
           {step === 'welcome' && (
             <SetupStepWelcome
@@ -115,6 +115,8 @@ function StepIndicator({ currentStep }: { currentStep: WizardStep }) {
               key={s.id}
               className="relative flex h-setup-wizard-step-row-height items-center gap-3"
               aria-current={status === 'active' ? 'step' : undefined}
+              data-step-id={s.id}
+              data-step-status={status}
             >
               {index < steps.length - 1 && (
                 <div

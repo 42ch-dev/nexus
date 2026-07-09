@@ -173,6 +173,11 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
 
     tracing::info!("Starting daemon-runtime v{}", env!("CARGO_PKG_VERSION"));
 
+    // PATH enrichment (V1.101 Class B) runs in the `nexus42` binary *before*
+    // Tokio starts — see `apps/nexus42/src/main.rs`. Do not call
+    // `apply_process_path_enrichment` here: `setenv` is not thread-safe against
+    // concurrent `getenv` on a live multi-threaded runtime.
+
     // V1.92 P-1: install the rustls crypto provider once at process startup.
     // The call is idempotent; an error usually means a provider is already
     // installed (e.g. by a parent CLI subscriber or an earlier test invocation).

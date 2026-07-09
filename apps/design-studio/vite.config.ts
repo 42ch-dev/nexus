@@ -29,6 +29,8 @@ export default defineConfig({
       '@/lib/utils': path.resolve(__dirname, '../web/src/lib/utils'),
       '@': path.resolve(__dirname, './src'),
       '@web-ui': path.resolve(__dirname, '../web/src/components/ui'),
+      // Gallery-only alias for app-shared setup compositions (V1.101 AgentPicker).
+      '@web-setup': path.resolve(__dirname, '../web/src/components/setup'),
       '@web-lib/utils': path.resolve(__dirname, '../web/src/lib/utils'),
     },
   },

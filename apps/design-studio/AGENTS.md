@@ -24,6 +24,7 @@ Parent rules: [`../AGENTS.md`](../AGENTS.md) (apps placement), root [`AGENTS.md`
 | --- | --- | --- |
 | `@/*` | `./src/*` | Studio routes, fixtures, gallery layout |
 | `@web-ui/*` | `../web/src/components/ui/*` | Transitional gallery source for not-yet-promoted primitives |
+| `@web-setup/*` | `../web/src/components/setup/*` | Gallery-only import of app-shared setup compositions (e.g. AgentPicker) — props-driven; no contracts/daemon |
 | `@web-lib/utils` | `../web/src/lib/utils.ts` | `cn()` only |
 | `@42ch/nexus-ui` | workspace package | Brand VI plus V1.99-approved presentational primitives through public exports |
 | `@nexus/design-tokens` | `tooling/design-tokens` | Shared CSS + Tailwind preset |
@@ -38,7 +39,7 @@ Parent rules: [`../AGENTS.md`](../AGENTS.md) (apps placement), root [`AGENTS.md`
 - `@42ch/nexus-contracts` — no wire DTOs
 - `@42ch/nexus-ui/src/*` — deep import; use public package API only
 - `@tauri-apps/*` — desktop-only; studio is a browser SPA
-- `@web-ui/button`, `@web-ui/badge`, `@web-ui/card` — already-promoted; import from `@42ch/nexus-ui`
+- `@web-ui/button`, `@web-ui/badge`, `@web-ui/card`, `@web-ui/input`, `@web-ui/label`, `@web-ui/textarea`, `@web-ui/select` — already-promoted; import from `@42ch/nexus-ui`
 - Inventing design tokens not in root DESIGN pair
 - **Any `@web-ui/*` import without a transitional annotation** (`// transitional — …` or `// @web-ui/<name> — transitional …`)
 

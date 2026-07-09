@@ -4,18 +4,20 @@
 **Document class**: Dev-surface auxiliary app (not author-facing product)  
 **Created**: 2026-07-08 (`@product-manager`)  
 **Scope**: `apps/design-studio` — read-only gallery and visual proving ground for Nexus DESIGN SSOT, brand VI, shared presentational primitives, and representative surface fixtures
-**Iteration compass**: [v1.98-design-studio-and-design-unification-compass-v1.md](../../iterations/v1.98-design-studio-and-design-unification-compass-v1.md)  
-**V1.99 compass**: [v1.99-design-system-deepening-compass-v1.md](../../iterations/v1.99-design-system-deepening-compass-v1.md)
-**IA guide**: [design-studio-information-architecture.md](../../iterations/v1.98/guides/design-studio-information-architecture.md)  
+**Iteration compass**: [v1.98-design-studio-and-design-unification-compass-v1.md](../iterations/v1.98-design-studio-and-design-unification-compass-v1.md)  
+**V1.99 compass**: [v1.99-design-system-deepening-compass-v1.md](../iterations/v1.99-design-system-deepening-compass-v1.md)
+**IA guide**: [design-studio-information-architecture.md](../iterations/v1.98/guides/design-studio-information-architecture.md)  
 **Coordinates with**:
 
-- Repo-root [`DESIGN.md`](../../../DESIGN.md) + [`DESIGN.dark.md`](../../../DESIGN.dark.md) — sole normative token SSOT after V1.98 merge
+- Repo-root [`DESIGN.md`](../../DESIGN.md) + [`DESIGN.dark.md`](../../DESIGN.dark.md) — sole normative token SSOT after V1.98 merge
 - [`web-ui.md`](web-ui.md) §30 — V1.98 stage note (studio is dev tooling, not Control Room feature)
-- [`design-unification.md`](../../iterations/v1.98/specs/design-unification.md) — merge rules (architect-owned, P-1)
-- [`component-promotion-boundary.md`](../../iterations/v1.99/specs/component-promotion-boundary.md) — V1.99 draft boundary for selected pure presentational primitives in `@42ch/nexus-ui`
-- [`studio-first-ui-workflow.md`](../../iterations/v1.99/guides/studio-first-ui-workflow.md) — V1.99 validation path from studio fixtures to package promotion to Web integration
-- `@42ch/nexus-ui` — brand layer plus V1.99-approved presentational primitives only
+- [`design-unification.md`](../iterations/v1.98/specs/design-unification.md) — merge rules (architect-owned, P-1)
+- [`component-promotion-boundary.md`](../iterations/v1.99/specs/component-promotion-boundary.md) — V1.99 draft boundary for selected pure presentational primitives in `@42ch/nexus-ui`
+- [`studio-first-ui-workflow.md`](../iterations/v1.99/guides/studio-first-ui-workflow.md) — V1.99 validation path from studio fixtures to package promotion to Web integration
+- [`studio-first-visual-then-app.md`](../iterations/v1.101/guides/studio-first-visual-then-app.md) — V1.101 process note (Studio visual → App wiring; human smoke separate)
+- `@42ch/nexus-ui` — brand layer plus approved presentational primitives (V1.99 Button/Badge/Card; V1.100 form fields; V1.101 Stretch may add `Select`)
 - `apps/web/src/components/ui/*` — transitional gallery source for primitives not yet promoted
+- `apps/web/src/components/setup/*` — app-shared setup compositions (e.g. V1.101 `AgentPicker`); Studio may import via gallery alias — **not** `@42ch/nexus-ui`
 
 ---
 
@@ -131,10 +133,10 @@ Exact port and script aliases finalized in P0 `README` / `AGENTS.md`.
 | Tokens | P0 | Colors, typography, spacing, rounded; elevation/motion if present in SSOT |
 | Brand VI | P0 | 4 logo variants + `NexusMark` + `theme.css` swatches + clear-space callout |
 | Components | P0 | All `apps/web/src/components/ui/*.tsx` primitives (variant/state matrix) |
-| Voice & Content | P1 | Labeled specimens per [IA guide §4.4](../../iterations/v1.98/guides/design-studio-information-architecture.md) — strings from DESIGN § Voice & Content |
-| Surfaces | P1 | Setup step card + App shell chrome fixtures per [IA guide §4.5](../../iterations/v1.98/guides/design-studio-information-architecture.md) |
+| Voice & Content | P1 | Labeled specimens per [IA guide §4.4](../iterations/v1.98/guides/design-studio-information-architecture.md) — strings from DESIGN § Voice & Content |
+| Surfaces | P1 | Setup step card + App shell chrome fixtures per [IA guide §4.5](../iterations/v1.98/guides/design-studio-information-architecture.md) |
 
-Section nav labels and per-component matrix: [IA guide](../../iterations/v1.98/guides/design-studio-information-architecture.md).
+Section nav labels and per-component matrix: [IA guide](../iterations/v1.98/guides/design-studio-information-architecture.md).
 
 ---
 

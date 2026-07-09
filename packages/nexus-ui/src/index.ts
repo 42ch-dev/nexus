@@ -37,3 +37,6 @@ export {
 export { Input, type InputProps } from './components/input';
 export { Label, type LabelProps } from './components/label';
 export { Textarea, type TextareaProps } from './components/textarea';
+
+// V1.101 P2 — promoted native Select presentational primitive
+export { Select, type SelectProps } from './components/select';

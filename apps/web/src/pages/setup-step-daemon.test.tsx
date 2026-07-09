@@ -35,7 +35,7 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
 }
 
 describe('SetupStepDaemon', () => {
-  it('renders Continue as a wide prominent CTA and Back as a smaller tertiary button', async () => {
+  it('renders Continue as a wide prominent CTA and Back adjacent in a horizontal row', async () => {
     useHandlers(
       http.get('/v1/daemon/runtime/health', () => HttpResponse.json({ status: 'ok', version: 'test' })),
     );
@@ -48,8 +48,14 @@ describe('SetupStepDaemon', () => {
     const continueButton = await waitFor(() => screen.getByRole('button', { name: 'Continue' }));
     expect(continueButton).toHaveClass('w-full', 'max-w-setup-wizard-surface-cta-primary-max-width');
 
-    const backButton = screen.getByRole('button', { name: 'Back' });
-    expect(backButton).toHaveClass('self-start');
+    const cta = screen.getByTestId('wizard-cta-row');
+    expect(cta).toHaveAttribute('data-layout', 'horizontal-adjacent');
+    expect(cta).toHaveClass('flex', 'items-center');
+    expect(cta).not.toHaveClass('flex-col');
+
+    const buttons = cta.querySelectorAll('button');
+    expect(buttons[0]).toHaveTextContent('Back');
+    expect(buttons[1]).toHaveTextContent('Continue');
   });
 
   it('uses the HTTP health probe in browser mode and reaches the running state', async () => {
@@ -198,7 +204,70 @@ describe('SetupStepDaemon', () => {
 
     await waitFor(() => expect(screen.getByText('Daemon is running.')).toBeInTheDocument());
     expect(getDaemonStatus).toHaveBeenCalled();
+    expect(onDaemonStatusChanged).not.toHaveBeenCalled();
     expect(healthCalls).toBe(0);
+  });
+
+  it('subscribes once while starting and does not open a second listener', async () => {
+    const getDaemonStatus = vi.fn(() => Promise.resolve({ state: 'starting', port: 8420 } as DaemonStatus));
+    const onDaemonStatusChanged = vi.fn(() => Promise.resolve(() => {}));
+
+    renderInApp(<SetupStepDaemon onNext={() => {}} onBack={() => {}} />, {
+      client: makeClient(),
+      desktop: makeDesktop({ getDaemonStatus, onDaemonStatusChanged }),
+      initialRouterEntries: ['/setup'],
+    });
+
+    await waitFor(() => expect(onDaemonStatusChanged).toHaveBeenCalledTimes(1));
+    expect(screen.getByText('Starting daemon…')).toBeInTheDocument();
+    expect(getDaemonStatus).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-probes after auto-start and shows running without waiting for an event', async () => {
+    const startDaemon = vi.fn(() => Promise.resolve());
+    const getDaemonStatus = vi
+      .fn()
+      .mockResolvedValueOnce({ state: 'stopped', port: 8420 } as DaemonStatus)
+      .mockResolvedValueOnce({ state: 'running', port: 8420, version: 'test' } as DaemonStatus);
+    const onDaemonStatusChanged = vi.fn(() => Promise.resolve(() => {}));
+
+    renderInApp(<SetupStepDaemon onNext={() => {}} onBack={() => {}} />, {
+      client: makeClient(),
+      desktop: makeDesktop({ startDaemon, getDaemonStatus, onDaemonStatusChanged }),
+      initialRouterEntries: ['/setup'],
+    });
+
+    await waitFor(() => expect(startDaemon).toHaveBeenCalled());
+    await waitFor(() => expect(screen.getByText('Daemon is running.')).toBeInTheDocument());
+    expect(getDaemonStatus).toHaveBeenCalledTimes(2);
+    expect(onDaemonStatusChanged).not.toHaveBeenCalled();
+  });
+
+  it('re-probes getDaemonStatus on remount (Back re-entry) without relying on a stale subscription', async () => {
+    const getDaemonStatus = vi.fn(() =>
+      Promise.resolve({ state: 'running', port: 8420, version: 'test' } as DaemonStatus),
+    );
+    const onDaemonStatusChanged = vi.fn(() => Promise.resolve(() => {}));
+
+    const { unmount } = renderInApp(<SetupStepDaemon onNext={() => {}} onBack={() => {}} />, {
+      client: makeClient(),
+      desktop: makeDesktop({ getDaemonStatus, onDaemonStatusChanged }),
+      initialRouterEntries: ['/setup'],
+    });
+
+    await waitFor(() => expect(screen.getByText('Daemon is running.')).toBeInTheDocument());
+    expect(getDaemonStatus).toHaveBeenCalledTimes(1);
+    unmount();
+
+    renderInApp(<SetupStepDaemon onNext={() => {}} onBack={() => {}} />, {
+      client: makeClient(),
+      desktop: makeDesktop({ getDaemonStatus, onDaemonStatusChanged }),
+      initialRouterEntries: ['/setup'],
+    });
+
+    await waitFor(() => expect(screen.getByText('Daemon is running.')).toBeInTheDocument());
+    expect(getDaemonStatus).toHaveBeenCalledTimes(2);
+    expect(onDaemonStatusChanged).not.toHaveBeenCalled();
   });
 
   it('remains in loading state while daemon is starting', async () => {
@@ -234,7 +303,65 @@ describe('SetupStepDaemon', () => {
     await waitFor(() =>
       expect(screen.getByText(/Daemon is taking longer than expected to start/)).toBeInTheDocument(),
     );
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    expect(screen.queryByText('Starting daemon…')).not.toBeInTheDocument();
     vi.useRealTimers();
+  });
+
+  it('surfaces Retry when the 25s re-probe returns stopped (no permanent spinner)', async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const getDaemonStatus = vi
+      .fn()
+      .mockResolvedValueOnce({ state: 'starting', port: 8420 } as DaemonStatus)
+      .mockResolvedValueOnce({ state: 'stopped', port: 8420 } as DaemonStatus);
+    const onDaemonStatusChanged = vi.fn(() => Promise.resolve(() => {}));
+
+    renderInApp(<SetupStepDaemon onNext={() => {}} onBack={() => {}} />, {
+      client: makeClient(),
+      desktop: makeDesktop({ getDaemonStatus, onDaemonStatusChanged }),
+      initialRouterEntries: ['/setup'],
+    });
+
+    await waitFor(() => expect(getDaemonStatus).toHaveBeenCalled());
+    expect(screen.getByText('Starting daemon…')).toBeInTheDocument();
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(25_000);
+    });
+
+    await waitFor(() =>
+      expect(screen.getByText(/Daemon is taking longer than expected to start/)).toBeInTheDocument(),
+    );
+    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    expect(screen.queryByText('Starting daemon…')).not.toBeInTheDocument();
+    vi.useRealTimers();
+  });
+
+  it('unsubscribes when unmount races ahead of onDaemonStatusChanged resolving', async () => {
+    let resolveListen!: (unlisten: () => void) => void;
+    const unlisten = vi.fn();
+    const getDaemonStatus = vi.fn(() => Promise.resolve({ state: 'starting', port: 8420 } as DaemonStatus));
+    const onDaemonStatusChanged = vi.fn(
+      () =>
+        new Promise<() => void>((resolve) => {
+          resolveListen = resolve;
+        }),
+    );
+
+    const { unmount } = renderInApp(<SetupStepDaemon onNext={() => {}} onBack={() => {}} />, {
+      client: makeClient(),
+      desktop: makeDesktop({ getDaemonStatus, onDaemonStatusChanged }),
+      initialRouterEntries: ['/setup'],
+    });
+
+    await waitFor(() => expect(onDaemonStatusChanged).toHaveBeenCalledTimes(1));
+    unmount();
+
+    await act(async () => {
+      resolveListen(unlisten);
+    });
+
+    expect(unlisten).toHaveBeenCalledTimes(1);
   });
 
   it('surfaces getDaemonStatus errors as fallback to polling', async () => {
@@ -257,7 +384,8 @@ describe('SetupStepDaemon', () => {
     const startDaemon = vi.fn(() => Promise.resolve());
     const getDaemonStatus = vi
       .fn()
-      .mockResolvedValueOnce({ state: 'error', port: 8420, detail: 'port conflict' } as DaemonStatus);
+      .mockResolvedValueOnce({ state: 'error', port: 8420, detail: 'port conflict' } as DaemonStatus)
+      .mockResolvedValueOnce({ state: 'starting', port: 8420 } as DaemonStatus);
     let emitStatus: (status: DaemonStatus) => void;
     const onDaemonStatusChanged = vi.fn((callback: (status: DaemonStatus) => void) => {
       emitStatus = callback;
@@ -273,7 +401,8 @@ describe('SetupStepDaemon', () => {
     await waitFor(() => expect(startDaemon).toHaveBeenCalled());
     // Error detail should NOT be surfaced — auto-start handled the recovery.
     expect(screen.queryByText('port conflict')).not.toBeInTheDocument();
-    expect(screen.getByText('Starting daemon…')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('Starting daemon…')).toBeInTheDocument());
+    expect(onDaemonStatusChanged).toHaveBeenCalledTimes(1);
 
     // Daemon recovers after auto-start.
     await waitFor(() => {

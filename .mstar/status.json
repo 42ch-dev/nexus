@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-07-08T21:41:00+0800",
+  "updated_at": "2026-07-09T13:25:00+0800",
   "plans": [
     {
       "id": "2026-07-08-v1.99-prepare-visual-system-deepening",
@@ -8,9 +8,19 @@
       "file": ".mstar/plans/2026-07-08-v1.99-prepare-visual-system-deepening.md",
       "status": "Done",
       "owner": "@project-manager",
-      "agents": ["@product-manager", "@architect", "@writing-specialist"],
+      "agents": [
+        "@product-manager",
+        "@architect",
+        "@writing-specialist"
+      ],
       "progress": 100,
-      "tags": ["V1.99", "prepare", "design-system", "nexus-ui", "design-studio"],
+      "tags": [
+        "V1.99",
+        "prepare",
+        "design-system",
+        "nexus-ui",
+        "design-studio"
+      ],
       "created_at": "2026-07-08",
       "updated_at": "2026-07-08",
       "done_at": "2026-07-08",
@@ -35,9 +45,18 @@
       "file": ".mstar/plans/2026-07-08-v1.99-nexus-ui-component-promotion.md",
       "status": "Done",
       "owner": "@project-manager",
-      "agents": ["@frontend-dev", "@qc-specialist", "@qa-engineer"],
+      "agents": [
+        "@frontend-dev",
+        "@qc-specialist",
+        "@qa-engineer"
+      ],
       "progress": 100,
-      "tags": ["V1.99", "frontend", "nexus-ui", "component-library"],
+      "tags": [
+        "V1.99",
+        "frontend",
+        "nexus-ui",
+        "component-library"
+      ],
       "created_at": "2026-07-08",
       "updated_at": "2026-07-08",
       "done_at": "2026-07-08",
@@ -63,9 +82,18 @@
       "file": ".mstar/plans/2026-07-08-v1.99-surfaces-visual-direction.md",
       "status": "Done",
       "owner": "@project-manager",
-      "agents": ["@frontend-dev", "@qc-specialist", "@qa-engineer"],
+      "agents": [
+        "@frontend-dev",
+        "@qc-specialist",
+        "@qa-engineer"
+      ],
       "progress": 100,
-      "tags": ["V1.99", "visual", "design-studio", "surfaces"],
+      "tags": [
+        "V1.99",
+        "visual",
+        "design-studio",
+        "surfaces"
+      ],
       "created_at": "2026-07-08",
       "updated_at": "2026-07-08",
       "done_at": "2026-07-08",
@@ -90,9 +118,18 @@
       "file": ".mstar/plans/2026-07-08-v1.99-studio-first-ui-workflow.md",
       "status": "Done",
       "owner": "@project-manager",
-      "agents": ["@product-manager", "@architect", "@writing-specialist"],
+      "agents": [
+        "@product-manager",
+        "@architect",
+        "@writing-specialist"
+      ],
       "progress": 100,
-      "tags": ["V1.99", "workflow", "documentation", "skills-evaluation"],
+      "tags": [
+        "V1.99",
+        "workflow",
+        "documentation",
+        "skills-evaluation"
+      ],
       "created_at": "2026-07-08",
       "updated_at": "2026-07-08",
       "done_at": "2026-07-08",
@@ -118,9 +155,21 @@
       "file": ".mstar/plans/2026-07-08-v1.100-desktop-clean-state-first-launch.md",
       "status": "Done",
       "owner": "@project-manager",
-      "agents": ["@architect", "@fullstack-dev", "@frontend-dev", "@qc-specialist", "@qa-engineer"],
+      "agents": [
+        "@architect",
+        "@fullstack-dev",
+        "@frontend-dev",
+        "@qc-specialist",
+        "@qa-engineer"
+      ],
       "progress": 100,
-      "tags": ["V1.100", "desktop", "first-launch", "setup-wizard", "ui"],
+      "tags": [
+        "V1.100",
+        "desktop",
+        "first-launch",
+        "setup-wizard",
+        "ui"
+      ],
       "created_at": "2026-07-08",
       "updated_at": "2026-07-09",
       "done_at": "2026-07-09",
@@ -144,9 +193,20 @@
       "file": ".mstar/plans/2026-07-08-v1.100-ui-hygiene-guardrails.md",
       "status": "Done",
       "owner": "@project-manager",
-      "agents": ["@architect", "@frontend-dev", "@qc-specialist", "@qa-engineer"],
+      "agents": [
+        "@architect",
+        "@frontend-dev",
+        "@qc-specialist",
+        "@qa-engineer"
+      ],
       "progress": 100,
-      "tags": ["V1.100", "ui", "guardrails", "nexus-ui", "design-studio"],
+      "tags": [
+        "V1.100",
+        "ui",
+        "guardrails",
+        "nexus-ui",
+        "design-studio"
+      ],
       "created_at": "2026-07-08",
       "updated_at": "2026-07-08",
       "done_at": "2026-07-08",
@@ -170,9 +230,20 @@
       "file": ".mstar/plans/2026-07-08-v1.100-form-field-component-promotion.md",
       "status": "Done",
       "owner": "@project-manager",
-      "agents": ["@architect", "@frontend-dev", "@qc-specialist", "@qa-engineer"],
+      "agents": [
+        "@architect",
+        "@frontend-dev",
+        "@qc-specialist",
+        "@qa-engineer"
+      ],
       "progress": 100,
-      "tags": ["V1.100", "ui", "forms", "nexus-ui", "design-system"],
+      "tags": [
+        "V1.100",
+        "ui",
+        "forms",
+        "nexus-ui",
+        "design-system"
+      ],
       "created_at": "2026-07-08",
       "updated_at": "2026-07-08",
       "done_at": "2026-07-08",
@@ -191,16 +262,143 @@
         "execution_mode": "sdd",
         "qa_gate": "mandatory"
       }
+    },
+    {
+      "id": "2026-07-09-v1.101-agent-detection-picker",
+      "title": "P0 — Agent Detection & AgentPicker",
+      "file": ".mstar/plans/2026-07-09-v1.101-agent-detection-picker.md",
+      "status": "Done",
+      "owner": "@project-manager",
+      "agents": [
+        "@product-manager",
+        "@architect",
+        "@frontend-dev",
+        "@fullstack-dev",
+        "@qc-specialist",
+        "@qa-engineer"
+      ],
+      "progress": 100,
+      "tags": [
+        "V1.101",
+        "desktop",
+        "setup",
+        "agent-picker",
+        "studio-first"
+      ],
+      "created_at": "2026-07-09",
+      "updated_at": "2026-07-09",
+      "notes": "Done: SDD T1-T4 + QC Approve with residuals (fix-wave-1) + QA Pass. R-V1100P0SMOKE-AGENT-SCAN resolved. Residuals R-V1101P0-001..004.",
+      "metadata": {
+        "priority": "high",
+        "spec_integration_branch": "iteration/v1.101",
+        "merge_target": "iteration/v1.101",
+        "iteration_compass": ".mstar/iterations/v1.101-delivery-compass.md",
+        "iteration_refs": [
+          ".mstar/iterations/v1.101/specs/agent-picker-and-detection.md",
+          ".mstar/iterations/v1.101/guides/studio-first-visual-then-app.md"
+        ],
+        "primary_spec": ".mstar/iterations/v1.101/specs/agent-picker-and-detection.md",
+        "execution_mode": "sdd",
+        "qa_gate": "mandatory",
+        "stretch": false,
+        "working_branch": "plan/v1.101-p0-agent-detection-picker"
+      },
+      "done_at": "2026-07-09"
+    },
+    {
+      "id": "2026-07-09-v1.101-setup-wizard-ui-polish",
+      "title": "P1 — Setup Wizard UI Polish",
+      "file": ".mstar/plans/2026-07-09-v1.101-setup-wizard-ui-polish.md",
+      "status": "Done",
+      "owner": "@project-manager",
+      "agents": [
+        "@product-manager",
+        "@frontend-dev",
+        "@qc-specialist",
+        "@qa-engineer"
+      ],
+      "progress": 100,
+      "tags": [
+        "V1.101",
+        "desktop",
+        "setup",
+        "ui-polish",
+        "studio-first"
+      ],
+      "created_at": "2026-07-09",
+      "updated_at": "2026-07-09",
+      "notes": "Done: SDD T1-T4 + QC Approve (fix-wave-1) + QA Pass. BACK/STEPS/POLL closed. Residuals R-V1101P1-001..002 nit.",
+      "metadata": {
+        "priority": "high",
+        "spec_integration_branch": "iteration/v1.101",
+        "merge_target": "iteration/v1.101",
+        "iteration_compass": ".mstar/iterations/v1.101-delivery-compass.md",
+        "iteration_refs": [
+          ".mstar/iterations/v1.101/specs/setup-wizard-ui-polish.md",
+          ".mstar/iterations/v1.101/guides/studio-first-visual-then-app.md"
+        ],
+        "primary_spec": ".mstar/iterations/v1.101/specs/setup-wizard-ui-polish.md",
+        "execution_mode": "sdd",
+        "qa_gate": "mandatory",
+        "stretch": false,
+        "working_branch": "plan/v1.101-p1-setup-wizard-ui-polish"
+      },
+      "done_at": "2026-07-09"
+    },
+    {
+      "id": "2026-07-09-v1.101-select-component-promotion",
+      "title": "P2 — Select Component Promotion (Stretch)",
+      "file": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
+      "status": "Done",
+      "owner": "@project-manager",
+      "agents": [
+        "@architect",
+        "@frontend-dev",
+        "@qc-specialist",
+        "@qa-engineer"
+      ],
+      "progress": 100,
+      "tags": [
+        "V1.101",
+        "design-system",
+        "nexus-ui",
+        "select",
+        "stretch"
+      ],
+      "created_at": "2026-07-09",
+      "updated_at": "2026-07-09",
+      "notes": "QA Pass @ 0205f3ab (acceptance-only). QC Approve. Residuals R-V1101P2-001..005 defer open; R-V1100P1QC1-W002 pre-existing.",
+      "metadata": {
+        "priority": "medium",
+        "blocked_by_plan_id": "2026-07-09-v1.101-setup-wizard-ui-polish",
+        "spec_integration_branch": "iteration/v1.101",
+        "merge_target": "iteration/v1.101",
+        "iteration_compass": ".mstar/iterations/v1.101-delivery-compass.md",
+        "iteration_refs": [
+          ".mstar/iterations/v1.101/specs/select-promotion-contract.md",
+          ".mstar/iterations/v1.101/guides/studio-first-visual-then-app.md"
+        ],
+        "primary_spec": ".mstar/iterations/v1.101/specs/select-promotion-contract.md",
+        "execution_mode": "sdd",
+        "qa_gate": "mandatory",
+        "stretch": true,
+        "working_branch": "plan/v1.101-p2-select-component-promotion",
+        "feature_branch": "plan/v1.101-p2-select-component-promotion",
+        "product_head": "0205f3ab",
+        "qc_decision": "Approve",
+        "qa_decision": "Pass"
+      },
+      "done_at": "2026-07-09"
     }
   ],
   "metadata": {
     "integration_branch_retired": true,
     "last_integration_branch": "iteration/v1.97",
     "iteration_base_branch": "main",
-    "spec_integration_branch": "iteration/v1.100",
+    "spec_integration_branch": "iteration/v1.101",
     "target_branch": "main",
-    "latest_active_iteration": "V1.100",
-    "latest_active_compass": "v1.100-delivery-compass.md",
+    "latest_active_iteration": "V1.101",
+    "latest_active_compass": "v1.101-delivery-compass.md",
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/specs/README.md",
@@ -213,36 +411,20 @@
       "merge_commit": "901191a1"
     },
     "tech_debt_summary": {
-      "updated_at": "2026-07-08",
-      "total_open": 26,
+      "updated_at": "2026-07-09",
+      "total_open": 39,
       "by_severity": {
-        "critical": 0,
-        "high": 1,
-        "medium": 2,
-        "low": 19,
-        "nit": 4
+        "nit": 14,
+        "low": 24,
+        "medium": 1
       },
-      "by_target": {
-        "V1.96": 14,
-        "V1.96 spec-hygiene pass": 1,
-        "V1.97": 4,
-        "V1.97+": 1,
-        "V1.98": 4,
-        "V1.98+": 1,
-        "post-V1.99": 4,
-        "when list virtualisation lands": 1
-      },
-      "by_plan": {
-        "2026-07-05-v1.91-findings-batch": 1,
-        "2026-07-05-v1.92-closure": 1,
-        "2026-07-06-v1.93-closure": 1,
-        "2026-07-06-v1.94-closure": 9,
-        "2026-07-07-v1.95-implement-fixes": 4,
-        "2026-07-07-v1.96-implement-rework": 5,
-        "2026-07-07-v1.97-desktop-first-launch-hardening": 5
-      }
+      "by_target": {},
+      "by_plan": {}
     },
-    "updated_at": "2026-07-08T21:41:00+0800"
+    "updated_at": "2026-07-09T14:50:00+0800",
+    "active_iteration": "V1.101",
+    "iteration_status": "completed",
+    "iteration_close_date": "2026-07-09"
   },
   "residual_findings": {
     "2026-07-05-v1.91-findings-batch": [
@@ -646,10 +828,10 @@
         "severity": "low",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "P2",
+        "target": "post-V1.101",
         "lifecycle": "open",
         "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
-        "note": "Fix: single PROMOTED_PRIMITIVES array at top of check-ui-guardrails.sh. P2 adds input/label/textarea anyway. QC source: qc1 W-002"
+        "note": "Fix: single PROMOTED_PRIMITIVES array at top of check-ui-guardrails.sh. P2 adds input/label/textarea anyway. QC source: qc1 W-002 V1.101 P2 updated select in both script sites but did not introduce single PROMOTED_PRIMITIVES array (QC1 S-001)."
       },
       {
         "id": "R-V1100P1QC2-W001",
@@ -740,50 +922,133 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/sdd/2026-07-08-v1.100-desktop-clean-state-first-launch/review/qc-consolidated.md",
         "note": "Not blocking; defer to a dep-slim pass. QC source: P0 qc3 S-002"
-      },
+      }
+    ],
+    "2026-07-09-v1.101-agent-detection-picker": [
       {
-        "id": "R-V1100P0SMOKE-UI-BACK",
-        "title": "Setup wizard Back button position is incorrect (smoke observation)",
+        "id": "R-V1101P0-001",
+        "title": "@web-setup/* aliases entire components/setup/ tree — prefer file-scoped alias or guardrail",
         "severity": "low",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "V1.101+ (desktop UI polish)",
+        "target": "V1.102+",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-08-v1.100-desktop-clean-state-first-launch.md",
-        "note": "Pre-existing UI issue surfaced during V1.100 P0 clean-state smoke. Not introduced by P0 bootstrap work. User requested deferral to future UI iteration."
+        "tracking_link": ".mstar/plans/2026-07-09-v1.101-agent-detection-picker.md",
+        "note": "QC3 F-003. Current fixtures only import agent-picker; directory alias could pull wizard modules into Studio."
       },
       {
-        "id": "R-V1100P0SMOKE-UI-STEPS",
-        "title": "Setup wizard sidebar Steps indicator displays abnormally (smoke observation)",
+        "id": "R-V1101P0-002",
+        "title": "desktop-shell.md still describes Recommended badge; UI uses status dots / auto-select",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@writing-specialist",
+        "target": "V1.101 P1 or V1.102",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-09-v1.101-agent-detection-picker.md",
+        "note": "QC2 F-006 doc drift."
+      },
+      {
+        "id": "R-V1101P0-003",
+        "title": "Document Class B PATH enrichment locus + finite common-dir / custom-launch escape hatch",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@architect",
+        "target": "post-V1.101",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-09-v1.101-agent-detection-picker.md",
+        "note": "QC1 F-003 / QC3 F-004. asdf/mise added in fix-wave; exotic PATH still custom-launch."
+      },
+      {
+        "id": "R-V1101P0-004",
+        "title": "P0 feature branch diff includes sibling V1.101 plan/spec scaffolding from iteration-start",
+        "severity": "nit",
+        "decision": "accept",
+        "owner": "@project-manager",
+        "target": "accept",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-09-v1.101-agent-detection-picker.md",
+        "note": "QC1 F-005 process note; squash/integration scope hygiene."
+      }
+    ],
+    "2026-07-09-v1.101-setup-wizard-ui-polish": [
+      {
+        "id": "R-V1101P1-001",
+        "title": "Optional Back click-through polish from QC2 F-002",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.101",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-09-v1.101-setup-wizard-ui-polish.md",
+        "note": "Non-blocking QC suggestion after Approve."
+      },
+      {
+        "id": "R-V1101P1-002",
+        "title": "data-layout on single-button CTAs (welcome/done)",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.101",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-09-v1.101-setup-wizard-ui-polish.md",
+        "note": "QC2 F-003 suggestion."
+      }
+    ],
+    "2026-07-09-v1.101-select-component-promotion": [
+      {
+        "id": "R-V1101P2-001",
+        "title": "Studio AGENTS transitional prose still generic (V1.98→V1.99) while Forbidden lists Select as promoted",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.101",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
+        "note": "QC3-S001 after revalidation Approve. Non-blocking."
+      },
+      {
+        "id": "R-V1101P2-002",
+        "title": "Studio AGENTS Allowed table still says “V1.99-approved presentational primitives”",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.101",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
+        "note": "QC1 S-002. Optional doc tidy."
+      },
+      {
+        "id": "R-V1101P2-003",
+        "title": "Studio invalid Select fixture uses -helper suffix on role=alert error node",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.101",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
+        "note": "QC2 F-001. Prefer …-error for parity with form-field fixtures."
+      },
+      {
+        "id": "R-V1101P2-004",
+        "title": "Package Select tests lack consumer aria-invalid override case (Input parity)",
         "severity": "low",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "V1.101+ (desktop UI polish)",
+        "target": "post-V1.101",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-08-v1.100-desktop-clean-state-first-launch.md",
-        "note": "Pre-existing UI issue surfaced during V1.100 P0 smoke. Not introduced by P0. Defer to future UI iteration."
+        "tracking_link": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
+        "note": "QC2 F-002. Behavior matches Input; explicit override test would lock spread-order."
       },
       {
-        "id": "R-V1100P0SMOKE-UI-POLL",
-        "title": "Daemon status detection interval inconsistent: fast Back-re-entry shows 'running' immediately, but waiting shows delay before 'running' — polling interval / race issue",
-        "severity": "low",
+        "id": "R-V1101P2-005",
+        "title": "packages/nexus-ui/src/index.ts header still frames package as V1.99-approved",
+        "severity": "nit",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "V1.101+ (desktop UI polish)",
+        "target": "post-V1.101",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-08-v1.100-desktop-clean-state-first-launch.md",
-        "note": "Pre-existing polling/timing issue in setup-step-daemon status subscription. Not a P0 blocker (daemon does reach running). Defer to future UI iteration."
-      },
-      {
-        "id": "R-V1100P0SMOKE-AGENT-SCAN",
-        "title": "Agent selection step does not display locally-available agent CLIs (smoke observation)",
-        "severity": "medium",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target": "V1.101+ (agent detection)",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-08-v1.100-desktop-clean-state-first-launch.md",
-        "note": "Agent scan/detection in setup wizard does not surface local agent CLIs. Pre-existing; beyond P0 bootstrap scope. Defer to a dedicated agent-detection iteration."
+        "tracking_link": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
+        "note": "QC2 F-003. Cosmetic; Select export comment already cites V1.101."
       }
     ]
   }

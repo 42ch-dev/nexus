@@ -1,8 +1,20 @@
 import { useState, type ReactNode } from 'react';
 
-import { cn, Badge, Button, Card, CardHeader, CardTitle, CardDescription, CardContent, Input, Label, Textarea } from '@42ch/nexus-ui';
+import {
+  cn,
+  Badge,
+  Button,
+  Card,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+  CardContent,
+  Input,
+  Label,
+  Textarea,
+  Select,
+} from '@42ch/nexus-ui';
 import { Dialog, DialogTrigger, DialogContent } from '@web-ui/dialog'; // transitional — keep-web (Radix portal/focus-trap beyond presentational scope)
-import { Select } from '@web-ui/select'; // transitional — keep-web (native select wrapper; no cross-app demand proven yet)
 import { Spinner, LoadingState, EmptyState, ErrorState } from '@web-ui/states'; // transitional — keep-web (lucide-react asset boundary; product copy & app-composition callbacks)
 import {
   Table,
@@ -354,49 +366,167 @@ function LabelSection() {
 /*  7. Select                                                           */
 /* ------------------------------------------------------------------ */
 
+function SelectOptionList({ options }: { options: string[] }) {
+  return (
+    <>
+      {options.map((o) => (
+        <option key={o} value={o}>
+          {o}
+        </option>
+      ))}
+    </>
+  );
+}
+
+/**
+ * Select gallery — V1.101 P2 visual acceptance fixtures.
+ *
+ * Source: `@42ch/nexus-ui` (promoted native `<select>`). Web keeps a thin
+ * re-export under `apps/web/src/components/ui/select.tsx`.
+ *
+ * Open/expanded is UA-owned for native `<select>` — no package `open` prop.
+ * The “open (manual)” row documents keyboard/pointer acceptance; automated
+ * tests assert closed-control attributes and focus-visible class path only.
+ */
 function SelectSection() {
   const options = ['Option A', 'Option B', 'Option C'];
+  const closedId = 'studio-select-closed';
+  const invalidId = 'studio-select-invalid';
+  const invalidHelperId = `${invalidId}-helper`;
+  const focusId = 'studio-select-focus';
 
   return (
-    <section>
+    <section data-testid="select-fixtures">
       <SectionHeading id="comp-select">Select</SectionHeading>
-      <p className="text-copy-16 text-gray-700 mb-6">
-        Native styled select — default, disabled, and invalid states. Uses the native
-        element for accessibility; DESIGN.md control styling applied.
+      <p className="text-copy-16 text-gray-700 mb-2">
+        Native styled select per the locked V1.101 Select promotion contract —
+        closed default, disabled, invalid, and focus-visible. Uses the native
+        element for accessibility; DESIGN.md{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          input-select-textarea
+        </code>{' '}
+        tokens. Imported directly from{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @42ch/nexus-ui
+        </code>
+        .
       </p>
-      <MatrixCard>
+      <p className="text-copy-13 text-gray-500 mb-6">
+        Open listbox chrome is UA-owned — Tab to the control, then Space /
+        Enter / Alt+↓ (platform-dependent) to open. Automated Studio tests do
+        not drive OS listbox UI.
+      </p>
+
+      <p className="text-label-14 text-gray-900 mb-4">
+        States — closed, disabled, invalid
+      </p>
+      <MatrixCard className="mb-6">
         <div className="flex flex-col gap-4 max-w-md">
           <MatrixRow>
-            <VariantLabel label="default" />
-            <Select className="flex-1">
-              {options.map((o) => (
-                <option key={o} value={o}>
-                  {o}
-                </option>
-              ))}
-            </Select>
+            <VariantLabel label="closed" />
+            <div className="flex flex-col gap-1.5 flex-1">
+              <Label htmlFor={closedId}>Work profile</Label>
+              <Select
+                id={closedId}
+                data-testid="select-fixture-closed"
+                className="w-full"
+                defaultValue="Option A"
+              >
+                <SelectOptionList options={options} />
+              </Select>
+            </div>
           </MatrixRow>
           <MatrixRow>
             <VariantLabel label="disabled" />
-            <Select disabled className="flex-1">
-              {options.map((o) => (
-                <option key={o} value={o}>
-                  {o}
-                </option>
-              ))}
+            <Select
+              disabled
+              data-testid="select-fixture-disabled"
+              className="flex-1"
+              defaultValue="Option A"
+              aria-label="Disabled select fixture"
+            >
+              <SelectOptionList options={options} />
             </Select>
           </MatrixRow>
           <MatrixRow>
             <VariantLabel label="invalid" />
-            <Select invalid className="flex-1">
-              {options.map((o) => (
-                <option key={o} value={o}>
-                  {o}
-                </option>
-              ))}
-            </Select>
+            <div className="flex flex-col gap-1.5 flex-1">
+              <Label htmlFor={invalidId}>Executor</Label>
+              <Select
+                id={invalidId}
+                invalid
+                data-testid="select-fixture-invalid"
+                className="w-full"
+                defaultValue="Option A"
+                aria-describedby={invalidHelperId}
+              >
+                <SelectOptionList options={options} />
+              </Select>
+              <p id={invalidHelperId} className="text-copy-13 text-red-700" role="alert">
+                Choose a valid executor.
+              </p>
+            </div>
           </MatrixRow>
         </div>
+      </MatrixCard>
+
+      <p className="text-label-14 text-gray-900 mb-4">
+        Focus-visible (Tab to see border + global ring)
+      </p>
+      <MatrixCard className="mb-6">
+        <div className="flex flex-col gap-1.5 max-w-md">
+          <Label htmlFor={focusId}>Focus target</Label>
+          <Select
+            id={focusId}
+            data-testid="select-fixture-focus"
+            className="w-full"
+            defaultValue="Option B"
+          >
+            <SelectOptionList options={options} />
+          </Select>
+        </div>
+        <p className="text-copy-13 text-gray-500 mt-4">
+          Press{' '}
+          <kbd className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">Tab</kbd>{' '}
+          onto the control — package class{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            focus-visible:border-blue-700
+          </code>{' '}
+          plus the global two-layer ring from{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            src/index.css
+          </code>
+          .
+        </p>
+      </MatrixCard>
+
+      <p className="text-label-14 text-gray-900 mb-4">
+        Open (manual visual acceptance)
+      </p>
+      <MatrixCard>
+        <div className="flex flex-col gap-1.5 max-w-md">
+          <Label htmlFor="studio-select-open-manual">Open listbox manually</Label>
+          <Select
+            id="studio-select-open-manual"
+            data-testid="select-fixture-open-manual"
+            className="w-full"
+            defaultValue="Option A"
+          >
+            <SelectOptionList options={options} />
+          </Select>
+        </div>
+        <p className="text-copy-13 text-gray-500 mt-4">
+          With the control focused, open the native list (Space / Enter /
+          Alt+↓). There is no package{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            open
+          </code>{' '}
+          or{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            aria-expanded
+          </code>{' '}
+          API — expanded state stays with the user agent (contract §5.3).
+        </p>
       </MatrixCard>
     </section>
   );
@@ -719,8 +849,8 @@ export function ComponentsPage() {
       <FormFieldSection />
 
       <p className="text-copy-13 text-gray-500 mt-12 pt-8 border-t border-gray-alpha-200">
-        6 promoted (Badge, Button, Card, Input, Label, Textarea) + 5
-        transitional (Dialog, Select, States, Table, Tabs) = 11 primitive
+        7 promoted (Badge, Button, Card, Input, Label, Textarea, Select) + 4
+        transitional (Dialog, States, Table, Tabs) = 11 primitive
         modules from the{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">apps/web/src/components/ui</code>{' '}
         barrel — all rendered live via{' '}

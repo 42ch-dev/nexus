@@ -1,12 +1,10 @@
 # Deferred Features — Cross-Version Tracker v2
 
-**Quick status**: **V1.94 active (Phase 3 close done; PR pending Phase 4)** — Desktop App Onboarding & IA Pass (5 author-reported UX defects + tailwind-merge root cause fix). V1.93 shipped (2026-07-06 via PR #121, merge `aec54e98`). Platform **paused**.
-
-**V1.94 closed (2026-07-06, Phase 3; PR Phase 4 next)**: Desktop App Onboarding & IA Pass — 4-step setup wizard + per-launch daemon-ready gate + two-tab sidebar IA (Creator | Orchestrator) + footer profile switcher + restart-icon daemon status bar + Strategies unification. Additive `POST /v1/daemon/agent-host/scan`. Mid-Phase-3 user clarification on contrast rule triggered audit that found the real root cause of the original button-contrast complaint: `tailwind-merge` was silently stripping `text-white` because it didn't recognize custom font-size tokens. Fix corrected both the symptom and a latent typography regression across 181 call sites. `@42ch/nexus-contracts` 0.20.0 → 0.21.0. QC 3/3 Approve (twice); QA Pass. 9 V1.95-deferred residuals registered.
+**Quick status**: **V1.101 completed (awaiting PR merge)** — Desktop setup polish + AgentPicker (Must) + Select stretch shipped on `iteration/v1.101`. Settings shell remains DF-70. V1.100 shipped (PR #130). Platform **paused**.
 
 **Purpose**: Single source of truth for **open** and **backlog** features deferred from delivery compasses. Closed/shipped history lives in shipped archive.
 **Scope**: `nexus` OSS repository only.
-**Created**: 2026-04-21 · **Last updated**: 2026-07-06 (V1.94 iteration-close)
+**Created**: 2026-04-21 · **Last updated**: 2026-07-09 (V1.101 iteration-close — AgentPicker shipped app-shared; DF-70 still open; Select stretch Done)
 
 ---
 
@@ -50,7 +48,8 @@
 | DF-47 | Host tool + `worker/agent_tool_request` unified registry | V1.34 audit | V1.42 P3 Narrowed | M | V1.34→V1.42 | V1.42 P3 shipped `DaemonToolDispatchAdapter` + `HostToolCallTask` + one tool proven E2E. |
 | DF-55 | `nexus.context.assemble` cloud/platform path | V1.34 | V2.0+ | M | V1.34 | Local/read-only or `policy_blocked` (PD-05). |
 | DF-59 | Platform publish integration for novel | V1.36 prepare | Backlog | L | V1.36 | Platform dependency. |
-| FEAT-WASM-COMPUTE | **Programmable Narrative Progression** — WASM compute for timeline narrative | V1.61 | **V1.61 (Prepare active)** | XL | V1.61 | Core differentiator: wasmtime + KB structured layer (attributes/state/computable) + `narrative.compute` capability + `combat-engine` preset + `basic-combat` sample. 6 plans, 4 waves. Canvas: `canvases/programmable-narrative-progression.canvas.tsx`. Compass: [v1.61-programmable-narrative-progression-delivery-compass-v1.md](../iterations/v1.61-programmable-narrative-progression-delivery-compass-v1.md). V2 deferred: Generic Combat Protocol, CDN distrib, 3P game bridge, marketplace, GPU/SIMD. |
+| DF-70 | **App Settings shell** (sidebar IA + pages hosting reusable AgentPicker / execution-mode settings) | V1.101 | V1.102+ | M | V1.101 | V1.101 Must **shipped** reusable app-shared `AgentPicker` at `apps/web/src/components/setup/agent-picker.tsx` (not `@42ch/nexus-ui`); no settings route/shell yet. BYOK remains out. Trigger: V1.101 PR merge + product priority. |
+| FEAT-WASM-COMPUTE | **Programmable Narrative Progression** — WASM compute for timeline narrative | V1.61 | **Shipped (V1.61)** — V2 backlog | XL | V1.61 | Core differentiator shipped in V1.61: wasmtime + KB structured layer + `narrative.compute` + `combat-engine` preset. Compass: [v1.61-programmable-narrative-progression-delivery-compass-v1.md](../iterations/v1.61-programmable-narrative-progression-delivery-compass-v1.md). V2 deferred: Generic Combat Protocol, CDN distrib, 3P game bridge, marketplace, GPU/SIMD. |
 
 ### 2.4 Backlog (no committed target)
 
@@ -92,9 +91,9 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 ## 5) Quick index
 
-**Active iteration**: none (V1.94 Phase 3 close done; PR pending Phase 4; integration branch `iteration/v1.94` active until PR merges).
+**Active iteration**: [V1.101](../iterations/v1.101-delivery-compass.md) (**completed** close — awaiting PR; `iteration/v1.101`).
 
-**Latest shipped**: [V1.93](../iterations/v1.93-remote-access-polish-delivery-compass-v1.md) (Remote-Access Polish & Residual Convergence — PR [#121](https://github.com/42ch-dev/nexus/pull/121), merge `aec54e98` — 2026-07-06). V1.94 PR pending Phase 4.
+**Latest shipped**: [V1.100](../iterations/v1.100-delivery-compass.md) (UI Completion — PR [#130](https://github.com/42ch-dev/nexus/pull/130) — 2026-07-09).
 
 **Full iteration index**: [iterations/README.md](../iterations/README.md)
 

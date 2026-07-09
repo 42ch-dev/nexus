@@ -1,10 +1,14 @@
 import { useEffect, useMemo } from 'react';
-import { Check, Loader2, Terminal } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
+import {
+  AgentPicker,
+  type AgentPickerItem,
+  type AgentPickerStatus,
+} from '@/components/setup/agent-picker';
 import { useScanAgents } from '@/api/queries';
+import { errorMessage } from '@/lib/error-message';
+import { lookupAgentOutboundUrls } from '@/pages/setup-agent-urls';
 import type { AgentScanEntry } from '@42ch/nexus-contracts';
 import type { WizardState } from '@/pages/setup-wizard-page';
 
@@ -15,35 +19,145 @@ interface SetupStepAgentProps {
   onBack: () => void;
 }
 
+/** Base picker id for a scan entry (registry id preferred). */
+export function agentPickerId(agent: AgentScanEntry): string {
+  return (agent.registry_agent_id?.trim() || agent.name).trim();
+}
+
+/**
+ * Assign collision-safe picker ids for a scan list.
+ *
+ * Duplicate `registry_agent_id` / name values get a `#n` suffix so map lookups
+ * and React keys stay unique (QC B6).
+ */
+export function assignCollisionSafePickerIds(
+  agents: AgentScanEntry[],
+): string[] {
+  const seen = new Map<string, number>();
+  return agents.map((agent) => {
+    const base = agentPickerId(agent);
+    const count = seen.get(base) ?? 0;
+    seen.set(base, count + 1);
+    return count === 0 ? base : `${base}#${count}`;
+  });
+}
+
+/** Map wire scan entries → presentational picker items (+ static URL table). */
+export function mapScanEntriesToPickerItems(
+  agents: AgentScanEntry[],
+): AgentPickerItem[] {
+  const ids = assignCollisionSafePickerIds(agents);
+  return agents.map((agent, index) => {
+    const urls = lookupAgentOutboundUrls(agent.registry_agent_id, agent.name);
+    return {
+      id: ids[index]!,
+      name: agent.name,
+      version: agent.version,
+      description: agent.description,
+      installed: agent.installed,
+      installUrl: urls.installUrl ?? null,
+      docsUrl: urls.docsUrl ?? null,
+    };
+  });
+}
+
+/**
+ * Build a collision-safe id → scan-entry map (same ids as picker items).
+ */
+export function buildAgentsByPickerId(
+  agents: AgentScanEntry[],
+): Map<string, AgentScanEntry> {
+  const ids = assignCollisionSafePickerIds(agents);
+  const map = new Map<string, AgentScanEntry>();
+  agents.forEach((agent, index) => {
+    map.set(ids[index]!, agent);
+  });
+  return map;
+}
+
+function resolvePickerStatus(
+  isLoading: boolean,
+  isError: boolean,
+  agentCount: number,
+): AgentPickerStatus {
+  if (isLoading) return 'loading';
+  if (isError) return 'error';
+  if (agentCount === 0) return 'empty';
+  return 'ready';
+}
+
 export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAgentProps) {
   const scan = useScanAgents({ filter: 'all', registry_refresh: true });
   const agents = scan.data?.agents ?? [];
-  const recommendedIndex = useMemo(
-    () => agents.findIndex((a) => a.installed),
+  const pickerItems = useMemo(() => mapScanEntriesToPickerItems(agents), [agents]);
+  const status = resolvePickerStatus(scan.isLoading, scan.isError, agents.length);
+
+  const agentsById = useMemo(() => buildAgentsByPickerId(agents), [agents]);
+
+  const firstInstalled = useMemo(
+    () => agents.find((a) => a.installed) ?? null,
     [agents],
   );
 
-  // Default to the first installed agent.
-  useEffect(() => {
-    if (state.selectedAgent || state.customLaunchCommand) return;
-    if (recommendedIndex >= 0) {
-      onChange({ ...state, selectedAgent: agents[recommendedIndex] });
-    }
-  }, [recommendedIndex, agents, state, onChange]);
+  const selectedAgent = state.selectedAgent;
+  const customLaunchCommand = state.customLaunchCommand;
+  const workspaceRoot = state.workspaceRoot;
+  const workspacePicked = state.workspacePicked;
 
-  function selectAgent(agent: AgentScanEntry) {
-    onChange({ ...state, selectedAgent: agent, customLaunchCommand: '' });
+  // Default to the first installed agent (profile path).
+  // Narrow deps (QC B3): do not depend on the whole `state` object.
+  useEffect(() => {
+    if (selectedAgent || customLaunchCommand.trim()) return;
+    if (!firstInstalled) return;
+    onChange({
+      workspaceRoot,
+      workspacePicked,
+      selectedAgent: firstInstalled,
+      customLaunchCommand: '',
+    });
+  }, [
+    firstInstalled,
+    selectedAgent,
+    customLaunchCommand,
+    workspaceRoot,
+    workspacePicked,
+    onChange,
+  ]);
+
+  function selectById(id: string) {
+    const agent = agentsById.get(id);
+    if (!agent?.installed) return;
+    onChange({
+      workspaceRoot,
+      workspacePicked,
+      selectedAgent: agent,
+      customLaunchCommand: '',
+    });
   }
 
   function useCustom(command: string) {
     onChange({
-      ...state,
+      workspaceRoot,
+      workspacePicked,
       selectedAgent: null,
       customLaunchCommand: command,
     });
   }
 
-  const canContinue = Boolean(state.selectedAgent || state.customLaunchCommand.trim());
+  const selectedId = useMemo(() => {
+    if (!selectedAgent) return null;
+    for (const [id, agent] of agentsById) {
+      if (
+        agent.registry_agent_id === selectedAgent.registry_agent_id &&
+        agent.name === selectedAgent.name
+      ) {
+        return id;
+      }
+    }
+    return agentPickerId(selectedAgent);
+  }, [selectedAgent, agentsById]);
+
+  const canContinue = Boolean(selectedAgent || customLaunchCommand.trim());
 
   return (
     <div className="flex flex-col gap-6">
@@ -54,68 +168,30 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
         </p>
       </div>
 
-      <div className="flex min-h-[160px] flex-col gap-3 rounded-card border border-gray-alpha-400 bg-background-200 p-4">
-        {scan.isLoading ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-2">
-            <Loader2 className="h-5 w-5 animate-spin text-blue-700" aria-hidden />
-            <span className="text-copy-14 text-gray-900">Scanning for local ACP agents…</span>
-          </div>
-        ) : agents.length === 0 ? (
-          <div className="flex flex-col gap-3">
-            <p className="text-copy-14 text-gray-900">No agents found on PATH.</p>
-            <CustomLaunchCommand value={state.customLaunchCommand} onChange={useCustom} />
-          </div>
-        ) : (
-          <ul className="flex flex-col gap-2">
-            {agents.map((agent, index) => {
-              const selected = state.selectedAgent?.name === agent.name;
-              const recommended = index === recommendedIndex;
-              return (
-                <li key={agent.name}>
-                  <button
-                    type="button"
-                    onClick={() => selectAgent(agent)}
-                    aria-pressed={selected}
-                    className={[
-                      'flex w-full items-center justify-between gap-3 rounded-control border p-3 text-left transition-colors',
-                      selected
-                        ? 'border-blue-700 bg-blue-700/8'
-                        : 'border-gray-alpha-400 bg-background-100 hover:bg-gray-alpha-100',
-                    ].join(' ')}
-                  >
-                    <div className="flex flex-col">
-                      <span className={['text-copy-14 font-medium', selected ? 'text-gray-1000' : 'text-gray-1000'].join(' ')}>
-                        {agent.name}
-                      </span>
-                      {agent.version && (
-                        <span className="text-copy-13 text-gray-700">Version {agent.version}</span>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {recommended && (
-                        <span className="rounded-pill bg-green-700 px-2 py-0.5 text-label-12 text-white dark:text-brand-deep-blue">Recommended</span>
-                      )}
-                      {agent.installed ? (
-                        <>
-                          <Check className="h-4 w-4 text-green-800" aria-hidden />
-                          <span className="text-copy-13 text-gray-700">Installed</span>
-                        </>
-                      ) : (
-                        <span className="text-copy-13 text-gray-700">Not installed</span>
-                      )}
-                    </div>
-                  </button>
-                </li>
-              );
-            })}
-            <li className="mt-2 border-t border-gray-alpha-400 pt-3">
-              <CustomLaunchCommand value={state.customLaunchCommand} onChange={useCustom} />
-            </li>
-          </ul>
-        )}
-      </div>
+      <AgentPicker
+        status={status}
+        agents={status === 'ready' ? pickerItems : []}
+        selectedId={selectedId}
+        onSelect={selectById}
+        customLaunchValue={customLaunchCommand}
+        onCustomLaunchChange={useCustom}
+        errorDescription={
+          scan.isError
+            ? errorMessage(scan.error) || 'The daemon did not respond to the agent scan request.'
+            : undefined
+        }
+        onRetry={scan.isError ? () => void scan.refetch() : undefined}
+        emptyTitle="No agents found on PATH."
+      />
 
-      <div className="flex flex-col gap-setup-wizard-surface-cta-container-gap mt-auto">
+      <div
+        className="mt-auto flex items-center gap-setup-wizard-surface-cta-container-gap"
+        data-testid="wizard-cta-row"
+        data-layout="horizontal-adjacent"
+      >
+        <Button variant="tertiary" onClick={onBack}>
+          Back
+        </Button>
         <Button
           variant="primary"
           onClick={onNext}
@@ -124,27 +200,7 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
         >
           Continue
         </Button>
-        <Button variant="tertiary" onClick={onBack} className="self-start">
-          Back
-        </Button>
       </div>
-    </div>
-  );
-}
-
-function CustomLaunchCommand({ value, onChange }: { value: string; onChange: (command: string) => void }) {
-  return (
-    <div className="flex flex-col gap-2">
-      <Label htmlFor="custom-launch-command" className="flex items-center gap-1.5 text-copy-14 text-gray-900">
-        <Terminal className="h-4 w-4 text-gray-700" aria-hidden />
-        Use custom launch command
-      </Label>
-      <Input
-        id="custom-launch-command"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder="e.g. /usr/local/bin/my-agent"
-      />
     </div>
   );
 }

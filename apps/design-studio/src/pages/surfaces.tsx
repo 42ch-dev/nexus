@@ -1,17 +1,13 @@
 import type { ReactNode } from 'react';
 
-import { cn, Badge, Button, Card, Label } from '@42ch/nexus-ui';
+import { cn, Badge } from '@42ch/nexus-ui';
+
+import { AgentPickerFixtures } from '@/fixtures/agent-picker-fixtures';
+import { SetupWizardChromeFixtures } from '@/fixtures/setup-wizard-chrome-fixtures';
 
 /* ------------------------------------------------------------------ */
 /*  Data — IA guide §4.5 fixtures (canonical copy strings)              */
 /* ------------------------------------------------------------------ */
-
-const SETUP_STEPS = [
-  { label: 'Welcome', state: 'active' as const },
-  { label: 'Daemon', state: 'pending' as const },
-  { label: 'Agent', state: 'pending' as const },
-  { label: 'Done', state: 'pending' as const },
-];
 
 interface ShellNavItem {
   label: string;
@@ -50,146 +46,7 @@ function SurfaceHeading({ children }: { children: ReactNode }) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Fixture 1 — Setup wizard step card                                  */
-/* ------------------------------------------------------------------ */
-
-function StepCircle({
-  label,
-  state,
-}: {
-  label: string;
-  state: 'active' | 'pending';
-}) {
-  return (
-    <div className="flex items-center gap-3">
-      {/* Step circle — DESIGN.md §setup-wizard-step tokens */}
-      <div
-        className={cn(
-          'w-setup-wizard-step-circle-size h-setup-wizard-step-circle-size rounded-full flex items-center justify-center shrink-0',
-          'text-label-14 font-semibold',
-          state === 'active'
-            ? 'bg-setup-wizard-step-circle-active-bg text-setup-wizard-step-circle-active-text'
-            : 'bg-setup-wizard-step-circle-pending-bg text-setup-wizard-step-circle-pending-text',
-        )}
-        aria-current={state === 'active' ? 'step' : undefined}
-      >
-        {state === 'active' && (
-          <svg
-            width="16"
-            height="16"
-            viewBox="0 0 16 16"
-            fill="none"
-            aria-hidden="true"
-          >
-            <path
-              d="M13.3 4.3L6 11.6L2.7 8.3"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-        )}
-      </div>
-      {/* Step label — DESIGN.md §setup-wizard-step tokens */}
-      <span
-        className={cn(
-          'text-label-14',
-          state === 'active'
-            ? 'text-setup-wizard-step-label-active-color font-medium'
-            : 'text-setup-wizard-step-label-pending-color',
-        )}
-      >
-        {label}
-      </span>
-    </div>
-  );
-}
-
-function StepConnector() {
-  return (
-    <div className="flex justify-center h-6" aria-hidden="true">
-      <div className="w-0.5 h-full bg-setup-wizard-step-connector rounded-full" />
-    </div>
-  );
-}
-
-function SetupWizardFixture() {
-  return (
-    <div className="flex items-center justify-center min-h-[420px] p-4">
-      {/* Outer card — integrated wizard surface per DESIGN.md §Setup Wizard Surface
-          All dimensions use registered setup-wizard-* tokens from the
-          @nexus/design-tokens preset. */}
-      <Card className="flex flex-col sm:flex-row w-full max-w-setup-wizard-step-wizard-max-width p-0 shadow-modal rounded-popover overflow-hidden">
-        {/* ── Left panel: step indicator list ── */}
-        <div className="w-full sm:w-setup-wizard-surface-step-panel-width shrink-0 border-b sm:border-b-0 sm:border-r border-gray-alpha-200 bg-background-100 py-8 px-6">
-          <div className="space-y-1">
-            {SETUP_STEPS.map((step, idx) => (
-              <div key={step.label}>
-                <StepCircle label={step.label} state={step.state} />
-                {idx < SETUP_STEPS.length - 1 && <StepConnector />}
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* ── Right panel: current step content (Welcome) ── */}
-        <div className="flex-1 py-8 px-10 bg-background-100 min-w-0">
-          <h3 className="text-heading-24 font-semibold text-gray-1000 mb-6">
-            Welcome to Nexus
-          </h3>
-          <p className="text-copy-16 text-gray-700 mb-6 leading-relaxed">
-            Nexus needs a workspace folder for your creative projects. We will
-            create it if it does not exist.
-          </p>
-
-          {/* Inline input row */}
-          <Label className="block mb-2 text-label-14 text-gray-700">
-            Workspace location
-          </Label>
-          <div className="flex items-center gap-2 mb-6">
-            <div className="flex-1 flex items-center gap-3 min-h-setup-wizard-surface-input-row-min-height px-4 rounded-control bg-background-200 border border-gray-alpha-400 text-copy-14">
-              <svg
-                width="16"
-                height="16"
-                viewBox="0 0 16 16"
-                fill="none"
-                className="text-setup-wizard-surface-input-row-icon-color shrink-0"
-                aria-hidden="true"
-              >
-                <path
-                  d="M2 4.5C2 3.67157 2.67157 3 3.5 3H5.58579C5.851 3 6.10536 3.10536 6.29289 3.29289L7.70711 4.70711C7.89464 4.89464 8.149 5 8.41421 5H12.5C13.3284 5 14 5.67157 14 6.5V11.5C14 12.3284 13.3284 13 12.5 13H3.5C2.67157 13 2 12.3284 2 11.5V4.5Z"
-                  stroke="currentColor"
-                  strokeWidth="1.25"
-                  fill="none"
-                />
-              </svg>
-              <span className="text-copy-14 text-gray-1000 truncate">
-                ~/Documents/nexus/default
-              </span>
-            </div>
-            <Button variant="secondary" size="small">
-              Browse…
-            </Button>
-          </div>
-
-          {/* Primary CTA — max-width from setup-wizard-surface token */}
-          <div className="flex items-center gap-4">
-            <Button
-              variant="primary"
-              className="max-w-setup-wizard-surface-cta-primary-max-width w-full"
-            >
-              Continue
-            </Button>
-          </div>
-        </div>
-      </Card>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ */
-/*  Fixture 2 — App shell chrome                                        */
+/*  Fixture — App shell chrome                                          */
 /* ------------------------------------------------------------------ */
 
 function AvatarStub({ label }: { label: string }) {
@@ -394,24 +251,25 @@ export function SurfacesPage() {
         ).
       </p>
 
-      {/* 1. Setup wizard step card */}
+      {/* 1. Setup wizard chrome polish (V1.101 P1) */}
       <section>
-        <SurfaceHeading>Setup — Step card</SurfaceHeading>
+        <SurfaceHeading>Setup — Wizard chrome</SurfaceHeading>
         <p className="text-copy-14 text-gray-700 mb-6">
-          A studio-local fixture reproducing the V1.96 integrated wizard card
-          appearance. Left panel: step indicator list (Welcome → Daemon → Agent
-          → Done) per{' '}
+          Studio-local chrome fixtures for V1.101 P1 polish contract §8: Steps
+          matrices (welcome / daemon / agent / done) with numbered
+          complete/active/pending circles, normative Back+Continue horizontal
+          CTA row, and daemon status chips (starting / running / error). Tokens
+          from{' '}
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
             components.setup-wizard-step
           </code>{' '}
-          tokens. Right panel: Welcome step body with workspace-location
-          affordance per{' '}
+          and{' '}
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
             components.setup-wizard-surface
           </code>
-          . Static fixture — no Tauri IPC, no daemon wiring.
+          . Static — no Tauri IPC, no daemon wiring, no App page imports.
         </p>
-        <SetupWizardFixture />
+        <SetupWizardChromeFixtures />
       </section>
 
       {/* 2. App shell chrome */}
@@ -432,6 +290,24 @@ export function SurfacesPage() {
           , and no layout component imports.
         </p>
         <AppShellFixture />
+      </section>
+
+      {/* 3. AgentPicker visual states (V1.101 P0) */}
+      <section className="mt-10">
+        <SurfaceHeading>Setup — AgentPicker</SurfaceHeading>
+        <p className="text-copy-14 text-gray-700 mb-6">
+          Presentational card grid from{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            @web-setup/agent-picker
+          </code>{' '}
+          (apps/web setup composition — not{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            @42ch/nexus-ui
+          </code>
+          ). Props-driven fixtures: loading, installed grid, mixed, empty, error,
+          selected. No contracts, no daemon client.
+        </p>
+        <AgentPickerFixtures />
       </section>
 
       {/* Daemon status strip */}
@@ -457,21 +333,24 @@ export function SurfacesPage() {
       </section>
 
       <p className="text-copy-13 text-gray-500 mt-12 pt-8 border-t border-gray-alpha-200">
-        2 surface fixtures (Setup step card + App shell chrome) composed from{' '}
+        Surface fixtures: Setup wizard chrome, App shell chrome, AgentPicker
+        states, daemon status strip. Composed from{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @42ch/nexus-ui
-        </code>{' '}
-        (promoted) and{' '}
+        </code>
+        ,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-setup/*
+        </code>
+        , and transitional{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @web-ui/*
-        </code>{' '}
-        (transitional)
-        primitives + layout CSS. No live product pages, no{' '}
+        </code>
+        . No live product pages, no{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           components/layout/
         </code>{' '}
-        imports, no daemon wiring. Copy strings from IA guide §4.5 (canonical
-        fixtures).
+        imports, no daemon wiring.
       </p>
     </div>
   );
