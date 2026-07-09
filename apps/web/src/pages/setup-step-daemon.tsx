@@ -34,11 +34,13 @@ export function SetupStepDaemon({ onNext, onBack }: SetupStepDaemonProps) {
       } else if (status.state === 'starting') {
         setReady(false);
         setError(null);
-      } else if (status.state === 'error' || status.state === 'stopped') {
+      } else if (status.state === 'error') {
         setReady(false);
         setError(status.detail ?? `Daemon is ${status.state}.`);
         clearTimeout(timeoutId);
       }
+      // 'stopped' is handled inline in subscribe() — do not surface as error here
+      // because the clean-state path auto-starts the daemon.
     }
 
     async function subscribe() {
@@ -48,8 +50,38 @@ export function SetupStepDaemon({ onNext, onBack }: SetupStepDaemonProps) {
       }
       try {
         const status = await desktop.getDaemonStatus();
-        applyStatus(status);
-        if (cancelled || status.state === 'running' || status.state === 'degraded') return;
+        if (cancelled || status.state === 'running' || status.state === 'degraded') {
+          setReady(true);
+          setError(null);
+          return;
+        }
+
+        if (status.state === 'starting') {
+          setReady(false);
+          setError(null);
+        }
+
+        // Clean-state path (stopped) or existing-install crash recovery
+        // (error): auto-start the daemon before subscribing.  Don't surface
+        // an 'error' detail optimistically — the auto-start may recover, and
+        // if it doesn't, the catch block below surfaces the actionable error.
+        if (status.state === 'stopped' || status.state === 'error') {
+          try {
+            await desktop.startDaemon();
+          } catch (err) {
+            // Surface the sidecar-launch failure immediately — the status
+            // subscription won't help when the daemon process isn't running,
+            // and the 25s timeout message is too generic.
+            if (!cancelled) {
+              setError(
+                `Could not start the local service: ${errorMessage(err) || 'unknown error'}. ` +
+                  'Retry or reset the local database.',
+              );
+            }
+            return;
+          }
+        }
+
         unsub = await desktop.onDaemonStatusChanged((status) => {
           applyStatus(status);
         });

@@ -51,6 +51,9 @@ tracing = "0.1"
 # Deterministic jitter for sidecar restart backoff (QC3-S5). Fast, no-std-friendly
 # PRNG already present in the Tauri dependency tree.
 fastrand = "2"
+# UUID v4 for creator ID generation in setup bootstrap (V1.100 P0).
+# Matches the generation pattern in nexus-creator/src/local_identity.rs:211-221.
+uuid = { version = "1", features = ["v4"] }
 
 [target.'cfg(unix)'.dependencies]
 # Unix signal handling for graceful sidecar shutdown (SIGTERM). V1.66 is macOS-only.
