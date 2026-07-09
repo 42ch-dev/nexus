@@ -1,10 +1,10 @@
 # Deferred Features — Cross-Version Tracker v2
 
-**Quick status**: **V1.103 Must delivered (P0–P3)** — Settings shell + Agent/Connection/Setup. Stretch Workspace W2 **deferred → V1.104+**. Execution-mode matrix still deferred. Platform **paused**.
+**Quick status**: **V1.104 active** — Must W2 (Settings Workspace path + honest restart copy). V1.103 Must delivered (Agent/Connection/Setup); Stretch W2 promoted here. Execution-mode matrix still deferred. Platform **paused**.
 
 **Purpose**: Single source of truth for **open** and **backlog** features deferred from delivery compasses. Closed/shipped history lives in shipped archive.
 **Scope**: `nexus` OSS repository only.
-**Created**: 2026-04-21 · **Last updated**: 2026-07-09 (V1.103 Must close — Workspace W2 → V1.104+)
+**Created**: 2026-04-21 · **Last updated**: 2026-07-09 (V1.104 active — Workspace W2 Must in flight)
 
 ---
 
@@ -48,7 +48,7 @@
 | DF-47 | Host tool + `worker/agent_tool_request` unified registry | V1.34 audit | V1.42 P3 Narrowed | M | V1.34→V1.42 | V1.42 P3 shipped `DaemonToolDispatchAdapter` + `HostToolCallTask` + one tool proven E2E. |
 | DF-55 | `nexus.context.assemble` cloud/platform path | V1.34 | V2.0+ | M | V1.34 | Local/read-only or `policy_blocked` (PD-05). |
 | DF-59 | Platform publish integration for novel | V1.36 prepare | Backlog | L | V1.36 | Platform dependency. |
-| DF-70 | **App Settings shell** (sidebar IA + pages hosting reusable AgentPicker / execution-mode settings) | V1.101 | **V1.104+** (execution-mode + Workspace W2) | M | V1.102→V1.103→V1.104+ | **V1.103 Must shipped**: S3 shell + Agent preselect + Connection (C1) + Re-run setup (R1). **Stretch Workspace W2 deferred → V1.104+** (no Workspace nav in V1.103). **Execution-mode matrix still deferred**. BYOK out. AgentPicker stays app-shared. |
+| DF-70 | **App Settings shell** (sidebar IA + pages hosting reusable AgentPicker / execution-mode settings) | V1.101 | **V1.104** (W2 Must) + execution-mode deferred | M | V1.102→V1.103→**V1.104** | **V1.103 Must shipped**: S3 shell + Agent preselect + Connection (C1) + Re-run setup (R1). **V1.104 Must**: Workspace W2 (path view/change + honesty copy). **Execution-mode matrix still deferred**. BYOK out. AgentPicker stays app-shared. Compass: [v1.104-delivery-compass.md](../iterations/v1.104-delivery-compass.md). |
 | FEAT-WASM-COMPUTE | **Programmable Narrative Progression** — WASM compute for timeline narrative | V1.61 | **Shipped (V1.61)** — V2 backlog | XL | V1.61 | Core differentiator shipped in V1.61: wasmtime + KB structured layer + `narrative.compute` + `combat-engine` preset. Compass: [v1.61-programmable-narrative-progression-delivery-compass-v1.md](../iterations/v1.61-programmable-narrative-progression-delivery-compass-v1.md). V2 deferred: Generic Combat Protocol, CDN distrib, 3P game bridge, marketplace, GPU/SIMD. |
 
 ### 2.4 Backlog (no committed target)
@@ -91,9 +91,9 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 ## 5) Quick index
 
-**Active iteration**: [V1.103](../iterations/v1.103-delivery-compass.md) (**completed** — PR pending; Stretch Workspace → V1.104+; `iteration/v1.103`).
+**Active iteration**: [V1.104](../iterations/v1.104-delivery-compass.md) (**active** — Must W2 Settings Workspace; `iteration/v1.104`).
 
-**Latest shipped**: [V1.102](../iterations/v1.102-delivery-compass.md) (Badge + thin Settings + Surfaces Stretch — PR [#132](https://github.com/42ch-dev/nexus/pull/132) — 2026-07-09).
+**Latest shipped**: [V1.103](../iterations/v1.103-delivery-compass.md) (Settings shell Must — Agent/Connection/Setup; Workspace Stretch deferred; 2026-07-09).
 
 **Full iteration index**: [iterations/README.md](../iterations/README.md)
 
