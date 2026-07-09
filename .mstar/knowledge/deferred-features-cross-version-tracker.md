@@ -48,7 +48,7 @@
 | DF-47 | Host tool + `worker/agent_tool_request` unified registry | V1.34 audit | V1.42 P3 Narrowed | M | V1.34→V1.42 | V1.42 P3 shipped `DaemonToolDispatchAdapter` + `HostToolCallTask` + one tool proven E2E. |
 | DF-55 | `nexus.context.assemble` cloud/platform path | V1.34 | V2.0+ | M | V1.34 | Local/read-only or `policy_blocked` (PD-05). |
 | DF-59 | Platform publish integration for novel | V1.36 prepare | Backlog | L | V1.36 | Platform dependency. |
-| DF-70 | **App Settings shell** (sidebar IA + pages hosting reusable AgentPicker / execution-mode settings) | V1.101 | V1.102 (thin host Must) / fuller IA V1.103+ | M | V1.101→V1.102 | V1.102 Must ships **thin host** (route/shell + AgentPicker page). Fuller multi-section IA + execution-mode matrix remain deferred. BYOK out. AgentPicker stays app-shared. |
+| DF-70 | **App Settings shell** (sidebar IA + pages hosting reusable AgentPicker / execution-mode settings) | V1.101 | V1.103+ (fuller IA) | M | V1.102 | **Thin host shipped in V1.102** (`/settings` + AgentPicker). Fuller multi-section IA + execution-mode matrix remain deferred. BYOK out. AgentPicker stays app-shared. |
 | FEAT-WASM-COMPUTE | **Programmable Narrative Progression** — WASM compute for timeline narrative | V1.61 | **Shipped (V1.61)** — V2 backlog | XL | V1.61 | Core differentiator shipped in V1.61: wasmtime + KB structured layer + `narrative.compute` + `combat-engine` preset. Compass: [v1.61-programmable-narrative-progression-delivery-compass-v1.md](../iterations/v1.61-programmable-narrative-progression-delivery-compass-v1.md). V2 deferred: Generic Combat Protocol, CDN distrib, 3P game bridge, marketplace, GPU/SIMD. |
 
 ### 2.4 Backlog (no committed target)
