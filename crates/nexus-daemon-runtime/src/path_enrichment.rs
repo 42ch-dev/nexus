@@ -88,8 +88,16 @@ pub fn login_equivalent_bin_dirs() -> Vec<PathBuf> {
 ///
 /// Existing entries keep their relative order after any newly prepended dirs.
 /// Duplicates (by string equality of the path component) are skipped.
-#[must_use]
-pub fn merge_path(existing: Option<&OsStr>, extra_dirs: impl IntoIterator<Item = PathBuf>) -> OsString {
+///
+/// # Errors
+///
+/// Returns [`env::JoinPathsError`] when any collected component contains the
+/// OS path-separator character. Callers must not treat that as "already
+/// enriched" — the merge did not succeed.
+pub fn merge_path(
+    existing: Option<&OsStr>,
+    extra_dirs: impl IntoIterator<Item = PathBuf>,
+) -> Result<OsString, env::JoinPathsError> {
     let mut ordered: Vec<PathBuf> = Vec::new();
     let mut seen: HashSet<String> = HashSet::new();
 
@@ -109,16 +117,18 @@ pub fn merge_path(existing: Option<&OsStr>, extra_dirs: impl IntoIterator<Item =
         }
     }
 
-    env::join_paths(&ordered).unwrap_or_else(|_| {
-        existing.map_or_else(OsString::new, OsString::from)
-    })
+    env::join_paths(&ordered)
 }
 
 /// Enrich the current process `PATH` with [`login_equivalent_bin_dirs`].
 ///
-/// Idempotent: directories already present are not duplicated. Safe to call from
-/// CLI `nexus42 daemon start` and from the desktop-bundled sidecar (both enter
-/// [`crate::boot::run_daemon`]).
+/// Idempotent: directories already present are not duplicated.
+///
+/// **Call before starting a Tokio multi-threaded runtime.** On POSIX,
+/// `setenv(3)` is not thread-safe against concurrent `getenv(3)`; the
+/// `nexus42` binary invokes this from sync `main` before
+/// `tokio::runtime::Runtime::new`. Do not call from inside an already-running
+/// async runtime (including [`crate::boot::run_daemon`]).
 pub fn apply_process_path_enrichment() {
     let existing = env::var_os("PATH");
     let extras = login_equivalent_bin_dirs();
@@ -126,16 +136,23 @@ pub fn apply_process_path_enrichment() {
         return;
     }
 
-    let before_count = existing
-        .as_ref()
-        .map_or(0, |p| env::split_paths(p).count());
-    let enriched = merge_path(existing.as_deref(), extras);
+    let before_count = existing.as_ref().map_or(0, |p| env::split_paths(p).count());
+    let enriched = match merge_path(existing.as_deref(), extras) {
+        Ok(path) => path,
+        Err(err) => {
+            tracing::warn!(
+                error = %err,
+                "PATH enrichment: join_paths failed; leaving PATH unchanged"
+            );
+            return;
+        }
+    };
     let after_count = env::split_paths(&enriched).count();
 
-    // Process-global PATH update at daemon boot, before any agent scan.
+    // Process-global PATH update before Tokio (and before any agent scan).
     // Concurrent tests that mutate PATH must serialize (see module tests).
-    // Matches existing daemon test helpers (`agent_host` PathGuard): workspace
-    // forbids `unsafe`, so we use the same safe `set_var` call site pattern.
+    // Workspace forbids `unsafe`, so we use the safe `set_var` call — but only
+    // from a single-threaded context (binary `main` before Runtime::new).
     env::set_var("PATH", &enriched);
 
     if after_count > before_count {
@@ -168,7 +185,7 @@ mod tests {
             PathBuf::from("/opt/homebrew/bin"),
             PathBuf::from("/custom/bin"),
         ];
-        let merged = merge_path(Some(existing.as_os_str()), extras);
+        let merged = merge_path(Some(existing.as_os_str()), extras).unwrap();
         let parts: Vec<_> = env::split_paths(&merged).collect();
         assert_eq!(parts[0], PathBuf::from("/opt/homebrew/bin"));
         assert_eq!(parts[1], PathBuf::from("/custom/bin"));
@@ -187,7 +204,7 @@ mod tests {
     #[test]
     fn merge_path_handles_empty_existing() {
         let extras = vec![PathBuf::from("/opt/homebrew/bin")];
-        let merged = merge_path(None, extras);
+        let merged = merge_path(None, extras).unwrap();
         let parts: Vec<_> = env::split_paths(&merged).collect();
         assert_eq!(parts, vec![PathBuf::from("/opt/homebrew/bin")]);
     }
@@ -215,7 +232,7 @@ mod tests {
             "stripped PATH must not resolve the probe binary"
         );
 
-        let enriched = merge_path(env::var_os("PATH").as_deref(), vec![bin_dir.clone()]);
+        let enriched = merge_path(env::var_os("PATH").as_deref(), vec![bin_dir.clone()]).unwrap();
         env::set_var("PATH", &enriched);
         let found = which::which("nexus-path-probe-agent");
         assert!(

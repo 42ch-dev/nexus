@@ -5,9 +5,10 @@
 
 use clap::Parser;
 use nexus42::cli::{Cli, Commands};
+use nexus42::config::CliConfig;
+use nexus42::errors::Result;
 
-#[tokio::main]
-async fn main() {
+fn main() {
     // V1.46 P2 (Grill #20, #21): intercept `creator run <preset_id> --help`
     // before clap parses so manifest-declared `cli_args` surface in --help.
     // Falls through silently for any non-matching invocation.
@@ -26,12 +27,42 @@ async fn main() {
     }
 
     let cli = Cli::parse();
-
-    // Initialize tracing
     init_logging(cli.verbose());
 
+    // V1.101 Class B: enrich PATH *before* Tokio starts. GUI-launched desktop
+    // sidecars inherit a minimal macOS PATH; `setenv` must not race concurrent
+    // `getenv` on a live multi-threaded runtime (Greptile P2 on run_daemon).
+    // Logging is already initialized so join_paths failures surface as warnings.
+    nexus_daemon_runtime::path_enrichment::apply_process_path_enrichment();
+
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()
+        .expect("failed to build Tokio runtime");
+    if let Err(e) = runtime.block_on(async_main(cli)) {
+        eprintln!("Error: {e}");
+        // V1.51 T-B P0: exit code mapping for advisory lock errors.
+        // - E_LOCK   (contention, temporary):  exit 75 (EX_TEMPFAIL)
+        // - E_LOCK_IO (I/O failure, config):   exit 78 (EX_CONFIG)
+        // V1.51 T-B P1: exit code mapping for OCC version conflicts.
+        // - E_VERSION (CAS mismatch):          exit 76
+        // - All other errors:                   exit 1
+        let code = if matches!(e, nexus42::errors::CliError::Locked { .. }) {
+            75
+        } else if matches!(e, nexus42::errors::CliError::LockIo(_)) {
+            78
+        } else if matches!(e, nexus42::errors::CliError::VersionConflict { .. }) {
+            76
+        } else {
+            1
+        };
+        std::process::exit(code);
+    }
+}
+
+async fn async_main(cli: Cli) -> Result<()> {
     // Load configuration
-    let mut config = nexus42::config::CliConfig::load().unwrap_or_default();
+    let mut config = CliConfig::load().unwrap_or_default();
 
     // Resolve persistent device ID (UUID v4) for platform HTTP requests.
     // Only create the device-id file if the nexus home already exists
@@ -54,7 +85,7 @@ async fn main() {
 
     // Execute command
     let output_format = cli.output_format().to_string();
-    let result = match cli.into_command() {
+    match cli.into_command() {
         Some(Commands::Daemon { command }) => {
             nexus42::commands::daemon::run(command, &config).await
         }
@@ -83,26 +114,6 @@ async fn main() {
             Cli::parse_from(["nexus42", "--help"]);
             Ok(())
         }
-    };
-
-    if let Err(e) = result {
-        eprintln!("Error: {e}");
-        // V1.51 T-B P0: exit code mapping for advisory lock errors.
-        // - E_LOCK   (contention, temporary):  exit 75 (EX_TEMPFAIL)
-        // - E_LOCK_IO (I/O failure, config):   exit 78 (EX_CONFIG)
-        // V1.51 T-B P1: exit code mapping for OCC version conflicts.
-        // - E_VERSION (CAS mismatch):          exit 76
-        // - All other errors:                   exit 1
-        let code = if matches!(e, nexus42::errors::CliError::Locked { .. }) {
-            75
-        } else if matches!(e, nexus42::errors::CliError::LockIo(_)) {
-            78
-        } else if matches!(e, nexus42::errors::CliError::VersionConflict { .. }) {
-            76
-        } else {
-            1
-        };
-        std::process::exit(code);
     }
 }
 

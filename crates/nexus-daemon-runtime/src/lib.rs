@@ -14,7 +14,7 @@ pub mod config;
 pub mod cron_supervisor;
 pub mod db;
 pub mod lifecycle;
-pub(crate) mod path_enrichment;
+pub mod path_enrichment;
 pub mod refresh_scheduler;
 pub mod stale_findings_watcher;
 #[cfg(not(debug_assertions))]
