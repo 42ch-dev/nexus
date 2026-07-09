@@ -414,7 +414,25 @@
     "2026-07-07-v1.96-implement-rework",
     "2026-07-07-v1.97-desktop-first-launch-hardening",
     "2026-07-08-v1.98-prepare-design-studio",
-    "2026-07-08-v1.98-design-studio-and-design-unification"
+    "2026-07-08-v1.98-design-studio-and-design-unification",
+    "2026-07-08-v1.99-prepare-visual-system-deepening",
+    "2026-07-08-v1.99-nexus-ui-component-promotion",
+    "2026-07-08-v1.99-surfaces-visual-direction",
+    "2026-07-08-v1.99-studio-first-ui-workflow",
+    "2026-07-08-v1.100-desktop-clean-state-first-launch",
+    "2026-07-08-v1.100-ui-hygiene-guardrails",
+    "2026-07-08-v1.100-form-field-component-promotion",
+    "2026-07-09-v1.101-agent-detection-picker",
+    "2026-07-09-v1.101-setup-wizard-ui-polish",
+    "2026-07-09-v1.101-select-component-promotion",
+    "2026-07-09-v1.102-badge-soft-solid",
+    "2026-07-09-v1.102-settings-shell",
+    "2026-07-09-v1.102-ui-hygiene",
+    "2026-07-09-v1.103-settings-shell-nav",
+    "2026-07-09-v1.103-settings-agent-preselect",
+    "2026-07-09-v1.103-settings-connection",
+    "2026-07-09-v1.103-settings-rerun-setup",
+    "2026-07-09-v1.103-settings-workspace"
   ],
   "iteration_summaries": {
     "v1.45": {

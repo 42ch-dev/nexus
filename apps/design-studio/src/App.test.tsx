@@ -12,7 +12,7 @@
  * swatch or component variant. Follow apps/web conventions: vitest + jsdom +
  * @testing-library/react.
  */
-import { act, render, screen, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -425,18 +425,18 @@ describe('Surfaces page — AgentPicker fixtures', () => {
   });
 });
 
-/* ---- surfaces page — Settings thin host (V1.102 P1 Task 2) -------------- */
+/* ---- surfaces page — Settings shell chrome (V1.103 P0 Task 2) ----------- */
 
-describe('Surfaces page — Settings thin host fixtures', () => {
+describe('Surfaces page — Settings shell chrome fixtures', () => {
   beforeEach(() => {
     mockMatchMedia(false);
-    // Settings thin host remains discoverable under Shell (Studio-only).
+    // Settings shell chrome remains discoverable under Shell (Studio-only).
     renderStudio('/surfaces/shell');
   });
 
-  it('renders the Settings thin host section heading', () => {
+  it('renders the Settings shell chrome section heading', () => {
     expect(
-      screen.getByRole('heading', { name: 'Settings — Thin host' }),
+      screen.getByRole('heading', { name: 'Settings — Shell chrome' }),
     ).toBeInTheDocument();
   });
 
@@ -447,27 +447,247 @@ describe('Surfaces page — Settings thin host fixtures', () => {
     expect(link).toHaveAttribute('aria-current', 'page');
   });
 
-  it('renders thin host page chrome (title + helper, not wizard CTAs)', () => {
+  it('renders section nav with Agent, Connection, Setup (no Workspace)', () => {
     const hostRoot = screen.getByTestId('settings-host-fixtures');
-    const pages = within(hostRoot).getAllByTestId('settings-host-page-chrome');
-    expect(pages.length).toBeGreaterThanOrEqual(2);
+    const sectionNav = within(hostRoot).getByTestId('settings-section-nav');
     expect(
-      within(hostRoot).getAllByRole('heading', { name: 'Settings', level: 2 })
-        .length,
-    ).toBeGreaterThanOrEqual(1);
+      within(sectionNav).getByTestId('settings-section-nav-agent'),
+    ).toHaveTextContent('Agent');
+    expect(
+      within(sectionNav).getByTestId('settings-section-nav-connection'),
+    ).toHaveTextContent('Connection');
+    expect(
+      within(sectionNav).getByTestId('settings-section-nav-setup'),
+    ).toHaveTextContent('Setup');
+    expect(
+      within(sectionNav).queryByTestId('settings-section-nav-workspace'),
+    ).not.toBeInTheDocument();
+    expect(within(sectionNav).queryByText('Workspace')).not.toBeInTheDocument();
+  });
+
+  it('defaults to Agent section with preselected Agent body and locked shell helper', () => {
+    const hostRoot = screen.getByTestId('settings-host-fixtures');
+    const shellPages = within(hostRoot).getAllByTestId(
+      'settings-shell-page-chrome',
+    );
+    expect(shellPages.length).toBeGreaterThanOrEqual(1);
+    expect(
+      within(hostRoot).getByTestId('settings-section-nav-agent'),
+    ).toHaveAttribute('aria-current', 'page');
+    const outlet = within(hostRoot).getByTestId('settings-shell-outlet');
+    const agentSection = within(outlet).getByTestId('settings-agent-section');
+    expect(agentSection).toHaveAttribute('data-preselected', 'codex');
+    expect(
+      within(outlet).queryByTestId('settings-section-frame-agent'),
+    ).not.toBeInTheDocument();
     expect(
       within(hostRoot).getAllByText(
-        /Change the local agent Nexus uses after setup/i,
+        /Manage your local agent, daemon connection, and setup options/i,
       ).length,
-    ).toBeGreaterThanOrEqual(2);
-    // Thin host must not include wizard Back/Continue chrome (wizard CTAs live
+    ).toBeGreaterThanOrEqual(1);
+    // Shell must not include wizard Back/Continue chrome (wizard CTAs live
     // on /surfaces/setup).
     expect(
       within(hostRoot).queryByTestId('wizard-cta-row'),
     ).not.toBeInTheDocument();
   });
 
-  it('mounts AgentPicker with fixture data inside the host', () => {
+  it('switches to Connection section chrome when section nav is clicked', () => {
+    const hostRoot = screen.getByTestId('settings-host-fixtures');
+    const outlet = within(hostRoot).getByTestId('settings-shell-outlet');
+    const connectionTab = within(hostRoot).getByTestId(
+      'settings-section-nav-connection',
+    );
+    fireEvent.click(connectionTab);
+    expect(connectionTab).toHaveAttribute('aria-current', 'page');
+    expect(
+      within(outlet).getByTestId('settings-connection-section'),
+    ).toBeInTheDocument();
+    expect(
+      within(outlet).queryByTestId('settings-section-frame-connection'),
+    ).not.toBeInTheDocument();
+    expect(
+      within(outlet).queryByTestId('settings-agent-section'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('switches to Setup section chrome when section nav is clicked', () => {
+    const hostRoot = screen.getByTestId('settings-host-fixtures');
+    const outlet = within(hostRoot).getByTestId('settings-shell-outlet');
+    const setupTab = within(hostRoot).getByTestId('settings-section-nav-setup');
+    fireEvent.click(setupTab);
+    expect(setupTab).toHaveAttribute('aria-current', 'page');
+    expect(
+      within(outlet).getByTestId('settings-setup-section'),
+    ).toBeInTheDocument();
+    expect(
+      within(outlet).queryByTestId('settings-section-frame-setup'),
+    ).not.toBeInTheDocument();
+    expect(
+      within(outlet).getByTestId('settings-rerun-setup'),
+    ).toHaveTextContent('Re-run Setup');
+  });
+
+  it('renders static empty frames for all three Must sections', () => {
+    const framesRoot = screen.getByTestId(
+      'settings-host-fixture-section-frames',
+    );
+    expect(
+      within(framesRoot).getByTestId('settings-section-frame-agent'),
+    ).toBeInTheDocument();
+    expect(
+      within(framesRoot).getByTestId('settings-section-frame-connection'),
+    ).toBeInTheDocument();
+    expect(
+      within(framesRoot).getByTestId('settings-section-frame-setup'),
+    ).toBeInTheDocument();
+  });
+
+  it('renders Agent section fixture with locked helper, preselected Codex, and Save Agent', () => {
+    const agentRoot = screen.getByTestId(
+      'settings-host-fixture-agent-section',
+    );
+    const section = within(agentRoot).getByTestId('settings-agent-section');
+    expect(section).toHaveAttribute('data-preselected', 'codex');
+    expect(
+      within(agentRoot).getByText(
+        /Choose which local ACP agent Nexus uses for creative work/i,
+      ),
+    ).toBeInTheDocument();
+    const pressed = within(agentRoot)
+      .getAllByTestId('agent-card-select-codex')
+      .filter((el) => el.getAttribute('aria-pressed') === 'true');
+    expect(pressed.length).toBeGreaterThanOrEqual(1);
+    // Preselect is Codex, not the first-installed Claude default.
+    const claudePressed = within(agentRoot)
+      .getAllByTestId('agent-card-select-claude-code')
+      .filter((el) => el.getAttribute('aria-pressed') === 'true');
+    expect(claudePressed.length).toBe(0);
+    expect(
+      within(agentRoot).getByTestId('settings-save-agent'),
+    ).toHaveTextContent('Save Agent');
+  });
+
+  it('renders Connection section fixture with locked helper and form chrome', () => {
+    const connectionRoot = screen.getByTestId(
+      'settings-host-fixture-connection-section',
+    );
+    expect(
+      within(connectionRoot).getByTestId('settings-connection-section'),
+    ).toBeInTheDocument();
+    expect(
+      within(connectionRoot).getByText(
+        /Connect this app to a remote Nexus daemon\. Your local daemon stays the default/i,
+      ),
+    ).toBeInTheDocument();
+    const form = within(connectionRoot).getByTestId(
+      'settings-connection-form-chrome',
+    );
+    expect(within(form).getByText('Connect to Daemon')).toBeInTheDocument();
+    expect(
+      within(form).getByText(
+        /Enter the remote daemon URL and API key\. Local mode remains available/i,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(form).getByText(
+        /The full HTTPS address of the daemon, including port/i,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(form).getByText(/The API key from the daemon machine/i),
+    ).toBeInTheDocument();
+    expect(
+      within(form).getByText('nexus42 daemon api-key'),
+    ).toBeInTheDocument();
+    expect(
+      within(form).getByText(
+        /Confirm the certificate fingerprint matches what you see on the daemon machine/i,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(form).getByTestId('trust-connect-button'),
+    ).toHaveTextContent('Trust This Certificate and Connect');
+    expect(
+      within(form).getByTestId('revert-local-button'),
+    ).toHaveTextContent('Use Local Daemon');
+  });
+
+  it('renders Setup section fixture with locked helper and Re-run Setup CTA', () => {
+    const setupRoot = screen.getByTestId(
+      'settings-host-fixture-setup-section',
+    );
+    const section = within(setupRoot).getByTestId('settings-setup-section');
+    expect(section).toHaveAttribute('data-desktop', 'true');
+    expect(
+      within(setupRoot).getByText(
+        /Return to the first-run wizard to walk through setup steps again\. Your workspace and agent choices are kept/i,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(setupRoot).getByTestId('settings-rerun-setup'),
+    ).toHaveTextContent('Re-run Setup');
+  });
+
+  it('opens Re-run Setup confirm dialog with locked copy and Title Case CTAs', () => {
+    const setupRoot = screen.getByTestId(
+      'settings-host-fixture-setup-section',
+    );
+    fireEvent.click(within(setupRoot).getByTestId('settings-rerun-setup'));
+    const dialog = screen.getByRole('dialog');
+    expect(within(dialog).getByText('Re-run Setup?')).toBeInTheDocument();
+    expect(
+      within(dialog).getByText(
+        /This restarts the setup wizard from the beginning\. Your workspace path and agent profile are not deleted/i,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(dialog).getByTestId('settings-rerun-setup-cancel'),
+    ).toHaveTextContent('Cancel');
+    expect(
+      within(dialog).getByTestId('settings-rerun-setup-confirm-action'),
+    ).toHaveTextContent('Re-run Setup');
+    // Close so Radix aria-hidden does not leak into later tests in this suite.
+    fireEvent.click(within(dialog).getByTestId('settings-rerun-setup-cancel'));
+  });
+
+  it('renders Setup confirm dialog fixture open for visual acceptance', () => {
+    const confirmRoot = screen.getByTestId(
+      'settings-host-fixture-setup-confirm',
+    );
+    const chrome = within(confirmRoot).getByTestId(
+      'settings-rerun-setup-confirm-chrome',
+    );
+    expect(within(chrome).getByText('Re-run Setup?')).toBeInTheDocument();
+    expect(
+      within(chrome).getByText(
+        /This restarts the setup wizard from the beginning\. Your workspace path and agent profile are not deleted/i,
+      ),
+    ).toBeInTheDocument();
+    expect(within(chrome).getByText('Cancel')).toBeInTheDocument();
+    expect(within(chrome).getByText('Re-run Setup')).toBeInTheDocument();
+  });
+
+  it('renders Setup browser-only fixture with disabled CTA and honest helper', () => {
+    const browserRoot = screen.getByTestId(
+      'settings-host-fixture-setup-browser',
+    );
+    const section = within(browserRoot).getByTestId('settings-setup-section');
+    expect(section).toHaveAttribute('data-desktop', 'false');
+    expect(
+      within(browserRoot).getByText(
+        /Re-run setup is available on the desktop app only/i,
+      ),
+    ).toBeInTheDocument();
+    const cta = within(browserRoot).getByTestId('settings-rerun-setup');
+    expect(cta).toBeDisabled();
+    expect(cta).toHaveAttribute(
+      'title',
+      'Open the Nexus desktop app to re-run setup.',
+    );
+  });
+
+  it('retains AgentPicker thin-host reference for P1', () => {
     const regions = screen.getAllByTestId('settings-host-picker-region');
     expect(regions.length).toBeGreaterThanOrEqual(1);
     const cards = screen.getAllByTestId('agent-card-claude-code');

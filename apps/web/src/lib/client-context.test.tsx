@@ -2,10 +2,11 @@ import { describe, expect, it, vi, beforeEach, type Mock } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Routes, Route, useLocation } from 'react-router-dom';
 
-import { ClientProvider, useNexusClient, useFingerprintGateState } from '@/lib/client-context';
-import type { ConnectionConfig } from '@/lib/nexus/connection-storage';
+import { ClientProvider, useNexusClient, useFingerprintGateState, useConnectionConfig, useSetConnectionConfig } from '@/lib/client-context';
+import { createConnectionStorage, type ConnectionConfig } from '@/lib/nexus/connection-storage';
 import { isDesktopBuild } from '@/lib/nexus/detect';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import userEvent from '@testing-library/user-event';
 
 vi.mock('@/lib/nexus/detect', () => ({
   isDesktopBuild: vi.fn(),
@@ -91,7 +92,19 @@ function renderWithGate(
         <ClientProvider connectionConfig={config} fetchImpl={fetchImpl}>
           <Routes>
             <Route path="/" element={<TestChild />} />
-            <Route path="/connect" element={<div data-testid="connect-page">Connect</div>} />
+            <Route
+              path="/settings/agent"
+              element={<div data-testid="settings-agent-page">Agent</div>}
+            />
+            <Route
+              path="/settings/setup"
+              element={<div data-testid="settings-setup-page">Setup</div>}
+            />
+            <Route
+              path="/settings/connection"
+              element={<div data-testid="connect-page">Connect</div>}
+            />
+            <Route path="/connect" element={<div data-testid="legacy-connect">Legacy</div>} />
             <Route path="/setup" element={<TestChild />} />
           </Routes>
           <RouteSpy />
@@ -151,7 +164,7 @@ describe('ClientProvider resume-time fingerprint gate', () => {
     expect(requestUrl).toBe('https://remote.example.com/v1/daemon/runtime/cert-fingerprint');
   });
 
-  it('redirects to /connect on fingerprint mismatch and does not mount children', async () => {
+  it('redirects to /settings/connection on fingerprint mismatch and does not mount children', async () => {
     const fetchImpl = makeFetchImpl({ fingerprint: 'served-fingerprint' });
     const config: ConnectionConfig = {
       endpointUrl: 'https://remote.example.com',
@@ -162,7 +175,9 @@ describe('ClientProvider resume-time fingerprint gate', () => {
     renderWithGate(config, fetchImpl);
 
     await waitFor(() => {
-      expect(screen.getByTestId('current-path')).toHaveTextContent('/connect');
+      expect(screen.getByTestId('current-path')).toHaveTextContent(
+        '/settings/connection',
+      );
     });
 
     expect(screen.queryByTestId('child')).not.toBeInTheDocument();
@@ -172,6 +187,33 @@ describe('ClientProvider resume-time fingerprint gate', () => {
     const requestUrl = (fetchImpl as unknown as Mock).mock.calls[0][0] as string;
     expect(requestUrl).toBe('https://remote.example.com/v1/daemon/runtime/cert-fingerprint');
   });
+
+  it.each([
+    { path: '/settings/agent', siblingTestId: 'settings-agent-page' },
+    { path: '/settings/setup', siblingTestId: 'settings-setup-page' },
+  ] as const)(
+    'redirects fingerprint mismatch from $path to /settings/connection (sibling is not a bypass)',
+    async ({ path, siblingTestId }) => {
+      const fetchImpl = makeFetchImpl({ fingerprint: 'served-fingerprint' });
+      const config: ConnectionConfig = {
+        endpointUrl: 'https://remote.example.com',
+        apiKey: 'key-1',
+        pinnedFingerprint: 'stored-fingerprint',
+        active: true,
+      };
+      renderWithGate(config, fetchImpl, [path]);
+
+      await waitFor(() => {
+        expect(screen.getByTestId('current-path')).toHaveTextContent(
+          '/settings/connection',
+        );
+      });
+
+      expect(screen.queryByTestId(siblingTestId)).not.toBeInTheDocument();
+      expect(screen.getByTestId('connect-page')).toBeInTheDocument();
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+    },
+  );
 
   it('shows a retryable error when fingerprint fetch fails', async () => {
     const error = new Error('Daemon unreachable');
@@ -242,5 +284,74 @@ describe('ClientProvider resume-time fingerprint gate', () => {
     await waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(1));
     expect(screen.getByTestId('child')).toBeInTheDocument();
     expect(screen.queryByText('Could not verify daemon identity')).not.toBeInTheDocument();
+  });
+});
+
+describe('ClientProvider setConfig optimistic rollback', () => {
+  beforeEach(() => {
+    vi.mocked(isDesktopBuild).mockReturnValue(false);
+  });
+
+  it('rolls back stored config when storage.save rejects', async () => {
+    const initial: ConnectionConfig = {
+      endpointUrl: 'https://old.example:8420',
+      apiKey: 'old-key',
+      active: true,
+    };
+    const next: ConnectionConfig = {
+      endpointUrl: 'https://new.example:8420',
+      apiKey: 'new-key',
+      active: true,
+    };
+    const save = vi.fn().mockRejectedValue(new Error('disk full'));
+    vi.mocked(createConnectionStorage).mockReturnValue({
+      load: vi.fn().mockResolvedValue(initial),
+      save,
+      clear: vi.fn(async () => {}),
+    });
+
+    function Probe() {
+      const config = useConnectionConfig();
+      const setConfig = useSetConnectionConfig();
+      return (
+        <div>
+          <span data-testid="endpoint">{config?.endpointUrl ?? 'none'}</span>
+          <button
+            type="button"
+            data-testid="apply-next"
+            onClick={() => {
+              void setConfig(next).catch(() => {
+                /* expected — form surfaces toast */
+              });
+            }}
+          >
+            Apply
+          </button>
+        </div>
+      );
+    }
+
+    render(
+      <QueryClientProvider client={makeQueryClient()}>
+        <MemoryRouter>
+          <ClientProvider>
+            <Probe />
+          </ClientProvider>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('endpoint')).toHaveTextContent('https://old.example:8420');
+    });
+
+    await userEvent.click(screen.getByTestId('apply-next'));
+
+    await waitFor(() => {
+      expect(save).toHaveBeenCalled();
+    });
+    await waitFor(() => {
+      expect(screen.getByTestId('endpoint')).toHaveTextContent('https://old.example:8420');
+    });
   });
 });

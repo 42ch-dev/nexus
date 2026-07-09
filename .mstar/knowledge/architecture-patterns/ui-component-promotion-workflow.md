@@ -92,6 +92,16 @@ V1.100 (P1 + P2) hardened the promotion workflow from reviewer-instruction to **
 V1.101 proved two complementary placement rules on the same studio-first track:
 
 1. **`Select` is a package promotion (Stretch P2).** Same semantics-first ladder as V1.100 form fields: lock a11y/composition contract → Studio fixtures → `@42ch/nexus-ui` presentational export + tests → Studio-direct import → Web thin re-export → update `tooling/check-ui-guardrails.sh` + Studio README import surface. Transitional `@web-ui/*` remains only for unpromoted keep-web primitives (Dialog, States, Table, Tabs). **Docs must match guardrails** — listing a promoted primitive under `@web-ui/*` in README is a QC blocker even when code is correct.
-2. **`AgentPicker` is app-shared, not package (Must P0).** Reusable across wizard and the V1.102 thin Settings host at `apps/web/src/components/setup/agent-picker.tsx`, but it composes scan/profile/outbound-link product semantics — **do not** promote to `@42ch/nexus-ui` until the surface is presentational-only. Studio may import via a scoped alias. Fuller multi-section Settings IA remains **DF-70** deferred.
+2. **`AgentPicker` is app-shared, not package (Must P0).** Reusable across wizard and Settings (**V1.102** thin host → **V1.103** `/settings/agent` section) at `apps/web/src/components/setup/agent-picker.tsx`, but it composes scan/profile/outbound-link product semantics — **do not** promote to `@42ch/nexus-ui` until the surface is presentational-only. Studio may import via a scoped alias. **V1.103** delivers S3 Settings shell (Agent/Connection/Setup; Stretch Workspace deferred → V1.104+) — execution-mode matrix remains DF-70 deferred. See [settings-shell-ia.md](../../iterations/v1.103/specs/settings-shell-ia.md).
 
 **Studio-first + smoke separation (process):** UI-visual work = Studio fixtures → visual acceptance → App wiring on a separate track. Interactive macOS desktop smoke is a **human gate**, not an automated Done / CI blocker. Distilled from `.mstar/iterations/v1.101/guides/studio-first-visual-then-app.md` (workspace snapshot).
+
+## V1.103 Extension — Settings shell modules + form extract
+
+V1.103 deepened the thin Settings host into an S3 multi-section shell without promoting product forms to `@42ch/nexus-ui`:
+
+1. **Shell + section modules under `apps/web/src/pages/settings/`.** `settings-shell-layout.tsx` owns secondary nav + `<Outlet />`; section bodies are siblings (`settings-agent-section`, `settings-connection-section`, `settings-setup-section`). Register `/settings/workspace` **only** when Stretch Workspace runs — Must plans must not ship a dead Workspace tab.
+2. **Extract product forms beside the shell, not into the package.** Connection reused Connect UI via `apps/web/src/components/settings/connect-daemon-form.tsx` (extract from the legacy page); Settings mounts the form and owns post-save stay-on-section + `/connect` → `/settings/connection` redirect.
+3. **Marker context races are directional.** Re-run Setup vs wizard Finish need asymmetric `setCompleted` timing — see [asymmetric-setup-completed-context.md](./asymmetric-setup-completed-context.md).
+
+**Process note:** V1.103 reaffirmed studio-first per section (Studio chrome → App IPC) in `.mstar/iterations/v1.103/guides/studio-first-visual-then-app.md` (workspace snapshot; not promoted as a second process doc).

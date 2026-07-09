@@ -13,10 +13,12 @@ import { MemoryPage } from '@/pages/memory-page';
 import { NotFoundPage } from '@/pages/not-found-page';
 import { SchedulePage } from '@/pages/schedule-page';
 import { SessionsPage } from '@/pages/sessions-page';
-import { SettingsPage } from '@/pages/settings-page';
+import { SettingsAgentSection } from '@/pages/settings/settings-agent-section';
+import { SettingsConnectionSection } from '@/pages/settings/settings-connection-section';
+import { SettingsSetupSection } from '@/pages/settings/settings-setup-section';
+import { SettingsShellLayout } from '@/pages/settings/settings-shell-layout';
 import { WorkDetailPage } from '@/pages/work-detail-page';
 import { WorksPage } from '@/pages/works-page';
-import { ConnectDaemonPage } from '@/pages/connect-daemon-page';
 import { SetupWizardPage } from '@/pages/setup-wizard-page';
 import { StrategiesPage } from '@/pages/strategies-page';
 import { LoadingState } from '@/components/ui/states';
@@ -80,7 +82,12 @@ function AppRoutes() {
         <Route path="capabilities" element={<CapabilitiesPage />} />
         <Route path="findings" element={<FindingsPage />} />
         <Route path="memory" element={<MemoryPage />} />
-        <Route path="settings" element={<SettingsPage />} />
+        <Route path="settings" element={<SettingsShellLayout />}>
+          <Route index element={<Navigate to="agent" replace />} />
+          <Route path="agent" element={<SettingsAgentSection />} />
+          <Route path="connection" element={<SettingsConnectionSection />} />
+          <Route path="setup" element={<SettingsSetupSection />} />
+        </Route>
         <Route path="strategies" element={<StrategiesPage />} />
         <Route
           path="strategies/:presetId"
@@ -91,7 +98,10 @@ function AppRoutes() {
           }
         />
         <Route path="strategy" element={<Navigate to="/strategies" replace />} />
-        <Route path="connect" element={<ConnectDaemonPage />} />
+        <Route
+          path="connect"
+          element={<Navigate to="/settings/connection" replace />}
+        />
         <Route path="*" element={<NotFoundPage />} />
       </Route>
     </Routes>

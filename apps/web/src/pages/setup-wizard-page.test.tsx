@@ -2,9 +2,10 @@ import { http, HttpResponse } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { useLocation } from 'react-router-dom';
+import { Route, Routes, useLocation } from 'react-router-dom';
 
 import { SetupWizardPage } from '@/pages/setup-wizard-page';
+import { SetupGate } from '@/components/setup/setup-gate';
 import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 import { BrowserClient } from '@/lib/nexus';
@@ -29,6 +30,7 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
     getSetupCompleted: () => Promise.resolve(false),
     setSetupCompleted: () => Promise.resolve(),
     setAgentProfile: () => Promise.resolve(),
+    getAgentProfile: () => Promise.resolve(null),
     getWorkspaceRoot: () => Promise.resolve('/tmp/nexus'),
     pickDirectory: () => Promise.resolve(null),
     setWorkspacePath: () => Promise.resolve(),
@@ -351,5 +353,76 @@ describe('SetupWizardPage', () => {
     expect(screen.getByText('permission denied')).toBeInTheDocument();
     expect(setSetupCompleted).not.toHaveBeenCalled();
     expect(screen.getByTestId('location')).toHaveTextContent('/setup');
+  });
+
+  it('finish reaches gated /works while setSetupCompleted IPC is still pending', async () => {
+    const user = userEvent.setup();
+    let resolveIpc!: () => void;
+    const setSetupCompleted = vi.fn(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveIpc = resolve;
+        }),
+    );
+    const setAgentProfile = vi.fn(() => Promise.resolve());
+
+    useHandlers(
+      http.get('/v1/daemon/runtime/health', () =>
+        HttpResponse.json({ status: 'ok', version: 'test' }),
+      ),
+      http.post('/v1/daemon/agent-host/scan', () =>
+        HttpResponse.json({
+          agents: [
+            {
+              name: 'codex',
+              registry_agent_id: 'openai/codex',
+              launch_command: 'codex',
+              installed: true,
+              version: '1.0.0',
+            },
+          ],
+        }),
+      ),
+    );
+
+    renderInApp(
+      <>
+        <LocationDisplay />
+        <Routes>
+          <Route path="/setup" element={<SetupWizardPage />} />
+          <Route
+            path="/works"
+            element={
+              <SetupGate>
+                <div data-testid="main-shell">Works</div>
+              </SetupGate>
+            }
+          />
+        </Routes>
+      </>,
+      {
+        client: makeClient(),
+        desktop: makeDesktop({ setAgentProfile, setSetupCompleted }),
+        initialRouterEntries: ['/setup'],
+        setupCompleted: false,
+      },
+    );
+
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await waitFor(() => expect(screen.getByText('Daemon is running.')).toBeInTheDocument());
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await waitFor(() => expect(screen.getByText('codex')).toBeInTheDocument());
+    await user.click(screen.getByText('codex'));
+    await user.click(screen.getAllByRole('button', { name: 'Continue' })[0]);
+    await waitFor(() =>
+      expect(screen.getByRole('heading', { name: 'You are ready' })).toBeInTheDocument(),
+    );
+    await user.click(screen.getByRole('button', { name: 'Open Nexus' }));
+
+    // Optimistic completed:true must beat SetupGate before IPC resolves.
+    await waitFor(() => expect(screen.getByTestId('main-shell')).toBeInTheDocument());
+    expect(screen.getByTestId('location')).toHaveTextContent('/works');
+    expect(setSetupCompleted).toHaveBeenCalledWith(true);
+    resolveIpc();
   });
 });

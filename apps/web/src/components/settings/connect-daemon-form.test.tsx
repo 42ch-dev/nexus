@@ -3,7 +3,7 @@ import { http, HttpResponse } from 'msw';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-import { ConnectDaemonPage } from '@/pages/connect-daemon-page';
+import { ConnectDaemonForm } from '@/components/settings/connect-daemon-form';
 import { renderInApp, noopClient } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 import type { ConnectionConfig } from '@/lib/nexus/connection-storage';
@@ -15,7 +15,7 @@ vi.mock('react-router-dom', async () => {
   return { ...actual, useNavigate: () => mockedNavigate };
 });
 
-describe('ConnectDaemonPage', () => {
+describe('ConnectDaemonForm', () => {
   it('renders the setup form and fetches a fingerprint on first use', async () => {
     const setConfig = vi.fn().mockResolvedValue(undefined);
     vi.spyOn(clientContext, 'useSetConnectionConfig').mockReturnValue(setConfig);
@@ -29,7 +29,7 @@ describe('ConnectDaemonPage', () => {
 
     renderInApp(
       <clientContext.ClientProvider connectionConfig={null} onConnectionConfigChange={setConfig}>
-        <ConnectDaemonPage />
+        <ConnectDaemonForm />
       </clientContext.ClientProvider>,
     );
 
@@ -52,6 +52,8 @@ describe('ConnectDaemonPage', () => {
         }),
       );
     });
+    // Post-activate stays on Connection — no navigate away.
+    expect(mockedNavigate).not.toHaveBeenCalled();
   });
 
   it('shows a reassurance hint when reconnecting to a pinned-matching endpoint', async () => {
@@ -77,7 +79,7 @@ describe('ConnectDaemonPage', () => {
         connectionConfig={saved}
         onConnectionConfigChange={setConfig}
       >
-        <ConnectDaemonPage />
+        <ConnectDaemonForm />
       </clientContext.ClientProvider>,
     );
 
@@ -86,6 +88,9 @@ describe('ConnectDaemonPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('fingerprint-match-hint')).toBeInTheDocument();
     });
+    expect(screen.getByTestId('trust-connect-button')).toHaveTextContent(
+      'Reconnect With These Settings',
+    );
   });
 
   it('shows a blocking warning when the fingerprint changes', async () => {
@@ -111,7 +116,7 @@ describe('ConnectDaemonPage', () => {
         connectionConfig={saved}
         onConnectionConfigChange={setConfig}
       >
-        <ConnectDaemonPage />
+        <ConnectDaemonForm />
       </clientContext.ClientProvider>,
     );
 
@@ -124,7 +129,7 @@ describe('ConnectDaemonPage', () => {
     expect(setConfig).not.toHaveBeenCalled();
   });
 
-  it('reverts to local without deleting the saved config', async () => {
+  it('reverts to local without deleting the saved config and does not navigate away', async () => {
     const setConfig = vi.fn().mockResolvedValue(undefined);
     vi.spyOn(clientContext, 'useSetConnectionConfig').mockReturnValue(setConfig);
     const saved: ConnectionConfig = {
@@ -141,7 +146,7 @@ describe('ConnectDaemonPage', () => {
         connectionConfig={saved}
         onConnectionConfigChange={setConfig}
       >
-        <ConnectDaemonPage />
+        <ConnectDaemonForm />
       </clientContext.ClientProvider>,
     );
 
@@ -150,6 +155,73 @@ describe('ConnectDaemonPage', () => {
     await waitFor(() => {
       expect(setConfig).toHaveBeenCalledWith(expect.objectContaining({ active: false }));
     });
+    expect(mockedNavigate).not.toHaveBeenCalled();
+  });
+
+  it('shows an error toast when activate setConfig rejects', async () => {
+    const setConfig = vi.fn().mockRejectedValue(new Error('storage write failed'));
+    vi.spyOn(clientContext, 'useSetConnectionConfig').mockReturnValue(setConfig);
+    vi.spyOn(clientContext, 'useConnectionConfig').mockReturnValue(null);
+
+    useHandlers(
+      http.get('https://remote.example:8420/v1/daemon/runtime/cert-fingerprint', () =>
+        HttpResponse.json({ fingerprint: 'SHA256:aa:bb:cc', algorithm: 'sha256' }),
+      ),
+    );
+
+    renderInApp(
+      <clientContext.ClientProvider connectionConfig={null} onConnectionConfigChange={setConfig}>
+        <ConnectDaemonForm />
+      </clientContext.ClientProvider>,
+    );
+
+    await userEvent.type(screen.getByTestId('daemon-url-input'), 'https://remote.example:8420');
+    await userEvent.type(screen.getByTestId('api-key-input'), 'secret-key');
+    await userEvent.click(screen.getByTestId('fetch-fingerprint-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('trust-connect-button')).toBeInTheDocument();
+    });
+
+    await userEvent.click(screen.getByTestId('trust-connect-button'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Could not connect to daemon')).toBeInTheDocument();
+    });
+    expect(screen.getByText('storage write failed')).toBeInTheDocument();
+    expect(screen.queryByText('Connected to daemon')).not.toBeInTheDocument();
+    expect(mockedNavigate).not.toHaveBeenCalled();
+  });
+
+  it('shows an error toast when revert setConfig rejects', async () => {
+    const setConfig = vi.fn().mockRejectedValue(new Error('storage write failed'));
+    vi.spyOn(clientContext, 'useSetConnectionConfig').mockReturnValue(setConfig);
+    const saved: ConnectionConfig = {
+      endpointUrl: 'https://remote.example:8420',
+      apiKey: 'secret-key',
+      pinnedFingerprint: 'SHA256:aa:bb:cc',
+      active: true,
+    };
+    vi.spyOn(clientContext, 'useConnectionConfig').mockReturnValue(saved);
+
+    renderInApp(
+      <clientContext.ClientProvider
+        client={noopClient}
+        connectionConfig={saved}
+        onConnectionConfigChange={setConfig}
+      >
+        <ConnectDaemonForm />
+      </clientContext.ClientProvider>,
+    );
+
+    await userEvent.click(screen.getByTestId('revert-local-button'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Could not switch to local daemon')).toBeInTheDocument();
+    });
+    expect(screen.getByText('storage write failed')).toBeInTheDocument();
+    expect(screen.queryByText('Using local daemon')).not.toBeInTheDocument();
+    expect(mockedNavigate).not.toHaveBeenCalled();
   });
 
   it('shows the loopback-only info note when the daemon has no TLS cert', async () => {
@@ -165,7 +237,7 @@ describe('ConnectDaemonPage', () => {
 
     renderInApp(
       <clientContext.ClientProvider connectionConfig={null} onConnectionConfigChange={setConfig}>
-        <ConnectDaemonPage />
+        <ConnectDaemonForm />
       </clientContext.ClientProvider>,
     );
 
@@ -182,7 +254,7 @@ describe('ConnectDaemonPage', () => {
 
     renderInApp(
       <clientContext.ClientProvider connectionConfig={null}>
-        <ConnectDaemonPage />
+        <ConnectDaemonForm />
       </clientContext.ClientProvider>,
     );
 
@@ -202,7 +274,7 @@ describe('ConnectDaemonPage', () => {
 
     renderInApp(
       <clientContext.ClientProvider connectionConfig={null}>
-        <ConnectDaemonPage />
+        <ConnectDaemonForm />
       </clientContext.ClientProvider>,
     );
 
@@ -230,7 +302,7 @@ describe('ConnectDaemonPage', () => {
 
     renderInApp(
       <clientContext.ClientProvider connectionConfig={null}>
-        <ConnectDaemonPage />
+        <ConnectDaemonForm />
       </clientContext.ClientProvider>,
     );
 
@@ -240,5 +312,27 @@ describe('ConnectDaemonPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('fingerprint-error')).toHaveTextContent('Fingerprint lookup failed.');
     });
+  });
+
+  it('renders locked form card description and field helpers', () => {
+    vi.spyOn(clientContext, 'useConnectionConfig').mockReturnValue(null);
+
+    renderInApp(
+      <clientContext.ClientProvider connectionConfig={null}>
+        <ConnectDaemonForm />
+      </clientContext.ClientProvider>,
+    );
+
+    expect(screen.getByText('Connect to Daemon')).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        /Enter the remote daemon URL and API key\. Local mode remains available/i,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText(/The full HTTPS address of the daemon, including port/i),
+    ).toBeInTheDocument();
+    expect(screen.getByText(/The API key from the daemon machine/i)).toBeInTheDocument();
+    expect(screen.getByText('nexus42 daemon api-key')).toBeInTheDocument();
   });
 });
