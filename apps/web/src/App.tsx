@@ -17,6 +17,7 @@ import { SettingsAgentSection } from '@/pages/settings/settings-agent-section';
 import { SettingsConnectionSection } from '@/pages/settings/settings-connection-section';
 import { SettingsSetupSection } from '@/pages/settings/settings-setup-section';
 import { SettingsShellLayout } from '@/pages/settings/settings-shell-layout';
+import { SettingsWorkspaceSection } from '@/pages/settings/settings-workspace-section';
 import { WorkDetailPage } from '@/pages/work-detail-page';
 import { WorksPage } from '@/pages/works-page';
 import { SetupWizardPage } from '@/pages/setup-wizard-page';
@@ -87,6 +88,7 @@ function AppRoutes() {
           <Route path="agent" element={<SettingsAgentSection />} />
           <Route path="connection" element={<SettingsConnectionSection />} />
           <Route path="setup" element={<SettingsSetupSection />} />
+          <Route path="workspace" element={<SettingsWorkspaceSection />} />
         </Route>
         <Route path="strategies" element={<StrategiesPage />} />
         <Route
