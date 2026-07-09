@@ -388,6 +388,57 @@ fn set_agent_profile(name: String, launch_command: Option<String>) -> Result<(),
         .map_err(|e| format!("failed to write agent profile: {e}"))
 }
 
+/// Saved agent profile returned by `get_agent_profile` (Settings preselect).
+///
+/// Serializes with camelCase so the SPA reads `{ name, launchCommand? }` without
+/// a second mapping layer. Missing/`null` means "no usable saved profile".
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct AgentProfile {
+    name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    launch_command: Option<String>,
+}
+
+/// Read the first `native_cli` provider from `~/.nexus42/agent-host/config.toml`.
+///
+/// Preselect path: missing file, empty providers, no `native_cli` entry, or TOML
+/// parse/IO failure all return `None` (never an error) so Settings can fall back
+/// without crashing.
+#[tauri::command]
+fn get_agent_profile() -> Option<AgentProfile> {
+    let path = agent_profile_config_path()?;
+    read_agent_profile_at(&path)
+}
+
+fn read_agent_profile_at(path: &Path) -> Option<AgentProfile> {
+    if !path.exists() {
+        return None;
+    }
+    let text = std::fs::read_to_string(path).ok()?;
+    let doc = text.parse::<toml_edit::DocumentMut>().ok()?;
+    let providers = doc.get("providers")?.as_array_of_tables()?;
+    for provider in providers.iter() {
+        let protocol = provider.get("protocol").and_then(|v| v.as_str());
+        if protocol != Some("native_cli") {
+            continue;
+        }
+        let name = provider.get("id").and_then(|v| v.as_str())?;
+        if name.is_empty() {
+            continue;
+        }
+        let launch_command = provider
+            .get("command")
+            .and_then(|v| v.as_str())
+            .map(str::to_owned);
+        return Some(AgentProfile {
+            name: name.to_owned(),
+            launch_command,
+        });
+    }
+    None
+}
+
 /// Wipe the daemon's local state DB(s) under `~/.nexus42/creators/*/workspaces/*/`,
 /// plus their SQLite WAL/SHM siblings.
 ///
@@ -667,6 +718,7 @@ pub fn run() {
             get_setup_completed,
             set_setup_completed,
             set_agent_profile,
+            get_agent_profile,
             ensure_setup_bootstrap,
             connection_config::get_connection_config,
             connection_config::set_connection_config,
@@ -695,8 +747,9 @@ mod tests {
     //! daemon actually stores (`Works/<ref>/Stories/…`) and traversal attempts.
 
     use super::{
-        default_workspace_root, guard_path, read_setup_completed_at, reset_local_database_at,
-        write_agent_profile_at, write_setup_completed_at, PathGuardError, WorkspaceRoot,
+        default_workspace_root, guard_path, read_agent_profile_at, read_setup_completed_at,
+        reset_local_database_at, write_agent_profile_at, write_setup_completed_at, AgentProfile,
+        PathGuardError, WorkspaceRoot,
     };
     use super::{
         ensure_setup_bootstrap_at, generate_local_creator_id, read_bootstrap_state,
@@ -928,6 +981,68 @@ mod tests {
             !text.contains("claude-cli"),
             "agent profile must not be written on parse failure"
         );
+    }
+
+    #[test]
+    fn agent_profile_read_returns_first_native_cli_provider() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("agent-host").join("config.toml");
+        write_agent_profile_at(&config_path, "codex-acp", Some("codex")).expect("write profile");
+
+        let profile = read_agent_profile_at(&config_path);
+        assert_eq!(
+            profile,
+            Some(AgentProfile {
+                name: "codex-acp".to_owned(),
+                launch_command: Some("codex".to_owned()),
+            })
+        );
+    }
+
+    #[test]
+    fn agent_profile_read_skips_non_native_cli_providers() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("agent-host").join("config.toml");
+        std::fs::create_dir_all(config_path.parent().unwrap()).expect("mkdir");
+        std::fs::write(
+            &config_path,
+            r#"
+[[providers]]
+id = "http-agent"
+protocol = "http"
+
+[[providers]]
+id = "claude-cli"
+protocol = "native_cli"
+command = "claude"
+"#,
+        )
+        .expect("write config");
+
+        let profile = read_agent_profile_at(&config_path);
+        assert_eq!(
+            profile,
+            Some(AgentProfile {
+                name: "claude-cli".to_owned(),
+                launch_command: Some("claude".to_owned()),
+            })
+        );
+    }
+
+    #[test]
+    fn agent_profile_read_returns_none_when_missing_or_malformed() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let missing = tmp.path().join("missing.toml");
+        assert_eq!(read_agent_profile_at(&missing), None);
+
+        let empty = tmp.path().join("empty.toml");
+        std::fs::write(&empty, "max_sessions = 2\n").expect("write empty providers");
+        assert_eq!(read_agent_profile_at(&empty), None);
+
+        let malformed = tmp.path().join("malformed.toml");
+        std::fs::write(&malformed, "max_sessions = 2\nmalformed = \"unclosed\n")
+            .expect("write malformed");
+        assert_eq!(read_agent_profile_at(&malformed), None);
     }
 
     #[test]

@@ -66,6 +66,7 @@ function makeDesktop(
     getSetupCompleted: () => Promise.resolve(true),
     setSetupCompleted: () => Promise.resolve(),
     setAgentProfile: () => Promise.resolve(),
+    getAgentProfile: () => Promise.resolve(null),
     getWorkspaceRoot: () => Promise.resolve('/tmp/nexus'),
     pickDirectory: () => Promise.resolve(null),
     setWorkspacePath: () => Promise.resolve(),

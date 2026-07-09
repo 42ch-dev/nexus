@@ -133,6 +133,31 @@ describe('TauriDesktopCapabilities', () => {
     restoreTauri();
   });
 
+  it('getAgentProfile invokes get_agent_profile and returns the profile payload', async () => {
+    const { invoke } = mockTauri(() =>
+      Promise.resolve({ name: 'codex', launchCommand: 'codex' }),
+    );
+    const caps = new TauriDesktopCapabilities();
+    const profile = await caps.getAgentProfile();
+    expect(invoke).toHaveBeenCalledWith('get_agent_profile');
+    expect(profile).toEqual({ name: 'codex', launchCommand: 'codex' });
+    restoreTauri();
+  });
+
+  it('getAgentProfile returns null when the command yields null', async () => {
+    mockTauri(() => Promise.resolve(null));
+    const caps = new TauriDesktopCapabilities();
+    await expect(caps.getAgentProfile()).resolves.toBeNull();
+    restoreTauri();
+  });
+
+  it('getAgentProfile returns null on invoke transport failure (preselect path)', async () => {
+    mockTauri(() => Promise.reject('string error'));
+    const caps = new TauriDesktopCapabilities();
+    await expect(caps.getAgentProfile()).resolves.toBeNull();
+    restoreTauri();
+  });
+
   it('onDaemonStatusChanged listens for nexus://daemon-status-changed events', async () => {
     const handler = vi.fn();
     const listen = vi.fn().mockImplementation((event, cb) => {
