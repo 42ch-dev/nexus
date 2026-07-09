@@ -9,13 +9,13 @@
 
 ## Goal
 
-Expose **Re-run setup** from Settings — fulfilling V1.94's deferred "Re-run setup" action (clears `setup_completed` marker). Interaction **R1**: confirm → clear `setup_completed` → navigate to `/setup` immediately.
+Expose **Re-run setup** from Settings — fulfilling V1.94's deferred "Re-run setup" action (clears `setup_completed` marker). Interaction **R1**: confirm → clear `setup_completed` → navigate to `/setup`. On desktop, **`DaemonLaunchGate`** (V1.105) intercepts before the wizard mounts — authors see fullscreen daemon wait, then land on the Agent step.
 
 > V1.94 risk register: Settings exposes a "Re-run setup" action that clears the marker. V1.102 deferred the UI; this spec delivers it.
 
 ## Author-facing outcome
 
-Settings → **Setup** → select **Re-run Setup** → confirm dialog explains the wizard will restart → **Re-run Setup** opens `/setup`. Workspace path and agent profile files are **not** deleted. **Cancel** returns to Setup with no change.
+Settings → **Setup** → select **Re-run Setup** → confirm dialog explains the wizard will restart → **Re-run Setup** clears the marker and navigates to `/setup`. The app-level fullscreen daemon gate runs next; when Ready, the three-step wizard opens on **Agent**. Workspace path and agent profile files are **not** deleted. **Cancel** returns to Setup with no change.
 
 ## Architecture locks (implementer SSOT)
 
@@ -32,7 +32,7 @@ Execute in order:
 
 1. `await desktop.setSetupCompleted(false)` → Tauri **`set_setup_completed`** with `{ value: false }`.
 2. Update **`SetupCompletedContext`** to `completed: false` **before** navigation (extend provider — see below).
-3. `navigate('/setup', { replace: true })`.
+3. `navigate('/setup', { replace: true })` — routing succeeds immediately because `/setup` is outside `SetupGate`; **`DaemonLaunchGate`** (outer, V1.105) shows fullscreen daemon wait before the wizard renders.
 
 **Cancel:** close dialog; **no** IPC; **no** context change; remain on `/settings/setup`.
 
@@ -53,6 +53,7 @@ Without step 2, an author who cancels the wizard and navigates back to gated rou
 | Fact | Implication |
 |------|-------------|
 | `/setup` route is **outside** `SetupGate` in `App.tsx` | Navigation to wizard always succeeds after marker clear |
+| `/setup` is **inside** `DaemonLaunchGate` (V1.105) | Wizard does not mount until daemon Ready; re-run authors always pass fullscreen wait first |
 | Gated routes (`/works`, `/settings`, …) check `useSetupCompleted()` | After re-run confirm, context `false` → `SetupGate` redirects to `/setup` if author hits a gated URL before finishing wizard |
 | `SetupGate` does **not** wrap Settings re-run button | Re-run is initiated from inside gated UI while `completed` is still `true`; only Confirm flips marker |
 
@@ -104,7 +105,11 @@ Destructive-adjacent tone — warn without implying data loss.
 ## Acceptance (author-visible)
 
 - Setup section shows **Re-run Setup** CTA with confirm dialog (destructive-adjacent copy; Title Case primary CTA per DESIGN Voice).
-- **Re-run Setup** (confirm) clears `setup_completed` and navigates to `/setup` immediately.
+- **Re-run Setup** (confirm) clears `setup_completed` and navigates to `/setup`; fullscreen daemon gate runs before wizard (V1.105).
 - **Cancel** leaves `setup_completed` unchanged; author stays on Setup section.
 - After confirm, workspace path and agent profile remain available (no silent file deletion).
 - No `schemas/` change.
+
+## V1.105 compatibility (wizard IA)
+
+After **V1.105** ships, Re-run Setup lands in the **new** three-step wizard (**Agent → Workspace → Done**) after the app-level fullscreen Daemon gate — not the legacy Welcome-first / Daemon-step flow. R1 semantics are unchanged (marker clear only; no data wipe). **Wizard IA authority:** [v1.105/specs/wizard-ia-reorder.md](../../v1.105/specs/wizard-ia-reorder.md). Confirm dialog copy ("restarts the setup wizard from the beginning") remains accurate.

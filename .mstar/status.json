@@ -1,15 +1,75 @@
 {
   "version": 1,
-  "updated_at": "2026-07-09",
-  "plans": [],
+  "updated_at": "2026-07-10",
+  "plans": [
+    {
+      "id": "2026-07-10-v1.105-daemon-fullscreen-gate",
+      "title": "P0 — App-level fullscreen Daemon gate (D2)",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-07-10-v1.105-daemon-fullscreen-gate.md",
+      "metadata": {
+        "primary_spec": ".mstar/iterations/v1.105/specs/daemon-fullscreen-gate.md",
+        "description": "Always auto-start sidecar; fullscreen Ready gate; rewrite Rule 13",
+        "iteration_compass": ".mstar/iterations/v1.105-delivery-compass.md",
+        "iteration_refs": [
+          "v1.105"
+        ],
+        "spec_integration_branch": "iteration/v1.105",
+        "merge_target": "iteration/v1.105",
+        "priority": "high",
+        "phase": "V1.105",
+        "sdd_dir": ".mstar/sdd/2026-07-10-v1.105-daemon-fullscreen-gate/"
+      }
+    },
+    {
+      "id": "2026-07-10-v1.105-wizard-ia-reorder",
+      "title": "P1 — Wizard IA Agent→Workspace→Done",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-07-10-v1.105-wizard-ia-reorder.md",
+      "metadata": {
+        "primary_spec": ".mstar/iterations/v1.105/specs/wizard-ia-reorder.md",
+        "description": "Reorder wizard; remove Welcome/Daemon steps; workspace+bootstrap on step 2",
+        "iteration_compass": ".mstar/iterations/v1.105-delivery-compass.md",
+        "iteration_refs": [
+          "v1.105"
+        ],
+        "spec_integration_branch": "iteration/v1.105",
+        "merge_target": "iteration/v1.105",
+        "priority": "high",
+        "phase": "V1.105",
+        "blocked_by_plan_id": "2026-07-10-v1.105-daemon-fullscreen-gate",
+        "sdd_dir": ".mstar/sdd/2026-07-10-v1.105-wizard-ia-reorder/"
+      }
+    },
+    {
+      "id": "2026-07-10-v1.105-portrait-shell-steps",
+      "title": "P2 — Portrait shell + top Steps",
+      "status": "Todo",
+      "file": ".mstar/plans/2026-07-10-v1.105-portrait-shell-steps.md",
+      "metadata": {
+        "primary_spec": ".mstar/iterations/v1.105/specs/portrait-wizard-shell.md",
+        "description": "Fixed portrait wizard card + top horizontal Steps; Studio-first",
+        "iteration_compass": ".mstar/iterations/v1.105-delivery-compass.md",
+        "iteration_refs": [
+          "v1.105"
+        ],
+        "spec_integration_branch": "iteration/v1.105",
+        "merge_target": "iteration/v1.105",
+        "priority": "high",
+        "phase": "V1.105",
+        "blocked_by_plan_id": "2026-07-10-v1.105-wizard-ia-reorder",
+        "sdd_dir": ".mstar/sdd/2026-07-10-v1.105-portrait-shell-steps/"
+      }
+    }
+  ],
   "metadata": {
     "integration_branch_retired": false,
     "last_integration_branch": "iteration/v1.97",
     "iteration_base_branch": "main",
-    "spec_integration_branch": "iteration/v1.103",
+    "spec_integration_branch": "iteration/v1.105",
     "target_branch": "main",
-    "latest_active_iteration": "V1.103",
-    "latest_active_compass": "v1.103-delivery-compass.md",
+    "latest_active_iteration": "V1.105",
+    "latest_active_compass": "v1.105-delivery-compass.md",
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/specs/README.md",
@@ -67,7 +127,7 @@
         "2026-07-09-v1.103-settings-shell-nav": 2
       }
     },
-    "updated_at": "2026-07-09T22:30:00+0800"
+    "updated_at": "2026-07-10T00:30:00+0800"
   },
   "residual_findings": {
     "2026-07-05-v1.91-findings-batch": [

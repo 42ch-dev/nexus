@@ -594,7 +594,8 @@ components:
     step-label-typography: "{typography.label-14}"
     step-label-active-color: "{colors.gray-1000}"
     step-label-pending-color: "{colors.gray-700}"
-    wizard-max-width: "640px"
+    wizard-max-width: "480px"
+    wizard-max-height: "720px"
     wizard-padding: "{spacing.space-8}"
 
   # ── setup-wizard-surface (V1.96): apps/web dark ──

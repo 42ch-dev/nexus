@@ -165,6 +165,8 @@ Rules 9 + 10 fix the supervisor state machine so a real spawn is actually attemp
 
 ### Rule 13 (V1.100): gate `.setup()` auto-start behind `setup_completed`; bootstrap creator/workspace via Tauri IPC BEFORE daemon start
 
+> **Superseded by V1.105 D2 (§13.10.1 in `desktop-shell.md`).** Sidecar auto-start is now **unconditional** on every launch; bootstrap runs on Workspace **Continue** in the three-step wizard. Full knowledge rewrite at iteration-close compound — do not treat Rule 13 as current product behavior.
+
 V1.97 made the daemon reachable but exposed the next clean-state blocker: `.setup()` unconditionally auto-started the sidecar, but on a fresh `~/.nexus42/` there is no `active_creator_id`, so the daemon exits `No active creator`. The wizard had no creator-bootstrap step.
 
 **Pattern:** gate the launch-time auto-start on setup completion; let the wizard persist workspace + bootstrap minimum creator/workspace state through a **desktop-only Tauri IPC command** (`ensure_setup_bootstrap`), THEN start the daemon.

@@ -150,7 +150,7 @@ Section nav labels and per-component matrix: [IA guide](../iterations/v1.98/guid
 - No unbounded migration of shadcn primitives into `@42ch/nexus-ui`; V1.99 allows only approved pure presentational primitives
 - No daemon/Tauri integration, schema changes, or `@42ch/nexus-contracts` bump
 - Not a replacement for `apps/web` product QA — studio complements, does not gate author flows
-- Desktop clean-state / first-launch work remains outside Design Studio scope and is deferred from the active V1.99 design-system iteration unless user direction changes again
+- Desktop clean-state / first-launch author onboarding is owned by **V1.105** (setup wizard chrome via Studio fixtures — see [v1.105-delivery-compass.md](../iterations/v1.105-delivery-compass.md)); Design Studio itself does not ship author onboarding.
 
 ---
 

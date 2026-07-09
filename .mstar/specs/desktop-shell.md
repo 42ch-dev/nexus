@@ -123,9 +123,16 @@ Window chrome / app menu / native dialogs / desktop context menu / daemon-status
 
 ### 13.1 Purpose
 
-The desktop app's first-launch flow walks a new author through workspace creation, daemon startup, and ACP agent selection before entering the main UI. The wizard is gated by a `setup_completed` marker — absent or `false` → wizard; `true` → skip.
+Desktop first-launch is a **two-phase entry** (V1.105):
 
-### 13.2 Four-step flow
+1. **Launch ritual** — fullscreen `DaemonLaunchGate` until the bundled sidecar is Ready (every launch; not a wizard step).
+2. **Setup wizard** — after Ready, three author-facing steps only: **Agent → Workspace → Done** (see §13.10.3).
+
+The `setup_completed` marker still gates main UI vs `/setup` **after** Ready — absent or `false` → wizard; `true` → main UI.
+
+> **Current product authority:** §13.10. Sections §13.2–§13.9 record historical V1.94–V1.100 behavior for traceability.
+
+### 13.2 Four-step flow (historical — superseded by §13.10)
 
 | Step | Title | Action | UX states |
 |------|-------|--------|-----------|
@@ -139,12 +146,16 @@ The desktop app's first-launch flow walks a new author through workspace creatio
 ### 13.3 `setup_completed` marker
 
 - **Location**: `~/.nexus42/config.toml` field `setup_completed: bool`.
-- **Semantics**: absent or `false` = first-launch (wizard); `true` = skip wizard, enter per-launch daemon-ready gate.
+- **Semantics**: absent or `false` = first-launch (wizard at `/setup` after `DaemonLaunchGate` Ready); `true` = skip wizard, enter main UI after Ready (§13.10.2).
 - **Additive**: the field is optional; existing config files without it are treated as absent (= first-launch). TOML deserialiser must use `#[serde(default)]` or equivalent — the field must tolerate unknown config shapes.
 - **Persistence**: the Tauri shell writes `setup_completed = true` on wizard completion via the existing `set_setup_completed` command (P0). The CLI config path (`apps/nexus42/src/config.rs`) accepts the field additively.
 - **Reset**: Settings → **Setup** exposes **Re-run Setup**, which clears the `setup_completed` marker (R1). Missing marker = fail-safe to wizard. **V1.103 implement authority:** [settings-setup-section.md](../iterations/v1.103/specs/settings-setup-section.md).
 
-### 13.4 Per-launch daemon-ready gate
+### 13.4 Per-launch daemon-ready gate (historical pre-V1.105 — see §13.10.2)
+
+> **V1.105 supersedes this section.** Current product: outer **`DaemonLaunchGate`** — fullscreen splash on **every** desktop launch (first-launch and return visits), always preceded by unconditional sidecar auto-start (D2). The wizard Daemon step is retired. **Normative:** §13.10.2.
+
+The text below describes pre-V1.105 behavior retained for traceability.
 
 Every app launch — not only first launch — gates entry to the main UI on a healthy daemon probe:
 
@@ -201,6 +212,8 @@ On desktop builds, `ClientProvider` returns `TauriClient` + `TauriDesktopCapabil
 
 ### 13.7 V1.96 Amendments — Setup Wizard Surface rework & daemon diagnostic chain
 
+> **Supersession (V1.105):** §13.10.3 three-step IA; portrait top Steps (§13.10.5 / `portrait-wizard-shell.md`); daemon diagnostics on `DaemonLaunchGate` splash — not wizard step 2. Toast/CTA/Browse patterns below remain valid where §13.10 references them.
+
 **Product behavior target (author-visible).** These describe what the user sees and does after the V1.96 changes. Technical token names, React implementation, and Rust sidecar mechanics are out of scope for this spec (see DESIGN.md and the implement plan).
 
 #### 13.7.1 Centered, integrated card layout
@@ -255,6 +268,8 @@ V1.95 amendments (ClientProvider, migration-reset button, workspace default + st
 
 ### 13.8 V1.97 Amendments — First-launch reliability hardening
 
+> **Daemon step references below are historical** (V1.105 §13.10.2). Workspace/Browse rules apply to Workspace step 2 in the current IA.
+
 **Product behavior target (author-visible).** A clean desktop install must not strand the author in an unbounded starting state. The wizard may succeed or surface a daemon failure, but the outcome must be observable, bounded, and actionable.
 
 - Step 1 remains contained at desktop window sizes: the step list does not crowd the content area, card bounds hold, and long workspace paths truncate instead of expanding the layout.
@@ -279,6 +294,8 @@ V1.97 does not change daemon routes, JSON schemas, generated TypeScript/Rust con
 
 ### 13.9 V1.100 Amendments — Clean-state first-launch bootstrap (P0)
 
+> **Partial supersession (V1.105):** §13.9.1 bootstrap **timing** moves to Workspace **Continue** (§13.10.3). §13.9.2 Rule 13 gating is **rewritten** by §13.10.1 (D2 — always auto-start). Bootstrap IPC contract itself remains valid.
+
 **Product behavior target.** A clean desktop install must complete the full wizard path without a pre-daemon `No active creator` failure. A new bootstrap substep between workspace selection and daemon start creates the minimum creator/workspace state the daemon requires to boot.
 
 **Contract location:** The authoritative implementation-ready contract is [`.mstar/iterations/v1.100/specs/desktop-first-launch-bootstrap.md`](../iterations/v1.100/specs/desktop-first-launch-bootstrap.md). This section records the product behavior; the iteration contract is SSOT for implementation details (bootstrap mechanism, daemon-start timing matrix, minimum state, idempotency contract, reuse targets).
@@ -295,7 +312,7 @@ A new bootstrap substep is inserted between step 1 (Welcome + Workspace) and ste
 | 3 | ACP Agent Detection | **Unchanged.** |
 | 4 | Done | **Unchanged.** |
 
-#### 13.9.2 `.setup()` daemon auto-start gating
+#### 13.9.2 `.setup()` daemon auto-start gating (historical — superseded by §13.10.1)
 
 The Tauri `.setup()` hook in `apps/desktop/src-tauri/src/lib.rs` now reads `setup_completed` before spawning the sidecar:
 
@@ -305,6 +322,51 @@ The Tauri `.setup()` hook in `apps/desktop/src-tauri/src/lib.rs` now reads `setu
 #### 13.9.3 Contract boundary
 
 V1.100 does not change daemon routes, JSON schemas, generated TypeScript/Rust contracts, or `@42ch/nexus-contracts` (`wire_contracts_changed: false`). The bootstrap is Tauri IPC only — it writes to `~/.nexus42/config.toml` through the existing Tauri Rust layer; the daemon reads the same config file it already reads at boot. No daemon boot-without-creator mode is introduced.
+
+### 13.10 V1.105 Amendments — First-launch wizard reshape (Agent-first + app-level Daemon gate)
+
+**Product behavior target.** V1.105 makes daemon readiness a **launch ritual** (fullscreen gate) and reduces the setup wizard to three author choices. **Iteration SSOT:** [`.mstar/iterations/v1.105-delivery-compass.md`](../iterations/v1.105-delivery-compass.md) + [`v1.105/specs/`](../iterations/v1.105/specs/).
+
+#### 13.10.1 Rule 13 rewrite — always auto-start sidecar (D2)
+
+The Tauri `.setup()` hook **always** spawns/attaches the sidecar on app launch — **regardless of `setup_completed`**. This **supersedes** §13.9.2 (V1.100 "wizard owns daemon start on clean state").
+
+| `setup_completed` | Sidecar at `.setup()` | Author-visible entry after Ready |
+|-------------------|----------------------|----------------------------------|
+| false / absent | Auto-start (always) | `/setup` wizard |
+| true | Auto-start (always) | Main UI |
+
+The wizard **no longer** owns daemon start via a Daemon step or `startDaemon` IPC as the primary clean-state path.
+
+#### 13.10.2 Fullscreen Daemon gate (every launch)
+
+- First-launch **and** return visits wait on a fullscreen splash until daemon Ready (or bounded timeout/retry/recovery).
+- **Gate layering (architect §5.2):** outer `DaemonLaunchGate` (`apps/web/src/components/setup/daemon-launch-gate.tsx`) wraps all routes in `App.tsx`; inner `SetupGate` routes by `setup_completed` only. `/setup` is under the outer gate, not inside `SetupGate`.
+- Sidecar start is **exclusively** Tauri `.setup()` (`apps/desktop/src-tauri/src/lib.rs`) — gate subscribes/health-probes; happy path does **not** call wizard `startDaemon`.
+- `setup_completed` marker still gates main UI vs `/setup` **after** Ready — unchanged semantics from §13.3.
+- Wizard step 2 (Daemon Ready) from §13.2 is **retired** as a numbered step; diagnostic UX (timeout, retry, `resetLocalDatabase`) lives on `daemon-ready-splash.tsx` / outer gate.
+
+#### 13.10.3 Three-step wizard flow (supersedes §13.2 four-step table for current product)
+
+| Step | Title | Action |
+|------|-------|--------|
+| 1 | Agent | `POST /v1/daemon/agent-host/scan`; AgentPicker + custom command |
+| 2 | Workspace | Default `~/Documents/nexus/default` + Browse; `ensureSetupBootstrap` on Continue |
+| 3 | Done | `setAgentProfile` + `setup_completed=true` → main UI |
+
+**Removed:** Welcome + Workspace as step 1; Daemon as step 2.
+
+Bootstrap timing moves to Workspace Continue (not between Welcome and Daemon as in V1.100 §13.9.1).
+
+#### 13.10.4 Settings Re-run Setup (V1.103 R1)
+
+- Re-run still clears `setup_completed` marker only ([settings-setup-section.md](../iterations/v1.103/specs/settings-setup-section.md)).
+- After confirm: fullscreen gate → `/setup` on Agent step (new IA).
+- Workspace path and agent profile files are **not** deleted.
+
+#### 13.10.5 Contract boundary
+
+Prefer `wire_contracts_changed: false`. Portrait shell: `wizard-max-width` **480px**, `wizard-max-height` **720px**, viewport cap **85vh** (P2 — see `portrait-wizard-shell.md`). React structure: `TopStepIndicator` horizontal; retire left `step-panel-width` (208px) in wizard.
 
 ---
 
