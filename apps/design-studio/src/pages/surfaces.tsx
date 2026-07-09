@@ -3,6 +3,7 @@ import type { ReactNode } from 'react';
 import { cn, Badge } from '@42ch/nexus-ui';
 
 import { AgentPickerFixtures } from '@/fixtures/agent-picker-fixtures';
+import { SettingsHostFixtures } from '@/fixtures/settings-host-fixtures';
 import { SetupWizardChromeFixtures } from '@/fixtures/setup-wizard-chrome-fixtures';
 
 /* ------------------------------------------------------------------ */
@@ -310,6 +311,30 @@ export function SurfacesPage() {
         <AgentPickerFixtures />
       </section>
 
+      {/* 4. Thin Settings host (V1.102 P1) */}
+      <section className="mt-10">
+        <SurfaceHeading>Settings — Thin host</SurfaceHeading>
+        <p className="text-copy-14 text-gray-700 mb-6">
+          Studio-local chrome for DF-70 slice A: footer utility{' '}
+          <strong className="font-medium text-gray-1000">Settings</strong>{' '}
+          (lucide) above profiles, plus a thin host page mounting{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            @web-setup/agent-picker
+          </code>{' '}
+          with fixture props. Not a wizard re-run — no Steps / Back+Continue.
+          No daemon, no product{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            pages/
+          </code>{' '}
+          or{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            components/layout/
+          </code>{' '}
+          imports.
+        </p>
+        <SettingsHostFixtures />
+      </section>
+
       {/* Daemon status strip */}
       <section className="mt-6">
         <SurfaceHeading>Daemon status strip</SurfaceHeading>
@@ -334,7 +359,7 @@ export function SurfacesPage() {
 
       <p className="text-copy-13 text-gray-500 mt-12 pt-8 border-t border-gray-alpha-200">
         Surface fixtures: Setup wizard chrome, App shell chrome, AgentPicker
-        states, daemon status strip. Composed from{' '}
+        states, Settings thin host, daemon status strip. Composed from{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @42ch/nexus-ui
         </code>
