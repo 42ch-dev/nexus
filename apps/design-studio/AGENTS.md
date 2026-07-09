@@ -24,6 +24,7 @@ Parent rules: [`../AGENTS.md`](../AGENTS.md) (apps placement), root [`AGENTS.md`
 | --- | --- | --- |
 | `@/*` | `./src/*` | Studio routes, fixtures, gallery layout |
 | `@web-ui/*` | `../web/src/components/ui/*` | Transitional gallery source for not-yet-promoted primitives |
+| `@web-setup/*` | `../web/src/components/setup/*` | Gallery-only import of app-shared setup compositions (e.g. AgentPicker) — props-driven; no contracts/daemon |
 | `@web-lib/utils` | `../web/src/lib/utils.ts` | `cn()` only |
 | `@42ch/nexus-ui` | workspace package | Brand VI plus V1.99-approved presentational primitives through public exports |
 | `@nexus/design-tokens` | `tooling/design-tokens` | Shared CSS + Tailwind preset |

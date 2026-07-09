@@ -21,6 +21,7 @@
       "@/*": ["./src/*"],
       "@/lib/utils": ["../web/src/lib/utils.ts"],
       "@web-ui/*": ["../web/src/components/ui/*"],
+      "@web-setup/*": ["../web/src/components/setup/*"],
       "@web-lib/utils": ["../web/src/lib/utils.ts"]
     },
 

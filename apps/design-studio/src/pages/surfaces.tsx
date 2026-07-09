@@ -2,6 +2,8 @@ import type { ReactNode } from 'react';
 
 import { cn, Badge, Button, Card, Label } from '@42ch/nexus-ui';
 
+import { AgentPickerFixtures } from '@/fixtures/agent-picker-fixtures';
+
 /* ------------------------------------------------------------------ */
 /*  Data — IA guide §4.5 fixtures (canonical copy strings)              */
 /* ------------------------------------------------------------------ */
@@ -434,6 +436,24 @@ export function SurfacesPage() {
         <AppShellFixture />
       </section>
 
+      {/* 3. AgentPicker visual states (V1.101 P0) */}
+      <section className="mt-10">
+        <SurfaceHeading>Setup — AgentPicker</SurfaceHeading>
+        <p className="text-copy-14 text-gray-700 mb-6">
+          Presentational card grid from{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            @web-setup/agent-picker
+          </code>{' '}
+          (apps/web setup composition — not{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            @42ch/nexus-ui
+          </code>
+          ). Props-driven fixtures: loading, installed grid, mixed, empty, error,
+          selected. No contracts, no daemon client.
+        </p>
+        <AgentPickerFixtures />
+      </section>
+
       {/* Daemon status strip */}
       <section className="mt-6">
         <SurfaceHeading>Daemon status strip</SurfaceHeading>
@@ -457,21 +477,24 @@ export function SurfacesPage() {
       </section>
 
       <p className="text-copy-13 text-gray-500 mt-12 pt-8 border-t border-gray-alpha-200">
-        2 surface fixtures (Setup step card + App shell chrome) composed from{' '}
+        Surface fixtures: Setup step card, App shell chrome, AgentPicker states,
+        daemon status strip. Composed from{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @42ch/nexus-ui
-        </code>{' '}
-        (promoted) and{' '}
+        </code>
+        ,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-setup/*
+        </code>
+        , and transitional{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @web-ui/*
-        </code>{' '}
-        (transitional)
-        primitives + layout CSS. No live product pages, no{' '}
+        </code>
+        . No live product pages, no{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           components/layout/
         </code>{' '}
-        imports, no daemon wiring. Copy strings from IA guide §4.5 (canonical
-        fixtures).
+        imports, no daemon wiring.
       </p>
     </div>
   );
