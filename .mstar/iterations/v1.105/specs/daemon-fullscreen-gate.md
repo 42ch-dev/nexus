@@ -1,10 +1,25 @@
 # Daemon Fullscreen Gate (V1.105 P0)
 
-**Status:** architect-locked (Phase 1 §5.2); writing-polished (§5.3)  
+**Status:** architect-locked (Phase 1 §5.2); writing-polished (§5.3); implementer-confirmed (Task 1)  
 **Plan:** `2026-07-10-v1.105-daemon-fullscreen-gate`  
 **Compass:** [`v1.105-delivery-compass.md`](../../v1.105-delivery-compass.md)  
 **Tier:** Must (P0)  
 **Wire:** `wire_contracts_changed: false`
+
+## Implementer confirmation (Task 1)
+
+Locked for Tasks 2–3 — no product reopen:
+
+| Topic | Confirmed value |
+|-------|-----------------|
+| **D2 auto-start** | Tauri `.setup()` **always** spawns `manager.start(&handle)`; remove `if read_setup_completed().unwrap_or(false)` (rewrite V1.100 Rule 13). |
+| **Splash ownership** | Outer `DaemonLaunchGate` owns wait/subscribe; `DaemonReadySplash` owns fullscreen chrome + migrated diagnostics (25s timeout, retry, `resetLocalDatabase`). `SetupGate` must not render splash after P0. |
+| **SetupGate sequencing** | `SetupCompletedProvider` → `DaemonLaunchGate` → `Routes`; `/setup` and `SetupGate`-wrapped main shell are **siblings** under the outer gate. Marker routing only after Ready. |
+| **Non-Goals** | No P1 wizard IA, no P2 portrait, no Tauri PATH scan, no schema/wire changes, no Re-run Setup semantic change (marker clear only). |
+
+**Pre-P0 baseline (do not preserve):** today `SetupGate` waits for daemon only on the completed-setup path; `/setup` can mount without that wait. P0 inverts this — Ready is required before **either** route tree renders on desktop.
+
+**Recovery default for Task 3:** prefer reload + `resetLocalDatabase` parity with V1.96/V1.97 splash error paths; do **not** make wizard/`startDaemon` the clean-state happy path. Gate may call `startDaemon` only in an explicit recovery branch if needed during implement.
 
 ## Goal
 
