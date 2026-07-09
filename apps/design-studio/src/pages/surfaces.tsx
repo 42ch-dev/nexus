@@ -426,8 +426,9 @@ export function SurfacesShellPage() {
           <strong className="font-medium text-gray-1000">Setup</strong>). Default
           Agent outlet shows the preselected Agent section body (G1 visual);
           Connection outlet shows Connection section chrome (locked helper +
-          form placeholder); Setup keeps an empty frame. Workspace nav is
-          absent until P4 Stretch. No App IPC, no daemon, no product{' '}
+          form placeholder); Setup outlet shows Re-run Setup section chrome
+          (helper + confirm dialog). Workspace nav is absent until P4 Stretch.
+          No App IPC, no daemon, no product{' '}
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
             pages/
           </code>{' '}

@@ -1,6 +1,6 @@
 /**
  * Studio fixtures for Settings shell chrome (V1.103) + Agent (P1) +
- * Connection (P2) section bodies.
+ * Connection (P2) + Setup (P3) section bodies.
  *
  * Studio-local shell + page chrome only — no apps/web pages/, layout/, hooks,
  * or daemon client. Section nav labels locked by settings-shell-ia.md.
@@ -8,7 +8,9 @@
  *
  * P1 Agent section fixture is props-driven with a preselected agent card
  * (saved-profile visual state). P2 Connection section fixture shows locked
- * helper copy + form chrome placeholder. No App IPC / Tauri in Studio.
+ * helper copy + form chrome placeholder. P3 Setup section fixture shows
+ * Re-run Setup CTA + confirm dialog chrome (DESIGN Voice). No App IPC /
+ * Tauri in Studio.
  */
 
 import { useState, type ReactNode } from 'react';
@@ -32,6 +34,11 @@ import {
   Input,
   Label,
 } from '@42ch/nexus-ui';
+
+import {
+  Dialog,
+  DialogContent,
+} from '@web-ui/dialog'; // transitional — keep-web (Radix portal/focus-trap beyond presentational scope)
 
 import {
   AgentPicker,
@@ -64,7 +71,8 @@ const SETTINGS_SECTIONS: {
     id: 'setup',
     label: 'Setup',
     icon: RotateCcw,
-    emptyHint: 'Setup re-run section body mounts here (P3).',
+    emptyHint:
+      'Setup section body mounts in the shell outlet (see Setup section fixture).',
   },
 ];
 
@@ -92,6 +100,21 @@ const CONNECTION_API_KEY_HELPER_SUFFIX = ' on that host).';
 
 const CONNECTION_FINGERPRINT_HELPER =
   'Confirm the certificate fingerprint matches what you see on the daemon machine before connecting.';
+
+/** Locked by settings-setup-section.md — section body helper (sentence case). */
+const SETUP_SECTION_HELPER =
+  'Return to the first-run wizard to walk through setup steps again. Your workspace and agent choices are kept.';
+
+const SETUP_CONFIRM_TITLE = 'Re-run Setup?';
+
+const SETUP_CONFIRM_BODY =
+  'This restarts the setup wizard from the beginning. Your workspace path and agent profile are not deleted.';
+
+const SETUP_BROWSER_HELPER =
+  'Re-run setup is available on the desktop app only.';
+
+const SETUP_BROWSER_TOOLTIP =
+  'Open the Nexus desktop app to re-run setup.';
 
 /** Fixture-only sample values — visual chrome, not live connection state. */
 const FIXTURE_DAEMON_URL = 'https://192.168.1.42:8420';
@@ -455,6 +478,120 @@ function SettingsConnectionSectionChrome() {
   );
 }
 
+/**
+ * Setup section body chrome — locked helper + Re-run Setup CTA + confirm
+ * dialog (settings-setup-section.md). Props-driven only; no App IPC.
+ *
+ * `desktopAvailable` toggles honest browser-only copy vs the desktop CTA.
+ */
+function SettingsSetupSectionChrome({
+  desktopAvailable = true,
+}: {
+  desktopAvailable?: boolean;
+}) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
+
+  return (
+    <div
+      className="flex flex-col gap-6"
+      data-testid="settings-setup-section"
+      data-desktop={desktopAvailable ? 'true' : 'false'}
+    >
+      <div className="flex flex-col gap-2">
+        <h3 className="text-heading-16 font-heading text-gray-1000">Setup</h3>
+        <p className="text-copy-14 text-gray-900">{SETUP_SECTION_HELPER}</p>
+      </div>
+
+      {desktopAvailable ? (
+        <div className="flex items-center gap-3">
+          <Button
+            type="button"
+            variant="secondary"
+            data-testid="settings-rerun-setup"
+            onClick={() => setConfirmOpen(true)}
+          >
+            Re-run Setup
+          </Button>
+        </div>
+      ) : (
+        <div className="flex flex-col gap-3" data-testid="settings-setup-browser-only">
+          <p className="text-copy-14 text-gray-700">{SETUP_BROWSER_HELPER}</p>
+          <div className="flex items-center gap-3">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled
+              title={SETUP_BROWSER_TOOLTIP}
+              data-testid="settings-rerun-setup"
+            >
+              Re-run Setup
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+        <DialogContent
+          title={SETUP_CONFIRM_TITLE}
+          description={SETUP_CONFIRM_BODY}
+        >
+          <div
+            className="flex justify-end gap-3"
+            data-testid="settings-rerun-setup-confirm"
+          >
+            <Button
+              type="button"
+              variant="secondary"
+              data-testid="settings-rerun-setup-cancel"
+              onClick={() => setConfirmOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              variant="destructive"
+              data-testid="settings-rerun-setup-confirm-action"
+              onClick={() => setConfirmOpen(false)}
+            >
+              Re-run Setup
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+/**
+ * Static confirm-dialog chrome for visual acceptance — mirrors DialogContent
+ * layout without Radix portal/aria-hidden (keeps Surfaces page a11y tree intact).
+ */
+function SettingsSetupConfirmChromeStatic() {
+  return (
+    <div
+      className="flex max-w-[560px] flex-col overflow-hidden rounded-popover border border-gray-alpha-400 bg-background-100 shadow-modal"
+      data-testid="settings-rerun-setup-confirm-chrome"
+      role="group"
+      aria-label="Re-run Setup confirm dialog chrome"
+    >
+      <div className="flex flex-col gap-1 p-6 pb-4">
+        <p className="text-heading-20 font-heading tracking-tight text-gray-1000">
+          {SETUP_CONFIRM_TITLE}
+        </p>
+        <p className="text-copy-14 text-gray-900">{SETUP_CONFIRM_BODY}</p>
+      </div>
+      <div className="flex justify-end gap-3 px-6 pb-6">
+        <Button type="button" variant="secondary" tabIndex={-1}>
+          Cancel
+        </Button>
+        <Button type="button" variant="destructive" tabIndex={-1}>
+          Re-run Setup
+        </Button>
+      </div>
+    </div>
+  );
+}
+
 function InteractiveSettingsShellPage() {
   const [active, setActive] = useState<SettingsSectionId>('agent');
   return (
@@ -466,6 +603,8 @@ function InteractiveSettingsShellPage() {
         <SettingsAgentSectionChrome />
       ) : active === 'connection' ? (
         <SettingsConnectionSectionChrome />
+      ) : active === 'setup' ? (
+        <SettingsSetupSectionChrome />
       ) : (
         <SettingsEmptySectionFrame sectionId={active} />
       )}
@@ -565,8 +704,8 @@ export function SettingsHostFixtures() {
           Footer utility Settings (lucide) above profiles; main panel is the
           Settings shell — title, helper, section nav (Agent / Connection /
           Setup). Default Agent outlet shows the preselected Agent section
-          body; Connection outlet shows Connection section chrome. Workspace
-          nav is absent until P4.
+          body; Connection and Setup outlets show their section chrome.
+          Workspace nav is absent until P4.
         </p>
         <SettingsShellChromeFixture />
       </div>
@@ -607,6 +746,57 @@ export function SettingsHostFixtures() {
 
       <div
         className="rounded-card border border-gray-alpha-200 bg-background-100 p-4"
+        data-testid="settings-host-fixture-setup-section"
+      >
+        <h4 className="text-heading-16 font-heading text-gray-1000 mb-1">
+          Setup section
+        </h4>
+        <p className="text-copy-13 text-gray-700 mb-4">
+          Section chrome with locked helper copy and Re-run Setup CTA. Opens
+          the confirm dialog (destructive-adjacent Title Case primary).
+          Fixture-driven only; no App IPC.
+        </p>
+        <div className="bg-background-200 rounded-card p-6">
+          <SettingsSetupSectionChrome />
+        </div>
+      </div>
+
+      <div
+        className="rounded-card border border-gray-alpha-200 bg-background-100 p-4"
+        data-testid="settings-host-fixture-setup-confirm"
+      >
+        <h4 className="text-heading-16 font-heading text-gray-1000 mb-1">
+          Setup — confirm dialog
+        </h4>
+        <p className="text-copy-13 text-gray-700 mb-4">
+          Static confirm dialog chrome for visual acceptance: title, body,
+          Cancel, and destructive Re-run Setup. No Radix portal (avoids
+          aria-hiding the Surfaces page); interactive open is on the Setup
+          section CTA above.
+        </p>
+        <div className="bg-background-200 rounded-card p-6">
+          <SettingsSetupConfirmChromeStatic />
+        </div>
+      </div>
+
+      <div
+        className="rounded-card border border-gray-alpha-200 bg-background-100 p-4"
+        data-testid="settings-host-fixture-setup-browser"
+      >
+        <h4 className="text-heading-16 font-heading text-gray-1000 mb-1">
+          Setup — browser-only
+        </h4>
+        <p className="text-copy-13 text-gray-700 mb-4">
+          Honest desktop-only helper with disabled Re-run Setup CTA (optional
+          tooltip). No invented HTTP setup-marker API.
+        </p>
+        <div className="bg-background-200 rounded-card p-6">
+          <SettingsSetupSectionChrome desktopAvailable={false} />
+        </div>
+      </div>
+
+      <div
+        className="rounded-card border border-gray-alpha-200 bg-background-100 p-4"
         data-testid="settings-host-fixture-section-frames"
       >
         <h4 className="text-heading-16 font-heading text-gray-1000 mb-1">
@@ -614,8 +804,8 @@ export function SettingsHostFixtures() {
         </h4>
         <p className="text-copy-13 text-gray-700 mb-4">
           Static empty outlet frames for Agent / Connection / Setup
-          placeholders. Shell outlet mounts Agent and Connection bodies; Setup
-          body lands in P3.
+          placeholders. Shell outlet mounts Agent, Connection, and Setup
+          bodies; empty frames remain as visual reference.
         </p>
         <div className="grid grid-cols-1 gap-4">
           {SETTINGS_SECTIONS.map(({ id }) => (
