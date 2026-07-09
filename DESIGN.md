@@ -934,7 +934,7 @@ Default, compact, and hero/status card values: see frontmatter `components.card`
 Tone axis: `tone=soft|solid` (API on `@42ch/nexus-ui` Badge). Default is **soft** — omitting `tone` preserves soft callers (`StatusBadge` and other wrappers need no cutover).
 
 - **Soft (default):** tinted fill + semantic text. Borders are strengthened for light-background readability: neutral uses `gray-alpha-400`; semantic variants use ~50% alpha borders (was ~30%).
-- **Solid (opt-in):** solid semantic fill + `#ffffff` / `text-white` text; `border-transparent` (no visible border). Light solid fills are locked in frontmatter `components.badge-status-pill.solid`. Dark solid uses the same white text rule with dark-theme semantic fills (see `DESIGN.dark.md`); dark neutral solid uses a dark surface (`gray-200`) so white text stays readable (dark `gray-1000` is a light token).
+- **Solid (opt-in):** solid semantic fill + high-contrast text; `border-transparent` (no visible border). Light solid fills are locked in frontmatter `components.badge-status-pill.solid` with `#ffffff` text. Dark solid follows the Button Contrast Invariant: bright semantic fills use `brand-deep-blue` text (white fails AA); dark neutral solid uses `gray-200` + white (see `DESIGN.dark.md`).
 
 Variant × tone values: see frontmatter `components.badge-status-pill` (nested `.soft` / `.solid`). Base: height 24px, `px-2`, `rounded-pill`, `label-12`, `font-semibold`.
 

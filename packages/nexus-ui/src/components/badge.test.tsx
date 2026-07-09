@@ -5,49 +5,107 @@ import '@testing-library/jest-dom/vitest';
 import { Badge } from './badge';
 
 describe('Badge', () => {
-  // --- variant rendering ---
+  // --- soft tone (default) ---
 
-  it('renders the neutral variant (default)', () => {
+  it('defaults to soft tone with strengthened neutral border', () => {
     render(<Badge>Neutral</Badge>);
     const badge = screen.getByText('Neutral');
     expect(badge).toHaveClass('bg-gray-alpha-100');
     expect(badge).toHaveClass('text-gray-900');
-    expect(badge).toHaveClass('border-gray-alpha-300');
+    expect(badge).toHaveClass('border-gray-alpha-400');
   });
 
-  it('renders the running variant with green accent', () => {
+  it('renders soft running with ~50% border alpha', () => {
     render(<Badge variant="running">Running</Badge>);
     const badge = screen.getByText('Running');
     expect(badge).toHaveClass('text-green-1000');
     expect(badge.className).toContain('color-mix(in_srgb,var(--color-green-700)_10%,transparent)');
+    expect(badge.className).toContain('color-mix(in_srgb,var(--color-green-700)_50%,transparent)');
   });
 
-  it('renders the queued variant with teal accent', () => {
+  it('renders soft queued with teal accent', () => {
     render(<Badge variant="queued">Queued</Badge>);
     const badge = screen.getByText('Queued');
     expect(badge).toHaveClass('text-teal-1000');
-    expect(badge.className).toContain('color-mix(in_srgb,var(--color-teal-700)_10%,transparent)');
+    expect(badge.className).toContain('color-mix(in_srgb,var(--color-teal-700)_50%,transparent)');
   });
 
-  it('renders the warning variant with amber accent', () => {
+  it('renders soft warning with amber accent', () => {
     render(<Badge variant="warning">Warning</Badge>);
     const badge = screen.getByText('Warning');
     expect(badge).toHaveClass('text-amber-1000');
-    expect(badge.className).toContain('color-mix(in_srgb,var(--color-amber-700)_12%,transparent)');
+    expect(badge.className).toContain('color-mix(in_srgb,var(--color-amber-700)_50%,transparent)');
   });
 
-  it('renders the error variant with red accent', () => {
+  it('renders soft error with red accent', () => {
     render(<Badge variant="error">Failed</Badge>);
     const badge = screen.getByText('Failed');
     expect(badge).toHaveClass('text-red-1000');
-    expect(badge.className).toContain('color-mix(in_srgb,var(--color-red-700)_12%,transparent)');
+    expect(badge.className).toContain('color-mix(in_srgb,var(--color-red-700)_50%,transparent)');
   });
 
-  it('renders the preset variant with purple accent', () => {
+  it('renders soft preset with purple accent', () => {
     render(<Badge variant="preset">Preset</Badge>);
     const badge = screen.getByText('Preset');
     expect(badge).toHaveClass('text-purple-1000');
-    expect(badge.className).toContain('color-mix(in_srgb,var(--color-purple-700)_10%,transparent)');
+    expect(badge.className).toContain('color-mix(in_srgb,var(--color-purple-700)_50%,transparent)');
+  });
+
+  it('explicit tone=soft matches default soft classes', () => {
+    render(
+      <Badge tone="soft" variant="neutral">
+        Soft
+      </Badge>,
+    );
+    const badge = screen.getByText('Soft');
+    expect(badge).toHaveClass('border-gray-alpha-400');
+    expect(badge).not.toHaveClass('border-transparent');
+  });
+
+  // --- solid tone ---
+
+  it('renders solid neutral with white text and transparent border', () => {
+    render(
+      <Badge tone="solid" variant="neutral">
+        Solid Neutral
+      </Badge>,
+    );
+    const badge = screen.getByText('Solid Neutral');
+    expect(badge).toHaveClass('bg-gray-1000');
+    expect(badge).toHaveClass('text-white');
+    expect(badge).toHaveClass('border-transparent');
+    expect(badge).toHaveClass('dark:bg-gray-200');
+  });
+
+  it('renders solid semantic fills with dark AA text override', () => {
+    render(
+      <Badge tone="solid" variant="running">
+        Solid Running
+      </Badge>,
+    );
+    const badge = screen.getByText('Solid Running');
+    expect(badge).toHaveClass('bg-green-700');
+    expect(badge).toHaveClass('text-white');
+    expect(badge).toHaveClass('dark:text-brand-deep-blue');
+    expect(badge).toHaveClass('border-transparent');
+  });
+
+  it.each([
+    ['queued', 'bg-teal-700'],
+    ['warning', 'bg-amber-700'],
+    ['error', 'bg-red-800'],
+    ['preset', 'bg-purple-700'],
+  ] as const)('renders solid %s with transparent border and dark deep-blue text', (variant, bg) => {
+    render(
+      <Badge tone="solid" variant={variant}>
+        {variant}
+      </Badge>,
+    );
+    const badge = screen.getByText(variant);
+    expect(badge).toHaveClass(bg);
+    expect(badge).toHaveClass('text-white');
+    expect(badge).toHaveClass('dark:text-brand-deep-blue');
+    expect(badge).toHaveClass('border-transparent');
   });
 
   // --- base structural classes ---

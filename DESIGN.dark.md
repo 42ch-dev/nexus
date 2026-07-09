@@ -164,15 +164,16 @@ components:
       warning: { backgroundColor: "rgba(255,192,67,0.16)", textColor: "{colors.amber-1000}", borderColor: "rgba(255,192,67,0.50)" }
       error: { backgroundColor: "rgba(255,107,107,0.16)", textColor: "{colors.red-1000}", borderColor: "rgba(255,107,107,0.50)" }
       preset: { backgroundColor: "rgba(183,148,255,0.12)", textColor: "{colors.purple-1000}", borderColor: "rgba(183,148,255,0.50)" }
-    # solid (opt-in): semantic fill from dark scales + white text (contract: solid text remains white);
-    # no visible border. Note: dark *-700 fills are bright — Task 2 must verify AA vs Button Contrast Invariant.
+    # solid (opt-in): semantic fills + AA text per Button Contrast Invariant.
+    # Bright dark *-700/*-800 fills use brand-deep-blue (white fails AA ~1.6–2.4:1).
+    # Neutral uses dark gray-200 + white (~14:1). No visible border.
     solid:
       neutral: { backgroundColor: "{colors.gray-200}", textColor: "#ffffff", borderColor: "transparent" }
-      running: { backgroundColor: "{colors.green-700}", textColor: "#ffffff", borderColor: "transparent" }
-      queued: { backgroundColor: "{colors.teal-700}", textColor: "#ffffff", borderColor: "transparent" }
-      warning: { backgroundColor: "{colors.amber-700}", textColor: "#ffffff", borderColor: "transparent" }
-      error: { backgroundColor: "{colors.red-800}", textColor: "#ffffff", borderColor: "transparent" }
-      preset: { backgroundColor: "{colors.purple-700}", textColor: "#ffffff", borderColor: "transparent" }
+      running: { backgroundColor: "{colors.green-700}", textColor: "{colors.brand-deep-blue}", borderColor: "transparent" }
+      queued: { backgroundColor: "{colors.teal-700}", textColor: "{colors.brand-deep-blue}", borderColor: "transparent" }
+      warning: { backgroundColor: "{colors.amber-700}", textColor: "{colors.brand-deep-blue}", borderColor: "transparent" }
+      error: { backgroundColor: "{colors.red-800}", textColor: "{colors.brand-deep-blue}", borderColor: "transparent" }
+      preset: { backgroundColor: "{colors.purple-700}", textColor: "{colors.brand-deep-blue}", borderColor: "transparent" }
 
   # ── toast: apps/web dark ──
   toast: { backgroundColor: "{colors.background-100}", borderColor: "{colors.gray-alpha-400}", shadow: "shadow-popover", rounded: "{rounded.popover}", maxWidth: "360px", titleTypography: "{typography.label-14}", bodyTypography: "{typography.copy-13}" }
