@@ -25,7 +25,7 @@ pnpm add @42ch/nexus-ui --workspace
 | Component | Import | Variants | Notes |
 |-----------|--------|----------|-------|
 | `Button` | `import { Button } from '@42ch/nexus-ui'` | `variant` (`primary`, `secondary`, `tertiary`, `destructive`) + `size` (`small`, `default`, `large`) + `asChild` | Presentational only; no daemon or routing state |
-| `Badge` | `import { Badge } from '@42ch/nexus-ui'` | `variant` (`neutral`, `running`, `queued`, `warning`, `error`, `preset`) | 24px status pill; uses DESIGN.md semantic color tokens |
+| `Badge` | `import { Badge } from '@42ch/nexus-ui'` | `variant` (`neutral`, `running`, `queued`, `warning`, `error`, `preset`) + `tone` (`soft`, `solid`; default `soft`) | 24px status pill; soft = tinted fill + strengthened border; solid = semantic fill + high-contrast text (opt-in) |
 | `Card` | `import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@42ch/nexus-ui'` | Five related sub-primitives; no variant axis | `Card` wraps content with border + shadow; `CardHeader`/`CardContent` layout helpers |
 | `Input` | `import { Input } from '@42ch/nexus-ui'` | `invalid?: boolean` + native input attrs | V1.100 form-field contract; app owns id/describedby/copy |
 | `Label` | `import { Label } from '@42ch/nexus-ui'` | Native label attrs (`htmlFor`) | Presentational `<label>`; app owns association IDs |
@@ -101,9 +101,11 @@ import { Button, Badge, Card, CardHeader, CardTitle, CardDescription, CardConten
   <a href="/settings">Settings</a>
 </Button>
 
-// Badge with semantic status variants
+// Badge with semantic status variants (default tone=soft)
 <Badge variant="running">Running</Badge>
 <Badge variant="error">Failed</Badge>
+// Opt-in solid / emphasis tone
+<Badge tone="solid" variant="running">Running</Badge>
 
 // Card with sub-primitives
 <Card>

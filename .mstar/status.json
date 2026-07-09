@@ -394,7 +394,7 @@
       "id": "2026-07-09-v1.102-badge-soft-solid",
       "title": "P0 — Badge Soft / Solid Tone",
       "file": ".mstar/plans/2026-07-09-v1.102-badge-soft-solid.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@product-manager",
@@ -403,7 +403,7 @@
         "@qc-specialist",
         "@qa-engineer"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "V1.102",
         "badge",
@@ -413,7 +413,7 @@
       ],
       "created_at": "2026-07-09",
       "updated_at": "2026-07-09",
-      "notes": "Must. Badge tone soft|solid + soft border contrast.",
+      "notes": "Done — QC Approve w/ residuals; QA Pass w/ residuals; merged to iteration/v1.102",
       "metadata": {
         "priority": "high",
         "tier": "must",
@@ -427,7 +427,27 @@
         "primary_spec": ".mstar/iterations/v1.102/specs/badge-soft-solid-contract.md",
         "execution_mode": "sdd",
         "qa_gate": "mandatory",
-        "wire_contracts_changed": false
+        "wire_contracts_changed": false,
+        "working_branch": "feat/v1.102-badge-soft-solid",
+        "sdd_dir": ".mstar/sdd/2026-07-09-v1.102-badge-soft-solid",
+        "task_commits": [
+          {
+            "task": 1,
+            "sha": "8c62bc4c"
+          },
+          {
+            "task": 2,
+            "sha": "ffa84feb"
+          },
+          {
+            "task": 3,
+            "sha": "d8d4469a"
+          },
+          {
+            "task": 4,
+            "sha": "a4660999"
+          }
+        ]
       }
     },
     {
@@ -1168,6 +1188,32 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
         "note": "QC2 F-003. Cosmetic; Select export comment already cites V1.101."
+      }
+    ],
+    "2026-07-09-v1.102-badge-soft-solid": [
+      {
+        "id": "R-V1102P0QC-S001",
+        "severity": "suggestion",
+        "lifecycle": "open",
+        "summary": "Optional soft-row Studio smoke symmetry (testids/class asserts)",
+        "source": "qc-tri",
+        "plan_id": "2026-07-09-v1.102-badge-soft-solid"
+      },
+      {
+        "id": "R-V1102P0QC-S002",
+        "severity": "suggestion",
+        "lifecycle": "open",
+        "summary": "Dark interactive Badge solid eyeball at human-smoke gate",
+        "source": "qc3",
+        "plan_id": "2026-07-09-v1.102-badge-soft-solid"
+      },
+      {
+        "id": "R-V1102P0QC-S003",
+        "severity": "suggestion",
+        "lifecycle": "open",
+        "summary": "Optional README note for dark solid AA text",
+        "source": "qc2",
+        "plan_id": "2026-07-09-v1.102-badge-soft-solid"
       }
     ]
   }

@@ -158,15 +158,25 @@ components:
     row: { typography: "{typography.copy-14}", textColor: "{colors.gray-1000}", secondaryTextColor: "{colors.gray-900}", hoverBackgroundColor: "{colors.background-200}", selectedBackgroundColor: "{colors.background-300}" }
     idText: { typography: "{typography.label-12-mono}" }
 
-  # ── badge-status-pill: apps/web ──
+  # ── badge-status-pill: apps/web (tone=soft|solid; default soft) ──
   badge-status-pill:
-    neutral: { backgroundColor: "{colors.gray-alpha-100}", textColor: "{colors.gray-900}", borderColor: "{colors.gray-alpha-300}" }
-    running: { backgroundColor: "rgba(31,143,77,0.10)", textColor: "{colors.green-1000}", borderColor: "rgba(31,143,77,0.30)" }
-    queued: { backgroundColor: "rgba(0,133,119,0.10)", textColor: "{colors.teal-1000}", borderColor: "rgba(0,133,119,0.30)" }
-    warning: { backgroundColor: "rgba(183,110,0,0.12)", textColor: "{colors.amber-1000}", borderColor: "rgba(183,110,0,0.30)" }
-    error: { backgroundColor: "rgba(229,72,77,0.12)", textColor: "{colors.red-1000}", borderColor: "rgba(229,72,77,0.30)" }
-    preset: { backgroundColor: "rgba(124,58,237,0.10)", textColor: "{colors.purple-1000}", borderColor: "rgba(124,58,237,0.30)" }
-    base: { height: "24px", paddingInline: "8px", rounded: "{rounded.pill}", typography: "{typography.label-12}" }
+    base: { height: "24px", paddingInline: "8px", rounded: "{rounded.pill}", typography: "{typography.label-12}", fontWeight: 600 }
+    # soft (default): tinted fill + semantic text; strengthened borders (neutral gray-alpha-400; semantic ~50% alpha)
+    soft:
+      neutral: { backgroundColor: "{colors.gray-alpha-100}", textColor: "{colors.gray-900}", borderColor: "{colors.gray-alpha-400}" }
+      running: { backgroundColor: "rgba(31,143,77,0.10)", textColor: "{colors.green-1000}", borderColor: "rgba(31,143,77,0.50)" }
+      queued: { backgroundColor: "rgba(0,133,119,0.10)", textColor: "{colors.teal-1000}", borderColor: "rgba(0,133,119,0.50)" }
+      warning: { backgroundColor: "rgba(183,110,0,0.12)", textColor: "{colors.amber-1000}", borderColor: "rgba(183,110,0,0.50)" }
+      error: { backgroundColor: "rgba(229,72,77,0.12)", textColor: "{colors.red-1000}", borderColor: "rgba(229,72,77,0.50)" }
+      preset: { backgroundColor: "rgba(124,58,237,0.10)", textColor: "{colors.purple-1000}", borderColor: "rgba(124,58,237,0.50)" }
+    # solid (opt-in): semantic fill + high-contrast white text; no visible border
+    solid:
+      neutral: { backgroundColor: "{colors.gray-1000}", textColor: "#ffffff", borderColor: "transparent" }
+      running: { backgroundColor: "{colors.green-700}", textColor: "#ffffff", borderColor: "transparent" }
+      queued: { backgroundColor: "{colors.teal-700}", textColor: "#ffffff", borderColor: "transparent" }
+      warning: { backgroundColor: "{colors.amber-700}", textColor: "#ffffff", borderColor: "transparent" }
+      error: { backgroundColor: "{colors.red-800}", textColor: "#ffffff", borderColor: "transparent" }
+      preset: { backgroundColor: "{colors.purple-700}", textColor: "#ffffff", borderColor: "transparent" }
 
   # ── toast: apps/web ──
   toast: { backgroundColor: "{colors.background-100}", borderColor: "{colors.gray-alpha-400}", shadow: "shadow-popover", rounded: "{rounded.popover}", maxWidth: "360px", titleTypography: "{typography.label-14}", bodyTypography: "{typography.copy-13}" }
@@ -921,7 +931,12 @@ Default, compact, and hero/status card values: see frontmatter `components.card`
 
 ### Badge / Status Pill
 
-Variant values: see frontmatter `components.badge-status-pill`.
+Tone axis: `tone=soft|solid` (API on `@42ch/nexus-ui` Badge). Default is **soft** — omitting `tone` preserves soft callers (`StatusBadge` and other wrappers need no cutover).
+
+- **Soft (default):** tinted fill + semantic text. Borders are strengthened for light-background readability: neutral uses `gray-alpha-400`; semantic variants use ~50% alpha borders (was ~30%).
+- **Solid (opt-in):** solid semantic fill + high-contrast text; `border-transparent` (no visible border). Light solid fills are locked in frontmatter `components.badge-status-pill.solid` with `#ffffff` text. Dark solid follows the Button Contrast Invariant: bright semantic fills use `brand-deep-blue` text (white fails AA); dark neutral solid uses `gray-200` + white (see `DESIGN.dark.md`).
+
+Variant × tone values: see frontmatter `components.badge-status-pill` (nested `.soft` / `.solid`). Base: height 24px, `px-2`, `rounded-pill`, `label-12`, `font-semibold`.
 
 ### Toast
 
