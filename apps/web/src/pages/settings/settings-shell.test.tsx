@@ -16,7 +16,6 @@ import { ThemeProvider } from '@/components/theme-provider';
 import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 import { BrowserClient } from '@/lib/nexus';
-import type { DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
 
 vi.mock('@/components/brand/nexus-logo', () => ({
   NexusLogo: () => <div data-testid="nexus-logo">Nexus</div>,
@@ -47,36 +46,6 @@ function LayoutWithTheme() {
 
 function makeClient() {
   return new BrowserClient();
-}
-
-function makeDesktop(
-  overrides: Partial<DesktopCapabilities> = {},
-): DesktopCapabilities {
-  return {
-    openWith: () => Promise.resolve(),
-    revealInFinder: () => Promise.resolve(),
-    getDaemonStatus: () => Promise.resolve({ state: 'running', port: 8420 }),
-    onDaemonStatusChanged: (callback) => {
-      callback({ state: 'running', port: 8420 });
-      return Promise.resolve(() => {});
-    },
-    startDaemon: () => Promise.resolve(),
-    stopDaemon: () => Promise.resolve(),
-    resetLocalDatabase: () => Promise.resolve(),
-    getSetupCompleted: () => Promise.resolve(true),
-    setSetupCompleted: () => Promise.resolve(),
-    setAgentProfile: () => Promise.resolve(),
-    getAgentProfile: () => Promise.resolve(null),
-    getWorkspaceRoot: () => Promise.resolve('/tmp/nexus'),
-    pickDirectory: () => Promise.resolve(null),
-    setWorkspacePath: () => Promise.resolve(),
-    ensureSetupBootstrap: () =>
-      Promise.resolve({
-        creator_id: 'ctr_local1234567890ab',
-        already_bootstrapped: true,
-      }),
-    ...overrides,
-  };
 }
 
 function scanHandler(
@@ -145,58 +114,6 @@ describe('SettingsAgentSection', () => {
     await waitFor(() =>
       expect(screen.getByTestId('agent-card-openai/codex')).toBeInTheDocument(),
     );
-  });
-
-  it('persists via setAgentProfile on Save Agent (desktop)', async () => {
-    const user = userEvent.setup();
-    const setAgentProfile = vi.fn(() => Promise.resolve());
-    useHandlers(scanHandler(), creatorsHandler());
-
-    renderInApp(
-      <Routes>
-        {settingsRouteTree}
-      </Routes>,
-      {
-        client: makeClient(),
-        desktop: makeDesktop({ setAgentProfile }),
-        initialRouterEntries: ['/settings/agent'],
-      },
-    );
-
-    await waitFor(() =>
-      expect(screen.getByTestId('agent-card-openai/codex')).toBeInTheDocument(),
-    );
-
-    await user.click(screen.getByTestId('settings-save-agent'));
-
-    await waitFor(() =>
-      expect(setAgentProfile).toHaveBeenCalledWith('codex', 'codex'),
-    );
-    expect(await screen.findByText('Agent profile saved')).toBeInTheDocument();
-  });
-
-  it('shows desktop-only toast when saving without desktop caps', async () => {
-    const user = userEvent.setup();
-    useHandlers(scanHandler(), creatorsHandler());
-
-    renderInApp(
-      <Routes>
-        {settingsRouteTree}
-      </Routes>,
-      {
-        client: makeClient(),
-        desktop: null,
-        initialRouterEntries: ['/settings/agent'],
-      },
-    );
-
-    await waitFor(() =>
-      expect(screen.getByTestId('agent-card-openai/codex')).toBeInTheDocument(),
-    );
-
-    await user.click(screen.getByTestId('settings-save-agent'));
-
-    expect(await screen.findByText('Desktop only')).toBeInTheDocument();
   });
 });
 

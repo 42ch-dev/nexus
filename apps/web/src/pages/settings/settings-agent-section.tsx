@@ -1,10 +1,10 @@
 /**
- * Settings Agent section — V1.103 P0 scaffold (body from V1.102 thin host).
+ * Settings Agent section — V1.103 P1 (G1 getAgentProfile preselect).
  *
  * Mounts app-shared AgentPicker under SettingsShellLayout outlet.
- * Persist via DesktopCapabilities.setAgentProfile (setup finish() parity).
- * Browser build: picker mounts; persist is a no-op toast.
- * P1 adds getAgentProfile preselect.
+ * Desktop: after scan settles, preselect via getAgentProfile (match by name).
+ * Persist via setAgentProfile on Save Agent (setup finish() parity).
+ * Browser: picker mounts; skip saved-profile preselect; desktop-only save toast.
  */
 
 import { useEffect, useMemo, useState } from 'react';
@@ -25,6 +25,13 @@ import {
 } from '@/pages/setup-step-agent';
 import type { AgentScanEntry } from '@42ch/nexus-contracts';
 
+/** Locked by settings-agent-section.md — section body helper (sentence case). */
+const AGENT_SECTION_HELPER =
+  'Choose which local ACP agent Nexus uses for creative work.';
+
+const BROWSER_ONLY_HELPER =
+  'Agent selection is available on the desktop app only.';
+
 function resolvePickerStatus(
   isLoading: boolean,
   isError: boolean,
@@ -34,6 +41,32 @@ function resolvePickerStatus(
   if (isError) return 'error';
   if (agentCount === 0) return 'empty';
   return 'ready';
+}
+
+/**
+ * Apply a saved profile onto scan results: prefer name match among installed
+ * agents; otherwise use launchCommand as the custom path. Returns whether a
+ * selection was applied (caller falls back to first-installed when false).
+ */
+function applySavedProfile(
+  agents: AgentScanEntry[],
+  profile: { name: string; launchCommand?: string },
+  setSelectedAgent: (agent: AgentScanEntry | null) => void,
+  setCustomLaunchCommand: (command: string) => void,
+): boolean {
+  const match = agents.find((a) => a.name === profile.name && a.installed);
+  if (match) {
+    setSelectedAgent(match);
+    setCustomLaunchCommand('');
+    return true;
+  }
+  const launch = profile.launchCommand?.trim();
+  if (launch) {
+    setSelectedAgent(null);
+    setCustomLaunchCommand(launch);
+    return true;
+  }
+  return false;
 }
 
 export function SettingsAgentSection() {
@@ -50,30 +83,54 @@ export function SettingsAgentSection() {
   const [isSaving, setIsSaving] = useState(false);
   const [didInitDefault, setDidInitDefault] = useState(false);
 
-  const firstInstalled = useMemo(
-    () => agents.find((a) => a.installed) ?? null,
-    [agents],
-  );
-
-  // Default selection to first installed (setup parity). No getAgentProfile in Must P0.
+  // G1: after scan settles, desktop preselects via getAgentProfile (match by
+  // name). Null/unreadable → first-installed fallback. Browser skips read.
+  // Depend on scan.data?.agents (stable when data unchanged), not a fresh
+  // `agents ?? []` alias — that would cancel the async read every render.
   useEffect(() => {
     if (didInitDefault) return;
     if (scan.isLoading || scan.isError) return;
-    if (selectedAgent || customLaunchCommand.trim()) {
+    const scanned = scan.data?.agents;
+    if (scanned === undefined) return;
+
+    let cancelled = false;
+
+    async function initSelection() {
+      if (desktop) {
+        const profile = await desktop.getAgentProfile();
+        if (cancelled) return;
+        if (
+          profile &&
+          applySavedProfile(
+            scanned,
+            profile,
+            setSelectedAgent,
+            setCustomLaunchCommand,
+          )
+        ) {
+          setDidInitDefault(true);
+          return;
+        }
+      }
+
+      if (cancelled) return;
+      const fallback = scanned.find((a) => a.installed) ?? null;
+      if (fallback) {
+        setSelectedAgent(fallback);
+      }
       setDidInitDefault(true);
-      return;
     }
-    if (firstInstalled) {
-      setSelectedAgent(firstInstalled);
-    }
-    setDidInitDefault(true);
+
+    void initSelection();
+    return () => {
+      cancelled = true;
+    };
   }, [
     didInitDefault,
     scan.isLoading,
     scan.isError,
-    selectedAgent,
-    customLaunchCommand,
-    firstInstalled,
+    scan.data?.agents,
+    desktop,
   ]);
 
   const selectedId = useMemo(() => {
@@ -109,8 +166,8 @@ export function SettingsAgentSection() {
     if (!desktop) {
       toast({
         variant: 'info',
-        title: 'Desktop only',
-        description: 'Saving the agent profile requires the Nexus desktop app.',
+        title: 'Save agent on desktop',
+        description: 'Open the Nexus desktop app to change your local agent.',
       });
       return;
     }
@@ -136,6 +193,16 @@ export function SettingsAgentSection() {
 
   return (
     <div className="flex flex-col gap-6" data-testid="settings-agent-section">
+      <div className="flex flex-col gap-2">
+        <h3 className="text-heading-16 font-heading text-gray-1000">Agent</h3>
+        <p className="text-copy-14 text-gray-900">{AGENT_SECTION_HELPER}</p>
+        {!desktop ? (
+          <p className="text-copy-13 text-gray-700" data-testid="settings-agent-browser-helper">
+            {BROWSER_ONLY_HELPER}
+          </p>
+        ) : null}
+      </div>
+
       <div data-testid="settings-host-picker-region">
         <AgentPicker
           status={status}
