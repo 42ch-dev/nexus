@@ -784,9 +784,10 @@
         "lifecycle": "open",
         "title": "Studio vs web section-list drift risk",
         "summary": "Keep Studio SETTINGS_SHELL_SECTIONS aligned with App MUST_SECTIONS when P4 adds Workspace",
-        "target": "V1.103 P4",
+        "target": "V1.104+",
         "source": "qc1",
-        "decision": "defer"
+        "decision": "defer",
+        "note": " P4 Stretch deferred; retarget V1.104+."
       },
       {
         "id": "R-V1103P0QC-S005",

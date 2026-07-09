@@ -91,7 +91,7 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 ## 5) Quick index
 
-**Active iteration**: [V1.103](../iterations/v1.103-delivery-compass.md) (Must delivered; Stretch Workspace deferred; close pending — `iteration/v1.103`).
+**Active iteration**: [V1.103](../iterations/v1.103-delivery-compass.md) (**completed** — PR pending; Stretch Workspace → V1.104+; `iteration/v1.103`).
 
 **Latest shipped**: [V1.102](../iterations/v1.102-delivery-compass.md) (Badge + thin Settings + Surfaces Stretch — PR [#132](https://github.com/42ch-dev/nexus/pull/132) — 2026-07-09).
 
