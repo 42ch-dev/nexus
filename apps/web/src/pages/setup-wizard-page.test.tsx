@@ -74,18 +74,34 @@ async function advanceAgentToWorkspace(user: ReturnType<typeof userEvent.setup>)
 }
 
 describe('SetupWizardPage', () => {
-  it('renders a centered integrated card with step indicator and content area', () => {
+  it('renders a portrait card with top Steps and no left rail', () => {
     useWizardScanHandlers();
     renderInApp(
       <SetupWizardPage />,
       { client: makeClient(), initialRouterEntries: ['/setup'] },
     );
 
-    const innerNav = screen.getByRole('navigation', { name: 'Setup progress' });
-    const list = innerNav.querySelector('ol');
-    expect(list).toHaveClass('flex-col');
+    const card = screen.getByTestId('setup-wizard-card');
+    expect(card).toHaveAttribute('data-shell', 'portrait');
+    expect(card).toHaveClass('max-w-setup-wizard-step-wizard-max-width');
+    expect(card).toHaveClass('h-setup-wizard-wizard-max-height');
+    expect(card).toHaveClass('max-h-[85vh]');
+    expect(card).toHaveClass('overflow-hidden');
+    expect(card).toHaveClass('rounded-popover');
+    expect(card).toHaveClass('shadow-modal');
+    expect(card).toHaveClass('bg-setup-wizard-surface-card-bg');
+    expect(card).toHaveClass('border-setup-wizard-surface-card-border');
+    expect(card.querySelector('.w-setup-wizard-surface-step-panel-width')).toBeNull();
+    expect(card.querySelector('aside')).toBeNull();
+
+    const topSteps = screen.getByTestId('top-step-indicator');
+    expect(card).toContainElement(topSteps);
+    const list = topSteps.querySelector('ol');
+    expect(list).toHaveClass('flex');
+    expect(list).not.toHaveClass('flex-col');
 
     const activeStep = screen.getByRole('listitem', { current: 'step' });
+    expect(activeStep).toHaveAttribute('data-step-id', 'agent');
     expect(activeStep).toHaveTextContent('1');
     expect(activeStep).toHaveTextContent('Agent');
 
@@ -94,26 +110,19 @@ describe('SetupWizardPage', () => {
     expect(circle).toHaveClass('w-setup-wizard-step-circle-size');
 
     const main = screen.getByRole('main');
-    const card = main.parentElement;
-    expect(card).toContainElement(innerNav);
-    expect(card).toHaveClass('max-w-setup-wizard-step-wizard-max-width');
-    expect(card).toHaveClass('overflow-hidden');
-    expect(card).toHaveClass('rounded-popover');
-    expect(card).toHaveClass('shadow-modal');
-    expect(card).toHaveClass('bg-setup-wizard-surface-card-bg');
-    expect(card).toHaveClass('border-setup-wizard-surface-card-border');
+    expect(card).toContainElement(main);
+    expect(main).toHaveClass('flex-col');
+    expect(main).toHaveClass('flex-1');
+    expect(main).toHaveClass('min-h-0');
+    expect(main).toHaveClass('min-w-0');
 
-    const outer = card?.parentElement;
+    const outer = card.parentElement;
     expect(outer).toHaveClass('items-center');
     expect(outer).toHaveClass('justify-center');
     expect(outer).toHaveClass('min-h-screen');
-
-    expect(main).toHaveClass('flex-col');
-    expect(main).toHaveClass('flex-1');
-    expect(main).toHaveClass('min-w-0');
   });
 
-  it('aligns step indicator circles and labels on the same baseline and renders connectors between steps', () => {
+  it('renders horizontal top Steps with connectors between circles', () => {
     useWizardScanHandlers();
     renderInApp(
       <SetupWizardPage />,
@@ -125,7 +134,7 @@ describe('SetupWizardPage', () => {
 
     steps.forEach((li, index) => {
       expect(li).toHaveClass('items-center');
-      expect(li).toHaveClass('h-setup-wizard-step-row-height');
+      expect(li).toHaveAttribute('data-step-id', ['agent', 'workspace', 'done'][index]);
 
       const spans = Array.from(li.children).filter((child) => child.tagName === 'SPAN');
       expect(spans).toHaveLength(2);
@@ -136,11 +145,8 @@ describe('SetupWizardPage', () => {
     for (let i = 0; i < 2; i++) {
       const connector = steps[i].querySelector('[data-testid="step-connector"]');
       expect(connector).toBeInTheDocument();
-      expect(connector).toHaveClass('w-px');
+      expect(connector).toHaveClass('h-px');
       expect(connector).toHaveClass('bg-setup-wizard-step-connector');
-      expect(connector).toHaveStyle({
-        top: 'calc(50% + var(--color-setup-wizard-step-circle-size) / 2)',
-      });
     }
 
     expect(steps[2].querySelector('[data-testid="step-connector"]')).not.toBeInTheDocument();
