@@ -4,8 +4,8 @@
   "plans": [
     {
       "id": "2026-07-10-v1.105-daemon-fullscreen-gate",
-      "title": "P0 \u2014 App-level fullscreen Daemon gate (D2)",
-      "status": "InProgress",
+      "title": "P0 — App-level fullscreen Daemon gate (D2)",
+      "status": "InReview",
       "file": ".mstar/plans/2026-07-10-v1.105-daemon-fullscreen-gate.md",
       "metadata": {
         "primary_spec": ".mstar/iterations/v1.105/specs/daemon-fullscreen-gate.md",
@@ -45,18 +45,13 @@
             "task_id": "T5",
             "base": "eb4acd4cc77decd5d3082c2e4e3abc3c79d5201a",
             "head": "998d4de714f9608c1015806cb0d03927b7cf8e09"
-          },
-          {
-            "task_id": "T4",
-            "base": "8eb7fdeccf50f0d178b56f9c0d047344a8c0b2c2",
-            "head": "eb4acd4cc77decd5d3082c2e4e3abc3c79d5201a"
           }
         ]
       }
     },
     {
       "id": "2026-07-10-v1.105-wizard-ia-reorder",
-      "title": "P1 \u2014 Wizard IA Agent\u2192Workspace\u2192Done",
+      "title": "P1 — Wizard IA Agent→Workspace→Done",
       "status": "Todo",
       "file": ".mstar/plans/2026-07-10-v1.105-wizard-ia-reorder.md",
       "metadata": {
@@ -76,7 +71,7 @@
     },
     {
       "id": "2026-07-10-v1.105-portrait-shell-steps",
-      "title": "P2 \u2014 Portrait shell + top Steps",
+      "title": "P2 — Portrait shell + top Steps",
       "status": "Todo",
       "file": ".mstar/plans/2026-07-10-v1.105-portrait-shell-steps.md",
       "metadata": {
@@ -103,7 +98,7 @@
     "target_branch": "main",
     "latest_active_iteration": "V1.105",
     "latest_active_compass": "v1.105-delivery-compass.md",
-    "platform_integration": "paused \u2014 local-only until further notice",
+    "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "spec_refs_index": ".mstar/specs/README.md",
     "pre_iteration_hotfix": null,
@@ -173,7 +168,7 @@
         "target": "when list virtualisation lands",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-05-v1.91-findings-batch.md",
-        "note": "At the 100-item cap this is not user-visible. QC source: \u00a7S-004"
+        "note": "At the 100-item cap this is not user-visible. QC source: §S-004"
       }
     ],
     "2026-07-06-v1.93-closure": [
@@ -186,7 +181,7 @@
         "target": "V1.96 spec-hygiene pass",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-06-v1.93-closure.md",
-        "note": "Pre-existing from V1.90. QC source: \u00a7W-003"
+        "note": "Pre-existing from V1.90. QC source: §W-003"
       }
     ],
     "2026-07-05-v1.92-closure": [
@@ -212,7 +207,7 @@
         "target": "V1.96",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-06-v1.94-closure.md",
-        "note": "Non-blocking. QC source: \u00a7F-101"
+        "note": "Non-blocking. QC source: §F-101"
       },
       {
         "id": "R-V194QC1-S102",
@@ -223,7 +218,7 @@
         "target": "V1.96",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-06-v1.94-closure.md",
-        "note": "Non-blocking. QC source: \u00a7F-102"
+        "note": "Non-blocking. QC source: §F-102"
       },
       {
         "id": "R-V194QC1-S103",
@@ -234,18 +229,18 @@
         "target": "V1.96",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-06-v1.94-closure.md",
-        "note": "Non-blocking. QC source: \u00a7F-103"
+        "note": "Non-blocking. QC source: §F-103"
       },
       {
         "id": "R-V194QC1-S104",
-        "title": "Browser-fallback workspace string uses ~/\u2026 while Tauri returns absolute path",
+        "title": "Browser-fallback workspace string uses ~/… while Tauri returns absolute path",
         "severity": "low",
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "V1.96",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-06-v1.94-closure.md",
-        "note": "Non-blocking. QC source: \u00a7F-104"
+        "note": "Non-blocking. QC source: §F-104"
       },
       {
         "id": "R-V194QC1-S105",
@@ -256,7 +251,7 @@
         "target": "V1.96",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-06-v1.94-closure.md",
-        "note": "Non-blocking. QC source: \u00a7F-105"
+        "note": "Non-blocking. QC source: §F-105"
       },
       {
         "id": "R-V194QC1-S106",
@@ -267,7 +262,7 @@
         "target": "V1.96",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-06-v1.94-closure.md",
-        "note": "Non-blocking. QC source: \u00a7F-106"
+        "note": "Non-blocking. QC source: §F-106"
       },
       {
         "id": "R-V194QC2-S001",
@@ -278,7 +273,7 @@
         "target": "V1.96",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-06-v1.94-closure.md",
-        "note": "Non-blocking. QC source: \u00a7S-001"
+        "note": "Non-blocking. QC source: §S-001"
       },
       {
         "id": "R-V194QC2-S002",
@@ -289,7 +284,7 @@
         "target": "V1.96",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-06-v1.94-closure.md",
-        "note": "Non-blocking. QC source: \u00a7S-002"
+        "note": "Non-blocking. QC source: §S-002"
       },
       {
         "id": "R-V194QC1R-S001",
@@ -300,34 +295,34 @@
         "target": "V1.96",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-06-v1.94-closure.md",
-        "note": "Non-blocking. QC source: \u00a7Revalidation"
+        "note": "Non-blocking. QC source: §Revalidation"
       }
     ],
     "2026-07-07-v1.95-implement-fixes": [
       {
         "id": "R-V195-ARCH-DUPLICATE-DEFAULTS",
-        "title": "Triplicate resolve_default_workspace_path/default_workspace_root (apps/nexus42, nexus-daemon-runtime, desktop src-tauri) \u2014 consolidate into nexus-home-layout",
+        "title": "Triplicate resolve_default_workspace_path/default_workspace_root (apps/nexus42, nexus-daemon-runtime, desktop src-tauri) — consolidate into nexus-home-layout",
         "severity": "low",
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.96",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md \u00a7Architecture residual",
+        "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md §Architecture residual",
         "note": "V1.95 fixed brand nexus42->nexus in all 3; structural consolidation deferred."
       },
       {
         "id": "R-V195-ARCH-STRERR-GAP",
-        "title": "SidecarManager discards _rx from command.spawn() \u2014 daemon stderr (real crash reason) never captured; wizard shows generic error",
+        "title": "SidecarManager discards _rx from command.spawn() — daemon stderr (real crash reason) never captured; wizard shows generic error",
         "severity": "medium",
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.96",
         "lifecycle": "resolved",
-        "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md \u00a7Architecture residual",
+        "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md §Architecture residual",
         "note": "T3 surfaces detail verbatim but stderr is not captured; reset button is the pragmatic recovery.",
         "closed_at": "2026-07-07",
         "closed_by": "V1.96",
-        "closure_note": "Closed by V1.96 plan QC Approve \u2014 stderr capture (T3)"
+        "closure_note": "Closed by V1.96 plan QC Approve — stderr capture (T3)"
       },
       {
         "id": "R-V195QC3-W002",
@@ -338,7 +333,7 @@
         "target": "V1.96",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md",
-        "note": "PM-accepted: recovery-wipe semantics; daemon recreates fresh DBs on boot regardless; partial wipe recoverable. QC source: \u00a7W2"
+        "note": "PM-accepted: recovery-wipe semantics; daemon recreates fresh DBs on boot regardless; partial wipe recoverable. QC source: §W2"
       },
       {
         "id": "R-V195QC3-W003",
@@ -349,21 +344,21 @@
         "target": "V1.96",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md",
-        "note": "PM-accepted: matches existing write_setup_completed_at/write_agent_profile_at pattern (all std::fs::write); codebase-wide hardening is V1.96. QC source: \u00a7W3"
+        "note": "PM-accepted: matches existing write_setup_completed_at/write_agent_profile_at pattern (all std::fs::write); codebase-wide hardening is V1.96. QC source: §W3"
       },
       {
         "id": "R-V195QC3-S001",
-        "title": "Setup daemon step has no timeout \u2014 if sidecar never emits a status event, wizard hangs indefinitely",
+        "title": "Setup daemon step has no timeout — if sidecar never emits a status event, wizard hangs indefinitely",
         "severity": "low",
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "V1.96",
         "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md",
-        "note": "useEffect cleanup unsubscribes; no hard timeout. QC source: \u00a7Suggestion",
+        "note": "useEffect cleanup unsubscribes; no hard timeout. QC source: §Suggestion",
         "closed_at": "2026-07-07",
         "closed_by": "V1.96",
-        "closure_note": "Closed by V1.96 plan QC Approve \u2014 wizard timeout + starting branch (T4)"
+        "closure_note": "Closed by V1.96 plan QC Approve — wizard timeout + starting branch (T4)"
       },
       {
         "id": "R-V195QC1-S002",
@@ -374,7 +369,7 @@
         "target": "V1.96",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md",
-        "note": "Implementation correct; integration-covered; test-parity with siblings is polish. QC source: \u00a7S-002"
+        "note": "Implementation correct; integration-covered; test-parity with siblings is polish. QC source: §S-002"
       }
     ],
     "2026-07-07-v1.96-implement-rework": [
@@ -387,7 +382,7 @@
         "target": "V1.97",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.96-implement-rework.md",
-        "note": "Sub-millisecond window; low practical impact. QC source: \u00a7W-1"
+        "note": "Sub-millisecond window; low practical impact. QC source: §W-1"
       },
       {
         "id": "R-V196QC1-S002",
@@ -398,7 +393,7 @@
         "target": "V1.97",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.96-implement-rework.md",
-        "note": "Single-line blast radius; V1.97 polish. QC source: \u00a7S-002"
+        "note": "Single-line blast radius; V1.97 polish. QC source: §S-002"
       },
       {
         "id": "R-V196QC1-S004",
@@ -409,7 +404,7 @@
         "target": "V1.97+",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.96-implement-rework.md",
-        "note": "Future 'copy error details' support button. QC source: \u00a7S-004"
+        "note": "Future 'copy error details' support button. QC source: §S-004"
       },
       {
         "id": "R-V196QC3-S001",
@@ -420,7 +415,7 @@
         "target": "V1.97",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.96-implement-rework.md",
-        "note": "Would not catch className regression. QC source: \u00a7S-1"
+        "note": "Would not catch className regression. QC source: §S-1"
       },
       {
         "id": "R-V196QC1-S001",
@@ -431,7 +426,7 @@
         "target": "V1.97",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.96-implement-rework.md",
-        "note": "Different fallback semantics; consolidation candidate. QC source: \u00a7S-001"
+        "note": "Different fallback semantics; consolidation candidate. QC source: §S-001"
       }
     ],
     "2026-07-08-v1.99-surfaces-visual-direction": [
@@ -447,13 +442,13 @@
         "note": "Non-blocking. QC source: qc1 S-1",
         "closed_at": "2026-07-08",
         "closed_by": "P2",
-        "closure_note": "Closed by P2 T2 \u2014 transitional annotation added to @web-ui/label in surfaces.tsx + components.tsx"
+        "closure_note": "Closed by P2 T2 — transitional annotation added to @web-ui/label in surfaces.tsx + components.tsx"
       }
     ],
     "2026-07-08-v1.99-nexus-ui-component-promotion": [
       {
         "id": "R-V199QC1-S001",
-        "title": "Package cn.ts is byte-identical to apps/web utils.ts \u2014 add cross-reference comment to document the drift invariant",
+        "title": "Package cn.ts is byte-identical to apps/web utils.ts — add cross-reference comment to document the drift invariant",
         "severity": "low",
         "decision": "defer",
         "owner": "@frontend-dev",
@@ -463,7 +458,7 @@
         "note": "Non-blocking. QC source: qc1 S-001. V1.100 rejects @nexus/design-tokens as the authority while it depends on @42ch/nexus-ui.",
         "closed_at": "2026-07-08",
         "closed_by": "P1",
-        "closure_note": "Closed by P1 T3 \u2014 preferred path taken: web utils.ts is a thin re-export of cn from @42ch/nexus-ui; duplication physically eliminated. Behavioral SSOT check (check_cn_parity) verifies single-source authority."
+        "closure_note": "Closed by P1 T3 — preferred path taken: web utils.ts is a thin re-export of cn from @42ch/nexus-ui; duplication physically eliminated. Behavioral SSOT check (check_cn_parity) verifies single-source authority."
       },
       {
         "id": "R-V199QC1-S002",
@@ -477,11 +472,11 @@
         "note": "Non-blocking. QC source: qc1 S-002",
         "closed_at": "2026-07-08",
         "closed_by": "P1",
-        "closure_note": "Closed by P1 T2 \u2014 promoted-wrapper forbidden-import guardrail (check-ui-guardrails.sh) catches clsx/cva/tailwind-merge/@/lib/*/deep imports in CI; failure-fixture proven."
+        "closure_note": "Closed by P1 T2 — promoted-wrapper forbidden-import guardrail (check-ui-guardrails.sh) catches clsx/cva/tailwind-merge/@/lib/*/deep imports in CI; failure-fixture proven."
       },
       {
         "id": "R-V199QC3-F001",
-        "title": "extendTailwindMerge config duplicated between package and apps/web \u2014 consolidate behind the approved class-merge SSOT",
+        "title": "extendTailwindMerge config duplicated between package and apps/web — consolidate behind the approved class-merge SSOT",
         "severity": "low",
         "decision": "defer",
         "owner": "@frontend-dev",
@@ -491,7 +486,7 @@
         "note": "Non-blocking. QC source: qc3 F-001. V1.100 rejects @nexus/design-tokens as the authority while it depends on @42ch/nexus-ui.",
         "closed_at": "2026-07-08",
         "closed_by": "P1",
-        "closure_note": "Closed by P1 T3 \u2014 extendTailwindMerge exists only in packages/nexus-ui/src/lib/cn.ts; web utils.ts re-exports cn; dupe scan clean. Behavioral SSOT check guards drift."
+        "closure_note": "Closed by P1 T3 — extendTailwindMerge exists only in packages/nexus-ui/src/lib/cn.ts; web utils.ts re-exports cn; dupe scan clean. Behavioral SSOT check guards drift."
       }
     ],
     "2026-07-07-v1.97-desktop-first-launch-hardening": [
@@ -504,10 +499,10 @@
         "target": "post-V1.99",
         "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-08-v1.100-desktop-clean-state-first-launch.md",
-        "note": "Pre-existing product/arch gap exposed by V1.97 smoke (spawn-name fix made daemon reachable). V1.97 ships the spawn-name fix; creator-bootstrap design deferred. Needs architect: gate daemon auto-start behind setup_completed + wizard creator-init. QC source: \u00a7R-V197-SMOKE-CLEAN-STATE",
+        "note": "Pre-existing product/arch gap exposed by V1.97 smoke (spawn-name fix made daemon reachable). V1.97 ships the spawn-name fix; creator-bootstrap design deferred. Needs architect: gate daemon auto-start behind setup_completed + wizard creator-init. QC source: §R-V197-SMOKE-CLEAN-STATE",
         "closed_at": "2026-07-09",
         "closed_by": "V1.100 P0",
-        "closure_note": "Closed by V1.100 P0 \u2014 interactive macOS clean-state smoke: user confirmed daemon reached 'Daemon is running' after wizard bootstrap; No active creator blocker resolved. ensure_setup_bootstrap + .setup() gating shipped."
+        "closure_note": "Closed by V1.100 P0 — interactive macOS clean-state smoke: user confirmed daemon reached 'Daemon is running' after wizard bootstrap; No active creator blocker resolved. ensure_setup_bootstrap + .setup() gating shipped."
       },
       {
         "id": "R-V197-SMOKE-UI",
@@ -518,10 +513,10 @@
         "target": "post-V1.99",
         "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-08-v1.100-desktop-clean-state-first-launch.md",
-        "note": "Attach path + unit tests verified; wizard/UI flow not. Manual or automated desktop smoke on interactive host in V1.98. QC source: \u00a7R-V197-SMOKE-UI",
+        "note": "Attach path + unit tests verified; wizard/UI flow not. Manual or automated desktop smoke on interactive host in V1.98. QC source: §R-V197-SMOKE-UI",
         "closed_at": "2026-07-09",
         "closed_by": "V1.100 P0",
-        "closure_note": "Closed by V1.100 P0 \u2014 clean-state interactive macOS smoke captured (user: daemon reached running). Existing-install path is byte-for-byte code-preserved (QC1/QC2 verified .setup() true-branch) + clean-state smoke confirmed daemon reachability. User chose to continue rather than run a separate existing-install pass; UI polish findings registered as separate residuals."
+        "closure_note": "Closed by V1.100 P0 — clean-state interactive macOS smoke captured (user: daemon reached running). Existing-install path is byte-for-byte code-preserved (QC1/QC2 verified .setup() true-branch) + clean-state smoke confirmed daemon reachability. User chose to continue rather than run a separate existing-install pass; UI polish findings registered as separate residuals."
       },
       {
         "id": "R-V197QC3-W001",
@@ -532,7 +527,7 @@
         "target": "V1.99+",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.97-desktop-first-launch-hardening.md",
-        "note": "No error lost; consolidate to single storage path in future iteration. QC source: \u00a7W-001"
+        "note": "No error lost; consolidate to single storage path in future iteration. QC source: §W-001"
       },
       {
         "id": "R-V197QC3-W002",
@@ -543,7 +538,7 @@
         "target": "post-V1.99",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.97-desktop-first-launch-hardening.md",
-        "note": "Same code path as start_daemon; budget-not-reset implicitly covered by crash_restart_stops_when_budget_exhausted. QC source: \u00a7W-002"
+        "note": "Same code path as start_daemon; budget-not-reset implicitly covered by crash_restart_stops_when_budget_exhausted. QC source: §W-002"
       },
       {
         "id": "R-V197-CLIPPY",
@@ -554,7 +549,7 @@
         "target": "post-V1.99",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.97-desktop-first-launch-hardening.md",
-        "note": "Not introduced by V1.97; strict clippy -D warnings fails on this pre-existing lint. QC source: \u00a7R-V197-CLIPPY"
+        "note": "Not introduced by V1.97; strict clippy -D warnings fails on this pre-existing lint. QC source: §R-V197-CLIPPY"
       }
     ],
     "2026-07-08-v1.100-ui-hygiene-guardrails": [
@@ -571,7 +566,7 @@
       },
       {
         "id": "R-V1100P1QC2-W002",
-        "title": "cn-dupe scan scoped to apps/ only, not tooling/ \u2014 accidental tooling duplication would not fail the gate",
+        "title": "cn-dupe scan scoped to apps/ only, not tooling/ — accidental tooling duplication would not fail the gate",
         "severity": "nit",
         "decision": "accept",
         "owner": "@frontend-dev",
@@ -600,7 +595,7 @@
         "target": "post-V1.100",
         "lifecycle": "open",
         "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
-        "note": "Fail-on-missing-dir would be stricter. Low risk \u2014 dir renames caught by other CI jobs. QC source: qc3 S-003"
+        "note": "Fail-on-missing-dir would be stricter. Low risk — dir renames caught by other CI jobs. QC source: qc3 S-003"
       },
       {
         "id": "R-V1100P2QC3-S001",
@@ -652,7 +647,7 @@
     "2026-07-09-v1.101-agent-detection-picker": [
       {
         "id": "R-V1101P0-001",
-        "title": "@web-setup/* aliases entire components/setup/ tree \u2014 prefer file-scoped alias or guardrail",
+        "title": "@web-setup/* aliases entire components/setup/ tree — prefer file-scoped alias or guardrail",
         "severity": "low",
         "decision": "defer",
         "owner": "@frontend-dev",
@@ -722,7 +717,7 @@
     "2026-07-09-v1.101-select-component-promotion": [
       {
         "id": "R-V1101P2-001",
-        "title": "Studio AGENTS transitional prose still generic (V1.98\u2192V1.99) while Forbidden lists Select as promoted",
+        "title": "Studio AGENTS transitional prose still generic (V1.98→V1.99) while Forbidden lists Select as promoted",
         "severity": "nit",
         "decision": "defer",
         "owner": "@frontend-dev",
@@ -733,7 +728,7 @@
       },
       {
         "id": "R-V1101P2-002",
-        "title": "Studio AGENTS Allowed table still says \u201cV1.99-approved presentational primitives\u201d",
+        "title": "Studio AGENTS Allowed table still says “V1.99-approved presentational primitives”",
         "severity": "nit",
         "decision": "defer",
         "owner": "@frontend-dev",
@@ -751,7 +746,7 @@
         "target": "post-V1.101",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
-        "note": "QC2 F-001. Prefer \u2026-error for parity with form-field fixtures."
+        "note": "QC2 F-001. Prefer …-error for parity with form-field fixtures."
       },
       {
         "id": "R-V1101P2-004",
@@ -915,6 +910,63 @@
         "target": "accept",
         "source": "qc3",
         "decision": "defer"
+      }
+    ],
+    "2026-07-10-v1.105-daemon-fullscreen-gate": [
+      {
+        "id": "R-V1105P0-001",
+        "title": "Clean-state: D2 auto-start before ensureSetupBootstrap; gate blocks wizard until P1 moves bootstrap to Workspace Continue",
+        "severity": "medium",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "V1.105 P1",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-10-v1.105-wizard-ia-reorder.md",
+        "note": "QC1 W-001 / QC3-001. Architect §13.10.3 intentional sequencing; P0 ships D2+gate as locked."
+      },
+      {
+        "id": "R-V1105P0-002",
+        "title": "setup-step-daemon.tsx still calls startDaemon on error/reset until P1 retires Daemon wizard step",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "V1.105 P1",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-10-v1.105-wizard-ia-reorder.md",
+        "note": "QC2 S006 / QC3-002. Task 4 handoff."
+      },
+      {
+        "id": "R-V1105P0-003",
+        "title": "DaemonLaunchGate timeout callback can race after markReady (ready→error)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.105",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-10-v1.105-daemon-fullscreen-gate.md",
+        "note": "QC2 S001. Inherited pattern."
+      },
+      {
+        "id": "R-V1105P0-004",
+        "title": "Missing explicit retry→reload and degraded Vitest cases for DaemonLaunchGate",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.105",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-10-v1.105-daemon-fullscreen-gate.md",
+        "note": "QC1/QC2 suggestions."
+      },
+      {
+        "id": "R-V1105P0-005",
+        "title": "Settings re-run test does not mount DaemonLaunchGate",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.105",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-10-v1.105-daemon-fullscreen-gate.md",
+        "note": "QC3 suggestion; gate covered separately."
       }
     ]
   }
