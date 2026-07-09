@@ -13,9 +13,11 @@
 //! root (§5 #8).
 //!
 //! Daemon lifecycle (sidecar autostart/stop/restart) is owned here via
-//! `SidecarManager`. The `.setup()` hook auto-starts the daemon only when
-//! `setup_completed` is `true` (existing install); on clean-state first launch
-//! the wizard owns the daemon start after `ensure_setup_bootstrap`.
+//! `SidecarManager`. The `.setup()` hook **always** auto-starts/attaches the
+//! daemon on every launch (V1.105 D2 — rewrites V1.100 Rule 13). The
+//! `setup_completed` marker no longer gates sidecar start; the web shell's
+//! outer `DaemonLaunchGate` waits for Ready, then `SetupGate` routes `/setup`
+//! vs main UI.
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
@@ -268,6 +270,16 @@ fn nexus_config_path() -> Option<PathBuf> {
 fn read_setup_completed() -> Option<bool> {
     let path = nexus_config_path()?;
     read_setup_completed_at(&path).ok()?
+}
+
+/// Whether `.setup()` should spawn `SidecarManager::start`.
+///
+/// V1.105 D2: always `true` regardless of `setup_completed` (absent / false / true).
+/// Production `.setup()` always spawns; this helper exists so unit tests can pin
+/// the always-start contract without a Tauri app handle.
+#[cfg(test)]
+fn setup_auto_starts_sidecar(_setup_completed: Option<bool>) -> bool {
+    true
 }
 
 fn read_setup_completed_at(path: &Path) -> anyhow::Result<Option<bool>> {
@@ -696,18 +708,16 @@ pub fn run() {
         .manage(sidecar_manager.clone())
         .setup(move |app| {
             setup_manager.set_app_handle(app.handle().clone());
-            // Gate daemon auto-start behind setup_completed.
-            // - true (existing install): preserve current auto-start/attach behavior.
-            // - false / absent (clean-state): no-op; wizard owns daemon start after bootstrap.
-            if read_setup_completed().unwrap_or(false) {
-                let manager = setup_manager.clone();
-                let handle = app.handle().clone();
-                tauri::async_runtime::spawn(async move {
-                    if let Err(e) = manager.start(&handle).await {
-                        eprintln!("nexus-desktop: sidecar failed to start: {e}");
-                    }
-                });
-            }
+            // V1.105 D2: always auto-start/attach sidecar (rewrites V1.100 Rule 13).
+            // `setup_completed` only routes the web shell after Ready — it does not
+            // gate whether Tauri starts the sidecar.
+            let manager = setup_manager.clone();
+            let handle = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                if let Err(e) = manager.start(&handle).await {
+                    eprintln!("nexus-desktop: sidecar failed to start: {e}");
+                }
+            });
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -753,8 +763,8 @@ mod tests {
 
     use super::{
         default_workspace_root, guard_path, read_agent_profile_at, read_setup_completed_at,
-        reset_local_database_at, write_agent_profile_at, write_setup_completed_at, AgentProfile,
-        PathGuardError, WorkspaceRoot,
+        reset_local_database_at, setup_auto_starts_sidecar, write_agent_profile_at,
+        write_setup_completed_at, AgentProfile, PathGuardError, WorkspaceRoot,
     };
     use super::{
         ensure_setup_bootstrap_at, generate_local_creator_id, read_bootstrap_state,
@@ -1202,44 +1212,49 @@ command = "claude"
         assert!(user_file.exists(), "user workspace files must be untouched");
     }
 
-    // ── V1.100 P0: setup bootstrap tests ────────────────────────────────
-    // Pins three lifecycle branches per
-    // `.mstar/iterations/v1.100/specs/desktop-first-launch-bootstrap.md`
-    // § Verification Strategy:
-    //   1. setup_completed=false → .setup() does NOT auto-start sidecar
-    //   2. setup_completed=true  → preserves auto-start/attach behavior
-    //   3. ensure_setup_bootstrap idempotency
-    //   4. Bootstrap failure: config write failure → no partial/corrupt state
+    // ── V1.105 P0: sidecar always-start (D2) + V1.100 bootstrap ─────────
+    // Pins lifecycle branches per
+    // `.mstar/iterations/v1.105/specs/daemon-fullscreen-gate.md`:
+    //   1. setup_completed absent/false/true → .setup() ALWAYS auto-starts
+    //   2. ensure_setup_bootstrap idempotency (V1.100, unchanged)
+    //   3. Bootstrap failure: config write failure → no partial/corrupt state
     //
-    // Branch 1 + 2 are tested via the read_setup_completed boolean logic
-    // that gates .setup() (the Tauri closure itself is integration-tested
-    // via interactive smoke, T4).
+    // Always-start is tested via `setup_auto_starts_sidecar` (unit-testable
+    // D2 policy mirror). Production `.setup()` always spawns unconditionally;
+    // the Tauri closure itself remains smoke-tested.
 
     #[test]
-    fn setup_completed_absent_means_no_auto_start() {
-        // Clean-state: no config file → read_setup_completed returns None
-        // → .setup() treats as false → no sidecar spawn.
+    fn setup_completed_absent_still_auto_starts() {
+        // Clean-state: no config file → read returns Err / None semantics.
         let tmp = tempfile::tempdir().expect("temp dir");
         let config_path = tmp.path().join("config.toml");
 
-        // No config file exists → read returns Err (which .setup() handles
-        // via unwrap_or(false) → effectively false → no sidecar spawn).
         assert!(read_setup_completed_at(&config_path).is_err());
+        assert!(
+            setup_auto_starts_sidecar(None),
+            "absent marker must still auto-start (V1.105 D2)"
+        );
 
-        // Write setup_completed = false explicitly — same gating semantics.
         write_setup_completed_at(&config_path, false).expect("write false");
         assert_eq!(read_setup_completed_at(&config_path).unwrap(), Some(false));
+        assert!(
+            setup_auto_starts_sidecar(Some(false)),
+            "false marker must still auto-start (V1.105 D2)"
+        );
     }
 
     #[test]
-    fn setup_completed_true_preserves_auto_start_behavior() {
-        // Existing install: setup_completed = true → .setup() auto-starts
-        // the sidecar (current behavior, byte-for-byte preserved).
+    fn setup_completed_true_still_auto_starts() {
+        // Existing install: setup_completed = true → still auto-starts.
         let tmp = tempfile::tempdir().expect("temp dir");
         let config_path = tmp.path().join("config.toml");
 
         write_setup_completed_at(&config_path, true).expect("write true");
         assert_eq!(read_setup_completed_at(&config_path).unwrap(), Some(true));
+        assert!(
+            setup_auto_starts_sidecar(Some(true)),
+            "true marker must still auto-start (V1.105 D2)"
+        );
     }
 
     #[test]

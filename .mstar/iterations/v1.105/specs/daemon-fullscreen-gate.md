@@ -1,10 +1,25 @@
 # Daemon Fullscreen Gate (V1.105 P0)
 
-**Status:** architect-locked (Phase 1 §5.2); writing-polished (§5.3)  
+**Status:** architect-locked (Phase 1 §5.2); writing-polished (§5.3); implementer-confirmed (Task 1)  
 **Plan:** `2026-07-10-v1.105-daemon-fullscreen-gate`  
 **Compass:** [`v1.105-delivery-compass.md`](../../v1.105-delivery-compass.md)  
 **Tier:** Must (P0)  
 **Wire:** `wire_contracts_changed: false`
+
+## Implementer confirmation (Task 1)
+
+Locked for Tasks 2–3 — no product reopen:
+
+| Topic | Confirmed value |
+|-------|-----------------|
+| **D2 auto-start** | Tauri `.setup()` **always** spawns `manager.start(&handle)`; remove `if read_setup_completed().unwrap_or(false)` (rewrite V1.100 Rule 13). |
+| **Splash ownership** | Outer `DaemonLaunchGate` owns wait/subscribe; `DaemonReadySplash` owns fullscreen chrome + migrated diagnostics (25s timeout, retry, `resetLocalDatabase`). `SetupGate` must not render splash after P0. |
+| **SetupGate sequencing** | `SetupCompletedProvider` → `DaemonLaunchGate` → `Routes`; `/setup` and `SetupGate`-wrapped main shell are **siblings** under the outer gate. Marker routing only after Ready. |
+| **Non-Goals** | No P1 wizard IA, no P2 portrait, no Tauri PATH scan, no schema/wire changes, no Re-run Setup semantic change (marker clear only). |
+
+**Pre-P0 baseline (do not preserve):** today `SetupGate` waits for daemon only on the completed-setup path; `/setup` can mount without that wait. P0 inverts this — Ready is required before **either** route tree renders on desktop.
+
+**Recovery (Task 3 locked):** Happy path never calls `startDaemon`. Retry = `window.location.reload()`. Reset = `resetLocalDatabase` then reload — **no** post-reset `startDaemon` (D2 `.setup()` always-starts on reload).
 
 ## Goal
 
@@ -39,6 +54,15 @@ Treat local daemon readiness as an **application-level fullscreen launch require
 | Wizard daemon step (retire) | `apps/web/src/pages/setup-step-daemon.tsx` | **Not** a wizard step after P1; P0 migrates wait/recovery UX to gate; file deleted or demoted in P1. **Must not** remain the clean-state `startDaemon` happy path. |
 | Setup marker IPC | `apps/web/src/lib/setup-completed-context.tsx`, `apps/web/src/lib/nexus/desktop-capabilities.ts` | Unchanged read/write of `setup_completed`. |
 | Re-run entry | `apps/web/src/pages/settings/settings-setup-section.tsx` | R1 unchanged: `setCompleted(false)` → `navigate('/setup')`; gate intercepts before wizard mounts. |
+
+## P1 handoff (Task 4)
+
+P0 delivered ownership of sidecar start + Ready wait outside the wizard. P1 must finish retirement:
+
+1. **Remove** `daemon` from `WizardStep` / step indicator in `setup-wizard-page.tsx` (Agent-first IA after Ready).
+2. **Delete or demote** `setup-step-daemon.tsx` (+ shrink/delete `setup-step-daemon.test.tsx`). Do not keep it as the clean-state start owner.
+3. **P0 already true:** launch happy path uses Tauri D2 + `DaemonLaunchGate` only — no wizard `startDaemon`. Gate recovery = reload or `resetLocalDatabase`→reload.
+4. Until P1 lands, the wizard may still render the Daemon step if navigated there; that residual is acceptable and is **not** the launch happy path (outer gate reaches Ready before `/setup` mounts).
 
 ## SetupGate sequencing (normative)
 
