@@ -13,7 +13,7 @@
         "@qc-specialist",
         "@qa-engineer"
       ],
-      "progress": 100,
+      "progress": 95,
       "tags": [
         "V1.103",
         "settings",
@@ -22,7 +22,7 @@
       ],
       "created_at": "2026-07-09",
       "updated_at": "2026-07-09",
-      "notes": "Must. Move Connect UI into Settings; permanent /connect → /settings/connection redirect (C1).",
+      "notes": "QC 3/3 Approve; QA Pass. Ready to merge.",
       "metadata": {
         "priority": "high",
         "tier": "must",
@@ -923,6 +923,17 @@
         "summary": "qc1 F-003 shared helper extract non-blocking",
         "target": "accept",
         "source": "qc1"
+      }
+    ],
+    "2026-07-09-v1.103-settings-connection": [
+      {
+        "id": "R-V1103P2QC-S001",
+        "severity": "suggestion",
+        "lifecycle": "open",
+        "title": "Optional FingerprintGate /connect allowlist cleanup",
+        "summary": "qc3 suggestion: drop stale /connect from bypass allowlist",
+        "target": "accept",
+        "source": "qc3"
       }
     ]
   }
