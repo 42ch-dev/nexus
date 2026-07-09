@@ -403,3 +403,59 @@ describe('Components page — form-field composition fixture', () => {
     expect(bio).toBeDisabled();
   });
 });
+
+/* ---- components page — Select fixtures (V1.101 P2 Task 2) --------------- */
+
+describe('Components page — Select fixtures', () => {
+  beforeEach(() => {
+    mockMatchMedia(false);
+    renderStudio('/components');
+  });
+
+  it('renders the Select section and fixture root', () => {
+    expect(screen.getByRole('heading', { name: 'Select' })).toBeInTheDocument();
+    expect(screen.getByTestId('select-fixtures')).toBeInTheDocument();
+  });
+
+  it('renders closed select with label association', () => {
+    const select = screen.getByTestId('select-fixture-closed');
+    expect(select.tagName).toBe('SELECT');
+    expect(select).toHaveAttribute('id', 'studio-select-closed');
+    expect(select).not.toBeDisabled();
+    expect(select).not.toHaveAttribute('aria-invalid');
+
+    const label = screen.getByText('Work profile');
+    expect(label.tagName).toBe('LABEL');
+    expect(label).toHaveAttribute('for', 'studio-select-closed');
+  });
+
+  it('renders disabled select', () => {
+    const select = screen.getByTestId('select-fixture-disabled');
+    expect(select).toBeDisabled();
+  });
+
+  it('renders invalid select with aria-invalid and app-owned error', () => {
+    const select = screen.getByTestId('select-fixture-invalid');
+    expect(select).toHaveAttribute('aria-invalid', 'true');
+    expect(select).toHaveAttribute('aria-describedby', 'studio-select-invalid-helper');
+    expect(select.className).toMatch(/border-red-700/);
+
+    const error = document.getElementById('studio-select-invalid-helper');
+    expect(error).toBeInTheDocument();
+    expect(error).toHaveAttribute('role', 'alert');
+    expect(error).toHaveTextContent('Choose a valid executor.');
+  });
+
+  it('documents focus-visible class path on the focus fixture', () => {
+    const select = screen.getByTestId('select-fixture-focus');
+    expect(select.className).toMatch(/focus-visible:border-blue-700/);
+    expect(select).toHaveAttribute('id', 'studio-select-focus');
+  });
+
+  it('provides a manual open-acceptance fixture without package open API', () => {
+    const select = screen.getByTestId('select-fixture-open-manual');
+    expect(select.tagName).toBe('SELECT');
+    expect(select).not.toHaveAttribute('aria-expanded');
+    expect(select).not.toHaveAttribute('open');
+  });
+});

@@ -29,7 +29,7 @@ Success means contributors can tell which semantics the package owns, which the 
 ## 3. Studio-first
 
 1. **This file** locks Select a11y/composition contract (Execute Task 1 — done when Status = Locked).
-2. Studio fixtures for closed/open (native list), disabled, invalid, keyboard focus (§6 acceptance).
+2. Studio fixtures for closed/open (native list), disabled, invalid, keyboard focus (§9 acceptance).
 3. Visual acceptance → package implementation → Web wrapper / Studio consumer updates.
 
 ## 4. Implementation shape — LOCKED: native `<select>`
