@@ -1,11 +1,13 @@
 /**
- * Studio fixtures for setup wizard chrome polish (V1.101 P1 Task 2).
+ * Studio fixtures for setup wizard chrome polish (V1.101 P1 + V1.102 P2).
  *
  * Normative contract: `.mstar/iterations/v1.101/specs/setup-wizard-ui-polish.md` §8
+ * + `.mstar/iterations/v1.102/specs/surfaces-polish-contract.md` wizard chrome rules.
  * Studio-local only — no product pages, no daemon client, no contracts.
  */
 
 import type { ReactNode } from 'react';
+import { ChevronLeft } from 'lucide-react';
 
 import { cn, Button, Card } from '@42ch/nexus-ui';
 
@@ -57,9 +59,15 @@ function stepStatus(currentStep: WizardStepId, index: number): StepStatus {
   return 'pending';
 }
 
+/**
+ * Step list policy (V1.102): left panel chrome **fills** the card height via
+ * flex stretch; the step list itself stays **top-aligned** (no vertical
+ * centering of the ol). Connectors start below each circle so nothing paints
+ * above step 1.
+ */
 function StepIndicator({ currentStep }: { currentStep: WizardStepId }) {
   return (
-    <nav aria-label="Setup progress">
+    <nav aria-label="Setup progress" className="self-start">
       <ol className="flex flex-col">
         {STEP_DEFS.map((s, index) => {
           const status = stepStatus(currentStep, index);
@@ -73,9 +81,16 @@ function StepIndicator({ currentStep }: { currentStep: WizardStepId }) {
             >
               {index < STEP_DEFS.length - 1 && (
                 <div
-                  className="absolute top-1/2 h-setup-wizard-step-row-height w-px bg-setup-wizard-step-connector"
+                  className="absolute w-px bg-setup-wizard-step-connector"
                   aria-hidden
-                  style={{ left: 'calc(var(--color-setup-wizard-step-circle-size) / 2)' }}
+                  data-testid="step-connector"
+                  style={{
+                    left: 'calc(var(--color-setup-wizard-step-circle-size) / 2)',
+                    // Start at the bottom edge of the circle — never above step 1.
+                    top: 'calc(50% + var(--color-setup-wizard-step-circle-size) / 2)',
+                    height:
+                      'calc(var(--color-setup-wizard-step-row-height) - var(--color-setup-wizard-step-circle-size))',
+                  }}
                 />
               )}
               <span
@@ -109,7 +124,7 @@ function StepIndicator({ currentStep }: { currentStep: WizardStepId }) {
   );
 }
 
-/** Normative CTA: single horizontal row — Back left, Continue right (§8.1 + progress note). */
+/** Normative CTA: single horizontal row — icon Back left, Continue right. */
 function CtaRow({ showBack, primaryLabel }: { showBack: boolean; primaryLabel: string }) {
   return (
     <div
@@ -118,8 +133,13 @@ function CtaRow({ showBack, primaryLabel }: { showBack: boolean; primaryLabel: s
       data-layout="horizontal-adjacent"
     >
       {showBack && (
-        <Button variant="tertiary" type="button">
-          Back
+        <Button
+          variant="tertiary"
+          type="button"
+          aria-label="Back"
+          className="px-2"
+        >
+          <ChevronLeft className="h-4 w-4" aria-hidden="true" />
         </Button>
       )}
       <Button
@@ -136,7 +156,10 @@ function CtaRow({ showBack, primaryLabel }: { showBack: boolean; primaryLabel: s
 function DaemonStatusRegion({ state }: { state: DaemonChipState }) {
   return (
     <div
-      className="flex min-h-[120px] flex-col items-center justify-center gap-3 rounded-card border border-gray-alpha-400 bg-background-200 p-6 text-center"
+      className={cn(
+        'flex min-h-[120px] flex-col gap-3 rounded-card border border-gray-alpha-400 bg-background-200 p-6',
+        state === 'error' ? 'items-stretch justify-center' : 'items-center justify-center text-center',
+      )}
       data-testid={`daemon-chip-${state}`}
       data-daemon-state={state}
     >
@@ -154,13 +177,14 @@ function DaemonStatusRegion({ state }: { state: DaemonChipState }) {
       )}
       {state === 'error' && (
         <>
-          <p className="text-copy-14 text-red-800">
-            Daemon is taking longer than expected to start. You can retry or reset the local
-            database.
+          <div className="flex justify-center">
+            <Button variant="secondary" type="button">
+              Retry
+            </Button>
+          </div>
+          <p className="text-left text-copy-12 leading-snug text-red-800">
+            Daemon is taking longer than expected. Retry or reset the local database.
           </p>
-          <Button variant="secondary" type="button">
-            Retry
-          </Button>
         </>
       )}
     </div>
@@ -184,7 +208,8 @@ function WizardChromeCard({
         data-testid={`wizard-chrome-card-${currentStep}`}
         data-current-step={currentStep}
       >
-        <div className="w-full shrink-0 border-b border-gray-alpha-200 bg-background-100 px-setup-wizard-surface-step-panel-padding-x py-setup-wizard-surface-step-panel-padding-y sm:w-setup-wizard-surface-step-panel-width sm:border-b-0 sm:border-r">
+        {/* Left panel fills card height; step list top-aligns (see StepIndicator). */}
+        <div className="flex w-full shrink-0 flex-col border-b border-gray-alpha-200 bg-background-100 px-setup-wizard-surface-step-panel-padding-x py-setup-wizard-surface-step-panel-padding-y sm:w-setup-wizard-surface-step-panel-width sm:border-b-0 sm:border-r">
           <StepIndicator currentStep={currentStep} />
         </div>
 

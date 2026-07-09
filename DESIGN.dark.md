@@ -153,15 +153,27 @@ components:
     row: { typography: "{typography.copy-14}", textColor: "{colors.gray-1000}", secondaryTextColor: "{colors.gray-900}", hoverBackgroundColor: "{colors.background-200}", selectedBackgroundColor: "{colors.background-300}" }
     idText: { typography: "{typography.label-12-mono}" }
 
-  # ── badge-status-pill: apps/web dark ──
+  # ── badge-status-pill: apps/web dark (tone=soft|solid; default soft) ──
   badge-status-pill:
-    neutral: { backgroundColor: "{colors.gray-alpha-100}", textColor: "{colors.gray-900}", borderColor: "{colors.gray-alpha-300}" }
-    running: { backgroundColor: "rgba(84,213,138,0.14)", textColor: "{colors.green-1000}", borderColor: "rgba(84,213,138,0.30)" }
-    queued: { backgroundColor: "rgba(76,216,200,0.14)", textColor: "{colors.teal-1000}", borderColor: "rgba(76,216,200,0.30)" }
-    warning: { backgroundColor: "rgba(255,192,67,0.16)", textColor: "{colors.amber-1000}", borderColor: "rgba(255,192,67,0.30)" }
-    error: { backgroundColor: "rgba(255,107,107,0.16)", textColor: "{colors.red-1000}", borderColor: "rgba(255,107,107,0.30)" }
-    preset: { backgroundColor: "rgba(183,148,255,0.12)", textColor: "{colors.purple-1000}", borderColor: "rgba(183,148,255,0.30)" }
-    base: { height: "24px", paddingInline: "8px", rounded: "{rounded.pill}", typography: "{typography.label-12}" }
+    base: { height: "24px", paddingInline: "8px", rounded: "{rounded.pill}", typography: "{typography.label-12}", fontWeight: 600 }
+    # soft (default): tinted fill + semantic text; strengthened borders (neutral gray-alpha-400; semantic ~50% alpha)
+    soft:
+      neutral: { backgroundColor: "{colors.gray-alpha-100}", textColor: "{colors.gray-900}", borderColor: "{colors.gray-alpha-400}" }
+      running: { backgroundColor: "rgba(84,213,138,0.14)", textColor: "{colors.green-1000}", borderColor: "rgba(84,213,138,0.50)" }
+      queued: { backgroundColor: "rgba(76,216,200,0.14)", textColor: "{colors.teal-1000}", borderColor: "rgba(76,216,200,0.50)" }
+      warning: { backgroundColor: "rgba(255,192,67,0.16)", textColor: "{colors.amber-1000}", borderColor: "rgba(255,192,67,0.50)" }
+      error: { backgroundColor: "rgba(255,107,107,0.16)", textColor: "{colors.red-1000}", borderColor: "rgba(255,107,107,0.50)" }
+      preset: { backgroundColor: "rgba(183,148,255,0.12)", textColor: "{colors.purple-1000}", borderColor: "rgba(183,148,255,0.50)" }
+    # solid (opt-in): semantic fills + AA text per Button Contrast Invariant.
+    # Bright dark *-700/*-800 fills use brand-deep-blue (white fails AA ~1.6–2.4:1).
+    # Neutral uses dark gray-200 + white (~14:1). No visible border.
+    solid:
+      neutral: { backgroundColor: "{colors.gray-200}", textColor: "#ffffff", borderColor: "transparent" }
+      running: { backgroundColor: "{colors.green-700}", textColor: "{colors.brand-deep-blue}", borderColor: "transparent" }
+      queued: { backgroundColor: "{colors.teal-700}", textColor: "{colors.brand-deep-blue}", borderColor: "transparent" }
+      warning: { backgroundColor: "{colors.amber-700}", textColor: "{colors.brand-deep-blue}", borderColor: "transparent" }
+      error: { backgroundColor: "{colors.red-800}", textColor: "{colors.brand-deep-blue}", borderColor: "transparent" }
+      preset: { backgroundColor: "{colors.purple-700}", textColor: "{colors.brand-deep-blue}", borderColor: "transparent" }
 
   # ── toast: apps/web dark ──
   toast: { backgroundColor: "{colors.background-100}", borderColor: "{colors.gray-alpha-400}", shadow: "shadow-popover", rounded: "{rounded.popover}", maxWidth: "360px", titleTypography: "{typography.label-14}", bodyTypography: "{typography.copy-13}" }

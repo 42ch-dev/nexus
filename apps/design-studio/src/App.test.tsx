@@ -5,14 +5,14 @@
  *   1. App renders the landing page (HomePage) with section links.
  *   2. Theme toggle switches light ↔ dark and applies the `.dark` class.
  *   3. Each gallery section route renders its heading.
- *   4. Surfaces page renders setup wizard and app shell fixtures with
+ *   4. Surfaces nested section routes (V1.102 P2) render fixtures with
  *      expected labels and structural elements.
  *
  * These tests catch route/render regressions without snapshot-exhausting every
  * swatch or component variant. Follow apps/web conventions: vitest + jsdom +
  * @testing-library/react.
  */
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -138,12 +138,71 @@ describe('Gallery section rendering', () => {
   );
 });
 
+/* ---- surfaces section menu / deep links (V1.102 P2 Task 1) -------------- */
+
+const SURFACES_SECTION_ROUTES = [
+  { route: '/surfaces', testId: 'surfaces-index', linkLabel: 'Overview' },
+  { route: '/surfaces/setup', testId: 'surfaces-setup', linkLabel: 'Setup' },
+  { route: '/surfaces/shell', testId: 'surfaces-shell', linkLabel: 'Shell' },
+  {
+    route: '/surfaces/agent-picker',
+    testId: 'surfaces-agent-picker',
+    linkLabel: 'AgentPicker',
+  },
+  { route: '/surfaces/daemon', testId: 'surfaces-daemon', linkLabel: 'Daemon' },
+] as const;
+
+describe('Surfaces section menu — deep links', () => {
+  it.each(SURFACES_SECTION_ROUTES)(
+    'renders $testId at $route with section nav',
+    ({ route, testId, linkLabel }) => {
+      mockMatchMedia(false);
+      renderStudio(route);
+
+      expect(screen.getByTestId(testId)).toBeInTheDocument();
+      const sectionNav = screen.getByTestId('surfaces-section-nav');
+      expect(sectionNav).toBeInTheDocument();
+      expect(
+        within(sectionNav).getByRole('link', { name: linkLabel }),
+      ).toHaveAttribute('aria-current', 'page');
+      // Top gallery Surfaces link stays active for nested section routes.
+      const galleryNav = screen.getByRole('navigation', {
+        name: 'Gallery sections',
+      });
+      expect(
+        within(galleryNav).getByRole('link', { name: 'Surfaces' }),
+      ).toHaveAttribute('aria-current', 'page');
+    },
+  );
+
+  it('index lists deep links to each Surfaces section', () => {
+    mockMatchMedia(false);
+    renderStudio('/surfaces');
+    const index = screen.getByTestId('surfaces-index');
+    expect(within(index).getByRole('link', { name: /Setup/ })).toHaveAttribute(
+      'href',
+      '/surfaces/setup',
+    );
+    expect(within(index).getByRole('link', { name: /Shell/ })).toHaveAttribute(
+      'href',
+      '/surfaces/shell',
+    );
+    expect(
+      within(index).getByRole('link', { name: /AgentPicker/ }),
+    ).toHaveAttribute('href', '/surfaces/agent-picker');
+    expect(within(index).getByRole('link', { name: /Daemon/ })).toHaveAttribute(
+      'href',
+      '/surfaces/daemon',
+    );
+  });
+});
+
 /* ---- surfaces page fixtures (T4) ---------------------------------------- */
 
 describe('Surfaces page — setup wizard chrome fixtures', () => {
   beforeEach(() => {
     mockMatchMedia(false);
-    renderStudio('/surfaces');
+    renderStudio('/surfaces/setup');
   });
 
   it('renders the wizard chrome section heading', () => {
@@ -199,25 +258,26 @@ describe('Surfaces page — setup wizard chrome fixtures', () => {
     expect(daemonCta).toHaveClass('flex', 'items-center');
     expect(daemonCta).not.toHaveClass('flex-col');
 
-    const daemonButtons = daemonCta?.querySelectorAll('button');
-    expect(daemonButtons?.[0]).toHaveTextContent('Back');
-    expect(daemonButtons?.[1]).toHaveTextContent('Continue');
+    const daemonBack = daemonCta?.querySelector('button[aria-label="Back"]');
+    expect(daemonBack).toBeInTheDocument();
+    expect(daemonBack).not.toHaveTextContent('Back');
+    expect(daemonCta?.querySelectorAll('button')[1]).toHaveTextContent('Continue');
 
     const agentCard = screen.getByTestId('wizard-chrome-card-agent');
     const agentCta = agentCard.querySelector('[data-testid="wizard-cta-row"]');
-    expect(agentCta?.querySelectorAll('button')[0]).toHaveTextContent('Back');
+    expect(agentCta?.querySelector('button[aria-label="Back"]')).toBeInTheDocument();
   });
 
   it('omits Back on welcome and done', () => {
     const welcomeCard = screen.getByTestId('wizard-chrome-card-welcome');
     expect(
-      welcomeCard.querySelector('[data-testid="wizard-cta-row"]')?.textContent,
-    ).not.toMatch(/Back/);
+      welcomeCard.querySelector('[data-testid="wizard-cta-row"] button[aria-label="Back"]'),
+    ).not.toBeInTheDocument();
 
     const doneCard = screen.getByTestId('wizard-chrome-card-done');
     expect(
-      doneCard.querySelector('[data-testid="wizard-cta-row"]')?.textContent,
-    ).not.toMatch(/Back/);
+      doneCard.querySelector('[data-testid="wizard-cta-row"] button[aria-label="Back"]'),
+    ).not.toBeInTheDocument();
     expect(doneCard.querySelector('[data-testid="wizard-cta-row"]')).toHaveTextContent(
       'Open Nexus',
     );
@@ -229,20 +289,38 @@ describe('Surfaces page — setup wizard chrome fixtures', () => {
     );
     expect(screen.getAllByTestId('daemon-chip-running').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Daemon is running.')).toBeInTheDocument();
-    expect(screen.getByTestId('daemon-chip-error')).toHaveTextContent(/taking longer/i);
-    expect(screen.getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    const errorChip = screen.getByTestId('daemon-chip-error');
+    expect(errorChip).toHaveTextContent(/taking longer/i);
+    expect(within(errorChip).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
+    // Retry is first; concise left-aligned small copy below.
+    const errorChildren = Array.from(errorChip.children);
+    expect(errorChildren[0]?.querySelector('button')).toHaveTextContent('Retry');
+    expect(errorChildren[1]?.tagName).toBe('P');
+    expect(errorChildren[1]).toHaveClass('text-left', 'text-copy-12');
+  });
+
+  it('starts step connectors below each circle (nothing above step 1)', () => {
+    const welcomeCard = screen.getByTestId('wizard-chrome-card-welcome');
+    const connectors = welcomeCard.querySelectorAll('[data-testid="step-connector"]');
+    expect(connectors.length).toBe(3);
+    connectors.forEach((el) => {
+      expect(el).toHaveStyle({
+        top: 'calc(50% + var(--color-setup-wizard-step-circle-size) / 2)',
+      });
+    });
   });
 });
 
 describe('Surfaces page — app shell fixture', () => {
   beforeEach(() => {
     mockMatchMedia(false);
-    renderStudio('/surfaces');
+    renderStudio('/surfaces/shell');
   });
 
   it('renders Creator and Orchestrator tabs', () => {
-    expect(screen.getByText('Creator')).toBeInTheDocument();
-    expect(screen.getByText('Orchestrator')).toBeInTheDocument();
+    // App shell + Settings host fixtures both stub Creator/Orchestrator tabs.
+    expect(screen.getAllByText('Creator').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('Orchestrator').length).toBeGreaterThanOrEqual(1);
   });
 
   it('renders Works nav group and All Works child', () => {
@@ -252,12 +330,12 @@ describe('Surfaces page — app shell fixture', () => {
   });
 
   it('renders Worlds and Findings nav groups', () => {
-    expect(screen.getByText('Worlds')).toBeInTheDocument();
-    expect(screen.getByText('Findings')).toBeInTheDocument();
+    expect(screen.getAllByText('Worlds').length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText('Findings').length).toBeGreaterThanOrEqual(1);
   });
 
   it('renders the profile footer with creator name', () => {
-    expect(screen.getByText('Local Creator')).toBeInTheDocument();
+    expect(screen.getAllByText('Local Creator').length).toBeGreaterThanOrEqual(1);
   });
 
   it('renders add-profile button with accessible label', () => {
@@ -272,12 +350,19 @@ describe('Surfaces page — app shell fixture', () => {
 });
 
 describe('Surfaces page — daemon status strip', () => {
-  it('renders daemon status heading and healthy badge', () => {
+  it('renders single-line status + soft badge + Restart (no description)', () => {
     mockMatchMedia(false);
-    renderStudio('/surfaces');
+    renderStudio('/surfaces/daemon');
 
-    expect(screen.getByText('Daemon running')).toBeInTheDocument();
-    expect(screen.getByText('healthy')).toBeInTheDocument();
+    const strip = screen.getByTestId('daemon-status-strip');
+    expect(within(strip).getByText('Daemon running')).toBeInTheDocument();
+    expect(within(strip).getByText('healthy')).toBeInTheDocument();
+    expect(
+      within(strip).getByRole('button', { name: 'Restart daemon' }),
+    ).toBeInTheDocument();
+    expect(
+      within(strip).queryByText(/Daemon API is reachable/i),
+    ).not.toBeInTheDocument();
   });
 });
 
@@ -286,7 +371,7 @@ describe('Surfaces page — daemon status strip', () => {
 describe('Surfaces page — AgentPicker fixtures', () => {
   beforeEach(() => {
     mockMatchMedia(false);
-    renderStudio('/surfaces');
+    renderStudio('/surfaces/agent-picker');
   });
 
   it('renders the AgentPicker section heading', () => {
@@ -337,6 +422,59 @@ describe('Surfaces page — AgentPicker fixtures', () => {
       .getAllByTestId('agent-card-select-claude-code')
       .filter((el) => el.getAttribute('aria-pressed') === 'true');
     expect(pressed.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+/* ---- surfaces page — Settings thin host (V1.102 P1 Task 2) -------------- */
+
+describe('Surfaces page — Settings thin host fixtures', () => {
+  beforeEach(() => {
+    mockMatchMedia(false);
+    // Settings thin host remains discoverable under Shell (Studio-only).
+    renderStudio('/surfaces/shell');
+  });
+
+  it('renders the Settings thin host section heading', () => {
+    expect(
+      screen.getByRole('heading', { name: 'Settings — Thin host' }),
+    ).toBeInTheDocument();
+  });
+
+  it('renders shell chrome with footer utility Settings link', () => {
+    expect(screen.getByTestId('settings-shell-chrome')).toBeInTheDocument();
+    const link = screen.getByTestId('settings-footer-utility-link');
+    expect(link).toHaveTextContent('Settings');
+    expect(link).toHaveAttribute('aria-current', 'page');
+  });
+
+  it('renders thin host page chrome (title + helper, not wizard CTAs)', () => {
+    const hostRoot = screen.getByTestId('settings-host-fixtures');
+    const pages = within(hostRoot).getAllByTestId('settings-host-page-chrome');
+    expect(pages.length).toBeGreaterThanOrEqual(2);
+    expect(
+      within(hostRoot).getAllByRole('heading', { name: 'Settings', level: 2 })
+        .length,
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      within(hostRoot).getAllByText(
+        /Change the local agent Nexus uses after setup/i,
+      ).length,
+    ).toBeGreaterThanOrEqual(2);
+    // Thin host must not include wizard Back/Continue chrome (wizard CTAs live
+    // on /surfaces/setup).
+    expect(
+      within(hostRoot).queryByTestId('wizard-cta-row'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('mounts AgentPicker with fixture data inside the host', () => {
+    const regions = screen.getAllByTestId('settings-host-picker-region');
+    expect(regions.length).toBeGreaterThanOrEqual(1);
+    const cards = screen.getAllByTestId('agent-card-claude-code');
+    expect(cards.length).toBeGreaterThanOrEqual(1);
+    expect(
+      screen.getAllByTestId('agent-picker-custom-launch').length,
+    ).toBeGreaterThanOrEqual(1);
   });
 });
 
@@ -401,6 +539,33 @@ describe('Components page — form-field composition fixture', () => {
   it('renders disabled textarea', () => {
     const bio = screen.getByPlaceholderText('Tell us about yourself…');
     expect(bio).toBeDisabled();
+  });
+});
+
+/* ---- components page — Badge soft/solid matrix (V1.102 P0 Task 3) -------- */
+
+describe('Components page — Badge soft/solid matrix', () => {
+  beforeEach(() => {
+    mockMatchMedia(false);
+    renderStudio('/components');
+  });
+
+  it('renders Soft and Solid matrix headings under Badge', () => {
+    expect(screen.getByRole('heading', { name: 'Badge' })).toBeInTheDocument();
+    expect(screen.getByTestId('badge-fixtures')).toBeInTheDocument();
+    expect(screen.getByText('Soft (default)')).toBeInTheDocument();
+    expect(screen.getByText('Solid')).toBeInTheDocument();
+  });
+
+  it('renders six solid samples with solid tone classes', () => {
+    const variants = ['neutral', 'running', 'queued', 'warning', 'error', 'preset'] as const;
+    for (const variant of variants) {
+      const badge = screen.getByTestId(`badge-solid-${variant}`);
+      expect(badge).toHaveClass('border-transparent');
+      expect(badge).toHaveClass('text-white');
+    }
+    expect(screen.getByTestId('badge-solid-running')).toHaveClass('bg-green-700');
+    expect(screen.getByTestId('badge-solid-running')).toHaveClass('dark:text-brand-deep-blue');
   });
 });
 

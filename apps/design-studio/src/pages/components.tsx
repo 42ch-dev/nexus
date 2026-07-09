@@ -129,16 +129,35 @@ function BadgeSection() {
   ];
 
   return (
-    <section>
+    <section data-testid="badge-fixtures">
       <SectionHeading id="comp-badge">Badge</SectionHeading>
-      <p className="text-copy-16 text-gray-700 mb-6">
-        Status pill — 6 semantic variants per DESIGN.md § Badge.
+      <p className="text-copy-16 text-gray-700 mb-2">
+        Status pill — 6 semantic variants × soft/solid tone per DESIGN.md § Badge.
+        Default tone is soft; solid is opt-in emphasis.
       </p>
+
+      <p className="text-label-14 text-gray-900 mb-4">Soft (default)</p>
+      <MatrixCard className="mb-6">
+        <div className="flex flex-wrap items-center gap-4">
+          {variants.map(({ variant, label }) => (
+            <div key={`soft-${variant}`} className="flex flex-col items-center gap-2">
+              <Badge tone="soft" variant={variant}>
+                {label}
+              </Badge>
+              <VariantLabel label={label} />
+            </div>
+          ))}
+        </div>
+      </MatrixCard>
+
+      <p className="text-label-14 text-gray-900 mb-4">Solid</p>
       <MatrixCard>
         <div className="flex flex-wrap items-center gap-4">
           {variants.map(({ variant, label }) => (
-            <div key={variant} className="flex flex-col items-center gap-2">
-              <Badge variant={variant}>{label}</Badge>
+            <div key={`solid-${variant}`} className="flex flex-col items-center gap-2">
+              <Badge tone="solid" variant={variant} data-testid={`badge-solid-${variant}`}>
+                {label}
+              </Badge>
               <VariantLabel label={label} />
             </div>
           ))}

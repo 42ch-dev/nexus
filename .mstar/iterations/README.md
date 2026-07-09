@@ -112,12 +112,14 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | [v1.99-design-system-deepening-compass-v1.md](v1.99-design-system-deepening-compass-v1.md) | V1.99 | **Completed** (2026-07-08) — Design System Deepening. Promoted Button/Badge/Card to `@42ch/nexus-ui`, redesigned `/surfaces` with registered tokens, codified studio-first workflow. Integration branch `iteration/v1.99`; target `main`. |
 | [v1.100-delivery-compass.md](v1.100-delivery-compass.md) | V1.100 | **Delivered** (2026-07-09) — UI Completion: Desktop clean-state first-launch (bootstrap-gated) + UI guardrails/`cn` SSOT + Form Field component promotion. All 3 plans Done + QA Pass. Integration branch `iteration/v1.100`; target `main`. |
 | [v1.101-delivery-compass.md](v1.101-delivery-compass.md) | V1.101 | **completed** (2026-07-09) — Desktop setup polish + AgentPicker (Must) + Select stretch shipped. Studio-first; Settings shell remains DF-70. Integration `iteration/v1.101` → `main`. |
+| [v1.102-delivery-compass.md](v1.102-delivery-compass.md) | V1.102 | **completed** (2026-07-09) — Badge soft/solid + thin Settings host + Surfaces polish Stretch. Integration `iteration/v1.102` → PR `main`. |
 
 ### Active iteration workspaces
 
 | Workspace | Version | Contents |
 | --- | --- | --- |
 | [v1.101/](v1.101/README.md) | V1.101 | Iteration contracts: AgentPicker + scan→select, wizard chrome polish, Stretch Select; studio-first process guide |
+| [v1.102/](v1.102/README.md) | V1.102 | Iteration contracts: Badge soft/solid, thin Settings host, Surfaces polish Stretch |
 
 ### Legacy `v1.*` iteration artifacts
 

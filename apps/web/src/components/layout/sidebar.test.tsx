@@ -106,4 +106,55 @@ describe('Sidebar', () => {
       expect(screen.getByRole('toolbar', { name: 'Profiles' })).toBeInTheDocument(),
     );
   });
+
+  it('exposes Settings as a footer utility link above profiles', async () => {
+    useHandlers(
+      http.get('/v1/daemon/creators', () =>
+        HttpResponse.json({
+          items: [{ creator_id: 'creator-a', display_name: 'Alice' }],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+    );
+
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+
+    const link = screen.getByTestId('settings-footer-utility-link');
+    expect(link).toHaveAttribute('href', '/settings');
+    expect(link).toHaveTextContent('Settings');
+    // Settings stays visible on Creator tab (not tab-scoped).
+    expect(screen.getByRole('tab', { name: 'Creator', selected: true })).toBeInTheDocument();
+  });
+
+  it('keeps parent groups as quiet labels and selected leaf with soft fill + thin bar', async () => {
+    useHandlers(
+      http.get('/v1/daemon/creators', () =>
+        HttpResponse.json({
+          items: [{ creator_id: 'creator-a', display_name: 'Alice' }],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+    );
+
+    renderInApp(<Sidebar />, {
+      client: makeClient(),
+      activeCreatorId: 'creator-a',
+      initialRouterEntries: ['/works'],
+    });
+
+    const worksGroup = screen.getByRole('button', { name: /Works/i });
+    expect(worksGroup).toHaveClass('text-gray-600');
+    expect(worksGroup).not.toHaveClass('bg-gray-alpha-100');
+
+    const allWorks = screen.getByRole('link', { name: 'All Works' });
+    expect(allWorks).toHaveClass('bg-gray-alpha-100', 'text-gray-1000');
+    expect(allWorks.querySelector('[data-testid="sidebar-active-bar"]')).toHaveClass(
+      'w-[2px]',
+      'bg-blue-700',
+    );
+
+    const memory = screen.getByRole('link', { name: 'Memory' });
+    expect(memory).toHaveClass('text-gray-600');
+    expect(memory).not.toHaveClass('bg-gray-alpha-100');
+  });
 });

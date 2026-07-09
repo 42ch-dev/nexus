@@ -62,7 +62,7 @@ export function SetupWizardPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background-100 p-6">
       <div className="flex w-full max-w-setup-wizard-step-wizard-max-width overflow-hidden rounded-popover border border-setup-wizard-surface-card-border bg-setup-wizard-surface-card-bg shadow-modal">
-        <aside className="flex-shrink-0 w-setup-wizard-surface-step-panel-width border-r border-r-setup-wizard-surface-step-panel-right-divider px-setup-wizard-surface-step-panel-padding-x py-setup-wizard-surface-step-panel-padding-y">
+        <aside className="flex flex-shrink-0 w-setup-wizard-surface-step-panel-width flex-col border-r border-r-setup-wizard-surface-step-panel-right-divider px-setup-wizard-surface-step-panel-padding-x py-setup-wizard-surface-step-panel-padding-y">
           <StepIndicator currentStep={step} />
         </aside>
         <main className="flex min-w-0 flex-1 flex-col px-setup-wizard-surface-content-panel-padding-x py-setup-wizard-surface-content-panel-padding-y">
@@ -96,6 +96,12 @@ export function SetupWizardPage() {
   );
 }
 
+/**
+ * Step list policy (V1.102): left panel chrome **fills** the card height via
+ * flex stretch; the step list itself stays **top-aligned** (no vertical
+ * centering of the ol). Connectors start below each circle so nothing paints
+ * above step 1.
+ */
 function StepIndicator({ currentStep }: { currentStep: WizardStep }) {
   const steps: { id: WizardStep; label: string }[] = [
     { id: 'welcome', label: 'Welcome' },
@@ -106,7 +112,7 @@ function StepIndicator({ currentStep }: { currentStep: WizardStep }) {
   const currentIndex = steps.findIndex((s) => s.id === currentStep);
 
   return (
-    <nav aria-label="Setup progress">
+    <nav aria-label="Setup progress" className="self-start">
       <ol className="flex flex-col">
         {steps.map((s, index) => {
           const status = index < currentIndex ? 'complete' : index === currentIndex ? 'active' : 'pending';
@@ -120,9 +126,16 @@ function StepIndicator({ currentStep }: { currentStep: WizardStep }) {
             >
               {index < steps.length - 1 && (
                 <div
-                  className="absolute top-1/2 h-setup-wizard-step-row-height w-px bg-setup-wizard-step-connector"
+                  className="absolute w-px bg-setup-wizard-step-connector"
                   aria-hidden
-                  style={{ left: 'calc(var(--color-setup-wizard-step-circle-size) / 2)' }}
+                  data-testid="step-connector"
+                  style={{
+                    left: 'calc(var(--color-setup-wizard-step-circle-size) / 2)',
+                    // Start at the bottom edge of the circle — never above step 1.
+                    top: 'calc(50% + var(--color-setup-wizard-step-circle-size) / 2)',
+                    height:
+                      'calc(var(--color-setup-wizard-step-row-height) - var(--color-setup-wizard-step-circle-size))',
+                  }}
                 />
               )}
               <span

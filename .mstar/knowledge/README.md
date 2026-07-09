@@ -42,3 +42,8 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 **All OSS feature specs:** [`../specs/README.md`](../specs/README.md) (full index by domain).
 
 **Archived:** [`.mstar/archived/knowledge/`](../archived/knowledge/README.md) · [shipped-features-tracker](../archived/shipped-features-tracker.md)
+
+### V1.102 additions
+
+| [badge-soft-solid-tone.md](architecture-patterns/badge-soft-solid-tone.md) | Badge soft/solid tone axis (V1.102) |
+
