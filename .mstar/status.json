@@ -1,40 +1,7 @@
 {
   "version": 1,
-  "updated_at": "2026-07-09",
-  "plans": [
-    {
-      "id": "2026-07-09-v1.104-settings-workspace",
-      "title": "P0 — Settings Workspace path (W2)",
-      "file": "plans/2026-07-09-v1.104-settings-workspace.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@frontend-dev"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.104",
-        "settings",
-        "workspace",
-        "df-70"
-      ],
-      "created_at": "2026-07-09",
-      "updated_at": "2026-07-09",
-      "done_at": "2026-07-10",
-      "notes": "",
-      "metadata": {
-        "iteration_refs": [
-          "V1.104"
-        ],
-        "spec_integration_branch": "iteration/v1.104",
-        "merge_target": "iteration/v1.104",
-        "working_branch": null,
-        "primary_spec": ".mstar/iterations/v1.104/specs/settings-workspace-section.md",
-        "wire_contracts_changed": false,
-        "tier": "Must"
-      }
-    }
-  ],
+  "updated_at": "2026-07-10",
+  "plans": [],
   "metadata": {
     "integration_branch_retired": false,
     "last_integration_branch": "iteration/v1.97",
@@ -100,7 +67,7 @@
         "2026-07-09-v1.103-settings-shell-nav": 2
       }
     },
-    "updated_at": "2026-07-09T23:50:00+0800"
+    "updated_at": "2026-07-10T00:30:00+0800"
   },
   "residual_findings": {
     "2026-07-05-v1.91-findings-batch": [
@@ -256,20 +223,6 @@
         "note": "V1.95 fixed brand nexus42->nexus in all 3; structural consolidation deferred."
       },
       {
-        "id": "R-V195-ARCH-STRERR-GAP",
-        "title": "SidecarManager discards _rx from command.spawn() — daemon stderr (real crash reason) never captured; wizard shows generic error",
-        "severity": "medium",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target": "V1.96",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md §Architecture residual",
-        "note": "T3 surfaces detail verbatim but stderr is not captured; reset button is the pragmatic recovery.",
-        "closed_at": "2026-07-07",
-        "closed_by": "V1.96",
-        "closure_note": "Closed by V1.96 plan QC Approve — stderr capture (T3)"
-      },
-      {
         "id": "R-V195QC3-W002",
         "title": "reset_local_database deletes files in a loop without atomicity/rollback; mid-deletion failure leaves partial state",
         "severity": "low",
@@ -290,20 +243,6 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md",
         "note": "PM-accepted: matches existing write_setup_completed_at/write_agent_profile_at pattern (all std::fs::write); codebase-wide hardening is V1.96. QC source: §W3"
-      },
-      {
-        "id": "R-V195QC3-S001",
-        "title": "Setup daemon step has no timeout — if sidecar never emits a status event, wizard hangs indefinitely",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "V1.96",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md",
-        "note": "useEffect cleanup unsubscribes; no hard timeout. QC source: §Suggestion",
-        "closed_at": "2026-07-07",
-        "closed_by": "V1.96",
-        "closure_note": "Closed by V1.96 plan QC Approve — wizard timeout + starting branch (T4)"
       },
       {
         "id": "R-V195QC1-S002",
@@ -374,95 +313,7 @@
         "note": "Different fallback semantics; consolidation candidate. QC source: §S-001"
       }
     ],
-    "2026-07-08-v1.99-surfaces-visual-direction": [
-      {
-        "id": "R-V199P1QC1-S001",
-        "title": "@web-ui/label import lacks inline transitional annotation per workflow guide",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "P2",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/sdd/2026-07-08-v1.99-surfaces-visual-direction/review/qc1.md",
-        "note": "Non-blocking. QC source: qc1 S-1",
-        "closed_at": "2026-07-08",
-        "closed_by": "P2",
-        "closure_note": "Closed by P2 T2 — transitional annotation added to @web-ui/label in surfaces.tsx + components.tsx"
-      }
-    ],
-    "2026-07-08-v1.99-nexus-ui-component-promotion": [
-      {
-        "id": "R-V199QC1-S001",
-        "title": "Package cn.ts is byte-identical to apps/web utils.ts — add cross-reference comment to document the drift invariant",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.99",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
-        "note": "Non-blocking. QC source: qc1 S-001. V1.100 rejects @nexus/design-tokens as the authority while it depends on @42ch/nexus-ui.",
-        "closed_at": "2026-07-08",
-        "closed_by": "P1",
-        "closure_note": "Closed by P1 T3 — preferred path taken: web utils.ts is a thin re-export of cn from @42ch/nexus-ui; duplication physically eliminated. Behavioral SSOT check (check_cn_parity) verifies single-source authority."
-      },
-      {
-        "id": "R-V199QC1-S002",
-        "title": "Web re-export wrappers have no compile-time guard against re-introducing local cn dependency",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.99",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
-        "note": "Non-blocking. QC source: qc1 S-002",
-        "closed_at": "2026-07-08",
-        "closed_by": "P1",
-        "closure_note": "Closed by P1 T2 — promoted-wrapper forbidden-import guardrail (check-ui-guardrails.sh) catches clsx/cva/tailwind-merge/@/lib/*/deep imports in CI; failure-fixture proven."
-      },
-      {
-        "id": "R-V199QC3-F001",
-        "title": "extendTailwindMerge config duplicated between package and apps/web — consolidate behind the approved class-merge SSOT",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.99",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
-        "note": "Non-blocking. QC source: qc3 F-001. V1.100 rejects @nexus/design-tokens as the authority while it depends on @42ch/nexus-ui.",
-        "closed_at": "2026-07-08",
-        "closed_by": "P1",
-        "closure_note": "Closed by P1 T3 — extendTailwindMerge exists only in packages/nexus-ui/src/lib/cn.ts; web utils.ts re-exports cn; dupe scan clean. Behavioral SSOT check guards drift."
-      }
-    ],
     "2026-07-07-v1.97-desktop-first-launch-hardening": [
-      {
-        "id": "R-V197-SMOKE-CLEAN-STATE",
-        "title": "Clean-state desktop first-launch blocked: .setup() auto-starts daemon unconditionally; daemon exits 'No active creator'; wizard has no creator-bootstrap invoke",
-        "severity": "high",
-        "decision": "defer",
-        "owner": "@architect + @fullstack-dev",
-        "target": "post-V1.99",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/plans/2026-07-08-v1.100-desktop-clean-state-first-launch.md",
-        "note": "Pre-existing product/arch gap exposed by V1.97 smoke (spawn-name fix made daemon reachable). V1.97 ships the spawn-name fix; creator-bootstrap design deferred. Needs architect: gate daemon auto-start behind setup_completed + wizard creator-init. QC source: §R-V197-SMOKE-CLEAN-STATE",
-        "closed_at": "2026-07-09",
-        "closed_by": "V1.100 P0",
-        "closure_note": "Closed by V1.100 P0 — interactive macOS clean-state smoke: user confirmed daemon reached 'Daemon is running' after wizard bootstrap; No active creator blocker resolved. ensure_setup_bootstrap + .setup() gating shipped."
-      },
-      {
-        "id": "R-V197-SMOKE-UI",
-        "title": "Full desktop UI smoke (clean-state + existing-install wizard observation) requires interactive macOS host; headless session cannot drive native Tauri window",
-        "severity": "medium",
-        "decision": "defer",
-        "owner": "@qa-engineer",
-        "target": "post-V1.99",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/plans/2026-07-08-v1.100-desktop-clean-state-first-launch.md",
-        "note": "Attach path + unit tests verified; wizard/UI flow not. Manual or automated desktop smoke on interactive host in V1.98. QC source: §R-V197-SMOKE-UI",
-        "closed_at": "2026-07-09",
-        "closed_by": "V1.100 P0",
-        "closure_note": "Closed by V1.100 P0 — clean-state interactive macOS smoke captured (user: daemon reached running). Existing-install path is byte-for-byte code-preserved (QC1/QC2 verified .setup() true-branch) + clean-state smoke confirmed daemon reachability. User chose to continue rather than run a separate existing-install pass; UI polish findings registered as separate residuals."
-      },
       {
         "id": "R-V197QC3-W001",
         "title": "Stderr drain dual-storage (Arc<Mutex<String>> + inner.stderr_tail) confusing but not buggy; preserves V1.96 R-V196QC3-W001 sub-ms race",
