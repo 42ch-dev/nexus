@@ -17,7 +17,8 @@ interface SetupStepAgentProps {
   state: WizardState;
   onChange: (state: WizardState) => void;
   onNext: () => void;
-  onBack: () => void;
+  /** Hidden on first step (Agent); omit so Back is not shown. */
+  onBack?: () => void;
 }
 
 /** Base picker id for a scan entry (registry id preferred). */
@@ -161,38 +162,43 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
   const canContinue = Boolean(selectedAgent || customLaunchCommand.trim());
 
   return (
-    <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-2">
-        <h2 className="text-heading-24 font-heading text-gray-1000">Choose an ACP agent</h2>
-        <p className="text-copy-14 text-gray-900">
-          Nexus uses an ACP-compatible agent to run strategies. Select a discovered agent or provide a custom launch command.
-        </p>
+    <div className="flex min-h-0 flex-1 flex-col gap-4">
+      <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto" data-testid="wizard-step-body">
+        <div className="flex flex-col gap-2">
+          <h2 className="text-heading-24 font-heading text-gray-1000">Choose an ACP agent</h2>
+          <p className="text-copy-14 text-gray-900">
+            Nexus uses an ACP-compatible agent to run strategies. Select a discovered agent or provide a custom launch
+            command.
+          </p>
+        </div>
+
+        <AgentPicker
+          status={status}
+          agents={status === 'ready' ? pickerItems : []}
+          selectedId={selectedId}
+          onSelect={selectById}
+          customLaunchValue={customLaunchCommand}
+          onCustomLaunchChange={useCustom}
+          errorDescription={
+            scan.isError
+              ? errorMessage(scan.error) || 'The daemon did not respond to the agent scan request.'
+              : undefined
+          }
+          onRetry={scan.isError ? () => void scan.refetch() : undefined}
+          emptyTitle="No agents found on PATH."
+        />
       </div>
 
-      <AgentPicker
-        status={status}
-        agents={status === 'ready' ? pickerItems : []}
-        selectedId={selectedId}
-        onSelect={selectById}
-        customLaunchValue={customLaunchCommand}
-        onCustomLaunchChange={useCustom}
-        errorDescription={
-          scan.isError
-            ? errorMessage(scan.error) || 'The daemon did not respond to the agent scan request.'
-            : undefined
-        }
-        onRetry={scan.isError ? () => void scan.refetch() : undefined}
-        emptyTitle="No agents found on PATH."
-      />
-
       <div
-        className="mt-auto flex items-center gap-setup-wizard-surface-cta-container-gap"
+        className="mt-auto flex shrink-0 items-center gap-setup-wizard-surface-cta-container-gap"
         data-testid="wizard-cta-row"
         data-layout="horizontal-adjacent"
       >
-        <Button variant="tertiary" onClick={onBack} aria-label="Back" className="px-2">
-          <ChevronLeft className="h-4 w-4" aria-hidden="true" />
-        </Button>
+        {onBack && (
+          <Button variant="tertiary" onClick={onBack} aria-label="Back" className="px-2">
+            <ChevronLeft className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        )}
         <Button
           variant="primary"
           onClick={onNext}

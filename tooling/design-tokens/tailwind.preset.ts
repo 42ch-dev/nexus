@@ -253,6 +253,10 @@ const preset: Partial<Config> = {
         'setup-wizard-step-wizard-max-width': cv('setup-wizard-wizard-max-width'),
         'setup-wizard-surface-cta-primary-max-width': cv('setup-wizard-surface-cta-primary-max-width'),
       },
+      // V1.105 P2: portrait wizard height cap (DESIGN.md setup-wizard-step.wizard-max-height)
+      height: {
+        'setup-wizard-wizard-max-height': cv('setup-wizard-wizard-max-height'),
+      },
       padding: {
         'setup-wizard-step-wizard-padding': cv('setup-wizard-wizard-padding'),
         'setup-wizard-surface-step-panel-padding-x': cv('setup-wizard-surface-step-panel-padding-x'),

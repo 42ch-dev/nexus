@@ -1,8 +1,7 @@
 /**
- * Studio fixtures for setup wizard chrome polish (V1.101 P1 + V1.102 P2).
+ * Studio fixtures for setup wizard chrome (V1.105 P2 portrait shell).
  *
- * Normative contract: `.mstar/iterations/v1.101/specs/setup-wizard-ui-polish.md` §8
- * + `.mstar/iterations/v1.102/specs/surfaces-polish-contract.md` wizard chrome rules.
+ * Normative contract: `.mstar/iterations/v1.105/specs/portrait-wizard-shell.md`
  * Studio-local only — no product pages, no daemon client, no contracts.
  */
 
@@ -11,23 +10,35 @@ import { ChevronLeft } from 'lucide-react';
 
 import { cn, Button, Card } from '@42ch/nexus-ui';
 
-export type WizardStepId = 'welcome' | 'daemon' | 'agent' | 'done';
+export type WizardStepId = 'agent' | 'workspace' | 'done';
 export type StepStatus = 'complete' | 'active' | 'pending';
-export type DaemonChipState = 'starting' | 'running' | 'error';
 
 const STEP_DEFS: { id: WizardStepId; label: string }[] = [
-  { id: 'welcome', label: 'Welcome' },
-  { id: 'daemon', label: 'Daemon' },
   { id: 'agent', label: 'Agent' },
+  { id: 'workspace', label: 'Workspace' },
   { id: 'done', label: 'Done' },
 ];
 
 const STEP_TITLES: Record<WizardStepId, string> = {
-  welcome: 'Welcome to Nexus',
-  daemon: 'Start the daemon',
   agent: 'Choose an agent',
+  workspace: 'Choose a workspace',
   done: 'You are ready',
 };
+
+const OVERFLOW_AGENT_NAMES = [
+  'Claude Code',
+  'Codex CLI',
+  'Cursor Agent',
+  'Gemini CLI',
+  'Aider',
+  'OpenCode',
+  'Continue',
+  'Windsurf Cascade',
+  'Cline',
+  'Roo Code',
+  'Amp',
+  'Custom ACP',
+];
 
 function FixtureFrame({
   title,
@@ -60,37 +71,28 @@ function stepStatus(currentStep: WizardStepId, index: number): StepStatus {
 }
 
 /**
- * Step list policy (V1.102): left panel chrome **fills** the card height via
- * flex stretch; the step list itself stays **top-aligned** (no vertical
- * centering of the ol). Connectors start below each circle so nothing paints
- * above step 1.
+ * Top horizontal Steps (V1.105 N1) — replaces left rail StepIndicator.
+ * Optional short horizontal connectors reuse setup-wizard-step-connector color.
  */
-function StepIndicator({ currentStep }: { currentStep: WizardStepId }) {
+function TopStepIndicator({ currentStep }: { currentStep: WizardStepId }) {
   return (
-    <nav aria-label="Setup progress" className="self-start">
-      <ol className="flex flex-col">
+    <nav aria-label="Setup progress" className="w-full shrink-0" data-testid="top-step-indicator">
+      <ol className="flex w-full items-center justify-between gap-2">
         {STEP_DEFS.map((s, index) => {
           const status = stepStatus(currentStep, index);
           return (
             <li
               key={s.id}
-              className="relative flex h-setup-wizard-step-row-height items-center gap-3"
+              className="relative flex min-w-0 flex-1 flex-col items-center gap-2"
               aria-current={status === 'active' ? 'step' : undefined}
               data-step-id={s.id}
               data-step-status={status}
             >
               {index < STEP_DEFS.length - 1 && (
                 <div
-                  className="absolute w-px bg-setup-wizard-step-connector"
+                  className="absolute top-[calc(var(--color-setup-wizard-step-circle-size)/2)] left-[calc(50%+var(--color-setup-wizard-step-circle-size)/2+4px)] right-[calc(-50%+var(--color-setup-wizard-step-circle-size)/2+4px)] h-px bg-setup-wizard-step-connector"
                   aria-hidden
                   data-testid="step-connector"
-                  style={{
-                    left: 'calc(var(--color-setup-wizard-step-circle-size) / 2)',
-                    // Start at the bottom edge of the circle — never above step 1.
-                    top: 'calc(50% + var(--color-setup-wizard-step-circle-size) / 2)',
-                    height:
-                      'calc(var(--color-setup-wizard-step-row-height) - var(--color-setup-wizard-step-circle-size))',
-                  }}
                 />
               )}
               <span
@@ -108,7 +110,7 @@ function StepIndicator({ currentStep }: { currentStep: WizardStepId }) {
               </span>
               <span
                 className={cn(
-                  'text-setup-wizard-step-label-typography',
+                  'truncate text-center text-setup-wizard-step-label-typography',
                   status === 'pending'
                     ? 'text-setup-wizard-step-label-pending-color'
                     : 'text-setup-wizard-step-label-active-color',
@@ -124,21 +126,16 @@ function StepIndicator({ currentStep }: { currentStep: WizardStepId }) {
   );
 }
 
-/** Normative CTA: single horizontal row — icon Back left, Continue right. */
+/** Normative CTA: single horizontal row — icon Back left, Continue/Finish right. */
 function CtaRow({ showBack, primaryLabel }: { showBack: boolean; primaryLabel: string }) {
   return (
     <div
-      className="mt-auto flex items-center gap-setup-wizard-surface-cta-container-gap"
+      className="mt-auto flex shrink-0 items-center gap-setup-wizard-surface-cta-container-gap"
       data-testid="wizard-cta-row"
       data-layout="horizontal-adjacent"
     >
       {showBack && (
-        <Button
-          variant="tertiary"
-          type="button"
-          aria-label="Back"
-          className="px-2"
-        >
+        <Button variant="tertiary" type="button" aria-label="Back" className="px-2">
           <ChevronLeft className="h-4 w-4" aria-hidden="true" />
         </Button>
       )}
@@ -153,101 +150,91 @@ function CtaRow({ showBack, primaryLabel }: { showBack: boolean; primaryLabel: s
   );
 }
 
-function DaemonStatusRegion({ state }: { state: DaemonChipState }) {
+function AgentListBody({ overflow }: { overflow: boolean }) {
+  const names = overflow ? OVERFLOW_AGENT_NAMES : OVERFLOW_AGENT_NAMES.slice(0, 3);
+  return (
+    <ul
+      className="flex flex-col gap-2"
+      data-testid={overflow ? 'wizard-agent-list-overflow' : 'wizard-agent-list'}
+    >
+      {names.map((name, i) => (
+        <li
+          key={name}
+          className={cn(
+            'flex min-h-setup-wizard-surface-input-row-min-height items-center rounded-control border px-setup-wizard-surface-input-row-padding-x py-setup-wizard-surface-input-row-padding-y',
+            i === 0
+              ? 'border-blue-700 bg-background-200'
+              : 'border-setup-wizard-surface-input-row-border bg-setup-wizard-surface-input-row-bg',
+          )}
+        >
+          <span className="text-copy-14 text-setup-wizard-surface-input-row-path-color">{name}</span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function WorkspaceBody() {
   return (
     <div
-      className={cn(
-        'flex min-h-[120px] flex-col gap-3 rounded-card border border-gray-alpha-400 bg-background-200 p-6',
-        state === 'error' ? 'items-stretch justify-center' : 'items-center justify-center text-center',
-      )}
-      data-testid={`daemon-chip-${state}`}
-      data-daemon-state={state}
+      className="flex min-h-setup-wizard-surface-input-row-min-height items-center gap-setup-wizard-surface-input-row-gap rounded-control border border-setup-wizard-surface-input-row-border bg-setup-wizard-surface-input-row-bg px-setup-wizard-surface-input-row-padding-x py-setup-wizard-surface-input-row-padding-y"
+      data-testid="workspace-location-row"
     >
-      {state === 'starting' && (
-        <>
-          <span
-            className="h-6 w-6 animate-spin rounded-full border-2 border-blue-700 border-t-transparent"
-            aria-hidden
-          />
-          <p className="text-copy-14 text-gray-900">Starting daemon…</p>
-        </>
-      )}
-      {state === 'running' && (
-        <p className="text-copy-14 text-green-800">Daemon is running.</p>
-      )}
-      {state === 'error' && (
-        <>
-          <div className="flex justify-center">
-            <Button variant="secondary" type="button">
-              Retry
-            </Button>
-          </div>
-          <p className="text-left text-copy-12 leading-snug text-red-800">
-            Daemon is taking longer than expected. Retry or reset the local database.
-          </p>
-        </>
-      )}
+      <span className="text-label-12 text-setup-wizard-surface-input-row-label-color">
+        Workspace location
+      </span>
+      <span className="truncate text-copy-14 text-setup-wizard-surface-input-row-path-color">
+        ~/Documents/nexus/default
+      </span>
+      <Button variant="secondary" size="small" type="button" className="ml-auto shrink-0">
+        Browse…
+      </Button>
     </div>
   );
 }
 
 function WizardChromeCard({
   currentStep,
-  daemonState,
+  agentOverflow = false,
 }: {
   currentStep: WizardStepId;
-  daemonState?: DaemonChipState;
+  agentOverflow?: boolean;
 }) {
-  const showBack = currentStep === 'daemon' || currentStep === 'agent';
+  const showBack = currentStep === 'workspace' || currentStep === 'done';
   const primaryLabel = currentStep === 'done' ? 'Open Nexus' : 'Continue';
 
   return (
     <div className="flex items-center justify-center p-2">
       <Card
-        className="flex w-full max-w-setup-wizard-step-wizard-max-width flex-col overflow-hidden rounded-popover p-0 shadow-modal sm:flex-row"
-        data-testid={`wizard-chrome-card-${currentStep}`}
+        className="flex h-setup-wizard-wizard-max-height max-h-[85vh] w-full max-w-setup-wizard-step-wizard-max-width flex-col overflow-hidden rounded-popover p-0 shadow-modal"
+        data-testid={`wizard-chrome-card-${currentStep}${agentOverflow ? '-overflow' : ''}`}
         data-current-step={currentStep}
+        data-shell="portrait"
       >
-        {/* Left panel fills card height; step list top-aligns (see StepIndicator). */}
-        <div className="flex w-full shrink-0 flex-col border-b border-gray-alpha-200 bg-background-100 px-setup-wizard-surface-step-panel-padding-x py-setup-wizard-surface-step-panel-padding-y sm:w-setup-wizard-surface-step-panel-width sm:border-b-0 sm:border-r">
-          <StepIndicator currentStep={currentStep} />
-        </div>
+        <div className="flex min-h-0 flex-1 flex-col gap-4 bg-background-100 px-setup-wizard-surface-content-panel-padding-x py-setup-wizard-surface-content-panel-padding-y">
+          <TopStepIndicator currentStep={currentStep} />
 
-        <div className="flex min-h-[280px] min-w-0 flex-1 flex-col gap-6 bg-background-100 px-setup-wizard-surface-content-panel-padding-x py-setup-wizard-surface-content-panel-padding-y">
-          <div className="flex flex-col gap-2">
-            <h3 className="text-heading-24 font-heading text-gray-1000">
-              {STEP_TITLES[currentStep]}
-            </h3>
-            <p className="text-copy-14 text-gray-900">
-              {currentStep === 'welcome' &&
-                'Nexus needs a workspace folder for your creative projects. We will create it if it does not exist.'}
-              {currentStep === 'daemon' &&
-                'Nexus runs a local daemon that manages your workspace, agents, and creative projects.'}
-              {currentStep === 'agent' &&
-                'Pick a local ACP agent already on your machine, or provide a custom launch command.'}
-              {currentStep === 'done' &&
-                'Nexus is set up and the daemon is running. You can change these settings later from the app menu.'}
-            </p>
-          </div>
-
-          {currentStep === 'welcome' && (
-            <div
-              className="flex min-h-setup-wizard-surface-input-row-min-height items-center gap-setup-wizard-surface-input-row-gap rounded-control border border-setup-wizard-surface-input-row-border bg-setup-wizard-surface-input-row-bg px-setup-wizard-surface-input-row-padding-x py-setup-wizard-surface-input-row-padding-y"
-              data-testid="workspace-location-row"
-            >
-              <span className="text-label-12 text-setup-wizard-surface-input-row-label-color">
-                Workspace location
-              </span>
-              <span className="truncate text-copy-14 text-setup-wizard-surface-input-row-path-color">
-                ~/Documents/nexus/default
-              </span>
-              <Button variant="secondary" size="small" type="button" className="ml-auto shrink-0">
-                Browse…
-              </Button>
+          <div
+            className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto"
+            data-testid="wizard-step-body"
+          >
+            <div className="flex flex-col gap-2">
+              <h3 className="text-heading-24 font-heading text-gray-1000">
+                {STEP_TITLES[currentStep]}
+              </h3>
+              <p className="text-copy-14 text-gray-900">
+                {currentStep === 'agent' &&
+                  'Pick a local ACP agent already on your machine, or provide a custom launch command.'}
+                {currentStep === 'workspace' &&
+                  'Nexus needs a workspace folder for your creative projects. We will create it if it does not exist.'}
+                {currentStep === 'done' &&
+                  'Nexus is set up and the daemon is running. You can change these settings later from the app menu.'}
+              </p>
             </div>
-          )}
 
-          {currentStep === 'daemon' && daemonState && <DaemonStatusRegion state={daemonState} />}
+            {currentStep === 'agent' && <AgentListBody overflow={agentOverflow} />}
+            {currentStep === 'workspace' && <WorkspaceBody />}
+          </div>
 
           <CtaRow showBack={showBack} primaryLabel={primaryLabel} />
         </div>
@@ -257,57 +244,41 @@ function WizardChromeCard({
 }
 
 /**
- * Visual acceptance fixtures for Back / Steps / daemon chips before App wiring (T3).
+ * Visual acceptance fixtures for portrait shell + top Steps before App wiring (Task 3).
  */
 export function SetupWizardChromeFixtures() {
   return (
     <div data-testid="setup-wizard-chrome-fixtures">
       <FixtureFrame
-        title="Steps — welcome active"
-        description="Matrix: Welcome active; Daemon/Agent/Done pending. Numbered circles + absolute connectors."
-        testId="wizard-chrome-steps-welcome"
-      >
-        <WizardChromeCard currentStep="welcome" />
-      </FixtureFrame>
-
-      <FixtureFrame
-        title="Steps — daemon active (Back + running)"
-        description="Matrix: Welcome complete; Daemon active. Normative CTA row: Back left / Continue right. Daemon chip: running."
-        testId="wizard-chrome-steps-daemon"
-      >
-        <WizardChromeCard currentStep="daemon" daemonState="running" />
-      </FixtureFrame>
-
-      <FixtureFrame
         title="Steps — agent active"
-        description="Matrix: Welcome+Daemon complete; Agent active; Done pending. Back adjacent to Continue."
+        description="Portrait card; top Steps: Agent active; Workspace/Done pending. No left rail."
         testId="wizard-chrome-steps-agent"
       >
         <WizardChromeCard currentStep="agent" />
       </FixtureFrame>
 
       <FixtureFrame
+        title="Steps — workspace active"
+        description="Portrait card; Agent complete; Workspace active. Normative CTA: Back left / Continue right."
+        testId="wizard-chrome-steps-workspace"
+      >
+        <WizardChromeCard currentStep="workspace" />
+      </FixtureFrame>
+
+      <FixtureFrame
         title="Steps — done active"
-        description="Matrix: all prior complete; Done active. Finish CTA only (no Back)."
+        description="Portrait card; all prior complete; Done active. Finish CTA with Back."
         testId="wizard-chrome-steps-done"
       >
         <WizardChromeCard currentStep="done" />
       </FixtureFrame>
 
       <FixtureFrame
-        title="Daemon chip — starting"
-        description="Spinner + “Starting daemon…”; Continue present (disabled in App — visual only here)."
-        testId="wizard-chrome-daemon-starting"
+        title="Agent list — scroll overflow"
+        description="Long agent list scrolls inside fixed-height portrait card; CTA stays bottom-anchored."
+        testId="wizard-chrome-steps-agent-overflow"
       >
-        <WizardChromeCard currentStep="daemon" daemonState="starting" />
-      </FixtureFrame>
-
-      <FixtureFrame
-        title="Daemon chip — error"
-        description="Error copy + Retry affordance (Reset local database is desktop-only in App)."
-        testId="wizard-chrome-daemon-error"
-      >
-        <WizardChromeCard currentStep="daemon" daemonState="error" />
+        <WizardChromeCard currentStep="agent" agentOverflow />
       </FixtureFrame>
     </div>
   );

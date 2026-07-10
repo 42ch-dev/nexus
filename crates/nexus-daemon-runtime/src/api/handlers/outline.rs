@@ -127,15 +127,14 @@ fn split_frontmatter(content: &str) -> Option<(String, String)> {
     // splitting the frontmatter prematurely (R-V172-GREPTILE-004).
     let (end, skip) = if let Some(idx) = after_open.find("\n---\n") {
         (idx, 5)
-    } else if let Some(idx) = after_open.find("\n---") {
+    } else {
+        let idx = after_open.find("\n---")?;
         if idx + 4 == after_open.len() {
             (idx, 4)
         } else {
             // `---` is not on its own line (e.g. `\n---more`); malformed.
             return None;
         }
-    } else {
-        return None;
     };
     let yaml = after_open[..end].to_string();
     let body = after_open[end + skip..]

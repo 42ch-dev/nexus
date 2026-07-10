@@ -611,7 +611,8 @@ components:
     step-label-typography: "{typography.label-14}"
     step-label-active-color: "{colors.gray-1000}"
     step-label-pending-color: "{colors.gray-700}"
-    wizard-max-width: "640px"
+    wizard-max-width: "480px"
+    wizard-max-height: "720px"
     wizard-padding: "{spacing.space-8}"
 
   # ── setup-wizard-surface (V1.96): apps/web ──
@@ -974,18 +975,25 @@ Token values: see frontmatter `components.context-menu`. Actions: `Copy Path` on
 
 ---
 
-## Setup Wizard Surface (V1.96 — Level 3 Production)
+## Setup Wizard Surface (V1.96 — Level 3 Production; V1.105 portrait amend)
 
-The setup wizard is the user's first interaction with Nexus. After V1.95's left-sidebar layout, V1.96 redesigns the wizard as a centered, integrated single-card surface. All token values live in frontmatter `components.setup-wizard-surface` and `components.setup-wizard-step`. The dark theme shares the same token names with dark-tuned values in [`DESIGN.dark.md`](DESIGN.dark.md).
+The setup wizard is the user's first interaction with Nexus. V1.96 introduced a centered single-card surface with a left step rail. **V1.105 (P2)** reshapes the card to a fixed portrait geometry with top horizontal steps. All token values live in frontmatter `components.setup-wizard-surface` and `components.setup-wizard-step`. The dark theme shares the same token names with dark-tuned values in [`DESIGN.dark.md`](DESIGN.dark.md).
 
-### Layout shell
+### Layout shell (V1.105)
+
+- Portrait card: **480px** max width (`wizard-max-width` → `max-w-setup-wizard-step-wizard-max-width`), **min(720px, 85vh)** height (`wizard-max-height` → `h-setup-wizard-wizard-max-height` + `max-h-[85vh]`).
+- **Top horizontal** step indicator (`TopStepIndicator`) above scrollable step content — labels **Agent** / **Workspace** / **Done** (`agent` / `workspace` / `done`); states `complete` / `active` / `pending` reuse `setup-wizard-step-circle-*` and `setup-wizard-step-label-*`; horizontal `flex` row with optional short connectors (`setup-wizard-step-connector` color).
+- Step body: `flex-1 min-h-0 overflow-y-auto`; primary CTA stays bottom-anchored (`mt-auto` on `data-testid="wizard-cta-row"`).
+- Left step rail (`step-panel-width` 208px / `w-setup-wizard-surface-step-panel-width`) **retired** for wizard chrome — do not reference `step-panel-*` or vertical connectors in P2 wizard layout.
+
+### Layout shell (V1.96 legacy — superseded by V1.105 for wizard)
 
 - The wizard card is centered in the viewport both horizontally and vertically.
 - The step indicator list (left panel) and the current step's content area (right panel) live inside **one shared card chrome** container.
 
-### Inline input row pattern (Step 1)
+### Inline input row pattern (Workspace step)
 
-The workspace location affordance is one tightly-coupled inline row:
+The workspace location affordance is one tightly-coupled inline row (V1.105 step 2 — Workspace; historically step 1 Welcome):
 
 - Folder icon (`input-row-icon-color`) + label (`input-row-label-color`) + path text (`input-row-path-color`) + Browse button.
 - The entire row uses `input-row-bg` with `input-row-border` and `input-row-rounded`.

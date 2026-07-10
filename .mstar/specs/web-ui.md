@@ -1079,7 +1079,7 @@ P1 implements a sweep audit of all button call sites in `apps/web/src/**` for th
 ### 29.8 Browser-build contract
 
 The wizard and per-launch daemon-ready gate are **desktop-first**:
-- **Desktop (Tauri)**: `setup_completed` read from Tauri command `get_setup_completed()`; wizard renders when false.
+- **Desktop (Tauri)**: `setup_completed` read from Tauri command `get_setup_completed()`; wizard renders when false **after** the V1.105 fullscreen Daemon gate reaches Ready (see §29.13).
 - **Browser**: defaults `setup_completed = true` (i.e. no wizard). The daemon-ready gate is a no-op or instant pass. No Tauri command calls are assumed in the browser build. The browser SPA must not regress — existing Vite dev / static-serve flows continue unchanged.
 
 ### 29.9 Non-goals
@@ -1089,7 +1089,9 @@ The wizard and per-launch daemon-ready gate are **desktop-first**:
 - Agent detection during non-first-launch.
 - Mobile full rewrite (the `<lg` collapse preserves the two-tab structure as a dropdown/pill scroller but is not optimized for touch-first patterns).
 
-### 29.10 V1.95 Amendments
+### 29.10 V1.95 Amendments (historical — superseded by §29.13 for current wizard)
+
+> **Current wizard IA and chrome:** §29.13 (Agent → Workspace → Done; portrait card; top horizontal Steps; app-level `DaemonLaunchGate`). This section records V1.95 shipped behavior for traceability only.
 
 #### 29.10.1 Setup wizard layout redesign (V1.95 shipped behavior)
 
@@ -1126,6 +1128,8 @@ On desktop builds, `ClientProvider` returns `TauriClient` + `TauriDesktopCapabil
 
 ### 29.11 V1.96 Amendments — Setup Wizard Surface rework & daemon diagnostic chain (IA)
 
+> **Layout supersession (V1.105):** §29.13.3 portrait shell + top Steps replace the V1.96 left-rail centered card. **Daemon supersession (V1.105):** diagnostic UX moves to `DaemonLaunchGate` / splash — not wizard step 2. Patterns below (toast errors, bottom CTA, Browse adjacency) remain applicable where noted in §29.13.
+
 **Product behavior (author-visible).** These describe the IA and interaction patterns after V1.96. Token names, component implementation, and daemon-side capture details live in DESIGN.md and the implement plan, not here.
 
 #### 29.11.1 Centered integrated card IA
@@ -1134,7 +1138,7 @@ On desktop builds, `ClientProvider` returns `TauriClient` + `TauriDesktopCapabil
 - Step indicator list and step content share a **single card chrome** container (one bordered, shadowed, background block). They are not separate sidebar + content panels.
 - Within each step indicator row the marker (circle/number) and label text sit on the same horizontal baseline.
 
-#### 29.11.2 Inline workspace location row (Step 1)
+#### 29.11.2 Inline workspace location row (Step 1 — historical; V1.105 Workspace step 2)
 
 - Workspace location is rendered as one inline affordance group:
   - Icon + label + resolved path + Browse button appear together on a single row (or tightly coupled rows inside the same visual block).
@@ -1166,6 +1170,8 @@ All V1.95 amendments (ClientProvider, migration reset, workspace default rules, 
 
 ### 29.12 V1.97 Amendments — First-launch reliability hardening
 
+> **Daemon step references below are historical.** V1.105 retires the Daemon wizard step; readiness is the app-level `DaemonLaunchGate` (§29.13.1). Workspace-location and Browse rules apply to the Workspace step (step 2) in the V1.105 IA.
+
 **Product behavior (author-visible).** V1.97 keeps the V1.96 wizard IA but hardens the first-launch path so a new author either completes setup or reaches a bounded, actionable recovery state.
 
 - Step 1 remains visually calm at desktop window sizes: the step list does not crowd content, the card does not overflow the viewport or right edge, and long workspace paths truncate inside the workspace location affordance.
@@ -1180,6 +1186,56 @@ All V1.95 amendments (ClientProvider, migration reset, workspace default rules, 
 - The native Browse path uses the existing desktop capability/IPC boundary. The frontend sends `defaultPath` to the Tauri command and does not introduce a second argument shape or compatibility shim.
 - The daemon step observes existing desktop daemon-status state and `detail` only. It must not require new daemon API fields, generated schemas, or contract package changes.
 - Clean-state smoke and existing-install smoke are hard product verification gates, not new UI features. Their evidence may be captured manually or with automation, but unit tests alone do not prove the author-visible first-launch path.
+
+### 29.13 V1.105 Amendments — First-launch wizard reshape (Agent-first + app-level Daemon gate)
+
+**Product behavior (author-visible).** V1.105 separates daemon readiness from wizard steps and reduces the wizard to three author-facing choices. **Iteration SSOT:** [`.mstar/iterations/v1.105-delivery-compass.md`](../iterations/v1.105-delivery-compass.md) + [`v1.105/specs/`](../iterations/v1.105/specs/).
+
+#### 29.13.1 App-level fullscreen Daemon gate (not a wizard step)
+
+- **Every desktop launch** — first-launch and return visits — shows a fullscreen Daemon wait until Ready before `/setup` or main UI.
+- **Outer gate:** `DaemonLaunchGate` wraps `AppRoutes` in `apps/web/src/App.tsx`; renders `DaemonReadySplash` until Ready on desktop.
+- **Inner gate:** `SetupGate` on main-shell routes only — after Ready, `setup_completed=false` → `/setup`; `true` → main UI. Splash logic **removed** from `SetupGate` post-P0.
+- Desktop **always** auto-starts the bundled sidecar on app open (D2 — `apps/desktop/src-tauri/src/lib.rs` `.setup()` unconditional `SidecarManager::start`).
+- The **Daemon wizard step is retired**. Diagnostic UX (timeout, retry, stderr detail, reset-local-database recovery) moves to the splash/gate surface — not a numbered setup step.
+- Happy path does **not** use `startDaemon` IPC from the wizard; recovery only on splash error paths.
+
+#### 29.13.2 Three-step wizard IA (Agent → Workspace → Done)
+
+| Step | Step ID | Author-facing label | Module |
+|------|---------|---------------------|--------|
+| 1 | `agent` | Agent | `setup-step-agent.tsx` |
+| 2 | `workspace` | Workspace | `setup-step-workspace.tsx` (new; extract from Welcome) |
+| 3 | `done` | Done | `setup-step-done.tsx` |
+
+Orchestrator: `setup-wizard-page.tsx` — `WizardStep = 'agent' | 'workspace' | 'done'`; initial step `agent`.
+
+**Removed:** Welcome step (`setup-step-welcome.tsx`); Daemon step (`setup-step-daemon.tsx`).
+
+Agent scan remains `POST /v1/daemon/agent-host/scan` via `useScanAgents` after gate Ready (grill-me **B**). Five scan-safety constraints per §desktop-shell 14.3. No Tauri-side PATH probe duplicate.
+
+Bootstrap (`ensureSetupBootstrap`) on Workspace **Continue** only.
+
+#### 29.13.3 Portrait wizard shell
+
+- Fixed portrait card: **`480px`** max width (`--color-setup-wizard-wizard-max-width`), **`min(720px, 85vh)`** height (`wizard-max-height: 720px` + `max-h-[85vh]`); content scrolls inside the card (`flex-1 overflow-y-auto` on step body).
+- Top horizontal `TopStepIndicator` (Agent / Workspace / Done); **no** left `w-setup-wizard-surface-step-panel-width` (208px) rail.
+- Studio visual SSOT: `apps/design-studio/src/fixtures/setup-wizard-chrome-fixtures.tsx` before App wiring.
+- V1.96 centered-card patterns (toast errors, bottom CTA, Browse adjacency) preserved where applicable — only layout chrome changes in P2.
+
+#### 29.13.4 Settings Re-run Setup (V1.103 R1 compatibility)
+
+- Settings → Setup → **Re-run Setup** semantics unchanged: confirm clears `setup_completed` marker only; workspace path and agent profile **not** deleted.
+- After confirm, author passes the V1.105 fullscreen gate, then enters the **new** three-step wizard (Agent-first — not legacy Welcome-first).
+- **Implement authority for re-run action:** [settings-setup-section.md](../iterations/v1.103/specs/settings-setup-section.md).
+
+#### 29.13.5 Browser-build contract (unchanged)
+
+§29.8 browser defaults remain: wizard and daemon gate are desktop-first; browser build skips wizard and gate.
+
+#### 29.13.6 Non-goals
+
+- Tauri PATH agent scan; multi-workspace switcher; BYOK; Settings shell IA redesign; wire/schema changes unless P0 proves unavoidable.
 
 ### 30. V1.98 Amendments — Design Studio dev surface (not author-facing)
 
@@ -1207,8 +1263,8 @@ All V1.95 amendments (ClientProvider, migration reset, workspace default rules, 
 #### 30.3 Author invariants (unchanged)
 
 - No new screens, routes, or settings in the author Web UI for design-studio.
-- Setup wizard, Control Room IA (§29), and daemon status behavior unchanged by studio work alone (product setup polish continues under active iteration contracts — see [V1.101 compass](../iterations/v1.101-delivery-compass.md)).
-- Desktop clean-state / first-launch hardening shipped in **V1.100**; Design Studio remains a contributor gallery only and does not deliver author onboarding.
+- Setup wizard, Control Room IA (§29), and daemon status behavior unchanged by studio work alone (product setup polish continues under active iteration contracts — see [V1.105 compass](../iterations/v1.105-delivery-compass.md)).
+- Desktop first-launch / setup wizard reshape is owned by **V1.105** (P0 gate + P1 IA + P2 portrait shell); Design Studio remains a contributor gallery and does not deliver author onboarding.
 
 #### 30.4 Contributor workflow (cross-reference)
 

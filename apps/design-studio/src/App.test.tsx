@@ -211,24 +211,32 @@ describe('Surfaces page — setup wizard chrome fixtures', () => {
     ).toBeInTheDocument();
   });
 
-  it('covers welcome / daemon / agent / done step matrices', () => {
-    expect(screen.getByTestId('wizard-chrome-steps-welcome')).toBeInTheDocument();
-    expect(screen.getByTestId('wizard-chrome-steps-daemon')).toBeInTheDocument();
+  it('covers agent / workspace / done step matrices plus overflow', () => {
     expect(screen.getByTestId('wizard-chrome-steps-agent')).toBeInTheDocument();
+    expect(screen.getByTestId('wizard-chrome-steps-workspace')).toBeInTheDocument();
     expect(screen.getByTestId('wizard-chrome-steps-done')).toBeInTheDocument();
+    expect(screen.getByTestId('wizard-chrome-steps-agent-overflow')).toBeInTheDocument();
   });
 
-  it('maps step statuses for the agent-active matrix', () => {
+  it('uses portrait shell classes without left step rail', () => {
     const card = screen.getByTestId('wizard-chrome-card-agent');
-    expect(card.querySelector('[data-step-id="welcome"]')).toHaveAttribute(
-      'data-step-status',
-      'complete',
+    expect(card).toHaveAttribute('data-shell', 'portrait');
+    expect(card).toHaveClass(
+      'max-w-setup-wizard-step-wizard-max-width',
+      'h-setup-wizard-wizard-max-height',
+      'max-h-[85vh]',
     );
-    expect(card.querySelector('[data-step-id="daemon"]')).toHaveAttribute(
-      'data-step-status',
-      'complete',
-    );
+    expect(card.querySelector('.w-setup-wizard-surface-step-panel-width')).toBeNull();
+    expect(card.querySelector('[data-testid="top-step-indicator"]')).toBeInTheDocument();
+  });
+
+  it('maps step statuses for the workspace-active matrix', () => {
+    const card = screen.getByTestId('wizard-chrome-card-workspace');
     expect(card.querySelector('[data-step-id="agent"]')).toHaveAttribute(
+      'data-step-status',
+      'complete',
+    );
+    expect(card.querySelector('[data-step-id="workspace"]')).toHaveAttribute(
       'data-step-status',
       'active',
     );
@@ -238,75 +246,57 @@ describe('Surfaces page — setup wizard chrome fixtures', () => {
     );
   });
 
-  it('shows numbered step circles (1–4) on the welcome fixture', () => {
-    const card = screen.getByTestId('wizard-chrome-card-welcome');
+  it('shows numbered step circles (1–3) on the agent fixture', () => {
+    const card = screen.getByTestId('wizard-chrome-card-agent');
     const circles = card.querySelectorAll('[data-step-id] span.rounded-full');
-    expect(circles).toHaveLength(4);
+    expect(circles).toHaveLength(3);
     expect(circles[0]).toHaveTextContent('1');
     expect(circles[1]).toHaveTextContent('2');
     expect(circles[2]).toHaveTextContent('3');
-    expect(circles[3]).toHaveTextContent('4');
   });
 
-  it('uses a single horizontal Back / Continue CTA row on daemon and agent', () => {
-    const daemonCard = screen
-      .getByTestId('wizard-chrome-steps-daemon')
-      .querySelector('[data-testid="wizard-chrome-card-daemon"]');
-    expect(daemonCard).not.toBeNull();
-    const daemonCta = daemonCard!.querySelector('[data-testid="wizard-cta-row"]');
-    expect(daemonCta).toHaveAttribute('data-layout', 'horizontal-adjacent');
-    expect(daemonCta).toHaveClass('flex', 'items-center');
-    expect(daemonCta).not.toHaveClass('flex-col');
+  it('uses a single horizontal Back / Continue CTA row on workspace', () => {
+    const workspaceCard = screen.getByTestId('wizard-chrome-card-workspace');
+    const cta = workspaceCard.querySelector('[data-testid="wizard-cta-row"]');
+    expect(cta).toHaveAttribute('data-layout', 'horizontal-adjacent');
+    expect(cta).toHaveClass('flex', 'items-center');
+    expect(cta).not.toHaveClass('flex-col');
 
-    const daemonBack = daemonCta?.querySelector('button[aria-label="Back"]');
-    expect(daemonBack).toBeInTheDocument();
-    expect(daemonBack).not.toHaveTextContent('Back');
-    expect(daemonCta?.querySelectorAll('button')[1]).toHaveTextContent('Continue');
+    const back = cta?.querySelector('button[aria-label="Back"]');
+    expect(back).toBeInTheDocument();
+    expect(back).not.toHaveTextContent('Back');
+    expect(cta?.querySelectorAll('button')[1]).toHaveTextContent('Continue');
+  });
 
+  it('omits Back on agent; shows Finish on done', () => {
     const agentCard = screen.getByTestId('wizard-chrome-card-agent');
-    const agentCta = agentCard.querySelector('[data-testid="wizard-cta-row"]');
-    expect(agentCta?.querySelector('button[aria-label="Back"]')).toBeInTheDocument();
-  });
-
-  it('omits Back on welcome and done', () => {
-    const welcomeCard = screen.getByTestId('wizard-chrome-card-welcome');
     expect(
-      welcomeCard.querySelector('[data-testid="wizard-cta-row"] button[aria-label="Back"]'),
+      agentCard.querySelector('[data-testid="wizard-cta-row"] button[aria-label="Back"]'),
     ).not.toBeInTheDocument();
 
     const doneCard = screen.getByTestId('wizard-chrome-card-done');
     expect(
       doneCard.querySelector('[data-testid="wizard-cta-row"] button[aria-label="Back"]'),
-    ).not.toBeInTheDocument();
+    ).toBeInTheDocument();
     expect(doneCard.querySelector('[data-testid="wizard-cta-row"]')).toHaveTextContent(
       'Open Nexus',
     );
   });
 
-  it('covers daemon starting / running / error chips', () => {
-    expect(screen.getByTestId('daemon-chip-starting')).toHaveTextContent(
-      'Starting daemon…',
-    );
-    expect(screen.getAllByTestId('daemon-chip-running').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText('Daemon is running.')).toBeInTheDocument();
-    const errorChip = screen.getByTestId('daemon-chip-error');
-    expect(errorChip).toHaveTextContent(/taking longer/i);
-    expect(within(errorChip).getByRole('button', { name: 'Retry' })).toBeInTheDocument();
-    // Retry is first; concise left-aligned small copy below.
-    const errorChildren = Array.from(errorChip.children);
-    expect(errorChildren[0]?.querySelector('button')).toHaveTextContent('Retry');
-    expect(errorChildren[1]?.tagName).toBe('P');
-    expect(errorChildren[1]).toHaveClass('text-left', 'text-copy-12');
+  it('scrolls long agent lists inside the portrait card', () => {
+    const overflowCard = screen.getByTestId('wizard-chrome-card-agent-overflow');
+    const body = overflowCard.querySelector('[data-testid="wizard-step-body"]');
+    expect(body).toHaveClass('overflow-y-auto', 'min-h-0', 'flex-1');
+    expect(screen.getByTestId('wizard-agent-list-overflow').children.length).toBeGreaterThan(6);
+    expect(overflowCard.querySelector('[data-testid="wizard-cta-row"]')).toBeInTheDocument();
   });
 
-  it('starts step connectors below each circle (nothing above step 1)', () => {
-    const welcomeCard = screen.getByTestId('wizard-chrome-card-welcome');
-    const connectors = welcomeCard.querySelectorAll('[data-testid="step-connector"]');
-    expect(connectors.length).toBe(3);
+  it('renders horizontal connectors between top steps', () => {
+    const card = screen.getByTestId('wizard-chrome-card-agent');
+    const connectors = card.querySelectorAll('[data-testid="step-connector"]');
+    expect(connectors.length).toBe(2);
     connectors.forEach((el) => {
-      expect(el).toHaveStyle({
-        top: 'calc(50% + var(--color-setup-wizard-step-circle-size) / 2)',
-      });
+      expect(el).toHaveClass('bg-setup-wizard-step-connector', 'h-px');
     });
   });
 });

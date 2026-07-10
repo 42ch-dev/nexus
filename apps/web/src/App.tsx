@@ -4,6 +4,7 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 import { ActiveCreatorProvider } from '@/lib/active-creator-context';
 import { SetupCompletedProvider } from '@/lib/setup-completed-context';
 import { RootLayout } from '@/components/layout/root-layout';
+import { DaemonLaunchGate } from '@/components/setup/daemon-launch-gate';
 import { SetupGate } from '@/components/setup/setup-gate';
 import { CapabilitiesPage } from '@/pages/capabilities-page';
 import { ChapterPage } from '@/pages/chapter-page';
@@ -46,10 +47,10 @@ const WorldKbPage = lazy(() =>
 /**
  * App routes — Control Room + Setup shell.
  *
- * V1.94 adds the setup wizard (`/setup`) and per-launch daemon-ready gate. The
- * wizard is rendered outside the main shell; the main shell is shown only after
- * setup is complete and the daemon is reachable. `/strategy` redirects to the
- * unified `/strategies` list + `/strategies/:presetId` detail.
+ * V1.105: outer {@link DaemonLaunchGate} waits for daemon Ready on every
+ * desktop launch; inner {@link SetupGate} routes by `setup_completed` only.
+ * `/setup` and the main shell are siblings under the outer gate. `/strategy`
+ * redirects to `/strategies` list + `/strategies/:presetId` detail.
  */
 function AppRoutes() {
   return (
@@ -114,7 +115,9 @@ export function App() {
   return (
     <ActiveCreatorProvider>
       <SetupCompletedProvider>
-        <AppRoutes />
+        <DaemonLaunchGate>
+          <AppRoutes />
+        </DaemonLaunchGate>
       </SetupCompletedProvider>
     </ActiveCreatorProvider>
   );
