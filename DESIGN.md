@@ -148,7 +148,7 @@ components:
 
   # ── select: native `<select>` chevron inset ──
   select:
-    default: { paddingInlineStart: "{spacing.space-3}", paddingInlineEnd: "{spacing.space-8}", chevronInset: "{spacing.space-8}" }
+    default: { paddingInlineStart: "{spacing.space-3}", paddingInlineEnd: "{spacing.space-8}", chevronInset: "{spacing.space-3}" }
 
   # ── card: apps/web ──
   card:
