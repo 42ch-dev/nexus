@@ -12,7 +12,7 @@
  * cap-height, hollow/lit selection dots, muted not-installed cards.
  */
 
-import { ArrowUpRight, Loader2, Terminal } from 'lucide-react';
+import { Loader2, Terminal } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { cn } from '@/lib/utils';
@@ -172,8 +172,8 @@ export function AgentPicker({
               'flex flex-col gap-2',
               status === 'ready' && agents.length > 0
                 ? compact
-                  ? 'mt-0 border-t border-gray-alpha-400 pt-2'
-                  : 'mt-1 border-t border-gray-alpha-400 pt-3'
+                  ? 'mt-2 border-t border-gray-alpha-400 pt-2'
+                  : 'mt-3 border-t border-gray-alpha-400 pt-3'
                 : undefined,
             )}
           >
@@ -210,13 +210,9 @@ function AgentCard({
       data-testid={`agent-card-${agent.id}`}
       data-installed={selectable ? 'true' : 'false'}
       className={cn(
-        'flex w-full flex-col rounded-control border',
+        'flex w-full flex-col rounded-control border border-gray-alpha-400 bg-background-100',
         compact ? 'p-2' : 'p-3',
-        selectable
-          ? selected
-            ? 'border-blue-700 bg-blue-700/8'
-            : 'border-gray-alpha-400 bg-background-100'
-          : 'border-gray-alpha-400 bg-background-100 opacity-60',
+        selectable && selected && 'border-blue-700 bg-blue-700/8',
       )}
     >
       {selectable ? (
@@ -239,13 +235,9 @@ function AgentCard({
       )}
 
       <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
-        {agent.installed ? (
-          <Badge variant="running" tone="soft" data-testid={`agent-card-installed-badge-${agent.id}`}>
-            Installed
-          </Badge>
-        ) : (
+        {!agent.installed ? (
           <span className="text-copy-13 text-gray-700">Not installed</span>
-        )}
+        ) : null}
         {agent.installUrl ? (
           <OutboundLink href={agent.installUrl} label="Install" />
         ) : null}
@@ -266,10 +258,27 @@ function AgentCardIdentity({
 }) {
   return (
     <>
-      <div className="flex min-w-0 flex-col gap-0.5">
-        <span className="truncate text-copy-14 font-medium text-gray-1000">
-          {agent.name}
-        </span>
+      <div className="flex min-w-0 flex-1 flex-col gap-0.5">
+        <div className="flex min-w-0 items-center gap-2">
+          <span
+            className={cn(
+              'truncate text-copy-14 font-medium',
+              agent.installed ? 'text-gray-1000' : 'text-gray-700',
+            )}
+          >
+            {agent.name}
+          </span>
+          {agent.installed ? (
+            <Badge
+              variant="running"
+              tone="soft"
+              data-testid={`agent-card-installed-badge-${agent.id}`}
+              className="shrink-0"
+            >
+              Installed
+            </Badge>
+          ) : null}
+        </div>
         {agent.version ? (
           <span className="text-copy-13 text-gray-700">Version {agent.version}</span>
         ) : null}
@@ -333,10 +342,10 @@ function OutboundLink({ href, label }: { href: string; label: string }) {
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className="inline-flex items-center gap-1 text-label-14 font-medium leading-none text-blue-700 transition-colors hover:text-blue-800"
+      aria-label={label}
+      className="inline-flex items-baseline gap-1 text-label-14 font-medium leading-none text-blue-700 transition-colors hover:text-blue-800 after:ml-0.5 after:inline-block after:text-[0.75em] after:leading-none after:content-['↗']"
     >
       {label}
-      <ArrowUpRight className="h-[1em] w-[1em] shrink-0" aria-hidden />
     </a>
   );
 }

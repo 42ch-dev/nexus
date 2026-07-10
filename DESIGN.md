@@ -146,6 +146,10 @@ components:
     helperText: { typography: "{typography.copy-13}" }
     errorHelperText: { textColor: "{colors.red-700}", typography: "{typography.copy-13}" }
 
+  # ── select: native `<select>` chevron inset ──
+  select:
+    default: { paddingInlineStart: "{spacing.space-3}", paddingInlineEnd: "{spacing.space-8}", chevronInset: "{spacing.space-8}" }
+
   # ── card: apps/web ──
   card:
     default: { backgroundColor: "{colors.background-100}", borderColor: "{colors.gray-alpha-400}", rounded: "{rounded.card}", padding: "{spacing.space-6}", shadow: "shadow-card" }
@@ -164,11 +168,11 @@ components:
     # soft (default): tinted fill + semantic text; strengthened borders (neutral gray-alpha-400; semantic ~50% alpha)
     soft:
       neutral: { backgroundColor: "{colors.gray-alpha-100}", textColor: "{colors.gray-900}", borderColor: "{colors.gray-alpha-400}" }
-      running: { backgroundColor: "rgba(31,143,77,0.10)", textColor: "{colors.green-1000}", borderColor: "rgba(31,143,77,0.50)" }
-      queued: { backgroundColor: "rgba(0,133,119,0.10)", textColor: "{colors.teal-1000}", borderColor: "rgba(0,133,119,0.50)" }
-      warning: { backgroundColor: "rgba(183,110,0,0.12)", textColor: "{colors.amber-1000}", borderColor: "rgba(183,110,0,0.50)" }
-      error: { backgroundColor: "rgba(229,72,77,0.12)", textColor: "{colors.red-1000}", borderColor: "rgba(229,72,77,0.50)" }
-      preset: { backgroundColor: "rgba(124,58,237,0.10)", textColor: "{colors.purple-1000}", borderColor: "rgba(124,58,237,0.50)" }
+      running: { backgroundColor: "rgba(31,143,77,0.16)", textColor: "{colors.green-1000}", borderColor: "rgba(31,143,77,0.50)" }
+      queued: { backgroundColor: "rgba(0,133,119,0.16)", textColor: "{colors.teal-1000}", borderColor: "rgba(0,133,119,0.50)" }
+      warning: { backgroundColor: "rgba(183,110,0,0.16)", textColor: "{colors.amber-1000}", borderColor: "rgba(183,110,0,0.50)" }
+      error: { backgroundColor: "rgba(229,72,77,0.16)", textColor: "{colors.red-1000}", borderColor: "rgba(229,72,77,0.50)" }
+      preset: { backgroundColor: "rgba(124,58,237,0.16)", textColor: "{colors.purple-1000}", borderColor: "rgba(124,58,237,0.50)" }
     # solid (opt-in): semantic fill + high-contrast white text; no visible border
     solid:
       neutral: { backgroundColor: "{colors.gray-1000}", textColor: "#ffffff", borderColor: "transparent" }

@@ -426,7 +426,11 @@ function SelectSection() {
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           input-select-textarea
         </code>{' '}
-        tokens. Imported directly from{' '}
+        tokens plus{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          components.select
+        </code>{' '}
+        chevron inset. Imported directly from{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @42ch/nexus-ui
         </code>

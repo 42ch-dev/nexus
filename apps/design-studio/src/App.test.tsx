@@ -589,21 +589,24 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     expect(link).toHaveAttribute('aria-current', 'page');
   });
 
-  it('renders section nav with Agent, Connection, Setup, Workspace', () => {
+  it('renders section nav with Agent, Workspace, Advanced', () => {
     const hostRoot = screen.getByTestId('settings-host-fixtures');
     const sectionNav = within(hostRoot).getByTestId('settings-section-nav');
     expect(
       within(sectionNav).getByTestId('settings-section-nav-agent'),
     ).toHaveTextContent('Agent');
     expect(
-      within(sectionNav).getByTestId('settings-section-nav-connection'),
-    ).toHaveTextContent('Connection');
-    expect(
-      within(sectionNav).getByTestId('settings-section-nav-setup'),
-    ).toHaveTextContent('Setup');
-    expect(
       within(sectionNav).getByTestId('settings-section-nav-workspace'),
     ).toHaveTextContent('Workspace');
+    expect(
+      within(sectionNav).getByTestId('settings-section-nav-advanced'),
+    ).toHaveTextContent('Advanced');
+    expect(
+      within(sectionNav).queryByTestId('settings-section-nav-connection'),
+    ).not.toBeInTheDocument();
+    expect(
+      within(sectionNav).queryByTestId('settings-section-nav-setup'),
+    ).not.toBeInTheDocument();
   });
 
   it('defaults to Agent section with preselected Agent body and locked shell helper', () => {
@@ -633,40 +636,32 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).not.toBeInTheDocument();
   });
 
-  it('switches to Connection section chrome when section nav is clicked', () => {
+  it('switches to Advanced section chrome when section nav is clicked', () => {
     const hostRoot = screen.getByTestId('settings-host-fixtures');
     const outlet = within(hostRoot).getByTestId('settings-shell-outlet');
-    const connectionTab = within(hostRoot).getByTestId(
-      'settings-section-nav-connection',
+    const advancedTab = within(hostRoot).getByTestId(
+      'settings-section-nav-advanced',
     );
-    fireEvent.click(connectionTab);
-    expect(connectionTab).toHaveAttribute('aria-current', 'page');
+    fireEvent.click(advancedTab);
+    expect(advancedTab).toHaveAttribute('aria-current', 'page');
+    expect(
+      within(outlet).getByTestId('settings-advanced-section'),
+    ).toBeInTheDocument();
     expect(
       within(outlet).getByTestId('settings-connection-section'),
+    ).toBeInTheDocument();
+    expect(
+      within(outlet).getByTestId('settings-setup-section'),
     ).toBeInTheDocument();
     expect(
       within(outlet).queryByTestId('settings-section-frame-connection'),
     ).not.toBeInTheDocument();
     expect(
-      within(outlet).queryByTestId('settings-agent-section'),
-    ).not.toBeInTheDocument();
-  });
-
-  it('switches to Setup section chrome when section nav is clicked', () => {
-    const hostRoot = screen.getByTestId('settings-host-fixtures');
-    const outlet = within(hostRoot).getByTestId('settings-shell-outlet');
-    const setupTab = within(hostRoot).getByTestId('settings-section-nav-setup');
-    fireEvent.click(setupTab);
-    expect(setupTab).toHaveAttribute('aria-current', 'page');
-    expect(
-      within(outlet).getByTestId('settings-setup-section'),
-    ).toBeInTheDocument();
-    expect(
       within(outlet).queryByTestId('settings-section-frame-setup'),
     ).not.toBeInTheDocument();
     expect(
-      within(outlet).getByTestId('settings-rerun-setup'),
-    ).toHaveTextContent('Re-run Setup');
+      within(outlet).queryByTestId('settings-agent-section'),
+    ).not.toBeInTheDocument();
   });
 
   it('renders static empty frames for all four Must sections', () => {

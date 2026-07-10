@@ -109,16 +109,18 @@ function FingerprintGate({
   const location = useLocation();
 
   // Connection re-pin lives under Settings (V1.103). Allow the recovery path
-  // (and legacy `/connect` while it redirects) to mount on fingerprint mismatch
-  // so the author is not hard-locked out of re-pinning.
+  // (and legacy `/connect` / `/settings/connection` while they redirect) to
+  // mount on fingerprint mismatch so the author is not hard-locked out of
+  // re-pinning.
   const isConnectRoute =
     location.pathname === '/connect' ||
     location.pathname === '/settings/connection' ||
+    location.pathname === '/settings/advanced' ||
     location.pathname === '/setup';
 
   useEffect(() => {
     if (state.status === 'mismatch' && !isConnectRoute) {
-      navigate('/settings/connection', { replace: true });
+      navigate('/settings/advanced#connection', { replace: true });
     }
   }, [state.status, navigate, isConnectRoute]);
 
@@ -141,7 +143,7 @@ function FingerprintGate({
             retryLabel="Try again"
           />
           <div className="mt-4 flex justify-center">
-            <Button variant="secondary" onClick={() => navigate('/settings/connection')}>
+            <Button variant="secondary" onClick={() => navigate('/settings/advanced#connection')}>
               Reconnect to daemon
             </Button>
           </div>

@@ -5,11 +5,10 @@ import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 
 import { SettingsAgentSection } from '@/pages/settings/settings-agent-section';
-import { SettingsConnectionSection } from '@/pages/settings/settings-connection-section';
-import { SettingsSetupSection } from '@/pages/settings/settings-setup-section';
+import { SettingsAdvancedSection } from '@/pages/settings/settings-advanced-section';
 import { SettingsShellLayout } from '@/pages/settings/settings-shell-layout';
 import { SettingsWorkspaceSection } from '@/pages/settings/settings-workspace-section';
 import { RootLayout } from '@/components/layout/root-layout';
@@ -49,6 +48,11 @@ function makeClient() {
   return new BrowserClient();
 }
 
+function HashProbe() {
+  const { hash } = useLocation();
+  return <span data-testid="location-hash">{hash}</span>;
+}
+
 function scanHandler(
   agents: Array<Record<string, unknown>> = [
     {
@@ -80,14 +84,21 @@ function healthHandler() {
   );
 }
 
-/** Nested settings tree matching App.tsx (P0 — includes Workspace). */
+/** Nested settings tree matching App.tsx (V1.106 P2 — Advanced hosts Connection + Setup). */
 const settingsRouteTree = (
   <Route path="settings" element={<SettingsShellLayout />}>
     <Route index element={<Navigate to="agent" replace />} />
     <Route path="agent" element={<SettingsAgentSection />} />
-    <Route path="connection" element={<SettingsConnectionSection />} />
-    <Route path="setup" element={<SettingsSetupSection />} />
+    <Route path="advanced" element={<SettingsAdvancedSection />} />
     <Route path="workspace" element={<SettingsWorkspaceSection />} />
+    <Route
+      path="connection"
+      element={<Navigate to="/settings/advanced#connection" replace />}
+    />
+    <Route
+      path="setup"
+      element={<Navigate to="/settings/advanced#setup" replace />}
+    />
   </Route>
 );
 
@@ -147,7 +158,7 @@ describe('Settings shell routes', () => {
     );
   });
 
-  it('renders section nav with Agent, Connection, Setup, Workspace', () => {
+  it('renders section nav with Agent, Workspace, Advanced', () => {
     useHandlers(scanHandler(), creatorsHandler());
 
     renderInApp(
@@ -165,14 +176,17 @@ describe('Settings shell routes', () => {
       'Agent',
     );
     expect(
-      within(nav).getByTestId('settings-section-nav-connection'),
-    ).toHaveTextContent('Connection');
-    expect(within(nav).getByTestId('settings-section-nav-setup')).toHaveTextContent(
-      'Setup',
-    );
-    expect(
       within(nav).getByTestId('settings-section-nav-workspace'),
     ).toHaveTextContent('Workspace');
+    expect(within(nav).getByTestId('settings-section-nav-advanced')).toHaveTextContent(
+      'Advanced',
+    );
+    expect(
+      within(nav).queryByTestId('settings-section-nav-connection'),
+    ).not.toBeInTheDocument();
+    expect(
+      within(nav).queryByTestId('settings-section-nav-setup'),
+    ).not.toBeInTheDocument();
   });
 
   it('mounts Workspace section outlet and marks nav active', async () => {
@@ -209,19 +223,19 @@ describe('Settings shell routes', () => {
       },
     );
 
-    await user.click(screen.getByTestId('settings-section-nav-setup'));
+    await user.click(screen.getByTestId('settings-section-nav-advanced'));
 
     await waitFor(() =>
-      expect(screen.getByTestId('settings-setup-section')).toBeInTheDocument(),
+      expect(screen.getByTestId('settings-advanced-section')).toBeInTheDocument(),
     );
     expect(screen.queryByTestId('settings-agent-section')).not.toBeInTheDocument();
-    expect(screen.getByTestId('settings-section-nav-setup')).toHaveAttribute(
+    expect(screen.getByTestId('settings-section-nav-advanced')).toHaveAttribute(
       'aria-current',
       'page',
     );
   });
 
-  it('mounts Connection section outlet with form chrome', async () => {
+  it('mounts Advanced page with Connection and Setup sections', async () => {
     useHandlers(scanHandler(), creatorsHandler());
 
     renderInApp(
@@ -230,13 +244,15 @@ describe('Settings shell routes', () => {
       </Routes>,
       {
         client: makeClient(),
-        initialRouterEntries: ['/settings/connection'],
+        initialRouterEntries: ['/settings/advanced'],
       },
     );
 
+    expect(screen.getByTestId('settings-advanced-section')).toBeInTheDocument();
     expect(screen.getByTestId('settings-connection-section')).toBeInTheDocument();
+    expect(screen.getByTestId('settings-setup-section')).toBeInTheDocument();
     expect(screen.getByTestId('connect-daemon-form')).toBeInTheDocument();
-    expect(screen.getByTestId('settings-section-nav-connection')).toHaveAttribute(
+    expect(screen.getByTestId('settings-section-nav-advanced')).toHaveAttribute(
       'aria-current',
       'page',
     );
@@ -247,17 +263,20 @@ describe('Settings shell routes', () => {
     ).toBeInTheDocument();
   });
 
-  it('permanently redirects /connect to /settings/connection', async () => {
+  it('permanently redirects /connect to /settings/advanced#connection', async () => {
     useHandlers(scanHandler(), creatorsHandler());
 
     renderInApp(
-      <Routes>
-        {settingsRouteTree}
-        <Route
-          path="connect"
-          element={<Navigate to="/settings/connection" replace />}
-        />
-      </Routes>,
+      <>
+        <Routes>
+          {settingsRouteTree}
+          <Route
+            path="connect"
+            element={<Navigate to="/settings/advanced#connection" replace />}
+          />
+        </Routes>
+        <HashProbe />
+      </>,
       {
         client: makeClient(),
         initialRouterEntries: ['/connect'],
@@ -265,13 +284,65 @@ describe('Settings shell routes', () => {
     );
 
     await waitFor(() =>
-      expect(screen.getByTestId('settings-connection-section')).toBeInTheDocument(),
+      expect(screen.getByTestId('settings-advanced-section')).toBeInTheDocument(),
     );
+    expect(screen.getByTestId('settings-connection-section')).toBeInTheDocument();
     expect(screen.getByTestId('connect-daemon-form')).toBeInTheDocument();
-    expect(screen.getByTestId('settings-section-nav-connection')).toHaveAttribute(
+    expect(screen.getByTestId('settings-section-nav-advanced')).toHaveAttribute(
       'aria-current',
       'page',
     );
+    expect(screen.getByTestId('location-hash')).toHaveTextContent('#connection');
+  });
+
+  it('permanently redirects /settings/connection to /settings/advanced#connection', async () => {
+    useHandlers(scanHandler(), creatorsHandler());
+
+    renderInApp(
+      <>
+        <Routes>{settingsRouteTree}</Routes>
+        <HashProbe />
+      </>,
+      {
+        client: makeClient(),
+        initialRouterEntries: ['/settings/connection'],
+      },
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId('settings-advanced-section')).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId('settings-connection-section')).toBeInTheDocument();
+    expect(screen.getByTestId('settings-section-nav-advanced')).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    expect(screen.getByTestId('location-hash')).toHaveTextContent('#connection');
+  });
+
+  it('permanently redirects /settings/setup to /settings/advanced#setup', async () => {
+    useHandlers(scanHandler(), creatorsHandler());
+
+    renderInApp(
+      <>
+        <Routes>{settingsRouteTree}</Routes>
+        <HashProbe />
+      </>,
+      {
+        client: makeClient(),
+        initialRouterEntries: ['/settings/setup'],
+      },
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId('settings-advanced-section')).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId('settings-setup-section')).toBeInTheDocument();
+    expect(screen.getByTestId('settings-section-nav-advanced')).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
+    expect(screen.getByTestId('location-hash')).toHaveTextContent('#setup');
   });
 
   it('exposes Settings in sidebar footer utility and opens Agent via /settings', async () => {
