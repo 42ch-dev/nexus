@@ -148,7 +148,8 @@ export function AgentPicker({
         {status === 'ready' && agents.length > 0 ? (
           <ul
             className={cn(
-              'grid grid-cols-1 sm:grid-cols-2',
+              'grid grid-cols-1',
+              !compact && 'sm:grid-cols-2',
               compact ? 'gap-2' : 'gap-3',
             )}
             data-testid="agent-picker-grid"
