@@ -6,7 +6,7 @@
  */
 
 import { useState, type ReactNode } from 'react';
-import { ChevronLeft } from 'lucide-react';
+import { CheckCircle, ChevronLeft } from 'lucide-react';
 
 import { cn, Button, Card } from '@42ch/nexus-ui';
 import {
@@ -22,7 +22,7 @@ import {
 const STEP_TITLES: Record<WizardStep, string> = {
   agent: 'Choose an agent',
   workspace: 'Choose a workspace',
-  done: 'You are ready',
+  done: "You're ready 🎉",
 };
 
 const OVERFLOW_AGENT_NAMES = [
@@ -180,24 +180,45 @@ function WizardChromeCard({
             className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto"
             data-testid="wizard-step-body"
           >
-            <div className="flex flex-col gap-2">
-              <h3 className="text-heading-24 font-heading text-gray-1000">
-                {STEP_TITLES[currentStep]}
-              </h3>
-              <p className="text-copy-14 text-gray-900">
-                {currentStep === 'agent' &&
-                  'Pick a local ACP agent already on your machine, or provide a custom launch command.'}
-                {currentStep === 'workspace' &&
-                  'Nexus needs a workspace folder for your creative projects. We will create it if it does not exist.'}
-                {currentStep === 'done' &&
-                  'Nexus is set up and the daemon is running. You can change these settings later from the app menu.'}
-              </p>
-            </div>
-
             {currentStep === 'agent' && (
-              <AgentStepBody status={agentStatus} overflow={agentOverflow} />
+              <>
+                <div className="flex flex-col gap-2">
+                  <h3 className="text-heading-24 font-heading text-gray-1000">
+                    {STEP_TITLES.agent}
+                  </h3>
+                  <p className="text-copy-14 text-gray-900">
+                    Pick a local ACP agent already on your machine, or provide a custom launch command.
+                  </p>
+                </div>
+                <AgentStepBody status={agentStatus} overflow={agentOverflow} />
+              </>
             )}
-            {currentStep === 'workspace' && <WorkspaceBody />}
+            {currentStep === 'workspace' && (
+              <div className="my-auto flex flex-col gap-4">
+                <div className="flex flex-col gap-2">
+                  <h3 className="text-heading-24 font-heading text-gray-1000">
+                    {STEP_TITLES.workspace}
+                  </h3>
+                  <p className="text-copy-14 text-gray-900">
+                    Nexus needs a workspace folder for your creative projects. We will create it if it does not exist.
+                  </p>
+                </div>
+                <WorkspaceBody />
+              </div>
+            )}
+            {currentStep === 'done' && (
+              <div className="my-auto flex flex-col items-center gap-4 text-center">
+                <CheckCircle className="h-12 w-12 text-green-800" aria-hidden />
+                <div className="flex flex-col gap-2">
+                  <h3 className="text-heading-24 font-heading text-gray-1000">
+                    {STEP_TITLES.done}
+                  </h3>
+                  <p className="text-copy-14 text-gray-900">
+                    Open Nexus to start writing. You can change settings anytime.
+                  </p>
+                </div>
+              </div>
+            )}
           </div>
 
           <CtaRow showBack={showBack} primaryLabel={primaryLabel} />

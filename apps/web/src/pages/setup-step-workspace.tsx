@@ -141,17 +141,18 @@ export function SetupStepWorkspace({
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto" data-testid="wizard-step-body">
-        <div className="flex flex-col gap-2">
-          <h2 className="text-heading-24 font-heading text-gray-1000">Choose a workspace</h2>
-          <p className="text-copy-14 text-gray-900">
-            Nexus needs a workspace folder for your creative projects. We will create it if it does not exist.
-          </p>
-        </div>
+        <div className="my-auto flex flex-col gap-4">
+          <div className="flex flex-col gap-2">
+            <h2 className="text-heading-24 font-heading text-gray-1000">Choose a workspace</h2>
+            <p className="text-copy-14 text-gray-900">
+              Nexus needs a workspace folder for your creative projects. We will create it if it does not exist.
+            </p>
+          </div>
 
-        <div
-          className="flex min-h-setup-wizard-surface-input-row-min-height items-center gap-setup-wizard-surface-input-row-gap rounded-control border border-setup-wizard-surface-input-row-border bg-setup-wizard-surface-input-row-bg px-setup-wizard-surface-input-row-padding-x py-setup-wizard-surface-input-row-padding-y"
-          data-testid="workspace-location-row"
-        >
+          <div
+            className="flex min-h-setup-wizard-surface-input-row-min-height items-center gap-setup-wizard-surface-input-row-gap rounded-control border border-setup-wizard-surface-input-row-border bg-setup-wizard-surface-input-row-bg px-setup-wizard-surface-input-row-padding-x py-setup-wizard-surface-input-row-padding-y"
+            data-testid="workspace-location-row"
+          >
           <FolderOpen className="h-5 w-5 text-setup-wizard-surface-input-row-icon-color" aria-hidden />
           <div className="flex min-w-0 flex-1 flex-col">
             <span className="text-label-12 text-setup-wizard-surface-input-row-label-color">Workspace location</span>
@@ -171,6 +172,7 @@ export function SetupStepWorkspace({
           )}
         </div>
       </div>
+    </div>
 
       <div
         className="mt-auto flex shrink-0 items-center gap-setup-wizard-surface-cta-container-gap"

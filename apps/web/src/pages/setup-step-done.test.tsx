@@ -11,8 +11,10 @@ describe('SetupStepDone', () => {
       initialRouterEntries: ['/setup'],
     });
 
-    expect(screen.getByText('You are ready')).toBeInTheDocument();
-    expect(screen.getByText(/Nexus is set up and ready/)).toBeInTheDocument();
+    expect(screen.getByText("You're ready 🎉")).toBeInTheDocument();
+    expect(
+      screen.getByText('Open Nexus to start writing. You can change settings anytime.'),
+    ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Open Nexus' })).toBeInTheDocument();
   });
 

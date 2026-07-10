@@ -194,7 +194,7 @@ describe('SetupWizardPage', () => {
 
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'You are ready' })).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: /You're ready/ })).toBeInTheDocument(),
     );
 
     expect(progress.querySelector('[data-step-id="workspace"]')).toHaveAttribute(
@@ -225,7 +225,7 @@ describe('SetupWizardPage', () => {
 
     await user.click(screen.getByRole('button', { name: 'Continue' }));
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'You are ready' })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('heading', { name: /You're ready/ })).toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: 'Open Nexus' }));
 
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/works'));
@@ -249,7 +249,7 @@ describe('SetupWizardPage', () => {
     await advanceAgentToWorkspace(user);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'You are ready' })).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: /You're ready/ })).toBeInTheDocument(),
     );
 
     await user.click(screen.getByRole('button', { name: 'Back' }));
@@ -276,7 +276,7 @@ describe('SetupWizardPage', () => {
     await advanceAgentToWorkspace(user);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'You are ready' })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('heading', { name: /You're ready/ })).toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: 'Open Nexus' }));
 
     await waitFor(() => expect(setAgentProfile).toHaveBeenCalledWith('codex', 'codex'));
@@ -304,7 +304,7 @@ describe('SetupWizardPage', () => {
     await advanceAgentToWorkspace(user);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'You are ready' })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('heading', { name: /You're ready/ })).toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: 'Open Nexus' }));
 
     await waitFor(() => expect(screen.getByText('Could not finish setup')).toBeInTheDocument());
@@ -351,7 +351,7 @@ describe('SetupWizardPage', () => {
     await advanceAgentToWorkspace(user);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'You are ready' })).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: /You're ready/ })).toBeInTheDocument(),
     );
     await user.click(screen.getByRole('button', { name: 'Open Nexus' }));
 
