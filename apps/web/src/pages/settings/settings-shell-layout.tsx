@@ -1,11 +1,11 @@
 /**
- * Settings shell layout — V1.103 P0 (settings-shell-ia.md).
+ * Settings shell layout — V1.103 P0 (settings-shell-ia.md) + V1.104 W2.
  *
  * Owns page title/helper, secondary section nav, and `<Outlet />`.
- * Section bodies live in sibling route modules. Workspace nav omitted until P4.
+ * Section bodies live in sibling route modules. Workspace nav added in V1.104.
  */
 
-import { Bot, RotateCcw, Wifi, type LucideIcon } from 'lucide-react';
+import { Bot, FolderOpen, RotateCcw, Wifi, type LucideIcon } from 'lucide-react';
 import { NavLink, Outlet } from 'react-router-dom';
 
 import { cn } from '@/lib/utils';
@@ -13,9 +13,9 @@ import { cn } from '@/lib/utils';
 const SHELL_HELPER =
   'Manage your local agent, daemon connection, and setup options from one place.';
 
-/** P0 Must section allowlist — Workspace omitted until P4 Stretch. */
+/** P0 Must section allowlist — Agent / Connection / Setup / Workspace. */
 const SETTINGS_SECTIONS: {
-  id: 'agent' | 'connection' | 'setup';
+  id: 'agent' | 'connection' | 'setup' | 'workspace';
   label: string;
   to: string;
   icon: LucideIcon;
@@ -28,6 +28,7 @@ const SETTINGS_SECTIONS: {
     icon: Wifi,
   },
   { id: 'setup', label: 'Setup', to: '/settings/setup', icon: RotateCcw },
+  { id: 'workspace', label: 'Workspace', to: '/settings/workspace', icon: FolderOpen },
 ];
 
 export function SettingsShellLayout() {

@@ -1,16 +1,17 @@
 /**
  * Studio fixtures for Settings shell chrome (V1.103) + Agent (P1) +
- * Connection (P2) + Setup (P3) section bodies.
+ * Connection (P2) + Setup (P3) + Workspace (V1.104 P0) section bodies.
  *
  * Studio-local shell + page chrome only — no apps/web pages/, layout/, hooks,
  * or daemon client. Section nav labels locked by settings-shell-ia.md.
- * Workspace nav is absent until P4 Stretch runs.
+ * Workspace nav added in V1.104 P0 (Must).
  *
  * P1 Agent section fixture is props-driven with a preselected agent card
  * (saved-profile visual state). P2 Connection section fixture shows locked
  * helper copy + form chrome placeholder. P3 Setup section fixture shows
- * Re-run Setup CTA + confirm dialog chrome (DESIGN Voice). No App IPC /
- * Tauri in Studio.
+ * Re-run Setup CTA + confirm dialog chrome (DESIGN Voice). P0 Workspace
+ * section fixture shows path display, Change Folder action, post-persist
+ * honesty copy, and browser-only disabled state. No App IPC / Tauri in Studio.
  */
 
 import { useState, type ReactNode } from 'react';
@@ -18,6 +19,7 @@ import { useState, type ReactNode } from 'react';
 import {
   Bot,
   Fingerprint,
+  FolderOpen,
   RotateCcw,
   Settings,
   Wifi,
@@ -45,8 +47,8 @@ import {
   type AgentPickerItem,
 } from '@web-setup/agent-picker';
 
-/** P0 Must section allowlist — Workspace omitted until P4 Stretch. */
-export type SettingsSectionId = 'agent' | 'connection' | 'setup';
+/** P0 Must section allowlist — Agent / Connection / Setup / Workspace. */
+export type SettingsSectionId = 'agent' | 'connection' | 'setup' | 'workspace';
 
 const SETTINGS_SECTIONS: {
   id: SettingsSectionId;
@@ -73,6 +75,13 @@ const SETTINGS_SECTIONS: {
     icon: RotateCcw,
     emptyHint:
       'Setup section body mounts in the shell outlet (see Setup section fixture).',
+  },
+  {
+    id: 'workspace',
+    label: 'Workspace',
+    icon: FolderOpen,
+    emptyHint:
+      'Workspace section body mounts in the shell outlet (see Workspace section fixture).',
   },
 ];
 
@@ -115,6 +124,30 @@ const SETUP_BROWSER_HELPER =
 
 const SETUP_BROWSER_TOOLTIP =
   'Open the Nexus desktop app to re-run setup.';
+
+/** Locked by settings-workspace-section.md — section body helper (sentence case). */
+const WORKSPACE_SECTION_HELPER =
+  'View or change where Nexus stores your creative files on this machine.';
+
+const WORKSPACE_CURRENT_PATH_LABEL = 'Workspace folder';
+
+const WORKSPACE_CHANGE_ACTION = 'Change Folder…';
+
+const WORKSPACE_POST_PERSIST_SUCCESS =
+  'Workspace path saved. Restart or reload the app so the running daemon uses the new location.';
+
+/** Copy-only label — no wired app restart orchestration. */
+const WORKSPACE_RESTART_LABEL = 'Quit and reopen Nexus';
+
+const WORKSPACE_BROWSER_HELPER =
+  'Workspace path changes are available on the desktop app only.';
+
+const WORKSPACE_BROWSER_TOOLTIP =
+  'Open the Nexus desktop app to change your workspace folder.';
+
+/** Fixture-only sample paths — visual chrome, not live workspace state. */
+const FIXTURE_WORKSPACE_PATH = '/Users/creator/Documents/Nexus';
+const FIXTURE_WORKSPACE_PATH_UPDATED = '/Volumes/Studio/Nexus';
 
 /** Fixture-only sample values — visual chrome, not live connection state. */
 const FIXTURE_DAEMON_URL = 'https://192.168.1.42:8420';
@@ -592,6 +625,89 @@ function SettingsSetupConfirmChromeStatic() {
   );
 }
 
+/**
+ * Workspace section body chrome — locked helper + current path display +
+ * Change Folder action + post-persist honesty copy
+ * (settings-workspace-section.md). Props-driven only; no App IPC.
+ *
+ * `desktopAvailable` toggles honest browser-only copy vs the desktop action.
+ */
+function SettingsWorkspaceSectionChrome({
+  desktopAvailable = true,
+  saved = false,
+  path = FIXTURE_WORKSPACE_PATH,
+}: {
+  desktopAvailable?: boolean;
+  saved?: boolean;
+  path?: string;
+}) {
+  return (
+    <div
+      className="flex flex-col gap-6"
+      data-testid="settings-workspace-section"
+      data-desktop={desktopAvailable ? 'true' : 'false'}
+    >
+      <div className="flex flex-col gap-2">
+        <h3 className="text-heading-16 font-heading text-gray-1000">Workspace</h3>
+        <p className="text-copy-14 text-gray-900">{WORKSPACE_SECTION_HELPER}</p>
+      </div>
+
+      <Card className="shadow-card" data-testid="settings-workspace-card">
+        <CardHeader>
+          <div className="flex items-center gap-2">
+            <FolderOpen
+              className="h-5 w-5 text-blue-700"
+              aria-hidden="true"
+            />
+            <CardTitle>{WORKSPACE_CURRENT_PATH_LABEL}</CardTitle>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {!desktopAvailable && (
+            <p className="text-copy-14 text-gray-700">
+              {WORKSPACE_BROWSER_HELPER}
+            </p>
+          )}
+          <div className="flex items-center gap-3">
+            <Input
+              id="studio-workspace-path"
+              type="text"
+              readOnly
+              value={path}
+              data-testid="settings-workspace-path"
+            />
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={!desktopAvailable}
+              title={
+                !desktopAvailable ? WORKSPACE_BROWSER_TOOLTIP : undefined
+              }
+              data-testid="settings-change-folder"
+            >
+              {WORKSPACE_CHANGE_ACTION}
+            </Button>
+          </div>
+
+          {saved && (
+            <div
+              className="rounded-control border border-gray-alpha-400 bg-background-200 p-4 space-y-1"
+              data-testid="settings-workspace-saved-honesty"
+            >
+              <p className="text-copy-14 text-gray-900">
+                {WORKSPACE_POST_PERSIST_SUCCESS}
+              </p>
+              <p className="text-copy-13 text-gray-700">
+                {WORKSPACE_RESTART_LABEL}
+              </p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+    </div>
+  );
+}
+
 function InteractiveSettingsShellPage() {
   const [active, setActive] = useState<SettingsSectionId>('agent');
   return (
@@ -605,6 +721,8 @@ function InteractiveSettingsShellPage() {
         <SettingsConnectionSectionChrome />
       ) : active === 'setup' ? (
         <SettingsSetupSectionChrome />
+      ) : active === 'workspace' ? (
+        <SettingsWorkspaceSectionChrome />
       ) : (
         <SettingsEmptySectionFrame sectionId={active} />
       )}
@@ -703,9 +821,9 @@ export function SettingsHostFixtures() {
         <p className="text-copy-13 text-gray-700 mb-4">
           Footer utility Settings (lucide) above profiles; main panel is the
           Settings shell — title, helper, section nav (Agent / Connection /
-          Setup). Default Agent outlet shows the preselected Agent section
-          body; Connection and Setup outlets show their section chrome.
-          Workspace nav is absent until P4.
+          Setup / Workspace). Default Agent outlet shows the preselected Agent
+          section body; Connection, Setup, and Workspace outlets show their
+          section chrome.
         </p>
         <SettingsShellChromeFixture />
       </div>
@@ -797,15 +915,67 @@ export function SettingsHostFixtures() {
 
       <div
         className="rounded-card border border-gray-alpha-200 bg-background-100 p-4"
+        data-testid="settings-host-fixture-workspace-section"
+      >
+        <h4 className="text-heading-16 font-heading text-gray-1000 mb-1">
+          Workspace section (desktop)
+        </h4>
+        <p className="text-copy-13 text-gray-700 mb-4">
+          Section chrome with locked helper copy, current path display, and
+          enabled Change Folder CTA. Props-driven only; no App IPC.
+        </p>
+        <div className="bg-background-200 rounded-card p-6">
+          <SettingsWorkspaceSectionChrome />
+        </div>
+      </div>
+
+      <div
+        className="rounded-card border border-gray-alpha-200 bg-background-100 p-4"
+        data-testid="settings-host-fixture-workspace-saved"
+      >
+        <h4 className="text-heading-16 font-heading text-gray-1000 mb-1">
+          Workspace section — post-persist
+        </h4>
+        <p className="text-copy-13 text-gray-700 mb-4">
+          Honesty copy after persist: the running app and daemon may still use
+          the previous workspace root until restart or reload. No wired restart
+          orchestration.
+        </p>
+        <div className="bg-background-200 rounded-card p-6">
+          <SettingsWorkspaceSectionChrome
+            saved
+            path={FIXTURE_WORKSPACE_PATH_UPDATED}
+          />
+        </div>
+      </div>
+
+      <div
+        className="rounded-card border border-gray-alpha-200 bg-background-100 p-4"
+        data-testid="settings-host-fixture-workspace-browser"
+      >
+        <h4 className="text-heading-16 font-heading text-gray-1000 mb-1">
+          Workspace section — browser-only
+        </h4>
+        <p className="text-copy-13 text-gray-700 mb-4">
+          Honest desktop-only helper with disabled Change Folder CTA (title
+          tooltip). No invented HTTP workspace API.
+        </p>
+        <div className="bg-background-200 rounded-card p-6">
+          <SettingsWorkspaceSectionChrome desktopAvailable={false} />
+        </div>
+      </div>
+
+      <div
+        className="rounded-card border border-gray-alpha-200 bg-background-100 p-4"
         data-testid="settings-host-fixture-section-frames"
       >
         <h4 className="text-heading-16 font-heading text-gray-1000 mb-1">
           Empty section frames
         </h4>
         <p className="text-copy-13 text-gray-700 mb-4">
-          Static empty outlet frames for Agent / Connection / Setup
-          placeholders. Shell outlet mounts Agent, Connection, and Setup
-          bodies; empty frames remain as visual reference.
+          Static empty outlet frames for Agent / Connection / Setup / Workspace
+          placeholders. Shell outlet mounts Agent, Connection, Setup, and
+          Workspace bodies; empty frames remain as visual reference.
         </p>
         <div className="grid grid-cols-1 gap-4">
           {SETTINGS_SECTIONS.map(({ id }) => (
