@@ -38,13 +38,13 @@
       "id": "2026-07-10-v1.108-ui-shell-ssot",
       "title": "P1 — UI shell SSOT + AgentPicker + canvas Surfaces",
       "file": "plans/2026-07-10-v1.108-ui-shell-ssot.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@frontend-dev",
         "@architect"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.108",
         "ui",
@@ -53,8 +53,8 @@
         "must"
       ],
       "created_at": "2026-07-10",
-      "updated_at": "2026-07-10",
-      "notes": "Draft — FB-UI-001..008 + Work IA + Studio canvas; awaiting §5",
+      "updated_at": "2026-07-11",
+      "notes": "Done — SDD T1-T4 + QC tri Approve with residuals + QA Pass; merged to iteration/v1.108",
       "metadata": {
         "iteration_refs": [
           "V1.108"
@@ -1154,6 +1154,61 @@
       }
     ],
     "2026-07-10-v1.108-canvas-outline-spatial": [
+      {
+        "id": "R-V1108P1QC1-S001",
+        "title": "CREATOR_NAV/ORCHESTRATOR_NAV duplicated between settings fixture and surfaces.tsx",
+        "severity": "suggestion",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.108",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-10-v1.108-ui-shell-ssot/review/qc1.md",
+        "note": "QC1 S-001. Studio fixture data drift risk; extract shared helper."
+      },
+      {
+        "id": "R-V1108P1QC1-S002",
+        "title": "Studio node chrome mirror should import P0 extract when available",
+        "severity": "suggestion",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.108",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-10-v1.108-ui-shell-ssot/review/qc1.md",
+        "note": "QC1 S-002. Import P0 presentational node chrome once extracted."
+      },
+      {
+        "id": "R-V1108P1QC2-S001",
+        "title": "Verify error helper does not distinguish transport failure vs no-match",
+        "severity": "suggestion",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.108",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-10-v1.108-ui-shell-ssot/review/qc2.md",
+        "note": "QC2 S-001. Spec-locked copy either way; distinguish in future."
+      },
+      {
+        "id": "R-V1108P1QC3-W001",
+        "title": "AgentPicker re-renders entire card grid on verifyStatus change",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.108",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-10-v1.108-ui-shell-ssot/review/qc3.md",
+        "note": "QC3 W-001. Negligible at 2-6 cards; React.memo if grid grows."
+      },
+      {
+        "id": "R-V1108P1QC3-W002",
+        "title": "useVerifyAgent mutation lacks unmount cancellation",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.108",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-10-v1.108-ui-shell-ssot/review/qc3.md",
+        "note": "QC3 W-002. Local daemon scan <100ms; minimal risk."
+      },
       {
         "id": "R-V1108P0QC3-W001",
         "title": "Selection-sync useEffect fires on every node interaction (not just selection changes) — latent perf trap",

@@ -41,7 +41,7 @@ export function WorldKbHeader({
         </div>
         <p className="text-copy-13 text-gray-700">
           {entryCount === 0
-            ? 'Start adding characters, abilities, or scenes from the command palette (kb adopt/snapshot).'
+            ? 'No entries to show yet. Refresh after adding world content, or continue from a linked Work.'
             : 'Browse entities and promotion candidates. Edits are guarded by per-row version checks.'}
         </p>
       </div>

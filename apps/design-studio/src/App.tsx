@@ -9,6 +9,7 @@ import { VoicePage } from '@/pages/voice';
 import {
   SurfacesAgentPickerPage,
   SurfacesBannerPage,
+  SurfacesCanvasPage,
   SurfacesDaemonPage,
   SurfacesIndexPage,
   SurfacesLaunchPage,
@@ -56,6 +57,7 @@ export function App() {
             <Route path="setup" element={<SurfacesSetupPage />} />
             <Route path="shell" element={<SurfacesShellPage />} />
             <Route path="agent-picker" element={<SurfacesAgentPickerPage />} />
+            <Route path="canvas" element={<SurfacesCanvasPage />} />
             <Route path="daemon" element={<SurfacesDaemonPage />} />
             <Route path="launch" element={<SurfacesLaunchPage />} />
             <Route path="banner" element={<SurfacesBannerPage />} />

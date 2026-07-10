@@ -16,7 +16,7 @@ import { ArrowUpRight, Loader2, Terminal } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { cn } from '@/lib/utils';
-import { Badge, Input, Label } from '@42ch/nexus-ui';
+import { Badge, Button, Input, Label } from '@42ch/nexus-ui';
 
 /** Local view-model for one agent card — owned by this module (not wire DTOs). */
 export interface AgentPickerItem {
@@ -37,6 +37,16 @@ export type AgentPickerStatus = 'loading' | 'ready' | 'empty' | 'error';
 
 export type AgentPickerDensity = 'default' | 'compact';
 
+/**
+ * Verify probe status for the custom-launch field.
+ *
+ * - `idle` — no probe run yet (default).
+ * - `loading` — probe in flight; Verify button shows spinner + disabled.
+ * - `success` — probe matched an installed agent; show success helper.
+ * - `error` — probe did not match; show failure helper.
+ */
+export type AgentVerifyStatus = 'idle' | 'loading' | 'success' | 'error';
+
 export interface AgentPickerProps {
   status: AgentPickerStatus;
   agents?: AgentPickerItem[];
@@ -48,6 +58,10 @@ export interface AgentPickerProps {
   onCustomLaunchChange?: (command: string) => void;
   /** When true, always show custom-launch row (default: empty/error, or when list non-empty). */
   showCustomLaunch?: boolean;
+  /** Verify a custom launch command probe. When omitted, the Verify button is hidden. */
+  onVerify?: () => void;
+  /** Status of the custom-launch verify probe (defaults to `idle`). */
+  verifyStatus?: AgentVerifyStatus;
   errorTitle?: string;
   errorDescription?: string;
   onRetry?: () => void;
@@ -72,6 +86,8 @@ export function AgentPicker({
   customLaunchValue = '',
   onCustomLaunchChange,
   showCustomLaunch,
+  onVerify,
+  verifyStatus = 'idle',
   errorTitle = 'Could not scan for agents',
   errorDescription,
   onRetry,
@@ -182,6 +198,8 @@ export function AgentPicker({
               value={customLaunchValue}
               onChange={onCustomLaunchChange}
               compact={compact}
+              onVerify={onVerify}
+              verifyStatus={verifyStatus}
             />
           </div>
         ) : null}
@@ -211,9 +229,11 @@ function AgentCard({
       data-testid={`agent-card-${agent.id}`}
       data-installed={selectable ? 'true' : 'false'}
       className={cn(
-        'flex w-full flex-col rounded-control border border-gray-alpha-400 bg-background-100',
+        'flex w-full flex-col rounded-control border border-gray-alpha-400 bg-background-100 transition-colors duration-state ease-standard',
         compact ? 'p-2' : 'p-3',
+        // V1.108 FB-UI-007: hover paints the entire outer card surface.
         selectable && selected && 'border-blue-700 bg-blue-700/8',
+        selectable && !selected && 'hover:bg-gray-alpha-100',
         !selectable && 'bg-background-200',
       )}
     >
@@ -224,8 +244,8 @@ function AgentCard({
           aria-pressed={selected}
           data-testid={`agent-card-select-${agent.id}`}
           className={cn(
-            'flex w-full items-start justify-between gap-2 rounded-sm text-left transition-colors duration-state ease-standard',
-            'hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700',
+            'flex w-full items-start justify-between gap-2 rounded-sm text-left',
+            'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700',
           )}
         >
           <AgentCardIdentity agent={agent} selected={selected} />
@@ -302,8 +322,11 @@ function AgentCardIdentity({
 }
 
 /**
- * Selection affordance: hollow outline when installed-unselected; filled/lit
- * when selected; muted solid when not installed (non-selectable).
+ * Selection affordance: hollow gray outline when installed-unselected; filled
+ * green when selected; muted solid gray when not installed (non-selectable).
+ *
+ * V1.108 FB-UI-006: unselected installed agents show hollow **gray** (not
+ * green) so they do not imply validity before selection.
  */
 function StatusDot({
   installed,
@@ -337,7 +360,7 @@ function StatusDot({
             'bg-green-700',
           installed &&
             !selected &&
-            'border-[1.5px] border-green-700 bg-transparent',
+            'border-[1.5px] border-gray-500 bg-transparent',
         )}
       />
     </span>
@@ -363,11 +386,17 @@ function CustomLaunchField({
   value,
   onChange,
   compact,
+  onVerify,
+  verifyStatus = 'idle',
 }: {
   value: string;
   onChange: (command: string) => void;
   compact: boolean;
+  onVerify?: () => void;
+  verifyStatus?: AgentVerifyStatus;
 }) {
+  const canVerify = value.trim().length > 0 && verifyStatus !== 'loading';
+
   return (
     <div className={cn('flex flex-col', compact ? 'gap-1.5' : 'gap-2')} data-testid="agent-picker-custom-launch">
       <Label
@@ -377,12 +406,53 @@ function CustomLaunchField({
         <Terminal className="h-4 w-4 text-gray-700" aria-hidden />
         Use custom launch command
       </Label>
-      <Input
-        id="agent-picker-custom-launch"
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder="e.g. /usr/local/bin/my-agent"
-      />
+      <div className="flex flex-wrap gap-2">
+        <Input
+          id="agent-picker-custom-launch"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="e.g. /usr/local/bin/my-agent"
+          className="min-w-0 flex-1"
+        />
+        {onVerify ? (
+          <Button
+            type="button"
+            variant="secondary"
+            size="small"
+            onClick={onVerify}
+            disabled={!canVerify}
+            data-testid="agent-picker-verify"
+            className="shrink-0"
+          >
+            {verifyStatus === 'loading' ? (
+              <>
+                <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
+                Verifying…
+              </>
+            ) : (
+              'Verify Agent'
+            )}
+          </Button>
+        ) : null}
+      </div>
+      {verifyStatus === 'success' ? (
+        <p
+          className="text-copy-13 text-green-700"
+          data-testid="agent-picker-verify-success"
+          role="status"
+        >
+          Agent responded successfully.
+        </p>
+      ) : null}
+      {verifyStatus === 'error' ? (
+        <p
+          className="text-copy-13 text-red-700"
+          data-testid="agent-picker-verify-error"
+          role="alert"
+        >
+          Could not reach this agent. Check the command and try again.
+        </p>
+      ) : null}
     </div>
   );
 }

@@ -11,18 +11,31 @@
  * `@web-settings/settings-setup-section-chrome`, and
  * `@web-setup/workspace-path-field` so the fixture file stays a thin gallery
  * wrapper with no duplicated app markup.
+ *
+ * V1.108 (FB-UI-001..003, 005) replaced the stale inline SettingsShellChromeFixture
+ * (underline tabs, plain nav, profile-name dual track) with ShellSidebarChrome +
+ * FooterProfilesChrome SSOT via `@web-layout/*` — same component tree as the App
+ * shell and surfaces.tsx ShellSidebarFixture. Profiles are icon-only (no
+ * `activeDisplayName`).
  */
 
 import { useState, type ReactNode } from 'react';
 
 import {
   Bot,
+  Boxes,
+  BrainCircuit,
+  CalendarClock,
   FolderOpen,
+  Layers,
+  ListChecks,
   RotateCcw,
   Settings,
+  Sparkles,
   Wifi,
   type LucideIcon,
 } from 'lucide-react';
+import logoPrimary from '@42ch/nexus-ui/assets/logos/logo-primary.svg';
 import {
   Button,
   Card,
@@ -30,6 +43,7 @@ import {
   CardHeader,
   CardTitle,
   cn,
+  NexusLogo,
 } from '@42ch/nexus-ui';
 
 import { Dialog, DialogContent } from '@web-ui/dialog'; // transitional — keep-web (Radix portal/focus-trap beyond presentational scope)
@@ -39,6 +53,12 @@ import {
   AgentPicker,
   type AgentPickerItem,
 } from '@web-setup/agent-picker';
+import {
+  ShellSidebarChrome,
+  type ShellNavGroup,
+  type ShellSidebarTab,
+} from '@web-layout/shell-sidebar-chrome';
+import { FooterProfilesChrome } from '@web-layout/footer-profiles-chrome';
 import { ConnectDaemonFormChrome } from '@web-settings/connect-daemon-form-chrome';
 import {
   SettingsSetupSectionChrome,
@@ -99,6 +119,41 @@ const SETTINGS_SECTIONS: {
 const SHELL_HELPER =
   'Manage your local agent, daemon connection, and setup options from one place.';
 
+/**
+ * App shell sidebar nav — mirrors surfaces.tsx ShellSidebarFixture so the
+ * Settings fixture shares the same component tree as the App shell (V1.108
+ * FB-UI-005). Not inner Settings page nav (that is SETTINGS_NAV_SECTIONS).
+ */
+const CREATOR_NAV: ShellNavGroup[] = [
+  {
+    id: 'works',
+    label: 'Works',
+    items: [{ to: '#works', label: 'All Works', icon: Layers }],
+  },
+  {
+    id: 'creator',
+    label: 'Creator',
+    items: [{ to: '#memory', label: 'Memory', icon: BrainCircuit }],
+  },
+];
+
+const ORCHESTRATOR_NAV: ShellNavGroup[] = [
+  {
+    id: 'runtime',
+    label: 'Runtime',
+    items: [
+      { to: '#sessions', label: 'Sessions', icon: ListChecks },
+      { to: '#schedule', label: 'Schedule', icon: CalendarClock },
+      { to: '#capabilities', label: 'Capabilities', icon: Boxes },
+    ],
+  },
+  {
+    id: 'strategies',
+    label: 'Strategies',
+    items: [{ to: '#strategies', label: 'Strategies', icon: Sparkles }],
+  },
+];
+
 /** Locked by settings-agent-section.md — section body helper (sentence case). */
 const AGENT_SECTION_HELPER =
   'Choose which local ACP agent Nexus uses for creative work.';
@@ -158,21 +213,6 @@ const FIXTURE_AGENTS: AgentPickerItem[] = [
     docsUrl: 'https://ai.google.dev/',
   },
 ];
-
-function AvatarStub({ label }: { label: string }) {
-  return (
-    <div
-      className={cn(
-        'w-8 h-8 rounded-pill flex items-center justify-center shrink-0',
-        'bg-gray-alpha-200 text-gray-700',
-        'text-label-12 font-semibold select-none',
-      )}
-      aria-hidden="true"
-    >
-      {label.slice(0, 2).toUpperCase()}
-    </div>
-  );
-}
 
 /**
  * Secondary section nav inside Settings page chrome.
@@ -577,70 +617,62 @@ function InteractiveSettingsShellPage() {
 }
 
 /**
- * App shell slice with Settings as footer utility (above profiles), plus
- * Settings shell page chrome: section nav + empty section frame.
+ * Icon-only profile footer for the Settings fixture — same FooterProfilesChrome
+ * SSOT as the App shell, but without `activeDisplayName` (FB-UI-001: no name
+ * text under avatars in the Settings context).
+ */
+function SettingsFooterProfiles() {
+  return (
+    <FooterProfilesChrome
+      sectionLabel="Profiles"
+      addButtonLabel="Add profile"
+      profiles={[
+        { id: 'local-creator', displayName: 'Local Creator', active: true },
+      ]}
+      focusIndex={0}
+      onSelect={() => {}}
+      onAdd={() => {}}
+      onFocus={() => {}}
+      onKeyDown={() => {}}
+      onItemRef={() => {}}
+      onAddRef={() => {}}
+    />
+  );
+}
+
+/**
+ * App shell slice with Settings footer utility active — uses ShellSidebarChrome
+ * + FooterProfilesChrome SSOT (V1.108 FB-UI-001..003, 005), not stale inline
+ * underline/plain-nav/profile-name markup. Same component tree as the App
+ * shell and surfaces.tsx ShellSidebarFixture.
  */
 function SettingsShellChromeFixture() {
+  const [activeTab, setActiveTab] = useState<ShellSidebarTab>('creator');
+  const groups = activeTab === 'creator' ? CREATOR_NAV : ORCHESTRATOR_NAV;
+
   return (
     <div
       className="flex min-h-[440px] border border-gray-alpha-300 rounded-card bg-background-100 overflow-hidden"
       data-testid="settings-shell-chrome"
     >
-      <div className="w-sidebar-nav-width shrink-0 border-r border-gray-alpha-200 bg-background-100 flex flex-col">
-        <div className="flex border-b border-gray-alpha-200">
-          {(['Creator', 'Orchestrator'] as const).map((tab, i) => (
-            <button
-              key={tab}
-              type="button"
-              tabIndex={-1}
-              className={cn(
-                'flex-1 text-center py-3 text-label-14 font-medium border-b-2 transition-colors',
-                i === 0
-                  ? 'text-gray-1000 border-blue-700 bg-gray-alpha-100'
-                  : 'text-gray-700 border-transparent',
-              )}
-            >
-              {tab}
-            </button>
-          ))}
-        </div>
-
-        <nav className="flex-1 overflow-auto p-3 space-y-1" aria-label="Creator navigation">
-          {['Works', 'Worlds', 'Findings'].map((label) => (
-            <div
-              key={label}
-              className="flex items-center h-sidebar-nav-item-height px-3 rounded-control text-label-14 text-gray-700"
-            >
-              <span className="truncate">{label}</span>
-            </div>
-          ))}
-        </nav>
-
-        <div className="border-t border-gray-alpha-200 p-3 space-y-2">
-          <a
-            href="#settings"
-            tabIndex={-1}
-            className={cn(
-              'flex items-center gap-2 h-sidebar-nav-item-height px-3 rounded-control',
-              'text-label-14 text-gray-1000 bg-gray-alpha-100',
-            )}
-            aria-current="page"
-            data-testid="settings-footer-utility-link"
-          >
-            <Settings className="size-4 shrink-0" aria-hidden="true" />
-            <span>Settings</span>
-          </a>
-
-          <div className="flex items-center gap-2 px-1 pt-1">
-            <AvatarStub label="Creator" />
-            <div className="flex flex-col min-w-0">
-              <span className="text-label-14 text-gray-1000 truncate">
-                Local Creator
-              </span>
-              <span className="text-copy-13 text-gray-700 truncate">Profiles</span>
-            </div>
-          </div>
-        </div>
+      <div className="w-sidebar-nav-width shrink-0">
+        <ShellSidebarChrome
+          activeTab={activeTab}
+          activeRoute="#works"
+          settingsActive
+          navGroups={groups}
+          onTabChange={setActiveTab}
+          logo={
+            <NexusLogo
+              variant="primary"
+              src={logoPrimary}
+              label="Nexus"
+              size={32}
+              className="h-8 w-auto shrink-0"
+            />
+          }
+          footer={<SettingsFooterProfiles />}
+        />
       </div>
 
       <div className="flex-1 bg-background-200 flex flex-col min-w-0 p-8 overflow-auto">

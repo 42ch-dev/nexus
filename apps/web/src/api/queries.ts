@@ -538,6 +538,32 @@ export function useScanAgents(request?: ScanRequest) {
   });
 }
 
+/**
+ * V1.108 FB-UI-008 — Verify Agent probe for the custom launch field.
+ *
+ * Reuses the existing scan endpoint (`POST /v1/daemon/agent-host/scan`) with
+ * `filter: 'installed'` and matches the trimmed custom command against
+ * installed agents' `launch_command` (locked FB-UI-008 design: match scan
+ * result by command string). No wire change. The probe validates commands
+ * that resolve to an installed ACP-registry agent; it does not verify
+ * arbitrary binaries outside the registry.
+ *
+ * @returns `true` when an installed agent's `launch_command` matches.
+ */
+export function useVerifyAgent() {
+  const client = useNexusClient();
+  return useMutation({
+    mutationFn: async (command: string): Promise<boolean> => {
+      const trimmed = command.trim();
+      if (!trimmed) return false;
+      const res = await client.scanAgents({ filter: 'installed' });
+      return res.agents.some(
+        (a) => a.installed && (a.launch_command?.trim() === trimmed),
+      );
+    },
+  });
+}
+
 // ── Creator Memory review-loop (V1.78) ───────────────────────────────────────
 
 /** Pending-review count badge refresh cadence (live count indicator). */
