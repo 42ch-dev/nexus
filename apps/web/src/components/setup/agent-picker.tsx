@@ -327,7 +327,7 @@ function StatusDot({
           !installed && 'bg-gray-500',
           installed &&
             selected &&
-            'bg-green-700 ring-2 ring-blue-700 ring-offset-2 ring-offset-background-100',
+            'bg-green-700',
           installed &&
             !selected &&
             'border-[1.5px] border-green-700 bg-transparent',
