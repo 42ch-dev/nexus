@@ -15,8 +15,7 @@ import { NotFoundPage } from '@/pages/not-found-page';
 import { SchedulePage } from '@/pages/schedule-page';
 import { SessionsPage } from '@/pages/sessions-page';
 import { SettingsAgentSection } from '@/pages/settings/settings-agent-section';
-import { SettingsConnectionSection } from '@/pages/settings/settings-connection-section';
-import { SettingsSetupSection } from '@/pages/settings/settings-setup-section';
+import { SettingsAdvancedSection } from '@/pages/settings/settings-advanced-section';
 import { SettingsShellLayout } from '@/pages/settings/settings-shell-layout';
 import { SettingsWorkspaceSection } from '@/pages/settings/settings-workspace-section';
 import { WorkDetailPage } from '@/pages/work-detail-page';
@@ -87,9 +86,16 @@ function AppRoutes() {
         <Route path="settings" element={<SettingsShellLayout />}>
           <Route index element={<Navigate to="agent" replace />} />
           <Route path="agent" element={<SettingsAgentSection />} />
-          <Route path="connection" element={<SettingsConnectionSection />} />
-          <Route path="setup" element={<SettingsSetupSection />} />
+          <Route path="advanced" element={<SettingsAdvancedSection />} />
           <Route path="workspace" element={<SettingsWorkspaceSection />} />
+          <Route
+            path="connection"
+            element={<Navigate to="/settings/advanced#connection" replace />}
+          />
+          <Route
+            path="setup"
+            element={<Navigate to="/settings/advanced#setup" replace />}
+          />
         </Route>
         <Route path="strategies" element={<StrategiesPage />} />
         <Route
@@ -103,7 +109,7 @@ function AppRoutes() {
         <Route path="strategy" element={<Navigate to="/strategies" replace />} />
         <Route
           path="connect"
-          element={<Navigate to="/settings/connection" replace />}
+          element={<Navigate to="/settings/advanced#connection" replace />}
         />
         <Route path="*" element={<NotFoundPage />} />
       </Route>

@@ -65,7 +65,7 @@ export function DaemonHealthIndicator() {
     );
 
   return (
-    <Link to="/settings/connection" className="focus-visible:outline-none">
+    <Link to="/settings/advanced#connection" className="focus-visible:outline-none">
       {badge}
     </Link>
   );

@@ -15,7 +15,7 @@ const CONNECTION_SECTION_HELPER =
 
 export function SettingsConnectionSection() {
   return (
-    <div className="flex flex-col gap-6" data-testid="settings-connection-section">
+    <div className="flex flex-col gap-6" data-testid="settings-connection-section" id="connection">
       <div className="flex flex-col gap-2">
         <h3 className="text-heading-16 font-heading text-gray-1000">Connection</h3>
         <p className="text-copy-14 text-gray-900">{CONNECTION_SECTION_HELPER}</p>

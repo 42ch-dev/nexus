@@ -5,7 +5,7 @@
  * Section bodies live in sibling route modules. Workspace nav added in V1.104.
  */
 
-import { Bot, FolderOpen, RotateCcw, Wifi, type LucideIcon } from 'lucide-react';
+import { Bot, FolderOpen, Settings, type LucideIcon } from 'lucide-react';
 import { NavLink, Outlet } from 'react-router-dom';
 
 import { cn } from '@/lib/utils';
@@ -13,22 +13,26 @@ import { cn } from '@/lib/utils';
 const SHELL_HELPER =
   'Manage your local agent, daemon connection, and setup options from one place.';
 
-/** P0 Must section allowlist — Agent / Connection / Setup / Workspace. */
+/** V1.106 P2 three-tab nav — Agent / Workspace / Advanced. */
 const SETTINGS_SECTIONS: {
-  id: 'agent' | 'connection' | 'setup' | 'workspace';
+  id: 'agent' | 'workspace' | 'advanced';
   label: string;
   to: string;
   icon: LucideIcon;
 }[] = [
   { id: 'agent', label: 'Agent', to: '/settings/agent', icon: Bot },
   {
-    id: 'connection',
-    label: 'Connection',
-    to: '/settings/connection',
-    icon: Wifi,
+    id: 'workspace',
+    label: 'Workspace',
+    to: '/settings/workspace',
+    icon: FolderOpen,
   },
-  { id: 'setup', label: 'Setup', to: '/settings/setup', icon: RotateCcw },
-  { id: 'workspace', label: 'Workspace', to: '/settings/workspace', icon: FolderOpen },
+  {
+    id: 'advanced',
+    label: 'Advanced',
+    to: '/settings/advanced',
+    icon: Settings,
+  },
 ];
 
 export function SettingsShellLayout() {
