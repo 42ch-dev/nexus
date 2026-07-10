@@ -2,7 +2,7 @@
 
 Iteration-scoped contracts and guides for **V1.108 — Canvas Outline Spatial + UI Shell SSOT**.
 
-**Compass:** [`v1.108-delivery-compass.md`](../v1.108-delivery-compass.md) (`status: active` → lock after §5.4)
+**Compass:** [`v1.108-delivery-compass.md`](../v1.108-delivery-compass.md) (`status: locked`)
 
 ## Story
 
