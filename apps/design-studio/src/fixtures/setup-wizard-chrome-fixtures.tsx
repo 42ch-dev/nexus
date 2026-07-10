@@ -52,6 +52,27 @@ const OVERFLOW_AGENTS: AgentPickerItem[] = OVERFLOW_AGENT_NAMES.map((name) => ({
 
 const READY_AGENTS = OVERFLOW_AGENTS.slice(0, 3);
 
+const MIXED_AGENTS: AgentPickerItem[] = [
+  {
+    id: 'claude-code',
+    name: 'Claude Code',
+    version: '1.0.42',
+    description: 'Anthropic coding agent via ACP.',
+    installed: true,
+    installUrl: 'https://docs.anthropic.com/en/docs/claude-code',
+    docsUrl: 'https://docs.anthropic.com/en/docs/claude-code',
+  },
+  {
+    id: 'gemini-cli',
+    name: 'Gemini CLI',
+    version: null,
+    description: 'Google Gemini agent (not on PATH).',
+    installed: false,
+    installUrl: 'https://github.com/google-gemini/gemini-cli',
+    docsUrl: 'https://ai.google.dev/',
+  },
+];
+
 function FixtureFrame({
   title,
   description,
@@ -102,15 +123,28 @@ function CtaRow({ showBack, primaryLabel }: { showBack: boolean; primaryLabel: s
 function AgentStepBody({
   status,
   overflow = false,
+  mixed = false,
 }: {
   status: AgentPickerStatus;
   overflow?: boolean;
+  mixed?: boolean;
 }) {
   const [selectedId, setSelectedId] = useState<string | null>(
-    status === 'ready' ? READY_AGENTS[0]!.id : null,
+    status === 'ready'
+      ? mixed
+        ? MIXED_AGENTS[0]!.id
+        : READY_AGENTS[0]!.id
+      : null,
   );
   const [custom, setCustom] = useState('');
-  const agents = status === 'ready' ? (overflow ? OVERFLOW_AGENTS : READY_AGENTS) : [];
+  const agents =
+    status === 'ready'
+      ? mixed
+        ? MIXED_AGENTS
+        : overflow
+          ? OVERFLOW_AGENTS
+          : READY_AGENTS
+      : [];
 
   return (
     <AgentPicker
@@ -151,10 +185,12 @@ function WizardChromeCard({
   currentStep,
   agentStatus = 'ready',
   agentOverflow = false,
+  agentMixed = false,
 }: {
   currentStep: WizardStep;
   agentStatus?: AgentPickerStatus;
   agentOverflow?: boolean;
+  agentMixed?: boolean;
 }) {
   const showBack = currentStep === 'workspace' || currentStep === 'done';
   const primaryLabel = currentStep === 'done' ? 'Open Nexus' : 'Continue';
@@ -166,9 +202,11 @@ function WizardChromeCard({
         data-testid={`wizard-chrome-card-${currentStep}${
           currentStep === 'agent' && agentStatus !== 'ready'
             ? `-${agentStatus}`
-            : agentOverflow
-              ? '-overflow'
-              : ''
+            : agentMixed
+              ? '-mixed'
+              : agentOverflow
+                ? '-overflow'
+                : ''
         }`}
         data-current-step={currentStep}
         data-shell="portrait"
@@ -190,7 +228,7 @@ function WizardChromeCard({
                     Pick a local ACP agent already on your machine, or provide a custom launch command.
                   </p>
                 </div>
-                <AgentStepBody status={agentStatus} overflow={agentOverflow} />
+                <AgentStepBody status={agentStatus} overflow={agentOverflow} mixed={agentMixed} />
               </>
             )}
             {currentStep === 'workspace' && (
@@ -264,6 +302,14 @@ export function SetupWizardChromeFixtures() {
         testId="wizard-chrome-steps-agent-overflow"
       >
         <WizardChromeCard currentStep="agent" agentOverflow />
+      </FixtureFrame>
+
+      <FixtureFrame
+        title="Agent — mixed install state"
+        description="Installed badge beside title; uninstalled title muted; status dots visible."
+        testId="wizard-chrome-agent-mixed"
+      >
+        <WizardChromeCard currentStep="agent" agentMixed />
       </FixtureFrame>
 
       <FixtureFrame
