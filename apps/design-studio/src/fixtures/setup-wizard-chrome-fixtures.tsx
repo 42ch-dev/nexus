@@ -154,10 +154,11 @@ function AgentStepBody({
       onSelect={setSelectedId}
       customLaunchValue={custom}
       onCustomLaunchChange={setCustom}
-      density="compact"
-      emptyDescription="Install an agent or add a custom launch command below."
+      showCustomLaunch={false}
+      emptyDescription="Install an ACP-compatible agent to continue."
       errorDescription="The daemon did not respond to the agent scan request."
       onRetry={status === 'error' ? () => undefined : undefined}
+      density="compact"
     />
   );
 }
@@ -224,9 +225,9 @@ function WizardChromeCard({
                   <h3 className="text-heading-24 font-heading text-gray-1000">
                     {STEP_TITLES.agent}
                   </h3>
-                  <p className="text-copy-14 text-gray-900">
-                    Pick a local ACP agent already on your machine, or provide a custom launch command.
-                  </p>
+                <p className="text-copy-14 text-gray-900">
+                  Pick a local ACP agent already on your machine.
+                </p>
                 </div>
                 <AgentStepBody status={agentStatus} overflow={agentOverflow} mixed={agentMixed} />
               </>
