@@ -1,5 +1,4 @@
-import { forwardRef, useEffect, useRef, useState } from 'react';
-import { Plus } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -7,19 +6,14 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { useCreators, useCreateCreator } from '@/api/queries';
 import { useActiveCreatorId, useSetActiveCreatorId } from '@/lib/active-creator-context';
-import { cn } from '@/lib/utils';
-import type { CreatorInfo } from '@42ch/nexus-contracts';
+import { FooterProfilesChrome } from './presentational/footer-profiles-chrome';
 
 /**
  * Sidebar footer profile switcher — Slack/Chrome-style avatar row.
  *
- * Renders one avatar per local creator plus a "+" affordance to create a new
- * creator. Click/keyboard switches the active creator id stored in client
- * context (persisted to localStorage / Tauri store). Single-creator case:
- * clicking the lone avatar is a no-op.
- *
- * Keyboard contract (web-ui.md §29.5): ArrowLeft/ArrowRight move focus between
- * avatars; Home/End jump to first/last; Escape moves focus out of the toolbar.
+ * Thin wrapper around {@link FooterProfilesChrome}: owns the creator query,
+ * active-creator context, and the create-creator dialog. The chrome owns the
+ * presentational markup and data-testid SSOT.
  */
 export function FooterProfiles() {
   const creators = useCreators();
@@ -69,89 +63,37 @@ export function FooterProfiles() {
     }
   }
 
+  const profiles = items.map((creator) => ({
+    id: creator.creator_id,
+    displayName: creator.display_name,
+    active: creator.creator_id === activeCreatorId,
+  }));
+
   return (
-    <div className="flex flex-col gap-2">
-      <span className="px-3 text-label-12 font-medium uppercase tracking-wide text-gray-700">
-        Profiles
-      </span>
-      <div
-        role="toolbar"
-        aria-label="Profiles"
-        className="flex items-center gap-2 px-3"
+    <>
+      <FooterProfilesChrome
+        sectionLabel="Profiles"
+        addButtonLabel="Add creator"
+        profiles={profiles}
+        focusIndex={focusIndex}
+        onSelect={(id) => {
+          if (items.length > 1) setActiveCreatorId(id);
+        }}
+        onAdd={() => setCreateOpen(true)}
+        onFocus={setFocusIndex}
         onKeyDown={handleKeyDown}
-      >
-        {items.map((creator, index) => (
-          <CreatorAvatar
-            key={creator.creator_id}
-            ref={(el) => {
-              itemRefs.current[index] = el;
-            }}
-            creator={creator}
-            active={creator.creator_id === activeCreatorId}
-            tabIndex={focusIndex === index ? 0 : -1}
-            onFocus={() => setFocusIndex(index)}
-            onSelect={() => {
-              if (items.length > 1) setActiveCreatorId(creator.creator_id);
-            }}
-          />
-        ))}
-        <button
-          ref={(el) => {
-            itemRefs.current[items.length] = el;
-          }}
-          type="button"
-          tabIndex={focusIndex === items.length ? 0 : -1}
-          onFocus={() => setFocusIndex(items.length)}
-          onClick={() => setCreateOpen(true)}
-          aria-label="Add creator"
-          className={cn(
-            'flex h-8 w-8 items-center justify-center rounded-full border border-dashed transition-colors',
-            'border-footer-profile-add-button-border bg-footer-profile-add-button-bg text-footer-profile-add-button-text',
-            'hover:bg-footer-profile-add-button-hover-bg hover:border-footer-profile-add-button-hover-border hover:text-footer-profile-add-button-hover-text',
-          )}
-        >
-          <Plus className="h-4 w-4" aria-hidden />
-        </button>
-      </div>
+        onItemRef={(index, el) => {
+          itemRefs.current[index] = el;
+        }}
+        onAddRef={(el) => {
+          itemRefs.current[items.length] = el;
+        }}
+      />
 
       <CreateCreatorDialog open={createOpen} onOpenChange={setCreateOpen} />
-    </div>
+    </>
   );
 }
-
-interface CreatorAvatarProps {
-  creator: CreatorInfo;
-  active: boolean;
-  tabIndex: number;
-  onFocus: () => void;
-  onSelect: () => void;
-}
-
-const CreatorAvatar = forwardRef<HTMLButtonElement, CreatorAvatarProps>(
-  ({ creator, active, tabIndex, onFocus, onSelect }, ref) => {
-    const initials = creator.display_name.slice(0, 1).toUpperCase();
-    return (
-      <button
-        ref={ref}
-        type="button"
-        tabIndex={tabIndex}
-        onClick={onSelect}
-        onFocus={onFocus}
-        aria-pressed={active}
-        title={creator.display_name}
-        className={cn(
-          'flex h-8 w-8 items-center justify-center rounded-full text-button-14 font-button transition-colors',
-          active
-            ? 'bg-footer-profile-avatar-bg-active text-footer-profile-avatar-text-active'
-            : 'bg-footer-profile-avatar-bg text-footer-profile-avatar-text hover:bg-footer-profile-avatar-bg-hover',
-        )}
-      >
-        {initials}
-      </button>
-    );
-  },
-);
-CreatorAvatar.displayName = 'CreatorAvatar';
 
 function CreateCreatorDialog({
   open,

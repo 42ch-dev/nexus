@@ -272,7 +272,7 @@ describe('SetupStepAgent', () => {
       expect(screen.getByTestId('agent-picker')).toHaveAttribute('data-status', 'empty'),
     );
     expect(screen.getByText('No agents found on PATH.')).toBeInTheDocument();
-    expect(screen.getByTestId('agent-picker-custom-launch')).toBeInTheDocument();
+    expect(screen.queryByTestId('agent-picker-custom-launch')).not.toBeInTheDocument();
   });
 
   it('renders Continue as a wide prominent CTA without Back on the first step', async () => {
@@ -296,32 +296,7 @@ describe('SetupStepAgent', () => {
     expect(cta.querySelector('button[aria-label="Back"]')).not.toBeInTheDocument();
   });
 
-  it('updates state when a custom launch command is typed', async () => {
-    const user = userEvent.setup();
-    const onNext = vi.fn();
-
-    useHandlers(
-      http.post('/v1/daemon/agent-host/scan', () => HttpResponse.json({ agents: [] })),
-    );
-
-    renderHarness(makeState(), { onNext });
-
-    await waitFor(() =>
-      expect(screen.getByText('No agents found on PATH.')).toBeInTheDocument(),
-    );
-
-    const input = screen.getByLabelText(/Use custom launch command/i);
-    await user.type(input, '/usr/local/bin/my-agent');
-
-    const continueButton = screen.getByRole('button', { name: 'Continue' });
-    await waitFor(() => expect(continueButton).toBeEnabled());
-    await user.click(continueButton);
-
-    await waitFor(() => expect(onNext).toHaveBeenCalled());
-  });
-
-  it('shows error status with custom launch and retry', async () => {
-    const user = userEvent.setup();
+  it('shows error status with retry and keeps Continue disabled without a selected agent', async () => {
     useHandlers(
       http.post('/v1/daemon/agent-host/scan', () =>
         HttpResponse.json({ error: { code: 'internal', message: 'scan failed' } }, { status: 500 }),
@@ -334,14 +309,9 @@ describe('SetupStepAgent', () => {
       expect(screen.getByTestId('agent-picker')).toHaveAttribute('data-status', 'error'),
     );
     expect(screen.getByText('Could not scan for agents')).toBeInTheDocument();
-    expect(screen.getByTestId('agent-picker-custom-launch')).toBeInTheDocument();
+    expect(screen.queryByTestId('agent-picker-custom-launch')).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
-
-    const input = screen.getByLabelText(/Use custom launch command/i);
-    await user.type(input, '/bin/custom-agent');
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled(),
-    );
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
   });
 
   it('shows Install link for known registry ids and hides links when URLs missing', async () => {

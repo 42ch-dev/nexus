@@ -1299,7 +1299,7 @@ When shipped: nav **Agent · Workspace · Advanced** only. Single `/settings/adv
 
 #### 29.14.4 Contract boundary
 
-Prefer `wire_contracts_changed: false`. Studio-first invariant locked for all author-facing chrome (compass + [`studio-first-invariant.md`](../iterations/v1.106/guides/studio-first-invariant.md)).
+Prefer `wire_contracts_changed: false`. Studio-first invariant locked for all author-facing chrome (compass + [`studio-first-invariant.md`](../iterations/v1.107/guides/studio-first-invariant.md); V1.107 carry-forward).
 
 #### 29.14.5 Voice & Content — first-launch + daemon chrome (P0/P1 Must)
 
@@ -1313,3 +1313,34 @@ Normative copy lives in repo-root [`DESIGN.md`](../../DESIGN.md) (`### Launch & 
 | AgentPicker loading | *Scanning for local ACP agents…* |
 | AgentPicker empty | **No agents found on PATH** |
 | Settings nav (P2 Stretch) | **Agent** · **Workspace** · **Advanced** |
+
+### 29.15 V1.107 Amendments — Studio UI tune + coverage hygiene
+
+**Iteration SSOT:** [`.mstar/iterations/v1.107-delivery-compass.md`](../iterations/v1.107-delivery-compass.md) + [`v1.107/specs/studio-ui-tune.md`](../iterations/v1.107/specs/studio-ui-tune.md).
+
+#### 29.15.1 Studio Tailwind content (FB-000)
+
+Design Studio `tailwind.config.ts` must include `apps/web/src/components/setup/**`, `layout/presentational/**`, and `packages/nexus-ui/src/**` in `content` so wizard chrome and component matrices paint.
+
+#### 29.15.2 Workspace path field SSOT (FB-008)
+
+- **Module:** `apps/web/src/components/setup/workspace-path-field.tsx`
+- **Exports:** `WorkspacePathField`, `WORKSPACE_PATH_FIELD_LABEL` (`Workspace folder`), `WORKSPACE_PATH_CHANGE_ACTION` (`Change Folder…`)
+- **Consumers:** Settings workspace section, wizard workspace step, Studio fixtures — shared label/CTA; wizard `layout="wizard-stack"`
+
+#### 29.15.3 Presentational gallery aliases (FB-013..015)
+
+| Alias | Resolves to | Use |
+|-------|-------------|-----|
+| `@web-layout/*` | `apps/web/src/components/layout/presentational/*` | Shell sidebar, footer profiles, header/health chrome |
+| `@web-settings/*` | `apps/web/src/components/settings/presentational/*` | ConnectDaemon + Setup section chrome |
+
+Studio **must not** import routing-heavy `sidebar.tsx` or IPC-backed `connect-daemon-form.tsx` directly.
+
+#### 29.15.4 Toast App adoption (FB-012)
+
+V1.106 promoted Toast to `@42ch/nexus-ui` for Studio fixtures. V1.107 requires App `apps/web/src/lib/use-toast.tsx` to become a **thin re-export** — closes `R-V1106P0-001`. Do not claim App/package Toast parity until FB-012 lands.
+
+#### 29.15.5 Contract boundary
+
+Prefer `wire_contracts_changed: false`. Studio-first invariant: [`studio-first-invariant.md`](../iterations/v1.107/guides/studio-first-invariant.md) (V1.107 carry-forward).

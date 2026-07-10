@@ -117,6 +117,7 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | [v1.104-delivery-compass.md](v1.104-delivery-compass.md) | V1.104 | **locked** — Settings Workspace path (W2 Must; V1.103 Stretch carry-forward); post-setup folder change + honest restart copy; residual R1 opportunistic. Integration `iteration/v1.104` → `main`. |
 | [v1.105-delivery-compass.md](v1.105-delivery-compass.md) | V1.105 | **completed** (2026-07-10) — First-launch wizard reshape: app-level Daemon gate + Agent→Workspace→Done + portrait shell. Integration `iteration/v1.105` → `main`. |
 | [v1.106-delivery-compass.md](v1.106-delivery-compass.md) | V1.106 | **completed** (2026-07-10) — Studio-first pipeline Must + first-launch polish Must + UI continuity Stretch. Integration `iteration/v1.106` → `main`. |
+| [v1.107-delivery-compass.md](v1.107-delivery-compass.md) | V1.107 | **completed** (2026-07-10) — Studio UI tune Must (visual FB-000..011 + coverage FB-012..016). Integration `iteration/v1.107`. |
 
 ### Active iteration workspaces
 
@@ -128,6 +129,7 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | [v1.104/](v1.104/README.md) | V1.104 | Settings Workspace W2 Must + shell nav/route delta; studio-first guide |
 | [v1.105/](v1.105/README.md) | V1.105 | Iteration contracts: Daemon fullscreen gate, wizard IA reorder, portrait shell; studio-first guide |
 | [v1.106/](v1.106/README.md) | V1.106 | Studio-first pipeline + first-launch polish + UI continuity Stretch; studio-first invariant guide |
+| [v1.107/](v1.107/README.md) | V1.107 | Studio UI tune Must — visual + coverage hygiene; studio-first invariant carry-forward |
 
 ### Legacy `v1.*` iteration artifacts
 

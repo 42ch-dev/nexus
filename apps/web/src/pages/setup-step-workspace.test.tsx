@@ -71,11 +71,13 @@ function renderHarness(
 }
 
 describe('SetupStepWorkspace', () => {
-  it('uses the hardcoded fallback in browser mode and hides the picker', async () => {
+  it('uses the hardcoded fallback in browser mode and disables the picker', async () => {
     renderHarness(makeState());
 
-    await waitFor(() => expect(screen.getByText('~/Documents/nexus/default')).toBeInTheDocument());
-    expect(screen.queryByRole('button', { name: 'Browse…' })).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.getByDisplayValue('~/Documents/nexus/default')).toBeInTheDocument());
+    const button = screen.getByRole('button', { name: 'Change Folder…' });
+    expect(button).toBeInTheDocument();
+    expect(button).toBeDisabled();
   });
 
   it('renders Choose a workspace heading and Back to Agent CTA', async () => {
@@ -105,17 +107,17 @@ describe('SetupStepWorkspace', () => {
       desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve(longPath) }),
     });
 
-    await waitFor(() => expect(screen.getByText(longPath)).toBeInTheDocument());
-    const pathText = screen.getByText(longPath);
-    const pathContainer = pathText.parentElement;
+    await waitFor(() => expect(screen.getByDisplayValue(longPath)).toBeInTheDocument());
+    const pathInput = screen.getByDisplayValue(longPath);
+    const pathContainer = pathInput.parentElement;
 
-    expect(pathText).toHaveClass('truncate');
-    expect(pathContainer).toHaveClass('min-w-0');
-    expect(pathContainer).toHaveClass('flex-1');
+    expect(pathInput).toHaveClass('truncate');
+    expect(pathInput).toHaveClass('min-w-0');
+    expect(pathInput).toHaveClass('flex-1');
     expect(pathContainer?.parentElement).toHaveAttribute('data-testid', 'workspace-location-row');
 
-    const browseButton = screen.getByRole('button', { name: 'Browse…' });
-    expect(browseButton).toHaveClass('flex-shrink-0');
+    const changeFolderButton = screen.getByRole('button', { name: 'Change Folder…' });
+    expect(changeFolderButton).toHaveClass('shrink-0');
   });
 
   it('shows the desktop workspace root and a picker button in the same row', async () => {
@@ -123,11 +125,10 @@ describe('SetupStepWorkspace', () => {
       desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve('/custom/nexus') }),
     });
 
-    await waitFor(() => expect(screen.getByText('/custom/nexus')).toBeInTheDocument());
-    const browseButton = screen.getByRole('button', { name: 'Browse…' });
-    expect(browseButton).toBeInTheDocument();
-    expect(browseButton.closest('[data-testid="workspace-location-row"]')).toBeInTheDocument();
-    expect(screen.getByText('/custom/nexus').parentElement).toHaveClass('min-w-0');
+    await waitFor(() => expect(screen.getByDisplayValue('/custom/nexus')).toBeInTheDocument());
+    const changeFolderButton = screen.getByRole('button', { name: 'Change Folder…' });
+    expect(changeFolderButton).toBeInTheDocument();
+    expect(changeFolderButton.closest('[data-testid="workspace-location-row"]')).toBeInTheDocument();
   });
 
   it('updates the workspace root when the picker returns a directory', async () => {
@@ -138,12 +139,12 @@ describe('SetupStepWorkspace', () => {
       desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve('/custom/nexus'), pickDirectory }),
     });
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Browse…' })).toBeEnabled());
-    await user.click(screen.getByRole('button', { name: 'Browse…' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Change Folder…' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Change Folder…' }));
 
     await waitFor(() => expect(pickDirectory).toHaveBeenCalledWith('/custom/nexus'));
     await waitFor(() =>
-      expect(screen.getByText('/picked/workspace')).toBeInTheDocument(),
+      expect(screen.getByDisplayValue('/picked/workspace')).toBeInTheDocument(),
     );
   });
 
@@ -209,8 +210,8 @@ describe('SetupStepWorkspace', () => {
       desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve('/custom/nexus'), pickDirectory }),
     });
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Browse…' })).toBeEnabled());
-    await user.click(screen.getByRole('button', { name: 'Browse…' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Change Folder…' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Change Folder…' }));
 
     await waitFor(() => expect(screen.getByText('dialog failed')).toBeInTheDocument());
   });

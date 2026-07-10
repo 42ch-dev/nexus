@@ -138,6 +138,11 @@ else
     "import\s+.*from\s+['\"][^'\"]*web\/src\/components\/layout\/" \
     "${STUDIO_FILES[@]}"
 
+  # Web settings modules (allowed only via @web-settings/*)
+  forbid "Studio: imports web settings modules" \
+    "import\s+.*from\s+['\"][^'\"]*web\/src\/components\/settings\/" \
+    "${STUDIO_FILES[@]}"
+
   # Web daemon transport / client
   forbid "Studio: imports daemon client/transport" \
     "import\s+.*from\s+['\"][^'\"]*web\/src\/lib\/nexus\/" \

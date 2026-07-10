@@ -87,6 +87,7 @@ function SubNav() {
     { label: 'Button', href: '#comp-button' },
     { label: 'Card', href: '#comp-card' },
     { label: 'Dialog', href: '#comp-dialog' },
+    { label: 'Domain Badges', href: '#comp-domain-badges' },
     { label: 'Input', href: '#comp-input' },
     { label: 'Label', href: '#comp-label' },
     { label: 'Select', href: '#comp-select' },
@@ -161,6 +162,169 @@ function BadgeSection() {
                 {label}
               </Badge>
               <VariantLabel label={label} />
+            </div>
+          ))}
+        </div>
+      </MatrixCard>
+    </section>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  1a. Domain Badges                                                   */
+/* ------------------------------------------------------------------ */
+
+function humanizeDomainValue(value: string): string {
+  return value
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function DomainBadgeSection() {
+  const statusItems = [
+    { value: 'running', variant: 'running' as const },
+    { value: 'queued', variant: 'queued' as const },
+    { value: 'warning', variant: 'warning' as const },
+    { value: 'error', variant: 'error' as const },
+    { value: 'unknown', variant: 'neutral' as const },
+  ];
+
+  const chapterItems = [
+    { value: 'not_started', variant: 'neutral' as const },
+    { value: 'outlined', variant: 'queued' as const },
+    { value: 'draft', variant: 'warning' as const },
+    { value: 'finalized', variant: 'running' as const },
+    { value: 'published', variant: 'preset' as const },
+  ];
+
+  const findingItems = [
+    {
+      value: 'open',
+      classes:
+        'bg-[color-mix(in_srgb,var(--color-amber-700)_12%,transparent)] text-amber-1000 border-[color-mix(in_srgb,var(--color-amber-700)_30%,transparent)]',
+    },
+    {
+      value: 'triaged',
+      classes:
+        'bg-[color-mix(in_srgb,var(--color-teal-700)_10%,transparent)] text-teal-1000 border-[color-mix(in_srgb,var(--color-teal-700)_30%,transparent)]',
+    },
+    {
+      value: 'in_review',
+      classes:
+        'bg-[color-mix(in_srgb,var(--color-blue-700)_10%,transparent)] text-blue-1000 border-[color-mix(in_srgb,var(--color-blue-700)_30%,transparent)]',
+    },
+    {
+      value: 'resolved',
+      classes:
+        'bg-[color-mix(in_srgb,var(--color-green-700)_10%,transparent)] text-green-1000 border-[color-mix(in_srgb,var(--color-green-700)_30%,transparent)]',
+    },
+    {
+      value: 'wont_fix',
+      classes: 'bg-gray-alpha-100 text-gray-900 border-gray-alpha-300',
+    },
+    {
+      value: 'duplicate',
+      classes:
+        'bg-[color-mix(in_srgb,var(--color-purple-700)_10%,transparent)] text-purple-1000 border-[color-mix(in_srgb,var(--color-purple-700)_30%,transparent)]',
+    },
+  ];
+
+  const taskKindItems = [
+    {
+      value: 'brainstorm',
+      classes:
+        'bg-[color-mix(in_srgb,var(--color-amber-700)_12%,transparent)] text-amber-1000 border-[color-mix(in_srgb,var(--color-amber-700)_30%,transparent)]',
+    },
+    {
+      value: 'outline',
+      classes:
+        'bg-[color-mix(in_srgb,var(--color-blue-700)_10%,transparent)] text-blue-1000 border-[color-mix(in_srgb,var(--color-blue-700)_30%,transparent)]',
+    },
+    {
+      value: 'chapter',
+      classes:
+        'bg-[color-mix(in_srgb,var(--color-teal-700)_10%,transparent)] text-teal-1000 border-[color-mix(in_srgb,var(--color-teal-700)_30%,transparent)]',
+    },
+    {
+      value: 'research',
+      classes:
+        'bg-[color-mix(in_srgb,var(--color-purple-700)_10%,transparent)] text-purple-1000 border-[color-mix(in_srgb,var(--color-purple-700)_30%,transparent)]',
+    },
+    {
+      value: 'unknown',
+      classes: 'bg-gray-alpha-100 text-gray-900 border-gray-alpha-300',
+    },
+  ];
+
+  return (
+    <section data-testid="domain-badge-fixtures">
+      <SectionHeading id="comp-domain-badges">Domain Badges</SectionHeading>
+      <p className="text-copy-16 text-gray-700 mb-2">
+        Domain-specific status pills mapped to the DESIGN.md semantic palette.
+        Status and Chapter use the standard Badge variants; Finding and TaskKind
+        use the app-locked color-mix classes so each domain state stays distinct
+        in both light and dark.
+      </p>
+
+      <p className="text-label-14 text-gray-900 mb-4">Status</p>
+      <MatrixCard className="mb-6">
+        <div className="flex flex-wrap items-center gap-4">
+          {statusItems.map(({ value, variant }) => (
+            <div key={`status-${value}`} className="flex flex-col items-center gap-2">
+              <Badge variant={variant} data-testid={`domain-badge-status-${value}`}>
+                {humanizeDomainValue(value)}
+              </Badge>
+              <VariantLabel label={value} />
+            </div>
+          ))}
+        </div>
+      </MatrixCard>
+
+      <p className="text-label-14 text-gray-900 mb-4">Chapter</p>
+      <MatrixCard className="mb-6">
+        <div className="flex flex-wrap items-center gap-4">
+          {chapterItems.map(({ value, variant }) => (
+            <div key={`chapter-${value}`} className="flex flex-col items-center gap-2">
+              <Badge variant={variant} data-testid={`domain-badge-chapter-${value}`}>
+                {humanizeDomainValue(value)}
+              </Badge>
+              <VariantLabel label={value} />
+            </div>
+          ))}
+        </div>
+      </MatrixCard>
+
+      <p className="text-label-14 text-gray-900 mb-4">Finding</p>
+      <MatrixCard className="mb-6">
+        <div className="flex flex-wrap items-center gap-4">
+          {findingItems.map(({ value, classes }) => (
+            <div key={`finding-${value}`} className="flex flex-col items-center gap-2">
+              <Badge
+                variant="neutral"
+                className={classes}
+                data-testid={`domain-badge-finding-${value}`}
+              >
+                {humanizeDomainValue(value)}
+              </Badge>
+              <VariantLabel label={value} />
+            </div>
+          ))}
+        </div>
+      </MatrixCard>
+
+      <p className="text-label-14 text-gray-900 mb-4">TaskKind</p>
+      <MatrixCard>
+        <div className="flex flex-wrap items-center gap-4">
+          {taskKindItems.map(({ value, classes }) => (
+            <div key={`task-kind-${value}`} className="flex flex-col items-center gap-2">
+              <Badge
+                variant="neutral"
+                className={classes}
+                data-testid={`domain-badge-task-kind-${value}`}
+              >
+                {humanizeDomainValue(value)}
+              </Badge>
+              <VariantLabel label={value} />
             </div>
           ))}
         </div>
@@ -883,6 +1047,7 @@ export function ComponentsPage() {
       <SubNav />
 
       <BadgeSection />
+      <DomainBadgeSection />
       <ButtonSection />
       <CardSection />
       <DialogSection />

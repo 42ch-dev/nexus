@@ -3,9 +3,9 @@
   "updated_at": "2026-07-10",
   "plans": [
     {
-      "id": "2026-07-10-v1.106-studio-first-pipeline",
-      "title": "P0 — Studio-first pipeline complete",
-      "file": "plans/2026-07-10-v1.106-studio-first-pipeline.md",
+      "id": "2026-07-10-v1.107-studio-ui-tune",
+      "title": "P0 — Studio UI tune (visual + coverage)",
+      "file": "plans/2026-07-10-v1.107-studio-ui-tune.md",
       "status": "Done",
       "owner": "@project-manager",
       "agents": [
@@ -14,88 +14,24 @@
       ],
       "progress": 100,
       "tags": [
-        "v1.106",
+        "v1.107",
         "studio-first",
-        "design-system",
+        "design-studio",
         "must"
       ],
       "created_at": "2026-07-10",
       "updated_at": "2026-07-10",
-      "done_at": "2026-07-10",
-      "notes": "Done — QC tri Approve with residuals; QA Accept. 5 residuals R-V1106P0-001..005 (defer/accept).",
+      "notes": "Done — All 17 FBs implemented. QC tri Approve (3/3) after fix wave. QA Pass with residuals. 2 non-blocking residuals (R-V1107QC1-W002 low, R-V1107QC1-ARCH nit).",
       "metadata": {
         "iteration_refs": [
-          "V1.106"
+          "V1.107"
         ],
-        "spec_integration_branch": "iteration/v1.106",
-        "merge_target": "iteration/v1.106",
-        "working_branch": "plan/v1.106-p0-studio-first-pipeline",
-        "primary_spec": ".mstar/iterations/v1.106/specs/studio-first-pipeline.md",
+        "spec_integration_branch": "iteration/v1.107",
+        "merge_target": "iteration/v1.107",
+        "working_branch": "plan/v1.107-p0-studio-ui-tune",
+        "primary_spec": ".mstar/iterations/v1.107/specs/studio-ui-tune.md",
         "wire_contracts_changed": false,
         "tier": "Must"
-      }
-    },
-    {
-      "id": "2026-07-10-v1.106-first-launch-polish",
-      "title": "P1 — First-launch polish",
-      "file": "plans/2026-07-10-v1.106-first-launch-polish.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@frontend-dev"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.106",
-        "first-launch",
-        "wizard",
-        "must"
-      ],
-      "created_at": "2026-07-10",
-      "updated_at": "2026-07-10",
-      "done_at": "2026-07-10",
-      "notes": "Done — QC tri Approve with residuals (fixed); QA Accept. 6 V1.105 residuals closed.",
-      "metadata": {
-        "iteration_refs": [
-          "V1.106"
-        ],
-        "spec_integration_branch": "iteration/v1.106",
-        "merge_target": "iteration/v1.106",
-        "working_branch": "plan/v1.106-p1-first-launch-polish",
-        "primary_spec": ".mstar/iterations/v1.106/specs/first-launch-polish.md",
-        "wire_contracts_changed": false,
-        "tier": "Must"
-      }
-    },
-    {
-      "id": "2026-07-10-v1.106-ui-continuity",
-      "title": "P2 — UI continuity polish",
-      "file": "plans/2026-07-10-v1.106-ui-continuity.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@frontend-dev"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.106",
-        "ui-continuity",
-        "stretch"
-      ],
-      "created_at": "2026-07-10",
-      "updated_at": "2026-07-10",
-      "done_at": "2026-07-10",
-      "notes": "Done — QC tri Approve (no Criticals/blocking Warnings); QA Accept. 3 residuals R-V1106P2-001..003 (defer/accept).",
-      "metadata": {
-        "iteration_refs": [
-          "V1.106"
-        ],
-        "spec_integration_branch": "iteration/v1.106",
-        "merge_target": "iteration/v1.106",
-        "working_branch": "plan/v1.106-p2-ui-continuity",
-        "primary_spec": ".mstar/iterations/v1.106/specs/ui-continuity.md",
-        "wire_contracts_changed": false,
-        "tier": "Stretch"
       }
     }
   ],
@@ -103,8 +39,8 @@
     "integration_branch_retired": false,
     "iteration_base_branch": "main",
     "last_integration_branch": "iteration/v1.97",
-    "latest_active_compass": "v1.106-delivery-compass.md",
-    "latest_active_iteration": "V1.106",
+    "latest_active_compass": "v1.107-delivery-compass.md",
+    "latest_active_iteration": "V1.107",
     "latest_ship": {
       "iteration": "V1.97",
       "compass": "v1.97-desktop-first-launch-hardening-compass-v1.md",
@@ -115,7 +51,7 @@
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "pre_iteration_hotfix": null,
-    "spec_integration_branch": "iteration/v1.106",
+    "spec_integration_branch": "iteration/v1.107",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {
@@ -1182,6 +1118,30 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-10-v1.106-ui-continuity.md",
         "note": "QC1 F-001. it.each matrix at badge.test.tsx:55 covers the contract."
+      }
+    ],
+    "2026-07-10-v1.107-studio-ui-tune": [
+      {
+        "id": "R-V1107QC1-W002",
+        "title": "ConnectDaemonFormChrome prop name 'state' vs spec 'matrixState' + missing supporting props (savedConfig, fingerprintValue, fetchStatus, fetchErrorMessage, hasSavedConfig)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.107",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-10-v1.107-studio-ui-tune.md",
+        "note": "QC1 W-002. Known follow-up for App-side adoption; rename + surface props when live ConnectDaemonForm delegates to chrome."
+      },
+      {
+        "id": "R-V1107QC1-ARCH",
+        "title": "shell-header-chrome.tsx not created (in Architecture contracts module table but no FB acceptance criterion)",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.107",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-10-v1.107-studio-ui-tune.md",
+        "note": "Architecture doc gap; next iteration shell polish."
       }
     ]
   }

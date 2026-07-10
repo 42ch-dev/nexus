@@ -146,7 +146,7 @@ describe('AgentPicker', () => {
     ).not.toBeNull();
   });
 
-  it('uses CSS ::after ArrowUpRight sized to label cap-height', () => {
+  it('renders an ArrowUpRight icon inside outbound links', () => {
     render(
       <AgentPicker
         status="ready"
@@ -157,11 +157,8 @@ describe('AgentPicker', () => {
       />,
     );
     const install = screen.getByRole('link', { name: /Install/i });
-    expect(install.querySelector('svg')).toBeNull();
-    expect(install).toHaveClass(
-      'after:content-[\'↗\']',
-      'after:text-[0.75em]',
-    );
+    expect(install.querySelector('svg')).not.toBeNull();
+    expect(install.querySelector('svg')).toHaveClass('lucide-arrow-up-right');
   });
 
   it('shows custom launch on empty and error', () => {

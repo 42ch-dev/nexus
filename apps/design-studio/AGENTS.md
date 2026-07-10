@@ -24,16 +24,19 @@ Parent rules: [`../AGENTS.md`](../AGENTS.md) (apps placement), root [`AGENTS.md`
 | --- | --- | --- |
 | `@/*` | `./src/*` | Studio routes, fixtures, gallery layout |
 | `@web-ui/*` | `../web/src/components/ui/*` | Transitional gallery source for not-yet-promoted primitives |
-| `@web-setup/*` | `../web/src/components/setup/*` | Gallery-only import of app-shared setup compositions (e.g. AgentPicker) — props-driven; no contracts/daemon |
+| `@web-setup/*` | `../web/src/components/setup/*` | Gallery-only import of app-shared setup compositions (e.g. AgentPicker, WorkspacePathField) — props-driven; no contracts/daemon |
+| `@web-layout/*` | `../web/src/components/layout/presentational/*` | Shell chrome extracts (sidebar, footer profiles, header/health) — props-driven; no routing or daemon hooks (V1.107) |
+| `@web-settings/*` | `../web/src/components/settings/presentational/*` | Settings section chrome extracts (ConnectDaemon form, Setup section) — props-driven; no IPC (V1.107) |
 | `@web-lib/utils` | `../web/src/lib/utils.ts` | `cn()` only |
-| `@42ch/nexus-ui` | workspace package | Brand VI plus promoted presentational primitives (Button, Badge, Card, Input, Label, Textarea, Select) through public exports |
+| `@42ch/nexus-ui` | workspace package | Brand VI plus promoted presentational primitives (Button, Badge, Card, Input, Label, Textarea, Select, Toast) through public exports |
 | `@nexus/design-tokens` | `tooling/design-tokens` | Shared CSS + Tailwind preset |
 
 ### Forbidden
 
 - `apps/web/src/lib/nexus/**` — no `NexusClient`, no daemon transport
 - `apps/web/src/pages/**` — no product screens
-- `apps/web/src/components/layout/**` — use studio-local Surfaces fixtures instead
+- `apps/web/src/components/layout/**` except via `@web-layout/*` presentational extracts — no direct import of routing-heavy `sidebar.tsx`, `root-layout.tsx`, or daemon-wired layout modules
+- `apps/web/src/components/settings/**` except via `@web-settings/*` presentational extracts — no live ConnectDaemonForm with IPC in Studio
 - `apps/web/src/hooks/**` — no product hooks
 - `apps/web/src/(providers|contexts)/**` — no app providers
 - `@42ch/nexus-contracts` — no wire DTOs

@@ -56,7 +56,7 @@ describe('SettingsWorkspaceSection', () => {
     ).toBeInTheDocument();
 
     await waitFor(() =>
-      expect(screen.getByTestId('settings-workspace-path')).toHaveValue(
+      expect(screen.getByDisplayValue(INITIAL_PATH)).toHaveValue(
         INITIAL_PATH,
       ),
     );
@@ -70,12 +70,12 @@ describe('SettingsWorkspaceSection', () => {
     renderInApp(<SettingsWorkspaceSection />, { desktop });
 
     await waitFor(() =>
-      expect(screen.getByTestId('settings-workspace-path')).toHaveValue(
+      expect(screen.getByDisplayValue(INITIAL_PATH)).toHaveValue(
         INITIAL_PATH,
       ),
     );
 
-    await user.click(screen.getByTestId('settings-change-folder'));
+    await user.click(screen.getByRole('button', { name: 'Change Folder…' }));
 
     await waitFor(() =>
       expect(desktop.setWorkspacePath).toHaveBeenCalledWith(PICKED_PATH),
@@ -87,7 +87,7 @@ describe('SettingsWorkspaceSection', () => {
         /Restart or reload the app so the running daemon uses the new location/i,
       ),
     );
-    expect(screen.getByTestId('settings-workspace-path')).toHaveValue(PICKED_PATH);
+    expect(screen.getByDisplayValue(PICKED_PATH)).toHaveValue(PICKED_PATH);
   });
 
   it('returns to idle state when picker is cancelled (pickDirectory returns null)', async () => {
@@ -98,19 +98,19 @@ describe('SettingsWorkspaceSection', () => {
     renderInApp(<SettingsWorkspaceSection />, { desktop });
 
     await waitFor(() =>
-      expect(screen.getByTestId('settings-workspace-path')).toHaveValue(
+      expect(screen.getByDisplayValue(INITIAL_PATH)).toHaveValue(
         INITIAL_PATH,
       ),
     );
 
-    await user.click(screen.getByTestId('settings-change-folder'));
+    await user.click(screen.getByRole('button', { name: 'Change Folder…' }));
 
     await waitFor(() =>
-      expect(screen.getByTestId('settings-change-folder')).not.toBeDisabled(),
+      expect(screen.getByRole('button', { name: 'Change Folder…' })).not.toBeDisabled(),
     );
     expect(desktop.pickDirectory).toHaveBeenCalledWith(INITIAL_PATH);
     expect(desktop.setWorkspacePath).not.toHaveBeenCalled();
-    expect(screen.getByTestId('settings-workspace-path')).toHaveValue(INITIAL_PATH);
+    expect(screen.getByDisplayValue(INITIAL_PATH)).toHaveValue(INITIAL_PATH);
     expect(
       screen.queryByTestId('settings-workspace-saved-honesty'),
     ).not.toBeInTheDocument();
@@ -123,16 +123,12 @@ describe('SettingsWorkspaceSection', () => {
     expect(section).toHaveAttribute('data-desktop', 'false');
 
     expect(
-      screen.getByTestId('settings-workspace-browser-only'),
-    ).toHaveTextContent(
-      'Workspace path changes are available on the desktop app only.',
-    );
+      screen.getByText(
+        'Workspace path changes are available on the desktop app only.',
+      ),
+    ).toBeInTheDocument();
 
-    const button = screen.getByTestId('settings-change-folder');
+    const button = screen.getByRole('button', { name: 'Change Folder…' });
     expect(button).toBeDisabled();
-    expect(button).toHaveAttribute(
-      'title',
-      'Open the Nexus desktop app to change your workspace folder.',
-    );
   });
 });
