@@ -12,7 +12,7 @@
  * cap-height, hollow/lit selection dots, muted not-installed cards.
  */
 
-import { Loader2, Terminal } from 'lucide-react';
+import { ArrowUpRight, Loader2, Terminal } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { cn } from '@/lib/utils';
@@ -235,7 +235,7 @@ function AgentCard({
         </div>
       )}
 
-      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
+      <div className="mt-3 flex flex-wrap items-center gap-3">
         {!agent.installed ? (
           <span className="text-copy-13 text-gray-700">Not installed</span>
         ) : null}
@@ -344,9 +344,10 @@ function OutboundLink({ href, label }: { href: string; label: string }) {
       target="_blank"
       rel="noopener noreferrer"
       aria-label={label}
-      className="inline-flex items-baseline gap-1 text-label-14 font-medium leading-none text-blue-700 transition-colors hover:text-blue-800 after:ml-0.5 after:inline-block after:text-[0.75em] after:leading-none after:content-['↗']"
+      className="inline-flex items-center gap-1 text-label-14 font-medium leading-none text-blue-700 transition-colors hover:text-blue-800"
     >
       {label}
+      <ArrowUpRight className="h-3 w-3" aria-hidden />
     </a>
   );
 }
