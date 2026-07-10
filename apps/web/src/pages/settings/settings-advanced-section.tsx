@@ -12,12 +12,12 @@ import { SettingsSetupSection } from '@/pages/settings/settings-setup-section';
 
 export function SettingsAdvancedSection() {
   const gate = useFingerprintGateState();
-  const isMismatch = gate?.status === 'mismatch';
+  const showSetup = gate === null || gate.status === 'verified';
 
   return (
     <div className="flex flex-col gap-10" data-testid="settings-advanced-section">
       <SettingsConnectionSection />
-      {!isMismatch && <SettingsSetupSection />}
+      {showSetup && <SettingsSetupSection />}
     </div>
   );
 }
