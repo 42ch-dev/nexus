@@ -8,7 +8,7 @@
 import { useState, type ReactNode } from 'react';
 import { CheckCircle, ChevronLeft } from 'lucide-react';
 
-import { cn, Button, Card } from '@42ch/nexus-ui';
+import { Button, Card } from '@42ch/nexus-ui';
 import {
   AgentPicker,
   type AgentPickerItem,
