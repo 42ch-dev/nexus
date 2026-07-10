@@ -1,5 +1,5 @@
 import { act, render, screen } from '@testing-library/react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi, afterEach } from 'vitest';
 import '@testing-library/jest-dom/vitest';
 
 import { ToastProvider, Toaster, useToast } from './toast';
@@ -40,6 +40,10 @@ describe('Toaster + useToast', () => {
     );
     return () => api!;
   }
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 
   it('renders a toast with title and description', () => {
     const getApi = renderToaster();
@@ -91,5 +95,24 @@ describe('Toaster + useToast', () => {
       screen.getByRole('button', { name: 'Dismiss notification' }).click();
     });
     expect(screen.queryByText('Dismiss me')).not.toBeInTheDocument();
+  });
+
+  it('does not reset the auto-dismiss timer when a second toast is added', () => {
+    vi.useFakeTimers();
+    const getApi = renderToaster();
+    const { toast } = getApi();
+
+    act(() =>
+      toast({ variant: 'info', title: 'First', duration: 3000, testId: 'toast-a' }),
+    );
+    act(() => vi.advanceTimersByTime(2000));
+
+    act(() =>
+      toast({ variant: 'info', title: 'Second', duration: 3000, testId: 'toast-b' }),
+    );
+    act(() => vi.advanceTimersByTime(1500));
+
+    expect(screen.queryByTestId('toast-a')).not.toBeInTheDocument();
+    expect(screen.getByTestId('toast-b')).toBeInTheDocument();
   });
 });

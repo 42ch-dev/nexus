@@ -433,11 +433,30 @@ describe('Surfaces page — main banner fixtures', () => {
   });
 
   it('does not import the App MainBanner (composition-only)', () => {
-    // The composition-only fixture replicates the banner structure without
-    // pulling in daemon/desktop hooks. We verify the Restart Daemon CTA exists
-    // across variants without the App-specific loading state.
-    const ctas = screen.getAllByRole('button', { name: /Restart Daemon/i });
-    expect(ctas.length).toBeGreaterThanOrEqual(4);
+    // The fixture exposes stable, state-specific testids built from inline
+    // markup and @42ch/nexus-ui Button. The real apps/web banner has no
+    // data-testid and renders a single dynamic daemon state, so four matching
+    // fixture roots prove the fixture is used and the App banner is not
+    // imported.
+    const bannerSection = screen.getByTestId('surfaces-banner');
+    expect(
+      within(bannerSection).getByTestId('main-banner-fixture-starting'),
+    ).toBeInTheDocument();
+    expect(
+      within(bannerSection).getByTestId('main-banner-fixture-degraded'),
+    ).toBeInTheDocument();
+    expect(
+      within(bannerSection).getByTestId('main-banner-fixture-stopped'),
+    ).toBeInTheDocument();
+    expect(
+      within(bannerSection).getByTestId('main-banner-fixture-error'),
+    ).toBeInTheDocument();
+
+    // The real MainBanner does not emit any data-testid; an imported copy
+    // would add an uncontrolled root element without the fixture prefix.
+    expect(
+      within(bannerSection).queryAllByTestId(/^main-banner-/).length,
+    ).toBe(4);
   });
 });
 

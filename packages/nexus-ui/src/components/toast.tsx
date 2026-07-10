@@ -103,6 +103,7 @@ const VARIANT_STYLES: Record<ToastVariant, { bar: string; icon: ReactNode }> = {
  */
 export function Toaster() {
   const { toasts, dismiss } = useToast();
+  const handleDismiss = useCallback((id: number) => dismiss(id), [dismiss]);
   if (typeof document === 'undefined') return null;
 
   return createPortal(
@@ -112,22 +113,22 @@ export function Toaster() {
       className="pointer-events-none fixed bottom-4 right-4 z-50 flex w-full max-w-[360px] flex-col gap-2"
     >
       {toasts.map((t) => (
-        <ToastItem key={t.id} toast={t} onDismiss={() => dismiss(t.id)} />
+        <ToastItem key={t.id} toast={t} onDismiss={handleDismiss} />
       ))}
     </div>,
     document.body,
   );
 }
 
-function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }) {
-  const { variant, title, description, duration, testId } = toast;
+function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: (id: number) => void }) {
+  const { variant, title, description, duration, id, testId } = toast;
   const styles = VARIANT_STYLES[variant];
 
   useEffect(() => {
     if (!duration || duration <= 0) return;
-    const timer = setTimeout(onDismiss, duration);
+    const timer = setTimeout(() => onDismiss(id), duration);
     return () => clearTimeout(timer);
-  }, [duration, onDismiss]);
+  }, [duration, id, onDismiss]);
 
   return (
     <div
@@ -144,7 +145,7 @@ function ToastItem({ toast, onDismiss }: { toast: Toast; onDismiss: () => void }
         </div>
         <button
           type="button"
-          onClick={onDismiss}
+          onClick={() => onDismiss(id)}
           aria-label="Dismiss notification"
           className="shrink-0 rounded-control p-1 text-gray-700 transition-colors duration-state ease-standard hover:bg-gray-alpha-100 hover:text-gray-1000"
         >
