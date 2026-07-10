@@ -19,6 +19,7 @@ const config: Config = {
     '../web/src/components/ui/**/*.{ts,tsx}',
     '../web/src/components/setup/**/*.{ts,tsx}',
     '../web/src/components/layout/presentational/**/*.{ts,tsx}',
+    '../web/src/components/settings/presentational/**/*.{ts,tsx}',
     '../../packages/nexus-ui/src/**/*.{ts,tsx}',
   ],
   theme: {

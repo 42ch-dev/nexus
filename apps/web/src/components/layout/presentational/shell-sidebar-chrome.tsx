@@ -225,7 +225,7 @@ function NavGroupChrome({
       {open && (
         <ul className="flex flex-col gap-0.5">
           {group.items.map((item) => {
-            const isActive = item.to === activeRoute;
+            const isActive = activeRoute === item.to || activeRoute.startsWith(`${item.to}/`);
             return (
               <li key={item.to}>
                 {renderNavItem?.(
