@@ -1152,6 +1152,7 @@ fn apply_timeline_patch(
         "remove_event" => timeline_remove_event(req, frontmatter),
         "attach_event_to_chapter" => timeline_attach_event_to_chapter(req, frontmatter, chapters),
         "link_foreshadow" => timeline_link_foreshadow(req, frontmatter),
+        "unlink_foreshadow" => timeline_unlink_foreshadow(req, frontmatter),
         operation => Err(NexusApiError::BadRequest {
             code: "invalid_timeline_operation".to_string(),
             message: format!("unsupported timeline operation '{operation}'"),
@@ -1252,6 +1253,17 @@ fn timeline_link_foreshadow(
             code: "missing_foreshadows_event_id".to_string(),
             message: "link_foreshadow requires foreshadows_event_id".to_string(),
         })?;
+
+    // QC2-F002 — a foreshadow edge from an event to itself is nonsensical (an
+    // event cannot foreshadow its own realization). Reject at the daemon level
+    // so a bypass of the UI's `!==` guard cannot create a self-loop edge.
+    if source == target {
+        return Err(NexusApiError::BadRequest {
+            code: "self_foreshadow_forbidden".to_string(),
+            message: "foreshadow source and target events must differ".to_string(),
+        });
+    }
+
     let source_event = frontmatter
         .timeline_events
         .iter()
@@ -1303,6 +1315,63 @@ fn timeline_link_foreshadow(
             source_event_id: source.to_string(),
             target_event_id: target.to_string(),
         });
+    }
+    Ok(())
+}
+
+/// Remove a foreshadow link (source → target) from the outline.
+///
+/// This is the unlink counterpart to [`timeline_link_foreshadow`]. It requires
+/// `event_id` (source) and `foreshadows_event_id` (target); both must match an
+/// existing edge exactly. A non-existent edge returns `NotFound` so callers can
+/// distinguish "nothing to unlink" from a silent no-op.
+fn timeline_unlink_foreshadow(
+    req: &TimelinePatchEventRequest,
+    frontmatter: &mut OutlineFrontmatter,
+) -> Result<(), NexusApiError> {
+    let source = req
+        .event_id
+        .as_deref()
+        .ok_or_else(|| NexusApiError::BadRequest {
+            code: "missing_event_id".to_string(),
+            message: "unlink_foreshadow requires event_id".to_string(),
+        })?;
+    let target = req
+        .foreshadows_event_id
+        .as_deref()
+        .ok_or_else(|| NexusApiError::BadRequest {
+            code: "missing_foreshadows_event_id".to_string(),
+            message: "unlink_foreshadow requires foreshadows_event_id".to_string(),
+        })?;
+
+    // QC2-F001 — verify both events still exist in `timeline_events`, mirroring
+    // the link handler's existence checks. An edge can outlive its events if
+    // the outline was edited outside the daemon (e.g. manual YAML edit removed
+    // an event but left a dangling foreshadow entry). Without this guard the
+    // unlink would silently succeed on a structurally invalid outline.
+    if !frontmatter
+        .timeline_events
+        .iter()
+        .any(|e| e.event_id == source)
+    {
+        return Err(NexusApiError::NotFound(format!("event {source}")));
+    }
+    if !frontmatter
+        .timeline_events
+        .iter()
+        .any(|e| e.event_id == target)
+    {
+        return Err(NexusApiError::NotFound(format!("event {target}")));
+    }
+
+    let before = frontmatter.foreshadows.len();
+    frontmatter
+        .foreshadows
+        .retain(|edge| !(edge.source_event_id == source && edge.target_event_id == target));
+    if frontmatter.foreshadows.len() == before {
+        return Err(NexusApiError::NotFound(format!(
+            "foreshadow link {source} → {target}"
+        )));
     }
     Ok(())
 }
@@ -1579,5 +1648,378 @@ mod tests {
             Err(other) => panic!("expected outline_path_forbidden BadRequest, got {other:?}"),
             Ok(_) => panic!("expected error"),
         }
+    }
+
+    // ── Foreshadow link/unlink unit tests (FB-C1-005, V1.108 P0 T4) ────────
+
+    /// Build a frontmatter with two attached events and a foreshadow edge
+    /// between them, for reuse by link/unlink tests.
+    fn frontmatter_with_foreshadow() -> OutlineFrontmatter {
+        OutlineFrontmatter {
+            outline_revision: 1,
+            volumes: Vec::new(),
+            timeline_events: vec![
+                WorkOutlineTimelineEvent {
+                    event_id: "evt_a".to_string(),
+                    title: "Plant".to_string(),
+                    description: None,
+                    realizes_chapter_id: Some(1),
+                },
+                WorkOutlineTimelineEvent {
+                    event_id: "evt_b".to_string(),
+                    title: "Payoff".to_string(),
+                    description: None,
+                    realizes_chapter_id: Some(2),
+                },
+            ],
+            foreshadows: vec![WorkOutlineForeshadow {
+                source_event_id: "evt_a".to_string(),
+                target_event_id: "evt_b".to_string(),
+            }],
+            chapter_titles: HashMap::new(),
+            updated_at: "2024-01-01T00:00:00Z".to_string(),
+        }
+    }
+
+    #[test]
+    fn unlink_foreshadow_removes_existing_edge() {
+        let mut fm = frontmatter_with_foreshadow();
+        let req = TimelinePatchEventRequest {
+            work_id: "wk_test".to_string(),
+            base_revision: 1,
+            operation: "unlink_foreshadow".to_string(),
+            event_id: Some("evt_a".to_string()),
+            foreshadows_event_id: Some("evt_b".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(fm.foreshadows.len(), 1);
+        timeline_unlink_foreshadow(&req, &mut fm).expect("unlink should succeed");
+        assert!(fm.foreshadows.is_empty(), "edge must be removed");
+    }
+
+    #[test]
+    fn unlink_foreshadow_returns_not_found_for_missing_edge() {
+        let mut fm = frontmatter_with_foreshadow();
+        let req = TimelinePatchEventRequest {
+            work_id: "wk_test".to_string(),
+            base_revision: 1,
+            operation: "unlink_foreshadow".to_string(),
+            event_id: Some("evt_b".to_string()), // reversed direction — does not exist
+            foreshadows_event_id: Some("evt_a".to_string()),
+            ..Default::default()
+        };
+        let result = timeline_unlink_foreshadow(&req, &mut fm);
+        assert!(result.is_err(), "non-existent edge must error");
+        assert!(matches!(result, Err(NexusApiError::NotFound(_))));
+        // The existing edge must be untouched.
+        assert_eq!(fm.foreshadows.len(), 1);
+    }
+
+    #[test]
+    fn unlink_foreshadow_requires_event_id_and_target() {
+        let mut fm = frontmatter_with_foreshadow();
+
+        // Missing event_id.
+        let no_source = TimelinePatchEventRequest {
+            work_id: "wk_test".to_string(),
+            base_revision: 1,
+            operation: "unlink_foreshadow".to_string(),
+            foreshadows_event_id: Some("evt_b".to_string()),
+            ..Default::default()
+        };
+        assert!(timeline_unlink_foreshadow(&no_source, &mut fm).is_err());
+
+        // Missing foreshadows_event_id.
+        let no_target = TimelinePatchEventRequest {
+            work_id: "wk_test".to_string(),
+            base_revision: 1,
+            operation: "unlink_foreshadow".to_string(),
+            event_id: Some("evt_a".to_string()),
+            ..Default::default()
+        };
+        assert!(timeline_unlink_foreshadow(&no_target, &mut fm).is_err());
+    }
+
+    #[test]
+    fn apply_timeline_patch_dispatches_unlink_foreshadow() {
+        let mut fm = frontmatter_with_foreshadow();
+        let req = TimelinePatchEventRequest {
+            work_id: "wk_test".to_string(),
+            base_revision: 1,
+            operation: "unlink_foreshadow".to_string(),
+            event_id: Some("evt_a".to_string()),
+            foreshadows_event_id: Some("evt_b".to_string()),
+            ..Default::default()
+        };
+        // apply_timeline_patch routes to the correct handler by operation string.
+        apply_timeline_patch(&req, &mut fm, &[]).expect("dispatch should succeed");
+        assert!(fm.foreshadows.is_empty());
+    }
+
+    #[test]
+    fn link_then_unlink_roundtrip() {
+        // Start with no foreshadow edges, link one, then unlink it — verifying
+        // the round-trip leaves the outline clean.
+        let mut fm = OutlineFrontmatter {
+            outline_revision: 1,
+            volumes: Vec::new(),
+            timeline_events: frontmatter_with_foreshadow().timeline_events,
+            foreshadows: Vec::new(),
+            chapter_titles: HashMap::new(),
+            updated_at: "2024-01-01T00:00:00Z".to_string(),
+        };
+
+        let link_req = TimelinePatchEventRequest {
+            work_id: "wk_test".to_string(),
+            base_revision: 1,
+            operation: "link_foreshadow".to_string(),
+            event_id: Some("evt_a".to_string()),
+            foreshadows_event_id: Some("evt_b".to_string()),
+            ..Default::default()
+        };
+        apply_timeline_patch(&link_req, &mut fm, &[]).expect("link should succeed");
+        assert_eq!(fm.foreshadows.len(), 1);
+
+        let unlink_req = TimelinePatchEventRequest {
+            work_id: "wk_test".to_string(),
+            base_revision: 1,
+            operation: "unlink_foreshadow".to_string(),
+            event_id: Some("evt_a".to_string()),
+            foreshadows_event_id: Some("evt_b".to_string()),
+            ..Default::default()
+        };
+        apply_timeline_patch(&unlink_req, &mut fm, &[]).expect("unlink should succeed");
+        assert!(fm.foreshadows.is_empty());
+    }
+
+    // ── QC2-F002 / QC2-F003 — link self-ref guard + unlink existence checks ─
+
+    /// QC2-F002 — `link_foreshadow` with source == target must return
+    /// `BadRequest("self_foreshadow_forbidden")`.
+    #[test]
+    fn link_foreshadow_rejects_self_reference() {
+        let mut fm = frontmatter_with_foreshadow();
+        let req = TimelinePatchEventRequest {
+            work_id: "wk_test".to_string(),
+            base_revision: 1,
+            operation: "link_foreshadow".to_string(),
+            event_id: Some("evt_a".to_string()),
+            foreshadows_event_id: Some("evt_a".to_string()),
+            ..Default::default()
+        };
+        let result = timeline_link_foreshadow(&req, &mut fm);
+        match result {
+            Err(NexusApiError::BadRequest { code, .. }) => {
+                assert_eq!(
+                    code, "self_foreshadow_forbidden",
+                    "expected self_foreshadow_forbidden code"
+                );
+            }
+            Err(other) => panic!("expected BadRequest self_foreshadow_forbidden, got {other:?}"),
+            Ok(_) => panic!("self-referential foreshadow link must be rejected"),
+        }
+        // No edge should have been added.
+        assert_eq!(
+            fm.foreshadows.len(),
+            1,
+            "existing edges must be untouched after a rejected self-ref link"
+        );
+    }
+
+    /// QC2-F001 — `unlink_foreshadow` must return `NotFound` when either the
+    /// source or target event no longer exists in `timeline_events`, even if
+    /// the edge is still present in `foreshadows`. This can happen when the
+    /// outline was edited outside the daemon (manual YAML edit) and an event
+    /// was removed without cleaning up the foreshadow entry.
+    #[test]
+    fn unlink_foreshadow_returns_not_found_for_missing_event() {
+        // Start with a frontmatter that has the foreshadow edge but whose
+        // source event has been removed from timeline_events.
+        let mut fm = OutlineFrontmatter {
+            outline_revision: 1,
+            volumes: Vec::new(),
+            timeline_events: vec![WorkOutlineTimelineEvent {
+                event_id: "evt_b".to_string(),
+                title: "Payoff".to_string(),
+                description: None,
+                realizes_chapter_id: Some(2),
+            }],
+            // The edge evt_a → evt_b is still present, but evt_a no longer exists.
+            foreshadows: vec![WorkOutlineForeshadow {
+                source_event_id: "evt_a".to_string(),
+                target_event_id: "evt_b".to_string(),
+            }],
+            chapter_titles: HashMap::new(),
+            updated_at: "2024-01-01T00:00:00Z".to_string(),
+        };
+        let req = TimelinePatchEventRequest {
+            work_id: "wk_test".to_string(),
+            base_revision: 1,
+            operation: "unlink_foreshadow".to_string(),
+            event_id: Some("evt_a".to_string()),
+            foreshadows_event_id: Some("evt_b".to_string()),
+            ..Default::default()
+        };
+        let result = timeline_unlink_foreshadow(&req, &mut fm);
+        assert!(
+            result.is_err(),
+            "unlink with missing source event must error"
+        );
+        assert!(
+            matches!(result, Err(NexusApiError::NotFound(_))),
+            "expected NotFound for missing source event"
+        );
+        // Edge must be untouched (we didn't remove it because we failed early).
+        assert_eq!(fm.foreshadows.len(), 1);
+
+        // Same for missing target event.
+        let mut fm2 = OutlineFrontmatter {
+            outline_revision: 1,
+            volumes: Vec::new(),
+            timeline_events: vec![WorkOutlineTimelineEvent {
+                event_id: "evt_a".to_string(),
+                title: "Plant".to_string(),
+                description: None,
+                realizes_chapter_id: Some(1),
+            }],
+            foreshadows: vec![WorkOutlineForeshadow {
+                source_event_id: "evt_a".to_string(),
+                target_event_id: "evt_b".to_string(),
+            }],
+            chapter_titles: HashMap::new(),
+            updated_at: "2024-01-01T00:00:00Z".to_string(),
+        };
+        let result2 = timeline_unlink_foreshadow(&req, &mut fm2);
+        assert!(
+            matches!(result2, Err(NexusApiError::NotFound(_))),
+            "expected NotFound for missing target event"
+        );
+    }
+
+    /// QC2-F003 — `patch_timeline_event` handler must return `outline_conflict`
+    /// (409) when `base_revision` is stale, even for the `unlink_foreshadow`
+    /// op. This verifies the revision gate fires before the operation is
+    /// dispatched.
+    #[tokio::test]
+    async fn patch_timeline_event_stale_revision_unlink_returns_conflict() {
+        use crate::api::handlers::works::{CreateWorkRequest, PatchWorkRequest};
+
+        let (tmp, nexus_home, db_path, workspace_dir) =
+            crate::test_utils::create_initialized_test_workspace().await;
+        let state = WorkspaceState::new_for_testing(
+            nexus_home,
+            db_path,
+            Some(workspace_dir.to_string_lossy().to_string()),
+        )
+        .await;
+        crate::test_utils::seed_test_creator_and_world(state.pool()).await;
+
+        // Create a work so the outline file path is resolvable.
+        let work_id = {
+            let req = CreateWorkRequest {
+                title: "Stale Rev Test".to_string(),
+                long_term_goal: "Test stale revision guard".to_string(),
+                initial_idea: "A test".to_string(),
+                world_id: Some("wld_test_world".to_string()),
+                story_ref: None,
+                primary_preset_id: None,
+                lineage_from_work_id: None,
+                client_request_id: None,
+                set_pool_active: None,
+                work_profile: None,
+            };
+            let (_status, axum::Json(resp)) = crate::api::handlers::works::create_work(
+                axum::extract::State(state.clone()),
+                axum::Json(req),
+            )
+            .await
+            .unwrap();
+            resp.work_id
+        };
+
+        // Set story_ref for deterministic outline path.
+        {
+            let req = PatchWorkRequest {
+                title: None,
+                long_term_goal: None,
+                creative_brief: None,
+                intake_status: None,
+                status: None,
+                world_id: None,
+                story_ref: Some(Some("stale-rev-test".to_string())),
+                primary_preset_id: None,
+                current_stage: None,
+                stage_status: None,
+                force: None,
+                auto_review_master_on_timeout: None,
+                auto_chain_interrupted: None,
+                work_profile: None,
+            };
+            let _ = crate::api::handlers::works::patch_work(
+                axum::extract::State(state.clone()),
+                axum::extract::Path(work_id.clone()),
+                axum::Json(req),
+            )
+            .await
+            .unwrap();
+        }
+
+        // Write an outline at revision 5 with events + a foreshadow edge.
+        let workspace_root = &workspace_dir;
+        let rel_path = "Works/stale-rev-test/Outlines/outline.md";
+        let outline_path = workspace_root.join(rel_path);
+        tokio::fs::create_dir_all(outline_path.parent().unwrap())
+            .await
+            .expect("create outline dirs");
+        tokio::fs::write(
+            &outline_path,
+            "---\n\
+             outline_revision: 5\n\
+             volumes: []\n\
+             timeline_events:\n\
+             \x20 - event_id: evt_a\n\
+             \x20   title: Plant\n\
+             \x20   realizes_chapter_id: 1\n\
+             \x20 - event_id: evt_b\n\
+             \x20   title: Payoff\n\
+             \x20   realizes_chapter_id: 2\n\
+             foreshadows:\n\
+             \x20 - source_event_id: evt_a\n\
+             \x20   target_event_id: evt_b\n\
+             chapter_titles: {}\n\
+             updated_at: \"2024-01-01T00:00:00Z\"\n\
+             ---\nbody\n",
+        )
+        .await
+        .expect("write outline");
+
+        // Send unlink_foreshadow with a stale base_revision (3 vs current 5).
+        let stale_req = TimelinePatchEventRequest {
+            work_id: work_id.clone(),
+            base_revision: 3, // stale — outline is at revision 5
+            operation: "unlink_foreshadow".to_string(),
+            event_id: Some("evt_a".to_string()),
+            foreshadows_event_id: Some("evt_b".to_string()),
+            ..Default::default()
+        };
+        let result = patch_timeline_event(
+            axum::extract::State(state.clone()),
+            axum::extract::Path(work_id.clone()),
+            axum::Json(stale_req),
+        )
+        .await;
+
+        match result {
+            Err(NexusApiError::OutlineConflict { .. }) => {
+                // Expected — the handler must reject the stale revision before
+                // dispatching the unlink operation.
+            }
+            Err(other) => {
+                panic!("expected OutlineConflict for stale base_revision, got {other:?}")
+            }
+            Ok(_) => panic!("stale base_revision must be rejected with outline_conflict"),
+        }
+
+        drop(tmp);
     }
 }

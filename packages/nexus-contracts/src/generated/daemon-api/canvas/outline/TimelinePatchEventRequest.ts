@@ -2,16 +2,16 @@ import type { SchemaVersion } from '../../../common/CommonTypes';
 /**
  * Nexus TimelinePatchEventRequest
  *
- * Request body for POST /v1/daemon/works/{work_id}/timeline/patch (V1.72). Mutates the Work timeline: add, remove, attach to chapter, or create foreshadow links.
+ * Request body for POST /v1/daemon/works/{work_id}/timeline/patch (V1.72). Mutates the Work timeline: add, remove, attach to chapter, or create/remove foreshadow links.
  *
  * @schema_version 1
  * @source timeline-patch-event-request.schema.json
  */
 
 /** Inline enum type */
-export type TimelinePatchEventRequestOperation = 'add_event' | 'remove_event' | 'attach_event_to_chapter' | 'link_foreshadow';
+export type TimelinePatchEventRequestOperation = 'add_event' | 'remove_event' | 'attach_event_to_chapter' | 'link_foreshadow' | 'unlink_foreshadow';
 
-/** Request body for POST /v1/daemon/works/{work_id}/timeline/patch (V1.72). Mutates the Work timeline: add, remove, attach to chapter, or create foreshadow links. */
+/** Request body for POST /v1/daemon/works/{work_id}/timeline/patch (V1.72). Mutates the Work timeline: add, remove, attach to chapter, or create/remove foreshadow links. */
 export interface TimelinePatchEventRequest {
   work_id: string;
   base_revision: number;

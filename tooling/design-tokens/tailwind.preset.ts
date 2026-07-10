@@ -185,6 +185,15 @@ const preset: Partial<Config> = {
           'worldkb-relationship-grounded-badge': cv('canvas-worldkb-relationship-grounded-badge'),
           'worldkb-relationship-asserted-badge': cv('canvas-worldkb-relationship-asserted-badge'),
           'worldkb-relationship-inspector-fill': cv('canvas-worldkb-relationship-inspector-fill'),
+          // Outline canvas — DESIGN.md §Canvas Outline Tokens (V1.72; consumed V1.108).
+          'outline-volume-fill': cv('canvas-outline-volume-fill'),
+          'outline-chapter-card-status-pending': cv('canvas-outline-chapter-card-status-pending'),
+          'outline-chapter-card-status-drafted': cv('canvas-outline-chapter-card-status-drafted'),
+          'outline-chapter-card-status-completed': cv('canvas-outline-chapter-card-status-completed'),
+          'outline-timeline-event-pin': cv('canvas-outline-timeline-event-pin'),
+          'outline-foreshadow-edge': cv('canvas-outline-foreshadow-edge'),
+          'outline-timeline-marker': cv('canvas-outline-timeline-marker'),
+          'outline-conflict-marker': cv('canvas-outline-conflict-marker'),
         },
       },
       fontFamily: {

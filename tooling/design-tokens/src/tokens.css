@@ -134,6 +134,16 @@
   --color-canvas-worldkb-relationship-asserted-badge: rgba(124, 58, 237, 0.12);
   --color-canvas-worldkb-relationship-inspector-fill: #ffffff;
 
+  /* Outline canvas — DESIGN.md §Canvas Outline Tokens (V1.72; consumed V1.108). */
+  --color-canvas-outline-volume-fill: #F5F5F4;
+  --color-canvas-outline-chapter-card-status-pending: #94A3B8;
+  --color-canvas-outline-chapter-card-status-drafted: #3B82F6;
+  --color-canvas-outline-chapter-card-status-completed: #10B981;
+  --color-canvas-outline-timeline-event-pin: #F59E0B;
+  --color-canvas-outline-foreshadow-edge: #A78BFA;
+  --color-canvas-outline-timeline-marker: #0EA5E9;
+  --color-canvas-outline-conflict-marker: #EF4444;
+
   /* V1.79 P1 — SOUL personality visualization tokens (DESIGN.md). */
   --color-soul-viz-keyword-cluster-node-fill: rgba(124, 58, 237, 0.18);
   --color-soul-viz-keyword-cluster-node-stroke: #7c3aed;
@@ -350,6 +360,16 @@
   --color-canvas-worldkb-relationship-grounded-badge: color-mix(in srgb, var(--color-blue-700) 14%, transparent);
   --color-canvas-worldkb-relationship-asserted-badge: rgba(183, 148, 255, 0.14);
   --color-canvas-worldkb-relationship-inspector-fill: #1a1a1a;
+
+  /* Outline canvas — DESIGN.dark.md §Canvas Outline Tokens (V1.72; consumed V1.108). */
+  --color-canvas-outline-volume-fill: #1F1F1E;
+  --color-canvas-outline-chapter-card-status-pending: #64748B;
+  --color-canvas-outline-chapter-card-status-drafted: #60A5FA;
+  --color-canvas-outline-chapter-card-status-completed: #34D399;
+  --color-canvas-outline-timeline-event-pin: #FBBF24;
+  --color-canvas-outline-foreshadow-edge: #C4B5FD;
+  --color-canvas-outline-timeline-marker: #38BDF8;
+  --color-canvas-outline-conflict-marker: #F87171;
 
   /* V1.79 P1 — SOUL personality visualization tokens (DESIGN.dark.md). */
   --color-soul-viz-keyword-cluster-node-fill: rgba(183, 148, 255, 0.2);
