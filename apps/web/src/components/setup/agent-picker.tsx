@@ -214,6 +214,7 @@ function AgentCard({
         'flex w-full flex-col rounded-control border border-gray-alpha-400 bg-background-100',
         compact ? 'p-2' : 'p-3',
         selectable && selected && 'border-blue-700 bg-blue-700/8',
+        !selectable && 'bg-background-200',
       )}
     >
       {selectable ? (
@@ -236,9 +237,6 @@ function AgentCard({
       )}
 
       <div className="mt-3 flex flex-wrap items-center gap-3">
-        {!agent.installed ? (
-          <span className="text-copy-13 text-gray-700">Not installed</span>
-        ) : null}
         {agent.installUrl ? (
           <OutboundLink href={agent.installUrl} label="Install" />
         ) : null}
@@ -278,7 +276,16 @@ function AgentCardIdentity({
             >
               Installed
             </Badge>
-          ) : null}
+          ) : (
+            <Badge
+              variant="neutral"
+              tone="soft"
+              data-testid={`agent-card-not-installed-badge-${agent.id}`}
+              className="shrink-0"
+            >
+              Not installed
+            </Badge>
+          )}
         </div>
         {agent.version ? (
           <span className="text-copy-13 text-gray-700">Version {agent.version}</span>
