@@ -18,6 +18,9 @@ import {
   TopStepIndicator,
   type WizardStep,
 } from '@web-setup/top-step-indicator';
+import {
+  WorkspacePathField,
+} from '@web-setup/workspace-path-field';
 
 const STEP_TITLES: Record<WizardStep, string> = {
   agent: 'Choose an agent',
@@ -165,20 +168,14 @@ function AgentStepBody({
 
 function WorkspaceBody() {
   return (
-    <div
-      className="flex min-h-setup-wizard-surface-input-row-min-height items-center gap-setup-wizard-surface-input-row-gap rounded-control border border-setup-wizard-surface-input-row-border bg-setup-wizard-surface-input-row-bg px-setup-wizard-surface-input-row-padding-x py-setup-wizard-surface-input-row-padding-y"
+    <WorkspacePathField
+      id="studio-wizard-workspace-path"
+      path="~/Documents/nexus/default"
+      layout="wizard-stack"
+      desktopAvailable={false}
+      browserOnlyHelper="Workspace path changes are available on the desktop app only."
       data-testid="workspace-location-row"
-    >
-      <span className="text-label-12 text-setup-wizard-surface-input-row-label-color">
-        Workspace location
-      </span>
-      <span className="truncate text-copy-14 text-setup-wizard-surface-input-row-path-color">
-        ~/Documents/nexus/default
-      </span>
-      <Button variant="secondary" size="small" type="button" className="ml-auto shrink-0">
-        Browse…
-      </Button>
-    </div>
+    />
   );
 }
 

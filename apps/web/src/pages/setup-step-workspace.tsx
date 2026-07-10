@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { ChevronLeft, FolderOpen, Loader2 } from 'lucide-react';
+import { ChevronLeft, Loader2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
+import { WorkspacePathField } from '@/components/setup/workspace-path-field';
 import { useDesktopCapabilities } from '@/lib/client-context';
 import { errorMessage } from '@/lib/error-message';
 import { useToast } from '@/lib/use-toast';
@@ -149,28 +150,16 @@ export function SetupStepWorkspace({
             </p>
           </div>
 
-          <div
-            className="flex min-h-setup-wizard-surface-input-row-min-height items-center gap-setup-wizard-surface-input-row-gap rounded-control border border-setup-wizard-surface-input-row-border bg-setup-wizard-surface-input-row-bg px-setup-wizard-surface-input-row-padding-x py-setup-wizard-surface-input-row-padding-y"
+          <WorkspacePathField
+            id="wizard-workspace-path"
+            path={state.workspaceRoot}
+            loading={loading}
+            changeDisabled={loading}
+            onChangeClick={browse}
+            layout="wizard-stack"
+            desktopAvailable={Boolean(desktop)}
             data-testid="workspace-location-row"
-          >
-          <FolderOpen className="h-5 w-5 text-setup-wizard-surface-input-row-icon-color" aria-hidden />
-          <div className="flex min-w-0 flex-1 flex-col">
-            <span className="text-label-12 text-setup-wizard-surface-input-row-label-color">Workspace location</span>
-            <span className="text-copy-14 text-setup-wizard-surface-input-row-path-color truncate">
-              {loading ? 'Resolving…' : state.workspaceRoot}
-            </span>
-          </div>
-          {desktop && (
-            <Button
-              variant="secondary"
-              onClick={browse}
-              disabled={loading}
-              className="flex-shrink-0"
-            >
-              Browse…
-            </Button>
-          )}
-        </div>
+          />
       </div>
     </div>
 
