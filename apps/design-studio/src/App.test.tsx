@@ -1001,6 +1001,52 @@ describe('Components page — Badge soft/solid matrix', () => {
   });
 });
 
+describe('Components page — Domain badge matrices', () => {
+  beforeEach(() => {
+    mockMatchMedia(false);
+    renderStudio('/components');
+  });
+
+  it('renders the Domain Badges section heading and fixture root', () => {
+    expect(
+      screen.getByRole('heading', { name: 'Domain Badges' }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId('domain-badge-fixtures')).toBeInTheDocument();
+  });
+
+  it('renders Status and Chapter matrices using Badge variants', () => {
+    const statusVariants = ['running', 'queued', 'warning', 'error', 'unknown'] as const;
+    for (const value of statusVariants) {
+      expect(
+        screen.getByTestId(`domain-badge-status-${value}`),
+      ).toBeInTheDocument();
+    }
+
+    const chapterValues = ['not_started', 'outlined', 'draft', 'finalized', 'published'] as const;
+    for (const value of chapterValues) {
+      expect(
+        screen.getByTestId(`domain-badge-chapter-${value}`),
+      ).toBeInTheDocument();
+    }
+  });
+
+  it('renders Finding and TaskKind matrices with custom color classes', () => {
+    const findings = ['open', 'triaged', 'in_review', 'resolved', 'wont_fix', 'duplicate'] as const;
+    for (const value of findings) {
+      expect(
+        screen.getByTestId(`domain-badge-finding-${value}`),
+      ).toBeInTheDocument();
+    }
+
+    const kinds = ['brainstorm', 'outline', 'chapter', 'research', 'unknown'] as const;
+    for (const value of kinds) {
+      expect(
+        screen.getByTestId(`domain-badge-task-kind-${value}`),
+      ).toBeInTheDocument();
+    }
+  });
+});
+
 /* ---- components page — Select fixtures (V1.101 P2 Task 2) --------------- */
 
 describe('Components page — Select fixtures', () => {
