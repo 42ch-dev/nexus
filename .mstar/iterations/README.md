@@ -114,6 +114,7 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | [v1.101-delivery-compass.md](v1.101-delivery-compass.md) | V1.101 | **completed** (2026-07-09) — Desktop setup polish + AgentPicker (Must) + Select stretch shipped. Studio-first; Settings shell remains DF-70. Integration `iteration/v1.101` → `main`. |
 | [v1.102-delivery-compass.md](v1.102-delivery-compass.md) | V1.102 | **completed** (2026-07-09) — Badge soft/solid + thin Settings host + Surfaces polish Stretch. Integration `iteration/v1.102` → PR `main`. |
 | [v1.103-delivery-compass.md](v1.103-delivery-compass.md) | V1.103 | **completed** (2026-07-09) — Settings shell deepening Must (P0–P3); Stretch Workspace deferred → V1.104+. Integration `iteration/v1.103` → `main`. |
+| [v1.104-delivery-compass.md](v1.104-delivery-compass.md) | V1.104 | **locked** — Settings Workspace path (W2 Must; V1.103 Stretch carry-forward); post-setup folder change + honest restart copy; residual R1 opportunistic. Integration `iteration/v1.104` → `main`. |
 | [v1.105-delivery-compass.md](v1.105-delivery-compass.md) | V1.105 | **completed** (2026-07-10) — First-launch wizard reshape: app-level Daemon gate + Agent→Workspace→Done + portrait shell. Integration `iteration/v1.105` → `main`. |
 
 ### Active iteration workspaces
@@ -123,6 +124,7 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | [v1.101/](v1.101/README.md) | V1.101 | Iteration contracts: AgentPicker + scan→select, wizard chrome polish, Stretch Select; studio-first process guide |
 | [v1.102/](v1.102/README.md) | V1.102 | Iteration contracts: Badge soft/solid, thin Settings host, Surfaces polish Stretch |
 | [v1.103/](v1.103/README.md) | V1.103 | Iteration contracts: Settings shell IA, Agent/Connection/Setup sections, Stretch Workspace; studio-first guide |
+| [v1.104/](v1.104/README.md) | V1.104 | Settings Workspace W2 Must + shell nav/route delta; studio-first guide |
 | [v1.105/](v1.105/README.md) | V1.105 | Iteration contracts: Daemon fullscreen gate, wizard IA reorder, portrait shell; studio-first guide |
 
 ### Legacy `v1.*` iteration artifacts

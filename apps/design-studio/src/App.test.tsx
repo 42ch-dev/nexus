@@ -437,7 +437,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     expect(link).toHaveAttribute('aria-current', 'page');
   });
 
-  it('renders section nav with Agent, Connection, Setup (no Workspace)', () => {
+  it('renders section nav with Agent, Connection, Setup, Workspace', () => {
     const hostRoot = screen.getByTestId('settings-host-fixtures');
     const sectionNav = within(hostRoot).getByTestId('settings-section-nav');
     expect(
@@ -450,9 +450,8 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
       within(sectionNav).getByTestId('settings-section-nav-setup'),
     ).toHaveTextContent('Setup');
     expect(
-      within(sectionNav).queryByTestId('settings-section-nav-workspace'),
-    ).not.toBeInTheDocument();
-    expect(within(sectionNav).queryByText('Workspace')).not.toBeInTheDocument();
+      within(sectionNav).getByTestId('settings-section-nav-workspace'),
+    ).toHaveTextContent('Workspace');
   });
 
   it('defaults to Agent section with preselected Agent body and locked shell helper', () => {
@@ -518,7 +517,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).toHaveTextContent('Re-run Setup');
   });
 
-  it('renders static empty frames for all three Must sections', () => {
+  it('renders static empty frames for all four Must sections', () => {
     const framesRoot = screen.getByTestId(
       'settings-host-fixture-section-frames',
     );
@@ -530,6 +529,9 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).toBeInTheDocument();
     expect(
       within(framesRoot).getByTestId('settings-section-frame-setup'),
+    ).toBeInTheDocument();
+    expect(
+      within(framesRoot).getByTestId('settings-section-frame-workspace'),
     ).toBeInTheDocument();
   });
 
@@ -674,6 +676,77 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     expect(cta).toHaveAttribute(
       'title',
       'Open the Nexus desktop app to re-run setup.',
+    );
+  });
+
+  it('switches to Workspace section chrome when section nav is clicked', () => {
+    const hostRoot = screen.getByTestId('settings-host-fixtures');
+    const outlet = within(hostRoot).getByTestId('settings-shell-outlet');
+    const workspaceTab = within(hostRoot).getByTestId(
+      'settings-section-nav-workspace',
+    );
+    fireEvent.click(workspaceTab);
+    expect(workspaceTab).toHaveAttribute('aria-current', 'page');
+    expect(
+      within(outlet).getByTestId('settings-workspace-section'),
+    ).toBeInTheDocument();
+    expect(
+      within(outlet).queryByTestId('settings-section-frame-workspace'),
+    ).not.toBeInTheDocument();
+    expect(
+      within(outlet).queryByTestId('settings-agent-section'),
+    ).not.toBeInTheDocument();
+  });
+
+  it('renders Workspace section fixture with locked helper, path, and Change Folder CTA', () => {
+    const workspaceRoot = screen.getByTestId(
+      'settings-host-fixture-workspace-section',
+    );
+    const section = within(workspaceRoot).getByTestId('settings-workspace-section');
+    expect(section).toHaveAttribute('data-desktop', 'true');
+    expect(
+      within(workspaceRoot).getByText(
+        /View or change where Nexus stores your creative files on this machine/i,
+      ),
+    ).toBeInTheDocument();
+    expect(
+      within(workspaceRoot).getByTestId('settings-workspace-path'),
+    ).toHaveValue('/Users/creator/Documents/Nexus');
+    const cta = within(workspaceRoot).getByTestId('settings-change-folder');
+    expect(cta).toHaveTextContent('Change Folder…');
+    expect(cta).not.toBeDisabled();
+  });
+
+  it('renders Workspace post-persist fixture with honesty copy', () => {
+    const savedRoot = screen.getByTestId('settings-host-fixture-workspace-saved');
+    const section = within(savedRoot).getByTestId('settings-workspace-section');
+    expect(section).toHaveAttribute('data-desktop', 'true');
+    expect(
+      within(savedRoot).getByTestId('settings-workspace-saved-honesty'),
+    ).toHaveTextContent(
+      'Workspace path saved. Restart or reload the app so the running daemon uses the new location.',
+    );
+    expect(
+      within(savedRoot).getByText('Quit and reopen Nexus'),
+    ).toBeInTheDocument();
+  });
+
+  it('renders Workspace browser-only fixture with disabled CTA and honest helper', () => {
+    const browserRoot = screen.getByTestId(
+      'settings-host-fixture-workspace-browser',
+    );
+    const section = within(browserRoot).getByTestId('settings-workspace-section');
+    expect(section).toHaveAttribute('data-desktop', 'false');
+    expect(
+      within(browserRoot).getByText(
+        /Workspace path changes are available on the desktop app only/i,
+      ),
+    ).toBeInTheDocument();
+    const cta = within(browserRoot).getByTestId('settings-change-folder');
+    expect(cta).toBeDisabled();
+    expect(cta).toHaveAttribute(
+      'title',
+      'Open the Nexus desktop app to change your workspace folder.',
     );
   });
 

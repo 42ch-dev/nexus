@@ -11,6 +11,7 @@ import { SettingsAgentSection } from '@/pages/settings/settings-agent-section';
 import { SettingsConnectionSection } from '@/pages/settings/settings-connection-section';
 import { SettingsSetupSection } from '@/pages/settings/settings-setup-section';
 import { SettingsShellLayout } from '@/pages/settings/settings-shell-layout';
+import { SettingsWorkspaceSection } from '@/pages/settings/settings-workspace-section';
 import { RootLayout } from '@/components/layout/root-layout';
 import { ThemeProvider } from '@/components/theme-provider';
 import { renderInApp } from '@/test/test-providers';
@@ -79,13 +80,14 @@ function healthHandler() {
   );
 }
 
-/** Nested settings tree matching App.tsx (P0 — no workspace). */
+/** Nested settings tree matching App.tsx (P0 — includes Workspace). */
 const settingsRouteTree = (
   <Route path="settings" element={<SettingsShellLayout />}>
     <Route index element={<Navigate to="agent" replace />} />
     <Route path="agent" element={<SettingsAgentSection />} />
     <Route path="connection" element={<SettingsConnectionSection />} />
     <Route path="setup" element={<SettingsSetupSection />} />
+    <Route path="workspace" element={<SettingsWorkspaceSection />} />
   </Route>
 );
 
@@ -145,7 +147,7 @@ describe('Settings shell routes', () => {
     );
   });
 
-  it('renders section nav with Agent, Connection, Setup (no Workspace)', () => {
+  it('renders section nav with Agent, Connection, Setup, Workspace', () => {
     useHandlers(scanHandler(), creatorsHandler());
 
     renderInApp(
@@ -169,9 +171,28 @@ describe('Settings shell routes', () => {
       'Setup',
     );
     expect(
-      within(nav).queryByTestId('settings-section-nav-workspace'),
-    ).not.toBeInTheDocument();
-    expect(within(nav).queryByText('Workspace')).not.toBeInTheDocument();
+      within(nav).getByTestId('settings-section-nav-workspace'),
+    ).toHaveTextContent('Workspace');
+  });
+
+  it('mounts Workspace section outlet and marks nav active', async () => {
+    renderInApp(
+      <Routes>
+        {settingsRouteTree}
+      </Routes>,
+      {
+        client: makeClient(),
+        initialRouterEntries: ['/settings/workspace'],
+      },
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId('settings-workspace-section')).toBeInTheDocument(),
+    );
+    expect(screen.getByTestId('settings-section-nav-workspace')).toHaveAttribute(
+      'aria-current',
+      'page',
+    );
   });
 
   it('switches outlet when section nav is clicked', async () => {

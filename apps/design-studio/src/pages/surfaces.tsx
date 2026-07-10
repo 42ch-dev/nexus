@@ -423,12 +423,14 @@ export function SurfacesShellPage() {
           (lucide) above profiles, plus section nav (
           <strong className="font-medium text-gray-1000">Agent</strong> /{' '}
           <strong className="font-medium text-gray-1000">Connection</strong> /{' '}
-          <strong className="font-medium text-gray-1000">Setup</strong>). Default
+          <strong className="font-medium text-gray-1000">Setup</strong> /{' '}
+          <strong className="font-medium text-gray-1000">Workspace</strong>). Default
           Agent outlet shows the preselected Agent section body (G1 visual);
           Connection outlet shows Connection section chrome (locked helper +
           form placeholder); Setup outlet shows Re-run Setup section chrome
-          (helper + confirm dialog). Workspace nav is absent until P4 Stretch.
-          No App IPC, no daemon, no product{' '}
+          (helper + confirm dialog); Workspace outlet shows Workspace section
+          chrome (path display + Change Folder action + post-persist honesty
+          copy). No App IPC, no daemon, no product{' '}
           <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
             pages/
           </code>{' '}
