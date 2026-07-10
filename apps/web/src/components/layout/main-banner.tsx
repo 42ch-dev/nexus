@@ -95,7 +95,7 @@ export function MainBanner() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex flex-col">
           <span className="text-copy-14 font-semibold text-gray-1000">{title}</span>
-          {description && <span className="text-copy-13 text-gray-900">{description}</span>}
+          {description && <span className="text-copy-13 text-gray-700">{description}</span>}
         </div>
         <Button
           type="button"
