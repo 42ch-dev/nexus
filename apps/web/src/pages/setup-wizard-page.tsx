@@ -13,9 +13,6 @@ import { SetupStepAgent } from '@/pages/setup-step-agent';
 import { SetupStepWorkspace } from '@/pages/setup-step-workspace';
 import { SetupStepDone } from '@/pages/setup-step-done';
 import type { AgentScanEntry } from '@42ch/nexus-contracts';
-import { SetupStepAgent } from '@/pages/setup-step-agent';
-import { SetupStepWorkspace } from '@/pages/setup-step-workspace';
-import { SetupStepDone } from '@/pages/setup-step-done';
 
 /** V1.105 P1: Agent → Workspace → Done (Welcome/Daemon retired). */
 export interface WizardState {
