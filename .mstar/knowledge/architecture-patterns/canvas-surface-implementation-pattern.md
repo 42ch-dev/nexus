@@ -1,11 +1,12 @@
 ---
 module: apps/web + crates/nexus-daemon-runtime + schemas
 date: 2026-06-30
+last_updated: 2026-07-11
 problem_type: architecture-pattern
 category: architecture-patterns
 severity: medium
-plan_id: V1.77-P-last (compound of V1.67–V1.76 canvas program)
-tags: [canvas, write-boundary, occ, conflict-modal, react-flow, design-tokens, local-api]
+plan_id: V1.77-P-last (compound of V1.67–V1.76 canvas program; updated V1.108)
+tags: [canvas, write-boundary, occ, conflict-modal, react-flow, design-tokens, local-api, projection-completeness, pagination]
 applies_when: implementing a new graph-editing surface on the Nexus canvas (or any structured-authoring surface with concurrent daemon + human edits)
 ---
 
@@ -27,6 +28,7 @@ A new canvas surface implements **six coupled layers**. Build them in this order
 4. **Non-spatial alternate view** (accessibility). Every spatial graph surface also ships a sortable table/list variant (virtualized for scale) so keyboard + screen-reader users have a non-spatial path. This is a product requirement, not a checkbox.
 5. **DESIGN.md token contract**. Each surface adds canvas tokens to `apps/web/DESIGN.md` + `DESIGN.dark.md` (YAML frontmatter SSOT; same token names, light/dark values split). **Token names are preserved verbatim across versions** (V1.69 invariant) — never rename a shipped token; only add new ones.
 6. **Draft → Normative promotion discipline**. A new surface starts as a Draft overlay spec; promote to Shipped β at P-last only after QC tri-review + QA Pass. The `canvas-strategy-surface.md` Master holds the cross-surface contract; per-stage details live in Draft overlays until folded in.
+7. **Projection data-completeness invariant** (V1.108). When a canvas projection derives graph **nodes** from a paginated query (e.g., `useChapters()` with `DEFAULT_PAGE_SIZE=20`) but derives **edges** from the full domain model (e.g., `outline.volumes[].chapter_ids`), the graph can emit **edges to non-existent nodes** — producing a broken React Flow graph. Fix: either (a) ensure all pages are loaded before projecting (auto-fetch-all pattern), or (b) filter edges to a `Set` of known node IDs after deriving them. Apply defense-in-depth: do both. Add a test with >page-size items or a domain model containing IDs absent from the query result asserting zero dangling edges.
 
 ## Why This Matters
 
@@ -51,3 +53,4 @@ The V1.65 whole-document TipTap outline editor (`chapter-page.tsx` PUT save) cou
 - **World KB β** (V1.73): `world_kb.patch_entity` + `promote_candidate` + reuse of `kb_key_blocks.revision` / `kb_extract_jobs.version` + `WorldKbConflictError`.
 - **World KB Relationships β/γ** (V1.74/V1.76): `world_kb.patch_relationship` + `kb_relationships.revision` + `needs_review` extraction gate + confidence-weighting.
 - **Findings-remediation (V1.77)**: the **counter-example** — last-writer-wins, no OCC, no conflict modal (single-author triage threat model; see `findings-lifecycle.md`).
+- **Outline spatial (V1.108)**: third spatial surface to follow this pattern. Confirmed layer 7 (projection data-completeness): paginated `useChapters()` + edges from full `outline.volumes[].chapter_ids` initially produced dangling edges → fix: auto-fetch-all + edge `Set` filter. Also confirmed additive wire escape hatch pattern (`unlink_foreshadow` op added to `TimelinePatchEventRequest` when daemon lacked unlink; schema→TS→Rust same commit; conflict-modal `changedFieldsOf` consumer must be updated for every new enum value).
