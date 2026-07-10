@@ -81,8 +81,8 @@ Cover these surfaces with token tables and copy examples:
 
 ### Acceptance
 
-- [ ] All four section groups above exist in DESIGN.md with component tables and/or prose as specified (§5.3 writing — normative prose landed in root `DESIGN.md` + dark frontmatter parity).
-- [ ] Dark theme parity where semantic colors differ (`DESIGN.dark.md`).
+- [x] All four section groups above exist in DESIGN.md with component tables and/or prose as specified (§5.3 writing — normative prose landed in root `DESIGN.md` + dark frontmatter parity).
+- [x] Dark theme parity where semantic colors differ (`DESIGN.dark.md`).
 
 ## SP-V1106-003 — Studio Surfaces fixtures
 
