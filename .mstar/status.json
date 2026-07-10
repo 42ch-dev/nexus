@@ -6,13 +6,13 @@
       "id": "2026-07-10-v1.108-canvas-outline-spatial",
       "title": "P0 — Canvas Outline spatial parity",
       "file": "plans/2026-07-10-v1.108-canvas-outline-spatial.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@frontend-dev",
         "@architect"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.108",
         "canvas",
@@ -20,8 +20,8 @@
         "must"
       ],
       "created_at": "2026-07-10",
-      "updated_at": "2026-07-10",
-      "notes": "Draft — awaiting §5 Review & Edit chain",
+      "updated_at": "2026-07-11",
+      "notes": "Done — SDD T1-T4 + QC tri Approve with residuals + QA Pass; merged to iteration/v1.108",
       "metadata": {
         "iteration_refs": [
           "V1.108"
@@ -1151,6 +1151,63 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-10-v1.106-ui-continuity.md",
         "note": "QC1 F-001. it.each matrix at badge.test.tsx:55 covers the contract."
+      }
+    ],
+    "2026-07-10-v1.108-canvas-outline-spatial": [
+      {
+        "id": "R-V1108P0QC3-W001",
+        "title": "Selection-sync useEffect fires on every node interaction (not just selection changes) — latent perf trap",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.108",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-10-v1.108-canvas-outline-spatial/review/qc3.md",
+        "note": "QC3 W-001. Acceptable at author-scale; derive from onNodesChange in future."
+      },
+      {
+        "id": "R-V1108P0QC3-S002",
+        "title": "Graph<->list toggle unmounts CanvasShell, losing RF viewport state",
+        "severity": "suggestion",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.108",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-10-v1.108-canvas-outline-spatial/review/qc3.md",
+        "note": "QC3 S-002. Acceptable for P0 (deterministic layout); CSS visibility toggle when drag/auto-layout lands."
+      },
+      {
+        "id": "R-V1108P0QC3-S003",
+        "title": "CanvasShell fully mocked in orchestrator tests — no real RF integration coverage",
+        "severity": "suggestion",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.108",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-10-v1.108-canvas-outline-spatial/review/qc3.md",
+        "note": "QC3 S-003. jsdom lacks ResizeObserver; E2E test needed in follow-up."
+      },
+      {
+        "id": "R-V1108P0QC1-M001",
+        "title": "Alt view is read-only (no sort controls) — spec wording about sortable lists debatable",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.108",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-10-v1.108-canvas-outline-spatial/review/qc1.md",
+        "note": "QC1 M-001. Editing available in inspectors; sort controls deferred."
+      },
+      {
+        "id": "R-V1108P0QC1-S001",
+        "title": "Consider extracting useOutlineCanvasGraph() hook for Scene/Beat roadmap",
+        "severity": "suggestion",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.108",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-10-v1.108-canvas-outline-spatial/review/qc1.md",
+        "note": "QC1 S-001. Follow-up refactor; not blocking."
       }
     ],
     "2026-07-10-v1.107-studio-ui-tune": [
