@@ -12,6 +12,23 @@ import { afterAll, afterEach, beforeAll } from 'vitest';
 import { server } from './msw-server';
 
 /**
+ * `@xyflow/react` (mounted via `CanvasShell`) instantiates a `ResizeObserver`
+ * in its measurement effect; jsdom does not provide one. Install a no-op polyfill
+ * once so any test that indirectly mounts the canvas (e.g. `outline-page.test.tsx`
+ * mounting the real page) does not throw `ReferenceError: ResizeObserver is not
+ * defined`. Canvas-shell-unit tests still mock `CanvasShell` directly; this only
+ * covers the indirect path. Guarded so a real (browser) implementation wins.
+ */
+if (typeof globalThis.ResizeObserver === 'undefined') {
+  // eslint-disable-next-line @typescript-eslint/no-extraneous-class
+  globalThis.ResizeObserver = class {
+    observe(): void {}
+    unobserve(): void {}
+    disconnect(): void {}
+  };
+}
+
+/**
  * Node 24+ may install an experimental `localStorage` shim that is undefined
  * unless `--localstorage-file` is set, which shadows jsdom's implementation.
  * ThemeProvider tests (and P2 logo wiring) need a working store.

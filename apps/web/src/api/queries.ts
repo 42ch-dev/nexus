@@ -548,6 +548,11 @@ export function useScanAgents(request?: ScanRequest) {
  * that resolve to an installed ACP-registry agent; it does not verify
  * arbitrary binaries outside the registry.
  *
+ * Matching is resilient to path/arg normalization (PR-review fix): a custom
+ * command typed as a full path (or with extra args) still matches an installed
+ * agent whose `launch_command` is the short form, and vice versa. See
+ * {@link launchCommandMatches} for the exact rules.
+ *
  * @returns `true` when an installed agent's `launch_command` matches.
  */
 export function useVerifyAgent() {
@@ -558,10 +563,47 @@ export function useVerifyAgent() {
       if (!trimmed) return false;
       const res = await client.scanAgents({ filter: 'installed' });
       return res.agents.some(
-        (a) => a.installed && (a.launch_command?.trim() === trimmed),
+        (a) => a.installed && launchCommandMatches(trimmed, a.launch_command),
       );
     },
   });
+}
+
+/**
+ * PR-review fix — lenient command matching for the Verify Agent probe.
+ *
+ * Exact string equality produced false negatives when the same binary was
+ * expressed differently on the two sides (e.g. the user types a full path
+ * `/usr/local/bin/my-agent` while the registry reports the short form
+ * `my-agent`, or one side carries trailing args). The rules, in order:
+ *
+ *   1. Trim both sides.
+ *   2. Exact (case-sensitive) equality → match. Preserves the original
+ *      FB-UI-008 behavior for the common case.
+ *   3. Otherwise, compare the **binary basename** case-insensitively. The
+ *      binary is the first whitespace-delimited token (so trailing args like
+ *      `my-agent --foo` are ignored), and the basename is its last `/`-separated
+ *      segment (so `/usr/local/bin/my-agent` and `my-agent` align). This is the
+ *      narrowest normalization that still survives path/arg drift without
+ *      admitting substring false positives (e.g. `code` must NOT match `codex`).
+ *
+ * Pure and side-effect-free so it can be unit-tested directly.
+ */
+export function launchCommandMatches(
+  customCommand: string,
+  scanLaunchCommand: string | null | undefined,
+): boolean {
+  const custom = customCommand.trim();
+  const scan = scanLaunchCommand?.trim();
+  if (!custom || !scan) return false;
+  if (custom === scan) return true;
+
+  const basename = (cmd: string): string => {
+    const binary = cmd.split(/\s+/)[0] ?? '';
+    const segs = binary.split('/');
+    return (segs[segs.length - 1] ?? '').toLowerCase();
+  };
+  return basename(custom) !== '' && basename(custom) === basename(scan);
 }
 
 // ── Creator Memory review-loop (V1.78) ───────────────────────────────────────

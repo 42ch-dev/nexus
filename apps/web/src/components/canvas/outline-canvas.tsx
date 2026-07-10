@@ -103,23 +103,49 @@ export function OutlineCanvas({ workId, initialSelectedChapterId = null }: Outli
   const onNodesChange = useNodeChangeHandler(setRfNodes);
 
   // Sync RF state when the projection changes (data refetch, chapter list update).
+  // PR-review fix: merge instead of replace so the author's graph interactions
+  // (dragged positions, selection) survive incremental chapter-page loads.
+  // `chapters` grows as each cursor page arrives (I-QC1-002 auto-fetch), which
+  // rebuilds the projection; a bare `setRfNodes(projection.nodes)` wiped every
+  // node's user-moved position and selection on each page fetch. For nodes that
+  // persist across the rebuild (same id), preserve their `position` and
+  // `selected` flag; new nodes use the projected position, dropped nodes fall
+  // away. Edges carry no per-interaction state, so they are replaced directly.
   useEffect(() => {
-    if (projection) {
-      setRfNodes(projection.nodes);
-      setRfEdges(projection.edges);
-    }
+    if (!projection) return;
+    setRfEdges(projection.edges);
+    setRfNodes((prev) => {
+      if (prev.length === 0) return projection.nodes;
+      const prevById = new Map(prev.map((n) => [n.id, n]));
+      return projection.nodes.map((node) => {
+        const existing = prevById.get(node.id);
+        if (!existing) return node;
+        return { ...node, position: existing.position, selected: existing.selected };
+      });
+    });
   }, [projection]);
 
   // Graph click → inspector selection sync (FB-C1-003).
   // React Flow tracks selection via the node `selected` flag (set through
   // onNodesChange). Resolve it to `selectedChapterId` so graph clicks drive the
-  // chapter inspector — same pattern as `world-kb-canvas.tsx`. `null` means
-  // the selection does not resolve to a chapter (volume/unattached event/no
-  // selection); the current inspector selection is left unchanged.
+  // chapter inspector — same pattern as `world-kb-canvas.tsx`.
+  //
+  // PR-review fix: `selectedChapterIdFromNodes` returns `null` both when no
+  // node is selected AND when the selected node does not resolve to a chapter
+  // (volume node, or a timeline event with no `realizes_chapter_id`). The old
+  // guard left the previous chapter selection in place in the second case,
+  // leaving a stale chapter in the inspector. Distinguish the two: when a node
+  // IS selected but resolves to no chapter, clear the chapter selection so the
+  // inspector does not show a chapter that is no longer the active graph
+  // selection. When nothing is selected at all, leave the current selection
+  // intact (preserves V1.75 `?chapter=N` preselect and click-to-keep-while-
+  // panning behavior).
   useEffect(() => {
     const chapterId = selectedChapterIdFromNodes(rfNodes);
     if (chapterId !== null) {
       setSelectedChapterId(chapterId);
+    } else if (rfNodes.some((n) => n.selected)) {
+      setSelectedChapterId(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rfNodes]);
