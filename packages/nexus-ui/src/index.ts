@@ -42,3 +42,12 @@ export { Textarea, type TextareaProps } from './components/textarea';
 
 // V1.101 P2 — promoted native Select presentational primitive
 export { Select, type SelectProps } from './components/select';
+
+// V1.106 P0 — promoted Toast presentational primitive (Studio Surfaces fixtures)
+export {
+  ToastProvider,
+  Toaster,
+  useToast,
+  type Toast,
+  type ToastVariant,
+} from './components/toast';

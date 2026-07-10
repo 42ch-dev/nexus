@@ -8,8 +8,10 @@ import { ComponentsPage } from '@/pages/components';
 import { VoicePage } from '@/pages/voice';
 import {
   SurfacesAgentPickerPage,
+  SurfacesBannerPage,
   SurfacesDaemonPage,
   SurfacesIndexPage,
+  SurfacesLaunchPage,
   SurfacesLayout,
   SurfacesSetupPage,
   SurfacesShellPage,
@@ -55,6 +57,8 @@ export function App() {
             <Route path="shell" element={<SurfacesShellPage />} />
             <Route path="agent-picker" element={<SurfacesAgentPickerPage />} />
             <Route path="daemon" element={<SurfacesDaemonPage />} />
+            <Route path="launch" element={<SurfacesLaunchPage />} />
+            <Route path="banner" element={<SurfacesBannerPage />} />
           </Route>
         </Routes>
       </main>

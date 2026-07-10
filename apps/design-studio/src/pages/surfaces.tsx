@@ -4,6 +4,8 @@ import { NavLink, Outlet } from 'react-router-dom';
 import { cn, Badge, Button } from '@42ch/nexus-ui';
 
 import { AgentPickerFixtures } from '@/fixtures/agent-picker-fixtures';
+import { LaunchDaemonFixtures } from '@/fixtures/launch-daemon-fixtures';
+import { MainBannerFixtures } from '@/fixtures/main-banner-fixtures';
 import { SettingsHostFixtures } from '@/fixtures/settings-host-fixtures';
 import { SetupWizardChromeFixtures } from '@/fixtures/setup-wizard-chrome-fixtures';
 
@@ -65,6 +67,18 @@ const SURFACES_SECTIONS = [
     path: '/surfaces/daemon',
     end: false,
     desc: 'Daemon status strip',
+  },
+  {
+    label: 'Launch',
+    path: '/surfaces/launch',
+    end: false,
+    desc: 'Desktop launch splash — waiting, error, and recovery',
+  },
+  {
+    label: 'Banner',
+    path: '/surfaces/banner',
+    end: false,
+    desc: 'Degraded daemon banner — starting, degraded, stopped, error',
   },
 ] as const;
 
@@ -488,6 +502,44 @@ export function SurfacesDaemonPage() {
         tokens.
       </p>
       <DaemonStatusStrip />
+    </section>
+  );
+}
+
+export function SurfacesLaunchPage() {
+  return (
+    <section data-testid="surfaces-launch">
+      <SurfaceHeading>Launch — Daemon splash</SurfaceHeading>
+      <p className="text-copy-14 text-gray-700 mb-6">
+        Presentational desktop launch splash from{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @web-setup/daemon-ready-splash
+        </code>
+        . Props-driven variants: waiting, error + Restart Nexus, and error +
+        Reset local database. No daemon IPC, no Tauri commands.
+      </p>
+      <LaunchDaemonFixtures />
+    </section>
+  );
+}
+
+export function SurfacesBannerPage() {
+  return (
+    <section data-testid="surfaces-banner">
+      <SurfaceHeading>Launch — Daemon banner</SurfaceHeading>
+      <p className="text-copy-14 text-gray-700 mb-6">
+        Composition-only fixture replicating the Control Room degraded-daemon
+        banner. Built from{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @42ch/nexus-ui
+        </code>{' '}
+        Button + inline markup. No import from{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          apps/web/src/components/layout/main-banner.tsx
+        </code>{' '}
+        (daemon/desktop hooks forbidden in Studio).
+      </p>
+      <MainBannerFixtures />
     </section>
   );
 }
