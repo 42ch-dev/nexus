@@ -1,11 +1,11 @@
 ---
 module: nexus-ui
 date: 2026-07-08
-last_updated: 2026-07-09
+last_updated: 2026-07-10
 problem_type: architecture_decision
 category: architecture-patterns
 severity: medium
-plan_id: 2026-07-08-v1.99-nexus-ui-component-promotion; V1.100 guardrails+form-fields; V1.101 Select + AgentPicker placement
+plan_id: 2026-07-08-v1.99-nexus-ui-component-promotion; V1.100 guardrails+form-fields; V1.101 Select + AgentPicker placement; V1.106 Toast promotion; V1.107 App Toast adoption
 tags: [nexus-ui, component-promotion, design-studio, presentational-primitives, package-boundary, agent-picker, select, studio-first]
 applies_when: promoting a UI primitive from app ownership into @42ch/nexus-ui, or deciding where a new UI component should live
 ---
@@ -105,3 +105,19 @@ V1.103 deepened the thin Settings host into an S3 multi-section shell without pr
 3. **Marker context races are directional.** Re-run Setup vs wizard Finish need asymmetric `setCompleted` timing — see [asymmetric-setup-completed-context.md](./asymmetric-setup-completed-context.md).
 
 **Process note:** V1.103 reaffirmed studio-first per section (Studio chrome → App IPC) in `.mstar/iterations/v1.103/guides/studio-first-visual-then-app.md` (workspace snapshot; not promoted as a second process doc).
+
+## V1.106 Extension — Toast package promotion + re-export hazard
+
+V1.106 P0 promoted `ToastProvider` / `useToast` / `Toaster` to `@42ch/nexus-ui` so Studio `/components` could fixture variant matrices. The package landed, but App kept a near-verbatim duplicate at `apps/web/src/lib/use-toast.tsx` (~40+ call sites) — residual **`R-V1106P0-001`**.
+
+**Lesson:** package promotion is **not** complete until the App adopts the **thin re-export** pattern from §Consumer wrapper strategy. Verbatim copy creates drift risk and false “pipeline complete” claims. Toast also introduced a **`lucide-react` package runtime dependency** for variant icons — documented exception in [`component-promotion-boundary.md`](../../iterations/v1.99/specs/component-promotion-boundary.md) (`R-V1106P0-002`).
+
+## V1.107 Extension — App Toast adoption + presentational gallery aliases
+
+V1.107 P0 closes the Toast loop and extends studio-first to shell/Settings chrome:
+
+1. **FB-012:** Replace App `use-toast.tsx` body with re-export from `@42ch/nexus-ui`; preserve `@/lib/use-toast` import path; closes `R-V1106P0-001`.
+2. **FB-013..015:** Presentational extracts under `layout/presentational/` and `settings/presentational/`; Studio imports `@web-layout/*` and `@web-settings/*` — not routing-heavy `sidebar.tsx` or IPC-backed `ConnectDaemonForm`.
+3. **FB-000:** Studio Tailwind must scan setup + presentational + nexus-ui sources — without this, studio-first visual acceptance is blocked.
+
+**Voice lock (FB-008):** workspace field label **Workspace folder**; change action **Change Folder…** on wizard and Settings (no wizard **Browse…**).

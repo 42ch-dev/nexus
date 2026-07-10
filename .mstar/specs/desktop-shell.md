@@ -377,6 +377,17 @@ Prefer `wire_contracts_changed: false`. Portrait shell: `wizard-max-width` **480
 - **TopStepIndicator:** single `apps/web/src/components/setup/top-step-indicator.tsx`; Studio `@web-setup/top-step-indicator` (closes dual-source residual).
 - **Contract boundary:** `wire_contracts_changed: false`.
 
+#### 13.10.7 V1.107 Amendments — Studio paint + presentational SSOT
+
+**Iteration SSOT:** [`.mstar/iterations/v1.107-delivery-compass.md`](../iterations/v1.107-delivery-compass.md) + [`studio-ui-tune.md`](../iterations/v1.107/specs/studio-ui-tune.md).
+
+- **Studio Tailwind content:** Design Studio must scan `apps/web/src/components/setup/**`, `layout/presentational/**`, and `packages/nexus-ui/src/**` so wizard and matrix utilities paint (FB-000).
+- **Shell chrome SSOT:** Extract props-driven modules under `apps/web/src/components/layout/presentational/`; App wrappers (`sidebar.tsx`, `footer-profiles.tsx`, `daemon-health-indicator.tsx`) delegate markup; Studio imports via `@web-layout/*` (FB-013..014).
+- **Settings chrome SSOT:** Presentational extracts under `apps/web/src/components/settings/presentational/`; Studio imports via `@web-settings/*` (FB-015).
+- **Workspace path field:** Shared `workspace-path-field.tsx` — label **Workspace folder**, CTA **Change Folder…** on wizard and Settings (FB-008); wizard uses `layout="wizard-stack"`.
+- **Toast:** App `apps/web/src/lib/use-toast.tsx` becomes thin re-export from `@42ch/nexus-ui` (FB-012) — package promotion alone (V1.106) does not close App duplication (`R-V1106P0-001`).
+- **Contract boundary:** `wire_contracts_changed: false`.
+
 ---
 
 ## 14. ACP Agent Detection (V1.94)

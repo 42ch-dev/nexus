@@ -115,6 +115,7 @@ Every component in `apps/web/src/components/ui/index.ts` barrel has a classifica
 | label | `promote` | Promoted alongside Input in V1.100 P2 Form Field slice |
 | textarea | `promote` | Promoted alongside Input in V1.100 P2 Form Field slice |
 | select | `promote` | Promoted in V1.101 P2 — native `<select>` presentational primitive |
+| toast | `promote` | Promoted in V1.106 P0 (`packages/nexus-ui/src/components/toast.tsx`) for Studio Surfaces fixtures; **App thin re-export** at `apps/web/src/lib/use-toast.tsx` completes in V1.107 FB-012 (`R-V1106P0-001`). Variant icons use `lucide-react` — **package runtime dependency exception** (`R-V1106P0-002`); apps retain separate lucide usage elsewhere. |
 | dialog | `keep-web` | Imports `@radix-ui/react-dialog` + `lucide-react`; uses `DialogPrimitive.Portal` (fixed positioning, focus trap, scroll lock) — behavior layer beyond presentational scope; title/description wired to Radix accessibility primitives |
 | tabs | `keep-web` | Compound component with internal React context + `useState` state management (`controlled`/`uncontrolled` pattern); not purely presentational — owns selection state |
 | table | `keep-web` | Pure presentational table primitives, but wraps output in `<div className="w-full overflow-x-auto">` (responsive layout concern); not in V1.99 first batch |
@@ -128,8 +129,13 @@ The V1.99 deferred primitives below have since been promoted:
 | --- | --- | --- |
 | input, label, textarea | V1.100 P2 Form Field slice — ≥2 Web consumers + 1 Studio fixture | `2026-07-08-v1.100-form-field-component-promotion` |
 | select | V1.101 P2 native Select primitive | `2026-07-09-v1.101-select-component-promotion` |
+| toast | V1.106 P0 Studio-first pipeline (package); V1.107 P0 App re-export shim | `2026-07-10-v1.106-studio-first-pipeline`, `2026-07-10-v1.107-studio-ui-tune` |
 
 No deferred primitives remain from V1.99. Future keep-web candidates (Dialog, Tabs, Table, States) should be reconsidered only when a cross-app reuse case, dependency-footprint shrink, or behavior-layer extraction is demonstrated.
+
+### Toast runtime dependency footnote (V1.106 / V1.107)
+
+`Toast` is the first promoted primitive whose variant icons import `lucide-react` inside `@42ch/nexus-ui`. This is a **documented exception** to the general “no lucide in package” pattern used by `keep-web` `states.tsx`. Add `lucide-react` to `packages/nexus-ui/package.json` `dependencies` when promoting; do **not** make it a peer — consumers are not required to share a lucide instance for Toast icons. App call sites may keep `@/lib/use-toast` as a thin re-export after V1.107 FB-012.
 
 ### keep-web Intent
 

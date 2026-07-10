@@ -17,7 +17,8 @@
 - [`studio-first-visual-then-app.md`](../iterations/v1.101/guides/studio-first-visual-then-app.md) — V1.101 process note (Studio visual → App wiring; human smoke separate)
 - [`studio-first-visual-then-app.md`](../iterations/v1.102/guides/studio-first-visual-then-app.md) — V1.102 process note (same discipline; Badge tone + Settings chrome + optional Surfaces Stretch)
 - [`studio-first-visual-then-app.md`](../iterations/v1.103/guides/studio-first-visual-then-app.md) — V1.103 process note (Settings shell + section fixtures; DESIGN Voice copy tables in section specs)
-- [`studio-first-invariant.md`](../iterations/v1.106/guides/studio-first-invariant.md) — **V1.106 locked invariant** (需求 → Studio↔DESIGN.md → App); supersedes ad-hoc per-iteration notes for author-facing chrome
+- [`studio-first-invariant.md`](../iterations/v1.107/guides/studio-first-invariant.md) — **V1.107 locked invariant** (需求 → Studio↔DESIGN.md → App); supersedes V1.106 guide for active iteration
+- [`studio-ui-tune.md`](../iterations/v1.107/specs/studio-ui-tune.md) — **V1.107 Must** — Studio Tailwind content, visual FBs, Toast App adoption, shell/Settings presentational SSOT
 - `@42ch/nexus-ui` — brand layer plus approved presentational primitives (V1.99 Button/Badge/Card; V1.100 form fields; V1.101 `Select`; V1.102 Badge `tone` soft/solid)
 - `apps/web/src/components/ui/*` — transitional gallery source for primitives not yet promoted
 - `apps/web/src/components/setup/*` — app-shared setup compositions (e.g. `AgentPicker`); Studio may import via gallery alias — **not** `@42ch/nexus-ui`
@@ -63,9 +64,13 @@ Design Studio is a **standalone Vite + React SPA** (`apps/design-studio`) that m
 | `@nexus/design-tokens` | Yes | Shared `tokens.css` + Tailwind preset with `apps/web` |
 | `@42ch/nexus-ui` | Yes | Brand VI plus V1.99-approved pure presentational primitives, via public package exports only |
 | `@web-ui/*` → `apps/web/src/components/ui/*` | Yes (transitional) | Vite/TS alias for not-yet-promoted primitives only; promoted primitives should use `@42ch/nexus-ui` |
+| `@web-setup/*` → `apps/web/src/components/setup/*` | Yes | Props-driven setup compositions (AgentPicker, TopStepIndicator, WorkspacePathField); no daemon |
+| `@web-layout/*` → `apps/web/src/components/layout/presentational/*` | Yes (V1.107) | Props-driven shell chrome extracts only; no routing or daemon hooks |
+| `@web-settings/*` → `apps/web/src/components/settings/presentational/*` | Yes (V1.107) | Props-driven Settings section chrome; no IPC or storage |
 | `@web-lib/utils` → `apps/web/src/lib/utils.ts` | Yes | `cn()` helper only |
 | `apps/web` screens, routing, `NexusClient`, daemon hooks | **No** | Prevents studio becoming a second product shell |
-| `apps/web/src/components/layout/**` | **No** | Surfaces slice uses studio-local chrome fixtures |
+| `apps/web/src/components/layout/**` (direct) | **No** | Import presentational chrome only via `@web-layout/*` |
+| `apps/web/src/components/settings/**` (direct) | **No** | Import presentational chrome only via `@web-settings/*` |
 | `apps/web` app providers, route definitions, product hooks, localStorage-backed product state, Tauri helpers | **No** | Studio fixtures stay daemon-independent and behavior-free |
 | Live token override, localStorage theme hacks, YAML write-back | **No** | V1.98 read-only invariant |
 
@@ -164,6 +169,21 @@ Section nav labels and per-component matrix: [IA guide](../iterations/v1.98/guid
 | `/components` Toast section | `toast-fixtures.tsx` or inline | `@42ch/nexus-ui` + Studio renderer |
 
 Register Launch and Banner in `SURFACES_SECTIONS` alongside existing Setup / Shell / AgentPicker / Daemon slices.
+
+### V1.107 Surfaces and import amendments (P0 Must — iteration detail)
+
+**Authority:** [`studio-ui-tune.md`](../iterations/v1.107/specs/studio-ui-tune.md).
+
+| Topic | Lock |
+|-------|------|
+| Studio Tailwind `content` | Scan `setup/**`, `layout/presentational/**`, `packages/nexus-ui/src/**` (FB-000) |
+| Shell Surfaces | `/surfaces/shell` imports `@web-layout/shell-sidebar-chrome` — replaces inline `AppShellFixture` stub (FB-013) |
+| Footer / health | Studio fixtures import `@web-layout/footer-profiles-chrome`, `@web-layout/daemon-health-indicator-chrome` (FB-014) |
+| Settings host | `settings-host-fixtures.tsx` imports `@web-settings/*` + `@web-setup/workspace-path-field` (FB-015) |
+| Toast | Package primitive in Studio; App adopts via thin `@/lib/use-toast` re-export (FB-012) — closes `R-V1106P0-001` |
+| Voice & Content | Workspace field label **Workspace folder**; CTA **Change Folder…** on wizard and Settings (FB-008) |
+
+**Note:** V1.106 promoted Toast to `@42ch/nexus-ui` for Studio fixtures; V1.107 completes App adoption — do not treat “package Toast exists” as “App unified” until FB-012 lands.
 
 ---
 

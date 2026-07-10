@@ -1,0 +1,32 @@
+{
+  "id": "2026-07-10-v1.106-first-launch-polish",
+  "title": "P1 — First-launch polish",
+  "file": "plans/2026-07-10-v1.106-first-launch-polish.md",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": [
+    "@frontend-dev"
+  ],
+  "progress": 100,
+  "tags": [
+    "v1.106",
+    "first-launch",
+    "wizard",
+    "must"
+  ],
+  "created_at": "2026-07-10",
+  "updated_at": "2026-07-10",
+  "done_at": "2026-07-10",
+  "notes": "Done — QC tri Approve with residuals (fixed); QA Accept. 6 V1.105 residuals closed.",
+  "metadata": {
+    "iteration_refs": [
+      "V1.106"
+    ],
+    "spec_integration_branch": "iteration/v1.106",
+    "merge_target": "iteration/v1.106",
+    "working_branch": "plan/v1.106-p1-first-launch-polish",
+    "primary_spec": ".mstar/iterations/v1.106/specs/first-launch-polish.md",
+    "wire_contracts_changed": false,
+    "tier": "Must"
+  }
+}
