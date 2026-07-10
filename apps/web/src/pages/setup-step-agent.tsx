@@ -159,7 +159,7 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
     return agentPickerId(selectedAgent);
   }, [selectedAgent, agentsById]);
 
-  const canContinue = Boolean(selectedAgent || customLaunchCommand.trim());
+  const canContinue = Boolean(selectedAgent);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
@@ -167,8 +167,7 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
         <div className="flex flex-col gap-2">
           <h2 className="text-heading-24 font-heading text-gray-1000">Choose an ACP agent</h2>
           <p className="text-copy-14 text-gray-900">
-            Nexus uses an ACP-compatible agent to run strategies. Select a discovered agent or provide a custom launch
-            command.
+            Nexus uses an ACP-compatible agent to run strategies. Select a discovered agent to continue.
           </p>
         </div>
 
@@ -179,6 +178,7 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
           onSelect={selectById}
           customLaunchValue={customLaunchCommand}
           onCustomLaunchChange={useCustom}
+          showCustomLaunch={false}
           errorDescription={
             scan.isError
               ? errorMessage(scan.error) || 'The daemon did not respond to the agent scan request.'
@@ -186,6 +186,7 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
           }
           onRetry={scan.isError ? () => void scan.refetch() : undefined}
           emptyTitle="No agents found on PATH."
+          emptyDescription="Install an ACP-compatible agent to continue."
           density="compact"
         />
       </div>

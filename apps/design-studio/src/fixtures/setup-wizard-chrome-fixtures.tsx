@@ -18,6 +18,9 @@ import {
   TopStepIndicator,
   type WizardStep,
 } from '@web-setup/top-step-indicator';
+import {
+  WorkspacePathField,
+} from '@web-setup/workspace-path-field';
 
 const STEP_TITLES: Record<WizardStep, string> = {
   agent: 'Choose an agent',
@@ -154,30 +157,25 @@ function AgentStepBody({
       onSelect={setSelectedId}
       customLaunchValue={custom}
       onCustomLaunchChange={setCustom}
-      density="compact"
-      emptyDescription="Install an agent or add a custom launch command below."
+      showCustomLaunch={false}
+      emptyDescription="Install an ACP-compatible agent to continue."
       errorDescription="The daemon did not respond to the agent scan request."
       onRetry={status === 'error' ? () => undefined : undefined}
+      density="compact"
     />
   );
 }
 
 function WorkspaceBody() {
   return (
-    <div
-      className="flex min-h-setup-wizard-surface-input-row-min-height items-center gap-setup-wizard-surface-input-row-gap rounded-control border border-setup-wizard-surface-input-row-border bg-setup-wizard-surface-input-row-bg px-setup-wizard-surface-input-row-padding-x py-setup-wizard-surface-input-row-padding-y"
+    <WorkspacePathField
+      id="studio-wizard-workspace-path"
+      path="~/Documents/nexus/default"
+      layout="wizard-stack"
+      desktopAvailable={false}
+      browserOnlyHelper="Workspace path changes are available on the desktop app only."
       data-testid="workspace-location-row"
-    >
-      <span className="text-label-12 text-setup-wizard-surface-input-row-label-color">
-        Workspace location
-      </span>
-      <span className="truncate text-copy-14 text-setup-wizard-surface-input-row-path-color">
-        ~/Documents/nexus/default
-      </span>
-      <Button variant="secondary" size="small" type="button" className="ml-auto shrink-0">
-        Browse…
-      </Button>
-    </div>
+    />
   );
 }
 
@@ -224,9 +222,9 @@ function WizardChromeCard({
                   <h3 className="text-heading-24 font-heading text-gray-1000">
                     {STEP_TITLES.agent}
                   </h3>
-                  <p className="text-copy-14 text-gray-900">
-                    Pick a local ACP agent already on your machine, or provide a custom launch command.
-                  </p>
+                <p className="text-copy-14 text-gray-900">
+                  Pick a local ACP agent already on your machine.
+                </p>
                 </div>
                 <AgentStepBody status={agentStatus} overflow={agentOverflow} mixed={agentMixed} />
               </>

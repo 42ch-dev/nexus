@@ -43,7 +43,7 @@ export function MainBannerFixtures() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-col">
               <span className="text-copy-14 font-semibold text-gray-1000">{title}</span>
-              <span className="text-copy-13 text-gray-900">{description}</span>
+              <span className="text-copy-13 text-gray-700">{description}</span>
             </div>
             <Button type="button" variant="primary" size="small">
               <RefreshCw className={cn('h-4 w-4')} aria-hidden />

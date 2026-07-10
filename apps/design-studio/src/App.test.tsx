@@ -366,8 +366,9 @@ describe('Surfaces page — app shell fixture', () => {
   });
 
   it('renders add-profile button with accessible label', () => {
+    const appShell = screen.getByTestId('app-shell-fixture');
     expect(
-      screen.getByRole('button', { name: 'Add profile' }),
+      within(appShell).getByRole('button', { name: 'Add profile' }),
     ).toBeInTheDocument();
   });
 
@@ -583,8 +584,9 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
   });
 
   it('renders shell chrome with footer utility Settings link', () => {
-    expect(screen.getByTestId('settings-shell-chrome')).toBeInTheDocument();
-    const link = screen.getByTestId('settings-footer-utility-link');
+    const settingsShell = screen.getByTestId('settings-shell-chrome');
+    expect(settingsShell).toBeInTheDocument();
+    const link = within(settingsShell).getByTestId('settings-footer-utility-link');
     expect(link).toHaveTextContent('Settings');
     expect(link).toHaveAttribute('aria-current', 'page');
   });
@@ -746,7 +748,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).toBeInTheDocument();
     expect(
       within(form).getByTestId('trust-connect-button'),
-    ).toHaveTextContent('Trust This Certificate and Connect');
+    ).toHaveTextContent('Reconnect With These Settings');
     expect(
       within(form).getByTestId('revert-local-button'),
     ).toHaveTextContent('Use Local Daemon');
@@ -996,6 +998,52 @@ describe('Components page — Badge soft/solid matrix', () => {
     }
     expect(screen.getByTestId('badge-solid-running')).toHaveClass('bg-green-700');
     expect(screen.getByTestId('badge-solid-running')).toHaveClass('dark:text-brand-deep-blue');
+  });
+});
+
+describe('Components page — Domain badge matrices', () => {
+  beforeEach(() => {
+    mockMatchMedia(false);
+    renderStudio('/components');
+  });
+
+  it('renders the Domain Badges section heading and fixture root', () => {
+    expect(
+      screen.getByRole('heading', { name: 'Domain Badges' }),
+    ).toBeInTheDocument();
+    expect(screen.getByTestId('domain-badge-fixtures')).toBeInTheDocument();
+  });
+
+  it('renders Status and Chapter matrices using Badge variants', () => {
+    const statusVariants = ['running', 'queued', 'warning', 'error', 'unknown'] as const;
+    for (const value of statusVariants) {
+      expect(
+        screen.getByTestId(`domain-badge-status-${value}`),
+      ).toBeInTheDocument();
+    }
+
+    const chapterValues = ['not_started', 'outlined', 'draft', 'finalized', 'published'] as const;
+    for (const value of chapterValues) {
+      expect(
+        screen.getByTestId(`domain-badge-chapter-${value}`),
+      ).toBeInTheDocument();
+    }
+  });
+
+  it('renders Finding and TaskKind matrices with custom color classes', () => {
+    const findings = ['open', 'triaged', 'in_review', 'resolved', 'wont_fix', 'duplicate'] as const;
+    for (const value of findings) {
+      expect(
+        screen.getByTestId(`domain-badge-finding-${value}`),
+      ).toBeInTheDocument();
+    }
+
+    const kinds = ['brainstorm', 'outline', 'chapter', 'research', 'unknown'] as const;
+    for (const value of kinds) {
+      expect(
+        screen.getByTestId(`domain-badge-task-kind-${value}`),
+      ).toBeInTheDocument();
+    }
   });
 });
 

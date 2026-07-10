@@ -23,6 +23,8 @@
       "@/components/ui/*": ["../web/src/components/ui/*"],
       "@web-ui/*": ["../web/src/components/ui/*"],
       "@web-setup/*": ["../web/src/components/setup/*"],
+      "@web-layout/*": ["../web/src/components/layout/presentational/*"],
+      "@web-settings/*": ["../web/src/components/settings/presentational/*"],
       "@web-lib/utils": ["../web/src/lib/utils.ts"]
     },
 

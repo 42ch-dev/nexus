@@ -12,7 +12,7 @@
  * cap-height, hollow/lit selection dots, muted not-installed cards.
  */
 
-import { Loader2, Terminal } from 'lucide-react';
+import { ArrowUpRight, Loader2, Terminal } from 'lucide-react';
 import type { ReactNode } from 'react';
 
 import { cn } from '@/lib/utils';
@@ -148,7 +148,8 @@ export function AgentPicker({
         {status === 'ready' && agents.length > 0 ? (
           <ul
             className={cn(
-              'grid grid-cols-1 sm:grid-cols-2',
+              'grid grid-cols-1',
+              !compact && 'sm:grid-cols-2',
               compact ? 'gap-2' : 'gap-3',
             )}
             data-testid="agent-picker-grid"
@@ -213,6 +214,7 @@ function AgentCard({
         'flex w-full flex-col rounded-control border border-gray-alpha-400 bg-background-100',
         compact ? 'p-2' : 'p-3',
         selectable && selected && 'border-blue-700 bg-blue-700/8',
+        !selectable && 'bg-background-200',
       )}
     >
       {selectable ? (
@@ -234,10 +236,7 @@ function AgentCard({
         </div>
       )}
 
-      <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1">
-        {!agent.installed ? (
-          <span className="text-copy-13 text-gray-700">Not installed</span>
-        ) : null}
+      <div className="mt-3 flex flex-wrap items-center gap-3">
         {agent.installUrl ? (
           <OutboundLink href={agent.installUrl} label="Install" />
         ) : null}
@@ -277,7 +276,16 @@ function AgentCardIdentity({
             >
               Installed
             </Badge>
-          ) : null}
+          ) : (
+            <Badge
+              variant="neutral"
+              tone="soft"
+              data-testid={`agent-card-not-installed-badge-${agent.id}`}
+              className="shrink-0"
+            >
+              Not installed
+            </Badge>
+          )}
         </div>
         {agent.version ? (
           <span className="text-copy-13 text-gray-700">Version {agent.version}</span>
@@ -326,7 +334,7 @@ function StatusDot({
           !installed && 'bg-gray-500',
           installed &&
             selected &&
-            'bg-green-700 ring-2 ring-blue-700 ring-offset-2 ring-offset-background-100',
+            'bg-green-700',
           installed &&
             !selected &&
             'border-[1.5px] border-green-700 bg-transparent',
@@ -343,9 +351,10 @@ function OutboundLink({ href, label }: { href: string; label: string }) {
       target="_blank"
       rel="noopener noreferrer"
       aria-label={label}
-      className="inline-flex items-baseline gap-1 text-label-14 font-medium leading-none text-blue-700 transition-colors hover:text-blue-800 after:ml-0.5 after:inline-block after:text-[0.75em] after:leading-none after:content-['↗']"
+      className="inline-flex items-center gap-1 text-label-14 font-medium leading-none text-blue-700 transition-colors hover:text-blue-800"
     >
       {label}
+      <ArrowUpRight className="h-3 w-3" aria-hidden />
     </a>
   );
 }

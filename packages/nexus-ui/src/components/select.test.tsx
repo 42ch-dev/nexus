@@ -29,6 +29,7 @@ describe('Select', () => {
     expect(select).toHaveClass('rounded-control');
     expect(select).toHaveClass('border');
     expect(select).toHaveClass('bg-background-100');
+    expect(select).toHaveClass('appearance-none');
     expect(select).toHaveClass('focus-visible:border-blue-700');
   });
 
@@ -79,6 +80,37 @@ describe('Select', () => {
     expect(select).toHaveClass('ps-3');
     expect(select).toHaveClass('pe-8');
     expect(select).not.toHaveClass('px-3');
+  });
+
+  // --- custom chevron overlay ---
+
+  it('renders a custom chevron overlay', () => {
+    render(
+      <Select data-testid="test-select">
+        <option value="a">A</option>
+      </Select>,
+    );
+    const chevron = screen.getByTestId('select-chevron');
+    expect(chevron).toBeInTheDocument();
+    expect(chevron).toHaveAttribute('aria-hidden', 'true');
+    expect(chevron).toHaveClass('right-3');
+    expect(chevron).toHaveClass('pointer-events-none');
+  });
+
+  it('keeps the custom chevron in disabled and invalid states', () => {
+    const { rerender } = render(
+      <Select disabled data-testid="test-select">
+        <option value="a">A</option>
+      </Select>,
+    );
+    expect(screen.getByTestId('select-chevron')).toBeInTheDocument();
+
+    rerender(
+      <Select invalid data-testid="test-select">
+        <option value="a">A</option>
+      </Select>,
+    );
+    expect(screen.getByTestId('select-chevron')).toBeInTheDocument();
   });
 
   // --- className merge (cn integration) ---

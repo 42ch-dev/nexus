@@ -93,6 +93,8 @@ describe('Button', () => {
     expect(btn).toHaveClass('disabled:pointer-events-none');
     expect(btn).toHaveClass('disabled:bg-gray-100');
     expect(btn).toHaveClass('disabled:text-gray-700');
+    expect(btn).toHaveClass('dark:disabled:bg-gray-100');
+    expect(btn).toHaveClass('dark:disabled:text-gray-700');
   });
 
   // --- className merge (cn integration) ---
