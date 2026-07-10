@@ -25,6 +25,10 @@ export default defineConfig({
       '@': path.resolve(__dirname, './src'),
       '@web-ui': path.resolve(__dirname, '../web/src/components/ui'),
       '@web-setup': path.resolve(__dirname, '../web/src/components/setup'),
+      // Gallery-only alias for app-shared layout chrome (V1.107 sidebar/footer/header).
+      '@web-layout': path.resolve(__dirname, '../web/src/components/layout/presentational'),
+      // Gallery-only alias for app-shared Settings presentational extracts (V1.107 Connection/Setup).
+      '@web-settings': path.resolve(__dirname, '../web/src/components/settings/presentational'),
       '@web-lib/utils': path.resolve(__dirname, '../web/src/lib/utils'),
     },
   },

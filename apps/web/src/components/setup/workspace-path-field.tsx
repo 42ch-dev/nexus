@@ -34,8 +34,14 @@ export interface WorkspacePathFieldProps {
   desktopAvailable?: boolean;
   /** Optional override for the browser-only helper text. */
   browserOnlyHelper?: string;
+  /** Optional tooltip for the disabled change action (e.g. desktop-only explanation). */
+  title?: string;
   /** Optional root test id. */
   'data-testid'?: string;
+  /** Optional test id for the readonly Input. */
+  inputDataTestId?: string;
+  /** Optional test id for the Change Folder button. */
+  buttonDataTestId?: string;
 }
 
 export function WorkspacePathField({
@@ -47,7 +53,10 @@ export function WorkspacePathField({
   layout = 'settings-row',
   desktopAvailable = true,
   browserOnlyHelper = DEFAULT_BROWSER_ONLY_HELPER,
+  title,
   'data-testid': dataTestId,
+  inputDataTestId,
+  buttonDataTestId,
 }: WorkspacePathFieldProps) {
   const isWizard = layout === 'wizard-stack';
   const disabled = changeDisabled || !desktopAvailable || !onChangeClick;
@@ -93,6 +102,7 @@ export function WorkspacePathField({
               'border-transparent bg-transparent px-0 focus-visible:border-transparent',
           )}
           aria-label={WORKSPACE_PATH_FIELD_LABEL}
+          data-testid={inputDataTestId}
         />
         <Button
           type="button"
@@ -100,6 +110,8 @@ export function WorkspacePathField({
           disabled={disabled}
           onClick={onChangeClick}
           className="shrink-0"
+          title={disabled ? title : undefined}
+          data-testid={buttonDataTestId}
         >
           {WORKSPACE_PATH_CHANGE_ACTION}
         </Button>

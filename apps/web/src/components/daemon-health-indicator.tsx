@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { NavLink } from 'react-router-dom';
 
-import { Badge } from '@/components/ui/badge';
+import { DaemonHealthIndicatorChrome } from '@/components/layout/presentational/daemon-health-indicator-chrome';
 import { useConnectionConfig, useNexusClient } from '@/lib/client-context';
 import { NexusClientError } from '@/lib/nexus';
 
@@ -51,22 +51,16 @@ export function DaemonHealthIndicator() {
 
   const isRemote = Boolean(config?.active && config.endpointUrl);
 
-  const badge =
-    state.kind === 'unknown' ? (
-      <Badge variant="neutral">Checking daemon…</Badge>
-    ) : state.kind === 'connected' ? (
-      <Badge variant="running" title={`Daemon v${state.version}`}>
-        {isRemote ? 'Remote daemon' : 'Daemon'} v{state.version}
-      </Badge>
-    ) : (
-      <Badge variant="error" title={state.message}>
-        {isRemote ? 'Remote daemon offline' : 'Daemon offline'}
-      </Badge>
-    );
-
   return (
-    <Link to="/settings/advanced#connection" className="focus-visible:outline-none">
-      {badge}
-    </Link>
+    <DaemonHealthIndicatorChrome
+      state={state}
+      isRemote={isRemote}
+      href="/settings/advanced#connection"
+      renderLink={({ href, children }) => (
+        <NavLink to={href} className="focus-visible:outline-none">
+          {children}
+        </NavLink>
+      )}
+    />
   );
 }

@@ -366,8 +366,9 @@ describe('Surfaces page — app shell fixture', () => {
   });
 
   it('renders add-profile button with accessible label', () => {
+    const appShell = screen.getByTestId('app-shell-fixture');
     expect(
-      screen.getByRole('button', { name: 'Add profile' }),
+      within(appShell).getByRole('button', { name: 'Add profile' }),
     ).toBeInTheDocument();
   });
 
@@ -583,8 +584,9 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
   });
 
   it('renders shell chrome with footer utility Settings link', () => {
-    expect(screen.getByTestId('settings-shell-chrome')).toBeInTheDocument();
-    const link = screen.getByTestId('settings-footer-utility-link');
+    const settingsShell = screen.getByTestId('settings-shell-chrome');
+    expect(settingsShell).toBeInTheDocument();
+    const link = within(settingsShell).getByTestId('settings-footer-utility-link');
     expect(link).toHaveTextContent('Settings');
     expect(link).toHaveAttribute('aria-current', 'page');
   });
