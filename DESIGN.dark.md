@@ -159,11 +159,11 @@ components:
     # soft (default): tinted fill + semantic text; strengthened borders (neutral gray-alpha-400; semantic ~50% alpha)
     soft:
       neutral: { backgroundColor: "{colors.gray-alpha-100}", textColor: "{colors.gray-900}", borderColor: "{colors.gray-alpha-400}" }
-      running: { backgroundColor: "rgba(84,213,138,0.14)", textColor: "{colors.green-1000}", borderColor: "rgba(84,213,138,0.50)" }
-      queued: { backgroundColor: "rgba(76,216,200,0.14)", textColor: "{colors.teal-1000}", borderColor: "rgba(76,216,200,0.50)" }
+      running: { backgroundColor: "rgba(84,213,138,0.16)", textColor: "{colors.green-1000}", borderColor: "rgba(84,213,138,0.50)" }
+      queued: { backgroundColor: "rgba(76,216,200,0.16)", textColor: "{colors.teal-1000}", borderColor: "rgba(76,216,200,0.50)" }
       warning: { backgroundColor: "rgba(255,192,67,0.16)", textColor: "{colors.amber-1000}", borderColor: "rgba(255,192,67,0.50)" }
       error: { backgroundColor: "rgba(255,107,107,0.16)", textColor: "{colors.red-1000}", borderColor: "rgba(255,107,107,0.50)" }
-      preset: { backgroundColor: "rgba(183,148,255,0.12)", textColor: "{colors.purple-1000}", borderColor: "rgba(183,148,255,0.50)" }
+      preset: { backgroundColor: "rgba(183,148,255,0.16)", textColor: "{colors.purple-1000}", borderColor: "rgba(183,148,255,0.50)" }
     # solid (opt-in): semantic fills + AA text per Button Contrast Invariant.
     # Bright dark *-700/*-800 fills use brand-deep-blue (white fails AA ~1.6–2.4:1).
     # Neutral uses dark gray-200 + white (~14:1). No visible border.

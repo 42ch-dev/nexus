@@ -7,9 +7,10 @@ import { cn } from '../lib/cn';
  * Badge / Status Pill — DESIGN.md §Component Primitives/Badge.
  *
  * Height 24px, px-2 (8px), radius-pill, label-12. Soft tone keeps tinted fills
- * with strengthened borders; solid tone uses semantic fills + high-contrast
- * text. Alpha layers use `color-mix(...)` so the same class stays correct in
- * both light and dark. Dark solid text follows the Button Contrast Invariant
+ * with strengthened borders (raised to 16% alpha in FB-V1106-001 so each hue
+ * reads distinctly). Solid tone uses semantic fills + high-contrast text.
+ * Alpha layers use `color-mix(...)` so the same class stays correct in both
+ * light and dark. Dark solid text follows the Button Contrast Invariant
  * (bright fills → `brand-deep-blue`, not white).
  */
 const badgeVariants = cva(
@@ -40,31 +41,31 @@ const badgeVariants = cva(
         tone: 'soft',
         variant: 'running',
         class:
-          'bg-[color-mix(in_srgb,var(--color-green-700)_10%,transparent)] text-green-1000 border-[color-mix(in_srgb,var(--color-green-700)_50%,transparent)]',
+          'bg-[color-mix(in_srgb,var(--color-green-700)_16%,transparent)] text-green-1000 border-[color-mix(in_srgb,var(--color-green-700)_50%,transparent)]',
       },
       {
         tone: 'soft',
         variant: 'queued',
         class:
-          'bg-[color-mix(in_srgb,var(--color-teal-700)_10%,transparent)] text-teal-1000 border-[color-mix(in_srgb,var(--color-teal-700)_50%,transparent)]',
+          'bg-[color-mix(in_srgb,var(--color-teal-700)_16%,transparent)] text-teal-1000 border-[color-mix(in_srgb,var(--color-teal-700)_50%,transparent)]',
       },
       {
         tone: 'soft',
         variant: 'warning',
         class:
-          'bg-[color-mix(in_srgb,var(--color-amber-700)_12%,transparent)] text-amber-1000 border-[color-mix(in_srgb,var(--color-amber-700)_50%,transparent)]',
+          'bg-[color-mix(in_srgb,var(--color-amber-700)_16%,transparent)] text-amber-1000 border-[color-mix(in_srgb,var(--color-amber-700)_50%,transparent)]',
       },
       {
         tone: 'soft',
         variant: 'error',
         class:
-          'bg-[color-mix(in_srgb,var(--color-red-700)_12%,transparent)] text-red-1000 border-[color-mix(in_srgb,var(--color-red-700)_50%,transparent)]',
+          'bg-[color-mix(in_srgb,var(--color-red-700)_16%,transparent)] text-red-1000 border-[color-mix(in_srgb,var(--color-red-700)_50%,transparent)]',
       },
       {
         tone: 'soft',
         variant: 'preset',
         class:
-          'bg-[color-mix(in_srgb,var(--color-purple-700)_10%,transparent)] text-purple-1000 border-[color-mix(in_srgb,var(--color-purple-700)_50%,transparent)]',
+          'bg-[color-mix(in_srgb,var(--color-purple-700)_16%,transparent)] text-purple-1000 border-[color-mix(in_srgb,var(--color-purple-700)_50%,transparent)]',
       },
       // ── solid (opt-in): semantic fill + high-contrast text; no visible border ──
       // Light: white on dark fills. Dark: deep-blue on bright semantic fills

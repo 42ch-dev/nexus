@@ -15,11 +15,11 @@ describe('Badge', () => {
     expect(badge).toHaveClass('border-gray-alpha-400');
   });
 
-  it('renders soft running with ~50% border alpha', () => {
+  it('renders soft running with ~16% fill and ~50% border alpha', () => {
     render(<Badge variant="running">Running</Badge>);
     const badge = screen.getByText('Running');
     expect(badge).toHaveClass('text-green-1000');
-    expect(badge.className).toContain('color-mix(in_srgb,var(--color-green-700)_10%,transparent)');
+    expect(badge.className).toContain('color-mix(in_srgb,var(--color-green-700)_16%,transparent)');
     expect(badge.className).toContain('color-mix(in_srgb,var(--color-green-700)_50%,transparent)');
   });
 
@@ -49,6 +49,23 @@ describe('Badge', () => {
     const badge = screen.getByText('Preset');
     expect(badge).toHaveClass('text-purple-1000');
     expect(badge.className).toContain('color-mix(in_srgb,var(--color-purple-700)_50%,transparent)');
+  });
+
+  it.each([
+    ['neutral', 'bg-gray-alpha-100', 'text-gray-900', null],
+    ['running', 'color-mix(in_srgb,var(--color-green-700)_16%,transparent)', 'text-green-1000', 'color-mix(in_srgb,var(--color-green-700)_50%,transparent)'],
+    ['queued', 'color-mix(in_srgb,var(--color-teal-700)_16%,transparent)', 'text-teal-1000', 'color-mix(in_srgb,var(--color-teal-700)_50%,transparent)'],
+    ['warning', 'color-mix(in_srgb,var(--color-amber-700)_16%,transparent)', 'text-amber-1000', 'color-mix(in_srgb,var(--color-amber-700)_50%,transparent)'],
+    ['error', 'color-mix(in_srgb,var(--color-red-700)_16%,transparent)', 'text-red-1000', 'color-mix(in_srgb,var(--color-red-700)_50%,transparent)'],
+    ['preset', 'color-mix(in_srgb,var(--color-purple-700)_16%,transparent)', 'text-purple-1000', 'color-mix(in_srgb,var(--color-purple-700)_50%,transparent)'],
+  ] as const)('renders soft %s with distinct hue and 16% fill / 50% border', (variant, bgClass, textClass, borderClass) => {
+    render(<Badge variant={variant}>{variant}</Badge>);
+    const badge = screen.getByText(variant);
+    expect(badge).toHaveClass(textClass);
+    expect(badge.className).toContain(bgClass);
+    if (borderClass) {
+      expect(badge.className).toContain(borderClass);
+    }
   });
 
   it('explicit tone=soft matches default soft classes', () => {
