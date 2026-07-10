@@ -1,0 +1,21 @@
+---
+description: Default all Task/subagent launches to composer-2.5 (no Fast, no MAX) unless the prompt explicitly overrides
+alwaysApply: true
+---
+
+# Subagent default model (project)
+
+Unless the **current user prompt** (or an always-applied user rule that names a model for a specific role/phase) explicitly requires a different model:
+
+1. **Every** `Task` / subagent launch in this repo **must** set `model` to `composer-2.5`.
+2. Do **not** use `composer-2.5-fast`, any `*-fast` slug, or enable MAX / Max Mode for subagents.
+3. Do **not** omit `model` so the subagent inherits the parent chat model — always pass `composer-2.5` explicitly.
+4. When creating or editing project agents under `.cursor/agents/`, set frontmatter to pin the non-fast variant, e.g. `model: composer-2.5[fast=false]` (or `composer-2.5[]`).
+
+## Override
+
+Honor an explicit model only when the user (or a higher-priority role/phase rule) names one in the prompt for that launch. Otherwise default to `composer-2.5` as above.
+
+## Note
+
+Built-in Explore / Bash / Browser subagents may still auto-select models; this rule governs agent-launched `Task` subagents and custom `.cursor/agents/` definitions.
