@@ -38,6 +38,7 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
     let cancelled = false;
     let unsub: (() => void) | undefined;
     let timeoutId: ReturnType<typeof setTimeout> | undefined;
+    let ready = false; // Guard: timeout callback must not race after markReady.
     const cap = desktop;
 
     function clearWaitTimeout() {
@@ -49,6 +50,7 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
 
     function markReady() {
       if (cancelled) return;
+      ready = true;
       setDaemonReady(true);
       setError(null);
       clearWaitTimeout();
@@ -119,13 +121,13 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
     }
 
     timeoutId = setTimeout(() => {
-      if (cancelled) return;
+      if (cancelled || ready) return;
       // Timer already fired — clear the handle without clearTimeout (no-op).
       timeoutId = undefined;
       void cap
         .getDaemonStatus()
         .then((status) => {
-          if (cancelled) return;
+          if (cancelled || ready) return;
           if (status.state === 'running' || status.state === 'degraded') {
             applyStatus(status);
             return;
@@ -141,7 +143,7 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
           );
         })
         .catch(() => {
-          if (cancelled) return;
+          if (cancelled || ready) return;
           setDaemonReady(false);
           setError('Could not determine daemon status. Try retrying.');
         });

@@ -39,12 +39,12 @@
       "id": "2026-07-10-v1.106-first-launch-polish",
       "title": "P1 — First-launch polish",
       "file": "plans/2026-07-10-v1.106-first-launch-polish.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@frontend-dev"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.106",
         "first-launch",
@@ -53,15 +53,15 @@
       ],
       "created_at": "2026-07-10",
       "updated_at": "2026-07-10",
-      "done_at": null,
-      "notes": "Scaffold only; FB-003/004 + V1.105 residual seeds. Prepare/§5 deferred.",
+      "done_at": "2026-07-10",
+      "notes": "Done — QC tri Approve with residuals (fixed); QA Accept. 6 V1.105 residuals closed.",
       "metadata": {
         "iteration_refs": [
           "V1.106"
         ],
         "spec_integration_branch": "iteration/v1.106",
         "merge_target": "iteration/v1.106",
-        "working_branch": null,
+        "working_branch": "plan/v1.106-p1-first-launch-polish",
         "primary_spec": ".mstar/iterations/v1.106/specs/first-launch-polish.md",
         "wire_contracts_changed": false,
         "tier": "Must"
@@ -1010,9 +1010,12 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.105",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-10-v1.105-daemon-fullscreen-gate.md",
-        "note": "QC2 S001. Inherited pattern."
+        "note": "QC2 S001. Inherited pattern.",
+        "closed_at": "2026-07-10",
+        "closed_by": "V1.106 P1 T3",
+        "closure_note": "Added a local `ready` guard in the useEffect closure so the timeout callback cannot set error after markReady has already fired."
       },
       {
         "id": "R-V1105P0-004",
@@ -1021,9 +1024,12 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.105",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-10-v1.105-daemon-fullscreen-gate.md",
-        "note": "QC1/QC2 suggestions."
+        "note": "QC1/QC2 suggestions.",
+        "closed_at": "2026-07-10",
+        "closed_by": "V1.106 P1 T3",
+        "closure_note": "Added Vitest cases in daemon-launch-gate.test.tsx: retry button reloads the window, and degraded initial status passes the gate."
       },
       {
         "id": "R-V1105P0-005",
@@ -1032,9 +1038,12 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.105",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-10-v1.105-daemon-fullscreen-gate.md",
-        "note": "QC3 suggestion; gate covered separately."
+        "note": "QC3 suggestion; gate covered separately.",
+        "closed_at": "2026-07-10",
+        "closed_by": "V1.106 P1 T3",
+        "closure_note": "Extended the re-run test mount in settings-setup-section.test.tsx to wrap routes with DaemonLaunchGate, mirroring the production App shell."
       }
     ],
     "2026-07-10-v1.105-portrait-shell-steps": [
@@ -1045,9 +1054,12 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.105",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-10-v1.105-portrait-shell-steps.md",
-        "note": "QC1 F-001 / QC2 F-006"
+        "note": "QC1 F-001 / QC2 F-006",
+        "closed_at": "2026-07-10",
+        "closed_by": "V1.106 P1 T1",
+        "closure_note": "Closed by V1.106 P1 T1 — Studio imports @web-setup/top-step-indicator; inline duplicate removed; WizardStep type exported from shared module."
       },
       {
         "id": "R-V1105P2-002",
@@ -1056,22 +1068,28 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.105",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-10-v1.105-portrait-shell-steps.md",
-        "note": "QC1 F-002 / QC2 F-003"
+        "note": "QC1 F-002 / QC2 F-003",
+        "closed_at": "2026-07-10",
+        "closed_by": "V1.106 P1 T3",
+        "closure_note": "Added App overflow integration test in setup-wizard-page.test.tsx: long agent list renders inside a scrollable portrait wizard body with CTA row visible."
       }
     ],
     "2026-07-10-v1.105-wizard-ia-reorder": [
       {
         "id": "R-V1105P1-001",
-        "title": "Settings re-run test does not mount DaemonLaunchGate / assert Agent-first landing",
+        "title": "Settings re-run test does not assert Agent-first landing (inherits R-V1105P0-005)",
         "severity": "nit",
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.105",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-10-v1.105-wizard-ia-reorder.md",
-        "note": "QC2; inherits R-V1105P0-005"
+        "note": "QC2; inherits R-V1105P0-005",
+        "closed_at": "2026-07-10",
+        "closed_by": "V1.106 P1 T3",
+        "closure_note": "Closed with R-V1105P0-005 — the re-run test now mounts DaemonLaunchGate, routing through the production App shell to /setup where the wizard lands on the Agent step by default."
       }
     ],
     "2026-07-10-v1.106-studio-first-pipeline": [

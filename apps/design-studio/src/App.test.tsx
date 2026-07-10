@@ -301,11 +301,31 @@ describe('Surfaces page — setup wizard chrome fixtures', () => {
   });
 
   it('scrolls long agent lists inside the portrait card', () => {
-    const overflowCard = screen.getByTestId('wizard-chrome-card-agent-overflow');
+    const overflowCard = screen.getByTestId('wizard-chrome-steps-agent-overflow');
     const body = overflowCard.querySelector('[data-testid="wizard-step-body"]');
     expect(body).toHaveClass('overflow-y-auto', 'min-h-0', 'flex-1');
-    expect(screen.getByTestId('wizard-agent-list-overflow').children.length).toBeGreaterThan(6);
+    const grid = overflowCard.querySelector('[data-testid="agent-picker-grid"]');
+    expect(grid).toBeInTheDocument();
+    expect(grid!.children.length).toBeGreaterThan(6);
     expect(overflowCard.querySelector('[data-testid="wizard-cta-row"]')).toBeInTheDocument();
+  });
+
+  it('mounts the shared AgentPicker with data-status reflecting the fixture state', () => {
+    const agentCard = screen.getByTestId('wizard-chrome-steps-agent');
+    const picker = within(agentCard).getByTestId('agent-picker');
+    expect(picker).toHaveAttribute('data-status', 'ready');
+
+    const loadingCard = screen.getByTestId('wizard-chrome-agent-loading');
+    expect(within(loadingCard).getByTestId('agent-picker')).toHaveAttribute(
+      'data-status',
+      'loading',
+    );
+
+    const emptyCard = screen.getByTestId('wizard-chrome-agent-empty');
+    expect(within(emptyCard).getByTestId('agent-picker')).toHaveAttribute('data-status', 'empty');
+
+    const errorCard = screen.getByTestId('wizard-chrome-agent-error');
+    expect(within(errorCard).getByTestId('agent-picker')).toHaveAttribute('data-status', 'error');
   });
 
   it('renders horizontal connectors between top steps', () => {

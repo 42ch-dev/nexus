@@ -194,7 +194,7 @@ describe('SetupWizardPage', () => {
 
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'You are ready' })).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: /You're ready/ })).toBeInTheDocument(),
     );
 
     expect(progress.querySelector('[data-step-id="workspace"]')).toHaveAttribute(
@@ -225,7 +225,7 @@ describe('SetupWizardPage', () => {
 
     await user.click(screen.getByRole('button', { name: 'Continue' }));
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'You are ready' })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('heading', { name: /You're ready/ })).toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: 'Open Nexus' }));
 
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/works'));
@@ -249,7 +249,7 @@ describe('SetupWizardPage', () => {
     await advanceAgentToWorkspace(user);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'You are ready' })).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: /You're ready/ })).toBeInTheDocument(),
     );
 
     await user.click(screen.getByRole('button', { name: 'Back' }));
@@ -276,7 +276,7 @@ describe('SetupWizardPage', () => {
     await advanceAgentToWorkspace(user);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'You are ready' })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('heading', { name: /You're ready/ })).toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: 'Open Nexus' }));
 
     await waitFor(() => expect(setAgentProfile).toHaveBeenCalledWith('codex', 'codex'));
@@ -304,7 +304,7 @@ describe('SetupWizardPage', () => {
     await advanceAgentToWorkspace(user);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: 'You are ready' })).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByRole('heading', { name: /You're ready/ })).toBeInTheDocument());
     await user.click(screen.getByRole('button', { name: 'Open Nexus' }));
 
     await waitFor(() => expect(screen.getByText('Could not finish setup')).toBeInTheDocument());
@@ -351,7 +351,7 @@ describe('SetupWizardPage', () => {
     await advanceAgentToWorkspace(user);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'You are ready' })).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: /You're ready/ })).toBeInTheDocument(),
     );
     await user.click(screen.getByRole('button', { name: 'Open Nexus' }));
 
@@ -359,5 +359,35 @@ describe('SetupWizardPage', () => {
     expect(screen.getByTestId('location')).toHaveTextContent('/works');
     expect(setSetupCompleted).toHaveBeenCalledWith(true);
     resolveIpc();
+  });
+
+  it('scrolls long agent lists inside the portrait wizard card', async () => {
+    useHandlers(
+      http.post('/v1/daemon/agent-host/scan', () =>
+        HttpResponse.json({
+          agents: Array.from({ length: 12 }, (_, i) => ({
+            name: `agent-${i}`,
+            registry_agent_id: `agent-${i}`,
+            installed: true,
+            version: '1.0.0',
+          })),
+        }),
+      ),
+    );
+
+    renderInApp(<SetupWizardPage />, {
+      client: makeClient(),
+      initialRouterEntries: ['/setup'],
+    });
+
+    const card = screen.getByTestId('setup-wizard-card');
+    const main = screen.getByRole('main');
+    expect(card).toHaveClass('overflow-hidden');
+    expect(main).toHaveClass('min-h-0', 'min-w-0', 'flex-1', 'overflow-hidden');
+
+    await waitFor(() => expect(screen.getByTestId('agent-picker-grid')).toBeInTheDocument());
+    const grid = screen.getByTestId('agent-picker-grid');
+    expect(grid.children.length).toBeGreaterThan(6);
+    expect(screen.getByTestId('wizard-cta-row')).toBeInTheDocument();
   });
 });
