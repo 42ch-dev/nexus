@@ -1,8 +1,10 @@
 /**
  * @42ch/nexus-ui — brand assets, tokens, theme helpers, React brand components,
- * and V1.99-approved pure presentational primitives.
+ * and promoted pure presentational primitives.
  * V1.87 ships: `<NexusLogo>` and `<NexusMark>`.
  * V1.99 P0 ships: `<Button>`, `<Badge>`, `<Card>` (+ sub-primitives).
+ * V1.100 P2 ships: `<Input>`, `<Label>`, `<Textarea>`.
+ * V1.101 P2 ships: `<Select>`.
  */
 
 // Class-merge utility — the V1.100 SSOT for cn / extendTailwindMerge.
