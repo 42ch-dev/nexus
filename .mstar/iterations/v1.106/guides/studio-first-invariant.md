@@ -1,6 +1,6 @@
 # Studio-First Invariant (V1.106)
 
-**Status:** Locked at iteration-start grill-me; §5.1 PM + §5.2 architect + §5.3 writing applied. Compass remains `active` until PM §5.4 lock.
+**Status:** Locked at iteration-start grill-me; §5.1 PM + §5.2 architect + §5.3 writing applied. Compass `status: locked` since §5.4 PM lock.
 
 ## Invariant
 

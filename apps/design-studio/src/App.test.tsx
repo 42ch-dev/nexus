@@ -145,11 +145,20 @@ const SURFACES_SECTION_ROUTES = [
   { route: '/surfaces/setup', testId: 'surfaces-setup', linkLabel: 'Setup' },
   { route: '/surfaces/shell', testId: 'surfaces-shell', linkLabel: 'Shell' },
   {
-    route: '/surfaces/agent-picker',
-    testId: 'surfaces-agent-picker',
-    linkLabel: 'AgentPicker',
+    route: '/surfaces/daemon',
+    testId: 'surfaces-daemon',
+    linkLabel: 'Daemon',
   },
-  { route: '/surfaces/daemon', testId: 'surfaces-daemon', linkLabel: 'Daemon' },
+  {
+    route: '/surfaces/launch',
+    testId: 'surfaces-launch',
+    linkLabel: 'Launch',
+  },
+  {
+    route: '/surfaces/banner',
+    testId: 'surfaces-banner',
+    linkLabel: 'Banner',
+  },
 ] as const;
 
 describe('Surfaces section menu — deep links', () => {
@@ -193,6 +202,14 @@ describe('Surfaces section menu — deep links', () => {
     expect(within(index).getByRole('link', { name: /Daemon/ })).toHaveAttribute(
       'href',
       '/surfaces/daemon',
+    );
+    expect(within(index).getByRole('link', { name: /Launch/ })).toHaveAttribute(
+      'href',
+      '/surfaces/launch',
+    );
+    expect(within(index).getByRole('link', { name: /Banner/ })).toHaveAttribute(
+      'href',
+      '/surfaces/banner',
     );
   });
 });
@@ -353,6 +370,121 @@ describe('Surfaces page — daemon status strip', () => {
     expect(
       within(strip).queryByText(/Daemon API is reachable/i),
     ).not.toBeInTheDocument();
+  });
+});
+
+/* ---- surfaces page — launch splash fixtures (V1.106 P0 Task 3) --------- */
+
+describe('Surfaces page — launch splash fixtures', () => {
+  beforeEach(() => {
+    mockMatchMedia(false);
+    renderStudio('/surfaces/launch');
+  });
+
+  it('renders the launch section heading', () => {
+    expect(
+      screen.getByRole('heading', { name: 'Launch — Daemon splash' }),
+    ).toBeInTheDocument();
+  });
+
+  it('renders the page root and three daemon-ready-splash mounts', () => {
+    expect(screen.getByTestId('surfaces-launch')).toBeInTheDocument();
+    const mounts = screen.getAllByTestId('daemon-ready-splash');
+    expect(mounts).toHaveLength(3);
+  });
+
+  it('covers waiting, error+retry, and reset-local-database variants', () => {
+    expect(screen.getByText('Starting daemon…')).toBeInTheDocument();
+    expect(screen.getAllByText('Daemon not ready').length).toBeGreaterThanOrEqual(2);
+    expect(
+      screen.getAllByRole('button', { name: 'Restart Nexus' }).length,
+    ).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText('Reset local database')).toBeInTheDocument();
+  });
+});
+
+/* ---- surfaces page — main banner fixtures (V1.106 P0 Task 3) ----------- */
+
+describe('Surfaces page — main banner fixtures', () => {
+  beforeEach(() => {
+    mockMatchMedia(false);
+    renderStudio('/surfaces/banner');
+  });
+
+  it('renders the banner section heading', () => {
+    expect(
+      screen.getByRole('heading', { name: 'Launch — Daemon banner' }),
+    ).toBeInTheDocument();
+  });
+
+  it('renders all four main banner fixture variants', () => {
+    expect(screen.getByTestId('main-banner-fixture-starting')).toBeInTheDocument();
+    expect(screen.getByTestId('main-banner-fixture-degraded')).toBeInTheDocument();
+    expect(screen.getByTestId('main-banner-fixture-stopped')).toBeInTheDocument();
+    expect(screen.getByTestId('main-banner-fixture-error')).toBeInTheDocument();
+  });
+
+  it('shows port-conflict copy on the error variant', () => {
+    const errorFixture = screen.getByTestId('main-banner-fixture-error');
+    expect(within(errorFixture).getByText('Port unavailable')).toBeInTheDocument();
+    expect(
+      within(errorFixture).getByText(/Port 8420 is already in use/i),
+    ).toBeInTheDocument();
+  });
+
+  it('does not import the App MainBanner (composition-only)', () => {
+    // The fixture exposes stable, state-specific testids built from inline
+    // markup and @42ch/nexus-ui Button. The real apps/web banner has no
+    // data-testid and renders a single dynamic daemon state, so four matching
+    // fixture roots prove the fixture is used and the App banner is not
+    // imported.
+    const bannerSection = screen.getByTestId('surfaces-banner');
+    expect(
+      within(bannerSection).getByTestId('main-banner-fixture-starting'),
+    ).toBeInTheDocument();
+    expect(
+      within(bannerSection).getByTestId('main-banner-fixture-degraded'),
+    ).toBeInTheDocument();
+    expect(
+      within(bannerSection).getByTestId('main-banner-fixture-stopped'),
+    ).toBeInTheDocument();
+    expect(
+      within(bannerSection).getByTestId('main-banner-fixture-error'),
+    ).toBeInTheDocument();
+
+    // The real MainBanner does not emit any data-testid; an imported copy
+    // would add an uncontrolled root element without the fixture prefix.
+    expect(
+      within(bannerSection).queryAllByTestId(/^main-banner-/).length,
+    ).toBe(4);
+  });
+});
+
+/* ---- components page — Toast matrix (V1.106 P0 Task 3) ---------------- */
+
+describe('Components page — Toast matrix', () => {
+  beforeEach(() => {
+    mockMatchMedia(false);
+    renderStudio('/components');
+  });
+
+  it('renders the Toast section heading and fixture root', () => {
+    expect(screen.getByRole('heading', { name: 'Toast' })).toBeInTheDocument();
+    expect(screen.getByTestId('toast-matrix')).toBeInTheDocument();
+  });
+
+  it('renders all four toast variant testids', () => {
+    expect(screen.getByTestId('toast-variant-success')).toBeInTheDocument();
+    expect(screen.getByTestId('toast-variant-error')).toBeInTheDocument();
+    expect(screen.getByTestId('toast-variant-warning')).toBeInTheDocument();
+    expect(screen.getByTestId('toast-variant-info')).toBeInTheDocument();
+  });
+
+  it('uses error role on the error variant and status on others', () => {
+    expect(screen.getByTestId('toast-variant-error')).toHaveAttribute('role', 'alert');
+    expect(screen.getByTestId('toast-variant-success')).toHaveAttribute('role', 'status');
+    expect(screen.getByTestId('toast-variant-warning')).toHaveAttribute('role', 'status');
+    expect(screen.getByTestId('toast-variant-info')).toHaveAttribute('role', 'status');
   });
 });
 

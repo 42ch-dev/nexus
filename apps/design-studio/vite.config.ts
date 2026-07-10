@@ -22,18 +22,22 @@ export default defineConfig({
   optimizeDeps: {
     esbuildOptions: { target: 'esnext' },
   },
-  resolve: {
-    alias: {
-      // web components import @/lib/utils — resolve it to apps/web before the
-      // general `@` -> design-studio/src alias catches it.
-      '@/lib/utils': path.resolve(__dirname, '../web/src/lib/utils'),
-      '@': path.resolve(__dirname, './src'),
-      '@web-ui': path.resolve(__dirname, '../web/src/components/ui'),
-      // Gallery-only alias for app-shared setup compositions (V1.101 AgentPicker).
-      '@web-setup': path.resolve(__dirname, '../web/src/components/setup'),
-      '@web-lib/utils': path.resolve(__dirname, '../web/src/lib/utils'),
+    resolve: {
+      alias: {
+        // web components import @/lib/utils — resolve it to apps/web before the
+        // general `@` -> design-studio/src alias catches it.
+        '@/lib/utils': path.resolve(__dirname, '../web/src/lib/utils'),
+        // Presentational app modules (e.g. daemon-ready-splash) reach into
+        // apps/web UI primitives via @/components/ui/*. Mirror that alias so
+        // Studio can import the presentational module without duplicating it.
+        '@/components/ui': path.resolve(__dirname, '../web/src/components/ui'),
+        '@': path.resolve(__dirname, './src'),
+        '@web-ui': path.resolve(__dirname, '../web/src/components/ui'),
+        // Gallery-only alias for app-shared setup compositions (V1.101 AgentPicker).
+        '@web-setup': path.resolve(__dirname, '../web/src/components/setup'),
+        '@web-lib/utils': path.resolve(__dirname, '../web/src/lib/utils'),
+      },
     },
-  },
   server: {
     port: 5174,
   },

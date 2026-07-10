@@ -1025,12 +1025,12 @@ Token values: see frontmatter `components.tabs`.
 
 Token values: see frontmatter `components.states`.
 
-| Primitive | Use | Voice & Content examples |
+| Primitive | Token use | Voice & Content examples |
 | --- | --- | --- |
-| `Spinner` | Inline/async affordance | Icon-only; pair with text in `LoadingState` |
-| `LoadingState` | Section/card pending query | *Scanning for local ACP agents…* (sentence case, present participle + ellipsis) |
-| `EmptyState` | Zero rows / first-use | Title: **No agents found on PATH**; helper: *Install an agent or add a custom launch command below.*; host-owned `action` slot for primary CTA |
-| `ErrorState` | Recoverable load failure | Title: **Could not load this view**; helper: sentence-case transport or plain-language reason; action: **Try again** |
+| `Spinner` | `components.states.spinner` — size `16px`, color `blue-700` | Icon-only; pair with text in `LoadingState` |
+| `LoadingState` | `components.states.loading` — `copy-14` at `gray-700`, `space-2` gap, `space-6` vertical padding | *Scanning for local ACP agents…* (sentence case, present participle + ellipsis) |
+| `EmptyState` | `components.states.empty` — title `heading-16`/`gray-1000`, description `copy-14`/`gray-900`, `space-2` gap, `space-16` vertical padding | Title: **No agents found on PATH**; helper: *Install an agent or add a custom launch command below.*; host-owned `action` slot |
+| `ErrorState` | `components.states.error` — title `heading-16`/`red-1000`, description `copy-14`/`red-900`, tinted background/border, `rounded-card`, `space-4` padding; retry `label-14`/`blue-700` | Title: **Could not load this view**; helper: sentence-case transport or plain-language reason; action: **Try again** |
 
 `EmptyState` accepts an optional `action` ReactNode — the host renders the first-step CTA (e.g. **Create Work**); the primitive does not embed routing.
 

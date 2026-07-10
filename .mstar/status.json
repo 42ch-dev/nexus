@@ -6,13 +6,13 @@
       "id": "2026-07-10-v1.106-studio-first-pipeline",
       "title": "P0 — Studio-first pipeline complete",
       "file": "plans/2026-07-10-v1.106-studio-first-pipeline.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@frontend-dev",
         "@architect"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.106",
         "studio-first",
@@ -21,15 +21,15 @@
       ],
       "created_at": "2026-07-10",
       "updated_at": "2026-07-10",
-      "done_at": null,
-      "notes": "Scaffold only; Prepare/§5 deferred. SP-001..003.",
+      "done_at": "2026-07-10",
+      "notes": "Done — QC tri Approve with residuals; QA Accept. 5 residuals R-V1106P0-001..005 (defer/accept).",
       "metadata": {
         "iteration_refs": [
           "V1.106"
         ],
         "spec_integration_branch": "iteration/v1.106",
         "merge_target": "iteration/v1.106",
-        "working_branch": null,
+        "working_branch": "plan/v1.106-p0-studio-first-pipeline",
         "primary_spec": ".mstar/iterations/v1.106/specs/studio-first-pipeline.md",
         "wire_contracts_changed": false,
         "tier": "Must"
@@ -707,9 +707,12 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.101",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
-        "note": "QC3-S001 after revalidation Approve. Non-blocking."
+        "note": "QC3-S001 after revalidation Approve. Non-blocking.",
+        "closed_at": "2026-07-10",
+        "closed_by": "V1.106 P0 T1",
+        "closure_note": "Closed by V1.106 P0 T1 — Studio AGENTS transitional prose and Allowed table updated to reflect promoted primitives (Input/Label/Textarea/Select)."
       },
       {
         "id": "R-V1101P2-002",
@@ -718,9 +721,12 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.101",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
-        "note": "QC1 S-002. Optional doc tidy."
+        "note": "QC1 S-002. Optional doc tidy.",
+        "closed_at": "2026-07-10",
+        "closed_by": "V1.106 P0 T1",
+        "closure_note": "Closed by V1.106 P0 T1 — Studio AGENTS Allowed table now lists the promoted primitives explicitly."
       },
       {
         "id": "R-V1101P2-003",
@@ -751,9 +757,12 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.101",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
-        "note": "QC2 F-003. Cosmetic; Select export comment already cites V1.101."
+        "note": "QC2 F-003. Cosmetic; Select export comment already cites V1.101.",
+        "closed_at": "2026-07-10",
+        "closed_by": "V1.106 P0 T1",
+        "closure_note": "Closed by V1.106 P0 T1 — packages/nexus-ui/src/index.ts header now reflects V1.99, V1.100, and V1.101 promoted primitives."
       }
     ],
     "2026-07-09-v1.101-setup-wizard-ui-polish": [
@@ -1063,6 +1072,63 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-10-v1.105-wizard-ia-reorder.md",
         "note": "QC2; inherits R-V1105P0-005"
+      }
+    ],
+    "2026-07-10-v1.106-studio-first-pipeline": [
+      {
+        "id": "R-V1106P0-001",
+        "title": "Toast duplicate implementation: apps/web/src/lib/use-toast.tsx (40+ call sites) vs promoted packages/nexus-ui/src/components/toast.tsx (near-verbatim copy + testId); V1.99 re-export pattern not applied",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.106 consolidation pass",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-10-v1.106-studio-first-pipeline.md",
+        "note": "QC1 W-001. Functional; drift risk on future toast changes."
+      },
+      {
+        "id": "R-V1106P0-002",
+        "title": "lucide-react promoted as runtime dep of @42ch/nexus-ui via Toast icon imports; promotion-boundary doc does not record this",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.106",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-10-v1.106-studio-first-pipeline.md",
+        "note": "QC1 W-002 / QC3 F-002. Acceptable trade-off; needs doc record."
+      },
+      {
+        "id": "R-V1106P0-003",
+        "title": "@/components/ui alias added to Studio vite/vitest/tsconfig but undocumented in apps/design-studio/AGENTS.md Allowed table",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.106",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-10-v1.106-studio-first-pipeline.md",
+        "note": "QC1 S-001. Doc gap."
+      },
+      {
+        "id": "R-V1106P0-004",
+        "title": "Toast queue has no maxToasts upper bound; under duration:0 rapid-fire generation could grow unbounded",
+        "severity": "suggestion",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.106",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-10-v1.106-studio-first-pipeline.md",
+        "note": "QC3 S-001. Fixture uses duration:0."
+      },
+      {
+        "id": "R-V1106P0-005",
+        "title": "daemon-ready-splash testid repeated across 3 launch-fixture variant containers (not unique per variant)",
+        "severity": "nit",
+        "decision": "accept",
+        "owner": "@frontend-dev",
+        "target": "accept",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-10-v1.106-studio-first-pipeline.md",
+        "note": "QC2 Minor. Tests use getAllByTestId; acceptable."
       }
     ]
   }

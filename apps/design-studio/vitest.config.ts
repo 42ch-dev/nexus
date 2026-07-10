@@ -18,6 +18,10 @@ export default defineConfig({
       // web components import @/lib/utils — resolve it to apps/web before the
       // general `@` -> design-studio/src alias catches it (matches vite.config.ts).
       '@/lib/utils': path.resolve(__dirname, '../web/src/lib/utils'),
+      // Presentational app modules (e.g. daemon-ready-splash) reach into
+      // apps/web UI primitives via @/components/ui/*. Mirror that alias so
+      // Studio tests can import the presentational module without duplicating it.
+      '@/components/ui': path.resolve(__dirname, '../web/src/components/ui'),
       '@': path.resolve(__dirname, './src'),
       '@web-ui': path.resolve(__dirname, '../web/src/components/ui'),
       '@web-setup': path.resolve(__dirname, '../web/src/components/setup'),
