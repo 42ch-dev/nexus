@@ -35,6 +35,8 @@ export interface AgentPickerItem {
 
 export type AgentPickerStatus = 'loading' | 'ready' | 'empty' | 'error';
 
+export type AgentPickerDensity = 'default' | 'compact';
+
 export interface AgentPickerProps {
   status: AgentPickerStatus;
   agents?: AgentPickerItem[];
@@ -55,6 +57,8 @@ export interface AgentPickerProps {
   loadingLabel?: string;
   emptyTitle?: string;
   emptyDescription?: string;
+  /** Layout density. Omit or `'default'` for Settings; wizard may pass `'compact'`. */
+  density?: AgentPickerDensity;
 }
 
 /**
@@ -76,7 +80,9 @@ export function AgentPicker({
   loadingLabel = 'Scanning for local ACP agents…',
   emptyTitle = 'No agents found on PATH',
   emptyDescription = 'Install an ACP-compatible agent, or continue with a custom launch command.',
+  density = 'default',
 }: AgentPickerProps) {
+  const compact = density === 'compact';
   const customLaunchVisible =
     showCustomLaunch ??
     (status === 'empty' ||
@@ -84,17 +90,25 @@ export function AgentPicker({
       (status === 'ready' && agents.length > 0));
 
   return (
-    <div className={cn('flex flex-col gap-4', className)}>
+    <div className={cn('flex flex-col', compact ? 'gap-3' : 'gap-4', className)}>
       {header}
 
       <div
-        className="flex min-h-[160px] flex-col gap-3 rounded-card border border-gray-alpha-400 bg-background-200 p-4"
+        className={cn(
+          'flex flex-col rounded-card border border-gray-alpha-400 bg-background-200',
+          compact
+            ? 'min-h-[120px] gap-2 p-3'
+            : 'min-h-[160px] gap-3 p-4',
+        )}
         data-testid="agent-picker"
         data-status={status}
       >
         {status === 'loading' ? (
           <div
-            className="flex flex-1 flex-col items-center justify-center gap-2 py-10"
+            className={cn(
+              'flex flex-1 flex-col items-center justify-center gap-2',
+              compact ? 'py-6' : 'py-10',
+            )}
             role="status"
             aria-live="polite"
           >
@@ -125,7 +139,7 @@ export function AgentPicker({
         ) : null}
 
         {status === 'empty' ? (
-          <div className="flex flex-col gap-2 py-4 text-center">
+          <div className={cn('flex flex-col gap-2 text-center', compact ? 'py-2' : 'py-4')}>
             <p className="text-heading-16 font-heading text-gray-1000">{emptyTitle}</p>
             <p className="text-copy-14 text-gray-900">{emptyDescription}</p>
           </div>
@@ -133,7 +147,10 @@ export function AgentPicker({
 
         {status === 'ready' && agents.length > 0 ? (
           <ul
-            className="grid grid-cols-1 gap-3 sm:grid-cols-2"
+            className={cn(
+              'grid grid-cols-1 sm:grid-cols-2',
+              compact ? 'gap-2' : 'gap-3',
+            )}
             data-testid="agent-picker-grid"
           >
             {agents.map((agent) => (
@@ -142,6 +159,7 @@ export function AgentPicker({
                   agent={agent}
                   selected={selectedId === agent.id}
                   onSelect={onSelect}
+                  compact={compact}
                 />
               </li>
             ))}
@@ -153,13 +171,16 @@ export function AgentPicker({
             className={cn(
               'flex flex-col gap-2',
               status === 'ready' && agents.length > 0
-                ? 'mt-1 border-t border-gray-alpha-400 pt-3'
+                ? compact
+                  ? 'mt-0 border-t border-gray-alpha-400 pt-2'
+                  : 'mt-1 border-t border-gray-alpha-400 pt-3'
                 : undefined,
             )}
           >
             <CustomLaunchField
               value={customLaunchValue}
               onChange={onCustomLaunchChange}
+              compact={compact}
             />
           </div>
         ) : null}
@@ -172,10 +193,12 @@ function AgentCard({
   agent,
   selected,
   onSelect,
+  compact,
 }: {
   agent: AgentPickerItem;
   selected: boolean;
   onSelect?: (id: string) => void;
+  compact: boolean;
 }) {
   const selectable = agent.installed;
 
@@ -187,7 +210,8 @@ function AgentCard({
       data-testid={`agent-card-${agent.id}`}
       data-installed={selectable ? 'true' : 'false'}
       className={cn(
-        'flex w-full flex-col rounded-control border p-3 text-left',
+        'flex w-full flex-col rounded-control border',
+        compact ? 'p-2' : 'p-3',
         selectable
           ? selected
             ? 'border-blue-700 bg-blue-700/8'
@@ -320,12 +344,14 @@ function OutboundLink({ href, label }: { href: string; label: string }) {
 function CustomLaunchField({
   value,
   onChange,
+  compact,
 }: {
   value: string;
   onChange: (command: string) => void;
+  compact: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-2" data-testid="agent-picker-custom-launch">
+    <div className={cn('flex flex-col', compact ? 'gap-1.5' : 'gap-2')} data-testid="agent-picker-custom-launch">
       <Label
         htmlFor="agent-picker-custom-launch"
         className="flex items-center gap-1.5 text-copy-14 text-gray-900"

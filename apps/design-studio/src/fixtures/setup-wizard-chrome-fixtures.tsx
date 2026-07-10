@@ -5,21 +5,21 @@
  * Studio-local only — no product pages, no daemon client, no contracts.
  */
 
-import type { ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import { ChevronLeft } from 'lucide-react';
 
 import { cn, Button, Card } from '@42ch/nexus-ui';
+import {
+  AgentPicker,
+  type AgentPickerItem,
+  type AgentPickerStatus,
+} from '@web-setup/agent-picker';
+import {
+  TopStepIndicator,
+  type WizardStep,
+} from '@web-setup/top-step-indicator';
 
-export type WizardStepId = 'agent' | 'workspace' | 'done';
-export type StepStatus = 'complete' | 'active' | 'pending';
-
-const STEP_DEFS: { id: WizardStepId; label: string }[] = [
-  { id: 'agent', label: 'Agent' },
-  { id: 'workspace', label: 'Workspace' },
-  { id: 'done', label: 'Done' },
-];
-
-const STEP_TITLES: Record<WizardStepId, string> = {
+const STEP_TITLES: Record<WizardStep, string> = {
   agent: 'Choose an agent',
   workspace: 'Choose a workspace',
   done: 'You are ready',
@@ -39,6 +39,18 @@ const OVERFLOW_AGENT_NAMES = [
   'Amp',
   'Custom ACP',
 ];
+
+const OVERFLOW_AGENTS: AgentPickerItem[] = OVERFLOW_AGENT_NAMES.map((name) => ({
+  id: name.toLowerCase().replace(/\s+/g, '-'),
+  name,
+  version: '1.0.0',
+  description: `${name} ACP agent.`,
+  installed: true,
+  installUrl: null,
+  docsUrl: null,
+}));
+
+const READY_AGENTS = OVERFLOW_AGENTS.slice(0, 3);
 
 function FixtureFrame({
   title,
@@ -60,69 +72,6 @@ function FixtureFrame({
       <p className="text-copy-13 text-gray-700 mb-4">{description}</p>
       {children}
     </div>
-  );
-}
-
-function stepStatus(currentStep: WizardStepId, index: number): StepStatus {
-  const currentIndex = STEP_DEFS.findIndex((s) => s.id === currentStep);
-  if (index < currentIndex) return 'complete';
-  if (index === currentIndex) return 'active';
-  return 'pending';
-}
-
-/**
- * Top horizontal Steps (V1.105 N1) — replaces left rail StepIndicator.
- * Optional short horizontal connectors reuse setup-wizard-step-connector color.
- */
-function TopStepIndicator({ currentStep }: { currentStep: WizardStepId }) {
-  return (
-    <nav aria-label="Setup progress" className="w-full shrink-0" data-testid="top-step-indicator">
-      <ol className="flex w-full items-center justify-between gap-2">
-        {STEP_DEFS.map((s, index) => {
-          const status = stepStatus(currentStep, index);
-          return (
-            <li
-              key={s.id}
-              className="relative flex min-w-0 flex-1 flex-col items-center gap-2"
-              aria-current={status === 'active' ? 'step' : undefined}
-              data-step-id={s.id}
-              data-step-status={status}
-            >
-              {index < STEP_DEFS.length - 1 && (
-                <div
-                  className="absolute top-[calc(var(--color-setup-wizard-step-circle-size)/2)] left-[calc(50%+var(--color-setup-wizard-step-circle-size)/2+4px)] right-[calc(-50%+var(--color-setup-wizard-step-circle-size)/2+4px)] h-px bg-setup-wizard-step-connector"
-                  aria-hidden
-                  data-testid="step-connector"
-                />
-              )}
-              <span
-                className={cn(
-                  'z-10 flex h-setup-wizard-step-circle-size w-setup-wizard-step-circle-size items-center justify-center rounded-full text-button-14 font-button',
-                  status === 'active' &&
-                    'bg-setup-wizard-step-circle-active-bg text-setup-wizard-step-circle-active-text',
-                  status === 'complete' &&
-                    'bg-setup-wizard-step-circle-complete-bg text-setup-wizard-step-circle-complete-text',
-                  status === 'pending' &&
-                    'bg-setup-wizard-step-circle-pending-bg text-setup-wizard-step-circle-pending-text',
-                )}
-              >
-                {index + 1}
-              </span>
-              <span
-                className={cn(
-                  'truncate text-center text-setup-wizard-step-label-typography',
-                  status === 'pending'
-                    ? 'text-setup-wizard-step-label-pending-color'
-                    : 'text-setup-wizard-step-label-active-color',
-                )}
-              >
-                {s.label}
-              </span>
-            </li>
-          );
-        })}
-      </ol>
-    </nav>
   );
 }
 
@@ -150,27 +99,32 @@ function CtaRow({ showBack, primaryLabel }: { showBack: boolean; primaryLabel: s
   );
 }
 
-function AgentListBody({ overflow }: { overflow: boolean }) {
-  const names = overflow ? OVERFLOW_AGENT_NAMES : OVERFLOW_AGENT_NAMES.slice(0, 3);
+function AgentStepBody({
+  status,
+  overflow = false,
+}: {
+  status: AgentPickerStatus;
+  overflow?: boolean;
+}) {
+  const [selectedId, setSelectedId] = useState<string | null>(
+    status === 'ready' ? READY_AGENTS[0]!.id : null,
+  );
+  const [custom, setCustom] = useState('');
+  const agents = status === 'ready' ? (overflow ? OVERFLOW_AGENTS : READY_AGENTS) : [];
+
   return (
-    <ul
-      className="flex flex-col gap-2"
-      data-testid={overflow ? 'wizard-agent-list-overflow' : 'wizard-agent-list'}
-    >
-      {names.map((name, i) => (
-        <li
-          key={name}
-          className={cn(
-            'flex min-h-setup-wizard-surface-input-row-min-height items-center rounded-control border px-setup-wizard-surface-input-row-padding-x py-setup-wizard-surface-input-row-padding-y',
-            i === 0
-              ? 'border-blue-700 bg-background-200'
-              : 'border-setup-wizard-surface-input-row-border bg-setup-wizard-surface-input-row-bg',
-          )}
-        >
-          <span className="text-copy-14 text-setup-wizard-surface-input-row-path-color">{name}</span>
-        </li>
-      ))}
-    </ul>
+    <AgentPicker
+      status={status}
+      agents={agents}
+      selectedId={selectedId}
+      onSelect={setSelectedId}
+      customLaunchValue={custom}
+      onCustomLaunchChange={setCustom}
+      density="compact"
+      emptyDescription="Install an agent or add a custom launch command below."
+      errorDescription="The daemon did not respond to the agent scan request."
+      onRetry={status === 'error' ? () => undefined : undefined}
+    />
   );
 }
 
@@ -195,9 +149,11 @@ function WorkspaceBody() {
 
 function WizardChromeCard({
   currentStep,
+  agentStatus = 'ready',
   agentOverflow = false,
 }: {
-  currentStep: WizardStepId;
+  currentStep: WizardStep;
+  agentStatus?: AgentPickerStatus;
   agentOverflow?: boolean;
 }) {
   const showBack = currentStep === 'workspace' || currentStep === 'done';
@@ -207,7 +163,13 @@ function WizardChromeCard({
     <div className="flex items-center justify-center p-2">
       <Card
         className="flex h-setup-wizard-wizard-max-height max-h-[85vh] w-full max-w-setup-wizard-step-wizard-max-width flex-col overflow-hidden rounded-popover p-0 shadow-modal"
-        data-testid={`wizard-chrome-card-${currentStep}${agentOverflow ? '-overflow' : ''}`}
+        data-testid={`wizard-chrome-card-${currentStep}${
+          currentStep === 'agent' && agentStatus !== 'ready'
+            ? `-${agentStatus}`
+            : agentOverflow
+              ? '-overflow'
+              : ''
+        }`}
         data-current-step={currentStep}
         data-shell="portrait"
       >
@@ -232,7 +194,9 @@ function WizardChromeCard({
               </p>
             </div>
 
-            {currentStep === 'agent' && <AgentListBody overflow={agentOverflow} />}
+            {currentStep === 'agent' && (
+              <AgentStepBody status={agentStatus} overflow={agentOverflow} />
+            )}
             {currentStep === 'workspace' && <WorkspaceBody />}
           </div>
 
@@ -279,6 +243,30 @@ export function SetupWizardChromeFixtures() {
         testId="wizard-chrome-steps-agent-overflow"
       >
         <WizardChromeCard currentStep="agent" agentOverflow />
+      </FixtureFrame>
+
+      <FixtureFrame
+        title="Agent — loading"
+        description="Scan in progress inside the portrait shell."
+        testId="wizard-chrome-agent-loading"
+      >
+        <WizardChromeCard currentStep="agent" agentStatus="loading" />
+      </FixtureFrame>
+
+      <FixtureFrame
+        title="Agent — empty"
+        description="No agents found; custom launch escape hatch visible."
+        testId="wizard-chrome-agent-empty"
+      >
+        <WizardChromeCard currentStep="agent" agentStatus="empty" />
+      </FixtureFrame>
+
+      <FixtureFrame
+        title="Agent — error"
+        description="Scan failure with retry + custom launch escape hatch."
+        testId="wizard-chrome-agent-error"
+      >
+        <WizardChromeCard currentStep="agent" agentStatus="error" />
       </FixtureFrame>
     </div>
   );

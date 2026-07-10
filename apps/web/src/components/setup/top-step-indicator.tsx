@@ -1,5 +1,6 @@
 import { cn } from '@/lib/utils';
-import type { WizardStep } from '@/pages/setup-wizard-page';
+
+export type WizardStep = 'agent' | 'workspace' | 'done';
 
 const STEP_DEFS: { id: WizardStep; label: string }[] = [
   { id: 'agent', label: 'Agent' },
