@@ -69,7 +69,12 @@ function TestChild() {
 
 function RouteSpy() {
   const location = useLocation();
-  return <span data-testid="current-path">{location.pathname}</span>;
+  return (
+    <>
+      <span data-testid="current-path">{location.pathname}</span>
+      <span data-testid="current-hash">{location.hash}</span>
+    </>
+  );
 }
 
 function makeQueryClient(): QueryClient {
@@ -214,6 +219,48 @@ describe('ClientProvider resume-time fingerprint gate', () => {
       expect(fetchImpl).toHaveBeenCalledTimes(1);
     },
   );
+
+  it('allows /settings/advanced#connection on fingerprint mismatch', async () => {
+    const fetchImpl = makeFetchImpl({ fingerprint: 'served-fingerprint' });
+    const config: ConnectionConfig = {
+      endpointUrl: 'https://remote.example.com',
+      apiKey: 'key-1',
+      pinnedFingerprint: 'stored-fingerprint',
+      active: true,
+    };
+    renderWithGate(config, fetchImpl, ['/settings/advanced#connection']);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('current-path')).toHaveTextContent(
+        '/settings/advanced',
+      );
+    });
+
+    expect(screen.getByTestId('current-hash')).toHaveTextContent('#connection');
+    expect(screen.getByTestId('connect-page')).toBeInTheDocument();
+    expect(screen.queryByTestId('child')).not.toBeInTheDocument();
+  });
+
+  it('redirects /settings/advanced#setup to #connection on fingerprint mismatch', async () => {
+    const fetchImpl = makeFetchImpl({ fingerprint: 'served-fingerprint' });
+    const config: ConnectionConfig = {
+      endpointUrl: 'https://remote.example.com',
+      apiKey: 'key-1',
+      pinnedFingerprint: 'stored-fingerprint',
+      active: true,
+    };
+    renderWithGate(config, fetchImpl, ['/settings/advanced#setup']);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('current-path')).toHaveTextContent(
+        '/settings/advanced',
+      );
+      expect(screen.getByTestId('current-hash')).toHaveTextContent('#connection');
+    });
+
+    expect(screen.getByTestId('connect-page')).toBeInTheDocument();
+    expect(screen.queryByTestId('settings-setup-page')).not.toBeInTheDocument();
+  });
 
   it('shows a retryable error when fingerprint fetch fails', async () => {
     const error = new Error('Daemon unreachable');

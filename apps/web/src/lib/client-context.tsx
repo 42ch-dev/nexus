@@ -108,15 +108,18 @@ function FingerprintGate({
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Connection re-pin lives under Settings (V1.103). Allow the recovery path
+  // Connection re-pin lives under Settings (V1.106). Allow the recovery path
   // (and legacy `/connect` / `/settings/connection` while they redirect) to
   // mount on fingerprint mismatch so the author is not hard-locked out of
-  // re-pinning.
+  // re-pinning. The Advanced page also hosts the Setup section, so only the
+  // Connection hash (or the landing view) is allowed; `#setup` is redirected
+  // to `#connection` while identity is unresolved.
   const isConnectRoute =
     location.pathname === '/connect' ||
     location.pathname === '/settings/connection' ||
-    location.pathname === '/settings/advanced' ||
-    location.pathname === '/setup';
+    location.pathname === '/setup' ||
+    (location.pathname === '/settings/advanced' &&
+      (location.hash === '#connection' || location.hash === ''));
 
   useEffect(() => {
     if (state.status === 'mismatch' && !isConnectRoute) {
