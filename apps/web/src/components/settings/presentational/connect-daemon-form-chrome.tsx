@@ -145,7 +145,19 @@ export function ConnectDaemonFormChrome({
 
         {showFingerprint ? (
           <div className="space-y-2">
-            <p className={cn('text-copy-13', isMismatch ? 'text-warning-700' : 'text-gray-700')}>
+            <p
+              className={cn(
+                'text-copy-13',
+                isMismatch ? 'text-warning-700' : 'text-gray-700',
+              )}
+              data-testid={
+                isMismatch
+                  ? 'fingerprint-mismatch-warning'
+                  : state === 'reconnectMatch'
+                    ? 'fingerprint-match-hint'
+                    : undefined
+              }
+            >
               {isMismatch ? FINGERPRINT_MISMATCH_HELPER : CONNECTION_FINGERPRINT_HELPER}
             </p>
             <div
@@ -161,7 +173,9 @@ export function ConnectDaemonFormChrome({
         ) : null}
 
         {isLoopback ? (
-          <p className="text-copy-13 text-gray-700">{LOOPBACK_ONLY_HELPER}</p>
+          <p className="text-copy-13 text-gray-700" data-testid="loopback-info-note">
+            {LOOPBACK_ONLY_HELPER}
+          </p>
         ) : null}
 
         <div className="flex flex-wrap items-center gap-3 pt-2">
@@ -184,7 +198,9 @@ export function ConnectDaemonFormChrome({
             data-testid="trust-connect-button"
             onClick={onConnect}
           >
-            Trust This Certificate and Connect
+            {state === 'reconnectMatch'
+              ? 'Reconnect With These Settings'
+              : 'Trust This Certificate and Connect'}
           </Button>
           <Button
             type="button"

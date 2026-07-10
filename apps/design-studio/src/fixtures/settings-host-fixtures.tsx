@@ -388,6 +388,36 @@ function SettingsConnectionSectionChrome() {
 }
 
 /**
+ * Connection four-state matrix — presentational chrome for each
+ * author-visible state so Studio can accept every branch.
+ */
+function SettingsConnectionMatrixChrome() {
+  return (
+    <div
+      className="grid grid-cols-1 gap-4"
+      data-testid="settings-connection-matrix"
+    >
+      <ConnectDaemonFormChrome
+        state="firstUse"
+        data-testid="settings-connection-form-first-use"
+      />
+      <ConnectDaemonFormChrome
+        state="reconnectMatch"
+        data-testid="settings-connection-form-reconnect"
+      />
+      <ConnectDaemonFormChrome
+        state="fingerprintMismatch"
+        data-testid="settings-connection-form-mismatch"
+      />
+      <ConnectDaemonFormChrome
+        state="loopbackOnly"
+        data-testid="settings-connection-form-loopback"
+      />
+    </div>
+  );
+}
+
+/**
  * Workspace section body chrome — presentational extract from
  * `@web-setup/workspace-path-field`.
  */
@@ -616,6 +646,23 @@ export function SettingsHostFixtures() {
         </p>
         <div className="bg-background-200 rounded-card p-6">
           <SettingsConnectionSectionChrome />
+        </div>
+      </div>
+
+      <div
+        className="rounded-card border border-gray-alpha-200 bg-background-100 p-4"
+        data-testid="settings-host-fixture-connection-matrix"
+      >
+        <h4 className="text-heading-16 font-heading text-gray-1000 mb-1">
+          Connection matrix — four states
+        </h4>
+        <p className="text-copy-13 text-gray-700 mb-4">
+          Presentational chrome for each Connect-to-Daemon author-visible state:
+          first-use TOFU, reconnect match, fingerprint mismatch, and loopback
+          only. Props-driven only; no App IPC.
+        </p>
+        <div className="bg-background-200 rounded-card p-6">
+          <SettingsConnectionMatrixChrome />
         </div>
       </div>
 

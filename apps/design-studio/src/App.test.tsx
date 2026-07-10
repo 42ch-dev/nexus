@@ -748,7 +748,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).toBeInTheDocument();
     expect(
       within(form).getByTestId('trust-connect-button'),
-    ).toHaveTextContent('Trust This Certificate and Connect');
+    ).toHaveTextContent('Reconnect With These Settings');
     expect(
       within(form).getByTestId('revert-local-button'),
     ).toHaveTextContent('Use Local Daemon');
