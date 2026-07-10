@@ -3,33 +3,66 @@
   "updated_at": "2026-07-10",
   "plans": [
     {
-      "id": "2026-07-10-v1.107-studio-ui-tune",
-      "title": "P0 — Studio UI tune (visual + coverage)",
-      "file": "plans/2026-07-10-v1.107-studio-ui-tune.md",
-      "status": "Done",
+      "id": "2026-07-10-v1.108-canvas-outline-spatial",
+      "title": "P0 — Canvas Outline spatial parity",
+      "file": "plans/2026-07-10-v1.108-canvas-outline-spatial.md",
+      "status": "Todo",
       "owner": "@project-manager",
       "agents": [
         "@frontend-dev",
         "@architect"
       ],
-      "progress": 100,
+      "progress": 0,
       "tags": [
-        "v1.107",
-        "studio-first",
-        "design-studio",
+        "v1.108",
+        "canvas",
+        "outline",
         "must"
       ],
       "created_at": "2026-07-10",
       "updated_at": "2026-07-10",
-      "notes": "Done — All 17 FBs implemented. QC tri Approve (3/3) after fix wave. QA Pass with residuals. 2 non-blocking residuals (R-V1107QC1-W002 low, R-V1107QC1-ARCH nit).",
+      "notes": "Draft — awaiting §5 Review & Edit chain",
       "metadata": {
         "iteration_refs": [
-          "V1.107"
+          "V1.108"
         ],
-        "spec_integration_branch": "iteration/v1.107",
-        "merge_target": "iteration/v1.107",
-        "working_branch": "plan/v1.107-p0-studio-ui-tune",
-        "primary_spec": ".mstar/iterations/v1.107/specs/studio-ui-tune.md",
+        "spec_integration_branch": "iteration/v1.108",
+        "merge_target": "iteration/v1.108",
+        "working_branch": "plan/v1.108-p0-canvas-outline-spatial",
+        "primary_spec": ".mstar/iterations/v1.108/specs/canvas-outline-spatial.md",
+        "wire_contracts_changed": false,
+        "tier": "Must"
+      }
+    },
+    {
+      "id": "2026-07-10-v1.108-ui-shell-ssot",
+      "title": "P1 — UI shell SSOT + AgentPicker + canvas Surfaces",
+      "file": "plans/2026-07-10-v1.108-ui-shell-ssot.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@frontend-dev",
+        "@architect"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.108",
+        "ui",
+        "shell",
+        "studio-first",
+        "must"
+      ],
+      "created_at": "2026-07-10",
+      "updated_at": "2026-07-10",
+      "notes": "Draft — FB-UI-001..008 + Work IA + Studio canvas; awaiting §5",
+      "metadata": {
+        "iteration_refs": [
+          "V1.108"
+        ],
+        "spec_integration_branch": "iteration/v1.108",
+        "merge_target": "iteration/v1.108",
+        "working_branch": "plan/v1.108-p1-ui-shell-ssot",
+        "primary_spec": ".mstar/iterations/v1.108/specs/ui-shell-ssot.md",
         "wire_contracts_changed": false,
         "tier": "Must"
       }
@@ -39,8 +72,8 @@
     "integration_branch_retired": false,
     "iteration_base_branch": "main",
     "last_integration_branch": "iteration/v1.97",
-    "latest_active_compass": "v1.107-delivery-compass.md",
-    "latest_active_iteration": "V1.107",
+    "latest_active_compass": "v1.108-delivery-compass.md",
+    "latest_active_iteration": "V1.108",
     "latest_ship": {
       "iteration": "V1.97",
       "compass": "v1.97-desktop-first-launch-hardening-compass-v1.md",
@@ -51,7 +84,7 @@
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "pre_iteration_hotfix": null,
-    "spec_integration_branch": "iteration/v1.107",
+    "spec_integration_branch": "iteration/v1.108",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {
@@ -100,7 +133,7 @@
         "2026-07-09-v1.103-settings-shell-nav": 2
       }
     },
-    "updated_at": "2026-07-10T11:45:00+0800"
+    "updated_at": "2026-07-10T22:35:00+0800"
   },
   "residual_findings": {
     "2026-07-05-v1.91-findings-batch": [
