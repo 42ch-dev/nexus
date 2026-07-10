@@ -69,7 +69,12 @@ function TestChild() {
 
 function RouteSpy() {
   const location = useLocation();
-  return <span data-testid="current-path">{location.pathname}</span>;
+  return (
+    <>
+      <span data-testid="current-path">{location.pathname}</span>
+      <span data-testid="current-hash">{location.hash}</span>
+    </>
+  );
 }
 
 function makeQueryClient(): QueryClient {
@@ -101,7 +106,7 @@ function renderWithGate(
               element={<div data-testid="settings-setup-page">Setup</div>}
             />
             <Route
-              path="/settings/connection"
+              path="/settings/advanced"
               element={<div data-testid="connect-page">Connect</div>}
             />
             <Route path="/connect" element={<div data-testid="legacy-connect">Legacy</div>} />
@@ -164,7 +169,7 @@ describe('ClientProvider resume-time fingerprint gate', () => {
     expect(requestUrl).toBe('https://remote.example.com/v1/daemon/runtime/cert-fingerprint');
   });
 
-  it('redirects to /settings/connection on fingerprint mismatch and does not mount children', async () => {
+  it('redirects to /settings/advanced on fingerprint mismatch and does not mount children', async () => {
     const fetchImpl = makeFetchImpl({ fingerprint: 'served-fingerprint' });
     const config: ConnectionConfig = {
       endpointUrl: 'https://remote.example.com',
@@ -176,7 +181,7 @@ describe('ClientProvider resume-time fingerprint gate', () => {
 
     await waitFor(() => {
       expect(screen.getByTestId('current-path')).toHaveTextContent(
-        '/settings/connection',
+        '/settings/advanced',
       );
     });
 
@@ -192,7 +197,7 @@ describe('ClientProvider resume-time fingerprint gate', () => {
     { path: '/settings/agent', siblingTestId: 'settings-agent-page' },
     { path: '/settings/setup', siblingTestId: 'settings-setup-page' },
   ] as const)(
-    'redirects fingerprint mismatch from $path to /settings/connection (sibling is not a bypass)',
+    'redirects fingerprint mismatch from $path to /settings/advanced (sibling is not a bypass)',
     async ({ path, siblingTestId }) => {
       const fetchImpl = makeFetchImpl({ fingerprint: 'served-fingerprint' });
       const config: ConnectionConfig = {
@@ -205,7 +210,7 @@ describe('ClientProvider resume-time fingerprint gate', () => {
 
       await waitFor(() => {
         expect(screen.getByTestId('current-path')).toHaveTextContent(
-          '/settings/connection',
+          '/settings/advanced',
         );
       });
 
@@ -214,6 +219,48 @@ describe('ClientProvider resume-time fingerprint gate', () => {
       expect(fetchImpl).toHaveBeenCalledTimes(1);
     },
   );
+
+  it('allows /settings/advanced#connection on fingerprint mismatch', async () => {
+    const fetchImpl = makeFetchImpl({ fingerprint: 'served-fingerprint' });
+    const config: ConnectionConfig = {
+      endpointUrl: 'https://remote.example.com',
+      apiKey: 'key-1',
+      pinnedFingerprint: 'stored-fingerprint',
+      active: true,
+    };
+    renderWithGate(config, fetchImpl, ['/settings/advanced#connection']);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('current-path')).toHaveTextContent(
+        '/settings/advanced',
+      );
+    });
+
+    expect(screen.getByTestId('current-hash')).toHaveTextContent('#connection');
+    expect(screen.getByTestId('connect-page')).toBeInTheDocument();
+    expect(screen.queryByTestId('child')).not.toBeInTheDocument();
+  });
+
+  it('redirects /settings/advanced#setup to #connection on fingerprint mismatch', async () => {
+    const fetchImpl = makeFetchImpl({ fingerprint: 'served-fingerprint' });
+    const config: ConnectionConfig = {
+      endpointUrl: 'https://remote.example.com',
+      apiKey: 'key-1',
+      pinnedFingerprint: 'stored-fingerprint',
+      active: true,
+    };
+    renderWithGate(config, fetchImpl, ['/settings/advanced#setup']);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('current-path')).toHaveTextContent(
+        '/settings/advanced',
+      );
+      expect(screen.getByTestId('current-hash')).toHaveTextContent('#connection');
+    });
+
+    expect(screen.getByTestId('connect-page')).toBeInTheDocument();
+    expect(screen.queryByTestId('settings-setup-page')).not.toBeInTheDocument();
+  });
 
   it('shows a retryable error when fingerprint fetch fails', async () => {
     const error = new Error('Daemon unreachable');

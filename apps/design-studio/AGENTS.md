@@ -26,7 +26,7 @@ Parent rules: [`../AGENTS.md`](../AGENTS.md) (apps placement), root [`AGENTS.md`
 | `@web-ui/*` | `../web/src/components/ui/*` | Transitional gallery source for not-yet-promoted primitives |
 | `@web-setup/*` | `../web/src/components/setup/*` | Gallery-only import of app-shared setup compositions (e.g. AgentPicker) — props-driven; no contracts/daemon |
 | `@web-lib/utils` | `../web/src/lib/utils.ts` | `cn()` only |
-| `@42ch/nexus-ui` | workspace package | Brand VI plus V1.99-approved presentational primitives through public exports |
+| `@42ch/nexus-ui` | workspace package | Brand VI plus promoted presentational primitives (Button, Badge, Card, Input, Label, Textarea, Select) through public exports |
 | `@nexus/design-tokens` | `tooling/design-tokens` | Shared CSS + Tailwind preset |
 
 ### Forbidden
@@ -45,14 +45,14 @@ Parent rules: [`../AGENTS.md`](../AGENTS.md) (apps placement), root [`AGENTS.md`
 
 **Guardrails:** `tooling/check-ui-guardrails.sh` (CI job `ui-guardrails`) enforces these boundaries mechanically.
 
-## Transitional `apps/web` UI import policy (V1.98 → V1.99)
+## Transitional `apps/web` UI import policy (post-V1.99 promotion waves)
 
 Gallery **displays** shadcn primitives from `apps/web/src/components/ui/*` without migrating them to `@42ch/nexus-ui`. This coupling is **intentional and transitional**:
 
 - Import only presentational primitives (`button`, `dialog`, `tabs`, …)
 - `tabs` barrel export landed in P0 T1 (commit `55dd06cc`); use `@web-ui/<module>` direct imports or barrel as needed
 - Declare matching Radix/CVA peer versions in `package.json` (same majors as `apps/web`)
-- V1.99 decoupling rule: once a primitive is promoted into `@42ch/nexus-ui`, Studio must import it from `@42ch/nexus-ui`, not `@web-ui/*`
+- Decoupling rule: once a primitive is promoted into `@42ch/nexus-ui`, Studio must import it from `@42ch/nexus-ui`, not `@web-ui/*`
 - Unpromoted primitives may remain on `@web-ui/*` until a later promotion or explicit keep-studio/keep-web decision
 - **Transitional annotation required:** every unpromoted `@web-ui/*` import in Studio source files must carry an inline comment identifying the blocking criteria for promotion (e.g., `// @web-ui/label — transitional until Form Field slice locks label/control/helper/error composition`). This ensures the dependency's temporary status and promotion trigger are visible to future contributors.
 - **Annotation placement:** the `// transitional` marker must appear on the **line containing the module path** (the `'@web-ui/<name>'` line). This is the most robust anchor — the quoted module specifier is a single lexical token that cannot be split across lines, so it covers single-line, multiline, and any `from`/path split. Placing the annotation on the line above the import is not valid under this convention. The guardrail in `tooling/check-ui-guardrails.sh` enforces this by checking the quoted module path line itself for the `transitional` keyword.

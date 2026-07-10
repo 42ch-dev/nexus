@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { TopStepIndicator } from '@/components/setup/top-step-indicator';
+import {
+  TopStepIndicator,
+  type WizardStep,
+} from '@/components/setup/top-step-indicator';
 import { useSetupCompleted } from '@/lib/setup-completed-context';
 import { useDesktopCapabilities } from '@/lib/client-context';
 import { errorMessage } from '@/lib/error-message';
@@ -12,8 +15,6 @@ import { SetupStepDone } from '@/pages/setup-step-done';
 import type { AgentScanEntry } from '@42ch/nexus-contracts';
 
 /** V1.105 P1: Agent → Workspace → Done (Welcome/Daemon retired). */
-export type WizardStep = 'agent' | 'workspace' | 'done';
-
 export interface WizardState {
   workspaceRoot: string;
   workspacePicked?: boolean;

@@ -75,6 +75,8 @@ Per V1.99 compass Grill-Me lock: **promote `Button`, `Badge`, and `Card`; defer 
 
 **Deferred-owner:** P-1 does not assign a specific plan ID. The revisit trigger is the Form Field slice, which must demonstrate at least two Web consumers and one Studio fixture before reopening these three for promotion.
 
+> **Status update (V1.106 P0 T1 — 2026-07-10):** Input, Label, and Textarea were promoted in V1.100 P2; Select was promoted in V1.101 P2. See §Non-Promotion Record for the current classification.
+
 > **Update (V1.100 T1 — 2026-07-08):** The Form Field contract is now locked — see `.mstar/iterations/v1.100/specs/form-field-contract.md`. Implementation proceeds in plan `2026-07-08-v1.100-form-field-component-promotion` (P2). The contract defines precise label/control association, `aria-invalid`/`aria-describedby` ownership, helper/error/required semantics, wrapper strategy, and confirms no stateful `FormField` in this iteration.
 
 ### Out of Scope (never candidates)
@@ -109,20 +111,25 @@ Every component in `apps/web/src/components/ui/index.ts` barrel has a classifica
 | button | `promote` | — see §Locked First-Batch List |
 | badge | `promote` | — see §Locked First-Batch List |
 | card | `promote` | — see §Locked First-Batch List |
-| input | `defer` | Form-field contract incomplete per Grill-Me lock; revisit in Form Field slice |
-| label | `defer` | Form-field contract incomplete per Grill-Me lock; revisit in Form Field slice |
-| textarea | `defer` | Form-field contract incomplete per Grill-Me lock; revisit in Form Field slice |
+| input | `promote` | Promoted in V1.100 P2 — see `.mstar/iterations/v1.100/specs/form-field-contract.md` |
+| label | `promote` | Promoted alongside Input in V1.100 P2 Form Field slice |
+| textarea | `promote` | Promoted alongside Input in V1.100 P2 Form Field slice |
+| select | `promote` | Promoted in V1.101 P2 — native `<select>` presentational primitive |
 | dialog | `keep-web` | Imports `@radix-ui/react-dialog` + `lucide-react`; uses `DialogPrimitive.Portal` (fixed positioning, focus trap, scroll lock) — behavior layer beyond presentational scope; title/description wired to Radix accessibility primitives |
 | tabs | `keep-web` | Compound component with internal React context + `useState` state management (`controlled`/`uncontrolled` pattern); not purely presentational — owns selection state |
-| select | `keep-web` | Native `<select>` element with web-local styling wrapper; technically pure presentational but not in V1.99 first batch; no cross-app demand proven yet |
 | table | `keep-web` | Pure presentational table primitives, but wraps output in `<div className="w-full overflow-x-auto">` (responsive layout concern); not in V1.99 first batch |
 | states | `keep-web` | `Spinner` imports `lucide-react` (`Loader2` icon — asset boundary); `ErrorState` has `onRetry` callback + product copy ("Could not load this view", "Try again"); `EmptyState` accepts `action` ReactNode (app-composition pattern) |
 
-### Deferred Revisit Triggers
+### Revisit history
 
-| Component(s) | Trigger | Owner |
+The V1.99 deferred primitives below have since been promoted:
+
+| Component(s) | Promotion slice | Owner |
 | --- | --- | --- |
-| input, label, textarea | Form Field slice: ≥2 Web consumers + 1 Studio fixture needing the same accessible field composition (helper text, error text, required/optional copy, label/control association) | Future plan (PM-assigned) |
+| input, label, textarea | V1.100 P2 Form Field slice — ≥2 Web consumers + 1 Studio fixture | `2026-07-08-v1.100-form-field-component-promotion` |
+| select | V1.101 P2 native Select primitive | `2026-07-09-v1.101-select-component-promotion` |
+
+No deferred primitives remain from V1.99. Future keep-web candidates (Dialog, Tabs, Table, States) should be reconsidered only when a cross-app reuse case, dependency-footprint shrink, or behavior-layer extraction is demonstrated.
 
 ### keep-web Intent
 

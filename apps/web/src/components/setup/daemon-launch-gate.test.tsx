@@ -99,6 +99,25 @@ describe('DaemonLaunchGate', () => {
     expect(startDaemon).not.toHaveBeenCalled();
   });
 
+  it('desktop passes gate when initial status is degraded', async () => {
+    healthUnavailable();
+    const startDaemon = vi.fn(() => Promise.resolve());
+    const getDaemonStatus = vi.fn(() =>
+      Promise.resolve({ state: 'degraded', port: 8420 } as DaemonStatus),
+    );
+
+    renderGate({
+      desktop: makeDesktop({
+        startDaemon,
+        getDaemonStatus,
+        onDaemonStatusChanged: () => Promise.resolve(() => {}),
+      }),
+    });
+
+    await waitFor(() => expect(screen.getByTestId('routes')).toBeInTheDocument());
+    expect(startDaemon).not.toHaveBeenCalled();
+  });
+
   it('desktop becomes ready via health when status subscription is unavailable', async () => {
     useHandlers(
       http.get('/v1/daemon/runtime/health', () =>
@@ -148,6 +167,40 @@ describe('DaemonLaunchGate', () => {
     expect(screen.getByRole('button', { name: /Restart Nexus/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Reset local database/i })).toBeInTheDocument();
     expect(startDaemon).not.toHaveBeenCalled();
+  });
+
+  it('reloads the window when retry is clicked', async () => {
+    healthUnavailable();
+    const user = userEvent.setup();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const getDaemonStatus = vi.fn(() =>
+      Promise.resolve({ state: 'starting', port: 8420 } as DaemonStatus),
+    );
+    const reloadSpy = vi.fn();
+    Object.defineProperty(window, 'location', {
+      value: { ...window.location, reload: reloadSpy },
+      writable: true,
+    });
+
+    renderGate({
+      desktop: makeDesktop({
+        getDaemonStatus,
+        onDaemonStatusChanged: () => Promise.resolve(() => {}),
+      }),
+    });
+
+    await waitFor(() => expect(screen.getByText('Starting daemon…')).toBeInTheDocument());
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(25_000);
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: /Restart Nexus/i })).toBeInTheDocument(),
+    );
+
+    await user.click(screen.getByRole('button', { name: /Restart Nexus/i }));
+    expect(reloadSpy).toHaveBeenCalled();
   });
 
   it('reset local database does not call startDaemon (reload owns D2 restart)', async () => {

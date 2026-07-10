@@ -11,13 +11,15 @@ interface SetupStepDoneProps {
 export function SetupStepDone({ onFinish, onBack, isFinishing }: SetupStepDoneProps) {
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center gap-4 text-center">
-      <div className="flex min-h-0 flex-1 flex-col items-center gap-4 overflow-y-auto" data-testid="wizard-step-body">
-        <CheckCircle className="h-12 w-12 text-green-800" aria-hidden />
-        <div className="flex flex-col gap-2">
-          <h2 className="text-heading-24 font-heading text-gray-1000">You are ready</h2>
-          <p className="text-copy-14 text-gray-900">
-            Nexus is set up and ready. You can change these settings later from the app menu.
-          </p>
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto" data-testid="wizard-step-body">
+        <div className="my-auto flex flex-col items-center gap-4">
+          <CheckCircle className="h-12 w-12 text-green-800" aria-hidden />
+          <div className="flex flex-col gap-2">
+            <h2 className="text-heading-24 font-heading text-gray-1000">You're ready 🎉</h2>
+            <p className="text-copy-14 text-gray-900">
+              Open Nexus to start writing. You can change settings anytime.
+            </p>
+          </div>
         </div>
       </div>
       <div

@@ -1,7 +1,7 @@
 # World KB Runtime Architecture
 
 **Status**: Normative — V1.74 Shipped (§2 `kb_relationships` store + symmetric read projection; prior V1.51 §5.5 LLM pathway + §6 OCC extension)
-**Authority**: Implementation SSOT below normative specs. Does not override [entity-scope-model.md](specs/entity-scope-model.md) or [novel-writing/workflow-profile.md](specs/novel-writing/workflow-profile.md).  
+**Authority**: Implementation SSOT below normative specs. Does not override [entity-scope-model.md](../specs/entity-scope-model.md) or [novel-writing/workflow-profile.md](../specs/novel-writing/workflow-profile.md).  
 **Iteration**: [v1.40-novel-world-kb-delivery-compass-v1.md](../iterations/v1.40-novel-world-kb-delivery-compass-v1.md)
 
 ---
@@ -93,7 +93,7 @@ Retire work-entry-only job semantics in V1.40; keep wire `BlockType` from contra
 V1.51 T-A P0 closes `R-V150KBED-01` by swapping the V1.50 heuristic
 (`block_type_guess='character'` for every capitalized noun phrase) for an
 LLM-driven extraction pathway. The new `nexus.llm.extract` capability
-([llm-extract.md](specs/llm-extract.md)) is a sibling to `judge.llm`: both
+([llm-extract.md](../specs/llm-extract.md)) is a sibling to `judge.llm`: both
 reuse the V1.32 LLM worker pool via `WorkerHandleProvider`, but
 `nexus.llm.extract` emits `Vec<KbCandidate>` carrying LLM-judged `block_type`,
 `canonical_name`, `confidence`, and a verbatim `source_quote`.
@@ -121,7 +121,7 @@ queryable/sortable. Heuristic rows keep the V1.50 shape (columns `NULL`,
 
 V1.76 extends the extraction pathway to also **propose relationships** from
 chapter prose. `nexus.llm.extract` may now return `{ candidates, relationships? }`
-(see [llm-extract.md](specs/llm-extract.md) §1.2). The review-time hook
+(see [llm-extract.md](../specs/llm-extract.md) §1.2). The review-time hook
 (`quality_loop::extract_kb_candidates_for_review`) parses the optional
 `relationships` array and persists suggestions into `kb_relationships` after
 endpoint resolution:

@@ -16,6 +16,7 @@ import {
 } from '@42ch/nexus-ui';
 import { Dialog, DialogTrigger, DialogContent } from '@web-ui/dialog'; // transitional — keep-web (Radix portal/focus-trap beyond presentational scope)
 import { Spinner, LoadingState, EmptyState, ErrorState } from '@web-ui/states'; // transitional — keep-web (lucide-react asset boundary; product copy & app-composition callbacks)
+import { ToastFixtures } from '@/fixtures/toast-fixtures';
 import {
   Table,
   TableHeader,
@@ -94,6 +95,7 @@ function SubNav() {
     { label: 'Tabs', href: '#comp-tabs' },
     { label: 'Textarea', href: '#comp-textarea' },
     { label: 'Form Field', href: '#comp-form-field' },
+    { label: 'Toast', href: '#comp-toast' },
   ];
 
   return (
@@ -424,7 +426,11 @@ function SelectSection() {
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           input-select-textarea
         </code>{' '}
-        tokens. Imported directly from{' '}
+        tokens plus{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          components.select
+        </code>{' '}
+        chevron inset. Imported directly from{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @42ch/nexus-ui
         </code>
@@ -831,6 +837,31 @@ function FormFieldSection() {
 }
 
 /* ------------------------------------------------------------------ */
+/*  13. Toast                                                          */
+/* ------------------------------------------------------------------ */
+
+function ToastSection() {
+  return (
+    <section>
+      <SectionHeading id="comp-toast">Toast</SectionHeading>
+      <p className="text-copy-16 text-gray-700 mb-6">
+        Live notification renderer using promoted{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @42ch/nexus-ui
+        </code>{' '}
+        Toast primitives. Variants: success, error, warning, info. Each toast
+        shows a title and optional description; error toasts use{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          role=&quot;alert&quot;
+        </code>
+        .
+      </p>
+      <ToastFixtures />
+    </section>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Page                                                                */
 /* ------------------------------------------------------------------ */
 
@@ -841,16 +872,13 @@ export function ComponentsPage() {
         Components
       </h2>
       <p className="text-copy-16 text-gray-700 mb-6">
-        All 11 UI primitive modules from{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          apps/web/src/components/ui
-        </code>{' '}
-        — live variant/state matrices per IA guide §4.3 and DESIGN.md.         Every
-        component is imported via <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>{' '}
-        (promoted) or{' '}
+        UI primitive matrices per IA guide §4.3 and DESIGN.md. Promoted
+        primitives are imported via{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>
+        ; transitional primitives remain on{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@web-ui/*</code>{' '}
-        (transitional);
-        interactive controls (Dialog, Tabs) are functional.
+        until their promotion slice lands. Interactive controls (Dialog, Tabs)
+        are functional.
       </p>
       <SubNav />
 
@@ -866,18 +894,16 @@ export function ComponentsPage() {
       <TabsSection />
       <TextareaSection />
       <FormFieldSection />
+      <ToastSection />
 
       <p className="text-copy-13 text-gray-500 mt-12 pt-8 border-t border-gray-alpha-200">
-        7 promoted (Badge, Button, Card, Input, Label, Textarea, Select) + 4
-        transitional (Dialog, States, Table, Tabs) = 11 primitive
-        modules from the{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">apps/web/src/components/ui</code>{' '}
-        barrel — all rendered live via{' '}
+        8 promoted (Badge, Button, Card, Input, Label, Textarea, Select, Toast)
+        + 4 transitional (Dialog, States, Table, Tabs) rendered live via{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@42ch/nexus-ui</code>{' '}
         (promoted) and{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@web-ui/*</code>{' '}
-        (transitional).
-        No primitives are migrated, copied, or re-implemented in this gallery.
+        (transitional). No transitional primitives are migrated, copied, or
+        re-implemented in this gallery.
       </p>
     </div>
   );

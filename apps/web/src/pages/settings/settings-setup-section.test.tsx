@@ -6,8 +6,10 @@ import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 
+import { SettingsAdvancedSection } from '@/pages/settings/settings-advanced-section';
 import { SettingsSetupSection } from '@/pages/settings/settings-setup-section';
 import { SettingsShellLayout } from '@/pages/settings/settings-shell-layout';
+import { DaemonLaunchGate } from '@/components/setup/daemon-launch-gate';
 import { renderInApp } from '@/test/test-providers';
 import { BrowserClient } from '@/lib/nexus';
 import type { DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
@@ -60,6 +62,7 @@ function CompletedProbe() {
 const settingsRouteTree = (
   <Route path="settings" element={<SettingsShellLayout />}>
     <Route index element={<Navigate to="agent" replace />} />
+    <Route path="advanced" element={<SettingsAdvancedSection />} />
     <Route path="setup" element={<SettingsSetupSection />} />
   </Route>
 );
@@ -102,21 +105,23 @@ describe('SettingsSetupSection', () => {
     const setAgentProfile = vi.fn(() => Promise.resolve());
 
     renderInApp(
-      <>
-        <CompletedProbe />
-        <Routes>
-          {settingsRouteTree}
-          <Route
-            path="setup"
-            element={
-              <>
-                <div data-testid="setup-wizard">Wizard</div>
-                <LocationProbe />
-              </>
-            }
-          />
-        </Routes>
-      </>,
+      <DaemonLaunchGate>
+        <>
+          <CompletedProbe />
+          <Routes>
+            {settingsRouteTree}
+            <Route
+              path="setup"
+              element={
+                <>
+                  <div data-testid="setup-wizard">Wizard</div>
+                  <LocationProbe />
+                </>
+              }
+            />
+          </Routes>
+        </>
+      </DaemonLaunchGate>,
       {
         client: makeClient(),
         desktop: makeDesktop({
@@ -128,6 +133,10 @@ describe('SettingsSetupSection', () => {
         initialRouterEntries: ['/settings/setup'],
         setupCompleted: true,
       },
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId('settings-setup-section')).toBeInTheDocument(),
     );
 
     expect(screen.getByTestId('setup-completed')).toHaveTextContent('true');
@@ -188,10 +197,6 @@ describe('SettingsSetupSection', () => {
     expect(setSetupCompleted).not.toHaveBeenCalled();
     expect(screen.getByTestId('setup-completed')).toHaveTextContent('true');
     expect(screen.getByTestId('settings-setup-section')).toBeInTheDocument();
-    expect(screen.getByTestId('settings-section-nav-setup')).toHaveAttribute(
-      'aria-current',
-      'page',
-    );
   });
 
   it('shows a toast and stays on Setup when clear IPC fails', async () => {

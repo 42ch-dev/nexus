@@ -96,7 +96,7 @@ describe('AgentPicker', () => {
     expect(screen.getByTestId('agent-card-missing').querySelector('a')).toBeNull();
   });
 
-  it('shows soft Installed Badge and mutes not-installed cards', () => {
+  it('shows soft Installed Badge beside title and mutes not-installed title', () => {
     render(
       <AgentPicker
         status="ready"
@@ -110,7 +110,7 @@ describe('AgentPicker', () => {
     expect(screen.getByTestId('agent-card-installed-badge-claude-acp')).toHaveTextContent(
       'Installed',
     );
-    expect(screen.getByTestId('agent-card-missing')).toHaveClass('opacity-60');
+    expect(screen.getByText('Missing Agent')).toHaveClass('text-gray-700');
     expect(screen.getByText('Not installed')).toBeInTheDocument();
   });
 
@@ -146,7 +146,7 @@ describe('AgentPicker', () => {
     ).not.toBeNull();
   });
 
-  it('uses ArrowUpRight outbound icons sized to label cap-height', () => {
+  it('uses CSS ::after ArrowUpRight sized to label cap-height', () => {
     render(
       <AgentPicker
         status="ready"
@@ -157,8 +157,11 @@ describe('AgentPicker', () => {
       />,
     );
     const install = screen.getByRole('link', { name: /Install/i });
-    const icon = install.querySelector('svg');
-    expect(icon).toHaveClass('h-[1em]', 'w-[1em]');
+    expect(install.querySelector('svg')).toBeNull();
+    expect(install).toHaveClass(
+      'after:content-[\'↗\']',
+      'after:text-[0.75em]',
+    );
   });
 
   it('shows custom launch on empty and error', () => {

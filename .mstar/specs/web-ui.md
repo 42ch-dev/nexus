@@ -1277,3 +1277,39 @@ Token tuning: edit repo-root [`DESIGN.md`](../../DESIGN.md) pair on disk → ref
 - Live token editor or YAML write-back from studio UI
 - Unbounded migration of `components/ui/*` into `@42ch/nexus-ui`; V1.99 handles only approved pure presentational primitives through the component-promotion boundary.
 - `wire_contracts_changed: true` — V1.98 is frontend/docs only
+
+### 29.14 V1.106 Amendments — Studio-first pipeline + first-launch polish
+
+**Iteration SSOT:** [`.mstar/iterations/v1.106-delivery-compass.md`](../iterations/v1.106-delivery-compass.md) + [`v1.106/specs/`](../iterations/v1.106/specs/). **Implement authority** for Stretch Settings IA: [`ui-continuity.md`](../iterations/v1.106/specs/ui-continuity.md) (P2 — may defer).
+
+#### 29.14.1 TopStepIndicator SSOT (P1 Must)
+
+- **Single module:** `apps/web/src/components/setup/top-step-indicator.tsx` exports `WizardStep` and `TopStepIndicator`.
+- **Studio:** imports `@web-setup/top-step-indicator` — no duplicate inline implementation in fixtures.
+- Supersedes V1.105 note that Studio fixtures alone are visual SSOT for step indicator chrome.
+
+#### 29.14.2 AgentPicker density (P1 Must)
+
+- Shared `apps/web/src/components/setup/agent-picker.tsx` accepts optional `density?: 'default' | 'compact'` (default `'default'`).
+- Settings omits prop; wizard may pass `compact` only. No second picker module.
+
+#### 29.14.3 Settings Advanced IA (P2 Stretch)
+
+When shipped: nav **Agent · Workspace · Advanced** only. Single `/settings/advanced` page with Connection + Setup sections (`id="connection"`, `id="setup"`). Legacy `/settings/connection`, `/settings/setup`, and `/connect` redirect to hash anchors on Advanced. **Normative detail:** [`ui-continuity.md`](../iterations/v1.106/specs/ui-continuity.md) §FB-V1106-005.
+
+#### 29.14.4 Contract boundary
+
+Prefer `wire_contracts_changed: false`. Studio-first invariant locked for all author-facing chrome (compass + [`studio-first-invariant.md`](../iterations/v1.106/guides/studio-first-invariant.md)).
+
+#### 29.14.5 Voice & Content — first-launch + daemon chrome (P0/P1 Must)
+
+Normative copy lives in repo-root [`DESIGN.md`](../../DESIGN.md) (`### Launch & daemon status`, `### Done step copy`, `### States`). Iteration examples:
+
+| Surface | Example copy |
+|---------|----------------|
+| DaemonReadySplash (waiting) | **Starting daemon…** — *This takes a few seconds on first launch.* |
+| DaemonReadySplash (error) | **Daemon not ready** — **Restart Nexus** |
+| Done step | **You're ready 🎉** — *Open Nexus to start writing. You can change settings anytime.* — **Open Nexus** |
+| AgentPicker loading | *Scanning for local ACP agents…* |
+| AgentPicker empty | **No agents found on PATH** |
+| Settings nav (P2 Stretch) | **Agent** · **Workspace** · **Advanced** |

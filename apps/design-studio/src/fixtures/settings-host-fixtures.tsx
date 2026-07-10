@@ -47,11 +47,24 @@ import {
   type AgentPickerItem,
 } from '@web-setup/agent-picker';
 
-/** P0 Must section allowlist — Agent / Connection / Setup / Workspace. */
-export type SettingsSectionId = 'agent' | 'connection' | 'setup' | 'workspace';
+/** Three-tab top nav — Agent / Workspace / Advanced (V1.106 P2). */
+export type SettingsNavSectionId = 'agent' | 'workspace' | 'advanced';
+
+/** Section body IDs for chrome fixtures; Connection and Setup live inside Advanced. */
+export type SettingsBodySectionId = 'agent' | 'connection' | 'setup' | 'workspace';
+
+const SETTINGS_NAV_SECTIONS: {
+  id: SettingsNavSectionId;
+  label: string;
+  icon: LucideIcon;
+}[] = [
+  { id: 'agent', label: 'Agent', icon: Bot },
+  { id: 'workspace', label: 'Workspace', icon: FolderOpen },
+  { id: 'advanced', label: 'Advanced', icon: Settings },
+];
 
 const SETTINGS_SECTIONS: {
-  id: SettingsSectionId;
+  id: SettingsBodySectionId;
   label: string;
   icon: LucideIcon;
   emptyHint: string;
@@ -208,14 +221,14 @@ function AvatarStub({ label }: { label: string }) {
 /**
  * Secondary section nav inside Settings page chrome.
  * Not Creator/Orchestrator tabs; not a second app-wide sidebar.
- * Workspace link intentionally absent (P4 Stretch deferred).
+ * V1.106 P2: three tabs — Agent / Workspace / Advanced.
  */
 function SettingsSectionNav({
   active,
   onSelect,
 }: {
-  active: SettingsSectionId;
-  onSelect: (id: SettingsSectionId) => void;
+  active: SettingsNavSectionId;
+  onSelect: (id: SettingsNavSectionId) => void;
 }) {
   return (
     <nav
@@ -223,7 +236,7 @@ function SettingsSectionNav({
       className="flex flex-wrap gap-1 border-b border-gray-alpha-200 pb-px"
       data-testid="settings-section-nav"
     >
-      {SETTINGS_SECTIONS.map(({ id, label, icon: Icon }) => {
+      {SETTINGS_NAV_SECTIONS.map(({ id, label, icon: Icon }) => {
         const selected = active === id;
         return (
           <button
@@ -253,7 +266,7 @@ function SettingsSectionNav({
 function SettingsEmptySectionFrame({
   sectionId,
 }: {
-  sectionId: SettingsSectionId;
+  sectionId: SettingsBodySectionId;
 }) {
   const section = SETTINGS_SECTIONS.find((s) => s.id === sectionId);
   if (!section) return null;
@@ -286,8 +299,8 @@ function SettingsShellPageChrome({
   onSectionChange,
   children,
 }: {
-  activeSection: SettingsSectionId;
-  onSectionChange: (id: SettingsSectionId) => void;
+  activeSection: SettingsNavSectionId;
+  onSectionChange: (id: SettingsNavSectionId) => void;
   children: ReactNode;
 }) {
   return (
@@ -407,6 +420,7 @@ function SettingsConnectionSectionChrome() {
     <div
       className="flex flex-col gap-6"
       data-testid="settings-connection-section"
+      id="connection"
     >
       <div className="flex flex-col gap-2">
         <h3 className="text-heading-16 font-heading text-gray-1000">
@@ -529,6 +543,7 @@ function SettingsSetupSectionChrome({
       className="flex flex-col gap-6"
       data-testid="settings-setup-section"
       data-desktop={desktopAvailable ? 'true' : 'false'}
+      id="setup"
     >
       <div className="flex flex-col gap-2">
         <h3 className="text-heading-16 font-heading text-gray-1000">Setup</h3>
@@ -708,8 +723,21 @@ function SettingsWorkspaceSectionChrome({
   );
 }
 
+/**
+ * Advanced section body chrome — stacks Connection and Setup on one page
+ * with hash anchors (V1.106 P2).
+ */
+function SettingsAdvancedSectionChrome() {
+  return (
+    <div className="flex flex-col gap-10" data-testid="settings-advanced-section">
+      <SettingsConnectionSectionChrome />
+      <SettingsSetupSectionChrome />
+    </div>
+  );
+}
+
 function InteractiveSettingsShellPage() {
-  const [active, setActive] = useState<SettingsSectionId>('agent');
+  const [active, setActive] = useState<SettingsNavSectionId>('agent');
   return (
     <SettingsShellPageChrome
       activeSection={active}
@@ -717,14 +745,10 @@ function InteractiveSettingsShellPage() {
     >
       {active === 'agent' ? (
         <SettingsAgentSectionChrome />
-      ) : active === 'connection' ? (
-        <SettingsConnectionSectionChrome />
-      ) : active === 'setup' ? (
-        <SettingsSetupSectionChrome />
       ) : active === 'workspace' ? (
         <SettingsWorkspaceSectionChrome />
       ) : (
-        <SettingsEmptySectionFrame sectionId={active} />
+        <SettingsAdvancedSectionChrome />
       )}
     </SettingsShellPageChrome>
   );
@@ -806,7 +830,8 @@ function SettingsShellChromeFixture() {
 
 /**
  * Settings shell chrome + empty section frames for Studio visual acceptance.
- * Workspace nav item is not rendered (P4 Stretch deferred).
+ * V1.106 P2: section nav shows Agent / Workspace / Advanced; Connection and
+ * Setup live inside Advanced.
  */
 export function SettingsHostFixtures() {
   return (
@@ -820,10 +845,10 @@ export function SettingsHostFixtures() {
         </h4>
         <p className="text-copy-13 text-gray-700 mb-4">
           Footer utility Settings (lucide) above profiles; main panel is the
-          Settings shell — title, helper, section nav (Agent / Connection /
-          Setup / Workspace). Default Agent outlet shows the preselected Agent
-          section body; Connection, Setup, and Workspace outlets show their
-          section chrome.
+          Settings shell — title, helper, section nav (Agent / Workspace /
+          Advanced). Default Agent outlet shows the preselected Agent section
+          body; Advanced outlet shows Connection and Setup stacked, and the
+          Workspace outlet shows the Workspace section chrome.
         </p>
         <SettingsShellChromeFixture />
       </div>

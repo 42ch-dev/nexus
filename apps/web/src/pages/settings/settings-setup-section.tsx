@@ -63,6 +63,7 @@ export function SettingsSetupSection() {
       className="flex flex-col gap-6"
       data-testid="settings-setup-section"
       data-desktop={desktop ? 'true' : 'false'}
+      id="setup"
     >
       <div className="flex flex-col gap-2">
         <h3 className="text-heading-16 font-heading text-gray-1000">Setup</h3>

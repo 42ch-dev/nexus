@@ -17,6 +17,7 @@
 - [`studio-first-visual-then-app.md`](../iterations/v1.101/guides/studio-first-visual-then-app.md) — V1.101 process note (Studio visual → App wiring; human smoke separate)
 - [`studio-first-visual-then-app.md`](../iterations/v1.102/guides/studio-first-visual-then-app.md) — V1.102 process note (same discipline; Badge tone + Settings chrome + optional Surfaces Stretch)
 - [`studio-first-visual-then-app.md`](../iterations/v1.103/guides/studio-first-visual-then-app.md) — V1.103 process note (Settings shell + section fixtures; DESIGN Voice copy tables in section specs)
+- [`studio-first-invariant.md`](../iterations/v1.106/guides/studio-first-invariant.md) — **V1.106 locked invariant** (需求 → Studio↔DESIGN.md → App); supersedes ad-hoc per-iteration notes for author-facing chrome
 - `@42ch/nexus-ui` — brand layer plus approved presentational primitives (V1.99 Button/Badge/Card; V1.100 form fields; V1.101 `Select`; V1.102 Badge `tone` soft/solid)
 - `apps/web/src/components/ui/*` — transitional gallery source for primitives not yet promoted
 - `apps/web/src/components/setup/*` — app-shared setup compositions (e.g. `AgentPicker`); Studio may import via gallery alias — **not** `@42ch/nexus-ui`
@@ -151,6 +152,18 @@ Section nav labels and per-component matrix: [IA guide](../iterations/v1.98/guid
 - No daemon/Tauri integration, schema changes, or `@42ch/nexus-contracts` bump
 - Not a replacement for `apps/web` product QA — studio complements, does not gate author flows
 - Desktop clean-state / first-launch author onboarding is owned by **V1.105** (setup wizard chrome via Studio fixtures — see [v1.105-delivery-compass.md](../iterations/v1.105-delivery-compass.md)); Design Studio itself does not ship author onboarding.
+
+### V1.106 Surfaces additions (P0 Must — iteration detail)
+
+**Authority:** [`studio-first-pipeline.md`](../iterations/v1.106/specs/studio-first-pipeline.md) §SP-V1106-003.
+
+| Route | Fixture file | Classification |
+|-------|--------------|----------------|
+| `/surfaces/launch` | `launch-daemon-fixtures.tsx` | `@web-setup/daemon-ready-splash` import |
+| `/surfaces/banner` | `main-banner-fixtures.tsx` | Composition-only (no App `main-banner.tsx` import) |
+| `/components` Toast section | `toast-fixtures.tsx` or inline | `@42ch/nexus-ui` + Studio renderer |
+
+Register Launch and Banner in `SURFACES_SECTIONS` alongside existing Setup / Shell / AgentPicker / Daemon slices.
 
 ---
 
