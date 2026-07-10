@@ -360,4 +360,34 @@ describe('SetupWizardPage', () => {
     expect(setSetupCompleted).toHaveBeenCalledWith(true);
     resolveIpc();
   });
+
+  it('scrolls long agent lists inside the portrait wizard card', async () => {
+    useHandlers(
+      http.post('/v1/daemon/agent-host/scan', () =>
+        HttpResponse.json({
+          agents: Array.from({ length: 12 }, (_, i) => ({
+            name: `agent-${i}`,
+            registry_agent_id: `agent-${i}`,
+            installed: true,
+            version: '1.0.0',
+          })),
+        }),
+      ),
+    );
+
+    renderInApp(<SetupWizardPage />, {
+      client: makeClient(),
+      initialRouterEntries: ['/setup'],
+    });
+
+    const card = screen.getByTestId('setup-wizard-card');
+    const main = screen.getByRole('main');
+    expect(card).toHaveClass('overflow-hidden');
+    expect(main).toHaveClass('min-h-0', 'min-w-0', 'flex-1', 'overflow-hidden');
+
+    await waitFor(() => expect(screen.getByTestId('agent-picker-grid')).toBeInTheDocument());
+    const grid = screen.getByTestId('agent-picker-grid');
+    expect(grid.children.length).toBeGreaterThan(6);
+    expect(screen.getByTestId('wizard-cta-row')).toBeInTheDocument();
+  });
 });

@@ -44,7 +44,7 @@
       "agents": [
         "@frontend-dev"
       ],
-      "progress": 25,
+      "progress": 67,
       "tags": [
         "v1.106",
         "first-launch",
@@ -54,7 +54,7 @@
       "created_at": "2026-07-10",
       "updated_at": "2026-07-10",
       "done_at": null,
-      "notes": "Task 1 (FB-V1106-003) implemented; tests green. Task 2/3 pending.",
+      "notes": "Task 1 (FB-V1106-003) and Task 3 (V1.105 residual pass) implemented; tests green. Task 2 pending.",
       "metadata": {
         "iteration_refs": [
           "V1.106"
@@ -1010,9 +1010,12 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.105",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-10-v1.105-daemon-fullscreen-gate.md",
-        "note": "QC2 S001. Inherited pattern."
+        "note": "QC2 S001. Inherited pattern.",
+        "closed_at": "2026-07-10",
+        "closed_by": "V1.106 P1 T3",
+        "closure_note": "Added a local `ready` guard in the useEffect closure so the timeout callback cannot set error after markReady has already fired."
       },
       {
         "id": "R-V1105P0-004",
@@ -1021,9 +1024,12 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.105",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-10-v1.105-daemon-fullscreen-gate.md",
-        "note": "QC1/QC2 suggestions."
+        "note": "QC1/QC2 suggestions.",
+        "closed_at": "2026-07-10",
+        "closed_by": "V1.106 P1 T3",
+        "closure_note": "Added Vitest cases in daemon-launch-gate.test.tsx: retry button reloads the window, and degraded initial status passes the gate."
       },
       {
         "id": "R-V1105P0-005",
@@ -1032,9 +1038,12 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.105",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-10-v1.105-daemon-fullscreen-gate.md",
-        "note": "QC3 suggestion; gate covered separately."
+        "note": "QC3 suggestion; gate covered separately.",
+        "closed_at": "2026-07-10",
+        "closed_by": "V1.106 P1 T3",
+        "closure_note": "Extended the re-run test mount in settings-setup-section.test.tsx to wrap routes with DaemonLaunchGate, mirroring the production App shell."
       }
     ],
     "2026-07-10-v1.105-portrait-shell-steps": [
@@ -1059,22 +1068,28 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.105",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-10-v1.105-portrait-shell-steps.md",
-        "note": "QC1 F-002 / QC2 F-003"
+        "note": "QC1 F-002 / QC2 F-003",
+        "closed_at": "2026-07-10",
+        "closed_by": "V1.106 P1 T3",
+        "closure_note": "Added App overflow integration test in setup-wizard-page.test.tsx: long agent list renders inside a scrollable portrait wizard body with CTA row visible."
       }
     ],
     "2026-07-10-v1.105-wizard-ia-reorder": [
       {
         "id": "R-V1105P1-001",
-        "title": "Settings re-run test does not mount DaemonLaunchGate / assert Agent-first landing",
+        "title": "Settings re-run test does not assert Agent-first landing (inherits R-V1105P0-005)",
         "severity": "nit",
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.105",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-10-v1.105-wizard-ia-reorder.md",
-        "note": "QC2; inherits R-V1105P0-005"
+        "note": "QC2; inherits R-V1105P0-005",
+        "closed_at": "2026-07-10",
+        "closed_by": "V1.106 P1 T3",
+        "closure_note": "Closed with R-V1105P0-005 — the re-run test now mounts DaemonLaunchGate, routing through the production App shell to /setup where the wizard lands on the Agent step by default."
       }
     ],
     "2026-07-10-v1.106-studio-first-pipeline": [

@@ -8,6 +8,7 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 
 import { SettingsSetupSection } from '@/pages/settings/settings-setup-section';
 import { SettingsShellLayout } from '@/pages/settings/settings-shell-layout';
+import { DaemonLaunchGate } from '@/components/setup/daemon-launch-gate';
 import { renderInApp } from '@/test/test-providers';
 import { BrowserClient } from '@/lib/nexus';
 import type { DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
@@ -102,21 +103,23 @@ describe('SettingsSetupSection', () => {
     const setAgentProfile = vi.fn(() => Promise.resolve());
 
     renderInApp(
-      <>
-        <CompletedProbe />
-        <Routes>
-          {settingsRouteTree}
-          <Route
-            path="setup"
-            element={
-              <>
-                <div data-testid="setup-wizard">Wizard</div>
-                <LocationProbe />
-              </>
-            }
-          />
-        </Routes>
-      </>,
+      <DaemonLaunchGate>
+        <>
+          <CompletedProbe />
+          <Routes>
+            {settingsRouteTree}
+            <Route
+              path="setup"
+              element={
+                <>
+                  <div data-testid="setup-wizard">Wizard</div>
+                  <LocationProbe />
+                </>
+              }
+            />
+          </Routes>
+        </>
+      </DaemonLaunchGate>,
       {
         client: makeClient(),
         desktop: makeDesktop({
@@ -128,6 +131,10 @@ describe('SettingsSetupSection', () => {
         initialRouterEntries: ['/settings/setup'],
         setupCompleted: true,
       },
+    );
+
+    await waitFor(() =>
+      expect(screen.getByTestId('settings-setup-section')).toBeInTheDocument(),
     );
 
     expect(screen.getByTestId('setup-completed')).toHaveTextContent('true');
