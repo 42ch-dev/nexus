@@ -22,13 +22,13 @@ A JSON Schema file belongs in `schemas/` **only if it is consumed by an external
 
 Everything else is **local**: hand-written Rust under `crates/nexus-contracts/src/local/` — **no** `pnpm run codegen` entry in `@42ch/nexus-contracts` npm surface for those types.
 
-**Corollary**: `/v1/local/*` daemon API DTOs, orchestration schedules, ACP registry manifest, worker IPC, SQLite row shapes → **local**, not `schemas/`. See [creator-schedule-and-core-context.md](specs/creator-schedule-and-core-context.md) §9. The daemon's own internal Local API request/response shapes stay local **unless** an external client (e.g. WebApp) must consume them cross-language — at which point they migrate into `schemas/local-api/<concern>/`.
+**Corollary**: `/v1/local/*` daemon API DTOs, orchestration schedules, ACP registry manifest, worker IPC, SQLite row shapes → **local**, not `schemas/`. See [creator-schedule-and-core-context.md](../specs/creator-schedule-and-core-context.md) §9. The daemon's own internal Local API request/response shapes stay local **unless** an external client (e.g. WebApp) must consume them cross-language — at which point they migrate into `schemas/local-api/<concern>/`.
 
 **DTO drift-closure criterion (V1.64)**: once a Local API shape is promoted under `schemas/local-api/`, the corresponding daemon handler must emit `generated::local_api::*` shapes (or a structurally equivalent type covered by strict drift detection). `schema_drift_detection.rs` with `CheckMode::Strict` is the enforcement gate; handler-local structs that drift from generated schema types are not acceptable for promoted endpoints.
 
 ## Directory layout (normative)
 
-Folder names, consumer-scope tree, and product-line mapping: **[specs/schemas-directory-layout.md](specs/schemas-directory-layout.md)**. On-disk index: [schemas/README.md](../../schemas/README.md).
+Folder names, consumer-scope tree, and product-line mapping: **[specs/schemas-directory-layout.md](../specs/schemas-directory-layout.md)**. On-disk index: [schemas/README.md](../../schemas/README.md).
 
 ## What still lives in `schemas/` today (2026-06, post-V1.64 target)
 
@@ -51,7 +51,7 @@ V1.62 reorganized `schemas/` along consumer-scope lines (compass v1.62 §1.3): t
 
 ## Drift / housekeeping
 
-- **README SSOT**: [schemas/README.md](../../schemas/README.md) + per-folder READMEs; layout rules in [specs/schemas-directory-layout.md](specs/schemas-directory-layout.md). Re-verify after moves.
+- **README SSOT**: [schemas/README.md](../../schemas/README.md) + per-folder READMEs; layout rules in [specs/schemas-directory-layout.md](../specs/schemas-directory-layout.md). Re-verify after moves.
 - **Stale path risk**: do not reference `schemas/cli-sync/`, `schemas/meta/`, `schemas/acp-runtime/`, `schemas/cloud-sync/`, or `schemas/compute/` — removed or renamed (see layout spec §1 + §5 historical renames).
 - **Codegen**: only files under `schemas/` generate TS in `@42ch/nexus-contracts`; platform upgrades follow npm semver + `schema_version`.
 - **Promoted Local API handlers**: handlers must return generated contract shapes for promoted schemas; strict drift detection is required before a schema-promoted route is considered consumer-safe.
@@ -59,7 +59,7 @@ V1.62 reorganized `schemas/` along consumer-scope lines (compass v1.62 §1.3): t
 
 ## Related
 
-- [local-cloud-crate-architecture.md](specs/local-cloud-crate-architecture.md) — local vs cloud product lines, crate graph, daemon API classes
+- [local-cloud-crate-architecture.md](../specs/local-cloud-crate-architecture.md) — local vs cloud product lines, crate graph, daemon API classes
 - [archived/knowledge/daemon-api-workspace-write-architecture.md](../archived/knowledge/daemon-api-workspace-write-architecture.md) — **superseded** route table (use V1.20 compass + `daemon-runtime` / crate architecture SSOT)
 - [v1.20-delivery-compass-v1.md](../iterations/v1.20-delivery-compass-v1.md) — shipped local API redesign
 - [v1.21-local-platform-isolation-delivery-compass-v1.md](../iterations/v1.21-local-platform-isolation-delivery-compass-v1.md) — daemon sync route removal program

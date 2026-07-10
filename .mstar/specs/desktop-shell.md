@@ -368,6 +368,15 @@ Bootstrap timing moves to Workspace Continue (not between Welcome and Daemon as 
 
 Prefer `wire_contracts_changed: false`. Portrait shell: `wizard-max-width` **480px**, `wizard-max-height` **720px**, viewport cap **85vh** (P2 — see `portrait-wizard-shell.md`). React structure: `TopStepIndicator` horizontal; retire left `step-panel-width` (208px) in wizard.
 
+#### 13.10.6 V1.106 Amendments — Studio fixtures + shared chrome SSOT
+
+**Iteration SSOT:** [`.mstar/iterations/v1.106-delivery-compass.md`](../iterations/v1.106-delivery-compass.md).
+
+- **DaemonReadySplash fixtures:** Studio `/surfaces/launch` imports presentational `@web-setup/daemon-ready-splash` — same module as App outer gate.
+- **MainBanner fixtures:** composition-only props-driven chrome in Studio — App `main-banner.tsx` stays daemon-hook-owned; no extract in V1.106.
+- **TopStepIndicator:** single `apps/web/src/components/setup/top-step-indicator.tsx`; Studio `@web-setup/top-step-indicator` (closes dual-source residual).
+- **Contract boundary:** `wire_contracts_changed: false`.
+
 ---
 
 ## 14. ACP Agent Detection (V1.94)

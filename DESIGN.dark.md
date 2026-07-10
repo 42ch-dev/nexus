@@ -185,6 +185,56 @@ components:
   dialog: { backgroundColor: "{colors.background-100}", rounded: "{rounded.popover}", shadow: "shadow-modal", maxWidth: "560px", padding: "{spacing.space-6}" }
   popover: { backgroundColor: "{colors.background-100}", borderColor: "{colors.gray-alpha-400}", shadow: "shadow-popover", rounded: "{rounded.popover}", itemHeight: "36px" }
 
+  # ── tabs: apps/web keep-web dark (V1.106) ──
+  tabs:
+    list: { backgroundColor: "{colors.background-200}", borderColor: "{colors.gray-alpha-400}", rounded: "{rounded.card}", padding: "4px", gap: "4px" }
+    trigger:
+      default: { typography: "{typography.button-12}", textColor: "{colors.gray-800}", height: "32px", paddingInline: "12px", rounded: "{rounded.control}" }
+      hover: { backgroundColor: "{colors.gray-alpha-100}", textColor: "{colors.gray-1000}" }
+      active: { backgroundColor: "{colors.background-100}", textColor: "{colors.gray-1000}", shadow: "shadow-card" }
+      disabled: { textColor: "{colors.gray-700}", cursor: "not-allowed" }
+      focusVisible: "{components.focus-ring}"
+
+  # ── states: apps/web keep-web dark (V1.106) ──
+  states:
+    spinner: { size: "16px", color: "{colors.blue-700}" }
+    loading: { typography: "{typography.copy-14}", textColor: "{colors.gray-700}", gap: "{spacing.space-2}", paddingBlock: "{spacing.space-6}" }
+    empty:
+      titleTypography: "{typography.heading-16}"
+      titleColor: "{colors.gray-1000}"
+      descriptionTypography: "{typography.copy-14}"
+      descriptionColor: "{colors.gray-900}"
+      paddingBlock: "{spacing.space-16}"
+      gap: "{spacing.space-2}"
+    error:
+      titleTypography: "{typography.heading-16}"
+      titleColor: "{colors.red-1000}"
+      descriptionTypography: "{typography.copy-14}"
+      descriptionColor: "{colors.red-900}"
+      backgroundColor: "color-mix(in srgb, {colors.red-700} 8%, transparent)"
+      borderColor: "color-mix(in srgb, {colors.red-700} 35%, transparent)"
+      rounded: "{rounded.card}"
+      padding: "{spacing.space-4}"
+      retryTypography: "{typography.label-14}"
+      retryColor: "{colors.blue-700}"
+
+  # ── launch-daemon: apps/web dark (V1.106) ──
+  launch-daemon:
+    splash:
+      titleTypography: "{typography.heading-24}"
+      helperTypography: "{typography.copy-14}"
+      spinnerSize: "32px"
+      maxWidth: "28rem"
+    main-banner:
+      backgroundColor: "rgba(255,192,67,0.14)"
+      borderColor: "{colors.gray-alpha-400}"
+      titleTypography: "{typography.copy-14}"
+      titleWeight: 600
+      descriptionTypography: "{typography.copy-13}"
+      paddingInline: "{spacing.space-6}"
+      paddingBlock: "{spacing.space-3}"
+    status-indicator: "{components.daemon-status-indicator}"
+
   # ── editor: apps/web dark ──
   editor:
     surface: "{colors.background-100}"
@@ -656,6 +706,10 @@ Dark-theme companion to [`DESIGN.md`](DESIGN.md). Same token names; values tuned
 | `brand-white` | `brand-white` | Logo on deepest panels |
 
 Dark primary button uses **cyan fill + deep-blue text** (V1.94 contrast correction; was white-on-cyan). `blue-*` names preserved for existing `{colors.blue-700}` consumers.
+
+### V1.106 component parity (Tabs, States, Launch & daemon)
+
+Behavior, keyboard, and Voice & Content tables live in [`DESIGN.md`](DESIGN.md) §Component Primitives (`### Tabs`, `### States`, `### Form Field (composition)`, `### Launch & daemon status`). Dark-tuned token values for `components.tabs`, `components.states`, and `components.launch-daemon` are in this file's frontmatter; `components.daemon-status-indicator` uses the dark semantic fills above.
 
 Canvas/SOUL/World-KB brand-blue tokens resolve through `var(--color-blue-700)` and `color-mix(in srgb, var(--color-blue-700) N%, transparent)`. In the dark theme `--color-blue-700: #25d1e0` (brand-cyan). See `DESIGN.md` § Implementation Mapping.
 

@@ -1,13 +1,110 @@
 {
   "version": 1,
   "updated_at": "2026-07-10",
-  "plans": [],
+  "plans": [
+    {
+      "id": "2026-07-10-v1.106-studio-first-pipeline",
+      "title": "P0 — Studio-first pipeline complete",
+      "file": "plans/2026-07-10-v1.106-studio-first-pipeline.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@frontend-dev",
+        "@architect"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.106",
+        "studio-first",
+        "design-system",
+        "must"
+      ],
+      "created_at": "2026-07-10",
+      "updated_at": "2026-07-10",
+      "done_at": null,
+      "notes": "Scaffold only; Prepare/§5 deferred. SP-001..003.",
+      "metadata": {
+        "iteration_refs": [
+          "V1.106"
+        ],
+        "spec_integration_branch": "iteration/v1.106",
+        "merge_target": "iteration/v1.106",
+        "working_branch": null,
+        "primary_spec": ".mstar/iterations/v1.106/specs/studio-first-pipeline.md",
+        "wire_contracts_changed": false,
+        "tier": "Must"
+      }
+    },
+    {
+      "id": "2026-07-10-v1.106-first-launch-polish",
+      "title": "P1 — First-launch polish",
+      "file": "plans/2026-07-10-v1.106-first-launch-polish.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@frontend-dev"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.106",
+        "first-launch",
+        "wizard",
+        "must"
+      ],
+      "created_at": "2026-07-10",
+      "updated_at": "2026-07-10",
+      "done_at": null,
+      "notes": "Scaffold only; FB-003/004 + V1.105 residual seeds. Prepare/§5 deferred.",
+      "metadata": {
+        "iteration_refs": [
+          "V1.106"
+        ],
+        "spec_integration_branch": "iteration/v1.106",
+        "merge_target": "iteration/v1.106",
+        "working_branch": null,
+        "primary_spec": ".mstar/iterations/v1.106/specs/first-launch-polish.md",
+        "wire_contracts_changed": false,
+        "tier": "Must"
+      }
+    },
+    {
+      "id": "2026-07-10-v1.106-ui-continuity",
+      "title": "P2 — UI continuity polish",
+      "file": "plans/2026-07-10-v1.106-ui-continuity.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@frontend-dev"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.106",
+        "ui-continuity",
+        "stretch"
+      ],
+      "created_at": "2026-07-10",
+      "updated_at": "2026-07-10",
+      "done_at": null,
+      "notes": "Stretch; FB-001/002/005/006. May defer without blocking close.",
+      "metadata": {
+        "iteration_refs": [
+          "V1.106"
+        ],
+        "spec_integration_branch": "iteration/v1.106",
+        "merge_target": "iteration/v1.106",
+        "working_branch": null,
+        "primary_spec": ".mstar/iterations/v1.106/specs/ui-continuity.md",
+        "wire_contracts_changed": false,
+        "tier": "Stretch"
+      }
+    }
+  ],
   "metadata": {
     "integration_branch_retired": false,
     "iteration_base_branch": "main",
     "last_integration_branch": "iteration/v1.97",
-    "latest_active_compass": "v1.105-delivery-compass.md",
-    "latest_active_iteration": "V1.105",
+    "latest_active_compass": "v1.106-delivery-compass.md",
+    "latest_active_iteration": "V1.106",
     "latest_ship": {
       "iteration": "V1.97",
       "compass": "v1.97-desktop-first-launch-hardening-compass-v1.md",
@@ -18,7 +115,7 @@
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "pre_iteration_hotfix": null,
-    "spec_integration_branch": "iteration/v1.105",
+    "spec_integration_branch": "iteration/v1.106",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {
@@ -67,7 +164,7 @@
         "2026-07-09-v1.103-settings-shell-nav": 2
       }
     },
-    "updated_at": "2026-07-10T02:30:00+0800"
+    "updated_at": "2026-07-10T11:45:00+0800"
   },
   "residual_findings": {
     "2026-07-05-v1.91-findings-batch": [

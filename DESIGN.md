@@ -188,6 +188,56 @@ components:
   dialog: { backgroundColor: "{colors.background-100}", rounded: "{rounded.popover}", shadow: "shadow-modal", maxWidth: "560px", padding: "{spacing.space-6}" }
   popover: { backgroundColor: "{colors.background-100}", borderColor: "{colors.gray-alpha-400}", shadow: "shadow-popover", rounded: "{rounded.popover}", itemHeight: "36px" }
 
+  # ── tabs: apps/web keep-web (V1.106) ──
+  tabs:
+    list: { backgroundColor: "{colors.background-200}", borderColor: "{colors.gray-alpha-400}", rounded: "{rounded.card}", padding: "4px", gap: "4px" }
+    trigger:
+      default: { typography: "{typography.button-12}", textColor: "{colors.gray-800}", height: "32px", paddingInline: "12px", rounded: "{rounded.control}" }
+      hover: { backgroundColor: "{colors.gray-alpha-100}", textColor: "{colors.gray-1000}" }
+      active: { backgroundColor: "{colors.background-100}", textColor: "{colors.gray-1000}", shadow: "shadow-card" }
+      disabled: { textColor: "{colors.gray-700}", cursor: "not-allowed" }
+      focusVisible: "{components.focus-ring}"
+
+  # ── states: apps/web keep-web (V1.106) ──
+  states:
+    spinner: { size: "16px", color: "{colors.blue-700}" }
+    loading: { typography: "{typography.copy-14}", textColor: "{colors.gray-700}", gap: "{spacing.space-2}", paddingBlock: "{spacing.space-6}" }
+    empty:
+      titleTypography: "{typography.heading-16}"
+      titleColor: "{colors.gray-1000}"
+      descriptionTypography: "{typography.copy-14}"
+      descriptionColor: "{colors.gray-900}"
+      paddingBlock: "{spacing.space-16}"
+      gap: "{spacing.space-2}"
+    error:
+      titleTypography: "{typography.heading-16}"
+      titleColor: "{colors.red-1000}"
+      descriptionTypography: "{typography.copy-14}"
+      descriptionColor: "{colors.red-900}"
+      backgroundColor: "color-mix(in srgb, {colors.red-700} 6%, transparent)"
+      borderColor: "color-mix(in srgb, {colors.red-700} 30%, transparent)"
+      rounded: "{rounded.card}"
+      padding: "{spacing.space-4}"
+      retryTypography: "{typography.label-14}"
+      retryColor: "{colors.blue-700}"
+
+  # ── launch-daemon: apps/web (V1.106) ──
+  launch-daemon:
+    splash:
+      titleTypography: "{typography.heading-24}"
+      helperTypography: "{typography.copy-14}"
+      spinnerSize: "32px"
+      maxWidth: "28rem"
+    main-banner:
+      backgroundColor: "rgba(183,110,0,0.10)"
+      borderColor: "{colors.gray-alpha-400}"
+      titleTypography: "{typography.copy-14}"
+      titleWeight: 600
+      descriptionTypography: "{typography.copy-13}"
+      paddingInline: "{spacing.space-6}"
+      paddingBlock: "{spacing.space-3}"
+    status-indicator: "{components.daemon-status-indicator}"
+
   # ── editor: apps/web ──
   editor:
     surface: "{colors.background-100}"
@@ -951,6 +1001,81 @@ Sidebar values: see frontmatter `components.sidebar-nav`. Collapsed/mobile nav m
 
 Dialog/popover values: see frontmatter `components.dialog` and `components.popover`.
 
+### Tabs
+
+**Classification (V1.106):** keep-web — owner `apps/web/src/components/ui/tabs.tsx`. Studio may reference via transitional `@web-ui/tabs` only; not package-promoted this iteration.
+
+Token values: see frontmatter `components.tabs`.
+
+| State | Visual | Interaction |
+| --- | --- | --- |
+| Default | `gray-800` label on transparent trigger inside `background-200` list | Click selects tab |
+| Hover | `gray-alpha-100` fill; label `gray-1000` | Pointer only |
+| Active | `background-100` fill + `shadow-card`; label `gray-1000` | Selected panel visible |
+| Disabled | Label `gray-700`; `not-allowed` cursor | No selection change |
+| Focus-visible | Global two-layer focus ring on trigger | Keyboard activation |
+
+**Keyboard:** Arrow keys move between tab triggers when focus is inside the tablist; implement roving `tabindex` (active trigger `tabindex={0}`, siblings `-1`) or an equivalent documented pattern. `Enter` / `Space` activate the focused trigger.
+
+**Voice & Content:** Tab labels use Title Case in product surfaces — examples: **Agent**, **Workspace**, **Advanced** (Settings); **Creator**, **Orchestrator** (shell).
+
+### States
+
+**Classification (V1.106):** keep-web — owner `apps/web/src/components/ui/states.tsx` (`Spinner`, `LoadingState`, `EmptyState`, `ErrorState`). Studio references via `@web-ui/states` when fixtured.
+
+Token values: see frontmatter `components.states`.
+
+| Primitive | Use | Voice & Content examples |
+| --- | --- | --- |
+| `Spinner` | Inline/async affordance | Icon-only; pair with text in `LoadingState` |
+| `LoadingState` | Section/card pending query | *Scanning for local ACP agents…* (sentence case, present participle + ellipsis) |
+| `EmptyState` | Zero rows / first-use | Title: **No agents found on PATH**; helper: *Install an agent or add a custom launch command below.*; host-owned `action` slot for primary CTA |
+| `ErrorState` | Recoverable load failure | Title: **Could not load this view**; helper: sentence-case transport or plain-language reason; action: **Try again** |
+
+`EmptyState` accepts an optional `action` ReactNode — the host renders the first-step CTA (e.g. **Create Work**); the primitive does not embed routing.
+
+`ErrorState` uses `role="alert"`; default retry label **Try again** (Title Case verb + noun).
+
+### Form Field (composition)
+
+**Cross-reference:** [`.mstar/iterations/v1.100/specs/form-field-contract.md`](.mstar/iterations/v1.100/specs/form-field-contract.md) (locked).
+
+**Ownership split:**
+
+| Layer | Owner | Responsibility |
+| --- | --- | --- |
+| Package (`@42ch/nexus-ui`) | `Input`, `Label`, `Textarea` | Presentational control styling; `invalid` prop → error border + `aria-invalid`; forwards native `id` / `htmlFor` |
+| App / fixture | Composition | Helper text, error text, required/optional copy, `aria-describedby` wiring, validation logic, submit behavior |
+
+**Composition order (top → bottom):**
+
+1. `Label` with `htmlFor` matching control `id` (Title Case label text; optional *(optional)* suffix is app copy)
+2. `Input` or `Textarea` with `id`, optional `invalid`, and `aria-describedby` listing helper/error element IDs
+3. Helper paragraph (`copy-13`, `gray-600` / `gray-700`) — sentence case
+4. Error paragraph (`copy-13`, `red-700`, `role="alert"`) — sentence case; shown when `invalid`
+
+Package controls do **not** render helper/error/required ornaments. Settings and wizard form rows follow this stack.
+
+### Launch & daemon status
+
+Author-facing daemon chrome on the desktop launch → Control Room path. Token values: frontmatter `components.launch-daemon` and `components.daemon-status-indicator`. Footer/status-bar behavior: [`.mstar/specs/web-ui.md`](.mstar/specs/web-ui.md) §29.6 (running = restart icon only; degraded/error → `MainBanner`).
+
+| Surface | State | Title (Title Case) | Helper / body (sentence case) | Primary action |
+| --- | --- | --- | --- | --- |
+| DaemonReadySplash | waiting | **Starting daemon…** | *This takes a few seconds on first launch.* | — |
+| DaemonReadySplash | error | **Daemon not ready** | Transport or plain-language `detail` (pre-wrapped) | **Restart Nexus** |
+| DaemonReadySplash | recovery | — (tertiary action row) | *This will clear the daemon's local state database (config, registry cache). Your creative files in the workspace are not affected.* | **Reset local database** (tertiary) |
+| MainBanner | starting | **Daemon starting…** | *Nexus is starting the local daemon.* | **Restart Daemon** |
+| MainBanner | degraded | **Daemon reconnecting** | *Nexus is retrying the local daemon connection.* | **Restart Daemon** |
+| MainBanner | stopped | **Daemon stopped** | *Restart the daemon to use local workspace features.* | **Restart Daemon** |
+| MainBanner | error (port) | **Port unavailable** | Server `detail` when present | **Restart Daemon** |
+| MainBanner | error (generic) | **Daemon did not start** | *Nexus could not start its background service. Check the logs or try restarting.* | **Restart Daemon** |
+| Status bar | running | — (icon-only restart affordance) | Cross-ref `web-ui.md` §29.6 | Restart icon button |
+
+While loading, banner primary shows **Restarting…** (sentence case, present participle + ellipsis). Avoid protocol jargon in author-facing strings unless diagnostics explicitly require it.
+
+**Studio (V1.106):** `/surfaces/launch` imports presentational `DaemonReadySplash`; `/surfaces/banner` uses composition-only MainBanner fixtures (no daemon IPC in Studio).
+
 ### Editor
 
 The outline editor is a planning surface, not the body manuscript editor. It should feel closer to an intentional note/workbench than a document processor: compact toolbar, clear save state, and no hidden background writes.
@@ -1002,6 +1127,17 @@ The workspace location affordance is one tightly-coupled inline row (V1.105 step
 ### Primary CTA
 
 The Continue/Finish button has max-width `cta-primary-max-width`. Back button renders as a smaller secondary button adjacent, with `cta-container-gap` spacing.
+
+### Done step copy (V1.106 P1)
+
+Portrait Done step centers the success stack in `data-testid="wizard-step-body"`; CTA row stays bottom-anchored.
+
+| Element | Copy pattern | Example |
+| --- | --- | --- |
+| Heading | Title Case title + celebratory emoji **after** title text | **You're ready 🎉** |
+| Helper | One line, sentence case | *Open Nexus to start writing. You can change settings anytime.* |
+| Primary CTA | Verb + product noun | **Open Nexus** |
+| Finishing state | Present participle + ellipsis | *Finishing…* |
 
 ---
 
