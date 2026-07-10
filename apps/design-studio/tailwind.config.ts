@@ -17,6 +17,9 @@ const config: Config = {
     './index.html',
     './src/**/*.{ts,tsx}',
     '../web/src/components/ui/**/*.{ts,tsx}',
+    '../web/src/components/setup/**/*.{ts,tsx}',
+    '../web/src/components/layout/presentational/**/*.{ts,tsx}',
+    '../../packages/nexus-ui/src/**/*.{ts,tsx}',
   ],
   theme: {
     screens: {
