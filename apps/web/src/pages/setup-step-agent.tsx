@@ -186,6 +186,7 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
           }
           onRetry={scan.isError ? () => void scan.refetch() : undefined}
           emptyTitle="No agents found on PATH."
+          emptyDescription="Install an ACP-compatible agent to continue."
           density="compact"
         />
       </div>
