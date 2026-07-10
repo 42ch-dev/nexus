@@ -43,6 +43,44 @@ describe('Select', () => {
     expect(screen.getByRole('option', { name: 'Option B' })).toBeInTheDocument();
   });
 
+  // --- chevron inset (asymmetric horizontal padding) ---
+
+  it('renders with asymmetric inline padding for chevron inset', () => {
+    render(
+      <Select data-testid="test-select">
+        <option value="a">A</option>
+      </Select>,
+    );
+    const select = screen.getByTestId('test-select');
+    expect(select).toHaveClass('ps-3');
+    expect(select).toHaveClass('pe-8');
+    expect(select).not.toHaveClass('px-3');
+  });
+
+  it('inherits chevron inset when disabled', () => {
+    render(
+      <Select disabled data-testid="test-select">
+        <option value="a">A</option>
+      </Select>,
+    );
+    const select = screen.getByTestId('test-select');
+    expect(select).toHaveClass('ps-3');
+    expect(select).toHaveClass('pe-8');
+    expect(select).not.toHaveClass('px-3');
+  });
+
+  it('inherits chevron inset when invalid', () => {
+    render(
+      <Select invalid data-testid="test-select">
+        <option value="a">A</option>
+      </Select>,
+    );
+    const select = screen.getByTestId('test-select');
+    expect(select).toHaveClass('ps-3');
+    expect(select).toHaveClass('pe-8');
+    expect(select).not.toHaveClass('px-3');
+  });
+
   // --- className merge (cn integration) ---
 
   it('merges custom className with base classes', () => {

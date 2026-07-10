@@ -141,6 +141,10 @@ components:
     helperText: { typography: "{typography.copy-13}" }
     errorHelperText: { textColor: "{colors.red-700}", typography: "{typography.copy-13}" }
 
+  # ── select: native `<select>` chevron inset ──
+  select:
+    default: { paddingInlineStart: "{spacing.space-3}", paddingInlineEnd: "{spacing.space-8}", chevronInset: "{spacing.space-8}" }
+
   # ── card: apps/web dark ──
   card:
     default: { backgroundColor: "{colors.background-100}", borderColor: "{colors.gray-alpha-400}", rounded: "{rounded.card}", padding: "{spacing.space-6}", shadow: "shadow-card" }
