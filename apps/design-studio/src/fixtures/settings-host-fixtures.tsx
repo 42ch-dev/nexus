@@ -32,6 +32,8 @@ import {
   cn,
 } from '@42ch/nexus-ui';
 
+import { Dialog, DialogContent } from '@web-ui/dialog'; // transitional — keep-web (Radix portal/focus-trap beyond presentational scope)
+
 import { WorkspacePathField } from '@web-setup/workspace-path-field';
 import {
   AgentPicker,
@@ -110,6 +112,11 @@ const WORKSPACE_POST_PERSIST_SUCCESS =
 
 /** Copy-only label — no wired app restart orchestration. */
 const WORKSPACE_RESTART_LABEL = 'Quit and reopen Nexus';
+
+const SETUP_CONFIRM_TITLE = 'Re-run Setup?';
+
+const SETUP_CONFIRM_BODY =
+  'This restarts the setup wizard from the beginning. Your workspace path and agent profile are not deleted.';
 
 /** Fixture-only sample paths — visual chrome, not live workspace state. */
 const FIXTURE_WORKSPACE_PATH = '/Users/creator/Documents/Nexus';
@@ -486,6 +493,59 @@ function SettingsWorkspaceSectionChrome({
 }
 
 /**
+ * Setup section host — owns the Radix confirm dialog; chrome is purely
+ * presentational. Browser-only variant needs no dialog (CTA is disabled).
+ */
+function SettingsSetupSectionHost({
+  desktopAvailable = true,
+  'data-testid': dataTestId,
+}: {
+  desktopAvailable?: boolean;
+  'data-testid'?: string;
+}) {
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  return (
+    <>
+      <SettingsSetupSectionChrome
+        desktopAvailable={desktopAvailable}
+        data-testid={dataTestId}
+        onReRunSetup={() => setConfirmOpen(true)}
+      />
+      {desktopAvailable && (
+        <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+          <DialogContent
+            title={SETUP_CONFIRM_TITLE}
+            description={SETUP_CONFIRM_BODY}
+          >
+            <div
+              className="flex justify-end gap-3"
+              data-testid="settings-rerun-setup-confirm"
+            >
+              <Button
+                type="button"
+                variant="secondary"
+                data-testid="settings-rerun-setup-cancel"
+                onClick={() => setConfirmOpen(false)}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="destructive"
+                data-testid="settings-rerun-setup-confirm-action"
+                onClick={() => setConfirmOpen(false)}
+              >
+                Re-run Setup
+              </Button>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+    </>
+  );
+}
+
+/**
  * Advanced section body chrome — stacks Connection and Setup on one page
  * with hash anchors (V1.106 P2).
  */
@@ -493,7 +553,7 @@ function SettingsAdvancedSectionChrome() {
   return (
     <div className="flex flex-col gap-10" data-testid="settings-advanced-section">
       <SettingsConnectionSectionChrome />
-      <SettingsSetupSectionChrome data-testid="settings-setup-section" />
+      <SettingsSetupSectionHost data-testid="settings-setup-section" />
     </div>
   );
 }
@@ -679,7 +739,7 @@ export function SettingsHostFixtures() {
           Fixture-driven only; no App IPC.
         </p>
         <div className="bg-background-200 rounded-card p-6">
-          <SettingsSetupSectionChrome data-testid="settings-setup-section" />
+          <SettingsSetupSectionHost data-testid="settings-setup-section" />
         </div>
       </div>
 

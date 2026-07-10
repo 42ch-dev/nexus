@@ -7,7 +7,6 @@ import {
   Layers,
   ListChecks,
   Sparkles,
-  type LucideIcon,
 } from 'lucide-react';
 
 import { NexusLogo } from '@/components/brand/nexus-logo';

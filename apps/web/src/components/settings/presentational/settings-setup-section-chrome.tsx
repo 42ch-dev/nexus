@@ -1,12 +1,10 @@
-import { useState } from 'react';
-
 import { Button } from '@42ch/nexus-ui';
-
-import { Dialog, DialogContent } from '@web-ui/dialog'; // transitional — keep-web (Radix portal/focus-trap beyond presentational scope)
 
 export interface SettingsSetupSectionChromeProps {
   /** When false, renders the honest browser-only disabled state. */
   desktopAvailable?: boolean;
+  /** Called when the desktop Re-run Setup CTA is clicked. */
+  onReRunSetup?: () => void;
   'data-testid'?: string;
 }
 
@@ -26,17 +24,17 @@ const SETUP_BROWSER_TOOLTIP =
   'Open the Nexus desktop app to re-run setup.';
 
 /**
- * Setup section body chrome — locked helper + Re-run Setup CTA + confirm
- * dialog (settings-setup-section.md). Props-driven only; no App IPC.
+ * Setup section body chrome — locked helper + Re-run Setup CTA.
+ * Props-driven only; no internal Dialog state. The host owns the confirm
+ * dialog via the `onReRunSetup` callback (settings-setup-section.md).
  *
  * `desktopAvailable` toggles honest browser-only copy vs the desktop CTA.
  */
 export function SettingsSetupSectionChrome({
   desktopAvailable = true,
+  onReRunSetup,
   'data-testid': dataTestId,
 }: SettingsSetupSectionChromeProps) {
-  const [confirmOpen, setConfirmOpen] = useState(false);
-
   return (
     <div
       className="flex flex-col gap-6"
@@ -53,9 +51,9 @@ export function SettingsSetupSectionChrome({
         <div className="flex items-center gap-3">
           <Button
             type="button"
-            variant="secondary"
+            variant="destructive"
             data-testid="settings-rerun-setup"
-            onClick={() => setConfirmOpen(true)}
+            onClick={() => onReRunSetup?.()}
           >
             Re-run Setup
           </Button>
@@ -76,29 +74,6 @@ export function SettingsSetupSectionChrome({
           </div>
         </div>
       )}
-
-      <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <DialogContent title={SETUP_CONFIRM_TITLE} description={SETUP_CONFIRM_BODY}>
-          <div className="flex justify-end gap-3" data-testid="settings-rerun-setup-confirm">
-            <Button
-              type="button"
-              variant="secondary"
-              data-testid="settings-rerun-setup-cancel"
-              onClick={() => setConfirmOpen(false)}
-            >
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              variant="destructive"
-              data-testid="settings-rerun-setup-confirm-action"
-              onClick={() => setConfirmOpen(false)}
-            >
-              Re-run Setup
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
