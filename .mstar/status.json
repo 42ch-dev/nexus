@@ -172,13 +172,13 @@
       "id": "2026-07-11-v1.110-daemon-startup-latency",
       "title": "P0 — Daemon startup latency (FB-D1)",
       "file": "plans/2026-07-11-v1.110-daemon-startup-latency.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@fullstack-dev",
         "@architect"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.110",
         "daemon",
@@ -189,7 +189,7 @@
       ],
       "created_at": "2026-07-11",
       "updated_at": "2026-07-11",
-      "notes": "Todo — Phase 1 compass registered",
+      "notes": "Done — SDD T1-T4 + QC tri Approve with residuals + QA Pass; merged to iteration/v1.110",
       "metadata": {
         "iteration_refs": [
           "V1.110"
@@ -206,13 +206,13 @@
       "id": "2026-07-11-v1.110-agent-scan-path-reliability",
       "title": "P1 — Agent scan PATH reliability (FB-D3)",
       "file": "plans/2026-07-11-v1.110-agent-scan-path-reliability.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@fullstack-dev",
         "@architect"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.110",
         "agent",
@@ -223,7 +223,7 @@
       ],
       "created_at": "2026-07-11",
       "updated_at": "2026-07-11",
-      "notes": "Todo — Phase 1 compass registered",
+      "notes": "Done — SDD T1-T4 + QC tri Approve with residuals + QA Pass; merged to iteration/v1.110",
       "metadata": {
         "iteration_refs": [
           "V1.110"
@@ -1250,6 +1250,76 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-11-v1.110-agent-picker-ux-polish.md",
         "note": "FB-D2-001 degrades to registry order in V1.110. lastUpdated is not on AgentScanEntry (additionalProperties: false); blocked on upstream ACP registry updated_at or a scan-response wire change."
+      }
+    ],
+    "2026-07-11-v1.110-daemon-startup-latency": [
+      {
+        "id": "R-V110P0QC1-S001",
+        "title": "PORT_PROBE_TIMEOUT naming ambiguity vs HEALTH_PROBE_TIMEOUT",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.110",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-11-v1.110-daemon-startup-latency.md",
+        "note": "qc1 S-001. Consider PORT_GATE_TIMEOUT."
+      },
+      {
+        "id": "R-V110P0QC1-S002",
+        "title": "probe_port_state_unknown test is best-effort",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.110",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-11-v1.110-daemon-startup-latency.md",
+        "note": "qc1 S-002 / qc3 W-001. Unknown arm hard to force with real sockets; logic correct by construction."
+      },
+      {
+        "id": "R-V110P0QC1-S003",
+        "title": "DRY opportunity for timing blocks in start_with_budget",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.110",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-11-v1.110-daemon-startup-latency.md",
+        "note": "qc1 S-003. Two Instant::now blocks; acceptable at N=2."
+      }
+    ],
+    "2026-07-11-v1.110-agent-scan-path-reliability": [
+      {
+        "id": "R-V110P1QC1-S001",
+        "title": "Missing doc comments on 4 private path_enrichment helpers",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.110",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-11-v1.110-agent-scan-path-reliability.md",
+        "note": "qc1 F-S1."
+      },
+      {
+        "id": "R-V110P1QC1-S002",
+        "title": "parse_semver_prefix silent-skip non-semver dirs (no debug log)",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.110",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-11-v1.110-agent-scan-path-reliability.md",
+        "note": "qc1 F-S2 / qc2 S-001 / qc3 S-002."
+      },
+      {
+        "id": "R-V110P1QC1-S005",
+        "title": "test coverage gaps: alias-cycle, fnm fallback, PNPM_HOME precedence, negative case",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.110",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-11-v1.110-agent-scan-path-reliability.md",
+        "note": "qc1 F-S5. Non-blocking; current 13 tests cover DoD."
       }
     ]
   }
