@@ -830,13 +830,14 @@ fn transition_rule_matches(
     if !to_match {
         return false;
     }
-    match condition {
-        Some(cond) => rule
-            .get("when")
-            .and_then(serde_yaml::Value::as_str)
-            .is_some_and(|v| v == cond),
-        None => rule.get("when").is_none(),
-    }
+    condition.map_or_else(
+        || rule.get("when").is_none(),
+        |cond| {
+            rule.get("when")
+                .and_then(serde_yaml::Value::as_str)
+                .is_some_and(|v| v == cond)
+        },
+    )
 }
 
 fn reject_linear_next_conflict(
