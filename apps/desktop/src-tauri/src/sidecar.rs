@@ -23,6 +23,12 @@ use tokio::time::{sleep, Instant};
 
 const DEFAULT_PORT: u16 = 8420;
 const HEALTH_POLL_INTERVAL: Duration = Duration::from_millis(250);
+/// Fast polling interval used during the first second of `wait_for_first_health`
+/// to catch the daemon ready transition sooner. After `FAST_POLL_WINDOW` the
+/// loop falls back to the steady `HEALTH_POLL_INTERVAL`.
+const HEALTH_POLL_INTERVAL_FAST: Duration = Duration::from_millis(100);
+/// Duration of the fast-poll window at the start of `wait_for_first_health`.
+const FAST_POLL_WINDOW: Duration = Duration::from_secs(1);
 const HEALTH_START_TIMEOUT: Duration = Duration::from_secs(15);
 const RESTART_BACKOFF_BASE: Duration = Duration::from_millis(500);
 const RESTART_BACKOFF_MAX: Duration = Duration::from_secs(8);
@@ -255,9 +261,35 @@ impl SidecarManager {
         // the HTTP health-probe round-trip. If the port is occupied (or the
         // gate is inconclusive), run the HTTP probe so the external-daemon
         // attach path is preserved and we never spawn onto an occupied port.
+        let port_probe_start = Instant::now();
         let port_state = probe_port_state(port).await;
+        let port_probe_elapsed = port_probe_start.elapsed();
+        let port_state_str = match port_state {
+            PortState::Free => "free",
+            PortState::Occupied => "occupied",
+            PortState::Unknown => "unknown",
+        };
+        tracing::info!(
+            phase = "port_probe",
+            port = port,
+            port_state = port_state_str,
+            elapsed_ms = port_probe_elapsed.as_millis() as u64,
+            "port probe completed"
+        );
+
         if port_state != PortState::Free {
-            if let Some(health) = probe_health(port).await {
+            let attach_probe_start = Instant::now();
+            let health = probe_health(port).await;
+            let attach_probe_elapsed = attach_probe_start.elapsed();
+            tracing::info!(
+                phase = "attach_probe",
+                port = port,
+                attached = health.is_some(),
+                elapsed_ms = attach_probe_elapsed.as_millis() as u64,
+                "attach probe completed"
+            );
+
+            if let Some(health) = health {
                 let mut inner = self.0.lock().await;
                 inner.state = DaemonState::Running;
                 inner.version = Some(health.version);
@@ -299,6 +331,12 @@ impl SidecarManager {
             .map_err(|e| format!("failed to spawn sidecar: {e}"))?;
 
         let pid = child.pid();
+        tracing::info!(
+            phase = "spawn",
+            port = port,
+            pid = pid,
+            "sidecar spawned"
+        );
 
         let stderr_tail = Arc::new(Mutex::new(String::new()));
         let stderr_tail_for_drain = stderr_tail.clone();
@@ -633,15 +671,42 @@ async fn probe_port_state(port: u16) -> PortState {
 }
 
 async fn wait_for_first_health(port: u16, pid: u32) -> Option<DaemonHealth> {
-    let deadline = Instant::now() + HEALTH_START_TIMEOUT;
+    let start = Instant::now();
+    let deadline = start + HEALTH_START_TIMEOUT;
+    let mut polls = 0u32;
     loop {
+        polls += 1;
         if let Some(health) = probe_health(port).await {
+            let elapsed = start.elapsed();
+            tracing::info!(
+                phase = "wait_for_ready",
+                port = port,
+                ready = true,
+                polls = polls,
+                elapsed_ms = elapsed.as_millis() as u64,
+                "daemon became ready"
+            );
             return Some(health);
         }
         if Instant::now() >= deadline || !process_alive(pid) {
+            let elapsed = start.elapsed();
+            tracing::info!(
+                phase = "wait_for_ready",
+                port = port,
+                ready = false,
+                polls = polls,
+                elapsed_ms = elapsed.as_millis() as u64,
+                "daemon did not become ready"
+            );
             return None;
         }
-        sleep(HEALTH_POLL_INTERVAL).await;
+        let elapsed = start.elapsed();
+        let interval = if elapsed < FAST_POLL_WINDOW {
+            HEALTH_POLL_INTERVAL_FAST
+        } else {
+            HEALTH_POLL_INTERVAL
+        };
+        sleep(interval).await;
     }
 }
 
