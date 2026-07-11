@@ -3,9 +3,9 @@
   "$id": "https://nexus42.invalid/schemas/daemon-api/canvas/strategy/strategy-patch-transition-request.schema.json",
   "schema_version": 1,
   "title": "Nexus StrategyPatchTransitionRequest",
-  "description": "Request body for POST /v1/daemon/strategies/{strategy_id}/transitions/patch (V1.71). Rewires an outer transition (linear next, conditional branch, or default target) and/or updates its condition label.",
+  "description": "Request body for POST /v1/daemon/strategies/{strategy_id}/transitions/patch (V1.109). Rewires or creates an outer transition (linear next, conditional branch, or default target) and/or updates its condition label.",
   "type": "object",
-  "required": ["strategy_id", "base_revision", "source_state_id", "old_target"],
+  "required": ["strategy_id", "base_revision", "source_state_id"],
   "properties": {
     "strategy_id": {
       "type": "string",
@@ -22,20 +22,26 @@
     },
     "old_target": {
       "type": "string",
-      "description": "Current target state identifier of the transition to replace."
+      "description": "Current target state identifier of the transition to replace. Required when op is 'update' (default)."
     },
     "new_target": {
       "type": "string",
-      "description": "New target state identifier. Required when rewiring the transition."
+      "description": "New target state identifier. Required when op is 'create', optional when op is 'update'."
     },
     "condition": {
       "type": "string",
-      "description": "For conditional / labeled branches, identifies the branch to update. When present, the branch's condition is also updated to this value."
+      "description": "For conditional / labeled branches, identifies the branch to update or create."
     },
     "transition_kind": {
       "type": "string",
       "enum": ["next", "branch", "default"],
       "description": "Optional disambiguator for the transition form being edited."
+    },
+    "op": {
+      "type": "string",
+      "enum": ["create", "update"],
+      "default": "update",
+      "description": "Operation to perform: 'create' adds a new outgoing transition, 'update' (default) rewires an existing transition."
     }
   },
   "additionalProperties": false
