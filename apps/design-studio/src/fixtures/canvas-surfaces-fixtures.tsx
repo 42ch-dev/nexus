@@ -17,9 +17,11 @@
  */
 import { type ReactNode } from 'react';
 import {
+  AlertTriangle,
   Copy,
   ExternalLink,
   FolderSearch,
+  Info,
   Link2,
   Maximize2,
   Minimize2,
@@ -505,12 +507,388 @@ function CanvasShellChrome({
 }
 
 /* ------------------------------------------------------------------ */
+/*  Strategy surface chrome — mirrored from strategy-nodes.tsx +         */
+/*  strategy-canvas/state-machine + strategy-canvas/inspector-panel.     */
+/*  Hand-mirrored static markup (no RF types, no App canvas import).     */
+/*  Tokens: canvas-strategy-accent (purple) + generic canvas-node-*.     */
+/*  Status overlay uses semantic colors (Draft §3.6: canvas tokens cover */
+/*  shared primitives only).                                            */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Status → ring/dot/label. Mirrors the STATUS_RING / STATUS_DOT /
+ * STATUS_LABEL maps in `strategy-nodes.tsx` verbatim. The overlay is driven
+ * by live session state in the App; here it is a static matrix.
+ */
+const STRATEGY_STATUS_RING = {
+  current: 'ring-2 ring-blue-700',
+  running: 'ring-2 ring-green-700',
+  waiting: 'ring-2 ring-amber-700',
+  error: 'ring-2 ring-red-700',
+  completed: 'ring-2 ring-teal-700',
+} as const;
+
+const STRATEGY_STATUS_DOT = {
+  current: 'bg-blue-700',
+  running: 'bg-green-700',
+  waiting: 'bg-amber-700',
+  error: 'bg-red-700',
+  completed: 'bg-teal-700',
+} as const;
+
+const STRATEGY_STATUS_LABEL = {
+  current: 'Current',
+  running: 'Running',
+  waiting: 'Waiting',
+  error: 'Error',
+  completed: 'Completed',
+} as const;
+
+type StrategyStatus = keyof typeof STRATEGY_STATUS_RING;
+
+/**
+ * Strategy node shell — mirrors `NodeShell` in `strategy-nodes.tsx`:
+ * `bg-canvas-node-fill`, `border-canvas-node(-selected)`, optional status
+ * ring, and the `border-l-canvas-strategy-accent` accent stripe for outer
+ * states. Distinct from the outline `NodeShell` above (which has no status /
+ * accent props) so the outline pattern is not perturbed.
+ */
+function StrategyNodeShell({
+  selected,
+  status,
+  accent,
+  children,
+  className,
+  style,
+}: {
+  selected: boolean;
+  status: StrategyStatus | null;
+  accent?: boolean;
+  children: ReactNode;
+  className?: string;
+  style?: React.CSSProperties;
+}) {
+  return (
+    <div
+      className={[
+        'min-w-[176px] rounded-card border bg-canvas-node-fill px-3 py-2 shadow-card transition-colors duration-state ease-standard',
+        selected ? 'border-canvas-node-border-selected' : 'border-canvas-node-border',
+        status ? STRATEGY_STATUS_RING[status] : '',
+        accent ? 'border-l-[3px] border-l-canvas-strategy-accent' : '',
+        className ?? '',
+      ].join(' ')}
+      style={style}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** Header row — label + status chip. Mirrors NodeHeader in strategy-nodes.tsx. */
+function StrategyNodeHeader({
+  label,
+  status,
+}: {
+  label: string;
+  status: StrategyStatus | null;
+}) {
+  return (
+    <div className="flex items-center justify-between gap-2">
+      <span
+        className="truncate font-heading text-copy-14 font-semibold text-gray-1000"
+        title={label}
+      >
+        {label}
+      </span>
+      {status ? (
+        <span className="flex items-center gap-1 text-label-12 text-gray-700">
+          <span
+            className={`inline-block h-2 w-2 rounded-pill ${STRATEGY_STATUS_DOT[status]}`}
+            aria-hidden
+          />
+          {STRATEGY_STATUS_LABEL[status]}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+/** State-kind mono tag — mirrors KindTag in strategy-nodes.tsx. */
+function StrategyKindTag({ kind }: { kind: string }) {
+  return (
+    <span className="mt-0.5 inline-block rounded-pill bg-gray-alpha-100 px-1.5 py-0.5 font-mono text-label-12 text-gray-700">
+      {kind}
+    </span>
+  );
+}
+
+/** Outer state-machine state — mirrors StrategyStateNode (accent + Start tag). */
+function StrategyStateSample({
+  label,
+  stateKind,
+  description,
+  isInitial,
+  status = null,
+  selected = false,
+}: {
+  label: string;
+  stateKind: string;
+  description: string | null;
+  isInitial: boolean;
+  status?: StrategyStatus | null;
+  selected?: boolean;
+}) {
+  return (
+    <StrategyNodeShell selected={selected} status={status} accent>
+      <StrategyNodeHeader label={label} status={status} />
+      <StrategyKindTag kind={stateKind} />
+      {description ? (
+        <p className="mt-1 line-clamp-2 text-copy-13 text-gray-900">{description}</p>
+      ) : null}
+      {isInitial ? (
+        <span className="mt-1 inline-block text-label-12 text-purple-700">Start</span>
+      ) : null}
+    </StrategyNodeShell>
+  );
+}
+
+/** Converge merge-point join — mirrors StrategyJoinNode (Join · strategy chip). */
+function StrategyJoinSample({
+  label,
+  convergeStrategy = 'wait_for_all',
+  status = null,
+  selected = false,
+}: {
+  label: string;
+  convergeStrategy?: string;
+  status?: StrategyStatus | null;
+  selected?: boolean;
+}) {
+  return (
+    <StrategyNodeShell selected={selected} status={status}>
+      <StrategyNodeHeader label={label} status={status} />
+      <span className="mt-0.5 inline-block rounded-pill bg-[color-mix(in_srgb,var(--color-purple-700)_12%,transparent)] px-1.5 py-0.5 text-label-12 text-purple-1000">
+        Join · {convergeStrategy}
+      </span>
+    </StrategyNodeShell>
+  );
+}
+
+/** Terminal state — mirrors StrategyTerminalNode (End). */
+function StrategyTerminalSample({
+  label,
+  status = null,
+  selected = false,
+}: {
+  label: string;
+  status?: StrategyStatus | null;
+  selected?: boolean;
+}) {
+  return (
+    <StrategyNodeShell selected={selected} status={status} className="min-w-[140px]">
+      <StrategyNodeHeader label={label} status={status} />
+      <span className="mt-0.5 inline-block text-label-12 text-gray-700">End</span>
+    </StrategyNodeShell>
+  );
+}
+
+/**
+ * Labeled transition edge — static stand-in for the RF `strategy-edge` with a
+ * `label: condition`. The App renders bezier paths with a label badge; here a
+ * horizontal connector with a centered condition pill captures the same
+ * visual contract. Accent stripe uses `canvas-strategy-accent`.
+ */
+function StrategyEdgeSample({
+  label,
+  kind = 'next',
+}: {
+  label: string | null;
+  kind?: 'next' | 'branch' | 'default' | 'converge' | 'depends_on';
+}) {
+  return (
+    <div
+      className="flex items-center gap-1.5"
+      data-testid="strategy-edge-sample"
+      aria-label={`Transition: ${kind}${label ? ` · ${label}` : ''}`}
+    >
+      <span
+        className="inline-block h-px w-8"
+        style={{
+          backgroundImage:
+            'linear-gradient(to right, var(--color-canvas-strategy-accent) 60%, transparent 60%)',
+          backgroundSize: '6px 1px',
+        }}
+        aria-hidden
+      />
+      <span
+        className="inline-flex items-center rounded-pill px-1.5 py-0.5 text-label-12"
+        style={{
+          color: 'var(--color-canvas-strategy-accent)',
+          background:
+            'color-mix(in srgb, var(--color-canvas-strategy-accent) 12%, transparent)',
+        }}
+      >
+        {label ?? kind}
+      </span>
+      <span
+        className="inline-block h-px w-8"
+        style={{
+          backgroundImage:
+            'linear-gradient(to right, var(--color-canvas-strategy-accent) 60%, transparent 60%)',
+          backgroundSize: '6px 1px',
+        }}
+        aria-hidden
+      />
+      <span
+        className="inline-block h-0 w-0"
+        style={{
+          borderTop: '3px solid transparent',
+          borderBottom: '3px solid transparent',
+          borderLeft: '5px solid var(--color-canvas-strategy-accent)',
+        }}
+        aria-hidden
+      />
+    </div>
+  );
+}
+
+/**
+ * Inspector panel chrome — mirrors the read-only `ReadOnlyDetails` in
+ * `inspector-panel.tsx` (top-right aside: Info icon + label + dl of Kind /
+ * State id / Initial / Status / description / prompt ref). Static — no edit
+ * toggle wiring, no conflict modal.
+ */
+function StrategyInspectorSample() {
+  return (
+    <aside
+      className="absolute right-3 top-3 w-[280px] rounded-card border border-gray-alpha-400 bg-background-100 p-3 shadow-popover"
+      aria-label="Selected node details"
+      data-testid="strategy-inspector-chrome"
+    >
+      <div className="flex items-center gap-2">
+        <Info className="h-4 w-4 text-purple-700" aria-hidden />
+        <h3 className="font-heading text-heading-16 text-gray-1000">Drafting</h3>
+      </div>
+      <dl className="mt-2 flex flex-col gap-1 text-copy-13">
+        <div className="flex justify-between">
+          <dt className="text-gray-700">Kind</dt>
+          <dd className="font-mono text-gray-1000">standard</dd>
+        </div>
+        <div className="flex justify-between">
+          <dt className="text-gray-700">State id</dt>
+          <dd className="font-mono text-gray-1000">drafting</dd>
+        </div>
+        <div className="text-purple-700">Initial state</div>
+        <div className="flex justify-between">
+          <dt className="text-gray-700">Status</dt>
+          <dd className="text-blue-700">current</dd>
+        </div>
+        <p className="mt-2 text-gray-900">Author writes the first draft of the chapter.</p>
+        <p className="mt-2 text-gray-700">
+          Prompt: <span className="font-mono">prompts/draft-chapter.md</span>
+        </p>
+      </dl>
+    </aside>
+  );
+}
+
+/**
+ * Validation panel chrome — mirrors `ValidationPanel` in `state-machine.tsx`
+ * (bottom-left, amber AlertTriangle + "Validation notes" + problem list +
+ * dangling transitions). Static.
+ */
+function StrategyValidationSample() {
+  return (
+    <div
+      className="absolute bottom-3 left-3 max-w-[360px] rounded-card border border-amber-700/40 bg-background-100 p-2 text-copy-13 shadow-popover"
+      role="status"
+      data-testid="strategy-validation-chrome"
+    >
+      <div className="flex items-center gap-1.5 text-amber-1000">
+        <AlertTriangle className="h-4 w-4" aria-hidden />
+        <span className="font-semibold">Validation notes</span>
+      </div>
+      <ul className="mt-1 flex flex-col gap-0.5 text-gray-900">
+        <li className="text-amber-1000">Dangling transition: drafting → unknown_target</li>
+      </ul>
+    </div>
+  );
+}
+
+/**
+ * Strategy shell chrome — mirrors `StrategyCanvas` + `CanvasShell` layout:
+ * dot-grid surface, state-machine nodes laid out in layers with labeled
+ * transition edges, a top-right inspector aside, and a bottom-left validation
+ * panel. No live graph — nodes and edges are static markup.
+ */
+function StrategyShellChrome() {
+  return (
+    <div
+      className="relative h-[460px] w-full overflow-hidden rounded-card border border-gray-alpha-400 bg-canvas-surface"
+      data-testid="strategy-shell-chrome"
+    >
+      {/* sr-only graph summary — mirrors CanvasShell aria-live region. */}
+      <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
+        Strategy preview — 4 states (drafting, revising, done), 1 join, 1 labeled transition.
+      </div>
+
+      {/* Dot-grid background — mirrors CanvasShell Background variant=Dots. */}
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          backgroundImage:
+            'radial-gradient(var(--color-canvas-grid) 1.5px, transparent 1.5px)',
+          backgroundSize: '20px 20px',
+        }}
+        aria-hidden
+      />
+
+      {/* Static state-machine graph — initial → join → terminal. */}
+      <div className="relative flex h-full flex-col items-start justify-center gap-4 p-10">
+        <div className="flex flex-col gap-2">
+          <span className="text-label-12 font-medium text-gray-500">Initial</span>
+          <StrategyStateSample
+            label="Drafting"
+            stateKind="standard"
+            description="Author writes the first draft of the chapter."
+            isInitial
+            status="current"
+          />
+        </div>
+
+        <div className="pl-6">
+          <StrategyEdgeSample label="draft_ready" kind="next" />
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <span className="text-label-12 font-medium text-gray-500">Join</span>
+          <StrategyJoinSample label="Converge" convergeStrategy="wait_for_all" />
+        </div>
+
+        <div className="pl-6">
+          <StrategyEdgeSample label="all_done" kind="converge" />
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <span className="text-label-12 font-medium text-gray-500">Terminal</span>
+          <StrategyTerminalSample label="Done" status="completed" />
+        </div>
+      </div>
+
+      <StrategyInspectorSample />
+      <StrategyValidationSample />
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Public fixture component                                            */
 /* ------------------------------------------------------------------ */
 
 /**
  * Canvas Surfaces fixtures — shell chrome + outline node chrome + context-menu
- * chrome matrices. Presentational-only; no daemon, no live graph, no contracts.
+ * chrome matrices + Strategy surface chrome. Presentational-only; no daemon,
+ * no live graph, no contracts.
  */
 export function CanvasSurfacesFixtures() {
   return (
@@ -667,6 +1045,14 @@ export function CanvasSurfacesFixtures() {
             </ContextMenuShell>
           </div>
         </div>
+      </FixtureFrame>
+
+      <FixtureFrame
+        title="Strategy surface chrome"
+        description="Strategy state-machine surface mirrored from strategy-nodes.tsx + strategy-canvas/state-machine + strategy-canvas/inspector-panel — outer states (accent stripe + stateKind tag + status ring), a join merge-point, a terminal, labeled transition edges (condition pill in canvas-strategy-accent), a read-only inspector aside, and an amber validation panel. Same canvas-node-* + canvas-strategy-accent tokens as the App; status overlay uses semantic colors (Draft §3.6). No @xyflow/react, no App canvas import — static markup."
+        testId="canvas-fixture-strategy"
+      >
+        <StrategyShellChrome />
       </FixtureFrame>
     </div>
   );

@@ -1259,4 +1259,57 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
     // There should be exactly one canvas shell chrome instance.
     expect(screen.getAllByTestId('canvas-shell-chrome')).toHaveLength(1);
   });
+
+  /* ---- Strategy surface chrome (V1.111 P2 T1) --------------------- */
+
+  it('renders the Strategy surface chrome fixture with shell + inspector + validation', () => {
+    const shell = screen.getByTestId('strategy-shell-chrome');
+    expect(shell).toBeInTheDocument();
+
+    // Inspector aside mirrors strategy-canvas/inspector-panel ReadOnlyDetails.
+    expect(
+      within(shell).getByTestId('strategy-inspector-chrome'),
+    ).toBeInTheDocument();
+
+    // Validation panel mirrors strategy-canvas/state-machine ValidationPanel.
+    expect(
+      within(shell).getByTestId('strategy-validation-chrome'),
+    ).toBeInTheDocument();
+  });
+
+  it('mirrors strategy node kinds (state / join / terminal) with status + kind tags', () => {
+    const shell = screen.getByTestId('strategy-shell-chrome');
+
+    // "Drafting" appears both as the state-node header (span[title]) and as the
+    // inspector aside heading (h3, read-only mirror of the selected node). The
+    // accent stripe lives on the state-node shell — target the span[title] copy.
+    const stateHeading = shell.querySelector<HTMLSpanElement>(
+      'span[title="Drafting"]',
+    );
+    expect(stateHeading).not.toBeNull();
+    const stateShell = stateHeading!.closest('[class*="border-l-canvas-strategy-accent"]');
+    expect(stateShell).not.toBeNull();
+
+    // stateKind mono tag — mirrors StrategyStateNode KindTag.
+    expect(within(shell).getAllByText('standard').length).toBeGreaterThanOrEqual(1);
+
+    // Status overlay uses semantic colors — Drafting is the current node.
+    expect(within(shell).getByText('Current')).toBeInTheDocument();
+
+    // Join node carries its converge-strategy chip.
+    expect(within(shell).getByText('Join · wait_for_all')).toBeInTheDocument();
+
+    // Terminal node shows the End marker.
+    expect(within(shell).getByText('End')).toBeInTheDocument();
+  });
+
+  it('renders labeled transition edges as static connectors (canvas-strategy-accent)', () => {
+    const shell = screen.getByTestId('strategy-shell-chrome');
+    const edges = within(shell).getAllByTestId('strategy-edge-sample');
+    expect(edges.length).toBeGreaterThanOrEqual(2);
+
+    // Edge labels mirror the RF `label: condition` on strategy-edge.
+    expect(within(shell).getByText('draft_ready')).toBeInTheDocument();
+    expect(within(shell).getByText('all_done')).toBeInTheDocument();
+  });
 });
