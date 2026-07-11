@@ -306,13 +306,13 @@
       "id": "2026-07-12-v1.111-sidebar-canvas-ia",
       "title": "P1 — Sidebar Canvas IA",
       "file": "plans/2026-07-12-v1.111-sidebar-canvas-ia.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@frontend-dev",
         "@architect"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.111",
         "sidebar",
@@ -323,7 +323,7 @@
       ],
       "created_at": "2026-07-12",
       "updated_at": "2026-07-12",
-      "notes": "Nest canvas surfaces under Work context; preserve V1.94 responsive rules",
+      "notes": "Done — SDD T1-T4 + QC tri Approve w/ residual (1 low) + QA Pass; merged to iteration/v1.111",
       "metadata": {
         "iteration_refs": [
           "V1.111"
@@ -1413,6 +1413,19 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-11-v1.110-agent-picker-ux-polish.md",
         "note": "qc3 W-001 low confidence."
+      }
+    ],
+    "2026-07-12-v1.111-sidebar-canvas-ia": [
+      {
+        "id": "R-V1111P1-WORLDS-PICKER",
+        "title": "World KB sidebar item disabled when no worldId active (no /worlds picker route exists; only /worlds/:worldId/kb)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.111",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-12-v1.111-sidebar-canvas-ia.md",
+        "note": "qc1 flag + T3 reviewer. Honest disabled+aria-disabled; palette go.world-kb has same gating. Durable fix: /worlds picker route. QC source: qc-consolidated.md"
       }
     ],
     "2026-07-12-v1.111-canvas-command-palette": [
