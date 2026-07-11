@@ -57,7 +57,7 @@ function scanHandler(
   agents: Array<Record<string, unknown>> = [
     {
       name: 'codex',
-      registry_agent_id: 'openai/codex',
+      registry_agent_id: 'codex-acp',
       launch_command: 'codex',
       installed: true,
       version: '1.0.0',
@@ -125,7 +125,7 @@ describe('SettingsAgentSection', () => {
     expect(screen.queryByTestId('wizard-cta-row')).not.toBeInTheDocument();
 
     await waitFor(() =>
-      expect(screen.getByTestId('agent-card-openai/codex')).toBeInTheDocument(),
+      expect(screen.getByTestId('agent-card-codex-acp')).toBeInTheDocument(),
     );
   });
 });

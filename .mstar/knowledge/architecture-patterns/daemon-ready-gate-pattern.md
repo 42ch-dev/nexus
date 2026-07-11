@@ -1,11 +1,11 @@
 ---
 module: apps/desktop/src-tauri + apps/web (setup-gate, daemon-status-bar, main-banner)
 date: 2026-07-06
-last_updated: 2026-07-10
+last_updated: 2026-07-11
 problem_type: architecture-pattern
 category: architecture-patterns
 severity: medium
-plan_id: V1.94-P-last (compound of desktop onboarding & IA pass); V1.96 refinements from 2026-07-07-v1.96-implement-rework; V1.97 refinements from 2026-07-07-v1.97-desktop-first-launch-hardening; V1.101 Class B PATH enrichment; V1.105 DaemonLaunchGate + D2 always-start
+plan_id: V1.94-P-last (compound of desktop onboarding & IA pass); V1.96 refinements from 2026-07-07-v1.96-implement-rework; V1.97 refinements from 2026-07-07-v1.97-desktop-first-launch-hardening; V1.101 Class B PATH enrichment; V1.105 DaemonLaunchGate + D2 always-start; V1.110 three-valued port-probe gate (FB-D1)
 tags: [daemon-runtime, sidecar, health-probe, desktop-shell, setup-wizard, daemon-status-bar, gate, two-consumer-pattern, late-subscription-race, stderr-capture, bounded-timeout, tauri-v2-sidecar-resolution, stopped-initial-state, attach-without-ownership, path-enrichment, agent-scan, daemon-launch-gate, d2-always-start]
 applies_when: gating main-UI entry on daemon readiness; designing any "wait for service X before entering app" UX; wiring observers to a process lifecycle event stream that may fire before subscription; surfacing supervised-process crash reasons to the user
 ---
@@ -62,6 +62,22 @@ The naive implementation would create two independent health-probe polls or two 
 - ❌ Adding `is_daemon_ready() -> bool` Tauri command (race-prone; the event already carries it).
 - ❌ Polling `GET /v1/daemon/runtime/health` from the SPA (duplicates `SidecarManager`'s own probe).
 - ❌ Two consumers calling `start_daemon()` independently (budget-reset semantics differ; can mask crash loops).
+
+## V1.110 refinement — three-valued port-probe gate (FB-D1)
+
+V1.110 optimized the cold-start path. Previously `start_with_budget` ran the full HTTP `probe_health` (2s timeout) **before** spawning the sidecar — a tax paid on every cold start where no daemon was running. V1.110 inserts a **three-valued TCP gate** first:
+
+| `probe_port_state(port)` | Meaning | Action |
+|--------------------------|---------|--------|
+| `Free` | TCP connect refused fast (port unused) | **Skip** HTTP probe; spawn immediately |
+| `Occupied` | TCP connect succeeded (something listens) | HTTP `probe_health` → attach (`owned=false`) or port-conflict error |
+| `Unknown` | Timeout / inconclusive (≤150ms gate) | HTTP `probe_health` → attach or spawn (safe fallback) |
+
+**Critical invariant preserved:** `Occupied`/`Unknown` always run the HTTP probe, so the attach-without-ownership path for an external daemon (user ran `nexus42 daemon start` first) is intact. Only the `Free` cold-start case skips the HTTP round-trip — dropping the felt latency from "up to 2s probe" to "<50ms TCP gate".
+
+**Two-phase poll:** `wait_for_first_health` now polls at 100ms for the first 1s (fast ready-detection), then 250ms (steady). Global `HEALTH_POLL_INTERVAL` unchanged.
+
+**Unit-test boundary:** do NOT spawn the real `nexus42` binary in `#[cfg(test)]` — it hangs (the daemon needs DB/runtime resources unavailable in the test env). Test `probe_port_state` + timing directly; the full `start_with_budget` spawn path is integration territory.
 - ❌ Treating `starting` as "ready" (health probe may still fail; main UI would render against an unreachable daemon).
 - ❌ **Subscribing without a mount-time state probe** (V1.96 regression root cause #1 — the daemon may have already transitioned before the SPA subscribed; the event is lost; the UI hangs forever). See "V1.96 refinements" below.
 - ❌ **Leaving a state-enum branch implicit** (V1.96 regression root cause #2 — the `'starting'` branch was missing → callback was silent → no state update → UI stuck). Every state must have an explicit branch.

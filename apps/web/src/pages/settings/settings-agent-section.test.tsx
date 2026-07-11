@@ -51,14 +51,14 @@ function makeDesktop(
 const MIXED_AGENTS = [
   {
     name: 'claude-code',
-    registry_agent_id: 'anthropic/claude-code',
+    registry_agent_id: 'claude-acp',
     launch_command: 'claude',
     installed: true,
     version: '1.0.0',
   },
   {
     name: 'codex',
-    registry_agent_id: 'openai/codex',
+    registry_agent_id: 'codex-acp',
     launch_command: 'codex',
     installed: true,
     version: '1.0.0',
@@ -111,7 +111,7 @@ describe('SettingsAgentSection preselect (G1)', () => {
     );
 
     await waitFor(() =>
-      expect(screen.getByTestId('agent-card-anthropic/claude-code')).toBeInTheDocument(),
+      expect(screen.getByTestId('agent-card-claude-acp')).toBeInTheDocument(),
     );
   });
 
@@ -131,21 +131,21 @@ describe('SettingsAgentSection preselect (G1)', () => {
     );
 
     await waitFor(() =>
-      expect(screen.getByTestId('agent-card-openai/codex')).toBeInTheDocument(),
+      expect(screen.getByTestId('agent-card-codex-acp')).toBeInTheDocument(),
     );
 
     await waitFor(() => expect(getAgentProfile).toHaveBeenCalled());
 
     await waitFor(() => {
       const pressed = screen
-        .getAllByTestId('agent-card-select-openai/codex')
+        .getAllByTestId('agent-card-select-codex-acp')
         .filter((el) => el.getAttribute('aria-pressed') === 'true');
       expect(pressed.length).toBeGreaterThanOrEqual(1);
     });
 
     // Not the first-installed Claude default when a saved profile matches Codex.
     const claudePressed = screen
-      .getAllByTestId('agent-card-select-anthropic/claude-code')
+      .getAllByTestId('agent-card-select-claude-acp')
       .filter((el) => el.getAttribute('aria-pressed') === 'true');
     expect(claudePressed.length).toBe(0);
     expect(screen.queryByTestId('settings-agent-browser-helper')).not.toBeInTheDocument();
@@ -173,14 +173,14 @@ describe('SettingsAgentSection preselect (G1)', () => {
     );
 
     await waitFor(() =>
-      expect(screen.getByTestId('agent-card-openai/codex')).toBeInTheDocument(),
+      expect(screen.getByTestId('agent-card-codex-acp')).toBeInTheDocument(),
     );
 
-    await user.click(screen.getByTestId('agent-card-select-openai/codex'));
+    await user.click(screen.getByTestId('agent-card-select-codex-acp'));
 
     await waitFor(() => {
       const pressed = screen
-        .getAllByTestId('agent-card-select-openai/codex')
+        .getAllByTestId('agent-card-select-codex-acp')
         .filter((el) => el.getAttribute('aria-pressed') === 'true');
       expect(pressed.length).toBeGreaterThanOrEqual(1);
     });
@@ -193,12 +193,12 @@ describe('SettingsAgentSection preselect (G1)', () => {
     // Author's Codex click must stick — late preselect must not snap back.
     await waitFor(() => {
       const codexPressed = screen
-        .getAllByTestId('agent-card-select-openai/codex')
+        .getAllByTestId('agent-card-select-codex-acp')
         .filter((el) => el.getAttribute('aria-pressed') === 'true');
       expect(codexPressed.length).toBeGreaterThanOrEqual(1);
     });
     const claudePressed = screen
-      .getAllByTestId('agent-card-select-anthropic/claude-code')
+      .getAllByTestId('agent-card-select-claude-acp')
       .filter((el) => el.getAttribute('aria-pressed') === 'true');
     expect(claudePressed.length).toBe(0);
   });
@@ -220,7 +220,7 @@ describe('SettingsAgentSection preselect (G1)', () => {
 
     await waitFor(() => {
       const pressed = screen
-        .getAllByTestId('agent-card-select-anthropic/claude-code')
+        .getAllByTestId('agent-card-select-claude-acp')
         .filter((el) => el.getAttribute('aria-pressed') === 'true');
       expect(pressed.length).toBeGreaterThanOrEqual(1);
     });
@@ -270,7 +270,7 @@ describe('SettingsAgentSection preselect (G1)', () => {
 
     await waitFor(() => {
       const pressed = screen
-        .getAllByTestId('agent-card-select-openai/codex')
+        .getAllByTestId('agent-card-select-codex-acp')
         .filter((el) => el.getAttribute('aria-pressed') === 'true');
       expect(pressed.length).toBeGreaterThanOrEqual(1);
     });
@@ -297,7 +297,7 @@ describe('SettingsAgentSection preselect (G1)', () => {
     );
 
     await waitFor(() =>
-      expect(screen.getByTestId('agent-card-anthropic/claude-code')).toBeInTheDocument(),
+      expect(screen.getByTestId('agent-card-claude-acp')).toBeInTheDocument(),
     );
 
     // Browser falls back to first installed so Save is enabled.
