@@ -1,9 +1,11 @@
+import { useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 
 import { DaemonStatusBar } from '@/components/layout/daemon-status-bar';
 import { Header } from '@/components/layout/header';
 import { MainBanner } from '@/components/layout/main-banner';
 import { Sidebar } from '@/components/layout/sidebar';
+import { useHotkey } from '@/lib/use-hotkey';
 import { cn } from '@/lib/utils';
 
 const ROUTE_TITLES: Record<string, string> = {
@@ -44,6 +46,14 @@ function useRouteTitle(): string {
  */
 export function RootLayout() {
   const title = useRouteTitle();
+
+  // ⌘K/Ctrl+K opens the command palette. T3 (canvas-command-palette) mounts the
+  // real <CommandPalette/> and consumes this open-state; the binding target is
+  // stable, so T3 only needs to swap `[, setPaletteOpen]` → `[paletteOpen,
+  // setPaletteOpen]` and render `{paletteOpen && <CommandPalette …/>}`. The
+  // value is intentionally skipped here because no component reads it until T3.
+  const [, setPaletteOpen] = useState(false);
+  useHotkey('mod+k', () => setPaletteOpen(true));
 
   return (
     <div className="flex min-h-screen bg-background-100 text-gray-1000">
