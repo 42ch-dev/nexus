@@ -12,7 +12,7 @@ import { strategyNodeTypes } from '@/components/canvas/strategy-nodes';
 import { ErrorState, LoadingState } from '@/components/ui/states';
 
 import { StateInspector } from './strategy-canvas/inspectors/state-inspector';
-import { EdgeInspector } from './strategy-canvas/inspectors/edge-inspector';
+import { EdgeInspector, DraftEdgeInspector } from './strategy-canvas/inspectors/edge-inspector';
 import { PromptInspector } from './strategy-canvas/inspectors/prompt-inspector';
 import { InspectorPanel, StrategyConflictModal } from './strategy-canvas/inspector-panel';
 import { useStrategyCanvas } from './strategy-canvas/hooks/use-strategy-canvas';
@@ -52,6 +52,11 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
     workingRevisionRef,
     handleConflict,
     handleReapply,
+    selectedDraftEdge,
+    draftSourceState,
+    commitDraft,
+    isCommittingDraft,
+    cancelDraft,
   } = useStrategyCanvas(presetId);
 
   const [artifacts, setArtifacts] = useState<IdeaArtifact[]>([]);
@@ -159,6 +164,20 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
               </>
             ) : null}
           </InspectorPanel>
+          {selectedDraftEdge ? (
+            <aside
+              className="absolute right-3 top-3 w-[280px] rounded-card border border-gray-alpha-400 bg-background-100 p-3 shadow-popover"
+              aria-label="Draft transition editor"
+            >
+              <DraftEdgeInspector
+                sourceStateId={selectedDraftEdge.source}
+                targetStateId={selectedDraftEdge.target}
+                isCommitting={isCommittingDraft}
+                onCommit={commitDraft}
+                onCancel={cancelDraft}
+              />
+            </aside>
+          ) : null}
           <ValidationPanel problems={problems} dangling={dangling} />
         </CanvasShell>
       )}
@@ -166,7 +185,7 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
       <StrategyConflictModal
         conflict={conflict}
         form={form}
-        canonicalState={selectedState}
+        canonicalState={selectedState ?? draftSourceState}
         promptTemplateRef={promptTemplateRef}
         onUseCurrent={() => {
           setConflict(null);

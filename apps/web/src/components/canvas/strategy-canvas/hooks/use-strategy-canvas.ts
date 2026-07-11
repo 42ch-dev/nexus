@@ -6,6 +6,7 @@
  * orchestrator component stays thin (R-V171P0-QC1-006).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   useEdgesState,
   useNodesState,
@@ -15,11 +16,15 @@ import {
 } from '@xyflow/react';
 
 import {
+  isStrategyConflictError,
   useActiveSession,
   useDerivedCreatorId,
   usePresetGraph,
   usePresetSchedules,
 } from '@/lib/canvas/use-strategy-data';
+import { useNexusClient } from '@/lib/client-context';
+import { queryKeys } from '@/lib/nexus/query-keys';
+import { useToast } from '@/lib/use-toast';
 import type { StrategyNodeData } from '@/lib/canvas/strategy-graph';
 
 import {
@@ -165,6 +170,82 @@ export function useStrategyCanvas(presetId: string) {
     [setEdges, setNodes],
   );
 
+  /**
+   * FB-SE-002 — the draft transition selected on the canvas. A draft edge is
+   * any edge carrying `data.isDraft = true` (created by {@link onConnect}).
+   * There is at most one draft at a time; {@link onConnect} replaces any
+   * existing draft instead of stacking duplicates.
+   */
+  const selectedDraftEdge = useMemo(
+    () => edges.find((e) => (e.data as { isDraft?: boolean } | undefined)?.isDraft) ?? null,
+    [edges],
+  );
+
+  const states = graphQuery.data?.parsed.manifest.states;
+  const draftSourceState = useMemo(() => {
+    if (!selectedDraftEdge) return undefined;
+    return states?.find((s) => s.id === selectedDraftEdge.source);
+  }, [selectedDraftEdge, states]);
+
+  const nexusClient = useNexusClient();
+  const qc = useQueryClient();
+  const { toast } = useToast();
+
+  /**
+   * Commit a draft transition via `strategy.patch_transition` with
+   * **`op: "create"`** (FB-SE-002). On success the draft is removed from local
+   * edge state and the preset query is invalidated so the canonical edge —
+   * built by the daemon from the structured op — replaces it on refetch. A 409
+   * revision conflict keeps the draft and routes through the same
+   * {@link handleConflict} path the existing edit inspector uses, so the
+   * conflict modal with Use current / Reapply / Review side-by-side opens.
+   *
+   * `handleConflict` is a hoisted function declaration, so it is safe to
+   * reference here even though it is defined textually later in the hook.
+   */
+  const commitDraftMutation = useMutation({
+    mutationFn: async (args: { condition?: string; label?: string }) => {
+      if (!selectedDraftEdge) throw new Error('No draft transition to commit');
+      return nexusClient.strategyPatchTransition(presetId, {
+        strategy_id: presetId,
+        base_revision: workingRevisionRef.current,
+        source_state_id: selectedDraftEdge.source,
+        new_target: selectedDraftEdge.target,
+        condition: args.condition,
+        op: 'create',
+        transition_kind: 'next',
+      });
+    },
+    onSuccess: (res, args) => {
+      workingRevisionRef.current = Number(res.new_revision);
+      setEdges((eds) => eds.filter((e) => !(e.data as { isDraft?: boolean } | undefined)?.isDraft));
+      toast({
+        variant: 'success',
+        title: 'Transition created',
+        description: args.label || `${selectedDraftEdge?.source} → ${selectedDraftEdge?.target}`,
+      });
+      void qc.invalidateQueries({ queryKey: queryKeys.presets.detail(presetId) });
+    },
+    onError: (error) => {
+      if (isStrategyConflictError(error)) {
+        const currentRevision =
+          typeof error.details === 'object' && error.details !== null
+            ? (error.details as { current_revision?: number }).current_revision ?? 0
+            : 0;
+        // Keep the draft so the author can reconcile; refetch canonical.
+        handleConflict(currentRevision, 'transition');
+      } else {
+        const message = error instanceof Error ? error.message : 'Failed to create transition';
+        toast({ variant: 'error', title: message });
+      }
+    },
+  });
+
+  /** Discard the current draft transition without a daemon call (FB-SE-001 #4). */
+  const cancelDraft = useCallback(() => {
+    setEdges((eds) => eds.filter((e) => !(e.data as { isDraft?: boolean } | undefined)?.isDraft));
+  }, [setEdges]);
+
   return {
     graphQuery,
     activeSession,
@@ -195,5 +276,10 @@ export function useStrategyCanvas(presetId: string) {
     workingRevisionRef,
     handleConflict,
     handleReapply,
+    selectedDraftEdge,
+    draftSourceState,
+    commitDraft: commitDraftMutation.mutate,
+    isCommittingDraft: commitDraftMutation.isPending,
+    cancelDraft,
   };
 }

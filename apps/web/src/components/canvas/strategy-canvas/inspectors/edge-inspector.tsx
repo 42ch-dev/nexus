@@ -4,7 +4,7 @@
  * Owns its own save button and partial-failure UI (R-V171P0-QC1-004).
  */
 import type { MutableRefObject } from 'react';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/react-query';
 
 import { useNexusClient } from '@/lib/client-context';
@@ -161,6 +161,108 @@ export function EdgeInspector({
           {saveStatus.message}
         </p>
       ) : null}
+    </section>
+  );
+}
+
+/**
+ * Commit payload assembled by {@link DraftEdgeInspector}. Empty strings are
+ * normalized to `undefined` so the wire request omits the field entirely
+ * (matches the optional `condition` / label semantics on the daemon side).
+ */
+export interface DraftCommitArgs {
+  condition?: string;
+  label?: string;
+}
+
+export interface DraftEdgeInspectorProps {
+  /** Source state id (read-only display). */
+  sourceStateId: string;
+  /** Target state id (read-only display). */
+  targetStateId: string;
+  /** True while the hook-owned commit mutation is in flight. */
+  isCommitting: boolean;
+  /** Commit the draft — sends `strategy.patch_transition` with `op: "create"`. */
+  onCommit: (args: DraftCommitArgs) => void;
+  /** Discard the draft edge without a daemon call. */
+  onCancel: () => void;
+}
+
+/**
+ * FB-SE-001 / FB-SE-002 — draft transition commit UI.
+ *
+ * Renders when a spatial `onConnect` draft edge is selected. Collects
+ * Condition + Label before commit; the commit routes through the hook-owned
+ * mutation that sends `strategy.patch_transition` with **`op: "create"`**.
+ * A 409 keeps the draft and opens the conflict modal (Use current / Reapply /
+ * Review side-by-side). Voice & Content is locked by the primary spec.
+ */
+export function DraftEdgeInspector({
+  sourceStateId,
+  targetStateId,
+  isCommitting,
+  onCommit,
+  onCancel,
+}: DraftEdgeInspectorProps) {
+  const [condition, setCondition] = useState('');
+  const [label, setLabel] = useState('');
+
+  function handleCommit() {
+    const args: DraftCommitArgs = {};
+    if (condition.trim()) args.condition = condition.trim();
+    if (label.trim()) args.label = label.trim();
+    onCommit(args);
+  }
+
+  return (
+    <section className="flex flex-col gap-2" aria-label="Create transition">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-label-14 font-semibold text-gray-900">Create Transition</span>
+        <div className="flex items-center gap-1">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={isCommitting}
+            className="rounded-control border border-gray-alpha-400 px-2 py-1 text-button-12 text-gray-900 hover:bg-gray-alpha-100 disabled:text-gray-500"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={handleCommit}
+            disabled={isCommitting}
+            className="rounded-control bg-purple-700 px-2 py-1 text-button-12 text-white hover:bg-purple-800 disabled:opacity-50"
+          >
+            {isCommitting ? 'Creating…' : 'Create Transition'}
+          </button>
+        </div>
+      </div>
+      <p className="text-copy-13 text-gray-700">
+        <span className="font-mono text-gray-1000">{sourceStateId}</span>
+        <span className="mx-1" aria-hidden>
+          →
+        </span>
+        <span className="font-mono text-gray-1000">{targetStateId}</span>
+      </p>
+      <label className="flex flex-col gap-1 text-copy-13">
+        <span className="text-gray-700">Condition</span>
+        <input
+          type="text"
+          value={condition}
+          onChange={(e) => setCondition(e.target.value)}
+          placeholder="e.g. word_count > 1000"
+          className="rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-gray-1000 focus:border-blue-700"
+        />
+      </label>
+      <label className="flex flex-col gap-1 text-copy-13">
+        <span className="text-gray-700">Label</span>
+        <input
+          type="text"
+          value={label}
+          onChange={(e) => setLabel(e.target.value)}
+          className="rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-gray-1000 focus:border-blue-700"
+        />
+      </label>
     </section>
   );
 }
