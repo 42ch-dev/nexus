@@ -267,7 +267,7 @@ states:
 "#;
     std::fs::write(bundle_dir.join("preset.yaml"), yaml).expect("write preset.yaml");
 
-    let state = test_state(tmp, nexus_home.clone(), db_path).await;
+    let state = test_state(tmp, nexus_home, db_path).await;
 
     let req = StrategyPatchTransitionRequest {
         strategy_id: "test-strategy".to_string(),
@@ -287,6 +287,171 @@ states:
     match err {
         NexusApiError::BadRequest { code, .. } => {
             assert_eq!(code, "strategy_transition_duplicate");
+        }
+        other => panic!("expected BadRequest, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn patch_transition_create_honors_transition_kind_default() {
+    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+    let bundle_dir = seed_test_bundle(&nexus_home);
+
+    let yaml = r#"
+revision: 1
+preset:
+  id: test-strategy
+  version: 1
+  kind: creator
+  description: "Integration test strategy"
+  run_intents: [work_init]
+  initial: start
+  terminal: end
+states:
+  - id: start
+    description: "Start state"
+    next:
+      kind: conditional
+      rules:
+        - to: end
+          when: "_context.ready"
+      default: end
+  - id: end
+    terminal: true
+  - id: alt
+    terminal: true
+"#;
+    std::fs::write(bundle_dir.join("preset.yaml"), yaml).expect("write preset.yaml");
+
+    let state = test_state(tmp, nexus_home.clone(), db_path).await;
+
+    let req = StrategyPatchTransitionRequest {
+        strategy_id: "test-strategy".to_string(),
+        base_revision: 1,
+        source_state_id: "start".to_string(),
+        old_target: None,
+        new_target: Some("alt".to_string()),
+        condition: None,
+        transition_kind: Some("default".to_string()),
+        op: Some("create".to_string()),
+    };
+
+    let res = patch_transition(State(state), Path("test-strategy".to_string()), Json(req))
+        .await
+        .expect("create default transition should succeed");
+    assert_eq!(res.new_revision, 2);
+
+    let updated = std::fs::read_to_string(
+        nexus_home_layout::user_preset_bundle_dir(&nexus_home, "test-strategy").join("preset.yaml"),
+    )
+    .unwrap();
+    assert!(updated.contains("default: alt"));
+    assert!(!updated.contains("to: alt"));
+}
+
+#[tokio::test]
+async fn patch_transition_create_branch_seeds_conditional_map() {
+    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+    let bundle_dir = seed_test_bundle(&nexus_home);
+
+    let yaml = r#"
+revision: 1
+preset:
+  id: test-strategy
+  version: 1
+  kind: creator
+  description: "Integration test strategy"
+  run_intents: [work_init]
+  initial: start
+  terminal: end
+states:
+  - id: start
+    description: "Start state"
+  - id: end
+    terminal: true
+"#;
+    std::fs::write(bundle_dir.join("preset.yaml"), yaml).expect("write preset.yaml");
+
+    let state = test_state(tmp, nexus_home.clone(), db_path).await;
+
+    let req = StrategyPatchTransitionRequest {
+        strategy_id: "test-strategy".to_string(),
+        base_revision: 1,
+        source_state_id: "start".to_string(),
+        old_target: None,
+        new_target: Some("end".to_string()),
+        condition: Some("_context.ready".to_string()),
+        transition_kind: Some("branch".to_string()),
+        op: Some("create".to_string()),
+    };
+
+    let res = patch_transition(State(state), Path("test-strategy".to_string()), Json(req))
+        .await
+        .expect("create branch transition should succeed");
+    assert_eq!(res.new_revision, 2);
+
+    let updated = std::fs::read_to_string(
+        nexus_home_layout::user_preset_bundle_dir(&nexus_home, "test-strategy").join("preset.yaml"),
+    )
+    .unwrap();
+    assert!(updated.contains("kind: conditional"));
+    assert!(updated.contains("to: end"));
+    assert!(updated.contains("when: _context.ready"));
+    assert!(!updated.contains("next: end"));
+}
+
+#[tokio::test]
+async fn patch_transition_create_rejects_explicit_next_on_conditional_map() {
+    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+    let bundle_dir = seed_test_bundle(&nexus_home);
+
+    let yaml = r#"
+revision: 1
+preset:
+  id: test-strategy
+  version: 1
+  kind: creator
+  description: "Integration test strategy"
+  run_intents: [work_init]
+  initial: start
+  terminal: end
+states:
+  - id: start
+    description: "Start state"
+    next:
+      kind: conditional
+      rules:
+        - to: end
+          when: "_context.ready"
+      default: end
+  - id: end
+    terminal: true
+  - id: alt
+    terminal: true
+"#;
+    std::fs::write(bundle_dir.join("preset.yaml"), yaml).expect("write preset.yaml");
+
+    let state = test_state(tmp, nexus_home, db_path).await;
+
+    let req = StrategyPatchTransitionRequest {
+        strategy_id: "test-strategy".to_string(),
+        base_revision: 1,
+        source_state_id: "start".to_string(),
+        old_target: None,
+        new_target: Some("alt".to_string()),
+        condition: None,
+        transition_kind: Some("next".to_string()),
+        op: Some("create".to_string()),
+    };
+
+    let err = patch_transition(State(state), Path("test-strategy".to_string()), Json(req))
+        .await
+        .expect_err("explicit next on conditional map should fail");
+
+    assert_eq!(err.status_code(), axum::http::StatusCode::BAD_REQUEST);
+    match err {
+        NexusApiError::BadRequest { code, .. } => {
+            assert_eq!(code, "strategy_transition_already_conditional");
         }
         other => panic!("expected BadRequest, got {other:?}"),
     }

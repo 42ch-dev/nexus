@@ -561,6 +561,20 @@ fn validate_transition_op(op: &str) -> Result<(), NexusApiError> {
     }
 }
 
+/// Validate the `transition_kind` field of a transition patch request.
+fn validate_transition_kind(kind: &str) -> Result<(), NexusApiError> {
+    if matches!(kind, "next" | "branch" | "default") {
+        Ok(())
+    } else {
+        Err(NexusApiError::BadRequest {
+            code: "invalid_input".to_string(),
+            message: format!(
+                "transition_kind must be 'next', 'branch', or 'default', got '{kind}'"
+            ),
+        })
+    }
+}
+
 // ─── Handlers ──────────────────────────────────────────────────────────────
 
 /// `POST /v1/daemon/strategies/{strategy_id}/states/{state_id}/patch` — patch a state.
@@ -825,50 +839,51 @@ fn transition_rule_matches(
     }
 }
 
-/// Create a new outgoing transition on a `next` YAML value.
-///
-/// - If `next` is absent, sets it to a scalar `new_target`.
-/// - If `next` is already a mapping, appends a new rule to `rules` (creating the
-///   array if necessary) with `to: new_target` and `when: condition` when a
-///   condition is supplied.
-/// - A pre-existing scalar `next` cannot hold multiple transitions, so it
-///   returns an error.
-fn apply_transition_create(
-    next: &mut serde_yaml::Value,
-    req: &StrategyPatchTransitionRequest,
-    new_target: &str,
-) -> Result<Vec<String>, NexusApiError> {
-    let mut side_effects: Vec<String> = Vec::new();
-
-    if next.is_null() {
-        *next = serde_yaml::Value::String(new_target.to_string());
-        side_effects.push(format!(
-            "transition {} -> {} created",
-            req.source_state_id, new_target
-        ));
-        return Ok(side_effects);
-    }
-
+fn reject_linear_next_conflict(
+    next: &serde_yaml::Value,
+    source_state_id: &str,
+) -> Result<(), NexusApiError> {
     if next.is_string() {
         return Err(NexusApiError::BadRequest {
             code: "strategy_transition_already_linear".to_string(),
             message: format!(
-                "state '{}' already has a linear next transition; create a branch instead",
-                req.source_state_id
+                "state '{source_state_id}' already has a linear next transition; create a branch instead"
             ),
         });
     }
+    Ok(())
+}
 
-    let next_map = next
-        .as_mapping_mut()
-        .ok_or_else(|| NexusApiError::BadRequest {
+fn ensure_conditional_next_map(
+    next: &mut serde_yaml::Value,
+    source_state_id: &str,
+) -> Result<(), NexusApiError> {
+    reject_linear_next_conflict(next, source_state_id)?;
+
+    if next.is_null() {
+        let mut map = serde_yaml::Mapping::new();
+        map.insert(
+            serde_yaml::Value::String("kind".to_string()),
+            serde_yaml::Value::String("conditional".to_string()),
+        );
+        *next = serde_yaml::Value::Mapping(map);
+    }
+
+    if !next.is_mapping() {
+        return Err(NexusApiError::BadRequest {
             code: "strategy_transition_invalid".to_string(),
-            message: format!(
-                "state '{}' has an unsupported next transition shape",
-                req.source_state_id
-            ),
-        })?;
+            message: format!("state '{source_state_id}' has an unsupported next transition shape"),
+        });
+    }
 
+    Ok(())
+}
+
+fn append_conditional_rule(
+    next_map: &mut serde_yaml::Mapping,
+    req: &StrategyPatchTransitionRequest,
+    new_target: &str,
+) -> Result<(), NexusApiError> {
     let rules = next_map
         .entry(serde_yaml::Value::String("rules".to_string()))
         .or_insert_with(|| serde_yaml::Value::Sequence(Vec::new()))
@@ -881,9 +896,10 @@ fn apply_transition_create(
             ),
         })?;
 
-    if rules.iter().any(|rule| {
-        transition_rule_matches(rule, new_target, req.condition.as_deref())
-    }) {
+    if rules
+        .iter()
+        .any(|rule| transition_rule_matches(rule, new_target, req.condition.as_deref()))
+    {
         return Err(NexusApiError::BadRequest {
             code: "strategy_transition_duplicate".to_string(),
             message: format!(
@@ -905,11 +921,100 @@ fn apply_transition_create(
         );
     }
     rules.push(serde_yaml::Value::Mapping(new_rule));
+    Ok(())
+}
 
-    side_effects.push(format!(
-        "branch {} -> {} created",
-        req.source_state_id, new_target
-    ));
+/// Resolve the create form when `transition_kind` is omitted.
+///
+/// Legacy callers without `transition_kind` keep the shipped behavior: absent
+/// `next` becomes a linear scalar; an existing conditional map appends a rule.
+fn resolved_create_transition_kind<'a>(
+    req: &'a StrategyPatchTransitionRequest,
+    next: &serde_yaml::Value,
+) -> Result<&'a str, NexusApiError> {
+    match req.transition_kind.as_deref() {
+        Some(kind) => {
+            validate_transition_kind(kind)?;
+            Ok(kind)
+        }
+        None if next.is_null() => Ok("next"),
+        None => Ok("branch"),
+    }
+}
+
+/// Create a new outgoing transition on a `next` YAML value.
+///
+/// Honors `transition_kind` when supplied:
+/// - `next` — linear scalar when `next` is absent; rejects conditional maps.
+/// - `branch` — appends a conditional rule (or seeds a conditional map).
+/// - `default` — sets the conditional `default` target.
+fn apply_transition_create(
+    next: &mut serde_yaml::Value,
+    req: &StrategyPatchTransitionRequest,
+    new_target: &str,
+) -> Result<Vec<String>, NexusApiError> {
+    let kind = resolved_create_transition_kind(req, next)?;
+    let mut side_effects: Vec<String> = Vec::new();
+
+    match kind {
+        "next" => {
+            if !next.is_null() {
+                return Err(NexusApiError::BadRequest {
+                    code: "strategy_transition_already_conditional".to_string(),
+                    message: format!(
+                        "state '{}' already has a conditional next transition; create a branch or default instead",
+                        req.source_state_id
+                    ),
+                });
+            }
+            *next = serde_yaml::Value::String(new_target.to_string());
+            side_effects.push(format!(
+                "transition {} -> {} created",
+                req.source_state_id, new_target
+            ));
+        }
+        "branch" => {
+            ensure_conditional_next_map(next, &req.source_state_id)?;
+            let next_map = next
+                .as_mapping_mut()
+                .expect("ensure_conditional_next_map leaves a mapping");
+            append_conditional_rule(next_map, req, new_target)?;
+            // Conditional presets require a `default` target; seed one when the
+            // author adds the first branch to an otherwise-empty state.
+            if !next_map.contains_key(serde_yaml::Value::String("default".to_string())) {
+                next_map.insert(
+                    serde_yaml::Value::String("default".to_string()),
+                    serde_yaml::Value::String(new_target.to_string()),
+                );
+            }
+            side_effects.push(format!(
+                "branch {} -> {} created",
+                req.source_state_id, new_target
+            ));
+        }
+        "default" => {
+            if req.condition.is_some() {
+                return Err(NexusApiError::BadRequest {
+                    code: "strategy_transition_default_condition".to_string(),
+                    message: "default transitions do not accept a condition".to_string(),
+                });
+            }
+            ensure_conditional_next_map(next, &req.source_state_id)?;
+            let next_map = next
+                .as_mapping_mut()
+                .expect("ensure_conditional_next_map leaves a mapping");
+            next_map.insert(
+                serde_yaml::Value::String("default".to_string()),
+                serde_yaml::Value::String(new_target.to_string()),
+            );
+            side_effects.push(format!(
+                "default transition {} -> {} created",
+                req.source_state_id, new_target
+            ));
+        }
+        _ => unreachable!("resolved_create_transition_kind only returns known kinds"),
+    }
+
     Ok(side_effects)
 }
 
