@@ -421,30 +421,39 @@
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {
-      "updated_at": "2026-07-09",
-      "total_open": 57,
+      "updated_at": "2026-07-12",
+      "total_open": 86,
       "by_severity": {
-        "critical": 0,
-        "high": 0,
+        "nit": 35,
         "medium": 1,
-        "low": 24,
-        "nit": 24
+        "low": 35,
+        "suggestion": 15
       },
       "by_target": {
-        "V1.101 P1 or V1.102": 1,
-        "V1.102+": 1,
-        "V1.103 P4": 1,
+        "when list virtualisation lands": 1,
         "V1.96": 14,
         "V1.96 spec-hygiene pass": 1,
         "V1.97": 4,
         "V1.97+": 1,
         "V1.99+": 1,
-        "accept": 3,
-        "post-V1.100": 8,
-        "post-V1.101": 8,
         "post-V1.99": 2,
+        "post-V1.100": 7,
+        "V1.102+": 1,
+        "V1.101 P1 or V1.102": 1,
+        "post-V1.101": 5,
+        "accept": 6,
         "unspecified": 11,
-        "when list virtualisation lands": 1
+        "V1.104+": 1,
+        "post-V1.104": 7,
+        "post-V1.106": 2,
+        "post-V1.109": 4,
+        "post-V1.108": 1,
+        "n/a": 1,
+        "when scene/beat wire DTOs land": 1,
+        "post-V1.109 (client API signal support)": 1,
+        "V1.111+": 2,
+        "post-V1.110": 8,
+        "post-V1.111": 3
       },
       "by_plan": {
         "2026-07-05-v1.91-findings-batch": 1,
@@ -455,15 +464,28 @@
         "2026-07-07-v1.96-implement-rework": 5,
         "2026-07-07-v1.97-desktop-first-launch-hardening": 3,
         "2026-07-08-v1.100-desktop-clean-state-first-launch": 3,
-        "2026-07-08-v1.100-ui-hygiene-guardrails": 5,
+        "2026-07-08-v1.100-ui-hygiene-guardrails": 4,
         "2026-07-09-v1.101-agent-detection-picker": 4,
-        "2026-07-09-v1.101-select-component-promotion": 5,
+        "2026-07-09-v1.101-select-component-promotion": 2,
         "2026-07-09-v1.101-setup-wizard-ui-polish": 2,
         "2026-07-09-v1.102-badge-soft-solid": 3,
         "2026-07-09-v1.102-settings-shell": 5,
         "2026-07-09-v1.102-ui-hygiene": 3,
         "2026-07-09-v1.103-settings-agent-preselect": 1,
-        "2026-07-09-v1.103-settings-shell-nav": 2
+        "2026-07-09-v1.103-settings-connection": 1,
+        "2026-07-09-v1.103-settings-shell-nav": 2,
+        "2026-07-09-v1.104-settings-workspace": 7,
+        "2026-07-10-v1.106-studio-first-pipeline": 3,
+        "2026-07-10-v1.106-ui-continuity": 1,
+        "2026-07-10-v1.108-canvas-outline-spatial": 3,
+        "2026-07-11-v1.109-canvas-scene-beat": 2,
+        "2026-07-11-v1.109-strategy-edge-rewiring": 2,
+        "2026-07-11-v1.109-canvas-graph-scale": 1,
+        "2026-07-11-v1.110-agent-picker-ux-polish": 4,
+        "2026-07-12-v1.111-sidebar-canvas-ia": 1,
+        "2026-07-12-v1.111-canvas-command-palette": 2,
+        "2026-07-11-v1.110-daemon-startup-latency": 3,
+        "2026-07-11-v1.110-agent-scan-path-reliability": 3
       }
     },
     "updated_at": "2026-07-12"
@@ -826,17 +848,6 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
         "note": "Fail-on-missing-dir would be stricter. Low risk — dir renames caught by other CI jobs. QC source: qc3 S-003"
-      },
-      {
-        "id": "R-V1100P2QC3-S001",
-        "title": "Stale comment in check-ui-guardrails.sh:75-76 says 'P2 will promote' but P2 has promoted input/label/textarea",
-        "severity": "nit",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.100",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/sdd/2026-07-08-v1.100-form-field-component-promotion/review/qc-consolidated.md",
-        "note": "Factual inaccuracy now; trivial cleanup on next script touch. QC source: P2 qc3 S-001"
       }
     ],
     "2026-07-09-v1.101-agent-detection-picker": [
@@ -1148,28 +1159,6 @@
     ],
     "2026-07-10-v1.106-studio-first-pipeline": [
       {
-        "id": "R-V1106P0-001",
-        "title": "Toast duplicate implementation: apps/web/src/lib/use-toast.tsx (40+ call sites) vs promoted packages/nexus-ui/src/components/toast.tsx (near-verbatim copy + testId); V1.99 re-export pattern not applied",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.106 consolidation pass",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-10-v1.106-studio-first-pipeline.md",
-        "note": "QC1 W-001. Functional; drift risk on future toast changes."
-      },
-      {
-        "id": "R-V1106P0-002",
-        "title": "lucide-react promoted as runtime dep of @42ch/nexus-ui via Toast icon imports; promotion-boundary doc does not record this",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.106",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-10-v1.106-studio-first-pipeline.md",
-        "note": "QC1 W-002 / QC3 F-002. Acceptable trade-off; needs doc record."
-      },
-      {
         "id": "R-V1106P0-003",
         "title": "@/components/ui alias added to Studio vite/vitest/tsconfig but undocumented in apps/design-studio/AGENTS.md Allowed table",
         "severity": "nit",
@@ -1204,28 +1193,6 @@
       }
     ],
     "2026-07-10-v1.106-ui-continuity": [
-      {
-        "id": "R-V1106P2-001",
-        "title": "Stale /settings/connection comments in connect-daemon-form.tsx + test header after route consolidation",
-        "severity": "nit",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.106",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-10-v1.106-ui-continuity.md",
-        "note": "QC1 F-005 / QC2 W-001. Non-functional comment drift."
-      },
-      {
-        "id": "R-V1106P2-002",
-        "title": "Add scrollIntoView for #setup hash anchor on Advanced page",
-        "severity": "suggestion",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.106",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-10-v1.106-ui-continuity.md",
-        "note": "QC3 S-001. Hash sets correctly; auto-scroll enhancement."
-      },
       {
         "id": "R-V1106P2-003",
         "title": "Badge queued individual test missing 16% fill assertion (matrix covers it)",
@@ -1273,42 +1240,7 @@
         "note": "QC1 S-001. Follow-up refactor; not blocking."
       }
     ],
-    "2026-07-10-v1.107-studio-ui-tune": [
-      {
-        "id": "R-V1107QC1-W002",
-        "title": "ConnectDaemonFormChrome prop name 'state' vs spec 'matrixState' + missing supporting props (savedConfig, fingerprintValue, fetchStatus, fetchErrorMessage, hasSavedConfig)",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.107",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-10-v1.107-studio-ui-tune.md",
-        "note": "QC1 W-002. Known follow-up for App-side adoption; rename + surface props when live ConnectDaemonForm delegates to chrome."
-      },
-      {
-        "id": "R-V1107QC1-ARCH",
-        "title": "shell-header-chrome.tsx not created (in Architecture contracts module table but no FB acceptance criterion)",
-        "severity": "nit",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.107",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-10-v1.107-studio-ui-tune.md",
-        "note": "Architecture doc gap; next iteration shell polish."
-      }
-    ],
     "2026-07-11-v1.109-canvas-scene-beat": [
-      {
-        "id": "R-V1109-P0-QC1-W001",
-        "title": "R-V1108P1QC1-S002 (Studio imports extracted chrome) not actually closed — Studio re-mirrors chrome as static markup (RF-coupled, import boundary forbids RF deps)",
-        "severity": "suggestion",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.109",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-scene-beat.md",
-        "note": "Re-scope: only R-V1108P0QC1-S001 (hook extract) is closed by P0. QC source: QC1 F-001"
-      },
       {
         "id": "R-V1109-P0-QC3-W001",
         "title": "Fixture object literal identity causes projection re-memo; production safe (module constant), Design Studio/test consumers should stabilize refs",
