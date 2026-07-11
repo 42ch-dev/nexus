@@ -863,6 +863,60 @@ mod tests {
         assert_ne!(state, PortState::Occupied, "a just-dropped listener should not report occupied");
     }
 
+    // FB-D1 cold-start latency budget (deterministic timing evidence).
+    //
+    // The three-valued `probe_port_state` gate replaces the unconditional HTTP
+    // `probe_health` call on the Free-port cold-start path. The gate timeout is
+    // `PORT_PROBE_TIMEOUT` (150 ms), while the HTTP probe timeout is
+    // `HEALTH_PROBE_TIMEOUT` (2 s). Loopback connect-refuse normally resolves in
+    // <10 ms and connect-success in <1 ms, so the Free decision drops from
+    // "up to 2 s HTTP round-trip" to "sub-50 ms TCP gate" in practice. The
+    // tests below assert a generous 500 ms upper bound to stay CI-safe.
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn probe_port_state_free_is_fast() {
+        // Measure the Free-port gate on a high unused port. This proves the
+        // cold-start path does not pay the 2 s HTTP health-probe round-trip.
+        let port = 63403;
+        let start = std::time::Instant::now();
+        let state = probe_port_state(port).await;
+        let elapsed = start.elapsed();
+        println!(
+            "probe_port_state(Free) elapsed: {} ms",
+            elapsed.as_millis()
+        );
+        assert_eq!(state, PortState::Free);
+        assert!(
+            elapsed < Duration::from_millis(500),
+            "Free-port gate took {:?}, expected < 500 ms (no 2 s HTTP probe)",
+            elapsed
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn probe_port_state_occupied_is_fast() {
+        // Measure the Occupied-port gate on a bound-but-not-HTTP listener. The
+        // HTTP probe only runs after this gate in the Occupied attach path.
+        let port = 63404;
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
+            .await
+            .expect("test listener should bind");
+        let start = std::time::Instant::now();
+        let state = probe_port_state(port).await;
+        let elapsed = start.elapsed();
+        println!(
+            "probe_port_state(Occupied) elapsed: {} ms",
+            elapsed.as_millis()
+        );
+        drop(listener);
+        assert_eq!(state, PortState::Occupied);
+        assert!(
+            elapsed < Duration::from_millis(500),
+            "Occupied-port gate took {:?}, expected < 500 ms",
+            elapsed
+        );
+    }
+
     #[test]
     fn default_port_without_env() {
         let _guard = ENV_LOCK.lock().unwrap();
