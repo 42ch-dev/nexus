@@ -128,6 +128,210 @@ async fn patch_state_rejects_stale_revision() {
 }
 
 #[tokio::test]
+async fn patch_transition_create_sets_linear_next_when_absent() {
+    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+    let bundle_dir = seed_test_bundle(&nexus_home);
+
+    // Replace the seeded preset with a state that has no outgoing `next`.
+    let yaml = r#"
+revision: 1
+preset:
+  id: test-strategy
+  version: 1
+  kind: creator
+  description: "Integration test strategy"
+  run_intents: [work_init]
+  initial: start
+  terminal: end
+states:
+  - id: start
+    description: "Start state"
+  - id: end
+    terminal: true
+"#;
+    std::fs::write(bundle_dir.join("preset.yaml"), yaml).expect("write preset.yaml");
+
+    let state = test_state(tmp, nexus_home.clone(), db_path).await;
+
+    let req = StrategyPatchTransitionRequest {
+        strategy_id: "test-strategy".to_string(),
+        base_revision: 1,
+        source_state_id: "start".to_string(),
+        old_target: None,
+        new_target: Some("end".to_string()),
+        condition: None,
+        transition_kind: None,
+        op: Some("create".to_string()),
+    };
+
+    let res = patch_transition(State(state), Path("test-strategy".to_string()), Json(req))
+        .await
+        .expect("create transition should succeed");
+    assert_eq!(res.new_revision, 2);
+
+    let yaml = std::fs::read_to_string(
+        nexus_home_layout::user_preset_bundle_dir(&nexus_home, "test-strategy").join("preset.yaml"),
+    )
+    .unwrap();
+    assert!(yaml.contains("next: end"));
+}
+
+#[tokio::test]
+async fn patch_transition_create_appends_rule_when_next_is_map() {
+    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+    let bundle_dir = seed_test_bundle(&nexus_home);
+
+    // Start state already has a conditional next map.
+    let yaml = r#"
+revision: 1
+preset:
+  id: test-strategy
+  version: 1
+  kind: creator
+  description: "Integration test strategy"
+  run_intents: [work_init]
+  initial: start
+  terminal: end
+states:
+  - id: start
+    description: "Start state"
+    next:
+      kind: conditional
+      rules:
+        - to: end
+          when: "_context.ready"
+      default: end
+  - id: end
+    terminal: true
+  - id: alt
+    terminal: true
+"#;
+    std::fs::write(bundle_dir.join("preset.yaml"), yaml).expect("write preset.yaml");
+
+    let state = test_state(tmp, nexus_home.clone(), db_path).await;
+
+    let req = StrategyPatchTransitionRequest {
+        strategy_id: "test-strategy".to_string(),
+        base_revision: 1,
+        source_state_id: "start".to_string(),
+        old_target: None,
+        new_target: Some("alt".to_string()),
+        condition: Some("_context.branch_b".to_string()),
+        transition_kind: None,
+        op: Some("create".to_string()),
+    };
+
+    let res = patch_transition(State(state), Path("test-strategy".to_string()), Json(req))
+        .await
+        .expect("create transition should succeed");
+    assert_eq!(res.new_revision, 2);
+
+    let updated = std::fs::read_to_string(
+        nexus_home_layout::user_preset_bundle_dir(&nexus_home, "test-strategy").join("preset.yaml"),
+    )
+    .unwrap();
+    assert!(updated.contains("to: end"));
+    assert!(updated.contains("when: _context.ready"));
+    assert!(updated.contains("to: alt"));
+    assert!(updated.contains("when: _context.branch_b"));
+}
+
+#[tokio::test]
+async fn patch_transition_default_op_preserves_update_semantics() {
+    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+    seed_test_bundle(&nexus_home);
+    let state = test_state(tmp, nexus_home.clone(), db_path).await;
+
+    let req = StrategyPatchTransitionRequest {
+        strategy_id: "test-strategy".to_string(),
+        base_revision: 1,
+        source_state_id: "start".to_string(),
+        old_target: Some("end".to_string()),
+        new_target: Some("alt".to_string()),
+        condition: None,
+        transition_kind: None,
+        op: None,
+    };
+
+    // Create the alt state so validation passes after rewiring.
+    let bundle_dir = nexus_home_layout::user_preset_bundle_dir(&nexus_home, "test-strategy");
+    let yaml = std::fs::read_to_string(bundle_dir.join("preset.yaml")).unwrap();
+    let yaml_with_alt = yaml.replace(
+        "  - id: end\n    terminal: true",
+        "  - id: end\n    terminal: true\n  - id: alt\n    terminal: true",
+    );
+    std::fs::write(bundle_dir.join("preset.yaml"), yaml_with_alt).expect("write preset.yaml");
+
+    let res = patch_transition(State(state), Path("test-strategy".to_string()), Json(req))
+        .await
+        .expect("default op=update should rewire");
+    assert_eq!(res.new_revision, 2);
+
+    let updated = std::fs::read_to_string(bundle_dir.join("preset.yaml")).unwrap();
+    assert!(updated.contains("next: alt"));
+}
+
+#[tokio::test]
+async fn patch_transition_rejects_create_without_new_target() {
+    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+    seed_test_bundle(&nexus_home);
+    let state = test_state(tmp, nexus_home, db_path).await;
+
+    let req = StrategyPatchTransitionRequest {
+        strategy_id: "test-strategy".to_string(),
+        base_revision: 1,
+        source_state_id: "start".to_string(),
+        old_target: None,
+        new_target: None,
+        condition: None,
+        transition_kind: None,
+        op: Some("create".to_string()),
+    };
+
+    let err = patch_transition(State(state), Path("test-strategy".to_string()), Json(req))
+        .await
+        .expect_err("create without new_target should fail");
+
+    assert_eq!(err.status_code(), axum::http::StatusCode::BAD_REQUEST);
+    match err {
+        NexusApiError::BadRequest { code, .. } => {
+            assert_eq!(code, "strategy_transition_missing_new_target");
+        }
+        other => panic!("expected BadRequest with missing new_target code, got {other:?}"),
+    }
+}
+
+#[tokio::test]
+async fn patch_transition_rejects_update_without_old_target() {
+    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+    seed_test_bundle(&nexus_home);
+    let state = test_state(tmp, nexus_home, db_path).await;
+
+    let req = StrategyPatchTransitionRequest {
+        strategy_id: "test-strategy".to_string(),
+        base_revision: 1,
+        source_state_id: "start".to_string(),
+        old_target: None,
+        new_target: Some("alt".to_string()),
+        condition: None,
+        transition_kind: None,
+        op: Some("update".to_string()),
+    };
+
+    let err = patch_transition(State(state), Path("test-strategy".to_string()), Json(req))
+        .await
+        .expect_err("update without old_target should fail");
+
+    assert_eq!(err.status_code(), axum::http::StatusCode::BAD_REQUEST);
+    match err {
+        NexusApiError::BadRequest { code, .. } => {
+            assert_eq!(code, "strategy_transition_missing_old_target");
+        }
+        other => panic!("expected BadRequest with missing old_target code, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn patch_transition_rejects_invalid_condition() {
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
     seed_test_bundle(&nexus_home);
@@ -137,10 +341,11 @@ async fn patch_transition_rejects_invalid_condition() {
         strategy_id: "test-strategy".to_string(),
         base_revision: 1,
         source_state_id: "start".to_string(),
-        old_target: "end".to_string(),
+        old_target: Some("end".to_string()),
         new_target: None,
         condition: Some("not a valid condition @#$".to_string()),
         transition_kind: None,
+        op: None,
     };
 
     let err = patch_transition(State(state), Path("test-strategy".to_string()), Json(req))
