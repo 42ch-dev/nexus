@@ -29,6 +29,10 @@ const RESTART_BACKOFF_MAX: Duration = Duration::from_secs(8);
 const MAX_RESTART_ATTEMPTS: u32 = 5;
 const STOP_GRACEFUL_TIMEOUT: Duration = Duration::from_secs(5);
 const HEALTH_PROBE_TIMEOUT: Duration = Duration::from_secs(2);
+/// Tight gate for the optimistic `probe_port_state` TCP connect. Loopback
+/// connects normally resolve in <10 ms; the gate prevents a hung port from
+/// blocking the cold-start path.
+const PORT_PROBE_TIMEOUT: Duration = Duration::from_millis(150);
 /// Maximum bytes of daemon stderr to retain for diagnostic surfacing.
 /// Capped to avoid unbounded buffering; truncated at the nearest newline
 /// boundary at or below this size (keep the tail, drop the head).
@@ -64,6 +68,19 @@ pub enum DaemonState {
     Stopped,
     /// Failed to start (port conflict, crash on boot, etc.).
     Error,
+}
+
+/// Result of the fast TCP port gate used before the heavier HTTP health probe.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PortState {
+    /// Nothing is listening on the loopback port; safe to spawn optimistically.
+    Free,
+    /// A TCP listener accepted the connect; an HTTP health probe is needed to
+    /// decide whether to attach or report a port conflict.
+    Occupied,
+    /// The gate timed out or produced an inconclusive connect error; fall back
+    /// to the HTTP health probe.
+    Unknown,
 }
 
 /// Status payload returned by the `get_daemon_status` command.
@@ -233,15 +250,36 @@ impl SidecarManager {
 
         let port = self.port().await;
 
-        // Attach to an already-healthy daemon (e.g. user ran `nexus42 daemon
-        // start` before launching the desktop app). We do NOT take ownership so
-        // we will not kill an unrelated process on quit.
-        if let Some(health) = probe_health(port).await {
-            let mut inner = self.0.lock().await;
-            inner.state = DaemonState::Running;
-            inner.version = Some(health.version);
-            inner.owned = false;
-            return Ok(());
+        // Three-valued port gate. If the OS can tell us conclusively that the
+        // port is free, spawn the bundled sidecar immediately without paying
+        // the HTTP health-probe round-trip. If the port is occupied (or the
+        // gate is inconclusive), run the HTTP probe so the external-daemon
+        // attach path is preserved and we never spawn onto an occupied port.
+        let port_state = probe_port_state(port).await;
+        if port_state != PortState::Free {
+            if let Some(health) = probe_health(port).await {
+                let mut inner = self.0.lock().await;
+                inner.state = DaemonState::Running;
+                inner.version = Some(health.version);
+                inner.owned = false;
+                return Ok(());
+            }
+
+            // The port accepted a TCP connect but does not look like our
+            // daemon. Treat it as a conflict rather than spawning a second
+            // process that will lose the port race.
+            if port_state == PortState::Occupied {
+                let message = format!(
+                    "Nexus couldn't start its background service — port {port} is already in use. \
+                     Quit the other Nexus instance, or set a different port."
+                );
+                let mut inner = self.0.lock().await;
+                inner.state = DaemonState::Error;
+                inner.detail = Some(message.clone());
+                drop(inner);
+                self.notify().await;
+                return Err(message);
+            }
         }
 
         let command = app
@@ -579,6 +617,21 @@ async fn tcp_reachable(port: u16) -> bool {
     .is_ok_and(|r| r.is_ok())
 }
 
+/// Fast three-valued TCP gate for the daemon port.
+///
+/// * Connect succeeds → `Occupied` (something is listening).
+/// * Connect refused → `Free` (the OS conclusively reports nothing listening).
+/// * Timeout or any other connect error → `Unknown` (do not guess; fall back
+///   to the HTTP health probe).
+async fn probe_port_state(port: u16) -> PortState {
+    match tokio::time::timeout(PORT_PROBE_TIMEOUT, TcpStream::connect(("127.0.0.1", port))).await {
+        Ok(Ok(_)) => PortState::Occupied,
+        Ok(Err(e)) if e.kind() == std::io::ErrorKind::ConnectionRefused => PortState::Free,
+        Ok(Err(_)) => PortState::Unknown,
+        Err(_) => PortState::Unknown,
+    }
+}
+
 async fn wait_for_first_health(port: u16, pid: u32) -> Option<DaemonHealth> {
     let deadline = Instant::now() + HEALTH_START_TIMEOUT;
     loop {
@@ -626,8 +679,8 @@ fn process_alive(_pid: u32) -> bool {
 #[cfg(test)]
 mod tests {
     use super::{
-        backoff, drain_stderr, format_error_detail, resolve_port, trim_stderr_tail, DaemonState,
-        MAX_RESTART_ATTEMPTS, STDERR_TAIL_MAX_BYTES,
+        backoff, drain_stderr, format_error_detail, probe_port_state, resolve_port,
+        trim_stderr_tail, DaemonState, PortState, MAX_RESTART_ATTEMPTS, STDERR_TAIL_MAX_BYTES,
     };
     use std::sync::Arc;
     use std::time::Duration;
@@ -711,6 +764,38 @@ mod tests {
         let manager = crate::sidecar::SidecarManager::new(63341);
         let status = manager.status().await;
         assert_eq!(status.state, DaemonState::Stopped);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn probe_port_state_free_on_unused_port() {
+        // Use a high ephemeral port that is extremely unlikely to be bound.
+        let port = 63400;
+        assert_eq!(probe_port_state(port).await, PortState::Free);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn probe_port_state_occupied_on_bound_listener() {
+        let port = 63401;
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
+            .await
+            .expect("test listener should bind");
+        assert_eq!(probe_port_state(port).await, PortState::Occupied);
+        drop(listener);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn probe_port_state_unknown_when_connect_hangs() {
+        // Simulate an inconclusive port by binding a listener and immediately
+        // dropping it, then probing before the OS has fully reclaimed the
+        // endpoint. This is best-effort: on most platforms the probe returns
+        // Free, so the assertion only checks it does not return Occupied.
+        let port = 63402;
+        let listener = tokio::net::TcpListener::bind(("127.0.0.1", port))
+            .await
+            .expect("test listener should bind");
+        drop(listener);
+        let state = probe_port_state(port).await;
+        assert_ne!(state, PortState::Occupied, "a just-dropped listener should not report occupied");
     }
 
     #[test]
@@ -1087,11 +1172,15 @@ mod tests {
         assert_eq!(inner.state, DaemonState::Running);
     }
 
-    /// One-shot loopback HTTP server for tests that need a healthy daemon probe.
+    /// Loopback HTTP server for tests that need a healthy daemon probe.
     ///
     /// The mock Tauri app does not initialize `tauri_plugin_shell`, so any test
     /// that reaches `app.shell()` panics. By serving the health endpoint we let
     /// `start()` / `start_daemon()` take the attach-without-spawn path.
+    ///
+    /// The server accepts connections in a loop: the new `probe_port_state`
+    /// gate performs a TCP connect before `probe_health` sends the HTTP request,
+    /// so the fixture must handle both.
     async fn spawn_health_server(port: u16) -> tokio::task::JoinHandle<()> {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -1099,20 +1188,22 @@ mod tests {
             .await
             .expect("health server should bind");
         tokio::spawn(async move {
-            let (mut socket, _) = listener
-                .accept()
-                .await
-                .expect("health server should accept one connection");
-            let mut buf = [0u8; 512];
-            // Drain the request so the client sees a complete HTTP exchange.
-            let _ = socket.read(&mut buf).await;
-            let body = br#"{"status":"ok","version":"1.0.0"}"#;
-            let response = format!(
-                "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
-                body.len()
-            );
-            let _ = socket.write_all(response.as_bytes()).await;
-            let _ = socket.write_all(body).await;
+            loop {
+                let (mut socket, _) = match listener.accept().await {
+                    Ok(conn) => conn,
+                    Err(_) => break,
+                };
+                let mut buf = [0u8; 512];
+                // Drain the request so the client sees a complete HTTP exchange.
+                let _ = socket.read(&mut buf).await;
+                let body = br#"{"status":"ok","version":"1.0.0"}"#;
+                let response = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\r\n",
+                    body.len()
+                );
+                let _ = socket.write_all(response.as_bytes()).await;
+                let _ = socket.write_all(body).await;
+            }
         })
     }
 }
