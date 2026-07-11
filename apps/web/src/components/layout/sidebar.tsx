@@ -31,7 +31,7 @@ const CREATOR_GROUPS: ShellNavGroup[] = [
   },
   // Canvas group — the three canvas-surface entry points (Outline / World KB /
   // Strategy), nested under the Creator (Works) tab. Active-surface highlight
-  // for these items is resolver-driven (see `renderNavItem` below), NOT the
+  // for these items is resolver-driven (see `isActiveItem` below), NOT the
   // chrome's built-in prefix match.
   CANVAS_NAV_GROUP,
   {
@@ -71,12 +71,11 @@ const ORCHESTRATOR_GROUPS: ShellNavGroup[] = [
  * from a built-in `activeRoute` prefix match (`activeRoute === item.to ||
  * activeRoute.startsWith(item.to + '/')`). That match is correct for non-canvas
  * items but TOO BROAD for Canvas items — e.g. "Outline" (`to: '/works'`) would
- * false-light on plain `/works/:workId` work-detail. The Canvas group's active
- * surface derives from {@link resolveActiveCanvasSurface} instead. The chrome
- * has no per-item active-override hook, so Canvas items are rendered here with
- * resolver-driven fill + active bar + `aria-current`. The markup mirrors
- * `NavGroupChrome` in `shell-sidebar-chrome.tsx` — keep the two in sync (and
- * see `task-2-report.md` for the recommended chrome follow-up).
+ * false-light on plain `/works/:workId` work-detail. The host passes an
+ * `isActiveItem` callback so the chrome's per-item active state is
+ * resolver-driven for Canvas items (via {@link resolveActiveCanvasSurface})
+ * and prefix-driven for non-canvas items — keeping the chrome's markup SSOT
+ * with no mirrored item markup in the host.
  */
 export function Sidebar() {
   const [activeTab, setActiveTab] = useState<ShellSidebarTab>('creator');
@@ -93,39 +92,28 @@ export function Sidebar() {
         onTabChange={setActiveTab}
         logo={<NexusLogo />}
         footer={<FooterProfiles />}
-        renderNavItem={(item, className, content, isActive) => {
+        isActiveItem={(item, route) => {
+          // Canvas items: resolver-driven (precise surface match — NOT the
+          // broad `item.to` prefix). Non-canvas items: the chrome's built-in
+          // prefix match, replicated here so this callback is the single
+          // active-resolution source for the host-owned groups.
           if ('surfaceId' in item) {
-            // Canvas item — active state from the resolver, not the chrome's
-            // prefix match. `<Link>` is used because we own the active state
-            // here; NavLink's own prefix detection would re-introduce the
-            // false positive the resolver exists to fix.
-            const canvasItem = item as CanvasNavItem;
-            const active = resolveActiveCanvasSurface(pathname) === canvasItem.surfaceId;
+            return resolveActiveCanvasSurface(route) === (item as CanvasNavItem).surfaceId;
+          }
+          return route === item.to || route.startsWith(`${item.to}/`);
+        }}
+        renderNavItem={(item, className, content, isActive) => {
+          // Canvas items use <Link> (not <NavLink>) so react-router's own
+          // prefix detection can't re-introduce the false positive the
+          // resolver exists to fix. aria-current is host-owned for these.
+          if ('surfaceId' in item) {
             return (
               <Link
-                to={canvasItem.to}
-                aria-current={active ? 'page' : undefined}
-                // Mirror shell-sidebar-chrome.tsx NavGroupChrome (active/inactive
-                // branches) — keep in sync.
-                className={cn(
-                  'group relative flex h-sidebar-nav-item-height items-center gap-2 rounded-control px-3 text-label-14 transition-colors duration-state ease-standard',
-                  active
-                    ? 'bg-gray-alpha-100 text-gray-1000'
-                    : 'text-gray-600 hover:bg-gray-alpha-100 hover:text-gray-900',
-                )}
+                to={item.to}
+                aria-current={isActive ? 'page' : undefined}
+                className={className}
               >
-                {active && (
-                  <span
-                    aria-hidden
-                    data-testid="sidebar-active-bar"
-                    className="absolute left-0 top-1/2 h-5 w-[2px] -translate-y-1/2 rounded-pill bg-blue-700"
-                  />
-                )}
-                <canvasItem.icon
-                  className={cn('h-4 w-4 shrink-0', active ? 'opacity-100' : 'opacity-70')}
-                  aria-hidden
-                />
-                <span>{canvasItem.label}</span>
+                {content}
               </Link>
             );
           }
