@@ -339,13 +339,13 @@
       "id": "2026-07-12-v1.111-design-studio-canvas-gallery",
       "title": "P2 — Design Studio Canvas Surface Gallery",
       "file": "plans/2026-07-12-v1.111-design-studio-canvas-gallery.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@frontend-dev",
         "@architect"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.111",
         "design-studio",
@@ -355,7 +355,7 @@
       ],
       "created_at": "2026-07-12",
       "updated_at": "2026-07-12",
-      "notes": "Canvas surface gallery in daemon-independent Studio; static chrome; no RF dep",
+      "notes": "Done — SDD T1-T5 + QC tri Approve (qc2 degraded PM-authored) + QA Pass; expanded CanvasSurfacesFixtures with Strategy+World KB chrome; merged to iteration/v1.111",
       "metadata": {
         "iteration_refs": [
           "V1.111"
