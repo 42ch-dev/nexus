@@ -585,6 +585,46 @@ describe('useStrategyCanvas edge reconnection (FB-SE-003)', () => {
     });
   });
 
+  it('includes the branch condition on reconnect so sibling rules sharing a target are not all rewritten (Greptile Issue 1)', async () => {
+    const branchEdge = {
+      id: 'e-s1-s2-branch-0',
+      source: 's1',
+      target: 's2',
+      type: 'strategy-edge',
+      data: { transitionKind: 'branch', condition: '_context.branch_a' },
+    };
+    const graph = mocks.graphQuery.data!.graph as { nodes: unknown[]; edges: unknown[] };
+    graph.edges = [branchEdge];
+
+    const patch = vi.fn().mockResolvedValue({ new_revision: 2 });
+    const client = makeReconnClient(patch);
+    const { result } = renderHook(() => useStrategyCanvas('preset-1'), {
+      wrapper: makeCommitWrapper(client),
+    });
+
+    await waitFor(() => expect(result.current.edges).toHaveLength(1));
+
+    act(() => {
+      result.current.onReconnect(branchEdge, {
+        source: 's1',
+        target: 's3',
+        sourceHandle: null,
+        targetHandle: null,
+      });
+    });
+
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
+    const request = patch.mock.calls[0][1] as Record<string, unknown>;
+    expect(request).toMatchObject({
+      source_state_id: 's1',
+      old_target: 's2',
+      new_target: 's3',
+      condition: '_context.branch_a',
+      transition_kind: 'branch',
+      op: 'update',
+    });
+  });
+
   it('reverts the edge to its previous target when the reconnect commit fails', async () => {
     const patch = vi.fn().mockRejectedValue(new Error('daemon unavailable'));
     const client = makeReconnClient(patch);
