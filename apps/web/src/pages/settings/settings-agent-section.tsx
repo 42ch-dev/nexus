@@ -13,8 +13,9 @@ import { Button } from '@/components/ui/button';
 import {
   AgentPicker,
   type AgentPickerStatus,
+  type AgentVerifyStatus,
 } from '@/components/setup/agent-picker';
-import { useScanAgents } from '@/api/queries';
+import { useScanAgents, useVerifyAgent } from '@/api/queries';
 import { useDesktopCapabilities } from '@/lib/client-context';
 import { errorMessage } from '@/lib/error-message';
 import { useToast } from '@/lib/use-toast';
@@ -73,6 +74,7 @@ export function SettingsAgentSection() {
   const desktop = useDesktopCapabilities();
   const { toast } = useToast();
   const scan = useScanAgents({ filter: 'all', registry_refresh: true });
+  const verifyAgent = useVerifyAgent();
   const agents = scan.data?.agents ?? [];
   const pickerItems = useMemo(() => mapScanEntriesToPickerItems(agents), [agents]);
   const status = resolvePickerStatus(scan.isLoading, scan.isError, agents.length);
@@ -82,6 +84,7 @@ export function SettingsAgentSection() {
   const [customLaunchCommand, setCustomLaunchCommand] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [didInitDefault, setDidInitDefault] = useState(false);
+  const [verifyStatus, setVerifyStatus] = useState<AgentVerifyStatus>('idle');
   /** Author touched picker before async preselect finished — skip late apply. */
   const userTouchedRef = useRef(false);
 
@@ -171,6 +174,19 @@ export function SettingsAgentSection() {
     userTouchedRef.current = true;
     setSelectedAgent(null);
     setCustomLaunchCommand(command);
+    setVerifyStatus('idle');
+  }
+
+  async function handleVerify() {
+    const command = customLaunchCommand.trim();
+    if (!command) return;
+    setVerifyStatus('loading');
+    try {
+      const ok = await verifyAgent.mutateAsync(command);
+      setVerifyStatus(ok ? 'success' : 'error');
+    } catch {
+      setVerifyStatus('error');
+    }
   }
 
   const canSave = Boolean(selectedAgent || customLaunchCommand.trim());
@@ -226,6 +242,8 @@ export function SettingsAgentSection() {
           onSelect={selectById}
           customLaunchValue={customLaunchCommand}
           onCustomLaunchChange={handleUseCustom}
+          onVerify={handleVerify}
+          verifyStatus={verifyStatus}
           errorDescription={
             scan.isError
               ? errorMessage(scan.error) ||

@@ -117,6 +117,23 @@ describe('changedFieldsOf', () => {
     ).toEqual(['remove_event']);
   });
 
+  // I-QC1-003 — the additive `unlink_foreshadow` op must surface its changed
+  // field in the conflict modal so stale unlink patches are labeled correctly.
+  it('projects unlink_foreshadow as a changed field (I-QC1-003)', () => {
+    expect(
+      changedFieldsOf({
+        kind: 'timeline',
+        request: {
+          work_id: 'wk',
+          base_revision: 0,
+          operation: 'unlink_foreshadow',
+          event_id: 'e1',
+          foreshadows_event_id: 'e2',
+        },
+      }),
+    ).toEqual(['unlink_foreshadow']);
+  });
+
   it('projects each edited chapter set field, in a stable order', () => {
     expect(
       changedFieldsOf({

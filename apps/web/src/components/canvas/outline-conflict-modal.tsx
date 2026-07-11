@@ -27,7 +27,8 @@ export type OutlineChangedField =
   | 'add_event'
   | 'remove_event'
   | 'attach_event_to_chapter'
-  | 'link_foreshadow';
+  | 'link_foreshadow'
+  | 'unlink_foreshadow';
 
 const FIELD_LABELS: Record<OutlineChangedField, string> = {
   chapter_title: 'Chapter title',
@@ -44,6 +45,7 @@ const FIELD_LABELS: Record<OutlineChangedField, string> = {
   remove_event: 'Remove timeline event',
   attach_event_to_chapter: 'Attach event to chapter',
   link_foreshadow: 'Foreshadow link',
+  unlink_foreshadow: 'Unlink foreshadow',
 };
 
 export interface OutlineConflictModalDraft {

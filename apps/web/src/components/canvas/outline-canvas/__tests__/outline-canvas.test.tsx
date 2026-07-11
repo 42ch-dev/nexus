@@ -1,0 +1,318 @@
+/**
+ * Outline canvas orchestrator — conflict modal trigger on stale revision
+ * (FB-C1-003) and panel selection path regression (V1.108 P0 T2).
+ *
+ * CanvasShell (React Flow) is mocked out so jsdom never needs ResizeObserver;
+ * the test focuses on the orchestrator's 409 conflict wiring and the panel
+ * → inspector selection path that must remain functional alongside the new
+ * graph-click selection sync.
+ */
+import { describe, expect, it, vi } from 'vitest';
+import { render, screen, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { act } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+
+import { OutlineCanvas } from '@/components/canvas/outline-canvas';
+import { NexusClientError } from '@/lib/nexus/errors';
+
+// ---------------------------------------------------------------------------
+// Mocks
+// ---------------------------------------------------------------------------
+
+// Stub CanvasShell so React Flow never mounts in jsdom (no ResizeObserver).
+// I-QC1-001 — the mock accepts children so the in-shell EmptyState overlay
+// test can assert its presence inside the shell.
+vi.mock('@/components/canvas/canvas-shell', () => ({
+  CanvasShell: ({ summaryText, children }: { summaryText: string; children?: React.ReactNode }) => (
+    <div data-testid="canvas-shell-mock" aria-label="Outline structure graph">
+      {summaryText}
+      {children}
+    </div>
+  ),
+  useNodeChangeHandler: () => () => {},
+}));
+
+const mocks = vi.hoisted(() => {
+  const WORK = {
+    work_id: 'wk_test',
+    title: 'Test Work',
+    work_profile: 'novel',
+    created_at: '',
+    updated_at: '',
+  };
+  const CHAPTER_1 = {
+    work_id: 'wk_test',
+    chapter: 1,
+    volume: 1,
+    title: 'Chapter One',
+    slug: 'ch-1',
+    status: 'draft',
+    planned_word_count: 1000,
+    actual_word_count: 500,
+    outline_path: undefined,
+    body_path: undefined,
+    created_at: '',
+    updated_at: '',
+  };
+  const OUTLINE = {
+    work_id: 'wk_test',
+    outline_revision: 2,
+    volumes: [{ volume_id: 1, label: 'Volume 1', chapter_ids: [1] }],
+    timeline_events: [],
+    foreshadows: [],
+    chapter_titles: {},
+    updated_at: '',
+  };
+  return {
+    WORK,
+    CHAPTER_1,
+    OUTLINE,
+    outlineResult: {
+      data: OUTLINE,
+      isLoading: false,
+      isError: false,
+      isFetching: false,
+      refetch: vi.fn().mockResolvedValue({ data: OUTLINE }),
+      dataUpdatedAt: 0,
+    },
+    chaptersResult: {
+      data: { pages: [{ items: [CHAPTER_1], pagination: { has_more: false, next_cursor: null } }] },
+      isLoading: false,
+      isError: false,
+      isFetching: false,
+      hasNextPage: false,
+      isFetchingNextPage: false,
+      fetchNextPage: vi.fn(),
+      refetch: vi.fn(),
+      dataUpdatedAt: 0,
+    },
+    workResult: {
+      data: WORK,
+      isLoading: false,
+      isError: false,
+      isFetching: false,
+      refetch: vi.fn(),
+      dataUpdatedAt: 0,
+    },
+    patchStructureResult: { mutate: vi.fn(), isPending: false },
+    patchChapterResult: { mutate: vi.fn(), isPending: false },
+    patchTimelineResult: { mutate: vi.fn(), isPending: false },
+  };
+});
+
+vi.mock('@/api/queries', () => ({
+  useWork: () => mocks.workResult,
+  useChapters: () => mocks.chaptersResult,
+  useChapterOutline: () => ({
+    data: undefined,
+    isLoading: false,
+    isError: false,
+    isFetching: false,
+    refetch: vi.fn(),
+    dataUpdatedAt: 0,
+  }),
+  flattenPages: (data: { pages: { items: unknown[] }[] } | undefined): unknown[] => {
+    if (!data) return [];
+    return data.pages.flatMap((p) => p.items);
+  },
+}));
+
+vi.mock('@/lib/canvas/use-outline-data', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/canvas/use-outline-data')>();
+  return {
+    ...actual,
+    useWorkOutline: () => mocks.outlineResult,
+    usePatchOutlineStructure: () => mocks.patchStructureResult,
+    usePatchOutlineChapter: () => mocks.patchChapterResult,
+    usePatchTimelineEvent: () => mocks.patchTimelineResult,
+  };
+});
+
+vi.mock('@/lib/nexus/query-keys', () => ({
+  queryKeys: {
+    chapters: {
+      outlines: () => ['chapters', 'outlines'],
+      detail: () => ['chapters', 'detail'],
+      lists: () => ['chapters', 'lists'],
+      list: () => ['chapters', 'list'],
+    },
+    outline: {
+      detail: () => ['outline', 'detail'],
+    },
+  },
+}));
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+const queryClient = new QueryClient({
+  defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+});
+
+function renderOutline() {
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <OutlineCanvas workId="wk_test" />
+    </QueryClientProvider>,
+  );
+}
+
+/** Build a real NexusClientError 409 carrying `current_version`. */
+function outlineConflictErr(currentVersion: number): NexusClientError {
+  return new NexusClientError(409, 'outline_conflict', 'stale revision', {
+    current_version: currentVersion,
+    conflicting_path: 'volumes/1',
+  });
+}
+
+/** Invoke the latest captured chapter mutate call's onError callback. */
+async function rejectLastChapterAsConflict(currentVersion: number) {
+  const chapterMutate = mocks.patchChapterResult.mutate;
+  const lastCall = chapterMutate.mock.calls.at(-1);
+  if (!lastCall) throw new Error('no patchChapter.mutate call captured');
+  const opts = lastCall[1] as { onError?: (e: unknown) => void };
+  await act(async () => {
+    opts.onError?.(outlineConflictErr(currentVersion));
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+describe('OutlineCanvas — conflict modal trigger (FB-C1-003)', () => {
+  it('renders the outline graph shell and structure panel', () => {
+    renderOutline();
+    expect(screen.getByTestId('canvas-shell-mock')).toBeInTheDocument();
+    expect(screen.getByText('Volumes & Chapters')).toBeInTheDocument();
+  });
+
+  it('shows the outline conflict modal when a chapter patch returns 409', async () => {
+    const user = userEvent.setup();
+    renderOutline();
+
+    // 1. Select the chapter via the structure panel (panel selection path).
+    await user.click(screen.getByText('Chapter One'));
+
+    // 2. Edit the title field to make the save button actionable.
+    const titleInput = screen.getByDisplayValue('Chapter One');
+    await user.clear(titleInput);
+    await user.type(titleInput, 'Revised Chapter One');
+
+    // 3. Save chapter → mutate fires → simulate 409 outline_conflict.
+    await user.click(screen.getByRole('button', { name: /Save chapter/i }));
+    await rejectLastChapterAsConflict(5);
+
+    // 4. The outline-flavored conflict modal must be visible with the new
+    //    server revision (FB-C1-003 acceptance: stale revision → conflict
+    //    modal appears with retry/merge path).
+    expect(
+      screen.getByText('This outline changed while you were editing.'),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText('5', { selector: 'span.font-mono' }),
+    ).toBeInTheDocument();
+  });
+
+  it('lists the chapter title in the local changed fields on 409', async () => {
+    const user = userEvent.setup();
+    renderOutline();
+
+    await user.click(screen.getByText('Chapter One'));
+    const titleInput = screen.getByDisplayValue('Chapter One');
+    await user.clear(titleInput);
+    await user.type(titleInput, 'New Title');
+    await user.click(screen.getByRole('button', { name: /Save chapter/i }));
+    await rejectLastChapterAsConflict(5);
+
+    const draftSection = screen.getByText('What you were about to do').closest('div')!;
+    expect(draftSection.textContent).toContain('Chapter title');
+  });
+});
+
+describe('OutlineCanvas — panel selection path regression', () => {
+  it('selecting a chapter in the panel updates the chapter inspector', async () => {
+    const user = userEvent.setup();
+    renderOutline();
+
+    // Before selection, the inspector shows the empty-state message.
+    expect(screen.getByText('Select a chapter to inspect its outline metadata.')).toBeInTheDocument();
+
+    // Click the chapter in the structure panel.
+    await user.click(screen.getByText('Chapter One'));
+
+    // The inspector should now show the Chapter Inspector with the chapter number.
+    const inspector = screen.getByText('Chapter Inspector').closest('[class*="card"]') ?? document.body;
+    expect(within(inspector as HTMLElement).getByText('#1')).toBeInTheDocument();
+  });
+});
+
+describe('OutlineCanvas — graph↔list alt toggle (FB-C1-004)', () => {
+  it('defaults to graph view (CanvasShell mounted, alt toggle not pressed)', () => {
+    renderOutline();
+    expect(screen.getByTestId('canvas-shell-mock')).toBeInTheDocument();
+    const toggle = screen.getByRole('button', { name: 'Show list view' });
+    expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('switches to alt list view on toggle click and back to graph', async () => {
+    const user = userEvent.setup();
+    renderOutline();
+
+    // Click "Show list view" → alt view appears, graph mock disappears.
+    await user.click(screen.getByRole('button', { name: 'Show list view' }));
+    expect(screen.queryByTestId('canvas-shell-mock')).not.toBeInTheDocument();
+    expect(screen.getByText('Chapters')).toBeInTheDocument();
+    expect(screen.getByText('Timeline Events')).toBeInTheDocument();
+
+    // The toggle label flips and aria-pressed is true.
+    const graphToggle = screen.getByRole('button', { name: 'Show graph' });
+    expect(graphToggle).toHaveAttribute('aria-pressed', 'true');
+
+    // Click "Show graph" → back to graph view.
+    await user.click(graphToggle);
+    expect(screen.getByTestId('canvas-shell-mock')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Show list view' })).toHaveAttribute(
+      'aria-pressed',
+      'false',
+    );
+  });
+
+  it('renders chapter list with status in alt view', async () => {
+    const user = userEvent.setup();
+    renderOutline();
+
+    await user.click(screen.getByRole('button', { name: 'Show list view' }));
+
+    // The alt view section renders the chapter title and status badge.
+    // Scope to the alt section to avoid collision with the structure panel below.
+    const altSection = screen.getByLabelText('Outline chapters and timeline in list order');
+    expect(within(altSection).getByText('Chapter One')).toBeInTheDocument();
+    expect(within(altSection).getByText('draft')).toBeInTheDocument();
+  });
+});
+
+// I-QC1-001 — CanvasShell must always mount for the graph view, even when the
+// projection produces zero nodes. The EmptyState renders as an in-shell overlay.
+describe('OutlineCanvas — empty graph shell parity (I-QC1-001)', () => {
+  it('mounts CanvasShell with in-shell EmptyState when projection has zero nodes', () => {
+    // Override the outline to have no volumes/events → projection.nodes.length === 0.
+    mocks.outlineResult.data = {
+      ...mocks.OUTLINE,
+      volumes: [],
+      timeline_events: [],
+    };
+    // Also clear chapters so no unassigned-chapter nodes are produced.
+    mocks.chaptersResult.data = {
+      pages: [{ items: [], pagination: { has_more: false, next_cursor: null } }],
+    };
+    renderOutline();
+
+    // CanvasShell must be mounted (shared-shell parity FB-C1-000).
+    expect(screen.getByTestId('canvas-shell-mock')).toBeInTheDocument();
+    // The in-shell EmptyState overlay must be visible inside the shell.
+    expect(screen.getByText('No graph nodes')).toBeInTheDocument();
+  });
+});

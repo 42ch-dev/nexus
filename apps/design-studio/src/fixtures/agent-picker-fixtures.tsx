@@ -11,6 +11,7 @@ import {
   AgentPicker,
   type AgentPickerItem,
   type AgentPickerStatus,
+  type AgentVerifyStatus,
 } from '@web-setup/agent-picker';
 
 const INSTALLED_ONLY: AgentPickerItem[] = [
@@ -109,7 +110,8 @@ function InteractiveMixedFixture() {
 }
 
 /**
- * Six required visual states for AgentPicker Studio acceptance.
+ * Six required visual states for AgentPicker Studio acceptance, plus V1.108
+ * FB-UI-008 Verify Agent static state matrix (idle/loading/success/failure).
  */
 export function AgentPickerFixtures() {
   const [emptyCustom, setEmptyCustom] = useState('');
@@ -153,6 +155,8 @@ export function AgentPickerFixtures() {
           status="empty"
           customLaunchValue={emptyCustom}
           onCustomLaunchChange={setEmptyCustom}
+          onVerify={() => undefined}
+          verifyStatus={'idle' satisfies AgentVerifyStatus}
         />
       </FixtureFrame>
 
@@ -166,6 +170,8 @@ export function AgentPickerFixtures() {
           onRetry={() => undefined}
           customLaunchValue={errorCustom}
           onCustomLaunchChange={setErrorCustom}
+          onVerify={() => undefined}
+          verifyStatus={'idle' satisfies AgentVerifyStatus}
         />
       </FixtureFrame>
 
@@ -174,6 +180,58 @@ export function AgentPickerFixtures() {
         description="Installed agent selected (aria-pressed + status-dot ring)."
       >
         <InteractiveSelectedFixture />
+      </FixtureFrame>
+
+      <FixtureFrame
+        title="Verify idle"
+        description="Custom launch with Verify Agent button — idle state (no probe yet)."
+      >
+        <AgentPicker
+          status="empty"
+          customLaunchValue="/usr/local/bin/my-agent"
+          onCustomLaunchChange={() => undefined}
+          onVerify={() => undefined}
+          verifyStatus={'idle' satisfies AgentVerifyStatus}
+        />
+      </FixtureFrame>
+
+      <FixtureFrame
+        title="Verify loading"
+        description="Probe in flight — spinner + Verifying… label."
+      >
+        <AgentPicker
+          status="empty"
+          customLaunchValue="/usr/local/bin/my-agent"
+          onCustomLaunchChange={() => undefined}
+          onVerify={() => undefined}
+          verifyStatus={'loading' satisfies AgentVerifyStatus}
+        />
+      </FixtureFrame>
+
+      <FixtureFrame
+        title="Verify success"
+        description="Probe matched an installed agent — success helper."
+      >
+        <AgentPicker
+          status="empty"
+          customLaunchValue="claude"
+          onCustomLaunchChange={() => undefined}
+          onVerify={() => undefined}
+          verifyStatus={'success' satisfies AgentVerifyStatus}
+        />
+      </FixtureFrame>
+
+      <FixtureFrame
+        title="Verify failure"
+        description="Probe did not match — failure helper."
+      >
+        <AgentPicker
+          status="empty"
+          customLaunchValue="/usr/local/bin/missing-agent"
+          onCustomLaunchChange={() => undefined}
+          onVerify={() => undefined}
+          verifyStatus={'error' satisfies AgentVerifyStatus}
+        />
       </FixtureFrame>
     </div>
   );

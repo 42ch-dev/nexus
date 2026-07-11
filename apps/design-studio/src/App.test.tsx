@@ -145,6 +145,16 @@ const SURFACES_SECTION_ROUTES = [
   { route: '/surfaces/setup', testId: 'surfaces-setup', linkLabel: 'Setup' },
   { route: '/surfaces/shell', testId: 'surfaces-shell', linkLabel: 'Shell' },
   {
+    route: '/surfaces/agent-picker',
+    testId: 'surfaces-agent-picker',
+    linkLabel: 'AgentPicker',
+  },
+  {
+    route: '/surfaces/canvas',
+    testId: 'surfaces-canvas',
+    linkLabel: 'Canvas',
+  },
+  {
     route: '/surfaces/daemon',
     testId: 'surfaces-daemon',
     linkLabel: 'Daemon',
@@ -199,6 +209,9 @@ describe('Surfaces section menu — deep links', () => {
     expect(
       within(index).getByRole('link', { name: /AgentPicker/ }),
     ).toHaveAttribute('href', '/surfaces/agent-picker');
+    expect(
+      within(index).getByRole('link', { name: /Canvas/ }),
+    ).toHaveAttribute('href', '/surfaces/canvas');
     expect(within(index).getByRole('link', { name: /Daemon/ })).toHaveAttribute(
       'href',
       '/surfaces/daemon',
@@ -353,12 +366,42 @@ describe('Surfaces page — app shell fixture', () => {
   it('renders Works nav group and All Works child', () => {
     // "Works" appears as a nav group label — verify at least one instance.
     expect(screen.getAllByText('Works').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText('All Works')).toBeInTheDocument();
+    // Both the app shell fixture and Settings fixture use ShellSidebarChrome
+    // SSOT, so "All Works" renders in each.
+    expect(screen.getAllByText('All Works').length).toBeGreaterThanOrEqual(1);
   });
 
-  it('renders Worlds and Findings nav groups', () => {
-    expect(screen.getAllByText('Worlds').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getAllByText('Findings').length).toBeGreaterThanOrEqual(1);
+  it('renders Settings fixture sidebar with SSOT segmented pill tabs (FB-UI-002)', () => {
+    // The Settings fixture consumes ShellSidebarChrome — segmented pill
+    // tablist, not stale underline tabs.
+    const settingsShell = screen.getByTestId('settings-shell-chrome');
+    const tablist = within(settingsShell).getByRole('tablist', {
+      name: 'Primary navigation',
+    });
+    expect(
+      within(tablist).getByRole('tab', { name: 'Creator' }),
+    ).toHaveAttribute('aria-selected', 'true');
+    expect(
+      within(tablist).getByRole('tab', { name: 'Orchestrator' }),
+    ).toHaveAttribute('aria-selected', 'false');
+  });
+
+  it('renders Settings fixture sidebar with sectioned icon nav (FB-UI-003)', () => {
+    const settingsShell = screen.getByTestId('settings-shell-chrome');
+    // Creator nav groups render as section headers + icon+label items.
+    expect(within(settingsShell).getByText('Memory')).toBeInTheDocument();
+  });
+
+  it('renders Settings fixture profiles as icon-only (FB-UI-001)', () => {
+    const settingsShell = screen.getByTestId('settings-shell-chrome');
+    const toolbar = within(settingsShell).getByRole('toolbar', {
+      name: 'Profiles',
+    });
+    expect(toolbar).toBeInTheDocument();
+    // Icon-only — no display name text visible in the settings shell.
+    expect(
+      within(settingsShell).queryByText('Local Creator'),
+    ).not.toBeInTheDocument();
   });
 
   it('renders the profile footer with creator name', () => {
@@ -525,7 +568,8 @@ describe('Surfaces page — AgentPicker fixtures', () => {
 
   it('covers loading, empty, and error states', () => {
     expect(screen.getByText('Scanning for local ACP agents…')).toBeInTheDocument();
-    expect(screen.getByText('No agents found on PATH')).toBeInTheDocument();
+    // Multiple empty-status fixtures (Empty + Verify matrix) render this title.
+    expect(screen.getAllByText('No agents found on PATH').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('Could not scan for agents')).toBeInTheDocument();
   });
 
@@ -565,6 +609,28 @@ describe('Surfaces page — AgentPicker fixtures', () => {
       .getAllByTestId('agent-card-select-claude-code')
       .filter((el) => el.getAttribute('aria-pressed') === 'true');
     expect(pressed.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('renders the V1.108 Verify Agent static state matrix (FB-UI-008)', () => {
+    // idle: Verify Agent button visible and enabled (command non-empty).
+    const idleBtns = screen.getAllByTestId('agent-picker-verify');
+    expect(idleBtns.length).toBeGreaterThanOrEqual(1);
+
+    const idleVerify = idleBtns.find((b) => b.textContent === 'Verify Agent');
+    expect(idleVerify).toBeTruthy();
+
+    // loading: Verifying… label + disabled.
+    const loadingVerify = idleBtns.find((b) => b.textContent === 'Verifying…');
+    expect(loadingVerify).toBeTruthy();
+    expect(loadingVerify).toBeDisabled();
+
+    // success helper.
+    expect(screen.getByText('Agent responded successfully.')).toBeInTheDocument();
+
+    // failure helper.
+    expect(
+      screen.getByText('Could not reach this agent. Check the command and try again.'),
+    ).toBeInTheDocument();
   });
 });
 
@@ -1100,5 +1166,97 @@ describe('Components page — Select fixtures', () => {
     expect(select.tagName).toBe('SELECT');
     expect(select).not.toHaveAttribute('aria-expanded');
     expect(select).not.toHaveAttribute('open');
+  });
+});
+
+/* ---- surfaces page — Canvas shell + context menu chrome (V1.108 P1 T4) -- */
+
+describe('Surfaces page — Canvas surfaces fixtures', () => {
+  beforeEach(() => {
+    mockMatchMedia(false);
+    renderStudio('/surfaces/canvas');
+  });
+
+  it('renders the Canvas section heading', () => {
+    expect(
+      screen.getByRole('heading', {
+        name: 'Canvas — Shell + context menu chrome',
+      }),
+    ).toBeInTheDocument();
+  });
+
+  it('renders the canvas shell chrome fixture with controls + minimap', () => {
+    const shell = screen.getByTestId('canvas-shell-chrome');
+    expect(shell).toBeInTheDocument();
+
+    const controls = within(shell).getByTestId('canvas-shell-controls');
+    expect(
+      within(controls).getByRole('button', { name: 'Zoom in' }),
+    ).toBeInTheDocument();
+    expect(
+      within(controls).getByRole('button', { name: 'Zoom out' }),
+    ).toBeInTheDocument();
+    expect(
+      within(controls).getByRole('button', { name: 'Fit view' }),
+    ).toBeInTheDocument();
+
+    expect(
+      within(shell).getByTestId('canvas-shell-minimap'),
+    ).toBeInTheDocument();
+  });
+
+  it('renders outline node samples aligned with P0 (Volume / Chapter / Timeline)', () => {
+    const matrix = screen.getByTestId('canvas-node-matrix');
+    // Volume node
+    expect(within(matrix).getByText('Volume II — Journeys')).toBeInTheDocument();
+
+    // Chapter status badges mirror the P0 STATUS_LABEL set.
+    const statusBadges = within(matrix).getAllByText('Not started');
+    expect(statusBadges.length).toBeGreaterThanOrEqual(1);
+    expect(within(matrix).getAllByText('Draft').length).toBeGreaterThanOrEqual(1);
+    expect(within(matrix).getAllByText('Finalized').length).toBeGreaterThanOrEqual(1);
+
+    // Timeline event node (unattached)
+    expect(within(matrix).getByText('Unattached event')).toBeInTheDocument();
+  });
+
+  it('marks the selected node with the canvas-node-border-selected class', () => {
+    const matrix = screen.getByTestId('canvas-node-matrix');
+    // The finalized-and-selected chapter node title is unique in the matrix.
+    const selectedTitle = within(matrix).getByText('Chapter 6 — Descent');
+    const nodeShell = selectedTitle.closest('[class*="rounded-card"]');
+    expect(nodeShell).not.toBeNull();
+    expect(nodeShell!.className).toContain('border-canvas-node-border-selected');
+  });
+
+  it('renders context menu chrome matrices with role=menu and Title Case items', () => {
+    const matrix = screen.getByTestId('canvas-context-menu-matrix');
+    const menus = within(matrix).getAllByRole('menu');
+    expect(menus.length).toBeGreaterThanOrEqual(3);
+
+    // Entity (World KB) + Canvas future both have Connect to… → use getAllByText.
+    expect(within(matrix).getAllByText('Connect to…').length).toBeGreaterThanOrEqual(1);
+
+    // Path (browser + desktop) both have Copy Path.
+    expect(within(matrix).getAllByText('Copy Path').length).toBeGreaterThanOrEqual(1);
+
+    // Path (desktop) — Open With… + Reveal in Finder
+    expect(within(matrix).getByText('Open With…')).toBeInTheDocument();
+    expect(within(matrix).getByText('Reveal in Finder')).toBeInTheDocument();
+
+    // Canvas (future) — Add Chapter
+    expect(within(matrix).getByText('Add Chapter')).toBeInTheDocument();
+  });
+
+  it('marks each context menu item with role=menuitem', () => {
+    const matrix = screen.getByTestId('canvas-context-menu-matrix');
+    const items = within(matrix).getAllByRole('menuitem');
+    expect(items.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('does not render light/dark as separate DOM trees (theme toggle drives both)', () => {
+    // The fixture renders once; the global ThemeToggle applies .dark to <html>.
+    // There should be exactly one canvas shell chrome instance.
+    expect(screen.getAllByTestId('canvas-shell-chrome')).toHaveLength(1);
   });
 });

@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -6,8 +6,9 @@ import {
   AgentPicker,
   type AgentPickerItem,
   type AgentPickerStatus,
+  type AgentVerifyStatus,
 } from '@/components/setup/agent-picker';
-import { useScanAgents } from '@/api/queries';
+import { useScanAgents, useVerifyAgent } from '@/api/queries';
 import { errorMessage } from '@/lib/error-message';
 import { lookupAgentOutboundUrls } from '@/pages/setup-agent-urls';
 import type { AgentScanEntry } from '@42ch/nexus-contracts';
@@ -90,11 +91,14 @@ function resolvePickerStatus(
 
 export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAgentProps) {
   const scan = useScanAgents({ filter: 'all', registry_refresh: true });
+  const verifyAgent = useVerifyAgent();
   const agents = scan.data?.agents ?? [];
   const pickerItems = useMemo(() => mapScanEntriesToPickerItems(agents), [agents]);
   const status = resolvePickerStatus(scan.isLoading, scan.isError, agents.length);
 
   const agentsById = useMemo(() => buildAgentsByPickerId(agents), [agents]);
+
+  const [verifyStatus, setVerifyStatus] = useState<AgentVerifyStatus>('idle');
 
   const firstInstalled = useMemo(
     () => agents.find((a) => a.installed) ?? null,
@@ -138,12 +142,25 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
   }
 
   function useCustom(command: string) {
+    setVerifyStatus('idle');
     onChange({
       workspaceRoot,
       workspacePicked,
       selectedAgent: null,
       customLaunchCommand: command,
     });
+  }
+
+  async function handleVerify() {
+    const command = customLaunchCommand.trim();
+    if (!command) return;
+    setVerifyStatus('loading');
+    try {
+      const ok = await verifyAgent.mutateAsync(command);
+      setVerifyStatus(ok ? 'success' : 'error');
+    } catch {
+      setVerifyStatus('error');
+    }
   }
 
   const selectedId = useMemo(() => {
@@ -159,7 +176,10 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
     return agentPickerId(selectedAgent);
   }, [selectedAgent, agentsById]);
 
-  const canContinue = Boolean(selectedAgent);
+  // FB-UI-008: an installed agent continues directly (registry-validated).
+  // A custom launch command must be verified before continuing so authors
+  // test the command in-place rather than discovering it is broken later.
+  const canContinue = Boolean(selectedAgent) || verifyStatus === 'success';
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
@@ -178,7 +198,8 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
           onSelect={selectById}
           customLaunchValue={customLaunchCommand}
           onCustomLaunchChange={useCustom}
-          showCustomLaunch={false}
+          onVerify={handleVerify}
+          verifyStatus={verifyStatus}
           errorDescription={
             scan.isError
               ? errorMessage(scan.error) || 'The daemon did not respond to the agent scan request.'

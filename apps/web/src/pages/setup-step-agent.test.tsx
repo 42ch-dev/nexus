@@ -272,7 +272,10 @@ describe('SetupStepAgent', () => {
       expect(screen.getByTestId('agent-picker')).toHaveAttribute('data-status', 'empty'),
     );
     expect(screen.getByText('No agents found on PATH.')).toBeInTheDocument();
-    expect(screen.queryByTestId('agent-picker-custom-launch')).not.toBeInTheDocument();
+    // FB-UI-008: Setup offers the custom launch escape hatch when no agents
+    // are found, so authors can still configure a non-registry agent.
+    expect(screen.getByTestId('agent-picker-custom-launch')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
   });
 
   it('renders Continue as a wide prominent CTA without Back on the first step', async () => {
@@ -309,7 +312,9 @@ describe('SetupStepAgent', () => {
       expect(screen.getByTestId('agent-picker')).toHaveAttribute('data-status', 'error'),
     );
     expect(screen.getByText('Could not scan for agents')).toBeInTheDocument();
-    expect(screen.queryByTestId('agent-picker-custom-launch')).not.toBeInTheDocument();
+    // FB-UI-008: custom launch escape hatch stays available even when the scan
+    // errors, so authors are not blocked by a transient scan failure.
+    expect(screen.getByTestId('agent-picker-custom-launch')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Try again' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
   });
@@ -339,5 +344,67 @@ describe('SetupStepAgent', () => {
     );
     expect(screen.queryByRole('link', { name: /Docs/i })).not.toBeInTheDocument();
     expect(screen.getByTestId('agent-card-mystery-agent').querySelector('a')).toBeNull();
+  });
+
+  it('enables Continue after verifying a custom launch command (FB-UI-008)', async () => {
+    const user = userEvent.setup();
+    const customCommand = '/usr/local/bin/my-agent';
+    useHandlers(
+      http.post('/v1/daemon/agent-host/scan', () =>
+        HttpResponse.json({
+          agents: [
+            makeAgent({
+              name: 'my-agent',
+              registry_agent_id: 'my-agent',
+              installed: true,
+              launch_command: customCommand,
+            }),
+          ],
+        }),
+      ),
+    );
+
+    renderHarness(makeState());
+
+    await waitFor(() => expect(screen.getByText('my-agent')).toBeInTheDocument());
+    // Auto-select enables Continue via the installed agent.
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled(),
+    );
+
+    // Switching to a custom command clears the selection → Continue gated on verify.
+    const input = screen.getByPlaceholderText('e.g. /usr/local/bin/my-agent');
+    await user.type(input, customCommand);
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
+
+    // Verify matches the installed agent's launch command → Continue enabled.
+    await user.click(screen.getByRole('button', { name: 'Verify Agent' }));
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled(),
+    );
+    expect(screen.getByTestId('agent-picker-verify-success')).toBeInTheDocument();
+  });
+
+  it('keeps Continue disabled when Verify fails on an unmatched command (FB-UI-008)', async () => {
+    const user = userEvent.setup();
+    useHandlers(
+      http.post('/v1/daemon/agent-host/scan', () => HttpResponse.json({ agents: [] })),
+    );
+
+    renderHarness(makeState());
+
+    await waitFor(() =>
+      expect(screen.getByTestId('agent-picker')).toHaveAttribute('data-status', 'empty'),
+    );
+
+    const input = screen.getByPlaceholderText('e.g. /usr/local/bin/my-agent');
+    await user.type(input, '/bin/nonexistent');
+
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Verify Agent' }));
+    await waitFor(() =>
+      expect(screen.getByTestId('agent-picker-verify-error')).toBeInTheDocument(),
+    );
+    expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
   });
 });

@@ -1,0 +1,32 @@
+{
+  "id": "2026-07-10-v1.107-studio-ui-tune",
+  "title": "P0 — Studio UI tune (visual + coverage)",
+  "file": "plans/2026-07-10-v1.107-studio-ui-tune.md",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": [
+    "@frontend-dev",
+    "@architect"
+  ],
+  "progress": 100,
+  "tags": [
+    "v1.107",
+    "studio-first",
+    "design-studio",
+    "must"
+  ],
+  "created_at": "2026-07-10",
+  "updated_at": "2026-07-10",
+  "notes": "Done — All 17 FBs implemented. QC tri Approve (3/3) after fix wave. QA Pass with residuals. 2 non-blocking residuals (R-V1107QC1-W002 low, R-V1107QC1-ARCH nit).",
+  "metadata": {
+    "iteration_refs": [
+      "V1.107"
+    ],
+    "spec_integration_branch": "iteration/v1.107",
+    "merge_target": "iteration/v1.107",
+    "working_branch": "plan/v1.107-p0-studio-ui-tune",
+    "primary_spec": ".mstar/iterations/v1.107/specs/studio-ui-tune.md",
+    "wire_contracts_changed": false,
+    "tier": "Must"
+  }
+}

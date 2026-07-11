@@ -111,6 +111,8 @@ export function changedFieldsOf(pending: PendingPatch): OutlineChangedField[] {
         return ['attach_event_to_chapter'];
       case 'link_foreshadow':
         return ['link_foreshadow'];
+      case 'unlink_foreshadow':
+        return ['unlink_foreshadow'];
       default:
         return [];
     }

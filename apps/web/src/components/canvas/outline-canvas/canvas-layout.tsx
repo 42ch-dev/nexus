@@ -1,9 +1,11 @@
 /**
- * Outline canvas — layout chrome (V1.73 B5 split, `R-V172P0-QC1-002`).
+ * Outline canvas — layout chrome (V1.73 B5 split, `R-V172P0-QC1-002`;
+ * V1.108 P0 T3 — `CanvasHeader` with graph↔list toggle).
  *
  * Small presentational pieces used by the orchestrator header. Mirrors the
  * V1.71 `strategy-canvas/canvas-layout.tsx` module. Extracted from the
- * original `outline-canvas.tsx` monolith; behavior is unchanged.
+ * original `outline-canvas.tsx` monolith. T3 adds the `CanvasHeader` with
+ * the alt-view toggle (FB-C1-004).
  */
 import { AlertTriangle } from 'lucide-react';
 
@@ -31,5 +33,50 @@ export function RevisionBadge({
       {status === 'conflict' ? <AlertTriangle className="h-3 w-3" aria-hidden /> : null}
       rev {revision}
     </span>
+  );
+}
+
+/**
+ * Outline canvas toolbar header — Work title, revision badge, and the
+ * graph↔list alt-view toggle (FB-C1-004).
+ *
+ * Mirrors `strategy-canvas/canvas-layout.tsx` `CanvasHeader`: the toggle
+ * uses `aria-pressed` so keyboard/screen-reader users know which view is
+ * active. Locked copy: **Show list view** (from graph) / **Show graph**
+ * (from list) — matches Strategy/World KB for cross-canvas consistency.
+ */
+export function CanvasHeader({
+  title,
+  subtitle,
+  revision,
+  status,
+  showAlt,
+  setShowAlt,
+}: {
+  title: string;
+  subtitle: string;
+  revision: number;
+  status: RevisionStatus;
+  showAlt: boolean;
+  setShowAlt: (v: boolean) => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2">
+      <div>
+        <h1 className="text-heading-24 font-heading text-gray-1000">{title}</h1>
+        <p className="text-copy-14 text-gray-900">{subtitle}</p>
+      </div>
+      <div className="flex items-center gap-2">
+        <RevisionBadge revision={revision} status={status} />
+        <button
+          type="button"
+          onClick={() => setShowAlt(!showAlt)}
+          aria-pressed={showAlt}
+          className="rounded-control border border-gray-alpha-400 px-3 py-1.5 text-button-12 text-gray-900 hover:bg-gray-alpha-100"
+        >
+          {showAlt ? 'Show graph' : 'Show list view'}
+        </button>
+      </div>
+    </div>
   );
 }

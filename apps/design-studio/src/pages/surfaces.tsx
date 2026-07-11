@@ -21,6 +21,7 @@ import { FooterProfilesChrome } from '@web-layout/footer-profiles-chrome';
 import { DaemonHealthIndicatorChrome } from '@web-layout/daemon-health-indicator-chrome';
 
 import { AgentPickerFixtures } from '@/fixtures/agent-picker-fixtures';
+import { CanvasSurfacesFixtures } from '@/fixtures/canvas-surfaces-fixtures';
 import { LaunchDaemonFixtures } from '@/fixtures/launch-daemon-fixtures';
 import { MainBannerFixtures } from '@/fixtures/main-banner-fixtures';
 import { SettingsHostFixtures } from '@/fixtures/settings-host-fixtures';
@@ -84,6 +85,12 @@ const SURFACES_SECTIONS = [
     path: '/surfaces/agent-picker',
     end: false,
     desc: 'AgentPicker visual states',
+  },
+  {
+    label: 'Canvas',
+    path: '/surfaces/canvas',
+    end: false,
+    desc: 'Canvas shell + context menu chrome (presentational preview)',
   },
   {
     label: 'Daemon',
@@ -632,6 +639,49 @@ export function SurfacesBannerPage() {
         (daemon/desktop hooks forbidden in Studio).
       </p>
       <MainBannerFixtures />
+    </section>
+  );
+}
+
+export function SurfacesCanvasPage() {
+  return (
+    <section data-testid="surfaces-canvas">
+      <SurfaceHeading>Canvas — Shell + context menu chrome</SurfaceHeading>
+      <p className="text-copy-14 text-gray-700 mb-6">
+        Presentational preview of the shared canvas surface chrome — dot-grid
+        background, zoom controls, minimap swatch, outline node kinds (Volume /
+        Chapter / Timeline Event), and right-click context menu matrices. Node
+        chrome mirrors the P0{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          outline-nodes.tsx
+        </code>{' '}
+        visual structure using the same{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          canvas-outline-*
+        </code>{' '}
+        and{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          canvas-node-*
+        </code>{' '}
+        tokens shared via{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @nexus/design-tokens
+        </code>
+        . No{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @xyflow/react
+        </code>
+        , no{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          NexusClient
+        </code>
+        , no{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          @42ch/nexus-contracts
+        </code>
+        — light/dark acceptance here carries to the App graph.
+      </p>
+      <CanvasSurfacesFixtures />
     </section>
   );
 }

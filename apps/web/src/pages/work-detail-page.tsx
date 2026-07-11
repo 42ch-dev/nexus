@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
-import { ArrowLeft, Network, Pencil } from 'lucide-react';
+import { ArrowLeft, ListTree, Network, Pencil, Sparkles } from 'lucide-react';
 
 import { StatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
@@ -113,6 +113,20 @@ export function WorkDetailPage() {
           )}
 
           <div className="mt-6 flex flex-wrap gap-2">
+            <Button asChild variant="secondary" size="small">
+              <Link to={`/works/${encodeURIComponent(w.work_id)}/outline`}>
+                <ListTree className="h-4 w-4" aria-hidden />
+                Open Outline
+              </Link>
+            </Button>
+            {w.primary_preset_id && (
+              <Button asChild variant="secondary" size="small">
+                <Link to={`/strategies/${encodeURIComponent(w.primary_preset_id)}`}>
+                  <Sparkles className="h-4 w-4" aria-hidden />
+                  Open Strategy
+                </Link>
+              </Button>
+            )}
             {w.world_id && (
               <Button asChild variant="secondary" size="small">
                 <Link to={`/worlds/${encodeURIComponent(w.world_id)}/kb`}>
