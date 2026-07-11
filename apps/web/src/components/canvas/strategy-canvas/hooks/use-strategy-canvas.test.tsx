@@ -111,3 +111,45 @@ describe('useStrategyCanvas edit-save-refetch (R-V171P0-QC1-008 B7)', () => {
     });
   });
 });
+
+describe('useStrategyCanvas onConnect draft edge (FB-SE-000)', () => {
+  it('creates a draft transition edge when connecting two different states', () => {
+    const { result } = renderHook(() => useStrategyCanvas('preset-1'), { wrapper });
+
+    expect(result.current.edges).toHaveLength(0);
+    expect(typeof result.current.onConnect).toBe('function');
+
+    act(() => {
+      result.current.onConnect({ source: 's1', target: 's2', sourceHandle: null, targetHandle: null });
+    });
+
+    expect(result.current.edges).toHaveLength(1);
+    const draft = result.current.edges[0];
+    expect(draft.source).toBe('s1');
+    expect(draft.target).toBe('s2');
+    expect(draft.label).toBe('Draft transition');
+    expect(draft.selected).toBe(true);
+    expect((draft.data as { isDraft?: boolean }).isDraft).toBe(true);
+  });
+
+  it('does not create a draft edge for a self-loop', () => {
+    const { result } = renderHook(() => useStrategyCanvas('preset-1'), { wrapper });
+
+    act(() => {
+      result.current.onConnect({ source: 's1', target: 's1', sourceHandle: null, targetHandle: null });
+    });
+
+    expect(result.current.edges).toHaveLength(0);
+  });
+
+  it('does not call the daemon on connect (local-only draft)', () => {
+    const { result } = renderHook(() => useStrategyCanvas('preset-1'), { wrapper });
+
+    act(() => {
+      result.current.onConnect({ source: 's1', target: 's2', sourceHandle: null, targetHandle: null });
+    });
+
+    // No save trigger fires from a connect — draft is local until inspector commit.
+    expect(result.current.saveTriggers.transition).toBe(0);
+  });
+});

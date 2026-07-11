@@ -33,6 +33,7 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
     edges,
     onNodesChange,
     onEdgesChange,
+    onConnect,
     selected,
     selectedState,
     baseRevision,
@@ -102,6 +103,7 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
           nodeTypes={strategyNodeTypes}
           onNodesChange={onNodesChange}
           onEdgesChange={onEdgesChange}
+          onConnect={onConnect}
           summaryText={summaryText}
           ariaLabel="Strategy state-machine graph"
         >

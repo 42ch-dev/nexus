@@ -5,8 +5,14 @@
  * revision tracking, and the conflict modal state in one place so the
  * orchestrator component stays thin (R-V171P0-QC1-006).
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { useEdgesState, useNodesState, type Edge, type Node } from '@xyflow/react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  useEdgesState,
+  useNodesState,
+  type Connection,
+  type Edge,
+  type Node,
+} from '@xyflow/react';
 
 import {
   useActiveSession,
@@ -17,6 +23,7 @@ import {
 import type { StrategyNodeData } from '@/lib/canvas/strategy-graph';
 
 import {
+  createDraftTransitionEdge,
   isSectionDirty,
   originalFormOf,
   selectedStateOf,
@@ -136,6 +143,28 @@ export function useStrategyCanvas(presetId: string) {
     });
   }
 
+  /**
+   * Spatial connect gesture → local draft transition edge (FB-SE-000).
+   *
+   * The draft is appended to edge state and selected so the edge inspector can
+   * take focus. No daemon call happens here — the author commits (or cancels)
+   * in the inspector (FB-SE-002). Re-attempting a connect from the same source
+   * replaces any existing draft rather than stacking duplicates. Node selection
+   * is cleared so the state inspector yields to the transition being drawn.
+   */
+  const onConnect = useCallback(
+    (connection: Connection) => {
+      const draft = createDraftTransitionEdge(connection);
+      if (!draft) return;
+      setEdges((eds) => [
+        ...eds.map((e) => ({ ...e, selected: false })).filter((e) => !(e.data as { isDraft?: boolean })?.isDraft),
+        draft,
+      ]);
+      setNodes((nds) => nds.map((n) => ({ ...n, selected: false })));
+    },
+    [setEdges, setNodes],
+  );
+
   return {
     graphQuery,
     activeSession,
@@ -145,6 +174,7 @@ export function useStrategyCanvas(presetId: string) {
     edges,
     onNodesChange,
     onEdgesChange,
+    onConnect,
     selected,
     selectedState,
     baseRevision,
