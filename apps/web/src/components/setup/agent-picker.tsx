@@ -13,7 +13,7 @@
  */
 
 import { ArrowUpRight, Loader2, Terminal } from 'lucide-react';
-import { memo, useCallback, useRef, type ReactNode } from 'react';
+import { memo, useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
 
 import { cn } from '@/lib/utils';
 import { Badge, Button, Input, Label } from '@42ch/nexus-ui';
@@ -31,6 +31,11 @@ export interface AgentPickerItem {
   installUrl?: string | null;
   /** Outbound docs URL; omit/null → hide Docs link. */
   docsUrl?: string | null;
+  /**
+   * Optional last-updated timestamp (forward-compat). Unsourced in V1.110 —
+   * stays `undefined`; residual R-V110P2-001 covers the sort deferral.
+   */
+  lastUpdated?: string;
 }
 
 export type AgentPickerStatus = 'loading' | 'ready' | 'empty' | 'error';
@@ -79,6 +84,81 @@ export interface AgentPickerProps {
 }
 
 /**
+ * Common-agent priority — rendered first in the picker, in this order.
+ *
+ * Match keys are tried against `agent.id` (registry_agent_id, stable) first,
+ * then case-insensitive `agent.name` (forward-compat for agents not yet in
+ * the ACP CDN registry). The list reflects the user's locked priority order;
+ * see `.mstar/iterations/v1.110/specs/agent-picker-ux-polish.md`.
+ *
+ * Order: Codex CLI, Claude Code, Cursor CLI, OpenCode, Hermes, Kimi Code,
+ * Qoder, GitHub Copilot CLI, Pi, Kiro CLI. Do NOT reorder — this list is frozen.
+ */
+const COMMON_AGENT_PRIORITY: readonly string[] = [
+  'codex-acp',           // Codex (user: "Codex CLI")
+  'claude-acp',          // Claude Agent (user: "Claude Code")
+  'cursor',              // Cursor (user: "Cursor CLI")
+  'opencode',            // OpenCode
+  'hermes',              // not in live registry — forward-compat (by id or name)
+  'kimi',                // Kimi CLI (user: "Kimi Code")
+  'qoder',               // Qoder CLI (user: "Qoder")
+  'github-copilot-cli',  // GitHub Copilot (user: "GitHub Copilot CLI")
+  'pi-acp',              // pi ACP (user: "Pi")
+  'kiro',                // not in live registry — forward-compat (by id or name)
+];
+
+/**
+ * Resolve the priority index for an agent. Tries `agent.id` (registry id,
+ * stable) for an exact match first, then falls back to a case-insensitive
+ * `agent.name` contains check (forward-compat for agents not yet in the ACP
+ * CDN registry, e.g. Hermes/Kiro). Returns `-1` when no key matches.
+ */
+function findPriorityIndex(agent: AgentPickerItem): number {
+  const lowerName = agent.name.toLowerCase();
+  for (let i = 0; i < COMMON_AGENT_PRIORITY.length; i++) {
+    const key = COMMON_AGENT_PRIORITY[i]!;
+    const lowerKey = key.toLowerCase();
+    if (agent.id === key || lowerName.includes(lowerKey)) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+/**
+ * Partition agents into `common` (matching {@link COMMON_AGENT_PRIORITY} by
+ * id first then name, sorted by priority index) and `rest` (remaining agents
+ * in stable registry order — the input array order). V1.110 does NOT sort
+ * `rest` by `lastUpdated`; residual R-V110P2-001 covers that deferral.
+ */
+function partitionAgentsByPriority(agents: AgentPickerItem[]): {
+  common: AgentPickerItem[];
+  rest: AgentPickerItem[];
+} {
+  const rest: AgentPickerItem[] = [];
+  const byPriority = new Map<number, AgentPickerItem[]>();
+  for (const agent of agents) {
+    const priorityIndex = findPriorityIndex(agent);
+    if (priorityIndex === -1) {
+      rest.push(agent);
+    } else {
+      const bucket = byPriority.get(priorityIndex);
+      if (bucket) {
+        bucket.push(agent);
+      } else {
+        byPriority.set(priorityIndex, [agent]);
+      }
+    }
+  }
+  const common: AgentPickerItem[] = [];
+  for (let i = 0; i < COMMON_AGENT_PRIORITY.length; i++) {
+    const bucket = byPriority.get(i);
+    if (bucket) common.push(...bucket);
+  }
+  return { common, rest };
+}
+
+/**
  * Presentational AgentPicker: loading / ready grid / empty / error + custom launch.
  */
 export function AgentPicker({
@@ -102,6 +182,16 @@ export function AgentPicker({
   density = 'default',
 }: AgentPickerProps) {
   const compact = density === 'compact';
+  const [showRest, setShowRest] = useState(false);
+  const { common: commonAgents, rest: restAgents } = useMemo(
+    () => partitionAgentsByPriority(agents),
+    [agents],
+  );
+  const gridClassName = cn(
+    'grid grid-cols-1',
+    !compact && 'sm:grid-cols-2',
+    compact ? 'gap-2' : 'gap-3',
+  );
   const customLaunchVisible =
     showCustomLaunch ??
     (status === 'empty' ||
@@ -175,25 +265,50 @@ export function AgentPicker({
         ) : null}
 
         {status === 'ready' && agents.length > 0 ? (
-          <ul
-            className={cn(
-              'grid grid-cols-1',
-              !compact && 'sm:grid-cols-2',
-              compact ? 'gap-2' : 'gap-3',
-            )}
-            data-testid="agent-picker-grid"
-          >
-            {agents.map((agent) => (
-              <li key={agent.id}>
-                <AgentCard
-                  agent={agent}
-                  selected={selectedId === agent.id}
-                  onSelect={stableOnSelect}
-                  compact={compact}
-                />
-              </li>
-            ))}
-          </ul>
+          <>
+            <ul className={gridClassName} data-testid="agent-picker-grid">
+              {commonAgents.map((agent) => (
+                <li key={agent.id}>
+                  <AgentCard
+                    agent={agent}
+                    selected={selectedId === agent.id}
+                    onSelect={stableOnSelect}
+                    compact={compact}
+                  />
+                </li>
+              ))}
+            </ul>
+            {restAgents.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => setShowRest((expanded) => !expanded)}
+                aria-expanded={showRest}
+                aria-controls="agent-picker-rest"
+                data-testid="agent-picker-more"
+                className="self-start rounded-control text-label-14 font-medium text-blue-700 transition-colors duration-state ease-standard hover:text-blue-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700"
+              >
+                {showRest ? 'Fewer agents' : 'More agents'}
+              </button>
+            ) : null}
+            {restAgents.length > 0 && showRest ? (
+              <ul
+                id="agent-picker-rest"
+                className={gridClassName}
+                data-testid="agent-picker-grid-rest"
+              >
+                {restAgents.map((agent) => (
+                  <li key={agent.id}>
+                    <AgentCard
+                      agent={agent}
+                      selected={selectedId === agent.id}
+                      onSelect={stableOnSelect}
+                      compact={compact}
+                    />
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+          </>
         ) : null}
 
         {customLaunchVisible && onCustomLaunchChange ? (
@@ -419,7 +534,7 @@ function CustomLaunchField({
         <Terminal className="h-4 w-4 text-gray-700" aria-hidden />
         Use custom launch command
       </Label>
-      <div className="flex flex-wrap gap-2">
+      <div className="flex gap-2">
         <Input
           id="agent-picker-custom-launch"
           value={value}
@@ -431,7 +546,6 @@ function CustomLaunchField({
           <Button
             type="button"
             variant="secondary"
-            size="small"
             onClick={onVerify}
             disabled={!canVerify}
             data-testid="agent-picker-verify"

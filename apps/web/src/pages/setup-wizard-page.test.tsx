@@ -53,7 +53,7 @@ function useWizardScanHandlers() {
         agents: [
           {
             name: 'codex',
-            registry_agent_id: 'openai/codex',
+            registry_agent_id: 'codex-acp',
             launch_command: 'codex',
             installed: true,
             version: '1.0.0',
@@ -362,15 +362,26 @@ describe('SetupWizardPage', () => {
   });
 
   it('scrolls long agent lists inside the portrait wizard card', async () => {
+    // Use common priority ids so cards render in the common grid (visible
+    // without expanding More). Two extra non-common agents exercise the rest
+    // partition behind the More toggle.
+    const commonIds = [
+      'codex-acp', 'claude-acp', 'cursor', 'opencode', 'hermes',
+      'kimi', 'qoder', 'github-copilot-cli', 'pi-acp', 'kiro',
+    ];
     useHandlers(
       http.post('/v1/daemon/agent-host/scan', () =>
         HttpResponse.json({
-          agents: Array.from({ length: 12 }, (_, i) => ({
-            name: `agent-${i}`,
-            registry_agent_id: `agent-${i}`,
-            installed: true,
-            version: '1.0.0',
-          })),
+          agents: [
+            ...commonIds.map((id, i) => ({
+              name: `agent-${i}`,
+              registry_agent_id: id,
+              installed: true,
+              version: '1.0.0',
+            })),
+            { name: 'extra-a', registry_agent_id: 'extra-a', installed: true, version: '1.0.0' },
+            { name: 'extra-b', registry_agent_id: 'extra-b', installed: true, version: '1.0.0' },
+          ],
         }),
       ),
     );

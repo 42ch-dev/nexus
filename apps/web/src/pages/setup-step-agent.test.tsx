@@ -70,6 +70,15 @@ function renderHarness(
   );
 }
 
+/**
+ * Expand the "More agents" toggle so non-common agent cards become visible.
+ * V1.110 partition: common agents render immediately; rest are behind More.
+ */
+async function expandRestAgents(user: ReturnType<typeof userEvent.setup>) {
+  const moreBtn = await waitFor(() => screen.getByTestId('agent-picker-more'));
+  await user.click(moreBtn);
+}
+
 describe('mapScanEntriesToPickerItems / URL table', () => {
   it('maps live registry ids (claude-acp / codex-acp / gemini) to outbound URLs', () => {
     const items = mapScanEntriesToPickerItems([
@@ -134,6 +143,7 @@ describe('mapScanEntriesToPickerItems / URL table', () => {
 
 describe('SetupStepAgent', () => {
   it('renders the agent scan list via AgentPicker', async () => {
+    const user = userEvent.setup();
     useHandlers(
       http.post('/v1/daemon/agent-host/scan', () =>
         HttpResponse.json({
@@ -147,6 +157,8 @@ describe('SetupStepAgent', () => {
 
     renderHarness(makeState());
 
+    // Both agents are non-common — expand More to reveal the rest partition.
+    await expandRestAgents(user);
     await waitFor(() => expect(screen.getByText('nexus-mcp-agent')).toBeInTheDocument());
     expect(screen.getByText('custom-agent')).toBeInTheDocument();
     expect(screen.getByText('Version 1.0.0')).toBeInTheDocument();
@@ -234,6 +246,8 @@ describe('SetupStepAgent', () => {
       { client: makeClient(), initialRouterEntries: ['/setup'] },
     );
 
+    // 'missing-agent' is non-common — expand More to reveal it.
+    await expandRestAgents(user);
     await waitFor(() => expect(screen.getByText('missing-agent')).toBeInTheDocument());
     const card = screen.getByTestId('agent-card-missing-agent');
     expect(card.tagName).toBe('DIV');
@@ -247,6 +261,7 @@ describe('SetupStepAgent', () => {
   });
 
   it('keeps Continue disabled when only not-installed agents are present (B4)', async () => {
+    const user = userEvent.setup();
     useHandlers(
       http.post('/v1/daemon/agent-host/scan', () =>
         HttpResponse.json({
@@ -257,6 +272,8 @@ describe('SetupStepAgent', () => {
 
     renderHarness(makeState());
 
+    // 'missing-only' is non-common — expand More to verify it rendered.
+    await expandRestAgents(user);
     await waitFor(() => expect(screen.getByText('missing-only')).toBeInTheDocument());
     expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
   });
@@ -320,6 +337,7 @@ describe('SetupStepAgent', () => {
   });
 
   it('shows Install link for known registry ids and hides links when URLs missing', async () => {
+    const user = userEvent.setup();
     useHandlers(
       http.post('/v1/daemon/agent-host/scan', () =>
         HttpResponse.json({
@@ -343,6 +361,8 @@ describe('SetupStepAgent', () => {
       'https://github.com/openai/codex',
     );
     expect(screen.queryByRole('link', { name: /Docs/i })).not.toBeInTheDocument();
+    // 'mystery-agent' is non-common — expand More to verify no links render.
+    await expandRestAgents(user);
     expect(screen.getByTestId('agent-card-mystery-agent').querySelector('a')).toBeNull();
   });
 
@@ -366,6 +386,8 @@ describe('SetupStepAgent', () => {
 
     renderHarness(makeState());
 
+    // 'my-agent' is non-common — expand More so its card is visible.
+    await expandRestAgents(user);
     await waitFor(() => expect(screen.getByText('my-agent')).toBeInTheDocument());
     // Auto-select enables Continue via the installed agent.
     await waitFor(() =>
