@@ -269,14 +269,144 @@
         "wire_contracts_changed": false,
         "tier": "Must"
       }
+    },
+    {
+      "id": "2026-07-12-v1.111-canvas-command-palette",
+      "title": "P0 — Shared Canvas Command Palette (Cmd+K)",
+      "file": "plans/2026-07-12-v1.111-canvas-command-palette.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@frontend-dev",
+        "@architect"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.111",
+        "canvas",
+        "command-palette",
+        "discoverability",
+        "must"
+      ],
+      "created_at": "2026-07-12",
+      "updated_at": "2026-07-12",
+      "notes": "Greenfield command palette; action registry; keyboard nav; a11y",
+      "metadata": {
+        "iteration_refs": [
+          "V1.111"
+        ],
+        "spec_integration_branch": "iteration/v1.111",
+        "merge_target": "iteration/v1.111",
+        "primary_spec": ".mstar/iterations/v1.111/specs/canvas-command-palette.md",
+        "wire_contracts_changed": false,
+        "tier": "Must"
+      }
+    },
+    {
+      "id": "2026-07-12-v1.111-sidebar-canvas-ia",
+      "title": "P1 — Sidebar Canvas IA",
+      "file": "plans/2026-07-12-v1.111-sidebar-canvas-ia.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@frontend-dev",
+        "@architect"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.111",
+        "sidebar",
+        "canvas",
+        "ia",
+        "navigation",
+        "must"
+      ],
+      "created_at": "2026-07-12",
+      "updated_at": "2026-07-12",
+      "notes": "Nest canvas surfaces under Work context; preserve V1.94 responsive rules",
+      "metadata": {
+        "iteration_refs": [
+          "V1.111"
+        ],
+        "spec_integration_branch": "iteration/v1.111",
+        "merge_target": "iteration/v1.111",
+        "primary_spec": ".mstar/iterations/v1.111/specs/sidebar-canvas-ia.md",
+        "wire_contracts_changed": false,
+        "tier": "Must"
+      }
+    },
+    {
+      "id": "2026-07-12-v1.111-design-studio-canvas-gallery",
+      "title": "P2 — Design Studio Canvas Surface Gallery",
+      "file": "plans/2026-07-12-v1.111-design-studio-canvas-gallery.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@frontend-dev",
+        "@architect"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.111",
+        "design-studio",
+        "canvas",
+        "studio-first",
+        "must"
+      ],
+      "created_at": "2026-07-12",
+      "updated_at": "2026-07-12",
+      "notes": "Canvas surface gallery in daemon-independent Studio; static chrome; no RF dep",
+      "metadata": {
+        "iteration_refs": [
+          "V1.111"
+        ],
+        "spec_integration_branch": "iteration/v1.111",
+        "merge_target": "iteration/v1.111",
+        "primary_spec": ".mstar/iterations/v1.111/specs/design-studio-canvas-gallery.md",
+        "wire_contracts_changed": false,
+        "tier": "Must"
+      }
+    },
+    {
+      "id": "2026-07-12-v1.111-frontend-consolidation-sweep",
+      "title": "P3 — Frontend Consolidation & UI Polish Sweep",
+      "file": "plans/2026-07-12-v1.111-frontend-consolidation-sweep.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@frontend-dev",
+        "@architect"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.111",
+        "frontend",
+        "consolidation",
+        "residuals",
+        "ui-polish",
+        "stretch"
+      ],
+      "created_at": "2026-07-12",
+      "updated_at": "2026-07-12",
+      "notes": "Close post-V1.106..V1.110 frontend residual cluster + UX aesthetics pass; Stretch — may defer to roadmap-next if scope overflows",
+      "metadata": {
+        "iteration_refs": [
+          "V1.111"
+        ],
+        "spec_integration_branch": "iteration/v1.111",
+        "merge_target": "iteration/v1.111",
+        "primary_spec": ".mstar/iterations/v1.111/specs/frontend-consolidation-sweep.md",
+        "wire_contracts_changed": false,
+        "tier": "Stretch"
+      }
     }
   ],
   "metadata": {
     "integration_branch_retired": true,
     "iteration_base_branch": "main",
     "last_integration_branch": "iteration/v1.110",
-    "latest_active_compass": null,
-    "latest_active_iteration": null,
+    "latest_active_compass": "v1.111-delivery-compass.md",
+    "latest_active_iteration": "V1.111",
     "latest_ship": {
       "iteration": "V1.110",
       "compass": "v1.110-delivery-compass.md",
@@ -287,7 +417,7 @@
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "pre_iteration_hotfix": null,
-    "spec_integration_branch": "iteration/v1.109",
+    "spec_integration_branch": "iteration/v1.111",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {
