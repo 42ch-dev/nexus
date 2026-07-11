@@ -803,6 +803,28 @@ fn apply_go_nogo_branches(
     matched
 }
 
+/// Whether a conditional rule matches the same `(to, when)` pair as a create request.
+fn transition_rule_matches(
+    rule: &serde_yaml::Value,
+    target: &str,
+    condition: Option<&str>,
+) -> bool {
+    let to_match = rule
+        .get("to")
+        .and_then(serde_yaml::Value::as_str)
+        .is_some_and(|v| v == target);
+    if !to_match {
+        return false;
+    }
+    match condition {
+        Some(cond) => rule
+            .get("when")
+            .and_then(serde_yaml::Value::as_str)
+            .is_some_and(|v| v == cond),
+        None => rule.get("when").is_none(),
+    }
+}
+
 /// Create a new outgoing transition on a `next` YAML value.
 ///
 /// - If `next` is absent, sets it to a scalar `new_target`.
@@ -858,6 +880,18 @@ fn apply_transition_create(
                 req.source_state_id
             ),
         })?;
+
+    if rules.iter().any(|rule| {
+        transition_rule_matches(rule, new_target, req.condition.as_deref())
+    }) {
+        return Err(NexusApiError::BadRequest {
+            code: "strategy_transition_duplicate".to_string(),
+            message: format!(
+                "state '{}' already has a transition to '{}' with the same condition",
+                req.source_state_id, new_target
+            ),
+        });
+    }
 
     let mut new_rule = serde_yaml::Mapping::new();
     new_rule.insert(
