@@ -18,6 +18,7 @@ import {
   useWorldKbGraph,
   isWorldKbConflictError,
 } from '@/lib/canvas/use-world-kb-data';
+import { useRegisterCommand } from '@/lib/canvas/command-registry';
 
 import { buildRelationshipRemoveRequest } from './relationship-inspector-logic';
 import { worldKbNodeTypes } from './entity-node';
@@ -64,6 +65,19 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
   // active-tab signal is lifted from the alt-view via `onActiveTabChange`.
   const [altTab, setAltTab] = useState<'entities' | 'relationships' | 'suggested'>('entities');
   const includeSuggested = showList && altTab === 'suggested';
+
+  // V1.111 P0 T4 — register the World KB graph↔list toggle in the palette.
+  // Functional `setShowList(v => !v)` so the mount-captured handler reads
+  // current state. No node-create command: the World KB canvas exposes no
+  // clean canvas-level creation button (relationships are created via graph
+  // edge-drag or alt-view row action, both of which require entity context).
+  useRegisterCommand({
+    id: 'world-kb.toggle-view',
+    label: 'Toggle World KB View',
+    group: 'World KB',
+    keywords: ['graph', 'list', 'alt view', 'switch'],
+    handler: () => setShowList((v) => !v),
+  });
 
   const graph = useWorldKbGraph(worldId, includeSuggested);
   const candidates = useWorldKbCandidates(worldId);

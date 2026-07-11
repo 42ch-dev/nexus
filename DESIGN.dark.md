@@ -42,6 +42,9 @@ colors:
   gray-alpha-500: "rgba(255,255,255,0.22)"
   gray-alpha-600: "rgba(255,255,255,0.30)"
 
+  # ── Overlay scrim (elevation fill — see DESIGN.md §Elevation) ──
+  scrim: "rgba(0,0,0,0.60)"
+
   # ── Primary interactive scale (dark; maps to brand-cyan steps) ──
   blue-700: "#25D1E0"
   blue-800: "#3DD9E6"

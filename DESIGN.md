@@ -42,6 +42,11 @@ colors:
   gray-alpha-500: "rgba(0,0,0,0.18)"
   gray-alpha-600: "rgba(0,0,0,0.24)"
 
+  # ── Overlay scrim (elevation fill for modal/dialog/command-palette backdrops) ──
+  # V1.111: dedicated scrim token — bg-gray-1000/N was theme-broken (gray-1000
+  # flips to near-white in dark → light wash instead of a dimming scrim).
+  scrim: "rgba(0,0,0,0.40)"
+
   # ── Primary interactive scale (light; maps to brand-deep-blue steps) ──
   # blue-* keys preserved as web aliases for backward compatibility.
   blue-700: "#1E3A5F"
@@ -864,6 +869,7 @@ Hierarchy comes from borders and tonal surfaces first. Shadows are subtle and on
 | `shadow-card` | `0 1px 2px rgba(0,0,0,0.04)` | `0 1px 2px rgba(0,0,0,0.40)` | Raised dashboard cards |
 | `shadow-popover` | `0 1px 1px rgba(0,0,0,0.03), 0 8px 24px -12px rgba(0,0,0,0.18)` | `0 1px 1px rgba(0,0,0,0.60), 0 12px 28px -12px rgba(0,0,0,0.70)` | Menus, tooltips, command panels |
 | `shadow-modal` | `0 1px 1px rgba(0,0,0,0.04), 0 24px 48px -24px rgba(0,0,0,0.30)` | `0 1px 1px rgba(0,0,0,0.70), 0 28px 56px -24px rgba(0,0,0,0.85)` | Dialogs and blocking overlays |
+| `scrim` | `rgba(0,0,0,0.40)` | `rgba(0,0,0,0.60)` | Backdrop fill behind modal/dialog/command-palette overlays (`bg-scrim`); dims the surface below. Dark value is stronger to separate the overlay from an already-low-luminance dark chrome. |
 
 ---
 
