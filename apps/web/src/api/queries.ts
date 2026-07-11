@@ -557,11 +557,29 @@ export function useScanAgents(request?: ScanRequest) {
  */
 export function useVerifyAgent() {
   const client = useNexusClient();
+  // R-V1108P1QC3-W002: cancel the in-flight probe on unmount so a stale scan
+  // result does not settle a mutation whose component tree is already gone.
+  const abortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
+  }, []);
+
   return useMutation({
     mutationFn: async (command: string): Promise<boolean> => {
+      const controller = new AbortController();
+      abortRef.current = controller;
+
       const trimmed = command.trim();
       if (!trimmed) return false;
       const res = await client.scanAgents({ filter: 'installed' });
+      // If the component unmounted while the scan was in flight, discard the
+      // result rather than settling a mutation on a gone tree.
+      if (controller.signal.aborted) {
+        throw new DOMException('useVerifyAgent aborted on unmount', 'AbortError');
+      }
       return res.agents.some(
         (a) => a.installed && launchCommandMatches(trimmed, a.launch_command),
       );

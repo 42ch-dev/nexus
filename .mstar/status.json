@@ -71,13 +71,13 @@
       "id": "2026-07-11-v1.109-canvas-scene-beat",
       "title": "P0 — Canvas Scene/Beat Expansion (C2)",
       "file": "plans/2026-07-11-v1.109-canvas-scene-beat.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@frontend-dev",
         "@architect"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.109",
         "canvas",
@@ -88,7 +88,7 @@
       ],
       "created_at": "2026-07-11",
       "updated_at": "2026-07-11",
-      "notes": "Outline graph depth to Scene/Beat nodes",
+      "notes": "Done — SDD T1-T4 + QC tri Approve with residuals + QA Pass; 4 open residuals (1 Important defer P2, 1 re-scope, 2 nit); wire: false",
       "metadata": {
         "iteration_refs": [
           "V1.109"
@@ -105,13 +105,13 @@
       "id": "2026-07-11-v1.109-strategy-edge-rewiring",
       "title": "P1 — Strategy Spatial Edge Rewiring",
       "file": "plans/2026-07-11-v1.109-strategy-edge-rewiring.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@frontend-dev",
         "@architect"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.109",
         "canvas",
@@ -121,7 +121,7 @@
       ],
       "created_at": "2026-07-11",
       "updated_at": "2026-07-11",
-      "notes": "Strategy spatial onConnect edge creation/rewiring",
+      "notes": "Done — SDD T0-T4 + fix wave + QC tri Approve with residuals + QA Pass; 2 open low residuals; wire: true (additive op)",
       "metadata": {
         "iteration_refs": [
           "V1.109"
@@ -130,7 +130,7 @@
         "merge_target": "iteration/v1.109",
         "working_branch": "plan/v1.109-p1-strategy-edge-rewiring",
         "primary_spec": ".mstar/iterations/v1.109/specs/strategy-edge-rewiring.md",
-        "wire_contracts_changed": false,
+        "wire_contracts_changed": true,
         "tier": "Must"
       }
     },
@@ -1262,9 +1262,12 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.108",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/sdd/2026-07-10-v1.108-ui-shell-ssot/review/qc1.md",
-        "note": "QC1 S-001. Studio fixture data drift risk; extract shared helper."
+        "lifecycle": "resolved",
+        "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
+        "note": "QC1 S-001. Studio fixture data drift risk; extract shared helper.",
+        "closed_at": "2026-07-11",
+        "closed_by": "V1.109 P2 T4",
+        "closure_note": "Extracted CREATOR_NAV/ORCHESTRATOR_NAV to apps/design-studio/src/fixtures/shell-nav-data.ts; both surfaces.tsx and settings-host-fixtures.tsx import from the single source."
       },
       {
         "id": "R-V1108P1QC1-S002",
@@ -1272,10 +1275,10 @@
         "severity": "suggestion",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "post-V1.108",
+        "target": "post-V1.109",
         "lifecycle": "open",
-        "tracking_link": ".mstar/sdd/2026-07-10-v1.108-ui-shell-ssot/review/qc1.md",
-        "note": "QC1 S-002. Import P0 presentational node chrome once extracted."
+        "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-scene-beat.md",
+        "note": "QC1 S-002. Re-scoped in P0 QC (R-V1109-P0-QC1-W001): Studio re-mirrors chrome as static markup because RF-coupled import boundary forbids RF deps. Deferred post-V1.109."
       },
       {
         "id": "R-V1108P1QC2-S001",
@@ -1284,9 +1287,12 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.108",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/sdd/2026-07-10-v1.108-ui-shell-ssot/review/qc2.md",
-        "note": "QC2 S-001. Spec-locked copy either way; distinguish in future."
+        "lifecycle": "resolved",
+        "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
+        "note": "QC2 S-001. Spec-locked copy either way; distinguish in future.",
+        "closed_at": "2026-07-11",
+        "closed_by": "V1.109 P2 T4",
+        "closure_note": "Added 'no-match' AgentVerifyStatus; AgentPicker shows 'No matching agent for this command.' (scan reached daemon, no agent matched) vs 'Could not reach this agent.' (transport failure). Both hosts map ok=false to no-match, catch to error."
       },
       {
         "id": "R-V1108P1QC3-W001",
@@ -1295,9 +1301,12 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.108",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/sdd/2026-07-10-v1.108-ui-shell-ssot/review/qc3.md",
-        "note": "QC3 W-001. Negligible at 2-6 cards; React.memo if grid grows."
+        "lifecycle": "resolved",
+        "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
+        "note": "QC3 W-001. Negligible at 2-6 cards; React.memo if grid grows.",
+        "closed_at": "2026-07-11",
+        "closed_by": "V1.109 P2 T4",
+        "closure_note": "Wrapped AgentCard in React.memo; stabilized onSelect via ref pattern in AgentPicker so verifyStatus changes no longer trigger card re-renders."
       },
       {
         "id": "R-V1108P1QC3-W002",
@@ -1306,9 +1315,12 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.108",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/sdd/2026-07-10-v1.108-ui-shell-ssot/review/qc3.md",
-        "note": "QC3 W-002. Local daemon scan <100ms; minimal risk."
+        "lifecycle": "resolved",
+        "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
+        "note": "QC3 W-002. Local daemon scan <100ms; minimal risk.",
+        "closed_at": "2026-07-11",
+        "closed_by": "V1.109 P2 T4",
+        "closure_note": "Added AbortController to useVerifyAgent with useEffect cleanup on unmount; stale scan results after unmount throw AbortError instead of settling."
       },
       {
         "id": "R-V1108P0QC3-W001",
@@ -1317,9 +1329,12 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.108",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/sdd/2026-07-10-v1.108-canvas-outline-spatial/review/qc3.md",
-        "note": "QC3 W-001. Acceptable at author-scale; derive from onNodesChange in future."
+        "lifecycle": "resolved",
+        "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
+        "note": "QC3 W-001. Acceptable at author-scale; derive from onNodesChange in future.",
+        "closed_at": "2026-07-11",
+        "closed_by": "V1.109 P2 T2 (FB-GS-001)",
+        "closure_note": "Selection sync now guards on selected entity id change only; pure position drag no longer triggers inspector rebind."
       },
       {
         "id": "R-V1108P0QC3-S002",
@@ -1328,9 +1343,12 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.108",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/sdd/2026-07-10-v1.108-canvas-outline-spatial/review/qc3.md",
-        "note": "QC3 S-002. Acceptable for P0 (deterministic layout); CSS visibility toggle when drag/auto-layout lands."
+        "lifecycle": "resolved",
+        "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
+        "note": "QC3 S-002. Acceptable for P0 (deterministic layout); CSS visibility toggle when drag/auto-layout lands.",
+        "closed_at": "2026-07-11",
+        "closed_by": "V1.109 P2 T1 (FB-GS-000)",
+        "closure_note": "use-canvas-viewport.ts hook preserves pan/zoom across graph↔list toggle; viewport restored on re-mount."
       },
       {
         "id": "R-V1108P0QC3-S003",
@@ -1339,9 +1357,12 @@
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.108",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/sdd/2026-07-10-v1.108-canvas-outline-spatial/review/qc3.md",
-        "note": "QC3 S-003. jsdom lacks ResizeObserver; E2E test needed in follow-up."
+        "lifecycle": "resolved",
+        "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
+        "note": "QC3 S-003. jsdom lacks ResizeObserver; E2E test needed in follow-up.",
+        "closed_at": "2026-07-11",
+        "closed_by": "V1.109 P2 T3 (FB-GS-002)",
+        "closure_note": "Real RF integration harness under canvas test utilities; ≥1 Outline orchestrator test uses real ReactFlow with ResizeObserver polyfill."
       },
       {
         "id": "R-V1108P0QC1-M001",
@@ -1349,10 +1370,10 @@
         "severity": "low",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "post-V1.108",
+        "target": "post-V1.109",
         "lifecycle": "open",
-        "tracking_link": ".mstar/sdd/2026-07-10-v1.108-canvas-outline-spatial/review/qc1.md",
-        "note": "QC1 M-001. Editing available in inspectors; sort controls deferred."
+        "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
+        "note": "QC1 M-001. Editing available in inspectors; sort controls deferred post-V1.109 (UX enhancement, not blocking)."
       },
       {
         "id": "R-V1108P0QC1-S001",
@@ -1388,6 +1409,76 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-10-v1.107-studio-ui-tune.md",
         "note": "Architecture doc gap; next iteration shell polish."
+      }
+    ],
+    "2026-07-11-v1.109-canvas-scene-beat": [
+      {
+        "id": "R-V1109-P0-QC3-I1",
+        "title": "Selection-sync useEffect fires on every node interaction (position drag), not just selection changes — inherited from V1.108",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "P2 FB-GS-001 (V1.109 same iteration)",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
+        "note": "Inherited R-V1108P0QC3-W001; extract makes fix file-disjoint; P0 does not worsen. QC source: QC3 I1"
+      },
+      {
+        "id": "R-V1109-P0-QC1-W001",
+        "title": "R-V1108P1QC1-S002 (Studio imports extracted chrome) not actually closed — Studio re-mirrors chrome as static markup (RF-coupled, import boundary forbids RF deps)",
+        "severity": "suggestion",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.109",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-scene-beat.md",
+        "note": "Re-scope: only R-V1108P0QC1-S001 (hook extract) is closed by P0. QC source: QC1 F-001"
+      },
+      {
+        "id": "R-V1109-P0-QC3-W001",
+        "title": "Fixture object literal identity causes projection re-memo; production safe (module constant), Design Studio/test consumers should stabilize refs",
+        "severity": "nit",
+        "decision": "accept",
+        "owner": "@frontend-dev",
+        "target": "n/a",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-scene-beat.md",
+        "note": "Production safe via EMPTY_SCENE_BEAT_FIXTURE. QC source: QC3 W1"
+      },
+      {
+        "id": "R-V1109-P0-QC3-W002",
+        "title": "beatParentSceneTitle uses Array.find() O(n) on fixture scenes every render; index when real wire data arrives",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "when scene/beat wire DTOs land",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-scene-beat.md",
+        "note": "Acceptable for small fixture arrays. QC source: QC3 W2"
+      }
+    ],
+    "2026-07-11-v1.109-strategy-edge-rewiring": [
+      {
+        "id": "R-V1109-P1-QC2-W001",
+        "title": "Server does not enforce self-loop guard for op:create (client guards exist; daemon accepts source==new_target)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.109",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-11-v1.109-strategy-edge-rewiring.md",
+        "note": "Client guards exist in state-machine.tsx + dialog. Outline.rs has server precedent. QC source: QC2 W-001"
+      },
+      {
+        "id": "R-V1109-P1-QC2-W002",
+        "title": "Create appends rule without dedup check; can produce duplicate (to, when) rules",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.109",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-11-v1.109-strategy-edge-rewiring.md",
+        "note": "Validation checks target existence but not rule uniqueness. QC source: QC2 W-002"
       }
     ]
   }

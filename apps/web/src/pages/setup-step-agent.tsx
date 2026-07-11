@@ -157,8 +157,11 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
     setVerifyStatus('loading');
     try {
       const ok = await verifyAgent.mutateAsync(command);
-      setVerifyStatus(ok ? 'success' : 'error');
+      // false = scan reached the daemon but no installed agent matched.
+      // R-V1108P1QC2-S001: distinguish transport failure from no-match.
+      setVerifyStatus(ok ? 'success' : 'no-match');
     } catch {
+      // Transport/unreachable — could not reach the daemon at all.
       setVerifyStatus('error');
     }
   }
