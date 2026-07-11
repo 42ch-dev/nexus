@@ -93,6 +93,31 @@ describe('useHotkey — mod+k (⌘K / Ctrl+K)', () => {
   });
 });
 
+describe('useHotkey — handler receives the KeyboardEvent (architect lock)', () => {
+  afterEach(() => {
+    document.body.innerHTML = '';
+  });
+
+  it('passes the matching KeyboardEvent to the handler', () => {
+    const handler = vi.fn();
+    renderHook(() => useHotkey('mod+k', handler));
+    const event = dispatchKey('k', { meta: true });
+    expect(handler).toHaveBeenCalledTimes(1);
+    // Architect lock item 3: `handler: (e: KeyboardEvent) => void`. The event
+    // is forwarded so a caller may inspect it; a `() => void` caller remains
+    // valid (a function ignoring its argument is assignable).
+    expect(handler).toHaveBeenCalledWith(event);
+    expect(handler.mock.calls[0][0]).toBeInstanceOf(KeyboardEvent);
+  });
+
+  it('accepts a `() => void` handler (ignores the event argument)', () => {
+    const handler = vi.fn();
+    renderHook(() => useHotkey('mod+k', () => handler()));
+    dispatchKey('k', { meta: true });
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('useHotkey — preventDefault', () => {
   afterEach(() => {
     document.body.innerHTML = '';
@@ -155,6 +180,18 @@ describe('useHotkey — conflict-avoidance (ignored targets)', () => {
   it('is ignored when a contenteditable host is focused', () => {
     const handler = vi.fn();
     const cleanup = focusElement('div', { contenteditable: 'true' });
+    renderHook(() => useHotkey('mod+k', handler));
+    dispatchKey('k', { meta: true });
+    expect(handler).not.toHaveBeenCalled();
+    cleanup();
+  });
+
+  it('is ignored when a focusable child inside a [contenteditable] host is focused', () => {
+    // The host itself is tested above; here a `<button>` (a focusable
+    // descendant) sits inside the contenteditable subtree. `closest()` ancestor
+    // matching must still suppress activation.
+    const handler = vi.fn();
+    const cleanup = focusInsideContainer('div', { contenteditable: 'true' }, 'button');
     renderHook(() => useHotkey('mod+k', handler));
     dispatchKey('k', { meta: true });
     expect(handler).not.toHaveBeenCalled();

@@ -40,13 +40,15 @@ export interface UseHotkeyOptions {
 
 /**
  * @param key  Descriptor — `'mod+<key>'` (⌘/Ctrl) or a bare `'<key>'`.
- * @param handler Invoked (with no arguments) when the shortcut fires. Held in a
- *                ref, so passing a fresh inline closure each render is safe.
+ * @param handler Invoked with the matching `KeyboardEvent` when the shortcut
+ *                fires. A caller may inspect the event (e.g. read `event.key`);
+ *                a caller that ignores it (`() => void`) remains valid. Held in
+ *                a ref, so passing a fresh inline closure each render is safe.
  * @param options Optional `{ preventDefault }` (default `true`).
  */
 export function useHotkey(
   key: string,
-  handler: () => void,
+  handler: (event: KeyboardEvent) => void,
   options?: UseHotkeyOptions,
 ): void {
   const preventDefault = options?.preventDefault ?? true;
@@ -67,7 +69,7 @@ export function useHotkey(
       if (event.key.toLowerCase() !== baseKey) return;
       if (shouldIgnoreTarget(document.activeElement)) return;
       if (preventDefault) event.preventDefault();
-      handlerRef.current();
+      handlerRef.current(event);
     }
 
     document.addEventListener('keydown', onKeyDown);
