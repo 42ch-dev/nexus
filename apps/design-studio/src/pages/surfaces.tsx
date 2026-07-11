@@ -611,28 +611,61 @@ export function SurfacesBannerPage() {
 export function SurfacesCanvasPage() {
   return (
     <section data-testid="surfaces-canvas">
-      <SurfaceHeading>Canvas — Shell + context menu chrome</SurfaceHeading>
+      <SurfaceHeading>Canvas — Three mirrored surfaces + shared chrome</SurfaceHeading>
       <p className="text-copy-14 text-gray-700 mb-6">
-        Presentational preview of the shared canvas surface chrome — dot-grid
-        background, zoom controls, minimap swatch, outline node kinds (Volume /
-        Chapter / Timeline Event / Scene / Beat), and right-click context menu
-        matrices. Node chrome mirrors the P0{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          outline-nodes.tsx
-        </code>{' '}
-        visual structure using the same{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          canvas-outline-*
-        </code>{' '}
-        and{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
-          canvas-node-*
-        </code>{' '}
-        tokens shared via{' '}
+        Presentational preview of the canvas surface chrome. All three App
+        canvas surfaces are mirrored as static markup using the same tokens
+        shared via{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @nexus/design-tokens
         </code>
-        . No{' '}
+        :{' '}
+        <strong className="font-medium text-gray-1000">Outline</strong> (Volume
+        / Chapter / Timeline Event / Scene / Beat node kinds, mirroring{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          outline-nodes.tsx
+        </code>{' '}
+        +{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          scene-beat-nodes.tsx
+        </code>
+        ),{' '}
+        <strong className="font-medium text-gray-1000">Strategy</strong>{' '}
+        (state-machine states, join, terminal, labeled transitions, inspector,
+        and validation panel, mirroring{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          strategy-nodes.tsx
+        </code>{' '}
+        +{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          strategy-canvas/*
+        </code>
+        ), and{' '}
+        <strong className="font-medium text-gray-1000">World KB</strong>{' '}
+        (entity cards, source-anchor provenance, typed relationship edges, and
+        relationship inspector, mirroring{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          world-kb/*
+        </code>
+        ). The shared shell chrome — dot-grid background, zoom controls,
+        minimap swatch — and right-click context menu matrices are common to all
+        three, painted from{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          canvas-outline-*
+        </code>
+        ,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          canvas-node-*
+        </code>
+        ,{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          canvas-strategy-accent
+        </code>
+        , and{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          canvas-worldkb-*
+        </code>{' '}
+        tokens. No{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           @xyflow/react
         </code>

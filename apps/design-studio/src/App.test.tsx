@@ -1180,7 +1180,7 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
   it('renders the Canvas section heading', () => {
     expect(
       screen.getByRole('heading', {
-        name: 'Canvas — Shell + context menu chrome',
+        name: 'Canvas — Three mirrored surfaces + shared chrome',
       }),
     ).toBeInTheDocument();
   });
