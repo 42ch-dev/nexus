@@ -268,7 +268,10 @@ describe('useStrategyCanvas draft transition commit (FB-SE-002)', () => {
 
     // 409 keeps the draft and routes to the existing conflict modal handler.
     await waitFor(() => expect(result.current.conflict).not.toBeNull());
-    expect(result.current.conflict).toEqual({ currentRevision: 1, section: 'transition' });
+    expect(result.current.conflict).toMatchObject({ currentRevision: 1, section: 'transition' });
+    // A retry command is stored so "Reapply my edit" replays the transition
+    // command, not the state-edit save trigger (QC1 W-001).
+    expect(typeof result.current.conflict?.retry).toBe('function');
     // Draft is preserved so the author can reconcile.
     expect(result.current.selectedDraftEdge).not.toBeNull();
   });
@@ -358,7 +361,63 @@ describe('useStrategyCanvas keyboard create (FB-SE-004)', () => {
     });
 
     await waitFor(() => expect(result.current.conflict).not.toBeNull());
-    expect(result.current.conflict).toEqual({ currentRevision: 1, section: 'transition' });
+    expect(result.current.conflict).toMatchObject({ currentRevision: 1, section: 'transition' });
+  });
+
+  it('reapplies the original transition command on reapply, not the state-edit save trigger (QC1 W-001)', async () => {
+    // First call rejects with 409; second call succeeds so we can observe
+    // the retry re-issuing the transition create.
+    const conflictError = new NexusClientError(
+      409,
+      'strategy_conflict',
+      'Strategy revision is stale',
+      { current_revision: 1 },
+    );
+    const patch = vi
+      .fn()
+      .mockRejectedValueOnce(conflictError)
+      .mockResolvedValueOnce({ new_revision: 2 });
+    const client = makeClient(patch);
+    const { result } = renderHook(() => useStrategyCanvas('preset-1'), {
+      wrapper: makeCommitWrapper(client),
+    });
+
+    const createArgs = {
+      sourceStateId: 's1',
+      targetStateId: 's2',
+      transitionKind: 'branch' as const,
+      condition: 'word_count > 1000',
+    };
+
+    await act(async () => {
+      result.current.commitKeyboardCreate(createArgs);
+    });
+
+    await waitFor(() => expect(result.current.conflict).not.toBeNull());
+    expect(patch).toHaveBeenCalledTimes(1);
+
+    // Reapply should replay the original transition command, not increment
+    // the section save trigger (which would drive a state-edit save).
+    await act(async () => {
+      result.current.handleReapply();
+    });
+
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(2));
+
+    // The second patch call is the retried transition create — same args.
+    const retryRequest = patch.mock.calls[1][1] as Record<string, unknown>;
+    expect(retryRequest).toMatchObject({
+      strategy_id: 'preset-1',
+      source_state_id: 's1',
+      new_target: 's2',
+      op: 'create',
+      transition_kind: 'branch',
+      condition: 'word_count > 1000',
+    });
+
+    // The transition save trigger must NOT have been incremented (that would
+    // drive the legacy state-edit EdgeInspector save, not the transition create).
+    expect(result.current.saveTriggers.transition).toBe(0);
   });
 });
 

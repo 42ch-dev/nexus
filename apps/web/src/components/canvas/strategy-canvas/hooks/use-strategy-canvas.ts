@@ -39,6 +39,21 @@ import {
   type Section,
 } from '../state-machine';
 
+/**
+ * Conflict state shared across the canvas write boundary.
+ *
+ * `retry` is present when the conflict originated from a transition
+ * create/reconnect command (not a state-edit save). In that case
+ * {@link useStrategyCanvas.handleReapply} replays the original transition
+ * command instead of incrementing the section save trigger, which would
+ * wrongly replay a state-edit save (QC1 W-001).
+ */
+export interface ConflictInfo {
+  currentRevision: number;
+  section: Section;
+  retry?: () => void;
+}
+
 export function useStrategyCanvas(presetId: string) {
   const graphQuery = usePresetGraph(presetId);
   const activeSession = useActiveSession(presetId);
@@ -51,7 +66,7 @@ export function useStrategyCanvas(presetId: string) {
   const [form, setForm] = useState<EditForm>({ label: '', description: '', nextTarget: '', promptBody: '' });
   const [saveStatuses, setSaveStatuses] = useState<Partial<Record<Section, SaveStatus>>>({});
   const [activeSection, setActiveSection] = useState<Section>('state');
-  const [conflict, setConflict] = useState<{ currentRevision: number; section: Section } | null>(null);
+  const [conflict, setConflict] = useState<ConflictInfo | null>(null);
   const [saveTriggers, setSaveTriggers] = useState<Record<Section, number>>({
     state: 0,
     transition: 0,
@@ -135,17 +150,24 @@ export function useStrategyCanvas(presetId: string) {
     return [...list].sort((a, b) => b.updated_at.localeCompare(a.updated_at))[0]?.schedule_id;
   }, [activeSession, schedules.data]);
 
-  function handleConflict(currentRevision: number, section: Section) {
-    setConflict({ currentRevision, section });
+  function handleConflict(currentRevision: number, section: Section, retry?: () => void) {
+    setConflict({ currentRevision, section, retry });
     void graphQuery.refetch();
   }
 
   function handleReapply() {
     if (!conflict) return;
-    const section = conflict.section;
+    const { section, retry } = conflict;
     setConflict(null);
     void graphQuery.refetch().then(() => {
-      setSaveTriggers((prev) => ({ ...prev, [section]: prev[section] + 1 }));
+      // Transition create/reconnect conflicts replay the original transition
+      // command; state-edit conflicts replay the section save trigger
+      // (QC1 W-001).
+      if (retry) {
+        retry();
+      } else {
+        setSaveTriggers((prev) => ({ ...prev, [section]: prev[section] + 1 }));
+      }
     });
   }
 
@@ -205,7 +227,7 @@ export function useStrategyCanvas(presetId: string) {
    * reference here even though it is defined textually later in the hook.
    */
   const commitDraftMutation = useMutation({
-    mutationFn: async (args: { condition?: string; label?: string }) => {
+    mutationFn: async (args: { condition?: string }) => {
       if (!selectedDraftEdge) throw new Error('No draft transition to commit');
       return nexusClient.strategyPatchTransition(presetId, {
         strategy_id: presetId,
@@ -217,24 +239,26 @@ export function useStrategyCanvas(presetId: string) {
         transition_kind: 'next',
       });
     },
-    onSuccess: (res, args) => {
+    onSuccess: (res) => {
       workingRevisionRef.current = Number(res.new_revision);
       setEdges((eds) => eds.filter((e) => !(e.data as { isDraft?: boolean } | undefined)?.isDraft));
       toast({
         variant: 'success',
         title: 'Transition created',
-        description: args.label || `${selectedDraftEdge?.source} → ${selectedDraftEdge?.target}`,
+        description: `${selectedDraftEdge?.source} → ${selectedDraftEdge?.target}`,
       });
       void qc.invalidateQueries({ queryKey: queryKeys.presets.detail(presetId) });
     },
-    onError: (error) => {
+    onError: (error, args) => {
       if (isStrategyConflictError(error)) {
         const currentRevision =
           typeof error.details === 'object' && error.details !== null
             ? (error.details as { current_revision?: number }).current_revision ?? 0
             : 0;
         // Keep the draft so the author can reconcile; refetch canonical.
-        handleConflict(currentRevision, 'transition');
+        // Pass a retry that replays the original transition command so
+        // "Reapply my edit" re-issues the create, not a state-edit save (QC1 W-001).
+        handleConflict(currentRevision, 'transition', () => commitDraftMutation.mutate(args));
       } else {
         const message = error instanceof Error ? error.message : 'Failed to create transition';
         toast({ variant: 'error', title: message });
@@ -265,7 +289,6 @@ export function useStrategyCanvas(presetId: string) {
       targetStateId: string;
       transitionKind?: 'next' | 'branch' | 'default';
       condition?: string;
-      label?: string;
     }) => {
       return nexusClient.strategyPatchTransition(presetId, {
         strategy_id: presetId,
@@ -282,17 +305,20 @@ export function useStrategyCanvas(presetId: string) {
       toast({
         variant: 'success',
         title: 'Transition created',
-        description: args.label || `${args.sourceStateId} → ${args.targetStateId}`,
+        description: `${args.sourceStateId} → ${args.targetStateId}`,
       });
       void qc.invalidateQueries({ queryKey: queryKeys.presets.detail(presetId) });
     },
-    onError: (error) => {
+    onError: (error, args) => {
       if (isStrategyConflictError(error)) {
         const currentRevision =
           typeof error.details === 'object' && error.details !== null
             ? (error.details as { current_revision?: number }).current_revision ?? 0
             : 0;
-        handleConflict(currentRevision, 'transition');
+        // Replay the original transition command on reapply (QC1 W-001).
+        handleConflict(currentRevision, 'transition', () =>
+          commitKeyboardCreateMutation.mutate(args),
+        );
       } else {
         const message = error instanceof Error ? error.message : 'Failed to create transition';
         toast({ variant: 'error', title: message });
@@ -349,7 +375,10 @@ export function useStrategyCanvas(presetId: string) {
           typeof error.details === 'object' && error.details !== null
             ? (error.details as { current_revision?: number }).current_revision ?? 0
             : 0;
-        handleConflict(currentRevision, 'transition');
+        // Replay the original reconnect command on reapply (QC1 W-001).
+        handleConflict(currentRevision, 'transition', () =>
+          reconnectTransitionMutation.mutate(args),
+        );
       } else {
         const message = error instanceof Error ? error.message : 'Failed to reconnect transition';
         toast({ variant: 'error', title: message });

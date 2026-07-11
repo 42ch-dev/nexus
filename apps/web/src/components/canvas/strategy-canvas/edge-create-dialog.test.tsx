@@ -66,7 +66,7 @@ describe('EdgeCreateDialog (FB-SE-004)', () => {
     expect(targetValues).toContain('done');
   });
 
-  it('commits with source, target, kind, condition, and label', () => {
+  it('commits with source, target, kind, and condition', () => {
     const onCommit = vi.fn();
     renderDialog({ onCommit });
 
@@ -74,7 +74,6 @@ describe('EdgeCreateDialog (FB-SE-004)', () => {
     fireEvent.change(screen.getByLabelText('Choose target'), { target: { value: 'revise' } });
     fireEvent.change(screen.getByLabelText('Choose edge kind'), { target: { value: 'branch' } });
     fireEvent.change(screen.getByLabelText('Condition'), { target: { value: 'word_count > 1000' } });
-    fireEvent.change(screen.getByLabelText('Label'), { target: { value: 'Branch on length' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create Transition' }));
 
     expect(onCommit).toHaveBeenCalledTimes(1);
@@ -83,7 +82,6 @@ describe('EdgeCreateDialog (FB-SE-004)', () => {
       targetStateId: 'revise',
       transitionKind: 'branch',
       condition: 'word_count > 1000',
-      label: 'Branch on length',
     });
   });
 

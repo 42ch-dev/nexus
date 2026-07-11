@@ -10,10 +10,11 @@ import type { Node } from '@xyflow/react';
 import { Info, Pencil, X } from 'lucide-react';
 
 import { ConflictModal } from '@/components/canvas/conflict-modal';
+import { ConflictModalBase } from '@/components/canvas/conflict-modal-base';
 import type { StrategyNodeData } from '@/lib/canvas/strategy-graph';
 import type { PresetState } from '@/lib/canvas/preset-yaml';
 import { getChangedFields, getConflictDraft, originalFormOf, templateRefOf, type EditForm } from './state-machine';
-import type { Section } from './state-machine';
+import type { ConflictInfo } from './hooks/use-strategy-canvas';
 
 interface InspectorPanelProps {
   selected: Node | null;
@@ -117,7 +118,7 @@ function ReadOnlyDetails({ d, selectedState }: { d: StrategyNodeData; selectedSt
 }
 
 interface StrategyConflictModalProps {
-  conflict: { currentRevision: number; section: Section } | null;
+  conflict: ConflictInfo | null;
   form: EditForm;
   canonicalState: PresetState | undefined;
   promptTemplateRef: string | undefined;
@@ -135,7 +136,29 @@ export function StrategyConflictModal({
   onReapply,
   onDismiss,
 }: StrategyConflictModalProps) {
-  if (!conflict || !canonicalState) return null;
+  if (!conflict) return null;
+
+  // Transition create/reconnect conflict — the state-edit field diff
+  // (label/description/nextTarget/promptBody) does not apply, and there may be
+  // no selected state to diff against. Render a transition-specific modal so
+  // the conflict is surfaced even without a selected node (QC1 W-001).
+  if (conflict.retry) {
+    return (
+      <ConflictModalBase
+        open
+        title="This strategy changed while you were editing a transition."
+        currentRevision={conflict.currentRevision}
+        serverChanges={[]}
+        localChanges={[]}
+        reviewRows={[]}
+        onUseCurrent={onUseCurrent}
+        onReapply={onReapply}
+        onDismiss={onDismiss}
+      />
+    );
+  }
+
+  if (!canonicalState) return null;
   return (
     <ConflictModal
       open

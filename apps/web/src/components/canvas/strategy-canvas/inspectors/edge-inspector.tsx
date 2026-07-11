@@ -168,11 +168,15 @@ export function EdgeInspector({
 /**
  * Commit payload assembled by {@link DraftEdgeInspector}. Empty strings are
  * normalized to `undefined` so the wire request omits the field entirely
- * (matches the optional `condition` / label semantics on the daemon side).
+ * (matches the optional `condition` semantics on the daemon side).
+ *
+ * Note: the DTO (`StrategyPatchTransitionRequest`) has no `label` field — the
+ * `condition` field is the branch identifier for conditional/labeled branches.
+ * A Label input was previously collected and silently dropped (QC1 W-002);
+ * it has been removed.
  */
 export interface DraftCommitArgs {
   condition?: string;
-  label?: string;
 }
 
 export interface DraftEdgeInspectorProps {
@@ -192,7 +196,7 @@ export interface DraftEdgeInspectorProps {
  * FB-SE-001 / FB-SE-002 — draft transition commit UI.
  *
  * Renders when a spatial `onConnect` draft edge is selected. Collects
- * Condition + Label before commit; the commit routes through the hook-owned
+ * Condition before commit; the commit routes through the hook-owned
  * mutation that sends `strategy.patch_transition` with **`op: "create"`**.
  * A 409 keeps the draft and opens the conflict modal (Use current / Reapply /
  * Review side-by-side). Voice & Content is locked by the primary spec.
@@ -205,12 +209,10 @@ export function DraftEdgeInspector({
   onCancel,
 }: DraftEdgeInspectorProps) {
   const [condition, setCondition] = useState('');
-  const [label, setLabel] = useState('');
 
   function handleCommit() {
     const args: DraftCommitArgs = {};
     if (condition.trim()) args.condition = condition.trim();
-    if (label.trim()) args.label = label.trim();
     onCommit(args);
   }
 
@@ -251,15 +253,6 @@ export function DraftEdgeInspector({
           value={condition}
           onChange={(e) => setCondition(e.target.value)}
           placeholder="e.g. word_count > 1000"
-          className="rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-gray-1000 focus:border-blue-700"
-        />
-      </label>
-      <label className="flex flex-col gap-1 text-copy-13">
-        <span className="text-gray-700">Label</span>
-        <input
-          type="text"
-          value={label}
-          onChange={(e) => setLabel(e.target.value)}
           className="rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-gray-1000 focus:border-blue-700"
         />
       </label>

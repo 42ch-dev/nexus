@@ -1,7 +1,7 @@
 /**
  * FB-SE-002 — draft transition commit UI (edge inspector draft mode).
  *
- * The `DraftEdgeInspector` renders Condition/Label fields plus the locked
+ * The `DraftEdgeInspector` renders the Condition field plus the locked
  * Create Transition / Cancel actions, and routes commits through the
  * hook-owned draft commit callback (op: "create") and cancel through the
  * hook-owned draft removal.
@@ -15,7 +15,7 @@ import { screen, fireEvent } from '@testing-library/react';
 import { DraftEdgeInspector } from './edge-inspector';
 
 describe('DraftEdgeInspector (FB-SE-002)', () => {
-  it('renders the locked copy: Create Transition, Cancel, Condition, Label', () => {
+  it('renders the locked copy: Create Transition, Cancel, Condition', () => {
     renderInApp(
       <DraftEdgeInspector
         sourceStateId="draft"
@@ -33,13 +33,12 @@ describe('DraftEdgeInspector (FB-SE-002)', () => {
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
     // Field labels — locked voice.
     expect(screen.getByText('Condition')).toBeInTheDocument();
-    expect(screen.getByText('Label')).toBeInTheDocument();
     // Read-only source/target display.
     expect(screen.getByText('draft')).toBeInTheDocument();
     expect(screen.getByText('revise')).toBeInTheDocument();
   });
 
-  it('commits with the entered condition and label', () => {
+  it('commits with the entered condition', () => {
     const onCommit = vi.fn();
     renderInApp(
       <DraftEdgeInspector
@@ -53,14 +52,13 @@ describe('DraftEdgeInspector (FB-SE-002)', () => {
     );
 
     fireEvent.change(screen.getByLabelText('Condition'), { target: { value: 'word_count > 1000' } });
-    fireEvent.change(screen.getByLabelText('Label'), { target: { value: 'Branch on length' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create Transition' }));
 
     expect(onCommit).toHaveBeenCalledTimes(1);
-    expect(onCommit).toHaveBeenCalledWith({ condition: 'word_count > 1000', label: 'Branch on length' });
+    expect(onCommit).toHaveBeenCalledWith({ condition: 'word_count > 1000' });
   });
 
-  it('omits empty condition/label from the commit payload', () => {
+  it('omits empty condition from the commit payload', () => {
     const onCommit = vi.fn();
     renderInApp(
       <DraftEdgeInspector

@@ -21,7 +21,6 @@ export interface KeyboardCreateArgs {
   targetStateId: string;
   transitionKind: 'next' | 'branch' | 'default';
   condition?: string;
-  label?: string;
 }
 
 export interface EdgeCreateDialogProps {
@@ -49,7 +48,6 @@ export function EdgeCreateDialog({
   const [targetId, setTargetId] = useState('');
   const [kind, setKind] = useState<'next' | 'branch' | 'default'>('next');
   const [condition, setCondition] = useState('');
-  const [labelText, setLabelText] = useState('');
 
   // Reset the form each time the dialog opens.
   useEffect(() => {
@@ -58,15 +56,17 @@ export function EdgeCreateDialog({
       setTargetId('');
       setKind('next');
       setCondition('');
-      setLabelText('');
     }
   }, [open]);
 
   // If the source changes and the target is no longer valid, clear target.
+  // Moved to useEffect to avoid setState during render (QC3 W-001).
   const targetOptions = states.filter((s) => s.id !== sourceId);
-  if (targetId && targetId === sourceId) {
-    setTargetId('');
-  }
+  useEffect(() => {
+    if (targetId && targetId === sourceId) {
+      setTargetId('');
+    }
+  }, [sourceId]); // eslint-disable-line react-hooks/exhaustive-deps -- only react to source changes
 
   const canCommit = sourceId !== '' && targetId !== '' && !isCommitting;
 
@@ -78,7 +78,6 @@ export function EdgeCreateDialog({
       transitionKind: kind,
     };
     if (condition.trim()) args.condition = condition.trim();
-    if (labelText.trim()) args.label = labelText.trim();
     onCommit(args);
   }
 
@@ -148,16 +147,6 @@ export function EdgeCreateDialog({
               value={condition}
               onChange={(e) => setCondition(e.target.value)}
               placeholder="e.g. word_count > 1000"
-            />
-          </div>
-
-          <div className="flex flex-col gap-1.5">
-            <Label htmlFor="edge-create-label">Label</Label>
-            <Input
-              id="edge-create-label"
-              value={labelText}
-              onChange={(e) => setLabelText(e.target.value)}
-              placeholder="Optional transition label"
             />
           </div>
 
