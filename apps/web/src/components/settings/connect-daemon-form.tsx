@@ -1,9 +1,11 @@
 /**
  * Connect-to-Daemon form — extracted from legacy ConnectDaemonPage (V1.103 P2).
  *
- * Hosted under Settings → Connection. Implements the four author-visible
- * states locked in daemon-runtime.md §16.2. Post activate/revert stays on
- * `/settings/connection` (toast only — no navigate away).
+ * Hosted under Settings → Advanced (Connection section; route consolidated to
+ * `/settings/advanced#connection` in V1.106 — legacy `/settings/connection`
+ * now redirects here). Implements the four author-visible states locked in
+ * daemon-runtime.md §16.2. Post activate/revert stays on
+ * `/settings/advanced#connection` (toast only — no navigate away).
  *
  * Author-facing copy: settings-connection-section.md.
  */
@@ -111,7 +113,7 @@ export function ConnectDaemonForm() {
         title: 'Connected to daemon',
         description: `Using ${next.endpointUrl}`,
       });
-      // Stay on /settings/connection — no navigate away (V1.103 lock).
+      // Stay on /settings/advanced#connection — no navigate away (V1.103 lock).
     } catch (err) {
       const description = errorMessage(err) || 'Failed to save connection settings.';
       toast({
@@ -133,7 +135,7 @@ export function ConnectDaemonForm() {
         title: 'Using local daemon',
         description: 'Remote settings are saved but inactive.',
       });
-      // Stay on /settings/connection — no navigate away (V1.103 lock).
+      // Stay on /settings/advanced#connection — no navigate away (V1.103 lock).
     } catch (err) {
       const description = errorMessage(err) || 'Failed to switch to local daemon.';
       toast({
