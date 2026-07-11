@@ -354,3 +354,108 @@ describe('useOutlineCanvasGraph — Scene/Beat selection sync (FB-C2-002)', () =
     expect(hook.result.current.selectedSceneId).toBe('s1');
   });
 });
+
+// ---------------------------------------------------------------------------
+// V1.109 P2 T2 — selection-sync overfire guard (FB-GS-001)
+//
+// Before the fix the selection-sync `useEffect` depended on `[rfNodes]`, and
+// RF emits a new `rfNodes` array ref on EVERY node interaction (position drags
+// included, via `applyNodeChanges`). The effect therefore re-ran on every
+// drag, re-resolving the selected entity and re-calling the inspector setters
+// — a latent perf trap as graphs grow (R-V1108P0QC3-W001).
+//
+// These tests pin the guard: a position-only drag must NOT re-fire the
+// selection-sync side effect, while a real selection change still must.
+// ---------------------------------------------------------------------------
+
+describe('useOutlineCanvasGraph — selection overfire guard (FB-GS-001)', () => {
+  it('does NOT re-fire selection sync on a position-only drag', () => {
+    const hook = renderHook(useOutlineCanvasGraph, {
+      initialProps: { outline: makeOutline(), chapters: [makeChapter({ chapter: 1 })] },
+    });
+
+    // 1. Select the chapter node -> effect fires -> selectedChapterId = 1.
+    selectNode(hook.result, chapterNodeId(1));
+    expect(hook.result.current.selectedChapterId).toBe(1);
+
+    // 2. Diverge the inspector from the graph selection. In production this
+    //    happens when a list-view click or `?chapter=N` preselect drives
+    //    `selectedChapterId` to a value the graph did not set. The graph
+    //    still has chapter:1 selected.
+    act(() => {
+      hook.result.current.setSelectedChapterId(99);
+    });
+    expect(hook.result.current.selectedChapterId).toBe(99);
+
+    // 3. Position-only drag of the (still-selected) chapter node. RF produces
+    //    a new `rfNodes` array ref, but the selected node id is unchanged, so
+    //    the guarded effect must NOT re-run. The inspector must stay at the
+    //    externally-set value rather than being reset to the graph-resolved id.
+    act(() => {
+      const changes: NodeChange[] = [
+        { id: chapterNodeId(1), type: 'position', position: { x: 500, y: 500 } },
+      ];
+      hook.result.current.onNodesChange(changes);
+    });
+
+    expect(hook.result.current.selectedChapterId).toBe(99);
+    // The position drag itself did land on the node.
+    const dragged = hook.result.current.rfNodes.find((n) => n.id === chapterNodeId(1))!;
+    expect(dragged.position).toEqual({ x: 500, y: 500 });
+  });
+
+  it('does NOT re-fire selection sync on repeated position-only drags', () => {
+    const hook = renderHook(useOutlineCanvasGraph, {
+      initialProps: { outline: makeOutline(), chapters: [makeChapter({ chapter: 1 })] },
+    });
+    selectNode(hook.result, chapterNodeId(1));
+    act(() => {
+      hook.result.current.setSelectedChapterId(7);
+    });
+
+    // Several position updates in sequence (RF emits one per drag tick).
+    for (const [x, y] of [[10, 10], [20, 20], [30, 30]] as const) {
+      act(() => {
+        const changes: NodeChange[] = [
+          { id: chapterNodeId(1), type: 'position', position: { x, y } },
+        ];
+        hook.result.current.onNodesChange(changes);
+      });
+    }
+
+    // Selection id never changed -> inspector must hold the externally-set value.
+    expect(hook.result.current.selectedChapterId).toBe(7);
+  });
+
+  it('still drives the inspector when the selected node id changes', () => {
+    // Regression guard: a genuine selection change must still fire the effect.
+    const hook = renderHook(useOutlineCanvasGraph, {
+      initialProps: { outline: makeOutline(), chapters: [makeChapter({ chapter: 1 })] },
+    });
+    selectNode(hook.result, chapterNodeId(1));
+    expect(hook.result.current.selectedChapterId).toBe(1);
+
+    // Select a volume node (resolves to no chapter) -> effect fires -> clears.
+    selectNode(hook.result, volumeNodeId(1));
+    expect(hook.result.current.selectedChapterId).toBeNull();
+  });
+
+  it('re-fires selection sync after a drag re-selects a different node', () => {
+    // Combined path: drag (no fire) then click-select another node (fires).
+    const hook = renderHook(useOutlineCanvasGraph, {
+      initialProps: { outline: makeOutline(), chapters: [makeChapter({ chapter: 1 })] },
+    });
+    selectNode(hook.result, chapterNodeId(1));
+    act(() => {
+      const changes: NodeChange[] = [
+        { id: chapterNodeId(1), type: 'position', position: { x: 800, y: 0 } },
+      ];
+      hook.result.current.onNodesChange(changes);
+    });
+    expect(hook.result.current.selectedChapterId).toBe(1);
+
+    // Now select the volume node -> selection id changes -> effect fires.
+    selectNode(hook.result, volumeNodeId(1));
+    expect(hook.result.current.selectedChapterId).toBeNull();
+  });
+});
