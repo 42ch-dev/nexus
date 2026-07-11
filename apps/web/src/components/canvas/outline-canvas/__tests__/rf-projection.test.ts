@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 import type { ChapterSummary, WorkOutline } from '@42ch/nexus-contracts';
 
 import {
+  beatNodeId,
   chapterNodeId,
   deriveContainsEdges,
   deriveForeshadowEdges,
@@ -20,9 +21,17 @@ import {
   layoutVolumeNodes,
   outlineGraphSummary,
   projectOutlineGraph,
+  sceneNodeId,
+  selectedBeatIdFromNodes,
   selectedChapterIdFromNodes,
+  selectedSceneIdFromNodes,
   volumeNodeId,
 } from '../rf-projection';
+import type {
+  BeatFixture,
+  SceneBeatFixturePayload,
+  SceneFixture,
+} from '../graph-projection';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -475,5 +484,263 @@ describe('selectedChapterIdFromNodes', () => {
     ch1.selected = true;
 
     expect(selectedChapterIdFromNodes(nodes)).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Scene/Beat projection (V1.109 C2 T2 — fixture-driven child nodes)
+// ---------------------------------------------------------------------------
+
+function sceneFixture(partial: Partial<SceneFixture> = {}): SceneFixture {
+  return {
+    sceneId: 's1',
+    chapterId: 1,
+    title: 'Scene One',
+    status: 'drafted',
+    ...partial,
+  };
+}
+
+function beatFixture(partial: Partial<BeatFixture> = {}): BeatFixture {
+  return {
+    beatId: 'b1',
+    sceneId: 's1',
+    title: 'Beat One',
+    status: null,
+    ...partial,
+  };
+}
+
+function sceneBeatPayload(
+  scenes: SceneFixture[] = [],
+  beats: BeatFixture[] = [],
+): SceneBeatFixturePayload {
+  return { scenes, beats };
+}
+
+describe('projectOutlineGraph — Scene/Beat child nodes (fixture-driven)', () => {
+  it('emits zero scene/beat nodes when no fixture payload is passed (honest empty chrome)', () => {
+    const o = outline({
+      volumes: [{ volume_id: 1, label: 'V1', chapter_ids: [1] }],
+    });
+    const { nodes } = projectOutlineGraph(o, [chapter({ chapter: 1 })]);
+    expect(nodes.filter((n) => n.type === 'outline-scene')).toHaveLength(0);
+    expect(nodes.filter((n) => n.type === 'outline-beat')).toHaveLength(0);
+  });
+
+  it('emits zero scene/beat nodes when fixture payload is empty', () => {
+    const o = outline({
+      volumes: [{ volume_id: 1, label: 'V1', chapter_ids: [1] }],
+    });
+    const { nodes } = projectOutlineGraph(
+      o,
+      [chapter({ chapter: 1 })],
+      sceneBeatPayload(),
+    );
+    expect(nodes.filter((n) => n.type === 'outline-scene')).toHaveLength(0);
+    expect(nodes.filter((n) => n.type === 'outline-beat')).toHaveLength(0);
+  });
+
+  it('emits a Scene node as a child of its owning Chapter with parentId + extent parent', () => {
+    const o = outline({
+      volumes: [{ volume_id: 1, label: 'V1', chapter_ids: [1] }],
+    });
+    const fixture = sceneBeatPayload([
+      sceneFixture({ sceneId: 's1', chapterId: 1, title: 'The Arrival', status: 'drafted' }),
+    ]);
+    const { nodes } = projectOutlineGraph(o, [chapter({ chapter: 1 })], fixture);
+
+    const sceneNodes = nodes.filter((n) => n.type === 'outline-scene');
+    expect(sceneNodes).toHaveLength(1);
+    const scene = sceneNodes[0];
+    expect(scene.id).toBe(sceneNodeId('s1'));
+    expect(scene.parentId).toBe(chapterNodeId(1));
+    expect(scene.extent).toBe('parent');
+    const data = scene.data as { workId: string; sceneId: string; chapterId: number; title: string | null; status: string | null };
+    expect(data.workId).toBe('wk_test');
+    expect(data.sceneId).toBe('s1');
+    expect(data.chapterId).toBe(1);
+    expect(data.title).toBe('The Arrival');
+    expect(data.status).toBe('drafted');
+  });
+
+  it('emits a Beat node as a child of its owning Scene with parentId + extent parent (Scene→Beat nesting)', () => {
+    const o = outline({
+      volumes: [{ volume_id: 1, label: 'V1', chapter_ids: [1] }],
+    });
+    const fixture = sceneBeatPayload(
+      [sceneFixture({ sceneId: 's1', chapterId: 1 })],
+      [beatFixture({ beatId: 'b1', sceneId: 's1', title: 'Turn: the call' })],
+    );
+    const { nodes } = projectOutlineGraph(o, [chapter({ chapter: 1 })], fixture);
+
+    const beatNodes = nodes.filter((n) => n.type === 'outline-beat');
+    expect(beatNodes).toHaveLength(1);
+    const beat = beatNodes[0];
+    expect(beat.id).toBe(beatNodeId('b1'));
+    expect(beat.parentId).toBe(sceneNodeId('s1'));
+    expect(beat.extent).toBe('parent');
+    const data = beat.data as { workId: string; beatId: string; sceneId: string; title: string | null };
+    expect(data.workId).toBe('wk_test');
+    expect(data.beatId).toBe('b1');
+    expect(data.sceneId).toBe('s1');
+    expect(data.title).toBe('Turn: the call');
+  });
+
+  it('filters out scenes whose parent chapter does not exist (no dangling parentId)', () => {
+    const o = outline({
+      volumes: [{ volume_id: 1, label: 'V1', chapter_ids: [1] }],
+    });
+    const fixture = sceneBeatPayload([
+      sceneFixture({ sceneId: 's-real', chapterId: 1 }),
+      sceneFixture({ sceneId: 's-orphan', chapterId: 99 }),
+    ]);
+    const { nodes } = projectOutlineGraph(o, [chapter({ chapter: 1 })], fixture);
+
+    const sceneIds = nodes
+      .filter((n) => n.type === 'outline-scene')
+      .map((n) => n.id);
+    expect(sceneIds).toContain(sceneNodeId('s-real'));
+    expect(sceneIds).not.toContain(sceneNodeId('s-orphan'));
+  });
+
+  it('filters out beats whose parent scene does not exist (no dangling parentId)', () => {
+    const o = outline({
+      volumes: [{ volume_id: 1, label: 'V1', chapter_ids: [1] }],
+    });
+    const fixture = sceneBeatPayload(
+      [sceneFixture({ sceneId: 's1', chapterId: 1 })],
+      [
+        beatFixture({ beatId: 'b-real', sceneId: 's1' }),
+        beatFixture({ beatId: 'b-orphan', sceneId: 's-missing' }),
+      ],
+    );
+    const { nodes } = projectOutlineGraph(o, [chapter({ chapter: 1 })], fixture);
+
+    const beatIds = nodes
+      .filter((n) => n.type === 'outline-beat')
+      .map((n) => n.id);
+    expect(beatIds).toContain(beatNodeId('b-real'));
+    expect(beatIds).not.toContain(beatNodeId('b-orphan'));
+  });
+
+  it('stacks multiple scenes under the same chapter in fixture declaration order', () => {
+    const o = outline({
+      volumes: [{ volume_id: 1, label: 'V1', chapter_ids: [1] }],
+    });
+    const fixture = sceneBeatPayload([
+      sceneFixture({ sceneId: 's1', chapterId: 1 }),
+      sceneFixture({ sceneId: 's2', chapterId: 1 }),
+      sceneFixture({ sceneId: 's3', chapterId: 1 }),
+    ]);
+    const { nodes } = projectOutlineGraph(o, [chapter({ chapter: 1 })], fixture);
+
+    const scenes = nodes.filter((n) => n.type === 'outline-scene');
+    expect(scenes.map((n) => n.id)).toEqual([
+      sceneNodeId('s1'),
+      sceneNodeId('s2'),
+      sceneNodeId('s3'),
+    ]);
+    // y increases down the stack (relative to parent); x stays constant.
+    expect(scenes[0].position.x).toBe(scenes[1].position.x);
+    expect(scenes[1].position.y).toBeGreaterThan(scenes[0].position.y);
+  });
+
+  it('does not mutate the fixture payload', () => {
+    const o = outline({
+      volumes: [{ volume_id: 1, label: 'V1', chapter_ids: [1] }],
+    });
+    const fixture = sceneBeatPayload(
+      [sceneFixture({ sceneId: 's1', chapterId: 1 })],
+      [beatFixture({ beatId: 'b1', sceneId: 's1' })],
+    );
+    const snapshot = JSON.parse(JSON.stringify(fixture));
+
+    projectOutlineGraph(o, [chapter({ chapter: 1 })], fixture);
+
+    expect(JSON.parse(JSON.stringify(fixture))).toEqual(snapshot);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// selectedSceneIdFromNodes / selectedBeatIdFromNodes (FB-C2-002 graph click)
+// ---------------------------------------------------------------------------
+
+describe('selectedSceneIdFromNodes', () => {
+  it('returns null when no node is selected', () => {
+    const o = outline({
+      volumes: [{ volume_id: 1, label: 'V1', chapter_ids: [1] }],
+    });
+    const fixture = sceneBeatPayload([sceneFixture({ sceneId: 's1', chapterId: 1 })]);
+    const { nodes } = projectOutlineGraph(o, [chapter({ chapter: 1 })], fixture);
+    expect(selectedSceneIdFromNodes(nodes)).toBeNull();
+  });
+
+  it('returns the sceneId when an outline-scene node is selected', () => {
+    const o = outline({
+      volumes: [{ volume_id: 1, label: 'V1', chapter_ids: [1] }],
+    });
+    const fixture = sceneBeatPayload([sceneFixture({ sceneId: 's1', chapterId: 1 })]);
+    const { nodes } = projectOutlineGraph(o, [chapter({ chapter: 1 })], fixture);
+    const sceneNode = nodes.find((n) => n.type === 'outline-scene')!;
+    sceneNode.selected = true;
+
+    expect(selectedSceneIdFromNodes(nodes)).toBe('s1');
+  });
+
+  it('returns null when a non-scene node is selected', () => {
+    const o = outline({
+      volumes: [{ volume_id: 1, label: 'V1', chapter_ids: [1] }],
+    });
+    const fixture = sceneBeatPayload([sceneFixture({ sceneId: 's1', chapterId: 1 })]);
+    const { nodes } = projectOutlineGraph(o, [chapter({ chapter: 1 })], fixture);
+    const chapterNode = nodes.find((n) => n.type === 'outline-chapter')!;
+    chapterNode.selected = true;
+
+    expect(selectedSceneIdFromNodes(nodes)).toBeNull();
+  });
+});
+
+describe('selectedBeatIdFromNodes', () => {
+  it('returns null when no node is selected', () => {
+    const o = outline({
+      volumes: [{ volume_id: 1, label: 'V1', chapter_ids: [1] }],
+    });
+    const fixture = sceneBeatPayload(
+      [sceneFixture({ sceneId: 's1', chapterId: 1 })],
+      [beatFixture({ beatId: 'b1', sceneId: 's1' })],
+    );
+    const { nodes } = projectOutlineGraph(o, [chapter({ chapter: 1 })], fixture);
+    expect(selectedBeatIdFromNodes(nodes)).toBeNull();
+  });
+
+  it('returns the beatId when an outline-beat node is selected', () => {
+    const o = outline({
+      volumes: [{ volume_id: 1, label: 'V1', chapter_ids: [1] }],
+    });
+    const fixture = sceneBeatPayload(
+      [sceneFixture({ sceneId: 's1', chapterId: 1 })],
+      [beatFixture({ beatId: 'b1', sceneId: 's1' })],
+    );
+    const { nodes } = projectOutlineGraph(o, [chapter({ chapter: 1 })], fixture);
+    const beatNode = nodes.find((n) => n.type === 'outline-beat')!;
+    beatNode.selected = true;
+
+    expect(selectedBeatIdFromNodes(nodes)).toBe('b1');
+  });
+
+  it('returns null when a scene node is selected (not a beat)', () => {
+    const o = outline({
+      volumes: [{ volume_id: 1, label: 'V1', chapter_ids: [1] }],
+    });
+    const fixture = sceneBeatPayload(
+      [sceneFixture({ sceneId: 's1', chapterId: 1 })],
+      [beatFixture({ beatId: 'b1', sceneId: 's1' })],
+    );
+    const { nodes } = projectOutlineGraph(o, [chapter({ chapter: 1 })], fixture);
+    const sceneNode = nodes.find((n) => n.type === 'outline-scene')!;
+    sceneNode.selected = true;
+
+    expect(selectedBeatIdFromNodes(nodes)).toBeNull();
   });
 });

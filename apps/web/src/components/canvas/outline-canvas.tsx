@@ -9,9 +9,8 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { Edge, Node } from '@xyflow/react';
 
-import { CanvasShell, useNodeChangeHandler } from '@/components/canvas/canvas-shell';
+import { CanvasShell } from '@/components/canvas/canvas-shell';
 import { EmptyState, ErrorState, LoadingState } from '@/components/ui/states';
 import { useChapters, useWork, flattenPages } from '@/api/queries';
 import { queryKeys } from '@/lib/nexus/query-keys';
@@ -25,23 +24,30 @@ import {
 
 import { CanvasHeader } from './outline-canvas/canvas-layout';
 import { OutlineConflictDialog } from './outline-canvas/conflict-modal';
+import { BeatInspector } from './outline-canvas/inspectors/beat-inspector';
 import { ChapterInspector } from './outline-canvas/inspectors/chapter-inspector';
 import { TimelinePanel } from './outline-canvas/inspectors/event-inspector';
+import { SceneInspector } from './outline-canvas/inspectors/scene-inspector';
 import { OutlineStructurePanel } from './outline-canvas/inspectors/structure-inspector';
-import type { ConflictState } from './outline-canvas/graph-projection';
-import {
-  outlineGraphSummary,
-  projectOutlineGraph,
-  selectedChapterIdFromNodes,
-} from './outline-canvas/rf-projection';
+import type { ConflictState, SceneBeatFixturePayload } from './outline-canvas/graph-projection';
+import { chapterDisplayTitle } from './outline-canvas/graph-projection';
+import { outlineGraphSummary } from './outline-canvas/rf-projection';
 import { outlineNodeTypes } from './outline-canvas/outline-nodes';
 import { OutlineAltView } from './outline-canvas/outline-alt-view';
+import { useOutlineCanvasGraph } from './outline-canvas/use-outline-canvas-graph';
 import type {
   ChapterSummary,
   OutlinePatchChapterRequest,
   OutlinePatchStructureRequest,
   TimelinePatchEventRequest,
 } from '@42ch/nexus-contracts';
+
+/**
+ * Stable empty fixture payload for real Works (no scene/beat data today).
+ * Module-level so the hook's projection memo deps stay referentially stable
+ * across re-renders — no new object identity per render.
+ */
+const EMPTY_SCENE_BEAT_FIXTURE: SceneBeatFixturePayload = { scenes: [], beats: [] };
 
 export interface OutlineCanvasProps {
   workId: string;
@@ -51,9 +57,23 @@ export interface OutlineCanvasProps {
    * seed {@link selectedChapterId}; later user clicks override it normally.
    */
   initialSelectedChapterId?: number | null;
+  /**
+   * Optional Scene/Beat fixture payload (V1.109 C2 T4 — FB-C2-000/004).
+   *
+   * The outline wire model carries no scene/beat data today (architect-locked
+   * §5.2 Q1), so real Works omit this prop → the projection emits zero
+   * scene/beat children (honest empty chrome). Design Studio / test fixtures
+   * inject populated payloads so the full Volume/Chapter/Scene/Beat hierarchy
+   * renders for visual acceptance and integration testing.
+   */
+  sceneBeatFixture?: SceneBeatFixturePayload;
 }
 
-export function OutlineCanvas({ workId, initialSelectedChapterId = null }: OutlineCanvasProps) {
+export function OutlineCanvas({
+  workId,
+  initialSelectedChapterId = null,
+  sceneBeatFixture,
+}: OutlineCanvasProps) {
   const work = useWork(workId);
   const chaptersQuery = useChapters(workId);
   const outline = useWorkOutline(workId);
@@ -62,9 +82,6 @@ export function OutlineCanvas({ workId, initialSelectedChapterId = null }: Outli
   const patchChapter = usePatchOutlineChapter(workId);
   const patchTimeline = usePatchTimelineEvent(workId);
 
-  const [selectedChapterId, setSelectedChapterId] = useState<number | null>(
-    initialSelectedChapterId ?? null,
-  );
   const [conflict, setConflict] = useState<ConflictState | null>(null);
   const [showAlt, setShowAlt] = useState(false);
   const qc = useQueryClient();
@@ -89,66 +106,63 @@ export function OutlineCanvas({ workId, initialSelectedChapterId = null }: Outli
     return map;
   }, [chapters]);
 
+  // V1.109 C2 T2/T4 — Scene/Beat fixture payload injection point. The outline
+  // wire model has no scene/beat data today (architect-locked §5.2 Q1), so
+  // real Works pass nothing here → projection emits zero scene/beat children
+  // (honest empty chrome). Design Studio / test fixtures inject populated
+  // payloads via the `sceneBeatFixture` prop when scene/beat demo data is
+  // needed. The empty default is stable (module-level constant) so the hook's
+  // projection memo deps don't churn on re-render.
+  const fixture = sceneBeatFixture ?? EMPTY_SCENE_BEAT_FIXTURE;
+
+  // V1.109 P0 T1 — RF graph state extracted into `useOutlineCanvasGraph`
+  // (R-V1108P0QC1-S001). The hook owns the projection memo, rfNodes/rfEdges
+  // state, the position-merge sync effect (preserves dragged positions +
+  // selection across chapter-page loads), the graph-click → inspector
+  // selection-sync effect (FB-C1-003), and `selectedChapterId`. The panel
+  // writes through the hook's setter so graph + panel selection stay in sync
+  // via one state owner.
+  const {
+    rfNodes,
+    rfEdges,
+    onNodesChange,
+    selectedChapterId,
+    setSelectedChapterId,
+    selectedSceneId,
+    selectedBeatId,
+    projection,
+  } = useOutlineCanvasGraph({
+    outline: outline.data,
+    chapters,
+    initialSelectedChapterId,
+    sceneBeatFixture: fixture,
+  });
+
   const selectedChapter = selectedChapterId ? chapterById.get(selectedChapterId) ?? null : null;
 
-  // V1.108 P0 — project the outline into a spatial React Flow graph.
-  // The graph is the primary view (FB-C1-000); the panel below remains as a
-  // structural inspector companion. T2 wires graph-click → inspector selection.
-  const projection = useMemo(
-    () => (outline.data ? projectOutlineGraph(outline.data, chapters) : null),
-    [outline.data, chapters],
-  );
-  const [rfNodes, setRfNodes] = useState<Node[]>([]);
-  const [rfEdges, setRfEdges] = useState<Edge[]>([]);
-  const onNodesChange = useNodeChangeHandler(setRfNodes);
+  // V1.109 C2 T4 — resolve the selected Scene/Beat from the fixture payload +
+  // hook selection state (FB-C2-002). The hook exposes `selectedSceneId` /
+  // `selectedBeatId` (driven by RF graph-click); the orchestrator resolves
+  // them against the fixture to get the entity data + parent title for the
+  // inspector. On real Works (empty fixture) both are always null — the
+  // Chapter inspector remains the default.
+  const selectedScene = selectedSceneId
+    ? fixture.scenes.find((s) => s.sceneId === selectedSceneId) ?? null
+    : null;
+  const selectedBeat = selectedBeatId
+    ? fixture.beats.find((b) => b.beatId === selectedBeatId) ?? null
+    : null;
 
-  // Sync RF state when the projection changes (data refetch, chapter list update).
-  // PR-review fix: merge instead of replace so the author's graph interactions
-  // (dragged positions, selection) survive incremental chapter-page loads.
-  // `chapters` grows as each cursor page arrives (I-QC1-002 auto-fetch), which
-  // rebuilds the projection; a bare `setRfNodes(projection.nodes)` wiped every
-  // node's user-moved position and selection on each page fetch. For nodes that
-  // persist across the rebuild (same id), preserve their `position` and
-  // `selected` flag; new nodes use the projected position, dropped nodes fall
-  // away. Edges carry no per-interaction state, so they are replaced directly.
-  useEffect(() => {
-    if (!projection) return;
-    setRfEdges(projection.edges);
-    setRfNodes((prev) => {
-      if (prev.length === 0) return projection.nodes;
-      const prevById = new Map(prev.map((n) => [n.id, n]));
-      return projection.nodes.map((node) => {
-        const existing = prevById.get(node.id);
-        if (!existing) return node;
-        return { ...node, position: existing.position, selected: existing.selected };
-      });
-    });
-  }, [projection]);
-
-  // Graph click → inspector selection sync (FB-C1-003).
-  // React Flow tracks selection via the node `selected` flag (set through
-  // onNodesChange). Resolve it to `selectedChapterId` so graph clicks drive the
-  // chapter inspector — same pattern as `world-kb-canvas.tsx`.
-  //
-  // PR-review fix: `selectedChapterIdFromNodes` returns `null` both when no
-  // node is selected AND when the selected node does not resolve to a chapter
-  // (volume node, or a timeline event with no `realizes_chapter_id`). The old
-  // guard left the previous chapter selection in place in the second case,
-  // leaving a stale chapter in the inspector. Distinguish the two: when a node
-  // IS selected but resolves to no chapter, clear the chapter selection so the
-  // inspector does not show a chapter that is no longer the active graph
-  // selection. When nothing is selected at all, leave the current selection
-  // intact (preserves V1.75 `?chapter=N` preselect and click-to-keep-while-
-  // panning behavior).
-  useEffect(() => {
-    const chapterId = selectedChapterIdFromNodes(rfNodes);
-    if (chapterId !== null) {
-      setSelectedChapterId(chapterId);
-    } else if (rfNodes.some((n) => n.selected)) {
-      setSelectedChapterId(null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rfNodes]);
+  // Parent titles for the *Part of* helper (Voice & Content lock).
+  const sceneParentChapterTitle = selectedScene
+    ? (() => {
+        const ch = chapterById.get(selectedScene.chapterId);
+        return ch ? chapterDisplayTitle(ch, outline.data?.chapter_titles as Record<string, string> | undefined) : null;
+      })()
+    : null;
+  const beatParentSceneTitle = selectedBeat
+    ? fixture.scenes.find((s) => s.sceneId === selectedBeat.sceneId)?.title ?? null
+    : null;
 
   const summary = outlineGraphSummary(outline.data, chapters.length);
 
@@ -278,8 +292,12 @@ export function OutlineCanvas({ workId, initialSelectedChapterId = null }: Outli
         setShowAlt={setShowAlt}
       />
 
+      {/* V1.109 C2 T4 — pass the original prop (undefined on real Works) so
+          the alt view distinguishes "no fixture" from "empty fixture". Real
+          Works → no scene/beat rows, no empty-under-chapter helper. Fixtures
+          (even empty) → helper shows for visual acceptance. */}
       {showAlt ? (
-        <OutlineAltView outline={outline.data} chapters={chapters} />
+        <OutlineAltView outline={outline.data} chapters={chapters} sceneBeatFixture={sceneBeatFixture} />
       ) : (
         <CanvasShell
           nodes={rfNodes}
@@ -288,6 +306,7 @@ export function OutlineCanvas({ workId, initialSelectedChapterId = null }: Outli
           onNodesChange={onNodesChange}
           summaryText={summary}
           ariaLabel="Outline structure graph"
+          surfaceKey={`outline:${workId}`}
         >
           {/* I-QC1-001 — when the projection has zero nodes, render the
               EmptyState as an in-shell overlay so CanvasShell is always
@@ -321,25 +340,39 @@ export function OutlineCanvas({ workId, initialSelectedChapterId = null }: Outli
         />
 
         <div className="flex flex-col gap-4">
-          <ChapterInspector
-            workId={workId}
-            outline={outline.data}
-            chapter={selectedChapter}
-            baseRevision={outline.data.outline_revision}
-            onPatchChapter={handleChapter}
-            onMove={(chapterId, volumeId) =>
-              handleStructure({
-                work_id: workId,
-                base_revision: outline.data.outline_revision,
-                operation: 'move_chapter',
-                chapter_id: chapterId,
-                volume_id: volumeId,
-              })
-            }
-            patchIsPending={patchChapter.isPending}
-            isConflicting={conflict !== null}
-            contentVersion={contentVersion}
-          />
+          {/* V1.109 C2 T4 — Scene/Beat inspector mounting (FB-C2-002). The
+              hook's selection coordination ensures only one of Beat/Scene/
+              Chapter is selected at a time. When a Beat is selected, show the
+              Beat inspector; when a Scene is selected, show the Scene
+              inspector; otherwise fall through to the Chapter inspector
+              (default — includes its empty state when no chapter is selected).
+              On real Works (empty fixture), selectedBeat/selectedScene are
+              always null → Chapter inspector is always shown (no regression). */}
+          {selectedBeat ? (
+            <BeatInspector beat={selectedBeat} parentSceneTitle={beatParentSceneTitle} />
+          ) : selectedScene ? (
+            <SceneInspector scene={selectedScene} parentChapterTitle={sceneParentChapterTitle} />
+          ) : (
+            <ChapterInspector
+              workId={workId}
+              outline={outline.data}
+              chapter={selectedChapter}
+              baseRevision={outline.data.outline_revision}
+              onPatchChapter={handleChapter}
+              onMove={(chapterId, volumeId) =>
+                handleStructure({
+                  work_id: workId,
+                  base_revision: outline.data.outline_revision,
+                  operation: 'move_chapter',
+                  chapter_id: chapterId,
+                  volume_id: volumeId,
+                })
+              }
+              patchIsPending={patchChapter.isPending}
+              isConflicting={conflict !== null}
+              contentVersion={contentVersion}
+            />
+          )}
 
           <TimelinePanel
             outline={outline.data}

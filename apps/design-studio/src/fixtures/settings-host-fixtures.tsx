@@ -23,15 +23,9 @@ import { useState, type ReactNode } from 'react';
 
 import {
   Bot,
-  Boxes,
-  BrainCircuit,
-  CalendarClock,
   FolderOpen,
-  Layers,
-  ListChecks,
   RotateCcw,
   Settings,
-  Sparkles,
   Wifi,
   type LucideIcon,
 } from 'lucide-react';
@@ -55,7 +49,6 @@ import {
 } from '@web-setup/agent-picker';
 import {
   ShellSidebarChrome,
-  type ShellNavGroup,
   type ShellSidebarTab,
 } from '@web-layout/shell-sidebar-chrome';
 import { FooterProfilesChrome } from '@web-layout/footer-profiles-chrome';
@@ -64,6 +57,11 @@ import {
   SettingsSetupSectionChrome,
   SettingsSetupConfirmChromeStatic,
 } from '@web-settings/settings-setup-section-chrome';
+
+import {
+  CREATOR_NAV,
+  ORCHESTRATOR_NAV,
+} from '@/fixtures/shell-nav-data';
 
 /** Three-tab top nav — Agent / Workspace / Advanced (V1.106 P2). */
 export type SettingsNavSectionId = 'agent' | 'workspace' | 'advanced';
@@ -119,40 +117,8 @@ const SETTINGS_SECTIONS: {
 const SHELL_HELPER =
   'Manage your local agent, daemon connection, and setup options from one place.';
 
-/**
- * App shell sidebar nav — mirrors surfaces.tsx ShellSidebarFixture so the
- * Settings fixture shares the same component tree as the App shell (V1.108
- * FB-UI-005). Not inner Settings page nav (that is SETTINGS_NAV_SECTIONS).
- */
-const CREATOR_NAV: ShellNavGroup[] = [
-  {
-    id: 'works',
-    label: 'Works',
-    items: [{ to: '#works', label: 'All Works', icon: Layers }],
-  },
-  {
-    id: 'creator',
-    label: 'Creator',
-    items: [{ to: '#memory', label: 'Memory', icon: BrainCircuit }],
-  },
-];
-
-const ORCHESTRATOR_NAV: ShellNavGroup[] = [
-  {
-    id: 'runtime',
-    label: 'Runtime',
-    items: [
-      { to: '#sessions', label: 'Sessions', icon: ListChecks },
-      { to: '#schedule', label: 'Schedule', icon: CalendarClock },
-      { to: '#capabilities', label: 'Capabilities', icon: Boxes },
-    ],
-  },
-  {
-    id: 'strategies',
-    label: 'Strategies',
-    items: [{ to: '#strategies', label: 'Strategies', icon: Sparkles }],
-  },
-];
+// CREATOR_NAV / ORCHESTRATOR_NAV imported from shell-nav-data.ts (V1.109 P2,
+// R-V1108P1QC1-S001) — shared with surfaces.tsx ShellSidebarFixture.
 
 /** Locked by settings-agent-section.md — section body helper (sentence case). */
 const AGENT_SECTION_HELPER =

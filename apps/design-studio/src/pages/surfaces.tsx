@@ -1,20 +1,11 @@
 import { useRef, useState, type ReactNode } from 'react';
 import { NavLink, Outlet } from 'react-router-dom';
 
-import {
-  Boxes,
-  BrainCircuit,
-  CalendarClock,
-  Layers,
-  ListChecks,
-  Sparkles,
-} from 'lucide-react';
 import logoPrimary from '@42ch/nexus-ui/assets/logos/logo-primary.svg';
 import { NexusLogo, cn, Badge, Button } from '@42ch/nexus-ui';
 
 import {
   ShellSidebarChrome,
-  type ShellNavGroup,
   type ShellSidebarTab,
 } from '@web-layout/shell-sidebar-chrome';
 import { FooterProfilesChrome } from '@web-layout/footer-profiles-chrome';
@@ -24,42 +15,16 @@ import { AgentPickerFixtures } from '@/fixtures/agent-picker-fixtures';
 import { CanvasSurfacesFixtures } from '@/fixtures/canvas-surfaces-fixtures';
 import { LaunchDaemonFixtures } from '@/fixtures/launch-daemon-fixtures';
 import { MainBannerFixtures } from '@/fixtures/main-banner-fixtures';
+import {
+  CREATOR_NAV,
+  ORCHESTRATOR_NAV,
+} from '@/fixtures/shell-nav-data';
 import { SettingsHostFixtures } from '@/fixtures/settings-host-fixtures';
 import { SetupWizardChromeFixtures } from '@/fixtures/setup-wizard-chrome-fixtures';
 
 /* ------------------------------------------------------------------ */
 /*  Data — IA guide §4.5 fixtures (canonical copy strings)              */
 /* ------------------------------------------------------------------ */
-
-const CREATOR_NAV: ShellNavGroup[] = [
-  {
-    id: 'works',
-    label: 'Works',
-    items: [{ to: '#works', label: 'All Works', icon: Layers }],
-  },
-  {
-    id: 'creator',
-    label: 'Creator',
-    items: [{ to: '#memory', label: 'Memory', icon: BrainCircuit }],
-  },
-];
-
-const ORCHESTRATOR_NAV: ShellNavGroup[] = [
-  {
-    id: 'runtime',
-    label: 'Runtime',
-    items: [
-      { to: '#sessions', label: 'Sessions', icon: ListChecks },
-      { to: '#schedule', label: 'Schedule', icon: CalendarClock },
-      { to: '#capabilities', label: 'Capabilities', icon: Boxes },
-    ],
-  },
-  {
-    id: 'strategies',
-    label: 'Strategies',
-    items: [{ to: '#strategies', label: 'Strategies', icon: Sparkles }],
-  },
-];
 
 const SURFACES_SECTIONS = [
   {
@@ -650,8 +615,8 @@ export function SurfacesCanvasPage() {
       <p className="text-copy-14 text-gray-700 mb-6">
         Presentational preview of the shared canvas surface chrome — dot-grid
         background, zoom controls, minimap swatch, outline node kinds (Volume /
-        Chapter / Timeline Event), and right-click context menu matrices. Node
-        chrome mirrors the P0{' '}
+        Chapter / Timeline Event / Scene / Beat), and right-click context menu
+        matrices. Node chrome mirrors the P0{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           outline-nodes.tsx
         </code>{' '}

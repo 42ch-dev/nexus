@@ -7,7 +7,7 @@
  * → inspector selection path that must remain functional alongside the new
  * graph-click selection sync.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { act } from 'react';
@@ -20,18 +20,24 @@ import { NexusClientError } from '@/lib/nexus/errors';
 // Mocks
 // ---------------------------------------------------------------------------
 
-// Stub CanvasShell so React Flow never mounts in jsdom (no ResizeObserver).
-// I-QC1-001 — the mock accepts children so the in-shell EmptyState overlay
-// test can assert its presence inside the shell.
-vi.mock('@/components/canvas/canvas-shell', () => ({
-  CanvasShell: ({ summaryText, children }: { summaryText: string; children?: React.ReactNode }) => (
-    <div data-testid="canvas-shell-mock" aria-label="Outline structure graph">
-      {summaryText}
-      {children}
-    </div>
-  ),
-  useNodeChangeHandler: () => () => {},
-}));
+// V1.109 P2 T3 (FB-GS-002) — CanvasShell is now backed by the REAL React Flow
+// integration harness instead of a div stub. The harness mounts a genuine
+// `<ReactFlowProvider>` + `<ReactFlow>` consuming the same nodes/edges/
+// onNodesChange props the orchestrator passes to CanvasShell, so graph-click →
+// inspector selection flows through real RF state. The ResizeObserver polyfill
+// in `src/test/setup.ts` covers jsdom mounting (same path `outline-page.test`
+// relies on). `testUseNodeChangeHandler` mirrors the real CanvasShell helper so
+// the hook's `onNodesChange` actually applies RF selection changes.
+//
+// I-QC1-001 — the harness renders children so the in-shell EmptyState overlay
+// test still asserts its presence inside the shell.
+vi.mock('@/components/canvas/canvas-shell', async () => {
+  const harness = await import('@/components/canvas/__tests__/rf-integration-harness');
+  return {
+    CanvasShell: harness.RFIntegrationHarness,
+    useNodeChangeHandler: harness.testUseNodeChangeHandler,
+  };
+});
 
 const mocks = vi.hoisted(() => {
   const WORK = {
@@ -159,6 +165,18 @@ function renderOutline() {
   );
 }
 
+/**
+ * Scope to the Outline structure panel Card. V1.109 P2 T3 — now that real RF
+ * mounts, the chapter title appears in BOTH the graph node and the structure
+ * panel row, so unscoped `getByText('Chapter One')` is ambiguous. The panel
+ * Card is anchored by its unique "Volumes & Chapters" CardTitle.
+ */
+function structurePanel(): HTMLElement {
+  return (
+    screen.getByText('Volumes & Chapters').closest('[class*="card"]') ?? document.body
+  );
+}
+
 /** Build a real NexusClientError 409 carrying `current_version`. */
 function outlineConflictErr(currentVersion: number): NexusClientError {
   return new NexusClientError(409, 'outline_conflict', 'stale revision', {
@@ -185,7 +203,7 @@ async function rejectLastChapterAsConflict(currentVersion: number) {
 describe('OutlineCanvas — conflict modal trigger (FB-C1-003)', () => {
   it('renders the outline graph shell and structure panel', () => {
     renderOutline();
-    expect(screen.getByTestId('canvas-shell-mock')).toBeInTheDocument();
+    expect(screen.getByTestId('rf-integration-harness')).toBeInTheDocument();
     expect(screen.getByText('Volumes & Chapters')).toBeInTheDocument();
   });
 
@@ -194,7 +212,9 @@ describe('OutlineCanvas — conflict modal trigger (FB-C1-003)', () => {
     renderOutline();
 
     // 1. Select the chapter via the structure panel (panel selection path).
-    await user.click(screen.getByText('Chapter One'));
+    //    Scoped to the panel because real RF also renders the chapter title in
+    //    the graph node (FB-GS-002).
+    await user.click(within(structurePanel()).getByText('Chapter One'));
 
     // 2. Edit the title field to make the save button actionable.
     const titleInput = screen.getByDisplayValue('Chapter One');
@@ -220,7 +240,7 @@ describe('OutlineCanvas — conflict modal trigger (FB-C1-003)', () => {
     const user = userEvent.setup();
     renderOutline();
 
-    await user.click(screen.getByText('Chapter One'));
+    await user.click(within(structurePanel()).getByText('Chapter One'));
     const titleInput = screen.getByDisplayValue('Chapter One');
     await user.clear(titleInput);
     await user.type(titleInput, 'New Title');
@@ -240,8 +260,9 @@ describe('OutlineCanvas — panel selection path regression', () => {
     // Before selection, the inspector shows the empty-state message.
     expect(screen.getByText('Select a chapter to inspect its outline metadata.')).toBeInTheDocument();
 
-    // Click the chapter in the structure panel.
-    await user.click(screen.getByText('Chapter One'));
+    // Click the chapter in the structure panel. Scoped to the panel because
+    // real RF also renders the chapter title in the graph node (FB-GS-002).
+    await user.click(within(structurePanel()).getByText('Chapter One'));
 
     // The inspector should now show the Chapter Inspector with the chapter number.
     const inspector = screen.getByText('Chapter Inspector').closest('[class*="card"]') ?? document.body;
@@ -252,7 +273,7 @@ describe('OutlineCanvas — panel selection path regression', () => {
 describe('OutlineCanvas — graph↔list alt toggle (FB-C1-004)', () => {
   it('defaults to graph view (CanvasShell mounted, alt toggle not pressed)', () => {
     renderOutline();
-    expect(screen.getByTestId('canvas-shell-mock')).toBeInTheDocument();
+    expect(screen.getByTestId('rf-integration-harness')).toBeInTheDocument();
     const toggle = screen.getByRole('button', { name: 'Show list view' });
     expect(toggle).toHaveAttribute('aria-pressed', 'false');
   });
@@ -263,7 +284,7 @@ describe('OutlineCanvas — graph↔list alt toggle (FB-C1-004)', () => {
 
     // Click "Show list view" → alt view appears, graph mock disappears.
     await user.click(screen.getByRole('button', { name: 'Show list view' }));
-    expect(screen.queryByTestId('canvas-shell-mock')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('rf-integration-harness')).not.toBeInTheDocument();
     expect(screen.getByText('Chapters')).toBeInTheDocument();
     expect(screen.getByText('Timeline Events')).toBeInTheDocument();
 
@@ -273,7 +294,7 @@ describe('OutlineCanvas — graph↔list alt toggle (FB-C1-004)', () => {
 
     // Click "Show graph" → back to graph view.
     await user.click(graphToggle);
-    expect(screen.getByTestId('canvas-shell-mock')).toBeInTheDocument();
+    expect(screen.getByTestId('rf-integration-harness')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Show list view' })).toHaveAttribute(
       'aria-pressed',
       'false',
@@ -311,8 +332,185 @@ describe('OutlineCanvas — empty graph shell parity (I-QC1-001)', () => {
     renderOutline();
 
     // CanvasShell must be mounted (shared-shell parity FB-C1-000).
-    expect(screen.getByTestId('canvas-shell-mock')).toBeInTheDocument();
+    expect(screen.getByTestId('rf-integration-harness')).toBeInTheDocument();
     // The in-shell EmptyState overlay must be visible inside the shell.
     expect(screen.getByText('No graph nodes')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// V1.109 C2 T4 — Scene/Beat integration (FB-C2-000/002/003/004)
+// ---------------------------------------------------------------------------
+
+/** Scene/Beat fixture payload with a full Volume/Chapter/Scene/Beat hierarchy. */
+const SCENE_BEAT_FIXTURE = {
+  scenes: [
+    { sceneId: 'scene-1', chapterId: 1, title: 'Opening Scene', status: 'drafted' as const },
+    { sceneId: 'scene-2', chapterId: 1, title: null, status: 'completed' as const },
+  ],
+  beats: [
+    { beatId: 'beat-1', sceneId: 'scene-1', title: 'Inciting Moment', status: null },
+  ],
+};
+
+function renderOutlineWithFixture(fixture: typeof SCENE_BEAT_FIXTURE) {
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <OutlineCanvas workId="wk_test" sceneBeatFixture={fixture} />
+    </QueryClientProvider>,
+  );
+}
+
+describe('OutlineCanvas — Scene/Beat alt view integration (FB-C2-000/003)', () => {
+  beforeEach(() => {
+    // Restore default mock data — the empty-graph test above mutates the
+    // shared mocks. Each Scene/Beat test needs the default Volume/Chapter
+    // structure to render the hierarchy.
+    mocks.outlineResult.data = mocks.OUTLINE;
+    mocks.chaptersResult.data = {
+      pages: [{ items: [mocks.CHAPTER_1], pagination: { has_more: false, next_cursor: null } }],
+    };
+  });
+
+  it('renders Scene/Beat rows nested under chapters in alt view when fixture provided', async () => {
+    const user = userEvent.setup();
+    renderOutlineWithFixture(SCENE_BEAT_FIXTURE);
+
+    // Switch to list view.
+    await user.click(screen.getByRole('button', { name: 'Show list view' }));
+
+    const altSection = screen.getByLabelText('Outline chapters and timeline in list order');
+
+    // Scene rows appear with type badges and titles.
+    expect(within(altSection).getByText('Opening Scene')).toBeInTheDocument();
+    expect(within(altSection).getAllByText('Scene')).toHaveLength(2);
+
+    // Beat row nests under its scene.
+    expect(within(altSection).getByText('Inciting Moment')).toBeInTheDocument();
+    expect(within(altSection).getByText('Beat')).toBeInTheDocument();
+
+    // Null-title scene falls back to Untitled Scene (Voice & Content lock).
+    expect(within(altSection).getByText('Untitled Scene')).toBeInTheDocument();
+  });
+
+  it('shows the empty-under-chapter helper for chapters with zero scenes when fixture is active', async () => {
+    const user = userEvent.setup();
+    // Add a second chapter to the outline + chapters data so it has zero scenes.
+    mocks.outlineResult.data = {
+      ...mocks.OUTLINE,
+      volumes: [
+        { volume_id: 1, label: 'Volume 1', chapter_ids: [1, 2] },
+      ],
+    };
+    mocks.chaptersResult.data = {
+      pages: [
+        {
+          items: [
+            mocks.CHAPTER_1,
+            { ...mocks.CHAPTER_1, chapter: 2, title: 'Chapter Two' },
+          ],
+          pagination: { has_more: false, next_cursor: null },
+        },
+      ],
+    };
+
+    renderOutlineWithFixture(SCENE_BEAT_FIXTURE);
+    await user.click(screen.getByRole('button', { name: 'Show list view' }));
+
+    // Chapter 2 has no scenes in the fixture → the empty helper shows.
+    expect(screen.getByText('No scenes in this chapter yet.')).toBeInTheDocument();
+  });
+
+  it('does NOT render Scene/Beat rows or empty-under-chapter helper when no fixture (honest empty chrome)', async () => {
+    const user = userEvent.setup();
+    renderOutline(); // No fixture prop — real Work behavior.
+
+    await user.click(screen.getByRole('button', { name: 'Show list view' }));
+
+    // No Scene/Beat chrome at all.
+    expect(screen.queryByText('Scene')).not.toBeInTheDocument();
+    expect(screen.queryByText('Beat')).not.toBeInTheDocument();
+    expect(screen.queryByText('No scenes in this chapter yet.')).not.toBeInTheDocument();
+  });
+});
+
+describe('OutlineCanvas — Scene/Beat inspector mounting (FB-C2-002)', () => {
+  beforeEach(() => {
+    mocks.outlineResult.data = mocks.OUTLINE;
+    mocks.chaptersResult.data = {
+      pages: [{ items: [mocks.CHAPTER_1], pagination: { has_more: false, next_cursor: null } }],
+    };
+  });
+
+  it('shows the Chapter inspector by default (no Scene/Beat selection)', () => {
+    renderOutlineWithFixture(SCENE_BEAT_FIXTURE);
+
+    // Chapter inspector is the default even with a fixture — its empty-state
+    // prompt shows when no chapter is selected. Scene/Beat inspectors only
+    // appear when those nodes are selected via graph click.
+    expect(screen.getByText('Select a chapter to inspect its outline metadata.')).toBeInTheDocument();
+    // Scene/Beat inspector headings do NOT appear (those inspectors are not
+    // mounted when selectedScene/selectedBeat are null).
+    expect(screen.queryByText('Scene')).not.toBeInTheDocument();
+    expect(screen.queryByText('Beat')).not.toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// V1.109 P2 T3 — Real React Flow integration (FB-GS-002)
+// ---------------------------------------------------------------------------
+//
+// Before this change the file stubbed CanvasShell with a div so React Flow
+// never mounted in jsdom. That left the graph-click → inspector selection path
+// (the very wiring `useOutlineCanvasGraph` exists to provide) uncovered by a
+// real RF tree: a regression that broke RF node selection silently would pass
+// every mock-based test. The file-level mock factory now backs CanvasShell with
+// the real-RF integration harness (`rf-integration-harness.tsx`), so every test
+// in this file — including these — mounts a genuine `<ReactFlowProvider>` +
+// `<ReactFlow>` tree, renders real node components, and flows a real graph
+// click through RF's `onNodesChange` → the hook's selection-sync effect → the
+// inspector. These two tests pin the integration contract explicitly.
+describe('OutlineCanvas — real RF graph-click selection (FB-GS-002)', () => {
+  beforeEach(() => {
+    mocks.outlineResult.data = mocks.OUTLINE;
+    mocks.chaptersResult.data = {
+      pages: [{ items: [mocks.CHAPTER_1], pagination: { has_more: false, next_cursor: null } }],
+    };
+  });
+
+  it('renders real React Flow nodes from the projection (no mock stub)', () => {
+    renderOutline();
+
+    // The real-RF harness region mounts (replaces the div stub).
+    const harness = screen.getByTestId('rf-integration-harness');
+    // A real RF chapter node is rendered inside the harness — the projection
+    // (rfNodes) is consumed by a genuine <ReactFlow>. The chapter title appears
+    // inside the graph node, scoped to the harness so it does not collide with
+    // the structure-panel row.
+    expect(within(harness).getByText('Chapter One')).toBeInTheDocument();
+    // RF wraps each node in a `.react-flow__node` element carrying the node id —
+    // proof a real RF tree (not a stub) rendered the projection.
+    expect(harness.querySelector('.react-flow__node[data-id="chapter:1"]')).not.toBeNull();
+  });
+
+  it('clicking a chapter node in the RF graph drives the chapter inspector', async () => {
+    const user = userEvent.setup();
+    renderOutline();
+
+    // Before selection, the inspector shows the empty-state prompt.
+    expect(
+      screen.getByText('Select a chapter to inspect its outline metadata.'),
+    ).toBeInTheDocument();
+
+    const harness = screen.getByTestId('rf-integration-harness');
+    // Click the chapter title rendered INSIDE the real RF graph node (scoped to
+    // the harness so this targets the graph node, not the structure-panel row).
+    await user.click(within(harness).getByText('Chapter One'));
+
+    // Real RF selection flows: node `selected` → onNodesChange → hook
+    // selection-sync → setSelectedChapterId → Chapter inspector mounts with #1.
+    const inspector =
+      screen.getByText('Chapter Inspector').closest('[class*="card"]') ?? document.body;
+    expect(within(inspector as HTMLElement).getByText('#1')).toBeInTheDocument();
   });
 });

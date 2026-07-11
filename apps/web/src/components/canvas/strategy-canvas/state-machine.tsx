@@ -5,7 +5,7 @@
  * panel, steering artifacts list, and the edit-form shape used by the three
  * inspector sections.
  */
-import type { Node } from '@xyflow/react';
+import { type Connection, type Edge, type Node } from '@xyflow/react';
 import { AlertTriangle, ScrollText } from 'lucide-react';
 
 import type { ChangedField, ConflictModalDraft } from '@/components/canvas/conflict-modal';
@@ -157,5 +157,34 @@ export function selectedStateOf(
   if (!selected || !states) return undefined;
   const stateId = (selected.data as StrategyNodeData).stateId;
   return states.find((s) => s.id === stateId);
+}
+
+/** Label shown on a draft (uncommitted) transition edge (FB-SE-000, Voice & Content lock). */
+export const DRAFT_TRANSITION_LABEL = 'Draft transition';
+
+/**
+ * Build a draft transition edge from a React Flow connect gesture, or return
+ * `null` when the connection is invalid (self-loop / missing endpoints).
+ *
+ * The draft is **local-only** — it is never sent to the daemon until the author
+ * commits in the edge inspector (FB-SE-000 #4). The edge is marked selected so
+ * the canvas selection model drives inspector focus (FB-SE-000 #5). The draft
+ * id is stable per source/target pair so re-attempting a connect from the same
+ * state replaces the prior draft instead of stacking duplicates.
+ */
+export function createDraftTransitionEdge(connection: Connection): Edge | null {
+  const { source, target } = connection;
+  if (!source || !target || source === target) return null;
+  return {
+    id: `draft-${source}-${target}`,
+    source,
+    target,
+    type: 'strategy-edge',
+    label: DRAFT_TRANSITION_LABEL,
+    data: { transitionKind: 'next', condition: '', isDraft: true },
+    selected: true,
+    selectable: true,
+    focusable: true,
+  };
 }
 

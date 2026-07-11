@@ -545,6 +545,36 @@ fn validate_transition_condition(condition: &str) -> Result<(), NexusApiError> {
         })
 }
 
+/// Validate the `op` field of a transition patch request.
+///
+/// Only `"create"` and `"update"` are accepted; any other value (including
+/// `"delete"`) is rejected with a 422 `invalid_input` error so raw clients cannot
+/// silently fall through to the update path (Greptile Issue 5).
+fn validate_transition_op(op: &str) -> Result<(), NexusApiError> {
+    if op == "create" || op == "update" {
+        Ok(())
+    } else {
+        Err(NexusApiError::BadRequest {
+            code: "invalid_input".to_string(),
+            message: format!("op must be 'create' or 'update', got '{op}'"),
+        })
+    }
+}
+
+/// Validate the `transition_kind` field of a transition patch request.
+fn validate_transition_kind(kind: &str) -> Result<(), NexusApiError> {
+    if matches!(kind, "next" | "branch" | "default") {
+        Ok(())
+    } else {
+        Err(NexusApiError::BadRequest {
+            code: "invalid_input".to_string(),
+            message: format!(
+                "transition_kind must be 'next', 'branch', or 'default', got '{kind}'"
+            ),
+        })
+    }
+}
+
 // ─── Handlers ──────────────────────────────────────────────────────────────
 
 /// `POST /v1/daemon/strategies/{strategy_id}/states/{state_id}/patch` — patch a state.
@@ -671,30 +701,31 @@ fn patch_state_inner(
 /// so the caller can emit a `strategy_transition_not_found` error.
 fn apply_transition_patch(
     next: &mut serde_yaml::Value,
+    old_target: &str,
     req: &StrategyPatchTransitionRequest,
 ) -> (bool, Vec<String>) {
     let mut matched = false;
     let mut side_effects: Vec<String> = Vec::new();
 
     if next.is_string() {
-        if next.as_str().is_some_and(|v| v == req.old_target) {
-            let new_target = req.new_target.as_deref().unwrap_or(&req.old_target);
+        if next.as_str().is_some_and(|v| v == old_target) {
+            let new_target = req.new_target.as_deref().unwrap_or(old_target);
             *next = serde_yaml::Value::String(new_target.to_string());
             matched = true;
             side_effects.push(format!(
                 "transition {} -> {} set to {}",
-                req.source_state_id, req.old_target, new_target
+                req.source_state_id, old_target, new_target
             ));
         }
     } else if let Some(next_map) = next.as_mapping_mut() {
-        matched = apply_conditional_rules(next_map, req, &mut side_effects);
+        matched = apply_conditional_rules(next_map, old_target, req, &mut side_effects);
 
         if !matched {
-            matched = apply_default_transition(next_map, req, &mut side_effects);
+            matched = apply_default_transition(next_map, old_target, req, &mut side_effects);
         }
 
         if !matched {
-            matched = apply_go_nogo_branches(next_map, req, &mut side_effects);
+            matched = apply_go_nogo_branches(next_map, old_target, req, &mut side_effects);
         }
     }
 
@@ -704,16 +735,21 @@ fn apply_transition_patch(
 /// Match and update a conditional/labeled `rules` branch inside a transition.
 fn apply_conditional_rules(
     next_map: &mut serde_yaml::Mapping,
+    old_target: &str,
     req: &StrategyPatchTransitionRequest,
     side_effects: &mut Vec<String>,
 ) -> bool {
     let mut matched = false;
     if let Some(rules) = next_map.get_mut("rules").and_then(|v| v.as_sequence_mut()) {
+        // NOTE: when `req.condition` is omitted, every rule whose `to` matches
+        // `old_target` is updated. This means an `op: "update"` reconnect can
+        // rewrite multiple conditional branches that point to the same target
+        // (Greptile Issue 1 — deferred; add disambiguation before relying on it).
         for rule in rules {
             let to_match = rule
                 .get("to")
                 .and_then(serde_yaml::Value::as_str)
-                .is_some_and(|v| v == req.old_target);
+                .is_some_and(|v| v == old_target);
             let cond_match = req.condition.as_ref().is_none_or(|cond| {
                 rule.get("when")
                     .and_then(serde_yaml::Value::as_str)
@@ -729,7 +765,7 @@ fn apply_conditional_rules(
                 matched = true;
                 side_effects.push(format!(
                     "branch {} -> {} updated",
-                    req.source_state_id, req.old_target
+                    req.source_state_id, old_target
                 ));
             }
         }
@@ -740,17 +776,18 @@ fn apply_conditional_rules(
 /// Match and update the `default` target of a conditional transition.
 fn apply_default_transition(
     next_map: &mut serde_yaml::Mapping,
+    old_target: &str,
     req: &StrategyPatchTransitionRequest,
     side_effects: &mut Vec<String>,
 ) -> bool {
     if let Some(default) = next_map.get_mut("default") {
-        if default.as_str().is_some_and(|v| v == req.old_target) {
+        if default.as_str().is_some_and(|v| v == old_target) {
             if let Some(new_target) = &req.new_target {
                 *default = serde_yaml::Value::String(new_target.clone());
             }
             side_effects.push(format!(
                 "default transition {} -> {} updated",
-                req.source_state_id, req.old_target
+                req.source_state_id, old_target
             ));
             return true;
         }
@@ -761,13 +798,14 @@ fn apply_default_transition(
 /// Match and update `go` / `nogo` branches of a transition.
 fn apply_go_nogo_branches(
     next_map: &mut serde_yaml::Mapping,
+    old_target: &str,
     req: &StrategyPatchTransitionRequest,
     side_effects: &mut Vec<String>,
 ) -> bool {
     let mut matched = false;
     for key in ["go", "nogo"] {
         if let Some(branch) = next_map.get_mut(key) {
-            if branch.as_str().is_some_and(|v| v == req.old_target) {
+            if branch.as_str().is_some_and(|v| v == old_target) {
                 if let Some(new_target) = &req.new_target {
                     *branch = serde_yaml::Value::String(new_target.clone());
                 }
@@ -777,6 +815,208 @@ fn apply_go_nogo_branches(
         }
     }
     matched
+}
+
+/// Whether a conditional rule matches the same `(to, when)` pair as a create request.
+fn transition_rule_matches(
+    rule: &serde_yaml::Value,
+    target: &str,
+    condition: Option<&str>,
+) -> bool {
+    let to_match = rule
+        .get("to")
+        .and_then(serde_yaml::Value::as_str)
+        .is_some_and(|v| v == target);
+    if !to_match {
+        return false;
+    }
+    condition.map_or_else(
+        || rule.get("when").is_none(),
+        |cond| {
+            rule.get("when")
+                .and_then(serde_yaml::Value::as_str)
+                .is_some_and(|v| v == cond)
+        },
+    )
+}
+
+fn reject_linear_next_conflict(
+    next: &serde_yaml::Value,
+    source_state_id: &str,
+) -> Result<(), NexusApiError> {
+    if next.is_string() {
+        return Err(NexusApiError::BadRequest {
+            code: "strategy_transition_already_linear".to_string(),
+            message: format!(
+                "state '{source_state_id}' already has a linear next transition; create a branch instead"
+            ),
+        });
+    }
+    Ok(())
+}
+
+fn ensure_conditional_next_map(
+    next: &mut serde_yaml::Value,
+    source_state_id: &str,
+) -> Result<(), NexusApiError> {
+    reject_linear_next_conflict(next, source_state_id)?;
+
+    if next.is_null() {
+        let mut map = serde_yaml::Mapping::new();
+        map.insert(
+            serde_yaml::Value::String("kind".to_string()),
+            serde_yaml::Value::String("conditional".to_string()),
+        );
+        *next = serde_yaml::Value::Mapping(map);
+    }
+
+    if !next.is_mapping() {
+        return Err(NexusApiError::BadRequest {
+            code: "strategy_transition_invalid".to_string(),
+            message: format!("state '{source_state_id}' has an unsupported next transition shape"),
+        });
+    }
+
+    Ok(())
+}
+
+fn append_conditional_rule(
+    next_map: &mut serde_yaml::Mapping,
+    req: &StrategyPatchTransitionRequest,
+    new_target: &str,
+) -> Result<(), NexusApiError> {
+    let rules = next_map
+        .entry(serde_yaml::Value::String("rules".to_string()))
+        .or_insert_with(|| serde_yaml::Value::Sequence(Vec::new()))
+        .as_sequence_mut()
+        .ok_or_else(|| NexusApiError::BadRequest {
+            code: "strategy_transition_invalid".to_string(),
+            message: format!(
+                "state '{}' has a non-array rules transition",
+                req.source_state_id
+            ),
+        })?;
+
+    if rules
+        .iter()
+        .any(|rule| transition_rule_matches(rule, new_target, req.condition.as_deref()))
+    {
+        return Err(NexusApiError::BadRequest {
+            code: "strategy_transition_duplicate".to_string(),
+            message: format!(
+                "state '{}' already has a transition to '{}' with the same condition",
+                req.source_state_id, new_target
+            ),
+        });
+    }
+
+    let mut new_rule = serde_yaml::Mapping::new();
+    new_rule.insert(
+        serde_yaml::Value::String("to".to_string()),
+        serde_yaml::Value::String(new_target.to_string()),
+    );
+    if let Some(condition) = &req.condition {
+        new_rule.insert(
+            serde_yaml::Value::String("when".to_string()),
+            serde_yaml::Value::String(condition.clone()),
+        );
+    }
+    rules.push(serde_yaml::Value::Mapping(new_rule));
+    Ok(())
+}
+
+/// Resolve the create form when `transition_kind` is omitted.
+///
+/// Legacy callers without `transition_kind` keep the shipped behavior: absent
+/// `next` becomes a linear scalar; an existing conditional map appends a rule.
+fn resolved_create_transition_kind<'a>(
+    req: &'a StrategyPatchTransitionRequest,
+    next: &serde_yaml::Value,
+) -> Result<&'a str, NexusApiError> {
+    match req.transition_kind.as_deref() {
+        Some(kind) => {
+            validate_transition_kind(kind)?;
+            Ok(kind)
+        }
+        None if next.is_null() => Ok("next"),
+        None => Ok("branch"),
+    }
+}
+
+/// Create a new outgoing transition on a `next` YAML value.
+///
+/// Honors `transition_kind` when supplied:
+/// - `next` — linear scalar when `next` is absent; rejects conditional maps.
+/// - `branch` — appends a conditional rule (or seeds a conditional map).
+/// - `default` — sets the conditional `default` target.
+fn apply_transition_create(
+    next: &mut serde_yaml::Value,
+    req: &StrategyPatchTransitionRequest,
+    new_target: &str,
+) -> Result<Vec<String>, NexusApiError> {
+    let kind = resolved_create_transition_kind(req, next)?;
+    let mut side_effects: Vec<String> = Vec::new();
+
+    match kind {
+        "next" => {
+            if !next.is_null() {
+                return Err(NexusApiError::BadRequest {
+                    code: "strategy_transition_already_conditional".to_string(),
+                    message: format!(
+                        "state '{}' already has a conditional next transition; create a branch or default instead",
+                        req.source_state_id
+                    ),
+                });
+            }
+            *next = serde_yaml::Value::String(new_target.to_string());
+            side_effects.push(format!(
+                "transition {} -> {} created",
+                req.source_state_id, new_target
+            ));
+        }
+        "branch" => {
+            ensure_conditional_next_map(next, &req.source_state_id)?;
+            let next_map = next
+                .as_mapping_mut()
+                .expect("ensure_conditional_next_map leaves a mapping");
+            append_conditional_rule(next_map, req, new_target)?;
+            // Conditional presets require a `default` target; seed one when the
+            // author adds the first branch to an otherwise-empty state.
+            if !next_map.contains_key(serde_yaml::Value::String("default".to_string())) {
+                next_map.insert(
+                    serde_yaml::Value::String("default".to_string()),
+                    serde_yaml::Value::String(new_target.to_string()),
+                );
+            }
+            side_effects.push(format!(
+                "branch {} -> {} created",
+                req.source_state_id, new_target
+            ));
+        }
+        "default" => {
+            if req.condition.is_some() {
+                return Err(NexusApiError::BadRequest {
+                    code: "strategy_transition_default_condition".to_string(),
+                    message: "default transitions do not accept a condition".to_string(),
+                });
+            }
+            ensure_conditional_next_map(next, &req.source_state_id)?;
+            let next_map = next
+                .as_mapping_mut()
+                .expect("ensure_conditional_next_map leaves a mapping");
+            next_map.insert(
+                serde_yaml::Value::String("default".to_string()),
+                serde_yaml::Value::String(new_target.to_string()),
+            );
+            side_effects.push(format!(
+                "default transition {} -> {} created",
+                req.source_state_id, new_target
+            ));
+        }
+        _ => unreachable!("resolved_create_transition_kind only returns known kinds"),
+    }
+
+    Ok(side_effects)
 }
 
 /// `POST /v1/daemon/strategies/{strategy_id}/transitions/patch` — rewire a transition.
@@ -815,6 +1055,12 @@ fn patch_transition_inner(
     strategy_id: &str,
     req: &StrategyPatchTransitionRequest,
 ) -> Result<StrategyPatchResponse, NexusApiError> {
+    // Reject unknown `op` values early so raw clients cannot send e.g. `op: "delete"`
+    // and silently fall through to the update path (Greptile Issue 5).
+    if let Some(op) = &req.op {
+        validate_transition_op(op)?;
+    }
+
     let bundle_dir = user_preset_bundle_dir(nexus_home, strategy_id);
     let _guard = acquire_strategy_lock(&bundle_dir)?;
 
@@ -858,24 +1104,63 @@ fn patch_transition_inner(
             message: "state index disappeared during transition patch".to_string(),
         })?;
 
-    let next = state_node
-        .get_mut("next")
-        .ok_or_else(|| NexusApiError::BadRequest {
-            code: "strategy_transition_missing".to_string(),
-            message: format!("state '{}' has no outgoing transition", req.source_state_id),
-        })?;
+    let op = req.op.as_deref().unwrap_or("update");
 
-    let (matched, side_effects) = apply_transition_patch(next, req);
+    let side_effects = if op == "create" {
+        let new_target = req
+            .new_target
+            .as_deref()
+            .ok_or_else(|| NexusApiError::BadRequest {
+                code: "strategy_transition_missing_new_target".to_string(),
+                message: format!(
+                    "new_target is required when creating a transition from state '{}'",
+                    req.source_state_id
+                ),
+            })?;
 
-    if !matched {
-        return Err(NexusApiError::BadRequest {
-            code: "strategy_transition_not_found".to_string(),
-            message: format!(
-                "no transition from '{}' to '{}' matches the request",
-                req.source_state_id, req.old_target
-            ),
-        });
-    }
+        // For create, `next` may be absent; treat absent as null so a new
+        // transition is inserted.
+        if state_node.get("next").is_none() {
+            state_node["next"] = serde_yaml::Value::Null;
+        }
+        let next = state_node
+            .get_mut("next")
+            .expect("next was just inserted if absent");
+        apply_transition_create(next, req, new_target)?
+    } else {
+        // `op` defaults to "update"; any value other than "create" is treated as
+        // an update to preserve backward compatibility with shipped callers.
+        let old_target = req
+            .old_target
+            .as_deref()
+            .ok_or_else(|| NexusApiError::BadRequest {
+                code: "strategy_transition_missing_old_target".to_string(),
+                message: format!(
+                    "old_target is required when updating a transition from state '{}'",
+                    req.source_state_id
+                ),
+            })?;
+
+        let next = state_node
+            .get_mut("next")
+            .ok_or_else(|| NexusApiError::BadRequest {
+                code: "strategy_transition_missing".to_string(),
+                message: format!("state '{}' has no outgoing transition", req.source_state_id),
+            })?;
+
+        let (matched, side_effects) = apply_transition_patch(next, old_target, req);
+
+        if !matched {
+            return Err(NexusApiError::BadRequest {
+                code: "strategy_transition_not_found".to_string(),
+                message: format!(
+                    "no transition from '{}' to '{}' matches the request",
+                    req.source_state_id, old_target
+                ),
+            });
+        }
+        side_effects
+    };
 
     let (errors, warnings) = validate_preset_yaml(&bundle_dir, &yaml_value)?;
     if !errors.is_empty() {
@@ -1235,10 +1520,11 @@ states:
             strategy_id: "test-strategy".to_string(),
             base_revision: 1,
             source_state_id: "start".to_string(),
-            old_target: "end".to_string(),
+            old_target: Some("end".to_string()),
             new_target: Some("end".to_string()),
             condition: None,
             transition_kind: Some("next".to_string()),
+            op: None,
         };
         // Sanity: rewriting to the same target is a no-op but should succeed.
         let res = patch_transition(State(state), Path("test-strategy".to_string()), Json(req))
@@ -1291,10 +1577,11 @@ states:
             strategy_id: "test-strategy".to_string(),
             base_revision: 1,
             source_state_id: "start".to_string(),
-            old_target: "end".to_string(),
+            old_target: Some("end".to_string()),
             new_target: None,
             condition: Some("not a valid expression @#$".to_string()),
             transition_kind: None,
+            op: None,
         };
         let err = patch_transition(State(state), Path("test-strategy".to_string()), Json(req))
             .await

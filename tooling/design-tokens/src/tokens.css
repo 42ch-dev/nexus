@@ -143,6 +143,13 @@
   --color-canvas-outline-foreshadow-edge: #A78BFA;
   --color-canvas-outline-timeline-marker: #0EA5E9;
   --color-canvas-outline-conflict-marker: #EF4444;
+  /* Outline Scene/Beat — DESIGN.md §Canvas Outline Tokens (V1.109 C2; FB-C2-001). */
+  --color-canvas-outline-scene-fill: #FAFAF9;
+  --color-canvas-outline-scene-border: rgba(0, 0, 0, 0.14);
+  --color-canvas-outline-scene-status-drafted: #3B82F6;
+  --color-canvas-outline-scene-status-completed: #10B981;
+  --color-canvas-outline-beat-fill: #F5F5F4;
+  --color-canvas-outline-beat-border: rgba(0, 0, 0, 0.14);
 
   /* V1.79 P1 — SOUL personality visualization tokens (DESIGN.md). */
   --color-soul-viz-keyword-cluster-node-fill: rgba(124, 58, 237, 0.18);
@@ -370,6 +377,13 @@
   --color-canvas-outline-foreshadow-edge: #C4B5FD;
   --color-canvas-outline-timeline-marker: #38BDF8;
   --color-canvas-outline-conflict-marker: #F87171;
+  /* Outline Scene/Beat — DESIGN.dark.md §Canvas Outline Tokens (V1.109 C2; FB-C2-001). */
+  --color-canvas-outline-scene-fill: #262625;
+  --color-canvas-outline-scene-border: rgba(255, 255, 255, 0.18);
+  --color-canvas-outline-scene-status-drafted: #60A5FA;
+  --color-canvas-outline-scene-status-completed: #34D399;
+  --color-canvas-outline-beat-fill: #1F1F1E;
+  --color-canvas-outline-beat-border: rgba(255, 255, 255, 0.18);
 
   /* V1.79 P1 — SOUL personality visualization tokens (DESIGN.dark.md). */
   --color-soul-viz-keyword-cluster-node-fill: rgba(183, 148, 255, 0.2);

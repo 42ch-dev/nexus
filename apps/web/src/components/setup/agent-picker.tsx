@@ -13,7 +13,7 @@
  */
 
 import { ArrowUpRight, Loader2, Terminal } from 'lucide-react';
-import type { ReactNode } from 'react';
+import { memo, useCallback, useRef, type ReactNode } from 'react';
 
 import { cn } from '@/lib/utils';
 import { Badge, Button, Input, Label } from '@42ch/nexus-ui';
@@ -43,9 +43,12 @@ export type AgentPickerDensity = 'default' | 'compact';
  * - `idle` — no probe run yet (default).
  * - `loading` — probe in flight; Verify button shows spinner + disabled.
  * - `success` — probe matched an installed agent; show success helper.
- * - `error` — probe did not match; show failure helper.
+ * - `no-match` — scan reached the daemon but no installed agent matched the
+ *   command; show the no-match helper.
+ * - `error` — could not reach the daemon (transport failure); show the
+ *   unreachable helper.
  */
-export type AgentVerifyStatus = 'idle' | 'loading' | 'success' | 'error';
+export type AgentVerifyStatus = 'idle' | 'loading' | 'success' | 'no-match' | 'error';
 
 export interface AgentPickerProps {
   status: AgentPickerStatus;
@@ -104,6 +107,16 @@ export function AgentPicker({
     (status === 'empty' ||
       status === 'error' ||
       (status === 'ready' && agents.length > 0));
+
+  // Stabilise onSelect so that memoised AgentCards do not re-render when the
+  // host re-renders for an unrelated reason (e.g. verifyStatus change). The ref
+  // always points at the latest prop without changing callback identity.
+  // R-V1108P1QC3-W001
+  const onSelectRef = useRef(onSelect);
+  onSelectRef.current = onSelect;
+  const stableOnSelect = useCallback((id: string) => {
+    onSelectRef.current?.(id);
+  }, []);
 
   return (
     <div className={cn('flex flex-col', compact ? 'gap-3' : 'gap-4', className)}>
@@ -175,7 +188,7 @@ export function AgentPicker({
                 <AgentCard
                   agent={agent}
                   selected={selectedId === agent.id}
-                  onSelect={onSelect}
+                  onSelect={stableOnSelect}
                   compact={compact}
                 />
               </li>
@@ -208,7 +221,7 @@ export function AgentPicker({
   );
 }
 
-function AgentCard({
+const AgentCard = memo(function AgentCard({
   agent,
   selected,
   onSelect,
@@ -266,7 +279,7 @@ function AgentCard({
       </div>
     </div>
   );
-}
+});
 
 function AgentCardIdentity({
   agent,
@@ -442,6 +455,15 @@ function CustomLaunchField({
           role="status"
         >
           Agent responded successfully.
+        </p>
+      ) : null}
+      {verifyStatus === 'no-match' ? (
+        <p
+          className="text-copy-13 text-red-700"
+          data-testid="agent-picker-verify-error"
+          role="alert"
+        >
+          No matching agent for this command. Check the command and try again.
         </p>
       ) : null}
       {verifyStatus === 'error' ? (

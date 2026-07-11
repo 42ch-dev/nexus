@@ -507,6 +507,13 @@ components:
     canvas-outline-foreshadow-edge: "#A78BFA"
     canvas-outline-timeline-marker: "#0EA5E9"
     canvas-outline-conflict-marker: "#EF4444"
+    # Outline Scene/Beat (V1.109 C2 — FB-C2-001)
+    canvas-outline-scene-fill: "#FAFAF9"
+    canvas-outline-scene-border: "rgba(0,0,0,0.14)"
+    canvas-outline-scene-status-drafted: "#3B82F6"
+    canvas-outline-scene-status-completed: "#10B981"
+    canvas-outline-beat-fill: "#F5F5F4"
+    canvas-outline-beat-border: "rgba(0,0,0,0.14)"
     # World KB
     canvas-worldkb-entity-card-fill-default: "#FFFFFF"
     canvas-worldkb-entity-card-fill-hover: "#F5F5F5"
