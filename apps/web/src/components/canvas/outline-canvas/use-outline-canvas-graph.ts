@@ -126,6 +126,20 @@ export function useOutlineCanvasGraph(
     });
   }, [projection]);
 
+  // FB-GS-001 — selection-sync overfire guard. RF emits a NEW `rfNodes` array
+  // ref on every node interaction, including position-only drags (via
+  // `applyNodeChanges`). Depending the selection-sync effect directly on
+  // `rfNodes` made it re-run on every drag, re-resolving the selected entity
+  // and re-calling the inspector setters — a latent perf trap as graphs grow
+  // (R-V1108P0QC3-W001). RF is single-select here, so the selected node's id
+  // (or `''` when nothing is selected) fully identifies the selection;
+  // resolving chapter/scene/beat from that id is deterministic. This memo
+  // returns a primitive that changes ONLY when which node is selected changes.
+  const selectionKey = useMemo(
+    () => rfNodes.find((n) => n.selected)?.id ?? '',
+    [rfNodes],
+  );
+
   // Graph click → inspector selection sync (FB-C1-003 + FB-C2-002).
   // React Flow tracks selection via the node `selected` flag (set through
   // onNodesChange). Resolve it to `selectedChapterId` / `selectedSceneId` /
@@ -143,6 +157,11 @@ export function useOutlineCanvasGraph(
   // V1.109 C2 T3 — extended to resolve Scene + Beat in the same pass so a
   // single graph click coordinates all three inspectors (selecting a Beat
   // clears both Scene and Chapter selections, etc.).
+  //
+  // V1.109 P2 T2 — depend on `selectionKey` instead of `rfNodes` so the effect
+  // re-fires only when the selected node id changes. The body still reads
+  // `rfNodes`; that is safe because whenever `selectionKey` changes, `rfNodes`
+  // has already updated in the same render, so the closure is current.
   useEffect(() => {
     const someSelected = rfNodes.some((n) => n.selected);
 
@@ -167,7 +186,7 @@ export function useOutlineCanvasGraph(
       setSelectedBeatId(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rfNodes]);
+  }, [selectionKey]);
 
   return {
     rfNodes,

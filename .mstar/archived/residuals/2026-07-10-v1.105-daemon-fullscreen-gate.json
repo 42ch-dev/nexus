@@ -1,34 +1,47 @@
 {
   "plan_id": "2026-07-10-v1.105-daemon-fullscreen-gate",
-  "schema_version": 1,
-  "archived_at": "2026-07-10T01:35:00+0800",
-  "archived_reason": "V1.105 P1 Tasks 2–3: bootstrap on Workspace Continue; Daemon wizard step retired.",
-  "entries": [
+  "findings": [
     {
-      "id": "R-V1105P0-001",
-      "title": "Clean-state: D2 auto-start before ensureSetupBootstrap; gate blocks wizard until P1 moves bootstrap to Workspace Continue",
-      "severity": "medium",
+      "id": "R-V1105P0-003",
+      "title": "DaemonLaunchGate timeout callback can race after markReady (ready→error)",
+      "severity": "low",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "post-V1.105",
       "lifecycle": "resolved",
+      "tracking_link": ".mstar/plans/2026-07-10-v1.105-daemon-fullscreen-gate.md",
+      "note": "QC2 S001. Inherited pattern.",
       "closed_at": "2026-07-10",
-      "closed_by": "2026-07-10-v1.105-wizard-ia-reorder",
-      "source_plan_id": "2026-07-10-v1.105-daemon-fullscreen-gate",
-      "tracking_link": ".mstar/plans/2026-07-10-v1.105-wizard-ia-reorder.md",
-      "archived_at": "2026-07-10",
-      "closure_note": "ensureSetupBootstrap runs only on SetupStepWorkspace Continue.",
-      "closure_evidence": "apps/web/src/pages/setup-step-workspace.tsx; setup-step-workspace.test.tsx"
+      "closed_by": "V1.106 P1 T3",
+      "closure_note": "Added a local `ready` guard in the useEffect closure so the timeout callback cannot set error after markReady has already fired."
     },
     {
-      "id": "R-V1105P0-002",
-      "title": "setup-step-daemon.tsx still calls startDaemon on error/reset until P1 retires Daemon wizard step",
-      "severity": "low",
+      "id": "R-V1105P0-004",
+      "title": "Missing explicit retry→reload and degraded Vitest cases for DaemonLaunchGate",
+      "severity": "nit",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "post-V1.105",
       "lifecycle": "resolved",
+      "tracking_link": ".mstar/plans/2026-07-10-v1.105-daemon-fullscreen-gate.md",
+      "note": "QC1/QC2 suggestions.",
       "closed_at": "2026-07-10",
-      "closed_by": "2026-07-10-v1.105-wizard-ia-reorder",
-      "source_plan_id": "2026-07-10-v1.105-daemon-fullscreen-gate",
-      "tracking_link": ".mstar/plans/2026-07-10-v1.105-wizard-ia-reorder.md",
-      "archived_at": "2026-07-10",
-      "closure_note": "Deleted setup-step-daemon.tsx; wizard is Agent→Workspace→Done. Daemon start owned by P0 DaemonLaunchGate only.",
-      "closure_evidence": "apps/web/src/pages/setup-wizard-page.tsx; deleted setup-step-daemon.tsx"
+      "closed_by": "V1.106 P1 T3",
+      "closure_note": "Added Vitest cases in daemon-launch-gate.test.tsx: retry button reloads the window, and degraded initial status passes the gate."
+    },
+    {
+      "id": "R-V1105P0-005",
+      "title": "Settings re-run test does not mount DaemonLaunchGate",
+      "severity": "nit",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "post-V1.105",
+      "lifecycle": "resolved",
+      "tracking_link": ".mstar/plans/2026-07-10-v1.105-daemon-fullscreen-gate.md",
+      "note": "QC3 suggestion; gate covered separately.",
+      "closed_at": "2026-07-10",
+      "closed_by": "V1.106 P1 T3",
+      "closure_note": "Extended the re-run test mount in settings-setup-section.test.tsx to wrap routes with DaemonLaunchGate, mirroring the production App shell."
     }
   ]
 }

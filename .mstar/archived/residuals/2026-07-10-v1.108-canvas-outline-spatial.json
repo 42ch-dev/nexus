@@ -1,0 +1,103 @@
+{
+  "plan_id": "2026-07-10-v1.108-canvas-outline-spatial",
+  "findings": [
+    {
+      "id": "R-V1108P1QC1-S001",
+      "title": "CREATOR_NAV/ORCHESTRATOR_NAV duplicated between settings fixture and surfaces.tsx",
+      "severity": "suggestion",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "post-V1.108",
+      "lifecycle": "resolved",
+      "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
+      "note": "QC1 S-001. Studio fixture data drift risk; extract shared helper.",
+      "closed_at": "2026-07-11",
+      "closed_by": "V1.109 P2 T4",
+      "closure_note": "Extracted CREATOR_NAV/ORCHESTRATOR_NAV to apps/design-studio/src/fixtures/shell-nav-data.ts; both surfaces.tsx and settings-host-fixtures.tsx import from the single source."
+    },
+    {
+      "id": "R-V1108P1QC2-S001",
+      "title": "Verify error helper does not distinguish transport failure vs no-match",
+      "severity": "suggestion",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "post-V1.108",
+      "lifecycle": "resolved",
+      "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
+      "note": "QC2 S-001. Spec-locked copy either way; distinguish in future.",
+      "closed_at": "2026-07-11",
+      "closed_by": "V1.109 P2 T4",
+      "closure_note": "Added 'no-match' AgentVerifyStatus; AgentPicker shows 'No matching agent for this command.' (scan reached daemon, no agent matched) vs 'Could not reach this agent.' (transport failure). Both hosts map ok=false to no-match, catch to error."
+    },
+    {
+      "id": "R-V1108P1QC3-W001",
+      "title": "AgentPicker re-renders entire card grid on verifyStatus change",
+      "severity": "low",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "post-V1.108",
+      "lifecycle": "resolved",
+      "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
+      "note": "QC3 W-001. Negligible at 2-6 cards; React.memo if grid grows.",
+      "closed_at": "2026-07-11",
+      "closed_by": "V1.109 P2 T4",
+      "closure_note": "Wrapped AgentCard in React.memo; stabilized onSelect via ref pattern in AgentPicker so verifyStatus changes no longer trigger card re-renders."
+    },
+    {
+      "id": "R-V1108P1QC3-W002",
+      "title": "useVerifyAgent mutation lacks unmount cancellation",
+      "severity": "low",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "post-V1.108",
+      "lifecycle": "resolved",
+      "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
+      "note": "QC3 W-002. Local daemon scan <100ms; minimal risk.",
+      "closed_at": "2026-07-11",
+      "closed_by": "V1.109 P2 T4",
+      "closure_note": "Added AbortController to useVerifyAgent with useEffect cleanup on unmount; stale scan results after unmount throw AbortError instead of settling."
+    },
+    {
+      "id": "R-V1108P0QC3-W001",
+      "title": "Selection-sync useEffect fires on every node interaction (not just selection changes) — latent perf trap",
+      "severity": "low",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "post-V1.108",
+      "lifecycle": "resolved",
+      "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
+      "note": "QC3 W-001. Acceptable at author-scale; derive from onNodesChange in future.",
+      "closed_at": "2026-07-11",
+      "closed_by": "V1.109 P2 T2 (FB-GS-001)",
+      "closure_note": "Selection sync now guards on selected entity id change only; pure position drag no longer triggers inspector rebind."
+    },
+    {
+      "id": "R-V1108P0QC3-S002",
+      "title": "Graph<->list toggle unmounts CanvasShell, losing RF viewport state",
+      "severity": "suggestion",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "post-V1.108",
+      "lifecycle": "resolved",
+      "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
+      "note": "QC3 S-002. Acceptable for P0 (deterministic layout); CSS visibility toggle when drag/auto-layout lands.",
+      "closed_at": "2026-07-11",
+      "closed_by": "V1.109 P2 T1 (FB-GS-000)",
+      "closure_note": "use-canvas-viewport.ts hook preserves pan/zoom across graph↔list toggle; viewport restored on re-mount."
+    },
+    {
+      "id": "R-V1108P0QC3-S003",
+      "title": "CanvasShell fully mocked in orchestrator tests — no real RF integration coverage",
+      "severity": "suggestion",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "post-V1.108",
+      "lifecycle": "resolved",
+      "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
+      "note": "QC3 S-003. jsdom lacks ResizeObserver; E2E test needed in follow-up.",
+      "closed_at": "2026-07-11",
+      "closed_by": "V1.109 P2 T3 (FB-GS-002)",
+      "closure_note": "Real RF integration harness under canvas test utilities; ≥1 Outline orchestrator test uses real ReactFlow with ResizeObserver polyfill."
+    }
+  ]
+}

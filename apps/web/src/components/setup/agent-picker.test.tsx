@@ -326,4 +326,20 @@ describe('AgentPicker', () => {
     );
     expect(screen.queryByTestId('agent-picker-verify-success')).toBeNull();
   });
+
+  it('shows no-match helper when verifyStatus is no-match (R-V1108P1QC2-S001)', () => {
+    render(
+      <AgentPicker
+        status="empty"
+        customLaunchValue="/bin/nonexistent"
+        onCustomLaunchChange={() => undefined}
+        onVerify={() => undefined}
+        verifyStatus="no-match"
+      />,
+    );
+    expect(screen.getByTestId('agent-picker-verify-error')).toHaveTextContent(
+      'No matching agent for this command. Check the command and try again.',
+    );
+    expect(screen.queryByTestId('agent-picker-verify-success')).toBeNull();
+  });
 });

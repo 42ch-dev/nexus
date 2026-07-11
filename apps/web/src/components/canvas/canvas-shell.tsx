@@ -31,6 +31,8 @@ import {
   type OnReconnect,
 } from '@xyflow/react';
 
+import { useCanvasViewport } from './use-canvas-viewport';
+
 import '@xyflow/react/dist/style.css';
 
 export interface CanvasShellProps {
@@ -49,6 +51,13 @@ export interface CanvasShellProps {
   ariaLabel: string;
   /** Overlay children rendered above the graph (idea input, inspector, etc.). */
   children?: ReactNode;
+  /**
+   * Stable key for viewport caching across graph↔list toggles (FB-GS-000).
+   * When provided, the pan/zoom viewport is cached on user interaction and
+   * restored on re-mount instead of re-fitting. Omit to opt out (surfaces
+   * that have not opted in keep the previous re-fit behaviour).
+   */
+  surfaceKey?: string;
 }
 
 /**
@@ -67,7 +76,13 @@ function CanvasShellInner({
   summaryText,
   ariaLabel,
   children,
+  surfaceKey,
 }: CanvasShellProps) {
+  // FB-GS-000 — cache pan/zoom so a graph↔list toggle does not drop the
+  // viewport. When a cached viewport exists, restore it instead of fitting.
+  const { cachedViewport, onViewportChange } = useCanvasViewport(surfaceKey);
+  const hasCachedViewport = cachedViewport !== null;
+
   return (
     <div className="relative h-[calc(100vh-180px)] min-h-[420px] w-full overflow-hidden rounded-card border border-gray-alpha-400 bg-canvas-surface">
       {/* Screen-reader graph summary (A8 #3) — live region, polite. */}
@@ -86,8 +101,10 @@ function CanvasShellInner({
         onReconnect={onReconnect}
         nodesFocusable
         edgesFocusable
-        fitView
+        fitView={!hasCachedViewport}
         fitViewOptions={{ padding: 0.2 }}
+        defaultViewport={hasCachedViewport ? cachedViewport : undefined}
+        onMove={(_, viewport) => onViewportChange(viewport)}
         proOptions={{ hideAttribution: true }}
         aria-label={ariaLabel}
         className="bg-canvas-surface"
