@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, NavLink, useLocation } from 'react-router-dom';
+import { Link, NavLink, useLocation, useParams } from 'react-router-dom';
 import {
   Boxes,
   BrainCircuit,
@@ -14,6 +14,7 @@ import { FooterProfiles } from '@/components/layout/footer-profiles';
 import {
   CANVAS_NAV_GROUP,
   resolveActiveCanvasSurface,
+  resolveCanvasNavTarget,
   type CanvasNavItem,
 } from '@/components/layout/canvas-nav';
 import {
@@ -76,10 +77,24 @@ const ORCHESTRATOR_GROUPS: ShellNavGroup[] = [
  * resolver-driven for Canvas items (via {@link resolveActiveCanvasSurface})
  * and prefix-driven for non-canvas items — keeping the chrome's markup SSOT
  * with no mirrored item markup in the host.
+ *
+ * Navigation note (V1.111 T3): Canvas items don't navigate to their static
+ * `to` (a list-picker identity); the click target is computed by
+ * {@link resolveCanvasNavTarget} from the URL-scoped Work/World context so the
+ * active context is preserved (e.g. Outline on a Work route →
+ * `/works/:workId/outline`, not `/works`). The app has no global active
+ * work/world — ids come from `useParams`, exactly like the palette's
+ * `canvas-nav-commands.tsx`. When a surface has no valid target (World KB with
+ * no `worldId` and no `/worlds` picker), the item renders disabled.
  */
 export function Sidebar() {
   const [activeTab, setActiveTab] = useState<ShellSidebarTab>('creator');
   const { pathname } = useLocation();
+  // URL-scoped context for Canvas nav targets (mirrors canvas-nav-commands).
+  // Sidebar lives in RootLayout (a layout route), so useParams returns the leaf
+  // route's params — workId/worldId are populated on Work-/World-scoped routes
+  // and undefined elsewhere.
+  const { workId, worldId } = useParams<{ workId?: string; worldId?: string }>();
   const groups = activeTab === 'creator' ? CREATOR_GROUPS : ORCHESTRATOR_GROUPS;
 
   return (
@@ -103,13 +118,32 @@ export function Sidebar() {
           return route === item.to || route.startsWith(`${item.to}/`);
         }}
         renderNavItem={(item, className, content, isActive) => {
-          // Canvas items use <Link> (not <NavLink>) so react-router's own
-          // prefix detection can't re-introduce the false positive the
-          // resolver exists to fix. aria-current is host-owned for these.
+          // Canvas items: compute the context-aware click target (T3). The
+          // static `item.to` is the chrome-keyed identity only; the real
+          // destination preserves the active Work/World context. A `null`
+          // target means the surface has no valid entry point (World KB with
+          // no worldId and no `/worlds` picker) → render disabled.
           if ('surfaceId' in item) {
+            const target = resolveCanvasNavTarget((item as CanvasNavItem).surfaceId, {
+              workId,
+              worldId,
+            });
+            if (target === null) {
+              return (
+                <span
+                  aria-disabled="true"
+                  className={cn(className, 'cursor-not-allowed opacity-50 pointer-events-none')}
+                >
+                  {content}
+                </span>
+              );
+            }
+            // `<Link>` (not `<NavLink>`) so react-router's own prefix detection
+            // can't re-introduce the false positive the resolver exists to fix.
+            // aria-current is host-owned for Canvas items.
             return (
               <Link
-                to={item.to}
+                to={target}
                 aria-current={isActive ? 'page' : undefined}
                 className={className}
               >

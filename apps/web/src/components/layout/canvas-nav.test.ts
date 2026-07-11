@@ -12,6 +12,7 @@ import {
   CANVAS_ITEMS,
   CANVAS_NAV_GROUP,
   resolveActiveCanvasSurface,
+  resolveCanvasNavTarget,
   type CanvasSurfaceId,
 } from './canvas-nav';
 
@@ -101,5 +102,66 @@ describe('CANVAS_NAV_GROUP — group data shape', () => {
       expect(item.label.length).toBeGreaterThan(0);
       expect(item.icon).toBeDefined();
     }
+  });
+});
+
+describe('resolveCanvasNavTarget — Outline (workId-aware)', () => {
+  it('routes to the work-scoped outline surface when a workId is present', () => {
+    expect(resolveCanvasNavTarget('outline', { workId: 'w-42' })).toBe('/works/w-42/outline');
+  });
+
+  it('encodes the workId so a space-bearing id stays one path segment', () => {
+    expect(resolveCanvasNavTarget('outline', { workId: 'w 4' })).toBe('/works/w%204/outline');
+  });
+
+  it('falls back to the /works picker when no workId is in the URL', () => {
+    expect(resolveCanvasNavTarget('outline', {})).toBe('/works');
+  });
+
+  it('falls back to the /works picker when workId is undefined', () => {
+    expect(resolveCanvasNavTarget('outline', { workId: undefined })).toBe('/works');
+  });
+});
+
+describe('resolveCanvasNavTarget — World KB (worldId-gated, no /worlds picker)', () => {
+  it('routes to the world-scoped kb surface when a worldId is present', () => {
+    expect(resolveCanvasNavTarget('world-kb', { worldId: 'world-7' })).toBe('/worlds/world-7/kb');
+  });
+
+  it('encodes the worldId so a space-bearing id stays one path segment', () => {
+    expect(resolveCanvasNavTarget('world-kb', { worldId: 'w 7' })).toBe('/worlds/w%207/kb');
+  });
+
+  it('returns null (disabled) when no worldId is in the URL — no /worlds picker exists', () => {
+    expect(resolveCanvasNavTarget('world-kb', {})).toBeNull();
+  });
+
+  it('returns null (disabled) when worldId is undefined', () => {
+    expect(resolveCanvasNavTarget('world-kb', { worldId: undefined })).toBeNull();
+  });
+
+  it('does not use the workId as a fallback for the world target', () => {
+    // A workId is NOT a worldId; the resolver must not conflate them.
+    expect(resolveCanvasNavTarget('world-kb', { workId: 'w-1' })).toBeNull();
+  });
+});
+
+describe('resolveCanvasNavTarget — Strategy (always the list)', () => {
+  it('routes to /strategies regardless of context', () => {
+    expect(resolveCanvasNavTarget('strategy', {})).toBe('/strategies');
+    expect(resolveCanvasNavTarget('strategy', { workId: 'w-1', worldId: 'w-7' })).toBe(
+      '/strategies',
+    );
+  });
+});
+
+describe('resolveCanvasNavTarget — context is not mutated', () => {
+  it('treats workId/worldId independently (outline ignores worldId, world-kb ignores workId)', () => {
+    // Outline target depends only on workId; a present worldId does not change it.
+    expect(resolveCanvasNavTarget('outline', { workId: 'w-1', worldId: 'world-7' })).toBe(
+      '/works/w-1/outline',
+    );
+    // World KB target depends only on worldId; a present workId does not ungate it.
+    expect(resolveCanvasNavTarget('world-kb', { workId: 'w-1' })).toBeNull();
   });
 });
