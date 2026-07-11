@@ -35,6 +35,18 @@
     "codegen": "pnpm --filter nexus-codegen run build && pnpm --filter nexus-codegen run codegen && pnpm --filter @42ch/nexus-contracts run build",
     "codegen:watch": "pnpm --filter nexus-codegen run build && pnpm --filter nexus-codegen run dev",
     "publish:contracts": "cd packages/nexus-contracts && pnpm run publish:public",
-    "sidecar": "bash scripts/fetch-sidecar.sh"
+    "sidecar": "bash scripts/fetch-sidecar.sh",
+    "build:contracts": "pnpm --filter @42ch/nexus-contracts run build",
+    "build:ui": "pnpm --filter @42ch/nexus-ui run build",
+    "dev:design-studio": "pnpm --filter design-studio dev",
+    "dev:web": "pnpm --filter web dev",
+    "dev:desktop": "pnpm --filter desktop dev",
+    "build:design-studio": "pnpm --filter design-studio build",
+    "build:web": "pnpm --filter web build",
+    "build:desktop": "pnpm --filter desktop build",
+    "test:design-studio": "pnpm --filter design-studio test",
+    "test:web": "pnpm --filter web test",
+    "build:cli": "cargo build -p nexus42",
+    "build:cli:release": "cargo build -p nexus42 --release"
   }
 }
