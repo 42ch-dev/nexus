@@ -170,6 +170,36 @@ describe('useStrategyCanvas onConnect draft edge (FB-SE-000)', () => {
     // No save trigger fires from a connect — draft is local until inspector commit.
     expect(result.current.saveTriggers.transition).toBe(0);
   });
+
+  it('preserves the draft edge when a refetch returns server data (Greptile Issue 4)', () => {
+    const { result, rerender } = renderHook(() => useStrategyCanvas('preset-1'), { wrapper });
+
+    act(() => {
+      result.current.onConnect({ source: 's1', target: 's2', sourceHandle: null, targetHandle: null });
+    });
+
+    expect(result.current.edges).toHaveLength(1);
+    const draft = result.current.edges[0];
+    expect((draft.data as { isDraft?: boolean }).isDraft).toBe(true);
+
+    // Simulate a refetch that returns a canonical server edge for the same pair.
+    act(() => {
+      const data = mocks.graphQuery.data as { graph: { nodes: unknown[]; edges: unknown[] } };
+      mocks.graphQuery.data = {
+        ...data,
+        graph: {
+          ...data.graph,
+          edges: [{ id: 'e-s1-s2', source: 's1', target: 's2', type: 'strategy-edge' }],
+        },
+      } as unknown as typeof mocks.graphQuery.data;
+    });
+
+    rerender();
+
+    // The server edge is applied, but the draft is kept because it has no matching server id.
+    expect(result.current.edges).toHaveLength(2);
+    expect(result.current.edges.some((e) => e.id === draft.id)).toBe(true);
+  });
 });
 
 describe('useStrategyCanvas draft transition commit (FB-SE-002)', () => {

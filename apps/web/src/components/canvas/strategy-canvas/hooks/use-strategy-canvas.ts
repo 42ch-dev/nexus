@@ -78,7 +78,17 @@ export function useStrategyCanvas(presetId: string) {
   useEffect(() => {
     if (graphQuery.data) {
       setNodes(graphQuery.data.graph.nodes as Node[]);
-      setEdges(graphQuery.data.graph.edges as Edge[]);
+      // Preserve local draft edges while replacing server edges so a refetch
+      // that completes after onConnect does not erase the in-progress draft
+      // before the author commits or cancels it (Greptile Issue 4).
+      setEdges((currentEdges) => {
+        const serverEdges = graphQuery.data.graph.edges as Edge[];
+        const serverEdgeIds = new Set(serverEdges.map((e) => e.id));
+        const keptDrafts = currentEdges.filter(
+          (e) => (e.data as { isDraft?: boolean } | undefined)?.isDraft && !serverEdgeIds.has(e.id),
+        );
+        return [...serverEdges, ...keptDrafts];
+      });
     }
   }, [graphQuery.data, setNodes, setEdges]);
 
