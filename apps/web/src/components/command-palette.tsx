@@ -229,7 +229,7 @@ function CommandPaletteDialog(): React.ReactElement {
         />
 
         {visible.length === 0 ? (
-          <p id={NO_RESULTS_ID} className="px-4 py-6 text-center text-copy-14 text-gray-800">
+          <p id={NO_RESULTS_ID} className="px-4 py-6 text-center text-copy-14 text-gray-900">
             No matching commands.
           </p>
         ) : (
