@@ -3,59 +3,31 @@
   "findings": [
     {
       "id": "R-V195-ARCH-STRERR-GAP",
-      "title": "SidecarManager discards _rx from command.spawn() — daemon stderr (real crash reason) never captured; wizard shows generic error",
+      "title": "SidecarManager discards _rx from command.spawn() \u2014 daemon stderr (real crash reason) never captured; wizard shows generic error",
       "severity": "medium",
       "decision": "defer",
       "owner": "@fullstack-dev",
       "target": "V1.96",
       "lifecycle": "resolved",
-      "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md §Architecture residual",
+      "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md \u00a7Architecture residual",
       "note": "T3 surfaces detail verbatim but stderr is not captured; reset button is the pragmatic recovery.",
       "closed_at": "2026-07-07",
       "closed_by": "V1.96",
-      "closure_note": "Closed by V1.96 plan QC Approve — stderr capture (T3)"
+      "closure_note": "Closed by V1.96 plan QC Approve \u2014 stderr capture (T3)"
     },
     {
       "id": "R-V195QC3-S001",
-      "title": "Setup daemon step has no timeout — if sidecar never emits a status event, wizard hangs indefinitely",
+      "title": "Setup daemon step has no timeout \u2014 if sidecar never emits a status event, wizard hangs indefinitely",
       "severity": "low",
       "decision": "defer",
       "owner": "@frontend-dev",
       "target": "V1.96",
       "lifecycle": "resolved",
       "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md",
-      "note": "useEffect cleanup unsubscribes; no hard timeout. QC source: §Suggestion",
+      "note": "useEffect cleanup unsubscribes; no hard timeout. QC source: \u00a7Suggestion",
       "closed_at": "2026-07-07",
       "closed_by": "V1.96",
-      "closure_note": "Closed by V1.96 plan QC Approve — wizard timeout + starting branch (T4)"
-    },
-    {
-      "id": "R-V195-ARCH-STRERR-GAP",
-      "title": "SidecarManager discards _rx from command.spawn() — daemon stderr (real crash reason) never captured; wizard shows generic error",
-      "severity": "medium",
-      "decision": "defer",
-      "owner": "@fullstack-dev",
-      "target": "V1.96",
-      "lifecycle": "resolved",
-      "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md §Architecture residual",
-      "note": "T3 surfaces detail verbatim but stderr is not captured; reset button is the pragmatic recovery.",
-      "closed_at": "2026-07-07",
-      "closed_by": "V1.96",
-      "closure_note": "Closed by V1.96 plan QC Approve — stderr capture (T3)"
-    },
-    {
-      "id": "R-V195QC3-S001",
-      "title": "Setup daemon step has no timeout — if sidecar never emits a status event, wizard hangs indefinitely",
-      "severity": "low",
-      "decision": "defer",
-      "owner": "@frontend-dev",
-      "target": "V1.96",
-      "lifecycle": "resolved",
-      "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md",
-      "note": "useEffect cleanup unsubscribes; no hard timeout. QC source: §Suggestion",
-      "closed_at": "2026-07-07",
-      "closed_by": "V1.96",
-      "closure_note": "Closed by V1.96 plan QC Approve — wizard timeout + starting branch (T4)"
+      "closure_note": "Closed by V1.96 plan QC Approve \u2014 wizard timeout + starting branch (T4)"
     }
   ]
 }

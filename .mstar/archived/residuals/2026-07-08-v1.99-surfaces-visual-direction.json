@@ -13,21 +13,7 @@
       "note": "Non-blocking. QC source: qc1 S-1",
       "closed_at": "2026-07-08",
       "closed_by": "P2",
-      "closure_note": "Closed by P2 T2 — transitional annotation added to @web-ui/label in surfaces.tsx + components.tsx"
-    },
-    {
-      "id": "R-V199P1QC1-S001",
-      "title": "@web-ui/label import lacks inline transitional annotation per workflow guide",
-      "severity": "low",
-      "decision": "defer",
-      "owner": "@frontend-dev",
-      "target": "P2",
-      "lifecycle": "resolved",
-      "tracking_link": ".mstar/sdd/2026-07-08-v1.99-surfaces-visual-direction/review/qc1.md",
-      "note": "Non-blocking. QC source: qc1 S-1",
-      "closed_at": "2026-07-08",
-      "closed_by": "P2",
-      "closure_note": "Closed by P2 T2 — transitional annotation added to @web-ui/label in surfaces.tsx + components.tsx"
+      "closure_note": "Closed by P2 T2 \u2014 transitional annotation added to @web-ui/label in surfaces.tsx + components.tsx"
     }
   ]
 }
