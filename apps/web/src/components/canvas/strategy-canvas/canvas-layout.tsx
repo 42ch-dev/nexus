@@ -5,6 +5,9 @@
  * Extracted so the orchestrator stays under the 200-line limit
  * (R-V171P0-QC1-006).
  */
+import { useEffect } from 'react';
+import { Plus } from 'lucide-react';
+
 import { IdeaInput, type IdeaArtifact } from '@/components/canvas/idea-input';
 
 import { ArtifactsList, RevisionBadge } from './state-machine';
@@ -15,13 +18,40 @@ export function CanvasHeader({
   activeSession,
   showAlt,
   setShowAlt,
+  onOpenCreateTransition,
 }: {
   revision: number;
   status: 'clean' | 'dirty' | 'conflict';
   activeSession: { current_task_id?: string; status: string } | null | undefined;
   showAlt: boolean;
   setShowAlt: (v: boolean) => void;
+  /**
+   * FB-SE-004 — when provided, the header renders a **Create Transition…**
+   * button and binds the Shift+N keyboard shortcut that opens the keyboard
+   * edge-creation dialog. The shortcut is suppressed while focus is in a text
+   * field, select, or contenteditable so authors can type the letter N.
+   */
+  onOpenCreateTransition?: () => void;
 }) {
+  // Shift+N opens the keyboard edge-creation dialog (FB-SE-004 §4.4). Suppressed
+  // inside text-entry controls so the letter is passed through to the field.
+  useEffect(() => {
+    if (!onOpenCreateTransition) return;
+    const open = onOpenCreateTransition;
+    function onKeyDown(e: KeyboardEvent) {
+      if (!e.shiftKey || e.key !== 'N') return;
+      const target = e.target as HTMLElement | null;
+      if (target) {
+        const tag = target.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || target.isContentEditable) return;
+      }
+      e.preventDefault();
+      open();
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onOpenCreateTransition]);
+
   return (
     <>
       <div className="flex flex-wrap items-center justify-between gap-2">
@@ -34,14 +64,26 @@ export function CanvasHeader({
             Preset as a state-machine graph. Select a state to edit it; the revision badge shows graph freshness.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setShowAlt(!showAlt)}
-          aria-pressed={showAlt}
-          className="rounded-control border border-gray-alpha-400 px-3 py-1.5 text-button-12 text-gray-900 hover:bg-gray-alpha-100"
-        >
-          {showAlt ? 'Show graph' : 'Show list view'}
-        </button>
+        <div className="flex items-center gap-2">
+          {onOpenCreateTransition ? (
+            <button
+              type="button"
+              onClick={onOpenCreateTransition}
+              className="inline-flex items-center gap-1 rounded-control bg-purple-700 px-3 py-1.5 text-button-12 text-white hover:bg-purple-800"
+            >
+              <Plus className="h-3.5 w-3.5" aria-hidden />
+              Create Transition…
+            </button>
+          ) : null}
+          <button
+            type="button"
+            onClick={() => setShowAlt(!showAlt)}
+            aria-pressed={showAlt}
+            className="rounded-control border border-gray-alpha-400 px-3 py-1.5 text-button-12 text-gray-900 hover:bg-gray-alpha-100"
+          >
+            {showAlt ? 'Show graph' : 'Show list view'}
+          </button>
+        </div>
       </div>
       {activeSession ? (
         <div className="flex items-center gap-2 rounded-card border border-blue-700/30 bg-[color-mix(in_srgb,var(--color-blue-700)_6%,transparent)] px-3 py-2 text-copy-13 text-gray-900">

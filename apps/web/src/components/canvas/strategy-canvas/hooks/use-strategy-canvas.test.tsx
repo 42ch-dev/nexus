@@ -294,6 +294,74 @@ describe('useStrategyCanvas draft transition commit (FB-SE-002)', () => {
   });
 });
 
+describe('useStrategyCanvas keyboard create (FB-SE-004)', () => {
+  function makeClient(patchImpl: () => Promise<unknown>): NexusClient {
+    return {
+      strategyPatchState: vi.fn(),
+      strategyPatchTransition: vi.fn(patchImpl),
+      strategyPatchPromptTemplate: vi.fn(),
+    } as unknown as NexusClient;
+  }
+
+  it('commits via strategy.patch_transition with op: "create" and explicit source/target', async () => {
+    const patch = vi.fn().mockResolvedValue({
+      new_revision: 2,
+      validation_summary: { errors: [], warnings: [] },
+      side_effects: [],
+    });
+    const client = makeClient(patch);
+    const { result } = renderHook(() => useStrategyCanvas('preset-1'), {
+      wrapper: makeCommitWrapper(client),
+    });
+
+    await act(async () => {
+      result.current.commitKeyboardCreate({
+        sourceStateId: 's1',
+        targetStateId: 's2',
+        transitionKind: 'branch',
+        condition: 'word_count > 1000',
+      });
+    });
+
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
+    const request = patch.mock.calls[0][1] as Record<string, unknown>;
+    expect(request).toMatchObject({
+      strategy_id: 'preset-1',
+      source_state_id: 's1',
+      new_target: 's2',
+      op: 'create',
+      transition_kind: 'branch',
+      condition: 'word_count > 1000',
+    });
+  });
+
+  it('routes a 409 conflict through the conflict modal handler', async () => {
+    const conflictError = new NexusClientError(
+      409,
+      'strategy_conflict',
+      'Strategy revision is stale',
+      { current_revision: 1 },
+    );
+    const patch = vi.fn().mockRejectedValue(conflictError);
+    const client = makeClient(patch);
+    const { result } = renderHook(() => useStrategyCanvas('preset-1'), {
+      wrapper: makeCommitWrapper(client),
+    });
+
+    expect(result.current.conflict).toBeNull();
+
+    await act(async () => {
+      result.current.commitKeyboardCreate({
+        sourceStateId: 's1',
+        targetStateId: 's2',
+      });
+    });
+
+    await waitFor(() => expect(result.current.conflict).not.toBeNull());
+    expect(result.current.conflict).toEqual({ currentRevision: 1, section: 'transition' });
+  });
+});
+
 describe('useStrategyCanvas edge reconnection (FB-SE-003)', () => {
   // Seed the shared graph mock with an existing transition edge so a reconnect
   // gesture has something to drag. The hoisted `mocks.graphQuery` is the same

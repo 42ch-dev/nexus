@@ -248,6 +248,59 @@ export function useStrategyCanvas(presetId: string) {
   }, [setEdges]);
 
   /**
+   * FB-SE-004 — keyboard edge-creation commit. Sends the same
+   * `strategy.patch_transition` with **`op: "create"`** as the spatial path
+   * (FB-SE-002), but with explicit source/target from the dialog instead of a
+   * draft edge. On 409, routes through the same {@link handleConflict} path so
+   * the conflict modal opens. There is no local draft edge to remove on
+   * success — the dialog closes and the preset refetch brings the canonical
+   * edge.
+   *
+   * `handleConflict` is a hoisted function declaration, so it is safe to
+   * reference here even though it is defined textually later in the hook.
+   */
+  const commitKeyboardCreateMutation = useMutation({
+    mutationFn: async (args: {
+      sourceStateId: string;
+      targetStateId: string;
+      transitionKind?: 'next' | 'branch' | 'default';
+      condition?: string;
+      label?: string;
+    }) => {
+      return nexusClient.strategyPatchTransition(presetId, {
+        strategy_id: presetId,
+        base_revision: workingRevisionRef.current,
+        source_state_id: args.sourceStateId,
+        new_target: args.targetStateId,
+        condition: args.condition,
+        transition_kind: args.transitionKind ?? 'next',
+        op: 'create',
+      });
+    },
+    onSuccess: (res, args) => {
+      workingRevisionRef.current = Number(res.new_revision);
+      toast({
+        variant: 'success',
+        title: 'Transition created',
+        description: args.label || `${args.sourceStateId} → ${args.targetStateId}`,
+      });
+      void qc.invalidateQueries({ queryKey: queryKeys.presets.detail(presetId) });
+    },
+    onError: (error) => {
+      if (isStrategyConflictError(error)) {
+        const currentRevision =
+          typeof error.details === 'object' && error.details !== null
+            ? (error.details as { current_revision?: number }).current_revision ?? 0
+            : 0;
+        handleConflict(currentRevision, 'transition');
+      } else {
+        const message = error instanceof Error ? error.message : 'Failed to create transition';
+        toast({ variant: 'error', title: message });
+      }
+    },
+  });
+
+  /**
    * FB-SE-003 — reconnect an existing transition edge to a new target by drag.
    *
    * Sends a single `strategy.patch_transition` with `op: "update"` (default) +
@@ -358,6 +411,8 @@ export function useStrategyCanvas(presetId: string) {
     commitDraft: commitDraftMutation.mutate,
     isCommittingDraft: commitDraftMutation.isPending,
     cancelDraft,
+    commitKeyboardCreate: commitKeyboardCreateMutation.mutate,
+    isCommittingKeyboardCreate: commitKeyboardCreateMutation.isPending,
     onReconnect,
     isReconnecting: reconnectTransitionMutation.isPending,
   };

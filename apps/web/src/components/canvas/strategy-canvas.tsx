@@ -15,6 +15,7 @@ import { StateInspector } from './strategy-canvas/inspectors/state-inspector';
 import { EdgeInspector, DraftEdgeInspector } from './strategy-canvas/inspectors/edge-inspector';
 import { PromptInspector } from './strategy-canvas/inspectors/prompt-inspector';
 import { InspectorPanel, StrategyConflictModal } from './strategy-canvas/inspector-panel';
+import { EdgeCreateDialog } from './strategy-canvas/edge-create-dialog';
 import { useStrategyCanvas } from './strategy-canvas/hooks/use-strategy-canvas';
 import { CanvasFooter, CanvasHeader } from './strategy-canvas/canvas-layout';
 import { ValidationPanel, originalFormOf, type SaveStatus, type Section } from './strategy-canvas/state-machine';
@@ -58,11 +59,14 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
     commitDraft,
     isCommittingDraft,
     cancelDraft,
+    commitKeyboardCreate,
+    isCommittingKeyboardCreate,
   } = useStrategyCanvas(presetId);
 
   const [artifacts, setArtifacts] = useState<IdeaArtifact[]>([]);
   const [showAlt, setShowAlt] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
 
   useEffect(() => {
     if (!isEditing || !selectedState) {
@@ -98,6 +102,7 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
         activeSession={activeSession}
         showAlt={showAlt}
         setShowAlt={setShowAlt}
+        onOpenCreateTransition={() => setCreateDialogOpen(true)}
       />
 
       {showAlt && parsed ? (
@@ -196,6 +201,17 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
         }}
         onReapply={handleReapply}
         onDismiss={() => setConflict(null)}
+      />
+
+      <EdgeCreateDialog
+        open={createDialogOpen}
+        onOpenChange={setCreateDialogOpen}
+        states={parsed?.manifest.states ?? []}
+        isCommitting={isCommittingKeyboardCreate}
+        onCommit={(args) => {
+          commitKeyboardCreate(args);
+          setCreateDialogOpen(false);
+        }}
       />
 
       <CanvasFooter
