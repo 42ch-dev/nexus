@@ -119,6 +119,7 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | [v1.106-delivery-compass.md](v1.106-delivery-compass.md) | V1.106 | **completed** (2026-07-10) — Studio-first pipeline Must + first-launch polish Must + UI continuity Stretch. Integration `iteration/v1.106` → `main`. |
 | [v1.107-delivery-compass.md](v1.107-delivery-compass.md) | V1.107 | **completed** (2026-07-10) — Studio UI tune Must (visual FB-000..011 + coverage FB-012..016). Integration `iteration/v1.107`. |
 | [v1.108-delivery-compass.md](v1.108-delivery-compass.md) | V1.108 | **Shipped (2026-07-11)** — Dual Must: Canvas Outline spatial parity (P0) + UI shell SSOT / AgentPicker / Studio canvas (P1). Integration `iteration/v1.108`. |
+| [v1.109-delivery-compass.md](v1.109-delivery-compass.md) | V1.109 | **active** — Triple Must: Canvas Scene/Beat (P0) + Strategy edge rewiring (P1) + Graph scale/viewport (P2). Integration `iteration/v1.109`. |
 
 ### Active iteration workspaces
 
@@ -132,6 +133,7 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | [v1.106/](v1.106/README.md) | V1.106 | Studio-first pipeline + first-launch polish + UI continuity Stretch; studio-first invariant guide |
 | [v1.107/](v1.107/README.md) | V1.107 | Studio UI tune Must — visual + coverage hygiene; studio-first invariant carry-forward |
 | [v1.108/](v1.108/README.md) | V1.108 | Dual Must — Outline spatial canvas + UI shell SSOT / AgentPicker / canvas Surfaces |
+| [v1.109/](v1.109/README.md) | V1.109 | Triple Must — Scene/Beat expansion + Strategy edge rewiring + Graph scale/viewport reliability |
 
 ### Legacy `v1.*` iteration artifacts
 

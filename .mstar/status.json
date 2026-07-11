@@ -66,14 +66,115 @@
         "wire_contracts_changed": false,
         "tier": "Must"
       }
+    },
+    {
+      "id": "2026-07-11-v1.109-canvas-scene-beat",
+      "title": "P0 — Canvas Scene/Beat Expansion (C2)",
+      "file": "plans/2026-07-11-v1.109-canvas-scene-beat.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@frontend-dev",
+        "@architect"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.109",
+        "canvas",
+        "outline",
+        "scene",
+        "beat",
+        "must"
+      ],
+      "created_at": "2026-07-11",
+      "updated_at": "2026-07-11",
+      "notes": "Outline graph depth to Scene/Beat nodes",
+      "metadata": {
+        "iteration_refs": [
+          "V1.109"
+        ],
+        "spec_integration_branch": "iteration/v1.109",
+        "merge_target": "iteration/v1.109",
+        "working_branch": "plan/v1.109-p0-canvas-scene-beat",
+        "primary_spec": ".mstar/iterations/v1.109/specs/canvas-scene-beat.md",
+        "wire_contracts_changed": false,
+        "tier": "Must"
+      }
+    },
+    {
+      "id": "2026-07-11-v1.109-strategy-edge-rewiring",
+      "title": "P1 — Strategy Spatial Edge Rewiring",
+      "file": "plans/2026-07-11-v1.109-strategy-edge-rewiring.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@frontend-dev",
+        "@architect"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.109",
+        "canvas",
+        "strategy",
+        "edges",
+        "must"
+      ],
+      "created_at": "2026-07-11",
+      "updated_at": "2026-07-11",
+      "notes": "Strategy spatial onConnect edge creation/rewiring",
+      "metadata": {
+        "iteration_refs": [
+          "V1.109"
+        ],
+        "spec_integration_branch": "iteration/v1.109",
+        "merge_target": "iteration/v1.109",
+        "working_branch": "plan/v1.109-p1-strategy-edge-rewiring",
+        "primary_spec": ".mstar/iterations/v1.109/specs/strategy-edge-rewiring.md",
+        "wire_contracts_changed": false,
+        "tier": "Must"
+      }
+    },
+    {
+      "id": "2026-07-11-v1.109-canvas-graph-scale",
+      "title": "P2 — Canvas Graph Scale + Viewport Reliability",
+      "file": "plans/2026-07-11-v1.109-canvas-graph-scale.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@frontend-dev",
+        "@architect"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.109",
+        "canvas",
+        "viewport",
+        "scale",
+        "residuals",
+        "must"
+      ],
+      "created_at": "2026-07-11",
+      "updated_at": "2026-07-11",
+      "notes": "Viewport preservation + selection optimization + RF integration tests + V1.108 residual sweep",
+      "metadata": {
+        "iteration_refs": [
+          "V1.109"
+        ],
+        "spec_integration_branch": "iteration/v1.109",
+        "merge_target": "iteration/v1.109",
+        "working_branch": "plan/v1.109-p2-canvas-graph-scale",
+        "primary_spec": ".mstar/iterations/v1.109/specs/canvas-graph-scale.md",
+        "wire_contracts_changed": false,
+        "tier": "Must"
+      }
     }
   ],
   "metadata": {
     "integration_branch_retired": true,
     "iteration_base_branch": "main",
     "last_integration_branch": "iteration/v1.108",
-    "latest_active_compass": null,
-    "latest_active_iteration": null,
+    "latest_active_compass": "v1.109-delivery-compass.md",
+    "latest_active_iteration": "V1.109",
     "latest_ship": {
       "iteration": "V1.108",
       "compass": "v1.108-delivery-compass.md",
@@ -84,7 +185,7 @@
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "pre_iteration_hotfix": null,
-    "spec_integration_branch": "iteration/v1.108",
+    "spec_integration_branch": "iteration/v1.109",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {
@@ -133,7 +234,7 @@
         "2026-07-09-v1.103-settings-shell-nav": 2
       }
     },
-    "updated_at": "2026-07-10T22:35:00+0800"
+    "updated_at": "2026-07-11"
   },
   "residual_findings": {
     "2026-07-05-v1.91-findings-batch": [
