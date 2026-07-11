@@ -176,7 +176,11 @@ describe('Sidebar', () => {
 
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
 
-    expect(screen.getByRole('button', { name: 'Canvas' })).toBeInTheDocument();
+    // The Canvas group is a disclosure (collapsible), open by default so its
+    // three items are visible without an extra click.
+    const canvasDisclosure = screen.getByRole('button', { name: 'Canvas' });
+    expect(canvasDisclosure).toBeInTheDocument();
+    expect(canvasDisclosure).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('link', { name: 'Outline' })).toBeInTheDocument();
     // World KB has no worldId at the default route and no `/worlds` picker
     // exists, so it renders disabled (not a link) — see T3 navigation wiring.
@@ -302,5 +306,95 @@ describe('Sidebar — Canvas nav target wiring (V1.111 P1 T3)', () => {
     renderSidebarAtRoute('/works/work-1');
 
     expect(screen.getByRole('link', { name: 'Strategy' })).toHaveAttribute('href', '/strategies');
+  });
+});
+
+describe('Sidebar — Canvas active-surface highlight (V1.111 P1 T4)', () => {
+  // Like the T3 block, these tests mount Sidebar inside a layout route so
+  // `useParams` populates workId/worldId the way RootLayout does in production.
+  // Without the matching route tree, World KB on `/worlds/:worldId/kb` would
+  // render disabled (no worldId) even though the resolver marks it active —
+  // a state that cannot occur in production. The route helper keeps the
+  // highlight assertions faithful to real behavior.
+  function renderSidebarAtRoute(initialPath: string) {
+    useCreatorHandler();
+    renderInApp(
+      <Routes>
+        <Route element={<Sidebar />}>
+          <Route path="works" element={null} />
+          <Route path="works/:workId" element={null} />
+          <Route path="works/:workId/outline" element={null} />
+          <Route path="worlds/:worldId/kb" element={null} />
+          <Route path="strategies" element={null} />
+          <Route path="strategies/:presetId" element={null} />
+          <Route path="memory" element={null} />
+        </Route>
+      </Routes>,
+      {
+        client: makeClient(),
+        activeCreatorId: 'creator-a',
+        initialRouterEntries: [initialPath],
+      },
+    );
+  }
+
+  it('highlights the World KB canvas surface on /worlds/:worldId/kb (resolver-driven)', async () => {
+    renderSidebarAtRoute('/worlds/world-9/kb');
+
+    const worldKb = screen.getByRole('link', { name: 'World KB' });
+    expect(worldKb).toHaveClass('bg-gray-alpha-100', 'text-gray-1000');
+    expect(worldKb).toHaveAttribute('aria-current', 'page');
+    expect(worldKb.querySelector('[data-testid="sidebar-active-bar"]')).toHaveClass(
+      'bg-blue-700',
+    );
+    // Non-World-KB canvas surfaces stay inactive. Outline renders as a link
+    // (no workId → /works fallback); Strategy stays a link but inactive.
+    expect(screen.getByRole('link', { name: 'Outline' })).not.toHaveClass('bg-gray-alpha-100');
+    expect(screen.getByRole('link', { name: 'Strategy' })).not.toHaveClass('bg-gray-alpha-100');
+  });
+
+  it('highlights the Strategy canvas surface on /strategies/:presetId (resolver-driven)', async () => {
+    renderSidebarAtRoute('/strategies/preset-1');
+
+    const strategy = screen.getByRole('link', { name: 'Strategy' });
+    expect(strategy).toHaveClass('bg-gray-alpha-100', 'text-gray-1000');
+    expect(strategy).toHaveAttribute('aria-current', 'page');
+    expect(strategy.querySelector('[data-testid="sidebar-active-bar"]')).toHaveClass(
+      'bg-blue-700',
+    );
+    // Non-strategy canvas surfaces stay inactive. Outline renders as a link
+    // (no workId → /works fallback); World KB has no worldId here and renders
+    // disabled (not a link).
+    expect(screen.getByRole('link', { name: 'Outline' })).not.toHaveClass('bg-gray-alpha-100');
+    expect(screen.queryByRole('link', { name: 'World KB' })).not.toBeInTheDocument();
+  });
+
+  it('keeps all Canvas items inactive on a non-canvas Creator-tab route (/memory)', async () => {
+    // On a non-canvas route the resolver returns null, so every Canvas item
+    // must render inactive. This is the clean no-canvas baseline (distinct
+    // from the /works/:id case, which specifically probes the resolver-vs-
+    // prefix-match conflict for Outline).
+    renderSidebarAtRoute('/memory');
+
+    // Outline + Strategy render as inactive links (both have valid fallback
+    // targets even without context). Neither lights up.
+    const outline = screen.getByRole('link', { name: 'Outline' });
+    expect(outline).not.toHaveClass('bg-gray-alpha-100');
+    expect(outline).not.toHaveAttribute('aria-current', 'page');
+    expect(outline.querySelector('[data-testid="sidebar-active-bar"]')).toBeNull();
+
+    const strategy = screen.getByRole('link', { name: 'Strategy' });
+    expect(strategy).not.toHaveClass('bg-gray-alpha-100');
+    expect(strategy).not.toHaveAttribute('aria-current', 'page');
+    expect(strategy.querySelector('[data-testid="sidebar-active-bar"]')).toBeNull();
+
+    // World KB has no worldId and no /worlds picker → renders disabled.
+    expect(screen.queryByRole('link', { name: 'World KB' })).not.toBeInTheDocument();
+    expect(screen.getByText('World KB').closest('[aria-disabled="true"]')).toBeInTheDocument();
+
+    // Contrast: the non-canvas "Memory" item (to: /memory) DOES highlight via
+    // the chrome's prefix match — V1.94 behavior preserved for non-canvas
+    // items even while every Canvas item stays quiet.
+    expect(screen.getByRole('link', { name: 'Memory' })).toHaveClass('bg-gray-alpha-100');
   });
 });
