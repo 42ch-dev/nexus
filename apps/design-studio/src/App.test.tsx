@@ -1312,4 +1312,81 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
     expect(within(shell).getByText('draft_ready')).toBeInTheDocument();
     expect(within(shell).getByText('all_done')).toBeInTheDocument();
   });
+
+  /* ---- World KB surface chrome (V1.111 P2 T2) ---------------------- */
+
+  it('renders the World KB surface chrome fixture with shell + inspector', () => {
+    const shell = screen.getByTestId('worldkb-shell-chrome');
+    expect(shell).toBeInTheDocument();
+
+    // Relationship inspector aside mirrors relationship-inspector.tsx.
+    expect(
+      within(shell).getByTestId('worldkb-inspector-chrome'),
+    ).toBeInTheDocument();
+  });
+
+  it('mirrors entity node cards with lifecycle badges for all four states', () => {
+    const shell = screen.getByTestId('worldkb-shell-chrome');
+
+    // Confirmed (selected) entity — mirrors WorldKbEntityNode selected paint.
+    const confirmedTitle = shell.querySelector<HTMLSpanElement>(
+      'span[title="Kael Veynor"]',
+    );
+    expect(confirmedTitle).not.toBeNull();
+    const confirmedShell = confirmedTitle!.closest(
+      '[class*="border-canvas-worldkb-entity-card-stroke-selected"]',
+    );
+    expect(confirmedShell).not.toBeNull();
+
+    // All four lifecycle badge labels render (promotion-* tokens).
+    expect(within(shell).getAllByText('Confirmed').length).toBeGreaterThanOrEqual(1);
+    expect(within(shell).getAllByText('Merged').length).toBeGreaterThanOrEqual(1);
+    expect(within(shell).getAllByText('Pending').length).toBeGreaterThanOrEqual(1);
+    expect(within(shell).getAllByText('Rejected').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('mirrors the computable chip on computable BlockType entities', () => {
+    const shell = screen.getByTestId('worldkb-shell-chrome');
+    // "Act" is a computable block kind → Computable chip renders.
+    expect(within(shell).getAllByText('Computable').length).toBeGreaterThanOrEqual(1);
+    // The Act entity shows its BlockType tag too.
+    expect(within(shell).getAllByText('Act').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('mirrors source-anchor provenance nodes + read-only provenance edges', () => {
+    const shell = screen.getByTestId('worldkb-shell-chrome');
+
+    // Source-anchor node — mirrors WorldKbSourceAnchorNode (sourceType + reference).
+    expect(within(shell).getAllByText('manuscript').length).toBeGreaterThanOrEqual(1);
+
+    // Source-anchor provenance edge — solid connector in source-anchor-edge token.
+    expect(
+      within(shell).getAllByTestId('worldkb-source-anchor-edge-sample').length,
+    ).toBeGreaterThanOrEqual(1);
+  });
+
+  it('mirrors typed relationship edges with confidence bands + suggested-dashed', () => {
+    const shell = screen.getByTestId('worldkb-shell-chrome');
+    const edges = within(shell).getAllByTestId('worldkb-relationship-edge-sample');
+    expect(edges.length).toBeGreaterThanOrEqual(3);
+
+    // Relationship kind labels mirror RELATIONSHIP_KIND_LABELS + custom label.
+    expect(within(shell).getAllByText('Allied With').length).toBeGreaterThanOrEqual(1);
+    expect(within(shell).getAllByText('Rival Of · suggested').length).toBeGreaterThanOrEqual(1);
+    expect(within(shell).getAllByText('Sworn Enemy').length).toBeGreaterThanOrEqual(1);
+
+    // Confidence band labels mirror CONFIDENCE_BAND_LABEL (low / mid / high).
+    expect(within(shell).getAllByText('High').length).toBeGreaterThanOrEqual(1);
+    expect(within(shell).getAllByText('Medium').length).toBeGreaterThanOrEqual(1);
+    expect(within(shell).getAllByText('Low').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('mirrors the relationship inspector with grounded-badge and confidence', () => {
+    const inspector = screen.getByTestId('worldkb-inspector-chrome');
+    expect(inspector).toBeInTheDocument();
+    // Grounded badge mirrors the relationship-grounded-badge token.
+    expect(within(inspector).getByText('Grounded')).toBeInTheDocument();
+    // Confidence value renders numerically (formatConfidence).
+    expect(within(inspector).getByText('0.82')).toBeInTheDocument();
+  });
 });
