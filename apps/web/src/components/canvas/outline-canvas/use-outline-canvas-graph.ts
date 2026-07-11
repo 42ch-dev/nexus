@@ -27,7 +27,9 @@ import { useNodeChangeHandler } from '@/components/canvas/canvas-shell';
 import type { SceneBeatFixturePayload } from './graph-projection';
 import {
   projectOutlineGraph,
+  selectedBeatIdFromNodes,
   selectedChapterIdFromNodes,
+  selectedSceneIdFromNodes,
   type OutlineGraphProjection,
 } from './rf-projection';
 
@@ -54,6 +56,18 @@ export interface UseOutlineCanvasGraphResult {
   onNodesChange: OnNodesChange;
   selectedChapterId: number | null;
   setSelectedChapterId: React.Dispatch<React.SetStateAction<number | null>>;
+  /**
+   * V1.109 C2 T3 — selected Scene id (FB-C2-002). Drives the Scene inspector.
+   * `null` when no Scene node is selected (cleared when a non-Scene node is
+   * selected, kept intact when nothing is selected — same contract as
+   * {@link selectedChapterId}).
+   */
+  selectedSceneId: string | null;
+  /**
+   * V1.109 C2 T3 — selected Beat id (FB-C2-002). Drives the Beat inspector.
+   * Same selection contract as {@link selectedSceneId}.
+   */
+  selectedBeatId: string | null;
   projection: OutlineGraphProjection | null;
 }
 
@@ -69,6 +83,12 @@ export function useOutlineCanvasGraph(
   const [selectedChapterId, setSelectedChapterId] = useState<number | null>(
     initialSelectedChapterId ?? null,
   );
+  // V1.109 C2 T3 — Scene/Beat selection state (FB-C2-002). Graph-click drives
+  // the Scene/Beat inspector the same way `selectedChapterId` drives the
+  // Chapter inspector. The selection-sync effect below resolves all three from
+  // RF node selection in one pass.
+  const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null);
+  const [selectedBeatId, setSelectedBeatId] = useState<string | null>(null);
 
   // V1.108 P0 — project the outline into a spatial React Flow graph.
   // V1.109 C2 T2 — forward the scene/beat fixture payload so the projection
@@ -106,25 +126,45 @@ export function useOutlineCanvasGraph(
     });
   }, [projection]);
 
-  // Graph click → inspector selection sync (FB-C1-003).
+  // Graph click → inspector selection sync (FB-C1-003 + FB-C2-002).
   // React Flow tracks selection via the node `selected` flag (set through
-  // onNodesChange). Resolve it to `selectedChapterId` so graph clicks drive the
-  // chapter inspector — same pattern as `world-kb-canvas.tsx`.
+  // onNodesChange). Resolve it to `selectedChapterId` / `selectedSceneId` /
+  // `selectedBeatId` so graph clicks drive the matching inspector — same
+  // pattern as `world-kb-canvas.tsx`.
   //
-  // PR-review fix: `selectedChapterIdFromNodes` returns `null` both when no
-  // node is selected AND when the selected node does not resolve to a chapter
-  // (volume node, or a timeline event with no `realizes_chapter_id`). Distinguish
-  // the two: when a node IS selected but resolves to no chapter, clear the
-  // chapter selection so the inspector does not show a chapter that is no
-  // longer the active graph selection. When nothing is selected at all, leave
-  // the current selection intact (preserves V1.75 `?chapter=N` preselect and
-  // click-to-keep-while-panning behavior).
+  // PR-review fix: each `selectedXxxIdFromNodes` helper returns `null` both
+  // when no node is selected AND when the selected node does not resolve to
+  // that kind. Distinguish the two: when a node IS selected but resolves to
+  // no entity of that kind, clear that kind's selection so the inspector does
+  // not show an entity that is no longer the active graph selection. When
+  // nothing is selected at all, leave all selections intact (preserves V1.75
+  // `?chapter=N` preselect and click-to-keep-while-panning behavior).
+  //
+  // V1.109 C2 T3 — extended to resolve Scene + Beat in the same pass so a
+  // single graph click coordinates all three inspectors (selecting a Beat
+  // clears both Scene and Chapter selections, etc.).
   useEffect(() => {
+    const someSelected = rfNodes.some((n) => n.selected);
+
     const chapterId = selectedChapterIdFromNodes(rfNodes);
     if (chapterId !== null) {
       setSelectedChapterId(chapterId);
-    } else if (rfNodes.some((n) => n.selected)) {
+    } else if (someSelected) {
       setSelectedChapterId(null);
+    }
+
+    const sceneId = selectedSceneIdFromNodes(rfNodes);
+    if (sceneId !== null) {
+      setSelectedSceneId(sceneId);
+    } else if (someSelected) {
+      setSelectedSceneId(null);
+    }
+
+    const beatId = selectedBeatIdFromNodes(rfNodes);
+    if (beatId !== null) {
+      setSelectedBeatId(beatId);
+    } else if (someSelected) {
+      setSelectedBeatId(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rfNodes]);
@@ -135,6 +175,8 @@ export function useOutlineCanvasGraph(
     onNodesChange,
     selectedChapterId,
     setSelectedChapterId,
+    selectedSceneId,
+    selectedBeatId,
     projection,
   };
 }

@@ -27,7 +27,8 @@ import type { NodeChange } from '@xyflow/react';
 
 import { useOutlineCanvasGraph } from '../use-outline-canvas-graph';
 import type { UseOutlineCanvasGraphResult } from '../use-outline-canvas-graph';
-import { chapterNodeId, volumeNodeId } from '../rf-projection';
+import { chapterNodeId, sceneNodeId, beatNodeId, volumeNodeId } from '../rf-projection';
+import type { SceneBeatFixturePayload } from '../graph-projection';
 
 // ---------------------------------------------------------------------------
 // Fixtures (module-level so refs are stable across hook re-renders)
@@ -232,5 +233,124 @@ describe('useOutlineCanvasGraph — setter passthrough', () => {
       result.current.setSelectedChapterId(7);
     });
     expect(result.current.selectedChapterId).toBe(7);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// V1.109 C2 T3 — Scene/Beat selection sync (FB-C2-002 graph click -> inspector)
+// ---------------------------------------------------------------------------
+
+const sceneBeatFixture: SceneBeatFixturePayload = {
+  scenes: [{ sceneId: 's1', chapterId: 1, title: 'The Arrival', status: 'drafted' }],
+  beats: [{ beatId: 'b1', sceneId: 's1', title: 'Turn', status: null }],
+};
+
+describe('useOutlineCanvasGraph — Scene/Beat selection sync (FB-C2-002)', () => {
+  it('exposes selectedSceneId / selectedBeatId (null by default)', () => {
+    const { result } = renderHook(useOutlineCanvasGraph, {
+      initialProps: {
+        outline: makeOutline(),
+        chapters: [makeChapter()],
+        sceneBeatFixture,
+      },
+    });
+    expect(result.current.selectedSceneId).toBeNull();
+    expect(result.current.selectedBeatId).toBeNull();
+  });
+
+  it('drives selectedSceneId when a Scene node is selected', () => {
+    const hook = renderHook(useOutlineCanvasGraph, {
+      initialProps: {
+        outline: makeOutline(),
+        chapters: [makeChapter({ chapter: 1 })],
+        sceneBeatFixture,
+      },
+    });
+    expect(hook.result.current.selectedSceneId).toBeNull();
+    selectNode(hook.result, sceneNodeId('s1'));
+    expect(hook.result.current.selectedSceneId).toBe('s1');
+  });
+
+  it('drives selectedBeatId when a Beat node is selected', () => {
+    const hook = renderHook(useOutlineCanvasGraph, {
+      initialProps: {
+        outline: makeOutline(),
+        chapters: [makeChapter({ chapter: 1 })],
+        sceneBeatFixture,
+      },
+    });
+    expect(hook.result.current.selectedBeatId).toBeNull();
+    selectNode(hook.result, beatNodeId('b1'));
+    expect(hook.result.current.selectedBeatId).toBe('b1');
+  });
+
+  it('clears selectedSceneId and selectedChapterId when a Beat node is selected', () => {
+    const hook = renderHook(useOutlineCanvasGraph, {
+      initialProps: {
+        outline: makeOutline(),
+        chapters: [makeChapter({ chapter: 1 })],
+        sceneBeatFixture,
+        initialSelectedChapterId: 1,
+      },
+    });
+    // Preselect chapter 1, then select the beat — chapter + scene must clear.
+    expect(hook.result.current.selectedChapterId).toBe(1);
+    selectNode(hook.result, beatNodeId('b1'));
+    expect(hook.result.current.selectedBeatId).toBe('b1');
+    expect(hook.result.current.selectedSceneId).toBeNull();
+    expect(hook.result.current.selectedChapterId).toBeNull();
+  });
+
+  it('clears selectedBeatId when a Scene node is selected', () => {
+    const hook = renderHook(useOutlineCanvasGraph, {
+      initialProps: {
+        outline: makeOutline(),
+        chapters: [makeChapter({ chapter: 1 })],
+        sceneBeatFixture,
+      },
+    });
+    selectNode(hook.result, beatNodeId('b1'));
+    expect(hook.result.current.selectedBeatId).toBe('b1');
+    selectNode(hook.result, sceneNodeId('s1'));
+    expect(hook.result.current.selectedSceneId).toBe('s1');
+    expect(hook.result.current.selectedBeatId).toBeNull();
+  });
+
+  it('clears Scene/Beat selection when a Chapter node is selected', () => {
+    const hook = renderHook(useOutlineCanvasGraph, {
+      initialProps: {
+        outline: makeOutline(),
+        chapters: [makeChapter({ chapter: 1 })],
+        sceneBeatFixture,
+      },
+    });
+    selectNode(hook.result, sceneNodeId('s1'));
+    expect(hook.result.current.selectedSceneId).toBe('s1');
+    selectNode(hook.result, chapterNodeId(1));
+    expect(hook.result.current.selectedChapterId).toBe(1);
+    expect(hook.result.current.selectedSceneId).toBeNull();
+    expect(hook.result.current.selectedBeatId).toBeNull();
+  });
+
+  it('leaves Scene/Beat selection intact when nothing is selected', () => {
+    const hook = renderHook(useOutlineCanvasGraph, {
+      initialProps: {
+        outline: makeOutline(),
+        chapters: [makeChapter({ chapter: 1 })],
+        sceneBeatFixture,
+      },
+    });
+    selectNode(hook.result, sceneNodeId('s1'));
+    expect(hook.result.current.selectedSceneId).toBe('s1');
+    // Deselect everything (click empty canvas) -> keep current selection.
+    act(() => {
+      const changes: NodeChange[] = hook.result.current.rfNodes.map((n) => ({
+        id: n.id,
+        type: 'select',
+        selected: false,
+      }));
+      hook.result.current.onNodesChange(changes);
+    });
+    expect(hook.result.current.selectedSceneId).toBe('s1');
   });
 });
