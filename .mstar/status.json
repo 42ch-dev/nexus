@@ -138,13 +138,13 @@
       "id": "2026-07-11-v1.109-canvas-graph-scale",
       "title": "P2 — Canvas Graph Scale + Viewport Reliability",
       "file": "plans/2026-07-11-v1.109-canvas-graph-scale.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@frontend-dev",
         "@architect"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.109",
         "canvas",
@@ -155,7 +155,7 @@
       ],
       "created_at": "2026-07-11",
       "updated_at": "2026-07-11",
-      "notes": "Viewport preservation + selection optimization + RF integration tests + V1.108 residual sweep",
+      "notes": "Done — SDD T1-T4 + QC tri Approve with residuals + QA Pass; 7 V1.108 residuals closed; 1 nit accepted; wire: false",
       "metadata": {
         "iteration_refs": [
           "V1.109"
@@ -421,34 +421,6 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md",
         "note": "Implementation correct; integration-covered; test-parity with siblings is polish. QC source: §S-002"
-      },
-      {
-        "id": "R-V195-ARCH-STRERR-GAP",
-        "title": "SidecarManager discards _rx from command.spawn() — daemon stderr (real crash reason) never captured; wizard shows generic error",
-        "severity": "medium",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target": "V1.96",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md §Architecture residual",
-        "note": "T3 surfaces detail verbatim but stderr is not captured; reset button is the pragmatic recovery.",
-        "closed_at": "2026-07-07",
-        "closed_by": "V1.96",
-        "closure_note": "Closed by V1.96 plan QC Approve — stderr capture (T3)"
-      },
-      {
-        "id": "R-V195QC3-S001",
-        "title": "Setup daemon step has no timeout — if sidecar never emits a status event, wizard hangs indefinitely",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "V1.96",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md",
-        "note": "useEffect cleanup unsubscribes; no hard timeout. QC source: §Suggestion",
-        "closed_at": "2026-07-07",
-        "closed_by": "V1.96",
-        "closure_note": "Closed by V1.96 plan QC Approve — wizard timeout + starting branch (T4)"
       }
     ],
     "2026-07-07-v1.96-implement-rework": [
@@ -541,34 +513,6 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.97-desktop-first-launch-hardening.md",
         "note": "Not introduced by V1.97; strict clippy -D warnings fails on this pre-existing lint. QC source: §R-V197-CLIPPY"
-      },
-      {
-        "id": "R-V197-SMOKE-CLEAN-STATE",
-        "title": "Clean-state desktop first-launch blocked: .setup() auto-starts daemon unconditionally; daemon exits 'No active creator'; wizard has no creator-bootstrap invoke",
-        "severity": "high",
-        "decision": "defer",
-        "owner": "@architect + @fullstack-dev",
-        "target": "post-V1.99",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/plans/2026-07-08-v1.100-desktop-clean-state-first-launch.md",
-        "note": "Pre-existing product/arch gap exposed by V1.97 smoke (spawn-name fix made daemon reachable). V1.97 ships the spawn-name fix; creator-bootstrap design deferred. Needs architect: gate daemon auto-start behind setup_completed + wizard creator-init. QC source: §R-V197-SMOKE-CLEAN-STATE",
-        "closed_at": "2026-07-09",
-        "closed_by": "V1.100 P0",
-        "closure_note": "Closed by V1.100 P0 — interactive macOS clean-state smoke: user confirmed daemon reached 'Daemon is running' after wizard bootstrap; No active creator blocker resolved. ensure_setup_bootstrap + .setup() gating shipped."
-      },
-      {
-        "id": "R-V197-SMOKE-UI",
-        "title": "Full desktop UI smoke (clean-state + existing-install wizard observation) requires interactive macOS host; headless session cannot drive native Tauri window",
-        "severity": "medium",
-        "decision": "defer",
-        "owner": "@qa-engineer",
-        "target": "post-V1.99",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/plans/2026-07-08-v1.100-desktop-clean-state-first-launch.md",
-        "note": "Attach path + unit tests verified; wizard/UI flow not. Manual or automated desktop smoke on interactive host in V1.98. QC source: §R-V197-SMOKE-UI",
-        "closed_at": "2026-07-09",
-        "closed_by": "V1.100 P0",
-        "closure_note": "Closed by V1.100 P0 — clean-state interactive macOS smoke captured (user: daemon reached running). Existing-install path is byte-for-byte code-preserved (QC1/QC2 verified .setup() true-branch) + clean-state smoke confirmed daemon reachability. User chose to continue rather than run a separate existing-install pass; UI polish findings registered as separate residuals."
       }
     ],
     "2026-07-08-v1.100-desktop-clean-state-first-launch": [
@@ -663,66 +607,6 @@
         "note": "Factual inaccuracy now; trivial cleanup on next script touch. QC source: P2 qc3 S-001"
       }
     ],
-    "2026-07-08-v1.99-nexus-ui-component-promotion": [
-      {
-        "id": "R-V199QC1-S001",
-        "title": "Package cn.ts is byte-identical to apps/web utils.ts — add cross-reference comment to document the drift invariant",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.99",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
-        "note": "Non-blocking. QC source: qc1 S-001. V1.100 rejects @nexus/design-tokens as the authority while it depends on @42ch/nexus-ui.",
-        "closed_at": "2026-07-08",
-        "closed_by": "P1",
-        "closure_note": "Closed by P1 T3 — preferred path taken: web utils.ts is a thin re-export of cn from @42ch/nexus-ui; duplication physically eliminated. Behavioral SSOT check (check_cn_parity) verifies single-source authority."
-      },
-      {
-        "id": "R-V199QC1-S002",
-        "title": "Web re-export wrappers have no compile-time guard against re-introducing local cn dependency",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.99",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
-        "note": "Non-blocking. QC source: qc1 S-002",
-        "closed_at": "2026-07-08",
-        "closed_by": "P1",
-        "closure_note": "Closed by P1 T2 — promoted-wrapper forbidden-import guardrail (check-ui-guardrails.sh) catches clsx/cva/tailwind-merge/@/lib/*/deep imports in CI; failure-fixture proven."
-      },
-      {
-        "id": "R-V199QC3-F001",
-        "title": "extendTailwindMerge config duplicated between package and apps/web — consolidate behind the approved class-merge SSOT",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.99",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
-        "note": "Non-blocking. QC source: qc3 F-001. V1.100 rejects @nexus/design-tokens as the authority while it depends on @42ch/nexus-ui.",
-        "closed_at": "2026-07-08",
-        "closed_by": "P1",
-        "closure_note": "Closed by P1 T3 — extendTailwindMerge exists only in packages/nexus-ui/src/lib/cn.ts; web utils.ts re-exports cn; dupe scan clean. Behavioral SSOT check guards drift."
-      }
-    ],
-    "2026-07-08-v1.99-surfaces-visual-direction": [
-      {
-        "id": "R-V199P1QC1-S001",
-        "title": "@web-ui/label import lacks inline transitional annotation per workflow guide",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "P2",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/sdd/2026-07-08-v1.99-surfaces-visual-direction/review/qc1.md",
-        "note": "Non-blocking. QC source: qc1 S-1",
-        "closed_at": "2026-07-08",
-        "closed_by": "P2",
-        "closure_note": "Closed by P2 T2 — transitional annotation added to @web-ui/label in surfaces.tsx + components.tsx"
-      }
-    ],
     "2026-07-09-v1.101-agent-detection-picker": [
       {
         "id": "R-V1101P0-001",
@@ -771,34 +655,6 @@
     ],
     "2026-07-09-v1.101-select-component-promotion": [
       {
-        "id": "R-V1101P2-001",
-        "title": "Studio AGENTS transitional prose still generic (V1.98→V1.99) while Forbidden lists Select as promoted",
-        "severity": "nit",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.101",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
-        "note": "QC3-S001 after revalidation Approve. Non-blocking.",
-        "closed_at": "2026-07-10",
-        "closed_by": "V1.106 P0 T1",
-        "closure_note": "Closed by V1.106 P0 T1 — Studio AGENTS transitional prose and Allowed table updated to reflect promoted primitives (Input/Label/Textarea/Select)."
-      },
-      {
-        "id": "R-V1101P2-002",
-        "title": "Studio AGENTS Allowed table still says “V1.99-approved presentational primitives”",
-        "severity": "nit",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.101",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
-        "note": "QC1 S-002. Optional doc tidy.",
-        "closed_at": "2026-07-10",
-        "closed_by": "V1.106 P0 T1",
-        "closure_note": "Closed by V1.106 P0 T1 — Studio AGENTS Allowed table now lists the promoted primitives explicitly."
-      },
-      {
         "id": "R-V1101P2-003",
         "title": "Studio invalid Select fixture uses -helper suffix on role=alert error node",
         "severity": "nit",
@@ -819,20 +675,6 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
         "note": "QC2 F-002. Behavior matches Input; explicit override test would lock spread-order."
-      },
-      {
-        "id": "R-V1101P2-005",
-        "title": "packages/nexus-ui/src/index.ts header still frames package as V1.99-approved",
-        "severity": "nit",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.101",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
-        "note": "QC2 F-003. Cosmetic; Select export comment already cites V1.101.",
-        "closed_at": "2026-07-10",
-        "closed_by": "V1.106 P0 T1",
-        "closure_note": "Closed by V1.106 P0 T1 — packages/nexus-ui/src/index.ts header now reflects V1.99, V1.100, and V1.101 promoted primitives."
       }
     ],
     "2026-07-09-v1.101-setup-wizard-ui-polish": [
@@ -1072,96 +914,6 @@
         "note": "Consider disabling button or showing inline retry on load failure. QC3 S-2."
       }
     ],
-    "2026-07-10-v1.105-daemon-fullscreen-gate": [
-      {
-        "id": "R-V1105P0-003",
-        "title": "DaemonLaunchGate timeout callback can race after markReady (ready→error)",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.105",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/plans/2026-07-10-v1.105-daemon-fullscreen-gate.md",
-        "note": "QC2 S001. Inherited pattern.",
-        "closed_at": "2026-07-10",
-        "closed_by": "V1.106 P1 T3",
-        "closure_note": "Added a local `ready` guard in the useEffect closure so the timeout callback cannot set error after markReady has already fired."
-      },
-      {
-        "id": "R-V1105P0-004",
-        "title": "Missing explicit retry→reload and degraded Vitest cases for DaemonLaunchGate",
-        "severity": "nit",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.105",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/plans/2026-07-10-v1.105-daemon-fullscreen-gate.md",
-        "note": "QC1/QC2 suggestions.",
-        "closed_at": "2026-07-10",
-        "closed_by": "V1.106 P1 T3",
-        "closure_note": "Added Vitest cases in daemon-launch-gate.test.tsx: retry button reloads the window, and degraded initial status passes the gate."
-      },
-      {
-        "id": "R-V1105P0-005",
-        "title": "Settings re-run test does not mount DaemonLaunchGate",
-        "severity": "nit",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.105",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/plans/2026-07-10-v1.105-daemon-fullscreen-gate.md",
-        "note": "QC3 suggestion; gate covered separately.",
-        "closed_at": "2026-07-10",
-        "closed_by": "V1.106 P1 T3",
-        "closure_note": "Extended the re-run test mount in settings-setup-section.test.tsx to wrap routes with DaemonLaunchGate, mirroring the production App shell."
-      }
-    ],
-    "2026-07-10-v1.105-portrait-shell-steps": [
-      {
-        "id": "R-V1105P2-001",
-        "title": "Dual TopStepIndicator sources (Studio inline vs App extract) drift risk",
-        "severity": "nit",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.105",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/plans/2026-07-10-v1.105-portrait-shell-steps.md",
-        "note": "QC1 F-001 / QC2 F-006",
-        "closed_at": "2026-07-10",
-        "closed_by": "V1.106 P1 T1",
-        "closure_note": "Closed by V1.106 P1 T1 — Studio imports @web-setup/top-step-indicator; inline duplicate removed; WizardStep type exported from shared module."
-      },
-      {
-        "id": "R-V1105P2-002",
-        "title": "No App overflow integration test (Studio has wizard-chrome-card-agent-overflow)",
-        "severity": "nit",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.105",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/plans/2026-07-10-v1.105-portrait-shell-steps.md",
-        "note": "QC1 F-002 / QC2 F-003",
-        "closed_at": "2026-07-10",
-        "closed_by": "V1.106 P1 T3",
-        "closure_note": "Added App overflow integration test in setup-wizard-page.test.tsx: long agent list renders inside a scrollable portrait wizard body with CTA row visible."
-      }
-    ],
-    "2026-07-10-v1.105-wizard-ia-reorder": [
-      {
-        "id": "R-V1105P1-001",
-        "title": "Settings re-run test does not assert Agent-first landing (inherits R-V1105P0-005)",
-        "severity": "nit",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.105",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/plans/2026-07-10-v1.105-wizard-ia-reorder.md",
-        "note": "QC2; inherits R-V1105P0-005",
-        "closed_at": "2026-07-10",
-        "closed_by": "V1.106 P1 T3",
-        "closure_note": "Closed with R-V1105P0-005 — the re-run test now mounts DaemonLaunchGate, routing through the production App shell to /setup where the wizard lands on the Agent step by default."
-      }
-    ],
     "2026-07-10-v1.106-studio-first-pipeline": [
       {
         "id": "R-V1106P0-001",
@@ -1256,20 +1008,6 @@
     ],
     "2026-07-10-v1.108-canvas-outline-spatial": [
       {
-        "id": "R-V1108P1QC1-S001",
-        "title": "CREATOR_NAV/ORCHESTRATOR_NAV duplicated between settings fixture and surfaces.tsx",
-        "severity": "suggestion",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.108",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
-        "note": "QC1 S-001. Studio fixture data drift risk; extract shared helper.",
-        "closed_at": "2026-07-11",
-        "closed_by": "V1.109 P2 T4",
-        "closure_note": "Extracted CREATOR_NAV/ORCHESTRATOR_NAV to apps/design-studio/src/fixtures/shell-nav-data.ts; both surfaces.tsx and settings-host-fixtures.tsx import from the single source."
-      },
-      {
         "id": "R-V1108P1QC1-S002",
         "title": "Studio node chrome mirror should import P0 extract when available",
         "severity": "suggestion",
@@ -1279,90 +1017,6 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-scene-beat.md",
         "note": "QC1 S-002. Re-scoped in P0 QC (R-V1109-P0-QC1-W001): Studio re-mirrors chrome as static markup because RF-coupled import boundary forbids RF deps. Deferred post-V1.109."
-      },
-      {
-        "id": "R-V1108P1QC2-S001",
-        "title": "Verify error helper does not distinguish transport failure vs no-match",
-        "severity": "suggestion",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.108",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
-        "note": "QC2 S-001. Spec-locked copy either way; distinguish in future.",
-        "closed_at": "2026-07-11",
-        "closed_by": "V1.109 P2 T4",
-        "closure_note": "Added 'no-match' AgentVerifyStatus; AgentPicker shows 'No matching agent for this command.' (scan reached daemon, no agent matched) vs 'Could not reach this agent.' (transport failure). Both hosts map ok=false to no-match, catch to error."
-      },
-      {
-        "id": "R-V1108P1QC3-W001",
-        "title": "AgentPicker re-renders entire card grid on verifyStatus change",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.108",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
-        "note": "QC3 W-001. Negligible at 2-6 cards; React.memo if grid grows.",
-        "closed_at": "2026-07-11",
-        "closed_by": "V1.109 P2 T4",
-        "closure_note": "Wrapped AgentCard in React.memo; stabilized onSelect via ref pattern in AgentPicker so verifyStatus changes no longer trigger card re-renders."
-      },
-      {
-        "id": "R-V1108P1QC3-W002",
-        "title": "useVerifyAgent mutation lacks unmount cancellation",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.108",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
-        "note": "QC3 W-002. Local daemon scan <100ms; minimal risk.",
-        "closed_at": "2026-07-11",
-        "closed_by": "V1.109 P2 T4",
-        "closure_note": "Added AbortController to useVerifyAgent with useEffect cleanup on unmount; stale scan results after unmount throw AbortError instead of settling."
-      },
-      {
-        "id": "R-V1108P0QC3-W001",
-        "title": "Selection-sync useEffect fires on every node interaction (not just selection changes) — latent perf trap",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.108",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
-        "note": "QC3 W-001. Acceptable at author-scale; derive from onNodesChange in future.",
-        "closed_at": "2026-07-11",
-        "closed_by": "V1.109 P2 T2 (FB-GS-001)",
-        "closure_note": "Selection sync now guards on selected entity id change only; pure position drag no longer triggers inspector rebind."
-      },
-      {
-        "id": "R-V1108P0QC3-S002",
-        "title": "Graph<->list toggle unmounts CanvasShell, losing RF viewport state",
-        "severity": "suggestion",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.108",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
-        "note": "QC3 S-002. Acceptable for P0 (deterministic layout); CSS visibility toggle when drag/auto-layout lands.",
-        "closed_at": "2026-07-11",
-        "closed_by": "V1.109 P2 T1 (FB-GS-000)",
-        "closure_note": "use-canvas-viewport.ts hook preserves pan/zoom across graph↔list toggle; viewport restored on re-mount."
-      },
-      {
-        "id": "R-V1108P0QC3-S003",
-        "title": "CanvasShell fully mocked in orchestrator tests — no real RF integration coverage",
-        "severity": "suggestion",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.108",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
-        "note": "QC3 S-003. jsdom lacks ResizeObserver; E2E test needed in follow-up.",
-        "closed_at": "2026-07-11",
-        "closed_by": "V1.109 P2 T3 (FB-GS-002)",
-        "closure_note": "Real RF integration harness under canvas test utilities; ≥1 Outline orchestrator test uses real ReactFlow with ResizeObserver polyfill."
       },
       {
         "id": "R-V1108P0QC1-M001",
@@ -1412,17 +1066,6 @@
       }
     ],
     "2026-07-11-v1.109-canvas-scene-beat": [
-      {
-        "id": "R-V1109-P0-QC3-I1",
-        "title": "Selection-sync useEffect fires on every node interaction (position drag), not just selection changes — inherited from V1.108",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "P2 FB-GS-001 (V1.109 same iteration)",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
-        "note": "Inherited R-V1108P0QC3-W001; extract makes fix file-disjoint; P0 does not worsen. QC source: QC3 I1"
-      },
       {
         "id": "R-V1109-P0-QC1-W001",
         "title": "R-V1108P1QC1-S002 (Studio imports extracted chrome) not actually closed — Studio re-mirrors chrome as static markup (RF-coupled, import boundary forbids RF deps)",
@@ -1479,6 +1122,19 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-11-v1.109-strategy-edge-rewiring.md",
         "note": "Validation checks target existence but not rule uniqueness. QC source: QC2 W-002"
+      }
+    ],
+    "2026-07-11-v1.109-canvas-graph-scale": [
+      {
+        "id": "R-V1109-P2-QC2-S001",
+        "title": "AbortController in useVerifyAgent discards stale results on unmount but doesn't pass signal to client.scanAgents (no true HTTP cancellation)",
+        "severity": "nit",
+        "decision": "accept",
+        "owner": "@frontend-dev",
+        "target": "post-V1.109 (client API signal support)",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
+        "note": "Local-only read-only scan; true cancellation requires client API support. QC source: QC2 suggestion"
       }
     ]
   }
