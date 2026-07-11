@@ -7,6 +7,8 @@
  *   • outline-volume         — Volume lane node (label + chapter count)
  *   • outline-chapter        — Chapter card (title, status paint, word count)
  *   • outline-timeline-event — Timeline event lane node
+ *   • outline-scene          — Scene card (title + status) — V1.109 C2 (FB-C2-001)
+ *   • outline-beat           — Beat card (title only) — V1.109 C2 (FB-C2-001)
  *
  * Consumes shared `canvas-node-*` tokens for structural chrome plus the
  * `canvas-outline-*` token family (FB-C1-006) for outline-specific paint
@@ -25,6 +27,7 @@ import type {
   OutlineVolumeNodeData,
 } from './rf-projection';
 import { STATUS_OPTIONS } from './graph-projection';
+import { OutlineSceneNode, OutlineBeatNode } from './scene-beat-nodes';
 
 // ---------------------------------------------------------------------------
 // Status → token (canvas-outline-chapter-card-status-* — DESIGN.md)
@@ -192,7 +195,13 @@ export const outlineNodeTypes = {
   'outline-volume': OutlineVolumeNode,
   'outline-chapter': OutlineChapterNode,
   'outline-timeline-event': OutlineTimelineEventNode,
+  'outline-scene': OutlineSceneNode,
+  'outline-beat': OutlineBeatNode,
 } as const;
 
 // Re-export for consumers that inspect status options from this barrel.
 export { STATUS_OPTIONS };
+// Re-export Scene/Beat data interfaces + components for type-only consumers
+// (projection in Task 2 will import these when emitting scene/beat nodes).
+export type { OutlineSceneNodeData, OutlineBeatNodeData, OutlineSceneStatus } from './scene-beat-nodes';
+export { OutlineSceneNode, OutlineBeatNode } from './scene-beat-nodes';

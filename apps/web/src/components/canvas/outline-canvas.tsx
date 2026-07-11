@@ -9,9 +9,8 @@
  */
 import { useEffect, useMemo, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
-import type { Edge, Node } from '@xyflow/react';
 
-import { CanvasShell, useNodeChangeHandler } from '@/components/canvas/canvas-shell';
+import { CanvasShell } from '@/components/canvas/canvas-shell';
 import { EmptyState, ErrorState, LoadingState } from '@/components/ui/states';
 import { useChapters, useWork, flattenPages } from '@/api/queries';
 import { queryKeys } from '@/lib/nexus/query-keys';
@@ -29,13 +28,10 @@ import { ChapterInspector } from './outline-canvas/inspectors/chapter-inspector'
 import { TimelinePanel } from './outline-canvas/inspectors/event-inspector';
 import { OutlineStructurePanel } from './outline-canvas/inspectors/structure-inspector';
 import type { ConflictState } from './outline-canvas/graph-projection';
-import {
-  outlineGraphSummary,
-  projectOutlineGraph,
-  selectedChapterIdFromNodes,
-} from './outline-canvas/rf-projection';
+import { outlineGraphSummary } from './outline-canvas/rf-projection';
 import { outlineNodeTypes } from './outline-canvas/outline-nodes';
 import { OutlineAltView } from './outline-canvas/outline-alt-view';
+import { useOutlineCanvasGraph } from './outline-canvas/use-outline-canvas-graph';
 import type {
   ChapterSummary,
   OutlinePatchChapterRequest,
@@ -62,9 +58,6 @@ export function OutlineCanvas({ workId, initialSelectedChapterId = null }: Outli
   const patchChapter = usePatchOutlineChapter(workId);
   const patchTimeline = usePatchTimelineEvent(workId);
 
-  const [selectedChapterId, setSelectedChapterId] = useState<number | null>(
-    initialSelectedChapterId ?? null,
-  );
   const [conflict, setConflict] = useState<ConflictState | null>(null);
   const [showAlt, setShowAlt] = useState(false);
   const qc = useQueryClient();
@@ -89,66 +82,23 @@ export function OutlineCanvas({ workId, initialSelectedChapterId = null }: Outli
     return map;
   }, [chapters]);
 
+  // V1.109 P0 T1 — RF graph state extracted into `useOutlineCanvasGraph`
+  // (R-V1108P0QC1-S001). The hook owns the projection memo, rfNodes/rfEdges
+  // state, the position-merge sync effect (preserves dragged positions +
+  // selection across chapter-page loads), the graph-click → inspector
+  // selection-sync effect (FB-C1-003), and `selectedChapterId`. The panel
+  // writes through the hook's setter so graph + panel selection stay in sync
+  // via one state owner.
+  const {
+    rfNodes,
+    rfEdges,
+    onNodesChange,
+    selectedChapterId,
+    setSelectedChapterId,
+    projection,
+  } = useOutlineCanvasGraph({ outline: outline.data, chapters, initialSelectedChapterId });
+
   const selectedChapter = selectedChapterId ? chapterById.get(selectedChapterId) ?? null : null;
-
-  // V1.108 P0 — project the outline into a spatial React Flow graph.
-  // The graph is the primary view (FB-C1-000); the panel below remains as a
-  // structural inspector companion. T2 wires graph-click → inspector selection.
-  const projection = useMemo(
-    () => (outline.data ? projectOutlineGraph(outline.data, chapters) : null),
-    [outline.data, chapters],
-  );
-  const [rfNodes, setRfNodes] = useState<Node[]>([]);
-  const [rfEdges, setRfEdges] = useState<Edge[]>([]);
-  const onNodesChange = useNodeChangeHandler(setRfNodes);
-
-  // Sync RF state when the projection changes (data refetch, chapter list update).
-  // PR-review fix: merge instead of replace so the author's graph interactions
-  // (dragged positions, selection) survive incremental chapter-page loads.
-  // `chapters` grows as each cursor page arrives (I-QC1-002 auto-fetch), which
-  // rebuilds the projection; a bare `setRfNodes(projection.nodes)` wiped every
-  // node's user-moved position and selection on each page fetch. For nodes that
-  // persist across the rebuild (same id), preserve their `position` and
-  // `selected` flag; new nodes use the projected position, dropped nodes fall
-  // away. Edges carry no per-interaction state, so they are replaced directly.
-  useEffect(() => {
-    if (!projection) return;
-    setRfEdges(projection.edges);
-    setRfNodes((prev) => {
-      if (prev.length === 0) return projection.nodes;
-      const prevById = new Map(prev.map((n) => [n.id, n]));
-      return projection.nodes.map((node) => {
-        const existing = prevById.get(node.id);
-        if (!existing) return node;
-        return { ...node, position: existing.position, selected: existing.selected };
-      });
-    });
-  }, [projection]);
-
-  // Graph click → inspector selection sync (FB-C1-003).
-  // React Flow tracks selection via the node `selected` flag (set through
-  // onNodesChange). Resolve it to `selectedChapterId` so graph clicks drive the
-  // chapter inspector — same pattern as `world-kb-canvas.tsx`.
-  //
-  // PR-review fix: `selectedChapterIdFromNodes` returns `null` both when no
-  // node is selected AND when the selected node does not resolve to a chapter
-  // (volume node, or a timeline event with no `realizes_chapter_id`). The old
-  // guard left the previous chapter selection in place in the second case,
-  // leaving a stale chapter in the inspector. Distinguish the two: when a node
-  // IS selected but resolves to no chapter, clear the chapter selection so the
-  // inspector does not show a chapter that is no longer the active graph
-  // selection. When nothing is selected at all, leave the current selection
-  // intact (preserves V1.75 `?chapter=N` preselect and click-to-keep-while-
-  // panning behavior).
-  useEffect(() => {
-    const chapterId = selectedChapterIdFromNodes(rfNodes);
-    if (chapterId !== null) {
-      setSelectedChapterId(chapterId);
-    } else if (rfNodes.some((n) => n.selected)) {
-      setSelectedChapterId(null);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [rfNodes]);
 
   const summary = outlineGraphSummary(outline.data, chapters.length);
 
