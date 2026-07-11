@@ -9,44 +9,34 @@
  *
  * Node kinds:
  *   • outline-scene — Scene card (title + status), child of a Chapter parent
- *   • outline-beat  — Beat card (title only), child of a Scene parent
+ *   • outline-beat  — Beat card (title), child of a Scene parent
  *
- * NOTE: The projection (`rf-projection.ts`) does not emit these node kinds
- * yet — Task 2 extends the projection to produce Scene/Beat nodes from
- * fixture-injected data. These components are registered in `outlineNodeTypes`
- * now so Task 2 only touches the projection.
- *
- * Data interfaces (`OutlineSceneNodeData`, `OutlineBeatNodeData`) are defined
- * here for T1; Task 2 will extend `rf-projection.ts` to emit them and may
- * promote/re-export the interfaces there.
+ * The projection (`rf-projection.ts`) emits these node kinds from fixture-
+ * injected data (T2). The data interfaces live in `rf-projection.ts` (the
+ * projection SSOT) so the payloads carry the identity fields (`workId`,
+ * `sceneId`, `chapterId`, `beatId`) the projection needs to emit `parentId` +
+ * `extent: "parent"`. This module re-exports them for consumers that imported
+ * them from the node-component barrel historically.
  */
 import { memo } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 
-// ---------------------------------------------------------------------------
-// Node data payloads (UI-only; wire DTOs in @42ch/nexus-contracts remain SSOT)
-// ---------------------------------------------------------------------------
+import type {
+  OutlineBeatNodeData,
+  OutlineSceneNodeData,
+  OutlineSceneStatus,
+} from './rf-projection';
 
-/** Scene status model — two-value (drafted/completed), no pending tier. */
-export type OutlineSceneStatus = 'drafted' | 'completed';
-
-/** React Flow node data for a Scene card node. */
-export interface OutlineSceneNodeData {
-  /** React Flow requires an index signature on node data. */
-  [key: string]: unknown;
-  /** Scene title; `null`/empty → **Untitled Scene** fallback (Voice & Content). */
-  title: string | null;
-  /** Scene status; `null` when not yet set → no status chip rendered. */
-  status: OutlineSceneStatus | null;
-}
-
-/** React Flow node data for a Beat card node. */
-export interface OutlineBeatNodeData {
-  /** React Flow requires an index signature on node data. */
-  [key: string]: unknown;
-  /** Beat title; `null`/empty → **Untitled Beat** fallback (Voice & Content). */
-  title: string | null;
-}
+// Re-export for type-only consumers that historically imported these from the
+// node component module (T1 defined them here; T2 promoted the canonical
+// definitions to `rf-projection.ts` — the projection SSOT — so the data
+// payloads carry the identity fields `workId` / `sceneId` / `chapterId` /
+// `beatId` the projection needs to emit `parentId` + `extent`).
+export type {
+  OutlineBeatNodeData,
+  OutlineSceneNodeData,
+  OutlineSceneStatus,
+} from './rf-projection';
 
 // ---------------------------------------------------------------------------
 // Status → token + label (canvas-outline-scene-status-* — DESIGN.md)

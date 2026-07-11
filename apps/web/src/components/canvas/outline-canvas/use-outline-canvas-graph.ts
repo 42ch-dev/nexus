@@ -24,6 +24,7 @@ import type { Edge, Node, OnNodesChange } from '@xyflow/react';
 import type { ChapterSummary, WorkOutline } from '@42ch/nexus-contracts';
 
 import { useNodeChangeHandler } from '@/components/canvas/canvas-shell';
+import type { SceneBeatFixturePayload } from './graph-projection';
 import {
   projectOutlineGraph,
   selectedChapterIdFromNodes,
@@ -39,6 +40,12 @@ export interface UseOutlineCanvasGraphArgs {
   chapters: ChapterSummary[];
   /** Optional chapter id to preselect on mount (V1.75 F-QC3-001). */
   initialSelectedChapterId?: number | null;
+  /**
+   * Optional Scene/Beat fixture payload (V1.109 C2 T2). When provided, the
+   * projection emits Scene/Beat child nodes inside their Chapter/Scene
+   * parents. Empty/undefined on real Works — honest empty chrome.
+   */
+  sceneBeatFixture?: SceneBeatFixturePayload;
 }
 
 export interface UseOutlineCanvasGraphResult {
@@ -57,16 +64,18 @@ export interface UseOutlineCanvasGraphResult {
 export function useOutlineCanvasGraph(
   args: UseOutlineCanvasGraphArgs,
 ): UseOutlineCanvasGraphResult {
-  const { outline, chapters, initialSelectedChapterId = null } = args;
+  const { outline, chapters, initialSelectedChapterId = null, sceneBeatFixture } = args;
 
   const [selectedChapterId, setSelectedChapterId] = useState<number | null>(
     initialSelectedChapterId ?? null,
   );
 
   // V1.108 P0 — project the outline into a spatial React Flow graph.
+  // V1.109 C2 T2 — forward the scene/beat fixture payload so the projection
+  // can emit Scene/Beat child nodes (empty/undefined on real Works today).
   const projection = useMemo(
-    () => (outline ? projectOutlineGraph(outline, chapters) : null),
-    [outline, chapters],
+    () => (outline ? projectOutlineGraph(outline, chapters, sceneBeatFixture) : null),
+    [outline, chapters, sceneBeatFixture],
   );
 
   const [rfNodes, setRfNodes] = useState<Node[]>([]);

@@ -28,6 +28,17 @@ import type {
 } from '@42ch/nexus-contracts';
 
 import { chapterDisplayTitle } from './graph-projection';
+import type {
+  BeatFixture,
+  OutlineSceneStatus,
+  SceneBeatFixturePayload,
+  SceneFixture,
+} from './graph-projection';
+
+// Re-export the Scene/Beat status union so node-component and projection
+// consumers import it from one barrel (the projection SSOT). The canonical
+// definition lives in `graph-projection.ts` (lowest-level shared module).
+export type { OutlineSceneStatus } from './graph-projection';
 
 // ---------------------------------------------------------------------------
 // Node data payloads (UI-only; wire DTOs in @42ch/nexus-contracts remain SSOT)
@@ -70,6 +81,47 @@ export interface OutlineTimelineEventNodeData {
   realizesChapterId: number | null;
 }
 
+/**
+ * React Flow node data for a Scene card node (V1.109 C2 — FB-C2-000).
+ *
+ * Scene nodes are children of Chapter parent nodes
+ * (`parentId = chapter:<chapterId>`, `extent: "parent"`). The data is
+ * fixture-driven — the outline wire model has no scene data today
+ * (architect-locked §5.2 Q1).
+ */
+export interface OutlineSceneNodeData {
+  /** React Flow requires an index signature on node data. */
+  [key: string]: unknown;
+  workId: string;
+  sceneId: string;
+  /** Owning chapter id — drives `parentId = chapter:<chapterId>`. */
+  chapterId: number;
+  /** Scene title; `null`/empty → **Untitled Scene** fallback (Voice & Content). */
+  title: string | null;
+  /** Scene status; `null` when not yet set → no status chip rendered. */
+  status: OutlineSceneStatus | null;
+}
+
+/**
+ * React Flow node data for a Beat card node (V1.109 C2 — FB-C2-000).
+ *
+ * Beat nodes are children of Scene parent nodes
+ * (`parentId = scene:<sceneId>`, `extent: "parent"`) — Scene→Beat nesting
+ * per §5.2 Q2.
+ */
+export interface OutlineBeatNodeData {
+  /** React Flow requires an index signature on node data. */
+  [key: string]: unknown;
+  workId: string;
+  beatId: string;
+  /** Owning scene id — drives `parentId = scene:<sceneId>`. */
+  sceneId: string;
+  /** Beat title; `null`/empty → **Untitled Beat** fallback (Voice & Content). */
+  title: string | null;
+  /** Beat status; `null` when not yet set. */
+  status: OutlineSceneStatus | null;
+}
+
 /** Edge data payload for outline structural / temporal edges. */
 export interface OutlineEdgeData {
   /** React Flow requires an index signature on edge data. */
@@ -104,6 +156,12 @@ export function chapterNodeId(chapterId: number): string {
 export function eventNodeId(eventId: string): string {
   return `event:${eventId}`;
 }
+export function sceneNodeId(sceneId: string): string {
+  return `scene:${sceneId}`;
+}
+export function beatNodeId(beatId: string): string {
+  return `beat:${beatId}`;
+}
 
 // ---------------------------------------------------------------------------
 // Projection: outline + chapters → { nodes, edges }
@@ -117,12 +175,17 @@ export interface OutlineGraphProjection {
 /**
  * Project a full outline into React Flow nodes + edges.
  *
- * Deterministic: the same `(outline, chapters)` pair always yields identical
- * node positions, ids, and edge sets. Inputs are never mutated.
+ * Deterministic: the same `(outline, chapters, fixture?)` tuple always yields
+ * identical node positions, ids, and edge sets. Inputs are never mutated.
+ *
+ * Scene/Beat nodes (V1.109 C2) are **fixture-driven**: when `sceneBeatFixture`
+ * is omitted or empty, the projection emits zero scene/beat children — honest
+ * empty chrome (the outline wire model has no scene/beat data today).
  */
 export function projectOutlineGraph(
   outline: WorkOutline,
   chapters: ChapterSummary[],
+  sceneBeatFixture?: SceneBeatFixturePayload,
 ): OutlineGraphProjection {
   const volumeNodes = layoutVolumeNodes(outline);
   const chapterNodes = layoutChapterNodes(outline, chapters);
@@ -133,6 +196,18 @@ export function projectOutlineGraph(
   const foreshadowEdges = deriveForeshadowEdges(outline);
 
   const allNodes = [...volumeNodes, ...chapterNodes, ...eventNodes];
+
+  // V1.109 C2 — Scene/Beat child nodes (fixture-driven). Scenes are children
+  // of Chapter parents; Beats are children of Scene parents. Orphans (scene
+  // whose chapter is absent, beat whose scene is absent) are filtered so the
+  // projection never emits a `parentId` pointing at a non-existent node.
+  const chapterIds = new Set(chapters.map((c) => c.chapter));
+  const sceneNodes = layoutSceneNodes(outline.work_id, sceneBeatFixture, chapterIds);
+  const emittedSceneIds = new Set(sceneNodes.map((n) => (n.data as OutlineSceneNodeData).sceneId));
+  const beatNodes = layoutBeatNodes(outline.work_id, sceneBeatFixture, emittedSceneIds);
+
+  const allNodesWithSceneBeat = [...allNodes, ...sceneNodes, ...beatNodes];
+
   const allEdges = [...containsEdges, ...realizesEdges, ...foreshadowEdges];
 
   // I-QC1-002 — filter out dangling edges whose source or target node does not
@@ -140,12 +215,12 @@ export function projectOutlineGraph(
   // remaining pages, but this guard ensures the projection never emits a
   // dangling edge if a chapter referenced by the outline is absent from the
   // loaded pages or the chapters list entirely.
-  const nodeIds = new Set(allNodes.map((n) => n.id));
+  const nodeIds = new Set(allNodesWithSceneBeat.map((n) => n.id));
   const edges = allEdges.filter(
     (e) => nodeIds.has(e.source) && nodeIds.has(e.target),
   );
 
-  return { nodes: allNodes, edges };
+  return { nodes: allNodesWithSceneBeat, edges };
 }
 
 // ---------------------------------------------------------------------------
@@ -245,6 +320,116 @@ export function layoutTimelineEventNodes(outline: WorkOutline): Node<OutlineTime
 }
 
 // ---------------------------------------------------------------------------
+// Scene/Beat child-node layout (V1.109 C2 — fixture-driven)
+// ---------------------------------------------------------------------------
+//
+// Child nodes use React Flow `parentId` + `extent: "parent"`, so their
+// `position` is **relative to the parent node's top-left**, not the canvas
+// origin. Scenes stack vertically inside their Chapter parent; Beats stack
+// vertically inside their Scene parent. The exact offsets are a pragmatic
+// deterministic grid — the layout engine (dagre/elk) is deferred.
+
+/** Relative offset from the parent's top-left where the first child starts. */
+const CHILD_ORIGIN_X = 8;
+const CHILD_ORIGIN_Y = 40;
+/** Vertical stride between stacked children inside the same parent. */
+const CHILD_ROW_Y = 56;
+
+/**
+ * Scene nodes — children of Chapter parents. Scenes whose `chapterId` is not
+ * in `chapterIds` (chapter not loaded / doesn't exist) are skipped so the
+ * projection never emits a dangling `parentId`.
+ */
+export function layoutSceneNodes(
+  workId: string,
+  fixture: SceneBeatFixturePayload | undefined,
+  chapterIds: Set<number>,
+): Node<OutlineSceneNodeData>[] {
+  if (!fixture || fixture.scenes.length === 0) return [];
+
+  // Group scenes by chapter so children of the same parent stack together,
+  // then assign per-parent child indices for the vertical offset.
+  const perChapter = new Map<number, SceneFixture[]>();
+  for (const scene of fixture.scenes) {
+    if (!chapterIds.has(scene.chapterId)) continue;
+    const bucket = perChapter.get(scene.chapterId);
+    if (bucket) bucket.push(scene);
+    else perChapter.set(scene.chapterId, [scene]);
+  }
+
+  const nodes: Node<OutlineSceneNodeData>[] = [];
+  for (const [chapterId, scenes] of perChapter) {
+    scenes.forEach((scene, index) => {
+      const data: OutlineSceneNodeData = {
+        workId,
+        sceneId: scene.sceneId,
+        chapterId,
+        title: scene.title,
+        status: scene.status,
+      };
+      nodes.push({
+        id: sceneNodeId(scene.sceneId),
+        type: 'outline-scene',
+        parentId: chapterNodeId(chapterId),
+        extent: 'parent',
+        position: {
+          x: CHILD_ORIGIN_X,
+          y: CHILD_ORIGIN_Y + index * CHILD_ROW_Y,
+        },
+        data,
+      });
+    });
+  }
+  return nodes;
+}
+
+/**
+ * Beat nodes — children of Scene parents (Scene→Beat nesting, §5.2 Q2). Beats
+ * whose `sceneId` is not in `emittedSceneIds` (scene filtered out or missing)
+ * are skipped so the projection never emits a dangling `parentId`.
+ */
+export function layoutBeatNodes(
+  workId: string,
+  fixture: SceneBeatFixturePayload | undefined,
+  emittedSceneIds: Set<string>,
+): Node<OutlineBeatNodeData>[] {
+  if (!fixture || fixture.beats.length === 0) return [];
+
+  const perScene = new Map<string, BeatFixture[]>();
+  for (const beat of fixture.beats) {
+    if (!emittedSceneIds.has(beat.sceneId)) continue;
+    const bucket = perScene.get(beat.sceneId);
+    if (bucket) bucket.push(beat);
+    else perScene.set(beat.sceneId, [beat]);
+  }
+
+  const nodes: Node<OutlineBeatNodeData>[] = [];
+  for (const [sceneId, beats] of perScene) {
+    beats.forEach((beat, index) => {
+      const data: OutlineBeatNodeData = {
+        workId,
+        beatId: beat.beatId,
+        sceneId,
+        title: beat.title,
+        status: beat.status,
+      };
+      nodes.push({
+        id: beatNodeId(beat.beatId),
+        type: 'outline-beat',
+        parentId: sceneNodeId(sceneId),
+        extent: 'parent',
+        position: {
+          x: CHILD_ORIGIN_X,
+          y: CHILD_ORIGIN_Y + index * CHILD_ROW_Y,
+        },
+        data,
+      });
+    });
+  }
+  return nodes;
+}
+
+// ---------------------------------------------------------------------------
 // Edge derivation
 // ---------------------------------------------------------------------------
 
@@ -333,6 +518,41 @@ export function selectedChapterIdFromNodes(nodes: Node[]): number | null {
   }
   if (selected.type === 'outline-timeline-event') {
     return (selected.data as OutlineTimelineEventNodeData).realizesChapterId;
+  }
+  return null;
+}
+
+/**
+ * Resolve the selected scene id from React Flow node selection state
+ * (V1.109 C2 — FB-C2-002 graph click → Scene inspector).
+ *
+ * Returns the `sceneId` when an `outline-scene` node is selected, `null`
+ * otherwise. Callers must treat `null` as "selection does not resolve to a
+ * scene" so selecting a chapter/volume/beat/timeline node does not clear the
+ * current scene selection erroneously (same contract as
+ * {@link selectedChapterIdFromNodes}).
+ */
+export function selectedSceneIdFromNodes(nodes: Node[]): string | null {
+  const selected = nodes.find((n) => n.selected);
+  if (!selected) return null;
+  if (selected.type === 'outline-scene') {
+    return (selected.data as OutlineSceneNodeData).sceneId;
+  }
+  return null;
+}
+
+/**
+ * Resolve the selected beat id from React Flow node selection state
+ * (V1.109 C2 — FB-C2-002 graph click → Beat inspector).
+ *
+ * Returns the `beatId` when an `outline-beat` node is selected, `null`
+ * otherwise.
+ */
+export function selectedBeatIdFromNodes(nodes: Node[]): string | null {
+  const selected = nodes.find((n) => n.selected);
+  if (!selected) return null;
+  if (selected.type === 'outline-beat') {
+    return (selected.data as OutlineBeatNodeData).beatId;
   }
   return null;
 }

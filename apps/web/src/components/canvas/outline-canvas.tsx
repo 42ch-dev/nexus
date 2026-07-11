@@ -27,7 +27,7 @@ import { OutlineConflictDialog } from './outline-canvas/conflict-modal';
 import { ChapterInspector } from './outline-canvas/inspectors/chapter-inspector';
 import { TimelinePanel } from './outline-canvas/inspectors/event-inspector';
 import { OutlineStructurePanel } from './outline-canvas/inspectors/structure-inspector';
-import type { ConflictState } from './outline-canvas/graph-projection';
+import type { ConflictState, SceneBeatFixturePayload } from './outline-canvas/graph-projection';
 import { outlineGraphSummary } from './outline-canvas/rf-projection';
 import { outlineNodeTypes } from './outline-canvas/outline-nodes';
 import { OutlineAltView } from './outline-canvas/outline-alt-view';
@@ -82,6 +82,16 @@ export function OutlineCanvas({ workId, initialSelectedChapterId = null }: Outli
     return map;
   }, [chapters]);
 
+  // V1.109 C2 T2 — Scene/Beat fixture payload injection point. The outline
+  // wire model has no scene/beat data today (architect-locked §5.2 Q1), so
+  // real Works pass an empty payload → projection emits zero scene/beat
+  // children (honest empty chrome). Design Studio / test fixtures inject
+  // populated payloads here when scene/beat demo data is needed.
+  const sceneBeatFixture = useMemo<SceneBeatFixturePayload>(
+    () => ({ scenes: [], beats: [] }),
+    [],
+  );
+
   // V1.109 P0 T1 — RF graph state extracted into `useOutlineCanvasGraph`
   // (R-V1108P0QC1-S001). The hook owns the projection memo, rfNodes/rfEdges
   // state, the position-merge sync effect (preserves dragged positions +
@@ -96,7 +106,12 @@ export function OutlineCanvas({ workId, initialSelectedChapterId = null }: Outli
     selectedChapterId,
     setSelectedChapterId,
     projection,
-  } = useOutlineCanvasGraph({ outline: outline.data, chapters, initialSelectedChapterId });
+  } = useOutlineCanvasGraph({
+    outline: outline.data,
+    chapters,
+    initialSelectedChapterId,
+    sceneBeatFixture,
+  });
 
   const selectedChapter = selectedChapterId ? chapterById.get(selectedChapterId) ?? null : null;
 
