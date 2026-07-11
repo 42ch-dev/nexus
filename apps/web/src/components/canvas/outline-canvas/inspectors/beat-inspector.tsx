@@ -12,7 +12,7 @@
  * `useOutlineCanvasGraph().selectedBeatId` + the fixture payload, then passes
  * the beat data + parent scene title here.
  */
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
 import type { OutlineSceneStatus } from '../rf-projection';
 
@@ -53,7 +53,6 @@ export function BeatInspector({ beat, parentSceneTitle }: BeatInspectorProps) {
     <Card>
       <CardHeader>
         <CardTitle>Beat</CardTitle>
-        <CardDescription>Structural metadata for this beat.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="rounded-card border border-gray-alpha-300 bg-background-100 p-3 text-copy-13 text-gray-700">

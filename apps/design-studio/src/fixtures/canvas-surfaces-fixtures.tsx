@@ -206,6 +206,102 @@ function TimelineEventNodeSample({
   );
 }
 
+/* ------------------------------------------------------------------ */
+/*  Scene/Beat node chrome — mirrored from V1.109 C2 scene-beat-nodes.tsx */
+/*  (same canvas-outline-scene-* / canvas-outline-beat-* tokens)         */
+/* ------------------------------------------------------------------ */
+
+const SCENE_STATUS_TOKENS = {
+  drafted: '--color-canvas-outline-scene-status-drafted',
+  completed: '--color-canvas-outline-scene-status-completed',
+} as const;
+
+const SCENE_STATUS_LABELS = {
+  drafted: 'Drafted',
+  completed: 'Completed',
+} as const;
+
+type SceneStatusKey = keyof typeof SCENE_STATUS_TOKENS;
+
+/**
+ * Scene node sample — mirrors V1.109 C2 OutlineSceneNode (title + status chip).
+ * Consumes `canvas-outline-scene-fill` / `-border` / `-status-*` tokens.
+ */
+function SceneNodeSample({
+  title,
+  status,
+  selected = false,
+}: {
+  title: string;
+  status: SceneStatusKey | null;
+  selected?: boolean;
+}) {
+  const tokenVar = status ? `var(${SCENE_STATUS_TOKENS[status]})` : null;
+  return (
+    <div
+      className={[
+        'min-w-[160px] rounded-card border px-3 py-2 shadow-card transition-colors duration-state ease-standard',
+        selected ? 'border-canvas-node-border-selected' : '',
+      ].join(' ')}
+      style={{
+        background: 'var(--color-canvas-outline-scene-fill)',
+        borderColor: selected ? undefined : 'var(--color-canvas-outline-scene-border)',
+      }}
+    >
+      <span
+        className="truncate font-heading text-copy-14 font-semibold text-gray-1000"
+        title={title}
+      >
+        {title}
+      </span>
+      {tokenVar ? (
+        <div className="mt-1 flex flex-wrap items-center gap-1">
+          <span
+            className="flex items-center gap-1 rounded-pill bg-gray-alpha-100 px-1.5 py-0.5 text-label-12"
+            style={{
+              color: tokenVar,
+              background: `color-mix(in srgb, ${tokenVar} 12%, transparent)`,
+            }}
+          >
+            <span
+              className="inline-block h-2 w-2 rounded-pill"
+              style={{ background: tokenVar }}
+              aria-hidden
+            />
+            {SCENE_STATUS_LABELS[status!]}
+          </span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Beat node sample — mirrors V1.109 C2 OutlineBeatNode (title only, no status).
+ * Consumes `canvas-outline-beat-fill` / `-border` tokens.
+ */
+function BeatNodeSample({ title, selected = false }: { title: string; selected?: boolean }) {
+  return (
+    <div
+      className={[
+        'min-w-[160px] rounded-card border px-3 py-2 shadow-card transition-colors duration-state ease-standard',
+        selected ? 'border-canvas-node-border-selected' : '',
+      ].join(' ')}
+      style={{
+        background: 'var(--color-canvas-outline-beat-fill)',
+        borderColor: selected ? undefined : 'var(--color-canvas-outline-beat-border)',
+      }}
+    >
+      <span
+        className="truncate font-heading text-copy-14 font-semibold text-gray-1000"
+        title={title}
+      >
+        {title}
+      </span>
+    </div>
+  );
+}
+
 /** Connection port — mirrors the RF Handle visual (canvas-port token). */
 function PortSample() {
   return (
@@ -482,6 +578,34 @@ export function CanvasSurfacesFixtures() {
               description={null}
               realizesLabel="Unattached event"
             />
+          </div>
+
+          {/* V1.109 C2 — Scene/Beat node chrome (FB-C2-001/004). Mirrors
+              scene-beat-nodes.tsx using canvas-outline-scene-* / -beat-*
+              tokens. Light/dark acceptance here carries to the App graph. */}
+          <div className="flex flex-col gap-2">
+            <span className="text-label-12 font-medium text-gray-500">Scene (drafted)</span>
+            <SceneNodeSample title="Opening Scene" status="drafted" />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <span className="text-label-12 font-medium text-gray-500">Scene (completed)</span>
+            <SceneNodeSample title="Closing Scene" status="completed" />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <span className="text-label-12 font-medium text-gray-500">Scene (no status)</span>
+            <SceneNodeSample title="Untitled Scene" status={null} />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <span className="text-label-12 font-medium text-gray-500">Beat</span>
+            <BeatNodeSample title="Inciting Moment" />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <span className="text-label-12 font-medium text-gray-500">Beat (selected)</span>
+            <BeatNodeSample title="Turning Point" selected />
           </div>
         </div>
       </FixtureFrame>

@@ -7,7 +7,7 @@
  * → inspector selection path that must remain functional alongside the new
  * graph-click selection sync.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { act } from 'react';
@@ -314,5 +314,123 @@ describe('OutlineCanvas — empty graph shell parity (I-QC1-001)', () => {
     expect(screen.getByTestId('canvas-shell-mock')).toBeInTheDocument();
     // The in-shell EmptyState overlay must be visible inside the shell.
     expect(screen.getByText('No graph nodes')).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// V1.109 C2 T4 — Scene/Beat integration (FB-C2-000/002/003/004)
+// ---------------------------------------------------------------------------
+
+/** Scene/Beat fixture payload with a full Volume/Chapter/Scene/Beat hierarchy. */
+const SCENE_BEAT_FIXTURE = {
+  scenes: [
+    { sceneId: 'scene-1', chapterId: 1, title: 'Opening Scene', status: 'drafted' as const },
+    { sceneId: 'scene-2', chapterId: 1, title: null, status: 'completed' as const },
+  ],
+  beats: [
+    { beatId: 'beat-1', sceneId: 'scene-1', title: 'Inciting Moment', status: null },
+  ],
+};
+
+function renderOutlineWithFixture(fixture: typeof SCENE_BEAT_FIXTURE) {
+  return render(
+    <QueryClientProvider client={queryClient}>
+      <OutlineCanvas workId="wk_test" sceneBeatFixture={fixture} />
+    </QueryClientProvider>,
+  );
+}
+
+describe('OutlineCanvas — Scene/Beat alt view integration (FB-C2-000/003)', () => {
+  beforeEach(() => {
+    // Restore default mock data — the empty-graph test above mutates the
+    // shared mocks. Each Scene/Beat test needs the default Volume/Chapter
+    // structure to render the hierarchy.
+    mocks.outlineResult.data = mocks.OUTLINE;
+    mocks.chaptersResult.data = {
+      pages: [{ items: [mocks.CHAPTER_1], pagination: { has_more: false, next_cursor: null } }],
+    };
+  });
+
+  it('renders Scene/Beat rows nested under chapters in alt view when fixture provided', async () => {
+    const user = userEvent.setup();
+    renderOutlineWithFixture(SCENE_BEAT_FIXTURE);
+
+    // Switch to list view.
+    await user.click(screen.getByRole('button', { name: 'Show list view' }));
+
+    const altSection = screen.getByLabelText('Outline chapters and timeline in list order');
+
+    // Scene rows appear with type badges and titles.
+    expect(within(altSection).getByText('Opening Scene')).toBeInTheDocument();
+    expect(within(altSection).getAllByText('Scene')).toHaveLength(2);
+
+    // Beat row nests under its scene.
+    expect(within(altSection).getByText('Inciting Moment')).toBeInTheDocument();
+    expect(within(altSection).getByText('Beat')).toBeInTheDocument();
+
+    // Null-title scene falls back to Untitled Scene (Voice & Content lock).
+    expect(within(altSection).getByText('Untitled Scene')).toBeInTheDocument();
+  });
+
+  it('shows the empty-under-chapter helper for chapters with zero scenes when fixture is active', async () => {
+    const user = userEvent.setup();
+    // Add a second chapter to the outline + chapters data so it has zero scenes.
+    mocks.outlineResult.data = {
+      ...mocks.OUTLINE,
+      volumes: [
+        { volume_id: 1, label: 'Volume 1', chapter_ids: [1, 2] },
+      ],
+    };
+    mocks.chaptersResult.data = {
+      pages: [
+        {
+          items: [
+            mocks.CHAPTER_1,
+            { ...mocks.CHAPTER_1, chapter: 2, title: 'Chapter Two' },
+          ],
+          pagination: { has_more: false, next_cursor: null },
+        },
+      ],
+    };
+
+    renderOutlineWithFixture(SCENE_BEAT_FIXTURE);
+    await user.click(screen.getByRole('button', { name: 'Show list view' }));
+
+    // Chapter 2 has no scenes in the fixture → the empty helper shows.
+    expect(screen.getByText('No scenes in this chapter yet.')).toBeInTheDocument();
+  });
+
+  it('does NOT render Scene/Beat rows or empty-under-chapter helper when no fixture (honest empty chrome)', async () => {
+    const user = userEvent.setup();
+    renderOutline(); // No fixture prop — real Work behavior.
+
+    await user.click(screen.getByRole('button', { name: 'Show list view' }));
+
+    // No Scene/Beat chrome at all.
+    expect(screen.queryByText('Scene')).not.toBeInTheDocument();
+    expect(screen.queryByText('Beat')).not.toBeInTheDocument();
+    expect(screen.queryByText('No scenes in this chapter yet.')).not.toBeInTheDocument();
+  });
+});
+
+describe('OutlineCanvas — Scene/Beat inspector mounting (FB-C2-002)', () => {
+  beforeEach(() => {
+    mocks.outlineResult.data = mocks.OUTLINE;
+    mocks.chaptersResult.data = {
+      pages: [{ items: [mocks.CHAPTER_1], pagination: { has_more: false, next_cursor: null } }],
+    };
+  });
+
+  it('shows the Chapter inspector by default (no Scene/Beat selection)', () => {
+    renderOutlineWithFixture(SCENE_BEAT_FIXTURE);
+
+    // Chapter inspector is the default even with a fixture — its empty-state
+    // prompt shows when no chapter is selected. Scene/Beat inspectors only
+    // appear when those nodes are selected via graph click.
+    expect(screen.getByText('Select a chapter to inspect its outline metadata.')).toBeInTheDocument();
+    // Scene/Beat inspector headings do NOT appear (those inspectors are not
+    // mounted when selectedScene/selectedBeat are null).
+    expect(screen.queryByText('Scene')).not.toBeInTheDocument();
+    expect(screen.queryByText('Beat')).not.toBeInTheDocument();
   });
 });
