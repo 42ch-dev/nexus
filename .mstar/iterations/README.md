@@ -120,6 +120,7 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | [v1.107-delivery-compass.md](v1.107-delivery-compass.md) | V1.107 | **completed** (2026-07-10) — Studio UI tune Must (visual FB-000..011 + coverage FB-012..016). Integration `iteration/v1.107`. |
 | [v1.108-delivery-compass.md](v1.108-delivery-compass.md) | V1.108 | **Shipped (2026-07-11)** — Dual Must: Canvas Outline spatial parity (P0) + UI shell SSOT / AgentPicker / Studio canvas (P1). Integration `iteration/v1.108`. |
 | [v1.109-delivery-compass.md](v1.109-delivery-compass.md) | V1.109 | **completed** (2026-07-11) — Triple Must: Canvas Scene/Beat (P0) + Strategy edge rewiring (P1) + Graph scale/viewport (P2). Integration `iteration/v1.109`. |
+| [v1.110-delivery-compass.md](v1.110-delivery-compass.md) | V1.110 | **active** (2026-07-11) — Reliability + UX polish: daemon startup latency (P0) + agent scan PATH reliability (P1) + AgentPicker UX polish (P2). Integration `iteration/v1.110`. |
 
 ### Active iteration workspaces
 
