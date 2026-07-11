@@ -9,7 +9,7 @@
  * This hook-level test proves that conflict handling and reapply both drive a
  * graph refetch without mounting React Flow in jsdom.
  */
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -291,5 +291,186 @@ describe('useStrategyCanvas draft transition commit (FB-SE-002)', () => {
 
     expect(result.current.selectedDraftEdge).toBeNull();
     expect(patch).not.toHaveBeenCalled();
+  });
+});
+
+describe('useStrategyCanvas edge reconnection (FB-SE-003)', () => {
+  // Seed the shared graph mock with an existing transition edge so a reconnect
+  // gesture has something to drag. The hoisted `mocks.graphQuery` is the same
+  // reference the hook reads, so mutating its nested arrays is visible to the
+  // hook's sync effect.
+  const reconnNodes = [
+    {
+      id: 's1',
+      type: 'strategy-state',
+      position: { x: 0, y: 0 },
+      data: {
+        stateId: 's1',
+        label: 'S1',
+        stateKind: 'default',
+        presetId: 'preset-1',
+        isTerminal: false,
+        isInitial: true,
+        isGroup: false,
+      },
+    },
+    {
+      id: 's2',
+      type: 'strategy-state',
+      position: { x: 200, y: 0 },
+      data: {
+        stateId: 's2',
+        label: 'S2',
+        stateKind: 'default',
+        presetId: 'preset-1',
+        isTerminal: false,
+        isInitial: false,
+        isGroup: false,
+      },
+    },
+    {
+      id: 's3',
+      type: 'strategy-state',
+      position: { x: 400, y: 0 },
+      data: {
+        stateId: 's3',
+        label: 'S3',
+        stateKind: 'default',
+        presetId: 'preset-1',
+        isTerminal: false,
+        isInitial: false,
+        isGroup: false,
+      },
+    },
+  ];
+  const existingEdge = {
+    id: 'e-s1-s2-next-0',
+    source: 's1',
+    target: 's2',
+    type: 'strategy-edge',
+    data: { transitionKind: 'next' },
+  };
+
+  beforeEach(() => {
+    // Cast through unknown: the hoisted mock infers `edges: never[]` from its
+    // initial `[]`, so a direct assignment would not type-check. The hook reads
+    // these by reference, so mutation is visible to its sync effect.
+    const graph = mocks.graphQuery.data!.graph as { nodes: unknown[]; edges: unknown[] };
+    graph.nodes = reconnNodes;
+    graph.edges = [existingEdge];
+  });
+
+  afterEach(() => {
+    // Restore the single-node, no-edge graph the earlier suites expect.
+    const graph = mocks.graphQuery.data!.graph as { nodes: unknown[]; edges: unknown[] };
+    graph.nodes = [
+      {
+        id: 's1',
+        type: 'strategy-state',
+        position: { x: 0, y: 0 },
+        data: {
+          stateId: 's1',
+          label: 'S1',
+          stateKind: 'default',
+          presetId: 'preset-1',
+          isTerminal: false,
+          isInitial: true,
+          isGroup: false,
+        },
+        selected: true,
+      },
+    ];
+    graph.edges = [];
+  });
+
+  function makeReconnClient(patchImpl: () => Promise<unknown>): NexusClient {
+    return {
+      strategyPatchState: vi.fn(),
+      strategyPatchTransition: vi.fn(patchImpl),
+      strategyPatchPromptTemplate: vi.fn(),
+    } as unknown as NexusClient;
+  }
+
+  it('reconnects via a single patch_transition with old_target + new_target (op: update)', async () => {
+    const patch = vi.fn().mockResolvedValue({ new_revision: 2 });
+    const client = makeReconnClient(patch);
+    const { result } = renderHook(() => useStrategyCanvas('preset-1'), {
+      wrapper: makeCommitWrapper(client),
+    });
+
+    await waitFor(() => expect(result.current.edges).toHaveLength(1));
+    expect(typeof result.current.onReconnect).toBe('function');
+
+    act(() => {
+      result.current.onReconnect(existingEdge, {
+        source: 's1',
+        target: 's3',
+        sourceHandle: null,
+        targetHandle: null,
+      });
+    });
+
+    // Single reconnect payload — no delete+create, one logical transition.
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
+    const request = patch.mock.calls[0][1] as Record<string, unknown>;
+    expect(request).toMatchObject({
+      strategy_id: 'preset-1',
+      source_state_id: 's1',
+      old_target: 's2',
+      new_target: 's3',
+      op: 'update',
+    });
+
+    // The author ends with one edge to the new target — no duplicate.
+    await waitFor(() => {
+      expect(result.current.edges).toHaveLength(1);
+      expect(result.current.edges[0].target).toBe('s3');
+    });
+  });
+
+  it('reverts the edge to its previous target when the reconnect commit fails', async () => {
+    const patch = vi.fn().mockRejectedValue(new Error('daemon unavailable'));
+    const client = makeReconnClient(patch);
+    const { result } = renderHook(() => useStrategyCanvas('preset-1'), {
+      wrapper: makeCommitWrapper(client),
+    });
+
+    await waitFor(() => expect(result.current.edges).toHaveLength(1));
+
+    act(() => {
+      result.current.onReconnect(existingEdge, {
+        source: 's1',
+        target: 's3',
+        sourceHandle: null,
+        targetHandle: null,
+      });
+    });
+
+    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
+    // Failed reconnect restores the previous target — no partial daemon state.
+    await waitFor(() => {
+      expect(result.current.edges).toHaveLength(1);
+      expect(result.current.edges[0].target).toBe('s2');
+    });
+  });
+
+  it('does not reconnect onto the same source (self-loop guard)', () => {
+    const patch = vi.fn();
+    const client = makeReconnClient(patch as () => Promise<unknown>);
+    const { result } = renderHook(() => useStrategyCanvas('preset-1'), {
+      wrapper: makeCommitWrapper(client),
+    });
+
+    act(() => {
+      result.current.onReconnect(existingEdge, {
+        source: 's1',
+        target: 's1',
+        sourceHandle: null,
+        targetHandle: null,
+      });
+    });
+
+    expect(patch).not.toHaveBeenCalled();
+    expect(result.current.edges[0].target).toBe('s2');
   });
 });

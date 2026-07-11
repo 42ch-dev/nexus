@@ -8,6 +8,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
+  reconnectEdge,
   useEdgesState,
   useNodesState,
   type Connection,
@@ -246,6 +247,82 @@ export function useStrategyCanvas(presetId: string) {
     setEdges((eds) => eds.filter((e) => !(e.data as { isDraft?: boolean } | undefined)?.isDraft));
   }, [setEdges]);
 
+  /**
+   * FB-SE-003 — reconnect an existing transition edge to a new target by drag.
+   *
+   * Sends a single `strategy.patch_transition` with `op: "update"` (default) +
+   * `old_target` (the previous target) + `new_target` (the drag's new target).
+   * The daemon replaces the matched transition atomically — no delete+create,
+   * so the author ends with one edge for that logical rewiring. The edge is
+   * updated optimistically; on failure (including 409 conflict) it reverts to
+   * the previous target so no partial daemon state is visible.
+   *
+   * `handleConflict` is a hoisted function declaration, so it is safe to
+   * reference here even though it is defined textually later in the hook.
+   */
+  const reconnectTransitionMutation = useMutation({
+    mutationFn: async (args: { oldEdge: Edge; newConnection: Connection }) => {
+      const { oldEdge, newConnection } = args;
+      if (!newConnection.target) throw new Error('Reconnect is missing a new target');
+      const data = oldEdge.data as { transitionKind?: string; condition?: string } | undefined;
+      return nexusClient.strategyPatchTransition(presetId, {
+        strategy_id: presetId,
+        base_revision: workingRevisionRef.current,
+        source_state_id: oldEdge.source,
+        old_target: oldEdge.target,
+        new_target: newConnection.target,
+        condition: data?.condition,
+        transition_kind: (data?.transitionKind ?? 'next') as 'next' | 'branch' | 'default',
+        op: 'update',
+      });
+    },
+    onSuccess: (res, args) => {
+      workingRevisionRef.current = Number(res.new_revision);
+      toast({
+        variant: 'success',
+        title: 'Transition reconnected',
+        description: `${args.oldEdge.source} → ${args.newConnection.target}`,
+      });
+      void qc.invalidateQueries({ queryKey: queryKeys.presets.detail(presetId) });
+    },
+    onError: (error, args) => {
+      // Revert the optimistic edge update so the canvas shows the prior target.
+      const revertedTarget = args.oldEdge.target;
+      setEdges((eds) =>
+        eds.map((e) => (e.id === args.oldEdge.id ? { ...e, target: revertedTarget } : e)),
+      );
+      if (isStrategyConflictError(error)) {
+        const currentRevision =
+          typeof error.details === 'object' && error.details !== null
+            ? (error.details as { current_revision?: number }).current_revision ?? 0
+            : 0;
+        handleConflict(currentRevision, 'transition');
+      } else {
+        const message = error instanceof Error ? error.message : 'Failed to reconnect transition';
+        toast({ variant: 'error', title: message });
+      }
+    },
+  });
+
+  /**
+   * React Flow reconnect gesture (dragging an existing edge end to a new
+   * target) → single `patch_transition` reconnect payload (FB-SE-003).
+   *
+   * Self-loops and missing endpoints are ignored so the edge snaps back to its
+   * prior target (no daemon call). Valid reconnects update the edge
+   * optimistically (id kept stable via `shouldReplaceId: false` so the revert
+   * path in the mutation can find it) and fire the patch mutation.
+   */
+  const onReconnect = useCallback(
+    (oldEdge: Edge, newConnection: Connection) => {
+      if (!newConnection.target || newConnection.target === oldEdge.source) return;
+      if (newConnection.target === oldEdge.target) return;
+      setEdges((eds) => reconnectEdge(oldEdge, newConnection, eds, { shouldReplaceId: false }));
+      reconnectTransitionMutation.mutate({ oldEdge, newConnection });
+    },
+    [setEdges, reconnectTransitionMutation],
+  );
+
   return {
     graphQuery,
     activeSession,
@@ -281,5 +358,7 @@ export function useStrategyCanvas(presetId: string) {
     commitDraft: commitDraftMutation.mutate,
     isCommittingDraft: commitDraftMutation.isPending,
     cancelDraft,
+    onReconnect,
+    isReconnecting: reconnectTransitionMutation.isPending,
   };
 }

@@ -28,6 +28,7 @@ import {
   type OnConnect,
   type OnEdgesChange,
   type OnNodesChange,
+  type OnReconnect,
 } from '@xyflow/react';
 
 import '@xyflow/react/dist/style.css';
@@ -40,6 +41,8 @@ export interface CanvasShellProps {
   onEdgesChange?: OnEdgesChange;
   onEdgeClick?: (event: React.MouseEvent, edge: Edge) => void;
   onConnect?: OnConnect;
+  /** Edge reconnect handler — when set, edges become draggable to a new end (RF `edgesReconnectable` defaults to true). */
+  onReconnect?: OnReconnect<Edge>;
   /** Graph-level summary spoken to assistive tech (A8). */
   summaryText: string;
   /** Accessible label for the canvas region. */
@@ -60,6 +63,7 @@ function CanvasShellInner({
   onEdgesChange,
   onEdgeClick,
   onConnect,
+  onReconnect,
   summaryText,
   ariaLabel,
   children,
@@ -79,6 +83,7 @@ function CanvasShellInner({
         onEdgesChange={onEdgesChange}
         onEdgeClick={onEdgeClick}
         onConnect={onConnect}
+        onReconnect={onReconnect}
         nodesFocusable
         edgesFocusable
         fitView
