@@ -545,6 +545,22 @@ fn validate_transition_condition(condition: &str) -> Result<(), NexusApiError> {
         })
 }
 
+/// Validate the `op` field of a transition patch request.
+///
+/// Only `"create"` and `"update"` are accepted; any other value (including
+/// `"delete"`) is rejected with a 422 `invalid_input` error so raw clients cannot
+/// silently fall through to the update path (Greptile Issue 5).
+fn validate_transition_op(op: &str) -> Result<(), NexusApiError> {
+    if op == "create" || op == "update" {
+        Ok(())
+    } else {
+        Err(NexusApiError::BadRequest {
+            code: "invalid_input".to_string(),
+            message: format!("op must be 'create' or 'update', got '{op}'"),
+        })
+    }
+}
+
 // ─── Handlers ──────────────────────────────────────────────────────────────
 
 /// `POST /v1/daemon/strategies/{strategy_id}/states/{state_id}/patch` — patch a state.
@@ -711,6 +727,10 @@ fn apply_conditional_rules(
 ) -> bool {
     let mut matched = false;
     if let Some(rules) = next_map.get_mut("rules").and_then(|v| v.as_sequence_mut()) {
+        // NOTE: when `req.condition` is omitted, every rule whose `to` matches
+        // `old_target` is updated. This means an `op: "update"` reconnect can
+        // rewrite multiple conditional branches that point to the same target
+        // (Greptile Issue 1 — deferred; add disambiguation before relying on it).
         for rule in rules {
             let to_match = rule
                 .get("to")
@@ -895,6 +915,12 @@ fn patch_transition_inner(
     strategy_id: &str,
     req: &StrategyPatchTransitionRequest,
 ) -> Result<StrategyPatchResponse, NexusApiError> {
+    // Reject unknown `op` values early so raw clients cannot send e.g. `op: "delete"`
+    // and silently fall through to the update path (Greptile Issue 5).
+    if let Some(op) = &req.op {
+        validate_transition_op(op)?;
+    }
+
     let bundle_dir = user_preset_bundle_dir(nexus_home, strategy_id);
     let _guard = acquire_strategy_lock(&bundle_dir)?;
 

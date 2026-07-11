@@ -482,3 +482,32 @@ async fn concurrent_patch_state_serializes_and_one_writer_gets_conflict() {
         "the other concurrent patch should get a conflict"
     );
 }
+
+#[tokio::test]
+async fn patch_transition_rejects_unknown_op_with_422() {
+    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+    seed_test_bundle(&nexus_home);
+    let state = test_state(tmp, nexus_home, db_path).await;
+
+    let req = StrategyPatchTransitionRequest {
+        strategy_id: "test-strategy".to_string(),
+        base_revision: 1,
+        source_state_id: "start".to_string(),
+        old_target: None,
+        new_target: Some("end".to_string()),
+        condition: None,
+        transition_kind: None,
+        op: Some("delete".to_string()),
+    };
+
+    let err = patch_transition(State(state), Path("test-strategy".to_string()), Json(req))
+        .await
+        .expect_err("unknown op should fail");
+
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "invalid_input");
+}
+
