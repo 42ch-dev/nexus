@@ -72,12 +72,14 @@ fn highest_semver_nvm_bin(nvm_root: &Path) -> Option<PathBuf> {
     let versions = nvm_root.join("versions").join("node");
     let mut best: Option<(u64, u64, u64, PathBuf)> = None;
     for entry in std::fs::read_dir(&versions).ok()? {
-        let entry = entry.ok()?;
+        let Ok(entry) = entry else { continue };
         let bin = entry.path().join("bin");
         if !bin.is_dir() {
             continue;
         }
-        let version = parse_semver_prefix(&entry.file_name().to_string_lossy())?;
+        let Some(version) = parse_semver_prefix(&entry.file_name().to_string_lossy()) else {
+            continue;
+        };
         best = Some(match best {
             None => (version.0, version.1, version.2, bin),
             Some((maj, min, patch, _)) if version > (maj, min, patch) => {
@@ -552,6 +554,34 @@ mod tests {
 
         let resolved = resolve_nvm_bin();
         assert_eq!(resolved, Some(new_bin));
+
+        match previous {
+            Some(p) => env::set_var("NVM_DIR", p),
+            None => env::remove_var("NVM_DIR"),
+        }
+    }
+
+    #[test]
+    fn resolve_nvm_bin_ignores_non_semver_entries_in_glob() {
+        let tmp = tempfile::tempdir().unwrap();
+        let nvm_root = tmp.path();
+        let valid_bin = nvm_root.join("versions/node/v20.11.0/bin");
+        let current_bin = nvm_root.join("versions/node/current/bin");
+        std::fs::create_dir_all(&valid_bin).unwrap();
+        // `current` symlink target does not matter; the name itself is non-semver.
+        std::fs::create_dir_all(&current_bin).unwrap();
+        std::fs::write(nvm_root.join("versions/node/.DS_Store"), b"junk").unwrap();
+
+        let _guard = PATH_TEST_LOCK.lock().unwrap();
+        let previous = env::var_os("NVM_DIR");
+        env::set_var("NVM_DIR", nvm_root);
+
+        let resolved = resolve_nvm_bin();
+        assert_eq!(
+            resolved,
+            Some(valid_bin),
+            "non-semver entries must not abort the glob"
+        );
 
         match previous {
             Some(p) => env::set_var("NVM_DIR", p),
