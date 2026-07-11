@@ -650,8 +650,8 @@ export function SurfacesCanvasPage() {
       <p className="text-copy-14 text-gray-700 mb-6">
         Presentational preview of the shared canvas surface chrome — dot-grid
         background, zoom controls, minimap swatch, outline node kinds (Volume /
-        Chapter / Timeline Event), and right-click context menu matrices. Node
-        chrome mirrors the P0{' '}
+        Chapter / Timeline Event / Scene / Beat), and right-click context menu
+        matrices. Node chrome mirrors the P0{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           outline-nodes.tsx
         </code>{' '}

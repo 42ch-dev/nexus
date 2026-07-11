@@ -40,6 +40,55 @@ export const STATUS_VARIANT: Record<
   published: 'preset',
 };
 
+// ---------------------------------------------------------------------------
+// Scene/Beat fixture types (V1.109 C2 — fixture-driven read-projection)
+//
+// The outline wire model carries no scene/beat data (architect-locked §5.2 Q1).
+// Design Studio / test fixtures inject scene/beat payloads at the UI projection
+// layer. On real Works (no scene/beat data today), the projection emits zero
+// scene/beat children — honest empty chrome.
+// ---------------------------------------------------------------------------
+
+/**
+ * Scene/Beat lifecycle status (two-value, no pending tier). Shared by Scene
+ * and Beat node data. Matches `OutlineSceneNodeData.status` consumed by the
+ * Scene/Beat node components (`scene-beat-nodes.tsx`).
+ */
+export type OutlineSceneStatus = 'drafted' | 'completed';
+
+/**
+ * Fixture shape for a single Scene — injected at the projection call site.
+ * `chapterId` ties the scene to its parent Chapter node (`chapter:<chapterId>`).
+ */
+export interface SceneFixture {
+  sceneId: string;
+  chapterId: number;
+  title: string | null;
+  status: OutlineSceneStatus | null;
+}
+
+/**
+ * Fixture shape for a single Beat — injected at the projection call site.
+ * `sceneId` ties the beat to its parent Scene node (`scene:<sceneId>`,
+ * Scene→Beat nesting per §5.2 Q2).
+ */
+export interface BeatFixture {
+  beatId: string;
+  sceneId: string;
+  title: string | null;
+  status: OutlineSceneStatus | null;
+}
+
+/**
+ * Fixture payload for scene/beat data injected into {@link projectOutlineGraph}.
+ * Empty by default on real Works — chapters then render with zero scene/beat
+ * children.
+ */
+export interface SceneBeatFixturePayload {
+  scenes: SceneFixture[];
+  beats: BeatFixture[];
+}
+
 /** A pending canvas patch awaiting confirmation, captured for conflict replay. */
 export type PendingPatch =
   | { kind: 'structure'; request: OutlinePatchStructureRequest }

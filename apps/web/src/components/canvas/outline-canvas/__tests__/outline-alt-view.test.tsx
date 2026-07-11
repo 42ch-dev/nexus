@@ -10,6 +10,7 @@ import { describe, expect, it } from 'vitest';
 import { render, screen } from '@testing-library/react';
 
 import { OutlineAltView } from '@/components/canvas/outline-canvas/outline-alt-view';
+import type { SceneBeatFixturePayload } from '@/components/canvas/outline-canvas/graph-projection';
 import type { ChapterSummary, WorkOutline } from '@42ch/nexus-contracts';
 
 function makeOutline(overrides: Partial<WorkOutline> = {}): WorkOutline {
@@ -119,5 +120,99 @@ describe('OutlineAltView', () => {
 
     expect(screen.getByText('No chapters yet.')).toBeInTheDocument();
     expect(screen.getByText('No timeline events yet.')).toBeInTheDocument();
+  });
+
+  // -------------------------------------------------------------------------
+  // V1.109 C2 T3 — Scene/Beat nested rows (FB-C2-003)
+  // -------------------------------------------------------------------------
+
+  it('renders Scene rows nested under their parent chapter with a Scene type badge', () => {
+    const outline = makeOutline({
+      volumes: [{ volume_id: 1, label: 'Act One', chapter_ids: [1] }],
+    });
+    const chapters = [makeChapter({ chapter: 1 })];
+    const fixture: SceneBeatFixturePayload = {
+      scenes: [
+        { sceneId: 's1', chapterId: 1, title: 'The Arrival', status: 'drafted' },
+        { sceneId: 's2', chapterId: 1, title: 'The Departure', status: null },
+      ],
+      beats: [],
+    };
+
+    render(<OutlineAltView outline={outline} chapters={chapters} sceneBeatFixture={fixture} />);
+
+    expect(screen.getByText('The Arrival')).toBeInTheDocument();
+    expect(screen.getByText('The Departure')).toBeInTheDocument();
+    // Two Scene type badges (one per scene row).
+    expect(screen.getAllByText('Scene')).toHaveLength(2);
+  });
+
+  it('renders Beat rows nested under their parent Scene (Scene->Beat nesting)', () => {
+    const outline = makeOutline({
+      volumes: [{ volume_id: 1, label: 'Act One', chapter_ids: [1] }],
+    });
+    const chapters = [makeChapter({ chapter: 1 })];
+    const fixture: SceneBeatFixturePayload = {
+      scenes: [{ sceneId: 's1', chapterId: 1, title: 'The Arrival', status: null }],
+      beats: [
+        { beatId: 'b1', sceneId: 's1', title: 'Turn: the call', status: null },
+        { beatId: 'b2', sceneId: 's1', title: 'The rebutal', status: null },
+      ],
+    };
+
+    render(<OutlineAltView outline={outline} chapters={chapters} sceneBeatFixture={fixture} />);
+
+    expect(screen.getByText('Turn: the call')).toBeInTheDocument();
+    expect(screen.getByText('The rebutal')).toBeInTheDocument();
+    // One Scene badge + two Beat badges.
+    expect(screen.getAllByText('Scene')).toHaveLength(1);
+    expect(screen.getAllByText('Beat')).toHaveLength(2);
+  });
+
+  it('shows the empty-under-chapter helper when a chapter has zero scenes', () => {
+    const outline = makeOutline({
+      volumes: [{ volume_id: 1, label: 'Act One', chapter_ids: [1, 2] }],
+    });
+    const chapters = [makeChapter({ chapter: 1 }), makeChapter({ chapter: 2 })];
+    // Only chapter 1 has a scene; chapter 2 has zero.
+    const fixture: SceneBeatFixturePayload = {
+      scenes: [{ sceneId: 's1', chapterId: 1, title: 'The Arrival', status: null }],
+      beats: [],
+    };
+
+    render(<OutlineAltView outline={outline} chapters={chapters} sceneBeatFixture={fixture} />);
+
+    // Locked empty-under-chapter copy appears once (chapter 2 only).
+    expect(screen.getAllByText('No scenes in this chapter yet.')).toHaveLength(1);
+  });
+
+  it('does not show the empty-under-chapter helper when no fixture is passed (real Works)', () => {
+    const outline = makeOutline({
+      volumes: [{ volume_id: 1, label: 'Act One', chapter_ids: [1] }],
+    });
+    const chapters = [makeChapter({ chapter: 1 })];
+
+    render(<OutlineAltView outline={outline} chapters={chapters} />);
+
+    expect(screen.queryByText('No scenes in this chapter yet.')).not.toBeInTheDocument();
+  });
+
+  it('renders Scene rows for unassigned chapters too', () => {
+    const outline = makeOutline({
+      volumes: [{ volume_id: 1, label: 'Act One', chapter_ids: [1] }],
+    });
+    const chapters = [
+      makeChapter({ chapter: 1 }),
+      makeChapter({ chapter: 2, volume: 1 }), // unassigned
+    ];
+    const fixture: SceneBeatFixturePayload = {
+      scenes: [{ sceneId: 's2', chapterId: 2, title: 'Loose thread', status: null }],
+      beats: [],
+    };
+
+    render(<OutlineAltView outline={outline} chapters={chapters} sceneBeatFixture={fixture} />);
+
+    expect(screen.getByText('Loose thread')).toBeInTheDocument();
+    expect(screen.getAllByText('Scene')).toHaveLength(1);
   });
 });
