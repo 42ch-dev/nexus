@@ -306,6 +306,7 @@ export function OutlineCanvas({
           onNodesChange={onNodesChange}
           summaryText={summary}
           ariaLabel="Outline structure graph"
+          surfaceKey={`outline:${workId}`}
         >
           {/* I-QC1-001 — when the projection has zero nodes, render the
               EmptyState as an in-shell overlay so CanvasShell is always
