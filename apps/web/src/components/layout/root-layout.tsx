@@ -1,5 +1,6 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 
+import { CanvasNavCommands } from '@/components/canvas/canvas-nav-commands';
 import { CommandPalette, openPalette } from '@/components/command-palette';
 import { DaemonStatusBar } from '@/components/layout/daemon-status-bar';
 import { Header } from '@/components/layout/header';
@@ -96,6 +97,11 @@ export function RootLayout() {
 
         <DaemonStatusBar />
       </div>
+
+      {/* V1.111 P0 T4 — registers canvas nav commands into the palette.
+          Effect-only; renders nothing. Mounted here (not in a canvas) so the
+          commands are available wherever the palette can open. */}
+      <CanvasNavCommands />
 
       {/* Global command palette overlay (⌘K / Ctrl+K). Rendered last so it
           layers above the main column. */}
