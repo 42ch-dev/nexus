@@ -1,6 +1,6 @@
-import { useState } from 'react';
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 
+import { CommandPalette, openPalette } from '@/components/command-palette';
 import { DaemonStatusBar } from '@/components/layout/daemon-status-bar';
 import { Header } from '@/components/layout/header';
 import { MainBanner } from '@/components/layout/main-banner';
@@ -47,13 +47,10 @@ function useRouteTitle(): string {
 export function RootLayout() {
   const title = useRouteTitle();
 
-  // ⌘K/Ctrl+K opens the command palette. T3 (canvas-command-palette) mounts the
-  // real <CommandPalette/> and consumes this open-state; the binding target is
-  // stable, so T3 only needs to swap `[, setPaletteOpen]` → `[paletteOpen,
-  // setPaletteOpen]` and render `{paletteOpen && <CommandPalette …/>}`. The
-  // value is intentionally skipped here because no component reads it until T3.
-  const [, setPaletteOpen] = useState(false);
-  useHotkey('mod+k', () => setPaletteOpen(true));
+  // ⌘K/Ctrl+K opens the command palette. The palette owns its open/close
+  // (module-level store in `command-palette.tsx`); the hotkey just calls
+  // `openPalette()`. See V1.111 P0 T3.
+  useHotkey('mod+k', () => openPalette());
 
   return (
     <div className="flex min-h-screen bg-background-100 text-gray-1000">
@@ -99,6 +96,10 @@ export function RootLayout() {
 
         <DaemonStatusBar />
       </div>
+
+      {/* Global command palette overlay (⌘K / Ctrl+K). Rendered last so it
+          layers above the main column. */}
+      <CommandPalette />
     </div>
   );
 }
