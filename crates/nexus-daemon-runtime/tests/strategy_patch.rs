@@ -510,4 +510,3 @@ async fn patch_transition_rejects_unknown_op_with_422() {
     );
     assert_eq!(err.error_code(), "invalid_input");
 }
-
