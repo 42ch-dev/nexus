@@ -198,13 +198,13 @@ function CommandPaletteDialog(): React.ReactElement {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-start justify-center bg-gray-1000/40 p-4 pt-[12vh]"
+      className="fixed inset-0 z-50 flex items-start justify-center bg-scrim p-4 pt-[12vh]"
       role="dialog"
       aria-modal="true"
       aria-labelledby={titleId}
       onClick={onBackdropClick}
     >
-      <div className="flex w-full max-w-[560px] flex-col overflow-hidden rounded-popover border border-gray-alpha-400 bg-background-100 shadow-popover">
+      <div className="flex w-full max-w-dialog flex-col overflow-hidden rounded-popover border border-gray-alpha-400 bg-background-100 shadow-popover">
         <h2 id={titleId} className="sr-only">
           Command palette
         </h2>
@@ -225,7 +225,7 @@ function CommandPaletteDialog(): React.ReactElement {
           aria-activedescendant={activeOptionId}
           aria-label="Search commands"
           placeholder="Type a command…"
-          className="w-full border-b border-gray-alpha-400 bg-transparent px-4 py-3 text-copy-15 text-gray-1000 outline-none placeholder:text-gray-700"
+          className="w-full border-b border-gray-alpha-400 bg-transparent px-4 py-3 text-copy-14 text-gray-1000 outline-none placeholder:text-gray-700"
         />
 
         {visible.length === 0 ? (

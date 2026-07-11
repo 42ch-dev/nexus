@@ -51,6 +51,12 @@
   --color-gray-alpha-500: rgba(0, 0, 0, 0.18);
   --color-gray-alpha-600: rgba(0, 0, 0, 0.24);
 
+  /* Overlay scrim — DESIGN.md §Elevation (backdrop fill behind modal/dialog/palette). */
+  --color-scrim: rgba(0, 0, 0, 0.40);
+
+  /* Dialog sizing — DESIGN.md components.dialog (maxWidth projection). */
+  --color-dialog-max-width: 560px;
+
   /* Accent scales — DESIGN.md §Colors/Accent Scales (blue → brand-deep-blue) */
   --color-blue-700: #1e3a5f;
   --color-blue-800: #182f4d;
@@ -286,6 +292,9 @@
   --color-gray-alpha-400: rgba(255, 255, 255, 0.16);
   --color-gray-alpha-500: rgba(255, 255, 255, 0.22);
   --color-gray-alpha-600: rgba(255, 255, 255, 0.3);
+
+  /* Overlay scrim — DESIGN.dark.md §Elevation (stronger to dim dark chrome). */
+  --color-scrim: rgba(0, 0, 0, 0.60);
 
   /* Accent scales — brand-cyan interactive scale (DESIGN.dark.md) */
   --color-blue-700: #25d1e0;
