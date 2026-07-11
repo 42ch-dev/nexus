@@ -69,17 +69,17 @@
     }
   ],
   "metadata": {
-    "integration_branch_retired": false,
+    "integration_branch_retired": true,
     "iteration_base_branch": "main",
-    "last_integration_branch": "iteration/v1.97",
-    "latest_active_compass": "v1.108-delivery-compass.md",
-    "latest_active_iteration": "V1.108",
+    "last_integration_branch": "iteration/v1.108",
+    "latest_active_compass": null,
+    "latest_active_iteration": null,
     "latest_ship": {
-      "iteration": "V1.97",
-      "compass": "v1.97-desktop-first-launch-hardening-compass-v1.md",
-      "shipped_at": "2026-07-08",
-      "pr": "https://github.com/42ch-dev/nexus/pull/126",
-      "merge_commit": "901191a1"
+      "iteration": "V1.108",
+      "compass": "v1.108-delivery-compass.md",
+      "shipped_at": "2026-07-11",
+      "pr": "https://github.com/42ch-dev/nexus/pull/138",
+      "merge_commit": "715f85ca"
     },
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
