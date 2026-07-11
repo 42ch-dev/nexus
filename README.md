@@ -4,18 +4,90 @@ Nexus is a local-first creative writing tool.
 
 ## Quick Start
 
+> **TBD** — end-user install, first run, and everyday usage.
+
+---
+
+## Development
+
+For contributors and maintainers working in this monorepo. Root `package.json` scripts wrap common `pnpm -F <workspace>` invocations — run from the repo root.
+
+### Setup
+
 ```bash
-# Build
-cargo build --release
-
-# Show help
-./target/release/nexus42 --help
-
-# Start daemon
-./target/release/nexus42 daemon start
+git clone https://github.com/42ch/nexus.git
+cd nexus
+pnpm install
 ```
 
-## Monorepo Layout
+Prerequisites and the full pre-PR checklist: [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md).
+
+### App dev servers
+
+| Command | What it does |
+|---------|----------------|
+| `pnpm run dev:design-studio` | Design Studio gallery — [http://localhost:5174](http://localhost:5174); no daemon required |
+| `pnpm run dev:web` | Web UI — [http://localhost:5173](http://localhost:5173); start the daemon first (`nexus42 daemon start`) |
+| `pnpm run dev:desktop` | Tauri desktop dev — starts web dev automatically via `tauri.conf.json` |
+
+### Build
+
+| Command | What it does |
+|---------|----------------|
+| `pnpm run build` | Build all TS workspaces **except** desktop (web, design-studio, contracts, ui, codegen) |
+| `pnpm run build:web` | Production build of `apps/web` → `dist/` |
+| `pnpm run build:design-studio` | Production build of `apps/design-studio` |
+| `pnpm run build:desktop` | Unsigned macOS `.app` / `.dmg` (runs web build + sidecar + Tauri bundle) |
+| `pnpm run build:cli` | Debug build of `nexus42` |
+| `pnpm run build:cli:release` | Release build of `nexus42` |
+
+Build individual packages when needed:
+
+```bash
+pnpm -F @42ch/nexus-contracts build
+pnpm -F @42ch/nexus-ui build
+```
+
+### Test & typecheck
+
+| Command | What it does |
+|---------|----------------|
+| `pnpm run test` | Run tests in every workspace that defines a `test` script |
+| `pnpm run test:web` | Web UI Vitest suite |
+| `pnpm run test:design-studio` | Design Studio Vitest suite |
+| `pnpm run typecheck` | TypeScript `--noEmit` across workspaces that define `typecheck` |
+
+### Schemas & codegen
+
+| Command | What it does |
+|---------|----------------|
+| `pnpm run validate-schemas` | Validate all JSON Schemas under `schemas/` |
+| `pnpm run codegen` | Regenerate Rust + TypeScript types from schemas; rebuild `@42ch/nexus-contracts` |
+| `pnpm run codegen:watch` | Watch mode for the codegen tool during schema work |
+
+After editing `schemas/`, run `validate-schemas` then `codegen`, and commit generated output together with schema changes. See [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) for the full pre-PR checklist.
+
+### Desktop sidecar
+
+Desktop builds expect a bundled `nexus42` binary under `apps/desktop/src-tauri/binaries/` (gitignored on fresh clones):
+
+```bash
+pnpm run sidecar
+```
+
+On Intel Macs, pass an explicit target:
+
+```bash
+SIDECAR_TARGETS="x86_64-apple-darwin" pnpm run sidecar
+```
+
+### Cleanup
+
+```bash
+pnpm run clean    # remove dist/ in contracts, nexus-ui, and codegen packages
+```
+
+### Monorepo layout
 
 | Directory | Contents |
 |-----------|----------|

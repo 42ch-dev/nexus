@@ -1,295 +1,172 @@
 # Nexus Architecture
 
-High-level map of the **nexus** open-source monorepo: wire contracts, Rust workspace crates, entity-scope ownership, and how crates connect at build time. Normative scope and naming rules live in [`.mstar/specs/entity-scope-model.md`](../.mstar/specs/entity-scope-model.md); long-term local/cloud crate rules live in [`.mstar/specs/local-cloud-crate-architecture.md`](../.mstar/specs/local-cloud-crate-architecture.md).
+Directional map of the **nexus** open-source monorepo: how product surfaces relate, which boundaries are hard, and where authority lives.
 
-This document separates **Cargo dependency wiring** (what compiles and links) from **product integration** (what CLI commands and daemon HTTP handlers actually call). A full knowledge↔crates drift audit lives in [`.mstar/iterations/v1.24-knowledge-crates-alignment-audit-compass-v1.md`](../.mstar/iterations/v1.24-knowledge-crates-alignment-audit-compass-v1.md) (evidence date **2026-05-25**).
+This document is for **orientation and decision-making**. It does not inventory crates, routes, CLI flags, or on-disk paths — those change often and are discoverable from code and normative specs.
 
-## Monorepo layout
+| Need | Where to look |
+|------|----------------|
+| Product vision & tech rationale | [`STRATEGY.md`](../STRATEGY.md) |
+| Domain vocabulary | [`CONCEPTS.md`](../CONCEPTS.md) |
+| Day-to-day commands | [`README.md`](../README.md) → Development; [`CONTRIBUTING.md`](CONTRIBUTING.md) |
+| Entity ownership & naming | [`.mstar/specs/entity-scope-model.md`](../.mstar/specs/entity-scope-model.md) |
+| Local vs cloud crate rules | [`.mstar/specs/local-cloud-crate-architecture.md`](../.mstar/specs/local-cloud-crate-architecture.md) |
+| Daemon trust / API classes | [`.mstar/specs/daemon-runtime.md`](../.mstar/specs/daemon-runtime.md), [`.mstar/specs/local-runtime-boundary.md`](../.mstar/specs/local-runtime-boundary.md) |
+| Per-directory invariants | Root [`AGENTS.md`](../AGENTS.md) and each subtree’s `AGENTS.md` |
 
-| Area | Path | Role |
-| --- | --- | --- |
-| Wire contracts (truth source) | `schemas/` | JSON Schema → codegen |
-| Generated Rust types | `crates/nexus-contracts/` | Workspace-internal library |
-| Generated TypeScript | `packages/nexus-contracts/` | npm `@42ch/nexus-contracts` for `nexus-platform` |
-| Product surfaces | `apps/*` | Polyglot product binaries + clients (`nexus42`, `desktop`, `web`) |
-| Rust libraries | `crates/*` | Workspace library crates (see below) |
-| Codegen / validation | `tooling/` | `pnpm run codegen`, schema checks |
-| Normative OSS specs | `.mstar/specs/` | CLI, daemon, orchestration, sync contracts |
-| End-user docs | `docs/` | Install, contributing, this file. Author happy path: [`novel-writing/author-experience.md`](../.mstar/specs/novel-writing/author-experience.md) §3; CLI workflows: [`creator-run-preset-entry.md`](../.mstar/specs/creator-run-preset-entry.md) |
+---
 
-## Truth source: JSON Schema
+## What this repo is
 
-All cross-repo wire shapes are defined under `schemas/`.
+Nexus OSS is a **local-first creative writing runtime** plus the clients that talk to it: the CLI/daemon producer, open-source UIs, and shared wire contracts published as `@42ch/nexus-contracts`.
 
-```text
-schemas/*.json
-    → tooling/codegen
-        → crates/nexus-contracts/src/generated/   (Rust)
-        → packages/nexus-contracts/               (TypeScript / npm)
-```
+Three product surfaces, one producer:
 
-Local-only types (daemon HTTP, schedules, orchestration IPC) are hand-written under `crates/nexus-contracts/src/local/` and are **not** generated from `schemas/`. See [`.mstar/knowledge/schemas-external-consumer-boundary.md`](../.mstar/knowledge/schemas-external-consumer-boundary.md) and [`.mstar/specs/schemas-directory-layout.md`](../.mstar/specs/schemas-directory-layout.md).
+| Surface | Role | Rule of thumb |
+|---------|------|----------------|
+| **`nexus42`** | **Producer** — CLI + integrated daemon | Owns lifecycle, local persistence, Daemon API |
+| **`apps/web`** | **Consumer** — Control Room + canvas SPA | Talks only through contracts + client interface |
+| **`apps/desktop`** | **Consumer** — Tauri shell around `web` | Native extras only; no second SPA or DTO set |
 
-**Design principles**
+Placement rule: runnable product surfaces → `apps/`; reusable Rust libraries → `crates/`; publishable npm libraries → `packages/`. App-owned nested Rust (e.g. `apps/desktop/src-tauri/`) stays with the surface until it becomes a shared building block.
 
-- Single DTO source — no parallel handwritten wire structs in application crates
-- `schema_version` locks cross-language contract evolution
-- Platform consumes npm package; OSS consumes the Rust crate in-tree
+---
 
-## Product lines (local vs cloud)
+## Two product lines
 
-| Line | Purpose | Primary crates | User entry |
-| --- | --- | --- | --- |
-| **Local** | Daemon supervisor, orchestration, agent-host, Creator workspace, Creator memory, World KB / narrative state, User knowledge, Moment context assembly | **Cargo:** `nexus-daemon-runtime` links orchestration, agent-host, creator, creator-memory, narrative, kb, knowledge, moment-context-assembly (default features), local-db. **Product:** memory + orchestration + agent-host + **work-scope KB file index** + **narrative read-only** (`GET /v1/daemon/narrative/*`) are wired on daemon HTTP; `assemble-moment` is the **single assembly SSOT** (no `assemble-local`); SQLite four-domain context assembly via `nexus-moment-context-assembly`. See § Product integration gaps. | `nexus42 daemon …` → `/v1/daemon/*` |
-| **Cloud** | Platform HTTP, registration, bundle sync (CLI-only), optional context Stage-1 | `nexus-cloud-sync` (`legacy-sync` on CLI) → `nexus-cloud-domain` for User/Pairing invariants | `nexus42 sync …`, `nexus42 platform …` |
+| Line | Purpose | Surface |
+|------|---------|---------|
+| **Local** | Daemon, orchestration, agent host, Creator / memory, narrative, World KB, User knowledge, moment assembly, web/desktop UI | `nexus42 daemon` → `/v1/daemon/*`; clients over that API |
+| **Cloud enhancement** | Platform HTTP, sync, registration, optional cloud context stage | CLI / `nexus-cloud-sync` — **never** the Daemon API |
 
-**Hard isolation (enforced in `Cargo.toml`):** `nexus-daemon-runtime` does **not** depend on `nexus-cloud-sync` or `nexus-cloud-domain`. Platform sync and creator registration must not be exposed on the Daemon API.
+**Hard isolation:** the daemon runtime must not depend on cloud sync or cloud-domain crates, and must not expose cloud HTTP or sync proxies. Local UI is part of the local line: it talks only to the Daemon API and must not assume cloud-only product surfaces.
 
-## Entity scope hierarchy
+Operational actor for agents and orchestration is **`Creator`**. `User` / `Pairing` are platform-bridge concepts owned by the cloud domain.
 
-V1.23 uses the scope model in [`entity-scope-model.md`](../.mstar/specs/entity-scope-model.md) as the normative ownership map:
+---
+
+## Contracts are truth
+
+Cross-language wire shapes start in **`schemas/`** (JSON Schema). Codegen produces Rust (`crates/nexus-contracts`) and TypeScript (`@42ch/nexus-contracts`). Platform and OSS clients must consume those types — **no parallel handwritten DTO sets**.
+
+- Types observed by platform or sync bundles live in schemas → generated contracts.
+- Local-only daemon/orchestration shapes may live under `nexus-contracts` local modules when platform does not observe them; they still must not be redefined in app crates.
+- After schema edits: validate → codegen → commit schemas and generated output together.
+
+Schema layout and external-consumer boundary: [`.mstar/specs/schemas-directory-layout.md`](../.mstar/specs/schemas-directory-layout.md), [`.mstar/knowledge/schemas-external-consumer-boundary.md`](../.mstar/knowledge/schemas-external-consumer-boundary.md).
+
+---
+
+## Entity scope (ownership map)
+
+Canonical hierarchy (normative detail in the entity-scope model):
 
 ```text
 Global
 └── User
     ├── Creator
     │   └── World
-    │       ├── Timeline
-    │       │   └── Event
-    │       │       └── Moment
+    │       ├── Timeline → Event → Moment
     │       └── KB graph / narrative knowledge assets
     └── User knowledge index
 ```
 
-Key contributor rules:
+Guiding rules:
 
-- Every scoped entity has exactly one canonical owning scope.
-- `User` / `Pairing` invariants belong to `nexus-cloud-domain`; cloud transport belongs to `nexus-cloud-sync`.
-- `Creator` aggregate and local operational identity belong to `nexus-creator`; Creator memory belongs to `nexus-creator-memory`.
-- **World KB** / **narrative KB** assets belong under `World` and are owned by `nexus-kb` with `nexus-narrative` coordinating narrative context.
-- **User knowledge** / **global knowledge index** belongs to `nexus-knowledge`; it is not Creator-scoped and does not own World KeyBlocks.
-- **CLI local work KB index** means today’s `nexus42 creator kb --scope work` file/index workflow under the active `creator_id` + `workspace_slug`; it is not equivalent to `nexus-kb` or `nexus-knowledge`.
+1. Every scoped entity has **exactly one** owning scope and primary owner crate.
+2. **World history is immutable** — change via Fork, not in-place rewrite.
+3. **`nexus-kb`** owns World-scoped KeyBlocks / SourceAnchors; **`nexus-knowledge`** owns User-scoped knowledge. Do not conflate either with the CLI/daemon **work file index** under work-scope `kb` routes.
+4. **`nexus-narrative`** coordinates World / Timeline / Event state; forks are platform-oriented where the entity model says so.
+5. **`nexus-moment-context-assembly`** owns session-start context assembly (`assemble_moment` is the assembly SSOT).
+6. A local `workspace_slug` is a **storage partition** under Creator, not a new entity scope.
 
-## Rust workspace members (16)
+When naming or placing a feature, ask: *which scope owns this, and which crate may mutate it?* Prefer the entity-scope model over copying older plan wording.
 
-### Foundation (types & paths)
+---
 
-| Crate | Responsibility |
-| --- | --- |
-| `nexus-contracts` | Generated wire types + `src/local/` + enum conversions; no I/O |
-| `nexus-home-layout` | Frozen `~/.nexus42/` path helpers; no entity invariants |
-
-### Local runtime stack (wired into `nexus42`)
-
-| Crate | Responsibility | Direct deps (nexus crates) |
-| --- | --- | --- |
-| `nexus-acp-host` | ACP client SDK adapter | `nexus-contracts` |
-| `nexus-agent-host` | Managed agent sessions (ACP client) | `nexus-acp-host`, `nexus-contracts`, `nexus-home-layout` |
-| `nexus-creator` | Creator aggregate logic, credential/cache hooks, active Creator local state | `nexus-contracts`, `nexus-home-layout` |
-| `nexus-creator-memory` | Creator-scoped SOUL, long-term memory, review, personality / experience I/O | `nexus-creator`, `nexus-contracts`, `nexus-home-layout` |
-| `nexus-local-db` | Shared SQLite mechanics for Creator/workspace working copies; does not own narrative or User semantics | `nexus-contracts` |
-| `nexus-orchestration` | Presets, graph-flow engine, schedules, capability registry; carries scope IDs as execution context | `nexus-contracts`, `nexus-home-layout`, `nexus-local-db` |
-| `nexus-daemon-runtime` | Lifecycle, Daemon API, hosts orchestration + agent-host | `nexus-agent-host`, `nexus-creator`, `nexus-creator-memory`, `nexus-local-db`, `nexus-orchestration`, `nexus-narrative`, `nexus-kb`, `nexus-knowledge`, `nexus-moment-context-assembly` (default features), `nexus-contracts`, `nexus-home-layout` |
-| `nexus-moment-context-assembly` | Moment / session-start context aggregation (`assemble_moment`; Stage-0 + optional cloud Stage-1) | `nexus-creator-memory`, `nexus-narrative`, `nexus-kb`, `nexus-knowledge`, `nexus-contracts`; optional `nexus-cloud-sync` via `cloud-stage` |
-
-### Cloud line (CLI; not daemon)
-
-| Crate | Responsibility | Direct deps (nexus crates) |
-| --- | --- | --- |
-| `nexus-cloud-sync` | Platform HTTP, delta/outbox (`legacy-sync` feature) | `nexus-cloud-domain`, `nexus-contracts`, `nexus-home-layout`, `nexus-local-db` |
-| `nexus-cloud-domain` | User / Pairing **domain logic** and invariants (no HTTP) | `nexus-contracts` |
-
-### Domain libraries (Cargo-linked; product integration partial)
-
-Introduced in the V1.21 split; **linked in `Cargo.toml` since V1.23 alignment** (verified 2026-05-25). Domain logic and tests live in-crate; most **daemon HTTP / CLI commands** still use legacy file/SQLite paths instead of these APIs.
-
-| Crate | Scope / role | Cargo reachability | Product integration (2026-05-25) |
-| --- | --- | --- | --- |
-| `nexus-kb` | **World KB** graph: KeyBlocks, SourceAnchors, `KbStore` | `nexus-narrative`, `nexus-moment-context-assembly`, `nexus-daemon-runtime` | Used by moment-assembly and narrative read-only routes; `GET /v1/daemon/narrative/*` exposes World KB reads via `nexus-narrative` gateway. `/v1/daemon/kb/*` remains **work file index** (not `nexus-kb`) |
-| `nexus-narrative` | `World`, `Timeline`, `Event`: worlds, forks, timelines, manuscripts | `nexus-moment-context-assembly`, `nexus-daemon-runtime` | `NarrativeGateway` powers `GET /v1/daemon/narrative/*` (read-only). **World fork is platform-only** (PD-01; see [`entity-scope-model.md`](../.mstar/specs/entity-scope-model.md)); no local fork CLI. |
-| `nexus-knowledge` | **User knowledge** entries + reference-source types | `nexus-moment-context-assembly`, `nexus-daemon-runtime` | SQLite persistence shipped V1.27; `GET /v1/daemon/references` lists via **`nexus-local-db`** |
-
-CLI `nexus42 creator kb` and daemon `/v1/daemon/kb/entries` implement the **CLI local work KB index** (files under `~/.nexus42/.../kb/`) — **not** `nexus-kb`. World KB scope (`--scope world`) routes to `nexus-narrative` + `nexus-kb` through the narrative read-only API. **World fork is platform-only** (PD-01; no local fork CLI — see [`entity-scope-model.md`](../.mstar/specs/entity-scope-model.md)). See [`entity-scope-model.md` §5](../.mstar/specs/entity-scope-model.md#5-naming-clarifications) and audit compass **KCA-003**.
-
-### Executable surface
-
-| Artifact | Crate | Notes |
-| --- | --- | --- |
-| **`nexus42`** | `apps/nexus42` | Sole user-facing binary; ACP **client** only |
-| Daemon runtime | (library) `nexus-daemon-runtime` | Started via `nexus42 daemon start` / hidden `daemon-run` — not a separate product binary |
-| ACP worker | `nexus42 acp-worker` (hidden) | Subprocess; uses `nexus-acp-host` |
-
-`nexus42` enables `nexus-moment-context-assembly/cloud-stage` and `nexus-cloud-sync/legacy-sync` for CLI cloud workflows. Daemon builds use `nexus-daemon-runtime` without those cloud features on the runtime crate itself.
-
-## Dependency graph — Cargo wiring (verified 2026-05-25)
-
-Direct workspace dependencies from `Cargo.toml` / `cargo tree`. This is the **build-time** graph.
+## Layering & dependency direction
 
 ```text
-                         schemas/
-                            │
-                            ▼
-                   nexus-contracts ◄──────────────────────────────────────┐
-                            ▲                                               │
-    nexus-home-layout ──────┼───────────────────────────────────────────────┤
-    nexus-local-db ─────────┤                                               │
-    nexus-cloud-domain ─────┤                                               │
-         │                  │                                               │
-    nexus-creator ──────────┤                                               │
-         │                  │                                               │
-    nexus-creator-memory ───┤                                               │
-         │                  │                                               │
-    nexus-kb ◄── nexus-narrative ──┐                                        │
-         ▲              ▲          │                                        │
-         │              │          │                                        │
-    nexus-knowledge ─────┼──────────┼── nexus-moment-context-assembly       │
-                         │          │         │ [cloud-stage] ──► cloud-sync  │
-    nexus-orchestration ◄┘          │         │ (CLI enables cloud-stage)     │
-    nexus-agent-host ──► nexus-acp-host       │                             │
-         ▲                                    │                             │
-         │                                    │                             │
-    nexus-daemon-runtime ◄────────────────────┘                             │
-         ▲                                                                  │
-         │                                                                  │
-      nexus42 ──────────────► cloud-sync (legacy-sync)                      │
-              └────────────► moment-context-assembly (cloud-stage) ───────┘
-
-nexus-cloud-sync ──► nexus-cloud-domain
+schemas/  →  contracts (Rust + npm)
+                ↑
+        domain / runtime crates
+                ↑
+     apps/nexus42 (composition root)
+                ↑
+     apps/web  ←──  apps/desktop (wraps web)
 ```
 
-**Forbidden edges (normative, satisfied):** `nexus-daemon-runtime` must not depend on `nexus-cloud-sync` or `nexus-cloud-domain`. Enforced in `Cargo.toml` and `architecture_assertions` tests.
+- **Foundation:** contracts, home layout, local DB mechanics — no product HTTP.
+- **Domain crates:** Creator, memory, narrative, KB, knowledge, orchestration, agent host — own invariants for their scopes.
+- **Daemon runtime:** local supervisor + HTTP surface; composes local domain crates only.
+- **CLI binary:** composition root for daemon start, ACP client paths, and cloud CLI features (feature-gated so daemon builds stay free of cloud deps).
+- **UI:** depends on contracts and a transport-agnostic client interface; screens must not call `fetch` / Tauri `invoke` directly.
 
-**Daemon moment assembly:** `nexus-daemon-runtime` depends on `nexus-moment-context-assembly` with **default features** (no `cloud-stage`). CLI depends on the same crate with **`cloud-stage`** for platform-enhanced assembly.
+**Cargo edge ≠ product integration.** Linking a crate does not mean every HTTP route or CLI command uses it. Prefer domain APIs over legacy file/SQLite shortcuts when extending behavior; do not invent a second ownership path for the same entity.
 
-**Narrative ↔ KB:** `nexus-narrative` → `nexus-kb` only (narrative coordinates World-scoped KB graph).
+---
 
-Normative spec §4 in [`local-cloud-crate-architecture.md`](../.mstar/specs/local-cloud-crate-architecture.md) is refreshed to match this graph; remaining discrepancies are tracked as product-integration gaps in [v1.24 audit compass](../.mstar/iterations/v1.24-knowledge-crates-alignment-audit-compass-v1.md).
+## Client & transport boundaries
 
-## Product integration gaps (runtime behavior, 2026-05-25)
+| Boundary | Decision |
+|----------|----------|
+| **Daemon API** | Local HTTP under `/v1/daemon/*`. Default bind is loopback. Remote bind is opt-in and must stay fail-closed (API key + remote flag + TLS for non-loopback). |
+| **NexusClient** | UI depends on the interface; browser vs Tauri implementations swap at the edge. |
+| **Desktop** | Same SPA as web; Tauri adds sidecar lifecycle and OS affordances (open / reveal / path guard). Path checks are authoritative in Rust against the active workspace root. |
+| **ACP** | Nexus is an **ACP client**, not an agent/server. Agent host adapts to the user’s local agents; do not ship a competing agent runtime or public ACP server surface on the daemon. |
 
-Cargo edges alone do not mean daemon HTTP or CLI commands call a crate. Known gaps:
+Forbidden on the daemon: sync proxies, platform registration passthrough, treating the runtime as an ACP Agent/Server.
 
-| Area | Wired in Cargo? | Product path today | Gap ID |
-| --- | --- | --- | --- |
-| Moment `assemble_moment` | Yes (daemon + CLI libs) | **Shipped:** `nexus42 platform context assemble-moment` calls `assemble_moment` in-process (four-domain SQLite assembly). `assemble-local` is **removed** in pre-release. Daemon has no `POST /v1/daemon/context/assemble` (KCA-002 B2 retired). | KCA-002 |
-| World KB (`nexus-kb`) | Yes | `/v1/daemon/kb/*` = **work file index**, not `KbStore`. World KB reads exposed via `GET /v1/daemon/narrative/*` | KCA-003 |
-| Narrative gateway | Yes | `GET /v1/daemon/narrative/*` (read-only) — shipped V1.27. No write/mutation routes (fork is platform-only per PD-01). | — |
-| User knowledge store | Yes | SQLite persistence shipped V1.27; `GET /v1/daemon/references` still lists via **local-db** | KCA-004 |
-| Orchestration engine in daemon lifecycle | Yes (orchestration crate) | Engine/worker stubs (DF-38–DF-40) | tracker |
-| Author Intelligence loop (V1.29) | Yes (`nexus-creator-memory`, `nexus-orchestration`) | CLI `creator memory pending-*` / `creator soul refresh-experience` shipped. Orchestration `kb.extract_work` / `soul.experience.aggregate` registered; `acp_prompt` partially de-stubbed for preset paths. Full de-stub deferred (FL-D). | tracker |
-| KB extract queue (V1.29) | Yes (`nexus-local-db`, `nexus-orchestration`) | CLI `creator kb queue-extract` / `extract-status` shipped. Extraction runs via preset + `acp_prompt` IPC. | tracker |
+---
 
-See [v1.24-knowledge-crates-alignment-audit-compass-v1.md](../.mstar/iterations/v1.24-knowledge-crates-alignment-audit-compass-v1.md) for remediation themes.
+## Design & UI ownership
 
-## CLI command groups (frozen surface)
+- **DESIGN.md / DESIGN.dark.md** at repo root are the brand/token SSOT. Surfaces consume shared projection (`@nexus/design-tokens`); they do not invent parallel tokens.
+- **`@42ch/nexus-ui`** holds publishable brand and promoted presentational primitives. Product screens, routing, and daemon wiring stay in `apps/web`.
+- **Design Studio** (`apps/design-studio`) is a contributor gallery — not shipped to authors and not daemon-coupled.
 
-Six top-level groups ([`cli-spec.md`](../.mstar/specs/cli-spec.md) §6):
+Studio-first and promotion rules live under design-studio / UI specs and guardrail scripts; follow those when moving primitives across packages.
 
-| Group | Role |
-| --- | --- |
-| `daemon` | Runtime lifecycle, schedules, orchestration control |
-| `acp` | Registry, agents, skills, probe/doctor |
-| `creator` | Identity, workspace, soul, memory, **CLI local work KB index** (`creator kb --scope work`) |
-| `sync` | Structured platform sync (`nexus-cloud-sync`) |
-| `platform` | Auth, explore, context assemble, publish; future User knowledge entry points route to `nexus-knowledge` |
-| `system` | version, doctor, config, completion, debug |
+---
 
-Hidden entries: `acp-worker`, `daemon-run` (internal process modes).
+## Pre-1.0 persistence stance
 
-## TypeScript workspace
+Breaking changes to API shapes, CLI flags, config, and on-disk layout are **allowed without a deprecation period**. Local data may be wiped rather than migrated.
 
-| Package | Role |
-| --- | --- |
-| `@42ch/nexus-contracts` | Generated wire types; consumed by private `nexus-platform` via npm semver |
+Guidance for contributors:
 
-No second handwritten DTO set in platform — types must come from this repo’s schemas.
+- Treat `~/.nexus42/` and workspace-local state as **working copies**, not a stable public storage API.
+- Domain semantics belong in owner crates (`nexus-local-db`, `nexus-creator-memory`, `nexus-kb`, …). File caches in the CLI composition root are conveniences, not long-term SSOT.
+- Prefer structured deltas/bundles for sync — not full manuscript upload by default.
+- Document intentional wipe/reset UX when a change invalidates local DBs (authors should not need to reverse-engineer migrations).
 
-## Daemon API authority
+Exact path layouts: `nexus-home-layout` and local-db specs — do not duplicate them here.
 
-**Authoritative route list:** `crates/nexus-daemon-runtime/src/api/mod.rs` (registered routes). [`.mstar/specs/local-runtime-boundary.md`](../.mstar/specs/local-runtime-boundary.md) §3.2.1 is refreshed to mark unregistered context/research/agent-session rows as retired or not implemented (audit **KCA-002**, **KCA-006**).
+---
 
-### Registered route families (2026-05-25)
+## Standing constraints
 
-| Family | Prefix / examples |
-| --- | --- |
-| Runtime | `GET /v1/daemon/runtime/health`, `…/status`, `GET /v1/daemon/daemon/status` |
-| Workspace | `GET /v1/daemon/workspace`, `POST …/workspace/init`, `GET|POST /v1/daemon/workspaces`, `…/workspaces/active` |
-| Creator | `GET /v1/daemon/creators`, `GET|PUT …/creators/active`, `GET …/creators/{id}`, `POST …:logout` |
-| References | `GET /v1/daemon/references` (SQLite via local-db) |
-| Work KB index | `GET|POST /v1/daemon/kb/entries`, `GET|DELETE …/kb/entries/{id}` (**file index**, not `nexus-kb`) |
-| Narrative (read-only) | `GET /v1/daemon/narrative/*` — World KB reads via `NarrativeGateway` |
-| Memory review | `GET|POST|DELETE /v1/daemon/memory/pending-review…` |
-| Presets | `GET|POST /v1/daemon/presets`, `POST …/presets:validate`, `POST …/presets/{id}:reload` |
-| Orchestration | `GET|POST /v1/daemon/orchestration/sessions`, schedules, capabilities, presets |
-| Agent host | `/v1/daemon/agent-host/*` (sessions, operations, events SSE) |
-| Monitoring | `GET /v1/daemon/monitoring/pool` |
+These are architectural invariants, not style preferences:
 
-**Not registered today (but referenced elsewhere):** `POST /v1/daemon/context/assemble` (retired; `assemble-moment` replaces it), `GET /v1/daemon/research/sources`, `POST /v1/daemon/research/scan`, `POST /v1/daemon/agent-sessions/restart`, legacy `/v1/daemon/sync/*` (correctly removed per V1.21).
+1. **Local-first** — cloud is optional enhancement.
+2. **Wire contracts single-sourced** — schemas → codegen; no app-local wire DTOs.
+3. **Daemon ≠ ACP server** — client/host only.
+4. **No daemon↔cloud Cargo or HTTP coupling.**
+5. **World history immutable** — Fork, not rewrite.
+6. **One scope owner per entity** — resolve naming (`kb` vs `knowledge` vs work index) via the entity-scope model.
+7. **Consumers stay thin** — web/desktop do not re-own domain logic or invent second contracts.
+8. **Simplicity** — do not abstract before proven need (see Strategy).
 
-**Classes allowed on daemon:** runtime health, workspace, local Creator listing, orchestration, agent-host, preset management, work-scope KB file index, memory pending-review, references list.
+---
 
-**Classes forbidden on daemon:** `/sync/*`, platform registration proxies, public `/acp/*` as a server (ACP stays client/worker path).
+## Normative reading order
 
-## Versioning
+When designing or reviewing a change:
 
-- Wire: `schema_version` in schemas and bundle envelopes
-- CLI / crate: SemVer per crate; breaking wire → coordinated bump of schemas, Rust crate, and npm major
-- Pre-release (&lt;1.0): breaking CLI, paths, and on-disk layout allowed without migration
+1. Root [`AGENTS.md`](../AGENTS.md) — repo invariants
+2. This file — orientation
+3. [`entity-scope-model.md`](../.mstar/specs/entity-scope-model.md) — ownership
+4. [`local-cloud-crate-architecture.md`](../.mstar/specs/local-cloud-crate-architecture.md) — line split & forbidden edges
+5. Domain Master for the subsystem (daemon, orchestration, CLI, web-ui, desktop-shell, …) under [`.mstar/specs/`](../.mstar/specs/)
 
-## Pre-release local storage and breaking changes
-
-Nexus is pre-release (version &lt; 1.0). Per [`AGENTS.md`](../AGENTS.md), breaking changes are expected and allowed — API shapes, CLI flags, on-disk paths, config file layout, and behavior may change without a deprecation period. **Local persistence may be wiped rather than migrated.**
-
-### What is stored locally
-
-| Path | Content | Owner crate |
-| --- | --- | --- |
-| `~/.nexus42/config.toml` | CLI preferences (active creator, workspace slug, URLs, runtime mode) | `nexus42` (CLI surface) |
-| `~/.nexus42/agents.toml` | Multi-agent strategy/role overrides | `nexus42` (CLI surface) |
-| `~/.nexus42/auth.json` | Platform JWT tokens, creator auth state, API keys | `nexus42` (CLI surface; planned daemon migration) |
-| `~/.nexus42/creator-identities.json` | Creator display name/handle cache | `nexus42` (CLI surface; planned SQLite migration) |
-| `~/.nexus42/state.db` | Global identity database | `nexus-local-db` via `nexus42` |
-| `~/.nexus42/creators/<cid>/workspaces/<slug>/state.db` | Per-creator/workspace working copy (creators, reference_sources, outbox, etc.) | `nexus-local-db` |
-| `~/.nexus42/creators/<cid>/workspaces/<slug>/kb/index.json` + `entries/*.md` | CLI local work KB index (distinct from World KB and User knowledge) | `nexus42` (CLI surface; future routing to `nexus-kb` / `nexus-knowledge`) |
-| `<workspace_root>/.nexus42/workspace.json` | Workspace display config | `nexus42` (CLI surface) |
-
-### What users should expect before 1.0
-
-- **On-disk paths may change** between versions. After an upgrade, existing `~/.nexus42/` data may not be readable by the new version.
-- **No automatic migration.** If a breaking schema or layout change occurs, the recommended action is to delete `~/.nexus42/` (or the affected workspace's data) and re-initialize.
-- **CLI config may reset.** `config.toml` fields may be added, removed, or renamed. If the file cannot be parsed, it is backed up and defaults are used.
-- **Auth tokens may be invalidated.** `auth.json` tokens have expiry times and may not survive across CLI version changes if the platform token format changes.
-- **KB work index may be reset.** The CLI local work KB index (`creator kb --scope work`) uses a simple JSON + Markdown file layout. This is a temporary implementation — future versions will route to the proper domain crates (`nexus-kb`, `nexus-knowledge`), and the existing file-based index may not be migrated.
-- **SQLite schemas may change.** `state.db` uses a versioned migration system (`db_schema_version`), but pre-release migrations may be destructive (drop-and-recreate rather than in-place alter).
-
-### Storage ownership summary
-
-The CLI crate `nexus42` is a **command/router layer**. It does not own domain storage semantics:
-
-- All SQLite mechanics are delegated to `nexus-local-db`.
-- Creator memory operations are delegated to `nexus-creator-memory`.
-- Cloud sync operations are delegated to `nexus-cloud-sync`.
-- Path layout is delegated to `nexus-home-layout`.
-- File-based caches in `nexus42` (auth, identities, KB work index) are pre-release conveniences acknowledged for future migration to proper domain crates or SQLite.
-
-## Architecture constraints
-
-- Daemon runtime is a **local supervisor**, not an ACP Agent/Server
-- Default sync is **structured deltas/bundles**, not full manuscript upload
-- **World history is immutable** — changes go through Fork, not in-place mutation
-- Wire types in code must match `schemas/` (run `pnpm run codegen` after schema edits)
-
-## Further reading
-
-| Topic | Document |
-| --- | --- |
-| Entity scopes, crate ownership, KB / knowledge naming | [entity-scope-model.md](../.mstar/specs/entity-scope-model.md) |
-| Crate responsibilities & forbidden deps | [local-cloud-crate-architecture.md](../.mstar/specs/local-cloud-crate-architecture.md) |
-| Daemon layering | [daemon-runtime.md](../.mstar/specs/daemon-runtime.md) |
-| Orchestration | [orchestration-engine.md](../.mstar/specs/orchestration-engine.md) |
-| CLI behavior | [cli-spec.md](../.mstar/specs/cli-spec.md) |
-| Spec index | [specs/README.md](../.mstar/specs/README.md) |
-| Per-crate rules | `crates/*/AGENTS.md` |
-| Knowledge↔crates audit (V1.24) | [v1.24-knowledge-crates-alignment-audit-compass-v1.md](../.mstar/iterations/v1.24-knowledge-crates-alignment-audit-compass-v1.md) |
-| V1.23 wiring reference | [v1.23-architecture-crate-wiring-reference-compass-v1.md](../.mstar/iterations/v1.23-architecture-crate-wiring-reference-compass-v1.md) |
-| Deferred wiring / stubs | [deferred-features-cross-version-tracker.md](../.mstar/knowledge/deferred-features-cross-version-tracker.md) |
+Iteration plans and audit compasses record delivery history; they are not architecture SSOT. Prefer Master specs over dated gap tables when deciding what “should” be true.

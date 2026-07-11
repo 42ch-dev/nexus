@@ -11,7 +11,7 @@ schemas/*.schema.json → TypeScript + Rust types
 ```
 
 All wire types are **generated**, not handwritten. This ensures:
-- Consistency across CLI and platform
+- Consistency across Rust and TypeScript consumers
 - Schema-driven versioning
 - Automatic validation support
 - No drift between implementations
