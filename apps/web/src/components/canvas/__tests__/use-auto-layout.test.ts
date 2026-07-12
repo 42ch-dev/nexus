@@ -145,7 +145,7 @@ describe('useAutoLayout — dagre integration', () => {
     });
   });
 
-  it('lays out a 30-node compound graph within the 200ms performance threshold', () => {
+  it('lays out a 50-node compound graph within the 200ms performance threshold', () => {
     const parent: Node<{ label: string }> = {
       id: 'parent',
       type: 'default',
@@ -154,7 +154,7 @@ describe('useAutoLayout — dagre integration', () => {
     };
     const children: Node<{ label: string }>[] = [];
     const edges: Edge[] = [];
-    for (let i = 0; i < 30; i++) {
+    for (let i = 0; i < 49; i++) {
       children.push({
         id: `child-${i}`,
         type: 'default',
@@ -171,7 +171,7 @@ describe('useAutoLayout — dagre integration', () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const { result } = renderHook(() => useAutoLayout(nodes, edges, { direction: 'TB' }));
 
-    expect(result.current.nodes).toHaveLength(31);
+    expect(result.current.nodes).toHaveLength(50);
     expect(warnSpy).not.toHaveBeenCalled();
     warnSpy.mockRestore();
   });

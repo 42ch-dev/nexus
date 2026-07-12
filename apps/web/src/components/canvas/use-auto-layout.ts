@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react';
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import dagre, { Graph, type NodeLabel as DagreNodeLabel } from '@dagrejs/dagre';
 import type { Edge, Node } from '@xyflow/react';
 
@@ -136,7 +136,41 @@ export function useAutoLayout<TNodeData extends Record<string, unknown>>(
 
     // Detect manual drags by comparing incoming positions against the snapshot
     // from the last layout run. Any deviation marks the surface as dirty and
-    // suppresses automatic re-layouts.
+    // suppresses automatic re-layouts. This loop is read-only: refs are updated
+    // in the layout effect below so strict-mode double-invocation cannot leak
+    // state between memo runs.
+    let hasManualPosition = hasManualPositionRef.current;
+    for (const node of nodes) {
+      if (manualNodeIdsRef.current.has(node.id)) continue;
+      const last = lastLayoutPositionsRef.current.get(node.id);
+      if (last === undefined) continue;
+      if (
+        Math.abs(node.position.x - last.x) > EPSILON ||
+        Math.abs(node.position.y - last.y) > EPSILON
+      ) {
+        hasManualPosition = true;
+      }
+    }
+
+    const isRelayout = layoutGeneration !== lastLayoutGenRef.current;
+    const isFirstLayout = !initialLayoutDoneRef.current;
+    const shouldLayout = isRelayout || (isFirstLayout && !hasManualPosition);
+
+    if (!shouldLayout) {
+      return { nodes, isLayouting: false, relayout };
+    }
+
+    const laidOut = computeDagreLayout(nodes, edges, options);
+    return { nodes: laidOut, isLayouting: false, relayout };
+  }, [nodes, edges, options, layoutGeneration, relayout]);
+
+  useLayoutEffect(() => {
+    if (!options) {
+      return;
+    }
+
+    // Apply the manual-override side effects that were intentionally kept out
+    // of the memo above.
     for (const node of nodes) {
       if (manualNodeIdsRef.current.has(node.id)) continue;
       const last = lastLayoutPositionsRef.current.get(node.id);
@@ -150,19 +184,15 @@ export function useAutoLayout<TNodeData extends Record<string, unknown>>(
       }
     }
 
-    const isRelayout = layoutGeneration !== lastLayoutGenRef.current;
-    const isFirstLayout = !initialLayoutDoneRef.current;
-    const shouldLayout =
-      isRelayout || (isFirstLayout && !hasManualPositionRef.current);
-
-    if (!shouldLayout) {
-      return { nodes, isLayouting: false, relayout };
+    const layoutApplied = result.nodes !== nodes;
+    if (!layoutApplied) {
+      return;
     }
 
-    const laidOut = computeDagreLayout(nodes, edges, options);
+    const isRelayout = layoutGeneration !== lastLayoutGenRef.current;
 
     lastLayoutPositionsRef.current = new Map(
-      laidOut.map((n) => [n.id, { ...n.position }]),
+      result.nodes.map((n) => [n.id, { ...n.position }]),
     );
 
     if (isRelayout) {
@@ -172,9 +202,7 @@ export function useAutoLayout<TNodeData extends Record<string, unknown>>(
 
     initialLayoutDoneRef.current = true;
     lastLayoutGenRef.current = layoutGeneration;
-
-    return { nodes: laidOut, isLayouting: false, relayout };
-  }, [nodes, edges, options, layoutGeneration, relayout]);
+  }, [nodes, edges, options, layoutGeneration, result]);
 
   return result;
 }
