@@ -362,6 +362,10 @@ fn world_kb_routes() -> Router<WorkspaceState> {
             "/v1/daemon/worlds/{world_id}/kb/candidates",
             get(handlers::world_kb::get_candidates),
         )
+        .route(
+            "/v1/daemon/worlds/{world_id}/kb/key-blocks/{key_block_id}/state",
+            get(handlers::world_kb::get_key_block_state),
+        )
 }
 
 /// Works routes — Work CRUD + inspiration + reconcile-chapters (V1.33 §7.2, V1.36 §8).

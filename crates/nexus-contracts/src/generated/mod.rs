@@ -45,6 +45,7 @@ pub const SCHEMA_VERSIONS: &[(&str, u32)] = &[
     ("WorldKbEntityProjection", 1),
     ("WorldKbExtractJobProjection", 1),
     ("WorldKbGraphResponse", 1),
+    ("WorldKbKeyBlockStateResponse", 1),
     ("WorldKbPatchEntityRequest", 1),
     ("WorldKbPatchEntityResponse", 1),
     ("WorldKbPatchRelationshipRequest", 1),

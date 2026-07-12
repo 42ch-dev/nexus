@@ -31,10 +31,10 @@ use axum::Json;
 use nexus_contracts::{
     PaginationInfo, WorldKbCandidateProjection, WorldKbCandidatesResponse, WorldKbEntityPatch,
     WorldKbEntityProjection, WorldKbExtractJobProjection, WorldKbGraphResponse,
-    WorldKbPatchEntityRequest, WorldKbPatchEntityResponse, WorldKbPatchRelationshipRequest,
-    WorldKbPatchRelationshipResponse, WorldKbPromoteCandidateRequest,
-    WorldKbPromoteCandidateResponse, WorldKbRelationshipInput, WorldKbRelationshipKind,
-    WorldKbRelationshipProjection, WorldKbSourceAnchorProjection,
+    WorldKbKeyBlockStateResponse, WorldKbPatchEntityRequest, WorldKbPatchEntityResponse,
+    WorldKbPatchRelationshipRequest, WorldKbPatchRelationshipResponse,
+    WorldKbPromoteCandidateRequest, WorldKbPromoteCandidateResponse, WorldKbRelationshipInput,
+    WorldKbRelationshipKind, WorldKbRelationshipProjection, WorldKbSourceAnchorProjection,
 };
 use nexus_kb::key_block::{KeyBlock, KeyBlockBody};
 use nexus_kb::validation::{validate_body, validate_canonical_name, ValidationMode};
@@ -912,6 +912,59 @@ pub async fn get_graph(
             query.include_suggested.unwrap_or(false),
         )
         .await?,
+    }))
+}
+
+/// `GET /v1/daemon/worlds/{world_id}/kb/key-blocks/{key_block_id}/state` —
+/// computable `KeyBlock` state read.
+///
+/// V1.114 P2: dedicated read surface for `body.state` of computable `KeyBlocks`.
+/// Returns `state` when `body.computable` is true; `state: null` and
+/// `is_computable: false` otherwise. `version` mirrors the per-row OCC
+/// revision so callers can use the same OCC pattern as the graph/patch flows.
+pub async fn get_key_block_state(
+    State(state): State<WorkspaceState>,
+    Path((world_id, key_block_id)): Path<(String, String)>,
+) -> Result<Json<WorldKbKeyBlockStateResponse>, NexusApiError> {
+    let creator_id = require_creator(&state)?;
+    require_world_owner(state.pool(), &world_id, &creator_id).await?;
+
+    let store = kb_store::SqliteKbStore::new(state.pool().clone());
+    let kb = store
+        .get_key_block(&key_block_id)
+        .await
+        .map_err(|e| match e {
+            nexus_kb::store::KbStoreError::NotFound(_) => {
+                NexusApiError::NotFound(format!("key block {key_block_id} in world {world_id}"))
+            }
+            other => NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: other.to_string(),
+            },
+        })?;
+
+    // Scope check: the KeyBlock must live in the path world. Treat a row
+    // belonging to a different world as 404 (same as patch_entity).
+    if kb.world_id != world_id {
+        return Err(NexusApiError::NotFound(format!(
+            "key block {key_block_id} in world {world_id}"
+        )));
+    }
+
+    let is_computable = kb.body.as_ref().and_then(|b| b.computable).unwrap_or(false);
+    let state = if is_computable {
+        kb.body
+            .as_ref()
+            .and_then(|b| b.state.clone())
+            .unwrap_or(serde_json::Value::Null)
+    } else {
+        serde_json::Value::Null
+    };
+
+    Ok(Json(WorldKbKeyBlockStateResponse {
+        state,
+        is_computable,
+        version: kb.revision.unwrap_or(0),
     }))
 }
 

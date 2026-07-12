@@ -851,6 +851,11 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             WorldKbGraphResponse
         ),
         entry!(
+            "schemas/daemon-api/canvas/world-kb/world-kb-key-block-state-response.schema.json",
+            Strict,
+            WorldKbKeyBlockStateResponse
+        ),
+        entry!(
             "schemas/daemon-api/canvas/world-kb/world-kb-candidates-response.schema.json",
             Strict,
             WorldKbCandidatesResponse
