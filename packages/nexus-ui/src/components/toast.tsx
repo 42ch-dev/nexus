@@ -59,7 +59,19 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const toast = useCallback((input: Omit<Toast, 'id'>): number => {
     const id = nextId.current++;
     const next: Toast = { id, duration: DEFAULT_DURATION, ...input };
-    setToasts((prev) => [...prev.slice(-(MAX_TOASTS - 1)), next]);
+    setToasts((prev) => {
+      if (prev.length < MAX_TOASTS) return [...prev, next];
+      const evictIndex = prev.findIndex((t) => t.duration !== 0);
+      if (evictIndex === -1) {
+        // All existing toasts are persistent; keep them and allow the queue
+        // to temporarily exceed MAX_TOASTS rather than silently drop either
+        // the new toast or a persistent one.
+        return [...prev, next];
+      }
+      const nextQueue = [...prev];
+      nextQueue.splice(evictIndex, 1);
+      return [...nextQueue, next];
+    });
     return id;
   }, []);
 
