@@ -452,7 +452,9 @@
     "2026-07-12-v1.111-canvas-command-palette",
     "2026-07-12-v1.111-sidebar-canvas-ia",
     "2026-07-12-v1.111-design-studio-canvas-gallery",
-    "2026-07-12-v1.111-frontend-consolidation-sweep"
+    "2026-07-12-v1.111-frontend-consolidation-sweep",
+    "2026-07-12-v1.112-i18n-foundation",
+    "2026-07-12-v1.112-i18n-ui-migration"
   ],
   "iteration_summaries": {
     "v1.45": {

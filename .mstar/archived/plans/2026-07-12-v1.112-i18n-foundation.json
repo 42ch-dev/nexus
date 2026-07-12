@@ -1,0 +1,31 @@
+{
+  "id": "2026-07-12-v1.112-i18n-foundation",
+  "title": "P0 — i18n foundation + Appearance",
+  "file": "plans/2026-07-12-v1.112-i18n-foundation.md",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": [
+    "@frontend-dev"
+  ],
+  "progress": 100,
+  "tags": [
+    "v1.112",
+    "i18n",
+    "foundation",
+    "must"
+  ],
+  "created_at": "2026-07-12",
+  "updated_at": "2026-07-12",
+  "notes": "Done — SDD T1-T4 + QC tri Approve with residuals (3 low) + QA Pass; merged to iteration/v1.112",
+  "metadata": {
+    "iteration_refs": [
+      "V1.112"
+    ],
+    "spec_integration_branch": "iteration/v1.112",
+    "merge_target": "iteration/v1.112",
+    "working_branch": "plan/v1.112-p0-i18n-foundation",
+    "primary_spec": ".mstar/iterations/v1.112/specs/i18n-foundation.md",
+    "wire_contracts_changed": false,
+    "tier": "Must"
+  }
+}
