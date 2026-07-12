@@ -68,7 +68,7 @@ export function RootLayout() {
       <div className="flex min-w-0 flex-1 flex-col">
         {/* Mobile top nav (below lg) */}
         <nav
-          aria-label="Primary"
+          aria-label={t('aria.primary')}
           className="flex gap-1 overflow-x-auto border-b border-gray-alpha-400 bg-background-100 px-2 py-2 lg:hidden"
         >
           {MOBILE_NAV_KEYS.map(({ to, key }) => (

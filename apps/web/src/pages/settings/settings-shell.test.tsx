@@ -134,10 +134,10 @@ describe('SettingsAgentSection', () => {
 });
 
 describe('Settings shell routes', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mockMatchMedia(false);
     window.localStorage.clear();
-    i18n.changeLanguage('en');
+    await i18n.changeLanguage('en');
   });
 
   it('redirects /settings index to Agent section', async () => {

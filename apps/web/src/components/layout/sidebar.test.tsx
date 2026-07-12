@@ -31,9 +31,9 @@ function useCreatorHandler() {
 }
 
 describe('Sidebar', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     window.localStorage.clear();
-    i18n.changeLanguage('en');
+    await i18n.changeLanguage('en');
   });
 
   it('renders the Creator tab by default', async () => {
