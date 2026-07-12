@@ -46,6 +46,7 @@ interface ToastContextValue {
 const ToastContext = createContext<ToastContextValue | null>(null);
 
 const DEFAULT_DURATION = 6_000;
+const MAX_TOASTS = 5;
 
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toasts, setToasts] = useState<Toast[]>([]);
@@ -58,7 +59,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   const toast = useCallback((input: Omit<Toast, 'id'>): number => {
     const id = nextId.current++;
     const next: Toast = { id, duration: DEFAULT_DURATION, ...input };
-    setToasts((prev) => [...prev, next]);
+    setToasts((prev) => [...prev.slice(-(MAX_TOASTS - 1)), next]);
     return id;
   }, []);
 

@@ -1,13 +1,17 @@
-[
-  {
-    "id": "R-P1-002",
-    "title": "Uncached Intl.DateTimeFormat/RelativeTimeFormat created per call in format.ts",
-    "severity": "low",
-    "decision": "defer",
-    "owner": "@frontend-dev",
-    "target": "post-V1.112",
-    "lifecycle": "resolved",
-    "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-ui-migration.md",
-    "note": "Resolved 2026-07-12: IntlFormatterCache added to format.ts; DateTimeFormat/RelativeTimeFormat instances cached per locale+options. Closed in v1.113 P0 T4."
-  }
-]
+{
+  "plan_id": "2026-07-12-v1.112-i18n-ui-migration",
+  "schema_version": 1,
+  "entries": [
+    {
+      "id": "R-P1-002",
+      "title": "Uncached Intl.DateTimeFormat/RelativeTimeFormat created per call in format.ts",
+      "severity": "low",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "post-V1.112",
+      "lifecycle": "resolved",
+      "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-ui-migration.md",
+      "note": "Resolved 2026-07-12: IntlFormatterCache added to format.ts; DateTimeFormat/RelativeTimeFormat instances cached per locale+options. Closed in v1.113 P0 T4."
+    }
+  ]
+}

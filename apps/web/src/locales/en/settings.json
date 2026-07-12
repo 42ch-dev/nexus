@@ -3,7 +3,7 @@
     "sections": "Settings sections"
   },
   "title": "Settings",
-  "helper": "Manage your local agent, daemon connection, and setup options from one place.",
+  "helper": "Manage your local agent, workspace, daemon connection, and setup options from one place.",
   "nav": {
     "agent": "Agent",
     "workspace": "Workspace",

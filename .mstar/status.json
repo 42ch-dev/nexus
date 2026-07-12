@@ -68,12 +68,12 @@
       "id": "2026-07-12-v1.113-tech-debt-paydown",
       "title": "P2 - Tech Debt Paydown",
       "file": "plans/2026-07-12-v1.113-tech-debt-paydown.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@frontend-dev"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.113",
         "tech-debt",
@@ -82,7 +82,7 @@
       ],
       "created_at": "2026-07-12",
       "updated_at": "2026-07-12",
-      "notes": "Phase 1: compass + plan written; awaiting Review & Edit chain",
+      "notes": "Phase 2: SDD T1-T3 done, QC tri Approve with residuals (4 R#), QA Pass with notes",
       "metadata": {
         "iteration_refs": [
           "V1.113"
@@ -120,27 +120,28 @@
     "target_branch": "main",
     "tech_debt_summary": {
       "updated_at": "2026-07-12",
-      "total_open": 87,
+      "total_open": 77,
       "by_severity": {
         "critical": 0,
         "high": 0,
-        "medium": 1,
-        "low": 35,
-        "nit": 51
+        "medium": 2,
+        "low": 28,
+        "nit": 47
       },
       "by_target": {
-        "V1.96": 14,
-        "V1.97": 4,
+        "V1.96": 8,
+        "V1.97": 2,
         "accept": 6,
         "post-V1.100": 7,
         "post-V1.101": 6,
         "post-V1.102": 1,
-        "post-V1.104": 8,
-        "post-V1.106": 2,
+        "post-V1.104": 1,
         "post-V1.108": 1,
         "post-V1.109": 5,
         "post-V1.110": 8,
-        "post-V1.111": 6,
+        "post-V1.111": 5,
+        "post-V1.112": 4,
+        "post-V1.113": 4,
         "post-V1.97": 1,
         "post-V1.99": 3,
         "spec-hygiene": 1,
@@ -152,9 +153,9 @@
         "2026-07-05-v1.91-findings-batch": 1,
         "2026-07-05-v1.92-closure": 1,
         "2026-07-06-v1.93-closure": 1,
-        "2026-07-06-v1.94-closure": 9,
+        "2026-07-06-v1.94-closure": 3,
         "2026-07-07-v1.95-implement-fixes": 4,
-        "2026-07-07-v1.96-implement-rework": 5,
+        "2026-07-07-v1.96-implement-rework": 3,
         "2026-07-07-v1.97-desktop-first-launch-hardening": 3,
         "2026-07-08-v1.100-desktop-clean-state-first-launch": 3,
         "2026-07-08-v1.100-ui-hygiene-guardrails": 4,
@@ -167,8 +168,7 @@
         "2026-07-09-v1.103-settings-agent-preselect": 1,
         "2026-07-09-v1.103-settings-connection": 1,
         "2026-07-09-v1.103-settings-shell-nav": 2,
-        "2026-07-09-v1.104-settings-workspace": 7,
-        "2026-07-10-v1.106-studio-first-pipeline": 3,
+        "2026-07-10-v1.106-studio-first-pipeline": 1,
         "2026-07-10-v1.106-ui-continuity": 1,
         "2026-07-10-v1.108-canvas-outline-spatial": 3,
         "2026-07-11-v1.109-canvas-graph-scale": 1,
@@ -178,8 +178,10 @@
         "2026-07-11-v1.110-agent-scan-path-reliability": 3,
         "2026-07-11-v1.110-daemon-startup-latency": 3,
         "2026-07-12-v1.111-canvas-command-palette": 2,
-        "2026-07-12-v1.111-frontend-consolidation-sweep": 1,
-        "2026-07-12-v1.111-sidebar-canvas-ia": 1
+        "2026-07-12-v1.111-sidebar-canvas-ia": 1,
+        "2026-07-12-v1.112-i18n-foundation": 2,
+        "2026-07-12-v1.112-i18n-ui-migration": 2,
+        "2026-07-12-v1.113-i18n-completion": 4
       }
     },
     "updated_at": "2026-07-12"
@@ -225,72 +227,6 @@
       }
     ],
     "2026-07-06-v1.94-closure": [
-      {
-        "id": "R-V194QC1-S101",
-        "title": "Setup-step-agent auto-select effect over-fires on every state change",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "V1.96",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-06-v1.94-closure.md",
-        "note": "Non-blocking. QC source: §F-101"
-      },
-      {
-        "id": "R-V194QC1-S102",
-        "title": "Health-probe subscription duplicated between SetupGate and SetupStepDaemon",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "V1.96",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-06-v1.94-closure.md",
-        "note": "Non-blocking. QC source: §F-102"
-      },
-      {
-        "id": "R-V194QC1-S103",
-        "title": "SetupStepWelcome swallows Tauri errors silently",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "V1.96",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-06-v1.94-closure.md",
-        "note": "Non-blocking. QC source: §F-103"
-      },
-      {
-        "id": "R-V194QC1-S104",
-        "title": "Browser-fallback workspace string uses ~/… while Tauri returns absolute path",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "V1.96",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-06-v1.94-closure.md",
-        "note": "Non-blocking. QC source: §F-104"
-      },
-      {
-        "id": "R-V194QC1-S105",
-        "title": "/strategy redirect drops preset ID",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "V1.96",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-06-v1.94-closure.md",
-        "note": "Non-blocking. QC source: §F-105"
-      },
-      {
-        "id": "R-V194QC1-S106",
-        "title": "Sidebar nav data is open-ended with no compile-time guard",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "V1.96",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-06-v1.94-closure.md",
-        "note": "Non-blocking. QC source: §F-106"
-      },
       {
         "id": "R-V194QC2-S001",
         "title": "Agent scan endpoint could expose optional force_refresh query param",
@@ -384,17 +320,6 @@
         "note": "Sub-millisecond window; low practical impact. QC source: §W-1"
       },
       {
-        "id": "R-V196QC1-S002",
-        "title": "rounded-control inlined in setup-step-welcome.tsx where DESIGN.md supplies input-row-rounded token",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "V1.97",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-07-v1.96-implement-rework.md",
-        "note": "Single-line blast radius; V1.97 polish. QC source: §S-002"
-      },
-      {
         "id": "R-V196QC1-S004",
         "title": "format_error_detail composes free-form String rather than structured envelope",
         "severity": "low",
@@ -415,17 +340,6 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.96-implement-rework.md",
         "note": "Would not catch className regression. QC source: §S-1"
-      },
-      {
-        "id": "R-V196QC1-S001",
-        "title": "path-context-menu.tsx has near-duplicate inline errorMessage() (slight variant)",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "V1.97",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-07-v1.96-implement-rework.md",
-        "note": "Different fallback semantics; consolidation candidate. QC source: §S-001"
       }
     ],
     "2026-07-07-v1.97-desktop-first-launch-hardening": [
@@ -790,101 +704,7 @@
         "decision": "defer"
       }
     ],
-    "2026-07-09-v1.104-settings-workspace": [
-      {
-        "id": "R-V1104QC-S001",
-        "severity": "nit",
-        "lifecycle": "open",
-        "title": "Redundant ternary in test mock (defaultPath === INITIAL_PATH ? PICKED_PATH : PICKED_PATH)",
-        "source": "qc1",
-        "decision": "defer",
-        "target": "post-V1.104",
-        "note": "Collapse to single-branch or add cancel-path test case. QC1 S-1."
-      },
-      {
-        "id": "R-V1104QC-S002",
-        "severity": "nit",
-        "lifecycle": "open",
-        "title": "Seven locked copy constants duplicated between apps/web and apps/design-studio fixture",
-        "source": "qc1",
-        "decision": "defer",
-        "target": "post-V1.104",
-        "note": "Matches existing Setup/Connection pattern; shared settings-copy.ts would centralize. QC1 S-2."
-      },
-      {
-        "id": "R-V1104QC-S003",
-        "severity": "nit",
-        "lifecycle": "open",
-        "title": "SHELL_HELPER copy does not mention Workspace",
-        "source": "qc1",
-        "decision": "defer",
-        "target": "post-V1.104",
-        "note": "Locked by spec; future copy delta. QC1 S-3."
-      },
-      {
-        "id": "R-V1104QC-S004",
-        "severity": "low",
-        "lifecycle": "open",
-        "title": "saved state never cleared on subsequent Change Folder entry/cancel/error",
-        "source": "qc2",
-        "decision": "defer",
-        "target": "post-V1.104",
-        "note": "Honesty banner can linger after a later failed gesture. QC2 Minor-1."
-      },
-      {
-        "id": "R-V1104QC-S005",
-        "severity": "low",
-        "lifecycle": "open",
-        "title": "Load failure leaves path empty with no fallback; picker would pass empty defaultPath",
-        "source": "qc2",
-        "decision": "defer",
-        "target": "post-V1.104",
-        "note": "Wizard has DEFAULT fallback; workspace section does not. QC2 Minor-2."
-      },
-      {
-        "id": "R-V1104QC-W001",
-        "severity": "low",
-        "lifecycle": "open",
-        "title": "handleChangeFolder recreated on every render (no useCallback)",
-        "source": "qc3",
-        "decision": "defer",
-        "target": "post-V1.104",
-        "note": "No measurable impact at current scale; would break React.memo if Button were wrapped. QC3 W-1."
-      },
-      {
-        "id": "R-V1104QC-S006",
-        "severity": "nit",
-        "lifecycle": "open",
-        "title": "getWorkspaceRoot rejection leaves path empty; user can still click Change Folder with empty defaultPath",
-        "source": "qc3",
-        "decision": "defer",
-        "target": "post-V1.104",
-        "note": "Consider disabling button or showing inline retry on load failure. QC3 S-2."
-      }
-    ],
     "2026-07-10-v1.106-studio-first-pipeline": [
-      {
-        "id": "R-V1106P0-003",
-        "title": "@/components/ui alias added to Studio vite/vitest/tsconfig but undocumented in apps/design-studio/AGENTS.md Allowed table",
-        "severity": "nit",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.106",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-10-v1.106-studio-first-pipeline.md",
-        "note": "QC1 S-001. Doc gap."
-      },
-      {
-        "id": "R-V1106P0-004",
-        "title": "Toast queue has no maxToasts upper bound; under duration:0 rapid-fire generation could grow unbounded",
-        "severity": "nit",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.106",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-10-v1.106-studio-first-pipeline.md",
-        "note": "QC3 S-001. Fixture uses duration:0."
-      },
       {
         "id": "R-V1106P0-005",
         "title": "daemon-ready-splash testid repeated across 3 launch-fixture variant containers (not unique per variant)",
@@ -1052,22 +872,7 @@
         "note": "qc3 W-001 low confidence."
       }
     ],
-    "2026-07-12-v1.111-frontend-consolidation-sweep": [
-      {
-        "id": "R-V1111P3QC1-S001",
-        "title": "Two DESIGN-token gaps from P0/P1 UX audit: sidebar-nav.disabled token (disabled items use opacity-50) + listbox-max-height token (max-h-[320px])",
-        "severity": "nit",
-        "decision": "defer",
-        "owner": "@architect",
-        "target": "post-V1.111",
-        "lifecycle": "resolved",
-        "tracking_link": ".mstar/plans/2026-07-12-v1.111-frontend-consolidation-sweep.md",
-        "note": "qc1 S-002 + T4 audit. Add tokens when a second consumer appears. QC source: qc-consolidated.md Closed by V1.113 P1: tokens added + opacity-50 sweep.",
-        "closed_at": "2026-07-12",
-        "closure_note": "DESIGN.md + DESIGN.dark.md tokens added (sidebar-nav.disabledOpacity/disabledTextColor, listbox.maxHeight, states.disabled.opacity); all inline opacity-50 and max-h-[320px] usages swept to shared tokens; verified by QA (989 tests pass, typecheck clean, build clean, grep audit clean)",
-        "closure_evidence": "plan/v1.113-p1-ui-normalization: e2d9c017, 42161e8c, fd4a82bc, dc3518ab"
-      }
-    ],
+    "2026-07-12-v1.111-frontend-consolidation-sweep": [],
     "2026-07-12-v1.111-sidebar-canvas-ia": [
       {
         "id": "R-V1111P1-WORLDS-PICKER",
@@ -1197,17 +1002,6 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-foundation.md",
         "note": "~2KB for P0. Evaluate dynamic import/manualChunks before P1 expansion."
-      },
-      {
-        "id": "R-P0-006",
-        "title": "Design-studio App.test.tsx pre-existing AgentPicker fixture failures (7 tests)",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.112",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-foundation.md",
-        "note": "Pre-existing - file not touched in P0 diff. Not introduced by this plan."
       }
     ],
     "2026-07-12-v1.112-i18n-ui-migration": [

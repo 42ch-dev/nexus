@@ -23,6 +23,7 @@ Parent rules: [`../AGENTS.md`](../AGENTS.md) (apps placement), root [`AGENTS.md`
 | Alias | Resolves to | Use |
 | --- | --- | --- |
 | `@/*` | `./src/*` | Studio routes, fixtures, gallery layout |
+| `@/components/ui/*` | `../web/src/components/ui/*` | Mirror alias for direct per-module imports (used by Vite/Vitest/tsconfig); transitional until promotion |
 | `@web-ui/*` | `../web/src/components/ui/*` | Transitional gallery source for not-yet-promoted primitives |
 | `@web-setup/*` | `../web/src/components/setup/*` | Gallery-only import of app-shared setup compositions (e.g. AgentPicker, WorkspacePathField) — props-driven; no contracts/daemon |
 | `@web-layout/*` | `../web/src/components/layout/presentational/*` | Shell chrome extracts (sidebar, footer profiles, header/health) — props-driven; no routing or daemon hooks (V1.107) |

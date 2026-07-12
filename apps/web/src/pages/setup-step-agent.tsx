@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronLeft } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
@@ -112,25 +112,24 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
   const workspaceRoot = state.workspaceRoot;
   const workspacePicked = state.workspacePicked;
 
+  const stateRef = useRef(state);
+  stateRef.current = state;
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
   // Default to the first installed agent (profile path).
-  // Narrow deps (QC B3): do not depend on the whole `state` object.
+  // Narrow deps (QC B3 + R-V194QC1-S101): do not depend on the whole `state`
+  // object or its pass-through fields. The effect only needs to react when a
+  // first installed agent becomes available while no agent is selected.
   useEffect(() => {
-    if (selectedAgent || customLaunchCommand.trim()) return;
+    if (stateRef.current.selectedAgent || stateRef.current.customLaunchCommand.trim()) return;
     if (!firstInstalled) return;
-    onChange({
-      workspaceRoot,
-      workspacePicked,
+    onChangeRef.current({
+      ...stateRef.current,
       selectedAgent: firstInstalled,
       customLaunchCommand: '',
     });
-  }, [
-    firstInstalled,
-    selectedAgent,
-    customLaunchCommand,
-    workspaceRoot,
-    workspacePicked,
-    onChange,
-  ]);
+  }, [firstInstalled]);
 
   function selectById(id: string) {
     const agent = agentsById.get(id);

@@ -43,8 +43,26 @@ const OVERFLOW_AGENT_NAMES = [
   'Custom ACP',
 ];
 
+// Map Studio display names to ACP registry IDs so the shared AgentPicker
+// treats every overflow agent as a common agent and renders them in the grid
+// without requiring the "More agents" toggle.
+const OVERFLOW_AGENT_ID_BY_NAME: Record<string, string> = {
+  'Claude Code': 'claude-acp',
+  'Codex CLI': 'codex-acp',
+  'Cursor Agent': 'cursor',
+  'Gemini CLI': 'kimi',
+  'Aider': 'hermes',
+  'OpenCode': 'opencode',
+  'Continue': 'qoder',
+  'Windsurf Cascade': 'github-copilot-cli',
+  'Cline': 'pi-acp',
+  'Roo Code': 'kiro',
+  'Amp': 'amp',
+  'Custom ACP': 'custom-acp',
+};
+
 const OVERFLOW_AGENTS: AgentPickerItem[] = OVERFLOW_AGENT_NAMES.map((name) => ({
-  id: name.toLowerCase().replace(/\s+/g, '-'),
+  id: OVERFLOW_AGENT_ID_BY_NAME[name] ?? name.toLowerCase().replace(/\s+/g, '-'),
   name,
   version: '1.0.0',
   description: `${name} ACP agent.`,
@@ -57,7 +75,7 @@ const READY_AGENTS = OVERFLOW_AGENTS.slice(0, 3);
 
 const MIXED_AGENTS: AgentPickerItem[] = [
   {
-    id: 'claude-code',
+    id: 'claude-acp',
     name: 'Claude Code',
     version: '1.0.42',
     description: 'Anthropic coding agent via ACP.',
@@ -66,7 +84,7 @@ const MIXED_AGENTS: AgentPickerItem[] = [
     docsUrl: 'https://docs.anthropic.com/en/docs/claude-code',
   },
   {
-    id: 'gemini-cli',
+    id: 'kimi',
     name: 'Gemini CLI',
     version: null,
     description: 'Google Gemini agent (not on PATH).',

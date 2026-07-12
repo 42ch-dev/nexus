@@ -9,7 +9,7 @@ import { errorMessage } from '@/lib/error-message';
 import { useToast } from '@/lib/use-toast';
 import type { WizardState } from '@/pages/setup-wizard-page';
 
-const DEFAULT_WORKSPACE = '~/Documents/nexus/default';
+export const DEFAULT_WORKSPACE = '~/Documents/nexus/default';
 
 interface SetupStepWorkspaceProps {
   state: WizardState;

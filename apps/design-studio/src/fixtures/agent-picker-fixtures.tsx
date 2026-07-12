@@ -16,7 +16,7 @@ import {
 
 const INSTALLED_ONLY: AgentPickerItem[] = [
   {
-    id: 'claude-code',
+    id: 'claude-acp',
     name: 'Claude Code',
     version: '1.0.42',
     description: 'Anthropic coding agent via ACP.',
@@ -25,7 +25,7 @@ const INSTALLED_ONLY: AgentPickerItem[] = [
     docsUrl: 'https://docs.anthropic.com/en/docs/claude-code',
   },
   {
-    id: 'codex',
+    id: 'codex-acp',
     name: 'Codex',
     version: '0.12.0',
     description: 'OpenAI Codex CLI.',
@@ -38,7 +38,7 @@ const INSTALLED_ONLY: AgentPickerItem[] = [
 const MIXED: AgentPickerItem[] = [
   ...INSTALLED_ONLY,
   {
-    id: 'gemini-cli',
+    id: 'kimi',
     name: 'Gemini CLI',
     version: null,
     description: 'Google Gemini agent (not on PATH).',
@@ -47,7 +47,7 @@ const MIXED: AgentPickerItem[] = [
     docsUrl: 'https://ai.google.dev/',
   },
   {
-    id: 'cursor-agent',
+    id: 'cursor',
     name: 'Cursor Agent',
     version: null,
     description: 'Known registry entry without install/docs URLs.',
@@ -80,7 +80,7 @@ function FixtureFrame({
 }
 
 function InteractiveSelectedFixture() {
-  const [selectedId, setSelectedId] = useState<string | null>('claude-code');
+  const [selectedId, setSelectedId] = useState<string | null>('claude-acp');
   const [custom, setCustom] = useState('');
   return (
     <AgentPicker

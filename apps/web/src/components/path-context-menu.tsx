@@ -23,6 +23,7 @@ import { Copy, ExternalLink, FolderSearch } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { useDesktopCapabilities } from '@/lib/client-context';
 import { useToast } from '@/lib/use-toast';
+import { errorMessage } from '@/lib/error-message';
 import type { DesktopCapabilityError } from '@/lib/nexus';
 
 export interface MenuPosition {
@@ -70,13 +71,6 @@ function isOutsideWorkspaceError(err: unknown): boolean {
     typeof err === 'object' &&
     (err as DesktopCapabilityError).code === 'path_outside_workspace'
   );
-}
-
-function errorMessage(err: unknown): string {
-  if (err !== null && typeof err === 'object' && 'message' in err) {
-    return String((err as { message: unknown }).message);
-  }
-  return err instanceof Error ? err.message : 'Action failed.';
 }
 
 export interface PathContextMenuProps {
@@ -137,7 +131,7 @@ export function PathContextMenu({
       const title = isOutsideWorkspaceError(err)
         ? commonT('toast.pathNotOpened')
         : commonT(errorKey);
-      toast({ variant: 'error', title, description: errorMessage(err) });
+      toast({ variant: 'error', title, description: errorMessage(err) || commonT('toast.actionFailed') });
     }
     onClose();
   }

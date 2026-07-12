@@ -137,7 +137,8 @@
     "agentProfileSavedDescription": "Using {{name}} for local strategies.",
     "daemonRestartFailed": "Daemon restart failed",
     "presetScaffolded": "Preset scaffolded",
-    "pathNotOpened": "Path not opened"
+    "pathNotOpened": "Path not opened",
+    "actionFailed": "Action failed."
   },
   "dialog": {
     "close": "Close dialog"
