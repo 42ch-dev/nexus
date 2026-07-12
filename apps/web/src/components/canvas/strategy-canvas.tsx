@@ -197,13 +197,8 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
   const onConnect = useCallback(
     (connection: Connection) => {
       strategyState.onConnect(connection);
-      if (surface.selectedNode) {
-        surface.onNodesChange([
-          { type: 'select', id: surface.selectedNode.id, selected: false },
-        ]);
-      }
     },
-    [strategyState.onConnect, surface.selectedNode, surface.onNodesChange],
+    [strategyState.onConnect],
   );
 
   if (strategyState.graphQuery.isLoading) return <LoadingState label={t('strategy.loading')} />;

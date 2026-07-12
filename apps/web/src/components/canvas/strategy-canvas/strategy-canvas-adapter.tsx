@@ -109,10 +109,9 @@ export function createStrategyCanvasAdapter(
       } satisfies ConflictModalProps;
     },
 
-    renderInspector(node) {
+    renderInspector(_node) {
       const ctx = ctxRef.current;
-      const states = ctx.parsed?.manifest.states;
-      const selectedState = states?.find((s) => s.id === node.data.stateId);
+      const selectedState = ctx.selectedState;
       if (!selectedState) return null;
 
       return (
