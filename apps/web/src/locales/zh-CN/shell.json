@@ -9,6 +9,7 @@
     "sessions": "会话",
     "schedule": "日程",
     "capabilities": "能力",
+    "modules": "模块",
     "findings": "发现",
     "memory": "记忆",
     "settings": "设置",
@@ -28,6 +29,8 @@
     "sessions": "会话",
     "schedule": "日程",
     "capabilities": "能力",
+    "compute": "计算",
+    "modules": "模块",
     "strategies": "策略",
     "settings": "设置"
   },

@@ -108,4 +108,14 @@ export const queryKeys = {
     annotations: (workId: string, chapter: number) =>
       [...queryKeys.reading.all, 'annotations', workId, chapter] as const,
   },
+  // V1.114 — Compute modules registry visibility.
+  compute: {
+    all: ['compute'] as const,
+    modules: {
+      all: () => [...queryKeys.compute.all, 'modules'] as const,
+      list: () => [...queryKeys.compute.modules.all(), 'list'] as const,
+      detail: (moduleId: string) =>
+        [...queryKeys.compute.modules.all(), 'detail', moduleId] as const,
+    },
+  },
 } as const;
