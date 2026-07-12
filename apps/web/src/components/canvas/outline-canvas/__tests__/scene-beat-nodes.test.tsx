@@ -12,8 +12,10 @@
  * node body renders in isolation. `NodeProps` is passed through as-is.
  */
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import type { ReactNode } from 'react';
+
+import { renderInApp } from '@/test/test-providers';
 
 // Stub Handle so the node body renders without the RF store. `NodeProps` is
 // re-exported from the real module so the component's type imports resolve.
@@ -89,31 +91,31 @@ function beatProps(
 
 describe('OutlineSceneNode', () => {
   it('renders the scene title from node data', () => {
-    render(<OutlineSceneNode {...sceneProps({ title: 'The Arrival' })} />);
+    renderInApp(<OutlineSceneNode {...sceneProps({ title: 'The Arrival' })} />);
     expect(screen.getByText('The Arrival')).toBeInTheDocument();
   });
 
   it('renders "Untitled Scene" fallback when title is empty', () => {
-    render(<OutlineSceneNode {...sceneProps({ title: null })} />);
+    renderInApp(<OutlineSceneNode {...sceneProps({ title: null })} />);
     expect(screen.getByText('Untitled Scene')).toBeInTheDocument();
   });
 
   it('renders a status chip when status is set', () => {
-    const { container } = render(
+    const { container } = renderInApp(
       <OutlineSceneNode {...sceneProps({ title: 'S1', status: 'drafted' })} />,
     );
     expect(container.textContent).toContain('Drafted');
   });
 
   it('renders "Completed" status label for completed status', () => {
-    const { container } = render(
+    const { container } = renderInApp(
       <OutlineSceneNode {...sceneProps({ title: 'S1', status: 'completed' })} />,
     );
     expect(container.textContent).toContain('Completed');
   });
 
   it('omits the status chip when status is null', () => {
-    const { container } = render(
+    const { container } = renderInApp(
       <OutlineSceneNode {...sceneProps({ title: 'S1', status: null })} />,
     );
     expect(container.textContent).not.toContain('Drafted');
@@ -121,7 +123,7 @@ describe('OutlineSceneNode', () => {
   });
 
   it('consumes the canvas-outline-scene-fill token on the node body', () => {
-    const { container } = render(
+    const { container } = renderInApp(
       <OutlineSceneNode {...sceneProps({ title: 'S1' })} />,
     );
     const nodeEl = container.firstElementChild as HTMLElement;
@@ -135,17 +137,17 @@ describe('OutlineSceneNode', () => {
 
 describe('OutlineBeatNode', () => {
   it('renders the beat title from node data', () => {
-    render(<OutlineBeatNode {...beatProps({ title: 'Turn: the call' })} />);
+    renderInApp(<OutlineBeatNode {...beatProps({ title: 'Turn: the call' })} />);
     expect(screen.getByText('Turn: the call')).toBeInTheDocument();
   });
 
   it('renders "Untitled Beat" fallback when title is empty', () => {
-    render(<OutlineBeatNode {...beatProps({ title: null })} />);
+    renderInApp(<OutlineBeatNode {...beatProps({ title: null })} />);
     expect(screen.getByText('Untitled Beat')).toBeInTheDocument();
   });
 
   it('consumes the canvas-outline-beat-fill token on the node body', () => {
-    const { container } = render(
+    const { container } = renderInApp(
       <OutlineBeatNode {...beatProps({ title: 'B1' })} />,
     );
     const nodeEl = container.firstElementChild as HTMLElement;

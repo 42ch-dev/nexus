@@ -9,6 +9,7 @@
  * Selection in either pane opens the matching inspector.
  */
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import type {
   WorldKbEntityProjection,
@@ -66,6 +67,7 @@ export function WorldKbAltView({
   suggestionPending,
   onActiveTabChange,
 }: WorldKbAltViewProps) {
+  const { t } = useTranslation('canvas');
   const [activeTab, setActiveTab] = useState<Tab>('entities');
 
   // V1.76: wrap setActiveTab so the canvas can react to the Suggested pane
@@ -84,19 +86,19 @@ export function WorldKbAltView({
     <div className="flex flex-col gap-3">
       <div className="inline-flex rounded-card border border-gray-alpha-400 bg-background-200 p-1">
         <TabButton
-          label="Entities"
+          label={t('worldKb.altView.entities')}
           active={activeTab === 'entities'}
           onClick={() => selectTab('entities')}
           count={nodes.length}
         />
         <TabButton
-          label="Relationships"
+          label={t('worldKb.altView.relationships')}
           active={activeTab === 'relationships'}
           onClick={() => selectTab('relationships')}
           count={confirmedRels.length}
         />
         <TabButton
-          label="Suggested"
+          label={t('worldKb.altView.suggested')}
           active={activeTab === 'suggested'}
           onClick={() => selectTab('suggested')}
           count={suggestedRels.length}

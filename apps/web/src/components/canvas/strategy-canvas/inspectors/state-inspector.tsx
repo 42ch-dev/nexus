@@ -5,6 +5,7 @@
  */
 import type { MutableRefObject } from 'react';
 import { useCallback, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/react-query';
 
 import { useNexusClient } from '@/lib/client-context';
@@ -80,6 +81,7 @@ export function StateInspector({
   onSaveStatus,
   onConflict,
 }: StateInspectorProps) {
+  const { t } = useTranslation('canvas');
   const patch = usePatchStrategyState();
   const original = originalFormOf(selectedState);
   const dirty = isSectionDirty('state', form, original);
@@ -100,7 +102,7 @@ export function StateInspector({
     try {
       const res = await patch.mutateAsync(args);
       workingRevisionRef.current = Number(res.new_revision);
-      onSaveStatus({ type: 'success', message: 'Saved label' });
+      onSaveStatus({ type: 'success', message: t('strategy.inspector.state.saved') });
     } catch (error) {
       if (isStrategyConflictError(error)) {
         const currentRevision =
@@ -109,11 +111,11 @@ export function StateInspector({
             : 0;
         onConflict(currentRevision, 'state');
       } else {
-        const message = error instanceof Error ? error.message : 'Failed to save label';
+        const message = error instanceof Error ? error.message : t('strategy.inspector.state.saveFailed');
         onSaveStatus({ type: 'error', message });
       }
     }
-  }, [dirty, patch.isPending, form, original, presetId, selectedState, onSaveStatus, onConflict]);
+  }, [dirty, patch.isPending, form, original, presetId, selectedState, onSaveStatus, onConflict, t]);
 
   // Keep a fresh callback reference for the keyboard shortcut effect so the
   // effect itself does not need to depend on the callback (R-V172P1-QC1-001).
@@ -128,20 +130,20 @@ export function StateInspector({
   }, [saveTrigger]);
 
   return (
-    <section className="flex flex-col gap-2" aria-label="State editor">
+    <section className="flex flex-col gap-2" aria-label={t('strategy.inspector.state.ariaLabel')}>
       <div className="flex items-center justify-between">
-        <span className="text-label-14 font-semibold text-gray-900">State</span>
+        <span className="text-label-14 font-semibold text-gray-900">{t('strategy.inspector.state.title')}</span>
         <button
           type="button"
           onClick={handleSave}
           disabled={!dirty || patch.isPending}
           className="rounded-control border border-gray-alpha-400 px-2 py-1 text-button-12 text-gray-900 hover:bg-gray-alpha-100 disabled:text-gray-500"
         >
-          {patch.isPending ? 'Saving…' : 'Save state'}
+          {patch.isPending ? t('strategy.inspector.state.saving') : t('strategy.inspector.state.save')}
         </button>
       </div>
       <label className="flex flex-col gap-1 text-copy-13">
-        <span className="text-gray-700">Label / state id</span>
+        <span className="text-gray-700">{t('strategy.inspector.state.labelLabel')}</span>
         <input
           type="text"
           value={form.label}
@@ -150,7 +152,7 @@ export function StateInspector({
         />
       </label>
       <label className="flex flex-col gap-1 text-copy-13">
-        <span className="text-gray-700">Description</span>
+        <span className="text-gray-700">{t('strategy.inspector.state.descriptionLabel')}</span>
         <textarea
           value={form.description}
           onChange={(e) => onChange('description', e.target.value)}

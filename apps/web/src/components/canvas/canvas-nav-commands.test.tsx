@@ -140,8 +140,8 @@ describe('CanvasNavCommands — registration', () => {
   it('each command carries a Navigate group, icon, and non-empty label', () => {
     renderInLayout('/sessions');
     for (const cmd of getCommands()) {
-      expect(cmd.group).toBe('Navigate');
-      expect(cmd.label.length).toBeGreaterThan(0);
+      expect(cmd.groupKey).toBe('group.navigate');
+      expect(cmd.labelKey.length).toBeGreaterThan(0);
       expect(cmd.icon).toBeDefined();
     }
   });

@@ -20,32 +20,44 @@ import {
 } from './command-registry';
 
 /** Factory for a minimal command; overrides only what each test cares about. */
-function makeCommand(overrides: Partial<Command> & Pick<Command, 'id'>): Command {
+function makeCommand(
+  overrides: Partial<Command> & Pick<Command, 'id'>,
+): Command {
   return {
-    label: overrides.id,
-    group: 'Test',
+    labelKey: overrides.id,
+    groupKey: 'test.group',
     handler: vi.fn(),
     ...overrides,
   };
 }
 
+/** Resolve a Command's key fields into the strings `filterCommands` ranks on. */
+function resolve(command: Command, label?: string, keywords?: string[]) {
+  return {
+    ...command,
+    label: label ?? command.labelKey,
+    group: command.groupKey,
+    keywords: keywords ?? command.keywordKeys ?? [],
+  };
+}
+
 const ADD_CHAPTER: Command = makeCommand({
   id: 'outline.add-chapter',
-  label: 'Add Chapter',
-  group: 'Outline',
-  keywords: ['new chapter', 'insert'],
+  labelKey: 'Add Chapter',
+  groupKey: 'Outline',
+  keywordKeys: ['new chapter', 'insert'],
 });
 const ADD_SCENE: Command = makeCommand({
   id: 'outline.add-scene',
-  label: 'Add Scene',
-  group: 'Outline',
-  keywords: ['beat'],
+  labelKey: 'Add Scene',
+  groupKey: 'Outline',
+  keywordKeys: ['beat'],
 });
 const RUN_STRATEGY: Command = makeCommand({
   id: 'strategy.run',
-  label: 'Run Strategy',
-  group: 'Strategy',
-  keywords: ['execute', 'start'],
+  labelKey: 'Run Strategy',
+  groupKey: 'Strategy',
+  keywordKeys: ['execute', 'start'],
 });
 
 describe('command store — register / lookup / unregister', () => {
@@ -77,7 +89,7 @@ describe('command store — register / lookup / unregister', () => {
     registerCommand(ADD_CHAPTER);
     const updated: Command = makeCommand({
       id: 'outline.add-chapter',
-      label: 'Add Chapter (renamed)',
+      labelKey: 'Add Chapter (renamed)',
     });
     registerCommand(updated);
     expect(getCommands()).toEqual([updated]);
@@ -226,7 +238,7 @@ describe('useRegisterCommand — lifetime binding', () => {
 });
 
 describe('filterCommands — query matching', () => {
-  const ALL: Command[] = [ADD_CHAPTER, ADD_SCENE, RUN_STRATEGY];
+  const ALL = [ADD_CHAPTER, ADD_SCENE, RUN_STRATEGY].map((c) => resolve(c));
 
   it('returns all commands in input order for an empty query', () => {
     expect(filterCommands(ALL, '')).toEqual(ALL);
@@ -261,11 +273,13 @@ describe('filterCommands — query matching', () => {
   });
 
   it('does not apply the available() gate (palette composes that separately)', () => {
-    const hidden: Command = makeCommand({
-      id: 'x.hidden',
-      label: 'Hidden',
-      available: () => false,
-    });
+    const hidden = resolve(
+      makeCommand({
+        id: 'x.hidden',
+        labelKey: 'Hidden',
+        available: () => false,
+      }),
+    );
     // filterCommands is query-only; available() is the consumer's concern.
     expect(filterCommands([hidden], 'hidden')).toEqual([hidden]);
     expect(filterCommands([hidden], '')).toEqual([hidden]);
@@ -274,9 +288,9 @@ describe('filterCommands — query matching', () => {
 
 describe('filterCommands — ranking', () => {
   it('surfaces an exact label match ahead of substring matches', () => {
-    const exact: Command = makeCommand({ id: 'add', label: 'Add' });
-    const chapter: Command = makeCommand({ id: 'add-chapter', label: 'Add Chapter' });
-    const additive: Command = makeCommand({ id: 'additive', label: 'Additive' });
+    const exact = resolve(makeCommand({ id: 'add', labelKey: 'Add' }));
+    const chapter = resolve(makeCommand({ id: 'add-chapter', labelKey: 'Add Chapter' }));
+    const additive = resolve(makeCommand({ id: 'additive', labelKey: 'Additive' }));
     const out = filterCommands([chapter, exact, additive], 'add');
     // exact label → first, then the two startswith/contains, in input order.
     expect(out[0]).toBe(exact);
@@ -284,47 +298,51 @@ describe('filterCommands — ranking', () => {
   });
 
   it('ranks label-startswith ahead of label-contains', () => {
-    const starts: Command = makeCommand({ id: 's', label: 'Add Scene' });
-    const contains: Command = makeCommand({ id: 'c', label: 'Read Addins' });
+    const starts = resolve(makeCommand({ id: 's', labelKey: 'Add Scene' }));
+    const contains = resolve(makeCommand({ id: 'c', labelKey: 'Read Addins' }));
     const out = filterCommands([contains, starts], 'add');
     expect(out.map((c) => c.id)).toEqual(['s', 'c']);
   });
 
   it('ranks label-contains ahead of keyword-only matches', () => {
-    const labelMatch: Command = makeCommand({ id: 'lm', label: 'Run Header' });
-    const keywordOnly: Command = makeCommand({
-      id: 'ko',
-      label: 'Strategy',
-      keywords: ['overrun'],
-    });
+    const labelMatch = resolve(makeCommand({ id: 'lm', labelKey: 'Run Header' }));
+    const keywordOnly = resolve(
+      makeCommand({
+        id: 'ko',
+        labelKey: 'Strategy',
+        keywordKeys: ['overrun'],
+      }),
+    );
     const out = filterCommands([keywordOnly, labelMatch], 'run');
     expect(out.map((c) => c.id)).toEqual(['lm', 'ko']);
   });
 
   it('preserves input order within the same rank tier (stable)', () => {
-    const a: Command = makeCommand({ id: 'a', label: 'Go Alpha' });
-    const b: Command = makeCommand({ id: 'b', label: 'Go Beta' });
-    const c: Command = makeCommand({ id: 'c', label: 'Go Gamma' });
+    const a = resolve(makeCommand({ id: 'a', labelKey: 'Go Alpha' }));
+    const b = resolve(makeCommand({ id: 'b', labelKey: 'Go Beta' }));
+    const c = resolve(makeCommand({ id: 'c', labelKey: 'Go Gamma' }));
     const out = filterCommands([a, b, c], 'go');
     expect(out.map((c2) => c2.id)).toEqual(['a', 'b', 'c']);
   });
 
   it('full tier ordering: exact → startswith → contains → keyword', () => {
-    const exact: Command = makeCommand({ id: 'ex', label: 'Node' });
-    const starts: Command = makeCommand({ id: 'st', label: 'Node Start' });
-    const contains: Command = makeCommand({ id: 'co', label: 'On Node Pad' });
-    const keyword: Command = makeCommand({
-      id: 'kw',
-      label: 'Graph',
-      keywords: ['node-like'],
-    });
+    const exact = resolve(makeCommand({ id: 'ex', labelKey: 'Node' }));
+    const starts = resolve(makeCommand({ id: 'st', labelKey: 'Node Start' }));
+    const contains = resolve(makeCommand({ id: 'co', labelKey: 'On Node Pad' }));
+    const keyword = resolve(
+      makeCommand({
+        id: 'kw',
+        labelKey: 'Graph',
+        keywordKeys: ['node-like'],
+      }),
+    );
     // Deliberately shuffled input to prove ordering is rank-driven, not input.
     const out = filterCommands([keyword, contains, starts, exact], 'node');
     expect(out.map((c) => c.id)).toEqual(['ex', 'st', 'co', 'kw']);
   });
 
   it('does not mutate the input array', () => {
-    const input = [ADD_CHAPTER, ADD_SCENE];
+    const input = [resolve(ADD_CHAPTER), resolve(ADD_SCENE)];
     const snapshot = [...input];
     filterCommands(input, 'add');
     expect(input).toEqual(snapshot);

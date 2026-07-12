@@ -7,6 +7,7 @@
  * merge flow selects a target confirmed KeyBlock from the graph projection.
  */
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { Select } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
@@ -48,6 +49,7 @@ export function PromotionInspector({
   onConflict,
   reseedSignal,
 }: PromotionInspectorProps) {
+  const { t } = useTranslation('canvas');
   const promote = usePromoteWorldKbCandidate(worldId);
   const [action, setAction] = useState<WorldKbPromoteAction>('adopt');
   const [mergeTargetId, setMergeTargetId] = useState<string>('');
@@ -74,7 +76,7 @@ export function PromotionInspector({
   function handleSubmit() {
     setValidationErrors([]);
     if (action === 'merge' && !mergeTargetId) {
-      setValidationErrors(['Select a confirmed entity to merge into.']);
+      setValidationErrors([t('worldKb.promotionInspector.selectMergeTarget')]);
       return;
     }
     const mergeTarget = mergeTargets.find((e) => e.key_block_id === mergeTargetId);
@@ -90,7 +92,7 @@ export function PromotionInspector({
         onError: (error) => {
           if (isWorldKbValidationError(error)) {
             const details = error.details as { validation_summary?: { errors?: string[] } } | undefined;
-            setValidationErrors(details?.validation_summary?.errors ?? ['Validation failed.']);
+            setValidationErrors(details?.validation_summary?.errors ?? [t('worldKb.promotionInspector.validationFailed')]);
             return;
           }
           const details = error as unknown as {
@@ -130,23 +132,21 @@ export function PromotionInspector({
       }}
     >
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-heading-16 font-heading text-gray-1000">Pending Candidate</h3>
+        <h3 className="text-heading-16 font-heading text-gray-1000">{t('worldKb.promotionInspector.title')}</h3>
         <span className="rounded-pill bg-canvas-worldkb-promotion-pending/15 px-1.5 py-0.5 text-label-12 text-canvas-worldkb-promotion-pending">
-          Pending · v{node.version}
+          {t('worldKb.promotionInspector.pendingBadge', { version: node.version })}
         </span>
       </div>
-      <p className="text-copy-13 text-gray-700">
-        Review this extracted candidate and decide whether to promote it into the World KB.
-      </p>
+      <p className="text-copy-13 text-gray-700">{t('worldKb.promotionInspector.description')}</p>
 
       <dl className="grid grid-cols-1 gap-2 rounded-card border border-gray-alpha-300 bg-background-100 p-3">
-        <Row label="Name" value={candidate.canonical_name || '(unnamed)'} />
-        <Row label="Block Type" value={BLOCK_TYPE_LABELS[candidate.block_type]} />
-        <Row label="Job" value={<span className="font-mono text-copy-13-mono">{shortId(candidate.job_id)}</span>} />
+        <Row label={t('worldKb.promotionInspector.field.name')} value={candidate.canonical_name || t('worldKb.promotionInspector.unnamed')} />
+        <Row label={t('worldKb.promotionInspector.field.blockType')} value={BLOCK_TYPE_LABELS[candidate.block_type]} />
+        <Row label={t('worldKb.promotionInspector.field.job')} value={<span className="font-mono text-copy-13-mono">{shortId(candidate.job_id)}</span>} />
       </dl>
 
       <fieldset className="flex flex-col gap-2">
-        <legend className="text-label-14 font-medium text-gray-1000">Decision</legend>
+        <legend className="text-label-14 font-medium text-gray-1000">{t('worldKb.promotionInspector.decisionLegend')}</legend>
         {(['adopt', 'reject', 'merge'] as const).map((a) => (
           <label key={a} className="flex items-center gap-2 text-copy-14 text-gray-900">
             <input
@@ -158,8 +158,8 @@ export function PromotionInspector({
               className="h-4 w-4"
             />
             <span>
-              {actionLabel(a)}
-              <span className="text-copy-13 text-gray-700"> — {actionHelp(a)}</span>
+              {t(`worldKb.promotionInspector.action.${a}.label`)}
+              <span className="text-copy-13 text-gray-700"> — {t(`worldKb.promotionInspector.action.${a}.help`)}</span>
             </span>
           </label>
         ))}
@@ -167,10 +167,12 @@ export function PromotionInspector({
 
       {action === 'merge' ? (
         <div className="flex flex-col gap-1">
-          <Label htmlFor="wkbp-merge">Merge into (confirmed {BLOCK_TYPE_LABELS[candidate.block_type]})</Label>
+          <Label htmlFor="wkbp-merge">
+            {t('worldKb.promotionInspector.mergeInto', { blockType: BLOCK_TYPE_LABELS[candidate.block_type] })}
+          </Label>
           {mergeTargets.length === 0 ? (
             <p className="rounded-card border border-amber-700/30 bg-amber-700/10 p-2 text-copy-13 text-amber-1000">
-              No confirmed {BLOCK_TYPE_LABELS[candidate.block_type]} entities to merge into. Adopt or reject instead.
+              {t('worldKb.promotionInspector.noMergeTargets', { blockType: BLOCK_TYPE_LABELS[candidate.block_type] })}
             </p>
           ) : (
             <Select
@@ -178,7 +180,7 @@ export function PromotionInspector({
               value={mergeTargetId}
               onChange={(e) => setMergeTargetId(e.target.value)}
             >
-              <option value="">Select a target…</option>
+              <option value="">{t('worldKb.promotionInspector.selectTarget')}</option>
               {mergeTargets.map((e) => (
                 <option key={e.key_block_id} value={e.key_block_id}>
                   {e.canonical_name} (v{e.version})
@@ -202,7 +204,7 @@ export function PromotionInspector({
 
       <div className="flex items-center justify-end gap-2">
         <Button type="submit" disabled={promote.isPending || (action === 'merge' && !mergeTargetId)}>
-          {promote.isPending ? 'Submitting…' : actionLabel(action)}
+          {promote.isPending ? t('worldKb.promotionInspector.submitting') : t(`worldKb.promotionInspector.action.${action}.label`)}
         </Button>
       </div>
     </form>
@@ -220,18 +222,6 @@ function Row({ label, value }: { label: string; value: React.ReactNode }) {
 
 function shortId(id: string): string {
   return id.length > 12 ? `${id.slice(0, 8)}…` : id;
-}
-
-function actionLabel(a: WorldKbPromoteAction): string {
-  if (a === 'adopt') return 'Adopt candidate';
-  if (a === 'reject') return 'Reject candidate';
-  return 'Merge candidate';
-}
-
-function actionHelp(a: WorldKbPromoteAction): string {
-  if (a === 'adopt') return 'promote into a new confirmed KeyBlock';
-  if (a === 'reject') return 'discard this candidate';
-  return 'fold into an existing confirmed entity';
 }
 
 /** Best-effort inference of the canonical promotion state from the recovery hint. */

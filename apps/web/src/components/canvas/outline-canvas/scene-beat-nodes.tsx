@@ -19,6 +19,7 @@
  * them from the node-component barrel historically.
  */
 import { memo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 
 import type {
@@ -26,6 +27,7 @@ import type {
   OutlineSceneNodeData,
   OutlineSceneStatus,
 } from './rf-projection';
+import { SCENE_STATUS_LABEL_KEYS } from './graph-projection';
 
 // Re-export for type-only consumers that historically imported these from the
 // node component module (T1 defined them here; T2 promoted the canonical
@@ -45,11 +47,6 @@ export type {
 const SCENE_STATUS_TOKEN_VAR: Record<OutlineSceneStatus, string> = {
   drafted: '--color-canvas-outline-scene-status-drafted',
   completed: '--color-canvas-outline-scene-status-completed',
-};
-
-const SCENE_STATUS_LABEL: Record<OutlineSceneStatus, string> = {
-  drafted: 'Drafted',
-  completed: 'Completed',
 };
 
 function sceneStatusColorVar(status: OutlineSceneStatus): string {
@@ -96,8 +93,9 @@ export const OutlineSceneNode = memo(function OutlineSceneNode({
   data,
   selected,
 }: NodeProps) {
+  const { t } = useTranslation('canvas');
   const d = data as OutlineSceneNodeData;
-  const title = d.title || 'Untitled Scene';
+  const title = d.title || t('outlineAltView.untitledScene');
   return (
     <SceneBeatNodeShell
       selected={!!selected}
@@ -122,7 +120,7 @@ export const OutlineSceneNode = memo(function OutlineSceneNode({
               style={{ background: sceneStatusColorVar(d.status) }}
               aria-hidden
             />
-            {SCENE_STATUS_LABEL[d.status]}
+            {t(SCENE_STATUS_LABEL_KEYS[d.status])}
           </span>
         </div>
       ) : null}
@@ -140,8 +138,9 @@ export const OutlineBeatNode = memo(function OutlineBeatNode({
   data,
   selected,
 }: NodeProps) {
+  const { t } = useTranslation('canvas');
   const d = data as OutlineBeatNodeData;
-  const title = d.title || 'Untitled Beat';
+  const title = d.title || t('outlineAltView.untitledBeat');
   return (
     <SceneBeatNodeShell
       selected={!!selected}

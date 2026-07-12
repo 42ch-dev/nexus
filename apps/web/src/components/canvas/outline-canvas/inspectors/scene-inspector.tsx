@@ -12,15 +12,11 @@
  * `useOutlineCanvasGraph().selectedSceneId` + the fixture payload, then passes
  * the scene data + parent chapter title here.
  */
+import { useTranslation } from 'react-i18next';
+
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
-import type { OutlineSceneStatus } from '../rf-projection';
-
-/** Status value → human label (matches the Scene node chip labels). */
-const SCENE_STATUS_LABEL: Record<OutlineSceneStatus, string> = {
-  drafted: 'Drafted',
-  completed: 'Completed',
-};
+import { SCENE_STATUS_LABEL_KEYS, type OutlineSceneStatus } from '../graph-projection';
 
 /** Resolved Scene data passed in by the orchestrator. */
 export interface SceneInspectorScene {
@@ -37,44 +33,45 @@ export interface SceneInspectorProps {
 }
 
 export function SceneInspector({ scene, parentChapterTitle }: SceneInspectorProps) {
+  const { t } = useTranslation('canvas');
   if (!scene) {
     return (
       <Card>
         <CardContent className="py-12 text-center text-copy-14 text-gray-700">
-          Select a scene on the graph to inspect it.
+          {t('sceneInspector.empty')}
         </CardContent>
       </Card>
     );
   }
 
-  const title = scene.title || 'Untitled Scene';
+  const title = scene.title || t('outlineAltView.untitledScene');
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Scene</CardTitle>
+        <CardTitle>{t('sceneInspector.title')}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="rounded-card border border-gray-alpha-300 bg-background-100 p-3 text-copy-13 text-gray-700">
-          Scene details are view-only for now.
+          {t('sceneInspector.readOnly')}
         </div>
 
         <div className="flex flex-col gap-1 text-copy-13">
-          <span className="text-gray-700">Title</span>
+          <span className="text-gray-700">{t('sceneInspector.field.title')}</span>
           <span className="text-gray-1000">{title}</span>
         </div>
 
         <div className="flex flex-col gap-1 text-copy-13">
-          <span className="text-gray-700">Status</span>
+          <span className="text-gray-700">{t('sceneInspector.field.status')}</span>
           {scene.status ? (
-            <span className="text-gray-1000">{SCENE_STATUS_LABEL[scene.status]}</span>
+            <span className="text-gray-1000">{t(SCENE_STATUS_LABEL_KEYS[scene.status])}</span>
           ) : (
-            <span className="text-gray-700">Not set</span>
+            <span className="text-gray-700">{t('sceneInspector.statusNotSet')}</span>
           )}
         </div>
 
         {parentChapterTitle ? (
-          <p className="text-copy-13 text-gray-700">Part of {parentChapterTitle}.</p>
+          <p className="text-copy-13 text-gray-700">{t('sceneInspector.partOf', { title: parentChapterTitle })}</p>
         ) : null}
       </CardContent>
     </Card>

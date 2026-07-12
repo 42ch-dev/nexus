@@ -22,7 +22,8 @@ const baseProps = {
 describe('OutlineConflictModal', () => {
   it('renders the outline headline and server revision', () => {
     render(<OutlineConflictModal {...baseProps} />);
-    expect(screen.getByText('This outline changed while you were editing.')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Outline Conflict' })).toBeInTheDocument();
+    expect(screen.getByText(/This entry changed while you were editing/i)).toBeInTheDocument();
     expect(screen.getByText('3', { selector: 'span.font-mono' })).toBeInTheDocument();
   });
 

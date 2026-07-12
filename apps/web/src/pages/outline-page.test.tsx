@@ -11,16 +11,17 @@
  * panel also renders a "Select a chapter to inspect or move it between
  * volumes." helper and a `#N` mono glyph per list row, so inspector queries use
  * the inspector-only strings ("Chapter Inspector" title, "...its outline
- * metadata." empty state, "...metadata exposed on the outline canvas." copy).
+ * metadata." empty state, "Metadata for chapter #N exposed on the outline
+ * canvas." description).
  */
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { Route, Routes } from 'react-router-dom';
-import { screen } from '@testing-library/react';
+import { screen, within } from '@testing-library/react';
 
 import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
-import { chapterSummary, chaptersList, workDetail } from '@/test/handlers';
+import { chapterOutline, chapterSummary, chaptersList, workDetail } from '@/test/handlers';
 import { BrowserClient } from '@/lib/nexus';
 import { OutlinePage } from '@/pages/outline-page';
 
@@ -59,6 +60,7 @@ describe('OutlinePage chapter preselect (V1.75 F-QC3-001)', () => {
       workDetail('w-123', { title: 'Test Work' }),
       chaptersList([chapterSummary(1), chapterSummary(2), chapterSummary(3)]),
       workOutlineHandler([1, 2, 3]),
+      chapterOutline(2, ''),
     );
 
     renderOutline('/works/w-123/outline?chapter=2');
@@ -66,11 +68,12 @@ describe('OutlinePage chapter preselect (V1.75 F-QC3-001)', () => {
     // The "Chapter Inspector" card title only renders when a chapter is
     // selected (the empty state returns a bare card without this title).
     expect(await screen.findByText('Chapter Inspector')).toBeInTheDocument();
-    // The inspector description is unique to the inspector ("metadata exposed
-    // on the outline canvas"); its textContent carries the selected chapter's
-    // `#N`, locking that the preselected node is chapter 2 (not chapter 1).
+    const inspectorCard = screen.getByText('Chapter Inspector').closest('[class*="card"]') as HTMLElement;
+    // The inspector description is unique: "Metadata for chapter #N exposed on
+    // the outline canvas." Scoping to the card avoids matching the structure
+    // panel helper text that also mentions the outline canvas.
     expect(
-      screen.getByText(/metadata exposed on the outline canvas/i),
+      within(inspectorCard).getByText('Metadata for chapter #2 exposed on the outline canvas.'),
     ).toHaveTextContent('#2');
     // Empty state is gone.
     expect(

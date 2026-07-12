@@ -7,6 +7,8 @@
  * and the side-by-side review panel from the V1.71/V1.72 surfaces. The variant
  * is selected by the originating inspector (`patch_entity` vs `promote_candidate`).
  */
+import { useTranslation } from 'react-i18next';
+
 import {
   ConflictModalBase,
   type ConflictField,
@@ -16,11 +18,11 @@ import {
 /** Fields editable through `world_kb.patch_entity`. */
 export type WorldKbEntityField = 'title' | 'body' | 'aliases' | 'block_type';
 
-const ENTITY_FIELD_LABELS: Record<WorldKbEntityField, string> = {
-  title: 'Title',
-  body: 'Body',
-  aliases: 'Aliases',
-  block_type: 'Block Type',
+const ENTITY_FIELD_LABEL_KEYS: Record<WorldKbEntityField, string> = {
+  title: 'worldKb.conflict.field.title',
+  body: 'worldKb.conflict.field.body',
+  aliases: 'worldKb.conflict.field.aliases',
+  block_type: 'worldKb.conflict.field.blockType',
 };
 
 /** Draft carried by the `patch_entity` conflict modal. */
@@ -52,54 +54,54 @@ export function WorldKbEntityConflictModal({
   onReapply,
   onDismiss,
 }: WorldKbEntityConflictModalProps) {
+  const { t } = useTranslation('canvas');
   const serverChanges: ConflictField<WorldKbEntityField>[] = draft.changedFields.map((c) => ({
     id: c.field,
-    label: ENTITY_FIELD_LABELS[c.field],
+    label: t(ENTITY_FIELD_LABEL_KEYS[c.field]),
     serverValue: c.to,
   }));
 
   const localChanges: ConflictField<WorldKbEntityField>[] = draft.fields.map((id) => ({
     id,
-    label: ENTITY_FIELD_LABELS[id],
+    label: t(ENTITY_FIELD_LABEL_KEYS[id]),
     localValue: draft.draftValues[id],
   }));
 
   const reviewRows: ConflictReviewRow[] = draft.fields.map((id) => {
     const change = draft.changedFields.find((c) => c.field === id);
     return {
-      label: ENTITY_FIELD_LABELS[id],
-      server: change?.to ?? change?.from ?? 'Modified by another session',
-      draft: draft.draftValues[id] ?? 'Your pending edit',
+      label: t(ENTITY_FIELD_LABEL_KEYS[id]),
+      server: change?.to ?? change?.from ?? t('worldKb.conflict.modifiedByOther'),
+      draft: draft.draftValues[id] ?? t('worldKb.conflict.yourEdit'),
       changed: Boolean(change),
     };
   });
 
-  const editedFieldLabel = draft.fields[0] ? ENTITY_FIELD_LABELS[draft.fields[0]] : 'fields';
+  const editedFieldLabel = draft.fields[0] ? t(ENTITY_FIELD_LABEL_KEYS[draft.fields[0]]) : t('worldKb.conflict.fields');
 
   return (
     <ConflictModalBase<WorldKbEntityField>
       open={open}
-      title="This world entry changed while you were editing."
-      description={<>Nexus updated {bold(draft.entityName)} to version</>}
+      title={t('worldKb.conflict.entityTitle')}
+      description={<>Nexus updated {bold(draft.entityName)} {t('worldKb.conflict.toVersion')}</>}
       descriptionSuffix={
         <>
           {' '}
-          while you were editing its {bold(editedFieldLabel.toLowerCase())}. Your change is still
-          in the inspector.
+          {t('worldKb.conflict.whileEditing', { field: editedFieldLabel.toLowerCase() })}
         </>
       }
       currentRevision={currentVersion}
-      serverSectionTitle="What changed"
-      localSectionTitle="What you were about to do"
+      serverSectionTitle={t('worldKb.conflict.serverSection')}
+      localSectionTitle={t('worldKb.conflict.localSection')}
       serverChanges={serverChanges}
       localChanges={localChanges}
       reviewRows={reviewRows}
       onUseCurrent={onUseCurrent}
       onReapply={onReapply}
       onDismiss={onDismiss}
-      useCurrentLabel="Use current"
-      reapplyLabel="Reapply my edit"
-      keepEditingLabel="Cancel"
+      useCurrentLabel={t('worldKb.conflict.useCurrent')}
+      reapplyLabel={t('worldKb.conflict.reapply')}
+      keepEditingLabel={t('worldKb.conflict.cancel')}
     />
   );
 }
@@ -131,13 +133,6 @@ export interface WorldKbPromoteConflictModalProps {
   onDismiss: () => void;
 }
 
-const PROMOTE_ACTION_LABEL: Record<WorldKbPromoteAction, string> = {
-  adopt: 'Adopt',
-  reject: 'Reject',
-  merge: 'Merge',
-};
-
-/** `promote_candidate` variant — promotion inspector conflict. */
 export function WorldKbPromoteConflictModal({
   open,
   draft,
@@ -146,6 +141,7 @@ export function WorldKbPromoteConflictModal({
   onReapply,
   onDismiss,
 }: WorldKbPromoteConflictModalProps) {
+  const { t } = useTranslation('canvas');
   // The promote variant models a single promotion slot, but the user's pending
   // action is intentionally non-overlapping with the canonical action: "reapply"
   // means "redo my decision against the new version", not "clobber the same
@@ -154,25 +150,36 @@ export function WorldKbPromoteConflictModal({
   const serverChanges: ConflictField<'canonical-promotion'>[] = [
     {
       id: 'canonical-promotion',
-      label: `Candidate ${draft.newStatus}`,
-      serverValue: `${draft.candidateName} was ${draft.newStatus}`,
+      label: t('worldKb.conflict.candidateStatus', { status: draft.newStatus }),
+      serverValue: t('worldKb.conflict.candidateWas', { name: draft.candidateName, status: draft.newStatus }),
     },
   ];
 
-  const mergeSuffix = draft.mergeTargetLabel ? ` into ${bold(draft.mergeTargetLabel)} (confirmed)` : '';
+  const actionLabel = t(`worldKb.promotionInspector.action.${draft.action}.label`);
+  const mergeSuffix = draft.mergeTargetLabel
+    ? t('worldKb.conflict.mergeSuffix', { target: draft.mergeTargetLabel })
+    : '';
   const localChanges: ConflictField<'pending-action'>[] = [
     {
       id: 'pending-action',
-      label: PROMOTE_ACTION_LABEL[draft.action],
-      localValue: `${PROMOTE_ACTION_LABEL[draft.action]} ${draft.candidateName}${mergeSuffix}`,
+      label: actionLabel,
+      localValue: t('worldKb.conflict.pendingAction', {
+        action: actionLabel,
+        name: draft.candidateName,
+        suffix: mergeSuffix,
+      }),
     },
   ];
 
   const reviewRows: ConflictReviewRow[] = [
     {
-      label: 'Promotion state',
-      server: `${draft.candidateName} is now ${draft.newStatus}`,
-      draft: `${PROMOTE_ACTION_LABEL[draft.action]} ${draft.candidateName}${mergeSuffix}`,
+      label: t('worldKb.conflict.promotionState'),
+      server: t('worldKb.conflict.promotionServer', { name: draft.candidateName, status: draft.newStatus }),
+      draft: t('worldKb.conflict.pendingAction', {
+        action: actionLabel,
+        name: draft.candidateName,
+        suffix: mergeSuffix,
+      }),
       changed: true,
     },
   ];
@@ -180,31 +187,30 @@ export function WorldKbPromoteConflictModal({
   return (
     <ConflictModalBase<'canonical-promotion' | 'pending-action'>
       open={open}
-      title="This candidate's state changed while you were reviewing it."
+      title={t('worldKb.conflict.promoteTitle')}
       description={
         <>
-          Nexus {draft.newStatus} {bold(draft.candidateName)} (version
+          {t('worldKb.conflict.promoteDescription', { status: draft.newStatus, name: draft.candidateName })}{' '}
+          {t('worldKb.conflict.toVersion')}
         </>
       }
       descriptionSuffix={
         <>
-          {') while you were about to '}
-          {bold(draft.action)}
-          {' it. Your decision is still in the inspector.'}
+          {t('worldKb.conflict.promoteSuffix', { action: draft.action })}
         </>
       }
       currentRevision={currentVersion}
-      serverSectionTitle="What changed"
-      localSectionTitle="What you were about to do"
+      serverSectionTitle={t('worldKb.conflict.serverSection')}
+      localSectionTitle={t('worldKb.conflict.localSection')}
       serverChanges={serverChanges}
       localChanges={localChanges}
       reviewRows={reviewRows}
       onUseCurrent={onUseCurrent}
       onReapply={onReapply}
       onDismiss={onDismiss}
-      useCurrentLabel="Use current"
-      reapplyLabel="Reapply my decision"
-      keepEditingLabel="Cancel"
+      useCurrentLabel={t('worldKb.conflict.useCurrent')}
+      reapplyLabel={t('worldKb.conflict.promoteReapply')}
+      keepEditingLabel={t('worldKb.conflict.cancel')}
     />
   );
 }

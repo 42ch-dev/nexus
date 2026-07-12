@@ -1,1 +1,90 @@
-{}
+{
+  "palette": {
+    "title": "Command palette",
+    "search": {
+      "label": "Search commands",
+      "placeholder": "Type a command…"
+    },
+    "listbox": {
+      "label": "Commands"
+    },
+    "noResults": "No matching commands."
+  },
+  "group": {
+    "navigate": "Navigate",
+    "strategy": "Strategy",
+    "outline": "Outline",
+    "world-kb": "World KB"
+  },
+  "go": {
+    "strategy": {
+      "label": "Go to Strategies",
+      "keywords": {
+        "preset": "preset",
+        "state-machine": "state machine",
+        "canvas": "canvas",
+        "sparkles": "sparkles"
+      }
+    },
+    "outline": {
+      "label": "Go to Outline",
+      "keywords": {
+        "chapters": "chapters",
+        "timeline": "timeline",
+        "work-canvas": "work canvas",
+        "structure": "structure"
+      }
+    },
+    "world-kb": {
+      "label": "Go to World KB",
+      "keywords": {
+        "entities": "entities",
+        "relationships": "relationships",
+        "world-canvas": "world canvas",
+        "lore": "lore"
+      }
+    }
+  },
+  "strategy": {
+    "toggle-view": {
+      "label": "Toggle Strategy View",
+      "keywords": {
+        "graph": "graph",
+        "list": "list",
+        "alt-view": "alt view",
+        "switch": "switch"
+      }
+    },
+    "create-transition": {
+      "label": "Create Transition",
+      "keywords": {
+        "add-edge": "add edge",
+        "new-transition": "new transition",
+        "state-machine": "state machine",
+        "link-states": "link states"
+      }
+    }
+  },
+  "outline": {
+    "toggle-view": {
+      "label": "Toggle Outline View",
+      "keywords": {
+        "graph": "graph",
+        "list": "list",
+        "alt-view": "alt view",
+        "switch": "switch"
+      }
+    }
+  },
+  "world-kb": {
+    "toggle-view": {
+      "label": "Toggle World KB View",
+      "keywords": {
+        "graph": "graph",
+        "list": "list",
+        "alt-view": "alt view",
+        "switch": "switch"
+      }
+    }
+  }
+}

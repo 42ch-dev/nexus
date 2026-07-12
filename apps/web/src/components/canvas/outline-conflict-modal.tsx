@@ -7,6 +7,7 @@
  * server-side field values, so we surface the conflicting path and the local
  * draft fields.
  */
+import { useTranslation } from 'react-i18next';
 import {
   ConflictModalBase,
   type ConflictField,
@@ -30,24 +31,6 @@ export type OutlineChangedField =
   | 'link_foreshadow'
   | 'unlink_foreshadow';
 
-const FIELD_LABELS: Record<OutlineChangedField, string> = {
-  chapter_title: 'Chapter title',
-  chapter_slug: 'Chapter slug',
-  chapter_volume: 'Chapter volume',
-  chapter_status: 'Chapter status',
-  chapter_planned_word_count: 'Planned word count',
-  chapter_actual_word_count: 'Actual word count',
-  chapter_outline_content: 'Chapter outline content',
-  move_chapter: 'Move chapter',
-  attach_to_volume: 'Attach chapter to volume',
-  link_event: 'Link event to chapter',
-  add_event: 'Add timeline event',
-  remove_event: 'Remove timeline event',
-  attach_event_to_chapter: 'Attach event to chapter',
-  link_foreshadow: 'Foreshadow link',
-  unlink_foreshadow: 'Unlink foreshadow',
-};
-
 export interface OutlineConflictModalDraft {
   fields: OutlineChangedField[];
   conflictingPath: string;
@@ -70,11 +53,31 @@ export function OutlineConflictModal({
   onReapply,
   onDismiss,
 }: OutlineConflictModalProps) {
+  const { t } = useTranslation('canvas');
+
+  const fieldLabels: Record<OutlineChangedField, string> = {
+    chapter_title: t('outlineConflict.fields.chapter_title'),
+    chapter_slug: t('outlineConflict.fields.chapter_slug'),
+    chapter_volume: t('outlineConflict.fields.chapter_volume'),
+    chapter_status: t('outlineConflict.fields.chapter_status'),
+    chapter_planned_word_count: t('outlineConflict.fields.chapter_planned_word_count'),
+    chapter_actual_word_count: t('outlineConflict.fields.chapter_actual_word_count'),
+    chapter_outline_content: t('outlineConflict.fields.chapter_outline_content'),
+    move_chapter: t('outlineConflict.fields.move_chapter'),
+    attach_to_volume: t('outlineConflict.fields.attach_to_volume'),
+    link_event: t('outlineConflict.fields.link_event'),
+    add_event: t('outlineConflict.fields.add_event'),
+    remove_event: t('outlineConflict.fields.remove_event'),
+    attach_event_to_chapter: t('outlineConflict.fields.attach_event_to_chapter'),
+    link_foreshadow: t('outlineConflict.fields.link_foreshadow'),
+    unlink_foreshadow: t('outlineConflict.fields.unlink_foreshadow'),
+  };
+
   const serverChanges: ConflictField[] = draft.conflictingPath
     ? [
         {
           id: 'conflicting_path',
-          label: 'Outline structure changed',
+          label: t('outlineConflict.server.structureChanged'),
           serverValue: draft.conflictingPath,
         },
       ]
@@ -82,23 +85,23 @@ export function OutlineConflictModal({
 
   const localChanges: ConflictField[] = draft.fields.map((id) => ({
     id,
-    label: FIELD_LABELS[id],
+    label: fieldLabels[id],
   }));
 
   const reviewRows: ConflictReviewRow[] = draft.fields.map((id) => ({
-    label: FIELD_LABELS[id],
-    server: draft.conflictingPath ? 'Modified by another session' : '(unknown)',
-    draft: 'Your pending edit',
+    label: fieldLabels[id],
+    server: draft.conflictingPath ? t('outlineConflict.review.modifiedByOther') : t('outlineConflict.review.unknown'),
+    draft: t('outlineConflict.review.yourEdit'),
     changed: true,
   }));
 
   return (
     <ConflictModalBase
       open={open}
-      title="This outline changed while you were editing."
+      title={t('outlineConflict.title')}
       currentRevision={currentRevision}
-      serverSectionTitle="What changed on the server"
-      localSectionTitle="What you were about to do"
+      serverSectionTitle={t('outlineConflict.serverSectionTitle')}
+      localSectionTitle={t('outlineConflict.localSectionTitle')}
       serverChanges={serverChanges}
       localChanges={localChanges}
       reviewRows={reviewRows}

@@ -18,16 +18,24 @@
 import { useEffect, useSyncExternalStore } from 'react';
 import type { LucideIcon } from 'lucide-react';
 
-/** A single palette action. All fields are read once at registration time. */
+/** A single palette action. Display fields are stored as translation keys so
+ * the palette can resolve them at render time; this lets labels update on
+ * locale switches without re-registering commands. */
 export interface Command {
   /** Stable, unique id, namespaced by surface (e.g. `outline.add-chapter`). */
   readonly id: string;
-  /** Display label (Title Case per DESIGN.md §Voice & Content). */
-  readonly label: string;
-  /** Logical grouping shown as a heading in the palette (e.g. `Outline`). */
-  readonly group: string;
-  /** Extra search terms; matched after the label. */
-  readonly keywords?: readonly string[];
+  /** Translation key for the display label (Title Case per DESIGN.md §Voice & Content). */
+  readonly labelKey: string;
+  /** Namespace for `labelKey`; defaults to `commands`. */
+  readonly labelNs?: string;
+  /** Translation key for the logical grouping shown as a heading in the palette. */
+  readonly groupKey: string;
+  /** Namespace for `groupKey`; defaults to `commands`. */
+  readonly groupNs?: string;
+  /** Translation keys for extra search terms; matched after the label. */
+  readonly keywordKeys?: readonly string[];
+  /** Namespace for `keywordKeys`; defaults to `commands`. */
+  readonly keywordNs?: string;
   /** Optional leading icon. */
   readonly icon?: LucideIcon;
   /** Fired when the user activates the command (Enter/click). */
@@ -168,16 +176,15 @@ const RANK_KEYWORD_CONTAINS = 3;
  * composes (`commands.filter(c => c.available?.() ?? true)`) since the store
  * cannot know when a dynamic predicate flips.
  */
-export function filterCommands(
-  commands: readonly Command[],
-  query: string,
-): Command[] {
+export function filterCommands<
+  T extends { readonly label: string; readonly keywords?: readonly string[] },
+>(commands: readonly T[], query: string): T[] {
   const q = query.trim().toLowerCase();
   if (q === '') {
     return [...commands];
   }
 
-  const tiers: Command[][] = [[], [], [], []];
+  const tiers: T[][] = [[], [], [], []];
   for (const command of commands) {
     const label = command.label.toLowerCase();
     let tier: number;

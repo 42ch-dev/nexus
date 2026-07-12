@@ -5,6 +5,9 @@
  * assertions (dialog / combobox / listbox / option), keyboard interactions
  * (Arrow / Enter / Escape), filter wiring, open/close + focus restoration,
  * and the `available()` render-time predicate.
+ *
+ * V1.112 P1 T2: display fields are translation keys resolved at render time;
+ * tests wrap the palette in a LocaleProvider so `useTranslation` resolves.
  */
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -15,6 +18,8 @@ import {
   registerCommand,
   type Command,
 } from '@/lib/canvas/command-registry';
+import { i18n } from '@/lib/i18n/config';
+import { LocaleProvider } from '@/components/locale-provider';
 
 import {
   CommandPalette,
@@ -30,16 +35,22 @@ import {
  * activeIndex-reset effect that fires on mount.
  */
 function renderPalette() {
-  const result = render(<CommandPalette />);
+  const result = render(
+    <LocaleProvider>
+      <CommandPalette />
+    </LocaleProvider>,
+  );
   act(() => openPalette());
   return result;
 }
 
 /** Factory for a minimal command; overrides only what each test cares about. */
-function makeCommand(overrides: Partial<Command> & Pick<Command, 'id'>): Command {
+function makeCommand(
+  overrides: Partial<Command> & Pick<Command, 'id'>,
+): Command {
   return {
-    label: overrides.id,
-    group: 'Test',
+    labelKey: overrides.id,
+    groupKey: 'Test',
     handler: vi.fn(),
     ...overrides,
   };
@@ -47,19 +58,19 @@ function makeCommand(overrides: Partial<Command> & Pick<Command, 'id'>): Command
 
 const ALPHA: Command = makeCommand({
   id: 'test.alpha',
-  label: 'Add Chapter',
-  group: 'Outline',
-  keywords: ['new chapter'],
+  labelKey: 'Add Chapter',
+  groupKey: 'Outline',
+  keywordKeys: ['new chapter'],
 });
 const BETA: Command = makeCommand({
   id: 'test.beta',
-  label: 'Add Scene',
-  group: 'Outline',
+  labelKey: 'Add Scene',
+  groupKey: 'Outline',
 });
 const GAMMA: Command = makeCommand({
   id: 'test.gamma',
-  label: 'Go to Strategy',
-  group: 'Navigate',
+  labelKey: 'Go to Strategy',
+  groupKey: 'Navigate',
 });
 
 beforeEach(() => {
@@ -80,7 +91,11 @@ afterEach(() => {
 
 describe('CommandPalette — a11y roles', () => {
   it('renders nothing while closed', () => {
-    render(<CommandPalette />);
+    render(
+      <LocaleProvider>
+        <CommandPalette />
+      </LocaleProvider>,
+    );
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
@@ -154,7 +169,11 @@ describe('CommandPalette — open / close + focus', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument();
     act(() => closePalette());
     // Re-render to flush the now-closed store state.
-    render(<CommandPalette />);
+    render(
+      <LocaleProvider>
+        <CommandPalette />
+      </LocaleProvider>,
+    );
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 });
@@ -187,7 +206,7 @@ describe('CommandPalette — keyboard navigation', () => {
 
   it('Enter invokes the active command handler and closes', () => {
     const handler = vi.fn();
-    registerCommand(makeCommand({ id: 'test.alpha', label: 'Add Chapter', handler }));
+    registerCommand(makeCommand({ id: 'test.alpha', labelKey: 'Add Chapter', handler }));
     renderPalette();
     const input = screen.getByRole('combobox');
 
@@ -199,7 +218,7 @@ describe('CommandPalette — keyboard navigation', () => {
   it('Enter on a non-first option invokes that option', () => {
     const handler = vi.fn();
     registerCommand(
-      makeCommand({ id: 'test.beta', label: 'Add Scene', handler }),
+      makeCommand({ id: 'test.beta', labelKey: 'Add Scene', handler }),
     );
     renderPalette();
     const input = screen.getByRole('combobox');
@@ -213,7 +232,7 @@ describe('CommandPalette — keyboard navigation', () => {
     const user = userEvent.setup();
     const handler = vi.fn();
     registerCommand(
-      makeCommand({ id: 'test.gamma', label: 'Go to Strategy', handler }),
+      makeCommand({ id: 'test.gamma', labelKey: 'Go to Strategy', handler }),
     );
     renderPalette();
 
@@ -288,10 +307,10 @@ describe('CommandPalette — available() predicate', () => {
   it('hides commands whose available() returns false', () => {
     clearCommands();
     registerCommand(
-      makeCommand({ id: 'test.off', label: 'Disabled', available: () => false }),
+      makeCommand({ id: 'test.off', labelKey: 'Disabled', available: () => false }),
     );
     registerCommand(
-      makeCommand({ id: 'test.on', label: 'Enabled', available: () => true }),
+      makeCommand({ id: 'test.on', labelKey: 'Enabled', available: () => true }),
     );
     renderPalette();
 
@@ -303,9 +322,9 @@ describe('CommandPalette — available() predicate', () => {
     clearCommands();
     let off = false;
     registerCommand(
-      makeCommand({ id: 'test.off', label: 'Disabled', available: () => !off }),
+      makeCommand({ id: 'test.off', labelKey: 'Disabled', available: () => !off }),
     );
-    registerCommand(makeCommand({ id: 'test.on', label: 'Enabled' }));
+    registerCommand(makeCommand({ id: 'test.on', labelKey: 'Enabled' }));
 
     const { rerender } = renderPalette();
     const input = screen.getByRole('combobox');
@@ -315,10 +334,44 @@ describe('CommandPalette — available() predicate', () => {
     // Move active to the second option, then make it unavailable.
     fireEvent.keyDown(input, { key: 'ArrowDown' });
     off = true;
-    rerender(<CommandPalette />);
+    rerender(
+      <LocaleProvider>
+        <CommandPalette />
+      </LocaleProvider>,
+    );
 
     const remaining = screen.getAllByRole('option');
     expect(remaining).toHaveLength(1);
     expect(remaining[0]).toHaveAttribute('aria-selected', 'true');
+  });
+});
+
+describe('CommandPalette — locale switching', () => {
+  it('updates command labels without remounting when the locale changes', () => {
+    // Use real keys from the commands catalog so switching to zh-CN changes
+    // the rendered text. The palette stays open and is not remounted.
+    clearCommands();
+    registerCommand({
+      id: 'test.locale',
+      labelKey: 'go.strategy.label',
+      groupKey: 'group.navigate',
+      handler: vi.fn(),
+    });
+
+    renderPalette();
+    expect(screen.getByRole('option')).toHaveTextContent('Go to Strategies');
+
+    act(() => {
+      i18n.changeLanguage('zh-CN');
+    });
+
+    // Palette is still open, option text is now Chinese, component was not remounted.
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+    expect(screen.getByRole('option')).toHaveTextContent('前往策略');
+
+    // Restore English for subsequent tests.
+    act(() => {
+      i18n.changeLanguage('en');
+    });
   });
 });

@@ -6,6 +6,7 @@
  * in create mode.
  */
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Pencil, Plus, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -41,6 +42,7 @@ export function WorldKbRelationshipTable({
   onCreate,
   onDelete,
 }: WorldKbRelationshipTableProps) {
+  const { t } = useTranslation('canvas');
   const [sortKey, setRelationshipTableSortKey] = useState<RelationshipTableSortKey>('type');
   const [sortDir, setRelationshipTableSortDir] = useState<RelationshipTableSortDir>('asc');
 
@@ -99,7 +101,11 @@ export function WorldKbRelationshipTable({
     const target = entityName(rel.target_entity_id);
     if (
       window.confirm(
-        `Delete the relationship "${relationshipEdgeLabel(rel)}" from ${source} to ${target}?`,
+        t('worldKb.relationshipTable.deleteConfirm', {
+          label: relationshipEdgeLabel(rel),
+          source,
+          target,
+        }),
       )
     ) {
       onDelete(rel);
@@ -107,40 +113,41 @@ export function WorldKbRelationshipTable({
   }
 
   const columnClass = 'px-3 py-2 text-left text-label-12 text-gray-700';
+  const columnLabel = (key: RelationshipTableSortKey) => t(`worldKb.relationshipTable.column.${key}`);
 
   return (
     <section
-      aria-label="World KB relationships (sortable list)"
+      aria-label={t('worldKb.relationshipTable.ariaLabel')}
       className="rounded-card border border-gray-alpha-400 bg-background-100 shadow-card"
     >
       <div className="flex items-center justify-between border-b border-gray-alpha-200 px-3 py-2">
-        <h3 className="text-heading-16 font-heading text-gray-1000">Relationships</h3>
+        <h3 className="text-heading-16 font-heading text-gray-1000">{t('worldKb.relationshipTable.title')}</h3>
         <Button type="button" variant="secondary" size="small" onClick={onCreate}>
-          <Plus className="h-4 w-4" aria-hidden /> New Relationship
+          <Plus className="h-4 w-4" aria-hidden /> {t('worldKb.relationshipTable.new')}
         </Button>
       </div>
       <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 420px)' }}>
         <table className="w-full table-fixed text-copy-14">
           <caption className="sr-only">
-            World KB relationships sorted by {sortKey} ({sortDir}). Press Enter on a row to edit it.
+            {t('worldKb.relationshipTable.caption', { sortKey, sortDir })}
           </caption>
           <thead className="sticky top-0 bg-background-200">
             <tr>
-              <SortHeader label="Source" sortKey="source" current={sortKey} dir={sortDir} onToggle={toggleSort} />
-              <SortHeader label="Target" sortKey="target" current={sortKey} dir={sortDir} onToggle={toggleSort} />
-              <SortHeader label="Type" sortKey="type" current={sortKey} dir={sortDir} onToggle={toggleSort} />
-              <SortHeader label="Symmetric" sortKey="symmetric" current={sortKey} dir={sortDir} onToggle={toggleSort} />
-              <SortHeader label="Confidence" sortKey="confidence" current={sortKey} dir={sortDir} onToggle={toggleSort} />
-              <SortHeader label="Anchors" sortKey="anchors" current={sortKey} dir={sortDir} onToggle={toggleSort} />
-              <SortHeader label="Updated" sortKey="updated" current={sortKey} dir={sortDir} onToggle={toggleSort} />
-              <th className={columnClass}>Actions</th>
+              <SortHeader label={columnLabel('source')} sortKey="source" current={sortKey} dir={sortDir} onToggle={toggleSort} />
+              <SortHeader label={columnLabel('target')} sortKey="target" current={sortKey} dir={sortDir} onToggle={toggleSort} />
+              <SortHeader label={columnLabel('type')} sortKey="type" current={sortKey} dir={sortDir} onToggle={toggleSort} />
+              <SortHeader label={columnLabel('symmetric')} sortKey="symmetric" current={sortKey} dir={sortDir} onToggle={toggleSort} />
+              <SortHeader label={columnLabel('confidence')} sortKey="confidence" current={sortKey} dir={sortDir} onToggle={toggleSort} />
+              <SortHeader label={columnLabel('anchors')} sortKey="anchors" current={sortKey} dir={sortDir} onToggle={toggleSort} />
+              <SortHeader label={columnLabel('updated')} sortKey="updated" current={sortKey} dir={sortDir} onToggle={toggleSort} />
+              <th className={columnClass}>{t('worldKb.relationshipTable.column.actions')}</th>
             </tr>
           </thead>
           <tbody>
             {sorted.length === 0 ? (
               <tr>
                 <td colSpan={8} className="px-3 py-6 text-center text-copy-13 text-gray-700">
-                  No relationships yet.
+                  {t('worldKb.relationshipTable.empty')}
                 </td>
               </tr>
             ) : (
@@ -168,7 +175,7 @@ export function WorldKbRelationshipTable({
                     <td className="truncate px-3 py-2 text-gray-1000">{entityName(rel.source_entity_id)}</td>
                     <td className="truncate px-3 py-2 text-gray-1000">{entityName(rel.target_entity_id)}</td>
                     <td className="px-3 py-2 text-gray-900">{relationshipEdgeLabel(rel)}</td>
-                    <td className="px-3 py-2 text-gray-900">{rel.symmetric ? 'Yes' : 'No'}</td>
+                    <td className="px-3 py-2 text-gray-900">{rel.symmetric ? t('worldKb.relationshipTable.yes') : t('worldKb.relationshipTable.no')}</td>
                     <td className="px-3 py-2 tabular-nums text-gray-900">{(rel.confidence ?? 1).toFixed(2)}</td>
                     <td className="px-3 py-2 tabular-nums text-gray-900">{anchorCount}</td>
                     <td className="px-3 py-2 text-copy-13-mono text-gray-700">{formatUpdated(rel.updated_at)}</td>
@@ -181,7 +188,7 @@ export function WorldKbRelationshipTable({
                             onSelect(rel);
                           }}
                           className="rounded p-1 text-gray-700 hover:bg-gray-alpha-200 hover:text-gray-1000 focus-visible:ring-2 focus-visible:ring-canvas-strategy-accent"
-                          aria-label={`Edit relationship ${relationshipEdgeLabel(rel)}`}
+                          aria-label={t('worldKb.relationshipTable.editAria', { label: relationshipEdgeLabel(rel) })}
                         >
                           <Pencil className="h-4 w-4" aria-hidden />
                         </button>
@@ -193,7 +200,7 @@ export function WorldKbRelationshipTable({
                               handleDelete(rel);
                             }}
                             className="rounded p-1 text-red-700 hover:bg-red-100 focus-visible:ring-2 focus-visible:ring-red-700"
-                            aria-label={`Delete relationship ${relationshipEdgeLabel(rel)}`}
+                            aria-label={t('worldKb.relationshipTable.deleteAria', { label: relationshipEdgeLabel(rel) })}
                           >
                             <Trash2 className="h-4 w-4" aria-hidden />
                           </button>
@@ -208,7 +215,7 @@ export function WorldKbRelationshipTable({
         </table>
       </div>
       <p className="border-t border-gray-alpha-200 px-3 py-2 text-label-12 text-gray-700">
-        {sorted.length} {sorted.length === 1 ? 'relationship' : 'relationships'}
+        {t('worldKb.relationshipTable.count', { count: sorted.length })}
       </p>
     </section>
   );

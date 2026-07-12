@@ -8,6 +8,7 @@
  * `EntityField`) are preserved for existing consumers.
  */
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Connection, Node } from '@xyflow/react';
 
 import { CanvasShell, useNodeChangeHandler } from '@/components/canvas/canvas-shell';
@@ -54,6 +55,7 @@ export interface WorldKbCanvasProps {
 }
 
 export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
+  const { t } = useTranslation('canvas');
   // List view is the default for keyboard-only / screen-reader users.
   const prefersReducedMotion = useReducedMotionPreference();
   const [showList, setShowList] = useState<boolean>(prefersReducedMotion);
@@ -73,9 +75,14 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
   // edge-drag or alt-view row action, both of which require entity context).
   useRegisterCommand({
     id: 'world-kb.toggle-view',
-    label: 'Toggle World KB View',
-    group: 'World KB',
-    keywords: ['graph', 'list', 'alt view', 'switch'],
+    labelKey: 'world-kb.toggle-view.label',
+    groupKey: 'group.world-kb',
+    keywordKeys: [
+      'world-kb.toggle-view.keywords.graph',
+      'world-kb.toggle-view.keywords.list',
+      'world-kb.toggle-view.keywords.alt-view',
+      'world-kb.toggle-view.keywords.switch',
+    ],
     handler: () => setShowList((v) => !v),
   });
 
@@ -161,10 +168,10 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
     return () => window.removeEventListener('world-kb-connect-to', onConnectTo);
   }, [setSelection]);
 
-  if (graph.isLoading || candidates.isLoading) return <LoadingState label="Loading World KB…" />;
+  if (graph.isLoading || candidates.isLoading) return <LoadingState label={t('worldKb.loading')} />;
   if (graph.isError)
     return (
-      <ErrorState description="Could not load the World KB graph." onRetry={() => graph.refetch()} />
+      <ErrorState description={t('worldKb.loadError')} onRetry={() => graph.refetch()} />
     );
 
   const summary = graphSummary(graph.data, candidateItems.length);
@@ -335,7 +342,7 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
           onEdgeClick={onEdgeClick}
           onConnect={handleConnect}
           summaryText={summary}
-          ariaLabel="World KB entity graph"
+          ariaLabel={t('worldKb.graphAriaLabel')}
         >
           <div className="pointer-events-none absolute inset-0" />
           {/* V1.76: confidence threshold filter (confirmed edges below the
@@ -349,7 +356,7 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
               htmlFor="kb-confidence-threshold"
               className="text-label-12 text-gray-700"
             >
-              Confidence ≥ {confidenceThreshold.toFixed(2)}
+              {t('worldKb.confidenceLabel', { value: confidenceThreshold.toFixed(2) })}
             </label>
             <input
               id="kb-confidence-threshold"
@@ -360,7 +367,7 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
               value={confidenceThreshold}
               onChange={(e) => setConfidenceThreshold(Number(e.target.value))}
               className="h-1 w-32 cursor-pointer accent-canvas-strategy-accent"
-              aria-label="Minimum confidence threshold for confirmed relationship edges"
+              aria-label={t('worldKb.confidenceThresholdAria')}
             />
           </div>
           <div className="pointer-events-auto absolute right-3 top-3 w-[340px] max-w-[calc(100%-1.5rem)] rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-popover">

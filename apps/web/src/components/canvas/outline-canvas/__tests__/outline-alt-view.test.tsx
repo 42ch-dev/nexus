@@ -7,8 +7,9 @@
  * all covered.
  */
 import { describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 
+import { renderInApp } from '@/test/test-providers';
 import { OutlineAltView } from '@/components/canvas/outline-canvas/outline-alt-view';
 import type { SceneBeatFixturePayload } from '@/components/canvas/outline-canvas/graph-projection';
 import type { ChapterSummary, WorkOutline } from '@42ch/nexus-contracts';
@@ -59,17 +60,17 @@ describe('OutlineAltView', () => {
       makeChapter({ chapter: 3, status: 'published', volume: 2 }),
     ];
 
-    render(<OutlineAltView outline={outline} chapters={chapters} />);
+    renderInApp(<OutlineAltView outline={outline} chapters={chapters} />);
 
     expect(screen.getByText('Act One')).toBeInTheDocument();
     expect(screen.getByText('Act Two')).toBeInTheDocument();
     expect(screen.getByText('The Beginning')).toBeInTheDocument();
     expect(screen.getByText('The Middle')).toBeInTheDocument();
     expect(screen.getByText('The End')).toBeInTheDocument();
-    // Status badges render (lowercased from replace /_/g).
-    expect(screen.getByText('draft')).toBeInTheDocument();
-    expect(screen.getByText('finalized')).toBeInTheDocument();
-    expect(screen.getByText('published')).toBeInTheDocument();
+    // Status badges render as translated labels.
+    expect(screen.getByText('Draft')).toBeInTheDocument();
+    expect(screen.getByText('Finalized')).toBeInTheDocument();
+    expect(screen.getByText('Published')).toBeInTheDocument();
   });
 
   it('renders unassigned chapters in a separate bucket', () => {
@@ -81,7 +82,7 @@ describe('OutlineAltView', () => {
       makeChapter({ chapter: 2, volume: 1 }), // not referenced by any volume
     ];
 
-    render(<OutlineAltView outline={outline} chapters={chapters} />);
+    renderInApp(<OutlineAltView outline={outline} chapters={chapters} />);
 
     expect(screen.getByText('Unassigned')).toBeInTheDocument();
     expect(screen.getByText('#2')).toBeInTheDocument();
@@ -105,7 +106,7 @@ describe('OutlineAltView', () => {
       ],
     });
 
-    render(<OutlineAltView outline={outline} chapters={[]} />);
+    renderInApp(<OutlineAltView outline={outline} chapters={[]} />);
 
     expect(screen.getByText('Inciting Incident')).toBeInTheDocument();
     expect(screen.getByText('The call to adventure')).toBeInTheDocument();
@@ -116,7 +117,7 @@ describe('OutlineAltView', () => {
   it('shows honest empty messages when no data', () => {
     const outline = makeOutline();
 
-    render(<OutlineAltView outline={outline} chapters={[]} />);
+    renderInApp(<OutlineAltView outline={outline} chapters={[]} />);
 
     expect(screen.getByText('No chapters yet.')).toBeInTheDocument();
     expect(screen.getByText('No timeline events yet.')).toBeInTheDocument();
@@ -139,7 +140,7 @@ describe('OutlineAltView', () => {
       beats: [],
     };
 
-    render(<OutlineAltView outline={outline} chapters={chapters} sceneBeatFixture={fixture} />);
+    renderInApp(<OutlineAltView outline={outline} chapters={chapters} sceneBeatFixture={fixture} />);
 
     expect(screen.getByText('The Arrival')).toBeInTheDocument();
     expect(screen.getByText('The Departure')).toBeInTheDocument();
@@ -160,7 +161,7 @@ describe('OutlineAltView', () => {
       ],
     };
 
-    render(<OutlineAltView outline={outline} chapters={chapters} sceneBeatFixture={fixture} />);
+    renderInApp(<OutlineAltView outline={outline} chapters={chapters} sceneBeatFixture={fixture} />);
 
     expect(screen.getByText('Turn: the call')).toBeInTheDocument();
     expect(screen.getByText('The rebutal')).toBeInTheDocument();
@@ -180,7 +181,7 @@ describe('OutlineAltView', () => {
       beats: [],
     };
 
-    render(<OutlineAltView outline={outline} chapters={chapters} sceneBeatFixture={fixture} />);
+    renderInApp(<OutlineAltView outline={outline} chapters={chapters} sceneBeatFixture={fixture} />);
 
     // Locked empty-under-chapter copy appears once (chapter 2 only).
     expect(screen.getAllByText('No scenes in this chapter yet.')).toHaveLength(1);
@@ -192,7 +193,7 @@ describe('OutlineAltView', () => {
     });
     const chapters = [makeChapter({ chapter: 1 })];
 
-    render(<OutlineAltView outline={outline} chapters={chapters} />);
+    renderInApp(<OutlineAltView outline={outline} chapters={chapters} />);
 
     expect(screen.queryByText('No scenes in this chapter yet.')).not.toBeInTheDocument();
   });
@@ -210,7 +211,7 @@ describe('OutlineAltView', () => {
       beats: [],
     };
 
-    render(<OutlineAltView outline={outline} chapters={chapters} sceneBeatFixture={fixture} />);
+    renderInApp(<OutlineAltView outline={outline} chapters={chapters} sceneBeatFixture={fixture} />);
 
     expect(screen.getByText('Loose thread')).toBeInTheDocument();
     expect(screen.getAllByText('Scene')).toHaveLength(1);

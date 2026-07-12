@@ -13,13 +13,14 @@
  * Forbidden in empty copy: "command palette", `kb adopt`, `snapshot`.
  */
 import { describe, expect, it } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 
+import { renderInApp } from '@/test/test-providers';
 import { WorldKbHeader } from '@/components/canvas/world-kb/world-kb-canvas-header';
 
 describe('WorldKbHeader empty-state honesty (V1.108 FB-UI-010)', () => {
   it('shows the locked honest helper copy when there are no entries', () => {
-    render(
+    renderInApp(
       <WorldKbHeader
         entryCount={0}
         lastFetched="just now"
@@ -38,7 +39,7 @@ describe('WorldKbHeader empty-state honesty (V1.108 FB-UI-010)', () => {
   });
 
   it('does not promise a command palette or kb adopt/snapshot in empty copy', () => {
-    render(
+    renderInApp(
       <WorldKbHeader
         entryCount={0}
         lastFetched="just now"
@@ -55,7 +56,7 @@ describe('WorldKbHeader empty-state honesty (V1.108 FB-UI-010)', () => {
   });
 
   it('keeps the non-empty helper copy unchanged', () => {
-    render(
+    renderInApp(
       <WorldKbHeader
         entryCount={3}
         lastFetched="just now"

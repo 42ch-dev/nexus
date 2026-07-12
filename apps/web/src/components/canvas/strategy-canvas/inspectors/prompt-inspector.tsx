@@ -5,6 +5,7 @@
  */
 import type { MutableRefObject } from 'react';
 import { useCallback, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/react-query';
 
 import { useNexusClient } from '@/lib/client-context';
@@ -76,6 +77,7 @@ export function PromptInspector({
   onSaveStatus,
   onConflict,
 }: PromptInspectorProps) {
+  const { t } = useTranslation('canvas');
   const patch = usePatchStrategyPromptTemplate();
   const original = originalFormOf(selectedState);
   const dirty = isSectionDirty('prompt', form, original);
@@ -94,7 +96,7 @@ export function PromptInspector({
         body: form.promptBody,
       });
       workingRevisionRef.current = Number(res.new_revision);
-      onSaveStatus({ type: 'success', message: 'Saved prompt template' });
+      onSaveStatus({ type: 'success', message: t('strategy.inspector.prompt.saved') });
     } catch (error) {
       if (isStrategyConflictError(error)) {
         const currentRevision =
@@ -103,11 +105,11 @@ export function PromptInspector({
             : 0;
         onConflict(currentRevision, 'prompt');
       } else {
-        const message = error instanceof Error ? error.message : 'Failed to save prompt template';
+        const message = error instanceof Error ? error.message : t('strategy.inspector.prompt.saveFailed');
         onSaveStatus({ type: 'error', message });
       }
     }
-  }, [dirty, patch.isPending, form, original, presetId, selectedState, onSaveStatus, onConflict, promptTemplateRef]);
+  }, [dirty, patch.isPending, form, original, presetId, selectedState, onSaveStatus, onConflict, promptTemplateRef, t]);
 
   // Keep a fresh callback reference for the keyboard shortcut effect so the
   // effect itself does not need to depend on the callback (R-V172P1-QC1-001).
@@ -122,16 +124,16 @@ export function PromptInspector({
   }, [saveTrigger]);
 
   return (
-    <section className="flex flex-col gap-2" aria-label="Prompt template editor">
+    <section className="flex flex-col gap-2" aria-label={t('strategy.inspector.prompt.ariaLabel')}>
       <div className="flex items-center justify-between">
-        <span className="text-label-14 font-semibold text-gray-900">Prompt template</span>
+        <span className="text-label-14 font-semibold text-gray-900">{t('strategy.inspector.prompt.title')}</span>
         <button
           type="button"
           onClick={handleSave}
           disabled={!dirty || patch.isPending}
           className="rounded-control border border-gray-alpha-400 px-2 py-1 text-button-12 text-gray-900 hover:bg-gray-alpha-100 disabled:text-gray-500"
         >
-          {patch.isPending ? 'Saving…' : 'Save prompt'}
+          {patch.isPending ? t('strategy.inspector.prompt.saving') : t('strategy.inspector.prompt.save')}
         </button>
       </div>
       <span className="text-copy-13-mono text-gray-700">{promptTemplateRef}</span>
@@ -139,7 +141,7 @@ export function PromptInspector({
         value={form.promptBody}
         onChange={(e) => onChange('promptBody', e.target.value)}
         rows={4}
-        placeholder="Enter new prompt body…"
+        placeholder={t('strategy.inspector.prompt.placeholder')}
         className="rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-gray-1000 focus:border-blue-700"
       />
       {saveStatus ? (

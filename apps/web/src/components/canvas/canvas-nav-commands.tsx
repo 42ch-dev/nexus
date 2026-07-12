@@ -45,18 +45,28 @@ export function CanvasNavCommands(): null {
 
   useRegisterCommand({
     id: 'go.strategy',
-    label: 'Go to Strategies',
-    group: 'Navigate',
-    keywords: ['preset', 'state machine', 'canvas', 'sparkles'],
+    labelKey: 'go.strategy.label',
+    groupKey: 'group.navigate',
+    keywordKeys: [
+      'go.strategy.keywords.preset',
+      'go.strategy.keywords.state-machine',
+      'go.strategy.keywords.canvas',
+      'go.strategy.keywords.sparkles',
+    ],
     icon: Sparkles,
     handler: () => navigate('/strategies'),
   });
 
   useRegisterCommand({
     id: 'go.outline',
-    label: 'Go to Outline',
-    group: 'Navigate',
-    keywords: ['chapters', 'timeline', 'work canvas', 'structure'],
+    labelKey: 'go.outline.label',
+    groupKey: 'group.navigate',
+    keywordKeys: [
+      'go.outline.keywords.chapters',
+      'go.outline.keywords.timeline',
+      'go.outline.keywords.work-canvas',
+      'go.outline.keywords.structure',
+    ],
     icon: ListTree,
     handler: () => {
       const { workId: w } = idsRef.current;
@@ -67,9 +77,14 @@ export function CanvasNavCommands(): null {
 
   useRegisterCommand({
     id: 'go.world-kb',
-    label: 'Go to World KB',
-    group: 'Navigate',
-    keywords: ['entities', 'relationships', 'world canvas', 'lore'],
+    labelKey: 'go.world-kb.label',
+    groupKey: 'group.navigate',
+    keywordKeys: [
+      'go.world-kb.keywords.entities',
+      'go.world-kb.keywords.relationships',
+      'go.world-kb.keywords.world-canvas',
+      'go.world-kb.keywords.lore',
+    ],
     icon: Network,
     handler: () => {
       const { worldId: w } = idsRef.current;

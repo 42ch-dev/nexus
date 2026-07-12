@@ -7,6 +7,7 @@
  * original `outline-canvas.tsx` monolith. T3 adds the `CanvasHeader` with
  * the alt-view toggle (FB-C1-004).
  */
+import { useTranslation } from 'react-i18next';
 import { AlertTriangle } from 'lucide-react';
 
 type RevisionStatus = 'clean' | 'dirty' | 'conflict';
@@ -19,6 +20,7 @@ export function RevisionBadge({
   revision: number;
   status: RevisionStatus;
 }) {
+  const { t } = useTranslation('canvas');
   const color =
     status === 'conflict'
       ? 'border-canvas-write-conflict text-canvas-write-conflict bg-canvas-write-conflict/10'
@@ -28,10 +30,10 @@ export function RevisionBadge({
   return (
     <span
       className={`inline-flex items-center gap-1 rounded-pill border px-2 py-0.5 text-label-12 ${color}`}
-      title={status === 'conflict' ? 'Revision conflict — refetch before editing' : undefined}
+      title={status === 'conflict' ? t('outlineCanvas.revision.conflictTooltip') : undefined}
     >
       {status === 'conflict' ? <AlertTriangle className="h-3 w-3" aria-hidden /> : null}
-      rev {revision}
+      {t('outlineCanvas.revision.label', { revision })}
     </span>
   );
 }
@@ -60,6 +62,7 @@ export function CanvasHeader({
   showAlt: boolean;
   setShowAlt: (v: boolean) => void;
 }) {
+  const { t } = useTranslation('canvas');
   return (
     <div className="flex flex-wrap items-center justify-between gap-2">
       <div>
@@ -74,7 +77,7 @@ export function CanvasHeader({
           aria-pressed={showAlt}
           className="rounded-control border border-gray-alpha-400 px-3 py-1.5 text-button-12 text-gray-900 hover:bg-gray-alpha-100"
         >
-          {showAlt ? 'Show graph' : 'Show list view'}
+          {showAlt ? t('outlineCanvas.showGraph') : t('outlineCanvas.showListView')}
         </button>
       </div>
     </div>

@@ -12,15 +12,11 @@
  * `useOutlineCanvasGraph().selectedBeatId` + the fixture payload, then passes
  * the beat data + parent scene title here.
  */
+import { useTranslation } from 'react-i18next';
+
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
-import type { OutlineSceneStatus } from '../rf-projection';
-
-/** Status value → human label (matches the Beat node chip labels). */
-const SCENE_STATUS_LABEL: Record<OutlineSceneStatus, string> = {
-  drafted: 'Drafted',
-  completed: 'Completed',
-};
+import { SCENE_STATUS_LABEL_KEYS, type OutlineSceneStatus } from '../graph-projection';
 
 /** Resolved Beat data passed in by the orchestrator. */
 export interface BeatInspectorBeat {
@@ -37,44 +33,45 @@ export interface BeatInspectorProps {
 }
 
 export function BeatInspector({ beat, parentSceneTitle }: BeatInspectorProps) {
+  const { t } = useTranslation('canvas');
   if (!beat) {
     return (
       <Card>
         <CardContent className="py-12 text-center text-copy-14 text-gray-700">
-          Select a beat on the graph to inspect it.
+          {t('beatInspector.empty')}
         </CardContent>
       </Card>
     );
   }
 
-  const title = beat.title || 'Untitled Beat';
+  const title = beat.title || t('outlineAltView.untitledBeat');
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Beat</CardTitle>
+        <CardTitle>{t('beatInspector.title')}</CardTitle>
       </CardHeader>
       <CardContent className="space-y-3">
         <div className="rounded-card border border-gray-alpha-300 bg-background-100 p-3 text-copy-13 text-gray-700">
-          Beat details are view-only for now.
+          {t('beatInspector.readOnly')}
         </div>
 
         <div className="flex flex-col gap-1 text-copy-13">
-          <span className="text-gray-700">Title</span>
+          <span className="text-gray-700">{t('beatInspector.field.title')}</span>
           <span className="text-gray-1000">{title}</span>
         </div>
 
         <div className="flex flex-col gap-1 text-copy-13">
-          <span className="text-gray-700">Status</span>
+          <span className="text-gray-700">{t('beatInspector.field.status')}</span>
           {beat.status ? (
-            <span className="text-gray-1000">{SCENE_STATUS_LABEL[beat.status]}</span>
+            <span className="text-gray-1000">{t(SCENE_STATUS_LABEL_KEYS[beat.status])}</span>
           ) : (
-            <span className="text-gray-700">Not set</span>
+            <span className="text-gray-700">{t('beatInspector.statusNotSet')}</span>
           )}
         </div>
 
         {parentSceneTitle ? (
-          <p className="text-copy-13 text-gray-700">Part of {parentSceneTitle}.</p>
+          <p className="text-copy-13 text-gray-700">{t('beatInspector.partOf', { title: parentSceneTitle })}</p>
         ) : null}
       </CardContent>
     </Card>

@@ -4,6 +4,8 @@
  * Routes the current selection to the appropriate inspector:
  * entity → EntityInspector, candidate → PromotionInspector, none → placeholder.
  */
+import { useTranslation } from 'react-i18next';
+
 import type {
   WorldKbEntityProjection,
   WorldKbSourceAnchorProjection,
@@ -54,20 +56,21 @@ export function InspectorPanel({
   onRelationshipConflict,
   onRelationshipSaved,
 }: InspectorPanelProps) {
+  const { t } = useTranslation('canvas');
   if (!selection) {
     return (
       <aside
-        aria-label="World KB inspector"
+        aria-label={t('worldKb.inspector.ariaLabel')}
         className="rounded-card border border-gray-alpha-400 bg-background-100 p-4 text-copy-13 text-gray-700 shadow-card"
       >
-        Select an entity, candidate, or relationship to inspect it.
+        {t('worldKb.inspector.empty')}
       </aside>
     );
   }
   if (selection.kind === 'entity') {
     return (
       <aside
-        aria-label={`Entity inspector: ${selection.node.name}`}
+        aria-label={t('worldKb.inspector.entityAria', { name: selection.node.name })}
         className="rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-card"
       >
         <EntityInspector
@@ -83,7 +86,7 @@ export function InspectorPanel({
   if (selection.kind === 'candidate') {
     return (
       <aside
-        aria-label={`Promotion inspector: ${selection.node.name}`}
+        aria-label={t('worldKb.inspector.candidateAria', { name: selection.node.name })}
         className="rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-card"
       >
         <PromotionInspector
@@ -100,7 +103,7 @@ export function InspectorPanel({
   if (selection.kind === 'new-relationship') {
     return (
       <aside
-        aria-label="New relationship inspector"
+        aria-label={t('worldKb.inspector.newRelationshipAria')}
         className="rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-card"
       >
         <RelationshipInspector
@@ -116,7 +119,7 @@ export function InspectorPanel({
   }
   return (
     <aside
-      aria-label={`Relationship inspector: ${selection.relationship.relationship_id}`}
+      aria-label={t('worldKb.inspector.relationshipAria', { id: selection.relationship.relationship_id })}
       className="rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-card"
     >
       <RelationshipInspector
