@@ -68,7 +68,7 @@
       "id": "2026-07-12-v1.113-tech-debt-paydown",
       "title": "P2 - Tech Debt Paydown",
       "file": "plans/2026-07-12-v1.113-tech-debt-paydown.md",
-      "status": "InReview",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@frontend-dev"
@@ -82,7 +82,7 @@
       ],
       "created_at": "2026-07-12",
       "updated_at": "2026-07-12",
-      "notes": "Phase 2: 16 low/nit residuals closed or accepted; tests green; awaiting QC/QA",
+      "notes": "Phase 2: SDD T1-T3 done, QC tri Approve with residuals (4 R#), QA Pass with notes",
       "metadata": {
         "iteration_refs": [
           "V1.113"
