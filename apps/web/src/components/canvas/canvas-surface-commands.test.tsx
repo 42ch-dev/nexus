@@ -150,13 +150,13 @@ const strategyMocks = vi.hoisted(() => ({
   },
 }));
 
-vi.mock('@/components/canvas/strategy-canvas/hooks/use-strategy-canvas', () => ({
-  useStrategyCanvas: () => ({
+vi.mock('@/components/canvas/strategy-canvas/hooks/use-strategy-canvas', () => {
+  const strategyState = {
     graphQuery: strategyMocks.graphQuery,
     activeSession: null,
     creatorId: 'c1',
-    nodes: [],
-    edges: [],
+    nodes: [] as never[],
+    edges: [] as never[],
     onNodesChange: () => {},
     onEdgesChange: () => {},
     onConnect: () => {},
@@ -186,8 +186,9 @@ vi.mock('@/components/canvas/strategy-canvas/hooks/use-strategy-canvas', () => (
     cancelDraft: () => {},
     commitKeyboardCreate: () => {},
     isCommittingKeyboardCreate: false,
-  }),
-}));
+  };
+  return { useStrategyCanvas: () => strategyState };
+});
 
 // Strategy heavy children → no-ops (keep canvas-layout + edge-create-dialog real).
 vi.mock('@/components/canvas/strategy-canvas/inspectors/state-inspector', () => ({
