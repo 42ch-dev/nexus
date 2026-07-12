@@ -39,13 +39,13 @@
       "id": "2026-07-12-v1.112-i18n-ui-migration",
       "title": "P1 — Full user-facing UI migration",
       "file": "plans/2026-07-12-v1.112-i18n-ui-migration.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@frontend-dev",
         "@architect"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.112",
         "i18n",
@@ -54,7 +54,7 @@
       ],
       "created_at": "2026-07-12",
       "updated_at": "2026-07-12",
-      "notes": "Phase 1 locked — Prepare gates done; awaiting implement on iteration/v1.112",
+      "notes": "Phase 2: SDD T1-T4 done, QC Approve with residuals (3 R#), QA Pass, merged to integration",
       "metadata": {
         "iteration_refs": [
           "V1.112"
@@ -1210,6 +1210,41 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-foundation.md",
         "note": "Pre-existing - file not touched in P0 diff. Not introduced by this plan."
+      }
+    ],
+    "2026-07-12-v1.112-i18n-ui-migration": [
+      {
+        "id": "R-P1-001",
+        "title": "~25 secondary page strings not migrated to i18n",
+        "severity": "medium",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.112",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-ui-migration.md",
+        "note": "Remaining hardcoded strings in works/schedule/sessions/strategies/capabilities pages + dialogs + content editor. Subagent non-functional during fix wave."
+      },
+      {
+        "id": "R-P1-002",
+        "title": "Uncached Intl.DateTimeFormat/RelativeTimeFormat created per call in format.ts",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.112",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-ui-migration.md",
+        "note": "Consider memoization for hot paths."
+      },
+      {
+        "id": "R-P1-003",
+        "title": "soul.fragmentCount shared key slightly redundant in world-selector context",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.112",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-ui-migration.md",
+        "note": "Split into two keys in future polish."
       }
     ]
   }
