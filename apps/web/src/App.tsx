@@ -1,5 +1,5 @@
 import { lazy, Suspense } from 'react';
-import { Navigate, Route, Routes } from 'react-router-dom';
+import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 
 import { ActiveCreatorProvider } from '@/lib/active-creator-context';
 import { SetupCompletedProvider } from '@/lib/setup-completed-context';
@@ -52,6 +52,15 @@ const WorldKbPage = lazy(() =>
  * `/setup` and the main shell are siblings under the outer gate. `/strategy`
  * redirects to `/strategies` list + `/strategies/:presetId` detail.
  */
+/**
+ * `/strategy` legacy redirect preserves query state (e.g. preset ID) rather
+ * than dropping the search string on the floor.
+ */
+function StrategyRedirect() {
+  const { search } = useLocation();
+  return <Navigate to={{ pathname: '/strategies', search }} replace />;
+}
+
 function AppRoutes() {
   return (
     <Routes>
@@ -108,7 +117,7 @@ function AppRoutes() {
             </Suspense>
           }
         />
-        <Route path="strategy" element={<Navigate to="/strategies" replace />} />
+        <Route path="strategy" element={<StrategyRedirect />} />
         <Route
           path="connect"
           element={<Navigate to="/settings/advanced#connection" replace />}

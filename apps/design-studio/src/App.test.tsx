@@ -694,7 +694,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).not.toBeInTheDocument();
     expect(
       within(hostRoot).getAllByText(
-        /Manage your local agent, daemon connection, and setup options/i,
+        /Manage your local agent, workspace, daemon connection, and setup options/i,
       ).length,
     ).toBeGreaterThanOrEqual(1);
     // Shell must not include wizard Back/Continue chrome (wizard CTAs live

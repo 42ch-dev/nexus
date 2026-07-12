@@ -88,7 +88,7 @@ export function WorkspacePathField({
         className={cn(
           'flex items-center gap-3',
           isWizard &&
-            'min-h-setup-wizard-surface-input-row-min-height rounded-control border border-setup-wizard-surface-input-row-border bg-setup-wizard-surface-input-row-bg px-setup-wizard-surface-input-row-padding-x py-setup-wizard-surface-input-row-padding-y',
+            'min-h-setup-wizard-surface-input-row-min-height rounded-setup-wizard-surface-input-row-rounded border border-setup-wizard-surface-input-row-border bg-setup-wizard-surface-input-row-bg px-setup-wizard-surface-input-row-padding-x py-setup-wizard-surface-input-row-padding-y',
         )}
       >
         {isWizard && (

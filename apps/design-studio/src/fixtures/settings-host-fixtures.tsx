@@ -115,7 +115,7 @@ const SETTINGS_SECTIONS: {
 ];
 
 const SHELL_HELPER =
-  'Manage your local agent, daemon connection, and setup options from one place.';
+  'Manage your local agent, workspace, daemon connection, and setup options from one place.';
 
 // CREATOR_NAV / ORCHESTRATOR_NAV imported from shell-nav-data.ts (V1.109 P2,
 // R-V1108P1QC1-S001) — shared with surfaces.tsx ShellSidebarFixture.

@@ -248,6 +248,7 @@ const preset: Partial<Config> = {
         popover: '12px',
         fullscreen: '16px',
         pill: '9999px',
+        'setup-wizard-surface-input-row-rounded': cv('setup-wizard-surface-input-row-rounded'),
       },
       spacing: {
         'setup-wizard-step-circle-size': cv('setup-wizard-step-circle-size'),
