@@ -71,14 +71,37 @@ and consumed by the screens. Remaining gaps the UI adapts around:
 - **Daemon port**: default HTTP transport `127.0.0.1:8420`
   (`crates/nexus-daemon-runtime/src/boot.rs`); override via `NEXUS_DAEMON_PORT`
   or `VITE_DAEMON_URL` (dev proxy).
-- **i18n (V1.112+):** `i18next` + `react-i18next`; locales `en` + `zh-CN`;
-  preference `localStorage` key `nexus-web-locale` (`system` | `en` | `zh-CN`).
-  Catalogs: `src/locales/{en,zh-CN}/{common,shell,settings,setup,canvas,reading,findings,memory,commands}.json`.
-  Provider: `components/locale-provider.tsx` (mirrors `theme-provider.tsx`);
-  mount in `main.tsx` inside `ThemeProvider`. **Caller-owned copy** — pass
-  `t()` strings into `@42ch/nexus-ui` and shared primitives; do not bake product
-  copy into packages. **User-facing-only catalogs** — author-visible chrome
-  only; exclude design-studio, test fixtures, and manuscript body. New
-  user-facing strings must use i18n. Command palette: `labelKey`/`groupKey` on
-  `Command`, resolved in `command-palette.tsx`. Normative spec:
+- **i18n (V1.112+):** see the [i18n conventions](#i18n) section below.
+
+## i18n
+
+- **Library:** `i18next` + `react-i18next`.
+- **Catalog location:** `src/locales/{en,zh-CN}/`.
+- **Namespaces (nine):**
+
+  | Namespace | Scope |
+  |-----------|-------|
+  | `common` | Shared actions, generic loading/error fragments |
+  | `shell` | Header, sidebar, mobile nav, route titles, not-found |
+  | `settings` | Settings shell helper, section nav labels, Appearance page |
+  | `setup` | Setup wizard (P1) |
+  | `canvas` | Canvas inspectors, panels, and commands (P1) |
+  | `reading` | Reading toolbar and inspectors (P1) |
+  | `findings` | Findings list/detail chrome (P1) |
+  | `memory` | Memory, soul, and chapters chrome (P1) |
+  | `commands` | Command-palette action labels and group headings (P1) |
+
+- **Key convention:** dot-separated within the namespace file, e.g.
+  `settings.appearance.language.label` or `shell.nav.works`. English source
+  strings follow DESIGN.md §Voice & Content (Title Case for nav/titles/buttons).
+- **Usage pattern:** `const { t } = useTranslation('<namespace>')` and render
+  `t('path.to.key')`. Do not concatenate translated strings in components; use
+  i18next interpolation (`{{name}}`) when a value is dynamic.
+- **Rule:** new user-facing strings in `apps/web` must use i18n from day one.
+- **Caller-owned copy:** pass `t()` strings into `@42ch/nexus-ui` and shared
+  primitives; do not bake product copy into packages.
+- **User-facing-only catalogs:** only author-visible product chrome enters the
+  locale catalogs. Exclude developer-auxiliary surfaces (`apps/design-studio`),
+  test fixtures, and manuscript body text.
+- **Normative spec:**
   [`.mstar/iterations/v1.112/specs/i18n-foundation.md`](../../.mstar/iterations/v1.112/specs/i18n-foundation.md).

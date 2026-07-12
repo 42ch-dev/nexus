@@ -1,5 +1,5 @@
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes } from 'react-router-dom';
@@ -8,6 +8,7 @@ import { Sidebar } from './sidebar';
 import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 import { BrowserClient } from '@/lib/nexus';
+import { i18n } from '@/lib/i18n/config';
 
 vi.mock('@/components/brand/nexus-logo', () => ({
   NexusLogo: () => <div data-testid="nexus-logo">Nexus</div>,
@@ -30,6 +31,11 @@ function useCreatorHandler() {
 }
 
 describe('Sidebar', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    i18n.changeLanguage('en');
+  });
+
   it('renders the Creator tab by default', async () => {
     useHandlers(
       http.get('/v1/daemon/creators', () =>
@@ -137,6 +143,20 @@ describe('Sidebar', () => {
     expect(link).toHaveTextContent('Settings');
     // Settings stays visible on Creator tab (not tab-scoped).
     expect(screen.getByRole('tab', { name: 'Creator', selected: true })).toBeInTheDocument();
+  });
+
+  it('renders localized labels when locale is zh-CN', async () => {
+    window.localStorage.setItem('nexus-web-locale', 'zh-CN');
+    useCreatorHandler();
+
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+
+    expect(screen.getByRole('tab', { name: '创作', selected: true })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '编排' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '全部作品' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '记忆' })).toBeInTheDocument();
+    const link = screen.getByTestId('settings-footer-utility-link');
+    expect(link).toHaveTextContent('设置');
   });
 
   it('keeps parent groups as quiet labels and selected leaf with soft fill + thin bar', async () => {

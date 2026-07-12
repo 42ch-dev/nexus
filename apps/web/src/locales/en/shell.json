@@ -40,10 +40,6 @@
     "strategies": "Strategies",
     "settings": "Settings"
   },
-  "settings": {
-    "title": "Settings",
-    "helper": "Manage your local agent, daemon connection, and setup options from one place."
-  },
   "theme": {
     "switchToLight": "Switch to light theme",
     "switchToDark": "Switch to dark theme"

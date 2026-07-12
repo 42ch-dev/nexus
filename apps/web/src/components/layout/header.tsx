@@ -1,4 +1,5 @@
 import { Moon, Sun } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { NexusLogo } from '@/components/brand/nexus-logo';
 import { DaemonHealthIndicator } from '@/components/daemon-health-indicator';
@@ -12,8 +13,13 @@ import { useDesktopCapabilities } from '@/lib/client-context';
  * bar), and the token-driven theme toggle.
  */
 export function Header({ title }: { title: string }) {
+  const { t } = useTranslation('shell');
   const { resolvedTheme, toggleTheme } = useTheme();
   const desktop = useDesktopCapabilities();
+  const isDark = resolvedTheme === 'dark';
+  const themeLabel = isDark
+    ? t('theme.switchToLight')
+    : t('theme.switchToDark');
   return (
     <header className="flex h-14 items-center justify-between border-b border-gray-alpha-400 bg-background-100 px-4 md:px-6">
       <div className="flex min-w-0 items-center gap-3">
@@ -26,10 +32,10 @@ export function Header({ title }: { title: string }) {
           variant="tertiary"
           size="small"
           onClick={toggleTheme}
-          aria-label={resolvedTheme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
-          title={resolvedTheme === 'dark' ? 'Switch to light theme' : 'Switch to dark theme'}
+          aria-label={themeLabel}
+          title={themeLabel}
         >
-          {resolvedTheme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+          {isDark ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
         </Button>
       </div>
     </header>

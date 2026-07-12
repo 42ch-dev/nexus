@@ -1,4 +1,5 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 
 import { CanvasNavCommands } from '@/components/canvas/canvas-nav-commands';
 import { CommandPalette, openPalette } from '@/components/command-palette';
@@ -9,32 +10,34 @@ import { Sidebar } from '@/components/layout/sidebar';
 import { useHotkey } from '@/lib/use-hotkey';
 import { cn } from '@/lib/utils';
 
-const ROUTE_TITLES: Record<string, string> = {
-  '/works': 'Works',
-  '/sessions': 'Sessions',
-  '/schedule': 'Schedule',
-  '/capabilities': 'Capabilities',
-  '/findings': 'Findings',
-  '/memory': 'Memory',
-  '/settings': 'Settings',
-  '/strategies': 'Strategies',
+const ROUTE_KEYS: Record<string, string> = {
+  '/works': 'works',
+  '/sessions': 'sessions',
+  '/schedule': 'schedule',
+  '/capabilities': 'capabilities',
+  '/findings': 'findings',
+  '/memory': 'memory',
+  '/settings': 'settings',
+  '/strategies': 'strategies',
 };
 
-const MOBILE_NAV = [
-  { to: '/works', label: 'Works' },
-  { to: '/sessions', label: 'Sessions' },
-  { to: '/schedule', label: 'Schedule' },
-  { to: '/capabilities', label: 'Capabilities' },
-  { to: '/memory', label: 'Memory' },
-  { to: '/strategies', label: 'Strategies' },
-  { to: '/settings', label: 'Settings' },
+const MOBILE_NAV_KEYS = [
+  { to: '/works', key: 'works' },
+  { to: '/sessions', key: 'sessions' },
+  { to: '/schedule', key: 'schedule' },
+  { to: '/capabilities', key: 'capabilities' },
+  { to: '/memory', key: 'memory' },
+  { to: '/strategies', key: 'strategies' },
+  { to: '/settings', key: 'settings' },
 ];
 
 /** Resolve the header title from the active top-level route. */
 function useRouteTitle(): string {
+  const { t } = useTranslation('shell');
   const { pathname } = useLocation();
   const top = `/${pathname.split('/')[1] ?? ''}`;
-  return ROUTE_TITLES[top] ?? 'Control Room';
+  const routeKey = ROUTE_KEYS[top];
+  return routeKey ? t(`route.${routeKey}`) : t('appTitle');
 }
 
 /**
@@ -46,6 +49,7 @@ function useRouteTitle(): string {
  * states; the footer status bar is restart-icon-only when running.
  */
 export function RootLayout() {
+  const { t } = useTranslation('shell');
   const title = useRouteTitle();
 
   // ⌘K/Ctrl+K opens the command palette. The palette owns its open/close
@@ -67,7 +71,7 @@ export function RootLayout() {
           aria-label="Primary"
           className="flex gap-1 overflow-x-auto border-b border-gray-alpha-400 bg-background-100 px-2 py-2 lg:hidden"
         >
-          {MOBILE_NAV.map(({ to, label }) => (
+          {MOBILE_NAV_KEYS.map(({ to, key }) => (
             <NavLink
               key={to}
               to={to}
@@ -80,7 +84,7 @@ export function RootLayout() {
                 )
               }
             >
-              {label}
+              {t(`mobileNav.${key}`)}
             </NavLink>
           ))}
         </nav>

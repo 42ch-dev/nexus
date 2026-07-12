@@ -2,6 +2,8 @@
   "aria": {
     "sections": "设置分区"
   },
+  "title": "设置",
+  "helper": "在此处管理你的本地智能体、守护进程连接和设置选项。",
   "nav": {
     "agent": "智能体",
     "workspace": "工作区",

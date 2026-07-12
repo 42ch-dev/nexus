@@ -11,9 +11,6 @@ import { NavLink, Outlet } from 'react-router-dom';
 
 import { cn } from '@/lib/utils';
 
-const SHELL_HELPER =
-  'Manage your local agent, daemon connection, and setup options from one place.';
-
 export function SettingsShellLayout() {
   const { t } = useTranslation('settings');
 
@@ -24,10 +21,10 @@ export function SettingsShellLayout() {
     to: string;
     icon: LucideIcon;
   }[] = [
-    { id: 'agent', label: 'Agent', to: '/settings/agent', icon: Bot },
+    { id: 'agent', label: t('nav.agent'), to: '/settings/agent', icon: Bot },
     {
       id: 'workspace',
-      label: 'Workspace',
+      label: t('nav.workspace'),
       to: '/settings/workspace',
       icon: FolderOpen,
     },
@@ -39,7 +36,7 @@ export function SettingsShellLayout() {
     },
     {
       id: 'advanced',
-      label: 'Advanced',
+      label: t('nav.advanced'),
       to: '/settings/advanced',
       icon: Settings,
     },
@@ -52,12 +49,12 @@ export function SettingsShellLayout() {
     >
       <div className="flex flex-col gap-2">
         {/* Visual page title; document h1 lives in RootLayout Header. */}
-        <h2 className="text-heading-24 font-heading text-gray-1000">Settings</h2>
-        <p className="text-copy-14 text-gray-900">{SHELL_HELPER}</p>
+        <h2 className="text-heading-24 font-heading text-gray-1000">{t('title')}</h2>
+        <p className="text-copy-14 text-gray-900">{t('helper')}</p>
       </div>
 
       <nav
-        aria-label="Settings sections"
+        aria-label={t('aria.sections')}
         className="flex flex-wrap gap-1 border-b border-gray-alpha-200 pb-px"
         data-testid="settings-section-nav"
       >
