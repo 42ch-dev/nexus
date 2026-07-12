@@ -4,6 +4,7 @@
  * Routes the current selection to the appropriate inspector:
  * entity → EntityInspector, candidate → PromotionInspector, none → placeholder.
  */
+import type { ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import type {
@@ -43,6 +44,8 @@ interface InspectorPanelProps {
     draft: RelationshipForm;
   }) => void;
   onRelationshipSaved: () => void;
+  /** Optional adapter-driven inspector for node-based selections (graph mode). */
+  nodeInspector?: ReactNode;
 }
 
 export function InspectorPanel({
@@ -55,6 +58,7 @@ export function InspectorPanel({
   onPromoteConflict,
   onRelationshipConflict,
   onRelationshipSaved,
+  nodeInspector,
 }: InspectorPanelProps) {
   const { t } = useTranslation('canvas');
   if (!selection) {
@@ -73,13 +77,15 @@ export function InspectorPanel({
         aria-label={t('worldKb.inspector.entityAria', { name: selection.node.name })}
         className="rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-card"
       >
-        <EntityInspector
-          worldId={worldId}
-          node={selection.node}
-          entity={selection.entity}
-          onConflict={onEntityConflict}
-          reseedSignal={reseedSignal}
-        />
+        {nodeInspector ?? (
+          <EntityInspector
+            worldId={worldId}
+            node={selection.node}
+            entity={selection.entity}
+            onConflict={onEntityConflict}
+            reseedSignal={reseedSignal}
+          />
+        )}
       </aside>
     );
   }
@@ -89,14 +95,16 @@ export function InspectorPanel({
         aria-label={t('worldKb.inspector.candidateAria', { name: selection.node.name })}
         className="rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-card"
       >
-        <PromotionInspector
-          worldId={worldId}
-          node={selection.node}
-          candidate={selection.candidate}
-          confirmedEntities={confirmedEntities}
-          onConflict={onPromoteConflict}
-          reseedSignal={reseedSignal}
-        />
+        {nodeInspector ?? (
+          <PromotionInspector
+            worldId={worldId}
+            node={selection.node}
+            candidate={selection.candidate}
+            confirmedEntities={confirmedEntities}
+            onConflict={onPromoteConflict}
+            reseedSignal={reseedSignal}
+          />
+        )}
       </aside>
     );
   }
