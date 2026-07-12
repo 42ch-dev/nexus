@@ -159,7 +159,7 @@ export function Sidebar() {
               return (
                 <span
                   aria-disabled="true"
-                  className={cn(className, 'cursor-not-allowed opacity-50 pointer-events-none')}
+                  className={cn(className, 'cursor-not-allowed opacity-disabled pointer-events-none')}
                 >
                   {content}
                 </span>

@@ -280,7 +280,7 @@ export function SuggestedRelationshipsPane({
                         type="button"
                         onClick={() => onPromote(rel)}
                         disabled={pending}
-                        className="rounded p-1 text-green-700 hover:bg-green-100 focus-visible:ring-2 focus-visible:ring-green-700 disabled:opacity-50"
+                        className="rounded p-1 text-green-700 hover:bg-green-100 focus-visible:ring-2 focus-visible:ring-green-700 disabled:opacity-disabled"
                         aria-label={t('worldKb.suggested.promoteAria', { label: relationshipEdgeLabel(rel) })}
                       >
                         <ArrowUp className="h-4 w-4" aria-hidden />
@@ -289,7 +289,7 @@ export function SuggestedRelationshipsPane({
                         type="button"
                         onClick={() => handleDelete(rel)}
                         disabled={pending}
-                        className="rounded p-1 text-red-700 hover:bg-red-100 focus-visible:ring-2 focus-visible:ring-red-700 disabled:opacity-50"
+                        className="rounded p-1 text-red-700 hover:bg-red-100 focus-visible:ring-2 focus-visible:ring-red-700 disabled:opacity-disabled"
                         aria-label={t('worldKb.suggested.deleteAria', { label: relationshipEdgeLabel(rel) })}
                       >
                         <Trash2 className="h-4 w-4" aria-hidden />
