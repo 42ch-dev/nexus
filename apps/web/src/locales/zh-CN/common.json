@@ -4,7 +4,13 @@
     "cancel": "取消"
   },
   "status": {
-    "loading": "加载中…"
+    "loading": "加载中…",
+    "loadingMore": "正在加载更多…",
+    "loadMore": "加载更多"
+  },
+  "error": {
+    "title": "无法加载此视图",
+    "retry": "重试"
   },
   "toast": {
     "error": "错误",

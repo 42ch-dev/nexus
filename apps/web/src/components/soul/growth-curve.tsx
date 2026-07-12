@@ -1,4 +1,5 @@
 import type { MemoryFragmentInfo } from '@42ch/nexus-contracts';
+import { useTranslation } from 'react-i18next';
 
 import { EmptyState } from '@/components/ui/states';
 import {
@@ -8,27 +9,8 @@ import {
   type GrowthPoint,
 } from '@/components/soul/soul-stats';
 
-/**
- * Growth-curve (V1.81 SP-3 — web-ui.md §26.1).
- *
- * Cumulative fragment count over time as a simple line/area chart, independent
- * of the temporal-drift timeline (which answers "how has my focus shifted?" —
- * this answers "how much have I accumulated?"). Respects the world projection:
- * the parent passes the world-scoped fragment subset.
- *
- * Three density states (plan §2.3, reusing the V1.79 `densityFor` branching
- * pattern with growth-specific thresholds from soul-stats):
- *  - `empty`    — 0 fragments: forward-looking illustration, no chart.
- *  - `low-data` — 1–9 fragments (and <5 days): a simple cumulative line.
- *  - `rich`     — ≥10 fragments OR ≥5 distinct days: full curve with axis
- *                 labels and a summary stat.
- *
- * Unlike the narrative card (which gates entirely below the quality threshold),
- * the growth-curve always renders a chart for non-empty states — it degrades to
- * a simpler form rather than hiding. The stroke uses the DESIGN.md
- * `soul-growth-curve-stroke` token (`--color-soul-growth-curve-stroke`).
- */
 export function GrowthCurve({ fragments }: { fragments: MemoryFragmentInfo[] }) {
+  const { t } = useTranslation('memory');
   const series = growthSeries(fragments);
   const density = growthDensityFor({
     fragmentCount: fragments.length,
@@ -39,8 +21,8 @@ export function GrowthCurve({ fragments }: { fragments: MemoryFragmentInfo[] }) 
     return (
       <div data-testid="soul-growth-empty">
         <EmptyState
-          title="Your SOUL begins here"
-          description="Every review session adds a fragment to your creative growth."
+          title={t('growth.emptyTitle')}
+          description={t('growth.emptyDescription')}
         />
       </div>
     );
@@ -49,9 +31,7 @@ export function GrowthCurve({ fragments }: { fragments: MemoryFragmentInfo[] }) 
   if (density === 'low-data') {
     return (
       <div data-testid="soul-growth-low-data" className="flex flex-col gap-3">
-        <p className="text-copy-13 text-gray-700">
-          Your SOUL is taking shape. Keep writing to see your growth curve emerge.
-        </p>
+        <p className="text-copy-13 text-gray-700">{t('growth.lowData')}</p>
         <GrowthLineChart points={series.points} rich={false} />
       </div>
     );
@@ -63,7 +43,7 @@ export function GrowthCurve({ fragments }: { fragments: MemoryFragmentInfo[] }) 
     <div data-testid="soul-growth-rich" className="flex flex-col gap-3">
       <div className="flex items-baseline justify-between">
         <p className="text-copy-13 text-gray-700">
-          {total} fragment{total === 1 ? '' : 's'} over {series.distinctDays} day{series.distinctDays === 1 ? '' : 's'}
+          {t('growth.summary', { count: total, days: series.distinctDays })}
         </p>
       </div>
       <GrowthLineChart points={series.points} rich />
@@ -71,13 +51,8 @@ export function GrowthCurve({ fragments }: { fragments: MemoryFragmentInfo[] }) 
   );
 }
 
-/**
- * Lightweight cumulative line chart (no charting dependency). Renders an SVG
- * polyline scaled to the bucket dimensions, with a baseline area fill. `rich`
- * adds axis labels (first/last day) so the timespan is legible; `low-data`
- * renders the line + a quiet inline summary to avoid over-labeling a thin span.
- */
 function GrowthLineChart({ points, rich }: { points: GrowthPoint[]; rich: boolean }) {
+  const { t } = useTranslation('memory');
   if (points.length === 0) return null;
   const width = 100;
   const height = 40;
@@ -100,7 +75,7 @@ function GrowthLineChart({ points, rich }: { points: GrowthPoint[]; rich: boolea
         preserveAspectRatio="none"
         className="h-24 w-full"
         role="img"
-        aria-label="Cumulative fragment growth over time"
+        aria-label={t('growth.chartAriaLabel')}
       >
         <polygon points={area} fill="var(--color-soul-growth-curve-stroke)" opacity={0.14} />
         <polyline
@@ -119,13 +94,11 @@ function GrowthLineChart({ points, rich }: { points: GrowthPoint[]; rich: boolea
         </div>
       ) : (
         <p className="text-label-12 text-gray-700">
-          {points.length} day{points.length === 1 ? '' : 's'} of growth so far.
+          {t('growth.daysOfGrowth', { count: points.length })}
         </p>
       )}
     </div>
   );
 }
 
-// Re-export the low-data ceiling so tests can assert the density boundary
-// without importing the constant from two places.
 export { GROWTH_LOW_DATA_MAX_FRAGMENT };

@@ -7,6 +7,7 @@
  */
 import { useState } from 'react';
 import { Pencil, Trash2, X } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
@@ -46,6 +47,7 @@ export function AnnotationInspector({
   isDeleting,
   className,
 }: AnnotationInspectorProps) {
+  const { t } = useTranslation('reading');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draftNote, setDraftNote] = useState('');
   const [draftColor, setDraftColor] = useState<ReadingAnnotationColor>('yellow');
@@ -72,19 +74,19 @@ export function AnnotationInspector({
         'flex w-80 flex-col rounded-card border bg-[var(--color-reading-annotation-inspector-background)] border-[var(--color-reading-annotation-inspector-border)] text-[var(--color-reading-annotation-inspector-text)] shadow-card',
         className,
       )}
-      aria-label="Annotation inspector"
+      aria-label={t('annotation.inspectorAriaLabel')}
     >
       <div className="border-b border-[var(--color-reading-annotation-inspector-border)] px-4 py-3">
-        <h3 className="text-label-14 font-medium text-gray-1000">Highlights</h3>
+        <h3 className="text-label-14 font-medium text-gray-1000">{t('annotation.title')}</h3>
         <p className="mt-0.5 text-copy-13 text-gray-700">
-          {annotations.length} {annotations.length === 1 ? 'annotation' : 'annotations'}
+          {t('annotation.count', { count: annotations.length })}
         </p>
       </div>
 
       <div className="max-h-[60vh] overflow-y-auto p-2">
         {annotations.length === 0 && (
           <div className="px-3 py-6 text-center text-copy-14 text-gray-700">
-            Select text in the chapter to add a highlight.
+            {t('annotation.empty')}
           </div>
         )}
 
@@ -99,18 +101,18 @@ export function AnnotationInspector({
                   <Select
                     value={draftColor}
                     onChange={(event) => setDraftColor(event.target.value as ReadingAnnotationColor)}
-                    aria-label="Highlight color"
+                    aria-label={t('annotation.colorLabel')}
                   >
                     {ANNOTATION_COLORS.map((color) => (
                       <option key={color} value={color}>
-                        {color.charAt(0).toUpperCase() + color.slice(1)}
+                        {t(`annotation.colors.${color}`)}
                       </option>
                     ))}
                   </Select>
                   <Textarea
                     value={draftNote}
                     onChange={(event) => setDraftNote(event.target.value)}
-                    placeholder="Add a note…"
+                    placeholder={t('annotation.notePlaceholder')}
                     rows={3}
                     className="min-h-0 text-copy-14"
                   />
@@ -120,7 +122,7 @@ export function AnnotationInspector({
                       variant="tertiary"
                       size="small"
                       onClick={cancelEdit}
-                      aria-label="Cancel edit"
+                      aria-label={t('annotation.cancelEdit')}
                     >
                       <X className="h-4 w-4" aria-hidden />
                     </Button>
@@ -131,7 +133,7 @@ export function AnnotationInspector({
                       onClick={() => saveEdit(annotation.annotation_id)}
                       disabled={isUpdating}
                     >
-                      Save
+                      {t('annotation.save')}
                     </Button>
                   </div>
                 </div>
@@ -143,7 +145,7 @@ export function AnnotationInspector({
                         'mt-0.5 h-4 w-4 shrink-0 rounded-sm border',
                         SWATCH_CLASS[annotation.color],
                       )}
-                      aria-label={`Color: ${annotation.color}`}
+                      aria-label={t('annotation.colorAria', { color: annotation.color })}
                     />
                     <blockquote className="line-clamp-3 flex-1 text-copy-14 text-gray-1000">
                       “{annotation.selected_text}”
@@ -162,7 +164,7 @@ export function AnnotationInspector({
                         variant="tertiary"
                         size="small"
                         onClick={() => startEdit(annotation)}
-                        aria-label="Edit highlight"
+                        aria-label={t('annotation.edit')}
                       >
                         <Pencil className="h-4 w-4" aria-hidden />
                       </Button>
@@ -172,7 +174,7 @@ export function AnnotationInspector({
                         size="small"
                         onClick={() => onDelete(annotation.annotation_id)}
                         disabled={isDeleting}
-                        aria-label="Delete highlight"
+                        aria-label={t('annotation.delete')}
                         className="text-red-700 hover:bg-red-700/10"
                       >
                         <Trash2 className="h-4 w-4" aria-hidden />

@@ -1,1 +1,83 @@
-{}
+{
+  "prose": {
+    "bodyTitle": "正文",
+    "bodyDescription": "本章正文草稿的只读渲染。",
+    "copyPath": "复制路径",
+    "copyPathAria": "复制正文路径",
+    "pathLabel": "路径：{{path}}",
+    "statusLabel": "状态：{{status}}",
+    "bodyAriaLabel": "章节正文"
+  },
+  "loading": {
+    "body": "正在加载正文…",
+    "chapter": "正在加载章节…"
+  },
+  "error": {
+    "bodyLoadDescription": "无法加载章节正文。",
+    "chapterDescription": "无法加载此章节。它可能不存在，或守护进程未能返回。"
+  },
+  "chapter": {
+    "title": "第 {{chapter}} 章",
+    "backToChapters": "返回章节列表",
+    "updated": "更新于 {{relative}}",
+    "canvasRedirectTitle": "大纲编辑已迁移至画布",
+    "canvasRedirectDescription": "V1.75 已停用全文档大纲编辑器。请在大纲画布上编辑本章大纲。",
+    "canvasRedirectButton": "编辑大纲 → 画布",
+    "canvasRedirectAria": "在大纲画布上编辑第 {{chapter}} 章的大纲"
+  },
+  "nav": {
+    "ariaLabel": "章节导航",
+    "previousAria": "上一章：{{label}}",
+    "loadingChapters": "正在加载章节",
+    "noPrevious": "没有上一章",
+    "firstChapter": "第一章",
+    "volume": "第 {{volume}} 卷",
+    "keyboardHint": "使用 ← → 导航",
+    "nextAria": "下一章：{{label}}",
+    "noNext": "没有下一章",
+    "lastChapter": "最后一章"
+  },
+  "maturation": {
+    "ariaLabel": "章节成熟度指标",
+    "keyBlocks": "关键块",
+    "openFindings": "待处理发现"
+  },
+  "progress": {
+    "ariaLabel": "阅读进度"
+  },
+  "highlight": {
+    "driftNotice": "标注可能因正文编辑而偏移。"
+  },
+  "annotation": {
+    "inspectorAriaLabel": "标注检查器",
+    "title": "高亮",
+    "count_one": "{{count}} 条标注",
+    "count_other": "{{count}} 条标注",
+    "empty": "在章节正文中选择文本以添加高亮。",
+    "colorLabel": "高亮颜色",
+    "colors": {
+      "yellow": "黄色",
+      "blue": "蓝色",
+      "green": "绿色",
+      "pink": "粉色"
+    },
+    "notePlaceholder": "添加备注…",
+    "cancelEdit": "取消编辑",
+    "save": "保存",
+    "colorAria": "颜色：{{color}}",
+    "edit": "编辑高亮",
+    "delete": "删除高亮",
+    "toolbarAriaLabel": "标注操作",
+    "highlightSelection": "高亮所选内容",
+    "highlight": "高亮"
+  },
+  "contextMenu": {
+    "copyPath": "复制路径",
+    "openWith": "打开方式…",
+    "revealInFinder": "在 Finder 中显示"
+  },
+  "chrome": {
+    "definitionLabel": "定义：",
+    "sceneSeparator": "* * *"
+  }
+}

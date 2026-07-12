@@ -1,1 +1,92 @@
-{}
+{
+  "page": {
+    "title": "发现",
+    "description": "分类发现——推进状态、分配路由或内联编辑详情。",
+    "refresh": "刷新",
+    "refreshAria": "刷新发现",
+    "workLabel": "作品",
+    "loadingWorks": "正在加载作品…",
+    "selectWork": "选择作品",
+    "selectWorkPlaceholder": "选择作品…",
+    "severityLabel": "严重程度",
+    "severityPlaceholder": "例如 critical",
+    "statusLabel": "状态",
+    "statusPlaceholder": "例如 open",
+    "bulkSetStatus": "设置状态…",
+    "bulkSetStatusAria": "为所选项目设置状态",
+    "bulkAssignTo": "分配给…",
+    "bulkAssignToAria": "为所选项目分配目标执行器",
+    "clearSelection": "清除",
+    "selected": "已选择 {{count}} 项",
+    "emptySelectTitle": "选择作品",
+    "emptySelectDescription": "在上方选择作品以查看其发现。",
+    "errorDescription": "无法加载此作品的发现。",
+    "loading": "正在加载发现…",
+    "noFindingsTitle": "暂无发现",
+    "noFindingsDescription": "当前筛选条件下没有匹配此作品的发现。",
+    "count_one": "{{count}} 条发现",
+    "count_other": "{{count}} 条发现",
+    "exportAria": "导出发现到 CSV",
+    "exportCsv": "导出 CSV",
+    "selectAllAria": "选择所有可见发现",
+    "selectRowAria": "选择发现 {{id}}",
+    "columns": {
+      "severity": "严重程度",
+      "status": "状态",
+      "title": "标题",
+      "kind": "类型",
+      "chapter": "章节",
+      "assignTo": "分配给"
+    },
+    "untitledFinding": "（未命名发现）",
+    "detailTitle": "发现详情",
+    "noSelectionTitle": "未选择发现",
+    "noSelectionDescription": "选择一行以分类状态、分配路由或编辑详情。"
+  },
+  "detail": {
+    "statusLabel": "状态",
+    "terminal": "已终结——不再允许状态转换。",
+    "advanceAria": "将发现推进到 {{status}}",
+    "targetExecutorLabel": "目标执行器",
+    "targetExecutorHelp": "将发现路由到分类处理。重新运行预设仍然是画布上的明确操作。",
+    "chapterLabel": "章节：{{chapter}}",
+    "routingLabel": "路由：{{routing}}",
+    "idLabel": "ID：{{id}}",
+    "createdLabel": "创建：{{date}}",
+    "updatedLabel": "更新：{{date}}",
+    "titleLabel": "标题",
+    "descriptionLabel": "描述",
+    "severityLabel": "严重程度",
+    "kindLabel": "类型",
+    "ruleSuggestionLabel": "规则建议",
+    "ruleSuggestionPlaceholder": "清空以移除规则建议",
+    "saveChanges": "保存更改",
+    "reset": "重置",
+    "unsavedChanges": "未保存更改"
+  },
+  "executors": {
+    "none": "无",
+    "write": "写作",
+    "brainstorm": "头脑风暴",
+    "master": "主审"
+  },
+  "severity": {
+    "info": "信息",
+    "minor": "轻微",
+    "major": "严重",
+    "blocker": "阻塞"
+  },
+  "status": {
+    "open": "待处理",
+    "triaged": "已分类",
+    "in_review": "审核中",
+    "resolved": "已解决",
+    "wont_fix": "不修复",
+    "duplicate": "重复"
+  },
+  "kind": {
+    "craft": "技法",
+    "pacing": "节奏",
+    "consistency": "一致性"
+  }
+}

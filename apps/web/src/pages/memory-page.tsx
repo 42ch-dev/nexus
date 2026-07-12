@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { FragmentsSection } from '@/components/memory/fragments-section';
 import { PendingReviewsSection } from '@/components/memory/pending-reviews-section';
@@ -21,8 +22,8 @@ import { useActiveCreatorId } from '@/api/queries';
  *   3. Fragments browser (read-only, optional keyword filter).
  *
  * Layout (D-UX LOCKED): detail-panel + row-action hybrid — a Control-Room table
- * with a side inspector (matching the V1.77 findings-page pattern), not a
- * canvas graph. `createPendingReview` stays CLI/producer-only.
+ * with a side inspector (matching the V1.77 findings-page pattern), not a canvas
+ * graph. `createPendingReview` stays CLI/producer-only.
  *
  * Module shape (R-V179P1-QC1-001): this file is the route/page shell only —
  * active creator lookup, the page-level fragment-keyword state that coordinates
@@ -32,6 +33,7 @@ import { useActiveCreatorId } from '@/api/queries';
  * (P0-owned, untouched here).
  */
 export function MemoryPage() {
+  const { t } = useTranslation('memory');
   const creatorId = useActiveCreatorId();
   // Lifted so the SOUL viz click-to-filter can drive the fragments browser
   // (V1.79 P1 §D integration). FragmentsSection is now controlled.
@@ -40,16 +42,16 @@ export function MemoryPage() {
   return (
     <Card className="shadow-card">
       <CardHeader>
-        <CardTitle>Memory</CardTitle>
+        <CardTitle>{t('page.title')}</CardTitle>
         <CardDescription>
-          Review pending captures, summarize them into long-term memory, and browse fragments.
+          {t('page.description')}
         </CardDescription>
       </CardHeader>
       <CardContent>
         {!creatorId ? (
           <EmptyState
-            title="No active creator"
-            description="Start a session or schedule so the memory surface can resolve your creator identity."
+            title={t('page.noCreatorTitle')}
+            description={t('page.noCreatorDescription')}
           />
         ) : (
           <div className="flex flex-col gap-8">

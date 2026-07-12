@@ -12,6 +12,7 @@
  */
 import { humanizeStatus } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import { useTranslation } from 'react-i18next';
 
 /** Known `task_kind` values the daemon defaults and capture pipeline emit. */
 export type KnownTaskKind = 'brainstorm' | 'outline' | 'chapter' | 'research' | 'unknown';
@@ -56,6 +57,11 @@ interface TaskKindBadgeProps {
 
 /** Task-kind pill with the DESIGN.md `memory-task-kind-*` mapping. */
 export function TaskKindBadge({ taskKind, className }: TaskKindBadgeProps) {
+  const { t } = useTranslation('memory');
+  const normalized = (taskKind ?? 'unknown') as KnownTaskKind;
+  const label = KNOWN_TASK_KINDS.includes(normalized)
+    ? t(`taskKind.${normalized}`)
+    : humanizeStatus(taskKind);
   return (
     <span
       className={cn(
@@ -64,7 +70,7 @@ export function TaskKindBadge({ taskKind, className }: TaskKindBadgeProps) {
         className,
       )}
     >
-      {humanizeStatus(taskKind)}
+      {label}
     </span>
   );
 }

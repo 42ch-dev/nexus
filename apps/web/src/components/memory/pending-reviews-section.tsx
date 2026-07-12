@@ -11,6 +11,7 @@
  */
 import { useMemo, useState } from 'react';
 import { Loader2, RefreshCw, Sparkles, Trash2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { LoadMore } from '@/components/load-more';
 import { MemoryDetailPanel } from '@/components/memory/memory-detail-panel';
@@ -31,6 +32,7 @@ import { formatRelative, shortId } from '@/lib/format';
 import type { PendingReviewInfo } from '@42ch/nexus-contracts';
 
 export function PendingReviewsSection({ creatorId }: { creatorId: string }) {
+  const { t } = useTranslation('memory');
   const reviews = usePendingReviews(creatorId);
   const count = usePendingReviewCount(creatorId);
   const deleteReview = useDeletePendingReview();
@@ -41,9 +43,6 @@ export function PendingReviewsSection({ creatorId }: { creatorId: string }) {
   const pendingCount = count.data?.count;
   const hasPending = typeof pendingCount === 'number' ? pendingCount > 0 : rows.length > 0;
 
-  // The selected row comes from the list cache (optimistically updated by
-  // useDeletePendingReview), so the inspector reflects in-flight deletes and
-  // dismisses cleanly once the row is gone.
   const selected: PendingReviewInfo | null = useMemo(
     () => rows.find((r) => r.pending_id === selectedId) ?? null,
     [rows, selectedId],
@@ -52,7 +51,7 @@ export function PendingReviewsSection({ creatorId }: { creatorId: string }) {
   const confirmDelete = (pending: PendingReviewInfo) => {
     if (
       !window.confirm(
-        `Delete this pending review?\n\n${shortId(pending.pending_id)} · ${pending.task_kind}`,
+        t('pending.deleteConfirm', { id: shortId(pending.pending_id), kind: t(`taskKind.${pending.task_kind}` as const) }),
       )
     ) {
       return;
@@ -70,13 +69,12 @@ export function PendingReviewsSection({ creatorId }: { creatorId: string }) {
     <section data-testid="memory-pending-section">
       <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
         <div className="flex items-center gap-2">
-          <h2 className="text-heading-16 text-gray-1000">Pending Reviews</h2>
-          {/* memory-pending-count badge — red numeric indicator (DESIGN.md token). */}
+          <h2 className="text-heading-16 text-gray-1000">{t('pending.title')}</h2>
           <Badge
             variant="error"
             className="tabular-nums"
             data-testid="memory-pending-count"
-            aria-label={`${pendingCount ?? 0} pending reviews`}
+            aria-label={t('pending.countAria', { count: pendingCount ?? 0 })}
           >
             {pendingCount ?? '—'}
           </Badge>
@@ -91,38 +89,37 @@ export function PendingReviewsSection({ creatorId }: { creatorId: string }) {
               void count.refetch();
             }}
             disabled={reviews.isFetching}
-            aria-label="Refresh pending reviews"
+            aria-label={t('pending.refreshAria')}
           >
             <RefreshCw className={`h-4 w-4 ${reviews.isFetching ? 'animate-spin' : ''}`} aria-hidden />
-            Refresh
+            {t('pending.refresh')}
           </Button>
-          {/* memory-review-button — primary accent CTA (DESIGN.md token). */}
           <Button
             type="button"
             variant="primary"
             size="small"
             onClick={runReview}
             disabled={!hasPending || reviewMemory.isPending}
-            aria-label="Review and summarize pending captures"
+            aria-label={t('pending.reviewAria')}
           >
             {reviewMemory.isPending ? (
               <Loader2 className="h-4 w-4 animate-spin" aria-hidden />
             ) : (
               <Sparkles className="h-4 w-4" aria-hidden />
             )}
-            {reviewMemory.isPending ? 'Summarizing…' : 'Review & Summarize'}
+            {reviewMemory.isPending ? t('pending.summarizing') : t('pending.review')}
           </Button>
         </div>
       </div>
 
       {reviews.isError ? (
-        <ErrorState description="Could not load pending reviews." onRetry={() => reviews.refetch()} />
+        <ErrorState description={t('pending.error')} onRetry={() => reviews.refetch()} />
       ) : reviews.isLoading ? (
-        <LoadingState label="Loading pending reviews…" />
+        <LoadingState label={t('pending.loading')} />
       ) : rows.length === 0 ? (
         <EmptyState
-          title="No pending reviews"
-          description="Captures from your sessions will appear here for review."
+          title={t('pending.emptyTitle')}
+          description={t('pending.emptyDescription')}
         />
       ) : (
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
@@ -130,11 +127,11 @@ export function PendingReviewsSection({ creatorId }: { creatorId: string }) {
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Kind</TableHead>
-                  <TableHead>Session</TableHead>
-                  <TableHead>Digest</TableHead>
-                  <TableHead>Captured</TableHead>
-                  <TableHead aria-label="Row actions" />
+                  <TableHead>{t('pending.columns.kind')}</TableHead>
+                  <TableHead>{t('pending.columns.session')}</TableHead>
+                  <TableHead>{t('pending.columns.digest')}</TableHead>
+                  <TableHead>{t('pending.columns.captured')}</TableHead>
+                  <TableHead aria-label={t('pending.columns.actions')} />
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -165,7 +162,7 @@ export function PendingReviewsSection({ creatorId }: { creatorId: string }) {
                           size="small"
                           onClick={() => confirmDelete(r)}
                           disabled={deleteReview.isPending}
-                          aria-label={`Delete pending review ${shortId(r.pending_id)}`}
+                            aria-label={`${t('pending.deleteRowAria', { id: shortId(r.pending_id) })}`}
                         >
                           <Trash2 className="h-4 w-4" aria-hidden />
                         </Button>
@@ -179,7 +176,7 @@ export function PendingReviewsSection({ creatorId }: { creatorId: string }) {
               isFetchingNextPage={reviews.isFetchingNextPage}
               hasNextPage={reviews.hasNextPage}
               fetchNextPage={() => reviews.fetchNextPage()}
-              label="Load more pending reviews"
+              label={t('pending.loadMore')}
             />
           </div>
 
@@ -187,7 +184,7 @@ export function PendingReviewsSection({ creatorId }: { creatorId: string }) {
             {selected ? (
               <Card className="shadow-card">
                 <CardHeader>
-                  <CardTitle className="text-heading-16">Pending Review Details</CardTitle>
+                  <CardTitle className="text-heading-16">{t('pending.detailTitle')}</CardTitle>
                   <CardDescription className="text-copy-13-mono">
                     {shortId(selected.pending_id)}
                   </CardDescription>
@@ -202,8 +199,8 @@ export function PendingReviewsSection({ creatorId }: { creatorId: string }) {
               </Card>
             ) : (
               <EmptyState
-                title="No pending review selected"
-                description="Select a row to inspect its full context, or delete it."
+                title={t('pending.noSelectionTitle')}
+                description={t('pending.noSelectionDescription')}
               />
             )}
           </aside>

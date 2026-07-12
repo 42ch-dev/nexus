@@ -4,7 +4,13 @@
     "cancel": "Cancel"
   },
   "status": {
-    "loading": "Loading…"
+    "loading": "Loading…",
+    "loadingMore": "Loading more…",
+    "loadMore": "Load more"
+  },
+  "error": {
+    "title": "Could not load this view",
+    "retry": "Try again"
   },
   "toast": {
     "error": "Error",

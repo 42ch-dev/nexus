@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Download, RefreshCw } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { LoadMore } from '@/components/load-more';
 import { FindingDetailPanel } from '@/components/findings/finding-detail-panel';
@@ -41,6 +42,7 @@ import type { FindingDetailResponse, ListFindingsQuery } from '@42ch/nexus-contr
  * Control-Room table, not a canvas graph.
  */
 export function FindingsPage() {
+  const { t } = useTranslation('findings');
   const works = useWorks({ limit: 100 });
   const workOptions = useMemo(() => flattenPages(works.data), [works.data]);
   const [workId, setWorkId] = useState('');
@@ -151,10 +153,8 @@ export function FindingsPage() {
       <CardHeader>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <CardTitle>Findings</CardTitle>
-            <CardDescription>
-              Triage findings — advance status, assign routing, or edit details inline.
-            </CardDescription>
+            <CardTitle>{t('page.title')}</CardTitle>
+            <CardDescription>{t('page.description')}</CardDescription>
           </div>
           <Button
             type="button"
@@ -162,17 +162,17 @@ export function FindingsPage() {
             size="small"
             onClick={() => findings.refetch()}
             disabled={!workId || findings.isFetching}
-            aria-label="Refresh findings"
+            aria-label={t('page.refreshAria')}
           >
             <RefreshCw className={`h-4 w-4 ${findings.isFetching ? 'animate-spin' : ''}`} aria-hidden />
-            Refresh
+            {t('page.refresh')}
           </Button>
         </div>
       </CardHeader>
       <CardContent>
         <div className="mb-4 flex flex-wrap items-end gap-3">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="findings-work">Work</Label>
+            <Label htmlFor="findings-work">{t('page.workLabel')}</Label>
             <Select
               id="findings-work"
               value={workId}
@@ -183,7 +183,7 @@ export function FindingsPage() {
               }}
               disabled={works.isLoading}
             >
-              <option value="">{works.isLoading ? 'Loading works…' : 'Select a Work'}</option>
+              <option value="">{works.isLoading ? t('page.loadingWorks') : t('page.selectWork')}</option>
               {workOptions.map((w) => (
                 <option key={w.work_id} value={w.work_id}>
                   {w.title || shortId(w.work_id)}
@@ -192,7 +192,7 @@ export function FindingsPage() {
             </Select>
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="findings-severity">Severity</Label>
+            <Label htmlFor="findings-severity">{t('page.severityLabel')}</Label>
             <input
               id="findings-severity"
               type="search"
@@ -201,12 +201,12 @@ export function FindingsPage() {
                 setSeverity(e.target.value);
                 setSelectedIds(new Set());
               }}
-              placeholder="e.g. critical"
+              placeholder={t('page.severityPlaceholder')}
               className="h-10 w-full max-w-[180px] rounded-control border border-gray-alpha-400 bg-background-100 px-3 text-copy-14 text-gray-1000 placeholder:text-gray-700"
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="findings-status">Status</Label>
+            <Label htmlFor="findings-status">{t('page.statusLabel')}</Label>
             <input
               id="findings-status"
               type="search"
@@ -215,7 +215,7 @@ export function FindingsPage() {
                 setStatus(e.target.value);
                 setSelectedIds(new Set());
               }}
-              placeholder="e.g. open"
+              placeholder={t('page.statusPlaceholder')}
               className="h-10 w-full max-w-[180px] rounded-control border border-gray-alpha-400 bg-background-100 px-3 text-copy-14 text-gray-1000 placeholder:text-gray-700"
             />
           </div>
@@ -227,35 +227,36 @@ export function FindingsPage() {
             data-testid="findings-bulk-bar"
           >
             <span className="text-copy-14 font-medium text-gray-1000">
-              {selectedIds.size} selected
+              {t('page.selected', { count: selectedIds.size })}
             </span>
             <div className="flex items-center gap-2">
               <Select
-                aria-label="Set status for selected findings"
+                aria-label={t('page.bulkSetStatusAria')}
                 value=""
                 onChange={(e) => runBatchStatus(e.target.value)}
                 disabled={isBusy}
                 className="h-8 w-[150px] text-copy-13"
               >
-                <option value="">Set status…</option>
+                <option value="">{t('page.bulkSetStatus')}</option>
                 {FINDING_STATUSES.map((s) => (
                   <option key={s} value={s}>
-                    {humanizeStatus(s)}
+                    {t(`status.${s}` as const)}
                   </option>
                 ))}
               </Select>
               <Select
-                aria-label="Assign target executor for selected findings"
+                aria-label={t('page.bulkAssignToAria')}
                 value=""
                 onChange={(e) => runBatchExecutor(e.target.value)}
                 disabled={isBusy}
                 className="h-8 w-[150px] text-copy-13"
               >
-                <option value="">Assign to…</option>
-                <option value="none">None</option>
-                <option value="write">Write</option>
-                <option value="brainstorm">Brainstorm</option>
-                <option value="master">Master</option>
+                <option value="">{t('page.bulkAssignTo')}</option>
+                {TARGET_EXECUTOR_OPTIONS.map((opt) => (
+                  <option key={opt} value={opt}>
+                    {t(`executors.${opt}` as const)}
+                  </option>
+                ))}
               </Select>
               <Button
                 type="button"
@@ -264,35 +265,35 @@ export function FindingsPage() {
                 onClick={clearSelection}
                 disabled={isBusy}
               >
-                Clear
+                {t('page.clearSelection')}
               </Button>
             </div>
           </div>
         )}
 
         {!workId ? (
-          <EmptyState title="Select a Work" description="Pick a Work above to see its findings." />
+          <EmptyState title={t('page.emptySelectTitle')} description={t('page.emptySelectDescription')} />
         ) : findings.isError ? (
-          <ErrorState description="Could not load findings for this Work." onRetry={() => findings.refetch()} />
+          <ErrorState description={t('page.errorDescription')} onRetry={() => findings.refetch()} />
         ) : findings.isLoading ? (
-          <LoadingState label="Loading findings…" />
+          <LoadingState label={t('page.loading')} />
         ) : rows.length === 0 ? (
-          <EmptyState title="No findings" description="No findings match these filters for this Work." />
+          <EmptyState title={t('page.noFindingsTitle')} description={t('page.noFindingsDescription')} />
         ) : (
           <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_360px]">
             <div className="min-w-0">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                <span className="text-copy-13 text-gray-700">{rows.length} finding(s)</span>
+                <span className="text-copy-13 text-gray-700">{t('page.count', { count: rows.length })}</span>
                 <Button
                   type="button"
                   variant="tertiary"
                   size="small"
                   onClick={exportCsv}
                   disabled={rows.length === 0}
-                  aria-label="Export findings to CSV"
+                  aria-label={t('page.exportAria')}
                 >
                   <Download className="mr-1.5 h-4 w-4" aria-hidden />
-                  Export CSV
+                  {t('page.exportCsv')}
                 </Button>
               </div>
               <Table>
@@ -301,7 +302,7 @@ export function FindingsPage() {
                     <TableHead className="w-10">
                       <input
                         type="checkbox"
-                        aria-label="Select all visible findings"
+                        aria-label={t('page.selectAllAria')}
                         checked={allSelected}
                         ref={(el) => {
                           if (el) el.indeterminate = someSelected && !allSelected;
@@ -310,12 +311,12 @@ export function FindingsPage() {
                         disabled={isBusy}
                       />
                     </TableHead>
-                    <TableHead>Severity</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Title</TableHead>
-                    <TableHead>Kind</TableHead>
-                    <TableHead>Chapter</TableHead>
-                    <TableHead>Assign To</TableHead>
+                    <TableHead>{t('page.columns.severity')}</TableHead>
+                    <TableHead>{t('page.columns.status')}</TableHead>
+                    <TableHead>{t('page.columns.title')}</TableHead>
+                    <TableHead>{t('page.columns.kind')}</TableHead>
+                    <TableHead>{t('page.columns.chapter')}</TableHead>
+                    <TableHead>{t('page.columns.assignTo')}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -331,7 +332,7 @@ export function FindingsPage() {
                         <TableCell onClick={(e) => e.stopPropagation()}>
                           <input
                             type="checkbox"
-                            aria-label={`Select finding ${shortId(f.finding_id)}`}
+                            aria-label={`${t('page.selectRowAria', { id: shortId(f.finding_id) })}`}
                             checked={isSelected}
                             onChange={() => toggleRow(f.finding_id)}
                             disabled={isBusy}
@@ -343,21 +344,22 @@ export function FindingsPage() {
                         <TableCell>
                           <FindingStatusBadge status={f.status} />
                         </TableCell>
-                        <TableCell className="text-gray-1000">{f.title || '(untitled finding)'}</TableCell>
-                        <TableCell className="text-gray-900">{humanizeStatus(f.kind)}</TableCell>
+                        <TableCell className="text-gray-1000">{f.title || t('page.untitledFinding')}</TableCell>
+                        <TableCell className="text-gray-900">{t(`kind.${f.kind}` as const)}</TableCell>
                         <TableCell className="tabular-nums text-gray-900">{f.chapter ?? '—'}</TableCell>
                         <TableCell onClick={(e) => e.stopPropagation()}>
                           <Select
-                            aria-label={`Assign target executor for finding ${shortId(f.finding_id)}`}
+                            aria-label={`${t('page.columns.assignTo')} ${shortId(f.finding_id)}`}
                             value={f.target_executor}
                             onChange={(e) => quickAssign(f.finding_id, e.target.value)}
                             disabled={isBusy}
                             className="h-8 w-[130px] text-copy-13"
                           >
-                            <option value="none">None</option>
-                            <option value="write">Write</option>
-                            <option value="brainstorm">Brainstorm</option>
-                            <option value="master">Master</option>
+                            {TARGET_EXECUTOR_OPTIONS.map((opt) => (
+                              <option key={opt} value={opt}>
+                                {t(`executors.${opt}` as const)}
+                              </option>
+                            ))}
                           </Select>
                         </TableCell>
                       </TableRow>
@@ -369,7 +371,7 @@ export function FindingsPage() {
                 isFetchingNextPage={findings.isFetchingNextPage}
                 hasNextPage={findings.hasNextPage}
                 fetchNextPage={() => findings.fetchNextPage()}
-                label="Load more findings"
+                label={t('page.count', { count: rows.length })}
               />
             </div>
 
@@ -377,7 +379,7 @@ export function FindingsPage() {
               {selected ? (
                 <Card className="shadow-card">
                   <CardHeader>
-                    <CardTitle className="text-heading-16">Finding Details</CardTitle>
+                    <CardTitle className="text-heading-16">{t('page.detailTitle')}</CardTitle>
                     <CardDescription className="text-copy-13-mono">
                       {shortId(selected.finding_id)}
                     </CardDescription>
@@ -388,8 +390,8 @@ export function FindingsPage() {
                 </Card>
               ) : (
                 <EmptyState
-                  title="No finding selected"
-                  description="Select a row to triage status, assign routing, or edit details."
+                  title={t('page.noSelectionTitle')}
+                  description={t('page.noSelectionDescription')}
                 />
               )}
             </aside>
@@ -399,4 +401,6 @@ export function FindingsPage() {
     </Card>
   );
 }
+
+const TARGET_EXECUTOR_OPTIONS = ['none', 'write', 'brainstorm', 'master'] as const;
 
