@@ -1,9 +1,12 @@
 import { NavLink, Outlet, useLocation } from 'react-router-dom';
 
+import { CanvasNavCommands } from '@/components/canvas/canvas-nav-commands';
+import { CommandPalette, openPalette } from '@/components/command-palette';
 import { DaemonStatusBar } from '@/components/layout/daemon-status-bar';
 import { Header } from '@/components/layout/header';
 import { MainBanner } from '@/components/layout/main-banner';
 import { Sidebar } from '@/components/layout/sidebar';
+import { useHotkey } from '@/lib/use-hotkey';
 import { cn } from '@/lib/utils';
 
 const ROUTE_TITLES: Record<string, string> = {
@@ -44,6 +47,11 @@ function useRouteTitle(): string {
  */
 export function RootLayout() {
   const title = useRouteTitle();
+
+  // ⌘K/Ctrl+K opens the command palette. The palette owns its open/close
+  // (module-level store in `command-palette.tsx`); the hotkey just calls
+  // `openPalette()`. See V1.111 P0 T3.
+  useHotkey('mod+k', () => openPalette());
 
   return (
     <div className="flex min-h-screen bg-background-100 text-gray-1000">
@@ -89,6 +97,15 @@ export function RootLayout() {
 
         <DaemonStatusBar />
       </div>
+
+      {/* V1.111 P0 T4 — registers canvas nav commands into the palette.
+          Effect-only; renders nothing. Mounted here (not in a canvas) so the
+          commands are available wherever the palette can open. */}
+      <CanvasNavCommands />
+
+      {/* Global command palette overlay (⌘K / Ctrl+K). Rendered last so it
+          layers above the main column. */}
+      <CommandPalette />
     </div>
   );
 }

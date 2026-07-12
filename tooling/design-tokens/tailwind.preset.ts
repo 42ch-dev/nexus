@@ -51,6 +51,8 @@ const preset: Partial<Config> = {
           500: cv('gray-alpha-500'),
           600: cv('gray-alpha-600'),
         },
+        // Overlay scrim — DESIGN.md §Elevation (backdrop fill behind overlays).
+        scrim: cv('scrim'),
         // Brand primitives — DESIGN.md + @42ch/nexus-ui/theme.css.
         brand: {
           'deep-blue': cv('brand-deep-blue'),
@@ -261,6 +263,8 @@ const preset: Partial<Config> = {
       maxWidth: {
         'setup-wizard-step-wizard-max-width': cv('setup-wizard-wizard-max-width'),
         'setup-wizard-surface-cta-primary-max-width': cv('setup-wizard-surface-cta-primary-max-width'),
+        // Dialog — DESIGN.md components.dialog.maxWidth (560px).
+        dialog: cv('dialog-max-width'),
       },
       // V1.105 P2: portrait wizard height cap (DESIGN.md setup-wizard-step.wizard-max-height)
       height: {

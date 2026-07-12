@@ -40,6 +40,15 @@ export interface ShellSidebarChromeProps {
     content: ReactNode,
     isActive: boolean,
   ) => ReactNode;
+  /**
+   * Optional per-item active-state override. When provided, the chrome calls it
+   * for every item INSTEAD of the built-in `activeRoute === item.to ||
+   * activeRoute.startsWith(item.to + '/')` prefix match. Lets hosts that need
+   * resolver-driven active state (e.g. Canvas surface matching) keep the
+   * chrome's markup SSOT instead of mirroring it. When absent, the built-in
+   * match is preserved (backward-compatible).
+   */
+  isActiveItem?: (item: ShellNavItem, activeRoute: string) => boolean;
   /** Optional custom renderer for the Settings footer utility link. */
   renderSettingsLink?: (
     to: string,
@@ -67,6 +76,7 @@ export function ShellSidebarChrome({
   footer,
   renderNavItem = defaultRenderNavItem,
   renderSettingsLink = defaultRenderSettingsLink,
+  isActiveItem,
   'data-testid': dataTestId,
 }: ShellSidebarChromeProps) {
   return (
@@ -108,6 +118,7 @@ export function ShellSidebarChrome({
             group={group}
             activeRoute={activeRoute}
             renderNavItem={renderNavItem}
+            isActiveItem={isActiveItem}
           />
         ))}
       </ul>
@@ -198,10 +209,12 @@ function NavGroupChrome({
   group,
   activeRoute,
   renderNavItem,
+  isActiveItem,
 }: {
   group: ShellNavGroup;
   activeRoute: string;
   renderNavItem: ShellSidebarChromeProps['renderNavItem'];
+  isActiveItem?: ShellSidebarChromeProps['isActiveItem'];
 }) {
   const [open, setOpen] = useState(group.defaultOpen ?? true);
   const hasMultiple = group.items.length > 1;
@@ -225,7 +238,9 @@ function NavGroupChrome({
       {open && (
         <ul className="flex flex-col gap-0.5">
           {group.items.map((item) => {
-            const isActive = activeRoute === item.to || activeRoute.startsWith(`${item.to}/`);
+            const isActive = isActiveItem
+              ? isActiveItem(item, activeRoute)
+              : activeRoute === item.to || activeRoute.startsWith(`${item.to}/`);
             return (
               <li key={item.to}>
                 {renderNavItem?.(

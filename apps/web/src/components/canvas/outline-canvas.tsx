@@ -13,6 +13,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { CanvasShell } from '@/components/canvas/canvas-shell';
 import { EmptyState, ErrorState, LoadingState } from '@/components/ui/states';
 import { useChapters, useWork, flattenPages } from '@/api/queries';
+import { useRegisterCommand } from '@/lib/canvas/command-registry';
 import { queryKeys } from '@/lib/nexus/query-keys';
 import {
   isOutlineConflictError,
@@ -88,6 +89,19 @@ export function OutlineCanvas({
   // Bumped after a successful refetch so the inspector's content editor resets
   // its local dirty state (e.g. following conflict resolution / reapply).
   const [contentVersion, setContentVersion] = useState(0);
+
+  // V1.111 P0 T4 — register the Outline graph↔list toggle in the palette. The
+  // functional `setShowAlt(v => !v)` updater is used so the handler (captured
+  // once on mount by `useRegisterCommand`) reads current state rather than the
+  // mount-time value. No node-create command: the Outline canvas exposes no
+  // chapter-creation entrypoint (the structure panel is select/move only).
+  useRegisterCommand({
+    id: 'outline.toggle-view',
+    label: 'Toggle Outline View',
+    group: 'Outline',
+    keywords: ['graph', 'list', 'alt view', 'switch'],
+    handler: () => setShowAlt((v) => !v),
+  });
 
   const chapters = useMemo(() => flattenPages(chaptersQuery.data), [chaptersQuery.data]);
 

@@ -59,6 +59,25 @@ const DEFAULT_FINGERPRINT = 'SHA256:aa:bb:cc:dd:ee:ff';
  * Presentational Connect-to-Daemon form chrome — four-state matrix for Studio.
  *
  * No daemon client, no IPC, no certificate validation. The host owns the actions.
+ *
+ * # Prop contract reconciliation (R-V1107QC1-W002)
+ *
+ * This chrome takes a `state` prop of type `ConnectDaemonFormState`
+ * (`firstUse` | `reconnectMatch` | `fingerprintMismatch` | `loopbackOnly`).
+ * The V1.107 delivery compass / studio-ui-tune spec named this concept
+ * `matrixState`; the implementation uses `state`. The two refer to the same
+ * four-state matrix — the naming drift is intentional and stays until the live
+ * `ConnectDaemonForm` (`../connect-daemon-form.tsx`) delegates rendering to
+ * this chrome. At that adoption point the prop is renamed in one move and the
+ * spec is updated to match; until then renaming the presentational-only prop
+ * would churn Studio fixtures for no behavioral gain.
+ *
+ * Supporting props the live form derives from daemon state — `savedConfig`,
+ * `fingerprintValue`, `fetchStatus`, `fetchErrorMessage`, `hasSavedConfig` —
+ * are intentionally NOT surfaced on this chrome. The chrome is a static fixture
+ * surface (Studio gallery) driven entirely by `state` + display defaults; the
+ * live form keeps those derived values internal. They will be threaded through
+ * when the live form adopts the chrome as its presentational layer.
  */
 export function ConnectDaemonFormChrome({
   state,

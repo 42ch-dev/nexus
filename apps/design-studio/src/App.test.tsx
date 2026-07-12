@@ -1180,7 +1180,7 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
   it('renders the Canvas section heading', () => {
     expect(
       screen.getByRole('heading', {
-        name: 'Canvas — Shell + context menu chrome',
+        name: 'Canvas — Three mirrored surfaces + shared chrome',
       }),
     ).toBeInTheDocument();
   });
@@ -1258,5 +1258,135 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
     // The fixture renders once; the global ThemeToggle applies .dark to <html>.
     // There should be exactly one canvas shell chrome instance.
     expect(screen.getAllByTestId('canvas-shell-chrome')).toHaveLength(1);
+  });
+
+  /* ---- Strategy surface chrome (V1.111 P2 T1) --------------------- */
+
+  it('renders the Strategy surface chrome fixture with shell + inspector + validation', () => {
+    const shell = screen.getByTestId('strategy-shell-chrome');
+    expect(shell).toBeInTheDocument();
+
+    // Inspector aside mirrors strategy-canvas/inspector-panel ReadOnlyDetails.
+    expect(
+      within(shell).getByTestId('strategy-inspector-chrome'),
+    ).toBeInTheDocument();
+
+    // Validation panel mirrors strategy-canvas/state-machine ValidationPanel.
+    expect(
+      within(shell).getByTestId('strategy-validation-chrome'),
+    ).toBeInTheDocument();
+  });
+
+  it('mirrors strategy node kinds (state / join / terminal) with status + kind tags', () => {
+    const shell = screen.getByTestId('strategy-shell-chrome');
+
+    // "Drafting" appears both as the state-node header (span[title]) and as the
+    // inspector aside heading (h3, read-only mirror of the selected node). The
+    // accent stripe lives on the state-node shell — target the span[title] copy.
+    const stateHeading = shell.querySelector<HTMLSpanElement>(
+      'span[title="Drafting"]',
+    );
+    expect(stateHeading).not.toBeNull();
+    const stateShell = stateHeading!.closest('[class*="border-l-canvas-strategy-accent"]');
+    expect(stateShell).not.toBeNull();
+
+    // stateKind mono tag — mirrors StrategyStateNode KindTag.
+    expect(within(shell).getAllByText('standard').length).toBeGreaterThanOrEqual(1);
+
+    // Status overlay uses semantic colors — Drafting is the current node.
+    expect(within(shell).getByText('Current')).toBeInTheDocument();
+
+    // Join node carries its converge-strategy chip.
+    expect(within(shell).getByText('Join · wait_for_all')).toBeInTheDocument();
+
+    // Terminal node shows the End marker.
+    expect(within(shell).getByText('End')).toBeInTheDocument();
+  });
+
+  it('renders labeled transition edges as static connectors (canvas-strategy-accent)', () => {
+    const shell = screen.getByTestId('strategy-shell-chrome');
+    const edges = within(shell).getAllByTestId('strategy-edge-sample');
+    expect(edges.length).toBeGreaterThanOrEqual(2);
+
+    // Edge labels mirror the RF `label: condition` on strategy-edge.
+    expect(within(shell).getByText('draft_ready')).toBeInTheDocument();
+    expect(within(shell).getByText('all_done')).toBeInTheDocument();
+  });
+
+  /* ---- World KB surface chrome (V1.111 P2 T2) ---------------------- */
+
+  it('renders the World KB surface chrome fixture with shell + inspector', () => {
+    const shell = screen.getByTestId('worldkb-shell-chrome');
+    expect(shell).toBeInTheDocument();
+
+    // Relationship inspector aside mirrors relationship-inspector.tsx.
+    expect(
+      within(shell).getByTestId('worldkb-inspector-chrome'),
+    ).toBeInTheDocument();
+  });
+
+  it('mirrors entity node cards with lifecycle badges for all four states', () => {
+    const shell = screen.getByTestId('worldkb-shell-chrome');
+
+    // Confirmed (selected) entity — mirrors WorldKbEntityNode selected paint.
+    const confirmedTitle = shell.querySelector<HTMLSpanElement>(
+      'span[title="Kael Veynor"]',
+    );
+    expect(confirmedTitle).not.toBeNull();
+    const confirmedShell = confirmedTitle!.closest(
+      '[class*="border-canvas-worldkb-entity-card-stroke-selected"]',
+    );
+    expect(confirmedShell).not.toBeNull();
+
+    // All four lifecycle badge labels render (promotion-* tokens).
+    expect(within(shell).getAllByText('Confirmed').length).toBeGreaterThanOrEqual(1);
+    expect(within(shell).getAllByText('Merged').length).toBeGreaterThanOrEqual(1);
+    expect(within(shell).getAllByText('Pending').length).toBeGreaterThanOrEqual(1);
+    expect(within(shell).getAllByText('Rejected').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('mirrors the computable chip on computable BlockType entities', () => {
+    const shell = screen.getByTestId('worldkb-shell-chrome');
+    // "Act" is a computable block kind → Computable chip renders.
+    expect(within(shell).getAllByText('Computable').length).toBeGreaterThanOrEqual(1);
+    // The Act entity shows its BlockType tag too.
+    expect(within(shell).getAllByText('Act').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('mirrors source-anchor provenance nodes + read-only provenance edges', () => {
+    const shell = screen.getByTestId('worldkb-shell-chrome');
+
+    // Source-anchor node — mirrors WorldKbSourceAnchorNode (sourceType + reference).
+    expect(within(shell).getAllByText('manuscript').length).toBeGreaterThanOrEqual(1);
+
+    // Source-anchor provenance edge — solid connector in source-anchor-edge token.
+    expect(
+      within(shell).getAllByTestId('worldkb-source-anchor-edge-sample').length,
+    ).toBeGreaterThanOrEqual(1);
+  });
+
+  it('mirrors typed relationship edges with confidence bands + suggested-dashed', () => {
+    const shell = screen.getByTestId('worldkb-shell-chrome');
+    const edges = within(shell).getAllByTestId('worldkb-relationship-edge-sample');
+    expect(edges.length).toBeGreaterThanOrEqual(3);
+
+    // Relationship kind labels mirror RELATIONSHIP_KIND_LABELS + custom label.
+    expect(within(shell).getAllByText('Allied With').length).toBeGreaterThanOrEqual(1);
+    expect(within(shell).getAllByText('Rival Of · suggested').length).toBeGreaterThanOrEqual(1);
+    expect(within(shell).getAllByText('Sworn Enemy').length).toBeGreaterThanOrEqual(1);
+
+    // Confidence band labels mirror CONFIDENCE_BAND_LABEL (low / mid / high).
+    expect(within(shell).getAllByText('High').length).toBeGreaterThanOrEqual(1);
+    expect(within(shell).getAllByText('Medium').length).toBeGreaterThanOrEqual(1);
+    expect(within(shell).getAllByText('Low').length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('mirrors the relationship inspector with grounded-badge and confidence', () => {
+    const inspector = screen.getByTestId('worldkb-inspector-chrome');
+    expect(inspector).toBeInTheDocument();
+    // Grounded badge mirrors the relationship-grounded-badge token.
+    expect(within(inspector).getByText('Grounded')).toBeInTheDocument();
+    // Confidence value renders numerically (formatConfidence).
+    expect(within(inspector).getByText('0.82')).toBeInTheDocument();
   });
 });

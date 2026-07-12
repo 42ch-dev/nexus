@@ -10,6 +10,7 @@ import { CanvasShell } from '@/components/canvas/canvas-shell';
 import { StrategyAltView } from '@/components/canvas/strategy-alt-view';
 import { strategyNodeTypes } from '@/components/canvas/strategy-nodes';
 import { ErrorState, LoadingState } from '@/components/ui/states';
+import { useRegisterCommand } from '@/lib/canvas/command-registry';
 
 import { StateInspector } from './strategy-canvas/inspectors/state-inspector';
 import { EdgeInspector, DraftEdgeInspector } from './strategy-canvas/inspectors/edge-inspector';
@@ -67,6 +68,25 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
   const [showAlt, setShowAlt] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
+
+  // V1.111 P0 T4 — register Strategy-surface palette commands. The functional
+  // `setShowAlt(v => !v)` / `setCreateDialogOpen(true)` updaters are used so the
+  // handlers (captured once on mount by `useRegisterCommand`) always reflect
+  // current state instead of closing over a stale `showAlt` flag.
+  useRegisterCommand({
+    id: 'strategy.toggle-view',
+    label: 'Toggle Strategy View',
+    group: 'Strategy',
+    keywords: ['graph', 'list', 'alt view', 'switch'],
+    handler: () => setShowAlt((v) => !v),
+  });
+  useRegisterCommand({
+    id: 'strategy.create-transition',
+    label: 'Create Transition',
+    group: 'Strategy',
+    keywords: ['add edge', 'new transition', 'state machine', 'link states'],
+    handler: () => setCreateDialogOpen(true),
+  });
 
   useEffect(() => {
     if (!isEditing || !selectedState) {
