@@ -44,9 +44,21 @@
     "running": "守护进程运行中",
     "healthy": "健康",
     "restart": "重启守护进程",
-    "restartConfirm": "重启守护进程将中断所有正在运行的编排任务。是否继续？",
+    "restartConfirm": "重启守护进程将中断任何正在运行的编排。是否继续？",
     "restartFailed": "守护进程重启失败",
-    "restartFailedFallback": "守护进程重启失败。"
+    "restartFailedFallback": "守护进程重启失败。",
+    "starting": "守护进程启动中…",
+    "reconnecting": "守护进程重新连接中",
+    "stopped": "守护进程已停止",
+    "portUnavailable": "端口不可用",
+    "didNotStart": "守护进程未能启动",
+    "statusUnknown": "守护进程状态未知",
+    "restarting": "正在重启…",
+    "restartButton": "重启守护进程",
+    "startingDescription": "Nexus 正在启动本地守护进程。",
+    "reconnectingDescription": "Nexus 正在重试本地守护进程连接。",
+    "stoppedDescription": "重启守护进程以使用本地工作区功能。",
+    "didNotStartDescription": "Nexus 无法启动其后台服务。请检查日志或尝试重启。"
   },
   "profile": {
     "sectionLabel": "配置文件",
@@ -66,6 +78,7 @@
     "daemonVersion": "守护进程 v{{version}}",
     "daemonOffline": "守护进程离线",
     "remoteDaemonOffline": "远程守护进程离线",
+    "cannotReachLocalDaemon": "无法连接到本地守护进程",
     "aria": {
       "online": "守护进程健康状态",
       "offline": "守护进程离线 — 前往连接设置"

@@ -22,6 +22,7 @@ import { useToast } from '@/lib/use-toast';
 
 export function SettingsWorkspaceSection() {
   const { t } = useTranslation('settings');
+  const { t: commonT } = useTranslation('common');
   const desktop = useDesktopCapabilities();
   const { toast } = useToast();
   const [path, setPath] = useState('');
@@ -42,8 +43,8 @@ export function SettingsWorkspaceSection() {
       })
       .catch((err) => {
         if (!cancelled) {
-          const description = errorMessage(err) || 'Could not load the workspace path.';
-          toast({ variant: 'error', title: 'Workspace path', description });
+          const description = errorMessage(err) || commonT('toast.workspacePathLoadFailed');
+          toast({ variant: 'error', title: commonT('toast.workspacePath'), description });
           console.error('Failed to load workspace root:', err);
         }
       })
@@ -66,8 +67,8 @@ export function SettingsWorkspaceSection() {
       setPath(selected);
       setSaved(true);
     } catch (err) {
-      const description = errorMessage(err) || 'Could not save the workspace path.';
-      toast({ variant: 'error', title: 'Workspace path', description });
+      const description = errorMessage(err) || commonT('toast.workspacePathSaveFailed');
+      toast({ variant: 'error', title: commonT('toast.workspacePath'), description });
       console.error('Failed to change workspace path:', err);
     } finally {
       setSaving(false);

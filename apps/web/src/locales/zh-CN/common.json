@@ -86,7 +86,10 @@
     "couldNotUpdateOutlineTimeline": "无法更新时间线",
     "couldNotSaveWorldKbEntity": "无法保存实体",
     "couldNotPromoteWorldKbCandidate": "无法提升候选",
-    "couldNotSaveWorldKbRelationship": "无法保存关系"
+    "couldNotSaveWorldKbRelationship": "无法保存关系",
+    "couldNotSaveConnection": "无法保存连接设置。",
+    "couldNotSwitchToLocalDaemon": "无法切换到本地守护进程。",
+    "couldNotSaveAgentProfile": "无法保存智能体配置文件。"
   },
   "toast": {
     "error": "错误",
@@ -131,6 +134,7 @@
     "saveAgentOnDesktop": "请在桌面端保存代理",
     "saveAgentOnDesktopDescription": "打开 Nexus 桌面应用以更改本地代理。",
     "couldNotSaveAgent": "无法保存代理",
+    "agentProfileSavedDescription": "正在使用 {{name}} 执行本地策略。",
     "daemonRestartFailed": "守护进程重启失败",
     "presetScaffolded": "预设模板已生成",
     "pathNotOpened": "路径未打开"

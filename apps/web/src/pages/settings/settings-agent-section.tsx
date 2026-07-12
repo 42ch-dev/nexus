@@ -8,6 +8,7 @@
  */
 
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -25,13 +26,6 @@ import {
   mapScanEntriesToPickerItems,
 } from '@/pages/setup-step-agent';
 import type { AgentScanEntry } from '@42ch/nexus-contracts';
-
-/** Locked by settings-agent-section.md — section body helper (sentence case). */
-const AGENT_SECTION_HELPER =
-  'Choose which local ACP agent Nexus uses for creative work.';
-
-const BROWSER_ONLY_HELPER =
-  'Agent selection is available on the desktop app only.';
 
 function resolvePickerStatus(
   isLoading: boolean,
@@ -71,6 +65,8 @@ function applySavedProfile(
 }
 
 export function SettingsAgentSection() {
+  const { t } = useTranslation('settings');
+  const { t: commonT } = useTranslation('common');
   const desktop = useDesktopCapabilities();
   const { toast } = useToast();
   const scan = useScanAgents({ filter: 'all', registry_refresh: true });
@@ -200,8 +196,8 @@ export function SettingsAgentSection() {
     if (!desktop) {
       toast({
         variant: 'info',
-        title: 'Save agent on desktop',
-        description: 'Open the Nexus desktop app to change your local agent.',
+        title: commonT('toast.saveAgentOnDesktop'),
+        description: commonT('toast.saveAgentOnDesktopDescription'),
       });
       return;
     }
@@ -214,12 +210,12 @@ export function SettingsAgentSection() {
       await desktop.setAgentProfile(name, launchCommand);
       toast({
         variant: 'success',
-        title: 'Agent profile saved',
-        description: `Using ${name} for local strategies.`,
+        title: commonT('toast.agentProfileSaved'),
+        description: commonT('toast.agentProfileSavedDescription', { name }),
       });
     } catch (err) {
-      const description = errorMessage(err) || 'Failed to save agent profile.';
-      toast({ variant: 'error', title: 'Could not save agent', description });
+      const description = errorMessage(err) || commonT('error.couldNotSaveAgentProfile');
+      toast({ variant: 'error', title: commonT('toast.couldNotSaveAgent'), description });
     } finally {
       setIsSaving(false);
     }
@@ -228,11 +224,11 @@ export function SettingsAgentSection() {
   return (
     <div className="flex flex-col gap-6" data-testid="settings-agent-section">
       <div className="flex flex-col gap-2">
-        <h3 className="text-heading-16 font-heading text-gray-1000">Agent</h3>
-        <p className="text-copy-14 text-gray-900">{AGENT_SECTION_HELPER}</p>
+        <h3 className="text-heading-16 font-heading text-gray-1000">{t('agent.title')}</h3>
+        <p className="text-copy-14 text-gray-900">{t('agent.helper')}</p>
         {!desktop ? (
           <p className="text-copy-13 text-gray-700" data-testid="settings-agent-browser-helper">
-            {BROWSER_ONLY_HELPER}
+            {t('agent.browserOnly')}
           </p>
         ) : null}
       </div>
@@ -249,12 +245,11 @@ export function SettingsAgentSection() {
           verifyStatus={verifyStatus}
           errorDescription={
             scan.isError
-              ? errorMessage(scan.error) ||
-                'The daemon did not respond to the agent scan request.'
+              ? errorMessage(scan.error) || t('agent.scanError')
               : undefined
           }
           onRetry={scan.isError ? () => void scan.refetch() : undefined}
-          emptyTitle="No agents found on PATH."
+          emptyTitle={t('agent.emptyTitle')}
         />
       </div>
 
@@ -266,7 +261,7 @@ export function SettingsAgentSection() {
           disabled={!canSave || isSaving}
           data-testid="settings-save-agent"
         >
-          {isSaving ? 'Saving…' : 'Save Agent'}
+          {isSaving ? t('agent.saving') : t('agent.save')}
         </Button>
       </div>
     </div>

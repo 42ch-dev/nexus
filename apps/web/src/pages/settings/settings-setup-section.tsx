@@ -8,6 +8,8 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
+import { useTranslation } from 'react-i18next';
+
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { SettingsSetupSectionChrome } from '@/components/settings/presentational/settings-setup-section-chrome';
@@ -16,12 +18,9 @@ import { errorMessage } from '@/lib/error-message';
 import { useSetupCompleted } from '@/lib/setup-completed-context';
 import { useToast } from '@/lib/use-toast';
 
-const SETUP_CONFIRM_TITLE = 'Re-run Setup?';
-
-const SETUP_CONFIRM_BODY =
-  'This restarts the setup wizard from the beginning. Your workspace path and agent profile are not deleted.';
-
 export function SettingsSetupSection() {
+  const { t } = useTranslation('settings');
+  const { t: commonT } = useTranslation('common');
   const desktop = useDesktopCapabilities();
   const { setCompleted } = useSetupCompleted();
   const navigate = useNavigate();
@@ -38,10 +37,10 @@ export function SettingsSetupSection() {
       setConfirmOpen(false);
       navigate('/setup', { replace: true });
     } catch (err) {
-      const description = errorMessage(err) || 'Could not clear the setup marker.';
+      const description = errorMessage(err) || t('setup.couldNotClear');
       toast({
         variant: 'error',
-        title: 'Could not re-run setup',
+        title: t('setup.couldNotReRun'),
         description,
       });
     } finally {
@@ -55,6 +54,11 @@ export function SettingsSetupSection() {
         data-testid="settings-setup-section"
         desktopAvailable={Boolean(desktop)}
         onReRunSetup={() => setConfirmOpen(true)}
+        title={t('setup.title')}
+        helper={t('setup.helper')}
+        rerunLabel={t('setup.rerun')}
+        browserOnlyHelper={t('setup.browserOnly')}
+        browserTooltip={t('setup.browserTooltip')}
       />
 
       <Dialog
@@ -65,7 +69,7 @@ export function SettingsSetupSection() {
           setConfirmOpen(open);
         }}
       >
-        <DialogContent title={SETUP_CONFIRM_TITLE} description={SETUP_CONFIRM_BODY}>
+        <DialogContent title={t('setup.confirmTitle')} description={t('setup.confirmBody')}>
           <div
             className="flex justify-end gap-3"
             data-testid="settings-rerun-setup-confirm"
@@ -77,7 +81,7 @@ export function SettingsSetupSection() {
               disabled={isConfirming}
               onClick={() => setConfirmOpen(false)}
             >
-              Cancel
+              {commonT('action.cancel')}
             </Button>
             <Button
               type="button"
@@ -88,7 +92,7 @@ export function SettingsSetupSection() {
                 void handleConfirm();
               }}
             >
-              Re-run Setup
+              {t('setup.rerun')}
             </Button>
           </div>
         </DialogContent>

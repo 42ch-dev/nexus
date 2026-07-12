@@ -4,6 +4,7 @@ import { NavLink } from 'react-router-dom';
 import { DaemonHealthIndicatorChrome } from '@/components/layout/presentational/daemon-health-indicator-chrome';
 import { useConnectionConfig, useNexusClient } from '@/lib/client-context';
 import { NexusClientError } from '@/lib/nexus';
+import { useTranslation } from 'react-i18next';
 
 /**
  * Daemon health indicator — polls `GET /v1/daemon/runtime/health` and shows
@@ -19,6 +20,7 @@ type HealthState =
 const POLL_MS = 10_000;
 
 export function DaemonHealthIndicator() {
+  const { t } = useTranslation('shell');
   const client = useNexusClient();
   const config = useConnectionConfig();
   const [state, setState] = useState<HealthState>({ kind: 'unknown' });
@@ -35,7 +37,7 @@ export function DaemonHealthIndicator() {
       } catch (error) {
         if (!mounted.current) return;
         const message =
-          error instanceof NexusClientError ? error.message : 'Cannot reach local daemon';
+          error instanceof NexusClientError ? error.message : t('health.cannotReachLocalDaemon');
         setState({ kind: 'offline', message });
       } finally {
         if (mounted.current) timer = setTimeout(check, POLL_MS);

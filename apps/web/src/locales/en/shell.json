@@ -46,7 +46,19 @@
     "restart": "Restart daemon",
     "restartConfirm": "Restarting the daemon will interrupt any running orchestration. Continue?",
     "restartFailed": "Daemon restart failed",
-    "restartFailedFallback": "Daemon restart failed."
+    "restartFailedFallback": "Daemon restart failed.",
+    "starting": "Daemon starting…",
+    "reconnecting": "Daemon reconnecting",
+    "stopped": "Daemon stopped",
+    "portUnavailable": "Port unavailable",
+    "didNotStart": "Daemon did not start",
+    "statusUnknown": "Daemon status unknown",
+    "restarting": "Restarting…",
+    "restartButton": "Restart Daemon",
+    "startingDescription": "Nexus is starting the local daemon.",
+    "reconnectingDescription": "Nexus is retrying the local daemon connection.",
+    "stoppedDescription": "Restart the daemon to use local workspace features.",
+    "didNotStartDescription": "Nexus could not start its background service. Check the logs or try restarting."
   },
   "profile": {
     "sectionLabel": "Profiles",
@@ -66,6 +78,7 @@
     "daemonVersion": "Daemon v{{version}}",
     "daemonOffline": "Daemon offline",
     "remoteDaemonOffline": "Remote daemon offline",
+    "cannotReachLocalDaemon": "Cannot reach local daemon",
     "aria": {
       "online": "Daemon health",
       "offline": "Daemon offline — go to connection settings"
