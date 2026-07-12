@@ -37,12 +37,12 @@
       "id": "2026-07-12-v1.113-ui-normalization",
       "title": "P1 - UI Normalization",
       "file": "plans/2026-07-12-v1.113-ui-normalization.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@frontend-dev"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.113",
         "ui",
@@ -51,7 +51,7 @@
       ],
       "created_at": "2026-07-12",
       "updated_at": "2026-07-12",
-      "notes": "Phase 1: compass + plan written; awaiting Review & Edit chain",
+      "notes": "Phase 2: SDD T1-T3 done, QC tri Approve after fix-wave, QA Pass",
       "metadata": {
         "iteration_refs": [
           "V1.113"
@@ -1060,9 +1060,12 @@
         "decision": "defer",
         "owner": "@architect",
         "target": "post-V1.111",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-12-v1.111-frontend-consolidation-sweep.md",
-        "note": "qc1 S-002 + T4 audit. Add tokens when a second consumer appears. QC source: qc-consolidated.md"
+        "note": "qc1 S-002 + T4 audit. Add tokens when a second consumer appears. QC source: qc-consolidated.md Closed by V1.113 P1: tokens added + opacity-50 sweep.",
+        "closed_at": "2026-07-12",
+        "closure_note": "DESIGN.md + DESIGN.dark.md tokens added (sidebar-nav.disabledOpacity/disabledTextColor, listbox.maxHeight, states.disabled.opacity); all inline opacity-50 and max-h-[320px] usages swept to shared tokens; verified by QA (989 tests pass, typecheck clean, build clean, grep audit clean)",
+        "closure_evidence": "plan/v1.113-p1-ui-normalization: e2d9c017, 42161e8c, fd4a82bc, dc3518ab"
       }
     ],
     "2026-07-12-v1.111-sidebar-canvas-ia": [
