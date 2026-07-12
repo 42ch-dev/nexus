@@ -5,7 +5,8 @@
  * Section bodies live in sibling route modules. Workspace nav added in V1.104.
  */
 
-import { Bot, FolderOpen, Settings, type LucideIcon } from 'lucide-react';
+import { Bot, FolderOpen, Palette, Settings, type LucideIcon } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { NavLink, Outlet } from 'react-router-dom';
 
 import { cn } from '@/lib/utils';
@@ -13,29 +14,37 @@ import { cn } from '@/lib/utils';
 const SHELL_HELPER =
   'Manage your local agent, daemon connection, and setup options from one place.';
 
-/** V1.106 P2 three-tab nav — Agent / Workspace / Advanced. */
-const SETTINGS_SECTIONS: {
-  id: 'agent' | 'workspace' | 'advanced';
-  label: string;
-  to: string;
-  icon: LucideIcon;
-}[] = [
-  { id: 'agent', label: 'Agent', to: '/settings/agent', icon: Bot },
-  {
-    id: 'workspace',
-    label: 'Workspace',
-    to: '/settings/workspace',
-    icon: FolderOpen,
-  },
-  {
-    id: 'advanced',
-    label: 'Advanced',
-    to: '/settings/advanced',
-    icon: Settings,
-  },
-];
-
 export function SettingsShellLayout() {
+  const { t } = useTranslation('settings');
+
+  /** V1.112 P0 four-tab nav — Agent / Workspace / Appearance / Advanced. */
+  const SETTINGS_SECTIONS: {
+    id: 'agent' | 'workspace' | 'appearance' | 'advanced';
+    label: string;
+    to: string;
+    icon: LucideIcon;
+  }[] = [
+    { id: 'agent', label: 'Agent', to: '/settings/agent', icon: Bot },
+    {
+      id: 'workspace',
+      label: 'Workspace',
+      to: '/settings/workspace',
+      icon: FolderOpen,
+    },
+    {
+      id: 'appearance',
+      label: t('nav.appearance'),
+      to: '/settings/appearance',
+      icon: Palette,
+    },
+    {
+      id: 'advanced',
+      label: 'Advanced',
+      to: '/settings/advanced',
+      icon: Settings,
+    },
+  ];
+
   return (
     <div
       className="flex flex-col gap-6 max-w-2xl w-full"
