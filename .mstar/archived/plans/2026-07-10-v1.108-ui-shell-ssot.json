@@ -1,0 +1,33 @@
+{
+  "id": "2026-07-10-v1.108-ui-shell-ssot",
+  "title": "P1 — UI shell SSOT + AgentPicker + canvas Surfaces",
+  "file": "plans/2026-07-10-v1.108-ui-shell-ssot.md",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": [
+    "@frontend-dev",
+    "@architect"
+  ],
+  "progress": 100,
+  "tags": [
+    "v1.108",
+    "ui",
+    "shell",
+    "studio-first",
+    "must"
+  ],
+  "created_at": "2026-07-10",
+  "updated_at": "2026-07-11",
+  "notes": "Done — SDD T1-T4 + QC tri Approve with residuals + QA Pass; merged to iteration/v1.108",
+  "metadata": {
+    "iteration_refs": [
+      "V1.108"
+    ],
+    "spec_integration_branch": "iteration/v1.108",
+    "merge_target": "iteration/v1.108",
+    "working_branch": "plan/v1.108-p1-ui-shell-ssot",
+    "primary_spec": ".mstar/iterations/v1.108/specs/ui-shell-ssot.md",
+    "wire_contracts_changed": false,
+    "tier": "Must"
+  }
+}

@@ -1,0 +1,13 @@
+[
+  {
+    "id": "R-V1111P3QC1-W001",
+    "title": "tech_debt_summary.by_severity has non-canonical 'suggestion' bucket (rollup norm_sev() maps warning->low not suggestion); DRIFT flagged. Pre-existing (17 entries pre-P3; P3 archived 2)",
+    "severity": "low",
+    "decision": "defer",
+    "owner": "@fullstack-dev",
+    "target": "spec-hygiene",
+    "lifecycle": "resolved",
+    "tracking_link": ".mstar/plans/2026-07-12-v1.111-frontend-consolidation-sweep.md",
+    "note": "qc1 F-001. Pre-existing metadata-schema drift; P3 improved it. Canonical-severity normalization is the separate spec-hygiene pass (P3 non-goal). QC source: qc-consolidated.md Resolved 2026-07-12: suggestion→nit normalization + tech_debt_summary refresh."
+  }
+]

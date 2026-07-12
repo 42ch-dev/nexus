@@ -1,0 +1,35 @@
+{
+  "id": "2026-07-12-v1.111-frontend-consolidation-sweep",
+  "title": "P3 — Frontend Consolidation & UI Polish Sweep",
+  "file": "plans/2026-07-12-v1.111-frontend-consolidation-sweep.md",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": [
+    "@frontend-dev",
+    "@architect",
+    "@qa-engineer"
+  ],
+  "progress": 100,
+  "tags": [
+    "v1.111",
+    "frontend",
+    "consolidation",
+    "residuals",
+    "ui-polish",
+    "stretch"
+  ],
+  "created_at": "2026-07-12",
+  "updated_at": "2026-07-12",
+  "notes": "Done — SDD T1-T5 + QC tri Approve with residuals (2 defer) + QA Pass; merged to iteration/v1.111",
+  "metadata": {
+    "iteration_refs": [
+      "V1.111"
+    ],
+    "spec_integration_branch": "iteration/v1.111",
+    "merge_target": "iteration/v1.111",
+    "working_branch": "plan/v1.111-p3-frontend-consolidation",
+    "primary_spec": ".mstar/iterations/v1.111/specs/frontend-consolidation-sweep.md",
+    "wire_contracts_changed": false,
+    "tier": "Stretch"
+  }
+}
