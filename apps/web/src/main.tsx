@@ -6,6 +6,7 @@ import { BrowserRouter } from 'react-router-dom';
 import { App } from '@/App';
 import { ClientProvider } from '@/lib/client-context';
 import { ThemeProvider } from '@/components/theme-provider';
+import { LocaleProvider } from '@/components/locale-provider';
 import { ToastProvider, Toaster, useToast } from '@/lib/use-toast';
 import { NexusClientError } from '@/lib/nexus';
 import './index.css';
@@ -59,12 +60,14 @@ if (!rootElement) throw new Error('Root element #root not found');
 createRoot(rootElement).render(
   <StrictMode>
     <ThemeProvider>
-      <ToastProvider>
-        <AppProviders>
-          <App />
-        </AppProviders>
-        <Toaster />
-      </ToastProvider>
+      <LocaleProvider>
+        <ToastProvider>
+          <AppProviders>
+            <App />
+          </AppProviders>
+          <Toaster />
+        </ToastProvider>
+      </LocaleProvider>
     </ThemeProvider>
   </StrictMode>,
 );
