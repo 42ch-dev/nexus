@@ -7,19 +7,24 @@
  * baseline P-last can extend to the remaining screens.
  */
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 import { BrowserClient } from '@/lib/nexus';
+import { i18n } from '@/lib/i18n/config';
 import { WorksPage } from '@/pages/works-page';
-import { screen, waitFor } from '@testing-library/react';
+import { act, screen, waitFor } from '@testing-library/react';
 
 const client = () => new BrowserClient();
 
 function renderWorks() {
   return renderInApp(<WorksPage />, { client: client() });
 }
+
+beforeEach(async () => {
+  await i18n.changeLanguage('en');
+});
 
 describe('WorksPage', () => {
   it('renders the works table on a successful list', async () => {
@@ -95,5 +100,35 @@ describe('WorksPage', () => {
     expect(createButtons.length).toBeGreaterThanOrEqual(1);
     // Sanity: the table column header / title text is present.
     expect(screen.getByText('Works')).toBeInTheDocument();
+  });
+
+  it('switches to zh-CN locale without remounting', async () => {
+    useHandlers(
+      http.get('/v1/daemon/works', () =>
+        HttpResponse.json({
+          items: [
+            {
+              work_id: 'w-123',
+              title: 'Galaxy Novel',
+              status: 'active',
+              intake_status: 'complete',
+              primary_preset_id: 'novel-writing',
+              updated_at: '2026-06-24T00:00:00Z',
+            },
+          ],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+    );
+
+    renderWorks();
+    expect(await screen.findByText('Works')).toBeInTheDocument();
+
+    act(() => {
+      i18n.changeLanguage('zh-CN');
+    });
+
+    await waitFor(() => expect(screen.getByText('作品')).toBeInTheDocument());
+    expect(screen.getByText('标题')).toBeInTheDocument();
   });
 });
