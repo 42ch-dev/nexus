@@ -32,6 +32,7 @@ export function usePatchStrategyPromptTemplate(): UseMutationResult<
 > {
   const client = useNexusClient();
   const qc = useQueryClient();
+  const { t } = useTranslation('canvas');
   const { toast } = useToast();
   return useMutation({
     mutationFn: (args: PatchStrategyPromptTemplateArgs) => {
@@ -45,7 +46,7 @@ export function usePatchStrategyPromptTemplate(): UseMutationResult<
       return client.strategyPatchPromptTemplate(args.strategyId, args.stateId, req);
     },
     onSuccess: (_data, args) => {
-      toast({ variant: 'success', title: 'Prompt template saved', description: args.templateRef });
+      toast({ variant: 'success', title: t('strategy.inspector.prompt.updated'), description: args.templateRef });
       void qc.invalidateQueries({ queryKey: queryKeys.presets.detail(args.strategyId) });
     },
     onError: () => {},

@@ -14,6 +14,7 @@ import userEvent from '@testing-library/user-event';
 
 import { PathContextMenu } from '@/components/path-context-menu';
 import { renderInApp } from '@/test/test-providers';
+import '@/lib/i18n/config';
 import type { DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
 
 const POS = { x: 10, y: 10 };

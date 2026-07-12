@@ -44,6 +44,7 @@ export function usePatchStrategyState(): UseMutationResult<
 > {
   const client = useNexusClient();
   const qc = useQueryClient();
+  const { t } = useTranslation('canvas');
   const { toast } = useToast();
   return useMutation({
     mutationFn: (args: PatchStrategyStateArgs) =>
@@ -51,7 +52,7 @@ export function usePatchStrategyState(): UseMutationResult<
     onSuccess: (_data, args) => {
       // Show the new label after a rename; fall back to the immutable id for
       // description-only edits (R-V171P1-QC1-003 B10).
-      toast({ variant: 'success', title: 'State updated', description: args.label ?? args.stateId });
+      toast({ variant: 'success', title: t('strategy.inspector.state.updated'), description: args.label ?? args.stateId });
       void qc.invalidateQueries({ queryKey: queryKeys.presets.detail(args.strategyId) });
     },
     onError: () => {},

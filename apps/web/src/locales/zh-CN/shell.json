@@ -79,5 +79,104 @@
       "online": "守护进程健康状态",
       "offline": "守护进程离线 — 前往连接设置"
     }
+  },
+  "scaffoldPreset": {
+    "title": "生成预设模板",
+    "description": "从名称创建一个新的用户预设。",
+    "nameLabel": "名称",
+    "namePlaceholder": "例如 my-chapter-preset",
+    "validationError": "名称为必填项。",
+    "creating": "正在生成预设模板…",
+    "submit": "生成预设模板"
+  },
+  "workCreate": {
+    "title": "创建作品",
+    "description": "在本地运行时中启动一个新的创作作品。",
+    "titleLabel": "标题",
+    "titlePlaceholder": "作品名称",
+    "goalLabel": "长期目标",
+    "goalPlaceholder": "这部作品的发展方向",
+    "ideaLabel": "初始想法",
+    "ideaPlaceholder": "运行时将要构建的种子",
+    "profileLabel": "作品类型",
+    "validationError": "标题、长期目标和初始想法为必填项。",
+    "creating": "正在创建作品…",
+    "create": "创建作品",
+    "toastCreated": "作品已创建"
+  },
+  "works": {
+    "title": "作品",
+    "description": "所有作品、状态以及最后更改时间。",
+    "filterPlaceholder": "按状态筛选（例如 active）",
+    "refreshAria": "刷新作品",
+    "create": "创建作品",
+    "emptyTitle": "暂无作品",
+    "emptyDescription": "创建作品以启动本地循环。",
+    "columns": {
+      "title": "标题",
+      "status": "状态",
+      "intake": "接入",
+      "preset": "预设",
+      "updated": "更新时间"
+    }
+  },
+  "workDetail": {
+    "loading": "正在加载作品…",
+    "notFoundTitle": "作品未找到",
+    "notFoundDescription": "该作品不存在或守护进程无法返回。",
+    "backToWorks": "返回作品列表",
+    "updateWork": "更新作品",
+    "longTermGoal": "长期目标",
+    "initialIdea": "初始想法",
+    "intakeStatus": "接入状态",
+    "currentStage": "当前阶段",
+    "profile": "类型",
+    "primaryPreset": "主预设",
+    "world": "世界",
+    "storyRef": "故事引用",
+    "created": "创建时间",
+    "updated": "更新时间",
+    "chapterProgress": "章节进度",
+    "chapterNoTotal": "第 {{chapter}} 章（无计划总数）。",
+    "openOutline": "打开大纲",
+    "openStrategy": "打开策略",
+    "openWorldKb": "打开世界知识库",
+    "archiveWork": "归档作品",
+    "confirmArchive": "确认归档",
+    "findings": "发现",
+    "findingsDescription": "针对此作品的发现，可按严重程度筛选。",
+    "findingsError": "无法加载此作品的发现。",
+    "findingsLoading": "正在加载发现…",
+    "noFindings": "此作品暂无发现记录。",
+    "loadMoreFindings": "加载更多发现"
+  },
+  "schedule": {
+    "title": "日程",
+    "description": "每个作品的 cron 角色、状态和最后更新时间。",
+    "refreshAria": "刷新日程",
+    "emptyTitle": "暂无日程",
+    "emptyDescription": "作品配置 cron 角色后，日程将显示在此处。",
+    "columns": {
+      "schedule": "日程",
+      "label": "标签",
+      "status": "状态",
+      "preset": "预设",
+      "coreCtx": "核心上下文",
+      "updated": "更新时间"
+    }
+  },
+  "sessions": {
+    "title": "会话",
+    "description": "运行时正在执行的内容。",
+    "refreshAria": "刷新会话",
+    "emptyTitle": "无活跃会话",
+    "emptyDescription": "运行开始运行后，编排会话将显示在此处。",
+    "columns": {
+      "session": "会话",
+      "status": "状态",
+      "preset": "预设",
+      "creator": "创作者",
+      "currentTask": "当前任务"
+    }
   }
 }

@@ -2,6 +2,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 
 import { App } from '@/App';
 import { ClientProvider } from '@/lib/client-context';
@@ -19,14 +20,15 @@ import './index.css';
  */
 function useQueryErrorToast() {
   const { toast } = useToast();
+  const { t } = useTranslation('common');
   return (error: unknown) => {
     const description =
       error instanceof NexusClientError
         ? error.message
         : error instanceof Error
           ? error.message
-          : 'Unexpected error.';
-    toast({ variant: 'error', title: 'Request failed', description });
+          : t('error.unexpected');
+    toast({ variant: 'error', title: t('error.requestFailed'), description });
   };
 }
 

@@ -202,6 +202,11 @@
       "join": "合并 · {{strategy}}",
       "currentExecutionNode": "当前执行节点"
     },
+    "toast": {
+      "runQueued": "策略运行已排队",
+      "ideaSent": "想法已发送至策略",
+      "resumed": "策略已恢复"
+    },
     "draftTransitionLabel": "草稿转换",
     "draftTransitionEditor": "草稿转换编辑器",
     "revisionBadge": {
@@ -267,7 +272,8 @@
         "save": "保存状态",
         "saved": "已保存",
         "saveFailed": "保存失败",
-        "saving": "保存中…"
+        "saving": "保存中…",
+        "updated": "状态已更新"
       },
       "transition": {
         "title": "转换",
@@ -276,7 +282,8 @@
         "save": "保存转换",
         "saved": "已保存",
         "saveFailed": "保存失败",
-        "saving": "保存中…"
+        "saving": "保存中…",
+        "updated": "转换已更新"
       },
       "prompt": {
         "title": "提示词",
@@ -285,7 +292,8 @@
         "save": "保存提示词",
         "saved": "已保存",
         "saveFailed": "保存失败",
-        "saving": "保存中…"
+        "saving": "保存中…",
+        "updated": "提示词模板已保存"
       },
       "stateId": "状态 ID",
       "status": "状态",

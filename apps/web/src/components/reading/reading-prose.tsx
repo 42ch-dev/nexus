@@ -42,6 +42,7 @@ export const ReadingProse = forwardRef<HTMLDivElement, ReadingProseProps>(functi
   ref,
 ) {
   const { t } = useTranslation('reading');
+  const { t: commonT } = useTranslation('common');
   const { toast } = useToast();
   const menu = useContextMenu();
 
@@ -54,12 +55,12 @@ export const ReadingProse = forwardRef<HTMLDivElement, ReadingProseProps>(functi
   async function copyPath() {
     try {
       await navigator.clipboard.writeText(path);
-      toast({ variant: 'success', title: 'Path copied' });
+      toast({ variant: 'success', title: commonT('toast.pathCopied') });
     } catch {
       toast({
         variant: 'error',
-        title: 'Path not copied',
-        description: 'Copy it manually from the details panel.',
+        title: commonT('toast.pathNotCopied'),
+        description: commonT('toast.pathNotCopiedDescription'),
       });
     }
   }

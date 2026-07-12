@@ -34,6 +34,7 @@ export function usePatchStrategyTransition(): UseMutationResult<
 > {
   const client = useNexusClient();
   const qc = useQueryClient();
+  const { t } = useTranslation('canvas');
   const { toast } = useToast();
   return useMutation({
     mutationFn: (args: PatchStrategyTransitionArgs) =>
@@ -49,7 +50,7 @@ export function usePatchStrategyTransition(): UseMutationResult<
     onSuccess: (_data, args) => {
       toast({
         variant: 'success',
-        title: 'Transition updated',
+        title: t('strategy.inspector.transition.updated'),
         description: `${args.sourceStateId} → ${args.newTarget ?? args.oldTarget}`,
       });
       void qc.invalidateQueries({ queryKey: queryKeys.presets.detail(args.strategyId) });

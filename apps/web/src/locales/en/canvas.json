@@ -207,6 +207,11 @@
       "join": "Join · {{strategy}}",
       "currentExecutionNode": "Current execution node"
     },
+    "toast": {
+      "runQueued": "Strategy run queued",
+      "ideaSent": "Idea sent to Strategy",
+      "resumed": "Strategy resumed"
+    },
     "draftTransitionLabel": "Draft transition",
     "draftTransitionEditor": "Draft transition editor",
     "revisionBadge": {
@@ -272,7 +277,8 @@
         "save": "Save State",
         "saved": "Saved",
         "saveFailed": "Save failed",
-        "saving": "Saving…"
+        "saving": "Saving…",
+        "updated": "State updated"
       },
       "transition": {
         "title": "Transition",
@@ -281,7 +287,8 @@
         "save": "Save Transition",
         "saved": "Saved",
         "saveFailed": "Save failed",
-        "saving": "Saving…"
+        "saving": "Saving…",
+        "updated": "Transition updated"
       },
       "prompt": {
         "title": "Prompt",
@@ -290,7 +297,8 @@
         "save": "Save Prompt",
         "saved": "Saved",
         "saveFailed": "Save failed",
-        "saving": "Saving…"
+        "saving": "Saving…",
+        "updated": "Prompt template saved"
       },
       "stateId": "State ID",
       "status": "Status",
