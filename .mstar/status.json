@@ -3,70 +3,98 @@
   "updated_at": "2026-07-12",
   "plans": [
     {
-      "id": "2026-07-12-v1.112-i18n-foundation",
-      "title": "P0 — i18n foundation + Appearance",
-      "file": "plans/2026-07-12-v1.112-i18n-foundation.md",
-      "status": "Done",
+      "id": "2026-07-12-v1.113-i18n-completion",
+      "title": "P0 - i18n Completion",
+      "file": "plans/2026-07-12-v1.113-i18n-completion.md",
+      "status": "Todo",
       "owner": "@project-manager",
       "agents": [
-        "@frontend-dev",
-        "@architect"
+        "@frontend-dev"
       ],
-      "progress": 100,
+      "progress": 0,
       "tags": [
-        "v1.112",
+        "v1.113",
         "i18n",
-        "settings",
-        "appearance",
+        "completion",
         "must"
       ],
       "created_at": "2026-07-12",
       "updated_at": "2026-07-12",
-      "notes": "Phase 2: SDD T1-T4 done, QC tri Approve with residuals (6 R#), QA Pass, merged to integration",
+      "notes": "Phase 1: compass + plan written; awaiting Review & Edit chain",
       "metadata": {
         "iteration_refs": [
-          "V1.112"
+          "V1.113"
         ],
-        "spec_integration_branch": "iteration/v1.112",
-        "merge_target": "iteration/v1.112",
-        "working_branch": "plan/v1.112-p0-i18n-foundation",
-        "primary_spec": ".mstar/iterations/v1.112/specs/i18n-foundation.md",
+        "spec_integration_branch": "iteration/v1.113",
+        "merge_target": "iteration/v1.113",
+        "working_branch": "plan/v1.113-p0-i18n-completion",
+        "primary_spec": ".mstar/iterations/v1.113/specs/i18n-completion.md",
         "wire_contracts_changed": false,
         "tier": "Must"
       }
     },
     {
-      "id": "2026-07-12-v1.112-i18n-ui-migration",
-      "title": "P1 — Full user-facing UI migration",
-      "file": "plans/2026-07-12-v1.112-i18n-ui-migration.md",
-      "status": "Done",
+      "id": "2026-07-12-v1.113-ui-normalization",
+      "title": "P1 - UI Normalization",
+      "file": "plans/2026-07-12-v1.113-ui-normalization.md",
+      "status": "Todo",
       "owner": "@project-manager",
       "agents": [
-        "@frontend-dev",
-        "@architect"
+        "@frontend-dev"
       ],
-      "progress": 100,
+      "progress": 0,
       "tags": [
-        "v1.112",
-        "i18n",
-        "migration",
+        "v1.113",
+        "ui",
+        "normalization",
         "must"
       ],
       "created_at": "2026-07-12",
       "updated_at": "2026-07-12",
-      "notes": "Phase 2: SDD T1-T4 done, QC Approve with residuals (3 R#), QA Pass, merged to integration",
+      "notes": "Phase 1: compass + plan written; awaiting Review & Edit chain",
       "metadata": {
         "iteration_refs": [
-          "V1.112"
+          "V1.113"
         ],
-        "spec_integration_branch": "iteration/v1.112",
-        "merge_target": "iteration/v1.112",
-        "working_branch": "plan/v1.112-p1-i18n-ui-migration",
-        "primary_spec": ".mstar/iterations/v1.112/specs/i18n-ui-migration.md",
+        "spec_integration_branch": "iteration/v1.113",
+        "merge_target": "iteration/v1.113",
+        "working_branch": "plan/v1.113-p1-ui-normalization",
+        "primary_spec": ".mstar/iterations/v1.113/specs/ui-normalization.md",
         "wire_contracts_changed": false,
-        "tier": "Must",
+        "tier": "Must"
+      }
+    },
+    {
+      "id": "2026-07-12-v1.113-tech-debt-paydown",
+      "title": "P2 - Tech Debt Paydown",
+      "file": "plans/2026-07-12-v1.113-tech-debt-paydown.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@frontend-dev"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.113",
+        "tech-debt",
+        "paydown",
+        "should"
+      ],
+      "created_at": "2026-07-12",
+      "updated_at": "2026-07-12",
+      "notes": "Phase 1: compass + plan written; awaiting Review & Edit chain",
+      "metadata": {
+        "iteration_refs": [
+          "V1.113"
+        ],
+        "spec_integration_branch": "iteration/v1.113",
+        "merge_target": "iteration/v1.113",
+        "working_branch": "plan/v1.113-p2-tech-debt-paydown",
+        "primary_spec": ".mstar/iterations/v1.113/specs/tech-debt-paydown.md",
+        "wire_contracts_changed": false,
+        "tier": "Should",
         "blocked_by": [
-          "2026-07-12-v1.112-i18n-foundation"
+          "2026-07-12-v1.113-i18n-completion"
         ]
       }
     }
@@ -75,19 +103,19 @@
     "integration_branch_retired": true,
     "iteration_base_branch": "main",
     "last_integration_branch": "iteration/v1.111",
-    "latest_active_compass": "v1.112-delivery-compass.md",
-    "latest_active_iteration": "V1.112",
+    "latest_active_compass": "v1.113-delivery-compass.md",
+    "latest_active_iteration": "V1.113",
     "latest_ship": {
-      "iteration": "V1.111",
-      "compass": "v1.111-delivery-compass.md",
+      "iteration": "V1.112",
+      "compass": "v1.112-delivery-compass.md",
       "shipped_at": "2026-07-12",
-      "pr": "https://github.com/42ch-dev/nexus/pull/141",
-      "merge_commit": "13387a39"
+      "pr": "https://github.com/42ch-dev/nexus/pull/142",
+      "merge_commit": "64bb6ff6"
     },
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "pre_iteration_hotfix": null,
-    "spec_integration_branch": "iteration/v1.112",
+    "spec_integration_branch": "iteration/v1.113",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {

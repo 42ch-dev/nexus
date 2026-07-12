@@ -1345,7 +1345,7 @@ V1.106 promoted Toast to `@42ch/nexus-ui` for Studio fixtures. V1.107 requires A
 
 Prefer `wire_contracts_changed: false`. Studio-first invariant: [`studio-first-invariant.md`](../iterations/v1.107/guides/studio-first-invariant.md) (V1.107 carry-forward).
 
-### 29.16 V1.112 Amendments — Frontend i18n (in progress)
+### 29.16 V1.112 Amendments — Frontend i18n (shipped)
 
 **Iteration SSOT:** [`.mstar/iterations/v1.112-delivery-compass.md`](../iterations/v1.112-delivery-compass.md) + [`v1.112/specs/`](../iterations/v1.112/specs/). Normative product detail for this slice lives in the iteration workspace until P5 merge.
 
