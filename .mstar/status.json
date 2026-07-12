@@ -200,11 +200,11 @@
     "latest_active_compass": "v1.114-delivery-compass.md",
     "latest_active_iteration": "V1.114",
     "latest_ship": {
-      "iteration": "V1.112",
-      "compass": "v1.112-delivery-compass.md",
-      "shipped_at": "2026-07-12",
-      "pr": "https://github.com/42ch-dev/nexus/pull/142",
-      "merge_commit": "64bb6ff6"
+      "iteration": "V1.114",
+      "compass": "v1.114-delivery-compass.md",
+      "shipped_at": "2026-07-13",
+      "pr": "pending",
+      "merge_commit": "pending"
     },
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
