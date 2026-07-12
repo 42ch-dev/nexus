@@ -256,9 +256,12 @@ export function ConflictModalBase<T extends string = string>({
           </div>
         ) : null}
 
+        {/* Action tray. Access keys are consistent across all surfaces so the
+            four decisions can be reached from the keyboard without tabbing. */}
         <div className="mt-5 flex flex-wrap items-center justify-end gap-2">
           <button
             type="button"
+            accessKey="c"
             onClick={onDismiss}
             className="rounded-control border border-gray-alpha-400 px-4 py-2 text-button-12 text-gray-900 hover:bg-gray-alpha-100"
           >
@@ -266,6 +269,7 @@ export function ConflictModalBase<T extends string = string>({
           </button>
           <button
             type="button"
+            accessKey="r"
             onClick={() => setShowReview((v) => !v)}
             className="rounded-control border border-gray-alpha-400 px-4 py-2 text-button-12 text-gray-900 hover:bg-gray-alpha-100"
           >
@@ -274,6 +278,7 @@ export function ConflictModalBase<T extends string = string>({
           </button>
           <button
             type="button"
+            accessKey="a"
             onClick={onReapply}
             disabled={!canReapply}
             title={
@@ -290,6 +295,7 @@ export function ConflictModalBase<T extends string = string>({
           </button>
           <button
             type="button"
+            accessKey="u"
             onClick={onUseCurrent}
             className="rounded-control bg-canvas-write-conflict px-4 py-2 text-button-12 text-white hover:bg-red-800 dark:text-brand-deep-blue"
           >

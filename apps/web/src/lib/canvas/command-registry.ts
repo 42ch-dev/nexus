@@ -90,6 +90,15 @@ function getSnapshot(): readonly Command[] {
  * StrictMode double-invoked effects.
  */
 export function registerCommand(command: Command): void {
+  if (import.meta.env.DEV && commandMap.has(command.id)) {
+    const existing = commandMap.get(command.id);
+    console.warn(
+      `[command-registry] command id collision detected: "${command.id}"\n` +
+        `  existing:  ${existing?.labelKey ?? '(unknown)'}\n` +
+        `  duplicate: ${command.labelKey}`,
+    );
+  }
+
   commandMap.set(command.id, command);
   rebuildSnapshot();
   emit();
