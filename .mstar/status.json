@@ -1185,17 +1185,6 @@
         "note": "Matches ThemeProvider precedent. P1 review whether write should defer until first user change."
       },
       {
-        "id": "R-P0-002",
-        "title": "Catalog inflation - duplicate route.*/mobileNav.* keys with identical strings",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.112",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-foundation.md",
-        "note": "ROUTE_KEYS and MOBILE_NAV_KEYS produce identical EN/ZH. P1 consolidate."
-      },
-      {
         "id": "R-P0-003",
         "title": "Static imports of all 18 JSON catalogs - both locales bundled unconditionally",
         "severity": "low",
@@ -1205,28 +1194,6 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-foundation.md",
         "note": "~2KB for P0. Evaluate dynamic import/manualChunks before P1 expansion."
-      },
-      {
-        "id": "R-P0-004",
-        "title": "Unvalidated setPreference input - no runtime guard",
-        "severity": "nit",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.112",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-foundation.md",
-        "note": "Add isLocalePreference() runtime guard in P1."
-      },
-      {
-        "id": "R-P0-005",
-        "title": "Unused not-found catalog keys while page still hardcoded",
-        "severity": "nit",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.112",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-foundation.md",
-        "note": "shell.json defines notFound.* but not-found-page.tsx not migrated. Migrate in P1 or remove keys."
       },
       {
         "id": "R-P0-006",
@@ -1251,17 +1218,6 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-ui-migration.md",
         "note": "Remaining hardcoded strings in works/schedule/sessions/strategies/capabilities pages + dialogs + content editor. Subagent non-functional during fix wave."
-      },
-      {
-        "id": "R-P1-002",
-        "title": "Uncached Intl.DateTimeFormat/RelativeTimeFormat created per call in format.ts",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.112",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-ui-migration.md",
-        "note": "Consider memoization for hot paths."
       },
       {
         "id": "R-P1-003",
