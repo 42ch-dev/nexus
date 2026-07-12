@@ -404,11 +404,11 @@
     }
   ],
   "metadata": {
-    "integration_branch_retired": true,
+    "integration_branch_retired": false,
     "iteration_base_branch": "main",
     "last_integration_branch": "iteration/v1.110",
-    "latest_active_compass": "v1.111-delivery-compass.md",
-    "latest_active_iteration": "V1.111",
+    "latest_active_compass": null,
+    "latest_active_iteration": null,
     "latest_ship": {
       "iteration": "V1.110",
       "compass": "v1.110-delivery-compass.md",
