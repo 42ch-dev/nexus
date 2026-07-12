@@ -10,7 +10,29 @@ each call receives a fresh `ComputeInput` envelope and returns a 4-part
 
 > Spec context: V1.61 "Programmable Narrative Progression" — see
 > `.mstar/iterations/v1.61-programmable-narrative-progression-delivery-compass-v1.md`
-> (grill decisions Q2/Q6/Q8/Q9/Q10) and `schemas/compute/` for the wire contracts.
+> (grill decisions Q2/Q6/Q8/Q9/Q10) and the wire contracts under
+> `schemas/daemon-api/compute/` (registry) and `schemas/local-api/compute/`
+> (envelopes).
+
+## Module-author onboarding path
+
+1. **Write a `manifest.json`** — declare identity, required `key_block_types`,
+   exports, and optional sandbox overrides (see [`manifest.json`](#manifestjson)
+   and [compute-module-abi.md](../.mstar/specs/compute-module-abi.md) §7).
+2. **Implement the V1 ABI** — export `memory`, `alloc`, `compute`, and
+   optionally `init` (see [The V1 ABI at a glance](#the-v1-abi-at-a-glance)).
+3. **Run in the sandbox** — build with
+   `cargo build --release --target wasm32-unknown-unknown` and let
+   `nexus-wasm-host` enforce fuel, memory, and wall-time limits
+   (see [Sandbox guarantees](#sandbox-guarantees-compass-q6)).
+4. **Test and inspect** — register the module in
+   `crates/nexus-wasm-host/build.rs` (see [Embedding a module](#embedding-a-module)),
+   then use the daemon registry endpoints to discover it:
+   - `GET /v1/daemon/compute/modules` — list all installed modules.
+   - `GET /v1/daemon/compute/modules/{module_id}` — read the full manifest.
+
+The registry endpoints are read-only in V1.114; they expose the same
+`manifest.json` shape this document describes.
 
 ## The V1 ABI at a glance
 
@@ -310,5 +332,8 @@ never crashes the host. Manifest overrides (`max_fuel`, `max_memory_mib`,
 
 - Sample module: [`basic-combat/`](basic-combat/) — simple ATK−DEF resolution.
 - Host crate: [`crates/nexus-wasm-host/`](../crates/nexus-wasm-host/) — engine,
-  sandbox, host-function ABI, embedded-module loader.
-- Wire contracts: [`schemas/compute/`](../schemas/compute/).
+  sandbox, host-function ABI, embedded-module loader, registry module.
+- Registry API: `GET /v1/daemon/compute/modules` and
+  `GET /v1/daemon/compute/modules/{module_id}` (schemas in
+  [`schemas/daemon-api/compute/`](../schemas/daemon-api/compute/)).
+- Compute envelopes: [`schemas/local-api/compute/`](../schemas/local-api/compute/).

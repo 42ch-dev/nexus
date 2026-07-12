@@ -401,6 +401,20 @@ within the manifest file. `$ref` to external files is not supported in V1.62
 }
 ```
 
+### 7.5 Registry exposure (V1.114 P2)
+
+The same `manifest.json` shape described in this section is now exposed
+read-only through the daemon registry API:
+
+- `GET /v1/daemon/compute/modules` — list installed modules as
+  `ComputeModuleSummary` items.
+- `GET /v1/daemon/compute/modules/{module_id}` — full manifest as
+  `ComputeModuleDetail`.
+
+These endpoints reuse the manifest fields defined above; they do not introduce
+a parallel module DTO. See [`schemas/daemon-api/compute/`](../../../schemas/daemon-api/compute/)
+for the generated wire contracts.
+
 ---
 
 ## 8. Sandbox model cross-ref
