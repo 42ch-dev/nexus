@@ -6,13 +6,13 @@
       "id": "2026-07-12-v1.112-i18n-foundation",
       "title": "P0 — i18n foundation + Appearance",
       "file": "plans/2026-07-12-v1.112-i18n-foundation.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@frontend-dev",
         "@architect"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.112",
         "i18n",
@@ -22,7 +22,7 @@
       ],
       "created_at": "2026-07-12",
       "updated_at": "2026-07-12",
-      "notes": "Phase 1 locked — Prepare gates done; awaiting implement on iteration/v1.112",
+      "notes": "Phase 2: SDD T1-T4 done, QC tri Approve with residuals (6 R#), QA Pass, merged to integration",
       "metadata": {
         "iteration_refs": [
           "V1.112"
@@ -1142,6 +1142,74 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-11-v1.110-agent-scan-path-reliability.md",
         "note": "qc1 F-S5. Non-blocking; current 13 tests cover DoD."
+      }
+    ],
+    "2026-07-12-v1.112-i18n-foundation": [
+      {
+        "id": "R-P0-001",
+        "title": "localStorage writes system on first mount without user action",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.112",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-foundation.md",
+        "note": "Matches ThemeProvider precedent. P1 review whether write should defer until first user change."
+      },
+      {
+        "id": "R-P0-002",
+        "title": "Catalog inflation - duplicate route.*/mobileNav.* keys with identical strings",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.112",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-foundation.md",
+        "note": "ROUTE_KEYS and MOBILE_NAV_KEYS produce identical EN/ZH. P1 consolidate."
+      },
+      {
+        "id": "R-P0-003",
+        "title": "Static imports of all 18 JSON catalogs - both locales bundled unconditionally",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.112",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-foundation.md",
+        "note": "~2KB for P0. Evaluate dynamic import/manualChunks before P1 expansion."
+      },
+      {
+        "id": "R-P0-004",
+        "title": "Unvalidated setPreference input - no runtime guard",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.112",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-foundation.md",
+        "note": "Add isLocalePreference() runtime guard in P1."
+      },
+      {
+        "id": "R-P0-005",
+        "title": "Unused not-found catalog keys while page still hardcoded",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.112",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-foundation.md",
+        "note": "shell.json defines notFound.* but not-found-page.tsx not migrated. Migrate in P1 or remove keys."
+      },
+      {
+        "id": "R-P0-006",
+        "title": "Design-studio App.test.tsx pre-existing AgentPicker fixture failures (7 tests)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.112",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-foundation.md",
+        "note": "Pre-existing - file not touched in P0 diff. Not introduced by this plan."
       }
     ]
   }
