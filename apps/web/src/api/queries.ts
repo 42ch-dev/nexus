@@ -9,6 +9,8 @@
  * Findings + Works use cursor pagination; the hook exposes TanStack's
  * `fetchNextPage`/`hasNextPage` for "Load more".
  */
+import { useCallback, useEffect, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   useInfiniteQuery,
   useMutation,
@@ -58,7 +60,6 @@ import { useNexusClient } from '@/lib/client-context';
 import { NexusClientError } from '@/lib/nexus';
 import { shortId } from '@/lib/format';
 import { queryKeys } from '@/lib/nexus/query-keys';
-import { useCallback, useEffect, useRef } from 'react';
 import { useActiveCreatorId as useActiveCreatorIdFromContext } from '@/lib/active-creator-context';
 
 /** Default page size for cursor-paginated lists. */
@@ -199,14 +200,15 @@ export function usePresets() {
 /** Surface a NexusClientError as a toast; callers may still read the result. */
 function useErrorToast() {
   const { toast } = useToast();
-  return (error: unknown, fallbackTitle: string) => {
+  const { t } = useTranslation('common');
+  return (error: unknown, key: string) => {
     const description =
       error instanceof NexusClientError
         ? error.message
         : error instanceof Error
           ? error.message
-          : 'Unexpected error.';
-    toast({ variant: 'error', title: fallbackTitle, description });
+          : t('error.unexpected');
+    toast({ variant: 'error', title: t(key, { defaultValue: key }), description });
   };
 }
 
@@ -219,7 +221,7 @@ export function useCreateWork() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.works.lists() });
     },
-    onError: (error) => errorToast(error, 'Could not create Work'),
+    onError: (error) => errorToast(error, 'error.couldNotCreateWork'),
   });
 }
 
@@ -234,7 +236,7 @@ export function usePatchWork() {
       void qc.invalidateQueries({ queryKey: queryKeys.works.lists() });
       void qc.invalidateQueries({ queryKey: queryKeys.works.detail(vars.workId) });
     },
-    onError: (error) => errorToast(error, 'Could not update Work'),
+    onError: (error) => errorToast(error, 'error.couldNotUpdateWork'),
   });
 }
 
@@ -253,6 +255,7 @@ export function useUpdateFinding() {
   const client = useNexusClient();
   const qc = useQueryClient();
   const errorToast = useErrorToast();
+  const { t } = useTranslation('common');
   const { toast } = useToast();
   type FindingsListData = { pages: CursorPage<FindingDetailResponse>[] };
   return useMutation({
@@ -304,10 +307,10 @@ export function useUpdateFinding() {
           qc.setQueryData(queryKey, data);
         }
       }
-      errorToast(error, 'Could not update finding');
+      errorToast(error, 'error.couldNotUpdateFinding');
     },
     onSuccess: (_data, vars) => {
-      toast({ variant: 'success', title: 'Finding updated', description: shortId(vars.findingId) });
+      toast({ variant: 'success', title: t('toast.findingUpdated'), description: shortId(vars.findingId) });
     },
     onSettled: (_data, _error, vars) => {
       // Narrow to the mutated Work's list scope (all filter views of that Work
@@ -331,6 +334,7 @@ export function useBatchUpdateFindings() {
   const client = useNexusClient();
   const qc = useQueryClient();
   const errorToast = useErrorToast();
+  const { t } = useTranslation('common');
   const { toast } = useToast();
   return useMutation({
     mutationFn: (vars: { workId: string; request: BatchUpdateFindingsRequest }) =>
@@ -339,33 +343,33 @@ export function useBatchUpdateFindings() {
       if (data.updated && !data.not_found?.length && !data.conflict?.length) {
         toast({
           variant: 'success',
-          title: 'Batch update complete',
-          description: `${data.updated} findings updated`,
+          title: t('toast.batchUpdateComplete'),
+          description: t('toast.batchUpdateCompleteDescription', { count: data.updated }),
         });
       } else {
         if (data.updated) {
-          toast({ variant: 'success', title: 'Batch update', description: `${data.updated} updated` });
+          toast({ variant: 'success', title: t('toast.batchUpdate'), description: t('toast.batchUpdateDescription', { count: data.updated }) });
         }
         if (data.not_found?.length) {
           toast({
             variant: 'warning',
-            title: 'Findings not found',
-            description: `${data.not_found.length} IDs were not found`,
+            title: t('toast.findingsNotFound'),
+            description: t('toast.findingsNotFoundDescription', { count: data.not_found.length }),
             duration: 0,
           });
         }
         if (data.conflict?.length) {
           toast({
             variant: 'warning',
-            title: 'Findings conflict',
-            description: `${data.conflict.length} IDs could not be updated`,
+            title: t('toast.findingsConflict'),
+            description: t('toast.findingsConflictDescription', { count: data.conflict.length }),
             duration: 0,
           });
         }
       }
       void qc.invalidateQueries({ queryKey: queryKeys.findings.list(vars.workId) });
     },
-    onError: (error) => errorToast(error, 'Could not update findings'),
+    onError: (error) => errorToast(error, 'error.couldNotUpdateFindings'),
   });
 }
 
@@ -378,7 +382,7 @@ export function useScaffoldPreset() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.presets.list() });
     },
-    onError: (error) => errorToast(error, 'Could not scaffold preset'),
+    onError: (error) => errorToast(error, 'error.couldNotScaffoldPreset'),
   });
 }
 
@@ -387,7 +391,7 @@ export function useValidatePreset() {
   const errorToast = useErrorToast();
   return useMutation({
     mutationFn: (request: ValidatePresetRequest) => client.validatePreset(request),
-    onError: (error) => errorToast(error, 'Could not validate preset'),
+    onError: (error) => errorToast(error, 'error.couldNotValidatePreset'),
     // On success the caller surfaces structured errors/warnings inline; a toast
     // is not added here so the validate dialog stays the single source of truth.
   });
@@ -397,14 +401,15 @@ export function useReloadPreset() {
   const client = useNexusClient();
   const qc = useQueryClient();
   const errorToast = useErrorToast();
+  const { t } = useTranslation('common');
   const { toast } = useToast();
   return useMutation({
     mutationFn: (presetId: string) => client.reloadPreset(presetId),
     onSuccess: (_data, presetId) => {
-      toast({ variant: 'success', title: 'Preset reloaded', description: presetId });
+      toast({ variant: 'success', title: t('toast.presetReloaded'), description: presetId });
       void qc.invalidateQueries({ queryKey: queryKeys.presets.list() });
     },
-    onError: (error) => errorToast(error, 'Could not reload preset'),
+    onError: (error) => errorToast(error, 'error.couldNotReloadPreset'),
   });
 }
 
@@ -476,7 +481,7 @@ export function usePatchChapter(workId: string | undefined) {
       void qc.invalidateQueries({ queryKey: queryKeys.chapters.lists() });
       void qc.invalidateQueries({ queryKey: queryKeys.chapters.detail(workId!, vars.chapter) });
     },
-    onError: (error) => errorToast(error, 'Could not update chapter'),
+    onError: (error) => errorToast(error, 'error.couldNotUpdateChapter'),
   });
 }
 
@@ -511,7 +516,7 @@ export function useCreateCreator() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.creators.all });
     },
-    onError: (error) => errorToast(error, 'Could not create Creator'),
+    onError: (error) => errorToast(error, 'error.couldNotCreateCreator'),
   });
 }
 
@@ -524,7 +529,7 @@ export function useSetActiveCreator() {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.creators.all });
     },
-    onError: (error) => errorToast(error, 'Could not switch Creator'),
+    onError: (error) => errorToast(error, 'error.couldNotSwitchCreator'),
   });
 }
 
@@ -694,6 +699,7 @@ export function useDeletePendingReview() {
   const client = useNexusClient();
   const qc = useQueryClient();
   const errorToast = useErrorToast();
+  const { t } = useTranslation('common');
   const { toast } = useToast();
   type PendingListData = { pages: CursorPage<PendingReviewInfo>[] };
   return useMutation({
@@ -738,10 +744,10 @@ export function useDeletePendingReview() {
       if (context?.previousCount) {
         qc.setQueryData(queryKeys.memory.count(vars.creatorId), context.previousCount);
       }
-      errorToast(error, 'Could not delete pending review');
+      errorToast(error, 'error.couldNotDeletePendingReview');
     },
     onSuccess: (_data, vars) => {
-      toast({ variant: 'success', title: 'Pending review deleted', description: shortId(vars.pendingId) });
+      toast({ variant: 'success', title: t('toast.pendingReviewDeleted'), description: shortId(vars.pendingId) });
     },
     onSettled: (_data, _error, vars) => {
       void qc.invalidateQueries({ queryKey: queryKeys.memory.pendingList(vars.creatorId) });
@@ -782,6 +788,7 @@ export function useReviewMemory() {
   const client = useNexusClient();
   const qc = useQueryClient();
   const errorToast = useErrorToast();
+  const { t } = useTranslation('common');
   const { toast } = useToast();
   return useMutation({
     mutationFn: async (creatorId: string): Promise<ReviewResponse> => {
@@ -811,18 +818,27 @@ export function useReviewMemory() {
         // the client stopped re-requesting. Non-error informational message.
         toast({
           variant: 'info',
-          title: 'Review still draining',
-          description: `Processed ${data.processed} so far (${data.promoted} promoted, ${data.fragmented} fragments, ${data.dropped} dropped). Some entries remain — run review again to continue.`,
+          title: t('toast.reviewStillDraining'),
+          description: t('toast.reviewStillDrainingDescription', {
+            processed: data.processed,
+            promoted: data.promoted,
+            fragmented: data.fragmented,
+            dropped: data.dropped,
+          }),
         });
       } else {
         toast({
           variant: 'success',
-          title: 'Review complete',
-          description: `${data.promoted} promoted to long-term memory, ${data.fragmented} saved as fragments, ${data.dropped} dropped.`,
+          title: t('toast.reviewComplete'),
+          description: t('toast.reviewCompleteDescription', {
+            promoted: data.promoted,
+            fragmented: data.fragmented,
+            dropped: data.dropped,
+          }),
         });
       }
     },
-    onError: (error) => errorToast(error, 'Could not complete review'),
+    onError: (error) => errorToast(error, 'error.couldNotCompleteReview'),
     // Invalidate on settle (not just success): if the network fails AFTER the
     // server already processed/deleted the pending queue, the client would
     // otherwise keep showing rows that no longer exist until a manual refresh.
@@ -910,6 +926,7 @@ export function useReflectSoulNarrative() {
   const client = useNexusClient();
   const qc = useQueryClient();
   const errorToast = useErrorToast();
+  const { t } = useTranslation('common');
   const { toast } = useToast();
   return useMutation({
     mutationFn: (vars: { creatorId: string; worldId?: string | null }): Promise<SoulNarrativeResponse> =>
@@ -919,9 +936,9 @@ export function useReflectSoulNarrative() {
         force_regenerate: true,
       }),
     onSuccess: () => {
-      toast({ variant: 'success', title: 'SOUL reflected', description: 'Your narrative is up to date.' });
+      toast({ variant: 'success', title: t('toast.soulReflected'), description: t('toast.soulReflectedDescription') });
     },
-    onError: (error) => errorToast(error, 'Could not reflect your SOUL'),
+    onError: (error) => errorToast(error, 'error.couldNotReflectSoul'),
     onSettled: (_data, _error, vars) => {
       void qc.invalidateQueries({
         queryKey: queryKeys.memory.soulNarrative(vars.creatorId, vars.worldId),
@@ -951,6 +968,7 @@ export function useSaveReadingProgress(options?: { showToast?: boolean }) {
   const client = useNexusClient();
   const qc = useQueryClient();
   const errorToast = useErrorToast();
+  const { t } = useTranslation('common');
   const { toast } = useToast();
   return useMutation({
     mutationFn: (vars: { workId: string; chapter: number; scrollProgress: number }) =>
@@ -962,10 +980,10 @@ export function useSaveReadingProgress(options?: { showToast?: boolean }) {
     onSuccess: (_data, vars) => {
       qc.setQueryData(queryKeys.reading.progress(vars.workId, vars.chapter), _data);
       if (options?.showToast) {
-        toast({ variant: 'success', title: 'Progress saved' });
+        toast({ variant: 'success', title: t('toast.progressSaved') });
       }
     },
-    onError: (error) => errorToast(error, 'Could not save reading progress'),
+    onError: (error) => errorToast(error, 'error.couldNotSaveReadingProgress'),
   });
 }
 
@@ -990,7 +1008,7 @@ export function useCreateAnnotation() {
     onSuccess: (data: ReadingAnnotation) => {
       void qc.invalidateQueries({ queryKey: queryKeys.reading.annotations(data.work_id, data.chapter) });
     },
-    onError: (error) => errorToast(error, 'Could not create highlight'),
+    onError: (error) => errorToast(error, 'error.couldNotCreateHighlight'),
   });
 }
 
@@ -1008,7 +1026,7 @@ export function useUpdateAnnotation() {
     onSuccess: (_data, vars) => {
       void qc.invalidateQueries({ queryKey: queryKeys.reading.annotations(vars.workId, vars.chapter) });
     },
-    onError: (error) => errorToast(error, 'Could not update highlight'),
+    onError: (error) => errorToast(error, 'error.couldNotUpdateHighlight'),
   });
 }
 
@@ -1016,15 +1034,16 @@ export function useDeleteAnnotation() {
   const client = useNexusClient();
   const qc = useQueryClient();
   const errorToast = useErrorToast();
+  const { t } = useTranslation('common');
   const { toast } = useToast();
   return useMutation({
     mutationFn: (vars: { annotationId: string; workId: string; chapter: number }) =>
       client.deleteReadingAnnotation(vars.annotationId),
     onSuccess: (_data, vars) => {
-      toast({ variant: 'success', title: 'Highlight deleted' });
+      toast({ variant: 'success', title: t('toast.highlightDeleted') });
       void qc.invalidateQueries({ queryKey: queryKeys.reading.annotations(vars.workId, vars.chapter) });
     },
-    onError: (error) => errorToast(error, 'Could not delete highlight'),
+    onError: (error) => errorToast(error, 'error.couldNotDeleteHighlight'),
   });
 }
 

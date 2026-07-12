@@ -13,6 +13,7 @@ import { MemoryRouter } from 'react-router-dom';
 import { ClientProvider } from '@/lib/client-context';
 import { ActiveCreatorProvider } from '@/lib/active-creator-context';
 import { SetupCompletedProvider } from '@/lib/setup-completed-context';
+import { LocaleProvider } from '@/components/locale-provider';
 import type { NexusClient } from '@/lib/nexus';
 import type { DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
 import { ToastProvider, Toaster } from '@/lib/use-toast';
@@ -73,10 +74,12 @@ export function renderInApp(
           <ClientProvider client={activeClient} desktop={desktop ?? null} connectionConfig={null}>
             <ActiveCreatorProvider initialCreatorId={activeCreatorId}>
               <SetupCompletedProvider initialCompleted={setupCompleted}>
-                <ToastProvider>
-                  {children}
-                  <Toaster />
-                </ToastProvider>
+                <LocaleProvider>
+                  <ToastProvider>
+                    {children}
+                    <Toaster />
+                  </ToastProvider>
+                </LocaleProvider>
               </SetupCompletedProvider>
             </ActiveCreatorProvider>
           </ClientProvider>

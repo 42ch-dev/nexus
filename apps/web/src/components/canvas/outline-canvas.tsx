@@ -8,6 +8,7 @@
  * `CanvasShell` with the RF projection so the outline opens as a spatial graph.
  */
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 
 import { CanvasShell } from '@/components/canvas/canvas-shell';
@@ -75,6 +76,7 @@ export function OutlineCanvas({
   initialSelectedChapterId = null,
   sceneBeatFixture,
 }: OutlineCanvasProps) {
+  const { t } = useTranslation('canvas');
   const work = useWork(workId);
   const chaptersQuery = useChapters(workId);
   const outline = useWorkOutline(workId);
@@ -97,9 +99,14 @@ export function OutlineCanvas({
   // chapter-creation entrypoint (the structure panel is select/move only).
   useRegisterCommand({
     id: 'outline.toggle-view',
-    label: 'Toggle Outline View',
-    group: 'Outline',
-    keywords: ['graph', 'list', 'alt view', 'switch'],
+    labelKey: 'outline.toggle-view.label',
+    groupKey: 'group.outline',
+    keywordKeys: [
+      'outline.toggle-view.keywords.graph',
+      'outline.toggle-view.keywords.list',
+      'outline.toggle-view.keywords.alt-view',
+      'outline.toggle-view.keywords.switch',
+    ],
     handler: () => setShowAlt((v) => !v),
   });
 
@@ -171,14 +178,14 @@ export function OutlineCanvas({
   const sceneParentChapterTitle = selectedScene
     ? (() => {
         const ch = chapterById.get(selectedScene.chapterId);
-        return ch ? chapterDisplayTitle(ch, outline.data?.chapter_titles as Record<string, string> | undefined) : null;
+        return ch ? chapterDisplayTitle(ch, outline.data?.chapter_titles as Record<string, string> | undefined, t('chapter.fallback')) : null;
       })()
     : null;
   const beatParentSceneTitle = selectedBeat
     ? fixture.scenes.find((s) => s.sceneId === selectedBeat.sceneId)?.title ?? null
     : null;
 
-  const summary = outlineGraphSummary(outline.data, chapters.length);
+  const summary = outlineGraphSummary(outline.data, chapters.length, t);
 
   function captureConflictState(
     error: unknown,
@@ -271,8 +278,8 @@ export function OutlineCanvas({
   if (outline.isError || chaptersQuery.isError || work.isError) {
     return (
       <ErrorState
-        title="Could not load outline"
-        description="The outline or chapter list failed to load. Try again when the daemon is reachable."
+        title={t('outline.loadError.title')}
+        description={t('outline.loadError.description')}
         onRetry={() => {
           void outline.refetch();
           void chaptersQuery.refetch();
@@ -283,14 +290,14 @@ export function OutlineCanvas({
   }
 
   if (outline.isLoading || chaptersQuery.isLoading || work.isLoading) {
-    return <LoadingState label="Loading outline…" />;
+    return <LoadingState label={t('outline.loading')} />;
   }
 
   if (!outline.data) {
     return (
       <EmptyState
-        title="No outline found"
-        description="This Work does not have an outline yet. Create chapters to populate the canvas."
+        title={t('outline.empty.title')}
+        description={t('outline.empty.description')}
       />
     );
   }
@@ -298,8 +305,8 @@ export function OutlineCanvas({
   return (
     <div className="flex flex-col gap-4">
       <CanvasHeader
-        title={work.data?.title ?? 'Untitled Work'}
-        subtitle="Outline and timeline structure for this Work."
+        title={work.data?.title ?? t('outline.untitledWork')}
+        subtitle={t('outline.subtitle')}
         revision={outline.data.outline_revision}
         status={patchStructure.isPending ? 'dirty' : 'clean'}
         showAlt={showAlt}
@@ -319,7 +326,7 @@ export function OutlineCanvas({
           nodeTypes={outlineNodeTypes}
           onNodesChange={onNodesChange}
           summaryText={summary}
-          ariaLabel="Outline structure graph"
+          ariaLabel={t('outline.graphAriaLabel')}
           surfaceKey={`outline:${workId}`}
         >
           {/* I-QC1-001 — when the projection has zero nodes, render the
@@ -327,10 +334,10 @@ export function OutlineCanvas({
               mounted for the graph view (FB-C1-000 shared-shell parity). */}
           {projection && projection.nodes.length === 0 ? (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
-              <EmptyState
-                title="No graph nodes"
-                description="This outline has no volumes, chapters, or timeline events to display on the graph yet."
-              />
+            <EmptyState
+              title={t('outline.noGraph.title')}
+              description={t('outline.noGraph.description')}
+            />
             </div>
           ) : null}
         </CanvasShell>

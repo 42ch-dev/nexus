@@ -9,6 +9,7 @@
  */
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { RefreshCw } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -20,6 +21,7 @@ import { useToast } from '@/lib/use-toast';
 const STATUS_SYNC_INTERVAL_MS = 10_000;
 
 export function DaemonStatusBar() {
+  const { t } = useTranslation('shell');
   const desktop = useDesktopCapabilities();
   const [status, setStatus] = useState<DaemonStatus | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -75,9 +77,7 @@ export function DaemonStatusBar() {
 
   const handleRestart = async () => {
     if (!desktop) return;
-    const confirmed = window.confirm(
-      'Restarting the daemon will interrupt any running orchestration. Continue?',
-    );
+    const confirmed = window.confirm(t('daemon.restartConfirm'));
     if (!confirmed) return;
     setIsLoading(true);
     try {
@@ -85,8 +85,8 @@ export function DaemonStatusBar() {
       await desktop.startDaemon();
       await refresh();
     } catch (err) {
-      const message = errorMessage(err) || 'Daemon restart failed.';
-      toast({ variant: 'error', title: 'Daemon restart failed', description: message });
+      const message = errorMessage(err) || t('daemon.restartFailedFallback');
+      toast({ variant: 'error', title: t('daemon.restartFailed'), description: message });
     } finally {
       setIsLoading(false);
     }
@@ -99,9 +99,9 @@ export function DaemonStatusBar() {
     >
       <div className="flex min-w-0 items-center gap-2">
         <span className="h-2 w-2 shrink-0 rounded-full bg-green-700" aria-hidden />
-        <span className="truncate text-label-14 text-gray-1000">Daemon running</span>
+        <span className="truncate text-label-14 text-gray-1000">{t('daemon.running')}</span>
         <Badge variant="running" tone="soft">
-          healthy
+          {t('daemon.healthy')}
         </Badge>
       </div>
       <Button
@@ -110,8 +110,8 @@ export function DaemonStatusBar() {
         size="small"
         onClick={handleRestart}
         disabled={isLoading}
-        aria-label="Restart daemon"
-        title="Restart daemon"
+        aria-label={t('daemon.restart')}
+        title={t('daemon.restart')}
       >
         <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} aria-hidden />
       </Button>

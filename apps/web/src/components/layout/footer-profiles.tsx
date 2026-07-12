@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -16,6 +17,7 @@ import { FooterProfilesChrome } from './presentational/footer-profiles-chrome';
  * presentational markup and data-testid SSOT.
  */
 export function FooterProfiles() {
+  const { t } = useTranslation('shell');
   const creators = useCreators();
   const activeCreatorId = useActiveCreatorId();
   const setActiveCreatorId = useSetActiveCreatorId();
@@ -72,8 +74,8 @@ export function FooterProfiles() {
   return (
     <>
       <FooterProfilesChrome
-        sectionLabel="Profiles"
-        addButtonLabel="Add creator"
+        sectionLabel={t('profile.sectionLabel')}
+        addButtonLabel={t('profile.addButtonLabel')}
         profiles={profiles}
         focusIndex={focusIndex}
         onSelect={(id) => {
@@ -102,6 +104,7 @@ function CreateCreatorDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t } = useTranslation('shell');
   const create = useCreateCreator();
   const [displayName, setDisplayName] = useState('');
 
@@ -123,18 +126,18 @@ function CreateCreatorDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
         className="sm:max-w-md"
-        title="Add Creator"
-        description="Create a new local creator profile."
+        title={t('profile.addDialogTitle')}
+        description={t('profile.addDialogDescription')}
       >
         <form onSubmit={submit}>
           <div className="grid gap-4 py-4">
             <div className="grid gap-2">
-              <Label htmlFor="creator-name">Display name</Label>
+              <Label htmlFor="creator-name">{t('profile.displayNameLabel')}</Label>
               <Input
                 id="creator-name"
                 value={displayName}
                 onChange={(e) => setDisplayName(e.target.value)}
-                placeholder="e.g. Default Creator"
+                placeholder={t('profile.displayNamePlaceholder')}
                 autoFocus
               />
             </div>
@@ -146,10 +149,10 @@ function CreateCreatorDialog({
               onClick={() => onOpenChange(false)}
               disabled={create.isPending}
             >
-              Cancel
+              {t('profile.cancel')}
             </Button>
             <Button type="submit" variant="primary" disabled={!displayName.trim() || create.isPending}>
-              {create.isPending ? 'Creating…' : 'Create'}
+              {create.isPending ? t('profile.creating') : t('profile.create')}
             </Button>
           </div>
         </form>

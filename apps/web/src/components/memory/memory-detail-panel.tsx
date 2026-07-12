@@ -18,6 +18,7 @@ import { Label } from '@/components/ui/label';
 import { TaskKindBadge } from '@/components/memory/task-kind-badge';
 import { formatDateTime, shortId } from '@/lib/format';
 import type { PendingReviewInfo } from '@42ch/nexus-contracts';
+import { useTranslation } from 'react-i18next';
 
 interface MemoryDetailPanelProps {
   pending: PendingReviewInfo;
@@ -28,9 +29,9 @@ interface MemoryDetailPanelProps {
 }
 
 export function MemoryDetailPanel({ pending, deletePending, onDelete }: MemoryDetailPanelProps) {
+  const { t } = useTranslation('memory');
   return (
     <div className="flex flex-col gap-4">
-      {/* ── Identity + delete action ─────────────────────────────────────── */}
       <section className="flex flex-wrap items-center gap-2">
         <Badge className="text-copy-13-mono">{shortId(pending.pending_id)}</Badge>
         <TaskKindBadge taskKind={pending.task_kind} />
@@ -42,41 +43,37 @@ export function MemoryDetailPanel({ pending, deletePending, onDelete }: MemoryDe
             onClick={onDelete}
             disabled={deletePending}
             className="ml-auto"
-            aria-label={`Delete pending review ${shortId(pending.pending_id)}`}
+            aria-label={`${t('pending.deleteRowAria', { id: shortId(pending.pending_id) })}`}
           >
-            Delete
+            {t('detail.delete')}
           </Button>
         )}
       </section>
 
-      {/* ── Context fields ──────────────────────────────────────────────── */}
       <section className="flex flex-col gap-1.5 text-copy-13">
         <div className="flex flex-col gap-0.5">
-          <Label className="text-gray-900">Session</Label>
+          <Label className="text-gray-900">{t('detail.sessionLabel')}</Label>
           <span className="text-copy-13-mono text-gray-900" data-testid="memory-session-id">
             {pending.session_id}
           </span>
         </div>
         <div className="flex flex-col gap-0.5">
-          <Label className="text-gray-900">World</Label>
-          {/* open item #3: absent world_id reads as "(none)" in the inspector. */}
+          <Label className="text-gray-900">{t('detail.worldLabel')}</Label>
           <span className="text-gray-1000" data-testid="memory-world-id">
-            {pending.world_id?.trim() ? pending.world_id : '(none)'}
+            {pending.world_id?.trim() ? pending.world_id : t('detail.noWorld')}
           </span>
         </div>
         <div className="flex flex-col gap-0.5">
-          <Label className="text-gray-900">Captured</Label>
-          {/* created_at is RFC 3339; display in the author's local time. */}
+          <Label className="text-gray-900">{t('detail.capturedLabel')}</Label>
           <span className="text-gray-1000" data-testid="memory-created-at">
             {formatDateTime(pending.created_at)}
           </span>
         </div>
       </section>
 
-      {/* ── Raw digest (scrollable; max 64 KB per handler validation) ────── */}
       <section className="flex flex-col gap-1.5">
         <Label htmlFor="memory-raw-digest" className="text-gray-900">
-          Raw Digest
+          {t('detail.rawDigestLabel')}
         </Label>
         <pre
           id="memory-raw-digest"
@@ -87,13 +84,9 @@ export function MemoryDetailPanel({ pending, deletePending, onDelete }: MemoryDe
         </pre>
       </section>
 
-      {/* ── Full id readout ─────────────────────────────────────────────── */}
       <section className="flex flex-col gap-0.5 border-t border-gray-alpha-400 pt-3 text-copy-13 text-gray-900">
         <span>
-          Pending ID:{' '}
-          <span className="text-copy-13-mono text-gray-700" data-testid="memory-pending-id-full">
-            {pending.pending_id}
-          </span>
+          {t('detail.pendingIdLabel', { id: pending.pending_id })}
         </span>
       </section>
     </div>

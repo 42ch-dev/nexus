@@ -12,6 +12,7 @@
  * The `canvas-worldkb-*` tokens are the V1.73 DESIGN.md SSOT.
  */
 import { memo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 
 import { useContextMenu } from '@/components/path-context-menu';
@@ -19,24 +20,24 @@ import { useContextMenu } from '@/components/path-context-menu';
 import { BLOCK_TYPE_LABELS, type EntityLifecycle, type WorldKbNodeData } from './types';
 import { WorldKbEntityContextMenu } from './world-kb-entity-context-menu';
 
-const LIFECYCLE_BADGE: Record<EntityLifecycle, { label: string; className: string }> = {
+const LIFECYCLE_BADGE: Record<EntityLifecycle, { labelKey: string; className: string }> = {
   pending: {
-    label: 'Pending',
+    labelKey: 'worldKb.entityNode.lifecycle.pending',
     className:
       'bg-canvas-worldkb-promotion-pending/15 text-canvas-worldkb-promotion-pending border-canvas-worldkb-promotion-pending/30',
   },
   confirmed: {
-    label: 'Confirmed',
+    labelKey: 'worldKb.entityNode.lifecycle.confirmed',
     className:
       'bg-canvas-worldkb-promotion-confirmed/15 text-canvas-worldkb-promotion-confirmed border-canvas-worldkb-promotion-confirmed/30',
   },
   rejected: {
-    label: 'Rejected',
+    labelKey: 'worldKb.entityNode.lifecycle.rejected',
     className:
       'bg-canvas-worldkb-promotion-rejected/15 text-canvas-worldkb-promotion-rejected border-canvas-worldkb-promotion-rejected/30',
   },
   merged: {
-    label: 'Merged',
+    labelKey: 'worldKb.entityNode.lifecycle.merged',
     className:
       'bg-canvas-worldkb-promotion-merged/15 text-canvas-worldkb-promotion-merged border-canvas-worldkb-promotion-merged/30',
   },
@@ -56,6 +57,7 @@ export const WorldKbEntityNode = memo(function WorldKbEntityNode({
   selected,
 }: NodeProps) {
   const d = data as WorldKbNodeData;
+  const { t } = useTranslation('canvas');
   const { open, position, openMenu, close } = useContextMenu();
   const badge = LIFECYCLE_BADGE[d.lifecycle];
   return (
@@ -75,7 +77,7 @@ export const WorldKbEntityNode = memo(function WorldKbEntityNode({
       />
       <div className="flex items-center justify-between gap-2">
         <span className="truncate font-heading text-copy-14 font-semibold text-gray-1000" title={d.name}>
-          {d.name || '(unnamed)'}
+          {d.name || t('worldKb.entityNode.unnamed')}
         </span>
       </div>
       <div className="mt-1 flex flex-wrap items-center gap-1">
@@ -83,27 +85,27 @@ export const WorldKbEntityNode = memo(function WorldKbEntityNode({
           {BLOCK_TYPE_LABELS[d.entityKind]}
         </span>
         <span className={`rounded-pill border px-1.5 py-0.5 text-label-12 ${badge.className}`}>
-          {badge.label}
+          {t(badge.labelKey)}
         </span>
         {d.computable ? (
           <span className="rounded-pill border border-canvas-worldkb-computable-badge/30 bg-canvas-worldkb-computable-badge/15 px-1.5 py-0.5 text-label-12 text-canvas-worldkb-computable-badge">
-            Computable
+            {t('worldKb.entityNode.computable')}
           </span>
         ) : null}
       </div>
       <p className="mt-1 text-label-12 text-gray-700">
-        {d.sourceAnchorCount} {d.sourceAnchorCount === 1 ? 'source anchor' : 'source anchors'} · v{d.version}
+        {t('worldKb.entityNode.sourceAnchorCount', { count: d.sourceAnchorCount })} · v{d.version}
       </p>
       <Handle
         type="source"
         position={Position.Bottom}
         className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port"
       />
-      {selected ? <span className="sr-only">Selected World KB entity</span> : null}
+      {selected ? <span className="sr-only">{t('worldKb.entityNode.selected')}</span> : null}
       {d.keyBlockId && open ? (
         <WorldKbEntityContextMenu
           position={position}
-          entityName={d.name || '(unnamed)'}
+          entityName={d.name || t('worldKb.entityNode.unnamed')}
           onClose={close}
           onConnectTo={() => {
             close();
@@ -125,10 +127,11 @@ export const WorldKbSourceAnchorNode = memo(function WorldKbSourceAnchorNode({
   data,
 }: NodeProps) {
   const d = data as SourceAnchorNodeData;
+  const { t } = useTranslation('canvas');
   return (
     <div
       className="min-w-[140px] max-w-[180px] rounded-card border border-canvas-worldkb-source-anchor-edge/40 bg-canvas-worldkb-source-anchor-node px-2 py-1 shadow-card"
-      aria-label={`Source anchor: ${d.reference}`}
+      aria-label={t('worldKb.entityNode.sourceAnchorAria', { reference: d.reference })}
     >
       <Handle
         type="source"

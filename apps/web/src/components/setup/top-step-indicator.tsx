@@ -1,11 +1,15 @@
+import { useTranslation } from 'react-i18next';
+
 import { cn } from '@/lib/utils';
 
 export type WizardStep = 'agent' | 'workspace' | 'done';
 
-const STEP_DEFS: { id: WizardStep; label: string }[] = [
-  { id: 'agent', label: 'Agent' },
-  { id: 'workspace', label: 'Workspace' },
-  { id: 'done', label: 'Done' },
+type StepDef = { id: WizardStep; key: string };
+
+const STEP_DEFS: StepDef[] = [
+  { id: 'agent', key: 'setup:progress.agent' },
+  { id: 'workspace', key: 'setup:progress.workspace' },
+  { id: 'done', key: 'setup:progress.done' },
 ];
 
 type StepStatus = 'complete' | 'active' | 'pending';
@@ -22,8 +26,9 @@ function stepStatus(currentStep: WizardStep, index: number): StepStatus {
  * Visual SSOT: apps/design-studio setup-wizard-chrome-fixtures TopStepIndicator.
  */
 export function TopStepIndicator({ currentStep }: { currentStep: WizardStep }) {
+  const { t } = useTranslation('setup');
   return (
-    <nav aria-label="Setup progress" className="w-full shrink-0" data-testid="top-step-indicator">
+    <nav aria-label={t('progress.label')} className="w-full shrink-0" data-testid="top-step-indicator">
       <ol className="flex w-full items-center justify-between gap-2">
         {STEP_DEFS.map((s, index) => {
           const status = stepStatus(currentStep, index);
@@ -63,7 +68,7 @@ export function TopStepIndicator({ currentStep }: { currentStep: WizardStep }) {
                     : 'text-setup-wizard-step-label-active-color',
                 )}
               >
-                {s.label}
+                {t(s.key)}
               </span>
             </li>
           );

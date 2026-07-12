@@ -17,6 +17,7 @@
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, ArrowUpRight } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { AnnotationInspector } from '@/components/reading/annotation-inspector';
 import { AnnotationToolbar } from '@/components/reading/annotation-toolbar';
@@ -45,6 +46,7 @@ import {
 import { formatRelative } from '@/lib/format';
 
 export function ChapterPage() {
+  const { t } = useTranslation('reading');
   const { workId = '', chapter: chapterParam = '' } = useParams();
   const chapterNumber = Number(chapterParam);
   const navigate = useNavigate();
@@ -103,11 +105,11 @@ export function ChapterPage() {
     );
   }
 
-  if (chapter.isLoading) return <LoadingState label="Loading chapter…" />;
+  if (chapter.isLoading) return <LoadingState label={t('loading.chapter')} />;
   if (chapter.isError || !chapter.data) {
     return (
       <ErrorState
-        description="Could not load this chapter. It may not exist or the daemon could not return it."
+        description={t('error.chapterDescription')}
         onRetry={() => chapter.refetch()}
       />
     );
@@ -125,16 +127,16 @@ export function ChapterPage() {
         <div className="flex flex-wrap items-center gap-2">
           <Button asChild variant="tertiary" size="small">
             <Link to={`/works/${encodeURIComponent(workId)}/chapters`}>
-              <ArrowLeft className="h-4 w-4" aria-hidden />Back to Chapters
+              <ArrowLeft className="h-4 w-4" aria-hidden />{t('chapter.backToChapters')}
             </Link>
           </Button>
           <span className="text-heading-20 font-heading tracking-tight text-gray-1000">
-            Chapter {ch.chapter}
+            {t('chapter.title', { chapter: ch.chapter })}
           </span>
           <MaturationIndicators workId={workId} chapter={ch.chapter} status={ch.status} />
         </div>
         <div className="text-copy-13 text-gray-700">
-          Updated {formatRelative(ch.updated_at)}
+          {t('chapter.updated', { relative: formatRelative(ch.updated_at) })}
         </div>
       </div>
 
@@ -151,19 +153,18 @@ export function ChapterPage() {
 
       <Card className="shadow-card">
         <CardHeader className="pb-3">
-          <CardTitle>Outline editing moved to Canvas</CardTitle>
+          <CardTitle>{t('chapter.canvasRedirectTitle')}</CardTitle>
           <CardDescription>
-            The whole-document outline editor was retired in V1.75. Edit this chapter&rsquo;s outline
-            on the outline canvas.
+            {t('chapter.canvasRedirectDescription')}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <Button asChild variant="primary" size="small">
             <Link
               to={canvasHref}
-              aria-label={`Edit outline for Chapter ${ch.chapter} on the outline canvas`}
+              aria-label={t('chapter.canvasRedirectAria', { chapter: ch.chapter })}
             >
-              Edit outline → Canvas <ArrowUpRight className="h-4 w-4" aria-hidden />
+              {t('chapter.canvasRedirectButton')} <ArrowUpRight className="h-4 w-4" aria-hidden />
             </Link>
           </Button>
         </CardContent>

@@ -33,8 +33,9 @@
  * if authors ask for it). Upgrade path: wrap options in nested
  * `role="group"[aria-label]` per `group`, preserving rank within each group.
  */
-import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { filterCommands, useCommands, type Command } from '@/lib/canvas/command-registry';
 import { cn } from '@/lib/utils';
@@ -96,7 +97,15 @@ export function CommandPalette(): React.ReactElement | null {
   return open ? <CommandPaletteDialog /> : null;
 }
 
+/** Command with display strings resolved from translation keys. */
+type ResolvedCommand = Command & {
+  readonly label: string;
+  readonly group: string;
+  readonly keywords: string[];
+};
+
 function CommandPaletteDialog(): React.ReactElement {
+  const { t } = useTranslation('commands');
   const commands = useCommands();
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
@@ -108,11 +117,29 @@ function CommandPaletteDialog(): React.ReactElement {
   const listboxId = useId();
   const optionBaseId = useId();
 
+  // Resolve translation keys at render time so labels update instantly on
+  // locale switches without re-registering commands. The registry stays stable
+  // (keyed by id); useTranslation subscribes this component to i18n changes.
+  const resolvedCommands = useMemo<ResolvedCommand[]>(
+    () =>
+      commands.map((c) => ({
+        ...c,
+        label: t(c.labelKey, { ns: c.labelNs ?? 'commands' }),
+        group: t(c.groupKey, { ns: c.groupNs ?? 'commands' }),
+        keywords:
+          c.keywordKeys?.map((k) => t(k, { ns: c.keywordNs ?? 'commands' })) ??
+          [],
+      })),
+    [commands, t],
+  );
+
   // Available() is a render-time gate (T1 contract) — evaluated on EVERY render
   // (NOT memoized) so a predicate that flips between renders is honoured. The
   // registry is small (canvas-action-scoped this iteration), so an un-memoized
   // scan is cheap; ranking is also linear in the visible set.
-  const availableCommands = commands.filter((c) => c.available?.() ?? true);
+  const availableCommands = resolvedCommands.filter(
+    (c) => c.available?.() ?? true,
+  );
   const visible = filterCommands(availableCommands, query);
 
   // Clamp active index into range whenever the filtered set shrinks/grows so
@@ -166,7 +193,7 @@ function CommandPaletteDialog(): React.ReactElement {
     });
   }
 
-  function invoke(command: Command): void {
+  function invoke(command: ResolvedCommand): void {
     closePalette();
     command.handler();
   }
@@ -206,7 +233,7 @@ function CommandPaletteDialog(): React.ReactElement {
     >
       <div className="flex w-full max-w-dialog flex-col overflow-hidden rounded-popover border border-gray-alpha-400 bg-background-100 shadow-popover">
         <h2 id={titleId} className="sr-only">
-          Command palette
+          {t('palette.title')}
         </h2>
         {/* Combobox: APG "editable combobox with listbox popup". The input owns
             focus and carries the combobox role; the active option is virtualized
@@ -223,20 +250,20 @@ function CommandPaletteDialog(): React.ReactElement {
           aria-expanded={visible.length > 0 ? 'true' : 'false'}
           aria-controls={listboxId}
           aria-activedescendant={activeOptionId}
-          aria-label="Search commands"
-          placeholder="Type a command…"
+          aria-label={t('palette.search.label')}
+          placeholder={t('palette.search.placeholder')}
           className="w-full border-b border-gray-alpha-400 bg-transparent px-4 py-3 text-copy-14 text-gray-1000 outline-none placeholder:text-gray-700"
         />
 
         {visible.length === 0 ? (
           <p id={NO_RESULTS_ID} className="px-4 py-6 text-center text-copy-14 text-gray-900">
-            No matching commands.
+            {t('palette.noResults')}
           </p>
         ) : (
           <ul
             id={listboxId}
             role="listbox"
-            aria-label="Commands"
+            aria-label={t('palette.listbox.label')}
             className="max-h-[320px] overflow-y-auto p-1"
           >
             {visible.map((command, index) => (
@@ -264,7 +291,7 @@ function CommandOption({
   onMouseEnter,
 }: {
   id: string;
-  command: Command;
+  command: ResolvedCommand;
   selected: boolean;
   onSelect: () => void;
   onMouseEnter: () => void;

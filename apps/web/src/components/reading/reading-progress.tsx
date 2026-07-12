@@ -12,6 +12,7 @@
  * with text + value (status is never color-only).
  */
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 /**
  * Debounce design (R-V179P0-QC1-002).
@@ -35,6 +36,7 @@ import { useEffect, useState } from 'react';
 const RAF_GUARD_MS = 16;
 
 export function ReadingProgress() {
+  const { t } = useTranslation('reading');
   const [pct, setPct] = useState(0);
 
   useEffect(() => {
@@ -75,7 +77,7 @@ export function ReadingProgress() {
     <div
       className="flex items-center gap-2"
       role="progressbar"
-      aria-label="Reading progress"
+      aria-label={t('progress.ariaLabel')}
       aria-valuenow={pct}
       aria-valuemin={0}
       aria-valuemax={100}

@@ -10,6 +10,7 @@
  * primary spec.
  */
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
@@ -31,12 +32,6 @@ export interface EdgeCreateDialogProps {
   isCommitting: boolean;
 }
 
-const EDGE_KIND_OPTIONS = [
-  { value: 'next', label: 'Linear (next)' },
-  { value: 'branch', label: 'Branch (conditional)' },
-  { value: 'default', label: 'Default' },
-] as const;
-
 export function EdgeCreateDialog({
   open,
   onOpenChange,
@@ -44,10 +39,17 @@ export function EdgeCreateDialog({
   onCommit,
   isCommitting,
 }: EdgeCreateDialogProps) {
+  const { t } = useTranslation('canvas');
   const [sourceId, setSourceId] = useState('');
   const [targetId, setTargetId] = useState('');
   const [kind, setKind] = useState<'next' | 'branch' | 'default'>('next');
   const [condition, setCondition] = useState('');
+
+  const edgeKindOptions = [
+    { value: 'next', label: t('strategy.edgeCreate.kind.next') },
+    { value: 'branch', label: t('strategy.edgeCreate.kind.branch') },
+    { value: 'default', label: t('strategy.edgeCreate.kind.default') },
+  ] as const;
 
   // Reset the form each time the dialog opens.
   useEffect(() => {
@@ -83,7 +85,7 @@ export function EdgeCreateDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent title="Create Transition" description="Add a transition between two states.">
+      <DialogContent title={t('strategy.edgeCreate.title')} description={t('strategy.edgeCreate.description')}>
         <form
           className="flex flex-col gap-4"
           onSubmit={(e) => {
@@ -92,7 +94,7 @@ export function EdgeCreateDialog({
           }}
         >
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="edge-create-source">Choose source</Label>
+            <Label htmlFor="edge-create-source">{t('strategy.edgeCreate.sourceLabel')}</Label>
             <Select
               id="edge-create-source"
               value={sourceId}
@@ -100,7 +102,7 @@ export function EdgeCreateDialog({
               autoFocus
             >
               <option value="" disabled>
-                Select a source state…
+                {t('strategy.edgeCreate.sourcePlaceholder')}
               </option>
               {states.map((s) => (
                 <option key={s.id} value={s.id}>
@@ -111,7 +113,7 @@ export function EdgeCreateDialog({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="edge-create-target">Choose target</Label>
+            <Label htmlFor="edge-create-target">{t('strategy.edgeCreate.targetLabel')}</Label>
             <Select
               id="edge-create-target"
               value={targetId}
@@ -119,7 +121,9 @@ export function EdgeCreateDialog({
               disabled={sourceId === ''}
             >
               <option value="" disabled>
-                {sourceId === '' ? 'Choose a source first…' : 'Select a target state…'}
+                {sourceId === ''
+                  ? t('strategy.edgeCreate.targetPlaceholderLocked')
+                  : t('strategy.edgeCreate.targetPlaceholder')}
               </option>
               {targetOptions.map((s) => (
                 <option key={s.id} value={s.id}>
@@ -130,9 +134,9 @@ export function EdgeCreateDialog({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="edge-create-kind">Choose edge kind</Label>
+            <Label htmlFor="edge-create-kind">{t('strategy.edgeCreate.kindLabel')}</Label>
             <Select id="edge-create-kind" value={kind} onChange={(e) => setKind(e.target.value as typeof kind)}>
-              {EDGE_KIND_OPTIONS.map((o) => (
+              {edgeKindOptions.map((o) => (
                 <option key={o.value} value={o.value}>
                   {o.label}
                 </option>
@@ -141,12 +145,12 @@ export function EdgeCreateDialog({
           </div>
 
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="edge-create-condition">Condition</Label>
+            <Label htmlFor="edge-create-condition">{t('strategy.edgeCreate.conditionLabel')}</Label>
             <Input
               id="edge-create-condition"
               value={condition}
               onChange={(e) => setCondition(e.target.value)}
-              placeholder="e.g. word_count > 1000"
+              placeholder={t('strategy.edgeCreate.conditionPlaceholder')}
             />
           </div>
 
@@ -158,10 +162,10 @@ export function EdgeCreateDialog({
               onClick={() => onOpenChange(false)}
               disabled={isCommitting}
             >
-              Cancel
+              {t('strategy.edgeCreate.cancel')}
             </Button>
             <Button type="submit" variant="primary" size="small" disabled={!canCommit}>
-              {isCommitting ? 'Creating…' : 'Create Transition'}
+              {isCommitting ? t('strategy.edgeCreate.creating') : t('strategy.edgeCreate.submit')}
             </Button>
           </div>
         </form>

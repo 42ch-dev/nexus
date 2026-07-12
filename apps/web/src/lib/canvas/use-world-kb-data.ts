@@ -6,6 +6,7 @@
  * invalidate the graph so the canvas stays fresh after each successful write;
  * callers handle 409 conflicts via {@link isWorldKbConflictError}.
  */
+import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useNexusClient } from '@/lib/client-context';
@@ -25,14 +26,15 @@ import type {
 
 function useErrorToast() {
   const { toast } = useToast();
-  return (error: unknown, title: string) => {
+  const { t } = useTranslation('common');
+  return (error: unknown, key: string) => {
     const description =
       error instanceof NexusClientError
         ? error.message
         : error instanceof Error
           ? error.message
-          : 'Unexpected error.';
-    toast({ variant: 'error', title, description });
+          : t('error.unexpected');
+    toast({ variant: 'error', title: t(key, { defaultValue: key }), description });
   };
 }
 
@@ -102,7 +104,7 @@ export function usePatchWorldKbEntity(worldId: string | undefined) {
       // the real client errors (which ARE instances) are excluded; the per-call
       // handler still owns the 409/422 UX paths.
       if (!isWorldKbConflictError(error) && !isWorldKbValidationError(error)) {
-        errorToast(error, 'Could not save entity');
+        errorToast(error, 'error.couldNotSaveWorldKbEntity');
       }
     },
   });
@@ -123,7 +125,7 @@ export function usePromoteWorldKbCandidate(worldId: string | undefined) {
       // 409 conflicts are resolved by the promotion inspector's conflict modal;
       // only surface non-conflict failures as toasts.
       if (!isWorldKbConflictError(error)) {
-        errorToast(error, 'Could not promote candidate');
+        errorToast(error, 'error.couldNotPromoteWorldKbCandidate');
       }
     },
   });
@@ -149,7 +151,7 @@ export function usePatchWorldKbRelationship(worldId: string | undefined) {
         // canvas) layer their own dismiss/clear-selection UX on top.
         void qc.invalidateQueries({ queryKey: queryKeys.worldKb.graph(worldId ?? '') });
       } else if (!isWorldKbValidationError(error)) {
-        errorToast(error, 'Could not save relationship');
+        errorToast(error, 'error.couldNotSaveWorldKbRelationship');
       }
     },
   });

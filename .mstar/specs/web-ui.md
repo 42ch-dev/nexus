@@ -1344,3 +1344,16 @@ V1.106 promoted Toast to `@42ch/nexus-ui` for Studio fixtures. V1.107 requires A
 #### 29.15.5 Contract boundary
 
 Prefer `wire_contracts_changed: false`. Studio-first invariant: [`studio-first-invariant.md`](../iterations/v1.107/guides/studio-first-invariant.md) (V1.107 carry-forward).
+
+### 29.16 V1.112 Amendments — Frontend i18n (in progress)
+
+**Iteration SSOT:** [`.mstar/iterations/v1.112-delivery-compass.md`](../iterations/v1.112-delivery-compass.md) + [`v1.112/specs/`](../iterations/v1.112/specs/). Normative product detail for this slice lives in the iteration workspace until P5 merge.
+
+**Implement authority (iteration workspace):**
+
+| Plan | Spec | Scope |
+| --- | --- | --- |
+| P0 — i18n foundation + Appearance | [`i18n-foundation.md`](../iterations/v1.112/specs/i18n-foundation.md) | `i18next` + `react-i18next`; Settings **Appearance** → Language (`system` \| `en` \| `zh-CN`); caller-owned copy; user-facing-only catalogs |
+| P1 — full user-facing UI migration | [`i18n-ui-migration.md`](../iterations/v1.112/specs/i18n-ui-migration.md) | Remaining **user-facing** `apps/web` chrome + `format.ts` / `Intl` active-locale wiring |
+
+When shipped: Settings nav becomes **Agent · Workspace · Appearance · Advanced**; theme toggle stays in the header (not moved into Appearance). Developer-auxiliary surfaces (including `apps/design-studio`) remain out of catalog scope. `wire_contracts_changed: false`.

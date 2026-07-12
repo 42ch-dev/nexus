@@ -2,10 +2,12 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserRouter } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 
 import { App } from '@/App';
 import { ClientProvider } from '@/lib/client-context';
 import { ThemeProvider } from '@/components/theme-provider';
+import { LocaleProvider } from '@/components/locale-provider';
 import { ToastProvider, Toaster, useToast } from '@/lib/use-toast';
 import { NexusClientError } from '@/lib/nexus';
 import './index.css';
@@ -18,14 +20,15 @@ import './index.css';
  */
 function useQueryErrorToast() {
   const { toast } = useToast();
+  const { t } = useTranslation('common');
   return (error: unknown) => {
     const description =
       error instanceof NexusClientError
         ? error.message
         : error instanceof Error
           ? error.message
-          : 'Unexpected error.';
-    toast({ variant: 'error', title: 'Request failed', description });
+          : t('error.unexpected');
+    toast({ variant: 'error', title: t('error.requestFailed'), description });
   };
 }
 
@@ -59,12 +62,14 @@ if (!rootElement) throw new Error('Root element #root not found');
 createRoot(rootElement).render(
   <StrictMode>
     <ThemeProvider>
-      <ToastProvider>
-        <AppProviders>
-          <App />
-        </AppProviders>
-        <Toaster />
-      </ToastProvider>
+      <LocaleProvider>
+        <ToastProvider>
+          <AppProviders>
+            <App />
+          </AppProviders>
+          <Toaster />
+        </ToastProvider>
+      </LocaleProvider>
     </ThemeProvider>
   </StrictMode>,
 );

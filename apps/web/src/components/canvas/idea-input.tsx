@@ -15,6 +15,7 @@
  * artifacts list) so the author can later understand why Nexus did something.
  */
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Loader2, Play, RotateCcw, Send } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -39,18 +40,19 @@ export interface IdeaInputProps {
   onArtifact: (artifact: IdeaArtifact) => void;
 }
 
-const VERB_LABEL: Record<IdeaVerb, string> = {
-  run: 'Run',
-  steer: 'Steer',
-  resume: 'Resume',
-};
-
 export function IdeaInput({ presetId, creatorId, scheduleId, onArtifact }: IdeaInputProps) {
+  const { t } = useTranslation('canvas');
   const [text, setText] = useState('');
   const [verb, setVerb] = useState<IdeaVerb>('run');
   const run = useRunStrategy();
   const steer = useSteerStrategy();
   const resume = useResumeStrategy();
+
+  const VERB_LABEL: Record<IdeaVerb, string> = {
+    run: t('ideaInput.verb.run'),
+    steer: t('ideaInput.verb.steer'),
+    resume: t('ideaInput.verb.resume'),
+  };
 
   const pending = run.isPending || steer.isPending || resume.isPending;
 
@@ -78,15 +80,21 @@ export function IdeaInput({ presetId, creatorId, scheduleId, onArtifact }: IdeaI
     setText('');
   };
 
+  const runHelper = !creatorId
+    ? t('ideaInput.helper.run.noCreator')
+    : t('ideaInput.helper.run.default');
+  const steerHelper = t('ideaInput.helper.steer');
+  const resumeHelper = t('ideaInput.helper.resume');
+
   return (
     <div className="flex flex-col gap-2 rounded-card border border-gray-alpha-400 bg-background-100 p-3 shadow-popover">
       <label htmlFor="idea-input" className="text-label-14 text-gray-1000">
-        Steer the Strategy
+        {t('ideaInput.label')}
       </label>
       <textarea
         id="idea-input"
         className="min-h-[64px] w-full resize-y rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-2 text-copy-14 text-gray-1000 placeholder:text-gray-700 focus:border-blue-700 focus:outline-none"
-        placeholder="Describe a direction for Nexus — it will execute and write the prose."
+        placeholder={t('ideaInput.placeholder')}
         value={text}
         onChange={(e) => setText(e.target.value)}
         onKeyDown={(e) => {
@@ -98,7 +106,7 @@ export function IdeaInput({ presetId, creatorId, scheduleId, onArtifact }: IdeaI
         aria-describedby="idea-helper"
       />
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex items-center gap-1" role="group" aria-label="Steering verb">
+        <div className="flex items-center gap-1" role="group" aria-label={t('ideaInput.verbGroupAria')}>
           {(['run', 'steer', 'resume'] as const).map((v) => {
             const disabled =
               (v === 'run' && !creatorId) ||
@@ -137,17 +145,19 @@ export function IdeaInput({ presetId, creatorId, scheduleId, onArtifact }: IdeaI
                 ? <Play className="h-4 w-4" aria-hidden />
                 : <Send className="h-4 w-4" aria-hidden />
           )}
-          {effectiveVerb === 'run' ? 'Run Strategy' : effectiveVerb === 'steer' ? 'Send Idea' : 'Resume'}
+          {effectiveVerb === 'run'
+            ? t('ideaInput.submit.run')
+            : effectiveVerb === 'steer'
+              ? t('ideaInput.submit.steer')
+              : t('ideaInput.submit.resume')}
         </Button>
       </div>
       <p id="idea-helper" className="text-copy-13 text-gray-700">
         {effectiveVerb === 'run'
-          ? !creatorId
-            ? 'No active creator found. Start the daemon and create a Work first, or steer an existing run.'
-            : 'Starts a new run with this Idea as the seed. Nexus will execute the Strategy.'
+          ? runHelper
           : effectiveVerb === 'steer'
-            ? 'Appends this Idea to the active run’s context and resumes execution.'
-            : 'Signals the active run to resume from its current state.'}
+            ? steerHelper
+            : resumeHelper}
       </p>
     </div>
   );

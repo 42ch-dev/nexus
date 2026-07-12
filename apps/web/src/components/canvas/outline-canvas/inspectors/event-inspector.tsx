@@ -7,6 +7,7 @@
  * link/unlink authoring controls. Drives the `patch_timeline_event` route.
  */
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowRight, CalendarPlus, Link2, Trash2, Unlink } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -27,6 +28,7 @@ export function TimelinePanel({
   baseRevision,
   onPatchTimeline,
 }: TimelinePanelProps) {
+  const { t } = useTranslation('canvas');
   const [newTitle, setNewTitle] = useState('');
   const [newDescription, setNewDescription] = useState('');
   // Per-source-event selected foreshadow target id (FB-C1-005 link control).
@@ -96,13 +98,13 @@ export function TimelinePanel({
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <CalendarPlus className="h-5 w-5 text-teal-700" aria-hidden />
-          Timeline
+          {t('eventInspector.title')}
         </CardTitle>
-        <CardDescription>Events, beats, and foreshadow links.</CardDescription>
+        <CardDescription>{t('eventInspector.description')}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {outline.timeline_events.length === 0 ? (
-          <p className="text-copy-13 text-gray-700">No timeline events yet.</p>
+          <p className="text-copy-13 text-gray-700">{t('outlineAltView.noTimelineEvents')}</p>
         ) : (
           <ul className="space-y-2">
             {outline.timeline_events.map((event) => {
@@ -123,7 +125,7 @@ export function TimelinePanel({
                       ) : null}
                       {event.realizes_chapter_id ? (
                         <p className="text-label-12 text-gray-700">
-                          Chapter {event.realizes_chapter_id}
+                          {t('outlineAltView.realizesChapter', { chapter: event.realizes_chapter_id })}
                         </p>
                       ) : null}
                     </div>
@@ -141,8 +143,8 @@ export function TimelinePanel({
                             })
                           }
                           className="rounded-control p-1 text-gray-700 hover:bg-gray-alpha-100"
-                          aria-label={`Attach event to chapter ${selectedChapterId}`}
-                          title="Attach to selected chapter"
+                          aria-label={t('eventInspector.attachAria', { chapter: selectedChapterId })}
+                          title={t('eventInspector.attachTitle')}
                         >
                           <Link2 className="h-4 w-4" aria-hidden />
                         </button>
@@ -158,8 +160,8 @@ export function TimelinePanel({
                           })
                         }
                         className="rounded-control p-1 text-gray-700 hover:bg-gray-alpha-100"
-                        aria-label={`Remove event ${event.title}`}
-                        title="Remove event"
+                        aria-label={t('eventInspector.removeAria', { title: event.title })}
+                        title={t('eventInspector.removeTitle')}
                       >
                         <Trash2 className="h-4 w-4" aria-hidden />
                       </button>
@@ -167,21 +169,21 @@ export function TimelinePanel({
                   </div>
 
                   {targets.length > 0 ? (
-                    <ul className="mt-1.5 space-y-1" aria-label={`Foreshadow links from ${event.title}`}>
+                    <ul className="mt-1.5 space-y-1" aria-label={t('eventInspector.foreshadowsAria', { title: event.title })}>
                       {targets.map((targetId) => (
                         <li
                           key={targetId}
                           className="flex items-center justify-between gap-1 rounded-control bg-gray-alpha-100 px-1.5 py-0.5"
                         >
                           <span className="truncate text-label-12 text-gray-700">
-                            Foreshadows {eventTitleById.get(targetId) ?? targetId}
+                            {t('eventInspector.foreshadows', { title: eventTitleById.get(targetId) ?? targetId })}
                           </span>
                           <button
                             type="button"
                             onClick={() => unlinkForeshadow(event.event_id, targetId)}
                             className="flex shrink-0 items-center gap-1 rounded-control p-1 text-gray-700 hover:bg-gray-alpha-200"
-                            aria-label={`Unlink foreshadow to ${eventTitleById.get(targetId) ?? targetId}`}
-                            title="Unlink Foreshadow"
+                            aria-label={t('eventInspector.unlinkAria', { title: eventTitleById.get(targetId) ?? targetId })}
+                            title={t('eventInspector.unlinkTitle')}
                           >
                             <Unlink className="h-3.5 w-3.5" aria-hidden />
                           </button>
@@ -201,9 +203,9 @@ export function TimelinePanel({
                           }))
                         }
                         className="min-w-0 flex-1 rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-label-12 text-gray-1000 focus:border-blue-700"
-                        aria-label={`Foreshadow target for ${event.title}`}
+                        aria-label={t('eventInspector.targetAria', { title: event.title })}
                       >
-                        <option value="">Link foreshadow to…</option>
+                        <option value="">{t('eventInspector.targetPlaceholder')}</option>
                         {linkableEvents.map((target) => (
                           <option key={target.event_id} value={target.event_id}>
                             {target.title}
@@ -221,7 +223,7 @@ export function TimelinePanel({
                         }
                         disabled={!linkTargetByEvent[event.event_id]}
                       >
-                        Link Foreshadow
+                        {t('eventInspector.link')}
                       </Button>
                     </div>
                   ) : null}
@@ -232,23 +234,23 @@ export function TimelinePanel({
         )}
 
         <div className="rounded-card border border-gray-alpha-300 bg-background-100 p-3 space-y-2">
-          <p className="text-label-14 font-semibold text-gray-900">Add Event</p>
+          <p className="text-label-14 font-semibold text-gray-900">{t('eventInspector.addTitle')}</p>
           <input
             type="text"
             value={newTitle}
             onChange={(e) => setNewTitle(e.target.value)}
-            placeholder="Event title…"
+            placeholder={t('eventInspector.titlePlaceholder')}
             className="w-full rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-2 text-gray-1000 focus:border-blue-700"
           />
           <textarea
             value={newDescription}
             onChange={(e) => setNewDescription(e.target.value)}
-            placeholder="Description (optional)…"
+            placeholder={t('eventInspector.descriptionPlaceholder')}
             rows={2}
             className="w-full rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-2 text-gray-1000 focus:border-blue-700"
           />
           <Button variant="secondary" size="small" onClick={addEvent} disabled={!newTitle.trim()}>
-            <ArrowRight className="h-4 w-4" aria-hidden /> Add to timeline
+            <ArrowRight className="h-4 w-4" aria-hidden /> {t('eventInspector.addButton')}
           </Button>
         </div>
       </CardContent>

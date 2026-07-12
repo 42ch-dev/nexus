@@ -1,27 +1,9 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { EmptyState } from '@/components/ui/states';
 import type { KeywordCount } from '@/components/soul/soul-stats';
 
-/**
- * Keyword frequency / cluster visualization (V1.79 P1 — SOUL §B).
- *
- * Renders the creator's top creative themes as a frequency list: each row is a
- * keyword whose horizontal bar encodes how often it shows up across the
- * captured fragments. Node size = frequency (the cluster-node token maps to bar
- * width here). Per DESIGN.md `soul-viz-keyword-cluster-node`, the fill/stroke
- * carry the purple accent; the count surfaces on hover (title) and inline.
- *
- * Interaction:
- *  - Hover a row → the count is announced via `title` (tooltip) and inline text.
- *  - Click a keyword → `onSelectKeyword` fires so the parent can filter the
- *    fragments browser (optional; the callback is `undefined` when the parent
- *    does not wire filtering).
- *
- * Density contract: the parent only renders this for `low-data` and `rich`
- * states (never `empty`). When the fragments exist but none carry keywords, an
- * honest inline empty state explains the gap rather than rendering a blank chart.
- */
 export function KeywordFrequency({
   counts,
   selectedKeyword,
@@ -33,6 +15,7 @@ export function KeywordFrequency({
   onSelectKeyword?: (keyword: string | null) => void;
   maxRows?: number;
 }) {
+  const { t } = useTranslation('memory');
   const [hovered, setHovered] = useState<string | null>(null);
   const top = counts.slice(0, maxRows);
   const maxCount = top.length > 0 ? top[0]!.count : 0;
@@ -40,8 +23,8 @@ export function KeywordFrequency({
   if (top.length === 0) {
     return (
       <EmptyState
-        title="No themes yet"
-        description="Your captured fragments do not carry keyword labels yet. Keep reviewing pending captures — themes will accumulate here."
+        title={t('soul.noThemesTitle')}
+        description={t('soul.noThemesDescription')}
       />
     );
   }
@@ -66,7 +49,7 @@ export function KeywordFrequency({
               onMouseLeave={() => setHovered((h) => (h === keyword ? null : h))}
               onFocus={() => setHovered(keyword)}
               onBlur={() => setHovered((h) => (h === keyword ? null : h))}
-              title={`${count} fragment${count === 1 ? '' : 's'} mention “${keyword}”`}
+              title={t('soul.fragmentCount', { count, keyword })}
               aria-pressed={selectable ? isSelected : undefined}
               className={[
                 'group flex w-full items-center gap-3 rounded-control px-2 py-1.5 text-left',
@@ -83,7 +66,6 @@ export function KeywordFrequency({
                 className="relative h-2.5 flex-1 overflow-hidden rounded-pill"
                 aria-hidden
               >
-                {/* soul-viz-keyword-cluster-node fill/stroke (DESIGN.md token). */}
                 <span
                   className="block h-full rounded-pill"
                   style={{
@@ -103,7 +85,7 @@ export function KeywordFrequency({
       })}
       {counts.length > maxRows && (
         <li className="px-2 text-copy-13 text-gray-700">
-          +{counts.length - maxRows} more theme{counts.length - maxRows === 1 ? '' : 's'}
+          {t('soul.moreThemes', { count: counts.length - maxRows })}
         </li>
       )}
     </ul>

@@ -1,0 +1,32 @@
+{
+  "id": "2026-07-12-v1.111-canvas-command-palette",
+  "title": "P0 — Shared Canvas Command Palette (Cmd+K)",
+  "file": "plans/2026-07-12-v1.111-canvas-command-palette.md",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": [
+    "@frontend-dev",
+    "@architect"
+  ],
+  "progress": 100,
+  "tags": [
+    "v1.111",
+    "canvas",
+    "command-palette",
+    "discoverability",
+    "must"
+  ],
+  "created_at": "2026-07-12",
+  "updated_at": "2026-07-12",
+  "notes": "Done — SDD T1-T5 + QC tri Approve with residuals (2 low) + QA Pass; merged to iteration/v1.111",
+  "metadata": {
+    "iteration_refs": [
+      "V1.111"
+    ],
+    "spec_integration_branch": "iteration/v1.111",
+    "merge_target": "iteration/v1.111",
+    "primary_spec": ".mstar/iterations/v1.111/specs/canvas-command-palette.md",
+    "wire_contracts_changed": false,
+    "tier": "Must"
+  }
+}

@@ -1,0 +1,71 @@
+{
+  "aria": {
+    "sections": "设置分区"
+  },
+  "title": "设置",
+  "helper": "在此处管理你的本地智能体、守护进程连接和设置选项。",
+  "nav": {
+    "agent": "智能体",
+    "workspace": "工作区",
+    "appearance": "外观",
+    "advanced": "高级"
+  },
+  "appearance": {
+    "title": "外观",
+    "language": {
+      "label": "语言",
+      "system": "跟随系统",
+      "en": "English",
+      "zh-CN": "简体中文",
+      "helper": "跟随系统会采用你的操作系统或浏览器语言。"
+    }
+  },
+  "workspace": {
+    "title": "工作区",
+    "helper": "查看或更改 Nexus 在本机上存储创意文件的位置。",
+    "folderLabel": "工作区文件夹",
+    "changeFolder": "更改文件夹…",
+    "browserOnly": "仅在桌面应用中可以更改工作区路径。",
+    "savedHonesty": "工作区路径已保存。请重启或重新加载应用，以使运行中的守护进程使用新位置。",
+    "restartLabel": "退出并重新打开 Nexus"
+  },
+  "agent": {
+    "title": "智能体",
+    "helper": "选择 Nexus 用于创意工作的本地 ACP 智能体。",
+    "browserOnly": "仅在桌面应用中可以选择智能体。",
+    "save": "保存智能体",
+    "saving": "保存中…",
+    "scanError": "守护进程没有响应智能体扫描请求。",
+    "emptyTitle": "在 PATH 中未找到智能体。"
+  },
+  "connection": {
+    "title": "连接守护进程",
+    "description": "输入远程守护进程 URL 和 API 密钥。本地模式仍然可用——你可以随时在这里恢复。",
+    "urlLabel": "守护进程 URL",
+    "urlPlaceholder": "https://192.168.1.42:8420",
+    "urlHelper": "守护进程的完整 HTTPS 地址，包括端口。",
+    "apiKeyLabel": "API 密钥",
+    "apiKeyPlaceholder": "输入守护进程机器上的 API 密钥",
+    "apiKeyHelper": "来自守护进程机器的 API 密钥（在该主机上运行 {{command}}）。",
+    "apiKeyCommand": "nexus42 daemon api-key",
+    "showKey": "显示密钥",
+    "hideKey": "隐藏密钥",
+    "labelLabel": "标签（可选）",
+    "loopback": "此守护进程没有 TLS 证书。它正以仅环回模式运行，因此远程访问不可用。请改用本地模式。",
+    "fingerprintTrust": "在连接之前，请确认证书指纹与你在守护进程机器上看到的值一致。",
+    "fingerprintTrustDescription": "此指纹是你的应用确保它正在与真实守护进程通信、而非冒名顶替者的方式。将它与守护进程机器屏幕上打印的值进行比较。如果一致，则可以安全信任。",
+    "fingerprintMatch": "指纹与受信任的守护进程匹配。",
+    "fingerprintMismatch": "此守护进程的证书已更改。这可能发生在守护进程被重新安装或其证书被故意轮换时。也可能意味着有人正在拦截你的连接。",
+    "trustNewCertificate": "信任新证书并继续",
+    "keepOldCertificate": "取消并继续使用旧证书",
+    "useLocalDaemon": "使用本地守护进程",
+    "trustAndConnect": "信任此证书并连接",
+    "reconnectWithSettings": "使用这些设置重新连接",
+    "fetchFingerprint": "获取指纹",
+    "fetchingFingerprint": "正在获取指纹…",
+    "originNote": "如果你从浏览器标签页连接到远程守护进程，你的服务来源必须列在守护进程的 {{setting}} 设置中。桌面应用会自动被允许。",
+    "originSetting": "NEXUS_DAEMON_ALLOWED_ORIGINS",
+    "fingerprintError": "浏览器无法可靠地区分无法访问的守护进程与被拒绝的自签名证书，因此即使守护进程正在运行，获取证书指纹也可能失败。对于使用自签名证书的远程守护进程，请使用 Nexus 桌面应用——它支持首次使用时信任（TOFU），并可以将证书存储在操作系统钥匙串中。",
+    "connectedDescription": "正在使用 {{url}}"
+  }
+}

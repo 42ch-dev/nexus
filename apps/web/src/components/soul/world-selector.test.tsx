@@ -65,7 +65,7 @@ describe('WorldSelector', () => {
     const select = screen.getByTestId('soul-world-selector') as HTMLSelectElement;
     expect(select.value).toBe('');
     expect(screen.getByText('your whole Creator SOUL')).toBeInTheDocument();
-    expect(screen.getByText('Eryndor (42 fragments)')).toBeInTheDocument();
+    expect(screen.getByText('Eryndor (42 fragments mention \'Eryndor\')')).toBeInTheDocument();
   });
 
   it('renders world titles, not raw world_id', () => {
@@ -77,7 +77,7 @@ describe('WorldSelector', () => {
         onSelect={() => {}}
       />,
     );
-    expect(screen.getByText('The Realms of Eryndor (5 fragments)')).toBeInTheDocument();
+    expect(screen.getByText('The Realms of Eryndor (5 fragments mention \'The Realms of Eryndor\')')).toBeInTheDocument();
     expect(screen.queryByText('w-eryndor')).not.toBeInTheDocument();
   });
 
@@ -106,7 +106,7 @@ describe('WorldSelector', () => {
       />,
     );
     const options = screen.getAllByRole('option').slice(1); // skip "All worlds"
-    expect(options.map((o) => o.textContent)).toEqual(['Alpha (2 fragments)', 'Zeta (1 fragment)']);
+    expect(options.map((o) => o.textContent)).toEqual(['Alpha (2 fragments mention \'Alpha\')', 'Zeta (1 fragment mentions \'Zeta\')']);
   });
 
   it('selecting a world re-scopes the projection and reframes the label', () => {

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 
 import {
   TopStepIndicator,
@@ -34,6 +35,7 @@ export function SetupWizardPage() {
   const { markCompleted } = useSetupCompleted();
   const desktop = useDesktopCapabilities();
   const { toast } = useToast();
+  const { t } = useTranslation('setup');
   const [step, setStep] = useState<WizardStep>('agent');
   const [isFinishing, setIsFinishing] = useState(false);
   const [state, setState] = useState<WizardState>({
@@ -54,8 +56,8 @@ export function SetupWizardPage() {
       markCompleted();
       navigate('/works', { replace: true });
     } catch (err) {
-      const description = errorMessage(err) || 'Failed to save agent profile.';
-      toast({ variant: 'error', title: 'Could not finish setup', description });
+      const description = errorMessage(err) || t('error.finishSetupFailed');
+      toast({ variant: 'error', title: t('toast.finishFailed'), description });
     } finally {
       setIsFinishing(false);
     }

@@ -1,5 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 
+import { useTranslation } from 'react-i18next';
+
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Input, Label, Select, Textarea } from '@/components/ui';
 import { Button } from '@/components/ui/button';
@@ -33,6 +35,7 @@ export function CreateWorkDialog({
 }) {
   const create = useCreateWork();
   const { toast } = useToast();
+  const { t } = useTranslation('shell');
   const [title, setTitle] = useState('');
   const [longTermGoal, setLongTermGoal] = useState('');
   const [initialIdea, setInitialIdea] = useState('');
@@ -59,7 +62,7 @@ export function CreateWorkDialog({
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!valid) {
-      setError('Title, long-term goal, and initial idea are required.');
+      setError(t('workCreate.validationError'));
       return;
     }
     try {
@@ -69,7 +72,7 @@ export function CreateWorkDialog({
         initial_idea: initialIdea.trim(),
         ...(workProfileTouched ? { work_profile: workProfile } : {}),
       });
-      toast({ variant: 'success', title: 'Work created', description: res.work_id });
+      toast({ variant: 'success', title: t('workCreate.toastCreated'), description: res.work_id });
       onOpenChange(false);
       onCreated?.(res.work_id);
     } catch {
@@ -80,43 +83,43 @@ export function CreateWorkDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        title="Create Work"
-        description="Start a new creative Work in the local runtime."
+        title={t('workCreate.title')}
+        description={t('workCreate.description')}
       >
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="work-title">Title</Label>
+            <Label htmlFor="work-title">{t('workCreate.titleLabel')}</Label>
             <Input
               id="work-title"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="The Work's name"
+              placeholder={t('workCreate.titlePlaceholder')}
               invalid={Boolean(error) && title.trim().length === 0}
               autoFocus
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="work-goal">Long-term goal</Label>
+            <Label htmlFor="work-goal">{t('workCreate.goalLabel')}</Label>
             <Textarea
               id="work-goal"
               value={longTermGoal}
               onChange={(e) => setLongTermGoal(e.target.value)}
-              placeholder="Where this Work is heading"
+              placeholder={t('workCreate.goalPlaceholder')}
               invalid={Boolean(error) && longTermGoal.trim().length === 0}
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="work-idea">Initial idea</Label>
+            <Label htmlFor="work-idea">{t('workCreate.ideaLabel')}</Label>
             <Textarea
               id="work-idea"
               value={initialIdea}
               onChange={(e) => setInitialIdea(e.target.value)}
-              placeholder="The seed the runtime will build on"
+              placeholder={t('workCreate.ideaPlaceholder')}
               invalid={Boolean(error) && initialIdea.trim().length === 0}
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="work-profile">Work profile</Label>
+            <Label htmlFor="work-profile">{t('workCreate.profileLabel')}</Label>
             <Select
               id="work-profile"
               value={workProfile}
@@ -140,10 +143,10 @@ export function CreateWorkDialog({
           {error && <p className="text-copy-13 text-red-700">{error}</p>}
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="tertiary" size="small" onClick={() => onOpenChange(false)}>
-              Cancel
+              {t('common:action.cancel')}
             </Button>
             <Button type="submit" variant="primary" size="small" disabled={!valid || create.isPending}>
-              {create.isPending ? 'Creating Work…' : 'Create Work'}
+              {create.isPending ? t('workCreate.creating') : t('workCreate.create')}
             </Button>
           </div>
         </form>

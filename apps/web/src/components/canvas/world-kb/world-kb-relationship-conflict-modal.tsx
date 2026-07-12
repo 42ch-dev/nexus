@@ -5,6 +5,8 @@
  * `patch_relationship` means another session changed the row; the author can
  * use the server version or reapply their edit against the new version.
  */
+import { useTranslation } from 'react-i18next';
+
 import {
   ConflictModalBase,
   type ConflictField,
@@ -37,27 +39,27 @@ export function WorldKbRelationshipConflictModal({
   onReapply,
   onDismiss,
 }: WorldKbRelationshipConflictModalProps) {
+  const { t } = useTranslation('canvas');
   const label = relationshipLabel(draft.form);
-  const fieldLabel = capitalize(editedFieldLabelFor(draft.form));
-  const relationshipNames = bold(`${draft.sourceName} → ${draft.targetName}`);
+  const fieldLabelKey = editedFieldLabelKeyFor(draft.form);
   const serverChanges: ConflictField<keyof RelationshipForm>[] = [
     {
       id: 'relationType',
-      label: fieldLabel,
-      serverValue: 'Modified by another session',
+      label: t(fieldLabelKey),
+      serverValue: t('worldKb.conflict.modifiedByOther'),
     },
   ];
   const localChanges: ConflictField<keyof RelationshipForm>[] = [
     {
       id: 'relationType',
-      label: fieldLabel,
+      label: t(fieldLabelKey),
       localValue: `${draft.sourceName} ${label} ${draft.targetName}`,
     },
   ];
   const reviewRows: ConflictReviewRow[] = [
     {
-      label: fieldLabel,
-      server: 'Changed by another session',
+      label: t(fieldLabelKey),
+      server: t('worldKb.conflict.changedByOther'),
       draft: `${draft.sourceName} ${label} ${draft.targetName}`,
       changed: true,
     },
@@ -66,38 +68,39 @@ export function WorldKbRelationshipConflictModal({
   return (
     <ConflictModalBase<keyof RelationshipForm>
       open={open}
-      title="This relationship changed while you were editing it."
+      title={t('worldKb.conflict.relationshipTitle')}
       description={
         <>
-          Nexus updated the relationship {relationshipNames} to version
+          {t('worldKb.conflict.relationshipDescription', { source: draft.sourceName, target: draft.targetName })}
+          {' '}
+          {t('worldKb.conflict.toVersion')}
         </>
       }
       descriptionSuffix={
         <>
           {' '}
-          while you were editing its {bold(editedFieldLabelFor(draft.form))}. Your change is still
-          in the inspector.
+          {t('worldKb.conflict.relationshipSuffix', { field: capitalize(t(fieldLabelKey)) })}
         </>
       }
       currentRevision={currentVersion}
-      serverSectionTitle="What changed"
-      localSectionTitle="What you were about to do"
+      serverSectionTitle={t('worldKb.conflict.serverSection')}
+      localSectionTitle={t('worldKb.conflict.localSection')}
       serverChanges={serverChanges}
       localChanges={localChanges}
       reviewRows={reviewRows}
       onUseCurrent={onUseCurrent}
       onReapply={onReapply}
       onDismiss={onDismiss}
-      useCurrentLabel="Use current"
-      reapplyLabel="Reapply my edit"
-      keepEditingLabel="Cancel"
+      useCurrentLabel={t('worldKb.conflict.useCurrent')}
+      reapplyLabel={t('worldKb.conflict.reapply')}
+      keepEditingLabel={t('worldKb.conflict.cancel')}
     />
   );
 }
 
-function editedFieldLabelFor(form: RelationshipForm): string {
-  if (form.relationType === 'custom') return 'custom label';
-  return 'relation type';
+function editedFieldLabelKeyFor(form: RelationshipForm): string {
+  if (form.relationType === 'custom') return 'worldKb.conflict.field.customLabel';
+  return 'worldKb.conflict.field.relationType';
 }
 
 function capitalize(value: string): string {
@@ -109,6 +112,3 @@ function relationshipLabel(form: RelationshipForm): string {
   return RELATIONSHIP_KIND_LABELS[form.relationType]?.toLowerCase() ?? form.relationType;
 }
 
-function bold(value: string): React.ReactNode {
-  return <strong className="font-semibold">{value}</strong>;
-}

@@ -358,7 +358,7 @@ describe('StrategyCanvas — palette commands', () => {
   it('toggle-view command carries the Strategy group', async () => {
     const { StrategyCanvas } = await import('@/components/canvas/strategy-canvas');
     render(withProviders(<StrategyCanvas presetId="p1" />));
-    expect(findById('strategy.toggle-view')?.group).toBe('Strategy');
+    expect(findById('strategy.toggle-view')?.groupKey).toBe('group.strategy');
   });
 
   it('toggle handler flips aria-pressed across repeated invocations', async () => {
@@ -417,7 +417,7 @@ describe('OutlineCanvas — palette commands', () => {
   it('toggle-view command carries the Outline group', async () => {
     const { OutlineCanvas } = await import('@/components/canvas/outline-canvas');
     render(withProviders(<OutlineCanvas workId="w1" />));
-    expect(findById('outline.toggle-view')?.group).toBe('Outline');
+    expect(findById('outline.toggle-view')?.groupKey).toBe('group.outline');
   });
 
   it('toggle handler flips aria-pressed across repeated invocations', async () => {
@@ -463,7 +463,7 @@ describe('WorldKbCanvas — palette commands', () => {
   it('toggle-view command carries the World KB group', async () => {
     const { WorldKbCanvas } = await import('@/components/canvas/world-kb/world-kb-canvas');
     render(withProviders(<WorldKbCanvas worldId="world1" />));
-    expect(findById('world-kb.toggle-view')?.group).toBe('World KB');
+    expect(findById('world-kb.toggle-view')?.groupKey).toBe('group.world-kb');
   });
 
   it('toggle handler flips aria-pressed and returns to the initial value', async () => {

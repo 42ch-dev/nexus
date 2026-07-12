@@ -10,6 +10,8 @@
  * This module is now a thin wrapper around {@link ConflictModalBase} so the
  * same shell can be reused for the Outline+Timeline canvas.
  */
+import { useTranslation } from 'react-i18next';
+
 import type { PresetState } from '@/lib/canvas/preset-yaml';
 import {
   ConflictModalBase,
@@ -49,19 +51,20 @@ export function ConflictModal({
   onReapply,
   onDismiss,
 }: ConflictModalProps) {
+  const { t } = useTranslation('canvas');
   const canonicalLabel = canonicalState?.id ?? '';
   const canonicalDescription = canonicalState?.description ?? '';
   const canonicalNext =
     typeof canonicalState?.next === 'string' ? canonicalState.next : '';
 
   const fieldMeta: Record<ChangedField, { label: string; server: string; draft: string }> = {
-    label: { label: 'State label', server: canonicalLabel, draft: draft.label },
-    description: { label: 'Description', server: canonicalDescription, draft: draft.description },
-    nextTarget: { label: 'Next target', server: canonicalNext, draft: draft.nextTarget },
+    label: { label: t('conflict.fields.label'), server: canonicalLabel, draft: draft.label },
+    description: { label: t('conflict.fields.description'), server: canonicalDescription, draft: draft.description },
+    nextTarget: { label: t('conflict.fields.nextTarget'), server: canonicalNext, draft: draft.nextTarget },
     promptBody: {
-      label: 'Prompt template',
-      server: promptTemplateRef ? '(server content not fetched)' : '(none)',
-      draft: draft.promptBody || '(empty)',
+      label: t('conflict.fields.promptTemplate'),
+      server: promptTemplateRef ? t('conflict.serverContent.notFetched') : t('conflict.serverContent.none'),
+      draft: draft.promptBody || t('conflict.draftContent.empty'),
     },
   };
 
@@ -102,15 +105,15 @@ export function ConflictModal({
   }));
 
   const reviewRows: ConflictReviewRow[] = [
-    { label: 'State label', server: canonicalLabel, draft: draft.label, changed: changedFields.includes('label') },
+    { label: t('conflict.fields.label'), server: canonicalLabel, draft: draft.label, changed: changedFields.includes('label') },
     {
-      label: 'Description',
+      label: t('conflict.fields.description'),
       server: canonicalDescription,
       draft: draft.description,
       changed: changedFields.includes('description'),
     },
     {
-      label: 'Next target',
+      label: t('conflict.fields.nextTarget'),
       server: canonicalNext,
       draft: draft.nextTarget,
       changed: changedFields.includes('nextTarget'),
@@ -118,9 +121,9 @@ export function ConflictModal({
     ...(promptTemplateRef
       ? [
           {
-            label: `Prompt template (${promptTemplateRef})`,
-            server: '(server content not fetched)',
-            draft: draft.promptBody || '(empty)',
+            label: t('conflict.fields.promptTemplateWithRef', { ref: promptTemplateRef }),
+            server: t('conflict.serverContent.notFetched'),
+            draft: draft.promptBody || t('conflict.draftContent.empty'),
             changed: changedFields.includes('promptBody'),
           } satisfies ConflictReviewRow,
         ]
@@ -130,7 +133,7 @@ export function ConflictModal({
   return (
     <ConflictModalBase
       open={open}
-      title="This state changed while you were editing."
+      title={t('conflict.strategy.title')}
       currentRevision={currentRevision}
       serverChanges={serverChanges}
       localChanges={localChanges}

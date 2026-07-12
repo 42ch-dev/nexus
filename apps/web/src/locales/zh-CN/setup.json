@@ -1,0 +1,103 @@
+{
+  "step": {
+    "agent": {
+      "title": "选择 ACP 智能体",
+      "description": "Nexus 使用兼容 ACP 的智能体来运行策略。选择一个已发现的智能体以继续。",
+      "emptyTitle": "在 PATH 中未找到智能体。",
+      "emptyDescription": "安装一个兼容 ACP 的智能体以继续。"
+    },
+    "workspace": {
+      "title": "选择工作区",
+      "description": "Nexus 需要一个工作区文件夹来存放你的创意项目。如果该文件夹不存在，我们会自动创建。"
+    },
+    "done": {
+      "title": "准备就绪 🎉",
+      "description": "打开 Nexus 开始创作。你可以随时在设置中更改这些选项。"
+    }
+  },
+  "progress": {
+    "label": "设置向导进度",
+    "agent": "智能体",
+    "workspace": "工作区",
+    "done": "完成"
+  },
+  "action": {
+    "openNexus": "打开 Nexus",
+    "finishing": "正在完成…",
+    "preparingWorkspace": "正在准备工作区…",
+    "resetLocalDatabase": "重置本地数据库",
+    "resetting": "正在重置…",
+    "continue": "继续",
+    "back": "返回"
+  },
+  "agentPicker": {
+    "loading": "正在扫描本地 ACP 智能体…",
+    "error": {
+      "title": "无法扫描智能体",
+      "fallbackDescription": "守护进程未响应智能体扫描请求。"
+    },
+    "tryAgain": "重试",
+    "empty": {
+      "title": "在 PATH 中未找到智能体",
+      "description": "安装一个兼容 ACP 的智能体，或使用自定义启动命令继续。"
+    },
+    "more": "更多智能体",
+    "fewer": "收起智能体",
+    "installed": "已安装",
+    "notInstalled": "未安装",
+    "version": "版本 {{version}}",
+    "install": "安装",
+    "docs": "文档",
+    "customLaunch": {
+      "label": "使用自定义启动命令",
+      "placeholder": "例如 /usr/local/bin/my-agent"
+    },
+    "verify": "验证智能体",
+    "verifying": "正在验证…",
+    "verifySuccess": "智能体响应成功。",
+    "verifyNoMatch": "没有匹配此命令的智能体。请检查命令后重试。",
+    "verifyError": "无法访问此智能体。请检查命令后重试。",
+    "status": {
+      "selected": "已选中",
+      "installed": "已安装",
+      "notInstalled": "未安装"
+    }
+  },
+  "workspace": {
+    "label": "工作区文件夹",
+    "changeFolder": "更改文件夹…",
+    "resolving": "正在解析…",
+    "browserOnly": "仅在桌面应用中可以更改工作区路径。"
+  },
+  "daemon": {
+    "starting": {
+      "title": "正在启动守护进程…",
+      "description": "首次启动时这可能需要几秒钟。"
+    },
+    "notReady": {
+      "title": "守护进程未就绪"
+    },
+    "restartNexus": "重启 Nexus",
+    "resetDatabaseDescription": "这将清除守护进程的本地状态数据库（配置、注册表缓存）。你的工作区中的创意文件不会受到影响。"
+  },
+  "error": {
+    "daemonNotResponding": "守护进程未响应。",
+    "daemonSlowStart": "守护进程启动时间超出预期。你可以重试，或重置本地数据库。",
+    "daemonStatusUnknown": "无法确定守护进程状态。请尝试重试。",
+    "resetDatabaseFailed": "重置本地数据库失败。",
+    "finishSetupFailed": "保存智能体配置文件失败。",
+    "folderPickerFailed": "无法打开文件夹选择器。",
+    "workspacePathFailed": "无法保存工作区路径。",
+    "workspaceBootstrapFailed": "无法准备你的本地工作区。"
+  },
+  "toast": {
+    "finishFailed": "无法完成设置",
+    "folderPicker": "文件夹选择器",
+    "workspacePath": "工作区路径",
+    "workspacePrepared": "本地工作区已准备",
+    "workspacePreparedDescription": "已创建创作者身份（{{creatorId}}）。",
+    "workspaceBootstrapFailed": "本地工作区引导失败",
+    "workspaceBootstrapFailedDescription": "{{message}} 请重试“继续”，如果问题持续存在，请使用下方的“重置本地数据库”。",
+    "resetLocalDatabase": "重置本地数据库"
+  }
+}

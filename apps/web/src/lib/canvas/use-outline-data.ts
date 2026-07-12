@@ -6,6 +6,7 @@
  * fresh after each successful write; callers handle 409 conflicts via the
  * returned error shape.
  */
+import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useNexusClient } from '@/lib/client-context';
@@ -21,14 +22,15 @@ import type {
 
 function useErrorToast() {
   const { toast } = useToast();
-  return (error: unknown, title: string) => {
+  const { t } = useTranslation('common');
+  return (error: unknown, key: string) => {
     const description =
       error instanceof NexusClientError
         ? error.message
         : error instanceof Error
           ? error.message
-          : 'Unexpected error.';
-    toast({ variant: 'error', title, description });
+          : t('error.unexpected');
+    toast({ variant: 'error', title: t(key, { defaultValue: key }), description });
   };
 }
 
@@ -55,7 +57,7 @@ export function usePatchOutlineStructure(workId: string | undefined) {
       void qc.invalidateQueries({ queryKey: queryKeys.outline.detail(workId ?? '') });
       void qc.invalidateQueries({ queryKey: queryKeys.chapters.lists() });
     },
-    onError: (error) => errorToast(error, 'Could not update outline structure'),
+    onError: (error) => errorToast(error, 'error.couldNotUpdateOutlineStructure'),
   });
 }
 
@@ -83,7 +85,7 @@ export function usePatchOutlineChapter(workId: string | undefined) {
         queryKey: [...queryKeys.chapters.outlines(), workId ?? '', variables.chapter],
       });
     },
-    onError: (error) => errorToast(error, 'Could not update chapter'),
+    onError: (error) => errorToast(error, 'error.couldNotUpdateOutlineChapter'),
   });
 }
 
@@ -98,7 +100,7 @@ export function usePatchTimelineEvent(workId: string | undefined) {
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: queryKeys.outline.detail(workId ?? '') });
     },
-    onError: (error) => errorToast(error, 'Could not update timeline'),
+    onError: (error) => errorToast(error, 'error.couldNotUpdateOutlineTimeline'),
   });
 }
 

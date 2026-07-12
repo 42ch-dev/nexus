@@ -11,6 +11,7 @@
  * beside the findings table for the selected row.
  */
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { FindingStatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
@@ -37,6 +38,7 @@ interface FindingDetailPanelProps {
 }
 
 export function FindingDetailPanel({ workId, finding }: FindingDetailPanelProps) {
+  const { t } = useTranslation('findings');
   const updateFinding = useUpdateFinding();
   const [form, setForm] = useState<InlineForm>(() => formFromFinding(finding));
 
@@ -77,11 +79,11 @@ export function FindingDetailPanel({ workId, finding }: FindingDetailPanelProps)
     <div className="flex flex-col gap-4">
       {/* ── Status transitions ─────────────────────────────────────────── */}
       <section className="flex flex-col gap-2">
-        <Label className="text-gray-900">Status</Label>
+        <Label className="text-gray-900">{t('detail.statusLabel')}</Label>
         <div className="flex flex-wrap items-center gap-2">
           <FindingStatusBadge status={finding.status} />
           {terminal ? (
-            <span className="text-copy-13 text-gray-700">Terminal — no further transitions.</span>
+            <span className="text-copy-13 text-gray-700">{t('detail.terminal')}</span>
           ) : (
             FINDING_STATUSES.filter((s) => s !== finding.status).map((s) => (
               <Button
@@ -91,9 +93,9 @@ export function FindingDetailPanel({ workId, finding }: FindingDetailPanelProps)
                 size="small"
                 disabled={pending || !isValidTransition(finding.status, s)}
                 onClick={() => transition(s)}
-                aria-label={`Advance finding to ${s.replace(/_/g, ' ')}`}
+                aria-label={t('detail.advanceAria', { status: t(`status.${s}` as const) })}
               >
-                {s === 'in_review' ? 'In Review' : s.charAt(0).toUpperCase() + s.slice(1)}
+                {t(`status.${s}` as const)}
               </Button>
             ))
           )}
@@ -102,7 +104,7 @@ export function FindingDetailPanel({ workId, finding }: FindingDetailPanelProps)
 
       {/* ── Target executor assignment ─────────────────────────────────── */}
       <section className="flex flex-col gap-1.5">
-        <Label htmlFor="finding-target-executor">Target Executor</Label>
+        <Label htmlFor="finding-target-executor">{t('detail.targetExecutorLabel')}</Label>
         <Select
           id="finding-target-executor"
           value={finding.target_executor}
@@ -111,13 +113,11 @@ export function FindingDetailPanel({ workId, finding }: FindingDetailPanelProps)
         >
           {TARGET_EXECUTOR_OPTIONS.map((opt) => (
             <option key={opt} value={opt}>
-              {opt.charAt(0).toUpperCase() + opt.slice(1)}
+              {t(`executors.${opt}` as const)}
             </option>
           ))}
         </Select>
-        <p className="text-copy-13 text-gray-700">
-          Routes the finding for triage. Re-running a preset stays a deliberate canvas action.
-        </p>
+        <p className="text-copy-13 text-gray-700">{t('detail.targetExecutorHelp')}</p>
       </section>
 
       {/* ── Inline edit ────────────────────────────────────────────────── */}
@@ -134,20 +134,24 @@ export function FindingDetailPanel({ workId, finding }: FindingDetailPanelProps)
       <section className="flex flex-col gap-1 border-t border-gray-alpha-400 pt-3 text-copy-13 text-gray-900">
         <div className="flex flex-wrap gap-x-6 gap-y-1">
           <span data-testid="finding-context-chapter" className="tabular-nums text-gray-1000">
-            Chapter: {finding.chapter ?? '—'}
+            {t('detail.chapterLabel', { chapter: finding.chapter ?? '—' })}
           </span>
           {finding.routing_hint && (
             <span data-testid="finding-context-routing" className="text-gray-1000">
-              Routing: {finding.routing_hint}
+              {t('detail.routingLabel', { routing: finding.routing_hint })}
             </span>
           )}
           <span>
-            ID: <span className="text-copy-13-mono text-gray-700">{shortId(finding.finding_id)}</span>
+            {t('detail.idLabel', { id: shortId(finding.finding_id) })}
           </span>
         </div>
         <div className="flex flex-wrap gap-x-6 gap-y-1">
-          <span>Created: <span className="text-gray-1000">{formatRelative(formatIso(finding.created_at))}</span></span>
-          <span>Updated: <span className="text-gray-1000">{formatRelative(formatIso(finding.updated_at))}</span></span>
+          <span>
+            {t('detail.createdLabel', { date: formatRelative(formatIso(finding.created_at)) })}
+          </span>
+          <span>
+            {t('detail.updatedLabel', { date: formatRelative(formatIso(finding.updated_at)) })}
+          </span>
         </div>
       </section>
     </div>

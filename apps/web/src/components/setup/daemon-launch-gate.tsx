@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { DaemonReadySplash } from '@/components/setup/daemon-ready-splash';
 import { useDesktopCapabilities, useNexusClient } from '@/lib/client-context';
@@ -23,6 +24,7 @@ const WAIT_TIMEOUT_MS = 25_000;
  * (no post-reset `startDaemon`; reload re-runs always-start).
  */
 export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
+  const { t } = useTranslation('setup');
   const desktop = useDesktopCapabilities();
   const client = useNexusClient();
   const [daemonReady, setDaemonReady] = useState(() => !desktop);
@@ -66,7 +68,7 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
         setError(null);
       } else if (status.state === 'error') {
         setDaemonReady(false);
-        setError(status.detail ?? `Daemon is ${status.state}.`);
+        setError(status.detail ?? t('error.daemonNotResponding'));
       }
     }
 
@@ -114,7 +116,7 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
         } catch (err) {
           if (!cancelled) {
             setDaemonReady(false);
-            setError(errorMessage(err) || 'Daemon is not responding.');
+            setError(errorMessage(err) || t('error.daemonNotResponding'));
           }
         }
       }
@@ -134,18 +136,18 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
           }
           if (status.state === 'error') {
             setDaemonReady(false);
-            setError(status.detail ?? `Daemon is ${status.state}.`);
+            setError(status.detail ?? t('error.daemonNotResponding'));
             return;
           }
           setDaemonReady(false);
           setError(
-            'Daemon is taking longer than expected to start. You can retry or reset the local database.',
+            t('error.daemonSlowStart'),
           );
         })
         .catch(() => {
           if (cancelled || ready) return;
           setDaemonReady(false);
-          setError('Could not determine daemon status. Try retrying.');
+          setError(t('error.daemonStatusUnknown'));
         });
     }, WAIT_TIMEOUT_MS);
 
@@ -155,7 +157,7 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
       clearWaitTimeout();
       unsub?.();
     };
-  }, [client, desktop]);
+  }, [client, desktop, t]);
 
   function retry() {
     // Reload re-enters Tauri `.setup()` always-start (D2). No startDaemon.
@@ -175,7 +177,7 @@ export function DaemonLaunchGate({ children }: DaemonLaunchGateProps) {
       setResetBusy(false);
       // Keep the error until Restart (reload). Do not re-subscribe here —
       // that would re-run applyStatus and clear the reset-failure message.
-      setError(errorMessage(err) || 'Failed to reset local database.');
+      setError(errorMessage(err) || t('error.resetDatabaseFailed'));
     }
   }
 

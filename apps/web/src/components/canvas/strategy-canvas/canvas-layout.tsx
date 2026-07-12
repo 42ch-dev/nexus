@@ -6,6 +6,7 @@
  * (R-V171P0-QC1-006).
  */
 import { useEffect } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Plus } from 'lucide-react';
 
 import { IdeaInput, type IdeaArtifact } from '@/components/canvas/idea-input';
@@ -33,6 +34,8 @@ export function CanvasHeader({
    */
   onOpenCreateTransition?: () => void;
 }) {
+  const { t } = useTranslation('canvas');
+
   // Shift+N opens the keyboard edge-creation dialog (FB-SE-004 §4.4). Suppressed
   // inside text-entry controls so the letter is passed through to the field.
   useEffect(() => {
@@ -57,11 +60,11 @@ export function CanvasHeader({
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
           <div className="flex items-center gap-2">
-            <h2 className="text-heading-20 font-heading text-gray-1000">Strategy</h2>
+            <h2 className="text-heading-20 font-heading text-gray-1000">{t('strategy.header.title')}</h2>
             <RevisionBadge revision={revision} status={status} />
           </div>
           <p className="text-copy-13 text-gray-700">
-            Preset as a state-machine graph. Select a state to edit it; the revision badge shows graph freshness.
+            {t('strategy.header.description')}
           </p>
         </div>
         <div className="flex items-center gap-2">
@@ -72,7 +75,7 @@ export function CanvasHeader({
               className="inline-flex items-center gap-1 rounded-control bg-purple-700 px-3 py-1.5 text-button-12 text-white hover:bg-purple-800"
             >
               <Plus className="h-3.5 w-3.5" aria-hidden />
-              Create Transition…
+              {t('strategy.header.createTransition')}
             </button>
           ) : null}
           <button
@@ -81,14 +84,16 @@ export function CanvasHeader({
             aria-pressed={showAlt}
             className="rounded-control border border-gray-alpha-400 px-3 py-1.5 text-button-12 text-gray-900 hover:bg-gray-alpha-100"
           >
-            {showAlt ? 'Show graph' : 'Show list view'}
+            {showAlt ? t('strategy.header.showGraph') : t('strategy.header.showList')}
           </button>
         </div>
       </div>
       {activeSession ? (
         <div className="flex items-center gap-2 rounded-card border border-blue-700/30 bg-[color-mix(in_srgb,var(--color-blue-700)_6%,transparent)] px-3 py-2 text-copy-13 text-gray-900">
           <span className="inline-block h-2 w-2 rounded-pill bg-blue-700" aria-hidden />
-          Live: node <span className="font-mono">{activeSession.current_task_id ?? '—'}</span> · status {activeSession.status}
+          {t('strategy.header.livePrefix')}{' '}
+          <span className="font-mono">{activeSession.current_task_id ?? '—'}</span> · {t('strategy.header.liveStatus')}{' '}
+          {activeSession.status}
         </div>
       ) : null}
     </>

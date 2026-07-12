@@ -16,8 +16,12 @@
  * linear reading order. This is a read-only browse surface — editing stays
  * in the inspectors below, which remain visible in both graph and alt modes.
  */
+import { useTranslation } from 'react-i18next';
+
 import { Badge } from '@/components/ui/badge';
 import {
+  STATUS_LABEL_KEYS,
+  SCENE_STATUS_LABEL_KEYS,
   STATUS_VARIANT,
   chapterDisplayTitle,
   unassignedChaptersOf,
@@ -38,6 +42,7 @@ export interface OutlineAltViewProps {
 }
 
 export function OutlineAltView({ outline, chapters, sceneBeatFixture }: OutlineAltViewProps) {
+  const { t } = useTranslation('canvas');
   const titles = outline.chapter_titles as Record<string, string> | undefined;
   const chapterById = new Map<number, ChapterSummary>();
   for (const c of chapters) chapterById.set(c.chapter, c);
@@ -64,23 +69,23 @@ export function OutlineAltView({ outline, chapters, sceneBeatFixture }: OutlineA
 
   return (
     <section
-      aria-label="Outline chapters and timeline in list order"
+      aria-label={t('outlineAltView.ariaLabel')}
       className="grid gap-4 lg:grid-cols-2"
     >
       {/* Chapter list grouped by volume */}
       <div className="rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-card">
-        <h3 className="text-heading-16 font-heading text-gray-1000">Chapters</h3>
+        <h3 className="text-heading-16 font-heading text-gray-1000">{t('outlineAltView.chaptersTitle')}</h3>
         <ol className="mt-2 flex flex-col gap-1">
           {outline.volumes.map((volume) => (
             <li key={`vol-${volume.volume_id}`} className="flex flex-col gap-1">
               <span className="text-label-14 font-semibold text-gray-900">
-                {volume.label || `Volume ${volume.volume_id}`}
+                {volume.label || t('chapter.volume', { volume: volume.volume_id })}
               </span>
               <ol className="ml-2 flex flex-col gap-1 border-l border-gray-alpha-300 pl-2">
                 {volume.chapter_ids.map((chapterId, i) => {
                   const chapter = chapterById.get(chapterId);
                   if (!chapter) return null;
-                  const title = chapterDisplayTitle(chapter, titles);
+                  const title = chapterDisplayTitle(chapter, titles, t('chapter.fallback'));
                   return (
                     <ChapterRow
                       key={chapterId}
@@ -90,6 +95,7 @@ export function OutlineAltView({ outline, chapters, sceneBeatFixture }: OutlineA
                       hasSceneBeatFixture={hasSceneBeatFixture}
                       scenesByChapter={scenesByChapter}
                       beatsByScene={beatsByScene}
+                      t={t}
                     />
                   );
                 })}
@@ -98,10 +104,10 @@ export function OutlineAltView({ outline, chapters, sceneBeatFixture }: OutlineA
           ))}
           {unassigned.length > 0 ? (
             <li className="flex flex-col gap-1">
-              <span className="text-label-14 font-semibold text-gray-900">Unassigned</span>
+              <span className="text-label-14 font-semibold text-gray-900">{t('structureInspector.unassigned')}</span>
               <ol className="ml-2 flex flex-col gap-1 border-l border-gray-alpha-300 pl-2">
                 {unassigned.map((chapter, i) => {
-                  const title = chapterDisplayTitle(chapter, titles);
+                  const title = chapterDisplayTitle(chapter, titles, t('chapter.fallback'));
                   return (
                     <ChapterRow
                       key={chapter.chapter}
@@ -111,6 +117,7 @@ export function OutlineAltView({ outline, chapters, sceneBeatFixture }: OutlineA
                       hasSceneBeatFixture={hasSceneBeatFixture}
                       scenesByChapter={scenesByChapter}
                       beatsByScene={beatsByScene}
+                      t={t}
                     />
                   );
                 })}
@@ -118,16 +125,16 @@ export function OutlineAltView({ outline, chapters, sceneBeatFixture }: OutlineA
             </li>
           ) : null}
           {outline.volumes.length === 0 && unassigned.length === 0 ? (
-            <li className="text-copy-13 text-gray-700">No chapters yet.</li>
+            <li className="text-copy-13 text-gray-700">{t('outlineAltView.noChapters')}</li>
           ) : null}
         </ol>
       </div>
 
       {/* Timeline events list */}
       <div className="rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-card">
-        <h3 className="text-heading-16 font-heading text-gray-1000">Timeline Events</h3>
+        <h3 className="text-heading-16 font-heading text-gray-1000">{t('outlineAltView.timelineTitle')}</h3>
         {outline.timeline_events.length === 0 ? (
-          <p className="mt-2 text-copy-13 text-gray-700">No timeline events yet.</p>
+          <p className="mt-2 text-copy-13 text-gray-700">{t('outlineAltView.noTimelineEvents')}</p>
         ) : (
           <ol className="mt-2 flex flex-col gap-1">
             {outline.timeline_events.map((event, i) => (
@@ -146,7 +153,7 @@ export function OutlineAltView({ outline, chapters, sceneBeatFixture }: OutlineA
                 ) : null}
                 {event.realizes_chapter_id ? (
                   <span className="ml-8 text-label-12 text-gray-700">
-                    Realizes chapter {event.realizes_chapter_id}
+                    {t('outlineAltView.realizesChapter', { chapter: event.realizes_chapter_id })}
                   </span>
                 ) : null}
               </li>
@@ -170,6 +177,7 @@ interface ChapterRowProps {
   hasSceneBeatFixture: boolean;
   scenesByChapter: Map<number, SceneBeatFixturePayload['scenes']>;
   beatsByScene: Map<string, SceneBeatFixturePayload['beats']>;
+  t: (key: string, options?: Record<string, unknown>) => string;
 }
 
 function ChapterRow({
@@ -179,6 +187,7 @@ function ChapterRow({
   hasSceneBeatFixture,
   scenesByChapter,
   beatsByScene,
+  t,
 }: ChapterRowProps) {
   const scenes = scenesByChapter.get(chapter.chapter) ?? [];
   return (
@@ -190,36 +199,36 @@ function ChapterRow({
         <span className="font-mono text-gray-700">#{chapter.chapter}</span>
         <span className="text-gray-1000">{title}</span>
         <Badge variant={STATUS_VARIANT[chapter.status]}>
-          {chapter.status.replace(/_/g, ' ')}
+          {t(STATUS_LABEL_KEYS[chapter.status])}
         </Badge>
       </div>
       {scenes.length > 0 ? (
         <ol className="ml-8 flex flex-col gap-1 border-l border-gray-alpha-300 pl-2">
           {scenes.map((scene) => {
             const beats = beatsByScene.get(scene.sceneId) ?? [];
-            const sceneTitle = scene.title || 'Untitled Scene';
+            const sceneTitle = scene.title || t('outlineAltView.untitledScene');
             return (
               <li key={scene.sceneId} className="flex flex-col gap-1">
                 <div className="flex items-center gap-2 rounded-control px-2 py-1 text-copy-14">
-                  <Badge variant="neutral">Scene</Badge>
+                  <Badge variant="neutral">{t('outlineAltView.sceneLabel')}</Badge>
                   <span className="text-gray-1000">{sceneTitle}</span>
                   {scene.status ? (
-                    <Badge variant="neutral">{scene.status}</Badge>
+                    <Badge variant="neutral">{t(SCENE_STATUS_LABEL_KEYS[scene.status])}</Badge>
                   ) : null}
                 </div>
                 {beats.length > 0 ? (
                   <ol className="ml-8 flex flex-col gap-1 border-l border-gray-alpha-300 pl-2">
                     {beats.map((beat) => {
-                      const beatTitle = beat.title || 'Untitled Beat';
+                      const beatTitle = beat.title || t('outlineAltView.untitledBeat');
                       return (
                         <li
                           key={beat.beatId}
                           className="flex items-center gap-2 rounded-control px-2 py-1 text-copy-14"
                         >
-                          <Badge variant="neutral">Beat</Badge>
+                          <Badge variant="neutral">{t('outlineAltView.beatLabel')}</Badge>
                           <span className="text-gray-1000">{beatTitle}</span>
                           {beat.status ? (
-                            <Badge variant="neutral">{beat.status}</Badge>
+                            <Badge variant="neutral">{t(SCENE_STATUS_LABEL_KEYS[beat.status])}</Badge>
                           ) : null}
                         </li>
                       );
@@ -234,7 +243,7 @@ function ChapterRow({
         // Only show the empty-under-chapter helper when the fixture is active.
         // On real Works (no fixture), chapters render cleanly without the
         // helper — honest empty chrome (no invented scene structure).
-        <p className="ml-8 text-copy-13 text-gray-700">No scenes in this chapter yet.</p>
+        <p className="ml-8 text-copy-13 text-gray-700">{t('outlineAltView.noScenes')}</p>
       ) : null}
     </li>
   );

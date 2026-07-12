@@ -3,26 +3,22 @@
  *
  * Shared between Settings (settings-row) and the setup wizard (wizard-stack).
  * No daemon client, no desktop hooks; the host owns the picker orchestration.
+ * All user-facing strings are caller-owned; defaults resolve through the setup
+ * namespace for the wizard path.
  */
 
 import { FolderOpen } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
 import { Button, Input, Label } from '@42ch/nexus-ui';
-
-export const WORKSPACE_PATH_FIELD_LABEL = 'Workspace folder';
-
-export const WORKSPACE_PATH_CHANGE_ACTION = 'Change Folder…';
-
-const DEFAULT_BROWSER_ONLY_HELPER =
-  'Workspace path changes are available on the desktop app only.';
 
 export interface WorkspacePathFieldProps {
   /** Required — `label htmlFor` ↔ readonly `Input` a11y association. */
   id: string;
   /** Display value. */
   path: string;
-  /** Optional — shows `Resolving…` placeholder while true. */
+  /** Optional — shows resolving placeholder while true. */
   loading?: boolean;
   /** Optional — disables the change action CTA. */
   changeDisabled?: boolean;
@@ -32,7 +28,11 @@ export interface WorkspacePathFieldProps {
   layout?: 'settings-row' | 'wizard-stack';
   /** When false, show the browser-only helper. */
   desktopAvailable?: boolean;
-  /** Optional override for the browser-only helper text. */
+  /** Optional label text; defaults to setup catalog. */
+  label?: string;
+  /** Optional change action text; defaults to setup catalog. */
+  changeAction?: string;
+  /** Optional override for the browser-only helper text; defaults to setup catalog. */
   browserOnlyHelper?: string;
   /** Optional tooltip for the disabled change action (e.g. desktop-only explanation). */
   title?: string;
@@ -52,15 +52,22 @@ export function WorkspacePathField({
   onChangeClick,
   layout = 'settings-row',
   desktopAvailable = true,
-  browserOnlyHelper = DEFAULT_BROWSER_ONLY_HELPER,
+  label,
+  changeAction,
+  browserOnlyHelper,
   title,
   'data-testid': dataTestId,
   inputDataTestId,
   buttonDataTestId,
 }: WorkspacePathFieldProps) {
+  const { t } = useTranslation('setup');
   const isWizard = layout === 'wizard-stack';
   const disabled = changeDisabled || !desktopAvailable || !onChangeClick;
   const showHelper = !desktopAvailable;
+  const effectiveLabel = label ?? t('workspace.label');
+  const effectiveChangeAction = changeAction ?? t('workspace.changeFolder');
+  const effectivePlaceholder = loading ? t('workspace.resolving') : '';
+  const effectiveBrowserOnlyHelper = browserOnlyHelper ?? t('workspace.browserOnly');
 
   return (
     <div
@@ -74,7 +81,7 @@ export function WorkspacePathField({
           !isWizard && 'sr-only',
         )}
       >
-        {WORKSPACE_PATH_FIELD_LABEL}
+        {effectiveLabel}
       </Label>
 
       <div
@@ -95,13 +102,13 @@ export function WorkspacePathField({
           type="text"
           readOnly
           value={path}
-          placeholder={loading ? 'Resolving…' : ''}
+          placeholder={effectivePlaceholder}
           className={cn(
             'min-w-0 flex-1 truncate',
             isWizard &&
               'border-transparent bg-transparent px-0 focus-visible:border-transparent',
           )}
-          aria-label={WORKSPACE_PATH_FIELD_LABEL}
+          aria-label={effectiveLabel}
           data-testid={inputDataTestId}
         />
         <Button
@@ -113,12 +120,12 @@ export function WorkspacePathField({
           title={disabled ? title : undefined}
           data-testid={buttonDataTestId}
         >
-          {WORKSPACE_PATH_CHANGE_ACTION}
+          {effectiveChangeAction}
         </Button>
       </div>
 
       {showHelper ? (
-        <p className="text-copy-13 text-gray-700">{browserOnlyHelper}</p>
+        <p className="text-copy-13 text-gray-700">{effectiveBrowserOnlyHelper}</p>
       ) : null}
     </div>
   );

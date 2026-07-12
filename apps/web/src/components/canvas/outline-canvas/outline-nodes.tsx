@@ -17,6 +17,7 @@
  * color-only (Draft §4.4 #6).
  */
 import { memo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 
 import type { ChapterStatus } from '@42ch/nexus-contracts';
@@ -26,7 +27,7 @@ import type {
   OutlineTimelineEventNodeData,
   OutlineVolumeNodeData,
 } from './rf-projection';
-import { STATUS_OPTIONS } from './graph-projection';
+import { STATUS_LABEL_KEYS, STATUS_OPTIONS } from './graph-projection';
 import { OutlineSceneNode, OutlineBeatNode } from './scene-beat-nodes';
 
 // ---------------------------------------------------------------------------
@@ -47,14 +48,6 @@ const STATUS_TOKEN_VAR: Record<ChapterStatus, string> = {
   draft: '--color-canvas-outline-chapter-card-status-drafted',
   finalized: '--color-canvas-outline-chapter-card-status-completed',
   published: '--color-canvas-outline-chapter-card-status-completed',
-};
-
-const STATUS_LABEL: Record<ChapterStatus, string> = {
-  not_started: 'Not started',
-  outlined: 'Outlined',
-  draft: 'Draft',
-  finalized: 'Finalized',
-  published: 'Published',
 };
 
 function statusColorVar(status: ChapterStatus): string {
@@ -96,7 +89,9 @@ export const OutlineVolumeNode = memo(function OutlineVolumeNode({
   data,
   selected,
 }: NodeProps) {
+  const { t } = useTranslation('canvas');
   const d = data as OutlineVolumeNodeData;
+  const label = d.label || t('chapter.volume', { volume: d.volumeId });
   return (
     <NodeShell
       selected={!!selected}
@@ -105,9 +100,9 @@ export const OutlineVolumeNode = memo(function OutlineVolumeNode({
       }}
     >
       <Handle type="source" position={Position.Right} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
-      <span className="font-heading text-copy-14 font-semibold text-gray-1000">{d.label}</span>
+      <span className="font-heading text-copy-14 font-semibold text-gray-1000">{label}</span>
       <p className="mt-0.5 text-label-12 text-gray-700">
-        {d.chapterCount} {d.chapterCount === 1 ? 'chapter' : 'chapters'}
+        {t('structureInspector.chapterCount', { count: d.chapterCount })}
       </p>
     </NodeShell>
   );
@@ -122,6 +117,7 @@ export const OutlineChapterNode = memo(function OutlineChapterNode({
   data,
   selected,
 }: NodeProps) {
+  const { t } = useTranslation('canvas');
   const d = data as OutlineChapterNodeData;
   const statusColor = statusColorVar(d.status);
   return (
@@ -138,7 +134,7 @@ export const OutlineChapterNode = memo(function OutlineChapterNode({
           style={{ color: statusColor, background: `color-mix(in srgb, ${statusColor} 12%, transparent)` }}
         >
           <span className="inline-block h-2 w-2 rounded-pill" style={{ background: statusColor }} aria-hidden />
-          {STATUS_LABEL[d.status]}
+          {t(STATUS_LABEL_KEYS[d.status])}
         </span>
         {d.slug ? (
           <span className="rounded-pill bg-gray-alpha-100 px-1.5 py-0.5 font-mono text-label-12 text-gray-700">
@@ -147,7 +143,7 @@ export const OutlineChapterNode = memo(function OutlineChapterNode({
         ) : null}
       </div>
       <p className="mt-1 text-label-12 text-gray-700">
-        {d.actualWordCount ?? 0}/{d.plannedWordCount} words
+        {t('chapter.wordCount', { actual: d.actualWordCount ?? 0, planned: d.plannedWordCount })}
       </p>
       <Handle type="source" position={Position.Right} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
     </NodeShell>
@@ -163,6 +159,7 @@ export const OutlineTimelineEventNode = memo(function OutlineTimelineEventNode({
   data,
   selected,
 }: NodeProps) {
+  const { t } = useTranslation('canvas');
   const d = data as OutlineTimelineEventNodeData;
   return (
     <NodeShell
@@ -180,7 +177,9 @@ export const OutlineTimelineEventNode = memo(function OutlineTimelineEventNode({
         <p className="mt-0.5 text-copy-13 text-gray-900 line-clamp-2">{d.description}</p>
       ) : null}
       <p className="mt-0.5 text-label-12 text-gray-700">
-        {d.realizesChapterId !== null ? `Realizes chapter ${d.realizesChapterId}` : 'Unattached event'}
+        {d.realizesChapterId !== null
+          ? t('outlineAltView.realizesChapter', { chapter: d.realizesChapterId })
+          : t('outlineAltView.unattachedEvent')}
       </p>
       <Handle type="source" position={Position.Right} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
     </NodeShell>

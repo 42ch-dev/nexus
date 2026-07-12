@@ -1,0 +1,71 @@
+{
+  "aria": {
+    "sections": "Settings sections"
+  },
+  "title": "Settings",
+  "helper": "Manage your local agent, daemon connection, and setup options from one place.",
+  "nav": {
+    "agent": "Agent",
+    "workspace": "Workspace",
+    "appearance": "Appearance",
+    "advanced": "Advanced"
+  },
+  "appearance": {
+    "title": "Appearance",
+    "language": {
+      "label": "Language",
+      "system": "System",
+      "en": "English",
+      "zh-CN": "简体中文",
+      "helper": "System follows your OS/browser language."
+    }
+  },
+  "workspace": {
+    "title": "Workspace",
+    "helper": "View or change where Nexus stores your creative files on this machine.",
+    "folderLabel": "Workspace folder",
+    "changeFolder": "Change Folder…",
+    "browserOnly": "Workspace path changes are available on the desktop app only.",
+    "savedHonesty": "Workspace path saved. Restart or reload the app so the running daemon uses the new location.",
+    "restartLabel": "Quit and reopen Nexus"
+  },
+  "agent": {
+    "title": "Agent",
+    "helper": "Choose which local ACP agent Nexus uses for creative work.",
+    "browserOnly": "Agent selection is available on the desktop app only.",
+    "save": "Save Agent",
+    "saving": "Saving…",
+    "scanError": "The daemon did not respond to the agent scan request.",
+    "emptyTitle": "No agents found on PATH."
+  },
+  "connection": {
+    "title": "Connect to Daemon",
+    "description": "Enter the remote daemon URL and API key. Local mode remains available — you can revert here at any time.",
+    "urlLabel": "Daemon URL",
+    "urlPlaceholder": "https://192.168.1.42:8420",
+    "urlHelper": "The full HTTPS address of the daemon, including port.",
+    "apiKeyLabel": "API Key",
+    "apiKeyPlaceholder": "Enter the API key from the daemon machine",
+    "apiKeyHelper": "The API key from the daemon machine ({{command}} on that host).",
+    "apiKeyCommand": "nexus42 daemon api-key",
+    "showKey": "Show key",
+    "hideKey": "Hide key",
+    "labelLabel": "Label (optional)",
+    "loopback": "This daemon has no TLS certificate. It is running in loopback-only mode, so remote access is not available. Use local mode instead.",
+    "fingerprintTrust": "Confirm the certificate fingerprint matches what you see on the daemon machine before connecting.",
+    "fingerprintTrustDescription": "This fingerprint is how your app makes sure it is talking to the real daemon and not someone pretending to be it. Compare it to the value printed on the daemon machine's screen. If they match, it is safe to trust.",
+    "fingerprintMatch": "Fingerprint matches the trusted daemon.",
+    "fingerprintMismatch": "The certificate for this daemon has changed. This can happen if the daemon was reinstalled or its certificate was deliberately rotated. It can also mean someone is intercepting your connection.",
+    "trustNewCertificate": "Trust the New Certificate and Continue",
+    "keepOldCertificate": "Cancel and Keep Using the Old Certificate",
+    "useLocalDaemon": "Use Local Daemon",
+    "trustAndConnect": "Trust This Certificate and Connect",
+    "reconnectWithSettings": "Reconnect With These Settings",
+    "fetchFingerprint": "Fetch fingerprint",
+    "fetchingFingerprint": "Fetching fingerprint…",
+    "originNote": "If you are connecting from a browser tab to a remote daemon, your serving origin must be listed in the daemon's {{setting}} setting. Desktop apps are allowed automatically.",
+    "originSetting": "NEXUS_DAEMON_ALLOWED_ORIGINS",
+    "fingerprintError": "Browsers cannot reliably distinguish an unreachable daemon from a rejected self-signed certificate, so fetching the certificate fingerprint may fail even when the daemon is running. For remote daemons that use a self-signed certificate, use the Nexus desktop app — it supports Trust On First Use (TOFU) and can store the certificate in the OS keychain.",
+    "connectedDescription": "Using {{url}}"
+  }
+}

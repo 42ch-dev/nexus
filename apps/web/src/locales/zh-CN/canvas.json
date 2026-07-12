@@ -1,0 +1,601 @@
+{
+  "outline": {
+    "loading": "加载大纲中…",
+    "loadError": {
+      "title": "加载大纲失败",
+      "description": "无法加载大纲，请重试。"
+    },
+    "empty": {
+      "title": "暂无大纲",
+      "description": "此作品还没有大纲。创建章节以开始。"
+    },
+    "noGraph": {
+      "title": "没有图谱节点",
+      "description": "添加卷、章节和时间线事件以查看图谱。"
+    },
+    "subtitle": "大纲",
+    "untitledWork": "未命名作品",
+    "graphAriaLabel": "大纲空间图谱"
+  },
+  "outlineAltView": {
+    "ariaLabel": "按列表顺序显示大纲章节与时间线",
+    "chaptersTitle": "章节",
+    "timelineTitle": "时间线事件",
+    "noChapters": "暂无章节。",
+    "noTimelineEvents": "暂无时间线事件。",
+    "noScenes": "本章暂无任何场景。",
+    "unattachedEvent": "未关联事件",
+    "realizesChapter": "实现第 {{chapter}} 章",
+    "sceneLabel": "场景",
+    "beatLabel": "节拍",
+    "untitledScene": "未命名场景",
+    "untitledBeat": "未命名节拍"
+  },
+  "outlineCanvas": {
+    "showGraph": "显示图谱",
+    "showListView": "显示列表视图",
+    "revision": {
+      "label": "修订 {{revision}}",
+      "conflictTooltip": "修订版本冲突——请先刷新再编辑"
+    },
+    "graphSummary": {
+      "notLoaded": "大纲图谱未加载。",
+      "volumes": "{{count}} 卷",
+      "chapters": "{{count}} 章",
+      "events": "{{count}} 个时间线事件",
+      "foreshadows": "{{count}} 个伏笔关联",
+      "body": "大纲图谱：{{volumes}}，{{chapters}}，{{events}}，{{foreshadows}}。"
+    }
+  },
+  "outlineConflict": {
+    "title": "大纲冲突",
+    "serverSectionTitle": "服务器上的变更",
+    "localSectionTitle": "你即将提交的修改",
+    "server": {
+      "structureChanged": "你编辑期间，大纲结构已发生变化。"
+    },
+    "review": {
+      "modifiedByOther": "已被其他会话修改",
+      "unknown": "未知服务器变更",
+      "yourEdit": "你的编辑"
+    },
+    "fields": {
+      "chapter_title": "章节标题",
+      "chapter_slug": "短链",
+      "chapter_volume": "卷",
+      "chapter_status": "状态",
+      "chapter_planned_word_count": "预计字数",
+      "chapter_actual_word_count": "实际字数",
+      "chapter_outline_content": "大纲内容",
+      "move_chapter": "移动章节",
+      "attach_to_volume": "关联到卷",
+      "link_event": "关联事件",
+      "add_event": "添加事件",
+      "remove_event": "移除事件",
+      "attach_event_to_chapter": "关联事件到章节",
+      "link_foreshadow": "添加伏笔",
+      "unlink_foreshadow": "移除伏笔"
+    }
+  },
+  "chapterInspector": {
+    "title": "章节检查器",
+    "description": "大纲画布上展示的 #{{chapter}} 章节元数据。",
+    "empty": "选择一个章节以查看其大纲元数据。",
+    "publishedWarning": "本章已发布。修改需通过 Fork 或修订流程进行。",
+    "finalizedConfirm": "本章已锁定。编辑将移除锁定保护，是否继续？",
+    "save": "保存章节",
+    "movePrevVolume": "移到上一卷",
+    "moveNextVolume": "移到下一卷",
+    "field": {
+      "title": "标题",
+      "slug": "短链",
+      "status": "状态",
+      "plannedWords": "预计字数",
+      "volume": "卷"
+    },
+    "volume": {
+      "unassigned": "未分配"
+    }
+  },
+  "structureInspector": {
+    "title": "卷与章节",
+    "description": "选择一个章节以查看详情，或在卷之间移动章节。",
+    "unassigned": "未分配",
+    "chapterCount": "{{count}} 章",
+    "empty": {
+      "title": "暂无章节",
+      "description": "创建章节后将显示在此处。"
+    },
+    "moveChapterAria": "将第 {{chapter}} 章移动到 {{volume}}",
+    "moveChapterTitle": "移动到 {{volume}}"
+  },
+  "eventInspector": {
+    "title": "时间线",
+    "description": "事件、节拍与伏笔关联。",
+    "addTitle": "添加事件",
+    "titlePlaceholder": "事件标题…",
+    "descriptionPlaceholder": "描述（可选）…",
+    "addButton": "添加到时间线",
+    "attachTitle": "关联到已选章节",
+    "attachAria": "将事件关联到第 {{chapter}} 章",
+    "removeTitle": "移除事件",
+    "removeAria": "移除事件 {{title}}",
+    "foreshadowsAria": "来自 {{title}} 的伏笔关联",
+    "foreshadows": "为 {{title}} 埋下伏笔",
+    "unlinkTitle": "移除伏笔关联",
+    "unlinkAria": "移除到 {{title}} 的伏笔关联",
+    "targetAria": "{{title}} 的伏笔目标",
+    "targetPlaceholder": "选择要关联的伏笔目标…",
+    "link": "关联伏笔"
+  },
+  "sceneInspector": {
+    "title": "场景",
+    "empty": "在图谱上选择一个场景以查看详情。",
+    "readOnly": "场景详情当前为只读。",
+    "field": {
+      "title": "标题",
+      "status": "状态"
+    },
+    "statusNotSet": "未设置",
+    "partOf": "属于 {{title}}。"
+  },
+  "beatInspector": {
+    "title": "节拍",
+    "empty": "在图谱上选择一个节拍以查看详情。",
+    "readOnly": "节拍详情当前为只读。",
+    "field": {
+      "title": "标题",
+      "status": "状态"
+    },
+    "statusNotSet": "未设置",
+    "partOf": "属于 {{title}}。"
+  },
+  "chapter": {
+    "fallback": "章节",
+    "volume": "第 {{volume}} 卷",
+    "wordCount": "{{actual}}/{{planned}} 字",
+    "status": {
+      "not_started": "未开始",
+      "outlined": "已大纲",
+      "draft": "草稿",
+      "finalized": "已定稿",
+      "published": "已发布"
+    }
+  },
+  "scene": {
+    "status": {
+      "drafted": "草稿",
+      "completed": "已完成"
+    }
+  },
+  "strategy": {
+    "loading": "加载策略中…",
+    "loadError": "加载策略失败。",
+    "graphAriaLabel": "策略空间图谱",
+    "header": {
+      "title": "策略",
+      "description": "状态机与转换编辑器",
+      "showGraph": "显示图谱",
+      "showList": "显示列表",
+      "createTransition": "创建转换",
+      "livePrefix": "实时：",
+      "liveStatus": ""
+    },
+    "node": {
+      "status": {
+        "current": "当前",
+        "running": "运行中",
+        "waiting": "等待中",
+        "error": "错误",
+        "completed": "已完成"
+      },
+      "kind": {
+        "state": "状态",
+        "group": "组",
+        "join": "合并",
+        "terminal": "终止",
+        "inner": "内部"
+      },
+      "start": "开始",
+      "end": "结束",
+      "innerGraph": "内部 DAG · {{id}}",
+      "join": "合并 · {{strategy}}",
+      "currentExecutionNode": "当前执行节点"
+    },
+    "toast": {
+      "runQueued": "策略运行已排队",
+      "ideaSent": "想法已发送至策略",
+      "resumed": "策略已恢复"
+    },
+    "draftTransitionLabel": "草稿转换",
+    "draftTransitionEditor": "草稿转换编辑器",
+    "revisionBadge": {
+      "label": "修订 {{revision}}",
+      "conflictTitle": "修订版本冲突——请先刷新再编辑"
+    },
+    "validation": {
+      "title": "校验",
+      "dangling": "悬空转换：{{target}}"
+    },
+    "altView": {
+      "ariaLabel": "按列表顺序显示策略状态与转换",
+      "statesTitle": "状态",
+      "transitionsTitle": "转换",
+      "innerGraph": "内部：{{id}}",
+      "join": "合并 · {{strategy}}",
+      "noCondition": "—",
+      "column": {
+        "from": "来源",
+        "to": "目标",
+        "kind": "类型",
+        "condition": "条件"
+      },
+      "transitionKind": {
+        "next": "下一步",
+        "branch": "分支",
+        "default": "默认"
+      }
+    },
+    "artifacts": {
+      "title": "产物",
+      "ariaLabel": "策略产物",
+      "empty": "暂无产物。"
+    },
+    "edgeCreate": {
+      "title": "创建转换",
+      "description": "在两个状态之间添加转换。",
+      "sourceLabel": "来源",
+      "sourcePlaceholder": "选择来源",
+      "targetLabel": "目标",
+      "targetPlaceholder": "选择目标",
+      "targetPlaceholderLocked": "目标（已锁定）",
+      "kindLabel": "类型",
+      "kind": {
+        "next": "下一步",
+        "branch": "分支",
+        "default": "默认"
+      },
+      "conditionLabel": "条件",
+      "conditionPlaceholder": "条件（可选）…",
+      "cancel": "取消",
+      "submit": "创建转换",
+      "creating": "创建中…",
+      "draftAriaLabel": "从 {{source}} 到 {{target}} 的草稿转换"
+    },
+    "inspector": {
+      "ariaLabel": "策略检查器",
+      "state": {
+        "title": "状态",
+        "ariaLabel": "状态检查器",
+        "labelLabel": "标签",
+        "descriptionLabel": "描述",
+        "save": "保存状态",
+        "saved": "已保存",
+        "saveFailed": "保存失败",
+        "saving": "保存中…",
+        "updated": "状态已更新"
+      },
+      "transition": {
+        "title": "转换",
+        "ariaLabel": "转换检查器",
+        "targetLabel": "目标",
+        "save": "保存转换",
+        "saved": "已保存",
+        "saveFailed": "保存失败",
+        "saving": "保存中…",
+        "updated": "转换已更新"
+      },
+      "prompt": {
+        "title": "提示词",
+        "ariaLabel": "提示词检查器",
+        "placeholder": "输入提示词模板…",
+        "save": "保存提示词",
+        "saved": "已保存",
+        "saveFailed": "保存失败",
+        "saving": "保存中…",
+        "updated": "提示词模板已保存"
+      },
+      "stateId": "状态 ID",
+      "status": "状态",
+      "kind": "类型",
+      "initialState": "初始",
+      "terminalState": "终止",
+      "innerGraph": "内部图谱",
+      "converge": "汇聚",
+      "editAria": "编辑",
+      "cancelEditAria": "取消编辑",
+      "transitionConflict": {
+        "title": "转换冲突"
+      }
+    }
+  },
+  "conflict": {
+    "strategy": {
+      "title": "策略冲突"
+    },
+    "fields": {
+      "label": "标签",
+      "description": "描述",
+      "nextTarget": "目标",
+      "promptTemplate": "提示词模板",
+      "promptTemplateWithRef": "提示词模板（{{ref}}）"
+    },
+    "serverContent": {
+      "none": "无",
+      "notFetched": "未获取"
+    },
+    "draftContent": {
+      "empty": "空"
+    },
+    "serverSectionTitle": "服务器版本",
+    "localSectionTitle": "你的编辑",
+    "useCurrent": "使用当前版本",
+    "keepEditing": "继续编辑",
+    "reapplyLabel": "重新应用我的编辑",
+    "reviewButton": "并排审阅",
+    "review": {
+      "server": "服务器：{{label}}",
+      "local": "你的编辑：{{label}}",
+      "unchanged": "（无变化）"
+    },
+    "revisionLabel": "修订 {{revision}}",
+    "defaultDescription": "你编辑期间，此条目已发生变化。",
+    "local": {
+      "noChanges": "无本地变更"
+    },
+    "server": {
+      "noChanges": "无服务器变更"
+    },
+    "liveRegion": {
+      "revision": "检测到修订 {{revision}} 冲突。",
+      "overlap": "你的编辑与服务器变更重叠，请手动解决。",
+      "noOverlap": "你的编辑与服务器变更无重叠，可重新应用。",
+      "nothing": "未检测到冲突变更。",
+      "nothingDetectable": "未检测到可识别的变更。",
+      "localChanges": "本地变更：{{fields}}",
+      "serverChanges": "服务器变更：{{fields}}"
+    },
+    "reapply": {
+      "title": {
+        "enabled": "可重新应用",
+        "disabled": "不可重新应用"
+      }
+    }
+  },
+  "ideaInput": {
+    "label": "想法",
+    "placeholder": "描述接下来应该发生什么…",
+    "verbGroupAria": "想法操作",
+    "verb": {
+      "run": "运行",
+      "steer": "引导",
+      "resume": "继续"
+    },
+    "submit": {
+      "run": "运行",
+      "steer": "引导",
+      "resume": "继续"
+    },
+    "helper": {
+      "run": {
+        "default": "从当前状态运行下一步。",
+        "noCreator": "运行前请先选择创作者。"
+      },
+      "steer": "通过描述期望结果来引导故事走向。",
+      "resume": "从上次保存点继续。"
+    }
+  },
+  "worldKb": {
+    "loading": "加载世界知识库中…",
+    "loadError": "加载世界知识库失败。",
+    "graphAriaLabel": "世界知识空间图谱",
+    "confidenceLabel": "置信度",
+    "confidenceThresholdAria": "置信度阈值",
+    "header": {
+      "title": "世界知识库",
+      "noEntries": "暂无条目",
+      "entryCount": "{{count}} 条条目",
+      "fetched": "{{time}} 获取",
+      "emptyDescription": "暂无条目。添加世界内容后刷新，或从关联作品继续。",
+      "description": "浏览实体与提升候选。编辑受逐行版本检查保护。",
+      "showGraph": "显示图谱",
+      "showList": "显示列表视图",
+      "refresh": "立即刷新"
+    },
+    "altView": {
+      "entities": "实体",
+      "relationships": "关系",
+      "suggested": "建议"
+    },
+    "inspector": {
+      "ariaLabel": "世界知识库检查器",
+      "empty": "选择一个实体、候选或关系以查看详情。",
+      "entityAria": "实体检查器：{{name}}",
+      "candidateAria": "提升检查器：{{name}}",
+      "newRelationshipAria": "新建关系检查器",
+      "relationshipAria": "关系检查器：{{id}}"
+    },
+    "entityInspector": {
+      "title": "实体",
+      "description": "编辑此世界条目。冲突按行检测——Nexus 会阻止过期写入。",
+      "save": "保存实体",
+      "saving": "保存中…",
+      "noChanges": "无变更。",
+      "editing": "正在编辑：{{fields}}",
+      "bodyJsonError": "Body 必须是有效的 JSON（或留空）。",
+      "validationFailed": "验证失败。",
+      "aliasesPlaceholder": "例如：Aria the Tempest, Stormwind",
+      "bodyPlaceholder": "{}",
+      "field": {
+        "title": "标题",
+        "body": "正文",
+        "aliases": "别名",
+        "blockType": "块类型"
+      }
+    },
+    "relationshipInspector": {
+      "newTitle": "新建关系",
+      "editTitle": "编辑关系",
+      "sourceLabel": "来源实体",
+      "sourcePlaceholder": "选择来源…",
+      "targetLabel": "目标实体",
+      "targetPlaceholder": "选择目标…",
+      "typeLabel": "关系类型",
+      "customLabelLabel": "自定义标签",
+      "customLabelPlaceholder": "例如：童年好友",
+      "save": "保存更改",
+      "add": "添加关系",
+      "removeAria": "移除关系"
+    },
+    "promotionInspector": {
+      "title": "待提升候选",
+      "pendingBadge": "待提升 · v{{version}}",
+      "description": "审阅此提取候选，并决定是否将其提升为世界知识库。",
+      "unnamed": "（未命名）",
+      "decisionLegend": "决策",
+      "selectMergeTarget": "选择要合并到的已确认实体。",
+      "mergeInto": "合并到（已确认 {{blockType}}）",
+      "noMergeTargets": "没有可合并的已确认 {{blockType}} 实体。请改用采纳或拒绝。",
+      "selectTarget": "选择目标…",
+      "validationFailed": "验证失败。",
+      "submitting": "提交中…",
+      "field": {
+        "name": "名称",
+        "blockType": "块类型",
+        "job": "任务"
+      },
+      "action": {
+        "adopt": {
+          "label": "采纳候选",
+          "help": "提升为新的已确认 KeyBlock"
+        },
+        "reject": {
+          "label": "拒绝候选",
+          "help": "丢弃此候选"
+        },
+        "merge": {
+          "label": "合并候选",
+          "help": "合并到现有的已确认实体"
+        }
+      }
+    },
+    "suggested": {
+      "ariaLabel": "建议关系（提取）",
+      "title": "建议",
+      "promoteAll": "全部提升",
+      "description": "提取建议的关系。提升以确认，或删除以忽略。",
+      "caption": "按 {{sortKey}}（{{sortDir}}）排序的建议关系。默认置信度从高到低。",
+      "column": {
+        "source": "来源",
+        "target": "目标",
+        "type": "类型",
+        "confidence": "置信度",
+        "actions": "操作"
+      },
+      "empty": "暂无建议关系。对章节运行提取以生成建议。",
+      "confidenceBandLabel": "置信度",
+      "promoteAria": "提升 {{label}}",
+      "deleteAria": "删除 {{label}}",
+      "deleteConfirm": "删除从 {{source}} 到 {{target}} 的建议关系“{{label}}”？",
+      "promoteAllConfirmOne": "提升此建议关系？",
+      "promoteAllConfirmMany": "提升全部 {{count}} 条建议关系？这将一次性确认它们。",
+      "promoteAllRunning": "正在提升 {{count}} 条建议关系…",
+      "promoteAllSucceeded": "已提升 {{count}} 条建议关系。",
+      "promoteAllFailed": "{{count}} 条建议关系无法提升。请尝试单独提升。",
+      "promoteAllMixed": "已提升 {{succeeded}} 条；{{failed}} 条无法提升。请尝试单独提升其余。"
+    },
+    "entityTable": {
+      "ariaLabel": "世界知识库实体（可排序列表）",
+      "caption": "按 {{sortKey}}（{{sortDir}}）排序的世界知识库实体。按 Enter 打开检查器。",
+      "empty": "暂无世界知识库实体。",
+      "unnamed": "（未命名）",
+      "listView": "列表视图",
+      "entryCount": "{{count}} 条条目",
+      "column": {
+        "name": "名称",
+        "blockType": "块类型",
+        "lifecycle": "生命周期",
+        "anchors": "来源锚点",
+        "updated": "更新时间"
+      }
+    },
+    "relationshipTable": {
+      "ariaLabel": "世界知识库关系（可排序列表）",
+      "title": "关系",
+      "new": "新建关系",
+      "caption": "按 {{sortKey}}（{{sortDir}}）排序的世界知识库关系。按 Enter 编辑行。",
+      "empty": "暂无关系。",
+      "yes": "是",
+      "no": "否",
+      "count": "{{count}} 条关系",
+      "deleteConfirm": "删除从 {{source}} 到 {{target}} 的关系“{{label}}”？",
+      "editAria": "编辑关系 {{label}}",
+      "deleteAria": "删除关系 {{label}}",
+      "column": {
+        "source": "来源",
+        "target": "目标",
+        "type": "类型",
+        "symmetric": "对称",
+        "confidence": "置信度",
+        "anchors": "锚点",
+        "updated": "更新时间",
+        "actions": "操作"
+      }
+    },
+    "entityNode": {
+      "unnamed": "（未命名）",
+      "computable": "可计算",
+      "selected": "已选世界知识库实体",
+      "sourceAnchorAria": "来源锚点：{{reference}}",
+      "sourceAnchorCount": "{{count}} 个来源锚点",
+      "lifecycle": {
+        "pending": "待提升",
+        "confirmed": "已确认",
+        "rejected": "已拒绝",
+        "merged": "已合并"
+      }
+    },
+    "relationshipAnchorPicker": {
+      "empty": "暂无来源锚点。"
+    },
+    "conflict": {
+      "entityTitle": "你编辑期间，此世界条目已发生变化。",
+      "promoteTitle": "你审阅期间，此候选状态已发生变化。",
+      "promoteDescription": "Nexus {{status}} {{name}}（版本",
+      "promoteSuffix": "）时，你正准备 {{action}} 它。你的决定仍保留在检查器中。",
+      "relationshipTitle": "你编辑期间，此关系已发生变化。",
+      "relationshipDescription": "Nexus 已将关系 {{source}} → {{target}} 更新到版本",
+      "relationshipSuffix": "你正在编辑其 {{field}}。你的更改仍保留在检查器中。",
+      "toVersion": "到版本",
+      "whileEditing": "你正在编辑其 {{field}}。你的更改仍保留在检查器中。",
+      "serverSection": "服务器变更",
+      "localSection": "你即将提交的修改",
+      "useCurrent": "使用当前版本",
+      "reapply": "重新应用我的编辑",
+      "promoteReapply": "重新应用我的决定",
+      "cancel": "取消",
+      "modifiedByOther": "已被其他会话修改",
+      "changedByOther": "已被其他会话更改",
+      "yourEdit": "你待提交的编辑",
+      "fields": "字段",
+      "candidateStatus": "候选 {{status}}",
+      "candidateWas": "{{name}} 已被 {{status}}",
+      "pendingAction": "{{action}} {{name}}{{suffix}}",
+      "mergeSuffix": " 到 {{target}}（已确认）",
+      "promotionState": "提升状态",
+      "promotionServer": "{{name}} 现在为 {{status}}",
+      "field": {
+        "title": "标题",
+        "body": "正文",
+        "aliases": "别名",
+        "blockType": "块类型",
+        "relationType": "关系类型",
+        "customLabel": "自定义标签"
+      }
+    }
+  },
+  "source": "来源",
+  "target": "目标",
+  "type": "类型",
+  "confidence": "置信度"
+}

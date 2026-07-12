@@ -1,0 +1,83 @@
+{
+  "prose": {
+    "bodyTitle": "Body",
+    "bodyDescription": "Read-only render of the drafted chapter body.",
+    "copyPath": "Copy Path",
+    "copyPathAria": "Copy body path",
+    "pathLabel": "Path: {{path}}",
+    "statusLabel": "status: {{status}}",
+    "bodyAriaLabel": "Chapter body"
+  },
+  "loading": {
+    "body": "Loading body…",
+    "chapter": "Loading chapter…"
+  },
+  "error": {
+    "bodyLoadDescription": "Could not load the chapter body.",
+    "chapterDescription": "Could not load this chapter. It may not exist or the daemon could not return it."
+  },
+  "chapter": {
+    "title": "Chapter {{chapter}}",
+    "backToChapters": "Back to Chapters",
+    "updated": "Updated {{relative}}",
+    "canvasRedirectTitle": "Outline editing moved to Canvas",
+    "canvasRedirectDescription": "The whole-document outline editor was retired in V1.75. Edit this chapter's outline on the outline canvas.",
+    "canvasRedirectButton": "Edit outline → Canvas",
+    "canvasRedirectAria": "Edit outline for Chapter {{chapter}} on the outline canvas"
+  },
+  "nav": {
+    "ariaLabel": "Chapter navigation",
+    "previousAria": "Previous chapter: {{label}}",
+    "loadingChapters": "Loading chapters",
+    "noPrevious": "No previous chapter",
+    "firstChapter": "First chapter",
+    "volume": "Volume {{volume}}",
+    "keyboardHint": "Use ← → to navigate",
+    "nextAria": "Next chapter: {{label}}",
+    "noNext": "No next chapter",
+    "lastChapter": "Last chapter"
+  },
+  "maturation": {
+    "ariaLabel": "Chapter maturation indicators",
+    "keyBlocks": "key blocks",
+    "openFindings": "open findings"
+  },
+  "progress": {
+    "ariaLabel": "Reading progress"
+  },
+  "highlight": {
+    "driftNotice": "This highlight may have shifted after body edits."
+  },
+  "annotation": {
+    "inspectorAriaLabel": "Annotation inspector",
+    "title": "Highlights",
+    "count_one": "{{count}} annotation",
+    "count_other": "{{count}} annotations",
+    "empty": "Select text in the chapter to add a highlight.",
+    "colorLabel": "Highlight color",
+    "colors": {
+      "yellow": "Yellow",
+      "blue": "Blue",
+      "green": "Green",
+      "pink": "Pink"
+    },
+    "notePlaceholder": "Add a note…",
+    "cancelEdit": "Cancel edit",
+    "save": "Save",
+    "colorAria": "Color: {{color}}",
+    "edit": "Edit highlight",
+    "delete": "Delete highlight",
+    "toolbarAriaLabel": "Annotation actions",
+    "highlightSelection": "Highlight selection",
+    "highlight": "Highlight"
+  },
+  "contextMenu": {
+    "copyPath": "Copy Path",
+    "openWith": "Open With…",
+    "revealInFinder": "Reveal in Finder"
+  },
+  "chrome": {
+    "definitionLabel": "Definition:",
+    "sceneSeparator": "* * *"
+  }
+}

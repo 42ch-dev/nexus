@@ -1,6 +1,7 @@
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
 import { type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
 
@@ -26,6 +27,7 @@ export function DialogContent({
   title: string;
   description?: string;
 }) {
+  const { t } = useTranslation('common');
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-black/40 data-[state=open]:animate-in" />
@@ -47,7 +49,7 @@ export function DialogContent({
             )}
           </div>
           <DialogPrimitive.Close
-            aria-label="Close dialog"
+            aria-label={t('dialog.close')}
             className="shrink-0 rounded-control p-1 text-gray-700 transition-colors duration-state ease-standard hover:bg-gray-alpha-100 hover:text-gray-1000"
           >
             <X className="h-4 w-4" aria-hidden />

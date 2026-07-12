@@ -56,6 +56,14 @@ export interface ShellSidebarChromeProps {
     content: ReactNode,
     isActive: boolean,
   ) => ReactNode;
+  /** Optional label for the Creator tab (defaults to English for fixtures). */
+  creatorTabLabel?: string;
+  /** Optional label for the Orchestrator tab (defaults to English for fixtures). */
+  orchestratorTabLabel?: string;
+  /** Optional label for the Settings footer utility (defaults to English). */
+  settingsLabel?: string;
+  /** Optional aria-label for the primary navigation tablist. */
+  primaryNavigationAriaLabel?: string;
   /** Optional test id for the root sidebar chrome. */
   'data-testid'?: string;
 }
@@ -77,6 +85,10 @@ export function ShellSidebarChrome({
   renderNavItem = defaultRenderNavItem,
   renderSettingsLink = defaultRenderSettingsLink,
   isActiveItem,
+  creatorTabLabel = 'Creator',
+  orchestratorTabLabel = 'Orchestrator',
+  settingsLabel = 'Settings',
+  primaryNavigationAriaLabel = 'Primary navigation',
   'data-testid': dataTestId,
 }: ShellSidebarChromeProps) {
   return (
@@ -89,17 +101,17 @@ export function ShellSidebarChrome({
       <div
         className="grid grid-cols-2 gap-1 rounded-card bg-gray-alpha-100 p-1"
         role="tablist"
-        aria-label="Primary navigation"
+        aria-label={primaryNavigationAriaLabel}
       >
         <TabButton
           id="creator"
-          label="Creator"
+          label={creatorTabLabel}
           active={activeTab === 'creator'}
           onClick={() => onTabChange('creator')}
         />
         <TabButton
           id="orchestrator"
-          label="Orchestrator"
+          label={orchestratorTabLabel}
           active={activeTab === 'orchestrator'}
           onClick={() => onTabChange('orchestrator')}
         />
@@ -135,7 +147,7 @@ export function ShellSidebarChrome({
           ),
           <>
             <Settings className="h-4 w-4 shrink-0" aria-hidden />
-            <span>Settings</span>
+            <span>{settingsLabel}</span>
           </>,
           settingsActive,
         )}

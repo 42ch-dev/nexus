@@ -1,11 +1,11 @@
 {
   "version": 1,
-  "updated_at": "2026-07-10",
+  "updated_at": "2026-07-12",
   "plans": [
     {
-      "id": "2026-07-10-v1.108-canvas-outline-spatial",
-      "title": "P0 — Canvas Outline spatial parity",
-      "file": "plans/2026-07-10-v1.108-canvas-outline-spatial.md",
+      "id": "2026-07-12-v1.112-i18n-foundation",
+      "title": "P0 — i18n foundation + Appearance",
+      "file": "plans/2026-07-12-v1.112-i18n-foundation.md",
       "status": "Done",
       "owner": "@project-manager",
       "agents": [
@@ -14,298 +14,31 @@
       ],
       "progress": 100,
       "tags": [
-        "v1.108",
-        "canvas",
-        "outline",
-        "must"
-      ],
-      "created_at": "2026-07-10",
-      "updated_at": "2026-07-11",
-      "notes": "Done — SDD T1-T4 + QC tri Approve with residuals + QA Pass; merged to iteration/v1.108",
-      "metadata": {
-        "iteration_refs": [
-          "V1.108"
-        ],
-        "spec_integration_branch": "iteration/v1.108",
-        "merge_target": "iteration/v1.108",
-        "working_branch": "plan/v1.108-p0-canvas-outline-spatial",
-        "primary_spec": ".mstar/iterations/v1.108/specs/canvas-outline-spatial.md",
-        "wire_contracts_changed": false,
-        "tier": "Must"
-      }
-    },
-    {
-      "id": "2026-07-10-v1.108-ui-shell-ssot",
-      "title": "P1 — UI shell SSOT + AgentPicker + canvas Surfaces",
-      "file": "plans/2026-07-10-v1.108-ui-shell-ssot.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@frontend-dev",
-        "@architect"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.108",
-        "ui",
-        "shell",
-        "studio-first",
-        "must"
-      ],
-      "created_at": "2026-07-10",
-      "updated_at": "2026-07-11",
-      "notes": "Done — SDD T1-T4 + QC tri Approve with residuals + QA Pass; merged to iteration/v1.108",
-      "metadata": {
-        "iteration_refs": [
-          "V1.108"
-        ],
-        "spec_integration_branch": "iteration/v1.108",
-        "merge_target": "iteration/v1.108",
-        "working_branch": "plan/v1.108-p1-ui-shell-ssot",
-        "primary_spec": ".mstar/iterations/v1.108/specs/ui-shell-ssot.md",
-        "wire_contracts_changed": false,
-        "tier": "Must"
-      }
-    },
-    {
-      "id": "2026-07-11-v1.109-canvas-scene-beat",
-      "title": "P0 — Canvas Scene/Beat Expansion (C2)",
-      "file": "plans/2026-07-11-v1.109-canvas-scene-beat.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@frontend-dev",
-        "@architect"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.109",
-        "canvas",
-        "outline",
-        "scene",
-        "beat",
-        "must"
-      ],
-      "created_at": "2026-07-11",
-      "updated_at": "2026-07-11",
-      "notes": "Done — SDD T1-T4 + QC tri Approve with residuals + QA Pass; 4 open residuals (1 Important defer P2, 1 re-scope, 2 nit); wire: false",
-      "metadata": {
-        "iteration_refs": [
-          "V1.109"
-        ],
-        "spec_integration_branch": "iteration/v1.109",
-        "merge_target": "iteration/v1.109",
-        "working_branch": "plan/v1.109-p0-canvas-scene-beat",
-        "primary_spec": ".mstar/iterations/v1.109/specs/canvas-scene-beat.md",
-        "wire_contracts_changed": false,
-        "tier": "Must"
-      }
-    },
-    {
-      "id": "2026-07-11-v1.109-strategy-edge-rewiring",
-      "title": "P1 — Strategy Spatial Edge Rewiring",
-      "file": "plans/2026-07-11-v1.109-strategy-edge-rewiring.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@frontend-dev",
-        "@architect"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.109",
-        "canvas",
-        "strategy",
-        "edges",
-        "must"
-      ],
-      "created_at": "2026-07-11",
-      "updated_at": "2026-07-11",
-      "notes": "Done — SDD T0-T4 + fix wave + QC tri Approve with residuals + QA Pass; 2 open low residuals; wire: true (additive op)",
-      "metadata": {
-        "iteration_refs": [
-          "V1.109"
-        ],
-        "spec_integration_branch": "iteration/v1.109",
-        "merge_target": "iteration/v1.109",
-        "working_branch": "plan/v1.109-p1-strategy-edge-rewiring",
-        "primary_spec": ".mstar/iterations/v1.109/specs/strategy-edge-rewiring.md",
-        "wire_contracts_changed": true,
-        "tier": "Must"
-      }
-    },
-    {
-      "id": "2026-07-11-v1.109-canvas-graph-scale",
-      "title": "P2 — Canvas Graph Scale + Viewport Reliability",
-      "file": "plans/2026-07-11-v1.109-canvas-graph-scale.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@frontend-dev",
-        "@architect"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.109",
-        "canvas",
-        "viewport",
-        "scale",
-        "residuals",
-        "must"
-      ],
-      "created_at": "2026-07-11",
-      "updated_at": "2026-07-11",
-      "notes": "Done — SDD T1-T4 + QC tri Approve with residuals + QA Pass; 7 V1.108 residuals closed; 1 nit accepted; wire: false",
-      "metadata": {
-        "iteration_refs": [
-          "V1.109"
-        ],
-        "spec_integration_branch": "iteration/v1.109",
-        "merge_target": "iteration/v1.109",
-        "working_branch": "plan/v1.109-p2-canvas-graph-scale",
-        "primary_spec": ".mstar/iterations/v1.109/specs/canvas-graph-scale.md",
-        "wire_contracts_changed": false,
-        "tier": "Must"
-      }
-    },
-    {
-      "id": "2026-07-11-v1.110-daemon-startup-latency",
-      "title": "P0 — Daemon startup latency (FB-D1)",
-      "file": "plans/2026-07-11-v1.110-daemon-startup-latency.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@fullstack-dev",
-        "@architect"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.110",
-        "daemon",
-        "sidecar",
-        "startup",
-        "performance",
-        "must"
-      ],
-      "created_at": "2026-07-11",
-      "updated_at": "2026-07-11",
-      "notes": "Done — SDD T1-T4 + QC tri Approve with residuals + QA Pass; merged to iteration/v1.110",
-      "metadata": {
-        "iteration_refs": [
-          "V1.110"
-        ],
-        "spec_integration_branch": "iteration/v1.110",
-        "merge_target": "iteration/v1.110",
-        "working_branch": "plan/v1.110-p0-daemon-startup-latency",
-        "primary_spec": ".mstar/iterations/v1.110/specs/daemon-startup-latency.md",
-        "wire_contracts_changed": false,
-        "tier": "Must"
-      }
-    },
-    {
-      "id": "2026-07-11-v1.110-agent-scan-path-reliability",
-      "title": "P1 — Agent scan PATH reliability (FB-D3)",
-      "file": "plans/2026-07-11-v1.110-agent-scan-path-reliability.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@fullstack-dev",
-        "@architect"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.110",
-        "agent",
-        "scan",
-        "path",
-        "detection",
-        "must"
-      ],
-      "created_at": "2026-07-11",
-      "updated_at": "2026-07-11",
-      "notes": "Done — SDD T1-T4 + QC tri Approve with residuals + QA Pass; merged to iteration/v1.110",
-      "metadata": {
-        "iteration_refs": [
-          "V1.110"
-        ],
-        "spec_integration_branch": "iteration/v1.110",
-        "merge_target": "iteration/v1.110",
-        "working_branch": "plan/v1.110-p1-agent-scan-path",
-        "primary_spec": ".mstar/iterations/v1.110/specs/agent-scan-path-reliability.md",
-        "wire_contracts_changed": false,
-        "tier": "Must"
-      }
-    },
-    {
-      "id": "2026-07-11-v1.110-agent-picker-ux-polish",
-      "title": "P2 — AgentPicker UX polish (FB-D2 + FB-D4)",
-      "file": "plans/2026-07-11-v1.110-agent-picker-ux-polish.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@frontend-dev",
-        "@architect"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.110",
-        "agent",
-        "picker",
-        "ux",
-        "ui",
-        "must"
-      ],
-      "created_at": "2026-07-11",
-      "updated_at": "2026-07-11",
-      "notes": "Done — SDD T1-T4 + QC tri Approve with residuals + QA Pass; merged to iteration/v1.110",
-      "metadata": {
-        "iteration_refs": [
-          "V1.110"
-        ],
-        "spec_integration_branch": "iteration/v1.110",
-        "merge_target": "iteration/v1.110",
-        "working_branch": "plan/v1.110-p2-agent-picker-ux",
-        "primary_spec": ".mstar/iterations/v1.110/specs/agent-picker-ux-polish.md",
-        "wire_contracts_changed": false,
-        "tier": "Must"
-      }
-    },
-    {
-      "id": "2026-07-12-v1.111-canvas-command-palette",
-      "title": "P0 — Shared Canvas Command Palette (Cmd+K)",
-      "file": "plans/2026-07-12-v1.111-canvas-command-palette.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@frontend-dev",
-        "@architect"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.111",
-        "canvas",
-        "command-palette",
-        "discoverability",
+        "v1.112",
+        "i18n",
+        "settings",
+        "appearance",
         "must"
       ],
       "created_at": "2026-07-12",
       "updated_at": "2026-07-12",
-      "notes": "Done — SDD T1-T5 + QC tri Approve with residuals (2 low) + QA Pass; merged to iteration/v1.111",
+      "notes": "Phase 2: SDD T1-T4 done, QC tri Approve with residuals (6 R#), QA Pass, merged to integration",
       "metadata": {
         "iteration_refs": [
-          "V1.111"
+          "V1.112"
         ],
-        "spec_integration_branch": "iteration/v1.111",
-        "merge_target": "iteration/v1.111",
-        "primary_spec": ".mstar/iterations/v1.111/specs/canvas-command-palette.md",
+        "spec_integration_branch": "iteration/v1.112",
+        "merge_target": "iteration/v1.112",
+        "working_branch": "plan/v1.112-p0-i18n-foundation",
+        "primary_spec": ".mstar/iterations/v1.112/specs/i18n-foundation.md",
         "wire_contracts_changed": false,
         "tier": "Must"
       }
     },
     {
-      "id": "2026-07-12-v1.111-sidebar-canvas-ia",
-      "title": "P1 — Sidebar Canvas IA",
-      "file": "plans/2026-07-12-v1.111-sidebar-canvas-ia.md",
+      "id": "2026-07-12-v1.112-i18n-ui-migration",
+      "title": "P1 — Full user-facing UI migration",
+      "file": "plans/2026-07-12-v1.112-i18n-ui-migration.md",
       "status": "Done",
       "owner": "@project-manager",
       "agents": [
@@ -314,92 +47,27 @@
       ],
       "progress": 100,
       "tags": [
-        "v1.111",
-        "sidebar",
-        "canvas",
-        "ia",
-        "navigation",
+        "v1.112",
+        "i18n",
+        "migration",
         "must"
       ],
       "created_at": "2026-07-12",
       "updated_at": "2026-07-12",
-      "notes": "Done — SDD T1-T4 + QC tri Approve w/ residual (1 low) + QA Pass; merged to iteration/v1.111",
+      "notes": "Phase 2: SDD T1-T4 done, QC Approve with residuals (3 R#), QA Pass, merged to integration",
       "metadata": {
         "iteration_refs": [
-          "V1.111"
+          "V1.112"
         ],
-        "spec_integration_branch": "iteration/v1.111",
-        "merge_target": "iteration/v1.111",
-        "primary_spec": ".mstar/iterations/v1.111/specs/sidebar-canvas-ia.md",
+        "spec_integration_branch": "iteration/v1.112",
+        "merge_target": "iteration/v1.112",
+        "working_branch": "plan/v1.112-p1-i18n-ui-migration",
+        "primary_spec": ".mstar/iterations/v1.112/specs/i18n-ui-migration.md",
         "wire_contracts_changed": false,
-        "tier": "Must"
-      }
-    },
-    {
-      "id": "2026-07-12-v1.111-design-studio-canvas-gallery",
-      "title": "P2 — Design Studio Canvas Surface Gallery",
-      "file": "plans/2026-07-12-v1.111-design-studio-canvas-gallery.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@frontend-dev",
-        "@architect"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.111",
-        "design-studio",
-        "canvas",
-        "studio-first",
-        "must"
-      ],
-      "created_at": "2026-07-12",
-      "updated_at": "2026-07-12",
-      "notes": "Done — SDD T1-T5 + QC tri Approve (qc2 degraded PM-authored) + QA Pass; expanded CanvasSurfacesFixtures with Strategy+World KB chrome; merged to iteration/v1.111",
-      "metadata": {
-        "iteration_refs": [
-          "V1.111"
-        ],
-        "spec_integration_branch": "iteration/v1.111",
-        "merge_target": "iteration/v1.111",
-        "primary_spec": ".mstar/iterations/v1.111/specs/design-studio-canvas-gallery.md",
-        "wire_contracts_changed": false,
-        "tier": "Must"
-      }
-    },
-    {
-      "id": "2026-07-12-v1.111-frontend-consolidation-sweep",
-      "title": "P3 — Frontend Consolidation & UI Polish Sweep",
-      "file": "plans/2026-07-12-v1.111-frontend-consolidation-sweep.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@frontend-dev",
-        "@architect",
-        "@qa-engineer"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.111",
-        "frontend",
-        "consolidation",
-        "residuals",
-        "ui-polish",
-        "stretch"
-      ],
-      "created_at": "2026-07-12",
-      "updated_at": "2026-07-12",
-      "notes": "Done — SDD T1-T5 + QC tri Approve with residuals (2 defer) + QA Pass; merged to iteration/v1.111",
-      "metadata": {
-        "iteration_refs": [
-          "V1.111"
-        ],
-        "spec_integration_branch": "iteration/v1.111",
-        "merge_target": "iteration/v1.111",
-        "working_branch": "plan/v1.111-p3-frontend-consolidation",
-        "primary_spec": ".mstar/iterations/v1.111/specs/frontend-consolidation-sweep.md",
-        "wire_contracts_changed": false,
-        "tier": "Stretch"
+        "tier": "Must",
+        "blocked_by": [
+          "2026-07-12-v1.112-i18n-foundation"
+        ]
       }
     }
   ],
@@ -407,8 +75,8 @@
     "integration_branch_retired": true,
     "iteration_base_branch": "main",
     "last_integration_branch": "iteration/v1.111",
-    "latest_active_compass": null,
-    "latest_active_iteration": null,
+    "latest_active_compass": "v1.112-delivery-compass.md",
+    "latest_active_iteration": "V1.112",
     "latest_ship": {
       "iteration": "V1.111",
       "compass": "v1.111-delivery-compass.md",
@@ -419,43 +87,38 @@
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "pre_iteration_hotfix": null,
-    "spec_integration_branch": "iteration/v1.111",
+    "spec_integration_branch": "iteration/v1.112",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {
       "updated_at": "2026-07-12",
-      "total_open": 86,
+      "total_open": 87,
       "by_severity": {
-        "nit": 35,
+        "critical": 0,
+        "high": 0,
         "medium": 1,
         "low": 35,
-        "suggestion": 15
+        "nit": 51
       },
       "by_target": {
-        "when list virtualisation lands": 1,
         "V1.96": 14,
-        "V1.96 spec-hygiene pass": 1,
         "V1.97": 4,
-        "V1.97+": 1,
-        "V1.99+": 1,
-        "post-V1.99": 2,
-        "post-V1.100": 7,
-        "V1.102+": 1,
-        "V1.101 P1 or V1.102": 1,
-        "post-V1.101": 5,
         "accept": 6,
-        "unspecified": 11,
-        "V1.104+": 1,
-        "post-V1.104": 7,
+        "post-V1.100": 7,
+        "post-V1.101": 6,
+        "post-V1.102": 1,
+        "post-V1.104": 8,
         "post-V1.106": 2,
-        "post-V1.109": 4,
         "post-V1.108": 1,
-        "n/a": 1,
-        "when scene/beat wire DTOs land": 1,
-        "post-V1.109 (client API signal support)": 1,
-        "V1.111+": 2,
+        "post-V1.109": 5,
         "post-V1.110": 8,
-        "post-V1.111": 3
+        "post-V1.111": 6,
+        "post-V1.97": 1,
+        "post-V1.99": 3,
+        "spec-hygiene": 1,
+        "unspecified": 12,
+        "when-list-virtualisation": 1,
+        "when-scene-beat-wire": 1
       },
       "by_plan": {
         "2026-07-05-v1.91-findings-batch": 1,
@@ -480,14 +143,15 @@
         "2026-07-10-v1.106-studio-first-pipeline": 3,
         "2026-07-10-v1.106-ui-continuity": 1,
         "2026-07-10-v1.108-canvas-outline-spatial": 3,
+        "2026-07-11-v1.109-canvas-graph-scale": 1,
         "2026-07-11-v1.109-canvas-scene-beat": 2,
         "2026-07-11-v1.109-strategy-edge-rewiring": 2,
-        "2026-07-11-v1.109-canvas-graph-scale": 1,
         "2026-07-11-v1.110-agent-picker-ux-polish": 4,
-        "2026-07-12-v1.111-sidebar-canvas-ia": 1,
-        "2026-07-12-v1.111-canvas-command-palette": 2,
+        "2026-07-11-v1.110-agent-scan-path-reliability": 3,
         "2026-07-11-v1.110-daemon-startup-latency": 3,
-        "2026-07-11-v1.110-agent-scan-path-reliability": 3
+        "2026-07-12-v1.111-canvas-command-palette": 2,
+        "2026-07-12-v1.111-frontend-consolidation-sweep": 1,
+        "2026-07-12-v1.111-sidebar-canvas-ia": 1
       }
     },
     "updated_at": "2026-07-12"
@@ -500,7 +164,7 @@
         "severity": "nit",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "when list virtualisation lands",
+        "target": "when-list-virtualisation",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-05-v1.91-findings-batch.md",
         "note": "At the 100-item cap this is not user-visible. QC source: §S-004"
@@ -526,7 +190,7 @@
         "severity": "low",
         "decision": "defer",
         "owner": "@writing-specialist + @architect",
-        "target": "V1.96 spec-hygiene pass",
+        "target": "spec-hygiene",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-06-v1.93-closure.md",
         "note": "Pre-existing from V1.90. QC source: §W-003"
@@ -708,7 +372,7 @@
         "severity": "low",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.97+",
+        "target": "post-V1.97",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.96-implement-rework.md",
         "note": "Future 'copy error details' support button. QC source: §S-004"
@@ -743,7 +407,7 @@
         "severity": "low",
         "decision": "defer",
         "owner": "@fullstack-dev",
-        "target": "V1.99+",
+        "target": "post-V1.99",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.97-desktop-first-launch-hardening.md",
         "note": "No error lost; consolidate to single storage path in future iteration. QC source: §W-001"
@@ -859,7 +523,7 @@
         "severity": "low",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "V1.102+",
+        "target": "post-V1.102",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-09-v1.101-agent-detection-picker.md",
         "note": "QC3 F-003. Current fixtures only import agent-picker; directory alias could pull wizard modules into Studio."
@@ -870,7 +534,7 @@
         "severity": "nit",
         "decision": "defer",
         "owner": "@writing-specialist",
-        "target": "V1.101 P1 or V1.102",
+        "target": "post-V1.101",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-09-v1.101-agent-detection-picker.md",
         "note": "QC2 F-006 doc drift."
@@ -949,27 +613,30 @@
     "2026-07-09-v1.102-badge-soft-solid": [
       {
         "id": "R-V1102P0QC-S001",
-        "severity": "suggestion",
+        "severity": "nit",
         "lifecycle": "open",
         "summary": "Optional soft-row Studio smoke symmetry (testids/class asserts)",
         "source": "qc-tri",
-        "plan_id": "2026-07-09-v1.102-badge-soft-solid"
+        "plan_id": "2026-07-09-v1.102-badge-soft-solid",
+        "target": "unspecified"
       },
       {
         "id": "R-V1102P0QC-S002",
-        "severity": "suggestion",
+        "severity": "nit",
         "lifecycle": "open",
         "summary": "Dark interactive Badge solid eyeball at human-smoke gate",
         "source": "qc3",
-        "plan_id": "2026-07-09-v1.102-badge-soft-solid"
+        "plan_id": "2026-07-09-v1.102-badge-soft-solid",
+        "target": "unspecified"
       },
       {
         "id": "R-V1102P0QC-S003",
-        "severity": "suggestion",
+        "severity": "nit",
         "lifecycle": "open",
         "summary": "Optional README note for dark solid AA text",
         "source": "qc2",
-        "plan_id": "2026-07-09-v1.102-badge-soft-solid"
+        "plan_id": "2026-07-09-v1.102-badge-soft-solid",
+        "target": "unspecified"
       }
     ],
     "2026-07-09-v1.102-settings-shell": [
@@ -979,7 +646,8 @@
         "lifecycle": "open",
         "summary": "Mobile nav assert specificity",
         "source": "qc-tri",
-        "plan_id": "2026-07-09-v1.102-settings-shell"
+        "plan_id": "2026-07-09-v1.102-settings-shell",
+        "target": "unspecified"
       },
       {
         "id": "R-V1102P1QC-S002",
@@ -987,7 +655,8 @@
         "lifecycle": "open",
         "summary": "Custom-launch persist test optional",
         "source": "qc-tri",
-        "plan_id": "2026-07-09-v1.102-settings-shell"
+        "plan_id": "2026-07-09-v1.102-settings-shell",
+        "target": "unspecified"
       },
       {
         "id": "R-V1102P1QC-S003",
@@ -995,7 +664,8 @@
         "lifecycle": "open",
         "summary": "Settings reject-path test optional",
         "source": "qc-tri",
-        "plan_id": "2026-07-09-v1.102-settings-shell"
+        "plan_id": "2026-07-09-v1.102-settings-shell",
+        "target": "unspecified"
       },
       {
         "id": "R-V1102P1QC-S004",
@@ -1003,7 +673,8 @@
         "lifecycle": "open",
         "summary": "getAgentProfile preselect deferred per spec",
         "source": "qc-tri",
-        "plan_id": "2026-07-09-v1.102-settings-shell"
+        "plan_id": "2026-07-09-v1.102-settings-shell",
+        "target": "unspecified"
       },
       {
         "id": "R-V1102P1QC-S005",
@@ -1011,39 +682,43 @@
         "lifecycle": "open",
         "summary": "Mapping extract / Studio Save CTA polish optional",
         "source": "qc-tri",
-        "plan_id": "2026-07-09-v1.102-settings-shell"
+        "plan_id": "2026-07-09-v1.102-settings-shell",
+        "target": "unspecified"
       }
     ],
     "2026-07-09-v1.102-ui-hygiene": [
       {
         "id": "R-V1102P2QC-S001",
-        "severity": "suggestion",
+        "severity": "nit",
         "lifecycle": "open",
         "summary": "Stale Surfaces daemon helper/blurb copy",
         "source": "qc-tri",
-        "plan_id": "2026-07-09-v1.102-ui-hygiene"
+        "plan_id": "2026-07-09-v1.102-ui-hygiene",
+        "target": "unspecified"
       },
       {
         "id": "R-V1102P2QC-S002",
-        "severity": "suggestion",
+        "severity": "nit",
         "lifecycle": "open",
         "summary": "Studio vs App Restart label density parity",
         "source": "qc-tri",
-        "plan_id": "2026-07-09-v1.102-ui-hygiene"
+        "plan_id": "2026-07-09-v1.102-ui-hygiene",
+        "target": "unspecified"
       },
       {
         "id": "R-V1102P2QC-S003",
-        "severity": "suggestion",
+        "severity": "nit",
         "lifecycle": "open",
         "summary": "Soft running Badge semantic reuse for Installed/healthy",
         "source": "qc-tri",
-        "plan_id": "2026-07-09-v1.102-ui-hygiene"
+        "plan_id": "2026-07-09-v1.102-ui-hygiene",
+        "target": "unspecified"
       }
     ],
     "2026-07-09-v1.103-settings-agent-preselect": [
       {
         "id": "R-V1103P1QC-S001",
-        "severity": "suggestion",
+        "severity": "nit",
         "lifecycle": "open",
         "title": "Optional extract shared agent mapping helpers",
         "summary": "qc1 F-003 shared helper extract non-blocking",
@@ -1055,7 +730,7 @@
     "2026-07-09-v1.103-settings-connection": [
       {
         "id": "R-V1103P2QC-S001",
-        "severity": "suggestion",
+        "severity": "nit",
         "lifecycle": "open",
         "title": "Optional FingerprintGate /connect allowlist cleanup",
         "summary": "qc3 suggestion: drop stale /connect from bypass allowlist",
@@ -1067,11 +742,11 @@
     "2026-07-09-v1.103-settings-shell-nav": [
       {
         "id": "R-V1103P0QC-S002",
-        "severity": "suggestion",
+        "severity": "nit",
         "lifecycle": "open",
         "title": "Studio vs web section-list drift risk",
         "summary": "Keep Studio SETTINGS_SHELL_SECTIONS aligned with App MUST_SECTIONS when P4 adds Workspace",
-        "target": "V1.104+",
+        "target": "post-V1.104",
         "source": "qc1",
         "decision": "defer",
         "note": " P4 Stretch deferred; retarget V1.104+."
@@ -1100,7 +775,7 @@
       },
       {
         "id": "R-V1104QC-S002",
-        "severity": "suggestion",
+        "severity": "nit",
         "lifecycle": "open",
         "title": "Seven locked copy constants duplicated between apps/web and apps/design-studio fixture",
         "source": "qc1",
@@ -1110,7 +785,7 @@
       },
       {
         "id": "R-V1104QC-S003",
-        "severity": "suggestion",
+        "severity": "nit",
         "lifecycle": "open",
         "title": "SHELL_HELPER copy does not mention Workspace",
         "source": "qc1",
@@ -1150,7 +825,7 @@
       },
       {
         "id": "R-V1104QC-S006",
-        "severity": "suggestion",
+        "severity": "nit",
         "lifecycle": "open",
         "title": "getWorkspaceRoot rejection leaves path empty; user can still click Change Folder with empty defaultPath",
         "source": "qc3",
@@ -1174,7 +849,7 @@
       {
         "id": "R-V1106P0-004",
         "title": "Toast queue has no maxToasts upper bound; under duration:0 rapid-fire generation could grow unbounded",
-        "severity": "suggestion",
+        "severity": "nit",
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.106",
@@ -1211,7 +886,7 @@
       {
         "id": "R-V1108P1QC1-S002",
         "title": "Studio node chrome mirror should import P0 extract when available",
-        "severity": "suggestion",
+        "severity": "nit",
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.109",
@@ -1233,7 +908,7 @@
       {
         "id": "R-V1108P0QC1-S001",
         "title": "Consider extracting useOutlineCanvasGraph() hook for Scene/Beat roadmap",
-        "severity": "suggestion",
+        "severity": "nit",
         "decision": "defer",
         "owner": "@frontend-dev",
         "target": "post-V1.108",
@@ -1249,7 +924,7 @@
         "severity": "nit",
         "decision": "accept",
         "owner": "@frontend-dev",
-        "target": "n/a",
+        "target": "unspecified",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-scene-beat.md",
         "note": "Production safe via EMPTY_SCENE_BEAT_FIXTURE. QC source: QC3 W1"
@@ -1260,7 +935,7 @@
         "severity": "nit",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "when scene/beat wire DTOs land",
+        "target": "when-scene-beat-wire",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-scene-beat.md",
         "note": "Acceptable for small fixture arrays. QC source: QC3 W2"
@@ -1297,7 +972,7 @@
         "severity": "nit",
         "decision": "accept",
         "owner": "@frontend-dev",
-        "target": "post-V1.109 (client API signal support)",
+        "target": "post-V1.109",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
         "note": "Local-only read-only scan; true cancellation requires client API support. QC source: QC2 suggestion"
@@ -1310,7 +985,7 @@
         "severity": "low",
         "decision": "defer",
         "owner": "@architect",
-        "target": "V1.111+",
+        "target": "post-V1.111",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-11-v1.110-agent-picker-ux-polish.md",
         "note": "FB-D2-001 degrades to registry order in V1.110. lastUpdated is not on AgentScanEntry (additionalProperties: false); blocked on upstream ACP registry updated_at or a scan-response wire change."
@@ -1321,7 +996,7 @@
         "severity": "low",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "V1.111+",
+        "target": "post-V1.111",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-11-v1.110-agent-picker-ux-polish.md",
         "note": "qc2 W-001. Intentional forward-compat; low risk."
@@ -1350,17 +1025,6 @@
       }
     ],
     "2026-07-12-v1.111-frontend-consolidation-sweep": [
-      {
-        "id": "R-V1111P3QC1-W001",
-        "title": "tech_debt_summary.by_severity has non-canonical 'suggestion' bucket (rollup norm_sev() maps warning->low not suggestion); DRIFT flagged. Pre-existing (17 entries pre-P3; P3 archived 2)",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@fullstack-dev",
-        "target": "spec-hygiene pass",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-12-v1.111-frontend-consolidation-sweep.md",
-        "note": "qc1 F-001. Pre-existing metadata-schema drift; P3 improved it. Canonical-severity normalization is the separate spec-hygiene pass (P3 non-goal). QC source: qc-consolidated.md"
-      },
       {
         "id": "R-V1111P3QC1-S001",
         "title": "Two DESIGN-token gaps from P0/P1 UX audit: sidebar-nav.disabled token (disabled items use opacity-50) + listbox-max-height token (max-h-[320px])",
@@ -1478,6 +1142,109 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-11-v1.110-agent-scan-path-reliability.md",
         "note": "qc1 F-S5. Non-blocking; current 13 tests cover DoD."
+      }
+    ],
+    "2026-07-12-v1.112-i18n-foundation": [
+      {
+        "id": "R-P0-001",
+        "title": "localStorage writes system on first mount without user action",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.112",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-foundation.md",
+        "note": "Matches ThemeProvider precedent. P1 review whether write should defer until first user change."
+      },
+      {
+        "id": "R-P0-002",
+        "title": "Catalog inflation - duplicate route.*/mobileNav.* keys with identical strings",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.112",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-foundation.md",
+        "note": "ROUTE_KEYS and MOBILE_NAV_KEYS produce identical EN/ZH. P1 consolidate."
+      },
+      {
+        "id": "R-P0-003",
+        "title": "Static imports of all 18 JSON catalogs - both locales bundled unconditionally",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.112",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-foundation.md",
+        "note": "~2KB for P0. Evaluate dynamic import/manualChunks before P1 expansion."
+      },
+      {
+        "id": "R-P0-004",
+        "title": "Unvalidated setPreference input - no runtime guard",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.112",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-foundation.md",
+        "note": "Add isLocalePreference() runtime guard in P1."
+      },
+      {
+        "id": "R-P0-005",
+        "title": "Unused not-found catalog keys while page still hardcoded",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.112",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-foundation.md",
+        "note": "shell.json defines notFound.* but not-found-page.tsx not migrated. Migrate in P1 or remove keys."
+      },
+      {
+        "id": "R-P0-006",
+        "title": "Design-studio App.test.tsx pre-existing AgentPicker fixture failures (7 tests)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.112",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-foundation.md",
+        "note": "Pre-existing - file not touched in P0 diff. Not introduced by this plan."
+      }
+    ],
+    "2026-07-12-v1.112-i18n-ui-migration": [
+      {
+        "id": "R-P1-001",
+        "title": "~25 secondary page strings not migrated to i18n",
+        "severity": "medium",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.112",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-ui-migration.md",
+        "note": "Remaining hardcoded strings in works/schedule/sessions/strategies/capabilities pages + dialogs + content editor. Subagent non-functional during fix wave."
+      },
+      {
+        "id": "R-P1-002",
+        "title": "Uncached Intl.DateTimeFormat/RelativeTimeFormat created per call in format.ts",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.112",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-ui-migration.md",
+        "note": "Consider memoization for hot paths."
+      },
+      {
+        "id": "R-P1-003",
+        "title": "soul.fragmentCount shared key slightly redundant in world-selector context",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.112",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-ui-migration.md",
+        "note": "Split into two keys in future polish."
       }
     ]
   }
