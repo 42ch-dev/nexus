@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { useEffect, useState, type FormEvent } from 'react';
 
 import { Dialog, DialogContent } from '@/components/ui/dialog';
@@ -13,9 +14,6 @@ import type { WorkDetailResponse } from '@42ch/nexus-contracts';
  * uses free-strings (no enum), so inputs are free-text with the current value
  * pre-filled. Only non-empty deltas are sent.
  */
-const STAGE_HINT =
-  'Statuses are free-text in the runtime (e.g. intake, active, completed, paused).';
-
 export function PatchWorkDialog({
   work,
   open,
@@ -25,6 +23,7 @@ export function PatchWorkDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
+  const { t } = useTranslation('works');
   const patch = usePatchWork();
   const [status, setStatus] = useState(work.status);
   const [intakeStatus, setIntakeStatus] = useState(work.intake_status);
@@ -60,10 +59,10 @@ export function PatchWorkDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent title="Update Work" description={work.title}>
+      <DialogContent title={t('dialog.patchWork.title')} description={work.title}>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="patch-status">Status</Label>
+            <Label htmlFor="patch-status">{t('dialog.patchWork.statusLabel')}</Label>
             <Input
               id="patch-status"
               value={status}
@@ -72,7 +71,7 @@ export function PatchWorkDialog({
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="patch-intake">Intake status</Label>
+            <Label htmlFor="patch-intake">{t('dialog.patchWork.intakeStatusLabel')}</Label>
             <Input
               id="patch-intake"
               value={intakeStatus}
@@ -81,7 +80,7 @@ export function PatchWorkDialog({
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="patch-stage">Current stage</Label>
+            <Label htmlFor="patch-stage">{t('dialog.patchWork.currentStageLabel')}</Label>
             <Input
               id="patch-stage"
               value={currentStage}
@@ -90,7 +89,7 @@ export function PatchWorkDialog({
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="patch-stage-status">Stage status</Label>
+            <Label htmlFor="patch-stage-status">{t('dialog.patchWork.stageStatusLabel')}</Label>
             <Input
               id="patch-stage-status"
               value={stageStatus}
@@ -98,13 +97,13 @@ export function PatchWorkDialog({
               placeholder={work.stage_status}
             />
           </div>
-          <p className="text-copy-13 text-gray-700">{STAGE_HINT}</p>
+          <p className="text-copy-13 text-gray-700">{t('dialog.patchWork.hint')}</p>
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="tertiary" size="small" onClick={() => onOpenChange(false)}>
-              Cancel
+              {t('dialog.patchWork.cancel')}
             </Button>
             <Button type="submit" variant="primary" size="small" disabled={patch.isPending}>
-              {patch.isPending ? 'Updating Work…' : 'Update Work'}
+              {patch.isPending ? t('dialog.patchWork.submitting') : t('dialog.patchWork.submit')}
             </Button>
           </div>
         </form>

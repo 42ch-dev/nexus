@@ -22,10 +22,15 @@ interface LocaleContextValue {
 const LocaleContext = createContext<LocaleContextValue | null>(null);
 const STORAGE_KEY = 'nexus-web-locale';
 
+/** Runtime type guard for a locale preference value. */
+export function isLocalePreference(value: unknown): value is LocalePreference {
+  return value === 'system' || value === 'en' || value === 'zh-CN';
+}
+
 function readStoredLocale(): LocalePreference | null {
   if (typeof window === 'undefined') return null;
   const stored = window.localStorage.getItem(STORAGE_KEY);
-  if (stored === 'system' || stored === 'en' || stored === 'zh-CN') return stored;
+  if (isLocalePreference(stored)) return stored;
   return null;
 }
 
@@ -62,6 +67,10 @@ export function LocaleProvider({ children }: { children: ReactNode }) {
       preference,
       resolvedLocale,
       setPreference: (next) => {
+        if (!isLocalePreference(next)) {
+          // Invalid runtime value — fail closed (keep current state).
+          return;
+        }
         setPreferenceState(next);
         setResolvedLocale(resolveLocale(next));
       },

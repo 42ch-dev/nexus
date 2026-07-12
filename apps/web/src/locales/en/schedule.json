@@ -1,0 +1,18 @@
+{
+  "title": "Schedule",
+  "description": "Cron roles per Work, with status and last update.",
+  "refreshAria": "Refresh schedule",
+  "refresh": "Refresh",
+  "errorDescription": "Could not load schedules.",
+  "loading": "Loading schedule…",
+  "emptyTitle": "No schedules",
+  "emptyDescription": "Schedules appear here once a Work has cron roles configured.",
+  "columns": {
+    "schedule": "Schedule",
+    "label": "Label",
+    "status": "Status",
+    "preset": "Preset",
+    "coreCtx": "Core ctx",
+    "updated": "Updated"
+  }
+}

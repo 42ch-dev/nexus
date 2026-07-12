@@ -1,0 +1,50 @@
+{
+  "title": "策略",
+  "description": "在运行预设前进行验证 —  dry-run 是确认其已就绪的最安全方式。",
+  "validatePreset": "验证预设",
+  "scaffoldPreset": "生成预设模板",
+  "refreshAria": "刷新预设",
+  "errorDescription": "无法加载预设。",
+  "loading": "正在加载预设…",
+  "userPresets": {
+    "title": "用户预设",
+    "description": "由你生成并编辑的预设。",
+    "empty": "暂无用户预设。生成一个以开始。"
+  },
+  "systemPresets": {
+    "title": "系统预设",
+    "description": "从本地 home 布局中发现的预设。",
+    "empty": "未发现系统预设。"
+  },
+  "embeddedPresets": {
+    "title": "内置预设",
+    "description": "与运行时捆绑的预设。",
+    "empty": "暂无内置预设。"
+  },
+  "reloading": "正在重新加载…",
+  "reload": "重新加载",
+  "strategyDetail": {
+    "loading": "正在加载策略…",
+    "notFoundTitle": "策略未找到",
+    "notFoundDescription": "请从策略列表中选择一个策略。",
+    "title": "策略",
+    "description": "将预设视为状态机图，并用 Idea 引导执行。Nexus 拥有正文。"
+  },
+  "dialog": {
+    "validatePreset": {
+      "title": "验证预设",
+      "description": "在提交之前对预设文件进行 dry-run 验证。",
+      "presetPathLabel": "预设路径",
+      "presetPathPlaceholder": "磁盘上的预设文件路径",
+      "helpText": "由守护进程根据本地 home 布局解析。",
+      "close": "关闭",
+      "submit": "验证预设",
+      "submitting": "正在验证预设…",
+      "valid": "预设有效",
+      "safeToCommit": "可以安全提交",
+      "stateCountSuffix": " · {{count}} 个状态",
+      "validationFailed": "验证失败",
+      "warnings": "警告"
+    }
+  }
+}

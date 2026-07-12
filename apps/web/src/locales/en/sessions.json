@@ -1,0 +1,17 @@
+{
+  "title": "Sessions",
+  "description": "What the runtime is doing right now.",
+  "refreshAria": "Refresh sessions",
+  "refresh": "Refresh",
+  "errorDescription": "Could not load orchestration sessions.",
+  "loading": "Loading sessions…",
+  "emptyTitle": "No active sessions",
+  "emptyDescription": "Orchestration sessions will appear here when the runtime runs.",
+  "columns": {
+    "session": "Session",
+    "status": "Status",
+    "preset": "Preset",
+    "creator": "Creator",
+    "currentTask": "Current task"
+  }
+}

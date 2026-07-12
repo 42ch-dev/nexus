@@ -6,12 +6,12 @@
       "id": "2026-07-12-v1.113-i18n-completion",
       "title": "P0 - i18n Completion",
       "file": "plans/2026-07-12-v1.113-i18n-completion.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@frontend-dev"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.113",
         "i18n",
@@ -20,7 +20,7 @@
       ],
       "created_at": "2026-07-12",
       "updated_at": "2026-07-12",
-      "notes": "Phase 1: compass + plan written; awaiting Review & Edit chain",
+      "notes": "Phase 2: SDD T1-T5 done, QC tri Approve with residuals (4 R#), QA Pass",
       "metadata": {
         "iteration_refs": [
           "V1.113"
@@ -1185,17 +1185,6 @@
         "note": "Matches ThemeProvider precedent. P1 review whether write should defer until first user change."
       },
       {
-        "id": "R-P0-002",
-        "title": "Catalog inflation - duplicate route.*/mobileNav.* keys with identical strings",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.112",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-foundation.md",
-        "note": "ROUTE_KEYS and MOBILE_NAV_KEYS produce identical EN/ZH. P1 consolidate."
-      },
-      {
         "id": "R-P0-003",
         "title": "Static imports of all 18 JSON catalogs - both locales bundled unconditionally",
         "severity": "low",
@@ -1205,28 +1194,6 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-foundation.md",
         "note": "~2KB for P0. Evaluate dynamic import/manualChunks before P1 expansion."
-      },
-      {
-        "id": "R-P0-004",
-        "title": "Unvalidated setPreference input - no runtime guard",
-        "severity": "nit",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.112",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-foundation.md",
-        "note": "Add isLocalePreference() runtime guard in P1."
-      },
-      {
-        "id": "R-P0-005",
-        "title": "Unused not-found catalog keys while page still hardcoded",
-        "severity": "nit",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.112",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-foundation.md",
-        "note": "shell.json defines notFound.* but not-found-page.tsx not migrated. Migrate in P1 or remove keys."
       },
       {
         "id": "R-P0-006",
@@ -1253,17 +1220,6 @@
         "note": "Remaining hardcoded strings in works/schedule/sessions/strategies/capabilities pages + dialogs + content editor. Subagent non-functional during fix wave."
       },
       {
-        "id": "R-P1-002",
-        "title": "Uncached Intl.DateTimeFormat/RelativeTimeFormat created per call in format.ts",
-        "severity": "low",
-        "decision": "defer",
-        "owner": "@frontend-dev",
-        "target": "post-V1.112",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-ui-migration.md",
-        "note": "Consider memoization for hot paths."
-      },
-      {
         "id": "R-P1-003",
         "title": "soul.fragmentCount shared key slightly redundant in world-selector context",
         "severity": "nit",
@@ -1273,6 +1229,52 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-ui-migration.md",
         "note": "Split into two keys in future polish."
+      }
+    ],
+    "2026-07-12-v1.113-i18n-completion": [
+      {
+        "id": "R-P0-007",
+        "title": "SettingsSetupConfirmChromeStatic retains hardcoded English strings (test-only fixture)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.113",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-12-v1.113-i18n-completion.md",
+        "note": "qc2 W-001 / qc3 W-002. Test-only; unused in production."
+      },
+      {
+        "id": "R-P0-008",
+        "title": "IntlFormatterCache is unbounded (no eviction; ~6 entries max)",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.113",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-12-v1.113-i18n-completion.md",
+        "note": "qc3 W-001. Negligible risk at current scale."
+      },
+      {
+        "id": "R-P0-009",
+        "title": "SettingsSetupSectionChrome defaults props to English literals (latent fallback risk)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.113",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-12-v1.113-i18n-completion.md",
+        "note": "qc2 S-001. English defaults for design-studio; production passes localized props."
+      },
+      {
+        "id": "R-P0-011",
+        "title": "zh-CN common.json inconsistent agent terminology (智能体 vs 代理)",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.113",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-12-v1.113-i18n-completion.md",
+        "note": "qc2 S-003. Translation consistency polish."
       }
     ]
   }

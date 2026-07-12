@@ -1,0 +1,15 @@
+{
+  "title": "Capabilities",
+  "description": "The nexus.* capabilities the runtime can invoke.",
+  "filterLabel": "Filter capabilities",
+  "filterPlaceholder": "Filter by name",
+  "refreshAria": "Refresh capabilities",
+  "refresh": "Refresh",
+  "errorDescription": "Could not load capabilities.",
+  "loading": "Loading capabilities…",
+  "emptyTitle": "No capabilities",
+  "emptyDescription": "Capabilities will appear here once the runtime registers them.",
+  "inputSchema": "Input schema",
+  "outputSchema": "Output schema",
+  "admissionGatesInfo": "Admission gates are enforced by the daemon when this capability is invoked. Gate details are not exposed in the registry list response."
+}

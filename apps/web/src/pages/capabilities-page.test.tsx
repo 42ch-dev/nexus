@@ -6,19 +6,24 @@
  * enforced at invocation time rather than leaving the absence unexplained.
  */
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 
 import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 import { BrowserClient } from '@/lib/nexus';
+import { i18n } from '@/lib/i18n/config';
 import { CapabilitiesPage } from '@/pages/capabilities-page';
-import { screen } from '@testing-library/react';
+import { act, screen } from '@testing-library/react';
 
 const client = () => new BrowserClient();
 
 function renderCaps() {
   return renderInApp(<CapabilitiesPage />, { client: client() });
 }
+
+beforeEach(async () => {
+  await i18n.changeLanguage('en');
+});
 
 describe('CapabilitiesPage', () => {
   it('renders capability schemas and the admission-gate notice', async () => {
@@ -57,5 +62,32 @@ describe('CapabilitiesPage', () => {
     renderCaps();
 
     expect(await screen.findByText('No capabilities')).toBeInTheDocument();
+  });
+
+  it('switches to zh-CN locale without remounting', async () => {
+    useHandlers(
+      http.get('/v1/daemon/orchestration/capabilities', () =>
+        HttpResponse.json({
+          items: [
+            {
+              name: 'nexus.example.greet',
+              input_schema: '{"type":"object"}',
+              output_schema: '{"type":"string"}',
+            },
+          ],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+    );
+
+    renderCaps();
+    expect(await screen.findByText('nexus.example.greet')).toBeInTheDocument();
+
+    act(() => {
+      i18n.changeLanguage('zh-CN');
+    });
+
+    expect(await screen.findByText('输入 schema')).toBeInTheDocument();
+    expect(screen.getByText('输出 schema')).toBeInTheDocument();
   });
 });

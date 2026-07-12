@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router-dom';
 import { ArrowLeft, ListTree, Network, Pencil, Sparkles } from 'lucide-react';
 
@@ -22,18 +23,19 @@ import { PatchWorkDialog } from './dialogs/patch-work-dialog';
  * (F-P2 endpoint) and a status/stage patch entry point (Setup — T7).
  */
 export function WorkDetailPage() {
+  const { t } = useTranslation('works');
   const { workId = '' } = useParams();
   const work = useWork(workId);
   const patch = usePatchWork();
   const [patchOpen, setPatchOpen] = useState(false);
   const [archiveConfirm, setArchiveConfirm] = useState(false);
 
-  if (work.isLoading) return <LoadingState label="Loading Work…" />;
+  if (work.isLoading) return <LoadingState label={t('workDetail.loading')} />;
   if (work.isError || !work.data) {
     return (
       <ErrorState
-        title="Work not found"
-        description="This Work does not exist or the daemon could not return it."
+        title={t('workDetail.notFoundTitle')}
+        description={t('workDetail.notFoundDescription')}
         onRetry={() => work.refetch()}
       />
     );
@@ -50,7 +52,7 @@ export function WorkDetailPage() {
     <div className="flex flex-col gap-4">
       <div className="flex items-center gap-2">
         <Button asChild variant="tertiary" size="small">
-          <Link to="/works"><ArrowLeft className="h-4 w-4" aria-hidden />Back to Works</Link>
+          <Link to="/works"><ArrowLeft className="h-4 w-4" aria-hidden />{t('workDetail.backToWorks')}</Link>
         </Button>
       </div>
 
@@ -58,7 +60,7 @@ export function WorkDetailPage() {
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="flex flex-col gap-1">
-              <CardTitle>{w.title || '(untitled)'}</CardTitle>
+              <CardTitle>{w.title || t('untitled')}</CardTitle>
               <CardDescription>
                 <span className="text-copy-13-mono">{shortId(w.work_id)}</span>
               </CardDescription>
@@ -68,28 +70,28 @@ export function WorkDetailPage() {
               <StatusBadge status={w.work_profile ? humanizeStatus(w.work_profile) : undefined} variant="preset" />
               <Button type="button" variant="secondary" size="small" onClick={() => setPatchOpen(true)}>
                 <Pencil className="h-4 w-4" aria-hidden />
-                Update Work
+                {t('workDetail.updateWork')}
               </Button>
             </div>
           </div>
         </CardHeader>
         <CardContent>
           <dl className="grid grid-cols-1 gap-x-8 gap-y-4 md:grid-cols-2">
-            <Detail label="Long-term goal" value={w.long_term_goal || '—'} />
-            <Detail label="Initial idea" value={w.initial_idea || '—'} />
-            <Detail label="Intake status"><StatusBadge status={w.intake_status} /></Detail>
-            <Detail label="Current stage">{w.current_stage || '—'} <span className="text-gray-700">· {humanizeStatus(w.stage_status)}</span></Detail>
-            <Detail label="Profile">{w.work_profile ? humanizeStatus(w.work_profile) : '—'}</Detail>
-            <Detail label="Primary preset"><span className="text-copy-13-mono">{shortId(w.primary_preset_id)}</span></Detail>
-            <Detail label="World"><span className="text-copy-13-mono">{shortId(w.world_id)}</span></Detail>
-            <Detail label="Story ref">{w.story_ref || '—'}</Detail>
-            <Detail label="Created">{formatDateTime(w.created_at)}</Detail>
-            <Detail label="Updated">{formatRelative(w.updated_at)}</Detail>
+            <Detail label={t('workDetail.labels.longTermGoal')} value={w.long_term_goal || '—'} />
+            <Detail label={t('workDetail.labels.initialIdea')} value={w.initial_idea || '—'} />
+            <Detail label={t('workDetail.labels.intakeStatus')}><StatusBadge status={w.intake_status} /></Detail>
+            <Detail label={t('workDetail.labels.currentStage')}>{w.current_stage || '—'} <span className="text-gray-700">· {humanizeStatus(w.stage_status)}</span></Detail>
+            <Detail label={t('workDetail.labels.profile')}>{w.work_profile ? humanizeStatus(w.work_profile) : '—'}</Detail>
+            <Detail label={t('workDetail.labels.primaryPreset')}><span className="text-copy-13-mono">{shortId(w.primary_preset_id)}</span></Detail>
+            <Detail label={t('workDetail.labels.world')}><span className="text-copy-13-mono">{shortId(w.world_id)}</span></Detail>
+            <Detail label={t('workDetail.labels.storyRef')}>{w.story_ref || '—'}</Detail>
+            <Detail label={t('workDetail.labels.created')}>{formatDateTime(w.created_at)}</Detail>
+            <Detail label={t('workDetail.labels.updated')}>{formatRelative(w.updated_at)}</Detail>
           </dl>
 
           {(hasChapterPlan || w.work_profile === 'novel') && (
             <div className="mt-6 rounded-card border border-gray-alpha-400 bg-background-200 p-4">
-              <p className="text-label-14 font-medium text-gray-1000">Chapter progress</p>
+              <p className="text-label-14 font-medium text-gray-1000">{t('workDetail.chapterProgress')}</p>
               {hasChapterPlan ? (
                 <div className="mt-2 flex items-center gap-3">
                   <div className="h-2 flex-1 overflow-hidden rounded-pill bg-gray-alpha-300">
@@ -107,7 +109,9 @@ export function WorkDetailPage() {
                   </span>
                 </div>
               ) : (
-                <p className="mt-1 text-copy-13 text-gray-700">Chapter {w.current_chapter} (no planned total).</p>
+                <p className="mt-1 text-copy-13 text-gray-700">
+                  {t('workDetail.chapterNoTotal', { chapter: w.current_chapter })}
+                </p>
               )}
             </div>
           )}
@@ -116,14 +120,14 @@ export function WorkDetailPage() {
             <Button asChild variant="secondary" size="small">
               <Link to={`/works/${encodeURIComponent(w.work_id)}/outline`}>
                 <ListTree className="h-4 w-4" aria-hidden />
-                Open Outline
+                {t('workDetail.openOutline')}
               </Link>
             </Button>
             {w.primary_preset_id && (
               <Button asChild variant="secondary" size="small">
                 <Link to={`/strategies/${encodeURIComponent(w.primary_preset_id)}`}>
                   <Sparkles className="h-4 w-4" aria-hidden />
-                  Open Strategy
+                  {t('workDetail.openStrategy')}
                 </Link>
               </Button>
             )}
@@ -131,7 +135,7 @@ export function WorkDetailPage() {
               <Button asChild variant="secondary" size="small">
                 <Link to={`/worlds/${encodeURIComponent(w.world_id)}/kb`}>
                   <Network className="h-4 w-4" aria-hidden />
-                  Open World KB
+                  {t('workDetail.openWorldKb')}
                 </Link>
               </Button>
             )}
@@ -149,7 +153,7 @@ export function WorkDetailPage() {
                   setArchiveConfirm(false);
                 }}
               >
-                {archiveConfirm ? 'Confirm archive' : 'Archive Work'}
+                {archiveConfirm ? t('workDetail.confirmArchive') : t('workDetail.archiveWork')}
               </Button>
             )}
           </div>
@@ -173,30 +177,31 @@ function Detail({ label, value, children }: { label: string; value?: string; chi
 }
 
 function FindingsSection({ workId }: { workId: string }) {
+  const { t } = useTranslation('works');
   const findings = useFindings(workId);
   const rows = flattenPages(findings.data);
   return (
     <Card className="shadow-card">
       <CardHeader>
-        <CardTitle>Findings</CardTitle>
-        <CardDescription>Findings raised against this Work, with severity filtering.</CardDescription>
+        <CardTitle>{t('workDetail.findingsTitle')}</CardTitle>
+        <CardDescription>{t('workDetail.findingsDescription')}</CardDescription>
       </CardHeader>
       <CardContent>
         {findings.isError ? (
           <ErrorState
-            description="Could not load findings for this Work."
+            description={t('workDetail.findingsError')}
             onRetry={() => findings.refetch()}
           />
         ) : findings.isLoading ? (
-          <LoadingState label="Loading findings…" />
+          <LoadingState label={t('workDetail.findingsLoading')} />
         ) : rows.length === 0 ? (
-          <p className="py-6 text-copy-14 text-gray-700">No findings recorded for this Work.</p>
+          <p className="py-6 text-copy-14 text-gray-700">{t('workDetail.noFindings')}</p>
         ) : (
           <ul className="flex flex-col gap-2">
             {rows.map((f) => (
               <li key={f.finding_id} className="rounded-card border border-gray-alpha-400 p-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-copy-14 font-medium text-gray-1000">{f.title || '(untitled finding)'}</p>
+                  <p className="text-copy-14 font-medium text-gray-1000">{f.title || t('workDetail.untitledFinding')}</p>
                   <div className="flex items-center gap-2">
                     <StatusBadge status={f.severity} variant={undefined} raw />
                     <StatusBadge status={f.status} />
@@ -212,7 +217,7 @@ function FindingsSection({ workId }: { workId: string }) {
               isFetchingNextPage={findings.isFetchingNextPage}
               hasNextPage={findings.hasNextPage}
               fetchNextPage={() => findings.fetchNextPage()}
-              label="Load more findings"
+              label={t('workDetail.loadMoreFindings')}
             />
           </ul>
         )}

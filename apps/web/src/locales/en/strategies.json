@@ -1,0 +1,50 @@
+{
+  "title": "Strategies",
+  "description": "Validate a preset before running it — the dry-run is the safest way to confirm it is ready.",
+  "validatePreset": "Validate Preset",
+  "scaffoldPreset": "Scaffold Preset",
+  "refreshAria": "Refresh presets",
+  "errorDescription": "Could not load presets.",
+  "loading": "Loading presets…",
+  "userPresets": {
+    "title": "User presets",
+    "description": "Presets you scaffolded and edit.",
+    "empty": "No user presets yet. Scaffold one to start."
+  },
+  "systemPresets": {
+    "title": "System presets",
+    "description": "Discovered from the local home layout.",
+    "empty": "No system presets discovered."
+  },
+  "embeddedPresets": {
+    "title": "Embedded presets",
+    "description": "Bundled with the runtime.",
+    "empty": "No embedded presets."
+  },
+  "reloading": "Reloading…",
+  "reload": "Reload",
+  "strategyDetail": {
+    "loading": "Loading Strategy…",
+    "notFoundTitle": "Strategy not found",
+    "notFoundDescription": "Choose a Strategy from the Strategies list.",
+    "title": "Strategy",
+    "description": "See a preset as a state-machine graph and steer execution with an Idea. Nexus owns the prose."
+  },
+  "dialog": {
+    "validatePreset": {
+      "title": "Validate Preset",
+      "description": "Dry-run validation against a preset file before you commit it.",
+      "presetPathLabel": "Preset path",
+      "presetPathPlaceholder": "Path to the preset file on disk",
+      "helpText": "Resolved by the daemon against the local home layout.",
+      "close": "Close",
+      "submit": "Validate Preset",
+      "submitting": "Validating preset…",
+      "valid": "Preset is valid",
+      "safeToCommit": "Safe to commit",
+      "stateCountSuffix": " · {{count}} states",
+      "validationFailed": "Validation failed",
+      "warnings": "Warnings"
+    }
+  }
+}

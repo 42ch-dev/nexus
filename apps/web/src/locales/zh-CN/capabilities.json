@@ -1,0 +1,15 @@
+{
+  "title": "能力",
+  "description": "运行时可以调用的 nexus.* 能力。",
+  "filterLabel": "筛选能力",
+  "filterPlaceholder": "按名称筛选",
+  "refreshAria": "刷新能力",
+  "refresh": "刷新",
+  "errorDescription": "无法加载能力。",
+  "loading": "正在加载能力…",
+  "emptyTitle": "暂无能力",
+  "emptyDescription": "运行时装载能力后，它们将显示在此处。",
+  "inputSchema": "输入 schema",
+  "outputSchema": "输出 schema",
+  "admissionGatesInfo": "调用此能力时，守护进程会强制执行准入门槛。门槛详情未在注册表列表响应中暴露。"
+}

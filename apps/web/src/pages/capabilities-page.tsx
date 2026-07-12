@@ -1,4 +1,5 @@
 import { Info, RefreshCw } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { useState } from 'react';
 
 import { Badge } from '@/components/ui/badge';
@@ -17,6 +18,7 @@ import { useCapabilities } from '@/api/queries';
  * included in the list response; the UI surfaces that limitation explicitly.
  */
 export function CapabilitiesPage() {
+  const { t } = useTranslation('capabilities');
   const caps = useCapabilities();
   const [filter, setFilter] = useState('');
 
@@ -30,17 +32,17 @@ export function CapabilitiesPage() {
       <CardHeader>
         <div className="flex flex-wrap items-center justify-between gap-2">
           <div>
-            <CardTitle>Capabilities</CardTitle>
-            <CardDescription>The nexus.* capabilities the runtime can invoke.</CardDescription>
+            <CardTitle>{t('title')}</CardTitle>
+            <CardDescription>{t('description')}</CardDescription>
           </div>
           <div className="flex items-center gap-2">
-            <label htmlFor="caps-filter" className="sr-only">Filter capabilities</label>
+            <label htmlFor="caps-filter" className="sr-only">{t('filterLabel')}</label>
             <Input
               id="caps-filter"
               type="search"
               value={filter}
               onChange={(e) => setFilter(e.target.value)}
-              placeholder="Filter by name"
+              placeholder={t('filterPlaceholder')}
               className="h-9 max-w-[220px]"
             />
             <Button
@@ -49,21 +51,21 @@ export function CapabilitiesPage() {
               size="small"
               onClick={() => caps.refetch()}
               disabled={caps.isFetching}
-              aria-label="Refresh capabilities"
+              aria-label={t('refreshAria')}
             >
               <RefreshCw className={`h-4 w-4 ${caps.isFetching ? 'animate-spin' : ''}`} aria-hidden />
-              Refresh
+              {t('refresh')}
             </Button>
           </div>
         </div>
       </CardHeader>
       <CardContent>
         {caps.isError ? (
-          <ErrorState description="Could not load capabilities." onRetry={() => caps.refetch()} />
+          <ErrorState description={t('errorDescription')} onRetry={() => caps.refetch()} />
         ) : caps.isLoading ? (
-          <LoadingState label="Loading capabilities…" />
+          <LoadingState label={t('loading')} />
         ) : filtered.length === 0 ? (
-          <EmptyState title="No capabilities" description="Capabilities will appear here once the runtime registers them." />
+          <EmptyState title={t('emptyTitle')} description={t('emptyDescription')} />
         ) : (
           <ul className="flex flex-col gap-2">
             {filtered.map((c) => (
@@ -72,15 +74,12 @@ export function CapabilitiesPage() {
                   <Badge variant="preset">{c.name}</Badge>
                 </div>
                 <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-2">
-                  <SchemaBlock title="Input schema" value={c.input_schema} />
-                  <SchemaBlock title="Output schema" value={c.output_schema} />
+                  <SchemaBlock title={t('inputSchema')} value={c.input_schema} />
+                  <SchemaBlock title={t('outputSchema')} value={c.output_schema} />
                 </div>
                 <div className="mt-3 flex items-start gap-2 rounded-control bg-background-300 p-3 text-copy-13 text-gray-800">
                   <Info className="mt-0.5 h-4 w-4 shrink-0 text-gray-700" aria-hidden />
-                  <p>
-                    Admission gates are enforced by the daemon when this capability is invoked.
-                    Gate details are not exposed in the registry list response.
-                  </p>
+                  <p>{t('admissionGatesInfo')}</p>
                 </div>
               </li>
             ))}

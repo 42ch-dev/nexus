@@ -1,0 +1,17 @@
+{
+  "title": "会话",
+  "description": "运行时正在执行的内容。",
+  "refreshAria": "刷新会话",
+  "refresh": "刷新",
+  "errorDescription": "无法加载编排会话。",
+  "loading": "正在加载会话…",
+  "emptyTitle": "无活跃会话",
+  "emptyDescription": "运行开始运行后，编排会话将显示在此处。",
+  "columns": {
+    "session": "会话",
+    "status": "状态",
+    "preset": "预设",
+    "creator": "创作者",
+    "currentTask": "当前任务"
+  }
+}
