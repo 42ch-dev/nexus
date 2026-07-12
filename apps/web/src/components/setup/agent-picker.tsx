@@ -14,6 +14,7 @@
 
 import { ArrowUpRight, Loader2, Terminal } from 'lucide-react';
 import { memo, useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
 import { Badge, Button, Input, Label } from '@42ch/nexus-ui';
@@ -171,16 +172,17 @@ export function AgentPicker({
   showCustomLaunch,
   onVerify,
   verifyStatus = 'idle',
-  errorTitle = 'Could not scan for agents',
+  errorTitle,
   errorDescription,
   onRetry,
   header,
   className,
-  loadingLabel = 'Scanning for local ACP agents…',
-  emptyTitle = 'No agents found on PATH',
-  emptyDescription = 'Install an ACP-compatible agent, or continue with a custom launch command.',
+  loadingLabel,
+  emptyTitle,
+  emptyDescription,
   density = 'default',
 }: AgentPickerProps) {
+  const { t } = useTranslation('setup');
   const compact = density === 'compact';
   const [showRest, setShowRest] = useState(false);
   const { common: commonAgents, rest: restAgents } = useMemo(
@@ -197,6 +199,10 @@ export function AgentPicker({
     (status === 'empty' ||
       status === 'error' ||
       (status === 'ready' && agents.length > 0));
+  const effectiveErrorTitle = errorTitle ?? t('agentPicker.error.title');
+  const effectiveLoadingLabel = loadingLabel ?? t('agentPicker.loading');
+  const effectiveEmptyTitle = emptyTitle ?? t('agentPicker.empty.title');
+  const effectiveEmptyDescription = emptyDescription ?? t('agentPicker.empty.description');
 
   // Stabilise onSelect so that memoised AgentCards do not re-render when the
   // host re-renders for an unrelated reason (e.g. verifyStatus change). The ref
@@ -232,7 +238,7 @@ export function AgentPicker({
             aria-live="polite"
           >
             <Loader2 className="h-5 w-5 animate-spin text-blue-700" aria-hidden />
-            <span className="text-copy-14 text-gray-900">{loadingLabel}</span>
+            <span className="text-copy-14 text-gray-900">{effectiveLoadingLabel}</span>
           </div>
         ) : null}
 
@@ -241,7 +247,7 @@ export function AgentPicker({
             role="alert"
             className="flex flex-col gap-2 rounded-control border border-[color-mix(in_srgb,var(--color-red-700)_30%,transparent)] bg-[color-mix(in_srgb,var(--color-red-700)_6%,transparent)] p-3"
           >
-            <p className="text-heading-16 font-heading text-red-1000">{errorTitle}</p>
+            <p className="text-heading-16 font-heading text-red-1000">{effectiveErrorTitle}</p>
             {errorDescription ? (
               <p className="text-copy-14 text-red-900">{errorDescription}</p>
             ) : null}
@@ -251,7 +257,7 @@ export function AgentPicker({
                 onClick={onRetry}
                 className="self-start text-label-14 font-medium text-blue-700 transition-colors duration-state ease-standard hover:text-blue-800"
               >
-                Try again
+                {t('agentPicker.tryAgain')}
               </button>
             ) : null}
           </div>
@@ -259,8 +265,8 @@ export function AgentPicker({
 
         {status === 'empty' ? (
           <div className={cn('flex flex-col gap-2 text-center', compact ? 'py-2' : 'py-4')}>
-            <p className="text-heading-16 font-heading text-gray-1000">{emptyTitle}</p>
-            <p className="text-copy-14 text-gray-900">{emptyDescription}</p>
+            <p className="text-heading-16 font-heading text-gray-1000">{effectiveEmptyTitle}</p>
+            <p className="text-copy-14 text-gray-900">{effectiveEmptyDescription}</p>
           </div>
         ) : null}
 
@@ -287,7 +293,7 @@ export function AgentPicker({
                 data-testid="agent-picker-more"
                 className="self-start rounded-control text-label-14 font-medium text-blue-700 transition-colors duration-state ease-standard hover:text-blue-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700"
               >
-                {showRest ? 'Fewer agents' : 'More agents'}
+                {showRest ? t('agentPicker.fewer') : t('agentPicker.more')}
               </button>
             ) : null}
             {restAgents.length > 0 && showRest ? (
@@ -347,6 +353,7 @@ const AgentCard = memo(function AgentCard({
   onSelect?: (id: string) => void;
   compact: boolean;
 }) {
+  const { t } = useTranslation('setup');
   const selectable = agent.installed;
 
   // Outbound links must NOT be descendants of the select <button> (QC B2 /
@@ -386,10 +393,10 @@ const AgentCard = memo(function AgentCard({
 
       <div className="mt-3 flex flex-wrap items-center gap-3">
         {agent.installUrl ? (
-          <OutboundLink href={agent.installUrl} label="Install" />
+          <OutboundLink href={agent.installUrl} label={t('agentPicker.install')} />
         ) : null}
         {agent.docsUrl ? (
-          <OutboundLink href={agent.docsUrl} label="Docs" />
+          <OutboundLink href={agent.docsUrl} label={t('agentPicker.docs')} />
         ) : null}
       </div>
     </div>
@@ -403,6 +410,7 @@ function AgentCardIdentity({
   agent: AgentPickerItem;
   selected: boolean;
 }) {
+  const { t } = useTranslation('setup');
   return (
     <>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
@@ -422,7 +430,7 @@ function AgentCardIdentity({
               data-testid={`agent-card-installed-badge-${agent.id}`}
               className="shrink-0"
             >
-              Installed
+              {t('agentPicker.installed')}
             </Badge>
           ) : (
             <Badge
@@ -431,12 +439,12 @@ function AgentCardIdentity({
               data-testid={`agent-card-not-installed-badge-${agent.id}`}
               className="shrink-0"
             >
-              Not installed
+              {t('agentPicker.notInstalled')}
             </Badge>
           )}
         </div>
         {agent.version ? (
-          <span className="text-copy-13 text-gray-700">Version {agent.version}</span>
+          <span className="text-copy-13 text-gray-700">{t('agentPicker.version', { version: agent.version })}</span>
         ) : null}
         {agent.description ? (
           <span className="line-clamp-2 text-copy-13 text-gray-700">
@@ -463,11 +471,12 @@ function StatusDot({
   installed: boolean;
   selected: boolean;
 }) {
+  const { t } = useTranslation('setup');
   const label = installed
     ? selected
-      ? 'Selected'
-      : 'Installed'
-    : 'Not installed';
+      ? t('agentPicker.status.selected')
+      : t('agentPicker.status.installed')
+    : t('agentPicker.status.notInstalled');
 
   return (
     <span
@@ -523,6 +532,7 @@ function CustomLaunchField({
   onVerify?: () => void;
   verifyStatus?: AgentVerifyStatus;
 }) {
+  const { t } = useTranslation('setup');
   const canVerify = value.trim().length > 0 && verifyStatus !== 'loading';
 
   return (
@@ -532,14 +542,14 @@ function CustomLaunchField({
         className="flex items-center gap-1.5 text-copy-14 text-gray-900"
       >
         <Terminal className="h-4 w-4 text-gray-700" aria-hidden />
-        Use custom launch command
+        {t('agentPicker.customLaunch.label')}
       </Label>
       <div className="flex gap-2">
         <Input
           id="agent-picker-custom-launch"
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          placeholder="e.g. /usr/local/bin/my-agent"
+          placeholder={t('agentPicker.customLaunch.placeholder')}
           className="min-w-0 flex-1"
         />
         {onVerify ? (
@@ -554,10 +564,10 @@ function CustomLaunchField({
             {verifyStatus === 'loading' ? (
               <>
                 <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-                Verifying…
+                {t('agentPicker.verifying')}
               </>
             ) : (
-              'Verify Agent'
+              t('agentPicker.verify')
             )}
           </Button>
         ) : null}
@@ -568,7 +578,7 @@ function CustomLaunchField({
           data-testid="agent-picker-verify-success"
           role="status"
         >
-          Agent responded successfully.
+          {t('agentPicker.verifySuccess')}
         </p>
       ) : null}
       {verifyStatus === 'no-match' ? (
@@ -577,7 +587,7 @@ function CustomLaunchField({
           data-testid="agent-picker-verify-error"
           role="alert"
         >
-          No matching agent for this command. Check the command and try again.
+          {t('agentPicker.verifyNoMatch')}
         </p>
       ) : null}
       {verifyStatus === 'error' ? (
@@ -586,7 +596,7 @@ function CustomLaunchField({
           data-testid="agent-picker-verify-error"
           role="alert"
         >
-          Could not reach this agent. Check the command and try again.
+          {t('agentPicker.verifyError')}
         </p>
       ) : null}
     </div>

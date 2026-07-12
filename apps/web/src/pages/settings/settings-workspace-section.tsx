@@ -7,34 +7,21 @@
 import { useEffect, useState } from 'react';
 import { FolderOpen } from 'lucide-react';
 
+import { useTranslation } from 'react-i18next';
+
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
 } from '@/components/ui/card';
-import {
-  WorkspacePathField,
-  WORKSPACE_PATH_FIELD_LABEL,
-} from '@/components/setup/workspace-path-field';
+import { WorkspacePathField } from '@/components/setup/workspace-path-field';
 import { useDesktopCapabilities } from '@/lib/client-context';
 import { errorMessage } from '@/lib/error-message';
 import { useToast } from '@/lib/use-toast';
 
-/** Locked by settings-workspace-section.md — section body helper (sentence case). */
-const WORKSPACE_SECTION_HELPER =
-  'View or change where Nexus stores your creative files on this machine.';
-
-const WORKSPACE_POST_PERSIST_SUCCESS =
-  'Workspace path saved. Restart or reload the app so the running daemon uses the new location.';
-
-/** Copy-only label — no wired app restart orchestration. */
-const WORKSPACE_RESTART_LABEL = 'Quit and reopen Nexus';
-
-const WORKSPACE_BROWSER_HELPER =
-  'Workspace path changes are available on the desktop app only.';
-
 export function SettingsWorkspaceSection() {
+  const { t } = useTranslation('settings');
   const desktop = useDesktopCapabilities();
   const { toast } = useToast();
   const [path, setPath] = useState('');
@@ -94,15 +81,15 @@ export function SettingsWorkspaceSection() {
       data-desktop={desktop ? 'true' : 'false'}
     >
       <div className="flex flex-col gap-2">
-        <h3 className="text-heading-16 font-heading text-gray-1000">Workspace</h3>
-        <p className="text-copy-14 text-gray-900">{WORKSPACE_SECTION_HELPER}</p>
+        <h3 className="text-heading-16 font-heading text-gray-1000">{t('workspace.title')}</h3>
+        <p className="text-copy-14 text-gray-900">{t('workspace.helper')}</p>
       </div>
 
       <Card className="shadow-card" data-testid="settings-workspace-card">
         <CardHeader>
           <div className="flex items-center gap-2">
             <FolderOpen className="h-5 w-5 text-blue-700" aria-hidden="true" />
-            <CardTitle>{WORKSPACE_PATH_FIELD_LABEL}</CardTitle>
+            <CardTitle>{t('workspace.folderLabel')}</CardTitle>
           </div>
         </CardHeader>
         <CardContent className="space-y-6">
@@ -114,7 +101,9 @@ export function SettingsWorkspaceSection() {
             onChangeClick={() => void handleChangeFolder()}
             layout="settings-row"
             desktopAvailable={Boolean(desktop)}
-            browserOnlyHelper={WORKSPACE_BROWSER_HELPER}
+            label={t('workspace.folderLabel')}
+            changeAction={t('workspace.changeFolder')}
+            browserOnlyHelper={t('workspace.browserOnly')}
             data-testid="settings-workspace-field"
           />
 
@@ -124,9 +113,9 @@ export function SettingsWorkspaceSection() {
               data-testid="settings-workspace-saved-honesty"
             >
               <p className="text-copy-14 text-gray-900">
-                {WORKSPACE_POST_PERSIST_SUCCESS}
+                {t('workspace.savedHonesty')}
               </p>
-              <p className="text-copy-13 text-gray-700">{WORKSPACE_RESTART_LABEL}</p>
+              <p className="text-copy-13 text-gray-700">{t('workspace.restartLabel')}</p>
             </div>
           )}
         </CardContent>

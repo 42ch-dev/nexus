@@ -48,5 +48,36 @@
     "title": "页面未找到",
     "description": "该路由不属于控制室 + 设置界面。",
     "action": "前往作品"
+  },
+  "daemon": {
+    "running": "守护进程运行中",
+    "healthy": "健康",
+    "restart": "重启守护进程",
+    "restartConfirm": "重启守护进程将中断所有正在运行的编排任务。是否继续？",
+    "restartFailed": "守护进程重启失败",
+    "restartFailedFallback": "守护进程重启失败。"
+  },
+  "profile": {
+    "sectionLabel": "配置文件",
+    "addButtonLabel": "添加创作者",
+    "addDialogTitle": "添加创作者",
+    "addDialogDescription": "创建一个新的本地创作者配置文件。",
+    "displayNameLabel": "显示名称",
+    "displayNamePlaceholder": "例如 默认创作者",
+    "cancel": "取消",
+    "create": "创建",
+    "creating": "正在创建…"
+  },
+  "health": {
+    "checking": "正在检查守护进程…",
+    "daemon": "守护进程",
+    "remoteDaemon": "远程守护进程",
+    "daemonVersion": "守护进程 v{{version}}",
+    "daemonOffline": "守护进程离线",
+    "remoteDaemonOffline": "远程守护进程离线",
+    "aria": {
+      "online": "守护进程健康状态",
+      "offline": "守护进程离线 — 前往连接设置"
+    }
   }
 }

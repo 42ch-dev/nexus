@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { Badge } from '@/components/ui/badge';
 
@@ -34,16 +35,17 @@ export function DaemonHealthIndicatorChrome({
   renderLink,
   'data-testid': dataTestId,
 }: DaemonHealthIndicatorChromeProps) {
+  const { t } = useTranslation('shell');
   const badge =
     state.kind === 'unknown' ? (
-      <Badge variant="neutral" data-testid={dataTestId}>Checking daemon…</Badge>
+      <Badge variant="neutral" data-testid={dataTestId}>{t('health.checking')}</Badge>
     ) : state.kind === 'connected' ? (
       <Badge
         variant="running"
-        title={`Daemon v${state.version}`}
+        title={t('health.daemonVersion', { version: state.version })}
         data-testid={dataTestId}
       >
-        {isRemote ? 'Remote daemon' : 'Daemon'} v{state.version}
+        {isRemote ? t('health.remoteDaemon') : t('health.daemon')} v{state.version}
       </Badge>
     ) : (
       <Badge
@@ -51,7 +53,7 @@ export function DaemonHealthIndicatorChrome({
         title={state.message}
         data-testid={dataTestId}
       >
-        {isRemote ? 'Remote daemon offline' : 'Daemon offline'}
+        {isRemote ? t('health.remoteDaemonOffline') : t('health.daemonOffline')}
       </Badge>
     );
 
@@ -65,7 +67,7 @@ export function DaemonHealthIndicatorChrome({
     <a
       href={href}
       className="focus-visible:outline-none"
-      aria-label={state.kind === 'offline' ? 'Daemon offline — go to connection settings' : 'Daemon health'}
+      aria-label={state.kind === 'offline' ? t('health.aria.offline') : t('health.aria.online')}
     >
       {badge}
     </a>

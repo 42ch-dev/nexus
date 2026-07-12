@@ -19,5 +19,14 @@
       "zh-CN": "简体中文",
       "helper": "System follows your OS/browser language."
     }
+  },
+  "workspace": {
+    "title": "Workspace",
+    "helper": "View or change where Nexus stores your creative files on this machine.",
+    "folderLabel": "Workspace folder",
+    "changeFolder": "Change Folder…",
+    "browserOnly": "Workspace path changes are available on the desktop app only.",
+    "savedHonesty": "Workspace path saved. Restart or reload the app so the running daemon uses the new location.",
+    "restartLabel": "Quit and reopen Nexus"
   }
 }

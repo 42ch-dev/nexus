@@ -48,5 +48,36 @@
     "title": "Page not found",
     "description": "That route is not part of the Control Room + Setup surface.",
     "action": "Go to Works"
+  },
+  "daemon": {
+    "running": "Daemon running",
+    "healthy": "healthy",
+    "restart": "Restart daemon",
+    "restartConfirm": "Restarting the daemon will interrupt any running orchestration. Continue?",
+    "restartFailed": "Daemon restart failed",
+    "restartFailedFallback": "Daemon restart failed."
+  },
+  "profile": {
+    "sectionLabel": "Profiles",
+    "addButtonLabel": "Add creator",
+    "addDialogTitle": "Add Creator",
+    "addDialogDescription": "Create a new local creator profile.",
+    "displayNameLabel": "Display name",
+    "displayNamePlaceholder": "e.g. Default Creator",
+    "cancel": "Cancel",
+    "create": "Create",
+    "creating": "Creating…"
+  },
+  "health": {
+    "checking": "Checking daemon…",
+    "daemon": "Daemon",
+    "remoteDaemon": "Remote daemon",
+    "daemonVersion": "Daemon v{{version}}",
+    "daemonOffline": "Daemon offline",
+    "remoteDaemonOffline": "Remote daemon offline",
+    "aria": {
+      "online": "Daemon health",
+      "offline": "Daemon offline — go to connection settings"
+    }
   }
 }

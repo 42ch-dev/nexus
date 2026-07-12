@@ -19,5 +19,14 @@
       "zh-CN": "简体中文",
       "helper": "跟随系统会采用你的操作系统或浏览器语言。"
     }
+  },
+  "workspace": {
+    "title": "工作区",
+    "helper": "查看或更改 Nexus 在本机上存储创意文件的位置。",
+    "folderLabel": "工作区文件夹",
+    "changeFolder": "更改文件夹…",
+    "browserOnly": "仅在桌面应用中可以更改工作区路径。",
+    "savedHonesty": "工作区路径已保存。请重启或重新加载应用，以使运行中的守护进程使用新位置。",
+    "restartLabel": "退出并重新打开 Nexus"
   }
 }

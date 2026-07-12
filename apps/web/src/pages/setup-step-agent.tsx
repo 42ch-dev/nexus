@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ChevronLeft } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -90,6 +91,7 @@ function resolvePickerStatus(
 }
 
 export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAgentProps) {
+  const { t } = useTranslation('setup');
   const scan = useScanAgents({ filter: 'all', registry_refresh: true });
   const verifyAgent = useVerifyAgent();
   const agents = scan.data?.agents ?? [];
@@ -188,10 +190,8 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
     <div className="flex min-h-0 flex-1 flex-col gap-4">
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto" data-testid="wizard-step-body">
         <div className="flex flex-col gap-2">
-          <h2 className="text-heading-24 font-heading text-gray-1000">Choose an ACP agent</h2>
-          <p className="text-copy-14 text-gray-900">
-            Nexus uses an ACP-compatible agent to run strategies. Select a discovered agent to continue.
-          </p>
+          <h2 className="text-heading-24 font-heading text-gray-1000">{t('step.agent.title')}</h2>
+          <p className="text-copy-14 text-gray-900">{t('step.agent.description')}</p>
         </div>
 
         <AgentPicker
@@ -205,12 +205,12 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
           verifyStatus={verifyStatus}
           errorDescription={
             scan.isError
-              ? errorMessage(scan.error) || 'The daemon did not respond to the agent scan request.'
+              ? errorMessage(scan.error) || t('agentPicker.error.fallbackDescription')
               : undefined
           }
           onRetry={scan.isError ? () => void scan.refetch() : undefined}
-          emptyTitle="No agents found on PATH."
-          emptyDescription="Install an ACP-compatible agent to continue."
+          emptyTitle={t('step.agent.emptyTitle')}
+          emptyDescription={t('step.agent.emptyDescription')}
           density="compact"
         />
       </div>
@@ -221,7 +221,7 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
         data-layout="horizontal-adjacent"
       >
         {onBack && (
-          <Button variant="tertiary" onClick={onBack} aria-label="Back" className="px-2">
+          <Button variant="tertiary" onClick={onBack} aria-label={t('action.back')} className="px-2">
             <ChevronLeft className="h-4 w-4" aria-hidden="true" />
           </Button>
         )}
@@ -231,7 +231,7 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
           disabled={!canContinue}
           className="w-full max-w-setup-wizard-surface-cta-primary-max-width"
         >
-          Continue
+          {t('action.continue')}
         </Button>
       </div>
     </div>
