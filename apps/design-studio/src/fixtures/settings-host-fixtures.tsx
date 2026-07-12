@@ -148,11 +148,11 @@ const FIXTURE_WORKSPACE_PATH_UPDATED = '/Volumes/Studio/Nexus';
  * Codex (not first-installed Claude) so the visual reads as G1 preselect,
  * not the V1.102 first-installed default.
  */
-const PRESELECTED_AGENT_ID = 'codex';
+const PRESELECTED_AGENT_ID = 'codex-acp';
 
 const FIXTURE_AGENTS: AgentPickerItem[] = [
   {
-    id: 'claude-code',
+    id: 'claude-acp',
     name: 'Claude Code',
     version: '1.0.42',
     description: 'Anthropic coding agent via ACP.',
@@ -161,7 +161,7 @@ const FIXTURE_AGENTS: AgentPickerItem[] = [
     docsUrl: 'https://docs.anthropic.com/en/docs/claude-code',
   },
   {
-    id: 'codex',
+    id: 'codex-acp',
     name: 'Codex',
     version: '0.12.0',
     description: 'OpenAI Codex CLI.',
@@ -170,7 +170,7 @@ const FIXTURE_AGENTS: AgentPickerItem[] = [
     docsUrl: null,
   },
   {
-    id: 'gemini-cli',
+    id: 'kimi',
     name: 'Gemini CLI',
     version: null,
     description: 'Google Gemini agent (not on PATH).',
@@ -306,7 +306,7 @@ function SettingsHostPageChrome({ children }: { children: ReactNode }) {
 }
 
 function InteractiveSettingsPicker({
-  initialSelectedId = 'claude-code',
+  initialSelectedId = 'claude-acp',
 }: {
   initialSelectedId?: string | null;
 }) {

@@ -579,17 +579,17 @@ describe('Surfaces page — AgentPicker fixtures', () => {
   });
 
   it('renders installed and not-installed cards in mixed fixture', () => {
-    const installed = screen.getAllByTestId('agent-card-claude-code');
+    const installed = screen.getAllByTestId('agent-card-claude-acp');
     expect(installed.length).toBeGreaterThanOrEqual(1);
     expect(installed[0]).toHaveAttribute('data-installed', 'true');
 
-    const missing = screen.getAllByTestId('agent-card-gemini-cli');
+    const missing = screen.getAllByTestId('agent-card-kimi');
     expect(missing.length).toBeGreaterThanOrEqual(1);
     expect(missing[0]).toHaveAttribute('data-installed', 'false');
   });
 
   it('hides outbound links when URLs are missing (Cursor Agent)', () => {
-    const hiddenLinksCard = screen.getByTestId('agent-card-cursor-agent');
+    const hiddenLinksCard = screen.getByTestId('agent-card-cursor');
     expect(hiddenLinksCard.querySelector('a')).toBeNull();
   });
 
@@ -606,7 +606,7 @@ describe('Surfaces page — AgentPicker fixtures', () => {
 
   it('marks selected fixture with aria-pressed', () => {
     const pressed = screen
-      .getAllByTestId('agent-card-select-claude-code')
+      .getAllByTestId('agent-card-select-claude-acp')
       .filter((el) => el.getAttribute('aria-pressed') === 'true');
     expect(pressed.length).toBeGreaterThanOrEqual(1);
   });
@@ -688,7 +688,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).toHaveAttribute('aria-current', 'page');
     const outlet = within(hostRoot).getByTestId('settings-shell-outlet');
     const agentSection = within(outlet).getByTestId('settings-agent-section');
-    expect(agentSection).toHaveAttribute('data-preselected', 'codex');
+    expect(agentSection).toHaveAttribute('data-preselected', 'codex-acp');
     expect(
       within(outlet).queryByTestId('settings-section-frame-agent'),
     ).not.toBeInTheDocument();
@@ -755,19 +755,19 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
       'settings-host-fixture-agent-section',
     );
     const section = within(agentRoot).getByTestId('settings-agent-section');
-    expect(section).toHaveAttribute('data-preselected', 'codex');
+    expect(section).toHaveAttribute('data-preselected', 'codex-acp');
     expect(
       within(agentRoot).getByText(
         /Choose which local ACP agent Nexus uses for creative work/i,
       ),
     ).toBeInTheDocument();
     const pressed = within(agentRoot)
-      .getAllByTestId('agent-card-select-codex')
+      .getAllByTestId('agent-card-select-codex-acp')
       .filter((el) => el.getAttribute('aria-pressed') === 'true');
     expect(pressed.length).toBeGreaterThanOrEqual(1);
     // Preselect is Codex, not the first-installed Claude default.
     const claudePressed = within(agentRoot)
-      .getAllByTestId('agent-card-select-claude-code')
+      .getAllByTestId('agent-card-select-claude-acp')
       .filter((el) => el.getAttribute('aria-pressed') === 'true');
     expect(claudePressed.length).toBe(0);
     expect(
@@ -968,7 +968,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
   it('retains AgentPicker thin-host reference for P1', () => {
     const regions = screen.getAllByTestId('settings-host-picker-region');
     expect(regions.length).toBeGreaterThanOrEqual(1);
-    const cards = screen.getAllByTestId('agent-card-claude-code');
+    const cards = screen.getAllByTestId('agent-card-claude-acp');
     expect(cards.length).toBeGreaterThanOrEqual(1);
     expect(
       screen.getAllByTestId('agent-picker-custom-launch').length,
