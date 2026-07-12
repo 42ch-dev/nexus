@@ -1,0 +1,86 @@
+import i18next from 'i18next';
+import { initReactI18next } from 'react-i18next';
+
+import enCommon from '../../locales/en/common.json';
+import enShell from '../../locales/en/shell.json';
+import enSettings from '../../locales/en/settings.json';
+import enSetup from '../../locales/en/setup.json';
+import enCanvas from '../../locales/en/canvas.json';
+import enReading from '../../locales/en/reading.json';
+import enFindings from '../../locales/en/findings.json';
+import enMemory from '../../locales/en/memory.json';
+import enCommands from '../../locales/en/commands.json';
+
+import zhCommon from '../../locales/zh-CN/common.json';
+import zhShell from '../../locales/zh-CN/shell.json';
+import zhSettings from '../../locales/zh-CN/settings.json';
+import zhSetup from '../../locales/zh-CN/setup.json';
+import zhCanvas from '../../locales/zh-CN/canvas.json';
+import zhReading from '../../locales/zh-CN/reading.json';
+import zhFindings from '../../locales/zh-CN/findings.json';
+import zhMemory from '../../locales/zh-CN/memory.json';
+import zhCommands from '../../locales/zh-CN/commands.json';
+
+export type LocalePreference = 'system' | 'en' | 'zh-CN';
+export type ResolvedLocale = 'en' | 'zh-CN';
+
+/**
+ * Namespace catalog layout. P0 populates common/shell/settings; the remaining
+ * namespaces are stubbed as empty objects so P1 can add keys without touching
+ * init configuration.
+ */
+export const namespaces = [
+  'common',
+  'shell',
+  'settings',
+  'setup',
+  'canvas',
+  'reading',
+  'findings',
+  'memory',
+  'commands',
+] as const;
+
+export type Namespace = (typeof namespaces)[number];
+
+i18next
+  .use(initReactI18next)
+  .init({
+    lng: 'en',
+    fallbackLng: 'en',
+    supportedLngs: ['en', 'zh-CN'] as const,
+    defaultNS: 'common',
+    ns: namespaces as readonly string[],
+    resources: {
+      en: {
+        common: enCommon,
+        shell: enShell,
+        settings: enSettings,
+        setup: enSetup,
+        canvas: enCanvas,
+        reading: enReading,
+        findings: enFindings,
+        memory: enMemory,
+        commands: enCommands,
+      },
+      'zh-CN': {
+        common: zhCommon,
+        shell: zhShell,
+        settings: zhSettings,
+        setup: zhSetup,
+        canvas: zhCanvas,
+        reading: zhReading,
+        findings: zhFindings,
+        memory: zhMemory,
+        commands: zhCommands,
+      },
+    },
+    interpolation: {
+      escapeValue: false,
+    },
+    react: {
+      useSuspense: false,
+    },
+  });
+
+export const i18n = i18next;

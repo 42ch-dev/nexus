@@ -16,6 +16,7 @@ import { SchedulePage } from '@/pages/schedule-page';
 import { SessionsPage } from '@/pages/sessions-page';
 import { SettingsAgentSection } from '@/pages/settings/settings-agent-section';
 import { SettingsAdvancedSection } from '@/pages/settings/settings-advanced-section';
+import { SettingsAppearanceSection } from '@/pages/settings/settings-appearance-section';
 import { SettingsShellLayout } from '@/pages/settings/settings-shell-layout';
 import { SettingsWorkspaceSection } from '@/pages/settings/settings-workspace-section';
 import { WorkDetailPage } from '@/pages/work-detail-page';
@@ -88,6 +89,7 @@ function AppRoutes() {
           <Route path="agent" element={<SettingsAgentSection />} />
           <Route path="advanced" element={<SettingsAdvancedSection />} />
           <Route path="workspace" element={<SettingsWorkspaceSection />} />
+          <Route path="appearance" element={<SettingsAppearanceSection />} />
           <Route
             path="connection"
             element={<Navigate to="/settings/advanced#connection" replace />}

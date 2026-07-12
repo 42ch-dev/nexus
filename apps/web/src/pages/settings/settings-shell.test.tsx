@@ -10,12 +10,14 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { SettingsAgentSection } from '@/pages/settings/settings-agent-section';
 import { SettingsAdvancedSection } from '@/pages/settings/settings-advanced-section';
 import { SettingsShellLayout } from '@/pages/settings/settings-shell-layout';
+import { SettingsAppearanceSection } from '@/pages/settings/settings-appearance-section';
 import { SettingsWorkspaceSection } from '@/pages/settings/settings-workspace-section';
 import { RootLayout } from '@/components/layout/root-layout';
 import { ThemeProvider } from '@/components/theme-provider';
 import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 import { BrowserClient } from '@/lib/nexus';
+import { i18n } from '@/lib/i18n/config';
 
 vi.mock('@/components/brand/nexus-logo', () => ({
   NexusLogo: () => <div data-testid="nexus-logo">Nexus</div>,
@@ -91,6 +93,7 @@ const settingsRouteTree = (
     <Route path="agent" element={<SettingsAgentSection />} />
     <Route path="advanced" element={<SettingsAdvancedSection />} />
     <Route path="workspace" element={<SettingsWorkspaceSection />} />
+    <Route path="appearance" element={<SettingsAppearanceSection />} />
     <Route
       path="connection"
       element={<Navigate to="/settings/advanced#connection" replace />}
@@ -131,9 +134,10 @@ describe('SettingsAgentSection', () => {
 });
 
 describe('Settings shell routes', () => {
-  beforeEach(() => {
+  beforeEach(async () => {
     mockMatchMedia(false);
     window.localStorage.clear();
+    await i18n.changeLanguage('en');
   });
 
   it('redirects /settings index to Agent section', async () => {
@@ -158,7 +162,7 @@ describe('Settings shell routes', () => {
     );
   });
 
-  it('renders section nav with Agent, Workspace, Advanced', () => {
+  it('renders section nav with Agent, Workspace, Appearance, and Advanced', () => {
     useHandlers(scanHandler(), creatorsHandler());
 
     renderInApp(
@@ -178,6 +182,9 @@ describe('Settings shell routes', () => {
     expect(
       within(nav).getByTestId('settings-section-nav-workspace'),
     ).toHaveTextContent('Workspace');
+    expect(
+      within(nav).getByTestId('settings-section-nav-appearance'),
+    ).toHaveTextContent('Appearance');
     expect(within(nav).getByTestId('settings-section-nav-advanced')).toHaveTextContent(
       'Advanced',
     );
@@ -187,6 +194,35 @@ describe('Settings shell routes', () => {
     expect(
       within(nav).queryByTestId('settings-section-nav-setup'),
     ).not.toBeInTheDocument();
+  });
+
+  it('renders localized section nav labels in zh-CN', () => {
+    window.localStorage.setItem('nexus-web-locale', 'zh-CN');
+    useHandlers(scanHandler(), creatorsHandler());
+
+    renderInApp(
+      <Routes>
+        {settingsRouteTree}
+      </Routes>,
+      {
+        client: makeClient(),
+        initialRouterEntries: ['/settings/agent'],
+      },
+    );
+
+    const nav = screen.getByTestId('settings-section-nav');
+    expect(within(nav).getByTestId('settings-section-nav-agent')).toHaveTextContent(
+      '智能体',
+    );
+    expect(
+      within(nav).getByTestId('settings-section-nav-workspace'),
+    ).toHaveTextContent('工作区');
+    expect(
+      within(nav).getByTestId('settings-section-nav-appearance'),
+    ).toHaveTextContent('外观');
+    expect(within(nav).getByTestId('settings-section-nav-advanced')).toHaveTextContent(
+      '高级',
+    );
   });
 
   it('mounts Workspace section outlet and marks nav active', async () => {

@@ -1,0 +1,13 @@
+{
+  "action": {
+    "save": "保存",
+    "cancel": "取消"
+  },
+  "status": {
+    "loading": "加载中…"
+  },
+  "toast": {
+    "error": "错误",
+    "success": "成功"
+  }
+}

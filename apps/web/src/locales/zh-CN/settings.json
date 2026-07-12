@@ -1,0 +1,23 @@
+{
+  "aria": {
+    "sections": "设置分区"
+  },
+  "title": "设置",
+  "helper": "在此处管理你的本地智能体、守护进程连接和设置选项。",
+  "nav": {
+    "agent": "智能体",
+    "workspace": "工作区",
+    "appearance": "外观",
+    "advanced": "高级"
+  },
+  "appearance": {
+    "title": "外观",
+    "language": {
+      "label": "语言",
+      "system": "跟随系统",
+      "en": "English",
+      "zh-CN": "简体中文",
+      "helper": "跟随系统会采用你的操作系统或浏览器语言。"
+    }
+  }
+}

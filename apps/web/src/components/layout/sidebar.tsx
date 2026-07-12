@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link, NavLink, useLocation, useParams } from 'react-router-dom';
 import {
   Boxes,
@@ -12,10 +13,12 @@ import {
 import { NexusLogo } from '@/components/brand/nexus-logo';
 import { FooterProfiles } from '@/components/layout/footer-profiles';
 import {
+  CANVAS_ITEMS,
   CANVAS_NAV_GROUP,
   resolveActiveCanvasSurface,
   resolveCanvasNavTarget,
   type CanvasNavItem,
+  type CanvasSurfaceId,
 } from '@/components/layout/canvas-nav';
 import {
   ShellSidebarChrome,
@@ -24,40 +27,9 @@ import {
 } from '@/components/layout/presentational/shell-sidebar-chrome';
 import { cn } from '@/lib/utils';
 
-const CREATOR_GROUPS: ShellNavGroup[] = [
-  {
-    id: 'works',
-    label: 'Works',
-    items: [{ to: '/works', label: 'All Works', icon: Layers }],
-  },
-  // Canvas group — the three canvas-surface entry points (Outline / World KB /
-  // Strategy), nested under the Creator (Works) tab. Active-surface highlight
-  // for these items is resolver-driven (see `isActiveItem` below), NOT the
-  // chrome's built-in prefix match.
-  CANVAS_NAV_GROUP,
-  {
-    id: 'creator',
-    label: 'Creator',
-    items: [{ to: '/memory', label: 'Memory', icon: BrainCircuit }],
-  },
-];
-
-const ORCHESTRATOR_GROUPS: ShellNavGroup[] = [
-  {
-    id: 'runtime',
-    label: 'Runtime',
-    items: [
-      { to: '/sessions', label: 'Sessions', icon: ListChecks },
-      { to: '/schedule', label: 'Schedule', icon: CalendarClock },
-      { to: '/capabilities', label: 'Capabilities', icon: Boxes },
-    ],
-  },
-  {
-    id: 'strategies',
-    label: 'Strategies',
-    items: [{ to: '/strategies', label: 'Strategies', icon: Sparkles }],
-  },
-];
+function surfaceKey(surfaceId: CanvasSurfaceId): 'outline' | 'worldKb' | 'strategy' {
+  return surfaceId === 'world-kb' ? 'worldKb' : surfaceId;
+}
 
 /**
  * Sidebar nav — V1.94 two-tab IA (Creator | Orchestrator), extended in V1.111
@@ -88,6 +60,7 @@ const ORCHESTRATOR_GROUPS: ShellNavGroup[] = [
  * no `worldId` and no `/worlds` picker), the item renders disabled.
  */
 export function Sidebar() {
+  const { t } = useTranslation('shell');
   const [activeTab, setActiveTab] = useState<ShellSidebarTab>('creator');
   const { pathname } = useLocation();
   // URL-scoped context for Canvas nav targets (mirrors canvas-nav-commands).
@@ -95,10 +68,60 @@ export function Sidebar() {
   // route's params — workId/worldId are populated on Work-/World-scoped routes
   // and undefined elsewhere.
   const { workId, worldId } = useParams<{ workId?: string; worldId?: string }>();
-  const groups = activeTab === 'creator' ? CREATOR_GROUPS : ORCHESTRATOR_GROUPS;
+
+  const translatedCanvasGroup = useMemo<ShellNavGroup>(
+    () => ({
+      ...CANVAS_NAV_GROUP,
+      label: t('nav.canvas'),
+      items: CANVAS_ITEMS.map((item) => ({
+        ...item,
+        label: t(`nav.${surfaceKey(item.surfaceId)}`),
+      })),
+    }),
+    [t],
+  );
+
+  const creatorGroups: ShellNavGroup[] = useMemo(
+    () => [
+      {
+        id: 'works',
+        label: t('nav.works'),
+        items: [{ to: '/works', label: t('nav.allWorks'), icon: Layers }],
+      },
+      translatedCanvasGroup,
+      {
+        id: 'creator',
+        label: t('nav.creator'),
+        items: [{ to: '/memory', label: t('nav.memory'), icon: BrainCircuit }],
+      },
+    ],
+    [t, translatedCanvasGroup],
+  );
+
+  const orchestratorGroups: ShellNavGroup[] = useMemo(
+    () => [
+      {
+        id: 'runtime',
+        label: t('nav.runtime'),
+        items: [
+          { to: '/sessions', label: t('nav.sessions'), icon: ListChecks },
+          { to: '/schedule', label: t('nav.schedule'), icon: CalendarClock },
+          { to: '/capabilities', label: t('nav.capabilities'), icon: Boxes },
+        ],
+      },
+      {
+        id: 'strategies',
+        label: t('nav.strategies'),
+        items: [{ to: '/strategies', label: t('nav.strategies'), icon: Sparkles }],
+      },
+    ],
+    [t],
+  );
+
+  const groups = activeTab === 'creator' ? creatorGroups : orchestratorGroups;
 
   return (
-    <nav aria-label="Primary">
+    <nav aria-label={t('aria.primary')}>
       <ShellSidebarChrome
         activeTab={activeTab}
         activeRoute={pathname}
@@ -107,6 +130,10 @@ export function Sidebar() {
         onTabChange={setActiveTab}
         logo={<NexusLogo />}
         footer={<FooterProfiles />}
+        creatorTabLabel={t('nav.creator')}
+        orchestratorTabLabel={t('nav.orchestrator')}
+        settingsLabel={t('nav.settings')}
+        primaryNavigationAriaLabel={t('aria.primaryNavigation')}
         isActiveItem={(item, route) => {
           // Canvas items: resolver-driven (precise surface match — NOT the
           // broad `item.to` prefix). Non-canvas items: the chrome's built-in

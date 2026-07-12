@@ -1,0 +1,52 @@
+{
+  "appTitle": "控制室",
+  "aria": {
+    "primary": "主导航",
+    "primaryNavigation": "主导航"
+  },
+  "route": {
+    "works": "作品",
+    "sessions": "会话",
+    "schedule": "日程",
+    "capabilities": "能力",
+    "findings": "发现",
+    "memory": "记忆",
+    "settings": "设置",
+    "strategies": "策略"
+  },
+  "mobileNav": {
+    "works": "作品",
+    "sessions": "会话",
+    "schedule": "日程",
+    "capabilities": "能力",
+    "memory": "记忆",
+    "strategies": "策略",
+    "settings": "设置"
+  },
+  "nav": {
+    "creator": "创作",
+    "orchestrator": "编排",
+    "works": "作品",
+    "allWorks": "全部作品",
+    "canvas": "画布",
+    "outline": "大纲",
+    "worldKb": "世界知识库",
+    "strategy": "策略",
+    "memory": "记忆",
+    "runtime": "运行",
+    "sessions": "会话",
+    "schedule": "日程",
+    "capabilities": "能力",
+    "strategies": "策略",
+    "settings": "设置"
+  },
+  "theme": {
+    "switchToLight": "切换至浅色主题",
+    "switchToDark": "切换至深色主题"
+  },
+  "notFound": {
+    "title": "页面未找到",
+    "description": "该路由不属于控制室 + 设置界面。",
+    "action": "前往作品"
+  }
+}
