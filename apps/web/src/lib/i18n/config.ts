@@ -24,6 +24,34 @@ import zhCommands from '../../locales/zh-CN/commands.json';
 export type LocalePreference = 'system' | 'en' | 'zh-CN';
 export type ResolvedLocale = 'en' | 'zh-CN';
 
+const STORAGE_KEY = 'nexus-web-locale';
+
+/**
+ * Resolve the initial locale from localStorage + system before React renders.
+ * This prevents a flash of English on reload when the user selected zh-CN.
+ */
+function resolveInitialLocale(): ResolvedLocale {
+  if (typeof window === 'undefined') return 'en';
+  try {
+    const stored = window.localStorage.getItem(STORAGE_KEY);
+    if (stored === 'en' || stored === 'zh-CN') return stored;
+    if (stored === 'system' || stored === null) {
+      const sys = navigator.language;
+      return sys.startsWith('zh') ? 'zh-CN' : 'en';
+    }
+  } catch {
+    // localStorage not available (test env without --localstorage-file)
+  }
+  return 'en';
+}
+
+const initialLocale = resolveInitialLocale();
+
+// Set html lang attribute synchronously to avoid flash
+if (typeof document !== 'undefined') {
+  document.documentElement.lang = initialLocale;
+}
+
 /**
  * Namespace catalog layout. P0 populates common/shell/settings; the remaining
  * namespaces are stubbed as empty objects so P1 can add keys without touching
@@ -46,7 +74,7 @@ export type Namespace = (typeof namespaces)[number];
 i18next
   .use(initReactI18next)
   .init({
-    lng: 'en',
+    lng: initialLocale,
     fallbackLng: 'en',
     supportedLngs: ['en', 'zh-CN'] as const,
     defaultNS: 'common',
