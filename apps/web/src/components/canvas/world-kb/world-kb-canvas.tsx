@@ -1,5 +1,6 @@
 /**
- * World KB canvas — orchestrator facade (V1.74 A10 split).
+ * World KB canvas — orchestrator facade (V1.74 A10 split; V1.114 P0 T3 migrated
+ * to the shared `CanvasSurfaceAdapter` abstraction via `useCanvasSurface()`).
  *
  * Thin composition root that coordinates graph read, candidate read, entity
  * promotion, and conflict resolution. Implementation detail lives in split
@@ -7,11 +8,11 @@
  * projection, and alt view. Public exports (`WorldKbCanvas`, `patchFromForm`,
  * `EntityField`) are preserved for existing consumers.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { Connection, Node } from '@xyflow/react';
+import type { Connection } from '@xyflow/react';
 
-import { CanvasShell, useNodeChangeHandler } from '@/components/canvas/canvas-shell';
+import { CanvasShell } from '@/components/canvas/canvas-shell';
 import { ErrorState, LoadingState } from '@/components/ui/states';
 import {
   usePatchWorldKbRelationship,
@@ -20,20 +21,28 @@ import {
   isWorldKbConflictError,
 } from '@/lib/canvas/use-world-kb-data';
 import { useRegisterCommand } from '@/lib/canvas/command-registry';
+import { useCanvasSurface, type CanvasSurfaceQueryResult } from '@/components/canvas/use-canvas-surface';
 
 import { buildRelationshipRemoveRequest } from './relationship-inspector-logic';
-import { worldKbNodeTypes } from './entity-node';
-import { anchorNodes, deriveEdges, entryCountOf, graphSummary, layoutNodes } from './graph-projection';
-import { deriveRelationshipEdges, filterRelationshipEdgesByConfidence } from './relationship-projection';
-import { WorldKbAltView } from './world-kb-alt-view';
 import { WorldKbCanvasConflicts } from './world-kb-canvas-conflicts';
 import { WorldKbHeader } from './world-kb-canvas-header';
 import { InspectorPanel } from './world-kb-inspector-panel';
-import { useWorldKbCanvasState, buildEntityConflict, handleRelationshipConflict, handlePromoteConflict } from './use-world-kb-canvas-state';
-import { formatRelative, nodesToData } from './world-kb-canvas-utils';
+import {
+  useWorldKbCanvasState,
+  buildEntityConflict,
+  handleRelationshipConflict,
+  handlePromoteConflict,
+} from './use-world-kb-canvas-state';
+import { formatRelative } from './world-kb-canvas-utils';
 import { useReducedMotionPreference } from './use-view-preference';
 import type { WorldKbNodeData } from './types';
 import type { WorldKbRelationshipProjection } from '@42ch/nexus-contracts';
+
+import {
+  createWorldKbCanvasAdapter,
+  type WorldKbCanvasAdapterContext,
+  type WorldKbSurfaceGraph,
+} from './world-kb-canvas-adapter';
 
 export type { EntityField } from './world-kb-canvas-types';
 export { patchFromForm } from './world-kb-canvas-utils';
@@ -95,24 +104,11 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
   const anchors = graph.data?.source_anchors ?? [];
   const relationships = graph.data?.relationships ?? [];
 
-  const {
-    selection,
-    setSelection,
-    selectedNodeId,
-    selectedRelationshipId,
-    entityConflict,
-    promoteConflict,
-    relationshipConflict,
-    reseedSignal,
-    bumpReseed,
-    setEntityConflict,
-    setPromoteConflict,
-    setRelationshipConflict,
-    onSelectNode,
-    onSelectRelationship,
-    onCreateRelationship,
-    onEdgeClick,
-  } = useWorldKbCanvasState({ entities, candidateItems, relationships });
+  const canvasState = useWorldKbCanvasState({
+    entities,
+    candidateItems,
+    relationships,
+  });
 
   // V1.76: confidence threshold for the graph view. Confirmed edges with
   // confidence below the threshold are hidden; manual edges (no confidence)
@@ -121,52 +117,100 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
   // 0.0 = show all.
   const [confidenceThreshold, setConfidenceThreshold] = useState(0);
 
-  const projected = useMemo(() => {
-    const entityNodes = layoutNodes(entities, candidateItems, worldId);
-    const allNodes = [...anchorNodes(anchors), ...entityNodes] as Node[];
-    const relEdges = deriveRelationshipEdges(relationships);
-    // Apply the confidence threshold to confirmed relationship edges only.
-    const visibleRelEdges = filterRelationshipEdgesByConfidence(relEdges, confidenceThreshold);
+  const surfaceQuery = useMemo<CanvasSurfaceQueryResult<WorldKbSurfaceGraph>>(() => {
+    const data = graph.data;
+    if (!data) {
+      return {
+        data: undefined,
+        isLoading: graph.isLoading,
+        isError: graph.isError,
+        error: graph.error,
+        refetch: () => {
+          void graph.refetch();
+          void candidates.refetch();
+        },
+      };
+    }
     return {
-      nodes: allNodes,
-      edges: [...deriveEdges(anchors), ...visibleRelEdges],
+      data: {
+        worldId,
+        graph: data,
+        candidates: candidateItems,
+        confidenceThreshold,
+      },
+      isLoading: graph.isLoading,
+      isError: graph.isError,
+      error: graph.error,
+      refetch: () => {
+        void graph.refetch();
+        void candidates.refetch();
+      },
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entities, candidateItems, anchors, relationships, worldId, confidenceThreshold]);
+  }, [
+    graph.data,
+    graph.isLoading,
+    graph.isError,
+    graph.error,
+    graph.refetch,
+    candidates.refetch,
+    candidateItems,
+    worldId,
+    confidenceThreshold,
+  ]);
 
-  // Hold nodes in local state so React Flow drag/select moves persist; reseed
-  // when the server projection changes (refetch or selection-driven invalidation).
-  const [nodes, setNodes] = useState<Node[]>(projected.nodes);
-  const edges = projected.edges;
-  useEffect(() => {
-    setNodes(projected.nodes);
-  }, [projected.nodes]);
-  const onNodesChange = useNodeChangeHandler(setNodes);
+  const ctxRef = useRef<WorldKbCanvasAdapterContext>({
+    worldId,
+    selection: null,
+    confirmedEntities: [],
+    anchors: [],
+    relationships: [],
+    reseedSignal: 0,
+    onEntityConflict: () => {},
+    onPromoteConflict: () => {},
+    onRelationshipConflict: () => {},
+    onRelationshipSaved: () => {},
+    onSelectNode: () => {},
+    onSelectRelationship: () => {},
+    onCreateRelationship: () => {},
+    onDeleteRelationship: () => {},
+    onPromoteSuggestion: () => {},
+    onDeleteSuggestion: () => {},
+    onPromoteAllSuggestions: async () => ({ succeeded: 0, failed: 0 }),
+    patchRelationshipIsPending: false,
+    onActiveTabChange: () => {},
+    selectedNodeId: null,
+    selectedRelationshipId: null,
+    nodes: [],
+  });
+
+  const adapter = useMemo(() => createWorldKbCanvasAdapter(ctxRef), []);
+
+  const surface = useCanvasSurface(adapter, surfaceQuery);
 
   // Graph mode: React Flow tracks selection via the node `selected` flag (set
   // through onNodesChange). Resolve it to a World KB selection so the inspector
   // updates from graph clicks just like alt-view row activation.
   useEffect(() => {
     if (showList) return;
-    const selected = nodes.find((n) => n.selected && n.type === 'worldkb-entity');
+    const selected = surface.selectedNode;
     if (!selected) return;
-    onSelectNode(selected.data as unknown as WorldKbNodeData);
+    canvasState.onSelectNode(selected.data as unknown as WorldKbNodeData);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes, showList]);
+  }, [surface.selectedNode, showList]);
 
   useEffect(() => {
     function onConnectTo(event: Event) {
       const custom = event as CustomEvent<{ sourceEntityId: string }>;
       const sourceEntityId = custom.detail.sourceEntityId;
       if (!sourceEntityId) return;
-      setSelection({
+      canvasState.setSelection({
         kind: 'new-relationship',
         initialSourceEntityId: sourceEntityId,
       });
     }
     window.addEventListener('world-kb-connect-to', onConnectTo);
     return () => window.removeEventListener('world-kb-connect-to', onConnectTo);
-  }, [setSelection]);
+  }, [canvasState.setSelection]);
 
   if (graph.isLoading || candidates.isLoading) return <LoadingState label={t('worldKb.loading')} />;
   if (graph.isError)
@@ -174,43 +218,46 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
       <ErrorState description={t('worldKb.loadError')} onRetry={() => graph.refetch()} />
     );
 
-  const summary = graphSummary(graph.data, candidateItems.length);
-  const entryCount = entryCountOf(graph.data, candidateItems.length);
-  const lastFetched = graph.dataUpdatedAt ? formatRelative(graph.dataUpdatedAt) : '—';
   const confirmedEntities = entities.filter((e) => e.status?.toLowerCase() !== 'rejected');
 
   const handleEntityConflict = (payload: Parameters<typeof buildEntityConflict>[1]) =>
-    setEntityConflict(buildEntityConflict(selection, payload));
+    canvasState.setEntityConflict(buildEntityConflict(canvasState.selection, payload));
   const handleConnect = ({ source, target }: Connection) => {
     const sourceId = source?.startsWith('entity:') ? source.slice('entity:'.length) : undefined;
     const targetId = target?.startsWith('entity:') ? target.slice('entity:'.length) : undefined;
     if (sourceId && targetId && sourceId !== targetId) {
-      onCreateRelationship({ sourceEntityId: sourceId, targetEntityId: targetId });
+      canvasState.onCreateRelationship({ sourceEntityId: sourceId, targetEntityId: targetId });
     }
   };
   const onPromoteConflict = (payload: Parameters<typeof handlePromoteConflict>[1]) =>
-    handlePromoteConflict(setPromoteConflict, payload);
+    handlePromoteConflict(canvasState.setPromoteConflict, payload);
   const onRelationshipConflict = (payload: Parameters<typeof handleRelationshipConflict>[1]) =>
-    handleRelationshipConflict(setRelationshipConflict, payload);
+    handleRelationshipConflict(canvasState.setRelationshipConflict, payload);
   const onRelationshipSaved = () => {
-    setSelection(null);
-    bumpReseed();
+    canvasState.setSelection(null);
+    canvasState.bumpReseed();
   };
   const onDeleteRelationship = (rel: WorldKbRelationshipProjection) => {
     patchRelationship.mutate(buildRelationshipRemoveRequest(rel), {
       onSuccess: () => {
-        if (selection?.kind === 'relationship' && selection.relationship.relationship_id === rel.relationship_id) {
-          setSelection(null);
+        if (
+          canvasState.selection?.kind === 'relationship' &&
+          canvasState.selection.relationship.relationship_id === rel.relationship_id
+        ) {
+          canvasState.setSelection(null);
         }
-        bumpReseed();
+        canvasState.bumpReseed();
       },
       onError: (error) => {
         // A 409 on delete = the relationship changed concurrently. The hook's
         // global onError already refetches the graph to canonical state; here we
         // clear the selection so the inspector does not keep editing a stale row.
         if (isWorldKbConflictError(error)) {
-          if (selection?.kind === 'relationship' && selection.relationship.relationship_id === rel.relationship_id) {
-            setSelection(null);
+          if (
+            canvasState.selection?.kind === 'relationship' &&
+            canvasState.selection.relationship.relationship_id === rel.relationship_id
+          ) {
+            canvasState.setSelection(null);
           }
         }
       },
@@ -237,7 +284,7 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
           needs_review: false,
         },
       },
-      { onSuccess: () => bumpReseed() },
+      { onSuccess: () => canvasState.bumpReseed() },
     );
   };
   const onDeleteSuggestion = onDeleteRelationship;
@@ -283,20 +330,51 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
     if (failed > 0) {
       console.warn(`promoteAll: ${failed}/${rels.length} suggestions failed`);
     }
-    bumpReseed();
+    canvasState.bumpReseed();
     return { succeeded, failed };
   };
 
-  const inspectorPanelProps = {
-    selection,
+  // Update the mutable adapter context every render. The adapter object is
+  // stable, so useCanvasSurface's projection memo survives state changes.
+  ctxRef.current = {
     worldId,
+    selection: canvasState.selection,
     confirmedEntities,
     anchors,
-    reseedSignal,
+    relationships,
+    reseedSignal: canvasState.reseedSignal,
     onEntityConflict: handleEntityConflict,
     onPromoteConflict,
     onRelationshipConflict,
     onRelationshipSaved,
+    onSelectNode: canvasState.onSelectNode,
+    onSelectRelationship: canvasState.onSelectRelationship,
+    onCreateRelationship: canvasState.onCreateRelationship,
+    onDeleteRelationship,
+    onPromoteSuggestion,
+    onDeleteSuggestion,
+    onPromoteAllSuggestions,
+    patchRelationshipIsPending: patchRelationship.isPending,
+    onActiveTabChange: setAltTab,
+    selectedNodeId: canvasState.selectedNodeId,
+    selectedRelationshipId: canvasState.selectedRelationshipId,
+    nodes: surface.nodes,
+  };
+
+  const entryCount = (graph.data?.entities.length ?? 0) + candidateItems.length;
+  const lastFetched = graph.dataUpdatedAt ? formatRelative(graph.dataUpdatedAt) : '—';
+
+  const inspectorPanelProps = {
+    selection: canvasState.selection,
+    worldId,
+    confirmedEntities,
+    anchors,
+    reseedSignal: canvasState.reseedSignal,
+    onEntityConflict: handleEntityConflict,
+    onPromoteConflict,
+    onRelationshipConflict,
+    onRelationshipSaved,
+    nodeInspector: surface.inspector,
   };
 
   return (
@@ -315,33 +393,18 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
 
       {showList ? (
         <div className="grid gap-4 lg:grid-cols-[1fr_360px]">
-          <WorldKbAltView
-            nodes={nodesToData(nodes)}
-            relationships={relationships}
-            entities={confirmedEntities}
-            selectedNodeId={selectedNodeId}
-            selectedRelationshipId={selectedRelationshipId}
-            onSelectNode={(n) => onSelectNode(n)}
-            onSelectRelationship={onSelectRelationship}
-            onCreateRelationship={onCreateRelationship}
-            onDeleteRelationship={onDeleteRelationship}
-            onPromoteSuggestion={onPromoteSuggestion}
-            onDeleteSuggestion={onDeleteSuggestion}
-            onPromoteAllSuggestions={onPromoteAllSuggestions}
-            suggestionPending={patchRelationship.isPending}
-            onActiveTabChange={setAltTab}
-          />
+          {surface.altView}
           <InspectorPanel {...inspectorPanelProps} />
         </div>
       ) : (
         <CanvasShell
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={worldKbNodeTypes}
-          onNodesChange={onNodesChange}
-          onEdgeClick={onEdgeClick}
+          nodes={surface.nodes}
+          edges={surface.edges}
+          nodeTypes={surface.nodeTypes}
+          onNodesChange={surface.onNodesChange}
+          onEdgeClick={canvasState.onEdgeClick}
           onConnect={handleConnect}
-          summaryText={summary}
+          summaryText={surface.summaryText}
           ariaLabel={t('worldKb.graphAriaLabel')}
         >
           <div className="pointer-events-none absolute inset-0" />
@@ -377,16 +440,16 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
       )}
 
       <WorldKbCanvasConflicts
-        entityConflict={entityConflict}
-        promoteConflict={promoteConflict}
-        relationshipConflict={relationshipConflict}
-        selection={selection}
+        entityConflict={canvasState.entityConflict}
+        promoteConflict={canvasState.promoteConflict}
+        relationshipConflict={canvasState.relationshipConflict}
+        selection={canvasState.selection}
         worldId={worldId}
         confirmedEntities={confirmedEntities}
-        setEntityConflict={setEntityConflict}
-        setPromoteConflict={setPromoteConflict}
-        setRelationshipConflict={setRelationshipConflict}
-        bumpReseed={bumpReseed}
+        setEntityConflict={canvasState.setEntityConflict}
+        setPromoteConflict={canvasState.setPromoteConflict}
+        setRelationshipConflict={canvasState.setRelationshipConflict}
+        bumpReseed={canvasState.bumpReseed}
         refetchGraph={() => {
           void graph.refetch();
         }}
