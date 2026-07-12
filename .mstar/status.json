@@ -851,12 +851,13 @@
         "id": "R-V1108P0QC1-S001",
         "title": "Consider extracting useOutlineCanvasGraph() hook for Scene/Beat roadmap",
         "severity": "nit",
-        "decision": "defer",
+        "decision": "close",
         "owner": "@frontend-dev",
-        "target": "post-V1.108",
-        "lifecycle": "open",
+        "target": "V1.114",
+        "lifecycle": "resolved",
         "tracking_link": ".mstar/sdd/2026-07-10-v1.108-canvas-outline-spatial/review/qc1.md",
-        "note": "QC1 S-001. Follow-up refactor; not blocking."
+        "note": "Closed by V1.114 P1 T5 — verified hook was extracted in V1.109 P0; residual is stale.",
+        "closure_note": "V1.114 P1 T5 verified useOutlineCanvasGraph already exists."
       }
     ],
     "2026-07-11-v1.109-canvas-scene-beat": [
@@ -888,23 +889,25 @@
         "id": "R-V1109-P1-QC2-W001",
         "title": "Server does not enforce self-loop guard for op:create (client guards exist; daemon accepts source==new_target)",
         "severity": "low",
-        "decision": "defer",
+        "decision": "close",
         "owner": "@fullstack-dev",
-        "target": "post-V1.109",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-11-v1.109-strategy-edge-rewiring.md",
-        "note": "Client guards exist in state-machine.tsx + dialog. Outline.rs has server precedent. QC source: QC2 W-001"
+        "target": "V1.114",
+        "lifecycle": "resolved",
+        "tracking_link": ".mstar/plans/2026-07-13-v1.114-canvas-stability-hardening.md",
+        "note": "Closed by V1.114 P1 T1 — server-side strategy_self_loop guard shipped.",
+        "closure_note": "V1.114 P1 T1 added 422 strategy_self_loop guard in apply_transition_create()."
       },
       {
         "id": "R-V1109-P1-QC2-W002",
         "title": "Create appends rule without dedup check; can produce duplicate (to, when) rules",
         "severity": "low",
-        "decision": "defer",
+        "decision": "close",
         "owner": "@fullstack-dev",
-        "target": "post-V1.109",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-11-v1.109-strategy-edge-rewiring.md",
-        "note": "Validation checks target existence but not rule uniqueness. QC source: QC2 W-002"
+        "target": "V1.114",
+        "lifecycle": "resolved",
+        "tracking_link": ".mstar/plans/2026-07-13-v1.114-canvas-stability-hardening.md",
+        "note": "Closed by V1.114 P1 T2 — verified existing strategy_transition_duplicate guard + added tests.",
+        "closure_note": "V1.114 P1 T2 verified append_conditional_rule rejects duplicate rules."
       }
     ],
     "2026-07-11-v1.109-canvas-graph-scale": [
@@ -996,12 +999,13 @@
         "id": "R-V1111P0QC2-W002",
         "title": "Command registry id-keyed Map (last-write-wins) with no runtime collision detection; two surfaces same id silently overwrite",
         "severity": "low",
-        "decision": "defer",
+        "decision": "close",
         "owner": "@frontend-dev",
-        "target": "post-V1.111",
-        "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-12-v1.111-canvas-command-palette.md",
-        "note": "qc2 W2. Low risk at 7 commands; dev-mode collision warn or ref-counting for future scale. QC source: qc2.md"
+        "target": "V1.114",
+        "lifecycle": "resolved",
+        "tracking_link": ".mstar/plans/2026-07-13-v1.114-canvas-stability-hardening.md",
+        "note": "Closed by V1.114 P1 T3 — dev-mode console.warn collision detection shipped.",
+        "closure_note": "V1.114 P1 T3 added import.meta.env.DEV collision warning in registerCommand()."
       }
     ],
     "2026-07-11-v1.110-daemon-startup-latency": [
