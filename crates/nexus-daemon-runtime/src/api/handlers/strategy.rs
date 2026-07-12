@@ -1942,8 +1942,11 @@ states:
             transition_kind: None,
             op: None,
         };
-        append_conditional_rule(&mut map, &req_b, "b").expect("different condition should be allowed");
-        let rules = map["rules"].as_sequence().expect("rules should be a sequence");
+        append_conditional_rule(&mut map, &req_b, "b")
+            .expect("different condition should be allowed");
+        let rules = map["rules"]
+            .as_sequence()
+            .expect("rules should be a sequence");
         assert_eq!(rules.len(), 2);
     }
 }

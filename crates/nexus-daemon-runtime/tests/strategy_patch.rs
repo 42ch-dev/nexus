@@ -284,6 +284,11 @@ states:
         .await
         .expect_err("duplicate create should fail");
 
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "strategy_transition_duplicate");
     match err {
         NexusApiError::BadRequest { code, .. } => {
             assert_eq!(code, "strategy_transition_duplicate");

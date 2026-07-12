@@ -831,10 +831,10 @@
         "severity": "nit",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "post-V1.109",
+        "target": "post-V1.114",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-scene-beat.md",
-        "note": "QC1 S-002. Re-scoped in P0 QC (R-V1109-P0-QC1-W001): Studio re-mirrors chrome as static markup because RF-coupled import boundary forbids RF deps. Deferred post-V1.109."
+        "note": "QC1 S-002. Re-scoped in P0 QC (R-V1109-P0-QC1-W001): Studio re-mirrors chrome as static markup because RF-coupled import boundary forbids RF deps. Deferred post-V1.114."
       },
       {
         "id": "R-V1108P0QC1-M001",
@@ -842,10 +842,10 @@
         "severity": "low",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "post-V1.109",
+        "target": "post-V1.114",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
-        "note": "QC1 M-001. Editing available in inspectors; sort controls deferred post-V1.109 (UX enhancement, not blocking)."
+        "note": "QC1 M-001. Editing available in inspectors; sort controls deferred post-V1.114 (UX enhancement, not blocking)."
       },
       {
         "id": "R-V1108P0QC1-S001",
@@ -870,7 +870,8 @@
         "target": "unspecified",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-scene-beat.md",
-        "note": "Production safe via EMPTY_SCENE_BEAT_FIXTURE. QC source: QC3 W1"
+        "note": "Production safe via EMPTY_SCENE_BEAT_FIXTURE. QC source: QC3 W1",
+        "closure_note": "Production-safe: EMPTY_SCENE_BEAT_FIXTURE is a module-level constant with stable identity."
       },
       {
         "id": "R-V1109-P0-QC3-W002",
@@ -878,10 +879,10 @@
         "severity": "nit",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "when-scene-beat-wire",
+        "target": "post-V1.114",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-scene-beat.md",
-        "note": "Acceptable for small fixture arrays. QC source: QC3 W2"
+        "note": "Acceptable for small fixture arrays; revisit when real wire scene/beat data arrives. QC source: QC3 W2"
       }
     ],
     "2026-07-11-v1.109-strategy-edge-rewiring": [
@@ -920,7 +921,8 @@
         "target": "post-V1.109",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
-        "note": "Local-only read-only scan; true cancellation requires client API support. QC source: QC2 suggestion"
+        "note": "Local-only read-only scan; true cancellation requires client API support. QC source: QC2 suggestion",
+        "closure_note": "Accepted: abort-on-unmount prevents stale mutation settlement; true HTTP cancellation requires client API support."
       }
     ],
     "2026-07-11-v1.110-agent-picker-ux-polish": [
@@ -977,7 +979,7 @@
         "severity": "low",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "post-V1.111",
+        "target": "post-V1.114",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-12-v1.111-sidebar-canvas-ia.md",
         "note": "qc1 flag + T3 reviewer. Honest disabled+aria-disabled; palette go.world-kb has same gating. Durable fix: /worlds picker route. QC source: qc-consolidated.md"
@@ -990,10 +992,10 @@
         "severity": "low",
         "decision": "defer",
         "owner": "@frontend-dev",
-        "target": "post-V1.111",
+        "target": "post-V1.114",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-12-v1.111-canvas-command-palette.md",
-        "note": "qc2 W1. Mitigant: [data-command-palette-ignore] escape hatch exists. QC source: qc2.md"
+        "note": "qc2 W1. Mitigant: [data-command-palette-ignore] escape hatch exists. Defer until a stable RF public API or alternative detection mechanism is available. QC source: qc2.md"
       },
       {
         "id": "R-V1111P0QC2-W002",
