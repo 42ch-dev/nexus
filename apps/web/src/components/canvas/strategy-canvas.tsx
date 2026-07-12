@@ -233,6 +233,7 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
           onReconnect={strategyState.onReconnect}
           summaryText={surface.summaryText}
           ariaLabel={t('strategy.graphAriaLabel')}
+          relayout={surface.relayout}
         >
           <InspectorPanel
             selected={surface.selectedNode}

@@ -37,7 +37,7 @@ export interface UseCanvasSurfaceResult<TNodeData extends Record<string, unknown
   isLoading: boolean;
   isError: boolean;
   refetch: () => void;
-  relayout: () => void;
+  relayout?: () => void;
 }
 
 /**
@@ -143,6 +143,6 @@ export function useCanvasSurface<TGraph, TNodeData extends Record<string, unknow
     isLoading: queryResult.isLoading,
     isError: queryResult.isError,
     refetch: queryResult.refetch,
-    relayout: layout.relayout,
+    relayout: adapter.layoutOptions ? layout.relayout : undefined,
   };
 }

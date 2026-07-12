@@ -79,7 +79,7 @@ export function createStrategyCanvasAdapter(
     surfaceKind: 'strategy',
     nodeTypes: strategyNodeTypes,
     edgeTypes: undefined,
-    layoutOptions: undefined,
+    layoutOptions: { direction: 'TB' },
 
     projectGraph(graph) {
       return {
