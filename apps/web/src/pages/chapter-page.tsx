@@ -105,11 +105,11 @@ export function ChapterPage() {
     );
   }
 
-  if (chapter.isLoading) return <LoadingState label={t('prose.loading')} />;
+  if (chapter.isLoading) return <LoadingState label={t('loading.chapter')} />;
   if (chapter.isError || !chapter.data) {
     return (
       <ErrorState
-        description={t('prose.error')}
+        description={t('error.chapterDescription')}
         onRetry={() => chapter.refetch()}
       />
     );

@@ -49,7 +49,7 @@ export function KeywordFrequency({
               onMouseLeave={() => setHovered((h) => (h === keyword ? null : h))}
               onFocus={() => setHovered(keyword)}
               onBlur={() => setHovered((h) => (h === keyword ? null : h))}
-              title={t('soul.fragmentCount', { count })}
+              title={t('soul.fragmentCount', { count, keyword })}
               aria-pressed={selectable ? isSelected : undefined}
               className={[
                 'group flex w-full items-center gap-3 rounded-control px-2 py-1.5 text-left',

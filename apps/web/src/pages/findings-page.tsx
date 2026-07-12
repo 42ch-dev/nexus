@@ -19,7 +19,7 @@ import {
   useUpdateFinding,
   useWorks,
 } from '@/api/queries';
-import { humanizeStatus, shortId } from '@/lib/format';
+import { shortId } from '@/lib/format';
 import { FINDING_STATUSES } from '@/lib/findings-lifecycle';
 import { downloadFindingsCsv } from '@/lib/findings-csv';
 import type { FindingDetailResponse, ListFindingsQuery } from '@42ch/nexus-contracts';
@@ -339,7 +339,7 @@ export function FindingsPage() {
                           />
                         </TableCell>
                         <TableCell>
-                          <Badge variant={severityVariant(f.severity)}>{humanizeStatus(f.severity)}</Badge>
+                          <Badge variant={severityVariant(f.severity)}>{t(`severity.${f.severity}` as const)}</Badge>
                         </TableCell>
                         <TableCell>
                           <FindingStatusBadge status={f.status} />
@@ -371,7 +371,7 @@ export function FindingsPage() {
                 isFetchingNextPage={findings.isFetchingNextPage}
                 hasNextPage={findings.hasNextPage}
                 fetchNextPage={() => findings.fetchNextPage()}
-                label={t('page.count', { count: rows.length })}
+                label={t('page.loadMore')}
               />
             </div>
 
