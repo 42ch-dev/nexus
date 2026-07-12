@@ -134,5 +134,8 @@
     "daemonRestartFailed": "守护进程重启失败",
     "presetScaffolded": "预设模板已生成",
     "pathNotOpened": "路径未打开"
+  },
+  "dialog": {
+    "close": "关闭对话框"
   }
 }

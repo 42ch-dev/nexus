@@ -134,5 +134,8 @@
     "daemonRestartFailed": "Daemon restart failed",
     "presetScaffolded": "Preset scaffolded",
     "pathNotOpened": "Path not opened"
+  },
+  "dialog": {
+    "close": "Close dialog"
   }
 }
