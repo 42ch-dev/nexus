@@ -1,13 +1,31 @@
-[
-  {
-    "id": "R-V1111P3QC1-W001",
-    "title": "tech_debt_summary.by_severity has non-canonical 'suggestion' bucket (rollup norm_sev() maps warning->low not suggestion); DRIFT flagged. Pre-existing (17 entries pre-P3; P3 archived 2)",
-    "severity": "low",
-    "decision": "defer",
-    "owner": "@fullstack-dev",
-    "target": "spec-hygiene",
-    "lifecycle": "resolved",
-    "tracking_link": ".mstar/plans/2026-07-12-v1.111-frontend-consolidation-sweep.md",
-    "note": "qc1 F-001. Pre-existing metadata-schema drift; P3 improved it. Canonical-severity normalization is the separate spec-hygiene pass (P3 non-goal). QC source: qc-consolidated.md Resolved 2026-07-12: suggestion→nit normalization + tech_debt_summary refresh."
-  }
-]
+{
+  "plan_id": "2026-07-12-v1.111-frontend-consolidation-sweep",
+  "schema_version": 1,
+  "entries": [
+    {
+      "id": "R-V1111P3QC1-W001",
+      "title": "tech_debt_summary.by_severity has non-canonical 'suggestion' bucket (rollup norm_sev() maps warning->low not suggestion); DRIFT flagged. Pre-existing (17 entries pre-P3; P3 archived 2)",
+      "severity": "low",
+      "decision": "defer",
+      "owner": "@fullstack-dev",
+      "target": "spec-hygiene",
+      "lifecycle": "resolved",
+      "tracking_link": ".mstar/plans/2026-07-12-v1.111-frontend-consolidation-sweep.md",
+      "note": "qc1 F-001. Pre-existing metadata-schema drift; P3 improved it. Canonical-severity normalization is the separate spec-hygiene pass (P3 non-goal). QC source: qc-consolidated.md Resolved 2026-07-12: suggestion→nit normalization + tech_debt_summary refresh."
+    },
+    {
+      "id": "R-V1111P3QC1-S001",
+      "title": "Two DESIGN-token gaps from P0/P1 UX audit: sidebar-nav.disabled token (disabled items use opacity-50) + listbox-max-height token (max-h-[320px])",
+      "severity": "nit",
+      "decision": "defer",
+      "owner": "@architect",
+      "target": "post-V1.111",
+      "lifecycle": "resolved",
+      "tracking_link": ".mstar/plans/2026-07-12-v1.111-frontend-consolidation-sweep.md",
+      "note": "qc1 S-002 + T4 audit. Add tokens when a second consumer appears. QC source: qc-consolidated.md Closed by V1.113 P1: tokens added + opacity-50 sweep.",
+      "closed_at": "2026-07-12",
+      "closure_note": "DESIGN.md + DESIGN.dark.md tokens added (sidebar-nav.disabledOpacity/disabledTextColor, listbox.maxHeight, states.disabled.opacity); all inline opacity-50 and max-h-[320px] usages swept to shared tokens; verified by QA (989 tests pass, typecheck clean, build clean, grep audit clean)",
+      "closure_evidence": "plan/v1.113-p1-ui-normalization: e2d9c017, 42161e8c, fd4a82bc, dc3518ab"
+    }
+  ]
+}

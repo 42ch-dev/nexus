@@ -30,6 +30,22 @@
       "closed_reason": "closed_by_fix_doc",
       "closed_at": "2026-07-12",
       "archived_at": "2026-07-12"
+    },
+    {
+      "id": "R-V1106P0-003",
+      "severity": "nit",
+      "lifecycle": "resolved",
+      "closure_note": "Added the @/components/ui/* alias to the apps/design-studio/AGENTS.md Allowed table, documenting its use in Vite/Vitest/tsconfig.",
+      "closure_evidence": "commit 28e199e3",
+      "archived_at": "2026-07-12"
+    },
+    {
+      "id": "R-V1106P0-004",
+      "severity": "nit",
+      "lifecycle": "resolved",
+      "closure_note": "Added a MAX_TOASTS=5 cap to ToastProvider.toast() so the queue cannot grow unbounded under rapid-fire duration:0 generation.",
+      "closure_evidence": "commit 28e199e3",
+      "archived_at": "2026-07-12"
     }
   ],
   "archived_at": "2026-07-12"
