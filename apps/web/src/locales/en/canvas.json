@@ -184,7 +184,7 @@
       "showList": "Show list",
       "createTransition": "Create Transition",
       "livePrefix": "Live:",
-      "liveStatus": "{{count}} states, {{edgeCount}} transitions"
+      "liveStatus": ""
     },
     "node": {
       "status": {
@@ -215,7 +215,7 @@
     },
     "validation": {
       "title": "Validation",
-      "dangling": "One or more transitions are missing a target state."
+      "dangling": "Dangling transition: {{target}}"
     },
     "altView": {
       "ariaLabel": "Strategy states and transitions in list order",

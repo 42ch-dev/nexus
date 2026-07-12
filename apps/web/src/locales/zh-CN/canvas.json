@@ -179,7 +179,7 @@
       "showList": "显示列表",
       "createTransition": "创建转换",
       "livePrefix": "实时：",
-      "liveStatus": "{{count}} 个状态，{{edgeCount}} 条转换"
+      "liveStatus": ""
     },
     "node": {
       "status": {
@@ -210,7 +210,7 @@
     },
     "validation": {
       "title": "校验",
-      "dangling": "存在一条或多条转换缺少目标状态。"
+      "dangling": "悬空转换：{{target}}"
     },
     "altView": {
       "ariaLabel": "按列表顺序显示策略状态与转换",
