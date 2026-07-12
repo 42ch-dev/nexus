@@ -1,6 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
+import { useState } from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -98,5 +99,54 @@ describe('ConflictModal', () => {
     expect(live.textContent).toContain('Label');
     expect(live.textContent).toContain('Description');
     expect(live.textContent).toContain('Resolve manually');
+  });
+
+  it('exposes consistent keyboard access keys for the four actions', () => {
+    render(<ConflictModal {...baseProps} />);
+    expect(screen.getByRole('button', { name: /Keep editing/i })).toHaveAttribute('accessKey', 'c');
+    expect(screen.getByRole('button', { name: /Review side-by-side/i })).toHaveAttribute('accessKey', 'r');
+    expect(screen.getByRole('button', { name: /Reapply my edit/i })).toHaveAttribute('accessKey', 'a');
+    expect(screen.getByRole('button', { name: /Use current/i })).toHaveAttribute('accessKey', 'u');
+  });
+
+  it('dismisses on Escape', async () => {
+    const user = userEvent.setup();
+    const onDismiss = vi.fn();
+    render(<ConflictModal {...baseProps} onDismiss={onDismiss} />);
+    await user.keyboard('{Escape}');
+    expect(onDismiss).toHaveBeenCalledOnce();
+  });
+
+  it('traps focus so Tab wraps from the last button to the first', async () => {
+    const user = userEvent.setup();
+    render(<ConflictModal {...baseProps} />);
+    // Move focus to the last button (Use current), then Tab should wrap to the first (Keep editing).
+    const useCurrent = screen.getByRole('button', { name: /Use current/i });
+    useCurrent.focus();
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: /Keep editing/i }));
+  });
+
+  it('returns focus to the element that triggered the modal when it closes', async () => {
+    const user = userEvent.setup();
+    function Wrapper() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>Open conflict</button>
+          <ConflictModal
+            {...baseProps}
+            open={open}
+            onDismiss={() => setOpen(false)}
+          />
+        </>
+      );
+    }
+    render(<Wrapper />);
+    const trigger = screen.getByRole('button', { name: 'Open conflict' });
+    await user.click(trigger);
+    expect(screen.getByRole('button', { name: /Keep editing/i })).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(trigger).toHaveFocus();
   });
 });
