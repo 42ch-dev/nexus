@@ -421,3 +421,76 @@ describe('BrowserClient Strategy canvas write boundary (V1.71)', () => {
     expect(res.new_revision).toBe(5);
   });
 });
+
+describe('BrowserClient compute module + KeyBlock state wiring (V1.114 P2)', () => {
+  it('lists compute modules with { items, has_more }', async () => {
+    useHandlers(
+      http.get('/v1/daemon/compute/modules', () =>
+        HttpResponse.json({
+          items: [
+            {
+              module_id: 'combat-resolver',
+              name: 'Combat Resolver',
+              version: '1.0.0',
+              nexus_abi_version: 1,
+              required_key_block_types: ['battle_report'],
+              compute_export: 'resolve',
+              init_export: 'init',
+            },
+          ],
+          has_more: false,
+        }),
+      ),
+    );
+
+    const client = new BrowserClient();
+    const res = await client.getComputeModules();
+    expect(res.items).toHaveLength(1);
+    expect(res.items[0]!.module_id).toBe('combat-resolver');
+    expect(res.has_more).toBe(false);
+  });
+
+  it('fetches a compute module manifest by id', async () => {
+    useHandlers(
+      http.get('/v1/daemon/compute/modules/:moduleId', ({ params }) =>
+        HttpResponse.json({
+          module_id: params.moduleId,
+          name: 'Combat Resolver',
+          version: '1.0.0',
+          nexus_abi_version: 1,
+          required_key_block_types: ['battle_report'],
+          compute_export: 'resolve',
+          init_export: 'init',
+          description: 'Resolves combat encounters.',
+          host_functions: ['kb_read', 'narrative_query'],
+          max_fuel: 1000,
+        }),
+      ),
+    );
+
+    const client = new BrowserClient();
+    const res = await client.getComputeModule('combat-resolver');
+    expect(res.module_id).toBe('combat-resolver');
+    expect(res.name).toBe('Combat Resolver');
+    expect(res.host_functions).toEqual(['kb_read', 'narrative_query']);
+    expect(res.max_fuel).toBe(1000);
+  });
+
+  it('reads the mutable state of a computable KeyBlock', async () => {
+    useHandlers(
+      http.get('/v1/daemon/worlds/:worldId/kb/key-blocks/:keyBlockId/state', () =>
+        HttpResponse.json({
+          state: { hp: 42, buffs: ['shield'] },
+          is_computable: true,
+          version: 7,
+        }),
+      ),
+    );
+
+    const client = new BrowserClient();
+    const res = await client.getKeyBlockState('w1', 'kb-1');
+    expect(res.state).toEqual({ hp: 42, buffs: ['shield'] });
+    expect(res.is_computable).toBe(true);
+    expect(res.version).toBe(7);
+  });
+});

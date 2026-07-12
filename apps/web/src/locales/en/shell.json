@@ -9,6 +9,7 @@
     "sessions": "Sessions",
     "schedule": "Schedule",
     "capabilities": "Capabilities",
+    "modules": "Modules",
     "findings": "Findings",
     "memory": "Memory",
     "settings": "Settings",
@@ -28,6 +29,8 @@
     "sessions": "Sessions",
     "schedule": "Schedule",
     "capabilities": "Capabilities",
+    "compute": "Compute",
+    "modules": "Modules",
     "strategies": "Strategies",
     "settings": "Settings"
   },

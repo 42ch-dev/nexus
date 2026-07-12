@@ -57,6 +57,7 @@ import type {
   ListFindingsResponse,
   ListMemoryFragmentsQuery,
   ListMemoryFragmentsResponse,
+  ListModulesResponse,
   ListPendingReviewsQuery,
   ListPendingReviewsResponse,
   ListPresetsResponse,
@@ -67,6 +68,7 @@ import type {
   ListWorksQuery,
   ListWorksResponse,
   MemoryFragmentInfo,
+  ModuleDetail,
   OutlinePatchChapterRequest,
   OutlinePatchResponse,
   OutlinePatchStructureRequest,
@@ -108,6 +110,7 @@ import type {
   World,
   WorldKbCandidatesResponse,
   WorldKbGraphResponse,
+  WorldKbKeyBlockStateResponse,
   WorldKbPatchEntityRequest,
   WorldKbPatchEntityResponse,
   WorldKbPatchRelationshipRequest,
@@ -333,6 +336,17 @@ export interface NexusClient {
     worldId: string,
     request: WorldKbPatchRelationshipRequest,
   ): Promise<WorldKbPatchRelationshipResponse>;
+
+  // ── Compute modules (V1.114 P2) ─────────────────────────────────────────
+  /** `GET /v1/daemon/compute/modules` — cursor list of registered compute modules. */
+  getComputeModules(): Promise<ListModulesResponse>;
+  /** `GET /v1/daemon/compute/modules/{module_id}` — full module manifest. */
+  getComputeModule(moduleId: string): Promise<ModuleDetail>;
+  /**
+   * `GET /v1/daemon/worlds/{world_id}/kb/key-blocks/{key_block_id}/state` —
+   * mutable runtime state of a computable KeyBlock plus computability flag + OCC version.
+   */
+  getKeyBlockState(worldId: string, keyBlockId: string): Promise<WorldKbKeyBlockStateResponse>;
 
   // ── Creator Memory review-loop (V1.78) ─────────────────────────────────────
   // All memory endpoints are creator-scoped: the daemon rejects a `creator_id`

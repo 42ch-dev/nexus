@@ -13,10 +13,12 @@
 use axum::extract::{Path, Query, State};
 use axum::Json;
 use nexus_contracts::{
-    WorldKbEntityPatch, WorldKbPatchEntityRequest, WorldKbPromoteCandidateRequest,
+    WorldKbEntityPatch, WorldKbKeyBlockStateResponse, WorldKbPatchEntityRequest,
+    WorldKbPromoteCandidateRequest,
 };
 use nexus_daemon_runtime::api::handlers::world_kb::{
-    get_candidates, get_graph, patch_entity, promote_candidate, CandidatesQuery, GraphQuery,
+    get_candidates, get_graph, get_key_block_state, patch_entity, promote_candidate,
+    CandidatesQuery, GraphQuery,
 };
 use nexus_daemon_runtime::workspace::WorkspaceState;
 use nexus_local_db::kb_extract_job::insert_pending;
@@ -981,4 +983,139 @@ async fn promote_merge_target_cas_miss_marks_target_conflict() {
         details["current_version"], 1,
         "target CAS-miss 409 must report the bumped target revision (V+1)"
     );
+}
+
+// ─── computable KeyBlock state read (V1.114 P2) ───────────────────────────────
+
+#[tokio::test]
+async fn get_key_block_state_computable_returns_state() {
+    let (_tmp, state) = fresh_state().await;
+    let body_json = serde_json::json!({
+        "summary": "A computable hero",
+        "attributes": {"max_hp": 100},
+        "computable": true,
+        "state": {"character": {"current_hp": 85, "status_effects": ["poisoned"]}}
+    })
+    .to_string();
+    seed_key_block(
+        state.pool(),
+        "kb_hero",
+        "wld_test_world",
+        "character",
+        "Hero",
+        "confirmed",
+        Some(7),
+        Some(&body_json),
+    )
+    .await;
+
+    let Json(resp) = get_key_block_state(
+        State(state.clone()),
+        Path(("wld_test_world".to_string(), "kb_hero".to_string())),
+    )
+    .await
+    .expect("state read should succeed");
+
+    let expected = WorldKbKeyBlockStateResponse {
+        state: serde_json::json!({"character": {"current_hp": 85, "status_effects": ["poisoned"]}}),
+        is_computable: true,
+        version: 7,
+    };
+    assert_eq!(resp, expected);
+}
+
+#[tokio::test]
+async fn get_key_block_state_non_computable_returns_null_state() {
+    let (_tmp, state) = fresh_state().await;
+    let body_json = serde_json::json!({
+        "summary": "A plain scene",
+        "attributes": {"novel_category": "scene"},
+        "computable": false
+    })
+    .to_string();
+    seed_key_block(
+        state.pool(),
+        "kb_scene",
+        "wld_test_world",
+        "scene",
+        "Forest",
+        "confirmed",
+        Some(3),
+        Some(&body_json),
+    )
+    .await;
+
+    let Json(resp) = get_key_block_state(
+        State(state.clone()),
+        Path(("wld_test_world".to_string(), "kb_scene".to_string())),
+    )
+    .await
+    .expect("state read should succeed");
+
+    assert_eq!(resp.state, serde_json::Value::Null);
+    assert!(!resp.is_computable);
+    assert_eq!(resp.version, 3);
+}
+
+#[tokio::test]
+async fn get_key_block_state_missing_block_returns_404() {
+    let (_tmp, state) = fresh_state().await;
+
+    let err = get_key_block_state(
+        State(state.clone()),
+        Path(("wld_test_world".to_string(), "kb_missing".to_string())),
+    )
+    .await
+    .expect_err("missing key block must 404");
+    assert_eq!(err.status_code(), axum::http::StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn get_key_block_state_cross_world_returns_404() {
+    let (_tmp, state) = fresh_state().await;
+    // Seed a second world owned by the same creator so the world-owner check
+    // passes; the key block simply lives in a different world.
+    // SAFETY: test-only seed of a second world row.
+    sqlx::query(
+        "INSERT OR IGNORE INTO narrative_worlds \
+         (world_id, workspace_id, owner_creator_id, title, slug, status, visibility, \
+          time_policy, metadata_json, created_at) \
+         VALUES ('wld_other', 'ws', 'test_creator', 'Other', 'other-world', 'active', 'private', \
+          'manual', '{}', datetime('now'))",
+    )
+    .execute(state.pool())
+    .await
+    .unwrap();
+    seed_key_block(
+        state.pool(),
+        "kb_other",
+        "wld_other",
+        "character",
+        "Other",
+        "confirmed",
+        Some(1),
+        None,
+    )
+    .await;
+
+    let err = get_key_block_state(
+        State(state.clone()),
+        Path(("wld_test_world".to_string(), "kb_other".to_string())),
+    )
+    .await
+    .expect_err("cross-world key block must 404");
+    assert_eq!(err.status_code(), axum::http::StatusCode::NOT_FOUND);
+}
+
+#[tokio::test]
+async fn get_key_block_state_unknown_world_returns_404() {
+    let (_tmp, state) = fresh_state().await;
+
+    let err = get_key_block_state(
+        State(state.clone()),
+        Path(("wld_unknown".to_string(), "kb_hero".to_string())),
+    )
+    .await
+    .expect_err("unknown world must 404");
+    assert_eq!(err.status_code(), axum::http::StatusCode::NOT_FOUND);
 }

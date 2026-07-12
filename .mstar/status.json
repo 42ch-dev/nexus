@@ -68,12 +68,12 @@
       "id": "2026-07-13-v1.114-compute-module-foundation",
       "title": "P2 - Compute Module Foundation & Visibility",
       "file": "plans/2026-07-13-v1.114-compute-module-foundation.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@fullstack-dev"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.114",
         "compute",
@@ -84,7 +84,7 @@
       ],
       "created_at": "2026-07-13",
       "updated_at": "2026-07-13",
-      "notes": "Phase 1: Prepare — compass + spec + plan drafted",
+      "notes": "Phase 2: SDD T1-T5 done + QC fix-wave (clippy deny); QC tri Approve with residuals (1 R# low); QA Pass with notes; contracts 0.22.0→0.23.0",
       "metadata": {
         "iteration_refs": [
           "V1.114"
@@ -1218,6 +1218,19 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-13-v1.114-canvas-architecture-foundation.md",
         "note": "qc2 Minor. Latent robustness gap."
+      }
+    ],
+    "2026-07-13-v1.114-compute-module-foundation": [
+      {
+        "id": "R-V1114P2QC1-W002",
+        "title": "Manifest JSON-round-trip bridge (registry.rs) masks drift between hand-written ModuleManifest and generated ModuleDetail",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.114",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-13-v1.114-compute-module-foundation.md",
+        "note": "qc1 W-002. Architectural debt; reconcile when module surface matures."
       }
     ]
   }

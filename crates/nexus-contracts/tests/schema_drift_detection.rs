@@ -195,6 +195,22 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             Strict,
             ComputeOutput
         ),
+        // V1.114 P2 T1: compute module registry endpoints.
+        entry!(
+            "schemas/daemon-api/compute/module-summary.schema.json",
+            Strict,
+            ModuleSummary
+        ),
+        entry!(
+            "schemas/daemon-api/compute/module-detail.schema.json",
+            Strict,
+            ModuleDetail
+        ),
+        entry!(
+            "schemas/daemon-api/compute/list-modules-response.schema.json",
+            Strict,
+            ListModulesResponse
+        ),
         // ── daemon-api/works/ (V1.63 P1) ──────────────────────────────────
         entry!(
             "schemas/daemon-api/works/create-work-request.schema.json",
@@ -833,6 +849,11 @@ fn build_schema_map() -> Vec<SchemaEntry> {
             "schemas/daemon-api/canvas/world-kb/world-kb-graph-response.schema.json",
             Strict,
             WorldKbGraphResponse
+        ),
+        entry!(
+            "schemas/daemon-api/canvas/world-kb/world-kb-key-block-state-response.schema.json",
+            Strict,
+            WorldKbKeyBlockStateResponse
         ),
         entry!(
             "schemas/daemon-api/canvas/world-kb/world-kb-candidates-response.schema.json",

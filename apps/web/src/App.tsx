@@ -11,6 +11,7 @@ import { ChapterPage } from '@/pages/chapter-page';
 import { ChaptersPage } from '@/pages/chapters-page';
 import { FindingsPage } from '@/pages/findings-page';
 import { MemoryPage } from '@/pages/memory-page';
+import { ModulesPage } from '@/pages/modules-page';
 import { NotFoundPage } from '@/pages/not-found-page';
 import { SchedulePage } from '@/pages/schedule-page';
 import { SessionsPage } from '@/pages/sessions-page';
@@ -91,6 +92,7 @@ function AppRoutes() {
         <Route path="sessions" element={<SessionsPage />} />
         <Route path="schedule" element={<SchedulePage />} />
         <Route path="capabilities" element={<CapabilitiesPage />} />
+        <Route path="modules" element={<ModulesPage />} />
         <Route path="findings" element={<FindingsPage />} />
         <Route path="memory" element={<MemoryPage />} />
         <Route path="settings" element={<SettingsShellLayout />}>
