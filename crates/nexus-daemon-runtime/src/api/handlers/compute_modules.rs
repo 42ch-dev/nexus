@@ -40,7 +40,14 @@ pub async fn get_module(
     State(_state): State<WorkspaceState>,
     Path(module_id): Path<String>,
 ) -> Result<Json<ModuleDetail>, NexusApiError> {
-    nexus_wasm_host::get_module(&module_id)
-        .map(Json)
-        .ok_or_else(|| NexusApiError::NotFound(format!("module '{module_id}' not found")))
+    match nexus_wasm_host::get_module(&module_id) {
+        Ok(Some(detail)) => Ok(Json(detail)),
+        Ok(None) => Err(NexusApiError::NotFound(format!(
+            "module '{module_id}' not found"
+        ))),
+        Err(err) => Err(NexusApiError::Internal {
+            code: "MODULE_MANIFEST_INVALID".into(),
+            message: format!("module '{module_id}' manifest is invalid: {err}"),
+        }),
+    }
 }

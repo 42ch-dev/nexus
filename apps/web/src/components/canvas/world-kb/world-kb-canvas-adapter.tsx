@@ -126,7 +126,7 @@ export function createWorldKbCanvasAdapter(
     surfaceKind: 'world-kb-entities',
     nodeTypes: worldKbNodeTypes,
     edgeTypes: undefined,
-    layoutOptions: undefined,
+    layoutOptions: { direction: 'TB' },
 
     projectGraph(graph) {
       const entityNodes = layoutNodes(

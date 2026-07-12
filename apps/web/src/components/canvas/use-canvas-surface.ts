@@ -91,6 +91,21 @@ export function useCanvasSurface<TGraph, TNodeData extends Record<string, unknow
 
   const layout = useAutoLayout(nodes, projected.edges, adapter.layoutOptions);
 
+  // Reconcile laid-out positions back into the source node state that React Flow
+  // owns. Without this, measurement-only changes from React Flow compare the
+  // original (pre-layout) positions against the saved layout positions and are
+  // misclassified as manual drags, which suppresses auto-layout.
+  useEffect(() => {
+    if (layout.nodes === nodes) return;
+    const layoutById = new Map(layout.nodes.map((n) => [n.id, n]));
+    setNodes((prev) =>
+      prev.map((node) => {
+        const laidOut = layoutById.get(node.id);
+        return laidOut ? { ...node, position: laidOut.position } : node;
+      }),
+    );
+  }, [layout.nodes, nodes]);
+
   const selectedNode = useMemo(
     () => layout.nodes.find((n) => n.selected) ?? null,
     [layout.nodes],

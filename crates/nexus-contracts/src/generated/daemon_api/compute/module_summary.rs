@@ -19,4 +19,5 @@ pub struct ModuleSummary {
     pub required_key_block_types: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub battle_report_kind: Option<String>,
+    pub status: String,
 }

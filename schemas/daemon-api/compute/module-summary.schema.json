@@ -5,7 +5,7 @@
   "title": "Nexus ComputeModuleSummary",
   "description": "Summary of an installed compute module surfaced by the registry list endpoint.",
   "type": "object",
-  "required": ["module_id", "name", "version", "required_key_block_types"],
+  "required": ["module_id", "name", "version", "required_key_block_types", "status"],
   "properties": {
     "module_id": { "type": "string" },
     "name": { "type": "string" },
@@ -15,7 +15,11 @@
       "type": "array",
       "items": { "type": "string" }
     },
-    "battle_report_kind": { "type": "string" }
+    "battle_report_kind": { "type": "string" },
+    "status": {
+      "type": "string",
+      "enum": ["ok", "broken"]
+    }
   },
   "additionalProperties": false
 }

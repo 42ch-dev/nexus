@@ -143,6 +143,59 @@ describe('useCanvasSurface', () => {
     expect(appended.position).toEqual({ x: 10, y: 10 });
   });
 
+  it('reconciles layout positions so measurement-only changes do not revert the graph', () => {
+    const adapter: CanvasSurfaceAdapter<
+      SimpleGraph,
+      { label: string },
+      { label: string }
+    > = {
+      surfaceKind: 'strategy',
+      projectGraph(graph) {
+        return {
+          nodes: graph.items.map((id) => ({
+            id,
+            type: 'default',
+            position: { x: 0, y: 0 },
+            data: { label: id },
+          })),
+          edges: graph.items.slice(1).map((id, index) => ({
+            id: `e-${index}`,
+            source: graph.items[index],
+            target: id,
+          })),
+        };
+      },
+      nodeTypes,
+      layoutOptions: { direction: 'TB' },
+      summarizeGraph(graph) {
+        return `Graph with ${graph.items.length} items`;
+      },
+    };
+    const query = makeQuery({ data: { items: ['a', 'b', 'c'] } });
+    const { result } = renderHook(
+      ({ adapter, query }) => useCanvasSurface(adapter, query),
+      { initialProps: { adapter, query } },
+    );
+
+    const laidOutA = result.current.nodes.find((n) => n.id === 'a')!;
+    const laidOutC = result.current.nodes.find((n) => n.id === 'c')!;
+    expect(laidOutC.position.y).toBeGreaterThan(laidOutA.position.y);
+
+    act(() => {
+      result.current.onNodesChange([
+        {
+          id: 'a',
+          type: 'dimensions',
+          dimensions: { width: 100, height: 50 },
+        },
+      ]);
+    });
+
+    const afterMeasurement = result.current.nodes.find((n) => n.id === 'a')!;
+    expect(afterMeasurement.position).toEqual(laidOutA.position);
+    expect(afterMeasurement.measured).toEqual({ width: 100, height: 50 });
+  });
+
   it('exposes selectedNode and selectedNodeId from node selection', () => {
     const adapter = makeAdapter();
     const query = makeQuery({ data: { items: ['a', 'b'] } });
