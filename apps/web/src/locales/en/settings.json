@@ -1,0 +1,21 @@
+{
+  "aria": {
+    "sections": "Settings sections"
+  },
+  "nav": {
+    "agent": "Agent",
+    "workspace": "Workspace",
+    "appearance": "Appearance",
+    "advanced": "Advanced"
+  },
+  "appearance": {
+    "title": "Appearance",
+    "language": {
+      "label": "Language",
+      "system": "System",
+      "en": "English",
+      "zh-CN": "简体中文",
+      "helper": "System follows your OS/browser language."
+    }
+  }
+}

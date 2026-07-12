@@ -1,0 +1,13 @@
+{
+  "action": {
+    "save": "Save",
+    "cancel": "Cancel"
+  },
+  "status": {
+    "loading": "Loading…"
+  },
+  "toast": {
+    "error": "Error",
+    "success": "Success"
+  }
+}
