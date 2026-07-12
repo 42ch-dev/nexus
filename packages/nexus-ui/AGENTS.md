@@ -25,7 +25,7 @@ Publishable npm workspace package for Nexus brand assets, design tokens, theme C
 ## Dependencies
 
 - **Runtime/peer**: `react` (>=18), `react-dom` (>=18) — peer deps only (consumers ship React)
-- **Runtime/package deps**: non-singleton implementation helpers are allowed only when imported by promoted primitives (for example `class-variance-authority`, `@radix-ui/react-slot`, `clsx`, `tailwind-merge`). Do not make these peer dependencies unless consumers must share a singleton instance.
+- **Runtime/package deps**: non-singleton implementation helpers are allowed only when imported by promoted primitives (for example `class-variance-authority`, `@radix-ui/react-slot`, `clsx`, `tailwind-merge`, `lucide-react` for icon imports such as the Toast leading icons). Do not make these peer dependencies unless consumers must share a singleton instance.
 - **Dev-only**: `typescript`, `tsup`, `@types/react`, `@types/react-dom`, package tests
 - Consumers: `apps/web` and `apps/design-studio` (workspace); future external surfaces via public exports
 

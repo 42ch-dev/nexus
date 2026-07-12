@@ -1,16 +1,22 @@
 {
+  "schema_version": 1,
+  "description": "Archived resolved residuals from 2026-07-11-v1.109-canvas-scene-beat.",
   "plan_id": "2026-07-11-v1.109-canvas-scene-beat",
-  "findings": [
+  "entries": [
     {
-      "id": "R-V1109-P0-QC3-I1",
-      "title": "Selection-sync useEffect fires on every node interaction (position drag), not just selection changes — inherited from V1.108",
-      "severity": "low",
+      "id": "R-V1109-P0-QC1-W001",
+      "title": "R-V1108P1QC1-S002 (Studio imports extracted chrome) not actually closed — Studio re-mirrors chrome as static markup (RF-coupled, import boundary forbids RF deps)",
+      "severity": "suggestion",
       "decision": "defer",
       "owner": "@frontend-dev",
-      "target": "P2 FB-GS-001 (V1.109 same iteration)",
+      "target": "post-V1.109",
       "lifecycle": "resolved",
-      "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
-      "note": "Inherited R-V1108P0QC3-W001; extract makes fix file-disjoint; P0 does not worsen. QC source: QC3 I1"
+      "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-scene-beat.md",
+      "note": "Re-scope: only R-V1108P0QC1-S001 (hook extract) is closed by P0. QC source: QC1 F-001",
+      "closed_reason": "locked_direction_static_mirror",
+      "closed_at": "2026-07-12",
+      "archived_at": "2026-07-12"
     }
-  ]
+  ],
+  "archived_at": "2026-07-12"
 }
