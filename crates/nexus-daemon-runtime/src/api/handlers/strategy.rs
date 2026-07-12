@@ -954,6 +954,16 @@ fn apply_transition_create(
     req: &StrategyPatchTransitionRequest,
     new_target: &str,
 ) -> Result<Vec<String>, NexusApiError> {
+    if req.source_state_id == new_target {
+        return Err(NexusApiError::BadRequest {
+            code: "strategy_self_loop".to_string(),
+            message: format!(
+                "state '{}' cannot transition to itself",
+                req.source_state_id
+            ),
+        });
+    }
+
     let kind = resolved_create_transition_kind(req, next)?;
     let mut side_effects: Vec<String> = Vec::new();
 

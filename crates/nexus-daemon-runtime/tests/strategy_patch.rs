@@ -293,6 +293,59 @@ states:
 }
 
 #[tokio::test]
+async fn patch_transition_create_rejects_self_loop() {
+    let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
+    let bundle_dir = seed_test_bundle(&nexus_home);
+
+    let yaml = r#"
+revision: 1
+preset:
+  id: test-strategy
+  version: 1
+  kind: creator
+  description: "Integration test strategy"
+  run_intents: [work_init]
+  initial: start
+  terminal: end
+states:
+  - id: start
+    description: "Start state"
+  - id: end
+    terminal: true
+"#;
+    std::fs::write(bundle_dir.join("preset.yaml"), yaml).expect("write preset.yaml");
+
+    let state = test_state(tmp, nexus_home, db_path).await;
+
+    let req = StrategyPatchTransitionRequest {
+        strategy_id: "test-strategy".to_string(),
+        base_revision: 1,
+        source_state_id: "start".to_string(),
+        old_target: None,
+        new_target: Some("start".to_string()),
+        condition: None,
+        transition_kind: None,
+        op: Some("create".to_string()),
+    };
+
+    let err = patch_transition(State(state), Path("test-strategy".to_string()), Json(req))
+        .await
+        .expect_err("self-loop create should fail");
+
+    assert_eq!(
+        err.status_code(),
+        axum::http::StatusCode::UNPROCESSABLE_ENTITY
+    );
+    assert_eq!(err.error_code(), "strategy_self_loop");
+    match err {
+        NexusApiError::BadRequest { code, .. } => {
+            assert_eq!(code, "strategy_self_loop");
+        }
+        other => panic!("expected BadRequest, got {other:?}"),
+    }
+}
+
+#[tokio::test]
 async fn patch_transition_create_honors_transition_kind_default() {
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
     let bundle_dir = seed_test_bundle(&nexus_home);

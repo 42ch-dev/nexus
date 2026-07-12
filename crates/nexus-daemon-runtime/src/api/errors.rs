@@ -253,7 +253,8 @@ impl NexusApiError {
                     | "world_clear_forbidden"
                     | "invalid_transition"
                     | "invalid_input"
-                    | "too_many_findings" => StatusCode::UNPROCESSABLE_ENTITY,
+                    | "too_many_findings"
+                    | "strategy_self_loop" => StatusCode::UNPROCESSABLE_ENTITY,
                     // V1.65: chapter bodies above the size cap return 413.
                     "chapter_body_too_large" => StatusCode::PAYLOAD_TOO_LARGE,
                     _ => StatusCode::BAD_REQUEST,
@@ -300,7 +301,8 @@ impl NexusApiError {
                     | "too_many_findings"
                     | "world_id_required"
                     | "invalid_world_id"
-                    | "world_clear_forbidden" => code.as_str(),
+                    | "world_clear_forbidden"
+                    | "strategy_self_loop" => code.as_str(),
                     _ if code.ends_with("_sort_invalid") => code.as_str(),
                     _ => "bad_request",
                 }
