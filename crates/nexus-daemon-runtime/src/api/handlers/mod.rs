@@ -3,6 +3,7 @@
 pub mod acp;
 pub mod agent_host;
 pub mod chapters;
+pub mod compute_modules;
 pub mod creators;
 pub mod findings;
 pub mod host_tool_executor;

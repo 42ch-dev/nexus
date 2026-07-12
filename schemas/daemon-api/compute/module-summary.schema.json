@@ -1,0 +1,21 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/compute/module-summary.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ComputeModuleSummary",
+  "description": "Summary of an installed compute module surfaced by the registry list endpoint.",
+  "type": "object",
+  "required": ["module_id", "name", "version", "required_key_block_types"],
+  "properties": {
+    "module_id": { "type": "string" },
+    "name": { "type": "string" },
+    "version": { "type": "string" },
+    "description": { "type": "string" },
+    "required_key_block_types": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "battle_report_kind": { "type": "string" }
+  },
+  "additionalProperties": false
+}

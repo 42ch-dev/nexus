@@ -471,6 +471,21 @@ fn works_routes() -> Router<WorkspaceState> {
             patch(handlers::findings::batch_update_findings_handler),
         )
 }
+/// Compute module registry routes (V1.114 P2 T1).
+///
+/// Read-only discovery endpoints for installed WASM compute modules.
+fn compute_routes() -> Router<WorkspaceState> {
+    Router::new()
+        .route(
+            "/v1/daemon/compute/modules",
+            get(handlers::compute_modules::list_modules),
+        )
+        .route(
+            "/v1/daemon/compute/modules/{module_id}",
+            get(handlers::compute_modules::get_module),
+        )
+}
+
 /// Create the Daemon API router
 ///
 /// **Unguarded routes** (no auth, always reachable):
@@ -502,6 +517,8 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
             "/v1/daemon/monitoring/pool",
             get(handlers::monitoring::pool_status),
         )
+        // Compute module registry (V1.114 P2 T1)
+        .merge(compute_routes())
         // Workspace + Creator + Preset + KB + Memory (Batch 4–5 route groups)
         .merge(workspace_routes())
         .merge(creator_routes())

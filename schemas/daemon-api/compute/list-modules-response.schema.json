@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/compute/list-modules-response.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ListModulesResponse",
+  "description": "Response for GET /v1/daemon/compute/modules.",
+  "type": "object",
+  "required": ["items", "has_more"],
+  "properties": {
+    "items": {
+      "type": "array",
+      "items": { "$ref": "https://nexus42.invalid/schemas/daemon-api/compute/module-summary.schema.json" }
+    },
+    "has_more": { "type": "boolean" }
+  },
+  "additionalProperties": false
+}
