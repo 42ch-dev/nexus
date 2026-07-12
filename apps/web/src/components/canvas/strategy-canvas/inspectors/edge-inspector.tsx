@@ -237,7 +237,7 @@ export function DraftEdgeInspector({
             type="button"
             onClick={handleCommit}
             disabled={isCommitting}
-            className="rounded-control bg-purple-700 px-2 py-1 text-button-12 text-white hover:bg-purple-800 disabled:opacity-50"
+            className="rounded-control bg-purple-700 px-2 py-1 text-button-12 text-white hover:bg-purple-800 disabled:opacity-disabled"
           >
             {isCommitting ? t('strategy.edgeCreate.creating') : t('strategy.edgeCreate.submit')}
           </button>

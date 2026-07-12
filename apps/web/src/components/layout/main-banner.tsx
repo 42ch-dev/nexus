@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { RefreshCw } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -18,6 +19,7 @@ const STATUS_SYNC_INTERVAL_MS = 10_000;
  * {@link RootLayout}.
  */
 export function MainBanner() {
+  const { t } = useTranslation('shell');
   const desktop = useDesktopCapabilities();
   const [status, setStatus] = useState<DaemonStatus | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -71,7 +73,7 @@ export function MainBanner() {
   const state = status?.state ?? 'starting';
   if (state === 'running') return null;
 
-  const { title, description } = messageFor(status);
+  const { title, description } = messageFor(status, t);
 
   const handleRestart = async () => {
     if (!desktop) return;
@@ -83,8 +85,8 @@ export function MainBanner() {
       await desktop.startDaemon();
       await refresh();
     } catch (err) {
-      const message = errorMessage(err) || 'Daemon restart failed.';
-      toast({ variant: 'error', title: 'Daemon restart failed', description: message });
+      const message = errorMessage(err) || t('daemon.restartFailedFallback');
+      toast({ variant: 'error', title: t('daemon.restartFailed'), description: message });
     } finally {
       setIsLoading(false);
     }
@@ -105,32 +107,35 @@ export function MainBanner() {
           disabled={isLoading}
         >
           <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} aria-hidden />
-          {isLoading ? 'Restarting…' : 'Restart Daemon'}
+          {isLoading ? t('daemon.restarting') : t('daemon.restartButton')}
         </Button>
       </div>
     </div>
   );
 }
 
-function messageFor(status: DaemonStatus | null): { title: string; description?: string } {
+function messageFor(
+  status: DaemonStatus | null,
+  t: ReturnType<typeof useTranslation>['t'],
+): { title: string; description?: string } {
   if (!status) {
-    return { title: 'Checking daemon…' };
+    return { title: t('health.checking') };
   }
   switch (status.state) {
     case 'starting':
       return {
-        title: 'Daemon starting…',
-        description: status.detail ?? 'Nexus is starting the local daemon.',
+        title: t('daemon.starting'),
+        description: status.detail ?? t('daemon.startingDescription'),
       };
     case 'degraded':
       return {
-        title: 'Daemon reconnecting',
-        description: status.detail ?? 'Nexus is retrying the local daemon connection.',
+        title: t('daemon.reconnecting'),
+        description: status.detail ?? t('daemon.reconnectingDescription'),
       };
     case 'stopped':
       return {
-        title: 'Daemon stopped',
-        description: status.detail ?? 'Restart the daemon to use local workspace features.',
+        title: t('daemon.stopped'),
+        description: status.detail ?? t('daemon.stoppedDescription'),
       };
     case 'error': {
       const isPortConflict =
@@ -138,13 +143,12 @@ function messageFor(status: DaemonStatus | null): { title: string; description?:
         status.detail.includes('port') &&
         status.detail.includes('already in use');
       return {
-        title: isPortConflict ? 'Port unavailable' : 'Daemon did not start',
+        title: isPortConflict ? t('daemon.portUnavailable') : t('daemon.didNotStart'),
         description:
-          status.detail ??
-          'Nexus could not start its background service. Check the logs or try restarting.',
+          status.detail ?? t('daemon.didNotStartDescription'),
       };
     }
     default:
-      return { title: 'Daemon status unknown' };
+      return { title: t('daemon.statusUnknown') };
   }
 }

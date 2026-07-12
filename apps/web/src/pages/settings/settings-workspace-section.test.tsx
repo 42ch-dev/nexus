@@ -15,9 +15,7 @@ const PICKED_PATH = '/Volumes/Studio/Nexus';
 function makeDesktopCapabilities(): DesktopCapabilities {
   return {
     getWorkspaceRoot: vi.fn(() => Promise.resolve(INITIAL_PATH)),
-    pickDirectory: vi.fn((defaultPath: string) =>
-      Promise.resolve(defaultPath === INITIAL_PATH ? PICKED_PATH : PICKED_PATH),
-    ),
+    pickDirectory: vi.fn(() => Promise.resolve(PICKED_PATH)),
     setWorkspacePath: vi.fn(() => Promise.resolve()),
     openWith: vi.fn(() => Promise.resolve()),
     revealInFinder: vi.fn(() => Promise.resolve()),
@@ -61,6 +59,21 @@ describe('SettingsWorkspaceSection', () => {
       ),
     );
     expect(desktop.getWorkspaceRoot).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to the default workspace path when loading fails (desktop)', async () => {
+    const desktop = makeDesktopCapabilities();
+    vi.mocked(desktop.getWorkspaceRoot).mockRejectedValue(new Error('permission denied'));
+
+    renderInApp(<SettingsWorkspaceSection />, { desktop });
+
+    await waitFor(() =>
+      expect(screen.getByDisplayValue('~/Documents/nexus/default')).toHaveValue(
+        '~/Documents/nexus/default',
+      ),
+    );
+    expect(desktop.getWorkspaceRoot).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Change Folder…' })).toBeEnabled();
   });
 
   it('persists a picked directory and shows inline honesty copy', async () => {

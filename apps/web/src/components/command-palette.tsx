@@ -264,7 +264,7 @@ function CommandPaletteDialog(): React.ReactElement {
             id={listboxId}
             role="listbox"
             aria-label={t('palette.listbox.label')}
-            className="max-h-[320px] overflow-y-auto p-1"
+            className="max-h-listbox overflow-y-auto p-1"
           >
             {visible.map((command, index) => (
               <CommandOption

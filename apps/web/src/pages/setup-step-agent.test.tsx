@@ -192,6 +192,37 @@ describe('SetupStepAgent', () => {
     );
   });
 
+  it('does not re-fire auto-select when workspaceRoot changes (R-V194QC1-S101)', async () => {
+    const agent = makeAgent({
+      name: 'Claude Code',
+      registry_agent_id: 'claude-acp',
+      installed: true,
+    });
+    useHandlers(
+      http.post('/v1/daemon/agent-host/scan', () =>
+        HttpResponse.json({ agents: [agent] }),
+      ),
+    );
+    const onChange = vi.fn();
+
+    const { rerender } = renderInApp(
+      <SetupStepAgent state={makeState()} onChange={onChange} onNext={vi.fn()} />,
+      { client: makeClient(), initialRouterEntries: ['/setup'] },
+    );
+
+    await waitFor(() => expect(onChange).toHaveBeenCalledTimes(1));
+
+    rerender(
+      <SetupStepAgent
+        state={makeState({ workspaceRoot: '/some/other/path' })}
+        onChange={onChange}
+        onNext={vi.fn()}
+      />,
+    );
+
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
   it('selects an installed agent and calls onChange with the selected agent', async () => {
     const user = userEvent.setup();
     const agent = makeAgent({

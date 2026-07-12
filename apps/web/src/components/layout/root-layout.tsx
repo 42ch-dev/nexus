@@ -84,7 +84,7 @@ export function RootLayout() {
                 )
               }
             >
-              {t(`mobileNav.${key}`)}
+              {t(`route.${key}`)}
             </NavLink>
           ))}
         </nav>

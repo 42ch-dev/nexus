@@ -1,0 +1,54 @@
+{
+  "plan_id": "2026-07-06-v1.94-closure",
+  "schema_version": 1,
+  "entries": [
+    {
+      "id": "R-V194QC1-S101",
+      "severity": "low",
+      "lifecycle": "resolved",
+      "closure_note": "Narrowed auto-select effect to react only to firstInstalled via refs; no longer re-fires on workspaceRoot/workspacePicked changes. Regression test added.",
+      "closure_evidence": "commit 28e199e3",
+      "archived_at": "2026-07-12"
+    },
+    {
+      "id": "R-V194QC1-S102",
+      "severity": "low",
+      "lifecycle": "resolved",
+      "closure_note": "Obsolete: SetupStepDaemon was retired in V1.105; daemon readiness now lives in DaemonLaunchGate, so the duplicate health-probe subscription no longer exists.",
+      "closure_evidence": "already-fixed — architecture retired in V1.105",
+      "archived_at": "2026-07-12"
+    },
+    {
+      "id": "R-V194QC1-S103",
+      "severity": "low",
+      "lifecycle": "resolved",
+      "closure_note": "Obsolete: SetupStepWelcome was retired in V1.105; current SetupStepWorkspace surfaces errors via useToast and console.error.",
+      "closure_evidence": "already-fixed — component retired in V1.105",
+      "archived_at": "2026-07-12"
+    },
+    {
+      "id": "R-V194QC1-S104",
+      "severity": "low",
+      "lifecycle": "waived",
+      "closure_note": "Accepted: browser fallback path uses \"~\" as a placeholder because the browser build has no filesystem access; Tauri desktop returns the real absolute path.",
+      "closure_evidence": "accepted — browser-only limitation",
+      "archived_at": "2026-07-12"
+    },
+    {
+      "id": "R-V194QC1-S105",
+      "severity": "low",
+      "lifecycle": "resolved",
+      "closure_note": "/strategy redirect now preserves the query search string via a dedicated StrategyRedirect component.",
+      "closure_evidence": "commit 28e199e3",
+      "archived_at": "2026-07-12"
+    },
+    {
+      "id": "R-V194QC1-S106",
+      "severity": "low",
+      "lifecycle": "resolved",
+      "closure_note": "Already-fixed: sidebar nav data is now typed with literal ids and CanvasNavItem/ShellNavGroup unions in sidebar.tsx.",
+      "closure_evidence": "already-fixed — typed nav groups landed in V1.111",
+      "archived_at": "2026-07-12"
+    }
+  ]
+}

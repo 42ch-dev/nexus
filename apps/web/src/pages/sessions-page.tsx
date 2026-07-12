@@ -1,4 +1,5 @@
 import { RefreshCw } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { StatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
@@ -16,6 +17,7 @@ import { shortId } from '@/lib/format';
  * stable order (SessionSummary has no timestamp).
  */
 export function SessionsPage() {
+  const { t } = useTranslation('sessions');
   const sessions = useSessions();
 
   return (
@@ -23,8 +25,8 @@ export function SessionsPage() {
       <CardHeader>
         <div className="flex items-center justify-between gap-2">
           <div>
-            <CardTitle>Sessions</CardTitle>
-            <CardDescription>What the runtime is doing right now.</CardDescription>
+            <CardTitle>{t('title')}</CardTitle>
+            <CardDescription>{t('description')}</CardDescription>
           </div>
           <Button
             type="button"
@@ -32,32 +34,32 @@ export function SessionsPage() {
             size="small"
             onClick={() => sessions.refetch()}
             disabled={sessions.isFetching}
-            aria-label="Refresh sessions"
+            aria-label={t('refreshAria')}
           >
             <RefreshCw className={`h-4 w-4 ${sessions.isFetching ? 'animate-spin' : ''}`} aria-hidden />
-            Refresh
+            {t('refresh')}
           </Button>
         </div>
       </CardHeader>
       <CardContent>
         {sessions.isError ? (
           <ErrorState
-            description="Could not load orchestration sessions."
+            description={t('errorDescription')}
             onRetry={() => sessions.refetch()}
           />
         ) : sessions.isLoading ? (
-          <LoadingState label="Loading sessions…" />
+          <LoadingState label={t('loading')} />
         ) : !sessions.data || sessions.data.length === 0 ? (
-          <EmptyState title="No active sessions" description="Orchestration sessions will appear here when the runtime runs." />
+          <EmptyState title={t('emptyTitle')} description={t('emptyDescription')} />
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Session</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Preset</TableHead>
-                <TableHead>Creator</TableHead>
-                <TableHead>Current task</TableHead>
+                <TableHead>{t('columns.session')}</TableHead>
+                <TableHead>{t('columns.status')}</TableHead>
+                <TableHead>{t('columns.preset')}</TableHead>
+                <TableHead>{t('columns.creator')}</TableHead>
+                <TableHead>{t('columns.currentTask')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>

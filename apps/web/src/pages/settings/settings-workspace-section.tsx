@@ -4,7 +4,7 @@
  * View/change the workspace folder via desktop capabilities. Browser build
  * shows honest desktop-only copy and disables the picker.
  */
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { FolderOpen } from 'lucide-react';
 
 import { useTranslation } from 'react-i18next';
@@ -19,9 +19,11 @@ import { WorkspacePathField } from '@/components/setup/workspace-path-field';
 import { useDesktopCapabilities } from '@/lib/client-context';
 import { errorMessage } from '@/lib/error-message';
 import { useToast } from '@/lib/use-toast';
+import { DEFAULT_WORKSPACE } from '@/pages/setup-step-workspace';
 
 export function SettingsWorkspaceSection() {
   const { t } = useTranslation('settings');
+  const { t: commonT } = useTranslation('common');
   const desktop = useDesktopCapabilities();
   const { toast } = useToast();
   const [path, setPath] = useState('');
@@ -42,8 +44,9 @@ export function SettingsWorkspaceSection() {
       })
       .catch((err) => {
         if (!cancelled) {
-          const description = errorMessage(err) || 'Could not load the workspace path.';
-          toast({ variant: 'error', title: 'Workspace path', description });
+          const description = errorMessage(err) || commonT('toast.workspacePathLoadFailed');
+          toast({ variant: 'error', title: commonT('toast.workspacePath'), description });
+          setPath(DEFAULT_WORKSPACE);
           console.error('Failed to load workspace root:', err);
         }
       })
@@ -55,7 +58,7 @@ export function SettingsWorkspaceSection() {
     };
   }, [desktop, toast]);
 
-  async function handleChangeFolder() {
+  const handleChangeFolder = useCallback(async () => {
     if (!desktop) return;
     setSaved(false);
     setSaving(true);
@@ -66,13 +69,13 @@ export function SettingsWorkspaceSection() {
       setPath(selected);
       setSaved(true);
     } catch (err) {
-      const description = errorMessage(err) || 'Could not save the workspace path.';
-      toast({ variant: 'error', title: 'Workspace path', description });
+      const description = errorMessage(err) || commonT('toast.workspacePathSaveFailed');
+      toast({ variant: 'error', title: commonT('toast.workspacePath'), description });
       console.error('Failed to change workspace path:', err);
     } finally {
       setSaving(false);
     }
-  }
+  }, [desktop, path, commonT, toast]);
 
   return (
     <div
@@ -96,9 +99,9 @@ export function SettingsWorkspaceSection() {
           <WorkspacePathField
             id="settings-workspace-path"
             path={path}
-            loading={loading}
-            changeDisabled={saving}
-            onChangeClick={() => void handleChangeFolder()}
+          loading={loading}
+          changeDisabled={saving || loading || !path}
+          onChangeClick={() => void handleChangeFolder()}
             layout="settings-row"
             desktopAvailable={Boolean(desktop)}
             label={t('workspace.folderLabel')}

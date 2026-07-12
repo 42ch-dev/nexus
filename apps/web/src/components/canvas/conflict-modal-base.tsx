@@ -283,7 +283,7 @@ export function ConflictModalBase<T extends string = string>({
                     fields: overlap.map((f) => f.label).join(', '),
                   })
             }
-            className="rounded-control border border-gray-alpha-400 px-4 py-2 text-button-12 text-gray-900 hover:bg-gray-alpha-100 disabled:cursor-not-allowed disabled:opacity-50"
+            className="rounded-control border border-gray-alpha-400 px-4 py-2 text-button-12 text-gray-900 hover:bg-gray-alpha-100 disabled:cursor-not-allowed disabled:opacity-disabled"
           >
             <RefreshCw className="mr-1.5 inline h-4 w-4" aria-hidden />
             {resolvedReapplyLabel}

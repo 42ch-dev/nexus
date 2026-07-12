@@ -10,6 +10,11 @@ import enReading from '../../locales/en/reading.json';
 import enFindings from '../../locales/en/findings.json';
 import enMemory from '../../locales/en/memory.json';
 import enCommands from '../../locales/en/commands.json';
+import enWorks from '../../locales/en/works.json';
+import enSchedule from '../../locales/en/schedule.json';
+import enSessions from '../../locales/en/sessions.json';
+import enStrategies from '../../locales/en/strategies.json';
+import enCapabilities from '../../locales/en/capabilities.json';
 
 import zhCommon from '../../locales/zh-CN/common.json';
 import zhShell from '../../locales/zh-CN/shell.json';
@@ -20,6 +25,11 @@ import zhReading from '../../locales/zh-CN/reading.json';
 import zhFindings from '../../locales/zh-CN/findings.json';
 import zhMemory from '../../locales/zh-CN/memory.json';
 import zhCommands from '../../locales/zh-CN/commands.json';
+import zhWorks from '../../locales/zh-CN/works.json';
+import zhSchedule from '../../locales/zh-CN/schedule.json';
+import zhSessions from '../../locales/zh-CN/sessions.json';
+import zhStrategies from '../../locales/zh-CN/strategies.json';
+import zhCapabilities from '../../locales/zh-CN/capabilities.json';
 
 export type LocalePreference = 'system' | 'en' | 'zh-CN';
 export type ResolvedLocale = 'en' | 'zh-CN';
@@ -67,6 +77,11 @@ export const namespaces = [
   'findings',
   'memory',
   'commands',
+  'works',
+  'schedule',
+  'sessions',
+  'strategies',
+  'capabilities',
 ] as const;
 
 export type Namespace = (typeof namespaces)[number];
@@ -90,6 +105,11 @@ i18next
         findings: enFindings,
         memory: enMemory,
         commands: enCommands,
+        works: enWorks,
+        schedule: enSchedule,
+        sessions: enSessions,
+        strategies: enStrategies,
+        capabilities: enCapabilities,
       },
       'zh-CN': {
         common: zhCommon,
@@ -101,6 +121,11 @@ i18next
         findings: zhFindings,
         memory: zhMemory,
         commands: zhCommands,
+        works: zhWorks,
+        schedule: zhSchedule,
+        sessions: zhSessions,
+        strategies: zhStrategies,
+        capabilities: zhCapabilities,
       },
     },
     interpolation: {

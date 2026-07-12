@@ -137,6 +137,24 @@ describe('LocaleProvider setPreference', () => {
     expect(i18n.language).toBe('en');
     expect(document.documentElement.lang).toBe('en');
   });
+
+  it('rejects an invalid preference and keeps the current state', () => {
+    setNavigatorLanguage('en');
+    let setPreference: (p: LocalePreference) => void = () => {};
+    let current: LocalePreference = 'system';
+    renderWith(
+      <>
+        <LocaleProbe onPreference={(p) => (current = p)} />
+        <LocaleProbeApi onReady={(api) => (setPreference = api.setPreference)} />
+      </>,
+    );
+
+    act(() => setPreference('invalid' as LocalePreference));
+    expect(current).toBe('system');
+    expect(i18n.language).toBe('en');
+    expect(document.documentElement.lang).toBe('en');
+    expect(window.localStorage.getItem(STORAGE_KEY)).toBe('system');
+  });
 });
 
 describe('LocaleProvider system follow', () => {

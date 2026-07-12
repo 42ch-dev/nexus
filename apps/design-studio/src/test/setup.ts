@@ -7,6 +7,10 @@
  */
 import '@testing-library/jest-dom/vitest';
 
+import { beforeEach } from 'vitest';
+
+import { i18n } from '@/lib/i18n/config';
+
 /**
  * Node 24+ may install an experimental `localStorage` shim that shadows
  * jsdom's implementation. ThemeProvider tests need a working store.
@@ -44,3 +48,12 @@ function ensureLocalStorage() {
 }
 
 ensureLocalStorage();
+
+/**
+ * Shared app components imported via @web-setup/* use react-i18next. Reset to
+ * English before each test so assertions against the English source catalog are
+ * stable regardless of localStorage/system locale state.
+ */
+beforeEach(() => {
+  i18n.changeLanguage('en');
+});

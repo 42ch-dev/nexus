@@ -1,0 +1,22 @@
+{
+  "plan_id": "2026-07-07-v1.96-implement-rework",
+  "schema_version": 1,
+  "entries": [
+    {
+      "id": "R-V196QC1-S001",
+      "severity": "low",
+      "lifecycle": "resolved",
+      "closure_note": "Removed the local errorMessage helper in path-context-menu.tsx; now imports the shared errorMessage with a commonT(\"toast.actionFailed\") fallback.",
+      "closure_evidence": "commit 28e199e3",
+      "archived_at": "2026-07-12"
+    },
+    {
+      "id": "R-V196QC1-S002",
+      "severity": "low",
+      "lifecycle": "resolved",
+      "closure_note": "Added --color-setup-wizard-surface-input-row-rounded token and Tailwind borderRadius mapping; the wizard input row in WorkspacePathField now uses the token-backed class.",
+      "closure_evidence": "commit 28e199e3",
+      "archived_at": "2026-07-12"
+    }
+  ]
+}

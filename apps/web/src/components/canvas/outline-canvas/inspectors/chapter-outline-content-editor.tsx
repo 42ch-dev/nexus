@@ -292,7 +292,7 @@ function EditorToolbar({ editor, disabled }: { editor: Editor | null; disabled: 
       aria-label={title}
       aria-pressed={active}
       disabled={disabled}
-      className={`flex h-8 w-8 items-center justify-center rounded-control text-gray-1000 transition-colors duration-state ease-standard disabled:cursor-not-allowed disabled:opacity-50 ${
+      className={`flex h-8 w-8 items-center justify-center rounded-control text-gray-1000 transition-colors duration-state ease-standard disabled:cursor-not-allowed disabled:opacity-disabled ${
         active ? 'bg-gray-alpha-200' : 'hover:bg-gray-alpha-100'
       }`}
     >

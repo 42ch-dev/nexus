@@ -20,6 +20,7 @@
     "paths": {
       "@/*": ["./src/*"],
       "@/lib/utils": ["../web/src/lib/utils.ts"],
+      "@/lib/i18n/config": ["../web/src/lib/i18n/config.ts"],
       "@/components/ui/*": ["../web/src/components/ui/*"],
       "@web-ui/*": ["../web/src/components/ui/*"],
       "@web-setup/*": ["../web/src/components/setup/*"],

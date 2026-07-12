@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
 import { Plus, RefreshCw, ShieldCheck, Sparkles } from 'lucide-react';
 
@@ -20,6 +21,7 @@ import { ValidatePresetDialog } from './dialogs/validate-preset-dialog';
  * verbatim from the previous `/strategy` route.
  */
 export function StrategiesPage() {
+  const { t } = useTranslation('strategies');
   const presets = usePresets();
   const reload = useReloadPreset();
   const navigate = useNavigate();
@@ -30,19 +32,17 @@ export function StrategiesPage() {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h1 className="text-heading-24 font-heading text-gray-1000">Strategies</h1>
-          <p className="text-copy-14 text-gray-900">
-            Validate a preset before running it — the dry-run is the safest way to confirm it is ready.
-          </p>
+          <h1 className="text-heading-24 font-heading text-gray-1000">{t('title')}</h1>
+          <p className="text-copy-14 text-gray-900">{t('description')}</p>
         </div>
         <div className="flex items-center gap-2">
           <Button type="button" variant="secondary" size="small" onClick={() => setValidateOpen(true)}>
             <ShieldCheck className="h-4 w-4" aria-hidden />
-            Validate Preset
+            {t('validatePreset')}
           </Button>
           <Button type="button" variant="primary" size="small" onClick={() => setScaffoldOpen(true)}>
             <Plus className="h-4 w-4" aria-hidden />
-            Scaffold Preset
+            {t('scaffoldPreset')}
           </Button>
           <Button
             type="button"
@@ -50,7 +50,7 @@ export function StrategiesPage() {
             size="small"
             onClick={() => presets.refetch()}
             disabled={presets.isFetching}
-            aria-label="Refresh presets"
+            aria-label={t('refreshAria')}
           >
             <RefreshCw className={`h-4 w-4 ${presets.isFetching ? 'animate-spin' : ''}`} aria-hidden />
           </Button>
@@ -58,41 +58,41 @@ export function StrategiesPage() {
       </div>
 
       {presets.isError ? (
-        <ErrorState description="Could not load presets." onRetry={() => presets.refetch()} />
+        <ErrorState description={t('errorDescription')} onRetry={() => presets.refetch()} />
       ) : presets.isLoading ? (
         <Card className="shadow-card">
           <CardContent>
-            <LoadingState label="Loading presets…" />
+            <LoadingState label={t('loading')} />
           </CardContent>
         </Card>
       ) : !presets.data ? null : (
         <div className="flex flex-col gap-4">
           <PresetGroup
-            title="User presets"
-            description="Presets you scaffolded and edit."
+            title={t('userPresets.title')}
+            description={t('userPresets.description')}
             presets={presets.data.user}
             onReload={(id) => reload.mutate(id)}
             onSelect={(id) => navigate(`/strategies/${encodeURIComponent(id)}`)}
             reloadingId={reload.isPending ? reload.variables : undefined}
-            empty="No user presets yet. Scaffold one to start."
+            empty={t('userPresets.empty')}
           />
           <PresetGroup
-            title="System presets"
-            description="Discovered from the local home layout."
+            title={t('systemPresets.title')}
+            description={t('systemPresets.description')}
             presets={presets.data.system}
             onReload={(id) => reload.mutate(id)}
             onSelect={(id) => navigate(`/strategies/${encodeURIComponent(id)}`)}
             reloadingId={reload.isPending ? reload.variables : undefined}
-            empty="No system presets discovered."
+            empty={t('systemPresets.empty')}
           />
           <PresetGroup
-            title="Embedded presets"
-            description="Bundled with the runtime."
+            title={t('embeddedPresets.title')}
+            description={t('embeddedPresets.description')}
             presets={presets.data.embedded}
             onReload={(id) => reload.mutate(id)}
             onSelect={(id) => navigate(`/strategies/${encodeURIComponent(id)}`)}
             reloadingId={reload.isPending ? reload.variables : undefined}
-            empty="No embedded presets."
+            empty={t('embeddedPresets.empty')}
           />
         </div>
       )}
@@ -120,6 +120,7 @@ function PresetGroup({
   reloadingId: string | undefined;
   empty: string;
 }) {
+  const { t } = useTranslation('strategies');
   return (
     <Card className="shadow-card">
       <CardHeader>
@@ -160,7 +161,7 @@ function PresetGroup({
                   onClick={() => onReload(p.id)}
                   disabled={reloadingId === p.id}
                 >
-                  {reloadingId === p.id ? 'Reloading…' : 'Reload'}
+                  {reloadingId === p.id ? t('reloading') : t('reload')}
                 </Button>
               </li>
             ))}

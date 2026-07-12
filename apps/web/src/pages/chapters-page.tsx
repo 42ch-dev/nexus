@@ -288,7 +288,7 @@ export function ChaptersPage() {
                                 title={t('chapters.publishedTitle')}
                                 aria-label={t('chapters.publishedDisabled')}
                               >
-                                <Pencil className="h-4 w-4 opacity-50" aria-hidden />
+                                <Pencil className="h-4 w-4 opacity-disabled" aria-hidden />
                               </Button>
                             ) : (
                               <Button

@@ -3,7 +3,7 @@
     "sections": "Settings sections"
   },
   "title": "Settings",
-  "helper": "Manage your local agent, daemon connection, and setup options from one place.",
+  "helper": "Manage your local agent, workspace, daemon connection, and setup options from one place.",
   "nav": {
     "agent": "Agent",
     "workspace": "Workspace",
@@ -39,6 +39,8 @@
     "emptyTitle": "No agents found on PATH."
   },
   "connection": {
+    "sectionTitle": "Connection",
+    "sectionHelper": "Connect this app to a remote Nexus daemon. Your local daemon stays the default until you activate a remote connection.",
     "title": "Connect to Daemon",
     "description": "Enter the remote daemon URL and API key. Local mode remains available — you can revert here at any time.",
     "urlLabel": "Daemon URL",
@@ -46,8 +48,9 @@
     "urlHelper": "The full HTTPS address of the daemon, including port.",
     "apiKeyLabel": "API Key",
     "apiKeyPlaceholder": "Enter the API key from the daemon machine",
-    "apiKeyHelper": "The API key from the daemon machine ({{command}} on that host).",
+    "apiKeyHelperPrefix": "The API key from the daemon machine (",
     "apiKeyCommand": "nexus42 daemon api-key",
+    "apiKeyHelperSuffix": " on that host).",
     "showKey": "Show key",
     "hideKey": "Hide key",
     "labelLabel": "Label (optional)",
@@ -63,9 +66,21 @@
     "reconnectWithSettings": "Reconnect With These Settings",
     "fetchFingerprint": "Fetch fingerprint",
     "fetchingFingerprint": "Fetching fingerprint…",
-    "originNote": "If you are connecting from a browser tab to a remote daemon, your serving origin must be listed in the daemon's {{setting}} setting. Desktop apps are allowed automatically.",
+    "originNotePrefix": "If you are connecting from a browser tab to a remote daemon, your serving origin must be listed in the daemon's ",
     "originSetting": "NEXUS_DAEMON_ALLOWED_ORIGINS",
+    "originNoteSuffix": " setting. Desktop apps are allowed automatically.",
     "fingerprintError": "Browsers cannot reliably distinguish an unreachable daemon from a rejected self-signed certificate, so fetching the certificate fingerprint may fail even when the daemon is running. For remote daemons that use a self-signed certificate, use the Nexus desktop app — it supports Trust On First Use (TOFU) and can store the certificate in the OS keychain.",
     "connectedDescription": "Using {{url}}"
+  },
+  "setup": {
+    "title": "Setup",
+    "helper": "Return to the first-run wizard to walk through setup steps again. Your workspace and agent choices are kept.",
+    "rerun": "Re-run Setup",
+    "browserOnly": "Re-run setup is available on the desktop app only.",
+    "browserTooltip": "Open the Nexus desktop app to re-run setup.",
+    "confirmTitle": "Re-run Setup?",
+    "confirmBody": "This restarts the setup wizard from the beginning. Your workspace path and agent profile are not deleted.",
+    "couldNotClear": "Could not clear the setup marker.",
+    "couldNotReRun": "Could not re-run setup"
   }
 }

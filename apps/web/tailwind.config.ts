@@ -16,6 +16,19 @@ const config: Config = {
   darkMode: 'class',
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
+    extend: {
+      // V1.113 P1: app-local Tailwind utilities. The shared preset is consumed by
+      // apps/design-studio too, but only apps/web currently uses disabled opacity and
+      // the listbox max-height cap. Keeping them here avoids widening the shared preset
+      // for a single consumer; promote to @nexus/design-tokens/tailwind.preset if a
+      // second product surface needs them.
+      opacity: {
+        disabled: 'var(--color-states-disabled-opacity)',
+      },
+      maxHeight: {
+        listbox: 'var(--color-listbox-max-height)',
+      },
+    },
     // Breakpoints — DESIGN.md §Breakpoints (px-based).
     screens: {
       sm: '401px',

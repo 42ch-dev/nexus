@@ -97,6 +97,44 @@ describe('Toaster + useToast', () => {
     expect(screen.queryByText('Dismiss me')).not.toBeInTheDocument();
   });
 
+  it('caps the queue at MAX_TOASTS and keeps the newest items', () => {
+    const getApi = renderToaster();
+    const { toast } = getApi();
+    act(() => {
+      toast({ variant: 'info', title: 'One', testId: 'toast-1' });
+      toast({ variant: 'info', title: 'Two', testId: 'toast-2' });
+      toast({ variant: 'info', title: 'Three', testId: 'toast-3' });
+      toast({ variant: 'info', title: 'Four', testId: 'toast-4' });
+      toast({ variant: 'info', title: 'Five', testId: 'toast-5' });
+      toast({ variant: 'info', title: 'Six', testId: 'toast-6' });
+    });
+    expect(screen.queryByTestId('toast-1')).not.toBeInTheDocument();
+    expect(screen.getByTestId('toast-2')).toBeInTheDocument();
+    expect(screen.getByTestId('toast-3')).toBeInTheDocument();
+    expect(screen.getByTestId('toast-4')).toBeInTheDocument();
+    expect(screen.getByTestId('toast-5')).toBeInTheDocument();
+    expect(screen.getByTestId('toast-6')).toBeInTheDocument();
+  });
+
+  it('does not evict persistent toasts when trimming the queue', () => {
+    const getApi = renderToaster();
+    const { toast } = getApi();
+    act(() => {
+      toast({ variant: 'info', title: 'One', duration: 0, testId: 'toast-1' });
+      toast({ variant: 'info', title: 'Two', duration: 0, testId: 'toast-2' });
+      toast({ variant: 'info', title: 'Three', duration: 0, testId: 'toast-3' });
+      toast({ variant: 'info', title: 'Four', duration: 0, testId: 'toast-4' });
+      toast({ variant: 'info', title: 'Five', duration: 0, testId: 'toast-5' });
+      toast({ variant: 'info', title: 'Six', testId: 'toast-6' });
+    });
+    expect(screen.getByTestId('toast-1')).toBeInTheDocument();
+    expect(screen.getByTestId('toast-2')).toBeInTheDocument();
+    expect(screen.getByTestId('toast-3')).toBeInTheDocument();
+    expect(screen.getByTestId('toast-4')).toBeInTheDocument();
+    expect(screen.getByTestId('toast-5')).toBeInTheDocument();
+    expect(screen.getByTestId('toast-6')).toBeInTheDocument();
+  });
+
   it('does not reset the auto-dismiss timer when a second toast is added', () => {
     vi.useFakeTimers();
     const getApi = renderToaster();

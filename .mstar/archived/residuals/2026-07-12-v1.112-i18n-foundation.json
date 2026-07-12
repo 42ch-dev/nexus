@@ -1,0 +1,50 @@
+{
+  "plan_id": "2026-07-12-v1.112-i18n-foundation",
+  "schema_version": 1,
+  "entries": [
+    {
+      "id": "R-P0-002",
+      "title": "Catalog inflation - duplicate route.*/mobileNav.* keys with identical strings",
+      "severity": "low",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "post-V1.112",
+      "lifecycle": "resolved",
+      "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-foundation.md",
+      "note": "Resolved 2026-07-12: mobile nav now consumes shell.route.* keys; duplicate mobileNav.* keys removed from shell.json. Catalog hygiene closed in v1.113 P0 T4."
+    },
+    {
+      "id": "R-P0-004",
+      "title": "Unvalidated setPreference input - no runtime guard",
+      "severity": "nit",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "post-V1.112",
+      "lifecycle": "resolved",
+      "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-foundation.md",
+      "note": "Resolved 2026-07-12: isLocalePreference() runtime guard added to setPreference in locale-provider.tsx; invalid values fail closed. Closed in v1.113 P0 T4."
+    },
+    {
+      "id": "R-P0-005",
+      "title": "Unused not-found catalog keys while page still hardcoded",
+      "severity": "nit",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "post-V1.112",
+      "lifecycle": "resolved",
+      "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-foundation.md",
+      "note": "Resolved 2026-07-12: not-a-bug. not-found-page.tsx already uses shell.notFound.* keys (title, description, action). Verified in v1.113 P0 T4."
+    },
+    {
+      "id": "R-P0-006",
+      "title": "Design-studio App.test.tsx pre-existing AgentPicker fixture failures (7 tests)",
+      "severity": "low",
+      "decision": "defer",
+      "owner": "@frontend-dev",
+      "target": "post-V1.112",
+      "lifecycle": "resolved",
+      "tracking_link": ".mstar/plans/2026-07-12-v1.112-i18n-foundation.md",
+      "note": "Resolved 2026-07-12 (QA): i18next initialized in design-studio test setup + fixture agent IDs aligned with COMMON_AGENT_PRIORITY. Tests 110/110 green."
+    }
+  ]
+}

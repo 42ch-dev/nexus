@@ -3,7 +3,7 @@
     "sections": "设置分区"
   },
   "title": "设置",
-  "helper": "在此处管理你的本地智能体、守护进程连接和设置选项。",
+  "helper": "在此处管理你的本地智能体、工作区、守护进程连接和设置选项。",
   "nav": {
     "agent": "智能体",
     "workspace": "工作区",
@@ -39,15 +39,18 @@
     "emptyTitle": "在 PATH 中未找到智能体。"
   },
   "connection": {
+    "sectionTitle": "连接",
+    "sectionHelper": "将此应用连接到远程 Nexus 守护进程。在激活远程连接之前，本地守护进程保持为默认。",
     "title": "连接守护进程",
     "description": "输入远程守护进程 URL 和 API 密钥。本地模式仍然可用——你可以随时在这里恢复。",
     "urlLabel": "守护进程 URL",
     "urlPlaceholder": "https://192.168.1.42:8420",
     "urlHelper": "守护进程的完整 HTTPS 地址，包括端口。",
     "apiKeyLabel": "API 密钥",
-    "apiKeyPlaceholder": "输入守护进程机器上的 API 密钥",
-    "apiKeyHelper": "来自守护进程机器的 API 密钥（在该主机上运行 {{command}}）。",
+    "apiKeyPlaceholder": "请输入来自守护进程机器的 API 密钥",
+    "apiKeyHelperPrefix": "来自守护进程机器的 API 密钥（在该主机上运行 ",
     "apiKeyCommand": "nexus42 daemon api-key",
+    "apiKeyHelperSuffix": "）。",
     "showKey": "显示密钥",
     "hideKey": "隐藏密钥",
     "labelLabel": "标签（可选）",
@@ -63,9 +66,21 @@
     "reconnectWithSettings": "使用这些设置重新连接",
     "fetchFingerprint": "获取指纹",
     "fetchingFingerprint": "正在获取指纹…",
-    "originNote": "如果你从浏览器标签页连接到远程守护进程，你的服务来源必须列在守护进程的 {{setting}} 设置中。桌面应用会自动被允许。",
+    "originNotePrefix": "如果你从浏览器标签页连接到远程守护进程，你的服务来源必须列在守护进程的 ",
     "originSetting": "NEXUS_DAEMON_ALLOWED_ORIGINS",
+    "originNoteSuffix": " 设置中。桌面应用会自动被允许。",
     "fingerprintError": "浏览器无法可靠地区分无法访问的守护进程与被拒绝的自签名证书，因此即使守护进程正在运行，获取证书指纹也可能失败。对于使用自签名证书的远程守护进程，请使用 Nexus 桌面应用——它支持首次使用时信任（TOFU），并可以将证书存储在操作系统钥匙串中。",
     "connectedDescription": "正在使用 {{url}}"
+  },
+  "setup": {
+    "title": "设置",
+    "helper": "返回首次运行向导，重新执行设置步骤。你的工作区和智能体选择将保留。",
+    "rerun": "重新运行设置",
+    "browserOnly": "仅在桌面应用中可重新运行设置。",
+    "browserTooltip": "打开 Nexus 桌面应用以重新运行设置。",
+    "confirmTitle": "重新运行设置？",
+    "confirmBody": "这将从头开始重新运行设置向导。你的工作区路径和智能体配置文件不会被删除。",
+    "couldNotClear": "无法清除设置标记。",
+    "couldNotReRun": "无法重新运行设置"
   }
 }

@@ -5,22 +5,27 @@ export interface SettingsSetupSectionChromeProps {
   desktopAvailable?: boolean;
   /** Called when the desktop Re-run Setup CTA is clicked. */
   onReRunSetup?: () => void;
+  /** Section title. Defaults to English "Setup". */
+  title?: string;
+  /** Section body helper. */
+  helper?: string;
+  /** Re-run Setup CTA label. */
+  rerunLabel?: string;
+  /** Browser-only helper paragraph. */
+  browserOnlyHelper?: string;
+  /** Tooltip shown on the disabled browser Re-run Setup button. */
+  browserTooltip?: string;
   'data-testid'?: string;
 }
 
 /** Locked by settings-setup-section.md — section body helper (sentence case). */
-const SETUP_SECTION_HELPER =
+const DEFAULT_SETUP_SECTION_HELPER =
   'Return to the first-run wizard to walk through setup steps again. Your workspace and agent choices are kept.';
 
-const SETUP_CONFIRM_TITLE = 'Re-run Setup?';
-
-const SETUP_CONFIRM_BODY =
-  'This restarts the setup wizard from the beginning. Your workspace path and agent profile are not deleted.';
-
-const SETUP_BROWSER_HELPER =
+const DEFAULT_SETUP_BROWSER_HELPER =
   'Re-run setup is available on the desktop app only.';
 
-const SETUP_BROWSER_TOOLTIP =
+const DEFAULT_SETUP_BROWSER_TOOLTIP =
   'Open the Nexus desktop app to re-run setup.';
 
 /**
@@ -33,6 +38,11 @@ const SETUP_BROWSER_TOOLTIP =
 export function SettingsSetupSectionChrome({
   desktopAvailable = true,
   onReRunSetup,
+  title = 'Setup',
+  helper = DEFAULT_SETUP_SECTION_HELPER,
+  rerunLabel = 'Re-run Setup',
+  browserOnlyHelper = DEFAULT_SETUP_BROWSER_HELPER,
+  browserTooltip = DEFAULT_SETUP_BROWSER_TOOLTIP,
   'data-testid': dataTestId,
 }: SettingsSetupSectionChromeProps) {
   return (
@@ -43,8 +53,8 @@ export function SettingsSetupSectionChrome({
       id="setup"
     >
       <div className="flex flex-col gap-2">
-        <h3 className="text-heading-16 font-heading text-gray-1000">Setup</h3>
-        <p className="text-copy-14 text-gray-900">{SETUP_SECTION_HELPER}</p>
+        <h3 className="text-heading-16 font-heading text-gray-1000">{title}</h3>
+        <p className="text-copy-14 text-gray-900">{helper}</p>
       </div>
 
       {desktopAvailable ? (
@@ -55,21 +65,21 @@ export function SettingsSetupSectionChrome({
             data-testid="settings-rerun-setup"
             onClick={() => onReRunSetup?.()}
           >
-            Re-run Setup
+            {rerunLabel}
           </Button>
         </div>
       ) : (
         <div className="flex flex-col gap-3" data-testid="settings-setup-browser-only">
-          <p className="text-copy-14 text-gray-700">{SETUP_BROWSER_HELPER}</p>
+          <p className="text-copy-14 text-gray-700">{browserOnlyHelper}</p>
           <div className="flex items-center gap-3">
             <Button
               type="button"
               variant="secondary"
               disabled
-              title={SETUP_BROWSER_TOOLTIP}
+              title={browserTooltip}
               data-testid="settings-rerun-setup"
             >
-              Re-run Setup
+              {rerunLabel}
             </Button>
           </div>
         </div>
@@ -92,9 +102,11 @@ export function SettingsSetupConfirmChromeStatic() {
     >
       <div className="flex flex-col gap-1 p-6 pb-4">
         <p className="text-heading-20 font-heading tracking-tight text-gray-1000">
-          {SETUP_CONFIRM_TITLE}
+          Re-run Setup?
         </p>
-        <p className="text-copy-14 text-gray-900">{SETUP_CONFIRM_BODY}</p>
+        <p className="text-copy-14 text-gray-900">
+          This restarts the setup wizard from the beginning. Your workspace path and agent profile are not deleted.
+        </p>
       </div>
       <div className="flex justify-end gap-3 px-6 pb-6">
         <Button type="button" variant="secondary" tabIndex={-1}>

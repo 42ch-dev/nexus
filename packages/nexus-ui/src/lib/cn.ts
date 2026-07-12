@@ -29,6 +29,9 @@ const customTwMerge = extendTailwindMerge({
         'text-label-12-mono',
         'text-copy-13-mono',
       ],
+      // V1.113 P1: DESIGN.md custom token-backed utilities so cn() does not drop them.
+      opacity: ['opacity-disabled'],
+      'max-h': ['max-h-listbox'],
     },
   },
 });

@@ -248,6 +248,7 @@
   --color-setup-wizard-surface-input-row-label-color: var(--color-gray-700);
   --color-setup-wizard-surface-input-row-path-color: var(--color-gray-1000);
   --color-setup-wizard-surface-input-row-icon-color: var(--color-blue-700);
+  --color-setup-wizard-surface-input-row-rounded: 6px;
   --color-setup-wizard-surface-cta-primary-max-width: 400px;
   --color-setup-wizard-surface-cta-container-gap: 16px;
 
@@ -265,6 +266,12 @@
   --reading-prose-measure: 68ch;
   --reading-prose-line-height: 1.75;
   --reading-prose-paragraph-spacing: 1.25em;
+
+  /* States — DESIGN.md §States (V1.113 P1 shared disabled opacity). */
+  --color-states-disabled-opacity: 0.5;
+
+  /* Listbox — DESIGN.md §Listbox (V1.113 P1 max-height). */
+  --color-listbox-max-height: 320px;
 }
 
 .dark {
@@ -485,6 +492,7 @@
   --color-setup-wizard-surface-input-row-label-color: var(--color-gray-700);
   --color-setup-wizard-surface-input-row-path-color: var(--color-gray-1000);
   --color-setup-wizard-surface-input-row-icon-color: var(--color-blue-700);
+  --color-setup-wizard-surface-input-row-rounded: 6px;
   --color-setup-wizard-surface-cta-primary-max-width: 400px;
   --color-setup-wizard-surface-cta-container-gap: 16px;
 
@@ -492,8 +500,14 @@
   --color-sidebar-nav-width: 248px;
   --color-sidebar-nav-item-height: 36px;
 
-  /* Elevation */
+  /* Elevation — DESIGN.md §Elevation. */
   --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
   --shadow-popover: 0 1px 1px rgba(0, 0, 0, 0.6), 0 12px 28px -12px rgba(0, 0, 0, 0.7);
   --shadow-modal: 0 1px 1px rgba(0, 0, 0, 0.7), 0 28px 56px -24px rgba(0, 0, 0, 0.85);
+
+  /* States — DESIGN.md §States (V1.113 P1 shared disabled opacity). */
+  --color-states-disabled-opacity: 0.5;
+
+  /* Listbox — DESIGN.md §Listbox (V1.113 P1 max-height). */
+  --color-listbox-max-height: 320px;
 }

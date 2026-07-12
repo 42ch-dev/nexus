@@ -86,7 +86,10 @@
     "couldNotUpdateOutlineTimeline": "Could not update timeline",
     "couldNotSaveWorldKbEntity": "Could not save entity",
     "couldNotPromoteWorldKbCandidate": "Could not promote candidate",
-    "couldNotSaveWorldKbRelationship": "Could not save relationship"
+    "couldNotSaveWorldKbRelationship": "Could not save relationship",
+    "couldNotSaveConnection": "Could not save connection settings.",
+    "couldNotSwitchToLocalDaemon": "Could not switch to local daemon.",
+    "couldNotSaveAgentProfile": "Could not save agent profile."
   },
   "toast": {
     "error": "Error",
@@ -131,9 +134,11 @@
     "saveAgentOnDesktop": "Save agent on desktop",
     "saveAgentOnDesktopDescription": "Open the Nexus desktop app to change your local agent.",
     "couldNotSaveAgent": "Could not save agent",
+    "agentProfileSavedDescription": "Using {{name}} for local strategies.",
     "daemonRestartFailed": "Daemon restart failed",
     "presetScaffolded": "Preset scaffolded",
-    "pathNotOpened": "Path not opened"
+    "pathNotOpened": "Path not opened",
+    "actionFailed": "Action failed."
   },
   "dialog": {
     "close": "Close dialog"

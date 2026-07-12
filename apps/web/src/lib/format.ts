@@ -2,6 +2,49 @@ import { getActiveLocale } from './i18n/active-locale';
 import { i18n } from './i18n/config';
 
 /**
+ * Per-locale cache for Intl formatters used by the formatting helpers.
+ *
+ * The key includes both the locale and the serialized format options so that
+ * callers with different dateStyle/timeStyle combos get distinct formatters.
+ */
+export class IntlFormatterCache {
+  private dateTimeFormats = new Map<string, Intl.DateTimeFormat>();
+  private relativeTimeFormats = new Map<string, Intl.RelativeTimeFormat>();
+
+  private static makeKey(locale: string, options: object): string {
+    const sorted = Object.keys(options)
+      .sort()
+      .reduce<Record<string, unknown>>((acc, key) => {
+        acc[key] = (options as Record<string, unknown>)[key];
+        return acc;
+      }, {});
+    return `${locale}:${JSON.stringify(sorted)}`;
+  }
+
+  getDateTimeFormat(locale: string, options: Intl.DateTimeFormatOptions): Intl.DateTimeFormat {
+    const key = IntlFormatterCache.makeKey(locale, options);
+    let formatter = this.dateTimeFormats.get(key);
+    if (!formatter) {
+      formatter = new Intl.DateTimeFormat(locale, options);
+      this.dateTimeFormats.set(key, formatter);
+    }
+    return formatter;
+  }
+
+  getRelativeTimeFormat(locale: string, options: Intl.RelativeTimeFormatOptions): Intl.RelativeTimeFormat {
+    const key = IntlFormatterCache.makeKey(locale, options);
+    let formatter = this.relativeTimeFormats.get(key);
+    if (!formatter) {
+      formatter = new Intl.RelativeTimeFormat(locale, options);
+      this.relativeTimeFormats.set(key, formatter);
+    }
+    return formatter;
+  }
+}
+
+const formatterCache = new IntlFormatterCache();
+
+/**
  * Formatting helpers for the Control Room + Setup screens.
  *
  * All times are formatted in the user's local timezone for display, with an
@@ -14,7 +57,7 @@ export function formatDateTime(iso: string | undefined | null): string {
   if (!iso) return '—';
   const ms = Date.parse(iso);
   if (Number.isNaN(ms)) return iso;
-  return new Intl.DateTimeFormat(getActiveLocale(), {
+  return formatterCache.getDateTimeFormat(getActiveLocale(), {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(ms);
@@ -25,7 +68,7 @@ export function formatDate(iso: string | undefined | null): string {
   if (!iso) return '—';
   const ms = Date.parse(iso);
   if (Number.isNaN(ms)) return iso;
-  return new Intl.DateTimeFormat(getActiveLocale(), { dateStyle: 'medium' }).format(ms);
+  return formatterCache.getDateTimeFormat(getActiveLocale(), { dateStyle: 'medium' }).format(ms);
 }
 
 /**
@@ -37,7 +80,7 @@ export function formatRelative(iso: string | undefined | null): string {
   const ms = Date.parse(iso);
   if (Number.isNaN(ms)) return iso;
   const diffSec = Math.round((Date.now() - ms) / 1000);
-  const rtf = new Intl.RelativeTimeFormat(getActiveLocale(), { numeric: 'auto' });
+  const rtf = formatterCache.getRelativeTimeFormat(getActiveLocale(), { numeric: 'auto' });
   if (diffSec < 45) return rtf.format(-diffSec, 'second');
   if (diffSec < 3600) return rtf.format(-Math.round(diffSec / 60), 'minute');
   if (diffSec < 86400) return rtf.format(-Math.round(diffSec / 3600), 'hour');
@@ -54,12 +97,12 @@ export function formatUtcAndLocal(iso: string | undefined | null): { utc: string
   if (!iso) return { utc: fallback, local: fallback };
   const ms = Date.parse(iso);
   if (Number.isNaN(ms)) return { utc: iso, local: iso };
-  const utc = new Intl.DateTimeFormat('en-US', {
+  const utc = formatterCache.getDateTimeFormat('en-US', {
     timeZone: 'UTC',
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(ms);
-  const local = new Intl.DateTimeFormat(getActiveLocale(), {
+  const local = formatterCache.getDateTimeFormat(getActiveLocale(), {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(ms);

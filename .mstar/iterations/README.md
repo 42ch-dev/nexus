@@ -122,7 +122,7 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | [v1.109-delivery-compass.md](v1.109-delivery-compass.md) | V1.109 | **completed** (2026-07-11) — Triple Must: Canvas Scene/Beat (P0) + Strategy edge rewiring (P1) + Graph scale/viewport (P2). Integration `iteration/v1.109`. |
 | [v1.110-delivery-compass.md](v1.110-delivery-compass.md) | V1.110 | **completed* (2026-07-11) — Reliability + UX polish: daemon startup latency (P0) + agent scan PATH reliability (P1) + AgentPicker UX polish (P2). Integration `iteration/v1.110`. |
 | [v1.111-delivery-compass.md](v1.111-delivery-compass.md) | V1.111 | **completed** (2026-07-12) — Frontend canvas navigation + design studio + consolidation: command palette (P0) + sidebar canvas IA (P1) + design-studio canvas gallery (P2) + frontend consolidation sweep (P3). Integration `iteration/v1.111` → `main`. |
-| [v1.112-delivery-compass.md](v1.112-delivery-compass.md) | V1.112 | **locked** — Frontend i18n: react-i18next foundation + Appearance Language (P0) + full user-facing UI migration (P1). Integration `iteration/v1.112` → `main`. |
+| [v1.112-delivery-compass.md](v1.112-delivery-compass.md) | V1.112 | **Shipped** — Frontend i18n: react-i18next foundation + Appearance Language (P0) + full user-facing UI migration (P1). Integration `iteration/v1.112` → `main`. |
 
 ### Active iteration workspaces
 

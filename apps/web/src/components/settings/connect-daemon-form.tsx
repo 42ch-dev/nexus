@@ -11,6 +11,7 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AlertCircle, CheckCircle, Fingerprint, Info, Shield, Wifi } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -33,21 +34,9 @@ import {
 import { useConnectionConfig, useSetConnectionConfig } from '@/lib/client-context';
 import { useFingerprint } from '@/lib/nexus/use-fingerprint';
 
-/** Locked by settings-connection-section.md */
-const FORM_CARD_DESCRIPTION =
-  'Enter the remote daemon URL and API key. Local mode remains available — you can revert here at any time.';
-
-const URL_FIELD_HELPER =
-  'The full HTTPS address of the daemon, including port.';
-
-const API_KEY_HELPER_PREFIX = 'The API key from the daemon machine (';
-const API_KEY_HELPER_COMMAND = 'nexus42 daemon api-key';
-const API_KEY_HELPER_SUFFIX = ' on that host).';
-
-const FINGERPRINT_TRUST_HELPER =
-  'Confirm the certificate fingerprint matches what you see on the daemon machine before connecting.';
-
 export function ConnectDaemonForm() {
+  const { t } = useTranslation('settings');
+  const { t: commonT } = useTranslation('common');
   const { toast } = useToast();
   const savedConfig = useConnectionConfig();
   const setConfig = useSetConnectionConfig();
@@ -87,7 +76,7 @@ export function ConnectDaemonForm() {
 
   async function handleFetchFingerprint() {
     if (!normalizedUrl) {
-      toast({ variant: 'error', title: 'Enter a daemon URL' });
+      toast({ variant: 'error', title: commonT('toast.enterDaemonUrl') });
       return;
     }
     resetFp();
@@ -96,7 +85,7 @@ export function ConnectDaemonForm() {
 
   async function activateConfig(nextFingerprint?: string) {
     if (!normalizedUrl || !apiKey) {
-      toast({ variant: 'error', title: 'Enter the daemon URL and API key' });
+      toast({ variant: 'error', title: commonT('toast.enterDaemonUrlAndApiKey') });
       return;
     }
     const next: ConnectionConfig = {
@@ -110,15 +99,15 @@ export function ConnectDaemonForm() {
       await setConfig(next);
       toast({
         variant: 'success',
-        title: 'Connected to daemon',
-        description: `Using ${next.endpointUrl}`,
+        title: commonT('toast.connectedToDaemon'),
+        description: t('connection.connectedDescription', { url: next.endpointUrl }),
       });
       // Stay on /settings/advanced#connection — no navigate away (V1.103 lock).
     } catch (err) {
-      const description = errorMessage(err) || 'Failed to save connection settings.';
+      const description = errorMessage(err) || commonT('error.couldNotSaveConnection');
       toast({
         variant: 'error',
-        title: 'Could not connect to daemon',
+        title: commonT('toast.couldNotConnectToDaemon'),
         description,
       });
     }
@@ -132,15 +121,15 @@ export function ConnectDaemonForm() {
       }
       toast({
         variant: 'info',
-        title: 'Using local daemon',
-        description: 'Remote settings are saved but inactive.',
+        title: commonT('toast.usingLocalDaemon'),
+        description: commonT('toast.usingLocalDaemonDescription'),
       });
       // Stay on /settings/advanced#connection — no navigate away (V1.103 lock).
     } catch (err) {
-      const description = errorMessage(err) || 'Failed to switch to local daemon.';
+      const description = errorMessage(err) || commonT('error.couldNotSwitchToLocalDaemon');
       toast({
         variant: 'error',
-        title: 'Could not switch to local daemon',
+        title: commonT('toast.couldNotSwitchToLocalDaemon'),
         description,
       });
     }
@@ -156,17 +145,14 @@ export function ConnectDaemonForm() {
         >
           <div className="flex items-start gap-3">
             <Info className="mt-0.5 h-5 w-5 flex-shrink-0 text-gray-600" aria-hidden />
-            <p className="text-copy-14">
-              This daemon has no TLS certificate. It is running in loopback-only mode,
-              so remote access is not available. Use local mode instead.
-            </p>
+            <p className="text-copy-14">{t('connection.loopback')}</p>
           </div>
         </div>
       );
     }
     return (
       <div className="space-y-4">
-        <p className="text-copy-13 text-gray-700">{FINGERPRINT_TRUST_HELPER}</p>
+        <p className="text-copy-13 text-gray-700">{t('connection.fingerprintTrust')}</p>
         <div
           className="rounded-control border border-gray-alpha-400 bg-background-200 p-3 font-mono text-[13px] font-normal leading-relaxed text-gray-1000"
           data-testid="fingerprint-block"
@@ -176,12 +162,7 @@ export function ConnectDaemonForm() {
         <div className="rounded-card border border-blue-700/20 bg-blue-700/10 p-4 text-gray-900">
           <div className="flex items-start gap-3">
             <Shield className="mt-0.5 h-5 w-5 flex-shrink-0 text-blue-700" aria-hidden />
-            <p className="text-copy-14">
-              This fingerprint is how your app makes sure it is talking to the real
-              daemon and not someone pretending to be it. Compare it to the value
-              printed on the daemon machine&apos;s screen. If they match, it is safe
-              to trust.
-            </p>
+            <p className="text-copy-14">{t('connection.fingerprintTrustDescription')}</p>
           </div>
         </div>
         {reconnectWithMatch && (
@@ -191,7 +172,7 @@ export function ConnectDaemonForm() {
           >
             <div className="flex items-start gap-3">
               <CheckCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-blue-700" aria-hidden />
-              <p className="text-copy-14">Fingerprint matches the trusted daemon.</p>
+              <p className="text-copy-14">{t('connection.fingerprintMatch')}</p>
             </div>
           </div>
         )}
@@ -209,11 +190,7 @@ export function ConnectDaemonForm() {
         <div className="flex items-start gap-3">
           <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-amber-700" aria-hidden />
           <div className="space-y-3">
-            <p className="text-copy-14">
-              The certificate for this daemon has changed. This can happen if the
-              daemon was reinstalled or its certificate was deliberately rotated. It
-              can also mean someone is intercepting your connection.
-            </p>
+            <p className="text-copy-14">{t('connection.fingerprintMismatch')}</p>
             <div className="flex flex-wrap gap-2">
               <Button
                 type="button"
@@ -225,7 +202,7 @@ export function ConnectDaemonForm() {
                   )
                 }
               >
-                Trust the New Certificate and Continue
+                {t('connection.trustNewCertificate')}
               </Button>
               <Button
                 type="button"
@@ -233,7 +210,7 @@ export function ConnectDaemonForm() {
                 size="small"
                 onClick={() => resetFp()}
               >
-                Cancel and Keep Using the Old Certificate
+                {t('connection.keepOldCertificate')}
               </Button>
             </div>
           </div>
@@ -252,7 +229,7 @@ export function ConnectDaemonForm() {
           size="default"
           onClick={() => void handleRevertToLocal()}
         >
-          Use Local Daemon
+          {t('connection.useLocalDaemon')}
         </Button>
       );
     }
@@ -265,8 +242,8 @@ export function ConnectDaemonForm() {
         data-testid="trust-connect-button"
       >
         {reconnectWithMatch
-          ? 'Reconnect With These Settings'
-          : 'Trust This Certificate and Connect'}
+          ? t('connection.reconnectWithSettings')
+          : t('connection.trustAndConnect')}
       </Button>
     );
   }
@@ -276,40 +253,40 @@ export function ConnectDaemonForm() {
       <CardHeader>
         <div className="flex items-center gap-2">
           <Wifi className="h-5 w-5 text-blue-700" aria-hidden />
-          <CardTitle>Connect to Daemon</CardTitle>
+          <CardTitle>{t('connection.title')}</CardTitle>
         </div>
-        <CardDescription>{FORM_CARD_DESCRIPTION}</CardDescription>
+        <CardDescription>{t('connection.description')}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
         <div className="space-y-2">
-          <Label htmlFor="daemon-url">Daemon URL</Label>
+          <Label htmlFor="daemon-url">{t('connection.urlLabel')}</Label>
           <Input
             id="daemon-url"
             type="url"
             value={url}
             onChange={(e) => setUrl(e.target.value)}
-            placeholder="https://192.168.1.42:8420"
+            placeholder={t('connection.urlPlaceholder')}
             data-testid="daemon-url-input"
           />
-          <p className="text-copy-13 text-gray-700">{URL_FIELD_HELPER}</p>
+          <p className="text-copy-13 text-gray-700">{t('connection.urlHelper')}</p>
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="api-key">API Key</Label>
+          <Label htmlFor="api-key">{t('connection.apiKeyLabel')}</Label>
           <Input
             id="api-key"
             type={showKey ? 'text' : 'password'}
             value={apiKey}
             onChange={(e) => setApiKey(e.target.value)}
-            placeholder="Enter the API key from the daemon machine"
+            placeholder={t('connection.apiKeyPlaceholder')}
             data-testid="api-key-input"
           />
           <p className="text-copy-13 text-gray-700">
-            {API_KEY_HELPER_PREFIX}
+            {t('connection.apiKeyHelperPrefix')}
             <code className="rounded-control bg-background-200 px-1 py-0.5 font-mono text-[13px]">
-              {API_KEY_HELPER_COMMAND}
+              {t('connection.apiKeyCommand')}
             </code>
-            {API_KEY_HELPER_SUFFIX}
+            {t('connection.apiKeyHelperSuffix')}
           </p>
           <div className="flex items-center gap-2">
             <Button
@@ -318,13 +295,13 @@ export function ConnectDaemonForm() {
               size="small"
               onClick={() => setShowKey((s) => !s)}
             >
-              {showKey ? 'Hide key' : 'Show key'}
+              {showKey ? t('connection.hideKey') : t('connection.showKey')}
             </Button>
           </div>
         </div>
 
         <div className="space-y-2">
-          <Label htmlFor="connection-label">Label (optional)</Label>
+          <Label htmlFor="connection-label">{t('connection.labelLabel')}</Label>
           <Input
             id="connection-label"
             type="text"
@@ -339,12 +316,11 @@ export function ConnectDaemonForm() {
           <div className="flex items-start gap-3">
             <Info className="mt-0.5 h-5 w-5 flex-shrink-0 text-gray-600" aria-hidden />
             <p className="text-copy-14">
-              If you are connecting from a browser tab to a remote daemon, your
-              serving origin must be listed in the daemon&apos;s{' '}
+              {t('connection.originNotePrefix')}
               <code className="rounded-control bg-background-200 px-1 py-0.5 font-mono text-[13px]">
-                NEXUS_DAEMON_ALLOWED_ORIGINS
-              </code>{' '}
-              setting. Desktop apps are allowed automatically.
+                {t('connection.originSetting')}
+              </code>
+              {t('connection.originNoteSuffix')}
             </p>
           </div>
         </div>
@@ -359,13 +335,7 @@ export function ConnectDaemonForm() {
               <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-700" aria-hidden />
               <div className="space-y-2">
                 <p className="text-copy-14">{fpState.message}</p>
-                <p className="text-copy-14">
-                  Browsers cannot reliably distinguish an unreachable daemon from a
-                  rejected self-signed certificate, so fetching the certificate fingerprint
-                  may fail even when the daemon is running. For remote daemons that use a
-                  self-signed certificate, use the Nexus desktop app — it supports Trust On
-                  First Use (TOFU) and can store the certificate in the OS keychain.
-                </p>
+                <p className="text-copy-14">{t('connection.fingerprintError')}</p>
               </div>
             </div>
           </div>
@@ -384,7 +354,7 @@ export function ConnectDaemonForm() {
             data-testid="fetch-fingerprint-button"
           >
             <Fingerprint className="h-4 w-4" aria-hidden />
-            {fpState.status === 'loading' ? 'Fetching fingerprint…' : 'Fetch fingerprint'}
+            {fpState.status === 'loading' ? t('connection.fetchingFingerprint') : t('connection.fetchFingerprint')}
           </Button>
           {renderPrimaryAction()}
           {hasSavedConfig && (
@@ -395,7 +365,7 @@ export function ConnectDaemonForm() {
               onClick={() => void handleRevertToLocal()}
               data-testid="revert-local-button"
             >
-              Use Local Daemon
+              {t('connection.useLocalDaemon')}
             </Button>
           )}
         </div>

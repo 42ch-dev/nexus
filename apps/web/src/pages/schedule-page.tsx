@@ -1,4 +1,5 @@
 import { RefreshCw } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { StatusBadge } from '@/components/status-badge';
 import { Button } from '@/components/ui/button';
@@ -17,6 +18,7 @@ import { formatRelative, shortId } from '@/lib/format';
  * next-fire timestamp, so we show the last-updated relative time.
  */
 export function SchedulePage() {
+  const { t } = useTranslation('schedule');
   const schedules = useSchedules();
 
   return (
@@ -24,8 +26,8 @@ export function SchedulePage() {
       <CardHeader>
         <div className="flex items-center justify-between gap-2">
           <div>
-            <CardTitle>Schedule</CardTitle>
-            <CardDescription>Cron roles per Work, with status and last update.</CardDescription>
+            <CardTitle>{t('title')}</CardTitle>
+            <CardDescription>{t('description')}</CardDescription>
           </div>
           <Button
             type="button"
@@ -33,30 +35,30 @@ export function SchedulePage() {
             size="small"
             onClick={() => schedules.refetch()}
             disabled={schedules.isFetching}
-            aria-label="Refresh schedule"
+            aria-label={t('refreshAria')}
           >
             <RefreshCw className={`h-4 w-4 ${schedules.isFetching ? 'animate-spin' : ''}`} aria-hidden />
-            Refresh
+            {t('refresh')}
           </Button>
         </div>
       </CardHeader>
       <CardContent>
         {schedules.isError ? (
-          <ErrorState description="Could not load schedules." onRetry={() => schedules.refetch()} />
+          <ErrorState description={t('errorDescription')} onRetry={() => schedules.refetch()} />
         ) : schedules.isLoading ? (
-          <LoadingState label="Loading schedule…" />
+          <LoadingState label={t('loading')} />
         ) : !schedules.data || schedules.data.length === 0 ? (
-          <EmptyState title="No schedules" description="Schedules appear here once a Work has cron roles configured." />
+          <EmptyState title={t('emptyTitle')} description={t('emptyDescription')} />
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Schedule</TableHead>
-                <TableHead>Label</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Preset</TableHead>
-                <TableHead>Core ctx</TableHead>
-                <TableHead>Updated</TableHead>
+                <TableHead>{t('columns.schedule')}</TableHead>
+                <TableHead>{t('columns.label')}</TableHead>
+                <TableHead>{t('columns.status')}</TableHead>
+                <TableHead>{t('columns.preset')}</TableHead>
+                <TableHead>{t('columns.coreCtx')}</TableHead>
+                <TableHead>{t('columns.updated')}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>

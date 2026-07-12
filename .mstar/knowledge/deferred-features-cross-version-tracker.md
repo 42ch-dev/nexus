@@ -1,10 +1,10 @@
 # Deferred Features — Cross-Version Tracker v2
 
-**Quick status**: **V1.104 active** — Must W2 (Settings Workspace path + honest restart copy). V1.103 Must delivered (Agent/Connection/Setup); Stretch W2 promoted here. Execution-mode matrix still deferred. Platform **paused**.
+**Quick status**: **V1.113 active** — i18n completion (P0/P1) + tech-debt paydown (P2). V1.112 Shipped (i18n foundation + UI migration). Platform **paused**.
 
 **Purpose**: Single source of truth for **open** and **backlog** features deferred from delivery compasses. Closed/shipped history lives in shipped archive.
 **Scope**: `nexus` OSS repository only.
-**Created**: 2026-04-21 · **Last updated**: 2026-07-09 (V1.104 active — Workspace W2 Must in flight)
+**Created**: 2026-04-21 · **Last updated**: 2026-07-12 (V1.113 active — i18n completion + tech-debt paydown)
 
 ---
 
@@ -77,7 +77,7 @@ Non-feature reliability work routed out of feature iterations; picked up by a de
 
 ## 3) Residuals (SSOT pointer)
 
-Residual findings are tracked in [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary`. The tracker does **not** mirror residual rows — `status.json` is authoritative. Current state: 9 open V1.60 residuals (all low, V1.61+). Closed/historical: `.mstar/archived/residuals/<plan-id>.json`.
+Residual findings are tracked in [`status.json`](../status.json) → `residual_findings` + `metadata.tech_debt_summary`. The tracker does **not** mirror residual rows — `status.json` is authoritative. Current state: 78 open residuals tracked in [`status.json`](../status.json) via `metadata.tech_debt_summary` (updated 2026-07-12). Closed/historical: `.mstar/archived/residuals/<plan-id>.json`.
 
 ---
 
@@ -91,9 +91,9 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 ## 5) Quick index
 
-**Active iteration**: [V1.104](../iterations/v1.104-delivery-compass.md) (**active** — Must W2 Settings Workspace; `iteration/v1.104`).
+**Active iteration**: [V1.113](../iterations/v1.113-delivery-compass.md) (**active** — i18n completion + tech-debt paydown; `iteration/v1.113`).
 
-**Latest shipped**: [V1.103](../iterations/v1.103-delivery-compass.md) (Settings shell Must — Agent/Connection/Setup; Workspace Stretch deferred; 2026-07-09).
+**Latest shipped**: [V1.112](../iterations/v1.112-delivery-compass.md) (i18n foundation + UI migration; 2026-07-12).
 
 **Full iteration index**: [iterations/README.md](../iterations/README.md)
 

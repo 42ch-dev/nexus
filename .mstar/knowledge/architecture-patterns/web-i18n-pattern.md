@@ -4,9 +4,9 @@ date: 2026-07-12
 problem_type: knowledge
 category: architecture-patterns
 severity: low
-plan_id: 2026-07-12-v1.112-i18n-foundation
-tags: [i18n, i18next, react-i18next, locale, LocaleProvider, command-registry, format, intl]
-applies_when: Adding or extending i18n in apps/web; adding user-facing strings; wiring Intl formatters
+plan_id: 2026-07-12-v1.112-i18n-foundation, 2026-07-12-v1.113-i18n-completion
+tags: [i18n, i18next, react-i18next, locale, LocaleProvider, command-registry, format, intl, design-studio, test-setup]
+applies_when: Adding or extending i18n in apps/web; adding user-facing strings; wiring Intl formatters; setting up i18n in test environments that import shared web components
 ---
 
 # Web i18n Architecture Pattern
@@ -147,3 +147,31 @@ new Intl.DateTimeFormat(getActiveLocale(), { dateStyle: 'medium' });
 - **Hardcoded `aria-label` on mobile nav:** P0 missed migrating the mobile nav
   `aria-label="Primary"` while the sidebar used `t('aria.primary')`. QC caught
   this as an inconsistency.
+
+## V1.113 Additions
+
+### IntlFormatterCache (V1.113 P0)
+
+`format.ts` caches `Intl.DateTimeFormat` and `Intl.RelativeTimeFormat` instances
+per locale + options combo. The cache key includes `JSON.stringify` of sorted
+option keys to handle different `dateStyle`/`timeStyle` combinations. The cache
+is unbounded but negligible (~6 entries max for 2 locales x ~4 option combos).
+`formatUtcAndLocal` uses hardcoded `'en-US'` for the UTC branch (locale-independent).
+
+### Catalog namespace migration (V1.113 P0)
+
+Page-specific catalogs live in `src/locales/{en,zh-CN}/<page-name>.json`. Do not
+dual-SSOT page copy under both `shell.json` and a page namespace. When migrating,
+remove page-specific keys from `shell.json` and place them in the dedicated
+namespace file. `shell.json` should contain only route/chrome/not-found/daemon/
+profile/health keys.
+
+### Design-studio test setup (V1.113 P2)
+
+When `apps/design-studio` imports shared components from `apps/web` (via
+`@web-setup/*` aliases) that use `useTranslation()`, the design-studio test
+environment must initialize i18next. Fix: import `@/lib/i18n/config` in
+`apps/design-studio/src/test/setup.ts` and reset locale to `en` in `beforeEach`.
+Also ensure fixture agent IDs match `COMMON_AGENT_PRIORITY` so agent cards
+render in the visible grid. Do NOT migrate design-studio strings to i18n
+(developer-auxiliary surface).

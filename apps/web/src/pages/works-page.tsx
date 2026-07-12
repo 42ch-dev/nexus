@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { Plus, RefreshCw } from 'lucide-react';
 
@@ -25,6 +26,7 @@ import { CreateWorkDialog } from './dialogs/create-work-dialog';
  * the `status` query param. Clicking a row opens the Work detail view.
  */
 export function WorksPage() {
+  const { t } = useTranslation('works');
   const [statusFilter, setStatusFilter] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const query = useWorks(statusFilter.trim() ? { status: statusFilter.trim() } : undefined);
@@ -35,14 +37,14 @@ export function WorksPage() {
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div className="flex flex-1 flex-wrap items-center gap-2">
           <label htmlFor="works-status-filter" className="sr-only">
-            Filter Works by status
+            {t('filterLabel')}
           </label>
           <input
             id="works-status-filter"
             type="search"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
-            placeholder="Filter by status (e.g. active)"
+            placeholder={t('filterPlaceholder')}
             className="h-9 w-full max-w-xs rounded-control border border-gray-alpha-400 bg-background-100 px-3 text-copy-14 text-gray-1000 placeholder:text-gray-700"
           />
           <Button
@@ -51,39 +53,39 @@ export function WorksPage() {
             size="small"
             onClick={() => query.refetch()}
             disabled={query.isFetching}
-            aria-label="Refresh Works"
+            aria-label={t('refreshAria')}
           >
             <RefreshCw className={`h-4 w-4 ${query.isFetching ? 'animate-spin' : ''}`} aria-hidden />
-            Refresh
+            {t('refresh')}
           </Button>
         </div>
         <Button type="button" variant="primary" size="small" onClick={() => setCreateOpen(true)}>
           <Plus className="h-4 w-4" aria-hidden />
-          Create Work
+          {t('create')}
         </Button>
       </div>
 
       <Card className="shadow-card">
         <CardHeader>
-          <CardTitle>Works</CardTitle>
-          <CardDescription>Every Work, its status, and when it last changed.</CardDescription>
+          <CardTitle>{t('title')}</CardTitle>
+          <CardDescription>{t('description')}</CardDescription>
         </CardHeader>
         <CardContent>
           {query.isError ? (
             <ErrorState
-              description="The daemon did not return Works. Check that the local daemon is running."
+              description={t('errorDescription')}
               onRetry={() => query.refetch()}
             />
           ) : query.isLoading ? (
-            <LoadingState label="Loading works…" />
+            <LoadingState label={t('loading')} />
           ) : works.length === 0 ? (
             <EmptyState
-              title="No works yet"
-              description="Create a Work to start the local loop."
+              title={t('emptyTitle')}
+              description={t('emptyDescription')}
               action={
                 <Button type="button" variant="secondary" size="small" onClick={() => setCreateOpen(true)}>
                   <Plus className="h-4 w-4" aria-hidden />
-                  Create Work
+                  {t('create')}
                 </Button>
               }
             />
@@ -92,11 +94,11 @@ export function WorksPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead>Title</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Intake</TableHead>
-                    <TableHead>Preset</TableHead>
-                    <TableHead>Updated</TableHead>
+                    <TableHead>{t('columns.title')}</TableHead>
+                    <TableHead>{t('columns.status')}</TableHead>
+                    <TableHead>{t('columns.intake')}</TableHead>
+                    <TableHead>{t('columns.preset')}</TableHead>
+                    <TableHead>{t('columns.updated')}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -107,7 +109,7 @@ export function WorksPage() {
                           to={`/works/${encodeURIComponent(w.work_id)}`}
                           className="font-medium text-blue-700 hover:text-blue-800 hover:underline"
                         >
-                          {w.title || '(untitled)'}
+                          {w.title || t('untitled')}
                         </Link>
                         <div className="text-copy-13-mono text-gray-700">{shortId(w.work_id)}</div>
                       </TableCell>

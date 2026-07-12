@@ -1,0 +1,67 @@
+{
+  "title": "作品",
+  "description": "所有作品、状态以及最后更改时间。",
+  "filterLabel": "按状态筛选作品",
+  "filterPlaceholder": "按状态筛选（例如 active）",
+  "refreshAria": "刷新作品",
+  "refresh": "刷新",
+  "create": "创建作品",
+  "errorDescription": "守护进程未返回作品。请检查本地守护进程是否正在运行。",
+  "loading": "正在加载作品…",
+  "emptyTitle": "暂无作品",
+  "emptyDescription": "创建作品以启动本地循环。",
+  "untitled": "（未命名）",
+  "columns": {
+    "title": "标题",
+    "status": "状态",
+    "intake": "接入",
+    "preset": "预设",
+    "updated": "更新时间"
+  },
+  "workDetail": {
+    "loading": "正在加载作品…",
+    "notFoundTitle": "作品未找到",
+    "notFoundDescription": "该作品不存在或守护进程无法返回。",
+    "backToWorks": "返回作品列表",
+    "updateWork": "更新作品",
+    "labels": {
+      "longTermGoal": "长期目标",
+      "initialIdea": "初始想法",
+      "intakeStatus": "接入状态",
+      "currentStage": "当前阶段",
+      "profile": "类型",
+      "primaryPreset": "主预设",
+      "world": "世界",
+      "storyRef": "故事引用",
+      "created": "创建时间",
+      "updated": "更新时间"
+    },
+    "chapterProgress": "章节进度",
+    "chapterNoTotal": "第 {{chapter}} 章（无计划总数）。",
+    "openOutline": "打开大纲",
+    "openStrategy": "打开策略",
+    "openWorldKb": "打开世界知识库",
+    "archiveWork": "归档作品",
+    "confirmArchive": "确认归档",
+    "findingsTitle": "发现",
+    "findingsDescription": "针对此作品的发现，可按严重程度筛选。",
+    "findingsError": "无法加载此作品的发现。",
+    "findingsLoading": "正在加载发现…",
+    "noFindings": "此作品暂无发现记录。",
+    "loadMoreFindings": "加载更多发现",
+    "untitledFinding": "（未命名发现）"
+  },
+  "dialog": {
+    "patchWork": {
+      "title": "更新作品",
+      "statusLabel": "状态",
+      "intakeStatusLabel": "接入状态",
+      "currentStageLabel": "当前阶段",
+      "stageStatusLabel": "阶段状态",
+      "hint": "状态在运行时为自由文本（例如 intake、active、completed、paused）。",
+      "cancel": "取消",
+      "submit": "更新作品",
+      "submitting": "正在更新作品…"
+    }
+  }
+}
