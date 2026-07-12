@@ -32,17 +32,18 @@ const baseProps = {
 describe('ConflictModal', () => {
   it('renders the mandated headline and server revision', () => {
     render(<ConflictModal {...baseProps} />);
-    expect(screen.getByText('This state changed while you were editing.')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Strategy Conflict' })).toBeInTheDocument();
+    expect(screen.getByText(/This entry changed while you were editing/i)).toBeInTheDocument();
     expect(screen.getByText('7', { selector: 'span.font-mono' })).toBeInTheDocument();
   });
 
   it('lists what changed on the server and what the user edited', () => {
     render(<ConflictModal {...baseProps} />);
-    const serverSection = screen.getByText('What changed on the server').closest('div')!;
-    const draftSection = screen.getByText('What you were about to do').closest('div')!;
-    expect(serverSection.textContent).toContain('State label');
+    const serverSection = screen.getByText('Server version').closest('div')!;
+    const draftSection = screen.getByText('Your edit').closest('div')!;
+    expect(serverSection.textContent).toContain('Label');
     expect(serverSection.textContent).toContain('Description');
-    expect(draftSection.textContent).toContain('State label');
+    expect(draftSection.textContent).toContain('Label');
     expect(draftSection.textContent).toContain('Description');
   });
 
@@ -69,8 +70,8 @@ describe('ConflictModal', () => {
     render(<ConflictModal {...baseProps} />);
     const review = screen.getByRole('button', { name: /Review side-by-side/i });
     await user.click(review);
-    expect(screen.getByText('Server: State label')).toBeInTheDocument();
-    expect(screen.getByText('Your edit: State label')).toBeInTheDocument();
+    expect(screen.getByText('Server: Label')).toBeInTheDocument();
+    expect(screen.getByText('Your edit: Label')).toBeInTheDocument();
   });
 
   it('calls onUseCurrent when the primary action is clicked', async () => {
@@ -94,6 +95,8 @@ describe('ConflictModal', () => {
     const live = screen.getByRole('status');
     expect(live).toHaveAttribute('aria-live', 'polite');
     expect(live.textContent).toContain('Conflict detected on revision 7');
-    expect(live.textContent).toContain('Overlap on State label, Description');
+    expect(live.textContent).toContain('Label');
+    expect(live.textContent).toContain('Description');
+    expect(live.textContent).toContain('Resolve manually');
   });
 });

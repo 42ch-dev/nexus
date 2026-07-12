@@ -18,7 +18,8 @@
  * P2's FB-GS-001 selection-memo fix file-disjoint (P2 edits this hook, not the
  * orchestrator).
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Edge, Node, OnNodesChange } from '@xyflow/react';
 
 import type { ChapterSummary, WorkOutline } from '@42ch/nexus-contracts';
@@ -78,7 +79,12 @@ export interface UseOutlineCanvasGraphResult {
 export function useOutlineCanvasGraph(
   args: UseOutlineCanvasGraphArgs,
 ): UseOutlineCanvasGraphResult {
+  const { t } = useTranslation('canvas');
   const { outline, chapters, initialSelectedChapterId = null, sceneBeatFixture } = args;
+  const translateFallback = useCallback(
+    (chapter: number) => t('chapter.fallback', { chapter }),
+    [t],
+  );
 
   const [selectedChapterId, setSelectedChapterId] = useState<number | null>(
     initialSelectedChapterId ?? null,
@@ -94,8 +100,8 @@ export function useOutlineCanvasGraph(
   // V1.109 C2 T2 — forward the scene/beat fixture payload so the projection
   // can emit Scene/Beat child nodes (empty/undefined on real Works today).
   const projection = useMemo(
-    () => (outline ? projectOutlineGraph(outline, chapters, sceneBeatFixture) : null),
-    [outline, chapters, sceneBeatFixture],
+    () => (outline ? projectOutlineGraph(outline, chapters, sceneBeatFixture, translateFallback) : null),
+    [outline, chapters, sceneBeatFixture, translateFallback],
   );
 
   const [rfNodes, setRfNodes] = useState<Node[]>([]);

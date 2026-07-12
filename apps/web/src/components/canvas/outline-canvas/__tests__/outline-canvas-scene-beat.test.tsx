@@ -13,9 +13,10 @@
  * `use-outline-canvas-graph.test.ts` (16 tests including scene/beat selection).
  */
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
+import { renderInApp } from '@/test/test-providers';
 import { OutlineCanvas } from '@/components/canvas/outline-canvas';
 
 // ---------------------------------------------------------------------------
@@ -113,7 +114,7 @@ const queryClient = new QueryClient({
 });
 
 function renderWithFixture() {
-  return render(
+  return renderInApp(
     <QueryClientProvider client={queryClient}>
       <OutlineCanvas workId="wk_test" sceneBeatFixture={FIXTURE} />
     </QueryClientProvider>,

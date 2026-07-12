@@ -1,1 +1,90 @@
-{}
+{
+  "palette": {
+    "title": "命令面板",
+    "search": {
+      "label": "搜索命令",
+      "placeholder": "输入命令…"
+    },
+    "listbox": {
+      "label": "命令"
+    },
+    "noResults": "没有匹配的命令。"
+  },
+  "group": {
+    "navigate": "导航",
+    "strategy": "策略",
+    "outline": "大纲",
+    "world-kb": "世界知识库"
+  },
+  "go": {
+    "strategy": {
+      "label": "前往策略",
+      "keywords": {
+        "preset": "预设",
+        "state-machine": "状态机",
+        "canvas": "画布",
+        "sparkles": "闪光"
+      }
+    },
+    "outline": {
+      "label": "前往大纲",
+      "keywords": {
+        "chapters": "章节",
+        "timeline": "时间线",
+        "work-canvas": "作品画布",
+        "structure": "结构"
+      }
+    },
+    "world-kb": {
+      "label": "前往世界知识库",
+      "keywords": {
+        "entities": "实体",
+        "relationships": "关系",
+        "world-canvas": "世界画布",
+        "lore": "背景设定"
+      }
+    }
+  },
+  "strategy": {
+    "toggle-view": {
+      "label": "切换策略视图",
+      "keywords": {
+        "graph": "图表",
+        "list": "列表",
+        "alt-view": "替代视图",
+        "switch": "切换"
+      }
+    },
+    "create-transition": {
+      "label": "创建过渡",
+      "keywords": {
+        "add-edge": "添加边",
+        "new-transition": "新建过渡",
+        "state-machine": "状态机",
+        "link-states": "连接状态"
+      }
+    }
+  },
+  "outline": {
+    "toggle-view": {
+      "label": "切换大纲视图",
+      "keywords": {
+        "graph": "图表",
+        "list": "列表",
+        "alt-view": "替代视图",
+        "switch": "切换"
+      }
+    }
+  },
+  "world-kb": {
+    "toggle-view": {
+      "label": "切换世界知识库视图",
+      "keywords": {
+        "graph": "图表",
+        "list": "列表",
+        "alt-view": "替代视图",
+        "switch": "切换"
+      }
+    }
+  }
+}

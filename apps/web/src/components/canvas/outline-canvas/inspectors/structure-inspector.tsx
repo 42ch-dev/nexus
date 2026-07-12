@@ -9,11 +9,14 @@ import { useMemo } from 'react';
 import { BookOpen, ChevronRight } from 'lucide-react';
 import { FixedSizeList, type ListChildComponentProps } from 'react-window';
 
+import { useTranslation } from 'react-i18next';
+
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { EmptyState } from '@/components/ui/states';
 
 import {
+  STATUS_LABEL_KEYS,
   STATUS_VARIANT,
   chapterDisplayTitle,
   unassignedChaptersOf,
@@ -38,6 +41,7 @@ export function OutlineStructurePanel({
   onSelectChapter,
   onMoveChapter,
 }: OutlineStructurePanelProps) {
+  const { t } = useTranslation('canvas');
   const unassigned = useMemo(
     () => unassignedChaptersOf(outline, chapters),
     [outline, chapters],
@@ -48,13 +52,13 @@ export function OutlineStructurePanel({
       <CardHeader>
         <CardTitle className="flex items-center gap-2">
           <BookOpen className="h-5 w-5 text-purple-700" aria-hidden />
-          Volumes & Chapters
+          {t('structureInspector.title')}
         </CardTitle>
-        <CardDescription>Select a chapter to inspect or move it between volumes.</CardDescription>
+        <CardDescription>{t('structureInspector.description')}</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         {outline.volumes.length === 0 && unassigned.length === 0 ? (
-          <EmptyState title="No chapters yet" description="Chapters appear here once created." />
+          <EmptyState title={t('structureInspector.empty.title')} description={t('structureInspector.empty.description')} />
         ) : (
           <div className="space-y-5">
             {outline.volumes.map((volume) => (
@@ -70,12 +74,13 @@ export function OutlineStructurePanel({
             ))}
             {unassigned.length > 0 && (
               <div>
-                <h4 className="text-label-14 font-semibold text-gray-900">Unassigned</h4>
+                <h4 className="text-label-14 font-semibold text-gray-900">{t('structureInspector.unassigned')}</h4>
                 <VirtualUnassignedList
                   unassigned={unassigned}
                   outline={outline}
                   selectedChapterId={selectedChapterId}
                   onSelectChapter={onSelectChapter}
+                  t={t}
                 />
               </div>
             )}
@@ -103,12 +108,14 @@ function VolumeSection({
   onSelectChapter,
   onMoveChapter,
 }: VolumeSectionProps) {
+  const { t } = useTranslation('canvas');
   const listHeight = Math.min(volume.chapter_ids.length * CHAPTER_ROW_HEIGHT, MAX_LIST_HEIGHT);
+  const volumeLabel = volume.label || t('chapter.volume', { volume: volume.volume_id });
   return (
     <div className="rounded-card border border-gray-alpha-300 bg-background-100 p-3">
       <div className="flex items-center justify-between">
-        <h4 className="text-label-14 font-semibold text-gray-900">{volume.label || `Volume ${volume.volume_id}`}</h4>
-        <span className="text-label-12 text-gray-700">{volume.chapter_ids.length} chapters</span>
+        <h4 className="text-label-14 font-semibold text-gray-900">{volumeLabel}</h4>
+        <span className="text-label-12 text-gray-700">{t('structureInspector.chapterCount', { count: volume.chapter_ids.length })}</span>
       </div>
       <VirtualVolumeList
         volume={volume}
@@ -118,6 +125,7 @@ function VolumeSection({
         onSelectChapter={onSelectChapter}
         onMoveChapter={onMoveChapter}
         height={listHeight}
+        t={t}
       />
     </div>
   );
@@ -130,14 +138,16 @@ interface VolumeListData {
   selectedChapterId: number | null;
   onSelectChapter: (id: number | null) => void;
   onMoveChapter: (chapterId: number, volumeId: number) => void;
+  t: (key: string, options?: Record<string, unknown>) => string;
 }
 
 function VolumeRow({ index, style, data }: ListChildComponentProps<VolumeListData>) {
-  const { volume, outline, chapters, selectedChapterId, onSelectChapter, onMoveChapter } = data;
+  const { volume, outline, chapters, selectedChapterId, onSelectChapter, onMoveChapter, t } = data;
   const id = volume.chapter_ids[index];
   const chapter = chapters.find((c) => c.chapter === id);
   if (!chapter) return null;
   const nextVolume = outline.volumes.find((v) => v.volume_id === volume.volume_id + 1);
+  const nextVolumeLabel = nextVolume?.label || (nextVolume ? t('chapter.volume', { volume: nextVolume.volume_id }) : '');
   return (
     <li key={id} style={style} className="flex items-center gap-2">
       <ChapterRow
@@ -145,14 +155,15 @@ function VolumeRow({ index, style, data }: ListChildComponentProps<VolumeListDat
         outline={outline}
         selected={selectedChapterId === id}
         onSelect={() => onSelectChapter(id)}
+        t={t}
       />
       {nextVolume ? (
         <button
           type="button"
           onClick={() => onMoveChapter(id, nextVolume.volume_id)}
           className="rounded-control p-1 text-gray-700 hover:bg-gray-alpha-100"
-          aria-label={`Move chapter ${id} to ${nextVolume.label || `Volume ${nextVolume.volume_id}`}`}
-          title={`Move to ${nextVolume.label || `Volume ${nextVolume.volume_id}`}`}
+          aria-label={t('structureInspector.moveChapterAria', { chapter: id, volume: nextVolumeLabel })}
+          title={t('structureInspector.moveChapterTitle', { volume: nextVolumeLabel })}
         >
           <ChevronRight className="h-4 w-4" aria-hidden />
         </button>
@@ -169,6 +180,7 @@ function VirtualVolumeList({
   onSelectChapter,
   onMoveChapter,
   height,
+  t,
 }: VolumeListData & { height: number }) {
   const itemData = useMemo(
     () => ({
@@ -178,8 +190,9 @@ function VirtualVolumeList({
       selectedChapterId,
       onSelectChapter,
       onMoveChapter,
+      t,
     }),
-    [volume, outline, chapters, selectedChapterId, onSelectChapter, onMoveChapter],
+    [volume, outline, chapters, selectedChapterId, onSelectChapter, onMoveChapter, t],
   );
 
   return (
@@ -202,10 +215,11 @@ interface UnassignedListData {
   outline: WorkOutline;
   selectedChapterId: number | null;
   onSelectChapter: (id: number | null) => void;
+  t: (key: string, options?: Record<string, unknown>) => string;
 }
 
 function UnassignedRow({ index, style, data }: ListChildComponentProps<UnassignedListData>) {
-  const { unassigned, outline, selectedChapterId, onSelectChapter } = data;
+  const { unassigned, outline, selectedChapterId, onSelectChapter, t } = data;
   const chapter = unassigned[index];
   return (
     <li key={chapter.chapter} style={style}>
@@ -214,6 +228,7 @@ function UnassignedRow({ index, style, data }: ListChildComponentProps<Unassigne
         outline={outline}
         selected={selectedChapterId === chapter.chapter}
         onSelect={() => onSelectChapter(chapter.chapter)}
+        t={t}
       />
     </li>
   );
@@ -224,11 +239,12 @@ function VirtualUnassignedList({
   outline,
   selectedChapterId,
   onSelectChapter,
+  t,
 }: UnassignedListData) {
   const listHeight = Math.min(unassigned.length * CHAPTER_ROW_HEIGHT, MAX_LIST_HEIGHT);
   const itemData = useMemo(
-    () => ({ unassigned, outline, selectedChapterId, onSelectChapter }),
-    [unassigned, outline, selectedChapterId, onSelectChapter],
+    () => ({ unassigned, outline, selectedChapterId, onSelectChapter, t }),
+    [unassigned, outline, selectedChapterId, onSelectChapter, t],
   );
 
   return (
@@ -251,11 +267,12 @@ interface ChapterRowProps {
   outline: WorkOutline;
   selected: boolean;
   onSelect: () => void;
+  t: (key: string, options?: Record<string, unknown>) => string;
 }
 
-function ChapterRow({ chapter, outline, selected, onSelect }: ChapterRowProps) {
+function ChapterRow({ chapter, outline, selected, onSelect, t }: ChapterRowProps) {
   const titles = outline.chapter_titles as Record<string, string> | undefined;
-  const title = chapterDisplayTitle(chapter, titles);
+  const title = chapterDisplayTitle(chapter, titles, t('chapter.fallback'));
   return (
     <button
       type="button"
@@ -272,7 +289,7 @@ function ChapterRow({ chapter, outline, selected, onSelect }: ChapterRowProps) {
         <span className="font-mono text-gray-700">#{chapter.chapter}</span>{' '}
         {title}
       </span>
-      <Badge variant={STATUS_VARIANT[chapter.status]}>{chapter.status.replace(/_/g, ' ')}</Badge>
+      <Badge variant={STATUS_VARIANT[chapter.status]}>{t(STATUS_LABEL_KEYS[chapter.status])}</Badge>
     </button>
   );
 }

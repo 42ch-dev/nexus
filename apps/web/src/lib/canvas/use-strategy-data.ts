@@ -7,6 +7,7 @@
  * surface its own partial-failure UI (R-V171P0-QC1-004).
  */
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import { useNexusClient } from '@/lib/client-context';
@@ -85,14 +86,15 @@ export function useDerivedCreatorId(presetId: string | undefined): string | unde
 
 function useErrorToast() {
   const { toast } = useToast();
-  return (error: unknown, title: string) => {
+  const { t } = useTranslation('common');
+  return (error: unknown, key: string) => {
     const description =
       error instanceof NexusClientError
         ? error.message
         : error instanceof Error
           ? error.message
-          : 'Unexpected error.';
-    toast({ variant: 'error', title, description });
+          : t('error.unexpected');
+    toast({ variant: 'error', title: t(key, { defaultValue: key }), description });
   };
 }
 
@@ -108,6 +110,7 @@ export function useRunStrategy() {
   const client = useNexusClient();
   const qc = useQueryClient();
   const errorToast = useErrorToast();
+  const { t } = useTranslation('canvas');
   const { toast } = useToast();
   return useMutation({
     mutationFn: (args: RunIdeaArgs) =>
@@ -119,11 +122,11 @@ export function useRunStrategy() {
         reason: 'canvas-strategy-idea',
       }),
     onSuccess: (_data, args) => {
-      toast({ variant: 'success', title: 'Strategy run queued', description: args.presetId });
+      toast({ variant: 'success', title: t('strategy.toast.runQueued'), description: args.presetId });
       void qc.invalidateQueries({ queryKey: queryKeys.schedules.all });
       void qc.invalidateQueries({ queryKey: queryKeys.sessions.all });
     },
-    onError: (error) => errorToast(error, 'Could not start Strategy run'),
+    onError: (error) => errorToast(error, 'error.couldNotStartStrategyRun'),
   });
 }
 
@@ -137,6 +140,7 @@ export function useSteerStrategy() {
   const client = useNexusClient();
   const qc = useQueryClient();
   const errorToast = useErrorToast();
+  const { t } = useTranslation('canvas');
   const { toast } = useToast();
   return useMutation({
     mutationFn: async (args: SteerIdeaArgs) => {
@@ -144,11 +148,11 @@ export function useSteerStrategy() {
       return client.editCoreContext(args.scheduleId, { op: 'append', body: args.idea });
     },
     onSuccess: (_data, args) => {
-      toast({ variant: 'success', title: 'Idea sent to Strategy', description: args.scheduleId });
+      toast({ variant: 'success', title: t('strategy.toast.ideaSent'), description: args.scheduleId });
       void qc.invalidateQueries({ queryKey: queryKeys.schedules.all });
       void qc.invalidateQueries({ queryKey: queryKeys.sessions.all });
     },
-    onError: (error) => errorToast(error, 'Could not steer Strategy'),
+    onError: (error) => errorToast(error, 'error.couldNotSteerStrategy'),
   });
 }
 
@@ -157,15 +161,16 @@ export function useResumeStrategy() {
   const client = useNexusClient();
   const qc = useQueryClient();
   const errorToast = useErrorToast();
+  const { t } = useTranslation('canvas');
   const { toast } = useToast();
   return useMutation({
     mutationFn: (scheduleId: string) => client.signalSchedule(scheduleId, { signal: 'resume' }),
     onSuccess: (_data, scheduleId) => {
-      toast({ variant: 'success', title: 'Strategy resumed', description: scheduleId });
+      toast({ variant: 'success', title: t('strategy.toast.resumed'), description: scheduleId });
       void qc.invalidateQueries({ queryKey: queryKeys.schedules.all });
       void qc.invalidateQueries({ queryKey: queryKeys.sessions.all });
     },
-    onError: (error) => errorToast(error, 'Could not resume Strategy'),
+    onError: (error) => errorToast(error, 'error.couldNotResumeStrategy'),
   });
 }
 

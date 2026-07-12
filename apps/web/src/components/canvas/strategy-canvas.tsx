@@ -5,6 +5,7 @@
  * B2: split into focused sibling modules ≤200 lines (R-V171P0-QC1-006).
  */
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { CanvasShell } from '@/components/canvas/canvas-shell';
 import { StrategyAltView } from '@/components/canvas/strategy-alt-view';
@@ -27,6 +28,7 @@ export interface StrategyCanvasProps {
 }
 
 export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
+  const { t } = useTranslation('canvas');
   const {
     graphQuery,
     activeSession,
@@ -75,16 +77,26 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
   // current state instead of closing over a stale `showAlt` flag.
   useRegisterCommand({
     id: 'strategy.toggle-view',
-    label: 'Toggle Strategy View',
-    group: 'Strategy',
-    keywords: ['graph', 'list', 'alt view', 'switch'],
+    labelKey: 'strategy.toggle-view.label',
+    groupKey: 'group.strategy',
+    keywordKeys: [
+      'strategy.toggle-view.keywords.graph',
+      'strategy.toggle-view.keywords.list',
+      'strategy.toggle-view.keywords.alt-view',
+      'strategy.toggle-view.keywords.switch',
+    ],
     handler: () => setShowAlt((v) => !v),
   });
   useRegisterCommand({
     id: 'strategy.create-transition',
-    label: 'Create Transition',
-    group: 'Strategy',
-    keywords: ['add edge', 'new transition', 'state machine', 'link states'],
+    labelKey: 'strategy.create-transition.label',
+    groupKey: 'group.strategy',
+    keywordKeys: [
+      'strategy.create-transition.keywords.add-edge',
+      'strategy.create-transition.keywords.new-transition',
+      'strategy.create-transition.keywords.state-machine',
+      'strategy.create-transition.keywords.link-states',
+    ],
     handler: () => setCreateDialogOpen(true),
   });
 
@@ -106,9 +118,9 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
     setSaveStatuses((prev) => ({ ...prev, [section]: status }));
   }
 
-  if (graphQuery.isLoading) return <LoadingState label="Loading Strategy…" />;
+  if (graphQuery.isLoading) return <LoadingState label={t('strategy.loading')} />;
   if (graphQuery.isError)
-    return <ErrorState description="Could not load the Strategy preset." onRetry={() => graphQuery.refetch()} />;
+    return <ErrorState description={t('strategy.loadError')} onRetry={() => graphQuery.refetch()} />;
 
   const parsed = graphQuery.data?.parsed;
   const problems = parsed?.problems ?? [];
@@ -137,7 +149,7 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
           onConnect={onConnect}
           onReconnect={onReconnect}
           summaryText={summaryText}
-          ariaLabel="Strategy state-machine graph"
+          ariaLabel={t('strategy.graphAriaLabel')}
         >
           <InspectorPanel
             selected={selected}
@@ -192,10 +204,10 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
             ) : null}
           </InspectorPanel>
           {selectedDraftEdge ? (
-            <aside
-              className="absolute right-3 top-3 w-[280px] rounded-card border border-gray-alpha-400 bg-background-100 p-3 shadow-popover"
-              aria-label="Draft transition editor"
-            >
+          <aside
+            className="absolute right-3 top-3 w-[280px] rounded-card border border-gray-alpha-400 bg-background-100 p-3 shadow-popover"
+            aria-label={t('strategy.draftTransitionEditor')}
+          >
               <DraftEdgeInspector
                 sourceStateId={selectedDraftEdge.source}
                 targetStateId={selectedDraftEdge.target}

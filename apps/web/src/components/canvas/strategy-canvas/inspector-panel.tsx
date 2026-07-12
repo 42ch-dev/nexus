@@ -6,6 +6,7 @@
  * stays under the 200-line limit (R-V171P0-QC1-006).
  */
 import { useMemo } from 'react';
+import { useTranslation } from 'react-i18next';
 import type { Node } from '@xyflow/react';
 import { Info, Pencil, X } from 'lucide-react';
 
@@ -33,13 +34,14 @@ export function InspectorPanel({
   onFocusSection,
   children,
 }: InspectorPanelProps) {
+  const { t } = useTranslation('canvas');
   const d = useMemo(() => (selected?.data as StrategyNodeData | undefined) ?? undefined, [selected]);
   if (!selected || !selectedState || !d) return null;
 
   return (
     <aside
       className="absolute right-3 top-3 w-[280px] rounded-card border border-gray-alpha-400 bg-background-100 p-3 shadow-popover"
-      aria-label="Selected node details"
+      aria-label={t('strategy.inspector.ariaLabel')}
     >
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -51,7 +53,7 @@ export function InspectorPanel({
             type="button"
             onClick={() => setIsEditing(true)}
             className="rounded-control p-1 text-gray-700 hover:bg-gray-alpha-100"
-            aria-label="Edit state"
+            aria-label={t('strategy.inspector.editAria')}
           >
             <Pencil className="h-4 w-4" aria-hidden />
           </button>
@@ -60,7 +62,7 @@ export function InspectorPanel({
             type="button"
             onClick={() => setIsEditing(false)}
             className="rounded-control p-1 text-gray-700 hover:bg-gray-alpha-100"
-            aria-label="Cancel editing"
+            aria-label={t('strategy.inspector.cancelEditAria')}
           >
             <X className="h-4 w-4" aria-hidden />
           </button>
@@ -76,41 +78,43 @@ export function InspectorPanel({
 }
 
 function ReadOnlyDetails({ d, selectedState }: { d: StrategyNodeData; selectedState: PresetState }) {
+  const { t } = useTranslation('canvas');
   const promptTemplateRef = templateRefOf(selectedState);
   return (
     <dl className="mt-2 flex flex-col gap-1 text-copy-13">
       <div className="flex justify-between">
-        <dt className="text-gray-700">Kind</dt>
+        <dt className="text-gray-700">{t('strategy.inspector.kind')}</dt>
         <dd className="font-mono text-gray-1000">{d.stateKind}</dd>
       </div>
       <div className="flex justify-between">
-        <dt className="text-gray-700">State id</dt>
+        <dt className="text-gray-700">{t('strategy.inspector.stateId')}</dt>
         <dd className="font-mono text-gray-1000">{d.stateId}</dd>
       </div>
       {d.innerGraphId ? (
         <div className="flex justify-between">
-          <dt className="text-gray-700">Inner graph</dt>
+          <dt className="text-gray-700">{t('strategy.inspector.innerGraph')}</dt>
           <dd className="font-mono text-gray-1000">{d.innerGraphId}</dd>
         </div>
       ) : null}
       {d.convergeStrategy ? (
         <div className="flex justify-between">
-          <dt className="text-gray-700">Converge</dt>
+          <dt className="text-gray-700">{t('strategy.inspector.converge')}</dt>
           <dd className="font-mono text-gray-1000">{d.convergeStrategy}</dd>
         </div>
       ) : null}
-      {d.isInitial ? <div className="text-purple-700">Initial state</div> : null}
-      {d.isTerminal ? <div className="text-gray-700">Terminal state</div> : null}
+      {d.isInitial ? <div className="text-purple-700">{t('strategy.inspector.initialState')}</div> : null}
+      {d.isTerminal ? <div className="text-gray-700">{t('strategy.inspector.terminalState')}</div> : null}
       {d.status ? (
         <div className="flex justify-between">
-          <dt className="text-gray-700">Status</dt>
+          <dt className="text-gray-700">{t('strategy.inspector.status')}</dt>
           <dd className="text-blue-700">{d.status}</dd>
         </div>
       ) : null}
       {selectedState.description ? <p className="mt-2 text-gray-900">{selectedState.description}</p> : null}
       {promptTemplateRef ? (
         <p className="mt-2 text-gray-700">
-          Prompt: <span className="font-mono">{promptTemplateRef}</span>
+          {t('strategy.inspector.prompt')}{' '}
+          <span className="font-mono">{promptTemplateRef}</span>
         </p>
       ) : null}
     </dl>
@@ -136,6 +140,7 @@ export function StrategyConflictModal({
   onReapply,
   onDismiss,
 }: StrategyConflictModalProps) {
+  const { t } = useTranslation('canvas');
   if (!conflict) return null;
 
   // Transition create/reconnect conflict — the state-edit field diff
@@ -146,7 +151,7 @@ export function StrategyConflictModal({
     return (
       <ConflictModalBase
         open
-        title="This strategy changed while you were editing a transition."
+        title={t('strategy.inspector.transitionConflict.title')}
         currentRevision={conflict.currentRevision}
         serverChanges={[]}
         localChanges={[]}

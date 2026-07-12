@@ -1,17 +1,19 @@
 import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/ui/button';
 import { EmptyState } from '@/components/ui/states';
 
 /** 404 — part of the Control Room + Setup shell. */
 export function NotFoundPage() {
+  const { t } = useTranslation('shell');
   return (
     <EmptyState
-      title="Page not found"
-      description="That route is not part of the Control Room + Setup surface."
+      title={t('notFound.title')}
+      description={t('notFound.description')}
       action={
         <Button asChild variant="secondary" size="small">
-          <Link to="/works">Go to Works</Link>
+          <Link to="/works">{t('notFound.action')}</Link>
         </Button>
       }
     />

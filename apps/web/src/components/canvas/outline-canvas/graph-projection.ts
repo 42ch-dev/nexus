@@ -19,14 +19,29 @@ import type {
 
 import type { OutlineChangedField } from '@/components/canvas/outline-conflict-modal';
 
-/** Chapter lifecycle status label + value options for the inspector `<select>`. */
-export const STATUS_OPTIONS: { value: ChapterStatus; label: string }[] = [
-  { value: 'not_started', label: 'Not started' },
-  { value: 'outlined', label: 'Outlined' },
-  { value: 'draft', label: 'Draft' },
-  { value: 'finalized', label: 'Finalized' },
-  { value: 'published', label: 'Published' },
+/** i18n key for each chapter lifecycle status. */
+export const STATUS_LABEL_KEYS: Record<ChapterStatus, string> = {
+  not_started: 'chapter.status.not_started',
+  outlined: 'chapter.status.outlined',
+  draft: 'chapter.status.draft',
+  finalized: 'chapter.status.finalized',
+  published: 'chapter.status.published',
+};
+
+/** Chapter lifecycle status value + i18n key for the inspector `<select>`. */
+export const STATUS_OPTIONS: { value: ChapterStatus; labelKey: string }[] = [
+  { value: 'not_started', labelKey: STATUS_LABEL_KEYS.not_started },
+  { value: 'outlined', labelKey: STATUS_LABEL_KEYS.outlined },
+  { value: 'draft', labelKey: STATUS_LABEL_KEYS.draft },
+  { value: 'finalized', labelKey: STATUS_LABEL_KEYS.finalized },
+  { value: 'published', labelKey: STATUS_LABEL_KEYS.published },
 ];
+
+/** i18n keys for scene/beat lifecycle status. */
+export const SCENE_STATUS_LABEL_KEYS: Record<OutlineSceneStatus, string> = {
+  drafted: 'scene.status.drafted',
+  completed: 'scene.status.completed',
+};
 
 /** Maps a chapter status onto a Badge variant for the structure projection. */
 export const STATUS_VARIANT: Record<
@@ -122,12 +137,13 @@ export function unassignedChaptersOf(
 export function chapterDisplayTitle(
   chapter: { chapter: number; title?: string | null },
   titles: Record<string, string> | undefined,
-  fallback = `Chapter`,
+  fallback?: string,
 ): string {
+  const fallbackTitle = fallback ? `${fallback} ${chapter.chapter}` : `Chapter ${chapter.chapter}`;
   return (
     titles?.[String(chapter.chapter)] ??
     chapter.title ??
-    `${fallback} ${chapter.chapter}`
+    fallbackTitle
   );
 }
 

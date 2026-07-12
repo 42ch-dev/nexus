@@ -5,6 +5,7 @@
  */
 import type { MutableRefObject } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useMutation, useQueryClient, type UseMutationResult } from '@tanstack/react-query';
 
 import { useNexusClient } from '@/lib/client-context';
@@ -33,6 +34,7 @@ export function usePatchStrategyTransition(): UseMutationResult<
 > {
   const client = useNexusClient();
   const qc = useQueryClient();
+  const { t } = useTranslation('canvas');
   const { toast } = useToast();
   return useMutation({
     mutationFn: (args: PatchStrategyTransitionArgs) =>
@@ -48,7 +50,7 @@ export function usePatchStrategyTransition(): UseMutationResult<
     onSuccess: (_data, args) => {
       toast({
         variant: 'success',
-        title: 'Transition updated',
+        title: t('strategy.inspector.transition.updated'),
         description: `${args.sourceStateId} → ${args.newTarget ?? args.oldTarget}`,
       });
       void qc.invalidateQueries({ queryKey: queryKeys.presets.detail(args.strategyId) });
@@ -80,6 +82,7 @@ export function EdgeInspector({
   onSaveStatus,
   onConflict,
 }: EdgeInspectorProps) {
+  const { t } = useTranslation('canvas');
   const patch = usePatchStrategyTransition();
   const original = originalFormOf(selectedState);
   const dirty = isSectionDirty('transition', form, original);
@@ -99,7 +102,7 @@ export function EdgeInspector({
         transitionKind: 'next',
       });
       workingRevisionRef.current = Number(res.new_revision);
-      onSaveStatus({ type: 'success', message: 'Saved transition' });
+      onSaveStatus({ type: 'success', message: t('strategy.inspector.transition.saved') });
     } catch (error) {
       if (isStrategyConflictError(error)) {
         const currentRevision =
@@ -108,11 +111,11 @@ export function EdgeInspector({
             : 0;
         onConflict(currentRevision, 'transition');
       } else {
-        const message = error instanceof Error ? error.message : 'Failed to save transition';
+        const message = error instanceof Error ? error.message : t('strategy.inspector.transition.saveFailed');
         onSaveStatus({ type: 'error', message });
       }
     }
-  }, [dirty, patch.isPending, form, original, presetId, selectedState, onSaveStatus, onConflict]);
+  }, [dirty, patch.isPending, form, original, presetId, selectedState, onSaveStatus, onConflict, t]);
 
   // Keep a fresh callback reference for the keyboard shortcut effect so the
   // effect itself does not need to depend on the callback (R-V172P1-QC1-001).
@@ -129,20 +132,20 @@ export function EdgeInspector({
   if (typeof selectedState.next !== 'string') return null;
 
   return (
-    <section className="flex flex-col gap-2" aria-label="Transition editor">
+    <section className="flex flex-col gap-2" aria-label={t('strategy.inspector.transition.ariaLabel')}>
       <div className="flex items-center justify-between">
-        <span className="text-label-14 font-semibold text-gray-900">Transition</span>
+        <span className="text-label-14 font-semibold text-gray-900">{t('strategy.inspector.transition.title')}</span>
         <button
           type="button"
           onClick={handleSave}
           disabled={!dirty || patch.isPending}
           className="rounded-control border border-gray-alpha-400 px-2 py-1 text-button-12 text-gray-900 hover:bg-gray-alpha-100 disabled:text-gray-500"
         >
-          {patch.isPending ? 'Saving…' : 'Save transition'}
+          {patch.isPending ? t('strategy.inspector.transition.saving') : t('strategy.inspector.transition.save')}
         </button>
       </div>
       <label className="flex flex-col gap-1 text-copy-13">
-        <span className="text-gray-700">Transition target</span>
+        <span className="text-gray-700">{t('strategy.inspector.transition.targetLabel')}</span>
         <input
           type="text"
           value={form.nextTarget}
@@ -208,6 +211,7 @@ export function DraftEdgeInspector({
   onCommit,
   onCancel,
 }: DraftEdgeInspectorProps) {
+  const { t } = useTranslation('canvas');
   const [condition, setCondition] = useState('');
 
   function handleCommit() {
@@ -217,9 +221,9 @@ export function DraftEdgeInspector({
   }
 
   return (
-    <section className="flex flex-col gap-2" aria-label="Create transition">
+    <section className="flex flex-col gap-2" aria-label={t('strategy.edgeCreate.draftAriaLabel')}>
       <div className="flex items-center justify-between gap-2">
-        <span className="text-label-14 font-semibold text-gray-900">Create Transition</span>
+        <span className="text-label-14 font-semibold text-gray-900">{t('strategy.edgeCreate.title')}</span>
         <div className="flex items-center gap-1">
           <button
             type="button"
@@ -227,7 +231,7 @@ export function DraftEdgeInspector({
             disabled={isCommitting}
             className="rounded-control border border-gray-alpha-400 px-2 py-1 text-button-12 text-gray-900 hover:bg-gray-alpha-100 disabled:text-gray-500"
           >
-            Cancel
+            {t('strategy.edgeCreate.cancel')}
           </button>
           <button
             type="button"
@@ -235,7 +239,7 @@ export function DraftEdgeInspector({
             disabled={isCommitting}
             className="rounded-control bg-purple-700 px-2 py-1 text-button-12 text-white hover:bg-purple-800 disabled:opacity-50"
           >
-            {isCommitting ? 'Creating…' : 'Create Transition'}
+            {isCommitting ? t('strategy.edgeCreate.creating') : t('strategy.edgeCreate.submit')}
           </button>
         </div>
       </div>
@@ -247,12 +251,12 @@ export function DraftEdgeInspector({
         <span className="font-mono text-gray-1000">{targetStateId}</span>
       </p>
       <label className="flex flex-col gap-1 text-copy-13">
-        <span className="text-gray-700">Condition</span>
+        <span className="text-gray-700">{t('strategy.edgeCreate.conditionLabel')}</span>
         <input
           type="text"
           value={condition}
           onChange={(e) => setCondition(e.target.value)}
-          placeholder="e.g. word_count > 1000"
+          placeholder={t('strategy.edgeCreate.conditionPlaceholder')}
           className="rounded-control border border-gray-alpha-400 bg-background-100 px-2 py-1 text-gray-1000 focus:border-blue-700"
         />
       </label>

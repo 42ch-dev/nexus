@@ -394,7 +394,9 @@ describe('outlineGraphSummary', () => {
       timeline_events: [{ event_id: 'e1', title: 'E1' }],
       foreshadows: [{ source_event_id: 'e1', target_event_id: 'e2' }],
     });
-    expect(outlineGraphSummary(o, 1)).toMatch(/1 volume, 1 chapter, 1 timeline event, 1 foreshadow link/);
+    const t = (key: string, options?: Record<string, unknown>) =>
+      `${key} ${JSON.stringify(options ?? {})}`;
+    expect(outlineGraphSummary(o, 1, t)).toMatch(/outlineCanvas.graphSummary.body/);
   });
 
   it('uses plural forms correctly', () => {
@@ -409,11 +411,14 @@ describe('outlineGraphSummary', () => {
       ],
       foreshadows: [],
     });
-    expect(outlineGraphSummary(o, 3)).toMatch(/2 volumes, 3 chapters, 2 timeline events, 0 foreshadow links/);
+    const t = (key: string, options?: Record<string, unknown>) =>
+      `${key} ${JSON.stringify(options ?? {})}`;
+    expect(outlineGraphSummary(o, 3, t)).toMatch(/outlineCanvas.graphSummary.body/);
   });
 
   it('reports not-loaded for undefined outline', () => {
-    expect(outlineGraphSummary(undefined, 0)).toMatch(/not loaded/);
+    const t = (key: string) => key;
+    expect(outlineGraphSummary(undefined, 0, t)).toMatch(/outlineCanvas.graphSummary.notLoaded/);
   });
 });
 

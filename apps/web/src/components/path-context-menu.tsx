@@ -20,6 +20,7 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { Copy, ExternalLink, FolderSearch } from 'lucide-react';
 
+import { useTranslation } from 'react-i18next';
 import { useDesktopCapabilities } from '@/lib/client-context';
 import { useToast } from '@/lib/use-toast';
 import type { DesktopCapabilityError } from '@/lib/nexus';
@@ -104,17 +105,18 @@ export function PathContextMenu({
   regionLabel = 'Path context menu',
 }: PathContextMenuProps) {
   const desktop = useDesktopCapabilities();
+  const { t: commonT } = useTranslation('common');
   const { toast } = useToast();
 
   async function copyPath() {
     try {
       await navigator.clipboard.writeText(path);
-      toast({ variant: 'success', title: 'Path copied' });
+      toast({ variant: 'success', title: commonT('toast.pathCopied') });
     } catch {
       toast({
         variant: 'error',
-        title: 'Path not copied',
-        description: 'Copy it manually from the details panel.',
+        title: commonT('toast.pathNotCopied'),
+        description: commonT('toast.pathNotCopiedDescription'),
       });
     }
     onClose();
@@ -122,20 +124,19 @@ export function PathContextMenu({
 
   async function runNative(
     action: 'openWith' | 'revealInFinder',
-    successTitle: string,
+    successKey: string,
+    errorKey: string,
   ): Promise<void> {
     if (!desktop) return; // defended by conditional render; belt-and-suspenders.
     try {
       await desktop[action](path);
-      toast({ variant: 'success', title: successTitle });
+      toast({ variant: 'success', title: commonT(successKey) });
     } catch (err) {
       // The Rust path guard returns `path_outside_workspace`; surface its
       // plain-language copy verbatim (design-req §6.4 / DESIGN.md rule).
       const title = isOutsideWorkspaceError(err)
-        ? 'Path not opened'
-        : action === 'openWith'
-          ? 'Could not open editor'
-          : 'Could not reveal in Finder';
+        ? commonT('toast.pathNotOpened')
+        : commonT(errorKey);
       toast({ variant: 'error', title, description: errorMessage(err) });
     }
     onClose();
@@ -149,21 +150,21 @@ export function PathContextMenu({
       className="fixed z-50 min-w-[200px] rounded-popover border border-gray-alpha-400 bg-background-100 p-1 shadow-popover"
     >
       <MenuItem onClick={() => void copyPath()} icon={<Copy className="h-4 w-4" aria-hidden />}>
-        Copy Path
+        {commonT('pathContextMenu.copyPath')}
       </MenuItem>
       {desktop && (
         <>
           <MenuItem
-            onClick={() => void runNative('openWith', 'Opened in editor')}
+            onClick={() => void runNative('openWith', 'toast.openedInEditor', 'toast.couldNotOpenEditor')}
             icon={<ExternalLink className="h-4 w-4" aria-hidden />}
           >
-            Open With…
+            {commonT('pathContextMenu.openWith')}
           </MenuItem>
           <MenuItem
-            onClick={() => void runNative('revealInFinder', 'Revealed in Finder')}
+            onClick={() => void runNative('revealInFinder', 'toast.revealedInFinder', 'toast.couldNotRevealInFinder')}
             icon={<FolderSearch className="h-4 w-4" aria-hidden />}
           >
-            Reveal in Finder
+            {commonT('pathContextMenu.revealInFinder')}
           </MenuItem>
         </>
       )}

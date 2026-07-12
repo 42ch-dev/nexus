@@ -1,4 +1,5 @@
 import { ChevronDown, Loader2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/ui/button';
 
@@ -14,13 +15,14 @@ export function LoadMore({
   isFetchingNextPage,
   hasNextPage,
   fetchNextPage,
-  label = 'Load more',
+  label,
 }: {
   isFetchingNextPage: boolean;
   hasNextPage: boolean;
   fetchNextPage: () => void;
   label?: string;
 }) {
+  const { t } = useTranslation('common');
   if (!hasNextPage) return null;
   return (
     <div className="flex justify-center py-4">
@@ -36,7 +38,7 @@ export function LoadMore({
         ) : (
           <ChevronDown className="h-4 w-4" aria-hidden />
         )}
-        {isFetchingNextPage ? `Loading more…` : label}
+        {isFetchingNextPage ? t('status.loadingMore') : (label ?? t('status.loadMore'))}
       </Button>
     </div>
   );

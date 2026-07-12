@@ -1,1 +1,93 @@
-{}
+{
+  "page": {
+    "title": "Findings",
+    "description": "Triage findings — advance status, assign routing, or edit details inline.",
+    "refresh": "Refresh",
+    "refreshAria": "Refresh findings",
+    "workLabel": "Work",
+    "loadingWorks": "Loading works…",
+    "selectWork": "Select a Work",
+    "selectWorkPlaceholder": "Select a Work…",
+    "severityLabel": "Severity",
+    "severityPlaceholder": "e.g. major",
+    "statusLabel": "Status",
+    "statusPlaceholder": "e.g. open",
+    "bulkSetStatus": "Set status…",
+    "bulkSetStatusAria": "Set status for selected",
+    "bulkAssignTo": "Assign to…",
+    "bulkAssignToAria": "Assign target executor for selected",
+    "clearSelection": "Clear",
+    "selected": "{{count}} selected",
+    "emptySelectTitle": "Select a Work",
+    "emptySelectDescription": "Pick a Work above to see its findings.",
+    "errorDescription": "Could not load findings for this Work.",
+    "loading": "Loading findings…",
+    "noFindingsTitle": "No findings",
+    "noFindingsDescription": "No findings match these filters for this Work.",
+    "count_one": "{{count}} finding",
+    "count_other": "{{count}} findings",
+    "loadMore": "Load more findings",
+    "exportAria": "Export findings to CSV",
+    "exportCsv": "Export CSV",
+    "selectAllAria": "Select all visible findings",
+    "selectRowAria": "Select finding {{id}}",
+    "columns": {
+      "severity": "Severity",
+      "status": "Status",
+      "title": "Title",
+      "kind": "Kind",
+      "chapter": "Chapter",
+      "assignTo": "Assign To"
+    },
+    "untitledFinding": "(untitled finding)",
+    "detailTitle": "Finding Details",
+    "noSelectionTitle": "No finding selected",
+    "noSelectionDescription": "Select a row to triage status, assign routing, or edit details."
+  },
+  "detail": {
+    "statusLabel": "Status",
+    "terminal": "Terminal — no further transitions.",
+    "advanceAria": "Advance finding to {{status}}",
+    "targetExecutorLabel": "Target Executor",
+    "targetExecutorHelp": "Routes the finding for triage. Re-running a preset stays a deliberate canvas action.",
+    "chapterLabel": "Chapter: {{chapter}}",
+    "routingLabel": "Routing: {{routing}}",
+    "idLabel": "ID: {{id}}",
+    "createdLabel": "Created: {{date}}",
+    "updatedLabel": "Updated: {{date}}",
+    "titleLabel": "Title",
+    "descriptionLabel": "Description",
+    "severityLabel": "Severity",
+    "kindLabel": "Kind",
+    "ruleSuggestionLabel": "Rule Suggestion",
+    "ruleSuggestionPlaceholder": "Clear to remove the rule suggestion",
+    "saveChanges": "Save Changes",
+    "reset": "Reset",
+    "unsavedChanges": "Unsaved changes"
+  },
+  "executors": {
+    "none": "None",
+    "write": "Write",
+    "brainstorm": "Brainstorm",
+    "master": "Master"
+  },
+  "severity": {
+    "info": "Info",
+    "minor": "Minor",
+    "major": "Major",
+    "blocker": "Blocker"
+  },
+  "status": {
+    "open": "Open",
+    "triaged": "Triaged",
+    "in_review": "In Review",
+    "resolved": "Resolved",
+    "wont_fix": "Wont Fix",
+    "duplicate": "Duplicate"
+  },
+  "kind": {
+    "craft": "Craft",
+    "pacing": "Pacing",
+    "consistency": "Consistency"
+  }
+}

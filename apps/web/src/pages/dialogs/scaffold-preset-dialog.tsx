@@ -1,5 +1,7 @@
 import { useEffect, useState, type FormEvent } from 'react';
 
+import { useTranslation } from 'react-i18next';
+
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { Input, Label } from '@/components/ui';
 import { Button } from '@/components/ui/button';
@@ -22,6 +24,7 @@ export function ScaffoldPresetDialog({
 }) {
   const scaffold = useScaffoldPreset();
   const { toast } = useToast();
+  const { t } = useTranslation('shell');
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
 
@@ -35,14 +38,14 @@ export function ScaffoldPresetDialog({
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     if (!name.trim()) {
-      setError('A name is required.');
+      setError(t('scaffoldPreset.validationError'));
       return;
     }
     try {
       const res = await scaffold.mutateAsync({ name: name.trim() });
       toast({
         variant: 'success',
-        title: 'Preset scaffolded',
+        title: t('common:toast.presetScaffolded'),
         description: res.path,
       });
       onOpenChange(false);
@@ -54,17 +57,17 @@ export function ScaffoldPresetDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
-        title="Scaffold Preset"
-        description="Create a new user preset from a name."
+        title={t('scaffoldPreset.title')}
+        description={t('scaffoldPreset.description')}
       >
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="flex flex-col gap-1.5">
-            <Label htmlFor="preset-name">Name</Label>
+            <Label htmlFor="preset-name">{t('scaffoldPreset.nameLabel')}</Label>
             <Input
               id="preset-name"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="e.g. my-chapter-preset"
+              placeholder={t('scaffoldPreset.namePlaceholder')}
               invalid={Boolean(error) && name.trim().length === 0}
               autoFocus
             />
@@ -72,10 +75,10 @@ export function ScaffoldPresetDialog({
           </div>
           <div className="flex justify-end gap-2 pt-2">
             <Button type="button" variant="tertiary" size="small" onClick={() => onOpenChange(false)}>
-              Cancel
+              {t('common:action.cancel')}
             </Button>
             <Button type="submit" variant="primary" size="small" disabled={!name.trim() || scaffold.isPending}>
-              {scaffold.isPending ? 'Scaffolding preset…' : 'Scaffold Preset'}
+              {scaffold.isPending ? t('scaffoldPreset.creating') : t('scaffoldPreset.submit')}
             </Button>
           </div>
         </form>

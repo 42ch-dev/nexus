@@ -6,6 +6,7 @@
  * orchestrator component stays thin (R-V171P0-QC1-006).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   reconnectEdge,
@@ -55,6 +56,7 @@ export interface ConflictInfo {
 }
 
 export function useStrategyCanvas(presetId: string) {
+  const { t } = useTranslation('canvas');
   const graphQuery = usePresetGraph(presetId);
   const activeSession = useActiveSession(presetId);
   const schedules = usePresetSchedules(presetId);
@@ -192,7 +194,7 @@ export function useStrategyCanvas(presetId: string) {
    */
   const onConnect = useCallback(
     (connection: Connection) => {
-      const draft = createDraftTransitionEdge(connection);
+      const draft = createDraftTransitionEdge(connection, t('strategy.draftTransitionLabel'));
       if (!draft) return;
       setEdges((eds) => [
         ...eds.map((e) => ({ ...e, selected: false })).filter((e) => !(e.data as { isDraft?: boolean })?.isDraft),
@@ -200,7 +202,7 @@ export function useStrategyCanvas(presetId: string) {
       ]);
       setNodes((nds) => nds.map((n) => ({ ...n, selected: false })));
     },
-    [setEdges, setNodes],
+    [setEdges, setNodes, t],
   );
 
   /**

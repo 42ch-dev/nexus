@@ -8,6 +8,7 @@
  * renders 422 validation inline.
  */
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -69,6 +70,7 @@ export function RelationshipInspector({
 }: RelationshipInspectorProps) {
   const patchRelationship = usePatchWorldKbRelationship(worldId);
   const isEdit = Boolean(relationship);
+  const { t } = useTranslation('canvas');
   const [form, setForm] = useState<RelationshipForm>(() =>
     initialRelationshipForm(relationship, initialSourceEntityId, initialTargetEntityId),
   );
@@ -137,7 +139,7 @@ export function RelationshipInspector({
     >
       <div className="flex items-center justify-between">
         <h3 className="text-heading-16 font-heading text-gray-1000">
-          {isEdit ? 'Edit Relationship' : 'New Relationship'}
+          {isEdit ? t('worldKb.relationshipInspector.editTitle') : t('worldKb.relationshipInspector.newTitle')}
         </h3>
         {isEdit && (
           <Button
@@ -146,7 +148,7 @@ export function RelationshipInspector({
             size="small"
             onClick={handleRemove}
             disabled={patchRelationship.isPending}
-            aria-label="Remove relationship"
+            aria-label={t('worldKb.relationshipInspector.removeAria')}
           >
             <Trash2 className="h-4 w-4 text-red-700" aria-hidden />
           </Button>
@@ -154,7 +156,7 @@ export function RelationshipInspector({
       </div>
 
       <div className="grid gap-4">
-        <Field label="Source entity" htmlFor="rel-source" error={errors.sourceEntityId}>
+        <Field label={t('worldKb.relationshipInspector.sourceLabel')} htmlFor="rel-source" error={errors.sourceEntityId}>
           <Select
             id="rel-source"
             value={form.sourceEntityId}
@@ -162,7 +164,7 @@ export function RelationshipInspector({
             disabled={isEdit}
             invalid={Boolean(errors.sourceEntityId)}
           >
-            <option value="">Select source…</option>
+            <option value="">{t('worldKb.relationshipInspector.sourcePlaceholder')}</option>
             {selectableEntities.map((e) => (
               <option key={e.key_block_id} value={e.key_block_id}>
                 {e.canonical_name}
@@ -171,7 +173,7 @@ export function RelationshipInspector({
           </Select>
         </Field>
 
-        <Field label="Target entity" htmlFor="rel-target" error={errors.targetEntityId}>
+        <Field label={t('worldKb.relationshipInspector.targetLabel')} htmlFor="rel-target" error={errors.targetEntityId}>
           <Select
             id="rel-target"
             value={form.targetEntityId}
@@ -179,7 +181,7 @@ export function RelationshipInspector({
             disabled={isEdit}
             invalid={Boolean(errors.targetEntityId)}
           >
-            <option value="">Select target…</option>
+            <option value="">{t('worldKb.relationshipInspector.targetPlaceholder')}</option>
             {targetEntities.map((e) => (
               <option key={e.key_block_id} value={e.key_block_id}>
                 {e.canonical_name}
@@ -188,7 +190,7 @@ export function RelationshipInspector({
           </Select>
         </Field>
 
-        <Field label="Relation type" htmlFor="rel-type" error={errors.relationType}>
+        <Field label={t('worldKb.relationshipInspector.typeLabel')} htmlFor="rel-type" error={errors.relationType}>
           <Select
             id="rel-type"
             value={form.relationType}
@@ -207,12 +209,12 @@ export function RelationshipInspector({
         </Field>
 
         {isCustom && (
-          <Field label="Custom label" htmlFor="rel-custom" error={errors.customLabel}>
+          <Field label={t('worldKb.relationshipInspector.customLabelLabel')} htmlFor="rel-custom" error={errors.customLabel}>
             <Input
               id="rel-custom"
               value={form.customLabel}
               onChange={(e) => setForm((f) => ({ ...f, customLabel: e.target.value }))}
-              placeholder="e.g., Childhood Friend"
+              placeholder={t('worldKb.relationshipInspector.customLabelPlaceholder')}
               invalid={Boolean(errors.customLabel)}
             />
           </Field>
@@ -230,7 +232,7 @@ export function RelationshipInspector({
 
       <div className="flex justify-end gap-2">
         <Button type="submit" variant="primary" size="small" disabled={patchRelationship.isPending}>
-          {isEdit ? 'Save changes' : 'Add relationship'}
+          {isEdit ? t('worldKb.relationshipInspector.save') : t('worldKb.relationshipInspector.add')}
         </Button>
       </div>
     </form>

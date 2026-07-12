@@ -9,6 +9,7 @@ import '@testing-library/jest-dom/vitest';
 
 import { afterAll, afterEach, beforeAll } from 'vitest';
 
+import { i18n } from '@/lib/i18n/config';
 import { server } from './msw-server';
 
 /**
@@ -68,5 +69,8 @@ function ensureLocalStorage() {
 ensureLocalStorage();
 
 beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
-afterEach(() => server.resetHandlers());
+afterEach(() => {
+  server.resetHandlers();
+  i18n.changeLanguage('en');
+});
 afterAll(() => server.close());

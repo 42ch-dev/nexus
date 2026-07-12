@@ -9,6 +9,7 @@
  * body editor is V1.74.
  */
 import { useEffect, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { Textarea } from '@/components/ui/textarea';
 import { Select } from '@/components/ui/select';
@@ -50,11 +51,11 @@ function dirtyFields(form: EntityEditForm, entity: WorldKbEntityProjection): Wor
 
 type WorldKbEntityField = 'title' | 'body' | 'aliases' | 'block_type';
 
-const FIELD_LABELS: Record<WorldKbEntityField, string> = {
-  title: 'Title',
-  body: 'Body',
-  aliases: 'Aliases',
-  block_type: 'Block Type',
+const FIELD_LABEL_KEYS: Record<WorldKbEntityField, string> = {
+  title: 'worldKb.entityInspector.field.title',
+  body: 'worldKb.entityInspector.field.body',
+  aliases: 'worldKb.entityInspector.field.aliases',
+  block_type: 'worldKb.entityInspector.field.blockType',
 };
 
 export interface EntityInspectorProps {
@@ -86,6 +87,7 @@ export function EntityInspector({
   reseedSignal,
 }: EntityInspectorProps) {
   const patch = usePatchWorldKbEntity(worldId);
+  const { t } = useTranslation('canvas');
   const [form, setForm] = useState<EntityEditForm>(() => formFromEntity(entity));
   const [validationErrors, setValidationErrors] = useState<string[]>([]);
 
@@ -118,7 +120,7 @@ export function EntityInspector({
       try {
         patchBody.body = form.bodyText.trim() ? JSON.parse(form.bodyText) : undefined;
       } catch {
-        setValidationErrors(['Body must be valid JSON (or empty).']);
+        setValidationErrors([t('worldKb.entityInspector.bodyJsonError')]);
         return;
       }
     }
@@ -133,7 +135,7 @@ export function EntityInspector({
         onError: (error) => {
           if (isWorldKbValidationError(error)) {
             const details = error.details as { validation_summary?: { errors?: string[] } } | undefined;
-            setValidationErrors(details?.validation_summary?.errors ?? ['Validation failed.']);
+            setValidationErrors(details?.validation_summary?.errors ?? [t('worldKb.entityInspector.validationFailed')]);
             return;
           }
           // Conflict (409) — hand off to the canvas to render the modal.
@@ -167,17 +169,15 @@ export function EntityInspector({
       }}
     >
       <div className="flex items-center justify-between gap-2">
-        <h3 className="text-heading-16 font-heading text-gray-1000">Entity</h3>
+        <h3 className="text-heading-16 font-heading text-gray-1000">{t('worldKb.entityInspector.title')}</h3>
         <span className="rounded-pill bg-gray-alpha-100 px-1.5 py-0.5 font-mono text-label-12 text-gray-700">
           v{node.version}
         </span>
       </div>
-      <p className="text-copy-13 text-gray-700">
-        Edit this world entry. Conflicts are detected per-row — Nexus blocks stale writes.
-      </p>
+      <p className="text-copy-13 text-gray-700">{t('worldKb.entityInspector.description')}</p>
 
       <div className="flex flex-col gap-1">
-        <Label htmlFor="wkbe-title">Title</Label>
+        <Label htmlFor="wkbe-title">{t('worldKb.entityInspector.field.title')}</Label>
         <Input
           id="wkbe-title"
           value={form.title}
@@ -186,7 +186,7 @@ export function EntityInspector({
       </div>
 
       <div className="flex flex-col gap-1">
-        <Label htmlFor="wkbe-blocktype">Block Type</Label>
+        <Label htmlFor="wkbe-blocktype">{t('worldKb.entityInspector.field.blockType')}</Label>
         <Select
           id="wkbe-blocktype"
           value={form.block_type}
@@ -201,24 +201,24 @@ export function EntityInspector({
       </div>
 
       <div className="flex flex-col gap-1">
-        <Label htmlFor="wkbe-aliases">Aliases (comma-separated)</Label>
+        <Label htmlFor="wkbe-aliases">{t('worldKb.entityInspector.field.aliases')}</Label>
         <Input
           id="wkbe-aliases"
           value={form.aliasesText}
           onChange={(e) => update('aliasesText', e.target.value)}
-          placeholder="e.g. Aria the Tempest, Stormwind"
+          placeholder={t('worldKb.entityInspector.aliasesPlaceholder')}
         />
       </div>
 
       <div className="flex flex-col gap-1">
-        <Label htmlFor="wkbe-body">Body (JSON)</Label>
+        <Label htmlFor="wkbe-body">{t('worldKb.entityInspector.field.body')}</Label>
         <Textarea
           id="wkbe-body"
           rows={6}
           className="font-mono text-copy-13-mono"
           value={form.bodyText}
           onChange={(e) => update('bodyText', e.target.value)}
-          placeholder="{}"
+          placeholder={t('worldKb.entityInspector.bodyPlaceholder')}
           spellCheck={false}
         />
       </div>
@@ -237,11 +237,13 @@ export function EntityInspector({
       <div className="flex items-center justify-between gap-2">
         <span className="text-label-12 text-gray-700">
           {dirty.length === 0
-            ? 'No changes.'
-            : `Editing: ${dirty.map((d) => FIELD_LABELS[d]).join(', ')}`}
+            ? t('worldKb.entityInspector.noChanges')
+            : t('worldKb.entityInspector.editing', {
+                fields: dirty.map((d) => t(FIELD_LABEL_KEYS[d])).join(', '),
+              })}
         </span>
         <Button type="submit" disabled={dirty.length === 0 || patch.isPending}>
-          {patch.isPending ? 'Saving…' : 'Save entity'}
+          {patch.isPending ? t('worldKb.entityInspector.saving') : t('worldKb.entityInspector.save')}
         </Button>
       </div>
     </form>

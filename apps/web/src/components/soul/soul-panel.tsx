@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { KeywordFrequency } from '@/components/soul/keyword-frequency';
 import {
@@ -37,18 +38,19 @@ export function SoulPanel({
   fragmentsQuery: UseQueryResult<ListMemoryFragmentsResponse>;
   onFilterFragments?: (keyword: string | null) => void;
 }) {
+  const { t } = useTranslation('memory');
   const [selectedKeyword, setSelectedKeyword] = useState<string | null>(null);
 
   if (fragmentsQuery.isError) {
     return (
       <ErrorState
-        description="Could not load your SOUL visualization."
+        description={t('soul.error')}
         onRetry={() => fragmentsQuery.refetch()}
       />
     );
   }
   if (fragmentsQuery.isLoading) {
-    return <LoadingState label="Loading your SOUL…" />;
+    return <LoadingState label={t('soul.loading')} />;
   }
 
   const fragments: MemoryFragmentInfo[] = fragmentsQuery.data?.fragments ?? [];
@@ -63,8 +65,8 @@ export function SoulPanel({
     return (
       <div data-testid="soul-empty-state">
         <EmptyState
-          title="Your SOUL is just beginning"
-          description="As you write and review, Nexus captures fragments of your creative identity — themes, patterns, obsessions — and maps them here. Come back after your first review session."
+          title={t('soul.emptyTitle')}
+          description={t('soul.emptyDescription')}
         />
       </div>
     );
@@ -75,9 +77,7 @@ export function SoulPanel({
     return (
       <div data-testid="soul-low-data" className="flex flex-col gap-4">
         <p className="text-copy-14 text-gray-900">
-          Your SOUL is taking shape. {count} fragment{count === 1 ? '' : 's'}{' '}
-          captured so far — enough to see early themes. Keep writing and reviewing
-          to build richer patterns.
+          {t('soul.lowData', { count })}
         </p>
         <KeywordFrequency
           counts={aggregateKeywordFrequency(fragments)}
@@ -92,7 +92,7 @@ export function SoulPanel({
   const buckets = bucketByTime(fragments);
   return (
     <div data-testid="soul-rich" className="flex flex-col gap-6">
-      <p className="text-copy-13 text-gray-700">Your creative themes over time.</p>
+      <p className="text-copy-13 text-gray-700">{t('soul.richSubtitle')}</p>
       {buckets.length >= 2 ? (
         <TemporalDrift buckets={buckets} />
       ) : (
@@ -105,7 +105,7 @@ export function SoulPanel({
         />
       )}
       <div className="flex flex-col gap-3 border-t border-gray-alpha-400 pt-4">
-        <h3 className="text-heading-16 text-gray-1000">Theme frequency</h3>
+        <h3 className="text-heading-16 text-gray-1000">{t('soul.themeFrequencyTitle')}</h3>
         <KeywordFrequency
           counts={aggregateKeywordFrequency(fragments)}
           selectedKeyword={selectedKeyword}

@@ -7,6 +7,7 @@
  * Virtualization: rows are windowed by scroll position with a fixed row height.
  */
 import { useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { BLOCK_TYPE_LABELS, worldKbNodeId, type EntityLifecycle, type WorldKbNodeData } from './types';
 
@@ -30,12 +31,12 @@ const LIFECYCLE_BADGE_CLASS: Record<EntityLifecycle, string> = {
   merged: 'text-canvas-worldkb-promotion-merged',
 };
 
-const COLUMN_LABELS: Record<SortKey, string> = {
-  name: 'Name',
-  blockType: 'Block Type',
-  lifecycle: 'Lifecycle',
-  anchors: 'Source Anchors',
-  updated: 'Updated',
+const COLUMN_LABEL_KEYS: Record<SortKey, string> = {
+  name: 'worldKb.entityTable.column.name',
+  blockType: 'worldKb.entityTable.column.blockType',
+  lifecycle: 'worldKb.entityTable.column.lifecycle',
+  anchors: 'worldKb.entityTable.column.anchors',
+  updated: 'worldKb.entityTable.column.updated',
 };
 
 export interface WorldKbEntityTableProps {
@@ -45,6 +46,7 @@ export interface WorldKbEntityTableProps {
 }
 
 export function WorldKbEntityTable({ nodes, selectedId, onSelect }: WorldKbEntityTableProps) {
+  const { t } = useTranslation('canvas');
   const [sortKey, setSortKey] = useState<SortKey>('name');
   const [sortDir, setSortDir] = useState<SortDir>('asc');
   const [scrollTop, setScrollTop] = useState(0);
@@ -85,18 +87,17 @@ export function WorldKbEntityTable({ nodes, selectedId, onSelect }: WorldKbEntit
 
   return (
     <section
-      aria-label="World KB entities (sortable list)"
+      aria-label={t('worldKb.entityTable.ariaLabel')}
       className="rounded-card border border-gray-alpha-400 bg-background-100 shadow-card"
     >
       <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 260px)' }} ref={scrollRef}>
         <table className="w-full table-fixed text-copy-14">
           <caption className="sr-only">
-            World KB entities sorted by {COLUMN_LABELS[sortKey]} ({sortDir}). Press Enter on a row to
-            open its inspector.
+            {t('worldKb.entityTable.caption', { sortKey, sortDir })}
           </caption>
           <thead className="sticky top-0 bg-background-200 text-left text-label-12 text-gray-700">
             <tr>
-              {(Object.keys(COLUMN_LABELS) as SortKey[]).map((key) => (
+              {(Object.keys(COLUMN_LABEL_KEYS) as SortKey[]).map((key) => (
                 <th
                   key={key}
                   scope="col"
@@ -108,7 +109,7 @@ export function WorldKbEntityTable({ nodes, selectedId, onSelect }: WorldKbEntit
                     onClick={() => toggleSort(key)}
                     className="inline-flex items-center gap-1 hover:text-gray-1000"
                   >
-                    {COLUMN_LABELS[key]}
+                    {t(COLUMN_LABEL_KEYS[key])}
                     {sortKey === key ? <span aria-hidden>{sortDir === 'asc' ? '▲' : '▼'}</span> : null}
                   </button>
                 </th>
@@ -119,7 +120,7 @@ export function WorldKbEntityTable({ nodes, selectedId, onSelect }: WorldKbEntit
             {sorted.length === 0 ? (
               <tr>
                 <td colSpan={5} className="px-3 py-6 text-center text-copy-13 text-gray-700">
-                  No World KB entities yet.
+                  {t('worldKb.entityTable.empty')}
                 </td>
               </tr>
             ) : (
@@ -151,7 +152,7 @@ export function WorldKbEntityTable({ nodes, selectedId, onSelect }: WorldKbEntit
                       aria-selected={selected}
                     >
                       <td className="truncate px-3 py-2 text-gray-1000" title={node.name}>
-                        {node.name || '(unnamed)'}
+                        {node.name || t('worldKb.entityTable.unnamed')}
                       </td>
                       <td className="px-3 py-2 text-gray-900">{BLOCK_TYPE_LABELS[node.entityKind]}</td>
                       <td className={`px-3 py-2 capitalize ${LIFECYCLE_BADGE_CLASS[node.lifecycle]}`}>
@@ -175,7 +176,7 @@ export function WorldKbEntityTable({ nodes, selectedId, onSelect }: WorldKbEntit
         </table>
       </div>
       <p className="border-t border-gray-alpha-200 px-3 py-2 text-label-12 text-gray-700">
-        {sorted.length} {sorted.length === 1 ? 'entry' : 'entries'} · list view
+        {t('worldKb.entityTable.entryCount', { count: sorted.length })} · {t('worldKb.entityTable.listView')}
       </p>
     </section>
   );

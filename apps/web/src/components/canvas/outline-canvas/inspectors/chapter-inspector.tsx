@@ -10,6 +10,8 @@
 import { useEffect, useState } from 'react';
 import { AlertTriangle, ChevronLeft, ChevronRight, Save } from 'lucide-react';
 
+import { useTranslation } from 'react-i18next';
+
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 
@@ -51,6 +53,7 @@ export function ChapterInspector({
   isConflicting,
   contentVersion,
 }: ChapterInspectorProps) {
+  const { t } = useTranslation('canvas');
   const titles = outline.chapter_titles as Record<string, string> | undefined;
   const [title, setTitle] = useState('');
   const [slug, setSlug] = useState('');
@@ -75,7 +78,7 @@ export function ChapterInspector({
     return (
       <Card>
         <CardContent className="py-12 text-center text-copy-14 text-gray-700">
-          Select a chapter to inspect its outline metadata.
+          {t('chapterInspector.empty')}
         </CardContent>
       </Card>
     );
@@ -101,7 +104,7 @@ export function ChapterInspector({
     if (
       isFinalized &&
       !window.confirm(
-        'This chapter is finalized. Editing it will remove the finalized protection. Continue?',
+        t('chapterInspector.finalizedConfirm'),
       )
     ) {
       return;
@@ -118,29 +121,29 @@ export function ChapterInspector({
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Chapter Inspector</CardTitle>
+        <CardTitle>{t('chapterInspector.title')}</CardTitle>
         <CardDescription>
-          <span className="font-mono">#{chapter.chapter}</span> metadata exposed on the outline canvas.
+          {t('chapterInspector.description', { chapter: chapter.chapter })}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-3">
         {isPublished ? (
           <div className="rounded-card border border-red-700/30 bg-red-700/10 p-3 text-copy-13 text-red-1000">
             <AlertTriangle className="mr-1.5 inline h-4 w-4" aria-hidden />
-            This chapter is published. Edits must be made through a fork or revision workflow.
+            {t('chapterInspector.publishedWarning')}
           </div>
         ) : null}
 
-        <MetaField label="Title">
+        <MetaField label={t('chapterInspector.field.title')}>
           <input type="text" value={title} onChange={(e) => setTitle(e.target.value)} disabled={isPublished} className={INPUT_CLASS} />
         </MetaField>
 
-        <MetaField label="Slug">
+        <MetaField label={t('chapterInspector.field.slug')}>
           <input type="text" value={slug} onChange={(e) => setSlug(e.target.value)} disabled={isPublished} className={INPUT_CLASS} />
         </MetaField>
 
         <div className="grid grid-cols-2 gap-3">
-          <MetaField label="Status">
+          <MetaField label={t('chapterInspector.field.status')}>
             <select
               value={status}
               onChange={(e) => setStatus(e.target.value as ChapterStatus)}
@@ -148,17 +151,17 @@ export function ChapterInspector({
               className={INPUT_CLASS}
             >
               {STATUS_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>{o.label}</option>
+                <option key={o.value} value={o.value}>{t(o.labelKey)}</option>
               ))}
             </select>
           </MetaField>
 
-          <MetaField label="Planned words">
+          <MetaField label={t('chapterInspector.field.plannedWords')}>
             <input type="number" value={planned} onChange={(e) => setPlanned(e.target.value)} disabled={isPublished} className={INPUT_CLASS} />
           </MetaField>
         </div>
 
-        <MetaField label="Volume">
+        <MetaField label={t('chapterInspector.field.volume')}>
           <select
             value={volume}
             onChange={(e) => {
@@ -168,10 +171,10 @@ export function ChapterInspector({
             disabled={isPublished}
             className={INPUT_CLASS}
           >
-            <option value="">Unassigned</option>
+            <option value="">{t('chapterInspector.volume.unassigned')}</option>
             {outline.volumes.map((v) => (
               <option key={v.volume_id} value={v.volume_id}>
-                {v.label || `Volume ${v.volume_id}`}
+                {v.label || t('chapter.volume', { volume: v.volume_id })}
               </option>
             ))}
           </select>
@@ -187,7 +190,7 @@ export function ChapterInspector({
               }
               disabled={isPublished}
             >
-              <ChevronLeft className="h-4 w-4" aria-hidden /> Prev volume
+              <ChevronLeft className="h-4 w-4" aria-hidden /> {t('chapterInspector.movePrevVolume')}
             </Button>
           ) : null}
           {currentVolumeIndex >= 0 && currentVolumeIndex < outline.volumes.length - 1 ? (
@@ -199,7 +202,7 @@ export function ChapterInspector({
               }
               disabled={isPublished}
             >
-              Next volume <ChevronRight className="h-4 w-4" aria-hidden />
+              {t('chapterInspector.moveNextVolume')} <ChevronRight className="h-4 w-4" aria-hidden />
             </Button>
           ) : null}
           <Button
@@ -209,7 +212,7 @@ export function ChapterInspector({
             disabled={isPublished}
             className="ml-auto"
           >
-            <Save className="h-4 w-4" aria-hidden /> Save chapter
+            <Save className="h-4 w-4" aria-hidden /> {t('chapterInspector.save')}
           </Button>
         </div>
 

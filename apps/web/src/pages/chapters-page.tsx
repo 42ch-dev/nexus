@@ -11,6 +11,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
 import { ArrowLeft, Check, FileText, Pencil, X } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { LoadMore } from '@/components/load-more';
 import { ChapterStatusBadge } from '@/components/status-badge';
@@ -38,6 +39,7 @@ interface Edits {
 }
 
 export function ChaptersPage() {
+  const { t } = useTranslation('memory');
   const { workId = '' } = useParams();
   const navigate = useNavigate();
   const works = useWorks();
@@ -101,19 +103,19 @@ export function ChaptersPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <Button asChild variant="tertiary" size="small">
-            <Link to="/works"><ArrowLeft className="h-4 w-4" aria-hidden />Back to Works</Link>
+            <Link to="/works"><ArrowLeft className="h-4 w-4" aria-hidden />{t('chapters.backToWorks')}</Link>
           </Button>
           {works.isLoading ? (
-            <span className="text-copy-14 text-gray-700">Loading Works…</span>
+            <span className="text-copy-14 text-gray-700">{t('chapters.loadingWorks')}</span>
           ) : (
             <label className="flex items-center gap-2">
-              <span className="sr-only">Select Work</span>
+              <span className="sr-only">{t('chapters.selectWork')}</span>
               <select
                 value={workId}
                 onChange={(e) => navigate(`/works/${encodeURIComponent(e.target.value)}/chapters`)}
                 className="h-9 rounded-control border border-gray-alpha-400 bg-background-100 px-3 text-copy-14 text-gray-1000"
               >
-                <option value="" disabled>Select a Work…</option>
+                <option value="" disabled>{t('chapters.selectWorkPlaceholder')}</option>
                 {workOptions.map((w) => (
                   <option key={w.work_id} value={w.work_id}>
                     {w.title || w.work_id}
@@ -127,40 +129,40 @@ export function ChaptersPage() {
 
       <Card className="shadow-card">
         <CardHeader>
-          <CardTitle>Chapter Structure</CardTitle>
-          <CardDescription>Plan and restructure chapters for this Work.</CardDescription>
+          <CardTitle>{t('chapters.title')}</CardTitle>
+          <CardDescription>{t('chapters.description')}</CardDescription>
         </CardHeader>
         <CardContent>
           {!workId ? (
             <EmptyState
-              title="No Work selected"
-              description="Choose a Work above to view its chapter structure."
+              title={t('chapters.noWorkTitle')}
+              description={t('chapters.noWorkDescription')}
             />
           ) : chapters.isError ? (
             <ErrorState
-              description="Could not load chapters for this Work."
+              description={t('chapters.error')}
               onRetry={() => chapters.refetch()}
             />
           ) : chapters.isLoading ? (
-            <LoadingState label="Loading chapters…" />
+            <LoadingState label={t('chapters.loading')} />
           ) : rows.length === 0 ? (
             <EmptyState
-              title="No chapters yet"
-              description="This Work has no chapters. Create a chapter from the CLI to start planning."
+              title={t('chapters.noChaptersTitle')}
+              description={t('chapters.noChaptersDescription')}
             />
           ) : (
             <>
               <Table>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="text-right">#</TableHead>
-                    <TableHead>Title</TableHead>
-                    <TableHead>Slug</TableHead>
-                    <TableHead className="text-right">Planned Words</TableHead>
-                    <TableHead className="text-right">Volume</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead className="text-right">Actual Words</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
+                    <TableHead className="text-right">{t('chapters.columns.number')}</TableHead>
+                    <TableHead>{t('chapters.columns.title')}</TableHead>
+                    <TableHead>{t('chapters.columns.slug')}</TableHead>
+                    <TableHead className="text-right">{t('chapters.columns.plannedWords')}</TableHead>
+                    <TableHead className="text-right">{t('chapters.columns.volume')}</TableHead>
+                    <TableHead>{t('chapters.columns.status')}</TableHead>
+                    <TableHead className="text-right">{t('chapters.columns.actualWords')}</TableHead>
+                    <TableHead className="text-right">{t('chapters.columns.actions')}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -179,7 +181,7 @@ export function ChaptersPage() {
                             to={`/works/${encodeURIComponent(workId)}/chapters/${row.chapter}?volume=${row.volume ?? 1}`}
                             className="font-medium text-blue-700 hover:text-blue-800 hover:underline"
                           >
-                            {row.title || `Chapter ${row.chapter}`}
+                            {row.title || t('chapters.fallbackTitle', { chapter: row.chapter })}
                           </Link>
                         </TableCell>
                         <TableCell>
@@ -189,7 +191,7 @@ export function ChaptersPage() {
                               value={edits.slug ?? ''}
                               onChange={(e) => setEdits((s) => ({ ...s, slug: e.target.value }))}
                               className="h-8 w-full rounded-control border border-blue-700 bg-background-100 px-2 text-copy-14"
-                              aria-label="Slug"
+                              aria-label={t('chapters.slugLabel')}
                             />
                           ) : (
                             <span className="text-copy-13-mono text-gray-900">{row.slug || '—'}</span>
@@ -207,7 +209,7 @@ export function ChaptersPage() {
                                 }))
                               }
                               className="h-8 w-24 rounded-control border border-blue-700 bg-background-100 px-2 text-right text-copy-14 tabular-nums"
-                              aria-label="Planned word count"
+                              aria-label={t('chapters.plannedWordCountLabel')}
                             />
                           ) : (
                             <span className="tabular-nums">{row.planned_word_count.toLocaleString()}</span>
@@ -225,7 +227,7 @@ export function ChaptersPage() {
                                 }))
                               }
                               className="h-8 w-16 rounded-control border border-blue-700 bg-background-100 px-2 text-right text-copy-14 tabular-nums"
-                              aria-label="Volume"
+                              aria-label={t('chapters.volumeLabel')}
                             />
                           ) : (
                             <span className="tabular-nums">{row.volume}</span>
@@ -247,7 +249,7 @@ export function ChaptersPage() {
                             >
                               <Link
                                 to={`/works/${encodeURIComponent(workId)}/chapters/${row.chapter}?volume=${row.volume ?? 1}`}
-                                aria-label={`Open chapter ${row.chapter}`}
+                                aria-label={t('chapters.openAria', { chapter: row.chapter })}
                               >
                                 <FileText className="h-4 w-4" aria-hidden />
                               </Link>
@@ -259,7 +261,7 @@ export function ChaptersPage() {
                                   variant="tertiary"
                                   size="small"
                                   onClick={() => saveEdit(row)}
-                                  aria-label="Save edits"
+                                  aria-label={t('chapters.saveEdits')}
                                 >
                                   <Check className="h-4 w-4" aria-hidden />
                                 </Button>
@@ -268,7 +270,7 @@ export function ChaptersPage() {
                                   variant="tertiary"
                                   size="small"
                                   onClick={cancelEdit}
-                                  aria-label="Cancel edits"
+                                  aria-label={t('chapters.cancelEdits')}
                                 >
                                   <X className="h-4 w-4" aria-hidden />
                                 </Button>
@@ -283,8 +285,8 @@ export function ChaptersPage() {
                                 variant="tertiary"
                                 size="small"
                                 disabled
-                                title="Published chapters can't be structurally edited"
-                                aria-label="Published chapter — editing disabled"
+                                title={t('chapters.publishedTitle')}
+                                aria-label={t('chapters.publishedDisabled')}
                               >
                                 <Pencil className="h-4 w-4 opacity-50" aria-hidden />
                               </Button>
@@ -294,7 +296,7 @@ export function ChaptersPage() {
                                 variant="tertiary"
                                 size="small"
                                 onClick={() => startEdit(row)}
-                                aria-label="Edit structure"
+                                aria-label={t('chapters.editStructure')}
                               >
                                 <Pencil className="h-4 w-4" aria-hidden />
                               </Button>
@@ -307,7 +309,7 @@ export function ChaptersPage() {
                                 onClick={() => advanceStatus(row)}
                                 disabled={patch.isPending}
                               >
-                                Mark outlined
+                                {t('chapters.markOutlined')}
                               </Button>
                             )}
                           </div>
@@ -350,19 +352,20 @@ function ProtectedEditDialog({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const { t } = useTranslation('memory');
   return (
     <Dialog open={Boolean(chapter)} onOpenChange={(open) => !open && onCancel()}>
       {chapter && (
         <DialogContent
-          title="Confirm structural edit"
-          description={`This chapter is ${chapter.status}. Structural edits should be rare.`}
+          title={t('chapters.dialog.title')}
+          description={t('chapters.dialog.description', { status: chapter.status })}
         >
           <p className="text-copy-14 text-gray-900">
-            You are editing a <strong>{chapter.status}</strong> chapter. This change is allowed, but it may affect settled work.
+            {t('chapters.dialog.warning', { status: chapter.status })}
           </p>
           <div className="mt-4 flex justify-end gap-2">
-            <Button type="button" variant="secondary" size="small" onClick={onCancel}>Cancel</Button>
-            <Button type="button" variant="primary" size="small" onClick={onConfirm}>Confirm Edit</Button>
+            <Button type="button" variant="secondary" size="small" onClick={onCancel}>{t('chapters.dialog.cancel')}</Button>
+            <Button type="button" variant="primary" size="small" onClick={onConfirm}>{t('chapters.dialog.confirm')}</Button>
           </div>
         </DialogContent>
       )}

@@ -186,9 +186,10 @@ export function projectOutlineGraph(
   outline: WorkOutline,
   chapters: ChapterSummary[],
   sceneBeatFixture?: SceneBeatFixturePayload,
+  translateFallback?: (chapter: number) => string,
 ): OutlineGraphProjection {
   const volumeNodes = layoutVolumeNodes(outline);
-  const chapterNodes = layoutChapterNodes(outline, chapters);
+  const chapterNodes = layoutChapterNodes(outline, chapters, translateFallback);
   const eventNodes = layoutTimelineEventNodes(outline);
 
   const containsEdges = deriveContainsEdges(outline);
@@ -254,6 +255,7 @@ export function layoutVolumeNodes(outline: WorkOutline): Node<OutlineVolumeNodeD
 export function layoutChapterNodes(
   outline: WorkOutline,
   chapters: ChapterSummary[],
+  translateFallback?: (chapter: number) => string,
 ): Node<OutlineChapterNodeData>[] {
   const chapterById = new Map<number, ChapterSummary>();
   for (const c of chapters) chapterById.set(c.chapter, c);
@@ -285,7 +287,11 @@ export function layoutChapterNodes(
       workId: outline.work_id,
       chapterId: chapter.chapter,
       volumeId,
-      title: chapterDisplayTitle(chapter, outline.chapter_titles as Record<string, string> | undefined),
+      title: chapterDisplayTitle(
+        chapter,
+        outline.chapter_titles as Record<string, string> | undefined,
+        translateFallback ? translateFallback(chapter.chapter) : undefined,
+      ),
       slug: chapter.slug ?? null,
       status: chapter.status,
       plannedWordCount: chapter.planned_word_count,
@@ -568,15 +574,15 @@ export function selectedBeatIdFromNodes(nodes: Node[]): string | null {
 export function outlineGraphSummary(
   outline: WorkOutline | undefined,
   chapterCount: number,
+  t: (key: string, options?: Record<string, unknown>) => string,
 ): string {
-  if (!outline) return 'Outline graph not loaded.';
+  if (!outline) return t('outlineCanvas.graphSummary.notLoaded');
   const volumeCount = outline.volumes.length;
   const eventCount = outline.timeline_events.length;
   const foreshadowCount = outline.foreshadows.length;
-  return [
-    `Outline graph: ${volumeCount} ${volumeCount === 1 ? 'volume' : 'volumes'},`,
-    `${chapterCount} ${chapterCount === 1 ? 'chapter' : 'chapters'},`,
-    `${eventCount} timeline ${eventCount === 1 ? 'event' : 'events'},`,
-    `${foreshadowCount} ${foreshadowCount === 1 ? 'foreshadow link' : 'foreshadow links'}.`,
-  ].join(' ');
+  const volumes = t('outlineCanvas.graphSummary.volumes', { count: volumeCount });
+  const chapters = t('outlineCanvas.graphSummary.chapters', { count: chapterCount });
+  const events = t('outlineCanvas.graphSummary.events', { count: eventCount });
+  const foreshadows = t('outlineCanvas.graphSummary.foreshadows', { count: foreshadowCount });
+  return t('outlineCanvas.graphSummary.body', { volumes, chapters, events, foreshadows });
 }

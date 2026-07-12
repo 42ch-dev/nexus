@@ -1,1 +1,103 @@
-{}
+{
+  "step": {
+    "agent": {
+      "title": "Choose an ACP agent",
+      "description": "Nexus uses an ACP-compatible agent to run strategies. Select a discovered agent to continue.",
+      "emptyTitle": "No agents found on PATH.",
+      "emptyDescription": "Install an ACP-compatible agent to continue."
+    },
+    "workspace": {
+      "title": "Choose a workspace",
+      "description": "Nexus needs a workspace folder for your creative projects. We will create it if it does not exist."
+    },
+    "done": {
+      "title": "You're ready 🎉",
+      "description": "Open Nexus to start writing. You can change settings anytime."
+    }
+  },
+  "progress": {
+    "label": "Setup progress",
+    "agent": "Agent",
+    "workspace": "Workspace",
+    "done": "Done"
+  },
+  "action": {
+    "openNexus": "Open Nexus",
+    "finishing": "Finishing…",
+    "preparingWorkspace": "Preparing workspace…",
+    "resetLocalDatabase": "Reset local database",
+    "resetting": "Resetting…",
+    "continue": "Continue",
+    "back": "Back"
+  },
+  "agentPicker": {
+    "loading": "Scanning for local ACP agents…",
+    "error": {
+      "title": "Could not scan for agents",
+      "fallbackDescription": "The daemon did not respond to the agent scan request."
+    },
+    "tryAgain": "Try again",
+    "empty": {
+      "title": "No agents found on PATH",
+      "description": "Install an ACP-compatible agent, or continue with a custom launch command."
+    },
+    "more": "More agents",
+    "fewer": "Fewer agents",
+    "installed": "Installed",
+    "notInstalled": "Not installed",
+    "version": "Version {{version}}",
+    "install": "Install",
+    "docs": "Docs",
+    "customLaunch": {
+      "label": "Use custom launch command",
+      "placeholder": "e.g. /usr/local/bin/my-agent"
+    },
+    "verify": "Verify Agent",
+    "verifying": "Verifying…",
+    "verifySuccess": "Agent responded successfully.",
+    "verifyNoMatch": "No matching agent for this command. Check the command and try again.",
+    "verifyError": "Could not reach this agent. Check the command and try again.",
+    "status": {
+      "selected": "Selected",
+      "installed": "Installed",
+      "notInstalled": "Not installed"
+    }
+  },
+  "workspace": {
+    "label": "Workspace folder",
+    "changeFolder": "Change Folder…",
+    "resolving": "Resolving…",
+    "browserOnly": "Workspace path changes are available on the desktop app only."
+  },
+  "daemon": {
+    "starting": {
+      "title": "Starting daemon…",
+      "description": "This takes a few seconds on first launch."
+    },
+    "notReady": {
+      "title": "Daemon not ready"
+    },
+    "restartNexus": "Restart Nexus",
+    "resetDatabaseDescription": "This will clear the daemon's local state database (config, registry cache). Your creative files in the workspace are not affected."
+  },
+  "error": {
+    "daemonNotResponding": "Daemon is not responding.",
+    "daemonSlowStart": "Daemon is taking longer than expected to start. You can retry or reset the local database.",
+    "daemonStatusUnknown": "Could not determine daemon status. Try retrying.",
+    "resetDatabaseFailed": "Failed to reset local database.",
+    "finishSetupFailed": "Failed to save agent profile.",
+    "folderPickerFailed": "Could not open the folder picker.",
+    "workspacePathFailed": "Could not save the workspace path.",
+    "workspaceBootstrapFailed": "Could not prepare your local workspace."
+  },
+  "toast": {
+    "finishFailed": "Could not finish setup",
+    "folderPicker": "Folder picker",
+    "workspacePath": "Workspace path",
+    "workspacePrepared": "Local workspace prepared",
+    "workspacePreparedDescription": "Creator identity created ({{creatorId}}).",
+    "workspaceBootstrapFailed": "Local workspace bootstrap failed",
+    "workspaceBootstrapFailedDescription": "{{message}} Retry Continue, or use Reset local database below if the problem persists.",
+    "resetLocalDatabase": "Reset local database"
+  }
+}

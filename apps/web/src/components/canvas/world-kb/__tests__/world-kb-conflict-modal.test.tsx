@@ -100,7 +100,7 @@ describe('WorldKbPromoteConflictModal (promote_candidate variant)', () => {
     expect(
       screen.getByText("This candidate's state changed while you were reviewing it."),
     ).toBeInTheDocument();
-    expect(screen.getByText('Elena Vale')).toBeInTheDocument();
+    expect(screen.getByText(/Elena Vale/i)).toBeInTheDocument();
     expect(screen.getByText(/while you were about to/i)).toBeInTheDocument();
     expect(screen.getByText(/your decision is still in the inspector/i)).toBeInTheDocument();
   });

@@ -6,6 +6,7 @@
  * inspector sections.
  */
 import { type Connection, type Edge, type Node } from '@xyflow/react';
+import { useTranslation } from 'react-i18next';
 import { AlertTriangle, ScrollText } from 'lucide-react';
 
 import type { ChangedField, ConflictModalDraft } from '@/components/canvas/conflict-modal';
@@ -79,6 +80,7 @@ export function RevisionBadge({
   revision: number;
   status: 'clean' | 'dirty' | 'conflict';
 }) {
+  const { t } = useTranslation('canvas');
   const color =
     status === 'conflict'
       ? 'border-canvas-write-conflict text-canvas-write-conflict bg-canvas-write-conflict/10'
@@ -88,15 +90,16 @@ export function RevisionBadge({
   return (
     <span
       className={`inline-flex items-center gap-1 rounded-pill border px-2 py-0.5 text-label-12 ${color}`}
-      title={status === 'conflict' ? 'Revision conflict — refetch before editing' : undefined}
+      title={status === 'conflict' ? t('strategy.revisionBadge.conflictTitle') : undefined}
     >
       {status === 'conflict' ? <AlertTriangle className="h-3 w-3" aria-hidden /> : null}
-      rev {revision}
+      {t('strategy.revisionBadge.label', { revision })}
     </span>
   );
 }
 
 export function ValidationPanel({ problems, dangling }: { problems: string[]; dangling: string[] }) {
+  const { t } = useTranslation('canvas');
   if (problems.length === 0 && dangling.length === 0) return null;
   return (
     <div
@@ -105,12 +108,14 @@ export function ValidationPanel({ problems, dangling }: { problems: string[]; da
     >
       <div className="flex items-center gap-1.5 text-amber-1000">
         <AlertTriangle className="h-4 w-4" aria-hidden />
-        <span className="font-semibold">Validation notes</span>
+        <span className="font-semibold">{t('strategy.validation.title')}</span>
       </div>
       <ul className="mt-1 flex flex-col gap-0.5 text-gray-900">
         {problems.map((p, i) => <li key={`p${i}`}>{p}</li>)}
         {dangling.map((d, i) => (
-          <li key={`d${i}`} className="text-amber-1000">Dangling transition: {d}</li>
+          <li key={`d${i}`} className="text-amber-1000">
+            {t('strategy.validation.dangling', { target: d })}
+          </li>
         ))}
       </ul>
     </div>
@@ -118,18 +123,19 @@ export function ValidationPanel({ problems, dangling }: { problems: string[]; da
 }
 
 export function ArtifactsList({ artifacts }: { artifacts: IdeaArtifact[] }) {
+  const { t } = useTranslation('canvas');
   return (
     <section
-      aria-label="Steering artifacts"
+      aria-label={t('strategy.artifacts.ariaLabel')}
       className="rounded-card border border-gray-alpha-400 bg-background-100 p-3 shadow-card"
     >
       <div className="flex items-center gap-2">
         <ScrollText className="h-4 w-4 text-purple-700" aria-hidden />
-        <h3 className="text-heading-16 font-heading text-gray-1000">Steering artifacts</h3>
+        <h3 className="text-heading-16 font-heading text-gray-1000">{t('strategy.artifacts.title')}</h3>
       </div>
       {artifacts.length === 0 ? (
         <p className="mt-2 text-copy-13 text-gray-700">
-          Ideas you send appear here so you can trace why Nexus did something.
+          {t('strategy.artifacts.empty')}
         </p>
       ) : (
         <ul className="mt-2 flex flex-col gap-1.5">
@@ -160,7 +166,7 @@ export function selectedStateOf(
 }
 
 /** Label shown on a draft (uncommitted) transition edge (FB-SE-000, Voice & Content lock). */
-export const DRAFT_TRANSITION_LABEL = 'Draft transition';
+export const DRAFT_TRANSITION_LABEL_KEY = 'strategy.draftTransitionLabel';
 
 /**
  * Build a draft transition edge from a React Flow connect gesture, or return
@@ -172,7 +178,7 @@ export const DRAFT_TRANSITION_LABEL = 'Draft transition';
  * id is stable per source/target pair so re-attempting a connect from the same
  * state replaces the prior draft instead of stacking duplicates.
  */
-export function createDraftTransitionEdge(connection: Connection): Edge | null {
+export function createDraftTransitionEdge(connection: Connection, draftLabel = 'Draft transition'): Edge | null {
   const { source, target } = connection;
   if (!source || !target || source === target) return null;
   return {
@@ -180,11 +186,10 @@ export function createDraftTransitionEdge(connection: Connection): Edge | null {
     source,
     target,
     type: 'strategy-edge',
-    label: DRAFT_TRANSITION_LABEL,
+    label: draftLabel,
     data: { transitionKind: 'next', condition: '', isDraft: true },
     selected: true,
     selectable: true,
     focusable: true,
   };
 }
-

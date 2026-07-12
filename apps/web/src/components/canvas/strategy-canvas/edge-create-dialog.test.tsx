@@ -40,9 +40,9 @@ describe('EdgeCreateDialog (FB-SE-004)', () => {
     // Dialog title (heading).
     expect(screen.getByRole('heading', { name: 'Create Transition' })).toBeInTheDocument();
     // Step labels — locked voice.
-    expect(screen.getByText('Choose source')).toBeInTheDocument();
-    expect(screen.getByText('Choose target')).toBeInTheDocument();
-    expect(screen.getByText('Choose edge kind')).toBeInTheDocument();
+    expect(screen.getByText('Source')).toBeInTheDocument();
+    expect(screen.getByText('Target')).toBeInTheDocument();
+    expect(screen.getByText('Kind')).toBeInTheDocument();
     // Commit + Cancel CTAs — locked voice.
     expect(screen.getByRole('button', { name: 'Create Transition' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
@@ -57,9 +57,9 @@ describe('EdgeCreateDialog (FB-SE-004)', () => {
   it('target list excludes the chosen source', () => {
     renderDialog();
 
-    fireEvent.change(screen.getByLabelText('Choose source'), { target: { value: 'draft' } });
+    fireEvent.change(screen.getByLabelText('Source'), { target: { value: 'draft' } });
 
-    const targetSelect = screen.getByLabelText('Choose target') as HTMLSelectElement;
+    const targetSelect = screen.getByLabelText('Target') as HTMLSelectElement;
     const targetValues = Array.from(targetSelect.options).map((o) => o.value);
     expect(targetValues).not.toContain('draft');
     expect(targetValues).toContain('revise');
@@ -70,9 +70,9 @@ describe('EdgeCreateDialog (FB-SE-004)', () => {
     const onCommit = vi.fn();
     renderDialog({ onCommit });
 
-    fireEvent.change(screen.getByLabelText('Choose source'), { target: { value: 'draft' } });
-    fireEvent.change(screen.getByLabelText('Choose target'), { target: { value: 'revise' } });
-    fireEvent.change(screen.getByLabelText('Choose edge kind'), { target: { value: 'branch' } });
+    fireEvent.change(screen.getByLabelText('Source'), { target: { value: 'draft' } });
+    fireEvent.change(screen.getByLabelText('Target'), { target: { value: 'revise' } });
+    fireEvent.change(screen.getByLabelText('Kind'), { target: { value: 'branch' } });
     fireEvent.change(screen.getByLabelText('Condition'), { target: { value: 'word_count > 1000' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create Transition' }));
 
@@ -92,11 +92,11 @@ describe('EdgeCreateDialog (FB-SE-004)', () => {
     expect(screen.getByRole('button', { name: 'Create Transition' })).toBeDisabled();
 
     // Choose source only — still disabled (no target).
-    fireEvent.change(screen.getByLabelText('Choose source'), { target: { value: 'draft' } });
+    fireEvent.change(screen.getByLabelText('Source'), { target: { value: 'draft' } });
     expect(screen.getByRole('button', { name: 'Create Transition' })).toBeDisabled();
 
     // Choose target — now enabled.
-    fireEvent.change(screen.getByLabelText('Choose target'), { target: { value: 'revise' } });
+    fireEvent.change(screen.getByLabelText('Target'), { target: { value: 'revise' } });
     expect(screen.getByRole('button', { name: 'Create Transition' })).not.toBeDisabled();
   });
 

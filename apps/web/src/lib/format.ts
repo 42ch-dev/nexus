@@ -1,3 +1,6 @@
+import { getActiveLocale } from './i18n/active-locale';
+import { i18n } from './i18n/config';
+
 /**
  * Formatting helpers for the Control Room + Setup screens.
  *
@@ -11,7 +14,7 @@ export function formatDateTime(iso: string | undefined | null): string {
   if (!iso) return '—';
   const ms = Date.parse(iso);
   if (Number.isNaN(ms)) return iso;
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(getActiveLocale(), {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(ms);
@@ -22,26 +25,23 @@ export function formatDate(iso: string | undefined | null): string {
   if (!iso) return '—';
   const ms = Date.parse(iso);
   if (Number.isNaN(ms)) return iso;
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(ms);
+  return new Intl.DateTimeFormat(getActiveLocale(), { dateStyle: 'medium' }).format(ms);
 }
 
 /**
- * Format an ISO timestamp as a relative "time ago" string (e.g. "3h ago").
+ * Format an ISO timestamp as a relative "time ago" string.
  * Falls back to the absolute local time when older than ~30 days.
  */
 export function formatRelative(iso: string | undefined | null): string {
   if (!iso) return '—';
   const ms = Date.parse(iso);
   if (Number.isNaN(ms)) return iso;
-  const diffMs = Date.now() - ms;
-  const sec = Math.round(diffMs / 1000);
-  const min = Math.round(sec / 60);
-  const hr = Math.round(min / 60);
-  const day = Math.round(hr / 24);
-  if (sec < 45) return 'just now';
-  if (min < 60) return `${min}m ago`;
-  if (hr < 24) return `${hr}h ago`;
-  if (day < 30) return `${day}d ago`;
+  const diffSec = Math.round((Date.now() - ms) / 1000);
+  const rtf = new Intl.RelativeTimeFormat(getActiveLocale(), { numeric: 'auto' });
+  if (diffSec < 45) return rtf.format(-diffSec, 'second');
+  if (diffSec < 3600) return rtf.format(-Math.round(diffSec / 60), 'minute');
+  if (diffSec < 86400) return rtf.format(-Math.round(diffSec / 3600), 'hour');
+  if (diffSec < 30 * 86400) return rtf.format(-Math.round(diffSec / 86400), 'day');
   return formatDate(iso);
 }
 
@@ -59,7 +59,7 @@ export function formatUtcAndLocal(iso: string | undefined | null): { utc: string
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(ms);
-  const local = new Intl.DateTimeFormat(undefined, {
+  const local = new Intl.DateTimeFormat(getActiveLocale(), {
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(ms);
@@ -73,12 +73,25 @@ export function shortId(id: string | undefined | null, head = 8, tail = 4): stri
   return `${id.slice(0, head)}…${id.slice(-tail)}`;
 }
 
-/** Title-case a snake_case / kebab-case status for badges/labels. */
-export function humanizeStatus(value: string | undefined | null): string {
-  if (!value) return '—';
+/** Title-case helper for unknown status values without a catalog entry. */
+function titleCaseStatus(value: string): string {
   return value
     .replace(/[_-]+/g, ' ')
     .split(' ')
     .map((word) => (word.length === 0 ? word : word[0]!.toUpperCase() + word.slice(1)))
     .join(' ');
+}
+
+/**
+ * Localize a snake_case / kebab-case status for badges/labels.
+ *
+ * Looks up `common.status.<value>` in the active catalog; if no translation
+ * exists, falls back to title-casing the raw value (legacy behavior for
+ * unrecognized daemon free-strings). zh-CN does not receive English title-case.
+ */
+export function humanizeStatus(value: string | undefined | null): string {
+  if (!value) return '—';
+  const key = `status.${value}`;
+  const translated = i18n.t(key, { ns: 'common', defaultValue: value });
+  return translated === value ? titleCaseStatus(value) : translated;
 }

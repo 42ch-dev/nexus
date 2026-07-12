@@ -16,6 +16,7 @@
  * focus ring so state is not color-only (Draft §4.4 #6).
  */
 import { memo } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 
 import type { StrategyNodeData } from '@/lib/canvas/strategy-graph';
@@ -65,12 +66,12 @@ const STATUS_DOT: Record<NonNullable<NodeStatus>, string> = {
   completed: 'bg-teal-700',
 };
 
-const STATUS_LABEL: Record<NonNullable<NodeStatus>, string> = {
-  current: 'Current',
-  running: 'Running',
-  waiting: 'Waiting',
-  error: 'Error',
-  completed: 'Completed',
+const STATUS_LABEL_KEYS: Record<NonNullable<NodeStatus>, string> = {
+  current: 'strategy.node.status.current',
+  running: 'strategy.node.status.running',
+  waiting: 'strategy.node.status.waiting',
+  error: 'strategy.node.status.error',
+  completed: 'strategy.node.status.completed',
 };
 
 interface NodeShellProps {
@@ -100,13 +101,14 @@ function NodeShell({ selected, status, accent, children, className, style }: Nod
 }
 
 function NodeHeader({ label, status }: { label: string; status: NodeStatus }) {
+  const { t } = useTranslation('canvas');
   return (
     <div className="flex items-center justify-between gap-2">
       <span className="font-heading text-copy-14 font-semibold text-gray-1000">{label}</span>
       {status ? (
         <span className="flex items-center gap-1 text-label-12 text-gray-700">
           <span className={`inline-block h-2 w-2 rounded-pill ${STATUS_DOT[status]}`} aria-hidden />
-          {STATUS_LABEL[status]}
+          {t(STATUS_LABEL_KEYS[status])}
         </span>
       ) : null}
     </div>
@@ -114,9 +116,10 @@ function NodeHeader({ label, status }: { label: string; status: NodeStatus }) {
 }
 
 function KindTag({ kind }: { kind: string }) {
+  const { t } = useTranslation('canvas');
   return (
     <span className="mt-0.5 inline-block rounded-pill bg-gray-alpha-100 px-1.5 py-0.5 font-mono text-label-12 text-gray-700">
-      {kind}
+      {t(`strategy.node.kind.${kind}`, { defaultValue: kind })}
     </span>
   );
 }
@@ -127,6 +130,7 @@ export const StrategyStateNode = memo(function StrategyStateNode({
   selected,
 }: NodeProps) {
   const d = data as StrategyNodeData;
+  const { t } = useTranslation('canvas');
   const status = effectiveStatus(d.status);
   const isCurrent = status !== undefined;
   return (
@@ -135,9 +139,9 @@ export const StrategyStateNode = memo(function StrategyStateNode({
       <NodeHeader label={d.label} status={status} />
       <KindTag kind={d.stateKind} />
       {d.description ? <p className="mt-1 text-copy-13 text-gray-900 line-clamp-2">{d.description}</p> : null}
-      {d.isInitial ? <span className="mt-1 inline-block text-label-12 text-purple-700">Start</span> : null}
+      {d.isInitial ? <span className="mt-1 inline-block text-label-12 text-purple-700">{t('strategy.node.start')}</span> : null}
       <Handle type="source" position={Position.Bottom} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
-      {isCurrent ? <span className="sr-only">Current execution node</span> : null}
+      {isCurrent ? <span className="sr-only">{t('strategy.node.currentExecutionNode')}</span> : null}
     </NodeShell>
   );
 });
@@ -148,6 +152,7 @@ export const StrategyGroupNode = memo(function StrategyGroupNode({
   selected,
 }: NodeProps) {
   const d = data as StrategyNodeData;
+  const { t } = useTranslation('canvas');
   const status = effectiveStatus(d.status);
   return (
     <NodeShell
@@ -158,7 +163,9 @@ export const StrategyGroupNode = memo(function StrategyGroupNode({
     >
       <Handle type="target" position={Position.Top} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
       <NodeHeader label={d.label} status={status} />
-      <p className="mt-0.5 text-copy-13 text-gray-700">Inner DAG · {d.innerGraphId}</p>
+      <p className="mt-0.5 text-copy-13 text-gray-700">
+        {t('strategy.node.innerGraph', { id: d.innerGraphId })}
+      </p>
       <Handle type="source" position={Position.Bottom} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
     </NodeShell>
   );
@@ -170,13 +177,14 @@ export const StrategyJoinNode = memo(function StrategyJoinNode({
   selected,
 }: NodeProps) {
   const d = data as StrategyNodeData;
+  const { t } = useTranslation('canvas');
   const status = effectiveStatus(d.status);
   return (
     <NodeShell selected={!!selected} status={status} className="min-w-[176px]">
       <Handle type="target" position={Position.Top} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
       <NodeHeader label={d.label} status={status} />
       <span className="mt-0.5 inline-block rounded-pill bg-[color-mix(in_srgb,var(--color-purple-700)_12%,transparent)] px-1.5 py-0.5 text-label-12 text-purple-1000">
-        Join · {d.convergeStrategy ?? 'wait_for_all'}
+        {t('strategy.node.join', { strategy: d.convergeStrategy ?? 'wait_for_all' })}
       </span>
       <Handle type="source" position={Position.Bottom} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
     </NodeShell>
@@ -189,12 +197,13 @@ export const StrategyTerminalNode = memo(function StrategyTerminalNode({
   selected,
 }: NodeProps) {
   const d = data as StrategyNodeData;
+  const { t } = useTranslation('canvas');
   const status = effectiveStatus(d.status);
   return (
     <NodeShell selected={!!selected} status={status} className="min-w-[140px]">
       <Handle type="target" position={Position.Top} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
       <NodeHeader label={d.label} status={status} />
-      <span className="mt-0.5 inline-block text-label-12 text-gray-700">End</span>
+      <span className="mt-0.5 inline-block text-label-12 text-gray-700">{t('strategy.node.end')}</span>
     </NodeShell>
   );
 });

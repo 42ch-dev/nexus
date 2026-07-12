@@ -8,6 +8,7 @@
  * same field.
  */
 import { useEffect, useId, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { AlertTriangle, RefreshCw, Shield, Split } from 'lucide-react';
 
 export interface ConflictField<T extends string = string> {
@@ -60,20 +61,28 @@ export function ConflictModalBase<T extends string = string>({
   description,
   descriptionSuffix,
   currentRevision,
-  revisionLabel = 'Server revision is now',
-  serverSectionTitle = 'What changed on the server',
-  localSectionTitle = 'What you were about to do',
+  revisionLabel,
+  serverSectionTitle,
+  localSectionTitle,
   serverChanges,
   localChanges,
   reviewRows,
   onUseCurrent,
   onReapply,
   onDismiss,
-  useCurrentLabel = 'Use current',
-  reapplyLabel = 'Reapply my edit',
-  keepEditingLabel = 'Keep editing',
-  reviewLabel = 'Review side-by-side',
+  useCurrentLabel,
+  reapplyLabel,
+  keepEditingLabel,
+  reviewLabel,
 }: ConflictModalBaseProps<T>) {
+  const { t } = useTranslation('canvas');
+  const resolvedRevisionLabel = revisionLabel ?? t('conflict.revisionLabel', { revision: currentRevision });
+  const resolvedServerSectionTitle = serverSectionTitle ?? t('conflict.serverSectionTitle');
+  const resolvedLocalSectionTitle = localSectionTitle ?? t('conflict.localSectionTitle');
+  const resolvedUseCurrentLabel = useCurrentLabel ?? t('conflict.useCurrent');
+  const resolvedReapplyLabel = reapplyLabel ?? t('conflict.reapplyLabel');
+  const resolvedKeepEditingLabel = keepEditingLabel ?? t('conflict.keepEditing');
+  const resolvedReviewLabel = reviewLabel ?? t('conflict.reviewButton');
   const titleId = useId();
   const liveId = useId();
   const panelRef = useRef<HTMLDivElement>(null);
@@ -164,9 +173,9 @@ export function ConflictModalBase<T extends string = string>({
               </p>
             ) : (
               <p className="mt-1 text-copy-14 text-gray-900">
-                {revisionLabel}{' '}
-                <span className="font-mono">{currentRevision}</span>. Choose how
-                to reconcile your changes.
+                {resolvedRevisionLabel}{' '}
+                <span className="font-mono">{currentRevision}</span>.{' '}
+                {t('conflict.defaultDescription')}
               </p>
             )}
           </div>
@@ -179,23 +188,31 @@ export function ConflictModalBase<T extends string = string>({
           aria-live="polite"
           aria-atomic="true"
         >
-          Conflict detected on revision {currentRevision}. You changed{' '}
-          {localChanges.map((f) => f.label).join(', ') || 'nothing'}. The server
-          changed{' '}
-          {serverChanges.map((f) => f.label).join(', ') || 'nothing detectable'}.
+          {t('conflict.liveRegion.revision', { revision: currentRevision })}
+          {' '}
+          {t('conflict.liveRegion.localChanges', {
+            fields: localChanges.map((f) => f.label).join(', ') || t('conflict.liveRegion.nothing'),
+          })}
+          {' '}
+          {t('conflict.liveRegion.serverChanges', {
+            fields: serverChanges.map((f) => f.label).join(', ') || t('conflict.liveRegion.nothingDetectable'),
+          })}
           {overlap.length > 0
-            ? ` Overlap on ${overlap.map((f) => f.label).join(', ')}. Review before reapplying.`
-            : ' No overlap. You can safely reapply your edit.'}
+            ? ' ' +
+              t('conflict.liveRegion.overlap', {
+                fields: overlap.map((f) => f.label).join(', '),
+              })
+            : ' ' + t('conflict.liveRegion.noOverlap')}
         </div>
 
         <div className="mt-4 grid gap-3 rounded-card border border-gray-alpha-300 bg-background-100 p-3">
           <div>
             <h4 className="text-label-14 font-semibold text-gray-900">
-              {serverSectionTitle}
+              {resolvedServerSectionTitle}
             </h4>
             {serverChanges.length === 0 ? (
               <p className="text-copy-13 text-gray-700">
-                No detectable changes to the fields you edited.
+                {t('conflict.server.noChanges')}
               </p>
             ) : (
               <ul className="mt-1 flex flex-wrap gap-1">
@@ -212,10 +229,10 @@ export function ConflictModalBase<T extends string = string>({
           </div>
           <div>
             <h4 className="text-label-14 font-semibold text-gray-900">
-              {localSectionTitle}
+              {resolvedLocalSectionTitle}
             </h4>
             {localChanges.length === 0 ? (
-              <p className="text-copy-13 text-gray-700">No local changes.</p>
+              <p className="text-copy-13 text-gray-700">{t('conflict.local.noChanges')}</p>
             ) : (
               <ul className="mt-1 flex flex-wrap gap-1">
                 {localChanges.map((f) => (
@@ -245,7 +262,7 @@ export function ConflictModalBase<T extends string = string>({
             onClick={onDismiss}
             className="rounded-control border border-gray-alpha-400 px-4 py-2 text-button-12 text-gray-900 hover:bg-gray-alpha-100"
           >
-            {keepEditingLabel}
+            {resolvedKeepEditingLabel}
           </button>
           <button
             type="button"
@@ -253,7 +270,7 @@ export function ConflictModalBase<T extends string = string>({
             className="rounded-control border border-gray-alpha-400 px-4 py-2 text-button-12 text-gray-900 hover:bg-gray-alpha-100"
           >
             <Split className="mr-1.5 inline h-4 w-4" aria-hidden />
-            {reviewLabel}
+            {resolvedReviewLabel}
           </button>
           <button
             type="button"
@@ -261,13 +278,15 @@ export function ConflictModalBase<T extends string = string>({
             disabled={!canReapply}
             title={
               canReapply
-                ? 'Refetch and reapply your edit'
-                : `Cannot reapply automatically because ${overlap.map((f) => f.label).join(', ')} also changed on the server.`
+                ? t('conflict.reapply.title.enabled')
+                : t('conflict.reapply.title.disabled', {
+                    fields: overlap.map((f) => f.label).join(', '),
+                  })
             }
             className="rounded-control border border-gray-alpha-400 px-4 py-2 text-button-12 text-gray-900 hover:bg-gray-alpha-100 disabled:cursor-not-allowed disabled:opacity-50"
           >
             <RefreshCw className="mr-1.5 inline h-4 w-4" aria-hidden />
-            {reapplyLabel}
+            {resolvedReapplyLabel}
           </button>
           <button
             type="button"
@@ -275,7 +294,7 @@ export function ConflictModalBase<T extends string = string>({
             className="rounded-control bg-canvas-write-conflict px-4 py-2 text-button-12 text-white hover:bg-red-800 dark:text-brand-deep-blue"
           >
             <Shield className="mr-1.5 inline h-4 w-4" aria-hidden />
-            {useCurrentLabel}
+            {resolvedUseCurrentLabel}
           </button>
         </div>
       </div>
@@ -294,16 +313,19 @@ function ReviewRow({
   draft: string;
   changed: boolean;
 }) {
+  const { t } = useTranslation('canvas');
   return (
     <div className="grid gap-2 sm:grid-cols-2">
       <div className="rounded-control bg-gray-alpha-100 p-2">
-        <span className="text-label-12 text-gray-700">Server: {label}</span>
+        <span className="text-label-12 text-gray-700">
+          {t('conflict.review.server', { label })}
+        </span>
         <p className="mt-1 break-words text-copy-13 text-gray-900">{server}</p>
       </div>
       <div className="rounded-control bg-canvas-write-conflict/5 p-2">
         <span className="text-label-12 text-canvas-write-conflict">
-          Your edit: {label}
-          {changed ? null : ' (unchanged)'}
+          {t('conflict.review.local', { label })}
+          {changed ? null : ` ${t('conflict.review.unchanged')}`}
         </span>
         <p className="mt-1 break-words text-copy-13 text-gray-900">{draft}</p>
       </div>

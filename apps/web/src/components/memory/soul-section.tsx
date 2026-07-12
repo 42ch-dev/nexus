@@ -32,6 +32,7 @@
  * fragments, the whole viz area shows the honest subset-empty copy.
  */
 import { useState } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { GrowthCurve } from '@/components/soul/growth-curve';
 import { SoulNarrativeCard } from '@/components/soul/soul-narrative-card';
@@ -54,6 +55,7 @@ export function SoulSection({
   creatorId: string;
   onFilterFragments: (keyword: string | null) => void;
 }) {
+  const { t } = useTranslation('memory');
   // World projection: null = "All worlds" (whole Creator SOUL); a world_id
   // narrows keyword/drift + growth + narrative to that world's subset.
   const [selectedWorld, setSelectedWorld] = useState<string | null>(null);
@@ -97,9 +99,9 @@ export function SoulSection({
     <section data-testid="memory-soul-section">
       <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h2 className="text-heading-16 text-gray-1000">SOUL</h2>
+          <h2 className="text-heading-16 text-gray-1000">{t('soul.title')}</h2>
           <p className="text-copy-13 text-gray-700">
-            The themes your creative work has internalized, and how they shift over time.
+            {t('soul.description')}
           </p>
         </div>
         <WorldSelector
@@ -124,15 +126,15 @@ export function SoulSection({
       {isSubsetEmpty ? (
         <div data-testid="soul-world-subset-empty" className="py-4">
           <EmptyState
-            title="No fragments in this world yet"
-            description="Your Creator SOUL is still shaped by your work here when fragments arrive."
+            title={t('soul.subsetEmptyTitle')}
+            description={t('soul.subsetEmptyDescription')}
           />
         </div>
       ) : (
         <div className="flex flex-col gap-8">
           <SoulPanel fragmentsQuery={activeFragments} onFilterFragments={onFilterFragments} />
           <div className="flex flex-col gap-3 border-t border-gray-alpha-400 pt-4">
-            <h3 className="text-heading-16 text-gray-1000">Growth</h3>
+            <h3 className="text-heading-16 text-gray-1000">{t('soul.growthTitle')}</h3>
             <GrowthCurve fragments={activeList} />
           </div>
         </div>

@@ -3,6 +3,7 @@ import { humanizeStatus } from '@/lib/format';
 import { FINDING_STATUSES, type FindingStatus } from '@/lib/findings-lifecycle';
 import { cn } from '@/lib/utils';
 import type { ChapterStatus } from '@42ch/nexus-contracts';
+import { useTranslation } from 'react-i18next';
 
 /**
  * Map a free-string status to a Badge variant by keyword.
@@ -80,9 +81,11 @@ interface ChapterStatusBadgeProps {
 
 /** Chapter status pill with the DESIGN.md mapping. */
 export function ChapterStatusBadge({ status, className }: ChapterStatusBadgeProps) {
+  const { t } = useTranslation('canvas');
+  const label = status ? t(`chapter.status.${status}` as const) : humanizeStatus(status);
   return (
     <Badge variant={chapterStatusVariant(status)} className={className}>
-      {humanizeStatus(status)}
+      {label}
     </Badge>
   );
 }
@@ -129,9 +132,14 @@ interface FindingStatusBadgeProps {
 
 /** Finding status pill with the DESIGN.md §Findings 6-state mapping. */
 export function FindingStatusBadge({ status, className }: FindingStatusBadgeProps) {
+  const { t } = useTranslation('findings');
+  const normalized = (status ?? '').toLowerCase() as FindingStatus;
+  const label = FINDING_STATUSES.includes(normalized)
+    ? t(`status.${normalized}` as const)
+    : humanizeStatus(status);
   return (
     <Badge className={cn(findingStatusClasses(status), className)}>
-      {humanizeStatus(status)}
+      {label}
     </Badge>
   );
 }

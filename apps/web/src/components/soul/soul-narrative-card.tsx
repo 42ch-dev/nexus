@@ -2,6 +2,7 @@ import { Button } from '@/components/ui/button';
 import { EmptyState, Spinner } from '@/components/ui/states';
 import { formatDate } from '@/lib/format';
 import type { SoulNarrativeResponse } from '@42ch/nexus-contracts';
+import { useTranslation } from 'react-i18next';
 
 /**
  * Creator-SOUL Narrative card (V1.81 SP-1 — web-ui.md §26.1).
@@ -42,11 +43,13 @@ export function SoulNarrativeCard({
   /** V1.82: `world` scopes copy to the selected world's per-World narrative. */
   scope?: 'creator' | 'world';
 }) {
+  const { t } = useTranslation('memory');
+
   // `generating` (client-side, mutation in flight) takes precedence over the
   // server-reported state so the CTA shows active progress regardless of the
   // pre-reflect cache shape.
   if (isReflecting) {
-    return <GeneratingState />;
+    return <GeneratingState t={t} />;
   }
 
   // Initial read in flight and no cached data yet: a neutral loading skeleton.
@@ -56,7 +59,7 @@ export function SoulNarrativeCard({
     return (
       <div data-testid="soul-narrative-loading" className="flex items-center gap-2 py-6 text-copy-14 text-gray-700">
         <Spinner />
-        <span>Loading your SOUL narrative…</span>
+        <span>{t('narrative.loading')}</span>
       </div>
     );
   }
@@ -66,11 +69,11 @@ export function SoulNarrativeCard({
   }
 
   if (narrative.state === 'insufficient_data') {
-    return <InsufficientDataState narrative={narrative} scope={scope} />;
+    return <InsufficientDataState narrative={narrative} scope={scope} t={t} />;
   }
 
   if (narrative.state === 'ungenerated') {
-    return <UngeneratedState onReflect={onReflect} />;
+    return <UngeneratedState onReflect={onReflect} t={t} />;
   }
 
   // `current` or `stale` both have a cached narrative to show. `stale` overlays
@@ -82,6 +85,7 @@ export function SoulNarrativeCard({
         narrative={narrative}
         stale={stale}
         onReflect={onReflect}
+        t={t}
       />
     );
   }
@@ -89,7 +93,7 @@ export function SoulNarrativeCard({
   // Defensive: a `current`/`stale` state without narrative text should not
   // happen (the server returns text for those states), but degrade to the
   // ungenerated CTA rather than a blank card.
-  return <UngeneratedState onReflect={onReflect} />;
+  return <UngeneratedState onReflect={onReflect} t={t} />;
 }
 
 /** Distance from the quality threshold, clamped at 0 (for "X more to go"). */
@@ -97,12 +101,12 @@ function remainingToFragmentsThreshold(narrative: SoulNarrativeResponse): number
   return Math.max(0, narrative.min_fragment_count - narrative.current_fragment_count);
 }
 
-function GeneratingState() {
+function GeneratingState({ t }: { t: TFunction }) {
   return (
     <div data-testid="soul-narrative-generating" className="flex flex-col gap-3">
       <div className="flex items-center gap-2 text-copy-14 text-gray-700">
         <Spinner />
-        <span>Reflecting…</span>
+        <span>{t('narrative.reflecting')}</span>
       </div>
       <div
         aria-hidden
@@ -114,23 +118,21 @@ function GeneratingState() {
       </div>
       <Button variant="primary" disabled data-testid="soul-narrative-reflect">
         <Spinner className="text-current" />
-        Reflecting…
+        {t('narrative.reflecting')}
       </Button>
     </div>
   );
 }
 
-function UngeneratedState({ onReflect }: { onReflect: () => void }) {
+function UngeneratedState({ onReflect, t }: { onReflect: () => void; t: TFunction }) {
   return (
     <div data-testid="soul-narrative-ungenerated" className="flex flex-col items-start gap-3">
       <div>
-        <p className="text-heading-16 font-heading text-gray-1000">Reflect on who you are becoming</p>
-        <p className="mt-1 text-copy-14 text-gray-700">
-          Nexus will reflect on your themes, shifts, and creative growth.
-        </p>
+        <p className="text-heading-16 font-heading text-gray-1000">{t('narrative.ungeneratedTitle')}</p>
+        <p className="mt-1 text-copy-14 text-gray-700">{t('narrative.ungeneratedDescription')}</p>
       </div>
       <Button variant="primary" onClick={onReflect} data-testid="soul-narrative-reflect">
-        Reflect on My SOUL
+        {t('narrative.reflectCta')}
       </Button>
     </div>
   );
@@ -139,25 +141,23 @@ function UngeneratedState({ onReflect }: { onReflect: () => void }) {
 function InsufficientDataState({
   narrative,
   scope,
+  t,
 }: {
   narrative: SoulNarrativeResponse;
   scope: 'creator' | 'world';
+  t: TFunction;
 }) {
   const remaining = remainingToFragmentsThreshold(narrative);
   const isWorld = scope === 'world';
   return (
     <div data-testid="soul-narrative-insufficient">
       <EmptyState
-        title={isWorld ? "This world's SOUL is still forming" : 'Your SOUL is still forming'}
-        description={
-          isWorld
-            ? "Keep writing and reviewing in this world — once it has enough fragments, themes, and creative experience, Nexus can reflect on its identity."
-            : "Keep writing and reviewing — once you've accumulated enough fragments, themes, and creative experience, Nexus can reflect on who you are becoming."
-        }
+        title={t(isWorld ? 'narrative.insufficientTitle_world' : 'narrative.insufficientTitle_creator')}
+        description={t(isWorld ? 'narrative.insufficientDescription_world' : 'narrative.insufficientDescription_creator')}
       />
       <p className="mt-3 text-copy-13 text-gray-700">
-        {narrative.current_fragment_count} fragment{narrative.current_fragment_count === 1 ? '' : 's'} captured so far
-        {remaining > 0 ? ` — ${remaining} more to go` : ''}.
+        {t('narrative.capturedCount', { count: narrative.current_fragment_count })}
+        {remaining > 0 ? ` — ${t('narrative.moreToGo', { count: remaining })}` : ''}.
       </p>
     </div>
   );
@@ -167,10 +167,12 @@ function CachedNarrativeState({
   narrative,
   stale,
   onReflect,
+  t,
 }: {
   narrative: SoulNarrativeResponse;
   stale: boolean;
   onReflect: () => void;
+  t: TFunction;
 }) {
   return (
     <div
@@ -183,11 +185,9 @@ function CachedNarrativeState({
           className="flex flex-wrap items-center justify-between gap-3 rounded-control border border-amber-700/30 bg-amber-700/10 px-3 py-2"
           data-testid="soul-narrative-stale-banner"
         >
-          <p className="text-copy-14 text-gray-1000">
-            You've grown since this reflection — new fragments have arrived.
-          </p>
+          <p className="text-copy-14 text-gray-1000">{t('narrative.staleBanner')}</p>
           <Button variant="primary" size="small" onClick={onReflect}>
-            Re-reflect
+            {t('narrative.reReflect')}
           </Button>
         </div>
       )}
@@ -200,14 +200,16 @@ function CachedNarrativeState({
       </p>
       <div className="flex items-center justify-between">
         <p className="text-copy-13 text-gray-700">
-          Reflected on {formatDate(narrative.generated_at)}
+          {t('narrative.reflectedOn', { date: formatDate(narrative.generated_at) })}
         </p>
         {!stale && (
           <Button variant="tertiary" size="small" onClick={onReflect}>
-            Re-reflect
+            {t('narrative.reReflect')}
           </Button>
         )}
       </div>
     </div>
   );
 }
+
+type TFunction = (key: string, options?: Record<string, unknown>) => string;

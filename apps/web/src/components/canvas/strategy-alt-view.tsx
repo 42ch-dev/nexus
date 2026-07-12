@@ -11,6 +11,7 @@
  * readers get a linear reading order, and authors can scan transitions that a
  * spatial graph hides.
  */
+import { useTranslation } from 'react-i18next';
 import type { ParsedPreset } from '@/lib/canvas/preset-yaml';
 import { innerGraphIdOf, stateKind } from '@/lib/canvas/preset-yaml';
 
@@ -56,6 +57,7 @@ function executionOrder(parsed: ParsedPreset): string[] {
 }
 
 export function StrategyAltView({ parsed, statusByState }: StrategyAltViewProps) {
+  const { t } = useTranslation('canvas');
   const { manifest } = parsed;
   const byId = new Map(manifest.states.map((s) => [s.id, s]));
   const order = executionOrder(parsed);
@@ -75,10 +77,10 @@ export function StrategyAltView({ parsed, statusByState }: StrategyAltViewProps)
 
   return (
     <section
-      aria-label="Strategy states in execution order"
+      aria-label={t('strategy.altView.ariaLabel')}
       className="rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-card"
     >
-      <h3 className="text-heading-16 font-heading text-gray-1000">States (execution order)</h3>
+      <h3 className="text-heading-16 font-heading text-gray-1000">{t('strategy.altView.statesTitle')}</h3>
       <ol className="mt-2 flex flex-col gap-1">
         {order.map((id, i) => {
           const state = byId.get(id);
@@ -93,11 +95,17 @@ export function StrategyAltView({ parsed, statusByState }: StrategyAltViewProps)
             >
               <span className="w-6 shrink-0 text-copy-13-mono text-gray-700 tabular-nums">{i + 1}.</span>
               <span className="font-mono text-gray-1000">{id}</span>
-              <span className="rounded-pill bg-gray-alpha-100 px-1.5 py-0.5 text-label-12 text-gray-700">{kind}</span>
-              {graph ? <span className="text-label-12 text-purple-700">inner: {graph}</span> : null}
+              <span className="rounded-pill bg-gray-alpha-100 px-1.5 py-0.5 text-label-12 text-gray-700">
+                {t(`strategy.node.kind.${kind}`, { defaultValue: kind })}
+              </span>
+              {graph ? (
+                <span className="text-label-12 text-purple-700">
+                  {t('strategy.altView.innerGraph', { id: graph })}
+                </span>
+              ) : null}
               {state.converge ? (
                 <span className="rounded-pill bg-[color-mix(in_srgb,var(--color-purple-700)_12%,transparent)] px-1.5 py-0.5 text-label-12 text-purple-1000">
-                  join · {state.converge.strategy ?? 'wait_for_all'}
+                  {t('strategy.altView.join', { strategy: state.converge.strategy ?? 'wait_for_all' })}
                 </span>
               ) : null}
               {status ? <span className="text-label-12 text-blue-700">{status}</span> : null}
@@ -106,24 +114,26 @@ export function StrategyAltView({ parsed, statusByState }: StrategyAltViewProps)
         })}
       </ol>
 
-      <h3 className="mt-4 text-heading-16 font-heading text-gray-1000">Transitions</h3>
+      <h3 className="mt-4 text-heading-16 font-heading text-gray-1000">{t('strategy.altView.transitionsTitle')}</h3>
       <div className="mt-2 overflow-x-auto">
         <table className="w-full text-copy-14">
           <thead>
             <tr className="border-b border-gray-alpha-400 text-left text-label-12 text-gray-700">
-              <th className="py-1 pr-3">From</th>
-              <th className="py-1 pr-3">Condition</th>
-              <th className="py-1 pr-3">To</th>
-              <th className="py-1">Kind</th>
+              <th className="py-1 pr-3">{t('strategy.altView.column.from')}</th>
+              <th className="py-1 pr-3">{t('strategy.altView.column.condition')}</th>
+              <th className="py-1 pr-3">{t('strategy.altView.column.to')}</th>
+              <th className="py-1">{t('strategy.altView.column.kind')}</th>
             </tr>
           </thead>
           <tbody>
             {branches.map((b, i) => (
               <tr key={`${b.source}-${b.target}-${i}`} className="border-b border-gray-alpha-200">
                 <td className="py-1 pr-3 font-mono text-gray-1000">{b.source}</td>
-                <td className="py-1 pr-3 text-gray-900">{b.condition ?? '—'}</td>
+                <td className="py-1 pr-3 text-gray-900">{b.condition ?? t('strategy.altView.noCondition')}</td>
                 <td className="py-1 pr-3 font-mono text-gray-1000">{b.target}</td>
-                <td className="py-1 text-gray-700">{b.kind}</td>
+                <td className="py-1 text-gray-700">
+                  {t(`strategy.altView.transitionKind.${b.kind}`, { defaultValue: b.kind })}
+                </td>
               </tr>
             ))}
           </tbody>

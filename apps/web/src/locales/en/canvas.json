@@ -1,1 +1,612 @@
-{}
+{
+  "outline": {
+    "loading": "Loading outline…",
+    "loadError": {
+      "title": "Failed to load outline",
+      "description": "Could not load the outline. Try again."
+    },
+    "empty": {
+      "title": "No outline yet",
+      "description": "This work has no outline. Create chapters to get started."
+    },
+    "noGraph": {
+      "title": "No graph nodes",
+      "description": "Add volumes, chapters, and timeline events to see the graph."
+    },
+    "subtitle": "Outline",
+    "untitledWork": "Untitled Work",
+    "graphAriaLabel": "Outline spatial graph"
+  },
+  "outlineAltView": {
+    "ariaLabel": "Outline chapters and timeline in list order",
+    "chaptersTitle": "Chapters",
+    "timelineTitle": "Timeline Events",
+    "noChapters": "No chapters yet.",
+    "noTimelineEvents": "No timeline events yet.",
+    "noScenes": "No scenes in this chapter yet.",
+    "unattachedEvent": "Unattached event",
+    "realizesChapter": "Realizes chapter {{chapter}}",
+    "sceneLabel": "Scene",
+    "beatLabel": "Beat",
+    "untitledScene": "Untitled Scene",
+    "untitledBeat": "Untitled Beat"
+  },
+  "outlineCanvas": {
+    "showGraph": "Show graph",
+    "showListView": "Show list view",
+    "revision": {
+      "label": "rev {{revision}}",
+      "conflictTooltip": "Revision conflict — refetch before editing"
+    },
+    "graphSummary": {
+      "notLoaded": "Outline graph not loaded.",
+      "volumes_one": "{{count}} volume",
+      "volumes_other": "{{count}} volumes",
+      "chapters_one": "{{count}} chapter",
+      "chapters_other": "{{count}} chapters",
+      "events_one": "{{count}} timeline event",
+      "events_other": "{{count}} timeline events",
+      "foreshadows_one": "{{count}} foreshadow link",
+      "foreshadows_other": "{{count}} foreshadow links",
+      "body": "Outline graph: {{volumes}}, {{chapters}}, {{events}}, {{foreshadows}}."
+    }
+  },
+  "outlineConflict": {
+    "title": "Outline Conflict",
+    "serverSectionTitle": "What changed on the server",
+    "localSectionTitle": "What you were about to do",
+    "server": {
+      "structureChanged": "The outline structure changed while you were editing."
+    },
+    "review": {
+      "modifiedByOther": "Modified by another session",
+      "unknown": "Unknown server change",
+      "yourEdit": "Your edit"
+    },
+    "fields": {
+      "chapter_title": "Chapter title",
+      "chapter_slug": "Slug",
+      "chapter_volume": "Volume",
+      "chapter_status": "Status",
+      "chapter_planned_word_count": "Planned words",
+      "chapter_actual_word_count": "Actual words",
+      "chapter_outline_content": "Outline content",
+      "move_chapter": "Move chapter",
+      "attach_to_volume": "Attach to volume",
+      "link_event": "Link event",
+      "add_event": "Add event",
+      "remove_event": "Remove event",
+      "attach_event_to_chapter": "Attach event to chapter",
+      "link_foreshadow": "Link foreshadow",
+      "unlink_foreshadow": "Unlink foreshadow"
+    }
+  },
+  "chapterInspector": {
+    "title": "Chapter Inspector",
+    "description": "Metadata for chapter #{{chapter}} exposed on the outline canvas.",
+    "empty": "Select a chapter to inspect its outline metadata.",
+    "publishedWarning": "This chapter is published. Edits must be made through a fork or revision workflow.",
+    "finalizedConfirm": "This chapter is finalized. Editing it will remove the finalized protection. Continue?",
+    "save": "Save chapter",
+    "movePrevVolume": "Prev volume",
+    "moveNextVolume": "Next volume",
+    "field": {
+      "title": "Title",
+      "slug": "Slug",
+      "status": "Status",
+      "plannedWords": "Planned words",
+      "volume": "Volume"
+    },
+    "volume": {
+      "unassigned": "Unassigned"
+    }
+  },
+  "structureInspector": {
+    "title": "Volumes & Chapters",
+    "description": "Select a chapter to inspect or move it between volumes.",
+    "unassigned": "Unassigned",
+    "chapterCount_one": "{{count}} chapter",
+    "chapterCount_other": "{{count}} chapters",
+    "empty": {
+      "title": "No chapters yet",
+      "description": "Chapters appear here once created."
+    },
+    "moveChapterAria": "Move chapter {{chapter}} to {{volume}}",
+    "moveChapterTitle": "Move to {{volume}}"
+  },
+  "eventInspector": {
+    "title": "Timeline",
+    "description": "Events, beats, and foreshadow links.",
+    "addTitle": "Add Event",
+    "titlePlaceholder": "Event title…",
+    "descriptionPlaceholder": "Description (optional)…",
+    "addButton": "Add to timeline",
+    "attachTitle": "Attach to selected chapter",
+    "attachAria": "Attach event to chapter {{chapter}}",
+    "removeTitle": "Remove event",
+    "removeAria": "Remove event {{title}}",
+    "foreshadowsAria": "Foreshadow links from {{title}}",
+    "foreshadows": "Foreshadows {{title}}",
+    "unlinkTitle": "Unlink Foreshadow",
+    "unlinkAria": "Unlink foreshadow to {{title}}",
+    "targetAria": "Foreshadow target for {{title}}",
+    "targetPlaceholder": "Link foreshadow to…",
+    "link": "Link Foreshadow"
+  },
+  "sceneInspector": {
+    "title": "Scene",
+    "empty": "Select a scene on the graph to inspect it.",
+    "readOnly": "Scene details are view-only for now.",
+    "field": {
+      "title": "Title",
+      "status": "Status"
+    },
+    "statusNotSet": "Not set",
+    "partOf": "Part of {{title}}."
+  },
+  "beatInspector": {
+    "title": "Beat",
+    "empty": "Select a beat on the graph to inspect it.",
+    "readOnly": "Beat details are view-only for now.",
+    "field": {
+      "title": "Title",
+      "status": "Status"
+    },
+    "statusNotSet": "Not set",
+    "partOf": "Part of {{title}}."
+  },
+  "chapter": {
+    "fallback": "Chapter",
+    "volume": "Volume {{volume}}",
+    "wordCount": "{{actual}}/{{planned}} words",
+    "status": {
+      "not_started": "Not started",
+      "outlined": "Outlined",
+      "draft": "Draft",
+      "finalized": "Finalized",
+      "published": "Published"
+    }
+  },
+  "scene": {
+    "status": {
+      "drafted": "Drafted",
+      "completed": "Completed"
+    }
+  },
+  "strategy": {
+    "loading": "Loading strategy…",
+    "loadError": "Failed to load strategy.",
+    "graphAriaLabel": "Strategy spatial graph",
+    "header": {
+      "title": "Strategy",
+      "description": "State machine and transition editor",
+      "showGraph": "Show graph",
+      "showList": "Show list",
+      "createTransition": "Create Transition",
+      "livePrefix": "Live:",
+      "liveStatus": ""
+    },
+    "node": {
+      "status": {
+        "current": "Current",
+        "running": "Running",
+        "waiting": "Waiting",
+        "error": "Error",
+        "completed": "Completed"
+      },
+      "kind": {
+        "state": "state",
+        "group": "group",
+        "join": "join",
+        "terminal": "terminal",
+        "inner": "inner"
+      },
+      "start": "Start",
+      "end": "End",
+      "innerGraph": "Inner DAG · {{id}}",
+      "join": "Join · {{strategy}}",
+      "currentExecutionNode": "Current execution node"
+    },
+    "toast": {
+      "runQueued": "Strategy run queued",
+      "ideaSent": "Idea sent to Strategy",
+      "resumed": "Strategy resumed"
+    },
+    "draftTransitionLabel": "Draft transition",
+    "draftTransitionEditor": "Draft transition editor",
+    "revisionBadge": {
+      "label": "rev {{revision}}",
+      "conflictTitle": "Revision conflict — refetch before editing"
+    },
+    "validation": {
+      "title": "Validation",
+      "dangling": "Dangling transition: {{target}}"
+    },
+    "altView": {
+      "ariaLabel": "Strategy states and transitions in list order",
+      "statesTitle": "States",
+      "transitionsTitle": "Transitions",
+      "innerGraph": "inner: {{id}}",
+      "join": "join · {{strategy}}",
+      "noCondition": "—",
+      "column": {
+        "from": "From",
+        "to": "To",
+        "kind": "Kind",
+        "condition": "Condition"
+      },
+      "transitionKind": {
+        "next": "next",
+        "branch": "branch",
+        "default": "default"
+      }
+    },
+    "artifacts": {
+      "title": "Artifacts",
+      "ariaLabel": "Strategy artifacts",
+      "empty": "No artifacts yet."
+    },
+    "edgeCreate": {
+      "title": "Create Transition",
+      "description": "Add a transition between two states.",
+      "sourceLabel": "Source",
+      "sourcePlaceholder": "Choose source",
+      "targetLabel": "Target",
+      "targetPlaceholder": "Choose target",
+      "targetPlaceholderLocked": "Target (locked)",
+      "kindLabel": "Kind",
+      "kind": {
+        "next": "Next",
+        "branch": "Branch",
+        "default": "Default"
+      },
+      "conditionLabel": "Condition",
+      "conditionPlaceholder": "Condition (optional)…",
+      "cancel": "Cancel",
+      "submit": "Create Transition",
+      "creating": "Creating…",
+      "draftAriaLabel": "Draft transition from {{source}} to {{target}}"
+    },
+    "inspector": {
+      "ariaLabel": "Strategy inspector",
+      "state": {
+        "title": "State",
+        "ariaLabel": "State inspector",
+        "labelLabel": "Label",
+        "descriptionLabel": "Description",
+        "save": "Save State",
+        "saved": "Saved",
+        "saveFailed": "Save failed",
+        "saving": "Saving…",
+        "updated": "State updated"
+      },
+      "transition": {
+        "title": "Transition",
+        "ariaLabel": "Transition inspector",
+        "targetLabel": "Target",
+        "save": "Save Transition",
+        "saved": "Saved",
+        "saveFailed": "Save failed",
+        "saving": "Saving…",
+        "updated": "Transition updated"
+      },
+      "prompt": {
+        "title": "Prompt",
+        "ariaLabel": "Prompt inspector",
+        "placeholder": "Enter prompt template…",
+        "save": "Save Prompt",
+        "saved": "Saved",
+        "saveFailed": "Save failed",
+        "saving": "Saving…",
+        "updated": "Prompt template saved"
+      },
+      "stateId": "State ID",
+      "status": "Status",
+      "kind": "Kind",
+      "initialState": "Initial",
+      "terminalState": "Terminal",
+      "innerGraph": "Inner graph",
+      "converge": "Converge",
+      "editAria": "Edit",
+      "cancelEditAria": "Cancel edit",
+      "transitionConflict": {
+        "title": "Transition conflict"
+      }
+    }
+  },
+  "conflict": {
+    "strategy": {
+      "title": "Strategy Conflict"
+    },
+    "fields": {
+      "label": "Label",
+      "description": "Description",
+      "nextTarget": "Target",
+      "promptTemplate": "Prompt template",
+      "promptTemplateWithRef": "Prompt template ({{ref}})"
+    },
+    "serverContent": {
+      "none": "None",
+      "notFetched": "Not fetched"
+    },
+    "draftContent": {
+      "empty": "Empty"
+    },
+    "serverSectionTitle": "Server version",
+    "localSectionTitle": "Your edit",
+    "useCurrent": "Use current",
+    "keepEditing": "Keep editing",
+    "reapplyLabel": "Reapply my edit",
+    "reviewButton": "Review side-by-side",
+    "review": {
+      "server": "Server: {{label}}",
+      "local": "Your edit: {{label}}",
+      "unchanged": "(unchanged)"
+    },
+    "revisionLabel": "Revision {{revision}}",
+    "defaultDescription": "This entry changed while you were editing.",
+    "local": {
+      "noChanges": "No local changes"
+    },
+    "server": {
+      "noChanges": "No server changes"
+    },
+    "liveRegion": {
+      "revision": "Conflict detected on revision {{revision}}.",
+      "overlap": "Your edit overlaps with a server change. Resolve manually.",
+      "noOverlap": "No overlap with server changes. You can reapply your edit.",
+      "nothing": "No conflicting changes detected.",
+      "nothingDetectable": "No detectable changes.",
+      "localChanges": "Local changes: {{fields}}",
+      "serverChanges": "Server changes: {{fields}}"
+    },
+    "reapply": {
+      "title": {
+        "enabled": "Reapply enabled",
+        "disabled": "Reapply disabled"
+      }
+    }
+  },
+  "ideaInput": {
+    "label": "Idea",
+    "placeholder": "Describe what should happen next…",
+    "verbGroupAria": "Idea action",
+    "verb": {
+      "run": "Run",
+      "steer": "Steer",
+      "resume": "Resume"
+    },
+    "submit": {
+      "run": "Run",
+      "steer": "Steer",
+      "resume": "Resume"
+    },
+    "helper": {
+      "run": {
+        "default": "Run the next step from the current state.",
+        "noCreator": "Select a creator before running."
+      },
+      "steer": "Guide the story by describing the desired outcome.",
+      "resume": "Continue from the last saved point."
+    }
+  },
+  "worldKb": {
+    "loading": "Loading world knowledge base…",
+    "loadError": "Failed to load world knowledge base.",
+    "graphAriaLabel": "World knowledge spatial graph",
+    "confidenceLabel": "Confidence",
+    "confidenceThresholdAria": "Confidence threshold",
+    "header": {
+      "title": "World KB",
+      "noEntries": "no entries yet",
+      "entryCount_one": "{{count}} entry",
+      "entryCount_other": "{{count}} entries",
+      "fetched": "fetched {{time}}",
+      "emptyDescription": "No entries to show yet. Refresh after adding world content, or continue from a linked Work.",
+      "description": "Browse entities and promotion candidates. Edits are guarded by per-row version checks.",
+      "showGraph": "Show graph",
+      "showList": "Show list view",
+      "refresh": "Refresh now"
+    },
+    "altView": {
+      "entities": "Entities",
+      "relationships": "Relationships",
+      "suggested": "Suggested"
+    },
+    "inspector": {
+      "ariaLabel": "World KB inspector",
+      "empty": "Select an entity, candidate, or relationship to inspect it.",
+      "entityAria": "Entity inspector: {{name}}",
+      "candidateAria": "Promotion inspector: {{name}}",
+      "newRelationshipAria": "New relationship inspector",
+      "relationshipAria": "Relationship inspector: {{id}}"
+    },
+    "entityInspector": {
+      "title": "Entity",
+      "description": "Edit this world entry. Conflicts are detected per-row — Nexus blocks stale writes.",
+      "save": "Save entity",
+      "saving": "Saving…",
+      "noChanges": "No changes.",
+      "editing": "Editing: {{fields}}",
+      "bodyJsonError": "Body must be valid JSON (or empty).",
+      "validationFailed": "Validation failed.",
+      "aliasesPlaceholder": "e.g. Aria the Tempest, Stormwind",
+      "bodyPlaceholder": "{}",
+      "field": {
+        "title": "Title",
+        "body": "Body",
+        "aliases": "Aliases",
+        "blockType": "Block Type"
+      }
+    },
+    "relationshipInspector": {
+      "newTitle": "New Relationship",
+      "editTitle": "Edit Relationship",
+      "sourceLabel": "Source entity",
+      "sourcePlaceholder": "Select source…",
+      "targetLabel": "Target entity",
+      "targetPlaceholder": "Select target…",
+      "typeLabel": "Relation type",
+      "customLabelLabel": "Custom label",
+      "customLabelPlaceholder": "e.g., Childhood Friend",
+      "save": "Save changes",
+      "add": "Add relationship",
+      "removeAria": "Remove relationship"
+    },
+    "promotionInspector": {
+      "title": "Pending Candidate",
+      "pendingBadge": "Pending · v{{version}}",
+      "description": "Review this extracted candidate and decide whether to promote it into the World KB.",
+      "unnamed": "(unnamed)",
+      "decisionLegend": "Decision",
+      "selectMergeTarget": "Select a confirmed entity to merge into.",
+      "mergeInto": "Merge into (confirmed {{blockType}})",
+      "noMergeTargets": "No confirmed {{blockType}} entities to merge into. Adopt or reject instead.",
+      "selectTarget": "Select a target…",
+      "validationFailed": "Validation failed.",
+      "submitting": "Submitting…",
+      "field": {
+        "name": "Name",
+        "blockType": "Block Type",
+        "job": "Job"
+      },
+      "action": {
+        "adopt": {
+          "label": "Adopt candidate",
+          "help": "promote into a new confirmed KeyBlock"
+        },
+        "reject": {
+          "label": "Reject candidate",
+          "help": "discard this candidate"
+        },
+        "merge": {
+          "label": "Merge candidate",
+          "help": "fold into an existing confirmed entity"
+        }
+      }
+    },
+    "suggested": {
+      "ariaLabel": "Suggested relationships (extraction)",
+      "title": "Suggested",
+      "promoteAll": "Promote all",
+      "description": "Extraction-suggested relationships. Promote to confirm, or delete to dismiss.",
+      "caption": "Extraction-suggested relationships sorted by {{sortKey}} ({{sortDir}}). Default is confidence high to low.",
+      "column": {
+        "source": "Source",
+        "target": "Target",
+        "type": "Type",
+        "confidence": "Confidence",
+        "actions": "Actions"
+      },
+      "empty": "No suggested relationships. Run extraction on a chapter to populate suggestions.",
+      "confidenceBandLabel": "confidence",
+      "promoteAria": "Promote {{label}}",
+      "deleteAria": "Delete {{label}}",
+      "deleteConfirm": "Delete the suggested relationship \"{{label}}\" from {{source}} to {{target}}?",
+      "promoteAllConfirmOne": "Promote this suggested relationship?",
+      "promoteAllConfirmMany": "Promote all {{count}} suggested relationships? This confirms them all at once.",
+      "promoteAllRunning": "Promoting {{count}} suggested relationships…",
+      "promoteAllSucceeded_one": "Promoted {{count}} suggested relationship.",
+      "promoteAllSucceeded_other": "Promoted {{count}} suggested relationships.",
+      "promoteAllFailed_one": "{{count}} suggestion could not be promoted. Try promoting individually.",
+      "promoteAllFailed_other": "{{count}} suggestions could not be promoted. Try promoting individually.",
+      "promoteAllMixed": "Promoted {{succeeded}}; {{failed}} could not be promoted. Try promoting the rest individually."
+    },
+    "entityTable": {
+      "ariaLabel": "World KB entities (sortable list)",
+      "caption": "World KB entities sorted by {{sortKey}} ({{sortDir}}). Press Enter on a row to open its inspector.",
+      "empty": "No World KB entities yet.",
+      "unnamed": "(unnamed)",
+      "listView": "list view",
+      "entryCount_one": "{{count}} entry",
+      "entryCount_other": "{{count}} entries",
+      "column": {
+        "name": "Name",
+        "blockType": "Block Type",
+        "lifecycle": "Lifecycle",
+        "anchors": "Source Anchors",
+        "updated": "Updated"
+      }
+    },
+    "relationshipTable": {
+      "ariaLabel": "World KB relationships (sortable list)",
+      "title": "Relationships",
+      "new": "New Relationship",
+      "caption": "World KB relationships sorted by {{sortKey}} ({{sortDir}}). Press Enter on a row to edit it.",
+      "empty": "No relationships yet.",
+      "yes": "Yes",
+      "no": "No",
+      "count_one": "{{count}} relationship",
+      "count_other": "{{count}} relationships",
+      "deleteConfirm": "Delete the relationship \"{{label}}\" from {{source}} to {{target}}?",
+      "editAria": "Edit relationship {{label}}",
+      "deleteAria": "Delete relationship {{label}}",
+      "column": {
+        "source": "Source",
+        "target": "Target",
+        "type": "Type",
+        "symmetric": "Symmetric",
+        "confidence": "Confidence",
+        "anchors": "Anchors",
+        "updated": "Updated",
+        "actions": "Actions"
+      }
+    },
+    "entityNode": {
+      "unnamed": "(unnamed)",
+      "computable": "Computable",
+      "selected": "Selected World KB entity",
+      "sourceAnchorAria": "Source anchor: {{reference}}",
+      "sourceAnchorCount_one": "{{count}} source anchor",
+      "sourceAnchorCount_other": "{{count}} source anchors",
+      "lifecycle": {
+        "pending": "Pending",
+        "confirmed": "Confirmed",
+        "rejected": "Rejected",
+        "merged": "Merged"
+      }
+    },
+    "relationshipAnchorPicker": {
+      "empty": "No source anchors available."
+    },
+    "conflict": {
+      "entityTitle": "This world entry changed while you were editing.",
+      "promoteTitle": "This candidate's state changed while you were reviewing it.",
+      "promoteDescription": "Nexus {{status}} {{name}} (version",
+      "promoteSuffix": ") while you were about to {{action}} it. Your decision is still in the inspector.",
+      "relationshipTitle": "This relationship changed while you were editing it.",
+      "relationshipDescription": "Nexus updated the relationship {{source}} → {{target}} to version",
+      "relationshipSuffix": "while you were editing its {{field}}. Your change is still in the inspector.",
+      "toVersion": "to version",
+      "whileEditing": "while you were editing its {{field}}. Your change is still in the inspector.",
+      "serverSection": "What changed",
+      "localSection": "What you were about to do",
+      "useCurrent": "Use current",
+      "reapply": "Reapply my edit",
+      "promoteReapply": "Reapply my decision",
+      "cancel": "Cancel",
+      "modifiedByOther": "Modified by another session",
+      "changedByOther": "Changed by another session",
+      "yourEdit": "Your pending edit",
+      "fields": "fields",
+      "candidateStatus": "Candidate {{status}}",
+      "candidateWas": "{{name}} was {{status}}",
+      "pendingAction": "{{action}} {{name}}{{suffix}}",
+      "mergeSuffix": " into {{target}} (confirmed)",
+      "promotionState": "Promotion state",
+      "promotionServer": "{{name}} is now {{status}}",
+      "field": {
+        "title": "Title",
+        "body": "Body",
+        "aliases": "Aliases",
+        "blockType": "Block Type",
+        "relationType": "Relation type",
+        "customLabel": "Custom label"
+      }
+    }
+  },
+  "source": "Source",
+  "target": "Target",
+  "type": "Type",
+  "confidence": "Confidence"
+}

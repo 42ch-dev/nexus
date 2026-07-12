@@ -229,7 +229,7 @@ describe('OutlineCanvas — conflict modal trigger (FB-C1-003)', () => {
     //    server revision (FB-C1-003 acceptance: stale revision → conflict
     //    modal appears with retry/merge path).
     expect(
-      screen.getByText('This outline changed while you were editing.'),
+      screen.getByRole('heading', { name: 'Outline Conflict' }),
     ).toBeInTheDocument();
     expect(
       screen.getByText('5', { selector: 'span.font-mono' }),
@@ -266,7 +266,7 @@ describe('OutlineCanvas — panel selection path regression', () => {
 
     // The inspector should now show the Chapter Inspector with the chapter number.
     const inspector = screen.getByText('Chapter Inspector').closest('[class*="card"]') ?? document.body;
-    expect(within(inspector as HTMLElement).getByText('#1')).toBeInTheDocument();
+    expect(within(inspector as HTMLElement).getByText(/#1/)).toBeInTheDocument();
   });
 });
 
@@ -311,7 +311,7 @@ describe('OutlineCanvas — graph↔list alt toggle (FB-C1-004)', () => {
     // Scope to the alt section to avoid collision with the structure panel below.
     const altSection = screen.getByLabelText('Outline chapters and timeline in list order');
     expect(within(altSection).getByText('Chapter One')).toBeInTheDocument();
-    expect(within(altSection).getByText('draft')).toBeInTheDocument();
+    expect(within(altSection).getByText('Draft')).toBeInTheDocument();
   });
 });
 
@@ -511,6 +511,6 @@ describe('OutlineCanvas — real RF graph-click selection (FB-GS-002)', () => {
     // selection-sync → setSelectedChapterId → Chapter inspector mounts with #1.
     const inspector =
       screen.getByText('Chapter Inspector').closest('[class*="card"]') ?? document.body;
-    expect(within(inspector as HTMLElement).getByText('#1')).toBeInTheDocument();
+    expect(within(inspector as HTMLElement).getByText(/#1/)).toBeInTheDocument();
   });
 });

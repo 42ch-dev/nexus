@@ -7,6 +7,8 @@
  * the minimal-diff PATCH builder. The parent retains mutation orchestration
  * and form state so this module stays a pure presentational slice.
  */
+import { useTranslation } from 'react-i18next';
+
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Select } from '@/components/ui/select';
@@ -74,12 +76,13 @@ export function FindingInlineEditForm({
   onSave,
   onReset,
 }: FindingInlineEditFormProps) {
+  const { t } = useTranslation('findings');
   const isDirty = patch !== null;
 
   return (
     <section className="flex flex-col gap-3">
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="finding-title">Title</Label>
+        <Label htmlFor="finding-title">{t('detail.titleLabel')}</Label>
         <input
           id="finding-title"
           type="text"
@@ -90,7 +93,7 @@ export function FindingInlineEditForm({
         />
       </div>
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="finding-description">Description</Label>
+        <Label htmlFor="finding-description">{t('detail.descriptionLabel')}</Label>
         <textarea
           id="finding-description"
           value={form.description}
@@ -102,7 +105,7 @@ export function FindingInlineEditForm({
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="finding-severity">Severity</Label>
+          <Label htmlFor="finding-severity">{t('detail.severityLabel')}</Label>
           <Select
             id="finding-severity"
             value={form.severity}
@@ -111,13 +114,13 @@ export function FindingInlineEditForm({
           >
             {SEVERITY_OPTIONS.map((opt) => (
               <option key={opt} value={opt}>
-                {opt.charAt(0).toUpperCase() + opt.slice(1)}
+                {t(`severity.${opt}` as const)}
               </option>
             ))}
           </Select>
         </div>
         <div className="flex flex-col gap-1.5">
-          <Label htmlFor="finding-kind">Kind</Label>
+          <Label htmlFor="finding-kind">{t('detail.kindLabel')}</Label>
           <input
             id="finding-kind"
             type="text"
@@ -129,14 +132,14 @@ export function FindingInlineEditForm({
         </div>
       </div>
       <div className="flex flex-col gap-1.5">
-        <Label htmlFor="finding-rule-suggestion">Rule Suggestion</Label>
+        <Label htmlFor="finding-rule-suggestion">{t('detail.ruleSuggestionLabel')}</Label>
         <input
           id="finding-rule-suggestion"
           type="text"
           value={form.ruleSuggestion}
           onChange={(e) => setForm((f) => ({ ...f, ruleSuggestion: e.target.value }))}
           disabled={pending}
-          placeholder="Clear to remove the rule suggestion"
+          placeholder={t('detail.ruleSuggestionPlaceholder')}
           className="h-10 w-full rounded-control border border-gray-alpha-400 bg-background-100 px-3 text-copy-14 text-gray-1000 disabled:bg-gray-100 disabled:text-gray-700"
         />
       </div>
@@ -148,7 +151,7 @@ export function FindingInlineEditForm({
           onClick={onSave}
           disabled={!isDirty || pending}
         >
-          Save Changes
+          {t('detail.saveChanges')}
         </Button>
         <Button
           type="button"
@@ -157,9 +160,9 @@ export function FindingInlineEditForm({
           onClick={onReset}
           disabled={!isDirty || pending}
         >
-          Reset
+          {t('detail.reset')}
         </Button>
-        {isDirty && <span className="text-copy-13 text-gray-700">Unsaved changes</span>}
+        {isDirty && <span className="text-copy-13 text-gray-700">{t('detail.unsavedChanges')}</span>}
       </div>
     </section>
   );

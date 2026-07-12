@@ -13,69 +13,59 @@
  */
 import { Link } from 'react-router-dom';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/ui/button';
 import type { ChapterSummary } from '@42ch/nexus-contracts';
 
 interface ChapterNavProps {
   workId: string;
-  /** Immediately preceding chapter, or null when reading the first chapter. */
   prev: ChapterSummary | null;
-  /** Immediately following chapter, or null when reading the last chapter. */
   next: ChapterSummary | null;
-  /** Distinct volume numbers in the Work (drives the volume-grouping chip). */
   volumes: number[];
-  /** Volume the current chapter belongs to (for the "in Volume N" label). */
   currentVolume?: number;
-  /**
-   * True while the chapter list is still being walked. While true, a null
-   * `prev`/`next` may simply mean the relevant page has not loaded yet, so the
-   * nav renders a neutral loading placeholder instead of the misleading "First
-   * chapter"/"Last chapter" labels (qc3 W-QC3-001).
-   */
   loading?: boolean;
 }
 
 function chapterHref(workId: string, row: ChapterSummary): string {
-  // `volume` is contract-guaranteed (ChapterSummary.volume: number, >= 1), so
-  // no defensive fallback is needed (R-V179P0-QC1-002).
   return `/works/${encodeURIComponent(workId)}/chapters/${row.chapter}?volume=${row.volume}`;
 }
 
-function chapterLabel(row: ChapterSummary): string {
-  return row.title?.trim() ? row.title : `Chapter ${row.chapter}`;
+function chapterLabel(row: ChapterSummary, t: (key: string, options?: Record<string, unknown>) => string): string {
+  return row.title?.trim() ? row.title : t('chapter.title', { chapter: row.chapter });
 }
 
 export function ChapterNav({ workId, prev, next, volumes, currentVolume, loading = false }: ChapterNavProps) {
+  const { t } = useTranslation('reading');
   const multiVolume = volumes.length > 1;
   return (
     <nav
-      aria-label="Chapter navigation"
+      aria-label={t('nav.ariaLabel')}
       className="flex flex-wrap items-center justify-between gap-3 rounded-card border border-gray-alpha-400 bg-background-200 px-4 py-3"
     >
       <div className="flex min-w-0 items-center gap-2">
         {prev ? (
           <Button asChild variant="secondary" size="small">
-            <Link to={chapterHref(workId, prev)} aria-label={`Previous chapter: ${chapterLabel(prev)}`}>
+            <Link to={chapterHref(workId, prev)} aria-label={t('nav.previousAria', { label: chapterLabel(prev, t) })}>
               <ChevronLeft className="h-4 w-4" aria-hidden />
-              <span className="truncate">{chapterLabel(prev)}</span>
+              <span className="truncate">{chapterLabel(prev, t)}</span>
             </Link>
           </Button>
         ) : loading ? (
           <span
             className="inline-flex h-8 items-center gap-1 rounded-control border border-gray-alpha-300 px-3 text-copy-13 text-gray-700"
-            aria-label="Loading chapters"
+            aria-label={t('nav.loadingChapters')}
           >
             <ChevronLeft className="h-4 w-4" aria-hidden />
-            Loading chapters…
+            {t('nav.loadingChapters')}
           </span>
         ) : (
           <span
             className="inline-flex h-8 items-center gap-1 rounded-control border border-gray-alpha-300 px-3 text-copy-13 text-gray-700"
-            aria-label="No previous chapter"
+            aria-label={t('nav.noPrevious')}
           >
             <ChevronLeft className="h-4 w-4" aria-hidden />
-            First chapter
+            {t('nav.firstChapter')}
           </span>
         )}
       </div>
@@ -84,38 +74,38 @@ export function ChapterNav({ workId, prev, next, volumes, currentVolume, loading
         {multiVolume && (
           <span
             className="rounded-pill border border-gray-alpha-300 bg-background-300 px-2 py-0.5 text-label-12"
-            aria-label={`Volume ${currentVolume ?? 1}`}
+            aria-label={t('nav.volume', { volume: currentVolume ?? 1 })}
           >
-            Volume {currentVolume ?? 1}
+            {t('nav.volume', { volume: currentVolume ?? 1 })}
           </span>
         )}
         <span aria-hidden className="hidden sm:inline">
-          Use ← → to navigate
+          {t('nav.keyboardHint')}
         </span>
       </div>
 
       <div className="flex min-w-0 items-center gap-2">
         {next ? (
           <Button asChild variant="secondary" size="small">
-            <Link to={chapterHref(workId, next)} aria-label={`Next chapter: ${chapterLabel(next)}`}>
-              <span className="truncate">{chapterLabel(next)}</span>
+            <Link to={chapterHref(workId, next)} aria-label={t('nav.nextAria', { label: chapterLabel(next, t) })}>
+              <span className="truncate">{chapterLabel(next, t)}</span>
               <ChevronRight className="h-4 w-4" aria-hidden />
             </Link>
           </Button>
         ) : loading ? (
           <span
             className="inline-flex h-8 items-center gap-1 rounded-control border border-gray-alpha-300 px-3 text-copy-13 text-gray-700"
-            aria-label="Loading chapters"
+            aria-label={t('nav.loadingChapters')}
           >
-            Loading chapters…
+            {t('nav.loadingChapters')}
             <ChevronRight className="h-4 w-4" aria-hidden />
           </span>
         ) : (
           <span
             className="inline-flex h-8 items-center gap-1 rounded-control border border-gray-alpha-300 px-3 text-copy-13 text-gray-700"
-            aria-label="No next chapter"
+            aria-label={t('nav.noNext')}
           >
-            Last chapter
+            {t('nav.lastChapter')}
             <ChevronRight className="h-4 w-4" aria-hidden />
           </span>
         )}

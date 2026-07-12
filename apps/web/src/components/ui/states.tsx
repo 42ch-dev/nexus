@@ -1,5 +1,6 @@
 import { Loader2 } from 'lucide-react';
 import type { ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
 
@@ -20,11 +21,12 @@ export function Spinner({ className }: { className?: string }) {
  * LoadingState — present participle + ellipsis per DESIGN.md §Voice & Content.
  * Use inside a card/section while a query is pending.
  */
-export function LoadingState({ label = 'Loading…' }: { label?: string }) {
+export function LoadingState({ label }: { label?: string }) {
+  const { t } = useTranslation('common');
   return (
     <div className="flex items-center gap-2 py-6 text-copy-14 text-gray-700">
       <Spinner />
-      <span>{label}</span>
+      <span>{label ?? t('status.loading')}</span>
     </div>
   );
 }
@@ -60,22 +62,23 @@ export function EmptyState({
  * ErrorResponse via NexusClientError (W-1 fix).
  */
 export function ErrorState({
-  title = 'Could not load this view',
+  title,
   description,
   onRetry,
-  retryLabel = 'Try again',
+  retryLabel,
 }: {
   title?: string;
   description?: string;
   onRetry?: () => void;
   retryLabel?: string;
 }) {
+  const { t } = useTranslation('common');
   return (
     <div
       role="alert"
       className="flex flex-col gap-2 rounded-card border border-[color-mix(in_srgb,var(--color-red-700)_30%,transparent)] bg-[color-mix(in_srgb,var(--color-red-700)_6%,transparent)] p-4"
     >
-      <p className="text-heading-16 font-heading text-red-1000">{title}</p>
+      <p className="text-heading-16 font-heading text-red-1000">{title ?? t('error.title')}</p>
       {description && <p className="text-copy-14 text-red-900">{description}</p>}
       {onRetry && (
         <button
@@ -83,7 +86,7 @@ export function ErrorState({
           onClick={onRetry}
           className="self-start text-label-14 font-medium text-blue-700 transition-colors duration-state ease-standard hover:text-blue-800"
         >
-          {retryLabel}
+          {retryLabel ?? t('error.retry')}
         </button>
       )}
     </div>

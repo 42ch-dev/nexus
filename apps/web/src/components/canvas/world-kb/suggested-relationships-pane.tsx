@@ -11,6 +11,7 @@
  * route; Delete removes the row. Both reuse `usePatchWorldKbRelationship`.
  */
 import { useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { ArrowUp, Trash2 } from 'lucide-react';
 
 import { Button } from '@/components/ui/button';
@@ -55,14 +56,14 @@ type PromoteAllStatus =
   | { kind: 'done'; result: PromoteAllResult };
 
 /** A uniform 8px colored dot badge for a confidence band. */
-function ConfidenceBadge({ confidence }: { confidence: number | undefined | null }) {
+function ConfidenceBadge({ confidence, bandLabel }: { confidence: number | undefined | null; bandLabel: string }) {
   const band = confidenceBand(confidence);
   return (
     <span
       className="inline-block h-2 w-2 shrink-0 rounded-full"
       style={{ backgroundColor: CONFIDENCE_BAND_COLOR_VAR[band] }}
       role="img"
-      aria-label={`${CONFIDENCE_BAND_LABEL[band]} confidence`}
+      aria-label={`${bandLabel} ${CONFIDENCE_BAND_LABEL[band]}`}
     />
   );
 }
@@ -86,6 +87,7 @@ export function SuggestedRelationshipsPane({
   onPromoteAll,
   pending = false,
 }: SuggestedRelationshipsPaneProps) {
+  const { t } = useTranslation('canvas');
   const [sortKey, setSortKey] = useState<SortKey>('confidence');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [promoteAllStatus, setPromoteAllStatus] = useState<PromoteAllStatus>({ kind: 'idle' });
@@ -135,7 +137,11 @@ export function SuggestedRelationshipsPane({
     const target = entityName(rel.target_entity_id);
     if (
       confirmAction(
-        `Delete the suggested relationship "${relationshipEdgeLabel(rel)}" from ${source} to ${target}?`,
+        t('worldKb.suggested.deleteConfirm', {
+          label: relationshipEdgeLabel(rel),
+          source,
+          target,
+        }),
       )
     ) {
       onDelete(rel);
@@ -146,8 +152,8 @@ export function SuggestedRelationshipsPane({
     if (sorted.length === 0) return;
     const message =
       sorted.length > 1
-        ? `Promote all ${sorted.length} suggested relationships? This confirms them all at once.`
-        : `Promote this suggested relationship?`;
+        ? t('worldKb.suggested.promoteAllConfirmMany', { count: sorted.length })
+        : t('worldKb.suggested.promoteAllConfirmOne');
     if (!confirmAction(message)) return;
 
     setPromoteAllStatus({ kind: 'running', total: sorted.length });
@@ -167,16 +173,16 @@ export function SuggestedRelationshipsPane({
   function promoteAllCopy(): string | null {
     switch (promoteAllStatus.kind) {
       case 'running':
-        return `Promoting ${promoteAllStatus.total} suggested relationships…`;
+        return t('worldKb.suggested.promoteAllRunning', { count: promoteAllStatus.total });
       case 'done': {
         const { succeeded, failed } = promoteAllStatus.result;
         if (failed === 0) {
-          return `Promoted ${succeeded} suggested relationship${succeeded === 1 ? '' : 's'}.`;
+          return t('worldKb.suggested.promoteAllSucceeded', { count: succeeded });
         }
         if (succeeded === 0) {
-          return `${failed} suggestion${failed === 1 ? '' : 's'} could not be promoted. Try promoting individually.`;
+          return t('worldKb.suggested.promoteAllFailed', { count: failed });
         }
-        return `Promoted ${succeeded}; ${failed} could not be promoted. Try promoting the rest individually.`;
+        return t('worldKb.suggested.promoteAllMixed', { succeeded, failed });
       }
       default:
         return null;
@@ -187,12 +193,12 @@ export function SuggestedRelationshipsPane({
 
   return (
     <section
-      aria-label="Suggested relationships (extraction)"
+      aria-label={t('worldKb.suggested.ariaLabel')}
       className="rounded-card border border-gray-alpha-400 bg-background-100 shadow-card"
     >
       <div className="flex items-center justify-between border-b border-gray-alpha-200 px-3 py-2">
         <h3 className="text-heading-16 font-heading text-gray-1000">
-          Suggested <span className="text-gray-700">({sorted.length})</span>
+          {t('worldKb.suggested.title')} <span className="text-gray-700">({sorted.length})</span>
         </h3>
         <Button
           type="button"
@@ -201,11 +207,11 @@ export function SuggestedRelationshipsPane({
           onClick={handlePromoteAll}
           disabled={pending || sorted.length === 0}
         >
-          <ArrowUp className="h-4 w-4" aria-hidden /> Promote all
+          <ArrowUp className="h-4 w-4" aria-hidden /> {t('worldKb.suggested.promoteAll')}
         </Button>
       </div>
       <p className="border-b border-gray-alpha-200 px-3 py-1.5 text-label-12 text-gray-700">
-        Extraction-suggested relationships. Promote to confirm, or delete to dismiss.
+        {t('worldKb.suggested.description')}
       </p>
       {copy && (
         <p
@@ -223,31 +229,30 @@ export function SuggestedRelationshipsPane({
       <div className="overflow-auto" style={{ maxHeight: 'calc(100vh - 460px)' }}>
         <table className="w-full table-fixed text-copy-14">
           <caption className="sr-only">
-            Extraction-suggested relationships sorted by {sortKey} ({sortDir}). Default is confidence
-            high to low.
+            {t('worldKb.suggested.caption', { sortKey, sortDir })}
           </caption>
           <thead className="sticky top-0 bg-background-200">
             <tr>
               <th className={headerClass} onClick={() => toggleSort('source')}>
-                Source {sortKey === 'source' && (sortDir === 'asc' ? '▲' : '▼')}
+                {t('worldKb.suggested.column.source')} {sortKey === 'source' && (sortDir === 'asc' ? '▲' : '▼')}
               </th>
               <th className={headerClass} onClick={() => toggleSort('target')}>
-                Target {sortKey === 'target' && (sortDir === 'asc' ? '▲' : '▼')}
+                {t('worldKb.suggested.column.target')} {sortKey === 'target' && (sortDir === 'asc' ? '▲' : '▼')}
               </th>
               <th className={headerClass} onClick={() => toggleSort('type')}>
-                Type {sortKey === 'type' && (sortDir === 'asc' ? '▲' : '▼')}
+                {t('worldKb.suggested.column.type')} {sortKey === 'type' && (sortDir === 'asc' ? '▲' : '▼')}
               </th>
               <th className={headerClass} onClick={() => toggleSort('confidence')}>
-                Confidence {sortKey === 'confidence' && (sortDir === 'asc' ? '▲' : '▼')}
+                {t('worldKb.suggested.column.confidence')} {sortKey === 'confidence' && (sortDir === 'asc' ? '▲' : '▼')}
               </th>
-              <th className="px-3 py-2 text-left text-label-12 text-gray-700">Actions</th>
+              <th className="px-3 py-2 text-left text-label-12 text-gray-700">{t('worldKb.suggested.column.actions')}</th>
             </tr>
           </thead>
           <tbody>
             {sorted.length === 0 ? (
               <tr>
                 <td colSpan={5} className="px-3 py-6 text-center text-copy-13 text-gray-700">
-                  No suggested relationships. Run extraction on a chapter to populate suggestions.
+                  {t('worldKb.suggested.empty')}
                 </td>
               </tr>
             ) : (
@@ -265,7 +270,7 @@ export function SuggestedRelationshipsPane({
                   <td className="px-3 py-2 text-gray-900">{relationshipEdgeLabel(rel)}</td>
                   <td className="px-3 py-2 tabular-nums text-gray-900">
                     <span className="flex items-center gap-1.5">
-                      <ConfidenceBadge confidence={rel.confidence} />
+                      <ConfidenceBadge confidence={rel.confidence} bandLabel={t('worldKb.suggested.confidenceBandLabel')} />
                       <span>{formatConfidence(rel.confidence)}</span>
                     </span>
                   </td>
@@ -276,7 +281,7 @@ export function SuggestedRelationshipsPane({
                         onClick={() => onPromote(rel)}
                         disabled={pending}
                         className="rounded p-1 text-green-700 hover:bg-green-100 focus-visible:ring-2 focus-visible:ring-green-700 disabled:opacity-50"
-                        aria-label={`Promote ${relationshipEdgeLabel(rel)}`}
+                        aria-label={t('worldKb.suggested.promoteAria', { label: relationshipEdgeLabel(rel) })}
                       >
                         <ArrowUp className="h-4 w-4" aria-hidden />
                       </button>
@@ -285,7 +290,7 @@ export function SuggestedRelationshipsPane({
                         onClick={() => handleDelete(rel)}
                         disabled={pending}
                         className="rounded p-1 text-red-700 hover:bg-red-100 focus-visible:ring-2 focus-visible:ring-red-700 disabled:opacity-50"
-                        aria-label={`Delete ${relationshipEdgeLabel(rel)}`}
+                        aria-label={t('worldKb.suggested.deleteAria', { label: relationshipEdgeLabel(rel) })}
                       >
                         <Trash2 className="h-4 w-4" aria-hidden />
                       </button>

@@ -48,5 +48,135 @@
     "title": "Page not found",
     "description": "That route is not part of the Control Room + Setup surface.",
     "action": "Go to Works"
+  },
+  "daemon": {
+    "running": "Daemon running",
+    "healthy": "healthy",
+    "restart": "Restart daemon",
+    "restartConfirm": "Restarting the daemon will interrupt any running orchestration. Continue?",
+    "restartFailed": "Daemon restart failed",
+    "restartFailedFallback": "Daemon restart failed."
+  },
+  "profile": {
+    "sectionLabel": "Profiles",
+    "addButtonLabel": "Add creator",
+    "addDialogTitle": "Add Creator",
+    "addDialogDescription": "Create a new local creator profile.",
+    "displayNameLabel": "Display name",
+    "displayNamePlaceholder": "e.g. Default Creator",
+    "cancel": "Cancel",
+    "create": "Create",
+    "creating": "Creating…"
+  },
+  "health": {
+    "checking": "Checking daemon…",
+    "daemon": "Daemon",
+    "remoteDaemon": "Remote daemon",
+    "daemonVersion": "Daemon v{{version}}",
+    "daemonOffline": "Daemon offline",
+    "remoteDaemonOffline": "Remote daemon offline",
+    "aria": {
+      "online": "Daemon health",
+      "offline": "Daemon offline — go to connection settings"
+    }
+  },
+  "scaffoldPreset": {
+    "title": "Scaffold Preset",
+    "description": "Create a new user preset from a name.",
+    "nameLabel": "Name",
+    "namePlaceholder": "e.g. my-chapter-preset",
+    "validationError": "A name is required.",
+    "creating": "Scaffolding preset…",
+    "submit": "Scaffold Preset"
+  },
+  "workCreate": {
+    "title": "Create Work",
+    "description": "Start a new creative Work in the local runtime.",
+    "titleLabel": "Title",
+    "titlePlaceholder": "The Work's name",
+    "goalLabel": "Long-term goal",
+    "goalPlaceholder": "Where this Work is heading",
+    "ideaLabel": "Initial idea",
+    "ideaPlaceholder": "The seed the runtime will build on",
+    "profileLabel": "Work profile",
+    "validationError": "Title, long-term goal, and initial idea are required.",
+    "creating": "Creating Work…",
+    "create": "Create Work",
+    "toastCreated": "Work created"
+  },
+  "works": {
+    "title": "Works",
+    "description": "Every Work, its status, and when it last changed.",
+    "filterPlaceholder": "Filter by status (e.g. active)",
+    "refreshAria": "Refresh Works",
+    "create": "Create Work",
+    "emptyTitle": "No works yet",
+    "emptyDescription": "Create a Work to start the local loop.",
+    "columns": {
+      "title": "Title",
+      "status": "Status",
+      "intake": "Intake",
+      "preset": "Preset",
+      "updated": "Updated"
+    }
+  },
+  "workDetail": {
+    "loading": "Loading Work…",
+    "notFoundTitle": "Work not found",
+    "notFoundDescription": "This Work does not exist or the daemon could not return it.",
+    "backToWorks": "Back to Works",
+    "updateWork": "Update Work",
+    "longTermGoal": "Long-term goal",
+    "initialIdea": "Initial idea",
+    "intakeStatus": "Intake status",
+    "currentStage": "Current stage",
+    "profile": "Profile",
+    "primaryPreset": "Primary preset",
+    "world": "World",
+    "storyRef": "Story ref",
+    "created": "Created",
+    "updated": "Updated",
+    "chapterProgress": "Chapter progress",
+    "chapterNoTotal": "Chapter {{chapter}} (no planned total).",
+    "openOutline": "Open Outline",
+    "openStrategy": "Open Strategy",
+    "openWorldKb": "Open World KB",
+    "archiveWork": "Archive Work",
+    "confirmArchive": "Confirm archive",
+    "findings": "Findings",
+    "findingsDescription": "Findings raised against this Work, with severity filtering.",
+    "findingsError": "Could not load findings for this Work.",
+    "findingsLoading": "Loading findings…",
+    "noFindings": "No findings recorded for this Work.",
+    "loadMoreFindings": "Load more findings"
+  },
+  "schedule": {
+    "title": "Schedule",
+    "description": "Cron roles per Work, with status and last update.",
+    "refreshAria": "Refresh schedule",
+    "emptyTitle": "No schedules",
+    "emptyDescription": "Schedules appear here once a Work has cron roles configured.",
+    "columns": {
+      "schedule": "Schedule",
+      "label": "Label",
+      "status": "Status",
+      "preset": "Preset",
+      "coreCtx": "Core ctx",
+      "updated": "Updated"
+    }
+  },
+  "sessions": {
+    "title": "Sessions",
+    "description": "What the runtime is doing right now.",
+    "refreshAria": "Refresh sessions",
+    "emptyTitle": "No active sessions",
+    "emptyDescription": "Orchestration sessions will appear here when the runtime runs.",
+    "columns": {
+      "session": "Session",
+      "status": "Status",
+      "preset": "Preset",
+      "creator": "Creator",
+      "currentTask": "Current task"
+    }
   }
 }

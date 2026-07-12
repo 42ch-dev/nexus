@@ -4,6 +4,8 @@
  * Multi-checkbox picker for source-anchor grounding, extracted from the
  * relationship inspector to keep each module under the 250-line cap.
  */
+import { useTranslation } from 'react-i18next';
+
 import type { WorldKbSourceAnchorProjection } from '@42ch/nexus-contracts';
 
 interface RelationshipAnchorPickerProps {
@@ -19,8 +21,9 @@ export function RelationshipAnchorPicker({
   selectedIds,
   onChange,
 }: RelationshipAnchorPickerProps) {
+  const { t } = useTranslation('canvas');
   if (anchors.length === 0) {
-    return <span id={id} className="text-copy-13 text-gray-700">No source anchors available.</span>;
+    return <span id={id} className="text-copy-13 text-gray-700">{t('worldKb.relationshipAnchorPicker.empty')}</span>;
   }
   return (
     <div id={id} className="max-h-32 overflow-auto rounded-control border border-gray-alpha-400 bg-background-100 p-2">
