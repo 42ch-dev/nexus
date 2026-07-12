@@ -16,6 +16,15 @@ const config: Config = {
   darkMode: 'class',
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
+    extend: {
+      // V1.113 P1: DESIGN.md token-backed utilities (shared disabled opacity + listbox max-height).
+      opacity: {
+        disabled: 'var(--color-states-disabled-opacity)',
+      },
+      maxHeight: {
+        listbox: 'var(--color-listbox-max-height)',
+      },
+    },
     // Breakpoints — DESIGN.md §Breakpoints (px-based).
     screens: {
       sm: '401px',
