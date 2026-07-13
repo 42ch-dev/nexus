@@ -29,10 +29,7 @@ use crate::{DiscoverySource, LaunchStrategy, ProviderCatalogEntry, TrustLevel};
 ///
 /// Each entry maps a command name to a distinct `provider_id` that won't collide
 /// with ACP registry agent IDs.
-const KNOWN_COMMANDS: &[(&str, &str)] = &[
-    ("claude", "claude-native"),
-    ("codex", "codex-native"),
-];
+const KNOWN_COMMANDS: &[(&str, &str)] = &[("claude", "claude-native"), ("codex", "codex-native")];
 
 /// Discover native CLI providers by scanning PATH.
 ///
