@@ -564,6 +564,36 @@ pub async fn scan(
         .map(|agent| build_scan_entry(agent, &by_binary))
         .collect();
 
+    // Discover native CLI providers and merge them in. ACP entries come first;
+    // native entries are appended. If a native equivalent is installed, suppress
+    // the corresponding ACP registry entry so the UI shows the honest path.
+    let host_config = nexus_agent_host::config::AgentHostConfig::default();
+    let native_entries = nexus_agent_host::discovery::path_scan::scan_path(&host_config, &[])
+        .map_err(|e| NexusApiError::Internal {
+            code: "NATIVE_SCAN_ERROR".into(),
+            message: format!("failed to scan native CLI providers: {e}"),
+        })?;
+
+    let suppress_ids: std::collections::HashSet<&str> = native_entries
+        .iter()
+        .filter(|entry| entry.health.available)
+        .filter_map(|entry| {
+            NATIVE_PREFERRED_FAMILIES
+                .iter()
+                .find(|(_, native_id)| entry.provider_id.0 == *native_id)
+                .map(|(registry_id, _)| *registry_id)
+        })
+        .collect();
+
+    agents.retain(|entry| {
+        entry
+            .registry_agent_id
+            .as_deref()
+            .is_none_or(|id| !suppress_ids.contains(id))
+    });
+
+    agents.extend(native_entries.into_iter().map(map_native_catalog_entry));
+
     if req.filter.as_deref() == Some("installed") {
         agents.retain(|a| a.installed);
     }
@@ -607,7 +637,34 @@ fn build_scan_entry(
     }
 }
 
+/// Native CLI provider families that take precedence over their ACP registry
+/// counterparts. Tuple order is `(registry_agent_id, native_provider_id)`.
+const NATIVE_PREFERRED_FAMILIES: &[(&str, &str)] = &[
+    ("claude-acp", "claude-native"),
+    ("codex-acp", "codex-native"),
+];
+
+/// Map a native CLI catalog entry to an [`AgentScanEntry`].
+fn map_native_catalog_entry(entry: nexus_agent_host::ProviderCatalogEntry) -> AgentScanEntry {
+    let launch_command = match entry.launch {
+        nexus_agent_host::LaunchStrategy::NativeCli { command, .. } => Some(command),
+        nexus_agent_host::LaunchStrategy::Acp { .. } => None,
+    };
+
+    AgentScanEntry {
+        name: entry.display_name,
+        registry_agent_id: None,
+        launch_command,
+        installed: entry.health.available,
+        version: None,
+        description: None,
+        icon_url: None,
+    }
+}
+
 /// Return the ordered list of binary commands for an agent's binary distribution.
+/// Commands are normalized to bare names so PATH probes match registry keys
+/// consistently (see `nexus_acp_host::registry::bare_command_name`).
 fn platform_binary_commands(binary: &nexus_acp_host::registry::BinaryDistribution) -> Vec<String> {
     let mut cmds = Vec::new();
     let mut seen = std::collections::HashSet::new();
@@ -622,8 +679,9 @@ fn platform_binary_commands(binary: &nexus_acp_host::registry::BinaryDistributio
     .into_iter()
     .flatten()
     {
-        if seen.insert(pb.cmd.clone()) {
-            cmds.push(pb.cmd.clone());
+        let bare = nexus_acp_host::registry::bare_command_name(&pb.cmd);
+        if seen.insert(bare.clone()) {
+            cmds.push(bare);
         }
     }
     cmds
@@ -857,13 +915,11 @@ mod tests {
     }
 
     impl PathGuard {
-        fn prepend(dir: &std::path::Path) -> Self {
+        /// Replace `PATH` with a single directory, restoring the previous value on
+        /// drop. Useful for deterministic tests that must not see the host PATH.
+        fn isolate(dir: &std::path::Path) -> Self {
             let previous = std::env::var("PATH").ok();
-            let mut paths = vec![dir.to_path_buf()];
-            if let Some(ref existing) = previous {
-                paths.extend(std::env::split_paths(existing));
-            }
-            let new_path = std::env::join_paths(paths).expect("valid PATH");
+            let new_path = std::env::join_paths([dir.to_path_buf()]).expect("valid PATH");
             std::env::set_var("PATH", new_path);
             Self { previous }
         }
@@ -960,6 +1016,65 @@ mod tests {
         (server, tmp)
     }
 
+    fn write_registry_cache_with_native_acp(home: &std::path::Path) {
+        let registry_dir = home.join("registry");
+        std::fs::create_dir_all(&registry_dir).expect("create registry dir");
+
+        let registry_json = r#"{
+            "version": "1.0.0",
+            "agents": [
+                {
+                    "id": "codex-acp",
+                    "name": "Codex ACP",
+                    "version": "1.0.0",
+                    "distribution": {
+                        "binary": {
+                            "darwin-aarch64": { "archive": "https://example.com/codex.tar.gz", "cmd": "./codex" }
+                        }
+                    }
+                },
+                {
+                    "id": "claude-acp",
+                    "name": "Claude ACP",
+                    "version": "1.0.0",
+                    "distribution": {
+                        "binary": {
+                            "darwin-aarch64": { "archive": "https://example.com/claude.tar.gz", "cmd": "./claude" }
+                        }
+                    }
+                },
+                {
+                    "id": "other-agent",
+                    "name": "Other Agent",
+                    "version": "1.0.0",
+                    "distribution": {
+                        "binary": {
+                            "darwin-aarch64": { "archive": "https://example.com/other.tar.gz", "cmd": "other-cmd" }
+                        }
+                    }
+                }
+            ],
+            "extensions": []
+        }"#;
+        std::fs::write(registry_dir.join("cache.json"), registry_json).expect("write cache");
+
+        let meta_json = r#"{"fetched_at":"2026-07-06T00:00:00Z","registry_version":"1.0.0"}"#;
+        std::fs::write(registry_dir.join("cache_meta.json"), meta_json).expect("write meta");
+    }
+
+    async fn create_scan_test_app_with_native_acp_registry() -> (TestServer, tempfile::TempDir) {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let nexus_home = tmp.path().join(".nexus42");
+        write_registry_cache_with_native_acp(&nexus_home);
+
+        let db_path = tmp.path().join("state.db");
+        let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        let app = crate::api::create_router(state, DaemonApiConfig::keyless());
+        let server = TestServer::new(app).expect("TestServer should initialize");
+
+        (server, tmp)
+    }
+
     #[tokio::test]
     async fn scan_endpoint_returns_200_with_frozen_shape() {
         let _lock = SCAN_PATH_LOCK.lock().expect("lock scan tests");
@@ -971,7 +1086,10 @@ mod tests {
         assert_eq!(response.status_code(), axum::http::StatusCode::OK);
 
         let body: ScanResponse = response.json();
-        assert_eq!(body.agents.len(), 2);
+        assert!(
+            body.agents.len() >= 2,
+            "scan should include at least the two registry agents"
+        );
 
         let installed = body
             .agents
@@ -1004,7 +1122,7 @@ mod tests {
     async fn scan_endpoint_filter_installed_keeps_only_installed() {
         let _lock = SCAN_PATH_LOCK.lock().expect("lock scan tests");
         let (server, tmp) = create_scan_test_app_with_installed().await;
-        let _path_guard = PathGuard::prepend(tmp.path().join("bin").as_path());
+        let _path_guard = PathGuard::isolate(tmp.path().join("bin").as_path());
 
         let response = server
             .post("/v1/daemon/agent-host/scan")
@@ -1013,13 +1131,89 @@ mod tests {
         assert_eq!(response.status_code(), axum::http::StatusCode::OK);
 
         let body: ScanResponse = response.json();
-        assert_eq!(body.agents.len(), 1);
-        assert_eq!(
-            body.agents[0].registry_agent_id.as_deref(),
-            Some("installed-agent")
+        assert!(
+            body.agents.iter().all(|a| a.installed),
+            "filter=installed should only return installed agents"
         );
-        assert!(body.agents[0].installed);
-        assert!(body.agents[0].version.is_some());
+        let installed = body
+            .agents
+            .iter()
+            .find(|a| a.registry_agent_id.as_deref() == Some("installed-agent"))
+            .expect("installed agent");
+        assert!(installed.version.is_some());
+    }
+
+    #[tokio::test]
+    async fn scan_endpoint_includes_native_cli_entries_when_on_path() {
+        let _lock = SCAN_PATH_LOCK.lock().expect("lock scan tests");
+        let (server, tmp) = create_scan_test_app().await;
+        let bin_dir = tmp.path().join("bin");
+        write_shim(&bin_dir, "claude", "#!/bin/sh\necho \"claude 1.2.3\"\n");
+        write_shim(&bin_dir, "codex", "#!/bin/sh\necho \"codex 1.2.3\"\n");
+        let _path_guard = PathGuard::isolate(bin_dir.as_path());
+
+        let response = server
+            .post("/v1/daemon/agent-host/scan")
+            .json(&serde_json::json!({}))
+            .await;
+        assert_eq!(response.status_code(), axum::http::StatusCode::OK);
+
+        let body: ScanResponse = response.json();
+        let claude = body
+            .agents
+            .iter()
+            .find(|a| a.name == "claude (native CLI)")
+            .expect("claude native entry");
+        assert!(claude.installed);
+        assert!(claude.launch_command.is_some());
+        assert_eq!(claude.registry_agent_id, None);
+
+        let codex = body
+            .agents
+            .iter()
+            .find(|a| a.name == "codex (native CLI)")
+            .expect("codex native entry");
+        assert!(codex.installed);
+        assert!(codex.launch_command.is_some());
+        assert_eq!(codex.registry_agent_id, None);
+    }
+
+    #[tokio::test]
+    async fn scan_endpoint_suppresses_acp_entry_when_native_preferred_is_installed() {
+        let _lock = SCAN_PATH_LOCK.lock().expect("lock scan tests");
+        let (server, tmp) = create_scan_test_app_with_native_acp_registry().await;
+        let bin_dir = tmp.path().join("bin");
+        write_shim(&bin_dir, "claude", "#!/bin/sh\necho \"claude 1.2.3\"\n");
+        write_shim(&bin_dir, "codex", "#!/bin/sh\necho \"codex 1.2.3\"\n");
+        let _path_guard = PathGuard::isolate(bin_dir.as_path());
+
+        let response = server
+            .post("/v1/daemon/agent-host/scan")
+            .json(&serde_json::json!({}))
+            .await;
+        assert_eq!(response.status_code(), axum::http::StatusCode::OK);
+
+        let body: ScanResponse = response.json();
+        assert!(
+            body.agents
+                .iter()
+                .all(|a| a.registry_agent_id.as_deref() != Some("codex-acp")),
+            "codex-acp should be suppressed when codex-native is installed"
+        );
+        assert!(
+            body.agents
+                .iter()
+                .all(|a| a.registry_agent_id.as_deref() != Some("claude-acp")),
+            "claude-acp should be suppressed when claude-native is installed"
+        );
+        assert!(body
+            .agents
+            .iter()
+            .any(|a| a.name == "codex (native CLI)" && a.installed));
+        assert!(body
+            .agents
+            .iter()
+            .any(|a| a.name == "claude (native CLI)" && a.installed));
     }
 
     // ── Agent scan unit tests ───────────────────────────────────────────────
@@ -1147,6 +1341,49 @@ mod tests {
         assert!(entry.installed);
         assert_eq!(entry.launch_command.as_deref(), Some("second"));
         assert_eq!(entry.version.as_deref(), Some("second 2.0.0"));
+    }
+
+    #[test]
+    fn build_scan_entry_normalizes_relative_binary_commands() {
+        let agent = nexus_acp_host::registry::AgentEntry {
+            id: "cursor".to_string(),
+            name: "Cursor".to_string(),
+            version: "1.0.0".to_string(),
+            description: None,
+            repository: None,
+            authors: None,
+            license: None,
+            icon: None,
+            distribution: nexus_acp_host::registry::Distribution {
+                npx: None,
+                binary: Some(nexus_acp_host::registry::BinaryDistribution {
+                    darwin_aarch64: Some(nexus_acp_host::registry::PlatformBinary {
+                        archive: "https://example.com/a.tar.gz".to_string(),
+                        cmd: "./dist-package/cursor-agent".to_string(),
+                        args: None,
+                    }),
+                    darwin_x86_64: None,
+                    linux_aarch64: None,
+                    linux_x86_64: None,
+                    windows_aarch64: None,
+                    windows_x86_64: None,
+                }),
+            },
+        };
+
+        let mut by_binary = HashMap::new();
+        by_binary.insert(
+            "cursor-agent".to_string(),
+            nexus_acp_host::registry::LocalInstallation {
+                binary: "cursor-agent".to_string(),
+                version: Some("cursor-agent 1.2.3".to_string()),
+            },
+        );
+
+        let entry = build_scan_entry(agent, &by_binary);
+        assert!(entry.installed);
+        assert_eq!(entry.launch_command.as_deref(), Some("cursor-agent"));
+        assert_eq!(entry.version.as_deref(), Some("cursor-agent 1.2.3"));
     }
 
     #[test]
