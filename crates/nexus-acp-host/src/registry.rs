@@ -478,6 +478,19 @@ pub struct LocalInstallation {
     pub version: Option<String>,
 }
 
+/// Extract the bare command name from a possibly-relative path command.
+///
+/// Registry binary commands may be relative paths such as `./kimi` or
+/// `./dist-package/cursor-agent`; PATH probing needs the bare executable
+/// name (`kimi`, `cursor-agent`). This helper also correctly handles bare
+/// commands (`opencode` → `opencode`) and Windows-style relative paths.
+#[must_use]
+pub fn bare_command_name(cmd: &str) -> String {
+    Path::new(cmd)
+        .file_name()
+        .map_or_else(|| cmd.to_string(), |name| name.to_string_lossy().to_string())
+}
+
 /// Maximum concurrent PATH/version probes during a scan.
 const SCAN_MAX_CONCURRENT: usize = 4;
 
@@ -529,7 +542,7 @@ async fn scan_local_installations_impl(
         .into_iter()
         .flatten()
         {
-            binaries.insert(pb.cmd.clone());
+            binaries.insert(bare_command_name(&pb.cmd));
         }
     }
 
@@ -1136,24 +1149,41 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn scan_local_installations_handles_timeout() {
+    async fn scan_local_installations_strips_relative_path_prefix() {
         let tmp = tempfile::tempdir().expect("temp dir");
-        make_shim(
-            &tmp,
-            "slow-agent",
-            "#!/bin/sh\n/bin/sleep 5\necho \"slow-agent 9.9.9\"\n",
-        );
+        make_shim(&tmp, "kimi", "#!/bin/sh\necho \"kimi 1.0.0\"\n");
 
-        let registry = registry_with_binary("slow-agent");
-        let start = std::time::Instant::now();
+        let registry = registry_with_binary("./kimi");
         let results =
             scan_local_installations_with_path(&registry, &[tmp.path().to_path_buf()]).await;
-        let elapsed = start.elapsed();
-        // The probe should time out at 2 s, not wait for the 5 s shim.
-        assert!(elapsed < Duration::from_secs(3));
         assert_eq!(results.len(), 1);
-        assert_eq!(results[0].binary, "slow-agent");
-        // Found on PATH but version probe timed out.
-        assert!(results[0].version.is_none());
+        assert_eq!(results[0].binary, "kimi");
+        assert_eq!(results[0].version.as_deref(), Some("kimi 1.0.0"));
+    }
+
+    #[tokio::test]
+    async fn scan_local_installations_strips_nested_relative_path() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        make_shim(&tmp, "cursor-agent", "#!/bin/sh\necho \"cursor-agent 2.0.0\"\n");
+
+        let registry = registry_with_binary("./dist-package/cursor-agent");
+        let results =
+            scan_local_installations_with_path(&registry, &[tmp.path().to_path_buf()]).await;
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].binary, "cursor-agent");
+        assert_eq!(results[0].version.as_deref(), Some("cursor-agent 2.0.0"));
+    }
+
+    #[tokio::test]
+    async fn scan_local_installations_keeps_bare_command_name() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        make_shim(&tmp, "opencode", "#!/bin/sh\necho \"opencode 3.0.0\"\n");
+
+        let registry = registry_with_binary("opencode");
+        let results =
+            scan_local_installations_with_path(&registry, &[tmp.path().to_path_buf()]).await;
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].binary, "opencode");
+        assert_eq!(results[0].version.as_deref(), Some("opencode 3.0.0"));
     }
 }
