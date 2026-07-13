@@ -15,6 +15,7 @@ use crate::db::pool::{DbPool, PoolConfig};
 use crate::db::SqliteNarrativeGateway;
 use crate::lifecycle::{Lifecycle, LifecycleState, StatigLifecycle};
 use crate::workspace::session::WorkspaceSessionManager;
+use nexus_agent_host::config::AgentHostConfig;
 use nexus_contracts::local::domain::RuntimeMode;
 use nexus_contracts::CertFingerprintResponse;
 use nexus_orchestration::{
@@ -56,6 +57,8 @@ pub struct WorkspaceState {
     schedule_supervisor: Arc<Option<Arc<ScheduleSupervisor>>>,
     /// Agent host facade (set at daemon startup when agent host subsystem is wired).
     agent_host: Arc<Option<Arc<dyn nexus_agent_host::HostFacade>>>,
+    /// Agent host configuration loaded at boot from `agent-host/config.toml`.
+    agent_host_config: Arc<AgentHostConfig>,
     /// Narrative gateway — shared per workspace pool, constructed once at boot.
     narrative_gateway: Arc<SqliteNarrativeGateway>,
     /// Shutdown notification — fired when the daemon enters Stopping state.
@@ -121,6 +124,7 @@ impl WorkspaceState {
             capability_registry: Arc::new(None),
             schedule_supervisor: Arc::new(None),
             agent_host: Arc::new(None),
+            agent_host_config: Arc::new(AgentHostConfig::default()),
             narrative_gateway,
             shutdown_notify: Arc::new(Notify::new()),
             daemon_tool_dispatch: Arc::new(None),
@@ -178,6 +182,11 @@ impl WorkspaceState {
         tracing::info!("Workspace state.db at {:?}", db_path);
 
         let session_manager = Arc::new(WorkspaceSessionManager::new(Arc::new(db.pool().clone())));
+        let agent_host_config =
+            nexus_agent_host::config::load_config(&nexus_home).unwrap_or_else(|e| {
+                tracing::warn!(error = %e, "failed to load agent host config; using defaults");
+                AgentHostConfig::default()
+            });
         Ok(Self {
             db,
             nexus_home,
@@ -194,6 +203,7 @@ impl WorkspaceState {
             capability_registry: Arc::new(None),
             schedule_supervisor: Arc::new(None),
             agent_host: Arc::new(None),
+            agent_host_config: Arc::new(agent_host_config),
             narrative_gateway,
             shutdown_notify: Arc::new(Notify::new()),
             daemon_tool_dispatch: Arc::new(None),
@@ -245,6 +255,18 @@ impl WorkspaceState {
     /// Called from boot.rs after constructing the agent host subsystem.
     pub fn set_agent_host(&mut self, host: Arc<dyn nexus_agent_host::HostFacade>) {
         self.agent_host = Arc::new(Some(host));
+    }
+
+    /// Set the agent host configuration.
+    /// Called from boot.rs after loading the config from disk.
+    pub fn set_agent_host_config(&mut self, config: AgentHostConfig) {
+        self.agent_host_config = Arc::new(config);
+    }
+
+    /// Get the agent host configuration.
+    #[must_use]
+    pub fn agent_host_config(&self) -> Arc<AgentHostConfig> {
+        Arc::clone(&self.agent_host_config)
     }
 
     /// Set the daemon-side tool dispatch adapter (DF-47, V1.42 P3).

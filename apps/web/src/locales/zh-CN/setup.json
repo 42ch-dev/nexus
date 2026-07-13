@@ -52,7 +52,7 @@
       "label": "使用自定义启动命令",
       "placeholder": "例如 /usr/local/bin/my-agent"
     },
-    "verify": "验证智能体",
+    "verify": "验证",
     "verifying": "正在验证…",
     "verifySuccess": "智能体响应成功。",
     "verifyNoMatch": "没有匹配此命令的智能体。请检查命令后重试。",

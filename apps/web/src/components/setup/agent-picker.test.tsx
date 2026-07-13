@@ -252,7 +252,7 @@ describe('AgentPicker', () => {
     expect(selectBtn).not.toHaveClass('hover:bg-gray-alpha-100');
   });
 
-  it('shows Verify Agent button when onVerify is provided', async () => {
+  it('shows Verify button when onVerify is provided', async () => {
     const user = userEvent.setup();
     const onVerify = vi.fn();
     render(
@@ -265,12 +265,12 @@ describe('AgentPicker', () => {
       />,
     );
     const btn = screen.getByTestId('agent-picker-verify');
-    expect(btn).toHaveTextContent('Verify Agent');
+    expect(btn).toHaveTextContent('Verify');
     await user.click(btn);
     expect(onVerify).toHaveBeenCalledOnce();
   });
 
-  it('disables Verify Agent when command is empty', () => {
+  it('disables Verify button when command is empty', () => {
     render(
       <AgentPicker
         status="empty"
@@ -283,7 +283,7 @@ describe('AgentPicker', () => {
     expect(screen.getByTestId('agent-picker-verify')).toBeDisabled();
   });
 
-  it('hides Verify Agent button when onVerify is omitted', () => {
+  it('hides Verify button when onVerify is omitted', () => {
     render(
       <AgentPicker
         status="empty"
