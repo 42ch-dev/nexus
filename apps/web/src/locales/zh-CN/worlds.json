@@ -1,0 +1,13 @@
+{
+  "title": "世界",
+  "description": "选择一个世界以打开其知识库。",
+  "refreshAria": "刷新世界",
+  "refresh": "刷新",
+  "errorDescription": "无法加载世界。",
+  "loading": "正在加载世界…",
+  "emptyTitle": "暂无世界",
+  "emptyDescription": "当作品创建世界后，世界将显示在此处。",
+  "listTitle": "全部世界",
+  "openKb": "打开知识库",
+  "listAriaLabel": "世界"
+}

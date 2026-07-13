@@ -26,6 +26,7 @@
       "@web-setup/*": ["../web/src/components/setup/*"],
       "@web-layout/*": ["../web/src/components/layout/presentational/*"],
       "@web-settings/*": ["../web/src/components/settings/presentational/*"],
+      "@web-canvas/*": ["../web/src/components/canvas/presentational/*"],
       "@web-lib/utils": ["../web/src/lib/utils.ts"]
     },
 

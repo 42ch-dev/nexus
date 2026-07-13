@@ -226,10 +226,9 @@ describe('Sidebar', () => {
     expect(canvasDisclosure).toBeInTheDocument();
     expect(canvasDisclosure).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByRole('link', { name: 'Outline' })).toBeInTheDocument();
-    // World KB has no worldId at the default route and no `/worlds` picker
-    // exists, so it renders disabled (not a link) — see T3 navigation wiring.
-    const worldKb = screen.getByText('World KB');
-    expect(worldKb.closest('[aria-disabled="true"]')).toBeInTheDocument();
+    // World KB has no worldId at the default route, so it falls back to the
+    // `/worlds` picker (V1.115 T3) — a focusable link, never disabled.
+    expect(screen.getByRole('link', { name: 'World KB' })).toHaveAttribute('href', '/worlds');
     expect(screen.getByRole('link', { name: 'Strategy' })).toBeInTheDocument();
   });
 
@@ -249,9 +248,9 @@ describe('Sidebar', () => {
       'bg-blue-700',
     );
     // Non-outline canvas surfaces stay inactive on the outline route. World KB
-    // has no worldId here and renders disabled (not a link); Strategy stays a
-    // link but inactive.
-    expect(screen.queryByRole('link', { name: 'World KB' })).not.toBeInTheDocument();
+    // has no worldId here and falls back to the `/worlds` picker (a link, but
+    // inactive); Strategy stays a link but inactive.
+    expect(screen.getByRole('link', { name: 'World KB' })).not.toHaveClass('bg-gray-alpha-100');
     expect(screen.getByRole('link', { name: 'Strategy' })).not.toHaveClass('bg-gray-alpha-100');
   });
 
@@ -290,6 +289,7 @@ describe('Sidebar — Canvas nav target wiring (V1.111 P1 T3)', () => {
           <Route path="works" element={null} />
           <Route path="works/:workId" element={null} />
           <Route path="works/:workId/outline" element={null} />
+          <Route path="worlds" element={null} />
           <Route path="worlds/:worldId/kb" element={null} />
           <Route path="strategies" element={null} />
           <Route path="sessions" element={null} />
@@ -336,14 +336,12 @@ describe('Sidebar — Canvas nav target wiring (V1.111 P1 T3)', () => {
     );
   });
 
-  it('World KB renders disabled (not a link) when no worldId is in the URL', async () => {
-    // No `/worlds` picker route exists, so without a worldId the item has no
-    // valid target — it must render as an aria-disabled span, not navigate.
+  it('World KB navigates to the /worlds picker when no worldId is in the URL', async () => {
+    // V1.115 T3: the `/worlds` picker route exists, so without a worldId the
+    // item falls back to it — a focusable link, not an aria-disabled span.
     renderSidebarAtRoute('/works/work-1');
 
-    expect(screen.queryByRole('link', { name: 'World KB' })).not.toBeInTheDocument();
-    const worldKb = screen.getByText('World KB');
-    expect(worldKb.closest('[aria-disabled="true"]')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'World KB' })).toHaveAttribute('href', '/worlds');
   });
 
   it('Strategy always navigates to /strategies regardless of context', async () => {
@@ -368,6 +366,7 @@ describe('Sidebar — Canvas active-surface highlight (V1.111 P1 T4)', () => {
           <Route path="works" element={null} />
           <Route path="works/:workId" element={null} />
           <Route path="works/:workId/outline" element={null} />
+          <Route path="worlds" element={null} />
           <Route path="worlds/:worldId/kb" element={null} />
           <Route path="strategies" element={null} />
           <Route path="strategies/:presetId" element={null} />
@@ -407,10 +406,10 @@ describe('Sidebar — Canvas active-surface highlight (V1.111 P1 T4)', () => {
       'bg-blue-700',
     );
     // Non-strategy canvas surfaces stay inactive. Outline renders as a link
-    // (no workId → /works fallback); World KB has no worldId here and renders
-    // disabled (not a link).
+    // (no workId → /works fallback); World KB has no worldId here and falls
+    // back to the `/worlds` picker (a link, but inactive).
     expect(screen.getByRole('link', { name: 'Outline' })).not.toHaveClass('bg-gray-alpha-100');
-    expect(screen.queryByRole('link', { name: 'World KB' })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'World KB' })).not.toHaveClass('bg-gray-alpha-100');
   });
 
   it('keeps all Canvas items inactive on a non-canvas Creator-tab route (/memory)', async () => {
@@ -432,9 +431,11 @@ describe('Sidebar — Canvas active-surface highlight (V1.111 P1 T4)', () => {
     expect(strategy).not.toHaveAttribute('aria-current', 'page');
     expect(strategy.querySelector('[data-testid="sidebar-active-bar"]')).toBeNull();
 
-    // World KB has no worldId and no /worlds picker → renders disabled.
-    expect(screen.queryByRole('link', { name: 'World KB' })).not.toBeInTheDocument();
-    expect(screen.getByText('World KB').closest('[aria-disabled="true"]')).toBeInTheDocument();
+    // World KB has no worldId and falls back to the `/worlds` picker — a
+    // focusable link, inactive like the other Canvas items here.
+    const worldKb = screen.getByRole('link', { name: 'World KB' });
+    expect(worldKb).not.toHaveClass('bg-gray-alpha-100');
+    expect(worldKb).not.toHaveAttribute('aria-current', 'page');
 
     // Contrast: the non-canvas "Memory" item (to: /memory) DOES highlight via
     // the chrome's prefix match — V1.94 behavior preserved for non-canvas

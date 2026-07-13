@@ -17,10 +17,14 @@
  *
  * Conflict-avoidance (HARD, per task brief): the handler is NOT invoked when
  * `document.activeElement` is an `INPUT`, a `TEXTAREA`, or anywhere inside a
- * `[contenteditable]`, `[data-command-palette-ignore]`, or `.react-flow`
- * subtree. ⌘K therefore stays reachable from buttons, links, and the page
- * background, but never steals focus from text entry or the React Flow canvas.
- * This is the contract the command palette (T3) and future surfaces rely on.
+ * `[contenteditable]` or `[data-command-palette-ignore]` subtree. ⌘K therefore
+ * stays reachable from buttons, links, and the page background, but never
+ * steals focus from text entry or the canvas. Canvas surfaces opt out by
+ * setting `data-command-palette-ignore` on their root wrapper (e.g.
+ * `CanvasShell`) — this is fully under our control and stable across React
+ * Flow upgrades, unlike the RF-internal `.react-flow` class previously used
+ * (V1.115 P1 R-V1111P0QC2-W001). This is the contract the command palette
+ * (T3) and future surfaces rely on.
  *
  * The handler is stored in a ref so callers may pass an inline closure without
  * re-binding the listener on every render (mirrors the capture-once philosophy
@@ -94,8 +98,9 @@ function parseDescriptor(descriptor: string): { mod: boolean; baseKey: string } 
 /**
  * Whether the global hotkey should be suppressed for the currently focused
  * element. `closest()` walks ancestors, so this also covers children of a
- * contenteditable host (inherited editability), children of an opt-out region,
- * and nodes nested inside a React Flow pane.
+ * contenteditable host (inherited editability) and children of an opt-out
+ * region. Canvas surfaces own their opt-out via `data-command-palette-ignore`
+ * on their root wrapper — no dependency on React Flow internals.
  */
 function shouldIgnoreTarget(element: Element | null): boolean {
   if (element === null) return false;
@@ -103,7 +108,7 @@ function shouldIgnoreTarget(element: Element | null): boolean {
   if (tag === 'INPUT' || tag === 'TEXTAREA') return true;
   // Single combined ancestor query — parallel to a CSS selector list, and
   // attribute-based so it is robust across jsdom and real browsers.
-  if (element.closest('[contenteditable],[data-command-palette-ignore],.react-flow')) {
+  if (element.closest('[contenteditable],[data-command-palette-ignore]')) {
     return true;
   }
   return false;

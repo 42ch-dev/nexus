@@ -37,12 +37,12 @@
       "id": "2026-07-13-v1.115-canvas-ux-residual-cluster",
       "title": "P1 - Canvas UX Residual Cluster Closure",
       "file": "plans/2026-07-13-v1.115-canvas-ux-residual-cluster.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@frontend-dev"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.115",
         "canvas",
@@ -52,7 +52,7 @@
       ],
       "created_at": "2026-07-13",
       "updated_at": "2026-07-13",
-      "notes": "Close post-V1.114 canvas UX cluster: alt-view sort + hotkey + sidebar + studio mirror + O(n)",
+      "notes": "Phase 2: SDD T1-T5 done + QC1-W001 fix wave, QC tri Approve, QA Pass; 5 residuals closed + 3 new deferred",
       "metadata": {
         "iteration_refs": [
           "V1.115"
@@ -922,23 +922,25 @@
         "id": "R-V1108P1QC1-S002",
         "title": "Studio node chrome mirror should import P0 extract when available",
         "severity": "nit",
-        "decision": "defer",
+        "decision": "close",
         "owner": "@frontend-dev",
         "target": "post-V1.114",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-scene-beat.md",
-        "note": "QC1 S-002. Re-scoped in P0 QC (R-V1109-P0-QC1-W001): Studio re-mirrors chrome as static markup because RF-coupled import boundary forbids RF deps. Deferred post-V1.114."
+        "note": "QC1 S-002. Re-scoped in P0 QC (R-V1109-P0-QC1-W001): Studio re-mirrors chrome as static markup because RF-coupled import boundary forbids RF deps. Deferred post-V1.114.",
+        "closure_note": "Closed by V1.115 P1 — 2026-07-10-v1.108-canvas-outline-spatial"
       },
       {
         "id": "R-V1108P0QC1-M001",
         "title": "Alt view is read-only (no sort controls) — spec wording about sortable lists debatable",
         "severity": "low",
-        "decision": "defer",
+        "decision": "close",
         "owner": "@frontend-dev",
         "target": "post-V1.114",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
-        "note": "QC1 M-001. Editing available in inspectors; sort controls deferred post-V1.114 (UX enhancement, not blocking)."
+        "note": "QC1 M-001. Editing available in inspectors; sort controls deferred post-V1.114 (UX enhancement, not blocking).",
+        "closure_note": "Closed by V1.115 P1 — 2026-07-10-v1.108-canvas-outline-spatial"
       },
       {
         "id": "R-V1108P0QC1-S001",
@@ -970,12 +972,13 @@
         "id": "R-V1109-P0-QC3-W002",
         "title": "beatParentSceneTitle uses Array.find() O(n) on fixture scenes every render; index when real wire data arrives",
         "severity": "nit",
-        "decision": "defer",
+        "decision": "close",
         "owner": "@frontend-dev",
         "target": "post-V1.114",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-scene-beat.md",
-        "note": "Acceptable for small fixture arrays; revisit when real wire scene/beat data arrives. QC source: QC3 W2"
+        "note": "Acceptable for small fixture arrays; revisit when real wire scene/beat data arrives. QC source: QC3 W2",
+        "closure_note": "Closed by V1.115 P1 — 2026-07-11-v1.109-canvas-scene-beat"
       }
     ],
     "2026-07-11-v1.109-strategy-edge-rewiring": [
@@ -1070,12 +1073,13 @@
         "id": "R-V1111P1-WORLDS-PICKER",
         "title": "World KB sidebar item disabled when no worldId active (no /worlds picker route exists; only /worlds/:worldId/kb)",
         "severity": "low",
-        "decision": "defer",
+        "decision": "close",
         "owner": "@frontend-dev",
         "target": "post-V1.114",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-12-v1.111-sidebar-canvas-ia.md",
-        "note": "qc1 flag + T3 reviewer. Honest disabled+aria-disabled; palette go.world-kb has same gating. Durable fix: /worlds picker route. QC source: qc-consolidated.md"
+        "note": "qc1 flag + T3 reviewer. Honest disabled+aria-disabled; palette go.world-kb has same gating. Durable fix: /worlds picker route. QC source: qc-consolidated.md",
+        "closure_note": "Closed by V1.115 P1 — 2026-07-12-v1.111-sidebar-canvas-ia"
       }
     ],
     "2026-07-12-v1.111-canvas-command-palette": [
@@ -1083,12 +1087,13 @@
         "id": "R-V1111P0QC2-W001",
         "title": "Hotkey conflict-avoidance depends on .react-flow CSS class (not RF public API); RF upgrade could silently re-enable Cmd+K in canvas editor",
         "severity": "low",
-        "decision": "defer",
+        "decision": "close",
         "owner": "@frontend-dev",
         "target": "post-V1.114",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-12-v1.111-canvas-command-palette.md",
-        "note": "qc2 W1. Mitigant: [data-command-palette-ignore] escape hatch exists. Defer until a stable RF public API or alternative detection mechanism is available. QC source: qc2.md"
+        "note": "qc2 W1. Mitigant: [data-command-palette-ignore] escape hatch exists. Defer until a stable RF public API or alternative detection mechanism is available. QC source: qc2.md",
+        "closure_note": "Closed by V1.115 P1 — 2026-07-12-v1.111-canvas-command-palette"
       },
       {
         "id": "R-V1111P0QC2-W002",
@@ -1392,6 +1397,41 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-13-v1.114-compute-module-foundation.md",
         "note": "qc1 W-002. Architectural debt; reconcile when module surface matures."
+      }
+    ],
+    "2026-07-13-v1.115-canvas-ux-residual-cluster": [
+      {
+        "id": "R-V1115P1QC1-W002",
+        "title": "i18n sort key asymmetry — dead inactiveHint branch for timeline; timelineCaption duplicates column word",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.115",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-13-v1.115-canvas-ux-residual-cluster.md",
+        "note": "QC1-W-002. Maintainability hazard, non-blocking."
+      },
+      {
+        "id": "R-V1115P1QC1-S001",
+        "title": "Dead aria-disabled fallback in sidebar.tsx (all canvas surfaces now have valid targets)",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.115",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-13-v1.115-canvas-ux-residual-cluster.md",
+        "note": "QC1-S-001. Dead code cleanup."
+      },
+      {
+        "id": "R-V1115P1QC1-S002",
+        "title": "Inline sort arrays + volume-label Map in outline-alt-view — extract when data grows",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.115",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-13-v1.115-canvas-ux-residual-cluster.md",
+        "note": "QC1-S-002 / QC3-S-001/002. Non-actionable at current data sizes."
       }
     ]
   }

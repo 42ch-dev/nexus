@@ -29,7 +29,20 @@
     "sceneLabel": "Scene",
     "beatLabel": "Beat",
     "untitledScene": "Untitled Scene",
-    "untitledBeat": "Untitled Beat"
+    "untitledBeat": "Untitled Beat",
+    "sort": {
+      "chapterGroupAria": "Chapter list sort",
+      "timelineGroupAria": "Timeline event list sort",
+      "columnNumber": "Number",
+      "columnVolume": "Volume",
+      "columnEventTime": "Event time",
+      "dirAsc": "ascending",
+      "dirDesc": "descending",
+      "activeHint": "{{column}}, sorted {{dir}}. Activate to sort {{next}}.",
+      "inactiveHint": "{{column}}. Activate to sort ascending.",
+      "chapterCaption": "Chapter list sorted by {{sortKey}} ({{sortDir}}).",
+      "timelineCaption": "Timeline events sorted by event time ({{sortDir}})."
+    }
   },
   "canvasShell": {
     "relayout": "Re-layout"

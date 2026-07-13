@@ -1,0 +1,13 @@
+{
+  "title": "Worlds",
+  "description": "Choose a world to open its knowledge base.",
+  "refreshAria": "Refresh worlds",
+  "refresh": "Refresh",
+  "errorDescription": "Could not load worlds.",
+  "loading": "Loading worlds…",
+  "emptyTitle": "No worlds yet",
+  "emptyDescription": "Worlds will appear here once a Work creates one.",
+  "listTitle": "All worlds",
+  "openKb": "Open knowledge base",
+  "listAriaLabel": "Worlds"
+}

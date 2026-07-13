@@ -29,7 +29,20 @@
     "sceneLabel": "场景",
     "beatLabel": "节拍",
     "untitledScene": "未命名场景",
-    "untitledBeat": "未命名节拍"
+    "untitledBeat": "未命名节拍",
+    "sort": {
+      "chapterGroupAria": "章节列表排序",
+      "timelineGroupAria": "时间线事件列表排序",
+      "columnNumber": "编号",
+      "columnVolume": "卷",
+      "columnEventTime": "事件时间",
+      "dirAsc": "升序",
+      "dirDesc": "降序",
+      "activeHint": "{{column}}，当前 {{dir}}。点击按 {{next}} 排序。",
+      "inactiveHint": "{{column}}。点击升序排列。",
+      "chapterCaption": "章节列表按 {{sortKey}} 排序（{{sortDir}}）。",
+      "timelineCaption": "时间线事件按事件时间排序（{{sortDir}}）。"
+    }
   },
   "canvasShell": {
     "relayout": "重新布局"

@@ -146,6 +146,19 @@ export function OutlineCanvas({
   // projection memo deps don't churn on re-render.
   const fixture = sceneBeatFixture ?? EMPTY_SCENE_BEAT_FIXTURE;
 
+  // V1.115 P1 T5 (R-V1109-P0-QC3-W002) — index scene titles for O(1) lookup so
+  // `beatParentSceneTitle` is a `Map.get`, not an `Array.find` per render.
+  // Mirrors the `chapterById` pattern; rebuilt only when `fixture.scenes`
+  // changes (stable across renders on real Works where `fixture` is the
+  // module-level `EMPTY_SCENE_BEAT_FIXTURE`).
+  const sceneTitleById = useMemo(() => {
+    const map = new Map<string, string | null>();
+    for (const scene of fixture.scenes) {
+      map.set(scene.sceneId, scene.title);
+    }
+    return map;
+  }, [fixture.scenes]);
+
   // V1.115 P0 T1b — the orchestrator now consumes the shared `useCanvasSurface`
   // hook + `OutlineCanvasAdapter` (T1a). The projection memo, rfNodes/rfEdges
   // state, and the position-merge sync effect that previously lived in the
@@ -277,7 +290,7 @@ export function OutlineCanvas({
       })()
     : null;
   const beatParentSceneTitle = selectedBeat
-    ? fixture.scenes.find((s) => s.sceneId === selectedBeat.sceneId)?.title ?? null
+    ? sceneTitleById.get(selectedBeat.sceneId) ?? null
     : null;
 
   const summary = outlineGraphSummary(outline.data, chapters.length, t);

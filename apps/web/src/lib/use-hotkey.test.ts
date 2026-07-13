@@ -3,10 +3,11 @@
  * (FB-CP-001, V1.111 P0 T2).
  *
  * Coverage mirrors the task brief: fires on ⌘K/Ctrl+K; ignored when an INPUT,
- * TEXTAREA, contenteditable host, `.react-flow` pane, or
- * `[data-command-palette-ignore]` region is focused; still fires from a button
- * and the page background; `preventDefault` behavior; latest-handler ref
- * (no stale closure, no re-bind churn); cleanup on unmount.
+ * TEXTAREA, contenteditable host, or `[data-command-palette-ignore]` region is
+ * focused; the React Flow `.react-flow` class is NOT a trigger (V1.115 P1
+ * R-V1111P0QC2-W001); still fires from a button and the page background;
+ * `preventDefault` behavior; latest-handler ref (no stale closure, no re-bind
+ * churn); cleanup on unmount.
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { renderHook } from '@testing-library/react';
@@ -198,18 +199,42 @@ describe('useHotkey — conflict-avoidance (ignored targets)', () => {
     cleanup();
   });
 
-  it('is ignored when focused inside a .react-flow pane', () => {
+  it('still fires when focused inside a .react-flow pane (RF class is no longer a trigger)', () => {
+    // V1.115 P1 R-V1111P0QC2-W001: the React Flow `.react-flow` CSS class is
+    // an undocumented RF internal and must NOT drive conflict-avoidance. The
+    // canvas opts out via `data-command-palette-ignore` on its root wrapper
+    // (see `CanvasShell`); the RF class alone must let the hotkey fire so an RF
+    // upgrade can never silently re-suppress Cmd/Ctrl+K.
     const handler = vi.fn();
     const cleanup = focusInsideContainer('div', { class: 'react-flow' });
     renderHook(() => useHotkey('mod+k', handler));
     dispatchKey('k', { meta: true });
-    expect(handler).not.toHaveBeenCalled();
+    expect(handler).toHaveBeenCalledTimes(1);
     cleanup();
   });
 
   it('is ignored when focused inside a [data-command-palette-ignore] region', () => {
     const handler = vi.fn();
     const cleanup = focusInsideContainer('div', { 'data-command-palette-ignore': '' });
+    renderHook(() => useHotkey('mod+k', handler));
+    dispatchKey('k', { meta: true });
+    expect(handler).not.toHaveBeenCalled();
+    cleanup();
+  });
+
+  it('is ignored inside [data-command-palette-ignore] even when .react-flow class is also present', () => {
+    // Detection survives RF class absence — and remains authoritative when the
+    // RF class is present too. The migrated CanvasShell root sets
+    // `data-command-palette-ignore`; React Flow still renders its internal
+    // `.react-flow` wrapper beneath it. A focused node therefore has both
+    // ancestors, and the attribute — not the RF class — must be what
+    // suppresses. This guards against re-introducing a `.react-flow`
+    // dependency.
+    const handler = vi.fn();
+    const cleanup = focusInsideContainer('div', {
+      class: 'react-flow',
+      'data-command-palette-ignore': '',
+    });
     renderHook(() => useHotkey('mod+k', handler));
     dispatchKey('k', { meta: true });
     expect(handler).not.toHaveBeenCalled();

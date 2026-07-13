@@ -28,6 +28,7 @@ Parent rules: [`../AGENTS.md`](../AGENTS.md) (apps placement), root [`AGENTS.md`
 | `@web-setup/*` | `../web/src/components/setup/*` | Gallery-only import of app-shared setup compositions (e.g. AgentPicker, WorkspacePathField) — props-driven; no contracts/daemon |
 | `@web-layout/*` | `../web/src/components/layout/presentational/*` | Shell chrome extracts (sidebar, footer profiles, header/health) — props-driven; no routing or daemon hooks (V1.107) |
 | `@web-settings/*` | `../web/src/components/settings/presentational/*` | Settings section chrome extracts (ConnectDaemon form, Setup section) — props-driven; no IPC (V1.107) |
+| `@web-canvas/*` | `../web/src/components/canvas/presentational/*` | Canvas node-chrome extracts (`NodeChromeShell`) — props-driven; no `@xyflow/react`, no RF types (V1.115) |
 | `@web-lib/utils` | `../web/src/lib/utils.ts` | `cn()` only |
 | `@42ch/nexus-ui` | workspace package | Brand VI plus promoted presentational primitives (Button, Badge, Card, Input, Label, Textarea, Select, Toast) through public exports |
 | `@nexus/design-tokens` | `tooling/design-tokens` | Shared CSS + Tailwind preset |

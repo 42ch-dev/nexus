@@ -1,0 +1,194 @@
+/**
+ * WorldsPage render tests (V1.115 T3 — R-V1111P1-WORLDS-PICKER).
+ *
+ * Verifies the picker UX: the page lists worlds from the existing
+ * `GET /v1/daemon/narrative/worlds` endpoint, picking a world navigates to
+ * `/worlds/<id>/kb`, and an honest empty state renders when the list is empty.
+ */
+import { http, HttpResponse } from 'msw';
+import { beforeEach, describe, expect, it } from 'vitest';
+import { act, screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
+import { Route, Routes, useLocation } from 'react-router-dom';
+
+import { renderInApp } from '@/test/test-providers';
+import { useHandlers } from '@/test/msw-server';
+import { BrowserClient } from '@/lib/nexus';
+import { i18n } from '@/lib/i18n/config';
+import { WorldsPage } from '@/pages/worlds-page';
+
+const client = () => new BrowserClient();
+
+function LocationDisplay() {
+  const location = useLocation();
+  return <div data-testid="location">{location.pathname}</div>;
+}
+
+/**
+ * Mount WorldsPage inside a route tree with a location probe so navigation
+ * (MemoryRouter, not `window.location`) is observable — mirrors the pattern in
+ * `strategy-page.test.tsx`.
+ */
+function renderWorldsAt(initialPath = '/worlds') {
+  return renderInApp(
+    <>
+      <LocationDisplay />
+      <Routes>
+        <Route path="worlds" element={<WorldsPage />} />
+        <Route path="worlds/:worldId/kb" element={<div data-testid="world-kb-outlet" />} />
+      </Routes>
+    </>,
+    { client: client(), initialRouterEntries: [initialPath] },
+  );
+}
+
+/** Render WorldsPage standalone (no navigation assertions). */
+function renderWorlds() {
+  return renderInApp(<WorldsPage />, { client: client() });
+}
+
+function world(over: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    schema_version: 1,
+    world_id: 'w-1',
+    owner_creator_id: 'creator-a',
+    title: 'Eryndor',
+    slug: 'w-1',
+    status: 'active',
+    visibility: 'private',
+    time_policy: 'manual',
+    created_at: '2026-07-01T00:00:00Z',
+    ...over,
+  };
+}
+
+beforeEach(async () => {
+  await i18n.changeLanguage('en');
+});
+
+describe('WorldsPage', () => {
+  it('renders the world list with titles', async () => {
+    useHandlers(
+      http.get('/v1/daemon/narrative/worlds', () =>
+        HttpResponse.json({
+          worlds: [
+            world({ world_id: 'eryndor', title: 'The Realms of Eryndor' }),
+            world({ world_id: 'solara', title: 'Solara' }),
+          ],
+        }),
+      ),
+    );
+
+    renderWorlds();
+
+    expect(await screen.findByText('The Realms of Eryndor')).toBeInTheDocument();
+    expect(screen.getByText('Solara')).toBeInTheDocument();
+  });
+
+  it('navigates to /worlds/<id>/kb when a world is picked', async () => {
+    const user = userEvent.setup();
+
+    useHandlers(
+      http.get('/v1/daemon/narrative/worlds', () =>
+        HttpResponse.json({ worlds: [world({ world_id: 'eryndor', title: 'Eryndor' })] }),
+      ),
+    );
+
+    renderWorldsAt();
+
+    await screen.findByText('Eryndor');
+    await user.click(screen.getByRole('button', { name: 'Open knowledge base' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location')).toHaveTextContent('/worlds/eryndor/kb');
+    });
+  });
+
+  it('encodes a space-bearing world id in the navigation target', async () => {
+    const user = userEvent.setup();
+
+    useHandlers(
+      http.get('/v1/daemon/narrative/worlds', () =>
+        HttpResponse.json({ worlds: [world({ world_id: 'w 7', title: 'Spaced' })] }),
+      ),
+    );
+
+    renderWorldsAt();
+
+    await screen.findByText('Spaced');
+    await user.click(screen.getByRole('button', { name: 'Open knowledge base' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location')).toHaveTextContent('/worlds/w%207/kb');
+    });
+  });
+
+  it('renders the honest empty state when no worlds exist', async () => {
+    useHandlers(
+      http.get('/v1/daemon/narrative/worlds', () => HttpResponse.json({ worlds: [] })),
+    );
+
+    renderWorlds();
+
+    expect(await screen.findByText('No worlds yet')).toBeInTheDocument();
+  });
+
+  it('renders the loading state before data resolves', async () => {
+    useHandlers(
+      http.get('/v1/daemon/narrative/worlds', async () => {
+        await new Promise((resolve) => {
+          setTimeout(resolve, 50);
+        });
+        return HttpResponse.json({ worlds: [] });
+      }),
+    );
+
+    renderWorlds();
+
+    expect(await screen.findByText('Loading worlds…')).toBeInTheDocument();
+  });
+
+  it('renders the error state when the fetch fails', async () => {
+    useHandlers(
+      http.get('/v1/daemon/narrative/worlds', () =>
+        HttpResponse.json({ error: { code: 'INTERNAL', message: 'boom' } }, { status: 500 }),
+      ),
+    );
+
+    renderWorlds();
+
+    expect(await screen.findByText('Could not load worlds.')).toBeInTheDocument();
+  });
+
+  it('falls back to world_id when a world has no title', async () => {
+    useHandlers(
+      http.get('/v1/daemon/narrative/worlds', () =>
+        HttpResponse.json({
+          worlds: [world({ world_id: 'id-only', title: '' })],
+        }),
+      ),
+    );
+
+    renderWorlds();
+
+    // Empty title → the button label falls back to world_id.
+    expect(await screen.findByText('id-only')).toBeInTheDocument();
+  });
+
+  it('switches to zh-CN locale without remounting', async () => {
+    useHandlers(
+      http.get('/v1/daemon/narrative/worlds', () =>
+        HttpResponse.json({ worlds: [world({ world_id: 'eryndor', title: 'Eryndor' })] }),
+      ),
+    );
+
+    renderWorlds();
+    expect(await screen.findByRole('heading', { name: 'Worlds' })).toBeInTheDocument();
+
+    act(() => {
+      i18n.changeLanguage('zh-CN');
+    });
+
+    expect(await screen.findByRole('heading', { name: '世界' })).toBeInTheDocument();
+  });
+});
