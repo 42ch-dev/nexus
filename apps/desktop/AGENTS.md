@@ -41,6 +41,26 @@ SIDECAR_TARGETS="x86_64-apple-darwin" pnpm -w run sidecar
 Without this step, `cargo build`/`test`/`clippy` fails with the fail-fast guard
 in `src-tauri/build.rs` if the sidecar binary for the current target is missing.
 
+## Dev scripts
+
+The desktop shell can be run in two dev modes, controlled from the root
+`package.json`:
+
+- `pnpm dev:desktop` — **dist-load mode** (production-like, no HMR). Builds
+  `apps/web` and then starts Tauri with `src-tauri/tauri.dev.dist.conf.json`,
+  which overrides `devUrl` and `beforeDevCommand` to empty strings. Tauri loads
+  the UI from `build.frontendDist` (`../../web/dist`) and does not launch a Vite
+  dev server. Use this when you want to verify the desktop shell against a static
+  production-like web bundle.
+
+- `pnpm dev:desktop:web` — **Vite + Tauri HMR mode**. Runs the base Tauri dev
+  configuration (`tauri.conf.json`), which launches the Vite dev server via
+  `beforeDevCommand: pnpm --filter web dev` and points `devUrl` at
+  `http://localhost:5173`. Use this when actively editing `apps/web` source.
+  Daemon connection messages logged during the Rust compile phase are expected
+  in this mode because the web dev server is already running before the desktop
+  window opens.
+
 ## SSOT & authority
 
 - **Contract**: [`.mstar/specs/desktop-shell.md`](../../.mstar/specs/desktop-shell.md)
