@@ -514,6 +514,7 @@ impl ProviderAdapter for CodexNativeProvider {
         })
     }
 
+    #[allow(clippy::too_many_lines)]
     async fn execute(
         &self,
         session: &ManagedSessionHandle,
