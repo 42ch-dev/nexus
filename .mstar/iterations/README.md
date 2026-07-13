@@ -124,7 +124,7 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | [v1.111-delivery-compass.md](v1.111-delivery-compass.md) | V1.111 | **completed** (2026-07-12) — Frontend canvas navigation + design studio + consolidation: command palette (P0) + sidebar canvas IA (P1) + design-studio canvas gallery (P2) + frontend consolidation sweep (P3). Integration `iteration/v1.111` → `main`. |
 | [v1.112-delivery-compass.md](v1.112-delivery-compass.md) | V1.112 | **Shipped** — Frontend i18n: react-i18next foundation + Appearance Language (P0) + full user-facing UI migration (P1). Integration `iteration/v1.112` → `main`. |
 | [v1.114-delivery-compass.md](v1.114-delivery-compass.md) | V1.114 | **completed** (2026-07-13) — Canvas & Compute Module Foundation: canvas architecture (adapter + dagre auto-layout) (P0) + canvas stability/validation hardening (P1) + compute module foundation & visibility (P2). Integration `iteration/v1.114` → `main`. |
-| [v1.115-delivery-compass.md](v1.115-delivery-compass.md) | V1.115 | **active** — Canvas & Compute Foundation Completion: canvas adapter completion & contract convergence (P0) + canvas UX residual cluster closure (P1) + compute manifest bridge reconciliation (P2). Integration `iteration/v1.115` → `main`. |
+| [v1.115-delivery-compass.md](v1.115-delivery-compass.md) | V1.115 | **completed** (2026-07-13) — Canvas & Compute Foundation Completion: canvas adapter completion & contract convergence (P0) + canvas UX residual cluster closure (P1) + compute manifest bridge reconciliation (P2). Integration `iteration/v1.115` → `main`. |
 
 ### Active iteration workspaces
 
