@@ -57,6 +57,7 @@ pub fn get_module(id: &str) -> Result<Option<ModuleDetail>, serde_json::Error> {
 }
 
 fn manifest_to_summary(manifest: &ModuleManifest) -> ModuleSummary {
+    // Keep field mapping aligned with `From<&ModuleManifest> for ModuleDetail` in manifest.rs.
     ModuleSummary {
         module_id: manifest.module_id.clone(),
         name: manifest.name.clone(),
@@ -155,6 +156,27 @@ mod tests {
     #[test]
     fn get_module_returns_ok_none_for_unknown() {
         assert!(get_module("no-such-module").unwrap().is_none());
+    }
+
+    #[test]
+    fn list_modules_and_get_module_agree_on_basic_combat() {
+        let summary = list_modules()
+            .into_iter()
+            .find(|m| m.module_id == "basic-combat")
+            .expect("basic-combat should be in list_modules()");
+        let detail = get_module("basic-combat")
+            .expect("basic-combat manifest should parse")
+            .expect("basic-combat should be in get_module()");
+
+        assert_eq!(summary.module_id, detail.module_id);
+        assert_eq!(summary.name, detail.name);
+        assert_eq!(summary.version, detail.version);
+        assert_eq!(summary.description, detail.description);
+        assert_eq!(
+            summary.required_key_block_types,
+            detail.required_key_block_types
+        );
+        assert_eq!(summary.battle_report_kind, detail.battle_report_kind);
     }
 
     #[test]

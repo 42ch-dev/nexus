@@ -7,7 +7,7 @@
 | **Status** | Normative — V1.62 Shipped |
 | **Document class** | Master |
 | **Scope** | V1 envelope ABI: `ComputeInput` / `ComputeOutput` wire contracts, module exports table, host import ABI, marshalling convention, `manifest.json` contract, sandbox cross-ref, versioning policy |
-| **Last updated** | 2026-06-23 — V1.62 P2 |
+| **Last updated** | 2026-06-23 — V1.62 Shipped; 2026-07-13 — V1.115 P2 clarified wire vs runtime-only split in §7.6 (no normative change) |
 | **Related** | [wasm-host.md](./wasm-host.md), [schemas-directory-layout.md](./schemas-directory-layout.md) §3.5, [orchestration-engine.md](./orchestration-engine.md) §8 (narrative.compute), [entity-scope-model.md](./entity-scope-model.md) §5.5.9 |
 
 This Master is normative for the V1 compute ABI — the interface contract between the
@@ -414,6 +414,22 @@ read-only through the daemon registry API:
 These endpoints reuse the manifest fields defined above; they do not introduce
 a parallel module DTO. See [`schemas/daemon-api/compute/`](../../../schemas/daemon-api/compute/)
 for the generated wire contracts.
+
+### 7.6 Wire vs runtime-only fields
+
+Every field in `manifest.json` is **wire-promoted** in V1.x: all 15 fields appear
+both in the on-disk/runtime `ModuleManifest` struct and in the generated
+`ComputeModuleDetail` wire type consumed by the registry endpoints. There is **no
+runtime-only field split today**.
+
+If a future iteration adds a genuinely runtime-only field (e.g., a cached
+compiled-artifact handle or ephemeral host state), that field lives only on the
+runtime `ModuleManifest` struct and is intentionally omitted from the typed
+`From<&ModuleManifest> for ModuleDetail` conversion. Such a field would not appear
+in `module-detail.schema.json` and would therefore not be exposed on the wire.
+
+This rule keeps the generated wire contract as the SSOT while allowing the host
+runtime to carry internal state that is not part of the module author contract.
 
 ---
 

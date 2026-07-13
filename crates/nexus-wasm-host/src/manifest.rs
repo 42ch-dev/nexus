@@ -109,6 +109,13 @@ impl ModuleManifest {
 }
 
 impl From<&ModuleManifest> for ModuleDetail {
+    /// Typed conversion from the runtime manifest to the generated wire detail.
+    ///
+    /// Because this impl maps every field explicitly, manifest↔generated drift
+    /// becomes a **compile error**: adding a field to [`ModuleManifest`] without
+    /// mapping it here, or removing a field from [`ModuleDetail`] without updating
+    /// this impl, fails `cargo build -p nexus-wasm-host`. This is stronger than the
+    /// previous JSON round-trip, which silently dropped mismatched fields.
     fn from(manifest: &ModuleManifest) -> Self {
         Self {
             module_id: manifest.module_id.clone(),
@@ -242,6 +249,60 @@ mod tests {
         }"#;
         let m: ModuleManifest = serde_json::from_str(json).unwrap();
         assert!(m.schemas.is_none(), "V1.61 manifest must have schemas=None");
+    }
+
+    #[test]
+    fn from_manifest_maps_all_fields() {
+        let schemas = ModuleSchemas {
+            key_block_attributes: Some(HashMap::from([(
+                "character".to_string(),
+                serde_json::json!({"type": "object"}),
+            )])),
+            key_block_state: None,
+            invocation: Some(serde_json::json!({"type": "object"})),
+            battle_report: None,
+        };
+        let manifest = ModuleManifest {
+            module_id: "test-module".to_string(),
+            name: "Test Module".to_string(),
+            version: "1.2.3".to_string(),
+            nexus_abi_version: 1,
+            required_key_block_types: vec!["character".to_string()],
+            compute_export: "compute".to_string(),
+            init_export: "init".to_string(),
+            description: Some("A test module".to_string()),
+            author: Some("tester".to_string()),
+            host_functions: vec![HostFunction::KbRead, HostFunction::NarrativeQuery],
+            schemas: Some(schemas),
+            battle_report_kind: Some("combat".to_string()),
+            max_fuel: Some(42),
+            max_memory_mib: Some(128),
+            max_wall_time_ms: Some(60_000),
+        };
+
+        let detail = ModuleDetail::from(&manifest);
+
+        assert_eq!(detail.module_id, "test-module");
+        assert_eq!(detail.name, "Test Module");
+        assert_eq!(detail.version, "1.2.3");
+        assert_eq!(detail.nexus_abi_version, 1);
+        assert_eq!(
+            detail.required_key_block_types,
+            vec!["character".to_string()]
+        );
+        assert_eq!(detail.compute_export, "compute");
+        assert_eq!(detail.init_export, "init");
+        assert_eq!(detail.description.as_deref(), Some("A test module"));
+        assert_eq!(detail.author.as_deref(), Some("tester"));
+        assert_eq!(
+            detail.host_functions.as_deref(),
+            Some(&["kb_read".to_string(), "narrative_query".to_string()][..])
+        );
+        assert!(detail.schemas.is_some());
+        assert_eq!(detail.battle_report_kind.as_deref(), Some("combat"));
+        assert_eq!(detail.max_fuel, Some(42));
+        assert_eq!(detail.max_memory_mib, Some(128));
+        assert_eq!(detail.max_wall_time_ms, Some(60_000));
     }
 
     #[test]
