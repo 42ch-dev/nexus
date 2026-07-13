@@ -245,13 +245,29 @@ export function OutlineCanvas({
   const [selectedBeatId, setSelectedBeatId] = useState<string | null>(null);
 
   // Thin selection resolver — replaces the hook's selection-sync effect
-  // (FB-C1-003 + FB-C2-002). Reads `surface.selectedNodeId` (which changes only
+  // (FB-C1-003 + FB-C2-002). Reads `surface.selectedNode` (which changes only
   // when the selected RF node changes) and resolves chapter / scene / beat ids
   // via the same helpers the hook used. Passing a one-node array to the helpers
   // works because `surface.selectedNode` carries `selected: true`.
+  //
+  // `hasSelectedRef` distinguishes initial-mount-with-no-selection from a real
+  // deselection (user clicks the canvas background after selecting a node). On
+  // mount we must NOT clear — `initialSelectedChapterId` (deep-link via
+  // ?chapter=N) is the seed and no RF node is selected yet. Once a node has
+  // been selected, a subsequent null clears all derived selections so the
+  // inspector does not stay active for a stale/deselected node.
+  const hasSelectedRef = useRef(false);
   useEffect(() => {
     const selected = surface.selectedNode;
-    if (!selected) return; // nothing selected — leave selections intact
+    if (!selected) {
+      if (hasSelectedRef.current) {
+        setSelectedChapterId(null);
+        setSelectedSceneId(null);
+        setSelectedBeatId(null);
+      }
+      return;
+    }
+    hasSelectedRef.current = true;
 
     const chapterId = selectedChapterIdFromNodes([selected as Node]);
     if (chapterId !== null) setSelectedChapterId(chapterId);

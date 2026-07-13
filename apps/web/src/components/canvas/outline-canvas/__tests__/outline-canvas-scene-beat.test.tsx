@@ -196,6 +196,44 @@ describe('OutlineCanvas — Scene/Beat inspector selection wiring (FB-C2-002)', 
     expect(screen.queryByText('Beat')).not.toBeInTheDocument();
   });
 
+  // V1.115 Phase 5 Greptile fix — deselection (user clicks the canvas
+  // background) must clear the derived chapter/scene/beat selections so the
+  // inspector does not stay active for a stale/deselected node. Before the fix
+  // the resolver returned early on null and left the previous selection intact.
+  it('clears the Chapter inspector when the surface reports deselection after a selection', () => {
+    // 1. Select a chapter — the inspector mounts.
+    surfaceMock.selectedNode = {
+      id: 'chapter:1',
+      type: 'outline-chapter',
+      data: { chapterId: 1 },
+      selected: true,
+      position: { x: 0, y: 0 },
+    } as unknown as Node;
+    surfaceMock.selectedNodeId = 'chapter:1';
+
+    const { rerender } = renderWithFixture();
+    expect(screen.getByText('Chapter Inspector')).toBeInTheDocument();
+    expect(
+      screen.queryByText('Select a chapter to inspect its outline metadata.'),
+    ).not.toBeInTheDocument();
+
+    // 2. Deselect — surface reports null (user clicked canvas background).
+    surfaceMock.selectedNode = null;
+    surfaceMock.selectedNodeId = null;
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <OutlineCanvas workId="wk_test" sceneBeatFixture={FIXTURE} />
+      </QueryClientProvider>,
+    );
+
+    // 3. The inspector must clear — empty-state prompt reappears, no stale
+    //    Chapter Inspector heading.
+    expect(
+      screen.getByText('Select a chapter to inspect its outline metadata.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByText('Chapter Inspector')).not.toBeInTheDocument();
+  });
+
   // V1.115 P1 T5 (R-V1109-P0-QC3-W002) — `beatParentSceneTitle` must use a
   // memoized Map lookup, not `Array.find()` per render. Correctness is covered
   // by the beat-selection test above; this case guards the memo contract:
