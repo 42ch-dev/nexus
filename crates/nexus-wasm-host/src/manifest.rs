@@ -112,10 +112,21 @@ impl From<&ModuleManifest> for ModuleDetail {
     /// Typed conversion from the runtime manifest to the generated wire detail.
     ///
     /// Because this impl maps every field explicitly, manifest↔generated drift
-    /// becomes a **compile error**: adding a field to [`ModuleManifest`] without
-    /// mapping it here, or removing a field from [`ModuleDetail`] without updating
-    /// this impl, fails `cargo build -p nexus-wasm-host`. This is stronger than the
-    /// previous JSON round-trip, which silently dropped mismatched fields.
+    /// becomes a **compile error**:
+    ///
+    /// * Removing a field from [`ModuleDetail`] without updating this `From` impl
+    ///   fails `cargo build -p nexus-wasm-host`.
+    /// * Adding a field to [`ModuleManifest`] without mapping it here is caught by
+    ///   the `from_manifest_maps_all_fields` test.
+    ///
+    /// This `From` catches changes to [`ModuleDetail`] (generated) — if a field is
+    /// removed from the generated type, this impl won't compile. It does NOT catch
+    /// a field added to [`ModuleManifest`] that is not in [`ModuleDetail`] (that
+    /// would silently drop). The `schema_drift_detection` gate catches
+    /// schema↔generated drift; this `From` catches generated-side structural changes.
+    ///
+    /// This is stronger than the previous JSON round-trip, which silently dropped
+    /// mismatched fields.
     fn from(manifest: &ModuleManifest) -> Self {
         Self {
             module_id: manifest.module_id.clone(),
@@ -144,11 +155,11 @@ impl From<&ModuleManifest> for ModuleDetail {
             battle_report_kind: manifest.battle_report_kind.clone(),
             max_fuel: manifest
                 .max_fuel
-                .map(|v| i64::try_from(v).expect("max_fuel fits in i64")),
+                .map(|v| i64::try_from(v).unwrap_or(i64::MAX)),
             max_memory_mib: manifest.max_memory_mib.map(i64::from),
             max_wall_time_ms: manifest
                 .max_wall_time_ms
-                .map(|v| i64::try_from(v).expect("max_wall_time_ms fits in i64")),
+                .map(|v| i64::try_from(v).unwrap_or(i64::MAX)),
         }
     }
 }
