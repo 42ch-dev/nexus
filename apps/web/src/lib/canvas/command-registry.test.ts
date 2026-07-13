@@ -85,6 +85,20 @@ describe('command store — register / lookup / unregister', () => {
     ]);
   });
 
+  it('warns in dev mode when registering a duplicate id', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    registerCommand(ADD_CHAPTER);
+    const duplicate = makeCommand({
+      id: 'outline.add-chapter',
+      labelKey: 'Add Chapter (duplicate)',
+    });
+    registerCommand(duplicate);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toContain('outline.add-chapter');
+    expect(warn.mock.calls[0][0]).toContain('Add Chapter');
+    warn.mockRestore();
+  });
+
   it('replaces a command when re-registered with the same id (idempotent)', () => {
     registerCommand(ADD_CHAPTER);
     const updated: Command = makeCommand({

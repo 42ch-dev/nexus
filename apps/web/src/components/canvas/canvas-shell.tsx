@@ -13,11 +13,13 @@
  * in the canvas route chunk only.
  */
 import { useCallback, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
 import {
   Background,
   BackgroundVariant,
   Controls,
   MiniMap,
+  Panel,
   ReactFlow,
   ReactFlowProvider,
   applyNodeChanges,
@@ -58,6 +60,8 @@ export interface CanvasShellProps {
    * that have not opted in keep the previous re-fit behaviour).
    */
   surfaceKey?: string;
+  /** Optional re-layout action rendered inside the canvas when provided. */
+  relayout?: () => void;
 }
 
 /**
@@ -77,7 +81,9 @@ function CanvasShellInner({
   ariaLabel,
   children,
   surfaceKey,
+  relayout,
 }: CanvasShellProps) {
+  const { t } = useTranslation('canvas');
   // FB-GS-000 — cache pan/zoom so a graph↔list toggle does not drop the
   // viewport. When a cached viewport exists, restore it instead of fitting.
   const { cachedViewport, onViewportChange } = useCanvasViewport(surfaceKey);
@@ -126,6 +132,17 @@ function CanvasShellInner({
           pannable
           zoomable
         />
+        {relayout ? (
+          <Panel position="top-right" className="m-0">
+            <button
+              type="button"
+              onClick={relayout}
+              className="rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-1.5 text-button-12 text-gray-900 shadow-popover hover:bg-gray-alpha-100"
+            >
+              {t('canvasShell.relayout')}
+            </button>
+          </Panel>
+        ) : null}
       </ReactFlow>
 
       {children}

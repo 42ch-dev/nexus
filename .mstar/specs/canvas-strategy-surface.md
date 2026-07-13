@@ -138,6 +138,86 @@ All three surfaces should share a **Canvas Shell** and specialize by data adapte
 | **Work outline + timeline** | Work, volume, chapter, scene/beat, timeline event, foreshadowing/index item | Contains/ordered-after, references, foreshadows, belongs-to-volume, event→chapter realization | Volume lane, chapter card, event node, dependency/foreshadow node, in-node TipTap outline editor | Work/detail, chapter list/detail, outline read/structured patch, structure patch, timeline/index read/patch. The shipped V1.65 outline is a linear rich-text document (`web-ui.md` §13); the canvas projection turns headings/chapters/events into addressable graph nodes instead of replacing the underlying Work model. |
 | **World KB** | World, KeyBlock/entity, event, rule, location, organization, computable block, pending extraction candidate | Typed relationship edges (`WorldKbRelationshipProjection`), source-anchor provenance, timeline membership, rule-applies-to, promotion candidate→confirmed KeyBlock | Entity card, relationship edge, pending-candidate node, source-anchor node, computable-state badge | World detail; KB query/list/detail; pending/confirmed/rejected promotion state; adopt/reject/merge/update. Grounding: `entity-scope-model.md` §1–§2 defines World-owned narrative KB assets; §5.5 defines the World KB promotion state machine; §5.6 defines World KB relationship semantics. |
 
+### 3.3.1 CanvasSurfaceAdapter recipe (V1.114 P0)
+
+V1.114 P0 introduces a shared **CanvasSurfaceAdapter** interface and a single `useCanvasSurface()` composition hook so new surfaces do not re-wire shell boilerplate. The shell (`CanvasShell`) owns React Flow provider state, viewport caching, selection, and the **Re-layout** action; the adapter owns domain projection, node/edge types, the inspector, the alt-view companion, and an accessibility summary.
+
+#### Adapter interface
+
+```ts
+interface CanvasSurfaceAdapter<TGraph, TNodeData, TEdgeData> {
+  surfaceKind: CanvasSurfaceKind;
+  /** Project daemon graph DTO → React Flow nodes/edges. Owns parentId/extent nesting. */
+  projectGraph(graph: TGraph): { nodes: Node<TNodeData>[]; edges: Edge<TEdgeData>[] };
+  /** Node types registry for this surface. */
+  nodeTypes: NodeTypes;
+  /** Edge types registry (optional). */
+  edgeTypes?: EdgeTypes;
+  /** Dagre layout options; omit to opt out of auto-layout. */
+  layoutOptions?: CanvasSurfaceLayoutOptions;
+  /** Conflict DTO → conflict-modal props (optional). */
+  adaptConflict?(error: unknown): ConflictModalProps | null;
+  /** Inspector routing: which inspector renders for a selected node. */
+  renderInspector?(node: Node<TNodeData>): ReactNode;
+  /** Non-spatial alt-view companion (table/list). */
+  renderAltView?(): ReactNode;
+  /** Graph-level a11y summary (required). */
+  summarizeGraph(graph: TGraph): string;
+}
+
+interface CanvasSurfaceLayoutOptions {
+  direction?: 'TB' | 'LR';
+  rankSep?: number;
+  nodeSep?: number;
+}
+```
+
+#### `useCanvasSurface()` composition
+
+```ts
+const surface = useCanvasSurface(adapter, queryResult);
+```
+
+`useCanvasSurface`:
+
+1. Caches the viewport via `useCanvasViewport(adapter.surfaceKind)`.
+2. Projects the daemon graph with `adapter.projectGraph` (memoized; adapter must be stable).
+3. Merges new projections with the existing local React Flow state, preserving manual positions and selection for nodes that already exist.
+4. Applies `useAutoLayout` when `adapter.layoutOptions` is defined.
+5. Computes `summaryText`, `altView`, `inspector`, and `conflict` from the adapter.
+6. Exposes `relayout()` only when the adapter opts into layout.
+
+Surfaces should pass the returned `nodes`, `edges`, `nodeTypes`, `onNodesChange`, `summaryText`, `relayout`, and the overlay children (`inspector`, `altView`) to `CanvasShell`.
+
+#### `useAutoLayout()` integration + manual-override semantics
+
+`useAutoLayout(nodes, edges, options)` is a dagre (`@dagrejs/dagre`) wrapper with compound-graph support. Semantics:
+
+- **Opt-in only.** Surfaces that omit `layoutOptions` receive a pass-through; positions are never changed.
+- **Initial layout.** On the first projection of an opt-in surface, dagre runs automatically and produces a readable default arrangement.
+- **Manual override.** If the user drags any node, `useAutoLayout` detects the deviation from the last computed layout and suppresses automatic re-layouts on subsequent projections. This prevents a data refetch from undoing the author's manual positioning.
+- **Re-layout.** The **Re-layout** button in `CanvasShell` calls `relayout()`, which clears the manual-override flag and re-runs dagre. `CanvasShell` only renders the button when `relayout` is supplied.
+- **Compound graphs.** Dagre is configured with `compound: true`; `parentId` edges are registered so nested sub-flows (Strategy inner-graph groups, Work volume lanes, etc.) are laid out relative to their parent bounds.
+- **Performance guard.** Layouts that exceed `200ms` log a warning; sustained breaches should be recorded as a residual (e.g., cap visible nodes or lazy-expand subgraphs).
+
+#### Recipe: add a new canvas surface
+
+1. Define the surface graph payload (`TGraph`) and node/edge data types.
+2. Implement `CanvasSurfaceAdapter<TGraph, TNodeData, TEdgeData>`:
+   - `projectGraph` converts the daemon DTO into React Flow nodes/edges.
+   - `nodeTypes` registers the custom node components.
+   - Optionally provide `edgeTypes`, `layoutOptions`, `adaptConflict`, `renderInspector`, `renderAltView`.
+   - `summarizeGraph` returns a string for the screen-reader live region.
+3. If the adapter needs mutable orchestrator state (e.g., selected node, form state, callbacks), build it with a stable factory that reads from a mutable `React.RefObject` context. The adapter object itself must stay stable so `useCanvasSurface` does not re-project on every render.
+4. In the surface orchestrator, call `useCanvasSurface(adapter, queryResult)` where `queryResult` conforms to `CanvasSurfaceQueryResult<TGraph>`.
+5. Render `CanvasShell` with the returned values. Pass `relayout` to enable the Re-layout button.
+6. Wire the structured write boundary (§3.5) through the adapter or orchestrator; the shell never writes to files directly.
+
+#### Worked examples
+
+- **Strategy canvas (T2).** `apps/web/src/components/canvas/strategy-canvas/strategy-canvas-adapter.tsx` implements a stable `createStrategyCanvasAdapter(ctxRef)` that reads mutable form/save/conflict state from the context ref. It sets `layoutOptions: { direction: 'TB' }` to opt into top-down auto-layout and exposes the Re-layout action. Inspectors (`StateInspector`, `EdgeInspector`, `PromptInspector`) and the `StrategyAltView` are surface-owned and rendered through the adapter.
+- **World KB canvas (T3).** `apps/web/src/components/canvas/world-kb/world-kb-canvas-adapter.tsx` projects entities, candidates, source anchors, and typed relationships into nodes/edges. It currently omits `layoutOptions` (pass-through), so it relies on the daemon/projections' own spatial hints and manual positioning. Inspectors and `WorldKbAltView` are similarly adapter-driven.
+
 ### 3.4 Interface contracts (B2) — Strategy, Outline+Timeline, and World KB β DTOs shipped
 
 The V1.70 α implementation treats React Flow as a presentation and interaction model over domain-owned graph projections for the shipped Strategy read/overlay/Idea-steer slice. V1.71 β promotes the Strategy write operations (`strategy.patch_state`, `strategy.patch_transition`, `strategy.patch_prompt_template`) to schema/codegen-backed DTOs and Daemon API routes. V1.72 β promotes Outline+Timeline patch DTOs and routes. V1.73 β promotes World KB entity/candidate DTOs and routes. V1.74 β promotes typed World KB relationship DTOs and the `world_kb.patch_relationship` route. The graph-document shape below remains the shared design language for projections; for World KB relationships, `WorldKbEdgeData` is now backed by `WorldKbRelationshipProjection` rather than design-only prose.

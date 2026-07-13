@@ -3,24 +3,37 @@
  *
  * B1: per-inspector saves (R-V171P0-QC1-004).
  * B2: split into focused sibling modules ≤200 lines (R-V171P0-QC1-006).
+ * V1.114 P0 T2: migrated to the shared `CanvasSurfaceAdapter` abstraction via
+ * `useCanvasSurface()` so graph projection, summary, inspector routing, and
+ * alt-view are adapter-driven.
  */
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import type { Connection, Edge, Node } from '@xyflow/react';
 
 import { CanvasShell } from '@/components/canvas/canvas-shell';
-import { StrategyAltView } from '@/components/canvas/strategy-alt-view';
-import { strategyNodeTypes } from '@/components/canvas/strategy-nodes';
 import { ErrorState, LoadingState } from '@/components/ui/states';
 import { useRegisterCommand } from '@/lib/canvas/command-registry';
+import type { StrategyEdgeData, StrategyNodeData } from '@/lib/canvas/strategy-graph';
+import { useCanvasSurface, type CanvasSurfaceQueryResult } from '@/components/canvas/use-canvas-surface';
 
-import { StateInspector } from './strategy-canvas/inspectors/state-inspector';
-import { EdgeInspector, DraftEdgeInspector } from './strategy-canvas/inspectors/edge-inspector';
-import { PromptInspector } from './strategy-canvas/inspectors/prompt-inspector';
+import { useStrategyCanvas } from '@/components/canvas/strategy-canvas/hooks/use-strategy-canvas';
+import { CanvasFooter, CanvasHeader } from './strategy-canvas/canvas-layout';
+import {
+  createStrategyCanvasAdapter,
+  type StrategyCanvasAdapterContext,
+  type StrategySurfaceGraph,
+} from './strategy-canvas/strategy-canvas-adapter';
 import { InspectorPanel, StrategyConflictModal } from './strategy-canvas/inspector-panel';
 import { EdgeCreateDialog } from './strategy-canvas/edge-create-dialog';
-import { useStrategyCanvas } from './strategy-canvas/hooks/use-strategy-canvas';
-import { CanvasFooter, CanvasHeader } from './strategy-canvas/canvas-layout';
-import { ValidationPanel, originalFormOf, type SaveStatus, type Section } from './strategy-canvas/state-machine';
+import { DraftEdgeInspector } from './strategy-canvas/inspectors/edge-inspector';
+import {
+  ValidationPanel,
+  originalFormOf,
+  templateRefOf,
+  type SaveStatus,
+  type Section,
+} from './strategy-canvas/state-machine';
 import type { IdeaArtifact } from '@/components/canvas/idea-input';
 
 export interface StrategyCanvasProps {
@@ -29,52 +42,123 @@ export interface StrategyCanvasProps {
 
 export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
   const { t } = useTranslation('canvas');
-  const {
-    graphQuery,
-    activeSession,
-    creatorId,
-    nodes,
-    edges,
-    onNodesChange,
-    onEdgesChange,
-    onConnect,
-    onReconnect,
-    selected,
-    selectedState,
-    baseRevision,
-    promptTemplateRef,
-    revisionStatus,
-    summaryText,
-    activeScheduleId,
-    form,
-    setForm,
-    saveStatuses,
-    setSaveStatuses,
-    setActiveSection,
-    conflict,
-    setConflict,
-    saveTriggers,
-    workingRevisionRef,
-    handleConflict,
-    handleReapply,
-    selectedDraftEdge,
-    draftSourceState,
-    commitDraft,
-    isCommittingDraft,
-    cancelDraft,
-    commitKeyboardCreate,
-    isCommittingKeyboardCreate,
-  } = useStrategyCanvas(presetId);
+  const strategyState = useStrategyCanvas(presetId);
 
   const [artifacts, setArtifacts] = useState<IdeaArtifact[]>([]);
-  const [showAlt, setShowAlt] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [createDialogOpen, setCreateDialogOpen] = useState(false);
 
-  // V1.111 P0 T4 — register Strategy-surface palette commands. The functional
-  // `setShowAlt(v => !v)` / `setCreateDialogOpen(true)` updaters are used so the
-  // handlers (captured once on mount by `useRegisterCommand`) always reflect
-  // current state instead of closing over a stale `showAlt` flag.
+  const ctxRef = useRef<StrategyCanvasAdapterContext>({
+    presetId,
+    form: strategyState.form,
+    saveTriggers: strategyState.saveTriggers,
+    saveStatuses: strategyState.saveStatuses,
+    workingRevisionRef: strategyState.workingRevisionRef,
+    handleConflict: strategyState.handleConflict,
+    onChange: () => {},
+    onSaveStatus: () => {},
+    setActiveSection: strategyState.setActiveSection,
+    selectedState: undefined,
+    promptTemplateRef: undefined,
+    selectedNode: null,
+    parsed: undefined,
+    onUseCurrent: () => {},
+    onReapply: () => {},
+    onDismiss: () => {},
+  });
+
+  const adapter = useMemo(() => createStrategyCanvasAdapter(ctxRef), []);
+
+  const surfaceQuery = useMemo<CanvasSurfaceQueryResult<StrategySurfaceGraph>>(() => {
+    const data = strategyState.graphQuery.data;
+    if (!data) {
+      return {
+        data: undefined,
+        isLoading: strategyState.graphQuery.isLoading,
+        isError: strategyState.graphQuery.isError,
+        error: strategyState.graphQuery.error,
+        refetch: strategyState.graphQuery.refetch,
+      };
+    }
+    return {
+      data: {
+        ...data,
+        graph: {
+          ...data.graph,
+          nodes: strategyState.nodes as unknown as Node<StrategyNodeData>[],
+          edges: strategyState.edges as unknown as Edge<StrategyEdgeData>[],
+        },
+        activeSession: strategyState.activeSession,
+      },
+      isLoading: strategyState.graphQuery.isLoading,
+      isError: strategyState.graphQuery.isError,
+      error: strategyState.graphQuery.error,
+      refetch: strategyState.graphQuery.refetch,
+    };
+  }, [
+    strategyState.graphQuery,
+    strategyState.nodes,
+    strategyState.edges,
+    strategyState.activeSession,
+  ]);
+
+  const surface = useCanvasSurface(adapter, surfaceQuery);
+
+  const selectedState = useMemo(() => {
+    const node = surface.selectedNode;
+    if (!node) return undefined;
+    const stateId = (node.data as StrategyNodeData).stateId;
+    return strategyState.graphQuery.data?.parsed.manifest.states.find((s) => s.id === stateId);
+  }, [surface.selectedNode, strategyState.graphQuery.data]);
+
+  const promptTemplateRef = useMemo(() => {
+    return selectedState ? templateRefOf(selectedState) : undefined;
+  }, [selectedState]);
+
+  function updateField<K extends keyof typeof strategyState.form>(
+    field: K,
+    value: (typeof strategyState.form)[K],
+  ) {
+    strategyState.setForm((prev) => ({ ...prev, [field]: value }));
+  }
+
+  function onSaveStatus(section: Section, status: SaveStatus | undefined) {
+    strategyState.setSaveStatuses((prev) => ({ ...prev, [section]: status }));
+  }
+
+  function handleUseCurrent() {
+    strategyState.setConflict(null);
+    setIsEditing(false);
+    void strategyState.graphQuery.refetch();
+  }
+
+  // Update the mutable adapter context every render. The adapter object is
+  // stable, so useCanvasSurface's projection memo survives state changes.
+  ctxRef.current = {
+    presetId,
+    form: strategyState.form,
+    saveTriggers: strategyState.saveTriggers,
+    saveStatuses: strategyState.saveStatuses,
+    workingRevisionRef: strategyState.workingRevisionRef,
+    handleConflict: strategyState.handleConflict,
+    onChange: updateField,
+    onSaveStatus,
+    setActiveSection: strategyState.setActiveSection,
+    selectedState,
+    promptTemplateRef,
+    selectedNode: surface.selectedNode as unknown as Node<StrategyNodeData> | null,
+    parsed: strategyState.graphQuery.data?.parsed,
+    onUseCurrent: handleUseCurrent,
+    onReapply: strategyState.handleReapply,
+    onDismiss: () => strategyState.setConflict(null),
+  };
+
+  const showAltRef = useRef(surface.showAlt);
+  showAltRef.current = surface.showAlt;
+
+  // V1.111 P0 T4 — register Strategy-surface palette commands. The handlers
+  // read the current showAlt value through a ref so the command captured on
+  // mount never closes over a stale boolean.
   useRegisterCommand({
     id: 'strategy.toggle-view',
     labelKey: 'strategy.toggle-view.label',
@@ -85,7 +169,7 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
       'strategy.toggle-view.keywords.alt-view',
       'strategy.toggle-view.keywords.switch',
     ],
-    handler: () => setShowAlt((v) => !v),
+    handler: () => surface.setShowAlt(!showAltRef.current),
   });
   useRegisterCommand({
     id: 'strategy.create-transition',
@@ -102,118 +186,75 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
 
   useEffect(() => {
     if (!isEditing || !selectedState) {
-      setForm({ label: '', description: '', nextTarget: '', promptBody: '' });
-      setSaveStatuses({});
+      strategyState.setForm({ label: '', description: '', nextTarget: '', promptBody: '' });
+      strategyState.setSaveStatuses({});
       return;
     }
-    setForm(originalFormOf(selectedState));
-    setSaveStatuses({});
-  }, [isEditing, selectedState?.id, setForm, setSaveStatuses]);
+    strategyState.setForm(originalFormOf(selectedState));
+    strategyState.setSaveStatuses({});
+  }, [isEditing, selectedState?.id, strategyState.setForm, strategyState.setSaveStatuses]);
 
-  function updateField<K extends keyof typeof form>(field: K, value: (typeof form)[K]) {
-    setForm((prev) => ({ ...prev, [field]: value }));
-  }
+  const onConnect = useCallback(
+    (connection: Connection) => {
+      strategyState.onConnect(connection);
+    },
+    [strategyState.onConnect],
+  );
 
-  function onSaveStatus(section: Section, status: SaveStatus | undefined) {
-    setSaveStatuses((prev) => ({ ...prev, [section]: status }));
-  }
+  if (strategyState.graphQuery.isLoading) return <LoadingState label={t('strategy.loading')} />;
+  if (strategyState.graphQuery.isError)
+    return <ErrorState description={t('strategy.loadError')} onRetry={() => strategyState.graphQuery.refetch()} />;
 
-  if (graphQuery.isLoading) return <LoadingState label={t('strategy.loading')} />;
-  if (graphQuery.isError)
-    return <ErrorState description={t('strategy.loadError')} onRetry={() => graphQuery.refetch()} />;
-
-  const parsed = graphQuery.data?.parsed;
+  const parsed = strategyState.graphQuery.data?.parsed;
   const problems = parsed?.problems ?? [];
-  const dangling = graphQuery.data?.graph.danglingTargets ?? [];
+  const dangling = strategyState.graphQuery.data?.graph.danglingTargets ?? [];
 
   return (
     <div className="flex flex-col gap-4">
       <CanvasHeader
-        revision={baseRevision}
-        status={revisionStatus}
-        activeSession={activeSession}
-        showAlt={showAlt}
-        setShowAlt={setShowAlt}
+        revision={strategyState.baseRevision}
+        status={strategyState.revisionStatus}
+        activeSession={strategyState.activeSession}
+        showAlt={surface.showAlt}
+        setShowAlt={surface.setShowAlt}
         onOpenCreateTransition={() => setCreateDialogOpen(true)}
       />
 
-      {showAlt && parsed ? (
-        <StrategyAltView parsed={parsed} statusByState={{}} />
+      {surface.showAlt && parsed ? (
+        surface.altView
       ) : (
         <CanvasShell
-          nodes={nodes}
-          edges={edges}
-          nodeTypes={strategyNodeTypes}
-          onNodesChange={onNodesChange}
-          onEdgesChange={onEdgesChange}
+          nodes={surface.nodes}
+          edges={surface.edges}
+          nodeTypes={surface.nodeTypes}
+          onNodesChange={surface.onNodesChange}
+          onEdgesChange={strategyState.onEdgesChange}
           onConnect={onConnect}
-          onReconnect={onReconnect}
-          summaryText={summaryText}
+          onReconnect={strategyState.onReconnect}
+          summaryText={surface.summaryText}
           ariaLabel={t('strategy.graphAriaLabel')}
+          relayout={surface.relayout}
         >
           <InspectorPanel
-            selected={selected}
+            selected={surface.selectedNode}
             selectedState={selectedState}
             isEditing={isEditing}
             setIsEditing={setIsEditing}
-            onFocusSection={setActiveSection}
+            onFocusSection={strategyState.setActiveSection}
           >
-            {selectedState ? (
-              <>
-                <StateInspector
-                  presetId={presetId}
-                  selectedState={selectedState}
-                  form={form}
-                  onChange={updateField}
-                  workingRevisionRef={workingRevisionRef}
-                  saveTrigger={saveTriggers.state}
-                  saveStatus={saveStatuses.state}
-                  onSaveStatus={(s) => onSaveStatus('state', s)}
-                  onConflict={handleConflict}
-                />
-                <div onFocusCapture={() => setActiveSection('transition')}>
-                  <EdgeInspector
-                    presetId={presetId}
-                    selectedState={selectedState}
-                    form={form}
-                    onChange={updateField}
-                    workingRevisionRef={workingRevisionRef}
-                    saveTrigger={saveTriggers.transition}
-                    saveStatus={saveStatuses.transition}
-                    onSaveStatus={(s) => onSaveStatus('transition', s)}
-                    onConflict={handleConflict}
-                  />
-                </div>
-                {promptTemplateRef ? (
-                  <div onFocusCapture={() => setActiveSection('prompt')}>
-                    <PromptInspector
-                      presetId={presetId}
-                      selectedState={selectedState}
-                      form={form}
-                      onChange={updateField}
-                      workingRevisionRef={workingRevisionRef}
-                      promptTemplateRef={promptTemplateRef}
-                      saveTrigger={saveTriggers.prompt}
-                      saveStatus={saveStatuses.prompt}
-                      onSaveStatus={(s) => onSaveStatus('prompt', s)}
-                      onConflict={handleConflict}
-                    />
-                  </div>
-                ) : null}
-              </>
-            ) : null}
+            {selectedState ? surface.inspector : null}
           </InspectorPanel>
-          {selectedDraftEdge ? (
-          <aside
-            className="absolute right-3 top-3 w-[280px] rounded-card border border-gray-alpha-400 bg-background-100 p-3 shadow-popover"
-            aria-label={t('strategy.draftTransitionEditor')}
-          >
+          {strategyState.selectedDraftEdge ? (
+            <aside
+              className="absolute right-3 top-3 w-[280px] rounded-card border border-gray-alpha-400 bg-background-100 p-3 shadow-popover"
+              aria-label={t('strategy.draftTransitionEditor')}
+            >
               <DraftEdgeInspector
-                sourceStateId={selectedDraftEdge.source}
-                targetStateId={selectedDraftEdge.target}
-                isCommitting={isCommittingDraft}
-                onCommit={commitDraft}
-                onCancel={cancelDraft}
+                sourceStateId={strategyState.selectedDraftEdge.source}
+                targetStateId={strategyState.selectedDraftEdge.target}
+                isCommitting={strategyState.isCommittingDraft}
+                onCommit={strategyState.commitDraft}
+                onCancel={strategyState.cancelDraft}
               />
             </aside>
           ) : null}
@@ -222,34 +263,30 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
       )}
 
       <StrategyConflictModal
-        conflict={conflict}
-        form={form}
-        canonicalState={selectedState ?? draftSourceState}
+        conflict={strategyState.conflict}
+        form={strategyState.form}
+        canonicalState={selectedState ?? strategyState.draftSourceState}
         promptTemplateRef={promptTemplateRef}
-        onUseCurrent={() => {
-          setConflict(null);
-          setIsEditing(false);
-          void graphQuery.refetch();
-        }}
-        onReapply={handleReapply}
-        onDismiss={() => setConflict(null)}
+        onUseCurrent={handleUseCurrent}
+        onReapply={strategyState.handleReapply}
+        onDismiss={() => strategyState.setConflict(null)}
       />
 
       <EdgeCreateDialog
         open={createDialogOpen}
         onOpenChange={setCreateDialogOpen}
         states={parsed?.manifest.states ?? []}
-        isCommitting={isCommittingKeyboardCreate}
+        isCommitting={strategyState.isCommittingKeyboardCreate}
         onCommit={(args) => {
-          commitKeyboardCreate(args);
+          strategyState.commitKeyboardCreate(args);
           setCreateDialogOpen(false);
         }}
       />
 
       <CanvasFooter
         presetId={presetId}
-        creatorId={creatorId}
-        scheduleId={activeScheduleId}
+        creatorId={strategyState.creatorId}
+        scheduleId={strategyState.activeScheduleId}
         artifacts={artifacts}
         setArtifacts={setArtifacts}
       />

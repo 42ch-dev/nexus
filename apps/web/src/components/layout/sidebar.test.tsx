@@ -72,9 +72,28 @@ describe('Sidebar', () => {
     expect(screen.getByRole('link', { name: 'Sessions' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Schedule' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Capabilities' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Modules' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Strategies' })).toBeInTheDocument();
 
     expect(screen.queryByRole('link', { name: 'All Works' })).not.toBeInTheDocument();
+  });
+
+  it('exposes the Modules nav link under the Orchestrator tab with a valid route', async () => {
+    const user = userEvent.setup();
+    useHandlers(
+      http.get('/v1/daemon/creators', () =>
+        HttpResponse.json({
+          items: [{ creator_id: 'creator-a', display_name: 'Alice' }],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+    );
+
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+
+    await user.click(screen.getByRole('tab', { name: 'Orchestrator' }));
+    const modulesLink = screen.getByRole('link', { name: 'Modules' });
+    expect(modulesLink).toHaveAttribute('href', '/modules');
   });
 
   it('does not expose Connect or Daemon as top-level nav items', async () => {
@@ -147,6 +166,7 @@ describe('Sidebar', () => {
 
   it('renders localized labels when locale is zh-CN', async () => {
     window.localStorage.setItem('nexus-web-locale', 'zh-CN');
+    const user = userEvent.setup();
     useCreatorHandler();
 
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
@@ -157,6 +177,10 @@ describe('Sidebar', () => {
     expect(screen.getByRole('link', { name: '记忆' })).toBeInTheDocument();
     const link = screen.getByTestId('settings-footer-utility-link');
     expect(link).toHaveTextContent('设置');
+
+    await user.click(screen.getByRole('tab', { name: '编排' }));
+    expect(screen.getByRole('button', { name: '计算' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '模块' })).toBeInTheDocument();
   });
 
   it('keeps parent groups as quiet labels and selected leaf with soft fill + thin bar', async () => {

@@ -1,5 +1,11 @@
 pub mod compute_input;
 pub mod compute_output;
+pub mod list_modules_response;
+pub mod module_detail;
+pub mod module_summary;
 
 pub use compute_input::*;
 pub use compute_output::*;
+pub use list_modules_response::*;
+pub use module_detail::*;
+pub use module_summary::*;

@@ -39,6 +39,7 @@ import type {
   ListFindingsResponse,
   ListMemoryFragmentsQuery,
   ListMemoryFragmentsResponse,
+  ListModulesResponse,
   ListPendingReviewsQuery,
   ListPendingReviewsResponse,
   ListPresetsResponse,
@@ -48,6 +49,7 @@ import type {
   ListSessionsResponse,
   ListWorksQuery,
   ListWorksResponse,
+  ModuleDetail,
   OutlinePatchChapterRequest,
   OutlinePatchResponse,
   OutlinePatchStructureRequest,
@@ -88,6 +90,7 @@ import type {
   World,
   WorldKbCandidatesResponse,
   WorldKbGraphResponse,
+  WorldKbKeyBlockStateResponse,
   WorldKbPatchEntityRequest,
   WorldKbPatchEntityResponse,
   WorldKbPatchRelationshipRequest,
@@ -448,6 +451,19 @@ export class BrowserClient implements NexusClient {
     return this.post<WorldKbPatchRelationshipResponse>(
       `/v1/daemon/worlds/${encodeURIComponent(worldId)}/kb/patch-relationship`,
       request,
+    );
+  }
+
+  // ── Compute modules (V1.114 P2) ─────────────────────────────────────────
+  getComputeModules(): Promise<ListModulesResponse> {
+    return this.get<ListModulesResponse>('/v1/daemon/compute/modules');
+  }
+  getComputeModule(moduleId: string): Promise<ModuleDetail> {
+    return this.get<ModuleDetail>(`/v1/daemon/compute/modules/${encodeURIComponent(moduleId)}`);
+  }
+  getKeyBlockState(worldId: string, keyBlockId: string): Promise<WorldKbKeyBlockStateResponse> {
+    return this.get<WorldKbKeyBlockStateResponse>(
+      `/v1/daemon/worlds/${encodeURIComponent(worldId)}/kb/key-blocks/${encodeURIComponent(keyBlockId)}/state`,
     );
   }
 

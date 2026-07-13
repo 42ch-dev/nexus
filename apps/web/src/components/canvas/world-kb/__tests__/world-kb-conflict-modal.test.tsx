@@ -5,6 +5,7 @@
  * labels, the inherited focus-trapped/ARIA-live shell behavior, and that the
  * Reapply button is disabled when the draft overlaps the server change.
  */
+import { useState } from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -75,6 +76,45 @@ describe('WorldKbEntityConflictModal (patch_entity variant)', () => {
     expect(section.textContent).toContain('Title');
     expect(section.textContent).toContain('Aliases');
   });
+
+  it('exposes consistent keyboard access keys for the four actions', () => {
+    render(<WorldKbEntityConflictModal {...entityProps} />);
+    expect(screen.getByRole('button', { name: /Cancel/i })).toHaveAttribute('accessKey', 'c');
+    expect(screen.getByRole('button', { name: /Review side-by-side/i })).toHaveAttribute('accessKey', 'r');
+    expect(screen.getByRole('button', { name: /Reapply my edit/i })).toHaveAttribute('accessKey', 'a');
+    expect(screen.getByRole('button', { name: /Use current/i })).toHaveAttribute('accessKey', 'u');
+  });
+
+  it('dismisses on Escape', async () => {
+    const user = userEvent.setup();
+    const onDismiss = vi.fn();
+    render(<WorldKbEntityConflictModal {...entityProps} onDismiss={onDismiss} />);
+    await user.keyboard('{Escape}');
+    expect(onDismiss).toHaveBeenCalledOnce();
+  });
+
+  it('returns focus to the triggering element when it closes', async () => {
+    const user = userEvent.setup();
+    function Wrapper() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>Open conflict</button>
+          <WorldKbEntityConflictModal
+            {...entityProps}
+            open={open}
+            onDismiss={() => setOpen(false)}
+          />
+        </>
+      );
+    }
+    render(<Wrapper />);
+    const trigger = screen.getByRole('button', { name: 'Open conflict' });
+    await user.click(trigger);
+    expect(screen.getByRole('button', { name: /Cancel/i })).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(trigger).toHaveFocus();
+  });
 });
 
 const promoteDraft: WorldKbPromoteConflictDraft = {
@@ -120,5 +160,44 @@ describe('WorldKbPromoteConflictModal (promote_candidate variant)', () => {
     // The review row renders the label in both the server and draft cells.
     const matches = screen.getAllByText(/Promotion state/i);
     expect(matches.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('exposes consistent keyboard access keys for the four actions', () => {
+    render(<WorldKbPromoteConflictModal {...promoteProps} />);
+    expect(screen.getByRole('button', { name: /Cancel/i })).toHaveAttribute('accessKey', 'c');
+    expect(screen.getByRole('button', { name: /Review side-by-side/i })).toHaveAttribute('accessKey', 'r');
+    expect(screen.getByRole('button', { name: /Reapply my decision/i })).toHaveAttribute('accessKey', 'a');
+    expect(screen.getByRole('button', { name: /Use current/i })).toHaveAttribute('accessKey', 'u');
+  });
+
+  it('dismisses on Escape', async () => {
+    const user = userEvent.setup();
+    const onDismiss = vi.fn();
+    render(<WorldKbPromoteConflictModal {...promoteProps} onDismiss={onDismiss} />);
+    await user.keyboard('{Escape}');
+    expect(onDismiss).toHaveBeenCalledOnce();
+  });
+
+  it('returns focus to the triggering element when it closes', async () => {
+    const user = userEvent.setup();
+    function Wrapper() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>Open conflict</button>
+          <WorldKbPromoteConflictModal
+            {...promoteProps}
+            open={open}
+            onDismiss={() => setOpen(false)}
+          />
+        </>
+      );
+    }
+    render(<Wrapper />);
+    const trigger = screen.getByRole('button', { name: 'Open conflict' });
+    await user.click(trigger);
+    expect(screen.getByRole('button', { name: /Cancel/i })).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(trigger).toHaveFocus();
   });
 });

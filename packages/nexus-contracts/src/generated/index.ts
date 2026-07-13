@@ -34,6 +34,7 @@ export * from './daemon-api/canvas/world-kb/WorldKbEntityPatch';
 export * from './daemon-api/canvas/world-kb/WorldKbEntityProjection';
 export * from './daemon-api/canvas/world-kb/WorldKbExtractJobProjection';
 export * from './daemon-api/canvas/world-kb/WorldKbGraphResponse';
+export * from './daemon-api/canvas/world-kb/WorldKbKeyBlockStateResponse';
 export * from './daemon-api/canvas/world-kb/WorldKbPatchEntityRequest';
 export * from './daemon-api/canvas/world-kb/WorldKbPatchEntityResponse';
 export * from './daemon-api/canvas/world-kb/WorldKbPatchRelationshipRequest';
@@ -48,6 +49,9 @@ export * from './daemon-api/canvas/world-kb/WorldKbValidationError';
 export * from './daemon-api/common/ErrorResponse';
 export * from './daemon-api/compute/ComputeInput';
 export * from './daemon-api/compute/ComputeOutput';
+export * from './daemon-api/compute/ListModulesResponse';
+export * from './daemon-api/compute/ModuleDetail';
+export * from './daemon-api/compute/ModuleSummary';
 export * from './daemon-api/creators/ActiveCreatorResponse';
 export * from './daemon-api/creators/CreatorDetail';
 export * from './daemon-api/creators/CreatorInfo';
@@ -235,6 +239,7 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   WorldKbEntityProjection: 1,
   WorldKbExtractJobProjection: 1,
   WorldKbGraphResponse: 1,
+  WorldKbKeyBlockStateResponse: 1,
   WorldKbPatchEntityRequest: 1,
   WorldKbPatchEntityResponse: 1,
   WorldKbPatchRelationshipRequest: 1,
@@ -249,6 +254,9 @@ export const SCHEMA_VERSIONS: Record<string, number> = {
   ErrorResponse: 1,
   ComputeInput: 1,
   ComputeOutput: 1,
+  ListModulesResponse: 1,
+  ModuleDetail: 1,
+  ModuleSummary: 1,
   ActiveCreatorResponse: 1,
   CreatorDetail: 1,
   CreatorInfo: 1,

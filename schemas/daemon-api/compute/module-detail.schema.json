@@ -1,0 +1,59 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://nexus42.invalid/schemas/daemon-api/compute/module-detail.schema.json",
+  "schema_version": 1,
+  "title": "Nexus ComputeModuleDetail",
+  "description": "Full manifest.json shape for a compute module, as defined by compute-module-abi.md §7.",
+  "type": "object",
+  "required": [
+    "module_id",
+    "name",
+    "version",
+    "nexus_abi_version",
+    "required_key_block_types",
+    "compute_export",
+    "init_export"
+  ],
+  "properties": {
+    "module_id": { "type": "string" },
+    "name": { "type": "string" },
+    "version": { "type": "string" },
+    "nexus_abi_version": { "type": "integer" },
+    "required_key_block_types": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "compute_export": { "type": "string" },
+    "init_export": { "type": "string" },
+    "description": { "type": "string" },
+    "author": { "type": "string" },
+    "host_functions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": ["kb_read", "narrative_query"]
+      }
+    },
+    "schemas": {
+      "type": "object",
+      "properties": {
+        "key_block_attributes": {
+          "type": "object",
+          "additionalProperties": { "type": "object" }
+        },
+        "key_block_state": {
+          "type": "object",
+          "additionalProperties": { "type": "object" }
+        },
+        "invocation": { "type": "object" },
+        "battle_report": { "type": "object" }
+      },
+      "additionalProperties": false
+    },
+    "battle_report_kind": { "type": "string" },
+    "max_fuel": { "type": "integer" },
+    "max_memory_mib": { "type": "integer" },
+    "max_wall_time_ms": { "type": "integer" }
+  },
+  "additionalProperties": false
+}

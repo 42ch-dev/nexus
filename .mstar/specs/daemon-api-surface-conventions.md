@@ -589,3 +589,35 @@ This is the correct shape for a simple CRUD PATCH on a non-OCC resource. Future 
 - **DAO enforcement**: `update_finding` in `crates/nexus-local-db/src/findings.rs:927-1042` (enum validation + transition enforcement + dynamic SET clause builder).
 - **`wire_contracts_changed`**: `FALSE` for V1.77 — the route, schema, codegen, and handler are unchanged. Only consumer-side consumption is additive.
 - **Spec cross-reference**: [findings-lifecycle.md](./findings-lifecycle.md) — the 6-state lifecycle, `target_executor` routing, and UI remediation surface.
+
+## 12. V1.114 compute registry and KB state read routes
+
+V1.114 adds two read-only surfaces to the Daemon API inventory.
+
+### 12.1 Compute module registry
+
+| Use | Route | Response DTO |
+| --- | --- | --- |
+| List installed compute modules | `GET /v1/daemon/compute/modules` | `ListModulesResponse` |
+| Read a module's full manifest | `GET /v1/daemon/compute/modules/{module_id}` | `ModuleDetail` |
+
+Both endpoints reuse the existing `manifest.json` shape from
+[compute-module-abi.md](./compute-module-abi.md) §7; they do not introduce a
+parallel module DTO. `ListModulesResponse` follows the §2 cursor-list convention
+(`items`, `has_more`).
+
+### 12.2 Computable KeyBlock state read
+
+| Use | Route | Response DTO |
+| --- | --- | --- |
+| Read a computable KeyBlock's runtime state | `GET /v1/daemon/worlds/{world_id}/kb/key-blocks/{key_block_id}/state` | `WorldKbKeyBlockStateResponse` |
+
+Response semantics:
+
+- `state`: the block's `body.state` when `is_computable` is true; otherwise `null`.
+- `is_computable`: mirrors `body.computable`.
+- `version`: the row's OCC revision (`kb_key_blocks.revision`, normalized to `0` when NULL).
+
+This route is intentionally read-only and distinct from the World KB canvas
+patch routes in §7.5; it gives clients a focused, cacheable state dump without
+a full graph projection.

@@ -34,6 +34,7 @@ import type {
   ListSchedulesQuery,
   ListSessionsQuery,
   ListWorksQuery,
+  ModuleSummary,
   PaginationInfo,
   PatchChapterRequest,
   PatchWorkRequest,
@@ -1044,6 +1045,30 @@ export function useDeleteAnnotation() {
       void qc.invalidateQueries({ queryKey: queryKeys.reading.annotations(vars.workId, vars.chapter) });
     },
     onError: (error) => errorToast(error, 'error.couldNotDeleteHighlight'),
+  });
+}
+
+// ── Compute modules (V1.114 P2) ───────────────────────────────────────────────
+
+/** List installed compute modules surfaced by the registry. */
+export function useComputeModules() {
+  const client = useNexusClient();
+  return useQuery({
+    queryKey: queryKeys.compute.modules.list(),
+    queryFn: async (): Promise<ModuleSummary[]> => {
+      const res = await client.getComputeModules();
+      return res.items;
+    },
+  });
+}
+
+/** Full manifest detail for a single compute module. */
+export function useComputeModule(moduleId: string) {
+  const client = useNexusClient();
+  return useQuery({
+    queryKey: queryKeys.compute.modules.detail(moduleId),
+    queryFn: () => client.getComputeModule(moduleId),
+    enabled: Boolean(moduleId),
   });
 }
 

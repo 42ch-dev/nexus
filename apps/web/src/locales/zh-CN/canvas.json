@@ -31,6 +31,9 @@
     "untitledScene": "未命名场景",
     "untitledBeat": "未命名节拍"
   },
+  "canvasShell": {
+    "relayout": "重新布局"
+  },
   "outlineCanvas": {
     "showGraph": "显示图谱",
     "showListView": "显示列表视图",

@@ -1,6 +1,7 @@
 /**
  * @vitest-environment jsdom
  */
+import { useState } from 'react';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
@@ -61,5 +62,44 @@ describe('OutlineConflictModal', () => {
     await user.click(screen.getByRole('button', { name: /Review side-by-side/i }));
     expect(screen.getByText('Server: Chapter title')).toBeInTheDocument();
     expect(screen.getByText('Your edit: Chapter title')).toBeInTheDocument();
+  });
+
+  it('exposes consistent keyboard access keys for the four actions', () => {
+    render(<OutlineConflictModal {...baseProps} />);
+    expect(screen.getByRole('button', { name: /Keep editing/i })).toHaveAttribute('accessKey', 'c');
+    expect(screen.getByRole('button', { name: /Review side-by-side/i })).toHaveAttribute('accessKey', 'r');
+    expect(screen.getByRole('button', { name: /Reapply my edit/i })).toHaveAttribute('accessKey', 'a');
+    expect(screen.getByRole('button', { name: /Use current/i })).toHaveAttribute('accessKey', 'u');
+  });
+
+  it('dismisses on Escape', async () => {
+    const user = userEvent.setup();
+    const onDismiss = vi.fn();
+    render(<OutlineConflictModal {...baseProps} onDismiss={onDismiss} />);
+    await user.keyboard('{Escape}');
+    expect(onDismiss).toHaveBeenCalledOnce();
+  });
+
+  it('returns focus to the triggering element when it closes', async () => {
+    const user = userEvent.setup();
+    function Wrapper() {
+      const [open, setOpen] = useState(false);
+      return (
+        <>
+          <button type="button" onClick={() => setOpen(true)}>Open conflict</button>
+          <OutlineConflictModal
+            {...baseProps}
+            open={open}
+            onDismiss={() => setOpen(false)}
+          />
+        </>
+      );
+    }
+    render(<Wrapper />);
+    const trigger = screen.getByRole('button', { name: 'Open conflict' });
+    await user.click(trigger);
+    expect(screen.getByRole('button', { name: /Keep editing/i })).toHaveFocus();
+    await user.keyboard('{Escape}');
+    expect(trigger).toHaveFocus();
   });
 });

@@ -123,6 +123,7 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | [v1.110-delivery-compass.md](v1.110-delivery-compass.md) | V1.110 | **completed* (2026-07-11) — Reliability + UX polish: daemon startup latency (P0) + agent scan PATH reliability (P1) + AgentPicker UX polish (P2). Integration `iteration/v1.110`. |
 | [v1.111-delivery-compass.md](v1.111-delivery-compass.md) | V1.111 | **completed** (2026-07-12) — Frontend canvas navigation + design studio + consolidation: command palette (P0) + sidebar canvas IA (P1) + design-studio canvas gallery (P2) + frontend consolidation sweep (P3). Integration `iteration/v1.111` → `main`. |
 | [v1.112-delivery-compass.md](v1.112-delivery-compass.md) | V1.112 | **Shipped** — Frontend i18n: react-i18next foundation + Appearance Language (P0) + full user-facing UI migration (P1). Integration `iteration/v1.112` → `main`. |
+| [v1.114-delivery-compass.md](v1.114-delivery-compass.md) | V1.114 | **completed** (2026-07-13) — Canvas & Compute Module Foundation: canvas architecture (adapter + dagre auto-layout) (P0) + canvas stability/validation hardening (P1) + compute module foundation & visibility (P2). Integration `iteration/v1.114` → `main`. |
 
 ### Active iteration workspaces
 
@@ -140,6 +141,7 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | [v1.110/](v1.110/specs/) | V1.110 | Triple Must — daemon startup latency + agent scan PATH reliability + AgentPicker UX polish |
 | [v1.111/](v1.111/specs/) | V1.111 | Quad Must — canvas command palette + sidebar canvas IA + design-studio canvas gallery + frontend consolidation sweep |
 | [v1.112/](v1.112/README.md) | V1.112 | Dual Must — i18n foundation + Appearance (P0) + full user-facing UI migration (P1) |
+| [v1.114/](v1.114/specs/) | V1.114 | Triple Must — canvas architecture foundation (P0) + canvas stability hardening (P1) + compute module foundation & visibility (P2) |
 
 ### Legacy `v1.*` iteration artifacts
 

@@ -954,6 +954,16 @@ fn apply_transition_create(
     req: &StrategyPatchTransitionRequest,
     new_target: &str,
 ) -> Result<Vec<String>, NexusApiError> {
+    if req.source_state_id == new_target {
+        return Err(NexusApiError::BadRequest {
+            code: "strategy_self_loop".to_string(),
+            message: format!(
+                "state '{}' cannot transition to itself",
+                req.source_state_id
+            ),
+        });
+    }
+
     let kind = resolved_create_transition_kind(req, next)?;
     let mut side_effects: Vec<String> = Vec::new();
 
@@ -1858,5 +1868,85 @@ states:
 
         assert!(!path.exists(), "new file must be removed on rollback");
         assert!(!tmp_path.exists(), "staged temp file must be removed");
+    }
+
+    #[test]
+    fn append_conditional_rule_rejects_duplicate_unconditional_rules() {
+        let mut map = serde_yaml::Mapping::new();
+        let req = StrategyPatchTransitionRequest {
+            strategy_id: "s".to_string(),
+            base_revision: 1,
+            source_state_id: "a".to_string(),
+            old_target: None,
+            new_target: None,
+            condition: None,
+            transition_kind: None,
+            op: None,
+        };
+        append_conditional_rule(&mut map, &req, "b").expect("first unconditional rule");
+        let err = append_conditional_rule(&mut map, &req, "b")
+            .expect_err("duplicate unconditional rule should fail");
+        match err {
+            NexusApiError::BadRequest { code, .. } => {
+                assert_eq!(code, "strategy_transition_duplicate");
+            }
+            other => panic!("expected duplicate BadRequest, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn append_conditional_rule_rejects_duplicate_conditioned_rules() {
+        let mut map = serde_yaml::Mapping::new();
+        let req = StrategyPatchTransitionRequest {
+            strategy_id: "s".to_string(),
+            base_revision: 1,
+            source_state_id: "a".to_string(),
+            old_target: None,
+            new_target: None,
+            condition: Some("_context.ready".to_string()),
+            transition_kind: None,
+            op: None,
+        };
+        append_conditional_rule(&mut map, &req, "b").expect("first conditioned rule");
+        let err = append_conditional_rule(&mut map, &req, "b")
+            .expect_err("duplicate conditioned rule should fail");
+        match err {
+            NexusApiError::BadRequest { code, .. } => {
+                assert_eq!(code, "strategy_transition_duplicate");
+            }
+            other => panic!("expected duplicate BadRequest, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn append_conditional_rule_allows_same_target_with_different_condition() {
+        let mut map = serde_yaml::Mapping::new();
+        let req_a = StrategyPatchTransitionRequest {
+            strategy_id: "s".to_string(),
+            base_revision: 1,
+            source_state_id: "a".to_string(),
+            old_target: None,
+            new_target: None,
+            condition: Some("_context.ready".to_string()),
+            transition_kind: None,
+            op: None,
+        };
+        append_conditional_rule(&mut map, &req_a, "b").expect("first conditioned rule");
+        let req_b = StrategyPatchTransitionRequest {
+            strategy_id: "s".to_string(),
+            base_revision: 1,
+            source_state_id: "a".to_string(),
+            old_target: None,
+            new_target: None,
+            condition: Some("_context.alt".to_string()),
+            transition_kind: None,
+            op: None,
+        };
+        append_conditional_rule(&mut map, &req_b, "b")
+            .expect("different condition should be allowed");
+        let rules = map["rules"]
+            .as_sequence()
+            .expect("rules should be a sequence");
+        assert_eq!(rules.len(), 2);
     }
 }

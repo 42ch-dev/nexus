@@ -239,6 +239,26 @@ embedded version. The user scan runs after embedded loading; if a user module
 has the same `module_id`, its entry overwrites the embedded entry in the cache.
 This lets users override or patch shipped modules.
 
+### 7.3 Registry API (V1.114 P2)
+
+`nexus-wasm-host` exposes the embedded module set as a read-only registry via
+[`src/registry.rs`](../../../crates/nexus-wasm-host/src/registry.rs) for the
+daemon runtime:
+
+- `list_modules()` → `Vec<ModuleSummary>` — summary of every installed module.
+- `get_module(id)` → `Option<ModuleDetail>` — full manifest for a single module.
+
+These functions back the daemon endpoints:
+
+- `GET /v1/daemon/compute/modules` — returns `ListModulesResponse { items, has_more }`.
+- `GET /v1/daemon/compute/modules/{module_id}` — returns the full `ModuleDetail`.
+
+Both endpoints reuse the existing `manifest.json` shape; the runtime maps the
+hand-written `ModuleManifest` struct to the generated wire type via a JSON
+round-trip. See [`schemas/daemon-api/compute/`](../../../schemas/daemon-api/compute/)
+for the generated contracts and [`modules/README.md`](../../../modules/README.md)
+for the authoring guide.
+
 ---
 
 ## 8. Error taxonomy
