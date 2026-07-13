@@ -204,7 +204,7 @@
       "compass": "v1.114-delivery-compass.md",
       "shipped_at": "2026-07-13",
       "pr": "https://github.com/42ch-dev/nexus/pull/144",
-      "merge_commit": "pending-merge"
+      "merge_commit": "e08ed182"
     },
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
