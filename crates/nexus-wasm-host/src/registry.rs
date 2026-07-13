@@ -47,17 +47,17 @@ pub fn list_modules() -> Vec<ModuleSummary> {
 /// # Errors
 ///
 /// Returns a [`serde_json::Error`] if the embedded manifest file exists but
-/// cannot be deserialized into [`ModuleManifest`] or converted into the
-/// generated [`ModuleDetail`] wire type.
+/// cannot be deserialized into [`ModuleManifest`].
 pub fn get_module(id: &str) -> Result<Option<ModuleDetail>, serde_json::Error> {
     let Some(manifest_json) = embedded_module_manifest(id) else {
         return Ok(None);
     };
     let manifest: ModuleManifest = serde_json::from_str(manifest_json)?;
-    manifest_to_detail(&manifest).map(Some)
+    Ok(Some(ModuleDetail::from(&manifest)))
 }
 
 fn manifest_to_summary(manifest: &ModuleManifest) -> ModuleSummary {
+    // Keep field mapping aligned with `From<&ModuleManifest> for ModuleDetail` in manifest.rs.
     ModuleSummary {
         module_id: manifest.module_id.clone(),
         name: manifest.name.clone(),
@@ -79,14 +79,6 @@ fn broken_summary(id: &str) -> ModuleSummary {
         battle_report_kind: None,
         status: "broken".to_string(),
     }
-}
-
-fn manifest_to_detail(manifest: &ModuleManifest) -> Result<ModuleDetail, serde_json::Error> {
-    // The generated ModuleDetail mirrors the manifest.json shape, so a
-    // JSON round-trip is the smallest durable bridge between the hand-written
-    // runtime struct and the generated wire contract.
-    let value = serde_json::to_value(manifest)?;
-    serde_json::from_value(value)
 }
 
 #[cfg(test)]
@@ -167,6 +159,27 @@ mod tests {
     }
 
     #[test]
+    fn list_modules_and_get_module_agree_on_basic_combat() {
+        let summary = list_modules()
+            .into_iter()
+            .find(|m| m.module_id == "basic-combat")
+            .expect("basic-combat should be in list_modules()");
+        let detail = get_module("basic-combat")
+            .expect("basic-combat manifest should parse")
+            .expect("basic-combat should be in get_module()");
+
+        assert_eq!(summary.module_id, detail.module_id);
+        assert_eq!(summary.name, detail.name);
+        assert_eq!(summary.version, detail.version);
+        assert_eq!(summary.description, detail.description);
+        assert_eq!(
+            summary.required_key_block_types,
+            detail.required_key_block_types
+        );
+        assert_eq!(summary.battle_report_kind, detail.battle_report_kind);
+    }
+
+    #[test]
     fn get_module_errs_for_broken_manifest() {
         let result = get_module_detail_from_manifest("not valid json");
         assert!(
@@ -180,6 +193,6 @@ mod tests {
         manifest_json: &str,
     ) -> Result<Option<ModuleDetail>, serde_json::Error> {
         let manifest: ModuleManifest = serde_json::from_str(manifest_json)?;
-        manifest_to_detail(&manifest).map(Some)
+        Ok(Some(ModuleDetail::from(&manifest)))
     }
 }

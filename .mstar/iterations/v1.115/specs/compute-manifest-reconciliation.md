@@ -115,7 +115,7 @@ canvas work. No product dependency.
 | `max_memory_mib` | ✓ (opt) | ✓ | ✓ | shared (wire) |
 | `max_wall_time_ms` | ✓ (opt) | ✓ | ✓ | shared (wire) |
 
-**Result:** all 15 fields shared. **Runtime-only fields today: none.**
+**T1 confirmation (2026-07-13):** Re-audited every field in `crates/nexus-wasm-host/src/manifest.rs` against `module-detail.schema.json` and `crates/nexus-contracts/src/generated/daemon_api/compute/module_detail.rs`. The table above is accurate: all 15 fields are present on both sides, **0 wire-only**, **0 runtime-only today**. `ModuleSummary` still adds only runtime `status`.
 `ModuleSummary` adds a runtime `status` (`"ok"`/`"broken"`) not on the
 manifest — derived at registry call time, not stored.
 
