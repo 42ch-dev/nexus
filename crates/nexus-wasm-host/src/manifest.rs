@@ -31,6 +31,7 @@
 
 use std::collections::HashMap;
 
+use nexus_contracts::generated::daemon_api::compute::module_detail::ModuleDetail;
 use serde::{Deserialize, Serialize};
 
 /// Whitelisted host functions a module may import (open design item #4).
@@ -104,6 +105,44 @@ impl ModuleManifest {
     #[must_use]
     pub fn allows(&self, f: HostFunction) -> bool {
         self.host_functions.contains(&f)
+    }
+}
+
+impl From<&ModuleManifest> for ModuleDetail {
+    fn from(manifest: &ModuleManifest) -> Self {
+        Self {
+            module_id: manifest.module_id.clone(),
+            name: manifest.name.clone(),
+            version: manifest.version.clone(),
+            nexus_abi_version: i64::from(manifest.nexus_abi_version),
+            required_key_block_types: manifest.required_key_block_types.clone(),
+            compute_export: manifest.compute_export.clone(),
+            init_export: manifest.init_export.clone(),
+            description: manifest.description.clone(),
+            author: manifest.author.clone(),
+            host_functions: Some(
+                manifest
+                    .host_functions
+                    .iter()
+                    .map(|f| match f {
+                        HostFunction::KbRead => "kb_read".to_string(),
+                        HostFunction::NarrativeQuery => "narrative_query".to_string(),
+                    })
+                    .collect(),
+            ),
+            schemas: manifest
+                .schemas
+                .as_ref()
+                .map(|s| serde_json::to_value(s).expect("ModuleSchemas serializes to JSON")),
+            battle_report_kind: manifest.battle_report_kind.clone(),
+            max_fuel: manifest
+                .max_fuel
+                .map(|v| i64::try_from(v).expect("max_fuel fits in i64")),
+            max_memory_mib: manifest.max_memory_mib.map(i64::from),
+            max_wall_time_ms: manifest
+                .max_wall_time_ms
+                .map(|v| i64::try_from(v).expect("max_wall_time_ms fits in i64")),
+        }
     }
 }
 

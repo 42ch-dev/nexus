@@ -47,14 +47,13 @@ pub fn list_modules() -> Vec<ModuleSummary> {
 /// # Errors
 ///
 /// Returns a [`serde_json::Error`] if the embedded manifest file exists but
-/// cannot be deserialized into [`ModuleManifest`] or converted into the
-/// generated [`ModuleDetail`] wire type.
+/// cannot be deserialized into [`ModuleManifest`].
 pub fn get_module(id: &str) -> Result<Option<ModuleDetail>, serde_json::Error> {
     let Some(manifest_json) = embedded_module_manifest(id) else {
         return Ok(None);
     };
     let manifest: ModuleManifest = serde_json::from_str(manifest_json)?;
-    manifest_to_detail(&manifest).map(Some)
+    Ok(Some(ModuleDetail::from(&manifest)))
 }
 
 fn manifest_to_summary(manifest: &ModuleManifest) -> ModuleSummary {
@@ -79,14 +78,6 @@ fn broken_summary(id: &str) -> ModuleSummary {
         battle_report_kind: None,
         status: "broken".to_string(),
     }
-}
-
-fn manifest_to_detail(manifest: &ModuleManifest) -> Result<ModuleDetail, serde_json::Error> {
-    // The generated ModuleDetail mirrors the manifest.json shape, so a
-    // JSON round-trip is the smallest durable bridge between the hand-written
-    // runtime struct and the generated wire contract.
-    let value = serde_json::to_value(manifest)?;
-    serde_json::from_value(value)
 }
 
 #[cfg(test)]
@@ -180,6 +171,6 @@ mod tests {
         manifest_json: &str,
     ) -> Result<Option<ModuleDetail>, serde_json::Error> {
         let manifest: ModuleManifest = serde_json::from_str(manifest_json)?;
-        manifest_to_detail(&manifest).map(Some)
+        Ok(Some(ModuleDetail::from(&manifest)))
     }
 }
