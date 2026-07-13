@@ -6,6 +6,12 @@
  * V1.114 P0 T2: migrated to the shared `CanvasSurfaceAdapter` abstraction via
  * `useCanvasSurface()` so graph projection, summary, inspector routing, and
  * alt-view are adapter-driven.
+ * V1.115 P0 T2 (W001): the adapter's `projectGraph` now owns the real
+ * projection (`buildStrategyGraph(parsed)`). `useStrategyCanvas` is a thin
+ * query + state hook — it delegates projection to the adapter and owns only
+ * form/save/conflict/draft state. Draft edges are merged into the projection
+ * via `ctxRef.current.localEdges`; `danglingTargets` flows back via
+ * `ctxRef.current.danglingTargets`.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -29,6 +35,7 @@ import { EdgeCreateDialog } from './strategy-canvas/edge-create-dialog';
 import { DraftEdgeInspector } from './strategy-canvas/inspectors/edge-inspector';
 import {
   ValidationPanel,
+  isSectionDirty,
   originalFormOf,
   templateRefOf,
   type SaveStatus,
@@ -65,6 +72,8 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
     onUseCurrent: () => {},
     onReapply: () => {},
     onDismiss: () => {},
+    danglingTargets: [],
+    localEdges: [],
   });
 
   const adapter = useMemo(() => createStrategyCanvasAdapter(ctxRef), []);
@@ -80,14 +89,13 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
         refetch: strategyState.graphQuery.refetch,
       };
     }
+    // V1.115 P0 T2: the adapter projects from `parsed` (not a pre-projected
+    // graph). The hook's draft edges are merged via ctxRef.localEdges inside
+    // the adapter's projectGraph — no graph field in the surface payload.
     return {
       data: {
-        ...data,
-        graph: {
-          ...data.graph,
-          nodes: strategyState.nodes as unknown as Node<StrategyNodeData>[],
-          edges: strategyState.edges as unknown as Edge<StrategyEdgeData>[],
-        },
+        revision: data.revision,
+        parsed: data.parsed,
         activeSession: strategyState.activeSession,
       },
       isLoading: strategyState.graphQuery.isLoading,
@@ -97,8 +105,6 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
     };
   }, [
     strategyState.graphQuery,
-    strategyState.nodes,
-    strategyState.edges,
     strategyState.activeSession,
   ]);
 
@@ -114,6 +120,18 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
   const promptTemplateRef = useMemo(() => {
     return selectedState ? templateRefOf(selectedState) : undefined;
   }, [selectedState]);
+
+  // V1.115 T2: revisionStatus was previously owned by useStrategyCanvas.
+  // It moved here because it depends on selectedState (now resolved from
+  // surface.selectedNode by the orchestrator, not from hook-owned node state).
+  const original = useMemo(() => originalFormOf(selectedState), [selectedState]);
+  const revisionStatus: 'clean' | 'dirty' | 'conflict' = strategyState.conflict
+    ? 'conflict'
+    : isSectionDirty('state', strategyState.form, original) ||
+        isSectionDirty('transition', strategyState.form, original) ||
+        isSectionDirty('prompt', strategyState.form, original)
+      ? 'dirty'
+      : 'clean';
 
   function updateField<K extends keyof typeof strategyState.form>(
     field: K,
@@ -134,6 +152,10 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
 
   // Update the mutable adapter context every render. The adapter object is
   // stable, so useCanvasSurface's projection memo survives state changes.
+  // V1.115 T2: localEdges feeds draft transition edges into the adapter's
+  // projectGraph so they appear on the canvas without a second projection
+  // path. danglingTargets is written BY the adapter during projection and
+  // read below for the ValidationPanel.
   ctxRef.current = {
     presetId,
     form: strategyState.form,
@@ -151,6 +173,8 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
     onUseCurrent: handleUseCurrent,
     onReapply: strategyState.handleReapply,
     onDismiss: () => strategyState.setConflict(null),
+    danglingTargets: ctxRef.current.danglingTargets,
+    localEdges: strategyState.draftEdges as Edge<StrategyEdgeData>[],
   };
 
   const showAltRef = useRef(surface.showAlt);
@@ -207,13 +231,15 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
 
   const parsed = strategyState.graphQuery.data?.parsed;
   const problems = parsed?.problems ?? [];
-  const dangling = strategyState.graphQuery.data?.graph.danglingTargets ?? [];
+  // V1.115 T2: danglingTargets is a projection byproduct written by the
+  // adapter's projectGraph into ctxRef.current.danglingTargets.
+  const dangling = ctxRef.current.danglingTargets ?? [];
 
   return (
     <div className="flex flex-col gap-4">
       <CanvasHeader
         revision={strategyState.baseRevision}
-        status={strategyState.revisionStatus}
+        status={revisionStatus}
         activeSession={strategyState.activeSession}
         showAlt={surface.showAlt}
         setShowAlt={surface.setShowAlt}
@@ -228,7 +254,6 @@ export function StrategyCanvas({ presetId }: StrategyCanvasProps) {
           edges={surface.edges}
           nodeTypes={surface.nodeTypes}
           onNodesChange={surface.onNodesChange}
-          onEdgesChange={strategyState.onEdgesChange}
           onConnect={onConnect}
           onReconnect={strategyState.onReconnect}
           summaryText={surface.summaryText}

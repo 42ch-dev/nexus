@@ -6,10 +6,13 @@
  * the canvas refetches the canonical preset before showing the reconcile modal,
  * and reapply refetches again before re-issuing the save trigger.
  *
- * This hook-level test proves that conflict handling and reapply both drive a
- * graph refetch without mounting React Flow in jsdom.
+ * V1.115 P0 T2 (W001): the hook no longer manages base node/edge state (the
+ * adapter owns projection). Tests target the hook's remaining responsibilities:
+ * draft edge management (draftEdges), conflict/reapply coordination, and the
+ * three transition-write mutations. Projection equivalence is covered by the
+ * adapter-level tests in `strategy-graph.test.ts`.
  */
-import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { renderHook, act, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -27,30 +30,13 @@ const mocks = vi.hoisted(() => {
   const graphQuery = {
     data: {
       revision: 1,
-      graph: {
-        nodes: [
-          {
-            id: 's1',
-            type: 'strategy-state',
-            position: { x: 0, y: 0 },
-            data: {
-              stateId: 's1',
-              label: 'S1',
-              stateKind: 'default',
-              presetId: 'preset-1',
-              isTerminal: false,
-              isInitial: true,
-              isGroup: false,
-            },
-            selected: true,
-          },
-        ],
-        edges: [],
-      },
       parsed: {
         manifest: {
           preset: { id: 'preset-1' },
-          states: [{ id: 's1', description: 'Original', next: 's2' }],
+          states: [
+            { id: 's1', description: 'Original', next: 's2' },
+            { id: 's2', description: 'Second' },
+          ],
         },
       },
     },
@@ -107,10 +93,9 @@ function makeCommitWrapper(client: NexusClient) {
 }
 
 describe('useStrategyCanvas edit-save-refetch (R-V171P0-QC1-008 B7)', () => {
-  it('exposes the selected state and refetches on conflict + reapply', async () => {
+  it('refetches on conflict + reapply and replays the save trigger', async () => {
     const { result } = renderHook(() => useStrategyCanvas('preset-1'), { wrapper });
 
-    expect(result.current.selectedState).toBeDefined();
     expect(result.current.graphQuery.refetch).toBe(mocks.refetch);
 
     act(() => {
@@ -134,15 +119,15 @@ describe('useStrategyCanvas onConnect draft edge (FB-SE-000)', () => {
   it('creates a draft transition edge when connecting two different states', () => {
     const { result } = renderHook(() => useStrategyCanvas('preset-1'), { wrapper });
 
-    expect(result.current.edges).toHaveLength(0);
+    expect(result.current.draftEdges).toHaveLength(0);
     expect(typeof result.current.onConnect).toBe('function');
 
     act(() => {
       result.current.onConnect({ source: 's1', target: 's2', sourceHandle: null, targetHandle: null });
     });
 
-    expect(result.current.edges).toHaveLength(1);
-    const draft = result.current.edges[0];
+    expect(result.current.draftEdges).toHaveLength(1);
+    const draft = result.current.draftEdges[0];
     expect(draft.source).toBe('s1');
     expect(draft.target).toBe('s2');
     expect(draft.label).toBe('Draft transition');
@@ -157,7 +142,7 @@ describe('useStrategyCanvas onConnect draft edge (FB-SE-000)', () => {
       result.current.onConnect({ source: 's1', target: 's1', sourceHandle: null, targetHandle: null });
     });
 
-    expect(result.current.edges).toHaveLength(0);
+    expect(result.current.draftEdges).toHaveLength(0);
   });
 
   it('does not call the daemon on connect (local-only draft)', () => {
@@ -171,34 +156,24 @@ describe('useStrategyCanvas onConnect draft edge (FB-SE-000)', () => {
     expect(result.current.saveTriggers.transition).toBe(0);
   });
 
-  it('preserves the draft edge when a refetch returns server data (Greptile Issue 4)', () => {
+  it('preserves the draft edge across re-renders (V1.115 T2: adapter owns base projection)', () => {
+    // V1.115 T2: the hook manages only drafts; base edges are projected by the
+    // adapter. A re-render (e.g. query refetch) does not touch draftEdges.
     const { result, rerender } = renderHook(() => useStrategyCanvas('preset-1'), { wrapper });
 
     act(() => {
       result.current.onConnect({ source: 's1', target: 's2', sourceHandle: null, targetHandle: null });
     });
 
-    expect(result.current.edges).toHaveLength(1);
-    const draft = result.current.edges[0];
+    expect(result.current.draftEdges).toHaveLength(1);
+    const draft = result.current.draftEdges[0];
     expect((draft.data as { isDraft?: boolean }).isDraft).toBe(true);
-
-    // Simulate a refetch that returns a canonical server edge for the same pair.
-    act(() => {
-      const data = mocks.graphQuery.data as { graph: { nodes: unknown[]; edges: unknown[] } };
-      mocks.graphQuery.data = {
-        ...data,
-        graph: {
-          ...data.graph,
-          edges: [{ id: 'e-s1-s2', source: 's1', target: 's2', type: 'strategy-edge' }],
-        },
-      } as unknown as typeof mocks.graphQuery.data;
-    });
 
     rerender();
 
-    // The server edge is applied, but the draft is kept because it has no matching server id.
-    expect(result.current.edges).toHaveLength(2);
-    expect(result.current.edges.some((e) => e.id === draft.id)).toBe(true);
+    // The draft survives — the adapter merges it with projected edges.
+    expect(result.current.draftEdges).toHaveLength(1);
+    expect(result.current.draftEdges.some((e) => e.id === draft.id)).toBe(true);
   });
 });
 
@@ -452,54 +427,12 @@ describe('useStrategyCanvas keyboard create (FB-SE-004)', () => {
 });
 
 describe('useStrategyCanvas edge reconnection (FB-SE-003)', () => {
-  // Seed the shared graph mock with an existing transition edge so a reconnect
-  // gesture has something to drag. The hoisted `mocks.graphQuery` is the same
-  // reference the hook reads, so mutating its nested arrays is visible to the
-  // hook's sync effect.
-  const reconnNodes = [
-    {
-      id: 's1',
-      type: 'strategy-state',
-      position: { x: 0, y: 0 },
-      data: {
-        stateId: 's1',
-        label: 'S1',
-        stateKind: 'default',
-        presetId: 'preset-1',
-        isTerminal: false,
-        isInitial: true,
-        isGroup: false,
-      },
-    },
-    {
-      id: 's2',
-      type: 'strategy-state',
-      position: { x: 200, y: 0 },
-      data: {
-        stateId: 's2',
-        label: 'S2',
-        stateKind: 'default',
-        presetId: 'preset-1',
-        isTerminal: false,
-        isInitial: false,
-        isGroup: false,
-      },
-    },
-    {
-      id: 's3',
-      type: 'strategy-state',
-      position: { x: 400, y: 0 },
-      data: {
-        stateId: 's3',
-        label: 'S3',
-        stateKind: 'default',
-        presetId: 'preset-1',
-        isTerminal: false,
-        isInitial: false,
-        isGroup: false,
-      },
-    },
-  ];
+  // V1.115 T2: the hook no longer manages base edge state — the adapter
+  // projects from `parsed`. Reconnect tests verify the daemon call shape and
+  // conflict routing. The optimistic edge update / revert (previously managed
+  // in hook edge state) is now handled at the adapter/orchestrator level:
+  // the edge moves to the new target on query refetch (success) or stays at
+  // the old target (failure — no daemon state changed).
   const existingEdge = {
     id: 'e-s1-s2-next-0',
     source: 's1',
@@ -507,38 +440,6 @@ describe('useStrategyCanvas edge reconnection (FB-SE-003)', () => {
     type: 'strategy-edge',
     data: { transitionKind: 'next' },
   };
-
-  beforeEach(() => {
-    // Cast through unknown: the hoisted mock infers `edges: never[]` from its
-    // initial `[]`, so a direct assignment would not type-check. The hook reads
-    // these by reference, so mutation is visible to its sync effect.
-    const graph = mocks.graphQuery.data!.graph as { nodes: unknown[]; edges: unknown[] };
-    graph.nodes = reconnNodes;
-    graph.edges = [existingEdge];
-  });
-
-  afterEach(() => {
-    // Restore the single-node, no-edge graph the earlier suites expect.
-    const graph = mocks.graphQuery.data!.graph as { nodes: unknown[]; edges: unknown[] };
-    graph.nodes = [
-      {
-        id: 's1',
-        type: 'strategy-state',
-        position: { x: 0, y: 0 },
-        data: {
-          stateId: 's1',
-          label: 'S1',
-          stateKind: 'default',
-          presetId: 'preset-1',
-          isTerminal: false,
-          isInitial: true,
-          isGroup: false,
-        },
-        selected: true,
-      },
-    ];
-    graph.edges = [];
-  });
 
   function makeReconnClient(patchImpl: () => Promise<unknown>): NexusClient {
     return {
@@ -555,7 +456,6 @@ describe('useStrategyCanvas edge reconnection (FB-SE-003)', () => {
       wrapper: makeCommitWrapper(client),
     });
 
-    await waitFor(() => expect(result.current.edges).toHaveLength(1));
     expect(typeof result.current.onReconnect).toBe('function');
 
     act(() => {
@@ -577,12 +477,6 @@ describe('useStrategyCanvas edge reconnection (FB-SE-003)', () => {
       new_target: 's3',
       op: 'update',
     });
-
-    // The author ends with one edge to the new target — no duplicate.
-    await waitFor(() => {
-      expect(result.current.edges).toHaveLength(1);
-      expect(result.current.edges[0].target).toBe('s3');
-    });
   });
 
   it('includes the branch condition on reconnect so sibling rules sharing a target are not all rewritten (Greptile Issue 1)', async () => {
@@ -593,16 +487,12 @@ describe('useStrategyCanvas edge reconnection (FB-SE-003)', () => {
       type: 'strategy-edge',
       data: { transitionKind: 'branch', condition: '_context.branch_a' },
     };
-    const graph = mocks.graphQuery.data!.graph as { nodes: unknown[]; edges: unknown[] };
-    graph.edges = [branchEdge];
 
     const patch = vi.fn().mockResolvedValue({ new_revision: 2 });
     const client = makeReconnClient(patch);
     const { result } = renderHook(() => useStrategyCanvas('preset-1'), {
       wrapper: makeCommitWrapper(client),
     });
-
-    await waitFor(() => expect(result.current.edges).toHaveLength(1));
 
     act(() => {
       result.current.onReconnect(branchEdge, {
@@ -625,16 +515,22 @@ describe('useStrategyCanvas edge reconnection (FB-SE-003)', () => {
     });
   });
 
-  it('reverts the edge to its previous target when the reconnect commit fails', async () => {
-    const patch = vi.fn().mockRejectedValue(new Error('daemon unavailable'));
+  it('routes a 409 conflict through the conflict modal handler on reconnect failure', async () => {
+    const conflictError = new NexusClientError(
+      409,
+      'strategy_conflict',
+      'Strategy revision is stale',
+      { current_revision: 1 },
+    );
+    const patch = vi.fn().mockRejectedValue(conflictError);
     const client = makeReconnClient(patch);
     const { result } = renderHook(() => useStrategyCanvas('preset-1'), {
       wrapper: makeCommitWrapper(client),
     });
 
-    await waitFor(() => expect(result.current.edges).toHaveLength(1));
+    expect(result.current.conflict).toBeNull();
 
-    act(() => {
+    await act(async () => {
       result.current.onReconnect(existingEdge, {
         source: 's1',
         target: 's3',
@@ -643,12 +539,10 @@ describe('useStrategyCanvas edge reconnection (FB-SE-003)', () => {
       });
     });
 
-    await waitFor(() => expect(patch).toHaveBeenCalledTimes(1));
-    // Failed reconnect restores the previous target — no partial daemon state.
-    await waitFor(() => {
-      expect(result.current.edges).toHaveLength(1);
-      expect(result.current.edges[0].target).toBe('s2');
-    });
+    await waitFor(() => expect(result.current.conflict).not.toBeNull());
+    expect(result.current.conflict).toMatchObject({ currentRevision: 1, section: 'transition' });
+    // A retry command is stored so "Reapply my edit" replays the reconnect, not a state-edit save.
+    expect(typeof result.current.conflict?.retry).toBe('function');
   });
 
   it('does not reconnect onto the same source (self-loop guard)', () => {
@@ -668,6 +562,5 @@ describe('useStrategyCanvas edge reconnection (FB-SE-003)', () => {
     });
 
     expect(patch).not.toHaveBeenCalled();
-    expect(result.current.edges[0].target).toBe('s2');
   });
 });

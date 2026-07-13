@@ -136,8 +136,10 @@ const strategyMocks = vi.hoisted(() => ({
     refetch: vi.fn(),
     data: {
       revision: 1,
-      parsed: { manifest: { states: [] }, problems: [] },
-      graph: { danglingTargets: [] },
+      parsed: {
+        manifest: { preset: { id: 'test' }, states: [] },
+        problems: [],
+      },
     },
   },
 }));
@@ -147,19 +149,11 @@ vi.mock('@/components/canvas/strategy-canvas/hooks/use-strategy-canvas', () => {
     graphQuery: strategyMocks.graphQuery,
     activeSession: null,
     creatorId: 'c1',
-    nodes: [] as never[],
-    edges: [] as never[],
-    onNodesChange: () => {},
-    onEdgesChange: () => {},
+    baseRevision: 1,
+    activeScheduleId: undefined,
+    draftEdges: [] as never[],
     onConnect: () => {},
     onReconnect: () => {},
-    selected: null,
-    selectedState: null,
-    baseRevision: 1,
-    promptTemplateRef: null,
-    revisionStatus: 'clean' as const,
-    summaryText: 'summary',
-    activeScheduleId: undefined,
     form: { label: '', description: '', nextTarget: '', promptBody: '' },
     setForm: () => {},
     saveStatuses: {},
@@ -178,6 +172,7 @@ vi.mock('@/components/canvas/strategy-canvas/hooks/use-strategy-canvas', () => {
     cancelDraft: () => {},
     commitKeyboardCreate: () => {},
     isCommittingKeyboardCreate: false,
+    isReconnecting: false,
   };
   return { useStrategyCanvas: () => strategyState };
 });
@@ -202,6 +197,8 @@ vi.mock('@/components/canvas/strategy-canvas/state-machine', () => ({
   RevisionBadge: () => null,
   ArtifactsList: () => null,
   originalFormOf: () => ({ label: '', description: '', nextTarget: '', promptBody: '' }),
+  templateRefOf: () => undefined,
+  isSectionDirty: () => false,
 }));
 vi.mock('@/components/canvas/strategy-alt-view', () => ({
   StrategyAltView: () => null,
