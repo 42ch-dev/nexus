@@ -6,12 +6,12 @@
       "id": "2026-07-13-v1.115-canvas-adapter-completion",
       "title": "P0 - Canvas Adapter Completion & Contract Convergence",
       "file": "plans/2026-07-13-v1.115-canvas-adapter-completion.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@frontend-dev"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.115",
         "canvas",
@@ -21,7 +21,7 @@
       ],
       "created_at": "2026-07-13",
       "updated_at": "2026-07-13",
-      "notes": "Foundation completion: migrate Outline+Timeline to adapter + fix W001/W002/W003/M001",
+      "notes": "Phase 2: SDD T1a-T5 done, QC tri Approve with residuals (6 low/nit), QA Pass",
       "metadata": {
         "iteration_refs": [
           "V1.115"
@@ -1265,6 +1265,74 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-12-v1.113-i18n-completion.md",
         "note": "qc2 S-003. Translation consistency polish."
+      }
+    ],
+    "2026-07-13-v1.115-canvas-adapter-completion": [
+      {
+        "id": "R-V1115P0QC1-W001",
+        "title": "Strategy onReconnect dropped optimistic edge update — visible UX lag (edge moves on refetch, not immediately)",
+        "severity": "low",
+        "decision": "accept",
+        "owner": "@frontend-dev",
+        "target": "post-V1.115",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-13-v1.115-canvas-adapter-completion.md",
+        "note": "QC1-W-001. Documented T2 behavior change; reconnect routing/conflict handling unchanged; optimistic visual feedback is UX enhancement."
+      },
+      {
+        "id": "R-V1115P0QC1-W002",
+        "title": "Greptile Issue 4 regression coverage gap — deleted reconnect scenario in use-strategy-canvas.test.tsx not replaced",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.115",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-13-v1.115-canvas-adapter-completion.md",
+        "note": "QC1-W-002. Test-coverage polish."
+      },
+      {
+        "id": "R-V1115P0QC1-S002",
+        "title": "Outline orchestrator grew to 537 lines — extract selection hook when >600",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.115",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-13-v1.115-canvas-adapter-completion.md",
+        "note": "QC1-S-002. Module-split threshold."
+      },
+      {
+        "id": "R-V1115P0QC1-S003",
+        "title": "World KB context keeps selection alongside node.data routing — harden against future consolidation",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.115",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-13-v1.115-canvas-adapter-completion.md",
+        "note": "QC1-S-003. Hardening; functional today."
+      },
+      {
+        "id": "R-V1115P0QC1-S004",
+        "title": "Position-merge sync test orphaned by refactor — relocate to use-canvas-surface.test.ts",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.115",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-13-v1.115-canvas-adapter-completion.md",
+        "note": "QC1-S-004. Test relocation polish."
+      },
+      {
+        "id": "R-V1115P0QC2-S001",
+        "title": "Add integration test for hasSuppliedPositions end-to-end behavior",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.115",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-13-v1.115-canvas-adapter-completion.md",
+        "note": "QC2-S-001. Test-coverage polish."
       }
     ],
     "2026-07-13-v1.114-canvas-architecture-foundation": [
