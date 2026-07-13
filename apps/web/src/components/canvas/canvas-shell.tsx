@@ -90,7 +90,10 @@ function CanvasShellInner({
   const hasCachedViewport = cachedViewport !== null;
 
   return (
-    <div className="relative h-[calc(100vh-180px)] min-h-[420px] w-full overflow-hidden rounded-card border border-gray-alpha-400 bg-canvas-surface">
+    <div
+      data-command-palette-ignore
+      className="relative h-[calc(100vh-180px)] min-h-[420px] w-full overflow-hidden rounded-card border border-gray-alpha-400 bg-canvas-surface"
+    >
       {/* Screen-reader graph summary (A8 #3) — live region, polite. */}
       <div className="sr-only" role="status" aria-live="polite" aria-atomic="true">
         {summaryText}
