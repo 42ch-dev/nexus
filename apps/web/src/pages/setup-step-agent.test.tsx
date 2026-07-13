@@ -257,6 +257,48 @@ describe('SetupStepAgent', () => {
     expect(lastCall.customLaunchCommand).toBe('');
   });
 
+  it('renders and selects native CLI entries with registry_agent_id: null (AD-5)', async () => {
+    const user = userEvent.setup();
+    const nativeAgent = makeAgent({
+      name: 'codex (native CLI)',
+      registry_agent_id: null,
+      installed: true,
+      launch_command: 'codex',
+    });
+    const onChange = vi.fn();
+
+    useHandlers(
+      http.post('/v1/daemon/agent-host/scan', () =>
+        HttpResponse.json({ agents: [nativeAgent] }),
+      ),
+    );
+
+    renderInApp(
+      <SetupStepAgent
+        state={makeState()}
+        onChange={onChange}
+        onNext={vi.fn()}
+      />,
+      { client: makeClient(), initialRouterEntries: ['/setup'] },
+    );
+
+    // Native CLI entries are not part of COMMON_AGENT_PRIORITY, so they render
+    // behind the More toggle. Expanding proves they are visible (not filtered).
+    await expandRestAgents(user);
+    await waitFor(() =>
+      expect(screen.getByText('codex (native CLI)')).toBeInTheDocument(),
+    );
+    const selectId = 'agent-card-select-codex (native CLI)';
+    expect(screen.getByTestId(selectId)).toBeInTheDocument();
+
+    await user.click(screen.getByTestId(selectId));
+
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    const lastCall = onChange.mock.calls[onChange.mock.calls.length - 1]![0];
+    expect(lastCall.selectedAgent).toEqual(nativeAgent);
+    expect(lastCall.customLaunchCommand).toBe('');
+  });
+
   it('does not select not-installed cards', async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
@@ -431,7 +473,7 @@ describe('SetupStepAgent', () => {
     expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
 
     // Verify matches the installed agent's launch command → Continue enabled.
-    await user.click(screen.getByRole('button', { name: 'Verify Agent' }));
+    await user.click(screen.getByRole('button', { name: 'Verify' }));
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled(),
     );
@@ -454,7 +496,7 @@ describe('SetupStepAgent', () => {
     await user.type(input, '/bin/nonexistent');
 
     expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
-    await user.click(screen.getByRole('button', { name: 'Verify Agent' }));
+    await user.click(screen.getByRole('button', { name: 'Verify' }));
     await waitFor(() =>
       expect(screen.getByTestId('agent-picker-verify-error')).toBeInTheDocument(),
     );

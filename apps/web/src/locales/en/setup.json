@@ -52,7 +52,7 @@
       "label": "Use custom launch command",
       "placeholder": "e.g. /usr/local/bin/my-agent"
     },
-    "verify": "Verify Agent",
+    "verify": "Verify",
     "verifying": "Verifying…",
     "verifySuccess": "Agent responded successfully.",
     "verifyNoMatch": "No matching agent for this command. Check the command and try again.",
