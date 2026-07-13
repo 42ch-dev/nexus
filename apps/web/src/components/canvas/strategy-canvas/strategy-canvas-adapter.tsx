@@ -1,11 +1,12 @@
 import type { MutableRefObject } from 'react';
-import type { Node } from '@xyflow/react';
+import type { Edge, Node } from '@xyflow/react';
 
 import type { CanvasSurfaceAdapter } from '../canvas-surface-adapter';
 import type { ConflictModalProps } from '../conflict-modal';
 import { StrategyAltView } from '../strategy-alt-view';
 import { strategyNodeTypes } from '../strategy-nodes';
-import type { StrategyEdgeData, StrategyGraph, StrategyNodeData } from '@/lib/canvas/strategy-graph';
+import { buildStrategyGraph } from '@/lib/canvas/strategy-graph';
+import type { StrategyEdgeData, StrategyNodeData } from '@/lib/canvas/strategy-graph';
 import type { ParsedPreset, PresetState } from '@/lib/canvas/preset-yaml';
 import { isStrategyConflictError } from '@/lib/canvas/use-strategy-data';
 
@@ -27,10 +28,15 @@ export interface ActiveSession {
   status: string;
 }
 
-/** Graph payload consumed by the Strategy surface adapter. */
+/**
+ * Graph payload consumed by the Strategy surface adapter.
+ *
+ * V1.115 P0 T2 (W001): the pre-projected `graph` field is dropped — the adapter
+ * projects from `parsed` via `buildStrategyGraph` inside `projectGraph`. This
+ * makes the adapter's contract honest (it owns projection, not a passthrough).
+ */
 export interface StrategySurfaceGraph {
   revision: number;
-  graph: StrategyGraph;
   parsed: ParsedPreset;
   activeSession: ActiveSession | null | undefined;
 }
@@ -59,6 +65,18 @@ export interface StrategyCanvasAdapterContext {
   onUseCurrent: () => void;
   onReapply: () => void;
   onDismiss: () => void;
+  /**
+   * Projection byproduct — the adapter writes `danglingTargets` here after
+   * projecting; the orchestrator reads it for the ValidationPanel (V1.115 T2).
+   */
+  danglingTargets: string[];
+  /**
+   * Local edge modifications (draft transition edges created by the author via
+   * `onConnect`) that live outside the daemon-persisted graph. The adapter
+   * merges them with the projected edges so drafts are visible on the canvas
+   * without a second projection path (V1.115 T2).
+   */
+  localEdges: Edge<StrategyEdgeData>[];
 }
 
 export type StrategyCanvasAdapter = CanvasSurfaceAdapter<StrategySurfaceGraph, StrategyNodeData, StrategyEdgeData>;
@@ -67,6 +85,11 @@ export type StrategyCanvasAdapter = CanvasSurfaceAdapter<StrategySurfaceGraph, S
  * Strategy canvas adapter — projects the daemon preset graph into React Flow
  * nodes/edges and renders surface-specific chrome (inspectors, alt-view,
  * conflict modal, a11y summary).
+ *
+ * V1.115 P0 T2 (W001): `projectGraph` performs the real projection via
+ * `buildStrategyGraph(parsed)` — it is no longer a passthrough. The projection
+ * runs once inside `useCanvasSurface`'s `useMemo`, matching the old timing
+ * (the query fn previously called `buildStrategyGraph`; now the adapter does).
  *
  * The returned adapter is stable; it reads mutable values from the supplied
  * context ref so the orchestrator can update state without invalidating the
@@ -82,9 +105,45 @@ export function createStrategyCanvasAdapter(
     layoutOptions: { direction: 'TB' },
 
     projectGraph(graph) {
+      const projected = buildStrategyGraph(graph.parsed);
+
+      // Surface the dangling-targets byproduct via ctxRef so the orchestrator
+      // can feed the ValidationPanel without extending the projectGraph return
+      // shape (adapter interface stability constraint).
+      ctxRef.current.danglingTargets = projected.danglingTargets;
+
+      // Apply live session overlay — mark the current node with its session
+      // status so strategy nodes can render the active indicator (previously
+      // owned by useStrategyCanvas's node-state sync effect; moved here so the
+      // adapter owns the full projection pipeline).
+      let nodes = projected.nodes;
+      const session = graph.activeSession;
+      if (session) {
+        const currentTask = session.current_task_id;
+        const sessionStatus = session.status;
+        nodes = nodes.map((n) => {
+          const data = n.data as StrategyNodeData;
+          const isCurrent =
+            currentTask !== undefined &&
+            (n.id === currentTask ||
+              data.stateId === currentTask ||
+              n.id.startsWith(`${currentTask}::`));
+          return isCurrent
+            ? { ...n, data: { ...data, status: sessionStatus ?? '__current__' } }
+            : n;
+        });
+      }
+
+      // Merge local edge modifications (draft transition edges created by the
+      // author via onConnect) that are not yet persisted to the daemon graph.
+      // Drafts have no matching projected edge id, so we append them.
+      const localEdges = ctxRef.current.localEdges;
+      const baseIds = new Set(projected.edges.map((e) => e.id));
+      const drafts = localEdges.filter((e) => !baseIds.has(e.id));
+
       return {
-        nodes: graph.graph.nodes,
-        edges: graph.graph.edges,
+        nodes,
+        edges: [...projected.edges, ...drafts],
       };
     },
 
@@ -167,8 +226,16 @@ export function createStrategyCanvasAdapter(
     },
 
     summarizeGraph(graph) {
-      const count = graph.graph.nodes.length;
-      const edgeCount = graph.graph.edges.length;
+      const states = graph.parsed.manifest.states;
+      const count = states.length;
+      let edgeCount = 0;
+      for (const s of states) {
+        if (typeof s.next === 'string') {
+          edgeCount++;
+        } else if (s.next && typeof s.next === 'object') {
+          edgeCount += (s.next.rules?.length ?? 0) + (s.next.default ? 1 : 0);
+        }
+      }
       const sel = ctxRef.current.selectedNode ? ` Selected: ${ctxRef.current.selectedNode.id}.` : '';
       const live = graph.activeSession
         ? ` Current node: ${graph.activeSession.current_task_id ?? 'none'}. Session status: ${graph.activeSession.status}.`

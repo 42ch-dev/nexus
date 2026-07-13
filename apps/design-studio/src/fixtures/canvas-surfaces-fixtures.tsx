@@ -4,13 +4,12 @@
  * Presentational-only preview of the shared canvas shell chrome + context-menu
  * chrome. No `@xyflow/react`, no `@42ch/nexus-contracts`, no daemon data.
  *
- * Outline node chrome mirrors the P0 `outline-nodes.tsx` visual structure
- * (Volume / Chapter / Timeline Event) using the same `canvas-outline-*` and
- * `canvas-node-*` CSS tokens shared via `@nexus/design-tokens`. Because Studio
- * cannot import `@xyflow/react` (Handle/Position/NodeProps) or `ChapterStatus`,
- * the nodes are mirrored as static presentational markup — not the live RF
- * nodes. The token values are identical, so light/dark visual acceptance here
- * carries to the App graph.
+ * Outline / Strategy / Scene-Beat node chrome consumes the shared
+ * `NodeChromeShell` presentational extract (`@web-canvas/node-chrome-shell`)
+ * — the same source the App RF node wrappers use. Because the extract is
+ * free of `@xyflow/react`, Studio imports it directly without pulling RF
+ * into the gallery. The token values are identical, so light/dark visual
+ * acceptance here carries to the App graph.
  *
  * Context-menu chrome mirrors `path-context-menu.tsx` and
  * `world-kb-entity-context-menu.tsx` (role="menu", rounded-popover, shadow).
@@ -29,6 +28,12 @@ import {
   ZoomIn,
   ZoomOut,
 } from 'lucide-react';
+
+import {
+  NodeChromeShell,
+  NODE_STATUS_DOT,
+  type NodeStatus,
+} from '@web-canvas/node-chrome-shell';
 
 /* ------------------------------------------------------------------ */
 /*  Shared fixture frame                                                */
@@ -58,8 +63,9 @@ function FixtureFrame({
 }
 
 /* ------------------------------------------------------------------ */
-/*  Outline node chrome — mirrored from P0 outline-nodes.tsx            */
-/*  (same canvas-outline-* / canvas-node-* tokens; no RF types)         */
+/*  Outline node chrome — consumes the shared NodeChromeShell extract     */
+/*  (@web-canvas/node-chrome-shell). Same canvas-outline-* / canvas-node-* */
+/*  tokens as the App; no RF types.                                      */
 /* ------------------------------------------------------------------ */
 
 /**
@@ -81,35 +87,10 @@ const CHAPTER_STATUS_LABELS = {
 
 type ChapterStatusKey = keyof typeof CHAPTER_STATUS_TOKENS;
 
-function NodeShell({
-  selected,
-  children,
-  className,
-  style,
-}: {
-  selected: boolean;
-  children: ReactNode;
-  className?: string;
-  style?: React.CSSProperties;
-}) {
-  return (
-    <div
-      className={[
-        'min-w-[176px] rounded-card border bg-canvas-node-fill px-3 py-2 shadow-card transition-colors duration-state ease-standard',
-        selected ? 'border-canvas-node-border-selected' : 'border-canvas-node-border',
-        className ?? '',
-      ].join(' ')}
-      style={style}
-    >
-      {children}
-    </div>
-  );
-}
-
 /** Volume lane node — mirrors P0 OutlineVolumeNode. */
 function VolumeNodeSample({ label, chapterCount }: { label: string; chapterCount: number }) {
   return (
-    <NodeShell
+    <NodeChromeShell
       selected={false}
       style={{ background: 'var(--color-canvas-outline-volume-fill)' }}
     >
@@ -117,7 +98,7 @@ function VolumeNodeSample({ label, chapterCount }: { label: string; chapterCount
       <p className="mt-0.5 text-label-12 text-gray-700">
         {chapterCount} {chapterCount === 1 ? 'chapter' : 'chapters'}
       </p>
-    </NodeShell>
+    </NodeChromeShell>
   );
 }
 
@@ -139,7 +120,7 @@ function ChapterNodeSample({
 }) {
   const tokenVar = `var(${CHAPTER_STATUS_TOKENS[status]})`;
   return (
-    <NodeShell selected={selected}>
+    <NodeChromeShell selected={selected}>
       <div className="flex items-center justify-between gap-2">
         <span
           className="truncate font-heading text-copy-14 font-semibold text-gray-1000"
@@ -172,7 +153,7 @@ function ChapterNodeSample({
       <p className="mt-1 text-label-12 text-gray-700">
         {actualWords}/{plannedWords} words
       </p>
-    </NodeShell>
+    </NodeChromeShell>
   );
 }
 
@@ -187,7 +168,7 @@ function TimelineEventNodeSample({
   realizesLabel: string;
 }) {
   return (
-    <NodeShell
+    <NodeChromeShell
       selected={false}
       style={{
         borderLeftColor: 'var(--color-canvas-outline-timeline-event-pin)',
@@ -204,13 +185,14 @@ function TimelineEventNodeSample({
         <p className="mt-0.5 line-clamp-2 text-copy-13 text-gray-900">{description}</p>
       ) : null}
       <p className="mt-0.5 text-label-12 text-gray-700">{realizesLabel}</p>
-    </NodeShell>
+    </NodeChromeShell>
   );
 }
 
 /* ------------------------------------------------------------------ */
-/*  Scene/Beat node chrome — mirrored from V1.109 C2 scene-beat-nodes.tsx */
-/*  (same canvas-outline-scene-* / canvas-outline-beat-* tokens)         */
+/*  Scene/Beat node chrome — consumes the shared NodeChromeShell extract  */
+/*  (@web-canvas/node-chrome-shell). Same canvas-outline-scene-* /        */
+/*  canvas-outline-beat-* tokens as the App.                             */
 /* ------------------------------------------------------------------ */
 
 const SCENE_STATUS_TOKENS = {
@@ -240,11 +222,9 @@ function SceneNodeSample({
 }) {
   const tokenVar = status ? `var(${SCENE_STATUS_TOKENS[status]})` : null;
   return (
-    <div
-      className={[
-        'min-w-[160px] rounded-card border px-3 py-2 shadow-card transition-colors duration-state ease-standard',
-        selected ? 'border-canvas-node-border-selected' : '',
-      ].join(' ')}
+    <NodeChromeShell
+      selected={selected}
+      className="min-w-[160px]"
       style={{
         background: 'var(--color-canvas-outline-scene-fill)',
         borderColor: selected ? undefined : 'var(--color-canvas-outline-scene-border)',
@@ -274,7 +254,7 @@ function SceneNodeSample({
           </span>
         </div>
       ) : null}
-    </div>
+    </NodeChromeShell>
   );
 }
 
@@ -284,11 +264,9 @@ function SceneNodeSample({
  */
 function BeatNodeSample({ title, selected = false }: { title: string; selected?: boolean }) {
   return (
-    <div
-      className={[
-        'min-w-[160px] rounded-card border px-3 py-2 shadow-card transition-colors duration-state ease-standard',
-        selected ? 'border-canvas-node-border-selected' : '',
-      ].join(' ')}
+    <NodeChromeShell
+      selected={selected}
+      className="min-w-[160px]"
       style={{
         background: 'var(--color-canvas-outline-beat-fill)',
         borderColor: selected ? undefined : 'var(--color-canvas-outline-beat-border)',
@@ -300,7 +278,7 @@ function BeatNodeSample({ title, selected = false }: { title: string; selected?:
       >
         {title}
       </span>
-    </div>
+    </NodeChromeShell>
   );
 }
 
@@ -507,35 +485,20 @@ function CanvasShellChrome({
 }
 
 /* ------------------------------------------------------------------ */
-/*  Strategy surface chrome — mirrored from strategy-nodes.tsx +         */
-/*  strategy-canvas/state-machine + strategy-canvas/inspector-panel.     */
-/*  Hand-mirrored static markup (no RF types, no App canvas import).     */
-/*  Tokens: canvas-strategy-accent (purple) + generic canvas-node-*.     */
-/*  Status overlay uses semantic colors (Draft §3.6: canvas tokens cover */
-/*  shared primitives only).                                            */
+/*  Strategy surface chrome — consumes NodeChromeShell (@web-canvas) +    */
+/*  mirrors strategy-canvas/state-machine + strategy-canvas/inspector-    */
+/*  panel. Static props into the shared extract (no RF types, no App      */
+/*  canvas import). Tokens: canvas-strategy-accent (purple) + generic     */
+/*  canvas-node-*. Status overlay uses semantic colors (Draft §3.6:       */
+/*  canvas tokens cover shared primitives only).                         */
 /* ------------------------------------------------------------------ */
 
 /**
- * Status → ring/dot/label. Mirrors the STATUS_RING / STATUS_DOT /
- * STATUS_LABEL maps in `strategy-nodes.tsx` verbatim. The overlay is driven
- * by live session state in the App; here it is a static matrix.
+ * Status → label. The ring + dot classes come from the shared
+ * `NodeChromeShell` extract (`NODE_STATUS_RING` / `NODE_STATUS_DOT`); only the
+ * human-readable label is Studio-owned (static — the App resolves the same
+ * statuses via i18n `t()` at render time).
  */
-const STRATEGY_STATUS_RING = {
-  current: 'ring-2 ring-blue-700',
-  running: 'ring-2 ring-green-700',
-  waiting: 'ring-2 ring-amber-700',
-  error: 'ring-2 ring-red-700',
-  completed: 'ring-2 ring-teal-700',
-} as const;
-
-const STRATEGY_STATUS_DOT = {
-  current: 'bg-blue-700',
-  running: 'bg-green-700',
-  waiting: 'bg-amber-700',
-  error: 'bg-red-700',
-  completed: 'bg-teal-700',
-} as const;
-
 const STRATEGY_STATUS_LABEL = {
   current: 'Current',
   running: 'Running',
@@ -544,47 +507,9 @@ const STRATEGY_STATUS_LABEL = {
   completed: 'Completed',
 } as const;
 
-type StrategyStatus = keyof typeof STRATEGY_STATUS_RING;
+type StrategyStatus = NodeStatus;
 
-/**
- * Strategy node shell — mirrors `NodeShell` in `strategy-nodes.tsx`:
- * `bg-canvas-node-fill`, `border-canvas-node(-selected)`, optional status
- * ring, and the `border-l-canvas-strategy-accent` accent stripe for outer
- * states. Distinct from the outline `NodeShell` above (which has no status /
- * accent props) so the outline pattern is not perturbed.
- */
-function StrategyNodeShell({
-  selected,
-  status,
-  accent,
-  children,
-  className,
-  style,
-}: {
-  selected: boolean;
-  status: StrategyStatus | null;
-  accent?: boolean;
-  children: ReactNode;
-  className?: string;
-  style?: React.CSSProperties;
-}) {
-  return (
-    <div
-      className={[
-        'min-w-[176px] rounded-card border bg-canvas-node-fill px-3 py-2 shadow-card transition-colors duration-state ease-standard',
-        selected ? 'border-canvas-node-border-selected' : 'border-canvas-node-border',
-        status ? STRATEGY_STATUS_RING[status] : '',
-        accent ? 'border-l-[3px] border-l-canvas-strategy-accent' : '',
-        className ?? '',
-      ].join(' ')}
-      style={style}
-    >
-      {children}
-    </div>
-  );
-}
-
-/** Header row — label + status chip. Mirrors NodeHeader in strategy-nodes.tsx. */
+/** Header row — label + status chip. Consumes the shared NODE_STATUS_DOT. */
 function StrategyNodeHeader({
   label,
   status,
@@ -603,7 +528,7 @@ function StrategyNodeHeader({
       {status ? (
         <span className="flex items-center gap-1 text-label-12 text-gray-700">
           <span
-            className={`inline-block h-2 w-2 rounded-pill ${STRATEGY_STATUS_DOT[status]}`}
+            className={`inline-block h-2 w-2 rounded-pill ${NODE_STATUS_DOT[status]}`}
             aria-hidden
           />
           {STRATEGY_STATUS_LABEL[status]}
@@ -639,7 +564,7 @@ function StrategyStateSample({
   selected?: boolean;
 }) {
   return (
-    <StrategyNodeShell selected={selected} status={status} accent>
+    <NodeChromeShell selected={selected} status={status ?? undefined} accent>
       <StrategyNodeHeader label={label} status={status} />
       <StrategyKindTag kind={stateKind} />
       {description ? (
@@ -648,7 +573,7 @@ function StrategyStateSample({
       {isInitial ? (
         <span className="mt-1 inline-block text-label-12 text-purple-700">Start</span>
       ) : null}
-    </StrategyNodeShell>
+    </NodeChromeShell>
   );
 }
 
@@ -665,12 +590,12 @@ function StrategyJoinSample({
   selected?: boolean;
 }) {
   return (
-    <StrategyNodeShell selected={selected} status={status}>
+    <NodeChromeShell selected={selected} status={status ?? undefined}>
       <StrategyNodeHeader label={label} status={status} />
       <span className="mt-0.5 inline-block rounded-pill bg-[color-mix(in_srgb,var(--color-purple-700)_12%,transparent)] px-1.5 py-0.5 text-label-12 text-purple-1000">
         Join · {convergeStrategy}
       </span>
-    </StrategyNodeShell>
+    </NodeChromeShell>
   );
 }
 
@@ -685,10 +610,10 @@ function StrategyTerminalSample({
   selected?: boolean;
 }) {
   return (
-    <StrategyNodeShell selected={selected} status={status} className="min-w-[140px]">
+    <NodeChromeShell selected={selected} status={status ?? undefined} className="min-w-[140px]">
       <StrategyNodeHeader label={label} status={status} />
       <span className="mt-0.5 inline-block text-label-12 text-gray-700">End</span>
-    </StrategyNodeShell>
+    </NodeChromeShell>
   );
 }
 

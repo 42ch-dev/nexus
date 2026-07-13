@@ -123,7 +123,7 @@ describe('resolveCanvasNavTarget — Outline (workId-aware)', () => {
   });
 });
 
-describe('resolveCanvasNavTarget — World KB (worldId-gated, no /worlds picker)', () => {
+describe('resolveCanvasNavTarget — World KB (worldId-aware, /worlds picker fallback)', () => {
   it('routes to the world-scoped kb surface when a worldId is present', () => {
     expect(resolveCanvasNavTarget('world-kb', { worldId: 'world-7' })).toBe('/worlds/world-7/kb');
   });
@@ -132,17 +132,18 @@ describe('resolveCanvasNavTarget — World KB (worldId-gated, no /worlds picker)
     expect(resolveCanvasNavTarget('world-kb', { worldId: 'w 7' })).toBe('/worlds/w%207/kb');
   });
 
-  it('returns null (disabled) when no worldId is in the URL — no /worlds picker exists', () => {
-    expect(resolveCanvasNavTarget('world-kb', {})).toBeNull();
+  it('falls back to the /worlds picker when no worldId is in the URL', () => {
+    expect(resolveCanvasNavTarget('world-kb', {})).toBe('/worlds');
   });
 
-  it('returns null (disabled) when worldId is undefined', () => {
-    expect(resolveCanvasNavTarget('world-kb', { worldId: undefined })).toBeNull();
+  it('falls back to the /worlds picker when worldId is undefined', () => {
+    expect(resolveCanvasNavTarget('world-kb', { worldId: undefined })).toBe('/worlds');
   });
 
   it('does not use the workId as a fallback for the world target', () => {
-    // A workId is NOT a worldId; the resolver must not conflate them.
-    expect(resolveCanvasNavTarget('world-kb', { workId: 'w-1' })).toBeNull();
+    // A workId is NOT a worldId; the resolver must not conflate them. Without a
+    // worldId it falls back to the picker, not to the work-scoped route.
+    expect(resolveCanvasNavTarget('world-kb', { workId: 'w-1' })).toBe('/worlds');
   });
 });
 
@@ -161,7 +162,8 @@ describe('resolveCanvasNavTarget — context is not mutated', () => {
     expect(resolveCanvasNavTarget('outline', { workId: 'w-1', worldId: 'world-7' })).toBe(
       '/works/w-1/outline',
     );
-    // World KB target depends only on worldId; a present workId does not ungate it.
-    expect(resolveCanvasNavTarget('world-kb', { workId: 'w-1' })).toBeNull();
+    // World KB target depends only on worldId; a present workId does not
+    // ungate it — it still falls back to the /worlds picker.
+    expect(resolveCanvasNavTarget('world-kb', { workId: 'w-1' })).toBe('/worlds');
   });
 });

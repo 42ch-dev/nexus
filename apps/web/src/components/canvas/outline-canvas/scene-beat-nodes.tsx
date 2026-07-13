@@ -28,6 +28,7 @@ import type {
   OutlineSceneStatus,
 } from './rf-projection';
 import { SCENE_STATUS_LABEL_KEYS } from './graph-projection';
+import { NodeChromeShell } from '../presentational/node-chrome-shell';
 
 // Re-export for type-only consumers that historically imported these from the
 // node component module (T1 defined them here; T2 promoted the canonical
@@ -54,37 +55,6 @@ function sceneStatusColorVar(status: OutlineSceneStatus): string {
 }
 
 // ---------------------------------------------------------------------------
-// Shared node shell (mirrors outline-nodes.tsx NodeShell but consumes
-// scene/beat fill + border tokens instead of the shared canvas-node-* tokens)
-// ---------------------------------------------------------------------------
-
-interface SceneBeatNodeShellProps {
-  selected: boolean;
-  /** CSS variable name for the fill token (e.g. `var(--color-canvas-outline-scene-fill)`). */
-  fillVar: string;
-  /** CSS variable name for the border token. */
-  borderVar: string;
-  children: React.ReactNode;
-}
-
-function SceneBeatNodeShell({ selected, fillVar, borderVar, children }: SceneBeatNodeShellProps) {
-  return (
-    <div
-      className={[
-        'min-w-[160px] rounded-card border px-3 py-2 shadow-card transition-colors duration-state ease-standard',
-        selected ? 'border-canvas-node-border-selected' : '',
-      ].join(' ')}
-      style={{
-        background: fillVar,
-        borderColor: selected ? undefined : borderVar,
-      }}
-    >
-      {children}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Scene node
 // ---------------------------------------------------------------------------
 
@@ -97,10 +67,13 @@ export const OutlineSceneNode = memo(function OutlineSceneNode({
   const d = data as OutlineSceneNodeData;
   const title = d.title || t('outlineAltView.untitledScene');
   return (
-    <SceneBeatNodeShell
+    <NodeChromeShell
       selected={!!selected}
-      fillVar="var(--color-canvas-outline-scene-fill)"
-      borderVar="var(--color-canvas-outline-scene-border)"
+      className="min-w-[160px]"
+      style={{
+        background: 'var(--color-canvas-outline-scene-fill)',
+        borderColor: selected ? undefined : 'var(--color-canvas-outline-scene-border)',
+      }}
     >
       <Handle type="target" position={Position.Left} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
       <span className="truncate font-heading text-copy-14 font-semibold text-gray-1000" title={title}>
@@ -125,7 +98,7 @@ export const OutlineSceneNode = memo(function OutlineSceneNode({
         </div>
       ) : null}
       <Handle type="source" position={Position.Right} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
-    </SceneBeatNodeShell>
+    </NodeChromeShell>
   );
 });
 
@@ -142,16 +115,19 @@ export const OutlineBeatNode = memo(function OutlineBeatNode({
   const d = data as OutlineBeatNodeData;
   const title = d.title || t('outlineAltView.untitledBeat');
   return (
-    <SceneBeatNodeShell
+    <NodeChromeShell
       selected={!!selected}
-      fillVar="var(--color-canvas-outline-beat-fill)"
-      borderVar="var(--color-canvas-outline-beat-border)"
+      className="min-w-[160px]"
+      style={{
+        background: 'var(--color-canvas-outline-beat-fill)',
+        borderColor: selected ? undefined : 'var(--color-canvas-outline-beat-border)',
+      }}
     >
       <Handle type="target" position={Position.Left} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
       <span className="truncate font-heading text-copy-14 font-semibold text-gray-1000" title={title}>
         {title}
       </span>
       <Handle type="source" position={Position.Right} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
-    </SceneBeatNodeShell>
+    </NodeChromeShell>
   );
 });

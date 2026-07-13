@@ -22,6 +22,7 @@ import { SettingsShellLayout } from '@/pages/settings/settings-shell-layout';
 import { SettingsWorkspaceSection } from '@/pages/settings/settings-workspace-section';
 import { WorkDetailPage } from '@/pages/work-detail-page';
 import { WorksPage } from '@/pages/works-page';
+import { WorldsPage } from '@/pages/worlds-page';
 import { SetupWizardPage } from '@/pages/setup-wizard-page';
 import { StrategiesPage } from '@/pages/strategies-page';
 import { LoadingState } from '@/components/ui/states';
@@ -80,6 +81,10 @@ function AppRoutes() {
               <OutlinePage />
             </Suspense>
           }
+        />
+        <Route
+          path="worlds"
+          element={<WorldsPage />}
         />
         <Route
           path="worlds/:worldId/kb"

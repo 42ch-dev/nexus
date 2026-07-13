@@ -176,3 +176,127 @@ describe('useAutoLayout — dagre integration', () => {
     warnSpy.mockRestore();
   });
 });
+
+describe('useAutoLayout — supplied-positions mode (W003)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('preserves supplied positions on first open when hasSuppliedPositions is true', () => {
+    const nodes: Node<{ label: string }>[] = [
+      { id: 'a', type: 'default', position: { x: 100, y: 200 }, data: { label: 'A' } },
+      { id: 'b', type: 'default', position: { x: 300, y: 400 }, data: { label: 'B' } },
+      { id: 'c', type: 'default', position: { x: 500, y: 600 }, data: { label: 'C' } },
+    ];
+    const edges: Edge[] = [
+      { id: 'e1', source: 'a', target: 'b' },
+      { id: 'e2', source: 'b', target: 'c' },
+    ];
+
+    const { result } = renderHook(() =>
+      useAutoLayout(nodes, edges, { direction: 'TB', hasSuppliedPositions: true }),
+    );
+
+    // Positions must be preserved exactly — dagre must not override them.
+    expect(result.current.nodes.find((n) => n.id === 'a')!.position).toEqual({ x: 100, y: 200 });
+    expect(result.current.nodes.find((n) => n.id === 'b')!.position).toEqual({ x: 300, y: 400 });
+    expect(result.current.nodes.find((n) => n.id === 'c')!.position).toEqual({ x: 500, y: 600 });
+  });
+
+  it('does not treat supplied positions as manual drags on subsequent renders', () => {
+    const initialNodes: Node<{ label: string }>[] = [
+      { id: 'a', type: 'default', position: { x: 10, y: 20 }, data: { label: 'A' } },
+      { id: 'b', type: 'default', position: { x: 30, y: 40 }, data: { label: 'B' } },
+    ];
+    const edges: Edge[] = [{ id: 'e1', source: 'a', target: 'b' }];
+
+    const { result, rerender } = renderHook(
+      ({ nodes, edges }) => useAutoLayout(nodes, edges, { direction: 'TB', hasSuppliedPositions: true }),
+      { initialProps: { nodes: initialNodes, edges } },
+    );
+
+    // Re-render with the same positions (e.g. a graph refresh). The hook must
+    // not classify the supplied positions as manual drags and must continue to
+    // preserve them.
+    rerender({ nodes: initialNodes, edges });
+
+    expect(result.current.nodes.find((n) => n.id === 'a')!.position).toEqual({ x: 10, y: 20 });
+    expect(result.current.nodes.find((n) => n.id === 'b')!.position).toEqual({ x: 30, y: 40 });
+  });
+
+  it('relayout() overrides supplied positions even when hasSuppliedPositions is true', () => {
+    const nodes: Node<{ label: string }>[] = [
+      { id: 'a', type: 'default', position: { x: 100, y: 200 }, data: { label: 'A' } },
+      { id: 'b', type: 'default', position: { x: 300, y: 400 }, data: { label: 'B' } },
+    ];
+    const edges: Edge[] = [{ id: 'e1', source: 'a', target: 'b' }];
+
+    const { result } = renderHook(() =>
+      useAutoLayout(nodes, edges, { direction: 'TB', hasSuppliedPositions: true }),
+    );
+
+    // First open: positions preserved.
+    expect(result.current.nodes.find((n) => n.id === 'a')!.position).toEqual({ x: 100, y: 200 });
+
+    act(() => {
+      result.current.relayout();
+    });
+
+    // After explicit relayout: dagre takes over and repositions.
+    const aAfter = result.current.nodes.find((n) => n.id === 'a')!.position;
+    const bAfter = result.current.nodes.find((n) => n.id === 'b')!.position;
+    expect(aAfter).not.toEqual({ x: 100, y: 200 });
+    expect(bAfter).not.toEqual({ x: 300, y: 400 });
+  });
+});
+
+describe('useAutoLayout — defensive dagre label fallback (M001)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.resetModules();
+  });
+
+  it('does not crash and falls back to finite positions when a dagre label is missing', async () => {
+    // Mock @dagrejs/dagre so that Graph.node('ghost') returns undefined,
+    // simulating a dagre compound-graph edge case where layout does not assign
+    // coordinates to every setNode'd node.
+    vi.doMock('@dagrejs/dagre', async (importOriginal) => {
+      const actual = await importOriginal<typeof import('@dagrejs/dagre')>();
+      const OriginalGraph = actual.Graph;
+      return {
+        ...actual,
+        Graph: class extends OriginalGraph {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          node(id: string): any {
+            if (id === 'ghost') return undefined;
+            return super.node(id);
+          }
+        },
+      };
+    });
+
+    const { useAutoLayout: useAutoLayoutMocked } = await import('../use-auto-layout');
+    const { renderHook: renderHookMocked } = await import('@testing-library/react');
+
+    const nodes: Node<{ label: string }>[] = [
+      { id: 'a', type: 'default', position: { x: 0, y: 0 }, data: { label: 'A' } },
+      { id: 'ghost', type: 'default', position: { x: 0, y: 0 }, data: { label: 'Ghost' } },
+    ];
+    const edges: Edge[] = [{ id: 'e1', source: 'a', target: 'ghost' }];
+
+    // Must not throw — the defensive fallback handles the missing label.
+    const { result } = renderHookMocked(() =>
+      useAutoLayoutMocked(nodes, edges, { direction: 'TB' }),
+    );
+
+    // The ghost node's position must be a finite number, not NaN or a crash.
+    const ghost = result.current.nodes.find((n) => n.id === 'ghost')!;
+    expect(Number.isFinite(ghost.position.x)).toBe(true);
+    expect(Number.isFinite(ghost.position.y)).toBe(true);
+
+    // The normal node still gets a real dagre position.
+    const a = result.current.nodes.find((n) => n.id === 'a')!;
+    expect(Number.isFinite(a.position.x)).toBe(true);
+    expect(Number.isFinite(a.position.y)).toBe(true);
+  });
+});

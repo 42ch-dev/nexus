@@ -74,12 +74,19 @@ function computeDagreLayout<TNodeData extends Record<string, unknown>>(
 
   const absolute = new Map<string, { x: number; y: number; width: number; height: number }>();
   for (const node of nodes) {
-    const label = graph.node(node.id) as DagreNodeLabel;
+    const label = graph.node(node.id) as DagreNodeLabel | undefined;
+    // Defensive: dagre may not assign coordinates to every setNode'd node
+    // (compound-graph ranker edge cases). Fall back to the origin and the
+    // node's own dimensions so the layout never crashes on a missing or
+    // partial label (R-V1114P0QC2-M001).
+    const fallback = nodeDimensions(node);
+    const width = label?.width ?? fallback.width;
+    const height = label?.height ?? fallback.height;
     absolute.set(node.id, {
-      x: label.x! - label.width / 2,
-      y: label.y! - label.height / 2,
-      width: label.width,
-      height: label.height,
+      x: (label?.x ?? 0) - width / 2,
+      y: (label?.y ?? 0) - height / 2,
+      width,
+      height,
     });
   }
 
@@ -111,7 +118,9 @@ function computeDagreLayout<TNodeData extends Record<string, unknown>>(
  *
  * - Surfaces opt in by supplying `layoutOptions` on their adapter. Surfaces that
  *   do not opt in receive a pass-through (no position changes).
- * - First projection with opt-in options triggers an automatic layout.
+ * - First projection with opt-in options triggers an automatic layout — unless
+ *   `layoutOptions.hasSuppliedPositions` is set, in which case the surface's
+ *   positions are preserved until an explicit `relayout()` (W003).
  * - Manual drags suppress auto-layout until the user explicitly re-layouts.
  * - `relayout()` clears manual overrides and re-runs dagre.
  */
@@ -154,7 +163,12 @@ export function useAutoLayout<TNodeData extends Record<string, unknown>>(
 
     const isRelayout = layoutGeneration !== lastLayoutGenRef.current;
     const isFirstLayout = !initialLayoutDoneRef.current;
-    const shouldLayout = isRelayout || (isFirstLayout && !hasManualPosition);
+    // A surface may signal that it already supplies meaningful positions
+    // (hasSuppliedPositions). On first open, respect those positions and skip
+    // dagre; the author can still trigger an explicit relayout() (W003).
+    const hasSuppliedPositions = options.hasSuppliedPositions === true;
+    const shouldLayout =
+      isRelayout || (isFirstLayout && !hasManualPosition && !hasSuppliedPositions);
 
     if (!shouldLayout) {
       return { nodes, isLayouting: false, relayout };
@@ -185,23 +199,31 @@ export function useAutoLayout<TNodeData extends Record<string, unknown>>(
     }
 
     const layoutApplied = result.nodes !== nodes;
-    if (!layoutApplied) {
+    const isRelayout = layoutGeneration !== lastLayoutGenRef.current;
+    const firstCheckpoint = !initialLayoutDoneRef.current;
+
+    // When dagre did not run AND we have already passed the first checkpoint,
+    // there is nothing to snapshot — manual-drag detection continues to use
+    // the existing baseline. On the first checkpoint, snapshot even when dagre
+    // was skipped (supplied-positions mode) so subsequent manual drags can be
+    // detected against the preserved baseline (W003).
+    if (!layoutApplied && !firstCheckpoint) {
       return;
     }
-
-    const isRelayout = layoutGeneration !== lastLayoutGenRef.current;
 
     lastLayoutPositionsRef.current = new Map(
       result.nodes.map((n) => [n.id, { ...n.position }]),
     );
 
-    if (isRelayout) {
+    if (layoutApplied && isRelayout) {
       manualNodeIdsRef.current = new Set();
       hasManualPositionRef.current = false;
     }
 
     initialLayoutDoneRef.current = true;
-    lastLayoutGenRef.current = layoutGeneration;
+    if (layoutApplied) {
+      lastLayoutGenRef.current = layoutGeneration;
+    }
   }, [nodes, edges, options, layoutGeneration, result]);
 
   return result;

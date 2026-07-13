@@ -57,8 +57,9 @@ function surfaceKey(surfaceId: CanvasSurfaceId): 'outline' | 'worldKb' | 'strate
  * active context is preserved (e.g. Outline on a Work route →
  * `/works/:workId/outline`, not `/works`). The app has no global active
  * work/world — ids come from `useParams`, exactly like the palette's
- * `canvas-nav-commands.tsx`. When a surface has no valid target (World KB with
- * no `worldId` and no `/worlds` picker), the item renders disabled.
+ * `canvas-nav-commands.tsx`. Every Canvas surface has a valid fallback target
+ * (World KB → `/worlds` picker as of V1.115 T3), so items are always
+ * focusable links.
  */
 export function Sidebar() {
   const { t } = useTranslation('shell');
@@ -154,8 +155,9 @@ export function Sidebar() {
           // Canvas items: compute the context-aware click target (T3). The
           // static `item.to` is the chrome-keyed identity only; the real
           // destination preserves the active Work/World context. A `null`
-          // target means the surface has no valid entry point (World KB with
-          // no worldId and no `/worlds` picker) → render disabled.
+          // target means the surface has no valid entry point — currently no
+          // Canvas surface returns null (World KB falls back to `/worlds` as of
+          // V1.115 T3), but the disabled branch is retained for safety.
           if ('surfaceId' in item) {
             const target = resolveCanvasNavTarget((item as CanvasNavItem).surfaceId, {
               workId,

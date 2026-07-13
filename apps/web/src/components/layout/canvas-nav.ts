@@ -51,13 +51,12 @@ export interface CanvasNavItem extends ShellNavItem {
  * the id is present, else fall back to the list; `go.strategy` always goes to
  * the list.
  *
- * World KB gap (resolved T3): the `/worlds` list route is NOT registered in
- * `App.tsx` (only `/worlds/:worldId/kb`). When no `worldId` is in the URL, the
- * World KB item has no valid target, so {@link resolveCanvasNavTarget} returns
- * `null` and the sidebar renders the item **disabled** (mirrors the palette's
- * `available?()` gating). A `/worlds` picker route is the durable fix — tracked
- * as a follow-up. This does not affect the active-surface resolver, which keys
- * off the `/worlds/.../kb` pattern.
+ * World KB (V1.115 T3): the `/worlds` picker route IS registered in `App.tsx`.
+ * When no `worldId` is in the URL, {@link resolveCanvasNavTarget} falls back to
+ * `/worlds` so the sidebar item is always focusable and navigates to the world
+ * picker. This does not affect the active-surface resolver, which keys off the
+ * `/worlds/.../kb` pattern (the `/worlds` list itself resolves to null — it is
+ * a picker, not a canvas surface).
  */
 export const CANVAS_ITEMS: CanvasNavItem[] = [
   { to: '/works', label: 'Outline', icon: ListTree, surfaceId: 'outline' },
@@ -130,14 +129,13 @@ export interface CanvasNavContext {
  * - **Outline**   → `/works/:workId/outline` when a `workId` is present;
  *   otherwise `/works` (the Work picker — a valid, always-registered route).
  * - **World KB**  → `/worlds/:worldId/kb` when a `worldId` is present;
- *   otherwise `null`. There is no `/worlds` list route yet, so without a
- *   worldId the item has no valid target and the sidebar renders it disabled.
+ *   otherwise `/worlds` (the World picker — registered in V1.115 T3). The
+ *   item is always focusable; it never renders disabled.
  * - **Strategy**  → `/strategies` always (the list is the always-valid entry
  *   point to the Strategy canvas).
  *
- * Returns `null` only for the no-target World KB case; the caller MUST treat
- * `null` as "render disabled, do not navigate." Ids are `encodeURIComponent`-
- * encoded so a space-bearing id stays one path segment (same as the palette).
+ * Ids are `encodeURIComponent`-encoded so a space-bearing id stays one path
+ * segment (same as the palette).
  *
  * Pure: no React, no router, no side effects.
  */
@@ -151,9 +149,9 @@ export function resolveCanvasNavTarget(
         ? `/works/${encodeURIComponent(ctx.workId)}/outline`
         : '/works';
     case 'world-kb':
-      // No `/worlds` picker route exists yet — disabling when contextless is
-      // the documented resolution (see CANVAS_ITEMS docblock).
-      return ctx.worldId ? `/worlds/${encodeURIComponent(ctx.worldId)}/kb` : null;
+      // No worldId in the URL → fall back to the `/worlds` picker (registered
+      // in V1.115 T3). The item is always focusable; it never returns null.
+      return ctx.worldId ? `/worlds/${encodeURIComponent(ctx.worldId)}/kb` : '/worlds';
     case 'strategy':
       return '/strategies';
   }

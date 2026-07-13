@@ -29,6 +29,7 @@ import type {
 } from './rf-projection';
 import { STATUS_LABEL_KEYS, STATUS_OPTIONS } from './graph-projection';
 import { OutlineSceneNode, OutlineBeatNode } from './scene-beat-nodes';
+import { NodeChromeShell } from '../presentational/node-chrome-shell';
 
 // ---------------------------------------------------------------------------
 // Status → token (canvas-outline-chapter-card-status-* — DESIGN.md)
@@ -55,32 +56,6 @@ function statusColorVar(status: ChapterStatus): string {
 }
 
 // ---------------------------------------------------------------------------
-// Shared node shell
-// ---------------------------------------------------------------------------
-
-interface NodeShellProps {
-  selected: boolean;
-  children: React.ReactNode;
-  className?: string;
-  style?: React.CSSProperties;
-}
-
-function NodeShell({ selected, children, className, style }: NodeShellProps) {
-  return (
-    <div
-      className={[
-        'min-w-[176px] rounded-card border bg-canvas-node-fill px-3 py-2 shadow-card transition-colors duration-state ease-standard',
-        selected ? 'border-canvas-node-border-selected' : 'border-canvas-node-border',
-        className ?? '',
-      ].join(' ')}
-      style={style}
-    >
-      {children}
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
 // Volume node
 // ---------------------------------------------------------------------------
 
@@ -93,7 +68,7 @@ export const OutlineVolumeNode = memo(function OutlineVolumeNode({
   const d = data as OutlineVolumeNodeData;
   const label = d.label || t('chapter.volume', { volume: d.volumeId });
   return (
-    <NodeShell
+    <NodeChromeShell
       selected={!!selected}
       style={{
         background: 'var(--color-canvas-outline-volume-fill)',
@@ -104,7 +79,7 @@ export const OutlineVolumeNode = memo(function OutlineVolumeNode({
       <p className="mt-0.5 text-label-12 text-gray-700">
         {t('structureInspector.chapterCount', { count: d.chapterCount })}
       </p>
-    </NodeShell>
+    </NodeChromeShell>
   );
 });
 
@@ -121,7 +96,7 @@ export const OutlineChapterNode = memo(function OutlineChapterNode({
   const d = data as OutlineChapterNodeData;
   const statusColor = statusColorVar(d.status);
   return (
-    <NodeShell selected={!!selected}>
+    <NodeChromeShell selected={!!selected}>
       <Handle type="target" position={Position.Left} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
       <div className="flex items-center justify-between gap-2">
         <span className="truncate font-heading text-copy-14 font-semibold text-gray-1000" title={d.title}>
@@ -146,7 +121,7 @@ export const OutlineChapterNode = memo(function OutlineChapterNode({
         {t('chapter.wordCount', { actual: d.actualWordCount ?? 0, planned: d.plannedWordCount })}
       </p>
       <Handle type="source" position={Position.Right} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
-    </NodeShell>
+    </NodeChromeShell>
   );
 });
 
@@ -162,7 +137,7 @@ export const OutlineTimelineEventNode = memo(function OutlineTimelineEventNode({
   const { t } = useTranslation('canvas');
   const d = data as OutlineTimelineEventNodeData;
   return (
-    <NodeShell
+    <NodeChromeShell
       selected={!!selected}
       style={{
         borderLeftColor: 'var(--color-canvas-outline-timeline-event-pin)',
@@ -182,7 +157,7 @@ export const OutlineTimelineEventNode = memo(function OutlineTimelineEventNode({
           : t('outlineAltView.unattachedEvent')}
       </p>
       <Handle type="source" position={Position.Right} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
-    </NodeShell>
+    </NodeChromeShell>
   );
 });
 
