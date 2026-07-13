@@ -29,7 +29,10 @@ use crate::{DiscoverySource, LaunchStrategy, ProviderCatalogEntry, TrustLevel};
 ///
 /// Each entry maps a command name to a distinct `provider_id` that won't collide
 /// with ACP registry agent IDs.
-const KNOWN_COMMANDS: &[(&str, &str)] = &[("claude", "claude-native")];
+const KNOWN_COMMANDS: &[(&str, &str)] = &[
+    ("claude", "claude-native"),
+    ("codex", "codex-native"),
+];
 
 /// Discover native CLI providers by scanning PATH.
 ///
@@ -231,6 +234,21 @@ mod tests {
     }
 
     #[test]
+    fn scan_custom_path_finds_codex() {
+        let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
+        // Create a fake codex executable
+        let codex_path = temp_dir.path().join("codex");
+        std::fs::write(&codex_path, "#!/bin/sh\necho hello\n").expect("Failed to write fixture");
+
+        let entries = scan_custom_path(&[temp_dir.path().to_path_buf()], &[]);
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].provider_id.0, "codex-native");
+        assert_eq!(entries[0].protocol_kind, ProtocolKind::NativeCli);
+        assert_eq!(entries[0].source, DiscoverySource::PathScan);
+        assert_eq!(entries[0].trust, TrustLevel::LocalPath);
+    }
+
+    #[test]
     fn scan_custom_path_empty_dir() {
         let temp_dir = tempfile::tempdir().expect("Failed to create temp dir");
         let entries = scan_custom_path(&[temp_dir.path().to_path_buf()], &[]);
@@ -252,10 +270,12 @@ mod tests {
 
     #[test]
     fn known_commands_mapping() {
-        // Verify Wave 1 mapping: claude -> claude-native
-        assert_eq!(KNOWN_COMMANDS.len(), 1);
+        // Verify Wave 1 mapping: claude -> claude-native, codex -> codex-native
+        assert_eq!(KNOWN_COMMANDS.len(), 2);
         assert_eq!(KNOWN_COMMANDS[0].0, "claude");
         assert_eq!(KNOWN_COMMANDS[0].1, "claude-native");
+        assert_eq!(KNOWN_COMMANDS[1].0, "codex");
+        assert_eq!(KNOWN_COMMANDS[1].1, "codex-native");
     }
 
     // ── DF-26: Cross-platform probe tests (AH5.1) ─────────────────────
