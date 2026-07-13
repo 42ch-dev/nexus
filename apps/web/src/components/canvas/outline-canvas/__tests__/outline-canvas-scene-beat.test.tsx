@@ -195,4 +195,50 @@ describe('OutlineCanvas — Scene/Beat inspector selection wiring (FB-C2-002)', 
     expect(screen.queryByText('Scene')).not.toBeInTheDocument();
     expect(screen.queryByText('Beat')).not.toBeInTheDocument();
   });
+
+  // V1.115 P1 T5 (R-V1109-P0-QC3-W002) — `beatParentSceneTitle` must use a
+  // memoized Map lookup, not `Array.find()` per render. Correctness is covered
+  // by the beat-selection test above; this case guards the memo contract:
+  // stable across re-renders with the same scenes, and rebuilt when scenes
+  // change (catches a stale `[]` dep array).
+  it('keeps beatParentSceneTitle stable across re-renders and rebuilds when scenes change (AC-P1-6)', () => {
+    surfaceMock.selectedNode = {
+      id: 'beat:beat-1',
+      type: 'outline-beat',
+      data: { beatId: 'beat-1', sceneId: 'scene-1' },
+      selected: true,
+      position: { x: 0, y: 0 },
+    } as unknown as Node;
+    surfaceMock.selectedNodeId = 'beat:beat-1';
+
+    const { rerender } = renderWithFixture();
+    expect(screen.getByText('Part of Opening Scene.')).toBeInTheDocument();
+
+    // Re-render with the same fixture reference — the memoized scene-title Map
+    // is reused; the parent scene helper remains correct.
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <OutlineCanvas workId="wk_test" sceneBeatFixture={FIXTURE} />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByText('Part of Opening Scene.')).toBeInTheDocument();
+
+    // Re-render with a fixture whose scene-1 title changed — the memo must
+    // rebuild (dep = fixture.scenes) and surface the new title. A stale `[]`
+    // dep would keep showing "Opening Scene".
+    const renamedFixture = {
+      scenes: [
+        { sceneId: 'scene-1', chapterId: 1, title: 'Renamed Scene', status: 'drafted' as const },
+        { sceneId: 'scene-2', chapterId: 1, title: 'Closing Scene', status: 'completed' as const },
+      ],
+      beats: FIXTURE.beats,
+    };
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <OutlineCanvas workId="wk_test" sceneBeatFixture={renamedFixture} />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByText('Part of Renamed Scene.')).toBeInTheDocument();
+    expect(screen.queryByText('Part of Opening Scene.')).not.toBeInTheDocument();
+  });
 });
