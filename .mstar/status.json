@@ -289,15 +289,15 @@
   "metadata": {
     "integration_branch_retired": true,
     "iteration_base_branch": "main",
-    "last_integration_branch": "iteration/v1.114",
-    "latest_active_compass": "v1.115-delivery-compass.md",
-    "latest_active_iteration": "V1.115",
+    "last_integration_branch": "iteration/v1.115",
+    "latest_active_compass": null,
+    "latest_active_iteration": null,
     "latest_ship": {
-      "iteration": "V1.114",
-      "compass": "v1.114-delivery-compass.md",
+      "iteration": "V1.115",
+      "compass": "v1.115-delivery-compass.md",
       "shipped_at": "2026-07-13",
-      "pr": "https://github.com/42ch-dev/nexus/pull/144",
-      "merge_commit": "e08ed182"
+      "pr": "https://github.com/42ch-dev/nexus/pull/145",
+      "merge_commit": "c67571b8"
     },
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
@@ -371,7 +371,7 @@
         "2026-07-12-v1.113-i18n-completion": 4
       }
     },
-    "updated_at": "2026-07-12"
+    "updated_at": "2026-07-13"
   },
   "residual_findings": {
     "2026-07-05-v1.91-findings-batch": [
