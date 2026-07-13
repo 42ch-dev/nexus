@@ -486,9 +486,10 @@ pub struct LocalInstallation {
 /// commands (`opencode` → `opencode`) and Windows-style relative paths.
 #[must_use]
 pub fn bare_command_name(cmd: &str) -> String {
-    Path::new(cmd)
-        .file_name()
-        .map_or_else(|| cmd.to_string(), |name| name.to_string_lossy().to_string())
+    Path::new(cmd).file_name().map_or_else(
+        || cmd.to_string(),
+        |name| name.to_string_lossy().to_string(),
+    )
 }
 
 /// Maximum concurrent PATH/version probes during a scan.
@@ -1164,7 +1165,11 @@ mod tests {
     #[tokio::test]
     async fn scan_local_installations_strips_nested_relative_path() {
         let tmp = tempfile::tempdir().expect("temp dir");
-        make_shim(&tmp, "cursor-agent", "#!/bin/sh\necho \"cursor-agent 2.0.0\"\n");
+        make_shim(
+            &tmp,
+            "cursor-agent",
+            "#!/bin/sh\necho \"cursor-agent 2.0.0\"\n",
+        );
 
         let registry = registry_with_binary("./dist-package/cursor-agent");
         let results =
@@ -1172,6 +1177,37 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].binary, "cursor-agent");
         assert_eq!(results[0].version.as_deref(), Some("cursor-agent 2.0.0"));
+    }
+
+    #[tokio::test]
+    async fn scan_local_installations_handles_timeout() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let sleep_secs = SCAN_VERSION_TIMEOUT.as_secs() + 2;
+        let script = format!(
+            "#!/bin/sh\n/bin/sleep {}\necho \"slow-agent 1.0.0\"\n",
+            sleep_secs
+        );
+        make_shim(&tmp, "slow-agent", &script);
+
+        let registry = registry_with_binary("slow-agent");
+        let start = std::time::Instant::now();
+        let results =
+            scan_local_installations_with_path(&registry, &[tmp.path().to_path_buf()]).await;
+        let elapsed = start.elapsed();
+
+        // The binary is found on PATH but the `--version` probe times out,
+        // so it is reported with no version.
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].binary, "slow-agent");
+        assert!(
+            results[0].version.is_none(),
+            "slow binary --version should time out"
+        );
+        assert!(
+            elapsed < std::time::Duration::from_secs(sleep_secs),
+            "scan should return before the slow binary finishes sleeping (elapsed {:?})",
+            elapsed
+        );
     }
 
     #[tokio::test]

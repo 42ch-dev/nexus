@@ -567,12 +567,19 @@ pub async fn scan(
     // Discover native CLI providers and merge them in. ACP entries come first;
     // native entries are appended. If a native equivalent is installed, suppress
     // the corresponding ACP registry entry so the UI shows the honest path.
-    let host_config = nexus_agent_host::config::AgentHostConfig::default();
-    let native_entries = nexus_agent_host::discovery::path_scan::scan_path(&host_config, &[])
-        .map_err(|e| NexusApiError::Internal {
-            code: "NATIVE_SCAN_ERROR".into(),
-            message: format!("failed to scan native CLI providers: {e}"),
-        })?;
+    let host_config = state.agent_host_config();
+    let native_entries = tokio::task::spawn_blocking(move || {
+        nexus_agent_host::discovery::path_scan::scan_path(&host_config, &[])
+    })
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "NATIVE_SCAN_ERROR".into(),
+        message: format!("native PATH scan task panicked: {e}"),
+    })?
+    .map_err(|e| NexusApiError::Internal {
+        code: "NATIVE_SCAN_ERROR".into(),
+        message: format!("failed to scan native CLI providers: {e}"),
+    })?;
 
     let suppress_ids: std::collections::HashSet<&str> = native_entries
         .iter()

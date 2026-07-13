@@ -53,6 +53,9 @@ struct NativeSession {
     /// Whether the first `execute()` successfully captured a codex session ID.
     /// If false after the first execute, future invocations drop `--json`.
     json_capable: bool,
+    /// Child processes for in-flight operations, keyed by host operation ID.
+    /// Tracked so `cancel()` and `shutdown()` can kill running children.
+    operation_children: HashMap<HostOperationId, tokio::process::Child>,
 }
 
 impl std::fmt::Debug for NativeSession {
@@ -61,6 +64,7 @@ impl std::fmt::Debug for NativeSession {
             .field("codex_session_id", &self.codex_session_id.as_deref())
             .field("first_exec_done", &self.first_exec_done)
             .field("json_capable", &self.json_capable)
+            .field("operation_children", &self.operation_children.keys())
             .finish()
     }
 }
@@ -137,11 +141,13 @@ impl CodexNativeProvider {
     /// Emits `OpStarted`, then `MessageDelta`/`ThoughtDelta` per event, and a
     /// terminal `OpFinished`/`OpFailed` when stdout reaches EOF or an I/O error
     /// occurs.
+    #[allow(clippy::too_many_lines)]
     fn build_event_stream(
         &self,
         stdout: Option<tokio::process::ChildStdout>,
         op_id: HostOperationId,
         session_id: HostSessionId,
+        read_timeout: std::time::Duration,
     ) -> HostEventStream {
         let started = futures_util::stream::once({
             let op_id = op_id.clone();
@@ -157,10 +163,15 @@ impl CodexNativeProvider {
         let stdout_stream: HostEventStream = if let Some(stdout) = stdout {
             let sessions = Arc::clone(&self.sessions);
             let provider_id = self.provider_id.clone();
-            let reader = tokio::io::BufReader::new(stdout);
+            let reaper = ChildReaper {
+                sessions: Arc::clone(&self.sessions),
+                session_id: session_id.clone(),
+                op_id: op_id.clone(),
+            };
+            let stdout_reader = tokio::io::BufReader::new(stdout);
             futures_util::stream::unfold(
-                (reader, op_id, session_id, false),
-                move |(mut reader, op_id, session_id, finished)| {
+                (stdout_reader, op_id, session_id, false, reaper),
+                move |(mut stdout_reader, op_id, session_id, finished, reaper)| {
                     let sessions = Arc::clone(&sessions);
                     let provider_id = provider_id.clone();
                     async move {
@@ -170,8 +181,13 @@ impl CodexNativeProvider {
 
                         loop {
                             let mut line = String::new();
-                            match reader.read_line(&mut line).await {
-                                Ok(0) => {
+                            match tokio::time::timeout(
+                                read_timeout,
+                                stdout_reader.read_line(&mut line),
+                            )
+                            .await
+                            {
+                                Ok(Ok(0)) => {
                                     // EOF — emit terminal event and mark finished.
                                     return Some((
                                         Ok(HostEvent::OpFinished(OperationFinishedEvent {
@@ -179,10 +195,10 @@ impl CodexNativeProvider {
                                             op_id: op_id.clone(),
                                             reason: FinishReason::EndTurn,
                                         })),
-                                        (reader, op_id, HostSessionId::new(), true),
+                                        (stdout_reader, op_id, HostSessionId::new(), true, reaper),
                                     ));
                                 }
-                                Ok(_) => {
+                                Ok(Ok(_)) => {
                                     let trimmed = line
                                         .trim_end_matches('\n')
                                         .trim_end_matches('\r')
@@ -193,16 +209,18 @@ impl CodexNativeProvider {
                                         &op_id,
                                         &sessions,
                                         &provider_id,
-                                    ) {
+                                    )
+                                    .await
+                                    {
                                         return Some((
                                             Ok(event),
-                                            (reader, op_id, session_id, false),
+                                            (stdout_reader, op_id, session_id, false, reaper),
                                         ));
                                     }
                                     // Event was skipped (e.g., session_start
                                     // internal update) — continue reading.
                                 }
-                                Err(e) => {
+                                Ok(Err(e)) => {
                                     return Some((
                                         Ok(HostEvent::OpFailed(OperationFailedEvent {
                                             session_id,
@@ -210,7 +228,21 @@ impl CodexNativeProvider {
                                             error_category: "io_error".to_string(),
                                             error_message: e.to_string(),
                                         })),
-                                        (reader, op_id, HostSessionId::new(), true),
+                                        (stdout_reader, op_id, HostSessionId::new(), true, reaper),
+                                    ));
+                                }
+                                Err(_) => {
+                                    reaper.kill().await;
+                                    return Some((
+                                        Ok(HostEvent::OpFailed(OperationFailedEvent {
+                                            session_id,
+                                            op_id: op_id.clone(),
+                                            error_category: "timeout".to_string(),
+                                            error_message: format!(
+                                                "codex stream read timed out after {read_timeout:?}"
+                                            ),
+                                        })),
+                                        (stdout_reader, op_id, HostSessionId::new(), true, reaper),
                                     ));
                                 }
                             }
@@ -274,6 +306,46 @@ impl CodexNativeProvider {
     }
 }
 
+/// RAII guard that reaps a child process when the event stream ends.
+///
+/// Per-invocation codex children run until EOF. Once the stream consumer
+/// reaches EOF (or drops the stream), this guard removes the child handle from
+/// the session and waits on it, preventing zombies.
+struct ChildReaper {
+    sessions: Arc<RwLock<HashMap<HostSessionId, NativeSession>>>,
+    session_id: HostSessionId,
+    op_id: HostOperationId,
+}
+
+impl Drop for ChildReaper {
+    fn drop(&mut self) {
+        let sessions = Arc::clone(&self.sessions);
+        let session_id = self.session_id.clone();
+        let op_id = self.op_id.clone();
+        tokio::spawn(async move {
+            let mut sessions = sessions.write().await;
+            if let Some(ns) = sessions.get_mut(&session_id) {
+                if let Some(mut child) = ns.operation_children.remove(&op_id) {
+                    let _ = child.wait().await;
+                }
+            }
+        });
+    }
+}
+
+impl ChildReaper {
+    /// Kill the child process now (used for stream timeout).
+    async fn kill(&self) {
+        let mut sessions = self.sessions.write().await;
+        if let Some(ns) = sessions.get_mut(&self.session_id) {
+            if let Some(mut child) = ns.operation_children.remove(&self.op_id) {
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+            }
+        }
+    }
+}
+
 /// Parsed JSONL event shape from `codex --json`.
 ///
 /// This is intentionally tolerant: only fields the adapter cares about are
@@ -297,7 +369,7 @@ struct CodexJsonlEvent {
 /// Returns `Some(HostEvent)` when the line produces a host-visible event.
 /// Returns `None` when the line is consumed internally (e.g., session ID
 /// capture) and the caller should continue reading.
-fn parse_codex_jsonl_line(
+async fn parse_codex_jsonl_line(
     line: &str,
     session_id: &HostSessionId,
     op_id: &HostOperationId,
@@ -327,18 +399,16 @@ fn parse_codex_jsonl_line(
         let session_id_owned = session_id.clone();
         let sessions = Arc::clone(sessions);
         let codex_id_clone = codex_id.clone();
-        tokio::spawn(async move {
-            let mut sessions_guard = sessions.write().await;
-            if let Some(ns) = sessions_guard.get_mut(&session_id_owned) {
-                ns.codex_session_id = Some(codex_id_clone);
-                ns.json_capable = true;
-                tracing::info!(
-                    session_id = %session_id_owned,
-                    codex_session_id = %codex_id,
-                    "Captured codex session ID from JSONL event"
-                );
-            }
-        });
+        let mut sessions_guard = sessions.write().await;
+        if let Some(ns) = sessions_guard.get_mut(&session_id_owned) {
+            ns.codex_session_id = Some(codex_id_clone);
+            ns.json_capable = true;
+            tracing::info!(
+                session_id = %session_id_owned,
+                codex_session_id = %codex_id,
+                "Captured codex session ID from JSONL event"
+            );
+        }
     }
 
     match event.event_type.as_str() {
@@ -496,6 +566,7 @@ impl ProviderAdapter for CodexNativeProvider {
                     codex_session_id: None,
                     first_exec_done: false,
                     json_capable: true,
+                    operation_children: HashMap::new(),
                 },
             );
         }
@@ -607,9 +678,22 @@ impl ProviderAdapter for CodexNativeProvider {
             .with_op(op_id.clone())
         })??;
 
-        let (stdout, stderr, mut child) = spawn_result;
+        let (stdout, stderr, child) = spawn_result;
 
-        let stream = self.build_event_stream(stdout, op_id, session.session_id.clone());
+        // Track the child handle so cancel()/shutdown() can kill it.
+        {
+            let mut sessions = self.sessions.write().await;
+            if let Some(ns) = sessions.get_mut(&session.session_id) {
+                ns.operation_children.insert(op_id.clone(), child);
+            }
+        }
+
+        let stream = self.build_event_stream(
+            stdout,
+            op_id.clone(),
+            session.session_id.clone(),
+            self.timeouts.prompt_duration(),
+        );
 
         // Spawn a background task to drain stderr and log warnings.
         if let Some(stderr) = stderr {
@@ -627,11 +711,6 @@ impl ProviderAdapter for CodexNativeProvider {
             });
         }
 
-        // Wait for the child process in the background to prevent zombies.
-        tokio::spawn(async move {
-            let _ = child.wait().await;
-        });
-
         if is_first {
             // After the first execute, if the stream fails to capture a session ID,
             // the stream closure will leave json_capable = true and codex_session_id
@@ -648,26 +727,46 @@ impl ProviderAdapter for CodexNativeProvider {
 
     async fn cancel(
         &self,
-        _session: &ManagedSessionHandle,
-        _op_id: HostOperationId,
+        session: &ManagedSessionHandle,
+        op_id: HostOperationId,
     ) -> HostResult<()> {
-        // In per-invocation mode, the child process exits when stdin is closed.
-        // There is no persistent process to kill; cancellation is a no-op at the
-        // provider level (the host may drop the stream consumer).
+        let mut sessions = self.sessions.write().await;
+        if let Some(ns) = sessions.get_mut(&session.session_id) {
+            if let Some(mut child) = ns.operation_children.remove(&op_id) {
+                tracing::info!(
+                    session_id = %session.session_id,
+                    op_id = %op_id,
+                    provider_id = %self.provider_id,
+                    "Native CLI cancel: killing child process"
+                );
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+            }
+        }
+        drop(sessions);
         tracing::info!(
             provider_id = %self.provider_id,
-            "Native CLI cancel requested (per-invocation mode: no-op)"
+            "Native CLI cancel requested"
         );
         Ok(())
     }
 
     async fn shutdown(&self, session: ManagedSessionHandle) -> HostResult<()> {
-        // Remove the session state. In per-invocation mode there is no persistent
-        // child to kill; each child process exits when its stdin is closed.
-        {
-            let mut sessions = self.sessions.write().await;
-            sessions.remove(&session.session_id);
+        // Remove the session state and kill any in-flight children.
+        let mut sessions = self.sessions.write().await;
+        if let Some(ns) = sessions.remove(&session.session_id) {
+            for (op_id, mut child) in ns.operation_children {
+                tracing::info!(
+                    session_id = %session.session_id,
+                    op_id = %op_id,
+                    provider_id = %self.provider_id,
+                    "Native CLI shutdown: killing child process"
+                );
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+            }
         }
+        drop(sessions);
         tracing::info!(
             session_id = %session.session_id,
             provider_id = %self.provider_id,
@@ -860,9 +959,6 @@ mod tests {
             .collect();
         assert_eq!(deltas, vec!["hello"]);
 
-        // Allow the async session ID capture task to run.
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
         let sessions = provider.sessions.read().await;
         let ns = sessions.get(&handle.session_id).expect("session exists");
         assert!(
@@ -938,8 +1034,6 @@ mod tests {
             })
             .collect();
         assert_eq!(deltas1, vec!["hello"]);
-
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         // Second execute: should use `resume <id>`.
         let stream2 = provider
@@ -1048,8 +1142,6 @@ mod tests {
             })
             .collect();
         assert_eq!(deltas, vec!["plain text line", "another line"]);
-
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
 
         let sessions = provider.sessions.read().await;
         let ns = sessions.get(&handle.session_id).expect("session exists");
