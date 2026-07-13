@@ -20,11 +20,18 @@ import { useTranslation } from 'react-i18next';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 
 import type { StrategyNodeData } from '@/lib/canvas/strategy-graph';
+import {
+  NodeChromeShell,
+  NODE_STATUS_DOT,
+  type NodeStatus,
+} from './presentational/node-chrome-shell';
 
-/** Map an orchestration session status string to a semantic status bucket. */
-export type NodeStatus = 'current' | 'running' | 'waiting' | 'error' | 'completed' | undefined;
+// Re-export the shared status type + chrome extract so historical import
+// sites (`NodeStatus` from this barrel) keep resolving. The canonical home is
+// now the presentational extract.
+export type { NodeStatus };
 
-function statusFromSession(status: string | undefined): NodeStatus {
+function statusFromSession(status: string | undefined): NodeStatus | undefined {
   if (!status) return undefined;
   const s = status.toLowerCase();
   if (s.includes('error') || s.includes('fail')) return 'error';
@@ -45,28 +52,18 @@ function statusFromSession(status: string | undefined): NodeStatus {
  * applied uniformly; otherwise inner-graph / join / terminal / inner-child
  * nodes silently drop the indicator at session start and during poll gaps.
  */
-function effectiveStatus(rawStatus: string | undefined): NodeStatus {
+function effectiveStatus(rawStatus: string | undefined): NodeStatus | undefined {
   if (rawStatus === '__current__') return 'current';
   return statusFromSession(rawStatus);
 }
 
-const STATUS_RING: Record<NonNullable<NodeStatus>, string> = {
-  current: 'ring-2 ring-blue-700',
-  running: 'ring-2 ring-green-700',
-  waiting: 'ring-2 ring-amber-700',
-  error: 'ring-2 ring-red-700',
-  completed: 'ring-2 ring-teal-700',
-};
-
-const STATUS_DOT: Record<NonNullable<NodeStatus>, string> = {
-  current: 'bg-blue-700',
-  running: 'bg-green-700',
-  waiting: 'bg-amber-700',
-  error: 'bg-red-700',
-  completed: 'bg-teal-700',
-};
-
-const STATUS_LABEL_KEYS: Record<NonNullable<NodeStatus>, string> = {
+/**
+ * i18n keys for the strategy status overlay label. The status ring + dot
+ * classes live in the shared `NodeChromeShell` extract
+ * (`NODE_STATUS_RING` / `NODE_STATUS_DOT`); only the human-readable label is
+ * App-owned (resolved via `t()` at render time).
+ */
+const STATUS_LABEL_KEYS: Record<NodeStatus, string> = {
   current: 'strategy.node.status.current',
   running: 'strategy.node.status.running',
   waiting: 'strategy.node.status.waiting',
@@ -74,40 +71,14 @@ const STATUS_LABEL_KEYS: Record<NonNullable<NodeStatus>, string> = {
   completed: 'strategy.node.status.completed',
 };
 
-interface NodeShellProps {
-  selected: boolean;
-  status: NodeStatus;
-  accent?: boolean;
-  children: React.ReactNode;
-  className?: string;
-  style?: React.CSSProperties;
-}
-
-function NodeShell({ selected, status, accent, children, className, style }: NodeShellProps) {
-  return (
-    <div
-      className={[
-        'min-w-[176px] rounded-card border bg-canvas-node-fill px-3 py-2 shadow-card transition-colors duration-state ease-standard',
-        selected ? 'border-canvas-node-border-selected' : 'border-canvas-node-border',
-        status ? STATUS_RING[status] : '',
-        accent ? 'border-l-[3px] border-l-canvas-strategy-accent' : '',
-        className ?? '',
-      ].join(' ')}
-      style={style}
-    >
-      {children}
-    </div>
-  );
-}
-
-function NodeHeader({ label, status }: { label: string; status: NodeStatus }) {
+function NodeHeader({ label, status }: { label: string; status: NodeStatus | undefined }) {
   const { t } = useTranslation('canvas');
   return (
     <div className="flex items-center justify-between gap-2">
       <span className="font-heading text-copy-14 font-semibold text-gray-1000">{label}</span>
       {status ? (
         <span className="flex items-center gap-1 text-label-12 text-gray-700">
-          <span className={`inline-block h-2 w-2 rounded-pill ${STATUS_DOT[status]}`} aria-hidden />
+          <span className={`inline-block h-2 w-2 rounded-pill ${NODE_STATUS_DOT[status]}`} aria-hidden />
           {t(STATUS_LABEL_KEYS[status])}
         </span>
       ) : null}
@@ -134,7 +105,7 @@ export const StrategyStateNode = memo(function StrategyStateNode({
   const status = effectiveStatus(d.status);
   const isCurrent = status !== undefined;
   return (
-    <NodeShell selected={!!selected} status={status} accent>
+    <NodeChromeShell selected={!!selected} status={status} accent>
       <Handle type="target" position={Position.Top} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
       <NodeHeader label={d.label} status={status} />
       <KindTag kind={d.stateKind} />
@@ -142,7 +113,7 @@ export const StrategyStateNode = memo(function StrategyStateNode({
       {d.isInitial ? <span className="mt-1 inline-block text-label-12 text-purple-700">{t('strategy.node.start')}</span> : null}
       <Handle type="source" position={Position.Bottom} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
       {isCurrent ? <span className="sr-only">{t('strategy.node.currentExecutionNode')}</span> : null}
-    </NodeShell>
+    </NodeChromeShell>
   );
 });
 
@@ -155,7 +126,7 @@ export const StrategyGroupNode = memo(function StrategyGroupNode({
   const { t } = useTranslation('canvas');
   const status = effectiveStatus(d.status);
   return (
-    <NodeShell
+    <NodeChromeShell
       selected={!!selected}
       status={status}
       accent
@@ -167,7 +138,7 @@ export const StrategyGroupNode = memo(function StrategyGroupNode({
         {t('strategy.node.innerGraph', { id: d.innerGraphId })}
       </p>
       <Handle type="source" position={Position.Bottom} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
-    </NodeShell>
+    </NodeChromeShell>
   );
 });
 
@@ -180,14 +151,14 @@ export const StrategyJoinNode = memo(function StrategyJoinNode({
   const { t } = useTranslation('canvas');
   const status = effectiveStatus(d.status);
   return (
-    <NodeShell selected={!!selected} status={status} className="min-w-[176px]">
+    <NodeChromeShell selected={!!selected} status={status}>
       <Handle type="target" position={Position.Top} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
       <NodeHeader label={d.label} status={status} />
       <span className="mt-0.5 inline-block rounded-pill bg-[color-mix(in_srgb,var(--color-purple-700)_12%,transparent)] px-1.5 py-0.5 text-label-12 text-purple-1000">
         {t('strategy.node.join', { strategy: d.convergeStrategy ?? 'wait_for_all' })}
       </span>
       <Handle type="source" position={Position.Bottom} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
-    </NodeShell>
+    </NodeChromeShell>
   );
 });
 
@@ -200,11 +171,11 @@ export const StrategyTerminalNode = memo(function StrategyTerminalNode({
   const { t } = useTranslation('canvas');
   const status = effectiveStatus(d.status);
   return (
-    <NodeShell selected={!!selected} status={status} className="min-w-[140px]">
+    <NodeChromeShell selected={!!selected} status={status} className="min-w-[140px]">
       <Handle type="target" position={Position.Top} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
       <NodeHeader label={d.label} status={status} />
       <span className="mt-0.5 inline-block text-label-12 text-gray-700">{t('strategy.node.end')}</span>
-    </NodeShell>
+    </NodeChromeShell>
   );
 });
 
@@ -216,11 +187,11 @@ export const StrategyInnerNode = memo(function StrategyInnerNode({
   const d = data as StrategyNodeData;
   const status = effectiveStatus(d.status);
   return (
-    <NodeShell selected={!!selected} status={status} className="min-w-[150px]">
+    <NodeChromeShell selected={!!selected} status={status} className="min-w-[150px]">
       <Handle type="target" position={Position.Left} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
       <NodeHeader label={d.label} status={status} />
       <Handle type="source" position={Position.Right} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
-    </NodeShell>
+    </NodeChromeShell>
   );
 });
 

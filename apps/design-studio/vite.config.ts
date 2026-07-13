@@ -39,6 +39,8 @@ export default defineConfig({
         '@web-layout': path.resolve(__dirname, '../web/src/components/layout/presentational'),
         // Gallery-only alias for app-shared Settings presentational extracts (V1.107 Connection/Setup).
         '@web-settings': path.resolve(__dirname, '../web/src/components/settings/presentational'),
+        // Gallery-only alias for app-shared canvas node-chrome extracts (V1.115 NodeChromeShell).
+        '@web-canvas': path.resolve(__dirname, '../web/src/components/canvas/presentational'),
         '@web-lib/utils': path.resolve(__dirname, '../web/src/lib/utils'),
       },
     },
