@@ -58,7 +58,25 @@ export interface WorldKbSurfaceGraph {
  */
 export interface WorldKbCanvasAdapterContext {
   worldId: string;
+  /**
+   * Kept for orchestrator-owned paths (conflict handling, relationship
+   * inspector via InspectorPanel). The adapter's `renderInspector(node)` does
+   * NOT route from this field — `node.data` is the authority
+   * (R-V1114P0QC1-W002).
+   */
   selection: Selection;
+  /**
+   * Full entity list (including rejected) so `renderInspector` can resolve the
+   * entity projection for ANY entity node from `node.data.keyBlockId`. This is
+   * cross-node graph context, not per-node data.
+   */
+  entities: WorldKbEntityProjection[];
+  /**
+   * Pending promotion candidates so `renderInspector` can resolve the candidate
+   * projection from `node.data.candidateId`. Cross-node graph context.
+   */
+  candidates: WorldKbCandidateProjection[];
+  /** Confirmed (non-rejected) entities — PromotionInspector merge targets. */
   confirmedEntities: WorldKbEntityProjection[];
   anchors: WorldKbSourceAnchorProjection[];
   relationships: WorldKbRelationshipProjection[];
@@ -161,8 +179,14 @@ export function createWorldKbCanvasAdapter(
       return null as ConflictModalProps | null;
     },
 
-    renderInspector(_node) {
-      return <WorldKbInspectorWrapper ctxRef={ctxRef} />;
+    // Future extension point: `renderEdgeInspector?(edge)` on
+    // CanvasSurfaceAdapter would let surfaces own edge (relationship) selection
+    // inspectors. Currently the relationship inspector stays orchestrator-owned
+    // via InspectorPanel (R-V1114P0QC1-W002 known gap). Do NOT expand the
+    // interface this iteration (YAGNI) — add the optional method when a second
+    // surface needs edge-inspector routing.
+    renderInspector(node) {
+      return <WorldKbInspectorWrapper ctxRef={ctxRef} node={node} />;
     },
 
     renderAltView() {
@@ -175,33 +199,52 @@ export function createWorldKbCanvasAdapter(
   };
 }
 
-/** Adapter-driven inspector for node-based selections (entity / candidate). */
+/**
+ * Adapter-driven inspector for node-based selections (entity / candidate).
+ *
+ * Routes entity-vs-candidate from `node.data` — the contract `node` parameter
+ * is the authority, NOT `ctxRef.current.selection` (R-V1114P0QC1-W002). The
+ * projection is resolved by id lookup against the ctxRef graph lists so the
+ * inspector always reflects the passed node, even if the orchestrator's
+ * `selection` is stale or out of sync.
+ *
+ * ctxRef callbacks (`onEntityConflict`, `onPromoteConflict`), orchestrator
+ * context (`confirmedEntities`, `reseedSignal`) are read at render time —
+ * they are handlers / cross-node context, not per-node routing data.
+ */
 function WorldKbInspectorWrapper({
   ctxRef,
+  node,
 }: {
   ctxRef: MutableRefObject<WorldKbCanvasAdapterContext>;
+  node: Node<WorldKbNodeData>;
 }) {
   const ctx = ctxRef.current;
-  const selection = ctx.selection;
-  if (selection?.kind === 'entity') {
+  const data = node.data;
+
+  if (data.candidateId) {
+    const candidate = ctx.candidates.find((c) => c.candidate_id === data.candidateId);
+    if (!candidate) return null;
     return (
-      <EntityInspector
+      <PromotionInspector
         worldId={ctx.worldId}
-        node={selection.node}
-        entity={selection.entity}
-        onConflict={ctx.onEntityConflict}
+        node={data}
+        candidate={candidate}
+        confirmedEntities={ctx.confirmedEntities}
+        onConflict={ctx.onPromoteConflict}
         reseedSignal={ctx.reseedSignal}
       />
     );
   }
-  if (selection?.kind === 'candidate') {
+  if (data.keyBlockId) {
+    const entity = ctx.entities.find((e) => e.key_block_id === data.keyBlockId);
+    if (!entity) return null;
     return (
-      <PromotionInspector
+      <EntityInspector
         worldId={ctx.worldId}
-        node={selection.node}
-        candidate={selection.candidate}
-        confirmedEntities={ctx.confirmedEntities}
-        onConflict={ctx.onPromoteConflict}
+        node={data}
+        entity={entity}
+        onConflict={ctx.onEntityConflict}
         reseedSignal={ctx.reseedSignal}
       />
     );
