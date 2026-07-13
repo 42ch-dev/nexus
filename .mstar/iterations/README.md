@@ -125,6 +125,7 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | [v1.112-delivery-compass.md](v1.112-delivery-compass.md) | V1.112 | **Shipped** — Frontend i18n: react-i18next foundation + Appearance Language (P0) + full user-facing UI migration (P1). Integration `iteration/v1.112` → `main`. |
 | [v1.114-delivery-compass.md](v1.114-delivery-compass.md) | V1.114 | **completed** (2026-07-13) — Canvas & Compute Module Foundation: canvas architecture (adapter + dagre auto-layout) (P0) + canvas stability/validation hardening (P1) + compute module foundation & visibility (P2). Integration `iteration/v1.114` → `main`. |
 | [v1.115-delivery-compass.md](v1.115-delivery-compass.md) | V1.115 | **completed** (2026-07-13) — Canvas & Compute Foundation Completion: canvas adapter completion & contract convergence (P0) + canvas UX residual cluster closure (P1) + compute manifest bridge reconciliation (P2). Integration `iteration/v1.115` → `main`. |
+| [v1.116-delivery-compass.md](v1.116-delivery-compass.md) | V1.116 | **Active** — stabilization + readiness: agent detection fix + codex-native provider (P0 Must) + desktop dev script + design-studio locale (P1 Must) + canvas/compute readiness research (P2 Should). Integration `iteration/v1.116`. |
 
 ### Active iteration workspaces
 
@@ -144,6 +145,7 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | [v1.112/](v1.112/README.md) | V1.112 | Dual Must — i18n foundation + Appearance (P0) + full user-facing UI migration (P1) |
 | [v1.114/](v1.114/specs/) | V1.114 | Triple Must — canvas architecture foundation (P0) + canvas stability hardening (P1) + compute module foundation & visibility (P2) |
 | [v1.115/](v1.115/specs/) | V1.115 | Triple Must — canvas adapter completion & contract convergence (P0) + canvas UX residual cluster closure (P1) + compute manifest bridge reconciliation (P2) |
+| [v1.116/](v1.116/specs/) | V1.116 | Active — stabilization + readiness: agent detection fix + codex-native provider (P0 Must) + desktop dev script + design-studio locale (P1 Must) + canvas/compute readiness research (P2 Should) |
 
 ### Legacy `v1.*` iteration artifacts
 
