@@ -161,6 +161,8 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
   const ctxRef = useRef<WorldKbCanvasAdapterContext>({
     worldId,
     selection: null,
+    entities: [],
+    candidates: [],
     confirmedEntities: [],
     anchors: [],
     relationships: [],
@@ -339,6 +341,8 @@ export function WorldKbCanvas({ worldId }: WorldKbCanvasProps) {
   ctxRef.current = {
     worldId,
     selection: canvasState.selection,
+    entities,
+    candidates: candidateItems,
     confirmedEntities,
     anchors,
     relationships,

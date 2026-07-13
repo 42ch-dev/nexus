@@ -15,13 +15,18 @@ import { NexusClientError } from '@/lib/nexus';
 import { queryKeys } from '@/lib/nexus/query-keys';
 import { useToast } from '@/lib/use-toast';
 
-import { buildStrategyGraph, type StrategyGraph } from './strategy-graph';
 import { parsePresetYaml } from './preset-yaml';
 
 /** Calm overlay refresh cadence (A3 bounded overlay — session-level status). */
 const OVERLAY_POLL_MS = 5_000;
 
-/** Parsed graph + parse problems for one preset (A2 read projection). */
+/**
+ * Parsed preset + parse problems for one preset (A2 read projection).
+ *
+ * V1.115 P0 T2 (W001): graph projection (`buildStrategyGraph`) moved into the
+ * Strategy canvas adapter's `projectGraph`. This hook returns only the parsed
+ * preset + revision — the adapter owns projection so the contract is honest.
+ */
 export function usePresetGraph(presetId: string | undefined) {
   const client = useNexusClient();
   return useQuery({
@@ -29,8 +34,7 @@ export function usePresetGraph(presetId: string | undefined) {
     queryFn: async () => {
       const res = await client.getPreset(presetId!);
       const parsed = parsePresetYaml(res.yaml);
-      const graph: StrategyGraph = buildStrategyGraph(parsed);
-      return { preset: res, parsed, graph, revision: parsed.revision ?? 0 };
+      return { preset: res, parsed, revision: parsed.revision ?? 0 };
     },
     enabled: Boolean(presetId),
     staleTime: 30_000,

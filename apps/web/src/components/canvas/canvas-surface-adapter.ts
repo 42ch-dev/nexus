@@ -13,6 +13,18 @@ export interface CanvasSurfaceLayoutOptions {
   direction?: 'TB' | 'LR';
   rankSep?: number;
   nodeSep?: number;
+  /**
+   * When true, the surface projects meaningful node positions (e.g. persisted
+   * author positions, or a deterministic layout it wants preserved) and
+   * `useAutoLayout` must NOT override them on first open. The author can still
+   * trigger an explicit `relayout()` to force dagre.
+   *
+   * When false/undefined (default), `useAutoLayout` runs dagre on first open —
+   * the historical behavior for Strategy and World KB.
+   *
+   * (R-V1114P0QC1-W003)
+   */
+  hasSuppliedPositions?: boolean;
 }
 
 export interface CanvasSurfaceAdapter<TGraph, TNodeData extends Record<string, unknown>, TEdgeData extends Record<string, unknown>> {

@@ -91,17 +91,12 @@ vi.mock('@/lib/nexus/query-keys', () => ({
   queryKeys: { chapters: { outlines: () => ['ch', 'out'] } },
 }));
 
-vi.mock('@/components/canvas/outline-canvas/use-outline-canvas-graph', () => ({
-  useOutlineCanvasGraph: () => ({
-    rfNodes: [],
-    rfEdges: [],
-    onNodesChange: () => {},
-    selectedChapterId: null,
-    setSelectedChapterId: () => {},
-    selectedSceneId: null,
-    selectedBeatId: null,
-    projection: { nodes: [], edges: [] },
-  }),
+vi.mock('@/components/canvas/outline-canvas/rf-projection', () => ({
+  outlineGraphSummary: () => 'summary',
+  projectOutlineGraph: () => ({ nodes: [], edges: [] }),
+  selectedChapterIdFromNodes: () => null,
+  selectedSceneIdFromNodes: () => null,
+  selectedBeatIdFromNodes: () => null,
 }));
 
 // Outline heavy children → no-ops (keep canvas-layout real for the toggle).
@@ -129,9 +124,6 @@ vi.mock('@/components/canvas/outline-canvas/conflict-modal', () => ({
 vi.mock('@/components/canvas/outline-canvas/outline-nodes', () => ({
   outlineNodeTypes: {},
 }));
-vi.mock('@/components/canvas/outline-canvas/rf-projection', () => ({
-  outlineGraphSummary: () => 'summary',
-}));
 
 // ---------------------------------------------------------------------------
 // STRATEGY mocks
@@ -144,8 +136,10 @@ const strategyMocks = vi.hoisted(() => ({
     refetch: vi.fn(),
     data: {
       revision: 1,
-      parsed: { manifest: { states: [] }, problems: [] },
-      graph: { danglingTargets: [] },
+      parsed: {
+        manifest: { preset: { id: 'test' }, states: [] },
+        problems: [],
+      },
     },
   },
 }));
@@ -155,19 +149,11 @@ vi.mock('@/components/canvas/strategy-canvas/hooks/use-strategy-canvas', () => {
     graphQuery: strategyMocks.graphQuery,
     activeSession: null,
     creatorId: 'c1',
-    nodes: [] as never[],
-    edges: [] as never[],
-    onNodesChange: () => {},
-    onEdgesChange: () => {},
+    baseRevision: 1,
+    activeScheduleId: undefined,
+    draftEdges: [] as never[],
     onConnect: () => {},
     onReconnect: () => {},
-    selected: null,
-    selectedState: null,
-    baseRevision: 1,
-    promptTemplateRef: null,
-    revisionStatus: 'clean' as const,
-    summaryText: 'summary',
-    activeScheduleId: undefined,
     form: { label: '', description: '', nextTarget: '', promptBody: '' },
     setForm: () => {},
     saveStatuses: {},
@@ -186,6 +172,7 @@ vi.mock('@/components/canvas/strategy-canvas/hooks/use-strategy-canvas', () => {
     cancelDraft: () => {},
     commitKeyboardCreate: () => {},
     isCommittingKeyboardCreate: false,
+    isReconnecting: false,
   };
   return { useStrategyCanvas: () => strategyState };
 });
@@ -210,6 +197,8 @@ vi.mock('@/components/canvas/strategy-canvas/state-machine', () => ({
   RevisionBadge: () => null,
   ArtifactsList: () => null,
   originalFormOf: () => ({ label: '', description: '', nextTarget: '', promptBody: '' }),
+  templateRefOf: () => undefined,
+  isSectionDirty: () => false,
 }));
 vi.mock('@/components/canvas/strategy-alt-view', () => ({
   StrategyAltView: () => null,
