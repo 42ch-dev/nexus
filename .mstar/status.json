@@ -68,12 +68,12 @@
       "id": "2026-07-13-v1.115-compute-manifest-reconciliation",
       "title": "P2 - Compute Manifest Bridge Reconciliation",
       "file": "plans/2026-07-13-v1.115-compute-manifest-reconciliation.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@fullstack-dev"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.115",
         "compute",
@@ -83,7 +83,7 @@
       ],
       "created_at": "2026-07-13",
       "updated_at": "2026-07-13",
-      "notes": "Eliminate JSON round-trip bridge; reconcile ModuleManifest <-> ModuleDetail typed conversion",
+      "notes": "Phase 2: SDD T1-T5 done + QC fix wave, QC tri Approve, QA Pass; R-V1114P2QC1-W002 closed",
       "metadata": {
         "iteration_refs": [
           "V1.115"
@@ -1391,12 +1391,13 @@
         "id": "R-V1114P2QC1-W002",
         "title": "Manifest JSON-round-trip bridge (registry.rs) masks drift between hand-written ModuleManifest and generated ModuleDetail",
         "severity": "low",
-        "decision": "defer",
+        "decision": "close",
         "owner": "@fullstack-dev",
         "target": "post-V1.114",
-        "lifecycle": "open",
+        "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-13-v1.114-compute-module-foundation.md",
-        "note": "qc1 W-002. Architectural debt; reconcile when module surface matures."
+        "note": "qc1 W-002. Architectural debt; reconcile when module surface matures.",
+        "closure_note": "Closed by V1.115 P2 — typed From<&ModuleManifest> for ModuleDetail eliminates JSON round-trip drift bridge."
       }
     ],
     "2026-07-13-v1.115-canvas-ux-residual-cluster": [
@@ -1432,6 +1433,30 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-13-v1.115-canvas-ux-residual-cluster.md",
         "note": "QC1-S-002 / QC3-S-001/002. Non-actionable at current data sizes."
+      }
+    ],
+    "2026-07-13-v1.115-compute-manifest-reconciliation": [
+      {
+        "id": "R-V1115P2QC1-S103",
+        "title": "compute-module-abi.md §7.6 doc-link style (relative path vs anchor)",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@architect",
+        "target": "post-V1.115",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-13-v1.115-compute-manifest-reconciliation.md",
+        "note": "QC1-S-103. Doc polish."
+      },
+      {
+        "id": "R-V1115P2QC1-S104",
+        "title": "Residual-reference doc pointer in From impl could cross-reference status.json",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.115",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-13-v1.115-compute-manifest-reconciliation.md",
+        "note": "QC1-S-104. Doc polish."
       }
     ]
   }
