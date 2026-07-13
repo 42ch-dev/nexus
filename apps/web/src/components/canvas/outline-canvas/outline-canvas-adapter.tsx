@@ -130,8 +130,16 @@ export function createOutlineCanvasAdapter(
     surfaceKind: 'outline',
     nodeTypes: outlineNodeTypes,
     edgeTypes: undefined,
-    // Outline lanes flow left-to-right (volumes → chapters → timeline).
-    layoutOptions: { direction: 'LR' },
+    // simplify: dagre layout omitted because @dagrejs/dagre@3.0.0 crashes on
+    // compound graphs where an edge targets a node that has children via
+    // setParent (the Outline projection creates volume→chapter edges where
+    // chapter nodes have scene/beat children — exactly this pattern). The
+    // projection's built-in deterministic grid layout (projectOutlineGraph)
+    // supplies positions directly; useAutoLayout returns pass-through when
+    // layoutOptions is undefined. Upgrade path: fix the dagre compound-graph
+    // ranker issue, or switch to a layout engine that handles nesting (e.g.
+    // elk-js), then restore `layoutOptions: { direction: 'LR' }`.
+    layoutOptions: undefined,
 
     projectGraph(graph) {
       const { translateFallback } = ctxRef.current;

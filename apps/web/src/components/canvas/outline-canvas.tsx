@@ -7,7 +7,7 @@
  * V1.71 `strategy-canvas.tsx` pattern. V1.108 P0 mounts the shared
  * `CanvasShell` with the RF projection so the outline opens as a spatial graph.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useQueryClient } from '@tanstack/react-query';
 
@@ -23,6 +23,7 @@ import {
   usePatchTimelineEvent,
   useWorkOutline,
 } from '@/lib/canvas/use-outline-data';
+import { useCanvasSurface, type CanvasSurfaceQueryResult } from '@/components/canvas/use-canvas-surface';
 
 import { CanvasHeader } from './outline-canvas/canvas-layout';
 import { OutlineConflictDialog } from './outline-canvas/conflict-modal';
@@ -34,9 +35,18 @@ import { OutlineStructurePanel } from './outline-canvas/inspectors/structure-ins
 import type { ConflictState, SceneBeatFixturePayload } from './outline-canvas/graph-projection';
 import { chapterDisplayTitle } from './outline-canvas/graph-projection';
 import { outlineGraphSummary } from './outline-canvas/rf-projection';
-import { outlineNodeTypes } from './outline-canvas/outline-nodes';
+import {
+  selectedBeatIdFromNodes,
+  selectedChapterIdFromNodes,
+  selectedSceneIdFromNodes,
+} from './outline-canvas/rf-projection';
 import { OutlineAltView } from './outline-canvas/outline-alt-view';
-import { useOutlineCanvasGraph } from './outline-canvas/use-outline-canvas-graph';
+import {
+  createOutlineCanvasAdapter,
+  type OutlineCanvasAdapterContext,
+  type OutlineSurfaceGraph,
+} from './outline-canvas/outline-canvas-adapter';
+import type { Node } from '@xyflow/react';
 import type {
   ChapterSummary,
   OutlinePatchChapterRequest,
@@ -132,40 +142,125 @@ export function OutlineCanvas({
   // real Works pass nothing here → projection emits zero scene/beat children
   // (honest empty chrome). Design Studio / test fixtures inject populated
   // payloads via the `sceneBeatFixture` prop when scene/beat demo data is
-  // needed. The empty default is stable (module-level constant) so the hook's
+  // needed. The empty default is stable (module-level constant) so the
   // projection memo deps don't churn on re-render.
   const fixture = sceneBeatFixture ?? EMPTY_SCENE_BEAT_FIXTURE;
 
-  // V1.109 P0 T1 — RF graph state extracted into `useOutlineCanvasGraph`
-  // (R-V1108P0QC1-S001). The hook owns the projection memo, rfNodes/rfEdges
-  // state, the position-merge sync effect (preserves dragged positions +
-  // selection across chapter-page loads), the graph-click → inspector
-  // selection-sync effect (FB-C1-003), and `selectedChapterId`. The panel
-  // writes through the hook's setter so graph + panel selection stay in sync
-  // via one state owner.
-  const {
-    rfNodes,
-    rfEdges,
-    onNodesChange,
-    selectedChapterId,
-    setSelectedChapterId,
-    selectedSceneId,
-    selectedBeatId,
-    projection,
-  } = useOutlineCanvasGraph({
+  // V1.115 P0 T1b — the orchestrator now consumes the shared `useCanvasSurface`
+  // hook + `OutlineCanvasAdapter` (T1a). The projection memo, rfNodes/rfEdges
+  // state, and the position-merge sync effect that previously lived in the
+  // surface-specific `useOutlineCanvasGraph` hook are now provided by
+  // `useCanvasSurface` (same merge logic, same selection-key derivation). The
+  // orchestrator retains ownership of: the conflict modal (surface-specific
+  // `ConflictState` shape), the chapter/scene/beat inspector routing, the
+  // alt-view toggle, and the structure/timeline panels.
+  const translateFallback = useCallback(
+    (chapter: number) => t('chapter.fallback', { chapter }),
+    [t],
+  );
+
+  const surfaceQuery = useMemo<CanvasSurfaceQueryResult<OutlineSurfaceGraph>>(() => {
+    const outlineData = outline.data;
+    const workData = work.data;
+    // `data` is assembled only when all three queries have loaded so the
+    // adapter's projectGraph always receives a complete graph payload.
+    if (!outlineData || !workData) {
+      return {
+        data: undefined,
+        isLoading: outline.isLoading || chaptersQuery.isLoading || work.isLoading,
+        isError: outline.isError || chaptersQuery.isError || work.isError,
+        error: outline.error ?? chaptersQuery.error ?? work.error,
+        refetch: () => {
+          void outline.refetch();
+          void chaptersQuery.refetch();
+          void work.refetch();
+        },
+      };
+    }
+    return {
+      data: {
+        outline: outlineData,
+        chapters,
+        sceneBeatFixture: fixture,
+      },
+      isLoading: outline.isLoading || chaptersQuery.isLoading || work.isLoading,
+      isError: outline.isError || chaptersQuery.isError || work.isError,
+      error: outline.error ?? chaptersQuery.error ?? work.error,
+      refetch: () => {
+        void outline.refetch();
+        void chaptersQuery.refetch();
+        void work.refetch();
+      },
+    };
+  }, [
+    outline.data, outline.isLoading, outline.isError, outline.error, outline.refetch,
+    chaptersQuery.isLoading, chaptersQuery.isError, chaptersQuery.error, chaptersQuery.refetch,
+    work.data, work.isLoading, work.isError, work.error, work.refetch,
+    chapters, fixture,
+  ]);
+
+  // Mutable context ref — the adapter object is stable (created once); it reads
+  // fresh values from this ref at projection/render time so the orchestrator
+  // can update state without invalidating useCanvasSurface's memoized graph.
+  const ctxRef = useRef<OutlineCanvasAdapterContext>({
+    translateFallback,
+    t,
+    workId,
     outline: outline.data,
     chapters,
-    initialSelectedChapterId,
-    sceneBeatFixture: fixture,
+    chapterById,
+    fixture,
+    altViewSceneBeatFixture: sceneBeatFixture,
+    onPatchChapter: () => {},
+    onMove: () => {},
+    patchChapterIsPending: false,
+    isConflicting: false,
+    contentVersion: 0,
   });
+  const adapter = useMemo(() => createOutlineCanvasAdapter(ctxRef), []);
+  const surface = useCanvasSurface(adapter, surfaceQuery);
+
+  // Selection state — previously owned by `useOutlineCanvasGraph`; now owned by
+  // the orchestrator. `useCanvasSurface` exposes `selectedNodeId` (derived from
+  // the RF node `selected` flag); the orchestrator resolves it to chapter /
+  // scene / beat ids via the existing helpers so the StructurePanel,
+  // TimelinePanel, and inline inspector routing stay coordinated.
+  const [selectedChapterId, setSelectedChapterId] = useState<number | null>(
+    initialSelectedChapterId ?? null,
+  );
+  const [selectedSceneId, setSelectedSceneId] = useState<string | null>(null);
+  const [selectedBeatId, setSelectedBeatId] = useState<string | null>(null);
+
+  // Thin selection resolver — replaces the hook's selection-sync effect
+  // (FB-C1-003 + FB-C2-002). Reads `surface.selectedNodeId` (which changes only
+  // when the selected RF node changes) and resolves chapter / scene / beat ids
+  // via the same helpers the hook used. Passing a one-node array to the helpers
+  // works because `surface.selectedNode` carries `selected: true`.
+  useEffect(() => {
+    const selected = surface.selectedNode;
+    if (!selected) return; // nothing selected — leave selections intact
+
+    const chapterId = selectedChapterIdFromNodes([selected as Node]);
+    if (chapterId !== null) setSelectedChapterId(chapterId);
+    else setSelectedChapterId(null);
+
+    const sceneId = selectedSceneIdFromNodes([selected as Node]);
+    if (sceneId !== null) setSelectedSceneId(sceneId);
+    else setSelectedSceneId(null);
+
+    const beatId = selectedBeatIdFromNodes([selected as Node]);
+    if (beatId !== null) setSelectedBeatId(beatId);
+    else setSelectedBeatId(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [surface.selectedNodeId]);
 
   const selectedChapter = selectedChapterId ? chapterById.get(selectedChapterId) ?? null : null;
 
   // V1.109 C2 T4 — resolve the selected Scene/Beat from the fixture payload +
-  // hook selection state (FB-C2-002). The hook exposes `selectedSceneId` /
-  // `selectedBeatId` (driven by RF graph-click); the orchestrator resolves
-  // them against the fixture to get the entity data + parent title for the
-  // inspector. On real Works (empty fixture) both are always null — the
+  // selection state (FB-C2-002). The selection resolver above drives
+  // `selectedSceneId` / `selectedBeatId` from RF graph-click; the orchestrator
+  // resolves them against the fixture to get the entity data + parent title for
+  // the inspector. On real Works (empty fixture) both are always null — the
   // Chapter inspector remains the default.
   const selectedScene = selectedSceneId
     ? fixture.scenes.find((s) => s.sceneId === selectedSceneId) ?? null
@@ -302,6 +397,33 @@ export function OutlineCanvas({
     );
   }
 
+  // Update the mutable adapter context every render (after early returns, before
+  // JSX). The adapter object is stable, so useCanvasSurface's memoized graph
+  // projection survives state changes; inspectors/alt-view rendered via the
+  // adapter read fresh values from this ref at their render time.
+  ctxRef.current = {
+    translateFallback,
+    t,
+    workId,
+    outline: outline.data,
+    chapters,
+    chapterById,
+    fixture,
+    altViewSceneBeatFixture: sceneBeatFixture,
+    onPatchChapter: handleChapter,
+    onMove: (chapterId: number, volumeId: number) =>
+      handleStructure({
+        work_id: workId,
+        base_revision: outline.data.outline_revision,
+        operation: 'move_chapter',
+        chapter_id: chapterId,
+        volume_id: volumeId,
+      }),
+    patchChapterIsPending: patchChapter.isPending,
+    isConflicting: conflict !== null,
+    contentVersion,
+  };
+
   return (
     <div className="flex flex-col gap-4">
       <CanvasHeader
@@ -321,10 +443,10 @@ export function OutlineCanvas({
         <OutlineAltView outline={outline.data} chapters={chapters} sceneBeatFixture={sceneBeatFixture} />
       ) : (
         <CanvasShell
-          nodes={rfNodes}
-          edges={rfEdges}
-          nodeTypes={outlineNodeTypes}
-          onNodesChange={onNodesChange}
+          nodes={surface.nodes}
+          edges={surface.edges}
+          nodeTypes={surface.nodeTypes}
+          onNodesChange={surface.onNodesChange}
           summaryText={summary}
           ariaLabel={t('outline.graphAriaLabel')}
           surfaceKey={`outline:${workId}`}
@@ -332,7 +454,7 @@ export function OutlineCanvas({
           {/* I-QC1-001 — when the projection has zero nodes, render the
               EmptyState as an in-shell overlay so CanvasShell is always
               mounted for the graph view (FB-C1-000 shared-shell parity). */}
-          {projection && projection.nodes.length === 0 ? (
+          {surface.nodes.length === 0 ? (
             <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
             <EmptyState
               title={t('outline.noGraph.title')}

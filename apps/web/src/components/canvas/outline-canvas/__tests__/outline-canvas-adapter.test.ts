@@ -98,9 +98,13 @@ describe('OutlineCanvasAdapter — shape', () => {
     expect(adapter.surfaceKind).toBe('outline');
   });
 
-  it('opts into dagre auto-layout with LR direction (outline lane convention)', () => {
+  it('omits dagre layoutOptions (compound-graph ranker bug — projected positions used directly)', () => {
     const adapter = makeAdapter();
-    expect(adapter.layoutOptions?.direction).toBe('LR');
+    // V1.115 T1b: layoutOptions removed because @dagrejs/dagre@3.0.0 crashes
+    // when an edge targets a node that has children via setParent (the Outline
+    // projection creates volume→chapter edges where chapter nodes have scene/
+    // beat children). The projection's built-in grid layout supplies positions.
+    expect(adapter.layoutOptions).toBeUndefined();
   });
 
   it('exposes outlineNodeTypes', () => {

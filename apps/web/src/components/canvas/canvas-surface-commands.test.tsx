@@ -91,17 +91,12 @@ vi.mock('@/lib/nexus/query-keys', () => ({
   queryKeys: { chapters: { outlines: () => ['ch', 'out'] } },
 }));
 
-vi.mock('@/components/canvas/outline-canvas/use-outline-canvas-graph', () => ({
-  useOutlineCanvasGraph: () => ({
-    rfNodes: [],
-    rfEdges: [],
-    onNodesChange: () => {},
-    selectedChapterId: null,
-    setSelectedChapterId: () => {},
-    selectedSceneId: null,
-    selectedBeatId: null,
-    projection: { nodes: [], edges: [] },
-  }),
+vi.mock('@/components/canvas/outline-canvas/rf-projection', () => ({
+  outlineGraphSummary: () => 'summary',
+  projectOutlineGraph: () => ({ nodes: [], edges: [] }),
+  selectedChapterIdFromNodes: () => null,
+  selectedSceneIdFromNodes: () => null,
+  selectedBeatIdFromNodes: () => null,
 }));
 
 // Outline heavy children → no-ops (keep canvas-layout real for the toggle).
@@ -128,9 +123,6 @@ vi.mock('@/components/canvas/outline-canvas/conflict-modal', () => ({
 }));
 vi.mock('@/components/canvas/outline-canvas/outline-nodes', () => ({
   outlineNodeTypes: {},
-}));
-vi.mock('@/components/canvas/outline-canvas/rf-projection', () => ({
-  outlineGraphSummary: () => 'summary',
 }));
 
 // ---------------------------------------------------------------------------
