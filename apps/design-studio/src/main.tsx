@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom';
 
 import { App } from '@/App';
 import { ThemeProvider } from '@/components/theme-provider';
+import '@/lib/i18n/config';
 import './index.css';
 
 const rootElement = document.getElementById('root');
