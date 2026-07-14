@@ -470,20 +470,25 @@ async fn stop_daemon(port: u16) -> Result<()> {
         return Ok(());
     }
 
-    // Prefer the verified TCP listener PID over the pidfile. A recycled
-    // pidfile entry must never be signaled when a different process owns the
-    // daemon port (health already confirmed a Nexus daemon is listening).
-    let pid = match (listener_pid(port), read_pid_file()?) {
-        (Some(listen_pid), Some(file_pid)) if listen_pid == file_pid => Some(listen_pid),
-        (Some(listen_pid), _) => Some(listen_pid),
-        (None, Some(file_pid)) => Some(file_pid),
-        (None, None) => None,
+    // Health already confirmed a Nexus daemon is listening. Only signal the
+    // verified TCP listener PID — never fall back to an unverified pidfile
+    // (recycled PIDs / missing `lsof` would otherwise risk killing unrelated
+    // processes).
+    let Some(pid) = listener_pid(port) else {
+        return Err(CliError::Daemon {
+            message: format!(
+                "Daemon is running on port {port}, but the listening process could not be identified \
+                 (is `lsof` available?). Refusing to signal an unverified PID file."
+            ),
+        });
     };
-
-    let Some(pid) = pid else {
-        println!("No process found on port {port}.");
-        return Ok(());
-    };
+    if let Ok(Some(file_pid)) = read_pid_file() {
+        if file_pid != pid {
+            println!(
+                "  Note: PID file ({file_pid}) differs from listener ({pid}); signaling listener."
+            );
+        }
+    }
 
     println!("Stopping daemon (PID: {pid})...");
 
