@@ -31,7 +31,7 @@
   },
   "agent": {
     "title": "Agent",
-    "helper": "Choose which local ACP agent Nexus uses for creative work.",
+    "helper": "Choose which local agent Nexus uses for creative work.",
     "browserOnly": "Agent selection is available on the desktop app only.",
     "save": "Save Agent",
     "saving": "Saving…",

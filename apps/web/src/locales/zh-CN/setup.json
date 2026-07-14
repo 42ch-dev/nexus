@@ -1,10 +1,10 @@
 {
   "step": {
     "agent": {
-      "title": "选择 ACP 智能体",
-      "description": "Nexus 使用兼容 ACP 的智能体来运行策略。选择一个已发现的智能体以继续。",
+      "title": "选择智能体",
+      "description": "Nexus 使用智能体来运行策略。选择一个已发现的智能体以继续。",
       "emptyTitle": "在 PATH 中未找到智能体。",
-      "emptyDescription": "安装一个兼容 ACP 的智能体以继续。"
+      "emptyDescription": "安装一个智能体以继续。"
     },
     "workspace": {
       "title": "为你的个人档案命名",
@@ -31,7 +31,7 @@
     "back": "返回"
   },
   "agentPicker": {
-    "loading": "正在扫描本地 ACP 智能体…",
+    "loading": "正在扫描本地智能体…",
     "error": {
       "title": "无法扫描智能体",
       "fallbackDescription": "守护进程未响应智能体扫描请求。"
@@ -39,7 +39,7 @@
     "tryAgain": "重试",
     "empty": {
       "title": "在 PATH 中未找到智能体",
-      "description": "安装一个兼容 ACP 的智能体，或使用自定义启动命令继续。"
+      "description": "安装一个智能体，或使用自定义启动命令继续。"
     },
     "more": "更多智能体",
     "fewer": "收起智能体",

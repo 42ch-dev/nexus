@@ -54,7 +54,7 @@ const MORE_AGENTS: AgentPickerItem[] = [
 describe('AgentPicker', () => {
   it('renders loading state', () => {
     render(<AgentPicker status="loading" />);
-    expect(screen.getByText('Scanning for local ACP agents\u2026')).toBeInTheDocument();
+    expect(screen.getByText('Scanning for local agents\u2026')).toBeInTheDocument();
     expect(screen.getByTestId('agent-picker')).toHaveAttribute('data-status', 'loading');
   });
 

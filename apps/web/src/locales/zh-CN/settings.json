@@ -31,7 +31,7 @@
   },
   "agent": {
     "title": "智能体",
-    "helper": "选择 Nexus 用于创意工作的本地 ACP 智能体。",
+    "helper": "选择 Nexus 用于创意工作的本地智能体。",
     "browserOnly": "仅在桌面应用中可以选择智能体。",
     "save": "保存智能体",
     "saving": "保存中…",

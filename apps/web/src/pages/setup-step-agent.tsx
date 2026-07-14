@@ -11,7 +11,6 @@ import {
 } from '@/components/setup/agent-picker';
 import { useScanAgents, useVerifyAgent } from '@/api/queries';
 import { errorMessage } from '@/lib/error-message';
-import { lookupAgentOutboundUrls } from '@/pages/setup-agent-urls';
 import {
   defaultGridEntries,
   moreAgentsEntries,
@@ -72,15 +71,15 @@ export function mapScanEntriesToPickerItems(
 ): AgentPickerItem[] {
   const ids = assignCollisionSafePickerIds(agents);
   return agents.map((agent, index) => {
-    const urls = lookupAgentOutboundUrls(agent.registry_agent_id, agent.name);
+    const item = resolveCatalogItem(agent);
     return {
       id: ids[index]!,
       name: agent.name,
       version: agent.version,
       description: agent.description,
       installed: agent.installed,
-      installUrl: urls.installUrl ?? null,
-      docsUrl: urls.docsUrl ?? null,
+      installUrl: item.installUrl ?? null,
+      docsUrl: item.docsUrl ?? null,
     };
   });
 }

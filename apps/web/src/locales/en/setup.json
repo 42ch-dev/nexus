@@ -1,10 +1,10 @@
 {
   "step": {
     "agent": {
-      "title": "Choose an ACP agent",
-      "description": "Nexus uses an ACP-compatible agent to run strategies. Select a discovered agent to continue.",
+      "title": "Choose an agent",
+      "description": "Nexus uses an agent to run strategies. Select a discovered agent to continue.",
       "emptyTitle": "No agents found on PATH.",
-      "emptyDescription": "Install an ACP-compatible agent to continue."
+      "emptyDescription": "Install an agent to continue."
     },
     "workspace": {
       "title": "Name your Profile",
@@ -31,7 +31,7 @@
     "back": "Back"
   },
   "agentPicker": {
-    "loading": "Scanning for local ACP agents…",
+    "loading": "Scanning for local agents…",
     "error": {
       "title": "Could not scan for agents",
       "fallbackDescription": "The daemon did not respond to the agent scan request."
@@ -39,7 +39,7 @@
     "tryAgain": "Try again",
     "empty": {
       "title": "No agents found on PATH",
-      "description": "Install an ACP-compatible agent, or continue with a custom launch command."
+      "description": "Install an agent, or continue with a custom launch command."
     },
     "more": "More agents",
     "fewer": "Fewer agents",

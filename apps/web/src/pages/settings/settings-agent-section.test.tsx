@@ -89,8 +89,19 @@ const settingsRouteTree = (
   </Route>
 );
 
+/**
+ * Expand the "More agents" toggle so hiddenFromDefault cards (claude-acp,
+ * codex-acp per the V1.117 T1 catalog) become visible. `findByTestId` waits
+ * for the scan to settle into `ready` state before the button is clickable.
+ */
+async function expandMoreAgents(user: ReturnType<typeof userEvent.setup>) {
+  const moreBtn = await screen.findByTestId('agent-picker-more');
+  await user.click(moreBtn);
+}
+
 describe('SettingsAgentSection preselect (G1)', () => {
   it('renders locked Agent helper and browser-only helper without desktop', async () => {
+    const user = userEvent.setup();
     useHandlers(scanHandler(), creatorsHandler());
 
     renderInApp(
@@ -106,18 +117,22 @@ describe('SettingsAgentSection preselect (G1)', () => {
       screen.getByRole('heading', { name: 'Agent', level: 3 }),
     ).toBeInTheDocument();
     expect(
-      screen.getByText(/Choose which local ACP agent Nexus uses for creative work/i),
+      screen.getByText(/Choose which local agent Nexus uses for creative work/i),
     ).toBeInTheDocument();
     expect(screen.getByTestId('settings-agent-browser-helper')).toHaveTextContent(
       'Agent selection is available on the desktop app only.',
     );
 
     await waitFor(() =>
-      expect(screen.getByTestId('agent-card-claude-acp')).toBeInTheDocument(),
+      expect(screen.getByTestId('agent-picker')).toBeInTheDocument(),
     );
+    // claude-acp and codex-acp are in moreAgents — expand to find them.
+    await expandMoreAgents(user);
+    expect(screen.getByTestId('agent-card-claude-acp')).toBeInTheDocument();
   });
 
   it('preselects saved profile by name after scan settles (desktop)', async () => {
+    const user = userEvent.setup();
     const getAgentProfile = vi.fn(() =>
       Promise.resolve({ name: 'codex', launchCommand: 'codex' }),
     );
@@ -133,8 +148,11 @@ describe('SettingsAgentSection preselect (G1)', () => {
     );
 
     await waitFor(() =>
-      expect(screen.getByTestId('agent-card-codex-acp')).toBeInTheDocument(),
+      expect(screen.getByTestId('agent-picker')).toBeInTheDocument(),
     );
+    // codex-acp is in moreAgents — expand to find it.
+    await expandMoreAgents(user);
+    expect(screen.getByTestId('agent-card-codex-acp')).toBeInTheDocument();
 
     await waitFor(() => expect(getAgentProfile).toHaveBeenCalled());
 
@@ -175,8 +193,11 @@ describe('SettingsAgentSection preselect (G1)', () => {
     );
 
     await waitFor(() =>
-      expect(screen.getByTestId('agent-card-codex-acp')).toBeInTheDocument(),
+      expect(screen.getByTestId('agent-picker')).toBeInTheDocument(),
     );
+    // codex-acp is in moreAgents — expand to find it.
+    await expandMoreAgents(user);
+    expect(screen.getByTestId('agent-card-codex-acp')).toBeInTheDocument();
 
     await user.click(screen.getByTestId('agent-card-select-codex-acp'));
 
@@ -206,6 +227,7 @@ describe('SettingsAgentSection preselect (G1)', () => {
   });
 
   it('falls back to first installed when getAgentProfile returns null', async () => {
+    const user = userEvent.setup();
     const getAgentProfile = vi.fn(() => Promise.resolve(null));
     useHandlers(scanHandler(), creatorsHandler());
 
@@ -220,6 +242,8 @@ describe('SettingsAgentSection preselect (G1)', () => {
 
     await waitFor(() => expect(getAgentProfile).toHaveBeenCalled());
 
+    // claude-acp (first installed) is in moreAgents — expand to observe preselect.
+    await expandMoreAgents(user);
     await waitFor(() => {
       const pressed = screen
         .getAllByTestId('agent-card-select-claude-acp')
@@ -270,6 +294,8 @@ describe('SettingsAgentSection preselect (G1)', () => {
       },
     );
 
+    // codex-acp is in moreAgents — expand to observe the preselect.
+    await expandMoreAgents(user);
     await waitFor(() => {
       const pressed = screen
         .getAllByTestId('agent-card-select-codex-acp')
@@ -298,6 +324,9 @@ describe('SettingsAgentSection preselect (G1)', () => {
       },
     );
 
+    // claude-acp is in moreAgents — expand to confirm browser auto-select still
+    // falls back to the first installed agent without desktop caps.
+    await expandMoreAgents(user);
     await waitFor(() =>
       expect(screen.getByTestId('agent-card-claude-acp')).toBeInTheDocument(),
     );

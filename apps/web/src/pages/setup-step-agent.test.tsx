@@ -10,7 +10,7 @@ import {
   assignCollisionSafePickerIds,
   mapScanEntriesToPickerItems,
 } from '@/pages/setup-step-agent';
-import { lookupAgentOutboundUrls } from '@/pages/setup-agent-urls';
+import { resolveCatalogItem } from '@/lib/agent-catalog';
 import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 import { BrowserClient } from '@/lib/nexus';
@@ -112,13 +112,13 @@ describe('mapScanEntriesToPickerItems / URL table', () => {
     expect(items[3]!.docsUrl).toBeNull();
   });
 
-  it('lookupAgentOutboundUrls returns URLs for whitelisted keys only', () => {
-    expect(lookupAgentOutboundUrls('claude-native', 'Other').installUrl).toBeTruthy();
-    expect(lookupAgentOutboundUrls('codex-native', 'Other').installUrl).toBeTruthy();
-    expect(lookupAgentOutboundUrls('opencode', 'Other').installUrl).toBeTruthy();
+  it('resolveCatalogItem returns URLs for whitelisted keys only', () => {
+    expect(resolveCatalogItem(makeAgent({ name: 'Other', registry_agent_id: 'claude-native' })).installUrl).toBeTruthy();
+    expect(resolveCatalogItem(makeAgent({ name: 'Other', registry_agent_id: 'codex-native' })).installUrl).toBeTruthy();
+    expect(resolveCatalogItem(makeAgent({ name: 'Other', registry_agent_id: 'opencode' })).installUrl).toBeTruthy();
     // Non-whitelisted keys return null
-    expect(lookupAgentOutboundUrls('claude-acp', 'Other').installUrl).toBeNull();
-    expect(lookupAgentOutboundUrls(null, 'nope').installUrl).toBeNull();
+    expect(resolveCatalogItem(makeAgent({ name: 'Other', registry_agent_id: 'claude-acp' })).installUrl).toBeNull();
+    expect(resolveCatalogItem(makeAgent({ name: 'nope' })).installUrl).toBeNull();
   });
 
   it('agentPickerId prefers registry_agent_id', () => {
@@ -170,6 +170,7 @@ describe('SetupStepAgent', () => {
   });
 
   it('auto-selects the first installed agent (B4)', async () => {
+    const user = userEvent.setup();
     const agent = makeAgent({
       name: 'Claude Code',
       registry_agent_id: 'claude-acp',
@@ -183,6 +184,8 @@ describe('SetupStepAgent', () => {
 
     renderHarness(makeState());
 
+    // claude-acp is hiddenFromDefault (V1.117 T1 catalog) → behind the More toggle.
+    await expandRestAgents(user);
     await waitFor(() =>
       expect(screen.getByTestId('agent-card-select-claude-acp')).toHaveAttribute(
         'aria-pressed',
@@ -278,6 +281,8 @@ describe('SetupStepAgent', () => {
       { client: makeClient(), initialRouterEntries: ['/setup'] },
     );
 
+    // codex-acp is hiddenFromDefault (V1.117 T1 catalog) → behind the More toggle.
+    await expandRestAgents(user);
     await waitFor(() => expect(screen.getByText('Codex')).toBeInTheDocument());
     await user.click(screen.getByTestId('agent-card-select-codex-acp'));
 
@@ -312,13 +317,12 @@ describe('SetupStepAgent', () => {
       { client: makeClient(), initialRouterEntries: ['/setup'] },
     );
 
-    // Native CLI entries are not part of COMMON_AGENT_PRIORITY, so they render
-    // behind the More toggle. Expanding proves they are visible (not filtered).
-    await expandRestAgents(user);
+    // launch_command 'codex' maps to catalog key `codex-native` (priority 1,
+    // displayName 'Codex') via NATIVE_LAUNCH_MAP — renders in the default grid.
     await waitFor(() =>
-      expect(screen.getByText('codex (native CLI)')).toBeInTheDocument(),
+      expect(screen.getByText('Codex')).toBeInTheDocument(),
     );
-    const selectId = 'agent-card-select-codex (native CLI)';
+    const selectId = 'agent-card-select-codex-native';
     expect(screen.getByTestId(selectId)).toBeInTheDocument();
 
     await user.click(screen.getByTestId(selectId));
@@ -489,8 +493,7 @@ describe('SetupStepAgent', () => {
 
     renderHarness(makeState());
 
-    // 'my-agent' is non-common — expand More so its card is visible.
-    await expandRestAgents(user);
+    // 'my-agent' is installed and not hiddenFromDefault → default grid (visible).
     await waitFor(() => expect(screen.getByText('my-agent')).toBeInTheDocument());
     // Auto-select enables Continue via the installed agent.
     await waitFor(() =>
