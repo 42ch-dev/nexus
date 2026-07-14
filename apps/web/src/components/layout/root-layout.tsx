@@ -41,7 +41,13 @@ function useRouteTitle(): string {
 }
 
 /**
- * Root layout — DESIGN.md §Spacing/Layout Rules.
+ * Root layout — DESIGN.md §Spacing/Layout Rules + AD-P2-2 layout/scroll SSOT.
+ *
+ * The root is locked to the viewport (`h-screen overflow-hidden`): the sidebar
+ * is a full-height rail that never scrolls at the top level, and the main
+ * column constrains its children with `min-h-0` so only `<main>` (the content
+ * region) scrolls. The header, banner, and {@link DaemonStatusBar} are fixed
+ * flex children that stay on screen.
  *
  * Fixed 248px sidebar at `lg` and above; collapses to a horizontal top nav
  * below `lg`. Main content max-width 1200px with 24px desktop / 16px mobile
@@ -58,14 +64,16 @@ export function RootLayout() {
   useHotkey('mod+k', () => openPalette());
 
   return (
-    <div className="flex min-h-screen bg-background-100 text-gray-1000">
-      {/* Desktop sidebar */}
-      <aside className="hidden w-[248px] shrink-0 lg:block">
+    <div className="flex h-screen overflow-hidden bg-background-100 text-gray-1000">
+      {/* Desktop sidebar — full-height rail (AD-P2-2): h-screen + overflow-hidden
+          so the sidebar chrome manages its own internal scroll (nav scrolls in
+          the middle; Settings + Profiles footer block is pinned at the bottom). */}
+      <aside className="hidden h-screen w-[248px] shrink-0 flex-col overflow-hidden lg:flex">
         <Sidebar />
       </aside>
 
-      {/* Main column */}
-      <div className="flex min-w-0 flex-1 flex-col">
+      {/* Main column — min-h-0 lets the flex child shrink so only <main> scrolls. */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {/* Mobile top nav (below lg) */}
         <nav
           aria-label={t('aria.primary')}
@@ -93,7 +101,10 @@ export function RootLayout() {
 
         <MainBanner />
 
-        <main className="flex-1 overflow-y-auto">
+        {/* Content region — the ONLY scroll region (AD-P2-2). min-h-0 allows
+            the flex child to shrink within the column so overflow scrolls here
+            instead of growing the column past the viewport. */}
+        <main className="min-h-0 flex-1 overflow-y-auto">
           <div className="mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-8">
             <Outlet />
           </div>

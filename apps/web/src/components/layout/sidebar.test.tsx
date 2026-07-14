@@ -443,3 +443,71 @@ describe('Sidebar — Canvas active-surface highlight (V1.111 P1 T4)', () => {
     expect(screen.getByRole('link', { name: 'Memory' })).toHaveClass('bg-gray-alpha-100');
   });
 });
+
+describe('Sidebar — layout structure (AD-P2-2 T1)', () => {
+  beforeEach(async () => {
+    window.localStorage.clear();
+    await i18n.changeLanguage('en');
+  });
+
+  it('propagates height from the aside through the nav wrapper to the chrome', async () => {
+    useCreatorHandler();
+    renderInApp(<Sidebar />, {
+      client: makeClient(),
+      activeCreatorId: 'creator-a',
+    });
+
+    // The nav wrapper fills its flex parent (the aside) and can shrink so the
+    // chrome's internal scroll regions resolve against a definite height.
+    const nav = screen.getByRole('navigation');
+    expect(nav).toHaveClass('flex-1');
+    expect(nav).toHaveClass('min-h-0');
+
+    // The chrome root fills the nav (h-full) and lays out as a flex column.
+    const chromeRoot = nav.firstElementChild as HTMLElement;
+    expect(chromeRoot).toHaveClass('h-full');
+    expect(chromeRoot).toHaveClass('flex-col');
+  });
+
+  it('scrolls nav internally (tabpanel overflow-auto) while the footer block stays pinned', async () => {
+    useCreatorHandler();
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+
+    // The nav items live in a tabpanel that absorbs free space and scrolls.
+    const tabpanel = screen.getByRole('tabpanel');
+    expect(tabpanel).toHaveClass('overflow-auto');
+    expect(tabpanel).toHaveClass('flex-1');
+
+    // Settings is a footer utility — it sits OUTSIDE the scrolling tabpanel.
+    const settingsLink = screen.getByTestId('settings-footer-utility-link');
+    expect(tabpanel.contains(settingsLink)).toBe(false);
+
+    // The footer block container has a single border-t separating it from nav.
+    expect(settingsLink.parentElement).toHaveClass('border-t');
+  });
+
+  it('places Settings and Profiles in one bottom-aligned footer block', async () => {
+    useCreatorHandler();
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+
+    // Wait for the footer profile switcher to mount.
+    await waitFor(() =>
+      expect(screen.getByRole('toolbar', { name: 'Profiles' })).toBeInTheDocument(),
+    );
+
+    const settingsLink = screen.getByTestId('settings-footer-utility-link');
+    const toolbar = screen.getByRole('toolbar', { name: 'Profiles' });
+    const tabpanel = screen.getByRole('tabpanel');
+
+    // Both Settings and Profiles are outside the scrolling nav region.
+    expect(tabpanel.contains(settingsLink)).toBe(false);
+    expect(tabpanel.contains(toolbar)).toBe(false);
+
+    // Both share the same bottom block (the element with border-t that contains
+    // the Settings link). The toolbar may be nested one level deeper inside the
+    // FooterProfilesChrome wrapper, so verify common ancestry.
+    const bottomBlock = settingsLink.parentElement;
+    expect(bottomBlock).toHaveClass('border-t');
+    expect(bottomBlock!.contains(toolbar)).toBe(true);
+  });
+});

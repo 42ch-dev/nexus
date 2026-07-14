@@ -128,7 +128,7 @@ export function Sidebar() {
   const groups = activeTab === 'creator' ? creatorGroups : orchestratorGroups;
 
   return (
-    <nav aria-label={t('aria.primary')}>
+    <nav aria-label={t('aria.primary')} className="min-h-0 flex-1">
       <ShellSidebarChrome
         activeTab={activeTab}
         activeRoute={pathname}
