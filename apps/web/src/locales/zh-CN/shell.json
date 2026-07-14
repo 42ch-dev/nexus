@@ -20,7 +20,6 @@
     "orchestrator": "编排",
     "works": "作品",
     "allWorks": "全部作品",
-    "canvas": "画布",
     "outline": "大纲",
     "worldKb": "世界知识库",
     "strategy": "策略",
@@ -32,7 +31,12 @@
     "compute": "计算",
     "modules": "模块",
     "strategies": "策略",
-    "settings": "设置"
+    "settings": "设置",
+    "drillIn": {
+      "backToAll": "返回所有",
+      "outline": "大纲",
+      "body": "正文"
+    }
   },
   "theme": {
     "switchToLight": "切换至浅色主题",

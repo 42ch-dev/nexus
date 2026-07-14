@@ -18,6 +18,16 @@ export interface ShellNavGroup {
   items: ShellNavItem[];
 }
 
+/** Custom renderer for a nav item (receives the computed className, SSOT inner
+ * content, and active state). The chrome always resolves a default before
+ * passing it to its sub-renderers, so helpers take this as required. */
+export type RenderNavItem = (
+  item: ShellNavItem,
+  className: string,
+  content: ReactNode,
+  isActive: boolean,
+) => ReactNode;
+
 export interface ShellSidebarChromeProps {
   activeTab: ShellSidebarTab;
   activeRoute: string;
@@ -28,20 +38,8 @@ export interface ShellSidebarChromeProps {
   logo?: ReactNode;
   /** Optional footer slot rendered below the Settings utility (e.g. profile switcher). */
   footer?: ReactNode;
-  /**
-   * Optional custom nav link renderer. Receives the item, the computed container
-   * className, the SSOT inner content (active bar + icon + label), and whether the
-   * item is active. The default uses a plain `<a>` so Studio fixtures stay
-   * routing-free; the App wrapper can inject `<NavLink>`.
-   */
-  renderNavItem?: (
-    item: ShellNavItem,
-    className: string,
-    content: ReactNode,
-    isActive: boolean,
-  ) => ReactNode;
-  /**
-   * Optional per-item active-state override. When provided, the chrome calls it
+  renderNavItem?: RenderNavItem;
+  /** Optional per-item active-state override. When provided, the chrome calls it
    * for every item INSTEAD of the built-in `activeRoute === item.to ||
    * activeRoute.startsWith(item.to + '/')` prefix match. Lets hosts that need
    * resolver-driven active state (e.g. Canvas surface matching) keep the
@@ -49,6 +47,14 @@ export interface ShellSidebarChromeProps {
    * match is preserved (backward-compatible).
    */
   isActiveItem?: (item: ShellNavItem, activeRoute: string) => boolean;
+  /**
+   * Optional work-context drill-in mode (V1.117 AD-P2-1). When provided, the
+   * chrome hides the Creator/Orchestrator tablist and renders these items as a
+   * flat list (no group disclosures) in the scrollable nav region. The footer
+   * (Settings + profiles) is unaffected. When absent, the normal tab + group
+   * IA is rendered (backward-compatible).
+   */
+  drillInItems?: ShellNavItem[];
   /** Optional custom renderer for the Settings footer utility link. */
   renderSettingsLink?: (
     to: string,
@@ -85,6 +91,7 @@ export function ShellSidebarChrome({
   renderNavItem = defaultRenderNavItem,
   renderSettingsLink = defaultRenderSettingsLink,
   isActiveItem,
+  drillInItems,
   creatorTabLabel = 'Creator',
   orchestratorTabLabel = 'Orchestrator',
   settingsLabel = 'Settings',
@@ -98,42 +105,60 @@ export function ShellSidebarChrome({
     >
       <div className="flex h-12 items-center px-3">{logo}</div>
 
-      <div
-        className="grid grid-cols-2 gap-1 rounded-card bg-gray-alpha-100 p-1"
-        role="tablist"
-        aria-label={primaryNavigationAriaLabel}
-      >
-        <TabButton
-          id="creator"
-          label={creatorTabLabel}
-          active={activeTab === 'creator'}
-          onClick={() => onTabChange('creator')}
-        />
-        <TabButton
-          id="orchestrator"
-          label={orchestratorTabLabel}
-          active={activeTab === 'orchestrator'}
-          onClick={() => onTabChange('orchestrator')}
-        />
-      </div>
+      {drillInItems ? null : (
+        <>
+          <div
+            className="grid grid-cols-2 gap-1 rounded-card bg-gray-alpha-100 p-1"
+            role="tablist"
+            aria-label={primaryNavigationAriaLabel}
+          >
+            <TabButton
+              id="creator"
+              label={creatorTabLabel}
+              active={activeTab === 'creator'}
+              onClick={() => onTabChange('creator')}
+            />
+            <TabButton
+              id="orchestrator"
+              label={orchestratorTabLabel}
+              active={activeTab === 'orchestrator'}
+              onClick={() => onTabChange('orchestrator')}
+            />
+          </div>
 
-      <div className="my-1 h-px bg-gray-alpha-400" role="separator" />
+          <div className="my-1 h-px bg-gray-alpha-400" role="separator" />
+        </>
+      )}
 
-      <ul
-        className="flex flex-1 flex-col gap-4 overflow-auto py-1"
-        role="tabpanel"
-        aria-labelledby={activeTab}
-      >
-        {navGroups.map((group) => (
-          <NavGroupChrome
-            key={group.id}
-            group={group}
-            activeRoute={activeRoute}
-            renderNavItem={renderNavItem}
-            isActiveItem={isActiveItem}
-          />
-        ))}
-      </ul>
+      {drillInItems ? (
+        <ul className="flex flex-1 flex-col gap-0.5 overflow-auto py-1">
+          {drillInItems.map((item) => (
+            <NavItemLi
+              key={item.to}
+              item={item}
+              activeRoute={activeRoute}
+              isActiveItem={isActiveItem}
+              renderNavItem={renderNavItem}
+            />
+          ))}
+        </ul>
+      ) : (
+        <ul
+          className="flex flex-1 flex-col gap-4 overflow-auto py-1"
+          role="tabpanel"
+          aria-labelledby={activeTab}
+        >
+          {navGroups.map((group) => (
+            <NavGroupChrome
+              key={group.id}
+              group={group}
+              activeRoute={activeRoute}
+              renderNavItem={renderNavItem}
+              isActiveItem={isActiveItem}
+            />
+          ))}
+        </ul>
+      )}
 
       <div className="mt-auto flex flex-col gap-2 border-t border-gray-alpha-400 pt-3">
         {/* Footer utility — Settings is cross-cutting (not tab-scoped). */}
@@ -225,7 +250,7 @@ function NavGroupChrome({
 }: {
   group: ShellNavGroup;
   activeRoute: string;
-  renderNavItem: ShellSidebarChromeProps['renderNavItem'];
+  renderNavItem: RenderNavItem;
   isActiveItem?: ShellSidebarChromeProps['isActiveItem'];
 }) {
   const [open, setOpen] = useState(group.defaultOpen ?? true);
@@ -249,40 +274,66 @@ function NavGroupChrome({
       </button>
       {open && (
         <ul className="flex flex-col gap-0.5">
-          {group.items.map((item) => {
-            const isActive = isActiveItem
-              ? isActiveItem(item, activeRoute)
-              : activeRoute === item.to || activeRoute.startsWith(`${item.to}/`);
-            return (
-              <li key={item.to}>
-                {renderNavItem?.(
-                  item,
-                  cn(
-                    'group relative flex h-sidebar-nav-item-height items-center gap-2 rounded-control px-3 text-label-14 transition-colors duration-state ease-standard',
-                    isActive
-                      ? 'bg-gray-alpha-100 text-gray-1000'
-                      : 'text-gray-600 hover:bg-gray-alpha-100 hover:text-gray-900',
-                  ),
-                  <>
-                    {isActive && (
-                      <span
-                        aria-hidden
-                        data-testid="sidebar-active-bar"
-                        className="absolute left-0 top-1/2 h-5 w-[2px] -translate-y-1/2 rounded-pill bg-blue-700"
-                      />
-                    )}
-                    <item.icon
-                      className={cn('h-4 w-4 shrink-0', isActive ? 'opacity-100' : 'opacity-70')}
-                      aria-hidden
-                    />
-                    <span>{item.label}</span>
-                  </>,
-                  isActive,
-                )}
-              </li>
-            );
-          })}
+          {group.items.map((item) => (
+            <NavItemLi
+              key={item.to}
+              item={item}
+              activeRoute={activeRoute}
+              isActiveItem={isActiveItem}
+              renderNavItem={renderNavItem}
+            />
+          ))}
         </ul>
+      )}
+    </li>
+  );
+}
+
+/**
+ * Shared per-item `<li>` renderer — used by both group disclosures and the
+ * flat drill-in list so item markup (active bar, icon, label, active classes)
+ * stays in one place. The active state comes from `isActiveItem` when provided,
+ * else the built-in `item.to` prefix match.
+ */
+function NavItemLi({
+  item,
+  activeRoute,
+  isActiveItem,
+  renderNavItem,
+}: {
+  item: ShellNavItem;
+  activeRoute: string;
+  isActiveItem?: ShellSidebarChromeProps['isActiveItem'];
+  renderNavItem: RenderNavItem;
+}) {
+  const isActive = isActiveItem
+    ? isActiveItem(item, activeRoute)
+    : activeRoute === item.to || activeRoute.startsWith(`${item.to}/`);
+  return (
+    <li>
+      {renderNavItem(
+        item,
+        cn(
+          'group relative flex h-sidebar-nav-item-height items-center gap-2 rounded-control px-3 text-label-14 transition-colors duration-state ease-standard',
+          isActive
+            ? 'bg-gray-alpha-100 text-gray-1000'
+            : 'text-gray-600 hover:bg-gray-alpha-100 hover:text-gray-900',
+        ),
+        <>
+          {isActive && (
+            <span
+              aria-hidden
+              data-testid="sidebar-active-bar"
+              className="absolute left-0 top-1/2 h-5 w-[2px] -translate-y-1/2 rounded-pill bg-blue-700"
+            />
+          )}
+          <item.icon
+            className={cn('h-4 w-4 shrink-0', isActive ? 'opacity-100' : 'opacity-70')}
+            aria-hidden
+          />
+          <span>{item.label}</span>
+        </>,
+        isActive,
       )}
     </li>
   );

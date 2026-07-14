@@ -20,7 +20,6 @@
     "orchestrator": "Orchestrator",
     "works": "Works",
     "allWorks": "All Works",
-    "canvas": "Canvas",
     "outline": "Outline",
     "worldKb": "World KB",
     "strategy": "Strategy",
@@ -32,7 +31,12 @@
     "compute": "Compute",
     "modules": "Modules",
     "strategies": "Strategies",
-    "settings": "Settings"
+    "settings": "Settings",
+    "drillIn": {
+      "backToAll": "Back to all",
+      "outline": "Outline",
+      "body": "Body"
+    }
   },
   "theme": {
     "switchToLight": "Switch to light theme",
