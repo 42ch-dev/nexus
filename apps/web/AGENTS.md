@@ -65,9 +65,10 @@ and consumed by the screens. Remaining gaps the UI adapts around:
   focus-visible ring (`src/index.css`), visible labels (no icon-only nav), and
   reduced-motion handling. DESIGN.md dark/light tokens must both pass contrast.
 - **Voice & Content**: follow DESIGN.md §Voice & Content — Title Case for titles/
-  nav/buttons/headers; sentence case for helpers/errors/toasts; Verb + Noun
-  actions; name the changed object. Avoid protocol jargon (`ACP`, `cursor token`)
-  in the UI surface.
+  nav/buttons/headers; sentence case for helpers/errors/toasts; Verb-only for
+  buttons/CTAs (single Title Case verb — `Save`, `Create`, `Delete`); name the
+  changed object in the dialog title / surrounding copy when screen readers need
+  it. Avoid protocol jargon (`ACP`, `cursor token`) in the UI surface.
 - **Daemon port**: default HTTP transport `127.0.0.1:8420`
   (`crates/nexus-daemon-runtime/src/boot.rs`); override via `NEXUS_DAEMON_PORT`
   or `VITE_DAEMON_URL` (dev proxy).
