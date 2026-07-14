@@ -1,17 +1,24 @@
 /**
- * DaemonStatusBar lifecycle-action tests.
+ * DaemonStatusBar lifecycle + agent badge tests.
  *
- * V1.102: single-line footer with left status + soft Badge and right Restart.
- * Renders only when the daemon is running; non-running states are surfaced by
- * the top-of-main-content {@link MainBanner}.
+ * V1.117 P2 (T3): single-line footer with left status dot + "Daemon running"
+ * label + lowercase `running` tag, and right clickable agent badge (name+version
+ * or placeholder → `/settings/agent`) + Restart. Renders only when the daemon
+ * is running; non-running states are surfaced by the top-of-main-content
+ * {@link MainBanner}.
  */
+import { http, HttpResponse } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
+import { useLocation } from 'react-router-dom';
 
 import { DaemonStatusBar } from '@/components/layout/daemon-status-bar';
 import { renderInApp } from '@/test/test-providers';
+import { useHandlers } from '@/test/msw-server';
+import { BrowserClient } from '@/lib/nexus';
 import type { DesktopCapabilities, DaemonStatus } from '@/lib/nexus/desktop-capabilities';
+import type { AgentScanEntry } from '@42ch/nexus-contracts';
 
 function makeDesktop(
   status: { state: string },
@@ -44,13 +51,20 @@ function makeDesktop(
   } as DesktopCapabilities;
 }
 
+/** MSW handler returning a scan response with the given agents. */
+function scanHandler(agents: AgentScanEntry[]) {
+  return http.post('/v1/daemon/agent-host/scan', () =>
+    HttpResponse.json({ agents }),
+  );
+}
+
 describe('DaemonStatusBar lifecycle action', () => {
   it('browser build renders nothing', () => {
     const { container } = renderInApp(<DaemonStatusBar />);
     expect(container.firstChild).toBeNull();
   });
 
-  it('running daemon shows single-line status + soft badge + Restart and stops then starts when confirmed', async () => {
+  it('running daemon shows status dot + Daemon running label + running tag + Restart, and stops then starts when confirmed', async () => {
     const startDaemon = vi.fn().mockResolvedValue(undefined);
     const stopDaemon = vi.fn().mockResolvedValue(undefined);
     const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
@@ -61,8 +75,13 @@ describe('DaemonStatusBar lifecycle action', () => {
 
     const bar = await screen.findByTestId('daemon-status-bar');
     expect(bar).toHaveTextContent('Daemon running');
-    expect(bar).toHaveTextContent('healthy');
+    // Health tag copy was replaced with the lowercase `running` tag (AD-P2-5).
+    expect(bar).not.toHaveTextContent('healthy');
+    expect(screen.getByText('running')).toBeInTheDocument();
     expect(bar).not.toHaveTextContent(/reachable/i);
+
+    // State dot encodes health (present, green).
+    expect(bar.querySelector('.bg-green-700')).not.toBeNull();
 
     const button = await screen.findByRole('button', { name: /Restart daemon/i });
     expect(button).toBeInTheDocument();
@@ -154,3 +173,101 @@ describe('DaemonStatusBar lifecycle action', () => {
     vi.useRealTimers();
   });
 });
+
+describe('DaemonStatusBar agent badge (V1.117 P2 T3)', () => {
+  it('shows the placeholder when no agent profile is saved (still clickable)', async () => {
+    renderInApp(<DaemonStatusBar />, {
+      desktop: makeDesktop({ state: 'running' }),
+      client: new BrowserClient(),
+    });
+
+    const badge = await screen.findByTestId('daemon-status-agent-badge');
+    expect(badge).toHaveTextContent('No agent');
+  });
+
+  it('shows displayName + version when the saved profile matches an installed scan entry', async () => {
+    useHandlers(
+      scanHandler([
+        {
+          name: 'Claude Code',
+          registry_agent_id: 'claude-native',
+          launch_command: '/usr/local/bin/claude',
+          installed: true,
+          version: '1.0.42',
+        },
+      ]),
+    );
+
+    renderInApp(<DaemonStatusBar />, {
+      desktop: makeDesktop(
+        { state: 'running' },
+        {
+          getAgentProfile: vi.fn().mockResolvedValue({
+            name: 'Claude Code',
+            launchCommand: '/usr/local/bin/claude',
+          }),
+        },
+      ),
+      client: new BrowserClient(),
+    });
+
+    const badge = await screen.findByTestId('daemon-status-agent-badge');
+    // Override maps claude-native → "Claude"; version from the scan entry.
+    await waitFor(() => {
+      expect(badge).toHaveTextContent('Claude v1.0.42');
+    });
+  });
+
+  it('omits the version segment when no scan entry matches the profile', async () => {
+    useHandlers(scanHandler([]));
+
+    renderInApp(<DaemonStatusBar />, {
+      desktop: makeDesktop(
+        { state: 'running' },
+        {
+          getAgentProfile: vi.fn().mockResolvedValue({ name: 'Claude Code' }),
+        },
+      ),
+      client: new BrowserClient(),
+    });
+
+    const badge = await screen.findByTestId('daemon-status-agent-badge');
+    // Falls back to the raw profile name; no " v..." suffix.
+    await waitFor(() => {
+      expect(badge).toHaveTextContent('Claude Code');
+    });
+    expect(badge).not.toHaveTextContent(/ v/);
+  });
+
+  it('navigates to /settings/agent when the badge is clicked', async () => {
+    useHandlers(scanHandler([]));
+    let currentPath = '/';
+
+    renderInApp(
+      <>
+        <DaemonStatusBar />
+        <LocationSentinel onChange={(p) => (currentPath = p)} />
+      </>,
+      {
+        desktop: makeDesktop({ state: 'running' }),
+        client: new BrowserClient(),
+        initialRouterEntries: ['/'],
+      },
+    );
+
+    const badge = await screen.findByTestId('daemon-status-agent-badge');
+    await userEvent.click(badge);
+
+    await waitFor(() => expect(currentPath).toBe('/settings/agent'));
+  });
+});
+
+/**
+ * Records react-router's current pathname on every render so a test can assert
+ * where a navigation landed without mocking `useNavigate`.
+ */
+function LocationSentinel({ onChange }: { onChange: (pathname: string) => void }) {
+  const location = useLocation();
+  onChange(location.pathname);
+  return null;
+}

@@ -50,6 +50,10 @@
   "daemon": {
     "running": "守护进程运行中",
     "healthy": "健康",
+    "runningTag": "running",
+    "agentBadge": {
+      "empty": "未选择智能体"
+    },
     "restart": "重启守护进程",
     "restartConfirm": "重启守护进程将中断任何正在运行的编排。是否继续？",
     "restartFailed": "守护进程重启失败",
