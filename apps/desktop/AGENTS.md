@@ -48,10 +48,9 @@ The desktop shell can be run in two dev modes, controlled from the root
 
 - `pnpm dev:desktop` — **dist-load mode** (production-like, no HMR). Builds
   `apps/web` and then starts Tauri with `src-tauri/tauri.dev.dist.conf.json`,
-  which overrides `devUrl` and `beforeDevCommand` to empty strings. Tauri loads
-  the UI from `build.frontendDist` (`../../web/dist`) and does not launch a Vite
-  dev server. Use this when you want to verify the desktop shell against a static
-  production-like web bundle.
+  which overrides `beforeDevCommand` to `vite preview` on port 5173 (serving
+  `web/dist`) instead of the Vite dev server. Use this when you want to verify
+  the desktop shell against a static production-like web bundle.
 
 - `pnpm dev:desktop:web` — **Vite + Tauri HMR mode**. Runs the base Tauri dev
   configuration (`tauri.conf.json`), which launches the Vite dev server via
