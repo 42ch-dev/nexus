@@ -16,6 +16,7 @@ function makeClient(): BrowserClient {
 function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapabilities {
   return {
     openWith: vi.fn().mockResolvedValue(undefined),
+    openExternalUrl: vi.fn().mockResolvedValue(undefined),
     revealInFinder: vi.fn().mockResolvedValue(undefined),
     getDaemonStatus: vi.fn().mockResolvedValue({ state: 'running', port: 8420 }),
     onDaemonStatusChanged: vi.fn().mockResolvedValue(() => {}),

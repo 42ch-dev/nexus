@@ -26,6 +26,7 @@ function mockUpdateCreator(fn: () => Promise<unknown> = () => Promise.resolve({ 
 function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapabilities {
   return {
     openWith: () => Promise.resolve(),
+    openExternalUrl: () => Promise.resolve(),
     revealInFinder: () => Promise.resolve(),
     getDaemonStatus: () => Promise.resolve({ state: 'running', port: 8420 }),
     onDaemonStatusChanged: () => Promise.resolve(() => {}),

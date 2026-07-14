@@ -467,4 +467,40 @@ describe('AgentPicker', () => {
     expect(verifyBtn).toHaveClass('h-10');
     expect(input).toHaveClass('h-10');
   });
+
+  it('uses openExternalUrl when desktop prop is provided (AC-P1-2)', async () => {
+    const user = userEvent.setup();
+    const openExternalUrl = vi.fn().mockResolvedValue(undefined);
+    render(
+      <AgentPicker
+        status="ready"
+        agents={AGENTS}
+        onSelect={() => undefined}
+        customLaunchValue=""
+        onCustomLaunchChange={() => undefined}
+        desktop={{ openExternalUrl }}
+      />,
+    );
+
+    const installLink = screen.getByRole('link', { name: /Install/i });
+    await user.click(installLink);
+    expect(openExternalUrl).toHaveBeenCalledWith('https://example.com/install');
+    expect(installLink).not.toHaveAttribute('target');
+  });
+
+  it('keeps target=_blank when desktop prop is omitted (AC-P1-8)', () => {
+    render(
+      <AgentPicker
+        status="ready"
+        agents={AGENTS}
+        onSelect={() => undefined}
+        customLaunchValue=""
+        onCustomLaunchChange={() => undefined}
+      />,
+    );
+
+    const installLink = screen.getByRole('link', { name: /Install/i });
+    expect(installLink).toHaveAttribute('target', '_blank');
+    expect(installLink).toHaveAttribute('rel', 'noopener noreferrer');
+  });
 });

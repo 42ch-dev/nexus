@@ -89,7 +89,8 @@
     "couldNotSaveWorldKbRelationship": "Could not save relationship",
     "couldNotSaveConnection": "Could not save connection settings.",
     "couldNotSwitchToLocalDaemon": "Could not switch to local daemon.",
-    "couldNotSaveAgentProfile": "Could not save agent profile."
+    "couldNotSaveAgentProfile": "Could not save agent profile.",
+    "openExternalFailed": "Could not open the link. Try opening it manually in your browser."
   },
   "toast": {
     "error": "Error",

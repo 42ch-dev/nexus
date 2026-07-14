@@ -56,6 +56,12 @@ export interface DesktopCapabilities {
   /** Reveal `path` in Finder (path-guarded). */
   revealInFinder(path: string): Promise<void>;
   /**
+   * Open a URL in the system default browser. Only `http:` / `https:` URLs
+   * are accepted (validated by the Rust command). Returns a structured error
+   * on invalid scheme or open failure.
+   */
+  openExternalUrl(url: string): Promise<void>;
+  /**
    * Current daemon lifecycle state. P1 returns the sidecar-controlled state
    * from the Tauri sidecar manager.
    */
@@ -164,6 +170,14 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
   async openWith(path: string): Promise<void> {
     try {
       await tauriInvoke().core.invoke<void>('open_with', { path });
+    } catch (err) {
+      throw asDesktopError(err);
+    }
+  }
+
+  async openExternalUrl(url: string): Promise<void> {
+    try {
+      await tauriInvoke().core.invoke<void>('open_external_url', { url });
     } catch (err) {
       throw asDesktopError(err);
     }

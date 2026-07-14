@@ -14,6 +14,7 @@ function makeClient(): BrowserClient {
 function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapabilities {
   return {
     openWith: () => Promise.resolve(),
+    openExternalUrl: () => Promise.resolve(),
     revealInFinder: () => Promise.resolve(),
     getDaemonStatus: () =>
       Promise.resolve({ state: 'running', port: 8420, version: 'test' }),

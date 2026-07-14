@@ -19,6 +19,11 @@ import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { Badge, Button, Input, Label } from '@42ch/nexus-ui';
 
+/** Desktop-only capability needed by the picker to open URLs in the system browser. */
+export interface AgentPickerDesktop {
+  openExternalUrl(url: string): Promise<void>;
+}
+
 /** Local view-model for one agent card — owned by this module (not wire DTOs). */
 export interface AgentPickerItem {
   /** Stable id used for selection (typically registry agent id or name). */
@@ -82,6 +87,12 @@ export interface AgentPickerProps {
   emptyDescription?: string;
   /** Layout density. Omit or `'default'` for Settings; wizard may pass `'compact'`. */
   density?: AgentPickerDensity;
+  /**
+   * Desktop capabilities for opening URLs in the system browser.
+   * When provided, Install/Docs links use `openExternalUrl` instead of
+   * `<a target="_blank">` (desktop builds). Browser builds omit this prop.
+   */
+  desktop?: AgentPickerDesktop;
 }
 
 /**
@@ -181,6 +192,7 @@ export function AgentPicker({
   emptyTitle,
   emptyDescription,
   density = 'default',
+  desktop,
 }: AgentPickerProps) {
   const { t } = useTranslation('setup');
   const compact = density === 'compact';
@@ -280,6 +292,7 @@ export function AgentPicker({
                     selected={selectedId === agent.id}
                     onSelect={stableOnSelect}
                     compact={compact}
+                    desktop={desktop}
                   />
                 </li>
               ))}
@@ -309,6 +322,7 @@ export function AgentPicker({
                       selected={selectedId === agent.id}
                       onSelect={stableOnSelect}
                       compact={compact}
+                      desktop={desktop}
                     />
                   </li>
                 ))}
@@ -347,11 +361,13 @@ const AgentCard = memo(function AgentCard({
   selected,
   onSelect,
   compact,
+  desktop,
 }: {
   agent: AgentPickerItem;
   selected: boolean;
   onSelect?: (id: string) => void;
   compact: boolean;
+  desktop?: AgentPickerDesktop;
 }) {
   const { t } = useTranslation('setup');
   const selectable = agent.installed;
@@ -393,10 +409,10 @@ const AgentCard = memo(function AgentCard({
 
       <div className="mt-3 flex flex-wrap items-center gap-3">
         {agent.installUrl ? (
-          <OutboundLink href={agent.installUrl} label={t('agentPicker.install')} />
+          <OutboundLink href={agent.installUrl} label={t('agentPicker.install')} desktop={desktop} />
         ) : null}
         {agent.docsUrl ? (
-          <OutboundLink href={agent.docsUrl} label={t('agentPicker.docs')} />
+          <OutboundLink href={agent.docsUrl} label={t('agentPicker.docs')} desktop={desktop} />
         ) : null}
       </div>
     </div>
@@ -504,12 +520,32 @@ function StatusDot({
   );
 }
 
-function OutboundLink({ href, label }: { href: string; label: string }) {
+function OutboundLink({
+  href,
+  label,
+  desktop,
+}: {
+  href: string;
+  label: string;
+  desktop?: AgentPickerDesktop;
+}) {
+  const handleClick = useCallback(
+    (e: React.MouseEvent) => {
+      if (!desktop?.openExternalUrl) return;
+      e.preventDefault();
+      desktop.openExternalUrl(href).catch(() => {
+        console.error('Failed to open external URL:', href);
+      });
+    },
+    [desktop, href],
+  );
+
   return (
     <a
       href={href}
-      target="_blank"
-      rel="noopener noreferrer"
+      target={desktop ? undefined : '_blank'}
+      rel={desktop ? undefined : 'noopener noreferrer'}
+      onClick={handleClick}
       aria-label={label}
       className="inline-flex items-center gap-1 text-label-14 font-medium leading-none text-blue-700 transition-colors hover:text-blue-800"
     >

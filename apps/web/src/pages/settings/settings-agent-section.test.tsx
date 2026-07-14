@@ -23,6 +23,7 @@ function makeDesktop(
 ): DesktopCapabilities {
   return {
     openWith: () => Promise.resolve(),
+    openExternalUrl: () => Promise.resolve(),
     revealInFinder: () => Promise.resolve(),
     getDaemonStatus: () => Promise.resolve({ state: 'running', port: 8420 }),
     onDaemonStatusChanged: (callback) => {
