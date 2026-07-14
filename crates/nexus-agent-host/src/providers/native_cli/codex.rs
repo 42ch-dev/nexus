@@ -48,6 +48,8 @@ struct NativeSession {
     /// The codex-generated session ID used for `exec resume <id>`.
     /// Captured from the first `session_start` JSONL event.
     codex_session_id: Option<String>,
+    /// Working directory for the CLI process, retained from `LaunchSpec::cwd`.
+    cwd: std::path::PathBuf,
     /// Whether the first `execute()` has been performed for this session.
     first_exec_done: bool,
     /// Whether the first `execute()` successfully captured a codex session ID.
@@ -62,6 +64,7 @@ impl std::fmt::Debug for NativeSession {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("NativeSession")
             .field("codex_session_id", &self.codex_session_id.as_deref())
+            .field("cwd", &self.cwd.display())
             .field("first_exec_done", &self.first_exec_done)
             .field("json_capable", &self.json_capable)
             .field("operation_children", &self.operation_children.keys())
@@ -273,6 +276,7 @@ impl CodexNativeProvider {
         &self,
         full_args: &[String],
         prompt_text: &str,
+        cwd: &std::path::Path,
     ) -> HostResult<(
         Option<tokio::process::ChildStdout>,
         Option<tokio::process::ChildStderr>,
@@ -280,6 +284,7 @@ impl CodexNativeProvider {
     )> {
         let mut cmd = tokio::process::Command::new(&self.command);
         cmd.args(full_args)
+            .current_dir(cwd)
             .stdin(std::process::Stdio::piped())
             .stdout(std::process::Stdio::piped())
             .stderr(std::process::Stdio::piped())
@@ -564,6 +569,7 @@ impl ProviderAdapter for CodexNativeProvider {
                 host_session_id.clone(),
                 NativeSession {
                     codex_session_id: None,
+                    cwd: spec.cwd.clone(),
                     first_exec_done: false,
                     json_capable: true,
                     operation_children: HashMap::new(),
@@ -617,7 +623,7 @@ impl ProviderAdapter for CodexNativeProvider {
         }
 
         // Look up session state and determine invocation flags.
-        let (full_args, is_first) = {
+        let (full_args, is_first, cwd) = {
             let mut sessions = self.sessions.write().await;
             let native_session = sessions.get_mut(&session.session_id).ok_or_else(|| {
                 HostError::internal(format!(
@@ -626,22 +632,22 @@ impl ProviderAdapter for CodexNativeProvider {
                 ))
             })?;
 
+            let cwd = native_session.cwd.clone();
             let is_first = !native_session.first_exec_done;
-            native_session.first_exec_done = true;
 
             let mut full_args = Vec::new();
             full_args.push("exec".to_string());
 
             if is_first {
                 // First invocation: `codex exec --json -s read-only`
-                full_args.extend_from_slice(&self.args[1..]);
+                full_args.extend(self.args.iter().skip(1).cloned());
             } else if native_session.json_capable {
                 if let Some(ref codex_id) = native_session.codex_session_id {
                     // Subsequent invocation with captured session ID:
                     // `codex exec resume <id> --json -s read-only`
                     full_args.push("resume".to_string());
                     full_args.push(codex_id.clone());
-                    full_args.extend_from_slice(&self.args[1..]);
+                    full_args.extend(self.args.iter().skip(1).cloned());
                 } else {
                     // JSONL mode failed to capture an ID; spawn fresh without --json.
                     native_session.json_capable = false;
@@ -653,7 +659,7 @@ impl ProviderAdapter for CodexNativeProvider {
             }
 
             drop(sessions);
-            (full_args, is_first)
+            (full_args, is_first, cwd)
         };
 
         // Spawn the subprocess with prompt_ms timeout for the setup phase
@@ -662,7 +668,7 @@ impl ProviderAdapter for CodexNativeProvider {
 
         let spawn_result = tokio::time::timeout(
             prompt_dur,
-            self.spawn_and_write_stdin(&full_args, &prompt_text),
+            self.spawn_and_write_stdin(&full_args, &prompt_text, &cwd),
         )
         .await
         .map_err(|_| {
@@ -678,13 +684,24 @@ impl ProviderAdapter for CodexNativeProvider {
             .with_op(op_id.clone())
         })??;
 
-        let (stdout, stderr, child) = spawn_result;
+        let (stdout, stderr, mut child) = spawn_result;
 
-        // Track the child handle so cancel()/shutdown() can kill it.
+        // Mark the first execute as done only after the process was spawned and
+        // its stdin written successfully. Track the child handle so cancel()/
+        // shutdown() can kill it. If the session was removed while we were
+        // spawning, kill the child so it is not orphaned.
         {
             let mut sessions = self.sessions.write().await;
             if let Some(ns) = sessions.get_mut(&session.session_id) {
+                ns.first_exec_done = true;
                 ns.operation_children.insert(op_id.clone(), child);
+            } else {
+                let _ = child.kill().await;
+                let _ = child.wait().await;
+                return Err(HostError::internal(format!(
+                    "session {} was removed while spawning child",
+                    session.session_id
+                )));
             }
         }
 
@@ -752,21 +769,29 @@ impl ProviderAdapter for CodexNativeProvider {
     }
 
     async fn shutdown(&self, session: ManagedSessionHandle) -> HostResult<()> {
-        // Remove the session state and kill any in-flight children.
+        // Take the child handles out of the session before removing the session,
+        // then kill them. This avoids dropping a live child handle when a
+        // concurrent execute is between spawn and registration.
         let mut sessions = self.sessions.write().await;
-        if let Some(ns) = sessions.remove(&session.session_id) {
-            for (op_id, mut child) in ns.operation_children {
-                tracing::info!(
-                    session_id = %session.session_id,
-                    op_id = %op_id,
-                    provider_id = %self.provider_id,
-                    "Native CLI shutdown: killing child process"
-                );
-                let _ = child.kill().await;
-                let _ = child.wait().await;
-            }
-        }
+        let children = if let Some(ns) = sessions.get_mut(&session.session_id) {
+            std::mem::take(&mut ns.operation_children)
+        } else {
+            HashMap::new()
+        };
+        sessions.remove(&session.session_id);
         drop(sessions);
+
+        for (op_id, mut child) in children {
+            tracing::info!(
+                session_id = %session.session_id,
+                op_id = %op_id,
+                provider_id = %self.provider_id,
+                "Native CLI shutdown: killing child process"
+            );
+            let _ = child.kill().await;
+            let _ = child.wait().await;
+        }
+
         tracing::info!(
             session_id = %session.session_id,
             provider_id = %self.provider_id,
