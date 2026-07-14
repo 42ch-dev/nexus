@@ -251,7 +251,7 @@ describe('SetupWizardPage', () => {
     await user.click(screen.getByRole('button', { name: 'Continue' }));
 
     await waitFor(() => expect(screen.getByRole('heading', { name: /You're ready/ })).toBeInTheDocument());
-    await user.click(screen.getByRole('button', { name: 'Open Nexus' }));
+    await user.click(screen.getByRole('button', { name: 'Open' }));
 
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/works'));
   });
@@ -304,7 +304,7 @@ describe('SetupWizardPage', () => {
     await user.click(screen.getByRole('button', { name: 'Continue' }));
 
     await waitFor(() => expect(screen.getByRole('heading', { name: /You're ready/ })).toBeInTheDocument());
-    await user.click(screen.getByRole('button', { name: 'Open Nexus' }));
+    await user.click(screen.getByRole('button', { name: 'Open' }));
 
     await waitFor(() => expect(setAgentProfile).toHaveBeenCalledWith('codex', 'codex'));
     await waitFor(() => expect(setSetupCompleted).toHaveBeenCalledWith(true));
@@ -390,7 +390,7 @@ describe('SetupWizardPage', () => {
       expect(screen.getByRole('heading', { name: /You're ready/ })).toBeInTheDocument(),
     );
 
-    await user.click(screen.getByRole('button', { name: 'Open Nexus' }));
+    await user.click(screen.getByRole('button', { name: 'Open' }));
 
     await waitFor(() => expect(screen.getByTestId('main-shell')).toBeInTheDocument());
     expect(screen.getByTestId('location')).toHaveTextContent('/works');

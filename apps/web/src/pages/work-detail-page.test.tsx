@@ -13,7 +13,8 @@
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it } from 'vitest';
 import { Route, Routes } from 'react-router-dom';
-import { screen } from '@testing-library/react';
+import { screen, waitFor } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 
 import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
@@ -130,5 +131,41 @@ describe('WorkDetailPage canvas CTAs (V1.108 FB-UI-009)', () => {
 
     const worldKb = await screen.findByRole('link', { name: /Open World KB/i });
     expect(worldKb).toHaveAttribute('href', '/worlds/world-xyz/kb');
+  });
+});
+
+describe('WorkDetailPage archive destructive context (V1.117 AC-P4-6)', () => {
+  it('keeps the destructive Archive verb and names the Work on the confirm step', async () => {
+    const user = userEvent.setup();
+    let patchedBody: unknown = null;
+    useHandlers(
+      workDetailFixture('w-123', {
+        title: 'Archivable Work',
+        status: 'draft',
+        primary_preset_id: 'preset-abc',
+        world_id: 'world-xyz',
+      }),
+      emptyFindings(),
+      http.patch('/v1/daemon/works/:workId', async ({ request }) => {
+        patchedBody = await request.json();
+        return HttpResponse.json({ work_id: 'w-123', status: 'archived' });
+      }),
+    );
+
+    renderWorkDetail();
+
+    // Arming click: visible Verb-only label "Archive", no object-bearing
+    // accessible name yet (this step only arms; it is not the destructive act).
+    const arm = await screen.findByRole('button', { name: /^Archive$/i });
+    await user.click(arm);
+
+    // Confirm step keeps the destructive verb visible ("Archive") and gives the
+    // button an accessible name that carries the object ("Archive Work") so a
+    // screen reader never hears a contextless word for the irreversible action.
+    const confirm = await screen.findByRole('button', { name: /Archive Work/i });
+    expect(confirm).toHaveTextContent('Archive');
+    await user.click(confirm);
+
+    await waitFor(() => expect(patchedBody).toEqual({ status: 'archived' }));
   });
 });

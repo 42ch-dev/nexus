@@ -103,7 +103,7 @@
     "empty": "Select a chapter to inspect its outline metadata.",
     "publishedWarning": "This chapter is published. Edits must be made through a fork or revision workflow.",
     "finalizedConfirm": "This chapter is finalized. Editing it will remove the finalized protection. Continue?",
-    "save": "Save chapter",
+    "save": "Save",
     "movePrevVolume": "Prev volume",
     "moveNextVolume": "Next volume",
     "field": {
@@ -136,7 +136,7 @@
     "addTitle": "Add Event",
     "titlePlaceholder": "Event title…",
     "descriptionPlaceholder": "Description (optional)…",
-    "addButton": "Add to timeline",
+    "addButton": "Add",
     "attachTitle": "Attach to selected chapter",
     "attachAria": "Attach event to chapter {{chapter}}",
     "removeTitle": "Remove event",
@@ -147,7 +147,7 @@
     "unlinkAria": "Unlink foreshadow to {{title}}",
     "targetAria": "Foreshadow target for {{title}}",
     "targetPlaceholder": "Link foreshadow to…",
-    "link": "Link Foreshadow"
+    "link": "Link"
   },
   "sceneInspector": {
     "title": "Scene",
@@ -198,7 +198,7 @@
       "description": "State machine and transition editor",
       "showGraph": "Show graph",
       "showList": "Show list",
-      "createTransition": "Create Transition",
+      "createTransition": "Create",
       "livePrefix": "Live:",
       "liveStatus": ""
     },
@@ -279,7 +279,7 @@
       "conditionLabel": "Condition",
       "conditionPlaceholder": "Condition (optional)…",
       "cancel": "Cancel",
-      "submit": "Create Transition",
+      "submit": "Create",
       "creating": "Creating…",
       "draftAriaLabel": "Draft transition from {{source}} to {{target}}"
     },
@@ -290,7 +290,7 @@
         "ariaLabel": "State inspector",
         "labelLabel": "Label",
         "descriptionLabel": "Description",
-        "save": "Save State",
+        "save": "Save",
         "saved": "Saved",
         "saveFailed": "Save failed",
         "saving": "Saving…",
@@ -300,7 +300,7 @@
         "title": "Transition",
         "ariaLabel": "Transition inspector",
         "targetLabel": "Target",
-        "save": "Save Transition",
+        "save": "Save",
         "saved": "Saved",
         "saveFailed": "Save failed",
         "saving": "Saving…",
@@ -310,7 +310,7 @@
         "title": "Prompt",
         "ariaLabel": "Prompt inspector",
         "placeholder": "Enter prompt template…",
-        "save": "Save Prompt",
+        "save": "Save",
         "saved": "Saved",
         "saveFailed": "Save failed",
         "saving": "Saving…",
@@ -352,7 +352,7 @@
     "localSectionTitle": "Your edit",
     "useCurrent": "Use current",
     "keepEditing": "Keep editing",
-    "reapplyLabel": "Reapply my edit",
+    "reapplyLabel": "Reapply",
     "reviewButton": "Review side-by-side",
     "review": {
       "server": "Server: {{label}}",
@@ -422,7 +422,7 @@
       "description": "Browse entities and promotion candidates. Edits are guarded by per-row version checks.",
       "showGraph": "Show graph",
       "showList": "Show list view",
-      "refresh": "Refresh now"
+      "refresh": "Refresh"
     },
     "altView": {
       "entities": "Entities",
@@ -440,7 +440,7 @@
     "entityInspector": {
       "title": "Entity",
       "description": "Edit this world entry. Conflicts are detected per-row — Nexus blocks stale writes.",
-      "save": "Save entity",
+      "save": "Save",
       "saving": "Saving…",
       "noChanges": "No changes.",
       "editing": "Editing: {{fields}}",
@@ -465,8 +465,8 @@
       "typeLabel": "Relation type",
       "customLabelLabel": "Custom label",
       "customLabelPlaceholder": "e.g., Childhood Friend",
-      "save": "Save changes",
-      "add": "Add relationship",
+      "save": "Save",
+      "add": "Add",
       "removeAria": "Remove relationship"
     },
     "promotionInspector": {
@@ -598,8 +598,8 @@
       "serverSection": "What changed",
       "localSection": "What you were about to do",
       "useCurrent": "Use current",
-      "reapply": "Reapply my edit",
-      "promoteReapply": "Reapply my decision",
+      "reapply": "Reapply",
+      "promoteReapply": "Reapply",
       "cancel": "Cancel",
       "modifiedByOther": "Modified by another session",
       "changedByOther": "Changed by another session",

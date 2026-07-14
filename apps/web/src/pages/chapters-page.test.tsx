@@ -241,6 +241,6 @@ describe('ChaptersPage', () => {
     await userEvent.click(screen.getByRole('button', { name: /Save edits/i }));
 
     expect(await screen.findByText('Confirm structural edit')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Confirm Edit/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Confirm$/i })).toBeInTheDocument();
   });
 });

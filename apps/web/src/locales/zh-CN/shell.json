@@ -65,7 +65,7 @@
     "didNotStart": "守护进程未能启动",
     "statusUnknown": "守护进程状态未知",
     "restarting": "正在重启…",
-    "restartButton": "重启守护进程",
+    "restartButton": "重启",
     "startingDescription": "Nexus 正在启动本地守护进程。",
     "reconnectingDescription": "Nexus 正在重试本地守护进程连接。",
     "stoppedDescription": "重启守护进程以使用本地工作区功能。",
@@ -105,7 +105,7 @@
     "namePlaceholder": "例如 my-chapter-preset",
     "validationError": "名称为必填项。",
     "creating": "正在生成预设模板…",
-    "submit": "生成预设模板"
+    "submit": "生成"
   },
   "workCreate": {
     "title": "创建作品",
@@ -119,7 +119,7 @@
     "profileLabel": "作品类型",
     "validationError": "标题、长期目标和初始想法为必填项。",
     "creating": "正在创建作品…",
-    "create": "创建作品",
+    "create": "创建",
     "toastCreated": "作品已创建"
   }
 }

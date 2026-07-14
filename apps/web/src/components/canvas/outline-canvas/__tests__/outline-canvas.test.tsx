@@ -222,7 +222,7 @@ describe('OutlineCanvas — conflict modal trigger (FB-C1-003)', () => {
     await user.type(titleInput, 'Revised Chapter One');
 
     // 3. Save chapter → mutate fires → simulate 409 outline_conflict.
-    await user.click(screen.getByRole('button', { name: /Save chapter/i }));
+    await user.click(screen.getByRole('button', { name: /^Save$/i }));
     await rejectLastChapterAsConflict(5);
 
     // 4. The outline-flavored conflict modal must be visible with the new
@@ -244,7 +244,7 @@ describe('OutlineCanvas — conflict modal trigger (FB-C1-003)', () => {
     const titleInput = screen.getByDisplayValue('Chapter One');
     await user.clear(titleInput);
     await user.type(titleInput, 'New Title');
-    await user.click(screen.getByRole('button', { name: /Save chapter/i }));
+    await user.click(screen.getByRole('button', { name: /^Save$/i }));
     await rejectLastChapterAsConflict(5);
 
     const draftSection = screen.getByText('What you were about to do').closest('div')!;

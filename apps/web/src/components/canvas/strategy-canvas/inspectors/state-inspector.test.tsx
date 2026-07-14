@@ -56,7 +56,7 @@ describe('StateInspector toast (R-V171P1-QC1-003 B10)', () => {
       { client },
     );
 
-    await userEvent.click(screen.getByRole('button', { name: /save state/i }));
+    await userEvent.click(screen.getByRole('button', { name: /^Save$/i }));
 
     await waitFor(() => {
       expect(screen.getByText('State updated')).toBeInTheDocument();
@@ -82,7 +82,7 @@ describe('StateInspector toast (R-V171P1-QC1-003 B10)', () => {
       { client },
     );
 
-    await userEvent.click(screen.getByRole('button', { name: /save state/i }));
+    await userEvent.click(screen.getByRole('button', { name: /^Save$/i }));
 
     await waitFor(() => {
       expect(screen.getByText('State updated')).toBeInTheDocument();

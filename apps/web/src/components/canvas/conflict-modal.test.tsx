@@ -50,7 +50,7 @@ describe('ConflictModal', () => {
 
   it('disables Reapply when server and draft overlap', () => {
     render(<ConflictModal {...baseProps} />);
-    const reapply = screen.getByRole('button', { name: /Reapply my edit/i });
+    const reapply = screen.getByRole('button', { name: /^Reapply$/i });
     expect(reapply).toBeDisabled();
   });
 
@@ -62,7 +62,7 @@ describe('ConflictModal', () => {
         canonicalState={{ ...baseProps.canonicalState, next: 'next-state' }}
       />,
     );
-    const reapply = screen.getByRole('button', { name: /Reapply my edit/i });
+    const reapply = screen.getByRole('button', { name: /^Reapply$/i });
     expect(reapply).toBeEnabled();
   });
 
@@ -105,7 +105,7 @@ describe('ConflictModal', () => {
     render(<ConflictModal {...baseProps} />);
     expect(screen.getByRole('button', { name: /Keep editing/i })).toHaveAttribute('accessKey', 'c');
     expect(screen.getByRole('button', { name: /Review side-by-side/i })).toHaveAttribute('accessKey', 'r');
-    expect(screen.getByRole('button', { name: /Reapply my edit/i })).toHaveAttribute('accessKey', 'a');
+    expect(screen.getByRole('button', { name: /^Reapply$/i })).toHaveAttribute('accessKey', 'a');
     expect(screen.getByRole('button', { name: /Use current/i })).toHaveAttribute('accessKey', 'u');
   });
 

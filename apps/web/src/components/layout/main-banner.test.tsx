@@ -70,7 +70,7 @@ describe('MainBanner daemon failure surfaces', () => {
       await screen.findByText(/Restart the daemon to use local workspace features/i),
     ).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: /Restart Daemon/i }));
+    await userEvent.click(screen.getByRole('button', { name: /^Restart$/i }));
 
     expect(stopDaemon).not.toHaveBeenCalled();
     expect(startDaemon).toHaveBeenCalled();
@@ -84,7 +84,7 @@ describe('MainBanner daemon failure surfaces', () => {
       desktop: makeDesktop({ state: 'error', detail: 'Daemon crashed.' }, { startDaemon, stopDaemon }),
     });
 
-    await userEvent.click(await screen.findByRole('button', { name: /Restart Daemon/i }));
+    await userEvent.click(await screen.findByRole('button', { name: /^Restart$/i }));
 
     expect(stopDaemon).toHaveBeenCalled();
     expect(startDaemon).toHaveBeenCalled();
@@ -98,7 +98,7 @@ describe('MainBanner daemon failure surfaces', () => {
       desktop: makeDesktop({ state: 'degraded' }, { startDaemon, stopDaemon }),
     });
 
-    await userEvent.click(await screen.findByRole('button', { name: /Restart Daemon/i }));
+    await userEvent.click(await screen.findByRole('button', { name: /^Restart$/i }));
 
     expect(stopDaemon).toHaveBeenCalled();
     expect(startDaemon).toHaveBeenCalled();
@@ -108,7 +108,7 @@ describe('MainBanner daemon failure surfaces', () => {
     const desktop = makeDesktop({ state: 'stopped' });
 
     renderInApp(<MainBanner />, { desktop });
-    await screen.findByRole('button', { name: /Restart Daemon/i });
+    await screen.findByRole('button', { name: /^Restart$/i });
 
     (
       desktop as unknown as {
@@ -117,7 +117,7 @@ describe('MainBanner daemon failure surfaces', () => {
     )._triggerStatusChange({ state: 'running', port: 8420 });
 
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: /Restart Daemon/i })).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^Restart$/i })).not.toBeInTheDocument();
     });
   });
 });

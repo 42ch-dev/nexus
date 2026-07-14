@@ -72,7 +72,7 @@ describe('TimelinePanel — foreshadow link control (FB-C1-005)', () => {
     expect(selectors).toHaveLength(2);
 
     // The locked button copy must be present.
-    expect(screen.getAllByRole('button', { name: 'Link Foreshadow' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'Link' })).toHaveLength(2);
   });
 
   it('fires link_foreshadow op with event_id and foreshadows_event_id', async () => {
@@ -83,7 +83,7 @@ describe('TimelinePanel — foreshadow link control (FB-C1-005)', () => {
     const selectors = screen.getAllByLabelText(/Foreshadow target for/);
     await user.selectOptions(selectors[0], 'evt_b');
 
-    await user.click(screen.getAllByRole('button', { name: 'Link Foreshadow' })[0]);
+    await user.click(screen.getAllByRole('button', { name: 'Link' })[0]);
 
     expect(onPatch).toHaveBeenCalledTimes(1);
     const call = onPatch.mock.calls[0][0] as TimelinePatchEventRequest;
@@ -95,7 +95,7 @@ describe('TimelinePanel — foreshadow link control (FB-C1-005)', () => {
   it('disables the Link Foreshadow button until a target is selected', () => {
     renderTimeline(makeOutline());
 
-    const buttons = screen.getAllByRole('button', { name: 'Link Foreshadow' });
+    const buttons = screen.getAllByRole('button', { name: 'Link' });
     for (const btn of buttons) {
       expect(btn).toBeDisabled();
     }
@@ -110,7 +110,7 @@ describe('TimelinePanel — foreshadow link control (FB-C1-005)', () => {
       }),
     );
 
-    expect(screen.queryByRole('button', { name: 'Link Foreshadow' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Link' })).not.toBeInTheDocument();
   });
 });
 
@@ -175,7 +175,7 @@ describe('TimelinePanel — existing behavior regression', () => {
 
     const input = screen.getByPlaceholderText('Event title…');
     await user.type(input, 'New beat');
-    await user.click(screen.getByRole('button', { name: /Add to timeline/i }));
+    await user.click(screen.getByRole('button', { name: /^Add$/i }));
 
     expect(onPatch).toHaveBeenCalledTimes(1);
     const call = onPatch.mock.calls[0][0] as TimelinePatchEventRequest;

@@ -75,7 +75,7 @@ The single coherent bet:
 | 2026-07-14-v1.117-setup-agents-catalog | Setup Agents catalog polish | Done | Must |
 | 2026-07-14-v1.117-shell-layout-ia | Shell layout + menu IA + status bar | Done | Must |
 | 2026-07-14-v1.117-mac-dock-icon | Mac Dock transparent icon | Todo | Should (recommended close) |
-| 2026-07-14-v1.117-button-voice-verb-only | Button voice Verb-only + DESIGN.md | Todo | Must |
+| 2026-07-14-v1.117-button-voice-verb-only | Button voice Verb-only + DESIGN.md | Done | Must |
 
 ### Plan dependencies (implement order)
 

@@ -263,6 +263,34 @@ describe('ConnectDaemonForm', () => {
     expect(input).toHaveAttribute('type', 'password');
   });
 
+  it('toggles API key visibility with a Verb-only label and object-bearing aria-label (AC-P4-4)', async () => {
+    const user = userEvent.setup();
+    vi.spyOn(clientContext, 'useConnectionConfig').mockReturnValue(null);
+
+    renderInApp(
+      <clientContext.ClientProvider connectionConfig={null}>
+        <ConnectDaemonForm />
+      </clientContext.ClientProvider>,
+    );
+
+    const input = screen.getByTestId('api-key-input') as HTMLInputElement;
+    await user.type(input, 'secret-key');
+    expect(input).toHaveAttribute('type', 'password');
+
+    // Hidden state: visible Verb-only "Show"; accessible name keeps the object.
+    const showButton = screen.getByRole('button', { name: 'Show key' });
+    expect(showButton).toHaveTextContent('Show');
+    expect(showButton).toHaveAttribute('aria-pressed', 'false');
+
+    await user.click(showButton);
+
+    // Revealed state: visible Verb-only "Hide"; accessible name keeps the object.
+    const hideButton = await screen.findByRole('button', { name: 'Hide key' });
+    expect(hideButton).toHaveTextContent('Hide');
+    expect(hideButton).toHaveAttribute('aria-pressed', 'true');
+    expect(input).toHaveAttribute('type', 'text');
+  });
+
   it('shows an error when the fingerprint endpoint is unreachable', async () => {
     vi.spyOn(clientContext, 'useConnectionConfig').mockReturnValue(null);
 

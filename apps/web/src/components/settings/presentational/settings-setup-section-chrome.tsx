@@ -40,7 +40,7 @@ export function SettingsSetupSectionChrome({
   onReRunSetup,
   title = 'Setup',
   helper = DEFAULT_SETUP_SECTION_HELPER,
-  rerunLabel = 'Re-run Setup',
+  rerunLabel = 'Re-run',
   browserOnlyHelper = DEFAULT_SETUP_BROWSER_HELPER,
   browserTooltip = DEFAULT_SETUP_BROWSER_TOOLTIP,
   'data-testid': dataTestId,
@@ -113,7 +113,7 @@ export function SettingsSetupConfirmChromeStatic() {
           Cancel
         </Button>
         <Button type="button" variant="destructive" tabIndex={-1}>
-          Re-run Setup
+          Re-run
         </Button>
       </div>
     </div>

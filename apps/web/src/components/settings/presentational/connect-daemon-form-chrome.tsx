@@ -207,7 +207,7 @@ export function ConnectDaemonFormChrome({
             onClick={onFetchFingerprint}
           >
             <Fingerprint className="h-4 w-4" aria-hidden="true" />
-            Fetch fingerprint
+            Fetch
           </Button>
           <Button
             type="button"

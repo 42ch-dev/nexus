@@ -5,7 +5,7 @@
   "filterPlaceholder": "按状态筛选（例如 active）",
   "refreshAria": "刷新作品",
   "refresh": "刷新",
-  "create": "创建作品",
+  "create": "创建",
   "errorDescription": "守护进程未返回作品。请检查本地守护进程是否正在运行。",
   "loading": "正在加载作品…",
   "emptyTitle": "暂无作品",
@@ -23,7 +23,7 @@
     "notFoundTitle": "作品未找到",
     "notFoundDescription": "该作品不存在或守护进程无法返回。",
     "backToWorks": "返回作品列表",
-    "updateWork": "更新作品",
+    "updateWork": "更新",
     "labels": {
       "longTermGoal": "长期目标",
       "initialIdea": "初始想法",
@@ -41,8 +41,8 @@
     "openOutline": "打开大纲",
     "openStrategy": "打开策略",
     "openWorldKb": "打开世界知识库",
-    "archiveWork": "归档作品",
-    "confirmArchive": "确认归档",
+    "archiveWork": "归档",
+    "archiveWorkAria": "归档作品",
     "findingsTitle": "发现",
     "findingsDescription": "针对此作品的发现，可按严重程度筛选。",
     "findingsError": "无法加载此作品的发现。",
@@ -60,7 +60,7 @@
       "stageStatusLabel": "阶段状态",
       "hint": "状态在运行时为自由文本（例如 intake、active、completed、paused）。",
       "cancel": "取消",
-      "submit": "更新作品",
+      "submit": "更新",
       "submitting": "正在更新作品…"
     }
   }

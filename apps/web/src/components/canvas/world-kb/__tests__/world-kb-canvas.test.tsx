@@ -170,13 +170,13 @@ describe('promote conflict reapply onError (V1.73 greploop iter 3)', () => {
 
     // 3. Reapply → a concurrent write races and returns a SECOND 409 (v9). The
     //    fix's onError must store v9 as the new currentVersion.
-    await user.click(screen.getByRole('button', { name: /Reapply my decision/i }));
+    await user.click(screen.getByRole('button', { name: /^Reapply$/i }));
     await rejectLastPromoteAsConflict(9);
 
     // 4. Reapply again. The request MUST carry expected_version = 9 (the new
     //    version). Without the onError fix the state stays stale at 5 and this
     //    assertion fails — the conflict would never resolve without dismissing.
-    await user.click(screen.getByRole('button', { name: /Reapply my decision/i }));
+    await user.click(screen.getByRole('button', { name: /^Reapply$/i }));
     const lastRequest = (
       mocks.promoteMutate.mock.calls.at(-1) as [unknown, unknown]
     )[0] as { expected_version: number };

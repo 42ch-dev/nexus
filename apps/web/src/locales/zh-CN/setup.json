@@ -22,10 +22,10 @@
     "done": "完成"
   },
   "action": {
-    "openNexus": "打开 Nexus",
+    "openNexus": "打开",
     "finishing": "正在完成…",
     "preparingWorkspace": "正在准备工作区…",
-    "resetLocalDatabase": "重置本地数据库",
+    "resetLocalDatabase": "重置",
     "resetting": "正在重置…",
     "continue": "继续",
     "back": "返回"
@@ -65,7 +65,7 @@
   },
   "workspace": {
     "label": "工作区文件夹",
-    "changeFolder": "更改文件夹…",
+    "changeFolder": "更改…",
     "resolving": "正在解析…",
     "browserOnly": "仅在桌面应用中可以更改工作区路径。"
   },
@@ -83,7 +83,7 @@
     "notReady": {
       "title": "守护进程未就绪"
     },
-    "restartNexus": "重启 Nexus",
+    "restartNexus": "重启",
     "resetDatabaseDescription": "这将清除守护进程的本地状态数据库（配置、注册表缓存）。你的工作区中的创意文件不会受到影响。"
   },
   "error": {
