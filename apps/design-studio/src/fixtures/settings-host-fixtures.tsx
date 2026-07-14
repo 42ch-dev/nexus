@@ -315,7 +315,7 @@ function InteractiveSettingsPicker({
   return (
     <AgentPicker
       status="ready"
-      agents={FIXTURE_AGENTS}
+      defaultGrid={FIXTURE_AGENTS}
       selectedId={selectedId}
       onSelect={setSelectedId}
       customLaunchValue={custom}
@@ -350,7 +350,7 @@ function SettingsAgentSectionChrome({
       <div data-testid="settings-host-picker-region">
         <AgentPicker
           status="ready"
-          agents={FIXTURE_AGENTS}
+          defaultGrid={FIXTURE_AGENTS}
           selectedId={selectedId}
           onSelect={setSelectedId}
           customLaunchValue={custom}
