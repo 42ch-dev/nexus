@@ -22,13 +22,22 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::Serialize;
 use tauri::{AppHandle, State};
-use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind, MessageDialogResult};
 
 mod connection_config;
 mod sidecar;
+
+/// Set when the user has confirmed quit so the second `ExitRequested` (from
+/// `app.exit`) does not re-open the confirmation dialog.
+static EXIT_CONFIRMED: AtomicBool = AtomicBool::new(false);
+
+const QUIT_STOP_LABEL: &str = "Stop Daemon & Quit";
+const QUIT_KEEP_LABEL: &str = "Keep Daemon & Quit";
+const QUIT_CANCEL_LABEL: &str = "Cancel";
 
 /// Default workspace root when `workspace_path` is unset in `~/.nexus42/config.toml`.
 ///
@@ -742,14 +751,93 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while building Nexus desktop shell")
         // Tauri v2 idiomatic app-lifecycle hook: `RunEvent::ExitRequested` runs
-        // before the async runtime shuts down, so we can gracefully stop the
-        // owned sidecar. The previous "trailing" cleanup pattern that ran after
-        // `run()` returned raced with tokio teardown (qc1 S-5).
-        .run(move |_app_handle, event| {
-            if let tauri::RunEvent::ExitRequested { .. } = event {
-                let _ = tauri::async_runtime::block_on(sidecar_manager.stop());
+        // before the async runtime shuts down. We ask whether to stop the
+        // daemon (owned sidecar or attached external) instead of always killing
+        // it — so `pnpm dev:desktop` workflows can leave the CLI running.
+        .run(move |app_handle, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                if EXIT_CONFIRMED.load(Ordering::SeqCst) {
+                    return;
+                }
+                api.prevent_exit();
+                let manager = sidecar_manager.clone();
+                let app = app_handle.clone();
+                tauri::async_runtime::spawn(async move {
+                    handle_quit_with_daemon_prompt(app, manager).await;
+                });
             }
         });
+}
+
+/// Ask the user whether to stop the daemon when quitting the desktop shell.
+async fn handle_quit_with_daemon_prompt(
+    app: AppHandle,
+    manager: sidecar::SidecarManager,
+) {
+    let running = manager.is_running().await;
+    if !running {
+        EXIT_CONFIRMED.store(true, Ordering::SeqCst);
+        app.exit(0);
+        return;
+    }
+
+    let owned = manager.is_owned().await;
+    let port = manager.port().await;
+    let message = if owned {
+        format!(
+            "Nexus started the local daemon on port {port}.\n\n\
+             Stop it when quitting, or keep it running for CLI / next launch?"
+        )
+    } else {
+        format!(
+            "Nexus is attached to a daemon already running on port {port}.\n\n\
+             Stop that daemon when quitting, or leave it running?"
+        )
+    };
+
+    let (tx, rx) = tokio::sync::oneshot::channel::<MessageDialogResult>();
+    app.dialog()
+        .message(message)
+        .title("Quit Nexus")
+        .kind(MessageDialogKind::Info)
+        .buttons(MessageDialogButtons::YesNoCancelCustom(
+            QUIT_STOP_LABEL.to_string(),
+            QUIT_KEEP_LABEL.to_string(),
+            QUIT_CANCEL_LABEL.to_string(),
+        ))
+        .show_with_result(move |result| {
+            let _ = tx.send(result);
+        });
+
+    let Ok(result) = rx.await else {
+        return;
+    };
+
+    let stop_and_quit = match &result {
+        MessageDialogResult::Yes | MessageDialogResult::Ok => true,
+        MessageDialogResult::Custom(label) if label == QUIT_STOP_LABEL => true,
+        _ => false,
+    };
+    let keep_and_quit = match &result {
+        MessageDialogResult::No => true,
+        MessageDialogResult::Custom(label) if label == QUIT_KEEP_LABEL => true,
+        _ => false,
+    };
+
+    if stop_and_quit {
+        if let Err(e) = manager.stop_listening_daemon().await {
+            eprintln!("nexus-desktop: failed to stop daemon on quit: {e}");
+        }
+        EXIT_CONFIRMED.store(true, Ordering::SeqCst);
+        app.exit(0);
+    } else if keep_and_quit {
+        manager.release_without_stop().await;
+        EXIT_CONFIRMED.store(true, Ordering::SeqCst);
+        app.exit(0);
+    } else {
+        // Cancel — leave the app running.
+        EXIT_CONFIRMED.store(false, Ordering::SeqCst);
+    }
 }
 
 #[cfg(test)]

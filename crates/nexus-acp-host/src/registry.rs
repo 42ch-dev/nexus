@@ -486,7 +486,10 @@ pub struct LocalInstallation {
 /// commands (`opencode` → `opencode`) and Windows-style relative paths.
 #[must_use]
 pub fn bare_command_name(cmd: &str) -> String {
-    Path::new(cmd).file_name().map_or_else(
+    // Registry Windows entries may use backslashes (`./dist-package\cursor-agent.cmd`).
+    // On Unix, `\` is not a path separator, so normalize before taking the file name.
+    let normalized = cmd.replace('\\', "/");
+    Path::new(&normalized).file_name().map_or_else(
         || cmd.to_string(),
         |name| name.to_string_lossy().to_string(),
     )
@@ -515,6 +518,20 @@ const SCAN_VERSION_TIMEOUT: Duration = Duration::from_secs(2);
 /// - Each probe is capped at [`SCAN_VERSION_TIMEOUT`].
 pub async fn scan_local_installations(registry: &Registry) -> Vec<LocalInstallation> {
     scan_local_installations_impl(registry, &[]).await
+}
+
+/// Like [`scan_local_installations`], but probes binaries against an explicit
+/// directory list instead of the process `PATH`.
+///
+/// Production callers (daemon scan handler) pass login-shell-equivalent dirs
+/// merged with the process PATH so GUI-launched daemons still see Homebrew /
+/// vendor agent installs. When `path_dirs` is empty, behavior matches
+/// [`scan_local_installations`].
+pub async fn scan_local_installations_with_path(
+    registry: &Registry,
+    path_dirs: &[PathBuf],
+) -> Vec<LocalInstallation> {
+    scan_local_installations_impl(registry, path_dirs).await
 }
 
 async fn scan_local_installations_impl(
@@ -640,14 +657,6 @@ async fn probe_local_binary(
         binary: binary.to_string(),
         version,
     })
-}
-
-#[cfg(test)]
-async fn scan_local_installations_with_path(
-    registry: &Registry,
-    path_dirs: &[PathBuf],
-) -> Vec<LocalInstallation> {
-    scan_local_installations_impl(registry, path_dirs).await
 }
 
 // ── Tests ────────────────────────────────────────────────────────────
@@ -1221,5 +1230,15 @@ mod tests {
         assert_eq!(results.len(), 1);
         assert_eq!(results[0].binary, "opencode");
         assert_eq!(results[0].version.as_deref(), Some("opencode 3.0.0"));
+    }
+
+    #[test]
+    fn bare_command_name_normalizes_windows_backslash_paths() {
+        assert_eq!(
+            bare_command_name(r"./dist-package\cursor-agent.cmd"),
+            "cursor-agent.cmd"
+        );
+        assert_eq!(bare_command_name("./kimi"), "kimi");
+        assert_eq!(bare_command_name("opencode"), "opencode");
     }
 }

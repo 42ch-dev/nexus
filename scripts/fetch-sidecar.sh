@@ -4,11 +4,13 @@
 # Tauri `bundle.externalBin` expects.
 #
 # Usage:
-#   bash scripts/fetch-sidecar.sh                    # default: aarch64-apple-darwin
+#   bash scripts/fetch-sidecar.sh                    # default: aarch64-apple-darwin (release)
 #   bash scripts/fetch-sidecar.sh <target>...        # explicit targets
 #   SIDECAR_TARGETS="<target>..." bash scripts/fetch-sidecar.sh
+#   SIDECAR_PROFILE=debug bash scripts/fetch-sidecar.sh   # faster local desktop iteration
 #
-# Called automatically by `beforeBuildCommand` before `tauri build`.
+# Called automatically by `beforeBuildCommand` before `tauri build` (release)
+# and by `pnpm dev:desktop` / `dev:desktop:web` (debug via sidecar:dev).
 
 set -euo pipefail
 
@@ -29,6 +31,15 @@ else
   )
 fi
 
+PROFILE="${SIDECAR_PROFILE:-release}"
+case "${PROFILE}" in
+  debug|release) ;;
+  *)
+    echo "SIDECAR_PROFILE must be 'debug' or 'release' (got: ${PROFILE})" >&2
+    exit 1
+    ;;
+esac
+
 mkdir -p "${DEST}"
 
 export SQLX_OFFLINE=true
@@ -36,13 +47,17 @@ export SQLX_OFFLINE=true
 CARGO_TARGET="${CARGO_TARGET_DIR:-${REPO_ROOT}/target}"
 
 for target in "${TARGETS[@]}"; do
-  echo "==> Building nexus42 for ${target}..."
+  echo "==> Building nexus42 (${PROFILE}) for ${target}..."
   rustup target add "${target}" 2>/dev/null || true
-  cargo build --release -p nexus42 --target "${target}"
-  cp "${CARGO_TARGET}/${target}/release/nexus42" "${DEST}/nexus42-${target}"
+  if [ "${PROFILE}" = "release" ]; then
+    cargo build --release -p nexus42 --target "${target}"
+  else
+    cargo build -p nexus42 --target "${target}"
+  fi
+  cp "${CARGO_TARGET}/${target}/${PROFILE}/nexus42" "${DEST}/nexus42-${target}"
   chmod +x "${DEST}/nexus42-${target}"
   echo "    -> ${DEST}/nexus42-${target}"
 done
 
-echo "==> Sidecar binaries ready:"
+echo "==> Sidecar binaries ready (${PROFILE}):"
 ls -la "${DEST}"/nexus42-*

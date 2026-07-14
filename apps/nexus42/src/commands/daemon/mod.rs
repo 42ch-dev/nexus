@@ -155,8 +155,15 @@ async fn start_daemon(port: u16, foreground: bool, cdn_url: Option<String>) -> R
     // Check if already running
     let client = DaemonClient::new(&format!("http://127.0.0.1:{port}"));
     if client.health_check().await? {
-        println!("Daemon is already running on port {port}");
-        return Ok(());
+        if running_daemon_binary_is_stale(port) {
+            println!(
+                "Detected stale daemon on port {port} (binary older than this nexus42); restarting..."
+            );
+            stop_daemon(port).await?;
+        } else {
+            println!("Daemon is already running on port {port}");
+            return Ok(());
+        }
     }
 
     if foreground {
@@ -333,6 +340,117 @@ fn remove_pid_file() -> Result<()> {
 fn is_process_running(pid: u32) -> bool {
     // Sending signal 0 checks if the process exists without actually sending a signal
     nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid as i32), None).is_ok()
+}
+
+/// True when the daemon listening on `port` started before this `nexus42`
+/// binary's mtime (typical after `cargo build` overwrites the same path).
+///
+/// Comparing on-disk mtimes of the same path is not enough: rebuilding
+/// updates the path's mtime while the old process keeps serving the previous
+/// image. Process start time vs current-exe mtime catches that case.
+#[cfg(unix)]
+fn running_daemon_binary_is_stale(port: u16) -> bool {
+    let Ok(current_exe) = std::env::current_exe() else {
+        return false;
+    };
+    let Ok(current_meta) = std::fs::metadata(&current_exe) else {
+        return false;
+    };
+    let Ok(current_mtime) = current_meta.modified() else {
+        return false;
+    };
+
+    let pid = read_pid_file()
+        .ok()
+        .flatten()
+        .or_else(|| listener_pid(port));
+    let Some(pid) = pid else {
+        return false;
+    };
+    let Some(started_at) = process_start_time(pid) else {
+        return false;
+    };
+
+    // 1s skew tolerance for filesystem / process-start clock granularity.
+    started_at + std::time::Duration::from_secs(1) < current_mtime
+}
+
+#[cfg(not(unix))]
+fn running_daemon_binary_is_stale(_port: u16) -> bool {
+    false
+}
+
+#[cfg(unix)]
+fn listener_pid(port: u16) -> Option<u32> {
+    let output = std::process::Command::new("lsof")
+        .args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN", "-t"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout
+        .lines()
+        .find_map(|line| line.trim().parse::<u32>().ok())
+}
+
+#[cfg(unix)]
+fn process_start_time(pid: u32) -> Option<std::time::SystemTime> {
+    // Prefer Linux `etimes` (seconds); fall back to portable `etime`
+    // (`[[dd-]hh:]mm:ss`) which macOS supports.
+    let elapsed = process_elapsed_secs(pid)?;
+    std::time::SystemTime::now().checked_sub(std::time::Duration::from_secs(elapsed))
+}
+
+#[cfg(unix)]
+fn process_elapsed_secs(pid: u32) -> Option<u64> {
+    if let Some(secs) = ps_column_u64(pid, "etimes=") {
+        return Some(secs);
+    }
+    let output = std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "etime="])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_ps_etime(String::from_utf8_lossy(&output.stdout).trim())
+}
+
+#[cfg(unix)]
+fn ps_column_u64(pid: u32, column: &str) -> Option<u64> {
+    let output = std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", column])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    String::from_utf8_lossy(&output.stdout).trim().parse().ok()
+}
+
+/// Parse `ps -o etime=` output: `SS`, `MM:SS`, `HH:MM:SS`, or `DD-HH:MM:SS`.
+#[cfg(unix)]
+fn parse_ps_etime(raw: &str) -> Option<u64> {
+    let s = raw.trim();
+    if s.is_empty() {
+        return None;
+    }
+    let (days, rest) = match s.split_once('-') {
+        Some((d, r)) => (d.parse::<u64>().ok()?, r),
+        None => (0, s),
+    };
+    let parts: Vec<&str> = rest.split(':').collect();
+    let secs = match parts.as_slice() {
+        [ss] => ss.parse::<u64>().ok()?,
+        [mm, ss] => mm.parse::<u64>().ok()? * 60 + ss.parse::<u64>().ok()?,
+        [hh, mm, ss] => {
+            hh.parse::<u64>().ok()? * 3600 + mm.parse::<u64>().ok()? * 60 + ss.parse::<u64>().ok()?
+        }
+        _ => return None,
+    };
+    Some(days * 86_400 + secs)
 }
 
 #[cfg(unix)]
@@ -936,5 +1054,16 @@ mod tests {
     async fn test_daemon_doctor() {
         let result = daemon_doctor(19999).await;
         assert!(result.is_ok(), "daemon_doctor should succeed");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn parse_ps_etime_supports_common_formats() {
+        assert_eq!(parse_ps_etime("45"), Some(45));
+        assert_eq!(parse_ps_etime("01:02"), Some(62));
+        assert_eq!(parse_ps_etime("01:02:03"), Some(3723));
+        assert_eq!(parse_ps_etime("01-15:19:54"), Some(141_594));
+        assert_eq!(parse_ps_etime(""), None);
+        assert_eq!(parse_ps_etime("bad"), None);
     }
 }

@@ -552,7 +552,11 @@ pub async fn scan(
         message: format!("failed to fetch ACP registry: {e}"),
     })?;
 
-    let installations = nexus_acp_host::registry::scan_local_installations(&registry).await;
+    // Probe against process PATH + login-shell-equivalent dirs without
+    // mutating the process environment (safe on a live Tokio runtime).
+    let probe_dirs = crate::path_enrichment::probe_path_dirs();
+    let installations =
+        nexus_acp_host::registry::scan_local_installations_with_path(&registry, &probe_dirs).await;
     let by_binary: HashMap<String, nexus_acp_host::registry::LocalInstallation> = installations
         .into_iter()
         .map(|li| (li.binary.clone(), li))
@@ -568,8 +572,9 @@ pub async fn scan(
     // native entries are appended. If a native equivalent is installed, suppress
     // the corresponding ACP registry entry so the UI shows the honest path.
     let host_config = state.agent_host_config();
+    let native_probe_dirs = probe_dirs.clone();
     let native_entries = tokio::task::spawn_blocking(move || {
-        nexus_agent_host::discovery::path_scan::scan_path(&host_config, &[])
+        nexus_agent_host::discovery::path_scan::scan_path_in(&host_config, &[], &native_probe_dirs)
     })
     .await
     .map_err(|e| NexusApiError::Internal {

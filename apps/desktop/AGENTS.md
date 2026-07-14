@@ -46,19 +46,23 @@ in `src-tauri/build.rs` if the sidecar binary for the current target is missing.
 The desktop shell can be run in two dev modes, controlled from the root
 `package.json`:
 
-- `pnpm dev:desktop` — **dist-load mode** (production-like, no HMR). Builds
-  `apps/web` and then starts Tauri with `src-tauri/tauri.dev.dist.conf.json`,
-  which overrides `beforeDevCommand` to `vite preview` on port 5173 (serving
-  `web/dist`) instead of the Vite dev server. Use this when you want to verify
-  the desktop shell against a static production-like web bundle.
+- `pnpm dev:desktop` — **dist-load mode** (production-like, no HMR). Runs
+  `sidecar:dev` (debug `nexus42` → `src-tauri/binaries/`), builds `apps/web`,
+  then starts Tauri with `src-tauri/tauri.dev.dist.conf.json`, which overrides
+  `beforeDevCommand` to `vite preview` on port 5173 (serving `web/dist`). Use
+  this when you want to verify the desktop shell against a static
+  production-like web bundle with a freshly built sidecar CLI.
 
-- `pnpm dev:desktop:web` — **Vite + Tauri HMR mode**. Runs the base Tauri dev
-  configuration (`tauri.conf.json`), which launches the Vite dev server via
-  `beforeDevCommand: pnpm --filter web dev` and points `devUrl` at
-  `http://localhost:5173`. Use this when actively editing `apps/web` source.
+- `pnpm dev:desktop:web` — **Vite + Tauri HMR mode**. Same `sidecar:dev` refresh,
+  then the base Tauri configuration (`tauri.conf.json`), which launches the Vite
+  dev server via `beforeDevCommand: pnpm --filter web dev` and points `devUrl`
+  at `http://localhost:5173`. Use this when actively editing `apps/web` source.
   Daemon connection messages logged during the Rust compile phase are expected
   in this mode because the web dev server is already running before the desktop
   window opens.
+
+On quit, the shell asks whether to **Stop Daemon & Quit**, **Keep Daemon & Quit**,
+or **Cancel**. Prefer Keep when iterating so Setup/agent scan keep a warm daemon.
 
 ## SSOT & authority
 

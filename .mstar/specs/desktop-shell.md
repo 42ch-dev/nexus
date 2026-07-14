@@ -31,7 +31,7 @@ Recorded so deferrals are tracked, not lost:
 - Body full-text editor + per-chapter edit lock (V1.67 lead authoring slice).
 - UI productivity wave (drag-reorder, bulk ops, reconcile trigger, outline templates).
 - Windows + Linux desktop builds; code signing + Apple notarization + Windows Authenticode; GitHub Releases + auto-update; in-process `nexus-daemon-runtime` lib link. (Signing/distribution v2 may split to its own iteration if the V1.67 body editor consumes V1.67 capacity.)
-- System tray / menu-bar app / global hotkeys / native notifications; custom title bar / animated transitions (Production polish).
+- System tray / menu-bar app / global hotkeys / native notifications; custom title bar / animated transitions (Production polish). **Menu-bar daemon status + stop/start control** tracked as [DF-71](../knowledge/deferred-features-cross-version-tracker.md) (interim quit dialog shipped on the agent-detection hotfix; tray remains opportunistic polish).
 - Mobile (Tauri v2 mobile targets).
 
 ## 3. Application structure

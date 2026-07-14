@@ -10,11 +10,13 @@
 //! Spec: `.mstar/specs/daemon-runtime.md` §12 and
 //! `.mstar/specs/desktop-shell.md` §7/§8.
 
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 use serde::Serialize;
 use tauri::Emitter;
+use tauri::Manager;
 use tauri_plugin_shell::process::CommandChild;
 use tauri_plugin_shell::ShellExt;
 use tokio::net::TcpStream;
@@ -290,17 +292,30 @@ impl SidecarManager {
             );
 
             if let Some(health) = health {
-                let mut inner = self.0.lock().await;
-                inner.state = DaemonState::Running;
-                inner.version = Some(health.version);
-                inner.owned = false;
-                return Ok(());
-            }
-
-            // The port accepted a TCP connect but does not look like our
-            // daemon. Treat it as a conflict rather than spawning a second
-            // process that will lose the port race.
-            if port_state == PortState::Occupied {
+                // If the listening daemon binary is older than the bundled
+                // sidecar, replace it so Setup/agent scan pick up current
+                // detection logic instead of silently attaching to a stale
+                // `nexus42` left on port 8420 from a previous build.
+                if should_replace_stale_external_daemon(app, port) {
+                    tracing::warn!(
+                        phase = "stale_daemon_replace",
+                        port = port,
+                        version = %health.version,
+                        "external daemon binary is older than bundled sidecar; replacing"
+                    );
+                    stop_external_daemon(port).await;
+                    // Fall through to spawn the bundled sidecar.
+                } else {
+                    let mut inner = self.0.lock().await;
+                    inner.state = DaemonState::Running;
+                    inner.version = Some(health.version);
+                    inner.owned = false;
+                    return Ok(());
+                }
+            } else if port_state == PortState::Occupied {
+                // The port accepted a TCP connect but does not look like our
+                // daemon. Treat it as a conflict rather than spawning a second
+                // process that will lose the port race.
                 let message = format!(
                     "Nexus couldn't start its background service — port {port} is already in use. \
                      Quit the other Nexus instance, or set a different port."
@@ -413,6 +428,16 @@ impl SidecarManager {
         }
     }
 
+    /// Whether this manager spawned the current daemon process.
+    pub async fn is_owned(&self) -> bool {
+        self.0.lock().await.owned
+    }
+
+    /// Whether a daemon is currently considered running (owned or attached).
+    pub async fn is_running(&self) -> bool {
+        self.0.lock().await.state == DaemonState::Running
+    }
+
     /// Request graceful termination of the owned sidecar.
     ///
     /// Does nothing if the app is attached to a user-started daemon.
@@ -451,6 +476,42 @@ impl SidecarManager {
         if inner.state != DaemonState::Error {
             inner.state = DaemonState::Stopped;
         }
+        drop(inner);
+        self.notify().await;
+        Ok(())
+    }
+
+    /// Detach from an owned sidecar without terminating it.
+    ///
+    /// Used when the user quits the desktop shell but chooses to keep the
+    /// daemon running (dev workflows that leave CLI/sidecar up).
+    pub async fn release_without_stop(&self) {
+        let mut inner = self.0.lock().await;
+        inner.stop_requested = true;
+        inner.owned = false;
+        // Drop the child handle without killing — the process keeps running.
+        let _ = inner.child.take();
+        if inner.state != DaemonState::Error {
+            inner.state = DaemonState::Stopped;
+        }
+        drop(inner);
+        self.notify().await;
+    }
+
+    /// Stop a daemon that is listening on the managed port, whether or not this
+    /// manager owns the process handle (attached external daemon).
+    pub async fn stop_listening_daemon(&self) -> Result<(), String> {
+        if self.is_owned().await {
+            return self.stop().await;
+        }
+        let port = self.port().await;
+        stop_external_daemon(port).await;
+        let mut inner = self.0.lock().await;
+        inner.owned = false;
+        if inner.state != DaemonState::Error {
+            inner.state = DaemonState::Stopped;
+        }
+        inner.version = None;
         drop(inner);
         self.notify().await;
         Ok(())
@@ -627,6 +688,169 @@ fn format_error_detail(message: &str, stderr: Option<&str>) -> String {
         format!("{message}\n\nDaemon output:\n{}", stderr.trim())
     } else {
         message.to_string()
+    }
+}
+
+/// Return true when an external daemon on `port` should be replaced by the
+/// bundled sidecar because the process started before the sidecar binary's
+/// mtime (covers same-path rebuilds that leave a live old image).
+fn should_replace_stale_external_daemon<R: tauri::Runtime>(
+    app: &tauri::AppHandle<R>,
+    port: u16,
+) -> bool {
+    let Some(sidecar) = newest_bundled_sidecar_path(app) else {
+        return false;
+    };
+    let Some(sidecar_mtime) = file_mtime(&sidecar) else {
+        return false;
+    };
+    let Some(pid) = listener_pid(port) else {
+        return false;
+    };
+    let Some(started_at) = process_start_time(pid) else {
+        return false;
+    };
+    tracing::debug!(
+        phase = "stale_daemon_compare",
+        port = port,
+        pid = pid,
+        sidecar = %sidecar.display(),
+        started_at = ?started_at,
+        sidecar_mtime = ?sidecar_mtime,
+        "compared external daemon start time to bundled sidecar mtime"
+    );
+    // 1s skew tolerance for filesystem / process-start clock granularity.
+    started_at + Duration::from_secs(1) < sidecar_mtime
+}
+
+fn process_start_time(pid: u32) -> Option<SystemTime> {
+    // Prefer Linux `etimes` (seconds); fall back to portable `etime`
+    // (`[[dd-]hh:]mm:ss`) which macOS supports.
+    let elapsed = process_elapsed_secs(pid)?;
+    SystemTime::now().checked_sub(Duration::from_secs(elapsed))
+}
+
+fn process_elapsed_secs(pid: u32) -> Option<u64> {
+    if let Ok(output) = std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "etimes="])
+        .output()
+    {
+        if output.status.success() {
+            if let Ok(secs) = String::from_utf8_lossy(&output.stdout).trim().parse::<u64>() {
+                return Some(secs);
+            }
+        }
+    }
+    let output = std::process::Command::new("ps")
+        .args(["-p", &pid.to_string(), "-o", "etime="])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    parse_ps_etime(String::from_utf8_lossy(&output.stdout).trim())
+}
+
+/// Parse `ps -o etime=` output: `SS`, `MM:SS`, `HH:MM:SS`, or `DD-HH:MM:SS`.
+fn parse_ps_etime(raw: &str) -> Option<u64> {
+    let s = raw.trim();
+    if s.is_empty() {
+        return None;
+    }
+    let (days, rest) = match s.split_once('-') {
+        Some((d, r)) => (d.parse::<u64>().ok()?, r),
+        None => (0, s),
+    };
+    let parts: Vec<&str> = rest.split(':').collect();
+    let secs = match parts.as_slice() {
+        [ss] => ss.parse::<u64>().ok()?,
+        [mm, ss] => mm.parse::<u64>().ok()? * 60 + ss.parse::<u64>().ok()?,
+        [hh, mm, ss] => {
+            hh.parse::<u64>().ok()? * 3600 + mm.parse::<u64>().ok()? * 60 + ss.parse::<u64>().ok()?
+        }
+        _ => return None,
+    };
+    Some(days * 86_400 + secs)
+}
+
+fn newest_bundled_sidecar_path<R: tauri::Runtime>(app: &tauri::AppHandle<R>) -> Option<PathBuf> {
+    let mut candidates = Vec::new();
+    if let Ok(resource) = app.path().resource_dir() {
+        candidates.push(resource.join("nexus42"));
+        #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+        candidates.push(resource.join("nexus42-aarch64-apple-darwin"));
+        #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+        candidates.push(resource.join("nexus42-x86_64-apple-darwin"));
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            candidates.push(dir.join("nexus42"));
+            #[cfg(all(target_os = "macos", target_arch = "aarch64"))]
+            {
+                candidates.push(dir.join("nexus42-aarch64-apple-darwin"));
+                candidates.push(dir.join("../binaries/nexus42-aarch64-apple-darwin"));
+            }
+            #[cfg(all(target_os = "macos", target_arch = "x86_64"))]
+            {
+                candidates.push(dir.join("nexus42-x86_64-apple-darwin"));
+                candidates.push(dir.join("../binaries/nexus42-x86_64-apple-darwin"));
+            }
+        }
+    }
+
+    candidates
+        .into_iter()
+        .filter(|p| p.is_file())
+        .max_by_key(|p| file_mtime(p).unwrap_or(SystemTime::UNIX_EPOCH))
+}
+
+fn file_mtime(path: &Path) -> Option<SystemTime> {
+    std::fs::metadata(path).ok()?.modified().ok()
+}
+
+fn listener_pid(port: u16) -> Option<u32> {
+    let output = std::process::Command::new("lsof")
+        .args(["-nP", &format!("-iTCP:{port}"), "-sTCP:LISTEN", "-t"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    stdout
+        .lines()
+        .find_map(|line| line.trim().parse::<u32>().ok())
+}
+
+async fn stop_external_daemon(port: u16) {
+    let Some(pid) = listener_pid(port) else {
+        return;
+    };
+    #[cfg(unix)]
+    {
+        #[allow(clippy::cast_possible_wrap)]
+        let nix_pid = nix::unistd::Pid::from_raw(pid as i32);
+        let _ = nix::sys::signal::kill(nix_pid, nix::sys::signal::Signal::SIGTERM);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < deadline {
+            if listener_pid(port).is_none() {
+                return;
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+        let _ = nix::sys::signal::kill(nix_pid, nix::sys::signal::Signal::SIGKILL);
+        let kill_deadline = Instant::now() + Duration::from_secs(1);
+        while Instant::now() < kill_deadline {
+            if listener_pid(port).is_none() {
+                return;
+            }
+            sleep(Duration::from_millis(50)).await;
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = port;
+        let _ = pid;
     }
 }
 
@@ -960,6 +1184,24 @@ mod tests {
         assert!(!inner.stop_requested);
         assert!(!inner.owned);
         assert_eq!(inner.state, DaemonState::Running);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn release_without_stop_detaches_owned_manager() {
+        let manager = crate::sidecar::SidecarManager::new(63337);
+        {
+            let mut inner = manager.0.lock().await;
+            inner.state = DaemonState::Running;
+            inner.owned = true;
+        }
+
+        manager.release_without_stop().await;
+
+        let inner = manager.0.lock().await;
+        assert!(inner.stop_requested);
+        assert!(!inner.owned);
+        assert_eq!(inner.state, DaemonState::Stopped);
+        assert!(inner.child.is_none());
     }
 
     #[tokio::test(flavor = "current_thread")]
