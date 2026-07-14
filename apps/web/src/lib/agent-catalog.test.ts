@@ -4,9 +4,11 @@ import {
   isHiddenFromDefault,
   resolveAgentKey,
   resolveCatalogItem,
+  resolveCatalogItems,
   defaultGridEntries,
   moreAgentsEntries,
   prioritizeInstalled,
+  buildPickerSelection,
 } from '@/lib/agent-catalog';
 import type { AgentScanEntry } from '@42ch/nexus-contracts';
 
@@ -234,5 +236,61 @@ describe('prioritizeInstalled', () => {
     ] as Parameters<typeof prioritizeInstalled>[0]);
     expect(items[0]!.id).toBe('a');
     expect(items[1]!.id).toBe('b');
+  });
+});
+
+describe('resolveCatalogItems / picker id collision (PR#148 Greptile P1)', () => {
+  // Two real installs of `claude` resolve to the same native key but carry
+  // different launch commands — the bug is that a catalog-key map collapses
+  // them, so selecting one card could save the other's launch command.
+  const twoClaudeInstalls = (): AgentScanEntry[] => [
+    makeAgent({
+      registry_agent_id: null,
+      launch_command: '/usr/local/bin/claude',
+      name: 'claude-a',
+      installed: true,
+    }),
+    makeAgent({
+      registry_agent_id: null,
+      launch_command: '/opt/homebrew/bin/claude',
+      name: 'claude-b',
+      installed: true,
+    }),
+  ];
+
+  it('assigns distinct collision-safe pickerIds while id stays the catalog key', () => {
+    const items = resolveCatalogItems(twoClaudeInstalls());
+    expect(items.map((i) => i.pickerId)).toEqual(['claude-native', 'claude-native__2']);
+    // Catalog key is shared (override/whitelist lookup is by key).
+    expect(items[0]!.id).toBe('claude-native');
+    expect(items[1]!.id).toBe('claude-native');
+    // Each item preserves its OWN launch command — the card shows the right one.
+    expect(items[0]!.launchCommand).toBe('/usr/local/bin/claude');
+    expect(items[1]!.launchCommand).toBe('/opt/homebrew/bin/claude');
+  });
+
+  it('keeps pickerId === id when there is no collision', () => {
+    const items = resolveCatalogItems([
+      makeAgent({ registry_agent_id: 'claude-native', name: 'Claude' }),
+      makeAgent({ registry_agent_id: 'codex-native', name: 'Codex' }),
+    ]);
+    expect(items[0]!.pickerId).toBe('claude-native');
+    expect(items[1]!.pickerId).toBe('codex-native');
+  });
+
+  it('defaultGridEntries surfaces both colliding rows as distinct selectable cards', () => {
+    const entries = defaultGridEntries(twoClaudeInstalls());
+    expect(entries).toHaveLength(2);
+    expect(new Set(entries.map((e) => e.pickerId)).size).toBe(2);
+  });
+
+  it('buildPickerSelection maps each pickerId back to the exact scan row', () => {
+    const [a, b] = twoClaudeInstalls();
+    const { byPickerId, byEntry } = buildPickerSelection([a, b]);
+    // Selecting either card resolves to its own launch command, not the other's.
+    expect(byPickerId.get('claude-native')).toBe(a);
+    expect(byPickerId.get('claude-native__2')).toBe(b);
+    expect(byEntry.get(a)).toBe('claude-native');
+    expect(byEntry.get(b)).toBe('claude-native__2');
   });
 });

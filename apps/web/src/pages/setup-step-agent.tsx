@@ -17,6 +17,7 @@ import {
   defaultGridEntries,
   moreAgentsEntries,
   resolveCatalogItem,
+  buildPickerSelection,
   type AgentCatalogItem,
 } from '@/lib/agent-catalog';
 import type { AgentScanEntry } from '@42ch/nexus-contracts';
@@ -33,7 +34,9 @@ interface SetupStepAgentProps {
 /** Map a catalog item → picker view-model. */
 function catalogItemToPickerItem(item: AgentCatalogItem): AgentPickerItem {
   return {
-    id: item.id,
+    // Selection id is the collision-safe picker id (PR#148 Greptile P1), not
+    // the shared catalog key, so each card maps to exactly one scan row.
+    id: item.pickerId,
     name: item.name,
     displayName: item.displayName,
     version: item.version,
@@ -115,14 +118,10 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
   );
   const status = resolvePickerStatus(scan.isLoading, scan.isError, agents.length);
 
-  const agentsByCatalogId = useMemo(() => {
-    const map = new Map<string, AgentScanEntry>();
-    for (const agent of agents) {
-      const item = resolveCatalogItem(agent);
-      map.set(item.id, agent);
-    }
-    return map;
-  }, [agents]);
+  // Collision-safe picker-id ↔ scan-entry index. Replaces a catalog-key map
+  // that silently collides when two scan rows resolve to the same key and
+  // could save the wrong `launch_command` (PR#148 Greptile P1).
+  const pickerSelection = useMemo(() => buildPickerSelection(agents), [agents]);
 
   const [verifyStatus, setVerifyStatus] = useState<AgentVerifyStatus>('idle');
 
@@ -157,7 +156,7 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
   }, [firstInstalled]);
 
   function selectById(id: string) {
-    const agent = agentsByCatalogId.get(id);
+    const agent = pickerSelection.byPickerId.get(id);
     if (!agent?.installed) return;
     onChange({
       workspaceRoot,
@@ -196,8 +195,8 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
 
   const selectedId = useMemo(() => {
     if (!selectedAgent) return null;
-    return resolveCatalogItem(selectedAgent).id;
-  }, [selectedAgent]);
+    return pickerSelection.byEntry.get(selectedAgent) ?? null;
+  }, [selectedAgent, pickerSelection]);
 
   // FB-UI-008: an installed agent continues directly (registry-validated).
   // A custom launch command must be verified before continuing so authors

@@ -502,9 +502,19 @@ function OutboundLink({
   desktop?: AgentPickerDesktop;
   onExternalUrlError?: () => void;
 }) {
-  const handleClick = useCallback(
+  // On desktop the link must NEVER let the native `href` load the external
+  // page inside the Tauri webview — every activation routes through the
+  // validated system-browser opener. Middle-click / aux-click bypasses
+  // `onClick`, so it is intercepted separately (PR#148 Greptile P2).
+  const isDesktop = Boolean(desktop?.openExternalUrl);
+
+  const routeThroughOpener = useCallback(
     (e: React.MouseEvent) => {
       if (!desktop?.openExternalUrl) return;
+      // onClick covers left + modifier (meta/ctrl/shift) clicks. onAuxClick is
+      // attached for middle-click (button === 1); right-click (button === 2)
+      // is left to the host context menu and must not navigate.
+      if (e.type === 'auxclick' && e.button !== 1) return;
       e.preventDefault();
       desktop.openExternalUrl(href).catch(() => {
         // AD-P1-2: surface the failure to the user via the host's toast.
@@ -519,9 +529,10 @@ function OutboundLink({
   return (
     <a
       href={href}
-      target={desktop ? undefined : '_blank'}
-      rel={desktop ? undefined : 'noopener noreferrer'}
-      onClick={handleClick}
+      target={isDesktop ? undefined : '_blank'}
+      rel={isDesktop ? undefined : 'noopener noreferrer'}
+      onClick={routeThroughOpener}
+      onAuxClick={isDesktop ? routeThroughOpener : undefined}
       aria-label={label}
       className="inline-flex items-center gap-1 text-label-14 font-medium leading-none text-blue-700 transition-colors hover:text-blue-800"
     >

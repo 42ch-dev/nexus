@@ -2,7 +2,7 @@
  * AgentPicker presentational unit tests (V1.101 Task 2 + fix-wave B2).
  * V1.117 P1 T3: defaultGrid + moreAgents split; icon + displayName.
  */
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -572,5 +572,67 @@ describe('AgentPicker', () => {
     await vi.waitFor(() => {
       expect(onExternalUrlError).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it('routes middle-click through openExternalUrl on desktop (PR#148 Greptile P2)', () => {
+    const openExternalUrl = vi.fn().mockResolvedValue(undefined);
+    render(
+      <AgentPicker
+        status="ready"
+        defaultGrid={DEFAULT_GRID}
+        onSelect={() => undefined}
+        customLaunchValue=""
+        onCustomLaunchChange={() => undefined}
+        desktop={{ openExternalUrl }}
+      />,
+    );
+
+    const link = screen.getAllByRole('link', { name: /Install/i })[0]!;
+    // Middle-click fires `auxclick` with button === 1, not `click`. Without the
+    // fix the native href would load the external page inside the webview.
+    fireEvent(link, new MouseEvent('auxclick', { button: 1, bubbles: true, cancelable: true }));
+    expect(openExternalUrl).toHaveBeenCalledWith('https://example.com/install');
+    expect(openExternalUrl).toHaveBeenCalledTimes(1);
+  });
+
+  it('routes modifier-click through openExternalUrl on desktop (PR#148 Greptile P2)', () => {
+    const openExternalUrl = vi.fn().mockResolvedValue(undefined);
+    render(
+      <AgentPicker
+        status="ready"
+        defaultGrid={DEFAULT_GRID}
+        onSelect={() => undefined}
+        customLaunchValue=""
+        onCustomLaunchChange={() => undefined}
+        desktop={{ openExternalUrl }}
+      />,
+    );
+
+    const link = screen.getAllByRole('link', { name: /Install/i })[0]!;
+    // Cmd/Ctrl-click would otherwise open the href in a new webview tab.
+    fireEvent.click(link, { metaKey: true });
+    expect(openExternalUrl).toHaveBeenCalledWith('https://example.com/install');
+    expect(openExternalUrl).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not intercept middle-click on browser build (no desktop opener)', () => {
+    render(
+      <AgentPicker
+        status="ready"
+        defaultGrid={DEFAULT_GRID}
+        onSelect={() => undefined}
+        customLaunchValue=""
+        onCustomLaunchChange={() => undefined}
+      />,
+    );
+
+    const link = screen.getAllByRole('link', { name: /Install/i })[0]!;
+    // Browser builds keep target=_blank and must not attach an aux-click opener
+    // — the browser handles middle-click natively (AC-P1-8).
+    expect(link).toHaveAttribute('target', '_blank');
+    fireEvent(link, new MouseEvent('auxclick', { button: 1, bubbles: true, cancelable: true }));
+    // Nothing to assert besides "no opener ran" (jsdom does not navigate); the
+    // contract is that the native href/target path stays intact.
+    expect(link).toHaveAttribute('target', '_blank');
   });
 });

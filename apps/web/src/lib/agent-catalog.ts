@@ -22,7 +22,21 @@ export interface AgentCatalogOverrides {
 }
 
 export interface AgentCatalogItem {
+  /**
+   * Stable catalog key — the canonical agent identity used for override /
+   * whitelist lookup and the default-grid / more-agents split. MAY be shared
+   * by more than one scan row (e.g. two `claude` installs both resolve to
+   * `claude-native`). Use {@link pickerId} for selection.
+   */
   id: string;
+  /**
+   * Collision-safe selection handle, unique per scan row. Equals {@link id}
+   * when no other row resolves to the same catalog key; suffixed
+   * (`<id>__2`, `<id>__3`, …) on collision so each displayed card maps to
+   * exactly one scan entry (PR#148 Greptile P1). Computed over the full scan
+   * set by {@link resolveCatalogItems} / {@link buildPickerSelection}.
+   */
+  pickerId: string;
   name: string;
   displayName: string;
   version?: string | null;
@@ -91,6 +105,10 @@ export function resolveCatalogItem(entry: AgentScanEntry): AgentCatalogItem {
   const whitelistUrl = resolveInstallUrl(key);
   return {
     id: key,
+    // Single-entry default: equals the catalog key. Collision-safe suffixing
+    // happens at the list level in `resolveCatalogItems` (needs full-set
+    // context).
+    pickerId: key,
     name: entry.name,
     displayName: agentOverride?.displayName ?? entry.name,
     version: entry.version,
@@ -109,9 +127,32 @@ export function resolveCatalogItem(entry: AgentScanEntry): AgentCatalogItem {
   };
 }
 
+/**
+ * Resolve every scan entry to a catalog item with a collision-safe
+ * {@link AgentCatalogItem.pickerId}.
+ *
+ * `id` stays the stable catalog key (override/whitelist lookup, default/more
+ * split). `pickerId` is the unique-per-row selection handle: the first row for
+ * a key keeps the key; later rows get `<key>__2`, `<key>__3`, … This guarantees
+ * that selecting a displayed card always resolves to the exact scan row shown —
+ * even when two installs resolve to the same native key, the saved
+ * `launch_command` is the one on the card the author clicked (PR#148 Greptile
+ * P1). Single source for `defaultGridEntries` / `moreAgentsEntries` /
+ * `buildPickerSelection` so all three share one picker-id namespace.
+ */
+export function resolveCatalogItems(entries: AgentScanEntry[]): AgentCatalogItem[] {
+  const seen = new Map<string, number>();
+  return entries.map((entry) => {
+    const item = resolveCatalogItem(entry);
+    const occurrences = seen.get(item.id) ?? 0;
+    seen.set(item.id, occurrences + 1);
+    const pickerId = occurrences === 0 ? item.id : `${item.id}__${occurrences + 1}`;
+    return { ...item, pickerId };
+  });
+}
+
 export function defaultGridEntries(entries: AgentScanEntry[]): AgentCatalogItem[] {
-  const items = entries
-    .map(resolveCatalogItem)
+  return resolveCatalogItems(entries)
     .filter((item) => !item.hiddenFromDefault)
     .filter((item) => item.installed || item.priority !== undefined)
     .sort((a, b) => {
@@ -119,19 +160,16 @@ export function defaultGridEntries(entries: AgentScanEntry[]): AgentCatalogItem[
       const pb = b.priority ?? Infinity;
       return pa - pb;
     });
-  return items;
 }
 
 export function moreAgentsEntries(entries: AgentScanEntry[]): AgentCatalogItem[] {
   const defaultItemIds = new Set(defaultGridEntries(entries).map((i) => i.id));
-  const items = entries
-    .map(resolveCatalogItem)
+  return resolveCatalogItems(entries)
     .filter((item) => !defaultItemIds.has(item.id))
     .sort((a, b) => {
       if (a.installed !== b.installed) return a.installed ? -1 : 1;
       return a.name.localeCompare(b.name);
     });
-  return items;
 }
 
 export function prioritizeInstalled(items: AgentCatalogItem[]): AgentCatalogItem[] {
@@ -139,4 +177,33 @@ export function prioritizeInstalled(items: AgentCatalogItem[]): AgentCatalogItem
     if (a.installed !== b.installed) return a.installed ? -1 : 1;
     return 0;
   });
+}
+
+/** Bidirectional picker-id ↔ scan-entry index over a scan result. */
+export interface AgentPickerSelection {
+  /** Map a scan entry (by reference) → its collision-safe picker id. */
+  byEntry: Map<AgentScanEntry, string>;
+  /** Map a collision-safe picker id → its scan entry (selection lookup). */
+  byPickerId: Map<string, AgentScanEntry>;
+}
+
+/**
+ * Build the bidirectional picker-id ↔ scan-entry index over a scan result.
+ *
+ * Hosts use `byPickerId` to resolve a selected card back to the exact scan row
+ * — replacing a catalog-key map that silently collides and could save the
+ * wrong `launch_command`. `byEntry` derives the selected card id from a held
+ * `AgentScanEntry` (PR#148 Greptile P1). Keyed by object reference: entries
+ * must come from the same scan array the picker items were built from.
+ */
+export function buildPickerSelection(entries: AgentScanEntry[]): AgentPickerSelection {
+  const items = resolveCatalogItems(entries);
+  const byEntry = new Map<AgentScanEntry, string>();
+  const byPickerId = new Map<string, AgentScanEntry>();
+  items.forEach((item, index) => {
+    const entry = entries[index]!;
+    byEntry.set(entry, item.pickerId);
+    byPickerId.set(item.pickerId, entry);
+  });
+  return { byEntry, byPickerId };
 }
