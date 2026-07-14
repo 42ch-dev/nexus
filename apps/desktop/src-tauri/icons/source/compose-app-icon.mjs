@@ -19,10 +19,10 @@ const SHADOW = {
   offsetXRatio: 0,
   offsetYRatio: 0.018,
   blurSigmaRatio: 0.008,
-  opacity: 0.15,
+  opacity: 0.12,
   /** Gaussian spread padding (× blur sigma) so blur is not clipped at mark edges. */
   padSigmaFactor: 3,
-  /** Darker than the mark fill so the halo reads on background-200, not same as logo mid-tones. */
+  /** Darker than the mark fill so the halo reads on the system squircle, not same as logo mid-tones. */
   tintToken: 'brand-deep-blue-1000',
 };
 
@@ -90,7 +90,8 @@ async function buildShadowLayer(markBuffer, markWidth, markHeight, tint, config)
 }
 
 // logo_light.png is the deep-blue mark for light surfaces.
-const appIconBackground = hexToRgba(designColor('background-200'));
+// Canvas background is fully transparent (alpha: 0) — macOS applies the system
+// squircle mask, so an opaque fill would render as a white square in the Dock.
 const shadowTint = hexToRgba(designColor(SHADOW.tintToken));
 
 const trimmed = await sharp(logoPath).trim().toBuffer();
@@ -122,7 +123,7 @@ const composed = await sharp({
     width: CANVAS,
     height: CANVAS,
     channels: 4,
-    background: appIconBackground,
+    background: { r: 0, g: 0, b: 0, alpha: 0 },
   },
 })
   .composite([
@@ -136,5 +137,5 @@ await sharp(composed).toFile(out1024);
 await sharp(composed).resize(256, 256).png().toFile(out256);
 
 console.log(
-  `Composed ${out1024} and ${out256} from ${logoPath} on DESIGN.md background-200 (${designColor('background-200')}) with ${SHADOW.tintToken} shadow`,
+  `Composed ${out1024} and ${out256} from ${logoPath} on transparent canvas (alpha: 0) with ${SHADOW.tintToken} shadow (opacity ${SHADOW.opacity})`,
 );
