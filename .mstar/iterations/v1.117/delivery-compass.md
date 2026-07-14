@@ -1,7 +1,8 @@
 ---
 iteration_id: V1.117
 start_date: 2026-07-14
-status: locked
+end_date: 2026-07-15
+status: completed
 iteration_base_branch: main
 target_branch: main
 spec_integration_branch: iteration/v1.117
@@ -159,8 +160,8 @@ Per-plan AC IDs: see each spec under `specs/*.md`.
 
 ## Roadmap Position
 
-- **Current iteration (V1.117)**: Desktop UX polish — Profiles/workspace, Agents, shell IA, Dock icon, button voice
-- **Next iteration**: Full hierarchical menu depth and/or deeper Profiles fields — trigger: V1.117 shipped + author feedback
+- **Current iteration (V1.117)**: **delivered** — Desktop UX polish (Profiles/workspace, Agents, shell IA, Dock icon, button voice); all 5 plans Done (4 Must + 1 Should).
+- **Next iteration**: Full hierarchical menu depth and/or deeper Profiles fields — trigger: V1.117 shipped + author feedback. Carry: codegen DTO migration (R-V1117P0QC1-F002), TOML-write SSROT consolidation, path-guard live refresh, security-CTA voice revisit.
 - **North star**: Local-first creative desk that feels complete without protocol jargon
 
 ## Delivery Branch Policy
@@ -208,16 +209,24 @@ Cross-plan ADRs resolved in iteration specs; implementers treat these as normati
 
 ## Quality Gate Summary
 
-> Filled at iteration-close.
-
 | plan_id | QC decision | QA gate | Residuals | Durable summary |
 |---------|-------------|---------|-----------|-----------------|
-| — | — | — | — | — |
+| profiles-workspace (P0) | Approve with residuals (tri; QC2 degraded→PM-supplemented) | mandatory Pass (7/7 AC) | 6 low/nit (SSOT codegen, path-guard, TOML SSROT, diagnostics) | Plan gate summary |
+| setup-agents-catalog (P1) | Approve with residuals (tri; QC2 degraded→PM-supplemented) | mandatory Pass with notes (8/8 AC) | 4 low/nit (profile id, dead exports, shape guard, recompute) | Plan gate summary |
+| shell-layout-ia (P2) | Approve (tri clean, no fix-wave) | mandatory Pass (10/10 AC) | 2 low/nit (hook ordering, drill-in guard) | Plan gate summary |
+| button-voice-verb-only (P4) | Approve with residuals (tri; QC2 degraded→PM-supplemented) | mandatory Pass (7/7 AC) | 3 accept/defer (security CTAs, pagination, design-studio mirror) | Plan gate summary |
+| mac-dock-icon (P3, Should) | Approve (tri clean, no fix-wave) | pm-acceptance Pass (AC-P3-1/2/4 Met; P3-3 doc-manual) | 0 | Plan gate summary |
+
+**Iteration gate: PASS.** All Must plans (P0/P1/P2/P4) + Should (P3) Done. 15 new residuals registered (all low/nit, post-V1.117 defer/accept); 0 blocking open.
 
 ## Compound Round Summary
 
-> Filled at iteration-close.
+- **Knowledge promoted (1):** `architecture-patterns/daemon-creator-display-name-dual-store.md` — daemon stores creator `display_name` in SQL `creators` table + `creator_identity_cache.json` independently; any write must UPSERT both or surfaces drift. (V1.117 P0 QC1 F-001 distilled; Q1-Q8 ≥6 Yes.) Index registered in `knowledge/README.md`.
+- **Iteration package triage:** 5 iteration specs (`iterations/v1.117/specs/*.md`) → all **Keep snapshot** (iteration-scoped product briefs; durable decisions already in DESIGN.md / compass ADRs / code). No full-spec promotion.
+- **Cross-reference:** related `architecture-patterns/acp-registry-id-matching.md` (agent identity matching) noted in the new doc.
 
 ## Iteration Retrospective (minimal)
 
-> Filled at iteration-close.
+- **What worked:** SDD per-task implementer/reviewer caught the display_name SSOT drift (P0) and launch_command full-path bug (P1) before merge; fix-waves were focused and verified by targeted re-review.
+- **Friction:** the `qc-specialist-2` seat was non-functional across 3 of 5 plans (returned empty); PM supplemented with a security/correctness read + documented as degraded tri-review. Root cause likely a host/model binding issue for that specific subagent — worth a host-side check before the next iteration.
+- **Carry-forward:** codegen DTO migration (R-V1117P0QC1-F002) — daemon handlers use hand-written types despite generated `daemon_api/` contracts existing; a codebase-wide migration pass would close the gap that surfaced twice (P0 PATCH DTO, existing CreatorDetail).

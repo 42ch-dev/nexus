@@ -147,7 +147,7 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | [v1.114/](v1.114/specs/) | V1.114 | Triple Must — canvas architecture foundation (P0) + canvas stability hardening (P1) + compute module foundation & visibility (P2) |
 | [v1.115/](v1.115/specs/) | V1.115 | Triple Must — canvas adapter completion & contract convergence (P0) + canvas UX residual cluster closure (P1) + compute manifest bridge reconciliation (P2) |
 | [v1.116/](v1.116/specs/) | V1.116 | Shipped — agent detection + codex-native + desktop/locale + readiness research |
-| [v1.117/](v1.117/README.md) | V1.117 | Active — Profiles/workspace, Agents catalog, shell IA + status bar, Dock icon, button Verb-only |
+| [v1.117/](v1.117/README.md) | V1.117 | Completed — Profiles/workspace, Agents catalog, shell IA + status bar, Dock icon, button Verb-only |
 
 ### Legacy `v1.*` iteration artifacts
 
