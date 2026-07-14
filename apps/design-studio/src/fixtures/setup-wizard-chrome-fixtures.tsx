@@ -170,7 +170,7 @@ function AgentStepBody({
   return (
     <AgentPicker
       status={status}
-      agents={agents}
+      defaultGrid={agents}
       selectedId={selectedId}
       onSelect={setSelectedId}
       customLaunchValue={custom}

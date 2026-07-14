@@ -1,16 +1,17 @@
 /**
- * `canvas-nav` — Canvas nav group data + active-surface resolver (V1.111 P1 T1).
+ * `canvas-nav` — Canvas nav items + active-surface resolver.
  *
  * Coverage: the pure {@link resolveActiveCanvasSurface} resolver across all
  * three surfaces, the non-canvas / list-route null cases, and partial-match /
- * case-sensitivity edge cases. Also pins the group data shape (id, label,
- * item count, unique destinations, surface-id coverage) so T2/T3 can rely on it.
+ * case-sensitivity edge cases. Also pins the item data shape (V1.117 regroup:
+ * Outline + World KB only — Strategy moved to Orchestration) so the sidebar can
+ * rely on it. The resolvers still cover `strategy` (a canvas surface for
+ * route-pattern matching) even though it is no longer a sidebar canvas item.
  */
 import { describe, expect, it } from 'vitest';
 
 import {
   CANVAS_ITEMS,
-  CANVAS_NAV_GROUP,
   resolveActiveCanvasSurface,
   resolveCanvasNavTarget,
   type CanvasSurfaceId,
@@ -75,29 +76,20 @@ describe('resolveActiveCanvasSurface — edge cases', () => {
   });
 });
 
-describe('CANVAS_NAV_GROUP — group data shape', () => {
-  it('exposes the "Canvas" group with a stable id and Title-Case label', () => {
-    expect(CANVAS_NAV_GROUP.id).toBe('canvas');
-    expect(CANVAS_NAV_GROUP.label).toBe('Canvas');
-  });
-
-  it('lists exactly the three canvas surfaces in display order', () => {
-    expect(CANVAS_ITEMS.map((item) => item.surfaceId)).toEqual([
-      'outline',
-      'world-kb',
-      'strategy',
-    ]);
-    expect(CANVAS_NAV_GROUP.items).toHaveLength(3);
+describe('CANVAS_ITEMS — sidebar canvas items (V1.117 regroup)', () => {
+  it('lists exactly Outline + World KB in display order (Strategy moved to Orchestration)', () => {
+    expect(CANVAS_ITEMS.map((item) => item.surfaceId)).toEqual(['outline', 'world-kb']);
   });
 
   it('gives every item a unique destination (the chrome keys nav items by `to`)', () => {
-    // shell-sidebar-chrome.tsx uses `key={item.to}`; duplicates would break rendering.
-    const destinations = CANVAS_NAV_GROUP.items.map((item) => item.to);
+    // shell-sidebar-chrome.tsx uses `key={item.to}` within a group; duplicates
+    // would break rendering. Outline (/works) and World KB (/worlds) differ.
+    const destinations = CANVAS_ITEMS.map((item) => item.to);
     expect(new Set(destinations).size).toBe(destinations.length);
   });
 
   it('defines an icon and non-empty label for every item', () => {
-    for (const item of CANVAS_NAV_GROUP.items) {
+    for (const item of CANVAS_ITEMS) {
       expect(typeof item.label).toBe('string');
       expect(item.label.length).toBeGreaterThan(0);
       expect(item.icon).toBeDefined();
