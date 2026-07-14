@@ -111,6 +111,7 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
   const customLaunchCommand = state.customLaunchCommand;
   const workspaceRoot = state.workspaceRoot;
   const workspacePicked = state.workspacePicked;
+  const profileDisplayName = state.profileDisplayName;
 
   const stateRef = useRef(state);
   stateRef.current = state;
@@ -137,6 +138,7 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
     onChange({
       workspaceRoot,
       workspacePicked,
+      profileDisplayName,
       selectedAgent: agent,
       customLaunchCommand: '',
     });
@@ -147,6 +149,7 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
     onChange({
       workspaceRoot,
       workspacePicked,
+      profileDisplayName,
       selectedAgent: null,
       customLaunchCommand: command,
     });

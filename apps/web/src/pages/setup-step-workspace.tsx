@@ -3,8 +3,10 @@ import { ChevronLeft, Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import { WorkspacePathField } from '@/components/setup/workspace-path-field';
-import { useDesktopCapabilities } from '@/lib/client-context';
+import { useDesktopCapabilities, useNexusClient } from '@/lib/client-context';
 import { errorMessage } from '@/lib/error-message';
 import { useToast } from '@/lib/use-toast';
 import type { WizardState } from '@/pages/setup-wizard-page';
@@ -20,7 +22,7 @@ interface SetupStepWorkspaceProps {
 }
 
 /**
- * Wizard Workspace step — default path, optional Browse, bootstrap on Continue.
+ * Wizard Workspace step — Profile name, default path, optional Browse, bootstrap on Continue.
  *
  * Bootstrap timing (R-V1105P0-001 / V1.105 P1): `ensureSetupBootstrap` runs only
  * when the author clicks Continue on this step (after P0 gate Ready).
@@ -33,6 +35,7 @@ export function SetupStepWorkspace({
 }: SetupStepWorkspaceProps) {
   const { t } = useTranslation('setup');
   const desktop = useDesktopCapabilities();
+  const client = useNexusClient();
   const [loading, setLoading] = useState(true);
   const [bootstrapping, setBootstrapping] = useState(false);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
@@ -105,6 +108,24 @@ export function SetupStepWorkspace({
           description: t('toast.workspacePreparedDescription', { creatorId: result.creator_id }),
         });
       }
+
+      const displayName = state.profileDisplayName.trim();
+      if (displayName) {
+        try {
+          await client.updateCreator(result.creator_id, { display_name: displayName });
+        } catch (err) {
+          const message = errorMessage(err) || t('error.profileDisplayNameFailed');
+          setBootstrapError(message);
+          toast({
+            variant: 'error',
+            title: t('toast.profileDisplayName'),
+            description: message,
+          });
+          console.error('Failed to persist profile display name:', err);
+          return;
+        }
+      }
+
       setBootstrapError(null);
       onNext();
     } catch (err) {
@@ -152,6 +173,21 @@ export function SetupStepWorkspace({
             </p>
           </div>
 
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="wizard-profile-name" className="text-label-14 font-medium text-gray-1000">
+              {t('profile.name.label')}
+            </Label>
+            <Input
+              id="wizard-profile-name"
+              type="text"
+              value={state.profileDisplayName}
+              onChange={(e) => onChange({ ...state, profileDisplayName: e.target.value })}
+              placeholder={t('profile.name.placeholder')}
+              disabled={loading || bootstrapping || resetBusy}
+              data-testid="wizard-profile-name"
+            />
+          </div>
+
           <WorkspacePathField
             id="wizard-workspace-path"
             path={state.workspaceRoot}
@@ -162,8 +198,8 @@ export function SetupStepWorkspace({
             desktopAvailable={Boolean(desktop)}
             data-testid="workspace-location-row"
           />
+        </div>
       </div>
-    </div>
 
       <div
         className="mt-auto flex shrink-0 items-center gap-setup-wizard-surface-cta-container-gap"

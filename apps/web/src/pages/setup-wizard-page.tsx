@@ -21,6 +21,7 @@ export interface WizardState {
   workspacePicked?: boolean;
   selectedAgent: AgentScanEntry | null;
   customLaunchCommand: string;
+  profileDisplayName: string;
 }
 
 /**
@@ -42,6 +43,7 @@ export function SetupWizardPage() {
     workspaceRoot: '',
     selectedAgent: null,
     customLaunchCommand: '',
+    profileDisplayName: '',
   });
 
   async function finish() {

@@ -26,6 +26,7 @@ function makeState(overrides: Partial<WizardState> = {}): WizardState {
     workspaceRoot: '',
     selectedAgent: null,
     customLaunchCommand: '',
+    profileDisplayName: '',
     ...overrides,
   };
 }

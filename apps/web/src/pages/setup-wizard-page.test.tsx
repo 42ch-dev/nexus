@@ -69,7 +69,7 @@ async function advanceAgentToWorkspace(user: ReturnType<typeof userEvent.setup>)
   await user.click(screen.getByText('codex'));
   await user.click(screen.getAllByRole('button', { name: 'Continue' })[0]);
   await waitFor(() =>
-    expect(screen.getByRole('heading', { name: 'Choose a workspace' })).toBeInTheDocument(),
+    expect(screen.getByRole('heading', { name: 'Name your Profile' })).toBeInTheDocument(),
   );
 }
 
@@ -254,7 +254,7 @@ describe('SetupWizardPage', () => {
 
     await user.click(screen.getByRole('button', { name: 'Back' }));
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'Choose a workspace' })).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: 'Name your Profile' })).toBeInTheDocument(),
     );
   });
 
