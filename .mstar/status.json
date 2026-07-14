@@ -38,13 +38,13 @@
       "id": "2026-07-14-v1.117-setup-agents-catalog",
       "title": "P1 - Setup Agents catalog polish",
       "file": "plans/2026-07-14-v1.117-setup-agents-catalog.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@frontend-dev",
         "@fullstack-dev"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.117",
         "agents",
@@ -53,13 +53,14 @@
       ],
       "created_at": "2026-07-14",
       "updated_at": "2026-07-14",
-      "notes": "Phase 1 draft registered",
+      "notes": "Phase 2: SDD T1-T4 done + QC fix-wave; QC tri Approve with residuals (QC2 degraded, PM-supplemented); QA Pass with notes (8/8 AC); 4 residuals deferred",
       "metadata": {
         "iteration_refs": [
           "V1.117"
         ],
         "spec_integration_branch": "iteration/v1.117",
         "merge_target": "iteration/v1.117",
+        "working_branch": "plan/v1.117-p1-setup-agents-catalog",
         "primary_spec": ".mstar/iterations/v1.117/specs/setup-agents-catalog.md",
         "wire_contracts_changed": false,
         "tier": "Must"
@@ -691,6 +692,50 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-14-v1.117-profiles-workspace.md",
         "note": "QC3 W-002. Near-zero practical risk; getWorkspaceRoot reads pre-populated state."
+      },
+      {
+        "id": "R-V1117P1QC1-W2",
+        "title": "Saved agent profile stores display_name not provider id (spec AD-P1-4 drift); restoration works only by coincidence",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.117",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-14-v1.117-setup-agents-catalog.md",
+        "note": "QC1 W2. Align saved profile id with override key in a future iteration."
+      },
+      {
+        "id": "R-V1117P1QC1-S1",
+        "title": "Three dead legacy exports (agentPickerId, assignCollisionSafePickerIds, mapScanEntriesToPickerItems) in setup-step-agent.tsx — only consumed by own test",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.117",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-14-v1.117-setup-agents-catalog.md",
+        "note": "QC1 S1. Cleanup."
+      },
+      {
+        "id": "R-V1117P1QC1-S2",
+        "title": "agent-catalog-overrides.json has no runtime shape guard (TS type assertion only)",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.117",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-14-v1.117-setup-agents-catalog.md",
+        "note": "QC1 S2. Build-time TS type only; repo-tracked config."
+      },
+      {
+        "id": "R-V1117P1QC3-W002",
+        "title": "moreAgentsEntries() recomputes defaultGridEntries() internally; redundant computation on scan-data change",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.117",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-14-v1.117-setup-agents-catalog.md",
+        "note": "QC3 W002. Memoized at call site; small scan sizes."
       }
     ],
     "2026-07-05-v1.91-findings-batch": [
