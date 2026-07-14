@@ -296,14 +296,15 @@ impl SidecarManager {
                 // sidecar, replace it so Setup/agent scan pick up current
                 // detection logic instead of silently attaching to a stale
                 // `nexus42` left on port 8420 from a previous build.
-                if should_replace_stale_external_daemon(app, port) {
+                if let Some(stale_pid) = stale_external_daemon_pid(app, port) {
                     tracing::warn!(
                         phase = "stale_daemon_replace",
                         port = port,
+                        pid = stale_pid,
                         version = %health.version,
                         "external daemon binary is older than bundled sidecar; replacing"
                     );
-                    stop_external_daemon(port).await;
+                    stop_external_daemon(port, stale_pid).await;
                     // Fall through to spawn the bundled sidecar.
                 } else {
                     let mut inner = self.0.lock().await;
@@ -505,7 +506,9 @@ impl SidecarManager {
             return self.stop().await;
         }
         let port = self.port().await;
-        stop_external_daemon(port).await;
+        if let Some(pid) = listener_pid(port) {
+            stop_external_daemon(port, pid).await;
+        }
         let mut inner = self.0.lock().await;
         inner.owned = false;
         if inner.state != DaemonState::Error {
@@ -691,25 +694,19 @@ fn format_error_detail(message: &str, stderr: Option<&str>) -> String {
     }
 }
 
-/// Return true when an external daemon on `port` should be replaced by the
-/// bundled sidecar because the process started before the sidecar binary's
-/// mtime (covers same-path rebuilds that leave a live old image).
-fn should_replace_stale_external_daemon<R: tauri::Runtime>(
+/// Return the listener PID when an external daemon on `port` should be
+/// replaced by the bundled sidecar (process started before sidecar mtime).
+///
+/// Returning the verified PID lets the stop path signal that same process
+/// instead of rediscovering the port owner (which may have changed).
+fn stale_external_daemon_pid<R: tauri::Runtime>(
     app: &tauri::AppHandle<R>,
     port: u16,
-) -> bool {
-    let Some(sidecar) = newest_bundled_sidecar_path(app) else {
-        return false;
-    };
-    let Some(sidecar_mtime) = file_mtime(&sidecar) else {
-        return false;
-    };
-    let Some(pid) = listener_pid(port) else {
-        return false;
-    };
-    let Some(started_at) = process_start_time(pid) else {
-        return false;
-    };
+) -> Option<u32> {
+    let sidecar = newest_bundled_sidecar_path(app)?;
+    let sidecar_mtime = file_mtime(&sidecar)?;
+    let pid = listener_pid(port)?;
+    let started_at = process_start_time(pid)?;
     tracing::debug!(
         phase = "stale_daemon_compare",
         port = port,
@@ -720,7 +717,11 @@ fn should_replace_stale_external_daemon<R: tauri::Runtime>(
         "compared external daemon start time to bundled sidecar mtime"
     );
     // 1s skew tolerance for filesystem / process-start clock granularity.
-    started_at + Duration::from_secs(1) < sidecar_mtime
+    if started_at + Duration::from_secs(1) < sidecar_mtime {
+        Some(pid)
+    } else {
+        None
+    }
 }
 
 fn process_start_time(pid: u32) -> Option<SystemTime> {
@@ -766,7 +767,9 @@ fn parse_ps_etime(raw: &str) -> Option<u64> {
         [ss] => ss.parse::<u64>().ok()?,
         [mm, ss] => mm.parse::<u64>().ok()? * 60 + ss.parse::<u64>().ok()?,
         [hh, mm, ss] => {
-            hh.parse::<u64>().ok()? * 3600 + mm.parse::<u64>().ok()? * 60 + ss.parse::<u64>().ok()?
+            hh.parse::<u64>().ok()? * 3600
+                + mm.parse::<u64>().ok()? * 60
+                + ss.parse::<u64>().ok()?
         }
         _ => return None,
     };
@@ -822,10 +825,9 @@ fn listener_pid(port: u16) -> Option<u32> {
         .find_map(|line| line.trim().parse::<u32>().ok())
 }
 
-async fn stop_external_daemon(port: u16) {
-    let Some(pid) = listener_pid(port) else {
-        return;
-    };
+/// Stop a previously verified listener PID. Does not re-resolve the port
+/// owner — a different process may have bound the port after the stale check.
+async fn stop_external_daemon(port: u16, pid: u32) {
     #[cfg(unix)]
     {
         #[allow(clippy::cast_possible_wrap)]
@@ -833,7 +835,7 @@ async fn stop_external_daemon(port: u16) {
         let _ = nix::sys::signal::kill(nix_pid, nix::sys::signal::Signal::SIGTERM);
         let deadline = Instant::now() + Duration::from_secs(2);
         while Instant::now() < deadline {
-            if listener_pid(port).is_none() {
+            if nix::sys::signal::kill(nix_pid, None) == Err(nix::errno::Errno::ESRCH) {
                 return;
             }
             sleep(Duration::from_millis(100)).await;
@@ -841,11 +843,12 @@ async fn stop_external_daemon(port: u16) {
         let _ = nix::sys::signal::kill(nix_pid, nix::sys::signal::Signal::SIGKILL);
         let kill_deadline = Instant::now() + Duration::from_secs(1);
         while Instant::now() < kill_deadline {
-            if listener_pid(port).is_none() {
+            if nix::sys::signal::kill(nix_pid, None) == Err(nix::errno::Errno::ESRCH) {
                 return;
             }
             sleep(Duration::from_millis(50)).await;
         }
+        let _ = port;
     }
     #[cfg(not(unix))]
     {

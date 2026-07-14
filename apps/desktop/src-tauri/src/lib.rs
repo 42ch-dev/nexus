@@ -35,6 +35,10 @@ mod sidecar;
 /// `app.exit`) does not re-open the confirmation dialog.
 static EXIT_CONFIRMED: AtomicBool = AtomicBool::new(false);
 
+/// Set while the quit confirmation dialog is open so duplicate
+/// `ExitRequested` events cannot spawn a second conflicting dialog.
+static EXIT_PROMPT_ACTIVE: AtomicBool = AtomicBool::new(false);
+
 const QUIT_STOP_LABEL: &str = "Stop Daemon & Quit";
 const QUIT_KEEP_LABEL: &str = "Keep Daemon & Quit";
 const QUIT_CANCEL_LABEL: &str = "Cancel";
@@ -759,6 +763,11 @@ pub fn run() {
                 if EXIT_CONFIRMED.load(Ordering::SeqCst) {
                     return;
                 }
+                // Drop duplicate exit requests while a prompt is already open.
+                if EXIT_PROMPT_ACTIVE.swap(true, Ordering::SeqCst) {
+                    api.prevent_exit();
+                    return;
+                }
                 api.prevent_exit();
                 let manager = sidecar_manager.clone();
                 let app = app_handle.clone();
@@ -810,6 +819,7 @@ async fn handle_quit_with_daemon_prompt(
         });
 
     let Ok(result) = rx.await else {
+        EXIT_PROMPT_ACTIVE.store(false, Ordering::SeqCst);
         return;
     };
 
@@ -835,8 +845,9 @@ async fn handle_quit_with_daemon_prompt(
         EXIT_CONFIRMED.store(true, Ordering::SeqCst);
         app.exit(0);
     } else {
-        // Cancel — leave the app running.
+        // Cancel — leave the app running and allow a future quit prompt.
         EXIT_CONFIRMED.store(false, Ordering::SeqCst);
+        EXIT_PROMPT_ACTIVE.store(false, Ordering::SeqCst);
     }
 }
 

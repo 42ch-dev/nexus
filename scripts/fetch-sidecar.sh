@@ -17,18 +17,20 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DEST="${REPO_ROOT}/apps/desktop/src-tauri/binaries"
 
-# V1.66 CI ships an aarch64 (Apple Silicon) native macOS app only (macos-14
-# runner). Intel/universal builds are still available via SIDECAR_TARGETS override
-# for local dev and deferred to V1.67+ for CI. Pass targets as command-line args
-# or via SIDECAR_TARGETS to override (e.g. local universal).
+# Default target follows the host macOS arch so `pnpm sidecar:dev` works on
+# both Apple Silicon and Intel. Override with args or SIDECAR_TARGETS (e.g.
+# universal / CI pinning). Non-Darwin hosts keep the historical aarch64 default
+# used by release packaging docs.
 if [ $# -gt 0 ]; then
   TARGETS=("$@")
 elif [ -n "${SIDECAR_TARGETS:-}" ]; then
   read -ra TARGETS <<<"${SIDECAR_TARGETS}"
 else
-  TARGETS=(
-    aarch64-apple-darwin
-  )
+  case "$(uname -s):$(uname -m)" in
+    Darwin:arm64) TARGETS=(aarch64-apple-darwin) ;;
+    Darwin:x86_64) TARGETS=(x86_64-apple-darwin) ;;
+    *) TARGETS=(aarch64-apple-darwin) ;;
+  esac
 fi
 
 PROFILE="${SIDECAR_PROFILE:-release}"

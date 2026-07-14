@@ -360,11 +360,9 @@ fn running_daemon_binary_is_stale(port: u16) -> bool {
         return false;
     };
 
-    let pid = read_pid_file()
-        .ok()
-        .flatten()
-        .or_else(|| listener_pid(port));
-    let Some(pid) = pid else {
+    // Only trust the process that currently owns the listen port. A stale
+    // pidfile may point at a recycled PID that is not the Nexus daemon.
+    let Some(pid) = listener_pid(port) else {
         return false;
     };
     let Some(started_at) = process_start_time(pid) else {
@@ -446,7 +444,9 @@ fn parse_ps_etime(raw: &str) -> Option<u64> {
         [ss] => ss.parse::<u64>().ok()?,
         [mm, ss] => mm.parse::<u64>().ok()? * 60 + ss.parse::<u64>().ok()?,
         [hh, mm, ss] => {
-            hh.parse::<u64>().ok()? * 3600 + mm.parse::<u64>().ok()? * 60 + ss.parse::<u64>().ok()?
+            hh.parse::<u64>().ok()? * 3600
+                + mm.parse::<u64>().ok()? * 60
+                + ss.parse::<u64>().ok()?
         }
         _ => return None,
     };
@@ -470,110 +470,87 @@ async fn stop_daemon(port: u16) -> Result<()> {
         return Ok(());
     }
 
-    // Try to stop via PID file
-    let pid = read_pid_file()?;
-    if let Some(pid) = pid {
-        println!("Stopping daemon (PID: {pid})...");
+    // Prefer the verified TCP listener PID over the pidfile. A recycled
+    // pidfile entry must never be signaled when a different process owns the
+    // daemon port (health already confirmed a Nexus daemon is listening).
+    let pid = match (listener_pid(port), read_pid_file()?) {
+        (Some(listen_pid), Some(file_pid)) if listen_pid == file_pid => Some(listen_pid),
+        (Some(listen_pid), _) => Some(listen_pid),
+        (None, Some(file_pid)) => Some(file_pid),
+        (None, None) => None,
+    };
 
-        // Send SIGTERM
-        // PID cast is safe: Unix PIDs are always positive and within i32 range
-        #[allow(clippy::cast_possible_wrap)]
-        let nix_pid = nix::unistd::Pid::from_raw(pid as i32);
-        if let Err(e) = nix::sys::signal::kill(nix_pid, nix::sys::signal::Signal::SIGTERM) {
-            if e == nix::errno::Errno::ESRCH {
-                // Process doesn't exist — clean up PID file
-                remove_pid_file()?;
-                println!("  Process {pid} not found (already stopped).");
-                return Ok(());
-            }
-            return Err(CliError::Daemon {
-                message: format!("Failed to send SIGTERM to PID {pid}: {e}"),
-            });
+    let Some(pid) = pid else {
+        println!("No process found on port {port}.");
+        return Ok(());
+    };
+
+    println!("Stopping daemon (PID: {pid})...");
+
+    // Send SIGTERM
+    // PID cast is safe: Unix PIDs are always positive and within i32 range
+    #[allow(clippy::cast_possible_wrap)]
+    let nix_pid = nix::unistd::Pid::from_raw(pid as i32);
+    if let Err(e) = nix::sys::signal::kill(nix_pid, nix::sys::signal::Signal::SIGTERM) {
+        if e == nix::errno::Errno::ESRCH {
+            // Process doesn't exist — clean up PID file
+            remove_pid_file()?;
+            println!("  Process {pid} not found (already stopped).");
+            return Ok(());
         }
+        return Err(CliError::Daemon {
+            message: format!("Failed to send SIGTERM to PID {pid}: {e}"),
+        });
+    }
 
-        // Wait up to 2 seconds for graceful shutdown
-        let timeout = std::time::Duration::from_secs(2);
-        let start = std::time::Instant::now();
-        let mut stopped = false;
+    // Wait up to 2 seconds for graceful shutdown
+    let timeout = std::time::Duration::from_secs(2);
+    let start = std::time::Instant::now();
+    let mut stopped = false;
 
-        while start.elapsed() < timeout {
-            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
-            if nix::sys::signal::kill(nix_pid, Signal::SIGTERM) == Err(nix::errno::Errno::ESRCH) {
-                // Process no longer exists
-                stopped = true;
-                break;
-            }
-            // Still running, continue waiting
+    while start.elapsed() < timeout {
+        tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+        if nix::sys::signal::kill(nix_pid, None) == Err(nix::errno::Errno::ESRCH) {
+            // Process no longer exists
+            stopped = true;
+            break;
         }
+        // Still running, continue waiting
+    }
 
-        if !stopped {
-            // Force kill with SIGKILL
-            println!("  Daemon did not stop gracefully, sending SIGKILL...");
-            if let Err(e) = nix::sys::signal::kill(nix_pid, Signal::SIGKILL) {
-                // If ESRCH, process already dead
-                if e != nix::errno::Errno::ESRCH {
-                    return Err(CliError::Daemon {
-                        message: format!("Failed to send SIGKILL to PID {pid}: {e}"),
-                    });
-                }
-            }
-
-            // Poll to confirm the process is actually dead
-            let kill_timeout = std::time::Duration::from_secs(2);
-            let kill_start = std::time::Instant::now();
-            while kill_start.elapsed() < kill_timeout {
-                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-                if nix::sys::signal::kill(nix_pid, None) == Err(nix::errno::Errno::ESRCH) {
-                    stopped = true;
-                    break;
-                }
-            }
-            if !stopped {
+    if !stopped {
+        // Force kill with SIGKILL
+        println!("  Daemon did not stop gracefully, sending SIGKILL...");
+        if let Err(e) = nix::sys::signal::kill(nix_pid, Signal::SIGKILL) {
+            // If ESRCH, process already dead
+            if e != nix::errno::Errno::ESRCH {
                 return Err(CliError::Daemon {
-                    message: format!(
-                        "Daemon (PID {pid}) did not terminate after SIGKILL within {kill_timeout:?}"
-                    ),
+                    message: format!("Failed to send SIGKILL to PID {pid}: {e}"),
                 });
             }
         }
 
-        remove_pid_file()?;
-        println!("✓ Daemon stopped.");
-    } else {
-        // No PID file — try to stop via lsof
-        println!("No PID file found. Trying port-based stop...");
-        let output = std::process::Command::new("lsof")
-            .args(["-ti", &format!(":{port}")])
-            .output()
-            .map_err(|e| CliError::Daemon {
-                message: format!("Failed to run lsof: {e}"),
-            })?;
-
-        let pids_str = String::from_utf8_lossy(&output.stdout);
-        if pids_str.trim().is_empty() {
-            println!("No process found on port {port}.");
-            return Ok(());
-        }
-
-        for pid_str in pids_str.lines() {
-            if let Ok(pid_num) = pid_str.trim().parse::<u32>() {
-                // PID cast is safe: Unix PIDs are always positive and within i32 range
-                #[allow(clippy::cast_possible_wrap)]
-                let nix_pid = nix::unistd::Pid::from_raw(pid_num as i32);
-                let _ = nix::sys::signal::kill(nix_pid, Signal::SIGTERM);
-                println!("  Sent SIGTERM to PID {pid_num}.");
+        // Poll to confirm the process is actually dead
+        let kill_timeout = std::time::Duration::from_secs(2);
+        let kill_start = std::time::Instant::now();
+        while kill_start.elapsed() < kill_timeout {
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+            if nix::sys::signal::kill(nix_pid, None) == Err(nix::errno::Errno::ESRCH) {
+                stopped = true;
+                break;
             }
         }
-
-        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
-
-        // Verify daemon is stopped
-        if client.health_check().await? {
-            println!("  ⚠ Daemon may still be running. Check with: nexus42 daemon status");
-        } else {
-            println!("✓ Daemon stopped.");
+        if !stopped {
+            return Err(CliError::Daemon {
+                message: format!(
+                    "Daemon (PID {pid}) did not terminate after SIGKILL within {kill_timeout:?}"
+                ),
+            });
         }
     }
+
+    remove_pid_file()?;
+    println!("✓ Daemon stopped.");
 
     Ok(())
 }
