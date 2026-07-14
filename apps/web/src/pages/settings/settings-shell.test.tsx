@@ -181,7 +181,7 @@ describe('Settings shell routes', () => {
     );
     expect(
       within(nav).getByTestId('settings-section-nav-workspace'),
-    ).toHaveTextContent('Workspace');
+    ).toHaveTextContent('Profiles');
     expect(
       within(nav).getByTestId('settings-section-nav-appearance'),
     ).toHaveTextContent('Appearance');
@@ -216,7 +216,7 @@ describe('Settings shell routes', () => {
     );
     expect(
       within(nav).getByTestId('settings-section-nav-workspace'),
-    ).toHaveTextContent('工作区');
+    ).toHaveTextContent('Profiles');
     expect(
       within(nav).getByTestId('settings-section-nav-appearance'),
     ).toHaveTextContent('外观');

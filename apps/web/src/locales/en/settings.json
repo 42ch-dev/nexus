@@ -6,7 +6,7 @@
   "helper": "Manage your local agent, workspace, daemon connection, and setup options from one place.",
   "nav": {
     "agent": "Agent",
-    "workspace": "Workspace",
+    "workspace": "Profiles",
     "appearance": "Appearance",
     "advanced": "Advanced"
   },
@@ -21,12 +21,12 @@
     }
   },
   "workspace": {
-    "title": "Workspace",
-    "helper": "View or change where Nexus stores your creative files on this machine.",
-    "folderLabel": "Workspace folder",
+    "title": "Profiles",
+    "helper": "View or change the workspace folder for the active Profile.",
+    "folderLabel": "Profile workspace folder",
     "changeFolder": "Change Folder…",
-    "browserOnly": "Workspace path changes are available on the desktop app only.",
-    "savedHonesty": "Workspace path saved. Restart or reload the app so the running daemon uses the new location.",
+    "browserOnly": "Profile workspace path changes are available on the desktop app only.",
+    "savedHonesty": "Profile workspace path saved. Restart or reload the app so the running daemon uses the new location.",
     "restartLabel": "Quit and reopen Nexus"
   },
   "agent": {
