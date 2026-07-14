@@ -298,13 +298,42 @@ impl CodexNativeProvider {
             )
         })?;
 
-        // Write prompt to stdin and close it.
+        // Write prompt to stdin with a timeout and close it. If the write fails
+        // or times out, reap the child before returning so it cannot outlive host
+        // management.
+        let prompt_dur = self.timeouts.prompt_duration();
         let stdin = child.stdin.take();
         if let Some(mut stdin) = stdin {
-            stdin.write_all(prompt_text.as_bytes()).await.map_err(|e| {
-                HostError::protocol_error("failed to write prompt to stdin", Some(e.to_string()))
-            })?;
-            drop(stdin);
+            let write_result = tokio::time::timeout(
+                prompt_dur,
+                stdin.write_all(prompt_text.as_bytes()),
+            )
+            .await;
+
+            match write_result {
+                Ok(Ok(())) => {
+                    drop(stdin);
+                }
+                Ok(Err(e)) => {
+                    let _ = child.kill().await;
+                    let _ = child.wait().await;
+                    return Err(HostError::protocol_error(
+                        "failed to write prompt to stdin",
+                        Some(e.to_string()),
+                    ));
+                }
+                Err(_) => {
+                    let _ = child.kill().await;
+                    let _ = child.wait().await;
+                    return Err(HostError::timeout(
+                        "prompt",
+                        format!(
+                            "CLI process setup timed out after {}ms",
+                            self.timeouts.prompt_ms
+                        ),
+                    ));
+                }
+            }
         }
 
         Ok((child.stdout.take(), child.stderr.take(), child))
@@ -663,26 +692,17 @@ impl ProviderAdapter for CodexNativeProvider {
         };
 
         // Spawn the subprocess with prompt_ms timeout for the setup phase
-        // (spawn + stdin write). The streaming phase runs until EOF.
-        let prompt_dur = self.timeouts.prompt_duration();
-
-        let spawn_result = tokio::time::timeout(
-            prompt_dur,
-            self.spawn_and_write_stdin(&full_args, &prompt_text, &cwd),
-        )
-        .await
-        .map_err(|_| {
-            HostError::timeout(
-                "prompt",
-                format!(
-                    "CLI process setup timed out after {}ms",
-                    self.timeouts.prompt_ms
-                ),
-            )
-            .with_provider(self.provider_id.clone())
-            .with_session(session.session_id.clone())
-            .with_op(op_id.clone())
-        })??;
+        // (spawn + stdin write). The timeout is enforced inside
+        // spawn_and_write_stdin so a timed-out or failed write reaps the child
+        // before the error is returned. The streaming phase runs until EOF.
+        let spawn_result = self
+            .spawn_and_write_stdin(&full_args, &prompt_text, &cwd)
+            .await
+            .map_err(|e| {
+                e.with_provider(self.provider_id.clone())
+                    .with_session(session.session_id.clone())
+                    .with_op(op_id.clone())
+            })?;
 
         let (stdout, stderr, mut child) = spawn_result;
 
