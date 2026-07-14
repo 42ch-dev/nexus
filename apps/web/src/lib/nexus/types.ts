@@ -157,6 +157,12 @@ export interface NexusClient {
    * `{ display_name: string }` and the response is {@link CreatorDetail}.
    */
   createCreator(request: { display_name: string }): Promise<CreatorDetail>;
+  /**
+   * `PATCH /v1/daemon/creators/{creator_id}` — update the local creator's
+   * display name. V1.117: wire shape is `{ display_name: string }`; response is
+   * {@link CreatorDetail}. No new generated request type.
+   */
+  updateCreator(creatorId: string, request: { display_name: string }): Promise<CreatorDetail>;
   /** `POST /v1/daemon/creators/active` — switch the daemon's active creator. */
   setActiveCreator(request: SetActiveCreatorRequest): Promise<SetActiveCreatorResponse>;
 

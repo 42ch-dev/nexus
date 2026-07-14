@@ -1,5 +1,5 @@
 /**
- * Settings Workspace section — mount, desktop persist, browser-only branch.
+ * Settings Profiles section — mount, desktop persist, browser-only branch.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
@@ -33,6 +33,7 @@ function makeDesktopCapabilities(): DesktopCapabilities {
     ensureSetupBootstrap: vi.fn(() =>
       Promise.resolve({ creator_id: 'creator-a', already_bootstrapped: true }),
     ),
+    switchActiveCreator: vi.fn(() => Promise.resolve('/tmp/nexus')),
   };
 }
 
@@ -45,11 +46,11 @@ describe('SettingsWorkspaceSection', () => {
     expect(screen.getByTestId('settings-workspace-section')).toBeInTheDocument();
     expect(screen.getByTestId('settings-workspace-card')).toBeInTheDocument();
     expect(
-      screen.getByRole('heading', { name: 'Workspace', level: 3 }),
+      screen.getByRole('heading', { name: 'Profiles', level: 3 }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        /View or change where Nexus stores your creative files on this machine/i,
+        /View or change the workspace folder for the active Profile/i,
       ),
     ).toBeInTheDocument();
 
@@ -97,7 +98,7 @@ describe('SettingsWorkspaceSection', () => {
 
     await waitFor(() =>
       expect(screen.getByTestId('settings-workspace-saved-honesty')).toHaveTextContent(
-        /Restart or reload the app so the running daemon uses the new location/i,
+        /Profile workspace path saved/i,
       ),
     );
     expect(screen.getByDisplayValue(PICKED_PATH)).toHaveValue(PICKED_PATH);
@@ -137,7 +138,7 @@ describe('SettingsWorkspaceSection', () => {
 
     expect(
       screen.getByText(
-        'Workspace path changes are available on the desktop app only.',
+        'Profile workspace path changes are available on the desktop app only.',
       ),
     ).toBeInTheDocument();
 

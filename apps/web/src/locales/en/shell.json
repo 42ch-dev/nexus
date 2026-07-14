@@ -72,7 +72,10 @@
     "displayNamePlaceholder": "e.g. Default Creator",
     "cancel": "Cancel",
     "create": "Create",
-    "creating": "Creating…"
+    "creating": "Creating…",
+    "switchedTitle": "Profile switched",
+    "switchedDescription": "Restart or reload the app so the daemon uses the new workspace path.",
+    "switchBrowserOnly": "Switching Profiles is available in the Nexus desktop app only."
   },
   "health": {
     "checking": "Checking daemon…",

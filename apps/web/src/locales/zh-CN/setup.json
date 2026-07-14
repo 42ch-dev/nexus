@@ -7,8 +7,8 @@
       "emptyDescription": "安装一个兼容 ACP 的智能体以继续。"
     },
     "workspace": {
-      "title": "选择工作区",
-      "description": "Nexus 需要一个工作区文件夹来存放你的创意项目。如果该文件夹不存在，我们会自动创建。"
+      "title": "为你的个人档案命名",
+      "description": "Nexus 会创建你的第一个个人档案。请设置显示名称和用于存放创意项目的工作区文件夹；如果文件夹不存在，我们会自动创建。"
     },
     "done": {
       "title": "准备就绪 🎉",
@@ -69,6 +69,12 @@
     "resolving": "正在解析…",
     "browserOnly": "仅在桌面应用中可以更改工作区路径。"
   },
+  "profile": {
+    "name": {
+      "label": "个人档案名称",
+      "placeholder": "我的个人档案"
+    }
+  },
   "daemon": {
     "starting": {
       "title": "正在启动守护进程…",
@@ -88,7 +94,8 @@
     "finishSetupFailed": "保存智能体配置文件失败。",
     "folderPickerFailed": "无法打开文件夹选择器。",
     "workspacePathFailed": "无法保存工作区路径。",
-    "workspaceBootstrapFailed": "无法准备你的本地工作区。"
+    "workspaceBootstrapFailed": "无法准备你的本地工作区。",
+    "profileDisplayNameFailed": "无法保存个人档案名称。"
   },
   "toast": {
     "finishFailed": "无法完成设置",
@@ -98,6 +105,7 @@
     "workspacePreparedDescription": "已创建创作者身份（{{creatorId}}）。",
     "workspaceBootstrapFailed": "本地工作区引导失败",
     "workspaceBootstrapFailedDescription": "{{message}} 请重试“继续”，如果问题持续存在，请使用下方的“重置本地数据库”。",
-    "resetLocalDatabase": "重置本地数据库"
+    "resetLocalDatabase": "重置本地数据库",
+    "profileDisplayName": "个人档案名称"
   }
 }

@@ -6,7 +6,7 @@
   "helper": "在此处管理你的本地智能体、工作区、守护进程连接和设置选项。",
   "nav": {
     "agent": "智能体",
-    "workspace": "工作区",
+    "workspace": "Profiles",
     "appearance": "外观",
     "advanced": "高级"
   },
@@ -21,12 +21,12 @@
     }
   },
   "workspace": {
-    "title": "工作区",
-    "helper": "查看或更改 Nexus 在本机上存储创意文件的位置。",
-    "folderLabel": "工作区文件夹",
+    "title": "Profiles",
+    "helper": "查看或更改当前 Profile 的工作区文件夹。",
+    "folderLabel": "Profile 工作区文件夹",
     "changeFolder": "更改文件夹…",
-    "browserOnly": "仅在桌面应用中可以更改工作区路径。",
-    "savedHonesty": "工作区路径已保存。请重启或重新加载应用，以使运行中的守护进程使用新位置。",
+    "browserOnly": "Profile 工作区路径更改仅在桌面应用中可用。",
+    "savedHonesty": "Profile 工作区路径已保存。请重启或重新加载应用，以使运行中的守护进程使用新位置。",
     "restartLabel": "退出并重新打开 Nexus"
   },
   "agent": {

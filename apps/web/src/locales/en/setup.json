@@ -7,8 +7,8 @@
       "emptyDescription": "Install an ACP-compatible agent to continue."
     },
     "workspace": {
-      "title": "Choose a workspace",
-      "description": "Nexus needs a workspace folder for your creative projects. We will create it if it does not exist."
+      "title": "Name your Profile",
+      "description": "Nexus creates your first Profile. Choose a display name and a workspace folder for your creative projects. We will create the folder if it does not exist."
     },
     "done": {
       "title": "You're ready 🎉",
@@ -69,6 +69,12 @@
     "resolving": "Resolving…",
     "browserOnly": "Workspace path changes are available on the desktop app only."
   },
+  "profile": {
+    "name": {
+      "label": "Profile name",
+      "placeholder": "My Profile"
+    }
+  },
   "daemon": {
     "starting": {
       "title": "Starting daemon…",
@@ -88,7 +94,8 @@
     "finishSetupFailed": "Failed to save agent profile.",
     "folderPickerFailed": "Could not open the folder picker.",
     "workspacePathFailed": "Could not save the workspace path.",
-    "workspaceBootstrapFailed": "Could not prepare your local workspace."
+    "workspaceBootstrapFailed": "Could not prepare your local workspace.",
+    "profileDisplayNameFailed": "Could not save the Profile name."
   },
   "toast": {
     "finishFailed": "Could not finish setup",
@@ -98,6 +105,7 @@
     "workspacePreparedDescription": "Creator identity created ({{creatorId}}).",
     "workspaceBootstrapFailed": "Local workspace bootstrap failed",
     "workspaceBootstrapFailedDescription": "{{message}} Retry Continue, or use Reset local database below if the problem persists.",
-    "resetLocalDatabase": "Reset local database"
+    "resetLocalDatabase": "Reset local database",
+    "profileDisplayName": "Profile name"
   }
 }

@@ -1,7 +1,7 @@
 /**
- * Settings Workspace section — V1.104 P0 workspace path change (W2).
+ * Settings Profiles section — V1.117 P0 workspace path change (W2).
  *
- * View/change the workspace folder via desktop capabilities. Browser build
+ * View/change the workspace folder for the active Profile via desktop capabilities. Browser build
  * shows honest desktop-only copy and disables the picker.
  */
 import { useCallback, useEffect, useState } from 'react';
