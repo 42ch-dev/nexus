@@ -461,9 +461,9 @@ describe('Surfaces page — launch splash fixtures', () => {
     expect(screen.getByText('Starting daemon…')).toBeInTheDocument();
     expect(screen.getAllByText('Daemon not ready').length).toBeGreaterThanOrEqual(2);
     expect(
-      screen.getAllByRole('button', { name: 'Restart Nexus' }).length,
+      screen.getAllByRole('button', { name: 'Restart' }).length,
     ).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText('Reset local database')).toBeInTheDocument();
+    expect(screen.getByText('Reset')).toBeInTheDocument();
   });
 });
 
@@ -833,7 +833,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).toBeInTheDocument();
     expect(
       within(setupRoot).getByTestId('settings-rerun-setup'),
-    ).toHaveTextContent('Re-run Setup');
+    ).toHaveTextContent('Re-run');
   });
 
   it('opens Re-run Setup confirm dialog with locked copy and Title Case CTAs', () => {
@@ -853,7 +853,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
     ).toHaveTextContent('Cancel');
     expect(
       within(dialog).getByTestId('settings-rerun-setup-confirm-action'),
-    ).toHaveTextContent('Re-run Setup');
+    ).toHaveTextContent('Re-run');
     // Close so Radix aria-hidden does not leak into later tests in this suite.
     fireEvent.click(within(dialog).getByTestId('settings-rerun-setup-cancel'));
   });
@@ -872,7 +872,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
       ),
     ).toBeInTheDocument();
     expect(within(chrome).getByText('Cancel')).toBeInTheDocument();
-    expect(within(chrome).getByText('Re-run Setup')).toBeInTheDocument();
+    expect(within(chrome).getByText('Re-run')).toBeInTheDocument();
   });
 
   it('renders Setup browser-only fixture with disabled CTA and honest helper', () => {
@@ -928,7 +928,7 @@ describe('Surfaces page — Settings shell chrome fixtures', () => {
       within(workspaceRoot).getByTestId('settings-workspace-path'),
     ).toHaveValue('/Users/creator/Documents/Nexus');
     const cta = within(workspaceRoot).getByTestId('settings-change-folder');
-    expect(cta).toHaveTextContent('Change Folder…');
+    expect(cta).toHaveTextContent('Change…');
     expect(cta).not.toBeDisabled();
   });
 

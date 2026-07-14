@@ -541,7 +541,7 @@ function SettingsSetupSectionHost({
                 data-testid="settings-rerun-setup-confirm-action"
                 onClick={() => setConfirmOpen(false)}
               >
-                Re-run Setup
+                Re-run
               </Button>
             </div>
           </DialogContent>

@@ -147,7 +147,7 @@ function FingerprintGate({
           />
           <div className="mt-4 flex justify-center">
             <Button variant="secondary" onClick={() => navigate('/settings/advanced#connection')}>
-              Reconnect to daemon
+              Reconnect
             </Button>
           </div>
         </div>
