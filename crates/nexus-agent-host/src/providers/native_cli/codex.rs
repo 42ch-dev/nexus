@@ -304,11 +304,8 @@ impl CodexNativeProvider {
         let prompt_dur = self.timeouts.prompt_duration();
         let stdin = child.stdin.take();
         if let Some(mut stdin) = stdin {
-            let write_result = tokio::time::timeout(
-                prompt_dur,
-                stdin.write_all(prompt_text.as_bytes()),
-            )
-            .await;
+            let write_result =
+                tokio::time::timeout(prompt_dur, stdin.write_all(prompt_text.as_bytes())).await;
 
             match write_result {
                 Ok(Ok(())) => {
