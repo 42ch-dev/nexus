@@ -18,6 +18,7 @@ function makeDesktopCapabilities(): DesktopCapabilities {
     pickDirectory: vi.fn(() => Promise.resolve(PICKED_PATH)),
     setWorkspacePath: vi.fn(() => Promise.resolve()),
     openWith: vi.fn(() => Promise.resolve()),
+    openExternalUrl: vi.fn(() => Promise.resolve()),
     revealInFinder: vi.fn(() => Promise.resolve()),
     getDaemonStatus: vi.fn(() =>
       Promise.resolve({ state: 'running' as const, port: 8420 }),

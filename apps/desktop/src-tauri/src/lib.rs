@@ -343,6 +343,32 @@ fn reveal_in_finder(
     }
 }
 
+/// Validate URL scheme is `http:` or `https:` only. Rejects `file:`, `javascript:`,
+/// etc. Used by `open_external_url` to prevent unsafe URL schemes from reaching the
+/// system browser.
+fn validate_url_scheme(url: &str) -> Result<(), String> {
+    let Some(pos) = url.find("://") else {
+        return Err("URL must have a scheme (e.g. http:// or https://)".to_string());
+    };
+    let scheme = &url[..pos];
+    if scheme != "http" && scheme != "https" {
+        return Err(format!(
+            "URL scheme '{scheme}' is not allowed. Only http and https are supported."
+        ));
+    }
+    Ok(())
+}
+
+/// `open_external_url` — open a URL in the system default browser after scheme
+/// validation (http/https only). Unlike `open_with`, this command has **no**
+/// workspace path guard — it is intended for outbound links (Install/Docs URLs),
+/// not local files.
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    validate_url_scheme(&url)?;
+    opener::open(&url).map_err(|e| format!("failed to open URL: {e}"))
+}
+
 /// `get_workspace_root` — read-only accessor the JS capability layer uses for
 /// diagnostics (e.g. surfacing "no active workspace" before a right-click). The
 /// authoritative guard still runs in `open_with`/`reveal_in_finder`; this only
@@ -958,6 +984,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_with,
             reveal_in_finder,
+            open_external_url,
             get_workspace_root,
             get_daemon_status,
             start_daemon,
@@ -1083,8 +1110,8 @@ mod tests {
     use super::{
         default_workspace_root, guard_path, read_agent_profile_at, read_setup_completed_at,
         reset_local_database_at, resolve_workspace_root_at, setup_auto_starts_sidecar,
-        switch_active_creator_at, write_agent_profile_at, write_setup_completed_at,
-        write_workspace_path_at, write_workspace_path_by_creator_at,
+        switch_active_creator_at, validate_url_scheme, write_agent_profile_at,
+        write_setup_completed_at, write_workspace_path_at, write_workspace_path_by_creator_at,
         write_workspace_path_for_active_creator_at, AgentProfile, PathGuardError, WorkspaceRoot,
     };
     use super::{ensure_setup_bootstrap_at, generate_local_creator_id, read_bootstrap_state};
@@ -1193,6 +1220,43 @@ mod tests {
         let err =
             guard_path("Works/WRK/Stories/does-not-exist.md", &ws).expect_err("nonexistent denied");
         assert!(matches!(err, PathGuardError::PathUnresolvable));
+    }
+
+    // ── V1.117 P1: open_external_url scheme validation ────────────────
+
+    #[test]
+    fn open_external_url_accepts_http() {
+        assert!(validate_url_scheme("http://example.com/install").is_ok());
+    }
+
+    #[test]
+    fn open_external_url_accepts_https() {
+        assert!(validate_url_scheme("https://example.com/install").is_ok());
+    }
+
+    #[test]
+    fn open_external_url_rejects_file_scheme() {
+        let err = validate_url_scheme("file:///etc/passwd").expect_err("file scheme rejected");
+        assert!(err.contains("not allowed"), "error should mention scheme: {err}");
+    }
+
+    #[test]
+    fn open_external_url_rejects_javascript_scheme() {
+        let err =
+            validate_url_scheme("javascript:alert(1)").expect_err("javascript scheme rejected");
+        assert!(err.contains("scheme"), "error should mention scheme: {err}");
+    }
+
+    #[test]
+    fn open_external_url_rejects_ftp_scheme() {
+        let err = validate_url_scheme("ftp://files.example.com").expect_err("ftp scheme rejected");
+        assert!(err.contains("not allowed"), "error should mention scheme: {err}");
+    }
+
+    #[test]
+    fn open_external_url_rejects_missing_scheme() {
+        let err = validate_url_scheme("no-scheme").expect_err("missing scheme rejected");
+        assert!(err.contains("scheme"), "error should mention scheme: {err}");
     }
 
     #[test]

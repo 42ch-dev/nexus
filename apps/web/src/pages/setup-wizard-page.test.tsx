@@ -18,6 +18,7 @@ function makeClient() {
 function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapabilities {
   return {
     openWith: () => Promise.resolve(),
+    openExternalUrl: () => Promise.resolve(),
     revealInFinder: () => Promise.resolve(),
     getDaemonStatus: () => Promise.resolve({ state: 'running', port: 8420 }),
     onDaemonStatusChanged: (callback) => {
@@ -75,6 +76,9 @@ function useWizardScanHandlers() {
 }
 
 async function advanceAgentToWorkspace(user: ReturnType<typeof userEvent.setup>) {
+  // codex-acp is hiddenFromDefault (V1.117 T1 catalog) → behind the More toggle.
+  const moreBtn = await screen.findByTestId('agent-picker-more');
+  await user.click(moreBtn);
   await waitFor(() => expect(screen.getByText('codex')).toBeInTheDocument());
   await user.click(screen.getByText('codex'));
   await user.click(screen.getAllByRole('button', { name: 'Continue' })[0]);
@@ -240,7 +244,7 @@ describe('SetupWizardPage', () => {
       { client: makeClient(), initialRouterEntries: ['/setup'] },
     );
 
-    expect(screen.getByRole('heading', { name: 'Choose an ACP agent' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Choose an agent' })).toBeInTheDocument();
     await advanceAgentToWorkspace(user);
 
     await fillProfileName(user);
@@ -264,7 +268,7 @@ describe('SetupWizardPage', () => {
     await advanceAgentToWorkspace(user);
     await user.click(screen.getByRole('button', { name: 'Back' }));
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'Choose an ACP agent' })).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: 'Choose an agent' })).toBeInTheDocument(),
     );
 
     await advanceAgentToWorkspace(user);

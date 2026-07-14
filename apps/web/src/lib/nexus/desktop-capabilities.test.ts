@@ -58,6 +58,26 @@ describe('TauriDesktopCapabilities', () => {
     restoreTauri();
   });
 
+  it('openExternalUrl invokes the open_external_url command with the url payload', async () => {
+    const { invoke } = mockTauri(() => Promise.resolve(undefined));
+    const caps = new TauriDesktopCapabilities();
+    await caps.openExternalUrl('https://example.com/install');
+    expect(invoke).toHaveBeenCalledWith('open_external_url', { url: 'https://example.com/install' });
+    restoreTauri();
+  });
+
+  it('openExternalUrl unwraps a structured error into DesktopCapabilityError', async () => {
+    mockTauri(() =>
+      Promise.reject({ code: 'invoke_failed', message: 'URL scheme not allowed: file' }),
+    );
+    const caps = new TauriDesktopCapabilities();
+    await expect(caps.openExternalUrl('file:///etc/passwd')).rejects.toMatchObject({
+      code: 'invoke_failed',
+      message: 'URL scheme not allowed: file',
+    });
+    restoreTauri();
+  });
+
   it('unwraps a Rust path_outside_workspace rejection into the structured error', async () => {
     // Mirrors the Rust PathGuardError serialized shape ({ code, message }).
     mockTauri(() =>

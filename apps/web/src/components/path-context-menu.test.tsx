@@ -22,6 +22,7 @@ const POS = { x: 10, y: 10 };
 function makeDesktop(impl: Partial<DesktopCapabilities> = {}): DesktopCapabilities {
   return {
     openWith: vi.fn().mockResolvedValue(undefined),
+    openExternalUrl: vi.fn().mockResolvedValue(undefined),
     revealInFinder: vi.fn().mockResolvedValue(undefined),
     getDaemonStatus: vi.fn().mockResolvedValue({ state: 'running' }),
     onDaemonStatusChanged: vi.fn().mockResolvedValue(() => {}),

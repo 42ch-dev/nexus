@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "install_whitelist": {
+    "claude-native": "https://claude.ai/code",
+    "codex-native": "https://openai.com/codex/",
+    "opencode": "https://opencode.ai/download",
+    "cursor": "https://cursor.com/download",
+    "kimi": "https://www.kimi.com/code",
+    "pi": "https://pi.dev/"
+  },
+  "agents": {
+    "claude-acp": { "hiddenFromDefault": true },
+    "codex-acp": { "hiddenFromDefault": true },
+    "claude-native": { "displayName": "Claude", "priority": 0 },
+    "codex-native": { "displayName": "Codex", "priority": 1 }
+  }
+}

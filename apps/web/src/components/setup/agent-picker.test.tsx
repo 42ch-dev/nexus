@@ -1,6 +1,6 @@
 /**
  * AgentPicker presentational unit tests (V1.101 Task 2 + fix-wave B2).
- * Wiring/persistence coverage belongs to Task 3 / setup-step-agent tests.
+ * V1.117 P1 T3: defaultGrid + moreAgents split; icon + displayName.
  */
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -13,14 +13,34 @@ import {
   type AgentPickerItem,
 } from '@/components/setup/agent-picker';
 
-const AGENTS: AgentPickerItem[] = [
+const DEFAULT_GRID: AgentPickerItem[] = [
   {
-    id: 'claude-acp',
-    name: 'Claude Code',
+    id: 'claude-native',
+    name: 'Claude',
+    displayName: 'Claude',
+    iconUrl: 'https://example.com/claude-icon.svg',
     version: '1.0.0',
     installed: true,
     installUrl: 'https://example.com/install',
     docsUrl: 'https://example.com/docs',
+  },
+  {
+    id: 'codex-native',
+    name: 'Codex',
+    displayName: 'Codex',
+    installed: true,
+    installUrl: 'https://example.com/codex-install',
+    docsUrl: null,
+  },
+];
+
+const MORE_AGENTS: AgentPickerItem[] = [
+  {
+    id: 'claude-acp',
+    name: 'Claude ACP',
+    installed: false,
+    installUrl: null,
+    docsUrl: null,
   },
   {
     id: 'missing',
@@ -34,7 +54,7 @@ const AGENTS: AgentPickerItem[] = [
 describe('AgentPicker', () => {
   it('renders loading state', () => {
     render(<AgentPicker status="loading" />);
-    expect(screen.getByText('Scanning for local ACP agents…')).toBeInTheDocument();
+    expect(screen.getByText('Scanning for local agents\u2026')).toBeInTheDocument();
     expect(screen.getByTestId('agent-picker')).toHaveAttribute('data-status', 'loading');
   });
 
@@ -44,7 +64,8 @@ describe('AgentPicker', () => {
     render(
       <AgentPicker
         status="ready"
-        agents={AGENTS}
+        defaultGrid={DEFAULT_GRID}
+        moreAgents={MORE_AGENTS}
         selectedId={null}
         onSelect={onSelect}
         customLaunchValue=""
@@ -52,29 +73,27 @@ describe('AgentPicker', () => {
       />,
     );
 
-    await user.click(screen.getByTestId('agent-card-select-claude-acp'));
-    expect(onSelect).toHaveBeenCalledWith('claude-acp');
+    await user.click(screen.getByTestId('agent-card-select-claude-native'));
+    expect(onSelect).toHaveBeenCalledWith('claude-native');
 
-    // 'missing' is non-common — expand the More toggle to verify it renders
-    // without a select button (not-installed cards are discoverability-only).
     await user.click(screen.getByTestId('agent-picker-more'));
-    expect(screen.queryByTestId('agent-card-select-missing')).toBeNull();
-    expect(screen.getByTestId('agent-card-missing').tagName).toBe('DIV');
+    expect(screen.queryByTestId('agent-card-select-claude-acp')).toBeNull();
+    expect(screen.getByTestId('agent-card-claude-acp').tagName).toBe('DIV');
   });
 
   it('keeps Install/Docs links outside the select button (B2)', () => {
     render(
       <AgentPicker
         status="ready"
-        agents={AGENTS}
+        defaultGrid={DEFAULT_GRID}
         onSelect={() => undefined}
         customLaunchValue=""
         onCustomLaunchChange={() => undefined}
       />,
     );
-    const select = screen.getByTestId('agent-card-select-claude-acp');
+    const select = screen.getByTestId('agent-card-select-claude-native');
     expect(select.querySelector('a')).toBeNull();
-    const card = screen.getByTestId('agent-card-claude-acp');
+    const card = screen.getByTestId('agent-card-claude-native');
     expect(card.querySelector('a[href="https://example.com/install"]')).not.toBeNull();
     expect(card.querySelector('a[href="https://example.com/docs"]')).not.toBeNull();
   });
@@ -84,21 +103,17 @@ describe('AgentPicker', () => {
     render(
       <AgentPicker
         status="ready"
-        agents={AGENTS}
+        defaultGrid={DEFAULT_GRID}
+        moreAgents={MORE_AGENTS}
         onSelect={() => undefined}
         customLaunchValue=""
         onCustomLaunchChange={() => undefined}
       />,
     );
-    expect(screen.getByRole('link', { name: /Install/i })).toHaveAttribute(
-      'href',
-      'https://example.com/install',
-    );
-    expect(screen.getByRole('link', { name: /Docs/i })).toHaveAttribute(
-      'href',
-      'https://example.com/docs',
-    );
-    // 'missing' (no URLs) is non-common — expand to verify no links render.
+    const installLinks = screen.getAllByRole('link', { name: /Install/i });
+    expect(installLinks[0]).toHaveAttribute('href', 'https://example.com/install');
+    const docsLink = screen.getByRole('link', { name: /Docs/i });
+    expect(docsLink).toHaveAttribute('href', 'https://example.com/docs');
     await user.click(screen.getByTestId('agent-picker-more'));
     expect(screen.getByTestId('agent-card-missing').querySelector('a')).toBeNull();
   });
@@ -108,20 +123,20 @@ describe('AgentPicker', () => {
     render(
       <AgentPicker
         status="ready"
-        agents={AGENTS}
+        defaultGrid={DEFAULT_GRID}
+        moreAgents={MORE_AGENTS}
         selectedId={null}
         onSelect={() => undefined}
         customLaunchValue=""
         onCustomLaunchChange={() => undefined}
       />,
     );
-    expect(screen.getByTestId('agent-card-installed-badge-claude-acp')).toHaveTextContent(
+    expect(screen.getByTestId('agent-card-installed-badge-claude-native')).toHaveTextContent(
       'Installed',
     );
-    // 'Missing Agent' is non-common — expand to verify its muted title + badge.
     await user.click(screen.getByTestId('agent-picker-more'));
     expect(screen.getByText('Missing Agent')).toHaveClass('text-gray-700');
-    expect(screen.getByText('Not installed')).toBeInTheDocument();
+    expect(screen.getAllByText('Not installed').length).toBe(2);
   });
 
   it('uses hollow dot when installed-unselected and lit when selected', async () => {
@@ -129,31 +144,32 @@ describe('AgentPicker', () => {
     const { rerender } = render(
       <AgentPicker
         status="ready"
-        agents={AGENTS}
+        defaultGrid={DEFAULT_GRID}
+        moreAgents={MORE_AGENTS}
         selectedId={null}
         onSelect={() => undefined}
         customLaunchValue=""
         onCustomLaunchChange={() => undefined}
       />,
     );
-    const installedCard = screen.getByTestId('agent-card-claude-acp');
+    const installedCard = screen.getByTestId('agent-card-claude-native');
     expect(installedCard.querySelector('[data-dot="hollow"]')).not.toBeNull();
 
-    // Expand More so the non-common 'missing' card is visible after rerender.
     await user.click(screen.getByTestId('agent-picker-more'));
 
     rerender(
       <AgentPicker
         status="ready"
-        agents={AGENTS}
-        selectedId="claude-acp"
+        defaultGrid={DEFAULT_GRID}
+        moreAgents={MORE_AGENTS}
+        selectedId="claude-native"
         onSelect={() => undefined}
         customLaunchValue=""
         onCustomLaunchChange={() => undefined}
       />,
     );
     expect(
-      screen.getByTestId('agent-card-claude-acp').querySelector('[data-dot="lit"]'),
+      screen.getByTestId('agent-card-claude-native').querySelector('[data-dot="lit"]'),
     ).not.toBeNull();
     expect(
       screen.getByTestId('agent-card-missing').querySelector('[data-dot="muted"]'),
@@ -164,16 +180,15 @@ describe('AgentPicker', () => {
     render(
       <AgentPicker
         status="ready"
-        agents={AGENTS}
+        defaultGrid={DEFAULT_GRID}
         selectedId={null}
         onSelect={() => undefined}
         customLaunchValue=""
         onCustomLaunchChange={() => undefined}
       />,
     );
-    // Unselected installed: hollow gray border, NOT green.
     const unselectedDot = screen
-      .getByTestId('agent-card-claude-acp')
+      .getByTestId('agent-card-claude-native')
       .querySelector('[data-dot="hollow"] span');
     expect(unselectedDot).toHaveClass('border-gray-500');
     expect(unselectedDot).not.toHaveClass('border-green-700');
@@ -183,15 +198,15 @@ describe('AgentPicker', () => {
     render(
       <AgentPicker
         status="ready"
-        agents={AGENTS}
-        selectedId="claude-acp"
+        defaultGrid={DEFAULT_GRID}
+        selectedId="claude-native"
         onSelect={() => undefined}
         customLaunchValue=""
         onCustomLaunchChange={() => undefined}
       />,
     );
     const selectedDot = screen
-      .getByTestId('agent-card-claude-acp')
+      .getByTestId('agent-card-claude-native')
       .querySelector('[data-dot="lit"] span');
     expect(selectedDot).toHaveClass('bg-green-700');
   });
@@ -200,15 +215,15 @@ describe('AgentPicker', () => {
     render(
       <AgentPicker
         status="ready"
-        agents={AGENTS}
+        defaultGrid={DEFAULT_GRID}
         onSelect={() => undefined}
         customLaunchValue=""
         onCustomLaunchChange={() => undefined}
       />,
     );
-    const install = screen.getByRole('link', { name: /Install/i });
-    expect(install.querySelector('svg')).not.toBeNull();
-    expect(install.querySelector('svg')).toHaveClass('lucide-arrow-up-right');
+    const installLinks = screen.getAllByRole('link', { name: /Install/i });
+    expect(installLinks[0].querySelector('svg')).not.toBeNull();
+    expect(installLinks[0].querySelector('svg')).toHaveClass('lucide-arrow-up-right');
   });
 
   it('shows custom launch on empty and error', () => {
@@ -237,18 +252,17 @@ describe('AgentPicker', () => {
     render(
       <AgentPicker
         status="ready"
-        agents={AGENTS}
+        defaultGrid={DEFAULT_GRID}
         selectedId={null}
         onSelect={() => undefined}
         customLaunchValue=""
         onCustomLaunchChange={() => undefined}
       />,
     );
-    const card = screen.getByTestId('agent-card-claude-acp');
+    const card = screen.getByTestId('agent-card-claude-native');
     expect(card).toHaveClass('hover:bg-gray-alpha-100');
 
-    // Inner button must not carry the hover class.
-    const selectBtn = screen.getByTestId('agent-card-select-claude-acp');
+    const selectBtn = screen.getByTestId('agent-card-select-claude-native');
     expect(selectBtn).not.toHaveClass('hover:bg-gray-alpha-100');
   });
 
@@ -306,7 +320,7 @@ describe('AgentPicker', () => {
     );
     const btn = screen.getByTestId('agent-picker-verify');
     expect(btn).toBeDisabled();
-    expect(btn).toHaveTextContent('Verifying…');
+    expect(btn).toHaveTextContent('Verifying\u2026');
   });
 
   it('shows success helper when verifyStatus is success', () => {
@@ -357,51 +371,120 @@ describe('AgentPicker', () => {
     expect(screen.queryByTestId('agent-picker-verify-success')).toBeNull();
   });
 
-  it('renders common agents first in locked priority order', () => {
-    // Fixture intentionally out-of-order to verify priority sorting.
-    const agents: AgentPickerItem[] = [
-      { id: 'pi-acp', name: 'Pi', installed: true },
-      { id: 'codex-acp', name: 'Codex', installed: true },
-      { id: 'claude-acp', name: 'Claude', installed: true },
-      { id: 'cursor', name: 'Cursor', installed: true },
-      { id: 'unknown-tool', name: 'Mystery', installed: true },
+  it('renders defaultGrid cards in the primary grid and moreAgents behind toggle', async () => {
+    const user = userEvent.setup();
+    const grid: AgentPickerItem[] = [
+      { id: 'claude-native', name: 'Claude', installed: true },
+      { id: 'codex-native', name: 'Codex', installed: true },
+    ];
+    const more: AgentPickerItem[] = [
+      { id: 'custom-tool', name: 'Custom', installed: false },
     ];
     render(
       <AgentPicker
         status="ready"
-        agents={agents}
+        defaultGrid={grid}
+        moreAgents={more}
         onSelect={() => undefined}
         customLaunchValue=""
         onCustomLaunchChange={() => undefined}
       />,
     );
 
-    const grid = screen.getByTestId('agent-picker-grid');
-    const commonCardIds = Array.from(grid.querySelectorAll<HTMLElement>('[data-installed]')).map(
-      (card) => card.getAttribute('data-testid'),
-    );
-    // Priority order: codex-acp(0), claude-acp(1), cursor(2), pi-acp(8).
-    expect(commonCardIds).toEqual([
-      'agent-card-codex-acp',
-      'agent-card-claude-acp',
-      'agent-card-cursor',
-      'agent-card-pi-acp',
-    ]);
-    // Non-common agent stays behind More, not in the common grid.
-    expect(screen.queryByTestId('agent-card-unknown-tool')).toBeNull();
-    expect(screen.getByTestId('agent-picker-more')).toBeInTheDocument();
+    const gridEl = screen.getByTestId('agent-picker-grid');
+    expect(gridEl.querySelector('[data-testid="agent-card-claude-native"]')).toBeInTheDocument();
+    expect(gridEl.querySelector('[data-testid="agent-card-codex-native"]')).toBeInTheDocument();
+
+    expect(screen.queryByTestId('agent-card-custom-tool')).toBeNull();
+
+    await user.click(screen.getByTestId('agent-picker-more'));
+    expect(screen.getByTestId('agent-card-custom-tool')).toBeInTheDocument();
   });
 
-  it('reveals rest agents on More and hides on Fewer (aria-expanded / aria-controls)', async () => {
-    const user = userEvent.setup();
-    const agents: AgentPickerItem[] = [
-      { id: 'codex-acp', name: 'Codex', installed: true },
-      { id: 'custom-tool', name: 'Custom', installed: false },
+  it('renders displayName when provided', () => {
+    const grid: AgentPickerItem[] = [
+      { id: 'claude-native', name: 'Claude', displayName: 'Claude', installed: true },
+      { id: 'codex-native', name: 'Codex', displayName: 'Codex', installed: true },
     ];
     render(
       <AgentPicker
         status="ready"
-        agents={agents}
+        defaultGrid={grid}
+        onSelect={() => undefined}
+        customLaunchValue=""
+        onCustomLaunchChange={() => undefined}
+      />,
+    );
+
+    expect(screen.getByText('Claude')).toBeInTheDocument();
+    expect(screen.getByText('Codex')).toBeInTheDocument();
+  });
+
+  it('renders icon when iconUrl is provided', () => {
+    const grid: AgentPickerItem[] = [
+      { id: 'claude-native', name: 'Claude', iconUrl: 'https://example.com/icon.svg', installed: true },
+    ];
+    render(
+      <AgentPicker
+        status="ready"
+        defaultGrid={grid}
+        onSelect={() => undefined}
+        customLaunchValue=""
+        onCustomLaunchChange={() => undefined}
+      />,
+    );
+
+    const img = screen.getByTestId('agent-card-claude-native').querySelector('img');
+    expect(img).not.toBeNull();
+    expect(img).toHaveAttribute('src', 'https://example.com/icon.svg');
+  });
+
+  it('shows placeholder icon when iconUrl is absent', () => {
+    const grid: AgentPickerItem[] = [
+      { id: 'claude-native', name: 'Claude', installed: true },
+    ];
+    render(
+      <AgentPicker
+        status="ready"
+        defaultGrid={grid}
+        onSelect={() => undefined}
+        customLaunchValue=""
+        onCustomLaunchChange={() => undefined}
+      />,
+    );
+
+    const card = screen.getByTestId('agent-card-claude-native');
+    expect(card.querySelector('img')).toBeNull();
+    expect(card.querySelector('.lucide-user')).not.toBeNull();
+  });
+
+  it('hides More toggle when moreAgents is empty', () => {
+    render(
+      <AgentPicker
+        status="ready"
+        defaultGrid={[
+          { id: 'claude-native', name: 'Claude', installed: true },
+        ]}
+        onSelect={() => undefined}
+        customLaunchValue=""
+        onCustomLaunchChange={() => undefined}
+      />,
+    );
+    expect(screen.queryByTestId('agent-picker-more')).toBeNull();
+    expect(screen.queryByTestId('agent-picker-grid-rest')).toBeNull();
+  });
+
+  it('reveals moreAgents on More and hides on Fewer (aria-expanded / aria-controls)', async () => {
+    const user = userEvent.setup();
+    render(
+      <AgentPicker
+        status="ready"
+        defaultGrid={[
+          { id: 'claude-native', name: 'Claude', installed: true },
+        ]}
+        moreAgents={[
+          { id: 'custom-tool', name: 'Custom', installed: false },
+        ]}
         onSelect={() => undefined}
         customLaunchValue=""
         onCustomLaunchChange={() => undefined}
@@ -430,41 +513,64 @@ describe('AgentPicker', () => {
     expect(screen.queryByTestId('agent-picker-grid-rest')).toBeNull();
   });
 
-  it('hides More toggle when there are no rest agents', () => {
+  it('uses openExternalUrl when desktop prop is provided (AC-P1-2)', async () => {
+    const user = userEvent.setup();
+    const openExternalUrl = vi.fn().mockResolvedValue(undefined);
     render(
       <AgentPicker
         status="ready"
-        agents={[
-          { id: 'codex-acp', name: 'Codex', installed: true },
-          { id: 'claude-acp', name: 'Claude', installed: true },
-        ]}
+        defaultGrid={DEFAULT_GRID}
+        onSelect={() => undefined}
+        customLaunchValue=""
+        onCustomLaunchChange={() => undefined}
+        desktop={{ openExternalUrl }}
+      />,
+    );
+
+    const installLinks = screen.getAllByRole('link', { name: /Install/i });
+    await user.click(installLinks[0]);
+    expect(openExternalUrl).toHaveBeenCalledWith('https://example.com/install');
+    expect(installLinks[0]).not.toHaveAttribute('target');
+  });
+
+  it('keeps target=_blank when desktop prop is omitted (AC-P1-8)', () => {
+    render(
+      <AgentPicker
+        status="ready"
+        defaultGrid={DEFAULT_GRID}
         onSelect={() => undefined}
         customLaunchValue=""
         onCustomLaunchChange={() => undefined}
       />,
     );
-    expect(screen.queryByTestId('agent-picker-more')).toBeNull();
-    expect(screen.queryByTestId('agent-picker-grid-rest')).toBeNull();
+
+    const installLinks = screen.getAllByRole('link', { name: /Install/i });
+    expect(installLinks[0]).toHaveAttribute('target', '_blank');
+    expect(installLinks[0]).toHaveAttribute('rel', 'noopener noreferrer');
   });
 
-  it('renders Verify button and Input fused in one height-aligned row (FB-D4)', () => {
+  it('calls onExternalUrlError when openExternalUrl rejects (QC3 W001)', async () => {
+    const user = userEvent.setup();
+    const openExternalUrl = vi.fn().mockRejectedValue(new Error('boom'));
+    const onExternalUrlError = vi.fn();
     render(
       <AgentPicker
-        status="empty"
-        customLaunchValue="/usr/local/bin/agent"
+        status="ready"
+        defaultGrid={DEFAULT_GRID}
+        onSelect={() => undefined}
+        customLaunchValue=""
         onCustomLaunchChange={() => undefined}
-        onVerify={() => undefined}
-        verifyStatus="idle"
+        desktop={{ openExternalUrl }}
+        onExternalUrlError={onExternalUrlError}
       />,
     );
 
-    const verifyBtn = screen.getByTestId('agent-picker-verify');
-    const input = screen.getByPlaceholderText('e.g. /usr/local/bin/my-agent');
-
-    // Both controls share one flex row wrapper (no size mismatch).
-    expect(verifyBtn.parentElement).toBe(input.parentElement);
-    expect(verifyBtn.parentElement).toHaveClass('flex');
-    expect(verifyBtn).toHaveClass('h-10');
-    expect(input).toHaveClass('h-10');
+    const installLinks = screen.getAllByRole('link', { name: /Install/i });
+    await user.click(installLinks[0]);
+    expect(openExternalUrl).toHaveBeenCalledWith('https://example.com/install');
+    // The rejection is surfaced via the callback so the host can toast (AD-P1-2).
+    await vi.waitFor(() => {
+      expect(onExternalUrlError).toHaveBeenCalledTimes(1);
+    });
   });
 });

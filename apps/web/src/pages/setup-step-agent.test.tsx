@@ -10,10 +10,11 @@ import {
   assignCollisionSafePickerIds,
   mapScanEntriesToPickerItems,
 } from '@/pages/setup-step-agent';
-import { lookupAgentOutboundUrls } from '@/pages/setup-agent-urls';
+import { resolveCatalogItem } from '@/lib/agent-catalog';
 import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 import { BrowserClient } from '@/lib/nexus';
+import type { DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
 import type { AgentScanEntry } from '@42ch/nexus-contracts';
 import type { WizardState } from '@/pages/setup-wizard-page';
 
@@ -35,6 +36,35 @@ function makeAgent(overrides: Partial<AgentScanEntry> = {}): AgentScanEntry {
   return {
     name: 'test-agent',
     installed: false,
+    ...overrides,
+  };
+}
+
+function makeDesktop(
+  overrides: Partial<DesktopCapabilities> = {},
+): DesktopCapabilities {
+  return {
+    openWith: () => Promise.resolve(),
+    openExternalUrl: () => Promise.resolve(),
+    revealInFinder: () => Promise.resolve(),
+    getDaemonStatus: () => Promise.resolve({ state: 'running', port: 8420 }),
+    onDaemonStatusChanged: (cb) => {
+      cb({ state: 'running', port: 8420 });
+      return Promise.resolve(() => {});
+    },
+    startDaemon: () => Promise.resolve(),
+    stopDaemon: () => Promise.resolve(),
+    resetLocalDatabase: () => Promise.resolve(),
+    getSetupCompleted: () => Promise.resolve(true),
+    setSetupCompleted: () => Promise.resolve(),
+    setAgentProfile: () => Promise.resolve(),
+    getAgentProfile: () => Promise.resolve(null),
+    getWorkspaceRoot: () => Promise.resolve('/tmp/nexus'),
+    pickDirectory: () => Promise.resolve(null),
+    setWorkspacePath: () => Promise.resolve(),
+    ensureSetupBootstrap: () =>
+      Promise.resolve({ creator_id: 'ctr_local', already_bootstrapped: true }),
+    switchActiveCreator: () => Promise.resolve('/tmp/nexus'),
     ...overrides,
   };
 }
@@ -81,43 +111,44 @@ async function expandRestAgents(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('mapScanEntriesToPickerItems / URL table', () => {
-  it('maps live registry ids (claude-acp / codex-acp / gemini) to outbound URLs', () => {
+  it('maps live registry ids (claude-native / codex-native / opencode) to outbound URLs', () => {
     const items = mapScanEntriesToPickerItems([
       makeAgent({
-        name: 'Claude Code',
-        registry_agent_id: 'claude-acp',
+        name: 'Claude',
+        registry_agent_id: 'claude-native',
         installed: true,
       }),
       makeAgent({
         name: 'Codex',
-        registry_agent_id: 'codex-acp',
+        registry_agent_id: 'codex-native',
         installed: true,
         version: '0.1.0',
       }),
       makeAgent({
-        name: 'Gemini CLI',
-        registry_agent_id: 'gemini',
+        name: 'OpenCode',
+        registry_agent_id: 'opencode',
         installed: false,
       }),
       makeAgent({ name: 'Unknown Agent', installed: false }),
     ]);
-    expect(items[0]!.id).toBe('claude-acp');
-    expect(items[0]!.installUrl).toContain('docs.anthropic.com');
-    expect(items[1]!.id).toBe('codex-acp');
-    expect(items[1]!.installUrl).toContain('github.com/openai/codex');
+    expect(items[0]!.id).toBe('claude-native');
+    expect(items[0]!.installUrl).toContain('claude.ai/code');
+    expect(items[1]!.id).toBe('codex-native');
+    expect(items[1]!.installUrl).toContain('openai.com/codex');
     expect(items[1]!.docsUrl).toBeNull();
-    expect(items[2]!.id).toBe('gemini');
-    expect(items[2]!.installUrl).toContain('gemini-cli');
+    expect(items[2]!.id).toBe('opencode');
+    expect(items[2]!.installUrl).toContain('opencode.ai');
     expect(items[3]!.installUrl).toBeNull();
     expect(items[3]!.docsUrl).toBeNull();
   });
 
-  it('lookupAgentOutboundUrls prefers live registry id then aliases', () => {
-    expect(lookupAgentOutboundUrls('claude-acp', 'Other').installUrl).toBeTruthy();
-    expect(lookupAgentOutboundUrls('codex-acp', 'Other').installUrl).toBeTruthy();
-    expect(lookupAgentOutboundUrls('gemini', 'Other').installUrl).toBeTruthy();
-    expect(lookupAgentOutboundUrls(null, 'codex').installUrl).toBeTruthy();
-    expect(lookupAgentOutboundUrls(null, 'nope')).toEqual({});
+  it('resolveCatalogItem returns URLs for whitelisted keys only', () => {
+    expect(resolveCatalogItem(makeAgent({ name: 'Other', registry_agent_id: 'claude-native' })).installUrl).toBeTruthy();
+    expect(resolveCatalogItem(makeAgent({ name: 'Other', registry_agent_id: 'codex-native' })).installUrl).toBeTruthy();
+    expect(resolveCatalogItem(makeAgent({ name: 'Other', registry_agent_id: 'opencode' })).installUrl).toBeTruthy();
+    // Non-whitelisted keys return null
+    expect(resolveCatalogItem(makeAgent({ name: 'Other', registry_agent_id: 'claude-acp' })).installUrl).toBeNull();
+    expect(resolveCatalogItem(makeAgent({ name: 'nope' })).installUrl).toBeNull();
   });
 
   it('agentPickerId prefers registry_agent_id', () => {
@@ -169,6 +200,7 @@ describe('SetupStepAgent', () => {
   });
 
   it('auto-selects the first installed agent (B4)', async () => {
+    const user = userEvent.setup();
     const agent = makeAgent({
       name: 'Claude Code',
       registry_agent_id: 'claude-acp',
@@ -182,6 +214,8 @@ describe('SetupStepAgent', () => {
 
     renderHarness(makeState());
 
+    // claude-acp is hiddenFromDefault (V1.117 T1 catalog) → behind the More toggle.
+    await expandRestAgents(user);
     await waitFor(() =>
       expect(screen.getByTestId('agent-card-select-claude-acp')).toHaveAttribute(
         'aria-pressed',
@@ -277,6 +311,8 @@ describe('SetupStepAgent', () => {
       { client: makeClient(), initialRouterEntries: ['/setup'] },
     );
 
+    // codex-acp is hiddenFromDefault (V1.117 T1 catalog) → behind the More toggle.
+    await expandRestAgents(user);
     await waitFor(() => expect(screen.getByText('Codex')).toBeInTheDocument());
     await user.click(screen.getByTestId('agent-card-select-codex-acp'));
 
@@ -311,13 +347,12 @@ describe('SetupStepAgent', () => {
       { client: makeClient(), initialRouterEntries: ['/setup'] },
     );
 
-    // Native CLI entries are not part of COMMON_AGENT_PRIORITY, so they render
-    // behind the More toggle. Expanding proves they are visible (not filtered).
-    await expandRestAgents(user);
+    // launch_command 'codex' maps to catalog key `codex-native` (priority 1,
+    // displayName 'Codex') via NATIVE_LAUNCH_MAP — renders in the default grid.
     await waitFor(() =>
-      expect(screen.getByText('codex (native CLI)')).toBeInTheDocument(),
+      expect(screen.getByText('Codex')).toBeInTheDocument(),
     );
-    const selectId = 'agent-card-select-codex (native CLI)';
+    const selectId = 'agent-card-select-codex-native';
     expect(screen.getByTestId(selectId)).toBeInTheDocument();
 
     await user.click(screen.getByTestId(selectId));
@@ -438,15 +473,15 @@ describe('SetupStepAgent', () => {
     expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
   });
 
-  it('shows Install link for known registry ids and hides links when URLs missing', async () => {
+  it('shows Install link for whitelisted keys and hides links when URLs missing', async () => {
     const user = userEvent.setup();
     useHandlers(
       http.post('/v1/daemon/agent-host/scan', () =>
         HttpResponse.json({
           agents: [
             makeAgent({
-              name: 'Codex',
-              registry_agent_id: 'codex-acp',
+              name: 'OpenCode',
+              registry_agent_id: 'opencode',
               installed: true,
             }),
             makeAgent({ name: 'mystery-agent', installed: false }),
@@ -457,10 +492,10 @@ describe('SetupStepAgent', () => {
 
     renderHarness(makeState());
 
-    await waitFor(() => expect(screen.getByText('Codex')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('OpenCode')).toBeInTheDocument());
     expect(screen.getByRole('link', { name: /Install/i })).toHaveAttribute(
       'href',
-      'https://github.com/openai/codex',
+      'https://opencode.ai/download',
     );
     expect(screen.queryByRole('link', { name: /Docs/i })).not.toBeInTheDocument();
     // 'mystery-agent' is non-common — expand More to verify no links render.
@@ -488,8 +523,7 @@ describe('SetupStepAgent', () => {
 
     renderHarness(makeState());
 
-    // 'my-agent' is non-common — expand More so its card is visible.
-    await expandRestAgents(user);
+    // 'my-agent' is installed and not hiddenFromDefault → default grid (visible).
     await waitFor(() => expect(screen.getByText('my-agent')).toBeInTheDocument());
     // Auto-select enables Continue via the installed agent.
     await waitFor(() =>
@@ -530,5 +564,40 @@ describe('SetupStepAgent', () => {
       expect(screen.getByTestId('agent-picker-verify-error')).toBeInTheDocument(),
     );
     expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
+  });
+
+  it('passes desktop capability to the picker so Install links use openExternalUrl (QC1 W1)', async () => {
+    const user = userEvent.setup();
+    const openExternalUrl = vi.fn().mockResolvedValue(undefined);
+    useHandlers(
+      http.post('/v1/daemon/agent-host/scan', () =>
+        HttpResponse.json({
+          agents: [
+            makeAgent({
+              name: 'Claude',
+              registry_agent_id: 'claude-native',
+              installed: true,
+            }),
+          ],
+        }),
+      ),
+    );
+
+    renderInApp(
+      <SetupStepAgent state={makeState()} onChange={vi.fn()} onNext={vi.fn()} />,
+      {
+        client: makeClient(),
+        initialRouterEntries: ['/setup'],
+        desktop: makeDesktop({ openExternalUrl }),
+      },
+    );
+
+    await waitFor(() => expect(screen.getByText('Claude')).toBeInTheDocument());
+
+    const installLink = screen.getByRole('link', { name: /Install/i });
+    await user.click(installLink);
+    expect(openExternalUrl).toHaveBeenCalledWith('https://claude.ai/code');
+    // Desktop links must not use target=_blank (AC-P1-2).
+    expect(installLink).not.toHaveAttribute('target');
   });
 });
