@@ -12,6 +12,12 @@ import {
 import { useScanAgents, useVerifyAgent } from '@/api/queries';
 import { errorMessage } from '@/lib/error-message';
 import { lookupAgentOutboundUrls } from '@/pages/setup-agent-urls';
+import {
+  defaultGridEntries,
+  moreAgentsEntries,
+  resolveCatalogItem,
+  type AgentCatalogItem,
+} from '@/lib/agent-catalog';
 import type { AgentScanEntry } from '@42ch/nexus-contracts';
 import type { WizardState } from '@/pages/setup-wizard-page';
 
@@ -23,16 +29,28 @@ interface SetupStepAgentProps {
   onBack?: () => void;
 }
 
-/** Base picker id for a scan entry (registry id preferred). */
+/** Map a catalog item → picker view-model. */
+function catalogItemToPickerItem(item: AgentCatalogItem): AgentPickerItem {
+  return {
+    id: item.id,
+    name: item.name,
+    displayName: item.displayName,
+    version: item.version,
+    description: item.description,
+    iconUrl: item.iconUrl,
+    installed: item.installed,
+    installUrl: item.installUrl ?? null,
+    docsUrl: item.docsUrl ?? null,
+  };
+}
+
+/** Legacy: picker id for a scan entry. Kept for backward-compat tests. */
 export function agentPickerId(agent: AgentScanEntry): string {
   return (agent.registry_agent_id?.trim() || agent.name).trim();
 }
 
 /**
- * Assign collision-safe picker ids for a scan list.
- *
- * Duplicate `registry_agent_id` / name values get a `#n` suffix so map lookups
- * and React keys stay unique (QC B6).
+ * Legacy: collision-safe picker ids. Kept for backward-compat tests.
  */
 export function assignCollisionSafePickerIds(
   agents: AgentScanEntry[],
@@ -46,7 +64,9 @@ export function assignCollisionSafePickerIds(
   });
 }
 
-/** Map wire scan entries → presentational picker items (+ static URL table). */
+/**
+ * Legacy: map scan entries to picker items. Kept for backward-compat tests.
+ */
 export function mapScanEntriesToPickerItems(
   agents: AgentScanEntry[],
 ): AgentPickerItem[] {
@@ -65,20 +85,6 @@ export function mapScanEntriesToPickerItems(
   });
 }
 
-/**
- * Build a collision-safe id → scan-entry map (same ids as picker items).
- */
-export function buildAgentsByPickerId(
-  agents: AgentScanEntry[],
-): Map<string, AgentScanEntry> {
-  const ids = assignCollisionSafePickerIds(agents);
-  const map = new Map<string, AgentScanEntry>();
-  agents.forEach((agent, index) => {
-    map.set(ids[index]!, agent);
-  });
-  return map;
-}
-
 function resolvePickerStatus(
   isLoading: boolean,
   isError: boolean,
@@ -95,10 +101,24 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
   const scan = useScanAgents({ filter: 'all', registry_refresh: true });
   const verifyAgent = useVerifyAgent();
   const agents = scan.data?.agents ?? [];
-  const pickerItems = useMemo(() => mapScanEntriesToPickerItems(agents), [agents]);
+  const defaultGrid = useMemo(
+    () => defaultGridEntries(agents).map(catalogItemToPickerItem),
+    [agents],
+  );
+  const moreAgents = useMemo(
+    () => moreAgentsEntries(agents).map(catalogItemToPickerItem),
+    [agents],
+  );
   const status = resolvePickerStatus(scan.isLoading, scan.isError, agents.length);
 
-  const agentsById = useMemo(() => buildAgentsByPickerId(agents), [agents]);
+  const agentsByCatalogId = useMemo(() => {
+    const map = new Map<string, AgentScanEntry>();
+    for (const agent of agents) {
+      const item = resolveCatalogItem(agent);
+      map.set(item.id, agent);
+    }
+    return map;
+  }, [agents]);
 
   const [verifyStatus, setVerifyStatus] = useState<AgentVerifyStatus>('idle');
 
@@ -133,7 +153,7 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
   }, [firstInstalled]);
 
   function selectById(id: string) {
-    const agent = agentsById.get(id);
+    const agent = agentsByCatalogId.get(id);
     if (!agent?.installed) return;
     onChange({
       workspaceRoot,
@@ -172,16 +192,8 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
 
   const selectedId = useMemo(() => {
     if (!selectedAgent) return null;
-    for (const [id, agent] of agentsById) {
-      if (
-        agent.registry_agent_id === selectedAgent.registry_agent_id &&
-        agent.name === selectedAgent.name
-      ) {
-        return id;
-      }
-    }
-    return agentPickerId(selectedAgent);
-  }, [selectedAgent, agentsById]);
+    return resolveCatalogItem(selectedAgent).id;
+  }, [selectedAgent]);
 
   // FB-UI-008: an installed agent continues directly (registry-validated).
   // A custom launch command must be verified before continuing so authors
@@ -198,7 +210,8 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
 
         <AgentPicker
           status={status}
-          agents={status === 'ready' ? pickerItems : []}
+          defaultGrid={status === 'ready' ? defaultGrid : []}
+          moreAgents={status === 'ready' ? moreAgents : []}
           selectedId={selectedId}
           onSelect={selectById}
           customLaunchValue={customLaunchCommand}
