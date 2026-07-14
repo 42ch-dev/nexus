@@ -99,11 +99,12 @@ File: `apps/web/config/agent-catalog-overrides.json`
 {
   "schema_version": 1,
   "install_whitelist": {
-    "claude-acp": "https://docs.anthropic.com/en/docs/claude-code",
-    "codex-acp": "https://github.com/openai/codex",
-    "claude-native": "https://docs.anthropic.com/en/docs/claude-code",
-    "codex-native": "https://github.com/openai/codex",
-    "gemini": "https://github.com/google-gemini/gemini-cli"
+    "claude-native": "https://claude.ai/code",
+    "codex-native": "https://openai.com/codex/",
+    "opencode": "https://opencode.ai/download",
+    "cursor": "https://cursor.com/download",
+    "kimi": "https://www.kimi.com/code",
+    "pi": "https://pi.dev/"
   },
   "agents": {
     "claude-acp": { "hiddenFromDefault": true },
