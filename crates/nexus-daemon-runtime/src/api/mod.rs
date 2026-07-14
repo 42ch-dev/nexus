@@ -134,7 +134,7 @@ fn creator_routes() -> Router<WorkspaceState> {
     Router::new()
         .route(
             "/v1/daemon/creators/{creator_id}",
-            get(handlers::creators::get_creator),
+            get(handlers::creators::get_creator).patch(handlers::creators::patch_creator),
         )
         .route(
             "/v1/daemon/creators/{creator_id}:logout",

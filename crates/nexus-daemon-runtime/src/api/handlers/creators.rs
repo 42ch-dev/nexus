@@ -61,6 +61,12 @@ pub struct SetActiveCreatorRequest {
     pub creator_id: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct PatchCreatorRequest {
+    /// New display name for the creator.
+    pub display_name: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct ActiveCreatorResponse {
     pub creator_id: String,
@@ -340,6 +346,112 @@ pub async fn get_creator(
     }))
 }
 
+/// `PATCH /v1/daemon/creators/{creator_id}` — update creator display name.
+///
+/// Updates the local `creator_identity_cache.json` entry for the given creator,
+/// creating a minimal entry if one does not yet exist.
+pub async fn patch_creator(
+    State(state): State<WorkspaceState>,
+    Path(creator_id): Path<String>,
+    Json(req): Json<PatchCreatorRequest>,
+) -> Result<Json<CreatorDetail>, NexusApiError> {
+    info!(creator_id = %creator_id, "Patching creator");
+
+    validate_creator_id_safe(&creator_id).map_err(|reason| NexusApiError::InvalidInput {
+        field: "creator_id".to_string(),
+        reason,
+    })?;
+
+    if let Some(ref display_name) = req.display_name {
+        if display_name.is_empty() {
+            return Err(NexusApiError::InvalidInput {
+                field: "display_name".to_string(),
+                reason: "display_name cannot be empty".to_string(),
+            });
+        }
+        if display_name.len() > 256 {
+            return Err(NexusApiError::InvalidInput {
+                field: "display_name".to_string(),
+                reason: "display_name must be 256 characters or fewer".to_string(),
+            });
+        }
+    }
+
+    let home = dirs::home_dir().ok_or_else(|| NexusApiError::Internal {
+        code: "HOME_DIR_ERROR".into(),
+        message: "Cannot determine home directory".to_string(),
+    })?;
+    let cache_path = home.join(".nexus42").join("creator_identity_cache.json");
+
+    let mut cache = load_identity_cache();
+    if !cache.is_object() {
+        cache = serde_json::json!({"creators": {}});
+    }
+    let cache_obj = cache
+        .as_object_mut()
+        .ok_or_else(|| NexusApiError::Internal {
+            code: "CACHE_FORMAT_ERROR".into(),
+            message: "Identity cache root is not an object".to_string(),
+        })?;
+    if cache_obj.get("creators").is_none() || !cache_obj["creators"].is_object() {
+        cache_obj.insert("creators".to_string(), serde_json::json!({}));
+    }
+    let creators = cache_obj
+        .get_mut("creators")
+        .and_then(|v| v.as_object_mut())
+        .ok_or_else(|| NexusApiError::Internal {
+            code: "CACHE_FORMAT_ERROR".into(),
+            message: "Identity cache creators field is not an object".to_string(),
+        })?;
+
+    let entry = creators
+        .entry(creator_id.clone())
+        .or_insert_with(|| serde_json::json!({}));
+    let entry_obj = entry
+        .as_object_mut()
+        .ok_or_else(|| NexusApiError::Internal {
+            code: "CACHE_FORMAT_ERROR".into(),
+            message: "Identity cache entry is not an object".to_string(),
+        })?;
+
+    if let Some(display_name) = req.display_name {
+        entry_obj.insert(
+            "display_name".to_string(),
+            serde_json::Value::String(display_name),
+        );
+    }
+
+    if let Some(parent) = cache_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| NexusApiError::Internal {
+            code: "CACHE_DIR_ERROR".into(),
+            message: e.to_string(),
+        })?;
+    }
+    let json = serde_json::to_string_pretty(&cache).map_err(|e| NexusApiError::Internal {
+        code: "CACHE_SERIALIZE_ERROR".into(),
+        message: e.to_string(),
+    })?;
+    std::fs::write(&cache_path, json).map_err(|e| NexusApiError::Internal {
+        code: "CACHE_WRITE_ERROR".into(),
+        message: e.to_string(),
+    })?;
+
+    // Re-read the updated cache so the returned detail reflects the write.
+    let cache = load_identity_cache();
+    let entry = get_identity_entry(&cache, &creator_id);
+    let auth_store = load_auth_store();
+    let active_id = read_active_creator_id(state.nexus_home());
+
+    Ok(Json(CreatorDetail {
+        creator_id: creator_id.clone(),
+        handle: entry.as_ref().and_then(|e| e.handle.clone()),
+        display_name: entry.as_ref().and_then(|e| e.display_name.clone()),
+        has_api_key: has_creator_api_key(&auth_store, &creator_id),
+        has_cached_token: has_cached_token(&auth_store, &creator_id),
+        is_active: active_id.as_deref() == Some(creator_id.as_str()),
+    }))
+}
+
 /// `PUT /v1/daemon/creators/active` — set active creator
 pub async fn set_active_creator(
     State(state): State<WorkspaceState>,
@@ -440,6 +552,31 @@ pub async fn logout_creator(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_utils::create_test_workspace;
+    use serial_test::serial;
+
+    /// Temporarily override `HOME` so disk-backed helpers (e.g. `load_identity_cache`)
+    /// operate inside the isolated test directory. The original value is restored on drop.
+    struct HomeOverride {
+        original: Option<String>,
+    }
+
+    impl HomeOverride {
+        fn set(home: &std::path::Path) -> Self {
+            let original = std::env::var("HOME").ok();
+            std::env::set_var("HOME", home);
+            Self { original }
+        }
+    }
+
+    impl Drop for HomeOverride {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(v) => std::env::set_var("HOME", v),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+    }
 
     #[test]
     fn validate_creator_id_rejects_traversal() {
@@ -473,5 +610,104 @@ mod tests {
             NexusApiError::Uninitialized => {}
             other => panic!("Expected Uninitialized, got: {other}"),
         }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn patch_creator_updates_display_name() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state =
+            crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        let home = tmp.path();
+        let _home_override = HomeOverride::set(home);
+
+        let cache_path = home.join(".nexus42").join("creator_identity_cache.json");
+        let cache = serde_json::json!({
+            "creators": {
+                "crt_abc123": { "handle": "old_handle" }
+            }
+        });
+        std::fs::write(
+            &cache_path,
+            serde_json::to_string_pretty(&cache).expect("serialize cache"),
+        )
+        .expect("write cache");
+
+        let req = PatchCreatorRequest {
+            display_name: Some("New Display Name".to_string()),
+        };
+        let result = patch_creator(
+            State(state.clone()),
+            Path("crt_abc123".to_string()),
+            Json(req),
+        )
+        .await;
+        assert!(result.is_ok(), "patch_creator should succeed");
+        let detail = result.expect("result should be Ok").0;
+        assert_eq!(detail.creator_id, "crt_abc123");
+        assert_eq!(detail.display_name, Some("New Display Name".to_string()));
+
+        let get_result = get_creator(State(state), Path("crt_abc123".to_string())).await;
+        assert!(get_result.is_ok(), "get_creator should succeed");
+        let get_detail = get_result.expect("result should be Ok").0;
+        assert_eq!(
+            get_detail.display_name,
+            Some("New Display Name".to_string())
+        );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn patch_creator_rejects_empty_display_name() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state =
+            crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        let home = tmp.path();
+        let _home_override = HomeOverride::set(home);
+
+        let req = PatchCreatorRequest {
+            display_name: Some("".to_string()),
+        };
+        let result = patch_creator(State(state), Path("crt_abc123".to_string()), Json(req)).await;
+        assert!(result.is_err(), "empty display_name should be rejected");
+        match result.unwrap_err() {
+            NexusApiError::InvalidInput { field, .. } => {
+                assert_eq!(field, "display_name");
+            }
+            other => panic!("Expected InvalidInput, got: {other}"),
+        }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn patch_creator_creates_entry_when_missing() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state =
+            crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        let home = tmp.path();
+        let _home_override = HomeOverride::set(home);
+
+        // No cache file on disk initially.
+        let req = PatchCreatorRequest {
+            display_name: Some("Fresh Creator".to_string()),
+        };
+        let result = patch_creator(
+            State(state.clone()),
+            Path("crt_fresh".to_string()),
+            Json(req),
+        )
+        .await;
+        assert!(result.is_ok(), "patch_creator should create missing entry");
+        let detail = result.expect("result should be Ok").0;
+        assert_eq!(detail.creator_id, "crt_fresh");
+        assert_eq!(detail.display_name, Some("Fresh Creator".to_string()));
+
+        let cache_path = home.join(".nexus42").join("creator_identity_cache.json");
+        let cache_content = std::fs::read_to_string(&cache_path).expect("read cache");
+        let cache: serde_json::Value = serde_json::from_str(&cache_content).expect("parse cache");
+        assert_eq!(
+            cache["creators"]["crt_fresh"]["display_name"],
+            "Fresh Creator"
+        );
     }
 }
