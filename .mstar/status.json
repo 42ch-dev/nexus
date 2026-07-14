@@ -1,7 +1,162 @@
 {
   "version": 1,
-  "updated_at": "2026-07-13",
+  "updated_at": "2026-07-14",
   "plans": [
+    {
+      "id": "2026-07-14-v1.117-profiles-workspace",
+      "title": "P0 - Profiles + per-Profile workspace",
+      "file": "plans/2026-07-14-v1.117-profiles-workspace.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@fullstack-dev",
+        "@frontend-dev"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.117",
+        "profiles",
+        "workspace",
+        "must"
+      ],
+      "created_at": "2026-07-14",
+      "updated_at": "2026-07-14",
+      "notes": "Phase 1 draft registered",
+      "metadata": {
+        "iteration_refs": [
+          "V1.117"
+        ],
+        "spec_integration_branch": "iteration/v1.117",
+        "merge_target": "iteration/v1.117",
+        "primary_spec": ".mstar/iterations/v1.117/specs/profiles-workspace.md",
+        "wire_contracts_changed": false,
+        "tier": "Must"
+      }
+    },
+    {
+      "id": "2026-07-14-v1.117-setup-agents-catalog",
+      "title": "P1 - Setup Agents catalog polish",
+      "file": "plans/2026-07-14-v1.117-setup-agents-catalog.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@frontend-dev",
+        "@fullstack-dev"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.117",
+        "agents",
+        "setup",
+        "must"
+      ],
+      "created_at": "2026-07-14",
+      "updated_at": "2026-07-14",
+      "notes": "Phase 1 draft registered",
+      "metadata": {
+        "iteration_refs": [
+          "V1.117"
+        ],
+        "spec_integration_branch": "iteration/v1.117",
+        "merge_target": "iteration/v1.117",
+        "primary_spec": ".mstar/iterations/v1.117/specs/setup-agents-catalog.md",
+        "wire_contracts_changed": false,
+        "tier": "Must"
+      }
+    },
+    {
+      "id": "2026-07-14-v1.117-shell-layout-ia",
+      "title": "P2 - Shell layout + menu IA + status bar",
+      "file": "plans/2026-07-14-v1.117-shell-layout-ia.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@frontend-dev"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.117",
+        "shell",
+        "ia",
+        "status-bar",
+        "must"
+      ],
+      "created_at": "2026-07-14",
+      "updated_at": "2026-07-14",
+      "notes": "Phase 1 draft registered",
+      "metadata": {
+        "iteration_refs": [
+          "V1.117"
+        ],
+        "spec_integration_branch": "iteration/v1.117",
+        "merge_target": "iteration/v1.117",
+        "primary_spec": ".mstar/iterations/v1.117/specs/shell-layout-ia.md",
+        "wire_contracts_changed": false,
+        "tier": "Must"
+      }
+    },
+    {
+      "id": "2026-07-14-v1.117-mac-dock-icon",
+      "title": "P3 - Mac Dock transparent icon",
+      "file": "plans/2026-07-14-v1.117-mac-dock-icon.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@frontend-dev",
+        "@ops-engineer"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.117",
+        "desktop",
+        "icon",
+        "should"
+      ],
+      "created_at": "2026-07-14",
+      "updated_at": "2026-07-14",
+      "notes": "Phase 1 draft registered",
+      "metadata": {
+        "iteration_refs": [
+          "V1.117"
+        ],
+        "spec_integration_branch": "iteration/v1.117",
+        "merge_target": "iteration/v1.117",
+        "primary_spec": ".mstar/iterations/v1.117/specs/mac-dock-icon.md",
+        "wire_contracts_changed": false,
+        "tier": "Should"
+      }
+    },
+    {
+      "id": "2026-07-14-v1.117-button-voice-verb-only",
+      "title": "P4 - Button voice Verb-only + DESIGN.md",
+      "file": "plans/2026-07-14-v1.117-button-voice-verb-only.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@frontend-dev",
+        "@writing-specialist"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.117",
+        "voice",
+        "design",
+        "must"
+      ],
+      "created_at": "2026-07-14",
+      "updated_at": "2026-07-14",
+      "notes": "Phase 1 draft registered",
+      "metadata": {
+        "iteration_refs": [
+          "V1.117"
+        ],
+        "spec_integration_branch": "iteration/v1.117",
+        "merge_target": "iteration/v1.117",
+        "primary_spec": ".mstar/iterations/v1.117/specs/button-voice-verb-only.md",
+        "wire_contracts_changed": false,
+        "tier": "Must"
+      }
+    },
     {
       "id": "2026-07-13-v1.116-agent-detection-codex-native",
       "title": "P0 - Agent Detection Fix + codex-native Provider",
@@ -381,11 +536,11 @@
     }
   ],
   "metadata": {
-    "integration_branch_retired": true,
+    "integration_branch_retired": false,
     "iteration_base_branch": "main",
     "last_integration_branch": "iteration/v1.115",
-    "latest_active_compass": "v1.116-delivery-compass.md",
-    "latest_active_iteration": "V1.116",
+    "latest_active_compass": "v1.117/delivery-compass.md",
+    "latest_active_iteration": "V1.117",
     "latest_ship": {
       "iteration": "V1.115",
       "compass": "v1.115-delivery-compass.md",
@@ -396,7 +551,7 @@
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "pre_iteration_hotfix": null,
-    "spec_integration_branch": "iteration/v1.116",
+    "spec_integration_branch": "iteration/v1.117",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {
@@ -465,7 +620,8 @@
         "2026-07-12-v1.113-i18n-completion": 4
       }
     },
-    "updated_at": "2026-07-13"
+    "updated_at": "2026-07-13",
+    "phase1_status": "locked"
   },
   "residual_findings": {
     "2026-07-05-v1.91-findings-batch": [
