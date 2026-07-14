@@ -360,6 +360,7 @@ impl Drop for ChildReaper {
             let mut sessions = sessions.write().await;
             if let Some(ns) = sessions.get_mut(&session_id) {
                 if let Some(mut child) = ns.operation_children.remove(&op_id) {
+                    let _ = child.kill().await;
                     let _ = child.wait().await;
                 }
             }
@@ -832,6 +833,7 @@ impl ProviderAdapter for CodexNativeProvider {
 fn plain_text_args(json_args: &[String]) -> Vec<String> {
     json_args
         .iter()
+        .skip(1)
         .filter(|arg| arg.as_str() != "--json")
         .cloned()
         .collect()
