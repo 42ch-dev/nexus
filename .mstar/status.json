@@ -133,13 +133,13 @@
       "id": "2026-07-14-v1.117-button-voice-verb-only",
       "title": "P4 - Button voice Verb-only + DESIGN.md",
       "file": "plans/2026-07-14-v1.117-button-voice-verb-only.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@frontend-dev",
         "@writing-specialist"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.117",
         "voice",
@@ -148,13 +148,14 @@
       ],
       "created_at": "2026-07-14",
       "updated_at": "2026-07-14",
-      "notes": "Phase 1 draft registered",
+      "notes": "Phase 2: SDD T1-T3 done + QC fix-wave; QC tri Approve with residuals (QC2 degraded, PM-supplemented); QA pending",
       "metadata": {
         "iteration_refs": [
           "V1.117"
         ],
         "spec_integration_branch": "iteration/v1.117",
         "merge_target": "iteration/v1.117",
+        "working_branch": "plan/v1.117-p4-button-voice",
         "primary_spec": ".mstar/iterations/v1.117/specs/button-voice-verb-only.md",
         "wire_contracts_changed": false,
         "tier": "Must"
@@ -759,6 +760,39 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-14-v1.117-shell-layout-ia.md",
         "note": "QC2 W-002. Works today; tighten when adding deeper routes."
+      },
+      {
+        "id": "R-V1117P4-SEC-CTAS",
+        "title": "Security/trust CTAs retain full descriptive labels (Trust This Certificate and Connect, Use Local Daemon, Reconnect With These Settings, etc.) — PM-accepted safety-critical exception to Verb-only",
+        "severity": "low",
+        "decision": "accept",
+        "owner": "@frontend-dev",
+        "target": "post-V1.117",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-14-v1.117-button-voice-verb-only.md",
+        "note": "QC1 W-001. Safety-critical informed-consent labels; full phrase IS the accessible name; abbreviation risks user harm (analogous to AD-P4-1 aria sole-carrier exception)."
+      },
+      {
+        "id": "R-V1117P4-PAGINATION",
+        "title": "Load more … pagination button retains standard idiom (not swept to Verb-only)",
+        "severity": "nit",
+        "decision": "accept",
+        "owner": "@frontend-dev",
+        "target": "post-V1.117",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-14-v1.117-button-voice-verb-only.md",
+        "note": "QC1 W-001. Standard pagination idiom; 'more' is not a noun object."
+      },
+      {
+        "id": "R-V1117P4-DESIGN-STUDIO-MIRROR",
+        "title": "design-studio connect-daemon-form-chrome.tsx mirror still hardcodes Show key/Hide key (developer gallery, excluded from i18n)",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.117",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-14-v1.117-button-voice-verb-only.md",
+        "note": "Fix-wave observation. One-line follow-up for Voice gallery consistency."
       }
     ],
     "2026-07-05-v1.91-findings-batch": [
