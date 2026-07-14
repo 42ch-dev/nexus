@@ -44,7 +44,7 @@ describe('EdgeCreateDialog (FB-SE-004)', () => {
     expect(screen.getByText('Target')).toBeInTheDocument();
     expect(screen.getByText('Kind')).toBeInTheDocument();
     // Commit + Cancel CTAs — locked voice.
-    expect(screen.getByRole('button', { name: 'Create Transition' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
   });
 
@@ -74,7 +74,7 @@ describe('EdgeCreateDialog (FB-SE-004)', () => {
     fireEvent.change(screen.getByLabelText('Target'), { target: { value: 'revise' } });
     fireEvent.change(screen.getByLabelText('Kind'), { target: { value: 'branch' } });
     fireEvent.change(screen.getByLabelText('Condition'), { target: { value: 'word_count > 1000' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Create Transition' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
 
     expect(onCommit).toHaveBeenCalledTimes(1);
     expect(onCommit).toHaveBeenCalledWith({
@@ -89,15 +89,15 @@ describe('EdgeCreateDialog (FB-SE-004)', () => {
     renderDialog();
 
     // Initially disabled — no source/target.
-    expect(screen.getByRole('button', { name: 'Create Transition' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled();
 
     // Choose source only — still disabled (no target).
     fireEvent.change(screen.getByLabelText('Source'), { target: { value: 'draft' } });
-    expect(screen.getByRole('button', { name: 'Create Transition' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Create' })).toBeDisabled();
 
     // Choose target — now enabled.
     fireEvent.change(screen.getByLabelText('Target'), { target: { value: 'revise' } });
-    expect(screen.getByRole('button', { name: 'Create Transition' })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Create' })).not.toBeDisabled();
   });
 
   it('cancel closes the dialog without committing', () => {

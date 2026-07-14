@@ -22,10 +22,10 @@
     "done": "Done"
   },
   "action": {
-    "openNexus": "Open Nexus",
+    "openNexus": "Open",
     "finishing": "Finishing…",
     "preparingWorkspace": "Preparing workspace…",
-    "resetLocalDatabase": "Reset local database",
+    "resetLocalDatabase": "Reset",
     "resetting": "Resetting…",
     "continue": "Continue",
     "back": "Back"
@@ -65,7 +65,7 @@
   },
   "workspace": {
     "label": "Workspace folder",
-    "changeFolder": "Change Folder…",
+    "changeFolder": "Change…",
     "resolving": "Resolving…",
     "browserOnly": "Workspace path changes are available on the desktop app only."
   },
@@ -83,7 +83,7 @@
     "notReady": {
       "title": "Daemon not ready"
     },
-    "restartNexus": "Restart Nexus",
+    "restartNexus": "Restart",
     "resetDatabaseDescription": "This will clear the daemon's local state database (config, registry cache). Your creative files in the workspace are not affected."
   },
   "error": {

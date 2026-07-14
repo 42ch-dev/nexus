@@ -54,7 +54,7 @@ describe('WorldKbRelationshipConflictModal', () => {
 
   it('disables Reapply because the server and local change overlap on the same relationship field', () => {
     render(<WorldKbRelationshipConflictModal {...baseProps} />);
-    expect(screen.getByRole('button', { name: /Reapply my edit/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^Reapply$/i })).toBeDisabled();
   });
 
   it('calls onDismiss when Cancel is clicked', async () => {
@@ -79,7 +79,7 @@ describe('WorldKbRelationshipConflictModal', () => {
     render(<WorldKbRelationshipConflictModal {...baseProps} />);
     expect(screen.getByRole('button', { name: /Cancel/i })).toHaveAttribute('accessKey', 'c');
     expect(screen.getByRole('button', { name: /Review side-by-side/i })).toHaveAttribute('accessKey', 'r');
-    expect(screen.getByRole('button', { name: /Reapply my edit/i })).toHaveAttribute('accessKey', 'a');
+    expect(screen.getByRole('button', { name: /^Reapply$/i })).toHaveAttribute('accessKey', 'a');
     expect(screen.getByRole('button', { name: /Use current/i })).toHaveAttribute('accessKey', 'u');
   });
 

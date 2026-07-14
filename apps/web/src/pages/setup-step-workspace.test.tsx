@@ -94,7 +94,7 @@ describe('SetupStepWorkspace', () => {
     renderHarness(makeState());
 
     await waitFor(() => expect(screen.getByDisplayValue('~/Documents/nexus/default')).toBeInTheDocument());
-    const button = screen.getByRole('button', { name: 'Change Folder…' });
+    const button = screen.getByRole('button', { name: 'Change…' });
     expect(button).toBeInTheDocument();
     expect(button).toBeDisabled();
   });
@@ -135,7 +135,7 @@ describe('SetupStepWorkspace', () => {
     expect(pathInput).toHaveClass('flex-1');
     expect(pathContainer?.parentElement).toHaveAttribute('data-testid', 'workspace-location-row');
 
-    const changeFolderButton = screen.getByRole('button', { name: 'Change Folder…' });
+    const changeFolderButton = screen.getByRole('button', { name: 'Change…' });
     expect(changeFolderButton).toHaveClass('shrink-0');
   });
 
@@ -145,7 +145,7 @@ describe('SetupStepWorkspace', () => {
     });
 
     await waitFor(() => expect(screen.getByDisplayValue('/custom/nexus')).toBeInTheDocument());
-    const changeFolderButton = screen.getByRole('button', { name: 'Change Folder…' });
+    const changeFolderButton = screen.getByRole('button', { name: 'Change…' });
     expect(changeFolderButton).toBeInTheDocument();
     expect(changeFolderButton.closest('[data-testid="workspace-location-row"]')).toBeInTheDocument();
   });
@@ -158,8 +158,8 @@ describe('SetupStepWorkspace', () => {
       desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve('/custom/nexus'), pickDirectory }),
     });
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Change Folder…' })).toBeEnabled());
-    await user.click(screen.getByRole('button', { name: 'Change Folder…' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Change…' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Change…' }));
 
     await waitFor(() => expect(pickDirectory).toHaveBeenCalledWith('/custom/nexus'));
     await waitFor(() =>
@@ -229,8 +229,8 @@ describe('SetupStepWorkspace', () => {
       desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve('/custom/nexus'), pickDirectory }),
     });
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Change Folder…' })).toBeEnabled());
-    await user.click(screen.getByRole('button', { name: 'Change Folder…' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Change…' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Change…' }));
 
     await waitFor(() => expect(screen.getByText('dialog failed')).toBeInTheDocument());
   });
@@ -305,7 +305,7 @@ describe('SetupStepWorkspace', () => {
         screen.getByText(/Retry Continue, or use Reset local database below if the problem persists/),
       ).toBeInTheDocument(),
     );
-    expect(screen.getByRole('button', { name: 'Reset local database' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reset' })).toBeInTheDocument();
     expect(onNext).not.toHaveBeenCalled();
   });
 
@@ -329,10 +329,10 @@ describe('SetupStepWorkspace', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Reset local database' })).toBeInTheDocument(),
+      expect(screen.getByRole('button', { name: 'Reset' })).toBeInTheDocument(),
     );
 
-    await user.click(screen.getByRole('button', { name: 'Reset local database' }));
+    await user.click(screen.getByRole('button', { name: 'Reset' }));
     await waitFor(() => expect(resetLocalDatabase).toHaveBeenCalled());
     expect(startDaemon).not.toHaveBeenCalled();
     expect(reloadSpy).toHaveBeenCalled();
@@ -355,12 +355,12 @@ describe('SetupStepWorkspace', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() => expect(screen.getByText(/config write failed/)).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: 'Reset local database' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reset' })).toBeInTheDocument();
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() => expect(onNext).toHaveBeenCalled());
-    expect(screen.queryByRole('button', { name: 'Reset local database' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reset' })).not.toBeInTheDocument();
   });
 
   it('renders the Profile name field', async () => {

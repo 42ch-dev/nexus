@@ -96,7 +96,7 @@ describe('WorksPage', () => {
     await waitFor(() => expect(screen.getByText('No works yet')).toBeInTheDocument());
 
     // The Create Work button is present in both the toolbar and the empty state.
-    const createButtons = screen.getAllByRole('button', { name: /Create Work/i });
+    const createButtons = screen.getAllByRole('button', { name: /^Create$/i });
     expect(createButtons.length).toBeGreaterThanOrEqual(1);
     // Sanity: the table column header / title text is present.
     expect(screen.getByText('Works')).toBeInTheDocument();

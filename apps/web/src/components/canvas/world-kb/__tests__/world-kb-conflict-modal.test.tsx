@@ -51,7 +51,7 @@ describe('WorldKbEntityConflictModal (patch_entity variant)', () => {
 
   it('enables Reapply because the draft fields do not overlap the server change', () => {
     render(<WorldKbEntityConflictModal {...entityProps} />);
-    expect(screen.getByRole('button', { name: /Reapply my edit/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /^Reapply$/i })).toBeEnabled();
   });
 
   it('calls onUseCurrent when the primary action is clicked', async () => {
@@ -81,7 +81,7 @@ describe('WorldKbEntityConflictModal (patch_entity variant)', () => {
     render(<WorldKbEntityConflictModal {...entityProps} />);
     expect(screen.getByRole('button', { name: /Cancel/i })).toHaveAttribute('accessKey', 'c');
     expect(screen.getByRole('button', { name: /Review side-by-side/i })).toHaveAttribute('accessKey', 'r');
-    expect(screen.getByRole('button', { name: /Reapply my edit/i })).toHaveAttribute('accessKey', 'a');
+    expect(screen.getByRole('button', { name: /^Reapply$/i })).toHaveAttribute('accessKey', 'a');
     expect(screen.getByRole('button', { name: /Use current/i })).toHaveAttribute('accessKey', 'u');
   });
 
@@ -149,7 +149,7 @@ describe('WorldKbPromoteConflictModal (promote_candidate variant)', () => {
     const user = userEvent.setup();
     const onReapply = vi.fn();
     render(<WorldKbPromoteConflictModal {...promoteProps} onReapply={onReapply} />);
-    await user.click(screen.getByRole('button', { name: /Reapply my decision/i }));
+    await user.click(screen.getByRole('button', { name: /^Reapply$/i }));
     expect(onReapply).toHaveBeenCalledOnce();
   });
 
@@ -166,7 +166,7 @@ describe('WorldKbPromoteConflictModal (promote_candidate variant)', () => {
     render(<WorldKbPromoteConflictModal {...promoteProps} />);
     expect(screen.getByRole('button', { name: /Cancel/i })).toHaveAttribute('accessKey', 'c');
     expect(screen.getByRole('button', { name: /Review side-by-side/i })).toHaveAttribute('accessKey', 'r');
-    expect(screen.getByRole('button', { name: /Reapply my decision/i })).toHaveAttribute('accessKey', 'a');
+    expect(screen.getByRole('button', { name: /^Reapply$/i })).toHaveAttribute('accessKey', 'a');
     expect(screen.getByRole('button', { name: /Use current/i })).toHaveAttribute('accessKey', 'u');
   });
 

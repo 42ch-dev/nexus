@@ -72,7 +72,7 @@ describe('PatchWorkDialog', () => {
 
     await user.clear(screen.getByLabelText(/^Status$/i));
     await user.type(screen.getByLabelText(/^Status$/i), 'active');
-    await user.click(screen.getByRole('button', { name: /^Update Work$/i }));
+    await user.click(screen.getByRole('button', { name: /^Update$/i }));
 
     await waitFor(() => expect(patchedBody).not.toBeNull());
     expect(patchedBody).toEqual({ status: 'active' });
@@ -91,7 +91,7 @@ describe('PatchWorkDialog', () => {
 
     const { onOpenChange } = renderDialog();
 
-    await user.click(screen.getByRole('button', { name: /^Update Work$/i }));
+    await user.click(screen.getByRole('button', { name: /^Update$/i }));
 
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
     expect(requestCount).toBe(0);

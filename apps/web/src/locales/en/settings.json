@@ -24,7 +24,7 @@
     "title": "Profiles",
     "helper": "View or change the workspace folder for the active Profile.",
     "folderLabel": "Profile workspace folder",
-    "changeFolder": "Change Folder…",
+    "changeFolder": "Change…",
     "browserOnly": "Profile workspace path changes are available on the desktop app only.",
     "savedHonesty": "Profile workspace path saved. Restart or reload the app so the running daemon uses the new location.",
     "restartLabel": "Quit and reopen Nexus"
@@ -33,7 +33,7 @@
     "title": "Agent",
     "helper": "Choose which local agent Nexus uses for creative work.",
     "browserOnly": "Agent selection is available on the desktop app only.",
-    "save": "Save Agent",
+    "save": "Save",
     "saving": "Saving…",
     "scanError": "The daemon did not respond to the agent scan request.",
     "emptyTitle": "No agents found on PATH."
@@ -64,7 +64,7 @@
     "useLocalDaemon": "Use Local Daemon",
     "trustAndConnect": "Trust This Certificate and Connect",
     "reconnectWithSettings": "Reconnect With These Settings",
-    "fetchFingerprint": "Fetch fingerprint",
+    "fetchFingerprint": "Fetch",
     "fetchingFingerprint": "Fetching fingerprint…",
     "originNotePrefix": "If you are connecting from a browser tab to a remote daemon, your serving origin must be listed in the daemon's ",
     "originSetting": "NEXUS_DAEMON_ALLOWED_ORIGINS",
@@ -75,7 +75,7 @@
   "setup": {
     "title": "Setup",
     "helper": "Return to the first-run wizard to walk through setup steps again. Your workspace and agent choices are kept.",
-    "rerun": "Re-run Setup",
+    "rerun": "Re-run",
     "browserOnly": "Re-run setup is available on the desktop app only.",
     "browserTooltip": "Open the Nexus desktop app to re-run setup.",
     "confirmTitle": "Re-run Setup?",

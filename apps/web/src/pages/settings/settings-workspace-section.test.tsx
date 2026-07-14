@@ -75,7 +75,7 @@ describe('SettingsWorkspaceSection', () => {
       ),
     );
     expect(desktop.getWorkspaceRoot).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('button', { name: 'Change Folder…' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Change…' })).toBeEnabled();
   });
 
   it('persists a picked directory and shows inline honesty copy', async () => {
@@ -90,7 +90,7 @@ describe('SettingsWorkspaceSection', () => {
       ),
     );
 
-    await user.click(screen.getByRole('button', { name: 'Change Folder…' }));
+    await user.click(screen.getByRole('button', { name: 'Change…' }));
 
     await waitFor(() =>
       expect(desktop.setWorkspacePath).toHaveBeenCalledWith(PICKED_PATH),
@@ -118,10 +118,10 @@ describe('SettingsWorkspaceSection', () => {
       ),
     );
 
-    await user.click(screen.getByRole('button', { name: 'Change Folder…' }));
+    await user.click(screen.getByRole('button', { name: 'Change…' }));
 
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Change Folder…' })).not.toBeDisabled(),
+      expect(screen.getByRole('button', { name: 'Change…' })).not.toBeDisabled(),
     );
     expect(desktop.pickDirectory).toHaveBeenCalledWith(INITIAL_PATH);
     expect(desktop.setWorkspacePath).not.toHaveBeenCalled();
@@ -143,7 +143,7 @@ describe('SettingsWorkspaceSection', () => {
       ),
     ).toBeInTheDocument();
 
-    const button = screen.getByRole('button', { name: 'Change Folder…' });
+    const button = screen.getByRole('button', { name: 'Change…' });
     expect(button).toBeDisabled();
   });
 });

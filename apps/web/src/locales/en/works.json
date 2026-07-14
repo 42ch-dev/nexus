@@ -5,7 +5,7 @@
   "filterPlaceholder": "Filter by status (e.g. active)",
   "refreshAria": "Refresh Works",
   "refresh": "Refresh",
-  "create": "Create Work",
+  "create": "Create",
   "errorDescription": "The daemon did not return Works. Check that the local daemon is running.",
   "loading": "Loading works…",
   "emptyTitle": "No works yet",
@@ -23,7 +23,7 @@
     "notFoundTitle": "Work not found",
     "notFoundDescription": "This Work does not exist or the daemon could not return it.",
     "backToWorks": "Back to Works",
-    "updateWork": "Update Work",
+    "updateWork": "Update",
     "labels": {
       "longTermGoal": "Long-term goal",
       "initialIdea": "Initial idea",
@@ -41,8 +41,8 @@
     "openOutline": "Open Outline",
     "openStrategy": "Open Strategy",
     "openWorldKb": "Open World KB",
-    "archiveWork": "Archive Work",
-    "confirmArchive": "Confirm archive",
+    "archiveWork": "Archive",
+    "confirmArchive": "Confirm",
     "findingsTitle": "Findings",
     "findingsDescription": "Findings raised against this Work, with severity filtering.",
     "findingsError": "Could not load findings for this Work.",
@@ -60,7 +60,7 @@
       "stageStatusLabel": "Stage status",
       "hint": "Statuses are free-text in the runtime (e.g. intake, active, completed, paused).",
       "cancel": "Cancel",
-      "submit": "Update Work",
+      "submit": "Update",
       "submitting": "Updating Work…"
     }
   }

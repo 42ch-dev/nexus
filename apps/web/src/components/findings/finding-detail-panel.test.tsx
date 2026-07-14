@@ -140,7 +140,7 @@ describe('FindingDetailPanel — inline edit', () => {
 
     const titleInput = screen.getByLabelText(/title/i) as HTMLInputElement;
     fireEvent.change(titleInput, { target: { value: 'Edited title' } });
-    fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^Save$/i }));
 
     await waitFor(() => expect(calls).toHaveLength(1));
     expect(calls[0]!.patch).toEqual({ title: 'Edited title' });
@@ -149,7 +149,7 @@ describe('FindingDetailPanel — inline edit', () => {
   it('disables Save Changes when there is no diff', () => {
     const { client } = recordingClient(makeFinding());
     renderInApp(<FindingDetailPanel workId="w1" finding={makeFinding()} />, { client });
-    expect(screen.getByRole('button', { name: /save changes/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^Save$/i })).toBeDisabled();
   });
 
   it('Reset restores the canonical form state', () => {

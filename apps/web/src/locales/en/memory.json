@@ -103,7 +103,7 @@
     "reflecting": "Reflecting…",
     "ungeneratedTitle": "Reflect on who you are becoming",
     "ungeneratedDescription": "Nexus will reflect on your themes, shifts, and creative growth.",
-    "reflectCta": "Reflect on My SOUL",
+    "reflectCta": "Reflect",
     "insufficientTitle_creator": "Your SOUL is still forming",
     "insufficientTitle_world": "This world's SOUL is still forming",
     "insufficientDescription_creator": "Keep writing and reviewing — once you've accumulated enough fragments, themes, and creative experience, Nexus can reflect on who you are becoming.",
@@ -154,7 +154,7 @@
       "description": "This chapter is {{status}}. Structural edits should be rare.",
       "warning": "You are editing a {{status}} chapter. This change is allowed, but it may affect settled work.",
       "cancel": "Cancel",
-      "confirm": "Confirm Edit"
+      "confirm": "Confirm"
     }
   }
 }

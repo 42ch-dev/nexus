@@ -65,7 +65,7 @@
     "didNotStart": "Daemon did not start",
     "statusUnknown": "Daemon status unknown",
     "restarting": "Restarting…",
-    "restartButton": "Restart Daemon",
+    "restartButton": "Restart",
     "startingDescription": "Nexus is starting the local daemon.",
     "reconnectingDescription": "Nexus is retrying the local daemon connection.",
     "stoppedDescription": "Restart the daemon to use local workspace features.",
@@ -105,7 +105,7 @@
     "namePlaceholder": "e.g. my-chapter-preset",
     "validationError": "A name is required.",
     "creating": "Scaffolding preset…",
-    "submit": "Scaffold Preset"
+    "submit": "Scaffold"
   },
   "workCreate": {
     "title": "Create Work",
@@ -119,7 +119,7 @@
     "profileLabel": "Work profile",
     "validationError": "Title, long-term goal, and initial idea are required.",
     "creating": "Creating Work…",
-    "create": "Create Work",
+    "create": "Create",
     "toastCreated": "Work created"
   }
 }

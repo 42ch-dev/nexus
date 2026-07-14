@@ -37,7 +37,7 @@ describe('OutlineConflictModal', () => {
 
   it('enables Reapply because the server change path does not overlap known fields', () => {
     render(<OutlineConflictModal {...baseProps} />);
-    expect(screen.getByRole('button', { name: /Reapply my edit/i })).toBeEnabled();
+    expect(screen.getByRole('button', { name: /^Reapply$/i })).toBeEnabled();
   });
 
   it('calls onUseCurrent when the primary action is clicked', async () => {
@@ -68,7 +68,7 @@ describe('OutlineConflictModal', () => {
     render(<OutlineConflictModal {...baseProps} />);
     expect(screen.getByRole('button', { name: /Keep editing/i })).toHaveAttribute('accessKey', 'c');
     expect(screen.getByRole('button', { name: /Review side-by-side/i })).toHaveAttribute('accessKey', 'r');
-    expect(screen.getByRole('button', { name: /Reapply my edit/i })).toHaveAttribute('accessKey', 'a');
+    expect(screen.getByRole('button', { name: /^Reapply$/i })).toHaveAttribute('accessKey', 'a');
     expect(screen.getByRole('button', { name: /Use current/i })).toHaveAttribute('accessKey', 'u');
   });
 

@@ -24,7 +24,7 @@
     "title": "Profiles",
     "helper": "查看或更改当前 Profile 的工作区文件夹。",
     "folderLabel": "Profile 工作区文件夹",
-    "changeFolder": "更改文件夹…",
+    "changeFolder": "更改…",
     "browserOnly": "Profile 工作区路径更改仅在桌面应用中可用。",
     "savedHonesty": "Profile 工作区路径已保存。请重启或重新加载应用，以使运行中的守护进程使用新位置。",
     "restartLabel": "退出并重新打开 Nexus"
@@ -33,7 +33,7 @@
     "title": "智能体",
     "helper": "选择 Nexus 用于创意工作的本地智能体。",
     "browserOnly": "仅在桌面应用中可以选择智能体。",
-    "save": "保存智能体",
+    "save": "保存",
     "saving": "保存中…",
     "scanError": "守护进程没有响应智能体扫描请求。",
     "emptyTitle": "在 PATH 中未找到智能体。"
@@ -64,7 +64,7 @@
     "useLocalDaemon": "使用本地守护进程",
     "trustAndConnect": "信任此证书并连接",
     "reconnectWithSettings": "使用这些设置重新连接",
-    "fetchFingerprint": "获取指纹",
+    "fetchFingerprint": "获取",
     "fetchingFingerprint": "正在获取指纹…",
     "originNotePrefix": "如果你从浏览器标签页连接到远程守护进程，你的服务来源必须列在守护进程的 ",
     "originSetting": "NEXUS_DAEMON_ALLOWED_ORIGINS",
@@ -75,7 +75,7 @@
   "setup": {
     "title": "设置",
     "helper": "返回首次运行向导，重新执行设置步骤。你的工作区和智能体选择将保留。",
-    "rerun": "重新运行设置",
+    "rerun": "重新运行",
     "browserOnly": "仅在桌面应用中可重新运行设置。",
     "browserTooltip": "打开 Nexus 桌面应用以重新运行设置。",
     "confirmTitle": "重新运行设置？",
