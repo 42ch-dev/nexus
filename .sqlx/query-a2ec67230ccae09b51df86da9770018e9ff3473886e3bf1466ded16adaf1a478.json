@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE creators SET display_name = ?, cached_at = ? WHERE creator_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "a2ec67230ccae09b51df86da9770018e9ff3473886e3bf1466ded16adaf1a478"
+}

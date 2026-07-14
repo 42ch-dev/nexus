@@ -224,6 +224,34 @@ describe('SetupStepAgent', () => {
     expect(onChange).toHaveBeenCalledTimes(1);
   });
 
+  it('preserves profileDisplayName when defaulting to the first installed agent (R-V1117P0QC2-F007)', async () => {
+    const agent = makeAgent({
+      name: 'Claude Code',
+      registry_agent_id: 'claude-acp',
+      installed: true,
+    });
+    useHandlers(
+      http.post('/v1/daemon/agent-host/scan', () =>
+        HttpResponse.json({ agents: [agent] }),
+      ),
+    );
+    const onChange = vi.fn();
+
+    renderInApp(
+      <SetupStepAgent
+        state={makeState({ profileDisplayName: 'Alice' })}
+        onChange={onChange}
+        onNext={vi.fn()}
+      />,
+      { client: makeClient(), initialRouterEntries: ['/setup'] },
+    );
+
+    await waitFor(() => expect(onChange).toHaveBeenCalled());
+    const lastCall = onChange.mock.calls[onChange.mock.calls.length - 1]![0];
+    expect(lastCall.profileDisplayName).toBe('Alice');
+    expect(lastCall.selectedAgent).toEqual(agent);
+  });
+
   it('selects an installed agent and calls onChange with the selected agent', async () => {
     const user = userEvent.setup();
     const agent = makeAgent({

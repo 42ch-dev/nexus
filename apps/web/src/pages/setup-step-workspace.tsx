@@ -184,6 +184,8 @@ export function SetupStepWorkspace({
               onChange={(e) => onChange({ ...state, profileDisplayName: e.target.value })}
               placeholder={t('profile.name.placeholder')}
               disabled={loading || bootstrapping || resetBusy}
+              required
+              aria-required="true"
               data-testid="wizard-profile-name"
             />
           </div>
@@ -214,7 +216,7 @@ export function SetupStepWorkspace({
         <Button
           variant="primary"
           onClick={continueToNext}
-          disabled={loading || bootstrapping || resetBusy || !state.workspaceRoot}
+          disabled={loading || bootstrapping || resetBusy || !state.workspaceRoot || !state.profileDisplayName.trim()}
           className="w-full max-w-setup-wizard-surface-cta-primary-max-width"
         >
           {bootstrapping ? (

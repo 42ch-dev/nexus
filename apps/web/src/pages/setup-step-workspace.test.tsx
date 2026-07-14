@@ -50,7 +50,7 @@ function makeState(overrides: Partial<WizardState> = {}): WizardState {
     workspaceRoot: '',
     selectedAgent: null,
     customLaunchCommand: '',
-    profileDisplayName: '',
+    profileDisplayName: 'Test Profile',
     ...overrides,
   };
 }
@@ -378,6 +378,7 @@ describe('SetupStepWorkspace', () => {
     });
 
     const input = await waitFor(() => screen.getByTestId('wizard-profile-name'));
+    await user.clear(input);
     await user.type(input, 'Alice');
     expect(input).toHaveValue('Alice');
   });
@@ -409,22 +410,21 @@ describe('SetupStepWorkspace', () => {
     await waitFor(() => expect(onNext).toHaveBeenCalled());
   });
 
-  it('skips updateCreator when the Profile name is empty', async () => {
-    const user = userEvent.setup();
+  it('blocks Continue when the Profile name is empty', async () => {
     const onNext = vi.fn();
     const updateCreator = mockUpdateCreator();
 
-    renderHarness(makeState({ workspaceRoot: '/custom/nexus' }), {
+    renderHarness(makeState({ workspaceRoot: '/custom/nexus', profileDisplayName: '' }), {
       desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve('/custom/nexus') }),
       client: makeClient({ updateCreator }),
       onNext,
     });
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
-    await user.click(screen.getByRole('button', { name: 'Continue' }));
-
-    await waitFor(() => expect(onNext).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled(),
+    );
     expect(updateCreator).not.toHaveBeenCalled();
+    expect(onNext).not.toHaveBeenCalled();
   });
 
   it('surfaces an updateCreator error and stays on the step', async () => {

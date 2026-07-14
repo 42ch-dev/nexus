@@ -178,6 +178,88 @@ fn load_identity_cache() -> serde_json::Value {
     serde_json::from_str(&content).unwrap_or(serde_json::Value::Null)
 }
 
+/// Crash-safe file write: write to a sibling temp file on the same filesystem,
+/// then rename it into place. `rename` is atomic on POSIX and avoids leaving a
+/// truncated file if the process is killed mid-write.
+fn atomic_write(path: &std::path::Path, contents: &str) -> std::io::Result<()> {
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, contents)?;
+    std::fs::rename(&tmp, path)
+}
+
+/// Load the identity cache from disk, reporting parse/read errors instead of
+/// treating them as a missing cache.
+fn load_identity_cache_strict(
+    cache_path: &std::path::Path,
+) -> Result<serde_json::Value, NexusApiError> {
+    let content = std::fs::read_to_string(cache_path).map_err(|e| NexusApiError::Internal {
+        code: "CACHE_READ_ERROR".into(),
+        message: e.to_string(),
+    })?;
+    serde_json::from_str(&content).map_err(|e| NexusApiError::Internal {
+        code: "CACHE_PARSE_ERROR".into(),
+        message: e.to_string(),
+    })
+}
+
+/// Write the identity cache to disk with an atomic temp-file + rename.
+fn save_identity_cache(
+    cache_path: &std::path::Path,
+    cache: &serde_json::Value,
+) -> Result<(), NexusApiError> {
+    if let Some(parent) = cache_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| NexusApiError::Internal {
+            code: "CACHE_DIR_ERROR".into(),
+            message: e.to_string(),
+        })?;
+    }
+    let json = serde_json::to_string_pretty(cache).map_err(|e| NexusApiError::Internal {
+        code: "CACHE_SERIALIZE_ERROR".into(),
+        message: e.to_string(),
+    })?;
+    atomic_write(cache_path, &json).map_err(|e| NexusApiError::Internal {
+        code: "CACHE_WRITE_ERROR".into(),
+        message: e.to_string(),
+    })
+}
+
+/// Update the SQL `creators` row for `creator_id`, inserting a minimal active
+/// row if one does not exist.
+async fn upsert_creator_display_name(
+    pool: &sqlx::SqlitePool,
+    creator_id: &str,
+    display_name: &str,
+) -> Result<(), NexusApiError> {
+    let now = chrono::Utc::now().to_rfc3339();
+    let rows = sqlx::query!(
+        "UPDATE creators SET display_name = ?, cached_at = ? WHERE creator_id = ?",
+        display_name,
+        now,
+        creator_id
+    )
+    .execute(pool)
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".into(),
+        message: e.to_string(),
+    })?;
+    if rows.rows_affected() == 0 {
+        sqlx::query!(
+            "INSERT INTO creators (creator_id, display_name, status, cached_at, data) VALUES (?, ?, 'active', ?, '{}')",
+            creator_id,
+            display_name,
+            now
+        )
+        .execute(pool)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: e.to_string(),
+        })?;
+    }
+    Ok(())
+}
+
 /// Get identity cache entry for a creator.
 fn get_identity_entry(cache: &serde_json::Value, creator_id: &str) -> Option<IdentityEntry> {
     let creators = cache.get("creators")?.as_object()?;
@@ -369,7 +451,7 @@ pub async fn patch_creator(
                 reason: "display_name cannot be empty".to_string(),
             });
         }
-        if display_name.len() > 256 {
+        if display_name.chars().count() > 256 {
             return Err(NexusApiError::InvalidInput {
                 field: "display_name".to_string(),
                 reason: "display_name must be 256 characters or fewer".to_string(),
@@ -383,9 +465,20 @@ pub async fn patch_creator(
     })?;
     let cache_path = home.join(".nexus42").join("creator_identity_cache.json");
 
-    let mut cache = load_identity_cache();
+    // Only initialize a fresh cache when the file does not exist. If the file
+    // exists but cannot be parsed, report an error instead of silently wiping
+    // all cached identities (QC2-F-002).
+    let mut cache = if cache_path.exists() {
+        load_identity_cache_strict(&cache_path)?
+    } else {
+        serde_json::json!({"creators": {}})
+    };
+
     if !cache.is_object() {
-        cache = serde_json::json!({"creators": {}});
+        return Err(NexusApiError::Internal {
+            code: "CACHE_FORMAT_ERROR".into(),
+            message: "Identity cache root is not an object".to_string(),
+        });
     }
     let cache_obj = cache
         .as_object_mut()
@@ -393,8 +486,11 @@ pub async fn patch_creator(
             code: "CACHE_FORMAT_ERROR".into(),
             message: "Identity cache root is not an object".to_string(),
         })?;
-    if cache_obj.get("creators").is_none() || !cache_obj["creators"].is_object() {
-        cache_obj.insert("creators".to_string(), serde_json::json!({}));
+    if cache_obj.get("creators").is_none_or(|v| !v.is_object()) {
+        return Err(NexusApiError::Internal {
+            code: "CACHE_FORMAT_ERROR".into(),
+            message: "Identity cache creators field is not an object".to_string(),
+        });
     }
     let creators = cache_obj
         .get_mut("creators")
@@ -415,26 +511,17 @@ pub async fn patch_creator(
         })?;
 
     if let Some(display_name) = req.display_name {
+        // Write the display name to the SQL `creators` table so that `list_creators`
+        // (used by the footer via useCreators()) reflects the rename as well as
+        // the JSON identity cache (QC1-F-001).
+        upsert_creator_display_name(state.pool(), &creator_id, &display_name).await?;
         entry_obj.insert(
             "display_name".to_string(),
             serde_json::Value::String(display_name),
         );
     }
 
-    if let Some(parent) = cache_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| NexusApiError::Internal {
-            code: "CACHE_DIR_ERROR".into(),
-            message: e.to_string(),
-        })?;
-    }
-    let json = serde_json::to_string_pretty(&cache).map_err(|e| NexusApiError::Internal {
-        code: "CACHE_SERIALIZE_ERROR".into(),
-        message: e.to_string(),
-    })?;
-    std::fs::write(&cache_path, json).map_err(|e| NexusApiError::Internal {
-        code: "CACHE_WRITE_ERROR".into(),
-        message: e.to_string(),
-    })?;
+    save_identity_cache(&cache_path, &cache)?;
 
     // Re-read the updated cache so the returned detail reflects the write.
     let cache = load_identity_cache();
@@ -709,5 +796,125 @@ mod tests {
             cache["creators"]["crt_fresh"]["display_name"],
             "Fresh Creator"
         );
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn patch_creator_writes_display_name_to_sql_creators_table() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state =
+            crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        let home = tmp.path();
+        let _home_override = HomeOverride::set(home);
+
+        let req = PatchCreatorRequest {
+            display_name: Some("Renamed Profile".to_string()),
+        };
+        let result =
+            patch_creator(State(state.clone()), Path("crt_sql".to_string()), Json(req)).await;
+        assert!(result.is_ok(), "patch_creator should succeed");
+        let detail = result.expect("result should be Ok").0;
+        assert_eq!(detail.display_name, Some("Renamed Profile".to_string()));
+
+        let response = list(
+            State(state),
+            Query(ListCreatorsQuery {
+                limit: 50,
+                cursor: None,
+            }),
+        )
+        .await
+        .expect("list creators should succeed")
+        .0;
+        let item = response
+            .items
+            .into_iter()
+            .find(|i| i.creator_id == "crt_sql")
+            .expect("creator should be present in SQL list");
+        assert_eq!(item.display_name, "Renamed Profile");
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn patch_creator_accepts_256_character_multibyte_display_name() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state =
+            crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        let home = tmp.path();
+        let _home_override = HomeOverride::set(home);
+
+        let name = "中".repeat(256);
+        assert_eq!(name.chars().count(), 256);
+        assert!(
+            name.len() > 256,
+            "byte length should exceed 256 for CJK chars"
+        );
+
+        let req = PatchCreatorRequest {
+            display_name: Some(name.clone()),
+        };
+        let result = patch_creator(State(state), Path("crt_multi".to_string()), Json(req)).await;
+        assert!(
+            result.is_ok(),
+            "256-character multibyte display_name should be accepted"
+        );
+        assert_eq!(result.unwrap().0.display_name, Some(name));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn patch_creator_rejects_257_character_multibyte_display_name() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state =
+            crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        let home = tmp.path();
+        let _home_override = HomeOverride::set(home);
+
+        let name = "🎨".repeat(257);
+        assert_eq!(name.chars().count(), 257);
+
+        let req = PatchCreatorRequest {
+            display_name: Some(name),
+        };
+        let result = patch_creator(State(state), Path("crt_multi".to_string()), Json(req)).await;
+        assert!(
+            result.is_err(),
+            "257-character display_name should be rejected"
+        );
+        match result.unwrap_err() {
+            NexusApiError::InvalidInput { field, .. } => {
+                assert_eq!(field, "display_name");
+            }
+            other => panic!("Expected InvalidInput, got: {other}"),
+        }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn patch_creator_rejects_corrupt_cache_without_wiping_it() {
+        let (tmp, nexus_home, db_path) = create_test_workspace().await;
+        let state =
+            crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+        let home = tmp.path();
+        let _home_override = HomeOverride::set(home);
+
+        let cache_path = home.join(".nexus42").join("creator_identity_cache.json");
+        std::fs::create_dir_all(cache_path.parent().unwrap()).expect("mkdir cache dir");
+        std::fs::write(&cache_path, "not valid json {").expect("write corrupt cache");
+
+        let req = PatchCreatorRequest {
+            display_name: Some("New Name".to_string()),
+        };
+        let result = patch_creator(State(state), Path("crt_corrupt".to_string()), Json(req)).await;
+        assert!(result.is_err(), "corrupt cache should be rejected");
+        match result.unwrap_err() {
+            NexusApiError::Internal { code, .. } => {
+                assert_eq!(code, "CACHE_PARSE_ERROR");
+            }
+            other => panic!("Expected Internal CACHE_PARSE_ERROR, got: {other}"),
+        }
+
+        let preserved = std::fs::read_to_string(&cache_path).expect("read cache");
+        assert_eq!(preserved, "not valid json {");
     }
 }
