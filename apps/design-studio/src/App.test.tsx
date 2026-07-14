@@ -612,11 +612,11 @@ describe('Surfaces page — AgentPicker fixtures', () => {
   });
 
   it('renders the V1.108 Verify Agent static state matrix (FB-UI-008)', () => {
-    // idle: Verify Agent button visible and enabled (command non-empty).
+    // idle: Verify button visible and enabled (command non-empty).
     const idleBtns = screen.getAllByTestId('agent-picker-verify');
     expect(idleBtns.length).toBeGreaterThanOrEqual(1);
 
-    const idleVerify = idleBtns.find((b) => b.textContent === 'Verify Agent');
+    const idleVerify = idleBtns.find((b) => b.textContent === 'Verify');
     expect(idleVerify).toBeTruthy();
 
     // loading: Verifying… label + disabled.

@@ -3,6 +3,100 @@
   "updated_at": "2026-07-13",
   "plans": [
     {
+      "id": "2026-07-13-v1.116-agent-detection-codex-native",
+      "title": "P0 - Agent Detection Fix + codex-native Provider",
+      "file": "plans/2026-07-13-v1.116-agent-detection-codex-native.md",
+      "status": "Done",
+      "owner": "@project-manager",
+      "agents": [
+        "@fullstack-dev",
+        "@frontend-dev"
+      ],
+      "progress": 100,
+      "tags": [
+        "v1.116",
+        "agent-detection",
+        "codex-native",
+        "blocker",
+        "must"
+      ],
+      "created_at": "2026-07-13",
+      "updated_at": "2026-07-14",
+      "notes": "Phase 2: SDD T1-T5 done + QC fix wave, QC tri Approve after revalidation, QA Pass with notes; 7 residuals deferred",
+      "metadata": {
+        "iteration_refs": [
+          "V1.116"
+        ],
+        "spec_integration_branch": "iteration/v1.116",
+        "merge_target": "iteration/v1.116",
+        "wire_contracts_changed": false,
+        "tier": "Must"
+      }
+    },
+    {
+      "id": "2026-07-13-v1.116-desktop-dev-design-studio-locale",
+      "title": "P1 - Desktop Dev Script + Design-studio Locale",
+      "file": "plans/2026-07-13-v1.116-desktop-dev-design-studio-locale.md",
+      "status": "Done",
+      "owner": "@project-manager",
+      "agents": [
+        "@frontend-dev",
+        "@ops-engineer"
+      ],
+      "progress": 100,
+      "tags": [
+        "v1.116",
+        "desktop-dev",
+        "design-studio",
+        "locale",
+        "hygiene",
+        "must"
+      ],
+      "created_at": "2026-07-13",
+      "updated_at": "2026-07-14",
+      "notes": "Phase 2: SDD T1-T3 done, QC tri Approve with residuals (1 low), QA Pass",
+      "metadata": {
+        "iteration_refs": [
+          "V1.116"
+        ],
+        "spec_integration_branch": "iteration/v1.116",
+        "merge_target": "iteration/v1.116",
+        "wire_contracts_changed": false,
+        "tier": "Must"
+      }
+    },
+    {
+      "id": "2026-07-13-v1.116-canvas-compute-readiness-research",
+      "title": "P2 - Canvas/Compute Readiness Research",
+      "file": "plans/2026-07-13-v1.116-canvas-compute-readiness-research.md",
+      "status": "Done",
+      "owner": "@project-manager",
+      "agents": [
+        "@architect"
+      ],
+      "progress": 100,
+      "tags": [
+        "v1.116",
+        "readiness",
+        "research",
+        "canvas",
+        "compute",
+        "should"
+      ],
+      "created_at": "2026-07-13",
+      "updated_at": "2026-07-14",
+      "notes": "Phase 2: inline research done, QC single-seat Approve (0 blocking, 4 suggestions), QA pm-acceptance",
+      "metadata": {
+        "iteration_refs": [
+          "V1.116"
+        ],
+        "spec_integration_branch": "iteration/v1.116",
+        "merge_target": "iteration/v1.116",
+        "wire_contracts_changed": false,
+        "tier": "Should"
+      }
+    },
+    {
       "id": "2026-07-13-v1.115-canvas-adapter-completion",
       "title": "P0 - Canvas Adapter Completion & Contract Convergence",
       "file": "plans/2026-07-13-v1.115-canvas-adapter-completion.md",
@@ -290,8 +384,8 @@
     "integration_branch_retired": true,
     "iteration_base_branch": "main",
     "last_integration_branch": "iteration/v1.115",
-    "latest_active_compass": null,
-    "latest_active_iteration": null,
+    "latest_active_compass": "v1.116-delivery-compass.md",
+    "latest_active_iteration": "V1.116",
     "latest_ship": {
       "iteration": "V1.115",
       "compass": "v1.115-delivery-compass.md",
@@ -302,7 +396,7 @@
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "pre_iteration_hotfix": null,
-    "spec_integration_branch": "iteration/v1.115",
+    "spec_integration_branch": "iteration/v1.116",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {
@@ -1458,6 +1552,99 @@
         "tracking_link": ".mstar/plans/2026-07-13-v1.115-compute-manifest-reconciliation.md",
         "note": "QC1-S-104. Doc polish."
       }
-    ]
+    ],
+    "2026-07-13-v1.116-agent-detection-codex-native": [
+      {
+        "id": "R-V1116P0QC1-S007",
+        "title": "Dead code set_agent_host_config with misleading doc comment",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.116",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-13-v1.116-agent-detection-codex-native.md",
+        "note": "QC1 F-A007 revalidation. Unused setter claimed \"Called from boot.rs\"."
+      },
+      {
+        "id": "R-V1116P0QC1-S008",
+        "title": "AgentHostSubsystem::start uses AgentHostConfig::default() for max_sessions/max_ops/timeouts",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.116",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-13-v1.116-agent-detection-codex-native.md",
+        "note": "QC1 F-A008. Same class as F-A001 at subsystem layer."
+      },
+      {
+        "id": "R-V1116P0QC3-S001",
+        "title": "json_capable degradation irreversible after transient codex --json failure",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.116",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-13-v1.116-agent-detection-codex-native.md",
+        "note": "QC3 S-001. Could add retry/reset logic."
+      },
+      {
+        "id": "R-V1116P0QC3-S003",
+        "title": "codex --json first-call waste on CLI versions that do not support it",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.116",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-13-v1.116-agent-detection-codex-native.md",
+        "note": "QC3 S-003. Could probe --help first."
+      },
+      {
+        "id": "R-V1116P0-T5-001",
+        "title": "COMMON_AGENT_PRIORITY does not include native CLI provider IDs (codex-native, claude-native)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.116",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-13-v1.116-agent-detection-codex-native.md",
+        "note": "T5 follow-up. Native entries land behind More agents toggle."
+      },
+      {
+        "id": "R-V1116P0QA-001",
+        "title": "CodexNativeProvider not registered in HostManager (pre-existing gap shared with claude-native)",
+        "severity": "medium",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.116",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-13-v1.116-agent-detection-codex-native.md",
+        "note": "QA finding. Discovery works (scan shows installed), but session creation fails. Same gap exists for claude-native. Wire both during boot in a follow-up."
+      },
+      {
+        "id": "R-V1116P0QA-002",
+        "title": "scan_local_installations_strips_nested_relative_path flaky on 1/3 runs (test isolation)",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.116",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-13-v1.116-agent-detection-codex-native.md",
+        "note": "QA observation. Not a regression; test isolation issue with timeout test."
+      }
+    ],
+    "2026-07-13-v1.116-desktop-dev-design-studio-locale": [
+      {
+        "id": "R-V1116P1QC1-I001",
+        "title": "Tauri empty-string devUrl override not empirically verified at runtime",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.116",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-13-v1.116-desktop-dev-design-studio-locale.md",
+        "note": "QC1 I-1 / QC3 W-001. Plan Step 2 has vite preview fallback if empty devUrl does not work. User should validate by running pnpm dev:desktop."
+      }
+    ],
+    "2026-07-13-v1.116-canvas-compute-readiness-research": []
   }
 }
