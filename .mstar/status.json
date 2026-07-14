@@ -6,13 +6,13 @@
       "id": "2026-07-14-v1.117-profiles-workspace",
       "title": "P0 - Profiles + per-Profile workspace",
       "file": "plans/2026-07-14-v1.117-profiles-workspace.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@fullstack-dev",
         "@frontend-dev"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.117",
         "profiles",
@@ -21,13 +21,14 @@
       ],
       "created_at": "2026-07-14",
       "updated_at": "2026-07-14",
-      "notes": "Phase 1 draft registered",
+      "notes": "Phase 2: SDD T1-T4 done + QC fix-wave; QC tri Approve with residuals; QA Pass (7/7 AC); 6 residuals deferred",
       "metadata": {
         "iteration_refs": [
           "V1.117"
         ],
         "spec_integration_branch": "iteration/v1.117",
         "merge_target": "iteration/v1.117",
+        "working_branch": "plan/v1.117-p0-profiles-workspace",
         "primary_spec": ".mstar/iterations/v1.117/specs/profiles-workspace.md",
         "wire_contracts_changed": false,
         "tier": "Must"
@@ -624,6 +625,74 @@
     "phase1_status": "locked"
   },
   "residual_findings": {
+    "2026-07-14-v1.117-profiles-workspace": [
+      {
+        "id": "R-V1117P0QC1-F002",
+        "title": "Daemon creator handlers use hand-written serde types; new PatchCreatorRequest bypasses @42ch/nexus-contracts codegen (creator-detail.schema.json exists, handlers not migrated)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.117",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-14-v1.117-profiles-workspace.md",
+        "note": "QC1 F-002. Codebase-wide daemon handler → generated types migration; pre-existing pattern. Out of V1.117 P0 scope."
+      },
+      {
+        "id": "R-V1117P0QC1-F005",
+        "title": "WorkspaceRoot Tauri state captured at startup; path-guard uses stale root after Profile switch until restart (V1.66 carry-over by design)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.117",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-14-v1.117-profiles-workspace.md",
+        "note": "QC1 F-005. Restart-honesty banner covers UX; path-guard refresh is V1.66+ scope."
+      },
+      {
+        "id": "R-V1117P0QC1-F008",
+        "title": "Six near-duplicate TOML round-trip-and-write helpers in desktop lib.rs; extract nexus_home_layout::config::read_and_update SSOT",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.117",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-14-v1.117-profiles-workspace.md",
+        "note": "QC1 F-008. Extends R-V195-ARCH-DUPLICATE-DEFAULTS to TOML-write helpers. atomic_write extracted for 3 new paths only."
+      },
+      {
+        "id": "R-V1117P0QC2-F005",
+        "title": "resolve_workspace_root_at returns None with no diagnostic when config.toml unreadable/corrupt",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.117",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-14-v1.117-profiles-workspace.md",
+        "note": "QC2 F-005. Fail-closed is correct; add diagnostic logging later."
+      },
+      {
+        "id": "R-V1117P0QC2-F006",
+        "title": "patch_creator display_name lacks control-character sanitization beyond length/non-empty",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.117",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-14-v1.117-profiles-workspace.md",
+        "note": "QC2 F-006. serde_json escapes correctly; low risk local-only."
+      },
+      {
+        "id": "R-V1117P0QC3-W001",
+        "title": "Footer switch two sequential Tauri calls (switchActiveCreator → getWorkspaceRoot); second-call failure leaves in-memory state inconsistent",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.117",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-14-v1.117-profiles-workspace.md",
+        "note": "QC3 W-002. Near-zero practical risk; getWorkspaceRoot reads pre-populated state."
+      }
+    ],
     "2026-07-05-v1.91-findings-batch": [
       {
         "id": "R-V191P1-005",
