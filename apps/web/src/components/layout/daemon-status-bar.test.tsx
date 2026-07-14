@@ -8,7 +8,7 @@
  * {@link MainBanner}.
  */
 import { http, HttpResponse } from 'msw';
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it, vi, afterEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { useLocation } from 'react-router-dom';
@@ -259,6 +259,32 @@ describe('DaemonStatusBar agent badge (V1.117 P2 T3)', () => {
     await userEvent.click(badge);
 
     await waitFor(() => expect(currentPath).toBe('/settings/agent'));
+  });
+});
+
+describe('DaemonStatusBar locale parity (V1.117 P2 T4)', () => {
+  // Isolate localStorage so the zh-CN preference does not leak into the other
+  // describe blocks in this file (they do not clear localStorage themselves).
+  afterEach(() => {
+    window.localStorage.clear();
+  });
+
+  it('renders the running tag + agent badge placeholder in zh-CN (AC-P2-7/8)', async () => {
+    window.localStorage.setItem('nexus-web-locale', 'zh-CN');
+    renderInApp(<DaemonStatusBar />, {
+      desktop: makeDesktop({ state: 'running' }),
+      client: new BrowserClient(),
+    });
+
+    const bar = await screen.findByTestId('daemon-status-bar');
+    // AC-P2-7: `running` tag is lowercase in BOTH locales (AD-P2-5 / grill-me #7).
+    expect(screen.getByText('running')).toBeInTheDocument();
+    // AC-P2-8: zh-CN daemon-running label + agent badge placeholder.
+    expect(bar).toHaveTextContent('守护进程运行中');
+    expect(bar).toHaveTextContent('未选择智能体');
+    // The deprecated `healthy` / `健康` status-tag copy must not appear.
+    expect(bar).not.toHaveTextContent('健康');
+    expect(bar).not.toHaveTextContent('healthy');
   });
 });
 
