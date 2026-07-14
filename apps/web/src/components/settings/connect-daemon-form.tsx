@@ -294,6 +294,8 @@ export function ConnectDaemonForm() {
               variant="tertiary"
               size="small"
               onClick={() => setShowKey((s) => !s)}
+              aria-label={showKey ? t('connection.hideKeyAria') : t('connection.showKeyAria')}
+              aria-pressed={showKey}
             >
               {showKey ? t('connection.hideKey') : t('connection.showKey')}
             </Button>

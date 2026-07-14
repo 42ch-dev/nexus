@@ -42,7 +42,7 @@
     "openStrategy": "Open Strategy",
     "openWorldKb": "Open World KB",
     "archiveWork": "Archive",
-    "confirmArchive": "Confirm",
+    "archiveWorkAria": "Archive Work",
     "findingsTitle": "Findings",
     "findingsDescription": "Findings raised against this Work, with severity filtering.",
     "findingsError": "Could not load findings for this Work.",
