@@ -57,6 +57,22 @@ pub fn scan_path(
         .ok_or_else(|| HostError::internal("PATH environment variable not found".to_string()))?;
 
     let path_dirs: Vec<PathBuf> = std::env::split_paths(&path_var).collect();
+    scan_path_in(config, suppressed_ids, &path_dirs)
+}
+
+/// Discover native CLI providers by scanning an explicit directory list.
+///
+/// Used by the daemon scan handler so probes see login-shell-equivalent dirs
+/// without mutating the process `PATH` on a live Tokio runtime.
+///
+/// # Errors
+///
+/// Currently infallible; returns [`HostResult`] for symmetry with [`scan_path`].
+pub fn scan_path_in(
+    config: &AgentHostConfig,
+    suppressed_ids: &[ProviderId],
+    path_dirs: &[PathBuf],
+) -> HostResult<Vec<ProviderCatalogEntry>> {
     let suppressed: HashSet<&ProviderId> = suppressed_ids.iter().collect();
 
     // Collect configured provider_ids for dedup
@@ -77,8 +93,8 @@ pub fn scan_path(
             continue;
         }
 
-        // Search PATH for the command
-        if let Some(found_path) = find_command(&path_dirs, cmd) {
+        // Search the provided dirs (and process PATH as a which fallback).
+        if let Some(found_path) = find_command(path_dirs, cmd) {
             entries.push(ProviderCatalogEntry {
                 provider_id: pid.clone(),
                 display_name: format!("{cmd} (native CLI)"),
@@ -112,16 +128,30 @@ pub fn scan_path(
 ///
 /// Falls back to manual PATH scan if the `which` crate fails internally,
 /// ensuring robustness even in unusual environment configurations.
-fn find_command(_path_dirs: &[PathBuf], command: &str) -> Option<PathBuf> {
+fn find_command(path_dirs: &[PathBuf], command: &str) -> Option<PathBuf> {
+    if !path_dirs.is_empty() {
+        if let Ok(joined) = std::env::join_paths(path_dirs) {
+            if let Ok(path) = which::which_in(command, Some(joined), std::path::Path::new(".")) {
+                return Some(path);
+            }
+        }
+    }
+
     if let Ok(path) = which::which(command) {
         return Some(path);
     }
 
-    // Fallback: manual PATH scan for environments where `which`
-    // may not find a command that actually exists (e.g., unusual
-    // PATH configurations or non-standard file permissions).
-    let path_var = std::env::var_os("PATH")?;
-    for dir in std::env::split_paths(&path_var) {
+    // Fallback: manual scan of the provided dirs, then the process PATH,
+    // for environments where `which` may not find a command that exists.
+    let search_dirs: Vec<PathBuf> = if path_dirs.is_empty() {
+        std::env::var_os("PATH")
+            .map(|p| std::env::split_paths(&p).collect())
+            .unwrap_or_default()
+    } else {
+        path_dirs.to_vec()
+    };
+
+    for dir in search_dirs {
         let candidate = dir.join(command);
         if candidate.is_file() {
             return Some(candidate);

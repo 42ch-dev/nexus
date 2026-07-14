@@ -174,6 +174,8 @@ fn login_equivalent_bin_dirs_with_sources() -> Vec<(PathBuf, Option<ManagerName>
             ".cargo/bin",
             ".npm-global/bin",
             ".bun/bin",
+            // Vendor agent CLIs that install outside Homebrew / npm-global.
+            ".kimi-code/bin",
             // Version-manager shims (existence-gated; QC B5).
             ".asdf/shims",
             ".local/share/mise/shims",
@@ -280,6 +282,37 @@ pub fn merge_path(
     }
 
     env::join_paths(&ordered)
+}
+
+/// Build the directory list used for agent CLI PATH probes at scan time.
+///
+/// Order: current process `PATH` entries first (so test isolation and
+/// user overrides win), then [`login_equivalent_bin_dirs`] that are not
+/// already present. Unlike [`apply_process_path_enrichment`], this does
+/// **not** mutate the process environment — safe to call from a live
+/// Tokio runtime (e.g. the scan handler).
+#[must_use]
+pub fn probe_path_dirs() -> Vec<PathBuf> {
+    let mut dirs = Vec::new();
+    let mut seen: HashSet<String> = HashSet::new();
+
+    if let Some(existing) = env::var_os("PATH") {
+        for dir in env::split_paths(&existing) {
+            let key = dir.to_string_lossy().into_owned();
+            if seen.insert(key) {
+                dirs.push(dir);
+            }
+        }
+    }
+
+    for dir in login_equivalent_bin_dirs() {
+        let key = dir.to_string_lossy().into_owned();
+        if seen.insert(key) {
+            dirs.push(dir);
+        }
+    }
+
+    dirs
 }
 
 /// Enrich the current process `PATH` with [`login_equivalent_bin_dirs`].
@@ -491,6 +524,69 @@ mod tests {
         match previous_home {
             Some(p) => env::set_var("HOME", p),
             None => env::remove_var("HOME"),
+        }
+    }
+
+    #[test]
+    fn login_equivalent_bin_dirs_includes_kimi_code_bin_when_present() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        let kimi = home.join(".kimi-code/bin");
+        std::fs::create_dir_all(&kimi).unwrap();
+
+        let _guard = PATH_TEST_LOCK.lock().unwrap();
+        let previous_home = env::var_os("HOME");
+        let stashed = stash_manager_env_vars();
+        env::set_var("HOME", home);
+
+        let dirs = login_equivalent_bin_dirs();
+        assert!(
+            dirs.iter().any(|d| d.ends_with(".kimi-code/bin")),
+            "expected ~/.kimi-code/bin in {dirs:?}"
+        );
+
+        restore_manager_env_vars(stashed);
+        match previous_home {
+            Some(p) => env::set_var("HOME", p),
+            None => env::remove_var("HOME"),
+        }
+    }
+
+    #[test]
+    fn probe_path_dirs_keeps_process_path_before_enrichment() {
+        let tmp = tempfile::tempdir().unwrap();
+        let home = tmp.path();
+        let kimi = home.join(".kimi-code/bin");
+        std::fs::create_dir_all(&kimi).unwrap();
+        let isolated = home.join("isolated-bin");
+        std::fs::create_dir_all(&isolated).unwrap();
+
+        let _guard = PATH_TEST_LOCK.lock().unwrap();
+        let previous_home = env::var_os("HOME");
+        let previous_path = env::var_os("PATH");
+        let stashed = stash_manager_env_vars();
+        env::set_var("HOME", home);
+        env::set_var("PATH", &isolated);
+
+        let dirs = probe_path_dirs();
+        assert_eq!(
+            dirs.first().map(PathBuf::as_path),
+            Some(isolated.as_path()),
+            "process PATH entry must stay first for test isolation / overrides"
+        );
+        assert!(
+            dirs.iter().any(|d| d == &kimi),
+            "enrichment dirs must be appended: {dirs:?}"
+        );
+
+        restore_manager_env_vars(stashed);
+        match previous_home {
+            Some(p) => env::set_var("HOME", p),
+            None => env::remove_var("HOME"),
+        }
+        match previous_path {
+            Some(p) => env::set_var("PATH", p),
+            None => env::remove_var("PATH"),
         }
     }
 
