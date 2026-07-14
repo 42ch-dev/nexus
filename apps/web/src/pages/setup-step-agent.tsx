@@ -11,6 +11,8 @@ import {
 } from '@/components/setup/agent-picker';
 import { useScanAgents, useVerifyAgent } from '@/api/queries';
 import { errorMessage } from '@/lib/error-message';
+import { useDesktopCapabilities } from '@/lib/client-context';
+import { useToast } from '@/lib/use-toast';
 import {
   defaultGridEntries,
   moreAgentsEntries,
@@ -97,6 +99,9 @@ function resolvePickerStatus(
 
 export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAgentProps) {
   const { t } = useTranslation('setup');
+  const { t: commonT } = useTranslation('common');
+  const desktop = useDesktopCapabilities();
+  const { toast } = useToast();
   const scan = useScanAgents({ filter: 'all', registry_refresh: true });
   const verifyAgent = useVerifyAgent();
   const agents = scan.data?.agents ?? [];
@@ -226,6 +231,10 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
           emptyTitle={t('step.agent.emptyTitle')}
           emptyDescription={t('step.agent.emptyDescription')}
           density="compact"
+          desktop={desktop ?? undefined}
+          onExternalUrlError={() => {
+            toast({ variant: 'error', title: commonT('error.openExternalFailed') });
+          }}
         />
       </div>
 

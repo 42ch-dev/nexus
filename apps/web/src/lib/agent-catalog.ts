@@ -39,6 +39,9 @@ export interface AgentCatalogItem {
 
 const loaded = overrides as AgentCatalogOverrides;
 
+/** Whitelisted URL values for membership checks (override.installUrl defence). */
+const whitelistUrlValues = new Set(Object.values(loaded.install_whitelist));
+
 export function resolveInstallUrl(key: string): string | null {
   return loaded.install_whitelist[key] ?? null;
 }
@@ -52,13 +55,32 @@ const NATIVE_LAUNCH_MAP: Record<string, string> = {
   codex: 'codex-native',
 };
 
+/**
+ * Extract the binary basename from a launch command — mirrors the basename
+ * logic in `launchCommandMatches` (`apps/web/src/api/queries.ts`).
+ *
+ * The daemon PATH-scan emits the **full resolved binary path** (e.g.
+ * `/usr/local/bin/claude`) as `launch_command`. To match the
+ * `NATIVE_LAUNCH_MAP` (keyed on bare names like `claude`), we normalise to
+ * the last `/`-separated segment of the first whitespace-delimited token,
+ * case-insensitively.
+ */
+function launchCommandBasename(launch: string): string {
+  const binary = launch.split(/\s+/)[0] ?? '';
+  const segs = binary.split('/');
+  return (segs[segs.length - 1] ?? '').toLowerCase();
+}
+
 export function resolveAgentKey(entry: AgentScanEntry): string {
   if (entry.registry_agent_id?.trim()) {
     return entry.registry_agent_id.trim();
   }
-  const launch = entry.launch_command?.trim().toLowerCase();
-  if (launch && NATIVE_LAUNCH_MAP[launch]) {
-    return NATIVE_LAUNCH_MAP[launch];
+  const launch = entry.launch_command?.trim();
+  if (launch) {
+    const basename = launchCommandBasename(launch);
+    if (basename && NATIVE_LAUNCH_MAP[basename]) {
+      return NATIVE_LAUNCH_MAP[basename];
+    }
   }
   return entry.name.trim();
 }
@@ -75,9 +97,10 @@ export function resolveCatalogItem(entry: AgentScanEntry): AgentCatalogItem {
     description: entry.description,
     iconUrl: entry.icon_url ?? agentOverride?.iconUrl ?? null,
     installed: entry.installed,
-    installUrl: agentOverride?.installUrl
-      ? (resolveInstallUrl(agentOverride.installUrl) ?? whitelistUrl)
-      : whitelistUrl,
+    installUrl:
+      agentOverride?.installUrl && whitelistUrlValues.has(agentOverride.installUrl)
+        ? agentOverride.installUrl
+        : whitelistUrl,
     docsUrl: agentOverride?.docsUrl ?? null,
     hiddenFromDefault: isHiddenFromDefault(key),
     priority: agentOverride?.priority,

@@ -101,6 +101,12 @@ export interface AgentPickerProps {
    * `<a target="_blank">` (desktop builds). Browser builds omit this prop.
    */
   desktop?: AgentPickerDesktop;
+  /**
+   * Called when `desktop.openExternalUrl` rejects (AD-P1-2: the host must
+   * surface a toast — do not silently no-op). Omitted on browser builds
+   * (where `desktop` is absent).
+   */
+  onExternalUrlError?: () => void;
 }
 
 /**
@@ -130,6 +136,7 @@ export function AgentPicker({
   emptyDescription,
   density = 'default',
   desktop,
+  onExternalUrlError,
 }: AgentPickerProps) {
   const { t } = useTranslation('setup');
   const compact = density === 'compact';
@@ -228,6 +235,7 @@ export function AgentPicker({
                     onSelect={stableOnSelect}
                     compact={compact}
                     desktop={desktop}
+                    onExternalUrlError={onExternalUrlError}
                   />
                 </li>
               ))}
@@ -258,6 +266,7 @@ export function AgentPicker({
                       onSelect={stableOnSelect}
                       compact={compact}
                       desktop={desktop}
+                      onExternalUrlError={onExternalUrlError}
                     />
                   </li>
                 ))}
@@ -297,12 +306,14 @@ const AgentCard = memo(function AgentCard({
   onSelect,
   compact,
   desktop,
+  onExternalUrlError,
 }: {
   agent: AgentPickerItem;
   selected: boolean;
   onSelect?: (id: string) => void;
   compact: boolean;
   desktop?: AgentPickerDesktop;
+  onExternalUrlError?: () => void;
 }) {
   const { t } = useTranslation('setup');
   const selectable = agent.installed;
@@ -344,10 +355,20 @@ const AgentCard = memo(function AgentCard({
 
       <div className="mt-3 flex flex-wrap items-center gap-3">
         {agent.installUrl ? (
-          <OutboundLink href={agent.installUrl} label={t('agentPicker.install')} desktop={desktop} />
+          <OutboundLink
+            href={agent.installUrl}
+            label={t('agentPicker.install')}
+            desktop={desktop}
+            onExternalUrlError={onExternalUrlError}
+          />
         ) : null}
         {agent.docsUrl ? (
-          <OutboundLink href={agent.docsUrl} label={t('agentPicker.docs')} desktop={desktop} />
+          <OutboundLink
+            href={agent.docsUrl}
+            label={t('agentPicker.docs')}
+            desktop={desktop}
+            onExternalUrlError={onExternalUrlError}
+          />
         ) : null}
       </div>
     </div>
@@ -474,20 +495,25 @@ function OutboundLink({
   href,
   label,
   desktop,
+  onExternalUrlError,
 }: {
   href: string;
   label: string;
   desktop?: AgentPickerDesktop;
+  onExternalUrlError?: () => void;
 }) {
   const handleClick = useCallback(
     (e: React.MouseEvent) => {
       if (!desktop?.openExternalUrl) return;
       e.preventDefault();
       desktop.openExternalUrl(href).catch(() => {
+        // AD-P1-2: surface the failure to the user via the host's toast.
+        // Do not silently no-op.
         console.error('Failed to open external URL:', href);
+        onExternalUrlError?.();
       });
     },
-    [desktop, href],
+    [desktop, href, onExternalUrlError],
   );
 
   return (

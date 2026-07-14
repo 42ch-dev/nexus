@@ -14,6 +14,7 @@ import { resolveCatalogItem } from '@/lib/agent-catalog';
 import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 import { BrowserClient } from '@/lib/nexus';
+import type { DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
 import type { AgentScanEntry } from '@42ch/nexus-contracts';
 import type { WizardState } from '@/pages/setup-wizard-page';
 
@@ -35,6 +36,35 @@ function makeAgent(overrides: Partial<AgentScanEntry> = {}): AgentScanEntry {
   return {
     name: 'test-agent',
     installed: false,
+    ...overrides,
+  };
+}
+
+function makeDesktop(
+  overrides: Partial<DesktopCapabilities> = {},
+): DesktopCapabilities {
+  return {
+    openWith: () => Promise.resolve(),
+    openExternalUrl: () => Promise.resolve(),
+    revealInFinder: () => Promise.resolve(),
+    getDaemonStatus: () => Promise.resolve({ state: 'running', port: 8420 }),
+    onDaemonStatusChanged: (cb) => {
+      cb({ state: 'running', port: 8420 });
+      return Promise.resolve(() => {});
+    },
+    startDaemon: () => Promise.resolve(),
+    stopDaemon: () => Promise.resolve(),
+    resetLocalDatabase: () => Promise.resolve(),
+    getSetupCompleted: () => Promise.resolve(true),
+    setSetupCompleted: () => Promise.resolve(),
+    setAgentProfile: () => Promise.resolve(),
+    getAgentProfile: () => Promise.resolve(null),
+    getWorkspaceRoot: () => Promise.resolve('/tmp/nexus'),
+    pickDirectory: () => Promise.resolve(null),
+    setWorkspacePath: () => Promise.resolve(),
+    ensureSetupBootstrap: () =>
+      Promise.resolve({ creator_id: 'ctr_local', already_bootstrapped: true }),
+    switchActiveCreator: () => Promise.resolve('/tmp/nexus'),
     ...overrides,
   };
 }
@@ -534,5 +564,40 @@ describe('SetupStepAgent', () => {
       expect(screen.getByTestId('agent-picker-verify-error')).toBeInTheDocument(),
     );
     expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
+  });
+
+  it('passes desktop capability to the picker so Install links use openExternalUrl (QC1 W1)', async () => {
+    const user = userEvent.setup();
+    const openExternalUrl = vi.fn().mockResolvedValue(undefined);
+    useHandlers(
+      http.post('/v1/daemon/agent-host/scan', () =>
+        HttpResponse.json({
+          agents: [
+            makeAgent({
+              name: 'Claude',
+              registry_agent_id: 'claude-native',
+              installed: true,
+            }),
+          ],
+        }),
+      ),
+    );
+
+    renderInApp(
+      <SetupStepAgent state={makeState()} onChange={vi.fn()} onNext={vi.fn()} />,
+      {
+        client: makeClient(),
+        initialRouterEntries: ['/setup'],
+        desktop: makeDesktop({ openExternalUrl }),
+      },
+    );
+
+    await waitFor(() => expect(screen.getByText('Claude')).toBeInTheDocument());
+
+    const installLink = screen.getByRole('link', { name: /Install/i });
+    await user.click(installLink);
+    expect(openExternalUrl).toHaveBeenCalledWith('https://claude.ai/code');
+    // Desktop links must not use target=_blank (AC-P1-2).
+    expect(installLink).not.toHaveAttribute('target');
   });
 });

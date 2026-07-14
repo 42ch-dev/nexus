@@ -548,4 +548,29 @@ describe('AgentPicker', () => {
     expect(installLinks[0]).toHaveAttribute('target', '_blank');
     expect(installLinks[0]).toHaveAttribute('rel', 'noopener noreferrer');
   });
+
+  it('calls onExternalUrlError when openExternalUrl rejects (QC3 W001)', async () => {
+    const user = userEvent.setup();
+    const openExternalUrl = vi.fn().mockRejectedValue(new Error('boom'));
+    const onExternalUrlError = vi.fn();
+    render(
+      <AgentPicker
+        status="ready"
+        defaultGrid={DEFAULT_GRID}
+        onSelect={() => undefined}
+        customLaunchValue=""
+        onCustomLaunchChange={() => undefined}
+        desktop={{ openExternalUrl }}
+        onExternalUrlError={onExternalUrlError}
+      />,
+    );
+
+    const installLinks = screen.getAllByRole('link', { name: /Install/i });
+    await user.click(installLinks[0]);
+    expect(openExternalUrl).toHaveBeenCalledWith('https://example.com/install');
+    // The rejection is surfaced via the callback so the host can toast (AD-P1-2).
+    await vi.waitFor(() => {
+      expect(onExternalUrlError).toHaveBeenCalledTimes(1);
+    });
+  });
 });

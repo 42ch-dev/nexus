@@ -65,6 +65,37 @@ describe('resolveAgentKey', () => {
     ).toBe('codex-native');
   });
 
+  it('maps full-path launch_command via basename (production daemon shape) — QC1 C1', () => {
+    // The daemon PATH-scan emits the full resolved binary path.
+    expect(
+      resolveAgentKey(
+        makeAgent({
+          registry_agent_id: null,
+          launch_command: '/usr/local/bin/claude',
+          name: 'claude (native CLI)',
+        }),
+      ),
+    ).toBe('claude-native');
+
+    expect(
+      resolveAgentKey(
+        makeAgent({
+          registry_agent_id: null,
+          launch_command: '/opt/homebrew/bin/codex',
+          name: 'codex (native CLI)',
+        }),
+      ),
+    ).toBe('codex-native');
+  });
+
+  it('maps launch_command with trailing args via basename', () => {
+    expect(
+      resolveAgentKey(
+        makeAgent({ registry_agent_id: null, launch_command: '/usr/local/bin/claude --foo' }),
+      ),
+    ).toBe('claude-native');
+  });
+
   it('falls back to name when no registry id or native signal', () => {
     expect(
       resolveAgentKey(makeAgent({ registry_agent_id: null, launch_command: null, name: 'custom-agent' })),
@@ -100,6 +131,16 @@ describe('resolveCatalogItem', () => {
       makeAgent({ name: 'unknown-agent', installed: false }),
     );
     expect(item.installUrl).toBeNull();
+  });
+
+  it('uses whitelist installUrl when override has no installUrl (PM minor fix)', () => {
+    // claude-native override has displayName+priority but no installUrl.
+    // The fix clarified: override.installUrl must be a whitelisted VALUE to
+    // render; with no override.installUrl, the key's whitelist URL applies.
+    const item = resolveCatalogItem(
+      makeAgent({ registry_agent_id: 'claude-native', name: 'Claude' }),
+    );
+    expect(item.installUrl).toBe('https://claude.ai/code');
   });
 
   it('sets hiddenFromDefault for ACP wrappers', () => {

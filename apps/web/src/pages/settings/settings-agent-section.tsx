@@ -273,6 +273,10 @@ export function SettingsAgentSection() {
           }
           onRetry={scan.isError ? () => void scan.refetch() : undefined}
           emptyTitle={t('agent.emptyTitle')}
+          desktop={desktop ?? undefined}
+          onExternalUrlError={() => {
+            toast({ variant: 'error', title: commonT('error.openExternalFailed') });
+          }}
         />
       </div>
 
