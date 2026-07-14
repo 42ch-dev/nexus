@@ -81,43 +81,44 @@ async function expandRestAgents(user: ReturnType<typeof userEvent.setup>) {
 }
 
 describe('mapScanEntriesToPickerItems / URL table', () => {
-  it('maps live registry ids (claude-acp / codex-acp / gemini) to outbound URLs', () => {
+  it('maps live registry ids (claude-native / codex-native / opencode) to outbound URLs', () => {
     const items = mapScanEntriesToPickerItems([
       makeAgent({
-        name: 'Claude Code',
-        registry_agent_id: 'claude-acp',
+        name: 'Claude',
+        registry_agent_id: 'claude-native',
         installed: true,
       }),
       makeAgent({
         name: 'Codex',
-        registry_agent_id: 'codex-acp',
+        registry_agent_id: 'codex-native',
         installed: true,
         version: '0.1.0',
       }),
       makeAgent({
-        name: 'Gemini CLI',
-        registry_agent_id: 'gemini',
+        name: 'OpenCode',
+        registry_agent_id: 'opencode',
         installed: false,
       }),
       makeAgent({ name: 'Unknown Agent', installed: false }),
     ]);
-    expect(items[0]!.id).toBe('claude-acp');
-    expect(items[0]!.installUrl).toContain('docs.anthropic.com');
-    expect(items[1]!.id).toBe('codex-acp');
-    expect(items[1]!.installUrl).toContain('github.com/openai/codex');
+    expect(items[0]!.id).toBe('claude-native');
+    expect(items[0]!.installUrl).toContain('claude.ai/code');
+    expect(items[1]!.id).toBe('codex-native');
+    expect(items[1]!.installUrl).toContain('openai.com/codex');
     expect(items[1]!.docsUrl).toBeNull();
-    expect(items[2]!.id).toBe('gemini');
-    expect(items[2]!.installUrl).toContain('gemini-cli');
+    expect(items[2]!.id).toBe('opencode');
+    expect(items[2]!.installUrl).toContain('opencode.ai');
     expect(items[3]!.installUrl).toBeNull();
     expect(items[3]!.docsUrl).toBeNull();
   });
 
-  it('lookupAgentOutboundUrls prefers live registry id then aliases', () => {
-    expect(lookupAgentOutboundUrls('claude-acp', 'Other').installUrl).toBeTruthy();
-    expect(lookupAgentOutboundUrls('codex-acp', 'Other').installUrl).toBeTruthy();
-    expect(lookupAgentOutboundUrls('gemini', 'Other').installUrl).toBeTruthy();
-    expect(lookupAgentOutboundUrls(null, 'codex').installUrl).toBeTruthy();
-    expect(lookupAgentOutboundUrls(null, 'nope')).toEqual({});
+  it('lookupAgentOutboundUrls returns URLs for whitelisted keys only', () => {
+    expect(lookupAgentOutboundUrls('claude-native', 'Other').installUrl).toBeTruthy();
+    expect(lookupAgentOutboundUrls('codex-native', 'Other').installUrl).toBeTruthy();
+    expect(lookupAgentOutboundUrls('opencode', 'Other').installUrl).toBeTruthy();
+    // Non-whitelisted keys return null
+    expect(lookupAgentOutboundUrls('claude-acp', 'Other').installUrl).toBeNull();
+    expect(lookupAgentOutboundUrls(null, 'nope').installUrl).toBeNull();
   });
 
   it('agentPickerId prefers registry_agent_id', () => {
@@ -438,15 +439,15 @@ describe('SetupStepAgent', () => {
     expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled();
   });
 
-  it('shows Install link for known registry ids and hides links when URLs missing', async () => {
+  it('shows Install link for whitelisted keys and hides links when URLs missing', async () => {
     const user = userEvent.setup();
     useHandlers(
       http.post('/v1/daemon/agent-host/scan', () =>
         HttpResponse.json({
           agents: [
             makeAgent({
-              name: 'Codex',
-              registry_agent_id: 'codex-acp',
+              name: 'OpenCode',
+              registry_agent_id: 'opencode',
               installed: true,
             }),
             makeAgent({ name: 'mystery-agent', installed: false }),
@@ -457,10 +458,10 @@ describe('SetupStepAgent', () => {
 
     renderHarness(makeState());
 
-    await waitFor(() => expect(screen.getByText('Codex')).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText('OpenCode')).toBeInTheDocument());
     expect(screen.getByRole('link', { name: /Install/i })).toHaveAttribute(
       'href',
-      'https://github.com/openai/codex',
+      'https://opencode.ai/download',
     );
     expect(screen.queryByRole('link', { name: /Docs/i })).not.toBeInTheDocument();
     // 'mystery-agent' is non-common — expand More to verify no links render.
