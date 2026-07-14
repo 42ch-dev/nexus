@@ -96,6 +96,13 @@ export interface DesktopCapabilities {
    * invoke transport errors are also surfaced as `null` so preselect never crashes.
    */
   getAgentProfile(): Promise<{ name: string; launchCommand?: string } | null>;
+  /**
+   * Switch the active Profile in `~/.nexus42/config.toml`, updating the active
+   * creator ID and mirroring the target Profile's workspace path to the legacy
+   * `workspace_path` key. Returns the resolved workspace path for the switched-to
+   * Profile (AC-P0-5).
+   */
+  switchActiveCreator(creatorId: string): Promise<string>;
   /** Resolve the default workspace root path (desktop only). */
   getWorkspaceRoot(): Promise<string>;
   /**
@@ -273,6 +280,14 @@ export class TauriDesktopCapabilities implements DesktopCapabilities {
     } catch {
       // Preselect path: treat invoke/transport failures as "no saved profile".
       return null;
+    }
+  }
+
+  async switchActiveCreator(creatorId: string): Promise<string> {
+    try {
+      return await tauriInvoke().core.invoke<string>('switch_active_creator', { creatorId });
+    } catch (err) {
+      throw asDesktopError(err);
     }
   }
 

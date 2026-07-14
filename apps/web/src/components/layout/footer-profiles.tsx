@@ -7,6 +7,9 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { useCreators, useCreateCreator } from '@/api/queries';
 import { useActiveCreatorId, useSetActiveCreatorId } from '@/lib/active-creator-context';
+import { useDesktopCapabilities } from '@/lib/client-context';
+import { useToast } from '@/lib/use-toast';
+import { errorMessage } from '@/lib/error-message';
 import { FooterProfilesChrome } from './presentational/footer-profiles-chrome';
 
 /**
@@ -15,14 +18,29 @@ import { FooterProfilesChrome } from './presentational/footer-profiles-chrome';
  * Thin wrapper around {@link FooterProfilesChrome}: owns the creator query,
  * active-creator context, and the create-creator dialog. The chrome owns the
  * presentational markup and data-testid SSOT.
+ *
+ * Desktop build: selecting a different Profile invokes the Tauri
+ * `switch_active_creator` command, mirrors the target workspace path, and
+ * refreshes the cached workspace root so the footer can show restart-honesty
+ * copy when the new path differs from the running daemon's startup-captured root
+ * (V1.104 honesty pattern).
+ *
+ * Browser build: the switch is a no-op with an honest desktop-only banner; no
+ * fake Profile switch is performed.
  */
 export function FooterProfiles() {
   const { t } = useTranslation('shell');
+  const { t: commonT } = useTranslation('common');
   const creators = useCreators();
   const activeCreatorId = useActiveCreatorId();
   const setActiveCreatorId = useSetActiveCreatorId();
+  const desktop = useDesktopCapabilities();
+  const { toast } = useToast();
   const [createOpen, setCreateOpen] = useState(false);
   const [focusIndex, setFocusIndex] = useState(0);
+  const [switching, setSwitching] = useState(false);
+  const [restartHonest, setRestartHonest] = useState(false);
+  const [browserNotice, setBrowserNotice] = useState(false);
   const itemRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   const items = creators.data?.items ?? [];
@@ -65,6 +83,38 @@ export function FooterProfiles() {
     }
   }
 
+  async function handleSelect(id: string) {
+    if (id === activeCreatorId || switching) return;
+    if (items.length <= 1) return;
+
+    if (!desktop) {
+      setBrowserNotice(true);
+      setRestartHonest(false);
+      return;
+    }
+
+    setSwitching(true);
+    setRestartHonest(false);
+    setBrowserNotice(false);
+
+    try {
+      const newPath = await desktop.switchActiveCreator(id);
+      const cachedRoot = await desktop.getWorkspaceRoot();
+      setActiveCreatorId(id);
+      if (newPath !== cachedRoot) {
+        setRestartHonest(true);
+      }
+    } catch (err) {
+      toast({
+        variant: 'error',
+        title: commonT('error.couldNotSwitchCreator'),
+        description: errorMessage(err) || commonT('toast.actionFailed'),
+      });
+    } finally {
+      setSwitching(false);
+    }
+  }
+
   const profiles = items.map((creator) => ({
     id: creator.creator_id,
     displayName: creator.display_name,
@@ -78,9 +128,7 @@ export function FooterProfiles() {
         addButtonLabel={t('profile.addButtonLabel')}
         profiles={profiles}
         focusIndex={focusIndex}
-        onSelect={(id) => {
-          if (items.length > 1) setActiveCreatorId(id);
-        }}
+        onSelect={handleSelect}
         onAdd={() => setCreateOpen(true)}
         onFocus={setFocusIndex}
         onKeyDown={handleKeyDown}
@@ -91,6 +139,27 @@ export function FooterProfiles() {
           itemRefs.current[items.length] = el;
         }}
       />
+
+      {browserNotice && (
+        <div
+          className="rounded-control border border-gray-alpha-400 bg-background-200 p-4 space-y-1"
+          data-testid="footer-profile-browser-notice"
+        >
+          <p className="text-copy-14 text-gray-900">
+            {t('profile.switchBrowserOnly')}
+          </p>
+        </div>
+      )}
+
+      {restartHonest && (
+        <div
+          className="rounded-control border border-gray-alpha-400 bg-background-200 p-4 space-y-1"
+          data-testid="footer-profile-switch-honesty"
+        >
+          <p className="text-copy-14 text-gray-900">{t('profile.switchedTitle')}</p>
+          <p className="text-copy-13 text-gray-700">{t('profile.switchedDescription')}</p>
+        </div>
+      )}
 
       <CreateCreatorDialog open={createOpen} onOpenChange={setCreateOpen} />
     </>

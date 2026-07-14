@@ -45,6 +45,7 @@ function makeDesktop(
         creator_id: 'ctr_local1234567890ab',
         already_bootstrapped: true,
       }),
+    switchActiveCreator: () => Promise.resolve('/tmp/nexus'),
     ...overrides,
   };
 }

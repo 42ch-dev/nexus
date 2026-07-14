@@ -158,6 +158,30 @@ describe('TauriDesktopCapabilities', () => {
     restoreTauri();
   });
 
+  it('switchActiveCreator invokes switch_active_creator with the creator id and returns the new path', async () => {
+    const { invoke } = mockTauri((cmd) => {
+      if (cmd === 'switch_active_creator') {
+        return Promise.resolve('/Users/author/Documents/nexus-profile-b');
+      }
+      return Promise.resolve(undefined);
+    });
+    const caps = new TauriDesktopCapabilities();
+    const path = await caps.switchActiveCreator('creator-b');
+    expect(invoke).toHaveBeenCalledWith('switch_active_creator', { creatorId: 'creator-b' });
+    expect(path).toBe('/Users/author/Documents/nexus-profile-b');
+    restoreTauri();
+  });
+
+  it('switchActiveCreator unwraps a structured error into DesktopCapabilityError', async () => {
+    mockTauri(() => Promise.reject({ code: 'invoke_failed', message: 'failed to switch active creator: config locked' }));
+    const caps = new TauriDesktopCapabilities();
+    await expect(caps.switchActiveCreator('creator-b')).rejects.toMatchObject({
+      code: 'invoke_failed',
+      message: 'failed to switch active creator: config locked',
+    });
+    restoreTauri();
+  });
+
   it('onDaemonStatusChanged listens for nexus://daemon-status-changed events', async () => {
     const handler = vi.fn();
     const listen = vi.fn().mockImplementation((event, cb) => {

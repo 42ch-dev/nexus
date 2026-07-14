@@ -72,7 +72,10 @@
     "displayNamePlaceholder": "例如 默认创作者",
     "cancel": "取消",
     "create": "创建",
-    "creating": "正在创建…"
+    "creating": "正在创建…",
+    "switchedTitle": "配置文件已切换",
+    "switchedDescription": "请重启或重新加载应用，以使守护进程使用新的工作区路径。",
+    "switchBrowserOnly": "切换配置文件仅在 Nexus 桌面应用中可用。"
   },
   "health": {
     "checking": "正在检查守护进程…",
