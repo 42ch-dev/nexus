@@ -9,8 +9,9 @@ under this directory (except `source/`) are **generated at build/dev time** via
 ## Source assets (committed)
 
 - `source/compose-app-icon.mjs` — reproducible composition script: centers
-  `packages/nexus-ui/assets/logos/logo_light.png` on a white background with
-  ~10% padding, then writes the raster outputs below.
+  `packages/nexus-ui/assets/logos/logo_light.png` on a **transparent canvas**
+  (`alpha: 0`) with ~10% padding and a soft drop shadow, then writes the raster
+  outputs below.
 - `source/source-1024.png` — composed 1024×1024 RGBA PNG used as the input
   for `tauri icon`. Tracked by Git LFS.
 - `source/app-icon-preview-256.png` — 256×256 preview render for QA/PR review
@@ -24,9 +25,13 @@ From the repo root (requires `sharp` in `apps/desktop` devDependencies):
 pnpm --filter desktop run icons:compose
 ```
 
-This reads `logo_light.png` (deep-blue 3D mark for light surfaces), places it on
-root `DESIGN.md` `colors.background-200`, adds a soft `brand-deep-blue-1000` drop
-shadow for depth, and regenerates `source-1024.png` + `app-icon-preview-256.png`.
+This reads `logo_light.png` (deep-blue 3D mark for light surfaces), composes it
+on a **fully transparent canvas** (`alpha: 0`), and adds a soft
+`brand-deep-blue-1000` drop shadow (opacity `0.12`) for depth. macOS applies the
+system squircle mask to the bundled asset; the composed PNG therefore provides
+only the logo + shadow — **no opaque full-bleed fill** (an opaque fill would
+render as a white square in the Dock). It then regenerates `source-1024.png` +
+`app-icon-preview-256.png`.
 
 ## Generating desktop icon formats
 
@@ -67,5 +72,27 @@ and reviewed in GitHub/GitLab.
 ## Aesthetic sign-off
 
 User aesthetic sign-off was deferred per the V1.85 compass. The current
-composition uses `logo_light.png` on root `DESIGN.md` `colors.background-200`
-(muted light shell surface). Review `source/app-icon-preview-256.png` at QA/PR time.
+composition uses `logo_light.png` on a **transparent canvas** with a soft
+`brand-deep-blue-1000` drop shadow (opacity `0.12`). As of V1.117 P3 the opaque
+`background-200` fill that caused a white Dock square was removed; macOS supplies
+the squircle plate. Review `source/app-icon-preview-256.png` at QA/PR time.
+
+## macOS Dock visual smoke
+
+AC-P3-3 requires a Dock visual smoke check before iteration close. To verify the
+asset renders as a logo on the system squircle (and **not** a full-bleed white
+square):
+
+1. Build/run the desktop shell locally —
+   `pnpm dev:desktop` (dist-load mode) or `pnpm dev:desktop:web` (HMR mode).
+2. Once the app window is open, inspect the **macOS Dock** entry for Nexus.
+3. **Pass:** the Dock tile shows the Nexus logo on the system squircle shape,
+   with the surrounding Dock wallpaper visible behind the transparent corners —
+   no opaque white/off-white plate around the mark.
+4. **Fail:** the Dock tile appears as a sharp-edged white/off-white square
+   containing the logo (indicates an opaque fill leaked back into the compose
+   step — re-check `compose-app-icon.mjs` canvas `alpha: 0`).
+
+The 256×256 preview PNG (`source/app-icon-preview-256.png`) uses the same
+transparent composition, but the Dock smoke is authoritative because the OS
+applies the squircle mask at runtime.
