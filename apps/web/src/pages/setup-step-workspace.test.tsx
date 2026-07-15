@@ -1,6 +1,6 @@
 import { useCallback, useState } from 'react';
 import { describe, expect, it, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 import { SetupStepWorkspace } from '@/pages/setup-step-workspace';
@@ -217,7 +217,10 @@ describe('SetupStepWorkspace', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Continue' }));
 
-    await waitFor(() => expect(screen.getByText('permission denied')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(within(screen.getByTestId('wizard-continue-error')).getByText('permission denied')).toBeInTheDocument(),
+    );
+    expect(screen.queryByRole('button', { name: 'Reset' })).not.toBeInTheDocument();
     expect(onNext).not.toHaveBeenCalled();
   });
 
@@ -251,7 +254,9 @@ describe('SetupStepWorkspace', () => {
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Continue' }));
-    await waitFor(() => expect(screen.getByText('permission denied')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(within(screen.getByTestId('wizard-continue-error')).getByText('permission denied')).toBeInTheDocument(),
+    );
 
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() => expect(onNext).toHaveBeenCalled());
@@ -299,20 +304,24 @@ describe('SetupStepWorkspace', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Continue' }));
 
-    await waitFor(() => expect(screen.getByText(/config write failed/)).toBeInTheDocument());
     await waitFor(() =>
-      expect(
-        screen.getByText(/Retry Continue, or use Reset local database below if the problem persists/),
-      ).toBeInTheDocument(),
+      expect(within(screen.getByTestId('wizard-continue-error')).getByText(/config write failed/)).toBeInTheDocument(),
     );
-    expect(screen.getByRole('button', { name: 'Reset' })).toBeInTheDocument();
+    // soft_bootstrap: inline alert shows the soft helper, Reset is NOT offered.
+    expect(
+      within(screen.getByTestId('wizard-continue-error')).getByText('Fix the issue and tap Continue again.'),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reset' })).not.toBeInTheDocument();
     expect(onNext).not.toHaveBeenCalled();
   });
 
   it('reset local database after bootstrap failure reloads without startDaemon', async () => {
     const user = userEvent.setup();
     const onNext = vi.fn();
-    const ensureSetupBootstrap = vi.fn(() => Promise.reject(new Error('config write failed')));
+    // Migration-class error -> classified `migration_db` -> Reset renders (AD-P0).
+    const ensureSetupBootstrap = vi.fn(() =>
+      Promise.reject(new Error('Failed to open creator database: Failed to run database migrations: schema mismatch')),
+    );
     const resetLocalDatabase = vi.fn(() => Promise.resolve());
     const startDaemon = vi.fn(() => Promise.resolve());
     const reloadSpy = vi.fn();
@@ -331,6 +340,11 @@ describe('SetupStepWorkspace', () => {
     await waitFor(() =>
       expect(screen.getByRole('button', { name: 'Reset' })).toBeInTheDocument(),
     );
+    // AC-P0-3: migration-class failure -> inline alert + Reset allowed.
+    expect(screen.getByTestId('wizard-continue-error')).toHaveAttribute('data-continue-error-class', 'migration_db');
+    expect(
+      within(screen.getByTestId('wizard-continue-error')).getByText('Failed to open creator database: Failed to run database migrations: schema mismatch'),
+    ).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Reset' }));
     await waitFor(() => expect(resetLocalDatabase).toHaveBeenCalled());
@@ -354,8 +368,13 @@ describe('SetupStepWorkspace', () => {
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Continue' }));
-    await waitFor(() => expect(screen.getByText(/config write failed/)).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: 'Reset' })).toBeInTheDocument();
+    await waitFor(() =>
+      expect(within(screen.getByTestId('wizard-continue-error')).getByText(/config write failed/)).toBeInTheDocument(),
+    );
+    // AC-P0-2 / AC-P0-5: soft_bootstrap shows inline error but NO Reset; Continue
+    // stays enabled so the author can retry without destructive recovery.
+    expect(screen.getByTestId('wizard-continue-error')).toHaveAttribute('data-continue-error-class', 'soft_bootstrap');
+    expect(screen.queryByRole('button', { name: 'Reset' })).not.toBeInTheDocument();
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Continue' }));
@@ -442,7 +461,12 @@ describe('SetupStepWorkspace', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Continue' }));
 
-    await waitFor(() => expect(screen.getByText('display name conflict')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(within(screen.getByTestId('wizard-continue-error')).getByText('display name conflict')).toBeInTheDocument(),
+    );
+    // AC-P0-2: display-name failure is soft (no Reset, no advance).
+    expect(screen.getByTestId('wizard-continue-error')).toHaveAttribute('data-continue-error-class', 'soft_display_name');
+    expect(screen.queryByRole('button', { name: 'Reset' })).not.toBeInTheDocument();
     expect(onNext).not.toHaveBeenCalled();
   });
 
@@ -452,6 +476,120 @@ describe('SetupStepWorkspace', () => {
 
     renderHarness(makeState({ workspaceRoot: '/tmp/nexus' }), { onNext });
 
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    await waitFor(() => expect(onNext).toHaveBeenCalled());
+  });
+});
+
+/**
+ * AC-P0-* acceptance verification for plan 2026-07-15-v1.119-setup-continue-unblock.
+ *
+ * Each test maps one acceptance criterion and exercises the `data-continue-error-class`
+ * / `data-continue-error-phase` test surfaces added in T2/T3. Together with the
+ * scenario tests above (which carry the same class assertions), these give a single
+ * traceable home for each AC-P0-*.
+ */
+describe('AC-P0-* acceptance (setup-continue-unblock)', () => {
+  it('AC-P0-1: happy-path Continue advances to Done without showing Reset', async () => {
+    const user = userEvent.setup();
+    const onNext = vi.fn();
+    const stalePath = '/Users/x/Documents/nexus42/default';
+
+    renderHarness(makeState({ workspaceRoot: stalePath, profileDisplayName: 'default' }), {
+      desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve(stalePath) }),
+      onNext,
+    });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() => expect(onNext).toHaveBeenCalled());
+    // No error state on the happy path: no inline alert, no Reset, no phase.
+    expect(screen.queryByTestId('wizard-continue-error')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reset' })).not.toBeInTheDocument();
+    expect(screen.getByTestId('wizard-cta-row')).not.toHaveAttribute('data-continue-error-phase');
+  });
+
+  it('AC-P0-2: soft failure shows inline error (no Reset)', async () => {
+    const user = userEvent.setup();
+    const onNext = vi.fn();
+    const ensureSetupBootstrap = vi.fn(() => Promise.reject(new Error('config write failed')));
+
+    renderHarness(makeState({ workspaceRoot: '/custom/nexus' }), {
+      desktop: makeDesktop({ ensureSetupBootstrap }),
+      onNext,
+    });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+
+    const alert = await screen.findByTestId('wizard-continue-error');
+    expect(alert).toHaveAttribute('data-continue-error-class', 'soft_bootstrap');
+    expect(screen.getByTestId('wizard-cta-row')).toHaveAttribute('data-continue-error-phase', 'bootstrap');
+    // Soft classes never offer Reset (spec product rule 3).
+    expect(screen.queryByRole('button', { name: 'Reset' })).not.toBeInTheDocument();
+    expect(onNext).not.toHaveBeenCalled();
+  });
+
+  it('AC-P0-3: migration-class failure shows inline error + Reset', async () => {
+    const user = userEvent.setup();
+    const ensureSetupBootstrap = vi.fn(() =>
+      Promise.reject(new Error('Failed to open creator database: Failed to run database migrations: schema mismatch')),
+    );
+
+    renderHarness(makeState({ workspaceRoot: '/custom/nexus' }), {
+      desktop: makeDesktop({ ensureSetupBootstrap }),
+    });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+
+    const alert = await screen.findByTestId('wizard-continue-error');
+    expect(alert).toHaveAttribute('data-continue-error-class', 'migration_db');
+    expect(screen.getByTestId('wizard-cta-row')).toHaveAttribute('data-continue-error-phase', 'bootstrap');
+    expect(screen.getByRole('button', { name: 'Reset' })).toBeInTheDocument();
+  });
+
+  it('AC-P0-4: inline alert is present whenever an error is set (toast secondary only)', async () => {
+    const user = userEvent.setup();
+    const setWorkspacePath = vi.fn(() => Promise.reject(new Error('permission denied')));
+    const stalePath = '/Users/x/Documents/nexus42/default';
+
+    renderHarness(makeState({ workspaceRoot: stalePath }), {
+      desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve(stalePath), setWorkspacePath }),
+    });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+
+    // The inline alert is the primary signal — it must be present (with role=alert)
+    // whenever continueError is set, regardless of the toast.
+    const alert = await screen.findByTestId('wizard-continue-error');
+    expect(alert).toHaveAttribute('role', 'alert');
+    expect(alert).toHaveAttribute('data-continue-error-class', 'soft_workspace_path');
+  });
+
+  it('AC-P0-5: after a soft failure, Continue retry succeeds without reload', async () => {
+    const user = userEvent.setup();
+    const onNext = vi.fn();
+    const ensureSetupBootstrap = vi
+      .fn()
+      .mockRejectedValueOnce(new Error('config write failed'))
+      .mockResolvedValueOnce({ creator_id: 'ctr_local1234567890ab', already_bootstrapped: false });
+
+    renderHarness(makeState({ workspaceRoot: '/custom/nexus' }), {
+      desktop: makeDesktop({ ensureSetupBootstrap }),
+      onNext,
+    });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
+    // First Continue: soft failure (soft_bootstrap) — Continue stays enabled.
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+    const alert = await screen.findByTestId('wizard-continue-error');
+    expect(alert).toHaveAttribute('data-continue-error-class', 'soft_bootstrap');
+
+    // Retry without reload — second Continue resolves and advances.
     await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() => expect(onNext).toHaveBeenCalled());

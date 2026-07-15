@@ -437,8 +437,11 @@ pub async fn get_creator(
 /// Updates the local `creator_identity_cache.json` entry for the given creator,
 /// creating a minimal entry if one does not yet exist.
 ///
-/// **Note:** `display_name` updates also upsert into the creator SQL table and require an open pool;
-/// when no Profile is attached yet, the request may return HTTP 409 `uninitialized` (plan QC residual).
+/// **Note:** `display_name` updates also upsert into the creator SQL table and require an open pool.
+/// When `active_creator_id` is present in config but the pool is not yet open (clean first run
+/// after `ensureSetupBootstrap`), the pool is lazily attached here (mirroring
+/// `require_active_creator`). When no creator is active in config at all, the request returns
+/// HTTP 409 `uninitialized`.
 pub async fn patch_creator(
     State(state): State<WorkspaceState>,
     Path(creator_id): Path<String>,
@@ -518,6 +521,22 @@ pub async fn patch_creator(
         })?;
 
     if let Some(display_name) = req.display_name {
+        // Lazily attach the creator pool when `active_creator_id` is present in
+        // config but the pool is not yet open. On a clean first run the daemon
+        // boots without a creator DB (AC-P0-1); `ensureSetupBootstrap` then
+        // writes `active_creator_id` to config, but PATCH creator is Tier-1 (no
+        // `require_active_creator` middleware) so without this attach the
+        // display-name persist returns HTTP 409 `uninitialized`. Mirrors the
+        // `require_active_creator` middleware (api/middleware.rs).
+        if state.pool().is_none() && read_active_creator_id(state.nexus_home()).is_some() {
+            state
+                .ensure_creator_pool()
+                .await
+                .map_err(|e| NexusApiError::Internal {
+                    code: "DATABASE_ERROR".into(),
+                    message: e.to_string(),
+                })?;
+        }
         // Write the display name to the SQL `creators` table so that `list_creators`
         // (used by the footer via useCreators()) reflects the rename as well as
         // the JSON identity cache (QC1-F-001).
