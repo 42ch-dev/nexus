@@ -106,11 +106,11 @@ pub fn resolve_state_db_path(user_home: &Path, nexus_root: &Path) -> anyhow::Res
     ))
 }
 
-/// Non-fatal variant of [`resolve_state_db_path`].
+/// Read `active_creator_id` from `~/.nexus42/config.toml` without failing.
 ///
-/// Read `active_creator_id` from CLI config when present.
-///
-/// Returns `None` when absent or config cannot be read — non-fatal for Tier-0/Tier-1.
+/// Used by Tier-0/Tier-1 handlers and [`require_active_creator`](crate::api::middleware::require_active_creator)
+/// to distinguish "no Profile selected yet" from fatal config errors. Returns `None` when the key is
+/// absent or the config file cannot be read.
 #[must_use]
 pub fn try_active_creator_id(nexus_root: &Path) -> Option<String> {
     CliConfigSnapshot::load(nexus_root)

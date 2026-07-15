@@ -1,6 +1,6 @@
 # Desktop Shell (Tauri) — Specification v1
 
-**Status**: Shipped (V1.66) — Tauri Desktop Shell delivered (QC tri-review Approve after fix-wave-1 + QA Pass). **V1.118 Draft amendment** (§13.11 Daemon no-Profile boot — Profile is a business gate, not a sidecar boot prerequisite).
+**Status**: Shipped (V1.66) — Tauri Desktop Shell delivered (QC tri-review Approve after fix-wave-1 + QA Pass). **V1.118 P0 shipped** (§13.11 Daemon no-Profile boot — Profile is a business gate, not a sidecar boot prerequisite).
 **Document class**: Feature line
 **Created**: 2026-06-25 (Phase 2b, `@architect`)
 **Scope**: Nexus desktop shell contract — `apps/desktop` Tauri v2 wrapper, SPA adapter selection (`TauriClient`), desktop-only `NexusClient` extensions, native file actions + path guard, bundled `nexus42` sidecar lifecycle, port discovery, capability detection, macOS-first unsigned dev build. V1.67+ deferrals (signing, multi-OS, auto-update, in-process lib link, body editor) recorded in §2.
@@ -296,7 +296,9 @@ V1.97 does not change daemon routes, JSON schemas, generated TypeScript/Rust con
 
 > **Partial supersession (V1.105):** §13.9.1 bootstrap **timing** moves to Workspace **Continue** (§13.10.3). §13.9.2 Rule 13 gating is **rewritten** by §13.10.1 (D2 — always auto-start). Bootstrap IPC contract itself remains valid.
 
-**Product behavior target.** A clean desktop install must complete the full wizard path without a pre-daemon `No active creator` failure. A new bootstrap substep between workspace selection and daemon start creates the minimum creator/workspace state the daemon requires to boot.
+**Product behavior target (historical).** A clean desktop install must complete the full wizard path without a pre-daemon `No active creator` failure. A new bootstrap substep between workspace selection and daemon start creates the minimum creator/workspace state the daemon requires to boot.
+
+> **Superseded by §13.11 (V1.118):** Daemon boot no longer requires `active_creator_id`; bootstrap IPC is wizard convenience only, not a sidecar boot gate.
 
 **Contract location:** The authoritative implementation-ready contract is [`.mstar/iterations/v1.100/specs/desktop-first-launch-bootstrap.md`](../iterations/v1.100/specs/desktop-first-launch-bootstrap.md). This section records the product behavior; the iteration contract is SSOT for implementation details (bootstrap mechanism, daemon-start timing matrix, minimum state, idempotency contract, reuse targets).
 
@@ -390,9 +392,11 @@ Prefer `wire_contracts_changed: false`. Portrait shell: `wizard-max-width` **480
 
 ### 13.11 V1.118 Amendments — Daemon no-Profile boot
 
-> **Status:** Draft (V1.118) — architect plan **done** (2026-07-15). Iteration SSOT: [`.mstar/iterations/v1.118/specs/daemon-no-profile-boot.md`](../iterations/v1.118/specs/daemon-no-profile-boot.md). Runtime detail: [daemon-runtime.md](./daemon-runtime.md) §17. Fold into this Master at V1.118 P5 hygiene.
+> **Status:** P0 shipped (V1.118, 2026-07-15). Iteration SSOT: [`.mstar/iterations/v1.118/specs/daemon-no-profile-boot.md`](../iterations/v1.118/specs/daemon-no-profile-boot.md). Runtime detail: [daemon-runtime.md](./daemon-runtime.md) §17. Fold into this Master at V1.118 P5 hygiene.
 
 **Product behavior target.** The daemon **must** reach healthy Running on an empty `~/.nexus42` home **without** `active_creator_id`. Profile creation/selection remains in setup and footer Profiles — not a sidecar boot prerequisite.
+
+**Verification (P0 T3):** `apps/desktop/src-tauri/src/sidecar.rs` — `clean_home_nexus42_daemon_reaches_healthy_without_profile`, `clean_home_creators_tier1_before_profile`, `clean_home_sidecar_manager_attaches_to_running_daemon`; `apps/desktop/src-tauri/src/lib.rs` — `v118_clean_home_without_nexus42_dir_resolves_default_workspace`, `v118_always_start_sidecar_without_prior_bootstrap`. **CI gap:** these tests are not yet wired in GitHub Actions (plan residual I-1).
 
 **Supersedes (product assumption, not necessarily IPC removal):** §13.9–§13.10 treating creator bootstrap as required for daemon boot. `ensureSetupBootstrap` may remain idempotent on wizard Workspace Continue but is **no longer** the clean-state boot gate.
 

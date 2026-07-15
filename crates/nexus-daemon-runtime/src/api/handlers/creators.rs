@@ -436,6 +436,9 @@ pub async fn get_creator(
 ///
 /// Updates the local `creator_identity_cache.json` entry for the given creator,
 /// creating a minimal entry if one does not yet exist.
+///
+/// **Note:** `display_name` updates also upsert into the creator SQL table and require an open pool;
+/// when no Profile is attached yet, the request may return HTTP 409 `uninitialized` (plan QC residual).
 pub async fn patch_creator(
     State(state): State<WorkspaceState>,
     Path(creator_id): Path<String>,

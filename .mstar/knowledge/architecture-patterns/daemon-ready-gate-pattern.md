@@ -199,7 +199,7 @@ Rules 9 + 10 fix the supervisor state machine so a real spawn is actually attemp
 
 **Source:** V1.105 plans `2026-07-10-v1.105-daemon-fullscreen-gate` + `wizard-ia-reorder` + `portrait-shell-steps`; masters `desktop-shell.md` §13.10 / `web-ui.md` §29.13.
 
-> Residual `R-V197-SMOKE-CLEAN-STATE` was closed by V1.100 P0. V1.105 moves bootstrap **after** Ready (Workspace Continue) while keeping always-start — clean-state Ready may still fail until creator exists; authors recover via splash reset/reload after Workspace bootstrap on a subsequent attempt, or complete Workspace Continue once Ready is reached on partial state.
+> Residual `R-V197-SMOKE-CLEAN-STATE` was closed by V1.100 P0. V1.105 moves bootstrap **after** Ready (Workspace Continue) while keeping always-start. **V1.118 P0 supersedes the no-creator boot failure:** clean home reaches T0 health without `active_creator_id`; bootstrap remains optional wizard convenience (§13.11 / daemon-runtime §17).
 
 ### Rule 14 (V1.101): enrich process PATH at daemon boot for agent CLI discovery (Class B) — no schemas/
 
