@@ -63,7 +63,7 @@ describe('WorkRail', () => {
     await i18n.changeLanguage('en');
   });
 
-  it('renders the works list with the current work highlighted', async () => {
+  it('renders the works list with the current work highlighted on outline', async () => {
     useRailHandlers();
     renderRail();
 
@@ -74,6 +74,23 @@ describe('WorkRail', () => {
     expect(screen.getByTestId('work-rail-item-work-b')).toBeInTheDocument();
     expect(screen.getByTestId('work-rail-item-work-a')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByTestId('work-rail-item-work-b')).not.toHaveAttribute('aria-current');
+  });
+
+  it('does not set aria-current on the current work while on chapters', async () => {
+    useRailHandlers();
+
+    renderInApp(
+      <Routes>
+        <Route path="/works/:workId/chapters" element={<WorkRail />} />
+      </Routes>,
+      { client: makeClient(), initialRouterEntries: ['/works/work-a/chapters'] },
+    );
+
+    await waitFor(() => {
+      expect(screen.getByTestId('work-rail-item-work-a')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('work-rail-item-work-a')).not.toHaveAttribute('aria-current');
   });
 
   it('shows metadata preview for the route-scoped work', async () => {

@@ -1,5 +1,5 @@
 /**
- * Work-route nesting under WorkShellLayout — V1.118 P2 T2.
+ * Work-route nesting under WorkShellLayout — V1.118 P2 T2/T3.
  */
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
@@ -7,6 +7,7 @@ import { Navigate, Route, Routes, useLocation } from 'react-router-dom';
 
 import { WorkShellLayout } from '@/components/layout/work-shell-layout';
 import { cn } from '@/lib/utils';
+import { isWorkShellRoute } from '@/lib/work-shell-routes';
 import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 import { worksList, workDetail } from '@/test/handlers';
@@ -15,11 +16,6 @@ import { i18n } from '@/lib/i18n/config';
 
 function makeClient() {
   return new BrowserClient();
-}
-
-/** Mirrors RootLayout main wrapper opt-out for work shell routes (T2). */
-function isWorkShellRoute(pathname: string): boolean {
-  return /^\/works\/[^/]+(?:\/|$)/.test(pathname);
 }
 
 function WorkRouteTree() {
@@ -34,6 +30,7 @@ function WorkRouteTree() {
       data-testid={workShell ? 'main-work-shell' : 'main-standard'}
     >
       <Routes>
+        <Route path="works/chapters" element={<div data-testid="works-chapters-list">Chapters list</div>} />
         <Route path="works/:workId" element={<WorkShellLayout />}>
           <Route index element={<Navigate to="outline" replace />} />
           <Route path="outline" element={<div data-testid="outline-route">Outline</div>} />
@@ -110,5 +107,21 @@ describe('work route nesting (T2)', () => {
     });
     expect(screen.getByTestId('chapters-route')).toBeInTheDocument();
     expect(screen.getByTestId('main-work-shell')).toBeInTheDocument();
+  });
+
+  it('keeps standard main width on the reserved /works/chapters sibling route (T3)', async () => {
+    useWorkRouteHandlers();
+
+    renderInApp(<WorkRouteTree />, {
+      client: makeClient(),
+      initialRouterEntries: ['/works/chapters'],
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('works-chapters-list')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('main-standard')).toBeInTheDocument();
+    expect(screen.queryByTestId('main-work-shell')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('work-shell-layout')).not.toBeInTheDocument();
   });
 });

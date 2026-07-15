@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { NavLink, useParams } from 'react-router-dom';
+import { NavLink, useMatch, useParams } from 'react-router-dom';
 import { BookOpen } from 'lucide-react';
 
 import { flattenPages, useWork, useWorks } from '@/api/queries';
@@ -50,36 +50,58 @@ export function WorkRail({ onWorkSelect, showHeader = true }: WorkRailProps) {
           <p className="px-4 py-6 text-copy-14 text-gray-700">{t('workShell.noWorks')}</p>
         ) : (
           <ul className="flex flex-col gap-0.5 p-2" aria-label={t('workShell.worksListAria')}>
-            {works.map((work) => {
-              const isCurrent = work.work_id === workId;
-              return (
-                <li key={work.work_id}>
-                  <NavLink
-                    to={`/works/${encodeURIComponent(work.work_id)}/outline`}
-                    onClick={() => onWorkSelect?.()}
-                    aria-current={isCurrent ? 'page' : undefined}
-                    data-testid={`work-rail-item-${work.work_id}`}
-                    className={({ isActive }) =>
-                      cn(
-                        'flex w-full items-center gap-2 rounded-control px-3 py-2 text-left text-label-14 transition-colors duration-state ease-standard',
-                        isCurrent || isActive
-                          ? 'bg-gray-alpha-100 text-gray-1000'
-                          : 'text-gray-800 hover:bg-gray-alpha-100 hover:text-gray-1000',
-                      )
-                    }
-                  >
-                    <BookOpen className="h-4 w-4 shrink-0 text-gray-700" aria-hidden />
-                    <span className="min-w-0 flex-1 truncate">{work.title || t('workShell.untitled')}</span>
-                  </NavLink>
-                </li>
-              );
-            })}
+            {works.map((work) => (
+              <WorkRailListItem
+                key={work.work_id}
+                workId={work.work_id}
+                title={work.title || t('workShell.untitled')}
+                currentWorkId={workId}
+                onWorkSelect={onWorkSelect}
+              />
+            ))}
           </ul>
         )}
       </div>
 
       <WorkRailPreview workId={workId} />
     </div>
+  );
+}
+
+function WorkRailListItem({
+  workId,
+  title,
+  currentWorkId,
+  onWorkSelect,
+}: {
+  workId: string;
+  title: string;
+  currentWorkId: string;
+  onWorkSelect?: () => void;
+}) {
+  const outlinePath = `/works/${encodeURIComponent(workId)}/outline`;
+  const outlineMatch = useMatch({ path: outlinePath, end: false });
+  const isOutlineActive = outlineMatch !== null;
+  const isCurrentWork = workId === currentWorkId;
+
+  return (
+    <li>
+      <NavLink
+        to={outlinePath}
+        onClick={() => onWorkSelect?.()}
+        aria-current={isOutlineActive ? 'page' : undefined}
+        data-testid={`work-rail-item-${workId}`}
+        className={cn(
+          'flex w-full items-center gap-2 rounded-control px-3 py-2 text-left text-label-14 transition-colors duration-state ease-standard',
+          isCurrentWork || isOutlineActive
+            ? 'bg-gray-alpha-100 text-gray-1000'
+            : 'text-gray-800 hover:bg-gray-alpha-100 hover:text-gray-1000',
+        )}
+      >
+        <BookOpen className="h-4 w-4 shrink-0 text-gray-700" aria-hidden />
+        <span className="min-w-0 flex-1 truncate">{title}</span>
+      </NavLink>
+    </li>
   );
 }
 

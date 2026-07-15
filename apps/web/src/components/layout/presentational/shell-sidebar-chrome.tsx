@@ -48,11 +48,8 @@ export interface ShellSidebarChromeProps {
    */
   isActiveItem?: (item: ShellNavItem, activeRoute: string) => boolean;
   /**
-   * Optional work-context drill-in mode (V1.117 AD-P2-1). When provided, the
-   * chrome hides the Creator/Orchestrator tablist and renders these items as a
-   * flat list (no group disclosures) in the scrollable nav region. The footer
-   * (Settings + profiles) is unaffected. When absent, the normal tab + group
-   * IA is rendered (backward-compatible).
+   * @deprecated V1.118 P2 — work-context drill-in is retired; keep one release
+   * for downstream fixtures. Do not pass from production sidebar.
    */
   drillInItems?: ShellNavItem[];
   /** Optional custom renderer for the Settings footer utility link. */

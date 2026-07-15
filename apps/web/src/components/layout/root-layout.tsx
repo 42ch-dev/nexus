@@ -8,6 +8,7 @@ import { Header } from '@/components/layout/header';
 import { MainBanner } from '@/components/layout/main-banner';
 import { Sidebar } from '@/components/layout/sidebar';
 import { useHotkey } from '@/lib/use-hotkey';
+import { isWorkShellRoute } from '@/lib/work-shell-routes';
 import { cn } from '@/lib/utils';
 
 const ROUTE_KEYS: Record<string, string> = {
@@ -54,11 +55,6 @@ function useRouteTitle(): string {
  * side padding. V1.94 adds the {@link MainBanner} for daemon degraded/error
  * states; the footer status bar is restart-icon-only when running.
  */
-/** True when the active route is a canvas-first work shell (`/works/:workId/*`). */
-function isWorkShellRoute(pathname: string): boolean {
-  return /^\/works\/[^/]+(?:\/|$)/.test(pathname);
-}
-
 export function RootLayout() {
   const { t } = useTranslation('shell');
   const { pathname } = useLocation();
