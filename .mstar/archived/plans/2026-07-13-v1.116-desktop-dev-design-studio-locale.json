@@ -1,0 +1,32 @@
+{
+  "id": "2026-07-13-v1.116-desktop-dev-design-studio-locale",
+  "title": "P1 - Desktop Dev Script + Design-studio Locale",
+  "file": "plans/2026-07-13-v1.116-desktop-dev-design-studio-locale.md",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": [
+    "@frontend-dev",
+    "@ops-engineer"
+  ],
+  "progress": 100,
+  "tags": [
+    "v1.116",
+    "desktop-dev",
+    "design-studio",
+    "locale",
+    "hygiene",
+    "must"
+  ],
+  "created_at": "2026-07-13",
+  "updated_at": "2026-07-14",
+  "notes": "Phase 2: SDD T1-T3 done, QC tri Approve with residuals (1 low), QA Pass",
+  "metadata": {
+    "iteration_refs": [
+      "V1.116"
+    ],
+    "spec_integration_branch": "iteration/v1.116",
+    "merge_target": "iteration/v1.116",
+    "wire_contracts_changed": false,
+    "tier": "Must"
+  }
+}

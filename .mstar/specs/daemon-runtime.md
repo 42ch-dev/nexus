@@ -4,7 +4,7 @@
 
 | Attribute | Value |
 | --- | --- |
-| **Status** | Normative — V1.65 Prepare amendment (bundled local Web UI serving + chapter-content Daemon API route family); **V1.66 Phase 2b amendment** (§12: Tauri sidecar mode launch/readiness/lifecycle contract); **V1.86 amendment** (§13: Daemon API trust-boundary security — Origin allowlist, deny-fs-without-workspace, component-wise path guard); **V1.90 amendment** (§14: Daemon API remote bind gate; normative surface renaming from Local API to Daemon API with `/v1/daemon/` path prefix); **V1.92 amendment** (§15–16: transport security (TLS) + remote client connection model) |
+| **Status** | Normative — V1.65 Prepare amendment (bundled local Web UI serving + chapter-content Daemon API route family); **V1.66 Phase 2b amendment** (§12: Tauri sidecar mode launch/readiness/lifecycle contract); **V1.86 amendment** (§13: Daemon API trust-boundary security — Origin allowlist, deny-fs-without-workspace, component-wise path guard); **V1.90 amendment** (§14: Daemon API remote bind gate; normative surface renaming from Local API to Daemon API with `/v1/daemon/` path prefix); **V1.92 amendment** (§15–16: transport security (TLS) + remote client connection model); **V1.118 amendment** (§17: no-Profile boot + lazy `state.db` open) |
 | **Document class** | Master |
 | **Normative scope** | Architecture boundaries, process model, subsystem responsibilities, pre-release constraints |
 | **Related** | [cli-spec.md](./cli-spec.md), [local-runtime-boundary.md](./local-runtime-boundary.md), [agent-host.md](./agent-host.md) |
@@ -915,3 +915,46 @@ The API key is always **user-entered** — never compiled into the binary, never
 A remote daemon URL typed directly into a browser tab will encounter a self-signed certificate warning — the browser's built-in CA trust store does not recognise the daemon's self-signed cert. This is by design: the daemon is not intended for direct browser-tab navigation.
 
 The supported remote-access path is always through the app's "Connect to Daemon" setup screen, which performs TOFU fingerprint confirmation (§16.2) and manages the pinned certificate. This non-goal is codified so it is not treated as a bug to be "fixed" by removing TLS or requiring a public CA.
+
+---
+
+## 17. V1.118 Amendments — Daemon no-Profile boot + lazy `state.db`
+
+**Iteration SSOT:** [`.mstar/iterations/v1.118/specs/daemon-no-profile-boot.md`](../iterations/v1.118/specs/daemon-no-profile-boot.md) + [delivery-compass.md](../iterations/v1.118/delivery-compass.md) § Architect decisions (AD-P0).
+
+### 17.1 Product invariant
+
+**Daemon = system process. Profile (active creator) = business gate.** The daemon process MUST start and serve T0 health without `active_creator_id` in `~/.nexus42/config.toml`.
+
+### 17.2 Lazy-open contract
+
+| Stage | `state.db` | `WorkspaceState` pool |
+| --- | --- | --- |
+| Boot, no `active_creator_id` | Not opened | `None` / unset |
+| After `PUT …/creators/active` or Tier-2 entry with config already set | Opened per ADR-014 path | `DbPool` attached |
+
+Boot MUST still initialize `~/.nexus42` system directories (home-layout) and config skeleton.
+
+**Forbidden sole fix:** auto-create a Default Profile at boot only to open `state.db`.
+
+### 17.3 Route tiers (normative)
+
+| Tier | Requirement |
+| --- | --- |
+| **T0** | `GET /v1/daemon/runtime/health`, `status`, `daemon/status`, `cert-fingerprint` — no Profile, no pool |
+| **T1** | Creators list/create/patch/active — config + filesystem; no creator `state.db` |
+| **T2** | Works, memory, worlds, schedules, orchestration data, KB, reading, narrative, agent-host sessions tied to creator data — require active creator + open pool |
+
+Implement **`require_active_creator`** (or equivalent) on Tier-2 route groups. Tier-2 without Profile → `NexusApiError::Uninitialized` (HTTP **409**, wire code `uninitialized`). `GET /v1/daemon/creators/active` when unset → HTTP **404** `not_found`.
+
+### 17.4 Wire contracts
+
+**`wire_contracts_changed: false`** for V1.118 P0.
+
+### 17.5 Code anchors
+
+- `crates/nexus-daemon-runtime/src/workspace/mod.rs` — `WorkspaceState::new`, optional pool
+- `crates/nexus-daemon-runtime/src/config.rs` — `resolve_state_db_path` / lazy attach
+- `crates/nexus-daemon-runtime/src/api/mod.rs` — tier middleware layering
+- `crates/nexus-home-layout/` — system dir init
+

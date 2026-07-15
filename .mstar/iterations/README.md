@@ -126,7 +126,8 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | [v1.114-delivery-compass.md](v1.114-delivery-compass.md) | V1.114 | **completed** (2026-07-13) — Canvas & Compute Module Foundation: canvas architecture (adapter + dagre auto-layout) (P0) + canvas stability/validation hardening (P1) + compute module foundation & visibility (P2). Integration `iteration/v1.114` → `main`. |
 | [v1.115-delivery-compass.md](v1.115-delivery-compass.md) | V1.115 | **completed** (2026-07-13) — Canvas & Compute Foundation Completion: canvas adapter completion & contract convergence (P0) + canvas UX residual cluster closure (P1) + compute manifest bridge reconciliation (P2). Integration `iteration/v1.115` → `main`. |
 | [v1.116-delivery-compass.md](v1.116-delivery-compass.md) | V1.116 | **Shipped** — stabilization + readiness: agent detection + codex-native (P0) + desktop dev/locale (P1) + canvas/compute readiness research (P2). |
-| [v1.117/delivery-compass.md](v1.117/delivery-compass.md) | V1.117 | **Active** — Desktop UX polish: Profiles+per-Profile workspace (P0) + Setup Agents catalog (P1) + Shell IA/status bar (P2) + Mac Dock icon (P3) + Button Verb-only voice (P4). Integration `iteration/v1.117`. |
+| [v1.117/delivery-compass.md](v1.117/delivery-compass.md) | V1.117 | **Shipped** (2026-07-15 via PR #148) — Desktop UX polish: Profiles, Agents catalog, Shell IA, Dock icon, Button voice. |
+| [v1.118/delivery-compass.md](v1.118/delivery-compass.md) | V1.118 | **Active** — Daemon no-Profile boot (P0) + Creation peer groups Works/Worlds/Memories (P1) + Canvas-first work shell (P2). Integration `iteration/v1.118`. |
 
 ### Active iteration workspaces
 
@@ -148,6 +149,7 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | [v1.115/](v1.115/specs/) | V1.115 | Triple Must — canvas adapter completion & contract convergence (P0) + canvas UX residual cluster closure (P1) + compute manifest bridge reconciliation (P2) |
 | [v1.116/](v1.116/specs/) | V1.116 | Shipped — agent detection + codex-native + desktop/locale + readiness research |
 | [v1.117/](v1.117/README.md) | V1.117 | Completed — Profiles/workspace, Agents catalog, shell IA + status bar, Dock icon, button Verb-only |
+| [v1.118/](v1.118/README.md) | V1.118 | Active — Daemon no-Profile boot + Creation peer groups + Canvas-first work shell |
 
 ### Legacy `v1.*` iteration artifacts
 

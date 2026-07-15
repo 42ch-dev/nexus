@@ -1,542 +1,99 @@
 {
   "version": 1,
-  "updated_at": "2026-07-14",
+  "updated_at": "2026-07-15",
   "plans": [
     {
-      "id": "2026-07-14-v1.117-profiles-workspace",
-      "title": "P0 - Profiles + per-Profile workspace",
-      "file": "plans/2026-07-14-v1.117-profiles-workspace.md",
-      "status": "Done",
+      "id": "2026-07-15-v1.118-daemon-no-profile-boot",
+      "title": "P0 - Daemon no-Profile boot",
+      "file": "plans/2026-07-15-v1.118-daemon-no-profile-boot.md",
+      "status": "Todo",
       "owner": "@project-manager",
       "agents": [
         "@fullstack-dev",
         "@frontend-dev"
       ],
-      "progress": 100,
+      "progress": 0,
       "tags": [
-        "v1.117",
+        "v1.118",
+        "daemon",
         "profiles",
-        "workspace",
         "must"
       ],
-      "created_at": "2026-07-14",
-      "updated_at": "2026-07-14",
-      "notes": "Phase 2: SDD T1-T4 done + QC fix-wave; QC tri Approve with residuals; QA Pass (7/7 AC); 6 residuals deferred",
+      "created_at": "2026-07-15",
+      "updated_at": "2026-07-15",
+      "notes": "Phase 1 locked — Prepare gates done; ready for Phase 2 implement",
       "metadata": {
         "iteration_refs": [
-          "V1.117"
+          "V1.118"
         ],
-        "spec_integration_branch": "iteration/v1.117",
-        "merge_target": "iteration/v1.117",
-        "working_branch": "plan/v1.117-p0-profiles-workspace",
-        "primary_spec": ".mstar/iterations/v1.117/specs/profiles-workspace.md",
+        "spec_integration_branch": "iteration/v1.118",
+        "merge_target": "iteration/v1.118",
+        "working_branch": "plan/v1.118-p0-daemon-no-profile-boot",
+        "primary_spec": ".mstar/iterations/v1.118/specs/daemon-no-profile-boot.md",
         "wire_contracts_changed": false,
         "tier": "Must"
       }
     },
     {
-      "id": "2026-07-14-v1.117-setup-agents-catalog",
-      "title": "P1 - Setup Agents catalog polish",
-      "file": "plans/2026-07-14-v1.117-setup-agents-catalog.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@frontend-dev",
-        "@fullstack-dev"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.117",
-        "agents",
-        "setup",
-        "must"
-      ],
-      "created_at": "2026-07-14",
-      "updated_at": "2026-07-14",
-      "notes": "Phase 2: SDD T1-T4 done + QC fix-wave; QC tri Approve with residuals (QC2 degraded, PM-supplemented); QA Pass with notes (8/8 AC); 4 residuals deferred",
-      "metadata": {
-        "iteration_refs": [
-          "V1.117"
-        ],
-        "spec_integration_branch": "iteration/v1.117",
-        "merge_target": "iteration/v1.117",
-        "working_branch": "plan/v1.117-p1-setup-agents-catalog",
-        "primary_spec": ".mstar/iterations/v1.117/specs/setup-agents-catalog.md",
-        "wire_contracts_changed": false,
-        "tier": "Must"
-      }
-    },
-    {
-      "id": "2026-07-14-v1.117-shell-layout-ia",
-      "title": "P2 - Shell layout + menu IA + status bar",
-      "file": "plans/2026-07-14-v1.117-shell-layout-ia.md",
-      "status": "Done",
+      "id": "2026-07-15-v1.118-creation-peer-groups",
+      "title": "P1 - Creation peer groups",
+      "file": "plans/2026-07-15-v1.118-creation-peer-groups.md",
+      "status": "Todo",
       "owner": "@project-manager",
       "agents": [
         "@frontend-dev"
       ],
-      "progress": 100,
+      "progress": 0,
       "tags": [
-        "v1.117",
+        "v1.118",
         "shell",
         "ia",
-        "status-bar",
         "must"
       ],
-      "created_at": "2026-07-14",
-      "updated_at": "2026-07-14",
-      "notes": "Phase 2: SDD T1-T4 done + design-studio regression fix; QC tri Approve (clean, no fix-wave); QA pending",
+      "created_at": "2026-07-15",
+      "updated_at": "2026-07-15",
+      "notes": "Phase 1 locked — Prepare gates done; ready for Phase 2 implement",
       "metadata": {
         "iteration_refs": [
-          "V1.117"
+          "V1.118"
         ],
-        "spec_integration_branch": "iteration/v1.117",
-        "merge_target": "iteration/v1.117",
-        "working_branch": "plan/v1.117-p2-shell-layout-ia",
-        "primary_spec": ".mstar/iterations/v1.117/specs/shell-layout-ia.md",
+        "spec_integration_branch": "iteration/v1.118",
+        "merge_target": "iteration/v1.118",
+        "working_branch": "plan/v1.118-p1-creation-peer-groups",
+        "primary_spec": ".mstar/iterations/v1.118/specs/creation-peer-groups.md",
         "wire_contracts_changed": false,
         "tier": "Must"
       }
     },
     {
-      "id": "2026-07-14-v1.117-mac-dock-icon",
-      "title": "P3 - Mac Dock transparent icon",
-      "file": "plans/2026-07-14-v1.117-mac-dock-icon.md",
-      "status": "Done",
+      "id": "2026-07-15-v1.118-canvas-work-shell",
+      "title": "P2 - Canvas-first work shell",
+      "file": "plans/2026-07-15-v1.118-canvas-work-shell.md",
+      "status": "Todo",
       "owner": "@project-manager",
       "agents": [
-        "@frontend-dev",
-        "@ops-engineer"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.117",
-        "desktop",
-        "icon",
-        "should"
-      ],
-      "created_at": "2026-07-14",
-      "updated_at": "2026-07-14",
-      "notes": "Phase 2: SDD T1-T2 done; QC tri Approve (clean, no fix-wave); QA pending",
-      "metadata": {
-        "iteration_refs": [
-          "V1.117"
-        ],
-        "spec_integration_branch": "iteration/v1.117",
-        "merge_target": "iteration/v1.117",
-        "working_branch": "plan/v1.117-p3-mac-dock-icon",
-        "primary_spec": ".mstar/iterations/v1.117/specs/mac-dock-icon.md",
-        "wire_contracts_changed": false,
-        "tier": "Should"
-      }
-    },
-    {
-      "id": "2026-07-14-v1.117-button-voice-verb-only",
-      "title": "P4 - Button voice Verb-only + DESIGN.md",
-      "file": "plans/2026-07-14-v1.117-button-voice-verb-only.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@frontend-dev",
-        "@writing-specialist"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.117",
-        "voice",
-        "design",
-        "must"
-      ],
-      "created_at": "2026-07-14",
-      "updated_at": "2026-07-14",
-      "notes": "Phase 2: SDD T1-T3 done + QC fix-wave; QC tri Approve with residuals (QC2 degraded, PM-supplemented); QA pending",
-      "metadata": {
-        "iteration_refs": [
-          "V1.117"
-        ],
-        "spec_integration_branch": "iteration/v1.117",
-        "merge_target": "iteration/v1.117",
-        "working_branch": "plan/v1.117-p4-button-voice",
-        "primary_spec": ".mstar/iterations/v1.117/specs/button-voice-verb-only.md",
-        "wire_contracts_changed": false,
-        "tier": "Must"
-      }
-    },
-    {
-      "id": "2026-07-13-v1.116-agent-detection-codex-native",
-      "title": "P0 - Agent Detection Fix + codex-native Provider",
-      "file": "plans/2026-07-13-v1.116-agent-detection-codex-native.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@fullstack-dev",
         "@frontend-dev"
       ],
-      "progress": 100,
+      "progress": 0,
       "tags": [
-        "v1.116",
-        "agent-detection",
-        "codex-native",
-        "blocker",
-        "must"
-      ],
-      "created_at": "2026-07-13",
-      "updated_at": "2026-07-14",
-      "notes": "Phase 2: SDD T1-T5 done + QC fix wave, QC tri Approve after revalidation, QA Pass with notes; 7 residuals deferred",
-      "metadata": {
-        "iteration_refs": [
-          "V1.116"
-        ],
-        "spec_integration_branch": "iteration/v1.116",
-        "merge_target": "iteration/v1.116",
-        "wire_contracts_changed": false,
-        "tier": "Must"
-      }
-    },
-    {
-      "id": "2026-07-13-v1.116-desktop-dev-design-studio-locale",
-      "title": "P1 - Desktop Dev Script + Design-studio Locale",
-      "file": "plans/2026-07-13-v1.116-desktop-dev-design-studio-locale.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@frontend-dev",
-        "@ops-engineer"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.116",
-        "desktop-dev",
-        "design-studio",
-        "locale",
-        "hygiene",
-        "must"
-      ],
-      "created_at": "2026-07-13",
-      "updated_at": "2026-07-14",
-      "notes": "Phase 2: SDD T1-T3 done, QC tri Approve with residuals (1 low), QA Pass",
-      "metadata": {
-        "iteration_refs": [
-          "V1.116"
-        ],
-        "spec_integration_branch": "iteration/v1.116",
-        "merge_target": "iteration/v1.116",
-        "wire_contracts_changed": false,
-        "tier": "Must"
-      }
-    },
-    {
-      "id": "2026-07-13-v1.116-canvas-compute-readiness-research",
-      "title": "P2 - Canvas/Compute Readiness Research",
-      "file": "plans/2026-07-13-v1.116-canvas-compute-readiness-research.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@architect"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.116",
-        "readiness",
-        "research",
+        "v1.118",
         "canvas",
-        "compute",
-        "should"
-      ],
-      "created_at": "2026-07-13",
-      "updated_at": "2026-07-14",
-      "notes": "Phase 2: inline research done, QC single-seat Approve (0 blocking, 4 suggestions), QA pm-acceptance",
-      "metadata": {
-        "iteration_refs": [
-          "V1.116"
-        ],
-        "spec_integration_branch": "iteration/v1.116",
-        "merge_target": "iteration/v1.116",
-        "wire_contracts_changed": false,
-        "tier": "Should"
-      }
-    },
-    {
-      "id": "2026-07-13-v1.115-canvas-adapter-completion",
-      "title": "P0 - Canvas Adapter Completion & Contract Convergence",
-      "file": "plans/2026-07-13-v1.115-canvas-adapter-completion.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@frontend-dev"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.115",
-        "canvas",
-        "adapter",
-        "contract",
+        "shell",
         "must"
       ],
-      "created_at": "2026-07-13",
-      "updated_at": "2026-07-13",
-      "notes": "Phase 2: SDD T1a-T5 done, QC tri Approve with residuals (6 low/nit), QA Pass",
+      "created_at": "2026-07-15",
+      "updated_at": "2026-07-15",
+      "notes": "Phase 1 locked — Prepare gates done; ready for Phase 2 implement",
       "metadata": {
         "iteration_refs": [
-          "V1.115"
+          "V1.118"
         ],
-        "spec_integration_branch": "iteration/v1.115",
-        "merge_target": "iteration/v1.115",
-        "primary_spec": ".mstar/iterations/v1.115/specs/canvas-adapter-completion.md",
+        "spec_integration_branch": "iteration/v1.118",
+        "merge_target": "iteration/v1.118",
+        "working_branch": "plan/v1.118-p2-canvas-work-shell",
+        "primary_spec": ".mstar/iterations/v1.118/specs/canvas-work-shell.md",
         "wire_contracts_changed": false,
         "tier": "Must"
-      }
-    },
-    {
-      "id": "2026-07-13-v1.115-canvas-ux-residual-cluster",
-      "title": "P1 - Canvas UX Residual Cluster Closure",
-      "file": "plans/2026-07-13-v1.115-canvas-ux-residual-cluster.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@frontend-dev"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.115",
-        "canvas",
-        "ux",
-        "residuals",
-        "must"
-      ],
-      "created_at": "2026-07-13",
-      "updated_at": "2026-07-13",
-      "notes": "Phase 2: SDD T1-T5 done + QC1-W001 fix wave, QC tri Approve, QA Pass; 5 residuals closed + 3 new deferred",
-      "metadata": {
-        "iteration_refs": [
-          "V1.115"
-        ],
-        "spec_integration_branch": "iteration/v1.115",
-        "merge_target": "iteration/v1.115",
-        "primary_spec": ".mstar/iterations/v1.115/specs/canvas-ux-residual-cluster.md",
-        "wire_contracts_changed": false,
-        "tier": "Must"
-      }
-    },
-    {
-      "id": "2026-07-13-v1.115-compute-manifest-reconciliation",
-      "title": "P2 - Compute Manifest Bridge Reconciliation",
-      "file": "plans/2026-07-13-v1.115-compute-manifest-reconciliation.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@fullstack-dev"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.115",
-        "compute",
-        "manifest",
-        "reconciliation",
-        "must"
-      ],
-      "created_at": "2026-07-13",
-      "updated_at": "2026-07-13",
-      "notes": "Phase 2: SDD T1-T5 done + QC fix wave, QC tri Approve, QA Pass; R-V1114P2QC1-W002 closed",
-      "metadata": {
-        "iteration_refs": [
-          "V1.115"
-        ],
-        "spec_integration_branch": "iteration/v1.115",
-        "merge_target": "iteration/v1.115",
-        "primary_spec": ".mstar/iterations/v1.115/specs/compute-manifest-reconciliation.md",
-        "wire_contracts_changed": false,
-        "tier": "Must"
-      }
-    },
-    {
-      "id": "2026-07-13-v1.114-canvas-architecture-foundation",
-      "title": "P0 - Canvas Architecture Foundation",
-      "file": "plans/2026-07-13-v1.114-canvas-architecture-foundation.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@frontend-dev"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.114",
-        "canvas",
-        "architecture",
-        "dagre",
-        "must"
-      ],
-      "created_at": "2026-07-13",
-      "updated_at": "2026-07-13",
-      "notes": "Phase 2: SDD T1-T5 done, QC tri Approve with residuals (4 R# low/nit), QA Pass",
-      "metadata": {
-        "iteration_refs": [
-          "V1.114"
-        ],
-        "spec_integration_branch": "iteration/v1.114",
-        "merge_target": "iteration/v1.114",
-        "primary_spec": ".mstar/iterations/v1.114/specs/canvas-architecture-foundation.md",
-        "wire_contracts_changed": false,
-        "tier": "Must"
-      }
-    },
-    {
-      "id": "2026-07-13-v1.114-canvas-stability-hardening",
-      "title": "P1 - Canvas Stability & Validation Hardening",
-      "file": "plans/2026-07-13-v1.114-canvas-stability-hardening.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@fullstack-dev"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.114",
-        "canvas",
-        "stability",
-        "validation",
-        "must"
-      ],
-      "created_at": "2026-07-13",
-      "updated_at": "2026-07-13",
-      "notes": "Phase 2: SDD T1-T5 done + QC fix-wave (dedup→422, residual batch, rustfmt); QC tri Approve; QA Pass with notes; 4 residuals closed + 2 accepted + 5 deferred",
-      "metadata": {
-        "iteration_refs": [
-          "V1.114"
-        ],
-        "spec_integration_branch": "iteration/v1.114",
-        "merge_target": "iteration/v1.114",
-        "primary_spec": ".mstar/iterations/v1.114/specs/canvas-stability-hardening.md",
-        "wire_contracts_changed": false,
-        "tier": "Must"
-      }
-    },
-    {
-      "id": "2026-07-13-v1.114-compute-module-foundation",
-      "title": "P2 - Compute Module Foundation & Visibility",
-      "file": "plans/2026-07-13-v1.114-compute-module-foundation.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@fullstack-dev"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.114",
-        "compute",
-        "module",
-        "registry",
-        "visibility",
-        "must"
-      ],
-      "created_at": "2026-07-13",
-      "updated_at": "2026-07-13",
-      "notes": "Phase 2: SDD T1-T5 done + QC fix-wave (clippy deny); QC tri Approve with residuals (1 R# low); QA Pass with notes; contracts 0.22.0→0.23.0",
-      "metadata": {
-        "iteration_refs": [
-          "V1.114"
-        ],
-        "spec_integration_branch": "iteration/v1.114",
-        "merge_target": "iteration/v1.114",
-        "primary_spec": ".mstar/iterations/v1.114/specs/compute-module-foundation.md",
-        "wire_contracts_changed": true,
-        "tier": "Must"
-      }
-    },
-    {
-      "id": "2026-07-12-v1.113-i18n-completion",
-      "title": "P0 - i18n Completion",
-      "file": "plans/2026-07-12-v1.113-i18n-completion.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@frontend-dev"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.113",
-        "i18n",
-        "completion",
-        "must"
-      ],
-      "created_at": "2026-07-12",
-      "updated_at": "2026-07-12",
-      "notes": "Phase 2: SDD T1-T5 done, QC tri Approve with residuals (4 R#), QA Pass",
-      "metadata": {
-        "iteration_refs": [
-          "V1.113"
-        ],
-        "spec_integration_branch": "iteration/v1.113",
-        "merge_target": "iteration/v1.113",
-        "working_branch": "plan/v1.113-p0-i18n-completion",
-        "primary_spec": ".mstar/iterations/v1.113/specs/i18n-completion.md",
-        "wire_contracts_changed": false,
-        "tier": "Must"
-      }
-    },
-    {
-      "id": "2026-07-12-v1.113-ui-normalization",
-      "title": "P1 - UI Normalization",
-      "file": "plans/2026-07-12-v1.113-ui-normalization.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@frontend-dev"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.113",
-        "ui",
-        "normalization",
-        "must"
-      ],
-      "created_at": "2026-07-12",
-      "updated_at": "2026-07-12",
-      "notes": "Phase 2: SDD T1-T3 done, QC tri Approve after fix-wave, QA Pass",
-      "metadata": {
-        "iteration_refs": [
-          "V1.113"
-        ],
-        "spec_integration_branch": "iteration/v1.113",
-        "merge_target": "iteration/v1.113",
-        "working_branch": "plan/v1.113-p1-ui-normalization",
-        "primary_spec": ".mstar/iterations/v1.113/specs/ui-normalization.md",
-        "wire_contracts_changed": false,
-        "tier": "Must"
-      }
-    },
-    {
-      "id": "2026-07-12-v1.113-tech-debt-paydown",
-      "title": "P2 - Tech Debt Paydown",
-      "file": "plans/2026-07-12-v1.113-tech-debt-paydown.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@frontend-dev"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.113",
-        "tech-debt",
-        "paydown",
-        "should"
-      ],
-      "created_at": "2026-07-12",
-      "updated_at": "2026-07-12",
-      "notes": "Phase 2: SDD T1-T3 done, QC tri Approve with residuals (4 R#), QA Pass with notes",
-      "metadata": {
-        "iteration_refs": [
-          "V1.113"
-        ],
-        "spec_integration_branch": "iteration/v1.113",
-        "merge_target": "iteration/v1.113",
-        "working_branch": "plan/v1.113-p2-tech-debt-paydown",
-        "primary_spec": ".mstar/iterations/v1.113/specs/tech-debt-paydown.md",
-        "wire_contracts_changed": false,
-        "tier": "Should",
-        "blocked_by": [
-          "2026-07-12-v1.113-i18n-completion"
-        ]
       }
     }
   ],
@@ -544,8 +101,8 @@
     "integration_branch_retired": false,
     "iteration_base_branch": "main",
     "last_integration_branch": "iteration/v1.115",
-    "latest_active_compass": "v1.117/delivery-compass.md",
-    "latest_active_iteration": "V1.117",
+    "latest_active_compass": "v1.118/delivery-compass.md",
+    "latest_active_iteration": "V1.118",
     "latest_ship": {
       "iteration": "V1.117",
       "compass": "v1.117/delivery-compass.md",
@@ -556,7 +113,7 @@
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "pre_iteration_hotfix": null,
-    "spec_integration_branch": "iteration/v1.117",
+    "spec_integration_branch": "iteration/v1.118",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {

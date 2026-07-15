@@ -1,0 +1,32 @@
+{
+  "id": "2026-07-14-v1.117-profiles-workspace",
+  "title": "P0 - Profiles + per-Profile workspace",
+  "file": "plans/2026-07-14-v1.117-profiles-workspace.md",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": [
+    "@fullstack-dev",
+    "@frontend-dev"
+  ],
+  "progress": 100,
+  "tags": [
+    "v1.117",
+    "profiles",
+    "workspace",
+    "must"
+  ],
+  "created_at": "2026-07-14",
+  "updated_at": "2026-07-14",
+  "notes": "Phase 2: SDD T1-T4 done + QC fix-wave; QC tri Approve with residuals; QA Pass (7/7 AC); 6 residuals deferred",
+  "metadata": {
+    "iteration_refs": [
+      "V1.117"
+    ],
+    "spec_integration_branch": "iteration/v1.117",
+    "merge_target": "iteration/v1.117",
+    "working_branch": "plan/v1.117-p0-profiles-workspace",
+    "primary_spec": ".mstar/iterations/v1.117/specs/profiles-workspace.md",
+    "wire_contracts_changed": false,
+    "tier": "Must"
+  }
+}

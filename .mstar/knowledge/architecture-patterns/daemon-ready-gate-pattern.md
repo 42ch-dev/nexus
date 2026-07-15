@@ -1,11 +1,11 @@
 ---
 module: apps/desktop/src-tauri + apps/web (setup-gate, daemon-status-bar, main-banner)
 date: 2026-07-06
-last_updated: 2026-07-11
+last_updated: 2026-07-15
 problem_type: architecture-pattern
 category: architecture-patterns
 severity: medium
-plan_id: V1.94-P-last (compound of desktop onboarding & IA pass); V1.96 refinements from 2026-07-07-v1.96-implement-rework; V1.97 refinements from 2026-07-07-v1.97-desktop-first-launch-hardening; V1.101 Class B PATH enrichment; V1.105 DaemonLaunchGate + D2 always-start; V1.110 three-valued port-probe gate (FB-D1)
+plan_id: V1.94-P-last (compound of desktop onboarding & IA pass); V1.96 refinements from 2026-07-07-v1.96-implement-rework; V1.97 refinements from 2026-07-07-v1.97-desktop-first-launch-hardening; V1.101 Class B PATH enrichment; V1.105 DaemonLaunchGate + D2 always-start; V1.110 three-valued port-probe gate (FB-D1); V1.118 no-Profile boot supersession note
 tags: [daemon-runtime, sidecar, health-probe, desktop-shell, setup-wizard, daemon-status-bar, gate, two-consumer-pattern, late-subscription-race, stderr-capture, bounded-timeout, tauri-v2-sidecar-resolution, stopped-initial-state, attach-without-ownership, path-enrichment, agent-scan, daemon-launch-gate, d2-always-start]
 applies_when: gating main-UI entry on daemon readiness; designing any "wait for service X before entering app" UX; wiring observers to a process lifecycle event stream that may fire before subscription; surfacing supervised-process crash reasons to the user
 ---
@@ -85,7 +85,9 @@ V1.110 optimized the cold-start path. Previously `start_with_budget` ran the ful
 
 ## V1.96 refinements: late-subscription race + diagnostic surfacing
 
-V1.96 (plan `2026-07-07-v1.96-implement-rework`) hit a P0 blocker: the setup wizard Step 2 hung indefinitely in "Starting daemon…" on a clean `~/.nexus42/` first launch. RCA revealed **three** consumer-side root causes (the daemon does NOT hang — it crashes within milliseconds when `WorkspaceState::initialize()` finds no `active_creator_id`; the wizard just never learns about it). The fixes distill into four durable rules that apply to **any** observer of a process lifecycle event stream, not just the daemon-ready gate.
+V1.96 (plan `2026-07-07-v1.96-implement-rework`) hit a P0 blocker: the setup wizard Step 2 hung indefinitely in "Starting daemon…" on a clean `~/.nexus42/` first launch. RCA revealed **three** consumer-side root causes (pre-V1.118, the daemon also crashed within milliseconds when `WorkspaceState::initialize()` found no `active_creator_id`; the wizard just never learned about it). The fixes distill into four durable rules that apply to **any** observer of a process lifecycle event stream, not just the daemon-ready gate.
+
+> **V1.118 supersession (daemon no-Profile boot):** After V1.118 P0 ships, clean home reaches T0 health without `active_creator_id`; the gate opens on `running` and Profile selection is post-gate business flow. Crash-on-no-creator RCA below is **pre-V1.118** only. See [daemon-runtime.md §17](../../specs/daemon-runtime.md) + [desktop-shell.md §13.11](../../specs/desktop-shell.md).
 
 ### Rule 5: probe current state on mount, BEFORE subscribing
 
