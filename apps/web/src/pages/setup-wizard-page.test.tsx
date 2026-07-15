@@ -1,6 +1,6 @@
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it, vi } from 'vitest';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Route, Routes, useLocation } from 'react-router-dom';
 
@@ -340,7 +340,11 @@ describe('SetupWizardPage', () => {
     await fillProfileName(user);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
 
-    await waitFor(() => expect(screen.getByText('permission denied')).toBeInTheDocument());
+    await waitFor(() =>
+      expect(within(screen.getByTestId('wizard-continue-error')).getByText('permission denied')).toBeInTheDocument(),
+    );
+    // AC-P0-4: inline alert is the primary signal (toast is secondary only).
+    expect(screen.getByTestId('wizard-continue-error')).toHaveAttribute('data-continue-error-class', 'soft_display_name');
     expect(screen.getByRole('heading', { name: 'Name your Profile' })).toBeInTheDocument();
     expect(screen.queryByRole('heading', { name: /You're ready/ })).not.toBeInTheDocument();
     expect(setAgentProfile).not.toHaveBeenCalled();
