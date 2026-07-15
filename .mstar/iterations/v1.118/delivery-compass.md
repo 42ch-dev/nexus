@@ -1,7 +1,8 @@
 ---
 iteration_id: V1.118
 start_date: 2026-07-15
-status: locked
+end_date: 2026-07-15
+status: completed
 iteration_base_branch: main
 target_branch: main
 spec_integration_branch: iteration/v1.118
@@ -64,9 +65,9 @@ The coherent bet:
 
 | plan_id | Name | Status | Tier | Notes |
 |---------|------|--------|------|-------|
-| 2026-07-15-v1.118-daemon-no-profile-boot | Daemon no-Profile boot | InProgress | Must / P0 | T1 committed (e864698e); reviewer found 2 Critical + 1 Important — fix wave pending |
-| 2026-07-15-v1.118-creation-peer-groups | Creation peer groups | Todo | Must / P1 | List-mode IA; parallel-safe with P0 |
-| 2026-07-15-v1.118-canvas-work-shell | Canvas-first work shell | Todo | Must / P2 | Depends on P1 |
+| 2026-07-15-v1.118-daemon-no-profile-boot | Daemon no-Profile boot | Done | Must / P0 | QC Approve with residuals; QA Pass with residuals |
+| 2026-07-15-v1.118-creation-peer-groups | Creation peer groups | Done | Must / P1 | QC Approve; QA Pass |
+| 2026-07-15-v1.118-canvas-work-shell | Canvas-first work shell | Done | Must / P2 | QC Approve with residuals; QA Pass with residuals |
 
 ### Plan dependencies (implement order)
 
@@ -116,8 +117,8 @@ Author-observable unless noted as operator/API. Detail IDs live in iteration `sp
 
 ## Roadmap Position
 
-- **Current iteration (V1.118):** Daemon no-Profile boot + Creation peer IA + Canvas-first work shell
-- **Next iteration:** Deeper Memories IA / World authoring UX / medium residual paydown (TOFU, i18n gaps, CodexNative HostManager) — **trigger:** V1.118 shipped; **owner:** PM
+- **Current iteration (V1.118):** **delivered** — Daemon no-Profile boot + Creation peer IA + Canvas-first work shell
+- **Next iteration:** Deeper Memories IA / World authoring UX / re-home WorkDetail actions + Body discoverability / medium residual paydown (TOFU, i18n gaps, CodexNative HostManager) — **trigger:** V1.118 PR merged to `main`; **owner:** PM
 - **North star:** Desktop first-run and Creation surfaces feel local-first and Canvas-core without Profile/process coupling
 
 ## Delivery Branch Policy
@@ -190,18 +191,26 @@ Technical approach locked by `@architect` (2026-07-15). Implementers MUST follow
 
 ## Quality Gate Summary
 
-> Filled at iteration-close.
-
 | plan_id | QC decision | QA gate | Residuals | Durable summary |
 |---------|-------------|---------|-----------|-----------------|
-| 2026-07-15-v1.118-daemon-no-profile-boot | InProgress | mandatory | — | T1 SDD review: Needs fixes — 2 Critical (boot.rs pool_or_uninit crash on no-creator; set_active_creator doesn't call ensure_creator_pool) + 1 Important (list creators returns 409 instead of empty). Fix wave pending. |
-| 2026-07-15-v1.118-creation-peer-groups | N/A | mandatory | — | — |
-| 2026-07-15-v1.118-canvas-work-shell | N/A | mandatory | — | — |
+| 2026-07-15-v1.118-daemon-no-profile-boot | Approve with residuals | Pass with residuals | R-V1118P0-H2/I1/PATCH/WS-INIT/STALE-POOL | Lazy `Option<DbPool>` + Tier-2 middleware + agent-host scan Tier-1; desktop clean-home tests |
+| 2026-07-15-v1.118-creation-peer-groups | Approve | Pass | (none) | Works/Worlds/Memories peer groups; `useWorks({ limit: 12 })`; drill-in left for P2 |
+| 2026-07-15-v1.118-canvas-work-shell | Approve with residuals | Pass with residuals | R-V1118P2-ORPHAN/CHAPTERS-ID/BODY-NAV | `WorkShellLayout` + rail; nest routes; retire `isDrillIn`; mobile rail a11y |
 
 ## Compound Round Summary
 
-> Filled at iteration-close.
+**Package inventory** (`iterations/v1.118/`): `specs/{daemon-no-profile-boot,creation-peer-groups,canvas-work-shell}.md`, empty `guides/`, package `README.md`.
+
+| Path | Triage | Reason |
+|------|--------|--------|
+| `specs/*.md` | Keep snapshot | Iteration normative drafts already mirrored into master stubs (`daemon-runtime` §17, `desktop-shell` §13.11); not promoted as duplicate knowledge |
+| `guides/` | Skip | Empty |
+| New knowledge docs | Skip (Q1–Q8 ≤2 for net-new) | Boot pattern already covered by `knowledge/architecture-patterns/daemon-ready-gate-pattern.md` (updated pointer in V1.118 close). Axum `CreatorDbSlot`/`OnceLock` and work-shell route detector are captured in shipped specs + code comments — insufficient standalone reuse without rewriting master patterns this round. |
+
+**Promoted:** 0 · **Keep snapshot:** 3 specs · **Skip crystallize:** new docs (overlap / already documented).
 
 ## Iteration Retrospective (minimal)
 
-> Filled at iteration-close.
+- **What went well:** Serial plan order P0→P1→P2 with SDD + tri-QC + QA; Axum State clone issue caught early and fixed via shared pool + middleware; P1 absorbed T2/T3 into one implement commit without scope loss.
+- **What to improve:** Desktop clean-home tests still not in CI (R-V1118P0-I1); WorkDetailPage orphan / Body discoverability should be scheduled next (R-V1118P2-*).
+- **Carry forward:** Lazy-open + Tier-0/1/2 route discipline; peer Creation IA; canvas-first work shell as default enter-work UX.
