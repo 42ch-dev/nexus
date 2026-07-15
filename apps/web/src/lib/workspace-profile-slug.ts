@@ -48,7 +48,8 @@ function trimDashes(segment: string): string {
  * 4. Remove illegal segment chars: `/ \ : * ? " < > |` and `\0`
  * 5. Collapse repeated `-`; strip leading/trailing `-`
  * 6. Windows reserved name (case-insensitive exact) → append `-profile`, re-trim
- * 7. Empty → `default`
+ * 7. Lone `.` / `..` → empty (would otherwise resolve to current/parent dir)
+ * 8. Empty → `default`
  *
  * @example slugProfileSegment('default') // 'default'
  * @example slugProfileSegment('Alice') // 'Alice'
@@ -56,6 +57,8 @@ function trimDashes(segment: string): string {
  * @example slugProfileSegment('  foo  bar  ') // 'foo-bar'
  * @example slugProfileSegment('///') // 'default'
  * @example slugProfileSegment('CON') // 'CON-profile'
+ * @example slugProfileSegment('.') // 'default'
+ * @example slugProfileSegment('..') // 'default'
  */
 export function slugProfileSegment(displayName: string): string {
   // 1. Trim, 2. NFKC.
@@ -73,7 +76,14 @@ export function slugProfileSegment(displayName: string): string {
     segment = trimDashes(`${segment}-profile`);
   }
 
-  // 7. Empty → default.
+  // Reject dot-segments: a slug of '.' or '..' would make
+  // `replaceLastPathSegment` resolve the workspace root to the current or
+  // parent directory. Treat them as empty so they fall through to `default`.
+  if (segment === '.' || segment === '..') {
+    segment = '';
+  }
+
+  // 8. Empty → default.
   return segment.length === 0 ? 'default' : segment;
 }
 

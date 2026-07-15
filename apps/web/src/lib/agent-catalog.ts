@@ -11,11 +11,10 @@ export interface AgentOverride {
   docsUrl?: string;
   installUrl?: string;
   iconUrl?: string;
-  hiddenFromDefault?: boolean;
   /**
    * When `true`, the row is omitted from **both** the default grid and the
-   * More list (hard exclude). Replaces `hiddenFromDefault`-only hiding for
-   * ACP wrappers (P2: `claude-acp`, `codex-acp`).
+   * More list (hard exclude). Used for ACP wrappers (P2: `claude-acp`,
+   * `codex-acp`).
    */
   excludeFromPicker?: boolean;
   priority?: number;
@@ -57,7 +56,6 @@ export interface AgentCatalogItem {
   installed: boolean;
   installUrl?: string | null;
   docsUrl?: string | null;
-  hiddenFromDefault: boolean;
   /**
    * Hard-exclude flag: when `true`, the row never appears in the default grid
    * or the More list. Mirrors {@link AgentOverride.excludeFromPicker}.
@@ -75,10 +73,6 @@ const whitelistUrlValues = new Set(Object.values(loaded.install_whitelist));
 
 export function resolveInstallUrl(key: string): string | null {
   return loaded.install_whitelist[key] ?? null;
-}
-
-export function isHiddenFromDefault(key: string): boolean {
-  return loaded.agents[key]?.hiddenFromDefault === true;
 }
 
 /** Hard exclude: row omitted from both default grid and More (P2). */
@@ -142,7 +136,6 @@ export function resolveCatalogItem(entry: AgentScanEntry): AgentCatalogItem {
         ? agentOverride.installUrl
         : whitelistUrl,
     docsUrl: agentOverride?.docsUrl ?? null,
-    hiddenFromDefault: isHiddenFromDefault(key),
     excludeFromPicker: isExcludedFromPicker(key),
     priority: agentOverride?.priority,
     registryAgentId: entry.registry_agent_id,

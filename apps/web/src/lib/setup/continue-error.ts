@@ -28,10 +28,23 @@ export type ContinueErrorPhase = 'workspace_path' | 'bootstrap' | 'display_name'
 /**
  * Structured error codes that indicate a migration / DB failure.
  *
- * NOTE (T1 finding): these are effectively dead — the daemon emits the public
- * code `internal` for DB errors, never `migration_failed` /
- * `database_migration_failed` / `database_error`. They are kept for
- * completeness; the primary migration signal is the message regex below.
+ * DEAD BY DESIGN (T1 finding — re-verified against the daemon contract):
+ * these can NEVER match the public wire `code`. The daemon uses a two-tier
+ * error-code design (`crates/nexus-daemon-runtime/src/api/errors.rs`):
+ *   - `error_code()` is the **public, stable** wire `code` (lowercase
+ *     `snake_case`), and for every `Internal` variant — which is what all
+ *     DB / migration failures map to — it returns the coarse code
+ *     `"internal"` (errors.rs `error_code()` arm + `to_response_body()`
+ *     serializes `code: self.error_code()`).
+ *   - Strings like `"DATABASE_ERROR"` / `"DATABASE_MIGRATION_FAILED"` live in
+ *     `Internal.code`, an **internal classification** for logging that is
+ *     intentionally NOT exposed as the public wire `code`.
+ *
+ * So `NexusClientError.code` for any DB failure is `"internal"`, and the
+ * structured-code branch below is unreachable from production. The PRIMARY
+ * migration signal is the message regex `/migration/i` (always reachable,
+ * always used). The codes are kept as a forward-compat signal: if the daemon
+ * ever exposes finer-grained public codes, this set already names them.
  */
 const MIGRATION_CODES = new Set<string>([
   'migration_failed',

@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   resolveInstallUrl,
-  isHiddenFromDefault,
   isExcludedFromPicker,
   resolveAgentKey,
   resolveCatalogItem,
@@ -33,20 +32,8 @@ describe('resolveInstallUrl', () => {
   });
 });
 
-describe('isHiddenFromDefault', () => {
-  it('returns false for native agents', () => {
-    expect(isHiddenFromDefault('claude-native')).toBe(false);
-    expect(isHiddenFromDefault('codex-native')).toBe(false);
-  });
-
-  it('returns false for unknown keys', () => {
-    expect(isHiddenFromDefault('unknown')).toBe(false);
-  });
-});
-
 // P2 (F2): claude-acp / codex-acp are hard-excluded from both the default grid
-// and the More list via `excludeFromPicker` (replaces the old
-// `hiddenFromDefault`-only hiding for the ACP wrappers).
+// and the More list via `excludeFromPicker`.
 describe('isExcludedFromPicker', () => {
   it('returns true for ACP wrappers', () => {
     expect(isExcludedFromPicker('claude-acp')).toBe(true);

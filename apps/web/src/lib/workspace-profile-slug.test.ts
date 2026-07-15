@@ -33,6 +33,13 @@ describe('slugProfileSegment', () => {
     ['foo/bar:baz', 'foobarbaz'],
     // Dash-only input collapses to empty → `default`.
     ['---', 'default'],
+    // Lone dot-segments would resolve to current/parent directory — reject to
+    // `default` (Greptile P1: slug sanitization bypass).
+    ['.', 'default'],
+    ['..', 'default'],
+    // Dots mixed with other chars are kept (only lone `.` / `..` are rejected).
+    ['a.b', 'a.b'],
+    ['v1.2', 'v1.2'],
   ])('slugProfileSegment(%j) → %j', (input, expected) => {
     expect(slugProfileSegment(input)).toBe(expected);
   });
@@ -90,5 +97,17 @@ describe('replaceLastPathSegment', () => {
     const root = '/home/alice/Documents/nexus/default';
     const synced = replaceLastPathSegment(root, slugProfileSegment('Alice'));
     expect(synced).toBe('/home/alice/Documents/nexus/Alice');
+  });
+
+  it('dot-segment names never resolve the workspace root to the parent (Greptile P1)', () => {
+    // A display name of '.' or '..' must NOT make replaceLastPathSegment
+    // produce a path that the OS resolves to the current/parent directory.
+    const root = '/home/alice/Documents/nexus/default';
+    expect(replaceLastPathSegment(root, slugProfileSegment('.'))).toBe(
+      '/home/alice/Documents/nexus/default',
+    );
+    expect(replaceLastPathSegment(root, slugProfileSegment('..'))).toBe(
+      '/home/alice/Documents/nexus/default',
+    );
   });
 });

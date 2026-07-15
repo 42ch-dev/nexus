@@ -524,7 +524,7 @@ describe('SetupStepAgent', () => {
 
     renderHarness(makeState());
 
-    // 'my-agent' is installed and not hiddenFromDefault → default grid (visible).
+    // 'my-agent' is installed and not excluded from the picker → default grid (visible).
     await waitFor(() => expect(screen.getByText('my-agent')).toBeInTheDocument());
     // Auto-select enables Continue via the installed agent.
     await waitFor(() =>
