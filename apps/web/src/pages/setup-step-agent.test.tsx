@@ -200,10 +200,9 @@ describe('SetupStepAgent', () => {
   });
 
   it('auto-selects the first installed agent (B4)', async () => {
-    const user = userEvent.setup();
     const agent = makeAgent({
       name: 'Claude Code',
-      registry_agent_id: 'claude-acp',
+      registry_agent_id: 'claude-native',
       installed: true,
     });
     useHandlers(
@@ -214,10 +213,10 @@ describe('SetupStepAgent', () => {
 
     renderHarness(makeState());
 
-    // claude-acp is hiddenFromDefault (V1.117 T1 catalog) → behind the More toggle.
-    await expandRestAgents(user);
+    // claude-native (priority 1, installed) renders in the default grid and is
+    // auto-selected as the first installed agent.
     await waitFor(() =>
-      expect(screen.getByTestId('agent-card-select-claude-acp')).toHaveAttribute(
+      expect(screen.getByTestId('agent-card-select-claude-native')).toHaveAttribute(
         'aria-pressed',
         'true',
       ),
@@ -290,7 +289,7 @@ describe('SetupStepAgent', () => {
     const user = userEvent.setup();
     const agent = makeAgent({
       name: 'Codex',
-      registry_agent_id: 'codex-acp',
+      registry_agent_id: 'codex-native',
       installed: true,
       version: '1.0.0',
     });
@@ -311,10 +310,9 @@ describe('SetupStepAgent', () => {
       { client: makeClient(), initialRouterEntries: ['/setup'] },
     );
 
-    // codex-acp is hiddenFromDefault (V1.117 T1 catalog) → behind the More toggle.
-    await expandRestAgents(user);
+    // codex-native (priority 0, installed) renders in the default grid.
     await waitFor(() => expect(screen.getByText('Codex')).toBeInTheDocument());
-    await user.click(screen.getByTestId('agent-card-select-codex-acp'));
+    await user.click(screen.getByTestId('agent-card-select-codex-native'));
 
     await waitFor(() => expect(onChange).toHaveBeenCalled());
     const lastCall = onChange.mock.calls[onChange.mock.calls.length - 1]![0];
@@ -479,10 +477,13 @@ describe('SetupStepAgent', () => {
       http.post('/v1/daemon/agent-host/scan', () =>
         HttpResponse.json({
           agents: [
+            // P2 (F3): Install links render only on uninstalled cards. opencode
+            // is whitelisted + curated (priority 4) → uninstalled card shows it
+            // in the default grid.
             makeAgent({
               name: 'OpenCode',
               registry_agent_id: 'opencode',
-              installed: true,
+              installed: false,
             }),
             makeAgent({ name: 'mystery-agent', installed: false }),
           ],
@@ -573,10 +574,11 @@ describe('SetupStepAgent', () => {
       http.post('/v1/daemon/agent-host/scan', () =>
         HttpResponse.json({
           agents: [
+            // P2 (F3): Install link renders only on uninstalled cards.
             makeAgent({
               name: 'Claude',
               registry_agent_id: 'claude-native',
-              installed: true,
+              installed: false,
             }),
           ],
         }),
