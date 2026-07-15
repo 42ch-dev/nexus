@@ -1,7 +1,8 @@
 ---
 iteration_id: V1.119
 start_date: 2026-07-15
-status: locked
+status: completed
+end_date: 2026-07-16
 iteration_base_branch: main
 target_branch: main
 spec_integration_branch: iteration/v1.119
@@ -63,9 +64,9 @@ The coherent bet:
 
 | plan_id | Name | Status | Tier | Notes |
 |---------|------|--------|------|-------|
-| 2026-07-15-v1.119-setup-continue-unblock | Setup Continue unblock | Todo | Must / P0 | F7 |
-| 2026-07-15-v1.119-setup-workspace-profile-path | Workspace profile + path | Todo | Must / P1 | F4 F5 F6; blocked_by P0 |
-| 2026-07-15-v1.119-setup-agent-picker-catalog | AgentPicker catalog polish | Todo | Must / P2 | F1 F2 F3 |
+| 2026-07-15-v1.119-setup-continue-unblock | Setup Continue unblock | Done | Must / P0 | F7 - QC Approve w/ residuals, QA Pass |
+| 2026-07-15-v1.119-setup-workspace-profile-path | Workspace profile + path | Done | Must / P1 | F4 F5 F6 - QC Approve w/ residuals, QA Pass |
+| 2026-07-15-v1.119-setup-agent-picker-catalog | AgentPicker catalog polish | Done | Must / P2 | F1 F2 F3 - QC Approve w/ residuals, QA Pass |
 
 ### Plan dependencies (implement order)
 
@@ -111,7 +112,7 @@ The coherent bet:
 
 ## Roadmap Position
 
-- **Current iteration (V1.119):** Unblock Setup Continue + Workspace/Agent polish from feedback F1–F7
+- **Current iteration (V1.119):** `delivered` - Unblock Setup Continue + Workspace/Agent polish from feedback F1–F7
 - **Next iteration:** Deeper Memories IA / World authoring UX / WorkDetail + Body discoverability / medium residual paydown — **trigger:** V1.119 PR merged + dogfood unblocked; **owner:** PM
 - **North star:** Desktop first-run completes calmly; Setup fields match author mental models
 
@@ -212,14 +213,33 @@ Overrides are EN-only product copy (not locale files). Omit at ship if scan supp
 
 ## Quality Gate Summary
 
-> Filled at iteration-close.
-
 | plan_id | QC decision | QA gate | Residuals | Durable summary |
 |---------|-------------|---------|-----------|-----------------|
-| 2026-07-15-v1.119-setup-continue-unblock | | | | |
-| 2026-07-15-v1.119-setup-workspace-profile-path | | | | |
-| 2026-07-15-v1.119-setup-agent-picker-catalog | | | | |
+| 2026-07-15-v1.119-setup-continue-unblock | Approve with residuals | Pass (mandatory) | 10 (low/nit) | QC consolidated: `.mstar/sdd/2026-07-15-v1.119-setup-continue-unblock/review/qc-consolidated.md` |
+| 2026-07-15-v1.119-setup-workspace-profile-path | Approve with residuals | Pass (mandatory) | 8 (low/nit) | QC consolidated: `.mstar/sdd/2026-07-15-v1.119-setup-workspace-profile-path/review/qc-consolidated.md` |
+| 2026-07-15-v1.119-setup-agent-picker-catalog | Approve with residuals | Pass (mandatory) | 7 (1 low, 6 nit) | QC consolidated: `.mstar/sdd/2026-07-15-v1.119-setup-agent-picker-catalog/review/qc-consolidated.md` |
 
 ## Compound Round Summary
 
-> Filled at iteration-close.
+**1 knowledge doc created:** `architecture-patterns/daemon-creator-pool-lazy-attach.md` - daemon creator pool lazy-attach pattern (from P0 root-cause investigation: daemon boots without pool on clean first run, `ensureSetupBootstrap` only writes config, Tier-1 handlers must call `ensure_creator_pool()` before pool access; web-only fixes are dead ends).
+
+**Iteration package inventory (3 specs in `v1.119/specs/`):**
+- `setup-continue-unblock.md` - Keep snapshot (promote target: `specs/desktop-shell.md` / `specs/web-ui.md` at P5 merge)
+- `setup-workspace-profile-path.md` - Keep snapshot (same promote target)
+- `setup-agent-picker-catalog.md` - Keep snapshot (same promote target)
+
+Spec promotion deferred to post-merge P5 fold-in per compass promote target.
+
+## Iteration Retrospective (minimal)
+
+**What went well:**
+- SDD per-task model worked effectively for P0 (4 tasks + fix wave); micro-batch for P1/P2 (small interconnected tasks) saved dispatch overhead
+- T1 investigation task (root-cause repro) provided high-value evidence that shaped T2-T4 implementation
+- QC tri-review caught a real Critical issue (QC2-C-001: migration error swallowed) that would have made AC-P0-3 unreachable in production
+
+**What could improve:**
+- Task-brief script (`task-brief`) expects `### Task N` headings but plan used `- [ ] T1:` list format; briefs were written manually
+- P2 T1-T3 changes broke 33 tests (not 6 as initially expected) because fixture updates cascaded across 6 test files; T4 absorbed more work than anticipated
+- T4 reviewer returned empty result (transient issue); PM had to accept based on implementer evidence + subsequent QC review
+
+**Key learning:** The daemon creator pool lazy-attach pattern is now documented as a knowledge doc to prevent future developers from rediscovering the same root cause.
