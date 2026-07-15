@@ -11,7 +11,7 @@
 - [cli-spec.md](../cli-spec.md) — `creator works` command group
 - [local-db-schema.md](../local-db-schema.md) — table definitions
 
-**Iteration compass**: [v1.41-multi-work-author-desk-delivery-compass-v1.md](../../iterations/v1.41-multi-work-author-desk-delivery-compass-v1.md) (Shipped)
+**Iteration compass**: [v1.41/delivery-compass.md](../../iterations/v1.41/delivery-compass.md) (Shipped)
 
 ---
 

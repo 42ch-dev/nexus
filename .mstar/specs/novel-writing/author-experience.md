@@ -14,7 +14,7 @@
 - [quality-loop.md](quality-loop.md) — findings + review visibility
 - [creator-workflow.md](../creator-workflow.md) — FL-E stage names in narrative
 
-**Iteration compass**: [v1.46-novel-author-maturity-and-spec-hygiene-delivery-compass-v1.md](../../iterations/v1.46-novel-author-maturity-and-spec-hygiene-delivery-compass-v1.md)
+**Iteration compass**: [v1.46/delivery-compass.md](../../iterations/v1.46/delivery-compass.md)
 
 ---
 

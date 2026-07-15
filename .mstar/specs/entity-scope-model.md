@@ -311,7 +311,7 @@ Recommended default mapping when ingesting or authoring novel items (P1 validati
 | `rules` | `conflict` | Magic/tech/legal constraints |
 | `economy` | `item` | Trade, currency, resources |
 
-`world_refs` in novel chapter frontmatter reference **stable `canonical_name`** values (optionally prefixed in prose as `char_lin_xia` — resolved against `(world_id, block_type, canonical_name)` via P0 validator). Iteration: [v1.40-novel-world-kb-delivery-compass-v1.md](../../iterations/v1.40-novel-world-kb-delivery-compass-v1.md); runtime layering: [world-kb-runtime-architecture.md](../world-kb-runtime-architecture.md).
+`world_refs` in novel chapter frontmatter reference **stable `canonical_name`** values (optionally prefixed in prose as `char_lin_xia` — resolved against `(world_id, block_type, canonical_name)` via P0 validator). Iteration: [v1.40/delivery-compass.md](../../iterations/v1.40/delivery-compass.md); runtime layering: [world-kb-runtime-architecture.md](../world-kb-runtime-architecture.md).
 
 Minimum common `body` shape for novel-profile items (V1.40 P1):
 

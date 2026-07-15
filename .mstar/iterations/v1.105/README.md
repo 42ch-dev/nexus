@@ -2,7 +2,7 @@
 
 Iteration-scoped contracts and guides for **V1.105 — First-Launch Wizard Reshape**.
 
-**Compass:** [`v1.105-delivery-compass.md`](../v1.105-delivery-compass.md)
+**Compass:** [`v1.105/delivery-compass.md`](../v1.105/delivery-compass.md)
 
 ## Story
 

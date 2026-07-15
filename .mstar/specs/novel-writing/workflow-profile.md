@@ -14,7 +14,7 @@
 - [orchestration-engine.md](../orchestration-engine.md) — `novel-writing` preset
 - [entity-scope-model.md](../entity-scope-model.md) — World entity + World KB (`work_profile: novel` binds Work to World; world content is cross-Work, lives in World KB, NOT in per-Work `Worldbuilding/` subtree)
 
-**Iteration compass**: [v1.37-novel-writing-foundation-delivery-compass-v1.md](../../iterations/v1.37-novel-writing-foundation-delivery-compass-v1.md) extends the shipped V1.36 baseline without changing the single-chapter behavior.
+**Iteration compass**: [v1.37/delivery-compass.md](../../iterations/v1.37/delivery-compass.md) extends the shipped V1.36 baseline without changing the single-chapter behavior.
 
 ---
 
@@ -117,7 +117,7 @@ Therefore:
 
 ### 3.5.1 World KB continuity implement contract (V1.37 P2 roadmap → V1.40 implement)
 
-**Scope of this extension**: V1.37 P2 locked the roadmap; **V1.40** implements it across plans P0–P3 ([v1.40-novel-world-kb-delivery-compass-v1.md](../../iterations/v1.40-novel-world-kb-delivery-compass-v1.md)). The `novel-writing` `world_binding` mode is `required` for V1.40 new Work creation/init. Legacy worldless Works from V1.39 and earlier continue to read/operate without a World context block, but no V1.40 init path may create a worldless Work. Implement slices: P0 world create + validation; P1 taxonomy; P2 prompt context block; P3 kb-extract binding.
+**Scope of this extension**: V1.37 P2 locked the roadmap; **V1.40** implements it across plans P0–P3 ([v1.40/delivery-compass.md](../../iterations/v1.40/delivery-compass.md)). The `novel-writing` `world_binding` mode is `required` for V1.40 new Work creation/init. Legacy worldless Works from V1.39 and earlier continue to read/operate without a World context block, but no V1.40 init path may create a worldless Work. Implement slices: P0 world create + validation; P1 taxonomy; P2 prompt context block; P3 kb-extract binding.
 
 #### 3.5.1.1 Mandatory World binding paths for `novel-project-init`
 
@@ -777,7 +777,7 @@ The V1.36 single-chapter case (`total_planned_chapters == 1`) is a strict subset
 5. **Reopen** same Work: `completion-lock release` then `creator run resume --reopen --reason` (grill-me B); distinct from `--from-work` new Work.
 6. Pool integration: [work-pool.md](work-pool.md). **OUT:** `creator work switch`.
 
-**V1.42 P1**: multi-volume PK (§4.5.4) — [v1.42-multi-volume-serial-writing-delivery-compass-v1.md](../../iterations/v1.42-multi-volume-serial-writing-delivery-compass-v1.md).
+**V1.42 P1**: multi-volume PK (§4.5.4) — [v1.42/delivery-compass.md](../../iterations/v1.42/delivery-compass.md).
 
 ---
 
@@ -877,7 +877,7 @@ Each chapter row must show `not_started | outlined | draft | finalized` and `act
 4. Completion §6 reads from `work_chapters`; documented and testable without publish.
 5. `work_profile: novel` fields §2.1 registered in work-experience-model cross-link; `world_id` is the cross-Work binding (§3.5).
 6. `novel-project-init` asks the mandatory World binding question (§3.5, §5) with only create-new / bind-existing V1.40 paths.
-7. Compass demo path §2 in [v1.36 compass](../../iterations/v1.36-pending-delivery-compass.md) achievable after P1–P3 implement.
+7. Compass demo path §2 in [v1.36 compass](../../iterations/v1.36/delivery-compass.md) achievable after P1–P3 implement.
 
 ---
 

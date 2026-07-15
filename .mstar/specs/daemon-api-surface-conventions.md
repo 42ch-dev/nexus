@@ -517,7 +517,7 @@ V1.64 closes F-P1, F-P2, and F-E1 for the Web UI data-layer baseline, while docu
 
 ## 10. Daemon port discovery (V1.66 desktop shell)
 
-Daemon API clients that connect over loopback HTTP use a **resolved daemon base URL**, not a schema-defined discovery endpoint. (Compass: [v1.66 §5 #3 LOCKED](../iterations/v1.66-tauri-desktop-shell-delivery-compass-v1.md).)
+Daemon API clients that connect over loopback HTTP use a **resolved daemon base URL**, not a schema-defined discovery endpoint. (Compass: [v1.66 §5 #3 LOCKED](../iterations/v1.66/delivery-compass.md).)
 
 V1.66 desktop-shell convention:
 

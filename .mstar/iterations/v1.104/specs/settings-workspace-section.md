@@ -4,7 +4,7 @@
 **Plan:** `2026-07-09-v1.104-settings-workspace`  
 **Shell delta:** [`settings-shell-workspace-delta.md`](settings-shell-workspace-delta.md)  
 **Studio-first:** [`../guides/studio-first-visual-then-app.md`](../guides/studio-first-visual-then-app.md)  
-**Compass:** [`v1.104-delivery-compass.md`](../../v1.104-delivery-compass.md)  
+**Compass:** [`v1.104/delivery-compass.md`](../../v1.104/delivery-compass.md)  
 **Tier:** Must (P0)  
 **Wire:** `wire_contracts_changed: false`  
 **Supersedes (scope):** V1.103 Stretch deferral — product intent carried from [`v1.103/specs/settings-workspace-section.md`](../../v1.103/specs/settings-workspace-section.md)

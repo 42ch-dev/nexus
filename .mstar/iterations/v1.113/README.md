@@ -24,7 +24,7 @@ and the residual/test slate should be quieter before the next feature wave.
 | P1 UI normalization | `.mstar/plans/2026-07-12-v1.113-ui-normalization.md` |
 | P2 tech debt paydown | `.mstar/plans/2026-07-12-v1.113-tech-debt-paydown.md` |
 
-Compass: `../v1.113-delivery-compass.md`
+Compass: `../v1.113/delivery-compass.md`
 
 ## Context snapshot
 

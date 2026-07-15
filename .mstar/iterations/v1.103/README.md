@@ -2,7 +2,7 @@
 
 Iteration-scoped contracts and guides for **V1.103 — Settings Shell Deepening (DF-70 Remainder)**.
 
-**Compass:** [`v1.103-delivery-compass.md`](../v1.103-delivery-compass.md)
+**Compass:** [`v1.103/delivery-compass.md`](../v1.103/delivery-compass.md)
 
 ## Story
 

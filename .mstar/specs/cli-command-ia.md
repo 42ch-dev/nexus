@@ -69,7 +69,7 @@ No sixth top-level group in V1.35. Pre-release allows deprecation aliases (see Â
 
 **Removed in V1.45 (hard delete):** `review-master`, `audit-chapter`, `stage`, `start`, `continue`, `resume`, `reconcile-chapters` under `creator run`.
 
-See [v1.45-creator-run-preset-unification-delivery-compass-v1.md](../../iterations/v1.45-creator-run-preset-unification-delivery-compass-v1.md) migration appendix.
+See [v1.45/delivery-compass.md](../../iterations/v1.45/delivery-compass.md) migration appendix.
 
 <!-- V1.44 shipped table (superseded by V1.45):
 | `review-master <work_id>` | â€¦ | V1.44 P1 |
@@ -78,7 +78,7 @@ See [v1.45-creator-run-preset-unification-delivery-compass-v1.md](../../iteratio
 
 ### 3.2 `creator kb` vs `creator knowledge` (P3 lock)
 
-**Problem (KCA-003):** Users conflate `creator kb`, `creator knowledge`, and World KB. Evidence and UX IDs: [V1.35 compass Appendix A](../../iterations/v1.35-cli-ia-and-product-polish-delivery-compass-v1.md#appendix-a-cli-usability-audit-v135) UX-004.
+**Problem (KCA-003):** Users conflate `creator kb`, `creator knowledge`, and World KB. Evidence and UX IDs: [V1.35 compass Appendix A](../../iterations/v1.35/delivery-compass.md#appendix-a-cli-usability-audit-v135) UX-004.
 
 **Compass must lock one option before P3 implement:**
 

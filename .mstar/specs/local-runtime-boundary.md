@@ -86,7 +86,7 @@ ACP is for agent integration. Nexus still needs a stable internal interface for:
 
 The Daemon API is the **codegen-ready** internal contract between CLI, daemon, and local automation.
 
-**Routing policy (long-term):** [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md) §5. **Removal acceptance:** [v1.21 delivery compass](../../iterations/v1.21-local-platform-isolation-delivery-compass-v1.md).
+**Routing policy (long-term):** [local-cloud-crate-architecture.md](./local-cloud-crate-architecture.md) §5. **Removal acceptance:** [v1.21 delivery compass](../../iterations/v1.21/delivery-compass.md).
 
 | Endpoint / family | Status on daemon | Notes |
 | --- | --- | --- |

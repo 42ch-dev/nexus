@@ -2,7 +2,7 @@
 
 Iteration-scoped contracts and guides for **V1.106 — UI Continuity & Studio-First Pipeline**.
 
-**Compass:** [`v1.106-delivery-compass.md`](../v1.106-delivery-compass.md) (`status: active`)
+**Compass:** [`v1.106/delivery-compass.md`](../v1.106/delivery-compass.md) (`status: active`)
 
 ## Story
 

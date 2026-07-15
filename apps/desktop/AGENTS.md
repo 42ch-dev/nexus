@@ -69,7 +69,7 @@ or **Cancel**. Prefer Keep when iterating so Setup/agent scan keep a warm daemon
 - **Contract**: [`.mstar/specs/desktop-shell.md`](../../.mstar/specs/desktop-shell.md)
   (the feature-line spec — `NexusClient` desktop extensions, sidecar lifecycle,
   port discovery, capability detection, scope-whitelist path guard).
-- **Iteration compass**: [`.mstar/iterations/v1.66-tauri-desktop-shell-delivery-compass-v1.md`](../../.mstar/iterations/v1.66-tauri-desktop-shell-delivery-compass-v1.md)
+- **Iteration compass**: [`.mstar/iterations/v1.66/delivery-compass.md`](../../.mstar/iterations/v1.66/delivery-compass.md)
   §5 (LOCKED design items).
 - **Design tokens**: Repo-root [`DESIGN.md`](../../DESIGN.md) + [`DESIGN.dark.md`](../../DESIGN.dark.md) — sole design-system SSOT (V1.98 unified; former `apps/web/DESIGN*.md` retired).
 - **Wire contracts unchanged** (`wire_contracts_changed: false`, compass §5 #5):

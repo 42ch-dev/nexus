@@ -4,8 +4,8 @@
 **Document class**: Dev-surface auxiliary app (not author-facing product)  
 **Created**: 2026-07-08 (`@product-manager`)  
 **Scope**: `apps/design-studio` — read-only gallery and visual proving ground for Nexus DESIGN SSOT, brand VI, shared presentational primitives, and representative surface fixtures
-**Iteration compass**: [v1.98-design-studio-and-design-unification-compass-v1.md](../iterations/v1.98-design-studio-and-design-unification-compass-v1.md)  
-**V1.99 compass**: [v1.99-design-system-deepening-compass-v1.md](../iterations/v1.99-design-system-deepening-compass-v1.md)
+**Iteration compass**: [v1.98/delivery-compass.md](../iterations/v1.98/delivery-compass.md)  
+**V1.99 compass**: [v1.99/delivery-compass.md](../iterations/v1.99/delivery-compass.md)
 **IA guide**: [design-studio-information-architecture.md](../iterations/v1.98/guides/design-studio-information-architecture.md)  
 **Coordinates with**:
 
@@ -156,7 +156,7 @@ Section nav labels and per-component matrix: [IA guide](../iterations/v1.98/guid
 - No unbounded migration of shadcn primitives into `@42ch/nexus-ui`; V1.99 allows only approved pure presentational primitives
 - No daemon/Tauri integration, schema changes, or `@42ch/nexus-contracts` bump
 - Not a replacement for `apps/web` product QA — studio complements, does not gate author flows
-- Desktop clean-state / first-launch author onboarding is owned by **V1.105** (setup wizard chrome via Studio fixtures — see [v1.105-delivery-compass.md](../iterations/v1.105-delivery-compass.md)); Design Studio itself does not ship author onboarding.
+- Desktop clean-state / first-launch author onboarding is owned by **V1.105** (setup wizard chrome via Studio fixtures — see [v1.105/delivery-compass.md](../iterations/v1.105/delivery-compass.md)); Design Studio itself does not ship author onboarding.
 
 ### V1.106 Surfaces additions (P0 Must — iteration detail)
 

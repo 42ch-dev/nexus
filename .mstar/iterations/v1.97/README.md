@@ -17,5 +17,5 @@ The workspace is for iteration evidence and drafts only. Durable product contrac
 
 ## Linked Artifacts
 
-- Compass: `../v1.97-desktop-first-launch-hardening-compass-v1.md`
+- Compass: `../v1.97/delivery-compass.md`
 - Plan: `../../plans/2026-07-07-v1.97-desktop-first-launch-hardening.md`

@@ -10,5 +10,5 @@
 | [`specs/settings-shell-workspace-delta.md`](specs/settings-shell-workspace-delta.md) | Settings shell nav/route delta vs V1.103 omit |
 | [`guides/studio-first-visual-then-app.md`](guides/studio-first-visual-then-app.md) | Studio → visual acceptance → App wiring order |
 
-**Compass:** [`../v1.104-delivery-compass.md`](../v1.104-delivery-compass.md)  
+**Compass:** [`../v1.104/delivery-compass.md`](../v1.104/delivery-compass.md)  
 **Plan:** [`../../plans/2026-07-09-v1.104-settings-workspace.md`](../../plans/2026-07-09-v1.104-settings-workspace.md)

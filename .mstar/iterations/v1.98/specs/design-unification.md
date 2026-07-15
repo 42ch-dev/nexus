@@ -3,7 +3,7 @@
 **Status**: Normative (P-1 Prepare)  
 **Owner**: `@architect`  
 **Consumers**: P0 plan T1 (`apps/web` migration), `apps/design-studio`, `specs/design-studio.md`  
-**Iteration compass**: [v1.98-design-studio-and-design-unification-compass-v1.md](../../v1.98-design-studio-and-design-unification-compass-v1.md)  
+**Iteration compass**: [v1.98/delivery-compass.md](../../v1.98/delivery-compass.md)  
 **Wire contracts**: `wire_contracts_changed: false` — documentation + frontend paths only
 
 ---

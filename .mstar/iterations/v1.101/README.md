@@ -42,7 +42,7 @@ See `guides/studio-first-visual-then-app.md`. For every UI-visual change: Design
 
 | Artifact | Path |
 |----------|------|
-| Delivery compass | [`../v1.101-delivery-compass.md`](../v1.101-delivery-compass.md) |
+| Delivery compass | [`../v1.101/delivery-compass.md`](../v1.101/delivery-compass.md) |
 | P0 plan | [`.mstar/plans/2026-07-09-v1.101-agent-detection-picker.md`](../../plans/2026-07-09-v1.101-agent-detection-picker.md) |
 | P1 plan | [`.mstar/plans/2026-07-09-v1.101-setup-wizard-ui-polish.md`](../../plans/2026-07-09-v1.101-setup-wizard-ui-polish.md) |
 | P2 plan (Stretch) | [`.mstar/plans/2026-07-09-v1.101-select-component-promotion.md`](../../plans/2026-07-09-v1.101-select-component-promotion.md) |

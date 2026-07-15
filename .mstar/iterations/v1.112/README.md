@@ -13,7 +13,7 @@ catalogs in `apps/web`.
 | [`specs/i18n-foundation.md`](specs/i18n-foundation.md) | P0 — runtime, Appearance product copy, conventions, sample migration |
 | [`specs/i18n-ui-migration.md`](specs/i18n-ui-migration.md) | P1 — full user-facing UI migration + Done audit |
 
-Compass: [`../v1.112-delivery-compass.md`](../v1.112-delivery-compass.md).
+Compass: [`../v1.112/delivery-compass.md`](../v1.112/delivery-compass.md).
 
 Plans: [`../../plans/2026-07-12-v1.112-i18n-foundation.md`](../../plans/2026-07-12-v1.112-i18n-foundation.md),
 [`../../plans/2026-07-12-v1.112-i18n-ui-migration.md`](../../plans/2026-07-12-v1.112-i18n-ui-migration.md).
