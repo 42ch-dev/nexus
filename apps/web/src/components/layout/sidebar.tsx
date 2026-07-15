@@ -68,7 +68,7 @@ export function Sidebar() {
         label: t('nav.works'),
         items: [
           { to: '/works', label: t('nav.allWorks'), icon: Layers },
-          ...works.slice(0, 12).map((work) => ({
+          ...works.map((work) => ({
             to: `/works/${encodeURIComponent(work.work_id)}`,
             label: work.title,
             icon: BookOpen,

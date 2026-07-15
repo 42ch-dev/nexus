@@ -168,6 +168,26 @@ describe('Sidebar', () => {
     expect(memories).not.toHaveClass('bg-gray-alpha-100');
   });
 
+  it('highlights Memories on /memory via prefix match (V1.118 P1)', async () => {
+    useSidebarHandlers();
+
+    renderInApp(<Sidebar />, {
+      client: makeClient(),
+      activeCreatorId: 'creator-a',
+      initialRouterEntries: ['/memory'],
+    });
+
+    const memories = screen.getByRole('link', { name: 'Memories' });
+    expect(memories).toHaveClass('bg-gray-alpha-100', 'text-gray-1000');
+    expect(memories.querySelector('[data-testid="sidebar-active-bar"]')).toHaveClass(
+      'w-[2px]',
+      'bg-blue-700',
+    );
+
+    const allWorks = screen.getByRole('link', { name: 'All Works' });
+    expect(allWorks).not.toHaveClass('bg-gray-alpha-100');
+  });
+
   it('shows three peer groups with no Creator meta-group mixing canvas (V1.118 P1)', async () => {
     useSidebarHandlers();
 
