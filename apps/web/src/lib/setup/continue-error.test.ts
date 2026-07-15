@@ -73,6 +73,18 @@ describe('classifySetupContinueError', () => {
     expect(result.class).toBe('soft_bootstrap');
   });
 
+  it('8b. bootstrap + production wire code internal (no migration in message) → soft_bootstrap', () => {
+    const error = new NexusClientError(500, 'internal', 'database unavailable');
+    const result = classifySetupContinueError('bootstrap', error);
+    expect(result.class).toBe('soft_bootstrap');
+  });
+
+  it('8c. bootstrap + uppercase DATABASE_ERROR is not the public wire code → soft_bootstrap', () => {
+    const error = new NexusClientError(500, 'DATABASE_ERROR', 'pool open failed');
+    const result = classifySetupContinueError('bootstrap', error);
+    expect(result.class).toBe('soft_bootstrap');
+  });
+
   // ── Message extraction (callers apply phase fallback when empty) ─────────
 
   it('extracts the message from the error for display', () => {
