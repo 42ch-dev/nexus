@@ -8,6 +8,10 @@ import { Label } from '@/components/ui/label';
 import { WorkspacePathField } from '@/components/setup/workspace-path-field';
 import { useDesktopCapabilities, useNexusClient } from '@/lib/client-context';
 import { errorMessage } from '@/lib/error-message';
+import {
+  classifySetupContinueError,
+  type SetupContinueError,
+} from '@/lib/setup/continue-error';
 import { useToast } from '@/lib/use-toast';
 import type { WizardState } from '@/pages/setup-wizard-page';
 
@@ -38,11 +42,13 @@ export function SetupStepWorkspace({
   const client = useNexusClient();
   const [loading, setLoading] = useState(true);
   const [bootstrapping, setBootstrapping] = useState(false);
-  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
-  // Tracks which phase of the Continue path produced `bootstrapError`, so the
-  // classifier (T3) can derive Reset visibility and helper copy from the phase.
-  // Today `bootstrapError` still drives the (over-broad) Reset gate; T3 will
-  // replace that with `showReset = class === 'migration_db'`.
+  // Classified Continue-path error (AD-P0). Drives the inline `role="alert"`
+  // region above the CTA row, the class-selected helper copy, and Reset
+  // visibility (`showReset = class === 'migration_db'` only — never bound to
+  // message presence alone, per spec product rule 3).
+  const [continueError, setContinueError] = useState<SetupContinueError | null>(null);
+  // Tracks which phase of the Continue path produced `continueError`, exposed
+  // via `data-continue-error-phase` for testing.
   const [continueErrorPhase, setContinueErrorPhase] = useState<
     'workspace_path' | 'bootstrap' | 'display_name' | null
   >(null);
@@ -98,11 +104,11 @@ export function SetupStepWorkspace({
       try {
         await desktop.setWorkspacePath(state.workspaceRoot);
       } catch (err) {
-        const message = errorMessage(err) || t('error.workspacePathFailed');
-        // Promote workspace-path failure from toast-only to error state so it
-        // surfaces inline (spec: "Workspace path failures must populate
-        // continueError"). T3 will gate Reset to migration_db only.
-        setBootstrapError(message);
+        const classified = classifySetupContinueError('workspace_path', err);
+        const message = classified.message || t('error.workspacePathFailed');
+        // Promote workspace-path failure from toast-only to inline error state
+        // (spec: "Workspace path failures must populate continueError").
+        setContinueError({ message, class: classified.class });
         setContinueErrorPhase('workspace_path');
         toast({ variant: 'error', title: t('toast.workspacePath'), description: message });
         console.error('Failed to persist workspace path:', err);
@@ -110,7 +116,7 @@ export function SetupStepWorkspace({
       }
     }
     setBootstrapping(true);
-    setBootstrapError(null);
+    setContinueError(null);
     setContinueErrorPhase(null);
     try {
       const result = await desktop.ensureSetupBootstrap();
@@ -127,8 +133,9 @@ export function SetupStepWorkspace({
         try {
           await client.updateCreator(result.creator_id, { display_name: displayName });
         } catch (err) {
-          const message = errorMessage(err) || t('error.profileDisplayNameFailed');
-          setBootstrapError(message);
+          const classified = classifySetupContinueError('display_name', err);
+          const message = classified.message || t('error.profileDisplayNameFailed');
+          setContinueError({ message, class: classified.class });
           setContinueErrorPhase('display_name');
           toast({
             variant: 'error',
@@ -140,12 +147,13 @@ export function SetupStepWorkspace({
         }
       }
 
-      setBootstrapError(null);
+      setContinueError(null);
       setContinueErrorPhase(null);
       onNext();
     } catch (err) {
-      const message = errorMessage(err) || t('error.workspaceBootstrapFailed');
-      setBootstrapError(message);
+      const classified = classifySetupContinueError('bootstrap', err);
+      const message = classified.message || t('error.workspaceBootstrapFailed');
+      setContinueError({ message, class: classified.class });
       setContinueErrorPhase('bootstrap');
       toast({
         variant: 'error',
@@ -177,6 +185,10 @@ export function SetupStepWorkspace({
       console.error('Failed to reset local database:', err);
     }
   }
+
+  // Reset is allowed ONLY for migration/DB-class failures (spec product rule 3,
+  // AD-P0). Never bind Reset to message presence alone.
+  const showReset = continueError?.class === 'migration_db';
 
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
@@ -219,6 +231,22 @@ export function SetupStepWorkspace({
         </div>
       </div>
 
+      {continueError ? (
+        <div
+          role="alert"
+          data-testid="wizard-continue-error"
+          data-continue-error-class={continueError.class}
+          className="flex shrink-0 flex-col gap-2 rounded-card border border-[color-mix(in_srgb,var(--color-red-700)_30%,transparent)] bg-[color-mix(in_srgb,var(--color-red-700)_6%,transparent)] p-3"
+        >
+          <p className="text-heading-16 font-heading text-red-1000">{continueError.message}</p>
+          <p className="text-copy-14 text-red-900">
+            {continueError.class === 'migration_db'
+              ? t('continueError.helper.migrationDb')
+              : t('continueError.helper.soft')}
+          </p>
+        </div>
+      ) : null}
+
       <div
         className="mt-auto flex shrink-0 items-center gap-setup-wizard-surface-cta-container-gap"
         data-testid="wizard-cta-row"
@@ -245,7 +273,7 @@ export function SetupStepWorkspace({
             t('action.continue')
           )}
         </Button>
-        {bootstrapError && desktop ? (
+        {showReset ? (
           <Button
             variant="tertiary"
             onClick={() => void resetLocalDatabase()}
