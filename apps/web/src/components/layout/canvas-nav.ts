@@ -6,26 +6,27 @@ import type { ShellNavItem } from './presentational/shell-sidebar-chrome';
  * Canvas nav items + active-surface resolver.
  *
  * V1.111 grouped the three canvas surfaces (Outline / World KB / Strategy)
- * under a single "Canvas" {@link ShellNavGroup} disclosure. V1.117 removes that
- * group (AC-P2-3): Outline + World KB fold under the Creation (Creator) tab as
- * resolver-driven canvas items; Strategy moves to the Orchestration tab as a
- * plain `/strategies` link (AC-P2-4).
+ * under a single "Canvas" {@link ShellNavGroup} disclosure. V1.117 removed that
+ * group (AC-P2-3): Outline + World KB folded under the Creation tab as
+ * resolver-driven canvas items; Strategy moved to the Orchestration tab.
+ * V1.118 P1 removes canvas items from list-mode Creation sidebar groups — the
+ * three peer groups are Works / Worlds / Memories — while keeping these
+ * resolvers for command palette routing and active-surface matching elsewhere.
  *
  * Active-surface highlight derives from **route-pattern matching** via
  * {@link resolveActiveCanvasSurface}, NOT from a single Work param and NOT from
  * the chrome's built-in `item.to` prefix match (which is too broad — it would
- * light up "Outline" on plain `/works/:workId` work-detail).
+ * light up "Outline" on plain `/works/:workId` before the outline redirect).
  *
- * {@link CANVAS_ITEMS} holds the two surfaces still rendered via the resolver
- * path in the sidebar (Outline, World KB). The {@link CanvasSurfaceId} type and
- * resolvers still cover `strategy` (the `/strategies/:presetId` route remains a
- * canvas surface conceptually), but Strategy is no longer a sidebar canvas
- * item — it renders as a plain Orchestrator link.
+ * {@link CANVAS_ITEMS} holds the Outline + World KB surface definitions used by
+ * the active-surface resolver and command palette. They are no longer rendered
+ * in list-mode Creation sidebar groups after V1.118 P1.
  */
 
-/** The canvas surfaces. Only `outline` + `world-kb` are sidebar items (V1.117);
- * `strategy` is still a canvas surface for the resolver, but renders as a plain
- * Orchestrator link. */
+/** The canvas surfaces. Only `outline` + `world-kb` are in {@link CANVAS_ITEMS};
+ * `strategy` is still a canvas surface for {@link resolveActiveCanvasSurface}
+ * (command palette / future surfaces); the Orchestrator tab owns the `/strategies`
+ * link. */
 export type CanvasSurfaceId = 'outline' | 'world-kb' | 'strategy';
 
 /**
@@ -40,8 +41,8 @@ export interface CanvasNavItem extends ShellNavItem {
 }
 
 /**
- * The canvas nav items rendered via the resolver path in the sidebar, in
- * display order (V1.117 regroup).
+ * Canvas surface nav item definitions (resolver + command palette), in display
+ * order. Not rendered in list-mode Creation sidebar groups (V1.118 P1).
  *
  * Strategy is intentionally absent: it moved to the Orchestration tab as a
  * plain `/strategies` link (AC-P2-4). Outline + World KB remain

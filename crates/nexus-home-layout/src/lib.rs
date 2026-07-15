@@ -8,6 +8,52 @@ use std::path::{Path, PathBuf};
 
 const NEXUS_DIR: &str = ".nexus42";
 
+/// Create the `~/.nexus42/` system directory layout and config skeleton if they
+/// do not exist. Safe to call repeatedly — existing files are not overwritten.
+///
+/// Creates the following structure:
+///
+/// ```text
+/// ~/.nexus42/
+/// ├── config.toml          (empty/absent → default empty)
+/// ├── skills/              (embedded skill sync target)
+/// ├── presets/             (user-installed presets)
+/// ├── modules/             (user-installed WASM modules)
+/// ├── tls/                 (TLS cert + key)
+/// ├── shared/              (global shared DB)
+/// ├── acp/runs/            (ACP run trace storage)
+/// └── rules/               (user writing-craft rules)
+/// ```
+///
+/// If `config.toml` does not exist, an empty default is written so that
+/// subsequent config reads succeed without error.
+///
+/// # Errors
+///
+/// Returns an I/O error if directory creation or config file write fails.
+pub fn ensure_system_layout(nexus_home: &Path) -> std::io::Result<()> {
+    // Create the nexus home root if missing
+    std::fs::create_dir_all(nexus_home)?;
+
+    // System subdirectories
+    std::fs::create_dir_all(nexus_home.join("skills"))?;
+    std::fs::create_dir_all(nexus_home.join("presets"))?;
+    std::fs::create_dir_all(nexus_home.join("modules"))?;
+    std::fs::create_dir_all(nexus_home.join("tls"))?;
+    std::fs::create_dir_all(nexus_home.join("shared"))?;
+    std::fs::create_dir_all(nexus_home.join("acp").join("runs"))?;
+    std::fs::create_dir_all(nexus_home.join("rules"))?;
+
+    // Write empty config.toml if it does not exist (no config.json either)
+    let toml_path = nexus_home.join("config.toml");
+    let json_path = nexus_home.join("config.json");
+    if !toml_path.exists() && !json_path.exists() {
+        std::fs::write(&toml_path, "")?;
+    }
+
+    Ok(())
+}
+
 /// Resolve `~/.nexus42` from the user's home directory.
 #[must_use]
 pub fn nexus_root_from_home(home: &Path) -> PathBuf {

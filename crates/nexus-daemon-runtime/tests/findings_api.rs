@@ -34,7 +34,7 @@ use serde_json::json;
 async fn handler_state() -> (WorkspaceState, TestTempRoot) {
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
-    test_utils::seed_test_creator_and_world(state.pool()).await;
+    test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
     (state, tmp)
 }
 
@@ -933,7 +933,7 @@ async fn findings_prune_endpoint_dry_run_and_delete() {
     sqlx::query("UPDATE findings SET status = 'resolved', updated_at = ? WHERE finding_id = ?")
         .bind(old_ts)
         .bind(&f1.finding_id)
-        .execute(state.pool())
+        .execute(state.pool().unwrap())
         .await
         .unwrap();
 
@@ -951,7 +951,7 @@ async fn findings_prune_endpoint_dry_run_and_delete() {
     assert_eq!(dry.count, 1, "exactly one old resolved row is eligible");
     let total: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM findings WHERE work_id = ?")
         .bind(&work_id)
-        .fetch_one(state.pool())
+        .fetch_one(state.pool().unwrap())
         .await
         .unwrap();
     assert_eq!(total, 2, "dry-run must not delete any rows");
@@ -971,7 +971,7 @@ async fn findings_prune_endpoint_dry_run_and_delete() {
     let remaining: Vec<String> =
         sqlx::query_scalar("SELECT finding_id FROM findings WHERE work_id = ? ORDER BY finding_id")
             .bind(&work_id)
-            .fetch_all(state.pool())
+            .fetch_all(state.pool().unwrap())
             .await
             .unwrap();
     assert_eq!(
@@ -1220,7 +1220,7 @@ async fn findings_batch_update_mid_batch_dao_error_preserves_prior_updates() {
         f2.finding_id
     );
     sqlx::query(&trigger_sql)
-        .execute(state.pool())
+        .execute(state.pool().unwrap())
         .await
         .expect("create trigger");
 

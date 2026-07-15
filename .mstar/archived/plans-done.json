@@ -454,7 +454,24 @@
     "2026-07-12-v1.111-design-studio-canvas-gallery",
     "2026-07-12-v1.111-frontend-consolidation-sweep",
     "2026-07-12-v1.112-i18n-foundation",
-    "2026-07-12-v1.112-i18n-ui-migration"
+    "2026-07-12-v1.112-i18n-ui-migration",
+    "2026-07-14-v1.117-profiles-workspace",
+    "2026-07-14-v1.117-setup-agents-catalog",
+    "2026-07-14-v1.117-shell-layout-ia",
+    "2026-07-14-v1.117-mac-dock-icon",
+    "2026-07-14-v1.117-button-voice-verb-only",
+    "2026-07-13-v1.116-agent-detection-codex-native",
+    "2026-07-13-v1.116-desktop-dev-design-studio-locale",
+    "2026-07-13-v1.116-canvas-compute-readiness-research",
+    "2026-07-13-v1.115-canvas-adapter-completion",
+    "2026-07-13-v1.115-canvas-ux-residual-cluster",
+    "2026-07-13-v1.115-compute-manifest-reconciliation",
+    "2026-07-13-v1.114-canvas-architecture-foundation",
+    "2026-07-13-v1.114-canvas-stability-hardening",
+    "2026-07-13-v1.114-compute-module-foundation",
+    "2026-07-12-v1.113-i18n-completion",
+    "2026-07-12-v1.113-ui-normalization",
+    "2026-07-12-v1.113-tech-debt-paydown"
   ],
   "iteration_summaries": {
     "v1.45": {

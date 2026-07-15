@@ -1,0 +1,32 @@
+{
+  "id": "2026-07-13-v1.114-compute-module-foundation",
+  "title": "P2 - Compute Module Foundation & Visibility",
+  "file": "plans/2026-07-13-v1.114-compute-module-foundation.md",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": [
+    "@fullstack-dev"
+  ],
+  "progress": 100,
+  "tags": [
+    "v1.114",
+    "compute",
+    "module",
+    "registry",
+    "visibility",
+    "must"
+  ],
+  "created_at": "2026-07-13",
+  "updated_at": "2026-07-13",
+  "notes": "Phase 2: SDD T1-T5 done + QC fix-wave (clippy deny); QC tri Approve with residuals (1 R# low); QA Pass with notes; contracts 0.22.0→0.23.0",
+  "metadata": {
+    "iteration_refs": [
+      "V1.114"
+    ],
+    "spec_integration_branch": "iteration/v1.114",
+    "merge_target": "iteration/v1.114",
+    "primary_spec": ".mstar/iterations/v1.114/specs/compute-module-foundation.md",
+    "wire_contracts_changed": true,
+    "tier": "Must"
+  }
+}

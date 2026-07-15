@@ -39,7 +39,7 @@ async fn test_ctx() -> TestCtx {
     std::fs::write(nexus_home.join("config.toml"), config_content)
         .expect("failed to write config.toml");
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
-    let pool = state.pool().clone();
+    let pool = state.pool().unwrap().clone();
     let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
     let server = TestServer::new(app).expect("failed to create test server");

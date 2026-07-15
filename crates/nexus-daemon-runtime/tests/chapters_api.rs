@@ -31,7 +31,7 @@ async fn handler_state() -> (WorkspaceState, TestTempRoot) {
         Some(workspace_dir.to_string_lossy().to_string()),
     )
     .await;
-    test_utils::seed_test_creator_and_world(state.pool()).await;
+    test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
     (state, tmp)
 }
 
@@ -82,14 +82,26 @@ async fn create_work_with_chapters(state: &WorkspaceState, count: i32) -> (Strin
         ..Default::default()
     };
     let now = chrono::Utc::now().to_rfc3339();
-    nexus_local_db::works::patch_work(state.pool(), "test_creator", &work_id, &patch, &now)
-        .await
-        .expect("patch work_ref");
+    nexus_local_db::works::patch_work(
+        state.pool().unwrap(),
+        "test_creator",
+        &work_id,
+        &patch,
+        &now,
+    )
+    .await
+    .expect("patch work_ref");
 
     let now = chrono::Utc::now().to_rfc3339();
-    nexus_local_db::work_chapters::seed_chapters(state.pool(), &work_id, "test-novel", count, &now)
-        .await
-        .expect("seed chapters");
+    nexus_local_db::work_chapters::seed_chapters(
+        state.pool().unwrap(),
+        &work_id,
+        "test-novel",
+        count,
+        &now,
+    )
+    .await
+    .expect("seed chapters");
 
     (work_id, "test-novel".to_string())
 }
@@ -252,7 +264,7 @@ async fn patch_published_chapter_structure_is_hard_blocked() {
     let (work_id, _work_ref) = create_work_with_chapters(&state, 3).await;
 
     nexus_local_db::work_chapters::update_status(
-        state.pool(),
+        state.pool().unwrap(),
         &work_id,
         1,
         1,
@@ -287,7 +299,7 @@ async fn patch_finalized_chapter_structure_requires_confirmation() {
     let (work_id, _work_ref) = create_work_with_chapters(&state, 3).await;
 
     nexus_local_db::work_chapters::update_status(
-        state.pool(),
+        state.pool().unwrap(),
         &work_id,
         1,
         1,
@@ -371,7 +383,7 @@ async fn get_body_rejects_escaped_body_path() {
     .bind(&work_id)
     .bind(1)
     .bind(1)
-    .execute(state.pool())
+    .execute(state.pool().unwrap())
     .await
     .expect("update body_path");
 

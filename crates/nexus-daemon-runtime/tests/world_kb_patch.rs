@@ -101,7 +101,7 @@ async fn fresh_state() -> (
         Some(workspace_dir.to_string_lossy().to_string()),
     )
     .await;
-    nexus_daemon_runtime::test_utils::seed_test_creator_and_world(state.pool()).await;
+    nexus_daemon_runtime::test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
     (tmp, state)
 }
 
@@ -111,7 +111,7 @@ async fn fresh_state() -> (
 async fn patch_entity_title_bumps_version() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_hero",
         "wld_test_world",
         "character",
@@ -150,7 +150,7 @@ async fn patch_entity_title_bumps_version() {
 async fn patch_entity_stale_version_returns_409() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_hero",
         "wld_test_world",
         "character",
@@ -190,7 +190,7 @@ async fn patch_entity_stale_version_returns_409() {
 async fn patch_entity_deleted_entity_rejected_422() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_dead",
         "wld_test_world",
         "character",
@@ -235,7 +235,7 @@ async fn patch_entity_cross_author_forbidden() {
         "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
          VALUES ('other_creator', 'Other', 'active', datetime('now'), '{}')",
     )
-    .execute(state.pool())
+    .execute(state.pool().unwrap())
     .await
     .unwrap();
     sqlx::query(
@@ -245,11 +245,11 @@ async fn patch_entity_cross_author_forbidden() {
          VALUES ('wld_other', 'ws', 'other_creator', 'Other', 'other-world', 'active', 'private', \
           'manual', '{}', datetime('now'))",
     )
-    .execute(state.pool())
+    .execute(state.pool().unwrap())
     .await
     .unwrap();
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_other",
         "wld_other",
         "character",
@@ -303,7 +303,7 @@ async fn patch_entity_cross_author_does_not_leak_existence() {
         "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
          VALUES ('other_creator', 'Other', 'active', datetime('now'), '{}')",
     )
-    .execute(state.pool())
+    .execute(state.pool().unwrap())
     .await
     .unwrap();
     sqlx::query(
@@ -313,14 +313,14 @@ async fn patch_entity_cross_author_does_not_leak_existence() {
          VALUES ('wld_other', 'ws', 'other_creator', 'Other', 'other-world', 'active', 'private', \
           'manual', '{}', datetime('now'))",
     )
-    .execute(state.pool())
+    .execute(state.pool().unwrap())
     .await
     .unwrap();
 
     // An entity that exists in the ACTIVE creator's OWN world (not the foreign
     // path world). This is the row whose existence must NOT be revealed.
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_mine",
         "wld_test_world",
         "character",
@@ -368,7 +368,7 @@ const NOVEL_CHARACTER_BODY: &str =
 async fn promote_adopt_confirms_candidate() {
     let (_tmp, state) = fresh_state().await;
     let candidate = insert_pending(
-        state.pool(),
+        state.pool().unwrap(),
         "test_creator",
         "ws",
         "wld_test_world",
@@ -408,7 +408,7 @@ async fn promote_adopt_confirms_candidate() {
 async fn promote_reject_dismisses_candidate() {
     let (_tmp, state) = fresh_state().await;
     let candidate = insert_pending(
-        state.pool(),
+        state.pool().unwrap(),
         "test_creator",
         "ws",
         "wld_test_world",
@@ -446,7 +446,7 @@ async fn promote_reject_dismisses_candidate() {
 async fn promote_stale_version_returns_409() {
     let (_tmp, state) = fresh_state().await;
     let candidate = insert_pending(
-        state.pool(),
+        state.pool().unwrap(),
         "test_creator",
         "ws",
         "wld_test_world",
@@ -485,7 +485,7 @@ async fn promote_stale_version_returns_409() {
 async fn get_graph_returns_non_deleted_entities() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_one",
         "wld_test_world",
         "character",
@@ -496,7 +496,7 @@ async fn get_graph_returns_non_deleted_entities() {
     )
     .await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_two",
         "wld_test_world",
         "item",
@@ -528,7 +528,7 @@ async fn get_graph_returns_non_deleted_entities() {
 async fn get_candidates_returns_pending() {
     let (_tmp, state) = fresh_state().await;
     insert_pending(
-        state.pool(),
+        state.pool().unwrap(),
         "test_creator",
         "ws",
         "wld_test_world",
@@ -575,7 +575,7 @@ async fn get_candidates_multi_page_cursor_reaches_all_rows() {
     let mut seeded: Vec<nexus_local_db::kb_extract_job::KbExtractPromotion> = Vec::new();
     for idx in 0..4u8 {
         let row = insert_pending(
-            state.pool(),
+            state.pool().unwrap(),
             "test_creator",
             "ws",
             "wld_test_world",
@@ -726,7 +726,7 @@ async fn get_candidates_distinct_candidate_id_for_same_canonical_name() {
     // work_entry_id (the idempotency index is on (creator, work_entry_id,
     // world), so distinct work_entry_id lets both rows coexist).
     seed_pending_candidate(
-        state.pool(),
+        state.pool().unwrap(),
         "xj_aaaaaa0000000000000000000001",
         "we_source_work_one",
         "wld_test_world",
@@ -735,7 +735,7 @@ async fn get_candidates_distinct_candidate_id_for_same_canonical_name() {
     )
     .await;
     seed_pending_candidate(
-        state.pool(),
+        state.pool().unwrap(),
         "xj_aaaaaa0000000000000000000002",
         "we_source_work_two",
         "wld_test_world",
@@ -799,7 +799,7 @@ async fn get_candidates_distinct_candidate_id_for_same_canonical_name() {
 async fn promote_reject_cas_miss_conflict_carries_bumped_version() {
     let (_tmp, state) = fresh_state().await;
     let candidate = insert_pending(
-        state.pool(),
+        state.pool().unwrap(),
         "test_creator",
         "ws",
         "wld_test_world",
@@ -833,7 +833,7 @@ async fn promote_reject_cas_miss_conflict_carries_bumped_version() {
     // SAFETY: dynamic SQL — test-only version bump; compile-time macro not applicable.
     sqlx::query("UPDATE kb_extract_jobs SET version = version + 1 WHERE job_id = ?")
         .bind(&candidate.job_id)
-        .execute(state.pool())
+        .execute(state.pool().unwrap())
         .await
         .unwrap();
 
@@ -891,7 +891,7 @@ async fn promote_merge_target_cas_miss_marks_target_conflict() {
     let (_tmp, state) = fresh_state().await;
     // Confirmed merge target at revision 0.
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_target",
         "wld_test_world",
         "character",
@@ -904,7 +904,7 @@ async fn promote_merge_target_cas_miss_marks_target_conflict() {
     // Two distinct pending candidates targeting the same entity. Both start at
     // version 0 so each merge's outer OCC precondition passes independently.
     seed_pending_candidate(
-        state.pool(),
+        state.pool().unwrap(),
         "xj_merge_c1",
         "Racea1",
         "wld_test_world",
@@ -913,7 +913,7 @@ async fn promote_merge_target_cas_miss_marks_target_conflict() {
     )
     .await;
     seed_pending_candidate(
-        state.pool(),
+        state.pool().unwrap(),
         "xj_merge_c2",
         "Racea2",
         "wld_test_world",
@@ -998,7 +998,7 @@ async fn get_key_block_state_computable_returns_state() {
     })
     .to_string();
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_hero",
         "wld_test_world",
         "character",
@@ -1034,7 +1034,7 @@ async fn get_key_block_state_non_computable_returns_null_state() {
     })
     .to_string();
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_scene",
         "wld_test_world",
         "scene",
@@ -1083,11 +1083,11 @@ async fn get_key_block_state_cross_world_returns_404() {
          VALUES ('wld_other', 'ws', 'test_creator', 'Other', 'other-world', 'active', 'private', \
           'manual', '{}', datetime('now'))",
     )
-    .execute(state.pool())
+    .execute(state.pool().unwrap())
     .await
     .unwrap();
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_other",
         "wld_other",
         "character",

@@ -1,0 +1,34 @@
+{
+  "id": "2026-07-12-v1.113-tech-debt-paydown",
+  "title": "P2 - Tech Debt Paydown",
+  "file": "plans/2026-07-12-v1.113-tech-debt-paydown.md",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": [
+    "@frontend-dev"
+  ],
+  "progress": 100,
+  "tags": [
+    "v1.113",
+    "tech-debt",
+    "paydown",
+    "should"
+  ],
+  "created_at": "2026-07-12",
+  "updated_at": "2026-07-12",
+  "notes": "Phase 2: SDD T1-T3 done, QC tri Approve with residuals (4 R#), QA Pass with notes",
+  "metadata": {
+    "iteration_refs": [
+      "V1.113"
+    ],
+    "spec_integration_branch": "iteration/v1.113",
+    "merge_target": "iteration/v1.113",
+    "working_branch": "plan/v1.113-p2-tech-debt-paydown",
+    "primary_spec": ".mstar/iterations/v1.113/specs/tech-debt-paydown.md",
+    "wire_contracts_changed": false,
+    "tier": "Should",
+    "blocked_by": [
+      "2026-07-12-v1.113-i18n-completion"
+    ]
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "id": "2026-07-13-v1.115-canvas-adapter-completion",
+  "title": "P0 - Canvas Adapter Completion & Contract Convergence",
+  "file": "plans/2026-07-13-v1.115-canvas-adapter-completion.md",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": [
+    "@frontend-dev"
+  ],
+  "progress": 100,
+  "tags": [
+    "v1.115",
+    "canvas",
+    "adapter",
+    "contract",
+    "must"
+  ],
+  "created_at": "2026-07-13",
+  "updated_at": "2026-07-13",
+  "notes": "Phase 2: SDD T1a-T5 done, QC tri Approve with residuals (6 low/nit), QA Pass",
+  "metadata": {
+    "iteration_refs": [
+      "V1.115"
+    ],
+    "spec_integration_branch": "iteration/v1.115",
+    "merge_target": "iteration/v1.115",
+    "primary_spec": ".mstar/iterations/v1.115/specs/canvas-adapter-completion.md",
+    "wire_contracts_changed": false,
+    "tier": "Must"
+  }
+}

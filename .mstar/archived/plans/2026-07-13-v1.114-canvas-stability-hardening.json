@@ -1,0 +1,31 @@
+{
+  "id": "2026-07-13-v1.114-canvas-stability-hardening",
+  "title": "P1 - Canvas Stability & Validation Hardening",
+  "file": "plans/2026-07-13-v1.114-canvas-stability-hardening.md",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": [
+    "@fullstack-dev"
+  ],
+  "progress": 100,
+  "tags": [
+    "v1.114",
+    "canvas",
+    "stability",
+    "validation",
+    "must"
+  ],
+  "created_at": "2026-07-13",
+  "updated_at": "2026-07-13",
+  "notes": "Phase 2: SDD T1-T5 done + QC fix-wave (dedup→422, residual batch, rustfmt); QC tri Approve; QA Pass with notes; 4 residuals closed + 2 accepted + 5 deferred",
+  "metadata": {
+    "iteration_refs": [
+      "V1.114"
+    ],
+    "spec_integration_branch": "iteration/v1.114",
+    "merge_target": "iteration/v1.114",
+    "primary_spec": ".mstar/iterations/v1.114/specs/canvas-stability-hardening.md",
+    "wire_contracts_changed": false,
+    "tier": "Must"
+  }
+}

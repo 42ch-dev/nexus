@@ -84,7 +84,7 @@ async fn load_work(
     creator_id: &str,
     work_id: &str,
 ) -> Result<works::WorkRecord, NexusApiError> {
-    works::get_work(state.pool(), creator_id, work_id)
+    works::get_work(state.pool_or_uninit()?, creator_id, work_id)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -458,7 +458,7 @@ pub async fn get_work_outline(
     let work = load_work(&state, &creator_id, &work_id).await?;
     let work_ref = resolve_work_ref(&work)?;
 
-    let chapters = work_chapters::list_chapters(state.pool(), &work_id)
+    let chapters = work_chapters::list_chapters(state.pool_or_uninit()?, &work_id)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -497,7 +497,7 @@ pub async fn patch_outline_structure(
     let rel_path = outline_rel_path(&work_ref);
 
     // Pre-load chapter rows for defaulting and validation.
-    let chapters = work_chapters::list_chapters(state.pool(), &work_id)
+    let chapters = work_chapters::list_chapters(state.pool_or_uninit()?, &work_id)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -523,7 +523,7 @@ pub async fn patch_outline_structure(
         ));
     }
 
-    let lock = RuntimeLockGuard::acquire(state.pool(), &creator_id, &work_id).await?;
+    let lock = RuntimeLockGuard::acquire(state.pool_or_uninit()?, &creator_id, &work_id).await?;
 
     // Re-read both frontmatter and body under lock to close the TOCTOU window
     // for concurrent writers and avoid persisting a stale body snapshot.
@@ -607,7 +607,7 @@ pub async fn patch_outline_chapter(
     let workspace_root = workspace_root(&state)?;
     let rel_path = outline_rel_path(&work_ref);
 
-    let record = work_chapters::get_chapter(state.pool(), &work_id, chapter, 1)
+    let record = work_chapters::get_chapter(state.pool_or_uninit()?, &work_id, chapter, 1)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -615,7 +615,7 @@ pub async fn patch_outline_chapter(
         })?
         .ok_or_else(|| NexusApiError::NotFound(format!("chapter {chapter}")))?;
 
-    let chapters = work_chapters::list_chapters(state.pool(), &work_id)
+    let chapters = work_chapters::list_chapters(state.pool_or_uninit()?, &work_id)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -649,7 +649,7 @@ pub async fn patch_outline_chapter(
         });
     }
 
-    let lock = RuntimeLockGuard::acquire(state.pool(), &creator_id, &work_id).await?;
+    let lock = RuntimeLockGuard::acquire(state.pool_or_uninit()?, &creator_id, &work_id).await?;
 
     // Re-read both frontmatter and body under lock to close the TOCTOU window
     // for concurrent writers and avoid persisting a stale body snapshot.
@@ -716,7 +716,7 @@ pub async fn patch_timeline_event(
     let workspace_root = workspace_root(&state)?;
     let rel_path = outline_rel_path(&work_ref);
 
-    let chapters = work_chapters::list_chapters(state.pool(), &work_id)
+    let chapters = work_chapters::list_chapters(state.pool_or_uninit()?, &work_id)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -741,7 +741,7 @@ pub async fn patch_timeline_event(
         ));
     }
 
-    let lock = RuntimeLockGuard::acquire(state.pool(), &creator_id, &work_id).await?;
+    let lock = RuntimeLockGuard::acquire(state.pool_or_uninit()?, &creator_id, &work_id).await?;
 
     // Re-read both frontmatter and body under lock to close the TOCTOU window
     // for concurrent writers and avoid persisting a stale body snapshot.
@@ -815,12 +815,19 @@ async fn apply_structure_patch(
                     code: "invalid_chapter_id".to_string(),
                     message: format!("chapter_id {chapter_id} out of range"),
                 })?;
-            work_chapters::patch_chapter(state.pool(), work_id, chapter_id_i32, 1, &patch, &now)
-                .await
-                .map_err(|e| NexusApiError::Internal {
-                    code: "DATABASE_ERROR".to_string(),
-                    message: e.to_string(),
-                })?;
+            work_chapters::patch_chapter(
+                state.pool_or_uninit()?,
+                work_id,
+                chapter_id_i32,
+                1,
+                &patch,
+                &now,
+            )
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: e.to_string(),
+            })?;
 
             // Re-sync the outline volume ordering.
             move_chapter_in_frontmatter(frontmatter, chapter_id, volume_id, chapters);
@@ -1072,7 +1079,7 @@ async fn apply_chapter_patch(
     // Persist slug/wc/volume/status to the chapter SSOT table.
     let now = chrono::Utc::now().to_rfc3339();
     work_chapters::patch_chapter(
-        state.pool(),
+        state.pool_or_uninit()?,
         work_id,
         chapter,
         record.volume.unwrap_or(1),
@@ -1098,7 +1105,7 @@ async fn apply_chapter_patch(
             .set
             .volume
             .unwrap_or_else(|| i64::from(record.volume.unwrap_or(1)));
-        let chapters = work_chapters::list_chapters(state.pool(), work_id)
+        let chapters = work_chapters::list_chapters(state.pool_or_uninit()?, work_id)
             .await
             .map_err(|e| NexusApiError::Internal {
                 code: "DATABASE_ERROR".to_string(),
@@ -1129,7 +1136,7 @@ async fn apply_chapter_patch(
     if let Some(content) = req.set.content.clone() {
         let workspace_root = workspace_root(state)?;
         persist_chapter_outline_content(
-            state.pool(),
+            state.pool_or_uninit()?,
             &workspace_root,
             work_id,
             work_ref,
@@ -1470,7 +1477,7 @@ mod tests {
             Some(workspace_dir.to_string_lossy().to_string()),
         )
         .await;
-        crate::test_utils::seed_test_creator_and_world(state.pool()).await;
+        crate::test_utils::seed_test_creator_and_world(state.pool_or_uninit().unwrap()).await;
 
         let work_id = {
             let req = CreateWorkRequest {
@@ -1524,7 +1531,7 @@ mod tests {
         // Seed a single chapter so default frontmatter / volume moves work.
         let now = chrono::Utc::now().to_rfc3339();
         nexus_local_db::work_chapters::insert_chapter(
-            state.pool(),
+            state.pool_or_uninit().unwrap(),
             &nexus_local_db::work_chapters::InsertChapterParams {
                 work_id: &work_id,
                 chapter: 1,
@@ -1556,7 +1563,7 @@ mod tests {
         .await
         .expect("write initial outline");
 
-        let chapters = work_chapters::list_chapters(state.pool(), &work_id)
+        let chapters = work_chapters::list_chapters(state.pool_or_uninit().unwrap(), &work_id)
             .await
             .expect("list chapters");
 
@@ -1912,7 +1919,7 @@ mod tests {
             Some(workspace_dir.to_string_lossy().to_string()),
         )
         .await;
-        crate::test_utils::seed_test_creator_and_world(state.pool()).await;
+        crate::test_utils::seed_test_creator_and_world(state.pool_or_uninit().unwrap()).await;
 
         // Create a work so the outline file path is resolvable.
         let work_id = {

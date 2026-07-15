@@ -8,6 +8,7 @@ import { Header } from '@/components/layout/header';
 import { MainBanner } from '@/components/layout/main-banner';
 import { Sidebar } from '@/components/layout/sidebar';
 import { useHotkey } from '@/lib/use-hotkey';
+import { isWorkShellRoute } from '@/lib/work-shell-routes';
 import { cn } from '@/lib/utils';
 
 const ROUTE_KEYS: Record<string, string> = {
@@ -56,7 +57,9 @@ function useRouteTitle(): string {
  */
 export function RootLayout() {
   const { t } = useTranslation('shell');
+  const { pathname } = useLocation();
   const title = useRouteTitle();
+  const workShell = isWorkShellRoute(pathname);
 
   // ⌘K/Ctrl+K opens the command palette. The palette owns its open/close
   // (module-level store in `command-palette.tsx`); the hotkey just calls
@@ -105,7 +108,15 @@ export function RootLayout() {
             the flex child to shrink within the column so overflow scrolls here
             instead of growing the column past the viewport. */}
         <main className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-8">
+          <div
+            className={cn(
+              'mx-auto w-full',
+              workShell
+                ? 'max-w-none px-0 py-0'
+                : 'max-w-[1200px] px-4 py-6 md:px-6 md:py-8',
+            )}
+            data-testid={workShell ? 'main-work-shell' : 'main-standard'}
+          >
             <Outlet />
           </div>
         </main>

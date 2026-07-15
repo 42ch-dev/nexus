@@ -970,7 +970,8 @@ fn process_alive(_pid: u32) -> bool {
 mod tests {
     use super::{
         backoff, drain_stderr, format_error_detail, probe_port_state, resolve_port,
-        trim_stderr_tail, DaemonState, PortState, MAX_RESTART_ATTEMPTS, STDERR_TAIL_MAX_BYTES,
+        trim_stderr_tail, DaemonState, PortState, HEALTH_PROBE_TIMEOUT, HEALTH_START_TIMEOUT,
+        MAX_RESTART_ATTEMPTS, STDERR_TAIL_MAX_BYTES,
     };
     use std::sync::Arc;
     use std::time::Duration;
@@ -1533,6 +1534,206 @@ mod tests {
         let inner = manager.0.lock().await;
         assert_eq!(inner.stderr_tail, None);
         assert_eq!(inner.state, DaemonState::Running);
+    }
+
+    // ── V1.118 P0 T3: clean-home desktop launch regression (AC-P0-7) ───
+    //
+    // Spawns the bundled `nexus42` sidecar against an empty HOME (no
+    // `active_creator_id`, no pre-existing `~/.nexus42`) and verifies the
+    // desktop always-start path can reach Running without a fatal
+    // "No active creator" boot failure.
+
+    static CLEAN_HOME_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn sidecar_target_triple() -> String {
+        let arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_else(|_| "aarch64".to_string());
+        format!("{arch}-apple-darwin")
+    }
+
+    fn bundled_sidecar_binary() -> std::path::PathBuf {
+        std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("manifest dir"))
+            .join("binaries")
+            .join(format!("nexus42-{}", sidecar_target_triple()))
+    }
+
+    fn reserve_ephemeral_port() -> u16 {
+        std::net::TcpListener::bind("127.0.0.1:0")
+            .expect("reserve port")
+            .local_addr()
+            .expect("local addr")
+            .port()
+    }
+
+    struct CleanHomeDaemonGuard {
+        child: std::process::Child,
+        _home: tempfile::TempDir,
+    }
+
+    impl Drop for CleanHomeDaemonGuard {
+        fn drop(&mut self) {
+            #[cfg(unix)]
+            {
+                use nix::sys::signal::{kill, Signal};
+                use nix::unistd::Pid;
+                let _ = kill(Pid::from_raw(self.child.id() as i32), Signal::SIGTERM);
+            }
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+    }
+
+    fn spawn_nexus42_on_clean_home(port: u16) -> CleanHomeDaemonGuard {
+        let binary = bundled_sidecar_binary();
+        assert!(
+            binary.exists(),
+            "missing sidecar binary at {} — run `pnpm -w run sidecar`",
+            binary.display()
+        );
+        let home = tempfile::tempdir().expect("clean home tempdir");
+        assert!(
+            !home.path().join(".nexus42").exists(),
+            "test precondition: clean home must not have .nexus42"
+        );
+
+        let child = std::process::Command::new(&binary)
+            .args([
+                "daemon",
+                "start",
+                "--foreground",
+                "--port",
+                &port.to_string(),
+            ])
+            .env("HOME", home.path())
+            .env_remove("NEXUS42_DAEMON_API_KEY")
+            .env_remove("NEXUS_DAEMON_REMOTE_BIND")
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::piped())
+            .spawn()
+            .expect("spawn nexus42 sidecar on clean home");
+
+        CleanHomeDaemonGuard { child, _home: home }
+    }
+
+    async fn wait_for_http_ok(port: u16, path: &str, timeout: Duration) -> bool {
+        let client = reqwest::Client::builder()
+            .timeout(HEALTH_PROBE_TIMEOUT)
+            .build()
+            .expect("reqwest client");
+        let url = format!("http://127.0.0.1:{port}{path}");
+        let deadline = std::time::Instant::now() + timeout;
+        while std::time::Instant::now() < deadline {
+            if let Ok(resp) = client.get(&url).send().await {
+                if resp.status().is_success() {
+                    return true;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        false
+    }
+
+    async fn http_status_and_body(port: u16, path: &str) -> (u16, String) {
+        let client = reqwest::Client::builder()
+            .timeout(HEALTH_PROBE_TIMEOUT)
+            .build()
+            .expect("reqwest client");
+        let url = format!("http://127.0.0.1:{port}{path}");
+        let resp = client.get(&url).send().await.expect("http request");
+        let status = resp.status().as_u16();
+        let body = resp.text().await.unwrap_or_default();
+        (status, body)
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn clean_home_nexus42_daemon_reaches_healthy_without_profile() {
+        let _guard = CLEAN_HOME_LOCK.lock().expect("clean home lock");
+        let port = reserve_ephemeral_port();
+        let mut daemon = spawn_nexus42_on_clean_home(port);
+
+        let healthy =
+            wait_for_http_ok(port, "/v1/daemon/runtime/health", HEALTH_START_TIMEOUT).await;
+        assert!(
+            healthy,
+            "daemon on clean home must serve health within {:?}",
+            HEALTH_START_TIMEOUT
+        );
+
+        let (status, body) = http_status_and_body(port, "/v1/daemon/runtime/health").await;
+        assert_eq!(status, 200, "health body: {body}");
+        assert!(
+            body.contains("\"status\"") || body.contains("ok"),
+            "health response should look healthy: {body}"
+        );
+
+        // Read stderr only after stopping the child — otherwise read_to_string
+        // blocks until the pipe closes (daemon still running).
+        let stderr = daemon.child.stderr.take();
+        drop(daemon);
+        if let Some(mut stderr) = stderr {
+            use std::io::Read;
+            let mut buf = String::new();
+            let _ = stderr.read_to_string(&mut buf);
+            assert!(
+                !buf.contains("No active creator"),
+                "daemon stderr must not contain fatal no-creator: {buf}"
+            );
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn clean_home_creators_tier1_before_profile() {
+        let _guard = CLEAN_HOME_LOCK.lock().expect("clean home lock");
+        let port = reserve_ephemeral_port();
+        let _daemon = spawn_nexus42_on_clean_home(port);
+
+        assert!(
+            wait_for_http_ok(port, "/v1/daemon/runtime/health", HEALTH_START_TIMEOUT).await,
+            "health must be up before creators probe"
+        );
+
+        let (list_status, list_body) = http_status_and_body(port, "/v1/daemon/creators").await;
+        assert_eq!(
+            list_status, 200,
+            "creators list should succeed without Profile: {list_body}"
+        );
+
+        let (active_status, active_body) =
+            http_status_and_body(port, "/v1/daemon/creators/active").await;
+        assert_eq!(
+            active_status, 404,
+            "GET active without Profile should be 404 not_found: {active_body}"
+        );
+        assert!(
+            active_body.contains("not_found"),
+            "active unset should return not_found code: {active_body}"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn clean_home_sidecar_manager_attaches_to_running_daemon() {
+        let _guard = CLEAN_HOME_LOCK.lock().expect("clean home lock");
+        let port = reserve_ephemeral_port();
+        let _daemon = spawn_nexus42_on_clean_home(port);
+
+        assert!(
+            wait_for_http_ok(port, "/v1/daemon/runtime/health", HEALTH_START_TIMEOUT).await,
+            "daemon must be healthy before SidecarManager attach"
+        );
+
+        let app = tauri::test::mock_app();
+        let manager = crate::sidecar::SidecarManager::new(port);
+        manager
+            .start(app.handle())
+            .await
+            .expect("attach on clean home should succeed");
+
+        let status = manager.status().await;
+        assert_eq!(
+            status.state,
+            DaemonState::Running,
+            "desktop gate equivalent: manager must reach Running on clean home"
+        );
+        assert!(status.version.is_some(), "version from health probe");
     }
 
     /// Loopback HTTP server for tests that need a healthy daemon probe.

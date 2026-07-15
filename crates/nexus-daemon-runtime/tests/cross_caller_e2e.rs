@@ -111,7 +111,7 @@ async fn seed_work(state: &WorkspaceState) -> String {
         novel_completion_status: None,
         lineage_from_work_id: None,
     };
-    nexus_local_db::works::create_work_atomic(state.pool(), &record, None)
+    nexus_local_db::works::create_work_atomic(state.pool().unwrap(), &record, None)
         .await
         .unwrap()
         .unwrap_err(); // Returns Err with new record per existing pattern

@@ -88,7 +88,7 @@ pub async fn create_pending_review(
          VALUES (?, ?, ?, ?, ?, ?, ?)",
         pending_id, session_id, creator_id, world_id, task_kind, raw_digest, created_at
     )
-    .execute(state.pool())
+    .execute(state.pool_or_uninit()?)
     .await
     .map_err(|e| NexusApiError::Internal {
         code: "DATABASE_ERROR".into(),
@@ -220,7 +220,7 @@ pub async fn list_pending_reviews(
     let creator_id_filter = active_creator; // R-V133P4-07: use active creator
     let fetch_limit = i64::try_from(limit + 1).unwrap_or(i64::MAX);
     let mut items = fetch_pending_reviews_page(
-        state.pool(),
+        state.pool_or_uninit()?,
         &creator_id_filter,
         params.cursor.as_deref(),
         fetch_limit,
@@ -445,7 +445,7 @@ pub async fn count_pending_reviews(
         "SELECT COUNT(*) as \"count!\" FROM memory_pending_review WHERE creator_id = ?",
         creator_id_filter
     )
-    .fetch_one(state.pool())
+    .fetch_one(state.pool_or_uninit()?)
     .await
     .map_err(|e| NexusApiError::Internal {
         code: "DATABASE_ERROR".into(),
@@ -501,7 +501,7 @@ pub async fn delete_pending_review(
          FROM memory_pending_review WHERE pending_id = ?"#, // sqlx R3: use ? instead of ?1
         pid
     )
-    .fetch_optional(state.pool())
+    .fetch_optional(state.pool_or_uninit()?)
     .await
     .map_err(|e| NexusApiError::Internal {
         code: "DATABASE_ERROR".into(),
@@ -541,7 +541,7 @@ pub async fn delete_pending_review(
         "DELETE FROM memory_pending_review WHERE pending_id = ?",
         pid
     )
-    .execute(state.pool())
+    .execute(state.pool_or_uninit()?)
     .await
     .map_err(|e| NexusApiError::Internal {
         code: "DATABASE_ERROR".into(),
@@ -613,12 +613,13 @@ pub async fn review(
 
         // Bounded fetch: REVIEW_BATCH_LIMIT + 1 overfetch drives `has_more`.
         let fetch_limit = REVIEW_BATCH_LIMIT + 1;
-        let mut rows = fetch_pending_reviews_page(state.pool(), &active_creator, None, fetch_limit)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".into(),
-                message: format!("failed to fetch pending reviews for review: {e}"),
-            })?;
+        let mut rows =
+            fetch_pending_reviews_page(state.pool_or_uninit()?, &active_creator, None, fetch_limit)
+                .await
+                .map_err(|e| NexusApiError::Internal {
+                    code: "DATABASE_ERROR".into(),
+                    message: format!("failed to fetch pending reviews for review: {e}"),
+                })?;
 
         // The over-fetched (51st) row, if present, means more rows remain in the
         // DB beyond this batch. Truncate the processing slice back to the limit.
@@ -631,7 +632,7 @@ pub async fn review(
 
         let deadline = tokio::time::Instant::now() + REVIEW_CALL_TIMEOUT;
         let nexus_home = state.nexus_home().to_owned();
-        let pool = state.pool().clone();
+        let pool = state.pool_or_uninit()?.clone();
         let mut batch =
             process_review_batch(&rows, &nexus_home, &active_creator, &pool, deadline).await;
 
@@ -1042,7 +1043,7 @@ pub async fn fragments(
         // Use filtered query for keyword search
         let limit_u32 = u32::try_from(limit).unwrap_or(u32::MAX);
         nexus_local_db::memory_fragment::list_fragments_filtered(
-            state.pool(),
+            state.pool_or_uninit()?,
             &active_creator,
             params.keyword.as_deref(),
             params.world_id.as_deref(),
@@ -1060,7 +1061,7 @@ pub async fn fragments(
         // identical; the cap is simply enforced server-side now.
         let limit_i64 = i64::try_from(limit).unwrap_or(i64::MAX);
         nexus_local_db::memory_fragment::list_fragments_limited(
-            state.pool(),
+            state.pool_or_uninit()?,
             &active_creator,
             params.world_id.as_deref(),
             limit_i64,
@@ -1170,13 +1171,16 @@ pub async fn reflect_soul(
     // works/world_kb/host-tool handlers already use. Non-owned/non-existent
     // worlds are rejected before any stats query or synthesis.
     if let Some(w) = world_id {
-        if !nexus_local_db::narrative_write::is_world_owned(state.pool(), &active_creator, w)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".into(),
-                message: e.to_string(),
-            })?
-        {
+        if !nexus_local_db::narrative_write::is_world_owned(
+            state.pool_or_uninit()?,
+            &active_creator,
+            w,
+        )
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: e.to_string(),
+        })? {
             return Err(NexusApiError::Forbidden {
                 resource: "soul_narrative".into(),
                 reason: format!("creator does not own world '{w}'"),
@@ -1192,13 +1196,16 @@ pub async fn reflect_soul(
     );
 
     // 1. Compute fragment stats + cache row in one DB round-trip (G2 fix).
-    let (fragment_stats, cached) =
-        nexus_local_db::soul_narrative_fragment_stats(state.pool(), &active_creator, world_id)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".into(),
-                message: format!("failed to compute fragment stats: {e}"),
-            })?;
+    let (fragment_stats, cached) = nexus_local_db::soul_narrative_fragment_stats(
+        state.pool_or_uninit()?,
+        &active_creator,
+        world_id,
+    )
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".into(),
+        message: format!("failed to compute fragment stats: {e}"),
+    })?;
 
     let force = req.force_regenerate.unwrap_or(false);
 
@@ -1336,7 +1343,7 @@ pub async fn reflect_soul(
 
     // Build capped input signal scoped to the (creator, world) subset.
     let input = build_soul_narrative_synthesis_input(
-        state.pool(),
+        state.pool_or_uninit()?,
         &active_creator,
         world_id,
         &fragment_stats,
@@ -1383,7 +1390,7 @@ pub async fn reflect_soul(
         created_at: now.clone(),
         updated_at: now,
     };
-    nexus_local_db::upsert_soul_narrative(state.pool(), &record)
+    nexus_local_db::upsert_soul_narrative(state.pool_or_uninit()?, &record)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".into(),

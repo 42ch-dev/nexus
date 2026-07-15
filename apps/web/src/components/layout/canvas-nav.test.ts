@@ -76,7 +76,7 @@ describe('resolveActiveCanvasSurface — edge cases', () => {
   });
 });
 
-describe('CANVAS_ITEMS — sidebar canvas items (V1.117 regroup)', () => {
+describe('CANVAS_ITEMS — canvas surface definitions (V1.118 P1)', () => {
   it('lists exactly Outline + World KB in display order (Strategy moved to Orchestration)', () => {
     expect(CANVAS_ITEMS.map((item) => item.surfaceId)).toEqual(['outline', 'world-kb']);
   });

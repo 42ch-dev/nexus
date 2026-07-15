@@ -26,7 +26,7 @@ async fn handler_state() -> (WorkspaceState, test_utils::TestTempRoot) {
     let op_dir = nexus_home_layout::operational_workspace_dir(user_home, "test_creator", "default");
     let workspace_path = Some(op_dir.display().to_string());
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, workspace_path).await;
-    test_utils::seed_test_creator_and_world(state.pool()).await;
+    test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
     (state, tmp)
 }
 
@@ -355,7 +355,7 @@ async fn test_inspiration_promote_creates_work_and_pool_row() {
     );
 
     // Verify the new Work exists
-    let work = works::get_work(state.pool(), "test_creator", &promote_resp.work_id)
+    let work = works::get_work(state.pool().unwrap(), "test_creator", &promote_resp.work_id)
         .await
         .unwrap()
         .unwrap();
@@ -410,13 +410,17 @@ async fn test_completion_updates_pool_row() {
     .unwrap();
 
     // Mark completed via auto_chain (T7 hook)
-    nexus_orchestration::auto_chain::mark_work_completed(state.pool(), "test_creator", &work_id)
-        .await
-        .unwrap();
+    nexus_orchestration::auto_chain::mark_work_completed(
+        state.pool().unwrap(),
+        "test_creator",
+        &work_id,
+    )
+    .await
+    .unwrap();
 
     // Check pool entry is now completed
     let pool_entry = nexus_local_db::novel_pool_entries::get_pool_entry_by_work(
-        state.pool(),
+        state.pool().unwrap(),
         "test_creator",
         &work_id,
     )
@@ -445,25 +449,33 @@ async fn test_completion_demotes_active_pool_row_when_completed() {
     .unwrap();
 
     // Verify it's active
-    let active_before =
-        nexus_local_db::novel_pool_entries::get_active_pool_entry(state.pool(), "test_creator")
-            .await
-            .unwrap();
+    let active_before = nexus_local_db::novel_pool_entries::get_active_pool_entry(
+        state.pool().unwrap(),
+        "test_creator",
+    )
+    .await
+    .unwrap();
     assert!(
         active_before.is_some(),
         "should have an active pool entry before completion"
     );
 
     // Mark completed
-    nexus_orchestration::auto_chain::mark_work_completed(state.pool(), "test_creator", &work_id)
-        .await
-        .unwrap();
+    nexus_orchestration::auto_chain::mark_work_completed(
+        state.pool().unwrap(),
+        "test_creator",
+        &work_id,
+    )
+    .await
+    .unwrap();
 
     // Verify no active pool entry remains (completed entries are not "active")
-    let active_after =
-        nexus_local_db::novel_pool_entries::get_active_pool_entry(state.pool(), "test_creator")
-            .await
-            .unwrap();
+    let active_after = nexus_local_db::novel_pool_entries::get_active_pool_entry(
+        state.pool().unwrap(),
+        "test_creator",
+    )
+    .await
+    .unwrap();
     assert!(
         active_after.is_none(),
         "active pool entry should be gone after completion"
@@ -471,7 +483,7 @@ async fn test_completion_demotes_active_pool_row_when_completed() {
 
     // The completed entry should still exist but with status=completed
     let completed_entry = nexus_local_db::novel_pool_entries::get_pool_entry_by_work(
-        state.pool(),
+        state.pool().unwrap(),
         "test_creator",
         &work_id,
     )
@@ -640,7 +652,7 @@ async fn test_promote_inspiration_atomicity_on_step3_failure() {
     .unwrap();
 
     // Verify Work exists
-    let work = works::get_work(state.pool(), "test_creator", &promote_resp.work_id)
+    let work = works::get_work(state.pool().unwrap(), "test_creator", &promote_resp.work_id)
         .await
         .unwrap()
         .unwrap();
@@ -648,7 +660,7 @@ async fn test_promote_inspiration_atomicity_on_step3_failure() {
 
     // Verify pool entry is active
     let pool_entry = nexus_local_db::novel_pool_entries::get_pool_entry_by_work(
-        state.pool(),
+        state.pool().unwrap(),
         "test_creator",
         &promote_resp.work_id,
     )
@@ -658,10 +670,13 @@ async fn test_promote_inspiration_atomicity_on_step3_failure() {
     assert_eq!(pool_entry.status, "active");
 
     // Verify inspiration is promoted
-    let item = nexus_local_db::inspiration_items::get_inspiration(state.pool(), &add_resp.item_id)
-        .await
-        .unwrap()
-        .unwrap();
+    let item = nexus_local_db::inspiration_items::get_inspiration(
+        state.pool().unwrap(),
+        &add_resp.item_id,
+    )
+    .await
+    .unwrap()
+    .unwrap();
     assert_eq!(item.status, "promoted");
     assert_eq!(
         item.promoted_work_id.as_deref(),
@@ -696,10 +711,12 @@ async fn test_set_pool_active_rejects_mismatched_creator_id() {
     .unwrap();
 
     // Verify it's active before the attack
-    let active_before =
-        nexus_local_db::novel_pool_entries::get_active_pool_entry(state.pool(), "test_creator")
-            .await
-            .unwrap();
+    let active_before = nexus_local_db::novel_pool_entries::get_active_pool_entry(
+        state.pool().unwrap(),
+        "test_creator",
+    )
+    .await
+    .unwrap();
     assert!(
         active_before.is_some(),
         "pre-condition: should have an active pool entry"
@@ -728,10 +745,12 @@ async fn test_set_pool_active_rejects_mismatched_creator_id() {
     );
 
     // Pool must remain unchanged (attack had no effect)
-    let active_after =
-        nexus_local_db::novel_pool_entries::get_active_pool_entry(state.pool(), "test_creator")
-            .await
-            .unwrap();
+    let active_after = nexus_local_db::novel_pool_entries::get_active_pool_entry(
+        state.pool().unwrap(),
+        "test_creator",
+    )
+    .await
+    .unwrap();
     assert!(
         active_after.is_some(),
         "active pool entry must remain after rejected IDOR"

@@ -38,7 +38,7 @@ async fn test_ctx_with_active_creator(active_creator: &str) -> TestCtx {
         .expect("failed to write config.toml");
 
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
-    let pool = state.pool().clone();
+    let pool = state.pool().unwrap().clone();
     let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
     let server = TestServer::new(app).expect("failed to create test server");
@@ -277,9 +277,16 @@ async fn pending_review_list_still_works() {
 
 // ─── R-V133P4-01/02: Auth enforcement + cross-creator tests ──────────────
 
-/// Review returns 401 when no active creator is configured (no config.toml).
+/// Assert Tier-2 `require_active_creator` middleware rejects with 409 uninitialized.
+fn assert_uninitialized_response(resp: axum_test::TestResponse) {
+    resp.assert_status(axum::http::StatusCode::CONFLICT);
+    let body: Value = resp.json();
+    assert_eq!(body["error"]["code"], "uninitialized");
+}
+
+/// Review returns 409 uninitialized when no active creator is configured (no config.toml).
 #[tokio::test]
-async fn review_returns_401_without_creator() {
+async fn review_returns_409_without_creator() {
     let ctx = test_ctx_without_creator().await;
 
     let body = json!({ "creator_id": "ctr_testuser" });
@@ -288,19 +295,19 @@ async fn review_returns_401_without_creator() {
         .post("/v1/daemon/memory/review")
         .json(&body)
         .await;
-    resp.assert_status(axum::http::StatusCode::UNAUTHORIZED);
+    assert_uninitialized_response(resp);
 }
 
-/// Fragments returns 401 when no active creator is configured.
+/// Fragments returns 409 uninitialized when no active creator is configured.
 #[tokio::test]
-async fn fragments_returns_401_without_creator() {
+async fn fragments_returns_409_without_creator() {
     let ctx = test_ctx_without_creator().await;
 
     let resp = ctx
         .server
         .get("/v1/daemon/memory/fragments?creator_id=ctr_testuser")
         .await;
-    resp.assert_status(axum::http::StatusCode::UNAUTHORIZED);
+    assert_uninitialized_response(resp);
 }
 
 /// Review returns 403 when request creator_id does not match active creator.
@@ -361,7 +368,7 @@ async fn test_ctx_without_creator() -> TestCtx {
     // Remove config.toml → no active creator.
     std::fs::remove_file(nexus_home.join("config.toml")).expect("remove config.toml");
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
-    let pool = state.pool().clone();
+    let pool = state.pool().unwrap().clone();
     let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
     let server = TestServer::new(app).expect("failed to create test server");
@@ -372,9 +379,9 @@ async fn test_ctx_without_creator() -> TestCtx {
     }
 }
 
-/// Pending review create returns 401 when no active creator is configured.
+/// Pending review create returns 409 uninitialized when no active creator is configured.
 #[tokio::test]
-async fn pending_review_create_returns_401_without_creator() {
+async fn pending_review_create_returns_409_without_creator() {
     let ctx = test_ctx_without_creator().await;
     let body = json!({
         "pending_id": "pending_no_auth",
@@ -387,29 +394,29 @@ async fn pending_review_create_returns_401_without_creator() {
         .post("/v1/daemon/memory/pending-review")
         .json(&body)
         .await;
-    resp.assert_status(axum::http::StatusCode::UNAUTHORIZED);
+    assert_uninitialized_response(resp);
 }
 
-/// Pending review list returns 401 when no active creator is configured.
+/// Pending review list returns 409 uninitialized when no active creator is configured.
 #[tokio::test]
-async fn pending_review_list_returns_401_without_creator() {
+async fn pending_review_list_returns_409_without_creator() {
     let ctx = test_ctx_without_creator().await;
     let resp = ctx
         .server
         .get("/v1/daemon/memory/pending-review?creator_id=ctr_testuser")
         .await;
-    resp.assert_status(axum::http::StatusCode::UNAUTHORIZED);
+    assert_uninitialized_response(resp);
 }
 
-/// Pending review count returns 401 when no active creator is configured.
+/// Pending review count returns 409 uninitialized when no active creator is configured.
 #[tokio::test]
-async fn pending_review_count_returns_401_without_creator() {
+async fn pending_review_count_returns_409_without_creator() {
     let ctx = test_ctx_without_creator().await;
     let resp = ctx
         .server
         .get("/v1/daemon/memory/pending-review/count?creator_id=ctr_testuser")
         .await;
-    resp.assert_status(axum::http::StatusCode::UNAUTHORIZED);
+    assert_uninitialized_response(resp);
 }
 
 /// Pending review delete returns 401 when no active creator is configured.
@@ -611,7 +618,7 @@ async fn review_overlapping_calls_no_duplicate_processing() {
     )
     .expect("config.toml");
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
-    let pool = state.pool().clone();
+    let pool = state.pool().unwrap().clone();
 
     const SEED: usize = 5;
     seed_n_pending_reviews_raw(&pool, "ctr_testuser", SEED).await;
