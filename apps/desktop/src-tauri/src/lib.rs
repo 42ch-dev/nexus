@@ -224,8 +224,8 @@ fn resolve_workspace_root_at(home: &Path, default_root: &Path) -> Option<PathBuf
             config.active_creator_id.as_deref(),
             config.workspace_path.as_ref(),
         ) {
-            if let Err(e) = migrate_legacy_workspace_path_at(&config_path, creator_id, legacy_path
-            ) {
+            if let Err(e) = migrate_legacy_workspace_path_at(&config_path, creator_id, legacy_path)
+            {
                 eprintln!("nexus-desktop: failed to migrate legacy workspace_path: {e}");
             }
             config = read_workspace_config_at(&config_path).ok()?;
@@ -922,11 +922,10 @@ fn ensure_setup_bootstrap_at(path: &Path) -> anyhow::Result<BootstrapResult> {
     })
 }
 
-/// Desktop-only Tauri IPC command: bootstrap the minimum creator/workspace
-/// state (`active_creator_id` + `active_workspace_slug_by_creator` in
-/// `~/.nexus42/config.toml`) so the daemon can start without "No active
-/// creator". Idempotent — if a creator ID already exists, returns it without
-/// overwriting.
+/// Desktop-only Tauri IPC command: optional wizard convenience — writes minimum
+/// creator/workspace state for setup wizard Continue. **Not** a daemon boot
+/// prerequisite after V1.118 (daemon boots without `active_creator_id`).
+/// Idempotent — if a creator ID already exists, returns it without overwriting.
 ///
 /// See `.mstar/iterations/v1.100/specs/desktop-first-launch-bootstrap.md`.
 #[tauri::command]
@@ -1237,7 +1236,10 @@ mod tests {
     #[test]
     fn open_external_url_rejects_file_scheme() {
         let err = validate_url_scheme("file:///etc/passwd").expect_err("file scheme rejected");
-        assert!(err.contains("not allowed"), "error should mention scheme: {err}");
+        assert!(
+            err.contains("not allowed"),
+            "error should mention scheme: {err}"
+        );
     }
 
     #[test]
@@ -1250,7 +1252,10 @@ mod tests {
     #[test]
     fn open_external_url_rejects_ftp_scheme() {
         let err = validate_url_scheme("ftp://files.example.com").expect_err("ftp scheme rejected");
-        assert!(err.contains("not allowed"), "error should mention scheme: {err}");
+        assert!(
+            err.contains("not allowed"),
+            "error should mention scheme: {err}"
+        );
     }
 
     #[test]
@@ -1592,6 +1597,37 @@ command = "claude"
             "state.db-shm should be deleted"
         );
         assert!(user_file.exists(), "user workspace files must be untouched");
+    }
+
+    // ── V1.118 P0 T3: clean-home launch (AC-P0-7) ───────────────────────
+
+    #[test]
+    fn v118_clean_home_without_nexus42_dir_resolves_default_workspace() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let default_root = tmp.path().join("default-workspace");
+        assert!(
+            !tmp.path().join(".nexus42").exists(),
+            "clean home must not have .nexus42"
+        );
+        let resolved =
+            resolve_workspace_root_at(tmp.path(), &default_root).expect("resolve workspace root");
+        assert_eq!(resolved, default_root);
+    }
+
+    #[test]
+    fn v118_always_start_sidecar_without_prior_bootstrap() {
+        // AC-P0-7: V1.105 D2 always-start must not require wizard bootstrap.
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join(".nexus42").join("config.toml");
+        assert!(!config_path.exists(), "clean home has no config yet");
+        assert!(
+            setup_auto_starts_sidecar(None),
+            "absent config must still auto-start"
+        );
+        assert!(
+            setup_auto_starts_sidecar(read_setup_completed_at(&config_path).ok().flatten()),
+            "missing config file must still auto-start"
+        );
     }
 
     // ── V1.105 P0: sidecar always-start (D2) + V1.100 bootstrap ─────────
