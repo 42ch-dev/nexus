@@ -59,7 +59,9 @@ function scanHandler(
   agents: Array<Record<string, unknown>> = [
     {
       name: 'codex',
-      registry_agent_id: 'codex-acp',
+      // P2: codex-acp is hard-excluded; use the native curated key so the card
+      // renders in the default grid (priority 0).
+      registry_agent_id: 'codex-native',
       launch_command: 'codex',
       installed: true,
       version: '1.0.0',
@@ -107,7 +109,6 @@ const settingsRouteTree = (
 
 describe('SettingsAgentSection', () => {
   it('renders AgentPicker body (browser, no desktop)', async () => {
-    const user = userEvent.setup();
     useHandlers(scanHandler(), creatorsHandler());
 
     renderInApp(
@@ -131,10 +132,9 @@ describe('SettingsAgentSection', () => {
     await waitFor(() =>
       expect(screen.getByTestId('agent-picker')).toBeInTheDocument(),
     );
-    // codex-acp is in moreAgents — expand to find it.
-    const moreBtn = await screen.findByTestId('agent-picker-more');
-    await user.click(moreBtn);
-    expect(screen.getByTestId('agent-card-codex-acp')).toBeInTheDocument();
+    // codex-native (priority 0, installed) renders in the default grid — no
+    // More toggle needed (codex-acp wrapper is hard-excluded under P2).
+    expect(await screen.findByTestId('agent-card-codex-native')).toBeInTheDocument();
   });
 });
 

@@ -51,6 +51,19 @@ const MORE_AGENTS: AgentPickerItem[] = [
   },
 ];
 
+// P2 (F3): Install/Docs render only on uninstalled cards. Link-chrome tests
+// target this fixture because installed cards no longer carry outbound links.
+const UNINSTALLED_WITH_LINKS: AgentPickerItem[] = [
+  {
+    id: 'codex-native',
+    name: 'Codex',
+    displayName: 'Codex',
+    installed: false,
+    installUrl: 'https://example.com/install',
+    docsUrl: 'https://example.com/docs',
+  },
+];
+
 describe('AgentPicker', () => {
   it('renders loading state', () => {
     render(<AgentPicker status="loading" />);
@@ -81,19 +94,21 @@ describe('AgentPicker', () => {
     expect(screen.getByTestId('agent-card-claude-acp').tagName).toBe('DIV');
   });
 
-  it('keeps Install/Docs links outside the select button (B2)', () => {
+  it('keeps Install/Docs links outside any select button (B2, P2 gating)', () => {
     render(
       <AgentPicker
         status="ready"
-        defaultGrid={DEFAULT_GRID}
+        defaultGrid={UNINSTALLED_WITH_LINKS}
         onSelect={() => undefined}
         customLaunchValue=""
         onCustomLaunchChange={() => undefined}
       />,
     );
-    const select = screen.getByTestId('agent-card-select-claude-native');
-    expect(select.querySelector('a')).toBeNull();
-    const card = screen.getByTestId('agent-card-claude-native');
+    // P2: uninstalled cards are not selectable — no select button renders, so
+    // outbound links can never nest inside one (the original B2 nested-
+    // interactive bug class). Installed cards render no links at all.
+    expect(screen.queryByTestId('agent-card-select-codex-native')).toBeNull();
+    const card = screen.getByTestId('agent-card-codex-native');
     expect(card.querySelector('a[href="https://example.com/install"]')).not.toBeNull();
     expect(card.querySelector('a[href="https://example.com/docs"]')).not.toBeNull();
   });
@@ -103,7 +118,7 @@ describe('AgentPicker', () => {
     render(
       <AgentPicker
         status="ready"
-        defaultGrid={DEFAULT_GRID}
+        defaultGrid={UNINSTALLED_WITH_LINKS}
         moreAgents={MORE_AGENTS}
         onSelect={() => undefined}
         customLaunchValue=""
@@ -215,7 +230,7 @@ describe('AgentPicker', () => {
     render(
       <AgentPicker
         status="ready"
-        defaultGrid={DEFAULT_GRID}
+        defaultGrid={UNINSTALLED_WITH_LINKS}
         onSelect={() => undefined}
         customLaunchValue=""
         onCustomLaunchChange={() => undefined}
@@ -519,7 +534,7 @@ describe('AgentPicker', () => {
     render(
       <AgentPicker
         status="ready"
-        defaultGrid={DEFAULT_GRID}
+        defaultGrid={UNINSTALLED_WITH_LINKS}
         onSelect={() => undefined}
         customLaunchValue=""
         onCustomLaunchChange={() => undefined}
@@ -537,7 +552,7 @@ describe('AgentPicker', () => {
     render(
       <AgentPicker
         status="ready"
-        defaultGrid={DEFAULT_GRID}
+        defaultGrid={UNINSTALLED_WITH_LINKS}
         onSelect={() => undefined}
         customLaunchValue=""
         onCustomLaunchChange={() => undefined}
@@ -556,7 +571,7 @@ describe('AgentPicker', () => {
     render(
       <AgentPicker
         status="ready"
-        defaultGrid={DEFAULT_GRID}
+        defaultGrid={UNINSTALLED_WITH_LINKS}
         onSelect={() => undefined}
         customLaunchValue=""
         onCustomLaunchChange={() => undefined}
@@ -579,7 +594,7 @@ describe('AgentPicker', () => {
     render(
       <AgentPicker
         status="ready"
-        defaultGrid={DEFAULT_GRID}
+        defaultGrid={UNINSTALLED_WITH_LINKS}
         onSelect={() => undefined}
         customLaunchValue=""
         onCustomLaunchChange={() => undefined}
@@ -600,7 +615,7 @@ describe('AgentPicker', () => {
     render(
       <AgentPicker
         status="ready"
-        defaultGrid={DEFAULT_GRID}
+        defaultGrid={UNINSTALLED_WITH_LINKS}
         onSelect={() => undefined}
         customLaunchValue=""
         onCustomLaunchChange={() => undefined}
@@ -619,7 +634,7 @@ describe('AgentPicker', () => {
     render(
       <AgentPicker
         status="ready"
-        defaultGrid={DEFAULT_GRID}
+        defaultGrid={UNINSTALLED_WITH_LINKS}
         onSelect={() => undefined}
         customLaunchValue=""
         onCustomLaunchChange={() => undefined}
@@ -634,5 +649,71 @@ describe('AgentPicker', () => {
     // Nothing to assert besides "no opener ran" (jsdom does not navigate); the
     // contract is that the native href/target path stays intact.
     expect(link).toHaveAttribute('target', '_blank');
+  });
+
+  // -------------------------------------------------------------------------
+  // P2 acceptance criteria (component layer)
+  // Spec: .mstar/iterations/v1.119/specs/setup-agent-picker-catalog.md
+  // -------------------------------------------------------------------------
+
+  it('AC-P2-3: installed cards render no Install/Docs links', () => {
+    // Even with installUrl + docsUrl populated, an installed card shows only
+    // identity + Installed badge (no outbound link chrome).
+    render(
+      <AgentPicker
+        status="ready"
+        defaultGrid={[
+          {
+            id: 'claude-native',
+            name: 'Claude',
+            displayName: 'Claude',
+            installed: true,
+            installUrl: 'https://example.com/install',
+            docsUrl: 'https://example.com/docs',
+          },
+        ]}
+        onSelect={() => undefined}
+        customLaunchValue=""
+        onCustomLaunchChange={() => undefined}
+      />,
+    );
+
+    const card = screen.getByTestId('agent-card-claude-native');
+    expect(card.querySelector('a')).toBeNull();
+    expect(screen.queryByRole('link', { name: /Install/i })).toBeNull();
+    expect(screen.queryByRole('link', { name: /Docs/i })).toBeNull();
+    // Installed badge still renders.
+    expect(screen.getByTestId('agent-card-installed-badge-claude-native')).toHaveTextContent(
+      'Installed',
+    );
+  });
+
+  it('AC-P2-4: uninstalled whitelisted curated card shows Install link', () => {
+    render(
+      <AgentPicker
+        status="ready"
+        defaultGrid={[
+          {
+            id: 'codex-native',
+            name: 'Codex',
+            displayName: 'Codex',
+            installed: false,
+            installUrl: 'https://openai.com/codex/',
+            docsUrl: null,
+          },
+        ]}
+        onSelect={() => undefined}
+        customLaunchValue=""
+        onCustomLaunchChange={() => undefined}
+      />,
+    );
+
+    expect(screen.getByRole('link', { name: /Install/i })).toHaveAttribute(
+      'href',
+      'https://openai.com/codex/',
+    );
+    expect(screen.getByTestId('agent-card-not-installed-badge-codex-native')).toHaveTextContent(
+      'Not installed',
+    );
   });
 });

@@ -353,24 +353,31 @@ const AgentCard = memo(function AgentCard({
         </div>
       )}
 
-      <div className="mt-3 flex flex-wrap items-center gap-3">
-        {agent.installUrl ? (
-          <OutboundLink
-            href={agent.installUrl}
-            label={t('agentPicker.install')}
-            desktop={desktop}
-            onExternalUrlError={onExternalUrlError}
-          />
-        ) : null}
-        {agent.docsUrl ? (
-          <OutboundLink
-            href={agent.docsUrl}
-            label={t('agentPicker.docs')}
-            desktop={desktop}
-            onExternalUrlError={onExternalUrlError}
-          />
-        ) : null}
-      </div>
+      {/*
+        P2 (F3): Install/Docs render only when `!agent.installed`. Installed
+        cards show identity + Installed badge + version/description only — no
+        outbound link chrome.
+      */}
+      {!agent.installed ? (
+        <div className="mt-3 flex flex-wrap items-center gap-3">
+          {agent.installUrl ? (
+            <OutboundLink
+              href={agent.installUrl}
+              label={t('agentPicker.install')}
+              desktop={desktop}
+              onExternalUrlError={onExternalUrlError}
+            />
+          ) : null}
+          {agent.docsUrl ? (
+            <OutboundLink
+              href={agent.docsUrl}
+              label={t('agentPicker.docs')}
+              desktop={desktop}
+              onExternalUrlError={onExternalUrlError}
+            />
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 });

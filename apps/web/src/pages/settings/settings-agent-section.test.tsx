@@ -53,14 +53,16 @@ function makeDesktop(
 const MIXED_AGENTS = [
   {
     name: 'claude-code',
-    registry_agent_id: 'claude-acp',
+    // P2: claude-acp is hard-excluded; use the native curated key so the card
+    // renders in the default grid (priority 1).
+    registry_agent_id: 'claude-native',
     launch_command: 'claude',
     installed: true,
     version: '1.0.0',
   },
   {
     name: 'codex',
-    registry_agent_id: 'codex-acp',
+    registry_agent_id: 'codex-native',
     launch_command: 'codex',
     installed: true,
     version: '1.0.0',
@@ -89,19 +91,8 @@ const settingsRouteTree = (
   </Route>
 );
 
-/**
- * Expand the "More agents" toggle so hiddenFromDefault cards (claude-acp,
- * codex-acp per the V1.117 T1 catalog) become visible. `findByTestId` waits
- * for the scan to settle into `ready` state before the button is clickable.
- */
-async function expandMoreAgents(user: ReturnType<typeof userEvent.setup>) {
-  const moreBtn = await screen.findByTestId('agent-picker-more');
-  await user.click(moreBtn);
-}
-
 describe('SettingsAgentSection preselect (G1)', () => {
   it('renders locked Agent helper and browser-only helper without desktop', async () => {
-    const user = userEvent.setup();
     useHandlers(scanHandler(), creatorsHandler());
 
     renderInApp(
@@ -123,16 +114,12 @@ describe('SettingsAgentSection preselect (G1)', () => {
       'Agent selection is available on the desktop app only.',
     );
 
-    await waitFor(() =>
-      expect(screen.getByTestId('agent-picker')).toBeInTheDocument(),
-    );
-    // claude-acp and codex-acp are in moreAgents — expand to find them.
-    await expandMoreAgents(user);
-    expect(screen.getByTestId('agent-card-claude-acp')).toBeInTheDocument();
+    // claude-native (priority 1, installed) renders in the default grid once
+    // the async scan settles.
+    expect(await screen.findByTestId('agent-card-claude-native')).toBeInTheDocument();
   });
 
   it('preselects saved profile by name after scan settles (desktop)', async () => {
-    const user = userEvent.setup();
     const getAgentProfile = vi.fn(() =>
       Promise.resolve({ name: 'codex', launchCommand: 'codex' }),
     );
@@ -150,22 +137,21 @@ describe('SettingsAgentSection preselect (G1)', () => {
     await waitFor(() =>
       expect(screen.getByTestId('agent-picker')).toBeInTheDocument(),
     );
-    // codex-acp is in moreAgents — expand to find it.
-    await expandMoreAgents(user);
-    expect(screen.getByTestId('agent-card-codex-acp')).toBeInTheDocument();
+    // codex-native (priority 0, installed) renders in the default grid.
+    expect(await screen.findByTestId('agent-card-codex-native')).toBeInTheDocument();
 
     await waitFor(() => expect(getAgentProfile).toHaveBeenCalled());
 
     await waitFor(() => {
       const pressed = screen
-        .getAllByTestId('agent-card-select-codex-acp')
+        .getAllByTestId('agent-card-select-codex-native')
         .filter((el) => el.getAttribute('aria-pressed') === 'true');
       expect(pressed.length).toBeGreaterThanOrEqual(1);
     });
 
     // Not the first-installed Claude default when a saved profile matches Codex.
     const claudePressed = screen
-      .getAllByTestId('agent-card-select-claude-acp')
+      .getAllByTestId('agent-card-select-claude-native')
       .filter((el) => el.getAttribute('aria-pressed') === 'true');
     expect(claudePressed.length).toBe(0);
     expect(screen.queryByTestId('settings-agent-browser-helper')).not.toBeInTheDocument();
@@ -195,15 +181,12 @@ describe('SettingsAgentSection preselect (G1)', () => {
     await waitFor(() =>
       expect(screen.getByTestId('agent-picker')).toBeInTheDocument(),
     );
-    // codex-acp is in moreAgents — expand to find it.
-    await expandMoreAgents(user);
-    expect(screen.getByTestId('agent-card-codex-acp')).toBeInTheDocument();
-
-    await user.click(screen.getByTestId('agent-card-select-codex-acp'));
+    // codex-native renders in the default grid.
+    await user.click(await screen.findByTestId('agent-card-select-codex-native'));
 
     await waitFor(() => {
       const pressed = screen
-        .getAllByTestId('agent-card-select-codex-acp')
+        .getAllByTestId('agent-card-select-codex-native')
         .filter((el) => el.getAttribute('aria-pressed') === 'true');
       expect(pressed.length).toBeGreaterThanOrEqual(1);
     });
@@ -216,18 +199,17 @@ describe('SettingsAgentSection preselect (G1)', () => {
     // Author's Codex click must stick — late preselect must not snap back.
     await waitFor(() => {
       const codexPressed = screen
-        .getAllByTestId('agent-card-select-codex-acp')
+        .getAllByTestId('agent-card-select-codex-native')
         .filter((el) => el.getAttribute('aria-pressed') === 'true');
       expect(codexPressed.length).toBeGreaterThanOrEqual(1);
     });
     const claudePressed = screen
-      .getAllByTestId('agent-card-select-claude-acp')
+      .getAllByTestId('agent-card-select-claude-native')
       .filter((el) => el.getAttribute('aria-pressed') === 'true');
     expect(claudePressed.length).toBe(0);
   });
 
   it('falls back to first installed when getAgentProfile returns null', async () => {
-    const user = userEvent.setup();
     const getAgentProfile = vi.fn(() => Promise.resolve(null));
     useHandlers(scanHandler(), creatorsHandler());
 
@@ -242,11 +224,11 @@ describe('SettingsAgentSection preselect (G1)', () => {
 
     await waitFor(() => expect(getAgentProfile).toHaveBeenCalled());
 
-    // claude-acp (first installed) is in moreAgents — expand to observe preselect.
-    await expandMoreAgents(user);
+    // claude-native is the first installed agent in the scan (browser/desktop
+    // fallback selects the first installed) → renders preselected in the grid.
     await waitFor(() => {
       const pressed = screen
-        .getAllByTestId('agent-card-select-claude-acp')
+        .getAllByTestId('agent-card-select-claude-native')
         .filter((el) => el.getAttribute('aria-pressed') === 'true');
       expect(pressed.length).toBeGreaterThanOrEqual(1);
     });
@@ -294,11 +276,11 @@ describe('SettingsAgentSection preselect (G1)', () => {
       },
     );
 
-    // codex-acp is in moreAgents — expand to observe the preselect.
-    await expandMoreAgents(user);
+    // codex-native is preselected by the saved profile and renders in the
+    // default grid (priority 0, installed).
     await waitFor(() => {
       const pressed = screen
-        .getAllByTestId('agent-card-select-codex-acp')
+        .getAllByTestId('agent-card-select-codex-native')
         .filter((el) => el.getAttribute('aria-pressed') === 'true');
       expect(pressed.length).toBeGreaterThanOrEqual(1);
     });
@@ -324,11 +306,10 @@ describe('SettingsAgentSection preselect (G1)', () => {
       },
     );
 
-    // claude-acp is in moreAgents — expand to confirm browser auto-select still
-    // falls back to the first installed agent without desktop caps.
-    await expandMoreAgents(user);
+    // claude-native is the first installed agent; without desktop caps the
+    // browser auto-select falls back to it so Save is enabled.
     await waitFor(() =>
-      expect(screen.getByTestId('agent-card-claude-acp')).toBeInTheDocument(),
+      expect(screen.getByTestId('agent-card-claude-native')).toBeInTheDocument(),
     );
 
     // Browser falls back to first installed so Save is enabled.
@@ -344,5 +325,45 @@ describe('SettingsAgentSection preselect (G1)', () => {
         'Open the Nexus desktop app to change your local agent.',
       ),
     ).toBeInTheDocument();
+  });
+
+  it('AC-P2-6: Settings uses the same default-grid pipeline as Setup (no fork)', async () => {
+    // Smoke: Settings mounts AgentPicker with `defaultGridEntries` output, so an
+    // installed curated agent renders in the primary grid (visible without the
+    // More toggle) in priority order — the same contract SetupStepAgent uses.
+    const agents = [
+      {
+        name: 'Claude',
+        registry_agent_id: 'claude-native',
+        installed: true,
+        version: '1.0.0',
+      },
+      {
+        name: 'Cursor',
+        registry_agent_id: 'cursor',
+        installed: true,
+      },
+    ];
+    useHandlers(scanHandler(agents), creatorsHandler());
+
+    renderInApp(
+      <Routes>{settingsRouteTree}</Routes>,
+      {
+        client: makeClient(),
+        initialRouterEntries: ['/settings/agent'],
+      },
+    );
+
+    // codex slot is absent from this scan; claude-native (priority 1) and
+    // cursor (priority 2) are both installed-curated → default grid, ordered by
+    // priority: claude-native before cursor. No More toggle (both installed).
+    const grid = await screen.findByTestId('agent-picker-grid');
+    const cardIds = Array.from(
+      grid.querySelectorAll<HTMLElement>('li > div[data-testid^="agent-card-"]'),
+    ).map((el) => el.dataset.testid);
+    expect(cardIds[0]).toBe('agent-card-claude-native');
+    expect(cardIds[1]).toBe('agent-card-cursor');
+    // No More toggle — both agents are in the default grid.
+    expect(screen.queryByTestId('agent-picker-more')).toBeNull();
   });
 });

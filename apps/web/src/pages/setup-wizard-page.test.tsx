@@ -55,7 +55,9 @@ function useWizardScanHandlers() {
         agents: [
           {
             name: 'codex',
-            registry_agent_id: 'codex-acp',
+            // P2: codex-acp is hard-excluded; use the native curated key so the
+            // card renders in the default grid (priority 0).
+            registry_agent_id: 'codex-native',
             launch_command: 'codex',
             installed: true,
             version: '1.0.0',
@@ -76,11 +78,9 @@ function useWizardScanHandlers() {
 }
 
 async function advanceAgentToWorkspace(user: ReturnType<typeof userEvent.setup>) {
-  // codex-acp is hiddenFromDefault (V1.117 T1 catalog) → behind the More toggle.
-  const moreBtn = await screen.findByTestId('agent-picker-more');
-  await user.click(moreBtn);
-  await waitFor(() => expect(screen.getByText('codex')).toBeInTheDocument());
-  await user.click(screen.getByText('codex'));
+  // codex-native (priority 0, installed) renders in the default grid.
+  await waitFor(() => expect(screen.getByText('Codex')).toBeInTheDocument());
+  await user.click(screen.getByTestId('agent-card-select-codex-native'));
   await user.click(screen.getAllByRole('button', { name: 'Continue' })[0]);
   await waitFor(() =>
     expect(screen.getByRole('heading', { name: 'Name your Profile' })).toBeInTheDocument(),
