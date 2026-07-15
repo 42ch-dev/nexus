@@ -141,6 +141,6 @@ moving theme into Appearance; languages beyond `en`/`zh-CN`; wire/schema changes
 
 ## References
 
-- Grill-me decisions: `.mstar/iterations/v1.112-delivery-compass.md`
+- Grill-me decisions: `.mstar/iterations/v1.112/delivery-compass.md`
 - Theme persistence pattern: `apps/web/src/components/theme-provider.tsx`
 - Plan: `.mstar/plans/2026-07-12-v1.112-i18n-foundation.md`

@@ -293,7 +293,7 @@ V2 命令面按以下顶层执行（pre-release 允许破坏性调整）。**V1.
 - `nexus42 creator knowledge ...`：User knowledge / reference 管理入口（`nexus-knowledge`）
 - `nexus42 creator demo-seed ...`：演示数据填充（world + KB seed）
 
-**V1.29 additions** (compass: [v1.29](../../iterations/v1.29-author-intelligence-and-agent-hardening-delivery-compass-v1.md)):
+**V1.29 additions** (compass: [v1.29](../../iterations/v1.29/delivery-compass.md)):
 
 - `nexus42 creator memory pending-list` — list items in `memory_pending_review` awaiting review
 - `nexus42 creator memory pending-show <id>` — show detail of a single pending memory item
@@ -659,7 +659,7 @@ Normative: [novel-writing/multi-work-lifecycle.md](./novel-writing/multi-work-li
 
 **OUT V1.41:** `creator work switch` / global switch mutex (grill-me 2026-06-10).
 
-**Entry path pointer (no standalone quickstart in V1.41):** multi-book flow extends [creator-centric-entry-model.md](./creator-centric-entry-model.md) §3.1 step 7 — see compass [v1.41-multi-work-author-desk-delivery-compass-v1.md](../../iterations/v1.41-multi-work-author-desk-delivery-compass-v1.md) §2.
+**Entry path pointer (no standalone quickstart in V1.41):** multi-book flow extends [creator-centric-entry-model.md](./creator-centric-entry-model.md) §3.1 step 7 — see compass [v1.41/delivery-compass.md](../../iterations/v1.41/delivery-compass.md) §2.
 
 **Target (V1.41):** plans `2026-06-10-v1.41-multi-work-switch`, `2026-06-10-v1.41-selection-pool`.
 

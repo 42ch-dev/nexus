@@ -61,9 +61,9 @@ V1.62 reorganized `schemas/` along consumer-scope lines (compass v1.62 §1.3): t
 
 - [local-cloud-crate-architecture.md](../specs/local-cloud-crate-architecture.md) — local vs cloud product lines, crate graph, daemon API classes
 - [archived/knowledge/daemon-api-workspace-write-architecture.md](../archived/knowledge/daemon-api-workspace-write-architecture.md) — **superseded** route table (use V1.20 compass + `daemon-runtime` / crate architecture SSOT)
-- [v1.20-delivery-compass-v1.md](../iterations/v1.20-delivery-compass-v1.md) — shipped local API redesign
-- [v1.21-local-platform-isolation-delivery-compass-v1.md](../iterations/v1.21-local-platform-isolation-delivery-compass-v1.md) — daemon sync route removal program
-- [v1.62-compute-architecture-and-schemas-reorganization-delivery-compass-v1.md](../iterations/v1.62-compute-architecture-and-schemas-reorganization-delivery-compass-v1.md) — consumer-scope reorganization + `local-api/` tree
+- [v1.20/delivery-compass.md](../iterations/v1.20/delivery-compass.md) — shipped local API redesign
+- [v1.21/delivery-compass.md](../iterations/v1.21/delivery-compass.md) — daemon sync route removal program
+- [v1.62/delivery-compass.md](../iterations/v1.62/delivery-compass.md) — consumer-scope reorganization + `local-api/` tree
 
 ---
 

@@ -2,7 +2,7 @@
 
 **Status:** IA contract locked (Task 1 confirm); architect-locked (Phase 1 §5.2); writing-polished (§5.3)  
 **Plan:** `2026-07-10-v1.105-wizard-ia-reorder`  
-**Compass:** [`v1.105-delivery-compass.md`](../../v1.105-delivery-compass.md)  
+**Compass:** [`v1.105/delivery-compass.md`](../../v1.105/delivery-compass.md)  
 **Depends on:** [`daemon-fullscreen-gate.md`](daemon-fullscreen-gate.md)  
 **Tier:** Must (P1)  
 **Wire:** `wire_contracts_changed: false`

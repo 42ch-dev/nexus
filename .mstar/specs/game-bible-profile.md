@@ -404,4 +404,4 @@ Game-bible uses `work_profile = "game_bible"` (TEXT column, consistent with `"no
 
 ---
 
-*Draft V1.54 Feature line. Implementation authority is active while V1.54 compass `v1.54-df46-completion-and-game-bible-foundation-delivery-compass-v1.md` is active; P-last promotes or revises.*
+*Draft V1.54 Feature line. Implementation authority is active while V1.54 compass `v1.54/delivery-compass.md` is active; P-last promotes or revises.*

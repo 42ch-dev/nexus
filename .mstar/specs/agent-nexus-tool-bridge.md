@@ -12,7 +12,7 @@
 - [local-runtime-boundary.md](local-runtime-boundary.md) — CLI vs daemon vs Agent topology
 - [creator-workflow.md](creator-workflow.md) — FL-E stages; Work read/patch tools
 
-**Iteration compass**: [v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md](../../iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md)
+**Iteration compass**: [v1.34/delivery-compass.md](../../iterations/v1.34/delivery-compass.md)
 
 ---
 

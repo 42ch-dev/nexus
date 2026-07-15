@@ -2,7 +2,7 @@
 
 Iteration-scoped contracts and guides for **V1.107 — Studio UI Tune**.
 
-**Compass:** [`v1.107-delivery-compass.md`](../v1.107-delivery-compass.md) (`status: locked`)
+**Compass:** [`v1.107/delivery-compass.md`](../v1.107/delivery-compass.md) (`status: locked`)
 
 ## Story
 

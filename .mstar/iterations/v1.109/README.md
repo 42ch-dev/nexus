@@ -18,4 +18,4 @@ Triple Must iteration continuing the canvas trajectory from V1.108.
 
 ## Compass
 
-→ [`../v1.109-delivery-compass.md`](../v1.109-delivery-compass.md)
+→ [`../v1.109/delivery-compass.md`](../v1.109/delivery-compass.md)

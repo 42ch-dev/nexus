@@ -5,7 +5,7 @@
 **Prior shell SSOT:** [`v1.103/specs/settings-shell-ia.md`](../../v1.103/specs/settings-shell-ia.md) (V1.103 omit)  
 **Section SSOT:** [`settings-workspace-section.md`](settings-workspace-section.md)  
 **Studio-first:** [`../guides/studio-first-visual-then-app.md`](../guides/studio-first-visual-then-app.md)  
-**Compass:** [`v1.104-delivery-compass.md`](../../v1.104-delivery-compass.md)
+**Compass:** [`v1.104/delivery-compass.md`](../../v1.104/delivery-compass.md)
 
 ## Goal
 

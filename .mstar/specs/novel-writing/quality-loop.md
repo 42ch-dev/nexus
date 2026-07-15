@@ -14,7 +14,7 @@
 - [manuscript-audit.md](manuscript-audit.md) — DF-69 on-demand audit (V1.44 P0)
 - [author-experience.md](author-experience.md) — quickstart §5 cross-refs (V1.43 shipped)
 
-**Iteration compass**: [v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md](../../iterations/v1.39-novel-auto-chain-and-quality-loop-delivery-compass-v1.md) · [v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md](../../iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md) · [v1.47-novel-quality-loop-closure-delivery-compass-v1.md](../../iterations/v1.47-novel-quality-loop-closure-delivery-compass-v1.md) (active)
+**Iteration compass**: [v1.39/delivery-compass.md](../../iterations/v1.39/delivery-compass.md) · [v1.44/delivery-compass.md](../../iterations/v1.44/delivery-compass.md) · [v1.47/delivery-compass.md](../../iterations/v1.47/delivery-compass.md) (active)
 
 ---
 

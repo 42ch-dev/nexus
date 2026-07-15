@@ -3,7 +3,7 @@
 **Status:** Draft — writing-complete (§5.3); PM lock pending §5.4  
 **Tier:** Must (P1) — iteration incomplete if missing  
 **Plan:** `2026-07-10-v1.106-first-launch-polish`  
-**Compass:** `../v1.106-delivery-compass.md`  
+**Compass:** `../v1.106/delivery-compass.md`  
 **Depends on:** P0 studio-first invariant (Studio-first required for chrome in this plan)
 
 ## Product outcome

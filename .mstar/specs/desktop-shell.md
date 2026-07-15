@@ -4,7 +4,7 @@
 **Document class**: Feature line
 **Created**: 2026-06-25 (Phase 2b, `@architect`)
 **Scope**: Nexus desktop shell contract — `apps/desktop` Tauri v2 wrapper, SPA adapter selection (`TauriClient`), desktop-only `NexusClient` extensions, native file actions + path guard, bundled `nexus42` sidecar lifecycle, port discovery, capability detection, macOS-first unsigned dev build. V1.67+ deferrals (signing, multi-OS, auto-update, in-process lib link, body editor) recorded in §2.
-**Iteration compass**: [v1.66-tauri-desktop-shell-delivery-compass-v1.md](../iterations/v1.66-tauri-desktop-shell-delivery-compass-v1.md) (scope/roadmap SSOT — §0 grill decisions, §1.1 Track A, §5 locked design items)
+**Iteration compass**: [v1.66/delivery-compass.md](../iterations/v1.66/delivery-compass.md) (scope/roadmap SSOT — §0 grill decisions, §1.1 Track A, §5 locked design items)
 
 **Coordinates with**:
 
@@ -119,7 +119,7 @@ Window chrome / app menu / native dialogs / desktop context menu / daemon-status
 ## 13. Setup Wizard (V1.94)
 
 **Status**: Draft (V1.94) — normative contract frozen by P-1; implement authority P0 + P1.
-**Iteration compass**: [v1.94-desktop-onboarding-ia-pass-delivery-compass-v1.md](../iterations/v1.94-desktop-onboarding-ia-pass-delivery-compass-v1.md) §1 (locked decisions A2+B1, C1, H1) + §5 (acceptance criteria).
+**Iteration compass**: [v1.94/delivery-compass.md](../iterations/v1.94/delivery-compass.md) §1 (locked decisions A2+B1, C1, H1) + §5 (acceptance criteria).
 
 ### 13.1 Purpose
 
@@ -327,7 +327,7 @@ V1.100 does not change daemon routes, JSON schemas, generated TypeScript/Rust co
 
 ### 13.10 V1.105 Amendments — First-launch wizard reshape (Agent-first + app-level Daemon gate)
 
-**Product behavior target.** V1.105 makes daemon readiness a **launch ritual** (fullscreen gate) and reduces the setup wizard to three author choices. **Iteration SSOT:** [`.mstar/iterations/v1.105-delivery-compass.md`](../iterations/v1.105-delivery-compass.md) + [`v1.105/specs/`](../iterations/v1.105/specs/).
+**Product behavior target.** V1.105 makes daemon readiness a **launch ritual** (fullscreen gate) and reduces the setup wizard to three author choices. **Iteration SSOT:** [`.mstar/iterations/v1.105/delivery-compass.md`](../iterations/v1.105/delivery-compass.md) + [`v1.105/specs/`](../iterations/v1.105/specs/).
 
 #### 13.10.1 Rule 13 rewrite — always auto-start sidecar (D2)
 
@@ -372,7 +372,7 @@ Prefer `wire_contracts_changed: false`. Portrait shell: `wizard-max-width` **480
 
 #### 13.10.6 V1.106 Amendments — Studio fixtures + shared chrome SSOT
 
-**Iteration SSOT:** [`.mstar/iterations/v1.106-delivery-compass.md`](../iterations/v1.106-delivery-compass.md).
+**Iteration SSOT:** [`.mstar/iterations/v1.106/delivery-compass.md`](../iterations/v1.106/delivery-compass.md).
 
 - **DaemonReadySplash fixtures:** Studio `/surfaces/launch` imports presentational `@web-setup/daemon-ready-splash` — same module as App outer gate.
 - **MainBanner fixtures:** composition-only props-driven chrome in Studio — App `main-banner.tsx` stays daemon-hook-owned; no extract in V1.106.
@@ -381,7 +381,7 @@ Prefer `wire_contracts_changed: false`. Portrait shell: `wizard-max-width` **480
 
 #### 13.10.7 V1.107 Amendments — Studio paint + presentational SSOT
 
-**Iteration SSOT:** [`.mstar/iterations/v1.107-delivery-compass.md`](../iterations/v1.107-delivery-compass.md) + [`studio-ui-tune.md`](../iterations/v1.107/specs/studio-ui-tune.md).
+**Iteration SSOT:** [`.mstar/iterations/v1.107/delivery-compass.md`](../iterations/v1.107/delivery-compass.md) + [`studio-ui-tune.md`](../iterations/v1.107/specs/studio-ui-tune.md).
 
 - **Studio Tailwind content:** Design Studio must scan `apps/web/src/components/setup/**`, `layout/presentational/**`, and `packages/nexus-ui/src/**` so wizard and matrix utilities paint (FB-000).
 - **Shell chrome SSOT:** Extract props-driven modules under `apps/web/src/components/layout/presentational/`; App wrappers (`sidebar.tsx`, `footer-profiles.tsx`, `daemon-health-indicator.tsx`) delegate markup; Studio imports via `@web-layout/*` (FB-013..014).
@@ -464,7 +464,7 @@ The handler joins the registry list with the scan results to produce the annotat
 
 - Agent installation / download / update (registry-only detection; the user manages their own ACP agent binaries).
 - Full `AgentProfile` CRUD API (wizard + Settings Agent section write the default profile via desktop `setAgentProfile`; broader CRUD remains a separate future iteration).
-- Execution-mode matrix / BYOK / AgentPicker package promotion (out of V1.103 scope; see [V1.103 compass](../iterations/v1.103-delivery-compass.md) Non-Goals). Multi-section Settings shell for Agent/Connection/Setup is **in scope V1.103** — not a non-goal here.
+- Execution-mode matrix / BYOK / AgentPicker package promotion (out of V1.103 scope; see [V1.103 compass](../iterations/v1.103/delivery-compass.md) Non-Goals). Multi-section Settings shell for Agent/Connection/Setup is **in scope V1.103** — not a non-goal here.
 
 ---
 

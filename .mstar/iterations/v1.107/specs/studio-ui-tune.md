@@ -3,7 +3,7 @@
 **Status:** Draft — product-complete (§5.1 PM); architecture-locked (§5.2 architect); writing-complete (§5.3)  
 **Tier:** Must (P0)  
 **Plan:** `2026-07-10-v1.107-studio-ui-tune`  
-**Compass:** `../v1.107-delivery-compass.md`
+**Compass:** `../v1.107/delivery-compass.md`
 
 ## Product outcome
 

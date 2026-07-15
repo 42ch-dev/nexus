@@ -3,7 +3,7 @@
 **Status:** Draft — product-complete (§5.1 product-manager)  
 **Tier:** Must (P2)  
 **Plan:** `2026-07-11-v1.109-canvas-graph-scale`  
-**Compass:** `../v1.109-delivery-compass.md`  
+**Compass:** `../v1.109/delivery-compass.md`  
 **Normative master:** `.mstar/specs/canvas-strategy-surface.md` (§3.1 performance notes, §3.3 shared shell, §4.4 a11y)  
 **Upstream residuals:** V1.108 post-ship QC findings (10 open rows targeting post-V1.108)
 

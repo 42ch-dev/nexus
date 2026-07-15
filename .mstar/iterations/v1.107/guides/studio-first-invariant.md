@@ -33,5 +33,5 @@ All subsequent UI work for author-facing chrome follows:
 
 - Prior guide: [`.mstar/iterations/v1.106/guides/studio-first-invariant.md`](../../v1.106/guides/studio-first-invariant.md)
 - Primary spec: [`../specs/studio-ui-tune.md`](../specs/studio-ui-tune.md)
-- Compass: [`../../v1.107-delivery-compass.md`](../../v1.107-delivery-compass.md)
+- Compass: [`../../v1.107/delivery-compass.md`](../../v1.107/delivery-compass.md)
 - Deferred Surfaces: [`../specs/author-surfaces-backlog.md`](../specs/author-surfaces-backlog.md)

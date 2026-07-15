@@ -146,5 +146,5 @@ persistence key, or resolve order.
 ## References
 
 - P0 spec: [`i18n-foundation.md`](i18n-foundation.md)
-- Compass: `.mstar/iterations/v1.112-delivery-compass.md`
+- Compass: `.mstar/iterations/v1.112/delivery-compass.md`
 - Plan: `.mstar/plans/2026-07-12-v1.112-i18n-ui-migration.md`

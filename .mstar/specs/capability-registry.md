@@ -6,7 +6,7 @@
 **Last updated**: 2026-06-22 (V1.57 P-last — folded in P0 test vectors + P1 3-caller dispatch + P3 dynamic allowlist mechanism)  
 **Scope**: Runtime SSOT for Nexus `nexus.*` capability dispatch — 18 host tools (per V1.57 P0 acp §4 roster, reconciled from 35 plan estimate) + dynamic worker allowlist (per V1.57 P3) + 3-caller entry point shape (per V1.57 P1)  
 **Coordinates with**: [acp-capability-set.md](acp-capability-set.md), [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md) (now Master), [acp-client-tech-spec.md](acp-client-tech-spec.md), [orchestration-engine.md](orchestration-engine.md) (§6.4 worker IPC), [daemon-runtime.md](daemon-runtime.md) (3-caller topology), [local-runtime-boundary.md](local-runtime-boundary.md) (3-caller adapter pattern)  
-**Iteration compass**: [v1.57-df46-df47-full-parity-and-adapter-unification-delivery-compass-v1.md](../../iterations/v1.57-df46-df47-full-parity-and-adapter-unification-delivery-compass-v1.md)
+**Iteration compass**: [v1.57/delivery-compass.md](../../iterations/v1.57/delivery-compass.md)
 
 ---
 

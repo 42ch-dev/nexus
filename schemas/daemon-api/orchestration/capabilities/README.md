@@ -16,4 +16,4 @@ V1.63 P3 — promoted from handler DTOs in `crates/nexus-contracts/src/local/orc
 
 - **Consumer:** `@42ch/nexus-contracts` (npm) — generated TypeScript types
 - **Handler:** `crates/nexus-daemon-runtime/src/api/handlers/orchestration/capabilities.rs`
-- **Compass:** `.mstar/iterations/v1.63-essay-profile-and-daemon-api-foundation-delivery-compass-v1.md` §1.1 Track C T12
+- **Compass:** `.mstar/iterations/v1.63/delivery-compass.md` §1.1 Track C T12

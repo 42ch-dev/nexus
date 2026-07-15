@@ -12,7 +12,7 @@
 - [on-demand-synthesis-read-path-invariant.md](../architecture-patterns/on-demand-synthesis-read-path-invariant.md) — read-path LLM gating (applies per world)
 - [fingerprint-cached-live-aggregate.md](../architecture-patterns/fingerprint-cached-live-aggregate.md) — read-path cost (cache key per (creator, world))
 
-**Iteration compass**: [v1.82-soul-completion-delivery-compass-v1.md](../../iterations/v1.82-soul-completion-delivery-compass-v1.md) (§7.2.4); supersets [v1.81-creator-soul-maturation-delivery-compass-v1.md](../../iterations/v1.81-creator-soul-maturation-delivery-compass-v1.md)
+**Iteration compass**: [v1.82/delivery-compass.md](../../iterations/v1.82/delivery-compass.md) (§7.2.4); supersets [v1.81/delivery-compass.md](../../iterations/v1.81/delivery-compass.md)
 **Plans**: [2026-07-01-v1.81-creator-soul-narrative-and-world-foundation.md](../../plans/2026-07-01-v1.81-creator-soul-narrative-and-world-foundation.md) (V1.81 P0) · [2026-07-02-v1.82-per-world-narrative-backend.md](../../plans/2026-07-02-v1.82-per-world-narrative-backend.md) (V1.82 P0)
 
 ## 1. Purpose

@@ -13,7 +13,7 @@
 - [orchestration-engine.md](orchestration-engine.md) — presets, schedules, capabilities
 - [agent-nexus-tool-bridge.md](agent-nexus-tool-bridge.md) — Agent-initiated context/tools (parallel channel)
 
-**Iteration compass**: [v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md](../../iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md)
+**Iteration compass**: [v1.34/delivery-compass.md](../../iterations/v1.34/delivery-compass.md)
 
 ---
 

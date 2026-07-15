@@ -3,7 +3,7 @@
 **Status:** Draft — product-complete (§5.1 product-manager)  
 **Tier:** Must (P1)  
 **Plan:** `2026-07-11-v1.109-strategy-edge-rewiring`  
-**Compass:** `../v1.109-delivery-compass.md`  
+**Compass:** `../v1.109/delivery-compass.md`  
 **Normative master:** `.mstar/specs/canvas-strategy-surface.md` (§1.1 Strategy β writes, §3.2 DAG mapping, §3.5 write boundary + conflict policy, §4.4 pointer alternatives, §4.5 user stories)
 
 ## Product outcome
