@@ -86,9 +86,15 @@ async fn seed_work_completion_locked(state: &WorkspaceState) -> String {
         completion_locked_at: Some(Some(now.clone())),
         ..Default::default()
     };
-    works::patch_work(state.pool().unwrap(), "test_creator", &work_id, &patch, &now)
-        .await
-        .expect("patch_work should succeed");
+    works::patch_work(
+        state.pool().unwrap(),
+        "test_creator",
+        &work_id,
+        &patch,
+        &now,
+    )
+    .await
+    .expect("patch_work should succeed");
 
     work_id
 }
