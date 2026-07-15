@@ -1,0 +1,31 @@
+{
+  "id": "2026-07-15-v1.118-creation-peer-groups",
+  "title": "P1 - Creation peer groups",
+  "file": "plans/2026-07-15-v1.118-creation-peer-groups.md",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": [
+    "@frontend-dev"
+  ],
+  "progress": 100,
+  "tags": [
+    "v1.118",
+    "shell",
+    "ia",
+    "must"
+  ],
+  "created_at": "2026-07-15",
+  "updated_at": "2026-07-15",
+  "notes": "QC Approve; QA Pass; merged to iteration/v1.118",
+  "metadata": {
+    "iteration_refs": [
+      "V1.118"
+    ],
+    "spec_integration_branch": "iteration/v1.118",
+    "merge_target": "iteration/v1.118",
+    "working_branch": "plan/v1.118-p1-creation-peer-groups",
+    "primary_spec": ".mstar/iterations/v1.118/specs/creation-peer-groups.md",
+    "wire_contracts_changed": false,
+    "tier": "Must"
+  }
+}

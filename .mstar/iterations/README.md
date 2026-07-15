@@ -137,3 +137,4 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | V1.116 | [v1.116/delivery-compass.md](v1.116/delivery-compass.md) | completed | 3 spec(s) |
 | V1.117 | [v1.117/](v1.117/) | completed | 5 spec(s) |
 | V1.118 | [v1.118/](v1.118/) | completed | 3 spec(s) |
+| V1.119 | [v1.119/](v1.119/) | active | 3 spec(s) |

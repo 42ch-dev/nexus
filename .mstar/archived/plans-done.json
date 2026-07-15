@@ -471,7 +471,11 @@
     "2026-07-13-v1.114-compute-module-foundation",
     "2026-07-12-v1.113-i18n-completion",
     "2026-07-12-v1.113-ui-normalization",
-    "2026-07-12-v1.113-tech-debt-paydown"
+    "2026-07-12-v1.113-tech-debt-paydown",
+    "2026-07-15-ci-disk-and-iterations-layout",
+    "2026-07-15-v1.118-daemon-no-profile-boot",
+    "2026-07-15-v1.118-creation-peer-groups",
+    "2026-07-15-v1.118-canvas-work-shell"
   ],
   "iteration_summaries": {
     "v1.45": {
