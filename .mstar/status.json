@@ -69,12 +69,12 @@
       "id": "2026-07-15-v1.118-canvas-work-shell",
       "title": "P2 - Canvas-first work shell",
       "file": "plans/2026-07-15-v1.118-canvas-work-shell.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@frontend-dev"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.118",
         "canvas",
@@ -83,7 +83,7 @@
       ],
       "created_at": "2026-07-15",
       "updated_at": "2026-07-15",
-      "notes": "Phase 1 locked \u2014 Prepare gates done; ready for Phase 2 implement",
+      "notes": "QC Approve with residuals; QA Pass with residuals; merged to iteration/v1.118",
       "metadata": {
         "iteration_refs": [
           "V1.118"
@@ -1586,6 +1586,41 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-15-v1.118-daemon-no-profile-boot.md",
         "note": "QC2 W-006."
+      }
+    ],
+    "2026-07-15-v1.118-canvas-work-shell": [
+      {
+        "id": "R-V1118P2-ORPHAN",
+        "title": "WorkDetailPage unrouted after outline-default shell \u2014 update/archive/findings entry points lost",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.118",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-15-v1.118-canvas-work-shell.md",
+        "note": "QC3 W-001. Re-home actions in rail/menu."
+      },
+      {
+        "id": "R-V1118P2-CHAPTERS-ID",
+        "title": "workId===chapters collides with reserved /works/chapters flat route (isWorkShellRoute false-negative)",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.118",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-15-v1.118-canvas-work-shell.md",
+        "note": "Documented in work-shell-routes.ts; forbid at create or refine detector."
+      },
+      {
+        "id": "R-V1118P2-BODY-NAV",
+        "title": "No shell-visible Body/chapters navigation after drill-in retirement",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.118",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-15-v1.118-canvas-work-shell.md",
+        "note": "QC3 W-003. Routes work; discoverability gap."
       }
     ]
   }
