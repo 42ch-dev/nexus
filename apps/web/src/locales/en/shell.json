@@ -119,5 +119,23 @@
     "creating": "Creating Work…",
     "create": "Create",
     "toastCreated": "Work created"
+  },
+  "workShell": {
+    "railTitle": "Works",
+    "railAria": "Works rail",
+    "railDrawerDescription": "Switch Works or review metadata for the current Work.",
+    "openRail": "Works",
+    "worksListAria": "Works in this library",
+    "previewAria": "Selected Work preview",
+    "loadingWorks": "Loading Works…",
+    "loadingPreview": "Loading preview…",
+    "worksErrorTitle": "Could not load Works",
+    "worksErrorDescription": "The Works list is unavailable right now.",
+    "noWorks": "No Works yet.",
+    "previewUnavailable": "Preview unavailable.",
+    "previewPreset": "Primary preset",
+    "previewProfile": "Work profile",
+    "previewUpdated": "Updated",
+    "untitled": "Untitled"
   }
 }
