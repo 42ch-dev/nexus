@@ -122,7 +122,9 @@ describe('SetupStepWorkspace', () => {
 
   it('truncates a long workspace path inside a shrinkable input row', async () => {
     const longPath = '/very/long/path/'.repeat(10);
-    renderHarness(makeState({ workspaceRoot: longPath }), {
+    // workspacePicked freezes the path so the mount name→slug reconcile (P1)
+    // does not rewrite the trailing segment; this test is about row layout.
+    renderHarness(makeState({ workspaceRoot: longPath, workspacePicked: true }), {
       desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve(longPath) }),
     });
 
@@ -140,7 +142,9 @@ describe('SetupStepWorkspace', () => {
   });
 
   it('shows the desktop workspace root and a picker button in the same row', async () => {
-    renderHarness(makeState(), {
+    // workspacePicked freezes the resolved path so the mount name→slug
+    // reconcile (P1) keeps the desktop-resolved root verbatim.
+    renderHarness(makeState({ workspacePicked: true }), {
       desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve('/custom/nexus') }),
     });
 
@@ -154,7 +158,9 @@ describe('SetupStepWorkspace', () => {
     const user = userEvent.setup();
     const pickDirectory = vi.fn(() => Promise.resolve('/picked/workspace'));
 
-    renderHarness(makeState(), {
+    // workspacePicked freezes the resolved path so the mount name→slug
+    // reconcile (P1) keeps `/custom/nexus` as the picker seed.
+    renderHarness(makeState({ workspacePicked: true }), {
       desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve('/custom/nexus'), pickDirectory }),
     });
 
@@ -173,7 +179,9 @@ describe('SetupStepWorkspace', () => {
     const setWorkspacePath = vi.fn(() => Promise.resolve());
     const stalePath = '/Users/x/Documents/nexus42/default';
 
-    renderHarness(makeState({ workspaceRoot: stalePath }), {
+    // P1 default name `default`: slug('default') === basename(stalePath), so the
+    // mount reconcile leaves the path as-is and Continue persists stalePath.
+    renderHarness(makeState({ workspaceRoot: stalePath, profileDisplayName: 'default' }), {
       desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve(stalePath), setWorkspacePath }),
       onNext,
     });
@@ -271,7 +279,9 @@ describe('SetupStepWorkspace', () => {
     );
     const stalePath = '/Users/x/Documents/nexus42/default';
 
-    renderHarness(makeState({ workspaceRoot: stalePath }), {
+    // P1 default name `default`: slug('default') === basename(stalePath), so the
+    // mount reconcile leaves the path as-is and Continue persists stalePath.
+    renderHarness(makeState({ workspaceRoot: stalePath, profileDisplayName: 'default' }), {
       desktop: makeDesktop({
         getWorkspaceRoot: () => Promise.resolve(stalePath),
         setWorkspacePath,
@@ -593,5 +603,96 @@ describe('AC-P0-* acceptance (setup-continue-unblock)', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() => expect(onNext).toHaveBeenCalled());
+  });
+});
+
+/**
+ * AC-P1-* acceptance verification for plan 2026-07-15-v1.119-setup-workspace-profile-path.
+ *
+ * Each test maps one acceptance criterion from the P1 spec
+ * (`.mstar/iterations/v1.119/specs/setup-workspace-profile-path.md`):
+ * default name, focus layout, unpicked name→path sync, picked path freeze,
+ * and Continue enabled on first paint. The slug pipeline itself is covered
+ * exhaustively in `src/lib/workspace-profile-slug.test.ts`.
+ */
+describe('AC-P1-* acceptance (workspace-profile-path)', () => {
+  it('AC-P1-1: Profile name field defaults to `default` (wizard init value)', async () => {
+    // Mirrors the SetupWizardPage useState init (profileDisplayName: 'default'
+    // in setup-wizard-page.tsx). The Workspace step receives it and renders
+    // `default` without the author typing — no Continue-for-empty-name block.
+    renderHarness(makeState({ profileDisplayName: 'default' }), {
+      desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve('/home/alice/Documents/nexus/default') }),
+    });
+
+    const input = await waitFor(() => screen.getByTestId('wizard-profile-name'));
+    expect(input).toHaveValue('default');
+  });
+
+  it('AC-P1-2: focused Profile name input reserves scroll margin so the folder label is not covered', async () => {
+    renderHarness(makeState({ profileDisplayName: 'default', workspacePicked: true }), {
+      desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve('/home/alice/Documents/nexus/default') }),
+    });
+
+    const input = await waitFor(() => screen.getByTestId('wizard-profile-name'));
+    // The browser auto scroll-into-view on focus must leave room above so the
+    // "Workspace folder" label stays visible at 480px card width (spec § Focus).
+    expect(input).toHaveClass('scroll-mt-4');
+  });
+
+  it('AC-P1-3: typing a Profile name updates the path last segment while the folder is unpicked', async () => {
+    const user = userEvent.setup();
+    renderHarness(makeState({ profileDisplayName: 'default' }), {
+      desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve('/home/alice/Documents/nexus/default') }),
+    });
+
+    // Mount: slug('default') === basename → path unchanged.
+    await waitFor(() =>
+      expect(screen.getByDisplayValue('/home/alice/Documents/nexus/default')).toBeInTheDocument(),
+    );
+
+    const input = screen.getByTestId('wizard-profile-name');
+    await user.clear(input);
+    await user.type(input, 'alice');
+
+    // onChange sync: last path segment becomes slug('alice') = 'alice'.
+    await waitFor(() =>
+      expect(screen.getByDisplayValue('/home/alice/Documents/nexus/alice')).toBeInTheDocument(),
+    );
+  });
+
+  it('AC-P1-4: after Browse picks a folder, renaming the Profile does not alter the workspace path', async () => {
+    const user = userEvent.setup();
+    const pickDirectory = vi.fn(() => Promise.resolve('/picked/creative-zone'));
+
+    renderHarness(makeState({ profileDisplayName: 'default' }), {
+      desktop: makeDesktop({
+        getWorkspaceRoot: () => Promise.resolve('/home/alice/Documents/nexus/default'),
+        pickDirectory,
+      }),
+    });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Change…' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Change…' }));
+    await waitFor(() =>
+      expect(screen.getByDisplayValue('/picked/creative-zone')).toBeInTheDocument(),
+    );
+
+    // Rename the Profile after picking — workspacePicked is true → path frozen.
+    const input = screen.getByTestId('wizard-profile-name');
+    await user.clear(input);
+    await user.type(input, 'Alice');
+
+    expect(screen.getByDisplayValue('/picked/creative-zone')).toBeInTheDocument();
+  });
+
+  it('AC-P1-5: Continue is enabled on first paint with the default name and resolved path', async () => {
+    renderHarness(makeState({ profileDisplayName: 'default' }), {
+      desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve('/home/alice/Documents/nexus/default') }),
+    });
+
+    // Default name `default` + desktop-resolved path → Continue is not disabled
+    // for an empty name on first paint (the F7 confusion P1 removes).
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
+    expect(screen.getByTestId('wizard-profile-name')).toHaveValue('default');
   });
 });
