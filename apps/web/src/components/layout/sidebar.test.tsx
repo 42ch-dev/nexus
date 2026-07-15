@@ -7,6 +7,7 @@ import { Route, Routes } from 'react-router-dom';
 import { Sidebar } from './sidebar';
 import { renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
+import { worksList } from '@/test/handlers';
 import { BrowserClient } from '@/lib/nexus';
 import { i18n } from '@/lib/i18n/config';
 
@@ -18,8 +19,8 @@ function makeClient() {
   return new BrowserClient();
 }
 
-/** The creators-list handler the footer profile switcher fetches on mount. */
-function useCreatorHandler() {
+/** Creators + empty Works list — sidebar fetches both on mount. */
+function useSidebarHandlers(works: unknown[] = []) {
   useHandlers(
     http.get('/v1/daemon/creators', () =>
       HttpResponse.json({
@@ -27,6 +28,7 @@ function useCreatorHandler() {
         pagination: { limit: 20, has_more: false },
       }),
     ),
+    worksList(works),
   );
 }
 
@@ -37,32 +39,19 @@ describe('Sidebar', () => {
   });
 
   it('renders the Creator tab by default', async () => {
-    useHandlers(
-      http.get('/v1/daemon/creators', () =>
-        HttpResponse.json({
-          items: [{ creator_id: 'creator-a', display_name: 'Alice' }],
-          pagination: { limit: 20, has_more: false },
-        }),
-      ),
-    );
+    useSidebarHandlers();
 
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
 
     expect(screen.getByRole('tab', { name: 'Creator', selected: true })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'All Works' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Memory' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Worlds' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Memories' })).toBeInTheDocument();
   });
 
   it('swaps to Orchestrator tab and shows runtime/strategy links', async () => {
     const user = userEvent.setup();
-    useHandlers(
-      http.get('/v1/daemon/creators', () =>
-        HttpResponse.json({
-          items: [{ creator_id: 'creator-a', display_name: 'Alice' }],
-          pagination: { limit: 20, has_more: false },
-        }),
-      ),
-    );
+    useSidebarHandlers();
 
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
 
@@ -80,14 +69,7 @@ describe('Sidebar', () => {
 
   it('exposes the Modules nav link under the Orchestrator tab with a valid route', async () => {
     const user = userEvent.setup();
-    useHandlers(
-      http.get('/v1/daemon/creators', () =>
-        HttpResponse.json({
-          items: [{ creator_id: 'creator-a', display_name: 'Alice' }],
-          pagination: { limit: 20, has_more: false },
-        }),
-      ),
-    );
+    useSidebarHandlers();
 
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
 
@@ -97,14 +79,7 @@ describe('Sidebar', () => {
   });
 
   it('does not expose Connect or Daemon as top-level nav items', async () => {
-    useHandlers(
-      http.get('/v1/daemon/creators', () =>
-        HttpResponse.json({
-          items: [{ creator_id: 'creator-a', display_name: 'Alice' }],
-          pagination: { limit: 20, has_more: false },
-        }),
-      ),
-    );
+    useSidebarHandlers();
 
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
 
@@ -113,14 +88,7 @@ describe('Sidebar', () => {
   });
 
   it('wraps tabs in a tablist and exposes the nav groups as a tabpanel', async () => {
-    useHandlers(
-      http.get('/v1/daemon/creators', () =>
-        HttpResponse.json({
-          items: [{ creator_id: 'creator-a', display_name: 'Alice' }],
-          pagination: { limit: 20, has_more: false },
-        }),
-      ),
-    );
+    useSidebarHandlers();
 
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
 
@@ -129,14 +97,7 @@ describe('Sidebar', () => {
   });
 
   it('mounts the footer profile switcher', async () => {
-    useHandlers(
-      http.get('/v1/daemon/creators', () =>
-        HttpResponse.json({
-          items: [{ creator_id: 'creator-a', display_name: 'Alice' }],
-          pagination: { limit: 20, has_more: false },
-        }),
-      ),
-    );
+    useSidebarHandlers();
 
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
 
@@ -146,14 +107,7 @@ describe('Sidebar', () => {
   });
 
   it('exposes Settings as a footer utility link above profiles', async () => {
-    useHandlers(
-      http.get('/v1/daemon/creators', () =>
-        HttpResponse.json({
-          items: [{ creator_id: 'creator-a', display_name: 'Alice' }],
-          pagination: { limit: 20, has_more: false },
-        }),
-      ),
-    );
+    useSidebarHandlers();
 
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
 
@@ -167,13 +121,14 @@ describe('Sidebar', () => {
   it('renders localized labels when locale is zh-CN', async () => {
     window.localStorage.setItem('nexus-web-locale', 'zh-CN');
     const user = userEvent.setup();
-    useCreatorHandler();
+    useSidebarHandlers();
 
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
 
     expect(screen.getByRole('tab', { name: '创作', selected: true })).toBeInTheDocument();
     expect(screen.getByRole('tab', { name: '编排' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '全部作品' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: '世界' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '记忆' })).toBeInTheDocument();
     const link = screen.getByTestId('settings-footer-utility-link');
     expect(link).toHaveTextContent('设置');
@@ -184,14 +139,7 @@ describe('Sidebar', () => {
   });
 
   it('keeps parent groups as quiet labels and selected leaf with soft fill + thin bar', async () => {
-    useHandlers(
-      http.get('/v1/daemon/creators', () =>
-        HttpResponse.json({
-          items: [{ creator_id: 'creator-a', display_name: 'Alice' }],
-          pagination: { limit: 20, has_more: false },
-        }),
-      ),
-    );
+    useSidebarHandlers();
 
     renderInApp(<Sidebar />, {
       client: makeClient(),
@@ -210,32 +158,97 @@ describe('Sidebar', () => {
       'bg-blue-700',
     );
 
-    const memory = screen.getByRole('link', { name: 'Memory' });
-    expect(memory).toHaveClass('text-gray-600');
-    expect(memory).not.toHaveClass('bg-gray-alpha-100');
+    const memories = screen.getByRole('link', { name: 'Memories' });
+    expect(memories).toHaveClass('text-gray-600');
+    expect(memories).not.toHaveClass('bg-gray-alpha-100');
   });
 
-  it('removes the Canvas group and nests Outline/World KB under Creation (V1.117 regroup)', async () => {
-    useCreatorHandler();
+  it('highlights Memories on /memory via prefix match (V1.118 P1)', async () => {
+    useSidebarHandlers();
+
+    renderInApp(<Sidebar />, {
+      client: makeClient(),
+      activeCreatorId: 'creator-a',
+      initialRouterEntries: ['/memory'],
+    });
+
+    const memories = screen.getByRole('link', { name: 'Memories' });
+    expect(memories).toHaveClass('bg-gray-alpha-100', 'text-gray-1000');
+    expect(memories.querySelector('[data-testid="sidebar-active-bar"]')).toHaveClass(
+      'w-[2px]',
+      'bg-blue-700',
+    );
+
+    const allWorks = screen.getByRole('link', { name: 'All Works' });
+    expect(allWorks).not.toHaveClass('bg-gray-alpha-100');
+  });
+
+  it('highlights Worlds on /worlds via prefix match (V1.118 P1)', async () => {
+    useSidebarHandlers();
+
+    renderInApp(<Sidebar />, {
+      client: makeClient(),
+      activeCreatorId: 'creator-a',
+      initialRouterEntries: ['/worlds'],
+    });
+
+    const worlds = screen.getByRole('link', { name: 'Worlds' });
+    expect(worlds).toHaveClass('bg-gray-alpha-100', 'text-gray-1000');
+    expect(worlds.querySelector('[data-testid="sidebar-active-bar"]')).toHaveClass(
+      'w-[2px]',
+      'bg-blue-700',
+    );
+
+    const allWorks = screen.getByRole('link', { name: 'All Works' });
+    expect(allWorks).not.toHaveClass('bg-gray-alpha-100');
+  });
+
+  it('shows three peer groups with no Creator meta-group mixing canvas (V1.118 P1)', async () => {
+    useSidebarHandlers();
 
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
 
-    // AC-P2-3: no "Canvas" group label anywhere in the sidebar.
+    expect(screen.getByRole('button', { name: /Works/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Worlds/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Memories/i })).toBeInTheDocument();
+
+    // No Creator meta-group label as a nav group (tab label "Creator" remains).
+    expect(screen.queryByRole('button', { name: /^Creator$/i })).not.toBeInTheDocument();
+
+    // Canvas surfaces are not list-mode Creation items anymore.
+    expect(screen.queryByRole('link', { name: 'Outline' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'World KB' })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Canvas' })).not.toBeInTheDocument();
 
-    // AC-P2-5: Outline + World KB are now Creation-tab items (folded into the
-    // Creator group). World KB has no worldId at the default route, so it
-    // falls back to the `/worlds` picker — a focusable link, never disabled.
-    expect(screen.getByRole('link', { name: 'Outline' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'World KB' })).toHaveAttribute('href', '/worlds');
+    expect(screen.getByRole('link', { name: 'Worlds' })).toHaveAttribute('href', '/worlds');
+    expect(screen.getByRole('link', { name: 'Memories' })).toHaveAttribute('href', '/memory');
+  });
 
-    // Strategy is NOT on the Creation tab anymore (moved to Orchestration).
-    expect(screen.queryByRole('link', { name: 'Strategy' })).not.toBeInTheDocument();
+  it('lists work rows from the Works query under the Works group', async () => {
+    useSidebarHandlers([
+      {
+        work_id: 'work-alpha',
+        title: 'Alpha Novel',
+        status: 'active',
+        intake_status: 'ready',
+        primary_preset_id: 'preset-1',
+        updated_at: '2026-01-01T00:00:00Z',
+      },
+    ]);
+
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toHaveAttribute(
+        'href',
+        '/works/work-alpha',
+      ),
+    );
   });
 
   it('nests Strategy under the Orchestration tab (AC-P2-4)', async () => {
     const user = userEvent.setup();
-    useCreatorHandler();
+    useSidebarHandlers();
 
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
 
@@ -248,178 +261,6 @@ describe('Sidebar', () => {
     );
   });
 
-  it('highlights the Outline canvas surface on /works/:id/outline (resolver-driven)', async () => {
-    useCreatorHandler();
-
-    renderInApp(<Sidebar />, {
-      client: makeClient(),
-      activeCreatorId: 'creator-a',
-      initialRouterEntries: ['/works/work-1/outline'],
-    });
-
-    const outline = screen.getByRole('link', { name: 'Outline' });
-    expect(outline).toHaveClass('bg-gray-alpha-100', 'text-gray-1000');
-    expect(outline).toHaveAttribute('aria-current', 'page');
-    expect(outline.querySelector('[data-testid="sidebar-active-bar"]')).toHaveClass(
-      'bg-blue-700',
-    );
-    // Non-outline canvas surfaces stay inactive on the outline route. World KB
-    // has no worldId here and falls back to the `/worlds` picker (a link, but
-    // inactive). Strategy is no longer on the Creation tab (V1.117).
-    expect(screen.getByRole('link', { name: 'World KB' })).not.toHaveClass('bg-gray-alpha-100');
-  });
-
-  it('does NOT highlight Outline on plain /works/:id — resolver null suppresses the chrome prefix match', async () => {
-    // The chrome's built-in `item.to` prefix match would light "Outline"
-    // (`to: '/works'`) on `/works/:id`; the resolver returns null here, so the
-    // canvas item must render inactive.
-    useCreatorHandler();
-
-    renderInApp(<Sidebar />, {
-      client: makeClient(),
-      activeCreatorId: 'creator-a',
-      initialRouterEntries: ['/works/work-1'],
-    });
-
-    const outline = screen.getByRole('link', { name: 'Outline' });
-    expect(outline).not.toHaveClass('bg-gray-alpha-100');
-    expect(outline).not.toHaveAttribute('aria-current', 'page');
-    expect(outline.querySelector('[data-testid="sidebar-active-bar"]')).toBeNull();
-    // Non-canvas "All Works" (`to: '/works'`) keeps its chrome prefix-match
-    // highlight — unchanged V1.94 behavior.
-    expect(screen.getByRole('link', { name: 'All Works' })).toHaveClass('bg-gray-alpha-100');
-  });
-});
-
-describe('Sidebar — Canvas nav target wiring (V1.111 P1 T3)', () => {
-  // Sidebar reads workId/worldId via `useParams`, which only populates when a
-  // route tree matches (as in production under RootLayout). renderInApp
-  // provides a MemoryRouter but no routes, so these tests mount Sidebar inside
-  // a layout route mirroring RootLayout, with child routes carrying the params.
-  function renderSidebarAtRoute(initialPath: string) {
-    useCreatorHandler();
-    renderInApp(
-      <Routes>
-        <Route element={<Sidebar />}>
-          <Route path="works" element={null} />
-          <Route path="works/:workId" element={null} />
-          <Route path="works/:workId/outline" element={null} />
-          <Route path="worlds" element={null} />
-          <Route path="worlds/:worldId/kb" element={null} />
-          <Route path="strategies" element={null} />
-          <Route path="sessions" element={null} />
-        </Route>
-      </Routes>,
-      {
-        client: makeClient(),
-        activeCreatorId: 'creator-a',
-        initialRouterEntries: [initialPath],
-      },
-    );
-  }
-
-  // V1.117: canvas item targets in NORMAL mode (workId absent). The
-  // work-scoped Outline target is now owned by the drill-in skeleton (see the
-  // "work drill-in skeleton" block) — when a workId is present the sidebar
-  // enters drill-in mode and these canvas items are not rendered.
-
-  it('Outline falls back to the /works picker when no workId is in the URL', async () => {
-    renderSidebarAtRoute('/sessions');
-
-    expect(screen.getByRole('link', { name: 'Outline' })).toHaveAttribute('href', '/works');
-  });
-
-  it('World KB navigates to the world-scoped surface when a worldId is in the URL', async () => {
-    renderSidebarAtRoute('/worlds/world-9/kb');
-
-    expect(screen.getByRole('link', { name: 'World KB' })).toHaveAttribute(
-      'href',
-      '/worlds/world-9/kb',
-    );
-  });
-
-  it('World KB navigates to the /worlds picker when no worldId is in the URL', async () => {
-    // V1.115 T3: the `/worlds` picker route exists, so without a worldId the
-    // item falls back to it — a focusable link, not an aria-disabled span.
-    // Render on a non-work route so the sidebar stays in normal (non-drill-in)
-    // mode and the World KB canvas item is visible.
-    renderSidebarAtRoute('/sessions');
-
-    expect(screen.getByRole('link', { name: 'World KB' })).toHaveAttribute('href', '/worlds');
-  });
-});
-
-describe('Sidebar — Canvas active-surface highlight (V1.111 P1 T4)', () => {
-  // Like the T3 block, these tests mount Sidebar inside a layout route so
-  // `useParams` populates workId/worldId the way RootLayout does in production.
-  // Without the matching route tree, World KB on `/worlds/:worldId/kb` would
-  // render disabled (no worldId) even though the resolver marks it active —
-  // a state that cannot occur in production. The route helper keeps the
-  // highlight assertions faithful to real behavior.
-  function renderSidebarAtRoute(initialPath: string) {
-    useCreatorHandler();
-    renderInApp(
-      <Routes>
-        <Route element={<Sidebar />}>
-          <Route path="works" element={null} />
-          <Route path="works/:workId" element={null} />
-          <Route path="works/:workId/outline" element={null} />
-          <Route path="worlds" element={null} />
-          <Route path="worlds/:worldId/kb" element={null} />
-          <Route path="strategies" element={null} />
-          <Route path="strategies/:presetId" element={null} />
-          <Route path="memory" element={null} />
-        </Route>
-      </Routes>,
-      {
-        client: makeClient(),
-        activeCreatorId: 'creator-a',
-        initialRouterEntries: [initialPath],
-      },
-    );
-  }
-
-  it('highlights the World KB canvas surface on /worlds/:worldId/kb (resolver-driven)', async () => {
-    renderSidebarAtRoute('/worlds/world-9/kb');
-
-    const worldKb = screen.getByRole('link', { name: 'World KB' });
-    expect(worldKb).toHaveClass('bg-gray-alpha-100', 'text-gray-1000');
-    expect(worldKb).toHaveAttribute('aria-current', 'page');
-    expect(worldKb.querySelector('[data-testid="sidebar-active-bar"]')).toHaveClass(
-      'bg-blue-700',
-    );
-    // Non-World-KB canvas surfaces stay inactive. Outline renders as a link
-    // (no workId → /works fallback). Strategy is no longer on the Creation tab
-    // (V1.117), so it is not asserted here.
-    expect(screen.getByRole('link', { name: 'Outline' })).not.toHaveClass('bg-gray-alpha-100');
-  });
-
-  it('keeps all Canvas items inactive on a non-canvas Creator-tab route (/memory)', async () => {
-    // On a non-canvas route the resolver returns null, so every Canvas item
-    // must render inactive. This is the clean no-canvas baseline (distinct
-    // from the /works/:id case, which specifically probes the resolver-vs-
-    // prefix-match conflict for Outline). Strategy is no longer on the
-    // Creation tab (V1.117), so it is not asserted here.
-    renderSidebarAtRoute('/memory');
-
-    // Outline renders as an inactive link (valid fallback target even without
-    // context). It does not light up.
-    const outline = screen.getByRole('link', { name: 'Outline' });
-    expect(outline).not.toHaveClass('bg-gray-alpha-100');
-    expect(outline).not.toHaveAttribute('aria-current', 'page');
-    expect(outline.querySelector('[data-testid="sidebar-active-bar"]')).toBeNull();
-
-    // World KB has no worldId and falls back to the `/worlds` picker — a
-    // focusable link, inactive like the other Canvas items here.
-    const worldKb = screen.getByRole('link', { name: 'World KB' });
-    expect(worldKb).not.toHaveClass('bg-gray-alpha-100');
-    expect(worldKb).not.toHaveAttribute('aria-current', 'page');
-
-    // Contrast: the non-canvas "Memory" item (to: /memory) DOES highlight via
-    // the chrome's prefix match — V1.94 behavior preserved for non-canvas
-    // items even while every Canvas item stays quiet.
-    expect(screen.getByRole('link', { name: 'Memory' })).toHaveClass('bg-gray-alpha-100');
-  });
 });
 
 describe('Sidebar — layout structure (AD-P2-2 T1)', () => {
@@ -429,7 +270,7 @@ describe('Sidebar — layout structure (AD-P2-2 T1)', () => {
   });
 
   it('propagates height from the aside through the nav wrapper to the chrome', async () => {
-    useCreatorHandler();
+    useSidebarHandlers();
     renderInApp(<Sidebar />, {
       client: makeClient(),
       activeCreatorId: 'creator-a',
@@ -448,7 +289,7 @@ describe('Sidebar — layout structure (AD-P2-2 T1)', () => {
   });
 
   it('scrolls nav internally (tabpanel overflow-auto) while the footer block stays pinned', async () => {
-    useCreatorHandler();
+    useSidebarHandlers();
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
 
     // The nav items live in a tabpanel that absorbs free space and scrolls.
@@ -465,7 +306,7 @@ describe('Sidebar — layout structure (AD-P2-2 T1)', () => {
   });
 
   it('places Settings and Profiles in one bottom-aligned footer block', async () => {
-    useCreatorHandler();
+    useSidebarHandlers();
     renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
 
     // Wait for the footer profile switcher to mount.
@@ -500,7 +341,7 @@ describe('Sidebar — work drill-in skeleton (AD-P2-1)', () => {
   // RootLayout does in production. Without the matching route tree, workId
   // would be undefined and drill-in would never trigger.
   function renderSidebarAtRoute(initialPath: string) {
-    useCreatorHandler();
+    useSidebarHandlers();
     renderInApp(
       <Routes>
         <Route element={<Sidebar />}>
@@ -540,7 +381,7 @@ describe('Sidebar — work drill-in skeleton (AD-P2-1)', () => {
 
     // Normal group items are gone (replaced by the skeleton).
     expect(screen.queryByRole('link', { name: 'All Works' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Memory' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Memories' })).not.toBeInTheDocument();
   });
 
   it('triggers drill-in on the work-detail route too (/works/:workId)', async () => {
