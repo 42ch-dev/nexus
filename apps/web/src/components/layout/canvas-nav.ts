@@ -24,8 +24,9 @@ import type { ShellNavItem } from './presentational/shell-sidebar-chrome';
  */
 
 /** The canvas surfaces. Only `outline` + `world-kb` are in {@link CANVAS_ITEMS};
- * `strategy` is still a canvas surface for the resolver, but renders as a plain
- * Orchestrator link. */
+ * `strategy` is still a canvas surface for {@link resolveActiveCanvasSurface}
+ * (command palette / future surfaces); the Orchestrator tab owns the `/strategies`
+ * link. */
 export type CanvasSurfaceId = 'outline' | 'world-kb' | 'strategy';
 
 /**

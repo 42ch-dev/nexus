@@ -32,11 +32,6 @@ function useSidebarHandlers(works: unknown[] = []) {
   );
 }
 
-/** @deprecated use useSidebarHandlers */
-function useCreatorHandler() {
-  useSidebarHandlers();
-}
-
 describe('Sidebar', () => {
   beforeEach(async () => {
     window.localStorage.clear();
@@ -180,6 +175,26 @@ describe('Sidebar', () => {
     const memories = screen.getByRole('link', { name: 'Memories' });
     expect(memories).toHaveClass('bg-gray-alpha-100', 'text-gray-1000');
     expect(memories.querySelector('[data-testid="sidebar-active-bar"]')).toHaveClass(
+      'w-[2px]',
+      'bg-blue-700',
+    );
+
+    const allWorks = screen.getByRole('link', { name: 'All Works' });
+    expect(allWorks).not.toHaveClass('bg-gray-alpha-100');
+  });
+
+  it('highlights Worlds on /worlds via prefix match (V1.118 P1)', async () => {
+    useSidebarHandlers();
+
+    renderInApp(<Sidebar />, {
+      client: makeClient(),
+      activeCreatorId: 'creator-a',
+      initialRouterEntries: ['/worlds'],
+    });
+
+    const worlds = screen.getByRole('link', { name: 'Worlds' });
+    expect(worlds).toHaveClass('bg-gray-alpha-100', 'text-gray-1000');
+    expect(worlds.querySelector('[data-testid="sidebar-active-bar"]')).toHaveClass(
       'w-[2px]',
       'bg-blue-700',
     );
