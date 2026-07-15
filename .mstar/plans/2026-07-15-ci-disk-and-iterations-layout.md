@@ -97,7 +97,7 @@ Tasks:
 
 | ID | Severity | Note |
 |----|----------|------|
-| R-HFIX0715QC1-L001 | low | Confirm post-PR CI: `Rust tests (orchestration-knowledge)` completes without ENOSPC |
+| R-HFIX0715QC1-L001 | low | **Resolved** — PR #150 CI green (`orchestration-knowledge` pass, no ENOSPC) |
 
 ## QA Gate Summary
 

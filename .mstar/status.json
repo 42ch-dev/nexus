@@ -22,7 +22,7 @@
       ],
       "created_at": "2026-07-15",
       "updated_at": "2026-07-15",
-      "notes": "QC Approve with residuals; PM acceptance; PR to main",
+      "notes": "QC Approve; CI green on PR #150; R-HFIX0715QC1-L001 resolved",
       "metadata": {
         "spec_integration_branch": "fix/ci-disk-and-iterations-layout",
         "merge_target": "main",
@@ -1654,18 +1654,6 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-15-v1.118-canvas-work-shell.md",
         "note": "QC3 W-003. Routes work; discoverability gap."
-      }
-    ],
-    "2026-07-15-ci-disk-and-iterations-layout": [
-      {
-        "id": "R-HFIX0715QC1-L001",
-        "severity": "low",
-        "lifecycle": "open",
-        "summary": "Confirm post-PR CI: Rust tests (orchestration-knowledge) completes without ENOSPC",
-        "tracking_link": ".mstar/plans/2026-07-15-ci-disk-and-iterations-layout.md",
-        "target": "post-PR-CI",
-        "created_at": "2026-07-15",
-        "updated_at": "2026-07-15"
       }
     ]
   }
