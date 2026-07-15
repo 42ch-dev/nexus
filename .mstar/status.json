@@ -6,13 +6,13 @@
       "id": "2026-07-15-v1.118-daemon-no-profile-boot",
       "title": "P0 - Daemon no-Profile boot",
       "file": "plans/2026-07-15-v1.118-daemon-no-profile-boot.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@fullstack-dev",
         "@frontend-dev"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.118",
         "daemon",
@@ -21,7 +21,7 @@
       ],
       "created_at": "2026-07-15",
       "updated_at": "2026-07-15",
-      "notes": "Phase 1 locked — Prepare gates done; ready for Phase 2 implement",
+      "notes": "QC Approve with residuals; QA Pass with residuals; merged to iteration/v1.118",
       "metadata": {
         "iteration_refs": [
           "V1.118"
@@ -52,7 +52,7 @@
       ],
       "created_at": "2026-07-15",
       "updated_at": "2026-07-15",
-      "notes": "Phase 1 locked — Prepare gates done; ready for Phase 2 implement",
+      "notes": "Phase 1 locked \u2014 Prepare gates done; ready for Phase 2 implement",
       "metadata": {
         "iteration_refs": [
           "V1.118"
@@ -83,7 +83,7 @@
       ],
       "created_at": "2026-07-15",
       "updated_at": "2026-07-15",
-      "notes": "Phase 1 locked — Prepare gates done; ready for Phase 2 implement",
+      "notes": "Phase 1 locked \u2014 Prepare gates done; ready for Phase 2 implement",
       "metadata": {
         "iteration_refs": [
           "V1.118"
@@ -110,7 +110,7 @@
       "pr": "https://github.com/42ch-dev/nexus/pull/148",
       "merge_commit": "12aa878f"
     },
-    "platform_integration": "paused — local-only until further notice",
+    "platform_integration": "paused \u2014 local-only until further notice",
     "pre_implement_gate": null,
     "pre_iteration_hotfix": null,
     "spec_integration_branch": "iteration/v1.118",
@@ -182,7 +182,7 @@
         "2026-07-12-v1.113-i18n-completion": 4
       }
     },
-    "updated_at": "2026-07-13",
+    "updated_at": "2026-07-15",
     "phase1_status": "locked"
   },
   "residual_findings": {
@@ -196,7 +196,7 @@
         "target": "post-V1.117",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-14-v1.117-profiles-workspace.md",
-        "note": "QC1 F-002. Codebase-wide daemon handler → generated types migration; pre-existing pattern. Out of V1.117 P0 scope."
+        "note": "QC1 F-002. Codebase-wide daemon handler \u2192 generated types migration; pre-existing pattern. Out of V1.117 P0 scope."
       },
       {
         "id": "R-V1117P0QC1-F005",
@@ -244,7 +244,7 @@
       },
       {
         "id": "R-V1117P0QC3-W001",
-        "title": "Footer switch two sequential Tauri calls (switchActiveCreator → getWorkspaceRoot); second-call failure leaves in-memory state inconsistent",
+        "title": "Footer switch two sequential Tauri calls (switchActiveCreator \u2192 getWorkspaceRoot); second-call failure leaves in-memory state inconsistent",
         "severity": "nit",
         "decision": "defer",
         "owner": "@frontend-dev",
@@ -266,7 +266,7 @@
       },
       {
         "id": "R-V1117P1QC1-S1",
-        "title": "Three dead legacy exports (agentPickerId, assignCollisionSafePickerIds, mapScanEntriesToPickerItems) in setup-step-agent.tsx — only consumed by own test",
+        "title": "Three dead legacy exports (agentPickerId, assignCollisionSafePickerIds, mapScanEntriesToPickerItems) in setup-step-agent.tsx \u2014 only consumed by own test",
         "severity": "nit",
         "decision": "defer",
         "owner": "@frontend-dev",
@@ -321,7 +321,7 @@
       },
       {
         "id": "R-V1117P4-SEC-CTAS",
-        "title": "Security/trust CTAs retain full descriptive labels (Trust This Certificate and Connect, Use Local Daemon, Reconnect With These Settings, etc.) — PM-accepted safety-critical exception to Verb-only",
+        "title": "Security/trust CTAs retain full descriptive labels (Trust This Certificate and Connect, Use Local Daemon, Reconnect With These Settings, etc.) \u2014 PM-accepted safety-critical exception to Verb-only",
         "severity": "low",
         "decision": "accept",
         "owner": "@frontend-dev",
@@ -332,7 +332,7 @@
       },
       {
         "id": "R-V1117P4-PAGINATION",
-        "title": "Load more … pagination button retains standard idiom (not swept to Verb-only)",
+        "title": "Load more \u2026 pagination button retains standard idiom (not swept to Verb-only)",
         "severity": "nit",
         "decision": "accept",
         "owner": "@frontend-dev",
@@ -363,7 +363,7 @@
         "target": "when-list-virtualisation",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-05-v1.91-findings-batch.md",
-        "note": "At the 100-item cap this is not user-visible. QC source: §S-004"
+        "note": "At the 100-item cap this is not user-visible. QC source: \u00a7S-004"
       }
     ],
     "2026-07-05-v1.92-closure": [
@@ -389,7 +389,7 @@
         "target": "spec-hygiene",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-06-v1.93-closure.md",
-        "note": "Pre-existing from V1.90. QC source: §W-003"
+        "note": "Pre-existing from V1.90. QC source: \u00a7W-003"
       }
     ],
     "2026-07-06-v1.94-closure": [
@@ -402,7 +402,7 @@
         "target": "V1.96",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-06-v1.94-closure.md",
-        "note": "Non-blocking. QC source: §S-001"
+        "note": "Non-blocking. QC source: \u00a7S-001"
       },
       {
         "id": "R-V194QC2-S002",
@@ -413,7 +413,7 @@
         "target": "V1.96",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-06-v1.94-closure.md",
-        "note": "Non-blocking. QC source: §S-002"
+        "note": "Non-blocking. QC source: \u00a7S-002"
       },
       {
         "id": "R-V194QC1R-S001",
@@ -424,19 +424,19 @@
         "target": "V1.96",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-06-v1.94-closure.md",
-        "note": "Non-blocking. QC source: §Revalidation"
+        "note": "Non-blocking. QC source: \u00a7Revalidation"
       }
     ],
     "2026-07-07-v1.95-implement-fixes": [
       {
         "id": "R-V195-ARCH-DUPLICATE-DEFAULTS",
-        "title": "Triplicate resolve_default_workspace_path/default_workspace_root (apps/nexus42, nexus-daemon-runtime, desktop src-tauri) — consolidate into nexus-home-layout",
+        "title": "Triplicate resolve_default_workspace_path/default_workspace_root (apps/nexus42, nexus-daemon-runtime, desktop src-tauri) \u2014 consolidate into nexus-home-layout",
         "severity": "low",
         "decision": "defer",
         "owner": "@fullstack-dev",
         "target": "V1.96",
         "lifecycle": "open",
-        "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md §Architecture residual",
+        "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md \u00a7Architecture residual",
         "note": "V1.95 fixed brand nexus42->nexus in all 3; structural consolidation deferred."
       },
       {
@@ -448,7 +448,7 @@
         "target": "V1.96",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md",
-        "note": "PM-accepted: recovery-wipe semantics; daemon recreates fresh DBs on boot regardless; partial wipe recoverable. QC source: §W2"
+        "note": "PM-accepted: recovery-wipe semantics; daemon recreates fresh DBs on boot regardless; partial wipe recoverable. QC source: \u00a7W2"
       },
       {
         "id": "R-V195QC3-W003",
@@ -459,7 +459,7 @@
         "target": "V1.96",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md",
-        "note": "PM-accepted: matches existing write_setup_completed_at/write_agent_profile_at pattern (all std::fs::write); codebase-wide hardening is V1.96. QC source: §W3"
+        "note": "PM-accepted: matches existing write_setup_completed_at/write_agent_profile_at pattern (all std::fs::write); codebase-wide hardening is V1.96. QC source: \u00a7W3"
       },
       {
         "id": "R-V195QC1-S002",
@@ -470,7 +470,7 @@
         "target": "V1.96",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.95-implement-fixes.md",
-        "note": "Implementation correct; integration-covered; test-parity with siblings is polish. QC source: §S-002"
+        "note": "Implementation correct; integration-covered; test-parity with siblings is polish. QC source: \u00a7S-002"
       }
     ],
     "2026-07-07-v1.96-implement-rework": [
@@ -483,7 +483,7 @@
         "target": "V1.97",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.96-implement-rework.md",
-        "note": "Sub-millisecond window; low practical impact. QC source: §W-1"
+        "note": "Sub-millisecond window; low practical impact. QC source: \u00a7W-1"
       },
       {
         "id": "R-V196QC1-S004",
@@ -494,7 +494,7 @@
         "target": "post-V1.97",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.96-implement-rework.md",
-        "note": "Future 'copy error details' support button. QC source: §S-004"
+        "note": "Future 'copy error details' support button. QC source: \u00a7S-004"
       },
       {
         "id": "R-V196QC3-S001",
@@ -505,7 +505,7 @@
         "target": "V1.97",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.96-implement-rework.md",
-        "note": "Would not catch className regression. QC source: §S-1"
+        "note": "Would not catch className regression. QC source: \u00a7S-1"
       }
     ],
     "2026-07-07-v1.97-desktop-first-launch-hardening": [
@@ -518,7 +518,7 @@
         "target": "post-V1.99",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.97-desktop-first-launch-hardening.md",
-        "note": "No error lost; consolidate to single storage path in future iteration. QC source: §W-001"
+        "note": "No error lost; consolidate to single storage path in future iteration. QC source: \u00a7W-001"
       },
       {
         "id": "R-V197QC3-W002",
@@ -529,7 +529,7 @@
         "target": "post-V1.99",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.97-desktop-first-launch-hardening.md",
-        "note": "Same code path as start_daemon; budget-not-reset implicitly covered by crash_restart_stops_when_budget_exhausted. QC source: §W-002"
+        "note": "Same code path as start_daemon; budget-not-reset implicitly covered by crash_restart_stops_when_budget_exhausted. QC source: \u00a7W-002"
       },
       {
         "id": "R-V197-CLIPPY",
@@ -540,7 +540,7 @@
         "target": "post-V1.99",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-07-v1.97-desktop-first-launch-hardening.md",
-        "note": "Not introduced by V1.97; strict clippy -D warnings fails on this pre-existing lint. QC source: §R-V197-CLIPPY"
+        "note": "Not introduced by V1.97; strict clippy -D warnings fails on this pre-existing lint. QC source: \u00a7R-V197-CLIPPY"
       }
     ],
     "2026-07-08-v1.100-desktop-clean-state-first-launch": [
@@ -592,7 +592,7 @@
       },
       {
         "id": "R-V1100P1QC2-W002",
-        "title": "cn-dupe scan scoped to apps/ only, not tooling/ — accidental tooling duplication would not fail the gate",
+        "title": "cn-dupe scan scoped to apps/ only, not tooling/ \u2014 accidental tooling duplication would not fail the gate",
         "severity": "nit",
         "decision": "accept",
         "owner": "@frontend-dev",
@@ -621,13 +621,13 @@
         "target": "post-V1.100",
         "lifecycle": "open",
         "tracking_link": ".mstar/sdd/2026-07-08-v1.100-ui-hygiene-guardrails/review/qc-consolidated.md",
-        "note": "Fail-on-missing-dir would be stricter. Low risk — dir renames caught by other CI jobs. QC source: qc3 S-003"
+        "note": "Fail-on-missing-dir would be stricter. Low risk \u2014 dir renames caught by other CI jobs. QC source: qc3 S-003"
       }
     ],
     "2026-07-09-v1.101-agent-detection-picker": [
       {
         "id": "R-V1101P0-001",
-        "title": "@web-setup/* aliases entire components/setup/ tree — prefer file-scoped alias or guardrail",
+        "title": "@web-setup/* aliases entire components/setup/ tree \u2014 prefer file-scoped alias or guardrail",
         "severity": "low",
         "decision": "defer",
         "owner": "@frontend-dev",
@@ -680,7 +680,7 @@
         "target": "post-V1.101",
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-09-v1.101-select-component-promotion.md",
-        "note": "QC2 F-001. Prefer …-error for parity with form-field fixtures."
+        "note": "QC2 F-001. Prefer \u2026-error for parity with form-field fixtures."
       },
       {
         "id": "R-V1101P2-004",
@@ -907,11 +907,11 @@
         "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-scene-beat.md",
         "note": "QC1 S-002. Re-scoped in P0 QC (R-V1109-P0-QC1-W001): Studio re-mirrors chrome as static markup because RF-coupled import boundary forbids RF deps. Deferred post-V1.114.",
-        "closure_note": "Closed by V1.115 P1 — 2026-07-10-v1.108-canvas-outline-spatial"
+        "closure_note": "Closed by V1.115 P1 \u2014 2026-07-10-v1.108-canvas-outline-spatial"
       },
       {
         "id": "R-V1108P0QC1-M001",
-        "title": "Alt view is read-only (no sort controls) — spec wording about sortable lists debatable",
+        "title": "Alt view is read-only (no sort controls) \u2014 spec wording about sortable lists debatable",
         "severity": "low",
         "decision": "close",
         "owner": "@frontend-dev",
@@ -919,7 +919,7 @@
         "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-graph-scale.md",
         "note": "QC1 M-001. Editing available in inspectors; sort controls deferred post-V1.114 (UX enhancement, not blocking).",
-        "closure_note": "Closed by V1.115 P1 — 2026-07-10-v1.108-canvas-outline-spatial"
+        "closure_note": "Closed by V1.115 P1 \u2014 2026-07-10-v1.108-canvas-outline-spatial"
       },
       {
         "id": "R-V1108P0QC1-S001",
@@ -930,7 +930,7 @@
         "target": "V1.114",
         "lifecycle": "resolved",
         "tracking_link": ".mstar/sdd/2026-07-10-v1.108-canvas-outline-spatial/review/qc1.md",
-        "note": "Closed by V1.114 P1 T5 — verified hook was extracted in V1.109 P0; residual is stale.",
+        "note": "Closed by V1.114 P1 T5 \u2014 verified hook was extracted in V1.109 P0; residual is stale.",
         "closure_note": "V1.114 P1 T5 verified useOutlineCanvasGraph already exists."
       }
     ],
@@ -957,7 +957,7 @@
         "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-11-v1.109-canvas-scene-beat.md",
         "note": "Acceptable for small fixture arrays; revisit when real wire scene/beat data arrives. QC source: QC3 W2",
-        "closure_note": "Closed by V1.115 P1 — 2026-07-11-v1.109-canvas-scene-beat"
+        "closure_note": "Closed by V1.115 P1 \u2014 2026-07-11-v1.109-canvas-scene-beat"
       }
     ],
     "2026-07-11-v1.109-strategy-edge-rewiring": [
@@ -970,7 +970,7 @@
         "target": "V1.114",
         "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-13-v1.114-canvas-stability-hardening.md",
-        "note": "Closed by V1.114 P1 T1 — server-side strategy_self_loop guard shipped.",
+        "note": "Closed by V1.114 P1 T1 \u2014 server-side strategy_self_loop guard shipped.",
         "closure_note": "V1.114 P1 T1 added 422 strategy_self_loop guard in apply_transition_create()."
       },
       {
@@ -982,7 +982,7 @@
         "target": "V1.114",
         "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-13-v1.114-canvas-stability-hardening.md",
-        "note": "Closed by V1.114 P1 T2 — verified existing strategy_transition_duplicate guard + added tests.",
+        "note": "Closed by V1.114 P1 T2 \u2014 verified existing strategy_transition_duplicate guard + added tests.",
         "closure_note": "V1.114 P1 T2 verified append_conditional_rule rejects duplicate rules."
       }
     ],
@@ -1036,7 +1036,7 @@
       },
       {
         "id": "R-V110P2QC3-W001",
-        "title": "flex-wrap removed from CustomLaunchField — narrow viewport wrap",
+        "title": "flex-wrap removed from CustomLaunchField \u2014 narrow viewport wrap",
         "severity": "nit",
         "decision": "defer",
         "owner": "@frontend-dev",
@@ -1058,7 +1058,7 @@
         "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-12-v1.111-sidebar-canvas-ia.md",
         "note": "qc1 flag + T3 reviewer. Honest disabled+aria-disabled; palette go.world-kb has same gating. Durable fix: /worlds picker route. QC source: qc-consolidated.md",
-        "closure_note": "Closed by V1.115 P1 — 2026-07-12-v1.111-sidebar-canvas-ia"
+        "closure_note": "Closed by V1.115 P1 \u2014 2026-07-12-v1.111-sidebar-canvas-ia"
       }
     ],
     "2026-07-12-v1.111-canvas-command-palette": [
@@ -1072,7 +1072,7 @@
         "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-12-v1.111-canvas-command-palette.md",
         "note": "qc2 W1. Mitigant: [data-command-palette-ignore] escape hatch exists. Defer until a stable RF public API or alternative detection mechanism is available. QC source: qc2.md",
-        "closure_note": "Closed by V1.115 P1 — 2026-07-12-v1.111-canvas-command-palette"
+        "closure_note": "Closed by V1.115 P1 \u2014 2026-07-12-v1.111-canvas-command-palette"
       },
       {
         "id": "R-V1111P0QC2-W002",
@@ -1083,7 +1083,7 @@
         "target": "V1.114",
         "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-13-v1.114-canvas-stability-hardening.md",
-        "note": "Closed by V1.114 P1 T3 — dev-mode console.warn collision detection shipped.",
+        "note": "Closed by V1.114 P1 T3 \u2014 dev-mode console.warn collision detection shipped.",
         "closure_note": "V1.114 P1 T3 added import.meta.env.DEV collision warning in registerCommand()."
       }
     ],
@@ -1241,7 +1241,7 @@
       },
       {
         "id": "R-P0-011",
-        "title": "zh-CN common.json inconsistent agent terminology (智能体 vs 代理)",
+        "title": "zh-CN common.json inconsistent agent terminology (\u667a\u80fd\u4f53 vs \u4ee3\u7406)",
         "severity": "nit",
         "decision": "defer",
         "owner": "@frontend-dev",
@@ -1254,7 +1254,7 @@
     "2026-07-13-v1.115-canvas-adapter-completion": [
       {
         "id": "R-V1115P0QC1-W001",
-        "title": "Strategy onReconnect dropped optimistic edge update — visible UX lag (edge moves on refetch, not immediately)",
+        "title": "Strategy onReconnect dropped optimistic edge update \u2014 visible UX lag (edge moves on refetch, not immediately)",
         "severity": "low",
         "decision": "accept",
         "owner": "@frontend-dev",
@@ -1265,7 +1265,7 @@
       },
       {
         "id": "R-V1115P0QC1-W002",
-        "title": "Greptile Issue 4 regression coverage gap — deleted reconnect scenario in use-strategy-canvas.test.tsx not replaced",
+        "title": "Greptile Issue 4 regression coverage gap \u2014 deleted reconnect scenario in use-strategy-canvas.test.tsx not replaced",
         "severity": "low",
         "decision": "defer",
         "owner": "@frontend-dev",
@@ -1276,7 +1276,7 @@
       },
       {
         "id": "R-V1115P0QC1-S002",
-        "title": "Outline orchestrator grew to 537 lines — extract selection hook when >600",
+        "title": "Outline orchestrator grew to 537 lines \u2014 extract selection hook when >600",
         "severity": "nit",
         "decision": "defer",
         "owner": "@frontend-dev",
@@ -1287,7 +1287,7 @@
       },
       {
         "id": "R-V1115P0QC1-S003",
-        "title": "World KB context keeps selection alongside node.data routing — harden against future consolidation",
+        "title": "World KB context keeps selection alongside node.data routing \u2014 harden against future consolidation",
         "severity": "nit",
         "decision": "defer",
         "owner": "@frontend-dev",
@@ -1298,7 +1298,7 @@
       },
       {
         "id": "R-V1115P0QC1-S004",
-        "title": "Position-merge sync test orphaned by refactor — relocate to use-canvas-surface.test.ts",
+        "title": "Position-merge sync test orphaned by refactor \u2014 relocate to use-canvas-surface.test.ts",
         "severity": "nit",
         "decision": "defer",
         "owner": "@frontend-dev",
@@ -1376,13 +1376,13 @@
         "lifecycle": "resolved",
         "tracking_link": ".mstar/plans/2026-07-13-v1.114-compute-module-foundation.md",
         "note": "qc1 W-002. Architectural debt; reconcile when module surface matures.",
-        "closure_note": "Closed by V1.115 P2 — typed From<&ModuleManifest> for ModuleDetail eliminates JSON round-trip drift bridge."
+        "closure_note": "Closed by V1.115 P2 \u2014 typed From<&ModuleManifest> for ModuleDetail eliminates JSON round-trip drift bridge."
       }
     ],
     "2026-07-13-v1.115-canvas-ux-residual-cluster": [
       {
         "id": "R-V1115P1QC1-W002",
-        "title": "i18n sort key asymmetry — dead inactiveHint branch for timeline; timelineCaption duplicates column word",
+        "title": "i18n sort key asymmetry \u2014 dead inactiveHint branch for timeline; timelineCaption duplicates column word",
         "severity": "nit",
         "decision": "defer",
         "owner": "@frontend-dev",
@@ -1404,7 +1404,7 @@
       },
       {
         "id": "R-V1115P1QC1-S002",
-        "title": "Inline sort arrays + volume-label Map in outline-alt-view — extract when data grows",
+        "title": "Inline sort arrays + volume-label Map in outline-alt-view \u2014 extract when data grows",
         "severity": "nit",
         "decision": "defer",
         "owner": "@frontend-dev",
@@ -1417,7 +1417,7 @@
     "2026-07-13-v1.115-compute-manifest-reconciliation": [
       {
         "id": "R-V1115P2QC1-S103",
-        "title": "compute-module-abi.md §7.6 doc-link style (relative path vs anchor)",
+        "title": "compute-module-abi.md \u00a77.6 doc-link style (relative path vs anchor)",
         "severity": "nit",
         "decision": "defer",
         "owner": "@architect",
@@ -1530,6 +1530,63 @@
         "note": "QC1 I-1 / QC3 W-001. Plan Step 2 has vite preview fallback if empty devUrl does not work. User should validate by running pnpm dev:desktop."
       }
     ],
-    "2026-07-13-v1.116-canvas-compute-readiness-research": []
+    "2026-07-13-v1.116-canvas-compute-readiness-research": [],
+    "2026-07-15-v1.118-daemon-no-profile-boot": [
+      {
+        "id": "R-V1118P0-H2",
+        "title": "Pool-backed background subsystems (schedule/cron/refresh) only wire at boot when pool exists; not started on runtime Profile attach",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.118",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-15-v1.118-daemon-no-profile-boot.md",
+        "note": "QC H2 / daemon-runtime \u00a717.7. HTTP Tier-2 OK via lazy-open."
+      },
+      {
+        "id": "R-V1118P0-I1",
+        "title": "Desktop clean_home / v118 regression tests not wired into GitHub Actions",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@ops-engineer",
+        "target": "post-V1.118",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-15-v1.118-daemon-no-profile-boot.md",
+        "note": "QC I-1 / T3 review. Tests exist locally; need sidecar + cargo test step."
+      },
+      {
+        "id": "R-V1118P0-PATCH",
+        "title": "PATCH /creators/{id} display_name calls pool_or_uninit \u2014 may 409 before pool attach",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.118",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-15-v1.118-daemon-no-profile-boot.md",
+        "note": "Documented in handler rustdoc + \u00a717.7."
+      },
+      {
+        "id": "R-V1118P0-WS-INIT",
+        "title": "POST /workspace/init returns 500 Internal instead of 409 uninitialized when no pool",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.118",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-15-v1.118-daemon-no-profile-boot.md",
+        "note": "QC2 W-005."
+      },
+      {
+        "id": "R-V1118P0-STALE-POOL",
+        "title": "Tier-2 ensure_creator_pool failure maps to 500 Internal rather than stable 4xx",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.118",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-15-v1.118-daemon-no-profile-boot.md",
+        "note": "QC2 W-006."
+      }
+    ]
   }
 }

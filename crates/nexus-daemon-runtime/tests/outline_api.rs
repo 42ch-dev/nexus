@@ -31,7 +31,7 @@ async fn test_ctx() -> TestCtx {
         Some(workspace_dir.to_string_lossy().to_string()),
     )
     .await;
-    test_utils::seed_test_creator_and_world(state.pool()).await;
+    test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
     TestCtx { _tmp: tmp, state }
 }
 
@@ -103,7 +103,7 @@ async fn outline_read_returns_default_frontmatter() {
     let ctx = test_ctx().await;
     let work_id = create_work(&ctx.state).await;
     set_story_ref(&ctx.state, &work_id, "outline-test-novel").await;
-    seed_chapter(ctx.state.pool(), &work_id, 1).await;
+    seed_chapter(ctx.state.pool().unwrap(), &work_id, 1).await;
 
     let Json(body) = outline::get_work_outline(State(ctx.state.clone()), Path(work_id.clone()))
         .await
@@ -120,7 +120,7 @@ async fn outline_structure_patch_moves_chapter_and_bumps_revision() {
     let ctx = test_ctx().await;
     let work_id = create_work(&ctx.state).await;
     set_story_ref(&ctx.state, &work_id, "outline-test-novel").await;
-    seed_chapter(ctx.state.pool(), &work_id, 1).await;
+    seed_chapter(ctx.state.pool().unwrap(), &work_id, 1).await;
 
     let req = json!({
         "work_id": work_id,
@@ -155,7 +155,7 @@ async fn outline_chapter_patch_updates_title_and_status() {
     let ctx = test_ctx().await;
     let work_id = create_work(&ctx.state).await;
     set_story_ref(&ctx.state, &work_id, "outline-test-novel").await;
-    seed_chapter(ctx.state.pool(), &work_id, 1).await;
+    seed_chapter(ctx.state.pool().unwrap(), &work_id, 1).await;
 
     let req = json!({
         "work_id": work_id,
@@ -188,7 +188,7 @@ async fn outline_timeline_patch_adds_event_and_links_chapter() {
     let ctx = test_ctx().await;
     let work_id = create_work(&ctx.state).await;
     set_story_ref(&ctx.state, &work_id, "outline-test-novel").await;
-    seed_chapter(ctx.state.pool(), &work_id, 1).await;
+    seed_chapter(ctx.state.pool().unwrap(), &work_id, 1).await;
 
     let req = json!({
         "work_id": work_id,
@@ -222,7 +222,7 @@ async fn outline_patch_rejects_stale_revision_with_conflict() {
     let ctx = test_ctx().await;
     let work_id = create_work(&ctx.state).await;
     set_story_ref(&ctx.state, &work_id, "outline-test-novel").await;
-    seed_chapter(ctx.state.pool(), &work_id, 1).await;
+    seed_chapter(ctx.state.pool().unwrap(), &work_id, 1).await;
 
     let req = json!({
         "work_id": work_id,

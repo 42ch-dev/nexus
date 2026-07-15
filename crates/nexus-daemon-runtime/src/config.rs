@@ -105,3 +105,30 @@ pub fn resolve_state_db_path(user_home: &Path, nexus_root: &Path) -> anyhow::Res
         user_home, cid, &slug,
     ))
 }
+
+/// Read `active_creator_id` from `~/.nexus42/config.toml` without failing.
+///
+/// Used by Tier-0/Tier-1 handlers and [`require_active_creator`](crate::api::middleware::require_active_creator)
+/// to distinguish "no Profile selected yet" from fatal config errors. Returns `None` when the key is
+/// absent or the config file cannot be read.
+#[must_use]
+pub fn try_active_creator_id(nexus_root: &Path) -> Option<String> {
+    CliConfigSnapshot::load(nexus_root)
+        .ok()
+        .and_then(|cfg| cfg.active_creator_id)
+}
+
+/// Returns `None` when `active_creator_id` is absent, instead of failing
+/// fatally. Used during boot to allow the daemon to start without a creator.
+///
+/// When `active_creator_id` is present, returns `Some(path)` using the same
+/// ADR-014 path rules as the CLI.
+#[must_use]
+pub fn try_resolve_state_db_path(user_home: &Path, nexus_root: &Path) -> Option<PathBuf> {
+    let cfg = CliConfigSnapshot::load(nexus_root).ok()?;
+    let cid = cfg.active_creator_id.as_deref()?;
+    let slug = cfg.workspace_slug_for_creator(cid);
+    Some(nexus_home_layout::workspace_state_db_path(
+        user_home, cid, &slug,
+    ))
+}

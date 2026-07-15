@@ -115,7 +115,7 @@ async fn load_work(
     creator_id: &str,
     work_id: &str,
 ) -> Result<works::WorkRecord, NexusApiError> {
-    works::get_work(state.pool(), creator_id, work_id)
+    works::get_work(state.pool_or_uninit()?, creator_id, work_id)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -364,7 +364,7 @@ pub async fn list_chapters(
     let status_filter = query.status.as_ref().map(ChapterStatus::as_str);
 
     let records = work_chapters::list_chapters_paginated(
-        state.pool(),
+        state.pool_or_uninit()?,
         &work_id,
         status_filter,
         fetch_limit,
@@ -409,7 +409,7 @@ pub async fn get_chapter(
     let chapter = parse_chapter(&n)?;
     let volume = i32::try_from(query.volume.unwrap_or(1)).unwrap_or(1);
 
-    let record = work_chapters::get_chapter(state.pool(), &work_id, chapter, volume)
+    let record = work_chapters::get_chapter(state.pool_or_uninit()?, &work_id, chapter, volume)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -440,7 +440,7 @@ pub async fn get_chapter_outline(
     let chapter = parse_chapter(&n)?;
     let volume = i32::try_from(query.volume.unwrap_or(1)).unwrap_or(1);
 
-    let record = work_chapters::get_chapter(state.pool(), &work_id, chapter, volume)
+    let record = work_chapters::get_chapter(state.pool_or_uninit()?, &work_id, chapter, volume)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -493,7 +493,7 @@ pub async fn patch_chapter(
     let chapter = parse_chapter(&n)?;
     let volume = i32::try_from(query.volume.unwrap_or(1)).unwrap_or(1);
 
-    let record = work_chapters::get_chapter(state.pool(), &work_id, chapter, volume)
+    let record = work_chapters::get_chapter(state.pool_or_uninit()?, &work_id, chapter, volume)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -545,7 +545,7 @@ pub async fn patch_chapter(
     }
 
     // Acquire runtime lock before mutating DB metadata.
-    let lock = RuntimeLockGuard::acquire(state.pool(), &creator_id, &work_id).await?;
+    let lock = RuntimeLockGuard::acquire(state.pool_or_uninit()?, &creator_id, &work_id).await?;
 
     let updated: Result<WorkChapterRecord, NexusApiError> = async {
         let patch = PatchChapterParams {
@@ -558,20 +558,27 @@ pub async fn patch_chapter(
         };
 
         let now = chrono::Utc::now().to_rfc3339();
-        work_chapters::patch_chapter(state.pool(), &work_id, chapter, volume, &patch, &now)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: e.to_string(),
-            })?
-            .then_some(())
-            .ok_or_else(|| NexusApiError::NotFound(format!("chapter {chapter} volume {volume}")))?;
+        work_chapters::patch_chapter(
+            state.pool_or_uninit()?,
+            &work_id,
+            chapter,
+            volume,
+            &patch,
+            &now,
+        )
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?
+        .then_some(())
+        .ok_or_else(|| NexusApiError::NotFound(format!("chapter {chapter} volume {volume}")))?;
 
         // Re-fetch using the POST-patch volume. If `req.volume` changed it, the
         // row now lives at the new volume; re-fetching with the original query
         // `volume` would miss it and return 404 on a fully-committed write.
         let fetch_volume = patch.volume.unwrap_or(volume);
-        work_chapters::get_chapter(state.pool(), &work_id, chapter, fetch_volume)
+        work_chapters::get_chapter(state.pool_or_uninit()?, &work_id, chapter, fetch_volume)
             .await
             .map_err(|e| NexusApiError::Internal {
                 code: "DATABASE_ERROR".to_string(),
@@ -607,7 +614,7 @@ pub async fn get_chapter_body(
     let chapter = parse_chapter(&n)?;
     let volume = i32::try_from(query.volume.unwrap_or(1)).unwrap_or(1);
 
-    let record = work_chapters::get_chapter(state.pool(), &work_id, chapter, volume)
+    let record = work_chapters::get_chapter(state.pool_or_uninit()?, &work_id, chapter, volume)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -668,7 +675,7 @@ mod tests {
             Some(local_root.to_string_lossy().to_string()),
         )
         .await;
-        crate::test_utils::seed_test_creator_and_world(state.pool()).await;
+        crate::test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
 
         let req = CreateWorkRequest {
             title: "Test Novel".into(),
@@ -692,14 +699,26 @@ mod tests {
             ..Default::default()
         };
         let now = chrono::Utc::now().to_rfc3339();
-        nexus_local_db::works::patch_work(state.pool(), "test_creator", &work_id, &patch, &now)
-            .await
-            .expect("patch work_ref");
+        nexus_local_db::works::patch_work(
+            state.pool().unwrap(),
+            "test_creator",
+            &work_id,
+            &patch,
+            &now,
+        )
+        .await
+        .expect("patch work_ref");
 
         let now = chrono::Utc::now().to_rfc3339();
-        nexus_local_db::work_chapters::seed_chapters(state.pool(), &work_id, "test-novel", 3, &now)
-            .await
-            .expect("seed chapters");
+        nexus_local_db::work_chapters::seed_chapters(
+            state.pool().unwrap(),
+            &work_id,
+            "test-novel",
+            3,
+            &now,
+        )
+        .await
+        .expect("seed chapters");
 
         (state, tmp, work_id)
     }
@@ -861,7 +880,7 @@ mod tests {
         let (state, _tmp, work_id) = setup_chapter_work().await;
         let now = chrono::Utc::now().to_rfc3339();
         work_chapters::update_outline_path(
-            state.pool(),
+            state.pool().unwrap(),
             &work_id,
             1,
             1,

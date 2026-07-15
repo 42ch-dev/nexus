@@ -86,7 +86,7 @@ async fn fresh_state() -> (
         Some(workspace_dir.to_string_lossy().to_string()),
     )
     .await;
-    nexus_daemon_runtime::test_utils::seed_test_creator_and_world(state.pool()).await;
+    nexus_daemon_runtime::test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
     (tmp, state)
 }
 
@@ -117,7 +117,7 @@ fn add_request(
 async fn add_relationship_returns_projected_row() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_a",
         "wld_test_world",
         "character",
@@ -126,7 +126,7 @@ async fn add_relationship_returns_projected_row() {
     )
     .await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_b",
         "wld_test_world",
         "character",
@@ -155,7 +155,7 @@ async fn add_relationship_returns_projected_row() {
 async fn update_relationship_returns_bumped_version_and_projected_row() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_a",
         "wld_test_world",
         "character",
@@ -164,7 +164,7 @@ async fn update_relationship_returns_bumped_version_and_projected_row() {
     )
     .await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_b",
         "wld_test_world",
         "character",
@@ -222,7 +222,7 @@ async fn update_relationship_returns_bumped_version_and_projected_row() {
 async fn remove_relationship_returns_null_projection() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_a",
         "wld_test_world",
         "character",
@@ -231,7 +231,7 @@ async fn remove_relationship_returns_null_projection() {
     )
     .await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_b",
         "wld_test_world",
         "character",
@@ -274,7 +274,7 @@ async fn remove_relationship_returns_null_projection() {
 async fn add_self_loop_rejects_422() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_a",
         "wld_test_world",
         "character",
@@ -302,7 +302,7 @@ async fn add_self_loop_rejects_422() {
 async fn add_custom_without_label_rejects_422() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_a",
         "wld_test_world",
         "character",
@@ -311,7 +311,7 @@ async fn add_custom_without_label_rejects_422() {
     )
     .await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_b",
         "wld_test_world",
         "character",
@@ -339,7 +339,7 @@ async fn add_custom_without_label_rejects_422() {
 async fn add_confidence_out_of_range_rejects_422() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_a",
         "wld_test_world",
         "character",
@@ -348,7 +348,7 @@ async fn add_confidence_out_of_range_rejects_422() {
     )
     .await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_b",
         "wld_test_world",
         "character",
@@ -377,7 +377,7 @@ async fn add_confidence_out_of_range_rejects_422() {
 async fn update_stale_version_returns_409() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_a",
         "wld_test_world",
         "character",
@@ -386,7 +386,7 @@ async fn update_stale_version_returns_409() {
     )
     .await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_b",
         "wld_test_world",
         "character",
@@ -441,7 +441,7 @@ async fn update_stale_version_returns_409() {
 async fn get_graph_includes_symmetric_reverse_projection() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_a",
         "wld_test_world",
         "character",
@@ -450,7 +450,7 @@ async fn get_graph_includes_symmetric_reverse_projection() {
     )
     .await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_b",
         "wld_test_world",
         "character",
@@ -502,7 +502,7 @@ async fn get_graph_includes_symmetric_reverse_projection() {
 async fn add_with_valid_anchor_succeeds() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block_with_source(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_a",
         "wld_test_world",
         "character",
@@ -511,7 +511,7 @@ async fn add_with_valid_anchor_succeeds() {
     )
     .await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_b",
         "wld_test_world",
         "character",
@@ -519,7 +519,7 @@ async fn add_with_valid_anchor_succeeds() {
         "confirmed",
     )
     .await;
-    seed_source_anchor(state.pool(), "kb_a", 1).await;
+    seed_source_anchor(state.pool().unwrap(), "kb_a", 1).await;
 
     let mut req = add_request("kb_a", "kb_b", WorldKbRelationshipKind::AlliedWith);
     req.relationship.as_mut().unwrap().source_anchor_ids = Some(vec!["sa_kb_a".to_string()]);
@@ -538,7 +538,7 @@ async fn add_with_valid_anchor_succeeds() {
 async fn add_with_invalid_anchor_rejects_422() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_a",
         "wld_test_world",
         "character",
@@ -547,7 +547,7 @@ async fn add_with_invalid_anchor_rejects_422() {
     )
     .await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_b",
         "wld_test_world",
         "character",
@@ -576,7 +576,7 @@ async fn add_with_invalid_anchor_rejects_422() {
 async fn add_cross_world_entity_rejects_422() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_a",
         "wld_test_world",
         "character",
@@ -589,7 +589,7 @@ async fn add_cross_world_entity_rejects_422() {
         "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
          VALUES ('other_creator', 'Other', 'active', datetime('now'), '{}')",
     )
-    .execute(state.pool())
+    .execute(state.pool().unwrap())
     .await
     .unwrap();
     sqlx::query(
@@ -599,11 +599,11 @@ async fn add_cross_world_entity_rejects_422() {
          VALUES ('wld_other', 'ws', 'other_creator', 'Other', 'other-world', 'active', 'private', \
           'manual', '{}', datetime('now'))",
     )
-    .execute(state.pool())
+    .execute(state.pool().unwrap())
     .await
     .unwrap();
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_b",
         "wld_other",
         "character",
@@ -656,9 +656,9 @@ async fn seed_other_world(pool: &sqlx::SqlitePool, world_id: &str) {
 }
 
 async fn relationship_in_other_world(state: &WorkspaceState, other_world_id: &str) -> String {
-    seed_other_world(state.pool(), other_world_id).await;
+    seed_other_world(state.pool().unwrap(), other_world_id).await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_other_a",
         other_world_id,
         "character",
@@ -667,7 +667,7 @@ async fn relationship_in_other_world(state: &WorkspaceState, other_world_id: &st
     )
     .await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_other_b",
         other_world_id,
         "character",
@@ -693,7 +693,7 @@ async fn relationship_in_other_world(state: &WorkspaceState, other_world_id: &st
 async fn update_cross_world_relationship_returns_403() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_a",
         "wld_test_world",
         "character",
@@ -702,7 +702,7 @@ async fn update_cross_world_relationship_returns_403() {
     )
     .await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_b",
         "wld_test_world",
         "character",
@@ -798,7 +798,7 @@ async fn seed_extraction_suggestion(
 async fn get_graph_hides_needs_review_by_default() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_a",
         "wld_test_world",
         "character",
@@ -807,7 +807,7 @@ async fn get_graph_hides_needs_review_by_default() {
     )
     .await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_b",
         "wld_test_world",
         "character",
@@ -829,7 +829,7 @@ async fn get_graph_hides_needs_review_by_default() {
     .await
     .unwrap();
     seed_extraction_suggestion(
-        state.pool(),
+        state.pool().unwrap(),
         "wld_test_world",
         "kb_a",
         "kb_b",
@@ -883,7 +883,7 @@ async fn get_graph_hides_needs_review_by_default() {
 async fn promote_suggestion_clears_needs_review() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_a",
         "wld_test_world",
         "character",
@@ -892,7 +892,7 @@ async fn promote_suggestion_clears_needs_review() {
     )
     .await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_b",
         "wld_test_world",
         "character",
@@ -902,7 +902,7 @@ async fn promote_suggestion_clears_needs_review() {
     .await;
 
     let rel_id = seed_extraction_suggestion(
-        state.pool(),
+        state.pool().unwrap(),
         "wld_test_world",
         "kb_a",
         "kb_b",
@@ -965,7 +965,7 @@ async fn promote_suggestion_clears_needs_review() {
 async fn update_preserves_needs_review_when_omitted() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_a",
         "wld_test_world",
         "character",
@@ -974,7 +974,7 @@ async fn update_preserves_needs_review_when_omitted() {
     )
     .await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_b",
         "wld_test_world",
         "character",
@@ -984,7 +984,7 @@ async fn update_preserves_needs_review_when_omitted() {
     .await;
 
     let rel_id = seed_extraction_suggestion(
-        state.pool(),
+        state.pool().unwrap(),
         "wld_test_world",
         "kb_a",
         "kb_b",
@@ -1057,7 +1057,7 @@ async fn seed_many_relationships(pool: &sqlx::SqlitePool, world_id: &str, count:
 async fn get_graph_truncates_relationships_at_cap() {
     let (_tmp, state) = fresh_state().await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_a",
         "wld_test_world",
         "character",
@@ -1066,7 +1066,7 @@ async fn get_graph_truncates_relationships_at_cap() {
     )
     .await;
     seed_key_block(
-        state.pool(),
+        state.pool().unwrap(),
         "kb_b",
         "wld_test_world",
         "character",
@@ -1077,7 +1077,7 @@ async fn get_graph_truncates_relationships_at_cap() {
 
     // GRAPH_RELATIONSHIP_CAP is 1000 in src/api/handlers/world_kb.rs.
     const CAP: usize = 1000;
-    seed_many_relationships(state.pool(), "wld_test_world", CAP + 2).await;
+    seed_many_relationships(state.pool().unwrap(), "wld_test_world", CAP + 2).await;
 
     let Json(graph) = get_graph(
         State(state.clone()),

@@ -953,8 +953,26 @@ Implement **`require_active_creator`** (or equivalent) on Tier-2 route groups. T
 
 ### 17.5 Code anchors
 
-- `crates/nexus-daemon-runtime/src/workspace/mod.rs` — `WorkspaceState::new`, optional pool
-- `crates/nexus-daemon-runtime/src/config.rs` — `resolve_state_db_path` / lazy attach
+- `crates/nexus-daemon-runtime/src/workspace/mod.rs` — `WorkspaceState::new`, `CreatorDbSlot`, `ensure_creator_pool`, shared pool publish
+- `crates/nexus-daemon-runtime/src/config.rs` — `try_active_creator_id`, `try_resolve_state_db_path`, `resolve_state_db_path`
+- `crates/nexus-daemon-runtime/src/api/middleware.rs` — `require_active_creator` (Tier-2 guard)
+- `crates/nexus-daemon-runtime/src/api/handlers/creators.rs` — `set_active_creator` (attach), `get_active_creator` (404 when unset)
 - `crates/nexus-daemon-runtime/src/api/mod.rs` — tier middleware layering
 - `crates/nexus-home-layout/` — system dir init
+
+### 17.6 Attach and middleware (shipped P0)
+
+1. **Boot:** `WorkspaceState::new` initializes home layout and config skeleton; creator `state.db` stays closed when `active_creator_id` is absent.
+2. **Profile attach:** `PUT /v1/daemon/creators/active` writes config, then calls `ensure_creator_pool()` — resolve ADR-014 path, `Schema::init`, open `DbPool`, populate `CreatorDbSlot`, publish shared pool for background subsystems.
+3. **Tier-2 lazy attach:** `require_active_creator` middleware on Profile-scoped route groups reads `try_active_creator_id`; when config is set but the Axum state clone has no pool yet, calls `ensure_creator_pool` before forwarding (same-session Tier-2 after set-active across state clones).
+4. **Idempotency:** repeated attach or concurrent Tier-2 entry no-ops when pool already open; shared pool is published only after the creator slot is ready.
+5. **Active creator read:** `GET /v1/daemon/creators/active` when unset → HTTP **404** `not_found` (not 409).
+
+### 17.7 Known residuals (post-P0 QC)
+
+| ID | Topic | Notes |
+| --- | --- | --- |
+| H2 | Background subsystem attach | Pool-backed background subsystems still boot-gated; runtime attach after Profile selection is a follow-up, not P0 |
+| — | `PATCH …/creators/{id}` display_name | Tier-1 route; updating `display_name` calls `pool_or_uninit()` and may return HTTP **409** `uninitialized` when no pool is open yet |
+| I-1 | Desktop clean-home CI | Regression tests live in `apps/desktop` but are not yet run in GitHub Actions |
 

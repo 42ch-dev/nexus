@@ -23,6 +23,51 @@ use crate::api::errors::NexusApiError;
 use crate::api::errors::RequestId;
 use crate::workspace::WorkspaceState;
 
+/// Profile-scoped route guard (V1.118 P0 T2).
+///
+/// Tier-2 routes require an active creator in config. When `active_creator_id`
+/// is set but the pool is not yet open on this request's state clone, calls
+/// [`WorkspaceState::ensure_creator_pool`] so same-session Tier-2 after
+/// `PUT /creators/active` works across Axum state clones.
+///
+/// # Errors
+///
+/// - No `active_creator_id` in config → [`NexusApiError::Uninitialized`] (HTTP 409)
+/// - Pool open failure after attach → [`NexusApiError::Internal`]
+pub async fn require_active_creator(
+    axum::extract::State(state): axum::extract::State<WorkspaceState>,
+    request: Request<Body>,
+    next: Next,
+) -> Result<Response, NexusApiError> {
+    tracing::debug!(
+        method = %request.method(),
+        path = %request.uri().path(),
+        "Checking active creator for Tier-2 route",
+    );
+
+    let active_creator = crate::config::try_active_creator_id(state.nexus_home());
+    if active_creator.is_none() {
+        tracing::info!(
+            method = %request.method(),
+            path = %request.uri().path(),
+            "Request rejected: no active creator (Profile not selected)",
+        );
+        return Err(NexusApiError::Uninitialized);
+    }
+
+    if state.pool().is_none() {
+        state
+            .ensure_creator_pool()
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".into(),
+                message: e.to_string(),
+            })?;
+    }
+
+    Ok(next.run(request).await)
+}
+
 /// Workspace initialization guard middleware.
 ///
 /// Rejects requests with 409 Conflict when the workspace has not been initialized.
@@ -473,5 +518,177 @@ mod tests {
         // Second call should produce a different ID (counter increments)
         let id2 = super::generate_request_id();
         assert_ne!(id, id2, "consecutive IDs should differ");
+    }
+
+    // --- V1.118 P0 T2: require_active_creator + no-Profile boot ---
+
+    struct HomeOverride {
+        original: Option<String>,
+    }
+
+    impl HomeOverride {
+        fn set(home: &std::path::Path) -> Self {
+            let original = std::env::var("HOME").ok();
+            std::env::set_var("HOME", home);
+            Self { original }
+        }
+    }
+
+    impl Drop for HomeOverride {
+        fn drop(&mut self) {
+            match &self.original {
+                Some(v) => std::env::set_var("HOME", v),
+                None => std::env::remove_var("HOME"),
+            }
+        }
+    }
+
+    async fn create_no_profile_router() -> (tempfile::TempDir, axum_test::TestServer) {
+        use crate::api::auth_middleware::DaemonApiConfig;
+
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let user_home = tmp.path();
+        let nexus_home = user_home.join(".nexus42");
+        nexus_home_layout::ensure_system_layout(&nexus_home).expect("system layout");
+        let _home = HomeOverride::set(user_home);
+
+        let state = WorkspaceState::initialize().await.expect("initialize");
+        assert!(state.pool().is_none());
+
+        let app = crate::api::create_router(state, DaemonApiConfig::keyless());
+        let server = TestServer::new(app).expect("TestServer");
+        (tmp, server)
+    }
+
+    fn seed_creator_layout(user_home: &std::path::Path, creator_id: &str) {
+        let nexus_home = user_home.join(".nexus42");
+        let cache = serde_json::json!({
+            "creators": {
+                creator_id: { "handle": "tier2-test" }
+            }
+        });
+        std::fs::write(
+            nexus_home.join("creator_identity_cache.json"),
+            serde_json::to_string_pretty(&cache).expect("cache json"),
+        )
+        .expect("write cache");
+
+        let op_dir = nexus_home_layout::operational_workspace_dir(user_home, creator_id, "default");
+        std::fs::create_dir_all(&op_dir).expect("operational dir");
+        let meta = serde_json::json!({
+            "schema_version": 1,
+            "creator_id": creator_id,
+            "workspace_slug": "default",
+            "local_root": user_home.join("creative"),
+            "created_at": "2020-01-01T00:00:00Z"
+        });
+        std::fs::write(
+            op_dir.join("meta.json"),
+            serde_json::to_string(&meta).expect("meta json"),
+        )
+        .expect("meta.json");
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn tier2_works_returns_409_without_active_creator() {
+        let (_tmp, server) = create_no_profile_router().await;
+        let response = server.get("/v1/daemon/references").await;
+        assert_eq!(response.status_code(), 409);
+        let body: Value = response.json();
+        assert_eq!(body["error"]["code"], "uninitialized");
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn tier1_creators_list_works_without_active_creator() {
+        let (_tmp, server) = create_no_profile_router().await;
+        let response = server.get("/v1/daemon/creators").await;
+        assert!(
+            response.status_code().is_success(),
+            "creators list should succeed without Profile"
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn tier1_agent_host_scan_works_without_active_creator() {
+        let (_tmp, server) = create_no_profile_router().await;
+        let response = server
+            .post("/v1/daemon/agent-host/scan")
+            .json(&serde_json::json!({ "filter": "all" }))
+            .await;
+        assert_ne!(
+            response.status_code(),
+            409,
+            "agent-host scan must not return uninitialized before Profile attach"
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn tier2_agent_host_sessions_returns_409_without_active_creator() {
+        let (_tmp, server) = create_no_profile_router().await;
+        let response = server.get("/v1/daemon/agent-host/sessions").await;
+        assert_eq!(response.status_code(), 409);
+        let body: Value = response.json();
+        assert_eq!(body["error"]["code"], "uninitialized");
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn get_active_creator_unset_returns_404_not_found() {
+        let (_tmp, server) = create_no_profile_router().await;
+        let response = server.get("/v1/daemon/creators/active").await;
+        assert_eq!(response.status_code(), 404);
+        let body: Value = response.json();
+        assert_eq!(body["error"]["code"], "not_found");
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn set_active_then_tier2_works_same_process() {
+        use crate::api::auth_middleware::DaemonApiConfig;
+
+        const CREATOR_ID: &str = "crt_t2_lazy_open";
+
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let user_home = tmp.path();
+        let nexus_home = user_home.join(".nexus42");
+        nexus_home_layout::ensure_system_layout(&nexus_home).expect("system layout");
+        seed_creator_layout(user_home, CREATOR_ID);
+        let _home = HomeOverride::set(user_home);
+
+        let state = WorkspaceState::initialize().await.expect("initialize");
+        let app = crate::api::create_router(state, DaemonApiConfig::keyless());
+        let server = TestServer::new(app).expect("TestServer");
+
+        let before = server.get("/v1/daemon/references").await;
+        assert_eq!(before.status_code(), 409);
+
+        let set_resp = server
+            .put("/v1/daemon/creators/active")
+            .json(&serde_json::json!({ "creator_id": CREATOR_ID }))
+            .await;
+        assert!(
+            set_resp.status_code().is_success(),
+            "set-active should succeed: {}",
+            set_resp.status_code()
+        );
+
+        let after = server.get("/v1/daemon/references").await;
+        assert!(
+            after.status_code().is_success(),
+            "Tier-2 references should succeed after set-active in same process (H1), got {}",
+            after.status_code()
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn health_works_without_active_creator() {
+        let (_tmp, server) = create_no_profile_router().await;
+        let response = server.get("/v1/daemon/runtime/health").await;
+        assert!(response.status_code().is_success());
     }
 }

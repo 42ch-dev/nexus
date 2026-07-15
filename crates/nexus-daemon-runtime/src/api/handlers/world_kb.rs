@@ -269,7 +269,7 @@ pub async fn patch_entity(
     Json(req): Json<WorldKbPatchEntityRequest>,
 ) -> Result<Json<WorldKbPatchEntityResponse>, NexusApiError> {
     let creator_id = require_creator(&state)?;
-    let pool = state.pool();
+    let pool = state.pool_or_uninit()?;
 
     // Authorization FIRST: verify the active creator owns the world BEFORE any
     // entity read. `world_id` comes from the PATH (not the entity), so this is
@@ -441,7 +441,7 @@ pub async fn promote_candidate(
     Json(req): Json<WorldKbPromoteCandidateRequest>,
 ) -> Result<Json<WorldKbPromoteCandidateResponse>, NexusApiError> {
     let creator_id = require_creator(&state)?;
-    let pool = state.pool();
+    let pool = state.pool_or_uninit()?;
 
     require_world_owner(pool, &world_id, &creator_id).await?;
 
@@ -573,7 +573,7 @@ async fn promote_adopt(
     candidate: &KbExtractPromotion,
     req: &WorldKbPromoteCandidateRequest,
 ) -> Result<Json<WorldKbPromoteCandidateResponse>, NexusApiError> {
-    let pool = state.pool();
+    let pool = state.pool_or_uninit()?;
     let store = kb_store::SqliteKbStore::with_validation_mode(pool.clone(), ValidationMode::Novel);
 
     let AdoptPlan {
@@ -704,7 +704,7 @@ async fn promote_merge(
     candidate: &KbExtractPromotion,
     req: &WorldKbPromoteCandidateRequest,
 ) -> Result<Json<WorldKbPromoteCandidateResponse>, NexusApiError> {
-    let pool = state.pool();
+    let pool = state.pool_or_uninit()?;
     let target_id = req
         .merge_target_id
         .as_deref()
@@ -851,9 +851,9 @@ pub async fn get_graph(
     Query(query): Query<GraphQuery>,
 ) -> Result<Json<WorldKbGraphResponse>, NexusApiError> {
     let creator_id = require_creator(&state)?;
-    require_world_owner(state.pool(), &world_id, &creator_id).await?;
+    require_world_owner(state.pool_or_uninit()?, &world_id, &creator_id).await?;
 
-    let store = kb_store::SqliteKbStore::new(state.pool().clone());
+    let store = kb_store::SqliteKbStore::new(state.pool_or_uninit()?.clone());
     let blocks = store
         .list_by_world(&world_id)
         .await
@@ -907,7 +907,7 @@ pub async fn get_graph(
         entities,
         source_anchors,
         relationships: project_relationships_for_world(
-            state.pool(),
+            state.pool_or_uninit()?,
             &world_id,
             query.include_suggested.unwrap_or(false),
         )
@@ -927,9 +927,9 @@ pub async fn get_key_block_state(
     Path((world_id, key_block_id)): Path<(String, String)>,
 ) -> Result<Json<WorldKbKeyBlockStateResponse>, NexusApiError> {
     let creator_id = require_creator(&state)?;
-    require_world_owner(state.pool(), &world_id, &creator_id).await?;
+    require_world_owner(state.pool_or_uninit()?, &world_id, &creator_id).await?;
 
-    let store = kb_store::SqliteKbStore::new(state.pool().clone());
+    let store = kb_store::SqliteKbStore::new(state.pool_or_uninit()?.clone());
     let kb = store
         .get_key_block(&key_block_id)
         .await
@@ -1110,7 +1110,7 @@ pub async fn get_candidates(
     Query(query): Query<CandidatesQuery>,
 ) -> Result<Json<WorldKbCandidatesResponse>, NexusApiError> {
     let creator_id = require_creator(&state)?;
-    require_world_owner(state.pool(), &world_id, &creator_id).await?;
+    require_world_owner(state.pool_or_uninit()?, &world_id, &creator_id).await?;
 
     let limit = query
         .limit
@@ -1122,7 +1122,7 @@ pub async fn get_candidates(
     // Fetch `limit + 1` rows starting strictly after the cursor tuple so the
     // extra row detects `has_more` without truncating later pages.
     let pending = list_pending_for_world_after(
-        state.pool(),
+        state.pool_or_uninit()?,
         &world_id,
         cursor_created_at.as_deref(),
         cursor_job_id.as_deref(),
@@ -1167,7 +1167,7 @@ pub async fn patch_relationship(
     Json(req): Json<WorldKbPatchRelationshipRequest>,
 ) -> Result<Json<WorldKbPatchRelationshipResponse>, NexusApiError> {
     let creator_id = require_creator(&state)?;
-    let pool = state.pool();
+    let pool = state.pool_or_uninit()?;
     require_world_owner(pool, &world_id, &creator_id).await?;
 
     let now = chrono::Utc::now().to_rfc3339();

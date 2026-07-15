@@ -142,7 +142,7 @@ pub async fn seed_valid_token(
     .bind(refresh_token)
     .bind(&expires_at)
     .bind(&created_at)
-    .execute(state.pool())
+    .execute(state.pool().unwrap())
     .await
     .expect("INSERT should succeed for test setup");
 }
@@ -173,7 +173,7 @@ pub async fn seed_expired_token(
     .bind(refresh_token)
     .bind(&expires_at)
     .bind(&created_at)
-    .execute(state.pool())
+    .execute(state.pool().unwrap())
     .await
     .expect("INSERT should succeed for test setup");
 }

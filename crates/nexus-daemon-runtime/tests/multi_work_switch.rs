@@ -19,7 +19,7 @@ use nexus_local_db::works;
 async fn handler_state() -> (WorkspaceState, test_utils::TestTempRoot) {
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
-    test_utils::seed_test_creator_and_world(state.pool()).await;
+    test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
     (state, tmp)
 }
 
@@ -85,7 +85,7 @@ async fn create_and_patch_work(
     }
     if completion_locked.is_some() || runtime_lock_holder.is_some() {
         works::patch_work(
-            state.pool(),
+            state.pool().unwrap(),
             "test_creator",
             &work_id,
             &patch,
@@ -184,7 +184,7 @@ async fn test_completion_ceremony_blocks_subsequent_patch() {
         ..Default::default()
     };
     works::patch_work(
-        state.pool(),
+        state.pool().unwrap(),
         "test_creator",
         &work_id,
         &completion_patch,

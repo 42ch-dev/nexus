@@ -1,6 +1,6 @@
 # P0 Spec — Daemon no-Profile boot
 
-**Status:** Draft (V1.118) — product specify + clarify **done**; architect **plan done** (2026-07-15)  
+**Status:** P0 shipped (V1.118) — T1–T3 landed on `plan/v1.118-p0-daemon-no-profile-boot` (2026-07-15); architect plan **done**  
 **Document class:** Draft overlay  
 **Iteration compass:** [delivery-compass.md](../delivery-compass.md)  
 **Promote target:** fold into [desktop-shell.md](../../../specs/desktop-shell.md) §13.11 + [daemon-runtime.md](../../../specs/daemon-runtime.md) §17 at iteration P5
@@ -51,10 +51,12 @@ V1.100 introduced `ensureSetupBootstrap` (writes `active_creator_id` before daem
 | Phase | When | Behavior |
 | --- | --- | --- |
 | **Boot** | `WorkspaceState::new` on empty/missing `active_creator_id` | Create `~/.nexus42` layout + config skeleton; **do not** call `Schema::init` on creator `state.db` |
-| **Attach** | `PUT /v1/daemon/creators/active` succeeds, or Tier-2 handler finds `active_creator_id` in config | `ensure_creator_pool()`: resolve path via ADR-014, `Schema::init`, `DbPool::new`, store on state |
-| **Idempotent attach** | Repeated attach / concurrent Tier-2 | Second call no-ops if pool already open for same creator |
+| **Attach** | `PUT /v1/daemon/creators/active` succeeds, or Tier-2 handler finds `active_creator_id` in config | `ensure_creator_pool()`: resolve path via ADR-014 (`try_resolve_state_db_path`), `Schema::init`, `DbPool::new`, store on `CreatorDbSlot` and publish shared pool |
+| **Idempotent attach** | Repeated attach / concurrent Tier-2 | Second call no-ops if pool already open for same creator; shared pool published only after slot is ready |
 
 Handlers **MUST NOT** call `state.pool()` before attach except Tier-0/Tier-1 code paths audited in P0 T1.
+
+**Shipped implementation (P0 T1–T2):** `WorkspaceState` holds an optional `CreatorDbSlot`; background subsystems receive a shared pool via `OnceLock` only after attach. Tier-2 route groups use `require_active_creator` middleware, which reads config via `try_active_creator_id`, calls `ensure_creator_pool` when config is set but the request's state clone has no pool yet, then forwards or returns HTTP 409 `uninitialized`.
 
 ### API route tiers
 

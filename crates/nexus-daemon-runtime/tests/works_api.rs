@@ -37,7 +37,7 @@ struct TestCtx {
 async fn test_ctx() -> TestCtx {
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path.clone(), None).await;
-    test_utils::seed_test_creator_and_world(state.pool()).await;
+    test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
     let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
     let server = TestServer::new(app).expect("failed to create test server");
@@ -144,7 +144,7 @@ async fn create_work_with_title(server: &TestServer, title: &str) -> String {
 async fn handler_state() -> (WorkspaceState, TestTempRoot) {
     let (tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
-    test_utils::seed_test_creator_and_world(state.pool()).await;
+    test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
     (state, tmp)
 }
 
@@ -556,7 +556,7 @@ async fn handler_append_inspiration_404_does_not_acquire_lock() {
     // Sanity: no work has an active lock at the start of the test.
     let initial_locks: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM works WHERE runtime_lock_holder IS NOT NULL")
-            .fetch_one(state.pool())
+            .fetch_one(state.pool().unwrap())
             .await
             .expect("count query should not error");
     assert_eq!(
@@ -588,7 +588,7 @@ async fn handler_append_inspiration_404_does_not_acquire_lock() {
     // existing rows. With the fix in place, the count stays at 0.
     let post_locks: i64 =
         sqlx::query_scalar("SELECT COUNT(*) FROM works WHERE runtime_lock_holder IS NOT NULL")
-            .fetch_one(state.pool())
+            .fetch_one(state.pool().unwrap())
             .await
             .expect("count query should not error");
     assert_eq!(
@@ -1261,7 +1261,7 @@ async fn patch_work_stage_path_releases_runtime_lock() {
     );
 
     // Verify the lock was released (R-V142-MERGE-CI-001 fix)
-    let work = nexus_local_db::works::get_work(state.pool(), &creator_id, &work_id)
+    let work = nexus_local_db::works::get_work(state.pool().unwrap(), &creator_id, &work_id)
         .await
         .unwrap()
         .unwrap();
@@ -1421,7 +1421,7 @@ async fn test_ctx_with_creator_config() -> (TestTempRoot, WorkspaceState) {
 #[tokio::test]
 async fn patch_stage_status_complete_without_stage_is_rejected() {
     let (tmp, state) = test_ctx_with_creator_config().await;
-    let pool = state.pool().clone();
+    let pool = state.pool().unwrap().clone();
 
     let work_id = format!("wrk_{}", uuid::Uuid::new_v4());
     seed_work_for_status_test(&pool, &work_id, "intake", "pending", "pending").await;
@@ -1468,7 +1468,7 @@ async fn patch_stage_status_complete_without_stage_is_rejected() {
 #[tokio::test]
 async fn patch_stage_status_complete_with_force_is_allowed() {
     let (tmp, state) = test_ctx_with_creator_config().await;
-    let pool = state.pool().clone();
+    let pool = state.pool().unwrap().clone();
 
     let work_id = format!("wrk_{}", uuid::Uuid::new_v4());
     seed_work_for_status_test(&pool, &work_id, "intake", "pending", "complete").await;
@@ -1511,7 +1511,7 @@ async fn patch_stage_status_complete_with_force_is_allowed() {
 #[tokio::test]
 async fn patch_stage_status_active_without_force_is_allowed() {
     let (tmp, state) = test_ctx_with_creator_config().await;
-    let pool = state.pool().clone();
+    let pool = state.pool().unwrap().clone();
 
     let work_id = format!("wrk_{}", uuid::Uuid::new_v4());
     seed_work_for_status_test(&pool, &work_id, "intake", "pending", "complete").await;
@@ -1600,24 +1600,38 @@ async fn handler_get_work_lazy_promotes_completed_then_is_idempotent() {
         work_ref: Some(Some("lazy-promote-novel".to_string())),
         ..Default::default()
     };
-    patch_work(state.pool(), &creator_id, &work_id, &patch, now)
+    patch_work(state.pool().unwrap(), &creator_id, &work_id, &patch, now)
         .await
         .unwrap();
 
     // 3. Seed 2 chapter rows and mark both finalized.
-    work_chapters::seed_chapters(state.pool(), &work_id, "lazy-promote-novel", 2, now)
+    work_chapters::seed_chapters(
+        state.pool().unwrap(),
+        &work_id,
+        "lazy-promote-novel",
+        2,
+        now,
+    )
+    .await
+    .unwrap();
+    for ch in 1..=2 {
+        work_chapters::update_status(
+            state.pool().unwrap(),
+            &work_id,
+            ch,
+            1,
+            "finalized",
+            Some(4000),
+            now,
+        )
         .await
         .unwrap();
-    for ch in 1..=2 {
-        work_chapters::update_status(state.pool(), &work_id, ch, 1, "finalized", Some(4000), now)
-            .await
-            .unwrap();
     }
 
     // Sanity: at this point works.status is still 'active' (or whatever
     // create_work set), NOT yet 'completed'. The promotion is lazy — only
     // GET triggers it.
-    let pre = nexus_local_db::works::get_work(state.pool(), &creator_id, &work_id)
+    let pre = nexus_local_db::works::get_work(state.pool().unwrap(), &creator_id, &work_id)
         .await
         .unwrap()
         .unwrap();

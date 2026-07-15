@@ -31,7 +31,7 @@ struct TestCtx {
 async fn test_ctx() -> TestCtx {
     let (_tmp, nexus_home, db_path) = test_utils::create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path.clone(), None).await;
-    test_utils::seed_test_creator_and_world(state.pool()).await;
+    test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
     TestCtx { _tmp, state }
 }
 
@@ -110,7 +110,7 @@ async fn test_concurrent_patch_second_fails_with_holder_hint() {
 
     // Simulate first process holding the lock
     set_runtime_lock(
-        ctx.state.pool(),
+        ctx.state.pool().unwrap(),
         "test_creator",
         &work_id,
         "cli:http:11111111-2222-3333-4444-555555555555",
@@ -138,7 +138,7 @@ async fn test_concurrent_inspiration_second_fails_with_holder_hint() {
 
     // Hold the lock
     set_runtime_lock(
-        ctx.state.pool(),
+        ctx.state.pool().unwrap(),
         "test_creator",
         &work_id,
         "daemon:schedule:ACH20260611120000",
@@ -165,7 +165,7 @@ async fn test_stale_lock_cleared_after_ttl() {
     // Simulate a crashed CLI holder from 3 hours ago
     let three_hours_ago = (chrono::Utc::now() - chrono::Duration::hours(3)).to_rfc3339();
     set_runtime_lock(
-        ctx.state.pool(),
+        ctx.state.pool().unwrap(),
         "test_creator",
         &work_id,
         "cli:http:dead-beef-cafe",
@@ -188,7 +188,7 @@ async fn test_stale_lock_cleared_after_ttl() {
     );
 
     // Verify the lock was released (handler releases on return)
-    let work = works::get_work(ctx.state.pool(), "test_creator", &work_id)
+    let work = works::get_work(ctx.state.pool().unwrap(), "test_creator", &work_id)
         .await
         .unwrap()
         .unwrap();
@@ -207,7 +207,7 @@ async fn test_fresh_lock_not_cleared_within_ttl() {
 
     // Lock acquired just now (within TTL)
     set_runtime_lock(
-        ctx.state.pool(),
+        ctx.state.pool().unwrap(),
         "test_creator",
         &work_id,
         "cli:http:fresh-lock",
@@ -234,7 +234,7 @@ async fn test_patch_acquires_and_releases_lock() {
     let work_id = create_test_work(&ctx.state).await;
 
     // No lock initially
-    let work = works::get_work(ctx.state.pool(), "test_creator", &work_id)
+    let work = works::get_work(ctx.state.pool().unwrap(), "test_creator", &work_id)
         .await
         .unwrap()
         .unwrap();
@@ -250,7 +250,7 @@ async fn test_patch_acquires_and_releases_lock() {
     assert!(result.is_ok());
 
     // Lock should be released after handler returns
-    let work = works::get_work(ctx.state.pool(), "test_creator", &work_id)
+    let work = works::get_work(ctx.state.pool().unwrap(), "test_creator", &work_id)
         .await
         .unwrap()
         .unwrap();
@@ -274,7 +274,7 @@ async fn test_inspiration_acquires_and_releases_lock() {
     assert!(result.is_ok());
 
     // Lock should be released after handler
-    let work = works::get_work(ctx.state.pool(), "test_creator", &work_id)
+    let work = works::get_work(ctx.state.pool().unwrap(), "test_creator", &work_id)
         .await
         .unwrap()
         .unwrap();
@@ -305,7 +305,7 @@ async fn test_reconcile_chapters_releases_lock_on_error() {
         Some(workspace_path.clone()),
     )
     .await;
-    test_utils::seed_test_creator_and_world(state.pool()).await;
+    test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
 
     let work_id = create_test_work(&state).await;
     let work_ref = "reconcile-lock-test";
@@ -320,7 +320,7 @@ async fn test_reconcile_chapters_releases_lock_on_error() {
     // Seed a DB chapter row (status defaults to `not_started`) so the file
     // frontmatter below produces a status CONFLICT → `ResyncFileStatus` op.
     nexus_local_db::insert_chapter(
-        state.pool(),
+        state.pool().unwrap(),
         &nexus_local_db::InsertChapterParams {
             work_id: &work_id,
             chapter: 1,
@@ -383,7 +383,7 @@ async fn test_reconcile_chapters_releases_lock_on_error() {
 
     // The lock must be released regardless of whether the reconcile call
     // succeeded or failed.
-    let work = works::get_work(state.pool(), "test_creator", &work_id)
+    let work = works::get_work(state.pool().unwrap(), "test_creator", &work_id)
         .await
         .unwrap()
         .unwrap();
@@ -412,7 +412,7 @@ async fn test_reconcile_chapters_read_phase_runs_unlocked() {
         Some(workspace_path.clone()),
     )
     .await;
-    test_utils::seed_test_creator_and_world(state.pool()).await;
+    test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
 
     let work_id = create_test_work(&state).await;
     let work_ref = "reconcile-read-unlocked";
@@ -461,7 +461,7 @@ async fn test_reconcile_chapters_read_phase_runs_unlocked() {
         );
     }
 
-    let work = works::get_work(state.pool(), "test_creator", &work_id)
+    let work = works::get_work(state.pool().unwrap(), "test_creator", &work_id)
         .await
         .unwrap()
         .unwrap();
@@ -494,7 +494,7 @@ async fn test_reconcile_chapters_dry_run_makes_zero_mutations() {
         Some(workspace_path.clone()),
     )
     .await;
-    test_utils::seed_test_creator_and_world(state.pool()).await;
+    test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
 
     let work_id = create_test_work(&state).await;
     let work_ref = "reconcile-dryrun-test";
@@ -520,7 +520,7 @@ async fn test_reconcile_chapters_dry_run_makes_zero_mutations() {
 
     // Snapshot pre-state: filesystem file contents + DB chapter row count.
     let pre_file_contents = std::fs::read_to_string(&chapter_path).unwrap();
-    let pre_db_rows = work_chapters::list_chapters(state.pool(), &work_id)
+    let pre_db_rows = work_chapters::list_chapters(state.pool().unwrap(), &work_id)
         .await
         .expect("list_chapters pre-dry-run")
         .len();
@@ -528,7 +528,7 @@ async fn test_reconcile_chapters_dry_run_makes_zero_mutations() {
         pre_db_rows, 0,
         "no chapter rows should exist before dry-run"
     );
-    let pre_lock_holder = works::get_work(state.pool(), "test_creator", &work_id)
+    let pre_lock_holder = works::get_work(state.pool().unwrap(), "test_creator", &work_id)
         .await
         .unwrap()
         .unwrap()
@@ -564,7 +564,7 @@ async fn test_reconcile_chapters_dry_run_makes_zero_mutations() {
     );
 
     // ZERO DB mutations: still no chapter rows.
-    let post_db_rows = work_chapters::list_chapters(state.pool(), &work_id)
+    let post_db_rows = work_chapters::list_chapters(state.pool().unwrap(), &work_id)
         .await
         .expect("list_chapters post-dry-run")
         .len();
@@ -574,7 +574,7 @@ async fn test_reconcile_chapters_dry_run_makes_zero_mutations() {
     );
 
     // NO runtime lock acquired on the dry-run path.
-    let post_lock_holder = works::get_work(state.pool(), "test_creator", &work_id)
+    let post_lock_holder = works::get_work(state.pool().unwrap(), "test_creator", &work_id)
         .await
         .unwrap()
         .unwrap()
@@ -599,7 +599,7 @@ async fn test_reconcile_chapters_dry_run_makes_zero_mutations() {
     .await
     .expect("mutating reconcile should succeed");
     assert_eq!(mutate_report.0.created, 1, "mutating path creates the row");
-    let post_mutate_rows = work_chapters::list_chapters(state.pool(), &work_id)
+    let post_mutate_rows = work_chapters::list_chapters(state.pool().unwrap(), &work_id)
         .await
         .unwrap()
         .len();
@@ -609,7 +609,7 @@ async fn test_reconcile_chapters_dry_run_makes_zero_mutations() {
     );
 
     // Lock must be released after the mutating path too.
-    let post_mutate_lock = works::get_work(state.pool(), "test_creator", &work_id)
+    let post_mutate_lock = works::get_work(state.pool().unwrap(), "test_creator", &work_id)
         .await
         .unwrap()
         .unwrap()

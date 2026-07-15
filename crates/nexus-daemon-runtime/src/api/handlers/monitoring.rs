@@ -20,8 +20,18 @@ pub struct PoolStatusResponse {
 ///
 /// Returns current pool metrics for monitoring and observability.
 /// Useful for debugging connection pool exhaustion and tuning pool configuration.
+///
+/// When no creator DB is open (daemon booted without active creator),
+/// returns zeroed metrics.
 pub async fn pool_status(State(state): State<WorkspaceState>) -> Json<PoolStatusResponse> {
-    let status = state.db_pool().status();
+    let Some(pool) = state.db_pool() else {
+        tracing::debug!("pool_status: no creator DB open (pre-attach)");
+        return Json(PoolStatusResponse {
+            max_size: 0,
+            size: 0,
+        });
+    };
+    let status = pool.status();
 
     // Log pool status for observability
     tracing::debug!(
