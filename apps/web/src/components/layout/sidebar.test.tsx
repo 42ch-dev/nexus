@@ -415,4 +415,23 @@ describe('Sidebar — work routes (V1.118 P2)', () => {
     expect(allWorks).not.toHaveClass('bg-gray-alpha-100');
     expect(allWorks.querySelector('[data-testid="sidebar-active-bar"]')).toBeNull();
   });
+
+  it('highlights the active work row on non-outline work sub-routes', async () => {
+    renderSidebarAtRoute('/works/work-42/chapters');
+
+    const workLink = await waitFor(() => screen.getByRole('link', { name: 'Drill Novel' }));
+    expect(workLink).toHaveClass('bg-gray-alpha-100', 'text-gray-1000');
+    expect(workLink.querySelector('[data-testid="sidebar-active-bar"]')).toHaveClass(
+      'w-[2px]',
+      'bg-blue-700',
+    );
+  });
+
+  it('does not highlight All Works on a non-outline work sub-route', async () => {
+    renderSidebarAtRoute('/works/work-42/chapters');
+
+    const allWorks = screen.getByRole('link', { name: 'All Works' });
+    expect(allWorks).not.toHaveClass('bg-gray-alpha-100');
+    expect(allWorks.querySelector('[data-testid="sidebar-active-bar"]')).toBeNull();
+  });
 });

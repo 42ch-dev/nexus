@@ -698,8 +698,7 @@ mod tests {
         let nexus_home = user_home.join(".nexus42");
         nexus_home_layout::ensure_system_layout(&nexus_home).expect("system layout");
 
-        let original_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", user_home);
+        let _home_override = HomeOverride::set(user_home);
 
         let state = crate::workspace::WorkspaceState::initialize()
             .await
@@ -714,11 +713,6 @@ mod tests {
             }),
         )
         .await;
-
-        match original_home {
-            Some(v) => std::env::set_var("HOME", v),
-            None => std::env::remove_var("HOME"),
-        }
 
         let body = result.expect("list should succeed without pool, not return 409");
         assert!(body.0.items.is_empty());

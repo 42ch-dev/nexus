@@ -120,6 +120,14 @@ export function Sidebar() {
         primaryNavigationAriaLabel={t('aria.primaryNavigation')}
         isActiveItem={(item, route) => {
           if (item.to === '/works') return route === '/works';
+          // Peer work rows link to outline; highlight on any surface under that work.
+          const workPeerMatch = /^\/works\/([^/]+)\/outline$/.exec(item.to);
+          if (workPeerMatch) {
+            const encodedWorkId = workPeerMatch[1];
+            return (
+              route === item.to || route.startsWith(`/works/${encodedWorkId}/`)
+            );
+          }
           return route === item.to || route.startsWith(`${item.to}/`);
         }}
         renderNavItem={(item, className, content, isActive) => (
