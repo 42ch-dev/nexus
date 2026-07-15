@@ -43,7 +43,9 @@ pub struct GetWorldResponse {
 pub async fn list_worlds(
     State(state): State<WorkspaceState>,
 ) -> Result<Json<ListWorldsResponse>, NexusApiError> {
-    let gateway = state.narrative_gateway();
+    let gateway = state
+        .narrative_gateway()
+        .ok_or(NexusApiError::Uninitialized)?;
     let worlds = gateway
         .list_worlds()
         .await
@@ -62,7 +64,9 @@ pub async fn get_world(
     State(state): State<WorkspaceState>,
     Path(world_id): Path<String>,
 ) -> Result<Json<GetWorldResponse>, NexusApiError> {
-    let gateway = state.narrative_gateway();
+    let gateway = state
+        .narrative_gateway()
+        .ok_or(NexusApiError::Uninitialized)?;
     let world = gateway
         .get_world_state(&world_id)
         .await
@@ -88,7 +92,9 @@ mod tests {
     async fn list_worlds_returns_empty_for_fresh_gateway() {
         let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
-        let gateway = state.narrative_gateway();
+        let gateway = state
+            .narrative_gateway()
+            .expect("test fixture creates creator DB");
         let worlds = gateway.list_worlds().await.unwrap();
         assert!(worlds.is_empty());
         drop(state);
@@ -99,7 +105,9 @@ mod tests {
     async fn get_world_state_returns_error_for_missing() {
         let (tmp, nexus_home, db_path) = crate::test_utils::create_test_workspace().await;
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
-        let gateway = state.narrative_gateway();
+        let gateway = state
+            .narrative_gateway()
+            .expect("test fixture creates creator DB");
         let result = gateway.get_world_state("nonexistent").await;
         assert!(result.is_err());
         drop(state);
@@ -113,7 +121,7 @@ mod tests {
 
         // Seed a world directly into the DB
         nexus_local_db::narrative_gateway::seed::world(
-            state.pool(),
+            state.pool().expect("test fixture creates creator DB"),
             "wld_test",
             "ctr_test",
             "Test",
@@ -123,7 +131,9 @@ mod tests {
         )
         .await;
 
-        let gateway = state.narrative_gateway();
+        let gateway = state
+            .narrative_gateway()
+            .expect("test fixture creates creator DB");
         let s = gateway.get_world_state("wld_test").await.unwrap();
         assert_eq!(s.world_id, "wld_test");
         assert_eq!(s.title, "Test");

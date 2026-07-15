@@ -68,7 +68,7 @@ async fn verify_work_ownership(
     creator_id: &str,
     work_id: &str,
 ) -> Result<(), NexusApiError> {
-    works::get_work(state.pool(), creator_id, work_id)
+    works::get_work(state.pool_or_uninit()?, creator_id, work_id)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -100,7 +100,7 @@ async fn load_annotation_for_creator(
     creator_id: &str,
     annotation_id: &str,
 ) -> Result<AnnotationRow, NexusApiError> {
-    let row = reading::get_annotation(state.pool(), annotation_id)
+    let row = reading::get_annotation(state.pool_or_uninit()?, annotation_id)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -129,8 +129,13 @@ pub async fn get_reading_progress(
     verify_work_ownership(&state, &creator_id, &query.work_id).await?;
 
     let chapter = query.chapter;
-    let (scroll_progress, updated_at) =
-        reading::get_reading_progress(state.pool(), &creator_id, &query.work_id, chapter).await?;
+    let (scroll_progress, updated_at) = reading::get_reading_progress(
+        state.pool_or_uninit()?,
+        &creator_id,
+        &query.work_id,
+        chapter,
+    )
+    .await?;
 
     let response = ReadingProgressResponse {
         work_id: query.work_id,
@@ -156,7 +161,7 @@ pub async fn put_reading_progress(
     let chapter = body.chapter;
     let scroll_progress = u64_to_i64(body.scroll_progress, "scroll_progress")?;
     let updated_at = reading::upsert_reading_progress(
-        state.pool(),
+        state.pool_or_uninit()?,
         &creator_id,
         &body.work_id,
         chapter,
@@ -182,8 +187,13 @@ pub async fn delete_reading_progress(
     let creator_id = require_active_scope(&state)?;
     verify_work_ownership(&state, &creator_id, &query.work_id).await?;
 
-    reading::delete_reading_progress(state.pool(), &creator_id, &query.work_id, query.chapter)
-        .await?;
+    reading::delete_reading_progress(
+        state.pool_or_uninit()?,
+        &creator_id,
+        &query.work_id,
+        query.chapter,
+    )
+    .await?;
 
     Ok(axum::http::StatusCode::NO_CONTENT)
 }
@@ -196,8 +206,13 @@ pub async fn list_annotations(
     let creator_id = require_active_scope(&state)?;
     verify_work_ownership(&state, &creator_id, &query.work_id).await?;
 
-    let rows =
-        reading::list_annotations(state.pool(), &creator_id, &query.work_id, query.chapter).await?;
+    let rows = reading::list_annotations(
+        state.pool_or_uninit()?,
+        &creator_id,
+        &query.work_id,
+        query.chapter,
+    )
+    .await?;
 
     let items = rows.iter().map(to_annotation_dto).collect();
     let response = ReadingAnnotationListResponse { items };
@@ -220,7 +235,7 @@ pub async fn create_annotation(
     let annotation_id = format!("{ANNOTATION_ID_PREFIX}{}", Uuid::new_v4().simple());
 
     let row = reading::create_annotation(
-        state.pool(),
+        state.pool_or_uninit()?,
         &creator_id,
         &body.work_id,
         body.chapter,
@@ -261,7 +276,7 @@ pub async fn patch_annotation(
     });
 
     let row = reading::update_annotation(
-        state.pool(),
+        state.pool_or_uninit()?,
         &annotation_id,
         body.color.as_deref(),
         note_change,
@@ -280,7 +295,7 @@ pub async fn delete_annotation(
     let creator_id = require_active_scope(&state)?;
     let _ = load_annotation_for_creator(&state, &creator_id, &annotation_id).await?;
 
-    reading::delete_annotation(state.pool(), &annotation_id).await?;
+    reading::delete_annotation(state.pool_or_uninit()?, &annotation_id).await?;
 
     Ok(axum::http::StatusCode::NO_CONTENT)
 }

@@ -532,7 +532,7 @@ async fn work_get_happy_path() {
         novel_completion_status: None,
         lineage_from_work_id: None,
     };
-    nexus_local_db::works::create_work_atomic(state.pool(), &record, None)
+    nexus_local_db::works::create_work_atomic(state.pool().unwrap(), &record, None)
         .await
         .expect("create work")
         .unwrap_err(); // Returns the new record in Err
@@ -794,7 +794,7 @@ async fn world_snapshot_get_returns_world_state() {
     let (tmp, nexus_home, db_path) = create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
     // Seed a world
-    crate::test_utils::seed_test_creator_and_world(state.pool()).await;
+    crate::test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
 
     let req = ToolExecuteRequest {
         tool_name: "nexus.world.snapshot.get".to_string(),
@@ -838,7 +838,7 @@ async fn timeline_recent_get_returns_recent_events() {
     let (tmp, nexus_home, db_path) = create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
     // Seed world + timeline events via narrative gateway seed helpers
-    let pool = state.pool().clone();
+    let pool = state.pool().unwrap().clone();
     nexus_local_db::narrative_gateway::seed::world(
         &pool,
         "wld_timeline",
@@ -892,7 +892,7 @@ async fn kb_snapshot_read_returns_key_blocks() {
     let (tmp, nexus_home, db_path) = create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
     // Seed world + key blocks
-    let pool = state.pool().clone();
+    let pool = state.pool().unwrap().clone();
     nexus_local_db::kb_store::seed::world(
         &pool,
         "wld_kb",
@@ -973,15 +973,21 @@ async fn manuscript_chapter_get_returns_chapter_record() {
         novel_completion_status: None,
         lineage_from_work_id: None,
     };
-    nexus_local_db::works::create_work_atomic(state.pool(), &record, None)
+    nexus_local_db::works::create_work_atomic(state.pool().unwrap(), &record, None)
         .await
         .expect("create work")
         .unwrap_err();
 
     // Seed chapters
-    nexus_local_db::work_chapters::seed_chapters(state.pool(), &work_id, "test-novel", 5, &now)
-        .await
-        .expect("seed chapters");
+    nexus_local_db::work_chapters::seed_chapters(
+        state.pool().unwrap(),
+        &work_id,
+        "test-novel",
+        5,
+        &now,
+    )
+    .await
+    .expect("seed chapters");
 
     let req = ToolExecuteRequest {
         tool_name: "nexus.manuscript.chapter.get".to_string(),
@@ -1071,7 +1077,7 @@ async fn registry_dispatch_returns_same_as_legacy_work_get() {
         novel_completion_status: None,
         lineage_from_work_id: None,
     };
-    nexus_local_db::works::create_work_atomic(state.pool(), &record, None)
+    nexus_local_db::works::create_work_atomic(state.pool().unwrap(), &record, None)
         .await
         .expect("create work")
         .unwrap_err();
@@ -1161,7 +1167,7 @@ async fn schedule_status_happy_path() {
         novel_completion_status: None,
         lineage_from_work_id: None,
     };
-    nexus_local_db::works::create_work_atomic(state.pool(), &record, None)
+    nexus_local_db::works::create_work_atomic(state.pool().unwrap(), &record, None)
         .await
         .expect("create work")
         .unwrap_err();
@@ -1220,14 +1226,14 @@ async fn switch_active_creator(
 async fn world_snapshot_get_cross_creator_denied() {
     let (tmp, nexus_home, db_path) = create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path.clone(), None).await;
-    crate::test_utils::seed_test_creator_and_world(state.pool()).await;
+    crate::test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
     // Seed another creator
     // SAFETY: test-only data setup.
     sqlx::query(
         "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
              VALUES ('other_creator', 'Other', 'active', datetime('now'), '{}')",
     )
-    .execute(state.pool())
+    .execute(state.pool().unwrap())
     .await
     .expect("seed other creator");
 
@@ -1254,14 +1260,14 @@ async fn world_snapshot_get_cross_creator_denied() {
 async fn timeline_recent_get_cross_creator_denied() {
     let (tmp, nexus_home, db_path) = create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path.clone(), None).await;
-    crate::test_utils::seed_test_creator_and_world(state.pool()).await;
+    crate::test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
     // Seed other creator
     // SAFETY: test-only.
     sqlx::query(
         "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
              VALUES ('other_creator', 'Other', 'active', datetime('now'), '{}')",
     )
-    .execute(state.pool())
+    .execute(state.pool().unwrap())
     .await
     .expect("seed other creator");
 
@@ -1283,13 +1289,13 @@ async fn timeline_recent_get_cross_creator_denied() {
 async fn kb_snapshot_read_cross_creator_denied() {
     let (tmp, nexus_home, db_path) = create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path.clone(), None).await;
-    crate::test_utils::seed_test_creator_and_world(state.pool()).await;
+    crate::test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
     // SAFETY: test-only.
     sqlx::query(
         "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
              VALUES ('other_creator', 'Other', 'active', datetime('now'), '{}')",
     )
-    .execute(state.pool())
+    .execute(state.pool().unwrap())
     .await
     .expect("seed other creator");
 
@@ -1390,7 +1396,7 @@ async fn daemon_health_rejects_without_active_creator() {
 async fn timeline_recent_get_respects_server_limit() {
     let (tmp, nexus_home, db_path) = create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
-    let pool = state.pool().clone();
+    let pool = state.pool().unwrap().clone();
     nexus_local_db::narrative_gateway::seed::world(
         &pool,
         "wld_limit",
@@ -1440,7 +1446,7 @@ async fn timeline_recent_get_respects_server_limit() {
 async fn timeline_recent_get_clamps_limit_to_500() {
     let (tmp, nexus_home, db_path) = create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
-    let pool = state.pool().clone();
+    let pool = state.pool().unwrap().clone();
     nexus_local_db::narrative_gateway::seed::world(
         &pool,
         "wld_clamp",
@@ -1480,7 +1486,7 @@ async fn timeline_recent_get_clamps_limit_to_500() {
 async fn kb_snapshot_write_upserts_key_blocks() {
     let (tmp, nexus_home, db_path) = create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
-    crate::test_utils::seed_test_creator_and_world(state.pool()).await;
+    crate::test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
 
     let req = ToolExecuteRequest {
         tool_name: "nexus.kb_snapshot.write".to_string(),
@@ -1551,7 +1557,7 @@ async fn kb_snapshot_write_rejects_unknown_tool_variant() {
 async fn kb_snapshot_write_rejects_cross_world_block_same_creator() {
     let (tmp, nexus_home, db_path) = create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
-    crate::test_utils::seed_test_creator_and_world(state.pool()).await;
+    crate::test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
     // Seed a second world owned by same creator
     // SAFETY: test-only data setup.
     sqlx::query(
@@ -1561,7 +1567,7 @@ async fn kb_snapshot_write_rejects_cross_world_block_same_creator() {
              VALUES ('wld_other_world', 'ws', 'test_creator', 'Other World', 'other-world', \
              'active', 'private', 'manual', '{}', datetime('now'))",
     )
-    .execute(state.pool())
+    .execute(state.pool().unwrap())
     .await
     .expect("seed second world");
 
@@ -1598,14 +1604,14 @@ async fn kb_snapshot_write_rejects_cross_world_block_same_creator() {
 async fn kb_snapshot_write_rejects_cross_creator_world_block() {
     let (tmp, nexus_home, db_path) = create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
-    crate::test_utils::seed_test_creator_and_world(state.pool()).await;
+    crate::test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
     // Seed a world owned by a different creator
     // SAFETY: test-only data setup.
     sqlx::query(
         "INSERT OR IGNORE INTO creators (creator_id, display_name, status, cached_at, data) \
              VALUES ('other_creator', 'Other Creator', 'active', datetime('now'), '{}')",
     )
-    .execute(state.pool())
+    .execute(state.pool().unwrap())
     .await
     .expect("seed other creator");
     sqlx::query(
@@ -1615,7 +1621,7 @@ async fn kb_snapshot_write_rejects_cross_creator_world_block() {
              VALUES ('wld_other_creator_world', 'ws', 'other_creator', 'Other Creator World', \
              'other-creator-world', 'active', 'private', 'manual', '{}', datetime('now'))",
     )
-    .execute(state.pool())
+    .execute(state.pool().unwrap())
     .await
     .expect("seed other creator world");
 
@@ -1695,13 +1701,19 @@ async fn manuscript_chapter_update_writes_content() {
         novel_completion_status: None,
         lineage_from_work_id: None,
     };
-    nexus_local_db::works::create_work_atomic(state.pool(), &record, None)
+    nexus_local_db::works::create_work_atomic(state.pool().unwrap(), &record, None)
         .await
         .expect("create work")
         .unwrap_err();
-    nexus_local_db::work_chapters::seed_chapters(state.pool(), &work_id, "test-update", 3, &now)
-        .await
-        .expect("seed chapters");
+    nexus_local_db::work_chapters::seed_chapters(
+        state.pool().unwrap(),
+        &work_id,
+        "test-update",
+        3,
+        &now,
+    )
+    .await
+    .expect("seed chapters");
 
     let req = ToolExecuteRequest {
         tool_name: "nexus.manuscript.chapter.update".to_string(),
@@ -1724,10 +1736,11 @@ async fn manuscript_chapter_update_writes_content() {
     assert_eq!(val["chapter"], 1);
     // C-002 atomicity: verify DB body_path exists and the file on disk
     // contains the content we wrote (proves file written iff DB committed).
-    let chapter_record = nexus_local_db::work_chapters::get_chapter(state.pool(), &work_id, 1, 1)
-        .await
-        .expect("get_chapter after update")
-        .expect("chapter should exist after update");
+    let chapter_record =
+        nexus_local_db::work_chapters::get_chapter(state.pool().unwrap(), &work_id, 1, 1)
+            .await
+            .expect("get_chapter after update")
+            .expect("chapter should exist after update");
     let db_body_path = chapter_record.body_path.expect("body_path should be set");
     // W-003: verify canonical path follows Works/{work_ref}/Stories/... pattern.
     assert!(
@@ -1798,7 +1811,7 @@ async fn manuscript_chapter_update_rejects_unknown_tool_variant() {
 async fn world_configure_updates_metadata() {
     let (tmp, nexus_home, db_path) = create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
-    crate::test_utils::seed_test_creator_and_world(state.pool()).await;
+    crate::test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
 
     let req = ToolExecuteRequest {
         tool_name: "nexus.world.configure".to_string(),
@@ -1823,7 +1836,7 @@ async fn world_configure_updates_metadata() {
 async fn world_configure_rejects_invalid_visibility() {
     let (tmp, nexus_home, db_path) = create_test_workspace().await;
     let state = WorkspaceState::new_for_testing(nexus_home.clone(), db_path, None).await;
-    crate::test_utils::seed_test_creator_and_world(state.pool()).await;
+    crate::test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
 
     let req = ToolExecuteRequest {
         tool_name: "nexus.world.configure".to_string(),
@@ -1901,7 +1914,7 @@ async fn work_schedule_set_links_schedules() {
         novel_completion_status: None,
         lineage_from_work_id: None,
     };
-    nexus_local_db::works::create_work_atomic(state.pool(), &record, None)
+    nexus_local_db::works::create_work_atomic(state.pool().unwrap(), &record, None)
         .await
         .expect("create work")
         .unwrap_err();
@@ -2007,7 +2020,7 @@ async fn finding_resolve_marks_resolved() {
         novel_completion_status: None,
         lineage_from_work_id: None,
     };
-    nexus_local_db::works::create_work_atomic(state.pool(), &record, None)
+    nexus_local_db::works::create_work_atomic(state.pool().unwrap(), &record, None)
         .await
         .expect("create work")
         .unwrap_err();
@@ -2026,7 +2039,7 @@ async fn finding_resolve_marks_resolved() {
     .bind(&work_id)
     .bind(now_epoch)
     .bind(now_epoch)
-    .execute(state.pool())
+    .execute(state.pool().unwrap())
     .await
     .expect("seed finding");
 
@@ -2111,7 +2124,7 @@ async fn pool_entry_manage_adds_to_pool() {
         novel_completion_status: None,
         lineage_from_work_id: None,
     };
-    nexus_local_db::works::create_work_atomic(state.pool(), &record, None)
+    nexus_local_db::works::create_work_atomic(state.pool().unwrap(), &record, None)
         .await
         .expect("create work")
         .unwrap_err();
@@ -2178,7 +2191,7 @@ async fn pool_entry_manage_rejects_invalid_action() {
         novel_completion_status: None,
         lineage_from_work_id: None,
     };
-    nexus_local_db::works::create_work_atomic(state.pool(), &record, None)
+    nexus_local_db::works::create_work_atomic(state.pool().unwrap(), &record, None)
         .await
         .expect("create work")
         .unwrap_err();
@@ -2297,7 +2310,7 @@ async fn concurrent_dispatch_ten_parallel_write_tools() {
         novel_completion_status: None,
         lineage_from_work_id: None,
     };
-    nexus_local_db::works::create_work_atomic(state.pool(), &record, None)
+    nexus_local_db::works::create_work_atomic(state.pool().unwrap(), &record, None)
         .await
         .expect("create work")
         .unwrap_err();
@@ -2686,13 +2699,13 @@ async fn create_test_manuscript_work(state: &WorkspaceState) -> (String, String)
         novel_completion_status: None,
         lineage_from_work_id: None,
     };
-    nexus_local_db::works::create_work_atomic(state.pool(), &record, None)
+    nexus_local_db::works::create_work_atomic(state.pool().unwrap(), &record, None)
         .await
         .expect("create work")
         .unwrap_err(); // inner Err = fresh insert (see create_work_atomic contract)
 
     nexus_local_db::work_chapters::seed_chapters(
-        state.pool(),
+        state.pool().unwrap(),
         &work_id,
         "v159-test-novel",
         3,
@@ -2774,7 +2787,7 @@ async fn manuscript_read_range_returns_bounded_content() {
     let (work_id, workspace_root) = create_test_manuscript_work(&state).await;
 
     // Write a body file with known content for chapter 1.
-    let chapter = nexus_local_db::work_chapters::get_chapter(state.pool(), &work_id, 1, 1)
+    let chapter = nexus_local_db::work_chapters::get_chapter(state.pool().unwrap(), &work_id, 1, 1)
         .await
         .expect("get chapter")
         .expect("chapter exists");
@@ -2857,7 +2870,7 @@ async fn manuscript_read_range_rejects_sibling_escape_body_path() {
     // Patch chapter 1's body_path to escape into the sibling directory.
     let now = chrono::Utc::now().to_rfc3339();
     nexus_local_db::work_chapters::update_paths(
-        state.pool(),
+        state.pool().unwrap(),
         &work_id,
         1,
         1,
@@ -2896,7 +2909,7 @@ async fn manuscript_read_range_accepts_in_bounds_body_path() {
     .await;
     let (work_id, _workspace_root) = create_test_manuscript_work(&state).await;
 
-    let chapter = nexus_local_db::work_chapters::get_chapter(state.pool(), &work_id, 1, 1)
+    let chapter = nexus_local_db::work_chapters::get_chapter(state.pool().unwrap(), &work_id, 1, 1)
         .await
         .expect("get chapter")
         .expect("chapter exists");
@@ -2948,7 +2961,7 @@ async fn manuscript_write_writes_content() {
 
     // W-001: confirm the word_count UPDATE committed to the DB and the body file
     // is durable on disk — i.e. the tx happy path landed both sides atomically.
-    let ch = nexus_local_db::work_chapters::get_chapter(state.pool(), &work_id, 1, 1)
+    let ch = nexus_local_db::work_chapters::get_chapter(state.pool().unwrap(), &work_id, 1, 1)
         .await
         .expect("get chapter")
         .expect("chapter exists");
@@ -2981,7 +2994,7 @@ async fn manuscript_write_rolls_back_word_count_on_rename_failure() {
 
     // Resolve chapter 1's body_path and turn the destination into a non-empty
     // directory so the final rename(file → dir) fails inside the tx.
-    let ch = nexus_local_db::work_chapters::get_chapter(state.pool(), &work_id, 1, 1)
+    let ch = nexus_local_db::work_chapters::get_chapter(state.pool().unwrap(), &work_id, 1, 1)
         .await
         .expect("get chapter")
         .expect("chapter exists");
@@ -3003,10 +3016,11 @@ async fn manuscript_write_rolls_back_word_count_on_rename_failure() {
     assert_eq!(err.error_code(), "internal");
 
     // W-001: the word-count UPDATE inside the tx must have rolled back.
-    let ch_after = nexus_local_db::work_chapters::get_chapter(state.pool(), &work_id, 1, 1)
-        .await
-        .expect("get chapter")
-        .expect("chapter exists");
+    let ch_after =
+        nexus_local_db::work_chapters::get_chapter(state.pool().unwrap(), &work_id, 1, 1)
+            .await
+            .expect("get chapter")
+            .expect("chapter exists");
     assert_eq!(
         ch_after.actual_word_count, word_count_before,
         "word_count must be unchanged after the rolled-back rename"
@@ -3041,7 +3055,7 @@ async fn manuscript_write_rejects_body_path_outside_workspace() {
     )
     .bind(&outside_str)
     .bind(&work_id)
-    .execute(state.pool())
+    .execute(state.pool().unwrap())
     .await
     .expect("rewrite body_path");
 

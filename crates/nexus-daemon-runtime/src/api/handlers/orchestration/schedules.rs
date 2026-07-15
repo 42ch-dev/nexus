@@ -172,7 +172,7 @@ pub async fn add_schedule(
 
     // V1.36 P4 (T2): novel-completion guard per novel-workflow-profile §5.2.
     if body.preset_id == "novel-writing" {
-        let pool = state.pool();
+        let pool = state.pool_or_uninit()?;
         let completed_count: i64 = sqlx::query_scalar!(
             "SELECT COUNT(*) AS \"count!\" FROM works \
              WHERE creator_id = ? AND work_profile = 'novel' AND status = 'completed'",
@@ -219,7 +219,7 @@ pub async fn add_schedule(
 
     if body.force_gates {
         // V1.37 (T5/T6): force-gates path — write audit row.
-        let pool = state.pool();
+        let pool = state.pool_or_uninit()?;
         let audit_id = format!("fga_{}", chrono::Utc::now().format("%Y%m%d%H%M%S%3f"));
         let forced_at = chrono::Utc::now().to_rfc3339();
         let work_id = work_id_opt.clone().unwrap_or_else(|| "unknown".to_string());
@@ -339,7 +339,7 @@ pub async fn add_schedule(
                 };
 
                 // Build work snapshot from DB.
-                let pool = state.pool();
+                let pool = state.pool_or_uninit()?;
 
                 // C-2: begin transaction for atomic gate eval + schedule insert.
                 let mut tx = pool.begin().await.map_err(|e| NexusApiError::Internal {

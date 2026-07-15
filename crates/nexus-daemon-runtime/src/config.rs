@@ -105,3 +105,20 @@ pub fn resolve_state_db_path(user_home: &Path, nexus_root: &Path) -> anyhow::Res
         user_home, cid, &slug,
     ))
 }
+
+/// Non-fatal variant of [`resolve_state_db_path`].
+///
+/// Returns `None` when `active_creator_id` is absent, instead of failing
+/// fatally. Used during boot to allow the daemon to start without a creator.
+///
+/// When `active_creator_id` is present, returns `Some(path)` using the same
+/// ADR-014 path rules as the CLI.
+#[must_use]
+pub fn try_resolve_state_db_path(user_home: &Path, nexus_root: &Path) -> Option<PathBuf> {
+    let cfg = CliConfigSnapshot::load(nexus_root).ok()?;
+    let cid = cfg.active_creator_id.as_deref()?;
+    let slug = cfg.workspace_slug_for_creator(cid);
+    Some(nexus_home_layout::workspace_state_db_path(
+        user_home, cid, &slug,
+    ))
+}

@@ -11,6 +11,7 @@
 pub mod manager;
 pub mod session;
 
+use crate::api::errors::NexusApiError;
 use crate::db::pool::{DbPool, PoolConfig};
 use crate::db::SqliteNarrativeGateway;
 use crate::lifecycle::{Lifecycle, LifecycleState, StatigLifecycle};
@@ -23,7 +24,7 @@ use nexus_orchestration::{
     WorkerManager,
 };
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::sync::Mutex as AsyncMutex;
 use tokio::sync::Notify;
@@ -31,9 +32,9 @@ use tokio::sync::Notify;
 /// Shared workspace state
 #[derive(Clone)]
 pub struct WorkspaceState {
-    db: DbPool,
+    db: Option<DbPool>,
     nexus_home: PathBuf,
-    db_path: PathBuf,
+    db_path: Option<PathBuf>,
     started_at: std::time::Instant,
     /// Wall-clock timestamp of when the workspace state was created (daemon start).
     /// Used for reporting `started_at` in the daemon status API.
@@ -60,7 +61,8 @@ pub struct WorkspaceState {
     /// Agent host configuration loaded at boot from `agent-host/config.toml`.
     agent_host_config: Arc<AgentHostConfig>,
     /// Narrative gateway — shared per workspace pool, constructed once at boot.
-    narrative_gateway: Arc<SqliteNarrativeGateway>,
+    /// `None` when no creator DB is open (boot before Profile attach).
+    narrative_gateway: Option<Arc<SqliteNarrativeGateway>>,
     /// Shutdown notification — fired when the daemon enters Stopping state.
     /// Consumers (HTTP server, engine drainer) await this to initiate graceful shutdown.
     shutdown_notify: Arc<Notify>,
@@ -69,7 +71,8 @@ pub struct WorkspaceState {
     daemon_tool_dispatch: Arc<Option<Arc<dyn nexus_orchestration::capability::DaemonToolDispatch>>>,
     /// Workspace session manager (DF-31 skeleton).
     /// In-memory session store for workspace.open / workspace.commit.
-    session_manager: Arc<WorkspaceSessionManager>,
+    /// `None` when no creator DB is open (boot before Profile attach).
+    session_manager: Option<Arc<WorkspaceSessionManager>>,
     /// V1.80 REL-01: per-creator in-flight serialization guard for
     /// `POST /v1/daemon/memory/review`. Two overlapping review calls for the same
     /// creator fetch the same pending rows and would double-promote / mint
@@ -111,9 +114,9 @@ impl WorkspaceState {
         let narrative_gateway = Arc::new(SqliteNarrativeGateway::new(db.pool().clone()));
         let session_manager = Arc::new(WorkspaceSessionManager::new(Arc::new(db.pool().clone())));
         Self {
-            db,
+            db: Some(db),
             nexus_home,
-            db_path,
+            db_path: Some(db_path),
             started_at: std::time::Instant::now(),
             started_at_wall: chrono::Utc::now(),
             workspace_path: Arc::new(std::sync::Mutex::new(workspace_path)),
@@ -125,30 +128,36 @@ impl WorkspaceState {
             schedule_supervisor: Arc::new(None),
             agent_host: Arc::new(None),
             agent_host_config: Arc::new(AgentHostConfig::default()),
-            narrative_gateway,
+            narrative_gateway: Some(narrative_gateway),
             shutdown_notify: Arc::new(Notify::new()),
             daemon_tool_dispatch: Arc::new(None),
-            session_manager,
+            session_manager: Some(session_manager),
             memory_review_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
             tls_fingerprint: Arc::new(None),
         }
     }
 
-    /// Initialize workspace state — create nexus home and `SQLite` database.
+    /// Initialize workspace state — create nexus home and optionally open `SQLite` database.
+    ///
+    /// Creates the `~/.nexus42/` system layout and config skeleton on every boot.
+    /// The creator `state.db` is opened lazily **only when** `active_creator_id` is
+    /// present in config, via [`ensure_creator_pool`]. This allows the daemon to
+    /// boot without a Profile selected (AC-P0-1, AC-P0-6).
     ///
     /// # Errors
     ///
     /// Returns an error if:
     /// - Home directory cannot be determined
-    /// - Directory creation fails
+    /// - System directory creation fails
     /// - CLI config cannot be read
-    /// - Database schema initialization fails
     pub async fn initialize() -> anyhow::Result<Self> {
         let user_home =
             dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
 
         let nexus_home = user_home.join(".nexus42");
-        std::fs::create_dir_all(&nexus_home)?;
+
+        // Create system layout and config skeleton (AC-P0-6).
+        nexus_home_layout::ensure_system_layout(&nexus_home)?;
 
         // Read runtime mode from CLI config
         let cli_snapshot = crate::config::CliConfigSnapshot::load(&nexus_home)?;
@@ -167,26 +176,24 @@ impl WorkspaceState {
             );
         }
 
-        let db_path = crate::config::resolve_state_db_path(&user_home, &nexus_home)?;
+        // Try to open creator DB — non-fatal if no active creator (AC-P0-1).
+        let (db, db_path, narrative_gateway, session_manager) =
+            Self::try_open_creator_db(&user_home, &nexus_home).await;
 
-        if let Some(parent) = db_path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-
-        // Initialize schema and create connection pool via nexus_local_db
-        crate::db::schema::Schema::init(&db_path).await?;
-        let db = DbPool::new(&db_path, PoolConfig::from_env()).await?;
-
-        let narrative_gateway = Arc::new(SqliteNarrativeGateway::new(db.pool().clone()));
-
-        tracing::info!("Workspace state.db at {:?}", db_path);
-
-        let session_manager = Arc::new(WorkspaceSessionManager::new(Arc::new(db.pool().clone())));
         let agent_host_config =
             nexus_agent_host::config::load_config(&nexus_home).unwrap_or_else(|e| {
                 tracing::warn!(error = %e, "failed to load agent host config; using defaults");
                 AgentHostConfig::default()
             });
+
+        if db.is_some() {
+            tracing::info!("Workspace state.db at {:?}", db_path);
+        } else {
+            tracing::info!(
+                "No active creator — creator state.db deferred (lazy-open on Profile attach)"
+            );
+        }
+
         Ok(Self {
             db,
             nexus_home,
@@ -211,6 +218,91 @@ impl WorkspaceState {
             memory_review_locks: Arc::new(std::sync::Mutex::new(HashMap::new())),
             tls_fingerprint: Arc::new(None),
         })
+    }
+
+    /// Try to open the creator DB if `active_creator_id` is present in config.
+    ///
+    /// Returns `(None, None, None, None)` when no creator is active — the
+    /// daemon can boot without a creator DB (T0/T1 tier).
+    async fn try_open_creator_db(
+        user_home: &Path,
+        nexus_home: &Path,
+    ) -> (
+        Option<DbPool>,
+        Option<PathBuf>,
+        Option<Arc<SqliteNarrativeGateway>>,
+        Option<Arc<WorkspaceSessionManager>>,
+    ) {
+        let Some(db_path) = crate::config::try_resolve_state_db_path(user_home, nexus_home) else {
+            return (None, None, None, None);
+        };
+
+        if let Some(parent) = db_path.parent() {
+            if let Err(e) = std::fs::create_dir_all(parent) {
+                tracing::warn!(
+                    path = %parent.display(),
+                    error = %e,
+                    "failed to create creator DB parent directory"
+                );
+                return (None, None, None, None);
+            }
+        }
+
+        // Initialize schema and create connection pool (same pattern as original initialize)
+        if let Err(e) = crate::db::schema::Schema::init(&db_path).await {
+            tracing::warn!(error = %e, "failed to init creator schema; deferring DB open");
+            return (None, None, None, None);
+        }
+        let db = match DbPool::new(&db_path, PoolConfig::from_env()).await {
+            Ok(pool) => pool,
+            Err(e) => {
+                tracing::warn!(error = %e, "failed to create DbPool; deferring DB open");
+                return (None, None, None, None);
+            }
+        };
+
+        let narrative_gateway = Arc::new(SqliteNarrativeGateway::new(db.pool().clone()));
+        let session_manager = Arc::new(WorkspaceSessionManager::new(Arc::new(db.pool().clone())));
+        (
+            Some(db),
+            Some(db_path),
+            Some(narrative_gateway),
+            Some(session_manager),
+        )
+    }
+
+    /// Lazily open the creator DB pool if not already open.
+    ///
+    /// Called on Profile attach (`set_active_creator`) or when a Tier-2 handler
+    /// finds `active_creator_id` in config. Idempotent: no-ops if pool already
+    /// open for the same creator.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the creator DB path cannot be resolved, schema init
+    /// fails, or pool creation fails.
+    pub async fn ensure_creator_pool(&mut self) -> anyhow::Result<()> {
+        if self.db.is_some() {
+            return Ok(()); // already open
+        }
+
+        let user_home =
+            dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
+        let (db, db_path, narrative_gateway, session_manager) =
+            Self::try_open_creator_db(&user_home, &self.nexus_home).await;
+
+        match (db, db_path, narrative_gateway, session_manager) {
+            (Some(db), Some(db_path), Some(narrative_gateway), Some(session_manager)) => {
+                self.db = Some(db);
+                self.db_path = Some(db_path);
+                self.narrative_gateway = Some(narrative_gateway);
+                self.session_manager = Some(session_manager);
+                Ok(())
+            }
+            _ => Err(anyhow::anyhow!(
+                "Failed to open creator database — no active creator or path resolution failed"
+            )),
+        }
     }
 
     /// Set the TLS certificate fingerprint for remote binds.
@@ -309,9 +401,10 @@ impl WorkspaceState {
     }
 
     /// Get the narrative gateway (shared per workspace pool).
+    /// Returns `None` when no creator DB is open (boot before Profile attach).
     #[must_use]
-    pub fn narrative_gateway(&self) -> Arc<SqliteNarrativeGateway> {
-        Arc::clone(&self.narrative_gateway)
+    pub fn narrative_gateway(&self) -> Option<Arc<SqliteNarrativeGateway>> {
+        self.narrative_gateway.clone()
     }
 
     /// Get the orchestration engine, if set.
@@ -378,10 +471,22 @@ impl WorkspaceState {
             .and_then(|lc| lc.exit_code())
     }
 
-    /// Get a reference to the underlying sqlx pool.
+    /// Get a reference to the underlying sqlx pool, if open.
+    /// Returns `None` when no creator DB is open (boot before Profile attach).
     #[must_use]
-    pub const fn pool(&self) -> &sqlx::SqlitePool {
-        self.db.pool()
+    pub fn pool(&self) -> Option<&sqlx::SqlitePool> {
+        self.db.as_ref().map(DbPool::pool)
+    }
+
+    /// Get the pool or return `Uninitialized` error.
+    /// Convenience for Tier-2 handlers that require an active creator.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`NexusApiError::Uninitialized`] when no creator DB pool is open
+    /// (daemon booted without an active creator and no attach has occurred).
+    pub fn pool_or_uninit(&self) -> Result<&sqlx::SqlitePool, NexusApiError> {
+        self.pool().ok_or(NexusApiError::Uninitialized)
     }
 
     /// Check if workspace is initialized.
@@ -409,9 +514,10 @@ impl WorkspaceState {
     }
 
     /// Get database path.
+    /// Returns `None` when no creator DB is open (boot before Profile attach).
     #[must_use]
-    pub fn database_path(&self) -> String {
-        self.db_path.display().to_string()
+    pub fn database_path(&self) -> Option<String> {
+        self.db_path.as_ref().map(|p| p.display().to_string())
     }
 
     /// Get nexus home directory.
@@ -421,8 +527,9 @@ impl WorkspaceState {
     }
 
     /// Get a clone of the database pool (for `TokenManager`, etc.)
+    /// Returns `None` when no creator DB is open (boot before Profile attach).
     #[must_use]
-    pub fn db_pool(&self) -> DbPool {
+    pub fn db_pool(&self) -> Option<DbPool> {
         self.db.clone()
     }
 
@@ -439,9 +546,10 @@ impl WorkspaceState {
     }
 
     /// Workspace session manager (DF-31 skeleton).
+    /// Returns `None` when no creator DB is open (boot before Profile attach).
     #[must_use]
-    pub fn session_manager(&self) -> Arc<WorkspaceSessionManager> {
-        Arc::clone(&self.session_manager)
+    pub fn session_manager(&self) -> Option<Arc<WorkspaceSessionManager>> {
+        self.session_manager.clone()
     }
 
     /// Current runtime mode (from CLI config at startup).
@@ -463,7 +571,11 @@ impl WorkspaceState {
     /// Returns an error if:
     /// - Directory creation fails
     /// - Database write fails
+    /// - No creator DB is open (`init_workspace` requires an active creator)
     pub async fn init_workspace(&self, path: &str) -> anyhow::Result<()> {
+        let pool = self.pool().ok_or_else(|| {
+            anyhow::anyhow!("Cannot initialize workspace: no active creator database")
+        })?;
         let workspace_dir = std::path::Path::new(path);
         let nexus_dir = workspace_dir.join(".nexus42");
 
@@ -476,7 +588,7 @@ impl WorkspaceState {
             "INSERT OR REPLACE INTO workspace_meta (key, value) VALUES ('workspace_path', ?)",
         )
         .bind(path)
-        .execute(self.pool())
+        .execute(pool)
         .await
         .map_err(|e| anyhow::anyhow!("Database error: {e}"))?;
 

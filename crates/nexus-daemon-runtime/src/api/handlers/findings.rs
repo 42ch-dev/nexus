@@ -246,7 +246,7 @@ pub async fn create_finding_handler(
         created_at: now,
         updated_at: now,
     };
-    findings::create_finding(state.pool(), &f).await?;
+    findings::create_finding(state.pool_or_uninit()?, &f).await?;
     Ok((StatusCode::CREATED, Json(f.into())))
 }
 
@@ -284,7 +284,7 @@ pub async fn list_findings_handler(
         limit: Some(fetch_limit),
         offset: Some(offset),
     };
-    let mut rows = findings::list_findings(state.pool(), &creator_id, &filters)
+    let mut rows = findings::list_findings(state.pool_or_uninit()?, &creator_id, &filters)
         .await
         .map_err(|err| match err {
             nexus_local_db::LocalDbError::InvalidEnum {
@@ -332,10 +332,10 @@ pub async fn get_finding_handler(
     let creator_id =
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
     // Verify work_id ownership
-    let _work = works::get_work(state.pool(), &creator_id, &work_id)
+    let _work = works::get_work(state.pool_or_uninit()?, &creator_id, &work_id)
         .await?
         .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
-    let f = findings::get_finding(state.pool(), &creator_id, &finding_id)
+    let f = findings::get_finding(state.pool_or_uninit()?, &creator_id, &finding_id)
         .await?
         .ok_or_else(|| NexusApiError::NotFound(format!("finding {finding_id}")))?;
     Ok(Json(f.into()))
@@ -353,7 +353,7 @@ pub async fn get_finding_creator_scoped_handler(
 ) -> Result<Json<FindingApiDto>, NexusApiError> {
     let creator_id =
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-    let f = findings::get_finding(state.pool(), &creator_id, &finding_id)
+    let f = findings::get_finding(state.pool_or_uninit()?, &creator_id, &finding_id)
         .await?
         .ok_or_else(|| NexusApiError::NotFound(format!("finding {finding_id}")))?;
     Ok(Json(f.into()))
@@ -384,7 +384,7 @@ pub async fn update_finding_handler(
 ) -> Result<Json<FindingApiDto>, NexusApiError> {
     let creator_id =
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-    let _work = works::get_work(state.pool(), &creator_id, &work_id)
+    let _work = works::get_work(state.pool_or_uninit()?, &creator_id, &work_id)
         .await?
         .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
     let patch = FindingPatch {
@@ -397,54 +397,60 @@ pub async fn update_finding_handler(
         rule_suggestion: body.rule_suggestion,
     };
     let now = chrono::Utc::now().timestamp();
-    let updated = findings::update_finding(state.pool(), &creator_id, &finding_id, &patch, now)
-        .await
-        .map_err(|err| match err {
-            // V1.49 P0 W-1: the DAO now emits typed variants for the PATCH
-            // surface. `IllegalTransition` → INVALID_TRANSITION (422);
-            // `InvalidEnum` → INVALID_INPUT (422). Both are observed with a
-            // structured `tracing::warn!` (qc3 S-2) so repeated illegal PATCH
-            // attempts leave a daemon-side trail. No string-sniffing: each
-            // variant carries its own structured payload.
-            nexus_local_db::LocalDbError::IllegalTransition { from, to } => {
-                tracing::warn!(
-                    creator_id = %creator_id,
-                    finding_id = %finding_id,
-                    from = %from,
-                    to = %to,
-                    "findings PATCH: illegal lifecycle transition"
-                );
-                NexusApiError::BadRequest {
-                    code: "invalid_transition".to_string(),
-                    message: format!("invalid status transition '{from}' → '{to}'"),
-                }
+    let updated = findings::update_finding(
+        state.pool_or_uninit()?,
+        &creator_id,
+        &finding_id,
+        &patch,
+        now,
+    )
+    .await
+    .map_err(|err| match err {
+        // V1.49 P0 W-1: the DAO now emits typed variants for the PATCH
+        // surface. `IllegalTransition` → INVALID_TRANSITION (422);
+        // `InvalidEnum` → INVALID_INPUT (422). Both are observed with a
+        // structured `tracing::warn!` (qc3 S-2) so repeated illegal PATCH
+        // attempts leave a daemon-side trail. No string-sniffing: each
+        // variant carries its own structured payload.
+        nexus_local_db::LocalDbError::IllegalTransition { from, to } => {
+            tracing::warn!(
+                creator_id = %creator_id,
+                finding_id = %finding_id,
+                from = %from,
+                to = %to,
+                "findings PATCH: illegal lifecycle transition"
+            );
+            NexusApiError::BadRequest {
+                code: "invalid_transition".to_string(),
+                message: format!("invalid status transition '{from}' → '{to}'"),
             }
-            nexus_local_db::LocalDbError::InvalidEnum {
-                field,
-                value,
-                allowed,
-            } => {
-                tracing::warn!(
-                    creator_id = %creator_id,
-                    finding_id = %finding_id,
-                    field = %field,
-                    value = %value,
-                    "findings PATCH: invalid enum value"
-                );
-                NexusApiError::BadRequest {
-                    code: "invalid_input".to_string(),
-                    message: format!(
-                        "invalid {field} value '{value}'; allowed: {}",
-                        allowed.join(", ")
-                    ),
-                }
+        }
+        nexus_local_db::LocalDbError::InvalidEnum {
+            field,
+            value,
+            allowed,
+        } => {
+            tracing::warn!(
+                creator_id = %creator_id,
+                finding_id = %finding_id,
+                field = %field,
+                value = %value,
+                "findings PATCH: invalid enum value"
+            );
+            NexusApiError::BadRequest {
+                code: "invalid_input".to_string(),
+                message: format!(
+                    "invalid {field} value '{value}'; allowed: {}",
+                    allowed.join(", ")
+                ),
             }
-            other => other.into(),
-        })?;
+        }
+        other => other.into(),
+    })?;
     if !updated {
         return Err(NexusApiError::NotFound(format!("finding {finding_id}")));
     }
-    let f = findings::get_finding(state.pool(), &creator_id, &finding_id)
+    let f = findings::get_finding(state.pool_or_uninit()?, &creator_id, &finding_id)
         .await?
         .expect("finding must exist after successful update");
     Ok(Json(f.into()))
@@ -529,8 +535,14 @@ pub async fn batch_update_findings_handler(
     let mut conflict: Vec<String> = Vec::new();
 
     for finding_id in &body.finding_ids {
-        match findings::update_finding(state.pool(), &creator_id, finding_id, &finding_patch, now)
-            .await
+        match findings::update_finding(
+            state.pool_or_uninit()?,
+            &creator_id,
+            finding_id,
+            &finding_patch,
+            now,
+        )
+        .await
         {
             Ok(true) => updated += 1,
             Ok(false) => not_found.push(finding_id.clone()),
@@ -606,10 +618,11 @@ pub async fn delete_finding_handler(
 ) -> Result<StatusCode, NexusApiError> {
     let creator_id =
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
-    let _work = works::get_work(state.pool(), &creator_id, &work_id)
+    let _work = works::get_work(state.pool_or_uninit()?, &creator_id, &work_id)
         .await?
         .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
-    let deleted = findings::delete_finding(state.pool(), &creator_id, &finding_id).await?;
+    let deleted =
+        findings::delete_finding(state.pool_or_uninit()?, &creator_id, &finding_id).await?;
     if deleted {
         Ok(StatusCode::NO_CONTENT)
     } else {
@@ -634,7 +647,7 @@ pub async fn create_from_review_handler(
     let creator_id =
         read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::AuthRequired)?;
     // Verify work ownership
-    let _work = works::get_work(state.pool(), &creator_id, &work_id)
+    let _work = works::get_work(state.pool_or_uninit()?, &creator_id, &work_id)
         .await?
         .ok_or_else(|| NexusApiError::NotFound(format!("work {work_id}")))?;
 
@@ -651,7 +664,7 @@ pub async fn create_from_review_handler(
         // Manual API path — no originating schedule; no idempotency guard.
         source_schedule_id: None,
     };
-    let finding_id = findings::create_finding_from_review(state.pool(), &verdict)
+    let finding_id = findings::create_finding_from_review(state.pool_or_uninit()?, &verdict)
         .await
         .map_err(|e| {
             // R-V139P1-W-6: explicitly log from-review hook errors for production debugging.
@@ -665,7 +678,7 @@ pub async fn create_from_review_handler(
                 message: e.to_string(),
             }
         })?;
-    let f = findings::get_finding(state.pool(), &creator_id, &finding_id)
+    let f = findings::get_finding(state.pool_or_uninit()?, &creator_id, &finding_id)
         .await?
         .expect("finding must exist after creation");
     Ok((StatusCode::CREATED, Json(f.into())))
@@ -725,7 +738,7 @@ pub async fn list_stale_findings_handler(
     let now_epoch = chrono::Utc::now().timestamp();
 
     let rows = nexus_local_db::findings::list_stale_open_findings(
-        state.pool(),
+        state.pool_or_uninit()?,
         &creator_id,
         now_epoch,
         threshold_seconds,
@@ -809,7 +822,7 @@ pub async fn prune_findings_handler(
 
     let count: u64 = if dry_run {
         let n = findings::count_resolved_findings_older_than(
-            state.pool(),
+            state.pool_or_uninit()?,
             now_epoch,
             retention_seconds,
         )
@@ -818,7 +831,7 @@ pub async fn prune_findings_handler(
     } else {
         u64::from(
             findings::prune_resolved_findings_older_than(
-                state.pool(),
+                state.pool_or_uninit()?,
                 now_epoch,
                 retention_seconds,
             )

@@ -82,7 +82,7 @@ async fn seed_work(state: &WorkspaceState) -> String {
         novel_completion_status: None,
         lineage_from_work_id: None,
     };
-    works::create_work_atomic(state.pool(), &record, None)
+    works::create_work_atomic(state.pool().unwrap(), &record, None)
         .await
         .unwrap()
         .unwrap_err(); // Returns new record in Err
@@ -432,7 +432,8 @@ async fn audit_log_written_on_success() {
     let req = make_request("nexus.context.whoami", json!({}));
     let _ = HostToolExecutor::execute(&req, &ctx.state).await;
 
-    let count = count_audit_rows(ctx.state.pool(), "nexus.context.whoami", "success").await;
+    let count =
+        count_audit_rows(ctx.state.pool().unwrap(), "nexus.context.whoami", "success").await;
     assert_eq!(count, 1, "Audit log must record success");
 }
 
@@ -442,7 +443,7 @@ async fn audit_log_written_on_unknown_tool_denial() {
     let req = make_request("nexus.unknown.tool", json!({}));
     let _ = HostToolExecutor::execute(&req, &ctx.state).await;
 
-    let outcome = latest_audit_outcome(ctx.state.pool(), "nexus.unknown.tool").await;
+    let outcome = latest_audit_outcome(ctx.state.pool().unwrap(), "nexus.unknown.tool").await;
     assert!(
         outcome.starts_with("denied:"),
         "Audit log must record denial, got: {outcome}"
@@ -462,7 +463,7 @@ async fn audit_log_written_on_cross_creator_denial() {
     let req = make_request("nexus.work.get", json!({ "work_id": work_id }));
     let _ = HostToolExecutor::execute(&req, &other_ctx.state).await;
 
-    let count = count_audit_rows(other_ctx.state.pool(), "nexus.work.get", "denied").await;
+    let count = count_audit_rows(other_ctx.state.pool().unwrap(), "nexus.work.get", "denied").await;
     assert_eq!(count, 1, "Audit log must record cross-creator denial");
 }
 
@@ -475,7 +476,7 @@ async fn audit_log_written_on_policy_blocked() {
     );
     let _ = HostToolExecutor::execute(&req, &ctx.state).await;
 
-    let outcome = latest_audit_outcome(ctx.state.pool(), "nexus.context.assemble").await;
+    let outcome = latest_audit_outcome(ctx.state.pool().unwrap(), "nexus.context.assemble").await;
     assert!(
         outcome.contains("denied:"),
         "Audit must record denial, got: {outcome}"
@@ -488,7 +489,7 @@ async fn audit_log_written_on_invalid_input() {
     let req = make_request("nexus.work.get", json!({}));
     let _ = HostToolExecutor::execute(&req, &ctx.state).await;
 
-    let count = count_audit_rows(ctx.state.pool(), "nexus.work.get", "denied").await;
+    let count = count_audit_rows(ctx.state.pool().unwrap(), "nexus.work.get", "denied").await;
     assert_eq!(count, 1, "Audit log must record invalid input denial");
 }
 

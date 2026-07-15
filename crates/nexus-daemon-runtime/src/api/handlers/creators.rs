@@ -365,7 +365,7 @@ pub async fn list(
         CreatorInfo,
         r#"SELECT creator_id as "creator_id!", display_name, status, cached_at FROM creators ORDER BY cached_at DESC"#
     )
-    .fetch_all(state.pool())
+    .fetch_all(state.pool_or_uninit()?)
     .await
     .map_err(|e| NexusApiError::Internal {
         code: "DATABASE_ERROR".into(),
@@ -514,7 +514,7 @@ pub async fn patch_creator(
         // Write the display name to the SQL `creators` table so that `list_creators`
         // (used by the footer via useCreators()) reflects the rename as well as
         // the JSON identity cache (QC1-F-001).
-        upsert_creator_display_name(state.pool(), &creator_id, &display_name).await?;
+        upsert_creator_display_name(state.pool_or_uninit()?, &creator_id, &display_name).await?;
         entry_obj.insert(
             "display_name".to_string(),
             serde_json::Value::String(display_name),

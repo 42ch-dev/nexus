@@ -23,7 +23,7 @@ pub async fn info(State(state): State<WorkspaceState>) -> Json<WorkspaceInfo> {
     Json(WorkspaceInfo {
         initialized: state.is_initialized(),
         workspace_path: state.workspace_path(),
-        database_path: state.database_path(),
+        database_path: state.database_path().unwrap_or_default(),
     })
 }
 
@@ -153,7 +153,9 @@ pub async fn open_workspace(
     debug!(?target_path, existed, "Resolved workspace target path");
 
     // Open session (async, DB-backed with content hashes)
-    let session_mgr = state.session_manager();
+    let session_mgr = state
+        .session_manager()
+        .ok_or(NexusApiError::Uninitialized)?;
     let session_id = session_mgr
         .open_session(&workspace_root, &req.path, existed)
         .await
@@ -259,7 +261,9 @@ pub async fn commit_workspace(
         });
     }
 
-    let session_mgr = state.session_manager();
+    let session_mgr = state
+        .session_manager()
+        .ok_or(NexusApiError::Uninitialized)?;
     let session_id = crate::workspace::session::SessionId(req.session_id.clone());
 
     // Get workspace root for path resolution

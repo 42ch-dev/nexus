@@ -73,13 +73,17 @@ pub async fn daemon_status(State(state): State<WorkspaceState>) -> Json<DaemonSt
         _ => LifecycleState::Failed, // "failed" or unknown fallback
     };
 
-    // Build subsystem health from actual workspace state
-    let db_status = match sqlx::query_scalar!("SELECT 1 as \"count!\"")
-        .fetch_one(state.pool())
-        .await
-    {
-        Ok(_) => HealthStatus::Up,
-        Err(_) => HealthStatus::Down,
+    // Build subsystem health from actual workspace state.
+    // When no creator DB is open (pre-attach boot), DB is reported as Down.
+    let db_status = match state.pool() {
+        Some(pool) => match sqlx::query_scalar!("SELECT 1 as \"count!\"")
+            .fetch_one(pool)
+            .await
+        {
+            Ok(_) => HealthStatus::Up,
+            Err(_) => HealthStatus::Down,
+        },
+        None => HealthStatus::Down,
     };
 
     let make_entry = |status: HealthStatus| SubsystemHealthEntry {
@@ -192,13 +196,18 @@ pub async fn cert_fingerprint(
 }
 
 /// Gather ACP status information from the database.
+///
+/// When no creator DB is open (pre-attach boot), returns the default
+/// `AcpStatusInfo` with zeroed counts.
 async fn gather_acp_status(state: &WorkspaceState) -> AcpStatusInfo {
     let mut status = AcpStatusInfo {
         tool_execution_enabled: true,
         ..Default::default()
     };
 
-    let pool = state.pool();
+    let Some(pool) = state.pool() else {
+        return status;
+    };
 
     // Count active sessions
     if let Ok(row) = sqlx::query_scalar!("SELECT COUNT(*) as \"count!\" FROM acp_sessions")

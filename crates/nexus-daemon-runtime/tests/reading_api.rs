@@ -30,7 +30,7 @@ async fn handler_state() -> (WorkspaceState, TestTempRoot) {
         Some(workspace_dir.to_string_lossy().to_string()),
     )
     .await;
-    test_utils::seed_test_creator_and_world(state.pool()).await;
+    test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
     (state, tmp)
 }
 
@@ -377,7 +377,7 @@ async fn annotation_cross_creator_returns_403() {
         "UPDATE reading_annotations SET creator_id = 'other_creator' WHERE annotation_id = ?1",
     )
     .bind(&created.annotation_id)
-    .execute(state.pool())
+    .execute(state.pool().unwrap())
     .await
     .expect("reassign creator");
 

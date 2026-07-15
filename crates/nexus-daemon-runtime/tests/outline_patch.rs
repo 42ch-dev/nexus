@@ -39,7 +39,7 @@ async fn test_ctx() -> TestCtx {
         Some(workspace_dir.to_string_lossy().to_string()),
     )
     .await;
-    test_utils::seed_test_creator_and_world(state.pool()).await;
+    test_utils::seed_test_creator_and_world(state.pool().unwrap()).await;
     TestCtx { _tmp: tmp, state }
 }
 
@@ -152,7 +152,7 @@ async fn setup_work(state: &WorkspaceState) -> String {
 async fn b1_valid_kebab_slug_passes() {
     let ctx = test_ctx().await;
     let work_id = setup_work(&ctx.state).await;
-    seed_chapter(ctx.state.pool(), &work_id, 1).await;
+    seed_chapter(ctx.state.pool().unwrap(), &work_id, 1).await;
 
     let req = json!({
         "work_id": work_id,
@@ -174,7 +174,7 @@ async fn b1_valid_kebab_slug_passes() {
 async fn b1_rejects_uppercase_slug() {
     let ctx = test_ctx().await;
     let work_id = setup_work(&ctx.state).await;
-    seed_chapter(ctx.state.pool(), &work_id, 1).await;
+    seed_chapter(ctx.state.pool().unwrap(), &work_id, 1).await;
 
     let req = json!({
         "work_id": work_id,
@@ -198,7 +198,7 @@ async fn b1_rejects_uppercase_slug() {
 async fn b1_rejects_slug_with_spaces() {
     let ctx = test_ctx().await;
     let work_id = setup_work(&ctx.state).await;
-    seed_chapter(ctx.state.pool(), &work_id, 1).await;
+    seed_chapter(ctx.state.pool().unwrap(), &work_id, 1).await;
 
     let req = json!({
         "work_id": work_id,
@@ -220,7 +220,7 @@ async fn b1_rejects_slug_with_spaces() {
 async fn b1_rejects_slug_that_is_too_long() {
     let ctx = test_ctx().await;
     let work_id = setup_work(&ctx.state).await;
-    seed_chapter(ctx.state.pool(), &work_id, 1).await;
+    seed_chapter(ctx.state.pool().unwrap(), &work_id, 1).await;
 
     // 81 chars — one beyond the 80-char ceiling.
     let long_slug = "a".repeat(81);
@@ -244,8 +244,8 @@ async fn b1_rejects_slug_that_is_too_long() {
 async fn b1_rejects_duplicate_slug_within_work() {
     let ctx = test_ctx().await;
     let work_id = setup_work(&ctx.state).await;
-    seed_chapter(ctx.state.pool(), &work_id, 1).await; // slug "ch01"
-    seed_chapter(ctx.state.pool(), &work_id, 2).await; // slug "ch02"
+    seed_chapter(ctx.state.pool().unwrap(), &work_id, 1).await; // slug "ch01"
+    seed_chapter(ctx.state.pool().unwrap(), &work_id, 2).await; // slug "ch02"
 
     // Patching chapter 2's slug to chapter 1's slug collides.
     let req = json!({
@@ -269,7 +269,7 @@ async fn b1_allows_unchanged_slug_on_same_chapter() {
     // Re-asserting a chapter's own slug must not trip the uniqueness check.
     let ctx = test_ctx().await;
     let work_id = setup_work(&ctx.state).await;
-    seed_chapter(ctx.state.pool(), &work_id, 1).await; // slug "ch01"
+    seed_chapter(ctx.state.pool().unwrap(), &work_id, 1).await; // slug "ch01"
 
     let req = json!({
         "work_id": work_id,
@@ -293,7 +293,7 @@ async fn b1_allows_unchanged_slug_on_same_chapter() {
 async fn b2_attach_to_existing_volume_passes() {
     let ctx = test_ctx().await;
     let work_id = setup_work(&ctx.state).await;
-    seed_chapter(ctx.state.pool(), &work_id, 1).await; // lands in default Volume 1
+    seed_chapter(ctx.state.pool().unwrap(), &work_id, 1).await; // lands in default Volume 1
 
     let req = json!({
         "work_id": work_id,
@@ -317,7 +317,7 @@ async fn b2_move_to_next_sequential_volume_passes() {
     // The legitimate "create Volume N+1" authoring flow must keep working.
     let ctx = test_ctx().await;
     let work_id = setup_work(&ctx.state).await;
-    seed_chapter(ctx.state.pool(), &work_id, 1).await; // Volume 1 exists (max=1)
+    seed_chapter(ctx.state.pool().unwrap(), &work_id, 1).await; // Volume 1 exists (max=1)
 
     let req = json!({
         "work_id": work_id,
@@ -340,7 +340,7 @@ async fn b2_move_to_next_sequential_volume_passes() {
 async fn b2_rejects_arbitrary_nonexistent_volume_via_structure_patch() {
     let ctx = test_ctx().await;
     let work_id = setup_work(&ctx.state).await;
-    seed_chapter(ctx.state.pool(), &work_id, 1).await; // max volume = 1
+    seed_chapter(ctx.state.pool().unwrap(), &work_id, 1).await; // max volume = 1
 
     // 999 is far beyond max+1 → a typo, not an explicit author action.
     let req = json!({
@@ -365,7 +365,7 @@ async fn b2_rejects_arbitrary_nonexistent_volume_via_structure_patch() {
 async fn b2_rejects_arbitrary_nonexistent_volume_via_chapter_patch() {
     let ctx = test_ctx().await;
     let work_id = setup_work(&ctx.state).await;
-    seed_chapter(ctx.state.pool(), &work_id, 1).await; // max volume = 1
+    seed_chapter(ctx.state.pool().unwrap(), &work_id, 1).await; // max volume = 1
 
     let req = json!({
         "work_id": work_id,
@@ -409,8 +409,8 @@ async fn timeline_patch(
 async fn b3_foreshadow_source_before_target_passes() {
     let ctx = test_ctx().await;
     let work_id = setup_work(&ctx.state).await;
-    seed_chapter(ctx.state.pool(), &work_id, 1).await;
-    seed_chapter(ctx.state.pool(), &work_id, 3).await;
+    seed_chapter(ctx.state.pool().unwrap(), &work_id, 1).await;
+    seed_chapter(ctx.state.pool().unwrap(), &work_id, 3).await;
 
     // Source event realizes ch1; target event realizes ch3 (1 <= 3) → ok.
     let rev = timeline_patch(
@@ -453,8 +453,8 @@ async fn b3_foreshadow_source_before_target_passes() {
 async fn b3_rejects_foreshadow_source_after_target() {
     let ctx = test_ctx().await;
     let work_id = setup_work(&ctx.state).await;
-    seed_chapter(ctx.state.pool(), &work_id, 1).await;
-    seed_chapter(ctx.state.pool(), &work_id, 3).await;
+    seed_chapter(ctx.state.pool().unwrap(), &work_id, 1).await;
+    seed_chapter(ctx.state.pool().unwrap(), &work_id, 3).await;
 
     // Source realizes ch3; target realizes ch1 (3 > 1) → temporal violation.
     let rev = timeline_patch(
@@ -496,7 +496,7 @@ async fn b3_rejects_foreshadow_source_after_target() {
 async fn b3_rejects_foreshadow_when_realization_unscheduled() {
     let ctx = test_ctx().await;
     let work_id = setup_work(&ctx.state).await;
-    seed_chapter(ctx.state.pool(), &work_id, 1).await;
+    seed_chapter(ctx.state.pool().unwrap(), &work_id, 1).await;
 
     // Source event has no realizing chapter → ordering cannot be established.
     let rev = timeline_patch(
@@ -552,8 +552,8 @@ async fn event_id_at(state: &WorkspaceState, work_id: &str, index: usize) -> Str
 async fn b4_blocks_move_chapter_on_published_chapter() {
     let ctx = test_ctx().await;
     let work_id = setup_work(&ctx.state).await;
-    seed_chapter(ctx.state.pool(), &work_id, 1).await;
-    force_chapter_status(ctx.state.pool(), &work_id, 1, "published").await;
+    seed_chapter(ctx.state.pool().unwrap(), &work_id, 1).await;
+    force_chapter_status(ctx.state.pool().unwrap(), &work_id, 1, "published").await;
 
     let req = json!({
         "work_id": work_id,
@@ -578,8 +578,8 @@ async fn b4_allows_move_chapter_on_draft_chapter() {
     // Non-published chapters are unaffected by the structural guard.
     let ctx = test_ctx().await;
     let work_id = setup_work(&ctx.state).await;
-    seed_chapter(ctx.state.pool(), &work_id, 1).await;
-    force_chapter_status(ctx.state.pool(), &work_id, 1, "draft").await;
+    seed_chapter(ctx.state.pool().unwrap(), &work_id, 1).await;
+    force_chapter_status(ctx.state.pool().unwrap(), &work_id, 1, "draft").await;
 
     let req = json!({
         "work_id": work_id,
@@ -644,14 +644,21 @@ async fn chapter_row(
 async fn v175_content_patch_writes_outline_path_and_bumps_revision() {
     let ctx = test_ctx().await;
     let work_id = setup_work(&ctx.state).await;
-    seed_chapter(ctx.state.pool(), &work_id, 1).await;
+    seed_chapter(ctx.state.pool().unwrap(), &work_id, 1).await;
 
     // Seed an existing outline_path so we patch a pre-existing file.
     let now = chrono::Utc::now().to_rfc3339();
     let rel_outline = "Works/outline-hardening-novel/Outlines/chapters/ch01-outline.md";
-    work_chapters::update_outline_path(ctx.state.pool(), &work_id, 1, 1, Some(rel_outline), &now)
-        .await
-        .expect("set outline_path");
+    work_chapters::update_outline_path(
+        ctx.state.pool().unwrap(),
+        &work_id,
+        1,
+        1,
+        Some(rel_outline),
+        &now,
+    )
+    .await
+    .expect("set outline_path");
     let ws_root = std::path::PathBuf::from(ctx.state.workspace_path().expect("workspace path set"));
     let outline_abs = ws_root.join(rel_outline);
     tokio::fs::create_dir_all(outline_abs.parent().unwrap())
@@ -691,8 +698,8 @@ async fn v175_content_patch_writes_outline_path_and_bumps_revision() {
 async fn v175_content_patch_blocked_on_published_chapter() {
     let ctx = test_ctx().await;
     let work_id = setup_work(&ctx.state).await;
-    seed_chapter(ctx.state.pool(), &work_id, 1).await;
-    force_chapter_status(ctx.state.pool(), &work_id, 1, "published").await;
+    seed_chapter(ctx.state.pool().unwrap(), &work_id, 1).await;
+    force_chapter_status(ctx.state.pool().unwrap(), &work_id, 1, "published").await;
 
     // The V1.75 published-chapter guard was extended to cover the new `content`
     // field — a published chapter's outline prose is locked, just like its
@@ -717,10 +724,10 @@ async fn v175_content_patch_blocked_on_published_chapter() {
 async fn v175_content_patch_seeds_outline_path_when_missing() {
     let ctx = test_ctx().await;
     let work_id = setup_work(&ctx.state).await;
-    seed_chapter(ctx.state.pool(), &work_id, 1).await;
+    seed_chapter(ctx.state.pool().unwrap(), &work_id, 1).await;
 
     // No outline_path seeded — the handler must derive the fallback path.
-    let before = chapter_row(ctx.state.pool(), &work_id, 1).await;
+    let before = chapter_row(ctx.state.pool().unwrap(), &work_id, 1).await;
     assert!(
         before.outline_path.as_deref().map_or(true, str::is_empty),
         "precondition: chapter has no outline_path"
@@ -736,7 +743,7 @@ async fn v175_content_patch_seeds_outline_path_when_missing() {
     .await
     .expect("content patch should seed the outline_path");
 
-    let after = chapter_row(ctx.state.pool(), &work_id, 1).await;
+    let after = chapter_row(ctx.state.pool().unwrap(), &work_id, 1).await;
     let derived = after
         .outline_path
         .as_deref()
@@ -758,7 +765,7 @@ async fn v175_content_patch_seeds_outline_path_when_missing() {
 async fn v175_content_patch_on_stale_base_revision_returns_conflict() {
     let ctx = test_ctx().await;
     let work_id = setup_work(&ctx.state).await;
-    seed_chapter(ctx.state.pool(), &work_id, 1).await;
+    seed_chapter(ctx.state.pool().unwrap(), &work_id, 1).await;
 
     // First patch bumps revision to 1.
     chapter_patch(&ctx.state, &work_id, "1", 0, json!({ "content": "first" }))
@@ -788,7 +795,7 @@ async fn v175_content_patch_does_not_touch_body_path() {
     // byte-identical before and after.
     let ctx = test_ctx().await;
     let work_id = setup_work(&ctx.state).await;
-    seed_chapter(ctx.state.pool(), &work_id, 1).await;
+    seed_chapter(ctx.state.pool().unwrap(), &work_id, 1).await;
 
     let ws_root = std::path::PathBuf::from(ctx.state.workspace_path().expect("workspace path set"));
 
@@ -796,15 +803,22 @@ async fn v175_content_patch_does_not_touch_body_path() {
     let now = chrono::Utc::now().to_rfc3339();
     let rel_outline = "Works/outline-hardening-novel/Outlines/chapters/ch01-outline.md";
     let rel_body = "Works/outline-hardening-novel/Stories/ch01-body.md";
-    work_chapters::update_outline_path(ctx.state.pool(), &work_id, 1, 1, Some(rel_outline), &now)
-        .await
-        .unwrap();
+    work_chapters::update_outline_path(
+        ctx.state.pool().unwrap(),
+        &work_id,
+        1,
+        1,
+        Some(rel_outline),
+        &now,
+    )
+    .await
+    .unwrap();
     // Seed the body_path column directly (insert_chapter took None).
     sqlx::query("UPDATE work_chapters SET body_path = ? WHERE work_id = ? AND chapter = ?")
         .bind(rel_body)
         .bind(&work_id)
         .bind(1)
-        .execute(ctx.state.pool())
+        .execute(ctx.state.pool().unwrap())
         .await
         .expect("seed body_path");
 
@@ -836,7 +850,7 @@ async fn v175_content_patch_does_not_touch_body_path() {
     .expect("content patch should succeed");
 
     // body_path column unchanged.
-    let after = chapter_row(ctx.state.pool(), &work_id, 1).await;
+    let after = chapter_row(ctx.state.pool().unwrap(), &work_id, 1).await;
     assert_eq!(after.body_path.as_deref(), Some(rel_body));
 
     // body file bytes unchanged.
@@ -855,7 +869,7 @@ async fn v175_content_patch_does_not_touch_body_path() {
 async fn v175_content_patch_rejects_oversized_content() {
     let ctx = test_ctx().await;
     let work_id = setup_work(&ctx.state).await;
-    seed_chapter(ctx.state.pool(), &work_id, 1).await;
+    seed_chapter(ctx.state.pool().unwrap(), &work_id, 1).await;
 
     // 10 MiB + 1 byte exceeds the OUTLINE_FILE_MAX_BYTES cap.
     let oversized = "x".repeat((10 * 1024 * 1024) + 1);

@@ -216,7 +216,7 @@ async fn execute_work_get(
             })?;
 
     // Entity lookup includes creator predicate (spec §12.5)
-    let record = works::get_work(state.pool(), creator_id, work_id)
+    let record = works::get_work(state.pool_or_uninit()?, creator_id, work_id)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -254,6 +254,8 @@ async fn execute_work_patch(
                 field: "parameters.work_id".into(),
                 reason: "must be a string".into(),
             })?;
+
+    let pool = state.pool_or_uninit()?;
 
     // Validate patch fields (spec §4.4)
     let params = req
@@ -309,7 +311,7 @@ async fn execute_work_patch(
             });
             let entry_json = serde_json::to_string(&json_entry).unwrap_or_default();
 
-            works::append_inspiration(state.pool(), creator_id, work_id, &entry_json, &now)
+            works::append_inspiration(pool, creator_id, work_id, &entry_json, &now)
                 .await
                 .map_err(|e| match &e {
                     nexus_local_db::LocalDbError::MissingVersionKey { .. } => {
@@ -366,7 +368,7 @@ async fn execute_work_patch(
             lineage_from_work_id: None,
         };
         let now = chrono::Utc::now().to_rfc3339();
-        works::patch_work(state.pool(), creator_id, work_id, &patch, &now)
+        works::patch_work(pool, creator_id, work_id, &patch, &now)
             .await
             .map_err(|e| match &e {
                 nexus_local_db::LocalDbError::MissingVersionKey { .. } => {
@@ -420,7 +422,7 @@ async fn execute_work_patch(
             "type": "stage_metadata",
         });
         let entry_json = serde_json::to_string(&entry).unwrap_or_default();
-        works::append_inspiration(state.pool(), creator_id, work_id, &entry_json, &now)
+        works::append_inspiration(pool, creator_id, work_id, &entry_json, &now)
             .await
             .map_err(|e| match &e {
                 nexus_local_db::LocalDbError::MissingVersionKey { .. } => {
@@ -437,7 +439,7 @@ async fn execute_work_patch(
     }
 
     // Return the updated Work
-    let updated = works::get_work(state.pool(), creator_id, work_id)
+    let updated = works::get_work(pool, creator_id, work_id)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -467,7 +469,7 @@ async fn execute_schedule_status(
             })?;
 
     // Verify work ownership first
-    let record = works::get_work(state.pool(), creator_id, work_id)
+    let record = works::get_work(state.pool_or_uninit()?, creator_id, work_id)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -515,7 +517,7 @@ async fn execute_context_assemble(
 
     // If work_id is provided, verify ownership
     if let Some(work_id) = req.parameters["work_id"].as_str() {
-        let _record = works::get_work(state.pool(), creator_id, work_id)
+        let _record = works::get_work(state.pool_or_uninit()?, creator_id, work_id)
             .await
             .map_err(|e| NexusApiError::Internal {
                 code: "DATABASE_ERROR".to_string(),
@@ -805,7 +807,7 @@ pub(crate) async fn audit_tool_execution(
     .bind(&outcome)
     .bind(&caller_kind)
     .bind(&session_id)
-    .execute(state.pool())
+    .execute(state.pool_or_uninit()?)
     .await
     .map_err(|e| NexusApiError::Internal {
         code: "AUDIT_LOG_FAILED".into(),
@@ -856,9 +858,14 @@ async fn execute_world_snapshot_get(
                 reason: "must be a string".into(),
             })?;
 
-    ensure_world_accessible_for_creator(state.pool(), creator_id, world_id).await?;
+    ensure_world_accessible_for_creator(state.pool_or_uninit()?, creator_id, world_id).await?;
 
-    let gw = state.narrative_gateway();
+    let gw = state
+        .narrative_gateway()
+        .ok_or_else(|| NexusApiError::Internal {
+            code: "NARRATIVE_GATEWAY_UNAVAILABLE".to_string(),
+            message: "narrative gateway not initialized".to_string(),
+        })?;
     let world_state =
         gw.get_world_state(world_id)
             .await
@@ -890,7 +897,7 @@ async fn execute_timeline_recent_get(
                 reason: "must be a string".into(),
             })?;
 
-    ensure_world_accessible_for_creator(state.pool(), creator_id, world_id).await?;
+    ensure_world_accessible_for_creator(state.pool_or_uninit()?, creator_id, world_id).await?;
 
     // Default limit 100, clamp to max 500
     let limit: usize = req.parameters["limit"]
@@ -899,7 +906,12 @@ async fn execute_timeline_recent_get(
         .unwrap_or(100)
         .min(500);
 
-    let gw = state.narrative_gateway();
+    let gw = state
+        .narrative_gateway()
+        .ok_or_else(|| NexusApiError::Internal {
+            code: "NARRATIVE_GATEWAY_UNAVAILABLE".to_string(),
+            message: "narrative gateway not initialized".to_string(),
+        })?;
     let mut events = gw.get_timeline(world_id, None, Some(limit)).await.map_err(
         |e: nexus_narrative::NarrativeError| NexusApiError::Internal {
             code: "NARRATIVE_ERROR".to_string(),
@@ -926,9 +938,11 @@ async fn execute_kb_snapshot_read(
                 reason: "must be a string".into(),
             })?;
 
-    ensure_world_accessible_for_creator(state.pool(), creator_id, world_id).await?;
+    let pool = state.pool_or_uninit()?;
 
-    let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(state.pool().clone());
+    ensure_world_accessible_for_creator(pool, creator_id, world_id).await?;
+
+    let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
     let blocks =
         kb_store
             .list_by_world(world_id)
@@ -971,8 +985,10 @@ async fn execute_manuscript_chapter_get(
         .as_i64()
         .map_or(1, |v| i32::try_from(v).unwrap_or(1));
 
+    let pool = state.pool_or_uninit()?;
+
     // Verify work ownership first (reuse existing pattern from execute_work_get)
-    let _record = works::get_work(state.pool(), creator_id, work_id)
+    let _record = works::get_work(pool, creator_id, work_id)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -983,13 +999,12 @@ async fn execute_manuscript_chapter_get(
             reason: "work not found or cross-creator access denied".to_string(),
         })?;
 
-    let chapter_record =
-        nexus_local_db::work_chapters::get_chapter(state.pool(), work_id, chapter, volume)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: e.to_string(),
-            })?;
+    let chapter_record = nexus_local_db::work_chapters::get_chapter(pool, work_id, chapter, volume)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?;
 
     chapter_record.map_or_else(
         || Err(NexusApiError::NotFound(format!("{work_id}/ch{chapter}"))),
@@ -1171,7 +1186,7 @@ async fn execute_reference_refresh(
     use nexus_orchestration::capability::Capability;
     let home = state.nexus_home();
     let cap = nexus_orchestration::capability::builtins::ReferenceRefresh::with_pool(
-        state.pool().clone(),
+        state.pool_or_uninit()?.clone(),
     )
     .with_creator_context(home.clone(), creator_id.to_string());
 
@@ -1233,7 +1248,9 @@ async fn execute_kb_snapshot_write(
                 reason: "must be a string".into(),
             })?;
 
-    ensure_world_accessible_for_creator(state.pool(), creator_id, world_id).await?;
+    let pool = state.pool_or_uninit()?;
+
+    ensure_world_accessible_for_creator(pool, creator_id, world_id).await?;
 
     let blocks =
         req.parameters["blocks"]
@@ -1243,16 +1260,12 @@ async fn execute_kb_snapshot_write(
                 reason: "must be an array of key blocks".into(),
             })?;
 
-    let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(state.pool().clone());
+    let kb_store = nexus_local_db::kb_store::SqliteKbStore::new(pool.clone());
     let mut written: usize = 0;
-    let mut tx = state
-        .pool()
-        .begin()
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?;
+    let mut tx = pool.begin().await.map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: e.to_string(),
+    })?;
 
     for block_val in blocks {
         let kb: nexus_kb::key_block::KeyBlock =
@@ -1322,8 +1335,10 @@ async fn execute_manuscript_chapter_update(
         .as_i64()
         .map_or(1, |v| i32::try_from(v).unwrap_or(1));
 
+    let pool = state.pool_or_uninit()?;
+
     // Verify work ownership first (keep record for work_ref used in W-003 path).
-    let work_record = works::get_work(state.pool(), creator_id, work_id)
+    let work_record = works::get_work(pool, creator_id, work_id)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -1335,13 +1350,12 @@ async fn execute_manuscript_chapter_update(
         })?;
 
     // Check chapter exists
-    let chapter_exists =
-        nexus_local_db::work_chapters::get_chapter(state.pool(), work_id, chapter, volume)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: e.to_string(),
-            })?;
+    let chapter_exists = nexus_local_db::work_chapters::get_chapter(pool, work_id, chapter, volume)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?;
 
     if chapter_exists.is_none() {
         return Err(NexusApiError::NotFound(format!(
@@ -1460,14 +1474,10 @@ async fn execute_manuscript_chapter_update(
         let word_count = req.parameters["content"]
             .as_str()
             .map_or(0, |c| c.split_whitespace().count());
-        let mut tx = state
-            .pool()
-            .begin()
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: format!("chapter update tx begin: {e}"),
-            })?;
+        let mut tx = pool.begin().await.map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: format!("chapter update tx begin: {e}"),
+        })?;
         // SAFETY: dynamic SQL for chapter update — runtime fields.
         #[allow(clippy::cast_possible_wrap)]
         sqlx::query(
@@ -1532,13 +1542,12 @@ async fn execute_manuscript_chapter_update(
     }
 
     // Read back updated chapter
-    let updated =
-        nexus_local_db::work_chapters::get_chapter(state.pool(), work_id, chapter, volume)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: e.to_string(),
-            })?;
+    let updated = nexus_local_db::work_chapters::get_chapter(pool, work_id, chapter, volume)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?;
 
     updated.map_or_else(
         || Err(NexusApiError::NotFound(format!("{work_id}/ch{chapter}"))),
@@ -1561,7 +1570,9 @@ async fn execute_world_configure(
                 reason: "must be a string".into(),
             })?;
 
-    ensure_world_accessible_for_creator(state.pool(), creator_id, world_id).await?;
+    let pool = state.pool_or_uninit()?;
+
+    ensure_world_accessible_for_creator(pool, creator_id, world_id).await?;
 
     let now = chrono::Utc::now().to_rfc3339();
     let mut updated = false;
@@ -1579,7 +1590,7 @@ async fn execute_world_configure(
             .bind(title)
             .bind(&now)
             .bind(world_id)
-            .execute(state.pool())
+            .execute(pool)
             .await
             .map_err(|e| NexusApiError::Internal {
                 code: "DATABASE_ERROR".to_string(),
@@ -1604,7 +1615,7 @@ async fn execute_world_configure(
         .bind(visibility)
         .bind(&now)
         .bind(world_id)
-        .execute(state.pool())
+        .execute(pool)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -1629,7 +1640,7 @@ async fn execute_world_configure(
         .bind(time_policy)
         .bind(&now)
         .bind(world_id)
-        .execute(state.pool())
+        .execute(pool)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -1677,7 +1688,8 @@ async fn execute_work_schedule_set(
     }
 
     // Verify work ownership first
-    let _record = works::get_work(state.pool(), creator_id, work_id)
+    let pool = state.pool_or_uninit()?;
+    let _record = works::get_work(pool, creator_id, work_id)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -1718,7 +1730,7 @@ async fn execute_work_schedule_set(
         lineage_from_work_id: None,
     };
 
-    works::patch_work(state.pool(), creator_id, work_id, &patch, &now)
+    works::patch_work(pool, creator_id, work_id, &patch, &now)
         .await
         .map_err(|e| match &e {
             nexus_local_db::LocalDbError::MissingVersionKey { .. } => NexusApiError::Forbidden {
@@ -1768,7 +1780,7 @@ async fn execute_finding_resolve(
     };
 
     let updated = nexus_local_db::findings::update_finding(
-        state.pool(),
+        state.pool_or_uninit()?,
         creator_id,
         finding_id,
         &patch,
@@ -1827,7 +1839,8 @@ async fn execute_pool_entry_manage(
         })?;
 
     // Verify work ownership for non-creator-scoped actions
-    let _record = works::get_work(state.pool(), creator_id, work_id)
+    let pool = state.pool_or_uninit()?;
+    let _record = works::get_work(pool, creator_id, work_id)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -1840,22 +1853,16 @@ async fn execute_pool_entry_manage(
 
     match action {
         "add" | "promote" => {
-            nexus_local_db::novel_pool_entries::promote_to_active(
-                state.pool(),
-                creator_id,
-                work_id,
-            )
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "POOL_ERROR".to_string(),
-                message: e.to_string(),
-            })?;
+            nexus_local_db::novel_pool_entries::promote_to_active(pool, creator_id, work_id)
+                .await
+                .map_err(|e| NexusApiError::Internal {
+                    code: "POOL_ERROR".to_string(),
+                    message: e.to_string(),
+                })?;
         }
         "remove" | "archive" => {
             let entry = nexus_local_db::novel_pool_entries::get_pool_entry_by_work(
-                state.pool(),
-                creator_id,
-                work_id,
+                pool, creator_id, work_id,
             )
             .await
             .map_err(|e| NexusApiError::Internal {
@@ -1865,7 +1872,7 @@ async fn execute_pool_entry_manage(
             .ok_or_else(|| NexusApiError::NotFound(format!("pool entry for {work_id}")))?;
 
             nexus_local_db::novel_pool_entries::archive_pool_entry(
-                state.pool(),
+                pool,
                 &entry.entry_id,
                 creator_id,
             )
@@ -1980,12 +1987,17 @@ async fn execute_manuscript_list(
         })?;
 
     let filters = works::WorkListFilters::default();
-    let records = works::list_works(state.pool(), creator_id, &workspace_slug, &filters)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?;
+    let records = works::list_works(
+        state.pool_or_uninit()?,
+        creator_id,
+        &workspace_slug,
+        &filters,
+    )
+    .await
+    .map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: e.to_string(),
+    })?;
 
     let manuscripts: Vec<serde_json::Value> = records
         .iter()
@@ -2040,7 +2052,8 @@ async fn execute_manuscript_read_range(
         .map_or(1, |v| i32::try_from(v).unwrap_or(1));
 
     // Verify work ownership (fail closed for cross-creator access).
-    let _work = works::get_work(state.pool(), creator_id, work_id)
+    let pool = state.pool_or_uninit()?;
+    let _work = works::get_work(pool, creator_id, work_id)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -2051,14 +2064,13 @@ async fn execute_manuscript_read_range(
             reason: "work not found or cross-creator access denied".to_string(),
         })?;
 
-    let chapter_record =
-        nexus_local_db::work_chapters::get_chapter(state.pool(), work_id, chapter, volume)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: e.to_string(),
-            })?
-            .ok_or_else(|| NexusApiError::NotFound(format!("{work_id}/ch{chapter}")))?;
+    let chapter_record = nexus_local_db::work_chapters::get_chapter(pool, work_id, chapter, volume)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?
+        .ok_or_else(|| NexusApiError::NotFound(format!("{work_id}/ch{chapter}")))?;
 
     let body_path = chapter_record
         .body_path
@@ -2190,7 +2202,8 @@ async fn execute_manuscript_write(
     }
 
     // Verify work ownership.
-    let _work = works::get_work(state.pool(), creator_id, work_id)
+    let pool = state.pool_or_uninit()?;
+    let _work = works::get_work(pool, creator_id, work_id)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -2202,14 +2215,13 @@ async fn execute_manuscript_write(
         })?;
 
     // Chapter must exist (manuscript.write does not create chapters).
-    let chapter_record =
-        nexus_local_db::work_chapters::get_chapter(state.pool(), work_id, chapter, volume)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: e.to_string(),
-            })?
-            .ok_or_else(|| NexusApiError::NotFound(format!("{work_id}/ch{chapter}")))?;
+    let chapter_record = nexus_local_db::work_chapters::get_chapter(pool, work_id, chapter, volume)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?
+        .ok_or_else(|| NexusApiError::NotFound(format!("{work_id}/ch{chapter}")))?;
 
     let body_path = chapter_record
         .body_path
@@ -2283,14 +2295,10 @@ async fn execute_manuscript_write(
     // dropped transaction rolls back the word-count UPDATE.
     let word_count = content.split_whitespace().count();
     let now = chrono::Utc::now().to_rfc3339();
-    let mut tx = state
-        .pool()
-        .begin()
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: format!("manuscript.write tx begin: {e}"),
-        })?;
+    let mut tx = pool.begin().await.map_err(|e| NexusApiError::Internal {
+        code: "DATABASE_ERROR".to_string(),
+        message: format!("manuscript.write tx begin: {e}"),
+    })?;
     // SAFETY: UPDATE against work_chapters — runtime query.
     #[allow(clippy::cast_possible_wrap)]
     sqlx::query(
@@ -2377,16 +2385,17 @@ async fn execute_manuscript_phase_get(
                 reason: "must be a string".into(),
             })?;
 
-    let (current_stage, stage_status) = works::get_work_stage(state.pool(), creator_id, work_id)
-        .await
-        .map_err(|e| NexusApiError::Internal {
-            code: "DATABASE_ERROR".to_string(),
-            message: e.to_string(),
-        })?
-        .ok_or_else(|| NexusApiError::Forbidden {
-            resource: "work".to_string(),
-            reason: "work not found or cross-creator access denied".to_string(),
-        })?;
+    let (current_stage, stage_status) =
+        works::get_work_stage(state.pool_or_uninit()?, creator_id, work_id)
+            .await
+            .map_err(|e| NexusApiError::Internal {
+                code: "DATABASE_ERROR".to_string(),
+                message: e.to_string(),
+            })?
+            .ok_or_else(|| NexusApiError::Forbidden {
+                resource: "work".to_string(),
+                reason: "work not found or cross-creator access denied".to_string(),
+            })?;
 
     Ok(serde_json::json!({
         "work_id": work_id,
@@ -2425,7 +2434,9 @@ async fn execute_manuscript_phase_set(
 
     let force = req.parameters["force"].as_bool().unwrap_or(false);
 
-    let (current_stage, _stage_status) = works::get_work_stage(state.pool(), creator_id, work_id)
+    let pool = state.pool_or_uninit()?;
+
+    let (current_stage, _stage_status) = works::get_work_stage(pool, creator_id, work_id)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),
@@ -2451,13 +2462,12 @@ async fn execute_manuscript_phase_set(
     }
 
     let now = chrono::Utc::now().to_rfc3339();
-    let updated =
-        works::update_work_stage(state.pool(), creator_id, work_id, new_phase, "active", &now)
-            .await
-            .map_err(|e| NexusApiError::Internal {
-                code: "DATABASE_ERROR".to_string(),
-                message: e.to_string(),
-            })?;
+    let updated = works::update_work_stage(pool, creator_id, work_id, new_phase, "active", &now)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".to_string(),
+            message: e.to_string(),
+        })?;
 
     Ok(serde_json::json!({
         "work_id": work_id,
@@ -2503,8 +2513,9 @@ async fn execute_research_query(
     _creator_id: &str,
 ) -> Result<serde_json::Value, NexusApiError> {
     // Direct lookup by reference_source_id takes precedence.
+    let pool = state.pool_or_uninit()?;
     if let Some(id) = req.parameters["reference_source_id"].as_str() {
-        let row = nexus_local_db::reference_source::get_by_id(state.pool(), id)
+        let row = nexus_local_db::reference_source::get_by_id(pool, id)
             .await
             .map_err(|e| NexusApiError::Internal {
                 code: "DATABASE_ERROR".to_string(),
@@ -2529,7 +2540,7 @@ async fn execute_research_query(
         .as_i64()
         .map_or(50, |v| v.clamp(1, 1000));
 
-    let rows = nexus_local_db::reference_source::list(state.pool(), Some(limit), None, None)
+    let rows = nexus_local_db::reference_source::list(pool, Some(limit), None, None)
         .await
         .map_err(|e| NexusApiError::Internal {
             code: "DATABASE_ERROR".to_string(),

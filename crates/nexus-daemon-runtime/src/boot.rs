@@ -214,7 +214,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     tracing::info!("Workspace state initialized");
 
     // --- Section 3: Orchestration engine + worker manager ---
-    let db_pool: sqlx::SqlitePool = state.pool().clone();
+    let db_pool: sqlx::SqlitePool = state.pool_or_uninit()?.clone();
     let sqlite_storage = Arc::new(SqliteSessionStorage::new(Arc::new(db_pool)));
 
     // V1.51 T-A P0 (QC3 F-001): construct the shared worker registry BEFORE
@@ -394,14 +394,17 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
 
     // --- Section 4: Schedule supervisor + core context manager ---
     // Replace .expect() with graceful error handling for database pool creation.
-    let schedule_pool: sqlx::SqlitePool =
-        match nexus_local_db::open_pool(std::path::Path::new(&state.database_path())).await {
-            Ok(pool) => pool,
-            Err(e) => {
-                tracing::error!("Fatal: failed to open database pool for schedule supervisor: {e}");
-                anyhow::bail!("Failed to open database pool for schedule supervisor: {e}");
-            }
-        };
+    let schedule_pool: sqlx::SqlitePool = match nexus_local_db::open_pool(std::path::Path::new(
+        &state.database_path().unwrap_or_default(),
+    ))
+    .await
+    {
+        Ok(pool) => pool,
+        Err(e) => {
+            tracing::error!("Fatal: failed to open database pool for schedule supervisor: {e}");
+            anyhow::bail!("Failed to open database pool for schedule supervisor: {e}");
+        }
+    };
     // V1.51 T-A P0: thread the capability registry into the supervisor so the
     // review-time KB extraction hook can invoke `nexus.llm.extract`. Falls back
     // to the heuristic when the worker is unavailable (llm-extract.md §5.1).
@@ -438,7 +441,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // (interrupted by daemon restart) and auto-resume them by evaluating
     // the next step and enqueuing a new schedule.
     {
-        let recovery_pool = state.pool();
+        let recovery_pool = state.pool_or_uninit()?;
         match nexus_orchestration::auto_chain::find_resumable_works(recovery_pool).await {
             Ok(resumable) => {
                 if !resumable.is_empty() {
@@ -617,7 +620,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // exits cleanly when `shutdown_notify` fires. See
     // `crates/nexus-daemon-runtime/src/stale_findings_watcher.rs`.
     {
-        let watcher_pool = state.pool().clone();
+        let watcher_pool = state.pool_or_uninit()?.clone();
         let watcher_shutdown = state.shutdown_notify();
         let watcher_config = crate::stale_findings_watcher::StaleFindingsWatcherConfig::from_env();
         let _watcher_handle = crate::stale_findings_watcher::spawn_stale_findings_watcher(
@@ -636,7 +639,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // and the loop continues. See
     // `crates/nexus-daemon-runtime/src/cron_supervisor.rs`.
     {
-        let cron_pool = state.pool().clone();
+        let cron_pool = state.pool_or_uninit()?.clone();
         let cron_workspace = state.workspace_path().map(std::path::PathBuf::from);
         let cron_supervisor = schedule_supervisor.clone();
         let cron_shutdown = state.shutdown_notify();
@@ -662,7 +665,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // chronology log (spec §3 / §4). Non-blocking: errors are logged and the
     // loop continues. See `crates/nexus-daemon-runtime/src/auto_chronology.rs`.
     {
-        let chron_pool = state.pool().clone();
+        let chron_pool = state.pool_or_uninit()?.clone();
         let chron_workspace = state.workspace_path().map(std::path::PathBuf::from);
         let chron_shutdown = state.shutdown_notify();
         let chron_config = crate::auto_chronology::AutoChronologyConfig::from_env();
@@ -682,7 +685,7 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     // First refresh cycle fires after 60s initial delay. See
     // `crates/nexus-daemon-runtime/src/refresh_scheduler.rs`.
     {
-        let refresh_pool = state.pool().clone();
+        let refresh_pool = state.pool_or_uninit()?.clone();
         let refresh_shutdown = state.shutdown_notify();
         let refresh_config = crate::refresh_scheduler::RefreshSchedulerConfig::from_env();
         let _refresh_handle = crate::refresh_scheduler::spawn_refresh_scheduler(
@@ -987,7 +990,7 @@ fn create_subsystems(
 
     let mut subsystems: Vec<Arc<dyn crate::lifecycle::SubsystemBootstrap>> = vec![
         Arc::new(HttpSubsystem::new(port)),
-        Arc::new(DbSubsystem::new(Some(state.database_path()))),
+        Arc::new(DbSubsystem::new(state.database_path())),
         // V1.51 T-A P0 (QC3 F-001): share the same worker registry that
         // backs `ProductionWorkerProvider` so workers spawned by either side
         // are visible to the other.
