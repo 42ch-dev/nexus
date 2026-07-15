@@ -38,6 +38,9 @@ export function WorkShellLayout() {
           variant="secondary"
           size="small"
           data-testid="work-shell-open-rail"
+          aria-label={t('workShell.openRailAria')}
+          aria-expanded={drawerOpen}
+          aria-haspopup="dialog"
           onClick={() => setDrawerOpen(true)}
         >
           <PanelRight className="mr-1.5 h-4 w-4" aria-hidden />

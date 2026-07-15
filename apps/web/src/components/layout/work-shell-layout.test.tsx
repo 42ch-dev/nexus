@@ -97,12 +97,34 @@ describe('WorkShellLayout', () => {
     expect(rail).toHaveClass('lg:flex');
   });
 
+  it('exposes dialog disclosure state on the mobile open-rail control', async () => {
+    const user = userEvent.setup();
+    useShellHandlers();
+    renderShell('/works/work-a/outline', false);
+
+    const trigger = screen.getByTestId('work-shell-open-rail');
+    expect(trigger).toHaveAttribute('aria-label', 'Show Works rail');
+    expect(trigger).toHaveAttribute('aria-haspopup', 'dialog');
+    expect(trigger).toHaveAttribute('aria-expanded', 'false');
+
+    await user.click(trigger);
+    await waitFor(() => {
+      expect(trigger).toHaveAttribute('aria-expanded', 'true');
+    });
+
+    await user.keyboard('{Escape}');
+    await waitFor(() => {
+      expect(trigger).toHaveAttribute('aria-expanded', 'false');
+    });
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
   it('opens the mobile end-sheet drawer from the header control', async () => {
     const user = userEvent.setup();
     useShellHandlers();
     renderShell('/works/work-a/outline', false);
 
-    await user.click(screen.getByRole('button', { name: 'Show' }));
+    await user.click(screen.getByRole('button', { name: 'Show Works rail' }));
 
     await waitFor(() => {
       expect(screen.getByRole('dialog')).toBeInTheDocument();
