@@ -28,7 +28,7 @@ describe('DraftEdgeInspector (FB-SE-002)', () => {
     );
 
     // Primary commit CTA — locked voice.
-    expect(screen.getByRole('button', { name: 'Create Transition' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create' })).toBeInTheDocument();
     // Cancel CTA — locked voice.
     expect(screen.getByRole('button', { name: 'Cancel' })).toBeInTheDocument();
     // Field labels — locked voice.
@@ -52,7 +52,7 @@ describe('DraftEdgeInspector (FB-SE-002)', () => {
     );
 
     fireEvent.change(screen.getByLabelText('Condition'), { target: { value: 'word_count > 1000' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Create Transition' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
 
     expect(onCommit).toHaveBeenCalledTimes(1);
     expect(onCommit).toHaveBeenCalledWith({ condition: 'word_count > 1000' });
@@ -71,7 +71,7 @@ describe('DraftEdgeInspector (FB-SE-002)', () => {
       { client: noopClient },
     );
 
-    fireEvent.click(screen.getByRole('button', { name: 'Create Transition' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
     expect(onCommit).toHaveBeenCalledWith({});
   });
 

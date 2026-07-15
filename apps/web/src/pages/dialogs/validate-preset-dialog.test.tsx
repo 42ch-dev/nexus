@@ -53,7 +53,7 @@ describe('ValidatePresetDialog', () => {
 
     const input = screen.getByLabelText(/^Preset path$/i);
     expect(input).toHaveValue('/presets/foo.yaml');
-    await user.click(screen.getByRole('button', { name: /^Validate Preset$/i }));
+    await user.click(screen.getByRole('button', { name: /^Validate$/i }));
 
     await waitFor(() => expect(postedBody).not.toBeNull());
     expect(postedBody).toEqual({ path: '/presets/foo.yaml' });
@@ -67,7 +67,7 @@ describe('ValidatePresetDialog', () => {
     const input = screen.getByLabelText(/^Preset path$/i);
     await userEvent.clear(input);
 
-    expect(screen.getByRole('button', { name: /^Validate Preset$/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /^Validate$/i })).toBeDisabled();
   });
 
   it('surfaces errors and warnings inline', async () => {
@@ -85,7 +85,7 @@ describe('ValidatePresetDialog', () => {
     renderDialog();
 
     await user.type(screen.getByLabelText(/^Preset path$/i), '/presets/bad.yaml');
-    await user.click(screen.getByRole('button', { name: /^Validate Preset$/i }));
+    await user.click(screen.getByRole('button', { name: /^Validate$/i }));
 
     expect(await screen.findByText('Validation failed')).toBeInTheDocument();
     expect(screen.getByText('Missing initial state')).toBeInTheDocument();

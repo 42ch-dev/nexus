@@ -144,6 +144,7 @@ export function WorkDetailPage() {
                 type="button"
                 variant={archiveConfirm ? 'destructive' : 'tertiary'}
                 size="small"
+                aria-label={archiveConfirm ? t('workDetail.archiveWorkAria') : undefined}
                 onClick={async () => {
                   if (!archiveConfirm) {
                     setArchiveConfirm(true);
@@ -153,7 +154,7 @@ export function WorkDetailPage() {
                   setArchiveConfirm(false);
                 }}
               >
-                {archiveConfirm ? t('workDetail.confirmArchive') : t('workDetail.archiveWork')}
+                {t('workDetail.archiveWork')}
               </Button>
             )}
           </div>

@@ -41,7 +41,7 @@ describe('SoulNarrativeCard — five UX states', () => {
       />,
     );
     expect(screen.getByTestId('soul-narrative-ungenerated')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /reflect on my soul/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Reflect$/i })).toBeInTheDocument();
     expect(screen.getByText(/nexus will reflect on your themes/i)).toBeInTheDocument();
   });
 

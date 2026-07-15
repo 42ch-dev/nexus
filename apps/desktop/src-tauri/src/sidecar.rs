@@ -347,12 +347,7 @@ impl SidecarManager {
             .map_err(|e| format!("failed to spawn sidecar: {e}"))?;
 
         let pid = child.pid();
-        tracing::info!(
-            phase = "spawn",
-            port = port,
-            pid = pid,
-            "sidecar spawned"
-        );
+        tracing::info!(phase = "spawn", port = port, pid = pid, "sidecar spawned");
 
         let stderr_tail = Arc::new(Mutex::new(String::new()));
         let stderr_tail_for_drain = stderr_tail.clone();
@@ -737,7 +732,10 @@ fn process_elapsed_secs(pid: u32) -> Option<u64> {
         .output()
     {
         if output.status.success() {
-            if let Ok(secs) = String::from_utf8_lossy(&output.stdout).trim().parse::<u64>() {
+            if let Ok(secs) = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .parse::<u64>()
+            {
                 return Some(secs);
             }
         }
@@ -1087,7 +1085,11 @@ mod tests {
             .expect("test listener should bind");
         drop(listener);
         let state = probe_port_state(port).await;
-        assert_ne!(state, PortState::Occupied, "a just-dropped listener should not report occupied");
+        assert_ne!(
+            state,
+            PortState::Occupied,
+            "a just-dropped listener should not report occupied"
+        );
     }
 
     // FB-D1 cold-start latency budget (deterministic timing evidence).
@@ -1108,10 +1110,7 @@ mod tests {
         let start = std::time::Instant::now();
         let state = probe_port_state(port).await;
         let elapsed = start.elapsed();
-        println!(
-            "probe_port_state(Free) elapsed: {} ms",
-            elapsed.as_millis()
-        );
+        println!("probe_port_state(Free) elapsed: {} ms", elapsed.as_millis());
         assert_eq!(state, PortState::Free);
         assert!(
             elapsed < Duration::from_millis(500),

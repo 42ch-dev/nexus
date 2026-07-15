@@ -14,6 +14,7 @@ function makeClient(): BrowserClient {
 function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapabilities {
   return {
     openWith: () => Promise.resolve(),
+    openExternalUrl: () => Promise.resolve(),
     revealInFinder: () => Promise.resolve(),
     getDaemonStatus: () =>
       Promise.resolve({ state: 'running', port: 8420, version: 'test' }),
@@ -30,6 +31,7 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
     setWorkspacePath: () => Promise.resolve(),
     ensureSetupBootstrap: () =>
       Promise.resolve({ creator_id: 'ctr_local1234567890ab', already_bootstrapped: false }),
+    switchActiveCreator: () => Promise.resolve('/tmp/nexus'),
     ...overrides,
   };
 }

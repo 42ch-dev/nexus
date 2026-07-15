@@ -15,7 +15,7 @@ describe('SetupStepDone', () => {
     expect(
       screen.getByText('Open Nexus to start writing. You can change settings anytime.'),
     ).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Open Nexus' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Open' })).toBeInTheDocument();
   });
 
   it('calls onFinish when the Finish button is clicked', async () => {
@@ -26,7 +26,7 @@ describe('SetupStepDone', () => {
       initialRouterEntries: ['/setup'],
     });
 
-    const finishButton = screen.getByRole('button', { name: 'Open Nexus' });
+    const finishButton = screen.getByRole('button', { name: 'Open' });
     await user.click(finishButton);
 
     await waitFor(() => expect(onFinish).toHaveBeenCalled());
@@ -63,7 +63,7 @@ describe('SetupStepDone', () => {
     });
 
     const finishButton = await waitFor(() =>
-      screen.getByRole('button', { name: 'Open Nexus' }),
+      screen.getByRole('button', { name: 'Open' }),
     );
     expect(finishButton).toHaveClass('w-full', 'max-w-setup-wizard-surface-cta-primary-max-width');
   });

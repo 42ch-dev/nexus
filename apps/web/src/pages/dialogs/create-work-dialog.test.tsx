@@ -47,7 +47,7 @@ describe('CreateWorkDialog CRUD round-trip', () => {
     await user.type(screen.getByLabelText(/Initial idea/i), 'A heist in a floating city');
     // The Work-profile selector is NOT touched — V1.66 semantics require the
     // field to be omitted so the daemon stores NULL (qc1 W1).
-    await user.click(screen.getByRole('button', { name: /Create Work/i }));
+    await user.click(screen.getByRole('button', { name: /^Create$/i }));
 
     await waitFor(() => expect(onCreated).toHaveBeenCalledWith('w-new'));
     expect(postedBody).toEqual({
@@ -75,7 +75,7 @@ describe('CreateWorkDialog CRUD round-trip', () => {
     await user.type(screen.getByLabelText(/Long-term goal/i), 'Publish a collection');
     await user.type(screen.getByLabelText(/Initial idea/i), 'A meditation on cities');
     await user.selectOptions(screen.getByLabelText(/Work profile/i), 'essay');
-    await user.click(screen.getByRole('button', { name: /Create Work/i }));
+    await user.click(screen.getByRole('button', { name: /^Create$/i }));
 
     await waitFor(() => expect(postedBody).not.toBeNull());
     expect(postedBody).toMatchObject({ work_profile: 'essay' });
@@ -100,7 +100,7 @@ describe('CreateWorkDialog CRUD round-trip', () => {
     await user.type(screen.getByLabelText(/Title/i), 'A Work');
     await user.type(screen.getByLabelText(/Long-term goal/i), 'A goal');
     await user.type(screen.getByLabelText(/Initial idea/i), 'An idea');
-    await user.click(screen.getByRole('button', { name: /Create Work/i }));
+    await user.click(screen.getByRole('button', { name: /^Create$/i }));
 
     // The error toast surfaces the parsed envelope message (W-1 fix, live).
     expect(await screen.findByText('Could not create Work')).toBeInTheDocument();
@@ -117,7 +117,7 @@ describe('CreateWorkDialog CRUD round-trip', () => {
     );
 
     renderDialog();
-    const submit = screen.getByRole('button', { name: /Create Work/i });
+    const submit = screen.getByRole('button', { name: /^Create$/i });
     expect(submit).toBeDisabled();
 
     // Partial fill is still not enough.
@@ -143,7 +143,7 @@ describe('CreateWorkDialog CRUD round-trip', () => {
     // Explicitly re-select the default — this counts as "touched" and MUST
     // send work_profile (qc1 W1 positive case).
     await user.selectOptions(screen.getByLabelText(/Work profile/i), 'novel');
-    await user.click(screen.getByRole('button', { name: /Create Work/i }));
+    await user.click(screen.getByRole('button', { name: /^Create$/i }));
 
     await waitFor(() => expect(postedBody).not.toBeNull());
     expect(postedBody).toMatchObject({ work_profile: 'novel' });
@@ -165,7 +165,7 @@ describe('CreateWorkDialog CRUD round-trip', () => {
     await user.type(screen.getByLabelText(/Long-term goal/i), 'Ship the lore bible');
     await user.type(screen.getByLabelText(/Initial idea/i), 'A dying solar system');
     await user.selectOptions(screen.getByLabelText(/Work profile/i), 'game_bible');
-    await user.click(screen.getByRole('button', { name: /Create Work/i }));
+    await user.click(screen.getByRole('button', { name: /^Create$/i }));
 
     await waitFor(() => expect(postedBody).not.toBeNull());
     // C1: the wire value MUST be the underscore canonical form `game_bible`,

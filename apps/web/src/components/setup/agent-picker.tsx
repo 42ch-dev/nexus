@@ -1,5 +1,5 @@
 /**
- * AgentPicker — presentational card grid for ACP agent selection.
+ * AgentPicker — presentational card grid for agent selection.
  *
  * Placement (V1.101 locked): app-shared under `components/setup/`.
  * No wizard routing, no daemon client, no `@42ch/nexus-contracts` wire DTOs.
@@ -10,22 +10,32 @@
  *
  * V1.102 chrome: soft Installed Badge, ArrowUpRight outbound icons at label
  * cap-height, hollow/lit selection dots, muted not-installed cards.
+ *
+ * V1.117 P1 T3: defaultGrid + moreAgents split; icon + displayName from catalog.
  */
 
-import { ArrowUpRight, Loader2, Terminal } from 'lucide-react';
-import { memo, useCallback, useMemo, useRef, useState, type ReactNode } from 'react';
+import { ArrowUpRight, Loader2, Terminal, User } from 'lucide-react';
+import { memo, useCallback, useRef, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
 
 import { cn } from '@/lib/utils';
 import { Badge, Button, Input, Label } from '@42ch/nexus-ui';
+
+/** Desktop-only capability needed by the picker to open URLs in the system browser. */
+export interface AgentPickerDesktop {
+  openExternalUrl(url: string): Promise<void>;
+}
 
 /** Local view-model for one agent card — owned by this module (not wire DTOs). */
 export interface AgentPickerItem {
   /** Stable id used for selection (typically registry agent id or name). */
   id: string;
   name: string;
+  displayName?: string | null;
   version?: string | null;
   description?: string | null;
+  /** Remote icon URL (registry or override). */
+  iconUrl?: string | null;
   /** When false, card is discoverability-only (not selectable as profile). */
   installed: boolean;
   /** Outbound install URL; omit/null → hide Install link. */
@@ -58,7 +68,10 @@ export type AgentVerifyStatus = 'idle' | 'loading' | 'success' | 'no-match' | 'e
 
 export interface AgentPickerProps {
   status: AgentPickerStatus;
-  agents?: AgentPickerItem[];
+  /** Cards shown in the primary grid (default grid — native-first, priority-sorted). */
+  defaultGrid?: AgentPickerItem[];
+  /** Cards behind the "More agents" toggle (installed-first). */
+  moreAgents?: AgentPickerItem[];
   /** Currently selected installed agent id (profile path). */
   selectedId?: string | null;
   onSelect?: (id: string) => void;
@@ -82,89 +95,30 @@ export interface AgentPickerProps {
   emptyDescription?: string;
   /** Layout density. Omit or `'default'` for Settings; wizard may pass `'compact'`. */
   density?: AgentPickerDensity;
-}
-
-/**
- * Common-agent priority — rendered first in the picker, in this order.
- *
- * Match keys are tried against `agent.id` (registry_agent_id, stable) first,
- * then case-insensitive `agent.name` (forward-compat for agents not yet in
- * the ACP CDN registry). The list reflects the user's locked priority order;
- * see `.mstar/iterations/v1.110/specs/agent-picker-ux-polish.md`.
- *
- * Order: Codex CLI, Claude Code, Cursor CLI, OpenCode, Hermes, Kimi Code,
- * Qoder, GitHub Copilot CLI, Pi, Kiro CLI. Do NOT reorder — this list is frozen.
- */
-const COMMON_AGENT_PRIORITY: readonly string[] = [
-  'codex-acp',           // Codex (user: "Codex CLI")
-  'claude-acp',          // Claude Agent (user: "Claude Code")
-  'cursor',              // Cursor (user: "Cursor CLI")
-  'opencode',            // OpenCode
-  'hermes',              // not in live registry — forward-compat (by id or name)
-  'kimi',                // Kimi CLI (user: "Kimi Code")
-  'qoder',               // Qoder CLI (user: "Qoder")
-  'github-copilot-cli',  // GitHub Copilot (user: "GitHub Copilot CLI")
-  'pi-acp',              // pi ACP (user: "Pi")
-  'kiro',                // not in live registry — forward-compat (by id or name)
-];
-
-/**
- * Resolve the priority index for an agent. Tries `agent.id` (registry id,
- * stable) for an exact match first, then falls back to a case-insensitive
- * `agent.name` contains check (forward-compat for agents not yet in the ACP
- * CDN registry, e.g. Hermes/Kiro). Returns `-1` when no key matches.
- */
-function findPriorityIndex(agent: AgentPickerItem): number {
-  const lowerName = agent.name.toLowerCase();
-  for (let i = 0; i < COMMON_AGENT_PRIORITY.length; i++) {
-    const key = COMMON_AGENT_PRIORITY[i]!;
-    const lowerKey = key.toLowerCase();
-    if (agent.id === key || lowerName.includes(lowerKey)) {
-      return i;
-    }
-  }
-  return -1;
-}
-
-/**
- * Partition agents into `common` (matching {@link COMMON_AGENT_PRIORITY} by
- * id first then name, sorted by priority index) and `rest` (remaining agents
- * in stable registry order — the input array order). V1.110 does NOT sort
- * `rest` by `lastUpdated`; residual R-V110P2-001 covers that deferral.
- */
-function partitionAgentsByPriority(agents: AgentPickerItem[]): {
-  common: AgentPickerItem[];
-  rest: AgentPickerItem[];
-} {
-  const rest: AgentPickerItem[] = [];
-  const byPriority = new Map<number, AgentPickerItem[]>();
-  for (const agent of agents) {
-    const priorityIndex = findPriorityIndex(agent);
-    if (priorityIndex === -1) {
-      rest.push(agent);
-    } else {
-      const bucket = byPriority.get(priorityIndex);
-      if (bucket) {
-        bucket.push(agent);
-      } else {
-        byPriority.set(priorityIndex, [agent]);
-      }
-    }
-  }
-  const common: AgentPickerItem[] = [];
-  for (let i = 0; i < COMMON_AGENT_PRIORITY.length; i++) {
-    const bucket = byPriority.get(i);
-    if (bucket) common.push(...bucket);
-  }
-  return { common, rest };
+  /**
+   * Desktop capabilities for opening URLs in the system browser.
+   * When provided, Install/Docs links use `openExternalUrl` instead of
+   * `<a target="_blank">` (desktop builds). Browser builds omit this prop.
+   */
+  desktop?: AgentPickerDesktop;
+  /**
+   * Called when `desktop.openExternalUrl` rejects (AD-P1-2: the host must
+   * surface a toast — do not silently no-op). Omitted on browser builds
+   * (where `desktop` is absent).
+   */
+  onExternalUrlError?: () => void;
 }
 
 /**
  * Presentational AgentPicker: loading / ready grid / empty / error + custom launch.
+ *
+ * V1.117 P1 T3: `defaultGrid` (native-first, priority-sorted) and `moreAgents`
+ * (installed-first) are pre-split by the host using the T1 catalog data API.
  */
 export function AgentPicker({
   status,
-  agents = [],
+  defaultGrid = [],
+  moreAgents = [],
   selectedId = null,
   onSelect,
   customLaunchValue = '',
@@ -181,14 +135,14 @@ export function AgentPicker({
   emptyTitle,
   emptyDescription,
   density = 'default',
+  desktop,
+  onExternalUrlError,
 }: AgentPickerProps) {
   const { t } = useTranslation('setup');
   const compact = density === 'compact';
   const [showRest, setShowRest] = useState(false);
-  const { common: commonAgents, rest: restAgents } = useMemo(
-    () => partitionAgentsByPriority(agents),
-    [agents],
-  );
+  const hasMore = moreAgents.length > 0;
+  const totalAgents = defaultGrid.length + moreAgents.length;
   const gridClassName = cn(
     'grid grid-cols-1',
     !compact && 'sm:grid-cols-2',
@@ -198,7 +152,7 @@ export function AgentPicker({
     showCustomLaunch ??
     (status === 'empty' ||
       status === 'error' ||
-      (status === 'ready' && agents.length > 0));
+      (status === 'ready' && totalAgents > 0));
   const effectiveErrorTitle = errorTitle ?? t('agentPicker.error.title');
   const effectiveLoadingLabel = loadingLabel ?? t('agentPicker.loading');
   const effectiveEmptyTitle = emptyTitle ?? t('agentPicker.empty.title');
@@ -270,21 +224,23 @@ export function AgentPicker({
           </div>
         ) : null}
 
-        {status === 'ready' && agents.length > 0 ? (
+        {status === 'ready' && totalAgents > 0 ? (
           <>
             <ul className={gridClassName} data-testid="agent-picker-grid">
-              {commonAgents.map((agent) => (
+              {defaultGrid.map((agent) => (
                 <li key={agent.id}>
                   <AgentCard
                     agent={agent}
                     selected={selectedId === agent.id}
                     onSelect={stableOnSelect}
                     compact={compact}
+                    desktop={desktop}
+                    onExternalUrlError={onExternalUrlError}
                   />
                 </li>
               ))}
             </ul>
-            {restAgents.length > 0 ? (
+            {hasMore ? (
               <button
                 type="button"
                 onClick={() => setShowRest((expanded) => !expanded)}
@@ -296,19 +252,21 @@ export function AgentPicker({
                 {showRest ? t('agentPicker.fewer') : t('agentPicker.more')}
               </button>
             ) : null}
-            {restAgents.length > 0 && showRest ? (
+            {hasMore && showRest ? (
               <ul
                 id="agent-picker-rest"
                 className={gridClassName}
                 data-testid="agent-picker-grid-rest"
               >
-                {restAgents.map((agent) => (
+                {moreAgents.map((agent) => (
                   <li key={agent.id}>
                     <AgentCard
                       agent={agent}
                       selected={selectedId === agent.id}
                       onSelect={stableOnSelect}
                       compact={compact}
+                      desktop={desktop}
+                      onExternalUrlError={onExternalUrlError}
                     />
                   </li>
                 ))}
@@ -321,7 +279,7 @@ export function AgentPicker({
           <div
             className={cn(
               'flex flex-col gap-2',
-              status === 'ready' && agents.length > 0
+              status === 'ready' && totalAgents > 0
                 ? compact
                   ? 'mt-2 border-t border-gray-alpha-400 pt-2'
                   : 'mt-3 border-t border-gray-alpha-400 pt-3'
@@ -347,11 +305,15 @@ const AgentCard = memo(function AgentCard({
   selected,
   onSelect,
   compact,
+  desktop,
+  onExternalUrlError,
 }: {
   agent: AgentPickerItem;
   selected: boolean;
   onSelect?: (id: string) => void;
   compact: boolean;
+  desktop?: AgentPickerDesktop;
+  onExternalUrlError?: () => void;
 }) {
   const { t } = useTranslation('setup');
   const selectable = agent.installed;
@@ -393,10 +355,20 @@ const AgentCard = memo(function AgentCard({
 
       <div className="mt-3 flex flex-wrap items-center gap-3">
         {agent.installUrl ? (
-          <OutboundLink href={agent.installUrl} label={t('agentPicker.install')} />
+          <OutboundLink
+            href={agent.installUrl}
+            label={t('agentPicker.install')}
+            desktop={desktop}
+            onExternalUrlError={onExternalUrlError}
+          />
         ) : null}
         {agent.docsUrl ? (
-          <OutboundLink href={agent.docsUrl} label={t('agentPicker.docs')} />
+          <OutboundLink
+            href={agent.docsUrl}
+            label={t('agentPicker.docs')}
+            desktop={desktop}
+            onExternalUrlError={onExternalUrlError}
+          />
         ) : null}
       </div>
     </div>
@@ -411,17 +383,32 @@ function AgentCardIdentity({
   selected: boolean;
 }) {
   const { t } = useTranslation('setup');
+  const [iconError, setIconError] = useState(false);
+  const label = agent.displayName || agent.name;
+  const showIcon = !!(agent.iconUrl && !iconError);
   return (
     <>
       <div className="flex min-w-0 flex-1 flex-col gap-0.5">
         <div className="flex min-w-0 items-center gap-2">
+          {showIcon ? (
+            <img
+              src={agent.iconUrl!}
+              alt=""
+              className="h-5 w-5 shrink-0 rounded-sm object-contain"
+              onError={() => setIconError(true)}
+            />
+          ) : (
+            <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-sm bg-gray-alpha-200">
+              <User className="h-3 w-3 text-gray-500" aria-hidden />
+            </span>
+          )}
           <span
             className={cn(
               'truncate text-copy-14 font-medium',
               agent.installed ? 'text-gray-1000' : 'text-gray-700',
             )}
           >
-            {agent.name}
+            {label}
           </span>
           {agent.installed ? (
             <Badge
@@ -504,12 +491,48 @@ function StatusDot({
   );
 }
 
-function OutboundLink({ href, label }: { href: string; label: string }) {
+function OutboundLink({
+  href,
+  label,
+  desktop,
+  onExternalUrlError,
+}: {
+  href: string;
+  label: string;
+  desktop?: AgentPickerDesktop;
+  onExternalUrlError?: () => void;
+}) {
+  // On desktop the link must NEVER let the native `href` load the external
+  // page inside the Tauri webview — every activation routes through the
+  // validated system-browser opener. Middle-click / aux-click bypasses
+  // `onClick`, so it is intercepted separately (PR#148 Greptile P2).
+  const isDesktop = Boolean(desktop?.openExternalUrl);
+
+  const routeThroughOpener = useCallback(
+    (e: React.MouseEvent) => {
+      if (!desktop?.openExternalUrl) return;
+      // onClick covers left + modifier (meta/ctrl/shift) clicks. onAuxClick is
+      // attached for middle-click (button === 1); right-click (button === 2)
+      // is left to the host context menu and must not navigate.
+      if (e.type === 'auxclick' && e.button !== 1) return;
+      e.preventDefault();
+      desktop.openExternalUrl(href).catch(() => {
+        // AD-P1-2: surface the failure to the user via the host's toast.
+        // Do not silently no-op.
+        console.error('Failed to open external URL:', href);
+        onExternalUrlError?.();
+      });
+    },
+    [desktop, href, onExternalUrlError],
+  );
+
   return (
     <a
       href={href}
-      target="_blank"
-      rel="noopener noreferrer"
+      target={isDesktop ? undefined : '_blank'}
+      rel={isDesktop ? undefined : 'noopener noreferrer'}
+      onClick={routeThroughOpener}
+      onAuxClick={isDesktop ? routeThroughOpener : undefined}
       aria-label={label}
       className="inline-flex items-center gap-1 text-label-14 font-medium leading-none text-blue-700 transition-colors hover:text-blue-800"
     >

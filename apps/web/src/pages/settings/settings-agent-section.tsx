@@ -13,6 +13,7 @@ import { useTranslation } from 'react-i18next';
 import { Button } from '@/components/ui/button';
 import {
   AgentPicker,
+  type AgentPickerItem,
   type AgentPickerStatus,
   type AgentVerifyStatus,
 } from '@/components/setup/agent-picker';
@@ -21,11 +22,29 @@ import { useDesktopCapabilities } from '@/lib/client-context';
 import { errorMessage } from '@/lib/error-message';
 import { useToast } from '@/lib/use-toast';
 import {
-  agentPickerId,
-  buildAgentsByPickerId,
-  mapScanEntriesToPickerItems,
-} from '@/pages/setup-step-agent';
+  defaultGridEntries,
+  moreAgentsEntries,
+  buildPickerSelection,
+  type AgentCatalogItem,
+} from '@/lib/agent-catalog';
 import type { AgentScanEntry } from '@42ch/nexus-contracts';
+
+/** Map a catalog item → picker view-model. */
+function catalogItemToPickerItem(item: AgentCatalogItem): AgentPickerItem {
+  return {
+    // Selection id is the collision-safe picker id (PR#148 Greptile P1), not
+    // the shared catalog key, so each card maps to exactly one scan row.
+    id: item.pickerId,
+    name: item.name,
+    displayName: item.displayName,
+    version: item.version,
+    description: item.description,
+    iconUrl: item.iconUrl,
+    installed: item.installed,
+    installUrl: item.installUrl ?? null,
+    docsUrl: item.docsUrl ?? null,
+  };
+}
 
 function resolvePickerStatus(
   isLoading: boolean,
@@ -72,9 +91,19 @@ export function SettingsAgentSection() {
   const scan = useScanAgents({ filter: 'all', registry_refresh: true });
   const verifyAgent = useVerifyAgent();
   const agents = scan.data?.agents ?? [];
-  const pickerItems = useMemo(() => mapScanEntriesToPickerItems(agents), [agents]);
+  const defaultGrid = useMemo(
+    () => defaultGridEntries(agents).map(catalogItemToPickerItem),
+    [agents],
+  );
+  const moreAgents = useMemo(
+    () => moreAgentsEntries(agents).map(catalogItemToPickerItem),
+    [agents],
+  );
   const status = resolvePickerStatus(scan.isLoading, scan.isError, agents.length);
-  const agentsById = useMemo(() => buildAgentsByPickerId(agents), [agents]);
+  // Collision-safe picker-id ↔ scan-entry index. Replaces a catalog-key map
+  // that silently collides when two scan rows resolve to the same key and
+  // could save the wrong `launch_command` (PR#148 Greptile P1).
+  const pickerSelection = useMemo(() => buildPickerSelection(agents), [agents]);
 
   const [selectedAgent, setSelectedAgent] = useState<AgentScanEntry | null>(null);
   const [customLaunchCommand, setCustomLaunchCommand] = useState('');
@@ -147,19 +176,11 @@ export function SettingsAgentSection() {
 
   const selectedId = useMemo(() => {
     if (!selectedAgent) return null;
-    for (const [id, agent] of agentsById) {
-      if (
-        agent.registry_agent_id === selectedAgent.registry_agent_id &&
-        agent.name === selectedAgent.name
-      ) {
-        return id;
-      }
-    }
-    return agentPickerId(selectedAgent);
-  }, [selectedAgent, agentsById]);
+    return pickerSelection.byEntry.get(selectedAgent) ?? null;
+  }, [selectedAgent, pickerSelection]);
 
   function selectById(id: string) {
-    const agent = agentsById.get(id);
+    const agent = pickerSelection.byPickerId.get(id);
     if (!agent?.installed) return;
     userTouchedRef.current = true;
     setSelectedAgent(agent);
@@ -236,7 +257,8 @@ export function SettingsAgentSection() {
       <div data-testid="settings-host-picker-region">
         <AgentPicker
           status={status}
-          agents={status === 'ready' ? pickerItems : []}
+          defaultGrid={status === 'ready' ? defaultGrid : []}
+          moreAgents={status === 'ready' ? moreAgents : []}
           selectedId={selectedId}
           onSelect={selectById}
           customLaunchValue={customLaunchCommand}
@@ -250,6 +272,10 @@ export function SettingsAgentSection() {
           }
           onRetry={scan.isError ? () => void scan.refetch() : undefined}
           emptyTitle={t('agent.emptyTitle')}
+          desktop={desktop ?? undefined}
+          onExternalUrlError={() => {
+            toast({ variant: 'error', title: commonT('error.openExternalFailed') });
+          }}
         />
       </div>
 

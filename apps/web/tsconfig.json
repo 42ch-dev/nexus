@@ -18,7 +18,8 @@
     /* Path alias (matches vite.config.ts) */
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "@config/*": ["./config/*"]
     },
 
     /* Strictness */
@@ -31,5 +32,5 @@
     "esModuleInterop": true,
     "types": ["node"]
   },
-  "include": ["src", "vite.config.ts"]
+  "include": ["src", "config", "vite.config.ts"]
 }

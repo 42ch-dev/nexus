@@ -17,7 +17,7 @@ interface VoiceSpecimen {
   fixture: string | { parts: string[] };
   /** Optional DESIGN.md surface-label from the §4.4 table (e.g. "Page title"). */
   surfaceLabel?: string;
-  /** Whether the fixture is a multi-part row (like Verb+Noun). */
+  /** Whether the fixture is a multi-part row (like Verb-only buttons). */
   multi?: boolean;
 }
 
@@ -36,11 +36,17 @@ const SPECIMENS: VoiceSpecimen[] = [
     surfaceLabel: 'Helper text',
   },
   {
-    label: 'Verb + Noun',
-    rule: 'Actions name the object; avoid generic OK / Submit',
-    fixture: { parts: ['Create Work', 'Restart Daemon', 'Continue'] },
-    surfaceLabel: 'Primary action',
+    label: 'Verb-only',
+    rule: 'Buttons and CTAs use a single Title Case verb; name the object in the dialog title when screen readers need it',
+    fixture: { parts: ['Save', 'Create', 'Delete'] },
+    surfaceLabel: 'Button / CTA',
     multi: true,
+  },
+  {
+    label: 'Action + object',
+    rule: 'Dialog titles name the action and the changed object — the button stays Verb-only',
+    fixture: 'Delete Work',
+    surfaceLabel: 'Dialog title',
   },
   {
     label: 'Sentence case, object named',
@@ -139,7 +145,8 @@ function VoiceCard({
 const GUIDANCE_RULES = [
   'Helpful, plain, local-first — a careful CLI message translated into UI copy.',
   'Title Case for nav, buttons, page titles, action verbs; sentence case for helpers, errors, and toasts.',
-  'Actions are Verb + Noun: Create Work, Validate Preset.',
+  'Buttons and CTAs are Verb-only: Save, Create, Delete (zh-CN: 保存, 创建, 删除).',
+  'Boundary: page titles, dialog titles, helpers, and toasts still name the object (e.g. dialog title Delete Work; button Delete).',
   'Prefer author-facing nouns: Work, preset, finding, local daemon.',
   'Toasts name the changed object; no trailing period.',
   'Avoid protocol jargon (ACP, cursor token) in product surfaces unless diagnostics explicitly require it.',
@@ -206,16 +213,17 @@ export function VoicePage() {
       </section>
 
       <p className="text-copy-13 text-gray-500 mt-12 pt-8 border-t border-gray-alpha-200">
-        7 writing-pattern specimens drawn from{' '}
+        8 writing-pattern specimens drawn from{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           DESIGN.md § Voice &amp; Content
         </code>{' '}
-        — labels and rules per IA guide §4.4. Applied across{' '}
+        — Verb-only button rule per DESIGN.md §Voice &amp; Content (V1.117);
+        labels and rules per IA guide §4.4. Applied across{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
           apps/web
         </code>{' '}
-        for page titles, helpers, actions, toasts, empty states, and loading
-        states.
+        for page titles, buttons/CTAs, dialog titles, helpers, toasts, empty
+        states, and loading states.
       </p>
     </div>
   );

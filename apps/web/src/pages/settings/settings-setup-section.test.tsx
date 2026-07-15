@@ -24,6 +24,7 @@ function makeDesktop(
 ): DesktopCapabilities {
   return {
     openWith: () => Promise.resolve(),
+    openExternalUrl: () => Promise.resolve(),
     revealInFinder: () => Promise.resolve(),
     getDaemonStatus: () => Promise.resolve({ state: 'running', port: 8420 }),
     onDaemonStatusChanged: (callback) => {
@@ -45,6 +46,7 @@ function makeDesktop(
         creator_id: 'ctr_local1234567890ab',
         already_bootstrapped: true,
       }),
+    switchActiveCreator: () => Promise.resolve('/tmp/nexus'),
     ...overrides,
   };
 }

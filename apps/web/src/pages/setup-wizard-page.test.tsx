@@ -18,6 +18,7 @@ function makeClient() {
 function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapabilities {
   return {
     openWith: () => Promise.resolve(),
+    openExternalUrl: () => Promise.resolve(),
     revealInFinder: () => Promise.resolve(),
     getDaemonStatus: () => Promise.resolve({ state: 'running', port: 8420 }),
     onDaemonStatusChanged: (callback) => {
@@ -36,6 +37,7 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
     setWorkspacePath: () => Promise.resolve(),
     ensureSetupBootstrap: () =>
       Promise.resolve({ creator_id: 'ctr_local1234567890ab', already_bootstrapped: false }),
+    switchActiveCreator: () => Promise.resolve('/tmp/nexus'),
     ...overrides,
   };
 }
@@ -61,16 +63,37 @@ function useWizardScanHandlers() {
         ],
       }),
     ),
+    http.patch('/v1/daemon/creators/:id', () =>
+      HttpResponse.json({
+        creator_id: 'ctr_local1234567890ab',
+        display_name: 'Test Profile',
+        has_api_key: false,
+        has_cached_token: false,
+        is_active: true,
+      }),
+    ),
   );
 }
 
 async function advanceAgentToWorkspace(user: ReturnType<typeof userEvent.setup>) {
+  // codex-acp is hiddenFromDefault (V1.117 T1 catalog) → behind the More toggle.
+  const moreBtn = await screen.findByTestId('agent-picker-more');
+  await user.click(moreBtn);
   await waitFor(() => expect(screen.getByText('codex')).toBeInTheDocument());
   await user.click(screen.getByText('codex'));
   await user.click(screen.getAllByRole('button', { name: 'Continue' })[0]);
   await waitFor(() =>
-    expect(screen.getByRole('heading', { name: 'Choose a workspace' })).toBeInTheDocument(),
+    expect(screen.getByRole('heading', { name: 'Name your Profile' })).toBeInTheDocument(),
   );
+}
+
+async function fillProfileName(
+  user: ReturnType<typeof userEvent.setup>,
+  name: string = 'Test Profile',
+) {
+  const input = await waitFor(() => screen.getByTestId('wizard-profile-name'));
+  await user.clear(input);
+  await user.type(input, name);
 }
 
 describe('SetupWizardPage', () => {
@@ -192,6 +215,7 @@ describe('SetupWizardPage', () => {
     expect(workspaceCta.querySelector('button[aria-label="Back"]')).toBeInTheDocument();
     expect(workspaceCta.querySelector('button[aria-label="Back"]')).not.toHaveTextContent('Back');
 
+    await fillProfileName(user);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: /You're ready/ })).toBeInTheDocument(),
@@ -220,13 +244,14 @@ describe('SetupWizardPage', () => {
       { client: makeClient(), initialRouterEntries: ['/setup'] },
     );
 
-    expect(screen.getByRole('heading', { name: 'Choose an ACP agent' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Choose an agent' })).toBeInTheDocument();
     await advanceAgentToWorkspace(user);
 
+    await fillProfileName(user);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
 
     await waitFor(() => expect(screen.getByRole('heading', { name: /You're ready/ })).toBeInTheDocument());
-    await user.click(screen.getByRole('button', { name: 'Open Nexus' }));
+    await user.click(screen.getByRole('button', { name: 'Open' }));
 
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('/works'));
   });
@@ -243,10 +268,11 @@ describe('SetupWizardPage', () => {
     await advanceAgentToWorkspace(user);
     await user.click(screen.getByRole('button', { name: 'Back' }));
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'Choose an ACP agent' })).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: 'Choose an agent' })).toBeInTheDocument(),
     );
 
     await advanceAgentToWorkspace(user);
+    await fillProfileName(user);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: /You're ready/ })).toBeInTheDocument(),
@@ -254,7 +280,7 @@ describe('SetupWizardPage', () => {
 
     await user.click(screen.getByRole('button', { name: 'Back' }));
     await waitFor(() =>
-      expect(screen.getByRole('heading', { name: 'Choose a workspace' })).toBeInTheDocument(),
+      expect(screen.getByRole('heading', { name: 'Name your Profile' })).toBeInTheDocument(),
     );
   });
 
@@ -274,20 +300,29 @@ describe('SetupWizardPage', () => {
     );
 
     await advanceAgentToWorkspace(user);
+    await fillProfileName(user);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
 
     await waitFor(() => expect(screen.getByRole('heading', { name: /You're ready/ })).toBeInTheDocument());
-    await user.click(screen.getByRole('button', { name: 'Open Nexus' }));
+    await user.click(screen.getByRole('button', { name: 'Open' }));
 
     await waitFor(() => expect(setAgentProfile).toHaveBeenCalledWith('codex', 'codex'));
     await waitFor(() => expect(setSetupCompleted).toHaveBeenCalledWith(true));
   });
 
-  it('shows a toast and stays on the wizard when saving the profile fails', async () => {
+  it('shows a toast and stays on the workspace step when the profile display name update fails', async () => {
     const user = userEvent.setup();
-    const setAgentProfile = vi.fn(() => Promise.reject(new Error('permission denied')));
+    const setAgentProfile = vi.fn(() => Promise.resolve());
     const setSetupCompleted = vi.fn(() => Promise.resolve());
     useWizardScanHandlers();
+    useHandlers(
+      http.patch('/v1/daemon/creators/:id', () =>
+        HttpResponse.json(
+          { error: { code: 'permission_denied', message: 'permission denied' } },
+          { status: 500 },
+        ),
+      ),
+    );
 
     renderInApp(
       <>
@@ -302,13 +337,13 @@ describe('SetupWizardPage', () => {
     );
 
     await advanceAgentToWorkspace(user);
+    await fillProfileName(user);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
 
-    await waitFor(() => expect(screen.getByRole('heading', { name: /You're ready/ })).toBeInTheDocument());
-    await user.click(screen.getByRole('button', { name: 'Open Nexus' }));
-
-    await waitFor(() => expect(screen.getByText('Could not finish setup')).toBeInTheDocument());
-    expect(screen.getByText('permission denied')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('permission denied')).toBeInTheDocument());
+    expect(screen.getByRole('heading', { name: 'Name your Profile' })).toBeInTheDocument();
+    expect(screen.queryByRole('heading', { name: /You're ready/ })).not.toBeInTheDocument();
+    expect(setAgentProfile).not.toHaveBeenCalled();
     expect(setSetupCompleted).not.toHaveBeenCalled();
     expect(screen.getByTestId('location')).toHaveTextContent('/setup');
   });
@@ -349,11 +384,13 @@ describe('SetupWizardPage', () => {
     );
 
     await advanceAgentToWorkspace(user);
+    await fillProfileName(user);
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() =>
       expect(screen.getByRole('heading', { name: /You're ready/ })).toBeInTheDocument(),
     );
-    await user.click(screen.getByRole('button', { name: 'Open Nexus' }));
+
+    await user.click(screen.getByRole('button', { name: 'Open' }));
 
     await waitFor(() => expect(screen.getByTestId('main-shell')).toBeInTheDocument());
     expect(screen.getByTestId('location')).toHaveTextContent('/works');

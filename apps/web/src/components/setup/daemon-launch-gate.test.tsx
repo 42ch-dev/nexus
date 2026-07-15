@@ -16,6 +16,7 @@ function makeClient(): BrowserClient {
 function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapabilities {
   return {
     openWith: () => Promise.resolve(),
+    openExternalUrl: () => Promise.resolve(),
     revealInFinder: () => Promise.resolve(),
     getDaemonStatus: () =>
       Promise.resolve({ state: 'running', port: 8420, version: 'test' }),
@@ -32,6 +33,7 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
     setWorkspacePath: () => Promise.resolve(),
     ensureSetupBootstrap: () =>
       Promise.resolve({ creator_id: 'ctr_local1234567890ab', already_bootstrapped: false }),
+    switchActiveCreator: () => Promise.resolve('/tmp/nexus'),
     ...overrides,
   };
 }
@@ -164,8 +166,8 @@ describe('DaemonLaunchGate', () => {
 
     await waitFor(() => expect(screen.getByText('Daemon not ready')).toBeInTheDocument());
     expect(screen.getByText(/taking longer than expected/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Restart Nexus/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /Reset local database/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Restart$/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Reset$/i })).toBeInTheDocument();
     expect(startDaemon).not.toHaveBeenCalled();
   });
 
@@ -196,10 +198,10 @@ describe('DaemonLaunchGate', () => {
     });
 
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: /Restart Nexus/i })).toBeInTheDocument(),
+      expect(screen.getByRole('button', { name: /^Restart$/i })).toBeInTheDocument(),
     );
 
-    await user.click(screen.getByRole('button', { name: /Restart Nexus/i }));
+    await user.click(screen.getByRole('button', { name: /^Restart$/i }));
     expect(reloadSpy).toHaveBeenCalled();
   });
 
@@ -231,7 +233,7 @@ describe('DaemonLaunchGate', () => {
     await waitFor(() => expect(screen.getByText('Daemon not ready')).toBeInTheDocument());
     expect(screen.getByText('sidecar crashed')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /Reset local database/i }));
+    await user.click(screen.getByRole('button', { name: /^Reset$/i }));
     await waitFor(() => expect(resetLocalDatabase).toHaveBeenCalled());
     expect(startDaemon).not.toHaveBeenCalled();
     expect(reloadSpy).toHaveBeenCalled();
@@ -264,13 +266,13 @@ describe('DaemonLaunchGate', () => {
     expect(screen.getByText('sidecar crashed')).toBeInTheDocument();
     const subscribeCallsBefore = onDaemonStatusChanged.mock.calls.length;
 
-    await user.click(screen.getByRole('button', { name: /Reset local database/i }));
+    await user.click(screen.getByRole('button', { name: /^Reset$/i }));
     await waitFor(() => expect(resetLocalDatabase).toHaveBeenCalled());
     await waitFor(() => expect(screen.getByText('reset denied')).toBeInTheDocument());
 
     // Failure must not re-run the wait effect (which would clear the error via applyStatus).
     expect(onDaemonStatusChanged.mock.calls.length).toBe(subscribeCallsBefore);
     expect(startDaemon).not.toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: /Restart Nexus/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /^Restart$/i })).toBeInTheDocument();
   });
 });

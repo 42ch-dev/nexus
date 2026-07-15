@@ -22,6 +22,7 @@ const POS = { x: 10, y: 10 };
 function makeDesktop(impl: Partial<DesktopCapabilities> = {}): DesktopCapabilities {
   return {
     openWith: vi.fn().mockResolvedValue(undefined),
+    openExternalUrl: vi.fn().mockResolvedValue(undefined),
     revealInFinder: vi.fn().mockResolvedValue(undefined),
     getDaemonStatus: vi.fn().mockResolvedValue({ state: 'running' }),
     onDaemonStatusChanged: vi.fn().mockResolvedValue(() => {}),
@@ -36,6 +37,7 @@ function makeDesktop(impl: Partial<DesktopCapabilities> = {}): DesktopCapabiliti
     pickDirectory: vi.fn().mockResolvedValue(null),
     setWorkspacePath: vi.fn().mockResolvedValue(undefined),
     ensureSetupBootstrap: vi.fn().mockResolvedValue({ creator_id: 'ctr_local1234567890ab', already_bootstrapped: false }),
+    switchActiveCreator: vi.fn().mockResolvedValue('~/Documents/nexus42/default'),
     ...impl,
   };
 }

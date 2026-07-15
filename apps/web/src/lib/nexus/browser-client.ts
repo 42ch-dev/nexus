@@ -167,6 +167,12 @@ export class BrowserClient implements NexusClient {
   createCreator(request: { display_name: string }): Promise<CreatorDetail> {
     return this.post<CreatorDetail>('/v1/daemon/creators', request);
   }
+  updateCreator(creatorId: string, request: { display_name: string }): Promise<CreatorDetail> {
+    return this.patch<CreatorDetail>(
+      `/v1/daemon/creators/${encodeURIComponent(creatorId)}`,
+      request,
+    );
+  }
   setActiveCreator(request: SetActiveCreatorRequest): Promise<SetActiveCreatorResponse> {
     return this.post<SetActiveCreatorResponse>('/v1/daemon/creators/active', request);
   }

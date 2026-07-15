@@ -21,12 +21,15 @@
 
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use serde::Serialize;
 use tauri::{AppHandle, State};
-use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind, MessageDialogResult};
+use tauri_plugin_dialog::{
+    DialogExt, MessageDialogButtons, MessageDialogKind, MessageDialogResult,
+};
 
 mod connection_config;
 mod sidecar;
@@ -110,6 +113,43 @@ impl Serialize for PathGuardError {
     }
 }
 
+/// Crash-safe file write: write to a sibling temp file on the same filesystem,
+/// then rename it into place. `rename` is atomic on POSIX and avoids leaving a
+/// truncated file if the process is killed mid-write.
+fn atomic_write(path: &Path, contents: &str) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let tmp = path.with_extension("tmp");
+    std::fs::write(&tmp, contents)?;
+    std::fs::rename(&tmp, path)?;
+    Ok(())
+}
+
+/// Non-panicking path-traversal validation for `creator_id`.
+///
+/// Mirrors [`nexus_home_layout::validate_creator_id_safe`] so the Tauri switch
+/// path and the daemon handlers enforce the same rules without adding a
+/// cross-workspace dependency to the standalone desktop crate.
+fn validate_creator_id_safe(id: &str) -> Result<(), String> {
+    if id.chars().any(|ch| ch == '/' || ch == '\\') {
+        return Err(format!(
+            "creator_id contains path separator: {id:?} — rejected for safety"
+        ));
+    }
+    if id.contains("..") {
+        return Err(format!(
+            "creator_id contains '..': {id:?} — rejected for safety"
+        ));
+    }
+    if id.chars().any(char::is_control) {
+        return Err(format!(
+            "creator_id contains control characters: {id:?} — rejected for safety"
+        ));
+    }
+    Ok(())
+}
+
 /// Cached active workspace root, resolved once at startup from
 /// `~/.nexus42/config.toml` (`workspace_path`) — the same source of truth the
 /// daemon uses at boot (`apps/nexus42/src/config.rs`). `None` when no
@@ -117,38 +157,114 @@ impl Serialize for PathGuardError {
 #[derive(Debug, Clone, Default)]
 struct WorkspaceRoot(Option<PathBuf>);
 
-/// Resolve the active workspace root exactly as the daemon/CLI do: read
-/// `~/.nexus42/config.toml` and return its `workspace_path`.
+/// Per-creator workspace path configuration read from `~/.nexus42/config.toml`.
+#[derive(serde::Deserialize, Default)]
+struct WorkspaceConfig {
+    #[serde(default)]
+    active_creator_id: Option<String>,
+    #[serde(default)]
+    workspace_path: Option<PathBuf>,
+    #[serde(default)]
+    workspace_path_by_creator: Option<HashMap<String, String>>,
+}
+
+/// Read workspace-related configuration from a config.toml path.
+fn read_workspace_config_at(path: &Path) -> anyhow::Result<WorkspaceConfig> {
+    if !path.exists() {
+        return Ok(WorkspaceConfig::default());
+    }
+    let content = std::fs::read_to_string(path)?;
+    Ok(toml::from_str::<WorkspaceConfig>(&content)?)
+}
+
+/// One-shot legacy migration: if `[workspace_path_by_creator]` is missing or
+/// empty and a legacy `workspace_path` is set, copy it into the active creator's
+/// map entry so the Default Profile keeps the existing folder (AD-P0-2).
+fn migrate_legacy_workspace_path_at(
+    path: &Path,
+    creator_id: &str,
+    legacy_path: &Path,
+) -> anyhow::Result<()> {
+    let mut doc = if path.exists() {
+        let text = std::fs::read_to_string(path)?;
+        text.parse::<toml_edit::DocumentMut>()?
+    } else {
+        toml_edit::DocumentMut::new()
+    };
+
+    if doc.get("workspace_path_by_creator").is_none() {
+        doc["workspace_path_by_creator"] = toml_edit::Item::Table(toml_edit::Table::new());
+    }
+    let legacy_str = legacy_path.to_string_lossy().to_string();
+    doc["workspace_path_by_creator"][creator_id] = toml_edit::value(&legacy_str);
+    // Keep the legacy mirror intact; do not remove it in V1.117 (AD-P0-2).
+    atomic_write(path, &doc.to_string())?;
+    Ok(())
+}
+
+/// Resolve the active workspace root for a given home directory.
 ///
-/// If `workspace_path` is unset, this function falls back to
-/// `~/Documents/nexus/default/` (cross-platform via `dirs::document_dir()`) and
-/// creates the directory if absent. The fallback matches
-/// [`apps/nexus42/src/config.rs::resolve_default_workspace_path`].
-fn resolve_workspace_root() -> Option<PathBuf> {
-    let home = dirs::home_dir()?;
+/// Read order (AD-P0-1): `[workspace_path_by_creator][active_creator_id]` →
+/// fallback `workspace_path` → default home path (`~/Documents/nexus/default`).
+/// On first access after upgrade, a legacy single `workspace_path` is migrated
+/// into the active creator's map entry (AD-P0-2).
+fn resolve_workspace_root_at(home: &Path, default_root: &Path) -> Option<PathBuf> {
     let config_path = home.join(".nexus42").join("config.toml");
 
-    let configured = std::fs::read_to_string(&config_path)
-        .ok()
-        .and_then(|content| {
-            #[derive(serde::Deserialize)]
-            struct ConfigFile {
-                workspace_path: Option<PathBuf>,
-            }
-            toml::from_str::<ConfigFile>(&content).ok()
-        })
-        .and_then(|cfg| cfg.workspace_path)
-        .filter(|p| !p.as_os_str().is_empty());
+    let mut config = read_workspace_config_at(&config_path).ok()?;
 
-    let root = configured.unwrap_or_else(default_workspace_root);
-    if let Err(e) = std::fs::create_dir_all(&root) {
+    // One-shot migration: map missing/empty + legacy path set → copy to active creator.
+    let map_missing_or_empty = config
+        .workspace_path_by_creator
+        .as_ref()
+        .map(HashMap::is_empty)
+        .unwrap_or(true);
+    if map_missing_or_empty {
+        if let (Some(creator_id), Some(legacy_path)) = (
+            config.active_creator_id.as_deref(),
+            config.workspace_path.as_ref(),
+        ) {
+            if let Err(e) = migrate_legacy_workspace_path_at(&config_path, creator_id, legacy_path
+            ) {
+                eprintln!("nexus-desktop: failed to migrate legacy workspace_path: {e}");
+            }
+            config = read_workspace_config_at(&config_path).ok()?;
+        }
+    }
+
+    let resolved = config
+        .active_creator_id
+        .as_ref()
+        .and_then(|id| {
+            config
+                .workspace_path_by_creator
+                .as_ref()
+                .and_then(|map| map.get(id))
+                .map(PathBuf::from)
+        })
+        .or(config.workspace_path)
+        .unwrap_or_else(|| default_root.to_path_buf());
+
+    if let Err(e) = std::fs::create_dir_all(&resolved) {
         eprintln!(
             "nexus-desktop: failed to create workspace root {}: {e}",
-            root.display()
+            resolved.display()
         );
         // Return the path anyway so the rest of the app can surface the error.
     }
-    Some(root)
+    Some(resolved)
+}
+
+/// Resolve the active workspace root exactly as the daemon/CLI do: read
+/// `~/.nexus42/config.toml` and return the active Profile's path.
+///
+/// If no workspace path is configured for the active Profile, this function falls
+/// back to `~/Documents/nexus/default/` (cross-platform via `dirs::document_dir()`)
+/// and creates the directory if absent. The fallback matches
+/// [`apps/nexus42/src/config.rs::resolve_default_workspace_path`].
+fn resolve_workspace_root() -> Option<PathBuf> {
+    let home = dirs::home_dir()?;
+    resolve_workspace_root_at(&home, &default_workspace_root())
 }
 
 /// Authoritative path guard (compass §5 #8, desktop-shell.md §9).
@@ -227,16 +343,40 @@ fn reveal_in_finder(
     }
 }
 
+/// Validate URL scheme is `http:` or `https:` only. Rejects `file:`, `javascript:`,
+/// etc. Used by `open_external_url` to prevent unsafe URL schemes from reaching the
+/// system browser.
+fn validate_url_scheme(url: &str) -> Result<(), String> {
+    let Some(pos) = url.find("://") else {
+        return Err("URL must have a scheme (e.g. http:// or https://)".to_string());
+    };
+    let scheme = &url[..pos];
+    if scheme != "http" && scheme != "https" {
+        return Err(format!(
+            "URL scheme '{scheme}' is not allowed. Only http and https are supported."
+        ));
+    }
+    Ok(())
+}
+
+/// `open_external_url` — open a URL in the system default browser after scheme
+/// validation (http/https only). Unlike `open_with`, this command has **no**
+/// workspace path guard — it is intended for outbound links (Install/Docs URLs),
+/// not local files.
+#[tauri::command]
+fn open_external_url(url: String) -> Result<(), String> {
+    validate_url_scheme(&url)?;
+    opener::open(&url).map_err(|e| format!("failed to open URL: {e}"))
+}
+
 /// `get_workspace_root` — read-only accessor the JS capability layer uses for
 /// diagnostics (e.g. surfacing "no active workspace" before a right-click). The
 /// authoritative guard still runs in `open_with`/`reveal_in_finder`; this only
-/// drives affordance copy.
+/// drives affordance copy. The returned value is re-resolved from TOML on every
+/// call so the SPA sees the latest persisted path (V1.117 QC1-F-006).
 #[tauri::command]
-fn get_workspace_root(workspace_root: State<'_, WorkspaceRoot>) -> Option<String> {
-    workspace_root
-        .0
-        .as_ref()
-        .map(|p| p.to_string_lossy().to_string())
+fn get_workspace_root() -> Option<String> {
+    resolve_workspace_root().map(|p| p.to_string_lossy().to_string())
 }
 
 /// `get_daemon_status` — surface the resolved port + lifecycle state to the SPA.
@@ -549,13 +689,22 @@ async fn pick_directory(app: AppHandle, default_path: String) -> Result<Option<S
 }
 
 /// Write `workspace_path` to `~/.nexus42/config.toml`, preserving other keys.
+///
+/// V1.117: writes both `[workspace_path_by_creator][active_creator_id]` (SSOT)
+/// and the top-level `workspace_path` legacy mirror (AD-P0-1 / AD-P0-3).
 #[tauri::command]
 fn set_workspace_path(path: String) -> Result<(), String> {
     let config_path = nexus_config_path().ok_or("cannot determine home directory")?;
-    write_workspace_path_at(&config_path, &path)
+    write_workspace_path_for_active_creator_at(&config_path, &path)
         .map_err(|e| format!("failed to write workspace_path: {e}"))
 }
 
+/// Write `workspace_path` to `~/.nexus42/config.toml`, preserving other keys.
+///
+/// Legacy helper used only by bootstrap tests; new code should prefer
+/// `write_workspace_path_for_active_creator_at` which maintains the per-creator
+/// map + mirror.
+#[cfg(test)]
 fn write_workspace_path_at(path: &Path, value: &str) -> anyhow::Result<()> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
@@ -575,6 +724,101 @@ fn write_workspace_path_at(path: &Path, value: &str) -> anyhow::Result<()> {
     doc["workspace_path"] = toml_edit::value(value);
     std::fs::write(path, doc.to_string())?;
     Ok(())
+}
+
+/// Write a workspace path for a specific creator and mirror it to the legacy
+/// top-level `workspace_path` key (AD-P0-1).
+fn write_workspace_path_by_creator_at(
+    path: &Path,
+    creator_id: &str,
+    value: &str,
+) -> anyhow::Result<()> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let mut doc = if path.exists() {
+        let text = std::fs::read_to_string(path)?;
+        text.parse::<toml_edit::DocumentMut>()?
+    } else {
+        toml_edit::DocumentMut::new()
+    };
+
+    if doc.get("workspace_path_by_creator").is_none() {
+        doc["workspace_path_by_creator"] = toml_edit::Item::Table(toml_edit::Table::new());
+    }
+    doc["workspace_path_by_creator"][creator_id] = toml_edit::value(value);
+    doc["workspace_path"] = toml_edit::value(value);
+    atomic_write(path, &doc.to_string())?;
+    Ok(())
+}
+
+/// Write the active Profile's workspace path to the per-creator map and mirror it
+/// to the legacy `workspace_path` key. Errors if no `active_creator_id` exists.
+fn write_workspace_path_for_active_creator_at(path: &Path, value: &str) -> anyhow::Result<()> {
+    let config = read_workspace_config_at(path)?;
+    let creator_id = config
+        .active_creator_id
+        .ok_or_else(|| anyhow::anyhow!("no active creator_id; run setup bootstrap first"))?;
+    write_workspace_path_by_creator_at(path, &creator_id, value)
+}
+
+/// Switch the active creator in `~/.nexus42/config.toml`, ensuring the target has
+/// a workspace path entry (creating a default one if missing) and mirroring that
+/// path to the legacy `workspace_path` key (AD-P0-3 / AD-P0-6).
+fn switch_active_creator_at(path: &Path, creator_id: &str) -> anyhow::Result<String> {
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let mut doc = if path.exists() {
+        let text = std::fs::read_to_string(path)?;
+        text.parse::<toml_edit::DocumentMut>()?
+    } else {
+        toml_edit::DocumentMut::new()
+    };
+
+    if doc.get("workspace_path_by_creator").is_none() {
+        doc["workspace_path_by_creator"] = toml_edit::Item::Table(toml_edit::Table::new());
+    }
+
+    let target_path = doc["workspace_path_by_creator"]
+        .get(creator_id)
+        .and_then(|v| v.as_str())
+        .map(String::from)
+        .unwrap_or_else(|| {
+            let default = default_workspace_root().to_string_lossy().to_string();
+            doc["workspace_path_by_creator"][creator_id] = toml_edit::value(&default);
+            default
+        });
+
+    doc["active_creator_id"] = toml_edit::value(creator_id);
+    doc["workspace_path"] = toml_edit::value(&target_path);
+
+    // Clear any stale workspace slug for the target creator so the Tauri path
+    // matches the daemon's `set_active_creator` invariant (QC1-F-004 parity).
+    if let Some(slugs) = doc
+        .get_mut("active_workspace_slug_by_creator")
+        .and_then(|item| item.as_table_mut())
+    {
+        slugs.remove(creator_id);
+    }
+
+    atomic_write(path, &doc.to_string())?;
+    Ok(target_path)
+}
+
+/// `switch_active_creator` — Tauri command used by the footer Profile switch.
+/// Updates `active_creator_id`, ensures the target Profile has a workspace path
+/// entry, and mirrors that path to the legacy `workspace_path` key. Returns the
+/// resolved workspace path for the switched-to Profile (AD-P0-3 / AC-P0-5).
+#[tauri::command]
+fn switch_active_creator(creator_id: String) -> Result<String, String> {
+    validate_creator_id_safe(&creator_id)
+        .map_err(|reason| format!("invalid creator_id: {reason}"))?;
+    let config_path = nexus_config_path().ok_or("cannot determine home directory")?;
+    switch_active_creator_at(&config_path, &creator_id)
+        .map_err(|e| format!("failed to switch active creator: {e}"))
 }
 
 // ── Setup bootstrap (V1.100 P0) ────────────────────────────────────────
@@ -618,7 +862,11 @@ fn read_bootstrap_state(path: &Path) -> anyhow::Result<(Option<String>, Option<S
     let slug = cfg
         .active_workspace_slug_by_creator
         .as_ref()
-        .and_then(|map| cfg.active_creator_id.as_ref().and_then(|id| map.get(id).cloned()));
+        .and_then(|map| {
+            cfg.active_creator_id
+                .as_ref()
+                .and_then(|id| map.get(id).cloned())
+        });
     Ok((cfg.active_creator_id, slug))
 }
 
@@ -736,6 +984,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_with,
             reveal_in_finder,
+            open_external_url,
             get_workspace_root,
             get_daemon_status,
             start_daemon,
@@ -743,6 +992,7 @@ pub fn run() {
             reset_local_database,
             pick_directory,
             set_workspace_path,
+            switch_active_creator,
             get_setup_completed,
             set_setup_completed,
             set_agent_profile,
@@ -779,10 +1029,7 @@ pub fn run() {
 }
 
 /// Ask the user whether to stop the daemon when quitting the desktop shell.
-async fn handle_quit_with_daemon_prompt(
-    app: AppHandle,
-    manager: sidecar::SidecarManager,
-) {
+async fn handle_quit_with_daemon_prompt(app: AppHandle, manager: sidecar::SidecarManager) {
     let running = manager.is_running().await;
     if !running {
         EXIT_CONFIRMED.store(true, Ordering::SeqCst);
@@ -862,13 +1109,12 @@ mod tests {
 
     use super::{
         default_workspace_root, guard_path, read_agent_profile_at, read_setup_completed_at,
-        reset_local_database_at, setup_auto_starts_sidecar, write_agent_profile_at,
-        write_setup_completed_at, AgentProfile, PathGuardError, WorkspaceRoot,
+        reset_local_database_at, resolve_workspace_root_at, setup_auto_starts_sidecar,
+        switch_active_creator_at, validate_url_scheme, write_agent_profile_at,
+        write_setup_completed_at, write_workspace_path_at, write_workspace_path_by_creator_at,
+        write_workspace_path_for_active_creator_at, AgentProfile, PathGuardError, WorkspaceRoot,
     };
-    use super::{
-        ensure_setup_bootstrap_at, generate_local_creator_id, read_bootstrap_state,
-        write_workspace_path_at,
-    };
+    use super::{ensure_setup_bootstrap_at, generate_local_creator_id, read_bootstrap_state};
     use std::fs;
     use std::path::PathBuf;
 
@@ -974,6 +1220,43 @@ mod tests {
         let err =
             guard_path("Works/WRK/Stories/does-not-exist.md", &ws).expect_err("nonexistent denied");
         assert!(matches!(err, PathGuardError::PathUnresolvable));
+    }
+
+    // ── V1.117 P1: open_external_url scheme validation ────────────────
+
+    #[test]
+    fn open_external_url_accepts_http() {
+        assert!(validate_url_scheme("http://example.com/install").is_ok());
+    }
+
+    #[test]
+    fn open_external_url_accepts_https() {
+        assert!(validate_url_scheme("https://example.com/install").is_ok());
+    }
+
+    #[test]
+    fn open_external_url_rejects_file_scheme() {
+        let err = validate_url_scheme("file:///etc/passwd").expect_err("file scheme rejected");
+        assert!(err.contains("not allowed"), "error should mention scheme: {err}");
+    }
+
+    #[test]
+    fn open_external_url_rejects_javascript_scheme() {
+        let err =
+            validate_url_scheme("javascript:alert(1)").expect_err("javascript scheme rejected");
+        assert!(err.contains("scheme"), "error should mention scheme: {err}");
+    }
+
+    #[test]
+    fn open_external_url_rejects_ftp_scheme() {
+        let err = validate_url_scheme("ftp://files.example.com").expect_err("ftp scheme rejected");
+        assert!(err.contains("not allowed"), "error should mention scheme: {err}");
+    }
+
+    #[test]
+    fn open_external_url_rejects_missing_scheme() {
+        let err = validate_url_scheme("no-scheme").expect_err("missing scheme rejected");
+        assert!(err.contains("scheme"), "error should mention scheme: {err}");
     }
 
     #[test]
@@ -1401,12 +1684,10 @@ command = "claude"
         let config_path = tmp.path().join("config.toml");
 
         // Pre-populate with keys written by wizard step 1 (set_workspace_path).
-        write_workspace_path_at(&config_path, "/tmp/test-workspace")
-            .expect("write workspace_path");
+        write_workspace_path_at(&config_path, "/tmp/test-workspace").expect("write workspace_path");
         write_setup_completed_at(&config_path, false).expect("write setup_completed");
 
-        let result =
-            ensure_setup_bootstrap_at(&config_path).expect("bootstrap should succeed");
+        let result = ensure_setup_bootstrap_at(&config_path).expect("bootstrap should succeed");
         assert!(!result.already_bootstrapped);
 
         let text = std::fs::read_to_string(&config_path).expect("read config");
@@ -1460,8 +1741,7 @@ command = "claude"
         assert_eq!(creator_id.as_deref(), Some("ctr_localABCD1234EF56"));
 
         // ensure_setup_bootstrap must detect and return already_bootstrapped.
-        let result =
-            ensure_setup_bootstrap_at(&config_path).expect("bootstrap should succeed");
+        let result = ensure_setup_bootstrap_at(&config_path).expect("bootstrap should succeed");
         assert!(result.already_bootstrapped);
         assert_eq!(result.creator_id, "ctr_localABCD1234EF56");
     }
@@ -1489,11 +1769,373 @@ command = "claude"
         let tmp = tempfile::tempdir().expect("temp dir");
         let config_path = tmp.path().join("config.toml");
 
-        let result =
-            ensure_setup_bootstrap_at(&config_path).expect("bootstrap should succeed");
+        let result = ensure_setup_bootstrap_at(&config_path).expect("bootstrap should succeed");
 
         let (creator_id, slug) = read_bootstrap_state(&config_path).expect("read state");
         assert_eq!(creator_id.as_deref(), Some(result.creator_id.as_str()));
         assert_eq!(slug.as_deref(), Some("default"));
+    }
+
+    // ── V1.117 P0: per-Profile workspace path (AD-P0-1..AD-P0-3) ─────────
+
+    fn temp_home_with_default_root() -> (tempfile::TempDir, PathBuf) {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let default_root = tmp.path().join("Documents").join("nexus").join("default");
+        std::fs::create_dir_all(&default_root).expect("mkdir default root");
+        (tmp, default_root)
+    }
+
+    #[test]
+    fn workspace_path_set_dual_writes_to_map_and_legacy() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("config.toml");
+        std::fs::write(
+            &config_path,
+            "active_creator_id = \"ctr_localABCD1234EF56\"\n",
+        )
+        .expect("write config");
+
+        write_workspace_path_for_active_creator_at(&config_path, "/custom/profile/path")
+            .expect("write active creator path");
+
+        let text = std::fs::read_to_string(&config_path).expect("read config");
+        assert!(
+            text.contains(r#"ctr_localABCD1234EF56 = "/custom/profile/path""#),
+            "per-creator map should contain the path: {text}"
+        );
+        assert!(
+            text.contains("workspace_path = \"/custom/profile/path\""),
+            "legacy workspace_path should mirror the active Profile path: {text}"
+        );
+    }
+
+    #[test]
+    fn workspace_path_set_requires_active_creator_id() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("config.toml");
+        std::fs::write(&config_path, "workspace_path = \"/legacy\"\n").expect("write config");
+
+        let result = write_workspace_path_for_active_creator_at(&config_path, "/new");
+        assert!(result.is_err(), "set without active_creator_id must fail");
+
+        // The file must not be modified.
+        let text = std::fs::read_to_string(&config_path).expect("read config");
+        assert!(!text.contains("workspace_path_by_creator"));
+        assert!(text.contains("workspace_path = \"/legacy\""));
+    }
+
+    #[test]
+    fn workspace_path_set_preserves_existing_keys() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("config.toml");
+        std::fs::write(
+            &config_path,
+            "active_creator_id = \"ctr_localABCD1234EF56\"\nsetup_completed = true\nruntime_mode = \"local_only\"\n",
+        )
+        .expect("write config");
+
+        write_workspace_path_for_active_creator_at(&config_path, "/custom/path")
+            .expect("write active creator path");
+
+        let text = std::fs::read_to_string(&config_path).expect("read config");
+        assert!(text.contains("setup_completed = true"));
+        assert!(text.contains("runtime_mode = \"local_only\""));
+        assert!(text.contains("active_creator_id"));
+    }
+
+    #[test]
+    fn workspace_path_set_rejects_malformed_toml() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("config.toml");
+        let original = "active_creator_id = \"ctr_localABCD1234EF56\"\nmalformed = \"unclosed\n";
+        std::fs::write(&config_path, original).expect("write malformed config");
+
+        let result = write_workspace_path_for_active_creator_at(&config_path, "/new");
+        assert!(result.is_err(), "malformed TOML should be rejected");
+
+        let text = std::fs::read_to_string(&config_path).expect("read config");
+        assert!(
+            text.contains("active_creator_id"),
+            "existing keys must survive a failed write"
+        );
+        assert!(
+            !text.contains("workspace_path_by_creator"),
+            "per-creator map must not be written on parse failure"
+        );
+        assert!(
+            !text.contains("workspace_path = \"/new\""),
+            "legacy workspace_path must not be written on parse failure"
+        );
+    }
+
+    #[test]
+    fn workspace_path_by_creator_direct_write_mirrors_to_legacy() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("config.toml");
+
+        write_workspace_path_by_creator_at(&config_path, "ctr_localXYZ", "/path/xyz")
+            .expect("write by creator");
+
+        let text = std::fs::read_to_string(&config_path).expect("read config");
+        assert!(text.contains(r#"ctr_localXYZ = "/path/xyz""#));
+        assert!(text.contains("workspace_path = \"/path/xyz\""));
+    }
+
+    #[test]
+    fn resolve_workspace_root_migrates_legacy_to_active_profile() {
+        let (tmp, default_root) = temp_home_with_default_root();
+        let config_path = tmp.path().join(".nexus42").join("config.toml");
+        std::fs::create_dir_all(config_path.parent().unwrap()).expect("mkdir config dir");
+        std::fs::write(
+            &config_path,
+            "active_creator_id = \"ctr_localABCD1234EF56\"\nworkspace_path = \"/legacy/workspace\"\n",
+        )
+        .expect("write legacy config");
+
+        let resolved =
+            resolve_workspace_root_at(tmp.path(), &default_root).expect("resolve workspace root");
+        assert_eq!(resolved, PathBuf::from("/legacy/workspace"));
+
+        // Migration should have persisted the legacy path into the per-creator map.
+        let text = std::fs::read_to_string(&config_path).expect("read config");
+        assert!(
+            text.contains(r#"ctr_localABCD1234EF56 = "/legacy/workspace""#),
+            "legacy path should migrate to workspace_path_by_creator: {text}"
+        );
+        assert!(
+            text.contains("workspace_path = \"/legacy/workspace\""),
+            "legacy mirror should remain: {text}"
+        );
+    }
+
+    #[test]
+    fn resolve_workspace_root_prefers_map_over_legacy() {
+        let (tmp, default_root) = temp_home_with_default_root();
+        let config_path = tmp.path().join(".nexus42").join("config.toml");
+        std::fs::create_dir_all(config_path.parent().unwrap()).expect("mkdir config dir");
+        std::fs::write(
+            &config_path,
+            "active_creator_id = \"ctr_localABCD1234EF56\"\n\
+             workspace_path = \"/legacy/workspace\"\n\
+             [workspace_path_by_creator]\n\
+             ctr_localABCD1234EF56 = \"/map/workspace\"\n",
+        )
+        .expect("write config");
+
+        let resolved =
+            resolve_workspace_root_at(tmp.path(), &default_root).expect("resolve workspace root");
+        assert_eq!(resolved, PathBuf::from("/map/workspace"));
+    }
+
+    #[test]
+    fn resolve_workspace_root_does_not_migrate_when_map_is_populated() {
+        let (tmp, default_root) = temp_home_with_default_root();
+        let config_path = tmp.path().join(".nexus42").join("config.toml");
+        std::fs::create_dir_all(config_path.parent().unwrap()).expect("mkdir config dir");
+        std::fs::write(
+            &config_path,
+            "active_creator_id = \"ctr_localABCD1234EF56\"\n\
+             workspace_path = \"/legacy/workspace\"\n\
+             [workspace_path_by_creator]\n\
+             ctr_localABCD1234EF56 = \"/map/workspace\"\n",
+        )
+        .expect("write config");
+
+        let text_before = std::fs::read_to_string(&config_path).expect("read config");
+        let resolved =
+            resolve_workspace_root_at(tmp.path(), &default_root).expect("resolve workspace root");
+        assert_eq!(resolved, PathBuf::from("/map/workspace"));
+
+        let text_after = std::fs::read_to_string(&config_path).expect("read config");
+        assert_eq!(
+            text_before, text_after,
+            "migration should not rewrite a populated map"
+        );
+    }
+
+    #[test]
+    fn resolve_workspace_root_fallback_to_default() {
+        let (tmp, default_root) = temp_home_with_default_root();
+        let config_path = tmp.path().join(".nexus42").join("config.toml");
+        std::fs::create_dir_all(config_path.parent().unwrap()).expect("mkdir config dir");
+        std::fs::write(
+            &config_path,
+            "active_creator_id = \"ctr_localABCD1234EF56\"\n",
+        )
+        .expect("write config");
+
+        let resolved =
+            resolve_workspace_root_at(tmp.path(), &default_root).expect("resolve workspace root");
+        assert_eq!(resolved, default_root);
+    }
+
+    #[test]
+    fn resolve_workspace_root_returns_legacy_when_no_active_creator() {
+        let (tmp, default_root) = temp_home_with_default_root();
+        let config_path = tmp.path().join(".nexus42").join("config.toml");
+        std::fs::create_dir_all(config_path.parent().unwrap()).expect("mkdir config dir");
+        std::fs::write(&config_path, "workspace_path = \"/legacy/workspace\"\n")
+            .expect("write config");
+
+        // Without active_creator_id we cannot migrate, but we still fall back to legacy.
+        let resolved =
+            resolve_workspace_root_at(tmp.path(), &default_root).expect("resolve workspace root");
+        assert_eq!(resolved, PathBuf::from("/legacy/workspace"));
+
+        let text = std::fs::read_to_string(&config_path).expect("read config");
+        assert!(
+            !text.contains("workspace_path_by_creator"),
+            "must not migrate without active_creator_id"
+        );
+    }
+
+    #[test]
+    fn switch_active_creator_updates_active_and_mirrors_target_path() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("config.toml");
+        std::fs::write(
+            &config_path,
+            "active_creator_id = \"profile_a\"\n\
+             workspace_path = \"/path/a\"\n\
+             [workspace_path_by_creator]\n\
+             profile_a = \"/path/a\"\n\
+             profile_b = \"/path/b\"\n",
+        )
+        .expect("write config");
+
+        let path = switch_active_creator_at(&config_path, "profile_b").expect("switch");
+        assert_eq!(path, "/path/b");
+
+        let text = std::fs::read_to_string(&config_path).expect("read config");
+        assert!(text.contains("active_creator_id = \"profile_b\""));
+        assert!(text.contains("workspace_path = \"/path/b\""));
+        assert!(text.contains("profile_a = \"/path/a\""));
+        assert!(text.contains("profile_b = \"/path/b\""));
+    }
+
+    #[test]
+    fn switch_active_creator_creates_default_entry_for_missing_profile() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("config.toml");
+        std::fs::write(
+            &config_path,
+            "active_creator_id = \"profile_a\"\n\
+             workspace_path = \"/path/a\"\n\
+             [workspace_path_by_creator]\n\
+             profile_a = \"/path/a\"\n",
+        )
+        .expect("write config");
+
+        let path = switch_active_creator_at(&config_path, "profile_b").expect("switch");
+        let default_path = default_workspace_root().to_string_lossy().to_string();
+        assert_eq!(path, default_path);
+
+        let text = std::fs::read_to_string(&config_path).expect("read config");
+        assert!(text.contains("active_creator_id = \"profile_b\""));
+        assert!(
+            text.contains(&format!("profile_b = \"{default_path}\"")),
+            "default entry should be created for profile_b: {text}"
+        );
+        assert!(
+            text.contains(&format!("workspace_path = \"{default_path}\"")),
+            "legacy workspace_path should mirror the new default path: {text}"
+        );
+    }
+
+    #[test]
+    fn switch_active_creator_preserves_existing_keys() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("config.toml");
+        std::fs::write(
+            &config_path,
+            "active_creator_id = \"profile_a\"\n\
+             setup_completed = true\n\
+             runtime_mode = \"local_only\"\n\
+             [workspace_path_by_creator]\n\
+             profile_a = \"/path/a\"\n",
+        )
+        .expect("write config");
+
+        switch_active_creator_at(&config_path, "profile_b").expect("switch");
+
+        let text = std::fs::read_to_string(&config_path).expect("read config");
+        assert!(text.contains("setup_completed = true"));
+        assert!(text.contains("runtime_mode = \"local_only\""));
+    }
+
+    #[test]
+    fn switch_active_creator_rejects_malformed_toml() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("config.toml");
+        let original = "active_creator_id = \"profile_a\"\nmalformed = \"unclosed\n";
+        std::fs::write(&config_path, original).expect("write malformed config");
+
+        let result = switch_active_creator_at(&config_path, "profile_b");
+        assert!(result.is_err(), "malformed TOML should be rejected");
+
+        let text = std::fs::read_to_string(&config_path).expect("read config");
+        assert!(
+            text.contains("active_creator_id = \"profile_a\""),
+            "existing keys must survive a failed switch"
+        );
+        assert!(
+            !text.contains("profile_b"),
+            "switch must not write on parse failure"
+        );
+    }
+
+    #[test]
+    fn switch_active_creator_clears_target_workspace_slug() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join("config.toml");
+        std::fs::write(
+            &config_path,
+            "active_creator_id = \"profile_a\"\n\
+             workspace_path = \"/path/a\"\n\
+             [workspace_path_by_creator]\n\
+             profile_a = \"/path/a\"\n\
+             profile_b = \"/path/b\"\n\
+             [active_workspace_slug_by_creator]\n\
+             profile_b = \"old-slug\"\n",
+        )
+        .expect("write config");
+
+        switch_active_creator_at(&config_path, "profile_b").expect("switch");
+
+        let text = std::fs::read_to_string(&config_path).expect("read config");
+        assert!(text.contains("active_creator_id = \"profile_b\""));
+        assert!(
+            !text.contains("old-slug"),
+            "stale workspace slug for target creator should be cleared"
+        );
+    }
+
+    #[test]
+    fn get_workspace_root_re_resolves_from_toml() {
+        let tmp = tempfile::tempdir().expect("temp dir");
+        let config_path = tmp.path().join(".nexus42").join("config.toml");
+        std::fs::create_dir_all(config_path.parent().unwrap()).expect("mkdir config dir");
+        std::fs::write(
+            &config_path,
+            "active_creator_id = \"profile_a\"\n\
+             [workspace_path_by_creator]\n\
+             profile_a = \"/custom/path\"\n",
+        )
+        .expect("write config");
+
+        let original_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", tmp.path());
+        let result = crate::get_workspace_root();
+        if let Some(original) = original_home {
+            std::env::set_var("HOME", original);
+        } else {
+            std::env::remove_var("HOME");
+        }
+
+        assert_eq!(
+            result,
+            Some("/custom/path".to_string()),
+            "get_workspace_root must re-resolve from TOML, not a startup snapshot"
+        );
     }
 }

@@ -6,7 +6,7 @@
   "helper": "Manage your local agent, workspace, daemon connection, and setup options from one place.",
   "nav": {
     "agent": "Agent",
-    "workspace": "Workspace",
+    "workspace": "Profiles",
     "appearance": "Appearance",
     "advanced": "Advanced"
   },
@@ -21,19 +21,19 @@
     }
   },
   "workspace": {
-    "title": "Workspace",
-    "helper": "View or change where Nexus stores your creative files on this machine.",
-    "folderLabel": "Workspace folder",
-    "changeFolder": "Change Folder…",
-    "browserOnly": "Workspace path changes are available on the desktop app only.",
-    "savedHonesty": "Workspace path saved. Restart or reload the app so the running daemon uses the new location.",
+    "title": "Profiles",
+    "helper": "View or change the workspace folder for the active Profile.",
+    "folderLabel": "Profile workspace folder",
+    "changeFolder": "Change…",
+    "browserOnly": "Profile workspace path changes are available on the desktop app only.",
+    "savedHonesty": "Profile workspace path saved. Restart or reload the app so the running daemon uses the new location.",
     "restartLabel": "Quit and reopen Nexus"
   },
   "agent": {
     "title": "Agent",
-    "helper": "Choose which local ACP agent Nexus uses for creative work.",
+    "helper": "Choose which local agent Nexus uses for creative work.",
     "browserOnly": "Agent selection is available on the desktop app only.",
-    "save": "Save Agent",
+    "save": "Save",
     "saving": "Saving…",
     "scanError": "The daemon did not respond to the agent scan request.",
     "emptyTitle": "No agents found on PATH."
@@ -51,8 +51,10 @@
     "apiKeyHelperPrefix": "The API key from the daemon machine (",
     "apiKeyCommand": "nexus42 daemon api-key",
     "apiKeyHelperSuffix": " on that host).",
-    "showKey": "Show key",
-    "hideKey": "Hide key",
+    "showKey": "Show",
+    "hideKey": "Hide",
+    "showKeyAria": "Show key",
+    "hideKeyAria": "Hide key",
     "labelLabel": "Label (optional)",
     "loopback": "This daemon has no TLS certificate. It is running in loopback-only mode, so remote access is not available. Use local mode instead.",
     "fingerprintTrust": "Confirm the certificate fingerprint matches what you see on the daemon machine before connecting.",
@@ -64,7 +66,7 @@
     "useLocalDaemon": "Use Local Daemon",
     "trustAndConnect": "Trust This Certificate and Connect",
     "reconnectWithSettings": "Reconnect With These Settings",
-    "fetchFingerprint": "Fetch fingerprint",
+    "fetchFingerprint": "Fetch",
     "fetchingFingerprint": "Fetching fingerprint…",
     "originNotePrefix": "If you are connecting from a browser tab to a remote daemon, your serving origin must be listed in the daemon's ",
     "originSetting": "NEXUS_DAEMON_ALLOWED_ORIGINS",
@@ -75,7 +77,7 @@
   "setup": {
     "title": "Setup",
     "helper": "Return to the first-run wizard to walk through setup steps again. Your workspace and agent choices are kept.",
-    "rerun": "Re-run Setup",
+    "rerun": "Re-run",
     "browserOnly": "Re-run setup is available on the desktop app only.",
     "browserTooltip": "Open the Nexus desktop app to re-run setup.",
     "confirmTitle": "Re-run Setup?",

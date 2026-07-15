@@ -7,10 +7,26 @@ import { SetupStepWorkspace } from '@/pages/setup-step-workspace';
 import { renderInApp } from '@/test/test-providers';
 import type { DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
 import type { WizardState } from '@/pages/setup-wizard-page';
+import type { CreatorDetail } from '@42ch/nexus-contracts';
+import type { NexusClient } from '@/lib/nexus';
+
+function makeClient(overrides: Partial<Pick<NexusClient, 'updateCreator'>> = {}): NexusClient {
+  const updateCreator = vi.fn(() =>
+    Promise.resolve({ creator_id: 'ctr_local1234567890ab', display_name: 'Test Profile' } as unknown as CreatorDetail),
+  ) as unknown as NexusClient['updateCreator'];
+  return {
+    updateCreator: overrides.updateCreator ?? updateCreator,
+  } as unknown as NexusClient;
+}
+
+function mockUpdateCreator(fn: () => Promise<unknown> = () => Promise.resolve({ creator_id: 'ctr_local1234567890ab' })): NexusClient['updateCreator'] {
+  return vi.fn(fn) as unknown as NexusClient['updateCreator'];
+}
 
 function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapabilities {
   return {
     openWith: () => Promise.resolve(),
+    openExternalUrl: () => Promise.resolve(),
     revealInFinder: () => Promise.resolve(),
     getDaemonStatus: () => Promise.resolve({ state: 'running', port: 8420 }),
     onDaemonStatusChanged: () => Promise.resolve(() => {}),
@@ -25,6 +41,7 @@ function makeDesktop(overrides: Partial<DesktopCapabilities> = {}): DesktopCapab
     pickDirectory: () => Promise.resolve(null),
     setWorkspacePath: () => Promise.resolve(),
     ensureSetupBootstrap: () => Promise.resolve({ creator_id: 'ctr_local1234567890ab', already_bootstrapped: false }),
+    switchActiveCreator: () => Promise.resolve('/tmp/nexus'),
     ...overrides,
   };
 }
@@ -34,6 +51,7 @@ function makeState(overrides: Partial<WizardState> = {}): WizardState {
     workspaceRoot: '',
     selectedAgent: null,
     customLaunchCommand: '',
+    profileDisplayName: 'Test Profile',
     ...overrides,
   };
 }
@@ -59,11 +77,12 @@ function Harness({ initial, onNext = vi.fn(), onBack = vi.fn() }: HarnessProps) 
 
 function renderHarness(
   initial: WizardState,
-  options: { desktop?: DesktopCapabilities; onNext?: () => void; onBack?: () => void } = {},
+  options: { client?: NexusClient; desktop?: DesktopCapabilities; onNext?: () => void; onBack?: () => void } = {},
 ) {
   return renderInApp(
     <Harness initial={initial} onNext={options.onNext} onBack={options.onBack} />,
     {
+      client: options.client ?? makeClient(),
       desktop: options.desktop,
       initialRouterEntries: ['/setup'],
     },
@@ -75,16 +94,16 @@ describe('SetupStepWorkspace', () => {
     renderHarness(makeState());
 
     await waitFor(() => expect(screen.getByDisplayValue('~/Documents/nexus/default')).toBeInTheDocument());
-    const button = screen.getByRole('button', { name: 'Change Folder…' });
+    const button = screen.getByRole('button', { name: 'Change…' });
     expect(button).toBeInTheDocument();
     expect(button).toBeDisabled();
   });
 
-  it('renders Choose a workspace heading and Back to Agent CTA', async () => {
+  it('renders Name your Profile heading and Back to Agent CTA', async () => {
     const onBack = vi.fn();
     renderHarness(makeState({ workspaceRoot: '/custom/nexus' }), { onBack });
 
-    expect(screen.getByRole('heading', { name: 'Choose a workspace' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: 'Name your Profile' })).toBeInTheDocument();
     const backButton = screen.getByRole('button', { name: 'Back' });
     expect(backButton).toBeInTheDocument();
     expect(backButton).not.toHaveTextContent('Back');
@@ -116,7 +135,7 @@ describe('SetupStepWorkspace', () => {
     expect(pathInput).toHaveClass('flex-1');
     expect(pathContainer?.parentElement).toHaveAttribute('data-testid', 'workspace-location-row');
 
-    const changeFolderButton = screen.getByRole('button', { name: 'Change Folder…' });
+    const changeFolderButton = screen.getByRole('button', { name: 'Change…' });
     expect(changeFolderButton).toHaveClass('shrink-0');
   });
 
@@ -126,7 +145,7 @@ describe('SetupStepWorkspace', () => {
     });
 
     await waitFor(() => expect(screen.getByDisplayValue('/custom/nexus')).toBeInTheDocument());
-    const changeFolderButton = screen.getByRole('button', { name: 'Change Folder…' });
+    const changeFolderButton = screen.getByRole('button', { name: 'Change…' });
     expect(changeFolderButton).toBeInTheDocument();
     expect(changeFolderButton.closest('[data-testid="workspace-location-row"]')).toBeInTheDocument();
   });
@@ -139,8 +158,8 @@ describe('SetupStepWorkspace', () => {
       desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve('/custom/nexus'), pickDirectory }),
     });
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Change Folder…' })).toBeEnabled());
-    await user.click(screen.getByRole('button', { name: 'Change Folder…' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Change…' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Change…' }));
 
     await waitFor(() => expect(pickDirectory).toHaveBeenCalledWith('/custom/nexus'));
     await waitFor(() =>
@@ -210,8 +229,8 @@ describe('SetupStepWorkspace', () => {
       desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve('/custom/nexus'), pickDirectory }),
     });
 
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Change Folder…' })).toBeEnabled());
-    await user.click(screen.getByRole('button', { name: 'Change Folder…' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Change…' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Change…' }));
 
     await waitFor(() => expect(screen.getByText('dialog failed')).toBeInTheDocument());
   });
@@ -286,7 +305,7 @@ describe('SetupStepWorkspace', () => {
         screen.getByText(/Retry Continue, or use Reset local database below if the problem persists/),
       ).toBeInTheDocument(),
     );
-    expect(screen.getByRole('button', { name: 'Reset local database' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reset' })).toBeInTheDocument();
     expect(onNext).not.toHaveBeenCalled();
   });
 
@@ -310,10 +329,10 @@ describe('SetupStepWorkspace', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Reset local database' })).toBeInTheDocument(),
+      expect(screen.getByRole('button', { name: 'Reset' })).toBeInTheDocument(),
     );
 
-    await user.click(screen.getByRole('button', { name: 'Reset local database' }));
+    await user.click(screen.getByRole('button', { name: 'Reset' }));
     await waitFor(() => expect(resetLocalDatabase).toHaveBeenCalled());
     expect(startDaemon).not.toHaveBeenCalled();
     expect(reloadSpy).toHaveBeenCalled();
@@ -336,12 +355,95 @@ describe('SetupStepWorkspace', () => {
     await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() => expect(screen.getByText(/config write failed/)).toBeInTheDocument());
-    expect(screen.getByRole('button', { name: 'Reset local database' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Reset' })).toBeInTheDocument();
 
     await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
     await user.click(screen.getByRole('button', { name: 'Continue' }));
     await waitFor(() => expect(onNext).toHaveBeenCalled());
-    expect(screen.queryByRole('button', { name: 'Reset local database' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Reset' })).not.toBeInTheDocument();
+  });
+
+  it('renders the Profile name field', async () => {
+    renderHarness(makeState({ workspaceRoot: '/custom/nexus' }), {
+      desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve('/custom/nexus') }),
+    });
+
+    await waitFor(() => expect(screen.getByTestId('wizard-profile-name')).toBeInTheDocument());
+    expect(screen.getByLabelText('Profile name')).toBeInTheDocument();
+  });
+
+  it('updates the Profile name as the author types', async () => {
+    const user = userEvent.setup();
+    renderHarness(makeState({ workspaceRoot: '/custom/nexus' }), {
+      desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve('/custom/nexus') }),
+    });
+
+    const input = await waitFor(() => screen.getByTestId('wizard-profile-name'));
+    await user.clear(input);
+    await user.type(input, 'Alice');
+    expect(input).toHaveValue('Alice');
+  });
+
+  it('persists the Profile display name after bootstrap', async () => {
+    const user = userEvent.setup();
+    const onNext = vi.fn();
+    const ensureSetupBootstrap = vi.fn(() =>
+      Promise.resolve({ creator_id: 'ctr_local1234567890ab', already_bootstrapped: false }),
+    );
+    const updateCreator = mockUpdateCreator();
+
+    renderHarness(makeState({ workspaceRoot: '/custom/nexus', profileDisplayName: 'Alice' }), {
+      desktop: makeDesktop({
+        getWorkspaceRoot: () => Promise.resolve('/custom/nexus'),
+        ensureSetupBootstrap,
+      }),
+      client: makeClient({ updateCreator }),
+      onNext,
+    });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() => expect(ensureSetupBootstrap).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(updateCreator).toHaveBeenCalledWith('ctr_local1234567890ab', { display_name: 'Alice' }),
+    );
+    await waitFor(() => expect(onNext).toHaveBeenCalled());
+  });
+
+  it('blocks Continue when the Profile name is empty', async () => {
+    const onNext = vi.fn();
+    const updateCreator = mockUpdateCreator();
+
+    renderHarness(makeState({ workspaceRoot: '/custom/nexus', profileDisplayName: '' }), {
+      desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve('/custom/nexus') }),
+      client: makeClient({ updateCreator }),
+      onNext,
+    });
+
+    await waitFor(() =>
+      expect(screen.getByRole('button', { name: 'Continue' })).toBeDisabled(),
+    );
+    expect(updateCreator).not.toHaveBeenCalled();
+    expect(onNext).not.toHaveBeenCalled();
+  });
+
+  it('surfaces an updateCreator error and stays on the step', async () => {
+    const user = userEvent.setup();
+    const onNext = vi.fn();
+    const updateCreator = mockUpdateCreator(() => Promise.reject(new Error('display name conflict')));
+
+    renderHarness(makeState({ workspaceRoot: '/custom/nexus', profileDisplayName: 'Alice' }), {
+      desktop: makeDesktop({ getWorkspaceRoot: () => Promise.resolve('/custom/nexus') }),
+      client: makeClient({ updateCreator }),
+      onNext,
+    });
+
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Continue' })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: 'Continue' }));
+
+    await waitFor(() => expect(screen.getByText('display name conflict')).toBeInTheDocument());
+    expect(onNext).not.toHaveBeenCalled();
   });
 
   it('skips bootstrap in browser mode and advances directly', async () => {

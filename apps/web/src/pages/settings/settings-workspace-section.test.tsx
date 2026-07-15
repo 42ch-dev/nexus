@@ -1,5 +1,5 @@
 /**
- * Settings Workspace section — mount, desktop persist, browser-only branch.
+ * Settings Profiles section — mount, desktop persist, browser-only branch.
  */
 import { describe, expect, it, vi } from 'vitest';
 import { screen, waitFor } from '@testing-library/react';
@@ -18,6 +18,7 @@ function makeDesktopCapabilities(): DesktopCapabilities {
     pickDirectory: vi.fn(() => Promise.resolve(PICKED_PATH)),
     setWorkspacePath: vi.fn(() => Promise.resolve()),
     openWith: vi.fn(() => Promise.resolve()),
+    openExternalUrl: vi.fn(() => Promise.resolve()),
     revealInFinder: vi.fn(() => Promise.resolve()),
     getDaemonStatus: vi.fn(() =>
       Promise.resolve({ state: 'running' as const, port: 8420 }),
@@ -33,6 +34,7 @@ function makeDesktopCapabilities(): DesktopCapabilities {
     ensureSetupBootstrap: vi.fn(() =>
       Promise.resolve({ creator_id: 'creator-a', already_bootstrapped: true }),
     ),
+    switchActiveCreator: vi.fn(() => Promise.resolve('/tmp/nexus')),
   };
 }
 
@@ -45,11 +47,11 @@ describe('SettingsWorkspaceSection', () => {
     expect(screen.getByTestId('settings-workspace-section')).toBeInTheDocument();
     expect(screen.getByTestId('settings-workspace-card')).toBeInTheDocument();
     expect(
-      screen.getByRole('heading', { name: 'Workspace', level: 3 }),
+      screen.getByRole('heading', { name: 'Profiles', level: 3 }),
     ).toBeInTheDocument();
     expect(
       screen.getByText(
-        /View or change where Nexus stores your creative files on this machine/i,
+        /View or change the workspace folder for the active Profile/i,
       ),
     ).toBeInTheDocument();
 
@@ -73,7 +75,7 @@ describe('SettingsWorkspaceSection', () => {
       ),
     );
     expect(desktop.getWorkspaceRoot).toHaveBeenCalledTimes(1);
-    expect(screen.getByRole('button', { name: 'Change Folder…' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Change…' })).toBeEnabled();
   });
 
   it('persists a picked directory and shows inline honesty copy', async () => {
@@ -88,7 +90,7 @@ describe('SettingsWorkspaceSection', () => {
       ),
     );
 
-    await user.click(screen.getByRole('button', { name: 'Change Folder…' }));
+    await user.click(screen.getByRole('button', { name: 'Change…' }));
 
     await waitFor(() =>
       expect(desktop.setWorkspacePath).toHaveBeenCalledWith(PICKED_PATH),
@@ -97,7 +99,7 @@ describe('SettingsWorkspaceSection', () => {
 
     await waitFor(() =>
       expect(screen.getByTestId('settings-workspace-saved-honesty')).toHaveTextContent(
-        /Restart or reload the app so the running daemon uses the new location/i,
+        /Profile workspace path saved/i,
       ),
     );
     expect(screen.getByDisplayValue(PICKED_PATH)).toHaveValue(PICKED_PATH);
@@ -116,10 +118,10 @@ describe('SettingsWorkspaceSection', () => {
       ),
     );
 
-    await user.click(screen.getByRole('button', { name: 'Change Folder…' }));
+    await user.click(screen.getByRole('button', { name: 'Change…' }));
 
     await waitFor(() =>
-      expect(screen.getByRole('button', { name: 'Change Folder…' })).not.toBeDisabled(),
+      expect(screen.getByRole('button', { name: 'Change…' })).not.toBeDisabled(),
     );
     expect(desktop.pickDirectory).toHaveBeenCalledWith(INITIAL_PATH);
     expect(desktop.setWorkspacePath).not.toHaveBeenCalled();
@@ -137,11 +139,11 @@ describe('SettingsWorkspaceSection', () => {
 
     expect(
       screen.getByText(
-        'Workspace path changes are available on the desktop app only.',
+        'Profile workspace path changes are available on the desktop app only.',
       ),
     ).toBeInTheDocument();
 
-    const button = screen.getByRole('button', { name: 'Change Folder…' });
+    const button = screen.getByRole('button', { name: 'Change…' });
     expect(button).toBeDisabled();
   });
 });

@@ -77,7 +77,7 @@ describe('EntityInspector', () => {
     const titleInput = await findByDisplayValue('Aria Stormwind');
     await user.type(titleInput, ' (v2)');
 
-    const save = await findByRole('button', { name: /Save entity/i });
+    const save = await findByRole('button', { name: /^Save$/i });
     await user.click(save);
 
     await waitFor(() => expect(client.worldKbPatchEntity).toHaveBeenCalled());
@@ -102,7 +102,7 @@ describe('EntityInspector', () => {
     // Type a non-JSON string (a bare word is not valid JSON → JSON.parse throws).
     await user.type(body, 'not valid json');
 
-    (await findByRole('button', { name: /Save entity/i })).click();
+    (await findByRole('button', { name: /^Save$/i })).click();
     expect(await findByText(/Body must be valid JSON/i)).toBeInTheDocument();
     expect(client.worldKbPatchEntity).not.toHaveBeenCalled();
   });
@@ -127,7 +127,7 @@ describe('EntityInspector', () => {
 
     const title = await findByDisplayValue('Aria Stormwind');
     await user.type(title, '!');
-    (await findByRole('button', { name: /Save entity/i })).click();
+    (await findByRole('button', { name: /^Save$/i })).click();
 
     await waitFor(() => expect(onConflict).toHaveBeenCalled());
     expect(onConflict.mock.calls[0][0]).toMatchObject({
@@ -156,7 +156,7 @@ describe('EntityInspector', () => {
 
     const title = await findByDisplayValue('Aria Stormwind');
     await user.type(title, '!');
-    (await findByRole('button', { name: /Save entity/i })).click();
+    (await findByRole('button', { name: /^Save$/i })).click();
 
     // The hook's global onError toasts non-conflict/non-validation failures.
     expect(await screen.findByRole('alert')).toBeInTheDocument();

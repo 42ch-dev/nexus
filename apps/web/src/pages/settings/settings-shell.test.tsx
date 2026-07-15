@@ -107,6 +107,7 @@ const settingsRouteTree = (
 
 describe('SettingsAgentSection', () => {
   it('renders AgentPicker body (browser, no desktop)', async () => {
+    const user = userEvent.setup();
     useHandlers(scanHandler(), creatorsHandler());
 
     renderInApp(
@@ -128,8 +129,12 @@ describe('SettingsAgentSection', () => {
     expect(screen.queryByTestId('wizard-cta-row')).not.toBeInTheDocument();
 
     await waitFor(() =>
-      expect(screen.getByTestId('agent-card-codex-acp')).toBeInTheDocument(),
+      expect(screen.getByTestId('agent-picker')).toBeInTheDocument(),
     );
+    // codex-acp is in moreAgents — expand to find it.
+    const moreBtn = await screen.findByTestId('agent-picker-more');
+    await user.click(moreBtn);
+    expect(screen.getByTestId('agent-card-codex-acp')).toBeInTheDocument();
   });
 });
 
@@ -181,7 +186,7 @@ describe('Settings shell routes', () => {
     );
     expect(
       within(nav).getByTestId('settings-section-nav-workspace'),
-    ).toHaveTextContent('Workspace');
+    ).toHaveTextContent('Profiles');
     expect(
       within(nav).getByTestId('settings-section-nav-appearance'),
     ).toHaveTextContent('Appearance');
@@ -216,7 +221,7 @@ describe('Settings shell routes', () => {
     );
     expect(
       within(nav).getByTestId('settings-section-nav-workspace'),
-    ).toHaveTextContent('工作区');
+    ).toHaveTextContent('Profiles');
     expect(
       within(nav).getByTestId('settings-section-nav-appearance'),
     ).toHaveTextContent('外观');

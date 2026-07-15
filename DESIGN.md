@@ -942,7 +942,15 @@ Canonical SVG assets ship from `@42ch/nexus-ui/assets/logos/`. PNG sources are p
 
 - Helpful, plain, local-first — a careful CLI message translated into UI copy.
 - Title Case for nav, buttons, page titles, action verbs; sentence case for helpers, errors, and toasts.
-- Actions are **Verb + Noun**: `Create Work`, `Validate Preset`.
+- **Buttons and CTAs are Verb-only (V1.117)** — a single Title Case verb: `Save`, `Create`, `Delete` (zh-CN: `保存`, `创建`, `删除`). The changed object is usually obvious from page context; do **not** use Verb + Noun on button labels.
+
+  | Before (Verb + Noun) | After (Verb-only) |
+  | --- | --- |
+  | `Save Agent` / `保存智能体` | `Save` / `保存` |
+  | `Create Work` (button) | `Create` |
+  | `Delete Work` (button) | `Delete` — dialog title keeps the object: `Delete Work` |
+
+- **Boundary — these surfaces keep naming the object** and are unchanged by the Verb-only rule: page titles and dialog titles may still use Verb + Noun (`Create Work` page title; `Delete Work` dialog title); nav items stay Title Case; helpers and toasts still name the changed object. Destructive actions put the verb on the button (`Delete`) and the object in the dialog title or `aria-label` when screen readers need it.
 - Prefer author-facing nouns: `Work`, `preset`, `finding`, `local daemon`.
 - Toasts name the changed object; no trailing period.
 - Avoid protocol jargon (`ACP`, `cursor token`) in product surfaces unless diagnostics explicitly require it.
@@ -1056,9 +1064,9 @@ Token values: see frontmatter `components.states`.
 | `EmptyState` | `components.states.empty` — title `heading-16`/`gray-1000`, description `copy-14`/`gray-900`, `space-2` gap, `space-16` vertical padding | Title: **No agents found on PATH**; helper: *Install an agent or add a custom launch command below.*; host-owned `action` slot |
 | `ErrorState` | `components.states.error` — title `heading-16`/`red-1000`, description `copy-14`/`red-900`, tinted background/border, `rounded-card`, `space-4` padding; retry `label-14`/`blue-700` | Title: **Could not load this view**; helper: sentence-case transport or plain-language reason; action: **Try again** |
 
-`EmptyState` accepts an optional `action` ReactNode — the host renders the first-step CTA (e.g. **Create Work**); the primitive does not embed routing.
+`EmptyState` accepts an optional `action` ReactNode — the host renders the first-step CTA (Verb-only, e.g. **Create**); the primitive does not embed routing.
 
-`ErrorState` uses `role="alert"`; default retry label **Try again** (Title Case verb + noun).
+`ErrorState` uses `role="alert"`; default retry label **Try again** (Title Case action).
 
 ### Form Field (composition)
 
@@ -1160,7 +1168,7 @@ Portrait Done step centers the success stack in `data-testid="wizard-step-body"`
 | --- | --- | --- |
 | Heading | Title Case title + celebratory emoji **after** title text | **You're ready 🎉** |
 | Helper | One line, sentence case | *Open Nexus to start writing. You can change settings anytime.* |
-| Primary CTA | Verb + product noun | **Open Nexus** |
+| Primary CTA | Verb-only (Title Case verb) | **Open** |
 | Finishing state | Present participle + ellipsis | *Finishing…* |
 
 ---

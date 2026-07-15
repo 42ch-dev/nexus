@@ -61,7 +61,7 @@
     "kindLabel": "类型",
     "ruleSuggestionLabel": "规则建议",
     "ruleSuggestionPlaceholder": "清空以移除规则建议",
-    "saveChanges": "保存更改",
+    "saveChanges": "保存",
     "reset": "重置",
     "unsavedChanges": "未保存更改"
   },

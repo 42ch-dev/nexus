@@ -58,6 +58,26 @@ describe('TauriDesktopCapabilities', () => {
     restoreTauri();
   });
 
+  it('openExternalUrl invokes the open_external_url command with the url payload', async () => {
+    const { invoke } = mockTauri(() => Promise.resolve(undefined));
+    const caps = new TauriDesktopCapabilities();
+    await caps.openExternalUrl('https://example.com/install');
+    expect(invoke).toHaveBeenCalledWith('open_external_url', { url: 'https://example.com/install' });
+    restoreTauri();
+  });
+
+  it('openExternalUrl unwraps a structured error into DesktopCapabilityError', async () => {
+    mockTauri(() =>
+      Promise.reject({ code: 'invoke_failed', message: 'URL scheme not allowed: file' }),
+    );
+    const caps = new TauriDesktopCapabilities();
+    await expect(caps.openExternalUrl('file:///etc/passwd')).rejects.toMatchObject({
+      code: 'invoke_failed',
+      message: 'URL scheme not allowed: file',
+    });
+    restoreTauri();
+  });
+
   it('unwraps a Rust path_outside_workspace rejection into the structured error', async () => {
     // Mirrors the Rust PathGuardError serialized shape ({ code, message }).
     mockTauri(() =>
@@ -155,6 +175,30 @@ describe('TauriDesktopCapabilities', () => {
     mockTauri(() => Promise.reject('string error'));
     const caps = new TauriDesktopCapabilities();
     await expect(caps.getAgentProfile()).resolves.toBeNull();
+    restoreTauri();
+  });
+
+  it('switchActiveCreator invokes switch_active_creator with the creator id and returns the new path', async () => {
+    const { invoke } = mockTauri((cmd) => {
+      if (cmd === 'switch_active_creator') {
+        return Promise.resolve('/Users/author/Documents/nexus-profile-b');
+      }
+      return Promise.resolve(undefined);
+    });
+    const caps = new TauriDesktopCapabilities();
+    const path = await caps.switchActiveCreator('creator-b');
+    expect(invoke).toHaveBeenCalledWith('switch_active_creator', { creatorId: 'creator-b' });
+    expect(path).toBe('/Users/author/Documents/nexus-profile-b');
+    restoreTauri();
+  });
+
+  it('switchActiveCreator unwraps a structured error into DesktopCapabilityError', async () => {
+    mockTauri(() => Promise.reject({ code: 'invoke_failed', message: 'failed to switch active creator: config locked' }));
+    const caps = new TauriDesktopCapabilities();
+    await expect(caps.switchActiveCreator('creator-b')).rejects.toMatchObject({
+      code: 'invoke_failed',
+      message: 'failed to switch active creator: config locked',
+    });
     restoreTauri();
   });
 

@@ -1,7 +1,167 @@
 {
   "version": 1,
-  "updated_at": "2026-07-13",
+  "updated_at": "2026-07-14",
   "plans": [
+    {
+      "id": "2026-07-14-v1.117-profiles-workspace",
+      "title": "P0 - Profiles + per-Profile workspace",
+      "file": "plans/2026-07-14-v1.117-profiles-workspace.md",
+      "status": "Done",
+      "owner": "@project-manager",
+      "agents": [
+        "@fullstack-dev",
+        "@frontend-dev"
+      ],
+      "progress": 100,
+      "tags": [
+        "v1.117",
+        "profiles",
+        "workspace",
+        "must"
+      ],
+      "created_at": "2026-07-14",
+      "updated_at": "2026-07-14",
+      "notes": "Phase 2: SDD T1-T4 done + QC fix-wave; QC tri Approve with residuals; QA Pass (7/7 AC); 6 residuals deferred",
+      "metadata": {
+        "iteration_refs": [
+          "V1.117"
+        ],
+        "spec_integration_branch": "iteration/v1.117",
+        "merge_target": "iteration/v1.117",
+        "working_branch": "plan/v1.117-p0-profiles-workspace",
+        "primary_spec": ".mstar/iterations/v1.117/specs/profiles-workspace.md",
+        "wire_contracts_changed": false,
+        "tier": "Must"
+      }
+    },
+    {
+      "id": "2026-07-14-v1.117-setup-agents-catalog",
+      "title": "P1 - Setup Agents catalog polish",
+      "file": "plans/2026-07-14-v1.117-setup-agents-catalog.md",
+      "status": "Done",
+      "owner": "@project-manager",
+      "agents": [
+        "@frontend-dev",
+        "@fullstack-dev"
+      ],
+      "progress": 100,
+      "tags": [
+        "v1.117",
+        "agents",
+        "setup",
+        "must"
+      ],
+      "created_at": "2026-07-14",
+      "updated_at": "2026-07-14",
+      "notes": "Phase 2: SDD T1-T4 done + QC fix-wave; QC tri Approve with residuals (QC2 degraded, PM-supplemented); QA Pass with notes (8/8 AC); 4 residuals deferred",
+      "metadata": {
+        "iteration_refs": [
+          "V1.117"
+        ],
+        "spec_integration_branch": "iteration/v1.117",
+        "merge_target": "iteration/v1.117",
+        "working_branch": "plan/v1.117-p1-setup-agents-catalog",
+        "primary_spec": ".mstar/iterations/v1.117/specs/setup-agents-catalog.md",
+        "wire_contracts_changed": false,
+        "tier": "Must"
+      }
+    },
+    {
+      "id": "2026-07-14-v1.117-shell-layout-ia",
+      "title": "P2 - Shell layout + menu IA + status bar",
+      "file": "plans/2026-07-14-v1.117-shell-layout-ia.md",
+      "status": "Done",
+      "owner": "@project-manager",
+      "agents": [
+        "@frontend-dev"
+      ],
+      "progress": 100,
+      "tags": [
+        "v1.117",
+        "shell",
+        "ia",
+        "status-bar",
+        "must"
+      ],
+      "created_at": "2026-07-14",
+      "updated_at": "2026-07-14",
+      "notes": "Phase 2: SDD T1-T4 done + design-studio regression fix; QC tri Approve (clean, no fix-wave); QA pending",
+      "metadata": {
+        "iteration_refs": [
+          "V1.117"
+        ],
+        "spec_integration_branch": "iteration/v1.117",
+        "merge_target": "iteration/v1.117",
+        "working_branch": "plan/v1.117-p2-shell-layout-ia",
+        "primary_spec": ".mstar/iterations/v1.117/specs/shell-layout-ia.md",
+        "wire_contracts_changed": false,
+        "tier": "Must"
+      }
+    },
+    {
+      "id": "2026-07-14-v1.117-mac-dock-icon",
+      "title": "P3 - Mac Dock transparent icon",
+      "file": "plans/2026-07-14-v1.117-mac-dock-icon.md",
+      "status": "Done",
+      "owner": "@project-manager",
+      "agents": [
+        "@frontend-dev",
+        "@ops-engineer"
+      ],
+      "progress": 100,
+      "tags": [
+        "v1.117",
+        "desktop",
+        "icon",
+        "should"
+      ],
+      "created_at": "2026-07-14",
+      "updated_at": "2026-07-14",
+      "notes": "Phase 2: SDD T1-T2 done; QC tri Approve (clean, no fix-wave); QA pending",
+      "metadata": {
+        "iteration_refs": [
+          "V1.117"
+        ],
+        "spec_integration_branch": "iteration/v1.117",
+        "merge_target": "iteration/v1.117",
+        "working_branch": "plan/v1.117-p3-mac-dock-icon",
+        "primary_spec": ".mstar/iterations/v1.117/specs/mac-dock-icon.md",
+        "wire_contracts_changed": false,
+        "tier": "Should"
+      }
+    },
+    {
+      "id": "2026-07-14-v1.117-button-voice-verb-only",
+      "title": "P4 - Button voice Verb-only + DESIGN.md",
+      "file": "plans/2026-07-14-v1.117-button-voice-verb-only.md",
+      "status": "Done",
+      "owner": "@project-manager",
+      "agents": [
+        "@frontend-dev",
+        "@writing-specialist"
+      ],
+      "progress": 100,
+      "tags": [
+        "v1.117",
+        "voice",
+        "design",
+        "must"
+      ],
+      "created_at": "2026-07-14",
+      "updated_at": "2026-07-14",
+      "notes": "Phase 2: SDD T1-T3 done + QC fix-wave; QC tri Approve with residuals (QC2 degraded, PM-supplemented); QA pending",
+      "metadata": {
+        "iteration_refs": [
+          "V1.117"
+        ],
+        "spec_integration_branch": "iteration/v1.117",
+        "merge_target": "iteration/v1.117",
+        "working_branch": "plan/v1.117-p4-button-voice",
+        "primary_spec": ".mstar/iterations/v1.117/specs/button-voice-verb-only.md",
+        "wire_contracts_changed": false,
+        "tier": "Must"
+      }
+    },
     {
       "id": "2026-07-13-v1.116-agent-detection-codex-native",
       "title": "P0 - Agent Detection Fix + codex-native Provider",
@@ -381,11 +541,11 @@
     }
   ],
   "metadata": {
-    "integration_branch_retired": true,
+    "integration_branch_retired": false,
     "iteration_base_branch": "main",
     "last_integration_branch": "iteration/v1.115",
-    "latest_active_compass": "v1.116-delivery-compass.md",
-    "latest_active_iteration": "V1.116",
+    "latest_active_compass": "v1.117/delivery-compass.md",
+    "latest_active_iteration": "V1.117",
     "latest_ship": {
       "iteration": "V1.115",
       "compass": "v1.115-delivery-compass.md",
@@ -396,7 +556,7 @@
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "pre_iteration_hotfix": null,
-    "spec_integration_branch": "iteration/v1.116",
+    "spec_integration_branch": "iteration/v1.117",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {
@@ -465,9 +625,177 @@
         "2026-07-12-v1.113-i18n-completion": 4
       }
     },
-    "updated_at": "2026-07-13"
+    "updated_at": "2026-07-13",
+    "phase1_status": "locked"
   },
   "residual_findings": {
+    "2026-07-14-v1.117-profiles-workspace": [
+      {
+        "id": "R-V1117P0QC1-F002",
+        "title": "Daemon creator handlers use hand-written serde types; new PatchCreatorRequest bypasses @42ch/nexus-contracts codegen (creator-detail.schema.json exists, handlers not migrated)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.117",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-14-v1.117-profiles-workspace.md",
+        "note": "QC1 F-002. Codebase-wide daemon handler → generated types migration; pre-existing pattern. Out of V1.117 P0 scope."
+      },
+      {
+        "id": "R-V1117P0QC1-F005",
+        "title": "WorkspaceRoot Tauri state captured at startup; path-guard uses stale root after Profile switch until restart (V1.66 carry-over by design)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.117",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-14-v1.117-profiles-workspace.md",
+        "note": "QC1 F-005. Restart-honesty banner covers UX; path-guard refresh is V1.66+ scope."
+      },
+      {
+        "id": "R-V1117P0QC1-F008",
+        "title": "Six near-duplicate TOML round-trip-and-write helpers in desktop lib.rs; extract nexus_home_layout::config::read_and_update SSOT",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.117",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-14-v1.117-profiles-workspace.md",
+        "note": "QC1 F-008. Extends R-V195-ARCH-DUPLICATE-DEFAULTS to TOML-write helpers. atomic_write extracted for 3 new paths only."
+      },
+      {
+        "id": "R-V1117P0QC2-F005",
+        "title": "resolve_workspace_root_at returns None with no diagnostic when config.toml unreadable/corrupt",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.117",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-14-v1.117-profiles-workspace.md",
+        "note": "QC2 F-005. Fail-closed is correct; add diagnostic logging later."
+      },
+      {
+        "id": "R-V1117P0QC2-F006",
+        "title": "patch_creator display_name lacks control-character sanitization beyond length/non-empty",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.117",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-14-v1.117-profiles-workspace.md",
+        "note": "QC2 F-006. serde_json escapes correctly; low risk local-only."
+      },
+      {
+        "id": "R-V1117P0QC3-W001",
+        "title": "Footer switch two sequential Tauri calls (switchActiveCreator → getWorkspaceRoot); second-call failure leaves in-memory state inconsistent",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.117",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-14-v1.117-profiles-workspace.md",
+        "note": "QC3 W-002. Near-zero practical risk; getWorkspaceRoot reads pre-populated state."
+      },
+      {
+        "id": "R-V1117P1QC1-W2",
+        "title": "Saved agent profile stores display_name not provider id (spec AD-P1-4 drift); restoration works only by coincidence",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.117",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-14-v1.117-setup-agents-catalog.md",
+        "note": "QC1 W2. Align saved profile id with override key in a future iteration."
+      },
+      {
+        "id": "R-V1117P1QC1-S1",
+        "title": "Three dead legacy exports (agentPickerId, assignCollisionSafePickerIds, mapScanEntriesToPickerItems) in setup-step-agent.tsx — only consumed by own test",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.117",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-14-v1.117-setup-agents-catalog.md",
+        "note": "QC1 S1. Cleanup."
+      },
+      {
+        "id": "R-V1117P1QC1-S2",
+        "title": "agent-catalog-overrides.json has no runtime shape guard (TS type assertion only)",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.117",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-14-v1.117-setup-agents-catalog.md",
+        "note": "QC1 S2. Build-time TS type only; repo-tracked config."
+      },
+      {
+        "id": "R-V1117P1QC3-W002",
+        "title": "moreAgentsEntries() recomputes defaultGridEntries() internally; redundant computation on scan-data change",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.117",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-14-v1.117-setup-agents-catalog.md",
+        "note": "QC3 W002. Memoized at call site; small scan sizes."
+      },
+      {
+        "id": "R-V1117P2QC2-W001",
+        "title": "useScanAgents called before browser-null guard in daemon-status-bar (React hooks ordering cosmetic)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.117",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-14-v1.117-shell-layout-ia.md",
+        "note": "QC2 W-001. Status bar returns null on browser after hooks run; cosmetic only."
+      },
+      {
+        "id": "R-V1117P2QC2-W002",
+        "title": "Drill-in uses workId without route-pattern guard (future-proofing when deeper routes added)",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.117",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-14-v1.117-shell-layout-ia.md",
+        "note": "QC2 W-002. Works today; tighten when adding deeper routes."
+      },
+      {
+        "id": "R-V1117P4-SEC-CTAS",
+        "title": "Security/trust CTAs retain full descriptive labels (Trust This Certificate and Connect, Use Local Daemon, Reconnect With These Settings, etc.) — PM-accepted safety-critical exception to Verb-only",
+        "severity": "low",
+        "decision": "accept",
+        "owner": "@frontend-dev",
+        "target": "post-V1.117",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-14-v1.117-button-voice-verb-only.md",
+        "note": "QC1 W-001. Safety-critical informed-consent labels; full phrase IS the accessible name; abbreviation risks user harm (analogous to AD-P4-1 aria sole-carrier exception)."
+      },
+      {
+        "id": "R-V1117P4-PAGINATION",
+        "title": "Load more … pagination button retains standard idiom (not swept to Verb-only)",
+        "severity": "nit",
+        "decision": "accept",
+        "owner": "@frontend-dev",
+        "target": "post-V1.117",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-14-v1.117-button-voice-verb-only.md",
+        "note": "QC1 W-001. Standard pagination idiom; 'more' is not a noun object."
+      },
+      {
+        "id": "R-V1117P4-DESIGN-STUDIO-MIRROR",
+        "title": "design-studio connect-daemon-form-chrome.tsx mirror still hardcodes Show key/Hide key (developer gallery, excluded from i18n)",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.117",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-14-v1.117-button-voice-verb-only.md",
+        "note": "Fix-wave observation. One-line follow-up for Voice gallery consistency."
+      }
+    ],
     "2026-07-05-v1.91-findings-batch": [
       {
         "id": "R-V191P1-005",

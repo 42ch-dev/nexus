@@ -99,7 +99,7 @@
     "empty": "选择一个章节以查看其大纲元数据。",
     "publishedWarning": "本章已发布。修改需通过 Fork 或修订流程进行。",
     "finalizedConfirm": "本章已锁定。编辑将移除锁定保护，是否继续？",
-    "save": "保存章节",
+    "save": "保存",
     "movePrevVolume": "移到上一卷",
     "moveNextVolume": "移到下一卷",
     "field": {
@@ -131,7 +131,7 @@
     "addTitle": "添加事件",
     "titlePlaceholder": "事件标题…",
     "descriptionPlaceholder": "描述（可选）…",
-    "addButton": "添加到时间线",
+    "addButton": "添加",
     "attachTitle": "关联到已选章节",
     "attachAria": "将事件关联到第 {{chapter}} 章",
     "removeTitle": "移除事件",
@@ -142,7 +142,7 @@
     "unlinkAria": "移除到 {{title}} 的伏笔关联",
     "targetAria": "{{title}} 的伏笔目标",
     "targetPlaceholder": "选择要关联的伏笔目标…",
-    "link": "关联伏笔"
+    "link": "关联"
   },
   "sceneInspector": {
     "title": "场景",
@@ -193,7 +193,7 @@
       "description": "状态机与转换编辑器",
       "showGraph": "显示图谱",
       "showList": "显示列表",
-      "createTransition": "创建转换",
+      "createTransition": "创建",
       "livePrefix": "实时：",
       "liveStatus": ""
     },
@@ -274,7 +274,7 @@
       "conditionLabel": "条件",
       "conditionPlaceholder": "条件（可选）…",
       "cancel": "取消",
-      "submit": "创建转换",
+      "submit": "创建",
       "creating": "创建中…",
       "draftAriaLabel": "从 {{source}} 到 {{target}} 的草稿转换"
     },
@@ -285,7 +285,7 @@
         "ariaLabel": "状态检查器",
         "labelLabel": "标签",
         "descriptionLabel": "描述",
-        "save": "保存状态",
+        "save": "保存",
         "saved": "已保存",
         "saveFailed": "保存失败",
         "saving": "保存中…",
@@ -295,7 +295,7 @@
         "title": "转换",
         "ariaLabel": "转换检查器",
         "targetLabel": "目标",
-        "save": "保存转换",
+        "save": "保存",
         "saved": "已保存",
         "saveFailed": "保存失败",
         "saving": "保存中…",
@@ -305,7 +305,7 @@
         "title": "提示词",
         "ariaLabel": "提示词检查器",
         "placeholder": "输入提示词模板…",
-        "save": "保存提示词",
+        "save": "保存",
         "saved": "已保存",
         "saveFailed": "保存失败",
         "saving": "保存中…",
@@ -347,7 +347,7 @@
     "localSectionTitle": "你的编辑",
     "useCurrent": "使用当前版本",
     "keepEditing": "继续编辑",
-    "reapplyLabel": "重新应用我的编辑",
+    "reapplyLabel": "重新应用",
     "reviewButton": "并排审阅",
     "review": {
       "server": "服务器：{{label}}",
@@ -416,7 +416,7 @@
       "description": "浏览实体与提升候选。编辑受逐行版本检查保护。",
       "showGraph": "显示图谱",
       "showList": "显示列表视图",
-      "refresh": "立即刷新"
+      "refresh": "刷新"
     },
     "altView": {
       "entities": "实体",
@@ -434,7 +434,7 @@
     "entityInspector": {
       "title": "实体",
       "description": "编辑此世界条目。冲突按行检测——Nexus 会阻止过期写入。",
-      "save": "保存实体",
+      "save": "保存",
       "saving": "保存中…",
       "noChanges": "无变更。",
       "editing": "正在编辑：{{fields}}",
@@ -459,8 +459,8 @@
       "typeLabel": "关系类型",
       "customLabelLabel": "自定义标签",
       "customLabelPlaceholder": "例如：童年好友",
-      "save": "保存更改",
-      "add": "添加关系",
+      "save": "保存",
+      "add": "添加",
       "removeAria": "移除关系"
     },
     "promotionInspector": {
@@ -587,8 +587,8 @@
       "serverSection": "服务器变更",
       "localSection": "你即将提交的修改",
       "useCurrent": "使用当前版本",
-      "reapply": "重新应用我的编辑",
-      "promoteReapply": "重新应用我的决定",
+      "reapply": "重新应用",
+      "promoteReapply": "重新应用",
       "cancel": "取消",
       "modifiedByOther": "已被其他会话修改",
       "changedByOther": "已被其他会话更改",

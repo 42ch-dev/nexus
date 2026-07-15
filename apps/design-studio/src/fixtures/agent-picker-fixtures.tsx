@@ -85,7 +85,7 @@ function InteractiveSelectedFixture() {
   return (
     <AgentPicker
       status="ready"
-      agents={INSTALLED_ONLY}
+      defaultGrid={INSTALLED_ONLY}
       selectedId={selectedId}
       onSelect={setSelectedId}
       customLaunchValue={custom}
@@ -100,7 +100,7 @@ function InteractiveMixedFixture() {
   return (
     <AgentPicker
       status="ready"
-      agents={MIXED}
+      defaultGrid={MIXED}
       selectedId={selectedId}
       onSelect={setSelectedId}
       customLaunchValue={custom}
@@ -132,7 +132,7 @@ export function AgentPickerFixtures() {
       >
         <AgentPicker
           status="ready"
-          agents={INSTALLED_ONLY}
+          defaultGrid={INSTALLED_ONLY}
           selectedId={null}
           onSelect={() => undefined}
           customLaunchValue=""

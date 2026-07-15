@@ -103,7 +103,7 @@
     "reflecting": "正在反思…",
     "ungeneratedTitle": "反思你正在变成谁",
     "ungeneratedDescription": "Nexus 将反思你的主题、变化与创作成长。",
-    "reflectCta": "反思我的 SOUL",
+    "reflectCta": "反思",
     "insufficientTitle_creator": "你的 SOUL 仍在成形",
     "insufficientTitle_world": "这个世界的 SOUL 仍在成形",
     "insufficientDescription_creator": "继续写作和回顾——当你积累了足够的片段、主题和创作经验后，Nexus 可以反思你正在变成谁。",
@@ -154,7 +154,7 @@
       "description": "此章节处于 {{status}} 状态。结构编辑应当很少见。",
       "warning": "你正在编辑一个 {{status}} 章节。这是被允许的，但可能影响已确定的内容。",
       "cancel": "取消",
-      "confirm": "确认编辑"
+      "confirm": "确认"
     }
   }
 }

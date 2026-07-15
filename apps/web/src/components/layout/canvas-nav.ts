@@ -1,25 +1,31 @@
-import { Globe, ListTree, Workflow } from 'lucide-react';
+import { Globe, ListTree } from 'lucide-react';
 
-import type { ShellNavGroup, ShellNavItem } from './presentational/shell-sidebar-chrome';
+import type { ShellNavItem } from './presentational/shell-sidebar-chrome';
 
 /**
- * Canvas nav group — V1.111 P1 sidebar IA restructure.
+ * Canvas nav items + active-surface resolver.
  *
- * The three canvas surfaces (Outline / World KB / Strategy) are nested under a
- * single "Canvas" {@link ShellNavGroup} disclosure. Because the three surfaces
- * use **different route params** (`workId` / `worldId` / `presetId`), they
- * cannot all nest under one "active Work" id — see
- * `plans/2026-07-12-v1.111-sidebar-canvas-ia.md` § Architecture locks #1.
+ * V1.111 grouped the three canvas surfaces (Outline / World KB / Strategy)
+ * under a single "Canvas" {@link ShellNavGroup} disclosure. V1.117 removes that
+ * group (AC-P2-3): Outline + World KB fold under the Creation (Creator) tab as
+ * resolver-driven canvas items; Strategy moves to the Orchestration tab as a
+ * plain `/strategies` link (AC-P2-4).
  *
  * Active-surface highlight derives from **route-pattern matching** via
  * {@link resolveActiveCanvasSurface}, NOT from a single Work param and NOT from
  * the chrome's built-in `item.to` prefix match (which is too broad — it would
  * light up "Outline" on plain `/works/:workId` work-detail).
  *
- * Consumed by T2 (`sidebar.tsx` restructure) and T3 (navigation wiring).
+ * {@link CANVAS_ITEMS} holds the two surfaces still rendered via the resolver
+ * path in the sidebar (Outline, World KB). The {@link CanvasSurfaceId} type and
+ * resolvers still cover `strategy` (the `/strategies/:presetId` route remains a
+ * canvas surface conceptually), but Strategy is no longer a sidebar canvas
+ * item — it renders as a plain Orchestrator link.
  */
 
-/** The three canvas surfaces exposed under the "Canvas" nav group. */
+/** The canvas surfaces. Only `outline` + `world-kb` are sidebar items (V1.117);
+ * `strategy` is still a canvas surface for the resolver, but renders as a plain
+ * Orchestrator link. */
 export type CanvasSurfaceId = 'outline' | 'world-kb' | 'strategy';
 
 /**
@@ -34,22 +40,24 @@ export interface CanvasNavItem extends ShellNavItem {
 }
 
 /**
- * The three canvas nav items, in display order.
+ * The canvas nav items rendered via the resolver path in the sidebar, in
+ * display order (V1.117 regroup).
+ *
+ * Strategy is intentionally absent: it moved to the Orchestration tab as a
+ * plain `/strategies` link (AC-P2-4). Outline + World KB remain
+ * resolver-driven because their click target depends on the URL-scoped
+ * Work/World context (see {@link resolveCanvasNavTarget}).
  *
  * Each `to` is the **entity-list entry point** for its surface — the place a
- * user lands to pick the context (Work / World / Preset) the surface renders:
+ * user lands to pick the context (Work / World) the surface renders:
  * - Outline   → `/works`      (pick a Work → `/works/:workId/outline`)
  * - World KB  → `/worlds`     (pick a World → `/worlds/:worldId/kb`)
- * - Strategy  → `/strategies` (pick a Preset → `/strategies/:presetId`)
  *
  * The static `to` is the chrome-keyed identity (and the resolver's domain is
  * the route pattern, not `to`). The actual click destination is computed by
  * {@link resolveCanvasNavTarget} (T3), which preserves the active Work/World
  * context when one is in the URL and falls back to the list picker otherwise.
- * This mirrors P0's command palette (`components/canvas/canvas-nav-commands.tsx`):
- * `go.outline` / `go.world-kb` drop into the context-scoped surface route when
- * the id is present, else fall back to the list; `go.strategy` always goes to
- * the list.
+ * This mirrors the command palette (`components/canvas/canvas-nav-commands.tsx`).
  *
  * World KB (V1.115 T3): the `/worlds` picker route IS registered in `App.tsx`.
  * When no `worldId` is in the URL, {@link resolveCanvasNavTarget} falls back to
@@ -61,22 +69,7 @@ export interface CanvasNavItem extends ShellNavItem {
 export const CANVAS_ITEMS: CanvasNavItem[] = [
   { to: '/works', label: 'Outline', icon: ListTree, surfaceId: 'outline' },
   { to: '/worlds', label: 'World KB', icon: Globe, surfaceId: 'world-kb' },
-  { to: '/strategies', label: 'Strategy', icon: Workflow, surfaceId: 'strategy' },
 ];
-
-/**
- * The "Canvas" nav group, ready to drop into a tab's group list.
- *
- * Typed as the plain {@link ShellNavGroup} the chrome expects; the richer
- * {@link CanvasNavItem} metadata is still reachable via {@link CANVAS_ITEMS}.
- * `defaultOpen` is intentionally unset to match the existing group convention
- * (the chrome defaults to open — `shell-sidebar-chrome.tsx:206`).
- */
-export const CANVAS_NAV_GROUP: ShellNavGroup = {
-  id: 'canvas',
-  label: 'Canvas',
-  items: CANVAS_ITEMS,
-};
 
 /**
  * Resolve the active canvas surface from a router pathname via route-pattern

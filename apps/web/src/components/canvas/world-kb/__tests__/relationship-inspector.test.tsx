@@ -103,7 +103,7 @@ describe('RelationshipInspector', () => {
         anchors={anchors}
       />,
     );
-    await user.click(screen.getByRole('button', { name: /Add relationship/i }));
+    await user.click(screen.getByRole('button', { name: /^Add$/i }));
     expect(screen.getByText(/Source and target must be different entities/i)).toBeInTheDocument();
     expect(mutate).not.toHaveBeenCalled();
   });
@@ -120,7 +120,7 @@ describe('RelationshipInspector', () => {
       />,
     );
     await user.selectOptions(screen.getByLabelText(/Relation type/i), 'custom');
-    await user.click(screen.getByRole('button', { name: /Add relationship/i }));
+    await user.click(screen.getByRole('button', { name: /^Add$/i }));
     expect(screen.getByText(/Custom label is required/i)).toBeInTheDocument();
   });
 
@@ -137,7 +137,7 @@ describe('RelationshipInspector', () => {
     );
     await user.selectOptions(screen.getByLabelText(/Relation type/i), 'custom');
     await user.type(screen.getByLabelText(/Custom label/i), '  Childhood Friend  ');
-    await user.click(screen.getByRole('button', { name: /Add relationship/i }));
+    await user.click(screen.getByRole('button', { name: /^Add$/i }));
     await waitFor(() => expect(mutate).toHaveBeenCalled());
     const request = mutate.mock.calls[0][0];
     expect(request.action).toBe('add');
@@ -154,7 +154,7 @@ describe('RelationshipInspector', () => {
         anchors={anchors}
       />,
     );
-    await user.click(screen.getByRole('button', { name: /Save changes/i }));
+    await user.click(screen.getByRole('button', { name: /^Save$/i }));
     await waitFor(() => expect(mutate).toHaveBeenCalled());
     const request = mutate.mock.calls[0][0];
     expect(request.action).toBe('update');
@@ -183,7 +183,7 @@ describe('RelationshipInspector', () => {
         }),
       );
     });
-    await user.click(screen.getByRole('button', { name: /Save changes/i }));
+    await user.click(screen.getByRole('button', { name: /^Save$/i }));
     await waitFor(() => expect(onConflict).toHaveBeenCalled());
     expect(onConflict.mock.calls[0][0].currentVersion).toBe(7);
   });

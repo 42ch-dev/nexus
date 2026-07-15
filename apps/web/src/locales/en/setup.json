@@ -1,14 +1,14 @@
 {
   "step": {
     "agent": {
-      "title": "Choose an ACP agent",
-      "description": "Nexus uses an ACP-compatible agent to run strategies. Select a discovered agent to continue.",
+      "title": "Choose an agent",
+      "description": "Nexus uses an agent to run strategies. Select a discovered agent to continue.",
       "emptyTitle": "No agents found on PATH.",
-      "emptyDescription": "Install an ACP-compatible agent to continue."
+      "emptyDescription": "Install an agent to continue."
     },
     "workspace": {
-      "title": "Choose a workspace",
-      "description": "Nexus needs a workspace folder for your creative projects. We will create it if it does not exist."
+      "title": "Name your Profile",
+      "description": "Nexus creates your first Profile. Choose a display name and a workspace folder for your creative projects. We will create the folder if it does not exist."
     },
     "done": {
       "title": "You're ready 🎉",
@@ -22,16 +22,16 @@
     "done": "Done"
   },
   "action": {
-    "openNexus": "Open Nexus",
+    "openNexus": "Open",
     "finishing": "Finishing…",
     "preparingWorkspace": "Preparing workspace…",
-    "resetLocalDatabase": "Reset local database",
+    "resetLocalDatabase": "Reset",
     "resetting": "Resetting…",
     "continue": "Continue",
     "back": "Back"
   },
   "agentPicker": {
-    "loading": "Scanning for local ACP agents…",
+    "loading": "Scanning for local agents…",
     "error": {
       "title": "Could not scan for agents",
       "fallbackDescription": "The daemon did not respond to the agent scan request."
@@ -39,7 +39,7 @@
     "tryAgain": "Try again",
     "empty": {
       "title": "No agents found on PATH",
-      "description": "Install an ACP-compatible agent, or continue with a custom launch command."
+      "description": "Install an agent, or continue with a custom launch command."
     },
     "more": "More agents",
     "fewer": "Fewer agents",
@@ -65,9 +65,15 @@
   },
   "workspace": {
     "label": "Workspace folder",
-    "changeFolder": "Change Folder…",
+    "changeFolder": "Change…",
     "resolving": "Resolving…",
     "browserOnly": "Workspace path changes are available on the desktop app only."
+  },
+  "profile": {
+    "name": {
+      "label": "Profile name",
+      "placeholder": "My Profile"
+    }
   },
   "daemon": {
     "starting": {
@@ -77,7 +83,7 @@
     "notReady": {
       "title": "Daemon not ready"
     },
-    "restartNexus": "Restart Nexus",
+    "restartNexus": "Restart",
     "resetDatabaseDescription": "This will clear the daemon's local state database (config, registry cache). Your creative files in the workspace are not affected."
   },
   "error": {
@@ -88,7 +94,8 @@
     "finishSetupFailed": "Failed to save agent profile.",
     "folderPickerFailed": "Could not open the folder picker.",
     "workspacePathFailed": "Could not save the workspace path.",
-    "workspaceBootstrapFailed": "Could not prepare your local workspace."
+    "workspaceBootstrapFailed": "Could not prepare your local workspace.",
+    "profileDisplayNameFailed": "Could not save the Profile name."
   },
   "toast": {
     "finishFailed": "Could not finish setup",
@@ -98,6 +105,7 @@
     "workspacePreparedDescription": "Creator identity created ({{creatorId}}).",
     "workspaceBootstrapFailed": "Local workspace bootstrap failed",
     "workspaceBootstrapFailedDescription": "{{message}} Retry Continue, or use Reset local database below if the problem persists.",
-    "resetLocalDatabase": "Reset local database"
+    "resetLocalDatabase": "Reset local database",
+    "profileDisplayName": "Profile name"
   }
 }

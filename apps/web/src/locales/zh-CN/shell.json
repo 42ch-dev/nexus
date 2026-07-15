@@ -20,7 +20,6 @@
     "orchestrator": "编排",
     "works": "作品",
     "allWorks": "全部作品",
-    "canvas": "画布",
     "outline": "大纲",
     "worldKb": "世界知识库",
     "strategy": "策略",
@@ -32,7 +31,12 @@
     "compute": "计算",
     "modules": "模块",
     "strategies": "策略",
-    "settings": "设置"
+    "settings": "设置",
+    "drillIn": {
+      "backToAll": "返回所有",
+      "outline": "大纲",
+      "body": "正文"
+    }
   },
   "theme": {
     "switchToLight": "切换至浅色主题",
@@ -46,6 +50,10 @@
   "daemon": {
     "running": "守护进程运行中",
     "healthy": "健康",
+    "runningTag": "running",
+    "agentBadge": {
+      "empty": "未选择智能体"
+    },
     "restart": "重启守护进程",
     "restartConfirm": "重启守护进程将中断任何正在运行的编排。是否继续？",
     "restartFailed": "守护进程重启失败",
@@ -57,7 +65,7 @@
     "didNotStart": "守护进程未能启动",
     "statusUnknown": "守护进程状态未知",
     "restarting": "正在重启…",
-    "restartButton": "重启守护进程",
+    "restartButton": "重启",
     "startingDescription": "Nexus 正在启动本地守护进程。",
     "reconnectingDescription": "Nexus 正在重试本地守护进程连接。",
     "stoppedDescription": "重启守护进程以使用本地工作区功能。",
@@ -72,7 +80,10 @@
     "displayNamePlaceholder": "例如 默认创作者",
     "cancel": "取消",
     "create": "创建",
-    "creating": "正在创建…"
+    "creating": "正在创建…",
+    "switchedTitle": "配置文件已切换",
+    "switchedDescription": "请重启或重新加载应用，以使守护进程使用新的工作区路径。",
+    "switchBrowserOnly": "切换配置文件仅在 Nexus 桌面应用中可用。"
   },
   "health": {
     "checking": "正在检查守护进程…",
@@ -94,7 +105,7 @@
     "namePlaceholder": "例如 my-chapter-preset",
     "validationError": "名称为必填项。",
     "creating": "正在生成预设模板…",
-    "submit": "生成预设模板"
+    "submit": "生成"
   },
   "workCreate": {
     "title": "创建作品",
@@ -108,7 +119,7 @@
     "profileLabel": "作品类型",
     "validationError": "标题、长期目标和初始想法为必填项。",
     "creating": "正在创建作品…",
-    "create": "创建作品",
+    "create": "创建",
     "toastCreated": "作品已创建"
   }
 }
