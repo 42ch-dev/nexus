@@ -5,7 +5,7 @@
 | plan_id | `2026-07-15-ci-disk-and-iterations-layout` |
 | type | hotfix (dual-track) |
 | Task category | `ops` (Track A) + `docs` (Track B) |
-| status | InProgress |
+| status | Done |
 | working_branch | `fix/ci-disk-and-iterations-layout` |
 | merge_target | `main` (squash PR) |
 | Execution mode | `inline` (hotfix) |
@@ -68,8 +68,8 @@ Tasks:
 - [x] T-A — CI disk optimization on `fix/ci-disk-space` (commit evidence)
 - [x] T-B — iterations package layout migration on `fix/iterations-package-layout` (commit evidence)
 - [x] T-merge — merge both tracks → `fix/ci-disk-and-iterations-layout`
-- [ ] T-QC — single-seat QC (`inline`)
-- [ ] T-accept — PM acceptance + squash PR to `main`
+- [x] T-QC — single-seat QC (`inline`)
+- [x] T-accept — PM acceptance + squash PR to `main`
 
 ## Acceptance
 
@@ -82,3 +82,27 @@ Tasks:
 1. Merge `fix/ci-disk-space` → `fix/ci-disk-and-iterations-layout`
 2. Merge `fix/iterations-package-layout` → `fix/ci-disk-and-iterations-layout`
 3. QC on integration HEAD → PR to `main`
+
+
+## Review Gate Summary
+
+| Field | Value |
+|-------|-------|
+| QC | Approve with residuals (single-seat hotfix) |
+| Report | `.mstar/sdd/2026-07-15-ci-disk-and-iterations-layout/review/qc.md` |
+| Reviewer | `@qc-specialist` |
+| Date | 2026-07-15 |
+
+### Residuals
+
+| ID | Severity | Note |
+|----|----------|------|
+| R-HFIX0715QC1-L001 | low | Confirm post-PR CI: `Rust tests (orchestration-knowledge)` completes without ENOSPC |
+
+## QA Gate Summary
+
+| Field | Value |
+|-------|-------|
+| Gate | `pm-acceptance` (hotfix; residual is post-PR CI verification only) |
+| Checklist | Tracks A+B merged; QC Approve with residuals; free-disk action present; iterations root has no flat compasses; PR opened to `main` |
+| Date | 2026-07-15 |
