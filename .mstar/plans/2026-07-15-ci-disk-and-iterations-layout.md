@@ -66,8 +66,8 @@ Tasks:
 ## Tasks
 
 - [x] T-A — CI disk optimization on `fix/ci-disk-space` (commit evidence)
-- [ ] T-B — iterations package layout migration on `fix/iterations-package-layout` (commit evidence)
-- [ ] T-merge — merge both tracks → `fix/ci-disk-and-iterations-layout`
+- [x] T-B — iterations package layout migration on `fix/iterations-package-layout` (commit evidence)
+- [x] T-merge — merge both tracks → `fix/ci-disk-and-iterations-layout`
 - [ ] T-QC — single-seat QC (`inline`)
 - [ ] T-accept — PM acceptance + squash PR to `main`
 

@@ -6,13 +6,13 @@
       "id": "2026-07-15-ci-disk-and-iterations-layout",
       "title": "Hotfix - CI disk pressure + iterations package layout",
       "file": "plans/2026-07-15-ci-disk-and-iterations-layout.md",
-      "status": "InProgress",
+      "status": "InReview",
       "owner": "@project-manager",
       "agents": [
         "@ops-engineer",
         "@writing-specialist"
       ],
-      "progress": 10,
+      "progress": 80,
       "tags": [
         "hotfix",
         "ci",
@@ -22,7 +22,7 @@
       ],
       "created_at": "2026-07-15",
       "updated_at": "2026-07-15",
-      "notes": "Dual-track hotfix from main; parallel worktrees",
+      "notes": "Tracks A+B merged; awaiting single QC + pm-acceptance",
       "metadata": {
         "spec_integration_branch": "fix/ci-disk-and-iterations-layout",
         "merge_target": "main",
