@@ -64,7 +64,7 @@ The coherent bet:
 
 | plan_id | Name | Status | Tier | Notes |
 |---------|------|--------|------|-------|
-| 2026-07-15-v1.118-daemon-no-profile-boot | Daemon no-Profile boot | Todo | Must / P0 | Foundation for clean desktop launch |
+| 2026-07-15-v1.118-daemon-no-profile-boot | Daemon no-Profile boot | InProgress | Must / P0 | T1 committed (e864698e); reviewer found 2 Critical + 1 Important — fix wave pending |
 | 2026-07-15-v1.118-creation-peer-groups | Creation peer groups | Todo | Must / P1 | List-mode IA; parallel-safe with P0 |
 | 2026-07-15-v1.118-canvas-work-shell | Canvas-first work shell | Todo | Must / P2 | Depends on P1 |
 
@@ -194,7 +194,7 @@ Technical approach locked by `@architect` (2026-07-15). Implementers MUST follow
 
 | plan_id | QC decision | QA gate | Residuals | Durable summary |
 |---------|-------------|---------|-----------|-----------------|
-| 2026-07-15-v1.118-daemon-no-profile-boot | N/A | mandatory | — | — |
+| 2026-07-15-v1.118-daemon-no-profile-boot | InProgress | mandatory | — | T1 SDD review: Needs fixes — 2 Critical (boot.rs pool_or_uninit crash on no-creator; set_active_creator doesn't call ensure_creator_pool) + 1 Important (list creators returns 409 instead of empty). Fix wave pending. |
 | 2026-07-15-v1.118-creation-peer-groups | N/A | mandatory | — | — |
 | 2026-07-15-v1.118-canvas-work-shell | N/A | mandatory | — | — |
 
