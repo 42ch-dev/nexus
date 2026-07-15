@@ -9,9 +9,29 @@
     "pi": "https://pi.dev/"
   },
   "agents": {
-    "claude-acp": { "hiddenFromDefault": true },
-    "codex-acp": { "hiddenFromDefault": true },
-    "claude-native": { "displayName": "Claude", "priority": 0 },
-    "codex-native": { "displayName": "Codex", "priority": 1 }
+    "claude-acp": { "excludeFromPicker": true },
+    "codex-acp": { "excludeFromPicker": true },
+    "codex-native": {
+      "displayName": "Codex",
+      "priority": 0,
+      "iconUrl": "https://cdn.agentclientprotocol.com/registry/v1/latest/codex-acp.svg",
+      "description": "OpenAI's agent for local coding with Codex."
+    },
+    "claude-native": {
+      "displayName": "Claude",
+      "priority": 1,
+      "iconUrl": "https://cdn.agentclientprotocol.com/registry/v1/latest/claude-acp.svg",
+      "description": "Anthropic's agent for local coding with Claude."
+    },
+    "cursor": { "priority": 2 },
+    "kimi": { "priority": 3 },
+    "opencode": { "priority": 4 },
+    "hermes": { "priority": 5 },
+    "gemini": { "priority": 6 },
+    "grok-build": { "priority": 7 },
+    "kilo": { "priority": 8 },
+    "pi-acp": { "displayName": "Pi", "priority": 9 },
+    "qoder": { "priority": 10 },
+    "qwen-code": { "priority": 11 }
   }
 }
