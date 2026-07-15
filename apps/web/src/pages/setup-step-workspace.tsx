@@ -13,6 +13,11 @@ import {
   type SetupContinueError,
 } from '@/lib/setup/continue-error';
 import { useToast } from '@/lib/use-toast';
+import {
+  lastPathSegment,
+  replaceLastPathSegment,
+  slugProfileSegment,
+} from '@/lib/workspace-profile-slug';
 import type { WizardState } from '@/pages/setup-wizard-page';
 
 export const DEFAULT_WORKSPACE = '~/Documents/nexus/default';
@@ -65,7 +70,18 @@ export function SetupStepWorkspace({
     desktop
       .getWorkspaceRoot()
       .then((root) => {
-        if (!cancelled) onChange({ ...state, workspaceRoot: root });
+        if (cancelled) return;
+        // AC-P1-3 (mount reconcile, AD-P1): one-time, display-only. When the
+        // folder is not picked and the resolved root's last segment does not
+        // already match the slug of the current display name, rewrite the
+        // displayed path's last segment once. No IPC persist here —
+        // `setWorkspacePath` only runs on Continue.
+        const displaySlug = slugProfileSegment(state.profileDisplayName);
+        const reconciled =
+          !state.workspacePicked && lastPathSegment(root) !== displaySlug
+            ? replaceLastPathSegment(root, displaySlug)
+            : root;
+        onChange({ ...state, workspaceRoot: reconciled });
       })
       .catch(() => {
         if (!cancelled) onChange({ ...state, workspaceRoot: DEFAULT_WORKSPACE });
@@ -224,12 +240,32 @@ export function SetupStepWorkspace({
                 // field so a previous failure does not persist visually.
                 setContinueError(null);
                 setContinueErrorPhase(null);
-                onChange({ ...state, profileDisplayName: e.target.value });
+                const nextName = e.target.value;
+                // AC-P1-3 / AC-P1-4: while the folder is not picked, typing a
+                // Profile name updates the path's last segment to the slug of
+                // the new name. Once the author picks a folder
+                // (`workspacePicked: true`), name edits leave the path frozen.
+                const nextRoot =
+                  !state.workspacePicked && state.workspaceRoot
+                    ? replaceLastPathSegment(
+                        state.workspaceRoot,
+                        slugProfileSegment(nextName),
+                      )
+                    : state.workspaceRoot;
+                onChange({
+                  ...state,
+                  profileDisplayName: nextName,
+                  workspaceRoot: nextRoot,
+                });
               }}
               placeholder={t('profile.name.placeholder')}
               disabled={loading || bootstrapping || resetBusy}
               required
               aria-required="true"
+              // AC-P1-2: leave scroll space above the focused input so the
+              // auto scroll-into-view on focus does not cover the Workspace
+              // folder label at 480px card width.
+              className="scroll-mt-4"
               data-testid="wizard-profile-name"
             />
           </div>

@@ -43,7 +43,10 @@ export function SetupWizardPage() {
     workspaceRoot: '',
     selectedAgent: null,
     customLaunchCommand: '',
-    profileDisplayName: '',
+    // AC-P1-1 / AC-P1-5: default name `default` enables Continue on first
+    // paint (desktop resolves path on mount). The i18n placeholder stays
+    // example copy (`My Profile`) — it is not the field value.
+    profileDisplayName: 'default',
   });
 
   async function finish() {
