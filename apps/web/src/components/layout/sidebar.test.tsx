@@ -407,4 +407,12 @@ describe('Sidebar — work routes (V1.118 P2)', () => {
       'bg-blue-700',
     );
   });
+
+  it('does not highlight All Works on a work detail route', async () => {
+    renderSidebarAtRoute('/works/work-42/outline');
+
+    const allWorks = screen.getByRole('link', { name: 'All Works' });
+    expect(allWorks).not.toHaveClass('bg-gray-alpha-100');
+    expect(allWorks.querySelector('[data-testid="sidebar-active-bar"]')).toBeNull();
+  });
 });

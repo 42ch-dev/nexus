@@ -760,8 +760,6 @@ mod tests {
         )
         .expect("meta.json");
 
-        let original_home = std::env::var("HOME").ok();
-        std::env::set_var("HOME", user_home);
         let _home_override = HomeOverride::set(user_home);
 
         let state = crate::workspace::WorkspaceState::initialize()
@@ -782,11 +780,6 @@ mod tests {
             state.pool().is_some(),
             "set_active_creator should open pool on shared creator_db slot (H1)"
         );
-
-        match original_home {
-            Some(v) => std::env::set_var("HOME", v),
-            None => std::env::remove_var("HOME"),
-        }
     }
 
     #[tokio::test]

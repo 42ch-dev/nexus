@@ -118,9 +118,10 @@ export function Sidebar() {
         orchestratorTabLabel={t('nav.orchestrator')}
         settingsLabel={t('nav.settings')}
         primaryNavigationAriaLabel={t('aria.primaryNavigation')}
-        isActiveItem={(item, route) =>
-          route === item.to || route.startsWith(`${item.to}/`)
-        }
+        isActiveItem={(item, route) => {
+          if (item.to === '/works') return route === '/works';
+          return route === item.to || route.startsWith(`${item.to}/`);
+        }}
         renderNavItem={(item, className, content, isActive) => (
           <NavLink
             to={item.to}

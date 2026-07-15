@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { NavLink, useMatch, useParams } from 'react-router-dom';
+import { Link, useMatch, useParams } from 'react-router-dom';
 import { BookOpen } from 'lucide-react';
 
 import { flattenPages, useWork, useWorks } from '@/api/queries';
@@ -86,10 +86,10 @@ function WorkRailListItem({
 
   return (
     <li>
-      <NavLink
+      <Link
         to={outlinePath}
         onClick={() => onWorkSelect?.()}
-        aria-current={isOutlineActive ? 'page' : undefined}
+        aria-current={isCurrentWork || isOutlineActive ? 'page' : undefined}
         data-testid={`work-rail-item-${workId}`}
         className={cn(
           'flex w-full items-center gap-2 rounded-control px-3 py-2 text-left text-label-14 transition-colors duration-state ease-standard',
@@ -100,7 +100,7 @@ function WorkRailListItem({
       >
         <BookOpen className="h-4 w-4 shrink-0 text-gray-700" aria-hidden />
         <span className="min-w-0 flex-1 truncate">{title}</span>
-      </NavLink>
+      </Link>
     </li>
   );
 }

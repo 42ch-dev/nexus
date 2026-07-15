@@ -76,7 +76,7 @@ describe('WorkRail', () => {
     expect(screen.getByTestId('work-rail-item-work-b')).not.toHaveAttribute('aria-current');
   });
 
-  it('does not set aria-current on the current work while on chapters', async () => {
+  it('sets aria-current on the current work while on chapters (visual match)', async () => {
     useRailHandlers();
 
     renderInApp(
@@ -90,7 +90,8 @@ describe('WorkRail', () => {
       expect(screen.getByTestId('work-rail-item-work-a')).toBeInTheDocument();
     });
 
-    expect(screen.getByTestId('work-rail-item-work-a')).not.toHaveAttribute('aria-current');
+    expect(screen.getByTestId('work-rail-item-work-a')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByTestId('work-rail-item-work-b')).not.toHaveAttribute('aria-current');
   });
 
   it('shows metadata preview for the route-scoped work', async () => {
