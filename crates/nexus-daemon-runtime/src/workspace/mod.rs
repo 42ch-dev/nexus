@@ -266,6 +266,16 @@ impl WorkspaceState {
         }
     }
 
+    /// True when the creator DB slot is fully populated (pool + gateways).
+    ///
+    /// Used instead of `pool().is_some()` for lazy-open readiness so concurrent
+    /// Tier-2 requests never observe a published pool before `narrative_gateway`
+    /// / `session_manager` are wired (V1.118 P0 T2 fix F1).
+    fn creator_pool_ready(&self) -> bool {
+        let slot = self.creator_db_read();
+        slot.db.is_some() && slot.narrative_gateway.is_some() && slot.session_manager.is_some()
+    }
+
     fn creator_db_read(&self) -> std::sync::RwLockReadGuard<'_, CreatorDbSlot> {
         self.creator_db.read().unwrap_or_else(|poisoned| {
             tracing::warn!("creator_db mutex poisoned, recovering");
@@ -342,7 +352,7 @@ impl WorkspaceState {
     /// Returns an error if the creator DB path cannot be resolved, schema init
     /// fails, or pool creation fails.
     pub async fn ensure_creator_pool(&self) -> anyhow::Result<()> {
-        if self.pool().is_some() {
+        if self.creator_pool_ready() {
             return Ok(()); // already open
         }
 
@@ -353,7 +363,6 @@ impl WorkspaceState {
 
         match (db, db_path, narrative_gateway, session_manager) {
             (Some(db), Some(db_path), Some(narrative_gateway), Some(session_manager)) => {
-                self.publish_shared_pool(&db);
                 let mut slot = self.creator_db_write();
                 if slot.db.is_some() {
                     return Ok(()); // concurrent attach won the race
@@ -362,6 +371,9 @@ impl WorkspaceState {
                 slot.db_path = Some(db_path);
                 slot.narrative_gateway = Some(narrative_gateway);
                 slot.session_manager = Some(session_manager);
+                if let Some(db_ref) = slot.db.as_ref() {
+                    self.publish_shared_pool(db_ref);
+                }
                 drop(slot);
                 Ok(())
             }
@@ -788,6 +800,81 @@ mod tests {
             state.pool().is_some(),
             "pool should be open after Profile attach"
         );
+        assert!(
+            state.narrative_gateway().is_some(),
+            "narrative_gateway must be ready when pool is visible"
+        );
+        assert!(
+            state.session_manager().is_some(),
+            "session_manager must be ready when pool is visible"
+        );
+
+        match original_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+    }
+
+    /// F1 regression: published pool must not outpace slot gateway/session wiring.
+    #[tokio::test]
+    #[serial]
+    async fn ensure_creator_pool_pool_visible_implies_slot_ready() {
+        const CREATOR_ID: &str = "crt_ready_gate_test";
+
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let user_home = tmp.path();
+        let nexus_home = user_home.join(".nexus42");
+        nexus_home_layout::ensure_system_layout(&nexus_home).expect("system layout");
+
+        let cache = serde_json::json!({
+            "creators": {
+                CREATOR_ID: { "handle": "ready-gate" }
+            }
+        });
+        std::fs::write(
+            nexus_home.join("creator_identity_cache.json"),
+            serde_json::to_string_pretty(&cache).expect("cache json"),
+        )
+        .expect("write cache");
+
+        let op_dir = nexus_home_layout::operational_workspace_dir(user_home, CREATOR_ID, "default");
+        std::fs::create_dir_all(&op_dir).expect("operational dir");
+        let meta = serde_json::json!({
+            "schema_version": 1,
+            "creator_id": CREATOR_ID,
+            "workspace_slug": "default",
+            "local_root": user_home.join("creative"),
+            "created_at": "2020-01-01T00:00:00Z"
+        });
+        std::fs::write(
+            op_dir.join("meta.json"),
+            serde_json::to_string(&meta).expect("meta json"),
+        )
+        .expect("meta.json");
+
+        let original_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", user_home);
+
+        let state = WorkspaceState::initialize().await.expect("initialize");
+        let config_toml = format!("active_creator_id = \"{CREATOR_ID}\"\n");
+        std::fs::write(nexus_home.join("config.toml"), config_toml).expect("config.toml");
+
+        state
+            .ensure_creator_pool()
+            .await
+            .expect("ensure_creator_pool");
+
+        // Invariant: pool handle is only published after slot is fully wired.
+        if state.pool().is_some() {
+            assert!(
+                state.narrative_gateway().is_some(),
+                "pool visible but narrative_gateway still None"
+            );
+            assert!(
+                state.session_manager().is_some(),
+                "pool visible but session_manager still None"
+            );
+        }
 
         match original_home {
             Some(v) => std::env::set_var("HOME", v),
