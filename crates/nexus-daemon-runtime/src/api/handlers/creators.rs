@@ -361,16 +361,20 @@ pub async fn list(
     info!("Handling list creators request");
 
     let limit = params.limit.clamp(1, MAX_LIMIT);
-    let all_creators = sqlx::query_as!(
-        CreatorInfo,
-        r#"SELECT creator_id as "creator_id!", display_name, status, cached_at FROM creators ORDER BY cached_at DESC"#
-    )
-    .fetch_all(state.pool_or_uninit()?)
-    .await
-    .map_err(|e| NexusApiError::Internal {
-        code: "DATABASE_ERROR".into(),
-        message: e.to_string(),
-    })?;
+    let all_creators = if let Some(pool) = state.pool() {
+        sqlx::query_as!(
+            CreatorInfo,
+            r#"SELECT creator_id as "creator_id!", display_name, status, cached_at FROM creators ORDER BY cached_at DESC"#
+        )
+        .fetch_all(pool)
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: e.to_string(),
+        })?
+    } else {
+        Vec::new()
+    };
 
     let mut items = all_creators;
 
@@ -541,7 +545,7 @@ pub async fn patch_creator(
 
 /// `PUT /v1/daemon/creators/active` — set active creator
 pub async fn set_active_creator(
-    State(state): State<WorkspaceState>,
+    State(mut state): State<WorkspaceState>,
     Json(req): Json<SetActiveCreatorRequest>,
 ) -> Result<Json<SetActiveCreatorResponse>, NexusApiError> {
     info!(creator_id = %req.creator_id, "Setting active creator");
@@ -580,6 +584,14 @@ pub async fn set_active_creator(
         }
         write_cli_config(state.nexus_home(), &config)?;
     }
+
+    state
+        .ensure_creator_pool()
+        .await
+        .map_err(|e| NexusApiError::Internal {
+            code: "DATABASE_ERROR".into(),
+            message: e.to_string(),
+        })?;
 
     Ok(Json(SetActiveCreatorResponse {
         creator_id: req.creator_id,
@@ -673,6 +685,108 @@ mod tests {
     #[test]
     fn validate_creator_id_accepts_valid() {
         assert!(validate_creator_id_safe("crt_abc123").is_ok());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn list_without_active_creator_returns_empty_list_not_uninitialized() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let user_home = tmp.path();
+        let nexus_home = user_home.join(".nexus42");
+        nexus_home_layout::ensure_system_layout(&nexus_home).expect("system layout");
+
+        let original_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", user_home);
+
+        let state = crate::workspace::WorkspaceState::initialize()
+            .await
+            .expect("initialize");
+        assert!(state.pool().is_none());
+
+        let result = list(
+            State(state),
+            Query(ListCreatorsQuery {
+                limit: 50,
+                cursor: None,
+            }),
+        )
+        .await;
+
+        match original_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+
+        let body = result.expect("list should succeed without pool, not return 409");
+        assert!(body.0.items.is_empty());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn set_active_creator_opens_pool_on_attach() {
+        const CREATOR_ID: &str = "crt_set_active_pool";
+
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let user_home = tmp.path();
+        let nexus_home = user_home.join(".nexus42");
+        nexus_home_layout::ensure_system_layout(&nexus_home).expect("system layout");
+
+        let cache = serde_json::json!({
+            "creators": {
+                CREATOR_ID: { "handle": "set-active" }
+            }
+        });
+        std::fs::write(
+            nexus_home.join("creator_identity_cache.json"),
+            serde_json::to_string_pretty(&cache).expect("cache json"),
+        )
+        .expect("write cache");
+
+        let op_dir = nexus_home_layout::operational_workspace_dir(user_home, CREATOR_ID, "default");
+        std::fs::create_dir_all(&op_dir).expect("operational dir");
+        let meta = serde_json::json!({
+            "schema_version": 1,
+            "creator_id": CREATOR_ID,
+            "workspace_slug": "default",
+            "local_root": user_home.join("creative"),
+            "created_at": "2020-01-01T00:00:00Z"
+        });
+        std::fs::write(
+            op_dir.join("meta.json"),
+            serde_json::to_string(&meta).expect("meta json"),
+        )
+        .expect("meta.json");
+
+        let original_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", user_home);
+        let _home_override = HomeOverride::set(user_home);
+
+        let state = crate::workspace::WorkspaceState::initialize()
+            .await
+            .expect("initialize");
+        assert!(state.pool().is_none());
+
+        set_active_creator(
+            State(state),
+            Json(SetActiveCreatorRequest {
+                creator_id: CREATOR_ID.to_string(),
+            }),
+        )
+        .await
+        .expect("set_active_creator should succeed");
+
+        let state_after = crate::workspace::WorkspaceState::initialize()
+            .await
+            .expect("re-initialize after set-active");
+        assert!(
+            state_after.pool().is_some(),
+            "set_active_creator should persist active_creator_id and open pool on attach"
+        );
+
+        match original_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
     }
 
     #[tokio::test]

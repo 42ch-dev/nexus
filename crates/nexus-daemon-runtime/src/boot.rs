@@ -53,6 +53,7 @@ fn ensure_remote_bind_allowed(host: &str) -> anyhow::Result<()> {
     );
     Ok(())
 }
+use graph_flow::{InMemorySessionStorage, SessionStorage};
 use nexus_orchestration::worker::{WorkerManagerSpawner, WorkerRegistry};
 use nexus_orchestration::{
     engine::{EngineSignal, OrchestrationEngine},
@@ -214,8 +215,29 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     tracing::info!("Workspace state initialized");
 
     // --- Section 3: Orchestration engine + worker manager ---
-    let db_pool: sqlx::SqlitePool = state.pool_or_uninit()?.clone();
-    let sqlite_storage = Arc::new(SqliteSessionStorage::new(Arc::new(db_pool)));
+    // Tier-0 boot must succeed without a creator DB (AC-P0-1). Use in-memory
+    // session storage until Profile attach opens the creator pool.
+    let (session_storage, sqlite_boot_storage): (
+        Arc<dyn SessionStorage>,
+        Option<Arc<SqliteSessionStorage>>,
+    ) = state.pool().cloned().map_or_else(
+        || {
+            tracing::info!(
+                "No creator DB at boot — using in-memory orchestration session storage until Profile attach"
+            );
+            (
+                Arc::new(InMemorySessionStorage::new()) as Arc<dyn SessionStorage>,
+                None,
+            )
+        },
+        |db_pool| {
+            let sqlite_storage = Arc::new(SqliteSessionStorage::new(Arc::new(db_pool)));
+            (
+                sqlite_storage.clone() as Arc<dyn SessionStorage>,
+                Some(sqlite_storage),
+            )
+        },
+    );
 
     // V1.51 T-A P0 (QC3 F-001): construct the shared worker registry BEFORE
     // the capability registry so `ProductionWorkerProvider` can be injected
@@ -322,25 +344,27 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     tracing::info!("Daemon tool dispatch adapter wired");
 
     let mut concrete_engine =
-        GraphFlowEngine::new_with_storage(sqlite_storage.clone(), capabilities.clone());
+        GraphFlowEngine::new_with_storage(session_storage.clone(), capabilities.clone());
 
     // DF-47 (V1.42 P3): wire the daemon tool dispatch into the engine so
     // HostTool enter actions in preset graphs can invoke nexus.* tools.
     concrete_engine.set_daemon_tool_dispatch(tool_dispatch.clone());
 
     // WS2 R1: Recover persisted non-terminal sessions into in-memory tracker.
-    match sqlite_storage.list_non_terminal_sessions().await {
-        Ok(summaries) => {
-            if !summaries.is_empty() {
-                tracing::info!(
-                    "recovering {} persisted session(s) into in-memory tracker",
-                    summaries.len()
-                );
-                concrete_engine.recover_sessions(summaries).await;
+    if let Some(sqlite_storage) = sqlite_boot_storage {
+        match sqlite_storage.list_non_terminal_sessions().await {
+            Ok(summaries) => {
+                if !summaries.is_empty() {
+                    tracing::info!(
+                        "recovering {} persisted session(s) into in-memory tracker",
+                        summaries.len()
+                    );
+                    concrete_engine.recover_sessions(summaries).await;
+                }
             }
-        }
-        Err(e) => {
-            tracing::warn!("failed to recover persisted sessions: {}", e);
+            Err(e) => {
+                tracing::warn!("failed to recover persisted sessions: {}", e);
+            }
         }
     }
 
@@ -393,80 +417,71 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
     tracing::info!("Orchestration engine wired");
 
     // --- Section 4: Schedule supervisor + core context manager ---
-    // Replace .expect() with graceful error handling for database pool creation.
-    let schedule_pool: sqlx::SqlitePool = match nexus_local_db::open_pool(std::path::Path::new(
-        &state.database_path().unwrap_or_default(),
-    ))
-    .await
-    {
-        Ok(pool) => pool,
-        Err(e) => {
-            tracing::error!("Fatal: failed to open database pool for schedule supervisor: {e}");
-            anyhow::bail!("Failed to open database pool for schedule supervisor: {e}");
+    // Pool-backed subsystems are deferred until Profile attach when no creator DB
+    // is open at boot (AC-P0-1).
+    if let Some(schedule_pool) = state.pool().cloned() {
+        // V1.51 T-A P0: thread the capability registry into the supervisor so the
+        // review-time KB extraction hook can invoke `nexus.llm.extract`. Falls back
+        // to the heuristic when the worker is unavailable (llm-extract.md §5.1).
+        let supervisor_registry = state.capability_registry();
+        let mut schedule_supervisor_builder = ScheduleSupervisor::new_with_workspace(
+            Arc::new(schedule_pool.clone()),
+            state.workspace_path().map(std::path::PathBuf::from),
+        );
+        if let Some(reg) = supervisor_registry {
+            schedule_supervisor_builder = schedule_supervisor_builder.with_capability_registry(reg);
         }
-    };
-    // V1.51 T-A P0: thread the capability registry into the supervisor so the
-    // review-time KB extraction hook can invoke `nexus.llm.extract`. Falls back
-    // to the heuristic when the worker is unavailable (llm-extract.md §5.1).
-    let supervisor_registry = state.capability_registry();
-    let mut schedule_supervisor_builder = ScheduleSupervisor::new_with_workspace(
-        Arc::new(schedule_pool),
-        state.workspace_path().map(std::path::PathBuf::from),
-    );
-    if let Some(reg) = supervisor_registry {
-        schedule_supervisor_builder = schedule_supervisor_builder.with_capability_registry(reg);
-    }
-    let schedule_supervisor = Arc::new(schedule_supervisor_builder);
-    state.set_schedule_supervisor(schedule_supervisor.clone());
+        let schedule_supervisor = Arc::new(schedule_supervisor_builder);
+        state.set_schedule_supervisor(schedule_supervisor.clone());
 
-    match schedule_supervisor
-        .resume_running_as_paused("daemon_restart")
-        .await
-    {
-        Ok(count) => {
-            if count > 0 {
-                tracing::info!(
-                    "resumed {} running schedule(s) as paused after daemon restart",
-                    count
-                );
+        match schedule_supervisor
+            .resume_running_as_paused("daemon_restart")
+            .await
+        {
+            Ok(count) => {
+                if count > 0 {
+                    tracing::info!(
+                        "resumed {} running schedule(s) as paused after daemon restart",
+                        count
+                    );
+                }
+            }
+            Err(e) => {
+                tracing::warn!("failed to resume running schedules on boot: {}", e);
             }
         }
-        Err(e) => {
-            tracing::warn!("failed to resume running schedules on boot: {}", e);
-        }
-    }
 
-    // V1.39 §5.5 (T5 + Fix 2): Auto-chain boot recovery.
-    // Find Works whose auto-chain driver schedule is no longer running
-    // (interrupted by daemon restart) and auto-resume them by evaluating
-    // the next step and enqueuing a new schedule.
-    {
-        let recovery_pool = state.pool_or_uninit()?;
-        match nexus_orchestration::auto_chain::find_resumable_works(recovery_pool).await {
-            Ok(resumable) => {
-                if !resumable.is_empty() {
-                    tracing::info!(
+        // V1.39 §5.5 (T5 + Fix 2): Auto-chain boot recovery.
+        // Find Works whose auto-chain driver schedule is no longer running
+        // (interrupted by daemon restart) and auto-resume them by evaluating
+        // the next step and enqueuing a new schedule.
+        {
+            let recovery_pool = &schedule_pool;
+            match nexus_orchestration::auto_chain::find_resumable_works(recovery_pool).await {
+                Ok(resumable) => {
+                    if !resumable.is_empty() {
+                        tracing::info!(
                         "found {} auto-chain work(s) with interrupted driver schedule(s), resuming",
                         resumable.len()
                     );
-                    for work in &resumable {
-                        // Reload from DB (SSOT)
-                        let fresh = nexus_local_db::works::get_work(
-                            recovery_pool,
-                            &work.creator_id,
-                            &work.work_id,
-                        )
-                        .await;
+                        for work in &resumable {
+                            // Reload from DB (SSOT)
+                            let fresh = nexus_local_db::works::get_work(
+                                recovery_pool,
+                                &work.creator_id,
+                                &work.work_id,
+                            )
+                            .await;
 
-                        if let Ok(Some(latest)) = fresh {
-                            // V1.42 F-001: When the persist stage just completed,
-                            // use the volume-aware evaluator to correctly handle
-                            // cross-volume auto-chain (Plan Goal 4 / AC2). For all
-                            // other stages, the flat evaluator suffices.
-                            let action = if latest.current_stage == "persist"
-                                && latest.stage_status == "complete"
-                            {
-                                match nexus_orchestration::auto_chain::evaluate_after_persist_volume_aware(recovery_pool, &latest).await {
+                            if let Ok(Some(latest)) = fresh {
+                                // V1.42 F-001: When the persist stage just completed,
+                                // use the volume-aware evaluator to correctly handle
+                                // cross-volume auto-chain (Plan Goal 4 / AC2). For all
+                                // other stages, the flat evaluator suffices.
+                                let action = if latest.current_stage == "persist"
+                                    && latest.stage_status == "complete"
+                                {
+                                    match nexus_orchestration::auto_chain::evaluate_after_persist_volume_aware(recovery_pool, &latest).await {
                                         Ok(vol_action) => vol_action,
                                         Err(e) => {
                                             tracing::warn!(
@@ -477,11 +492,11 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                                             nexus_orchestration::auto_chain::evaluate_next_step(&latest)
                                         }
                                     }
-                            } else {
-                                nexus_orchestration::auto_chain::evaluate_next_step(&latest)
-                            };
+                                } else {
+                                    nexus_orchestration::auto_chain::evaluate_next_step(&latest)
+                                };
 
-                            match action {
+                                match action {
                                 nexus_orchestration::auto_chain::ChainAction::AdvanceStage {
                                     ref work_id,
                                     ref next_stage,
@@ -601,97 +616,103 @@ pub async fn run_daemon(config: DaemonConfig) -> anyhow::Result<()> {
                                     );
                                 }
                             }
+                            }
                         }
                     }
                 }
-            }
-            Err(e) => {
-                tracing::warn!("failed to query auto-chain resumable works: {}", e);
+                Err(e) => {
+                    tracing::warn!("failed to query auto-chain resumable works: {}", e);
+                }
             }
         }
-    }
-    tracing::info!("Schedule supervisor wired");
+        tracing::info!("Schedule supervisor wired");
 
-    // --- Section 4b: Master-decision timeout watcher (V1.39 P4 T1) ---
-    //
-    // Periodically scans `findings` for open rows older than 96h (the
-    // master-decision SLA) and logs a structured `warn!` per stale row.
-    // Non-blocking: errors are logged and the loop continues. The task
-    // exits cleanly when `shutdown_notify` fires. See
-    // `crates/nexus-daemon-runtime/src/stale_findings_watcher.rs`.
-    {
-        let watcher_pool = state.pool_or_uninit()?.clone();
-        let watcher_shutdown = state.shutdown_notify();
-        let watcher_config = crate::stale_findings_watcher::StaleFindingsWatcherConfig::from_env();
-        let _watcher_handle = crate::stale_findings_watcher::spawn_stale_findings_watcher(
-            watcher_pool,
-            watcher_shutdown,
-            watcher_config,
-        );
-    }
+        // --- Section 4b: Master-decision timeout watcher (V1.39 P4 T1) ---
+        //
+        // Periodically scans `findings` for open rows older than 96h (the
+        // master-decision SLA) and logs a structured `warn!` per stale row.
+        // Non-blocking: errors are logged and the loop continues. The task
+        // exits cleanly when `shutdown_notify` fires. See
+        // `crates/nexus-daemon-runtime/src/stale_findings_watcher.rs`.
+        {
+            let watcher_pool = schedule_pool.clone();
+            let watcher_shutdown = state.shutdown_notify();
+            let watcher_config =
+                crate::stale_findings_watcher::StaleFindingsWatcherConfig::from_env();
+            let _watcher_handle = crate::stale_findings_watcher::spawn_stale_findings_watcher(
+                watcher_pool,
+                watcher_shutdown,
+                watcher_config,
+            );
+        }
 
-    // --- Section 4c: Cron supervisor (V1.50 T-A P1) ---
-    //
-    // Periodically (default 1-min) evaluates per-Work cron configs
-    // (`works.schedule_json`) for the novel-writing three-role staggering and
-    // enqueues pending `Schedule`s for any matching role (brainstorm + write
-    // in T-A P1), then admits due schedules. Non-blocking: errors are logged
-    // and the loop continues. See
-    // `crates/nexus-daemon-runtime/src/cron_supervisor.rs`.
-    {
-        let cron_pool = state.pool_or_uninit()?.clone();
-        let cron_workspace = state.workspace_path().map(std::path::PathBuf::from);
-        let cron_supervisor = schedule_supervisor.clone();
-        let cron_shutdown = state.shutdown_notify();
-        let cron_config = crate::cron_supervisor::CronSupervisorConfig::from_env();
-        // V1.51 T-B P0: pass workspace_dir for file-lock path construction.
-        // If workspace_path is unset, use an empty path (defensive — a daemon
-        // without a workspace should not have schedule_json-bearing Works).
-        let cron_ws_path = cron_workspace.unwrap_or_default();
-        let _cron_handle = crate::cron_supervisor::spawn_cron_supervisor(
-            cron_pool,
-            cron_ws_path,
-            cron_supervisor,
-            cron_shutdown,
-            cron_config,
-        );
-    }
+        // --- Section 4c: Cron supervisor (V1.50 T-A P1) ---
+        //
+        // Periodically (default 1-min) evaluates per-Work cron configs
+        // (`works.schedule_json`) for the novel-writing three-role staggering and
+        // enqueues pending `Schedule`s for any matching role (brainstorm + write
+        // in T-A P1), then admits due schedules. Non-blocking: errors are logged
+        // and the loop continues. See
+        // `crates/nexus-daemon-runtime/src/cron_supervisor.rs`.
+        {
+            let cron_pool = schedule_pool.clone();
+            let cron_workspace = state.workspace_path().map(std::path::PathBuf::from);
+            let cron_supervisor = schedule_supervisor.clone();
+            let cron_shutdown = state.shutdown_notify();
+            let cron_config = crate::cron_supervisor::CronSupervisorConfig::from_env();
+            // V1.51 T-B P0: pass workspace_dir for file-lock path construction.
+            // If workspace_path is unset, use an empty path (defensive — a daemon
+            // without a workspace should not have schedule_json-bearing Works).
+            let cron_ws_path = cron_workspace.unwrap_or_default();
+            let _cron_handle = crate::cron_supervisor::spawn_cron_supervisor(
+                cron_pool,
+                cron_ws_path,
+                cron_supervisor,
+                cron_shutdown,
+                cron_config,
+            );
+        }
 
-    // --- Section 4d: Auto-chronology task (V1.50 T-A P3) ---
-    //
-    // Periodically (default 5-min) scans Works with `auto_chronology = true`
-    // and, when the current volume is complete (all chapters finalized + intake
-    // complete + not locked), auto-creates the next volume outline + seeds +
-    // chronology log (spec §3 / §4). Non-blocking: errors are logged and the
-    // loop continues. See `crates/nexus-daemon-runtime/src/auto_chronology.rs`.
-    {
-        let chron_pool = state.pool_or_uninit()?.clone();
-        let chron_workspace = state.workspace_path().map(std::path::PathBuf::from);
-        let chron_shutdown = state.shutdown_notify();
-        let chron_config = crate::auto_chronology::AutoChronologyConfig::from_env();
-        let _chron_handle = crate::auto_chronology::spawn_auto_chronology_tick(
-            chron_pool,
-            chron_workspace,
-            chron_shutdown,
-            chron_config,
-        );
-    }
+        // --- Section 4d: Auto-chronology task (V1.50 T-A P3) ---
+        //
+        // Periodically (default 5-min) scans Works with `auto_chronology = true`
+        // and, when the current volume is complete (all chapters finalized + intake
+        // complete + not locked), auto-creates the next volume outline + seeds +
+        // chronology log (spec §3 / §4). Non-blocking: errors are logged and the
+        // loop continues. See `crates/nexus-daemon-runtime/src/auto_chronology.rs`.
+        {
+            let chron_pool = schedule_pool.clone();
+            let chron_workspace = state.workspace_path().map(std::path::PathBuf::from);
+            let chron_shutdown = state.shutdown_notify();
+            let chron_config = crate::auto_chronology::AutoChronologyConfig::from_env();
+            let _chron_handle = crate::auto_chronology::spawn_auto_chronology_tick(
+                chron_pool,
+                chron_workspace,
+                chron_shutdown,
+                chron_config,
+            );
+        }
 
-    // --- Section 4e: Reference refresh scheduler (V1.58 P1 DF-44) ---
-    //
-    // Periodically scans `reference_sources` for stale rows (on_change or
-    // overdue scheduled) and dispatches `nexus.reference.refresh` for each
-    // candidate. Non-blocking: errors are logged and the loop continues.
-    // First refresh cycle fires after 60s initial delay. See
-    // `crates/nexus-daemon-runtime/src/refresh_scheduler.rs`.
-    {
-        let refresh_pool = state.pool_or_uninit()?.clone();
-        let refresh_shutdown = state.shutdown_notify();
-        let refresh_config = crate::refresh_scheduler::RefreshSchedulerConfig::from_env();
-        let _refresh_handle = crate::refresh_scheduler::spawn_refresh_scheduler(
-            refresh_pool,
-            refresh_shutdown,
-            refresh_config,
+        // --- Section 4e: Reference refresh scheduler (V1.58 P1 DF-44) ---
+        //
+        // Periodically scans `reference_sources` for stale rows (on_change or
+        // overdue scheduled) and dispatches `nexus.reference.refresh` for each
+        // candidate. Non-blocking: errors are logged and the loop continues.
+        // First refresh cycle fires after 60s initial delay. See
+        // `crates/nexus-daemon-runtime/src/refresh_scheduler.rs`.
+        {
+            let refresh_pool = schedule_pool.clone();
+            let refresh_shutdown = state.shutdown_notify();
+            let refresh_config = crate::refresh_scheduler::RefreshSchedulerConfig::from_env();
+            let _refresh_handle = crate::refresh_scheduler::spawn_refresh_scheduler(
+                refresh_pool,
+                refresh_shutdown,
+                refresh_config,
+            );
+        }
+    } else {
+        tracing::info!(
+            "No creator DB at boot — deferring schedule supervisor and pool-backed background tasks until Profile attach"
         );
     }
 

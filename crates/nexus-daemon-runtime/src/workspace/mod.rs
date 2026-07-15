@@ -606,6 +606,7 @@ impl WorkspaceState {
 mod tests {
     use super::*;
     use crate::test_utils::create_test_workspace;
+    use serial_test::serial;
 
     #[tokio::test]
     async fn init_workspace_sets_is_initialized() {
@@ -638,5 +639,90 @@ mod tests {
 
         // workspace_path() should return the path
         assert_eq!(state.workspace_path(), Some(path_str));
+    }
+
+    /// AC-P0-1: boot initializes without `active_creator_id` and no pool.
+    #[tokio::test]
+    #[serial]
+    async fn initialize_without_active_creator_has_no_pool() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let user_home = tmp.path();
+        let nexus_home = user_home.join(".nexus42");
+        nexus_home_layout::ensure_system_layout(&nexus_home).expect("system layout");
+
+        let original_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", user_home);
+
+        let state = WorkspaceState::initialize().await.expect("initialize");
+        assert!(
+            state.pool().is_none(),
+            "no active creator should leave pool closed at boot"
+        );
+
+        match original_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
+    }
+
+    /// AC-P0-5: after Profile attach config is written, `ensure_creator_pool` opens the DB.
+    #[tokio::test]
+    #[serial]
+    async fn ensure_creator_pool_opens_after_active_creator_attach() {
+        const CREATOR_ID: &str = "crt_attach_test";
+
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let user_home = tmp.path();
+        let nexus_home = user_home.join(".nexus42");
+        nexus_home_layout::ensure_system_layout(&nexus_home).expect("system layout");
+
+        let cache = serde_json::json!({
+            "creators": {
+                CREATOR_ID: { "handle": "attach-test" }
+            }
+        });
+        std::fs::write(
+            nexus_home.join("creator_identity_cache.json"),
+            serde_json::to_string_pretty(&cache).expect("cache json"),
+        )
+        .expect("write cache");
+
+        let op_dir = nexus_home_layout::operational_workspace_dir(user_home, CREATOR_ID, "default");
+        std::fs::create_dir_all(&op_dir).expect("operational dir");
+        let meta = serde_json::json!({
+            "schema_version": 1,
+            "creator_id": CREATOR_ID,
+            "workspace_slug": "default",
+            "local_root": user_home.join("creative"),
+            "created_at": "2020-01-01T00:00:00Z"
+        });
+        std::fs::write(
+            op_dir.join("meta.json"),
+            serde_json::to_string(&meta).expect("meta json"),
+        )
+        .expect("meta.json");
+
+        let original_home = std::env::var("HOME").ok();
+        std::env::set_var("HOME", user_home);
+
+        let mut state = WorkspaceState::initialize().await.expect("initialize");
+        assert!(state.pool().is_none());
+
+        let config_toml = format!("active_creator_id = \"{CREATOR_ID}\"\n");
+        std::fs::write(nexus_home.join("config.toml"), config_toml).expect("config.toml");
+
+        state
+            .ensure_creator_pool()
+            .await
+            .expect("ensure_creator_pool after attach");
+        assert!(
+            state.pool().is_some(),
+            "pool should be open after Profile attach"
+        );
+
+        match original_home {
+            Some(v) => std::env::set_var("HOME", v),
+            None => std::env::remove_var("HOME"),
+        }
     }
 }
