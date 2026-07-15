@@ -197,14 +197,16 @@ async fn create_work_idempotent_replay_returns_200() {
 }
 
 #[tokio::test]
-async fn create_work_returns_401_without_creator() {
+async fn create_work_returns_409_without_creator() {
     let ctx = test_ctx_no_creator().await;
     let resp = ctx
         .server
         .post("/v1/daemon/works")
         .json(&make_create_body())
         .await;
-    resp.assert_status(axum::http::StatusCode::UNAUTHORIZED);
+    resp.assert_status(axum::http::StatusCode::CONFLICT);
+    let body: Value = resp.json();
+    assert_eq!(body["error"]["code"], "uninitialized");
 }
 
 // ─── HTTP-level: GET /v1/daemon/works (list) ────────────────────────────────
@@ -230,10 +232,12 @@ async fn list_works_returns_200() {
 }
 
 #[tokio::test]
-async fn list_works_returns_401_without_creator() {
+async fn list_works_returns_409_without_creator() {
     let ctx = test_ctx_no_creator().await;
     let resp = ctx.server.get("/v1/daemon/works").await;
-    resp.assert_status(axum::http::StatusCode::UNAUTHORIZED);
+    resp.assert_status(axum::http::StatusCode::CONFLICT);
+    let body: Value = resp.json();
+    assert_eq!(body["error"]["code"], "uninitialized");
 }
 
 #[tokio::test]
