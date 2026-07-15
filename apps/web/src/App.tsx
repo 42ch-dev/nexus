@@ -20,7 +20,7 @@ import { SettingsAdvancedSection } from '@/pages/settings/settings-advanced-sect
 import { SettingsAppearanceSection } from '@/pages/settings/settings-appearance-section';
 import { SettingsShellLayout } from '@/pages/settings/settings-shell-layout';
 import { SettingsWorkspaceSection } from '@/pages/settings/settings-workspace-section';
-import { WorkDetailPage } from '@/pages/work-detail-page';
+import { WorkShellLayout } from '@/components/layout/work-shell-layout';
 import { WorksPage } from '@/pages/works-page';
 import { WorldsPage } from '@/pages/worlds-page';
 import { SetupWizardPage } from '@/pages/setup-wizard-page';
@@ -71,17 +71,19 @@ function AppRoutes() {
         <Route index element={<Navigate to="/works" replace />} />
         <Route path="works" element={<WorksPage />} />
         <Route path="works/chapters" element={<ChaptersPage />} />
-        <Route path="works/:workId" element={<WorkDetailPage />} />
-        <Route path="works/:workId/chapters" element={<ChaptersPage />} />
-        <Route path="works/:workId/chapters/:chapter" element={<ChapterPage />} />
-        <Route
-          path="works/:workId/outline"
-          element={
-            <Suspense fallback={<LoadingState label="Loading Outline…" />}>
-              <OutlinePage />
-            </Suspense>
-          }
-        />
+        <Route path="works/:workId" element={<WorkShellLayout />}>
+          <Route index element={<Navigate to="outline" replace />} />
+          <Route
+            path="outline"
+            element={
+              <Suspense fallback={<LoadingState label="Loading Outline…" />}>
+                <OutlinePage />
+              </Suspense>
+            }
+          />
+          <Route path="chapters" element={<ChaptersPage />} />
+          <Route path="chapters/:chapter" element={<ChapterPage />} />
+        </Route>
         <Route
           path="worlds"
           element={<WorldsPage />}

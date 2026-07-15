@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Plus, RefreshCw } from 'lucide-react';
 
 import { LoadMore } from '@/components/load-more';
@@ -27,6 +27,7 @@ import { CreateWorkDialog } from './dialogs/create-work-dialog';
  */
 export function WorksPage() {
   const { t } = useTranslation('works');
+  const navigate = useNavigate();
   const [statusFilter, setStatusFilter] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
   const query = useWorks(statusFilter.trim() ? { status: statusFilter.trim() } : undefined);
@@ -106,7 +107,7 @@ export function WorksPage() {
                     <TableRow key={w.work_id}>
                       <TableCell>
                         <Link
-                          to={`/works/${encodeURIComponent(w.work_id)}`}
+                          to={`/works/${encodeURIComponent(w.work_id)}/outline`}
                           className="font-medium text-blue-700 hover:text-blue-800 hover:underline"
                         >
                           {w.title || t('untitled')}
@@ -137,8 +138,7 @@ export function WorksPage() {
         open={createOpen}
         onOpenChange={setCreateOpen}
         onCreated={(workId) => {
-          // The list auto-invalidates; nudge the user to the new Work.
-          void workId;
+          navigate(`/works/${encodeURIComponent(workId)}/outline`);
         }}
       />
     </div>

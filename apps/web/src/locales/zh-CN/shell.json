@@ -29,12 +29,7 @@
     "compute": "计算",
     "modules": "模块",
     "strategies": "策略",
-    "settings": "设置",
-    "drillIn": {
-      "backToAll": "返回所有",
-      "outline": "大纲",
-      "body": "正文"
-    }
+    "settings": "设置"
   },
   "theme": {
     "switchToLight": "切换至浅色主题",
@@ -119,5 +114,24 @@
     "creating": "正在创建作品…",
     "create": "创建",
     "toastCreated": "作品已创建"
+  },
+  "workShell": {
+    "railTitle": "作品",
+    "railAria": "作品侧栏",
+    "railDrawerDescription": "切换作品或查看当前作品的元数据。",
+    "openRail": "显示",
+    "openRailAria": "显示作品侧栏",
+    "worksListAria": "库中的作品",
+    "previewAria": "所选作品预览",
+    "loadingWorks": "正在加载作品…",
+    "loadingPreview": "正在加载预览…",
+    "worksErrorTitle": "无法加载作品",
+    "worksErrorDescription": "作品列表当前不可用。",
+    "noWorks": "尚无作品。",
+    "previewUnavailable": "预览不可用。",
+    "previewPreset": "主预设",
+    "previewProfile": "作品类型",
+    "previewUpdated": "更新时间",
+    "untitled": "未命名"
   }
 }

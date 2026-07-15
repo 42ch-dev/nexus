@@ -241,7 +241,7 @@ describe('Sidebar', () => {
     await waitFor(() =>
       expect(screen.getByRole('link', { name: 'Alpha Novel' })).toHaveAttribute(
         'href',
-        '/works/work-alpha',
+        '/works/work-alpha/outline',
       ),
     );
   });
@@ -331,17 +331,23 @@ describe('Sidebar — layout structure (AD-P2-2 T1)', () => {
   });
 });
 
-describe('Sidebar — work drill-in skeleton (AD-P2-1)', () => {
+describe('Sidebar — work routes (V1.118 P2)', () => {
   beforeEach(async () => {
     window.localStorage.clear();
     await i18n.changeLanguage('en');
   });
 
-  // Mount Sidebar inside a layout route so `useParams` populates workId the way
-  // RootLayout does in production. Without the matching route tree, workId
-  // would be undefined and drill-in would never trigger.
   function renderSidebarAtRoute(initialPath: string) {
-    useSidebarHandlers();
+    useSidebarHandlers([
+      {
+        work_id: 'work-42',
+        title: 'Drill Novel',
+        status: 'active',
+        intake_status: 'ready',
+        primary_preset_id: 'preset-1',
+        updated_at: '2026-01-01T00:00:00Z',
+      },
+    ]);
     renderInApp(
       <Routes>
         <Route element={<Sidebar />}>
@@ -361,104 +367,44 @@ describe('Sidebar — work drill-in skeleton (AD-P2-1)', () => {
     );
   }
 
-  it('shows the three drill-in links and hides tabs when a workId is present', async () => {
+  it('keeps Creator | Orchestrator tabs and peer groups inside a work (AC-P2-5)', async () => {
     renderSidebarAtRoute('/works/work-42/outline');
 
-    // AC-P2-6: the three skeleton links replace the top nav.
-    expect(screen.getByRole('link', { name: 'Back to all' })).toHaveAttribute('href', '/works');
-    expect(screen.getByRole('link', { name: 'Outline' })).toHaveAttribute(
-      'href',
-      '/works/work-42/outline',
-    );
-    expect(screen.getByRole('link', { name: 'Body' })).toHaveAttribute(
-      'href',
-      '/works/work-42/chapters',
+    expect(screen.getByRole('tab', { name: 'Creator', selected: true })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Orchestrator' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Works/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Worlds/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Memories/i })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'All Works' })).toBeInTheDocument();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Drill Novel' })).toHaveAttribute(
+        'href',
+        '/works/work-42/outline',
+      ),
     );
 
-    // The Creator/Orchestrator tabs are hidden in drill-in mode.
-    expect(screen.queryByRole('tab', { name: 'Creator' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('tab', { name: 'Orchestrator' })).not.toBeInTheDocument();
-
-    // Normal group items are gone (replaced by the skeleton).
-    expect(screen.queryByRole('link', { name: 'All Works' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Memories' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Back to all' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Outline' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Body' })).not.toBeInTheDocument();
   });
 
-  it('triggers drill-in on the work-detail route too (/works/:workId)', async () => {
-    renderSidebarAtRoute('/works/work-42');
-
-    expect(screen.getByRole('link', { name: 'Back to all' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Outline' })).toHaveAttribute(
-      'href',
-      '/works/work-42/outline',
-    );
-    expect(screen.getByRole('link', { name: 'Body' })).toHaveAttribute(
-      'href',
-      '/works/work-42/chapters',
-    );
-  });
-
-  it('encodes a space-bearing workId in the drill-in targets', async () => {
-    renderSidebarAtRoute('/works/w%204');
-
-    expect(screen.getByRole('link', { name: 'Outline' })).toHaveAttribute(
-      'href',
-      '/works/w%204/outline',
-    );
-    expect(screen.getByRole('link', { name: 'Body' })).toHaveAttribute(
-      'href',
-      '/works/w%204/chapters',
-    );
-  });
-
-  it('does NOT false-light Back to all while inside a work (host-owned aria-current)', async () => {
-    renderSidebarAtRoute('/works/work-42/outline');
-
-    const backToAll = screen.getByRole('link', { name: 'Back to all' });
-    // Back to all is a "go back" action — never the current location inside a
-    // work. It must not pick up an aria-current from react-router's prefix
-    // detection (the reason drill-in links render via <Link>, not <NavLink>).
-    expect(backToAll).not.toHaveAttribute('aria-current');
-    expect(backToAll).not.toHaveClass('bg-gray-alpha-100');
-
-    // The Outline surface link IS the current location.
-    expect(screen.getByRole('link', { name: 'Outline' })).toHaveAttribute(
-      'aria-current',
-      'page',
-    );
-  });
-
-  it('renders localized drill-in labels in zh-CN', async () => {
-    window.localStorage.setItem('nexus-web-locale', 'zh-CN');
-    renderSidebarAtRoute('/works/work-42/outline');
-
-    expect(screen.getByRole('link', { name: '返回所有' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '大纲' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: '正文' })).toBeInTheDocument();
-  });
-
-  it('keeps the Settings footer utility in drill-in mode', async () => {
-    renderSidebarAtRoute('/works/work-42/outline');
-
-    // The footer (Settings + profiles) is independent of drill-in mode.
-    const link = screen.getByTestId('settings-footer-utility-link');
-    expect(link).toHaveAttribute('href', '/settings');
-    expect(link).toHaveTextContent('Settings');
-  });
-
-  it('does NOT enter drill-in on the /works list route (no workId)', async () => {
+  it('does not enter drill-in on the /works list route', async () => {
     renderSidebarAtRoute('/works');
 
-    // Normal IA: tabs visible, All Works present, no drill-in Back-to-all link.
     expect(screen.getByRole('tab', { name: 'Creator' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'All Works' })).toBeInTheDocument();
     expect(screen.queryByRole('link', { name: 'Back to all' })).not.toBeInTheDocument();
   });
 
-  it('does NOT enter drill-in on a world route (worldId, not workId)', async () => {
-    renderSidebarAtRoute('/worlds');
+  it('highlights the active work row via prefix match on outline', async () => {
+    renderSidebarAtRoute('/works/work-42/outline');
 
-    expect(screen.getByRole('tab', { name: 'Creator' })).toBeInTheDocument();
-    expect(screen.queryByRole('link', { name: 'Back to all' })).not.toBeInTheDocument();
+    const workLink = await waitFor(() => screen.getByRole('link', { name: 'Drill Novel' }));
+    expect(workLink).toHaveClass('bg-gray-alpha-100', 'text-gray-1000');
+    expect(workLink.querySelector('[data-testid="sidebar-active-bar"]')).toHaveClass(
+      'w-[2px]',
+      'bg-blue-700',
+    );
   });
 });

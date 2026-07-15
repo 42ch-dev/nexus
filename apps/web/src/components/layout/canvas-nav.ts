@@ -16,7 +16,7 @@ import type { ShellNavItem } from './presentational/shell-sidebar-chrome';
  * Active-surface highlight derives from **route-pattern matching** via
  * {@link resolveActiveCanvasSurface}, NOT from a single Work param and NOT from
  * the chrome's built-in `item.to` prefix match (which is too broad — it would
- * light up "Outline" on plain `/works/:workId` work-detail).
+ * light up "Outline" on plain `/works/:workId` before the outline redirect).
  *
  * {@link CANVAS_ITEMS} holds the Outline + World KB surface definitions used by
  * the active-surface resolver and command palette. They are no longer rendered
