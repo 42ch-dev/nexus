@@ -72,7 +72,7 @@ describe('WorkRail', () => {
     });
 
     expect(screen.getByTestId('work-rail-item-work-b')).toBeInTheDocument();
-    expect(screen.getByTestId('work-rail-item-work-a')).toHaveAttribute('aria-current', 'true');
+    expect(screen.getByTestId('work-rail-item-work-a')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByTestId('work-rail-item-work-b')).not.toHaveAttribute('aria-current');
   });
 
@@ -111,7 +111,7 @@ describe('WorkRail', () => {
     await user.click(screen.getByTestId('work-rail-item-work-b'));
 
     await waitFor(() => {
-      expect(screen.getByTestId('work-rail-item-work-b')).toHaveAttribute('aria-current', 'true');
+      expect(screen.getByTestId('work-rail-item-work-b')).toHaveAttribute('aria-current', 'page');
     });
   });
 

@@ -241,7 +241,7 @@ describe('Sidebar', () => {
     await waitFor(() =>
       expect(screen.getByRole('link', { name: 'Alpha Novel' })).toHaveAttribute(
         'href',
-        '/works/work-alpha',
+        '/works/work-alpha/outline',
       ),
     );
   });

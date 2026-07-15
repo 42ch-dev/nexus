@@ -6,6 +6,7 @@ import { PanelRight } from 'lucide-react';
 import { WorkRail } from '@/components/layout/work-rail';
 import { Button } from '@/components/ui/button';
 import { Sheet, SheetContent } from '@/components/ui/sheet';
+import { useMinLgViewport } from '@/lib/use-min-lg-viewport';
 
 /**
  * Canvas-first work shell — flex main outlet + right {@link WorkRail}.
@@ -17,6 +18,14 @@ import { Sheet, SheetContent } from '@/components/ui/sheet';
 export function WorkShellLayout() {
   const { t } = useTranslation('shell');
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const isDesktopRail = useMinLgViewport();
+
+  const rail = (
+    <WorkRail
+      showHeader={isDesktopRail}
+      onWorkSelect={isDesktopRail ? undefined : () => setDrawerOpen(false)}
+    />
+  );
 
   return (
     <div
@@ -45,14 +54,16 @@ export function WorkShellLayout() {
         aria-label={t('workShell.railAria')}
         data-testid="work-shell-rail-desktop"
       >
-        <WorkRail />
+        {isDesktopRail ? rail : null}
       </aside>
 
-      <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
-        <SheetContent title={t('workShell.railTitle')} description={t('workShell.railDrawerDescription')}>
-          <WorkRail showHeader={false} onWorkSelect={() => setDrawerOpen(false)} />
-        </SheetContent>
-      </Sheet>
+      {!isDesktopRail ? (
+        <Sheet open={drawerOpen} onOpenChange={setDrawerOpen}>
+          <SheetContent title={t('workShell.railTitle')} description={t('workShell.railDrawerDescription')}>
+            {drawerOpen ? rail : null}
+          </SheetContent>
+        </Sheet>
+      ) : null}
     </div>
   );
 }

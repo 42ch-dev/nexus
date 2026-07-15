@@ -124,7 +124,7 @@
     "railTitle": "Works",
     "railAria": "Works rail",
     "railDrawerDescription": "Switch Works or review metadata for the current Work.",
-    "openRail": "Works",
+    "openRail": "Show",
     "worksListAria": "Works in this library",
     "previewAria": "Selected Work preview",
     "loadingWorks": "Loading Works…",

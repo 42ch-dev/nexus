@@ -69,7 +69,7 @@ export function Sidebar() {
         items: [
           { to: '/works', label: t('nav.allWorks'), icon: Layers },
           ...works.map((work) => ({
-            to: `/works/${encodeURIComponent(work.work_id)}`,
+            to: `/works/${encodeURIComponent(work.work_id)}/outline`,
             label: work.title,
             icon: BookOpen,
           })),

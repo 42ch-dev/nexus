@@ -54,9 +54,16 @@ function useRouteTitle(): string {
  * side padding. V1.94 adds the {@link MainBanner} for daemon degraded/error
  * states; the footer status bar is restart-icon-only when running.
  */
+/** True when the active route is a canvas-first work shell (`/works/:workId/*`). */
+function isWorkShellRoute(pathname: string): boolean {
+  return /^\/works\/[^/]+(?:\/|$)/.test(pathname);
+}
+
 export function RootLayout() {
   const { t } = useTranslation('shell');
+  const { pathname } = useLocation();
   const title = useRouteTitle();
+  const workShell = isWorkShellRoute(pathname);
 
   // ⌘K/Ctrl+K opens the command palette. The palette owns its open/close
   // (module-level store in `command-palette.tsx`); the hotkey just calls
@@ -105,7 +112,15 @@ export function RootLayout() {
             the flex child to shrink within the column so overflow scrolls here
             instead of growing the column past the viewport. */}
         <main className="min-h-0 flex-1 overflow-y-auto">
-          <div className="mx-auto w-full max-w-[1200px] px-4 py-6 md:px-6 md:py-8">
+          <div
+            className={cn(
+              'mx-auto w-full',
+              workShell
+                ? 'max-w-none px-0 py-0'
+                : 'max-w-[1200px] px-4 py-6 md:px-6 md:py-8',
+            )}
+            data-testid={workShell ? 'main-work-shell' : 'main-standard'}
+          >
             <Outlet />
           </div>
         </main>

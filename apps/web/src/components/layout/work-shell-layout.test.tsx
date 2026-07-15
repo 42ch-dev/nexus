@@ -39,14 +39,28 @@ function useShellHandlers() {
   );
 }
 
-function renderShell() {
+function mockMatchMedia(matches: boolean) {
+  vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
+    matches: query.includes('961px') ? matches : false,
+    media: query,
+    onchange: null,
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }));
+}
+
+function renderShell(initialEntry = '/works/work-a/outline', desktop = false) {
+  mockMatchMedia(desktop);
   return renderInApp(
     <Routes>
       <Route path="/works/:workId" element={<WorkShellLayout />}>
         <Route path="outline" element={<div data-testid="shell-outlet">Outline</div>} />
       </Route>
     </Routes>,
-    { client: makeClient(), initialRouterEntries: ['/works/work-a/outline'] },
+    { client: makeClient(), initialRouterEntries: [initialEntry] },
   );
 }
 
@@ -54,21 +68,11 @@ describe('WorkShellLayout', () => {
   beforeEach(async () => {
     window.localStorage.clear();
     await i18n.changeLanguage('en');
-    vi.spyOn(window, 'matchMedia').mockImplementation((query: string) => ({
-      matches: false,
-      media: query,
-      onchange: null,
-      addListener: vi.fn(),
-      removeListener: vi.fn(),
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-      dispatchEvent: vi.fn(),
-    }));
   });
 
   it('establishes flex row shell with main outlet slot', async () => {
     useShellHandlers();
-    renderShell();
+    renderShell('/works/work-a/outline', true);
 
     const shell = screen.getByTestId('work-shell-layout');
     expect(shell).toHaveClass('flex');
@@ -82,7 +86,7 @@ describe('WorkShellLayout', () => {
 
   it('renders desktop rail aside with 280px width class', async () => {
     useShellHandlers();
-    renderShell();
+    renderShell('/works/work-a/outline', true);
 
     await waitFor(() => {
       expect(screen.getByTestId('work-shell-rail-desktop')).toBeInTheDocument();
@@ -96,9 +100,9 @@ describe('WorkShellLayout', () => {
   it('opens the mobile end-sheet drawer from the header control', async () => {
     const user = userEvent.setup();
     useShellHandlers();
-    renderShell();
+    renderShell('/works/work-a/outline', false);
 
-    await user.click(screen.getByTestId('work-shell-open-rail'));
+    await user.click(screen.getByRole('button', { name: 'Show' }));
 
     await waitFor(() => {
       expect(screen.getByRole('dialog')).toBeInTheDocument();
