@@ -1,0 +1,29 @@
+name: Free disk space
+description: |
+  Reclaim disk on GitHub-hosted Ubuntu runners before heavy Rust builds.
+  Removes large preinstalled stacks unused by this monorepo (dotnet, Android,
+  Haskell, CodeQL, Boost, Swift, Docker images). Safe to run before Rust
+  jobs that install toolchains via dtolnay/rust-toolchain (not hostedtoolcache).
+
+runs:
+  using: composite
+  steps:
+    - name: Free disk space on Ubuntu runner
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "Disk before cleanup:"
+        df -h /
+
+        # Pattern follows jlumbroso/free-disk-space; kept as a local composite
+        # action so we can pin behavior without a third-party action dependency.
+        sudo rm -rf /usr/share/dotnet
+        sudo rm -rf /usr/local/lib/android
+        sudo rm -rf /opt/ghc
+        sudo rm -rf /opt/hostedtoolcache/CodeQL
+        sudo rm -rf /usr/local/share/boost
+        sudo rm -rf /usr/share/swift
+        sudo docker image prune --all --force || true
+
+        echo "Disk after cleanup:"
+        df -h /
