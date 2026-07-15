@@ -38,7 +38,7 @@ async fn test_ctx_with_active_creator(active_creator: &str) -> TestCtx {
         .expect("failed to write config.toml");
 
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
-    let pool = state.pool().clone();
+    let pool = state.pool().unwrap().clone();
     let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
     let server = TestServer::new(app).expect("failed to create test server");
@@ -361,7 +361,7 @@ async fn test_ctx_without_creator() -> TestCtx {
     // Remove config.toml → no active creator.
     std::fs::remove_file(nexus_home.join("config.toml")).expect("remove config.toml");
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
-    let pool = state.pool().clone();
+    let pool = state.pool().unwrap().clone();
     let auth_config = DaemonApiConfig::keyless();
     let app = api::create_router(state, auth_config);
     let server = TestServer::new(app).expect("failed to create test server");
@@ -611,7 +611,7 @@ async fn review_overlapping_calls_no_duplicate_processing() {
     )
     .expect("config.toml");
     let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
-    let pool = state.pool().clone();
+    let pool = state.pool().unwrap().clone();
 
     const SEED: usize = 5;
     seed_n_pending_reviews_raw(&pool, "ctr_testuser", SEED).await;

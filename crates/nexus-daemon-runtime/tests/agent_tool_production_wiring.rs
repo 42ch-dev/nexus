@@ -69,7 +69,7 @@ async fn seed_work(state: &WorkspaceState) -> String {
         novel_completion_status: None,
         lineage_from_work_id: None,
     };
-    works::create_work_atomic(state.pool(), &record, None)
+    works::create_work_atomic(state.pool().unwrap(), &record, None)
         .await
         .unwrap()
         .unwrap_err(); // Returns new record in Err
@@ -86,7 +86,7 @@ async fn seed_work_completion_locked(state: &WorkspaceState) -> String {
         completion_locked_at: Some(Some(now.clone())),
         ..Default::default()
     };
-    works::patch_work(state.pool(), "test_creator", &work_id, &patch, &now)
+    works::patch_work(state.pool().unwrap(), "test_creator", &work_id, &patch, &now)
         .await
         .expect("patch_work should succeed");
 
@@ -291,7 +291,7 @@ async fn agent_tool_e2e_read_only_tool_succeeds_under_completion_lock() {
     let work_id = seed_work_completion_locked(&ctx.state).await;
 
     // Verify the work has completion_locked_at set
-    let record = works::get_work(ctx.state.pool(), "test_creator", &work_id)
+    let record = works::get_work(ctx.state.pool().unwrap(), "test_creator", &work_id)
         .await
         .expect("db query should succeed")
         .expect("work should exist");

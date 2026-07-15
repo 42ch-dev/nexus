@@ -612,6 +612,31 @@ mod tests {
 
     #[tokio::test]
     #[serial_test::serial]
+    async fn tier1_agent_host_scan_works_without_active_creator() {
+        let (_tmp, server) = create_no_profile_router().await;
+        let response = server
+            .post("/v1/daemon/agent-host/scan")
+            .json(&serde_json::json!({ "filter": "all" }))
+            .await;
+        assert_ne!(
+            response.status_code(),
+            409,
+            "agent-host scan must not return uninitialized before Profile attach"
+        );
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn tier2_agent_host_sessions_returns_409_without_active_creator() {
+        let (_tmp, server) = create_no_profile_router().await;
+        let response = server.get("/v1/daemon/agent-host/sessions").await;
+        assert_eq!(response.status_code(), 409);
+        let body: Value = response.json();
+        assert_eq!(body["error"]["code"], "uninitialized");
+    }
+
+    #[tokio::test]
+    #[serial_test::serial]
     async fn get_active_creator_unset_returns_404_not_found() {
         let (_tmp, server) = create_no_profile_router().await;
         let response = server.get("/v1/daemon/creators/active").await;

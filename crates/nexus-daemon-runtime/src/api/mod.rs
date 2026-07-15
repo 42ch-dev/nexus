@@ -32,8 +32,10 @@ use axum::{
 use std::sync::Arc;
 use tower_http::cors::{AllowOrigin, Any, CorsLayer};
 
-/// Agent Host routes (V1.20 Batch 3).
-fn agent_host_routes() -> Router<WorkspaceState> {
+/// Agent Host discovery routes (Tier-1) — PATH/registry probe only; no creator DB.
+///
+/// Setup wizard calls `scan` before Profile attach (IC-2).
+fn agent_host_tier1_routes() -> Router<WorkspaceState> {
     Router::new()
         .route(
             "/v1/daemon/agent-host/health",
@@ -47,6 +49,11 @@ fn agent_host_routes() -> Router<WorkspaceState> {
             "/v1/daemon/agent-host/scan",
             post(handlers::agent_host::scan),
         )
+}
+
+/// Agent Host session routes (Tier-2) — require active creator + pool.
+fn agent_host_tier2_routes() -> Router<WorkspaceState> {
+    Router::new()
         .route(
             "/v1/daemon/agent-host/sessions",
             post(handlers::agent_host::create_session).get(handlers::agent_host::list_sessions),
@@ -511,7 +518,7 @@ fn tier2_routes() -> Router<WorkspaceState> {
             get(handlers::references::get),
         )
         .merge(orchestration_routes())
-        .merge(agent_host_routes())
+        .merge(agent_host_tier2_routes())
 }
 
 /// Create the Daemon API router
@@ -548,7 +555,8 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
         .route(
             "/v1/daemon/agent-host/internal/tool-executions",
             post(handlers::acp::tool_execute),
-        );
+        )
+        .merge(agent_host_tier1_routes());
 
     let protected_routes = Router::new()
         .merge(tier1_routes)
