@@ -37,7 +37,7 @@ First-launch wizard chrome (Agent, Workspace, Done) follows studio-first: Studio
 
 ## Related
 
-- Compass: `../v1.106-delivery-compass.md`
+- Compass: `../v1.106/delivery-compass.md`
 - P0 spec: `../specs/studio-first-pipeline.md`
 - P1 spec: `../specs/first-launch-polish.md`
 - Plan: `../../plans/2026-07-10-v1.106-studio-first-pipeline.md`

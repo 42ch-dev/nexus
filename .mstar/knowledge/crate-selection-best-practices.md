@@ -302,7 +302,7 @@ Breaking crate upgrades (e.g. `sqlx 0.8 → 0.9` with API churn) follow the same
 
 Documents and plans that cite this best-practices file:
 
-- `v1.4-delivery-compass-v1.md` — Tech Stack / Risk sections.
+- `v1.4/delivery-compass.md` — Tech Stack / Risk sections.
 - `orchestration-engine.md` — §4 (graph-flow integration), §5 (capability store), §6 (worker IPC).
 - `creator-schedule-and-core-context.md` — wall-clock deferral clause.
 - `2026-04-17-v1.4-ws2-orchestration-skeleton.md` — Tech Stack + Task 1 (sqlx features) + Task 5 (IPC implementation).
@@ -315,7 +315,7 @@ Before editing any of the above in a way that changes crate selection, update **
 ## 6. References
 
 - Research log (archival): [`../reports/2026-04-17-crate-selection-research/research-log.md`](../reports/2026-04-17-crate-selection-research/research-log.md)
-- V1.4 delivery compass: [`v1.4-delivery-compass-v1.md`](../iterations/v1.4-delivery-compass-v1.md)
+- V1.4 delivery compass: [`v1.4/delivery-compass.md`](../iterations/v1.4/delivery-compass.md)
 - Orchestration engine SSOT: [`orchestration-engine.md`](../specs/orchestration-engine.md)
 - Schedule / core context SSOT: [`creator-schedule-and-core-context.md`](creator-schedule-and-core-context.md)
 - Local DB ownership: [`local-db-refactor.md`](archived/knowledge/local-db-refactor.md)

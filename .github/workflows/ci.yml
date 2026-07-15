@@ -81,6 +81,9 @@ jobs:
     needs: verify-codegen
     env:
       SQLX_OFFLINE: "true"
+      # Disable incremental to cap target/debug/incremental growth on ephemeral
+      # runners (see rust-tests / ENOSPC mitigation in plan 2026-07-15).
+      CARGO_INCREMENTAL: "0"
       # Pin the fmt nightly so CI matches local rustfmt exactly. rustfmt
       # formatting rules drift across nightly versions, so an unpinned
       # `nightly` makes CI's `fmt --check` fail on code formatted by a
@@ -88,6 +91,7 @@ jobs:
       FMT_NIGHTLY: "nightly-2026-06-26"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: ./.github/actions/free-disk-space
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
         with:
           components: rustfmt, clippy
@@ -108,6 +112,9 @@ jobs:
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae  # v2
         with:
           shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}
+          workspaces: .
+          cache-all-crates: false
+          cache-on-failure: false
       - name: Check formatting
         run: cargo +"${FMT_NIGHTLY}" fmt --all -- --check
       - name: Run clippy
@@ -119,8 +126,10 @@ jobs:
     needs: verify-codegen
     env:
       SQLX_OFFLINE: "true"
+      CARGO_INCREMENTAL: "0"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: ./.github/actions/free-disk-space
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
         with:
           targets: wasm32-unknown-unknown
@@ -128,6 +137,17 @@ jobs:
         with:
           name: generated-types
           path: .
+      - name: Read workspace version for cargo cache key
+        id: workspace-version
+        run: |
+          v=$(python3 -c "import tomllib; print(tomllib.load(open('Cargo.toml', 'rb'))['workspace']['package']['version'])")
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae  # v2
+        with:
+          shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}-sqlx
+          workspaces: .
+          cache-all-crates: false
+          cache-on-failure: false
       - name: Verify sqlx offline metadata is up-to-date
         run: |
           # SQLX_OFFLINE=true makes cargo check use committed .sqlx/ metadata
@@ -223,6 +243,9 @@ jobs:
       - name: Check promoted-wrapper forbidden imports & Studio boundaries
         run: bash tooling/check-ui-guardrails.sh
 
+  # Heavy Rust jobs: free-disk before toolchain/cache restore, CARGO_INCREMENTAL=0,
+  # scoped rust-cache (workspace crates only), and split orchestration legs so
+  # peak target/ fits ubuntu-latest (~14 GiB free after preinstalled software).
   rust-tests:
     name: Rust tests (${{ matrix.group }})
     runs-on: ubuntu-latest
@@ -237,16 +260,18 @@ jobs:
               -p nexus-home-layout
               -p nexus-local-db
               -p nexus-cloud-domain
-          - group: orchestration-domain
+          - group: orchestration-core
             packages: >-
               -p nexus-orchestration
               -p nexus-creator
               -p nexus-creator-memory
+              -p nexus-cloud-sync
+          - group: orchestration-knowledge
+            packages: >-
               -p nexus-kb
               -p nexus-knowledge
               -p nexus-narrative
               -p nexus-moment-context-assembly
-              -p nexus-cloud-sync
               -p nexus-wasm-host
           - group: daemon
             packages: >-
@@ -258,8 +283,10 @@ jobs:
               -p nexus-agent-host
     env:
       SQLX_OFFLINE: "true"
+      CARGO_INCREMENTAL: "0"
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: ./.github/actions/free-disk-space
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
         with:
           targets: wasm32-unknown-unknown
@@ -275,5 +302,8 @@ jobs:
       - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae  # v2
         with:
           shared-key: nexus-rust-${{ steps.workspace-version.outputs.version }}-${{ matrix.group }}
+          workspaces: .
+          cache-all-crates: false
+          cache-on-failure: false
       - name: Run tests
         run: cargo test ${{ matrix.packages }}

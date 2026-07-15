@@ -14,7 +14,7 @@
 - [entity-scope-model.md](../entity-scope-model.md) — World-bound extract mode
 - [world-kb-runtime-architecture.md](../../world-kb-runtime-architecture.md) — `kb.extract_work` on-demand path
 
-**Iteration compass**: [v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md](../../iterations/v1.44-novel-quality-and-serial-hardening-delivery-compass-v1.md)  
+**Iteration compass**: [v1.44/delivery-compass.md](../../iterations/v1.44/delivery-compass.md)  
 **Tracker**: DF-69
 
 ---

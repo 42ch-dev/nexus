@@ -7,7 +7,7 @@
 **Wave-0 design inputs consumed**:
 
 - [orchestration-engine.md](orchestration-engine.md) — Task/Capability/Session primitives this spec builds on
-- [v1.4-delivery-compass-v1.md](../../iterations/v1.4-delivery-compass-v1.md) — program-level scope and milestones
+- [v1.4/delivery-compass.md](../../iterations/v1.4/delivery-compass.md) — program-level scope and milestones
 - [schemas-external-consumer-boundary.md](../knowledge/schemas-external-consumer-boundary.md) — confirms Schedule / core_context types are **local** (not wire)
 
 **Answers for open questions originally parked in `orchestration-engine.md` §11**: OQ-1, OQ-2, OQ-3, OQ-4, OQ-5 are resolved here (see §2 "Confirmed Decisions"). OQ-6 is scoped for V1.4; OQ-7/OQ-8 remain V1.5+.
@@ -559,7 +559,7 @@ Schedule and core_context Rust types in `crates/nexus-contracts/src/local/schedu
 Internal:
 
 - [orchestration-engine.md](orchestration-engine.md) — engine primitives; §11 OQ list now answered here
-- [v1.4-delivery-compass-v1.md](../../iterations/v1.4-delivery-compass-v1.md) — program scope (WS7)
+- [v1.4/delivery-compass.md](../../iterations/v1.4/delivery-compass.md) — program scope (WS7)
 - [schemas-external-consumer-boundary.md](../knowledge/schemas-external-consumer-boundary.md) — confirms Schedule types are local
 - [acp-client-tech-spec.md](local/acp-client-tech-spec.md) §4.3 — orchestration HTTP surface pattern
 - [daemon-lifecycle-api.md](../../archived/knowledge/daemon-lifecycle-api.md) — supervisor start/stop coupled to `Running`/`Stopping`

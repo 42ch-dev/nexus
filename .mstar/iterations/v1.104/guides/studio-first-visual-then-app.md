@@ -3,7 +3,7 @@
 **Status:** writing-polished (§5.3)  
 **Plan:** `2026-07-09-v1.104-settings-workspace`  
 **Primary spec:** [`../specs/settings-workspace-section.md`](../specs/settings-workspace-section.md)  
-**Compass:** [`../../v1.104-delivery-compass.md`](../../v1.104-delivery-compass.md)
+**Compass:** [`../../v1.104/delivery-compass.md`](../../v1.104/delivery-compass.md)
 
 **Author value:** Workspace path change must look intentional before IPC wiring — authors see path, action, and honesty copy in a polished surface, not a debug form.
 

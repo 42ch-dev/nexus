@@ -3,7 +3,7 @@
 **Status:** Draft — product-complete (§5.1 PM); architecture locked (§5.2 architect); writing-complete (§5.3)  
 **Tier:** Must (P1)  
 **Plan:** `2026-07-10-v1.108-ui-shell-ssot`  
-**Compass:** `../v1.108-delivery-compass.md`  
+**Compass:** `../v1.108/delivery-compass.md`  
 **Invariant:** Studio-first (see `../guides/studio-first-invariant.md`)
 
 ## Product outcome

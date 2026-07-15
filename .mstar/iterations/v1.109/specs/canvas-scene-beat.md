@@ -3,7 +3,7 @@
 **Status:** Draft — product-complete (§5.1 product-manager)  
 **Tier:** Must (P0)  
 **Plan:** `2026-07-11-v1.109-canvas-scene-beat`  
-**Compass:** `../v1.109-delivery-compass.md`  
+**Compass:** `../v1.109/delivery-compass.md`  
 **Normative master:** `.mstar/specs/canvas-strategy-surface.md` (§1 product thesis, §3.3 surface 2, §3.5 write boundary, §4 UX, §4.5 user stories)
 
 ## Product outcome

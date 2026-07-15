@@ -9,7 +9,7 @@ each call receives a fresh `ComputeInput` envelope and returns a 4-part
 [Embedding a module](#embedding-a-module)).
 
 > Spec context: V1.61 "Programmable Narrative Progression" — see
-> `.mstar/iterations/v1.61-programmable-narrative-progression-delivery-compass-v1.md`
+> `.mstar/iterations/v1.61/delivery-compass.md`
 > (grill decisions Q2/Q6/Q8/Q9/Q10) and the wire contracts under
 > `schemas/daemon-api/compute/` (registry) and `schemas/local-api/compute/`
 > (envelopes).

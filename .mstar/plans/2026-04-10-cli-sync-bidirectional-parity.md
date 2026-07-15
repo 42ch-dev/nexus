@@ -12,7 +12,7 @@
 
 ## Authoritative design input
 
-- [.mstar/iterations/v1.1-overview-v2.md](iterations/v1.1-overview-v2.md) — program overview (capability symmetry **B**).
+- [.mstar/iterations/v1.1/guides/v1.1/guides/v1.1-overview-v2.md](iterations/v1.1/guides/v1.1/guides/v1.1-overview-v2.md) — program overview (capability symmetry **B**).
 - [.mstar/knowledge/architecture-alignment-review.md](knowledge/architecture-alignment-review.md) — alignment narrative.
 - In-repo: `schemas/*sync*`, `crates/nexus-sync/`, `crates/nexus42/src/commands/sync*.rs` (paths may vary — locate with `rg 'sync' crates/nexus42`).
 

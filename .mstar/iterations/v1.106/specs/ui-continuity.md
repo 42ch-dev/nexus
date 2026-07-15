@@ -3,7 +3,7 @@
 **Status:** Draft — writing-complete (§5.3); PM lock pending §5.4  
 **Tier:** Stretch (P2) — **may defer**; does **not** block iteration close  
 **Plan:** `2026-07-10-v1.106-ui-continuity`  
-**Compass:** `../v1.106-delivery-compass.md`
+**Compass:** `../v1.106/delivery-compass.md`
 
 ## Product outcome
 

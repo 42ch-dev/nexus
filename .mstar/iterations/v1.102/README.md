@@ -46,7 +46,7 @@ See compass § Architecture Locks and `specs/*.md` (status: architect-locked). C
 
 | Artifact | Path |
 |----------|------|
-| Delivery compass | [`../v1.102-delivery-compass.md`](../v1.102-delivery-compass.md) |
+| Delivery compass | [`../v1.102/delivery-compass.md`](../v1.102/delivery-compass.md) |
 | P0 plan | [`.mstar/plans/2026-07-09-v1.102-badge-soft-solid.md`](../../plans/2026-07-09-v1.102-badge-soft-solid.md) |
 | P1 plan | [`.mstar/plans/2026-07-09-v1.102-settings-shell.md`](../../plans/2026-07-09-v1.102-settings-shell.md) |
 | P2 plan (Stretch) | [`.mstar/plans/2026-07-09-v1.102-ui-hygiene.md`](../../plans/2026-07-09-v1.102-ui-hygiene.md) |

@@ -2,7 +2,7 @@
 
 **Status:** architect-locked (§5.2); writing-polished (§5.3)  
 **Plan:** `2026-07-09-v1.103-settings-shell-nav`  
-**Compass:** [`v1.103-delivery-compass.md`](../../v1.103-delivery-compass.md)  
+**Compass:** [`v1.103/delivery-compass.md`](../../v1.103/delivery-compass.md)  
 **Tier:** Must (P0)  
 **Wire:** `wire_contracts_changed: false` (hard preference)  
 **Related specs:** [`settings-agent-section.md`](settings-agent-section.md) · [`settings-connection-section.md`](settings-connection-section.md) · [`settings-setup-section.md`](settings-setup-section.md) · [`settings-workspace-section.md`](settings-workspace-section.md) (Stretch)

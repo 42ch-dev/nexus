@@ -3,7 +3,7 @@
 **Status:** Draft — product-complete (§5.1 PM); architecture locked (§5.2 architect); writing-complete (§5.3)  
 **Tier:** Must (P0)  
 **Plan:** `2026-07-10-v1.108-canvas-outline-spatial`  
-**Compass:** `../v1.108-delivery-compass.md`  
+**Compass:** `../v1.108/delivery-compass.md`  
 **Normative master:** `.mstar/specs/canvas-strategy-surface.md` (Outline+Timeline surface)
 
 ## Product outcome

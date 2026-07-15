@@ -488,7 +488,7 @@ Both capabilities receive the `sqlx::SqlitePool` through the standard `with_pool
 
 ## 12. Tauri sidecar mode (V1.66)
 
-The Tauri desktop shell ([desktop-shell.md](desktop-shell.md)) may bundle the user-facing `nexus42` binary as a sidecar process. This does **not** create a second daemon product binary: the sidecar is still `nexus42`, launched in daemon foreground mode by the desktop app. (Compass: [v1.66 §5 #2/#3 LOCKED](../iterations/v1.66-tauri-desktop-shell-delivery-compass-v1.md).)
+The Tauri desktop shell ([desktop-shell.md](desktop-shell.md)) may bundle the user-facing `nexus42` binary as a sidecar process. This does **not** create a second daemon product binary: the sidecar is still `nexus42`, launched in daemon foreground mode by the desktop app. (Compass: [v1.66 §5 #2/#3 LOCKED](../iterations/v1.66/delivery-compass.md).)
 
 ### 12.1 Launch contract
 
@@ -553,7 +553,7 @@ In desktop mode, Tauri serves the bundled `apps/web/dist` via `build.frontendDis
 
 This section codifies the normative security contract for the daemon's Daemon API trust boundary. It closes the three-link attack chain identified in V1.86 (permissive CORS + keyless-localhost → remote-reach; fs/* bypass without workspace → arbitrary-file R/W; string-prefix path comparison → sibling-directory escape). The normative hooks in §4.4.3 (`require_api_key` on data routes) and §4.5 (W-002-style workspace path guard) already provide authority; this section adds the Origin gate, the deny-fs-without-workspace invariant, and the component-wise path guard requirement.
 
-**Coordinates with:** the V1.86 delivery compass ([v1.86-local-api-trust-hardening-delivery-compass-v1.md](../../iterations/v1.86-local-api-trust-hardening-delivery-compass-v1.md)), `api/path_guard.rs` (`resolve_guarded_path`), `api/auth_middleware.rs` (keyless-localhost mode), `api/mod.rs` (CORS layer configuration).
+**Coordinates with:** the V1.86 delivery compass ([v1.86/delivery-compass.md](../../iterations/v1.86/delivery-compass.md)), `api/path_guard.rs` (`resolve_guarded_path`), `api/auth_middleware.rs` (keyless-localhost mode), `api/mod.rs` (CORS layer configuration).
 
 ### 13.1 Origin allowlist gate
 

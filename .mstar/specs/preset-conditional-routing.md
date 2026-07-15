@@ -355,7 +355,7 @@ The runtime scans compiled expression ASTs for `registry_refresh` and `workspace
 | CLI | Optional; prefer preset-driven first |
 | QA | Validator + hermetic e2e branch coverage |
 
-**Target timing:** Post-V1.35. V1.35 compass explicitly **OUT** for implement — see [v1.35 compass Appendix B](../../iterations/v1.35-cli-ia-and-product-polish-delivery-compass-v1.md#appendix-b-v135-fl-d-scope-lock).
+**Target timing:** Post-V1.35. V1.35 compass explicitly **OUT** for implement — see [v1.35 compass Appendix B](../../iterations/v1.35/delivery-compass.md#appendix-b-v135-fl-d-scope-lock).
 
 ---
 
@@ -373,8 +373,8 @@ The runtime scans compiled expression ASTs for `registry_refresh` and `workspace
 ## 8. References
 
 - PD-08: Preset orchestration + Agentic Design Patterns (deferred tracker product line)
-- [v1.31-agentic-design-patterns-delivery-compass-v1.md](../../iterations/v1.31-agentic-design-patterns-delivery-compass-v1.md)
-- [v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md](../../iterations/v1.34-creator-workflow-and-agent-tools-delivery-compass-v1.md) §1.2 OUT: conditional routing
+- [v1.31/delivery-compass.md](../../iterations/v1.31/delivery-compass.md)
+- [v1.34/delivery-compass.md](../../iterations/v1.34/delivery-compass.md) §1.2 OUT: conditional routing
 - External: https://github.com/evoiz/Agentic-Design-Patterns
 
 ---

@@ -3,7 +3,7 @@
 **Status:** architect-locked (§5.2); writing-polished (§5.3)  
 **Plan:** `2026-07-09-v1.103-settings-agent-preselect`  
 **Shell:** [`settings-shell-ia.md`](settings-shell-ia.md)  
-**Compass:** [`v1.103-delivery-compass.md`](../../v1.103-delivery-compass.md)  
+**Compass:** [`v1.103/delivery-compass.md`](../../v1.103/delivery-compass.md)  
 **Tier:** Must (P1)  
 **Wire:** `wire_contracts_changed: false`
 

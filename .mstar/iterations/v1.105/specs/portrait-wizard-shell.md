@@ -2,7 +2,7 @@
 
 **Status:** architect-locked (Phase 1 §5.2); writing-polished (§5.3)  
 **Plan:** `2026-07-10-v1.105-portrait-shell-steps`  
-**Compass:** [`v1.105-delivery-compass.md`](../../v1.105-delivery-compass.md)  
+**Compass:** [`v1.105/delivery-compass.md`](../../v1.105/delivery-compass.md)  
 **Depends on:** [`wizard-ia-reorder.md`](wizard-ia-reorder.md)  
 **Tier:** Must (P2)  
 **Wire:** `wire_contracts_changed: false`

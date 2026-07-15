@@ -105,7 +105,7 @@ Per [effort-estimation.md](https://github.com/btspoony/mstar-harness/blob/main/d
 | `nexus42 schedule` CLI command family semantics                                | B-track                                                           |
 | Seed-prompt → stable core-context derivation & versioning                      | B-track                                                           |
 | Preset distribution / registry / signing                                       | Future (V1.5+)                                                   |
-| Wire schemas vs local types boundary refactor                                  | [v1.4-delivery-compass-v1.md](../../iterations/v1.4-delivery-compass-v1.md) §4 WS5 |
+| Wire schemas vs local types boundary refactor                                  | [v1.4/delivery-compass.md](../../iterations/v1.4/delivery-compass.md) §4 WS5 |
 | ACP SDK migration (e.g. to `sacp` v1.0)                                        | Governed by [acp-client-tech-spec.md](acp-client-tech-spec.md) §1.2 adapter-layer policy |
 
 ### 2.3 Non-goals (explicit)
@@ -1064,7 +1064,7 @@ Phase 3 (preset loader + novel-writing E2E)
 Phase 5 (knowledge doc revisions + spec amendments in place)
 ```
 
-Compass WS5 (`schemas/` boundary refactor) is fully parallel and has no dependencies on this spec's phases — see [v1.4-delivery-compass-v1.md](../../iterations/v1.4-delivery-compass-v1.md) §4 WS5 for detailed scope.
+Compass WS5 (`schemas/` boundary refactor) is fully parallel and has no dependencies on this spec's phases — see [v1.4/delivery-compass.md](../../iterations/v1.4/delivery-compass.md) §4 WS5 for detailed scope.
 
 ### 10.2 Phase 1 — `nexus-acp-host` crate extraction (M; 1–2 agent sessions)
 
@@ -1170,7 +1170,7 @@ The following questions were originally parked as B-track in this document. Afte
 
 ## 12. Coordinated Work Tracks and Knowledge Doc Revisions
 
-This document defines the **orchestration engine design itself** — workstream ordering, effort estimation, and program-level coordination with the `schemas/` boundary refactor live in **[v1.4-delivery-compass-v1.md](../../iterations/v1.4-delivery-compass-v1.md)**. Refer to that compass for:
+This document defines the **orchestration engine design itself** — workstream ordering, effort estimation, and program-level coordination with the `schemas/` boundary refactor live in **[v1.4/delivery-compass.md](../../iterations/v1.4/delivery-compass.md)**. Refer to that compass for:
 
 - How WS1–WS4 of this spec map to V1.4 waves and milestones.
 - How the `schemas/` boundary refactor (formerly noted here as a "parallel small plan") is formalised as **WS5** of the V1.4 delivery compass.

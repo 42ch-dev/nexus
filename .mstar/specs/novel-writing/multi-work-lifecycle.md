@@ -13,8 +13,8 @@
 - [work-experience-model.md](../work-experience-model.md) — Work is single-Work; pool `active` is CLI default only
 - [agent-nexus-tool-bridge.md](../agent-nexus-tool-bridge.md) — `nexus.work.patch` obeys same locks
 
-**Iteration compass**: [v1.41-multi-work-author-desk-delivery-compass-v1.md](../../iterations/v1.41-multi-work-author-desk-delivery-compass-v1.md) (Shipped)  
-**V1.42 amend**: §4.2 production acquire gap — [v1.42-multi-volume-serial-writing-delivery-compass-v1.md](../../iterations/v1.42-multi-volume-serial-writing-delivery-compass-v1.md) P0
+**Iteration compass**: [v1.41/delivery-compass.md](../../iterations/v1.41/delivery-compass.md) (Shipped)  
+**V1.42 amend**: §4.2 production acquire gap — [v1.42/delivery-compass.md](../../iterations/v1.42/delivery-compass.md) P0
 
 ---
 
