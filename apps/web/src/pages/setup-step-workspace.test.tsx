@@ -320,7 +320,7 @@ describe('SetupStepWorkspace', () => {
     const onNext = vi.fn();
     // Migration-class error -> classified `migration_db` -> Reset renders (AD-P0).
     const ensureSetupBootstrap = vi.fn(() =>
-      Promise.reject(new Error('Failed to run DB migrations: schema mismatch')),
+      Promise.reject(new Error('Failed to open creator database: Failed to run database migrations: schema mismatch')),
     );
     const resetLocalDatabase = vi.fn(() => Promise.resolve());
     const startDaemon = vi.fn(() => Promise.resolve());
@@ -343,7 +343,7 @@ describe('SetupStepWorkspace', () => {
     // AC-P0-3: migration-class failure -> inline alert + Reset allowed.
     expect(screen.getByTestId('wizard-continue-error')).toHaveAttribute('data-continue-error-class', 'migration_db');
     expect(
-      within(screen.getByTestId('wizard-continue-error')).getByText('Failed to run DB migrations: schema mismatch'),
+      within(screen.getByTestId('wizard-continue-error')).getByText('Failed to open creator database: Failed to run database migrations: schema mismatch'),
     ).toBeInTheDocument();
 
     await user.click(screen.getByRole('button', { name: 'Reset' }));
@@ -535,7 +535,7 @@ describe('AC-P0-* acceptance (setup-continue-unblock)', () => {
   it('AC-P0-3: migration-class failure shows inline error + Reset', async () => {
     const user = userEvent.setup();
     const ensureSetupBootstrap = vi.fn(() =>
-      Promise.reject(new Error('Failed to run DB migrations: schema mismatch')),
+      Promise.reject(new Error('Failed to open creator database: Failed to run database migrations: schema mismatch')),
     );
 
     renderHarness(makeState({ workspaceRoot: '/custom/nexus' }), {

@@ -84,6 +84,10 @@ export function SetupStepWorkspace({
     try {
       const selected = await desktop.pickDirectory(state.workspaceRoot || DEFAULT_WORKSPACE);
       if (selected) {
+        // QC2-C-002: clear stale error state when the author picks a new
+        // workspace path so a previous failure does not persist visually.
+        setContinueError(null);
+        setContinueErrorPhase(null);
         onChange({ ...state, workspaceRoot: selected, workspacePicked: true });
       }
     } catch (err) {
@@ -158,7 +162,13 @@ export function SetupStepWorkspace({
       toast({
         variant: 'error',
         title: t('toast.workspaceBootstrapFailed'),
-        description: t('toast.workspaceBootstrapFailedDescription', { message }),
+        // QC2-W-004: mirror the inline alert's class-selected helper instead
+        // of the legacy conflated description (spec: "when toast is shown,
+        // mirror the same class-selected helper").
+        description:
+          classified.class === 'migration_db'
+            ? t('continueError.helper.migrationDb')
+            : t('continueError.helper.soft'),
       });
       console.error('Bootstrap failed:', err);
     } finally {
@@ -209,7 +219,13 @@ export function SetupStepWorkspace({
               id="wizard-profile-name"
               type="text"
               value={state.profileDisplayName}
-              onChange={(e) => onChange({ ...state, profileDisplayName: e.target.value })}
+              onChange={(e) => {
+                // QC2-C-002: clear stale error state when the author edits the
+                // field so a previous failure does not persist visually.
+                setContinueError(null);
+                setContinueErrorPhase(null);
+                onChange({ ...state, profileDisplayName: e.target.value });
+              }}
               placeholder={t('profile.name.placeholder')}
               disabled={loading || bootstrapping || resetBusy}
               required

@@ -39,10 +39,10 @@ describe('classifySetupContinueError', () => {
     expect(result.class).toBe('migration_db');
   });
 
-  it('4. bootstrap + "Failed to run DB migrations" message → migration_db', () => {
+  it('4. bootstrap + realistic production migration message → migration_db', () => {
     const result = classifySetupContinueError(
       'bootstrap',
-      new Error('Failed to run DB migrations: schema mismatch'),
+      new Error('Failed to open creator database: Failed to run database migrations: schema mismatch'),
     );
     expect(result.class).toBe('migration_db');
   });

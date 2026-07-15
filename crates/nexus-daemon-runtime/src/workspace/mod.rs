@@ -39,6 +39,21 @@ struct CreatorDbSlot {
     session_manager: Option<Arc<WorkspaceSessionManager>>,
 }
 
+/// Outcome of attempting to open the creator DB pool (V1.119 QC2-C-001).
+///
+/// `open_error` captures the diagnostic when the open was attempted but failed
+/// (e.g. schema migration error). It is `None` when no creator was active (the
+/// normal lazy-open-deferred case at boot) or when the open succeeded. Carrying
+/// this detail lets [`WorkspaceState::ensure_creator_pool`] return a descriptive
+/// error whose message the web classifier can match (AC-P0-3).
+struct CreatorDbOutcome {
+    db: Option<DbPool>,
+    db_path: Option<PathBuf>,
+    narrative_gateway: Option<Arc<SqliteNarrativeGateway>>,
+    session_manager: Option<Arc<WorkspaceSessionManager>>,
+    open_error: Option<String>,
+}
+
 /// Shared workspace state
 #[derive(Clone)]
 pub struct WorkspaceState {
@@ -196,8 +211,16 @@ impl WorkspaceState {
         }
 
         // Try to open creator DB — non-fatal if no active creator (AC-P0-1).
-        let (db, db_path, narrative_gateway, session_manager) =
-            Self::try_open_creator_db(&user_home, &nexus_home).await;
+        let outcome = Self::try_open_creator_db(&user_home, &nexus_home).await;
+        let (db, db_path, narrative_gateway, session_manager) = (
+            outcome.db,
+            outcome.db_path,
+            outcome.narrative_gateway,
+            outcome.session_manager,
+        );
+        // `open_error` is intentionally ignored at boot — lazy-open defers when
+        // there is no active creator; the error resurfaces on the first Tier-2
+        // request via `ensure_creator_pool`.
 
         let agent_host_config =
             nexus_agent_host::config::load_config(&nexus_home).unwrap_or_else(|e| {
@@ -292,19 +315,21 @@ impl WorkspaceState {
 
     /// Try to open the creator DB if `active_creator_id` is present in config.
     ///
-    /// Returns `(None, None, None, None)` when no creator is active — the
-    /// daemon can boot without a creator DB (T0/T1 tier).
-    async fn try_open_creator_db(
-        user_home: &Path,
-        nexus_home: &Path,
-    ) -> (
-        Option<DbPool>,
-        Option<PathBuf>,
-        Option<Arc<SqliteNarrativeGateway>>,
-        Option<Arc<WorkspaceSessionManager>>,
-    ) {
+    /// Returns a [`CreatorDbOutcome`] whose components are all `None` when no
+    /// creator is active — the daemon can boot without a creator DB (T0/T1
+    /// tier). When the open is attempted but fails (schema migration, pool
+    /// creation), `open_error` captures a diagnostic so callers can surface a
+    /// meaningful error instead of a generic "no active creator" message
+    /// (V1.119 QC2-C-001 / AC-P0-3).
+    async fn try_open_creator_db(user_home: &Path, nexus_home: &Path) -> CreatorDbOutcome {
         let Some(db_path) = crate::config::try_resolve_state_db_path(user_home, nexus_home) else {
-            return (None, None, None, None);
+            return CreatorDbOutcome {
+                db: None,
+                db_path: None,
+                narrative_gateway: None,
+                session_manager: None,
+                open_error: None,
+            };
         };
 
         if let Some(parent) = db_path.parent() {
@@ -314,31 +339,52 @@ impl WorkspaceState {
                     error = %e,
                     "failed to create creator DB parent directory"
                 );
-                return (None, None, None, None);
+                return CreatorDbOutcome {
+                    db: None,
+                    db_path: None,
+                    narrative_gateway: None,
+                    session_manager: None,
+                    open_error: Some(format!("Failed to create database directory: {e}")),
+                };
             }
         }
 
         // Initialize schema and create connection pool (same pattern as original initialize)
         if let Err(e) = crate::db::schema::Schema::init(&db_path).await {
             tracing::warn!(error = %e, "failed to init creator schema; deferring DB open");
-            return (None, None, None, None);
+            return CreatorDbOutcome {
+                db: None,
+                db_path: None,
+                narrative_gateway: None,
+                session_manager: None,
+                // Message must contain "migration" so the web classifier's
+                // `/migration/i` regex matches (AC-P0-3).
+                open_error: Some(format!("Failed to run database migrations: {e}")),
+            };
         }
         let db = match DbPool::new(&db_path, PoolConfig::from_env()).await {
             Ok(pool) => pool,
             Err(e) => {
                 tracing::warn!(error = %e, "failed to create DbPool; deferring DB open");
-                return (None, None, None, None);
+                return CreatorDbOutcome {
+                    db: None,
+                    db_path: None,
+                    narrative_gateway: None,
+                    session_manager: None,
+                    open_error: Some(format!("Failed to create database connection pool: {e}")),
+                };
             }
         };
 
         let narrative_gateway = Arc::new(SqliteNarrativeGateway::new(db.pool().clone()));
         let session_manager = Arc::new(WorkspaceSessionManager::new(Arc::new(db.pool().clone())));
-        (
-            Some(db),
-            Some(db_path),
-            Some(narrative_gateway),
-            Some(session_manager),
-        )
+        CreatorDbOutcome {
+            db: Some(db),
+            db_path: Some(db_path),
+            narrative_gateway: Some(narrative_gateway),
+            session_manager: Some(session_manager),
+            open_error: None,
+        }
     }
 
     /// Lazily open the creator DB pool if not already open.
@@ -358,28 +404,37 @@ impl WorkspaceState {
 
         let user_home =
             dirs::home_dir().ok_or_else(|| anyhow::anyhow!("Cannot determine home directory"))?;
-        let (db, db_path, narrative_gateway, session_manager) =
-            Self::try_open_creator_db(&user_home, &self.nexus_home).await;
+        let CreatorDbOutcome {
+            db,
+            db_path,
+            narrative_gateway,
+            session_manager,
+            open_error,
+        } = Self::try_open_creator_db(&user_home, &self.nexus_home).await;
 
-        match (db, db_path, narrative_gateway, session_manager) {
-            (Some(db), Some(db_path), Some(narrative_gateway), Some(session_manager)) => {
-                let mut slot = self.creator_db_write();
-                if slot.db.is_some() {
-                    return Ok(()); // concurrent attach won the race
-                }
-                slot.db = Some(db);
-                slot.db_path = Some(db_path);
-                slot.narrative_gateway = Some(narrative_gateway);
-                slot.session_manager = Some(session_manager);
-                if let Some(db_ref) = slot.db.as_ref() {
-                    self.publish_shared_pool(db_ref);
-                }
-                drop(slot);
-                Ok(())
+        if let (Some(db), Some(db_path), Some(narrative_gateway), Some(session_manager)) =
+            (db, db_path, narrative_gateway, session_manager)
+        {
+            let mut slot = self.creator_db_write();
+            if slot.db.is_some() {
+                return Ok(()); // concurrent attach won the race
             }
-            _ => Err(anyhow::anyhow!(
-                "Failed to open creator database — no active creator or path resolution failed"
-            )),
+            slot.db = Some(db);
+            slot.db_path = Some(db_path);
+            slot.narrative_gateway = Some(narrative_gateway);
+            slot.session_manager = Some(session_manager);
+            if let Some(db_ref) = slot.db.as_ref() {
+                self.publish_shared_pool(db_ref);
+            }
+            drop(slot);
+            Ok(())
+        } else {
+            // Propagate the captured diagnostic so the web classifier can
+            // detect migration-class failures (AC-P0-3). Falls back to a
+            // generic message only when no creator was active.
+            let detail = open_error
+                .unwrap_or_else(|| "no active creator or path resolution failed".to_string());
+            Err(anyhow::anyhow!("Failed to open creator database: {detail}"))
         }
     }
 
