@@ -108,6 +108,16 @@ pub fn resolve_state_db_path(user_home: &Path, nexus_root: &Path) -> anyhow::Res
 
 /// Non-fatal variant of [`resolve_state_db_path`].
 ///
+/// Read `active_creator_id` from CLI config when present.
+///
+/// Returns `None` when absent or config cannot be read — non-fatal for Tier-0/Tier-1.
+#[must_use]
+pub fn try_active_creator_id(nexus_root: &Path) -> Option<String> {
+    CliConfigSnapshot::load(nexus_root)
+        .ok()
+        .and_then(|cfg| cfg.active_creator_id)
+}
+
 /// Returns `None` when `active_creator_id` is absent, instead of failing
 /// fatally. Used during boot to allow the daemon to start without a creator.
 ///

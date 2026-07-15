@@ -545,7 +545,7 @@ pub async fn patch_creator(
 
 /// `PUT /v1/daemon/creators/active` — set active creator
 pub async fn set_active_creator(
-    State(mut state): State<WorkspaceState>,
+    State(state): State<WorkspaceState>,
     Json(req): Json<SetActiveCreatorRequest>,
 ) -> Result<Json<SetActiveCreatorResponse>, NexusApiError> {
     info!(creator_id = %req.creator_id, "Setting active creator");
@@ -602,8 +602,8 @@ pub async fn set_active_creator(
 pub async fn get_active_creator(
     State(state): State<WorkspaceState>,
 ) -> Result<Json<ActiveCreatorResponse>, NexusApiError> {
-    let creator_id =
-        read_active_creator_id(state.nexus_home()).ok_or(NexusApiError::Uninitialized)?;
+    let creator_id = read_active_creator_id(state.nexus_home())
+        .ok_or_else(|| NexusApiError::NotFound("No active creator selected".to_string()))?;
 
     let cache = load_identity_cache();
     let entry = get_identity_entry(&cache, &creator_id);
@@ -767,7 +767,7 @@ mod tests {
         assert!(state.pool().is_none());
 
         set_active_creator(
-            State(state),
+            State(state.clone()),
             Json(SetActiveCreatorRequest {
                 creator_id: CREATOR_ID.to_string(),
             }),
@@ -775,12 +775,9 @@ mod tests {
         .await
         .expect("set_active_creator should succeed");
 
-        let state_after = crate::workspace::WorkspaceState::initialize()
-            .await
-            .expect("re-initialize after set-active");
         assert!(
-            state_after.pool().is_some(),
-            "set_active_creator should persist active_creator_id and open pool on attach"
+            state.pool().is_some(),
+            "set_active_creator should open pool on shared creator_db slot (H1)"
         );
 
         match original_home {
@@ -790,7 +787,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn get_active_without_creator_returns_uninitialized() {
+    async fn get_active_without_creator_returns_not_found() {
         let tmp = tempfile::TempDir::new().expect("temp dir");
         let nexus_home = tmp.path().join(".nexus42");
         std::fs::create_dir_all(&nexus_home).expect("create");
@@ -808,8 +805,8 @@ mod tests {
         let result = get_active_creator(State(state)).await;
         assert!(result.is_err());
         match result.unwrap_err() {
-            NexusApiError::Uninitialized => {}
-            other => panic!("Expected Uninitialized, got: {other}"),
+            NexusApiError::NotFound(_) => {}
+            other => panic!("Expected NotFound, got: {other}"),
         }
     }
 

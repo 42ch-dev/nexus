@@ -970,6 +970,11 @@ mod tests {
 
         let nexus_home = tmp.path().join(".nexus42");
         write_registry_cache(&nexus_home);
+        std::fs::write(
+            nexus_home.join("config.toml"),
+            "active_creator_id = \"test-creator\"\n",
+        )
+        .expect("config.toml");
 
         let db_path = tmp.path().join("state.db");
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
@@ -1019,6 +1024,11 @@ mod tests {
         let tmp = tempfile::tempdir().expect("temp dir");
         let nexus_home = tmp.path().join(".nexus42");
         write_registry_cache(&nexus_home);
+        std::fs::write(
+            nexus_home.join("config.toml"),
+            "active_creator_id = \"test-creator\"\n",
+        )
+        .expect("config.toml");
 
         let db_path = tmp.path().join("state.db");
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
@@ -1078,6 +1088,11 @@ mod tests {
         let tmp = tempfile::tempdir().expect("temp dir");
         let nexus_home = tmp.path().join(".nexus42");
         write_registry_cache_with_native_acp(&nexus_home);
+        std::fs::write(
+            nexus_home.join("config.toml"),
+            "active_creator_id = \"test-creator\"\n",
+        )
+        .expect("config.toml");
 
         let db_path = tmp.path().join("state.db");
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;

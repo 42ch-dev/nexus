@@ -490,6 +490,30 @@ fn compute_routes() -> Router<WorkspaceState> {
         )
 }
 
+/// Profile-scoped (Tier-2) routes — require active creator + lazy-open pool.
+fn tier2_routes() -> Router<WorkspaceState> {
+    Router::new()
+        // Monitoring
+        .route(
+            "/v1/daemon/monitoring/pool",
+            get(handlers::monitoring::pool_status),
+        )
+        .merge(kb_routes())
+        .merge(memory_routes())
+        .merge(works_routes())
+        .merge(reading_routes())
+        .merge(narrative_routes())
+        .merge(strategy_routes())
+        .merge(world_kb_routes())
+        .route("/v1/daemon/references", get(handlers::references::list))
+        .route(
+            "/v1/daemon/references/:reference_id",
+            get(handlers::references::get),
+        )
+        .merge(orchestration_routes())
+        .merge(agent_host_routes())
+}
+
 /// Create the Daemon API router
 ///
 /// **Unguarded routes** (no auth, always reachable):
@@ -514,42 +538,24 @@ pub fn create_router(state: WorkspaceState, auth_config: DaemonApiConfig) -> Rou
             get(handlers::runtime::daemon_status),
         );
 
-    // --- Protected: everything else behind require_api_key ---
-    let protected_routes = Router::new()
-        // Monitoring
-        .route(
-            "/v1/daemon/monitoring/pool",
-            get(handlers::monitoring::pool_status),
-        )
-        // Compute module registry (V1.114 P2 T1)
+    // --- Protected: Tier-1 (API key) + Tier-2 (active creator) ---
+    let tier1_routes = Router::new()
         .merge(compute_routes())
-        // Workspace + Creator + Preset + KB + Memory (Batch 4–5 route groups)
         .merge(workspace_routes())
         .merge(creator_routes())
         .merge(preset_routes())
-        .merge(kb_routes())
-        .merge(memory_routes())
-        .merge(works_routes())
-        .merge(reading_routes())
-        .merge(narrative_routes())
-        .merge(strategy_routes())
-        .merge(world_kb_routes())
-        // Legacy creators list & references
         .route("/v1/daemon/creators", get(handlers::creators::list))
-        .route("/v1/daemon/references", get(handlers::references::list))
-        .route(
-            "/v1/daemon/references/:reference_id",
-            get(handlers::references::get),
-        )
-        // ACP tool execution — internal route only (not public ACP routes)
         .route(
             "/v1/daemon/agent-host/internal/tool-executions",
             post(handlers::acp::tool_execute),
-        )
-        // Orchestration routes
-        .merge(orchestration_routes())
-        // ── Agent Host routes (V1.20 Batch 3) ─────────────────────────
-        .merge(agent_host_routes())
+        );
+
+    let protected_routes = Router::new()
+        .merge(tier1_routes)
+        .merge(tier2_routes().route_layer(axum_mw::from_fn_with_state(
+            state.clone(),
+            middleware::require_active_creator,
+        )))
         // Apply require_api_key middleware to all protected routes
         .route_layer(axum_mw::from_fn_with_state(
             Arc::clone(&auth_config),
