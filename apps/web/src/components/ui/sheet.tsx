@@ -32,7 +32,7 @@ export function SheetContent({
   const { t } = useTranslation('common');
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-black/40 data-[state=open]:animate-in" />
+      <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-scrim data-[state=open]:animate-in" />
       <DialogPrimitive.Content
         className={cn(
           'fixed z-50 flex h-full w-[min(100vw,280px)] flex-col overflow-hidden border-gray-alpha-400 bg-background-100 shadow-modal',

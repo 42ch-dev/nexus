@@ -112,3 +112,22 @@ describe('WorkShellLayout', () => {
     expect(within(dialog).getByTestId('work-rail')).toBeInTheDocument();
   });
 });
+
+describe('WorkShellLayout locale parity (V1.118 P2 T4)', () => {
+  beforeEach(async () => {
+    window.localStorage.clear();
+  });
+
+  it('renders work-shell chrome copy in zh-CN', async () => {
+    window.localStorage.setItem('nexus-web-locale', 'zh-CN');
+    useShellHandlers();
+    renderShell('/works/work-a/outline', true);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('work-shell-rail-desktop')).toBeInTheDocument();
+    });
+
+    expect(screen.getByRole('complementary', { name: '作品侧栏' })).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '作品' })).toBeInTheDocument();
+  });
+});

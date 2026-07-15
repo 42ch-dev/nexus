@@ -29,12 +29,7 @@
     "compute": "计算",
     "modules": "模块",
     "strategies": "策略",
-    "settings": "设置",
-    "drillIn": {
-      "backToAll": "返回所有",
-      "outline": "大纲",
-      "body": "正文"
-    }
+    "settings": "设置"
   },
   "theme": {
     "switchToLight": "切换至浅色主题",

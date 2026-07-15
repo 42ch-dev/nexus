@@ -29,12 +29,7 @@
     "compute": "Compute",
     "modules": "Modules",
     "strategies": "Strategies",
-    "settings": "Settings",
-    "drillIn": {
-      "backToAll": "Back to all",
-      "outline": "Outline",
-      "body": "Body"
-    }
+    "settings": "Settings"
   },
   "theme": {
     "switchToLight": "Switch to light theme",
