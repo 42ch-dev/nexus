@@ -39,6 +39,13 @@ export function SetupStepWorkspace({
   const [loading, setLoading] = useState(true);
   const [bootstrapping, setBootstrapping] = useState(false);
   const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  // Tracks which phase of the Continue path produced `bootstrapError`, so the
+  // classifier (T3) can derive Reset visibility and helper copy from the phase.
+  // Today `bootstrapError` still drives the (over-broad) Reset gate; T3 will
+  // replace that with `showReset = class === 'migration_db'`.
+  const [continueErrorPhase, setContinueErrorPhase] = useState<
+    'workspace_path' | 'bootstrap' | 'display_name' | null
+  >(null);
   const [resetBusy, setResetBusy] = useState(false);
   const { toast } = useToast();
 
@@ -92,6 +99,11 @@ export function SetupStepWorkspace({
         await desktop.setWorkspacePath(state.workspaceRoot);
       } catch (err) {
         const message = errorMessage(err) || t('error.workspacePathFailed');
+        // Promote workspace-path failure from toast-only to error state so it
+        // surfaces inline (spec: "Workspace path failures must populate
+        // continueError"). T3 will gate Reset to migration_db only.
+        setBootstrapError(message);
+        setContinueErrorPhase('workspace_path');
         toast({ variant: 'error', title: t('toast.workspacePath'), description: message });
         console.error('Failed to persist workspace path:', err);
         return;
@@ -99,6 +111,7 @@ export function SetupStepWorkspace({
     }
     setBootstrapping(true);
     setBootstrapError(null);
+    setContinueErrorPhase(null);
     try {
       const result = await desktop.ensureSetupBootstrap();
       if (!result.already_bootstrapped) {
@@ -116,6 +129,7 @@ export function SetupStepWorkspace({
         } catch (err) {
           const message = errorMessage(err) || t('error.profileDisplayNameFailed');
           setBootstrapError(message);
+          setContinueErrorPhase('display_name');
           toast({
             variant: 'error',
             title: t('toast.profileDisplayName'),
@@ -127,10 +141,12 @@ export function SetupStepWorkspace({
       }
 
       setBootstrapError(null);
+      setContinueErrorPhase(null);
       onNext();
     } catch (err) {
       const message = errorMessage(err) || t('error.workspaceBootstrapFailed');
       setBootstrapError(message);
+      setContinueErrorPhase('bootstrap');
       toast({
         variant: 'error',
         title: t('toast.workspaceBootstrapFailed'),
@@ -207,6 +223,7 @@ export function SetupStepWorkspace({
         className="mt-auto flex shrink-0 items-center gap-setup-wizard-surface-cta-container-gap"
         data-testid="wizard-cta-row"
         data-layout="horizontal-adjacent"
+        data-continue-error-phase={continueErrorPhase ?? undefined}
       >
         {onBack && (
           <Button variant="tertiary" onClick={onBack} aria-label={t('action.back')} className="px-2">
