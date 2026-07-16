@@ -140,16 +140,17 @@ fn orchestration_routes() -> Router<WorkspaceState> {
 fn creator_routes() -> Router<WorkspaceState> {
     Router::new()
         .route(
-            "/v1/daemon/creators/{creator_id}",
-            get(handlers::creators::get_creator).patch(handlers::creators::patch_creator),
+            "/v1/daemon/creators/active",
+            get(handlers::creators::get_active_creator).put(handlers::creators::set_active_creator),
         )
         .route(
             "/v1/daemon/creators/{creator_id}:logout",
             post(handlers::creators::logout_creator),
         )
+        // `:creator_id` (matchit) — `{creator_id}` never matched at runtime (framework 404).
         .route(
-            "/v1/daemon/creators/active",
-            get(handlers::creators::get_active_creator).put(handlers::creators::set_active_creator),
+            "/v1/daemon/creators/:creator_id",
+            get(handlers::creators::get_creator).patch(handlers::creators::patch_creator),
         )
 }
 
