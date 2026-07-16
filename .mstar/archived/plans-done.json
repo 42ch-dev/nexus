@@ -475,7 +475,8 @@
     "2026-07-15-ci-disk-and-iterations-layout",
     "2026-07-15-v1.118-daemon-no-profile-boot",
     "2026-07-15-v1.118-creation-peer-groups",
-    "2026-07-15-v1.118-canvas-work-shell"
+    "2026-07-15-v1.118-canvas-work-shell",
+    "2026-07-16-hotfix-setup-continue-404"
   ],
   "iteration_summaries": {
     "v1.45": {

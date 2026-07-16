@@ -1,7 +1,12 @@
 {
   "schema_version": 1,
-  "updated_at": "2026-06-30T04:00:00Z",
+  "updated_at": "2026-07-17T00:00:00Z",
   "entries": [
+    {
+      "at": "2026-07-17 (hotfix plan archival)",
+      "message": "2026-07-16-hotfix-setup-continue-404 marked Done + archived (Profile B): PR #153 squash-merged to main @ e320e62d; status.json row was stale InReview. Hot plans[] now = 3x V1.120 Todo plans only.",
+      "plan_id": "2026-07-16-hotfix-setup-continue-404"
+    },
     {
       "at": "2026-06-27 (security remediation)",
       "message": "Security remediation pass on main. (1) Dependabot glib #25 (medium) DISMISSED as tolerable_risk: glib 0.18.5 locked to ^0.18 by gtk 0.18.2 pulled by Tauri 2.11.3 (latest 2.x); no Tauri release ships gtk-rs >= 0.20 yet (cargo update -p glib and -p tauri both move 0 packages). Advisory = Rust unsoundness in glib::VariantStrIter (Iterator/DoubleEndedIterator impls) — only exercised on Linux/GTK code paths; CI builds macOS only (native WKWebView, no GTK), so the vulnerable path is compiled-for-linux-target only and not run on the supported platform. Revisit when Tauri bumps its gtk-rs baseline to >= 0.20 or when Linux desktop builds are added. (2) Code scanning / AI findings: 0 open via API; all 16 CodeQL alerts already fixed (actions/unpinned-tag x7, actions/missing-workflow-permissions x9). ci.yml still had 19 floating @v4 action refs while desktop-build.yml was already SHA-pinned -> PR #93 pinned ci.yml to the SAME commit SHAs desktop-build.yml uses (checkout/setup-node/upload-artifact match; download-artifact newly pinned), preserving v4 behavior (no major upgrade). PR #93 merged @ f878c178. Result: dependabot 0 open, code-scanning 0 open, both workflows SHA-pinned + permissions-compliant.",
