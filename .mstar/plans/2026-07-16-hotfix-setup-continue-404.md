@@ -62,4 +62,7 @@ _(pending)_
 
 ## QA Gate Summary
 
-_(pending)_
+- **Verdict:** Pass-with-manual-residual — `.mstar/sdd/2026-07-16-hotfix-setup-continue-404/review/qa.md`
+- **Automated:** 5/5 cargo tests green (creators_route_api ×3 + middleware GET/PATCH ×2)
+- **Manual residual:** Desktop Setup Workspace → Continue once after rebuilding/restarting daemon with `fix/setup-continue-creator-patch-404`
+
