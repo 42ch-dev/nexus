@@ -30,10 +30,7 @@ async fn test_ctx() -> TestCtx {
 #[tokio::test]
 async fn get_creator_by_id_hits_handler_not_framework_404() {
     let ctx = test_ctx().await;
-    let resp = ctx
-        .server
-        .get("/v1/daemon/creators/test_creator")
-        .await;
+    let resp = ctx.server.get("/v1/daemon/creators/test_creator").await;
     assert_ne!(
         resp.status_code(),
         404,
@@ -82,6 +79,47 @@ async fn patch_creator_rejects_empty_display_name() {
         .server
         .patch("/v1/daemon/creators/test_creator")
         .json(&serde_json::json!({ "display_name": "" }))
+        .await;
+    assert_eq!(resp.status_code(), 400);
+    let body: Value = resp.json();
+    assert_eq!(body["error"]["code"], "invalid_input");
+}
+
+#[tokio::test]
+async fn post_creator_logout_verb_hits_handler_not_405() {
+    let ctx = test_ctx().await;
+    let resp = ctx
+        .server
+        .post("/v1/daemon/creators/test_creator:logout")
+        .await;
+    assert_ne!(
+        resp.status_code(),
+        405,
+        "logout must not be captured as GET/PATCH-only :creator_id; body={}",
+        resp.text()
+    );
+    assert_ne!(
+        resp.status_code(),
+        404,
+        "logout must not be framework 404; body={}",
+        resp.text()
+    );
+    assert!(
+        resp.status_code().is_success(),
+        "POST logout: {} body={}",
+        resp.status_code(),
+        resp.text()
+    );
+    let body: Value = resp.json();
+    assert_eq!(body["creator_id"], "test_creator");
+}
+
+#[tokio::test]
+async fn get_creator_rejects_colon_verb_segment() {
+    let ctx = test_ctx().await;
+    let resp = ctx
+        .server
+        .get("/v1/daemon/creators/test_creator:logout")
         .await;
     assert_eq!(resp.status_code(), 400);
     let body: Value = resp.json();
