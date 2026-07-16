@@ -11,8 +11,19 @@ export interface AgentOverride {
   docsUrl?: string;
   installUrl?: string;
   iconUrl?: string;
-  hiddenFromDefault?: boolean;
+  /**
+   * When `true`, the row is omitted from **both** the default grid and the
+   * More list (hard exclude). Used for ACP wrappers (P2: `claude-acp`,
+   * `codex-acp`).
+   */
+  excludeFromPicker?: boolean;
   priority?: number;
+  /**
+   * Optional static description fallback used when the scan returns no
+   * description for this key (P2: native Claude/Codex). EN-only product
+   * string — does not enter locale catalogs.
+   */
+  description?: string;
 }
 
 export interface AgentCatalogOverrides {
@@ -45,7 +56,11 @@ export interface AgentCatalogItem {
   installed: boolean;
   installUrl?: string | null;
   docsUrl?: string | null;
-  hiddenFromDefault: boolean;
+  /**
+   * Hard-exclude flag: when `true`, the row never appears in the default grid
+   * or the More list. Mirrors {@link AgentOverride.excludeFromPicker}.
+   */
+  excludeFromPicker: boolean;
   priority?: number;
   registryAgentId?: string | null;
   launchCommand?: string | null;
@@ -60,8 +75,9 @@ export function resolveInstallUrl(key: string): string | null {
   return loaded.install_whitelist[key] ?? null;
 }
 
-export function isHiddenFromDefault(key: string): boolean {
-  return loaded.agents[key]?.hiddenFromDefault === true;
+/** Hard exclude: row omitted from both default grid and More (P2). */
+export function isExcludedFromPicker(key: string): boolean {
+  return loaded.agents[key]?.excludeFromPicker === true;
 }
 
 const NATIVE_LAUNCH_MAP: Record<string, string> = {
@@ -112,7 +128,7 @@ export function resolveCatalogItem(entry: AgentScanEntry): AgentCatalogItem {
     name: entry.name,
     displayName: agentOverride?.displayName ?? entry.name,
     version: entry.version,
-    description: entry.description,
+    description: entry.description ?? agentOverride?.description ?? null,
     iconUrl: entry.icon_url ?? agentOverride?.iconUrl ?? null,
     installed: entry.installed,
     installUrl:
@@ -120,7 +136,7 @@ export function resolveCatalogItem(entry: AgentScanEntry): AgentCatalogItem {
         ? agentOverride.installUrl
         : whitelistUrl,
     docsUrl: agentOverride?.docsUrl ?? null,
-    hiddenFromDefault: isHiddenFromDefault(key),
+    excludeFromPicker: isExcludedFromPicker(key),
     priority: agentOverride?.priority,
     registryAgentId: entry.registry_agent_id,
     launchCommand: entry.launch_command,
@@ -151,20 +167,58 @@ export function resolveCatalogItems(entries: AgentScanEntry[]): AgentCatalogItem
   });
 }
 
-export function defaultGridEntries(entries: AgentScanEntry[]): AgentCatalogItem[] {
-  return resolveCatalogItems(entries)
-    .filter((item) => !item.hiddenFromDefault)
-    .filter((item) => item.installed || item.priority !== undefined)
-    .sort((a, b) => {
-      const pa = a.priority ?? Infinity;
-      const pb = b.priority ?? Infinity;
-      return pa - pb;
-    });
+/**
+ * Sort comparator: `priority` asc (undefined last), then `displayName` asc.
+ * Used for curated tiers in {@link defaultGridEntries}.
+ */
+function byPriorityThenDisplayName(
+  a: AgentCatalogItem,
+  b: AgentCatalogItem,
+): number {
+  const pa = a.priority ?? Infinity;
+  const pb = b.priority ?? Infinity;
+  if (pa !== pb) return pa - pb;
+  return a.displayName.localeCompare(b.displayName);
 }
 
+/**
+ * Default grid (P2 sort): three stable tiers, concatenated.
+ *
+ * 1. **Installed curated** — installed AND `priority` defined; sort priority asc
+ *    (undefined last), then displayName asc.
+ * 2. **Curated uninstalled** — uninstalled AND `priority` 0–11 defined; sort
+ *    priority asc (curated table order).
+ * 3. **Installed not curated** — installed AND no `priority`; sort displayName
+ *    asc.
+ *
+ * Rows with `excludeFromPicker === true` are dropped before partitioning.
+ * Uninstalled rows without a priority do not enter the default grid (they fall
+ * through to {@link moreAgentsEntries}).
+ */
+export function defaultGridEntries(entries: AgentScanEntry[]): AgentCatalogItem[] {
+  const items = resolveCatalogItems(entries).filter(
+    (item) => !item.excludeFromPicker,
+  );
+  const installedCurated = items
+    .filter((item) => item.installed && item.priority !== undefined)
+    .sort(byPriorityThenDisplayName);
+  const curatedUninstalled = items
+    .filter((item) => !item.installed && item.priority !== undefined)
+    .sort(byPriorityThenDisplayName);
+  const installedNotCurated = items
+    .filter((item) => item.installed && item.priority === undefined)
+    .sort((a, b) => a.displayName.localeCompare(b.displayName));
+  return [...installedCurated, ...curatedUninstalled, ...installedNotCurated];
+}
+
+/**
+ * More list (P2): rows not in the default grid (by catalog key) and not hard
+ * excluded; sort installed-first, then `name` asc.
+ */
 export function moreAgentsEntries(entries: AgentScanEntry[]): AgentCatalogItem[] {
   const defaultItemIds = new Set(defaultGridEntries(entries).map((i) => i.id));
   return resolveCatalogItems(entries)
+    .filter((item) => !item.excludeFromPicker)
     .filter((item) => !defaultItemIds.has(item.id))
     .sort((a, b) => {
       if (a.installed !== b.installed) return a.installed ? -1 : 1;

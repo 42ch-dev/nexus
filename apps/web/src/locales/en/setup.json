@@ -97,6 +97,12 @@
     "workspaceBootstrapFailed": "Could not prepare your local workspace.",
     "profileDisplayNameFailed": "Could not save the Profile name."
   },
+  "continueError": {
+    "helper": {
+      "soft": "Fix the issue and tap Continue again.",
+      "migrationDb": "If this persists, use Reset below to clear local database state. Your workspace files are not deleted."
+    }
+  },
   "toast": {
     "finishFailed": "Could not finish setup",
     "folderPicker": "Folder picker",

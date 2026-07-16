@@ -8,7 +8,16 @@ import { Label } from '@/components/ui/label';
 import { WorkspacePathField } from '@/components/setup/workspace-path-field';
 import { useDesktopCapabilities, useNexusClient } from '@/lib/client-context';
 import { errorMessage } from '@/lib/error-message';
+import {
+  classifySetupContinueError,
+  type SetupContinueError,
+} from '@/lib/setup/continue-error';
 import { useToast } from '@/lib/use-toast';
+import {
+  lastPathSegment,
+  replaceLastPathSegment,
+  slugProfileSegment,
+} from '@/lib/workspace-profile-slug';
 import type { WizardState } from '@/pages/setup-wizard-page';
 
 export const DEFAULT_WORKSPACE = '~/Documents/nexus/default';
@@ -38,7 +47,16 @@ export function SetupStepWorkspace({
   const client = useNexusClient();
   const [loading, setLoading] = useState(true);
   const [bootstrapping, setBootstrapping] = useState(false);
-  const [bootstrapError, setBootstrapError] = useState<string | null>(null);
+  // Classified Continue-path error (AD-P0). Drives the inline `role="alert"`
+  // region above the CTA row, the class-selected helper copy, and Reset
+  // visibility (`showReset = class === 'migration_db'` only — never bound to
+  // message presence alone, per spec product rule 3).
+  const [continueError, setContinueError] = useState<SetupContinueError | null>(null);
+  // Tracks which phase of the Continue path produced `continueError`, exposed
+  // via `data-continue-error-phase` for testing.
+  const [continueErrorPhase, setContinueErrorPhase] = useState<
+    'workspace_path' | 'bootstrap' | 'display_name' | null
+  >(null);
   const [resetBusy, setResetBusy] = useState(false);
   const { toast } = useToast();
 
@@ -52,7 +70,18 @@ export function SetupStepWorkspace({
     desktop
       .getWorkspaceRoot()
       .then((root) => {
-        if (!cancelled) onChange({ ...state, workspaceRoot: root });
+        if (cancelled) return;
+        // AC-P1-3 (mount reconcile, AD-P1): one-time, display-only. When the
+        // folder is not picked and the resolved root's last segment does not
+        // already match the slug of the current display name, rewrite the
+        // displayed path's last segment once. No IPC persist here —
+        // `setWorkspacePath` only runs on Continue.
+        const displaySlug = slugProfileSegment(state.profileDisplayName);
+        const reconciled =
+          !state.workspacePicked && lastPathSegment(root) !== displaySlug
+            ? replaceLastPathSegment(root, displaySlug)
+            : root;
+        onChange({ ...state, workspaceRoot: reconciled });
       })
       .catch(() => {
         if (!cancelled) onChange({ ...state, workspaceRoot: DEFAULT_WORKSPACE });
@@ -71,6 +100,10 @@ export function SetupStepWorkspace({
     try {
       const selected = await desktop.pickDirectory(state.workspaceRoot || DEFAULT_WORKSPACE);
       if (selected) {
+        // QC2-C-002: clear stale error state when the author picks a new
+        // workspace path so a previous failure does not persist visually.
+        setContinueError(null);
+        setContinueErrorPhase(null);
         onChange({ ...state, workspaceRoot: selected, workspacePicked: true });
       }
     } catch (err) {
@@ -91,14 +124,20 @@ export function SetupStepWorkspace({
       try {
         await desktop.setWorkspacePath(state.workspaceRoot);
       } catch (err) {
-        const message = errorMessage(err) || t('error.workspacePathFailed');
+        const classified = classifySetupContinueError('workspace_path', err);
+        const message = classified.message || t('error.workspacePathFailed');
+        // Promote workspace-path failure from toast-only to inline error state
+        // (spec: "Workspace path failures must populate continueError").
+        setContinueError({ message, class: classified.class });
+        setContinueErrorPhase('workspace_path');
         toast({ variant: 'error', title: t('toast.workspacePath'), description: message });
         console.error('Failed to persist workspace path:', err);
         return;
       }
     }
     setBootstrapping(true);
-    setBootstrapError(null);
+    setContinueError(null);
+    setContinueErrorPhase(null);
     try {
       const result = await desktop.ensureSetupBootstrap();
       if (!result.already_bootstrapped) {
@@ -114,8 +153,10 @@ export function SetupStepWorkspace({
         try {
           await client.updateCreator(result.creator_id, { display_name: displayName });
         } catch (err) {
-          const message = errorMessage(err) || t('error.profileDisplayNameFailed');
-          setBootstrapError(message);
+          const classified = classifySetupContinueError('display_name', err);
+          const message = classified.message || t('error.profileDisplayNameFailed');
+          setContinueError({ message, class: classified.class });
+          setContinueErrorPhase('display_name');
           toast({
             variant: 'error',
             title: t('toast.profileDisplayName'),
@@ -126,15 +167,24 @@ export function SetupStepWorkspace({
         }
       }
 
-      setBootstrapError(null);
+      setContinueError(null);
+      setContinueErrorPhase(null);
       onNext();
     } catch (err) {
-      const message = errorMessage(err) || t('error.workspaceBootstrapFailed');
-      setBootstrapError(message);
+      const classified = classifySetupContinueError('bootstrap', err);
+      const message = classified.message || t('error.workspaceBootstrapFailed');
+      setContinueError({ message, class: classified.class });
+      setContinueErrorPhase('bootstrap');
       toast({
         variant: 'error',
         title: t('toast.workspaceBootstrapFailed'),
-        description: t('toast.workspaceBootstrapFailedDescription', { message }),
+        // QC2-W-004: mirror the inline alert's class-selected helper instead
+        // of the legacy conflated description (spec: "when toast is shown,
+        // mirror the same class-selected helper").
+        description:
+          classified.class === 'migration_db'
+            ? t('continueError.helper.migrationDb')
+            : t('continueError.helper.soft'),
       });
       console.error('Bootstrap failed:', err);
     } finally {
@@ -162,6 +212,10 @@ export function SetupStepWorkspace({
     }
   }
 
+  // Reset is allowed ONLY for migration/DB-class failures (spec product rule 3,
+  // AD-P0). Never bind Reset to message presence alone.
+  const showReset = continueError?.class === 'migration_db';
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-4">
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto" data-testid="wizard-step-body">
@@ -181,11 +235,37 @@ export function SetupStepWorkspace({
               id="wizard-profile-name"
               type="text"
               value={state.profileDisplayName}
-              onChange={(e) => onChange({ ...state, profileDisplayName: e.target.value })}
+              onChange={(e) => {
+                // QC2-C-002: clear stale error state when the author edits the
+                // field so a previous failure does not persist visually.
+                setContinueError(null);
+                setContinueErrorPhase(null);
+                const nextName = e.target.value;
+                // AC-P1-3 / AC-P1-4: while the folder is not picked, typing a
+                // Profile name updates the path's last segment to the slug of
+                // the new name. Once the author picks a folder
+                // (`workspacePicked: true`), name edits leave the path frozen.
+                const nextRoot =
+                  !state.workspacePicked && state.workspaceRoot
+                    ? replaceLastPathSegment(
+                        state.workspaceRoot,
+                        slugProfileSegment(nextName),
+                      )
+                    : state.workspaceRoot;
+                onChange({
+                  ...state,
+                  profileDisplayName: nextName,
+                  workspaceRoot: nextRoot,
+                });
+              }}
               placeholder={t('profile.name.placeholder')}
               disabled={loading || bootstrapping || resetBusy}
               required
               aria-required="true"
+              // AC-P1-2: leave scroll space above the focused input so the
+              // auto scroll-into-view on focus does not cover the Workspace
+              // folder label at 480px card width.
+              className="scroll-mt-4"
               data-testid="wizard-profile-name"
             />
           </div>
@@ -203,10 +283,27 @@ export function SetupStepWorkspace({
         </div>
       </div>
 
+      {continueError ? (
+        <div
+          role="alert"
+          data-testid="wizard-continue-error"
+          data-continue-error-class={continueError.class}
+          className="flex shrink-0 flex-col gap-2 rounded-card border border-[color-mix(in_srgb,var(--color-red-700)_30%,transparent)] bg-[color-mix(in_srgb,var(--color-red-700)_6%,transparent)] p-3"
+        >
+          <p className="text-heading-16 font-heading text-red-1000">{continueError.message}</p>
+          <p className="text-copy-14 text-red-900">
+            {continueError.class === 'migration_db'
+              ? t('continueError.helper.migrationDb')
+              : t('continueError.helper.soft')}
+          </p>
+        </div>
+      ) : null}
+
       <div
         className="mt-auto flex shrink-0 items-center gap-setup-wizard-surface-cta-container-gap"
         data-testid="wizard-cta-row"
         data-layout="horizontal-adjacent"
+        data-continue-error-phase={continueErrorPhase ?? undefined}
       >
         {onBack && (
           <Button variant="tertiary" onClick={onBack} aria-label={t('action.back')} className="px-2">
@@ -228,7 +325,7 @@ export function SetupStepWorkspace({
             t('action.continue')
           )}
         </Button>
-        {bootstrapError && desktop ? (
+        {showReset ? (
           <Button
             variant="tertiary"
             onClick={() => void resetLocalDatabase()}

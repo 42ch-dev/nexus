@@ -50,6 +50,10 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 
 **Archived:** [`.mstar/archived/knowledge/`](../archived/knowledge/README.md) · [shipped-features-tracker](../archived/shipped-features-tracker.md)
 
+### V1.119 additions
+
+| [daemon-creator-pool-lazy-attach.md](architecture-patterns/daemon-creator-pool-lazy-attach.md) | Daemon creator pool lazy-attach pattern - `ensure_creator_pool()` before pool access on Tier-1 handlers after `ensureSetupBootstrap`; web-only fixes are dead ends (V1.119 P0 distilled; compound V1.119) |
+
 ### V1.102 additions
 
 | [badge-soft-solid-tone.md](architecture-patterns/badge-soft-solid-tone.md) | Badge soft/solid tone axis (V1.102) |

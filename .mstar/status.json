@@ -3,42 +3,9 @@
   "updated_at": "2026-07-15",
   "plans": [
     {
-      "id": "2026-07-15-ci-disk-and-iterations-layout",
-      "title": "Hotfix - CI disk pressure + iterations package layout",
-      "file": "plans/2026-07-15-ci-disk-and-iterations-layout.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@ops-engineer",
-        "@writing-specialist"
-      ],
-      "progress": 100,
-      "tags": [
-        "hotfix",
-        "ci",
-        "disk",
-        "mstar-iterations",
-        "layout"
-      ],
-      "created_at": "2026-07-15",
-      "updated_at": "2026-07-15",
-      "notes": "QC Approve; CI green on PR #150; R-HFIX0715QC1-L001 resolved",
-      "metadata": {
-        "spec_integration_branch": "fix/ci-disk-and-iterations-layout",
-        "merge_target": "main",
-        "working_branch": "fix/ci-disk-and-iterations-layout",
-        "track_a_branch": "fix/ci-disk-space",
-        "track_b_branch": "fix/iterations-package-layout",
-        "wire_contracts_changed": false,
-        "execution_mode": "inline",
-        "qa_gate": "pm-acceptance",
-        "trigger_ci_run": "https://github.com/42ch-dev/nexus/actions/runs/29402750323"
-      }
-    },
-    {
-      "id": "2026-07-15-v1.118-daemon-no-profile-boot",
-      "title": "P0 - Daemon no-Profile boot",
-      "file": "plans/2026-07-15-v1.118-daemon-no-profile-boot.md",
+      "id": "2026-07-15-v1.119-setup-continue-unblock",
+      "title": "P0 - Setup Continue unblock",
+      "file": "plans/2026-07-15-v1.119-setup-continue-unblock.md",
       "status": "Done",
       "owner": "@project-manager",
       "agents": [
@@ -47,86 +14,89 @@
       ],
       "progress": 100,
       "tags": [
-        "v1.118",
-        "daemon",
-        "profiles",
-        "must"
+        "v1.119",
+        "setup",
+        "must",
+        "p0"
       ],
       "created_at": "2026-07-15",
-      "updated_at": "2026-07-15",
-      "notes": "QC Approve with residuals; QA Pass with residuals; merged to iteration/v1.118",
+      "updated_at": "2026-07-16",
+      "notes": "Done - QC Approve with residuals (10 low/nit), QA Pass. 4 SDD tasks + 1 fix wave.",
       "metadata": {
         "iteration_refs": [
-          "V1.118"
+          "V1.119"
         ],
-        "spec_integration_branch": "iteration/v1.118",
-        "merge_target": "iteration/v1.118",
-        "working_branch": "plan/v1.118-p0-daemon-no-profile-boot",
-        "primary_spec": ".mstar/iterations/v1.118/specs/daemon-no-profile-boot.md",
+        "spec_integration_branch": "iteration/v1.119",
+        "merge_target": "iteration/v1.119",
+        "working_branch": "plan/v1.119-p0-setup-continue-unblock",
+        "primary_spec": ".mstar/iterations/v1.119/specs/setup-continue-unblock.md",
         "wire_contracts_changed": false,
-        "tier": "Must"
+        "tier": "Must",
+        "blocked_by_plan_id": null
       }
     },
     {
-      "id": "2026-07-15-v1.118-creation-peer-groups",
-      "title": "P1 - Creation peer groups",
-      "file": "plans/2026-07-15-v1.118-creation-peer-groups.md",
+      "id": "2026-07-15-v1.119-setup-workspace-profile-path",
+      "title": "P1 - Workspace profile + path",
+      "file": "plans/2026-07-15-v1.119-setup-workspace-profile-path.md",
       "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@frontend-dev"
       ],
-      "progress": 100,
+      "progress": 0,
       "tags": [
-        "v1.118",
-        "shell",
-        "ia",
-        "must"
+        "v1.119",
+        "setup",
+        "must",
+        "p1"
       ],
       "created_at": "2026-07-15",
       "updated_at": "2026-07-15",
-      "notes": "QC Approve; QA Pass; merged to iteration/v1.118",
+      "notes": "Phase 1 draft — F4 F5 F6",
       "metadata": {
         "iteration_refs": [
-          "V1.118"
+          "V1.119"
         ],
-        "spec_integration_branch": "iteration/v1.118",
-        "merge_target": "iteration/v1.118",
-        "working_branch": "plan/v1.118-p1-creation-peer-groups",
-        "primary_spec": ".mstar/iterations/v1.118/specs/creation-peer-groups.md",
+        "spec_integration_branch": "iteration/v1.119",
+        "merge_target": "iteration/v1.119",
+        "working_branch": "plan/v1.119-p1-workspace-profile-path",
+        "primary_spec": ".mstar/iterations/v1.119/specs/setup-workspace-profile-path.md",
         "wire_contracts_changed": false,
-        "tier": "Must"
+        "tier": "Must",
+        "blocked_by_plan_id": "2026-07-15-v1.119-setup-continue-unblock"
       }
     },
     {
-      "id": "2026-07-15-v1.118-canvas-work-shell",
-      "title": "P2 - Canvas-first work shell",
-      "file": "plans/2026-07-15-v1.118-canvas-work-shell.md",
+      "id": "2026-07-15-v1.119-setup-agent-picker-catalog",
+      "title": "P2 - AgentPicker catalog polish",
+      "file": "plans/2026-07-15-v1.119-setup-agent-picker-catalog.md",
       "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@frontend-dev"
       ],
-      "progress": 100,
+      "progress": 0,
       "tags": [
-        "v1.118",
-        "canvas",
-        "shell",
-        "must"
+        "v1.119",
+        "setup",
+        "must",
+        "p2"
       ],
       "created_at": "2026-07-15",
       "updated_at": "2026-07-15",
-      "notes": "QC Approve with residuals; QA Pass with residuals; merged to iteration/v1.118",
+      "notes": "Phase 1 draft — F1 F2 F3",
       "metadata": {
         "iteration_refs": [
-          "V1.118"
+          "V1.119"
         ],
-        "spec_integration_branch": "iteration/v1.118",
-        "merge_target": "iteration/v1.118",
-        "working_branch": "plan/v1.118-p2-canvas-work-shell",
-        "primary_spec": ".mstar/iterations/v1.118/specs/canvas-work-shell.md",
+        "spec_integration_branch": "iteration/v1.119",
+        "merge_target": "iteration/v1.119",
+        "working_branch": "plan/v1.119-p2-agent-picker-catalog",
+        "primary_spec": ".mstar/iterations/v1.119/specs/setup-agent-picker-catalog.md",
         "wire_contracts_changed": false,
-        "tier": "Must"
+        "tier": "Must",
+        "blocked_by_plan_id": null
       }
     }
   ],
@@ -134,8 +104,8 @@
     "integration_branch_retired": false,
     "iteration_base_branch": "main",
     "last_integration_branch": "iteration/v1.115",
-    "latest_active_compass": "v1.118/delivery-compass.md",
-    "latest_active_iteration": "V1.118",
+    "latest_active_compass": "v1.119/delivery-compass.md",
+    "latest_active_iteration": "V1.119",
     "latest_ship": {
       "iteration": "V1.117",
       "compass": "v1.117/delivery-compass.md",
@@ -146,7 +116,7 @@
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "pre_iteration_hotfix": null,
-    "spec_integration_branch": "iteration/v1.118",
+    "spec_integration_branch": "iteration/v1.119",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {
@@ -219,6 +189,118 @@
     "phase1_status": "locked"
   },
   "residual_findings": {
+    "2026-07-15-v1.119-setup-continue-unblock": [
+      {
+        "id": "R-V1119P0QC1-S001",
+        "title": "Triplicate pool-attach guard pattern (pool().is_none() + read_active_creator_id + ensure_creator_pool) - consolidate",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.119",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-15-v1.119-setup-continue-unblock/review/qc-consolidated.md",
+        "note": "QC1 S-001. Maintainability suggestion; mirrors require_active_creator pattern."
+      },
+      {
+        "id": "R-V1119P0QC1-S002",
+        "title": "Classifier dead-code arm (structured migration codes) lacks comment explaining it's dead per T1",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.119",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-15-v1.119-setup-continue-unblock/review/qc-consolidated.md",
+        "note": "QC1 S-003. Documentation-only; codes included for completeness."
+      },
+      {
+        "id": "R-V1119P0QC2-W001",
+        "title": "Migration regex /migration/i false-negative: non-migration DB errors won't trigger Reset",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.119",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-15-v1.119-setup-continue-unblock/review/qc-consolidated.md",
+        "note": "QC2 W-001 / QC3 W-002. Primary signal works after fix; edge cases deferred."
+      },
+      {
+        "id": "R-V1119P0QC2-W002",
+        "title": "Migration regex false-positive: tangential 'migration' in non-migration messages",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.119",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-15-v1.119-setup-continue-unblock/review/qc-consolidated.md",
+        "note": "QC2 W-002. Low risk; no current false-positive in tree."
+      },
+      {
+        "id": "R-V1119P0QC2-W003",
+        "title": "Pool-attach error e.to_string() may leak internal details to user-facing alert",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.119",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-15-v1.119-setup-continue-unblock/review/qc-consolidated.md",
+        "note": "QC2 W-003. Matches existing require_active_creator pattern; not a new regression."
+      },
+      {
+        "id": "R-V1119P0QC2-S001",
+        "title": "Add false-positive guard test for migration regex",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.119",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-15-v1.119-setup-continue-unblock/review/qc-consolidated.md",
+        "note": "QC2 S-001. Test polish."
+      },
+      {
+        "id": "R-V1119P0QC2-S002",
+        "title": "Pool-attach guard could check active creator ID matches patched creator_id",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.119",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-15-v1.119-setup-continue-unblock/review/qc-consolidated.md",
+        "note": "QC2 S-002. Safe today; future-proofing."
+      },
+      {
+        "id": "R-V1119P0QC3-W001",
+        "title": "Race window on concurrent ensure_creator_pool during first PATCH (TOCTOU; OnceLock prevents corruption)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.119",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-15-v1.119-setup-continue-unblock/review/qc-consolidated.md",
+        "note": "QC3 W-001. Single-click UI; low practical impact."
+      },
+      {
+        "id": "R-V1119P0QC3-W003",
+        "title": "ensure_creator_pool blocks HTTP request with no timeout (sub-second for fresh SQLite)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.119",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-15-v1.119-setup-continue-unblock/review/qc-consolidated.md",
+        "note": "QC3 W-003. Retry-will-succeed mitigates."
+      },
+      {
+        "id": "R-V1119P0QC3-S001",
+        "title": "read_active_creator_id duplicated across 4 handler files",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.119",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/sdd/2026-07-15-v1.119-setup-continue-unblock/review/qc-consolidated.md",
+        "note": "QC3 S-001. DRY opportunity."
+      }
+    ],
     "2026-07-14-v1.117-profiles-workspace": [
       {
         "id": "R-V1117P0QC1-F002",

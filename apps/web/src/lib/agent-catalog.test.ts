@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   resolveInstallUrl,
-  isHiddenFromDefault,
+  isExcludedFromPicker,
   resolveAgentKey,
   resolveCatalogItem,
   resolveCatalogItems,
@@ -32,19 +32,21 @@ describe('resolveInstallUrl', () => {
   });
 });
 
-describe('isHiddenFromDefault', () => {
+// P2 (F2): claude-acp / codex-acp are hard-excluded from both the default grid
+// and the More list via `excludeFromPicker`.
+describe('isExcludedFromPicker', () => {
   it('returns true for ACP wrappers', () => {
-    expect(isHiddenFromDefault('claude-acp')).toBe(true);
-    expect(isHiddenFromDefault('codex-acp')).toBe(true);
+    expect(isExcludedFromPicker('claude-acp')).toBe(true);
+    expect(isExcludedFromPicker('codex-acp')).toBe(true);
   });
 
   it('returns false for native agents', () => {
-    expect(isHiddenFromDefault('claude-native')).toBe(false);
-    expect(isHiddenFromDefault('codex-native')).toBe(false);
+    expect(isExcludedFromPicker('claude-native')).toBe(false);
+    expect(isExcludedFromPicker('codex-native')).toBe(false);
   });
 
   it('returns false for unknown keys', () => {
-    expect(isHiddenFromDefault('unknown')).toBe(false);
+    expect(isExcludedFromPicker('unknown')).toBe(false);
   });
 });
 
@@ -145,18 +147,22 @@ describe('resolveCatalogItem', () => {
     expect(item.installUrl).toBe('https://claude.ai/code');
   });
 
-  it('sets hiddenFromDefault for ACP wrappers', () => {
+  it('sets excludeFromPicker for ACP wrappers (P2)', () => {
     const item = resolveCatalogItem(
       makeAgent({ registry_agent_id: 'claude-acp', name: 'Claude', installed: true }),
     );
-    expect(item.hiddenFromDefault).toBe(true);
+    expect(item.excludeFromPicker).toBe(true);
   });
 
-  it('sets priority from overrides', () => {
-    const item = resolveCatalogItem(
+  it('sets priority from overrides (P2 curated order: codex=0, claude=1)', () => {
+    const claude = resolveCatalogItem(
       makeAgent({ registry_agent_id: 'claude-native', name: 'Claude' }),
     );
-    expect(item.priority).toBe(0);
+    const codex = resolveCatalogItem(
+      makeAgent({ registry_agent_id: 'codex-native', name: 'Codex' }),
+    );
+    expect(codex.priority).toBe(0);
+    expect(claude.priority).toBe(1);
   });
 
   it('prefers scan icon_url over override', () => {
@@ -184,13 +190,13 @@ describe('defaultGridEntries', () => {
     expect(ids).not.toContain('claude-acp');
   });
 
-  it('sorts by priority ascending', () => {
+  it('sorts by priority ascending (P2: codex=0 before claude=1)', () => {
     const entries = defaultGridEntries([
-      makeAgent({ registry_agent_id: 'codex-native', name: 'Codex', installed: true }),
       makeAgent({ registry_agent_id: 'claude-native', name: 'Claude', installed: true }),
+      makeAgent({ registry_agent_id: 'codex-native', name: 'Codex', installed: true }),
     ]);
-    expect(entries[0]!.id).toBe('claude-native');
-    expect(entries[1]!.id).toBe('codex-native');
+    expect(entries[0]!.id).toBe('codex-native');
+    expect(entries[1]!.id).toBe('claude-native');
   });
 
   it('includes installed agents without priority after priority agents', () => {
@@ -204,7 +210,7 @@ describe('defaultGridEntries', () => {
 });
 
 describe('moreAgentsEntries', () => {
-  it('excludes default grid items', () => {
+  it('excludes default grid items and hard-excluded wrappers', () => {
     const entries = moreAgentsEntries([
       makeAgent({ registry_agent_id: 'claude-native', name: 'Claude', installed: true }),
       makeAgent({ registry_agent_id: 'claude-acp', name: 'Claude ACP', installed: true }),
@@ -212,19 +218,23 @@ describe('moreAgentsEntries', () => {
     ]);
     const ids = entries.map((e) => e.id);
     expect(ids).not.toContain('claude-native');
-    expect(ids).toContain('claude-acp');
+    // P2 (F2): claude-acp is hard-excluded from both the default grid and More.
+    expect(ids).not.toContain('claude-acp');
     expect(ids).toContain('other-agent');
   });
 
-  it('sorts installed first then alphabetically', () => {
+  it('sorts More agents by name (P2: installed agents always land in the default grid)', () => {
+    // P2: every installed agent enters the default grid (curated tier 1 or
+    // not-curated tier 3), so the More list only ever holds uninstalled
+    // non-curated agents — sorted by name. The installed-first comparator
+    // branch in `moreAgentsEntries` is defensive and not reachable through
+    // the real catalog pipeline.
     const entries = moreAgentsEntries([
       makeAgent({ name: 'z-agent', installed: false }),
-      makeAgent({ registry_agent_id: 'claude-acp', name: 'Claude ACP', installed: true }),
       makeAgent({ name: 'b-agent', installed: false }),
+      makeAgent({ name: 'a-agent', installed: false }),
     ]);
-    expect(entries[0]!.id).toBe('claude-acp');
-    expect(entries[1]!.id).toBe('b-agent');
-    expect(entries[2]!.id).toBe('z-agent');
+    expect(entries.map((e) => e.id)).toEqual(['a-agent', 'b-agent', 'z-agent']);
   });
 });
 
@@ -292,5 +302,78 @@ describe('resolveCatalogItems / picker id collision (PR#148 Greptile P1)', () =>
     expect(byPickerId.get('claude-native__2')).toBe(b);
     expect(byEntry.get(a)).toBe('claude-native');
     expect(byEntry.get(b)).toBe('claude-native__2');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// P2 acceptance criteria (catalog layer)
+// Spec: .mstar/iterations/v1.119/specs/setup-agent-picker-catalog.md
+// ---------------------------------------------------------------------------
+
+describe('P2 acceptance criteria (catalog layer)', () => {
+  it('AC-P2-1: native Claude/Codex carry pinned ACP iconUrls', () => {
+    const claude = resolveCatalogItem(
+      makeAgent({ registry_agent_id: 'claude-native', name: 'Claude' }),
+    );
+    const codex = resolveCatalogItem(
+      makeAgent({ registry_agent_id: 'codex-native', name: 'Codex' }),
+    );
+    expect(claude.iconUrl).toBe(
+      'https://cdn.agentclientprotocol.com/registry/v1/latest/claude-acp.svg',
+    );
+    expect(codex.iconUrl).toBe(
+      'https://cdn.agentclientprotocol.com/registry/v1/latest/codex-acp.svg',
+    );
+  });
+
+  it('AC-P2-2: ACP wrappers are absent from both the default grid and More', () => {
+    const scan: AgentScanEntry[] = [
+      makeAgent({ registry_agent_id: 'claude-acp', name: 'Claude ACP', installed: true }),
+      makeAgent({ registry_agent_id: 'codex-acp', name: 'Codex ACP', installed: true }),
+      makeAgent({ registry_agent_id: 'codex-native', name: 'Codex', installed: true }),
+      makeAgent({ name: 'other-agent', installed: false }),
+    ];
+    const defaultIds = defaultGridEntries(scan).map((e) => e.id);
+    const moreIds = moreAgentsEntries(scan).map((e) => e.id);
+    expect(defaultIds).not.toContain('claude-acp');
+    expect(defaultIds).not.toContain('codex-acp');
+    expect(moreIds).not.toContain('claude-acp');
+    expect(moreIds).not.toContain('codex-acp');
+  });
+
+  it('AC-P2-5: default grid order is installed-curated, curated-uninstalled, installed-not-curated', () => {
+    const scan: AgentScanEntry[] = [
+      // uninstalled curated
+      makeAgent({ registry_agent_id: 'cursor', name: 'Cursor', installed: false }), // priority 2
+      makeAgent({ registry_agent_id: 'codex-native', name: 'Codex', installed: false }), // priority 0
+      // installed curated
+      makeAgent({ registry_agent_id: 'claude-native', name: 'Claude', installed: true }), // priority 1
+      // installed not curated (no priority)
+      makeAgent({ name: 'zzz-custom', installed: true }),
+      makeAgent({ name: 'aaa-custom', installed: true }),
+    ];
+    const ids = defaultGridEntries(scan).map((e) => e.id);
+    // Tier 1 (installed curated, priority asc): claude-native
+    // Tier 2 (curated uninstalled, priority asc): codex-native(0), cursor(2)
+    // Tier 3 (installed not curated, displayName asc): aaa-custom, zzz-custom
+    expect(ids).toEqual([
+      'claude-native',
+      'codex-native',
+      'cursor',
+      'aaa-custom',
+      'zzz-custom',
+    ]);
+  });
+
+  it('AC-P2-7: forward-compat curated agents appear when scan includes their registry id', () => {
+    // Hermes/Grok/Kilo slots are forward-compat: they appear at their curated
+    // priority the moment the scan surfaces their registry id.
+    const scan: AgentScanEntry[] = [
+      makeAgent({ registry_agent_id: 'hermes', name: 'Hermes', installed: false }), // priority 5
+      makeAgent({ registry_agent_id: 'grok-build', name: 'Grok Build', installed: false }), // priority 7
+      makeAgent({ registry_agent_id: 'kilo', name: 'Kilo', installed: false }), // priority 8
+    ];
+    const ids = defaultGridEntries(scan).map((e) => e.id);
+    expect(ids).toEqual(['hermes', 'grok-build', 'kilo']);
   });
 });

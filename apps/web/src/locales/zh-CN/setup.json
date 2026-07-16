@@ -97,6 +97,12 @@
     "workspaceBootstrapFailed": "无法准备你的本地工作区。",
     "profileDisplayNameFailed": "无法保存个人档案名称。"
   },
+  "continueError": {
+    "helper": {
+      "soft": "请修正问题后再次点击「继续」。",
+      "migrationDb": "如果问题仍然存在，请使用下方的「重置」清除本地数据库状态。你的工作区文件不会被删除。"
+    }
+  },
   "toast": {
     "finishFailed": "无法完成设置",
     "folderPicker": "文件夹选择器",
