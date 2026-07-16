@@ -68,6 +68,7 @@
     "couldNotScaffoldPreset": "Could not scaffold preset",
     "couldNotValidatePreset": "Could not validate preset",
     "couldNotReloadPreset": "Could not reload preset",
+    "couldNotDeletePreset": "Could not delete preset",
     "couldNotUpdateChapter": "Could not update chapter",
     "couldNotCreateCreator": "Could not create Creator",
     "couldNotSwitchCreator": "Could not switch Creator",

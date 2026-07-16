@@ -13,7 +13,7 @@ use crate::workspace::WorkspaceState;
 use axum::extract::{Path, State};
 use axum::Json;
 use nexus_contracts::{GetPresetResponse, UpdatePresetRequest, UpdatePresetResponse};
-use nexus_home_layout::{user_preset_base_dir, user_preset_bundle_dir};
+use nexus_home_layout::user_preset_bundle_dir;
 use serde::{Deserialize, Serialize};
 use tracing::info;
 
@@ -480,9 +480,7 @@ pub async fn reload_preset(
     let bundle_dir = user_preset_bundle_dir(nexus_home, &preset_id);
     if !bundle_dir.join("preset.yaml").exists() {
         // Try system preset
-        let system_dir = user_preset_base_dir(nexus_home)
-            .join("_system")
-            .join(&preset_id);
+        let system_dir = system_preset_dir_for_id(nexus_home, &preset_id);
         if !system_dir.join("preset.yaml").exists() {
             return Err(NexusApiError::NotFound(format!(
                 "Preset '{preset_id}' not found"
@@ -494,6 +492,16 @@ pub async fn reload_preset(
         id: preset_id,
         reloaded: true,
     }))
+}
+
+/// Resolve the on-disk bundle directory for a system preset id.
+///
+/// System presets are listed with a qualified `_system.<name>` id, while the
+/// on-disk bundle lives at `presets/_system/<name>/` — strip the `_system.`
+/// prefix before joining (AD-P0-1b). Unqualified ids pass through unchanged.
+fn system_preset_dir_for_id(nexus_home: &std::path::Path, preset_id: &str) -> std::path::PathBuf {
+    let dir_name = preset_id.strip_prefix("_system.").unwrap_or(preset_id);
+    nexus_orchestration::system_preset_dir::system_preset_bundle_dir(nexus_home, dir_name)
 }
 
 /// Locate a preset by ID and return its source + filesystem path.
@@ -510,9 +518,7 @@ fn locate_preset(
         return Ok(("user".to_string(), Some(user_dir)));
     }
 
-    let system_dir = user_preset_base_dir(nexus_home)
-        .join("_system")
-        .join(preset_id);
+    let system_dir = system_preset_dir_for_id(nexus_home, preset_id);
     if system_dir.join("preset.yaml").exists() {
         return Ok(("system".to_string(), Some(system_dir)));
     }
@@ -1228,6 +1234,62 @@ states:
         assert_eq!(resp.source, "embedded");
         assert!(resp.yaml.contains("novel-writing"));
         assert!(resp.path.is_none());
+    }
+
+    /// AD-P0-1c repro leg 3: a qualified `_system.*` id returned by
+    /// `list_presets` must resolve to `presets/_system/<name>/` on disk.
+    #[tokio::test]
+    async fn get_preset_returns_system_preset() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let state = {
+            let nexus_home = tmp.path().to_path_buf();
+            let db_path = nexus_home.join("state.db");
+            let pool = nexus_local_db::open_pool(&db_path).await.expect("pool");
+            nexus_local_db::run_migrations(&pool)
+                .await
+                .expect("migrate");
+            nexus_local_db::seed_versions(&pool).await.expect("seed");
+            crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await
+        };
+
+        // First-start fallback creates `presets/_system/maintenance/` on disk.
+        nexus_orchestration::system_preset_dir::ensure_maintenance_preset(state.nexus_home())
+            .expect("ensure maintenance preset");
+
+        let resp = get_preset(State(state), Path("_system.maintenance".to_string()))
+            .await
+            .expect("get system preset")
+            .0;
+        assert_eq!(resp.id, "_system.maintenance");
+        assert_eq!(resp.source, "system");
+        assert!(resp.path.is_some());
+        assert!(resp.yaml.contains("maintenance"));
+    }
+
+    /// Same qualified-id resolution bug class on the reload route.
+    #[tokio::test]
+    async fn reload_preset_accepts_qualified_system_id() {
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let state = {
+            let nexus_home = tmp.path().to_path_buf();
+            let db_path = nexus_home.join("state.db");
+            let pool = nexus_local_db::open_pool(&db_path).await.expect("pool");
+            nexus_local_db::run_migrations(&pool)
+                .await
+                .expect("migrate");
+            nexus_local_db::seed_versions(&pool).await.expect("seed");
+            crate::workspace::WorkspaceState::new_for_testing(nexus_home, db_path, None).await
+        };
+
+        nexus_orchestration::system_preset_dir::ensure_maintenance_preset(state.nexus_home())
+            .expect("ensure maintenance preset");
+
+        let resp = reload_preset(State(state), Path("_system.maintenance".to_string()))
+            .await
+            .expect("reload system preset")
+            .0;
+        assert_eq!(resp.id, "_system.maintenance");
+        assert!(resp.reloaded);
     }
 
     #[tokio::test]
