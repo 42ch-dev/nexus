@@ -203,6 +203,7 @@ pub struct PoolStatus {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     /// Helper to create a test database with schema via `nexus_local_db`
     async fn create_test_pool() -> (tempfile::TempDir, std::path::PathBuf, DbPool) {
@@ -299,6 +300,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn pool_config_from_env_uses_defaults_when_unset() {
         // Ensure env vars are NOT set for this test
         std::env::remove_var("NEXUS_DB_POOL_TIMEOUT_SECS");
@@ -310,6 +312,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn pool_config_from_env_reads_valid_values() {
         std::env::set_var("NEXUS_DB_POOL_TIMEOUT_SECS", "10");
         std::env::set_var("NEXUS_DB_POOL_MAX_CONNECTIONS", "4");
@@ -324,6 +327,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn pool_config_from_env_ignores_invalid_values() {
         std::env::set_var("NEXUS_DB_POOL_TIMEOUT_SECS", "not_a_number");
         std::env::set_var("NEXUS_DB_POOL_MAX_CONNECTIONS", "abc");
