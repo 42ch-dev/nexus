@@ -23,6 +23,8 @@
   },
   "reloading": "Reloading…",
   "reload": "Reload",
+  "delete": "Delete",
+  "deleteAria": "Delete preset {{name}}",
   "strategyDetail": {
     "loading": "Loading Strategy…",
     "back": "Back",
@@ -30,6 +32,12 @@
     "notFoundDescription": "Choose a Strategy from the Strategies list.",
     "title": "Strategy",
     "description": "See a preset as a state-machine graph and steer execution with an Idea. Nexus owns the prose."
+  },
+  "deleteConfirm": {
+    "title": "Delete \"{{name}}\"",
+    "description": "This preset will be removed from your library. This cannot be undone.",
+    "delete": "Delete",
+    "deleting": "Deleting…"
   },
   "dialog": {
     "validatePreset": {

@@ -115,4 +115,122 @@ describe('StrategiesPage', () => {
 
     await waitFor(() => expect(screen.getByRole('heading', { name: '用户预设' })).toBeInTheDocument());
   });
+
+  it('filters _system.* ids out of the System presets section (AC-P0-3)', async () => {
+    useHandlers(
+      http.get('/v1/daemon/presets', () =>
+        HttpResponse.json({
+          user: [],
+          system: [
+            { id: '_system.maintenance', source: 'system' },
+            { id: 'author-strategy', source: 'system' },
+          ],
+          embedded: [],
+        }),
+      ),
+    );
+
+    renderStrategies();
+
+    await screen.findByRole('heading', { name: 'System presets' });
+    expect(screen.queryByText('_system.maintenance')).not.toBeInTheDocument();
+    expect(screen.getByText('author-strategy')).toBeInTheDocument();
+  });
+
+  it('removes the header Validate button and exposes Validate per row (AC-P0-4)', async () => {
+    useHandlers(
+      http.get('/v1/daemon/presets', () =>
+        HttpResponse.json({
+          user: [{ id: 'user/foo', source: 'user' }],
+          system: [{ id: 'system/bar', source: 'system' }],
+          embedded: [{ id: 'embedded/baz', source: 'embedded' }],
+        }),
+      ),
+    );
+
+    renderStrategies();
+
+    await screen.findByText('user/foo');
+    // One Validate button per row, none in the header (header would add a 4th).
+    expect(screen.getAllByRole('button', { name: 'Validate' })).toHaveLength(3);
+
+    const userRow = screen.getByText('user/foo').closest('li')!;
+    expect(within(userRow).getByRole('button', { name: 'Validate' })).toBeInTheDocument();
+  });
+
+  it('opens the existing Validate dialog when a row Validate button is clicked (AC-P0-4)', async () => {
+    const user = userEvent.setup();
+    useHandlers(
+      http.get('/v1/daemon/presets', () =>
+        HttpResponse.json({
+          user: [{ id: 'user/foo', source: 'user' }],
+          system: [],
+          embedded: [],
+        }),
+      ),
+    );
+
+    renderStrategies();
+
+    const userRow = await screen.findByText('user/foo');
+    await user.click(within(userRow.closest('li')!).getByRole('button', { name: 'Validate' }));
+
+    await screen.findByRole('heading', { name: 'Validate Preset' });
+  });
+
+  it('shows Delete only on user preset rows (AC-P0-5)', async () => {
+    useHandlers(
+      http.get('/v1/daemon/presets', () =>
+        HttpResponse.json({
+          user: [{ id: 'user/foo', source: 'user' }],
+          system: [{ id: 'system/bar', source: 'system' }],
+          embedded: [{ id: 'embedded/baz', source: 'embedded' }],
+        }),
+      ),
+    );
+
+    renderStrategies();
+    await screen.findByText('user/foo');
+
+    const userLi = screen.getByText('user/foo').closest('li')!;
+    const systemLi = screen.getByText('system/bar').closest('li')!;
+    const embeddedLi = screen.getByText('embedded/baz').closest('li')!;
+
+    expect(within(userLi).getByRole('button', { name: 'Delete preset user/foo' })).toBeInTheDocument();
+    expect(within(systemLi).queryByRole('button', { name: /Delete/i })).not.toBeInTheDocument();
+    expect(within(embeddedLi).queryByRole('button', { name: /Delete/i })).not.toBeInTheDocument();
+  });
+
+  it('confirms delete, calls deletePreset, and refreshes the list (AC-P0-5)', async () => {
+    const user = userEvent.setup();
+    let deleted = false;
+    useHandlers(
+      http.get('/v1/daemon/presets', () =>
+        HttpResponse.json({
+          user: deleted ? [] : [{ id: 'user/foo', source: 'user' }],
+          system: [],
+          embedded: [],
+        }),
+      ),
+      http.delete('/v1/daemon/presets/user%2Ffoo', () => {
+        deleted = true;
+        return new HttpResponse(null, { status: 204 });
+      }),
+    );
+
+    renderStrategies();
+
+    const userRow = await screen.findByText('user/foo');
+    await user.click(
+      within(userRow.closest('li')!).getByRole('button', { name: 'Delete preset user/foo' }),
+    );
+
+    // Confirm dialog title names the preset.
+    await screen.findByRole('heading', { name: 'Delete "user/foo"' });
+    await user.click(screen.getByRole('button', { name: /^Delete$/ }));
+
+    await waitFor(() => expect(deleted).toBe(true));
+    // Invalidation refetched the list; the row is gone.
+    await waitFor(() => expect(screen.queryByText('user/foo')).not.toBeInTheDocument());
+  });
 });

@@ -414,6 +414,25 @@ export function useReloadPreset() {
   });
 }
 
+/**
+ * Delete a user preset (V1.120 strategies-repair). Mirrors the
+ * `useScaffoldPreset` shape: `DELETE /v1/daemon/presets/{id}` then invalidate
+ * the grouped presets list so the row disappears. Only user presets are
+ * deletable — the row UI gates this (system/embedded rows render no Delete).
+ */
+export function useDeletePreset() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (presetId: string) => client.deletePreset(presetId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.presets.list() });
+    },
+    onError: (error) => errorToast(error, 'error.couldNotDeletePreset'),
+  });
+}
+
 // ── Chapters (V1.65 Content-Authoring) ───────────────────────────────────────
 
 /** Cursor-paginated chapter list for a Work (F-P3 `items` key). */
