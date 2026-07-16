@@ -85,7 +85,7 @@ Locked spec surfaces for this iteration:
 
 | plan_id | Name | Status | Tier | Notes |
 |---------|------|--------|------|-------|
-| 2026-07-17-v1.120-strategies-repair | Strategies repair | Todo | Must / P0 | F5 |
+| 2026-07-17-v1.120-strategies-repair | Strategies repair | Done | Must / P0 | F5 — QC Approve w/ residuals (7), QA Pass; merged `a6102357` |
 | 2026-07-17-v1.120-shell-form-polish | Shell & form polish | Todo | Must / P1 | F1 F2 F6 |
 | 2026-07-17-v1.120-orchestration-ia-icon | Orchestration IA + sessions + Dock | Todo | Must / P2 | F3 F4 F7 |
 
