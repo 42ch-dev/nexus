@@ -9,9 +9,10 @@ import { Navigate, Route, Routes } from 'react-router-dom';
 
 import { SettingsAgentSection } from '@/pages/settings/settings-agent-section';
 import { SettingsShellLayout } from '@/pages/settings/settings-shell-layout';
-import { renderInApp } from '@/test/test-providers';
+import { makeQueryClient, renderInApp } from '@/test/test-providers';
 import { useHandlers } from '@/test/msw-server';
 import { BrowserClient } from '@/lib/nexus';
+import { queryKeys } from '@/lib/nexus/query-keys';
 import type { DesktopCapabilities } from '@/lib/nexus/desktop-capabilities';
 
 function makeClient() {
@@ -259,7 +260,7 @@ describe('SettingsAgentSection preselect (G1)', () => {
     });
   });
 
-  it('persists via setAgentProfile on Save Agent (desktop)', async () => {
+  it('persists via setAgentProfile on Save Agent, dirty-gated (AC-P1-1)', async () => {
     const user = userEvent.setup();
     const setAgentProfile = vi.fn(() => Promise.resolve());
     const getAgentProfile = vi.fn(() =>
@@ -276,21 +277,84 @@ describe('SettingsAgentSection preselect (G1)', () => {
       },
     );
 
-    // codex-native is preselected by the saved profile and renders in the
-    // default grid (priority 0, installed).
+    // codex-native is preselected by the saved profile → CLEAN (Save disabled).
     await waitFor(() => {
       const pressed = screen
         .getAllByTestId('agent-card-select-codex-native')
         .filter((el) => el.getAttribute('aria-pressed') === 'true');
       expect(pressed.length).toBeGreaterThanOrEqual(1);
     });
+    await waitFor(() => expect(getAgentProfile).toHaveBeenCalled());
+
+    // AC-P1-1: selection matches last-saved profile → Save disabled.
+    await waitFor(() =>
+      expect(screen.getByTestId('settings-save-agent')).toBeDisabled(),
+    );
+
+    // DIRTY: switch to claude → Save enabled.
+    await user.click(screen.getByTestId('agent-card-select-claude-native'));
+    await waitFor(() =>
+      expect(screen.getByTestId('settings-save-agent')).not.toBeDisabled(),
+    );
 
     await user.click(screen.getByTestId('settings-save-agent'));
 
     await waitFor(() =>
-      expect(setAgentProfile).toHaveBeenCalledWith('codex', 'codex'),
+      expect(setAgentProfile).toHaveBeenCalledWith('claude-code', 'claude'),
     );
     expect(await screen.findByText('Agent profile saved')).toBeInTheDocument();
+
+    // AC-P1-1: after Save success the baseline updates and the gate closes
+    // (clean again → Save disabled).
+    await waitFor(() =>
+      expect(screen.getByTestId('settings-save-agent')).toBeDisabled(),
+    );
+  });
+
+  it('AC-P1-2/AC-P1-7: Save invalidates the query keys DaemonStatusBar consumes (footer refresh signal)', async () => {
+    const user = userEvent.setup();
+    const setAgentProfile = vi.fn(() => Promise.resolve());
+    const getAgentProfile = vi.fn(() =>
+      Promise.resolve({ name: 'codex', launchCommand: 'codex' }),
+    );
+    useHandlers(scanHandler(), creatorsHandler());
+    const qc = makeQueryClient();
+    const invalidateSpy = vi.spyOn(qc, 'invalidateQueries');
+
+    renderInApp(
+      <Routes>{settingsRouteTree}</Routes>,
+      {
+        client: makeClient(),
+        desktop: makeDesktop({ setAgentProfile, getAgentProfile }),
+        initialRouterEntries: ['/settings/agent'],
+        queryClient: qc,
+      },
+    );
+
+    // Wait for preselect (clean) then dirty + save.
+    await waitFor(() => expect(getAgentProfile).toHaveBeenCalled());
+    await waitFor(() =>
+      expect(screen.getByTestId('settings-save-agent')).toBeDisabled(),
+    );
+
+    await user.click(screen.getByTestId('agent-card-select-claude-native'));
+    await waitFor(() =>
+      expect(screen.getByTestId('settings-save-agent')).not.toBeDisabled(),
+    );
+    await user.click(screen.getByTestId('settings-save-agent'));
+
+    await waitFor(() =>
+      expect(setAgentProfile).toHaveBeenCalledWith('claude-code', 'claude'),
+    );
+
+    // Footer refresh signal: exactly the keys DaemonStatusBar reads are
+    // invalidated so the agent badge refreshes without a 10s poll (AD-P1-1).
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: queryKeys.agentProfile.detail(),
+    });
+    expect(invalidateSpy).toHaveBeenCalledWith({
+      queryKey: queryKeys.agentHost.scan({ filter: 'all' }),
+    });
   });
 
   it('shows locked desktop-only toast when saving without desktop caps', async () => {

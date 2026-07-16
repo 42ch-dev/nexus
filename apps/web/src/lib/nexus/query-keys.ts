@@ -59,6 +59,13 @@ export const queryKeys = {
     scan: (request?: { filter?: string; registry_refresh?: boolean }) =>
       [...queryKeys.agentHost.all, 'scan', request?.filter ?? 'all', request?.registry_refresh ?? false] as const,
   },
+  // V1.120 P1 (T1) — desktop-only saved agent profile. Cached so the Settings
+  // Agent Save handler can invalidate it and the DaemonStatusBar badge refreshes
+  // immediately after a save (AD-P1-1) instead of waiting for the 10s poll.
+  agentProfile: {
+    all: ['agentProfile'] as const,
+    detail: () => [...queryKeys.agentProfile.all, 'detail'] as const,
+  },
   chapters: {
     all: ['chapters'] as const,
     lists: () => [...queryKeys.chapters.all, 'list'] as const,

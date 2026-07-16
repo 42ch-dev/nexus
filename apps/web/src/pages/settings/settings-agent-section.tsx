@@ -9,6 +9,7 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useQueryClient } from '@tanstack/react-query';
 
 import { Button } from '@/components/ui/button';
 import {
@@ -21,6 +22,7 @@ import { useScanAgents, useVerifyAgent } from '@/api/queries';
 import { useDesktopCapabilities } from '@/lib/client-context';
 import { errorMessage } from '@/lib/error-message';
 import { useToast } from '@/lib/use-toast';
+import { queryKeys } from '@/lib/nexus/query-keys';
 import {
   defaultGridEntries,
   moreAgentsEntries,
@@ -83,6 +85,25 @@ function applySavedProfile(
   return false;
 }
 
+/** Dirty-gate baseline shape (V1.120 P1 T1, AD-P1-2). */
+interface SavedAgentProfile {
+  name: string;
+  launchCommand?: string;
+}
+
+/**
+ * Compare two saved-profile snapshots for the dirty gate. Launch commands are
+ * normalized (trim → `undefined` when empty) so a trailing-space-only difference
+ * does not keep the Save CTA enabled against an identical saved value.
+ */
+function profilesEqual(
+  a: SavedAgentProfile,
+  b: SavedAgentProfile,
+): boolean {
+  const norm = (cmd: string | undefined) => cmd?.trim() || undefined;
+  return a.name === b.name && norm(a.launchCommand) === norm(b.launchCommand);
+}
+
 export function SettingsAgentSection() {
   const { t } = useTranslation('settings');
   const { t: commonT } = useTranslation('common');
@@ -112,6 +133,11 @@ export function SettingsAgentSection() {
   const [verifyStatus, setVerifyStatus] = useState<AgentVerifyStatus>('idle');
   /** Author touched picker before async preselect finished — skip late apply. */
   const userTouchedRef = useRef(false);
+  // V1.120 P1 (T1, AD-P1-2): last-saved agent profile snapshot — the dirty-gate
+  // baseline. Captured from `getAgentProfile` during preselect and updated to the
+  // just-saved value on a successful Save so the gate closes again (AC-P1-1).
+  const savedProfileRef = useRef<SavedAgentProfile | null>(null);
+  const qc = useQueryClient();
 
   // G1: after scan settles, desktop preselects via getAgentProfile (match by
   // name). Null/unreadable → first-installed fallback. Browser skips read.
@@ -131,6 +157,10 @@ export function SettingsAgentSection() {
       if (desktop) {
         const profile = await desktop.getAgentProfile();
         if (cancelled) return;
+        // Capture the dirty-gate baseline from the saved profile (AD-P1-2).
+        // `null` (first run / unreadable config) is a valid baseline — any
+        // selection differs from it until the first Save.
+        savedProfileRef.current = profile;
         // qc2 F-002: do not overwrite a selection the author already made.
         if (userTouchedRef.current) {
           setDidInitDefault(true);
@@ -209,10 +239,29 @@ export function SettingsAgentSection() {
     }
   }
 
-  const canSave = Boolean(selectedAgent || customLaunchCommand.trim());
+  // V1.120 P1 (T1, AC-P1-1): the effective selection mirrors the values the
+  // Save handler persists (`name ?? 'custom'`, launch command from the selected
+  // agent or the custom field). The Save CTA is gated on this differing from
+  // the last-saved baseline so a no-op Save is never enabled.
+  const effectiveSelection = useMemo<SavedAgentProfile | null>(() => {
+    if (selectedAgent) {
+      return {
+        name: selectedAgent.name,
+        launchCommand: selectedAgent.launch_command ?? undefined,
+      };
+    }
+    const cmd = customLaunchCommand.trim();
+    if (cmd) return { name: 'custom', launchCommand: cmd };
+    return null;
+  }, [selectedAgent, customLaunchCommand]);
+
+  const isDirty =
+    effectiveSelection !== null &&
+    (savedProfileRef.current === null ||
+      !profilesEqual(effectiveSelection, savedProfileRef.current));
 
   async function saveProfile() {
-    if (!canSave || isSaving) return;
+    if (!isDirty || isSaving) return;
 
     if (!desktop) {
       toast({
@@ -229,6 +278,18 @@ export function SettingsAgentSection() {
       const launchCommand =
         (selectedAgent?.launch_command ?? customLaunchCommand.trim()) || undefined;
       await desktop.setAgentProfile(name, launchCommand);
+      // Update the dirty-gate baseline so the CTA closes again (AC-P1-1) and
+      // invalidate the React-Query keys DaemonStatusBar consumes so its agent
+      // badge refreshes immediately — no 10s poll wait (AC-P1-2 / AD-P1-1).
+      // Keys invalidated: `queryKeys.agentProfile.detail()` (badge name source)
+      // and `queryKeys.agentHost.scan({ filter: 'all' })` (status bar's PATH
+      // scan used to resolve displayName/version — scoped so the heavier
+      // registry_refresh scan on this page is not refetched).
+      savedProfileRef.current = { name, launchCommand };
+      void qc.invalidateQueries({ queryKey: queryKeys.agentProfile.detail() });
+      void qc.invalidateQueries({
+        queryKey: queryKeys.agentHost.scan({ filter: 'all' }),
+      });
       toast({
         variant: 'success',
         title: commonT('toast.agentProfileSaved'),
@@ -284,7 +345,7 @@ export function SettingsAgentSection() {
           type="button"
           variant="primary"
           onClick={() => void saveProfile()}
-          disabled={!canSave || isSaving}
+          disabled={!isDirty || isSaving}
           data-testid="settings-save-agent"
         >
           {isSaving ? t('agent.saving') : t('agent.save')}

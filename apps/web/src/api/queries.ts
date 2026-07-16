@@ -57,7 +57,7 @@ import type {
 } from '@42ch/nexus-contracts';
 
 import { useToast } from '@/lib/use-toast';
-import { useNexusClient } from '@/lib/client-context';
+import { useDesktopCapabilities, useNexusClient } from '@/lib/client-context';
 import { NexusClientError } from '@/lib/nexus';
 import { shortId } from '@/lib/format';
 import { queryKeys } from '@/lib/nexus/query-keys';
@@ -560,6 +560,26 @@ export function useScanAgents(request?: ScanRequest) {
   return useQuery({
     queryKey: queryKeys.agentHost.scan(request),
     queryFn: async (): Promise<ScanResponse> => client.scanAgents(request),
+  });
+}
+
+/** Saved agent profile snapshot shape (desktop `getAgentProfile` payload). */
+export type AgentProfileSnapshot = { name: string; launchCommand?: string };
+
+/**
+ * Desktop-only saved agent profile (V1.120 P1 T1).
+ *
+ * Backed by React Query so the Settings Agent Save handler can invalidate
+ * `queryKeys.agentProfile` and the DaemonStatusBar agent badge refreshes
+ * immediately after a save — no 10s poll wait (AD-P1-1). Browser build: the
+ * hook is disabled (`desktop === null`) and `data` stays `undefined`.
+ */
+export function useAgentProfile() {
+  const desktop = useDesktopCapabilities();
+  return useQuery({
+    queryKey: queryKeys.agentProfile.detail(),
+    queryFn: (): Promise<AgentProfileSnapshot | null> => desktop!.getAgentProfile(),
+    enabled: Boolean(desktop),
   });
 }
 
