@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "updated_at": "2026-07-16",
+  "updated_at": "2026-07-17",
   "plans": [
     {
       "id": "2026-07-16-hotfix-setup-continue-404",
@@ -26,6 +26,104 @@
         "wire_contracts_changed": false,
         "tier": "Hotfix",
         "execution_mode": "inline"
+      }
+    },
+    {
+      "id": "2026-07-17-v1.120-strategies-repair",
+      "title": "P0 - Strategies repair",
+      "file": "plans/2026-07-17-v1.120-strategies-repair.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@frontend-dev",
+        "@fullstack-dev"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.120",
+        "strategies",
+        "must",
+        "p0"
+      ],
+      "created_at": "2026-07-17",
+      "updated_at": "2026-07-17",
+      "notes": "Phase 1 draft — F5",
+      "metadata": {
+        "iteration_refs": [
+          "V1.120"
+        ],
+        "spec_integration_branch": "iteration/v1.120",
+        "merge_target": "iteration/v1.120",
+        "working_branch": "plan/v1.120-p0-strategies-repair",
+        "primary_spec": ".mstar/iterations/v1.120/specs/strategies-repair.md",
+        "wire_contracts_changed": false,
+        "tier": "Must",
+        "blocked_by_plan_id": null
+      }
+    },
+    {
+      "id": "2026-07-17-v1.120-shell-form-polish",
+      "title": "P1 - Shell & form polish",
+      "file": "plans/2026-07-17-v1.120-shell-form-polish.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@frontend-dev"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.120",
+        "shell",
+        "must",
+        "p1"
+      ],
+      "created_at": "2026-07-17",
+      "updated_at": "2026-07-17",
+      "notes": "Phase 1 draft — F1 F2 F6",
+      "metadata": {
+        "iteration_refs": [
+          "V1.120"
+        ],
+        "spec_integration_branch": "iteration/v1.120",
+        "merge_target": "iteration/v1.120",
+        "working_branch": "plan/v1.120-p1-shell-form-polish",
+        "primary_spec": ".mstar/iterations/v1.120/specs/shell-form-polish.md",
+        "wire_contracts_changed": false,
+        "tier": "Must",
+        "blocked_by_plan_id": null
+      }
+    },
+    {
+      "id": "2026-07-17-v1.120-orchestration-ia-icon",
+      "title": "P2 - Orchestration IA + sessions + Dock",
+      "file": "plans/2026-07-17-v1.120-orchestration-ia-icon.md",
+      "status": "Todo",
+      "owner": "@project-manager",
+      "agents": [
+        "@frontend-dev"
+      ],
+      "progress": 0,
+      "tags": [
+        "v1.120",
+        "orchestration",
+        "desktop",
+        "must",
+        "p2"
+      ],
+      "created_at": "2026-07-17",
+      "updated_at": "2026-07-17",
+      "notes": "Phase 1 draft — F3 F4 F7",
+      "metadata": {
+        "iteration_refs": [
+          "V1.120"
+        ],
+        "spec_integration_branch": "iteration/v1.120",
+        "merge_target": "iteration/v1.120",
+        "working_branch": "plan/v1.120-p2-orchestration-ia-icon",
+        "primary_spec": ".mstar/iterations/v1.120/specs/orchestration-ia-icon.md",
+        "wire_contracts_changed": false,
+        "tier": "Must",
+        "blocked_by_plan_id": null
       }
     },
     {
@@ -130,8 +228,8 @@
     "integration_branch_retired": false,
     "iteration_base_branch": "main",
     "last_integration_branch": "iteration/v1.115",
-    "latest_active_compass": "v1.119/delivery-compass.md",
-    "latest_active_iteration": "V1.119",
+    "latest_active_compass": "v1.120/delivery-compass.md",
+    "latest_active_iteration": "V1.120",
     "latest_ship": {
       "iteration": "V1.117",
       "compass": "v1.117/delivery-compass.md",
@@ -142,7 +240,7 @@
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "pre_iteration_hotfix": null,
-    "spec_integration_branch": "iteration/v1.119",
+    "spec_integration_branch": "iteration/v1.120",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {
