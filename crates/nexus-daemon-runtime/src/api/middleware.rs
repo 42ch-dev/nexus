@@ -691,4 +691,91 @@ mod tests {
         let response = server.get("/v1/daemon/runtime/health").await;
         assert!(response.status_code().is_success());
     }
+
+    /// Regression: GET/PATCH `/v1/daemon/creators/:creator_id` must hit handlers (not framework 404).
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn tier1_get_creator_by_id_hits_handler() {
+        use crate::api::auth_middleware::DaemonApiConfig;
+
+        const CREATOR_ID: &str = "crt_route_get";
+
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let user_home = tmp.path();
+        let nexus_home = user_home.join(".nexus42");
+        nexus_home_layout::ensure_system_layout(&nexus_home).expect("system layout");
+        seed_creator_layout(user_home, CREATOR_ID);
+        let _home = HomeOverride::set(user_home);
+
+        let state = WorkspaceState::initialize().await.expect("initialize");
+        let app = crate::api::create_router(state, DaemonApiConfig::keyless());
+        let server = TestServer::new(app).expect("TestServer");
+
+        let response = server
+            .get(&format!("/v1/daemon/creators/{CREATOR_ID}"))
+            .await;
+        assert_ne!(
+            response.status_code(),
+            404,
+            "GET by id must reach handler (framework 404 = route not registered); body={}",
+            response.text()
+        );
+        assert!(
+            response.status_code().is_success(),
+            "GET by id should succeed, got {}",
+            response.status_code()
+        );
+        let body: Value = response.json();
+        assert_eq!(body["creator_id"], CREATOR_ID);
+    }
+
+    /// Regression: PATCH display_name on `/v1/daemon/creators/:creator_id` (Setup Continue path).
+    #[tokio::test]
+    #[serial_test::serial]
+    async fn tier1_patch_creator_by_id_hits_handler() {
+        use crate::api::auth_middleware::DaemonApiConfig;
+
+        const CREATOR_ID: &str = "crt_route_patch";
+
+        let tmp = tempfile::TempDir::new().expect("temp dir");
+        let user_home = tmp.path();
+        let nexus_home = user_home.join(".nexus42");
+        nexus_home_layout::ensure_system_layout(&nexus_home).expect("system layout");
+        seed_creator_layout(user_home, CREATOR_ID);
+        let _home = HomeOverride::set(user_home);
+
+        let state = WorkspaceState::initialize().await.expect("initialize");
+        let app = crate::api::create_router(state, DaemonApiConfig::keyless());
+        let server = TestServer::new(app).expect("TestServer");
+
+        let set_resp = server
+            .put("/v1/daemon/creators/active")
+            .json(&serde_json::json!({ "creator_id": CREATOR_ID }))
+            .await;
+        assert!(
+            set_resp.status_code().is_success(),
+            "set-active should succeed before PATCH: {}",
+            set_resp.status_code()
+        );
+
+        let response = server
+            .patch(&format!("/v1/daemon/creators/{CREATOR_ID}"))
+            .json(&serde_json::json!({ "display_name": "Setup Display" }))
+            .await;
+        assert_ne!(
+            response.status_code(),
+            404,
+            "PATCH by id must reach handler (framework 404 = route not registered); body={}",
+            response.text()
+        );
+        assert!(
+            response.status_code().is_success(),
+            "PATCH by id should succeed, got {} body={}",
+            response.status_code(),
+            response.text()
+        );
+        let body: Value = response.json();
+        assert_eq!(body["creator_id"], CREATOR_ID);
+        assert_eq!(body["display_name"], "Setup Display");
+    }
 }

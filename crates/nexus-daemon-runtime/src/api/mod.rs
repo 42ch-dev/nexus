@@ -138,18 +138,21 @@ fn orchestration_routes() -> Router<WorkspaceState> {
 /// Registration now lives in the CLI via `nexus-cloud-sync`.
 /// The daemon only provides local creator status, active selection, and logout.
 fn creator_routes() -> Router<WorkspaceState> {
+    // Axum 0.7 + matchit 0.7 use `:param` captures. Brace form (`{param}`) is a
+    // *literal* path segment and never matches real ids (framework 404). Custom
+    // verb `POST …/:id:logout` cannot be a separate matchit pattern (`:a:b` is
+    // rejected), so logout shares `:creator_id` and strips a trailing `:logout`
+    // inside the handler (see `logout_creator`). Residual: R-HOTFIX-404-PARAM-SYNTAX.
     Router::new()
-        .route(
-            "/v1/daemon/creators/{creator_id}",
-            get(handlers::creators::get_creator).patch(handlers::creators::patch_creator),
-        )
-        .route(
-            "/v1/daemon/creators/{creator_id}:logout",
-            post(handlers::creators::logout_creator),
-        )
         .route(
             "/v1/daemon/creators/active",
             get(handlers::creators::get_active_creator).put(handlers::creators::set_active_creator),
+        )
+        .route(
+            "/v1/daemon/creators/:creator_id",
+            get(handlers::creators::get_creator)
+                .patch(handlers::creators::patch_creator)
+                .post(handlers::creators::logout_creator),
         )
 }
 

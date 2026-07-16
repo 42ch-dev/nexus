@@ -412,6 +412,7 @@ pub async fn get_creator(
 ) -> Result<Json<CreatorDetail>, NexusApiError> {
     info!(creator_id = %creator_id, "Getting creator detail");
 
+    reject_colon_verb_segment(&creator_id)?;
     validate_creator_id_safe(&creator_id).map_err(|reason| NexusApiError::InvalidInput {
         field: "creator_id".to_string(),
         reason,
@@ -449,6 +450,7 @@ pub async fn patch_creator(
 ) -> Result<Json<CreatorDetail>, NexusApiError> {
     info!(creator_id = %creator_id, "Patching creator");
 
+    reject_colon_verb_segment(&creator_id)?;
     validate_creator_id_safe(&creator_id).map_err(|reason| NexusApiError::InvalidInput {
         field: "creator_id".to_string(),
         reason,
@@ -637,12 +639,29 @@ pub async fn get_active_creator(
     }))
 }
 
-/// `POST /v1/daemon/creators/{id}:logout` — clear credentials
+/// `POST /v1/daemon/creators/{id}:logout` — clear credentials.
+///
+/// Routed as `POST /v1/daemon/creators/:creator_id` because matchit 0.7 cannot
+/// register `:id:logout` as a separate pattern. The path segment must end with
+/// `:logout`; otherwise this returns 404 (plain POST without the verb is not a
+/// logout).
 pub async fn logout_creator(
     State(state): State<WorkspaceState>,
-    Path(creator_id): Path<String>,
+    Path(segment): Path<String>,
 ) -> Result<Json<LogoutResponse>, NexusApiError> {
+    let creator_id = segment
+        .strip_suffix(":logout")
+        .ok_or_else(|| NexusApiError::NotFound(format!("Creator route '{segment}' not found")))?
+        .to_string();
+
     info!(creator_id = %creator_id, "Logging out creator");
+
+    if creator_id.is_empty() || creator_id.contains(':') {
+        return Err(NexusApiError::InvalidInput {
+            field: "creator_id".to_string(),
+            reason: "creator_id must not be empty or contain ':'".to_string(),
+        });
+    }
 
     validate_creator_id_safe(&creator_id).map_err(|reason| NexusApiError::InvalidInput {
         field: "creator_id".to_string(),
@@ -666,6 +685,20 @@ pub async fn logout_creator(
         creator_id,
         cleared,
     }))
+}
+
+/// Reject path segments that look like Google-AIP custom verbs (`id:verb`).
+///
+/// Those URLs share the `:creator_id` capture with logout; GET/PATCH must not
+/// treat `ctr_x:logout` as a valid creator id (ghost 200).
+fn reject_colon_verb_segment(creator_id: &str) -> Result<(), NexusApiError> {
+    if creator_id.contains(':') {
+        return Err(NexusApiError::InvalidInput {
+            field: "creator_id".to_string(),
+            reason: "creator_id must not contain ':'".to_string(),
+        });
+    }
+    Ok(())
 }
 
 // ─── Tests ──────────────────────────────────────────────────────────
