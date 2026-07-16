@@ -25,6 +25,7 @@
   "reload": "重新加载",
   "strategyDetail": {
     "loading": "正在加载策略…",
+    "back": "返回",
     "notFoundTitle": "策略未找到",
     "notFoundDescription": "请从策略列表中选择一个策略。",
     "title": "策略",

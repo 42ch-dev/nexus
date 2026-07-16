@@ -25,6 +25,7 @@
   "reload": "Reload",
   "strategyDetail": {
     "loading": "Loading Strategy…",
+    "back": "Back",
     "notFoundTitle": "Strategy not found",
     "notFoundDescription": "Choose a Strategy from the Strategies list.",
     "title": "Strategy",
