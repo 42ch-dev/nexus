@@ -8,7 +8,7 @@
  * open so the author can correct.
  */
 import { http, HttpResponse } from 'msw';
-import { screen, waitFor } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -23,10 +23,13 @@ function renderDialog() {
   const onOpenChange = vi.fn();
   // renderInApp mounts ToastProvider + Toaster (mirrors main.tsx) so the
   // mutation's onError → useToast → Toaster portal path is exercised live.
-  renderInApp(<CreateWorkDialog open onOpenChange={onOpenChange} onCreated={onCreated} />, {
-    client: new BrowserClient(),
-  });
-  return { onCreated, onOpenChange };
+  const view = renderInApp(
+    <CreateWorkDialog open onOpenChange={onOpenChange} onCreated={onCreated} />,
+    {
+      client: new BrowserClient(),
+    },
+  );
+  return { onCreated, onOpenChange, container: view.container };
 }
 
 describe('CreateWorkDialog CRUD round-trip', () => {
@@ -204,5 +207,51 @@ describe('CreateWorkDialog work_profile wire contract (C1)', () => {
     const gameBible = WORK_PROFILES.find((p) => p.label === 'Game Bible');
     expect(gameBible).toBeDefined();
     expect(gameBible?.value).toBe('game_bible');
+  });
+});
+
+// AC-P1-3 / AC-P1-5 (V1.120 P1 T2) — Select single chevron + disabled-primary
+// dark token contrast. The Select primitive (native `<select>` from
+// @42ch/nexus-ui) suppresses the UA dropdown arrow via `appearance-none` and
+// renders a single in-boundary chevron overlay; apps/web's Tailwind content
+// config must scan the package source so `appearance-none` is emitted (else the
+// native arrow re-appears alongside the overlay → duplicate chevron).
+describe('CreateWorkDialog Select chevron + disabled Create button', () => {
+  it('renders a single chevron inside the Work-profile Select control boundary (AC-P1-3)', () => {
+    renderDialog();
+
+    const profileSelect = screen.getByLabelText(/Work profile/i);
+    expect(profileSelect).toHaveProperty('tagName', 'SELECT');
+    // `appearance-none` suppresses the native UA dropdown arrow; `pe-8`
+    // reserves the right inset for the overlay. Both are package-exclusive
+    // utilities, so they rely on apps/web scanning packages/nexus-ui/src.
+    expect(profileSelect).toHaveClass('appearance-none');
+    expect(profileSelect).toHaveClass('pe-8');
+
+    // Exactly one chevron overlay exists in the dialog (Radix Dialog portals
+    // to document.body, so query via screen, not the render container) — no
+    // duplicate native arrow + overlay.
+    expect(screen.queryAllByTestId('select-chevron')).toHaveLength(1);
+
+    // The chevron sits inside the same `.relative` control wrapper as the
+    // `<select>` (i.e. within the control boundary, not bleeding outside).
+    const wrapper = profileSelect.parentElement;
+    expect(wrapper).not.toBeNull();
+    expect(wrapper).toHaveClass('relative');
+    expect(within(wrapper!).getByTestId('select-chevron')).toBeInTheDocument();
+  });
+
+  it('disabled Create button applies the dark-token disabled-primary classes (AC-P1-5)', () => {
+    renderDialog();
+
+    // Empty form → primary Create submit is disabled.
+    const createBtn = screen.getByRole('button', { name: /^Create$/i });
+    expect(createBtn).toBeDisabled();
+    expect(createBtn).toHaveClass('disabled:bg-gray-100');
+    expect(createBtn).toHaveClass('disabled:text-gray-700');
+    // The disabled treatment is theme-aware via CSS vars (no separate dark
+    // rule needed): in dark, --color-gray-100=#1f1f1f fill +
+    // --color-gray-700=#a3a3a3 text = 6.53:1 text/bg (≥ WCAG AA). See
+    // task-2-report.md for the contrast citation.
   });
 });
