@@ -2,3 +2,7 @@
 packages/nexus-ui/assets/logos/*.png filter=lfs diff=lfs merge=lfs -text
 apps/desktop/src-tauri/icons/source/*.png filter=lfs diff=lfs merge=lfs -text
 apps/desktop/src-tauri/icons/source/app-icon-preview-256.png -filter -diff -merge
+
+# Git LFS — canonical font binaries (provenance only; app-vendored copies under
+# apps/*/public/fonts/ stay plain git so Vite never serves an LFS pointer)
+packages/nexus-ui/assets/fonts/**/*.woff2 filter=lfs diff=lfs merge=lfs -text
