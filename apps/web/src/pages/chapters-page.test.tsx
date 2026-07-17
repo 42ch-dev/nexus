@@ -244,3 +244,43 @@ describe('ChaptersPage', () => {
     expect(screen.getByRole('button', { name: /^Confirm$/i })).toBeInTheDocument();
   });
 });
+
+// V1.121 v0.4 — banner/tint convergence (DESIGN.md §Design Concept + AC-P2-4).
+//
+// The protected-chapter row tint previously used a raw `color-mix` arbitrary
+// class (`bg-[color-mix(in_srgb,var(--color-purple-700)_6%,transparent)]`).
+// It now consumes the tokenized purple-700 scale via the Tailwind opacity
+// modifier (`bg-purple-700/10`) — no new hue, no raw color-mix arbitrary
+// class on a page-listed surface.
+describe('ChaptersPage banner/tint convergence (V1.121 v0.4)', () => {
+  it('renders the protected-chapter tint without a raw color-mix arbitrary class', async () => {
+    useHandlers(
+      worksHandler(),
+      http.get('/v1/daemon/works/:workId/chapters', () =>
+        HttpResponse.json({
+          items: [
+            {
+              work_id: 'w-123',
+              chapter: 1,
+              volume: 1,
+              slug: 'ch01',
+              planned_word_count: 4000,
+              status: 'finalized',
+              created_at: '2026-06-25T00:00:00Z',
+              updated_at: '2026-06-25T00:00:00Z',
+            },
+          ],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+    );
+
+    renderChapters();
+    const row = await screen.findByTestId('chapter-row-1');
+    // Tokenized purple-700 opacity modifier — converges onto the registered
+    // semantic scale; no raw color-mix arbitrary class remains.
+    expect(row.className).toMatch(/\bbg-purple-700\/10\b/);
+    expect(row.className).not.toMatch(/color-mix/);
+    expect(row.className).not.toMatch(/\bbg-\[/);
+  });
+});
