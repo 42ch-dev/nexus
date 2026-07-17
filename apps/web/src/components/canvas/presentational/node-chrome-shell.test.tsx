@@ -66,6 +66,31 @@ describe('NodeChromeShell rendering', () => {
     expect(shell.className).toContain('min-w-canvas-node-default');
   });
 
+  it('applies the v0.4 elevation hover + dragging tiers alongside the rest shadow-card', () => {
+    const { container } = render(<NodeChromeShell>body</NodeChromeShell>);
+    const cls = container.firstElementChild!.className;
+    // Rest tier — shadow-card is the elevation-1 alias (DESIGN.md §Elevation).
+    expect(cls).toContain('shadow-card');
+    // Hover tier — DESIGN.md §Elevation v0.4 recipe (rest 1 → hover 2 →
+    // dragging 4).
+    expect(cls).toContain('hover:shadow-elevation-2');
+    // Dragging tier — gated by the data-dragging attribute so the RF wrapper
+    // forwards the dragging prop without a class-name branch.
+    expect(cls).toContain('data-[dragging=true]:shadow-elevation-4');
+  });
+
+  it('forwards the dragging prop as a data-dragging attribute', () => {
+    const { container } = render(<NodeChromeShell dragging>body</NodeChromeShell>);
+    const shell = container.firstElementChild as HTMLElement;
+    expect(shell.dataset.dragging).toBe('true');
+  });
+
+  it('omits the data-dragging attribute at rest', () => {
+    const { container } = render(<NodeChromeShell>body</NodeChromeShell>);
+    const shell = container.firstElementChild as HTMLElement;
+    expect(shell.dataset.dragging).toBeUndefined();
+  });
+
   it('applies the default (unselected) border class', () => {
     const { container } = render(<NodeChromeShell>body</NodeChromeShell>);
     expect(container.firstElementChild!.className).toContain('border-canvas-node-border');
@@ -75,6 +100,31 @@ describe('NodeChromeShell rendering', () => {
   it('applies the selected border class when selected', () => {
     const { container } = render(<NodeChromeShell selected>body</NodeChromeShell>);
     expect(container.firstElementChild!.className).toContain('border-canvas-node-border-selected');
+  });
+
+  it('applies the two-layer selection ring when selected (no status)', () => {
+    const { container } = render(<NodeChromeShell selected>body</NodeChromeShell>);
+    const cls = container.firstElementChild!.className;
+    // V1.121 P3 T2 — selection is never color-only. A 2px selected-color
+    // ring with a 2px background-color offset pairs the canvas-focus token
+    // with the global focus-ring shape (DESIGN.md §Component Primitives).
+    expect(cls).toContain('ring-2');
+    expect(cls).toContain('ring-canvas-node-border-selected');
+    expect(cls).toContain('ring-offset-2');
+    expect(cls).toContain('ring-offset-background-100');
+  });
+
+  it('omits the two-layer selection ring when a status overlay is active', () => {
+    // Status wins the ring slot — overlay rings are more specific than plain
+    // selection. The selected border class still applies so selection state
+    // stays legible alongside the status halo.
+    const { container } = render(
+      <NodeChromeShell selected status="current">body</NodeChromeShell>,
+    );
+    const cls = container.firstElementChild!.className;
+    expect(cls).toContain('border-canvas-node-border-selected');
+    expect(cls).toContain(NODE_STATUS_RING.current);
+    expect(cls).not.toContain('ring-offset-background-100');
   });
 
   it('applies the status ring when status is set', () => {
@@ -92,6 +142,39 @@ describe('NodeChromeShell rendering', () => {
   it('applies the strategy accent stripe when accent is set', () => {
     const { container } = render(<NodeChromeShell accent>body</NodeChromeShell>);
     expect(container.firstElementChild!.className).toContain('border-l-canvas-strategy-accent');
+  });
+
+  it('treats accent={true} and accent="strategy" as the same spine', () => {
+    const trueCls = render(<NodeChromeShell accent>body</NodeChromeShell>)
+      .container.firstElementChild!.className;
+    const namedCls = render(<NodeChromeShell accent="strategy">body</NodeChromeShell>)
+      .container.firstElementChild!.className;
+    expect(namedCls).toContain('border-l-canvas-strategy-accent');
+    // Same spine class layer for both — boolean stays a synonym for the
+    // strategy surface so existing call sites render unchanged.
+    expect(trueCls).toContain('border-l-canvas-strategy-accent');
+  });
+
+  it('renders the outline accent spine when accent="outline"', () => {
+    const { container } = render(<NodeChromeShell accent="outline">body</NodeChromeShell>);
+    const cls = container.firstElementChild!.className;
+    expect(cls).toContain('border-l-canvas-outline-accent');
+    expect(cls).not.toContain('border-l-canvas-strategy-accent');
+  });
+
+  it('renders the worldkb accent spine when accent="worldkb"', () => {
+    const { container } = render(<NodeChromeShell accent="worldkb">body</NodeChromeShell>);
+    const cls = container.firstElementChild!.className;
+    expect(cls).toContain('border-l-canvas-worldkb-accent');
+    expect(cls).not.toContain('border-l-canvas-strategy-accent');
+  });
+
+  it('omits every accent spine when accent is absent', () => {
+    const { container } = render(<NodeChromeShell>body</NodeChromeShell>);
+    const cls = container.firstElementChild!.className;
+    expect(cls).not.toContain('border-l-canvas-strategy-accent');
+    expect(cls).not.toContain('border-l-canvas-outline-accent');
+    expect(cls).not.toContain('border-l-canvas-worldkb-accent');
   });
 
   it('merges className via cn so callers can override min-width', () => {

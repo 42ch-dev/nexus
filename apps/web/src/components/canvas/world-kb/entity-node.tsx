@@ -55,6 +55,7 @@ interface SourceAnchorNodeData {
 export const WorldKbEntityNode = memo(function WorldKbEntityNode({
   data,
   selected,
+  dragging,
 }: NodeProps) {
   const d = data as WorldKbNodeData;
   const { t } = useTranslation('canvas');
@@ -62,8 +63,20 @@ export const WorldKbEntityNode = memo(function WorldKbEntityNode({
   const badge = LIFECYCLE_BADGE[d.lifecycle];
   return (
     <div
+      data-dragging={dragging ? 'true' : undefined}
       className={[
-        'min-w-[200px] max-w-[240px] rounded-card border bg-canvas-worldkb-entity-card-fill-default px-3 py-2 shadow-card transition-colors duration-state ease-standard focus-visible:outline-none',
+        // V1.121 P3 T2 — v0.4 elevation recipe (DESIGN.md §Elevation):
+        // rest shadow-card (elevation-1) → hover elevation-2 → dragging
+        // elevation-4. The data-dragging attribute variant lets the RF
+        // wrapper forward the dragging prop without a class-name branch,
+        // mirroring NodeChromeShell's pattern.
+        'min-w-[200px] max-w-[240px] rounded-card border bg-canvas-worldkb-entity-card-fill-default px-3 py-2 shadow-card transition-shadow duration-state ease-standard hover:shadow-elevation-2 data-[dragging=true]:shadow-elevation-4 focus-visible:outline-none',
+        // V1.121 P3 T2 — per-surface accent spine (World KB = teal-700 per
+        // DESIGN.md §Canvas Surface). Mirrors NodeChromeShell's spine; this
+        // node keeps its bespoke 3-state fill tokens (default/hover/selected)
+        // rather than routing through NodeChromeShell because the entity
+        // card's selected-fill diverges from `canvas-node-fill`.
+        'border-l-[3px] border-l-canvas-worldkb-accent',
         selected
           ? 'border-canvas-worldkb-entity-card-stroke-selected bg-canvas-worldkb-entity-card-fill-selected'
           : 'border-canvas-worldkb-entity-card-stroke-default hover:bg-canvas-worldkb-entity-card-fill-hover',
@@ -125,12 +138,14 @@ export const WorldKbEntityNode = memo(function WorldKbEntityNode({
 /** Read-only source-anchor provenance origin node. */
 export const WorldKbSourceAnchorNode = memo(function WorldKbSourceAnchorNode({
   data,
+  dragging,
 }: NodeProps) {
   const d = data as SourceAnchorNodeData;
   const { t } = useTranslation('canvas');
   return (
     <div
-      className="min-w-[140px] max-w-[180px] rounded-card border border-canvas-worldkb-source-anchor-edge/40 bg-canvas-worldkb-source-anchor-node px-2 py-1 shadow-card"
+      data-dragging={dragging ? 'true' : undefined}
+      className="min-w-[140px] max-w-[180px] rounded-card border border-canvas-worldkb-source-anchor-edge/40 border-l-[3px] border-l-canvas-worldkb-accent bg-canvas-worldkb-source-anchor-node px-2 py-1 shadow-card transition-shadow duration-state ease-standard hover:shadow-elevation-2 data-[dragging=true]:shadow-elevation-4"
       aria-label={t('worldKb.entityNode.sourceAnchorAria', { reference: d.reference })}
     >
       <Handle

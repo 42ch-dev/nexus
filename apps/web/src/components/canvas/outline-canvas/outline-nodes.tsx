@@ -63,6 +63,7 @@ function statusColorVar(status: ChapterStatus): string {
 export const OutlineVolumeNode = memo(function OutlineVolumeNode({
   data,
   selected,
+  dragging,
 }: NodeProps) {
   const { t } = useTranslation('canvas');
   const d = data as OutlineVolumeNodeData;
@@ -70,6 +71,8 @@ export const OutlineVolumeNode = memo(function OutlineVolumeNode({
   return (
     <NodeChromeShell
       selected={!!selected}
+      accent="outline"
+      dragging={dragging}
       style={{
         background: 'var(--color-canvas-outline-volume-fill)',
       }}
@@ -91,12 +94,13 @@ export const OutlineVolumeNode = memo(function OutlineVolumeNode({
 export const OutlineChapterNode = memo(function OutlineChapterNode({
   data,
   selected,
+  dragging,
 }: NodeProps) {
   const { t } = useTranslation('canvas');
   const d = data as OutlineChapterNodeData;
   const statusColor = statusColorVar(d.status);
   return (
-    <NodeChromeShell selected={!!selected}>
+    <NodeChromeShell selected={!!selected} accent="outline" dragging={dragging}>
       <Handle type="target" position={Position.Left} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
       <div className="flex items-center justify-between gap-2">
         <span className="truncate font-heading text-copy-14 font-semibold text-gray-1000" title={d.title}>
@@ -133,12 +137,15 @@ export const OutlineChapterNode = memo(function OutlineChapterNode({
 export const OutlineTimelineEventNode = memo(function OutlineTimelineEventNode({
   data,
   selected,
+  dragging,
 }: NodeProps) {
   const { t } = useTranslation('canvas');
   const d = data as OutlineTimelineEventNodeData;
   return (
     <NodeChromeShell
       selected={!!selected}
+      accent="outline"
+      dragging={dragging}
       style={{
         borderLeftColor: 'var(--color-canvas-outline-timeline-event-pin)',
         borderLeftWidth: '3px',

@@ -581,6 +581,11 @@ components:
     canvas-port: "{colors.gray-700}"
     canvas-minimap: "{colors.gray-alpha-600}"
     canvas-strategy-accent: "{colors.purple-700}"
+    # V1.121 P3 T2: per-surface accent spines (§Canvas Surface — strategy =
+    # purple-700, outline = amber-700, World KB = teal-700). Each surface's
+    # spine is its own token so retuning one does not bleed into the others.
+    canvas-outline-accent: "{colors.amber-700}"
+    canvas-worldkb-accent: "{colors.teal-700}"
     canvas-write-dirty: "{colors.amber-700}"
     canvas-write-conflict: "{colors.red-700}"
     canvas-write-success: "{colors.green-700}"

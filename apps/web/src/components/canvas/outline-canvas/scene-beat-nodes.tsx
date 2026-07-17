@@ -62,6 +62,7 @@ function sceneStatusColorVar(status: OutlineSceneStatus): string {
 export const OutlineSceneNode = memo(function OutlineSceneNode({
   data,
   selected,
+  dragging,
 }: NodeProps) {
   const { t } = useTranslation('canvas');
   const d = data as OutlineSceneNodeData;
@@ -69,6 +70,8 @@ export const OutlineSceneNode = memo(function OutlineSceneNode({
   return (
     <NodeChromeShell
       selected={!!selected}
+      accent="outline"
+      dragging={dragging}
       className="min-w-canvas-node-outline-scene-beat"
       style={{
         background: 'var(--color-canvas-outline-scene-fill)',
@@ -110,6 +113,7 @@ export const OutlineSceneNode = memo(function OutlineSceneNode({
 export const OutlineBeatNode = memo(function OutlineBeatNode({
   data,
   selected,
+  dragging,
 }: NodeProps) {
   const { t } = useTranslation('canvas');
   const d = data as OutlineBeatNodeData;
@@ -117,6 +121,8 @@ export const OutlineBeatNode = memo(function OutlineBeatNode({
   return (
     <NodeChromeShell
       selected={!!selected}
+      accent="outline"
+      dragging={dragging}
       className="min-w-canvas-node-outline-scene-beat"
       style={{
         background: 'var(--color-canvas-outline-beat-fill)',
