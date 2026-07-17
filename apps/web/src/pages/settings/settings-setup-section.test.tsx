@@ -240,4 +240,34 @@ describe('SettingsSetupSection', () => {
     // Dialog stays open so the author can retry or cancel.
     expect(screen.getByRole('dialog')).toBeInTheDocument();
   });
+
+  it('renders the Advanced re-run wizard CTA with the destructive/danger variant (AC-P1-4)', async () => {
+    const user = userEvent.setup();
+
+    renderInApp(
+      <>
+        <CompletedProbe />
+        <Routes>{settingsRouteTree}</Routes>
+      </>,
+      {
+        client: makeClient(),
+        desktop: makeDesktop(),
+        initialRouterEntries: ['/settings/setup'],
+        setupCompleted: true,
+      },
+    );
+
+    // The Advanced "Re-run" trigger CTA is the destructive variant: a
+    // red-800 fill with brand-deep-blue text in dark (4.90:1, ≥ WCAG AA).
+    const trigger = screen.getByTestId('settings-rerun-setup');
+    expect(trigger).toHaveClass('bg-red-800');
+
+    // Open the confirm dialog and assert the confirm action is also danger.
+    await user.click(trigger);
+    const dialog = screen.getByRole('dialog');
+    const confirmAction = within(dialog).getByTestId(
+      'settings-rerun-setup-confirm-action',
+    );
+    expect(confirmAction).toHaveClass('bg-red-800');
+  });
 });

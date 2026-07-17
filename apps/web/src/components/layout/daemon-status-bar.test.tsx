@@ -288,6 +288,51 @@ describe('DaemonStatusBar locale parity (V1.117 P2 T4)', () => {
   });
 });
 
+describe('DaemonStatusBar Restart/agent a11y (V1.120 P1 T3, AC-P1-6)', () => {
+  // Isolate localStorage so the zh-CN preference does not leak into other
+  // describe blocks (they do not clear localStorage themselves).
+  afterEach(() => {
+    window.localStorage.clear();
+  });
+
+  it('Restart control exposes an accessible name + tooltip that name the daemon', async () => {
+    renderInApp(<DaemonStatusBar />, {
+      desktop: makeDesktop({ state: 'running' }),
+      client: new BrowserClient(),
+    });
+
+    // AC-P1-6 / AD-P1-5: the icon-only control must not be a bare "Restart" —
+    // its accessible name names the daemon, and the hover tooltip (title)
+    // carries the same object so users know what restarts.
+    const restart = await screen.findByRole('button', { name: 'Restart daemon' });
+    expect(restart).toHaveAccessibleName('Restart daemon');
+    expect(restart).toHaveAttribute('title', 'Restart daemon');
+  });
+
+  it('agent badge exposes an accessible name and a hover tooltip (AC-P1-6 context)', async () => {
+    renderInApp(<DaemonStatusBar />, {
+      desktop: makeDesktop({ state: 'running' }),
+      client: new BrowserClient(),
+    });
+
+    const badge = await screen.findByTestId('daemon-status-agent-badge');
+    // Visible label doubles as the accessible name; title provides the tooltip.
+    expect(badge).toHaveAccessibleName('No agent');
+    expect(badge).toHaveAttribute('title', 'No agent');
+  });
+
+  it('Restart accessible name + tooltip name the daemon in zh-CN too (locale parity)', async () => {
+    window.localStorage.setItem('nexus-web-locale', 'zh-CN');
+    renderInApp(<DaemonStatusBar />, {
+      desktop: makeDesktop({ state: 'running' }),
+      client: new BrowserClient(),
+    });
+
+    const restart = await screen.findByRole('button', { name: '重启守护进程' });
+    expect(restart).toHaveAttribute('title', '重启守护进程');
+  });
+});
+
 /**
  * Records react-router's current pathname on every render so a test can assert
  * where a navigation landed without mocking `useNavigate`.

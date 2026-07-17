@@ -14,7 +14,16 @@ import preset from '@nexus/design-tokens/tailwind.preset';
 const config: Config = {
   presets: [preset],
   darkMode: 'class',
-  content: ['./index.html', './src/**/*.{ts,tsx}'],
+  // Scan the @42ch/nexus-ui package source so package-exclusive utilities
+  // (e.g. `appearance-none`, `ps-3`, `pe-8`, `dark:bg-brand-cyan`) are emitted.
+  // Without this, only classes that also happen to appear under apps/web/src
+  // are generated, so the native Select kept its UA arrow alongside the custom
+  // chevron overlay (V1.120 P1 T2 / AC-P1-3). Mirrors apps/design-studio.
+  content: [
+    './index.html',
+    './src/**/*.{ts,tsx}',
+    '../../packages/nexus-ui/src/**/*.{ts,tsx}',
+  ],
   theme: {
     extend: {
       // V1.113 P1: app-local Tailwind utilities. The shared preset is consumed by
