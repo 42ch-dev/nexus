@@ -201,15 +201,23 @@ describe('Tokens page — spacing / radius galleries', () => {
     renderStudio('/tokens');
   });
 
-  it('renders spacing rows carrying the token width utility', () => {
+  it('renders spacing rows driven by the token CSS variable', () => {
     const row = screen.getByTestId('spacing-row-space-4');
-    expect(row.querySelector('.w-4')).not.toBeNull();
-    expect(screen.getByTestId('spacing-row-space-24').querySelector('.w-24')).not.toBeNull();
+    const bar = row.querySelector('[style*="--space-4"]');
+    expect(bar).not.toBeNull();
+    expect(row).toHaveTextContent('--space-4');
+    const row24 = screen.getByTestId('spacing-row-space-24');
+    expect(row24.querySelector('[style*="--space-24"]')).not.toBeNull();
+    expect(row24).toHaveTextContent('--space-24');
   });
 
-  it('renders radius boxes carrying the token rounded-* class', () => {
-    expect(screen.getByTestId('radius-box-card').querySelector('.rounded-card')).not.toBeNull();
-    expect(screen.getByTestId('radius-box-pill').querySelector('.rounded-pill')).not.toBeNull();
+  it('renders radius boxes driven by the token CSS variable', () => {
+    const card = screen.getByTestId('radius-box-card');
+    expect(card.querySelector('[style*="--radius-card"]')).not.toBeNull();
+    expect(card).toHaveTextContent('--radius-card');
+    const pill = screen.getByTestId('radius-box-pill');
+    expect(pill.querySelector('[style*="--radius-pill"]')).not.toBeNull();
+    expect(pill).toHaveTextContent('--radius-pill');
   });
 });
 

@@ -54,6 +54,44 @@
      fallback while/where the woff2 is unavailable. */
   --font-display: 'Source Serif 4', Georgia, 'Times New Roman', ui-serif, serif;
 
+  /* V1.121 v0.4 — display tier metric tuples (DESIGN.md typography.display-*).
+     Theme-independent: serif metrics are identical in both themes (the family
+     resolves via --font-display above). Consumed by tailwind.preset.ts
+     fontSize.display-* — do not duplicate the literals there. */
+  --text-display-32: 32px;
+  --text-display-32--line-height: 1.25;
+  --text-display-32--letter-spacing: -0.01em;
+  --text-display-32--font-weight: 600;
+  --text-display-24: 24px;
+  --text-display-24--line-height: 1.3;
+  --text-display-24--letter-spacing: -0.01em;
+  --text-display-24--font-weight: 600;
+  --text-display-20: 20px;
+  --text-display-20--line-height: 1.3;
+  --text-display-20--letter-spacing: 0;
+  --text-display-20--font-weight: 600;
+
+  /* Spacing scale — DESIGN.md frontmatter spacing: (4px base;
+     theme-independent). The Tailwind preset overrides the matching numeric
+     spacing steps with these vars; the studio spacing gallery reads them
+     live. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-16: 64px;
+  --space-24: 96px;
+
+  /* Radius scale — DESIGN.md frontmatter rounded: (theme-independent). */
+  --radius-control: 6px;
+  --radius-card: 8px;
+  --radius-popover: 12px;
+  --radius-fullscreen: 16px;
+  --radius-pill: 9999px;
+
   /* Brand — DESIGN.md + @42ch/nexus-ui/theme.css */
   --color-brand-deep-blue: var(--nexus-brand-deep-blue);
   --color-brand-cyan: var(--nexus-brand-cyan);
@@ -151,12 +189,14 @@
   --color-canvas-write-stale-bg: color-mix(in srgb, var(--color-amber-700) 8%, transparent);
   /* Canvas node width family — DESIGN.md components.canvas.node-width (V1.121
      v0.4 contract; registered here + preset minWidth, applied to node
-     components in P3; theme-independent). */
-  --color-canvas-node-width-strategy-root: 260px;
-  --color-canvas-node-width-strategy-primary: 140px;
-  --color-canvas-node-width-strategy-secondary: 150px;
-  --color-canvas-node-width-outline-scene-beat: 160px;
-  --color-canvas-node-width-default: 176px;
+     components in P3; theme-independent). Structural (non-color) tokens, so
+     they use the bare `--canvas-node-width-*` namespace per the DESIGN.md
+     structural-token convention (`--<category>-<name>`, not `--color-*`). */
+  --canvas-node-width-strategy-root: 260px;
+  --canvas-node-width-strategy-primary: 140px;
+  --canvas-node-width-strategy-secondary: 150px;
+  --canvas-node-width-outline-scene-beat: 160px;
+  --canvas-node-width-default: 176px;
 
   /* World KB canvas — DESIGN.md §World KB Canvas Tokens (V1.73) */
   --color-canvas-worldkb-entity-card-fill-default: #ffffff;
@@ -311,10 +351,17 @@
   --shadow-popover: var(--shadow-elevation-3);
   --shadow-modal: var(--shadow-elevation-4);
 
-  /* Motion — DESIGN.md §Motion (V1.121 v0.4 directional enter/exit pair;
-     theme-independent). */
+  /* Motion — DESIGN.md §Motion (V1.121 v0.4 full scale: durations + easings;
+     theme-independent). duration-enter/exit are the directional pair for
+     surfaces that appear/dismiss. */
+  --duration-instant: 0ms;
+  --duration-state: 120ms;
+  --duration-popover: 160ms;
+  --duration-modal: 220ms;
   --duration-enter: 200ms;
   --duration-exit: 140ms;
+  --ease-standard: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-emphasized: cubic-bezier(0.2, 0.8, 0.2, 1);
 
   /* Sidebar nav — DESIGN.md §Sidebar Nav (V1.99 P1 projection).
      Same values in light and dark (layout should not shift). */

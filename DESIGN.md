@@ -199,6 +199,12 @@ components:
     default: { backgroundColor: "{colors.background-100}", borderColor: "{colors.gray-alpha-400}", rounded: "{rounded.card}", padding: "{spacing.space-6}", shadow: "shadow-card" }
     compact: { padding: "{spacing.space-4}" }
     hero: { padding: "{spacing.space-8}" }
+    # CardTitle voice prop (V1.121 v0.4; additive opt-in — recipe in body §Card).
+    # interface = sans heading (default, unchanged); content = serif display tier.
+    title:
+      voice:
+        interface: { typography: "{typography.heading-16}" }
+        content: { typography: "{typography.display-20}" }
 
   # ── table: apps/web ──
   table:
@@ -555,8 +561,8 @@ components:
     canvas-write-conflict: "{colors.red-700}"
     canvas-write-success: "{colors.green-700}"
     canvas-write-stale-bg: "color-mix(in srgb, {colors.amber-700} 8%, transparent)"
-    # Canvas node width family (V1.121 v0.4 contract; registered in pipeline P2,
-    # applied to node components P3 — values grep-verified from source)
+    # Canvas node width family (V1.121 v0.4 contract; registered in pipeline P0
+    # as structural --canvas-node-width-* vars, applied to node components P3 — values grep-verified from source)
     node-width:
       strategy-root: "260px"
       strategy-primary: "140px"

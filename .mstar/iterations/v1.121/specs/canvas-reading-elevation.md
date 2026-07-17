@@ -1,7 +1,7 @@
 # P3 Spec — Canvas & Reading Elevation
 
 > Iteration: V1.121 “The Literary Engine”. Primary spec for plan `2026-07-17-v1.121-canvas-reading-elevation`.
-> Compass: S4. **Must** — signature surfaces (画布 + 阅读); iteration is incomplete if only shell/components elevate. Depends P0 (tokens/mapping) + P1 (elevated chrome) + P2 (`canvas-node-width-*`).
+> Compass: S4. **Must** — signature surfaces (画布 + 阅读); iteration is incomplete if only shell/components elevate. Depends P0 (tokens/mapping; `canvas-node-width-*` registration) + P1 (elevated chrome) + P2 (`canvas-node-width-*` verification).
 
 ## Problem statement
 
@@ -21,7 +21,7 @@ This plan makes the canvas feel like an **instrument** and the reading surface l
 
 1. **Three canvas surfaces** (`apps/web/src/components/canvas/**`): Strategy, Outline (+Scene/Beat), World KB.
    - **Ambient:** `canvas-shell` surface/grid/minimap/controls consume P0 ambient tokens; dot grid tuned per theme (size/gap/alpha); dark canvas sits on ink.
-   - **Node chrome v2:** `NodeChromeShell` + per-surface nodes adopt the v0.4 elevation recipe (rest 1 → hover 2 → dragging 4), two-layer selection ring, refined border contrast, per-surface accent spines (strategy=purple-700, outline=amber-700, worldkb=teal-700) as tokens; node widths consume the tokens registered in P2. **Note:** `NodeChromeShell` (`apps/web/src/components/canvas/presentational/node-chrome-shell.tsx`) already exposes `accent?: boolean` (currently drives `border-l-canvas-strategy-accent`); P3 extends this single prop to a per-surface accent spine — chosen shape (e.g. `accent?: boolean | 'strategy' | 'outline' | 'worldkb'`) is a P3 design decision; the extension is **additive** (existing `accent={true}` call sites continue to render the strategy accent for backward compatibility). Studio fixtures consume `NodeChromeShell` directly with static props, so the gallery is the verification surface.
+   - **Node chrome v2:** `NodeChromeShell` + per-surface nodes adopt the v0.4 elevation recipe (rest 1 → hover 2 → dragging 4), two-layer selection ring, refined border contrast, per-surface accent spines (strategy=purple-700, outline=amber-700, worldkb=teal-700) as tokens; node widths consume the `min-w-canvas-node-<role>` utilities registered in P0 (verified by P2's sweep). **Note:** `NodeChromeShell` (`apps/web/src/components/canvas/presentational/node-chrome-shell.tsx`) already exposes `accent?: boolean` (currently drives `border-l-canvas-strategy-accent`); P3 extends this single prop to a per-surface accent spine — chosen shape (e.g. `accent?: boolean | 'strategy' | 'outline' | 'worldkb'`) is a P3 design decision; the extension is **additive** (existing `accent={true}` call sites continue to render the strategy accent for backward compatibility). Studio fixtures consume `NodeChromeShell` directly with static props, so the gallery is the verification surface.
    - **Edges:** edge/edge-hover/port colors per v0.4; relationship-edge typing colors remapped per P0 hygiene table (hue-preserving); arrowheads/hover affordance refined.
    - **Inspectors/panels/conflict modals on canvas:** consume elevated popover/dialog tokens.
    - **Command palette on canvas:** inherits P2 palette work; verify on canvas context (no second palette implementation).

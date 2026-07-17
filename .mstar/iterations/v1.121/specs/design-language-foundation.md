@@ -123,9 +123,9 @@ The current `popover`/`modal` are already two-part (ambient `0 1px 1px` + key la
 - **Chromatic hygiene mapping (hue-preserving):** every Tailwind-palette leftover hex in `components.canvas.*` is remapped to the nearest brand semantic-scale value (e.g. `#3B82F6` → `blue-700` family, `#10B981` → `green-700` family, `#F59E0B` → `amber-700` family, `#A78BFA`/`#8B5CF6` → `purple-700` family, `#0EA5E9` → `teal-700` family, `#EF4444` → `red-700` family, `#94A3B8` → `gray-500/600`, `#EDE9FE` → purple alpha wash). Light + dark values both specified. The mapping table is normative in the spec appendix and applied verbatim to DESIGN.md/DESIGN.dark.md frontmatter.
 - Per-surface accent spines stay semantic (strategy = purple-700, outline = amber-700, worldkb = teal-700) — recorded as tokens so P3 can apply consistently.
 
-**Canvas node width family (concern 4 — contract originates here for P2 registration):**
+**Canvas node width family (concern 4 — contract + registration owned by P0):**
 
-P2 *registers* the `canvas-node-width-*` family in DESIGN.md frontmatter under **`components.canvas.node-width.<role>`** (consistent with the existing `components.canvas.*` namespace — `canvas.surface`, `canvas.grid`, `canvas.node-fill`, etc., already projected through `tooling/design-tokens/tailwind.preset.ts`). The five confirmed source values (grep-verified) and their semantic roles:
+P0 *registers* the `canvas-node-width-*` family in DESIGN.md frontmatter under **`components.canvas.node-width.<role>`** (consistent with the existing `components.canvas.*` namespace — `canvas.surface`, `canvas.grid`, `canvas.node-fill`, etc., already projected through `tooling/design-tokens/tailwind.preset.ts`). The five confirmed source values (grep-verified) and their semantic roles:
 
 | DESIGN.md key (`components.canvas.node-width.*`) | Value | Source (current hardcoded) |
 |----------------------------------------------------|-------|----------------------------|
@@ -135,7 +135,7 @@ P2 *registers* the `canvas-node-width-*` family in DESIGN.md frontmatter under *
 | `outline-scene-beat` | `160px` | `apps/web/src/components/canvas/outline-canvas/scene-beat-nodes.tsx:72,120` |
 | `default` | `176px` | `apps/web/src/components/canvas/presentational/node-chrome-shell.tsx:94` (NodeChromeShell default) |
 
-The family is **registered** (DESIGN.md frontmatter + tokens.css + tailwind preset `minWidth`/`width` keys + twMerge `min-w` group) in P2. **Applied** (replace the hardcoded `min-w-[Npx]` with `min-w-canvas-node-<role>`) in P3. P2 makes no canvas visual change. Exact tailwind utility prefix (`min-w-` vs `w-`) is fixed at registration in P2 so P3 consumes one name.
+The family is **registered** (DESIGN.md frontmatter + tokens.css `--canvas-node-width-*` structural vars + tailwind preset `minWidth` keys + twMerge `min-w` group) in **P0**. The tailwind utility prefix is fixed at registration as **`min-w-canvas-node-<role>`** so all downstream plans consume one name. **P2** *consumes/verifies* the registered utilities while sweeping arbitrary values (no re-registration, no canvas visual change). **P3** *applies* them (replaces the hardcoded `min-w-[Npx]` with `min-w-canvas-node-<role>`).
 
 ### T6. Reading-chrome tokenization contract
 
@@ -156,7 +156,7 @@ The family is **registered** (DESIGN.md frontmatter + tokens.css + tailwind pres
   | `font-family` (new entries in default `font-family` group) | `font-display` | Prevents `font-sans` / `font-display` from being merged away when both appear |
   | `shadow` (default `box-shadow` group — extends with named tokens) | `shadow-elevation-0`, `shadow-elevation-1`, `shadow-elevation-2`, `shadow-elevation-3`, `shadow-elevation-4` | Defensive — `shadow-*` is one class group in tailwind-merge by default, but registering named elevation tokens guards against future prefix drift |
   | `transition-duration` (default `duration` group) | `duration-enter`, `duration-exit` | Same defensive registration for new duration tokens |
-  | `min-width` (default `min-w` group — for P2 handoff) | `min-w-canvas-node-*` family (exact keys chosen by P2 per concern 4) | P2 registers `canvas-node-width-*` tokens; the resulting `min-w-*` utilities must survive merge |
+  | `min-width` (default `min-w` group) | `min-w-canvas-node-*` family (keys fixed at P0 registration per concern 4) | P0 registers `canvas-node-width-*` tokens; the resulting `min-w-*` utilities must survive merge |
 
 - **Regression test:** a vitest case in `packages/nexus-ui/src/lib/cn.test.ts` (or `apps/web/src/lib/utils.test.ts` mirroring the existing parity check) asserting representative classes from **each** new group survive `twMerge()` against a conflicting default — e.g. `cn('text-display-24', 'text-white')` keeps both; `cn('shadow-elevation-2', 'shadow-card')` collapses to one but never drops an unrelated class; `cn('font-display', 'font-sans')` resolves to the latter (correct merge semantics) without dropping e.g. `text-display-24`. The V1.94 silent-strip class of bug is the threat model.
 
@@ -184,7 +184,7 @@ Each AC is binary; evidence = file path + command log and/or grep and/or screens
 
 - AC-P0-1 — DESIGN.md + DESIGN.dark.md at v0.4.0 with T1–T8 frontmatter + body sections (concept, voice rules, elevation/motion recipes, contrast tables, chromatic mapping appendix); version field bumped; completeness Level 3 re-audited.
 - AC-P0-2 — Full light + dark WCAG 2.1 AA contrast table recomputed and recorded in DESIGN.md body for every changed pairing (ink backgrounds × gray text steps, scrim, canvas tokens). Any failing pairing blocks the candidate value, not the table. Table structure per T2 (rows = text tokens, columns = surfaces, cells = ratio + Pass/Fail).
-- AC-P0-3 — `tokens.css` + `tailwind.preset.ts` project all v0.4 tokens (light + dark), including the `--shadow-elevation-*` primitives, the `--shadow-{card,popover,modal}` alias chain, and `--font-display`; `pnpm --filter @nexus/design-tokens build` green.
+- AC-P0-3 — `tokens.css` + `tailwind.preset.ts` project all v0.4 tokens (light + dark), including the `--shadow-elevation-*` primitives, the `--shadow-{card,popover,modal}` alias chain, `--font-display`, the `--text-display-*` metric tuples, and the `--space-*` / `--radius-*` / `--duration-*` / `--ease-*` scalar scales; `pnpm --filter @nexus/design-tokens build` green — the gate is real: `tsc --noEmit` type-checks the preset and `scripts/check-tokens.mjs` asserts the expected v0.4 projections exist.
 - AC-P0-4 — `extendTailwindMerge` at `packages/nexus-ui/src/lib/cn.ts` registers the new groups listed in T7 (font-size, font-family, shadow, transition-duration entries) + vitest regression passes (representative display/elevation/duration classes survive merge). `tooling/check-ui-guardrails.sh` `check_cn_parity` still green.
 - AC-P0-5 — Serif decision recorded with **measured bundle delta** (gzipped `.woff2` per weight ≤ 80 KB → self-hosted path; otherwise documented system-stack fallback + Durable Roadmap entry on the P0 plan for V1.122). Font files vendored to `apps/web/public/fonts/` + `apps/design-studio/public/fonts/` with provenance comment pointing to `packages/nexus-ui/assets/fonts/`.
 - AC-P0-6 — design-studio gains Typography (incl. display tier), Spacing/Radius, Elevation/Motion galleries rendering real token values in both themes (typically extending the existing `/tokens` page — new top-level routes optional); studio build + tests green.

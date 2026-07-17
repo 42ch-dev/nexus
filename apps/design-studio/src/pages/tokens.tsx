@@ -157,42 +157,43 @@ const TYPO_SPECIMENS: TypoSpecimen[] = [
 
 /* ---------- Spacing scale (DESIGN.md frontmatter spacing:) ----------
  *
- * Bars render at true scale via the literal Tailwind width utility that the
- * token maps to (space-1 → w-1 …), so the visualization is token-true by
- * construction. The px/rem readout is read live from the rendered bar's
- * computed width.
+ * Bars render at true scale via the token's CSS custom property
+ * (`width: var(--space-N)`), projected in tokens.css `:root` from the DESIGN
+ * spacing: frontmatter — so the visualization tracks the SSOT, not the
+ * Tailwind default scale. The px/rem readout is read live from the rendered
+ * bar's computed width.
  */
 
 interface SpacingStep {
   label: string;
-  widthClass: string;
+  varName: string;
 }
 
 const SPACING_SCALE: SpacingStep[] = [
-  { label: 'space-1', widthClass: 'w-1' },
-  { label: 'space-2', widthClass: 'w-2' },
-  { label: 'space-3', widthClass: 'w-3' },
-  { label: 'space-4', widthClass: 'w-4' },
-  { label: 'space-6', widthClass: 'w-6' },
-  { label: 'space-8', widthClass: 'w-8' },
-  { label: 'space-10', widthClass: 'w-10' },
-  { label: 'space-16', widthClass: 'w-16' },
-  { label: 'space-24', widthClass: 'w-24' },
+  { label: 'space-1', varName: '--space-1' },
+  { label: 'space-2', varName: '--space-2' },
+  { label: 'space-3', varName: '--space-3' },
+  { label: 'space-4', varName: '--space-4' },
+  { label: 'space-6', varName: '--space-6' },
+  { label: 'space-8', varName: '--space-8' },
+  { label: 'space-10', varName: '--space-10' },
+  { label: 'space-16', varName: '--space-16' },
+  { label: 'space-24', varName: '--space-24' },
 ];
 
 /* ---------- Radius scale (DESIGN.md frontmatter rounded:) ---------- */
 
 interface RadiusStep {
   label: string;
-  radiusClass: string;
+  varName: string;
 }
 
 const RADIUS_SCALE: RadiusStep[] = [
-  { label: 'control', radiusClass: 'rounded-control' },
-  { label: 'card', radiusClass: 'rounded-card' },
-  { label: 'popover', radiusClass: 'rounded-popover' },
-  { label: 'fullscreen', radiusClass: 'rounded-fullscreen' },
-  { label: 'pill', radiusClass: 'rounded-pill' },
+  { label: 'control', varName: '--radius-control' },
+  { label: 'card', varName: '--radius-card' },
+  { label: 'popover', varName: '--radius-popover' },
+  { label: 'fullscreen', varName: '--radius-fullscreen' },
+  { label: 'pill', varName: '--radius-pill' },
 ];
 
 /* ---------- Elevation scale (DESIGN.md §Elevation, V1.121 v0.4) ---------- */
@@ -222,22 +223,22 @@ const ELEVATION_ALIASES = [
 
 interface MotionToken {
   label: string;
-  className: string;
+  varName: string;
   usage: string;
 }
 
 const MOTION_DURATIONS: MotionToken[] = [
-  { label: 'duration-instant', className: 'duration-instant', usage: 'Table filtering, data refresh replacement' },
-  { label: 'duration-state', className: 'duration-state', usage: 'Hover / focus / pressed states' },
-  { label: 'duration-popover', className: 'duration-popover', usage: 'Menus, dropdowns, tooltips' },
-  { label: 'duration-modal', className: 'duration-modal', usage: 'Dialog open / close' },
-  { label: 'duration-enter', className: 'duration-enter', usage: 'Entering surfaces (popover content in, toast in)' },
-  { label: 'duration-exit', className: 'duration-exit', usage: 'Dismissing surfaces (exit is faster than enter)' },
+  { label: 'duration-instant', varName: '--duration-instant', usage: 'Table filtering, data refresh replacement' },
+  { label: 'duration-state', varName: '--duration-state', usage: 'Hover / focus / pressed states' },
+  { label: 'duration-popover', varName: '--duration-popover', usage: 'Menus, dropdowns, tooltips' },
+  { label: 'duration-modal', varName: '--duration-modal', usage: 'Dialog open / close' },
+  { label: 'duration-enter', varName: '--duration-enter', usage: 'Entering surfaces (popover content in, toast in)' },
+  { label: 'duration-exit', varName: '--duration-exit', usage: 'Dismissing surfaces (exit is faster than enter)' },
 ];
 
 const MOTION_EASINGS: MotionToken[] = [
-  { label: 'ease-standard', className: 'ease-standard', usage: 'Default UI ease' },
-  { label: 'ease-emphasized', className: 'ease-emphasized', usage: 'Modal / panel enter' },
+  { label: 'ease-standard', varName: '--ease-standard', usage: 'Default UI ease' },
+  { label: 'ease-emphasized', varName: '--ease-emphasized', usage: 'Modal / panel enter' },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -276,24 +277,24 @@ function resolveBoxShadow(varName: string): string {
 }
 
 /**
- * Read a computed property produced by a Tailwind utility class (probe
- * element pattern) — live from the compiled CSS, not a hardcoded copy.
- * Returns '' when the class is not emitted (e.g. jsdom without CSS).
+ * Read a computed property produced by assigning a CSS custom property to a
+ * probe element — live from the token's declared value, not a hardcoded copy.
+ * Returns '' when the var is not defined (e.g. jsdom without CSS).
  */
-function useComputedClassValue(
-  className: string,
+function useComputedVarValue(
+  varName: string,
   property: 'transitionDuration' | 'transitionTimingFunction',
 ): string {
   const [value, setValue] = useState('');
   useEffect(() => {
     const el = document.createElement('div');
-    el.className = className;
+    el.style[property] = `var(${varName})`;
     el.style.display = 'none';
     document.body.appendChild(el);
     const computed = getComputedStyle(el)[property];
     document.body.removeChild(el);
     setValue(computed ?? '');
-  }, [className, property]);
+  }, [varName, property]);
   return value;
 }
 
@@ -427,8 +428,8 @@ function TypoRow({ specimen }: { specimen: TypoSpecimen }) {
 }
 
 /**
- * Spacing bar rendered at true scale — the bar itself carries the token's
- * width utility, so what you see is the token. The px/rem readout is read
+ * Spacing bar rendered at true scale — the bar's width is the token's CSS
+ * variable itself, so what you see is the token. The px/rem readout is read
  * live from the rendered bar.
  */
 function SpacingBar({ step }: { step: SpacingStep }) {
@@ -442,18 +443,19 @@ function SpacingBar({ step }: { step: SpacingStep }) {
   }, []);
 
   const px = parseFloat(width);
-  const hasValue = width.endsWith('px') && !Number.isNaN(px);
+  const hasValue = width.endsWith('px') && !Number.isNaN(px) && px > 0;
 
   return (
     <div data-testid={`spacing-row-${step.label}`} className="flex items-center gap-4 py-2">
       <div className="w-32 shrink-0 flex flex-col gap-0.5">
         <span className="text-label-14 font-medium text-gray-1000">{step.label}</span>
-        <span className="text-copy-13-mono font-mono text-gray-500">{step.widthClass}</span>
+        <span className="text-copy-13-mono font-mono text-gray-500">{step.varName}</span>
       </div>
       <div className="flex-1 flex items-center gap-3">
         <div
           ref={barRef}
-          className={`h-6 bg-blue-700 rounded-control ${step.widthClass}`}
+          className="h-6 bg-blue-700 rounded-control"
+          style={{ width: `var(${step.varName})` }}
         />
         {hasValue && (
           <span className="text-copy-13 text-gray-500 font-mono shrink-0">
@@ -465,7 +467,7 @@ function SpacingBar({ step }: { step: SpacingStep }) {
   );
 }
 
-/** Radius swatch — the box carries the literal rounded-* token class. */
+/** Radius swatch — the box's corner radius is the token's CSS variable. */
 function RadiusBox({ step }: { step: RadiusStep }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const [radius, setRadius] = useState('');
@@ -480,11 +482,12 @@ function RadiusBox({ step }: { step: RadiusStep }) {
     <div data-testid={`radius-box-${step.label}`} className="flex flex-col items-center gap-3">
       <div
         ref={boxRef}
-        className={`w-20 h-20 bg-gray-100 border border-gray-alpha-400 ${step.radiusClass}`}
+        className="w-20 h-20 bg-gray-100 border border-gray-alpha-400"
+        style={{ borderRadius: `var(${step.varName})` }}
       />
       <div className="flex flex-col items-center gap-0.5">
         <span className="text-label-14 text-gray-1000">{step.label}</span>
-        <span className="text-copy-13-mono font-mono text-gray-500">{step.radiusClass}</span>
+        <span className="text-copy-13-mono font-mono text-gray-500">{step.varName}</span>
         {radius && <span className="text-copy-13 text-gray-600 font-mono">{radius}</span>}
       </div>
     </div>
@@ -547,7 +550,7 @@ function ElevationAliasRow({ alias }: { alias: (typeof ELEVATION_ALIASES)[number
   );
 }
 
-/** Motion token row — value read live via the utility-class probe. */
+/** Motion token row — value read live from the token's CSS variable. */
 function MotionRow({
   token,
   property,
@@ -555,7 +558,7 @@ function MotionRow({
   token: MotionToken;
   property: 'transitionDuration' | 'transitionTimingFunction';
 }) {
-  const value = useComputedClassValue(token.className, property);
+  const value = useComputedVarValue(token.varName, property);
   return (
     <div
       data-testid={`motion-row-${token.label}`}
@@ -563,7 +566,7 @@ function MotionRow({
     >
       <span className="text-label-14 font-medium text-gray-1000 w-44 shrink-0">{token.label}</span>
       <span className="text-copy-13-mono font-mono text-gray-700 w-56 shrink-0 break-all">
-        {value || '—'}
+        {value || token.varName}
       </span>
       <span className="text-copy-13 text-gray-600">{token.usage}</span>
     </div>
@@ -713,8 +716,9 @@ function SpacingSection() {
     <section data-testid="tokens-spacing">
       <SectionHeading id="tokens-spacing">Spacing</SectionHeading>
       <p className="text-copy-14 text-gray-700 mb-4 max-w-prose">
-        Base unit 4px. Bars render at true scale — each bar carries the token's width utility,
-        with the computed px/rem read live.
+        Base unit 4px. Bars render at true scale — each bar's width is the token's{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">--space-*</code> CSS
+        variable, with the computed px/rem read live.
       </p>
       <div className="border border-gray-alpha-300 rounded-card bg-background-100 p-6">
         {SPACING_SCALE.map((s) => (
@@ -772,10 +776,10 @@ function MotionSection() {
     <section data-testid="tokens-motion">
       <SectionHeading id="tokens-motion">Motion</SectionHeading>
       <p className="text-copy-14 text-gray-700 mb-4 max-w-prose">
-        Short and standard-eased (120–220ms). Durations and easings are read live via their utility
-        classes; <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">--duration-enter</code> /{' '}
-        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">--duration-exit</code> are also
-        exposed as CSS variables. Every recipe honors{' '}
+        Short and standard-eased (120–220ms). Durations and easings are read live from their{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">--duration-*</code> /{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">--ease-*</code> CSS
+        variables. Every recipe honors{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">prefers-reduced-motion: reduce</code>{' '}
         by collapsing to an instant state change.
       </p>
@@ -835,9 +839,10 @@ export function TokensPage() {
       <MotionSection />
 
       <p className="text-copy-13 text-gray-500 mt-12 pt-8 border-t border-gray-alpha-200">
-        Every gallery reads live values: colors and shadows from CSS custom properties
-        (re-resolved on theme flip); typography, spacing, radius, and motion from the computed
-        style of elements carrying the token's utility class. Canvas token galleries land in P3.
+        Every gallery reads live values: colors, shadows, spacing, radius, and motion from CSS
+        custom properties (re-resolved on theme flip where theme-dependent); typography from the
+        computed style of elements carrying the token's utility class. Canvas token galleries land
+        in P3.
       </p>
     </div>
   );

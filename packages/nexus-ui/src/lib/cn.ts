@@ -59,7 +59,9 @@ const customTwMerge = extendTailwindMerge({
       // V1.121 v0.4: directional motion pair (DESIGN.md §Motion).
       duration: ['duration-enter', 'duration-exit'],
       // V1.121 v0.4: canvas node width family (DESIGN.md components.canvas.node-width;
-      // registered here in P0/P2, applied to node components in P3).
+      // registered in P0 alongside the `--canvas-node-width-*` structural CSS
+      // vars + preset minWidth keys, verified/consumed by P2's sweep, applied
+      // to node components in P3).
       'min-w': [
         'min-w-canvas-node-strategy-root',
         'min-w-canvas-node-strategy-primary',
