@@ -20,16 +20,20 @@
   --font-sans: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
     'Segoe UI', sans-serif;
   --font-mono: 'SFMono-Regular', 'Cascadia Code', 'Roboto Mono', Consolas, monospace;
+  /* V1.121 v0.4 — content-voice editorial serif (DESIGN.md §Typography display
+     tier). @font-face + vendored subsets land with the serif build task (P0 T3). */
+  --font-display: 'Source Serif 4', Georgia, 'Times New Roman', ui-serif, serif;
 
   /* Brand — DESIGN.md + @42ch/nexus-ui/theme.css */
   --color-brand-deep-blue: var(--nexus-brand-deep-blue);
   --color-brand-cyan: var(--nexus-brand-cyan);
   --color-brand-white: var(--nexus-brand-white);
 
-  /* Background — DESIGN.md §Colors/Background */
+  /* Background — DESIGN.md §Colors/Background.
+     V1.121 v0.4: background-200/300 carry a whisper of warm-paper cast. */
   --color-background-100: #ffffff;
-  --color-background-200: #fafafa;
-  --color-background-300: #f5f5f5;
+  --color-background-200: #faf8f4;
+  --color-background-300: #f5f2ec;
 
   /* Gray (solid) — DESIGN.md §Colors/Gray */
   --color-gray-100: #f5f5f5;
@@ -93,24 +97,36 @@
   --color-pink-900: #9d174d;
   --color-pink-1000: #831843;
 
-  /* Canvas surface — DESIGN.md §Canvas Surface (V1.70).
+  /* Canvas surface — DESIGN.md §Canvas Surface (V1.70; V1.121 v0.4 chromatic
+     hygiene: every status/marker/edge color resolves to the brand semantic
+     scales — see DESIGN.md §Appendix: Canvas Chromatic Hygiene Mapping).
      Canvas/SOUL brand-blue tokens must reference var(--color-blue-700);
      do not parallel a hardcoded blue scale (W005). */
-  --color-canvas-surface: #ebebeb;
+  --color-canvas-surface: #ebe9e5;
   --color-canvas-grid: rgba(0, 0, 0, 0.05);
+  --color-canvas-grid-gap: 20px;
+  --color-canvas-grid-dot-size: 1.5px;
   --color-canvas-node-fill: #ffffff;
-  --color-canvas-node-fill-hover: #f5f5f5;
+  --color-canvas-node-fill-hover: var(--color-background-300);
   --color-canvas-node-border: rgba(0, 0, 0, 0.14);
   --color-canvas-node-border-selected: var(--color-blue-700);
-  --color-canvas-edge: #a3a3a3;
-  --color-canvas-edge-hover: #4a4a4a;
-  --color-canvas-port: #666666;
-  --color-canvas-minimap: rgba(0, 0, 0, 0.24);
-  --color-canvas-strategy-accent: #7c3aed;
-  --color-canvas-write-dirty: #b76e00;
-  --color-canvas-write-conflict: #e5484d;
-  --color-canvas-write-success: #1f8f4d;
+  --color-canvas-edge: var(--color-gray-500);
+  --color-canvas-edge-hover: var(--color-gray-800);
+  --color-canvas-port: var(--color-gray-700);
+  --color-canvas-minimap: var(--color-gray-alpha-600);
+  --color-canvas-strategy-accent: var(--color-purple-700);
+  --color-canvas-write-dirty: var(--color-amber-700);
+  --color-canvas-write-conflict: var(--color-red-700);
+  --color-canvas-write-success: var(--color-green-700);
   --color-canvas-write-stale-bg: color-mix(in srgb, var(--color-amber-700) 8%, transparent);
+  /* Canvas node width family — DESIGN.md components.canvas.node-width (V1.121
+     v0.4 contract; registered here + preset minWidth, applied to node
+     components in P3; theme-independent). */
+  --color-canvas-node-width-strategy-root: 260px;
+  --color-canvas-node-width-strategy-primary: 140px;
+  --color-canvas-node-width-strategy-secondary: 150px;
+  --color-canvas-node-width-outline-scene-beat: 160px;
+  --color-canvas-node-width-default: 176px;
 
   /* World KB canvas — DESIGN.md §World KB Canvas Tokens (V1.73) */
   --color-canvas-worldkb-entity-card-fill-default: #ffffff;
@@ -118,42 +134,43 @@
   --color-canvas-worldkb-entity-card-fill-selected: #ebf2ff;
   --color-canvas-worldkb-entity-card-stroke-default: rgba(0, 0, 0, 0.14);
   --color-canvas-worldkb-entity-card-stroke-selected: var(--color-blue-700);
-  --color-canvas-worldkb-promotion-pending: #f59e0b;
-  --color-canvas-worldkb-promotion-confirmed: #10b981;
-  --color-canvas-worldkb-promotion-rejected: #ef4444;
-  --color-canvas-worldkb-promotion-merged: #8b5cf6;
-  --color-canvas-worldkb-source-anchor-edge: #a78bfa;
-  --color-canvas-worldkb-source-anchor-node: #ede9fe;
-  --color-canvas-worldkb-computable-badge: #0ea5e9;
-  --color-canvas-worldkb-conflict-marker: #ef4444;
-  --color-canvas-worldkb-conflict-marker-fill: rgba(239, 68, 68, 0.1);
+  --color-canvas-worldkb-promotion-pending: var(--color-amber-700);
+  --color-canvas-worldkb-promotion-confirmed: var(--color-green-700);
+  --color-canvas-worldkb-promotion-rejected: var(--color-red-700);
+  --color-canvas-worldkb-promotion-merged: var(--color-purple-700);
+  --color-canvas-worldkb-source-anchor-edge: var(--color-purple-700);
+  --color-canvas-worldkb-source-anchor-node: color-mix(in srgb, var(--color-purple-700) 10%, transparent);
+  --color-canvas-worldkb-computable-badge: var(--color-teal-700);
+  --color-canvas-worldkb-conflict-marker: var(--color-red-700);
+  --color-canvas-worldkb-conflict-marker-fill: color-mix(in srgb, var(--color-red-700) 10%, transparent);
   --color-canvas-worldkb-nonspatial-row-highlight: #f5f5f4;
   --color-canvas-worldkb-focus-ring: var(--color-blue-700);
-  --color-canvas-worldkb-relationship-edge: #94a3b8;
-  --color-canvas-worldkb-relationship-edge-default: #94a3b8;
-  --color-canvas-worldkb-relationship-edge-symmetric: #8b5cf6;
-  --color-canvas-worldkb-relationship-edge-custom: #db2777;
-  --color-canvas-worldkb-relationship-confidence-low: #e5484d;
-  --color-canvas-worldkb-relationship-confidence-mid: #b76e00;
-  --color-canvas-worldkb-relationship-confidence-high: #1f8f4d;
+  --color-canvas-worldkb-relationship-edge: var(--color-gray-500);
+  --color-canvas-worldkb-relationship-edge-default: var(--color-gray-500);
+  --color-canvas-worldkb-relationship-edge-symmetric: var(--color-purple-700);
+  --color-canvas-worldkb-relationship-edge-custom: var(--color-pink-700);
+  --color-canvas-worldkb-relationship-confidence-low: var(--color-red-700);
+  --color-canvas-worldkb-relationship-confidence-mid: var(--color-amber-700);
+  --color-canvas-worldkb-relationship-confidence-high: var(--color-green-700);
   --color-canvas-worldkb-relationship-grounded-badge: color-mix(in srgb, var(--color-blue-700) 12%, transparent);
   --color-canvas-worldkb-relationship-asserted-badge: rgba(124, 58, 237, 0.12);
   --color-canvas-worldkb-relationship-inspector-fill: #ffffff;
 
-  /* Outline canvas — DESIGN.md §Canvas Outline Tokens (V1.72; consumed V1.108). */
+  /* Outline canvas — DESIGN.md §Canvas Outline Tokens (V1.72; consumed V1.108;
+     V1.121 v0.4 chromatic remap onto brand scales). */
   --color-canvas-outline-volume-fill: #F5F5F4;
-  --color-canvas-outline-chapter-card-status-pending: #94A3B8;
-  --color-canvas-outline-chapter-card-status-drafted: #3B82F6;
-  --color-canvas-outline-chapter-card-status-completed: #10B981;
-  --color-canvas-outline-timeline-event-pin: #F59E0B;
-  --color-canvas-outline-foreshadow-edge: #A78BFA;
-  --color-canvas-outline-timeline-marker: #0EA5E9;
-  --color-canvas-outline-conflict-marker: #EF4444;
+  --color-canvas-outline-chapter-card-status-pending: var(--color-gray-500);
+  --color-canvas-outline-chapter-card-status-drafted: var(--color-blue-700);
+  --color-canvas-outline-chapter-card-status-completed: var(--color-green-700);
+  --color-canvas-outline-timeline-event-pin: var(--color-amber-700);
+  --color-canvas-outline-foreshadow-edge: var(--color-purple-700);
+  --color-canvas-outline-timeline-marker: var(--color-teal-700);
+  --color-canvas-outline-conflict-marker: var(--color-red-700);
   /* Outline Scene/Beat — DESIGN.md §Canvas Outline Tokens (V1.109 C2; FB-C2-001). */
   --color-canvas-outline-scene-fill: #FAFAF9;
   --color-canvas-outline-scene-border: rgba(0, 0, 0, 0.14);
-  --color-canvas-outline-scene-status-drafted: #3B82F6;
-  --color-canvas-outline-scene-status-completed: #10B981;
+  --color-canvas-outline-scene-status-drafted: var(--color-blue-700);
+  --color-canvas-outline-scene-status-completed: var(--color-green-700);
   --color-canvas-outline-beat-fill: #F5F5F4;
   --color-canvas-outline-beat-border: rgba(0, 0, 0, 0.14);
 
@@ -252,10 +269,22 @@
   --color-setup-wizard-surface-cta-primary-max-width: 400px;
   --color-setup-wizard-surface-cta-container-gap: 16px;
 
-  /* Elevation — DESIGN.md §Elevation */
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.04);
-  --shadow-popover: 0 1px 1px rgba(0, 0, 0, 0.03), 0 8px 24px -12px rgba(0, 0, 0, 0.18);
-  --shadow-modal: 0 1px 1px rgba(0, 0, 0, 0.04), 0 24px 48px -24px rgba(0, 0, 0, 0.3);
+  /* Elevation — DESIGN.md §Elevation (V1.121 v0.4). Two-part shadows (ambient
+     tight + key soft), ink-tinted in light. Legacy shadow-card/popover/modal
+     are aliases onto the scale — no consumer breakage. */
+  --shadow-elevation-0: none;
+  --shadow-elevation-1: 0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.03);
+  --shadow-elevation-2: 0 2px 4px rgba(15, 23, 42, 0.06), 0 4px 12px -2px rgba(15, 23, 42, 0.05);
+  --shadow-elevation-3: 0 1px 1px rgba(15, 23, 42, 0.03), 0 8px 24px -12px rgba(15, 23, 42, 0.18);
+  --shadow-elevation-4: 0 1px 1px rgba(15, 23, 42, 0.04), 0 24px 48px -24px rgba(15, 23, 42, 0.30);
+  --shadow-card: var(--shadow-elevation-1);
+  --shadow-popover: var(--shadow-elevation-3);
+  --shadow-modal: var(--shadow-elevation-4);
+
+  /* Motion — DESIGN.md §Motion (V1.121 v0.4 directional enter/exit pair;
+     theme-independent). */
+  --duration-enter: 200ms;
+  --duration-exit: 140ms;
 
   /* Sidebar nav — DESIGN.md §Sidebar Nav (V1.99 P1 projection).
      Same values in light and dark (layout should not shift). */
@@ -267,6 +296,66 @@
   --reading-prose-line-height: 1.75;
   --reading-prose-paragraph-spacing: 1.25em;
 
+  /* Reading chrome — DESIGN.md components.reading-chrome-* (V1.91; V1.121 v0.4
+     T6 projection — P3 migrates the apps/web index.css reading-chrome block to
+     var()-only consumption of these tokens; do not add reading tokens outside
+     this contract). Color values resolve through token refs so the theme flip
+     propagates; only v0.4-amended tints differ in .dark (overrides below). */
+  --reading-chrome-novel-chapter-title-font-family: var(--font-display);
+  --reading-chrome-novel-chapter-title-font-size: 28px;
+  --reading-chrome-novel-chapter-title-font-weight: 600;
+  --reading-chrome-novel-chapter-title-line-height: 1.3;
+  --reading-chrome-novel-chapter-title-letter-spacing: -0.01em;
+  --reading-chrome-novel-chapter-title-color: var(--color-gray-1000);
+  --reading-chrome-novel-scene-separator-color: var(--color-gray-500);
+  --reading-chrome-novel-scene-separator-font-size: 16px;
+  --reading-chrome-novel-scene-separator-text-align: center;
+  --reading-chrome-novel-scene-separator-padding-block: 12px;
+  --reading-chrome-novel-epigraph-font-style: italic;
+  --reading-chrome-novel-epigraph-text-align: right;
+  --reading-chrome-novel-epigraph-color: var(--color-gray-700);
+  --reading-chrome-novel-epigraph-padding-left: 25%;
+  --reading-chrome-essay-section-heading-font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --reading-chrome-essay-section-heading-font-size: 18px;
+  --reading-chrome-essay-section-heading-font-weight: 500;
+  --reading-chrome-essay-section-heading-line-height: 1.4;
+  --reading-chrome-essay-section-heading-letter-spacing: -0.01em;
+  --reading-chrome-essay-section-heading-color: var(--color-gray-1000);
+  --reading-chrome-essay-section-heading-margin-top: 28px;
+  --reading-chrome-essay-blockquote-border-left: 3px solid var(--color-gray-alpha-400);
+  --reading-chrome-essay-blockquote-padding-left: 16px;
+  --reading-chrome-essay-blockquote-font-style: italic;
+  --reading-chrome-essay-blockquote-color: var(--color-gray-900);
+  --reading-chrome-essay-footnote-marker-vertical-align: super;
+  --reading-chrome-essay-footnote-marker-font-size: 0.75em;
+  --reading-chrome-essay-footnote-marker-color: var(--color-teal-700);
+  --reading-chrome-game-bible-term-link-color: var(--color-teal-700);
+  --reading-chrome-game-bible-term-link-text-decoration: underline dotted;
+  --reading-chrome-game-bible-term-link-cursor: pointer;
+  --reading-chrome-game-bible-definition-callout-background-color: color-mix(in srgb, var(--color-teal-700) 6%, transparent);
+  --reading-chrome-game-bible-definition-callout-border-left: 3px solid var(--color-teal-700);
+  --reading-chrome-game-bible-definition-callout-padding: 12px 16px;
+  --reading-chrome-game-bible-definition-callout-label-color: var(--color-teal-900);
+  --reading-chrome-game-bible-definition-callout-label-font-weight: 600;
+  --reading-chrome-game-bible-category-badge-background-color: color-mix(in srgb, var(--color-amber-700) 12%, transparent);
+  --reading-chrome-game-bible-category-badge-color: var(--color-amber-1000);
+  --reading-chrome-script-character-name-text-align: center;
+  --reading-chrome-script-character-name-text-transform: uppercase;
+  --reading-chrome-script-character-name-font-weight: 700;
+  --reading-chrome-script-character-name-font-size: 14px;
+  --reading-chrome-script-character-name-letter-spacing: 0.08em;
+  --reading-chrome-script-character-name-margin-top: 20px;
+  --reading-chrome-script-character-name-color: var(--color-gray-1000);
+  --reading-chrome-script-parenthetical-font-style: italic;
+  --reading-chrome-script-parenthetical-color: var(--color-gray-700);
+  --reading-chrome-script-parenthetical-padding-left: 32px;
+  --reading-chrome-script-scene-heading-font-weight: 700;
+  --reading-chrome-script-scene-heading-text-transform: uppercase;
+  --reading-chrome-script-scene-heading-font-size: 14px;
+  --reading-chrome-script-scene-heading-letter-spacing: 0.05em;
+  --reading-chrome-script-scene-heading-color: var(--color-gray-900);
+  --reading-chrome-script-scene-heading-margin-top: 24px;
+
   /* States — DESIGN.md §States (V1.113 P1 shared disabled opacity). */
   --color-states-disabled-opacity: 0.5;
 
@@ -275,15 +364,17 @@
 }
 
 .dark {
-  /* Background */
-  --color-background-100: #0a0a0a;
-  --color-background-200: #111111;
-  --color-background-300: #1a1a1a;
+  /* Background — DESIGN.dark.md §Colors/Background (V1.121 v0.4 ink
+     atmosphere: deep-blue cast derived from brand-deep-blue-1000 at matched
+     lightness; AA table recomputed — DESIGN.md §Contrast (AA, recomputed)). */
+  --color-background-100: #0a1320;
+  --color-background-200: #0f1a2a;
+  --color-background-300: #152438;
 
-  /* Gray (solid) */
-  --color-gray-100: #1f1f1f;
-  --color-gray-200: #2a2a2a;
-  --color-gray-300: #3a3a3a;
+  /* Gray (solid) — gray-100…300 join the ink cast (V1.121 v0.4). */
+  --color-gray-100: #141f2e;
+  --color-gray-200: #1e2a3d;
+  --color-gray-300: #283749;
   --color-gray-400: #525252;
   --color-gray-500: #737373;
   --color-gray-600: #8a8a8a;
@@ -339,65 +430,67 @@
   --color-pink-900: #ffc4df;
   --color-pink-1000: #ffe3f0;
 
-  /* Canvas surface — DESIGN.dark.md §Canvas Surface (V1.70). */
-  --color-canvas-surface: #141414;
+  /* Canvas surface — DESIGN.dark.md §Canvas Surface (V1.70; V1.121 v0.4: ink
+     surface, not a neutral flip; chromatic remap onto brand scales). */
+  --color-canvas-surface: #101d2e;
   --color-canvas-grid: rgba(255, 255, 255, 0.05);
-  --color-canvas-node-fill: #1a1a1a;
-  --color-canvas-node-fill-hover: #2a2a2a;
+  --color-canvas-node-fill: var(--color-background-300);
+  --color-canvas-node-fill-hover: var(--color-gray-200);
   --color-canvas-node-border: rgba(255, 255, 255, 0.18);
   --color-canvas-node-border-selected: var(--color-blue-700);
-  --color-canvas-edge: #525252;
-  --color-canvas-edge-hover: #c7c7c7;
-  --color-canvas-port: #a3a3a3;
-  --color-canvas-minimap: rgba(255, 255, 255, 0.22);
-  --color-canvas-strategy-accent: #b794ff;
-  --color-canvas-write-dirty: #b76e00;
-  --color-canvas-write-conflict: #e5484d;
-  --color-canvas-write-success: #1f8f4d;
+  --color-canvas-edge: var(--color-gray-400);
+  --color-canvas-edge-hover: var(--color-gray-800);
+  --color-canvas-port: var(--color-gray-700);
+  --color-canvas-minimap: var(--color-gray-alpha-500);
+  --color-canvas-strategy-accent: var(--color-purple-700);
+  --color-canvas-write-dirty: var(--color-amber-700);
+  --color-canvas-write-conflict: var(--color-red-700);
+  --color-canvas-write-success: var(--color-green-700);
   --color-canvas-write-stale-bg: color-mix(in srgb, var(--color-amber-700) 12%, transparent);
 
   /* World KB canvas — DESIGN.dark.md §World KB Canvas Tokens (V1.73) */
-  --color-canvas-worldkb-entity-card-fill-default: #1a1a1a;
-  --color-canvas-worldkb-entity-card-fill-hover: #2a2a2a;
+  --color-canvas-worldkb-entity-card-fill-default: var(--color-background-300);
+  --color-canvas-worldkb-entity-card-fill-hover: var(--color-gray-200);
   --color-canvas-worldkb-entity-card-fill-selected: color-mix(in srgb, var(--color-blue-700) 14%, transparent);
   --color-canvas-worldkb-entity-card-stroke-default: rgba(255, 255, 255, 0.18);
   --color-canvas-worldkb-entity-card-stroke-selected: var(--color-blue-700);
-  --color-canvas-worldkb-promotion-pending: #fbbf24;
-  --color-canvas-worldkb-promotion-confirmed: #34d399;
-  --color-canvas-worldkb-promotion-rejected: #f87171;
-  --color-canvas-worldkb-promotion-merged: #a78bfa;
-  --color-canvas-worldkb-source-anchor-edge: #c4b5fd;
-  --color-canvas-worldkb-source-anchor-node: #2a2440;
-  --color-canvas-worldkb-computable-badge: #38bdf8;
-  --color-canvas-worldkb-conflict-marker: #f87171;
-  --color-canvas-worldkb-conflict-marker-fill: rgba(248, 113, 113, 0.12);
+  --color-canvas-worldkb-promotion-pending: var(--color-amber-700);
+  --color-canvas-worldkb-promotion-confirmed: var(--color-green-700);
+  --color-canvas-worldkb-promotion-rejected: var(--color-red-700);
+  --color-canvas-worldkb-promotion-merged: var(--color-purple-700);
+  --color-canvas-worldkb-source-anchor-edge: var(--color-purple-700);
+  --color-canvas-worldkb-source-anchor-node: color-mix(in srgb, var(--color-purple-700) 14%, transparent);
+  --color-canvas-worldkb-computable-badge: var(--color-teal-700);
+  --color-canvas-worldkb-conflict-marker: var(--color-red-700);
+  --color-canvas-worldkb-conflict-marker-fill: color-mix(in srgb, var(--color-red-700) 12%, transparent);
   --color-canvas-worldkb-nonspatial-row-highlight: #1f1f1e;
   --color-canvas-worldkb-focus-ring: var(--color-blue-700);
-  --color-canvas-worldkb-relationship-edge: #64748b;
-  --color-canvas-worldkb-relationship-edge-default: #64748b;
-  --color-canvas-worldkb-relationship-edge-symmetric: #a78bfa;
-  --color-canvas-worldkb-relationship-edge-custom: #f472b6;
-  --color-canvas-worldkb-relationship-confidence-low: #ff6b6b;
-  --color-canvas-worldkb-relationship-confidence-mid: #ffc043;
-  --color-canvas-worldkb-relationship-confidence-high: #54d58a;
+  --color-canvas-worldkb-relationship-edge: var(--color-gray-500);
+  --color-canvas-worldkb-relationship-edge-default: var(--color-gray-500);
+  --color-canvas-worldkb-relationship-edge-symmetric: var(--color-purple-700);
+  --color-canvas-worldkb-relationship-edge-custom: var(--color-pink-700);
+  --color-canvas-worldkb-relationship-confidence-low: var(--color-red-700);
+  --color-canvas-worldkb-relationship-confidence-mid: var(--color-amber-700);
+  --color-canvas-worldkb-relationship-confidence-high: var(--color-green-700);
   --color-canvas-worldkb-relationship-grounded-badge: color-mix(in srgb, var(--color-blue-700) 14%, transparent);
   --color-canvas-worldkb-relationship-asserted-badge: rgba(183, 148, 255, 0.14);
-  --color-canvas-worldkb-relationship-inspector-fill: #1a1a1a;
+  --color-canvas-worldkb-relationship-inspector-fill: var(--color-background-300);
 
-  /* Outline canvas — DESIGN.dark.md §Canvas Outline Tokens (V1.72; consumed V1.108). */
+  /* Outline canvas — DESIGN.dark.md §Canvas Outline Tokens (V1.72; consumed
+     V1.108; V1.121 v0.4 chromatic remap onto brand scales). */
   --color-canvas-outline-volume-fill: #1F1F1E;
-  --color-canvas-outline-chapter-card-status-pending: #64748B;
-  --color-canvas-outline-chapter-card-status-drafted: #60A5FA;
-  --color-canvas-outline-chapter-card-status-completed: #34D399;
-  --color-canvas-outline-timeline-event-pin: #FBBF24;
-  --color-canvas-outline-foreshadow-edge: #C4B5FD;
-  --color-canvas-outline-timeline-marker: #38BDF8;
-  --color-canvas-outline-conflict-marker: #F87171;
+  --color-canvas-outline-chapter-card-status-pending: var(--color-gray-500);
+  --color-canvas-outline-chapter-card-status-drafted: var(--color-blue-700);
+  --color-canvas-outline-chapter-card-status-completed: var(--color-green-700);
+  --color-canvas-outline-timeline-event-pin: var(--color-amber-700);
+  --color-canvas-outline-foreshadow-edge: var(--color-purple-700);
+  --color-canvas-outline-timeline-marker: var(--color-teal-700);
+  --color-canvas-outline-conflict-marker: var(--color-red-700);
   /* Outline Scene/Beat — DESIGN.dark.md §Canvas Outline Tokens (V1.109 C2; FB-C2-001). */
   --color-canvas-outline-scene-fill: #262625;
   --color-canvas-outline-scene-border: rgba(255, 255, 255, 0.18);
-  --color-canvas-outline-scene-status-drafted: #60A5FA;
-  --color-canvas-outline-scene-status-completed: #34D399;
+  --color-canvas-outline-scene-status-drafted: var(--color-blue-700);
+  --color-canvas-outline-scene-status-completed: var(--color-green-700);
   --color-canvas-outline-beat-fill: #1F1F1E;
   --color-canvas-outline-beat-border: rgba(255, 255, 255, 0.18);
 
@@ -500,10 +593,22 @@
   --color-sidebar-nav-width: 248px;
   --color-sidebar-nav-item-height: 36px;
 
-  /* Elevation — DESIGN.md §Elevation. */
-  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
-  --shadow-popover: 0 1px 1px rgba(0, 0, 0, 0.6), 0 12px 28px -12px rgba(0, 0, 0, 0.7);
-  --shadow-modal: 0 1px 1px rgba(0, 0, 0, 0.7), 0 28px 56px -24px rgba(0, 0, 0, 0.85);
+  /* Elevation — DESIGN.dark.md §Elevation (V1.121 v0.4): pure-black shadows,
+     stronger alphas; same scale + alias chain as light. */
+  --shadow-elevation-0: none;
+  --shadow-elevation-1: 0 1px 2px rgba(0, 0, 0, 0.40), 0 1px 3px rgba(0, 0, 0, 0.30);
+  --shadow-elevation-2: 0 2px 4px rgba(0, 0, 0, 0.50), 0 4px 12px -2px rgba(0, 0, 0, 0.40);
+  --shadow-elevation-3: 0 1px 1px rgba(0, 0, 0, 0.60), 0 12px 28px -12px rgba(0, 0, 0, 0.70);
+  --shadow-elevation-4: 0 1px 1px rgba(0, 0, 0, 0.70), 0 28px 56px -24px rgba(0, 0, 0, 0.85);
+  --shadow-card: var(--shadow-elevation-1);
+  --shadow-popover: var(--shadow-elevation-3);
+  --shadow-modal: var(--shadow-elevation-4);
+
+  /* Reading chrome — dark overrides (V1.121 v0.4; only the two v0.4-amended
+     tints differ from :root — all other reading-chrome vars resolve through
+     shared token refs and need no dark entry). */
+  --reading-chrome-game-bible-definition-callout-background-color: color-mix(in srgb, var(--color-teal-700) 8%, transparent);
+  --reading-chrome-game-bible-category-badge-background-color: color-mix(in srgb, var(--color-amber-700) 14%, transparent);
 
   /* States — DESIGN.md §States (V1.113 P1 shared disabled opacity). */
   --color-states-disabled-opacity: 0.5;

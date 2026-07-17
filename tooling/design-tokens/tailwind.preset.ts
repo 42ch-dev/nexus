@@ -201,8 +201,15 @@ const preset: Partial<Config> = {
       fontFamily: {
         sans: 'var(--font-sans)',
         mono: 'var(--font-mono)',
+        // V1.121 v0.4 — content-voice editorial serif (DESIGN.md typography.font-display).
+        display: 'var(--font-display)',
       },
       fontSize: {
+        // V1.121 v0.4 display tier — content-voice titles (serif metrics;
+        // fontWeight 600 baked per DESIGN.md typography.display-* contract).
+        'display-32': ['32px', { lineHeight: '1.25', letterSpacing: '-0.01em', fontWeight: '600' }],
+        'display-24': ['24px', { lineHeight: '1.3', letterSpacing: '-0.01em', fontWeight: '600' }],
+        'display-20': ['20px', { lineHeight: '1.3', letterSpacing: '0', fontWeight: '600' }],
         'heading-32': ['32px', { lineHeight: '1.18', letterSpacing: '-0.025em' }],
         'heading-24': ['24px', { lineHeight: '1.25', letterSpacing: '-0.02em' }],
         'heading-20': ['20px', { lineHeight: '1.3', letterSpacing: '-0.015em' }],
@@ -231,12 +238,24 @@ const preset: Partial<Config> = {
         card: 'var(--shadow-card)',
         popover: 'var(--shadow-popover)',
         modal: 'var(--shadow-modal)',
+        // V1.121 v0.4 elevation scale (DESIGN.md §Elevation) — additive;
+        // legacy card/popover/modal keys above keep resolving via the alias chain.
+        // Flat keys: Tailwind v3 does not flatten nested boxShadow maps into
+        // dash-separated utilities (compile-verified).
+        'elevation-0': 'var(--shadow-elevation-0)',
+        'elevation-1': 'var(--shadow-elevation-1)',
+        'elevation-2': 'var(--shadow-elevation-2)',
+        'elevation-3': 'var(--shadow-elevation-3)',
+        'elevation-4': 'var(--shadow-elevation-4)',
       },
       transitionDuration: {
         instant: '0ms',
         state: '120ms',
         popover: '160ms',
         modal: '220ms',
+        // V1.121 v0.4 directional pair (DESIGN.md §Motion) — additive.
+        enter: 'var(--duration-enter)',
+        exit: 'var(--duration-exit)',
       },
       transitionTimingFunction: {
         standard: 'cubic-bezier(0.16, 1, 0.3, 1)',
@@ -266,6 +285,15 @@ const preset: Partial<Config> = {
         'setup-wizard-surface-cta-primary-max-width': cv('setup-wizard-surface-cta-primary-max-width'),
         // Dialog — DESIGN.md components.dialog.maxWidth (560px).
         dialog: cv('dialog-max-width'),
+      },
+      // V1.121 v0.4 canvas node width family (DESIGN.md components.canvas.node-width;
+      // registered here, applied to node components in P3 as min-w-canvas-node-*).
+      minWidth: {
+        'canvas-node-strategy-root': cv('canvas-node-width-strategy-root'),
+        'canvas-node-strategy-primary': cv('canvas-node-width-strategy-primary'),
+        'canvas-node-strategy-secondary': cv('canvas-node-width-strategy-secondary'),
+        'canvas-node-outline-scene-beat': cv('canvas-node-width-outline-scene-beat'),
+        'canvas-node-default': cv('canvas-node-width-default'),
       },
       // V1.105 P2: portrait wizard height cap (DESIGN.md setup-wizard-step.wizard-max-height)
       height: {
