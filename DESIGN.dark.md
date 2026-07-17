@@ -548,6 +548,10 @@ components:
     canvas-port: "{colors.gray-700}"
     canvas-minimap: "{colors.gray-alpha-500}"
     canvas-strategy-accent: "{colors.purple-700}"
+    # V1.121 P3 T2: per-surface accent spines (mirrors light; values are
+    # the same brand semantic scales in both themes).
+    canvas-outline-accent: "{colors.amber-700}"
+    canvas-worldkb-accent: "{colors.teal-700}"
     canvas-write-dirty: "{colors.amber-700}"
     canvas-write-conflict: "{colors.red-700}"
     canvas-write-success: "{colors.green-700}"

@@ -247,6 +247,9 @@ const preset: Partial<Config> = {
           port: cv('canvas-port'),
           minimap: cv('canvas-minimap'),
           'strategy-accent': cv('canvas-strategy-accent'),
+          // V1.121 P3 T2: per-surface accent spines (DESIGN.md §Canvas Surface).
+          'outline-accent': cv('canvas-outline-accent'),
+          'worldkb-accent': cv('canvas-worldkb-accent'),
           'write-dirty': cv('canvas-write-dirty'),
           'write-conflict': cv('canvas-write-conflict'),
           'write-success': cv('canvas-write-success'),

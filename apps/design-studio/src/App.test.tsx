@@ -1728,3 +1728,224 @@ describe('Components page — theme toggle coverage (light/dark)', () => {
     expect(screen.getByTestId('dialog-fixtures')).toBeInTheDocument();
   });
 });
+
+/* ---- V1.121 P3 T4 — canvas surfaces v0.4 fixture updates ----------------- */
+
+describe('Surfaces page — Canvas surfaces v0.4 fixtures', () => {
+  beforeEach(() => {
+    mockMatchMedia(false);
+    renderStudio('/surfaces/canvas');
+  });
+
+  it('paints the outline accent spine on outline surface nodes (amber-700)', () => {
+    // Outline samples (Volume / Chapter / Scene / Beat) route the accent
+    // prop through NodeChromeShell — the spine class targets the amber-700
+    // canvas-outline-accent token.
+    const matrix = screen.getByTestId('canvas-node-matrix');
+    const volumeTitle = within(matrix).getByText('Volume II — Journeys');
+    const volumeShell = volumeTitle.closest('[class*="border-l-canvas-outline-accent"]');
+    expect(volumeShell).not.toBeNull();
+  });
+
+  it('paints the strategy accent spine on every strategy surface node', () => {
+    const shell = screen.getByTestId('strategy-shell-chrome');
+    // All four strategy node kinds (state, join, terminal, plus the
+    // selected drafting state) carry the strategy spine class.
+    const spines = shell.querySelectorAll('[class*="border-l-canvas-strategy-accent"]');
+    expect(spines.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('paints the worldkb accent spine on every World KB surface node', () => {
+    const shell = screen.getByTestId('worldkb-shell-chrome');
+    // Entity cards + source-anchor nodes both carry the worldkb spine.
+    const spines = shell.querySelectorAll('[class*="border-l-canvas-worldkb-accent"]');
+    expect(spines.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('uses min-w-canvas-node-outline-scene-beat for scene + beat samples', () => {
+    const matrix = screen.getByTestId('canvas-node-matrix');
+    const sceneShells = matrix.querySelectorAll('.min-w-canvas-node-outline-scene-beat');
+    // Scene + Beat + Scene (no status) + Beat (selected) = 4 chips.
+    expect(sceneShells.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('uses min-w-canvas-node-strategy-secondary for the strategy terminal', () => {
+    const shell = screen.getByTestId('strategy-shell-chrome');
+    const terminal = shell.querySelector('.min-w-canvas-node-strategy-secondary');
+    expect(terminal).not.toBeNull();
+  });
+
+  it('mirrors v0.4 elevation + accent on World KB entity + source-anchor nodes', () => {
+    const shell = screen.getByTestId('worldkb-shell-chrome');
+    // Entity card carries the v0.4 elevation recipe (rest + hover + dragging)
+    // via the transition-shadow + hover:shadow-elevation-2 +
+    // data-[dragging=true]:shadow-elevation-4 class chain.
+    const entityShells = shell.querySelectorAll(
+      '[class*="hover:shadow-elevation-2"][class*="data-[dragging=true]:shadow-elevation-4"]',
+    );
+    expect(entityShells.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('renders the v0.4 elevation state matrix fixture', () => {
+    const matrix = screen.getByTestId('canvas-node-v2-elevation-matrix');
+    expect(matrix).toBeInTheDocument();
+    // Four pinned chips: rest / selected / dragging / selected+dragging.
+    expect(within(matrix).getByText('Rest')).toBeInTheDocument();
+    expect(within(matrix).getByText('Selected')).toBeInTheDocument();
+    expect(within(matrix).getByText('Dragging')).toBeInTheDocument();
+    expect(within(matrix).getByText('Selected + dragging')).toBeInTheDocument();
+  });
+
+  it('renders the per-surface accent spine matrix fixture', () => {
+    const matrix = screen.getByTestId('canvas-node-v2-accents-matrix');
+    expect(matrix).toBeInTheDocument();
+    // Three accent spines side-by-side. The label appears twice per chip
+    // (row header + chip title) — assert on the chip title font-heading span.
+    expect(matrix.querySelectorAll('.font-heading.text-copy-14').length).toBe(3);
+
+    // Each spine class is unique per chip.
+    expect(
+      matrix.querySelectorAll('[class*="border-l-canvas-strategy-accent"]').length,
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      matrix.querySelectorAll('[class*="border-l-canvas-outline-accent"]').length,
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      matrix.querySelectorAll('[class*="border-l-canvas-worldkb-accent"]').length,
+    ).toBeGreaterThanOrEqual(1);
+  });
+
+  it('renders the node-width utility matrix fixture with all five slots', () => {
+    const matrix = screen.getByTestId('canvas-node-v2-widths-matrix');
+    expect(matrix).toBeInTheDocument();
+    // All five min-w-canvas-node-* utility chips are present.
+    for (const slot of [
+      'strategy-root',
+      'strategy-primary',
+      'strategy-secondary',
+      'outline-scene-beat',
+      'default',
+    ]) {
+      expect(
+        within(matrix).getByTestId(`canvas-node-width-${slot}`),
+      ).toBeInTheDocument();
+    }
+    // Each chip uses the named utility class.
+    expect(
+      matrix.querySelector('.min-w-canvas-node-strategy-root'),
+    ).not.toBeNull();
+    expect(
+      matrix.querySelector('.min-w-canvas-node-default'),
+    ).not.toBeNull();
+  });
+});
+
+/* ---- V1.121 P3 T4 — Tokens page canvas section -------------------------- */
+
+describe('Tokens page — Canvas token gallery (V1.121 P3)', () => {
+  beforeEach(() => {
+    mockMatchMediaFull();
+    renderStudio('/tokens');
+  });
+
+  it('renders the Canvas section heading + sub-nav link', () => {
+    expect(screen.getByRole('heading', { name: 'Canvas' })).toBeInTheDocument();
+    const subnav = screen.getByRole('navigation', { name: 'Token sub-sections' });
+    expect(within(subnav).getByRole('link', { name: 'Canvas' })).toHaveAttribute(
+      'href',
+      '#tokens-canvas',
+    );
+  });
+
+  it('renders every canvas token group (ambient / node chrome / edges / accents)', () => {
+    for (const idx of ['0', '1', '2', '3']) {
+      expect(
+        screen.getByTestId(`canvas-token-group-${idx}`),
+      ).toBeInTheDocument();
+    }
+  });
+
+  it('renders ambient group with dot-grid pattern swatch', () => {
+    expect(screen.getByTestId('canvas-ambient-grid-swatch')).toBeInTheDocument();
+  });
+
+  it('renders all three accent spine tokens (strategy / outline / worldkb)', () => {
+    const accentsGroup = screen.getByTestId('canvas-token-group-3');
+    expect(
+      within(accentsGroup).getByText('canvas-strategy-accent'),
+    ).toBeInTheDocument();
+    expect(
+      within(accentsGroup).getByText('canvas-outline-accent'),
+    ).toBeInTheDocument();
+    expect(
+      within(accentsGroup).getByText('canvas-worldkb-accent'),
+    ).toBeInTheDocument();
+  });
+
+  it('renders node chrome tokens including the selected border token', () => {
+    const nodeChromeGroup = screen.getByTestId('canvas-token-group-1');
+    expect(
+      within(nodeChromeGroup).getByText('canvas-node-fill'),
+    ).toBeInTheDocument();
+    expect(
+      within(nodeChromeGroup).getByText('canvas-node-border-selected'),
+    ).toBeInTheDocument();
+  });
+
+  it('renders the node-width utility gallery with all five slots', () => {
+    const widthsGroup = screen.getByTestId('canvas-token-group-widths');
+    expect(widthsGroup).toBeInTheDocument();
+    for (const slot of [
+      'strategy-root',
+      'strategy-primary',
+      'strategy-secondary',
+      'outline-scene-beat',
+      'default',
+    ]) {
+      expect(
+        within(widthsGroup).getByTestId(`canvas-node-width-swatch-${slot}`),
+      ).toBeInTheDocument();
+    }
+  });
+
+  it('each accent spine swatch uses border-l-[3px] shape mirroring NodeChromeShell', () => {
+    const accentsGroup = screen.getByTestId('canvas-token-group-3');
+    const swatches = accentsGroup.querySelectorAll('[style*="border-left: 3px"]');
+    // All three spine swatches use the spine shape.
+    expect(swatches.length).toBe(3);
+  });
+});
+
+/* ---- V1.121 P3 T4 — parity sweep (light/dark DOM assertions) ------------ */
+
+describe('V1.121 P3 T4 — parity sweep across all surfaces', () => {
+  it('renders all three canvas surfaces + canvas token gallery in a single tree', () => {
+    mockMatchMedia(false);
+    renderStudio('/surfaces/canvas');
+
+    // Three surface chrome fixtures render in the same DOM tree.
+    expect(screen.getByTestId('canvas-shell-chrome')).toBeInTheDocument();
+    expect(screen.getByTestId('strategy-shell-chrome')).toBeInTheDocument();
+    expect(screen.getByTestId('worldkb-shell-chrome')).toBeInTheDocument();
+
+    // The shared token surface is the same — no per-surface token duplication.
+    expect(screen.getAllByTestId('canvas-shell-chrome')).toHaveLength(1);
+  });
+
+  it('keeps a single DOM tree across light + dark for canvas surfaces', () => {
+    mockMatchMedia(false);
+    renderStudio('/surfaces/canvas');
+
+    expect(document.documentElement.classList.contains('dark')).toBe(false);
+    expect(screen.getAllByTestId('canvas-shell-chrome')).toHaveLength(1);
+    expect(screen.getAllByTestId('strategy-shell-chrome')).toHaveLength(1);
+    expect(screen.getAllByTestId('worldkb-shell-chrome')).toHaveLength(1);
+
+    // Toggle to dark — same tree, theme swap is class-driven on <html>.
+    act(() => screen.getByLabelText(/Switch to dark theme/).click());
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
+    expect(screen.getAllByTestId('canvas-shell-chrome')).toHaveLength(1);
+    expect(screen.getAllByTestId('strategy-shell-chrome')).toHaveLength(1);
+    expect(screen.getAllByTestId('worldkb-shell-chrome')).toHaveLength(1);
+  });
+});
