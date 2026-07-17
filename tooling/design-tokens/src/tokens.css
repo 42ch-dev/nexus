@@ -128,11 +128,6 @@
 
   /* Dialog sizing — DESIGN.md components.dialog (maxWidth projection). */
   --color-dialog-max-width: 560px;
-  /* Dialog/Sheet sizing — DESIGN.md components.dialog / components.sheet
-     (V1.121 P1 T2; theme-independent layout metrics). */
-  --color-dialog-width: calc(100% - 2rem);
-  --color-dialog-max-height: 85vh;
-  --color-sheet-width: min(100vw, 280px);
 
   /* Error surface — DESIGN.md components.states.error (tinted fill + border
      behind the ErrorState primitive; dark overrides in .dark below). */
@@ -257,6 +252,14 @@
   --canvas-node-width-strategy-secondary: 150px;
   --canvas-node-width-outline-scene-beat: 160px;
   --canvas-node-width-default: 176px;
+  /* Dialog/Sheet sizing — DESIGN.md components.dialog / components.sheet
+     (V1.121 P1 T2; theme-independent layout metrics). Structural (non-color)
+     tokens, so they use the bare `--dialog-*` / `--sheet-*` namespace per the
+     DESIGN.md structural-token convention (`--<category>-<name>`, not
+     `--color-*`). */
+  --dialog-width: calc(100% - 2rem);
+  --dialog-max-height: 85vh;
+  --sheet-width: min(100vw, 280px);
 
   /* World KB canvas — DESIGN.md §World KB Canvas Tokens (V1.73) */
   --color-canvas-worldkb-entity-card-fill-default: #ffffff;

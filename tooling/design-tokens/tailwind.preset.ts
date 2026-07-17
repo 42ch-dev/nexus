@@ -409,13 +409,15 @@ const preset: Partial<Config> = {
         dialog: cv('dialog-max-width'),
       },
       // Dialog/Sheet layout metrics — DESIGN.md components.dialog /
-      // components.sheet (V1.121 P1 T2; theme-independent).
+      // components.sheet (V1.121 P1 T2; theme-independent). Structural
+      // (non-color) tokens — referenced via the bare `--dialog-*` /
+      // `--sheet-*` namespace, not the `--color-*` helper.
       width: {
-        dialog: cv('dialog-width'),
-        sheet: cv('sheet-width'),
+        dialog: sv('dialog-width'),
+        sheet: sv('sheet-width'),
       },
       maxHeight: {
-        dialog: cv('dialog-max-height'),
+        dialog: sv('dialog-max-height'),
       },
       // V1.121 v0.4 canvas node width family (DESIGN.md components.canvas.node-width;
       // registered here, applied to node components in P3 as min-w-canvas-node-*).

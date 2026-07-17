@@ -70,6 +70,14 @@ const required = [
   { label: 'preset: minWidth canvas-node key', haystack: preset, needle: "'canvas-node-strategy-root':" },
   { label: 'preset: minWidth consumes structural var', haystack: preset, needle: "sv('canvas-node-width-strategy-root')" },
 
+  // ── Dialog/Sheet layout metrics (structural namespace, V1.121 P1) ──
+  { label: 'tokens: --dialog-width', haystack: tokens, needle: '--dialog-width:' },
+  { label: 'tokens: --dialog-max-height', haystack: tokens, needle: '--dialog-max-height:' },
+  { label: 'tokens: --sheet-width', haystack: tokens, needle: '--sheet-width:' },
+  { label: 'preset: width dialog consumes structural var', haystack: preset, needle: "dialog: sv('dialog-width')" },
+  { label: 'preset: width sheet consumes structural var', haystack: preset, needle: "sheet: sv('sheet-width')" },
+  { label: 'preset: maxHeight dialog consumes structural var', haystack: preset, needle: "dialog: sv('dialog-max-height')" },
+
   // ── Reading chrome projection (V1.121 v0.4 T6) ──
   { label: 'tokens: reading-chrome title family → display', haystack: tokens, needle: '--reading-chrome-novel-chapter-title-font-family: var(--font-display)' },
 
@@ -91,11 +99,23 @@ const required = [
  *  string stays zero — this script is the mechanical enforcer instead. */
 const BANNED_NODE_WIDTH_NS = '--color-canvas-' + 'node-width';
 const BANNED_NODE_WIDTH_HELPER = "cv('canvas-node-" + 'width';
+const BANNED_DIALOG_WIDTH_NS = '--color-dialog-' + 'width';
+const BANNED_DIALOG_MAX_HEIGHT_NS = '--color-dialog-max-' + 'height';
+const BANNED_SHEET_WIDTH_NS = '--color-sheet-' + 'width';
+const BANNED_DIALOG_WIDTH_HELPER = "cv('dialog-" + "width')";
+const BANNED_DIALOG_MAX_HEIGHT_HELPER = "cv('dialog-max-" + "height')";
+const BANNED_SHEET_WIDTH_HELPER = "cv('sheet-" + "width')";
 
 /** @type {Array<{ label: string, haystack: string, needle: string }>} */
 const forbidden = [
   { label: 'tokens: node widths must not use the color namespace', haystack: tokens, needle: BANNED_NODE_WIDTH_NS },
   { label: 'preset: node widths must not use the color-var helper', haystack: preset, needle: BANNED_NODE_WIDTH_HELPER },
+  { label: 'tokens: dialog width must not use the color namespace', haystack: tokens, needle: BANNED_DIALOG_WIDTH_NS },
+  { label: 'tokens: dialog max-height must not use the color namespace', haystack: tokens, needle: BANNED_DIALOG_MAX_HEIGHT_NS },
+  { label: 'tokens: sheet width must not use the color namespace', haystack: tokens, needle: BANNED_SHEET_WIDTH_NS },
+  { label: 'preset: dialog width must not use the color-var helper', haystack: preset, needle: BANNED_DIALOG_WIDTH_HELPER },
+  { label: 'preset: dialog max-height must not use the color-var helper', haystack: preset, needle: BANNED_DIALOG_MAX_HEIGHT_HELPER },
+  { label: 'preset: sheet width must not use the color-var helper', haystack: preset, needle: BANNED_SHEET_WIDTH_HELPER },
 ];
 
 /** Dark block must exist and carry the ink-atmosphere overrides. */
