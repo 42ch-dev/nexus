@@ -1280,6 +1280,34 @@ describe('Components page — Domain badge matrices', () => {
       ).toBeInTheDocument();
     }
   });
+
+  it('uses finding-status-* / memory-task-kind-* token classes (no color-mix arbitraries)', () => {
+    // Token segment uses dashes (in_review → in-review, wont_fix → wont-fix).
+    const findingCases = [
+      ['open', 'open'],
+      ['triaged', 'triaged'],
+      ['in_review', 'in-review'],
+      ['resolved', 'resolved'],
+      ['wont_fix', 'wont-fix'],
+      ['duplicate', 'duplicate'],
+    ] as const;
+    for (const [value, token] of findingCases) {
+      const badge = screen.getByTestId(`domain-badge-finding-${value}`);
+      expect(badge.className).toContain(`bg-finding-status-${token}-bg`);
+      expect(badge.className).toContain(`text-finding-status-${token}-text`);
+      expect(badge.className).toContain(`border-finding-status-${token}-border`);
+      expect(badge.className).not.toContain('color-mix');
+    }
+
+    const kinds = ['brainstorm', 'outline', 'chapter', 'research', 'unknown'] as const;
+    for (const kind of kinds) {
+      const badge = screen.getByTestId(`domain-badge-task-kind-${kind}`);
+      expect(badge.className).toContain(`bg-memory-task-kind-${kind}-bg`);
+      expect(badge.className).toContain(`text-memory-task-kind-${kind}-text`);
+      expect(badge.className).toContain(`border-memory-task-kind-${kind}-border`);
+      expect(badge.className).not.toContain('color-mix');
+    }
+  });
 });
 
 /* ---- components page — Select fixtures (V1.101 P2 Task 2) --------------- */

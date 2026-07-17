@@ -96,6 +96,14 @@ describe('Card', () => {
     expect(el).not.toHaveClass('text-display-20');
   });
 
+  it('pins the exact default-voice class list when voice is omitted (QC2-W-003)', () => {
+    // Exact-string pin: any regression to the default treatment (e.g. the
+    // content voice leaking into existing call sites) fails here.
+    render(<CardTitle>Title</CardTitle>);
+    const el = screen.getByText('Title');
+    expect(el.className).toBe('text-heading-16 font-heading leading-tight tracking-tight');
+  });
+
   it('renders the sans interface treatment when voice="interface" is explicit', () => {
     render(<CardTitle voice="interface">Interface Explicit</CardTitle>);
     const el = screen.getByText('Interface Explicit');

@@ -64,6 +64,8 @@ const CardTitle = forwardRef<HTMLHeadingElement, CardTitleProps>(
     <h3
       ref={ref}
       className={cn(
+        // Content voice intentionally omits `leading-tight`: the display-20
+        // typography token supplies its own line-height.
         voice === 'content'
           ? 'font-display text-display-20 tracking-tight'
           : 'text-heading-16 font-heading leading-tight tracking-tight',

@@ -197,62 +197,69 @@ function DomainBadgeSection() {
     { value: 'published', variant: 'preset' as const },
   ];
 
+  // Full literal class strings (no template interpolation) so Tailwind's
+  // content scan picks up every token class — mirrors production
+  // `findingStatusClasses` in apps/web/src/components/status-badge.tsx.
   const findingItems = [
     {
       value: 'open',
       classes:
-        'bg-[color-mix(in_srgb,var(--color-amber-700)_12%,transparent)] text-amber-1000 border-[color-mix(in_srgb,var(--color-amber-700)_30%,transparent)]',
+        'bg-finding-status-open-bg text-finding-status-open-text border-finding-status-open-border',
     },
     {
       value: 'triaged',
       classes:
-        'bg-[color-mix(in_srgb,var(--color-teal-700)_10%,transparent)] text-teal-1000 border-[color-mix(in_srgb,var(--color-teal-700)_30%,transparent)]',
+        'bg-finding-status-triaged-bg text-finding-status-triaged-text border-finding-status-triaged-border',
     },
     {
       value: 'in_review',
       classes:
-        'bg-[color-mix(in_srgb,var(--color-blue-700)_10%,transparent)] text-blue-1000 border-[color-mix(in_srgb,var(--color-blue-700)_30%,transparent)]',
+        'bg-finding-status-in-review-bg text-finding-status-in-review-text border-finding-status-in-review-border',
     },
     {
       value: 'resolved',
       classes:
-        'bg-[color-mix(in_srgb,var(--color-green-700)_10%,transparent)] text-green-1000 border-[color-mix(in_srgb,var(--color-green-700)_30%,transparent)]',
+        'bg-finding-status-resolved-bg text-finding-status-resolved-text border-finding-status-resolved-border',
     },
     {
       value: 'wont_fix',
-      classes: 'bg-gray-alpha-100 text-gray-900 border-gray-alpha-300',
+      classes:
+        'bg-finding-status-wont-fix-bg text-finding-status-wont-fix-text border-finding-status-wont-fix-border',
     },
     {
       value: 'duplicate',
       classes:
-        'bg-[color-mix(in_srgb,var(--color-purple-700)_10%,transparent)] text-purple-1000 border-[color-mix(in_srgb,var(--color-purple-700)_30%,transparent)]',
+        'bg-finding-status-duplicate-bg text-finding-status-duplicate-text border-finding-status-duplicate-border',
     },
   ];
 
+  // Mirrors production `taskKindClasses` in
+  // apps/web/src/components/memory/task-kind-badge.tsx.
   const taskKindItems = [
     {
       value: 'brainstorm',
       classes:
-        'bg-[color-mix(in_srgb,var(--color-amber-700)_12%,transparent)] text-amber-1000 border-[color-mix(in_srgb,var(--color-amber-700)_30%,transparent)]',
+        'bg-memory-task-kind-brainstorm-bg text-memory-task-kind-brainstorm-text border-memory-task-kind-brainstorm-border',
     },
     {
       value: 'outline',
       classes:
-        'bg-[color-mix(in_srgb,var(--color-blue-700)_10%,transparent)] text-blue-1000 border-[color-mix(in_srgb,var(--color-blue-700)_30%,transparent)]',
+        'bg-memory-task-kind-outline-bg text-memory-task-kind-outline-text border-memory-task-kind-outline-border',
     },
     {
       value: 'chapter',
       classes:
-        'bg-[color-mix(in_srgb,var(--color-teal-700)_10%,transparent)] text-teal-1000 border-[color-mix(in_srgb,var(--color-teal-700)_30%,transparent)]',
+        'bg-memory-task-kind-chapter-bg text-memory-task-kind-chapter-text border-memory-task-kind-chapter-border',
     },
     {
       value: 'research',
       classes:
-        'bg-[color-mix(in_srgb,var(--color-purple-700)_10%,transparent)] text-purple-1000 border-[color-mix(in_srgb,var(--color-purple-700)_30%,transparent)]',
+        'bg-memory-task-kind-research-bg text-memory-task-kind-research-text border-memory-task-kind-research-border',
     },
     {
       value: 'unknown',
-      classes: 'bg-gray-alpha-100 text-gray-900 border-gray-alpha-300',
+      classes:
+        'bg-memory-task-kind-unknown-bg text-memory-task-kind-unknown-text border-memory-task-kind-unknown-border',
     },
   ];
 
@@ -262,8 +269,12 @@ function DomainBadgeSection() {
       <p className="text-copy-16 text-gray-700 mb-2">
         Domain-specific status pills mapped to the DESIGN.md semantic palette.
         Status and Chapter use the standard Badge variants; Finding and TaskKind
-        use the app-locked color-mix classes so each domain state stays distinct
-        in both light and dark.
+        use the{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">finding-status-*</code>{' '}
+        and{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">memory-task-kind-*</code>{' '}
+        token classes (V1.121 P1) so each domain state stays distinct in both
+        light and dark.
       </p>
 
       <p className="text-label-14 text-gray-900 mb-4">Status</p>
