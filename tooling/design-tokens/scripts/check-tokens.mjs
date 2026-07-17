@@ -72,6 +72,19 @@ const required = [
 
   // ── Reading chrome projection (V1.121 v0.4 T6) ──
   { label: 'tokens: reading-chrome title family → display', haystack: tokens, needle: '--reading-chrome-novel-chapter-title-font-family: var(--font-display)' },
+
+  // ── Badge family tint projection (V1.121 P1 T3) ──
+  { label: 'tokens: finding-status open bg', haystack: tokens, needle: '--color-finding-status-open-bg:' },
+  { label: 'tokens: finding-status wont-fix text', haystack: tokens, needle: '--color-finding-status-wont-fix-text:' },
+  { label: 'tokens: finding-status duplicate border', haystack: tokens, needle: '--color-finding-status-duplicate-border:' },
+  { label: 'tokens: memory-task-kind brainstorm bg', haystack: tokens, needle: '--color-memory-task-kind-brainstorm-bg:' },
+  { label: 'tokens: memory-task-kind unknown border', haystack: tokens, needle: '--color-memory-task-kind-unknown-border:' },
+  { label: 'tokens: reading-maturation kb-density bg', haystack: tokens, needle: '--color-reading-maturation-kb-density-bg:' },
+  { label: 'tokens: reading-maturation open-findings text', haystack: tokens, needle: '--color-reading-maturation-open-findings-text:' },
+  { label: 'preset: finding-status color group', haystack: preset, needle: "'finding-status':" },
+  { label: 'preset: memory-task-kind color group', haystack: preset, needle: "'memory-task-kind':" },
+  { label: 'preset: reading-maturation color group', haystack: preset, needle: "'reading-maturation':" },
+  { label: 'preset: finding-status consumes var', haystack: preset, needle: "cv('finding-status-open-bg')" },
 ];
 
 /** Banned legacy namespace, assembled so a repo-wide grep for the literal
@@ -91,7 +104,7 @@ if (!darkBlock) {
   console.error('FAIL tokens: no .dark block found');
   process.exit(1);
 }
-for (const needle of ['--color-background-100:', '--color-gray-100:', '--shadow-elevation-1:']) {
+for (const needle of ['--color-background-100:', '--color-gray-100:', '--shadow-elevation-1:', '--color-finding-status-open-bg:', '--color-memory-task-kind-brainstorm-bg:', '--color-reading-maturation-kb-density-bg:']) {
   if (!darkBlock.includes(needle)) {
     console.error(`FAIL tokens .dark: missing ${needle}`);
     process.exit(1);

@@ -89,8 +89,8 @@ function CountBadge({ icon, label, count, loading, truncated = false, variant }:
 }
 
 const VARIANT_CLASSES: Record<CountBadgeProps['variant'], string> = {
-  info: 'bg-[color-mix(in_srgb,var(--color-teal-700)_10%,transparent)] text-teal-1000 border-[color-mix(in_srgb,var(--color-teal-700)_30%,transparent)]',
+  info: 'bg-reading-maturation-kb-density-bg text-reading-maturation-kb-density-text border-reading-maturation-kb-density-border',
   attention:
-    'bg-[color-mix(in_srgb,var(--color-amber-700)_12%,transparent)] text-amber-1000 border-[color-mix(in_srgb,var(--color-amber-700)_30%,transparent)]',
+    'bg-reading-maturation-open-findings-bg text-reading-maturation-open-findings-text border-reading-maturation-open-findings-border',
   neutral: 'bg-gray-alpha-100 text-gray-900 border-gray-alpha-300',
 };

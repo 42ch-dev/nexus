@@ -60,6 +60,82 @@ const preset: Partial<Config> = {
         // tokenized ErrorState tint + border, theme-aware via .dark overrides).
         'error-surface': cv('error-surface'),
         'error-surface-border': cv('error-surface-border'),
+        // Finding status pill — DESIGN.md components.finding-status-pill
+        // (V1.121 P1 T3; tinted fill + semantic text + border per status).
+        'finding-status': {
+          open: {
+            bg: cv('finding-status-open-bg'),
+            text: cv('finding-status-open-text'),
+            border: cv('finding-status-open-border'),
+          },
+          triaged: {
+            bg: cv('finding-status-triaged-bg'),
+            text: cv('finding-status-triaged-text'),
+            border: cv('finding-status-triaged-border'),
+          },
+          'in-review': {
+            bg: cv('finding-status-in-review-bg'),
+            text: cv('finding-status-in-review-text'),
+            border: cv('finding-status-in-review-border'),
+          },
+          resolved: {
+            bg: cv('finding-status-resolved-bg'),
+            text: cv('finding-status-resolved-text'),
+            border: cv('finding-status-resolved-border'),
+          },
+          'wont-fix': {
+            bg: cv('finding-status-wont-fix-bg'),
+            text: cv('finding-status-wont-fix-text'),
+            border: cv('finding-status-wont-fix-border'),
+          },
+          duplicate: {
+            bg: cv('finding-status-duplicate-bg'),
+            text: cv('finding-status-duplicate-text'),
+            border: cv('finding-status-duplicate-border'),
+          },
+        },
+        // Memory task-kind chips — DESIGN.md components.memory-task-kind-*.
+        'memory-task-kind': {
+          brainstorm: {
+            bg: cv('memory-task-kind-brainstorm-bg'),
+            text: cv('memory-task-kind-brainstorm-text'),
+            border: cv('memory-task-kind-brainstorm-border'),
+          },
+          outline: {
+            bg: cv('memory-task-kind-outline-bg'),
+            text: cv('memory-task-kind-outline-text'),
+            border: cv('memory-task-kind-outline-border'),
+          },
+          chapter: {
+            bg: cv('memory-task-kind-chapter-bg'),
+            text: cv('memory-task-kind-chapter-text'),
+            border: cv('memory-task-kind-chapter-border'),
+          },
+          research: {
+            bg: cv('memory-task-kind-research-bg'),
+            text: cv('memory-task-kind-research-text'),
+            border: cv('memory-task-kind-research-border'),
+          },
+          unknown: {
+            bg: cv('memory-task-kind-unknown-bg'),
+            text: cv('memory-task-kind-unknown-text'),
+            border: cv('memory-task-kind-unknown-border'),
+          },
+        },
+        // Reading maturation count badges — DESIGN.md
+        // components.reading-maturation-badge.
+        'reading-maturation': {
+          'kb-density': {
+            bg: cv('reading-maturation-kb-density-bg'),
+            text: cv('reading-maturation-kb-density-text'),
+            border: cv('reading-maturation-kb-density-border'),
+          },
+          'open-findings': {
+            bg: cv('reading-maturation-open-findings-bg'),
+            text: cv('reading-maturation-open-findings-text'),
+            border: cv('reading-maturation-open-findings-border'),
+          },
+        },
         // Brand primitives — DESIGN.md + @42ch/nexus-ui/theme.css.
         brand: {
           'deep-blue': cv('brand-deep-blue'),

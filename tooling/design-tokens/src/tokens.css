@@ -175,6 +175,56 @@
   --color-pink-900: #9d174d;
   --color-pink-1000: #831843;
 
+  /* Finding status pill — DESIGN.md components.finding-status-pill (V1.121 P1
+     T3 projection; tinted fill + semantic text + matching border per status;
+     dark overrides raise the tint alpha per DESIGN.dark.md). */
+  --color-finding-status-open-bg: color-mix(in srgb, var(--color-amber-700) 12%, transparent);
+  --color-finding-status-open-text: var(--color-amber-1000);
+  --color-finding-status-open-border: color-mix(in srgb, var(--color-amber-700) 30%, transparent);
+  --color-finding-status-triaged-bg: color-mix(in srgb, var(--color-teal-700) 10%, transparent);
+  --color-finding-status-triaged-text: var(--color-teal-1000);
+  --color-finding-status-triaged-border: color-mix(in srgb, var(--color-teal-700) 30%, transparent);
+  --color-finding-status-in-review-bg: color-mix(in srgb, var(--color-blue-700) 10%, transparent);
+  --color-finding-status-in-review-text: var(--color-blue-1000);
+  --color-finding-status-in-review-border: color-mix(in srgb, var(--color-blue-700) 30%, transparent);
+  --color-finding-status-resolved-bg: color-mix(in srgb, var(--color-green-700) 10%, transparent);
+  --color-finding-status-resolved-text: var(--color-green-1000);
+  --color-finding-status-resolved-border: color-mix(in srgb, var(--color-green-700) 30%, transparent);
+  --color-finding-status-wont-fix-bg: var(--color-gray-alpha-100);
+  --color-finding-status-wont-fix-text: var(--color-gray-900);
+  --color-finding-status-wont-fix-border: var(--color-gray-alpha-300);
+  --color-finding-status-duplicate-bg: color-mix(in srgb, var(--color-purple-700) 10%, transparent);
+  --color-finding-status-duplicate-text: var(--color-purple-1000);
+  --color-finding-status-duplicate-border: color-mix(in srgb, var(--color-purple-700) 30%, transparent);
+
+  /* Memory task-kind chips — DESIGN.md components.memory-task-kind-* (V1.121
+     P1 T3 projection; same tint pattern as finding-status-pill). */
+  --color-memory-task-kind-brainstorm-bg: color-mix(in srgb, var(--color-amber-700) 12%, transparent);
+  --color-memory-task-kind-brainstorm-text: var(--color-amber-1000);
+  --color-memory-task-kind-brainstorm-border: color-mix(in srgb, var(--color-amber-700) 30%, transparent);
+  --color-memory-task-kind-outline-bg: color-mix(in srgb, var(--color-blue-700) 10%, transparent);
+  --color-memory-task-kind-outline-text: var(--color-blue-1000);
+  --color-memory-task-kind-outline-border: color-mix(in srgb, var(--color-blue-700) 30%, transparent);
+  --color-memory-task-kind-chapter-bg: color-mix(in srgb, var(--color-teal-700) 10%, transparent);
+  --color-memory-task-kind-chapter-text: var(--color-teal-1000);
+  --color-memory-task-kind-chapter-border: color-mix(in srgb, var(--color-teal-700) 30%, transparent);
+  --color-memory-task-kind-research-bg: color-mix(in srgb, var(--color-purple-700) 10%, transparent);
+  --color-memory-task-kind-research-text: var(--color-purple-1000);
+  --color-memory-task-kind-research-border: color-mix(in srgb, var(--color-purple-700) 30%, transparent);
+  --color-memory-task-kind-unknown-bg: var(--color-gray-alpha-100);
+  --color-memory-task-kind-unknown-text: var(--color-gray-900);
+  --color-memory-task-kind-unknown-border: var(--color-gray-alpha-300);
+
+  /* Reading maturation count badges — DESIGN.md
+     components.reading-maturation-badge (world-kb-density-count → kb-density,
+     open-findings-count → open-findings; V1.121 P1 T3 projection). */
+  --color-reading-maturation-kb-density-bg: color-mix(in srgb, var(--color-teal-700) 10%, transparent);
+  --color-reading-maturation-kb-density-text: var(--color-teal-1000);
+  --color-reading-maturation-kb-density-border: color-mix(in srgb, var(--color-teal-700) 30%, transparent);
+  --color-reading-maturation-open-findings-bg: color-mix(in srgb, var(--color-amber-700) 12%, transparent);
+  --color-reading-maturation-open-findings-text: var(--color-amber-1000);
+  --color-reading-maturation-open-findings-border: color-mix(in srgb, var(--color-amber-700) 30%, transparent);
+
   /* Canvas surface — DESIGN.md §Canvas Surface (V1.70; V1.121 v0.4 chromatic
      hygiene: every status/marker/edge color resolves to the brand semantic
      scales — see DESIGN.md §Appendix: Canvas Chromatic Hygiene Mapping).
@@ -521,6 +571,25 @@
   --color-pink-800: #ffa6d0;
   --color-pink-900: #ffc4df;
   --color-pink-1000: #ffe3f0;
+
+  /* Finding status pill — DESIGN.dark.md components.finding-status-pill
+     (dark tint alphas raised per the dark contract; borders stay 30%). */
+  --color-finding-status-open-bg: color-mix(in srgb, var(--color-amber-700) 16%, transparent);
+  --color-finding-status-triaged-bg: color-mix(in srgb, var(--color-teal-700) 14%, transparent);
+  --color-finding-status-in-review-bg: color-mix(in srgb, var(--color-blue-700) 14%, transparent);
+  --color-finding-status-resolved-bg: color-mix(in srgb, var(--color-green-700) 14%, transparent);
+  --color-finding-status-duplicate-bg: color-mix(in srgb, var(--color-purple-700) 14%, transparent);
+
+  /* Memory task-kind chips — DESIGN.dark.md components.memory-task-kind-*. */
+  --color-memory-task-kind-brainstorm-bg: color-mix(in srgb, var(--color-amber-700) 16%, transparent);
+  --color-memory-task-kind-outline-bg: color-mix(in srgb, var(--color-blue-700) 14%, transparent);
+  --color-memory-task-kind-chapter-bg: color-mix(in srgb, var(--color-teal-700) 14%, transparent);
+  --color-memory-task-kind-research-bg: color-mix(in srgb, var(--color-purple-700) 14%, transparent);
+
+  /* Reading maturation count badges — DESIGN.dark.md
+     components.reading-maturation-badge. */
+  --color-reading-maturation-kb-density-bg: color-mix(in srgb, var(--color-teal-700) 14%, transparent);
+  --color-reading-maturation-open-findings-bg: color-mix(in srgb, var(--color-amber-700) 16%, transparent);
 
   /* Canvas surface — DESIGN.dark.md §Canvas Surface (V1.70; V1.121 v0.4: ink
      surface, not a neutral flip; chromatic remap onto brand scales). */
