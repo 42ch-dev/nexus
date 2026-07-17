@@ -3,37 +3,6 @@
   "updated_at": "2026-07-17",
   "plans": [
     {
-      "id": "2026-07-17-v1.121-design-language-foundation",
-      "title": "P0 - Design language foundation (DESIGN.md v0.4 + token pipeline)",
-      "file": "plans/2026-07-17-v1.121-design-language-foundation.md",
-      "status": "Todo",
-      "owner": "@project-manager",
-      "agents": [
-        "@frontend-dev",
-        "@architect"
-      ],
-      "progress": 0,
-      "tags": [
-        "design-system",
-        "tokens",
-        "design-studio"
-      ],
-      "created_at": "2026-07-17",
-      "updated_at": "2026-07-17",
-      "notes": "V1.121 The Literary Engine design-system elevation.",
-      "metadata": {
-        "working_branch": "plan/v1.121-p0-design-language-foundation",
-        "spec_integration_branch": "iteration/v1.121",
-        "merge_target": "iteration/v1.121",
-        "iteration_refs": "V1.121",
-        "iteration_compass": ".mstar/iterations/v1.121/delivery-compass.md",
-        "primary_spec": ".mstar/iterations/v1.121/specs/design-language-foundation.md",
-        "wire_contracts_changed": false,
-        "tier": "Must",
-        "execution_mode": "sdd"
-      }
-    },
-    {
       "id": "2026-07-17-v1.121-component-library-elevation",
       "title": "P1 - Component library elevation (nexus-ui + keep-web ui)",
       "file": "plans/2026-07-17-v1.121-component-library-elevation.md",
