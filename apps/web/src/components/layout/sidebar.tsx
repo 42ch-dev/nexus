@@ -3,7 +3,6 @@ import { useTranslation } from 'react-i18next';
 import { NavLink, useLocation } from 'react-router-dom';
 import {
   BookOpen,
-  Boxes,
   BrainCircuit,
   CalendarClock,
   Cpu,
@@ -82,7 +81,6 @@ export function Sidebar() {
         items: [
           { to: '/sessions', label: t('nav.sessions'), icon: ListChecks },
           { to: '/schedule', label: t('nav.schedule'), icon: CalendarClock },
-          { to: '/capabilities', label: t('nav.capabilities'), icon: Boxes },
         ],
       },
       {

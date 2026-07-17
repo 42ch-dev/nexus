@@ -6,7 +6,6 @@ import { SetupCompletedProvider } from '@/lib/setup-completed-context';
 import { RootLayout } from '@/components/layout/root-layout';
 import { DaemonLaunchGate } from '@/components/setup/daemon-launch-gate';
 import { SetupGate } from '@/components/setup/setup-gate';
-import { CapabilitiesPage } from '@/pages/capabilities-page';
 import { ChapterPage } from '@/pages/chapter-page';
 import { ChaptersPage } from '@/pages/chapters-page';
 import { FindingsPage } from '@/pages/findings-page';
@@ -98,7 +97,7 @@ function AppRoutes() {
         />
         <Route path="sessions" element={<SessionsPage />} />
         <Route path="schedule" element={<SchedulePage />} />
-        <Route path="capabilities" element={<CapabilitiesPage />} />
+        <Route path="capabilities" element={<Navigate to="/sessions" replace />} />
         <Route path="modules" element={<ModulesPage />} />
         <Route path="findings" element={<FindingsPage />} />
         <Route path="memory" element={<MemoryPage />} />
