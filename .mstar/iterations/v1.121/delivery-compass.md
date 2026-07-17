@@ -1,9 +1,10 @@
 ---
 iteration_id: V1.121
 start_date: 2026-07-17
-status: locked
+status: completed
 iteration_base_branch: main
 target_branch: main
+end_date: 2026-07-18
 spec_integration_branch: iteration/v1.121
 plans:
   - 2026-07-17-v1.121-design-language-foundation
@@ -131,9 +132,9 @@ Each AC is binary and evidence-backed (grep, contrast table, vitest/build log, a
 
 ## Roadmap Position
 
-- **Current iteration（V1.121）**：Design language v0.4 “Literary Engine” — foundation → component library → app surfaces → canvas/reading, verified in design-studio. Delivers the premium, literary-computational identity the product surfaces currently lack — without shipping new features.
-- **Next iteration**：V1.122 — post-elevation polish + any V1.121 residuals (including deferred self-hosted serif if P0 chose system-stack fallback); candidates: CJK serif companion for the display tier (zh-CN content-voice titles currently fall back to system serif for CJK glyphs — evaluate Noto Serif SC subset or accept the documented fallback; see P0 plan `## Roadmap`), keep-web → package promotion decisions informed by v0.4 usage, canvas performance follow-ups, residual arbitrary-value exceptions. 触发条件：V1.121 shipped + dogfood feedback, owner：product-manager。
-- **最终目标**：Every Nexus surface expresses one coherent literary-computational design language, authored in DESIGN.md, projected through tokens, verified in design-studio — no surface-local visual invention (V1.106 studio-first invariant).
+- **Current iteration（V1.121）**：**delivered** — Design language v0.4 “Literary Engine” shipped: foundation (DESIGN v0.4 + Source Serif 4 self-hosted + token pipeline + studio token galleries) → component library elevation (Card interactive + CardTitle voice + scrim + badge tokenization + twMerge hardening + studio states matrix) → app surfaces (shell chrome + setup wizard first impression + Control Room voice-split + arbitrary-value sweep) → canvas/reading (ambient + node chrome v2 + per-surface accents + chromatic hygiene + reading chrome tokenization + display serif + studio canvas galleries + parity sweep). 4/4 plans Done; QC Approve/Approve-with-residuals; QA Pass/Pass-with-residuals all plans; AC-V1121-1…7 verified. `wire_contracts_changed: false` (pure frontend).
+- **Next iteration**：V1.122 — post-elevation polish + V1.121 residuals (15 open residuals across P0–P3, all low/nit deferred). Candidates: CJK serif companion for display tier (zh-CN content-voice titles currently fall back to system serif for CJK glyphs — evaluate Noto Serif SC subset or accept documented fallback; see P0 plan `## Roadmap` + `self-hosted-ofl-font-wiring.md` knowledge doc); canvas inspector Tailwind-palette cleanup (`R-V1121P3QC1-W002`, 7 files); nexus-ui badge.tsx raw color-mix migration (`R-V1121P1QC1-S001`); light-theme small-text badge tint AA tuning (`R-V1121P3T4-O001`, separate contrast-tuning plan); `--color-sidebar-nav-width` + `--color-dialog-max-width` structural-namespace cleanup; toast enter/exit animation; keep-web → package promotion decisions informed by v0.4 usage. 触发条件：V1.121 shipped + dogfood feedback, owner：product-manager。
+- **最终目标**：Every Nexus surface expresses one coherent literary-computational design language, authored in DESIGN.md, projected through tokens, verified in design-studio — no surface-local visual invention (V1.106 studio-first invariant). V1.121 established the contract + applied it end-to-end; subsequent iterations refine residuals + extend the language to new surfaces.
 
 ## Delivery Branch Policy
 
@@ -177,25 +178,37 @@ Branch resolve evidence (autonomous): `status.json` root metadata (`iteration_ba
 
 | plan_id | QC decision | QA gate | Residuals | Durable summary |
 |---------|-------------|---------|-----------|-----------------|
-| (pending) | | | | |
+| P0 design-language-foundation | Approve with residuals | Pass with residuals | R-V1121P0QC1-F007 (low) | `plans/2026-07-17-v1.121-design-language-foundation.md#review-gate-summary` |
+| P1 component-library-elevation | Approve with residuals | Pass with residuals | R-V1121P1QC1-S001 (low), R-V1121P1T3-S001 (low), R-V1121P1T1-S001 (nit) | `plans/2026-07-17-v1.121-component-library-elevation.md#review-gate-summary` |
+| P2 app-surfaces-elevation | Approve (tri clean, no fix wave) | Pass with residuals | R-V1121P2QC1-S001 (nit), R-V1121P2QC1-S004 (nit), R-V1121P2QC3-S001 (low), R-V1121P2T1-M001 (nit), R-V1121P2T3-M001 (low) | `plans/2026-07-17-v1.121-app-surfaces-elevation.md#review-gate-summary` |
+| P3 canvas-reading-elevation | Approve with residuals | Pass with residuals | R-V1121P3QC1-W002 (low), R-V1121P3QC3-S001 (nit), R-V1121P3QC1-S001 (nit), R-V1121P3QC1-S002 (nit), R-V1121P3QC1-S004 (nit), R-V1121P3T4-O001 (low) | `plans/2026-07-17-v1.121-canvas-reading-elevation.md#review-gate-summary` |
 
 Notes:
 
+- 15 open residuals total (2 low + 2 low + 2 low+3 nit + 2 low+4 nit across P0–P3); all `defer` to post-V1.121; zero Critical, zero blocking Warning at any plan Done.
 - Raw review bundle: `{SDD_DIR}/review/` (ephemeral; do not rely on it after Done).
 - Open residual SSOT: `{HARNESS_DIR}/status.json` root `residual_findings[<plan-id>]`.
 
 ## Compound Round Summary
 
-> Filled at iteration-close.
-
-- 结晶文档数：(pending)
-- 新增 CONCEPTS.md 条目：(pending)
-- 触发 compound-refresh：(pending)
+- **结晶文档数**：3（1 update + 2 new）
+  - **UPDATE** `knowledge/architecture-patterns/nexus-brand-token-hierarchy.md` — V1.121 v0.4 pipeline refinements (display tier, ink atmosphere, elevation scale + alias chain, structural vs color namespace, twMerge registry hardening, real design-tokens build gate, canvas chromatic hygiene, reading-chrome tokenization)
+  - **NEW** `knowledge/architecture-patterns/editorial-typography-voice-split.md` — content voice vs interface voice discipline (serif for creative entities, sans for chrome)
+  - **NEW** `knowledge/architecture-patterns/self-hosted-ofl-font-wiring.md` — self-hosted OFL font pattern (provenance + per-app vendor + @font-face + preload + bundle gate)
+- **新增 CONCEPTS.md 条目**：0（no new domain terms; "Literary Engine" / "content voice" / "interface voice" are design-language vocabulary captured in the knowledge docs + DESIGN.md body, not project-domain concepts）
+- **Iteration package promotion 盘点**：4 specs under `iterations/v1.121/specs/` — all **Keep snapshot**（iteration-scoped contracts; durable form is DESIGN.md v0.4 itself + shipped code + the 3 knowledge docs; superseded by shipped artifacts）。`delivery-compass.md` excluded by default.
+- **`{KNOWLEDGE_DIR}/README.md` 登记**：✅ 3 docs registered (nexus-brand-token-hierarchy row updated; 2 new rows added).
+- **触发 compound-refresh**：否（本轮无知识文档被 V1.121 内容证伪或重叠需要合并；CJK serif companion 等后续工作属 V1.122）。
 
 ## Iteration Retrospective (minimal)
 
-> Filled at iteration-close.
-
-- 做得好的：
-- 可改进的：
-- 下迭代建议：
+- **做得好的**：
+  - Autonomous direction lock（用户 direction 约束 + 4 候选评估 + rationale 落盘）一气呵成；scale L 准确预算 4 业务 plan，harness 流程未占坑。
+  - 串行 per-plan SDD（T1→T4 → QC tri → fix wave → QA → 合并）节奏稳定；每 plan QA 都做了 live UI observable 验证（dev server + getComputedStyle + 双主题）。
+  - P2 是最干净的一 plan（QC tri 全 Approve，零 fix wave）——归功于 P0/P1 把 token 契约和组件升级打实。
+  - 知识结晶抓住了 token 管线、voice-split、字体自托管三个可复用模式。
+- **可改进的**：
+  - 两次 fix-wave session 出现空返回（subagent 静默失败），需要切分小任务或换 subagent_type 重派——harness 可加一条"subagent 空返回→自动 split"指引。
+  - P1 qc2 一次基于 grep 假阳性返回 Request Changes；PM 用独立 grep 证据驳回并要求 re-review，qc2 撤回——提示 QC 需要更严格的自验证。
+  - 累计 15 个 deferred residual（多数 nit）——V1.122 需要一次集中清理，避免技术债长期堆积。
+- **下迭代建议**：V1.122 作为 post-elevation 收敛迭代——清理 residual + CJK serif companion + dogfood 反馈驱动的小调整；不要再开大设计变更。

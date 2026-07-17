@@ -4,15 +4,15 @@ date: 2026-07-06
 problem_type: architecture-pattern
 category: architecture-patterns
 severity: medium
-plan_id: V1.83-P-last (compound of brand UI foundation iteration); V1.94-P-last (contrast rule correction); V1.98-P0 (DESIGN SSOT unification + shared token pipeline + design-studio)
-tags: [brand, design-tokens, nexus-ui, design-md, git-lfs, svg, npm-package, button-contrast, dark-theme, design-studio, tailwind-preset, ssot-unification]
-applies_when: adding or consuming cross-application Nexus brand/design tokens (new product surface, platform package, Web shell refresh, or a new app consuming the design system); also when defining any button background/text colour combination
-last_updated: 2026-07-08 (V1.98 unification: root DESIGN pair is now the SOLE full token SSOT; apps/web/DESIGN*.md retired; shared @nexus/design-tokens pipeline extracted; apps/design-studio added as read-only gallery consumer)
+plan_id: V1.83-P-last (compound of brand UI foundation iteration); V1.94-P-last (contrast rule correction); V1.98-P0 (DESIGN SSOT unification + shared token pipeline + design-studio); V1.121-P0 (v0.4 Literary Engine: display typography, ink atmosphere, elevation scale, motion recipes, canvas chromatic hygiene, structural namespace)
+tags: [brand, design-tokens, nexus-ui, design-md, git-lfs, svg, npm-package, button-contrast, dark-theme, design-studio, tailwind-preset, ssot-unification, literary-engine, ink-atmosphere, display-typography, motion-recipes, structural-namespace]
+applies_when: adding or consuming cross-application Nexus brand/design tokens (new product surface, platform package, Web shell refresh, or a new app consuming the design system); also when defining any button background/text colour combination, adding a display typography tier, tuning surface atmosphere, extending elevation/motion, or registering a structural (non-color) CSS variable family
+last_updated: 2026-07-18 (V1.121 v0.4 Literary Engine: display typography tier, ink atmosphere, elevation scale, motion recipes, canvas chromatic hygiene, structural vs color namespace distinction, real build gate, twMerge registry hardening, self-hosted font)
 ---
 
 # Nexus Brand & Design Token Hierarchy
 
-**Track**: Knowledge (durable guidance distilled from V1.83 Brand UI Foundation; corrected V1.94; unified V1.98).
+**Track**: Knowledge (durable guidance distilled from V1.83 Brand UI Foundation; corrected V1.94; unified V1.98; V1.121 v0.4 Literary Engine elevation).
 
 ## Context
 
@@ -91,3 +91,70 @@ Apps that consume `@42ch/nexus-ui` should run `pnpm --filter @42ch/nexus-ui run 
 - Brand package: `packages/nexus-ui` — `@42ch/nexus-ui` exports `theme.css`, `tokens`, logo SVGs, `<NexusLogo>`/`<NexusMark>` (V1.87).
 - Web implementation: `apps/web` consumes `@nexus/design-tokens` + `@42ch/nexus-ui`; `NexusLogo` thin wrapper imports `@42ch/nexus-ui/assets/logos/logo-color.svg` and passes the resolved URL to the package's `<NexusLogo variant src>`.
 - Gallery consumer: `apps/design-studio` — read-only Vite SPA visualizing every token scale + brand VI + all `apps/web` ui primitives (via `@web-ui/*` transitional alias) + Voice/Surface fixtures; runs without the daemon; not embedded in `nexus42`.
+
+---
+
+## V1.121 v0.4 "Literary Engine" Additions
+
+V1.121 elevated the design system from Level 3 (mechanically complete) to an expressive literary-computational identity. The following additions refine the token hierarchy established in V1.83/V1.98:
+
+### Display typography tier (content voice)
+
+- `typography.font-display` — self-hosted Source Serif 4 + `Georgia, 'Times New Roman', ui-serif, serif` fallback. Content voice only: creative-entity titles, brand moments, empty-state headlines on authoring surfaces. Never on chrome (nav, buttons, tables, badges, labels).
+- `typography.display-32` / `display-24` / `display-20` — semibold serif metric tuples, consumed via `text-display-*` utilities.
+- **Voice split discipline**: `Card.Title` gains additive `voice?: 'interface' | 'content'` prop (default `interface`). The voice-split rule is greppable, test-pinned, and documented in DESIGN.md body. See [editorial-typography-voice-split.md](editorial-typography-voice-split.md).
+- **Self-hosted OFL font wiring**: canonical provenance in `packages/nexus-ui/assets/fonts/` (LFS), app-vendored subsets in `public/fonts/`, `@font-face` in `tokens.css`, preload in each `index.html`, bundle gate ≤ 80 KB gz/weight. See [self-hosted-ofl-font-wiring.md](self-hosted-ofl-font-wiring.md).
+
+### Ink atmosphere (dark surfaces)
+
+- Dark backgrounds shifted from pure neutral (`#0a0a0a`/`#111`/`#1a1a`) to ink-blue-derived values (`#0A1320`/`#0F1A2A`/`#152438`), with gray tints similarly shifted (`#141F2E`/`#1E2A3D`/`#283749`). Lightness matched to pre-v0.4 values; AA contrast table recomputed.
+- Light surfaces: `background-200`/`300` gained a whisper of warm-paper cast (`#FAF8F4`/`#F5F2EC`).
+- **AA-gated value selection**: any candidate value that drops a currently-passing pairing below AA blocks that candidate (not the table). The full contrast table is recorded in DESIGN.md body.
+
+### Elevation scale (two-part shadows)
+
+- `elevation-0`…`elevation-4` replaces the previous 3-flat-shadow system. Each level is a two-part shadow (ambient tight + key soft).
+- Legacy alias chain: `shadow-card` → `elevation-1`, `shadow-popover` → `elevation-3`, `shadow-modal` → `elevation-4`. Zero consumer breakage.
+- Light theme shadows tinted toward ink blue (`rgba(15, 23, 42, …)`); dark theme uses pure black with stronger alphas.
+- `tailwind.preset.ts` keeps existing `boxShadow.{card, popover, modal}` and adds `boxShadow.elevation.{0..4}`.
+
+### Motion recipes
+
+- `duration-enter` (200ms) / `duration-exit` (140ms) added alongside existing `duration-state` (120ms), `duration-popover` (160ms), `duration-modal` (220ms).
+- `ease-standard` / `ease-emphasized` — standard `cubic-bezier(0.16, 1, 0.3, 1)` and emphasized `cubic-bezier(0.2, 0.8, 0.2, 1)`.
+- `prefers-reduced-motion` honored per recipe — unchanged.
+
+### Structural vs color namespace distinction
+
+Layout metrics (canvas node widths, dialog/sheet sizing) live in **structural** CSS vars (`--canvas-node-width-*`, `--dialog-width`, `--sheet-width`, `--dialog-max-height`), **not** `--color-*`. The `sv()` helper (structural var) in `tailwind.preset.ts` resolves them under `minWidth`, `width`, `maxWidth`, `maxHeight` keys — not `colors`. The `check-tokens.mjs` build gate asserts 8 namespace guards forbidding the `--color-` prefix on these tokens.
+
+**V1.94 flakiness**: in V1.94, structural tokens were briefly registered under `--color-*` (the only CSS var namespace the preset had at the time). V1.121 corrected this: `--canvas-node-width-*` are structural, `--dialog-width`/`--sheet-width`/`--dialog-max-height` are structural. The namespace guard prevents regression.
+
+### twMerge registry hardening
+
+Every new token class group added in V1.121 is registered in `packages/nexus-ui/src/lib/cn.ts`:
+
+| Group | New entries |
+|-------|-------------|
+| `font-size` | `text-display-32`, `text-display-24`, `text-display-20` |
+| `font-family` | `font-display` |
+| `shadow` | `shadow-elevation-0`…`4` (plus legacy `shadow-card`/`popover`/`modal` aliases) |
+| `duration` | `duration-enter`, `duration-exit`, `duration-state`, `duration-popover` |
+| `min-w` | `min-w-canvas-node-*` (5 entries) |
+| `w` | `w-dialog`, `w-sheet` |
+| `max-w` | `max-w-dialog` |
+| `max-h` | `max-h-dialog` |
+
+**Threat model**: the V1.94 silent-strip class of bug — an unregistered display-size class was misparsed as a text-color class and dropped by `twMerge`. The regression test in `packages/nexus-ui/src/lib/cn.test.ts` asserts representative classes from each new group survive `twMerge()` against conflicting defaults.
+
+### Real design-tokens build gate
+
+`tooling/design-tokens/scripts/check-tokens.mjs` validates 58 projections (font-display vars, display-32/24/20 metric tuples, spacing/radius steps, motion tokens, elevation scale + alias chain, canvas node width family, dialog/sheet layout metrics, reading-chrome projection, badge family tints) + 8 namespace guards (structural tokens must not use `--color-*`). The `package.json` `build` script runs `tsc --noEmit && node scripts/check-tokens.mjs` — no longer a no-op.
+
+### Canvas chromatic hygiene
+
+Every Tailwind-palette leftover hex in `components.canvas.*` was remapped hue-preserving onto the brand semantic scales (e.g. `#3B82F6` → `blue-700` family, `#10B981` → `green-700` family, `#F59E0B` → `amber-700` family, `#A78BFA`/`#8B5CF6` → `purple-700` family, `#0EA5E9` → `teal-700` family, `#EF4444` → `red-700` family, `#94A3B8` → `gray-500/600`, `#EDE9FE` → purple alpha wash). Per-surface accent spines tokenized: strategy = `purple-700`, outline = `amber-700`, worldkb = `teal-700`. The mapping table is recorded in DESIGN.md `§Appendix: Canvas Chromatic Hygiene Mapping`.
+
+### Reading-chrome tokenization
+
+All 40+ hardcoded values in the reading-chrome CSS block were named as component tokens in DESIGN.md frontmatter (`reading-chrome-novel-*`, `reading-chrome-essay-*`, `reading-chrome-screenplay-*`). The novel-profile chapter title absorbs the hardcoded `Georgia` into `font-display`. P0 authored the token contract; P3 migrated the CSS block to `var(--…)`-only consumption.
