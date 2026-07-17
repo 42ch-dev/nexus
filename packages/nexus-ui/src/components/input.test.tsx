@@ -118,6 +118,7 @@ describe('Input', () => {
     const input = screen.getByTestId('test-input');
     expect(input).toHaveClass('disabled:bg-gray-100');
     expect(input).toHaveClass('disabled:text-gray-700');
+    expect(input).toHaveClass('disabled:border-gray-alpha-300');
     expect(input).toHaveClass('disabled:cursor-not-allowed');
   });
 });

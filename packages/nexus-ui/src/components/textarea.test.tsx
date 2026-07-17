@@ -118,6 +118,7 @@ describe('Textarea', () => {
     const textarea = screen.getByTestId('test-textarea');
     expect(textarea).toHaveClass('disabled:bg-gray-100');
     expect(textarea).toHaveClass('disabled:text-gray-700');
+    expect(textarea).toHaveClass('disabled:border-gray-alpha-300');
     expect(textarea).toHaveClass('disabled:cursor-not-allowed');
   });
 });
