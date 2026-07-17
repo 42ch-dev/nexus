@@ -2065,6 +2065,20 @@
         "tracking_link": ".mstar/plans/2026-07-17-v1.120-orchestration-ia-icon.md",
         "note": "QC3 S-001. Dogfood repeatability nicety."
       }
+    ],
+    "2026-07-17-v1.121-design-language-foundation": [
+      {
+        "id": "R-V1121P0QC1-F007",
+        "title": "Light/dark DESIGN frontmatter token-set mismatch (pre-existing): shell-nav brand-mark/accent on-light/on-dark keys + dark-only button.primary hover/activeTextColor",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.121",
+        "lifecycle": "open",
+        "created_at": "2026-07-17",
+        "source": "qc1 F-007 (Suggestion) — PM adjudicated residual; pre-existing at iteration base; normalize key structure or amend invariant in a follow-up",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.121-design-language-foundation.md"
+      }
     ]
   }
 }
