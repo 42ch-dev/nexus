@@ -82,6 +82,12 @@ pub async fn list_sessions(
 
     let mut mapped: Vec<SessionSummary> = sessions
         .into_iter()
+        // AD-P0-2b (V1.120 P2 / F3): Sessions is an active-work monitor — hide
+        // daemon-internal `_system.*` preset sessions auto-started at boot
+        // (boot.rs WS-D) so an idle daemon yields an empty list. Filter runs
+        // before map/sort/paginate; `list_active` non-terminal semantics are
+        // unchanged (additive exclusion only).
+        .filter(|s| !s.preset_id.starts_with("_system."))
         .map(|s| SessionSummary {
             session_id: s.session_id.0,
             creator_id: s.creator_id,
@@ -217,5 +223,94 @@ fn session_status_to_str(status: &SessionStatus) -> String {
         SessionStatus::WaitingForInput => "waiting_for_input".to_string(),
         SessionStatus::Completed => "completed".to_string(),
         SessionStatus::Failed => "failed".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::test_utils::create_test_workspace;
+    use std::sync::Arc;
+
+    /// Build a minimal graph with a single manual-wait task (sessions stay
+    /// non-terminal without executing any step).
+    fn manual_wait_graph(name: &str) -> Arc<graph_flow::Graph> {
+        let graph = Arc::new(graph_flow::Graph::new(name));
+        graph.add_task(Arc::new(nexus_orchestration::tasks::ManualWaitTask));
+        graph
+    }
+
+    /// AD-P0-2b (V1.120 P2 / F3): daemon auto-started `_system.*` boot sessions
+    /// must not leak into the Sessions product surface. Seeds one `_system.*`
+    /// session (mirroring boot.rs WS-D) plus one author-started session and
+    /// asserts the list hides the former and keeps the latter.
+    #[tokio::test]
+    async fn list_sessions_excludes_system_preset_sessions() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
+        let caps = Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
+        let engine = nexus_orchestration::GraphFlowEngine::new_with_storage(storage, caps);
+
+        // Mirror boot.rs WS-D: `_system.*` preset session auto-started at boot.
+        engine
+            .start_session("_system.maintenance", manual_wait_graph("system-boot"))
+            .await
+            .expect("system session start");
+        // Author-started orchestration session.
+        engine
+            .start_session("novel-writing", manual_wait_graph("author-work"))
+            .await
+            .expect("author session start");
+
+        state.set_engine(Arc::new(engine));
+
+        let Json(body) = list_sessions(State(state), Query(ListSessionsQuery::default()))
+            .await
+            .expect("list_sessions should succeed");
+
+        let preset_ids: Vec<&str> = body.items.iter().map(|s| s.preset_id.as_str()).collect();
+        assert!(
+            preset_ids.iter().all(|p| !p.starts_with("_system.")),
+            "system preset sessions must be hidden, got: {preset_ids:?}"
+        );
+        assert!(
+            preset_ids.contains(&"novel-writing"),
+            "author non-terminal session must remain, got: {preset_ids:?}"
+        );
+    }
+
+    /// AC-P2-1: idle daemon with only `_system.*` boot sessions active ⇒ the
+    /// product list is empty (Sessions is an active-work monitor).
+    #[tokio::test]
+    async fn list_sessions_idle_daemon_yields_empty_list() {
+        let (_tmp, nexus_home, db_path) = create_test_workspace().await;
+        let mut state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
+
+        let storage = Arc::new(graph_flow::InMemorySessionStorage::new());
+        let caps = Arc::new(nexus_orchestration::CapabilityRegistry::with_builtins());
+        let engine = nexus_orchestration::GraphFlowEngine::new_with_storage(storage, caps);
+
+        engine
+            .start_session("_system.maintenance", manual_wait_graph("system-boot-a"))
+            .await
+            .expect("system session start");
+        engine
+            .start_session("_system.health", manual_wait_graph("system-boot-b"))
+            .await
+            .expect("system session start");
+
+        state.set_engine(Arc::new(engine));
+
+        let Json(body) = list_sessions(State(state), Query(ListSessionsQuery::default()))
+            .await
+            .expect("list_sessions should succeed");
+
+        assert!(
+            body.items.is_empty(),
+            "idle daemon (only _system.* sessions) must yield zero rows, got: {:?}",
+            body.items.iter().map(|s| &s.preset_id).collect::<Vec<_>>()
+        );
     }
 }

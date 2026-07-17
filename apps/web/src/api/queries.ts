@@ -108,13 +108,23 @@ export function useWork(workId: string | undefined) {
 
 // ── Sessions (cursor-paginated) ──────────────────────────────────────────────
 
+/**
+ * AD-P0-2c (V1.120 P2 / F3): Sessions is an active-work monitor. The daemon
+ * list handler excludes `_system.*` boot sessions (AD-P0-2b); this defensive
+ * filter is the belt for older daemons that still return them. Pure and
+ * exported for unit tests.
+ */
+export function filterVisibleSessions<T extends { preset_id: string }>(items: T[]): T[] {
+  return items.filter((s) => !s.preset_id.startsWith('_system.'));
+}
+
 export function useSessions(query?: ListSessionsQuery) {
   const client = useNexusClient();
   return useQuery({
     queryKey: queryKeys.sessions.list(query),
     queryFn: async () => {
       const res = await client.listSessions(query);
-      return res.items;
+      return filterVisibleSessions(res.items);
     },
   });
 }

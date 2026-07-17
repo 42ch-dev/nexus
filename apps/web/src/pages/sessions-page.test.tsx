@@ -58,6 +58,72 @@ describe('SessionsPage', () => {
     ).toBeInTheDocument();
   });
 
+  // AC-P2-1 / AD-P0-2c (V1.120 P2 / F3): daemon-internal `_system.*` boot
+  // sessions must never appear — an idle daemon shows the empty state.
+  it('renders the empty state when only _system.* sessions come back (defensive filter)', async () => {
+    useHandlers(
+      http.get('/v1/daemon/orchestration/sessions', () =>
+        HttpResponse.json({
+          items: [
+            {
+              session_id: 'sys-session-1',
+              creator_id: '',
+              preset_id: '_system.maintenance',
+              status: 'running',
+              current_task_id: null,
+            },
+            {
+              session_id: 'sys-session-2',
+              creator_id: '',
+              preset_id: '_system.health',
+              status: 'running',
+              current_task_id: null,
+            },
+          ],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+    );
+
+    renderSessions();
+
+    expect(await screen.findByText('No active sessions')).toBeInTheDocument();
+    expect(screen.queryByText(/_system/)).not.toBeInTheDocument();
+  });
+
+  it('hides _system.* sessions but keeps author sessions', async () => {
+    useHandlers(
+      http.get('/v1/daemon/orchestration/sessions', () =>
+        HttpResponse.json({
+          items: [
+            {
+              session_id: 'sys-session-1',
+              creator_id: '',
+              preset_id: '_system.maintenance',
+              status: 'running',
+              current_task_id: null,
+            },
+            {
+              session_id: 'session-1',
+              creator_id: 'creator-a',
+              preset_id: 'novel-writing',
+              status: 'running',
+              current_task_id: 'task-1',
+            },
+          ],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+    );
+
+    renderSessions();
+
+    expect(await screen.findByText('session-1')).toBeInTheDocument();
+    expect(screen.getByText('novel-writing')).toBeInTheDocument();
+    expect(screen.queryByText(/_system/)).not.toBeInTheDocument();
+    expect(screen.queryByText('sys-session-1')).not.toBeInTheDocument();
+  });
+
   it('renders the error state and offers retry when the daemon fails', async () => {
     useHandlers(
       http.get('/v1/daemon/orchestration/sessions', () =>

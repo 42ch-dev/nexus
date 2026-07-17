@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from 'vitest';
 
-import { launchCommandMatches } from './queries';
+import { filterVisibleSessions, launchCommandMatches } from './queries';
 
 describe('launchCommandMatches', () => {
   it('matches exact equality (preserves original FB-UI-008 behavior)', () => {
@@ -52,5 +52,29 @@ describe('launchCommandMatches', () => {
     expect(launchCommandMatches('codex', 'code')).toBe(false);
     // Different binaries sharing a prefix must not match.
     expect(launchCommandMatches('my-agent-cli', 'my-agent')).toBe(false);
+  });
+});
+
+// AD-P0-2c (V1.120 P2 / F3): defensive client filter behind `useSessions`.
+describe('filterVisibleSessions', () => {
+  const session = (preset_id: string) => ({ preset_id });
+
+  it('drops _system.* rows and keeps author rows', () => {
+    const items = [session('_system.maintenance'), session('novel-writing'), session('_system.health')];
+    expect(filterVisibleSessions(items)).toEqual([session('novel-writing')]);
+  });
+
+  it('returns an empty list when every row is _system.* (idle daemon)', () => {
+    expect(filterVisibleSessions([session('_system.maintenance')])).toEqual([]);
+  });
+
+  it('keeps everything when no _system.* rows exist', () => {
+    const items = [session('novel-writing'), session('essay')];
+    expect(filterVisibleSessions(items)).toEqual(items);
+  });
+
+  it('only matches the exact _system. prefix (system. without underscore stays)', () => {
+    const items = [session('system.user-preset'), session('_systematic')];
+    expect(filterVisibleSessions(items)).toEqual(items);
   });
 });
