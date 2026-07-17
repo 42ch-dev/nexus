@@ -58,7 +58,12 @@ describe('NodeChromeShell rendering', () => {
     expect(shell.className).toContain('rounded-card');
     expect(shell.className).toContain('bg-canvas-node-fill');
     expect(shell.className).toContain('shadow-card');
-    expect(shell.className).toContain('min-w-[176px]');
+    // V1.121 P2 T4: default node width now consumes the registered P0
+    // `min-w-canvas-node-default` utility (DESIGN.md
+    // components.canvas.node-width.default) instead of the raw `min-w-[176px]`
+    // arbitrary value — same rendered 176px, but token-named so P3 can lift
+    // canvas node geometry in one place.
+    expect(shell.className).toContain('min-w-canvas-node-default');
   });
 
   it('applies the default (unselected) border class', () => {
@@ -91,12 +96,14 @@ describe('NodeChromeShell rendering', () => {
 
   it('merges className via cn so callers can override min-width', () => {
     const { container } = render(
-      <NodeChromeShell className="min-w-[160px]">body</NodeChromeShell>,
+      <NodeChromeShell className="min-w-canvas-node-outline-scene-beat">body</NodeChromeShell>,
     );
     const cls = container.firstElementChild!.className;
-    // tailwind-merge deduplicates: min-w-[160px] wins, min-w-[176px] is dropped.
-    expect(cls).toContain('min-w-[160px]');
-    expect(cls).not.toContain('min-w-[176px]');
+    // tailwind-merge deduplicates within the registered `min-w` class group
+    // (packages/nexus-ui/src/lib/cn.ts): the caller's scene-beat utility wins,
+    // the default `min-w-canvas-node-default` is dropped.
+    expect(cls).toContain('min-w-canvas-node-outline-scene-beat');
+    expect(cls).not.toContain('min-w-canvas-node-default');
   });
 
   it('passes inline style through (scene/beat fill + border tokens)', () => {

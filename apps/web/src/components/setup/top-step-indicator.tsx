@@ -49,7 +49,7 @@ export function TopStepIndicator({ currentStep }: { currentStep: WizardStep }) {
               )}
               <span
                 className={cn(
-                  'z-10 flex h-setup-wizard-step-circle-size w-setup-wizard-step-circle-size items-center justify-center rounded-full text-button-14 font-button transition-colors',
+                  'z-10 flex h-setup-wizard-step-circle-size w-setup-wizard-step-circle-size items-center justify-center rounded-full text-button-14 font-button transition-colors duration-state ease-standard motion-reduce:transition-none',
                   status === 'active' &&
                     'bg-setup-wizard-step-circle-active-bg text-setup-wizard-step-circle-active-text',
                   status === 'complete' &&

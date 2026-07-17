@@ -170,7 +170,7 @@ export function DaemonStatusBar() {
           onClick={() => navigate('/settings/agent')}
           title={badgeLabel}
           data-testid="daemon-status-agent-badge"
-          className="max-w-[40vw] truncate rounded-control px-2 py-0.5 text-label-14 text-gray-900 transition-colors duration-state ease-standard hover:bg-gray-alpha-100 hover:text-gray-1000 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-500"
+          className="max-w-[40vw] truncate rounded-control px-2 py-0.5 text-label-14 text-gray-900 transition-colors duration-state ease-standard motion-reduce:transition-none hover:bg-gray-alpha-100 hover:text-gray-1000 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-500"
         >
           {badgeLabel}
         </button>

@@ -231,7 +231,7 @@ function CommandPaletteDialog(): React.ReactElement {
       aria-labelledby={titleId}
       onClick={onBackdropClick}
     >
-      <div className="flex w-full max-w-dialog flex-col overflow-hidden rounded-popover border border-gray-alpha-400 bg-background-100 shadow-popover">
+      <div className="flex w-full max-w-dialog flex-col overflow-hidden rounded-popover border border-gray-alpha-400 bg-background-100 shadow-elevation-4">
         <h2 id={titleId} className="sr-only">
           {t('palette.title')}
         </h2>
@@ -303,7 +303,7 @@ function CommandOption({
       role="option"
       aria-selected={selected}
       className={cn(
-        'flex h-9 cursor-pointer items-center gap-2 rounded-control px-3 text-copy-14 text-gray-1000',
+        'flex h-9 cursor-pointer items-center gap-2 rounded-control px-3 text-copy-14 text-gray-1000 transition-colors duration-state ease-standard motion-reduce:transition-none',
         selected ? 'bg-gray-alpha-100' : '',
       )}
       onClick={onSelect}

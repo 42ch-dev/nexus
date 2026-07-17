@@ -131,6 +131,10 @@ describe('SetupWizardPage', () => {
     const circle = screen.getByText('1').closest('span');
     expect(circle).toHaveClass('h-setup-wizard-step-circle-size');
     expect(circle).toHaveClass('w-setup-wizard-step-circle-size');
+    // V1.121 P2: step indicator state changes ride the v0.4 motion recipe.
+    expect(circle).toHaveClass('duration-state');
+    expect(circle).toHaveClass('ease-standard');
+    expect(circle).toHaveClass('motion-reduce:transition-none');
 
     const main = screen.getByRole('main');
     expect(card).toContainElement(main);
@@ -143,6 +147,22 @@ describe('SetupWizardPage', () => {
     expect(outer).toHaveClass('items-center');
     expect(outer).toHaveClass('justify-center');
     expect(outer).toHaveClass('min-h-screen');
+    // V1.121 P2: ambient tinted backdrop (P0 atmosphere tokens) behind the
+    // background-100 wizard card — geometry tokens unchanged.
+    expect(outer).toHaveClass('bg-background-200');
+  });
+
+  it('renders the first-impression step title in the content voice (serif display tier)', () => {
+    useWizardScanHandlers();
+    renderInApp(
+      <SetupWizardPage />,
+      { client: makeClient(), initialRouterEntries: ['/setup'] },
+    );
+
+    const title = screen.getByRole('heading', { name: 'Choose an agent' });
+    expect(title).toHaveClass('font-display');
+    expect(title).toHaveClass('text-display-24');
+    expect(title).not.toHaveClass('font-heading');
   });
 
   it('renders horizontal top Steps with connectors between circles', () => {

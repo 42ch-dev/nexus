@@ -104,6 +104,10 @@ describe('SetupStepWorkspace', () => {
     renderHarness(makeState({ workspaceRoot: '/custom/nexus' }), { onBack });
 
     expect(screen.getByRole('heading', { name: 'Name your Profile' })).toBeInTheDocument();
+    // V1.121 P2: wizard step titles are content voice (serif display tier).
+    const title = screen.getByRole('heading', { name: 'Name your Profile' });
+    expect(title).toHaveClass('font-display');
+    expect(title).toHaveClass('text-display-24');
     const backButton = screen.getByRole('button', { name: 'Back' });
     expect(backButton).toBeInTheDocument();
     expect(backButton).not.toHaveTextContent('Back');
@@ -228,6 +232,12 @@ describe('SetupStepWorkspace', () => {
     await waitFor(() =>
       expect(within(screen.getByTestId('wizard-continue-error')).getByText('permission denied')).toBeInTheDocument(),
     );
+    // V1.121 P2: error surface consumes the P1 error-surface tokens (no raw
+    // color-mix arbitrary classes).
+    const errorRegion = screen.getByTestId('wizard-continue-error');
+    expect(errorRegion).toHaveClass('bg-error-surface');
+    expect(errorRegion).toHaveClass('border-error-surface-border');
+    expect(errorRegion.className).not.toContain('color-mix');
     expect(screen.queryByRole('button', { name: 'Reset' })).not.toBeInTheDocument();
     expect(onNext).not.toHaveBeenCalled();
   });

@@ -164,6 +164,46 @@ describe('Sidebar', () => {
     expect(memories).not.toHaveClass('bg-gray-alpha-100');
   });
 
+  it('group disclosure transitions at duration-state with a rotating chevron (V1.121 P2 T1)', async () => {
+    const user = userEvent.setup();
+    useSidebarHandlers([
+      {
+        work_id: 'work-alpha',
+        title: 'Alpha Novel',
+        status: 'active',
+        intake_status: 'ready',
+        primary_preset_id: 'preset-1',
+        updated_at: '2026-01-01T00:00:00Z',
+      },
+    ]);
+
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+
+    // Wait for the async Works query so the group has >1 item (chevron only
+    // renders for multi-item groups).
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const worksGroup = screen.getByRole('button', { name: /Works/i });
+    expect(worksGroup).toHaveAttribute('aria-expanded', 'true');
+    expect(worksGroup.className).toMatch(/\bduration-state\b/);
+    expect(worksGroup.className).toMatch(/\bmotion-reduce:transition-none\b/);
+
+    // Multi-item group renders the disclosure chevron; open = rotated 90°.
+    // (SVG className is an SVGAnimatedString — assert via the class attribute.)
+    let chevron = worksGroup.querySelector('svg');
+    expect(chevron).not.toBeNull();
+    expect(chevron!.getAttribute('class')).toMatch(/\btransition-transform\b/);
+    expect(chevron!.getAttribute('class')).toMatch(/\brotate-90\b/);
+
+    // Collapse: chevron rotation removed (120ms state transition, ARIA unchanged).
+    await user.click(worksGroup);
+    expect(worksGroup).toHaveAttribute('aria-expanded', 'false');
+    chevron = worksGroup.querySelector('svg');
+    expect(chevron!.getAttribute('class')).not.toMatch(/\brotate-90\b/);
+  });
+
   it('highlights Memories on /memory via prefix match (V1.118 P1)', async () => {
     useSidebarHandlers();
 

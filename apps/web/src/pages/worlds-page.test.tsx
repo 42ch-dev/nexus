@@ -192,3 +192,74 @@ describe('WorldsPage', () => {
     expect(await screen.findByRole('heading', { name: '世界' })).toBeInTheDocument();
   });
 });
+
+// V1.121 v0.4 — voice-split discipline (DESIGN.md §Design Concept).
+//
+// Pins both directions of the serif contract on the Worlds page:
+//   - page-level entity title (h1 "Worlds") → content voice (serif display-24);
+//   - world list-item labels (the world titles) → content voice (serif
+//     display-20) — world titles are creative-entity titles in a list;
+//   - all sibling chrome (description, refresh button, world_id mono line)
+//     → interface voice (sans) — no `font-display` leaks into chrome.
+describe('WorldsPage voice-split (V1.121 v0.4)', () => {
+  it('renders the page title in the content voice (serif display-24)', async () => {
+    useHandlers(
+      http.get('/v1/daemon/narrative/worlds', () =>
+        HttpResponse.json({ worlds: [world({ world_id: 'eryndor', title: 'Eryndor' })] }),
+      ),
+    );
+
+    renderWorlds();
+
+    const title = await screen.findByRole('heading', { name: 'Worlds' });
+    expect(title.tagName).toBe('H1');
+    expect(title.className).toMatch(/\bfont-display\b/);
+    expect(title.className).toMatch(/\btext-display-24\b/);
+    // Interface-voice heading treatment is absent.
+    expect(title.className).not.toMatch(/\btext-heading-24\b/);
+    expect(title.className).not.toMatch(/\bfont-heading\b/);
+  });
+
+  it('renders world list-item titles in the content voice (serif display-20)', async () => {
+    useHandlers(
+      http.get('/v1/daemon/narrative/worlds', () =>
+        HttpResponse.json({
+          worlds: [world({ world_id: 'eryndor', title: 'The Realms of Eryndor' })],
+        }),
+      ),
+    );
+
+    renderWorlds();
+
+    const label = await screen.findByText('The Realms of Eryndor');
+    expect(label.className).toMatch(/\bfont-display\b/);
+    expect(label.className).toMatch(/\btext-display-20\b/);
+  });
+
+  it('keeps the description, refresh button, and world_id mono line in the interface voice', async () => {
+    useHandlers(
+      http.get('/v1/daemon/narrative/worlds', () =>
+        HttpResponse.json({ worlds: [world({ world_id: 'eryndor', title: 'Eryndor' })] }),
+      ),
+    );
+
+    renderWorlds();
+    await screen.findByText('Eryndor');
+
+    // Page description stays sans. (The description string appears on both the
+    // page header and the card description — both stay interface voice.)
+    const descriptions = screen.getAllByText('Choose a world to open its knowledge base.');
+    for (const d of descriptions) {
+      expect(d.className).not.toMatch(/\bfont-display\b/);
+    }
+
+    // Refresh button stays sans.
+    const refresh = screen.getByRole('button', { name: 'Refresh worlds' });
+    expect(refresh.className).not.toMatch(/\bfont-display\b/);
+
+    // The world_id mono secondary line stays sans-mono (interface voice).
+    const idLine = screen.getByText('eryndor');
+    expect(idLine.className).not.toMatch(/\bfont-display\b/);
+    expect(idLine.className).toMatch(/\btext-copy-13-mono\b/);
+  });
+});

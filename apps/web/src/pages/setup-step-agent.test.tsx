@@ -174,6 +174,25 @@ describe('mapScanEntriesToPickerItems / URL table', () => {
 });
 
 describe('SetupStepAgent', () => {
+  it('renders the welcome step title in the content voice (serif display tier)', async () => {
+    useHandlers(
+      http.post('/v1/daemon/agent-host/scan', () =>
+        HttpResponse.json({ agents: [makeAgent({ name: 'nexus-mcp-agent', installed: true })] }),
+      ),
+    );
+
+    renderHarness(makeState());
+
+    // V1.121 P2: the wizard's first-impression headline is content voice
+    // (`font-display text-display-24`); everything else on the step stays sans.
+    const title = await waitFor(() =>
+      screen.getByRole('heading', { name: 'Choose an agent' }),
+    );
+    expect(title).toHaveClass('font-display');
+    expect(title).toHaveClass('text-display-24');
+    expect(title).not.toHaveClass('font-heading');
+  });
+
   it('renders the agent scan list via AgentPicker', async () => {
     const user = userEvent.setup();
     useHandlers(

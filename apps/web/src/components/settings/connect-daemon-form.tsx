@@ -154,7 +154,7 @@ export function ConnectDaemonForm() {
       <div className="space-y-4">
         <p className="text-copy-13 text-gray-700">{t('connection.fingerprintTrust')}</p>
         <div
-          className="rounded-control border border-gray-alpha-400 bg-background-200 p-3 font-mono text-[13px] font-normal leading-relaxed text-gray-1000"
+          className="rounded-control border border-gray-alpha-400 bg-background-200 p-3 font-mono text-copy-13 font-normal leading-relaxed text-gray-1000"
           data-testid="fingerprint-block"
         >
           {fpState.response.fingerprint}
@@ -283,7 +283,7 @@ export function ConnectDaemonForm() {
           />
           <p className="text-copy-13 text-gray-700">
             {t('connection.apiKeyHelperPrefix')}
-            <code className="rounded-control bg-background-200 px-1 py-0.5 font-mono text-[13px]">
+            <code className="rounded-control bg-background-200 px-1 py-0.5 font-mono text-copy-13">
               {t('connection.apiKeyCommand')}
             </code>
             {t('connection.apiKeyHelperSuffix')}
@@ -319,7 +319,7 @@ export function ConnectDaemonForm() {
             <Info className="mt-0.5 h-5 w-5 flex-shrink-0 text-gray-600" aria-hidden />
             <p className="text-copy-14">
               {t('connection.originNotePrefix')}
-              <code className="rounded-control bg-background-200 px-1 py-0.5 font-mono text-[13px]">
+              <code className="rounded-control bg-background-200 px-1 py-0.5 font-mono text-copy-13">
                 {t('connection.originSetting')}
               </code>
               {t('connection.originNoteSuffix')}
@@ -329,15 +329,15 @@ export function ConnectDaemonForm() {
 
         {fpState.status === 'error' && (
           <div
-            className="rounded-card border border-red-700/20 bg-red-700/10 p-4 text-gray-900"
+            className="rounded-card border border-error-surface-border bg-error-surface p-4"
             role="alert"
             data-testid="fingerprint-error"
           >
             <div className="flex items-start gap-3">
               <AlertCircle className="mt-0.5 h-5 w-5 flex-shrink-0 text-red-700" aria-hidden />
               <div className="space-y-2">
-                <p className="text-copy-14">{fpState.message}</p>
-                <p className="text-copy-14">{t('connection.fingerprintError')}</p>
+                <p className="text-heading-16 font-heading text-red-1000">{fpState.message}</p>
+                <p className="text-copy-14 text-red-900">{t('connection.fingerprintError')}</p>
               </div>
             </div>
           </div>

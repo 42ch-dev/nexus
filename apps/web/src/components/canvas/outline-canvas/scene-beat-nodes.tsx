@@ -69,7 +69,7 @@ export const OutlineSceneNode = memo(function OutlineSceneNode({
   return (
     <NodeChromeShell
       selected={!!selected}
-      className="min-w-[160px]"
+      className="min-w-canvas-node-outline-scene-beat"
       style={{
         background: 'var(--color-canvas-outline-scene-fill)',
         borderColor: selected ? undefined : 'var(--color-canvas-outline-scene-border)',
@@ -117,7 +117,7 @@ export const OutlineBeatNode = memo(function OutlineBeatNode({
   return (
     <NodeChromeShell
       selected={!!selected}
-      className="min-w-[160px]"
+      className="min-w-canvas-node-outline-scene-beat"
       style={{
         background: 'var(--color-canvas-outline-beat-fill)',
         borderColor: selected ? undefined : 'var(--color-canvas-outline-beat-border)',

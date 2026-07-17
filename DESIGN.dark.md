@@ -270,6 +270,19 @@ components:
       retryTypography: "{typography.label-14}"
       retryColor: "{colors.blue-700}"
 
+    # Status surface family dark overrides (V1.121 P2 T4). Stronger alphas on
+    # the ink surfaces — mirrors the error dark override above. Each projects
+    # to --color-<role>-surface / --color-<role>-surface-border.
+    success:
+      backgroundColor: "color-mix(in srgb, {colors.green-700} 8%, transparent)"
+      borderColor: "color-mix(in srgb, {colors.green-700} 35%, transparent)"
+    warning:
+      backgroundColor: "color-mix(in srgb, {colors.amber-700} 8%, transparent)"
+      borderColor: "color-mix(in srgb, {colors.amber-700} 35%, transparent)"
+    info:
+      backgroundColor: "color-mix(in srgb, {colors.blue-700} 8%, transparent)"
+      borderColor: "color-mix(in srgb, {colors.blue-700} 35%, transparent)"
+
     disabled:
       opacity: "0.5"
 

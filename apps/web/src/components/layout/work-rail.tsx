@@ -92,7 +92,7 @@ function WorkRailListItem({
         aria-current={isCurrentWork || isOutlineActive ? 'page' : undefined}
         data-testid={`work-rail-item-${workId}`}
         className={cn(
-          'flex w-full items-center gap-2 rounded-control px-3 py-2 text-left text-label-14 transition-colors duration-state ease-standard',
+          'flex w-full items-center gap-2 rounded-control px-3 py-2 text-left text-label-14 transition-colors duration-state ease-standard motion-reduce:transition-none',
           isCurrentWork || isOutlineActive
             ? 'bg-gray-alpha-100 text-gray-1000'
             : 'text-gray-800 hover:bg-gray-alpha-100 hover:text-gray-1000',

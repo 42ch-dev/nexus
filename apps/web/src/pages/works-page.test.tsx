@@ -132,3 +132,75 @@ describe('WorksPage', () => {
     expect(screen.getByText('标题')).toBeInTheDocument();
   });
 });
+
+// V1.121 v0.4 — voice-split discipline (DESIGN.md §Design Concept).
+//
+// Pins both directions of the serif contract on the Works list page:
+//   - creative-entity title (CardTitle "Works") → content voice (serif
+//     display-20 via CardTitle voice="content");
+//   - all page chrome (table headers, buttons, refresh control, filter input)
+//     → interface voice (sans) — no `font-display` leaks into chrome.
+describe('WorksPage voice-split (V1.121 v0.4)', () => {
+  it('renders the Works CardTitle in the content voice (serif display-20)', async () => {
+    useHandlers(
+      http.get('/v1/daemon/works', () =>
+        HttpResponse.json({
+          items: [
+            {
+              work_id: 'w-1',
+              title: 'Galaxy Novel',
+              status: 'active',
+              intake_status: 'complete',
+              primary_preset_id: 'p-1',
+              updated_at: '2026-06-24T00:00:00Z',
+            },
+          ],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+    );
+
+    renderWorks();
+
+    const title = await screen.findByRole('heading', { name: 'Works' });
+    // Content voice (serif display tier) per DESIGN.md components.card.title.voice.
+    expect(title.className).toMatch(/\bfont-display\b/);
+    expect(title.className).toMatch(/\btext-display-20\b/);
+    // Interface-voice heading treatment is absent.
+    expect(title.className).not.toMatch(/\btext-heading-16\b/);
+    expect(title.className).not.toMatch(/\bfont-heading\b/);
+  });
+
+  it('keeps table headers and buttons in the interface voice (sans)', async () => {
+    useHandlers(
+      http.get('/v1/daemon/works', () =>
+        HttpResponse.json({
+          items: [
+            {
+              work_id: 'w-1',
+              title: 'Galaxy Novel',
+              status: 'active',
+              intake_status: 'complete',
+              primary_preset_id: 'p-1',
+              updated_at: '2026-06-24T00:00:00Z',
+            },
+          ],
+          pagination: { limit: 20, has_more: false },
+        }),
+      ),
+    );
+
+    renderWorks();
+    await screen.findByText('Galaxy Novel');
+
+    // Table column header — interface voice.
+    const colHeader = screen.getByRole('columnheader', { name: 'Title' });
+    expect(colHeader.className).not.toMatch(/\bfont-display\b/);
+
+    // Refresh + Create buttons stay sans.
+    const refresh = screen.getByRole('button', { name: /Refresh Works/i });
+    expect(refresh.className).not.toMatch(/\bfont-display\b/);
+    const create = screen.getByRole('button', { name: /^Create$/i });
+    expect(create.className).not.toMatch(/\bfont-display\b/);
+  });
+});

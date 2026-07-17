@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronRight, Settings, type LucideIcon } from 'lucide-react';
+import { ChevronRight, Settings, type LucideIcon } from 'lucide-react';
 import { useState, type ReactNode } from 'react';
 
 import { cn } from '@/lib/utils';
@@ -162,7 +162,7 @@ export function ShellSidebarChrome({
         {renderSettingsLink(
           '/settings',
           cn(
-            'group relative flex h-sidebar-nav-item-height items-center gap-2 rounded-control px-3 text-label-14 transition-colors duration-state ease-standard',
+            'group relative flex h-sidebar-nav-item-height items-center gap-2 rounded-control px-3 text-label-14 transition-colors duration-state ease-standard motion-reduce:transition-none',
             settingsActive
               ? 'bg-gray-alpha-100 text-gray-1000'
               : 'text-gray-600 hover:bg-gray-alpha-100 hover:text-gray-900',
@@ -228,7 +228,7 @@ function TabButton({
       aria-selected={active}
       onClick={onClick}
       className={cn(
-        'rounded-control px-2 py-1.5 text-button-14 font-button transition-colors',
+        'rounded-control px-2 py-1.5 text-button-14 font-button transition-colors duration-state ease-standard motion-reduce:transition-none',
         active
           ? 'bg-background-100 text-gray-1000 shadow-card'
           : 'text-gray-700 hover:bg-gray-alpha-200 hover:text-gray-1000',
@@ -255,18 +255,26 @@ function NavGroupChrome({
 
   return (
     <li className="flex flex-col gap-1">
-      {/* Parent = group/disclosure label only — no competing selected fill */}
+      {/* Parent = group/disclosure label only — no competing selected fill.
+          V1.121 P2: the disclosure affordance transitions at duration-state
+          (120ms ease-standard — DESIGN.md §Motion state transitions); the
+          chevron rotates open/closed. Reduced motion = instant (motion-reduce
+          + the global index.css reset). */}
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
         aria-expanded={open}
-        className="flex items-center gap-1 px-3 py-1 text-label-12 font-medium uppercase tracking-wide text-gray-600"
+        className="flex items-center gap-1 px-3 py-1 text-label-12 font-medium uppercase tracking-wide text-gray-600 transition-colors duration-state ease-standard motion-reduce:transition-none hover:text-gray-900"
       >
-        {hasMultiple && (open ? (
-          <ChevronDown className="h-3.5 w-3.5" aria-hidden />
-        ) : (
-          <ChevronRight className="h-3.5 w-3.5" aria-hidden />
-        ))}
+        {hasMultiple && (
+          <ChevronRight
+            className={cn(
+              'h-3.5 w-3.5 transition-transform duration-state ease-standard motion-reduce:transition-none',
+              open && 'rotate-90',
+            )}
+            aria-hidden
+          />
+        )}
         {group.label}
       </button>
       {open && (
@@ -311,7 +319,7 @@ function NavItemLi({
       {renderNavItem(
         item,
         cn(
-          'group relative flex h-sidebar-nav-item-height items-center gap-2 rounded-control px-3 text-label-14 transition-colors duration-state ease-standard',
+          'group relative flex h-sidebar-nav-item-height items-center gap-2 rounded-control px-3 text-label-14 transition-colors duration-state ease-standard motion-reduce:transition-none',
           isActive
             ? 'bg-gray-alpha-100 text-gray-1000'
             : 'text-gray-600 hover:bg-gray-alpha-100 hover:text-gray-900',

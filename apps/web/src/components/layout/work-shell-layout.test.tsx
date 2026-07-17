@@ -84,7 +84,7 @@ describe('WorkShellLayout', () => {
     expect(screen.getByTestId('work-shell-main')).toBeInTheDocument();
   });
 
-  it('renders desktop rail aside with 280px width class', async () => {
+  it('renders desktop rail aside with the sheet-width token class', async () => {
     useShellHandlers();
     renderShell('/works/work-a/outline', true);
 
@@ -93,7 +93,9 @@ describe('WorkShellLayout', () => {
     });
 
     const rail = screen.getByTestId('work-shell-rail-desktop');
-    expect(rail).toHaveClass('w-[280px]');
+    // DESIGN.md components.sheet.width (min(100vw, 280px)) — the work-shell
+    // right rail shares the sheet width token (V1.121 P2 T1).
+    expect(rail).toHaveClass('w-sheet');
     expect(rail).toHaveClass('lg:flex');
   });
 

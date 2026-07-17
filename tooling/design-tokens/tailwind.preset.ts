@@ -56,10 +56,18 @@ const preset: Partial<Config> = {
         },
         // Overlay scrim — DESIGN.md §Elevation (backdrop fill behind overlays).
         scrim: cv('scrim'),
-        // Error surface — DESIGN.md components.states.error (V1.121 P1 T2;
-        // tokenized ErrorState tint + border, theme-aware via .dark overrides).
+        // Status surface family — DESIGN.md components.states.{error,success,warning,info}
+        // (V1.121: error landed P1 T2; success/warning/info added P2 T4 to
+        // tokenize preset-validation status cards + canvas live-session banner;
+        // theme-aware via .dark overrides).
         'error-surface': cv('error-surface'),
         'error-surface-border': cv('error-surface-border'),
+        'success-surface': cv('success-surface'),
+        'success-surface-border': cv('success-surface-border'),
+        'warning-surface': cv('warning-surface'),
+        'warning-surface-border': cv('warning-surface-border'),
+        'info-surface': cv('info-surface'),
+        'info-surface-border': cv('info-surface-border'),
         // Finding status pill — DESIGN.md components.finding-status-pill
         // (V1.121 P1 T3; tinted fill + semantic text + border per status).
         'finding-status': {
