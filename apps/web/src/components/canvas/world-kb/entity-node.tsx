@@ -70,7 +70,7 @@ export const WorldKbEntityNode = memo(function WorldKbEntityNode({
         // elevation-4. The data-dragging attribute variant lets the RF
         // wrapper forward the dragging prop without a class-name branch,
         // mirroring NodeChromeShell's pattern.
-        'min-w-[200px] max-w-[240px] rounded-card border bg-canvas-worldkb-entity-card-fill-default px-3 py-2 shadow-card transition-shadow duration-state ease-standard hover:shadow-elevation-2 data-[dragging=true]:shadow-elevation-4 focus-visible:outline-none',
+        'min-w-[200px] max-w-[240px] rounded-card border bg-canvas-worldkb-entity-card-fill-default px-3 py-2 shadow-card transition-shadow duration-state ease-standard motion-reduce:transition-none hover:shadow-elevation-2 data-[dragging=true]:shadow-elevation-4 focus-visible:outline-none',
         // V1.121 P3 T2 — per-surface accent spine (World KB = teal-700 per
         // DESIGN.md §Canvas Surface). Mirrors NodeChromeShell's spine; this
         // node keeps its bespoke 3-state fill tokens (default/hover/selected)
@@ -145,7 +145,7 @@ export const WorldKbSourceAnchorNode = memo(function WorldKbSourceAnchorNode({
   return (
     <div
       data-dragging={dragging ? 'true' : undefined}
-      className="min-w-[140px] max-w-[180px] rounded-card border border-canvas-worldkb-source-anchor-edge/40 border-l-[3px] border-l-canvas-worldkb-accent bg-canvas-worldkb-source-anchor-node px-2 py-1 shadow-card transition-shadow duration-state ease-standard hover:shadow-elevation-2 data-[dragging=true]:shadow-elevation-4"
+      className="min-w-[140px] max-w-[180px] rounded-card border border-canvas-worldkb-source-anchor-edge/40 border-l-[3px] border-l-canvas-worldkb-accent bg-canvas-worldkb-source-anchor-node px-2 py-1 shadow-card transition-shadow duration-state ease-standard motion-reduce:transition-none hover:shadow-elevation-2 data-[dragging=true]:shadow-elevation-4"
       aria-label={t('worldKb.entityNode.sourceAnchorAria', { reference: d.reference })}
     >
       <Handle

@@ -618,26 +618,26 @@
 
   /* Canvas surface — DESIGN.dark.md §Canvas Surface (V1.70; V1.121 v0.4: ink
      surface, not a neutral flip; chromatic remap onto brand scales). */
-   --color-canvas-surface: #101d2e;
-   --color-canvas-grid: rgba(255, 255, 255, 0.05);
-   /* V1.121 P3 T2 (T1 carry-over): close the per-theme grid-metric contract.
-      DESIGN.dark.md ships the same values as the light block; projecting them
-      here lets a future dark-specific dot-grid tuning move one place. */
-   --color-canvas-grid-gap: 20px;
-   --color-canvas-grid-dot-size: 1.5px;
-   --color-canvas-node-fill: var(--color-background-300);
+  --color-canvas-surface: #101d2e;
+  --color-canvas-grid: rgba(255, 255, 255, 0.05);
+  /* V1.121 P3 T2 (T1 carry-over): close the per-theme grid-metric contract.
+     DESIGN.dark.md ships the same values as the light block; projecting them
+     here lets a future dark-specific dot-grid tuning move one place. */
+  --color-canvas-grid-gap: 20px;
+  --color-canvas-grid-dot-size: 1.5px;
+  --color-canvas-node-fill: var(--color-background-300);
   --color-canvas-node-fill-hover: var(--color-gray-200);
   --color-canvas-node-border: rgba(255, 255, 255, 0.18);
   --color-canvas-node-border-selected: var(--color-blue-700);
   --color-canvas-edge: var(--color-gray-400);
   --color-canvas-edge-hover: var(--color-gray-800);
   --color-canvas-port: var(--color-gray-700);
-   --color-canvas-minimap: var(--color-gray-alpha-500);
-   --color-canvas-strategy-accent: var(--color-purple-700);
-   /* V1.121 P3 T2: per-surface accent spines (mirrors light block). */
-   --color-canvas-outline-accent: var(--color-amber-700);
-   --color-canvas-worldkb-accent: var(--color-teal-700);
-   --color-canvas-write-dirty: var(--color-amber-700);
+  --color-canvas-minimap: var(--color-gray-alpha-500);
+  --color-canvas-strategy-accent: var(--color-purple-700);
+  /* V1.121 P3 T2: per-surface accent spines (mirrors light block). */
+  --color-canvas-outline-accent: var(--color-amber-700);
+  --color-canvas-worldkb-accent: var(--color-teal-700);
+  --color-canvas-write-dirty: var(--color-amber-700);
   --color-canvas-write-conflict: var(--color-red-700);
   --color-canvas-write-success: var(--color-green-700);
   --color-canvas-write-stale-bg: color-mix(in srgb, var(--color-amber-700) 12%, transparent);

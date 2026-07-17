@@ -150,7 +150,7 @@ export function NodeChromeShell({
         // (DESIGN.md §Elevation). Hover lifts to elevation-2; the
         // `data-[dragging=true]` variant lifts further to elevation-4 when
         // the RF wrapper forwards the dragging prop.
-        'min-w-canvas-node-default rounded-card border bg-canvas-node-fill px-3 py-2 shadow-card transition-shadow duration-state ease-standard hover:shadow-elevation-2 data-[dragging=true]:shadow-elevation-4',
+        'min-w-canvas-node-default rounded-card border bg-canvas-node-fill px-3 py-2 shadow-card transition-shadow duration-state ease-standard motion-reduce:transition-none hover:shadow-elevation-2 data-[dragging=true]:shadow-elevation-4',
         selected
           ? 'border-canvas-node-border-selected'
           : 'border-canvas-node-border',
