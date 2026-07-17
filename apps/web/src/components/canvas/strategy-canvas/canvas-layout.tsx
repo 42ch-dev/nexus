@@ -89,7 +89,7 @@ export function CanvasHeader({
         </div>
       </div>
       {activeSession ? (
-        <div className="flex items-center gap-2 rounded-card border border-blue-700/30 bg-[color-mix(in_srgb,var(--color-blue-700)_6%,transparent)] px-3 py-2 text-copy-13 text-gray-900">
+        <div className="flex items-center gap-2 rounded-card border border-info-surface-border bg-info-surface px-3 py-2 text-copy-13 text-gray-900">
           <span className="inline-block h-2 w-2 rounded-pill bg-blue-700" aria-hidden />
           {t('strategy.header.livePrefix')}{' '}
           <span className="font-mono">{activeSession.current_task_id ?? '—'}</span> · {t('strategy.header.liveStatus')}{' '}

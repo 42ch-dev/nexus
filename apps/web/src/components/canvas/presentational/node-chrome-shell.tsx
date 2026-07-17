@@ -60,8 +60,8 @@ export interface NodeChromeShellProps {
   accent?: boolean;
   /**
    * Extra classes merged via `cn()` (tailwind-merge). Use to override the
-   * default `min-w-[176px]` (e.g. scene/beat pass `min-w-[160px]`) or add
-   * node-specific sizing.
+   * default `min-w-canvas-node-default` (e.g. scene/beat pass
+   * `min-w-canvas-node-outline-scene-beat`) or add node-specific sizing.
    */
   className?: string;
   /**
@@ -91,7 +91,7 @@ export function NodeChromeShell({
   return (
     <div
       className={cn(
-        'min-w-[176px] rounded-card border bg-canvas-node-fill px-3 py-2 shadow-card transition-colors duration-state ease-standard',
+        'min-w-canvas-node-default rounded-card border bg-canvas-node-fill px-3 py-2 shadow-card transition-colors duration-state ease-standard',
         selected
           ? 'border-canvas-node-border-selected'
           : 'border-canvas-node-border',

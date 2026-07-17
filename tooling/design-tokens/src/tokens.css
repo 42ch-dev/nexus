@@ -129,10 +129,18 @@
   /* Dialog sizing — DESIGN.md components.dialog (maxWidth projection). */
   --color-dialog-max-width: 560px;
 
-  /* Error surface — DESIGN.md components.states.error (tinted fill + border
-     behind the ErrorState primitive; dark overrides in .dark below). */
+  /* Status surface family — DESIGN.md components.states.{error,success,warning,info}
+     (tinted fill + border for status-card chrome — preset validation, live
+     session banners, etc.; V1.121 P2 T4 completes the trio/trio+info that
+     `error-surface` started in P1 T2). Dark overrides in .dark below. */
   --color-error-surface: color-mix(in srgb, var(--color-red-700) 6%, transparent);
   --color-error-surface-border: color-mix(in srgb, var(--color-red-700) 30%, transparent);
+  --color-success-surface: color-mix(in srgb, var(--color-green-700) 6%, transparent);
+  --color-success-surface-border: color-mix(in srgb, var(--color-green-700) 30%, transparent);
+  --color-warning-surface: color-mix(in srgb, var(--color-amber-700) 6%, transparent);
+  --color-warning-surface-border: color-mix(in srgb, var(--color-amber-700) 30%, transparent);
+  --color-info-surface: color-mix(in srgb, var(--color-blue-700) 6%, transparent);
+  --color-info-surface-border: color-mix(in srgb, var(--color-blue-700) 30%, transparent);
 
   /* Accent scales — DESIGN.md §Colors/Accent Scales (blue → brand-deep-blue) */
   --color-blue-700: #1e3a5f;
@@ -534,10 +542,18 @@
   /* Overlay scrim — DESIGN.dark.md §Elevation (stronger to dim dark chrome). */
   --color-scrim: rgba(0, 0, 0, 0.60);
 
-  /* Error surface — DESIGN.dark.md components.states.error (stronger alphas
-     on the ink surfaces). */
+  /* Status surface family — DESIGN.dark.md
+     components.states.{error,success,warning,info} (stronger alphas on the
+     ink surfaces; V1.121 P2 T4 mirrors the error-surface dark override for
+     the parallel success/warning/info surfaces). */
   --color-error-surface: color-mix(in srgb, var(--color-red-700) 8%, transparent);
   --color-error-surface-border: color-mix(in srgb, var(--color-red-700) 35%, transparent);
+  --color-success-surface: color-mix(in srgb, var(--color-green-700) 8%, transparent);
+  --color-success-surface-border: color-mix(in srgb, var(--color-green-700) 35%, transparent);
+  --color-warning-surface: color-mix(in srgb, var(--color-amber-700) 8%, transparent);
+  --color-warning-surface-border: color-mix(in srgb, var(--color-amber-700) 35%, transparent);
+  --color-info-surface: color-mix(in srgb, var(--color-blue-700) 8%, transparent);
+  --color-info-surface-border: color-mix(in srgb, var(--color-blue-700) 35%, transparent);
 
   /* Accent scales — brand-cyan interactive scale (DESIGN.dark.md) */
   --color-blue-700: #25d1e0;

@@ -286,6 +286,23 @@ components:
       retryTypography: "{typography.label-14}"
       retryColor: "{colors.blue-700}"
 
+    # Status surface family (V1.121 P2 T4). Parallel tinted fills + borders for
+    # inline status cards (preset validation results, canvas live-session
+    # banner, future toast surfaces). Each projects to --color-<role>-surface /
+    # --color-<role>-surface-border (bg-<role>-surface / border-<role>-surface-border
+    # utilities). `error` (above) is the original; the three below complete the
+    # semantic quartet so non-ui components can drop raw color-mix arbitrary
+    # classes (AC-P2-4).
+    success:
+      backgroundColor: "color-mix(in srgb, {colors.green-700} 6%, transparent)"
+      borderColor: "color-mix(in srgb, {colors.green-700} 30%, transparent)"
+    warning:
+      backgroundColor: "color-mix(in srgb, {colors.amber-700} 6%, transparent)"
+      borderColor: "color-mix(in srgb, {colors.amber-700} 30%, transparent)"
+    info:
+      backgroundColor: "color-mix(in srgb, {colors.blue-700} 6%, transparent)"
+      borderColor: "color-mix(in srgb, {colors.blue-700} 30%, transparent)"
+
     disabled:
       opacity: "0.5"
 
