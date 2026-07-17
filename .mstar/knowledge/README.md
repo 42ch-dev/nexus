@@ -58,3 +58,9 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 
 | [badge-soft-solid-tone.md](architecture-patterns/badge-soft-solid-tone.md) | Badge soft/solid tone axis (V1.102) |
 
+### V1.120 additions
+
+| Document | Description |
+| --- | --- |
+| [conventions/system-preset-qualified-id-resolution.md](conventions/system-preset-qualified-id-resolution.md) | `_system.*` qualified-id → filesystem resolution convention — strip prefix + canonical `system_preset_bundle_dir`; literal joins are a recurring bug class; sessions `_system.` filter (V1.120 P0/P2 distilled) |
+| [architecture-patterns/tailwind-content-scan-for-package-primitives.md](architecture-patterns/tailwind-content-scan-for-package-primitives.md) | Tailwind `content` must scan `packages/nexus-ui/src` or package-only utilities (`appearance-none` etc.) silently never emit — duplicate-chevron root cause (V1.120 P1 distilled) |

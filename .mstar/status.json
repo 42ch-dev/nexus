@@ -1,137 +1,13 @@
 {
   "version": 1,
-  "updated_at": "2026-07-16",
-  "plans": [
-    {
-      "id": "2026-07-16-hotfix-setup-continue-404",
-      "title": "Hotfix - Setup Continue creator PATCH 404",
-      "file": "plans/2026-07-16-hotfix-setup-continue-404.md",
-      "status": "InReview",
-      "owner": "@project-manager",
-      "agents": [
-        "@fullstack-dev"
-      ],
-      "progress": 90,
-      "tags": [
-        "hotfix",
-        "setup",
-        "daemon"
-      ],
-      "created_at": "2026-07-16",
-      "updated_at": "2026-07-16",
-      "notes": "QC Approve w/ residuals; QA Pass-with-manual-residual. Await author dogfood then PR→main.",
-      "metadata": {
-        "working_branch": "fix/setup-continue-creator-patch-404",
-        "merge_target": "main",
-        "wire_contracts_changed": false,
-        "tier": "Hotfix",
-        "execution_mode": "inline"
-      }
-    },
-    {
-      "id": "2026-07-15-v1.119-setup-continue-unblock",
-      "title": "P0 - Setup Continue unblock",
-      "file": "plans/2026-07-15-v1.119-setup-continue-unblock.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@fullstack-dev",
-        "@frontend-dev"
-      ],
-      "progress": 100,
-      "tags": [
-        "v1.119",
-        "setup",
-        "must",
-        "p0"
-      ],
-      "created_at": "2026-07-15",
-      "updated_at": "2026-07-16",
-      "notes": "Done - QC Approve with residuals (10 low/nit), QA Pass. 4 SDD tasks + 1 fix wave.",
-      "metadata": {
-        "iteration_refs": [
-          "V1.119"
-        ],
-        "spec_integration_branch": "iteration/v1.119",
-        "merge_target": "iteration/v1.119",
-        "working_branch": "plan/v1.119-p0-setup-continue-unblock",
-        "primary_spec": ".mstar/iterations/v1.119/specs/setup-continue-unblock.md",
-        "wire_contracts_changed": false,
-        "tier": "Must",
-        "blocked_by_plan_id": null
-      }
-    },
-    {
-      "id": "2026-07-15-v1.119-setup-workspace-profile-path",
-      "title": "P1 - Workspace profile + path",
-      "file": "plans/2026-07-15-v1.119-setup-workspace-profile-path.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@frontend-dev"
-      ],
-      "progress": 0,
-      "tags": [
-        "v1.119",
-        "setup",
-        "must",
-        "p1"
-      ],
-      "created_at": "2026-07-15",
-      "updated_at": "2026-07-15",
-      "notes": "Phase 1 draft — F4 F5 F6",
-      "metadata": {
-        "iteration_refs": [
-          "V1.119"
-        ],
-        "spec_integration_branch": "iteration/v1.119",
-        "merge_target": "iteration/v1.119",
-        "working_branch": "plan/v1.119-p1-workspace-profile-path",
-        "primary_spec": ".mstar/iterations/v1.119/specs/setup-workspace-profile-path.md",
-        "wire_contracts_changed": false,
-        "tier": "Must",
-        "blocked_by_plan_id": "2026-07-15-v1.119-setup-continue-unblock"
-      }
-    },
-    {
-      "id": "2026-07-15-v1.119-setup-agent-picker-catalog",
-      "title": "P2 - AgentPicker catalog polish",
-      "file": "plans/2026-07-15-v1.119-setup-agent-picker-catalog.md",
-      "status": "Done",
-      "owner": "@project-manager",
-      "agents": [
-        "@frontend-dev"
-      ],
-      "progress": 0,
-      "tags": [
-        "v1.119",
-        "setup",
-        "must",
-        "p2"
-      ],
-      "created_at": "2026-07-15",
-      "updated_at": "2026-07-15",
-      "notes": "Phase 1 draft — F1 F2 F3",
-      "metadata": {
-        "iteration_refs": [
-          "V1.119"
-        ],
-        "spec_integration_branch": "iteration/v1.119",
-        "merge_target": "iteration/v1.119",
-        "working_branch": "plan/v1.119-p2-agent-picker-catalog",
-        "primary_spec": ".mstar/iterations/v1.119/specs/setup-agent-picker-catalog.md",
-        "wire_contracts_changed": false,
-        "tier": "Must",
-        "blocked_by_plan_id": null
-      }
-    }
-  ],
+  "updated_at": "2026-07-17",
+  "plans": [],
   "metadata": {
     "integration_branch_retired": false,
     "iteration_base_branch": "main",
     "last_integration_branch": "iteration/v1.115",
-    "latest_active_compass": "v1.119/delivery-compass.md",
-    "latest_active_iteration": "V1.119",
+    "latest_active_compass": "v1.120/delivery-compass.md",
+    "latest_active_iteration": "V1.120",
     "latest_ship": {
       "iteration": "V1.117",
       "compass": "v1.117/delivery-compass.md",
@@ -142,7 +18,7 @@
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "pre_iteration_hotfix": null,
-    "spec_integration_branch": "iteration/v1.119",
+    "spec_integration_branch": "iteration/v1.120",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {
@@ -211,8 +87,7 @@
         "2026-07-12-v1.113-i18n-completion": 4
       }
     },
-    "updated_at": "2026-07-15",
-    "phase1_status": "locked"
+    "updated_at": "2026-07-15"
   },
   "residual_findings": {
     "2026-07-15-v1.119-setup-continue-unblock": [
@@ -1797,6 +1672,276 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-16-hotfix-setup-continue-404.md",
         "note": "QA could not launch Tauri; one Continue click after rebuild confirms unblock."
+      }
+    ],
+    "2026-07-17-v1.120-strategies-repair": [
+      {
+        "id": "R-V1120P0QC2-S001",
+        "title": "Pre-existing path traversal on preset_id in preset_management.rs handlers (add validate_preset_id guard)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.120",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-strategies-repair.md",
+        "note": "QC2 S-001. Not introduced by this diff; local-only daemon mitigates. Mirror strategy.rs validate_strategy_id."
+      },
+      {
+        "id": "R-V1120P0QC2-S002",
+        "title": "strategy.rs:145 same _system literal-join bug class on PATCH classification (404 vs 400)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.120",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-strategies-repair.md",
+        "note": "QC2 S-002 / L2-M1. Reuse system_preset_dir_for_id. File is nexus-daemon-runtime/src/api/handlers/strategy.rs (QC1 attribution fix)."
+      },
+      {
+        "id": "R-V1120P0QC2-S003",
+        "title": "Per-row Validate cannot prefill path (contract-bound)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.120",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-strategies-repair.md",
+        "note": "QC1 S1 / QC2 S-003 / QC3 S-003. Needs validate_preset id-acceptance or PresetSummary.path — wire change."
+      },
+      {
+        "id": "R-V1120P0QC2-S004",
+        "title": "No success toast on delete preset",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.120",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-strategies-repair.md",
+        "note": "QC2 S-004. Matches scaffold/delete silent-success convention."
+      },
+      {
+        "id": "R-V1120P0QC2-S005",
+        "title": "No delete/update rejection test for _system.* presets",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.120",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-strategies-repair.md",
+        "note": "QC2 S-005. Classification side effect of T1 fix untested."
+      },
+      {
+        "id": "R-V1120P0QC3-S001",
+        "title": "useDeletePreset default mutation retry not self-documenting",
+        "severity": "nit",
+        "decision": "accept",
+        "owner": "@frontend-dev",
+        "target": "accept",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-strategies-repair.md",
+        "note": "QC3 S-001. Consistent with file convention; DELETE retry:0 is safer default."
+      },
+      {
+        "id": "R-V1120P0QC3-S002",
+        "title": "Detail page shares queryKeys.presets.list() invalidation blast radius",
+        "severity": "nit",
+        "decision": "accept",
+        "owner": "@frontend-dev",
+        "target": "accept",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-strategies-repair.md",
+        "note": "QC3 S-002. Architecturally correct shared data model."
+      }
+    ],
+    "2026-07-17-v1.120-shell-form-polish": [
+      {
+        "id": "R-V1120P1QC1-F001",
+        "title": "Asymmetric post-save invalidation: setup-wizard-page.finish saves agent profile without invalidating agent query keys",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.120",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-shell-form-polish.md",
+        "note": "QC1 F-001 (Warning, PM-accepted as residual per seat recommendation). Prefer shared persistAgentProfile() helper colocated with useAgentProfile; self-heals ≤15s via global staleTime."
+      },
+      {
+        "id": "R-V1120P1QC2-S001",
+        "title": "effectiveSelection vs save-handler launchCommand operator asymmetry (?? vs ||) masked by profilesEqual normalization",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.120",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-shell-form-polish.md",
+        "note": "QC2 S-001. Align operators or document normalization reliance."
+      },
+      {
+        "id": "R-V1120P1QC2-S002",
+        "title": "void qc.invalidateQueries fire-and-forget without .catch",
+        "severity": "nit",
+        "decision": "accept",
+        "owner": "@frontend-dev",
+        "target": "accept",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-shell-form-polish.md",
+        "note": "QC2 S-002 / QC3 S-002. Intentional; invalidation rejection is non-fatal cache coordination."
+      },
+      {
+        "id": "R-V1120P1QC2-S003",
+        "title": "Disabled-primary shape-visibility 1.20:1 vs page bg + DESIGN states.disabled.opacity token unused by Button",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@architect",
+        "target": "post-V1.120",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-shell-form-polish.md",
+        "note": "QC2 S-003 / QC3 S-003 / QC1 F-105. Text meets AA 6.53:1 (AC-P1-5); shape fade is DESIGN.disabled token decision (border/opacity variant)."
+      },
+      {
+        "id": "R-V1120P1QC1-F101",
+        "title": "desktop! non-null assertion in useAgentProfile queryFn (runtime-defended by enabled flag)",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.120",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-shell-form-polish.md",
+        "note": "QC1 F-101. Prefer guarded helper."
+      },
+      {
+        "id": "R-V1120P1QC1-F102",
+        "title": "agentHost.scan invalidation scope contract buried at caller; promote to queryKeys JSDoc",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.120",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-shell-form-polish.md",
+        "note": "QC1 F-102. Future scan variants would silently miss post-save invalidation."
+      },
+      {
+        "id": "R-V1120P1QC1-F103",
+        "title": "renderDialog() dead container return in create-work-dialog test",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.120",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-shell-form-polish.md",
+        "note": "QC1 F-103. Drop on next touch."
+      },
+      {
+        "id": "R-V1120P1QC1-F104",
+        "title": "custom sentinel magic string in dirty-baseline comparison",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.120",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-shell-form-polish.md",
+        "note": "QC1 F-104. Add JSDoc on SavedAgentProfile.name sentinel provenance."
+      },
+      {
+        "id": "R-V1120P1QC3-S001",
+        "title": "useAgentProfile relies on global 15s staleTime (observation)",
+        "severity": "nit",
+        "decision": "accept",
+        "owner": "@frontend-dev",
+        "target": "accept",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-shell-form-polish.md",
+        "note": "QC3 S-001. Acceptable while DaemonStatusBar is always-mounted."
+      }
+    ],
+    "2026-07-17-v1.120-orchestration-ia-icon": [
+      {
+        "id": "R-V1120P2QC1-S001",
+        "title": "Dead nav.capabilities / route.capabilities i18n keys left in en + zh-CN catalogs",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.120",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-orchestration-ia-icon.md",
+        "note": "QC1 S-001. Prune in i18n-hygiene pass."
+      },
+      {
+        "id": "R-V1120P2QC1-S002",
+        "title": "Mobile-nav test block noisy MSW unhandled-request warnings (works, agent-host/scan)",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.120",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-orchestration-ia-icon.md",
+        "note": "QC1 S-002. Stub or widen useCreatorHandler."
+      },
+      {
+        "id": "R-V1120P2QC1-S003",
+        "title": "capabilities-page.tsx lacks module doc explaining soft-remove intent",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.120",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-orchestration-ia-icon.md",
+        "note": "QC1 S-003. One-line comment for next maintainer."
+      },
+      {
+        "id": "R-V1120P2QC1-B001",
+        "title": "Pre-existing cargo clippy --all-targets baseline errors in nexus-daemon-runtime test code (~342, identical on base)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.120",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-orchestration-ia-icon.md",
+        "note": "QC1 baseline note. 0 errors reference sessions.rs; CI default-target clippy stays green."
+      },
+      {
+        "id": "R-V1120P2QC2-S001",
+        "title": "validate_preset_name does not reject _system.-prefixed author preset names",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.120",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-orchestration-ia-icon.md",
+        "note": "QC2 S-001. Pre-existing; now carries Sessions-filter semantics — such presets would be hidden from Sessions."
+      },
+      {
+        "id": "R-V1120P2QC2-S002",
+        "title": "Redirect test uses mirrored route config, not real App routes",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.120",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-orchestration-ia-icon.md",
+        "note": "QC2 S-002. Drift risk if App.tsx route table changes."
+      },
+      {
+        "id": "R-V1120P2QC2-S003",
+        "title": "get_session / signal_session intentionally unfiltered (direct-id access) — undocumented",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.120",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-orchestration-ia-icon.md",
+        "note": "QC2 S-003. Document design decision."
+      },
+      {
+        "id": "R-V1120P2QC3-S001",
+        "title": "Icons README lacks LaunchServices cache note (killall Dock after icon updates)",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.120",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-orchestration-ia-icon.md",
+        "note": "QC3 S-001. Dogfood repeatability nicety."
       }
     ]
   }

@@ -60,7 +60,8 @@ describe('Sidebar', () => {
     expect(screen.getByRole('tab', { name: 'Orchestrator', selected: true })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Sessions' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Schedule' })).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Capabilities' })).toBeInTheDocument();
+    // AC-P2-2: Capabilities is soft-removed from the Orchestration sidebar.
+    expect(screen.queryByRole('link', { name: 'Capabilities' })).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Modules' })).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Strategies' })).toBeInTheDocument();
 

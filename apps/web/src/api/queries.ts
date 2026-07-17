@@ -57,7 +57,7 @@ import type {
 } from '@42ch/nexus-contracts';
 
 import { useToast } from '@/lib/use-toast';
-import { useNexusClient } from '@/lib/client-context';
+import { useDesktopCapabilities, useNexusClient } from '@/lib/client-context';
 import { NexusClientError } from '@/lib/nexus';
 import { shortId } from '@/lib/format';
 import { queryKeys } from '@/lib/nexus/query-keys';
@@ -108,13 +108,23 @@ export function useWork(workId: string | undefined) {
 
 // ── Sessions (cursor-paginated) ──────────────────────────────────────────────
 
+/**
+ * AD-P0-2c (V1.120 P2 / F3): Sessions is an active-work monitor. The daemon
+ * list handler excludes `_system.*` boot sessions (AD-P0-2b); this defensive
+ * filter is the belt for older daemons that still return them. Pure and
+ * exported for unit tests.
+ */
+export function filterVisibleSessions<T extends { preset_id: string }>(items: T[]): T[] {
+  return items.filter((s) => !s.preset_id.startsWith('_system.'));
+}
+
 export function useSessions(query?: ListSessionsQuery) {
   const client = useNexusClient();
   return useQuery({
     queryKey: queryKeys.sessions.list(query),
     queryFn: async () => {
       const res = await client.listSessions(query);
-      return res.items;
+      return filterVisibleSessions(res.items);
     },
   });
 }
@@ -414,6 +424,25 @@ export function useReloadPreset() {
   });
 }
 
+/**
+ * Delete a user preset (V1.120 strategies-repair). Mirrors the
+ * `useScaffoldPreset` shape: `DELETE /v1/daemon/presets/{id}` then invalidate
+ * the grouped presets list so the row disappears. Only user presets are
+ * deletable — the row UI gates this (system/embedded rows render no Delete).
+ */
+export function useDeletePreset() {
+  const client = useNexusClient();
+  const qc = useQueryClient();
+  const errorToast = useErrorToast();
+  return useMutation({
+    mutationFn: (presetId: string) => client.deletePreset(presetId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: queryKeys.presets.list() });
+    },
+    onError: (error) => errorToast(error, 'error.couldNotDeletePreset'),
+  });
+}
+
 // ── Chapters (V1.65 Content-Authoring) ───────────────────────────────────────
 
 /** Cursor-paginated chapter list for a Work (F-P3 `items` key). */
@@ -541,6 +570,26 @@ export function useScanAgents(request?: ScanRequest) {
   return useQuery({
     queryKey: queryKeys.agentHost.scan(request),
     queryFn: async (): Promise<ScanResponse> => client.scanAgents(request),
+  });
+}
+
+/** Saved agent profile snapshot shape (desktop `getAgentProfile` payload). */
+export type AgentProfileSnapshot = { name: string; launchCommand?: string };
+
+/**
+ * Desktop-only saved agent profile (V1.120 P1 T1).
+ *
+ * Backed by React Query so the Settings Agent Save handler can invalidate
+ * `queryKeys.agentProfile` and the DaemonStatusBar agent badge refreshes
+ * immediately after a save — no 10s poll wait (AD-P1-1). Browser build: the
+ * hook is disabled (`desktop === null`) and `data` stays `undefined`.
+ */
+export function useAgentProfile() {
+  const desktop = useDesktopCapabilities();
+  return useQuery({
+    queryKey: queryKeys.agentProfile.detail(),
+    queryFn: (): Promise<AgentProfileSnapshot | null> => desktop!.getAgentProfile(),
+    enabled: Boolean(desktop),
   });
 }
 

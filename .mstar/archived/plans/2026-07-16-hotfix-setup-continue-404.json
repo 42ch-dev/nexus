@@ -1,0 +1,26 @@
+{
+  "id": "2026-07-16-hotfix-setup-continue-404",
+  "title": "Hotfix - Setup Continue creator PATCH 404",
+  "file": "plans/2026-07-16-hotfix-setup-continue-404.md",
+  "status": "Done",
+  "owner": "@project-manager",
+  "agents": [
+    "@fullstack-dev"
+  ],
+  "progress": 100,
+  "tags": [
+    "hotfix",
+    "setup",
+    "daemon"
+  ],
+  "created_at": "2026-07-16",
+  "updated_at": "2026-07-17",
+  "notes": "Done — PR #153 squash-merged to main @ e320e62d (QC Approve w/ residuals; QA Pass-with-manual-residual; author dogfood confirmed).",
+  "metadata": {
+    "working_branch": "fix/setup-continue-creator-patch-404",
+    "merge_target": "main",
+    "wire_contracts_changed": false,
+    "tier": "Hotfix",
+    "execution_mode": "inline"
+  }
+}

@@ -1,13 +1,14 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate } from 'react-router-dom';
-import { Plus, RefreshCw, ShieldCheck, Sparkles } from 'lucide-react';
+import { Plus, RefreshCw, Sparkles, Trash2 } from 'lucide-react';
 
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Dialog, DialogContent } from '@/components/ui/dialog';
 import { EmptyState, ErrorState, LoadingState } from '@/components/ui/states';
-import { usePresets, useReloadPreset } from '@/api/queries';
+import { useDeletePreset, usePresets, useReloadPreset } from '@/api/queries';
 import type { PresetSummary } from '@42ch/nexus-contracts';
 
 import { ScaffoldPresetDialog } from './dialogs/scaffold-preset-dialog';
@@ -19,14 +20,36 @@ import { ValidatePresetDialog } from './dialogs/validate-preset-dialog';
  * Lists presets grouped by source. Selecting a row navigates to the canvas
  * detail at `/strategies/:presetId`. The canvas surface itself is preserved
  * verbatim from the previous `/strategy` route.
+ *
+ * V1.120 strategies-repair: the list is an author-facing preset manager —
+ * `_system.*` internals are hidden from the System section, Validate is a
+ * per-row action (no global header button), and user presets can be deleted
+ * from a confirm dialog.
  */
 export function StrategiesPage() {
   const { t } = useTranslation('strategies');
   const presets = usePresets();
   const reload = useReloadPreset();
+  const removePreset = useDeletePreset();
   const navigate = useNavigate();
   const [scaffoldOpen, setScaffoldOpen] = useState(false);
+  // Per-row Validate reuses the existing path-based ValidatePresetDialog — no
+  // new validate flow (strategies-repair AD-P0-4). A single page-level dialog
+  // instance is opened by any row's Validate action.
   const [validateOpen, setValidateOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
+
+  // Filter `_system.*` from the System presets section only (AD-P0-3). User and
+  // embedded groups are passed through untouched.
+  const systemPresets = presets.data?.system.filter(isAuthorSystemPreset) ?? [];
+
+  function confirmDelete() {
+    if (deleteTarget === null) return;
+    const id = deleteTarget;
+    removePreset.mutate(id, {
+      onSettled: () => setDeleteTarget(null),
+    });
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -36,10 +59,6 @@ export function StrategiesPage() {
           <p className="text-copy-14 text-gray-900">{t('description')}</p>
         </div>
         <div className="flex items-center gap-2">
-          <Button type="button" variant="secondary" size="small" onClick={() => setValidateOpen(true)}>
-            <ShieldCheck className="h-4 w-4" aria-hidden />
-            {t('validatePreset')}
-          </Button>
           <Button type="button" variant="primary" size="small" onClick={() => setScaffoldOpen(true)}>
             <Plus className="h-4 w-4" aria-hidden />
             {t('scaffoldPreset')}
@@ -71,7 +90,10 @@ export function StrategiesPage() {
             title={t('userPresets.title')}
             description={t('userPresets.description')}
             presets={presets.data.user}
+            canDelete
             onReload={(id) => reload.mutate(id)}
+            onValidate={() => setValidateOpen(true)}
+            onDelete={(id) => setDeleteTarget(id)}
             onSelect={(id) => navigate(`/strategies/${encodeURIComponent(id)}`)}
             reloadingId={reload.isPending ? reload.variables : undefined}
             empty={t('userPresets.empty')}
@@ -79,8 +101,9 @@ export function StrategiesPage() {
           <PresetGroup
             title={t('systemPresets.title')}
             description={t('systemPresets.description')}
-            presets={presets.data.system}
+            presets={systemPresets}
             onReload={(id) => reload.mutate(id)}
+            onValidate={() => setValidateOpen(true)}
             onSelect={(id) => navigate(`/strategies/${encodeURIComponent(id)}`)}
             reloadingId={reload.isPending ? reload.variables : undefined}
             empty={t('systemPresets.empty')}
@@ -90,6 +113,7 @@ export function StrategiesPage() {
             description={t('embeddedPresets.description')}
             presets={presets.data.embedded}
             onReload={(id) => reload.mutate(id)}
+            onValidate={() => setValidateOpen(true)}
             onSelect={(id) => navigate(`/strategies/${encodeURIComponent(id)}`)}
             reloadingId={reload.isPending ? reload.variables : undefined}
             empty={t('embeddedPresets.empty')}
@@ -99,15 +123,45 @@ export function StrategiesPage() {
 
       <ScaffoldPresetDialog open={scaffoldOpen} onOpenChange={setScaffoldOpen} />
       <ValidatePresetDialog open={validateOpen} onOpenChange={setValidateOpen} />
+
+      <Dialog open={deleteTarget !== null} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+        <DialogContent
+          title={t('deleteConfirm.title', { name: deleteTarget ?? '' })}
+          description={t('deleteConfirm.description')}
+        >
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="tertiary" size="small" onClick={() => setDeleteTarget(null)}>
+              {t('common:action.cancel')}
+            </Button>
+            <Button
+              type="button"
+              variant="primary"
+              size="small"
+              onClick={confirmDelete}
+              disabled={removePreset.isPending}
+            >
+              {removePreset.isPending ? t('deleteConfirm.deleting') : t('deleteConfirm.delete')}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
+}
+
+/** Hide internal `_system.` prefixed presets from authors (AD-P0-3). */
+function isAuthorSystemPreset(preset: PresetSummary): boolean {
+  return !preset.id.startsWith('_system.');
 }
 
 function PresetGroup({
   title,
   description,
   presets,
+  canDelete = false,
   onReload,
+  onValidate,
+  onDelete,
   onSelect,
   reloadingId,
   empty,
@@ -115,7 +169,10 @@ function PresetGroup({
   title: string;
   description: string;
   presets: PresetSummary[];
+  canDelete?: boolean;
   onReload: (id: string) => void;
+  onValidate: () => void;
+  onDelete?: (id: string) => void;
   onSelect: (id: string) => void;
   reloadingId: string | undefined;
   empty: string;
@@ -154,15 +211,32 @@ function PresetGroup({
                     </div>
                   )}
                 </button>
-                <Button
-                  type="button"
-                  variant="tertiary"
-                  size="small"
-                  onClick={() => onReload(p.id)}
-                  disabled={reloadingId === p.id}
-                >
-                  {reloadingId === p.id ? t('reloading') : t('reload')}
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button type="button" variant="tertiary" size="small" onClick={onValidate}>
+                    {t('validatePreset')}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="tertiary"
+                    size="small"
+                    onClick={() => onReload(p.id)}
+                    disabled={reloadingId === p.id}
+                  >
+                    {reloadingId === p.id ? t('reloading') : t('reload')}
+                  </Button>
+                  {canDelete && onDelete && (
+                    <Button
+                      type="button"
+                      variant="tertiary"
+                      size="small"
+                      onClick={() => onDelete(p.id)}
+                      aria-label={t('deleteAria', { name: p.id })}
+                    >
+                      <Trash2 className="h-4 w-4" aria-hidden />
+                      {t('delete')}
+                    </Button>
+                  )}
+                </div>
               </li>
             ))}
           </ul>

@@ -7,18 +7,31 @@
  * Route-split: this page (and therefore `@xyflow/react`) is lazy-loaded by
  * `App.tsx` so React Flow never enters the Control Room bootstrap chunk
  * (Draft §3.1 bundle/performance).
+ *
+ * V1.120 P0 T2: a Back control to `/strategies` is always reachable. It lives
+ * on this page (not inside the canvas) so it stays visible both in the
+ * not-found empty state and in the detail header — the header renders above
+ * the canvas load-error shell, so the author is never trapped in a dead-end
+ * canvas `ErrorState` (AD-P0-1d, AC-P0-2).
  */
+import { ArrowLeft } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 
 import { StrategyCanvas } from '@/components/canvas/strategy-canvas';
+import { Button } from '@/components/ui/button';
 import { EmptyState, LoadingState } from '@/components/ui/states';
 import { usePresets } from '@/api/queries';
 
 export function StrategyPage() {
   const { t } = useTranslation('strategies');
   const { presetId } = useParams<{ presetId: string }>();
+  const navigate = useNavigate();
   const presets = usePresets();
+
+  function handleBack() {
+    navigate('/strategies');
+  }
 
   if (presets.isLoading) {
     return <LoadingState label={t('strategyDetail.loading')} />;
@@ -30,12 +43,27 @@ export function StrategyPage() {
   const activePreset = all.find((p) => p.id === presetId);
 
   if (!activePreset) {
-    return <EmptyState title={t('strategyDetail.notFoundTitle')} description={t('strategyDetail.notFoundDescription')} />;
+    return (
+      <EmptyState
+        title={t('strategyDetail.notFoundTitle')}
+        description={t('strategyDetail.notFoundDescription')}
+        action={
+          <Button type="button" variant="secondary" size="small" onClick={handleBack}>
+            <ArrowLeft className="h-4 w-4" aria-hidden />
+            {t('strategyDetail.back')}
+          </Button>
+        }
+      />
+    );
   }
 
   return (
     <div className="flex flex-col gap-4">
       <div>
+        <Button type="button" variant="tertiary" size="small" onClick={handleBack} className="mb-2">
+          <ArrowLeft className="h-4 w-4" aria-hidden />
+          {t('strategyDetail.back')}
+        </Button>
         <h1 className="text-heading-24 font-heading text-gray-1000">{t('strategyDetail.title')}</h1>
         <p className="text-copy-14 text-gray-900">
           {t('strategyDetail.description')}

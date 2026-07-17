@@ -475,7 +475,14 @@
     "2026-07-15-ci-disk-and-iterations-layout",
     "2026-07-15-v1.118-daemon-no-profile-boot",
     "2026-07-15-v1.118-creation-peer-groups",
-    "2026-07-15-v1.118-canvas-work-shell"
+    "2026-07-15-v1.118-canvas-work-shell",
+    "2026-07-16-hotfix-setup-continue-404",
+    "2026-07-15-v1.119-setup-continue-unblock",
+    "2026-07-15-v1.119-setup-workspace-profile-path",
+    "2026-07-15-v1.119-setup-agent-picker-catalog",
+    "2026-07-17-v1.120-strategies-repair",
+    "2026-07-17-v1.120-shell-form-polish",
+    "2026-07-17-v1.120-orchestration-ia-icon"
   ],
   "iteration_summaries": {
     "v1.45": {

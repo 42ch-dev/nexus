@@ -68,6 +68,7 @@
     "couldNotScaffoldPreset": "无法生成预设模板",
     "couldNotValidatePreset": "无法验证预设",
     "couldNotReloadPreset": "无法重新加载预设",
+    "couldNotDeletePreset": "无法删除预设",
     "couldNotUpdateChapter": "无法更新章节",
     "couldNotCreateCreator": "无法创建创作者",
     "couldNotSwitchCreator": "无法切换创作者",

@@ -14,6 +14,7 @@
  */
 import { http, HttpResponse } from 'msw';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { within } from '@testing-library/react';
 import { Route, Routes } from 'react-router-dom';
 
 import { RootLayout } from './root-layout';
@@ -130,5 +131,46 @@ describe('RootLayout — scroll split (AD-P2-2)', () => {
     // established by position, not by a rendered element).
     const main = container.querySelector('main');
     expect(main?.querySelector('[data-testid="outlet-content"]')).not.toBeNull();
+  });
+});
+
+describe('RootLayout — mobile nav key list (V1.120 P2 T2)', () => {
+  beforeEach(async () => {
+    window.localStorage.clear();
+    await i18n.changeLanguage('en');
+  });
+
+  /** The mobile top nav is the <nav> outside the desktop sidebar <aside>. */
+  function getMobileNav(container: HTMLElement) {
+    const aside = container.querySelector('aside');
+    return [...container.querySelectorAll('nav')].find(
+      (n) => aside === null || !aside.contains(n),
+    ) as HTMLElement | undefined;
+  }
+
+  it('exposes the mobile top-nav links (AC-P2-5)', () => {
+    useCreatorHandler();
+    const { container } = renderLayout();
+
+    const mobileNav = getMobileNav(container);
+    expect(mobileNav).toBeDefined();
+
+    // Control: the list still renders the expected author-facing surfaces.
+    expect(mobileNav!.querySelector('a[href="/sessions"]')).not.toBeNull();
+    expect(mobileNav!.querySelector('a[href="/works"]')).not.toBeNull();
+  });
+
+  it('has no Capabilities item in the mobile top nav (AC-P2-2)', () => {
+    useCreatorHandler();
+    const { container } = renderLayout();
+
+    const mobileNav = getMobileNav(container);
+    expect(mobileNav).toBeDefined();
+
+    // No Capabilities link by text or by href (MOBILE_NAV_KEYS updated).
+    expect(
+      within(mobileNav!).queryByRole('link', { name: 'Capabilities' }),
+    ).not.toBeInTheDocument();
+    expect(mobileNav!.querySelector('a[href="/capabilities"]')).toBeNull();
   });
 });

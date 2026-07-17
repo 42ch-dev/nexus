@@ -43,6 +43,9 @@ A WASM-powered execution unit within a world. Examples: combat engine resolution
 ### Preset
 A pre-configured bundle of compute capabilities with a YAML manifest. Presets define which capabilities are available, how they sequence, and what prompts/rules they use. Example: "combat-engine" preset.
 
+### System Preset (`_system.*`)
+A built-in preset shipped with the app under `presets/_system/<name>/`, addressed by a qualified id with the `_system.` prefix (e.g. `_system.maintenance`). The on-disk directory is the **stripped** name — resolving an id to a path must strip the prefix first (see `.mstar/knowledge/conventions/system-preset-qualified-id-resolution.md`). System presets are read-only and hidden from author-facing management surfaces (e.g. Sessions list, preset Delete).
+
 ### Creator
 The local user's identity aggregate — author profile, preferences, memories. A creator has one or more works and is the "self" that agents interact with.
 

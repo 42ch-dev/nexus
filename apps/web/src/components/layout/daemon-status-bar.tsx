@@ -19,7 +19,7 @@ import { useDesktopCapabilities } from '@/lib/client-context';
 import { errorMessage } from '@/lib/error-message';
 import type { DaemonStatus } from '@/lib/nexus/desktop-capabilities';
 import { useToast } from '@/lib/use-toast';
-import { launchCommandMatches, useScanAgents } from '@/api/queries';
+import { launchCommandMatches, useAgentProfile, useScanAgents } from '@/api/queries';
 import { resolveCatalogItem } from '@/lib/agent-catalog';
 import type { AgentScanEntry } from '@42ch/nexus-contracts';
 
@@ -64,10 +64,6 @@ export function DaemonStatusBar() {
   const navigate = useNavigate();
   const [status, setStatus] = useState<DaemonStatus | null>(null);
   const [isLoading, setIsLoading] = useState(false);
-  const [profile, setProfile] = useState<{
-    name: string;
-    launchCommand?: string;
-  } | null>(null);
   const { toast } = useToast();
   const mounted = useRef(true);
 
@@ -77,6 +73,13 @@ export function DaemonStatusBar() {
   // badge falls back to the placeholder / raw profile name (AD-P2-4).
   const scan = useScanAgents({ filter: 'all' });
   const agents = scan.data?.agents ?? [];
+
+  // V1.120 P1 (T1): the saved profile is React-Query-backed so the Settings
+  // Agent Save handler can invalidate `queryKeys.agentProfile` and the badge
+  // refreshes immediately after a save — no 10s poll wait (AD-P1-1). Browser
+  // build disables the hook (`desktop === null`) and `data` stays undefined.
+  const profileQuery = useAgentProfile();
+  const profile = profileQuery.data ?? null;
 
   const refresh = useCallback(async () => {
     if (!desktop) return;
@@ -119,24 +122,6 @@ export function DaemonStatusBar() {
       if (syncInterval) clearInterval(syncInterval);
     };
   }, [desktop, refresh]);
-
-  // Read the saved agent profile once on mount (desktop only). Unreadable or
-  // missing config resolves to `null` → badge placeholder (AD-P2-4).
-  useEffect(() => {
-    if (!desktop) return;
-    let cancelled = false;
-    void (async () => {
-      try {
-        const next = await desktop.getAgentProfile();
-        if (!cancelled && mounted.current) setProfile(next);
-      } catch {
-        // Unreadable config → leave `profile` null (placeholder).
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [desktop]);
 
   if (!desktop) return null;
 
