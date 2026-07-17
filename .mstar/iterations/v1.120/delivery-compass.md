@@ -1,7 +1,8 @@
 ---
 iteration_id: V1.120
 start_date: 2026-07-17
-status: locked
+status: completed
+end_date: 2026-07-17
 iteration_base_branch: main
 target_branch: main
 spec_integration_branch: iteration/v1.120
@@ -102,9 +103,9 @@ Locked spec surfaces for this iteration:
 | Milestone | Target date | Status |
 |-----------|-------------|--------|
 | Spec freeze (Phase 1 lock) | 2026-07-17 | done |
-| Dev complete | TBD | pending |
-| QC complete | TBD | pending |
-| Iteration close | TBD | pending |
+| Dev complete | 2026-07-17 | done |
+| QC complete | 2026-07-17 | done |
+| Iteration close | 2026-07-17 | done |
 
 ## Acceptance Criteria
 
@@ -125,8 +126,8 @@ Locked spec surfaces for this iteration:
 
 ## Roadmap Position
 
-- **Current iteration（V1.120）**：Close the post-V1.119 Control Room dogfood polish cluster (Strategies + shell + Orchestration IA + Dock icon).
-- **Next iteration**：Resume product depth deferred during Setup/polish — trigger: V1.120 PR merged + author dogfood green; owner: product-manager.
+- **Current iteration（V1.120）**：**delivered** (2026-07-17) — post-V1.119 Control Room dogfood polish cluster closed: Strategies repair (P0), shell/form polish (P1), Orchestration IA + sessions honesty + Dock icon (P2). PR `iteration/v1.120` → `main`.
+- **Next iteration**：Resume product depth deferred during Setup/polish — trigger: V1.120 PR merged + author dogfood green; owner: product-manager. Registered residual candidates for early triage: R-V1120P1QC1-F001 (wizard-path save invalidation helper), R-V1120P1QC2-S003 (DESIGN.disabled token cluster), R-V1120P0QC2-S001 (preset_id validation guard).
 - **最终目标**：Local-first Control Room chrome is trustworthy enough that authors spend time writing, not fighting shell bugs.
 
 ## Delivery Branch Policy
@@ -169,26 +170,22 @@ Locked spec surfaces for this iteration:
 
 ## Quality Gate Summary
 
-> Filled at iteration-close.
-
 | plan_id | QC decision | QA gate | Residuals | Durable summary |
 |---------|-------------|---------|-----------|-----------------|
-| 2026-07-17-v1.120-strategies-repair | N/A | mandatory | none | TBD |
-| 2026-07-17-v1.120-shell-form-polish | N/A | mandatory | none | TBD |
-| 2026-07-17-v1.120-orchestration-ia-icon | N/A | mandatory | none | TBD |
+| 2026-07-17-v1.120-strategies-repair | Approve with residuals (0C/0W) | mandatory → Pass (6/6 ACs) | 7 (3 low, 4 nit) | `locate_preset` SSOT fix + Back UX + list actions; merged `a6102357` |
+| 2026-07-17-v1.120-shell-form-polish | Approve with residuals (0C/1W) | mandatory → Pass with residuals (7/7 ACs) | 9 (2 low, 7 nit) | Dirty-gate + footer refresh + chevron root-fix + a11y; merged `5ee1a20b` |
+| 2026-07-17-v1.120-orchestration-ia-icon | Approve with residuals (0C/0W) | mandatory → Pass with residuals (5/5 ACs) | 8 (2 low, 6 nit) | Sessions honesty + Capabilities soft-remove + Dock evidence; merged `a1b0e5ce` |
 
 ## Compound Round Summary
 
-> Filled at iteration-close.
-
-- 结晶文档数：TBD
-- 新增 CONCEPTS.md 条目：TBD
-- 触发 compound-refresh：TBD
+- 结晶文档数：2（`conventions/system-preset-qualified-id-resolution.md`、`architecture-patterns/tailwind-content-scan-for-package-primitives.md`，均已登记 knowledge/README.md）
+- 新增 CONCEPTS.md 条目：1（`### System Preset (_system.*)`）
+- Package 盘点（§3.2 强制）：`specs/` 3 篇（strategies-repair / shell-form-polish / orchestration-ia-icon）→ **Keep snapshot**（迭代级 primary specs，继续被 plans 引用；非跨迭代知识）；`guides/` 空；无 Promote。
+- 跳过结晶候选：Dock icon 资产陈旧问题（根因为机器本地缓存，README+residual 已覆盖）；F-001 save→invalidate 约定（尚未实现，residual R-V1120P1QC1-F001 跟踪）。
+- 触发 compound-refresh：flag — tailwind content-scan doc 与既有 `tailwind-theme-key-routing-for-sizing-tokens.md` 中度重叠（同属 "Tailwind silent non-emission"），后续 refresh 可合并为单篇。
 
 ## Iteration Retrospective (minimal)
 
-> Filled at iteration-close.
-
-- 做得好的：
-- 可改进的：
-- 下迭代建议：
+- 做得好的： grill-me 锁定的范围边界（overlap guard）全程零跨 plan 污染；T1 TDD 一次命中根因；Dock F7 通过证据审核而非盲改完成（避免了对健康 pipeline 的误修）；所有 plan QC 0 Critical。
+- 可改进的： QC 发现的 cross-surface 契约不对称（wizard save 不失效缓存）属于 Prepare 期可预见的调用点普查遗漏 —— 下轮 Prepare 对「契约类改动」增加 caller-sweep 检查项。
+- 下迭代建议： 优先消化 R-V1120P1QC1-F001（persistAgentProfile helper）与 R-V1120P1QC2-S003（DESIGN.disabled token）；eval clippy `--all-targets` baseline 是否纳入 CI hygiene plan。
