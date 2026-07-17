@@ -1,8 +1,10 @@
 /**
- * Studio fixtures for Canvas surfaces (V1.108 P1 FB-UI-004).
+ * Studio fixtures for Canvas surfaces (V1.108 P1 FB-UI-004; V1.121 P3 v0.4
+ * node-chrome updates).
  *
  * Presentational-only preview of the shared canvas shell chrome + context-menu
- * chrome. No `@xyflow/react`, no `@42ch/nexus-contracts`, no daemon data.
+ * chrome + v0.4 NodeChromeShell states. No `@xyflow/react`, no
+ * `@42ch/nexus-contracts`, no daemon data.
  *
  * Outline / Strategy / Scene-Beat node chrome consumes the shared
  * `NodeChromeShell` presentational extract (`@web-canvas/node-chrome-shell`)
@@ -10,6 +12,14 @@
  * free of `@xyflow/react`, Studio imports it directly without pulling RF
  * into the gallery. The token values are identical, so light/dark visual
  * acceptance here carries to the App graph.
+ *
+ * V1.121 P3 T4 — every NodeChromeShell call site now passes the explicit
+ * surface name (`accent="strategy" | "outline" | "worldkb"`) so the per-
+ * surface accent spine renders through the surface's own token. World KB
+ * samples mirror the apps/web v0.4 source (elevation recipe + worldkb
+ * accent spine + data-dragging variant). Three new fixture frames cover
+ * the v0.4 elevation state matrix, the accent-spine matrix, and the
+ * node-width utility matrix (AC-P3-6 gallery completeness).
  *
  * Context-menu chrome mirrors `path-context-menu.tsx` and
  * `world-kb-entity-context-menu.tsx` (role="menu", rounded-popover, shadow).
@@ -92,6 +102,7 @@ function VolumeNodeSample({ label, chapterCount }: { label: string; chapterCount
   return (
     <NodeChromeShell
       selected={false}
+      accent="outline"
       style={{ background: 'var(--color-canvas-outline-volume-fill)' }}
     >
       <span className="font-heading text-copy-14 font-semibold text-gray-1000">{label}</span>
@@ -120,7 +131,7 @@ function ChapterNodeSample({
 }) {
   const tokenVar = `var(${CHAPTER_STATUS_TOKENS[status]})`;
   return (
-    <NodeChromeShell selected={selected}>
+    <NodeChromeShell selected={selected} accent="outline">
       <div className="flex items-center justify-between gap-2">
         <span
           className="truncate font-heading text-copy-14 font-semibold text-gray-1000"
@@ -170,6 +181,7 @@ function TimelineEventNodeSample({
   return (
     <NodeChromeShell
       selected={false}
+      accent="outline"
       style={{
         borderLeftColor: 'var(--color-canvas-outline-timeline-event-pin)',
         borderLeftWidth: '3px',
@@ -224,7 +236,8 @@ function SceneNodeSample({
   return (
     <NodeChromeShell
       selected={selected}
-      className="min-w-[160px]"
+      accent="outline"
+      className="min-w-canvas-node-outline-scene-beat"
       style={{
         background: 'var(--color-canvas-outline-scene-fill)',
         borderColor: selected ? undefined : 'var(--color-canvas-outline-scene-border)',
@@ -266,7 +279,8 @@ function BeatNodeSample({ title, selected = false }: { title: string; selected?:
   return (
     <NodeChromeShell
       selected={selected}
-      className="min-w-[160px]"
+      accent="outline"
+      className="min-w-canvas-node-outline-scene-beat"
       style={{
         background: 'var(--color-canvas-outline-beat-fill)',
         borderColor: selected ? undefined : 'var(--color-canvas-outline-beat-border)',
@@ -564,7 +578,7 @@ function StrategyStateSample({
   selected?: boolean;
 }) {
   return (
-    <NodeChromeShell selected={selected} status={status ?? undefined} accent>
+    <NodeChromeShell selected={selected} status={status ?? undefined} accent="strategy">
       <StrategyNodeHeader label={label} status={status} />
       <StrategyKindTag kind={stateKind} />
       {description ? (
@@ -590,7 +604,7 @@ function StrategyJoinSample({
   selected?: boolean;
 }) {
   return (
-    <NodeChromeShell selected={selected} status={status ?? undefined}>
+    <NodeChromeShell selected={selected} status={status ?? undefined} accent="strategy">
       <StrategyNodeHeader label={label} status={status} />
       <span className="mt-0.5 inline-block rounded-pill bg-[color-mix(in_srgb,var(--color-purple-700)_12%,transparent)] px-1.5 py-0.5 text-label-12 text-purple-1000">
         Join · {convergeStrategy}
@@ -610,7 +624,12 @@ function StrategyTerminalSample({
   selected?: boolean;
 }) {
   return (
-    <NodeChromeShell selected={selected} status={status ?? undefined} className="min-w-[140px]">
+    <NodeChromeShell
+      selected={selected}
+      status={status ?? undefined}
+      accent="strategy"
+      className="min-w-canvas-node-strategy-secondary"
+    >
       <StrategyNodeHeader label={label} status={status} />
       <span className="mt-0.5 inline-block text-label-12 text-gray-700">End</span>
     </NodeChromeShell>
@@ -850,6 +869,7 @@ function WorldKbEntityNodeSample({
   version,
   computable = false,
   selected = false,
+  dragging = false,
 }: {
   name: string;
   entityKind: string;
@@ -858,15 +878,22 @@ function WorldKbEntityNodeSample({
   version: number;
   computable?: boolean;
   selected?: boolean;
+  dragging?: boolean;
 }) {
   const badge = WORLDKB_LIFECYCLE_BADGE[lifecycle];
   return (
     <div
+      data-dragging={dragging ? 'true' : undefined}
       className={[
-        'min-w-[200px] max-w-[240px] rounded-card border px-3 py-2 shadow-card transition-colors duration-state ease-standard',
+        // V1.121 P3 T2 — v0.4 elevation recipe (DESIGN.md §Elevation):
+        // rest shadow-card (elevation-1) → hover elevation-2 → dragging
+        // elevation-4. data-dragging variant mirrors NodeChromeShell.
+        'min-w-[200px] max-w-[240px] rounded-card border bg-canvas-worldkb-entity-card-fill-default px-3 py-2 shadow-card transition-shadow duration-state ease-standard hover:shadow-elevation-2 data-[dragging=true]:shadow-elevation-4 focus-visible:outline-none',
+        // V1.121 P3 T2 — per-surface accent spine (World KB = teal-700).
+        'border-l-[3px] border-l-canvas-worldkb-accent',
         selected
           ? 'border-canvas-worldkb-entity-card-stroke-selected bg-canvas-worldkb-entity-card-fill-selected'
-          : 'border-canvas-worldkb-entity-card-stroke-default bg-canvas-worldkb-entity-card-fill-default',
+          : 'border-canvas-worldkb-entity-card-stroke-default',
       ].join(' ')}
       style={selected ? { outline: '2px solid var(--color-canvas-worldkb-focus-ring)' } : undefined}
     >
@@ -922,13 +949,18 @@ function WorldKbEntityNodeSample({
 function WorldKbSourceAnchorNodeSample({
   sourceType,
   reference,
+  dragging = false,
 }: {
   sourceType: string;
   reference: string;
+  dragging?: boolean;
 }) {
   return (
     <div
-      className="min-w-[140px] max-w-[180px] rounded-card border border-canvas-worldkb-source-anchor-edge/40 bg-canvas-worldkb-source-anchor-node px-2 py-1 shadow-card"
+      data-dragging={dragging ? 'true' : undefined}
+      // V1.121 P3 T2 — mirrors apps/web world-kb/entity-node.tsx:
+      // v0.4 elevation recipe + worldkb accent spine.
+      className="min-w-[140px] max-w-[180px] rounded-card border border-canvas-worldkb-source-anchor-edge/40 border-l-[3px] border-l-canvas-worldkb-accent bg-canvas-worldkb-source-anchor-node px-2 py-1 shadow-card transition-shadow duration-state ease-standard hover:shadow-elevation-2 data-[dragging=true]:shadow-elevation-4"
       aria-label={`Source anchor: ${reference}`}
     >
       <p
@@ -1275,6 +1307,106 @@ function WorldKbShellChrome() {
 }
 
 /* ------------------------------------------------------------------ */
+/*  V1.121 P3 T4 — Node chrome v2 states (elevation recipe + accent      */
+/*  spines). Verifies the v0.4 contract visually: rest elevation-1 →      */
+/*  hover elevation-2 → dragging elevation-4, plus the three per-surface   */
+/*  accent spines (strategy=purple-700, outline=amber-700,                */
+/*  worldkb=teal-700) side-by-side.                                       */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Elevation state chip — a NodeChromeShell rendered with each combination of
+ * `selected` / `dragging` so the visual reader can scan all four v0.4 states
+ * in one place. Hover is intentionally not pinned (it is a transient
+ * pointer state) — the rest / selected / dragging chips plus the live
+ * `hover:shadow-elevation-2` class on every chip covers hover in flight.
+ */
+function ElevationStateChip({
+  label,
+  selected = false,
+  dragging = false,
+}: {
+  label: string;
+  selected?: boolean;
+  dragging?: boolean;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="text-label-12 font-medium text-gray-500">{label}</span>
+      <NodeChromeShell selected={selected} dragging={dragging} accent="strategy">
+        <span className="font-heading text-copy-14 font-semibold text-gray-1000">
+          State node
+        </span>
+        <p className="mt-0.5 text-label-12 text-gray-700">
+          Elevation recipe demo — hover lifts to 2; dragging lifts to 4.
+        </p>
+      </NodeChromeShell>
+    </div>
+  );
+}
+
+/**
+ * Accent spine chip — renders a NodeChromeShell with each surface's accent
+ * value so the reader can compare the three per-surface spine colors
+ * (strategy / outline / worldkb) on the same shell shape. Mirrors the
+ * `ACCENT_SPINE_CLASSES` map in node-chrome-shell.tsx via the public prop.
+ */
+function AccentSpineChip({
+  label,
+  accent,
+}: {
+  label: string;
+  accent: 'strategy' | 'outline' | 'worldkb';
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="text-label-12 font-medium text-gray-500">{label}</span>
+      <NodeChromeShell accent={accent}>
+        <span className="font-heading text-copy-14 font-semibold text-gray-1000">
+          {label}
+        </span>
+        <p className="mt-0.5 text-label-12 text-gray-700">
+          accent=&quot;{accent}&quot;
+        </p>
+      </NodeChromeShell>
+    </div>
+  );
+}
+
+/**
+ * Node-width utility chip — proves each `min-w-canvas-node-*` utility from
+ * the P0 width family is registered and renders at the correct px value.
+ * The chip's `min-width` resolves through `--canvas-node-width-*` in
+ * tokens.css (read live from the rendered computed style).
+ */
+function NodeWidthChip({
+  label,
+  utilityClass,
+  varName,
+}: {
+  label: string;
+  utilityClass: string;
+  varName: string;
+}) {
+  return (
+    <div className="flex flex-col gap-1" data-testid={`canvas-node-width-${label}`}>
+      <div
+        className={[
+          'h-10 rounded-control border border-gray-alpha-300 bg-background-100',
+          'flex items-center justify-center text-label-12 font-mono text-gray-700',
+          utilityClass,
+        ].join(' ')}
+      >
+        {label}
+      </div>
+      <span className="text-copy-13-mono font-mono text-gray-500 break-all">
+        {varName}
+      </span>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ */
 /*  Public fixture component                                            */
 /* ------------------------------------------------------------------ */
 
@@ -1454,6 +1586,78 @@ export function CanvasSurfacesFixtures() {
         testId="canvas-fixture-worldkb"
       >
         <WorldKbShellChrome />
+      </FixtureFrame>
+
+      {/* V1.121 P3 T4 — v0.4 Node chrome v2 states. Showcases the elevation
+          recipe (rest / hover / selected / dragging) and the three
+          per-surface accent spines on the same shell shape. Verifies AC-P3-6
+          gallery completeness for the v0.4 contract. */}
+      <FixtureFrame
+        title="Node chrome v2 — elevation recipe"
+        description="V1.121 v0.4 elevation recipe on NodeChromeShell — rest shadow-card (elevation-1) → hover shadow-elevation-2 → dragging shadow-elevation-4. The four pinned chips cover rest / selected / dragging states; hover is a transient pointer state, present as the live hover:shadow-elevation-2 class on every chip. Two-layer selection ring (canvas-node-border-selected + ring-2 ring-offset-2 ring-offset-background-100) visible on the Selected chip."
+        testId="canvas-fixture-node-v2-elevation"
+      >
+        <div
+          className="flex flex-wrap gap-6 rounded-card bg-canvas-surface p-6"
+          data-testid="canvas-node-v2-elevation-matrix"
+        >
+          <ElevationStateChip label="Rest" />
+          <ElevationStateChip label="Selected" selected />
+          <ElevationStateChip label="Dragging" dragging />
+          <ElevationStateChip label="Selected + dragging" selected dragging />
+        </div>
+      </FixtureFrame>
+
+      <FixtureFrame
+        title="Node chrome v2 — per-surface accent spines"
+        description="V1.121 v0.4 per-surface accent spines — the three surface identity colors rendered through NodeChromeShell.accent (strategy = purple-700, outline = amber-700, worldkb = teal-700 per DESIGN.md §Canvas Surface). Spine = border-l-[3px] mapped to the surface's accent token. Gallery is the verification surface for AC-P3-2 accent spines."
+        testId="canvas-fixture-node-v2-accents"
+      >
+        <div
+          className="flex flex-wrap gap-6 rounded-card bg-canvas-surface p-6"
+          data-testid="canvas-node-v2-accents-matrix"
+        >
+          <AccentSpineChip label="Strategy" accent="strategy" />
+          <AccentSpineChip label="Outline" accent="outline" />
+          <AccentSpineChip label="World KB" accent="worldkb" />
+        </div>
+      </FixtureFrame>
+
+      <FixtureFrame
+        title="Node chrome v2 — node-width utilities"
+        description="V1.121 P0 + P3 node-width family — five min-w-canvas-node-* utilities registered in tailwind.preset.ts from the --canvas-node-width-* namespace (DESIGN.md components.canvas.node-width). Each chip's box uses the named utility; the live computed min-width reads back through tokens.css. Verifies the P0 token contract surfaces in the gallery."
+        testId="canvas-fixture-node-v2-widths"
+      >
+        <div
+          className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4 rounded-card bg-canvas-surface p-6"
+          data-testid="canvas-node-v2-widths-matrix"
+        >
+          <NodeWidthChip
+            label="strategy-root"
+            utilityClass="min-w-canvas-node-strategy-root"
+            varName="--canvas-node-width-strategy-root"
+          />
+          <NodeWidthChip
+            label="strategy-primary"
+            utilityClass="min-w-canvas-node-strategy-primary"
+            varName="--canvas-node-width-strategy-primary"
+          />
+          <NodeWidthChip
+            label="strategy-secondary"
+            utilityClass="min-w-canvas-node-strategy-secondary"
+            varName="--canvas-node-width-strategy-secondary"
+          />
+          <NodeWidthChip
+            label="outline-scene-beat"
+            utilityClass="min-w-canvas-node-outline-scene-beat"
+            varName="--canvas-node-width-outline-scene-beat"
+          />
+          <NodeWidthChip
+            label="default"
+            utilityClass="min-w-canvas-node-default"
+            varName="--canvas-node-width-default"
+          />
+        </div>
       </FixtureFrame>
     </div>
   );

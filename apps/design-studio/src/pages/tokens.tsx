@@ -241,6 +241,91 @@ const MOTION_EASINGS: MotionToken[] = [
   { label: 'ease-emphasized', varName: '--ease-emphasized', usage: 'Modal / panel enter' },
 ];
 
+/* ---------- Canvas tokens (V1.121 P3 — DESIGN.md §Canvas Surface) -------
+ *
+ * Live swatches for the canvas token families. Values resolve through
+ * tokens.css `:root` (light) and `.dark` (dark) blocks — every swatch
+ * re-reads on theme flip. The accent spine row uses the same border-l-[3px]
+ * shape NodeChromeShell renders for `accent="<surface>"`; the ambient row
+ * shows the actual dot-grid pattern at the live gap/dot-size metrics.
+ */
+
+interface CanvasToken {
+  label: string;
+  varName: string;
+  /** When set, renders the swatch with the literal token as a border color. */
+  asBorder?: boolean;
+  /** When set, renders the swatch as a transparent fill (color-mix over page). */
+  asTint?: boolean;
+}
+
+interface CanvasTokenGroup {
+  title: string;
+  /** Optional blurb shown under the group title. */
+  hint?: string;
+  tokens: CanvasToken[];
+}
+
+const CANVAS_TOKEN_GROUPS: CanvasTokenGroup[] = [
+  {
+    title: 'Ambient',
+    hint:
+      'Canvas surface chrome — the dot-grid sits on the ink canvas in dark; light sits on warm paper. Grid gap / dot size are live metrics.',
+    tokens: [
+      { label: 'canvas-surface', varName: '--color-canvas-surface' },
+      { label: 'canvas-grid', varName: '--color-canvas-grid' },
+      { label: 'canvas-minimap', varName: '--color-canvas-minimap' },
+    ],
+  },
+  {
+    title: 'Node chrome',
+    hint:
+      'Shared node primitives — fill, border, and the selected-border + focus-ring pairing. Selection is never color-only (Draft §4.4 #6).',
+    tokens: [
+      { label: 'canvas-node-fill', varName: '--color-canvas-node-fill' },
+      { label: 'canvas-node-fill-hover', varName: '--color-canvas-node-fill-hover' },
+      { label: 'canvas-node-border', varName: '--color-canvas-node-border' },
+      { label: 'canvas-node-border-selected', varName: '--color-canvas-node-border-selected' },
+    ],
+  },
+  {
+    title: 'Edges & ports',
+    hint:
+      'Stroke colors for relationship/transition edges and the connection port fill. Edge-hover is reserved for the v0.4 hover affordance.',
+    tokens: [
+      { label: 'canvas-edge', varName: '--color-canvas-edge' },
+      { label: 'canvas-edge-hover', varName: '--color-canvas-edge-hover' },
+      { label: 'canvas-port', varName: '--color-canvas-port' },
+    ],
+  },
+  {
+    title: 'Accent spines',
+    hint:
+      'Per-surface identity — the three spine colors NodeChromeShell renders as a 3px border-l-[3px] stripe when accent="strategy" | "outline" | "worldkb". strategy=purple-700, outline=amber-700, worldkb=teal-700 (DESIGN.md §Canvas Surface).',
+    tokens: [
+      { label: 'canvas-strategy-accent', varName: '--color-canvas-strategy-accent' },
+      { label: 'canvas-outline-accent', varName: '--color-canvas-outline-accent' },
+      { label: 'canvas-worldkb-accent', varName: '--color-canvas-worldkb-accent' },
+    ],
+  },
+];
+
+/** Node-width family (P0 + P3) — five --canvas-node-width-* slots. */
+interface CanvasWidthToken {
+  label: string;
+  /** Tailwind utility name; the chip's min-width resolves through the var. */
+  utilityClass: string;
+  varName: string;
+}
+
+const CANVAS_NODE_WIDTHS: CanvasWidthToken[] = [
+  { label: 'strategy-root', utilityClass: 'min-w-canvas-node-strategy-root', varName: '--canvas-node-width-strategy-root' },
+  { label: 'strategy-primary', utilityClass: 'min-w-canvas-node-strategy-primary', varName: '--canvas-node-width-strategy-primary' },
+  { label: 'strategy-secondary', utilityClass: 'min-w-canvas-node-strategy-secondary', varName: '--canvas-node-width-strategy-secondary' },
+  { label: 'outline-scene-beat', utilityClass: 'min-w-canvas-node-outline-scene-beat', varName: '--canvas-node-width-outline-scene-beat' },
+  { label: 'default', utilityClass: 'min-w-canvas-node-default', varName: '--canvas-node-width-default' },
+];
+
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                             */
 /* ------------------------------------------------------------------ */
@@ -573,6 +658,162 @@ function MotionRow({
   );
 }
 
+/**
+ * Canvas color swatch — resolves through tokens.css `:root` (light) and
+ * `.dark` (dark) blocks. Re-reads on theme flip so the visual reader can
+ * verify both themes from the same gallery. The optional `asBorder` /
+ * `asTint` modes let the swatch represent tokens that are typically used
+ * as borders or translucent tints (so the reader sees the token in its
+ * realistic context, not as a flat fill).
+ */
+function CanvasColorSwatch({ token }: { token: CanvasToken }) {
+  const { resolvedTheme } = useTheme();
+  const [computed, setComputed] = useState<string>(() => resolveSwatchColor(token.varName));
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const rafId = requestAnimationFrame(() => setComputed(resolveSwatchColor(token.varName)));
+      return () => cancelAnimationFrame(rafId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedTheme, token.varName]);
+
+  const swatchStyle: CSSProperties = {
+    backgroundColor: `var(${token.varName})`,
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div
+        className="w-full aspect-[3/2] rounded-card border border-gray-alpha-400"
+        style={swatchStyle}
+      />
+      <div className="flex flex-col gap-0.5 min-w-0">
+        <span className="text-label-14 text-gray-1000 truncate">{token.label}</span>
+        <span className="text-copy-13 text-gray-700 truncate font-mono">{computed}</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Ambient dot-grid swatch — renders the actual canvas dot-grid pattern at
+ * the live grid-gap / grid-dot-size metrics. The reader sees the same
+ * texture the App canvas paints, in both themes.
+ */
+function CanvasAmbientGridSwatch() {
+  const { resolvedTheme } = useTheme();
+  const [gap, setGap] = useState('20px');
+  const [dot, setDot] = useState('1.5px');
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const rafId = requestAnimationFrame(() => {
+      setGap(resolveSwatchColor('--color-canvas-grid-gap') || '20px');
+      setDot(resolveSwatchColor('--color-canvas-grid-dot-size') || '1.5px');
+    });
+    return () => cancelAnimationFrame(rafId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedTheme]);
+
+  return (
+    <div className="flex flex-col gap-2" data-testid="canvas-ambient-grid-swatch">
+      <div
+        className="w-full aspect-[3/2] rounded-card border border-gray-alpha-400 bg-canvas-surface"
+        style={{
+          backgroundImage:
+            'radial-gradient(var(--color-canvas-grid) 1.5px, transparent 1.5px)',
+          backgroundSize: `${gap} ${gap}`,
+        }}
+      />
+      <div className="flex flex-col gap-0.5 min-w-0">
+        <span className="text-label-14 text-gray-1000">canvas dot-grid</span>
+        <span className="text-copy-13 text-gray-700 font-mono">
+          gap {gap} · dot {dot}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Accent spine swatch — renders the surface's accent token as the same
+ * 3px border-l stripe NodeChromeShell applies for `accent="<surface>"`.
+ * Mirrors the spine shape so the visual reader sees the token in its
+ * realistic context.
+ */
+function CanvasAccentSpineSwatch({ token }: { token: CanvasToken }) {
+  const { resolvedTheme } = useTheme();
+  const [computed, setComputed] = useState<string>(() => resolveSwatchColor(token.varName));
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const rafId = requestAnimationFrame(() => setComputed(resolveSwatchColor(token.varName)));
+      return () => cancelAnimationFrame(rafId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedTheme, token.varName]);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div
+        className="w-full aspect-[3/2] rounded-card bg-background-100 shadow-card"
+        style={{
+          borderLeft: `3px solid var(${token.varName})`,
+        }}
+      />
+      <div className="flex flex-col gap-0.5 min-w-0">
+        <span className="text-label-14 text-gray-1000 truncate">{token.label}</span>
+        <span className="text-copy-13 text-gray-700 truncate font-mono">{computed}</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Node-width utility chip — the chip's `min-width` resolves through the
+ * --canvas-node-width-* CSS variable via the named utility class. The
+ * rendered min-width is read live so the reader sees the actual px value
+ * of the token.
+ */
+function CanvasNodeWidthSwatch({ token }: { token: CanvasWidthToken }) {
+  const chipRef = useRef<HTMLDivElement>(null);
+  const [minWidth, setMinWidth] = useState('');
+
+  useEffect(() => {
+    const el = chipRef.current;
+    if (!el) return;
+    setMinWidth(getComputedStyle(el).minWidth);
+  }, []);
+
+  return (
+    <div
+      data-testid={`canvas-node-width-swatch-${token.label}`}
+      className="flex flex-col gap-2"
+    >
+      <div
+        ref={chipRef}
+        className={[
+          'h-12 rounded-control border border-gray-alpha-300 bg-background-100',
+          'flex items-center justify-center px-3',
+          'text-label-12 font-mono text-gray-700',
+          token.utilityClass,
+        ].join(' ')}
+      >
+        {token.label}
+      </div>
+      <div className="flex flex-col gap-0.5 min-w-0">
+        <span className="text-label-14 text-gray-1000 truncate">
+          {token.utilityClass}
+        </span>
+        <span className="text-copy-13 text-gray-700 truncate font-mono">
+          {token.varName} {minWidth && `· ${minWidth}`}
+        </span>
+      </div>
+    </div>
+  );
+}
+
 const DEMO_BUTTON_CLASS =
   'px-3 py-1.5 rounded-control border border-gray-alpha-400 bg-background-100 text-button-14 font-button text-gray-1000 hover:bg-gray-alpha-100 transition-colors duration-state ease-standard motion-reduce:transition-none';
 
@@ -657,6 +898,7 @@ function SubNav() {
     { label: 'Radius', href: '#tokens-radius' },
     { label: 'Elevation', href: '#tokens-elevation' },
     { label: 'Motion', href: '#tokens-motion' },
+    { label: 'Canvas', href: '#tokens-canvas' },
   ];
 
   return (
@@ -816,6 +1058,80 @@ function MotionSection() {
   );
 }
 
+/**
+ * Canvas section (V1.121 P3 T4) — live swatches for every canvas token
+ * family: ambient (surface + grid + minimap + dot-grid pattern), node
+ * chrome (fill / fill-hover / border / border-selected), edges & ports,
+ * per-surface accent spines, and the five --canvas-node-width-* utility
+ * slots. Every swatch re-resolves on theme flip so the gallery covers
+ * both light and dark.
+ */
+function CanvasSection() {
+  return (
+    <section data-testid="tokens-canvas">
+      <SectionHeading id="tokens-canvas">Canvas</SectionHeading>
+      <p className="text-copy-14 text-gray-700 mb-4 max-w-prose">
+        V1.121 v0.4 canvas token families from DESIGN.md §Canvas Surface — the same{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">canvas-*</code> /
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">canvas-node-*</code> /
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">canvas-{`{surface}`}-accent</code>{' '}
+        tokens the three App canvases consume. Swatches read live CSS variable values and re-resolve on
+        theme flip; the dot-grid swatch uses the live grid gap / dot-size metrics.
+      </p>
+
+      {CANVAS_TOKEN_GROUPS.map((group, idx) => (
+        <div key={group.title} className="mb-8" data-testid={`canvas-token-group-${idx}`}>
+          <h4 className="text-heading-16 font-semibold text-gray-900 mb-2">{group.title}</h4>
+          {group.hint && (
+            <p className="text-copy-13 text-gray-600 mb-4 max-w-prose">{group.hint}</p>
+          )}
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+            {group.tokens.map((t) =>
+              group.title === 'Accent spines' ? (
+                <CanvasAccentSpineSwatch key={t.varName} token={t} />
+              ) : (
+                <CanvasColorSwatch key={t.varName} token={t} />
+              ),
+            )}
+            {/* Ambient group also shows the live dot-grid pattern. */}
+            {group.title === 'Ambient' && <CanvasAmbientGridSwatch />}
+          </div>
+        </div>
+      ))}
+
+      <div className="mb-8" data-testid="canvas-token-group-widths">
+        <h4 className="text-heading-16 font-semibold text-gray-900 mb-2">Node widths</h4>
+        <p className="text-copy-13 text-gray-600 mb-4 max-w-prose">
+          Five <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            --canvas-node-width-*
+          </code>{' '}
+          utility slots from DESIGN.md{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            components.canvas.node-width
+          </code>
+          . Each chip's <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">min-width</code>{' '}
+          resolves through the named Tailwind utility, with the live computed px read out below.
+        </p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
+          {CANVAS_NODE_WIDTHS.map((t) => (
+            <CanvasNodeWidthSwatch key={t.varName} token={t} />
+          ))}
+        </div>
+      </div>
+
+      <p className="text-copy-13 text-gray-500 mt-6">
+        Accent spine shape mirrors{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">NodeChromeShell</code>{' '}
+        — the same{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">border-l-[3px]</code>{' '}
+        recipe the App graph renders. The{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">/surfaces/canvas</code>{' '}
+        page mirrors the App canvas surfaces (Outline / Strategy / World KB) consuming these tokens.
+      </p>
+    </section>
+  );
+}
+
 /* ------------------------------------------------------------------ */
 /*  Page                                                                */
 /* ------------------------------------------------------------------ */
@@ -837,12 +1153,12 @@ export function TokensPage() {
       <RadiusSection />
       <ElevationSection />
       <MotionSection />
+      <CanvasSection />
 
       <p className="text-copy-13 text-gray-500 mt-12 pt-8 border-t border-gray-alpha-200">
-        Every gallery reads live values: colors, shadows, spacing, radius, and motion from CSS
-        custom properties (re-resolved on theme flip where theme-dependent); typography from the
-        computed style of elements carrying the token's utility class. Canvas token galleries land
-        in P3.
+        Every gallery reads live values: colors, shadows, spacing, radius, motion, and canvas
+        tokens from CSS custom properties (re-resolved on theme flip where theme-dependent);
+        typography from the computed style of elements carrying the token&apos;s utility class.
       </p>
     </div>
   );
