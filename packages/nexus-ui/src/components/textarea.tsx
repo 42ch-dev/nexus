@@ -5,6 +5,8 @@ import { cn } from '../lib/cn';
 /**
  * Textarea — DESIGN.md §Component Primitives/Textarea. Min height 96px,
  * background-100, gray-1000 text, gray-alpha-400 border, radius-control.
+ * Disabled (v0.4 `input-select-textarea.disabled`): gray-100 fill, gray-700
+ * text, gray-alpha-300 border.
  *
  * Per the V1.100 form-field contract:
  * - `id` is app-owned — the control receives it via the standard prop.
@@ -28,7 +30,7 @@ export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(
         'min-h-24 w-full rounded-control border bg-background-100 p-3 text-copy-14 text-gray-1000 transition-colors duration-state ease-standard',
         'placeholder:text-gray-700',
         'focus-visible:border-blue-700',
-        'disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed',
+        'disabled:bg-gray-100 disabled:text-gray-700 disabled:border-gray-alpha-300 disabled:cursor-not-allowed',
         invalid ? 'border-red-700' : 'border-gray-alpha-400',
         className,
       )}

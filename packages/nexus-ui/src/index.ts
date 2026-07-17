@@ -33,6 +33,9 @@ export {
   CardTitle,
   CardDescription,
   CardContent,
+  // V1.121 P1 — v0.4 additive opt-ins (interactive elevation recipe; title voice)
+  type CardProps,
+  type CardTitleProps,
 } from './components/card';
 
 // V1.100 P2 — promoted form-field presentational primitives

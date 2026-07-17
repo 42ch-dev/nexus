@@ -35,7 +35,7 @@ export function SheetContent({
       <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-scrim data-[state=open]:animate-in" />
       <DialogPrimitive.Content
         className={cn(
-          'fixed z-50 flex h-full w-[min(100vw,280px)] flex-col overflow-hidden border-gray-alpha-400 bg-background-100 shadow-modal',
+          'fixed z-50 flex h-full w-sheet flex-col overflow-hidden border-gray-alpha-400 bg-background-100 shadow-elevation-4',
           side === 'end' ? 'right-0 top-0 border-l' : undefined,
           className,
         )}

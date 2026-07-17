@@ -257,6 +257,7 @@ describe('Select', () => {
     expect(select).toBeDisabled();
     expect(select).toHaveClass('disabled:bg-gray-100');
     expect(select).toHaveClass('disabled:text-gray-700');
+    expect(select).toHaveClass('disabled:border-gray-alpha-300');
     expect(select).toHaveClass('disabled:cursor-not-allowed');
   });
 });

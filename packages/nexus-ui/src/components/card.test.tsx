@@ -24,6 +24,44 @@ describe('Card', () => {
     expect(screen.getByText('Hello')).toBeInTheDocument();
   });
 
+  // --- interactive elevation recipe (V1.121 v0.4 — DESIGN.md §Elevation) ---
+
+  it('rests on shadow-card (elevation-1 alias) without hover recipe by default', () => {
+    render(<Card data-testid="card">Static</Card>);
+    const el = screen.getByTestId('card');
+    expect(el).toHaveClass('shadow-card');
+    // No interactive recipe unless opted in — existing call sites unchanged.
+    expect(el).not.toHaveClass('hover:shadow-elevation-2');
+    expect(el.className).not.toContain('motion-safe:hover:-translate-y-px');
+    expect(el.className).not.toContain('duration-popover');
+  });
+
+  it('applies the v0.4 interactive elevation recipe when interactive', () => {
+    render(<Card interactive data-testid="card">Work card</Card>);
+    const el = screen.getByTestId('card');
+    // Rest stays elevation-1 (shadow-card alias); hover lifts to elevation-2.
+    expect(el).toHaveClass('shadow-card');
+    expect(el).toHaveClass('hover:shadow-elevation-2');
+    // Hover lift + pressed settle (transform removed on active).
+    expect(el.className).toContain('motion-safe:hover:-translate-y-px');
+    expect(el).toHaveClass('active:shadow-elevation-1');
+    expect(el.className).toContain('motion-safe:active:translate-y-0');
+    // 160ms ease-standard via the duration-popover token.
+    expect(el).toHaveClass('duration-popover');
+    expect(el).toHaveClass('ease-standard');
+    // Reduced-motion safe: transitions drop to instant under motion-reduce.
+    expect(el).toHaveClass('motion-reduce:transition-none');
+  });
+
+  it('keeps structural classes and merges className when interactive', () => {
+    render(<Card interactive className="work-card" data-testid="card">Merge</Card>);
+    const el = screen.getByTestId('card');
+    expect(el).toHaveClass('rounded-card');
+    expect(el).toHaveClass('bg-background-100');
+    expect(el).toHaveClass('work-card');
+    expect(el).toHaveClass('hover:shadow-elevation-2');
+  });
+
   // --- CardHeader ---
 
   it('renders CardHeader with structural classes', () => {
@@ -45,6 +83,53 @@ describe('Card', () => {
     expect(el).toHaveClass('font-heading');
     expect(el).toHaveClass('leading-tight');
     expect(el).toHaveClass('tracking-tight');
+  });
+
+  // --- CardTitle voice (V1.121 v0.4 — DESIGN.md components.card.title.voice) ---
+
+  it('defaults to the interface voice (sans heading) when voice is omitted', () => {
+    render(<CardTitle>Interface Default</CardTitle>);
+    const el = screen.getByText('Interface Default');
+    expect(el).toHaveClass('text-heading-16');
+    expect(el).toHaveClass('font-heading');
+    expect(el).not.toHaveClass('font-display');
+    expect(el).not.toHaveClass('text-display-20');
+  });
+
+  it('pins the exact default-voice class list when voice is omitted (QC2-W-003)', () => {
+    // Exact-string pin: any regression to the default treatment (e.g. the
+    // content voice leaking into existing call sites) fails here.
+    render(<CardTitle>Title</CardTitle>);
+    const el = screen.getByText('Title');
+    expect(el.className).toBe('text-heading-16 font-heading leading-tight tracking-tight');
+  });
+
+  it('renders the sans interface treatment when voice="interface" is explicit', () => {
+    render(<CardTitle voice="interface">Interface Explicit</CardTitle>);
+    const el = screen.getByText('Interface Explicit');
+    expect(el).toHaveClass('text-heading-16');
+    expect(el).toHaveClass('font-heading');
+    expect(el).toHaveClass('leading-tight');
+    expect(el).not.toHaveClass('font-display');
+  });
+
+  it('swaps to the serif display tier when voice="content"', () => {
+    render(<CardTitle voice="content">Work Title</CardTitle>);
+    const el = screen.getByText('Work Title');
+    expect(el.tagName).toBe('H3');
+    expect(el).toHaveClass('font-display');
+    expect(el).toHaveClass('text-display-20');
+    expect(el).toHaveClass('tracking-tight');
+    // Interface treatment is fully replaced (no sans leftovers).
+    expect(el).not.toHaveClass('text-heading-16');
+    expect(el).not.toHaveClass('font-heading');
+  });
+
+  it('merges custom className on CardTitle with voice="content"', () => {
+    render(<CardTitle voice="content" className="brand-title">Content Merge</CardTitle>);
+    const el = screen.getByText('Content Merge');
+    expect(el).toHaveClass('font-display');
+    expect(el).toHaveClass('brand-title');
   });
 
   // --- CardDescription ---

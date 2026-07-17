@@ -70,19 +70,52 @@ const required = [
   { label: 'preset: minWidth canvas-node key', haystack: preset, needle: "'canvas-node-strategy-root':" },
   { label: 'preset: minWidth consumes structural var', haystack: preset, needle: "sv('canvas-node-width-strategy-root')" },
 
+  // ── Dialog/Sheet layout metrics (structural namespace, V1.121 P1) ──
+  { label: 'tokens: --dialog-width', haystack: tokens, needle: '--dialog-width:' },
+  { label: 'tokens: --dialog-max-height', haystack: tokens, needle: '--dialog-max-height:' },
+  { label: 'tokens: --sheet-width', haystack: tokens, needle: '--sheet-width:' },
+  { label: 'preset: width dialog consumes structural var', haystack: preset, needle: "dialog: sv('dialog-width')" },
+  { label: 'preset: width sheet consumes structural var', haystack: preset, needle: "sheet: sv('sheet-width')" },
+  { label: 'preset: maxHeight dialog consumes structural var', haystack: preset, needle: "dialog: sv('dialog-max-height')" },
+
   // ── Reading chrome projection (V1.121 v0.4 T6) ──
   { label: 'tokens: reading-chrome title family → display', haystack: tokens, needle: '--reading-chrome-novel-chapter-title-font-family: var(--font-display)' },
+
+  // ── Badge family tint projection (V1.121 P1 T3) ──
+  { label: 'tokens: finding-status open bg', haystack: tokens, needle: '--color-finding-status-open-bg:' },
+  { label: 'tokens: finding-status wont-fix text', haystack: tokens, needle: '--color-finding-status-wont-fix-text:' },
+  { label: 'tokens: finding-status duplicate border', haystack: tokens, needle: '--color-finding-status-duplicate-border:' },
+  { label: 'tokens: memory-task-kind brainstorm bg', haystack: tokens, needle: '--color-memory-task-kind-brainstorm-bg:' },
+  { label: 'tokens: memory-task-kind unknown border', haystack: tokens, needle: '--color-memory-task-kind-unknown-border:' },
+  { label: 'tokens: reading-maturation kb-density bg', haystack: tokens, needle: '--color-reading-maturation-kb-density-bg:' },
+  { label: 'tokens: reading-maturation open-findings text', haystack: tokens, needle: '--color-reading-maturation-open-findings-text:' },
+  { label: 'preset: finding-status color group', haystack: preset, needle: "'finding-status':" },
+  { label: 'preset: memory-task-kind color group', haystack: preset, needle: "'memory-task-kind':" },
+  { label: 'preset: reading-maturation color group', haystack: preset, needle: "'reading-maturation':" },
+  { label: 'preset: finding-status consumes var', haystack: preset, needle: "cv('finding-status-open-bg')" },
 ];
 
 /** Banned legacy namespace, assembled so a repo-wide grep for the literal
  *  string stays zero — this script is the mechanical enforcer instead. */
 const BANNED_NODE_WIDTH_NS = '--color-canvas-' + 'node-width';
 const BANNED_NODE_WIDTH_HELPER = "cv('canvas-node-" + 'width';
+const BANNED_DIALOG_WIDTH_NS = '--color-dialog-' + 'width';
+const BANNED_DIALOG_MAX_HEIGHT_NS = '--color-dialog-max-' + 'height';
+const BANNED_SHEET_WIDTH_NS = '--color-sheet-' + 'width';
+const BANNED_DIALOG_WIDTH_HELPER = "cv('dialog-" + "width')";
+const BANNED_DIALOG_MAX_HEIGHT_HELPER = "cv('dialog-max-" + "height')";
+const BANNED_SHEET_WIDTH_HELPER = "cv('sheet-" + "width')";
 
 /** @type {Array<{ label: string, haystack: string, needle: string }>} */
 const forbidden = [
   { label: 'tokens: node widths must not use the color namespace', haystack: tokens, needle: BANNED_NODE_WIDTH_NS },
   { label: 'preset: node widths must not use the color-var helper', haystack: preset, needle: BANNED_NODE_WIDTH_HELPER },
+  { label: 'tokens: dialog width must not use the color namespace', haystack: tokens, needle: BANNED_DIALOG_WIDTH_NS },
+  { label: 'tokens: dialog max-height must not use the color namespace', haystack: tokens, needle: BANNED_DIALOG_MAX_HEIGHT_NS },
+  { label: 'tokens: sheet width must not use the color namespace', haystack: tokens, needle: BANNED_SHEET_WIDTH_NS },
+  { label: 'preset: dialog width must not use the color-var helper', haystack: preset, needle: BANNED_DIALOG_WIDTH_HELPER },
+  { label: 'preset: dialog max-height must not use the color-var helper', haystack: preset, needle: BANNED_DIALOG_MAX_HEIGHT_HELPER },
+  { label: 'preset: sheet width must not use the color-var helper', haystack: preset, needle: BANNED_SHEET_WIDTH_HELPER },
 ];
 
 /** Dark block must exist and carry the ink-atmosphere overrides. */
@@ -91,7 +124,7 @@ if (!darkBlock) {
   console.error('FAIL tokens: no .dark block found');
   process.exit(1);
 }
-for (const needle of ['--color-background-100:', '--color-gray-100:', '--shadow-elevation-1:']) {
+for (const needle of ['--color-background-100:', '--color-gray-100:', '--shadow-elevation-1:', '--color-finding-status-open-bg:', '--color-memory-task-kind-brainstorm-bg:', '--color-reading-maturation-kb-density-bg:']) {
   if (!darkBlock.includes(needle)) {
     console.error(`FAIL tokens .dark: missing ${needle}`);
     process.exit(1);

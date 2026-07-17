@@ -121,6 +121,16 @@ describe('Button', () => {
     expect(btn).toHaveClass('whitespace-nowrap');
   });
 
+  // --- v0.4 motion tokens (hover/pressed states ease over duration-state) ---
+
+  it('eases hover/pressed state changes over duration-state ease-standard', () => {
+    render(<Button>Motion</Button>);
+    const btn = screen.getByRole('button', { name: 'Motion' });
+    expect(btn).toHaveClass('transition-colors');
+    expect(btn).toHaveClass('duration-state');
+    expect(btn).toHaveClass('ease-standard');
+  });
+
   // --- forwardRef ---
 
   it('forwards the ref to the underlying button element', () => {

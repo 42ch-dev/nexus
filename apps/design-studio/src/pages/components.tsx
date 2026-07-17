@@ -197,62 +197,69 @@ function DomainBadgeSection() {
     { value: 'published', variant: 'preset' as const },
   ];
 
+  // Full literal class strings (no template interpolation) so Tailwind's
+  // content scan picks up every token class — mirrors production
+  // `findingStatusClasses` in apps/web/src/components/status-badge.tsx.
   const findingItems = [
     {
       value: 'open',
       classes:
-        'bg-[color-mix(in_srgb,var(--color-amber-700)_12%,transparent)] text-amber-1000 border-[color-mix(in_srgb,var(--color-amber-700)_30%,transparent)]',
+        'bg-finding-status-open-bg text-finding-status-open-text border-finding-status-open-border',
     },
     {
       value: 'triaged',
       classes:
-        'bg-[color-mix(in_srgb,var(--color-teal-700)_10%,transparent)] text-teal-1000 border-[color-mix(in_srgb,var(--color-teal-700)_30%,transparent)]',
+        'bg-finding-status-triaged-bg text-finding-status-triaged-text border-finding-status-triaged-border',
     },
     {
       value: 'in_review',
       classes:
-        'bg-[color-mix(in_srgb,var(--color-blue-700)_10%,transparent)] text-blue-1000 border-[color-mix(in_srgb,var(--color-blue-700)_30%,transparent)]',
+        'bg-finding-status-in-review-bg text-finding-status-in-review-text border-finding-status-in-review-border',
     },
     {
       value: 'resolved',
       classes:
-        'bg-[color-mix(in_srgb,var(--color-green-700)_10%,transparent)] text-green-1000 border-[color-mix(in_srgb,var(--color-green-700)_30%,transparent)]',
+        'bg-finding-status-resolved-bg text-finding-status-resolved-text border-finding-status-resolved-border',
     },
     {
       value: 'wont_fix',
-      classes: 'bg-gray-alpha-100 text-gray-900 border-gray-alpha-300',
+      classes:
+        'bg-finding-status-wont-fix-bg text-finding-status-wont-fix-text border-finding-status-wont-fix-border',
     },
     {
       value: 'duplicate',
       classes:
-        'bg-[color-mix(in_srgb,var(--color-purple-700)_10%,transparent)] text-purple-1000 border-[color-mix(in_srgb,var(--color-purple-700)_30%,transparent)]',
+        'bg-finding-status-duplicate-bg text-finding-status-duplicate-text border-finding-status-duplicate-border',
     },
   ];
 
+  // Mirrors production `taskKindClasses` in
+  // apps/web/src/components/memory/task-kind-badge.tsx.
   const taskKindItems = [
     {
       value: 'brainstorm',
       classes:
-        'bg-[color-mix(in_srgb,var(--color-amber-700)_12%,transparent)] text-amber-1000 border-[color-mix(in_srgb,var(--color-amber-700)_30%,transparent)]',
+        'bg-memory-task-kind-brainstorm-bg text-memory-task-kind-brainstorm-text border-memory-task-kind-brainstorm-border',
     },
     {
       value: 'outline',
       classes:
-        'bg-[color-mix(in_srgb,var(--color-blue-700)_10%,transparent)] text-blue-1000 border-[color-mix(in_srgb,var(--color-blue-700)_30%,transparent)]',
+        'bg-memory-task-kind-outline-bg text-memory-task-kind-outline-text border-memory-task-kind-outline-border',
     },
     {
       value: 'chapter',
       classes:
-        'bg-[color-mix(in_srgb,var(--color-teal-700)_10%,transparent)] text-teal-1000 border-[color-mix(in_srgb,var(--color-teal-700)_30%,transparent)]',
+        'bg-memory-task-kind-chapter-bg text-memory-task-kind-chapter-text border-memory-task-kind-chapter-border',
     },
     {
       value: 'research',
       classes:
-        'bg-[color-mix(in_srgb,var(--color-purple-700)_10%,transparent)] text-purple-1000 border-[color-mix(in_srgb,var(--color-purple-700)_30%,transparent)]',
+        'bg-memory-task-kind-research-bg text-memory-task-kind-research-text border-memory-task-kind-research-border',
     },
     {
       value: 'unknown',
-      classes: 'bg-gray-alpha-100 text-gray-900 border-gray-alpha-300',
+      classes:
+        'bg-memory-task-kind-unknown-bg text-memory-task-kind-unknown-text border-memory-task-kind-unknown-border',
     },
   ];
 
@@ -262,8 +269,12 @@ function DomainBadgeSection() {
       <p className="text-copy-16 text-gray-700 mb-2">
         Domain-specific status pills mapped to the DESIGN.md semantic palette.
         Status and Chapter use the standard Badge variants; Finding and TaskKind
-        use the app-locked color-mix classes so each domain state stays distinct
-        in both light and dark.
+        use the{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">finding-status-*</code>{' '}
+        and{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">memory-task-kind-*</code>{' '}
+        token classes (V1.121 P1) so each domain state stays distinct in both
+        light and dark.
       </p>
 
       <p className="text-label-14 text-gray-900 mb-4">Status</p>
@@ -417,24 +428,86 @@ function ButtonSection() {
 
 function CardSection() {
   return (
-    <section>
+    <section data-testid="card-fixtures">
       <SectionHeading id="comp-card">Card</SectionHeading>
-      <p className="text-copy-16 text-gray-700 mb-6">
-        Default card with header, title, description, and content slots.
+      <p className="text-copy-16 text-gray-700 mb-2">
+        Rest surface plus the V1.121 v0.4 additions per DESIGN.md § Card: the{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">interactive</code>{' '}
+        elevation recipe and the additive{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">CardTitle voice</code>{' '}
+        opt-in.
+      </p>
+
+      <p className="text-label-14 text-gray-900 mb-4">
+        Elevation — rest vs interactive (hover the right card)
+      </p>
+      <MatrixCard className="mb-6">
+        <div className="flex flex-wrap items-start gap-6">
+          <div className="flex flex-col items-center gap-2">
+            <Card data-testid="card-rest" className="w-72">
+              <CardHeader>
+                <CardTitle>Rest card</CardTitle>
+                <CardDescription>
+                  Default surface — elevation-1 at rest, no hover recipe.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                Static container for grouped content on background-100.
+              </CardContent>
+            </Card>
+            <VariantLabel label="rest (default)" />
+          </div>
+          <div className="flex flex-col items-center gap-2">
+            <Card data-testid="card-interactive" interactive className="w-72">
+              <CardHeader>
+                <CardTitle>Interactive card</CardTitle>
+                <CardDescription>
+                  Hover lifts to elevation-2 + translateY(-1px) over 160ms
+                  ease-standard.
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                Pressed returns to elevation-1; reduced-motion drops the lift.
+              </CardContent>
+            </Card>
+            <VariantLabel label="interactive (hover me)" />
+          </div>
+        </div>
+      </MatrixCard>
+
+      <p className="text-label-14 text-gray-900 mb-4">
+        Title voice — interface (default) vs content (creative entities)
       </p>
       <MatrixCard>
-        <Card className="max-w-md">
-          <CardHeader>
-            <CardTitle>Card title</CardTitle>
-            <CardDescription>
-              Card description — secondary text below the title.
-            </CardDescription>
-          </CardHeader>
-          <CardContent>
-            Body content goes here. Cards use background-100 fill,
-            gray-alpha-400 border, 24px padding, and an optional shadow.
-          </CardContent>
-        </Card>
+        <div className="flex flex-wrap items-start gap-6">
+          <div className="flex flex-col items-center gap-2">
+            <Card className="w-72">
+              <CardHeader>
+                <CardTitle data-testid="card-title-interface">
+                  Interface title
+                </CardTitle>
+                <CardDescription>
+                  Sans heading-16 — settings, dialogs, dashboards.
+                </CardDescription>
+              </CardHeader>
+            </Card>
+            <VariantLabel label='voice="interface" (default)' />
+          </div>
+          <div className="flex flex-col items-center gap-2">
+            <Card className="w-72">
+              <CardHeader>
+                <CardTitle data-testid="card-title-content" voice="content">
+                  The Lost City
+                </CardTitle>
+                <CardDescription>
+                  Serif display-20 — reserved for creative-entity cards
+                  (work/world).
+                </CardDescription>
+              </CardHeader>
+            </Card>
+            <VariantLabel label='voice="content"' />
+          </div>
+        </div>
       </MatrixCard>
     </section>
   );
@@ -448,11 +521,15 @@ function DialogSection() {
   const [open, setOpen] = useState(false);
 
   return (
-    <section>
+    <section data-testid="dialog-fixtures">
       <SectionHeading id="comp-dialog">Dialog</SectionHeading>
       <p className="text-copy-16 text-gray-700 mb-6">
         Modal dialog — built on Radix for focus trap, escape close, and ARIA.
-        Click the trigger to open.
+        The overlay uses the{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">bg-scrim</code>{' '}
+        token and the panel{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">shadow-elevation-4</code>{' '}
+        (V1.121 scrim convergence). Click the trigger to open.
       </p>
       <MatrixCard>
         <Dialog open={open} onOpenChange={setOpen}>
@@ -726,16 +803,24 @@ function SelectSection() {
 /* ------------------------------------------------------------------ */
 
 function StatesSection() {
+  const [retries, setRetries] = useState(0);
+
   return (
-    <section>
+    <section data-testid="states-fixtures">
       <SectionHeading id="comp-states">States</SectionHeading>
       <p className="text-copy-16 text-gray-700 mb-6">
-        Spinner, Loading, Empty, and Error affordances per DESIGN.md § Voice &amp; Content.
+        Spinner, Loading, Empty, and Error affordances per DESIGN.md § Voice &amp;
+        Content. V1.121 v0.4: the Empty headline uses the serif display tier
+        (content voice) and ErrorState sits on the token-backed{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+          error-surface
+        </code>{' '}
+        fill/border pair.
       </p>
 
       <p className="text-label-14 text-gray-900 mb-4">Spinner</p>
       <MatrixCard className="mb-6">
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-4" data-testid="states-spinner">
           <Spinner />
           <VariantLabel label="Spinner" />
         </div>
@@ -743,23 +828,42 @@ function StatesSection() {
 
       <p className="text-label-14 text-gray-900 mb-4">Loading</p>
       <MatrixCard className="mb-6">
-        <LoadingState label="Loading data…" />
+        <div data-testid="states-loading">
+          <LoadingState label="Loading data…" />
+        </div>
       </MatrixCard>
 
-      <p className="text-label-14 text-gray-900 mb-4">Empty</p>
+      <p className="text-label-14 text-gray-900 mb-4">
+        Empty — serif display headline (content voice)
+      </p>
       <MatrixCard className="mb-6">
-        <EmptyState
-          title="No works yet"
-          description="Create a Work to start the local loop."
-        />
+        <div data-testid="states-empty">
+          <EmptyState
+            title="No works yet"
+            description="Create a Work to start the local loop."
+          />
+        </div>
       </MatrixCard>
 
-      <p className="text-label-14 text-gray-900 mb-4">Error</p>
+      <p className="text-label-14 text-gray-900 mb-4">
+        Error — error-surface tokens + retry action
+      </p>
       <MatrixCard>
-        <ErrorState
-          title="Could not load this view"
-          description="The daemon returned an unexpected error."
-        />
+        <div data-testid="states-error">
+          <ErrorState
+            title="Could not load this view"
+            description="The daemon returned an unexpected error."
+            onRetry={() => setRetries((n) => n + 1)}
+          />
+        </div>
+        {retries > 0 && (
+          <p
+            data-testid="states-error-retry-count"
+            className="text-copy-13 text-gray-500 mt-4"
+          >
+            Retry requested {retries} {retries === 1 ? 'time' : 'times'}.
+          </p>
+        )}
       </MatrixCard>
     </section>
   );
@@ -1042,7 +1146,9 @@ export function ComponentsPage() {
         ; transitional primitives remain on{' '}
         <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">@web-ui/*</code>{' '}
         until their promotion slice lands. Interactive controls (Dialog, Tabs)
-        are functional.
+        are functional. Every matrix cell renders a real component — hover,
+        focus-visible, disabled, and loading states are live; toggle the theme
+        to verify both light and dark (V1.121 states matrix).
       </p>
       <SubNav />
 

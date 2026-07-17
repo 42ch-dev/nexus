@@ -1280,6 +1280,34 @@ describe('Components page — Domain badge matrices', () => {
       ).toBeInTheDocument();
     }
   });
+
+  it('uses finding-status-* / memory-task-kind-* token classes (no color-mix arbitraries)', () => {
+    // Token segment uses dashes (in_review → in-review, wont_fix → wont-fix).
+    const findingCases = [
+      ['open', 'open'],
+      ['triaged', 'triaged'],
+      ['in_review', 'in-review'],
+      ['resolved', 'resolved'],
+      ['wont_fix', 'wont-fix'],
+      ['duplicate', 'duplicate'],
+    ] as const;
+    for (const [value, token] of findingCases) {
+      const badge = screen.getByTestId(`domain-badge-finding-${value}`);
+      expect(badge.className).toContain(`bg-finding-status-${token}-bg`);
+      expect(badge.className).toContain(`text-finding-status-${token}-text`);
+      expect(badge.className).toContain(`border-finding-status-${token}-border`);
+      expect(badge.className).not.toContain('color-mix');
+    }
+
+    const kinds = ['brainstorm', 'outline', 'chapter', 'research', 'unknown'] as const;
+    for (const kind of kinds) {
+      const badge = screen.getByTestId(`domain-badge-task-kind-${kind}`);
+      expect(badge.className).toContain(`bg-memory-task-kind-${kind}-bg`);
+      expect(badge.className).toContain(`text-memory-task-kind-${kind}-text`);
+      expect(badge.className).toContain(`border-memory-task-kind-${kind}-border`);
+      expect(badge.className).not.toContain('color-mix');
+    }
+  });
 });
 
 /* ---- components page — Select fixtures (V1.101 P2 Task 2) --------------- */
@@ -1557,5 +1585,146 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
     expect(within(inspector).getByText('Grounded')).toBeInTheDocument();
     // Confidence value renders numerically (formatConfidence).
     expect(within(inspector).getByText('0.82')).toBeInTheDocument();
+  });
+});
+
+/* ---- components page — v0.4 states matrix (V1.121 P1 T4) --------------- */
+
+describe('Components page — Card v0.4 matrix (interactive + title voice)', () => {
+  beforeEach(() => {
+    mockMatchMedia(false);
+    renderStudio('/components');
+  });
+
+  it('renders rest and interactive cards as real components', () => {
+    expect(screen.getByTestId('card-rest')).toBeInTheDocument();
+    expect(screen.getByTestId('card-interactive')).toBeInTheDocument();
+  });
+
+  it('interactive card carries the v0.4 hover-lift recipe classes', () => {
+    const card = screen.getByTestId('card-interactive');
+    expect(card.className).toContain('hover:shadow-elevation-2');
+    expect(card.className).toContain('motion-safe:hover:-translate-y-px');
+    expect(card.className).toContain('duration-popover');
+    expect(card.className).toContain('motion-reduce:transition-none');
+  });
+
+  it('rest card keeps the static elevation-1 treatment without the recipe', () => {
+    const card = screen.getByTestId('card-rest');
+    expect(card.className).toContain('shadow-card');
+    expect(card.className).not.toContain('hover:shadow-elevation-2');
+  });
+
+  it('CardTitle voice="content" swaps to the serif display tier', () => {
+    const title = screen.getByTestId('card-title-content');
+    expect(title.className).toContain('font-display');
+    expect(title.className).toContain('text-display-20');
+    expect(title.className).toContain('tracking-tight');
+  });
+
+  it('default CardTitle keeps the interface sans treatment', () => {
+    const title = screen.getByTestId('card-title-interface');
+    expect(title.className).toContain('text-heading-16');
+    expect(title.className).toContain('font-heading');
+    expect(title.className).not.toContain('font-display');
+  });
+});
+
+describe('Components page — States v0.4 (error surface + serif empty headline)', () => {
+  beforeEach(() => {
+    mockMatchMedia(false);
+    renderStudio('/components');
+  });
+
+  it('renders Spinner and LoadingState as the loading cells', () => {
+    expect(screen.getByTestId('states-spinner')).toBeInTheDocument();
+    expect(screen.getByTestId('states-loading')).toHaveTextContent('Loading data…');
+  });
+
+  it('EmptyState headline uses the serif display tier (content voice)', () => {
+    const headline = screen
+      .getByTestId('states-empty')
+      .querySelector('.font-display');
+    expect(headline).not.toBeNull();
+    expect(headline!.className).toContain('text-display-24');
+    expect(headline!).toHaveTextContent('No works yet');
+  });
+
+  it('ErrorState uses the error-surface tokens with role="alert"', () => {
+    const alert = within(screen.getByTestId('states-error')).getByRole('alert');
+    expect(alert.className).toContain('bg-error-surface');
+    expect(alert.className).toContain('border-error-surface-border');
+  });
+
+  it('ErrorState retry action is live (fires the callback)', () => {
+    const retry = within(screen.getByTestId('states-error')).getByRole('button', {
+      name: 'Try again',
+    });
+    expect(
+      screen.queryByTestId('states-error-retry-count'),
+    ).not.toBeInTheDocument();
+    fireEvent.click(retry);
+    expect(screen.getByTestId('states-error-retry-count')).toHaveTextContent(
+      'Retry requested 1 time.',
+    );
+  });
+});
+
+describe('Components page — Dialog scrim convergence (V1.121)', () => {
+  beforeEach(() => {
+    mockMatchMedia(false);
+    renderStudio('/components');
+  });
+
+  it('opens with a bg-scrim overlay and an elevation-4 panel', () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Open dialog' }));
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.className).toContain('shadow-elevation-4');
+    expect(document.querySelector('.bg-scrim')).not.toBeNull();
+    // Close so Radix aria-hidden does not leak into later tests in this suite.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close dialog' }));
+  });
+});
+
+describe('Components page — serif discipline (AC-P1-5)', () => {
+  beforeEach(() => {
+    mockMatchMedia(false);
+    renderStudio('/components');
+  });
+
+  it('confines the serif display voice to content-voice opt-ins', () => {
+    // Only the CardTitle voice="content" fixture and the EmptyState headline
+    // may carry font-display on this page — interface components (Button,
+    // Badge, Input, Select, Tabs, Table) stay sans per DESIGN.md §Design
+    // Concept.
+    const allowedContainers = ['card-title-content', 'states-empty'];
+    const serifEls = Array.from(document.querySelectorAll('.font-display'));
+    expect(serifEls.length).toBeGreaterThan(0);
+    for (const el of serifEls) {
+      const inAllowed = allowedContainers.some(
+        (testid) =>
+          el.getAttribute('data-testid') === testid ||
+          el.closest(`[data-testid="${testid}"]`) !== null,
+      );
+      expect(inAllowed).toBe(true);
+    }
+  });
+});
+
+describe('Components page — theme toggle coverage (light/dark)', () => {
+  it('renders a single DOM tree driven by the .dark class toggle', () => {
+    mockMatchMedia(false);
+    renderStudio('/components');
+
+    // Light: the states matrix renders once (no per-theme DOM duplication).
+    expect(screen.getAllByTestId('card-interactive')).toHaveLength(1);
+    expect(document.documentElement.classList.contains('dark')).toBe(false);
+
+    // Toggle to dark — same tree; the token swap is class-driven.
+    act(() => screen.getByLabelText(/Switch to dark theme/).click());
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
+    expect(screen.getAllByTestId('card-interactive')).toHaveLength(1);
+    expect(screen.getByTestId('states-error')).toBeInTheDocument();
+    expect(screen.getByTestId('dialog-fixtures')).toBeInTheDocument();
   });
 });

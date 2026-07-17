@@ -3,36 +3,6 @@
   "updated_at": "2026-07-17",
   "plans": [
     {
-      "id": "2026-07-17-v1.121-component-library-elevation",
-      "title": "P1 - Component library elevation (nexus-ui + keep-web ui)",
-      "file": "plans/2026-07-17-v1.121-component-library-elevation.md",
-      "status": "Todo",
-      "owner": "@project-manager",
-      "agents": [
-        "@frontend-dev"
-      ],
-      "progress": 0,
-      "tags": [
-        "design-system",
-        "components",
-        "nexus-ui"
-      ],
-      "created_at": "2026-07-17",
-      "updated_at": "2026-07-17",
-      "notes": "V1.121 The Literary Engine design-system elevation.",
-      "metadata": {
-        "working_branch": "plan/v1.121-p1-component-library-elevation",
-        "spec_integration_branch": "iteration/v1.121",
-        "merge_target": "iteration/v1.121",
-        "iteration_refs": "V1.121",
-        "iteration_compass": ".mstar/iterations/v1.121/delivery-compass.md",
-        "primary_spec": ".mstar/iterations/v1.121/specs/component-library-elevation.md",
-        "wire_contracts_changed": false,
-        "tier": "Must",
-        "execution_mode": "sdd"
-      }
-    },
-    {
       "id": "2026-07-17-v1.121-app-surfaces-elevation",
       "title": "P2 - App surfaces elevation (shell + setup + Control Room)",
       "file": "plans/2026-07-17-v1.121-app-surfaces-elevation.md",
@@ -2047,6 +2017,44 @@
         "created_at": "2026-07-17",
         "source": "qc1 F-007 (Suggestion) — PM adjudicated residual; pre-existing at iteration base; normalize key structure or amend invariant in a follow-up",
         "tracking_link": ".mstar/plans/2026-07-17-v1.121-design-language-foundation.md"
+      }
+    ],
+    "2026-07-17-v1.121-component-library-elevation": [
+      {
+        "id": "R-V1121P1QC1-S001",
+        "title": "nexus-ui badge.tsx compound variants use raw color-mix (pre-existing pattern divergence)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.121",
+        "lifecycle": "open",
+        "created_at": "2026-07-17",
+        "source": "qc1 S-001 — migrate to nexus-ui-badge-soft-* token set or reuse semantic tint tokens",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.121-component-library-elevation.md"
+      },
+      {
+        "id": "R-V1121P1T3-S001",
+        "title": "2 pre-existing light solid badge pairs (green-700/amber-700 + white ~4.0-4.1:1) fail AA — locked V1.102 contract",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@architect",
+        "target": "post-V1.121",
+        "lifecycle": "open",
+        "created_at": "2026-07-17",
+        "source": "P1 T3 AA verification — V1.102 locked values need architect decision",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.121-component-library-elevation.md"
+      },
+      {
+        "id": "R-V1121P1T1-S001",
+        "title": "Toast enter/exit animation not implemented (state-machine change beyond CVA scope)",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.121",
+        "lifecycle": "open",
+        "created_at": "2026-07-17",
+        "source": "P1 T1 deviation — follow-up motion candidate",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.121-component-library-elevation.md"
       }
     ]
   }

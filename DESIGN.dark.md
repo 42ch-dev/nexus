@@ -228,9 +228,11 @@ components:
   listbox:
     maxHeight: "320px"
 
-  # ── dialog / popover: apps/web dark ──
-  dialog: { backgroundColor: "{colors.background-100}", rounded: "{rounded.popover}", shadow: "shadow-modal", maxWidth: "560px", padding: "{spacing.space-6}" }
+  # ── dialog / popover / sheet: apps/web dark ──
+  dialog: { backgroundColor: "{colors.background-100}", rounded: "{rounded.popover}", shadow: "shadow-modal", maxWidth: "560px", width: "calc(100% - 2rem)", maxHeight: "85vh", padding: "{spacing.space-6}" }
   popover: { backgroundColor: "{colors.background-100}", borderColor: "{colors.gray-alpha-400}", shadow: "shadow-popover", rounded: "{rounded.popover}", itemHeight: "36px" }
+  # Sheet — end-aligned drawer (work-shell right rail). Overlay uses colors.scrim (V1.121 scrim convergence).
+  sheet: { backgroundColor: "{colors.background-100}", borderColor: "{colors.gray-alpha-400}", shadow: "shadow-modal", width: "min(100vw, 280px)" }
 
   # ── tabs: apps/web keep-web dark (V1.106) ──
   tabs:
@@ -247,7 +249,8 @@ components:
     spinner: { size: "16px", color: "{colors.blue-700}" }
     loading: { typography: "{typography.copy-14}", textColor: "{colors.gray-700}", gap: "{spacing.space-2}", paddingBlock: "{spacing.space-6}" }
     empty:
-      titleTypography: "{typography.heading-16}"
+      # V1.121 v0.4: EmptyState headline is content voice (serif display tier).
+      titleTypography: "{typography.display-24}"
       titleColor: "{colors.gray-1000}"
       descriptionTypography: "{typography.copy-14}"
       descriptionColor: "{colors.gray-900}"
@@ -258,6 +261,8 @@ components:
       titleColor: "{colors.red-1000}"
       descriptionTypography: "{typography.copy-14}"
       descriptionColor: "{colors.red-900}"
+      # backgroundColor/borderColor project to --color-error-surface /
+      # --color-error-surface-border (V1.121 P1 T2); dark alphas are stronger.
       backgroundColor: "color-mix(in srgb, {colors.red-700} 8%, transparent)"
       borderColor: "color-mix(in srgb, {colors.red-700} 35%, transparent)"
       rounded: "{rounded.card}"

@@ -9,7 +9,9 @@ import { cn } from '../lib/cn';
  * Height 40px, background-100, gray-1000 text, gray-alpha-400 border,
  * radius-control. Uses `appearance-none` plus a custom chevron overlay so the
  * right inset is explicit in closed, disabled, and invalid states.
- * Error variant uses red-700 border. Disabled: gray-100 fill, gray-700 text.
+ * Error variant uses red-700 border. Disabled (v0.4
+ * `input-select-textarea.disabled`): gray-100 fill, gray-700 text,
+ * gray-alpha-300 border.
  * The two-layer focus ring is global (consumer index.css).
  *
  * Per the V1.101 Select promotion contract:
@@ -36,7 +38,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
         className={cn(
           'h-10 w-full appearance-none rounded-control border bg-background-100 ps-3 pe-8 text-copy-14 text-gray-1000 transition-colors duration-state ease-standard',
           'focus-visible:border-blue-700',
-          'disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed',
+          'disabled:bg-gray-100 disabled:text-gray-700 disabled:border-gray-alpha-300 disabled:cursor-not-allowed',
           invalid ? 'border-red-700' : 'border-gray-alpha-400',
           className,
         )}
