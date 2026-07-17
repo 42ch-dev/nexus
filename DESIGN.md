@@ -1,5 +1,5 @@
 ---
-version: 0.3.0
+version: 0.4.0
 name: "Nexus Design System"
 description: "Unified design contract for all Nexus product surfaces — light/default theme. Canonical token names and values for shared visual identity; consumed by apps/web, apps/design-studio, and @42ch/nexus-ui. Dark theme uses the same token names with dark values in DESIGN.dark.md."
 
@@ -22,9 +22,11 @@ colors:
   brand-cyan-alpha-200: "rgba(37,209,224,0.20)"
 
   # ── Neutral surfaces (apps/web parity — shipped values) ──
+  # V1.121 (v0.4): background-200/300 carry a whisper of warm-paper cast
+  # (The Literary Engine — atmosphere from tint, not decoration).
   background-100: "#ffffff"
-  background-200: "#fafafa"
-  background-300: "#f5f5f5"
+  background-200: "#FAF8F4"
+  background-300: "#F5F2EC"
   gray-100: "#f5f5f5"
   gray-200: "#eeeeee"
   gray-300: "#e0e0e0"
@@ -81,6 +83,15 @@ colors:
   pink-1000: "#831843"
 
 typography:
+  # ── Display tier (V1.121 v0.4 — content voice) ──
+  # Editorial serif for creative-entity titles, reading surfaces, and brand
+  # moments. font-display = self-hosted OFL serif (Source Serif 4; subset
+  # 400/600) + system-serif fallback. Serif discipline: content voice only —
+  # never nav, buttons, tables, badges, or labels (§Design Concept).
+  font-display: "\"Source Serif 4\", Georgia, \"Times New Roman\", ui-serif, serif"
+  display-32: { fontFamily: "{typography.font-display}", fontSize: "32px", fontWeight: 600, lineHeight: 1.25, letterSpacing: "-0.01em" }
+  display-24: { fontFamily: "{typography.font-display}", fontSize: "24px", fontWeight: 600, lineHeight: 1.3, letterSpacing: "-0.01em" }
+  display-20: { fontFamily: "{typography.font-display}", fontSize: "20px", fontWeight: 600, lineHeight: 1.3, letterSpacing: "0" }
   heading-32: { fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif", fontSize: "32px", fontWeight: 650, lineHeight: 1.18, letterSpacing: "-0.025em" }
   heading-24: { fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif", fontSize: "24px", fontWeight: 650, lineHeight: 1.25, letterSpacing: "-0.02em" }
   heading-20: { fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif", fontSize: "20px", fontWeight: 600, lineHeight: 1.3, letterSpacing: "-0.015em" }
@@ -121,6 +132,34 @@ rounded:
   fullscreen: "16px"
   pill: "9999px"
 
+# ── Elevation (V1.121 v0.4) ──
+# Two-part shadows (ambient tight + key soft). Light theme tints shadow color
+# toward ink blue (matches the T2 cast); dark theme uses pure black with
+# stronger alphas. Legacy shadow-* names are preserved as aliases onto the
+# scale — no consumer breakage (§Elevation).
+elevation:
+  elevation-0: "none"
+  elevation-1: "0 1px 2px rgba(15, 23, 42, 0.04), 0 1px 3px rgba(15, 23, 42, 0.03)"
+  elevation-2: "0 2px 4px rgba(15, 23, 42, 0.06), 0 4px 12px -2px rgba(15, 23, 42, 0.05)"
+  elevation-3: "0 1px 1px rgba(15, 23, 42, 0.03), 0 8px 24px -12px rgba(15, 23, 42, 0.18)"
+  elevation-4: "0 1px 1px rgba(15, 23, 42, 0.04), 0 24px 48px -24px rgba(15, 23, 42, 0.30)"
+  shadow-card: "{elevation.elevation-1}"
+  shadow-popover: "{elevation.elevation-3}"
+  shadow-modal: "{elevation.elevation-4}"
+
+# ── Motion (V1.121 v0.4) ──
+# Short, standard-eased (120–220ms); reduced-motion honored per recipe (§Motion).
+# duration-enter/exit are the directional pair for surfaces that appear/dismiss.
+motion:
+  duration-instant: "0ms"
+  duration-state: "120ms"
+  duration-popover: "160ms"
+  duration-modal: "220ms"
+  duration-enter: "200ms"
+  duration-exit: "140ms"
+  ease-standard: "cubic-bezier(0.16, 1, 0.3, 1)"
+  ease-emphasized: "cubic-bezier(0.2, 0.8, 0.2, 1)"
+
 components:
   # ── button: apps/web superset (tertiary + destructive + sizes + disabled) wins ──
   button:
@@ -160,6 +199,12 @@ components:
     default: { backgroundColor: "{colors.background-100}", borderColor: "{colors.gray-alpha-400}", rounded: "{rounded.card}", padding: "{spacing.space-6}", shadow: "shadow-card" }
     compact: { padding: "{spacing.space-4}" }
     hero: { padding: "{spacing.space-8}" }
+    # CardTitle voice prop (V1.121 v0.4; additive opt-in — recipe in body §Card).
+    # interface = sans heading (default, unchanged); content = serif display tier.
+    title:
+      voice:
+        interface: { typography: "{typography.heading-16}" }
+        content: { typography: "{typography.display-20}" }
 
   # ── table: apps/web ──
   table:
@@ -494,11 +539,17 @@ components:
   soul-growth-curve-stroke: "{colors.purple-700}"
 
   # ── canvas: apps/web ──
+  # V1.121 (v0.4) chromatic hygiene: every Tailwind-palette leftover hex is
+  # remapped hue-preserving onto the brand semantic scales — see
+  # §Appendix: Canvas Chromatic Hygiene Mapping. Ambient surfaces carry the
+  # warm-paper whisper (light) per §Design Concept.
   canvas:
-    canvas-surface: "#ebebeb"
+    canvas-surface: "#EBE9E5"
     canvas-grid: "rgba(0,0,0,0.05)"
+    canvas-grid-gap: "20px"
+    canvas-grid-dot-size: "1.5px"
     canvas-node-fill: "#ffffff"
-    canvas-node-fill-hover: "#f5f5f5"
+    canvas-node-fill-hover: "{colors.background-300}"
     canvas-node-border: "rgba(0,0,0,0.14)"
     canvas-node-border-selected: "{colors.blue-700}"
     canvas-edge: "{colors.gray-500}"
@@ -510,20 +561,28 @@ components:
     canvas-write-conflict: "{colors.red-700}"
     canvas-write-success: "{colors.green-700}"
     canvas-write-stale-bg: "color-mix(in srgb, {colors.amber-700} 8%, transparent)"
+    # Canvas node width family (V1.121 v0.4 contract; registered in pipeline P0
+    # as structural --canvas-node-width-* vars, applied to node components P3 — values grep-verified from source)
+    node-width:
+      strategy-root: "260px"
+      strategy-primary: "140px"
+      strategy-secondary: "150px"
+      outline-scene-beat: "160px"
+      default: "176px"
     # Outline/timeline
     canvas-outline-volume-fill: "#F5F5F4"
-    canvas-outline-chapter-card-status-pending: "#94A3B8"
-    canvas-outline-chapter-card-status-drafted: "#3B82F6"
-    canvas-outline-chapter-card-status-completed: "#10B981"
-    canvas-outline-timeline-event-pin: "#F59E0B"
-    canvas-outline-foreshadow-edge: "#A78BFA"
-    canvas-outline-timeline-marker: "#0EA5E9"
-    canvas-outline-conflict-marker: "#EF4444"
+    canvas-outline-chapter-card-status-pending: "{colors.gray-500}"
+    canvas-outline-chapter-card-status-drafted: "{colors.blue-700}"
+    canvas-outline-chapter-card-status-completed: "{colors.green-700}"
+    canvas-outline-timeline-event-pin: "{colors.amber-700}"
+    canvas-outline-foreshadow-edge: "{colors.purple-700}"
+    canvas-outline-timeline-marker: "{colors.teal-700}"
+    canvas-outline-conflict-marker: "{colors.red-700}"
     # Outline Scene/Beat (V1.109 C2 — FB-C2-001)
     canvas-outline-scene-fill: "#FAFAF9"
     canvas-outline-scene-border: "rgba(0,0,0,0.14)"
-    canvas-outline-scene-status-drafted: "#3B82F6"
-    canvas-outline-scene-status-completed: "#10B981"
+    canvas-outline-scene-status-drafted: "{colors.blue-700}"
+    canvas-outline-scene-status-completed: "{colors.green-700}"
     canvas-outline-beat-fill: "#F5F5F4"
     canvas-outline-beat-border: "rgba(0,0,0,0.14)"
     # World KB
@@ -532,25 +591,25 @@ components:
     canvas-worldkb-entity-card-fill-selected: "#EBF2FF"
     canvas-worldkb-entity-card-stroke-default: "rgba(0,0,0,0.14)"
     canvas-worldkb-entity-card-stroke-selected: "{colors.blue-700}"
-    canvas-worldkb-promotion-pending: "#F59E0B"
-    canvas-worldkb-promotion-confirmed: "#10B981"
-    canvas-worldkb-promotion-rejected: "#EF4444"
-    canvas-worldkb-promotion-merged: "#8B5CF6"
-    canvas-worldkb-source-anchor-edge: "#A78BFA"
-    canvas-worldkb-source-anchor-node: "#EDE9FE"
-    canvas-worldkb-computable-badge: "#0EA5E9"
-    canvas-worldkb-conflict-marker: "#EF4444"
-    canvas-worldkb-conflict-marker-fill: "rgba(239,68,68,0.10)"
+    canvas-worldkb-promotion-pending: "{colors.amber-700}"
+    canvas-worldkb-promotion-confirmed: "{colors.green-700}"
+    canvas-worldkb-promotion-rejected: "{colors.red-700}"
+    canvas-worldkb-promotion-merged: "{colors.purple-700}"
+    canvas-worldkb-source-anchor-edge: "{colors.purple-700}"
+    canvas-worldkb-source-anchor-node: "color-mix(in srgb, {colors.purple-700} 10%, transparent)"
+    canvas-worldkb-computable-badge: "{colors.teal-700}"
+    canvas-worldkb-conflict-marker: "{colors.red-700}"
+    canvas-worldkb-conflict-marker-fill: "color-mix(in srgb, {colors.red-700} 10%, transparent)"
     canvas-worldkb-nonspatial-row-highlight: "#F5F5F4"
     canvas-worldkb-focus-ring: "{colors.blue-700}"
-    canvas-worldkb-relationship-edge: "#94A3B8"
-    canvas-worldkb-relationship-edge-default: "#94A3B8"
-    canvas-worldkb-relationship-edge-symmetric: "#8B5CF6"
-    canvas-worldkb-relationship-edge-custom: "#DB2777"
-    canvas-worldkb-relationship-confidence-low: "#E5484D"
-    canvas-worldkb-relationship-confidence-mid: "#B76E00"
-    canvas-worldkb-relationship-confidence-high: "#1F8F4D"
-    canvas-worldkb-relationship-grounded-badge: "rgba(0,107,255,0.12)"
+    canvas-worldkb-relationship-edge: "{colors.gray-500}"
+    canvas-worldkb-relationship-edge-default: "{colors.gray-500}"
+    canvas-worldkb-relationship-edge-symmetric: "{colors.purple-700}"
+    canvas-worldkb-relationship-edge-custom: "{colors.pink-700}"
+    canvas-worldkb-relationship-confidence-low: "{colors.red-700}"
+    canvas-worldkb-relationship-confidence-mid: "{colors.amber-700}"
+    canvas-worldkb-relationship-confidence-high: "{colors.green-700}"
+    canvas-worldkb-relationship-grounded-badge: "color-mix(in srgb, {colors.blue-700} 12%, transparent)"
     canvas-worldkb-relationship-asserted-badge: "rgba(124,58,237,0.12)"
     canvas-worldkb-relationship-inspector-fill: "#FFFFFF"
 
@@ -579,12 +638,13 @@ components:
     textColor: "{colors.gray-1000}"
     shadow: "0px 4px 12px rgba(0,0,0,0.12)"
 
-  # ── reading chrome (V1.91): apps/web ──
+  # ── reading chrome (V1.91; V1.121 v0.4 — display serif absorbed into
+  # typography.font-display, raw rgba tints absorbed into semantic scales) ──
   reading-chrome-novel:
     chapter-title:
-      fontFamily: "Georgia, 'Times New Roman', ui-serif, serif"
+      fontFamily: "{typography.font-display}"
       fontSize: "28px"
-      fontWeight: 700
+      fontWeight: 600
       lineHeight: 1.3
       letterSpacing: "-0.01em"
       color: "{colors.gray-1000}"
@@ -622,13 +682,13 @@ components:
       textDecoration: "underline dotted"
       cursor: "pointer"
     definition-callout:
-      backgroundColor: "rgba(0,133,119,0.06)"
+      backgroundColor: "color-mix(in srgb, {colors.teal-700} 6%, transparent)"
       borderLeft: "3px solid {colors.teal-700}"
       padding: "12px 16px"
       labelColor: "{colors.teal-900}"
       labelFontWeight: 600
     category-badge:
-      backgroundColor: "rgba(183,110,0,0.12)"
+      backgroundColor: "color-mix(in srgb, {colors.amber-700} 12%, transparent)"
       textColor: "{colors.amber-1000}"
   reading-chrome-script:
     character-name:
@@ -717,7 +777,7 @@ components:
 
 # Nexus Design System
 
-<!-- COMPLETENESS_LEVEL: 3 — Production, last audited 2026-07-08 -->
+<!-- COMPLETENESS_LEVEL: 3 — Production, last audited 2026-07-17 (v0.4 Literary Engine re-audit) -->
 
 **This file is the sole normative design SSOT for all Nexus product surfaces.** It defines canonical token names, values, accessibility intent, logo rules, voice guidance, and component-level design tables for `apps/web`, `apps/design-studio`, and `@42ch/nexus-ui`. Dark theme uses the same token names with dark values in [`DESIGN.dark.md`](DESIGN.dark.md).
 
@@ -739,6 +799,22 @@ Product inputs from `.mstar/specs/web-ui-design-requirements.md`:
 - Authoring screens include outline editing, chapter structure tables, and a body read-only context menu.
 - WCAG 2.1 AA is the floor in both light and dark; focus rings, keyboard paths, status text, and reduced motion are non-negotiable.
 - Brand voice: helpful, plain, local-first, and consistent with CLI terms (`Work`, `preset`, `stage`, `finding`, `capability`).
+
+---
+
+## Design Concept — The Literary Engine (V1.121, v0.4)
+
+Nexus is a **writer's atelier resting on a computational engine**. The design language reconciles two registers:
+
+- **Content voice (文学 / 创作):** editorial serif (`font-display` + the `display-*` tier) for creative-entity titles, reading surfaces, and brand moments. Serif = the author's material.
+- **Interface voice (AI / 互联 / 画布 / 计算引擎):** precise system sans, ink-blue atmospheric darks, cyan signal accents, instrument-grade status language. Sans = the engine.
+
+Rules that keep the concept premium rather than themed:
+
+1. **Serif discipline.** Serif appears **only** in content-voice positions: work/world/chapter titles, manuscript headings, empty-state headlines on authoring surfaces, and the brand page. **Never** in nav, buttons, tables, badges, or labels. Opt-in is explicit and greppable (e.g. `components.card.title.voice` = `content`).
+2. **Atmosphere from tint, not decoration.** The dark theme is an *ink chamber*: `background-100…300` and `gray-100…300` carry a deep-blue cast derived from `brand-deep-blue-1000`. Light surfaces keep near-white calm with a whisper of warm-paper cast in `background-200/300` and the canvas. No gradients-as-decoration, no noise textures, no glassmorphism.
+3. **Depth is functional.** The `elevation-0…4` scale communicates interactivity (rest → hover → pressed → dragging), not ornament. See §Elevation for the per-component recipes.
+4. **Motion is short and standard-eased.** 120–220ms, `duration-enter`/`duration-exit` directional pairs, `prefers-reduced-motion` honored per recipe. See §Motion.
 
 ---
 
@@ -813,7 +889,59 @@ Color values live in frontmatter `colors:`. Color tokens follow the Geist-style 
 
 Neutral tokens (`background-*`, `gray-*`, `gray-alpha-*`) are refined for UI contrast and are not part of the VI brief. They carry surface hierarchy, borders, and text — brand colors carry identity and primary action.
 
+**Atmosphere (V1.121):** neutrals are not hue-less. Dark-theme `background-100…300` + `gray-100…300` take a deep-blue cast derived from `brand-deep-blue-1000` (ink chamber); light-theme `background-200/300` take a whisper of warm paper. Lightness stays matched to the pre-v0.4 neutrals so every previously-passing text pairing keeps its AA verdict — see §Contrast (AA, recomputed).
+
 ---
+
+## Contrast (AA, recomputed — V1.121)
+
+Full WCAG 2.1 AA recomputation for the v0.4 ink (dark) and warm-paper (light) surfaces. Every changed pairing appears below; candidates were gated cell-by-cell — **no previously-passing pairing regressed**, so the spec T2 candidate values locked unmodified (no ±1 lightness tuning was needed). Method: WCAG relative luminance over sRGB; alpha overlays resolved to effective colors.
+
+**Verdict key:** **P** = Pass normal text (≥ 4.5:1) · **G** = graphical / large-text only (3.0–4.49:1; icons, markers, borders, ≥ 24px or ≥ 18.66px bold text) · **F** = Fail (< 3.0:1 — decorative/non-text use only).
+
+### Dark theme (ink surfaces)
+
+| Text token | `background-100` `#0A1320` | `background-200` `#0F1A2A` | `background-300` `#152438` | `gray-100` `#141F2E` | `gray-200` `#1E2A3D` | `gray-300` `#283749` | `canvas-surface` `#101D2E` | `scrim` (eff. `#04080D`) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `gray-1000` `#f5f5f5` | 17.1 **P** | 16.0 **P** | 14.4 **P** | 15.2 **P** | 13.3 **P** | 11.1 **P** | 15.6 **P** | 18.4 **P** |
+| `gray-900` `#e0e0e0` | 14.1 **P** | 13.2 **P** | 11.9 **P** | 12.6 **P** | 10.9 **P** | 9.2 **P** | 12.9 **P** | 15.2 **P** |
+| `gray-700` `#a3a3a3` | 7.4 **P** | 6.9 **P** | 6.2 **P** | 6.6 **P** | 5.7 **P** | 4.8 **P** | 6.7 **P** | 8.0 **P** |
+| `gray-500` `#737373` | 3.9 **G** | 3.7 **G** | 3.3 **G** | 3.5 **G** | 3.1 **G** | 2.6 **F** | 3.6 **G** | 4.2 **G** |
+| `brand-cyan` = `blue-700` `#25D1E0` | 10.0 **P** | 9.4 **P** | 8.4 **P** | 8.9 **P** | 7.8 **P** | 6.5 **P** | 9.1 **P** | 10.8 **P** |
+| `brand-deep-blue` `#1E3A5F` | 1.6 **F** | 1.5 **F** | 1.4 **F** | 1.4 **F** | 1.3 **F** | 1.1 **F** | 1.5 **F** | 1.8 **F** |
+| `red-700` `#ff6b6b` | 6.7 **P** | 6.3 **P** | 5.6 **P** | 6.0 **P** | 5.2 **P** | 4.4 **G** | 6.1 **P** | 7.2 **P** |
+| `amber-700` `#ffc043` | 11.4 **P** | 10.7 **P** | 9.6 **P** | 10.2 **P** | 8.9 **P** | 7.4 **P** | 10.4 **P** | 12.3 **P** |
+| `green-700` `#54d58a` | 10.0 **P** | 9.4 **P** | 8.4 **P** | 8.9 **P** | 7.8 **P** | 6.5 **P** | 9.1 **P** | 10.8 **P** |
+| `teal-700` `#4cd8c8` | 10.6 **P** | 10.0 **P** | 8.9 **P** | 9.5 **P** | 8.2 **P** | 6.9 **P** | 9.7 **P** | 11.4 **P** |
+| `purple-700` `#b794ff` | 7.7 **P** | 7.2 **P** | 6.5 **P** | 6.9 **P** | 6.0 **P** | 5.0 **P** | 7.0 **P** | 8.3 **P** |
+| `pink-700` `#ff8ac2` | 8.6 **P** | 8.1 **P** | 7.2 **P** | 7.6 **P** | 6.7 **P** | 5.6 **P** | 7.8 **P** | 9.2 **P** |
+| `brand-white` `#FFFFFF` | 18.6 **P** | 17.5 **P** | 15.7 **P** | 16.6 **P** | 14.5 **P** | 12.1 **P** | 17.0 **P** | 20.1 **P** |
+
+### Light theme (warm-paper surfaces)
+
+| Text token | `background-100` `#ffffff` | `background-200` `#FAF8F4` | `background-300` `#F5F2EC` | `gray-100` `#f5f5f5` | `gray-200` `#eeeeee` | `gray-300` `#e0e0e0` | `canvas-surface` `#EBE9E5` | `scrim` (eff. `#999999`) |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| `gray-1000` `#111111` | 18.9 **P** | 17.8 **P** | 16.9 **P** | 17.3 **P** | 16.3 **P** | 14.3 **P** | 15.6 **P** | 6.6 **P** |
+| `gray-900` `#333333` | 12.6 **P** | 11.9 **P** | 11.3 **P** | 11.6 **P** | 10.9 **P** | 9.6 **P** | 10.4 **P** | 4.4 **G** |
+| `gray-700` `#666666` | 5.7 **P** | 5.4 **P** | 5.1 **P** | 5.3 **P** | 5.0 **P** | 4.4 **G** | 4.7 **P** | 2.0 **F** |
+| `gray-500` `#a3a3a3` | 2.5 **F** | 2.4 **F** | 2.3 **F** | 2.3 **F** | 2.2 **F** | 1.9 **F** | 2.1 **F** | 1.1 **F** |
+| `blue-700` = `brand-deep-blue` `#1E3A5F` | 11.5 **P** | 10.8 **P** | 10.3 **P** | 10.6 **P** | 9.9 **P** | 8.7 **P** | 9.5 **P** | 4.0 **G** |
+| `brand-cyan` `#25D1E0` | 1.9 **F** | 1.8 **F** | 1.7 **F** | 1.7 **F** | 1.6 **F** | 1.4 **F** | 1.5 **F** | 1.5 **F** |
+| `red-700` `#e5484d` | 3.9 **G** | 3.7 **G** | 3.5 **G** | 3.6 **G** | 3.4 **G** | 3.0 **G** | 3.2 **G** | 1.4 **F** |
+| `amber-700` `#b76e00` | 4.0 **G** | 3.8 **G** | 3.6 **G** | 3.7 **G** | 3.5 **G** | 3.0 **G** | 3.3 **G** | 1.4 **F** |
+| `green-700` `#1f8f4d` | 4.1 **G** | 3.9 **G** | 3.7 **G** | 3.8 **G** | 3.6 **G** | 3.1 **G** | 3.4 **G** | 1.5 **F** |
+| `teal-700` `#008577` | 4.5 **P** | 4.3 **G** | 4.1 **G** | 4.2 **G** | 3.9 **G** | 3.4 **G** | 3.8 **G** | 1.6 **F** |
+| `purple-700` `#7c3aed` | 5.7 **P** | 5.4 **P** | 5.1 **P** | 5.2 **P** | 4.9 **P** | 4.3 **G** | 4.7 **P** | 2.0 **F** |
+| `pink-700` `#db2777` | 4.6 **P** | 4.3 **G** | 4.1 **G** | 4.2 **G** | 4.0 **G** | 3.5 **G** | 3.8 **G** | 1.6 **F** |
+
+**Usage rules confirmed by the tables (unchanged in intent, re-verified on v0.4 surfaces):**
+
+- `brand-deep-blue` on dark chrome stays **Fail** — never deep-blue fills on dark surfaces; deep blue appears on cyan fills (6.2:1 **P**) or light surfaces only.
+- `brand-cyan` on light surfaces stays **Fail** — accent/icons/active indicators only, never body text on white or light gray (§Brand Colors cyan rule).
+- `gray-500` is graphical/decorative (edges, separators, tick marks) — not body text; dark values pass graphical (3.0+) except on `gray-300`, where it must not appear (same restriction as pre-v0.4).
+- Light semantic `*-700` accents on white-family surfaces are markers, large text, or status dots — body-copy status text uses the `*-1000` step on its tinted fill (badge soft variants), which is unchanged by v0.4.
+- **Scrim rule:** no text is set directly on the scrim — overlay surfaces (dialog, palette, popover) are opaque `background-100` above it. Light scrim effective `#999999` fails most text pairings by design; dark scrim effective `#04080D` passes all (18.4:1 primary text).
+- Canvas chrome: node borders (1.4–1.8:1 effective) and grid dots (~1.1:1 effective) are whisper-subtle decorative hairlines by intent — node boundaries are carried by fill delta + `elevation-1`, not by border contrast. `canvas-edge`/`canvas-edge-hover` remain graphical lines connecting nodes whose endpoints carry the interactive affordance.
 
 ## Typography
 
@@ -823,9 +951,11 @@ Font families:
 
 - `font-sans`: `Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif` for UI and prose.
 - `font-mono`: `"SFMono-Regular", "Cascadia Code", "Roboto Mono", Consolas, monospace` for IDs, ports, code-like values, and tabular metrics.
+- `font-display` (V1.121): `"Source Serif 4", Georgia, "Times New Roman", ui-serif, serif` — self-hosted OFL serif for the **content voice** (see §Design Concept). Source Serif 4 is vendored as a Latin subset (weights 400 regular + 600 semibold, `font-display: swap`); the system-serif tail of the stack renders until the webfont arrives and wherever the asset is absent.
 
 Role intent:
 
+- `display-*` (V1.121): content-voice titles only — work/world/chapter titles, manuscript headings, empty-state headlines on authoring surfaces, brand page. Sizes mirror the `heading-32/24/20` layout slots so swapping voices does not reflow chrome; serif metrics carry weight 600 and tightened tracking. **Never** substitute `display-*` into interface-voice positions (nav, buttons, tables, badges, labels).
 - `heading-*`: page titles, view titles, card section titles, and dense section titles.
 - `label-*`: form labels, nav labels, table headers, and badge labels.
 - `copy-*`: primary body copy, default UI copy, and dense helper text.
@@ -869,20 +999,36 @@ Spacing values live in frontmatter `spacing:`. Base unit: **4px**. Prefer mechan
 
 ## Elevation
 
-Hierarchy comes from borders and tonal surfaces first. Shadows are subtle and only clarify layers.
+Hierarchy comes from borders and tonal surfaces first. Shadows are subtle, two-part (tight ambient + soft key), and only clarify layers. Values live in frontmatter `elevation:` (V1.121 normalized all five levels to the same recipe; light theme tints the shadow color toward ink blue, dark theme uses pure black with stronger alphas).
+
+| Token | Use | Light | Dark |
+| --- | --- | --- | --- |
+| `elevation-0` | Flat / sunk into surface | `none` | `none` |
+| `elevation-1` | Resting card / canvas node at rest | `0 1px 2px rgba(15,23,42,0.04), 0 1px 3px rgba(15,23,42,0.03)` | `0 1px 2px rgba(0,0,0,0.40), 0 1px 3px rgba(0,0,0,0.30)` |
+| `elevation-2` | Hover / raised (interactive lift) | `0 2px 4px rgba(15,23,42,0.06), 0 4px 12px -2px rgba(15,23,42,0.05)` | `0 2px 4px rgba(0,0,0,0.50), 0 4px 12px -2px rgba(0,0,0,0.40)` |
+| `elevation-3` | Popover / floating (menus, tooltips, command panels) | `0 1px 1px rgba(15,23,42,0.03), 0 8px 24px -12px rgba(15,23,42,0.18)` | `0 1px 1px rgba(0,0,0,0.60), 0 12px 28px -12px rgba(0,0,0,0.70)` |
+| `elevation-4` | Modal / dragging | `0 1px 1px rgba(15,23,42,0.04), 0 24px 48px -24px rgba(15,23,42,0.30)` | `0 1px 1px rgba(0,0,0,0.70), 0 28px 56px -24px rgba(0,0,0,0.85)` |
+
+**Alias chain (no consumer breakage):** the legacy names remain as keys and resolve onto the scale — `shadow-card` → `elevation-1`, `shadow-popover` → `elevation-3`, `shadow-modal` → `elevation-4`. `elevation-2` has no legacy alias; consume it directly (`shadow-elevation-2`) for hover states.
+
+**Interactive recipes:**
+
+| Component | Rest | Hover | Pressed / active | Dragging / selected |
+| --- | --- | --- | --- | --- |
+| Interactive card | `elevation-1` | `elevation-2` + `translateY(-1px)` over 160ms `ease-standard` | `elevation-1`, transform removed | — |
+| Canvas node | `elevation-1` | `elevation-2` | `elevation-1` | `elevation-4` while dragging; selected keeps the two-layer ring (`canvas-node-border-selected`), not a shadow change |
+| Popover / menu | `elevation-3` | — | — | — |
+| Dialog / modal | `elevation-4` | — | — | — |
 
 | Token | Light | Dark | Use |
 | --- | --- | --- | --- |
-| `shadow-card` | `0 1px 2px rgba(0,0,0,0.04)` | `0 1px 2px rgba(0,0,0,0.40)` | Raised dashboard cards |
-| `shadow-popover` | `0 1px 1px rgba(0,0,0,0.03), 0 8px 24px -12px rgba(0,0,0,0.18)` | `0 1px 1px rgba(0,0,0,0.60), 0 12px 28px -12px rgba(0,0,0,0.70)` | Menus, tooltips, command panels |
-| `shadow-modal` | `0 1px 1px rgba(0,0,0,0.04), 0 24px 48px -24px rgba(0,0,0,0.30)` | `0 1px 1px rgba(0,0,0,0.70), 0 28px 56px -24px rgba(0,0,0,0.85)` | Dialogs and blocking overlays |
-| `scrim` | `rgba(0,0,0,0.40)` | `rgba(0,0,0,0.60)` | Backdrop fill behind modal/dialog/command-palette overlays (`bg-scrim`); dims the surface below. Dark value is stronger to separate the overlay from an already-low-luminance dark chrome. |
+| `scrim` | `rgba(0,0,0,0.40)` | `rgba(0,0,0,0.60)` | Backdrop fill behind modal/dialog/command-palette overlays (`bg-scrim`); dims the surface below. Dark value is stronger to separate the overlay from an already-low-luminance dark chrome. Re-checked against the v0.4 ink surfaces — unchanged (§Contrast (AA, recomputed)). |
 
 ---
 
 ## Motion
 
-Motion clarifies state change; it is not decoration. Most dashboard interactions should feel instant.
+Motion clarifies state change; it is not decoration. Most dashboard interactions should feel instant. Values live in frontmatter `motion:`.
 
 | Token | Value | Use |
 | --- | --- | --- |
@@ -890,10 +1036,22 @@ Motion clarifies state change; it is not decoration. Most dashboard interactions
 | `duration-state` | `120ms` | Hover/focus/pressed states |
 | `duration-popover` | `160ms` | Menus, dropdowns, tooltips |
 | `duration-modal` | `220ms` | Dialog open/close |
+| `duration-enter` | `200ms` | Entering surfaces (popover/menu content in, toast in) |
+| `duration-exit` | `140ms` | Dismissing surfaces (exit is always faster than enter) |
 | `ease-standard` | `cubic-bezier(0.16, 1, 0.3, 1)` | Default UI ease |
 | `ease-emphasized` | `cubic-bezier(0.2, 0.8, 0.2, 1)` | Modal/panel enter |
 
-Always honor `prefers-reduced-motion: reduce` by dropping nonessential transform/opacity transitions.
+**Per-component recipes:**
+
+| Component | Recipe |
+| --- | --- |
+| Card hover lift | `elevation-1` → `elevation-2` + `translateY(-1px)`, 160ms `ease-standard`; reverse on leave |
+| Popover / menu | Enter: opacity + `scale(0.98 → 1)`, `duration-enter` `ease-standard`. Exit: opacity out, `duration-exit` |
+| Dialog / modal | Enter: opacity + `translateY(4px → 0)`, `duration-modal` `ease-emphasized`; scrim fades in `duration-enter`. Exit: opacity out `duration-exit` |
+| Canvas node | Rest→hover shadow swap 160ms `ease-standard`; dragging picks up `elevation-4` instantly (`duration-instant`) so the node never lags the cursor |
+| Toast | Enter: slide + fade `duration-enter`; exit: fade `duration-exit` |
+
+Always honor `prefers-reduced-motion: reduce` by dropping nonessential transform/opacity transitions — for every recipe above, reduced motion means instant state change with no transform/opacity animation.
 
 ---
 
@@ -1004,6 +1162,15 @@ Variants: see frontmatter `components.input-select-textarea`. Textarea min heigh
 ### Card
 
 Default, compact, and hero/status card values: see frontmatter `components.card`.
+
+#### Card.Title voice (`components.card.title.voice` — V1.121 contract)
+
+`CardTitle` takes an optional `voice?: 'interface' | 'content'` prop (additive, non-breaking; default `'interface'`):
+
+- `voice="interface"` (default): the current `text-heading-16 font-heading` sans treatment, unchanged. Use on all interface cards (settings, dialogs, table cells, dashboards).
+- `voice="content"`: swaps to `font-display text-display-20 tracking-tight` — the serif content voice, sized to the same 20px slot so the card does not reflow. Use **only** on cards presenting a creative entity (work card, world card, brand-page card).
+
+The opt-in is prop-based (not a class convention, not a CVA variant) so the recipe has exactly one implementation and call sites stay greppable (`voice="content"`). Serif discipline per §Design Concept applies — if the card does not present a creative entity, it does not get the serif.
 
 ### Table
 
@@ -1177,9 +1344,11 @@ Portrait Done step centers the success stack in `data-testid="wizard-step-body"`
 
 Reading-surface tokens (`reading-prose-*`, `reading-chapter-nav`, `reading-progress-indicator`, `reading-maturation-badge`) define the prose column shape and chapter navigation chrome. All token values are in the frontmatter. Theme-independent metrics (`reading-prose-measure`, `reading-prose-line-height`, `reading-prose-paragraph-spacing`) keep the prose column shape stable across light/dark.
 
-### Reading Chrome (V1.91)
+### Reading Chrome (V1.91; v0.4 amend V1.121)
 
 Four work-profile-specific reading rendering tokens define profile-differentiated typography for read-only prose rendering. Token values in frontmatter `components.reading-chrome-novel/essay/game-bible/script`.
+
+**v0.4 amend:** the novel chapter title is the canonical content-voice consumer — its family now resolves through `typography.font-display` (weight 600, matching the vendored serif subset ramp; the CSS block's hardcoded `Georgia` stack is absorbed). The game-bible callout/badge backgrounds resolve as `color-mix` semantic tints on `teal-700`/`amber-700` instead of raw rgba. Reading chrome is a **content-voice** surface by definition (§Design Concept); profile headings that are interface chrome (essay section-heading) stay sans.
 
 ### Annotations (V1.89)
 
@@ -1193,9 +1362,15 @@ Keyword-cluster (network of nodes sized by frequency) and temporal-drift (stacke
 
 ---
 
-## Canvas Surface (V1.70, V1.73)
+## Canvas Surface (V1.70, V1.73; V1.121 v0.4)
 
 Infinite-canvas graph primitives and World KB entity-card / promotion / relationship tokens define the canvas workspace. Token values in frontmatter `components.canvas.*`.
+
+The canvas is the product's signature surface and follows §Design Concept strictly:
+
+- **Ambient.** The canvas field is an atmospheric surface, not a mode flip: ink in dark (`canvas-surface` on the `background-200/300` ink band), warm paper in light. The dot grid is decorative whisper-texture (`canvas-grid` alpha + `canvas-grid-gap` 20px + `canvas-grid-dot-size` 1.5px) — never strong enough to read as instrumentation. Minimap and controls inherit node fills/borders; node chrome carries `elevation` per §Elevation (rest `elevation-1`, hover `elevation-2`, dragging `elevation-4`).
+- **Chromatic hygiene.** Every status/marker/edge color resolves to the brand semantic scales (`blue-700`, `green-700`, `amber-700`, `red-700`, `teal-700`, `purple-700`, `pink-700`, `gray-500`) — Tailwind-palette leftovers were remapped hue-preserving in v0.4. The normative mapping table lives in §Appendix: Canvas Chromatic Hygiene Mapping. Per-surface accent spines stay semantic: strategy = `purple-700`, outline = `amber-700`, World KB = `teal-700`.
+- **Node widths.** `components.canvas.node-width.<role>` fixes the five node width slots (`strategy-root` 260px, `strategy-primary` 140px, `strategy-secondary` 150px, `outline-scene-beat` 160px, `default` 176px) so node geometry is a design decision, not a per-component magic number.
 
 ---
 
@@ -1241,3 +1416,41 @@ CSS variable tokens are projected from the frontmatter into `tooling/design-toke
 | Token | Pre-merge (apps/web) | Post-merge (root) | Reason |
 | --- | --- | --- | --- |
 | *(none)* | — | — | apps/web neutrals/accent values preserved verbatim; no value changes |
+
+---
+
+## Appendix: Canvas Chromatic Hygiene Mapping (V1.121, normative)
+
+Every Tailwind-palette leftover in `components.canvas.*` was remapped **hue-preserving** onto the brand semantic scales in v0.4. This table is the normative record of that mapping, applied verbatim to both DESIGN files; semantic *meaning* of every token (status, promotion state, confidence, edge kind) is unchanged — only the pigment moves on-palette. Post-v0.4, no `components.canvas.*` value may reference a Tailwind-palette hex (`#94A3B8`, `#3B82F6`, `#10B981`, `#F59E0B`, `#A78BFA`, `#0EA5E9`, `#EF4444`, `#8B5CF6`, `#EDE9FE` — grep-enforced).
+
+| Token | v0.3 light | v0.4 light | v0.3 dark | v0.4 dark | Hue family |
+| --- | --- | --- | --- | --- | --- |
+| `canvas-outline-chapter-card-status-pending` | `#94A3B8` | `gray-500` `#a3a3a3` | `#64748B` | `gray-500` `#737373` | slate → neutral gray |
+| `canvas-outline-chapter-card-status-drafted` | `#3B82F6` | `blue-700` | `#60A5FA` | `blue-700` | blue → brand blue (dark: brand-cyan) |
+| `canvas-outline-chapter-card-status-completed` | `#10B981` | `green-700` | `#34D399` | `green-700` | emerald → green |
+| `canvas-outline-timeline-event-pin` | `#F59E0B` | `amber-700` | `#FBBF24` | `amber-700` | amber |
+| `canvas-outline-foreshadow-edge` | `#A78BFA` | `purple-700` | `#C4B5FD` | `purple-700` | violet → purple |
+| `canvas-outline-timeline-marker` | `#0EA5E9` | `teal-700` | `#38BDF8` | `teal-700` | sky → teal |
+| `canvas-outline-conflict-marker` | `#EF4444` | `red-700` | `#F87171` | `red-700` | red |
+| `canvas-outline-scene-status-drafted` | `#3B82F6` | `blue-700` | `#60A5FA` | `blue-700` | blue |
+| `canvas-outline-scene-status-completed` | `#10B981` | `green-700` | `#34D399` | `green-700` | green |
+| `canvas-worldkb-promotion-pending` | `#F59E0B` | `amber-700` | `#FBBF24` | `amber-700` | amber |
+| `canvas-worldkb-promotion-confirmed` | `#10B981` | `green-700` | `#34D399` | `green-700` | green |
+| `canvas-worldkb-promotion-rejected` | `#EF4444` | `red-700` | `#F87171` | `red-700` | red |
+| `canvas-worldkb-promotion-merged` | `#8B5CF6` | `purple-700` | `#A78BFA` | `purple-700` | violet → purple |
+| `canvas-worldkb-source-anchor-edge` | `#A78BFA` | `purple-700` | `#C4B5FD` | `purple-700` | violet → purple |
+| `canvas-worldkb-source-anchor-node` | `#EDE9FE` | `color-mix(purple-700 10%)` | `#2A2440` | `color-mix(purple-700 14%)` | purple alpha wash |
+| `canvas-worldkb-computable-badge` | `#0EA5E9` | `teal-700` | `#38BDF8` | `teal-700` | sky → teal |
+| `canvas-worldkb-conflict-marker` | `#EF4444` | `red-700` | `#F87171` | `red-700` | red |
+| `canvas-worldkb-conflict-marker-fill` | `rgba(239,68,68,0.10)` | `color-mix(red-700 10%)` | `rgba(248,113,113,0.12)` | `color-mix(red-700 12%)` | red alpha wash |
+| `canvas-worldkb-relationship-edge` | `#94A3B8` | `gray-500` | `#64748B` | `gray-500` | slate → neutral gray |
+| `canvas-worldkb-relationship-edge-default` | `#94A3B8` | `gray-500` | `#64748B` | `gray-500` | slate → neutral gray |
+| `canvas-worldkb-relationship-edge-symmetric` | `#8B5CF6` | `purple-700` | `#A78BFA` | `purple-700` | violet → purple |
+| `canvas-worldkb-relationship-edge-custom` | `#DB2777` | `pink-700` (exact value) | `#F472B6` | `pink-700` | pink |
+| `canvas-worldkb-relationship-confidence-low` | `#E5484D` | `red-700` (exact value) | `#FF6B6B` | `red-700` (exact value) | red |
+| `canvas-worldkb-relationship-confidence-mid` | `#B76E00` | `amber-700` (exact value) | `#FFC043` | `amber-700` (exact value) | amber |
+| `canvas-worldkb-relationship-confidence-high` | `#1F8F4D` | `green-700` (exact value) | `#54D58A` | `green-700` (exact value) | green |
+| `canvas-worldkb-relationship-grounded-badge` | `rgba(0,107,255,0.12)` | `color-mix(blue-700 12%)` | `rgba(82,168,255,0.14)` | `color-mix(blue-700 14%)` | blue → brand blue scale (drift alignment — matches the value `tokens.css` already shipped) |
+| `canvas-worldkb-entity-card-fill-selected` | `#EBF2FF` (unchanged) | `#EBF2FF` | `rgba(82,168,255,0.14)` | `color-mix(blue-700 14%)` | blue → brand blue scale (dark drift alignment) |
+
+**Ambient alignment (same pass):** `canvas-surface` `#ebebeb` → `#EBE9E5` warm paper (light) / `#141414` → `#101D2E` ink (dark); `canvas-node-fill` dark `#1a1a1a` → `background-300`; `canvas-node-fill-hover` `#f5f5f5` → `background-300` (light) / `#2a2a2a` → `gray-200` (dark); `canvas-worldkb-entity-card-fill-default/hover` and `canvas-worldkb-relationship-inspector-fill` (dark) likewise resolve onto the ink scale (`background-300` / `gray-200`). New ambient keys: `canvas-grid-gap` `20px`, `canvas-grid-dot-size` `1.5px`, and the `components.canvas.node-width.*` family (see §Canvas Surface).

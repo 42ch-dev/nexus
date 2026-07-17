@@ -29,7 +29,7 @@ export function HomePage() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         {[
-          { label: 'Tokens', path: '/tokens', desc: 'Design scales: colors, typography, spacing, radius' },
+          { label: 'Tokens', path: '/tokens', desc: 'Design scales: colors, typography, spacing, radius, elevation, motion' },
           { label: 'Brand', path: '/brand', desc: 'VI: logos, mark, theme.css swatches' },
           { label: 'Components', path: '/components', desc: 'UI primitive variant/state matrix' },
           { label: 'Voice', path: '/voice', desc: 'Voice & Content rule specimens' },

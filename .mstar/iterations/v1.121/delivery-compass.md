@@ -132,7 +132,7 @@ Each AC is binary and evidence-backed (grep, contrast table, vitest/build log, a
 ## Roadmap Position
 
 - **Current iteration（V1.121）**：Design language v0.4 “Literary Engine” — foundation → component library → app surfaces → canvas/reading, verified in design-studio. Delivers the premium, literary-computational identity the product surfaces currently lack — without shipping new features.
-- **Next iteration**：V1.122 — post-elevation polish + any V1.121 residuals (including deferred self-hosted serif if P0 chose system-stack fallback); candidates: keep-web → package promotion decisions informed by v0.4 usage, canvas performance follow-ups, residual arbitrary-value exceptions. 触发条件：V1.121 shipped + dogfood feedback, owner：product-manager。
+- **Next iteration**：V1.122 — post-elevation polish + any V1.121 residuals (including deferred self-hosted serif if P0 chose system-stack fallback); candidates: CJK serif companion for the display tier (zh-CN content-voice titles currently fall back to system serif for CJK glyphs — evaluate Noto Serif SC subset or accept the documented fallback; see P0 plan `## Roadmap`), keep-web → package promotion decisions informed by v0.4 usage, canvas performance follow-ups, residual arbitrary-value exceptions. 触发条件：V1.121 shipped + dogfood feedback, owner：product-manager。
 - **最终目标**：Every Nexus surface expresses one coherent literary-computational design language, authored in DESIGN.md, projected through tokens, verified in design-studio — no surface-local visual invention (V1.106 studio-first invariant).
 
 ## Delivery Branch Policy

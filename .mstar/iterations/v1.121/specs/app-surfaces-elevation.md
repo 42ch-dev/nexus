@@ -21,7 +21,7 @@ Shell and Control Room surfaces are production-functional but visually generic: 
 2. **First-impression:** setup wizard (3 steps + step indicator), connection setup form, fingerprint gate, splash/launch screens.
 3. **Control Room pages:** Works, Worlds, Chapters (list), Sessions, Schedule, Modules, Findings, Memory (SOUL viz containers), Strategies list, Settings (all four tabs), NotFound.
 4. **Cross-cutting states:** empty/error/loading states on every page (editorial **typography** polish per voice rules — no marketing copy rewrite).
-5. **Token registration only (for P3):** `canvas-node-width-*` component tokens — **no canvas visual change in this plan**.
+5. **Token consumption/verification only (for P3):** `canvas-node-width-*` component tokens — registered in P0; **no canvas visual change in this plan**.
 
 ## Design intent
 
@@ -37,7 +37,7 @@ Shell and Control Room surfaces are production-functional but visually generic: 
 Convert to tokens or document exceptions:
 
 - `pages/findings-page.tsx` (6: `max-w-[180px]`, `w-[150px]`, `w-[130px]`, `grid-cols-[minmax(0,1fr)_360px]`, …)
-- `components/canvas/strategy-nodes.tsx` (3: `min-w-[260px]` root, `min-w-[140px]` primary, `min-w-[150px]` secondary), `components/canvas/outline-canvas/scene-beat-nodes.tsx` (`min-w-[160px]`), `components/canvas/presentational/node-chrome-shell.tsx` (`min-w-[176px]` default) — **register only** as the `canvas-node-width-*` family under DESIGN.md **`components.canvas.node-width.<role>`** per the contract authored in P0 spec T5 (5 values: strategy-root 260px / strategy-primary 140px / strategy-secondary 150px / outline-scene-beat 160px / default 176px). P3 applies them visually. The tailwind utility prefix (`min-w-canvas-node-<role>`) is **fixed at registration** here so P3 consumes one name; the `min-w` class group is added to the twMerge registry per P0 T7.
+- `components/canvas/strategy-nodes.tsx` (3: `min-w-[260px]` root, `min-w-[140px]` primary, `min-w-[150px]` secondary), `components/canvas/outline-canvas/scene-beat-nodes.tsx` (`min-w-[160px]`), `components/canvas/presentational/node-chrome-shell.tsx` (`min-w-[176px]` default) — the `canvas-node-width-*` family under DESIGN.md **`components.canvas.node-width.<role>`** per the contract authored in P0 spec T5 (5 values: strategy-root 260px / strategy-primary 140px / strategy-secondary 150px / outline-scene-beat 160px / default 176px) is **registered in P0** (frontmatter + tokens.css `--canvas-node-width-*` structural vars + tailwind preset `minWidth` + twMerge `min-w` group); the tailwind utility prefix (`min-w-canvas-node-<role>`) is **fixed at P0 registration** so P3 consumes one name. P2 **verifies** the registered utilities resolve (grep/build evidence) while sweeping arbitrary values — **no re-registration, no canvas visual adoption** (P3 applies).
 - `components/settings/connect-daemon-form.tsx` (3 × `text-[13px]` → `text-copy-13`)
 - `components/canvas/outline-canvas/inspectors/chapter-outline-content-editor.tsx`, `scene-beat-nodes.tsx`, `strategy-canvas/canvas-layout.tsx`, `components/path-context-menu.tsx`, `pages/dialogs/validate-preset-dialog.tsx`
 
@@ -47,13 +47,13 @@ Convert to tokens or document exceptions:
 - AC-P2-2 — Setup wizard + connection setup render the v0.4 first-impression treatment (serif welcome, ambient surfaces, refined step indicator) with V1.96 geometry preserved; wizard **flows, step order, and success criteria unchanged** (existing tests green).
 - AC-P2-3 — Every Control Room page adopts content-voice typography where contracted (creative-entity titles serif; chrome sans) — grep evidence both directions (no serif in nav/tables/badges/buttons).
 - AC-P2-4 — Empty/error/loading states on all pages use tokenized tints + editorial **typography** shape (serif headline allowed); no raw color-mix arbitrary classes remain in pages/non-ui components; i18n strings not rewritten for marketing.
-- AC-P2-5 — Arbitrary-value sweep complete: listed files converted to tokens or documented exceptions; `text-[13px]` eliminated; `canvas-node-width-*` family registered under DESIGN.md `components.canvas.node-width.*` (5 keys per P0 spec T5) + projected in tokens.css + tailwind preset + twMerge `min-w` group (no canvas visual adoption required here).
+- AC-P2-5 — Arbitrary-value sweep complete: listed files converted to tokens or documented exceptions; `text-[13px]` eliminated; the P0-registered `canvas-node-width-*` family (DESIGN.md `components.canvas.node-width.*` 5 keys per P0 spec T5 + tokens.css `--canvas-node-width-*` + tailwind preset `minWidth` + twMerge `min-w` group) is **consumed/verified** — the `min-w-canvas-node-*` utilities resolve and nothing is re-registered (no canvas visual adoption required here).
 - AC-P2-6 — All existing page tests pass; new visual states covered by updated/added vitest cases only where behavior changed; `apps/web` typecheck + build green.
 - AC-P2-7 — AA re-verified on ink dark surfaces for shell + page text pairings changed by P0 background shifts (spot-check table on plan).
 
 ## Non-goals
 
-- No canvas surface visual elevation (P3); no reading-surface prose chrome migration (P3). Canvas work here is **token registration only**.
+- No canvas surface visual elevation (P3); no reading-surface prose chrome migration (P3). Canvas work here is **token verification only** (registration shipped in P0).
 - No new routes/features/IA; no settings IA changes (V1.103/V1.106 settled).
 - No i18n/copy marketing rewrites; no desktop native Tauri chrome; no wire/daemon changes.
 
@@ -61,7 +61,7 @@ Convert to tokens or document exceptions:
 
 - `apps/web/src/components/{layout,shell}/…` (sidebar, header, banner, status bar), `components/command-palette.tsx`, `components/work-rail*`.
 - `apps/web/src/pages/**`, `apps/web/src/components/setup/**`, `components/settings/**`.
-- `canvas-node-width-*` family: DESIGN.md `components.canvas.node-width.*` (keys + values authored in P0 spec T5; **registered** here; consumed by P3).
+- `canvas-node-width-*` family: DESIGN.md `components.canvas.node-width.*` (keys + values authored in P0 spec T5; **registered in P0**; verified/consumed here; applied by P3).
 - DESIGN.md v0.4 tokens (P0) + elevated components (P1).
 
 ## Validation plan

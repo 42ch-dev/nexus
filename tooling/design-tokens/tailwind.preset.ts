@@ -19,6 +19,9 @@ import type { Config } from 'tailwindcss';
 /** CSS var helper for color tokens. */
 const cv = (token: string): string => `var(--color-${token})`;
 
+/** CSS var helper for structural (non-color) tokens — e.g. `--canvas-node-width-*`. */
+const sv = (token: string): string => `var(--${token})`;
+
 const preset: Partial<Config> = {
   theme: {
     extend: {
@@ -201,8 +204,38 @@ const preset: Partial<Config> = {
       fontFamily: {
         sans: 'var(--font-sans)',
         mono: 'var(--font-mono)',
+        // V1.121 v0.4 — content-voice editorial serif (DESIGN.md typography.font-display).
+        display: 'var(--font-display)',
       },
       fontSize: {
+        // V1.121 v0.4 display tier — content-voice titles (serif metrics;
+        // fontWeight 600 baked per DESIGN.md typography.display-* contract).
+        // Metrics consume the --text-display-* vars projected in tokens.css —
+        // no handwritten duplicate literals here (single projection chain).
+        'display-32': [
+          sv('text-display-32'),
+          {
+            lineHeight: sv('text-display-32--line-height'),
+            letterSpacing: sv('text-display-32--letter-spacing'),
+            fontWeight: sv('text-display-32--font-weight'),
+          },
+        ],
+        'display-24': [
+          sv('text-display-24'),
+          {
+            lineHeight: sv('text-display-24--line-height'),
+            letterSpacing: sv('text-display-24--letter-spacing'),
+            fontWeight: sv('text-display-24--font-weight'),
+          },
+        ],
+        'display-20': [
+          sv('text-display-20'),
+          {
+            lineHeight: sv('text-display-20--line-height'),
+            letterSpacing: sv('text-display-20--letter-spacing'),
+            fontWeight: sv('text-display-20--font-weight'),
+          },
+        ],
         'heading-32': ['32px', { lineHeight: '1.18', letterSpacing: '-0.025em' }],
         'heading-24': ['24px', { lineHeight: '1.25', letterSpacing: '-0.02em' }],
         'heading-20': ['20px', { lineHeight: '1.3', letterSpacing: '-0.015em' }],
@@ -231,26 +264,54 @@ const preset: Partial<Config> = {
         card: 'var(--shadow-card)',
         popover: 'var(--shadow-popover)',
         modal: 'var(--shadow-modal)',
+        // V1.121 v0.4 elevation scale (DESIGN.md §Elevation) — additive;
+        // legacy card/popover/modal keys above keep resolving via the alias chain.
+        // Flat keys: Tailwind v3 does not flatten nested boxShadow maps into
+        // dash-separated utilities (compile-verified).
+        'elevation-0': 'var(--shadow-elevation-0)',
+        'elevation-1': 'var(--shadow-elevation-1)',
+        'elevation-2': 'var(--shadow-elevation-2)',
+        'elevation-3': 'var(--shadow-elevation-3)',
+        'elevation-4': 'var(--shadow-elevation-4)',
       },
       transitionDuration: {
-        instant: '0ms',
-        state: '120ms',
-        popover: '160ms',
-        modal: '220ms',
+        // DESIGN.md §Motion scale — values projected from --duration-* vars.
+        instant: sv('duration-instant'),
+        state: sv('duration-state'),
+        popover: sv('duration-popover'),
+        modal: sv('duration-modal'),
+        // V1.121 v0.4 directional pair (DESIGN.md §Motion) — additive.
+        enter: 'var(--duration-enter)',
+        exit: 'var(--duration-exit)',
       },
       transitionTimingFunction: {
-        standard: 'cubic-bezier(0.16, 1, 0.3, 1)',
-        emphasized: 'cubic-bezier(0.2, 0.8, 0.2, 1)',
+        // DESIGN.md §Motion easings — values projected from --ease-* vars.
+        standard: sv('ease-standard'),
+        emphasized: sv('ease-emphasized'),
       },
       borderRadius: {
-        control: '6px',
-        card: '8px',
-        popover: '12px',
-        fullscreen: '16px',
-        pill: '9999px',
+        // DESIGN.md rounded: scale — values projected from --radius-* vars.
+        control: sv('radius-control'),
+        card: sv('radius-card'),
+        popover: sv('radius-popover'),
+        fullscreen: sv('radius-fullscreen'),
+        pill: sv('radius-pill'),
         'setup-wizard-surface-input-row-rounded': cv('setup-wizard-surface-input-row-rounded'),
       },
       spacing: {
+        // DESIGN.md spacing: scale (4px base) — the nine DESIGN steps override
+        // the matching Tailwind default numeric steps so the utilities resolve
+        // through the --space-* projection chain (values identical to the
+        // defaults; non-DESIGN fractional steps stay on the Tailwind scale).
+        '1': sv('space-1'),
+        '2': sv('space-2'),
+        '3': sv('space-3'),
+        '4': sv('space-4'),
+        '6': sv('space-6'),
+        '8': sv('space-8'),
+        '10': sv('space-10'),
+        '16': sv('space-16'),
+        '24': sv('space-24'),
         'setup-wizard-step-circle-size': cv('setup-wizard-step-circle-size'),
         'setup-wizard-step-row-height': cv('setup-wizard-step-row-height'),
         'setup-wizard-surface-step-panel-width': cv('setup-wizard-surface-step-panel-width'),
@@ -266,6 +327,17 @@ const preset: Partial<Config> = {
         'setup-wizard-surface-cta-primary-max-width': cv('setup-wizard-surface-cta-primary-max-width'),
         // Dialog — DESIGN.md components.dialog.maxWidth (560px).
         dialog: cv('dialog-max-width'),
+      },
+      // V1.121 v0.4 canvas node width family (DESIGN.md components.canvas.node-width;
+      // registered here, applied to node components in P3 as min-w-canvas-node-*).
+      // Structural (non-color) tokens — referenced via the bare
+      // `--canvas-node-width-*` namespace, not the `--color-*` helper.
+      minWidth: {
+        'canvas-node-strategy-root': sv('canvas-node-width-strategy-root'),
+        'canvas-node-strategy-primary': sv('canvas-node-width-strategy-primary'),
+        'canvas-node-strategy-secondary': sv('canvas-node-width-strategy-secondary'),
+        'canvas-node-outline-scene-beat': sv('canvas-node-width-outline-scene-beat'),
+        'canvas-node-default': sv('canvas-node-width-default'),
       },
       // V1.105 P2: portrait wizard height cap (DESIGN.md setup-wizard-step.wizard-max-height)
       height: {
