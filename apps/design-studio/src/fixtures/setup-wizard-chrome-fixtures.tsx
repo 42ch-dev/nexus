@@ -237,7 +237,7 @@ function WizardChromeCard({
             {currentStep === 'agent' && (
               <>
                 <div className="flex flex-col gap-2">
-                  <h3 className="text-heading-24 font-heading text-gray-1000">
+                  <h3 className="font-display text-display-24 text-gray-1000">
                     {STEP_TITLES.agent}
                   </h3>
                 <p className="text-copy-14 text-gray-900">
@@ -250,7 +250,7 @@ function WizardChromeCard({
             {currentStep === 'workspace' && (
               <div className="my-auto flex flex-col gap-4">
                 <div className="flex flex-col gap-2">
-                  <h3 className="text-heading-24 font-heading text-gray-1000">
+                  <h3 className="font-display text-display-24 text-gray-1000">
                     {STEP_TITLES.workspace}
                   </h3>
                   <p className="text-copy-14 text-gray-900">
@@ -264,7 +264,7 @@ function WizardChromeCard({
               <div className="my-auto flex flex-col items-center gap-4 text-center">
                 <CheckCircle className="h-12 w-12 text-green-800" aria-hidden />
                 <div className="flex flex-col gap-2">
-                  <h3 className="text-heading-24 font-heading text-gray-1000">
+                  <h3 className="font-display text-display-24 text-gray-1000">
                     {STEP_TITLES.done}
                   </h3>
                   <p className="text-copy-14 text-gray-900">

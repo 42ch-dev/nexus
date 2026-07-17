@@ -12,6 +12,10 @@ describe('SetupStepDone', () => {
     });
 
     expect(screen.getByText("You're ready 🎉")).toBeInTheDocument();
+    // V1.121 P2: the celebratory headline is content voice (serif display tier).
+    const title = screen.getByRole('heading', { name: /You're ready/ });
+    expect(title).toHaveClass('font-display');
+    expect(title).toHaveClass('text-display-24');
     expect(
       screen.getByText('Open Nexus to start writing. You can change settings anytime.'),
     ).toBeInTheDocument();

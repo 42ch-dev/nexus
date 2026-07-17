@@ -69,7 +69,7 @@ export function SetupWizardPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background-100 p-6">
+    <div className="flex min-h-screen items-center justify-center bg-background-200 p-6">
       <div
         className="flex h-setup-wizard-wizard-max-height max-h-[85vh] w-full max-w-setup-wizard-step-wizard-max-width flex-col overflow-hidden rounded-popover border border-setup-wizard-surface-card-border bg-setup-wizard-surface-card-bg shadow-modal"
         data-testid="setup-wizard-card"
