@@ -138,6 +138,167 @@ describe('Gallery section rendering', () => {
   );
 });
 
+/* ---- tokens page — V1.121 P0 v0.4 galleries (Task 4) -------------------- */
+
+/** matchMedia mock that distinguishes color-scheme from reduced-motion. */
+function mockMatchMediaFull({
+  dark = false,
+  reducedMotion = false,
+}: { dark?: boolean; reducedMotion?: boolean } = {}) {
+  vi.spyOn(window, 'matchMedia').mockImplementation(
+    (query: string) =>
+      ({
+        matches: query.includes('reduced-motion') ? reducedMotion : dark,
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }) as unknown as MediaQueryList,
+  );
+}
+
+describe('Tokens page — typography gallery (display tier)', () => {
+  beforeEach(() => {
+    mockMatchMediaFull();
+    renderStudio('/tokens');
+  });
+
+  it('renders the display tier rows with font-display + text-display-* classes', () => {
+    for (const label of ['display-32', 'display-24', 'display-20']) {
+      const row = screen.getByTestId(`typo-row-${label}`);
+      const specimen = row.querySelector(`.text-${label}`);
+      expect(specimen).not.toBeNull();
+      expect(specimen!.className).toContain('font-display');
+    }
+  });
+
+  it('keeps heading specimens in the interface voice (font-sans + font-heading)', () => {
+    const row = screen.getByTestId('typo-row-heading-24');
+    const specimen = row.querySelector('.text-heading-24');
+    expect(specimen).not.toBeNull();
+    expect(specimen!.className).toContain('font-sans');
+    expect(specimen!.className).toContain('font-heading');
+    expect(specimen!.className).not.toContain('font-display');
+  });
+
+  it('renders the full sans/mono scale rows', () => {
+    for (const label of [
+      'heading-32', 'heading-24', 'heading-20', 'heading-16',
+      'label-14', 'label-12', 'copy-16', 'copy-14', 'copy-13',
+      'button-14', 'button-12', 'label-12-mono', 'copy-13-mono',
+    ]) {
+      expect(screen.getByTestId(`typo-row-${label}`)).toBeInTheDocument();
+    }
+  });
+});
+
+describe('Tokens page — spacing / radius galleries', () => {
+  beforeEach(() => {
+    mockMatchMediaFull();
+    renderStudio('/tokens');
+  });
+
+  it('renders spacing rows carrying the token width utility', () => {
+    const row = screen.getByTestId('spacing-row-space-4');
+    expect(row.querySelector('.w-4')).not.toBeNull();
+    expect(screen.getByTestId('spacing-row-space-24').querySelector('.w-24')).not.toBeNull();
+  });
+
+  it('renders radius boxes carrying the token rounded-* class', () => {
+    expect(screen.getByTestId('radius-box-card').querySelector('.rounded-card')).not.toBeNull();
+    expect(screen.getByTestId('radius-box-pill').querySelector('.rounded-pill')).not.toBeNull();
+  });
+});
+
+describe('Tokens page — elevation gallery', () => {
+  beforeEach(() => {
+    mockMatchMediaFull();
+    renderStudio('/tokens');
+  });
+
+  it('renders the full elevation-0…4 scale', () => {
+    for (const level of ['elevation-0', 'elevation-1', 'elevation-2', 'elevation-3', 'elevation-4']) {
+      expect(screen.getByTestId(`elevation-swatch-${level}`)).toBeInTheDocument();
+    }
+  });
+
+  it('documents the legacy alias chain onto the scale', () => {
+    const aliases = screen.getByTestId('elevation-aliases');
+    expect(aliases).toHaveTextContent('shadow-card');
+    expect(aliases).toHaveTextContent('→ elevation-1');
+    expect(aliases).toHaveTextContent('shadow-popover');
+    expect(aliases).toHaveTextContent('→ elevation-3');
+    expect(aliases).toHaveTextContent('shadow-modal');
+    expect(aliases).toHaveTextContent('→ elevation-4');
+  });
+});
+
+describe('Tokens page — motion gallery', () => {
+  beforeEach(() => {
+    mockMatchMediaFull();
+    renderStudio('/tokens');
+  });
+
+  it('renders duration and easing token rows', () => {
+    for (const label of [
+      'duration-instant', 'duration-state', 'duration-popover',
+      'duration-modal', 'duration-enter', 'duration-exit',
+      'ease-standard', 'ease-emphasized',
+    ]) {
+      expect(screen.getByTestId(`motion-row-${label}`)).toBeInTheDocument();
+    }
+  });
+
+  it('renders the reduced-motion-aware hover-lift recipe demo', () => {
+    const demo = screen.getByTestId('motion-demo-lift');
+    expect(demo.className).toContain('shadow-elevation-1');
+    expect(demo.className).toContain('hover:shadow-elevation-2');
+    expect(demo.className).toContain('duration-popover');
+    expect(demo.className).toContain('motion-reduce:transition-none');
+  });
+
+  it('toggles the enter/exit demo between duration-enter and duration-exit states', () => {
+    vi.useFakeTimers();
+    try {
+      const chip = screen.getByTestId('motion-demo-enter-exit');
+      expect(chip.className).toContain('opacity-100');
+      expect(chip.className).toContain('duration-enter');
+
+      fireEvent.click(screen.getByTestId('motion-demo-dismiss'));
+      expect(chip.className).toContain('opacity-0');
+      expect(chip.className).toContain('duration-exit');
+
+      fireEvent.click(screen.getByTestId('motion-demo-replay'));
+      act(() => {
+        vi.runAllTimers();
+      });
+      expect(chip.className).toContain('opacity-100');
+      expect(chip.className).toContain('duration-enter');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows the honesty note when prefers-reduced-motion is active', () => {
+    // Re-render with reduced-motion active.
+    vi.restoreAllMocks();
+    mockMatchMediaFull({ reducedMotion: true });
+    renderStudio('/tokens');
+    expect(screen.getByTestId('motion-reduced-note')).toBeInTheDocument();
+  });
+
+  it('links the Motion section from the token sub-nav', () => {
+    const subnav = screen.getByRole('navigation', { name: 'Token sub-sections' });
+    expect(within(subnav).getByRole('link', { name: 'Motion' })).toHaveAttribute(
+      'href',
+      '#tokens-motion',
+    );
+  });
+});
+
 /* ---- surfaces section menu / deep links (V1.102 P2 Task 1) -------------- */
 
 const SURFACES_SECTION_ROUTES = [
