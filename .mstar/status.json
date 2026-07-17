@@ -71,12 +71,12 @@
       "id": "2026-07-17-v1.120-orchestration-ia-icon",
       "title": "P2 - Orchestration IA + sessions + Dock",
       "file": "plans/2026-07-17-v1.120-orchestration-ia-icon.md",
-      "status": "Todo",
+      "status": "Done",
       "owner": "@project-manager",
       "agents": [
         "@frontend-dev"
       ],
-      "progress": 0,
+      "progress": 100,
       "tags": [
         "v1.120",
         "orchestration",
@@ -86,7 +86,7 @@
       ],
       "created_at": "2026-07-17",
       "updated_at": "2026-07-17",
-      "notes": "Phase 1 draft — F3 F4 F7",
+      "notes": "Done — QC Approve w/ residuals (8 registered), QA Pass 5/5 ACs. Merged iteration/v1.120 @ a1b0e5ce.",
       "metadata": {
         "iteration_refs": [
           "V1.120"
@@ -2049,6 +2049,96 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-17-v1.120-shell-form-polish.md",
         "note": "QC3 S-001. Acceptable while DaemonStatusBar is always-mounted."
+      }
+    ],
+    "2026-07-17-v1.120-orchestration-ia-icon": [
+      {
+        "id": "R-V1120P2QC1-S001",
+        "title": "Dead nav.capabilities / route.capabilities i18n keys left in en + zh-CN catalogs",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.120",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-orchestration-ia-icon.md",
+        "note": "QC1 S-001. Prune in i18n-hygiene pass."
+      },
+      {
+        "id": "R-V1120P2QC1-S002",
+        "title": "Mobile-nav test block noisy MSW unhandled-request warnings (works, agent-host/scan)",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.120",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-orchestration-ia-icon.md",
+        "note": "QC1 S-002. Stub or widen useCreatorHandler."
+      },
+      {
+        "id": "R-V1120P2QC1-S003",
+        "title": "capabilities-page.tsx lacks module doc explaining soft-remove intent",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.120",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-orchestration-ia-icon.md",
+        "note": "QC1 S-003. One-line comment for next maintainer."
+      },
+      {
+        "id": "R-V1120P2QC1-B001",
+        "title": "Pre-existing cargo clippy --all-targets baseline errors in nexus-daemon-runtime test code (~342, identical on base)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.120",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-orchestration-ia-icon.md",
+        "note": "QC1 baseline note. 0 errors reference sessions.rs; CI default-target clippy stays green."
+      },
+      {
+        "id": "R-V1120P2QC2-S001",
+        "title": "validate_preset_name does not reject _system.-prefixed author preset names",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.120",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-orchestration-ia-icon.md",
+        "note": "QC2 S-001. Pre-existing; now carries Sessions-filter semantics — such presets would be hidden from Sessions."
+      },
+      {
+        "id": "R-V1120P2QC2-S002",
+        "title": "Redirect test uses mirrored route config, not real App routes",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.120",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-orchestration-ia-icon.md",
+        "note": "QC2 S-002. Drift risk if App.tsx route table changes."
+      },
+      {
+        "id": "R-V1120P2QC2-S003",
+        "title": "get_session / signal_session intentionally unfiltered (direct-id access) — undocumented",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.120",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-orchestration-ia-icon.md",
+        "note": "QC2 S-003. Document design decision."
+      },
+      {
+        "id": "R-V1120P2QC3-S001",
+        "title": "Icons README lacks LaunchServices cache note (killall Dock after icon updates)",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@fullstack-dev",
+        "target": "post-V1.120",
+        "lifecycle": "open",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.120-orchestration-ia-icon.md",
+        "note": "QC3 S-001. Dogfood repeatability nicety."
       }
     ]
   }
