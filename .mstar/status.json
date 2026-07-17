@@ -12,7 +12,7 @@
       "iteration": "V1.121",
       "compass": "v1.121/delivery-compass.md",
       "shipped_at": "2026-07-18",
-      "pr": "(pending — Phase 4)",
+      "pr": "https://github.com/42ch-dev/nexus/pull/155",
       "merge_commit": "(pending)"
     },
     "platform_integration": "paused — local-only until further notice",
