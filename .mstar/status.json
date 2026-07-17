@@ -3,36 +3,6 @@
   "updated_at": "2026-07-17",
   "plans": [
     {
-      "id": "2026-07-17-v1.121-app-surfaces-elevation",
-      "title": "P2 - App surfaces elevation (shell + setup + Control Room)",
-      "file": "plans/2026-07-17-v1.121-app-surfaces-elevation.md",
-      "status": "Todo",
-      "owner": "@project-manager",
-      "agents": [
-        "@frontend-dev"
-      ],
-      "progress": 0,
-      "tags": [
-        "design-system",
-        "apps-web",
-        "shell"
-      ],
-      "created_at": "2026-07-17",
-      "updated_at": "2026-07-17",
-      "notes": "V1.121 The Literary Engine design-system elevation.",
-      "metadata": {
-        "working_branch": "plan/v1.121-p2-app-surfaces-elevation",
-        "spec_integration_branch": "iteration/v1.121",
-        "merge_target": "iteration/v1.121",
-        "iteration_refs": "V1.121",
-        "iteration_compass": ".mstar/iterations/v1.121/delivery-compass.md",
-        "primary_spec": ".mstar/iterations/v1.121/specs/app-surfaces-elevation.md",
-        "wire_contracts_changed": false,
-        "tier": "Must",
-        "execution_mode": "sdd"
-      }
-    },
-    {
       "id": "2026-07-17-v1.121-canvas-reading-elevation",
       "title": "P3 - Canvas & reading elevation + studio galleries",
       "file": "plans/2026-07-17-v1.121-canvas-reading-elevation.md",
@@ -2055,6 +2025,68 @@
         "created_at": "2026-07-17",
         "source": "P1 T1 deviation — follow-up motion candidate",
         "tracking_link": ".mstar/plans/2026-07-17-v1.121-component-library-elevation.md"
+      }
+    ],
+    "2026-07-17-v1.121-app-surfaces-elevation": [
+      {
+        "id": "R-V1121P2QC1-S001",
+        "title": "Two arbitrary values missing from T4 exception list (min-h-[180px] StrategyGroupNode, border-l-[3px] NodeChromeShell accent stripe) - doc completeness only",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.121",
+        "lifecycle": "open",
+        "created_at": "2026-07-18",
+        "source": "qc1 S-001/S-002",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.121-app-surfaces-elevation.md"
+      },
+      {
+        "id": "R-V1121P2QC1-S004",
+        "title": "text-copy-12 dead class - 4 surviving call-sites need DESIGN.md deprecation note or removal",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.121",
+        "lifecycle": "open",
+        "created_at": "2026-07-18",
+        "source": "qc1 S-004",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.121-app-surfaces-elevation.md"
+      },
+      {
+        "id": "R-V1121P2QC3-S001",
+        "title": "--color-sidebar-nav-width uses --color- namespace for width value (pre-existing pattern); structural-namespace cleanup pass recommended",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.121",
+        "lifecycle": "open",
+        "created_at": "2026-07-18",
+        "source": "qc3 S-001 - same class as P1 qc1-F-003/F-006",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.121-app-surfaces-elevation.md"
+      },
+      {
+        "id": "R-V1121P2T1-M001",
+        "title": "MainBanner dark tint 0.10 vs token 0.14 (pre-existing app-wide pattern); needs projected utility or documented exception",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.121",
+        "lifecycle": "open",
+        "created_at": "2026-07-18",
+        "source": "P2 T1 deviation",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.121-app-surfaces-elevation.md"
+      },
+      {
+        "id": "R-V1121P2T3-M001",
+        "title": "chapters-page protected-row alpha 6%->10% shift (DESIGN authored 6%); exact-spec parity needs --color-data-table-row-protected token",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.121",
+        "lifecycle": "open",
+        "created_at": "2026-07-18",
+        "source": "P2 T3 deviation M6",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.121-app-surfaces-elevation.md"
       }
     ]
   }
