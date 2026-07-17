@@ -9,8 +9,10 @@ import { cn } from '@/lib/utils';
  * Dialog — DESIGN.md §Component Primitives/Dialog.
  *
  * Built on @radix-ui/react-dialog for accessibility (focus trap, escape,
- * aria). background-100, radius-popover, shadow-modal, max-width 560px,
- * space-6 padding. Radix handles the portal + scroll lock.
+ * aria). background-100, radius-popover, shadow-elevation-4 (alias
+ * shadow-modal), max-width 560px, space-6 padding. Overlay uses the scrim
+ * token (§Elevation — V1.121 scrim convergence). Radix handles the portal +
+ * scroll lock.
  */
 export const Dialog = DialogPrimitive.Root;
 export const DialogTrigger = DialogPrimitive.Trigger;
@@ -30,10 +32,10 @@ export function DialogContent({
   const { t } = useTranslation('common');
   return (
     <DialogPrimitive.Portal>
-      <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-black/40 data-[state=open]:animate-in" />
+      <DialogPrimitive.Overlay className="fixed inset-0 z-40 bg-scrim data-[state=open]:animate-in" />
       <DialogPrimitive.Content
         className={cn(
-          'fixed left-1/2 top-1/2 z-50 flex max-h-[85vh] w-[calc(100%-2rem)] max-w-[560px] -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-popover border border-gray-alpha-400 bg-background-100 shadow-modal',
+          'fixed left-1/2 top-1/2 z-50 flex max-h-dialog w-dialog max-w-dialog -translate-x-1/2 -translate-y-1/2 flex-col overflow-hidden rounded-popover border border-gray-alpha-400 bg-background-100 shadow-elevation-4',
           className,
         )}
       >

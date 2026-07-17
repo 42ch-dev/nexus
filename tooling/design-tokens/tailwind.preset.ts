@@ -56,6 +56,10 @@ const preset: Partial<Config> = {
         },
         // Overlay scrim — DESIGN.md §Elevation (backdrop fill behind overlays).
         scrim: cv('scrim'),
+        // Error surface — DESIGN.md components.states.error (V1.121 P1 T2;
+        // tokenized ErrorState tint + border, theme-aware via .dark overrides).
+        'error-surface': cv('error-surface'),
+        'error-surface-border': cv('error-surface-border'),
         // Brand primitives — DESIGN.md + @42ch/nexus-ui/theme.css.
         brand: {
           'deep-blue': cv('brand-deep-blue'),
@@ -327,6 +331,15 @@ const preset: Partial<Config> = {
         'setup-wizard-surface-cta-primary-max-width': cv('setup-wizard-surface-cta-primary-max-width'),
         // Dialog — DESIGN.md components.dialog.maxWidth (560px).
         dialog: cv('dialog-max-width'),
+      },
+      // Dialog/Sheet layout metrics — DESIGN.md components.dialog /
+      // components.sheet (V1.121 P1 T2; theme-independent).
+      width: {
+        dialog: cv('dialog-width'),
+        sheet: cv('sheet-width'),
+      },
+      maxHeight: {
+        dialog: cv('dialog-max-height'),
       },
       // V1.121 v0.4 canvas node width family (DESIGN.md components.canvas.node-width;
       // registered here, applied to node components in P3 as min-w-canvas-node-*).

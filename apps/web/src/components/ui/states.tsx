@@ -34,7 +34,8 @@ export function LoadingState({ label }: { label?: string }) {
 /**
  * EmptyState — DESIGN.md §Voice & Content (sentence case, first action).
  * Points the author to the next step (e.g. "No works yet. Create a Work to
- * start the local loop.").
+ * start the local loop."). The headline is content voice (serif display tier)
+ * per §Design Concept — "empty-state headlines on authoring surfaces".
  */
 export function EmptyState({
   title,
@@ -49,7 +50,7 @@ export function EmptyState({
 }) {
   return (
     <div className={cn('flex flex-col items-center justify-center gap-2 py-16 text-center', className)}>
-      <p className="text-heading-16 font-heading text-gray-1000">{title}</p>
+      <p className="font-display text-display-24 text-gray-1000">{title}</p>
       {description && <p className="max-w-sm text-copy-14 text-gray-900">{description}</p>}
       {action && <div className="mt-2">{action}</div>}
     </div>
@@ -76,7 +77,7 @@ export function ErrorState({
   return (
     <div
       role="alert"
-      className="flex flex-col gap-2 rounded-card border border-[color-mix(in_srgb,var(--color-red-700)_30%,transparent)] bg-[color-mix(in_srgb,var(--color-red-700)_6%,transparent)] p-4"
+      className="flex flex-col gap-2 rounded-card border border-error-surface-border bg-error-surface p-4"
     >
       <p className="text-heading-16 font-heading text-red-1000">{title ?? t('error.title')}</p>
       {description && <p className="text-copy-14 text-red-900">{description}</p>}

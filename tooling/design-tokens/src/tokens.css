@@ -128,6 +128,16 @@
 
   /* Dialog sizing — DESIGN.md components.dialog (maxWidth projection). */
   --color-dialog-max-width: 560px;
+  /* Dialog/Sheet sizing — DESIGN.md components.dialog / components.sheet
+     (V1.121 P1 T2; theme-independent layout metrics). */
+  --color-dialog-width: calc(100% - 2rem);
+  --color-dialog-max-height: 85vh;
+  --color-sheet-width: min(100vw, 280px);
+
+  /* Error surface — DESIGN.md components.states.error (tinted fill + border
+     behind the ErrorState primitive; dark overrides in .dark below). */
+  --color-error-surface: color-mix(in srgb, var(--color-red-700) 6%, transparent);
+  --color-error-surface-border: color-mix(in srgb, var(--color-red-700) 30%, transparent);
 
   /* Accent scales — DESIGN.md §Colors/Accent Scales (blue → brand-deep-blue) */
   --color-blue-700: #1e3a5f;
@@ -470,6 +480,11 @@
 
   /* Overlay scrim — DESIGN.dark.md §Elevation (stronger to dim dark chrome). */
   --color-scrim: rgba(0, 0, 0, 0.60);
+
+  /* Error surface — DESIGN.dark.md components.states.error (stronger alphas
+     on the ink surfaces). */
+  --color-error-surface: color-mix(in srgb, var(--color-red-700) 8%, transparent);
+  --color-error-surface-border: color-mix(in srgb, var(--color-red-700) 35%, transparent);
 
   /* Accent scales — brand-cyan interactive scale (DESIGN.dark.md) */
   --color-blue-700: #25d1e0;
