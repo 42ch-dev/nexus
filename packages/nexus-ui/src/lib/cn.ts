@@ -19,6 +19,10 @@ import { extendTailwindMerge } from 'tailwind-merge';
  * being misparsed (font-size → text-color) or never conflicting (unknown
  * classes are kept forever, so e.g. `duration-enter` + `duration-200` would
  * both survive). Threat model: the V1.94 silent-strip class of bug.
+ *
+ * V1.121 P1 adds the dialog/sheet sizing tokens (`w-dialog`, `w-sheet`,
+ * `max-w-dialog`, `max-h-dialog`) and completes the DESIGN.md motion duration
+ * set (`duration-state`, `duration-popover`) against the same groups.
  */
 const customTwMerge = extendTailwindMerge({
   extend: {
@@ -57,7 +61,10 @@ const customTwMerge = extendTailwindMerge({
         'shadow-modal',
       ],
       // V1.121 v0.4: directional motion pair (DESIGN.md §Motion).
-      duration: ['duration-enter', 'duration-exit'],
+      // V1.121 P1: `duration-state` / `duration-popover` complete the DESIGN.md
+      // motion token set (state transitions; menus/popovers — card.tsx in this
+      // package consumes `duration-popover` through cn()).
+      duration: ['duration-enter', 'duration-exit', 'duration-state', 'duration-popover'],
       // V1.121 v0.4: canvas node width family (DESIGN.md components.canvas.node-width;
       // registered in P0 alongside the `--canvas-node-width-*` structural CSS
       // vars + preset minWidth keys, verified/consumed by P2's sweep, applied
@@ -69,9 +76,13 @@ const customTwMerge = extendTailwindMerge({
         'min-w-canvas-node-outline-scene-beat',
         'min-w-canvas-node-default',
       ],
+      // V1.121 P1: dialog/sheet overlay sizing tokens (DESIGN.md
+      // components.dialog/sheet), consumed by apps/web dialog.tsx + sheet.tsx.
+      w: ['w-dialog', 'w-sheet'],
+      'max-w': ['max-w-dialog'],
       // V1.113 P1: DESIGN.md custom token-backed utilities so cn() does not drop them.
       opacity: ['opacity-disabled'],
-      'max-h': ['max-h-listbox'],
+      'max-h': ['max-h-listbox', 'max-h-dialog'],
     },
   },
 });

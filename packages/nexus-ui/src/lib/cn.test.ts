@@ -91,6 +91,45 @@ describe('cn — v0.4 canvas node width family (min-width group)', () => {
   });
 });
 
+describe('cn — P1 dialog/sheet sizing tokens (w / max-w / max-h groups)', () => {
+  it('merges w-dialog against a default width, later wins', () => {
+    expect(cn('w-dialog', 'w-4')).toBe('w-4');
+    expect(cn('w-4', 'w-dialog')).toBe('w-dialog');
+  });
+
+  it('merges w-dialog against w-sheet as one width group', () => {
+    expect(cn('w-dialog', 'w-sheet')).toBe('w-sheet');
+  });
+
+  it('merges max-w-dialog against default max widths', () => {
+    expect(cn('max-w-dialog', 'max-w-md')).toBe('max-w-md');
+    expect(cn('max-w-md', 'max-w-dialog')).toBe('max-w-dialog');
+  });
+
+  it('merges max-h-dialog against default max heights (alongside max-h-listbox)', () => {
+    expect(cn('max-h-dialog', 'max-h-40')).toBe('max-h-40');
+    expect(cn('max-h-listbox', 'max-h-dialog')).toBe('max-h-dialog');
+  });
+
+  it('keeps dialog sizing tokens alongside unrelated utilities', () => {
+    expect(cn('w-dialog', 'text-white')).toBe('w-dialog text-white');
+  });
+});
+
+describe('cn — P1 motion duration completion (transition-duration group)', () => {
+  it('collapses duration-state against duration-popover', () => {
+    expect(cn('duration-state', 'duration-popover')).toBe('duration-popover');
+  });
+
+  it('collapses duration-popover against duration-enter', () => {
+    expect(cn('duration-popover', 'duration-enter')).toBe('duration-enter');
+  });
+
+  it('collapses duration-state against default durations', () => {
+    expect(cn('duration-state', 'duration-150')).toBe('duration-150');
+  });
+});
+
 describe('cn — pre-existing registrations unchanged', () => {
   it('keeps the existing font-size registrations working', () => {
     expect(cn('text-heading-32', 'text-white')).toBe('text-heading-32 text-white');
