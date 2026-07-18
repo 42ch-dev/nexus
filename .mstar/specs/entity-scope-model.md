@@ -411,7 +411,7 @@ P1 adds validation helpers in `nexus-kb` for wire `BlockType` + optional `novel_
 
 **Game-bible profile semantics (body layer — V1.54 P1):** Seven new `BlockType` wire enum variants are registered in `schemas/common/common.schema.json` for game-bible domain concepts. The corresponding body-layer category is `game_bible_category` (string, carried in `KeyBlock.body.attributes`). It does **not** replace wire `block_type`.
 
-Shipped `BlockType` values (snake_case on wire) extended with:
+Game-bible profile `BlockType` additions (V1.54 P1, snake_case on wire):
 
 | Wire `block_type` | UI label | `game_bible_category` | Design section |
 | --- | --- | --- | --- |
@@ -490,7 +490,7 @@ Minimum common `body` shape for Brief-era items (V1.123 Draft):
 
 
 
-Shipped `BlockType` values (snake_case on wire) extended with:
+Script profile `BlockType` additions (V1.55 P3, snake_case on wire):
 
 | Wire `block_type` | UI label | `script_category` | Primary section |
 | --- | --- | --- | --- |

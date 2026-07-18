@@ -412,11 +412,7 @@ The V1.70 α implementation treats React Flow as a presentation and interaction 
 All three surfaces use one shell-level graph envelope before conversion to `@xyflow/react` `nodes` and `edges`:
 
 ```ts
-type CanvasSurfaceKind = "strategy" | "work-outline-timeline" | "timeline" | "world-kb";
-// V1.123 Draft overlay (architect seat 2 — see §3.3.3):
-//   - `timeline` gains Brief↔Narrative layer switcher (Brief = `block_type=era` KeyBlock).
-//   - The union gains a peer `"work-timeline"` (Work Timeline with Narrative↔Moment layer switcher;
-//     Moment = V1.108 Scene/Beat projection from V1.72 `WorkOutline`).
+// `CanvasSurfaceKind` is defined once in §3.3.3 (V1.122 + V1.123 canonical union).
 // The authoritative frontend enum lives in `apps/web/src/components/canvas/canvas-surface-adapter.ts`
 // (SSOT — V1.122 + V1.123 P1/P2 implementers extend it additively).
 
