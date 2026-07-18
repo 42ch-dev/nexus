@@ -32,15 +32,15 @@
   "metadata": {
     "integration_branch_retired": false,
     "iteration_base_branch": "main",
-    "last_integration_branch": "iteration/v1.121",
+    "last_integration_branch": "iteration/v1.122",
     "latest_active_compass": "v1.122/delivery-compass.md",
     "latest_active_iteration": "V1.122",
     "latest_ship": {
       "iteration": "V1.122",
       "compass": "v1.122/delivery-compass.md",
       "shipped_at": "2026-07-18",
-      "pr": null,
-      "merge_commit": null
+      "pr": "https://github.com/42ch-dev/nexus/pull/156",
+      "merge_commit": "68f8e847"
     },
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
