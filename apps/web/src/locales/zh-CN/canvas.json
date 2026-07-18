@@ -618,6 +618,7 @@
     "loading": "正在加载时间轴…",
     "loadError": "无法加载世界时间轴。",
     "canvasAriaLabel": "世界时间轴画布",
+    "orderingDisclaimer": "时间轴顺序根据可用事件数据推断，并非权威年表。",
     "empty": {
       "title": "该世界的时间轴为空",
       "description": "通过世界知识库或章节抽取添加的事件将显示在此处。"

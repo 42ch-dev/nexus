@@ -374,6 +374,94 @@ describe('TimelineCanvas orchestrator — write path + conflict UX (T4)', () => 
   });
 });
 
+// ─── Orchestrator-level visible ordering-disclaimer (PR #156 fix 3) ─────────
+//
+// Mounts the full <TimelineCanvas> with a mocked graph and asserts the
+// visible ordering-disclaimer notice renders when event entities are present
+// (the sighted-user counterpart to the a11y `summarizeGraph` disclaimer that
+// already ships in the CanvasShell live region). The notice must be omitted
+// for zero-event graphs (empty OR context-only) — mirroring the a11y
+// disclaimer condition in `summarizeTimelineGraph`.
+
+describe('TimelineCanvas orchestrator — visible ordering-disclaimer notice (PR #156 fix 3)', () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('renders the visible ordering-disclaimer when the graph has event entities', async () => {
+    // Default `makeMockClient().getWorldKbGraph` returns a single event
+    // entity (`entityEvent()`), so the notice must surface.
+    renderInApp(<TimelineCanvas worldId="world-7" />, { client: makeMockClient() });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('timeline-canvas')).toBeInTheDocument();
+    });
+
+    // The visible notice is present (sighted-user counterpart to the a11y
+    // `summarizeGraph` disclaimer). The i18n key resolves to the English
+    // catalog copy; assert the testid + a substring of the resolved copy.
+    const notice = await screen.findByTestId('timeline-ordering-disclaimer');
+    expect(notice).toBeInTheDocument();
+    expect(notice).toHaveTextContent(
+      /inferred from available event data/i,
+    );
+    // Non-modal semantics: the notice is informational, not an alert. SR
+    // users get the disclaimer via the CanvasShell live region; this visible
+    // notice uses `role="note"` (no aria-live) to avoid duplicate
+    // announcements.
+    expect(notice).toHaveAttribute('role', 'note');
+  });
+
+  it('does NOT render the visible notice for a zero-event (context-only) graph', async () => {
+    // Override the mock client's graph resolver with a Context-only entity
+    // set — no `block_type=event`. There is no when-axis ordering to
+    // disclaim, so the notice must be absent (consistent with the a11y
+    // disclaimer condition in `summarizeTimelineGraph`).
+    const client = makeMockClient();
+    (client.getWorldKbGraph as ReturnType<typeof vi.fn>).mockResolvedValue({
+      entities: [
+        entityEvent({
+          key_block_id: 'kb-char-1',
+          block_type: 'character',
+          canonical_name: 'Aria',
+        }),
+      ],
+      source_anchors: [],
+      relationships: [],
+    });
+
+    renderInApp(<TimelineCanvas worldId="world-7" />, { client });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('timeline-canvas')).toBeInTheDocument();
+    });
+
+    // The canvas branch renders (non-empty graph), but the notice is absent
+    // because no event entity is present.
+    expect(screen.queryByTestId('timeline-ordering-disclaimer')).toBeNull();
+  });
+
+  it('does NOT render the visible notice for an empty graph (empty-state branch)', async () => {
+    // A zero-entity graph surfaces its own honest empty-state copy via
+    // <EmptyState> (§7); the a11y live region therefore does NOT carry the
+    // ordering disclaimer, and neither does the visible notice.
+    const client = makeMockClient();
+    (client.getWorldKbGraph as ReturnType<typeof vi.fn>).mockResolvedValue({
+      entities: [],
+      source_anchors: [],
+      relationships: [],
+    });
+
+    renderInApp(<TimelineCanvas worldId="world-7" />, { client });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('timeline-canvas')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId('timeline-ordering-disclaimer')).toBeNull();
+  });
+});
+
 // ─── buildPatchEntityRequest — orchestrator write helper ────────────────────
 
 describe('buildPatchEntityRequest — V1.73 wire shape', () => {

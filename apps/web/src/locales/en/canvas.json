@@ -629,6 +629,7 @@
     "loading": "Loading Timeline…",
     "loadError": "Could not load the world timeline.",
     "canvasAriaLabel": "World timeline canvas",
+    "orderingDisclaimer": "Timeline order is inferred from available event data; not a canonical chronology.",
     "empty": {
       "title": "This World's timeline is empty",
       "description": "Events you add through World KB or chapter extraction will appear here."

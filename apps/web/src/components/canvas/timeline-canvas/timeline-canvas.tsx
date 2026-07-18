@@ -33,6 +33,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useBeforeUnload } from 'react-router-dom';
 import type { Node } from '@xyflow/react';
+import { Info } from 'lucide-react';
 
 import { CanvasShell } from '@/components/canvas/canvas-shell';
 import { useCanvasSurface, type CanvasSurfaceQueryResult } from '@/components/canvas/use-canvas-surface';
@@ -325,6 +326,16 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
   const isEmpty =
     !graph.data || (graph.data.entities ?? []).length === 0;
 
+  // Visible ordering-disclaimer gate (PR #156 fix 3 — Greptile P1). Mirrors
+  // the adapter's `summarizeTimelineGraph` a11y-disclaimer condition: present
+  // whenever any `block_type=event` entity is rendered, omitted for zero-event
+  // graphs. A graph with only Context entities (no events) does NOT surface
+  // the disclaimer — there is no when-axis ordering to disclaim. The a11y
+  // live region in `CanvasShell` carries the same disclaimer for SR users;
+  // this visible notice is the sighted-user counterpart.
+  const hasEvents =
+    (graph.data?.entities ?? []).some((e) => e.block_type === 'event');
+
   return (
     <div className="flex flex-col gap-3" data-testid="timeline-canvas">
       <TimelineCanvasHeader
@@ -343,6 +354,22 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
             <li key={i}>{err}</li>
           ))}
         </ul>
+      ) : null}
+
+      {hasEvents ? (
+        <div
+          // `role="note"` (no aria-live): the screen-reader live region in
+          // <CanvasShell> already carries the ordering disclaimer for SR
+          // users. This visible notice targets sighted users; SR users can
+          // still discover it via DOM navigation without a duplicate live
+          // announcement.
+          role="note"
+          data-testid="timeline-ordering-disclaimer"
+          className="flex items-start gap-2 rounded-card border border-gray-alpha-400 bg-background-100 px-3 py-2 text-copy-13 text-gray-700 shadow-elevation-2"
+        >
+          <Info className="mt-0.5 h-4 w-4 flex-shrink-0 text-gray-700" aria-hidden />
+          <span>{t('timeline.orderingDisclaimer')}</span>
+        </div>
       ) : null}
 
       {isEmpty ? (
