@@ -21,6 +21,8 @@
 
 > **Promoted to Shipped β (V1.74).** The V1.74 compass ([`v1.74/delivery-compass.md`](../../iterations/v1.74/delivery-compass.md)) ships the typed World KB relationships β slice: schema-backed relationship DTOs, a single structured patch route (`POST /v1/local/worlds/{world_id}/kb/patch-relationship` with action `add | update | remove`), per-row OCC via `expected_version` against `kb_relationships.revision`, structured 409 `WorldKbConflictError` + 422 `WorldKbValidationError`, and `GET /v1/local/worlds/{world_id}/kb/graph` populated with typed `relationships[]`. This promotion is scoped to first-class relationship editing for the World KB surface; relationship confidence weighting/filtering and automatic relationship extraction remain future work.
 
+> **Promoted to Draft (V1.122) — Timeline peer-surface amendment.** The V1.122 compass ([`v1.122/delivery-compass.md`](../iterations/v1.122/delivery-compass.md)) elevates **Timeline** from a lane inside the Outline+Timeline surface to a fourth peer `CanvasSurfaceKind = "timeline"` that is the **World-building hero** surface and the **default World-entry** surface. This is an **additive Draft overlay**: it introduces the Timeline peer surface, its World-building projection contract, its write-boundary reuse plan, the Timeline-as-default-World-entry IA rule, and it repositions the existing `work-outline-timeline` surface narratively as **"Outline (Timeline-companion)"** (the `CanvasSurfaceKind` string `"work-outline-timeline"` is unchanged; only the narrative label is clarified). Shipped β normative text for the Strategy, Outline+Timeline, and World KB surfaces is **not rewritten or removed**. The architect-locked data composition, adapter contract, write boundary, and conflict policy live in §3.3.2; the authoritative iteration-scoped contract is [`timeline-canvas-architecture.md`](../iterations/v1.122/specs/timeline-canvas-architecture.md). `wire_contracts_changed: false` (additive `CanvasSurfaceKind` enum value + reuse of 12 shipped DTOs/routes; no new schemas, no codegen, no daemon Rust change).
+
 ## 1. Product thesis (LOCKED from user re-discussion, 2026-06-26)
 
 Nexus is an **AI-autonomous creative executor** (in the spirit of Codex / a design tool): the human **inputs an Idea** and **steers** the work; the **AI owns the prose writing and execution**. Nexus is **not** a manual editor where the human writes chapter bodies by hand.
@@ -30,6 +32,8 @@ The human steers through three **Canvas (infinite-canvas) surfaces**, not docume
 1. **Strategy (Preset) orchestration canvas** — visualize and edit the preset/strategy that drives the creative workflow. Conceptual rename: **"Preset" → "策略 (Strategy)"** — it is the workflow that drives the creative work (this is already the orchestration engine's mental model: a strategy is a hierarchical state-machine of inner DAGs — graph-of-graphs; `orchestration-engine.md` §3).
 2. **Work outline + timeline canvas** — compile and steer the Work's outline and timeline as a graph, not a linear rich-text document.
 3. **World KB canvas** — browse and steer the World Knowledge Base (entities, events, rules, relationships) as a graph.
+
+> **V1.122 Draft overlay:** a fourth peer surface — **Timeline (World-building hero)** — is added alongside these three shipped surfaces (§3.3.2). Timeline is the default surface for **World entry**; the three surfaces above remain peers, and the Work outline + timeline surface is renamed narratively to **"Outline (Timeline-companion)"** (its `CanvasSurfaceKind` string `"work-outline-timeline"` is unchanged). The shipped β description of the original three surfaces in this section is not rewritten.
 
 **Renderer**: [React Flow](https://reactflow.dev/learn) (`@xyflow/react`) — chosen because a Strategy **is** already a graph/DAG (Directed Acyclic Graph) at runtime (states + edges + converge merge points), so React Flow's node/edge model is a natural projection, not a forced fit.
 
@@ -125,9 +129,9 @@ The mapping is a projection of the runtime model, not a separate design language
 
 **Data source.** The static canvas is fed by the Strategy definition (preset YAML bundle: `states`, `inner_graphs`, prompt/template references). The live overlay is fed by session state from the daemon (`orchestration-engine.md` §3.3, §4.2; `web-ui.md` §5 `NexusClient` boundary). V1.67 promotes preset get/update/delete methods on the TS client, but this Exploration does **not** assert that the Daemon API already exposes the exact graph document shape or session detail needed by the canvas. V1.68 should add or promote read endpoints such as "get Strategy graph projection" and "get session graph overlay" if the existing preset/session detail endpoints are too YAML/raw or too summary-only. (V1.68 implement decision)
 
-### 3.3 Three canvas surfaces
+### 3.3 Four canvas surfaces (V1.122 Draft overlay: Timeline peer elevated)
 
-All three surfaces should share a **Canvas Shell** and specialize by data adapter + node/edge registry:
+All four surfaces share a **Canvas Shell** and specialize by data adapter + node/edge registry:
 
 - Shared shell: React Flow provider, pan/zoom controls, minimap/overview, selection model, command palette, side inspector, validation/errors panel, dirty-state guard, keyboard shortcuts, screen-reader graph summary, and `NexusClient` transport injection (`web-ui.md` §5).
 - Per-surface adapters: convert Daemon API domain DTOs into `nodes`/`edges`, and convert user edits into structured operations (§3.4). No surface may read/write files directly from the browser/Tauri webview.
@@ -135,7 +139,8 @@ All three surfaces should share a **Canvas Shell** and specialize by data adapte
 | Surface | Graph nodes | Graph edges | Custom node types | Primary Daemon API needs |
 | --- | --- | --- | --- | --- |
 | **Strategy (Preset) editor** | Outer states; nested inner-graph steps; Converge join nodes; terminal nodes | Linear, labeled, expression/default, converge incoming/outgoing, inner `depends_on` | State node, join node, inner-graph group, prompt/capability node, manual-wait node, terminal node | Preset list/detail/update/delete/validate; session list/detail for live overlay; capability list for node configuration. |
-| **Work outline + timeline** | Work, volume, chapter, scene/beat, timeline event, foreshadowing/index item | Contains/ordered-after, references, foreshadows, belongs-to-volume, event→chapter realization | Volume lane, chapter card, event node, dependency/foreshadow node, in-node TipTap outline editor | Work/detail, chapter list/detail, outline read/structured patch, structure patch, timeline/index read/patch. The shipped V1.65 outline is a linear rich-text document (`web-ui.md` §13); the canvas projection turns headings/chapters/events into addressable graph nodes instead of replacing the underlying Work model. |
+| **Outline (Timeline-companion)** *(narrative label for `work-outline-timeline`; Work projection surface, default for **Work entry** per V1.118)* | Work, volume, chapter, scene/beat, timeline event, foreshadowing/index item | Contains/ordered-after, references, foreshadows, belongs-to-volume, event→chapter realization | Volume lane, chapter card, event node, dependency/foreshadow node, in-node TipTap outline editor | Work/detail, chapter list/detail, outline read/structured patch, structure patch, timeline/index read/patch. The shipped V1.65 outline is a linear rich-text document (`web-ui.md` §13); the canvas projection turns headings/chapters/events into addressable graph nodes instead of replacing the underlying Work model. Chapter-relative timeline affordances remain here as Timeline-companion UX. |
+| **Timeline (World-building hero)** *(V1.122 Draft overlay; `CanvasSurfaceKind = "timeline"`; default for **World entry**)* | World-scoped KeyBlock entities of `block_type=event` (when-axis events); other entity kinds (character/scene/organization/…) as **Context clusters** off the when-axis. **No Fork marker nodes** — Fork data renders only as optional header-badge chrome from a `WorldState` sidecar (§3.3.2) | Typed `WorldKbRelationshipProjection` edges reused **verbatim** (`WorldKbEdgeData`, V1.74); `source_anchors[]` render as grounding badges. No Timeline-specific edge DTOs (no `ForeshadowEdge`/`RealizesEdge`/`ForkFromEdge`) | `TimelineEventNode` (`layoutHint: 'event'`), `TimelineKeyBlockNode` (`layoutHint: 'context'`, Context cluster) | **Single graph source:** `GET /v1/daemon/worlds/{world_id}/kb/graph` → `WorldKbGraphResponse` (V1.73). **Optional sidecar:** `GET /v1/daemon/narrative/worlds/{world_id}` → `WorldState` for Fork-badge header chrome only. **Write:** `POST /v1/daemon/worlds/{world_id}/kb/patch-entity` (`kb.patch_entity`) **only**. See §3.3.2 for the full architect-locked contract. |
 | **World KB** | World, KeyBlock/entity, event, rule, location, organization, computable block, pending extraction candidate | Typed relationship edges (`WorldKbRelationshipProjection`), source-anchor provenance, timeline membership, rule-applies-to, promotion candidate→confirmed KeyBlock | Entity card, relationship edge, pending-candidate node, source-anchor node, computable-state badge | World detail; KB query/list/detail; pending/confirmed/rejected promotion state; adopt/reject/merge/update. Grounding: `entity-scope-model.md` §1–§2 defines World-owned narrative KB assets; §5.5 defines the World KB promotion state machine; §5.6 defines World KB relationship semantics. |
 
 ### 3.3.1 CanvasSurfaceAdapter recipe (V1.114 P0)
@@ -218,7 +223,72 @@ Surfaces should pass the returned `nodes`, `edges`, `nodeTypes`, `onNodesChange`
 - **Strategy canvas (T2).** `apps/web/src/components/canvas/strategy-canvas/strategy-canvas-adapter.tsx` implements a stable `createStrategyCanvasAdapter(ctxRef)` that reads mutable form/save/conflict state from the context ref. It sets `layoutOptions: { direction: 'TB' }` to opt into top-down auto-layout and exposes the Re-layout action. Inspectors (`StateInspector`, `EdgeInspector`, `PromptInspector`) and the `StrategyAltView` are surface-owned and rendered through the adapter.
 - **World KB canvas (T3).** `apps/web/src/components/canvas/world-kb/world-kb-canvas-adapter.tsx` projects entities, candidates, source anchors, and typed relationships into nodes/edges. It currently omits `layoutOptions` (pass-through), so it relies on the daemon/projections' own spatial hints and manual positioning. Inspectors and `WorldKbAltView` are similarly adapter-driven.
 
-### 3.4 Interface contracts (B2) — Strategy, Outline+Timeline, and World KB β DTOs shipped
+### 3.3.2 Timeline (World-building hero) surface — V1.122 Draft overlay
+
+> **Architect-locked.** This subsection is the normative Draft contract P1 implements. It is **additive** — it does not rewrite the shipped Strategy / Outline+Timeline / World KB β text. The authoritative iteration-scoped elaboration (TypeScript signatures, conformance rules, temporal-positioning rule, empty-state copy, verification gate) is [`timeline-canvas-architecture.md`](../iterations/v1.122/specs/timeline-canvas-architecture.md). Where this overlay and the iteration-scoped architecture spec agree, both are normative; where they differ in detail, the architecture spec is the finer-grained P1 reference.
+
+The Timeline surface is **World-scoped**. It projects a World's history — events, KeyBlock entities, typed relationships — onto a when-axis, making the World's Timeline the central instrument for World building. It is the **default surface for World entry** (§4.5); the Outline (Timeline-companion) surface remains the default for Work entry (V1.118, unchanged).
+
+#### Data composition (LOCKED — single graph source)
+
+- **Graph source (sole):** `GET /v1/daemon/worlds/{world_id}/kb/graph` → **`WorldKbGraphResponse`** (V1.73 shipped; schema `schemas/daemon-api/canvas/world-kb/world-kb-graph-response.schema.json`). The adapter's `projectGraph` accepts `WorldKbGraphResponse` directly — **no wrapper, no join, no second graph endpoint**.
+- **Optional sidecar (header chrome only):** the orchestrator MAY additionally fetch `GET /v1/daemon/narrative/worlds/{world_id}` → `WorldState` (V1.26) to render a read-only Fork-badge in the canvas header when `WorldState.is_fork === true` ("Fork of `<parent_world_id>` at event `<forked_from_event_id>`"). This sidecar is **not a timeline data source**; it MUST NOT be merged into `projectGraph`. If the sidecar is absent or errors, the badge is omitted (graceful degradation) and the Timeline surface remains fully functional.
+- **Explicitly NOT composed:** Work-scoped outline timeline events (`timeline.patch_event` surface) are **not** merged onto the World when-axis in V1.122. They are chapter-relative (`realizes_chapter_id`, foreshadow edges between chapter-linked events) with no World-level merge key; composing them would require N+1 fetches per bound Work. They remain on the Outline (Timeline-companion) surface for Work entry.
+- **Deferred:** a World-scoped `TimelineEvent` HTTP route (`GET /v1/daemon/worlds/{world_id}/timeline`) is out of V1.122 scope (would require daemon Rust changes + a new external route). The domain `schemas/domain/timeline-event.schema.json` table remains reachable only via `NarrativeGateway::get_timeline()` (internal) and the `nexus.timeline.recent.get` host-tool capability. Tracked under `DF-V1122-DEEPER-WB`.
+
+#### Projection mapping (LOCKED)
+
+| `WorldKbGraphResponse` field | Projection on Timeline canvas | Node/edge kind |
+|-------------------------------|-------------------------------|----------------|
+| `entities[block_type=event]` | When-axis events (the "when" content of the World) | `TimelineEventNode` (`layoutHint: 'event'`) |
+| `entities[block_type!=event]` (character / scene / organization / item / info_point / conflict / ability / species / faction / magic_system / technology / deity / level / economy_tier / dialogue / beat / act) | Context clusters off the when-axis; may be positioned near related events via relationship edges | `TimelineKeyBlockNode` (`layoutHint: 'context'`) |
+| `relationships[]` | Typed relationship edges (read-only in V1.122), reusing `WorldKbEdgeData` **verbatim** (V1.74 `WorldKbRelationshipProjection`) | `Edge<TimelineEdgeData>` where `TimelineEdgeData = WorldKbEdgeData` |
+| `source_anchors[]` | Grounding badge data on referenced nodes (optional rendering) | Node metadata; **not** a separate node kind |
+
+`block_type=event` entities ARE World-scoped narrative events per [`entity-scope-model.md`](entity-scope-model.md) §5.1.1 — they ARE the "when-axis" content the Timeline hero surface projects. `foreshadow` / `realizes` / `fork-from` are **Work-outline projection labels**, not Timeline edge DTOs; the Timeline surface introduces **no** new edge types.
+
+#### Node types
+
+- **`TimelineEventNode`** — a `block_type=event` KeyBlock entity projected onto the when-axis. Temporal positioning uses only `body.attributes.occurred_at` when present; the adapter MUST NOT fabricate chronology from `updated_at`, `canonical_name`, `version`, `sequence_no`, or any non-temporal field. Entities without a temporal signal cluster in a temporal-unknown group with honest copy.
+- **`TimelineKeyBlockNode`** — a non-event KeyBlock entity rendered as a Context cluster off the when-axis.
+- **No `TimelineForkMarkerNode`.** Fork data is reserved for the optional canvas-header badge from the `WorldState` sidecar; there are no Fork nodes on the timeline in V1.122. Fork create/merge UI is a Non-Goal (`DF-V1122-FORK-UI`).
+
+#### Adapter contract (LOCKED)
+
+`TimelineCanvasAdapter implements CanvasSurfaceAdapter<WorldKbGraphResponse, TimelineNodeData, WorldKbEdgeData>` per the V1.114 §3.3.1 recipe:
+
+- `TimelineGraph = WorldKbGraphResponse` (alias, no wrapper).
+- `TimelineNodeData = WorldKbEntityProjection & { layoutHint: 'event' | 'context'; occurredAtHint?: string }`.
+- `TimelineEdgeData = WorldKbEdgeData` (verbatim reuse; no extension).
+- Stable factory **`createTimelineCanvasAdapter(ctxRef)`** — the adapter object stays stable across renders (V1.114 §3.3.1 "stable factory that reads from a mutable `React.RefObject` context").
+- `layoutOptions: { direction: 'LR' }` — opts into dagre left-to-right auto-layout. `direction: 'LR'` is a **visual** choice, not a chronology promise.
+- `summarizeGraph(graph)` MUST include the ordering disclaimer ("Ordering inferred from available event data; not a canonical chronology.") whenever any event lacks an `occurredAtHint` temporal signal.
+
+#### Write boundary (LOCKED — reuse only)
+
+- **Permitted:** `POST /v1/daemon/worlds/{world_id}/kb/patch-entity` (`kb.patch_entity`, V1.73 shipped) — edits World-scoped KeyBlock entity `title` / `body` / `aliases` / `block_type` with per-row OCC via `expected_version` against `kb_key_blocks.revision`.
+- **Forbidden from this surface in V1.122:**
+  - `POST /v1/daemon/works/{work_id}/timeline/patch` (`timeline.patch_event`) — Work-scoped; operates on outline markdown, not World entities. P1 regression tests MUST assert non-invocation.
+  - `POST /v1/daemon/worlds/{world_id}/kb/patch-relationship` (`world_kb.patch_relationship`) — read-only on the Timeline surface in V1.122 (deferred to post-MVP; relationship edits remain on the World KB peer surface).
+  - `POST /v1/daemon/worlds/{world_id}/kb/promote-candidate` (`kb.promote_candidate`) — candidate workflow belongs to the World KB surface.
+  - Any raw-file write (`PUT` to a file route, Tauri `invoke` writing to disk) — §2 invariant preserved.
+- **No new Daemon API routes** in V1.122.
+
+#### Conflict policy (LOCKED — reuse only)
+
+- **Reuses** `WorldKbConflictError` (HTTP 409 — stale `expected_version`) and `WorldKbValidationError` (HTTP 422 — domain-rule failure) from V1.73.
+- **No Timeline-specific conflict DTO.** Conflict-modal copy is **world-kb-flavored**, reusing the V1.73 entity-patch / V1.74 relationship-patch copy tokens.
+- The `adaptConflict(error)` adapter method parses the canonical `ErrorResponse` envelope and projects `WorldKbConflictError` / `WorldKbValidationError` `details` to the existing conflict-modal props (Use current / Reapply my edit / Review side-by-side).
+
+#### Honest empty-state
+
+A sparse World timeline is a **valid MVP**. The adapter MUST NOT fabricate event ordering. Empty-state copy explains the spine and offers a CTA to the World KB peer surface (e.g. "This World's timeline is empty. Events you add through World KB or chapter extraction will appear here."). Exact copy strings are pinned in the iteration-scoped architecture spec §7.
+
+#### `wire_contracts_changed: false` verification
+
+V1.122 P1 adds **only** a frontend `CanvasSurfaceKind = "timeline"` enum value + a new adapter module under `apps/web/src/components/canvas/timeline-canvas/`. It reuses 12 shipped DTOs/routes (`WorldKbGraphResponse`, `WorldKbEntityProjection`, `WorldKbRelationshipProjection`, `WorldKbPatchEntityRequest`/`Response`, `WorldKbEntityPatch`, `WorldKbConflictError`, `WorldKbValidationError`, `WorldKbSourceAnchorProjection`, `WorldKbRelationshipKind`, `WorldState`, the graph read route, the narrative sidecar route, and the `kb.patch_entity` write route). No new `schemas/`, no codegen drift, no `@42ch/nexus-contracts` version bump, no daemon Rust change. The eight-point P1 verification gate is pinned in the iteration-scoped architecture spec §9.2.
+
+
 
 The V1.70 α implementation treats React Flow as a presentation and interaction model over domain-owned graph projections for the shipped Strategy read/overlay/Idea-steer slice. V1.71 β promotes the Strategy write operations (`strategy.patch_state`, `strategy.patch_transition`, `strategy.patch_prompt_template`) to schema/codegen-backed DTOs and Daemon API routes. V1.72 β promotes Outline+Timeline patch DTOs and routes. V1.73 β promotes World KB entity/candidate DTOs and routes. V1.74 β promotes typed World KB relationship DTOs and the `world_kb.patch_relationship` route. The graph-document shape below remains the shared design language for projections; for World KB relationships, `WorldKbEdgeData` is now backed by `WorldKbRelationshipProjection` rather than design-only prose.
 
@@ -227,7 +297,7 @@ The V1.70 α implementation treats React Flow as a presentation and interaction 
 All three surfaces use one shell-level graph envelope before conversion to `@xyflow/react` `nodes` and `edges`:
 
 ```ts
-type CanvasSurfaceKind = "strategy" | "work-outline-timeline" | "world-kb";
+type CanvasSurfaceKind = "strategy" | "work-outline-timeline" | "timeline" | "world-kb";
 
 interface CanvasGraphDocument<NodeData, EdgeData> {
   surface: CanvasSurfaceKind;
@@ -275,6 +345,7 @@ The shell owns React Flow provider state, viewport, selection, dirty state, acce
 | Strategy (Preset) | `StrategyNodeData = { stateId, label, stateKind, presetId, innerGraphId?, status?, promptRef?, capabilityRef?, validation[] }` | `StrategyEdgeData = { transitionKind: "next" | "branch" | "default" | "converge" | "depends_on", condition?, convergeStrategy? }` | UI label is Strategy; persisted identifiers remain preset/runtime names until a breaking rename plan. |
 | Work outline + timeline | `WorkNodeData = { workId, nodeKind: "work" | "volume" | "chapter" | "scene" | "beat" | "timeline_event" | "foreshadow", title, status?, path?, tiptapFragment? }` | `WorkEdgeData = { relation: "contains" | "ordered_after" | "references" | "foreshadows" | "belongs_to_volume" | "realizes_event" }` | TipTap is allowed only inside a selected node/fragment, not as whole-document editing. |
 | World KB | `WorldKbNodeData = { worldId, keyBlockId?, candidateId?, entityKind, name, lifecycle: "pending" | "confirmed" | "rejected" | "merged", sourceAnchors[] }` | `WorldKbEdgeData = { relationshipId, relationType: WorldKbRelationshipKind, customLabel?, confidence?, sourceAnchorIds[], symmetric, projectionDirection: "stored" | "symmetric_reverse" }` | Promotion state follows the World KB lifecycle in `entity-scope-model.md` §5.5. Relationship edges are schema-backed in V1.74 via `WorldKbRelationshipProjection`; source-anchor-only provenance edges remain a separate projection class. |
+| **Timeline** *(V1.122 Draft overlay)* | `TimelineNodeData = WorldKbEntityProjection & { layoutHint: "event" \| "context"; occurredAtHint?: string }` — `block_type=event` entities project as `TimelineEventNode` on the when-axis; other entity kinds project as `TimelineKeyBlockNode` Context clusters. **No Fork marker nodes.** | `TimelineEdgeData = WorldKbEdgeData` (**verbatim reuse** of the V1.74 relationship edge DTO; no Timeline-specific edge types — `foreshadow`/`realizes`/`fork-from` are Work-outline projection labels, not Timeline DTOs) | Single graph source `WorldKbGraphResponse` (V1.73); write path `kb.patch_entity` only; conflict reuses `WorldKbConflictError` (409) + `WorldKbValidationError` (422). Full architect-locked contract: §3.3.2 + [`timeline-canvas-architecture.md`](../iterations/v1.122/specs/timeline-canvas-architecture.md). |
 
 V1.73 codegen-derived DTO names use the `world-kb-*.schema.json` filename convention for generated TypeScript/Rust symbols, consistent with the V1.71/V1.72 generated-contract pattern even where schema `title` strings use a verb-prefix form. The shipped names are `WorldKbGraphResponse`, `WorldKbCandidatesResponse`, `WorldKbPatchEntityRequest` / `WorldKbPatchEntityResponse`, `WorldKbPromoteCandidateRequest` / `WorldKbPromoteCandidateResponse`, `WorldKbConflictError`, and `WorldKbValidationError`.
 
@@ -442,7 +513,28 @@ Concrete requirements for the Draft:
 6. **Motion and zoom discipline** — honor reduced-motion preferences for animated edges/auto-layout transitions; maintain visible focus rings at all zoom levels; do not encode state only by edge color.
 7. **Conflict modal accessibility** — when a 409 conflict occurs, announce the conflict and the current-vs-draft difference via an ARIA live region; move focus into the modal and trap it until the author selects an action; return focus to the originating node or inspector control when the modal closes; provide keyboard shortcuts for **Use current**, **Reapply my edit**, **Review side-by-side**, and **Cancel**; respect `prefers-reduced-motion` for any modal or graph animation triggered by the conflict.
 
-### 4.5 User stories (steering loop)
+### 4.5 Canvas entry defaults — World entry vs Work entry (V1.122 Draft overlay)
+
+> **Product lock (V1.122).** Inverts the IA so an author meets a World's history first, not its entity graph. Work entry is unchanged.
+
+The Canvas shell hosts four peer surfaces, but the **default surface on entry** differs by scope:
+
+| Entry context | Route | Default surface | Peer surfaces (one click away via Canvas shell nav) |
+| --- | --- | --- | --- |
+| **World entry** (`/worlds/:worldId`) | `/worlds/:worldId` → **Timeline** (e.g. `/timeline` or index redirect); Worlds list pick-target updates from today's `/kb` to Timeline | **Timeline (World-building hero)** | Outline (Timeline-companion), Strategy, World KB |
+| **Work entry** (`/works/:workId`) | `/works/:workId` → **Outline** (V1.118 canvas-first work shell — **unchanged this iteration**) | **Outline (Timeline-companion)** | (Work-scoped peers per V1.118) |
+
+Reachability rules (MUST hold after P1):
+
+1. **Outline is always one click away** from Timeline — no dead-end hero.
+2. **World KB remains a peer** — the entity graph is not deleted; it only loses default World-entry status.
+3. **Work Outline is not demoted** — authors writing chapters still open Works → Outline; Timeline is the World-building instrument, not a replacement for chapter planning.
+4. **Empty Timeline is honest** — if a World has no `block_type=event` entities yet, show an empty-state explaining the spine (not a blank canvas or a silent redirect to World KB).
+5. **No Outline→Timeline silent redirect** — authors who open a Work must not be bounced to World Timeline.
+
+This rule makes concrete the domain spine-vs-projection model: **World + Timeline are the spine** (truth of the narrative universe); **Work + Outline + Manuscript are projections** onto that spine. Authors should feel: *World first for World building; Work first for chapter writing.* The optional Fork-badge header chrome (§3.3.2 sidecar) may render from `WorldState` on the Timeline surface.
+
+### 4.6 User stories (steering loop)
 
 The author **directs an autonomous executor**; they do not write alongside an assistant. (Pure manual body writing is intentionally absent — the AI owns prose.)
 

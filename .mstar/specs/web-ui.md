@@ -1,6 +1,6 @@
 # Local Web UI (Control Room + Setup → Content-Authoring) — Specification v1
 
-**Status**: Shipped (V1.65) — Control Room + Setup MVP (V1.64) **+ Content-Authoring UI stage (V1.65, §13)**: outline rich-text editor + chapter structure table + structure CRUD (slug/wc/volume/status; title display-only) + body read-only render + browser "Copy path" context menu. Tauri desktop shell + body full-text editor + "open-with" → **V1.66** (compass §0 Q5). QC tri-review Approve (fix-wave-1) + QA Pass. **+ V1.67 Surface Convergence & De-risk (§15)** + **V1.69 Design System Maturation & Canvas Draft** (`apps/web/DESIGN.md` Production + Canvas Draft) + **V1.70 Canvas Strategy Implement α (§16)** + **CI/desktop-build optimization** (parallel ops track; PR path filter narrowed + release-gated full build) + **V1.71 Canvas Strategy Write-Boundary (§17)** (Strategy patch routes, graphRevision conflict policy, conflict modal UX, canvas-write tokens) + **V1.72 Canvas Outline+Timeline β (§18)** (3 outline/timeline patch routes `outline.patch_structure` / `outline.patch_chapter` / `timeline.patch_event` + outlineRevision conflict policy + outline-flavored conflict modal UX + non-spatial alternate views + 8 outline/timeline canvas-write DESIGN.md tokens). V1.71 `wire_contracts_changed: TRUE` for Strategy; V1.72 `wire_contracts_changed: TRUE` for additive Outline+Timeline (`@42ch/nexus-contracts` 0.7.0 → 0.8.0); V1.73 `wire_contracts_changed: TRUE` for additive World KB (`@42ch/nexus-contracts` 0.8.0 → 0.9.0). **V1.74 Shipped** — Canvas World KB Relationships β (§20) with typed relationship edges, `world_kb.patch_relationship`, relationship inspector, non-spatial relationship table, and KB-flavored conflict modal reuse. **V1.94 Draft amendment** — §29 Information Architecture (V1.94): two-tab sidebar, nested nav, footer Profiles switcher, daemon status bar simplification, Strategies unification, button contrast invariant. **V1.98 Draft amendment** — §30 Design Studio dev surface (auxiliary gallery app; not author-facing). **V1.118 Draft amendment** — §29.17 Creation peer groups (Works / Worlds / Memories) + Canvas-first work shell (`WorkShellLayout` + `WorkRail`).
+**Status**: Shipped (V1.65) — Control Room + Setup MVP (V1.64) **+ Content-Authoring UI stage (V1.65, §13)**: outline rich-text editor + chapter structure table + structure CRUD (slug/wc/volume/status; title display-only) + body read-only render + browser "Copy path" context menu. Tauri desktop shell + body full-text editor + "open-with" → **V1.66** (compass §0 Q5). QC tri-review Approve (fix-wave-1) + QA Pass. **+ V1.67 Surface Convergence & De-risk (§15)** + **V1.69 Design System Maturation & Canvas Draft** (`apps/web/DESIGN.md` Production + Canvas Draft) + **V1.70 Canvas Strategy Implement α (§16)** + **CI/desktop-build optimization** (parallel ops track; PR path filter narrowed + release-gated full build) + **V1.71 Canvas Strategy Write-Boundary (§17)** (Strategy patch routes, graphRevision conflict policy, conflict modal UX, canvas-write tokens) + **V1.72 Canvas Outline+Timeline β (§18)** (3 outline/timeline patch routes `outline.patch_structure` / `outline.patch_chapter` / `timeline.patch_event` + outlineRevision conflict policy + outline-flavored conflict modal UX + non-spatial alternate views + 8 outline/timeline canvas-write DESIGN.md tokens). V1.71 `wire_contracts_changed: TRUE` for Strategy; V1.72 `wire_contracts_changed: TRUE` for additive Outline+Timeline (`@42ch/nexus-contracts` 0.7.0 → 0.8.0); V1.73 `wire_contracts_changed: TRUE` for additive World KB (`@42ch/nexus-contracts` 0.8.0 → 0.9.0). **V1.74 Shipped** — Canvas World KB Relationships β (§20) with typed relationship edges, `world_kb.patch_relationship`, relationship inspector, non-spatial relationship table, and KB-flavored conflict modal reuse. **V1.94 Draft amendment** — §29 Information Architecture (V1.94): two-tab sidebar, nested nav, footer Profiles switcher, daemon status bar simplification, Strategies unification, button contrast invariant. **V1.98 Draft amendment** — §30 Design Studio dev surface (auxiliary gallery app; not author-facing). **V1.118 Draft amendment** — §29.17 Creation peer groups (Works / Worlds / Memories) + Canvas-first work shell (`WorkShellLayout` + `WorkRail`). **V1.122 Draft amendment** — §29.18 Three-pillar pivot (Harness/Canvas/Computable) + Timeline-first Canvas IA: Timeline is the default surface for **World entry** (`/worlds/:worldId` → Timeline); Work entry stays Outline (V1.118); `CanvasSurfaceKind = "timeline"` added as a peer surface. `wire_contracts_changed: false`.
 **Document class**: Feature line  
 **Created**: 2026-06-24  
 **Scope**: Nexus local Web UI product contract — placement (`apps/web`), stack, daemon-served model, `tauri-api` adapter boundary, MVP surface (Control Room + Setup), Content-Authoring stage (V1.65), Tauri / body-editor roadmap (V1.66), and strict separation from the private cloud SaaS  
@@ -1396,3 +1396,35 @@ Outline and World KB are **not** Creation peer groups. Strategy remains under Or
 #### 29.17.3 Contract boundary
 
 `wire_contracts_changed: false`. Studio-first for new shell chrome per repo-root `DESIGN.md`.
+
+### 29.18 V1.122 Amendments — Three-pillar pivot + Timeline-first Canvas IA (Draft)
+
+**Status:** Draft (V1.122) — P0 spec refactor in flight on `iteration/v1.122`; P1 implement authority in iteration workspace until P5 merge.
+
+**Iteration SSOT:** [`.mstar/iterations/v1.122/delivery-compass.md`](../iterations/v1.122/delivery-compass.md) (Three-Pillar Pivot: Harness · Canvas · Computable).
+
+**Implement authority (iteration workspace):**
+
+| Plan | Spec | Scope |
+| --- | --- | --- |
+| P0 — Three-pillar spec refactor | [`pillar-framing.md`](../iterations/v1.122/specs/pillar-framing.md) + [`timeline-canvas-architecture.md`](../iterations/v1.122/specs/timeline-canvas-architecture.md) | Canonize Harness/Canvas/Computable in STRATEGY + CONCEPTS; `CanvasSurfaceKind = "timeline"` Draft overlay; corpus pillar cross-refs |
+| P1 — Timeline-first Canvas | [`timeline-hero-product-spec.md`](../iterations/v1.122/specs/timeline-hero-product-spec.md) + [`timeline-canvas-architecture.md`](../iterations/v1.122/specs/timeline-canvas-architecture.md) | Elevate Timeline to peer surface + World-building projection + **World-entry default = Timeline** |
+
+#### 29.18.1 Canvas IA — World entry default flips to Timeline (P1)
+
+V1.122 inverts the **World-entry** default so an author meets a World's history first, not its entity graph. **Work entry is unchanged.**
+
+| Entry context | Route | Default surface (V1.122) | Prior default |
+| --- | --- | --- | --- |
+| **World entry** | `/worlds/:worldId` → **Timeline** (index redirect / `/timeline`); Worlds list pick-target updates | **Timeline (World-building hero)** | `/worlds/:worldId/kb` (World KB) |
+| **Work entry** | `/works/:workId` → Outline | **Outline (Timeline-companion)** — **unchanged** (V1.118 §29.17.2) | Outline (V1.118) |
+
+The Canvas shell now hosts **four** peer surfaces: Strategy / Outline (Timeline-companion) / **Timeline** / World KB. The `CanvasSurfaceKind` enum gains `"timeline"` as an additive peer value. The Outline (Timeline-companion) surface keeps its chapter-relative timeline lane (Work projection); Timeline (World-building hero) projects the World KB graph's `block_type=event` entities onto a when-axis. Surface contract: [`canvas-strategy-surface.md`](canvas-strategy-surface.md) §3.3.2 + §4.5.
+
+#### 29.18.2 Pillar framing (P0)
+
+The Web UI is the primary home of the **Canvas** pillar (spatial steering surface, with Timeline-centric World building as the hero). The **Harness** pillar (orchestration/agent host/capability registry) is surfaced today as "Strategy/Preset" — the product rename to "Harness" is deferred (`DF-V1122-HARNESS-RENAME`), so V1.122 UI strings keep "Strategy". The **Computable** pillar (WASM reactivity) is backend-only in V1.122; compute-registry/canvas surfacing is deferred (`DF-V1122-COMPUTABLE-UI`, `DF-V1122-COMPUTE-ON-TIMELINE`). Pillar definitions: [`STRATEGY.md`](../../STRATEGY.md) + [`CONCEPTS.md`](../../CONCEPTS.md).
+
+#### 29.18.3 Contract boundary
+
+`wire_contracts_changed: false`. P1 is additive frontend only (new `CanvasSurfaceKind = "timeline"` enum value + new Timeline adapter module under `apps/web/src/components/canvas/timeline-canvas/`); no `schemas/`, no codegen, no daemon Rust change, no `@42ch/nexus-contracts` version bump. Timeline reads `WorldKbGraphResponse` (V1.73) and writes through `kb.patch_entity` (V1.73) only — full architect-locked contract in [`timeline-canvas-architecture.md`](../iterations/v1.122/specs/timeline-canvas-architecture.md).

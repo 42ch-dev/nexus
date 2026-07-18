@@ -4,6 +4,27 @@ Core domain terms used across Nexus OSS documentation, plans, and code. Each ent
 
 ---
 
+## Three Pillars
+
+The product thesis (canonized in the V1.122 pivot): **Nexus is the local-first creative-writing tool where a World's Timeline is the central instrument, AI agents are harnessed through Canvas, and Computable modules make worlds react.** Each pillar below names a product thesis, not a single crate. See `STRATEGY.md` § *Vision → Three pillars* for the crate/spec mapping.
+
+### Harness
+The **control-strategy pillar**: how an author *harnesses* AI agents to execute creative work — orchestration, capability routing, agent hosting, and presets. Maps to the orchestration engine + agent host + capability registry + presets (UI still labels this "Strategy / Preset"; product rename to "Harness" is deferred — `DF-V1122-HARNESS-RENAME`). Specs: [orchestration-engine.md](.mstar/specs/orchestration-engine.md), [agent-host.md](.mstar/specs/agent-host.md), [capability-registry.md](.mstar/specs/capability-registry.md).
+
+### Computable
+The **product-thesis pillar** that *worlds react* via WASM compute — combat resolution, dice, relationship-graph computation, user-authored modules. **Distinct from `Compute (Capability)` below**: *Computable* is the pillar (the product claim that worlds react); *Compute (Capability)* is the mechanism (the WASM execution unit an author/agent invokes). The pillar names the thesis; the capability names the implementation unit. Specs: [compute-module-abi.md](.mstar/specs/compute-module-abi.md), [wasm-host.md](.mstar/specs/wasm-host.md).
+
+### Timeline-first World building
+The **Canvas hero pattern** (V1.122): a World's Timeline is the primary Canvas surface for **World entry** — authors open a World and meet its *when* axis (events, KeyBlock-on-timeline realizations, Fork markers) before its entity graph or chapter structure. `CanvasSurfaceKind = "timeline"` is a peer surface alongside Strategy / Outline (Timeline-companion) / World KB, and is the default **World-entry** surface. **Outline** remains the default for **Work entry** (V1.118, unchanged).
+
+**Spine vs projection** (locked product model):
+- **Spine:** World + Timeline + KeyBlock + Fork — the truth of the narrative universe. Timeline is the World's *when* axis.
+- **Projection:** Work + Outline + Manuscript — the authoring plan and prose bound to a World. Outline is the Work's structural projection (chapters / scenes).
+
+Authors should feel: **World first for World building (Timeline); Work first for chapter writing (Outline).** Dual entry defaults encode that. Spec: [canvas-strategy-surface.md](.mstar/specs/canvas-strategy-surface.md). Iteration framing: [iterations/v1.122/specs/pillar-framing.md](.mstar/iterations/v1.122/specs/pillar-framing.md).
+
+---
+
 ## Creative Writing Domain
 
 ### World
@@ -38,7 +59,7 @@ A structured, non-linear representation of a work's planned content — nodes re
 ## Compute & AI Domain
 
 ### Compute (Capability)
-A WASM-powered execution unit within a world. Examples: combat engine resolution, dice rolling, relationship graph computation. Compute modules are embedded (shipped with the binary) or user-authored.
+A WASM-powered execution unit within a world — the *mechanism* an author or agent invokes. Examples: combat engine resolution, dice rolling, relationship graph computation. Compute modules are embedded (shipped with the binary) or user-authored. **Distinct from the [Computable](#computable) pillar** in *Three Pillars* above: this entry is the capability mechanism; *Computable* is the product thesis that worlds react via such capabilities.
 
 ### Preset
 A pre-configured bundle of compute capabilities with a YAML manifest. Presets define which capabilities are available, how they sequence, and what prompts/rules they use. Example: "combat-engine" preset.
@@ -119,6 +140,14 @@ The Tauri v2 native desktop client (`apps/desktop`). Wraps the web SPA (`apps/we
 ## Cross-Reference
 
 Paths are relative to the repo root. Each entry links the term to its authoritative spec doc under `.mstar/specs/`.
+
+### Three Pillars
+
+| Term | Related concepts | Spec doc |
+|------|-----------------|----------|
+| Harness | Orchestration Engine, Agent Host, Capability Registry, Preset | [orchestration-engine.md](.mstar/specs/orchestration-engine.md) |
+| Computable (pillar) | Compute (Capability), WASM host, compute-module-abi | [compute-module-abi.md](.mstar/specs/compute-module-abi.md) |
+| Timeline-first World building | World, Timeline, Outline, Workspace (Canvas), Fork | [canvas-strategy-surface.md](.mstar/specs/canvas-strategy-surface.md) |
 
 ### Creative Writing Domain
 

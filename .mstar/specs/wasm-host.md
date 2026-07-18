@@ -6,6 +6,7 @@
 | --- | --- |
 | **Status** | Normative — V1.62 Shipped |
 | **Document class** | Master |
+| **Pillar (V1.122)** | **Computable** — this spec is the host-runtime contract for the [Computable](../../STRATEGY.md) pillar (the WASM layer that makes worlds *react*). Computable is a product pillar distinct from the `Compute (Capability)` mechanism ([`CONCEPTS.md`](../../CONCEPTS.md)); this crate is the host side of the [`compute-module-abi.md`](./compute-module-abi.md) contract. Pillar framing: [`pillar-framing.md`](../iterations/v1.122/specs/pillar-framing.md). |
 | **Scope** | `nexus-wasm-host` crate: wasmtime runtime, engine lifecycle, per-invocation sandbox, limits, wall-time watchdog, embedded module loading, user module discovery, error taxonomy, host function implementation |
 | **Last updated** | 2026-06-23 — V1.62 P2 |
 | **Related** | [compute-module-abi.md](./compute-module-abi.md), [orchestration-engine.md](./orchestration-engine.md) §8 (narrative.compute), [entity-scope-model.md](./entity-scope-model.md) §5.5.9, [`crates/nexus-wasm-host/AGENTS.md`](../../../crates/nexus-wasm-host/AGENTS.md) |

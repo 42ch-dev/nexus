@@ -6,6 +6,7 @@
 | --- | --- |
 | **Status** | Normative — V1.62 Shipped |
 | **Document class** | Master |
+| **Pillar (V1.122)** | **Computable** — this spec is the module-side ABI contract for the [Computable](../../STRATEGY.md) pillar (the WASM layer that makes worlds *react*). Computable is a product pillar distinct from the `Compute (Capability)` mechanism ([`CONCEPTS.md`](../../CONCEPTS.md)). Pillar framing: [`pillar-framing.md`](../iterations/v1.122/specs/pillar-framing.md). |
 | **Scope** | V1 envelope ABI: `ComputeInput` / `ComputeOutput` wire contracts, module exports table, host import ABI, marshalling convention, `manifest.json` contract, sandbox cross-ref, versioning policy |
 | **Last updated** | 2026-06-23 — V1.62 Shipped; 2026-07-13 — V1.115 P2 clarified wire vs runtime-only split in §7.6 (no normative change) |
 | **Related** | [wasm-host.md](./wasm-host.md), [schemas-directory-layout.md](./schemas-directory-layout.md) §3.5, [orchestration-engine.md](./orchestration-engine.md) §8 (narrative.compute), [entity-scope-model.md](./entity-scope-model.md) §5.5.9 |
