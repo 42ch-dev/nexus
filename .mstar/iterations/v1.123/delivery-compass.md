@@ -1,7 +1,8 @@
 ---
 iteration_id: V1.123
 start_date: 2026-07-18
-status: locked
+end_date: 2026-07-19
+status: completed
 iteration_base_branch: main
 target_branch: main
 spec_integration_branch: iteration/v1.123
@@ -408,10 +409,9 @@ Without this demo path shipping, V1.123 is a hollow abstraction (Candidate D fai
 
 ## Roadmap Position
 
-- **Current iteration（V1.123）**：Three-layer Timeline deepening — canonize Brief/Narrative/Moment as Timeline's three zoom layers; implement World Timeline Brief+Narrative and Work Timeline Narrative+Moment; deepen Timeline-first IA; differentiate three-layer zoom feel. PMF signal = demo path (Worlds → Brief → Narrative → Work Timeline → Moment → global Timeline).
-- **Prior expectation override:** V1.122 roadmap said V1.123 would be dogfood + residual cleanup. **User redirected** this iteration to the three-layer Timeline deepening. V1.121+V1.122 residuals remain deferred (not dropped) — see inventory below.
-- **Next iteration（V1.124） candidates** (pick after dogfood; owner: product-manager): (a) Fork creation/merge UI (`DF-V1122-FORK-UI`); (b) compute-on-timeline (`DF-V1122-COMPUTE-ON-TIMELINE`); (c) Harness UI rename (`DF-V1122-HARNESS-RENAME`); (d) Computable pillar UI (`DF-V1122-COMPUTABLE-UI`); (e) World Moment layer (`DF-V1123-WORLD-MOMENT`); (f) Work Brief layer (`DF-V1123-WORK-BRIEF`); (g) deeper era taxonomy / multi-timeline; (h) V1.121+V1.122+V1.123 residual cleanup; (i) `status.json` compaction + tech-debt paydown. **Trigger:** V1.123 shipped + dogfood feedback on three-layer Timeline.
-- **最终目标**：A Nexus Timeline is three instruments at three scales — Brief for the world's shape, Narrative for the events, Moments for the scenes — World timelines lead from the Brief, Work timelines lead from the Moments, and Timeline is structurally prominent as the product's core idea. V1.123 establishes the three-layer model + ships both World and Work layer compositions + deepens Timeline-first IA; subsequent iterations extend each layer (richer Brief taxonomy, Moment manuscript-binding, cross-World merge) and reactivate deferred pillars (Fork UI, compute-on-timeline, Harness rename, Computable UI).
+- **Current iteration（V1.123）**：**delivered** — Three-Layer Timeline deepening. Brief/Narrative/Moment canonized; World Timeline Brief+Narrative + Work Timeline Narrative+Moment + Timeline-first IA + three-layer zoom UX all shipped. 5/5 plans Done; QC Approve across all plans; QA Pass all plans; AC-V1123-1..24 verified. `wire_contracts_changed: true` attributable to single additive enum (`era` in `BlockType`); `@42ch/nexus-contracts` 0.23.0 → 0.24.0.
+- **Next iteration（V1.124） candidates** (pick after dogfood; owner: product-manager): (a) Fork creation/merge UI (`DF-V1122-FORK-UI`); (b) compute-on-timeline (`DF-V1122-COMPUTE-ON-TIMELINE`); (c) Harness UI rename (`DF-V1122-HARNESS-RENAME`); (d) Computable pillar UI (`DF-V1122-COMPUTABLE-UI`); (e) World Moment layer (`DF-V1123-WORLD-MOMENT`); (f) Work Brief layer (`DF-V1123-WORK-BRIEF`); (g) Moment-on-wire migration (`DF-V1123-MOMENT-WIRE`); (h) deeper era taxonomy / multi-timeline (`DF-V1123-ERA-TAXONOMY`, `DF-V1123-MULTI-TIMELINE`); (i) cross-World Timeline merge (`DF-V1123-GLOBAL-TIMELINE-MERGE`); (j) composite daemon endpoints for global Timeline + cross-surface fan-out (`DF-V1123-COMPOSITE-ENDPOINT`); (k) cross-surface data binding hardening (`DF-V1123-CROSS-SURFACE-BINDING`); (l) V1.121+V1.122+V1.123 residual cleanup (V1.123 added ~57 low/nit residuals across 5 plans); (m) `status.json` compaction (currently 120KB >> 20KB threshold — `DF-V1123-STATUS-COMPACT`). **Trigger:** V1.123 shipped + dogfood feedback on three-layer Timeline.
+- **最终目标**：A Nexus Timeline is three instruments at three scales — Brief for the world's shape, Narrative for the events, Moments for the scenes — World timelines lead from the Brief, Work timelines lead from the Moments, and Timeline is structurally prominent as the product's core idea. V1.123 establishes the three-layer model + ships both World and Work layer compositions + deepens Timeline-first IA + differentiates three-layer zoom feel. Subsequent iterations extend each layer (richer Brief taxonomy, Moment manuscript-binding, cross-World merge, Fork UI, compute-on-timeline) and reactivate deferred pillars (Harness rename, Computable UI).
 
 ### Deferred inventory (Durable Roadmap Gate)
 
@@ -481,25 +481,51 @@ Branch resolve evidence (autonomous): `status.json` root metadata (`iteration_ba
 
 ## Quality Gate Summary
 
-> Filled at iteration-close. Human summary only; per-plan gate details stay in each main plan, and open residual SSOT stays in `{HARNESS_DIR}/status.json`.
+> Filled at iteration-close.
 
 | plan_id | QC decision | QA gate | Residuals | Durable summary |
 |---------|-------------|---------|-----------|-----------------|
-| P0 three-layer-timeline-spec | _TBD at iteration-close_ | pm-acceptance (docs plan) | _TBD_ | `plans/2026-07-18-v1.123-three-layer-timeline-spec.md#review-gate-summary` |
-| P1 world-timeline-brief-narrative | _TBD_ | mandatory | _TBD_ | `plans/2026-07-18-v1.123-world-timeline-brief-narrative.md#review-gate-summary` |
-| P2 work-timeline-narrative-moment | _TBD_ | mandatory | _TBD_ | `plans/2026-07-18-v1.123-work-timeline-narrative-moment.md#review-gate-summary` |
-| P3 timeline-first-ia-deepening | _TBD_ | mandatory | _TBD_ | `plans/2026-07-18-v1.123-timeline-first-ia-deepening.md#review-gate-summary` |
-| P4 three-layer-zoom-experience | _TBD_ | mandatory | _TBD_ | `plans/2026-07-18-v1.123-three-layer-zoom-experience.md#review-gate-summary` |
+| P0 three-layer-timeline-spec | Approve with residuals (QC1) / Approve (QC2) / Approve with residuals (QC3) | pm-acceptance (docs plan, PASS) | 12 (12 low/nit) | `plans/2026-07-18-v1.123-three-layer-timeline-spec.md#review-gate-summary` |
+| P1 world-timeline-brief-narrative | Approve (QC1) / Approve (QC2) / Approve (QC3) | mandatory (PASS) | 10 (7 low + 3 nit) | `plans/2026-07-18-v1.123-world-timeline-brief-narrative.md#review-gate-summary` |
+| P2 work-timeline-narrative-moment | Approve (QC1) / Approve (QC2) / Approve (QC3) | mandatory (PASS) | 17 (10 low + 7 nit) | `plans/2026-07-18-v1.123-work-timeline-narrative-moment.md#review-gate-summary` |
+| P3 timeline-first-ia-deepening | Approve (QC1) / Approve (QC2) / Approve (QC3) | mandatory (PASS) | 17 (10 low + 7 nit) | `plans/2026-07-18-v1.123-timeline-first-ia-deepening.md#review-gate-summary` |
+| P4 three-layer-zoom-experience | Approve (QC1) / Approve (QC2) / Approve (QC3) | mandatory (PASS) | 11 (6 low + 5 nit) | `plans/2026-07-18-v1.123-three-layer-zoom-experience.md#review-gate-summary` |
 
 Notes:
 
 - Raw review bundle: `{SDD_DIR}/review/` (ephemeral; do not rely on it after Done).
 - Open residual SSOT: `{HARNESS_DIR}/status.json` root `residual_findings[<plan-id>]`.
+- All 5 plans shipped with 0 Critical/Warning findings across 3 QC seats each. Total V1.123 residuals: 67 (45 low + 22 nit) — all non-blocking, tracked for V1.124+ polish.
 
 ## Compound Round Summary
 
-> Filled at iteration-close.
+- 结晶文档数：2 (both Knowledge track, 0 Bug track)
+  - `knowledge/architecture-patterns/three-layer-timeline-projection.md` — Promoted from `iterations/v1.123/specs/three-layer-architecture.md` (architect LOCK extended with per-layer adapter pattern + URL persistence + cross-surface nav hooks)
+  - `knowledge/conventions/three-layer-timeline-feel.md` — Promoted from `iterations/v1.123/specs/layer-feel-differentiation.md` (per-layer feel contract honored "三层不一样的感受" mandate)
+- 新增 CONCEPTS.md 条目：3 (`### Brief`, `### Narrative`, `### Moment` added in Phase 1 seat 1 — already shipped with P0)
+- 触发 compound-refresh：No (no overlapping stale docs detected; 2 new docs are V1.123-specific extensions of V1.122 canvas-surface-extraction-pattern + V1.121 design system)
+- 迭代包盘点：
+  - `specs/three-layer-architecture.md` → **Promote** (extracted to `knowledge/architecture-patterns/three-layer-timeline-projection.md`; original kept as iteration-scoped LOCK reference)
+  - `specs/three-layer-product-spec.md` → **Keep snapshot** (product decisions + IA + ACs are iteration-specific; architect content covered by three-layer-architecture)
+  - `specs/layer-feel-differentiation.md` → **Promote** (extracted to `knowledge/conventions/three-layer-timeline-feel.md`; original kept as iteration-scoped contract reference)
+- Bug-track结晶：0 (V1.123 shipped with no Critical/Warning findings across all 5 plans; only low/nit Suggestions registered as residuals)
 
 ## Iteration Retrospective (minimal)
 
 > Filled at iteration-close.
+
+- 做得好的：
+  - Autonomous direction lock准确捕获 caller 的三层 Timeline + World/Work 分层 + Timeline 突出 PMF 意图；scale L+ 准确预算 5 业务 plan（spec refactor + 双 domain Timeline 实现 + IA 加深 + zoom UX 差异化）。
+  - Phase 1 Review & Edit chain 三角色顺序 invoke（product-manager → architect → writing-specialist）显著提升了 compass/plans/specs 质量；architect seat 2 用代码级证据解决了 Brief/Moment carrier + daemon route + conflict policy 等关键决策，保住 P2/P3/P4 `wire_contracts_changed: false`（P1 唯一一次 `true`，单一 additive enum `era`）。
+  - 5 plan 串行 SDD 编排稳定：P0 (spec refactor via Review chain) → P1 (Brief+Narrative World) → P2 (Narrative+Moment Work) → P3 (IA deepening) → P4 (zoom UX)。每 plan micro-batch (2-4 tasks/implementer) + fresh L2 task reviewer + plan QC tri (N=3) + mandatory QA gate。
+  - 测试增长健康：V1.122 ship 1334 tests → V1.123 ship 1527 tests（+193 tests，零回归）；V1.122 V1.123 P1/P2 baseline 在每 plan 都 regression-gate。
+  - Compound 抓住 2 个可复用模式（three-layer-timeline-projection architecture pattern + three-layer-timeline-feel convention），分别 promote 到 architecture-patterns/ 和 conventions/。
+  - 8-point wire-contracts gate 在每 plan QA 实际执行（不只声称），是 additive-frontend 迭代的可复用验证模式（V1.122 已结晶，V1.123 重用）。
+- 可改进的：
+  - P2 visual verification 受限于环境（无 daemon 运行）只能验单元/组件测试；populated-graph demo 推迟到 dogfood（与 V1.122 同限制）。后续迭代应确保 QA 环境可运行 daemon + seeded World/Work 数据。
+  - 累计 67 个 deferred residual（45 low + 22 nit，多数 P4 polish 候选或 V1.124+ scale items）+ V1.121/V1.122 累积 = 100+ 低优 residual 堆积；V1.124 需要一次集中清理。
+  - status.json 已达 120KB（>>20KB 阈值），`DF-V1123-STATUS-COMPACT` 在 V1.124 必须执行（pre-P-last 触发条件已满足）。
+  - 跨 surface 数据 binding（P3 cross-surface CTAs）受限于现有 wire（V1.72 WorkOutline 无 scene/beat data；V1.108 fixture-driven）；DF-V1123-MOMENT-WIRE 是 V1.124 关键解锁。
+  - P4 semantic zoom 用 CSS keyframe fallback（spec §4）而非 Framer Motion；若 V1.124+ 需要更丰富动画，需要引入 Framer Motion 或等效 runtime dep。
+  - Layer abstraction 在 World Timeline 和 Work Timeline 是平行结构（`TimelineLayer` vs `WorkTimelineLayer`）；V1.124+ 若引入 World Moment 或 Work Brief 层，可能需要统一为 generic `Layer` 类型（已记入 R-V1123P4QC1-S004 residual）。
+- 下迭代建议：V1.124 作为 three-layer ship 后的 dogfood + 收敛迭代 - (a) dogfood 三层 Timeline 收集真实作者反馈；(b) V1.121+V1.122+V1.123 residual 集中清理（100+ 低优）；(c) `status.json` compaction（120KB → <20KB）；(d) 评估 DF-V1123-MOMENT-WIRE（V1.72 WorkOutline 添加 scene/beat wire）解锁 P2 Moment 真实数据；(e) 评估 DF-V1123-COMPOSITE-ENDPOINT（global Timeline + cross-surface 性能）。不要再开大设计/架构变更。

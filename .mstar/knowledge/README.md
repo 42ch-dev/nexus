@@ -79,3 +79,10 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | [architecture-patterns/canvas-surface-extraction-pattern.md](architecture-patterns/canvas-surface-extraction-pattern.md) | Canvas surface extraction pattern — extracting a new surface from an existing bundled surface via additive enum, single graph source, stable factory, write-boundary reuse, conflict reuse, and wire-free verification gate (V1.122 P1 timeline-canvas-architecture distilled; compound V1.122) |
 | [architecture-patterns/world-vs-work-canvas-scope.md](architecture-patterns/world-vs-work-canvas-scope.md) | World vs Work scope discipline for Canvas surfaces — spine surfaces are World-scoped, projection surfaces are Work-scoped; do not cross-compose scoped data sources (V1.122 P1 architect-locked decision distilled; compound V1.122) |
 | [conventions/wire-contracts-frozen-verification.md](conventions/wire-contracts-frozen-verification.md) | Wire contracts frozen verification (8-point gate) — systematic checklist for verifying `wire_contracts_changed: false` on additive-frontend iterations (V1.122 P1 timeline-canvas-architecture §9 distilled; compound V1.122) |
+
+### V1.123 additions
+
+| Document | Description |
+| --- | --- |
+| [architecture-patterns/three-layer-timeline-projection.md](architecture-patterns/three-layer-timeline-projection.md) | Three-layer Timeline projection pattern — extending a Canvas surface with multi-layer projection (Brief/Narrative/Moment) via per-layer adapter factory + URL `?layer=` persistence + cross-surface navigation hooks + additive wire carrier choices (V1.123 P0+P1+P2+P4 compound distilled) |
+| [conventions/three-layer-timeline-feel.md](conventions/three-layer-timeline-feel.md) | Three-layer Timeline feel differentiation contract — per-layer layout/density/visual/zoom contract honoring "三层不一样的感受" mandate; semantic zoom (not viewport zoom); CSS keyframe vs Framer Motion; URL persistence; honest empty-state per layer (V1.123 P4 compound distilled) |
