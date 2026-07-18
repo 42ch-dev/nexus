@@ -643,6 +643,11 @@
       "showGraph": "Show graph",
       "showList": "Show list view"
     },
+    "layerSwitcher": {
+      "ariaLabel": "Timeline layer",
+      "brief": "Brief",
+      "narrative": "Narrative"
+    },
     "inspector": {
       "title": "Timeline entity",
       "description": "Edit this entity's title and body. Routes through the World KB write boundary.",
@@ -669,6 +674,15 @@
       "sourceAnchorCount_one": "{{count}} source anchor",
       "sourceAnchorCount_other": "{{count}} source anchors",
       "aria": "Timeline event: {{name}}"
+    },
+    "briefEraNode": {
+      "unnamed": "(unnamed era)",
+      "temporalUnknown": "Era time span unknown",
+      "selected": "Selected Brief era",
+      "sourceAnchorCount_one": "{{count}} source anchor",
+      "sourceAnchorCount_other": "{{count}} source anchors",
+      "aria": "Brief era: {{name}}",
+      "span": "{{start}} → {{end}}"
     },
     "keyBlockNode": {
       "unnamed": "(unnamed entity)",

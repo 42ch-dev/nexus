@@ -1,10 +1,17 @@
 /**
- * Timeline canvas — orchestrator facade (V1.122 P1 T3 + T4).
+ * Timeline canvas — orchestrator facade (V1.122 P1 T3 + T4 + V1.123 P1 T3).
  *
  * Slim composition root for the Timeline hero surface. Coordinates:
  *   - Graph read via the shared `useWorldKbGraph(worldId)` hook (V1.73
  *     `GET .../kb/graph` — the single World-spine read endpoint).
  *   - Adapter projection via `useCanvasSurface` (V1.114 P0 recipe).
+ *   - V1.123 P1 T3 layer state: Brief ↔ Narrative tabs in the canvas
+ *     header. Active layer drives `createTimelineCanvasAdapter(ctxRef, layer)`
+ *     so `useCanvasSurface`'s `[graph, adapter]` memo re-projects on layer
+ *     swap (semantic discrete swap per layer-feel-differentiation.md §3.1 —
+ *     not continuous viewport zoom). Default layer is `'brief'` when graph
+ *     has any `block_type=era` entity; `'narrative'` fallback otherwise
+ *     (plan Global Constraints + architect §7/§8).
  *   - Write boundary: `usePatchWorldKbEntity(worldId)` is the ONLY write
  *     path. The inspector routes patches through `ctxRef.onPatchEntity`,
  *     which the orchestrator wires to `patchEntity.mutate(...)`. Forbidden
@@ -28,6 +35,13 @@
  * Peer-surface navigation: the header surfaces Timeline / World KB / Strategy
  * links so the author can pivot to the peer surfaces from the hero. Work
  * entry stays Outline (V1.118 regression gate).
+ *
+ * Layer state: the orchestrator owns the active layer via `useState`. A
+ * `useMemo` derives the default layer from the graph data (Brief if any
+ * `block_type=era` entity, else Narrative). The user can override via the
+ * layer tabs (`onLayerChange`); the override sticks until the World is
+ * re-entered. Task 5 owns the honest empty-state copy per layer; Task 3
+ * wires the fallback logic only.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -47,6 +61,7 @@ import {
   type TimelineCanvasAdapterContext,
   type TimelineConflictInfo,
   type TimelineEntityPatch,
+  type TimelineLayer,
   type TimelinePatchField,
 } from './timeline-canvas-adapter';
 import type { TimelineNodeData } from './timeline-canvas-adapter';
@@ -166,7 +181,39 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
     worldId,
   });
 
-  const adapter = useMemo(() => createTimelineCanvasAdapter(ctxRef), []);
+  // ── V1.123 P1 T3 — layer state + default-layer logic ────────────────────
+  //
+  // The orchestrator owns the active layer. The default layer is derived
+  // from the graph data (Brief if any `block_type=era` entity, else
+  // Narrative) per plan Global Constraints + architect §7/§8. The user can
+  // override via the layer tabs (`onLayerChange`); the override sticks
+  // until the World is re-entered.
+  //
+  // `layerOverride` stays `null` until the user clicks a tab — that lets
+  // the default layer track the graph data if it changes (e.g. an author
+  // adds the first era KeyBlock via World KB and the Timeline flips its
+  // default to Brief on next refetch). Once the user has chosen, the
+  // override wins.
+  //
+  // Task 5 owns the honest empty-state copy per layer; Task 3 wires the
+  // fallback logic only.
+  const defaultLayer = useMemo<TimelineLayer>(() => {
+    const entities = graph.data?.entities ?? [];
+    const hasEra = entities.some((e) => e.block_type === 'era');
+    return hasEra ? 'brief' : 'narrative';
+  }, [graph.data]);
+
+  const [layerOverride, setLayerOverride] = useState<TimelineLayer | null>(null);
+  const activeLayer: TimelineLayer = layerOverride ?? defaultLayer;
+
+  // Rebuild the adapter on layer swap so `useCanvasSurface`'s `[graph,
+  // adapter]` memo re-projects (semantic discrete swap per layer-feel §3.1).
+  // The ctxRef stays mutable; the adapter just captures the new layer
+  // value, so this is a cheap factory re-run, not a full layout rebuild.
+  const adapter = useMemo(
+    () => createTimelineCanvasAdapter(ctxRef, activeLayer),
+    [activeLayer],
+  );
 
   const surface = useCanvasSurface(adapter, surfaceQuery);
 
@@ -337,11 +384,18 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
     (graph.data?.entities ?? []).some((e) => e.block_type === 'event');
 
   return (
-    <div className="flex flex-col gap-3" data-testid="timeline-canvas">
+    <div
+      className="flex flex-col gap-3"
+      data-testid="timeline-canvas"
+      data-active-layer={activeLayer}
+    >
       <TimelineCanvasHeader
         worldId={worldId}
         showAltView={showAltView}
         onToggleView={() => setShowAltView((v) => !v)}
+        activeLayer={activeLayer}
+        onLayerChange={setLayerOverride}
+        showLayerSwitcher={!isEmpty}
       />
 
       {validationBanner && validationBanner.length > 0 ? (
@@ -438,15 +492,31 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
  * T5: the header also surfaces the spatial ↔ list toggle (mirrors the V1.73
  * World KB `WorldKbHeader` show-list button). Hidden when the Timeline has
  * zero entities (the empty-state branch owns its own CTA).
+ *
+ * V1.123 P1 T3: the header also surfaces the Brief ↔ Narrative layer
+ * switcher (layer-feel-differentiation.md §3.2 — explicit layer control).
+ * The switcher renders inside the header only when the canvas branch is
+ * active (non-empty graph); the empty-state branch owns its own surface.
  */
 function TimelineCanvasHeader({
   worldId,
   showAltView,
   onToggleView,
+  activeLayer,
+  onLayerChange,
+  showLayerSwitcher,
 }: {
   worldId: string;
   showAltView: boolean;
   onToggleView: () => void;
+  activeLayer: TimelineLayer;
+  onLayerChange: (layer: TimelineLayer) => void;
+  /**
+   * V1.123 P1 T3 — gates the layer switcher visibility. The empty-state
+   * branch owns its own surface; the layer tabs add noise without value
+   * when the graph is empty (Task 5 owns the per-layer empty-state copy).
+   */
+  showLayerSwitcher: boolean;
 }) {
   const { t } = useTranslation('canvas');
   return (
@@ -460,6 +530,14 @@ function TimelineCanvasHeader({
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
+        {/* V1.123 P1 T3 — Brief ↔ Narrative layer switcher (layer-feel §3.2).
+            Hidden when the empty-state branch owns the surface. */}
+        {showLayerSwitcher ? (
+          <TimelineLayerSwitcher
+            activeLayer={activeLayer}
+            onLayerChange={onLayerChange}
+          />
+        ) : null}
         <button
           type="button"
           onClick={onToggleView}
@@ -486,6 +564,83 @@ function TimelineCanvasHeader({
           </Link>
         </nav>
       </div>
+    </div>
+  );
+}
+
+/**
+ * V1.123 P1 T3 — Brief ↔ Narrative layer switcher (layer-feel-differentiation.md
+ * §3.2 explicit layer control).
+ *
+ * Inline segmented control (two buttons with `aria-pressed`). Built inline
+ * rather than promoting to `packages/nexus-ui` because:
+ *   - The set of layers + the active-layer discriminator are Timeline-
+ *     surface-specific (not a generic primitive).
+ *   - YAGNI — no other surface consumes a generic SegmentedControl today
+ *     (the World KB / Strategy / Outline surfaces each ship their own header
+ *     toggle patterns). P4 may promote a generic primitive if more layers
+ *     arrive (e.g. Work Timeline Narrative ↔ Moment); the per-surface
+ *     inline control is the durable slice for V1.123 P1.
+ *
+ * Accessibility: each button carries `aria-pressed` so screen readers
+ * announce the active layer as a toggle state (WCAG 2.1 — semantic
+ * pressed state for toggle buttons). The group wraps in a `role="group"`
+ * with an i18n label so SR users can navigate to the switcher by name.
+ *
+ * `simplify:` the inline buttons reuse the existing header button styling
+ * (border + bg + shadow + focus ring) for visual consistency. A bespoke
+ * segmented-control visual (sliding indicator, etc.) is P4 polish territory
+ * (layer-feel §4 motion contract).
+ */
+function TimelineLayerSwitcher({
+  activeLayer,
+  onLayerChange,
+}: {
+  activeLayer: TimelineLayer;
+  onLayerChange: (layer: TimelineLayer) => void;
+}) {
+  const { t } = useTranslation('canvas');
+  const layers: Array<{
+    layer: TimelineLayer;
+    testId: string;
+    labelKey: string;
+  }> = [
+    {
+      layer: 'brief',
+      testId: 'timeline-layer-tab-brief',
+      labelKey: 'timeline.layerSwitcher.brief',
+    },
+    {
+      layer: 'narrative',
+      testId: 'timeline-layer-tab-narrative',
+      labelKey: 'timeline.layerSwitcher.narrative',
+    },
+  ];
+  return (
+    <div
+      role="group"
+      aria-label={t('timeline.layerSwitcher.ariaLabel')}
+      className="flex items-center gap-1 rounded-control border border-gray-alpha-400 bg-background-100 p-0.5"
+    >
+      {layers.map(({ layer, testId, labelKey }) => {
+        const pressed = activeLayer === layer;
+        return (
+          <button
+            key={layer}
+            type="button"
+            data-testid={testId}
+            aria-pressed={pressed}
+            onClick={() => onLayerChange(layer)}
+            className={
+              pressed
+                ? 'rounded-control bg-gray-alpha-200 px-3 py-1 text-button-12 font-semibold text-gray-1000 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2'
+                : 'rounded-control px-3 py-1 text-button-12 text-gray-700 hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2'
+            }
+          >
+            {t(labelKey)}
+          </button>
+        );
+      })}
     </div>
   );
 }

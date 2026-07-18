@@ -1,22 +1,38 @@
 /**
- * Timeline canvas adapter — V1.122 P1 T2 (projection) + T4 (write boundary).
+ * Timeline canvas adapter — V1.122 P1 T2 (projection) + T4 (write boundary)
+ *  + V1.123 P1 T2 (Brief layer projection).
  *
  * Projects a World's `WorldKbGraphResponse` onto a left-to-right when-axis
  * (the World-building hero surface, `CanvasSurfaceKind = "timeline"`).
  *
  * Architect-locked contract — see
- * `iterations/v1.122/specs/timeline-canvas-architecture.md` §2-§7:
+ * `iterations/v1.122/specs/timeline-canvas-architecture.md` §2-§7 +
+ * `iterations/v1.123/specs/three-layer-architecture.md` §2 + §8:
  *   - Single graph source: `WorldKbGraphResponse` (V1.73 shipped). No wrapper,
  *     no join with other DTOs (`TimelineGraph = WorldKbGraphResponse`).
- *   - `block_type=event` entities → `TimelineEventNode` on the when-axis,
- *     positioned by `body.attributes.occurred_at` (free-form) when present.
- *     Events without a temporal signal cluster in a temporal-unknown group
- *     with honest copy. The adapter MUST NOT fabricate chronology from
- *     `updated_at`, `canonical_name`, `version`, or `sequence_no`.
- *   - Other entity kinds → `TimelineKeyBlockNode` (Context cluster) off-axis.
+ *   - **Narrative layer (V1.122 preserved)**: `block_type=event` entities →
+ *     `TimelineEventNode` on the when-axis, positioned by
+ *     `body.attributes.occurred_at` (free-form) when present. Events without
+ *     a temporal signal cluster in a temporal-unknown group with honest copy.
+ *     The adapter MUST NOT fabricate chronology from `updated_at`,
+ *     `canonical_name`, `version`, or `sequence_no`. Non-event, non-era
+ *     entities → `TimelineKeyBlockNode` (Context cluster) off-axis.
+ *   - **Brief layer (V1.123 P1 T2 — architect §2 + §8)**: `block_type=era`
+ *     entities → `TimelineBriefEraNode` on the Brief when-axis, positioned by
+ *     `body.attributes.start_hint` when present. Eras without `start_hint`
+ *     cluster in a temporal-unknown group. Era markers carry `body.attributes.{
+ *     era_id, start_hint, end_hint, world_summary}` for the compact era card
+ *     + Brief-era inspector (Task 4). No relationship edges on Brief (layer-
+ *     feel-differentiation.md §2.2 — minimal density, era sweep only).
  *   - `relationships[]` → `Edge<TimelineEdgeData>` reusing `WorldKbEdgeData`
- *     verbatim (V1.74). No `ForeshadowEdge` / `RealizesEdge` / `ForkFromEdge`.
+ *     verbatim (V1.74) on the Narrative layer only. No `ForeshadowEdge` /
+ *     `RealizesEdge` / `ForkFromEdge`.
  *   - No Fork marker nodes (Fork data renders as optional header chrome in T3).
+ *
+ * V1.123 layer model: `projectGraphForLayer(graph, 'brief' | 'narrative')`
+ * selects the active layer. The default `projectGraph(graph)` delegates to
+ * the adapter's active layer, which defaults to `'narrative'` for V1.122
+ * backward compatibility (Task 3 wires Brief-default-on-World-entry).
  *
  * Write boundary (T4 — architect-locked §4): the Timeline surface edits
  * World-scoped KeyBlock entities through `NexusClient.worldKbPatchEntity`
@@ -35,8 +51,10 @@
  * the World KB adapter (the Strategy-specific `ConflictModalProps` return type
  * does not fit world-kb-flavored conflicts).
  *
- * `wire_contracts_changed: false` — the adapter reuses 12 shipped DTOs/routes
- * verbatim; only the frontend enum + this module are new.
+ * `wire_contracts_changed: true` — attributable to Task 1's single additive
+ * `BlockType = "era"` enum value (schema + Rust companion + codegen). V1.123
+ * P1 Tasks 2+3 add zero wire diff: the adapter is a pure frontend filter
+ * over the V1.73 `WorldKbGraphResponse` (architect §5).
  */
 import type { MutableRefObject } from 'react';
 import type { Edge, Node } from '@xyflow/react';
@@ -53,19 +71,41 @@ import { TimelineInspector } from './timeline-inspector';
 import { TimelineAltView } from './timeline-alt-view';
 import { timelineNodeTypes } from './timeline-node-types';
 
-// ─── Public types (architect-locked §3.1) ───────────────────────────────────
+// ─── Public types (architect-locked §3.1 + V1.123 §2/§8) ────────────────────
 
 /** Single graph source — no wrapper, no join. */
 export type TimelineGraph = WorldKbGraphResponse;
+
+/**
+ * V1.123 layer kind on the World Timeline surface.
+ *
+ * - `'brief'`     — world-shape era sweep (`block_type=era` KeyBlocks on the
+ *                   Brief when-axis; minimal density; no relationship edges).
+ * - `'narrative'` — V1.122 event timeline (`block_type=event` on the when-axis
+ *                   + Context clusters + relationship edges).
+ *
+ * Architect-locked in `three-layer-architecture.md` §8 + `layer-feel-
+ * differentiation.md` §2. The adapter's `projectGraphForLayer(graph, layer)`
+ * selects the active projection; `projectGraph(graph)` delegates to the
+ * adapter's active layer (default `'narrative'` for V1.122 backward compat).
+ */
+export type TimelineLayer = 'brief' | 'narrative';
 
 /**
  * Node data payload for the Timeline surface.
  *
  * `WorldKbEntityProjection` carries `key_block_id`, `block_type`,
  * `canonical_name`, `status`, `version`, `body`, `source_anchor_count`, etc.
- * The adapter adds a `layoutHint` ('event' for `block_type=event`, 'context'
- * otherwise) and an optional `occurredAtHint` extracted from
- * `body.attributes.occurred_at`.
+ * The adapter adds:
+ *   - `layoutHint` — discriminates the three projection kinds:
+ *     `'event'`  for Narrative `block_type=event` (V1.122).
+ *     `'context'` for Narrative non-event, non-era KeyBlocks (V1.122).
+ *     `'brief'`  for Brief `block_type=era` (V1.123 P1 T2).
+ *   - `occurredAtHint` — free-form temporal signal extracted from
+ *     `body.attributes.occurred_at` when present (Narrative layer).
+ *   - `eraId` / `startHint` / `endHint` / `worldSummary` — V1.123 Brief-era
+ *     markers extracted from `body.attributes` when `layoutHint === 'brief'`
+ *     (architect §2.3 + §8).
  *
  * The `[key: string]: unknown` index signature satisfies React Flow's
  * `Node<TNodeData extends Record<string, unknown>>` constraint.
@@ -74,16 +114,33 @@ export interface TimelineNodeData extends WorldKbEntityProjection {
   /** React Flow requires an index signature on node data. */
   [key: string]: unknown;
   /**
-   * 'event' when `block_type === 'event'` (entity-scope-model §5.1.1).
-   * 'context' for all other BlockType values.
+   * Projection kind. `'event'` / `'context'` are the V1.122 Narrative
+   * partitions; `'brief'` is the V1.123 P1 T2 Brief-era partition. The
+   * adapter's `projectGraphForLayer(graph, layer)` selects which entities
+   * receive which `layoutHint`.
    */
-  layoutHint: 'event' | 'context';
+  layoutHint: 'event' | 'context' | 'brief';
   /**
    * Free-form temporal signal extracted from `body.attributes.occurred_at`
    * when it is a non-empty string. Undefined when not declared by the
    * KeyBlock body — the entity then clusters in the temporal-unknown group.
+   * Narrative layer only (V1.122).
    */
   occurredAtHint?: string;
+  /**
+   * V1.123 P1 T2 Brief-era markers. Present only when `layoutHint === 'brief'`.
+   * Read from `body.attributes` per architect §2.3 + §8 (`era_id`,
+   * `start_hint`, `end_hint`, `world_summary` — freeform). The Brief-era
+   * node + Brief-era inspector (Task 4) consume these for the compact era
+   * card chrome.
+   */
+  eraId?: string;
+  /** Era start hint (`body.attributes.start_hint`). Used for LR positioning. */
+  startHint?: string;
+  /** Era end hint (`body.attributes.end_hint`). Surfaces in the time-span label. */
+  endHint?: string;
+  /** Optional world-shape summary line for the era card. */
+  worldSummary?: string;
 }
 
 /** Verbatim reuse of the V1.74 World KB relationship edge payload. */
@@ -282,22 +339,184 @@ function occurredAtOf(entity: WorldKbEntityProjection): string | undefined {
 }
 
 /**
- * Project the entities + relationships of a `WorldKbGraphResponse` onto
- * Timeline nodes + edges.
+ * Extract V1.123 Brief-era markers from `body.attributes` per architect §2.3
+ * + §8 (`era_id`, `start_hint`, `end_hint`, `world_summary` — all freeform).
+ * Non-string values and empty strings are treated as absent. Used by the
+ * Brief projection to populate the era card + Brief-era inspector (Task 4).
  *
- * Positioning rules:
+ * Type narrowing mirrors `occurredAtOf` — `body.attributes` is `unknown`
+ * until narrowed.
+ */
+function extractEraAttributes(entity: WorldKbEntityProjection): {
+  eraId?: string;
+  startHint?: string;
+  endHint?: string;
+  worldSummary?: string;
+} {
+  const attrs = entity.body?.attributes;
+  if (attrs === null || typeof attrs !== 'object') return {};
+  const a = attrs as Record<string, unknown>;
+  const readString = (key: string): string | undefined => {
+    const raw = a[key];
+    return typeof raw === 'string' && raw.length > 0 ? raw : undefined;
+  };
+  return {
+    eraId: readString('era_id'),
+    startHint: readString('start_hint'),
+    endHint: readString('end_hint'),
+    worldSummary: readString('world_summary'),
+  };
+}
+
+/**
+ * Project the entities + relationships of a `WorldKbGraphResponse` onto
+ * Timeline nodes + edges for the given layer.
+ *
+ * V1.123 P1 T2 — the layer parameter selects the active projection:
+ *   - `'narrative'` (default) — V1.122 event timeline + Context clusters.
+ *   - `'brief'`               — V1.123 Brief-era sweep (era markers only).
+ *
+ * V1.122 callers that omit the layer argument get the V1.122 Narrative
+ * projection unchanged — backward-compat is verified by the V1.122 regression
+ * test suite (`timeline-canvas-adapter.test.tsx`,
+ * `timeline-a11y.test.tsx`, `timeline-write-boundary.test.tsx`).
+ *
+ * Narrative positioning rules (V1.122 preserved):
  *   - Dated events (`body.attributes.occurred_at` present) are placed along
  *     the when-axis (Y = 0) sorted lexicographically by timestamp (ISO 8601
  *     sorts chronologically when the format is consistent).
  *   - Undated events cluster below the when-axis (temporal-unknown group).
- *   - Non-event entities (Context) cluster above the when-axis.
+ *   - Non-event, non-era entities (Context) cluster above the when-axis.
+ *     V1.123 architect §5.2: era entities are EXCLUDED from Context clusters
+ *     on the Narrative layer (they are Brief-layer-only markers).
  *   - Node ids are stable across refetches (`entity:${key_block_id}`).
+ *
+ * Brief positioning rules (V1.123 P1 T2):
+ *   - Eras with `body.attributes.start_hint` are placed along the Brief
+ *     when-axis (Y = 0) sorted lexicographically by `start_hint`.
+ *   - Eras without `start_hint` cluster below the when-axis (temporal-unknown
+ *     group) — mirrors the V1.122 undated-event convention so the Brief
+ *     sweep stays legible.
+ *   - No relationship edges on Brief (architect §8 + layer-feel spec §2.2 —
+ *     minimal density, era sweep only).
  *
  * Relationship edges reuse the V1.74 World KB edge rendering verbatim
  * (`WorldKbEdgeData`); both the stored + symmetric_reverse projections are
  * rendered when a relationship is symmetric, mirroring the World KB adapter.
  */
-export function projectTimelineGraph(graph: TimelineGraph): {
+export function projectTimelineGraph(
+  graph: TimelineGraph,
+  layer: TimelineLayer = 'narrative',
+): {
+  nodes: Node<TimelineNodeData>[];
+  edges: Edge<TimelineEdgeData>[];
+} {
+  if (layer === 'brief') {
+    return projectBriefLayer(graph);
+  }
+  return projectNarrativeLayer(graph);
+}
+
+/**
+ * V1.123 P1 T2 — Brief layer projection (architect §2 + §8).
+ *
+ * Filters `entities[block_type=era]` onto the Brief when-axis. Non-era
+ * entities (events, characters, ...) are EXCLUDED from the Brief layer —
+ * they belong to the Narrative layer (V1.122). Relationship edges are NOT
+ * rendered on Brief (minimal density per layer-feel §2.2).
+ *
+ * `simplify:` LR step metrics mirror the V1.122 Narrative lane scheme so
+ * both layers share a familiar reading direction. Replace with an era-aware
+ * temporal plugin if the Brief sweep grows beyond ~12 era markers (layer-feel
+ * §2.2 density target).
+ */
+function projectBriefLayer(graph: TimelineGraph): {
+  nodes: Node<TimelineNodeData>[];
+  edges: Edge<TimelineEdgeData>[];
+} {
+  const entities = graph.entities ?? [];
+
+  const eraEntities: WorldKbEntityProjection[] = entities.filter(
+    (e) => e.block_type === 'era',
+  );
+
+  // Split eras by temporal signal; sort dated eras chronologically by
+  // `body.attributes.start_hint`. Mirrors the V1.122 dated/undated event
+  // split so the Brief sweep reads as "earliest era on the left".
+  const datedEras: Array<{
+    entity: WorldKbEntityProjection;
+    startHint: string;
+  }> = [];
+  const undatedEras: WorldKbEntityProjection[] = [];
+  for (const e of eraEntities) {
+    const { startHint } = extractEraAttributes(e);
+    if (startHint === undefined) {
+      undatedEras.push(e);
+    } else {
+      datedEras.push({ entity: e, startHint });
+    }
+  }
+  datedEras.sort((a, b) => {
+    if (a.startHint < b.startHint) return -1;
+    if (a.startHint > b.startHint) return 1;
+    // Stable tiebreaker on key_block_id so identical start hints are
+    // deterministic across refetches.
+    return a.entity.key_block_id.localeCompare(b.entity.key_block_id);
+  });
+
+  const nodes: Node<TimelineNodeData>[] = [];
+
+  datedEras.forEach(({ entity, startHint }, i) => {
+    nodes.push({
+      id: nodeIdOf(entity.key_block_id),
+      type: 'timeline-brief-era',
+      position: { x: ORIGIN_X + i * EVENT_STEP_X, y: WHEN_AXIS_Y },
+      data: eraEntityToTimelineNodeData(entity, startHint),
+    });
+  });
+
+  // Undated eras cluster below the when-axis (temporal-unknown group),
+  // continuing the X spread from the rightmost dated era — same convention
+  // as the V1.122 undated event cluster.
+  const undatedOriginX = ORIGIN_X + datedEras.length * EVENT_STEP_X;
+  undatedEras.forEach((entity, i) => {
+    nodes.push({
+      id: nodeIdOf(entity.key_block_id),
+      type: 'timeline-brief-era',
+      position: { x: undatedOriginX + i * EVENT_STEP_X, y: TEMPORAL_UNKNOWN_Y },
+      data: eraEntityToTimelineNodeData(entity, undefined),
+    });
+  });
+
+  // Brief layer: no relationship edges (architect §8 + layer-feel §2.2 —
+  // minimal density, era sweep only). Edges belong to the Narrative layer.
+  return { nodes, edges: [] };
+}
+
+function eraEntityToTimelineNodeData(
+  entity: WorldKbEntityProjection,
+  startHint: string | undefined,
+): TimelineNodeData {
+  const eraAttrs = extractEraAttributes(entity);
+  const data: TimelineNodeData = {
+    ...entity,
+    layoutHint: 'brief',
+  };
+  if (startHint !== undefined) data.startHint = startHint;
+  if (eraAttrs.eraId !== undefined) data.eraId = eraAttrs.eraId;
+  if (eraAttrs.endHint !== undefined) data.endHint = eraAttrs.endHint;
+  if (eraAttrs.worldSummary !== undefined) data.worldSummary = eraAttrs.worldSummary;
+  return data;
+}
+
+/**
+ * V1.122 Narrative projection — preserved verbatim for the Narrative layer,
+ * with a single V1.123 additive change: era entities (`block_type='era'`)
+ * are EXCLUDED from Context clusters per architect §5.2 (Context clusters =
+ * entities.filter(e => !['event','era'].includes(e.block_type))). They are
+ * Brief-layer-only markers.
+ */
+function projectNarrativeLayer(graph: TimelineGraph): {
   nodes: Node<TimelineNodeData>[];
   edges: Edge<TimelineEdgeData>[];
 } {
@@ -309,7 +528,9 @@ export function projectTimelineGraph(graph: TimelineGraph): {
   for (const e of entities) {
     if (e.block_type === 'event') {
       eventEntities.push(e);
-    } else {
+    } else if (e.block_type !== 'era') {
+      // V1.123 architect §5.2: era entities are EXCLUDED from Context
+      // clusters on the Narrative layer — they are Brief-layer-only markers.
       contextEntities.push(e);
     }
   }
@@ -549,6 +770,13 @@ export function summarizeTimelineGraph(graph: TimelineGraph): string {
  * every orchestrator state change. The factory is therefore called once per
  * orchestrator mount (e.g. via `useMemo([], ...)` or a `useRef`).
  *
+ * V1.123 P1 T2 — `activeLayer` selects which projection `projectGraph(graph)`
+ * delegates to. Default `'narrative'` for V1.122 backward compatibility (the
+ * V1.122 test suite calls `createTimelineCanvasAdapter(ctxRef)` without a
+ * layer argument; their existing assertions MUST stay green). Task 3 wires
+ * the World-entry default layer to `'brief'` when era data exists, falling
+ * back to `'narrative'` (Task 3 brief Step 4 + plan Global Constraints).
+ *
  * T4 extensions over T2:
  *   - `layoutOptions.hasSuppliedPositions = true` — preserves the temporal-
  *     sorted node positions on first open so dagre LR does NOT collapse the
@@ -581,6 +809,7 @@ export function summarizeTimelineGraph(graph: TimelineGraph): string {
  */
 export function createTimelineCanvasAdapter(
   ctxRef: MutableRefObject<TimelineCanvasAdapterContext>,
+  activeLayer: TimelineLayer = 'narrative',
 ): TimelineCanvasAdapter {
   return {
     surfaceKind: 'timeline',
@@ -595,7 +824,13 @@ export function createTimelineCanvasAdapter(
     layoutOptions: { direction: 'LR', hasSuppliedPositions: true },
 
     projectGraph(graph) {
-      return projectTimelineGraph(graph);
+      // V1.123 P1 T2 — delegates to the active layer. Default `'narrative'`
+      // for V1.122 backward compat (the V1.122 regression suite verifies
+      // event timeline projection unchanged). Task 3 passes `'brief'` when
+      // the World entry has era data; the canvas component rebuilds the
+      // adapter via `useMemo([activeLayer], ...)` so layer swap triggers a
+      // fresh projection through `useCanvasSurface`.
+      return projectTimelineGraph(graph, activeLayer);
     },
 
     adaptConflict(_error) {

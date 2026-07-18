@@ -632,6 +632,11 @@
       "showGraph": "显示图形",
       "showList": "显示列表视图"
     },
+    "layerSwitcher": {
+      "ariaLabel": "时间轴图层",
+      "brief": "概览",
+      "narrative": "叙事"
+    },
     "inspector": {
       "title": "时间轴实体",
       "description": "编辑此实体的标题与正文。变更通过世界知识库写入边界提交。",
@@ -658,6 +663,15 @@
       "sourceAnchorCount_one": "{{count}} 个来源锚点",
       "sourceAnchorCount_other": "{{count}} 个来源锚点",
       "aria": "时间线事件：{{name}}"
+    },
+    "briefEraNode": {
+      "unnamed": "(未命名纪元)",
+      "temporalUnknown": "纪元时间跨度未知",
+      "selected": "已选中概览纪元",
+      "sourceAnchorCount_one": "{{count}} 个来源锚点",
+      "sourceAnchorCount_other": "{{count}} 个来源锚点",
+      "aria": "概览纪元：{{name}}",
+      "span": "{{start}} → {{end}}"
     },
     "keyBlockNode": {
       "unnamed": "(未命名实体)",
