@@ -726,5 +726,71 @@
         "desc": "降序"
       }
     }
+  },
+  "workTimeline": {
+    "loading": "正在加载作品时间轴…",
+    "loadError": "无法加载作品时间轴。",
+    "canvasAriaLabel": "作品时间轴画布",
+    "empty": {
+      "title": "该作品的时间轴为空",
+      "description": "通过作品大纲面板添加的大纲事件将显示在此处。"
+    },
+    "header": {
+      "title": "作品时间轴",
+      "description": "作品的叙事与瞬间。切换到大纲进行编辑。",
+      "peerNavAria": "同级面板",
+      "outlineLink": "大纲"
+    },
+    "layerSwitcher": {
+      "ariaLabel": "作品时间轴图层",
+      "narrative": "叙事",
+      "moment": "瞬间"
+    },
+    "narrativeEventNode": {
+      "aria": "作品时间轴事件：{{name}}",
+      "unnamed": "(未命名事件)",
+      "chapterBadge": "第 {{chapter}} 章",
+      "noChapter": "无章节锚点",
+      "selected": "已选中作品时间轴事件"
+    },
+    "momentSceneNode": {
+      "aria": "场景：{{name}}",
+      "unnamed": "(未命名场景)",
+      "anchor": "第 {{chapter}} 章 · {{scene}}",
+      "selected": "已选中场景"
+    },
+    "momentBeatNode": {
+      "aria": "节拍：{{name}}",
+      "unnamed": "(未命名节拍)",
+      "anchor": "第 {{chapter}} 章 · {{scene}} · {{beat}}",
+      "selected": "已选中节拍"
+    },
+    "moment": {
+      "emptyState": {
+        "title": "尚无场景或节拍数据",
+        "message": "瞬间聚焦场景精度并锚定到稿件。请在大纲中添加场景与节拍，或切换到叙事查看事件。",
+        "cta": "切换到叙事"
+      }
+    },
+    "inspector": {
+      "eventTitle": "叙事事件",
+      "eventDescription": "叙事 when 轴上的作品级事件。编辑通过作品大纲面板提交。",
+      "sceneTitle": "场景",
+      "sceneDescription": "瞬间图层上的场景级稿件锚点。编辑通过作品大纲面板提交。",
+      "beatTitle": "节拍",
+      "beatDescription": "场景内的节拍。编辑通过作品大纲面板提交。",
+      "editInOutline": "在大纲中编辑",
+      "manuscriptAnchor": "稿件锚点",
+      "noManuscriptAnchor": "无稿件锚点",
+      "aria": "{{name}} 的作品时间轴检查器",
+      "fields": {
+        "eventId": "事件 ID",
+        "sceneId": "场景 ID",
+        "beatId": "节拍 ID",
+        "chapter": "章节",
+        "description": "描述",
+        "status": "状态"
+      }
+    }
   }
 }

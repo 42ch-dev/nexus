@@ -39,6 +39,16 @@ const OutlinePage = lazy(() =>
   import('@/pages/outline-page').then((m) => ({ default: m.OutlinePage })),
 );
 
+// Route-split: the Work Timeline canvas (V1.123 P2 T5) is a peer of Outline
+// from the Work Canvas shell. Lazy-loaded alongside the other canvas routes so
+// React Flow stays out of the Control Room bootstrap chunk
+// (canvas-strategy-surface.md §3.1). Work entry stays Outline (V1.118
+// regression) — this route is a SIBLING at `/works/:workId/timeline`, NOT the
+// index.
+const WorkTimelinePage = lazy(() =>
+  import('@/pages/work-timeline-page').then((m) => ({ default: m.WorkTimelinePage })),
+);
+
 // Route-split: the World KB canvas pulls in `@xyflow/react` and is lazy-loaded
 // alongside the other canvas routes (canvas-strategy-surface.md §3.1).
 const WorldKbPage = lazy(() =>
@@ -84,6 +94,17 @@ function AppRoutes() {
             element={
               <Suspense fallback={<LoadingState label="Loading Outline…" />}>
                 <OutlinePage />
+              </Suspense>
+            }
+          />
+          {/* V1.123 P2 T5 — Work Timeline peer surface. Sibling of `outline`;
+              index redirect above still points to `outline` so the Work entry
+              default stays Outline (V1.118 regression preserved). */}
+          <Route
+            path="timeline"
+            element={
+              <Suspense fallback={<LoadingState label="Loading Work Timeline…" />}>
+                <WorkTimelinePage />
               </Suspense>
             }
           />

@@ -43,6 +43,15 @@
         "world-canvas": "世界画布",
         "lore": "背景设定"
       }
+    },
+    "work-timeline": {
+      "label": "前往作品时间轴",
+      "keywords": {
+        "narrative": "叙事",
+        "moment": "瞬间",
+        "scenes": "场景",
+        "beats": "节拍"
+      }
     }
   },
   "strategy": {

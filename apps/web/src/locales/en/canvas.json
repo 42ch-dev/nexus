@@ -737,5 +737,71 @@
         "desc": "descending"
       }
     }
+  },
+  "workTimeline": {
+    "loading": "Loading Work Timeline…",
+    "loadError": "Could not load the work timeline.",
+    "canvasAriaLabel": "Work timeline canvas",
+    "empty": {
+      "title": "This work's timeline is empty",
+      "description": "Outline events you add through the Outline surface will appear here."
+    },
+    "header": {
+      "title": "Work Timeline",
+      "description": "The work's narrative + moments. Pivots to Outline for edits.",
+      "peerNavAria": "Peer surfaces",
+      "outlineLink": "Outline"
+    },
+    "layerSwitcher": {
+      "ariaLabel": "Work Timeline layer",
+      "narrative": "Narrative",
+      "moment": "Moment"
+    },
+    "narrativeEventNode": {
+      "aria": "Work timeline event: {{name}}",
+      "unnamed": "(unnamed event)",
+      "chapterBadge": "Ch. {{chapter}}",
+      "noChapter": "No chapter anchor",
+      "selected": "Selected work timeline event"
+    },
+    "momentSceneNode": {
+      "aria": "Scene: {{name}}",
+      "unnamed": "(untitled scene)",
+      "anchor": "Ch. {{chapter}} · {{scene}}",
+      "selected": "Selected scene"
+    },
+    "momentBeatNode": {
+      "aria": "Beat: {{name}}",
+      "unnamed": "(untitled beat)",
+      "anchor": "Ch. {{chapter}} · {{scene}} · {{beat}}",
+      "selected": "Selected beat"
+    },
+    "moment": {
+      "emptyState": {
+        "title": "No scene or beat data yet",
+        "message": "Moment is scene-precise and manuscript-anchored. Add scenes and beats in Outline, or switch to Narrative for events.",
+        "cta": "Switch to Narrative"
+      }
+    },
+    "inspector": {
+      "eventTitle": "Narrative event",
+      "eventDescription": "Work-scoped event on the Narrative when-axis. Edits route through the Outline surface.",
+      "sceneTitle": "Scene",
+      "sceneDescription": "Scene-level manuscript anchor on the Moment layer. Edits route through the Outline surface.",
+      "beatTitle": "Beat",
+      "beatDescription": "Beat pin inside a scene. Edits route through the Outline surface.",
+      "editInOutline": "Edit in Outline",
+      "manuscriptAnchor": "Manuscript anchor",
+      "noManuscriptAnchor": "No manuscript anchor",
+      "aria": "Work Timeline inspector for {{name}}",
+      "fields": {
+        "eventId": "Event id",
+        "sceneId": "Scene id",
+        "beatId": "Beat id",
+        "chapter": "Chapter",
+        "description": "Description",
+        "status": "Status"
+      }
+    }
   }
 }

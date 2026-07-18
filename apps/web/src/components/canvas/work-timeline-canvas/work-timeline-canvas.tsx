@@ -32,6 +32,7 @@
  */
 import { useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router-dom';
 
 import { CanvasShell } from '@/components/canvas/canvas-shell';
 import {
@@ -161,6 +162,18 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
   const outline = outlineQuery.data;
   const isEmpty = !outline || (outline.timeline_events ?? []).length === 0;
 
+  // V1.123 P2 Task 7 — Moment-empty detection. Active layer is Moment AND
+  // the projection returned zero nodes (no scene/beat fixture / empty
+  // fixture). The graph itself is NOT globally empty here (the global empty
+  // branch above owns zero-event outlines). The Moment-empty branch only
+  // fires when there are events on Narrative but no scenes/beats on Moment —
+  // the CTA "Switch to Narrative" surfaces the events.
+  //
+  // layer-feel §2.4 + §7 + plan Task 7: render an honest Moment-empty panel
+  // with a CTA back to Narrative instead of an empty spatial canvas.
+  const isMomentEmpty =
+    !isEmpty && activeLayer === 'moment' && surface.nodes.length === 0;
+
   return (
     <div
       className="flex flex-col gap-3"
@@ -168,6 +181,7 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
       data-active-layer={activeLayer}
     >
       <WorkTimelineCanvasHeader
+        workId={workId}
         activeLayer={activeLayer}
         onLayerChange={setActiveLayer}
         showLayerSwitcher={!isEmpty}
@@ -176,13 +190,15 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
       {isEmpty ? (
         <EmptyState
           title={t('workTimeline.empty.title', {
-            defaultValue: 'This work’s timeline is empty',
+            defaultValue: "This work's timeline is empty",
           })}
           description={t('workTimeline.empty.description', {
             defaultValue:
               'Outline events you add through the Outline surface will appear here.',
           })}
         />
+      ) : isMomentEmpty ? (
+        <MomentEmptyState onSwitchToNarrative={() => setActiveLayer('narrative')} />
       ) : (
         <CanvasShell
           nodes={surface.nodes}
@@ -195,7 +211,17 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
           })}
           surfaceKey="work-timeline"
           relayout={surface.relayout}
-        />
+        >
+          {/* Task 6 — Work Timeline inspector overlay. Renders when
+              `useCanvasSurface`'s selection state resolves to a node; the
+              adapter's `renderInspector` dispatches by `nodeKind`
+              (event / scene / beat). Read-only in V1.123 (architect §6). */}
+          {surface.inspector ? (
+            <div className="pointer-events-auto absolute right-3 top-3 w-[340px] max-w-[calc(100%-1.5rem)] rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-popover">
+              {surface.inspector}
+            </div>
+          ) : null}
+        </CanvasShell>
       )}
     </div>
   );
@@ -203,15 +229,17 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
 
 /**
  * Canvas header — surfaces the Work Timeline label + the Narrative ↔ Moment
- * layer switcher (Task 4). The peer-link to Outline lives in Task 5
- * (Work Canvas shell peer nav registration). Task 4 ships the header with
- * the layer switcher only.
+ * layer switcher (Task 4) + the Outline peer-link (Task 5 — Work Canvas shell
+ * peer nav). The Outline link is the canonical escape hatch back to where
+ * the writes live (architect §6 — Work Timeline is read-only in V1.123).
  */
 function WorkTimelineCanvasHeader({
+  workId,
   activeLayer,
   onLayerChange,
   showLayerSwitcher,
 }: {
+  workId: string;
   activeLayer: WorkTimelineLayer;
   onLayerChange: (layer: WorkTimelineLayer) => void;
   /**
@@ -241,6 +269,24 @@ function WorkTimelineCanvasHeader({
             onLayerChange={onLayerChange}
           />
         ) : null}
+        {/* Task 5 — peer-link to Outline. Work Timeline is read-only in
+            V1.123 (architect §6); edits route through the Outline surface.
+            The link preserves the active `workId` so the pivot is
+            zero-friction. Mirrors the V1.122 Timeline peer-nav pattern
+            (worldKbLink / strategyLink). */}
+        <nav
+          className="flex flex-wrap items-center gap-2"
+          aria-label={t('workTimeline.header.peerNavAria', {
+            defaultValue: 'Peer surfaces',
+          })}
+        >
+          <Link
+            to={`/works/${encodeURIComponent(workId)}/outline`}
+            className="rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-1.5 text-button-12 text-gray-900 shadow-elevation-2 hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2"
+          >
+            {t('workTimeline.header.outlineLink', { defaultValue: 'Outline' })}
+          </Link>
+        </nav>
       </div>
     </div>
   );
@@ -324,6 +370,61 @@ function WorkTimelineLayerSwitcher({
           </button>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * V1.123 P2 Task 7 — Moment-layer honest empty-state.
+ *
+ * Renders when the active layer is Moment but the projection has zero nodes
+ * (no V1.108 scene/beat fixture; or fixture is empty). The V1.72 `WorkOutline`
+ * wire has no scene/beat data today (architect §3.4), so any Work without a
+ * Design Studio / test fixture surfaces this panel when the user clicks the
+ * Moment tab.
+ *
+ * Surfaces the layer-feel §7 copy + a CTA back to Narrative — the actionable
+ * escape hatch from an empty Moment world. Built on the shared `EmptyState`
+ * primitive so the visual treatment matches every other authoring empty-state
+ * in the app. Mirrors the V1.123 P1 BriefEmptyState pattern verbatim
+ * (canvas/timeline-canvas/timeline-canvas.tsx §`BriefEmptyState`).
+ *
+ * The CTA uses a primary-action button so keyboard + SR users have a direct
+ * escape hatch; it calls `onSwitchToNarrative` (the orchestrator's
+ * `setActiveLayer('narrative')`) — no navigation, no write.
+ */
+function MomentEmptyState({
+  onSwitchToNarrative,
+}: {
+  onSwitchToNarrative: () => void;
+}) {
+  const { t } = useTranslation('canvas');
+  return (
+    <div
+      data-testid="work-timeline-moment-empty-state"
+      className="rounded-card border border-gray-alpha-400 bg-background-100"
+    >
+      <EmptyState
+        title={t('workTimeline.moment.emptyState.title', {
+          defaultValue: 'No scene or beat data yet',
+        })}
+        description={t('workTimeline.moment.emptyState.message', {
+          defaultValue:
+            'Moment is scene-precise and manuscript-anchored. Add scenes and beats in Outline, or switch to Narrative for events.',
+        })}
+        action={
+          <button
+            type="button"
+            data-testid="work-timeline-moment-empty-cta"
+            onClick={onSwitchToNarrative}
+            className="rounded-control bg-blue-700 px-4 py-2 text-button-14 font-semibold text-white-100 shadow-elevation-2 hover:bg-blue-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2"
+          >
+            {t('workTimeline.moment.emptyState.cta', {
+              defaultValue: 'Switch to Narrative',
+            })}
+          </button>
+        }
+      />
     </div>
   );
 }

@@ -63,6 +63,7 @@ import type {
   SceneFixture,
 } from '../outline-canvas/graph-projection';
 import { workTimelineNodeTypes } from './work-timeline-node-types';
+import { renderWorkTimelineInspector } from './work-timeline-inspector';
 
 // ─── Public types (architect-locked §7.1) ──────────────────────────────────
 
@@ -274,10 +275,17 @@ const MOMENT_CHAPTER_STEP_X = 360;
  *
  * `layer-feel-differentiation.md` §2.3 + §2.4 locks the feel: Narrative
  * inherits the V1.122 LR balanced timeline; Moment prefers a vertical
- * scene-stack (TB direction). The `hasSuppliedPositions: true` flag is
- * preserved on both layers so the adapter's deterministic positions
- * survive first open; these `direction` / `rankSep` / `nodeSep` values
- * only take effect on an explicit `relayout()`.
+ * scene-stack (TB direction) with **tighter** rankSep / nodeSep so the
+ * chapter→scene→beat hierarchy reads as a dense manuscript stack (Plan
+ * Task 6 Step 2: "tight `nodeSep` (e.g., 30), `rankSep` (e.g., 60)").
+ * The `hasSuppliedPositions: true` flag is preserved on both layers so
+ * the adapter's deterministic positions survive first open; these
+ * `direction` / `rankSep` / `nodeSep` values only take effect on an
+ * explicit `relayout()`.
+ *
+ * Narrative does NOT carry Moment-specific rankSep/nodeSep — its LR baseline
+ * inherits V1.122 default spacing. The differentiation axis is direction +
+ * Moment density, not Narrative re-tuning.
  */
 const NARRATIVE_LAYOUT_OPTIONS = {
   direction: 'LR' as const,
@@ -285,8 +293,8 @@ const NARRATIVE_LAYOUT_OPTIONS = {
 };
 const MOMENT_LAYOUT_OPTIONS = {
   direction: 'TB' as const,
-  rankSep: 80,
-  nodeSep: 24,
+  rankSep: 60,
+  nodeSep: 30,
   hasSuppliedPositions: true,
 };
 
@@ -696,6 +704,18 @@ export function createWorkTimelineCanvasAdapter(
       // from the structured `WorkTimelineConflictInfo` parsed elsewhere.
       // Returning null mirrors the V1.122 Timeline adapter.
       return null;
+    },
+
+    renderInspector(node) {
+      // Task 6 — dispatch the selected node to the right Work Timeline
+      // inspector by `node.data.nodeKind`. Reads the current `workId` from
+      // the adapter context so the "Edit in Outline" CTA can navigate to
+      // `/works/:workId/outline` without closing over a stale id.
+      //
+      // Architect §6 (read-only in V1.123): every inspector renders
+      // read-only details + the Edit-in-Outline hand-off; no write is
+      // invoked from the Work Timeline surface.
+      return renderWorkTimelineInspector(node, ctxRef.current.workId);
     },
 
     summarizeGraph(graph) {
