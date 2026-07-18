@@ -467,6 +467,7 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
           summaryText={surface.summaryText}
           ariaLabel={t('timeline.canvasAriaLabel')}
           surfaceKey="timeline"
+          surfaceKind="timeline"
           relayout={surface.relayout}
         >
           {surface.inspector ? (

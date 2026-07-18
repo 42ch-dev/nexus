@@ -210,6 +210,7 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
             defaultValue: 'Work timeline canvas',
           })}
           surfaceKey="work-timeline"
+          surfaceKind="work-timeline"
           relayout={surface.relayout}
         >
           {/* Task 6 — Work Timeline inspector overlay. Renders when

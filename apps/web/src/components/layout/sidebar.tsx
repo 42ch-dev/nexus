@@ -5,6 +5,7 @@ import {
   BookOpen,
   BrainCircuit,
   CalendarClock,
+  CalendarRange,
   Cpu,
   Globe,
   Layers,
@@ -47,6 +48,17 @@ export function Sidebar() {
 
   const creatorGroups: ShellNavGroup[] = useMemo(
     () => [
+      // V1.123 P3 Task 1 — Timeline is the central instrument per
+      // `iterations/v1.123/specs/three-layer-product-spec.md`. Pinning it as
+      // the FIRST Creator-tab entry gives the global Timeline view structural
+      // prominence ("Timeline 一定要突出") over the Works / Worlds / Memories
+      // peers. The route is `/timeline` (cross-World overview); per-World
+      // Timeline stays at `/worlds/:worldId/timeline` (V1.122 P1 T3 hero).
+      {
+        id: 'timeline',
+        label: t('nav.timeline'),
+        items: [{ to: '/timeline', label: t('nav.timeline'), icon: CalendarRange }],
+      },
       {
         id: 'works',
         label: t('nav.works'),

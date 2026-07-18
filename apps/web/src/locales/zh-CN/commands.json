@@ -17,6 +17,15 @@
     "world-kb": "世界知识库"
   },
   "go": {
+    "timeline": {
+      "label": "前往时间线",
+      "keywords": {
+        "worlds": "世界",
+        "brief": "简介",
+        "narrative": "叙事",
+        "recent": "最近"
+      }
+    },
     "strategy": {
       "label": "前往策略",
       "keywords": {

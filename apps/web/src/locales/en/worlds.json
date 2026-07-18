@@ -10,5 +10,8 @@
   "listTitle": "All worlds",
   "openKb": "Open knowledge base",
   "openTimeline": "Open timeline",
-  "listAriaLabel": "Worlds"
+  "listAriaLabel": "Worlds",
+  "timelineActivity": "Timeline activity",
+  "timelineActivityLastEdited": "Timeline · last edited {{when}}",
+  "timelineActivityFallback": "Timeline · no activity yet"
 }

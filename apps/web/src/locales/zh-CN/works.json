@@ -16,8 +16,11 @@
     "status": "状态",
     "intake": "接入",
     "preset": "预设",
-    "updated": "更新时间"
+    "updated": "更新时间",
+    "timeline": "时间线"
   },
+  "viewTimeline": "查看时间线",
+  "viewTimelineAria": "查看 {{workId}} 的时间线",
   "workDetail": {
     "loading": "正在加载作品…",
     "notFoundTitle": "作品未找到",

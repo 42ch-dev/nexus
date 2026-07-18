@@ -33,7 +33,7 @@
  */
 import { useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { CalendarRange, ListTree, Network, Sparkles } from 'lucide-react';
+import { CalendarRange, ListTree, Network, Sparkles, Clock } from 'lucide-react';
 
 import { useRegisterCommand } from '@/lib/canvas/command-registry';
 
@@ -47,6 +47,24 @@ export function CanvasNavCommands(): null {
   // Ref so handlers/predicates (captured once on mount) read current values.
   const idsRef = useRef({ workId, worldId });
   idsRef.current = { workId, worldId };
+
+  // V1.123 P3 Task 2 — global Timeline entry in the command palette.
+  // Registered FIRST so authors discover the central instrument from any
+  // route (one-click reachability per AC-V1123-16). Always available —
+  // `/timeline` is a primary-nav route with no path params.
+  useRegisterCommand({
+    id: 'go.timeline',
+    labelKey: 'go.timeline.label',
+    groupKey: 'group.navigate',
+    keywordKeys: [
+      'go.timeline.keywords.worlds',
+      'go.timeline.keywords.brief',
+      'go.timeline.keywords.narrative',
+      'go.timeline.keywords.recent',
+    ],
+    icon: Clock,
+    handler: () => navigate('/timeline'),
+  });
 
   useRegisterCommand({
     id: 'go.strategy',
