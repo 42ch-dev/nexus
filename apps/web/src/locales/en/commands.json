@@ -43,6 +43,15 @@
         "world-canvas": "world canvas",
         "lore": "lore"
       }
+    },
+    "work-timeline": {
+      "label": "Go to Work Timeline",
+      "keywords": {
+        "narrative": "narrative",
+        "moment": "moment",
+        "scenes": "scenes",
+        "beats": "beats"
+      }
     }
   },
   "strategy": {

@@ -12,7 +12,17 @@ export type CanvasSurfaceKind =
   // a World's `WorldKbGraphResponse` onto a left-to-right when-axis. Reuses
   // the V1.73/V1.74 World KB DTOs verbatim (wire_contracts_changed: false);
   // see `timeline-canvas/` + `iterations/v1.122/specs/timeline-canvas-architecture.md`.
-  | 'timeline';
+  | 'timeline'
+  // V1.123 P2 Task 2 — additive Work Timeline peer surface (compiler-forced
+  // scope expansion: the Work Timeline adapter declares
+  // `surfaceKind: 'work-timeline'` and the enum must accept it for the
+  // adapter to satisfy `CanvasSurfaceAdapter`). Task 5 owns the full peer
+  // integration (route `/works/:workId/timeline` + canvas-nav resolver +
+  // sidebar entry); this enum value is the minimum additive addition so
+  // Tasks 2–4 ship adapter + projection + layer switcher without breaking
+  // type-safety. See `work-timeline-canvas/` +
+  // `iterations/v1.123/specs/three-layer-architecture.md` §7.4.
+  | 'work-timeline';
 
 export interface CanvasSurfaceLayoutOptions {
   direction?: 'TB' | 'LR';
