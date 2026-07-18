@@ -64,8 +64,8 @@ export type TimePolicy = 'manual' | 'owner_driven' | 'event_driven';
 /** Visibility/access level (data-model-v1.md §5.3) */
 export type Visibility = 'private' | 'unlisted' | 'public';
 
-/** KeyBlock content type (data-model-v1.md §5.5). V1.54 P1: added game-bible variants (species, faction, magic_system, technology, deity, level, economy_tier). V1.55 P3: added script variants (dialogue, beat, act). */
-export type BlockType = 'character' | 'ability' | 'scene' | 'organization' | 'item' | 'conflict' | 'info_point' | 'event' | 'species' | 'faction' | 'magic_system' | 'technology' | 'deity' | 'level' | 'economy_tier' | 'dialogue' | 'beat' | 'act';
+/** KeyBlock content type (data-model-v1.md §5.5). V1.54 P1: added game-bible variants (species, faction, magic_system, technology, deity, level, economy_tier). V1.55 P3: added script variants (dialogue, beat, act). V1.123 P1: added era (cross-profile world-shape marker for Brief layer). */
+export type BlockType = 'character' | 'ability' | 'scene' | 'organization' | 'item' | 'conflict' | 'info_point' | 'event' | 'species' | 'faction' | 'magic_system' | 'technology' | 'deity' | 'level' | 'economy_tier' | 'dialogue' | 'beat' | 'act' | 'era';
 
 /** MemoryItem type (data-model-v1.md §5.8) */
 export type MemoryType = 'canon' | 'working' | 'experience';

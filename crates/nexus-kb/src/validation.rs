@@ -636,7 +636,8 @@ pub const fn block_type_state_key(block_type: BlockType) -> Option<&'static str>
         | BlockType::EconomyTier
         | BlockType::Dialogue
         | BlockType::Beat
-        | BlockType::Act => None,
+        | BlockType::Act
+        | BlockType::Era => None,
     }
 }
 
