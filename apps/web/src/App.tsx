@@ -9,6 +9,7 @@ import { SetupGate } from '@/components/setup/setup-gate';
 import { ChapterPage } from '@/pages/chapter-page';
 import { ChaptersPage } from '@/pages/chapters-page';
 import { FindingsPage } from '@/pages/findings-page';
+import { GlobalTimelinePage } from '@/pages/global-timeline-page';
 import { MemoryPage } from '@/pages/memory-page';
 import { ModulesPage } from '@/pages/modules-page';
 import { NotFoundPage } from '@/pages/not-found-page';
@@ -85,6 +86,12 @@ function AppRoutes() {
       <Route path="setup" element={<SetupWizardPage />} />
       <Route element={<SetupGate><RootLayout /></SetupGate>}>
         <Route index element={<Navigate to="/works" replace />} />
+        {/* V1.123 P3 Task 1 — global Timeline entry in primary nav.
+            Cross-World overview composed client-side; sibling of `/works`
+            and `/worlds`. Per-World Timeline stays at
+            `/worlds/:worldId/timeline` (V1.122 P1 T3 hero surface); Work
+            Timeline stays at `/works/:workId/timeline` (V1.123 P2 T5). */}
+        <Route path="timeline" element={<GlobalTimelinePage />} />
         <Route path="works" element={<WorksPage />} />
         <Route path="works/chapters" element={<ChaptersPage />} />
         <Route path="works/:workId" element={<WorkShellLayout />}>

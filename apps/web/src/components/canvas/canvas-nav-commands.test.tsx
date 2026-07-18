@@ -126,11 +126,14 @@ describe('CanvasNavCommands — registration', () => {
   // trio (`go.outline`, `go.strategy`, `go.world-kb`). Surgical relaxation of
   // the V1.111 "exactly three" assertion: same Navigate group, same labelKey
   // shape, additive only.
-  it('registers the Navigate-family commands (incl. Work Timeline V1.123 P2)', () => {
+  // V1.123 P3 Task 2 — `go.timeline` (global Timeline entry) registered
+  // alongside the V1.123 P2 quartet. Always available; same Navigate group.
+  it('registers the Navigate-family commands (incl. Work Timeline V1.123 P2, global Timeline V1.123 P3 T2)', () => {
     renderInLayout('/sessions');
     expect(getCommands().map((c) => c.id).sort()).toEqual([
       'go.outline',
       'go.strategy',
+      'go.timeline',
       'go.work-timeline',
       'go.world-kb',
     ]);
@@ -138,7 +141,7 @@ describe('CanvasNavCommands — registration', () => {
 
   it('unregisters all commands on unmount (no leak across mounts)', () => {
     const { unmount } = renderInLayout('/sessions');
-    expect(getCommands()).toHaveLength(4);
+    expect(getCommands()).toHaveLength(5);
     unmount();
     expect(getCommands()).toEqual([]);
   });

@@ -31,8 +31,9 @@
  * contract ready).
  */
 import { useMemo, useRef, useState } from 'react';
+import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 
 import { CanvasShell } from '@/components/canvas/canvas-shell';
 import {
@@ -40,6 +41,7 @@ import {
   type CanvasSurfaceQueryResult,
 } from '@/components/canvas/use-canvas-surface';
 import { useWorkOutline } from '@/lib/canvas/use-outline-data';
+import { useWork } from '@/api/queries';
 import { LoadingState, ErrorState, EmptyState } from '@/components/ui/states';
 import type { SceneBeatFixturePayload } from '../outline-canvas/graph-projection';
 
@@ -79,7 +81,37 @@ export interface WorkTimelineCanvasProps {
  */
 export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCanvasProps) {
   const { t } = useTranslation('canvas');
+  const navigate = useNavigate();
   const outlineQuery = useWorkOutline(workId);
+
+  // ── V1.123 P3 Task 4 — Work's bound World (cross-surface navigation) ────
+  //
+  // The Work detail carries an optional `world_id` (V1.72 WorkDetailResponse).
+  // When present, the Narrative event inspector surfaces a "View on World
+  // Timeline" affordance that navigates to the bound World's Timeline
+  // Narrative layer. When absent, the affordance hides (honest scope cut per
+  // plan §"If binding is missing or unreliable, P3 hides the affordance").
+  //
+  // `useWork` shares the TanStack Query cache with every other Work reader
+  // (sidebar, Work detail page, etc.) so the extra fetch is typically a
+  // cache hit on Work-scoped routes — no real network cost on the Work
+  // Timeline entry. Stays enabled even while the outline is loading because
+  // the world_id is independent of the outline projection.
+  const workDetailQuery = useWork(workId);
+  const boundWorldId = workDetailQuery.data?.world_id ?? undefined;
+
+  // Cross-surface navigation hand-off. Composed once per render via
+  // `useCallback`; the adapter context ref captures the latest closure so
+  // the inspector's CTA always targets the current `boundWorldId`. The
+  // callback is only referenced by the adapter context when `boundWorldId`
+  // is present, so a stale-closure risk would not arise in practice — but
+  // the memo keeps the referential shape stable for the ctxRef assignment.
+  const onViewOnWorldTimeline = useCallback(() => {
+    if (!boundWorldId) return;
+    navigate(
+      `/worlds/${encodeURIComponent(boundWorldId)}/timeline?layer=narrative`,
+    );
+  }, [boundWorldId, navigate]);
 
   // ── V1.123 P2 Task 4 — layer state + default-layer logic ────────────────
   //
@@ -127,9 +159,17 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
   // referentially stable; only the values inside ctxRef.current change.
   // Task 4 wires the `sceneBeatFixture` slot so the Moment projection
   // reads from the orchestrator-supplied fixture (V1.108 carrier pattern).
+  //
+  // V1.123 P3 Task 4 — also wires the cross-surface navigation slots
+  // (`worldId` + `onViewOnWorldTimeline`) so the Narrative event inspector
+  // can render the "View on World Timeline" affordance. The callback is
+  // only forwarded when a bound World exists (the inspector hides the CTA
+  // otherwise — honest scope cut).
   ctxRef.current = {
     workId,
     sceneBeatFixture,
+    worldId: boundWorldId,
+    onViewOnWorldTimeline: boundWorldId ? onViewOnWorldTimeline : undefined,
   };
 
   // Rebuild the adapter on layer swap so `useCanvasSurface`'s `[graph,
@@ -210,6 +250,7 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
             defaultValue: 'Work timeline canvas',
           })}
           surfaceKey="work-timeline"
+          surfaceKind="work-timeline"
           relayout={surface.relayout}
         >
           {/* Task 6 — Work Timeline inspector overlay. Renders when

@@ -16,8 +16,11 @@
     "status": "Status",
     "intake": "Intake",
     "preset": "Preset",
-    "updated": "Updated"
+    "updated": "Updated",
+    "timeline": "Timeline"
   },
+  "viewTimeline": "View Timeline",
+  "viewTimelineAria": "View {{workId}} Timeline",
   "workDetail": {
     "loading": "Loading Work…",
     "notFoundTitle": "Work not found",

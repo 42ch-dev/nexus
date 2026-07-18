@@ -79,6 +79,30 @@ describe('Sidebar', () => {
     expect(modulesLink).toHaveAttribute('href', '/modules');
   });
 
+  // V1.123 P3 Task 1 — Timeline primary-nav entry. The global Timeline
+  // view (`/timeline`) is reachable from the Creator tab as a peer to Works
+  // / Worlds / Memories. Pinning it FIRST gives the central instrument
+  // structural prominence per `three-layer-product-spec.md`.
+  it('exposes the Timeline nav link under the Creator tab with a valid route (V1.123 P3 T1)', async () => {
+    useSidebarHandlers();
+
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+
+    const timelineLink = screen.getByRole('link', { name: 'Timeline' });
+    expect(timelineLink).toHaveAttribute('href', '/timeline');
+    // The link is on the Creator tab (selected by default).
+    expect(screen.getByRole('tab', { name: 'Creator', selected: true })).toBeInTheDocument();
+  });
+
+  it('renders localized Timeline label when locale is zh-CN (V1.123 P3 T1)', async () => {
+    window.localStorage.setItem('nexus-web-locale', 'zh-CN');
+    useSidebarHandlers();
+
+    renderInApp(<Sidebar />, { client: makeClient(), activeCreatorId: 'creator-a' });
+
+    expect(screen.getByRole('link', { name: '时间线' })).toHaveAttribute('href', '/timeline');
+  });
+
   it('does not expose Connect or Daemon as top-level nav items', async () => {
     useSidebarHandlers();
 

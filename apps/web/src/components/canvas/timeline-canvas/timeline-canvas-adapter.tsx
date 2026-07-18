@@ -281,6 +281,27 @@ export interface TimelineCanvasAdapterContext {
    * itself (architect-locked §4.2 — selection-only, inspector-owned writes).
    */
   onSelectNode?: (nodeId: string) => void;
+  /**
+   * V1.123 P3 Task 4 — bound Work id (the Work that realizes this World).
+   * When present, the World Timeline event inspector surfaces a "View in
+   * Work Timeline" affordance that navigates to the realizing Work's
+   * Timeline surface. Derived client-side by the orchestrator (uses
+   * `useWorks()` + per-Work `getWork()` fan-out — capped at N=20 most-recent
+   * Works; `simplify:` ceiling documented in the orchestrator).
+   *
+   * Undefined when no Work realizes the World (the orchestrator hides the
+   * affordance — honest scope cut per plan §"If binding is missing or
+   * unreliable, P3 hides the affordance").
+   */
+  boundWorkId?: string;
+  /**
+   * V1.123 P3 Task 4 — cross-surface navigation hand-off. Fires when the
+   * user clicks "View in Work Timeline" on a World Timeline Narrative event.
+   * The orchestrator navigates to `/works/:workId/timeline?layer=narrative`
+   * (Moment layer one click away per plan §"Cross-surface navigation URL
+   * contract"). Undefined when no realizing Work is bound.
+   */
+  onViewInWorkTimeline?: () => void;
 }
 
 export type TimelineCanvasAdapter = CanvasSurfaceAdapter<

@@ -1,4 +1,4 @@
-import { NavLink, Outlet, useLocation } from 'react-router-dom';
+import { NavLink, Outlet, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 
 import { CanvasNavCommands } from '@/components/canvas/canvas-nav-commands';
@@ -8,6 +8,7 @@ import { Header } from '@/components/layout/header';
 import { MainBanner } from '@/components/layout/main-banner';
 import { Sidebar } from '@/components/layout/sidebar';
 import { useHotkey } from '@/lib/use-hotkey';
+import { useTimelineShortcut } from '@/lib/keyboard-shortcuts';
 import { isWorkShellRoute } from '@/lib/work-shell-routes';
 import { cn } from '@/lib/utils';
 
@@ -56,6 +57,7 @@ function useRouteTitle(): string {
 export function RootLayout() {
   const { t } = useTranslation('shell');
   const { pathname } = useLocation();
+  const navigate = useNavigate();
   const title = useRouteTitle();
   const workShell = isWorkShellRoute(pathname);
 
@@ -63,6 +65,14 @@ export function RootLayout() {
   // (module-level store in `command-palette.tsx`); the hotkey just calls
   // `openPalette()`. See V1.111 P0 T3.
   useHotkey('mod+k', () => openPalette());
+
+  // V1.123 P3 Task 5 — global Timeline shortcut (`g` then `t` chord).
+  // Timeline is the central instrument per the V1.123 IA-deepening plan; the
+  // chord keeps it one keystroke away from anywhere in the app. The hook
+  // owns the listener lifecycle; the navigate callback targets the
+  // primary-nav `/timeline` route (Batch A Task 1). Mounted once per
+  // RootLayout (same site as `useHotkey` above) — never re-binds.
+  useTimelineShortcut(() => navigate('/timeline'));
 
   return (
     <div className="flex h-screen overflow-hidden bg-background-100 text-gray-1000">

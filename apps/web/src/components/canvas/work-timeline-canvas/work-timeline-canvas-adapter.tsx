@@ -712,10 +712,19 @@ export function createWorkTimelineCanvasAdapter(
       // the adapter context so the "Edit in Outline" CTA can navigate to
       // `/works/:workId/outline` without closing over a stale id.
       //
+      // V1.123 P3 Task 4 — also forwards the cross-surface navigation slots
+      // (`worldId` + `onViewOnWorldTimeline`) from the adapter context so the
+      // Narrative event inspector can render the "View on World Timeline"
+      // affordance when the orchestrator wires them. Honest scope cut: either
+      // slot absent → the inspector hides the affordance (per plan §).
+      //
       // Architect §6 (read-only in V1.123): every inspector renders
       // read-only details + the Edit-in-Outline hand-off; no write is
       // invoked from the Work Timeline surface.
-      return renderWorkTimelineInspector(node, ctxRef.current.workId);
+      return renderWorkTimelineInspector(node, ctxRef.current.workId, {
+        worldId: ctxRef.current.worldId,
+        onViewOnWorldTimeline: ctxRef.current.onViewOnWorldTimeline,
+      });
     },
 
     summarizeGraph(graph) {

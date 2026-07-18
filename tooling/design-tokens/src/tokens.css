@@ -252,6 +252,13 @@
      a single tuning knob, not a hardcoded semantic color in component code. */
   --color-canvas-outline-accent: var(--color-amber-700);
   --color-canvas-worldkb-accent: var(--color-teal-700);
+  /* V1.123 P3 T2: Timeline accent spine. Timeline is the central instrument
+     per `iterations/v1.123/specs/three-layer-product-spec.md`; the brand-blue
+     per the "Canvas/SOUL brand-blue tokens must reference var(--color-blue-700)"
+     invariant (see comment at the head of this Canvas surface block). The
+     value reuses the existing brand scale — no new color invented, only a
+     per-surface tuning knob mirroring the strategy/outline/worldkb pattern. */
+  --color-canvas-timeline-accent: var(--color-blue-700);
   --color-canvas-write-dirty: var(--color-amber-700);
   --color-canvas-write-conflict: var(--color-red-700);
   --color-canvas-write-success: var(--color-green-700);
@@ -637,6 +644,8 @@
   /* V1.121 P3 T2: per-surface accent spines (mirrors light block). */
   --color-canvas-outline-accent: var(--color-amber-700);
   --color-canvas-worldkb-accent: var(--color-teal-700);
+  /* V1.123 P3 T2: Timeline accent spine (mirrors light block). */
+  --color-canvas-timeline-accent: var(--color-blue-700);
   --color-canvas-write-dirty: var(--color-amber-700);
   --color-canvas-write-conflict: var(--color-red-700);
   --color-canvas-write-success: var(--color-green-700);

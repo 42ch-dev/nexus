@@ -45,7 +45,9 @@
     }
   },
   "canvasShell": {
-    "relayout": "重新布局"
+    "relayout": "重新布局",
+    "timelineBadge": "时间线",
+    "timelineBadgeAria": "时间线表面——核心工具"
   },
   "outlineCanvas": {
     "showGraph": "显示图谱",
@@ -656,6 +658,8 @@
       "bodyJsonError": "正文必须是有效的 JSON。",
       "bodyJsonObjectError": "正文必须是 JSON 对象。",
       "bodyPlaceholder": "自由格式的正文 JSON…",
+      "viewInWorkTimeline": "在作品时间轴中查看",
+      "viewInWorkTimelineAria": "在 Work Timeline 中打开承接此世界的作品",
       "field": {
         "title": "标题",
         "body": "正文",
@@ -782,6 +786,8 @@
       "editInOutline": "在大纲中编辑",
       "manuscriptAnchor": "稿件锚点",
       "noManuscriptAnchor": "无稿件锚点",
+      "viewOnWorldTimeline": "在世界时间轴中查看",
+      "viewOnWorldTimelineAria": "在 World Timeline 中打开此作品绑定的世界",
       "aria": "{{name}} 的作品时间轴检查器",
       "fields": {
         "eventId": "事件 ID",
@@ -791,6 +797,26 @@
         "description": "描述",
         "status": "状态"
       }
+    }
+  },
+  "globalTimeline": {
+    "title": "时间线",
+    "description": "所有世界的近期时间线活动。",
+    "listAriaLabel": "按世界分组的近期时间线活动",
+    "loading": "正在加载时间线…",
+    "loadError": "无法加载全局时间线。",
+    "empty": {
+      "title": "暂无时间线活动",
+      "description": "当作品创建世界后，世界会出现在这里。"
+    },
+    "activitySummary": "{{layer}} · 简介：{{era}} · 叙事：{{event}}",
+    "activityFallback": "时间线",
+    "activityLoading": "正在加载活动…",
+    "activityError": "活动不可用",
+    "lastEdited": "上次编辑 {{when}}",
+    "layer": {
+      "brief": "简介",
+      "narrative": "叙事"
     }
   }
 }

@@ -69,7 +69,7 @@
     },
     {
       "plan_id": "2026-07-18-v1.123-timeline-first-ia-deepening",
-      "status": "Todo",
+      "status": "Done",
       "iteration_refs": [
         "V1.123"
       ],
@@ -2683,6 +2683,161 @@
         "id": "R-V1123P2QC3-S012",
         "severity": "nit",
         "title": "Brief path adaptations (routes/ -> pages/; work-canvas-shell.tsx -> canvas-nav-commands.tsx) are project-canonical; recommend spec/path doc update at iteration-close",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": null
+      }
+    ],
+    "2026-07-18-v1.123-timeline-first-ia-deepening": [
+      {
+        "id": "R-V1123P3-001",
+        "severity": "low",
+        "title": "Per-World era/event counts deferred to V1.124+ composite daemon endpoint (N+1 mitigation per architect §5)",
+        "lifecycle": "open",
+        "source": "impl-batch-a",
+        "closure_note": null,
+        "tracking_link": "DF-V1123-COMPOSITE-ENDPOINT (V1.124+)"
+      },
+      {
+        "id": "R-V1123P3-002",
+        "severity": "low",
+        "title": "Per-Work timeline_events.length deferred to V1.124+ composite endpoint",
+        "lifecycle": "open",
+        "source": "impl-batch-a",
+        "closure_note": null,
+        "tracking_link": "DF-V1123-COMPOSITE-ENDPOINT (V1.124+)"
+      },
+      {
+        "id": "R-V1123P3-003",
+        "severity": "low",
+        "title": "Global Timeline view N=5 cap on per-World graph fan-out (plan floor; no composite endpoint)",
+        "lifecycle": "open",
+        "source": "impl-batch-a",
+        "closure_note": null,
+        "tracking_link": "P3 plan mitigation"
+      },
+      {
+        "id": "R-V1123P3-004",
+        "severity": "low",
+        "title": "Composite-endpoint work deferred to V1.124+",
+        "lifecycle": "open",
+        "source": "impl-batch-a",
+        "closure_note": null,
+        "tracking_link": "DF-V1123-COMPOSITE-ENDPOINT (V1.124+)"
+      },
+      {
+        "id": "R-V1123P3-005",
+        "severity": "low",
+        "title": "Per-event highlight omitted in cross-surface nav (no wire binding today)",
+        "lifecycle": "open",
+        "source": "impl-batch-b",
+        "closure_note": null,
+        "tracking_link": "DF-V1123-CROSS-SURFACE-BINDING"
+      },
+      {
+        "id": "R-V1123P3-006",
+        "severity": "low",
+        "title": "Composite-endpoint follow-up for cross-surface Work-detail fan-out (N=20 cap today)",
+        "lifecycle": "open",
+        "source": "impl-batch-b",
+        "closure_note": null,
+        "tracking_link": "DF-V1123-COMPOSITE-ENDPOINT (V1.124+)"
+      },
+      {
+        "id": "R-V1123P3-007",
+        "severity": "nit",
+        "title": "Scene/beat + context nodes excluded from cross-surface CTAs (only Moment + Narrative event nodes have CTAs)",
+        "lifecycle": "open",
+        "source": "impl-batch-b",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P3QC1-S001",
+        "severity": "nit",
+        "title": "go.timeline command palette icon (Clock) diverges from sidebar (CalendarRange) — cosmetic",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P3QC1-S002",
+        "severity": "nit",
+        "title": "i18n activitySummary renders layer name twice — cosmetic",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P3QC1-S003",
+        "severity": "nit",
+        "title": "onViewOnWorldTimeline callback ignores node arg — forward-compat for P4 ?event= URL extension",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": "P4 implementer note"
+      },
+      {
+        "id": "R-V1123P3QC1-S004",
+        "severity": "low",
+        "title": "Index-based useQueries lookup alignment — fragile under future filtering",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P3QC1-S005",
+        "severity": "nit",
+        "title": "Inline-style accent pattern in CanvasShellTimelineBadge not registered as Tailwind utility",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P3QC1-S006",
+        "severity": "nit",
+        "title": "useTimelineShortcut chord state machine not lifted into useHotkey (acceptable; flag if 2nd chord surface appears)",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P3QC1-S007",
+        "severity": "low",
+        "title": "Activity-badge 'last edited Xh ago' indicator not surfaced on Canvas shell (P4 polish candidate)",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": "P4 polish candidate"
+      },
+      {
+        "id": "R-V1123P3QC3-S001",
+        "severity": "low",
+        "title": "Ad-hoc query key ['work-detail', workId] diverges from queryKeys.ts convention",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P3QC3-S002",
+        "severity": "nit",
+        "title": "Cross-surface N=20 fan-out lacks simplify: performance ceiling doc",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P3QC3-S003",
+        "severity": "nit",
+        "title": "Global Timeline staleTime (5s) vs per-World graph staleTime (0) undocumented",
         "lifecycle": "open",
         "source": "qc3",
         "closure_note": null,

@@ -45,7 +45,9 @@
     }
   },
   "canvasShell": {
-    "relayout": "Re-layout"
+    "relayout": "Re-layout",
+    "timelineBadge": "Timeline",
+    "timelineBadgeAria": "Timeline surface — central instrument"
   },
   "outlineCanvas": {
     "showGraph": "Show graph",
@@ -667,6 +669,8 @@
       "bodyJsonError": "Body must be valid JSON.",
       "bodyJsonObjectError": "Body must be a JSON object.",
       "bodyPlaceholder": "Free-form body JSON…",
+      "viewInWorkTimeline": "View in Work Timeline",
+      "viewInWorkTimelineAria": "Open the Work that realizes this World on the Work Timeline",
       "field": {
         "title": "Title",
         "body": "Body",
@@ -793,6 +797,8 @@
       "editInOutline": "Edit in Outline",
       "manuscriptAnchor": "Manuscript anchor",
       "noManuscriptAnchor": "No manuscript anchor",
+      "viewOnWorldTimeline": "View on World Timeline",
+      "viewOnWorldTimelineAria": "Open this Work's bound World on the World Timeline",
       "aria": "Work Timeline inspector for {{name}}",
       "fields": {
         "eventId": "Event id",
@@ -802,6 +808,26 @@
         "description": "Description",
         "status": "Status"
       }
+    }
+  },
+  "globalTimeline": {
+    "title": "Timeline",
+    "description": "Recent Timeline activity across all Worlds.",
+    "listAriaLabel": "Recent Timeline activity by World",
+    "loading": "Loading Timeline…",
+    "loadError": "Could not load the global Timeline.",
+    "empty": {
+      "title": "No Timeline activity yet",
+      "description": "Worlds will appear here once a Work creates one."
+    },
+    "activitySummary": "{{layer}} · Brief: {{era}} · Narrative: {{event}}",
+    "activityFallback": "Timeline",
+    "activityLoading": "Loading activity…",
+    "activityError": "Activity unavailable",
+    "lastEdited": "Last edited {{when}}",
+    "layer": {
+      "brief": "Brief",
+      "narrative": "Narrative"
     }
   }
 }

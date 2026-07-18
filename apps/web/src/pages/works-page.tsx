@@ -104,6 +104,16 @@ export function WorksPage() {
                     <TableHead>{t('columns.intake')}</TableHead>
                     <TableHead>{t('columns.preset')}</TableHead>
                     <TableHead>{t('columns.updated')}</TableHead>
+                    {/* V1.123 P3 Task 3 — Timeline activity surface. The
+                        Works dashboard doubles as a Timeline activity
+                        index: each row exposes a peer link to the Work
+                        Timeline surface (`/works/<workId>/timeline`,
+                        V1.123 P2 T5). The existing Updated column stays —
+                        it was already a Timeline activity proxy via
+                        `formatRelative(updated_at)`. Per plan honest scope
+                        cut, per-Work outline fetches for event counts are
+                        deferred to a future composite endpoint. */}
+                    <TableHead>{t('columns.timeline')}</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -124,6 +134,21 @@ export function WorksPage() {
                         <span className="text-copy-13-mono text-gray-900">{shortId(w.primary_preset_id)}</span>
                       </TableCell>
                       <TableCell className="text-gray-900">{formatRelative(w.updated_at)}</TableCell>
+                      {/* V1.123 P3 Task 3 — per-work Timeline link. The
+                          testid is namespaced by work_id so tests can
+                          target a specific work row without ambiguity. The
+                          link is a peer of the row's primary outline link;
+                          both preserve their workId in the path. */}
+                      <TableCell>
+                        <Link
+                          to={`/works/${encodeURIComponent(w.work_id)}/timeline`}
+                          data-testid={`work-timeline-link-${w.work_id}`}
+                          aria-label={t('viewTimelineAria', { workId: w.work_id })}
+                          className="inline-flex items-center gap-1 text-blue-700 hover:text-blue-800 hover:underline"
+                        >
+                          {t('viewTimeline')}
+                        </Link>
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

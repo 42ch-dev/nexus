@@ -71,7 +71,7 @@ export function useHotkey(
       // an incidental Ctrl+K (only `mod+k` should match that chord).
       if (!mod && (event.metaKey || event.ctrlKey)) return;
       if (event.key.toLowerCase() !== baseKey) return;
-      if (shouldIgnoreTarget(document.activeElement)) return;
+      if (isHotkeyTargetIgnored(document.activeElement)) return;
       if (preventDefault) event.preventDefault();
       handlerRef.current(event);
     }
@@ -101,8 +101,14 @@ function parseDescriptor(descriptor: string): { mod: boolean; baseKey: string } 
  * contenteditable host (inherited editability) and children of an opt-out
  * region. Canvas surfaces own their opt-out via `data-command-palette-ignore`
  * on their root wrapper — no dependency on React Flow internals.
+ *
+ * Exported (V1.123 P3 Task 5) so the Timeline chord hook
+ * (`useTimelineShortcut`) can share the SAME suppression contract without
+ * duplicating the helper. Keeping a single source of truth avoids drift
+ * between the two shortcut surfaces (the chord must never steal typing
+ * focus from inputs the palette also avoids).
  */
-function shouldIgnoreTarget(element: Element | null): boolean {
+export function isHotkeyTargetIgnored(element: Element | null): boolean {
   if (element === null) return false;
   const tag = element.tagName;
   if (tag === 'INPUT' || tag === 'TEXTAREA') return true;
