@@ -658,6 +658,8 @@
       "bodyJsonError": "正文必须是有效的 JSON。",
       "bodyJsonObjectError": "正文必须是 JSON 对象。",
       "bodyPlaceholder": "自由格式的正文 JSON…",
+      "viewInWorkTimeline": "在作品时间轴中查看",
+      "viewInWorkTimelineAria": "在 Work Timeline 中打开承接此世界的作品",
       "field": {
         "title": "标题",
         "body": "正文",
@@ -784,6 +786,8 @@
       "editInOutline": "在大纲中编辑",
       "manuscriptAnchor": "稿件锚点",
       "noManuscriptAnchor": "无稿件锚点",
+      "viewOnWorldTimeline": "在世界时间轴中查看",
+      "viewOnWorldTimelineAria": "在 World Timeline 中打开此作品绑定的世界",
       "aria": "{{name}} 的作品时间轴检查器",
       "fields": {
         "eventId": "事件 ID",

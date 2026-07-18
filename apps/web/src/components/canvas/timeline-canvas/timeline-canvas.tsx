@@ -44,16 +44,25 @@
  * wires the fallback logic only.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useBeforeUnload } from 'react-router-dom';
+import { Link, useBeforeUnload, useNavigate } from 'react-router-dom';
 import type { Node } from '@xyflow/react';
+import { useQueries } from '@tanstack/react-query';
 import { Info } from 'lucide-react';
 
 import { CanvasShell } from '@/components/canvas/canvas-shell';
 import { useCanvasSurface, type CanvasSurfaceQueryResult } from '@/components/canvas/use-canvas-surface';
 import { useWorldKbGraph, usePatchWorldKbEntity } from '@/lib/canvas/use-world-kb-data';
+import { flattenPages, useWorks } from '@/api/queries';
+import { useNexusClient } from '@/lib/client-context';
 import { LoadingState, ErrorState, EmptyState } from '@/components/ui/states';
-import type { WorldKbGraphResponse, WorldKbPatchEntityRequest } from '@42ch/nexus-contracts';
+import type {
+  WorkDetailResponse,
+  WorkSummary,
+  WorldKbGraphResponse,
+  WorldKbPatchEntityRequest,
+} from '@42ch/nexus-contracts';
 
 import {
   createTimelineCanvasAdapter,
@@ -130,8 +139,82 @@ function buildConflictDraft(
 
 export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
   const { t } = useTranslation('canvas');
+  const navigate = useNavigate();
   const graph = useWorldKbGraph(worldId);
   const patchEntity = usePatchWorldKbEntity(worldId);
+
+  // ── V1.123 P3 Task 4 — bound Work (cross-surface navigation) ───────────
+  //
+  // The World's realizing Work is NOT directly indexed by the wire (the V1.72
+  // WorkDetailResponse carries `world_id`, but the inverse lookup — World →
+  // Work — requires per-Work detail fan-out). We compose it client-side from
+  // the existing `useWorks()` list + a capped per-Work detail fan-out. When
+  // exactly one Work binds to the active World, the World Timeline event
+  // inspector surfaces "View in Work Timeline" → navigates to
+  // `/works/:workId/timeline?layer=narrative`.
+  //
+  // Honest scope cut: when no Work binds to the World, the orchestrator
+  // supplies neither `boundWorkId` nor the callback; the inspector hides the
+  // CTA (per plan §"If binding is missing or unreliable, P3 hides the
+  // affordance"). When MULTIPLE Works bind (rare in V1.123 — most Worlds are
+  // single-Work), the orchestrator picks the most-recent by `updated_at` and
+  // notes the simplify: ceiling — a Work-picker is P4 polish.
+  //
+  // `simplify:` the fan-out is capped at N=20 most-recent Works (per the
+  // global Timeline's N=5 pattern). Workspaces with >20 Works see the CTA
+  // only when the realizing Work is among the 20 most-recent. A daemon-side
+  // composite endpoint (`GET .../worlds/{world_id}/works`) would lift the
+  // cap without UI churn — tracked as residual R-V1123P3-005.
+  const worksQuery = useWorks({ limit: 20 });
+  const worksList = useMemo<WorkSummary[]>(
+    () => flattenPages<WorkSummary>(worksQuery.data),
+    [worksQuery.data],
+  );
+  const nexusClient = useNexusClient();
+
+  // Per-Work detail fan-out (parallel). Each `getWork` returns a
+  // `WorkDetailResponse` carrying `world_id`; we filter to those matching the
+  // active World. Cached at the TanStack Query level — Work-detail readers
+  // (sidebar, Work detail page, Work Timeline orchestrator) share keys.
+  const workDetailQueries = useQueries({
+    queries: worksList.map((w: WorkSummary) => ({
+      queryKey: ['work-detail', w.work_id],
+      queryFn: (): Promise<WorkDetailResponse> => nexusClient.getWork(w.work_id),
+      staleTime: 30_000,
+    })),
+  });
+
+  // Find the Work that realizes this World (most-recent by `updated_at`).
+  // `simplify:` first-match by recency; multi-Work Worlds are rare in
+  // V1.123 and a Work-picker is P4 polish.
+  const boundWorkId = useMemo<string | undefined>(() => {
+    const candidates: Array<{ workId: string; updatedAt: string }> = [];
+    workDetailQueries.forEach((q, idx) => {
+      const detail = q.data as WorkDetailResponse | undefined;
+      if (!detail) return;
+      if (detail.world_id !== worldId) return;
+      const summary = worksList[idx];
+      candidates.push({
+        workId: detail.work_id,
+        updatedAt: summary?.updated_at ?? '',
+      });
+    });
+    if (candidates.length === 0) return undefined;
+    candidates.sort((a, b) => (a.updatedAt < b.updatedAt ? 1 : a.updatedAt > b.updatedAt ? -1 : 0));
+    return candidates[0].workId;
+  }, [workDetailQueries, worksList, worldId]);
+
+  // Cross-surface navigation hand-off. Composed once per render via
+  // `useCallback`; the adapter context ref captures the latest closure so
+  // the inspector's CTA always targets the current `boundWorkId`. The
+  // callback is only referenced by the adapter context when a realizing
+  // Work exists, so a stale-closure risk would not arise in practice.
+  const onViewInWorkTimeline = useCallback(() => {
+    if (!boundWorkId) return;
+    navigate(
+      `/works/${encodeURIComponent(boundWorkId)}/timeline?layer=narrative`,
+    );
+  }, [boundWorkId, navigate]);
 
   // Captured conflict info (T4) — set by the mutation `onError` when the
   // daemon returns 409 / 422. The node ref lets the modal re-submit on
@@ -348,6 +431,11 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
       }));
       surface.onNodesChange(changes);
     },
+    // V1.123 P3 Task 4 — cross-surface navigation slots. Forwarded only when
+    // a realizing Work is bound (the inspector hides the CTA otherwise —
+    // honest scope cut).
+    boundWorkId,
+    onViewInWorkTimeline: boundWorkId ? onViewInWorkTimeline : undefined,
   };
 
   // When the user navigates to a different node, clear a stale validation
