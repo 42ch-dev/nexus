@@ -4,7 +4,7 @@
   "plans": [
     {
       "plan_id": "2026-07-18-v1.122-three-pillar-spec-refactor",
-      "status": "Todo",
+      "status": "Done",
       "iteration_refs": [
         "V1.122"
       ],
@@ -2157,6 +2157,64 @@
         "created_at": "2026-07-18",
         "source": "P3 T4 observation O1 - recommended separate contrast-tuning plan",
         "tracking_link": ".mstar/plans/2026-07-17-v1.121-canvas-reading-elevation.md"
+      }
+    ],
+    "2026-07-18-v1.122-three-pillar-spec-refactor": [
+      {
+        "id": "R-V1122P0QC3-W001",
+        "severity": "low",
+        "source": "QC3 W-001",
+        "lifecycle": "open",
+        "description": "Large-graph projection performance guidance not cross-referenced in Draft overlay §3.3.2",
+        "tracking_link": ".mstar/plans/2026-07-18-v1.122-three-pillar-spec-refactor.md#review-gate-summary"
+      },
+      {
+        "id": "R-V1122P0QC1-S001",
+        "severity": "nit",
+        "source": "QC1 S-1",
+        "lifecycle": "open",
+        "description": "§1 surface-count dissonance in canvas-strategy-surface.md",
+        "tracking_link": ".mstar/plans/2026-07-18-v1.122-three-pillar-spec-refactor.md#review-gate-summary"
+      },
+      {
+        "id": "R-V1122P0QC1-S002",
+        "severity": "nit",
+        "source": "QC1 S-2",
+        "lifecycle": "open",
+        "description": "§4.5->§4.6 anchor renumbering (file-local)",
+        "tracking_link": ".mstar/plans/2026-07-18-v1.122-three-pillar-spec-refactor.md#review-gate-summary"
+      },
+      {
+        "id": "R-V1122P0QC1-S003",
+        "severity": "nit",
+        "source": "QC1 S-3",
+        "lifecycle": "open",
+        "description": "Route prefix divergence /v1/local/ vs /v1/daemon/ - informational for P1",
+        "tracking_link": ".mstar/plans/2026-07-18-v1.122-three-pillar-spec-refactor.md#review-gate-summary"
+      },
+      {
+        "id": "R-V1122P0QC3-S001",
+        "severity": "nit",
+        "source": "QC3 S-001",
+        "lifecycle": "open",
+        "description": "Draft overlay lacks explicit P5 merge path",
+        "tracking_link": ".mstar/plans/2026-07-18-v1.122-three-pillar-spec-refactor.md#review-gate-summary"
+      },
+      {
+        "id": "R-V1122P0QC3-S002",
+        "severity": "nit",
+        "source": "QC3 S-002",
+        "lifecycle": "open",
+        "description": "DF-V1122-COMPUTE-ON-TIMELINE compound Pillar value",
+        "tracking_link": ".mstar/plans/2026-07-18-v1.122-three-pillar-spec-refactor.md#review-gate-summary"
+      },
+      {
+        "id": "R-V1122P0QC3-S003",
+        "severity": "nit",
+        "source": "QC3 S-003",
+        "lifecycle": "open",
+        "description": "12 shipped DTOs/routes count in §3.3.2 - maintenance liability",
+        "tracking_link": ".mstar/plans/2026-07-18-v1.122-three-pillar-spec-refactor.md#review-gate-summary"
       }
     ]
   }
