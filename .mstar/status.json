@@ -27,14 +27,79 @@
         "merge_target": "iteration/v1.122",
         "working_branch": "feature/v1.122-timeline-first-canvas"
       }
+    },
+    {
+      "plan_id": "2026-07-18-v1.123-three-layer-timeline-spec",
+      "status": "Todo",
+      "iteration_refs": [
+        "V1.123"
+      ],
+      "metadata": {
+        "primary_spec": ".mstar/specs/canvas-strategy-surface.md",
+        "spec_integration_branch": "iteration/v1.123",
+        "merge_target": "iteration/v1.123",
+        "working_branch": "feature/v1.123-three-layer-timeline-spec"
+      }
+    },
+    {
+      "plan_id": "2026-07-18-v1.123-world-timeline-brief-narrative",
+      "status": "Todo",
+      "iteration_refs": [
+        "V1.123"
+      ],
+      "metadata": {
+        "primary_spec": ".mstar/specs/canvas-strategy-surface.md",
+        "spec_integration_branch": "iteration/v1.123",
+        "merge_target": "iteration/v1.123",
+        "working_branch": "feature/v1.123-world-timeline-brief-narrative"
+      }
+    },
+    {
+      "plan_id": "2026-07-18-v1.123-work-timeline-narrative-moment",
+      "status": "Todo",
+      "iteration_refs": [
+        "V1.123"
+      ],
+      "metadata": {
+        "primary_spec": ".mstar/specs/canvas-strategy-surface.md",
+        "spec_integration_branch": "iteration/v1.123",
+        "merge_target": "iteration/v1.123",
+        "working_branch": "feature/v1.123-work-timeline-narrative-moment"
+      }
+    },
+    {
+      "plan_id": "2026-07-18-v1.123-timeline-first-ia-deepening",
+      "status": "Todo",
+      "iteration_refs": [
+        "V1.123"
+      ],
+      "metadata": {
+        "primary_spec": ".mstar/specs/canvas-strategy-surface.md",
+        "spec_integration_branch": "iteration/v1.123",
+        "merge_target": "iteration/v1.123",
+        "working_branch": "feature/v1.123-timeline-first-ia-deepening"
+      }
+    },
+    {
+      "plan_id": "2026-07-18-v1.123-three-layer-zoom-experience",
+      "status": "Todo",
+      "iteration_refs": [
+        "V1.123"
+      ],
+      "metadata": {
+        "primary_spec": ".mstar/specs/canvas-strategy-surface.md",
+        "spec_integration_branch": "iteration/v1.123",
+        "merge_target": "iteration/v1.123",
+        "working_branch": "feature/v1.123-three-layer-zoom-experience"
+      }
     }
   ],
   "metadata": {
     "integration_branch_retired": false,
     "iteration_base_branch": "main",
-    "last_integration_branch": "iteration/v1.122",
-    "latest_active_compass": "v1.122/delivery-compass.md",
-    "latest_active_iteration": "V1.122",
+    "last_integration_branch": "iteration/v1.123",
+    "latest_active_compass": "v1.123/delivery-compass.md",
+    "latest_active_iteration": "V1.123",
     "latest_ship": {
       "iteration": "V1.122",
       "compass": "v1.122/delivery-compass.md",
@@ -45,7 +110,7 @@
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "pre_iteration_hotfix": null,
-    "spec_integration_branch": "iteration/v1.122",
+    "spec_integration_branch": "iteration/v1.123",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {

@@ -52,6 +52,86 @@ Global
 4. `User` and `Pairing` are cloud-domain concepts. Cloud transport MUST use `nexus-cloud-domain` for their invariants.
 5. Local `workspace_slug` is a storage partition under the active Creator. It can bind or stage multiple Worlds, but it is not a canonical entity scope in this hierarchy.
 
+### 1.4 Three-Layer Timeline projection (Draft V1.123 overlay)
+
+> **Status**: Draft (V1.123 — locked in iteration [`v1.123/specs/three-layer-architecture.md`](../iterations/v1.123/specs/three-layer-architecture.md) by architect seat 2).
+> **Authoring plan**: `2026-07-18-v1.123-three-layer-timeline-spec` (P0).
+> **Promotes to Normative**: P-last of V1.123 (after P1–P4 ship + dogfood).
+
+This subsection is an **additive Draft overlay** — it does not rewrite §1.1 (canonical scope tree) or §1.2 (scope definitions). It canonizes three Timeline zoom layers — **Brief**, **Narrative**, **Moment** — as a re-projection of the existing `World > Timeline > Event > Moment` scope hierarchy, and locks the World/Work layer composition.
+
+#### 1.4.1 Layer definitions (LOCKED — product semantics)
+
+| Layer | Granularity | Time span | Primary domain | Carrier (architect seat 2 LOCK) |
+|-------|-------------|-----------|----------------|---------------------------------|
+| **Brief** | World-global | Multi-decade / era / age | **World** (World-global Timeline layer) | `block_type=era` KeyBlock (new wire enum value — see §5.1.1 narrative taxonomy extension + iteration architecture §2) |
+| **Narrative** | Event-level | Human-paced (days/weeks/years) | **Shared** (both World Timeline and Work Timeline) | World scope: `block_type=event` KeyBlock (V1.122 preserved). Work scope: `WorkOutline.timeline_events[]` (V1.72 preserved). |
+| **Moment** | Scene/beat-precise | Sub-scene (minutes/hours within a scene) | **Work** (Work-scoped Timeline layer) | Frontend-only projection of V1.108 `OutlineSceneNodeData` / `OutlineBeatNodeData` from V1.72 `WorkOutline` (wire extension deferred to V1.124+; honest empty-state until then — see iteration architecture §3) |
+
+#### 1.4.2 Brief canonization
+
+Brief is canonized as a **Timeline-granularity concept at the World-global level**. It is **not** a new top-level scope container and does not modify §1.1's canonical tree. Concretely:
+
+- Brief is a **projection granularity of the World Timeline** — a multi-decade / era sweep visible on the World Timeline Brief layer.
+- The Brief data carrier is a World-scoped KeyBlock with the new wire `block_type=era` (architect seat 2 LOCK — see iteration architecture §2). It is owned by the `World` scope and persisted in the World KB graph alongside `event` / `character` / `scene` / etc. KeyBlocks.
+- No new scope-ownership rule applies. Brief-on-KeyBlock uses the existing `kb.patch_entity` write boundary (V1.73) and the existing `WorldKbConflictError` / `WorldKbValidationError` conflict policy (V1.73).
+
+#### 1.4.3 Moment re-projection
+
+The existing §1.2 `Moment` scope definition ("session-start context point: a read-only snapshot assembled before an agent session begins") is **preserved unchanged** — that is `Moment Context Assembly` semantics. V1.123 **adds** a second, parallel meaning to `Moment` as a **Timeline layer at the Work scope**:
+
+- Moment-as-Timeline-layer is a **projection granularity of the Work Timeline** — scene/beat precision visible on the Work Timeline Moment layer.
+- The Moment data carrier is the V1.108 `OutlineSceneNodeData` / `OutlineBeatNodeData` UI projection from the V1.72 `WorkOutline` wire (architect seat 2 LOCK — see iteration architecture §3). It is owned by the `Work` scope (via the Outline).
+- Moment-as-Timeline-layer is **read-only in V1.123** — edits route through the V1.72 `outline.patch_chapter` / `outline.patch_structure` write boundary (Outline surface owns the write; Work Timeline offers "Edit in Outline" affordance).
+- The existing `Moment Context Assembly` (session-start snapshot) is unaffected. `nexus-moment-context-assembly` continues to assemble session context per §6.5; the Timeline-layer Moment is a separate projection concern.
+
+The two meanings of "Moment" are disambiguated by context:
+- "Moment Context Assembly" = session-start snapshot (existing).
+- "Moment Timeline layer" or "Work Timeline Moment" = scene/beat projection (V1.123).
+
+#### 1.4.4 World/Work layer composition (LOCKED)
+
+```
+World Timeline (V1.123):
+  ├── Brief layer (hero)     — `block_type=era` KeyBlock projection (era markers / world shape)
+  ├── Narrative layer (peer) — `block_type=event` KeyBlock projection (V1.122 baseline, reframed)
+  └── Moment layer           — NOT composed in V1.123 (DF-V1123-WORLD-MOMENT if ever promoted)
+
+Work Timeline (V1.123):
+  ├── Brief layer            — NOT composed in V1.123 (DF-V1123-WORK-BRIEF if ever promoted)
+  ├── Narrative layer (peer) — `WorkOutline.timeline_events[]` projection (V1.72 preserved)
+  └── Moment layer (hero-on-demand) — V1.108 Scene/Beat projection from `WorkOutline`
+                                       (default layer = Narrative; Moment is one click away —
+                                        architect UX-risk override documented in iteration
+                                        architecture §7.3, authorized by product spec §4.3)
+```
+
+**Author mental model (do not invert in code comments or empty-state copy):**
+
+```
+World Timeline = Brief (world shape) + Narrative (events)
+Work Timeline  = Narrative (events)  + Moment (scenes)
+```
+
+Narrative is the **shared bridge**: events at human pace belong to both world history (World Timeline) and chapter realization (Work Timeline). Brief is the World's spine; Moment is the Work's spine.
+
+#### 1.4.5 Scope tree preservation
+
+The canonical `World > Timeline > Event > Moment` scope tree (§1.1) is **unchanged** in V1.123. The three layers are a **Canvas projection re-projection** of the existing hierarchy:
+
+- Brief → World-global projection of `World > Timeline` at era granularity.
+- Narrative → Event-level projection (already in §1.1 as `Timeline > Event`).
+- Moment → Work-scoped projection at `Event > Moment` granularity (with the dual meaning noted in §1.4.3).
+
+No new scope-ownership rule. No new uniqueness constraint. No new transition rule. The V1.123 changes are confined to (a) one additive wire enum value (`BlockType::Era`) per §5.1.1 narrative taxonomy extension and (b) one additive Draft overlay on the Canvas surface contract (`specs/canvas-strategy-surface.md` Draft (V1.123) overlay — see `canvas-strategy-surface.md`).
+
+#### 1.4.6 Cross-reference
+
+- **Iteration-scoped architecture (authoritative for carrier implementation):** [`iterations/v1.123/specs/three-layer-architecture.md`](../iterations/v1.123/specs/three-layer-architecture.md) §2 (Brief carrier), §3 (Moment carrier), §4 (wire_contracts_changed), §6 (conflict policy), §7 (Work Timeline adapter contract).
+- **Canvas surface contract overlay:** [`specs/canvas-strategy-surface.md`](canvas-strategy-surface.md) Draft (V1.123) overlay (layer switcher on `timeline` + new `work-timeline` peer + cross-layer rules + empty-state rules).
+- **Product spec (author voice + demo script):** [`iterations/v1.123/specs/three-layer-product-spec.md`](../iterations/v1.123/specs/three-layer-product-spec.md).
+- **Layer feel contract (P4 handoff):** [`iterations/v1.123/specs/layer-feel-differentiation.md`](../iterations/v1.123/specs/layer-feel-differentiation.md).
+
 ---
 
 ## 2. Entity type catalog
@@ -380,6 +460,35 @@ Minimum common `body` shape for game-bible items:
 ```
 
 **Script profile semantics (body layer — V1.55 P3):** Three new `BlockType` wire enum variants are registered in `schemas/common/common.schema.json` for script domain concepts. The corresponding body-layer category is `script_category` (string, carried in `KeyBlock.body.attributes`). It does **not** replace wire `block_type`.
+
+**Three-Layer Timeline semantics (cross-profile, V1.123 Draft overlay):** One new `BlockType` wire enum variant is registered in `schemas/common/common.schema.json` for the V1.123 Brief layer. The corresponding body-layer semantics live in `KeyBlock.body.attributes` as freeform era-marker fields (`era_id`, `start_hint`, `end_hint`, `world_summary`); there is **no `brief_category` body-layer string** because Brief is cross-profile world-shape, not a profile-specific category. See [`iterations/v1.123/specs/three-layer-architecture.md`](../iterations/v1.123/specs/three-layer-architecture.md) §2 for the architect-locked carrier rationale.
+
+Shipped `BlockType` values (snake_case on wire) extended with:
+
+| Wire `block_type` | UI label | Body-layer | Design section |
+| --- | --- | --- | --- |
+| `era` | Era (Brief marker) | `body.attributes.era_id` / `start_hint` / `end_hint` / `world_summary` (freeform) | [`iterations/v1.123/specs/three-layer-architecture.md`](../iterations/v1.123/specs/three-layer-architecture.md) §2 (Brief-on-KeyBlock LOCK) |
+
+Existing variants (`character`, `ability`, `scene`, `organization`, `item`, `conflict`, `info_point`, `event`, `species`, `faction`, `magic_system`, `technology`, `deity`, `level`, `economy_tier`, `dialogue`, `beat`, `act`) are reused unchanged.
+
+**V1.123 Draft overlay implementation:** `nexus-kb::validation` does NOT add a new `ValidationMode` for `era` — `era` is cross-profile and not subject to `novel_category` / `game_bible_category` / `script_category` enforcement (mirroring how `event` — the V1.122 Timeline event block type — is handled today). Advisory warnings only. `canonical_name` validation is identical across all modes. The wire enum change is additive; daemon Rust handlers that accept `BlockType` (notably `world_kb::patch_entity` and `world_kb::get_graph`) require **no** code change because they already parse any valid `BlockType` value through `parse_block_type` (see iteration architecture §2.4 for codebase evidence).
+
+Minimum common `body` shape for Brief-era items (V1.123 Draft):
+
+```json
+{
+  "summary": "The Age of Stars — kingdoms rise and fall across a millennium.",
+  "attributes": {
+    "era_id": "age_of_stars",
+    "start_hint": "year -1042",
+    "end_hint": "year 17",
+    "world_summary": "Founding era; the kingdoms of Erethon and Ys were established."
+  },
+  "tags": ["brief", "era"]
+}
+```
+
+
 
 Shipped `BlockType` values (snake_case on wire) extended with:
 

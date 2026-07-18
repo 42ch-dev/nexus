@@ -15,13 +15,13 @@ The **control-strategy pillar**: how an author *harnesses* AI agents to execute 
 The **product-thesis pillar** that *worlds react* via WASM compute — combat resolution, dice, relationship-graph computation, user-authored modules. **Distinct from `Compute (Capability)` below**: *Computable* is the pillar (the product claim that worlds react); *Compute (Capability)* is the mechanism (the WASM execution unit an author/agent invokes). The pillar names the thesis; the capability names the implementation unit. Specs: [compute-module-abi.md](.mstar/specs/compute-module-abi.md), [wasm-host.md](.mstar/specs/wasm-host.md).
 
 ### Timeline-first World building
-The **Canvas hero pattern** (V1.122): a World's Timeline is the primary Canvas surface for **World entry** — authors open a World and meet its *when* axis (events, KeyBlock-on-timeline realizations, Fork markers) before its entity graph or chapter structure. `CanvasSurfaceKind = "timeline"` is a peer surface alongside Strategy / Outline (Timeline-companion) / World KB, and is the default **World-entry** surface. **Outline** remains the default for **Work entry** (V1.118, unchanged).
+The **Canvas hero pattern** (V1.122, deepened V1.123): a World's Timeline is the primary Canvas surface for **World entry** — authors open a World and meet its *when* axis before its entity graph or chapter structure. `CanvasSurfaceKind = "timeline"` is a peer surface alongside Strategy / Outline (Timeline-companion) / World KB, and is the default **World-entry** surface. **Outline** remains the default for **Work entry** (V1.118, unchanged). From V1.123, Timeline is not a single flat event list: it is **three zoom layers** — [Brief](#brief), [Narrative](#narrative), and [Moment](#moment) — with domain-differentiated use (World: Brief+Narrative; Work: Narrative+Moment via peer `work-timeline`).
 
 **Spine vs projection** (locked product model):
-- **Spine:** World + Timeline + KeyBlock + Fork — the truth of the narrative universe. Timeline is the World's *when* axis.
-- **Projection:** Work + Outline + Manuscript — the authoring plan and prose bound to a World. Outline is the Work's structural projection (chapters / scenes).
+- **Spine:** World + Timeline + KeyBlock + Fork — the truth of the narrative universe. Timeline is the World's *when* axis (three layers).
+- **Projection:** Work + Outline + Manuscript — the authoring plan and prose bound to a World. Outline is the Work's structural projection (chapters / scenes); Work Timeline is a peer projection for Narrative+Moment.
 
-Authors should feel: **World first for World building (Timeline); Work first for chapter writing (Outline).** Dual entry defaults encode that. Spec: [canvas-strategy-surface.md](.mstar/specs/canvas-strategy-surface.md). Iteration framing: [iterations/v1.122/specs/pillar-framing.md](.mstar/iterations/v1.122/specs/pillar-framing.md).
+Authors should feel: **World first for World building (Timeline, Brief-led); Work first for chapter writing (Outline), with Work Timeline reachable for scene precision.** Dual entry defaults encode that. Spec: [canvas-strategy-surface.md](.mstar/specs/canvas-strategy-surface.md). Iteration framing: [iterations/v1.122/specs/pillar-framing.md](.mstar/iterations/v1.122/specs/pillar-framing.md), [iterations/v1.123/specs/three-layer-product-spec.md](.mstar/iterations/v1.123/specs/three-layer-product-spec.md).
 
 ---
 
@@ -40,7 +40,16 @@ A reference that ties a KeyBlock to its provenance — which artifact (manuscrip
 The structured prose output within a world — organized into chapters, scenes, and narrative flow. A world may have multiple manuscripts representing parallel storylines or drafts.
 
 ### Timeline
-The ordered sequence of events and KeyBlocks in a world. The "when" axis of the narrative. Timeline entries are append-only; rewrites create Forks.
+The ordered sequence of events and KeyBlocks in a world — the "when" axis of the narrative. Timeline entries are append-only; rewrites create Forks. From V1.123, a Timeline is experienced as **three zoom layers** — [Brief](#brief) (world-global shape), [Narrative](#narrative) (event-level), [Moment](#moment) (scene/beat-precise) — not a single flat event list. World Timeline leads with Brief+Narrative; Work Timeline (peer surface) leads with Narrative+Moment. See [Timeline-first World building](#timeline-first-world-building).
+
+### Brief
+Timeline's **world-global layer** — era / age / multi-decade markers and world-shape summary so an author can see the world's history at a glance. Brief is the **hero layer for World Timeline** (World entry defaults to Brief when Brief data exists, else Narrative with an honest empty-state). Time span is large by design; density is minimal (era landmarks, not every event). **Not** a separate container from Timeline, and **not** the same as a free-text World Summary / manifesto alone — Brief is a **when-axis projection**. The data carrier is `block_type=era` KeyBlock, a **cross-profile world-shape marker** (not a profile-specific category like `novel_category` / `game_bible_category`). Work Brief is out of scope in V1.123 (Outline covers Work structure; tracker `DF-V1123-WORK-BRIEF`). Cross-ref: [Timeline](#timeline), [Timeline-first World building](#timeline-first-world-building), [Narrative](#narrative).
+
+### Narrative
+Timeline's **event-level layer** — human-paced events in order (days/weeks/years): battles, treaties, journeys. Shared by **World Timeline** and **Work Timeline**. This is the V1.122 Timeline surface reframed as one of three layers (balanced event axis + relationship edges + Context clusters). **Disambiguation:** not "narrative writing" (prose craft) and not a synonym for Manuscript — here *Narrative* means the **event-granularity Timeline zoom layer**. Cross-ref: [Timeline](#timeline), [Brief](#brief), [Moment](#moment), [KeyBlock](#keyblock).
+
+### Moment
+Timeline's **scene/beat-precise layer** — sub-scene time (minutes/hours within a scene), manuscript-anchored, so an author can scrutinize what happens in an exact scene. Moment is the **hero layer for Work Timeline** (peer `CanvasSurfaceKind = "work-timeline"`; Work **entry** stays Outline). World Timeline does not ship a Moment layer in V1.123 (`DF-V1123-WORLD-MOMENT`). **Disambiguation:** distinct from [Moment Context Assembly](#moment-context-assembly) (the session process that packs KeyBlocks + memory for an agent task). Scope hierarchy already includes Moment under `World > Timeline > Event > Moment` ([entity-scope-model.md](.mstar/specs/entity-scope-model.md)); V1.123 adds Canvas projection as a Timeline layer. Cross-ref: [Timeline](#timeline), [Narrative](#narrative), [Outline](#outline), [Manuscript](#manuscript).
 
 ### Fork
 The only mechanism for changing world history. Creates a divergent branch from a point in the timeline. Original history is preserved. Forks are the structural equivalent of version control branches for narrative.
@@ -74,7 +83,7 @@ The local user's identity aggregate — author profile, preferences, memories. A
 The creator's persistent memory pipeline — a structured I/O system ("SOUL") that stores and retrieves personal context across sessions. This is *not* World KB; it's the author's own memory (writing preferences, character voice notes, etc.).
 
 ### Moment Context Assembly
-The process of assembling the right set of KeyBlocks, timeline state, and creator memory for a given creative moment. Produces a "moment context" that an agent sees when performing a task (e.g., "write next chapter").
+The process of assembling the right set of KeyBlocks, timeline state, and creator memory for a given creative moment. Produces a "moment context" that an agent sees when performing a task (e.g., "write next chapter"). **Not** the Timeline [Moment](#moment) layer (scene/beat Canvas projection on Work Timeline) — this entry is the **session context-assembly** concept.
 
 ### Quality Loop
 The iterative process: write → reflect → generate findings → human review → apply changes. Separates automated quality analysis from human decision-making.
@@ -147,7 +156,7 @@ Paths are relative to the repo root. Each entry links the term to its authoritat
 |------|-----------------|----------|
 | Harness | Orchestration Engine, Agent Host, Capability Registry, Preset | [orchestration-engine.md](.mstar/specs/orchestration-engine.md) |
 | Computable (pillar) | Compute (Capability), WASM host, compute-module-abi | [compute-module-abi.md](.mstar/specs/compute-module-abi.md) |
-| Timeline-first World building | World, Timeline, Outline, Workspace (Canvas), Fork | [canvas-strategy-surface.md](.mstar/specs/canvas-strategy-surface.md) |
+| Timeline-first World building | World, Timeline, Brief, Narrative, Moment, Outline, Workspace (Canvas), Fork | [canvas-strategy-surface.md](.mstar/specs/canvas-strategy-surface.md) |
 
 ### Creative Writing Domain
 
@@ -156,12 +165,15 @@ Paths are relative to the repo root. Each entry links the term to its authoritat
 | World | Fork, Timeline, Manuscript, Scope | [entity-scope-model.md](.mstar/specs/entity-scope-model.md) |
 | KeyBlock | SourceAnchor, Taxonomy, Computable | [entity-scope-model.md](.mstar/specs/entity-scope-model.md) |
 | SourceAnchor | KeyBlock, Provenance | [entity-scope-model.md](.mstar/specs/entity-scope-model.md) |
-| Manuscript | World, Timeline, Chapter | [entity-scope-model.md](.mstar/specs/entity-scope-model.md) |
-| Timeline | World, KeyBlock, Fork | [entity-scope-model.md](.mstar/specs/entity-scope-model.md) |
+| Manuscript | World, Timeline, Chapter, Moment (layer) | [entity-scope-model.md](.mstar/specs/entity-scope-model.md) |
+| Timeline | World, KeyBlock, Fork, Brief, Narrative, Moment | [entity-scope-model.md](.mstar/specs/entity-scope-model.md) |
+| Brief | Timeline, Narrative, Timeline-first World building | [entity-scope-model.md](.mstar/specs/entity-scope-model.md); [three-layer-product-spec.md](.mstar/iterations/v1.123/specs/three-layer-product-spec.md) |
+| Narrative (Timeline layer) | Timeline, Brief, Moment, KeyBlock | [entity-scope-model.md](.mstar/specs/entity-scope-model.md); [three-layer-product-spec.md](.mstar/iterations/v1.123/specs/three-layer-product-spec.md) |
+| Moment (Timeline layer) | Timeline, Narrative, Outline, Manuscript | [entity-scope-model.md](.mstar/specs/entity-scope-model.md); [three-layer-product-spec.md](.mstar/iterations/v1.123/specs/three-layer-product-spec.md) |
 | Fork | World, Timeline | [entity-scope-model.md](.mstar/specs/entity-scope-model.md) |
 | Scope | KeyBlock, Moment Context Assembly | [entity-scope-model.md](.mstar/specs/entity-scope-model.md) |
 | Narrative Profile | Novel, Essay, Game-Bible, Script | [novel-writing/workflow-profile.md](.mstar/specs/novel-writing/workflow-profile.md) |
-| Outline | Workspace, Canvas, Manuscript | [canvas-strategy-surface.md](.mstar/specs/canvas-strategy-surface.md) |
+| Outline | Workspace, Canvas, Manuscript, Moment (layer) | [canvas-strategy-surface.md](.mstar/specs/canvas-strategy-surface.md) |
 
 ### Compute & AI Domain
 
@@ -171,7 +183,7 @@ Paths are relative to the repo root. Each entry links the term to its authoritat
 | Preset | Compute, Orchestration, Capability | [orchestration-engine.md](.mstar/specs/orchestration-engine.md) |
 | Creator | Creator Memory, Works | [creator-workflow.md](.mstar/specs/creator-workflow.md) |
 | Creator Memory | Creator, SOUL I/O | [creator-workflow.md](.mstar/specs/creator-workflow.md) |
-| Moment Context Assembly | Scope, KeyBlock, Creator Memory | [local-runtime-boundary.md](.mstar/specs/local-runtime-boundary.md) |
+| Moment Context Assembly | Scope, KeyBlock, Creator Memory (≠ Timeline Moment layer) | [local-runtime-boundary.md](.mstar/specs/local-runtime-boundary.md) |
 | Quality Loop | Findings, Review, Knowledge Loop | [novel-writing/quality-loop.md](.mstar/specs/novel-writing/quality-loop.md) |
 | Knowledge Loop | KeyBlock, SourceAnchor, Quality Loop | [novel-writing/quality-loop.md](.mstar/specs/novel-writing/quality-loop.md) |
 
