@@ -25,9 +25,18 @@
  * the existing `worldkb` accent spine (teal-700 per DESIGN.md §Canvas
  * Surface) — V1.122 + V1.123 P1 T2 introduce NO new accent token
  * (`wire_contracts_changed: true` attributable to Task 1's single additive
- * enum value only). P4 may introduce a gold/bronze Brief-era accent token
- * per layer-feel-differentiation.md §6.1; until then the Brief-era node
- * reuses the worldkb spine.
+ * enum value only).
+ *
+ * V1.123 P4 Task 2 — per-layer feel accent migration (layer-feel-
+ * differentiation.md §6.1 + AC-V1123-20): the Brief-era node now carries
+ * the dedicated `--color-canvas-layer-brief-accent` token (gold-bronze
+ * "age" tone) instead of the worldkb teal spine. This is the per-LAYER
+ * accent within the World Timeline surface — the era-icon + time-span
+ * badge both read against the gold-bronze hue so a screenshot of Brief
+ * vs Narrative reads as a different instrument without reading chrome
+ * labels. The card's surface spine stays `accent="worldkb"` because the
+ * Timeline surface identity is still World-scoped (the layer accent is
+ * an INTRA-surface differentiator, not a surface identity override).
  *
  * No `TimelineForkMarkerNode` exists in V1.122 / V1.123. Fork data is
  * reserved for an optional canvas-header badge from the `WorldState`
@@ -53,10 +62,11 @@ function anchorCountOf(d: TimelineNodeData): number {
  *
  * Visual differentiation from the Narrative event node (layer-feel-
  * differentiation.md §2.2): the era-icon (`Hourglass` — gold/bronze literary
- * tone via `text-canvas-worldkb-accent`) leads the card so a screenshot of
- * Brief vs Narrative reads as a different instrument without reading chrome
- * labels. P4 may promote the accent to a dedicated Brief-era token
- * (`--color-canvas-layer-brief-accent`) per layer-feel §6.1.
+ * tone via `text-canvas-layer-brief-accent`) leads the card so a screenshot
+ * of Brief vs Narrative reads as a different instrument without reading
+ * chrome labels. The Brief-era layer accent is the dedicated
+ * `--color-canvas-layer-brief-accent` token (P4 Task 2 — alias amber-700
+ * gold-bronze per layer-feel §6.1).
  *
  * The time-span label renders `start_hint → end_hint` when both are present,
  * either hint alone when only one is present, and a temporal-unknown pill
@@ -101,7 +111,7 @@ export const TimelineBriefEraNode = memo(function TimelineBriefEraNode({
       />
       <div className="flex items-center gap-2">
         <Hourglass
-          className="h-4 w-4 flex-shrink-0 text-canvas-worldkb-accent"
+          className="h-4 w-4 flex-shrink-0 text-canvas-layer-brief-accent"
           aria-hidden
         />
         <span
@@ -116,7 +126,7 @@ export const TimelineBriefEraNode = memo(function TimelineBriefEraNode({
           {BLOCK_TYPE_LABELS[d.block_type]}
         </span>
         {span ? (
-          <span className="rounded-pill border border-canvas-worldkb-accent/30 bg-canvas-worldkb-accent/15 px-1.5 py-0.5 text-label-12 text-canvas-worldkb-accent">
+          <span className="rounded-pill border border-canvas-layer-brief-accent/30 bg-canvas-layer-brief-accent/15 px-1.5 py-0.5 text-label-12 text-canvas-layer-brief-accent">
             {span}
           </span>
         ) : (

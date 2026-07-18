@@ -250,6 +250,14 @@ const preset: Partial<Config> = {
           // V1.121 P3 T2: per-surface accent spines (DESIGN.md §Canvas Surface).
           'outline-accent': cv('canvas-outline-accent'),
           'worldkb-accent': cv('canvas-worldkb-accent'),
+          // V1.123 P4 Task 2: per-layer feel accents (layer-feel-
+          // differentiation.md §6.1). Brief=gold-bronze; Narrative=brand
+          // blue; Moment=ink-on-paper. Consumed by Brief-era + Moment
+          // scene/beat node components so a screenshot differentiates the
+          // three layers without reading chrome labels (AC-V1123-20).
+          'layer-brief-accent': cv('canvas-layer-brief-accent'),
+          'layer-narrative-accent': cv('canvas-layer-narrative-accent'),
+          'layer-moment-accent': cv('canvas-layer-moment-accent'),
           'write-dirty': cv('canvas-write-dirty'),
           'write-conflict': cv('canvas-write-conflict'),
           'write-success': cv('canvas-write-success'),

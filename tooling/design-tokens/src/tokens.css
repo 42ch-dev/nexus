@@ -259,6 +259,33 @@
      value reuses the existing brand scale — no new color invented, only a
      per-surface tuning knob mirroring the strategy/outline/worldkb pattern. */
   --color-canvas-timeline-accent: var(--color-blue-700);
+  /* V1.123 P4 Task 2: per-layer feel accent tokens (layer-feel-
+     differentiation.md §6.1). Three-layer feel contract — Brief / Narrative
+     / Moment each carry a dedicated accent so a screenshot reads each as a
+     distinct instrument without reading chrome labels (AC-V1123-20).
+
+       - Brief accent (gold-bronze "age" tone): reuses amber-700 — the
+         outline spine. The Brief-era node lives on the World Timeline
+         surface; Outline lives on a different surface, so the shared amber
+         hue does not collide. The differentiation axis is per-LAYER within
+         Timeline (Brief=amber vs Narrative=blue), not per-surface.
+       - Narrative accent (medium blue): aliases the V1.123 P3 Timeline
+         accent (brand-blue). Per layer-feel §6.1 the Narrative accent "may
+         alias existing Timeline/event accent (V1.122) — only add if
+         Narrative needs distinct chrome." P4 keeps the alias so the three-
+         layer accent triple stays cohesive.
+       - Moment accent (ink-on-paper manuscript tone): reuses gray-900 —
+         a stable mid-dark "ink" hue that reads as manuscript ink against
+         both light (paper) and dark (inverted paper) canvas backgrounds.
+         Gray-900 is the same hue used by reading-chrome essay blockquote
+         + script scene heading (literary tone family).
+     No new palette color is invented; the tokens alias existing scale
+     entries so DESIGN.md / DESIGN.dark.md own the value pair. Tuning the
+     accent triple later (e.g. to a custom sepia Moment tone) only needs a
+     token edit, not a node-component sweep. */
+  --color-canvas-layer-brief-accent: var(--color-amber-700);
+  --color-canvas-layer-narrative-accent: var(--color-blue-700);
+  --color-canvas-layer-moment-accent: var(--color-gray-900);
   --color-canvas-write-dirty: var(--color-amber-700);
   --color-canvas-write-conflict: var(--color-red-700);
   --color-canvas-write-success: var(--color-green-700);
@@ -646,6 +673,14 @@
   --color-canvas-worldkb-accent: var(--color-teal-700);
   /* V1.123 P3 T2: Timeline accent spine (mirrors light block). */
   --color-canvas-timeline-accent: var(--color-blue-700);
+  /* V1.123 P4 Task 2: per-layer feel accents (mirrors light block).
+     Brief=amber-700 (gold-bronze age tone); Narrative=blue-700 (shared
+     Timeline brand-blue); Moment=gray-900 (ink-on-paper — in dark theme
+     gray-900 projects to #e0e0e0 so the "ink" hue stays legible against
+     the inverted dark canvas background). */
+  --color-canvas-layer-brief-accent: var(--color-amber-700);
+  --color-canvas-layer-narrative-accent: var(--color-blue-700);
+  --color-canvas-layer-moment-accent: var(--color-gray-900);
   --color-canvas-write-dirty: var(--color-amber-700);
   --color-canvas-write-conflict: var(--color-red-700);
   --color-canvas-write-success: var(--color-green-700);

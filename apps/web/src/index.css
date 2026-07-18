@@ -63,6 +63,44 @@
   }
 }
 
+@layer utilities {
+  /*
+   * V1.123 P4 Task 4 — layer transition animation.
+   *
+   * CSS keyframe fallback per layer-feel-differentiation.md §4 (Framer
+   * Motion `AnimatePresence` is the spec's PREFERRED path; CSS transition
+   * is the documented FALLBACK — `apps/web/package.json` does not yet
+   * depend on Framer Motion, so P4 ships the fallback to avoid adding a
+   * runtime dependency for a 200–320ms swap animation).
+   *
+   * The animation is triggered by the React `key={activeLayer}` on the
+   * wrapper around `<CanvasShell>` in each Timeline orchestrator: every
+   * layer swap remounts the wrapper, replaying the enter animation. The
+   * animation reads as "changing instrument" (layer-feel §4 — "transition
+   * should read as changing instrument, not camera fly-through of one
+   * graph"): a short fade + subtle scale so the new layer's projection
+   * lands as a distinct reading distance.
+   *
+   * Duration ~240ms (within the spec's 200–320ms band). The global
+   * `prefers-reduced-motion` rule in `@layer base` already collapses
+   * animation-duration to 0.01ms, so no per-keyframe reduced-motion guard
+   * is needed here.
+   */
+  @keyframes nexus-layer-enter {
+    from {
+      opacity: 0;
+      transform: scale(0.985);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+  .nexus-layer-enter {
+    animation: nexus-layer-enter 240ms ease-out both;
+  }
+}
+
 @layer components {
   /* V1.91 Reading Chrome — profile-specific read-only rendering tokens.
      V1.121 v0.4 (P3 T3): block now consumes the `--reading-chrome-*` token
