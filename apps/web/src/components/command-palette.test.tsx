@@ -375,3 +375,29 @@ describe('CommandPalette — locale switching', () => {
     });
   });
 });
+
+describe('CommandPalette — v0.4 elevation + state recipe (V1.121 P2 T1)', () => {
+  it('panel floats at shadow-elevation-4 on the scrim overlay', () => {
+    renderPalette();
+
+    const dialog = screen.getByRole('dialog');
+    // Overlay dims via the scrim token (no text on scrim — §Elevation scrim rule).
+    expect(dialog).toHaveClass('bg-scrim');
+    // The opaque panel above the scrim carries the modal-class elevation.
+    const panel = dialog.firstElementChild as HTMLElement;
+    expect(panel).toHaveClass('shadow-elevation-4');
+    expect(panel).toHaveClass('bg-background-100');
+  });
+
+  it('option state transitions are token-driven (duration-state) and reduced-motion safe', () => {
+    renderPalette();
+
+    const option = screen.getAllByRole('option')[0];
+    expect(option.className).toMatch(/\bduration-state\b/);
+    expect(option.className).toMatch(/\bease-standard\b/);
+    expect(option.className).toMatch(/\bmotion-reduce:transition-none\b/);
+    // Selected state = gray-alpha-100 wash (aria-selected preserved, V1.111 untouched).
+    expect(option).toHaveAttribute('aria-selected', 'true');
+    expect(option).toHaveClass('bg-gray-alpha-100');
+  });
+});

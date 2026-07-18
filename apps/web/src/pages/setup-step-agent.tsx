@@ -207,7 +207,7 @@ export function SetupStepAgent({ state, onChange, onNext, onBack }: SetupStepAge
     <div className="flex min-h-0 flex-1 flex-col gap-4">
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto" data-testid="wizard-step-body">
         <div className="flex flex-col gap-2">
-          <h2 className="text-heading-24 font-heading text-gray-1000">{t('step.agent.title')}</h2>
+          <h2 className="font-display text-display-24 text-gray-1000">{t('step.agent.title')}</h2>
           <p className="text-copy-14 text-gray-900">{t('step.agent.description')}</p>
         </div>
 

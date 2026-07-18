@@ -66,7 +66,7 @@ export function TabsTrigger({ value, children, className }: TabsTriggerProps) {
       aria-selected={selected}
       onClick={() => onChange(value)}
       className={cn(
-        'h-8 rounded-control px-3 text-button-12 transition-colors duration-state ease-standard',
+        'h-8 rounded-control px-3 text-button-12 transition-colors duration-state ease-standard motion-reduce:transition-none',
         selected
           ? 'bg-background-100 text-gray-1000 shadow-card'
           : 'text-gray-800 hover:bg-gray-alpha-100 hover:text-gray-1000',

@@ -68,7 +68,11 @@ export function WorksPage() {
 
       <Card className="shadow-card">
         <CardHeader>
-          <CardTitle>{t('title')}</CardTitle>
+          {/* V1.121 v0.4: Works list page title is content voice (serif
+              display-20) per DESIGN.md §Design Concept — the Works list is the
+              creative-entity index surface. CardTitle voice="content" is the
+              canonical P1 contract for card-level entity titles. */}
+          <CardTitle voice="content">{t('title')}</CardTitle>
           <CardDescription>{t('description')}</CardDescription>
         </CardHeader>
         <CardContent>

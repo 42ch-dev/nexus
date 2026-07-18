@@ -95,31 +95,31 @@ export function ChapterStatusBadge({ status, className }: ChapterStatusBadgeProp
  *
  * Each finding status gets an intentional, distinct color (the generic
  * `statusVariant` keyword matcher cannot distinguish `in_review` from `resolved`
- * or `wont_fix` from `duplicate`). Colors reuse the established semantic palette
- * (amber=needs triage, teal=reviewed/ready, blue=active review, green=resolved,
- * gray=waived, purple=superseded) via the same `color-mix` pattern as the
- * generic badge variants, so they stay correct in both light and dark.
+ * or `wont_fix` from `duplicate`). Colors consume the DESIGN.md frontmatter
+ * `components.finding-status-pill` tokens (projected as
+ * `--color-finding-status-*` CSS vars via @nexus/design-tokens), so they stay
+ * correct in both light and dark themes.
  */
 function findingStatusClasses(status: FindingStatus | string | undefined | null): string {
   switch (status as FindingStatus) {
     case 'open':
       // amber — newly raised, needs triage attention.
-      return 'bg-[color-mix(in_srgb,var(--color-amber-700)_12%,transparent)] text-amber-1000 border-[color-mix(in_srgb,var(--color-amber-700)_30%,transparent)]';
+      return 'bg-finding-status-open-bg text-finding-status-open-text border-finding-status-open-border';
     case 'triaged':
       // teal — reviewed, ready to route.
-      return 'bg-[color-mix(in_srgb,var(--color-teal-700)_10%,transparent)] text-teal-1000 border-[color-mix(in_srgb,var(--color-teal-700)_30%,transparent)]';
+      return 'bg-finding-status-triaged-bg text-finding-status-triaged-text border-finding-status-triaged-border';
     case 'in_review':
       // blue — actively under master review.
-      return 'bg-[color-mix(in_srgb,var(--color-blue-700)_10%,transparent)] text-blue-1000 border-[color-mix(in_srgb,var(--color-blue-700)_30%,transparent)]';
+      return 'bg-finding-status-in-review-bg text-finding-status-in-review-text border-finding-status-in-review-border';
     case 'resolved':
       // green — addressed, positive terminal.
-      return 'bg-[color-mix(in_srgb,var(--color-green-700)_10%,transparent)] text-green-1000 border-[color-mix(in_srgb,var(--color-green-700)_30%,transparent)]';
+      return 'bg-finding-status-resolved-bg text-finding-status-resolved-text border-finding-status-resolved-border';
     case 'wont_fix':
       // gray — explicitly waived, quiet terminal.
-      return 'bg-gray-alpha-100 text-gray-900 border-gray-alpha-300';
+      return 'bg-finding-status-wont-fix-bg text-finding-status-wont-fix-text border-finding-status-wont-fix-border';
     case 'duplicate':
       // purple — superseded by another finding.
-      return 'bg-[color-mix(in_srgb,var(--color-purple-700)_10%,transparent)] text-purple-1000 border-[color-mix(in_srgb,var(--color-purple-700)_30%,transparent)]';
+      return 'bg-finding-status-duplicate-bg text-finding-status-duplicate-text border-finding-status-duplicate-border';
     default:
       return 'bg-gray-alpha-100 text-gray-900 border-gray-alpha-300';
   }

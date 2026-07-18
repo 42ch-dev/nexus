@@ -160,9 +160,13 @@ export function deriveEdges(
       target: `entity:${anchor.key_block_id}`,
       type: 'straight',
       data,
-      // Read-only: no patch affordance in V1.73.
+      // V1.121 P3 T2 — consume the v0.4 source-anchor-edge token
+      // (`canvas-worldkb-source-anchor-edge` = purple-700 in both themes per
+      // the P0 chromatic hygiene table). Previously relied on React Flow's
+      // default stroke, leaving the provenance edge off-token.
       selectable: false,
       focusable: true,
+      style: { stroke: 'var(--color-canvas-worldkb-source-anchor-edge)' },
     } satisfies Edge;
   });
 }

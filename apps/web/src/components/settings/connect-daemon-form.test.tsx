@@ -40,6 +40,11 @@ describe('ConnectDaemonForm', () => {
     await waitFor(() => {
       expect(screen.getByTestId('fingerprint-block')).toHaveTextContent('SHA256:aa:bb:cc');
     });
+    // V1.121 P2: fingerprint block size rides the copy-13 token (no arbitrary
+    // text-[13px]).
+    const fingerprintBlock = screen.getByTestId('fingerprint-block');
+    expect(fingerprintBlock).toHaveClass('text-copy-13');
+    expect(fingerprintBlock.className).not.toContain('text-[13px]');
 
     await userEvent.click(screen.getByTestId('trust-connect-button'));
     await waitFor(() => {
@@ -314,6 +319,13 @@ describe('ConnectDaemonForm', () => {
       expect(screen.getByTestId('fingerprint-error')).toHaveTextContent('Trust On First Use');
       expect(screen.getByTestId('fingerprint-error')).toHaveTextContent('desktop app');
     });
+    // V1.121 P2: error surface consumes the P1 error-surface tokens with the
+    // ErrorState text recipe (red-1000 title / red-900 helper).
+    const errorRegion = screen.getByTestId('fingerprint-error');
+    expect(errorRegion).toHaveClass('bg-error-surface');
+    expect(errorRegion).toHaveClass('border-error-surface-border');
+    expect(errorRegion.querySelector('.text-red-1000')).not.toBeNull();
+    expect(errorRegion.querySelector('.text-red-900')).not.toBeNull();
   });
 
   it('shows an error when the fingerprint endpoint returns 500', async () => {
@@ -362,5 +374,8 @@ describe('ConnectDaemonForm', () => {
     ).toBeInTheDocument();
     expect(screen.getByText(/The API key from the daemon machine/i)).toBeInTheDocument();
     expect(screen.getByText('nexus42 daemon api-key')).toBeInTheDocument();
+    // V1.121 P2: inline code helpers ride the copy-13 token (no arbitrary
+    // text-[13px]).
+    expect(screen.getByText('nexus42 daemon api-key')).toHaveClass('text-copy-13');
   });
 });

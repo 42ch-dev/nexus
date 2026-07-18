@@ -89,7 +89,7 @@ function ValidationResult({ result }: { result: ValidatePresetResponse }) {
     return (
       <div
         role="status"
-        className="flex items-start gap-2 rounded-card border border-[color-mix(in_srgb,var(--color-green-700)_30%,transparent)] bg-[color-mix(in_srgb,var(--color-green-700)_6%,transparent)] p-3"
+        className="flex items-start gap-2 rounded-card border border-success-surface-border bg-success-surface p-3"
       >
         <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-green-700" aria-hidden />
         <div className="flex flex-col gap-1">
@@ -107,7 +107,7 @@ function ValidationResult({ result }: { result: ValidatePresetResponse }) {
     <div className="flex flex-col gap-3">
       <div
         role="alert"
-        className="flex items-start gap-2 rounded-card border border-[color-mix(in_srgb,var(--color-red-700)_30%,transparent)] bg-[color-mix(in_srgb,var(--color-red-700)_6%,transparent)] p-3"
+        className="flex items-start gap-2 rounded-card border border-error-surface-border bg-error-surface p-3"
       >
         <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-700" aria-hidden />
         <div className="flex flex-col gap-1">
@@ -122,7 +122,7 @@ function ValidationResult({ result }: { result: ValidatePresetResponse }) {
       {result.warnings && result.warnings.length > 0 && (
         <div
           role="status"
-          className="flex items-start gap-2 rounded-card border border-[color-mix(in_srgb,var(--color-amber-700)_30%,transparent)] bg-[color-mix(in_srgb,var(--color-amber-700)_6%,transparent)] p-3"
+          className="flex items-start gap-2 rounded-card border border-warning-surface-border bg-warning-surface p-3"
         >
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" aria-hidden />
           <div className="flex flex-col gap-1">

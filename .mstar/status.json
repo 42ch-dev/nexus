@@ -6,19 +6,19 @@
     "integration_branch_retired": false,
     "iteration_base_branch": "main",
     "last_integration_branch": "iteration/v1.115",
-    "latest_active_compass": "v1.120/delivery-compass.md",
-    "latest_active_iteration": "V1.120",
+    "latest_active_compass": "v1.121/delivery-compass.md",
+    "latest_active_iteration": "V1.121",
     "latest_ship": {
-      "iteration": "V1.117",
-      "compass": "v1.117/delivery-compass.md",
-      "shipped_at": "2026-07-15",
-      "pr": "https://github.com/42ch-dev/nexus/pull/148",
-      "merge_commit": "12aa878f"
+      "iteration": "V1.121",
+      "compass": "v1.121/delivery-compass.md",
+      "shipped_at": "2026-07-18",
+      "pr": "https://github.com/42ch-dev/nexus/pull/155",
+      "merge_commit": "(pending)"
     },
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "pre_iteration_hotfix": null,
-    "spec_integration_branch": "iteration/v1.120",
+    "spec_integration_branch": "iteration/v1.121",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {
@@ -1942,6 +1942,194 @@
         "lifecycle": "open",
         "tracking_link": ".mstar/plans/2026-07-17-v1.120-orchestration-ia-icon.md",
         "note": "QC3 S-001. Dogfood repeatability nicety."
+      }
+    ],
+    "2026-07-17-v1.121-design-language-foundation": [
+      {
+        "id": "R-V1121P0QC1-F007",
+        "title": "Light/dark DESIGN frontmatter token-set mismatch (pre-existing): shell-nav brand-mark/accent on-light/on-dark keys + dark-only button.primary hover/activeTextColor",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.121",
+        "lifecycle": "open",
+        "created_at": "2026-07-17",
+        "source": "qc1 F-007 (Suggestion) — PM adjudicated residual; pre-existing at iteration base; normalize key structure or amend invariant in a follow-up",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.121-design-language-foundation.md"
+      }
+    ],
+    "2026-07-17-v1.121-component-library-elevation": [
+      {
+        "id": "R-V1121P1QC1-S001",
+        "title": "nexus-ui badge.tsx compound variants use raw color-mix (pre-existing pattern divergence)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.121",
+        "lifecycle": "open",
+        "created_at": "2026-07-17",
+        "source": "qc1 S-001 — migrate to nexus-ui-badge-soft-* token set or reuse semantic tint tokens",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.121-component-library-elevation.md"
+      },
+      {
+        "id": "R-V1121P1T3-S001",
+        "title": "2 pre-existing light solid badge pairs (green-700/amber-700 + white ~4.0-4.1:1) fail AA — locked V1.102 contract",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@architect",
+        "target": "post-V1.121",
+        "lifecycle": "open",
+        "created_at": "2026-07-17",
+        "source": "P1 T3 AA verification — V1.102 locked values need architect decision",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.121-component-library-elevation.md"
+      },
+      {
+        "id": "R-V1121P1T1-S001",
+        "title": "Toast enter/exit animation not implemented (state-machine change beyond CVA scope)",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.121",
+        "lifecycle": "open",
+        "created_at": "2026-07-17",
+        "source": "P1 T1 deviation — follow-up motion candidate",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.121-component-library-elevation.md"
+      }
+    ],
+    "2026-07-17-v1.121-app-surfaces-elevation": [
+      {
+        "id": "R-V1121P2QC1-S001",
+        "title": "Two arbitrary values missing from T4 exception list (min-h-[180px] StrategyGroupNode, border-l-[3px] NodeChromeShell accent stripe) - doc completeness only",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.121",
+        "lifecycle": "open",
+        "created_at": "2026-07-18",
+        "source": "qc1 S-001/S-002",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.121-app-surfaces-elevation.md"
+      },
+      {
+        "id": "R-V1121P2QC1-S004",
+        "title": "text-copy-12 dead class - 4 surviving call-sites need DESIGN.md deprecation note or removal",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.121",
+        "lifecycle": "open",
+        "created_at": "2026-07-18",
+        "source": "qc1 S-004",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.121-app-surfaces-elevation.md"
+      },
+      {
+        "id": "R-V1121P2QC3-S001",
+        "title": "--color-sidebar-nav-width uses --color- namespace for width value (pre-existing pattern); structural-namespace cleanup pass recommended",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.121",
+        "lifecycle": "open",
+        "created_at": "2026-07-18",
+        "source": "qc3 S-001 - same class as P1 qc1-F-003/F-006",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.121-app-surfaces-elevation.md"
+      },
+      {
+        "id": "R-V1121P2T1-M001",
+        "title": "MainBanner dark tint 0.10 vs token 0.14 (pre-existing app-wide pattern); needs projected utility or documented exception",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.121",
+        "lifecycle": "open",
+        "created_at": "2026-07-18",
+        "source": "P2 T1 deviation",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.121-app-surfaces-elevation.md"
+      },
+      {
+        "id": "R-V1121P2T3-M001",
+        "title": "chapters-page protected-row alpha 6%->10% shift (DESIGN authored 6%); exact-spec parity needs --color-data-table-row-protected token",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.121",
+        "lifecycle": "open",
+        "created_at": "2026-07-18",
+        "source": "P2 T3 deviation M6",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.121-app-surfaces-elevation.md"
+      }
+    ],
+    "2026-07-17-v1.121-canvas-reading-elevation": [
+      {
+        "id": "R-V1121P3QC1-W002",
+        "title": "Pre-existing Tailwind-palette refs in canvas inspectors (strategy-canvas/inspector-panel, state-machine, canvas-layout, edge-inspector, idea-input, strategy-alt-view, outline structure-inspector)",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.121",
+        "lifecycle": "open",
+        "created_at": "2026-07-18",
+        "source": "qc1 W-002 - not introduced by P3",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.121-canvas-reading-elevation.md"
+      },
+      {
+        "id": "R-V1121P3QC3-S001",
+        "title": "transition-shadow drops border-color animation on NodeChromeShell selection (mitigated by two-layer ring)",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.121",
+        "lifecycle": "open",
+        "created_at": "2026-07-18",
+        "source": "qc3 S-001",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.121-canvas-reading-elevation.md"
+      },
+      {
+        "id": "R-V1121P3QC1-S001",
+        "title": "World KB entity-node duplicates elevation recipe + accent spine (consider centralizing)",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.121",
+        "lifecycle": "open",
+        "created_at": "2026-07-18",
+        "source": "qc1 S-001",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.121-canvas-reading-elevation.md"
+      },
+      {
+        "id": "R-V1121P3QC1-S002",
+        "title": "MiniMap hardcoded to strategy accent (surface-agnosticism follow-up)",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.121",
+        "lifecycle": "open",
+        "created_at": "2026-07-18",
+        "source": "qc1 S-002",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.121-canvas-reading-elevation.md"
+      },
+      {
+        "id": "R-V1121P3QC1-S004",
+        "title": "Missing transition-shadow assertion in node-chrome-shell test",
+        "severity": "nit",
+        "decision": "defer",
+        "owner": "@frontend-dev",
+        "target": "post-V1.121",
+        "lifecycle": "open",
+        "created_at": "2026-07-18",
+        "source": "qc1 S-004 + qc3 S-003 (merged)",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.121-canvas-reading-elevation.md"
+      },
+      {
+        "id": "R-V1121P3T4-O001",
+        "title": "Light-theme AA gap on small-text badge tints (12-15% over white using amber/green/red/teal/gray-700); pre-existing across design system",
+        "severity": "low",
+        "decision": "defer",
+        "owner": "@architect",
+        "target": "post-V1.121",
+        "lifecycle": "open",
+        "created_at": "2026-07-18",
+        "source": "P3 T4 observation O1 - recommended separate contrast-tuning plan",
+        "tracking_link": ".mstar/plans/2026-07-17-v1.121-canvas-reading-elevation.md"
       }
     ]
   }

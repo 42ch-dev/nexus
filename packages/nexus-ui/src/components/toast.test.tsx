@@ -75,6 +75,19 @@ describe('Toaster + useToast', () => {
     expect(screen.getByTestId('toast-variant-success')).toHaveTextContent('Saved');
   });
 
+  it('renders the popover-level v0.4 surface (elevation-3 via shadow-popover alias)', () => {
+    const getApi = renderToaster();
+    const { toast } = getApi();
+    act(() => toast({ variant: 'info', title: 'Surfaced', testId: 'toast-surface' }));
+    const el = screen.getByTestId('toast-surface');
+    // DESIGN.md components.toast + §Elevation alias chain:
+    // shadow-popover resolves onto --shadow-elevation-3 (popover-level surface).
+    expect(el).toHaveClass('shadow-popover');
+    expect(el).toHaveClass('rounded-popover');
+    expect(el).toHaveClass('border-gray-alpha-400');
+    expect(el).toHaveClass('bg-background-100');
+  });
+
   it('gives error toasts role=alert and others role=status', () => {
     const getApi = renderToaster();
     const { toast } = getApi();

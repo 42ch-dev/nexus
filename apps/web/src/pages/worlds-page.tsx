@@ -27,7 +27,11 @@ export function WorldsPage() {
     <div className="flex flex-col gap-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <h1 className="text-heading-24 font-heading text-gray-1000">{t('title')}</h1>
+          {/* V1.121 v0.4: page-level entity title is content voice (serif
+              display-24) per DESIGN.md §Design Concept — Worlds is the
+              creative-entity index. Sibling chrome (description, refresh
+              button) stays interface voice (sans). */}
+          <h1 className="font-display text-display-24 text-gray-1000">{t('title')}</h1>
           <p className="text-copy-14 text-gray-900">{t('description')}</p>
         </div>
         <Button
@@ -69,7 +73,11 @@ export function WorldsPage() {
                     >
                       <Globe className="h-5 w-5 shrink-0 text-blue-700" aria-hidden />
                       <span className="min-w-0 flex-1">
-                        <span className="block truncate text-copy-14 font-medium text-gray-1000">
+                        {/* V1.121 v0.4: world titles in the list are
+                            creative-entity titles → content voice (serif
+                            display-20). The id line below stays sans mono
+                            (interface voice). */}
+                        <span className="block truncate font-display text-display-20 tracking-tight text-gray-1000">
                           {label}
                         </span>
                         {world.title && (

@@ -80,7 +80,7 @@ export function FooterProfilesChrome({
           onClick={onAdd}
           aria-label={addButtonLabel}
           className={cn(
-            'flex h-8 w-8 items-center justify-center rounded-full border border-dashed transition-colors',
+            'flex h-8 w-8 items-center justify-center rounded-full border border-dashed transition-colors duration-state ease-standard motion-reduce:transition-none',
             'border-footer-profile-add-button-border bg-footer-profile-add-button-bg text-footer-profile-add-button-text',
             'hover:bg-footer-profile-add-button-hover-bg hover:border-footer-profile-add-button-hover-border hover:text-footer-profile-add-button-hover-text',
           )}
@@ -119,7 +119,7 @@ const ProfileAvatar = forwardRef<HTMLButtonElement, ProfileAvatarProps>(
         aria-pressed={profile.active}
         title={profile.displayName}
         className={cn(
-          'flex h-8 w-8 items-center justify-center rounded-full text-button-14 font-button transition-colors',
+          'flex h-8 w-8 items-center justify-center rounded-full text-button-14 font-button transition-colors duration-state ease-standard motion-reduce:transition-none',
           profile.active
             ? 'bg-footer-profile-avatar-bg-active text-footer-profile-avatar-text-active'
             : 'bg-footer-profile-avatar-bg text-footer-profile-avatar-text hover:bg-footer-profile-avatar-bg-hover',

@@ -6,8 +6,9 @@ import { cn } from '../lib/cn';
  * Input — DESIGN.md §Component Primitives/Input.
  *
  * Height 40px, background-100, gray-1000 text, gray-alpha-400 border,
- * radius-control. Error variant uses red-700 border. Disabled: gray-100 fill,
- * gray-700 text. The two-layer focus ring is global (src/index.css).
+ * radius-control. Error variant uses red-700 border. Disabled (v0.4
+ * `input-select-textarea.disabled`): gray-100 fill, gray-700 text,
+ * gray-alpha-300 border. The two-layer focus ring is global (src/index.css).
  *
  * Per the V1.100 form-field contract:
  * - `id` is app-owned — the control receives it via the standard prop.
@@ -31,7 +32,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(
         'h-10 w-full rounded-control border bg-background-100 px-3 text-copy-14 text-gray-1000 transition-colors duration-state ease-standard',
         'placeholder:text-gray-700',
         'focus-visible:border-blue-700',
-        'disabled:bg-gray-100 disabled:text-gray-700 disabled:cursor-not-allowed',
+        'disabled:bg-gray-100 disabled:text-gray-700 disabled:border-gray-alpha-300 disabled:cursor-not-allowed',
         invalid ? 'border-red-700' : 'border-gray-alpha-400',
         className,
       )}

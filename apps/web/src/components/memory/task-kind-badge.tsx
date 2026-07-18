@@ -4,11 +4,12 @@
  *
  * `task_kind` is a free-form string on the wire (the contract does not constrain
  * it), so the badge maps the five known values (`brainstorm` / `outline` /
- * `chapter` / `research` / `unknown`) to distinct color accents via the same
- * `color-mix` pattern the V1.77 findings-status badges use, and falls back to a
- * neutral chip for any unrecognized value (rendered verbatim so authors are not
- * misled). Colors reuse the established semantic palette and stay correct in
- * both light and dark themes.
+ * `chapter` / `research` / `unknown`) to distinct color accents via the
+ * DESIGN.md frontmatter `components.memory-task-kind-*` tokens (projected as
+ * `--color-memory-task-kind-*` CSS vars via @nexus/design-tokens), and falls
+ * back to the neutral `unknown` chip for any unrecognized value (rendered
+ * verbatim so authors are not misled). Tokens stay correct in both light and
+ * dark themes.
  */
 import { humanizeStatus } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -27,26 +28,26 @@ export const KNOWN_TASK_KINDS: readonly KnownTaskKind[] = [
 
 /**
  * Tailwind classes for each task-kind chip. Mirrors DESIGN.md frontmatter
- * `memory-task-kind-*` (verbatim token names; values filled in A5).
+ * `memory-task-kind-*` via the projected token classes.
  */
 function taskKindClasses(taskKind: string | undefined | null): string {
   switch (taskKind as KnownTaskKind) {
     case 'brainstorm':
       // amber — ideation / creative.
-      return 'bg-[color-mix(in_srgb,var(--color-amber-700)_12%,transparent)] text-amber-1000 border-[color-mix(in_srgb,var(--color-amber-700)_30%,transparent)]';
+      return 'bg-memory-task-kind-brainstorm-bg text-memory-task-kind-brainstorm-text border-memory-task-kind-brainstorm-border';
     case 'outline':
       // blue — planning / structure.
-      return 'bg-[color-mix(in_srgb,var(--color-blue-700)_10%,transparent)] text-blue-1000 border-[color-mix(in_srgb,var(--color-blue-700)_30%,transparent)]';
+      return 'bg-memory-task-kind-outline-bg text-memory-task-kind-outline-text border-memory-task-kind-outline-border';
     case 'chapter':
       // teal — writing / content.
-      return 'bg-[color-mix(in_srgb,var(--color-teal-700)_10%,transparent)] text-teal-1000 border-[color-mix(in_srgb,var(--color-teal-700)_30%,transparent)]';
+      return 'bg-memory-task-kind-chapter-bg text-memory-task-kind-chapter-text border-memory-task-kind-chapter-border';
     case 'research':
       // purple — inquiry / knowledge.
-      return 'bg-[color-mix(in_srgb,var(--color-purple-700)_10%,transparent)] text-purple-1000 border-[color-mix(in_srgb,var(--color-purple-700)_30%,transparent)]';
+      return 'bg-memory-task-kind-research-bg text-memory-task-kind-research-text border-memory-task-kind-research-border';
     case 'unknown':
     default:
       // neutral gray — unrecognized values render verbatim (humanized).
-      return 'bg-gray-alpha-100 text-gray-900 border-gray-alpha-300';
+      return 'bg-memory-task-kind-unknown-bg text-memory-task-kind-unknown-text border-memory-task-kind-unknown-border';
   }
 }
 

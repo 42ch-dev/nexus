@@ -68,8 +68,9 @@ export function RootLayout() {
     <div className="flex h-screen overflow-hidden bg-background-100 text-gray-1000">
       {/* Desktop sidebar — full-height rail (AD-P2-2): h-screen + overflow-hidden
           so the sidebar chrome manages its own internal scroll (nav scrolls in
-          the middle; Settings + Profiles footer block is pinned at the bottom). */}
-      <aside className="hidden h-screen w-[248px] shrink-0 flex-col overflow-hidden lg:flex">
+          the middle; Settings + Profiles footer block is pinned at the bottom).
+          Width consumes the DESIGN.md sidebar-nav.width token (w-sidebar-nav-width). */}
+      <aside className="hidden h-screen w-sidebar-nav-width shrink-0 flex-col overflow-hidden lg:flex">
         <Sidebar />
       </aside>
 
@@ -86,7 +87,7 @@ export function RootLayout() {
               to={to}
               className={({ isActive }) =>
                 cn(
-                  'whitespace-nowrap rounded-control px-3 py-1.5 text-label-14 transition-colors duration-state ease-standard',
+                  'whitespace-nowrap rounded-control px-3 py-1.5 text-label-14 transition-colors duration-state ease-standard motion-reduce:transition-none',
                   isActive
                     ? 'bg-gray-alpha-100 text-gray-1000'
                     : 'text-gray-800 hover:bg-gray-alpha-100 hover:text-gray-1000',

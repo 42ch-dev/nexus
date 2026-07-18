@@ -60,7 +60,12 @@ export function WorkDetailPage() {
         <CardHeader>
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="flex flex-col gap-1">
-              <CardTitle>{w.title || t('untitled')}</CardTitle>
+              {/* V1.121 v0.4: Work entity title is content voice (serif
+                  display-20) per DESIGN.md §Design Concept — this is the
+                  canonical CardTitle voice="content" consumer. Sibling chrome
+                  (status badges, buttons, shortId description) stays interface
+                  voice (sans). */}
+              <CardTitle voice="content">{w.title || t('untitled')}</CardTitle>
               <CardDescription>
                 <span className="text-copy-13-mono">{shortId(w.work_id)}</span>
               </CardDescription>

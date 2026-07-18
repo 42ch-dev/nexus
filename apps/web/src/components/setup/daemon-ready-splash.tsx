@@ -44,7 +44,7 @@ export function DaemonReadySplash({
                 >
                   {t('action.resetLocalDatabase')}
                 </Button>
-                <p className="max-w-[320px] text-center text-copy-12 text-gray-800">
+                <p className="max-w-xs text-center text-label-12 text-gray-800">
                   {t('daemon.resetDatabaseDescription')}
                 </p>
               </div>

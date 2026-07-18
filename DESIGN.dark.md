@@ -1,5 +1,5 @@
 ---
-version: 0.3.0
+version: 0.4.0
 name: "Nexus Design System"
 description: "Unified design contract — dark theme. Same token names as DESIGN.md with dark-tuned values."
 
@@ -21,13 +21,16 @@ colors:
   brand-cyan-alpha-100: "rgba(37,209,224,0.14)"
   brand-cyan-alpha-200: "rgba(37,209,224,0.22)"
 
-  # ── Neutral surfaces (dark — apps/web parity) ──
-  background-100: "#0a0a0a"
-  background-200: "#111111"
-  background-300: "#1a1a1a"
-  gray-100: "#1f1f1f"
-  gray-200: "#2a2a2a"
-  gray-300: "#3a3a3a"
+  # ── Neutral surfaces (dark — ink atmosphere, V1.121 v0.4) ──
+  # Deep-blue cast derived from brand-deep-blue-1000 (#0C1A2B): "ink chamber",
+  # not "dark gray app". Lightness matched to the pre-v0.4 neutrals; full AA
+  # contrast table recomputed (DESIGN.md §Contrast (AA, recomputed)).
+  background-100: "#0A1320"
+  background-200: "#0F1A2A"
+  background-300: "#152438"
+  gray-100: "#141F2E"
+  gray-200: "#1E2A3D"
+  gray-300: "#283749"
   gray-400: "#525252"
   gray-500: "#737373"
   gray-600: "#8a8a8a"
@@ -78,6 +81,11 @@ colors:
   pink-1000: "#ffe3f0"
 
 typography:
+  # ── Display tier (V1.121 v0.4 — content voice; values theme-independent) ──
+  font-display: "\"Source Serif 4\", Georgia, \"Times New Roman\", ui-serif, serif"
+  display-32: { fontFamily: "{typography.font-display}", fontSize: "32px", fontWeight: 600, lineHeight: 1.25, letterSpacing: "-0.01em" }
+  display-24: { fontFamily: "{typography.font-display}", fontSize: "24px", fontWeight: 600, lineHeight: 1.3, letterSpacing: "-0.01em" }
+  display-20: { fontFamily: "{typography.font-display}", fontSize: "20px", fontWeight: 600, lineHeight: 1.3, letterSpacing: "0" }
   heading-32: { fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif", fontSize: "32px", fontWeight: 650, lineHeight: 1.18, letterSpacing: "-0.025em" }
   heading-24: { fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif", fontSize: "24px", fontWeight: 650, lineHeight: 1.25, letterSpacing: "-0.02em" }
   heading-20: { fontFamily: "Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, \"Segoe UI\", sans-serif", fontSize: "20px", fontWeight: 600, lineHeight: 1.3, letterSpacing: "-0.015em" }
@@ -113,6 +121,28 @@ rounded:
   popover: "12px"
   fullscreen: "16px"
   pill: "9999px"
+
+# ── Elevation (V1.121 v0.4) — dark: pure-black, stronger alphas ──
+elevation:
+  elevation-0: "none"
+  elevation-1: "0 1px 2px rgba(0, 0, 0, 0.40), 0 1px 3px rgba(0, 0, 0, 0.30)"
+  elevation-2: "0 2px 4px rgba(0, 0, 0, 0.50), 0 4px 12px -2px rgba(0, 0, 0, 0.40)"
+  elevation-3: "0 1px 1px rgba(0, 0, 0, 0.60), 0 12px 28px -12px rgba(0, 0, 0, 0.70)"
+  elevation-4: "0 1px 1px rgba(0, 0, 0, 0.70), 0 28px 56px -24px rgba(0, 0, 0, 0.85)"
+  shadow-card: "{elevation.elevation-1}"
+  shadow-popover: "{elevation.elevation-3}"
+  shadow-modal: "{elevation.elevation-4}"
+
+# ── Motion (V1.121 v0.4) — theme-independent ──
+motion:
+  duration-instant: "0ms"
+  duration-state: "120ms"
+  duration-popover: "160ms"
+  duration-modal: "220ms"
+  duration-enter: "200ms"
+  duration-exit: "140ms"
+  ease-standard: "cubic-bezier(0.16, 1, 0.3, 1)"
+  ease-emphasized: "cubic-bezier(0.2, 0.8, 0.2, 1)"
 
 components:
   # ── button: apps/web dark superset ──
@@ -153,6 +183,12 @@ components:
     default: { backgroundColor: "{colors.background-100}", borderColor: "{colors.gray-alpha-400}", rounded: "{rounded.card}", padding: "{spacing.space-6}", shadow: "shadow-card" }
     compact: { padding: "{spacing.space-4}" }
     hero: { padding: "{spacing.space-8}" }
+    # CardTitle voice prop (V1.121 v0.4; additive opt-in — recipe in body §Card).
+    # interface = sans heading (default, unchanged); content = serif display tier.
+    title:
+      voice:
+        interface: { typography: "{typography.heading-16}" }
+        content: { typography: "{typography.display-20}" }
 
   # ── table: apps/web dark ──
   table:
@@ -192,9 +228,11 @@ components:
   listbox:
     maxHeight: "320px"
 
-  # ── dialog / popover: apps/web dark ──
-  dialog: { backgroundColor: "{colors.background-100}", rounded: "{rounded.popover}", shadow: "shadow-modal", maxWidth: "560px", padding: "{spacing.space-6}" }
+  # ── dialog / popover / sheet: apps/web dark ──
+  dialog: { backgroundColor: "{colors.background-100}", rounded: "{rounded.popover}", shadow: "shadow-modal", maxWidth: "560px", width: "calc(100% - 2rem)", maxHeight: "85vh", padding: "{spacing.space-6}" }
   popover: { backgroundColor: "{colors.background-100}", borderColor: "{colors.gray-alpha-400}", shadow: "shadow-popover", rounded: "{rounded.popover}", itemHeight: "36px" }
+  # Sheet — end-aligned drawer (work-shell right rail). Overlay uses colors.scrim (V1.121 scrim convergence).
+  sheet: { backgroundColor: "{colors.background-100}", borderColor: "{colors.gray-alpha-400}", shadow: "shadow-modal", width: "min(100vw, 280px)" }
 
   # ── tabs: apps/web keep-web dark (V1.106) ──
   tabs:
@@ -211,7 +249,8 @@ components:
     spinner: { size: "16px", color: "{colors.blue-700}" }
     loading: { typography: "{typography.copy-14}", textColor: "{colors.gray-700}", gap: "{spacing.space-2}", paddingBlock: "{spacing.space-6}" }
     empty:
-      titleTypography: "{typography.heading-16}"
+      # V1.121 v0.4: EmptyState headline is content voice (serif display tier).
+      titleTypography: "{typography.display-24}"
       titleColor: "{colors.gray-1000}"
       descriptionTypography: "{typography.copy-14}"
       descriptionColor: "{colors.gray-900}"
@@ -222,12 +261,27 @@ components:
       titleColor: "{colors.red-1000}"
       descriptionTypography: "{typography.copy-14}"
       descriptionColor: "{colors.red-900}"
+      # backgroundColor/borderColor project to --color-error-surface /
+      # --color-error-surface-border (V1.121 P1 T2); dark alphas are stronger.
       backgroundColor: "color-mix(in srgb, {colors.red-700} 8%, transparent)"
       borderColor: "color-mix(in srgb, {colors.red-700} 35%, transparent)"
       rounded: "{rounded.card}"
       padding: "{spacing.space-4}"
       retryTypography: "{typography.label-14}"
       retryColor: "{colors.blue-700}"
+
+    # Status surface family dark overrides (V1.121 P2 T4). Stronger alphas on
+    # the ink surfaces — mirrors the error dark override above. Each projects
+    # to --color-<role>-surface / --color-<role>-surface-border.
+    success:
+      backgroundColor: "color-mix(in srgb, {colors.green-700} 8%, transparent)"
+      borderColor: "color-mix(in srgb, {colors.green-700} 35%, transparent)"
+    warning:
+      backgroundColor: "color-mix(in srgb, {colors.amber-700} 8%, transparent)"
+      borderColor: "color-mix(in srgb, {colors.amber-700} 35%, transparent)"
+    info:
+      backgroundColor: "color-mix(in srgb, {colors.blue-700} 8%, transparent)"
+      borderColor: "color-mix(in srgb, {colors.blue-700} 35%, transparent)"
 
     disabled:
       opacity: "0.5"
@@ -477,11 +531,16 @@ components:
   soul-growth-curve-stroke: "{colors.purple-700}"
 
   # ── canvas: apps/web dark ──
+  # V1.121 (v0.4) chromatic hygiene: hue-preserving remap onto brand scales
+  # (§Appendix: Canvas Chromatic Hygiene Mapping in DESIGN.md). Dark canvas is
+  # an ink surface, not a neutral flip (§Design Concept).
   canvas:
-    canvas-surface: "#141414"
+    canvas-surface: "#101D2E"
     canvas-grid: "rgba(255,255,255,0.05)"
-    canvas-node-fill: "#1a1a1a"
-    canvas-node-fill-hover: "#2a2a2a"
+    canvas-grid-gap: "20px"
+    canvas-grid-dot-size: "1.5px"
+    canvas-node-fill: "{colors.background-300}"
+    canvas-node-fill-hover: "{colors.gray-200}"
     canvas-node-border: "rgba(255,255,255,0.18)"
     canvas-node-border-selected: "{colors.blue-700}"
     canvas-edge: "{colors.gray-400}"
@@ -489,51 +548,63 @@ components:
     canvas-port: "{colors.gray-700}"
     canvas-minimap: "{colors.gray-alpha-500}"
     canvas-strategy-accent: "{colors.purple-700}"
+    # V1.121 P3 T2: per-surface accent spines (mirrors light; values are
+    # the same brand semantic scales in both themes).
+    canvas-outline-accent: "{colors.amber-700}"
+    canvas-worldkb-accent: "{colors.teal-700}"
     canvas-write-dirty: "{colors.amber-700}"
     canvas-write-conflict: "{colors.red-700}"
     canvas-write-success: "{colors.green-700}"
     canvas-write-stale-bg: "color-mix(in srgb, {colors.amber-700} 12%, transparent)"
+    # Canvas node width family (V1.121 v0.4 contract; registered in pipeline P0
+    # as structural --canvas-node-width-* vars, applied to node components P3 — theme-independent)
+    node-width:
+      strategy-root: "260px"
+      strategy-primary: "140px"
+      strategy-secondary: "150px"
+      outline-scene-beat: "160px"
+      default: "176px"
     canvas-outline-volume-fill: "#1F1F1E"
-    canvas-outline-chapter-card-status-pending: "#64748B"
-    canvas-outline-chapter-card-status-drafted: "#60A5FA"
-    canvas-outline-chapter-card-status-completed: "#34D399"
-    canvas-outline-timeline-event-pin: "#FBBF24"
-    canvas-outline-foreshadow-edge: "#C4B5FD"
-    canvas-outline-timeline-marker: "#38BDF8"
-    canvas-outline-conflict-marker: "#F87171"
+    canvas-outline-chapter-card-status-pending: "{colors.gray-500}"
+    canvas-outline-chapter-card-status-drafted: "{colors.blue-700}"
+    canvas-outline-chapter-card-status-completed: "{colors.green-700}"
+    canvas-outline-timeline-event-pin: "{colors.amber-700}"
+    canvas-outline-foreshadow-edge: "{colors.purple-700}"
+    canvas-outline-timeline-marker: "{colors.teal-700}"
+    canvas-outline-conflict-marker: "{colors.red-700}"
     # Outline Scene/Beat (V1.109 C2 — FB-C2-001)
     canvas-outline-scene-fill: "#262625"
     canvas-outline-scene-border: "rgba(255,255,255,0.18)"
-    canvas-outline-scene-status-drafted: "#60A5FA"
-    canvas-outline-scene-status-completed: "#34D399"
+    canvas-outline-scene-status-drafted: "{colors.blue-700}"
+    canvas-outline-scene-status-completed: "{colors.green-700}"
     canvas-outline-beat-fill: "#1F1F1E"
     canvas-outline-beat-border: "rgba(255,255,255,0.18)"
-    canvas-worldkb-entity-card-fill-default: "#1A1A1A"
-    canvas-worldkb-entity-card-fill-hover: "#2A2A2A"
-    canvas-worldkb-entity-card-fill-selected: "rgba(82,168,255,0.14)"
+    canvas-worldkb-entity-card-fill-default: "{colors.background-300}"
+    canvas-worldkb-entity-card-fill-hover: "{colors.gray-200}"
+    canvas-worldkb-entity-card-fill-selected: "color-mix(in srgb, {colors.blue-700} 14%, transparent)"
     canvas-worldkb-entity-card-stroke-default: "rgba(255,255,255,0.18)"
     canvas-worldkb-entity-card-stroke-selected: "{colors.blue-700}"
-    canvas-worldkb-promotion-pending: "#FBBF24"
-    canvas-worldkb-promotion-confirmed: "#34D399"
-    canvas-worldkb-promotion-rejected: "#F87171"
-    canvas-worldkb-promotion-merged: "#A78BFA"
-    canvas-worldkb-source-anchor-edge: "#C4B5FD"
-    canvas-worldkb-source-anchor-node: "#2A2440"
-    canvas-worldkb-computable-badge: "#38BDF8"
-    canvas-worldkb-conflict-marker: "#F87171"
-    canvas-worldkb-conflict-marker-fill: "rgba(248,113,113,0.12)"
+    canvas-worldkb-promotion-pending: "{colors.amber-700}"
+    canvas-worldkb-promotion-confirmed: "{colors.green-700}"
+    canvas-worldkb-promotion-rejected: "{colors.red-700}"
+    canvas-worldkb-promotion-merged: "{colors.purple-700}"
+    canvas-worldkb-source-anchor-edge: "{colors.purple-700}"
+    canvas-worldkb-source-anchor-node: "color-mix(in srgb, {colors.purple-700} 14%, transparent)"
+    canvas-worldkb-computable-badge: "{colors.teal-700}"
+    canvas-worldkb-conflict-marker: "{colors.red-700}"
+    canvas-worldkb-conflict-marker-fill: "color-mix(in srgb, {colors.red-700} 12%, transparent)"
     canvas-worldkb-nonspatial-row-highlight: "#1F1F1E"
     canvas-worldkb-focus-ring: "{colors.blue-700}"
-    canvas-worldkb-relationship-edge: "#64748B"
-    canvas-worldkb-relationship-edge-default: "#64748B"
-    canvas-worldkb-relationship-edge-symmetric: "#A78BFA"
-    canvas-worldkb-relationship-edge-custom: "#F472B6"
-    canvas-worldkb-relationship-confidence-low: "#FF6B6B"
-    canvas-worldkb-relationship-confidence-mid: "#FFC043"
-    canvas-worldkb-relationship-confidence-high: "#54D58A"
-    canvas-worldkb-relationship-grounded-badge: "rgba(82,168,255,0.14)"
+    canvas-worldkb-relationship-edge: "{colors.gray-500}"
+    canvas-worldkb-relationship-edge-default: "{colors.gray-500}"
+    canvas-worldkb-relationship-edge-symmetric: "{colors.purple-700}"
+    canvas-worldkb-relationship-edge-custom: "{colors.pink-700}"
+    canvas-worldkb-relationship-confidence-low: "{colors.red-700}"
+    canvas-worldkb-relationship-confidence-mid: "{colors.amber-700}"
+    canvas-worldkb-relationship-confidence-high: "{colors.green-700}"
+    canvas-worldkb-relationship-grounded-badge: "color-mix(in srgb, {colors.blue-700} 14%, transparent)"
     canvas-worldkb-relationship-asserted-badge: "rgba(183,148,255,0.14)"
-    canvas-worldkb-relationship-inspector-fill: "#1A1A1A"
+    canvas-worldkb-relationship-inspector-fill: "{colors.background-300}"
 
   # ── annotation highlights / inspector / selection-toolbar: apps/web dark ──
   reading-annotation-highlight-yellow:
@@ -560,12 +631,12 @@ components:
     textColor: "{colors.gray-1000}"
     shadow: "0px 4px 12px rgba(0,0,0,0.40)"
 
-  # ── reading chrome (V1.91): apps/web dark ──
+  # ── reading chrome (V1.91; V1.121 v0.4 — display serif + semantic tints) ──
   reading-chrome-novel:
     chapter-title:
-      fontFamily: "Georgia, 'Times New Roman', ui-serif, serif"
+      fontFamily: "{typography.font-display}"
       fontSize: "28px"
-      fontWeight: 700
+      fontWeight: 600
       lineHeight: 1.3
       letterSpacing: "-0.01em"
       color: "{colors.gray-1000}"
@@ -603,13 +674,13 @@ components:
       textDecoration: "underline dotted"
       cursor: "pointer"
     definition-callout:
-      backgroundColor: "rgba(0,133,119,0.08)"
+      backgroundColor: "color-mix(in srgb, {colors.teal-700} 8%, transparent)"
       borderLeft: "3px solid {colors.teal-700}"
       padding: "12px 16px"
       labelColor: "{colors.teal-900}"
       labelFontWeight: 600
     category-badge:
-      backgroundColor: "rgba(183,110,0,0.14)"
+      backgroundColor: "color-mix(in srgb, {colors.amber-700} 14%, transparent)"
       textColor: "{colors.amber-1000}"
   reading-chrome-script:
     character-name:
@@ -700,16 +771,20 @@ components:
 
 Dark-theme companion to [`DESIGN.md`](DESIGN.md). Same token names; values tuned for dark surfaces. Rule-type documentation, component behavior, voice/content guidance, and implementation mapping live in `DESIGN.md` and apply to both themes.
 
-### Contrast review (WCAG 2.1 AA — dark theme)
+**Ink atmosphere (V1.121, v0.4):** dark surfaces are an *ink chamber*, not a neutral flip — `background-100…300` and `gray-100…300` carry a deep-blue cast derived from `brand-deep-blue-1000` at matched lightness (§Design Concept in `DESIGN.md`). The full light + dark AA matrix is recomputed in `DESIGN.md` §Contrast (AA, recomputed); the key dark pairings are re-verified below.
+
+### Contrast review (WCAG 2.1 AA — dark theme, recomputed V1.121)
 
 | Pairing | Ratio | Intended usage | Verdict |
 | --- | --- | --- | --- |
-| `gray-1000` on `background-100` | 18.2:1 | Primary UI text | **Pass** |
-| `brand-cyan` on `background-100` | 10.6:1 | Focus ring, nav accent, active bar | **Pass** |
+| `gray-1000` on `background-100` | 17.1:1 | Primary UI text | **Pass** |
+| `brand-cyan` on `background-100` | 10.0:1 | Focus ring, nav accent, active bar | **Pass** |
 | `brand-deep-blue` on `brand-cyan` | 6.2:1 | Primary button label on cyan fill | **Pass** |
-| `brand-cyan` on `background-200` | 10.1:1 | Icons, inline accents | **Pass** |
-| `brand-deep-blue` on `background-100` | 1.7:1 | — | **Fail** — do not use deep blue fills on dark chrome; use cyan accent instead |
-| `gray-700` on `background-100` | 7.0:1 | Secondary/helper text | **Pass** |
+| `brand-cyan` on `background-200` | 9.4:1 | Icons, inline accents | **Pass** |
+| `gray-1000` on `gray-100` | 15.2:1 | Text on subtle fills | **Pass** |
+| `gray-700` on `background-200` | 6.9:1 | Secondary text on panels | **Pass** |
+| `brand-deep-blue` on `background-100` | 1.6:1 | — | **Fail** — do not use deep blue fills on dark chrome; use cyan accent instead |
+| `gray-700` on `background-100` | 7.4:1 | Secondary/helper text | **Pass** |
 
 **Dark primary button:** cyan fill (`brand-cyan`) + deep blue label (`brand-deep-blue`) — passes AA for button text. Deep blue filled buttons on dark chrome fail surface contrast; reserve deep blue for text on cyan or white-on-brand panels only.
 

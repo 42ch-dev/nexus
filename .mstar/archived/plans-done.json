@@ -482,7 +482,11 @@
     "2026-07-15-v1.119-setup-agent-picker-catalog",
     "2026-07-17-v1.120-strategies-repair",
     "2026-07-17-v1.120-shell-form-polish",
-    "2026-07-17-v1.120-orchestration-ia-icon"
+    "2026-07-17-v1.120-orchestration-ia-icon",
+    "2026-07-17-v1.121-design-language-foundation",
+    "2026-07-17-v1.121-component-library-elevation",
+    "2026-07-17-v1.121-app-surfaces-elevation",
+    "2026-07-17-v1.121-canvas-reading-elevation"
   ],
   "iteration_summaries": {
     "v1.45": {

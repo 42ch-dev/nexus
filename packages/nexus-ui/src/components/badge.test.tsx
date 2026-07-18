@@ -138,6 +138,14 @@ describe('Badge', () => {
     expect(badge).toHaveClass('whitespace-nowrap');
   });
 
+  it('eases state changes over duration-state (v0.4 motion tokens)', () => {
+    render(<Badge>Motion</Badge>);
+    const badge = screen.getByText('Motion');
+    expect(badge).toHaveClass('transition-colors');
+    expect(badge).toHaveClass('duration-state');
+    expect(badge).toHaveClass('ease-standard');
+  });
+
   // --- className merge (cn integration) ---
 
   it('merges custom className with variant classes', () => {

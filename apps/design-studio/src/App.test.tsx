@@ -138,6 +138,175 @@ describe('Gallery section rendering', () => {
   );
 });
 
+/* ---- tokens page — V1.121 P0 v0.4 galleries (Task 4) -------------------- */
+
+/** matchMedia mock that distinguishes color-scheme from reduced-motion. */
+function mockMatchMediaFull({
+  dark = false,
+  reducedMotion = false,
+}: { dark?: boolean; reducedMotion?: boolean } = {}) {
+  vi.spyOn(window, 'matchMedia').mockImplementation(
+    (query: string) =>
+      ({
+        matches: query.includes('reduced-motion') ? reducedMotion : dark,
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      }) as unknown as MediaQueryList,
+  );
+}
+
+describe('Tokens page — typography gallery (display tier)', () => {
+  beforeEach(() => {
+    mockMatchMediaFull();
+    renderStudio('/tokens');
+  });
+
+  it('renders the display tier rows with font-display + text-display-* classes', () => {
+    for (const label of ['display-32', 'display-24', 'display-20']) {
+      const row = screen.getByTestId(`typo-row-${label}`);
+      const specimen = row.querySelector(`.text-${label}`);
+      expect(specimen).not.toBeNull();
+      expect(specimen!.className).toContain('font-display');
+    }
+  });
+
+  it('keeps heading specimens in the interface voice (font-sans + font-heading)', () => {
+    const row = screen.getByTestId('typo-row-heading-24');
+    const specimen = row.querySelector('.text-heading-24');
+    expect(specimen).not.toBeNull();
+    expect(specimen!.className).toContain('font-sans');
+    expect(specimen!.className).toContain('font-heading');
+    expect(specimen!.className).not.toContain('font-display');
+  });
+
+  it('renders the full sans/mono scale rows', () => {
+    for (const label of [
+      'heading-32', 'heading-24', 'heading-20', 'heading-16',
+      'label-14', 'label-12', 'copy-16', 'copy-14', 'copy-13',
+      'button-14', 'button-12', 'label-12-mono', 'copy-13-mono',
+    ]) {
+      expect(screen.getByTestId(`typo-row-${label}`)).toBeInTheDocument();
+    }
+  });
+});
+
+describe('Tokens page — spacing / radius galleries', () => {
+  beforeEach(() => {
+    mockMatchMediaFull();
+    renderStudio('/tokens');
+  });
+
+  it('renders spacing rows driven by the token CSS variable', () => {
+    const row = screen.getByTestId('spacing-row-space-4');
+    const bar = row.querySelector('[style*="--space-4"]');
+    expect(bar).not.toBeNull();
+    expect(row).toHaveTextContent('--space-4');
+    const row24 = screen.getByTestId('spacing-row-space-24');
+    expect(row24.querySelector('[style*="--space-24"]')).not.toBeNull();
+    expect(row24).toHaveTextContent('--space-24');
+  });
+
+  it('renders radius boxes driven by the token CSS variable', () => {
+    const card = screen.getByTestId('radius-box-card');
+    expect(card.querySelector('[style*="--radius-card"]')).not.toBeNull();
+    expect(card).toHaveTextContent('--radius-card');
+    const pill = screen.getByTestId('radius-box-pill');
+    expect(pill.querySelector('[style*="--radius-pill"]')).not.toBeNull();
+    expect(pill).toHaveTextContent('--radius-pill');
+  });
+});
+
+describe('Tokens page — elevation gallery', () => {
+  beforeEach(() => {
+    mockMatchMediaFull();
+    renderStudio('/tokens');
+  });
+
+  it('renders the full elevation-0…4 scale', () => {
+    for (const level of ['elevation-0', 'elevation-1', 'elevation-2', 'elevation-3', 'elevation-4']) {
+      expect(screen.getByTestId(`elevation-swatch-${level}`)).toBeInTheDocument();
+    }
+  });
+
+  it('documents the legacy alias chain onto the scale', () => {
+    const aliases = screen.getByTestId('elevation-aliases');
+    expect(aliases).toHaveTextContent('shadow-card');
+    expect(aliases).toHaveTextContent('→ elevation-1');
+    expect(aliases).toHaveTextContent('shadow-popover');
+    expect(aliases).toHaveTextContent('→ elevation-3');
+    expect(aliases).toHaveTextContent('shadow-modal');
+    expect(aliases).toHaveTextContent('→ elevation-4');
+  });
+});
+
+describe('Tokens page — motion gallery', () => {
+  beforeEach(() => {
+    mockMatchMediaFull();
+    renderStudio('/tokens');
+  });
+
+  it('renders duration and easing token rows', () => {
+    for (const label of [
+      'duration-instant', 'duration-state', 'duration-popover',
+      'duration-modal', 'duration-enter', 'duration-exit',
+      'ease-standard', 'ease-emphasized',
+    ]) {
+      expect(screen.getByTestId(`motion-row-${label}`)).toBeInTheDocument();
+    }
+  });
+
+  it('renders the reduced-motion-aware hover-lift recipe demo', () => {
+    const demo = screen.getByTestId('motion-demo-lift');
+    expect(demo.className).toContain('shadow-elevation-1');
+    expect(demo.className).toContain('hover:shadow-elevation-2');
+    expect(demo.className).toContain('duration-popover');
+    expect(demo.className).toContain('motion-reduce:transition-none');
+  });
+
+  it('toggles the enter/exit demo between duration-enter and duration-exit states', () => {
+    vi.useFakeTimers();
+    try {
+      const chip = screen.getByTestId('motion-demo-enter-exit');
+      expect(chip.className).toContain('opacity-100');
+      expect(chip.className).toContain('duration-enter');
+
+      fireEvent.click(screen.getByTestId('motion-demo-dismiss'));
+      expect(chip.className).toContain('opacity-0');
+      expect(chip.className).toContain('duration-exit');
+
+      fireEvent.click(screen.getByTestId('motion-demo-replay'));
+      act(() => {
+        vi.runAllTimers();
+      });
+      expect(chip.className).toContain('opacity-100');
+      expect(chip.className).toContain('duration-enter');
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('shows the honesty note when prefers-reduced-motion is active', () => {
+    // Re-render with reduced-motion active.
+    vi.restoreAllMocks();
+    mockMatchMediaFull({ reducedMotion: true });
+    renderStudio('/tokens');
+    expect(screen.getByTestId('motion-reduced-note')).toBeInTheDocument();
+  });
+
+  it('links the Motion section from the token sub-nav', () => {
+    const subnav = screen.getByRole('navigation', { name: 'Token sub-sections' });
+    expect(within(subnav).getByRole('link', { name: 'Motion' })).toHaveAttribute(
+      'href',
+      '#tokens-motion',
+    );
+  });
+});
+
 /* ---- surfaces section menu / deep links (V1.102 P2 Task 1) -------------- */
 
 const SURFACES_SECTION_ROUTES = [
@@ -1111,6 +1280,34 @@ describe('Components page — Domain badge matrices', () => {
       ).toBeInTheDocument();
     }
   });
+
+  it('uses finding-status-* / memory-task-kind-* token classes (no color-mix arbitraries)', () => {
+    // Token segment uses dashes (in_review → in-review, wont_fix → wont-fix).
+    const findingCases = [
+      ['open', 'open'],
+      ['triaged', 'triaged'],
+      ['in_review', 'in-review'],
+      ['resolved', 'resolved'],
+      ['wont_fix', 'wont-fix'],
+      ['duplicate', 'duplicate'],
+    ] as const;
+    for (const [value, token] of findingCases) {
+      const badge = screen.getByTestId(`domain-badge-finding-${value}`);
+      expect(badge.className).toContain(`bg-finding-status-${token}-bg`);
+      expect(badge.className).toContain(`text-finding-status-${token}-text`);
+      expect(badge.className).toContain(`border-finding-status-${token}-border`);
+      expect(badge.className).not.toContain('color-mix');
+    }
+
+    const kinds = ['brainstorm', 'outline', 'chapter', 'research', 'unknown'] as const;
+    for (const kind of kinds) {
+      const badge = screen.getByTestId(`domain-badge-task-kind-${kind}`);
+      expect(badge.className).toContain(`bg-memory-task-kind-${kind}-bg`);
+      expect(badge.className).toContain(`text-memory-task-kind-${kind}-text`);
+      expect(badge.className).toContain(`border-memory-task-kind-${kind}-border`);
+      expect(badge.className).not.toContain('color-mix');
+    }
+  });
 });
 
 /* ---- components page — Select fixtures (V1.101 P2 Task 2) --------------- */
@@ -1388,5 +1585,367 @@ describe('Surfaces page — Canvas surfaces fixtures', () => {
     expect(within(inspector).getByText('Grounded')).toBeInTheDocument();
     // Confidence value renders numerically (formatConfidence).
     expect(within(inspector).getByText('0.82')).toBeInTheDocument();
+  });
+});
+
+/* ---- components page — v0.4 states matrix (V1.121 P1 T4) --------------- */
+
+describe('Components page — Card v0.4 matrix (interactive + title voice)', () => {
+  beforeEach(() => {
+    mockMatchMedia(false);
+    renderStudio('/components');
+  });
+
+  it('renders rest and interactive cards as real components', () => {
+    expect(screen.getByTestId('card-rest')).toBeInTheDocument();
+    expect(screen.getByTestId('card-interactive')).toBeInTheDocument();
+  });
+
+  it('interactive card carries the v0.4 hover-lift recipe classes', () => {
+    const card = screen.getByTestId('card-interactive');
+    expect(card.className).toContain('hover:shadow-elevation-2');
+    expect(card.className).toContain('motion-safe:hover:-translate-y-px');
+    expect(card.className).toContain('duration-popover');
+    expect(card.className).toContain('motion-reduce:transition-none');
+  });
+
+  it('rest card keeps the static elevation-1 treatment without the recipe', () => {
+    const card = screen.getByTestId('card-rest');
+    expect(card.className).toContain('shadow-card');
+    expect(card.className).not.toContain('hover:shadow-elevation-2');
+  });
+
+  it('CardTitle voice="content" swaps to the serif display tier', () => {
+    const title = screen.getByTestId('card-title-content');
+    expect(title.className).toContain('font-display');
+    expect(title.className).toContain('text-display-20');
+    expect(title.className).toContain('tracking-tight');
+  });
+
+  it('default CardTitle keeps the interface sans treatment', () => {
+    const title = screen.getByTestId('card-title-interface');
+    expect(title.className).toContain('text-heading-16');
+    expect(title.className).toContain('font-heading');
+    expect(title.className).not.toContain('font-display');
+  });
+});
+
+describe('Components page — States v0.4 (error surface + serif empty headline)', () => {
+  beforeEach(() => {
+    mockMatchMedia(false);
+    renderStudio('/components');
+  });
+
+  it('renders Spinner and LoadingState as the loading cells', () => {
+    expect(screen.getByTestId('states-spinner')).toBeInTheDocument();
+    expect(screen.getByTestId('states-loading')).toHaveTextContent('Loading data…');
+  });
+
+  it('EmptyState headline uses the serif display tier (content voice)', () => {
+    const headline = screen
+      .getByTestId('states-empty')
+      .querySelector('.font-display');
+    expect(headline).not.toBeNull();
+    expect(headline!.className).toContain('text-display-24');
+    expect(headline!).toHaveTextContent('No works yet');
+  });
+
+  it('ErrorState uses the error-surface tokens with role="alert"', () => {
+    const alert = within(screen.getByTestId('states-error')).getByRole('alert');
+    expect(alert.className).toContain('bg-error-surface');
+    expect(alert.className).toContain('border-error-surface-border');
+  });
+
+  it('ErrorState retry action is live (fires the callback)', () => {
+    const retry = within(screen.getByTestId('states-error')).getByRole('button', {
+      name: 'Try again',
+    });
+    expect(
+      screen.queryByTestId('states-error-retry-count'),
+    ).not.toBeInTheDocument();
+    fireEvent.click(retry);
+    expect(screen.getByTestId('states-error-retry-count')).toHaveTextContent(
+      'Retry requested 1 time.',
+    );
+  });
+});
+
+describe('Components page — Dialog scrim convergence (V1.121)', () => {
+  beforeEach(() => {
+    mockMatchMedia(false);
+    renderStudio('/components');
+  });
+
+  it('opens with a bg-scrim overlay and an elevation-4 panel', () => {
+    fireEvent.click(screen.getByRole('button', { name: 'Open dialog' }));
+    const dialog = screen.getByRole('dialog');
+    expect(dialog.className).toContain('shadow-elevation-4');
+    expect(document.querySelector('.bg-scrim')).not.toBeNull();
+    // Close so Radix aria-hidden does not leak into later tests in this suite.
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Close dialog' }));
+  });
+});
+
+describe('Components page — serif discipline (AC-P1-5)', () => {
+  beforeEach(() => {
+    mockMatchMedia(false);
+    renderStudio('/components');
+  });
+
+  it('confines the serif display voice to content-voice opt-ins', () => {
+    // Only the CardTitle voice="content" fixture and the EmptyState headline
+    // may carry font-display on this page — interface components (Button,
+    // Badge, Input, Select, Tabs, Table) stay sans per DESIGN.md §Design
+    // Concept.
+    const allowedContainers = ['card-title-content', 'states-empty'];
+    const serifEls = Array.from(document.querySelectorAll('.font-display'));
+    expect(serifEls.length).toBeGreaterThan(0);
+    for (const el of serifEls) {
+      const inAllowed = allowedContainers.some(
+        (testid) =>
+          el.getAttribute('data-testid') === testid ||
+          el.closest(`[data-testid="${testid}"]`) !== null,
+      );
+      expect(inAllowed).toBe(true);
+    }
+  });
+});
+
+describe('Components page — theme toggle coverage (light/dark)', () => {
+  it('renders a single DOM tree driven by the .dark class toggle', () => {
+    mockMatchMedia(false);
+    renderStudio('/components');
+
+    // Light: the states matrix renders once (no per-theme DOM duplication).
+    expect(screen.getAllByTestId('card-interactive')).toHaveLength(1);
+    expect(document.documentElement.classList.contains('dark')).toBe(false);
+
+    // Toggle to dark — same tree; the token swap is class-driven.
+    act(() => screen.getByLabelText(/Switch to dark theme/).click());
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
+    expect(screen.getAllByTestId('card-interactive')).toHaveLength(1);
+    expect(screen.getByTestId('states-error')).toBeInTheDocument();
+    expect(screen.getByTestId('dialog-fixtures')).toBeInTheDocument();
+  });
+});
+
+/* ---- V1.121 P3 T4 — canvas surfaces v0.4 fixture updates ----------------- */
+
+describe('Surfaces page — Canvas surfaces v0.4 fixtures', () => {
+  beforeEach(() => {
+    mockMatchMedia(false);
+    renderStudio('/surfaces/canvas');
+  });
+
+  it('paints the outline accent spine on outline surface nodes (amber-700)', () => {
+    // Outline samples (Volume / Chapter / Scene / Beat) route the accent
+    // prop through NodeChromeShell — the spine class targets the amber-700
+    // canvas-outline-accent token.
+    const matrix = screen.getByTestId('canvas-node-matrix');
+    const volumeTitle = within(matrix).getByText('Volume II — Journeys');
+    const volumeShell = volumeTitle.closest('[class*="border-l-canvas-outline-accent"]');
+    expect(volumeShell).not.toBeNull();
+  });
+
+  it('paints the strategy accent spine on every strategy surface node', () => {
+    const shell = screen.getByTestId('strategy-shell-chrome');
+    // All four strategy node kinds (state, join, terminal, plus the
+    // selected drafting state) carry the strategy spine class.
+    const spines = shell.querySelectorAll('[class*="border-l-canvas-strategy-accent"]');
+    expect(spines.length).toBeGreaterThanOrEqual(3);
+  });
+
+  it('paints the worldkb accent spine on every World KB surface node', () => {
+    const shell = screen.getByTestId('worldkb-shell-chrome');
+    // Entity cards + source-anchor nodes both carry the worldkb spine.
+    const spines = shell.querySelectorAll('[class*="border-l-canvas-worldkb-accent"]');
+    expect(spines.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('uses min-w-canvas-node-outline-scene-beat for scene + beat samples', () => {
+    const matrix = screen.getByTestId('canvas-node-matrix');
+    const sceneShells = matrix.querySelectorAll('.min-w-canvas-node-outline-scene-beat');
+    // Scene + Beat + Scene (no status) + Beat (selected) = 4 chips.
+    expect(sceneShells.length).toBeGreaterThanOrEqual(4);
+  });
+
+  it('uses min-w-canvas-node-strategy-secondary for the strategy terminal', () => {
+    const shell = screen.getByTestId('strategy-shell-chrome');
+    const terminal = shell.querySelector('.min-w-canvas-node-strategy-secondary');
+    expect(terminal).not.toBeNull();
+  });
+
+  it('mirrors v0.4 elevation + accent on World KB entity + source-anchor nodes', () => {
+    const shell = screen.getByTestId('worldkb-shell-chrome');
+    // Entity card carries the v0.4 elevation recipe (rest + hover + dragging)
+    // via the transition-shadow + hover:shadow-elevation-2 +
+    // data-[dragging=true]:shadow-elevation-4 class chain.
+    const entityShells = shell.querySelectorAll(
+      '[class*="hover:shadow-elevation-2"][class*="data-[dragging=true]:shadow-elevation-4"]',
+    );
+    expect(entityShells.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('renders the v0.4 elevation state matrix fixture', () => {
+    const matrix = screen.getByTestId('canvas-node-v2-elevation-matrix');
+    expect(matrix).toBeInTheDocument();
+    // Four pinned chips: rest / selected / dragging / selected+dragging.
+    expect(within(matrix).getByText('Rest')).toBeInTheDocument();
+    expect(within(matrix).getByText('Selected')).toBeInTheDocument();
+    expect(within(matrix).getByText('Dragging')).toBeInTheDocument();
+    expect(within(matrix).getByText('Selected + dragging')).toBeInTheDocument();
+  });
+
+  it('renders the per-surface accent spine matrix fixture', () => {
+    const matrix = screen.getByTestId('canvas-node-v2-accents-matrix');
+    expect(matrix).toBeInTheDocument();
+    // Three accent spines side-by-side. The label appears twice per chip
+    // (row header + chip title) — assert on the chip title font-heading span.
+    expect(matrix.querySelectorAll('.font-heading.text-copy-14').length).toBe(3);
+
+    // Each spine class is unique per chip.
+    expect(
+      matrix.querySelectorAll('[class*="border-l-canvas-strategy-accent"]').length,
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      matrix.querySelectorAll('[class*="border-l-canvas-outline-accent"]').length,
+    ).toBeGreaterThanOrEqual(1);
+    expect(
+      matrix.querySelectorAll('[class*="border-l-canvas-worldkb-accent"]').length,
+    ).toBeGreaterThanOrEqual(1);
+  });
+
+  it('renders the node-width utility matrix fixture with all five slots', () => {
+    const matrix = screen.getByTestId('canvas-node-v2-widths-matrix');
+    expect(matrix).toBeInTheDocument();
+    // All five min-w-canvas-node-* utility chips are present.
+    for (const slot of [
+      'strategy-root',
+      'strategy-primary',
+      'strategy-secondary',
+      'outline-scene-beat',
+      'default',
+    ]) {
+      expect(
+        within(matrix).getByTestId(`canvas-node-width-${slot}`),
+      ).toBeInTheDocument();
+    }
+    // Each chip uses the named utility class.
+    expect(
+      matrix.querySelector('.min-w-canvas-node-strategy-root'),
+    ).not.toBeNull();
+    expect(
+      matrix.querySelector('.min-w-canvas-node-default'),
+    ).not.toBeNull();
+  });
+});
+
+/* ---- V1.121 P3 T4 — Tokens page canvas section -------------------------- */
+
+describe('Tokens page — Canvas token gallery (V1.121 P3)', () => {
+  beforeEach(() => {
+    mockMatchMediaFull();
+    renderStudio('/tokens');
+  });
+
+  it('renders the Canvas section heading + sub-nav link', () => {
+    expect(screen.getByRole('heading', { name: 'Canvas' })).toBeInTheDocument();
+    const subnav = screen.getByRole('navigation', { name: 'Token sub-sections' });
+    expect(within(subnav).getByRole('link', { name: 'Canvas' })).toHaveAttribute(
+      'href',
+      '#tokens-canvas',
+    );
+  });
+
+  it('renders every canvas token group (ambient / node chrome / edges / accents)', () => {
+    for (const idx of ['0', '1', '2', '3']) {
+      expect(
+        screen.getByTestId(`canvas-token-group-${idx}`),
+      ).toBeInTheDocument();
+    }
+  });
+
+  it('renders ambient group with dot-grid pattern swatch', () => {
+    expect(screen.getByTestId('canvas-ambient-grid-swatch')).toBeInTheDocument();
+  });
+
+  it('renders all three accent spine tokens (strategy / outline / worldkb)', () => {
+    const accentsGroup = screen.getByTestId('canvas-token-group-3');
+    expect(
+      within(accentsGroup).getByText('canvas-strategy-accent'),
+    ).toBeInTheDocument();
+    expect(
+      within(accentsGroup).getByText('canvas-outline-accent'),
+    ).toBeInTheDocument();
+    expect(
+      within(accentsGroup).getByText('canvas-worldkb-accent'),
+    ).toBeInTheDocument();
+  });
+
+  it('renders node chrome tokens including the selected border token', () => {
+    const nodeChromeGroup = screen.getByTestId('canvas-token-group-1');
+    expect(
+      within(nodeChromeGroup).getByText('canvas-node-fill'),
+    ).toBeInTheDocument();
+    expect(
+      within(nodeChromeGroup).getByText('canvas-node-border-selected'),
+    ).toBeInTheDocument();
+  });
+
+  it('renders the node-width utility gallery with all five slots', () => {
+    const widthsGroup = screen.getByTestId('canvas-token-group-widths');
+    expect(widthsGroup).toBeInTheDocument();
+    for (const slot of [
+      'strategy-root',
+      'strategy-primary',
+      'strategy-secondary',
+      'outline-scene-beat',
+      'default',
+    ]) {
+      expect(
+        within(widthsGroup).getByTestId(`canvas-node-width-swatch-${slot}`),
+      ).toBeInTheDocument();
+    }
+  });
+
+  it('each accent spine swatch uses border-l-[3px] shape mirroring NodeChromeShell', () => {
+    const accentsGroup = screen.getByTestId('canvas-token-group-3');
+    const swatches = accentsGroup.querySelectorAll('[style*="border-left: 3px"]');
+    // All three spine swatches use the spine shape.
+    expect(swatches.length).toBe(3);
+  });
+});
+
+/* ---- V1.121 P3 T4 — parity sweep (light/dark DOM assertions) ------------ */
+
+describe('V1.121 P3 T4 — parity sweep across all surfaces', () => {
+  it('renders all three canvas surfaces + canvas token gallery in a single tree', () => {
+    mockMatchMedia(false);
+    renderStudio('/surfaces/canvas');
+
+    // Three surface chrome fixtures render in the same DOM tree.
+    expect(screen.getByTestId('canvas-shell-chrome')).toBeInTheDocument();
+    expect(screen.getByTestId('strategy-shell-chrome')).toBeInTheDocument();
+    expect(screen.getByTestId('worldkb-shell-chrome')).toBeInTheDocument();
+
+    // The shared token surface is the same — no per-surface token duplication.
+    expect(screen.getAllByTestId('canvas-shell-chrome')).toHaveLength(1);
+  });
+
+  it('keeps a single DOM tree across light + dark for canvas surfaces', () => {
+    mockMatchMedia(false);
+    renderStudio('/surfaces/canvas');
+
+    expect(document.documentElement.classList.contains('dark')).toBe(false);
+    expect(screen.getAllByTestId('canvas-shell-chrome')).toHaveLength(1);
+    expect(screen.getAllByTestId('strategy-shell-chrome')).toHaveLength(1);
+    expect(screen.getAllByTestId('worldkb-shell-chrome')).toHaveLength(1);
+
+    // Toggle to dark — same tree, theme swap is class-driven on <html>.
+    act(() => screen.getByLabelText(/Switch to dark theme/).click());
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
+    expect(screen.getAllByTestId('canvas-shell-chrome')).toHaveLength(1);
+    expect(screen.getAllByTestId('strategy-shell-chrome')).toHaveLength(1);
+    expect(screen.getAllByTestId('worldkb-shell-chrome')).toHaveLength(1);
   });
 });

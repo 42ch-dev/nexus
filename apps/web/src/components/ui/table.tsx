@@ -45,7 +45,7 @@ export const TableRow = forwardRef<HTMLTableRowElement, HTMLAttributes<HTMLTable
   ({ className, ...props }, ref) => (
     <tr
       ref={ref}
-      className={cn('transition-colors duration-state ease-standard hover:bg-background-200', className)}
+      className={cn('transition-colors duration-state ease-standard motion-reduce:transition-none hover:bg-background-200', className)}
       {...props}
     />
   ),

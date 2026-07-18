@@ -221,7 +221,7 @@ export function SetupStepWorkspace({
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto" data-testid="wizard-step-body">
         <div className="my-auto flex flex-col gap-4">
           <div className="flex flex-col gap-2">
-            <h2 className="text-heading-24 font-heading text-gray-1000">{t('step.workspace.title')}</h2>
+            <h2 className="font-display text-display-24 text-gray-1000">{t('step.workspace.title')}</h2>
             <p className="text-copy-14 text-gray-900">
               {t('step.workspace.description')}
             </p>
@@ -288,7 +288,7 @@ export function SetupStepWorkspace({
           role="alert"
           data-testid="wizard-continue-error"
           data-continue-error-class={continueError.class}
-          className="flex shrink-0 flex-col gap-2 rounded-card border border-[color-mix(in_srgb,var(--color-red-700)_30%,transparent)] bg-[color-mix(in_srgb,var(--color-red-700)_6%,transparent)] p-3"
+          className="flex shrink-0 flex-col gap-2 rounded-card border border-error-surface-border bg-error-surface p-3"
         >
           <p className="text-heading-16 font-heading text-red-1000">{continueError.message}</p>
           <p className="text-copy-14 text-red-900">

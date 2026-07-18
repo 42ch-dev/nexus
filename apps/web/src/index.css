@@ -65,102 +65,101 @@
 
 @layer components {
   /* V1.91 Reading Chrome — profile-specific read-only rendering tokens.
-     Values transcribed verbatim from DESIGN.md (light) and DESIGN.dark.md
-     (dark overrides below). Token names are frozen verbatim. */
-
+     V1.121 v0.4 (P3 T3): block now consumes the `--reading-chrome-*` token
+     surface authored in `@nexus/design-tokens` (DESIGN.md / DESIGN.dark.md
+     `components.reading-chrome-*`). Zero hardcoded font/size/weight/spacing/
+     color literals remain — every value flows through a token so the theme
+     flip propagates without per-file overrides. The novel chapter title now
+     uses `typography.font-display` (display serif) via the same token surface
+     that replaced the hardcoded Georgia stack. */
   /* Profile: novel — prose literature. */
   .reading-chrome-novel-chapter-title {
-    font-family: Georgia, 'Times New Roman', ui-serif, serif;
-    font-size: 28px;
-    font-weight: 700;
-    line-height: 1.3;
-    letter-spacing: -0.01em;
-    color: var(--color-gray-1000);
+    font-family: var(--reading-chrome-novel-chapter-title-font-family);
+    font-size: var(--reading-chrome-novel-chapter-title-font-size);
+    font-weight: var(--reading-chrome-novel-chapter-title-font-weight);
+    line-height: var(--reading-chrome-novel-chapter-title-line-height);
+    letter-spacing: var(--reading-chrome-novel-chapter-title-letter-spacing);
+    color: var(--reading-chrome-novel-chapter-title-color);
   }
   .reading-chrome-novel-scene-separator {
-    color: var(--color-gray-500);
-    font-size: 16px;
-    text-align: center;
-    padding-block: 12px;
+    color: var(--reading-chrome-novel-scene-separator-color);
+    font-size: var(--reading-chrome-novel-scene-separator-font-size);
+    text-align: var(--reading-chrome-novel-scene-separator-text-align);
+    padding-block: var(--reading-chrome-novel-scene-separator-padding-block);
   }
   .reading-chrome-novel-epigraph {
-    font-style: italic;
-    text-align: right;
-    color: var(--color-gray-700);
-    padding-left: 25%;
+    font-style: var(--reading-chrome-novel-epigraph-font-style);
+    text-align: var(--reading-chrome-novel-epigraph-text-align);
+    color: var(--reading-chrome-novel-epigraph-color);
+    padding-left: var(--reading-chrome-novel-epigraph-padding-left);
   }
 
   /* Profile: essay — structured non-fiction. */
   .reading-chrome-essay-section-heading {
-    font-family: Inter, ui-sans-serif, system-ui, -apple-system, sans-serif;
-    font-size: 18px;
-    font-weight: 500;
-    line-height: 1.4;
-    letter-spacing: -0.01em;
-    color: var(--color-gray-1000);
-    margin-top: 28px;
+    font-family: var(--reading-chrome-essay-section-heading-font-family);
+    font-size: var(--reading-chrome-essay-section-heading-font-size);
+    font-weight: var(--reading-chrome-essay-section-heading-font-weight);
+    line-height: var(--reading-chrome-essay-section-heading-line-height);
+    letter-spacing: var(--reading-chrome-essay-section-heading-letter-spacing);
+    color: var(--reading-chrome-essay-section-heading-color);
+    margin-top: var(--reading-chrome-essay-section-heading-margin-top);
   }
   .reading-chrome-essay-blockquote {
-    border-left: 3px solid var(--color-gray-alpha-400);
-    padding-left: 16px;
-    font-style: italic;
-    color: var(--color-gray-900);
+    border-left: var(--reading-chrome-essay-blockquote-border-left);
+    padding-left: var(--reading-chrome-essay-blockquote-padding-left);
+    font-style: var(--reading-chrome-essay-blockquote-font-style);
+    color: var(--reading-chrome-essay-blockquote-color);
   }
   .reading-chrome-essay-footnote-marker {
-    vertical-align: super;
-    font-size: 0.75em;
-    color: var(--color-teal-700);
+    vertical-align: var(--reading-chrome-essay-footnote-marker-vertical-align);
+    font-size: var(--reading-chrome-essay-footnote-marker-font-size);
+    color: var(--reading-chrome-essay-footnote-marker-color);
   }
 
   /* Profile: game-bible — encyclopedic world reference. */
   .reading-chrome-game-bible-term-link {
-    color: var(--color-teal-700);
-    text-decoration: underline dotted;
-    cursor: pointer;
+    color: var(--reading-chrome-game-bible-term-link-color);
+    text-decoration: var(--reading-chrome-game-bible-term-link-text-decoration);
+    cursor: var(--reading-chrome-game-bible-term-link-cursor);
   }
   .reading-chrome-game-bible-definition-callout {
-    background-color: rgba(0, 133, 119, 0.06);
-    border-left: 3px solid var(--color-teal-700);
-    padding: 12px 16px;
+    background-color: var(--reading-chrome-game-bible-definition-callout-background-color);
+    border-left: var(--reading-chrome-game-bible-definition-callout-border-left);
+    padding: var(--reading-chrome-game-bible-definition-callout-padding);
   }
   .reading-chrome-game-bible-definition-label {
-    color: var(--color-teal-900);
-    font-weight: 600;
+    color: var(--reading-chrome-game-bible-definition-callout-label-color);
+    font-weight: var(--reading-chrome-game-bible-definition-callout-label-font-weight);
   }
   .reading-chrome-game-bible-category-badge {
-    background-color: rgba(183, 110, 0, 0.12);
-    color: var(--color-amber-1000);
+    background-color: var(--reading-chrome-game-bible-category-badge-background-color);
+    color: var(--reading-chrome-game-bible-category-badge-color);
   }
 
   /* Profile: script — screenplay/teleplay. */
   .reading-chrome-script-character-name {
-    text-align: center;
-    text-transform: uppercase;
-    font-weight: 700;
-    font-size: 14px;
-    letter-spacing: 0.08em;
-    margin-top: 20px;
-    color: var(--color-gray-1000);
+    text-align: var(--reading-chrome-script-character-name-text-align);
+    text-transform: var(--reading-chrome-script-character-name-text-transform);
+    font-weight: var(--reading-chrome-script-character-name-font-weight);
+    font-size: var(--reading-chrome-script-character-name-font-size);
+    letter-spacing: var(--reading-chrome-script-character-name-letter-spacing);
+    margin-top: var(--reading-chrome-script-character-name-margin-top);
+    color: var(--reading-chrome-script-character-name-color);
   }
   .reading-chrome-script-parenthetical {
-    font-style: italic;
-    color: var(--color-gray-700);
-    padding-left: 32px;
+    font-style: var(--reading-chrome-script-parenthetical-font-style);
+    color: var(--reading-chrome-script-parenthetical-color);
+    padding-left: var(--reading-chrome-script-parenthetical-padding-left);
   }
   .reading-chrome-script-scene-heading {
-    font-weight: 700;
-    text-transform: uppercase;
-    font-size: 14px;
-    letter-spacing: 0.05em;
-    color: var(--color-gray-900);
-    margin-top: 24px;
+    font-weight: var(--reading-chrome-script-scene-heading-font-weight);
+    text-transform: var(--reading-chrome-script-scene-heading-text-transform);
+    font-size: var(--reading-chrome-script-scene-heading-font-size);
+    letter-spacing: var(--reading-chrome-script-scene-heading-letter-spacing);
+    color: var(--reading-chrome-script-scene-heading-color);
+    margin-top: var(--reading-chrome-script-scene-heading-margin-top);
   }
-}
-
-/* Dark-theme overrides for raw rgba reading-chrome tokens. */
-.dark .reading-chrome-game-bible-definition-callout {
-  background-color: rgba(0, 133, 119, 0.08);
-}
-.dark .reading-chrome-game-bible-category-badge {
-  background-color: rgba(183, 110, 0, 0.14);
+  /* v0.4 tints (game-bible callout/category-badge) resolve through
+     `--reading-chrome-*` tokens with `.dark` overrides in `tokens.css`;
+     no app-level dark overrides are needed here. */
 }

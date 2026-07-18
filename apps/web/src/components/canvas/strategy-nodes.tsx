@@ -99,13 +99,19 @@ function KindTag({ kind }: { kind: string }) {
 export const StrategyStateNode = memo(function StrategyStateNode({
   data,
   selected,
+  dragging,
 }: NodeProps) {
   const d = data as StrategyNodeData;
   const { t } = useTranslation('canvas');
   const status = effectiveStatus(d.status);
   const isCurrent = status !== undefined;
   return (
-    <NodeChromeShell selected={!!selected} status={status} accent>
+    <NodeChromeShell
+      selected={!!selected}
+      status={status}
+      accent="strategy"
+      dragging={dragging}
+    >
       <Handle type="target" position={Position.Top} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
       <NodeHeader label={d.label} status={status} />
       <KindTag kind={d.stateKind} />
@@ -121,6 +127,7 @@ export const StrategyStateNode = memo(function StrategyStateNode({
 export const StrategyGroupNode = memo(function StrategyGroupNode({
   data,
   selected,
+  dragging,
 }: NodeProps) {
   const d = data as StrategyNodeData;
   const { t } = useTranslation('canvas');
@@ -129,8 +136,9 @@ export const StrategyGroupNode = memo(function StrategyGroupNode({
     <NodeChromeShell
       selected={!!selected}
       status={status}
-      accent
-      className="min-w-[260px] min-h-[180px]"
+      accent="strategy"
+      dragging={dragging}
+      className="min-w-canvas-node-strategy-root min-h-[180px]"
     >
       <Handle type="target" position={Position.Top} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
       <NodeHeader label={d.label} status={status} />
@@ -146,12 +154,18 @@ export const StrategyGroupNode = memo(function StrategyGroupNode({
 export const StrategyJoinNode = memo(function StrategyJoinNode({
   data,
   selected,
+  dragging,
 }: NodeProps) {
   const d = data as StrategyNodeData;
   const { t } = useTranslation('canvas');
   const status = effectiveStatus(d.status);
   return (
-    <NodeChromeShell selected={!!selected} status={status}>
+    <NodeChromeShell
+      selected={!!selected}
+      status={status}
+      accent="strategy"
+      dragging={dragging}
+    >
       <Handle type="target" position={Position.Top} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
       <NodeHeader label={d.label} status={status} />
       <span className="mt-0.5 inline-block rounded-pill bg-[color-mix(in_srgb,var(--color-purple-700)_12%,transparent)] px-1.5 py-0.5 text-label-12 text-purple-1000">
@@ -166,12 +180,19 @@ export const StrategyJoinNode = memo(function StrategyJoinNode({
 export const StrategyTerminalNode = memo(function StrategyTerminalNode({
   data,
   selected,
+  dragging,
 }: NodeProps) {
   const d = data as StrategyNodeData;
   const { t } = useTranslation('canvas');
   const status = effectiveStatus(d.status);
   return (
-    <NodeChromeShell selected={!!selected} status={status} className="min-w-[140px]">
+    <NodeChromeShell
+      selected={!!selected}
+      status={status}
+      accent="strategy"
+      dragging={dragging}
+      className="min-w-canvas-node-strategy-primary"
+    >
       <Handle type="target" position={Position.Top} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
       <NodeHeader label={d.label} status={status} />
       <span className="mt-0.5 inline-block text-label-12 text-gray-700">{t('strategy.node.end')}</span>
@@ -183,11 +204,18 @@ export const StrategyTerminalNode = memo(function StrategyTerminalNode({
 export const StrategyInnerNode = memo(function StrategyInnerNode({
   data,
   selected,
+  dragging,
 }: NodeProps) {
   const d = data as StrategyNodeData;
   const status = effectiveStatus(d.status);
   return (
-    <NodeChromeShell selected={!!selected} status={status} className="min-w-[150px]">
+    <NodeChromeShell
+      selected={!!selected}
+      status={status}
+      accent="strategy"
+      dragging={dragging}
+      className="min-w-canvas-node-strategy-secondary"
+    >
       <Handle type="target" position={Position.Left} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />
       <NodeHeader label={d.label} status={status} />
       <Handle type="source" position={Position.Right} className="!h-2.5 !w-2.5 !border-canvas-port !bg-canvas-port" />

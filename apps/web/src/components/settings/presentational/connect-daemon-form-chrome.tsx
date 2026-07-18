@@ -141,7 +141,7 @@ export function ConnectDaemonFormChrome({
           />
           <p className="text-copy-13 text-gray-700">
             {CONNECTION_API_KEY_HELPER_PREFIX}
-            <code className="rounded-control bg-background-200 px-1 py-0.5 font-mono text-[13px]">
+            <code className="rounded-control bg-background-200 px-1 py-0.5 font-mono text-copy-13">
               {CONNECTION_API_KEY_HELPER_COMMAND}
             </code>
             {CONNECTION_API_KEY_HELPER_SUFFIX}
@@ -181,7 +181,7 @@ export function ConnectDaemonFormChrome({
             </p>
             <div
               className={cn(
-                'rounded-control border bg-background-200 p-3 font-mono text-[13px] font-normal leading-relaxed text-gray-1000',
+                'rounded-control border bg-background-200 p-3 font-mono text-copy-13 font-normal leading-relaxed text-gray-1000',
                 isMismatch ? 'border-warning-700' : 'border-gray-alpha-400',
               )}
               data-testid="fingerprint-block"

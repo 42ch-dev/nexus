@@ -53,7 +53,7 @@ export function WorkShellLayout() {
       </div>
 
       <aside
-        className="hidden h-full w-[280px] shrink-0 flex-col border-l border-gray-alpha-400 bg-background-100 lg:flex"
+        className="hidden h-full w-sheet shrink-0 flex-col border-l border-gray-alpha-400 bg-background-100 lg:flex"
         aria-label={t('workShell.railAria')}
         data-testid="work-shell-rail-desktop"
       >

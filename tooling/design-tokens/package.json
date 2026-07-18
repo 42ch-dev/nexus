@@ -12,8 +12,14 @@
     "./tailwind.preset": "./tailwind.preset.ts",
     "./tokens.css": "./src/tokens.css"
   },
+  "scripts": {
+    "build": "tsc --noEmit -p tsconfig.json && node scripts/check-tokens.mjs"
+  },
   "dependencies": {
     "@42ch/nexus-ui": "workspace:*"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3"
   },
   "peerDependencies": {
     "tailwindcss": "^3.4.0"

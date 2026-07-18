@@ -1,15 +1,9 @@
-import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { useTheme } from '@/components/theme-provider';
 
 /* ------------------------------------------------------------------ */
 /*  Data — token inventory from SSOT                                    */
 /* ------------------------------------------------------------------ */
-
-/** Read a CSS custom property value from the document root. */
-function readCSSVar(name: string): string {
-  if (typeof window === 'undefined') return '';
-  return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
-}
 
 interface ColorToken {
   label: string;
@@ -115,66 +109,94 @@ const COLOR_GROUPS: TokenGroup[] = [
   },
 ];
 
-/* ---------- Typography specimens (DESIGN.md frontmatter) ---------- */
+/* ---------- Typography specimens (DESIGN.md frontmatter typography:) ----------
+ *
+ * Class strings are written out literally so the Tailwind scanner emits them
+ * (dynamic `text-${name}` interpolation is invisible to the scanner). Metrics
+ * (size / weight / line-height / tracking) are read live from the rendered
+ * specimen's computed style — never hardcoded copies of the token values.
+ *
+ * Voice discipline (DESIGN.md §Design Concept): the display tier is the
+ * content voice (Source Serif 4, `font-display`) — creative-entity titles
+ * only; everything else stays interface voice (`font-sans` / `font-mono`).
+ */
 
 interface TypoSpecimen {
   label: string;
   role: string;
-  className: string;
+  /** Literal text-* size class from the shared preset. */
+  textClass: string;
+  /** Literal font family utility. */
+  familyClass: 'font-display' | 'font-sans' | 'font-mono';
+  /** Literal weight utility; display tier bakes weight 600 into text-display-*. */
+  weightClass?: 'font-heading' | 'font-semibold' | 'font-medium' | 'font-button';
   sampleText: string;
 }
 
 const TYPO_SPECIMENS: TypoSpecimen[] = [
-  { label: 'heading-32', role: 'Page / view title', className: 'heading-32', sampleText: 'Heading 32 — The quick brown fox' },
-  { label: 'heading-24', role: 'Section title', className: 'heading-24', sampleText: 'Heading 24 — The quick brown fox' },
-  { label: 'heading-20', role: 'Card title / dense section', className: 'heading-20', sampleText: 'Heading 20 — The quick brown fox' },
-  { label: 'heading-16', role: 'Inline heading', className: 'heading-16', sampleText: 'Heading 16 — The quick brown fox' },
-  { label: 'label-14', role: 'Form labels, nav items, table headers', className: 'label-14', sampleText: 'Label 14 — The quick brown fox' },
-  { label: 'label-12', role: 'Badge labels, compact headers', className: 'label-12', sampleText: 'LABEL 12 — THE QUICK BROWN FOX' },
-  { label: 'copy-16', role: 'Primary body copy', className: 'copy-16', sampleText: 'Body 16 — The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.' },
-  { label: 'copy-14', role: 'Default UI copy', className: 'copy-14', sampleText: 'Body 14 — The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.' },
-  { label: 'copy-13', role: 'Dense helper text', className: 'copy-13', sampleText: 'Body 13 — The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.' },
-  { label: 'button-14', role: 'Default button label', className: 'button-14', sampleText: 'Button 14 — Continue' },
-  { label: 'button-12', role: 'Compact button label', className: 'button-12', sampleText: 'BUTTON 12 — SAVE' },
-  { label: 'label-12-mono', role: 'IDs, table figures, code-like values', className: 'label-12-mono', sampleText: 'mono-12 — 0xDEAD_BEEF_2024' },
-  { label: 'copy-13-mono', role: 'Dense mono body', className: 'copy-13-mono', sampleText: 'mono-13 — const answer = 42; // the quick brown fox' },
+  // ── Content voice (V1.121 v0.4 display tier — Source Serif 4) ──
+  { label: 'display-32', role: 'Content voice · page-level creative titles', textClass: 'text-display-32', familyClass: 'font-display', sampleText: 'The Orchard of Small Hours' },
+  { label: 'display-24', role: 'Content voice · work / world titles', textClass: 'text-display-24', familyClass: 'font-display', sampleText: 'Chapter Six — The Long Descent' },
+  { label: 'display-20', role: 'Content voice · card & chapter titles', textClass: 'text-display-20', familyClass: 'font-display', sampleText: 'A Field Guide to Tidal Magic' },
+  // ── Interface voice (sans) ──
+  { label: 'heading-32', role: 'Page / view title', textClass: 'text-heading-32', familyClass: 'font-sans', weightClass: 'font-heading', sampleText: 'Heading 32 — The quick brown fox' },
+  { label: 'heading-24', role: 'Section title', textClass: 'text-heading-24', familyClass: 'font-sans', weightClass: 'font-heading', sampleText: 'Heading 24 — The quick brown fox' },
+  { label: 'heading-20', role: 'Card title / dense section', textClass: 'text-heading-20', familyClass: 'font-sans', weightClass: 'font-heading', sampleText: 'Heading 20 — The quick brown fox' },
+  { label: 'heading-16', role: 'Inline heading', textClass: 'text-heading-16', familyClass: 'font-sans', weightClass: 'font-heading', sampleText: 'Heading 16 — The quick brown fox' },
+  { label: 'label-14', role: 'Form labels, nav items, table headers', textClass: 'text-label-14', familyClass: 'font-sans', weightClass: 'font-medium', sampleText: 'Label 14 — The quick brown fox' },
+  { label: 'label-12', role: 'Badge labels, compact headers', textClass: 'text-label-12', familyClass: 'font-sans', weightClass: 'font-semibold', sampleText: 'LABEL 12 — THE QUICK BROWN FOX' },
+  { label: 'copy-16', role: 'Primary body copy', textClass: 'text-copy-16', familyClass: 'font-sans', sampleText: 'Body 16 — The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.' },
+  { label: 'copy-14', role: 'Default UI copy', textClass: 'text-copy-14', familyClass: 'font-sans', sampleText: 'Body 14 — The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.' },
+  { label: 'copy-13', role: 'Dense helper text', textClass: 'text-copy-13', familyClass: 'font-sans', sampleText: 'Body 13 — The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquor jugs.' },
+  { label: 'button-14', role: 'Default button label', textClass: 'text-button-14', familyClass: 'font-sans', weightClass: 'font-button', sampleText: 'Button 14 — Continue' },
+  { label: 'button-12', role: 'Compact button label', textClass: 'text-button-12', familyClass: 'font-sans', weightClass: 'font-semibold', sampleText: 'BUTTON 12 — SAVE' },
+  // ── Interface voice (mono) ──
+  { label: 'label-12-mono', role: 'IDs, table figures, code-like values', textClass: 'text-label-12-mono', familyClass: 'font-mono', weightClass: 'font-medium', sampleText: 'mono-12 — 0xDEAD_BEEF_2024' },
+  { label: 'copy-13-mono', role: 'Dense mono body', textClass: 'text-copy-13-mono', familyClass: 'font-mono', sampleText: 'mono-13 — const answer = 42; // the quick brown fox' },
 ];
 
-/* ---------- Spacing scale (DESIGN.md frontmatter) ---------- */
+/* ---------- Spacing scale (DESIGN.md frontmatter spacing:) ----------
+ *
+ * Bars render at true scale via the token's CSS custom property
+ * (`width: var(--space-N)`), projected in tokens.css `:root` from the DESIGN
+ * spacing: frontmatter — so the visualization tracks the SSOT, not the
+ * Tailwind default scale. The px/rem readout is read live from the rendered
+ * bar's computed width.
+ */
 
 interface SpacingStep {
   label: string;
-  px: number;
+  varName: string;
 }
 
 const SPACING_SCALE: SpacingStep[] = [
-  { label: 'base / space-1', px: 4 },
-  { label: 'space-2', px: 8 },
-  { label: 'space-3', px: 12 },
-  { label: 'space-4', px: 16 },
-  { label: 'space-6', px: 24 },
-  { label: 'space-8', px: 32 },
-  { label: 'space-10', px: 40 },
-  { label: 'space-16', px: 64 },
-  { label: 'space-24', px: 96 },
+  { label: 'space-1', varName: '--space-1' },
+  { label: 'space-2', varName: '--space-2' },
+  { label: 'space-3', varName: '--space-3' },
+  { label: 'space-4', varName: '--space-4' },
+  { label: 'space-6', varName: '--space-6' },
+  { label: 'space-8', varName: '--space-8' },
+  { label: 'space-10', varName: '--space-10' },
+  { label: 'space-16', varName: '--space-16' },
+  { label: 'space-24', varName: '--space-24' },
 ];
 
-/* ---------- Rounded scale (DESIGN.md frontmatter) ---------- */
+/* ---------- Radius scale (DESIGN.md frontmatter rounded:) ---------- */
 
-interface RoundedStep {
+interface RadiusStep {
   label: string;
-  radius: string;
+  varName: string;
 }
 
-const ROUNDED_SCALE: RoundedStep[] = [
-  { label: 'control', radius: '6px' },
-  { label: 'card', radius: '8px' },
-  { label: 'popover', radius: '12px' },
-  { label: 'fullscreen', radius: '16px' },
-  { label: 'pill', radius: '9999px' },
+const RADIUS_SCALE: RadiusStep[] = [
+  { label: 'control', varName: '--radius-control' },
+  { label: 'card', varName: '--radius-card' },
+  { label: 'popover', varName: '--radius-popover' },
+  { label: 'fullscreen', varName: '--radius-fullscreen' },
+  { label: 'pill', varName: '--radius-pill' },
 ];
 
-/* ---------- Elevation tokens (tokens.css CSS vars) ---------- */
+/* ---------- Elevation scale (DESIGN.md §Elevation, V1.121 v0.4) ---------- */
 
 interface ElevationToken {
   label: string;
@@ -182,10 +204,126 @@ interface ElevationToken {
   usage: string;
 }
 
-const ELEVATION_TOKENS: ElevationToken[] = [
-  { label: 'shadow-card', varName: '--shadow-card', usage: 'Raised dashboard cards' },
-  { label: 'shadow-popover', varName: '--shadow-popover', usage: 'Menus, tooltips, command panels' },
-  { label: 'shadow-modal', varName: '--shadow-modal', usage: 'Dialogs and blocking overlays' },
+const ELEVATION_LEVELS: ElevationToken[] = [
+  { label: 'elevation-0', varName: '--shadow-elevation-0', usage: 'Flat / sunk into surface' },
+  { label: 'elevation-1', varName: '--shadow-elevation-1', usage: 'Resting card / canvas node at rest' },
+  { label: 'elevation-2', varName: '--shadow-elevation-2', usage: 'Hover / raised (interactive lift)' },
+  { label: 'elevation-3', varName: '--shadow-elevation-3', usage: 'Popover / floating (menus, tooltips, command panels)' },
+  { label: 'elevation-4', varName: '--shadow-elevation-4', usage: 'Modal / dragging' },
+];
+
+/** Legacy alias chain — zero consumer breakage (DESIGN.md §Elevation). */
+const ELEVATION_ALIASES = [
+  { label: 'shadow-card', varName: '--shadow-card', target: 'elevation-1' },
+  { label: 'shadow-popover', varName: '--shadow-popover', target: 'elevation-3' },
+  { label: 'shadow-modal', varName: '--shadow-modal', target: 'elevation-4' },
+] as const;
+
+/* ---------- Motion tokens (DESIGN.md §Motion, V1.121 v0.4) ---------- */
+
+interface MotionToken {
+  label: string;
+  varName: string;
+  usage: string;
+}
+
+const MOTION_DURATIONS: MotionToken[] = [
+  { label: 'duration-instant', varName: '--duration-instant', usage: 'Table filtering, data refresh replacement' },
+  { label: 'duration-state', varName: '--duration-state', usage: 'Hover / focus / pressed states' },
+  { label: 'duration-popover', varName: '--duration-popover', usage: 'Menus, dropdowns, tooltips' },
+  { label: 'duration-modal', varName: '--duration-modal', usage: 'Dialog open / close' },
+  { label: 'duration-enter', varName: '--duration-enter', usage: 'Entering surfaces (popover content in, toast in)' },
+  { label: 'duration-exit', varName: '--duration-exit', usage: 'Dismissing surfaces (exit is faster than enter)' },
+];
+
+const MOTION_EASINGS: MotionToken[] = [
+  { label: 'ease-standard', varName: '--ease-standard', usage: 'Default UI ease' },
+  { label: 'ease-emphasized', varName: '--ease-emphasized', usage: 'Modal / panel enter' },
+];
+
+/* ---------- Canvas tokens (V1.121 P3 — DESIGN.md §Canvas Surface) -------
+ *
+ * Live swatches for the canvas token families. Values resolve through
+ * tokens.css `:root` (light) and `.dark` (dark) blocks — every swatch
+ * re-reads on theme flip. The accent spine row uses the same border-l-[3px]
+ * shape NodeChromeShell renders for `accent="<surface>"`; the ambient row
+ * shows the actual dot-grid pattern at the live gap/dot-size metrics.
+ */
+
+interface CanvasToken {
+  label: string;
+  varName: string;
+  /** When set, renders the swatch with the literal token as a border color. */
+  asBorder?: boolean;
+  /** When set, renders the swatch as a transparent fill (color-mix over page). */
+  asTint?: boolean;
+}
+
+interface CanvasTokenGroup {
+  title: string;
+  /** Optional blurb shown under the group title. */
+  hint?: string;
+  tokens: CanvasToken[];
+}
+
+const CANVAS_TOKEN_GROUPS: CanvasTokenGroup[] = [
+  {
+    title: 'Ambient',
+    hint:
+      'Canvas surface chrome — the dot-grid sits on the ink canvas in dark; light sits on warm paper. Grid gap / dot size are live metrics.',
+    tokens: [
+      { label: 'canvas-surface', varName: '--color-canvas-surface' },
+      { label: 'canvas-grid', varName: '--color-canvas-grid' },
+      { label: 'canvas-minimap', varName: '--color-canvas-minimap' },
+    ],
+  },
+  {
+    title: 'Node chrome',
+    hint:
+      'Shared node primitives — fill, border, and the selected-border + focus-ring pairing. Selection is never color-only (Draft §4.4 #6).',
+    tokens: [
+      { label: 'canvas-node-fill', varName: '--color-canvas-node-fill' },
+      { label: 'canvas-node-fill-hover', varName: '--color-canvas-node-fill-hover' },
+      { label: 'canvas-node-border', varName: '--color-canvas-node-border' },
+      { label: 'canvas-node-border-selected', varName: '--color-canvas-node-border-selected' },
+    ],
+  },
+  {
+    title: 'Edges & ports',
+    hint:
+      'Stroke colors for relationship/transition edges and the connection port fill. Edge-hover is reserved for the v0.4 hover affordance.',
+    tokens: [
+      { label: 'canvas-edge', varName: '--color-canvas-edge' },
+      { label: 'canvas-edge-hover', varName: '--color-canvas-edge-hover' },
+      { label: 'canvas-port', varName: '--color-canvas-port' },
+    ],
+  },
+  {
+    title: 'Accent spines',
+    hint:
+      'Per-surface identity — the three spine colors NodeChromeShell renders as a 3px border-l-[3px] stripe when accent="strategy" | "outline" | "worldkb". strategy=purple-700, outline=amber-700, worldkb=teal-700 (DESIGN.md §Canvas Surface).',
+    tokens: [
+      { label: 'canvas-strategy-accent', varName: '--color-canvas-strategy-accent' },
+      { label: 'canvas-outline-accent', varName: '--color-canvas-outline-accent' },
+      { label: 'canvas-worldkb-accent', varName: '--color-canvas-worldkb-accent' },
+    ],
+  },
+];
+
+/** Node-width family (P0 + P3) — five --canvas-node-width-* slots. */
+interface CanvasWidthToken {
+  label: string;
+  /** Tailwind utility name; the chip's min-width resolves through the var. */
+  utilityClass: string;
+  varName: string;
+}
+
+const CANVAS_NODE_WIDTHS: CanvasWidthToken[] = [
+  { label: 'strategy-root', utilityClass: 'min-w-canvas-node-strategy-root', varName: '--canvas-node-width-strategy-root' },
+  { label: 'strategy-primary', utilityClass: 'min-w-canvas-node-strategy-primary', varName: '--canvas-node-width-strategy-primary' },
+  { label: 'strategy-secondary', utilityClass: 'min-w-canvas-node-strategy-secondary', varName: '--canvas-node-width-strategy-secondary' },
+  { label: 'outline-scene-beat', utilityClass: 'min-w-canvas-node-outline-scene-beat', varName: '--canvas-node-width-outline-scene-beat' },
+  { label: 'default', utilityClass: 'min-w-canvas-node-default', varName: '--canvas-node-width-default' },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -208,9 +346,64 @@ function resolveSwatchColor(varName: string): string {
   return computed;
 }
 
+/**
+ * Read the computed box-shadow for a shadow CSS custom property, resolving
+ * through the alias chain (`--shadow-card` → `var(--shadow-elevation-1)`)
+ * to the value the browser actually paints.
+ */
+function resolveBoxShadow(varName: string): string {
+  const el = document.createElement('div');
+  el.style.boxShadow = `var(${varName})`;
+  el.style.display = 'none';
+  document.body.appendChild(el);
+  const computed = getComputedStyle(el).boxShadow;
+  document.body.removeChild(el);
+  return computed;
+}
+
+/**
+ * Read a computed property produced by assigning a CSS custom property to a
+ * probe element — live from the token's declared value, not a hardcoded copy.
+ * Returns '' when the var is not defined (e.g. jsdom without CSS).
+ */
+function useComputedVarValue(
+  varName: string,
+  property: 'transitionDuration' | 'transitionTimingFunction',
+): string {
+  const [value, setValue] = useState('');
+  useEffect(() => {
+    const el = document.createElement('div');
+    el.style[property] = `var(${varName})`;
+    el.style.display = 'none';
+    document.body.appendChild(el);
+    const computed = getComputedStyle(el)[property];
+    document.body.removeChild(el);
+    setValue(computed ?? '');
+  }, [varName, property]);
+  return value;
+}
+
+/** Live prefers-reduced-motion state (drives the demo honesty note). */
+function usePrefersReducedMotion(): boolean {
+  const [reduced, setReduced] = useState(false);
+  useEffect(() => {
+    const mql = window.matchMedia('(prefers-reduced-motion: reduce)');
+    const update = () => setReduced(mql.matches);
+    update();
+    mql.addEventListener('change', update);
+    return () => mql.removeEventListener('change', update);
+  }, []);
+  return reduced;
+}
+
 /** Format a px value as rem (1rem = 16px). */
 function pxToRem(px: number): string {
   return `${px / 16}rem`;
+}
+
+/** Trim a ratio to at most `decimals` places without trailing zeros. */
+function trimRatio(value: number, decimals: number): string {
+  return String(Number(value.toFixed(decimals)));
 }
 
 /* ------------------------------------------------------------------ */
@@ -252,71 +445,155 @@ function ColorSwatch({ token }: { token: ColorToken }) {
   );
 }
 
+/**
+ * Typography specimen row. Renders the specimen with the literal token
+ * classes and reads font-size / weight / line-height / letter-spacing back
+ * from the computed style (live) for the metrics line.
+ */
 function TypoRow({ specimen }: { specimen: TypoSpecimen }) {
+  const specimenRef = useRef<HTMLDivElement>(null);
+  const [metrics, setMetrics] = useState('');
+
+  useEffect(() => {
+    const el = specimenRef.current;
+    if (!el) return;
+    const cs = getComputedStyle(el);
+    const fontSize = cs.fontSize ?? '';
+    const sizePx = parseFloat(fontSize);
+    if (!fontSize.endsWith('px') || Number.isNaN(sizePx) || sizePx === 0) {
+      setMetrics('');
+      return;
+    }
+    const parts: string[] = [fontSize];
+    if (cs.fontWeight) parts.push(`weight ${cs.fontWeight}`);
+    const lineHeight = cs.lineHeight ?? '';
+    if (lineHeight.endsWith('px')) {
+      parts.push(`line-height ${trimRatio(parseFloat(lineHeight) / sizePx, 2)} (${lineHeight})`);
+    } else if (lineHeight && lineHeight !== 'normal') {
+      parts.push(`line-height ${lineHeight}`);
+    }
+    const tracking = cs.letterSpacing ?? '';
+    if (tracking.endsWith('px')) {
+      parts.push(`tracking ${trimRatio(parseFloat(tracking) / sizePx, 3)}em`);
+    } else if (tracking === 'normal') {
+      parts.push('tracking 0');
+    }
+    setMetrics(parts.join(' · '));
+  }, []);
+
+  const className = [
+    specimen.textClass,
+    specimen.familyClass,
+    specimen.weightClass ?? '',
+    'text-gray-1000',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
   return (
-    <div className="flex flex-col sm:flex-row sm:items-baseline gap-2 py-4 border-b border-gray-alpha-200 last:border-b-0">
-      <div className="w-32 shrink-0 flex flex-col gap-0.5">
+    <div
+      data-testid={`typo-row-${specimen.label}`}
+      className="flex flex-col sm:flex-row sm:items-baseline gap-2 py-4 border-b border-gray-alpha-200 last:border-b-0"
+    >
+      <div className="w-44 shrink-0 flex flex-col gap-0.5">
         <span className="text-label-14 font-medium text-gray-1000">{specimen.label}</span>
+        <span className="text-label-12-mono font-mono text-gray-500">{specimen.familyClass}</span>
         <span className="text-copy-13 text-gray-600">{specimen.role}</span>
       </div>
-      <div
-        style={{ fontFamily: specimen.className.includes('mono') ? 'var(--font-mono)' : 'var(--font-sans)' }}
-        className={`text-${specimen.className} text-gray-1000 leading-normal`}
-      >
-        {specimen.sampleText}
+      <div className="flex-1 min-w-0">
+        <div ref={specimenRef} className={className}>
+          {specimen.sampleText}
+        </div>
+        {metrics && (
+          <div className="text-copy-13-mono font-mono text-gray-500 mt-1">{metrics}</div>
+        )}
       </div>
     </div>
   );
 }
 
-function SpacingBar({ step, maxPx }: { step: SpacingStep; maxPx: number }) {
-  const widthPercent = (step.px / maxPx) * 100;
+/**
+ * Spacing bar rendered at true scale — the bar's width is the token's CSS
+ * variable itself, so what you see is the token. The px/rem readout is read
+ * live from the rendered bar.
+ */
+function SpacingBar({ step }: { step: SpacingStep }) {
+  const barRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState('');
+
+  useEffect(() => {
+    const el = barRef.current;
+    if (!el) return;
+    setWidth(getComputedStyle(el).width);
+  }, []);
+
+  const px = parseFloat(width);
+  const hasValue = width.endsWith('px') && !Number.isNaN(px) && px > 0;
+
   return (
-    <div className="flex items-center gap-4 py-2">
+    <div data-testid={`spacing-row-${step.label}`} className="flex items-center gap-4 py-2">
       <div className="w-32 shrink-0 flex flex-col gap-0.5">
         <span className="text-label-14 font-medium text-gray-1000">{step.label}</span>
-        <span className="text-copy-13 text-gray-600 font-mono">{step.px}px / {pxToRem(step.px)}</span>
+        <span className="text-copy-13-mono font-mono text-gray-500">{step.varName}</span>
       </div>
       <div className="flex-1 flex items-center gap-3">
         <div
-          className="h-6 bg-blue-700 rounded-control min-w-[4px]"
-          style={{ width: `${widthPercent}%` }}
+          ref={barRef}
+          className="h-6 bg-blue-700 rounded-control"
+          style={{ width: `var(${step.varName})` }}
         />
-        <span className="text-copy-13 text-gray-500 font-mono shrink-0">{step.px}px</span>
+        {hasValue && (
+          <span className="text-copy-13 text-gray-500 font-mono shrink-0">
+            {width} / {pxToRem(px)}
+          </span>
+        )}
       </div>
     </div>
   );
 }
 
-function RoundedBox({ step }: { step: RoundedStep }) {
+/** Radius swatch — the box's corner radius is the token's CSS variable. */
+function RadiusBox({ step }: { step: RadiusStep }) {
+  const boxRef = useRef<HTMLDivElement>(null);
+  const [radius, setRadius] = useState('');
+
+  useEffect(() => {
+    const el = boxRef.current;
+    if (!el) return;
+    setRadius(getComputedStyle(el).borderRadius);
+  }, []);
+
   return (
-    <div className="flex flex-col items-center gap-3">
+    <div data-testid={`radius-box-${step.label}`} className="flex flex-col items-center gap-3">
       <div
+        ref={boxRef}
         className="w-20 h-20 bg-gray-100 border border-gray-alpha-400"
-        style={{ borderRadius: step.radius }}
+        style={{ borderRadius: `var(${step.varName})` }}
       />
       <div className="flex flex-col items-center gap-0.5">
         <span className="text-label-14 text-gray-1000">{step.label}</span>
-        <span className="text-copy-13 text-gray-600 font-mono">{step.radius}</span>
+        <span className="text-copy-13-mono font-mono text-gray-500">{step.varName}</span>
+        {radius && <span className="text-copy-13 text-gray-600 font-mono">{radius}</span>}
       </div>
     </div>
   );
 }
 
+/** Elevation swatch — shadow applied via the live CSS variable. */
 function ElevationCard({ token }: { token: ElevationToken }) {
   const { resolvedTheme } = useTheme();
-  const [computed, setComputed] = useState<string>(() => readCSSVar(token.varName));
+  const [computed, setComputed] = useState<string>(() => resolveBoxShadow(token.varName));
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      const rafId = requestAnimationFrame(() => setComputed(readCSSVar(token.varName)));
+      const rafId = requestAnimationFrame(() => setComputed(resolveBoxShadow(token.varName)));
       return () => cancelAnimationFrame(rafId);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resolvedTheme, token.varName]);
 
   return (
-    <div className="flex flex-col gap-3">
+    <div data-testid={`elevation-swatch-${token.label}`} className="flex flex-col gap-3">
       <div
         className="w-full aspect-[16/10] rounded-card bg-background-100 border border-gray-alpha-200 flex items-center justify-center"
         style={{ boxShadow: `var(${token.varName})` } as CSSProperties}
@@ -327,6 +604,283 @@ function ElevationCard({ token }: { token: ElevationToken }) {
         <span className="text-label-14 text-gray-1000">{token.label}</span>
         <span className="text-copy-13 text-gray-600">{token.usage}</span>
         <span className="text-copy-13 text-gray-500 font-mono break-all">{computed}</span>
+      </div>
+    </div>
+  );
+}
+
+/** Alias-chain row — proves the legacy name resolves onto the scale. */
+function ElevationAliasRow({ alias }: { alias: (typeof ELEVATION_ALIASES)[number] }) {
+  const { resolvedTheme } = useTheme();
+  const [computed, setComputed] = useState<string>(() => resolveBoxShadow(alias.varName));
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const rafId = requestAnimationFrame(() => setComputed(resolveBoxShadow(alias.varName)));
+      return () => cancelAnimationFrame(rafId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedTheme, alias.varName]);
+
+  return (
+    <div className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-3 py-2 border-b border-gray-alpha-200 last:border-b-0">
+      <span className="text-label-14 font-medium text-gray-1000 w-40 shrink-0">
+        {alias.label}
+      </span>
+      <span className="text-copy-13-mono font-mono text-gray-600 w-40 shrink-0">
+        → {alias.target}
+      </span>
+      <span className="text-copy-13 text-gray-500 font-mono break-all">{computed}</span>
+    </div>
+  );
+}
+
+/** Motion token row — value read live from the token's CSS variable. */
+function MotionRow({
+  token,
+  property,
+}: {
+  token: MotionToken;
+  property: 'transitionDuration' | 'transitionTimingFunction';
+}) {
+  const value = useComputedVarValue(token.varName, property);
+  return (
+    <div
+      data-testid={`motion-row-${token.label}`}
+      className="flex flex-col sm:flex-row sm:items-baseline gap-1 sm:gap-3 py-2 border-b border-gray-alpha-200 last:border-b-0"
+    >
+      <span className="text-label-14 font-medium text-gray-1000 w-44 shrink-0">{token.label}</span>
+      <span className="text-copy-13-mono font-mono text-gray-700 w-56 shrink-0 break-all">
+        {value || token.varName}
+      </span>
+      <span className="text-copy-13 text-gray-600">{token.usage}</span>
+    </div>
+  );
+}
+
+/**
+ * Canvas color swatch — resolves through tokens.css `:root` (light) and
+ * `.dark` (dark) blocks. Re-reads on theme flip so the visual reader can
+ * verify both themes from the same gallery. The optional `asBorder` /
+ * `asTint` modes let the swatch represent tokens that are typically used
+ * as borders or translucent tints (so the reader sees the token in its
+ * realistic context, not as a flat fill).
+ */
+function CanvasColorSwatch({ token }: { token: CanvasToken }) {
+  const { resolvedTheme } = useTheme();
+  const [computed, setComputed] = useState<string>(() => resolveSwatchColor(token.varName));
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const rafId = requestAnimationFrame(() => setComputed(resolveSwatchColor(token.varName)));
+      return () => cancelAnimationFrame(rafId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedTheme, token.varName]);
+
+  const swatchStyle: CSSProperties = {
+    backgroundColor: `var(${token.varName})`,
+  };
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div
+        className="w-full aspect-[3/2] rounded-card border border-gray-alpha-400"
+        style={swatchStyle}
+      />
+      <div className="flex flex-col gap-0.5 min-w-0">
+        <span className="text-label-14 text-gray-1000 truncate">{token.label}</span>
+        <span className="text-copy-13 text-gray-700 truncate font-mono">{computed}</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Ambient dot-grid swatch — renders the actual canvas dot-grid pattern at
+ * the live grid-gap / grid-dot-size metrics. The reader sees the same
+ * texture the App canvas paints, in both themes.
+ */
+function CanvasAmbientGridSwatch() {
+  const { resolvedTheme } = useTheme();
+  const [gap, setGap] = useState('20px');
+  const [dot, setDot] = useState('1.5px');
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const rafId = requestAnimationFrame(() => {
+      setGap(resolveSwatchColor('--color-canvas-grid-gap') || '20px');
+      setDot(resolveSwatchColor('--color-canvas-grid-dot-size') || '1.5px');
+    });
+    return () => cancelAnimationFrame(rafId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedTheme]);
+
+  return (
+    <div className="flex flex-col gap-2" data-testid="canvas-ambient-grid-swatch">
+      <div
+        className="w-full aspect-[3/2] rounded-card border border-gray-alpha-400 bg-canvas-surface"
+        style={{
+          backgroundImage:
+            'radial-gradient(var(--color-canvas-grid) 1.5px, transparent 1.5px)',
+          backgroundSize: `${gap} ${gap}`,
+        }}
+      />
+      <div className="flex flex-col gap-0.5 min-w-0">
+        <span className="text-label-14 text-gray-1000">canvas dot-grid</span>
+        <span className="text-copy-13 text-gray-700 font-mono">
+          gap {gap} · dot {dot}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Accent spine swatch — renders the surface's accent token as the same
+ * 3px border-l stripe NodeChromeShell applies for `accent="<surface>"`.
+ * Mirrors the spine shape so the visual reader sees the token in its
+ * realistic context.
+ */
+function CanvasAccentSpineSwatch({ token }: { token: CanvasToken }) {
+  const { resolvedTheme } = useTheme();
+  const [computed, setComputed] = useState<string>(() => resolveSwatchColor(token.varName));
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const rafId = requestAnimationFrame(() => setComputed(resolveSwatchColor(token.varName)));
+      return () => cancelAnimationFrame(rafId);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resolvedTheme, token.varName]);
+
+  return (
+    <div className="flex flex-col gap-2">
+      <div
+        className="w-full aspect-[3/2] rounded-card bg-background-100 shadow-card"
+        style={{
+          borderLeft: `3px solid var(${token.varName})`,
+        }}
+      />
+      <div className="flex flex-col gap-0.5 min-w-0">
+        <span className="text-label-14 text-gray-1000 truncate">{token.label}</span>
+        <span className="text-copy-13 text-gray-700 truncate font-mono">{computed}</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Node-width utility chip — the chip's `min-width` resolves through the
+ * --canvas-node-width-* CSS variable via the named utility class. The
+ * rendered min-width is read live so the reader sees the actual px value
+ * of the token.
+ */
+function CanvasNodeWidthSwatch({ token }: { token: CanvasWidthToken }) {
+  const chipRef = useRef<HTMLDivElement>(null);
+  const [minWidth, setMinWidth] = useState('');
+
+  useEffect(() => {
+    const el = chipRef.current;
+    if (!el) return;
+    setMinWidth(getComputedStyle(el).minWidth);
+  }, []);
+
+  return (
+    <div
+      data-testid={`canvas-node-width-swatch-${token.label}`}
+      className="flex flex-col gap-2"
+    >
+      <div
+        ref={chipRef}
+        className={[
+          'h-12 rounded-control border border-gray-alpha-300 bg-background-100',
+          'flex items-center justify-center px-3',
+          'text-label-12 font-mono text-gray-700',
+          token.utilityClass,
+        ].join(' ')}
+      >
+        {token.label}
+      </div>
+      <div className="flex flex-col gap-0.5 min-w-0">
+        <span className="text-label-14 text-gray-1000 truncate">
+          {token.utilityClass}
+        </span>
+        <span className="text-copy-13 text-gray-700 truncate font-mono">
+          {token.varName} {minWidth && `· ${minWidth}`}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+const DEMO_BUTTON_CLASS =
+  'px-3 py-1.5 rounded-control border border-gray-alpha-400 bg-background-100 text-button-14 font-button text-gray-1000 hover:bg-gray-alpha-100 transition-colors duration-state ease-standard motion-reduce:transition-none';
+
+/**
+ * Card hover-lift recipe (DESIGN.md §Motion / §Elevation): rest elevation-1,
+ * hover elevation-2 + translateY(-1px) over 160ms ease-standard, pressed
+ * returns to elevation-1. Reduced motion: instant state change, no
+ * transform/opacity animation (motion-reduce guards).
+ */
+function HoverLiftDemo() {
+  return (
+    <div
+      data-testid="motion-demo-lift"
+      tabIndex={0}
+      className="rounded-card border border-gray-alpha-300 bg-background-100 p-5 shadow-elevation-1 transition-all duration-popover ease-standard hover:-translate-y-px hover:shadow-elevation-2 focus-visible:-translate-y-px focus-visible:shadow-elevation-2 active:translate-y-0 active:shadow-elevation-1 motion-reduce:transition-none motion-reduce:transform-none"
+    >
+      <p className="text-label-14 font-medium text-gray-1000 mb-1">Card hover lift</p>
+      <p className="text-copy-13 text-gray-600">
+        Rest <code>elevation-1</code> → hover <code>elevation-2</code> + <code>translateY(-1px)</code>,
+        160ms <code>ease-standard</code>; pressed returns to <code>elevation-1</code>.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Popover enter/exit recipe: enter opacity + scale(0.98 → 1) with
+ * duration-enter (200ms) ease-standard; exit fades with duration-exit
+ * (140ms). Reduced motion collapses both to an instant state change.
+ */
+function EnterExitDemo() {
+  const [visible, setVisible] = useState(true);
+
+  const replay = () => {
+    setVisible(false);
+    // Outlasts duration-exit (140ms) so the exit completes before re-enter.
+    window.setTimeout(() => setVisible(true), 280);
+  };
+
+  return (
+    <div>
+      <div className="flex flex-wrap gap-2 mb-4">
+        <button type="button" data-testid="motion-demo-replay" className={DEMO_BUTTON_CLASS} onClick={replay}>
+          Replay enter
+        </button>
+        <button
+          type="button"
+          data-testid="motion-demo-dismiss"
+          className={DEMO_BUTTON_CLASS}
+          onClick={() => setVisible(false)}
+        >
+          Dismiss
+        </button>
+      </div>
+      <div
+        data-testid="motion-demo-enter-exit"
+        className={[
+          'rounded-popover border border-gray-alpha-300 bg-background-100 p-4 shadow-elevation-3',
+          'transition-all ease-standard motion-reduce:transition-none motion-reduce:transform-none',
+          visible ? 'opacity-100 scale-100 duration-enter' : 'opacity-0 scale-[0.98] duration-exit',
+        ].join(' ')}
+      >
+        <p className="text-label-14 font-medium text-gray-1000 mb-1">Popover enter / exit</p>
+        <p className="text-copy-13 text-gray-600">
+          Enter: opacity + <code>scale(0.98 → 1)</code>, <code>duration-enter</code> (200ms){' '}
+          <code>ease-standard</code>. Exit: opacity out, <code>duration-exit</code> (140ms).
+        </p>
       </div>
     </div>
   );
@@ -343,6 +897,8 @@ function SubNav() {
     { label: 'Space', href: '#tokens-spacing' },
     { label: 'Radius', href: '#tokens-radius' },
     { label: 'Elevation', href: '#tokens-elevation' },
+    { label: 'Motion', href: '#tokens-motion' },
+    { label: 'Canvas', href: '#tokens-canvas' },
   ];
 
   return (
@@ -380,8 +936,14 @@ function ColorsSection() {
 
 function TypographySection() {
   return (
-    <section>
+    <section data-testid="tokens-typography">
       <SectionHeading id="tokens-typography">Typography</SectionHeading>
+      <p className="text-copy-14 text-gray-700 mb-4 max-w-prose">
+        The display tier (<code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">font-display</code>,
+        Source Serif 4) is the <strong>content voice</strong> — creative-entity titles only, never nav,
+        buttons, tables, badges, or labels. Everything else is the interface voice (sans / mono).
+        Metrics are read live from each rendered specimen.
+      </p>
       <div className="border border-gray-alpha-300 rounded-card bg-background-100 p-6">
         {TYPO_SPECIMENS.map((s) => (
           <TypoRow key={s.label} specimen={s} />
@@ -392,13 +954,17 @@ function TypographySection() {
 }
 
 function SpacingSection() {
-  const maxPx = SPACING_SCALE[SPACING_SCALE.length - 1].px;
   return (
-    <section>
+    <section data-testid="tokens-spacing">
       <SectionHeading id="tokens-spacing">Spacing</SectionHeading>
+      <p className="text-copy-14 text-gray-700 mb-4 max-w-prose">
+        Base unit 4px. Bars render at true scale — each bar's width is the token's{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">--space-*</code> CSS
+        variable, with the computed px/rem read live.
+      </p>
       <div className="border border-gray-alpha-300 rounded-card bg-background-100 p-6">
         {SPACING_SCALE.map((s) => (
-          <SpacingBar key={s.label} step={s} maxPx={maxPx} />
+          <SpacingBar key={s.label} step={s} />
         ))}
       </div>
     </section>
@@ -407,11 +973,11 @@ function SpacingSection() {
 
 function RadiusSection() {
   return (
-    <section>
+    <section data-testid="tokens-radius">
       <SectionHeading id="tokens-radius">Radius</SectionHeading>
       <div className="flex flex-wrap items-end gap-8 p-6 border border-gray-alpha-300 rounded-card bg-background-100">
-        {ROUNDED_SCALE.map((s) => (
-          <RoundedBox key={s.label} step={s} />
+        {RADIUS_SCALE.map((s) => (
+          <RadiusBox key={s.label} step={s} />
         ))}
       </div>
     </section>
@@ -420,13 +986,148 @@ function RadiusSection() {
 
 function ElevationSection() {
   return (
-    <section>
+    <section data-testid="tokens-elevation">
       <SectionHeading id="tokens-elevation">Elevation</SectionHeading>
+      <p className="text-copy-14 text-gray-700 mb-4 max-w-prose">
+        Two-part shadows (tight ambient + soft key), ink-tinted in light, pure-black in dark.
+        Swatches apply the live <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">--shadow-elevation-*</code>{' '}
+        variables and re-read on theme flip.
+      </p>
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-6">
-        {ELEVATION_TOKENS.map((t) => (
+        {ELEVATION_LEVELS.map((t) => (
           <ElevationCard key={t.varName} token={t} />
         ))}
       </div>
+      <div data-testid="elevation-aliases" className="mt-6 border border-gray-alpha-300 rounded-card bg-background-100 p-6">
+        <h4 className="text-heading-16 font-semibold text-gray-900 mb-2">Alias chain (no consumer breakage)</h4>
+        <p className="text-copy-13 text-gray-600 mb-3">
+          Legacy names resolve onto the scale. <code>elevation-2</code> has no legacy alias — consume it
+          directly (<code>shadow-elevation-2</code>) for hover states.
+        </p>
+        {ELEVATION_ALIASES.map((a) => (
+          <ElevationAliasRow key={a.varName} alias={a} />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function MotionSection() {
+  const reduced = usePrefersReducedMotion();
+  return (
+    <section data-testid="tokens-motion">
+      <SectionHeading id="tokens-motion">Motion</SectionHeading>
+      <p className="text-copy-14 text-gray-700 mb-4 max-w-prose">
+        Short and standard-eased (120–220ms). Durations and easings are read live from their{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">--duration-*</code> /{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">--ease-*</code> CSS
+        variables. Every recipe honors{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">prefers-reduced-motion: reduce</code>{' '}
+        by collapsing to an instant state change.
+      </p>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+        <div className="border border-gray-alpha-300 rounded-card bg-background-100 p-6">
+          <h4 className="text-heading-16 font-semibold text-gray-900 mb-2">Durations</h4>
+          {MOTION_DURATIONS.map((t) => (
+            <MotionRow key={t.label} token={t} property="transitionDuration" />
+          ))}
+        </div>
+        <div className="border border-gray-alpha-300 rounded-card bg-background-100 p-6">
+          <h4 className="text-heading-16 font-semibold text-gray-900 mb-2">Easings</h4>
+          {MOTION_EASINGS.map((t) => (
+            <MotionRow key={t.label} token={t} property="transitionTimingFunction" />
+          ))}
+        </div>
+      </div>
+
+      <div className="border border-gray-alpha-300 rounded-card bg-background-100 p-6">
+        <h4 className="text-heading-16 font-semibold text-gray-900 mb-4">Recipes</h4>
+        {reduced && (
+          <p data-testid="motion-reduced-note" className="text-copy-13 text-gray-600 mb-4">
+            <code>prefers-reduced-motion: reduce</code> is active — these demos render as instant state
+            changes with no transform/opacity animation.
+          </p>
+        )}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+          <HoverLiftDemo />
+          <EnterExitDemo />
+        </div>
+      </div>
+    </section>
+  );
+}
+
+/**
+ * Canvas section (V1.121 P3 T4) — live swatches for every canvas token
+ * family: ambient (surface + grid + minimap + dot-grid pattern), node
+ * chrome (fill / fill-hover / border / border-selected), edges & ports,
+ * per-surface accent spines, and the five --canvas-node-width-* utility
+ * slots. Every swatch re-resolves on theme flip so the gallery covers
+ * both light and dark.
+ */
+function CanvasSection() {
+  return (
+    <section data-testid="tokens-canvas">
+      <SectionHeading id="tokens-canvas">Canvas</SectionHeading>
+      <p className="text-copy-14 text-gray-700 mb-4 max-w-prose">
+        V1.121 v0.4 canvas token families from DESIGN.md §Canvas Surface — the same{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">canvas-*</code> /
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">canvas-node-*</code> /
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">canvas-{`{surface}`}-accent</code>{' '}
+        tokens the three App canvases consume. Swatches read live CSS variable values and re-resolve on
+        theme flip; the dot-grid swatch uses the live grid gap / dot-size metrics.
+      </p>
+
+      {CANVAS_TOKEN_GROUPS.map((group, idx) => (
+        <div key={group.title} className="mb-8" data-testid={`canvas-token-group-${idx}`}>
+          <h4 className="text-heading-16 font-semibold text-gray-900 mb-2">{group.title}</h4>
+          {group.hint && (
+            <p className="text-copy-13 text-gray-600 mb-4 max-w-prose">{group.hint}</p>
+          )}
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+            {group.tokens.map((t) =>
+              group.title === 'Accent spines' ? (
+                <CanvasAccentSpineSwatch key={t.varName} token={t} />
+              ) : (
+                <CanvasColorSwatch key={t.varName} token={t} />
+              ),
+            )}
+            {/* Ambient group also shows the live dot-grid pattern. */}
+            {group.title === 'Ambient' && <CanvasAmbientGridSwatch />}
+          </div>
+        </div>
+      ))}
+
+      <div className="mb-8" data-testid="canvas-token-group-widths">
+        <h4 className="text-heading-16 font-semibold text-gray-900 mb-2">Node widths</h4>
+        <p className="text-copy-13 text-gray-600 mb-4 max-w-prose">
+          Five <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            --canvas-node-width-*
+          </code>{' '}
+          utility slots from DESIGN.md{' '}
+          <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">
+            components.canvas.node-width
+          </code>
+          . Each chip's <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">min-width</code>{' '}
+          resolves through the named Tailwind utility, with the live computed px read out below.
+        </p>
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-4">
+          {CANVAS_NODE_WIDTHS.map((t) => (
+            <CanvasNodeWidthSwatch key={t.varName} token={t} />
+          ))}
+        </div>
+      </div>
+
+      <p className="text-copy-13 text-gray-500 mt-6">
+        Accent spine shape mirrors{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">NodeChromeShell</code>{' '}
+        — the same{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">border-l-[3px]</code>{' '}
+        recipe the App graph renders. The{' '}
+        <code className="text-copy-13-mono bg-gray-alpha-100 px-1 rounded">/surfaces/canvas</code>{' '}
+        page mirrors the App canvas surfaces (Outline / Strategy / World KB) consuming these tokens.
+      </p>
     </section>
   );
 }
@@ -440,8 +1141,9 @@ export function TokensPage() {
     <div className="max-w-6xl mx-auto py-8 px-4">
       <h2 className="text-heading-24 font-semibold text-gray-1000 mb-2">Tokens</h2>
       <p className="text-copy-16 text-gray-700 mb-6">
-        All scalar design scales from the DESIGN SSOT — colors, typography, spacing, radius, and elevation.
-        Values are read live from CSS custom properties and update when the theme toggles.
+        All scalar design scales from the DESIGN SSOT — colors, typography (incl. the display tier),
+        spacing, radius, elevation, and motion. Values are read live from CSS custom properties and
+        rendered utility classes, and update when the theme toggles.
       </p>
       <SubNav />
 
@@ -450,13 +1152,13 @@ export function TokensPage() {
       <SpacingSection />
       <RadiusSection />
       <ElevationSection />
+      <MotionSection />
+      <CanvasSection />
 
-      {/* Motion — omitted: DESIGN.md §Motion describes durations/easing but
-          they are not projected to CSS custom properties in tokens.css. */}
       <p className="text-copy-13 text-gray-500 mt-12 pt-8 border-t border-gray-alpha-200">
-        Motion tokens (durations, easing curves) are defined in DESIGN.md §Motion but are not
-        exposed as CSS custom properties in the shared tokens layer. They are consumed via
-        the Tailwind preset (<code>transitionDuration</code>, <code>transitionTimingFunction</code>).
+        Every gallery reads live values: colors, shadows, spacing, radius, motion, and canvas
+        tokens from CSS custom properties (re-resolved on theme flip where theme-dependent);
+        typography from the computed style of elements carrying the token&apos;s utility class.
       </p>
     </div>
   );

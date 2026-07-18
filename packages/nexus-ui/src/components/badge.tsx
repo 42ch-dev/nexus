@@ -11,10 +11,11 @@ import { cn } from '../lib/cn';
  * reads distinctly). Solid tone uses semantic fills + high-contrast text.
  * Alpha layers use `color-mix(...)` so the same class stays correct in both
  * light and dark. Dark solid text follows the Button Contrast Invariant
- * (bright fills → `brand-deep-blue`, not white).
+ * (bright fills → `brand-deep-blue`, not white). State changes (variant/tone
+ * or theme swap) ease over duration-state per the v0.4 motion scale.
  */
 const badgeVariants = cva(
-  'inline-flex items-center gap-1 rounded-pill border px-2 h-6 text-label-12 font-semibold whitespace-nowrap',
+  'inline-flex items-center gap-1 rounded-pill border px-2 h-6 text-label-12 font-semibold whitespace-nowrap transition-colors duration-state ease-standard',
   {
     variants: {
       variant: {

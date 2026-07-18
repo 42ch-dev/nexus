@@ -169,3 +169,55 @@ describe('WorkDetailPage archive destructive context (V1.117 AC-P4-6)', () => {
     await waitFor(() => expect(patchedBody).toEqual({ status: 'archived' }));
   });
 });
+
+// V1.121 v0.4 — voice-split discipline (DESIGN.md §Design Concept).
+//
+// Pins both directions of the serif contract on the Work detail page:
+//   - the Work entity title (CardTitle) → content voice (serif display-20 via
+//     CardTitle voice="content") — the canonical creative-entity title surface;
+//   - all sibling chrome (Update button, status badges, labels, shortId) →
+//     interface voice (sans) — no `font-display` leaks into chrome.
+describe('WorkDetailPage voice-split (V1.121 v0.4)', () => {
+  it('renders the Work entity title in the content voice (serif display-20)', async () => {
+    useHandlers(
+      workDetailFixture('w-123', {
+        title: 'Serif Work Title',
+        primary_preset_id: 'preset-abc',
+        world_id: 'world-xyz',
+      }),
+      emptyFindings(),
+    );
+
+    renderWorkDetail();
+
+    const title = await screen.findByRole('heading', { name: 'Serif Work Title' });
+    // Content voice (serif display tier) per DESIGN.md components.card.title.voice.
+    expect(title.className).toMatch(/\bfont-display\b/);
+    expect(title.className).toMatch(/\btext-display-20\b/);
+    expect(title.className).not.toMatch(/\btext-heading-16\b/);
+    expect(title.className).not.toMatch(/\bfont-heading\b/);
+  });
+
+  it('keeps the Update button and Findings section header in the interface voice', async () => {
+    useHandlers(
+      workDetailFixture('w-123', {
+        title: 'Serif Work Title',
+        primary_preset_id: 'preset-abc',
+        world_id: 'world-xyz',
+      }),
+      emptyFindings(),
+    );
+
+    renderWorkDetail();
+    await screen.findByRole('heading', { name: 'Serif Work Title' });
+
+    // Update button stays sans.
+    const update = screen.getByRole('button', { name: /^Update$/i });
+    expect(update.className).not.toMatch(/\bfont-display\b/);
+
+    // Findings section header (CardTitle — interface voice) stays sans.
+    const findingsHeader = screen.getByRole('heading', { name: 'Findings' });
+    expect(findingsHeader.className).not.toMatch(/\bfont-display\b/);
+    expect(findingsHeader.className).toMatch(/\bfont-heading\b/);
+  });
+});
