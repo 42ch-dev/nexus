@@ -1,6 +1,6 @@
 # Deferred Features — Cross-Version Tracker v2
 
-**Quick status**: **V1.113 active** — i18n completion (P0/P1) + tech-debt paydown (P2). V1.112 Shipped (i18n foundation + UI migration). Platform **paused**.
+**Quick status**: **V1.122 active** — Three-pillar pivot: Harness/Canvas/Computable canonization + Timeline-first Canvas surface elevation. V1.121 Shipped (design system elevation). Platform **paused**.
 
 **Purpose**: Single source of truth for **open** and **backlog** features deferred from delivery compasses. Closed/shipped history lives in shipped archive.
 **Scope**: `nexus` OSS repository only.
@@ -92,9 +92,9 @@ Residual findings are tracked in [`status.json`](../status.json) → `residual_f
 
 ## 5) Quick index
 
-**Active iteration**: [V1.113](../iterations/v1.113/delivery-compass.md) (**active** — i18n completion + tech-debt paydown; `iteration/v1.113`).
+**Active iteration**: [V1.122](../iterations/v1.122/delivery-compass.md) (**active** — Three-pillar pivot: Harness/Canvas/Computable canonization + Timeline-first Canvas surface elevation; `iteration/v1.122`).
 
-**Latest shipped**: [V1.112](../iterations/v1.112/delivery-compass.md) (i18n foundation + UI migration; 2026-07-12).
+**Latest shipped**: [V1.121](../iterations/v1.121/delivery-compass.md) (design system elevation; 2026-07-17).
 
 **Full iteration index**: [iterations/README.md](../iterations/README.md)
 
