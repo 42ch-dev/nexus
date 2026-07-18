@@ -86,7 +86,7 @@ export function TimelineInspector({ node, ctxRef }: TimelineInspectorProps) {
   const blockTypeLabel =
     BLOCK_TYPE_LABELS[data.block_type as BlockType] ?? data.block_type;
 
-  function handleSubmit() {
+  async function handleSubmit() {
     if (dirty.length === 0) return;
     setValidationErrors([]);
 
@@ -125,8 +125,20 @@ export function TimelineInspector({ node, ctxRef }: TimelineInspectorProps) {
     setIsSubmitting(true);
     // The orchestrator's mutation owns the actual `worldKbPatchEntity` call,
     // invalidation, conflict hand-off, and refetch. The inspector only
-    // forwards the structured patch + dirty fields.
-    onPatch(node, patch, dirty);
+    // forwards the structured patch + dirty fields, and awaits the returned
+    // promise so `isSubmitting` clears on EVERY outcome — success AND error
+    // (PR #156: previously the flag stayed `true` on 409/422/network failure
+    // because only a successful version-bump reseed would reset it, leaving
+    // Save permanently disabled until the selection changed).
+    try {
+      await onPatch(node, patch, dirty);
+    } catch {
+      // The orchestrator's mutation `onError` already surfaces conflict /
+      // validation / toast UX. The inspector only owns the local submit
+      // flag, which `finally` resets so the author can retry immediately.
+    } finally {
+      setIsSubmitting(false);
+    }
   }
 
   return (

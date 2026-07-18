@@ -232,6 +232,45 @@ describe('TimelineInspector — write-boundary wiring (T4)', () => {
     expect(client.worldKbPatchEntity).not.toHaveBeenCalled();
     expect(client.patchTimelineEvent).not.toHaveBeenCalled();
   });
+
+  it('clears isSubmitting and re-enables Save when onPatchEntity rejects (PR #156 fix)', async () => {
+    // Regression: previously the inspector set `isSubmitting=true` and
+    // forwarded the patch via a fire-and-forget `onPatchEntity`. The flag
+    // was only cleared when the selected node's `version` changed — which
+    // never happens on error — leaving Save permanently disabled. The fix
+    // awaits the returned promise and resets the flag in `finally`.
+    const user = userEvent.setup();
+    const client = makeMockClient();
+    const onPatchEntity = vi
+      .fn()
+      .mockRejectedValue(new Error('simulated network failure'));
+    renderInspector({ client, ctxOverrides: { onPatchEntity } });
+
+    const titleInput = screen.getByDisplayValue('Coronation');
+    await user.clear(titleInput);
+    await user.type(titleInput, 'Edited Title');
+    const saveButton = screen.getByTestId(
+      'timeline-inspector-save',
+    ) as HTMLButtonElement;
+
+    await user.click(saveButton);
+
+    await waitFor(() => expect(onPatchEntity).toHaveBeenCalledTimes(1));
+
+    // After the rejected promise settles, `isSubmitting` MUST reset so the
+    // author can retry. The form is still dirty (the edit is unsaved), so
+    // the only thing keeping Save disabled would be a stuck `isSubmitting`.
+    await waitFor(() => {
+      expect(saveButton).not.toBeDisabled();
+    });
+    // The label reflects the submit flag too: once settled it reads "Save"
+    // again, not the in-flight "Saving…" label.
+    expect(saveButton).toHaveTextContent('Save');
+    // Confirm a retry actually invokes the callback a second time — proves
+    // the flag did not wedge the form on the first failure.
+    await user.click(saveButton);
+    await waitFor(() => expect(onPatchEntity).toHaveBeenCalledTimes(2));
+  });
 });
 
 // ─── Orchestrator-level write path + conflict UX ────────────────────────────

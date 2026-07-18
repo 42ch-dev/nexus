@@ -177,6 +177,13 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
    * adapter's inspector calls this; the orchestrator owns the mutation,
    * invalidation, and conflict hand-off.
    *
+   * Returns a promise that settles with the underlying React Query mutation
+   * (`mutateAsync`) so the inspector can reset its `isSubmitting` flag in a
+   * `finally` block on every outcome — success AND error (PR #156 fix).
+   * The per-call `onError` still fires for conflict / validation hand-off
+   * before the promise rejects; the inspector swallows the rejection
+   * (conflict / toast UX is already surfaced here).
+   *
    * Forbidden methods that MUST NOT be wired here (negative-asserted in
    * `timeline-write-boundary.test.tsx`):
    *   - `client.patchTimelineEvent` (Work-scoped outline markdown).
@@ -186,13 +193,13 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
    *   - Raw file writes (no `fetch PUT` to a file route, no Tauri `invoke`
    *     to disk).
    */
-  function handlePatchEntity(
+  async function handlePatchEntity(
     node: Node<TimelineNodeData>,
     patch: TimelineEntityPatch,
     dirtyFields: TimelinePatchField[],
-  ) {
+  ): Promise<void> {
     setValidationBanner(null);
-    patchEntity.mutate(buildPatchEntityRequest(node, patch), {
+    await patchEntity.mutateAsync(buildPatchEntityRequest(node, patch), {
       onError: (error) => {
         const info = extractTimelineConflict(error, {
           draftPatch: patch,

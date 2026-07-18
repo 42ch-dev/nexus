@@ -307,16 +307,18 @@ describe('TimelineCanvasAdapter.summarizeGraph — a11y live region (re-verifica
     return { entities: [], source_anchors: [], relationships: [] };
   }
 
-  it('returns a non-empty string for an empty graph (empty-state SR coverage)', () => {
+  it('returns a non-empty string for an empty graph WITHOUT the ordering disclaimer (empty-state SR coverage)', () => {
     const adapter = createTimelineCanvasAdapter({
       current: { worldId: 'world-7' },
     });
     const summary = adapter.summarizeGraph(emptyGraph());
     expect(typeof summary).toBe('string');
     expect(summary.length).toBeGreaterThan(0);
-    // The architect-locked §7 disclaimer MUST be present when the timeline
-    // has zero events — the live region announces the empty state honestly.
-    expect(summary).toContain(ORDERING_DISCLAIMER);
+    // PR #156 fix: the ordering disclaimer is tied to event entities being
+    // rendered. A zero-event graph surfaces its own honest empty-state copy
+    // via <EmptyState> (§7); the a11y live region therefore does NOT carry
+    // the ordering disclaimer — there is no ordering to disclaim.
+    expect(summary).not.toContain(ORDERING_DISCLAIMER);
   });
 
   it('returns a non-empty string that includes the ordering disclaimer when temporal signals are partial', () => {
@@ -346,7 +348,11 @@ describe('TimelineCanvasAdapter.summarizeGraph — a11y live region (re-verifica
     expect(summary).toContain(ORDERING_DISCLAIMER);
   });
 
-  it('omits the disclaimer only when every event carries occurred_at', () => {
+  it('includes the disclaimer even when every event carries occurred_at (lexical sort is not canonical)', () => {
+    // PR #156 fix: even when every event has a parseable ISO timestamp, the
+    // adapter performs no date parsing in MVP — the when-axis ordering is
+    // lexical string comparison. The disclaimer must still surface because
+    // rendered ordering is inferred, not canonical chronology.
     const adapter = createTimelineCanvasAdapter({
       current: { worldId: 'world-7' },
     });
@@ -370,6 +376,6 @@ describe('TimelineCanvasAdapter.summarizeGraph — a11y live region (re-verifica
     };
     const summary = adapter.summarizeGraph(graph);
     expect(summary.length).toBeGreaterThan(0);
-    expect(summary).not.toContain(ORDERING_DISCLAIMER);
+    expect(summary).toContain(ORDERING_DISCLAIMER);
   });
 });

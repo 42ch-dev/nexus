@@ -9,7 +9,8 @@
  *   - `relationships[]` are projected verbatim via `WorldKbEdgeData` — no
  *     `ForeshadowEdge` / `RealizesEdge` / `ForkFromEdge` introduced.
  *   - `summarizeGraph` includes the architect-locked ordering disclaimer
- *     whenever temporal signals are partial or absent.
+ *     whenever event entities are rendered (lexical string sort is never
+ *     canonical chronology); omitted only for zero-event graphs.
  *   - The adapter does NOT invoke any write endpoint — write-boundary wiring
  *     belongs to T4. The negative assertion future-proofs T2 against T4
  *     write calls accidentally firing from a T2 code path.
@@ -424,14 +425,42 @@ describe('TimelineCanvasAdapter.summarizeGraph — honest temporal disclaimer', 
     expect(summary).toMatch(/1 event/i);
   });
 
-  it('includes the ordering disclaimer for an empty graph (zero events)', () => {
+  it('omits the disclaimer for an empty graph (zero events)', () => {
+    // PR #156 fix: the disclaimer is tied to event entities being rendered.
+    // A zero-event graph surfaces its own honest empty-state copy via
+    // <EmptyState> (§7); the a11y summary therefore does NOT carry the
+    // ordering disclaimer.
     const adapter = createTimelineCanvasAdapter({ current: makeContext() });
     const summary = adapter.summarizeGraph(emptyGraph());
-    expect(summary).toContain(ORDERING_DISCLAIMER);
+    expect(summary).not.toContain(ORDERING_DISCLAIMER);
     expect(summary.length).toBeGreaterThan(0);
   });
 
-  it('omits the disclaimer only when EVERY event carries occurred_at', () => {
+  it('omits the disclaimer when only non-event (context) entities exist', () => {
+    // Zero event entities → no ordering claim → no disclaimer. The presence
+    // of context entities alone must NOT trigger the disclaimer.
+    const character = entity({
+      key_block_id: 'kb-char-1',
+      block_type: 'character',
+      canonical_name: 'Aria',
+    });
+    const graph: WorldKbGraphResponse = {
+      entities: [character],
+      source_anchors: [],
+      relationships: [],
+    };
+
+    const adapter = createTimelineCanvasAdapter({ current: makeContext() });
+    const summary = adapter.summarizeGraph(graph);
+    expect(summary).not.toContain(ORDERING_DISCLAIMER);
+    expect(summary).toMatch(/1 context entity/i);
+  });
+
+  it('includes the disclaimer even when every event carries an ISO occurred_at (lexical sort is not canonical)', () => {
+    // PR #156 fix: even when every event has a parseable ISO timestamp, the
+    // adapter performs no date parsing in MVP — the when-axis is sorted by
+    // lexical string comparison. The disclaimer must still surface because
+    // "ISO-looking" is not the same as "canonical chronology parsed".
     const dated = entity({
       key_block_id: 'kb-event-dated',
       block_type: 'event',
@@ -451,9 +480,74 @@ describe('TimelineCanvasAdapter.summarizeGraph — honest temporal disclaimer', 
 
     const adapter = createTimelineCanvasAdapter({ current: makeContext() });
     const summary = adapter.summarizeGraph(graph);
-    expect(summary).not.toContain(ORDERING_DISCLAIMER);
+    expect(summary).toContain(ORDERING_DISCLAIMER);
     expect(summary).toMatch(/1 event/i);
-    expect(summary).toMatch(/1 (context|key block|entity|non-event)/i);
+    expect(summary).toMatch(/1 context entity/i);
+  });
+
+  it('includes the disclaimer for freeform (non-date) occurred_at strings like "Spring 1042"', () => {
+    // The Greptile finding: freeform non-date strings are NOT canonical
+    // temporal signals. A graph whose when-axis renders "Spring 1042",
+    // "10", and "2" lexically must still carry the disclaimer — the
+    // left-to-right order is string sorting, not chronology.
+    const spring = entity({
+      key_block_id: 'kb-event-spring',
+      block_type: 'event',
+      canonical_name: 'Spring Court',
+      body: { attributes: { occurred_at: 'Spring 1042' } },
+    });
+    const ten = entity({
+      key_block_id: 'kb-event-ten',
+      block_type: 'event',
+      canonical_name: 'Tenth Year',
+      body: { attributes: { occurred_at: '10' } },
+    });
+    const two = entity({
+      key_block_id: 'kb-event-two',
+      block_type: 'event',
+      canonical_name: 'Second Year',
+      body: { attributes: { occurred_at: '2' } },
+    });
+    const graph: WorldKbGraphResponse = {
+      entities: [spring, ten, two],
+      source_anchors: [],
+      relationships: [],
+    };
+
+    const adapter = createTimelineCanvasAdapter({ current: makeContext() });
+    const summary = adapter.summarizeGraph(graph);
+    expect(summary).toContain(ORDERING_DISCLAIMER);
+    expect(summary).toMatch(/3 events/i);
+  });
+
+  it('includes the disclaimer when events mix dated, freeform, and undated signals', () => {
+    const iso = entity({
+      key_block_id: 'kb-event-iso',
+      block_type: 'event',
+      canonical_name: 'Coronation',
+      body: { attributes: { occurred_at: '1042-03-01T00:00:00Z' } },
+    });
+    const freeform = entity({
+      key_block_id: 'kb-event-freeform',
+      block_type: 'event',
+      canonical_name: 'Spring Court',
+      body: { attributes: { occurred_at: 'Spring 1042' } },
+    });
+    const undated = entity({
+      key_block_id: 'kb-event-undated',
+      block_type: 'event',
+      canonical_name: 'Forgotten Battle',
+    });
+    const graph: WorldKbGraphResponse = {
+      entities: [iso, freeform, undated],
+      source_anchors: [],
+      relationships: [],
+    };
+
+    const adapter = createTimelineCanvasAdapter({ current: makeContext() });
+    const summary = adapter.summarizeGraph(graph);
+    expect(summary).toContain(ORDERING_DISCLAIMER);
+    expect(summary).toMatch(/3 events/i);
   });
 
   it('never returns an empty string', () => {

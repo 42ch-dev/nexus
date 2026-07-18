@@ -178,12 +178,22 @@ export interface TimelineCanvasAdapterContext {
    * React Query mutation; the adapter calls this from the inspector's submit
    * handler. Undefined in T2 (projection-only) and in tests that don't wire
    * writes.
+   *
+   * The callback MAY return a `Promise` that settles when the underlying
+   * mutation resolves or rejects (the orchestrator wires it to
+   * `usePatchWorldKbEntity().mutateAsync`). The inspector awaits the return
+   * so it can reset its local `isSubmitting` flag in a `finally` block on
+   * every outcome — success AND error (PR #156 fix: without this, a 409/422/
+   * network failure left Save permanently disabled until the selection
+   * changed). A synchronous `void` return is still accepted (read-only test
+   * mounts); the inspector's `await` treats it as an already-settled
+   * promise.
    */
   onPatchEntity?: (
     node: Node<TimelineNodeData>,
     patch: TimelineEntityPatch,
     dirtyFields: TimelinePatchField[],
-  ) => void;
+  ) => Promise<void> | void;
   /**
    * Conflict hand-off — fired by the orchestrator's mutation `onError` when
    * the daemon returns 409 / 422. The orchestrator renders the
@@ -451,10 +461,19 @@ const ORDERING_DISCLAIMER =
 /**
  * Build the screen-reader live-region summary for the Timeline canvas.
  *
- * The disclaimer MUST appear whenever temporal signals are partial OR absent
- * — i.e. when ANY event entity lacks `body.attributes.occurred_at`, OR when
- * there are zero events at all (sparse World empty-state). The disclaimer
- * is omitted only when EVERY event carries `occurred_at`.
+ * The disclaimer is present whenever event entities are rendered (i.e. when
+ * the graph has any `block_type=event` entity), and is omitted only for
+ * zero-event graphs (which have their own honest empty-state copy per §7).
+ *
+ * Rationale (architect-locked §3.3 + §7): the adapter performs NO date
+ * parsing in MVP — `occurred_at` is read from unvalidated entity attributes
+ * and the when-axis ordering is plain lexical string sort. Freeform
+ * non-date strings ("Spring 1042", "10", "2") are NOT canonical temporal
+ * signals, so a left-to-right timeline that "looks dated" is still inferred
+ * ordering, not chronology. The disclaimer must surface that honestly even
+ * when every event carries a non-empty `occurred_at` string. A date parser
+ * that could lift the disclaimer for ISO-8601-only graphs is out of V1.122
+ * scope (`simplify:` future `timeline-date-inference` enhancement).
  *
  * `simplify:` plain English (no i18n) — same convention as the World KB
  * `graphSummary`. The canvas a11y summary is an SR-only live region, not a
@@ -470,7 +489,6 @@ export function summarizeTimelineGraph(graph: TimelineGraph): string {
   const events = entities.filter((e) => e.block_type === 'event');
   const contextCount = entities.length - events.length;
   const datedEvents = events.filter((e) => occurredAtOf(e) !== undefined);
-  const undatedEventCount = events.length - datedEvents.length;
 
   const parts: string[] = [];
   parts.push(
@@ -506,8 +524,13 @@ export function summarizeTimelineGraph(graph: TimelineGraph): string {
 
   let summary = `Timeline: ${parts.join(', ')}.`;
 
-  // Disclaimer — required when temporal signals are partial OR absent.
-  if (undatedEventCount > 0 || events.length === 0) {
+  // Disclaimer — lexical string sorting is never canonical chronology. The
+  // adapter performs no date parsing in MVP, so every rendered event
+  // ordering is inferred. The disclaimer is present whenever event entities
+  // are rendered (block_type=event), and omitted only for zero-event graphs
+  // (which surface their own honest empty-state copy via <EmptyState> per
+  // §7).
+  if (events.length > 0) {
     summary = `${summary} ${ORDERING_DISCLAIMER}`;
   }
 
@@ -551,9 +574,10 @@ export function summarizeTimelineGraph(graph: TimelineGraph): string {
  *     the `kb.patch_entity` write — the alt-view itself performs NO writes
  *     (architect-locked §4.2 — `timeline.patch_event` is forbidden).
  *   - `summarizeGraph(graph)` — verified/strengthened for the a11y live
- *     region: non-empty for every graph state (empty + dense + partial
- *     temporal signal); emits the ordering disclaimer whenever temporal
- *     signals are partial OR absent (Batch 1 shipped this; T5 re-tests it).
+ *     region: non-empty for every graph state (empty + dense + freeform
+ *     temporal signal); emits the ordering disclaimer whenever event
+ *     entities are rendered (lexical string sort is never canonical
+ *     chronology), and omits it only for zero-event graphs (PR #156 fix).
  */
 export function createTimelineCanvasAdapter(
   ctxRef: MutableRefObject<TimelineCanvasAdapterContext>,
