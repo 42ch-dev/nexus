@@ -3,6 +3,8 @@
 > **Status:** Draft (Phase 1 product-manager). Normative ship lives in P0 edits to `STRATEGY.md`, `CONCEPTS.md`, and `.mstar/specs/*`. This file is the iteration-scoped product framing for Review & Edit + implement handoff.
 >
 > **Not knowledge:** Do not promote to `{KNOWLEDGE_DIR}/` until iteration-close (`mstar-compound`).
+>
+> **Compound verdict (V1.122):** Skip. Pillar naming concepts already promoted to STRATEGY.md/CONCEPTS.md during P0 implementation. No additional knowledge value in this iteration-scoped draft.
 
 ## One-sentence thesis
 

@@ -2,6 +2,8 @@
 
 > **Status:** Draft (Phase 1 architect seat 2). Locks the architecture for plan `2026-07-18-v1.122-timeline-first-canvas` (P1). Implements the locked direction: Timeline-centric World building as the primary Canvas selling point.
 >
+> **Promoted to:** `knowledge/architecture-patterns/canvas-surface-extraction-pattern.md`, `knowledge/architecture-patterns/world-vs-work-canvas-scope.md`, `knowledge/conventions/wire-contracts-frozen-verification.md` (compound V1.122).
+>
 > **Depends on:** P0 Draft overlay in `.mstar/specs/canvas-strategy-surface.md` (`CanvasSurfaceKind = "timeline"`).
 >
 > **Implements in:** plan `2026-07-18-v1.122-timeline-first-canvas`.

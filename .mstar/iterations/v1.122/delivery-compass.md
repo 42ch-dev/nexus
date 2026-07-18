@@ -1,7 +1,8 @@
 ---
 iteration_id: V1.122
 start_date: 2026-07-18
-status: locked
+status: completed
+end_date: 2026-07-18
 iteration_base_branch: main
 target_branch: main
 spec_integration_branch: iteration/v1.122
@@ -304,8 +305,8 @@ Branch resolve evidence (autonomous): `status.json` root metadata (`iteration_ba
 
 | plan_id | QC decision | QA gate | Residuals | Durable summary |
 |---------|-------------|---------|-----------|-----------------|
-| P0 three-pillar-spec-refactor | TBD | TBD | TBD | `plans/2026-07-18-v1.122-three-pillar-spec-refactor.md#review-gate-summary` |
-| P1 timeline-first-canvas | TBD | TBD | TBD | `plans/2026-07-18-v1.122-timeline-first-canvas.md#review-gate-summary` |
+| P0 three-pillar-spec-refactor | Approve with residuals (QC1) / Approve (QC2) / Approve (QC3) | pm-acceptance (docs plan, PASS) | 7 (1 low + 6 nit) | `plans/2026-07-18-v1.122-three-pillar-spec-refactor.md#review-gate-summary` |
+| P1 timeline-first-canvas | Approve (QC1) / Approve with residuals (QC2) / Approve (QC3) | mandatory (PASS_WITH_RESIDUALS) | 6 (4 low + 2 nit) | `plans/2026-07-18-v1.122-timeline-first-canvas.md#review-gate-summary` |
 
 Notes:
 
@@ -316,14 +317,27 @@ Notes:
 
 > Filled at iteration-close.
 
-- 结晶文档数：TBD
-- 新增 CONCEPTS.md 条目：TBD（P0 may add Harness/Computable/Timeline-first entries during spec refactor）
-- 触发 compound-refresh：TBD
+- 结晶文档数：3（全部 Knowledge track，0 Bug track）
+- 新增 CONCEPTS.md 条目：0（P0 已在实现阶段添加 Harness/Computable/Timeline-first World building 条目；本次 compound 未产生新术语）
+- 触发 compound-refresh：No（无重叠触发陈旧文档发现；3 个候选均为新知识，无冲突或需合并的已有文档）
+- 迭代包盘点：
+  - `specs/timeline-canvas-architecture.md` → **Promote**（提取为 `knowledge/architecture-patterns/canvas-surface-extraction-pattern.md` + 衍生出 `world-vs-work-canvas-scope.md` + `wire-contracts-frozen-verification.md`）
+  - `specs/pillar-framing.md` → **Skip**（支柱命名概念已通过 P0 提升到 STRATEGY.md/CONCEPTS.md 永久文档；无额外知识价值）
+  - `specs/timeline-hero-product-spec.md` → **Keep snapshot**（产品决策/IA/AC 为迭代特定；架构内容已通过 timeline-canvas-architecture 覆盖）
 
 ## Iteration Retrospective (minimal)
 
 > Filled at iteration-close.
 
 - 做得好的：
+  - Autonomous direction lock（4 候选评估 + rationale 落盘）准确捕获 caller 的 3-pillar + Timeline-first PMF 意图；scale M 准确预算 2 业务 plan。
+  - Phase 1 Review & Edit chain 三角色顺序 invoke（product-manager -> architect -> writing-specialist）显著提升了 compass/plans/specs 质量；architect 在 seat 2 用代码级证据解决了 HIGH 数据组合风险（WorldKbGraphResponse 单源 + block_type=event KeyBlocks = World-scoped events），保住 `wire_contracts_changed: false`。
+  - P0 (spec refactor) -> P1 (code refactor) 串行编排让 P1 有可实现的契约；P1 三批 SDD（T1+T2 / T3+T4 / T5+T6）每批 implementer + fresh task reviewer，节奏稳定；437/437 -> 1326 -> 1334 测试逐步增长无回归。
+  - `wire_contracts_changed: false` 8-point gate 在 P1 Task 6 实际执行（不只是声称），是 additive-frontend 迭代的可复用验证模式（已结晶为 knowledge）。
+  - Compound 抓住 3 个可复用模式（canvas-surface-extraction、world-vs-work-scope、wire-contracts-frozen-gate）。
 - 可改进的：
-- 下迭代建议：
+  - P1 visual verification 受限于环境（无 daemon 运行）只能截到 load-error 状态；populated-graph demo 推迟到 dogfood。后续迭代应确保 QA 环境可运行 daemon + seeded World。
+  - 累计 13 个 deferred residual（P0 7 + P1 6，多数 nit）+ 上一迭代 15 个 = 28 个低优 residual 堆积；V1.123 需要一次集中清理。
+  - STRATEGY.md decision-log catch-up 用分组条目避免臃肿，但仍追加了 8 行；长期 decision-log 会再膨胀，可考虑迁入 `notes.json` 或独立 CHANGESLOG。
+  - in-app dirty-state guard 因 BrowserRouter 限制推迟（`DF-V1122-DIRTY-GUARD-INAPP`）- MVP 可接受但应在 V1.123 评估升级到 data router。
+- 下迭代建议：V1.123 作为 pivot 后的 dogfood + 收敛迭代 - (a) dogfood Timeline-first World entry 收集真实作者反馈；(b) V1.121+V1.122 residual 集中清理（28 个低优）；(c) 评估 Harness UI rename 时机；(d) `status.json` compaction（当前 ~95KB，远超 20KB 阈值）；(e) 评估 in-app dirty guard 升级。不要再开大设计/架构变更。

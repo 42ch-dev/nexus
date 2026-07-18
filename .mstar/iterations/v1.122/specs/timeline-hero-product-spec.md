@@ -5,6 +5,8 @@
 > **Depends on:** P0 Draft overlay in `.mstar/specs/canvas-strategy-surface.md` (`CanvasSurfaceKind = "timeline"`).
 >
 > **Implements in:** plan `2026-07-18-v1.122-timeline-first-canvas`.
+>
+> **Compound verdict (V1.122):** Keep snapshot. Product decisions/IA/ACs/demo path are iteration-specific; architecture content is covered by `timeline-canvas-architecture.md` promotion.
 
 ## Problem
 

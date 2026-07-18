@@ -71,3 +71,11 @@ Engineering reference for the Nexus OSS harness **knowledge** tree.
 | --- | --- |
 | [architecture-patterns/editorial-typography-voice-split.md](architecture-patterns/editorial-typography-voice-split.md) | Content voice (serif display tier) vs interface voice (sans) discipline — creative-entity titles vs engine chrome; `Card.Title` `voice` prop; greppable both directions, test-pinned, studio-documented (V1.121 v0.4 Literary Engine distilled) |
 | [architecture-patterns/self-hosted-ofl-font-wiring.md](architecture-patterns/self-hosted-ofl-font-wiring.md) | Self-hosted OFL font pattern — canonical provenance, bundler-agnostic package boundary, app vendoring, `@font-face` in shared tokens.css, preload, bundle gate ≤ 80 KB gz/weight (V1.121 Source Serif 4 distilled) |
+
+### V1.122 additions
+
+| Document | Description |
+| --- | --- |
+| [architecture-patterns/canvas-surface-extraction-pattern.md](architecture-patterns/canvas-surface-extraction-pattern.md) | Canvas surface extraction pattern — extracting a new surface from an existing bundled surface via additive enum, single graph source, stable factory, write-boundary reuse, conflict reuse, and wire-free verification gate (V1.122 P1 timeline-canvas-architecture distilled; compound V1.122) |
+| [architecture-patterns/world-vs-work-canvas-scope.md](architecture-patterns/world-vs-work-canvas-scope.md) | World vs Work scope discipline for Canvas surfaces — spine surfaces are World-scoped, projection surfaces are Work-scoped; do not cross-compose scoped data sources (V1.122 P1 architect-locked decision distilled; compound V1.122) |
+| [conventions/wire-contracts-frozen-verification.md](conventions/wire-contracts-frozen-verification.md) | Wire contracts frozen verification (8-point gate) — systematic checklist for verifying `wire_contracts_changed: false` on additive-frontend iterations (V1.122 P1 timeline-canvas-architecture §9 distilled; compound V1.122) |
