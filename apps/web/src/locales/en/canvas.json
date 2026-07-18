@@ -650,6 +650,9 @@
       "brief": "Brief",
       "narrative": "Narrative"
     },
+    "breadcrumb": {
+      "ariaLabel": "Timeline layer path"
+    },
     "brief": {
       "emptyState": {
         "title": "No era markers yet",
@@ -760,6 +763,9 @@
       "ariaLabel": "Work Timeline layer",
       "narrative": "Narrative",
       "moment": "Moment"
+    },
+    "breadcrumb": {
+      "ariaLabel": "Work Timeline layer path"
     },
     "narrativeEventNode": {
       "aria": "Work timeline event: {{name}}",

@@ -639,6 +639,9 @@
       "brief": "概览",
       "narrative": "叙事"
     },
+    "breadcrumb": {
+      "ariaLabel": "时间轴图层路径"
+    },
     "brief": {
       "emptyState": {
         "title": "尚无纪元标记",
@@ -749,6 +752,9 @@
       "ariaLabel": "作品时间轴图层",
       "narrative": "叙事",
       "moment": "瞬间"
+    },
+    "breadcrumb": {
+      "ariaLabel": "作品时间轴图层路径"
     },
     "narrativeEventNode": {
       "aria": "作品时间轴事件：{{name}}",

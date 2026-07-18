@@ -36,22 +36,27 @@
  * links so the author can pivot to the peer surfaces from the hero. Work
  * entry stays Outline (V1.118 regression gate).
  *
- * Layer state: the orchestrator owns the active layer via `useState`. A
- * `useMemo` derives the default layer from the graph data (Brief if any
- * `block_type=era` entity, else Narrative). The user can override via the
- * layer tabs (`onLayerChange`); the override sticks until the World is
- * re-entered. Task 5 owns the honest empty-state copy per layer; Task 3
- * wires the fallback logic only.
+ * Layer state: the orchestrator owns the active layer via the URL search
+ * param `?layer=brief|narrative` (V1.123 P4 Task 6 — refresh-safe +
+ * survives Timeline → World KB → back). A `useMemo` derives the default
+ * layer from the graph data (Brief if any `block_type=era` entity, else
+ * Narrative); when the URL carries no layer (or an invalid value like
+ * `moment`, which is Work-Timeline-only), the default wins. The user can
+ * override via the layer tabs, the breadcrumb segments, or the semantic
+ * zoom bridge — every override writes back to the URL so the choice is
+ * shareable and survives refresh. Task 7 owns the honest empty-state copy
+ * per layer; Task 5 owns the breadcrumb cross-layer affordance.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useBeforeUnload, useNavigate } from 'react-router-dom';
+import { Link, useBeforeUnload, useNavigate, useSearchParams } from 'react-router-dom';
 import type { Node } from '@xyflow/react';
 import { useQueries } from '@tanstack/react-query';
 import { Info } from 'lucide-react';
 
 import { CanvasShell } from '@/components/canvas/canvas-shell';
+import { LayerBreadcrumb } from '@/components/canvas/layer-breadcrumb';
 import { useCanvasSurface, type CanvasSurfaceQueryResult } from '@/components/canvas/use-canvas-surface';
 import { SemanticZoomBridge } from '@/components/canvas/use-semantic-zoom';
 import { useWorldKbGraph, usePatchWorldKbEntity } from '@/lib/canvas/use-world-kb-data';
@@ -269,26 +274,63 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
   //
   // The orchestrator owns the active layer. The default layer is derived
   // from the graph data (Brief if any `block_type=era` entity, else
-  // Narrative) per plan Global Constraints + architect §7/§8. The user can
-  // override via the layer tabs (`onLayerChange`); the override sticks
-  // until the World is re-entered.
+  // Narrative) per plan Global Constraints + architect §7/§8.
   //
-  // `layerOverride` stays `null` until the user clicks a tab — that lets
-  // the default layer track the graph data if it changes (e.g. an author
-  // adds the first era KeyBlock via World KB and the Timeline flips its
-  // default to Brief on next refetch). Once the user has chosen, the
-  // override wins.
+  // V1.123 P4 Task 6 — layer-state persistence. The user-chosen layer is
+  // encoded in the URL search param `?layer=brief|narrative|moment`
+  // (layer-feel-differentiation.md §5). The URL is the shareable,
+  // refresh-safe source of truth for the active layer: it survives
+  // Timeline → World KB → back round-trips and refresh. On mount, the URL
+  // is read; on layer swap (via the layer tabs, breadcrumb, or semantic
+  // zoom), the URL is updated. Invalid layer values for the surface
+  // (e.g., `?layer=moment` on the World Timeline — Moment is Work-only)
+  // are ignored so the default-derived layer wins.
   //
-  // Task 5 owns the honest empty-state copy per layer; Task 3 wires the
-  // fallback logic only.
+  // When the user picks the default layer (e.g., clicks Brief on a World
+  // with era data), the URL param is dropped so the surface can resume
+  // tracking graph changes (e.g., if the user clears all eras via World
+  // KB, the default would flip to Narrative — a sticky `?layer=brief`
+  // would prevent that).
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlLayerRaw = searchParams.get('layer');
+  const urlLayerOverride: TimelineLayer | null = useMemo(() => {
+    if (urlLayerRaw === 'brief' || urlLayerRaw === 'narrative') {
+      return urlLayerRaw;
+    }
+    // Invalid / absent → fall back to the era-derived default. `moment`
+    // is Work-Timeline-only and is silently ignored here.
+    return null;
+  }, [urlLayerRaw]);
+
   const defaultLayer = useMemo<TimelineLayer>(() => {
     const entities = graph.data?.entities ?? [];
     const hasEra = entities.some((e) => e.block_type === 'era');
     return hasEra ? 'brief' : 'narrative';
   }, [graph.data]);
 
-  const [layerOverride, setLayerOverride] = useState<TimelineLayer | null>(null);
-  const activeLayer: TimelineLayer = layerOverride ?? defaultLayer;
+  const activeLayer: TimelineLayer = urlLayerOverride ?? defaultLayer;
+
+  // Layer swap callback — single source of truth for layer changes from
+  // the layer tabs, the breadcrumb, and the semantic zoom bridge. Writes
+  // the choice back to the URL so it survives refresh + surface switches.
+  const handleLayerChange = useCallback(
+    (layer: TimelineLayer) => {
+      if (layer === defaultLayer) {
+        // Dropping the param (rather than writing `?layer=<default>`)
+        // keeps the URL minimal and lets the default track graph changes.
+        if (searchParams.has('layer')) {
+          const next = new URLSearchParams(searchParams);
+          next.delete('layer');
+          setSearchParams(next, { replace: false });
+        }
+      } else {
+        const next = new URLSearchParams(searchParams);
+        next.set('layer', layer);
+        setSearchParams(next, { replace: false });
+      }
+    },
+    [defaultLayer, searchParams, setSearchParams],
+  );
 
   // Rebuild the adapter on layer swap so `useCanvasSurface`'s `[graph,
   // adapter]` memo re-projects (semantic discrete swap per layer-feel §3.1).
@@ -499,7 +541,7 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
         showAltView={showAltView}
         onToggleView={() => setShowAltView((v) => !v)}
         activeLayer={activeLayer}
-        onLayerChange={setLayerOverride}
+        onLayerChange={handleLayerChange}
         showLayerSwitcher={!isEmpty}
       />
 
@@ -537,7 +579,7 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
           description={t('timeline.empty.description')}
         />
       ) : isBriefEmpty ? (
-        <BriefEmptyState onSwitchToNarrative={() => setLayerOverride('narrative')} />
+        <BriefEmptyState onSwitchToNarrative={() => handleLayerChange('narrative')} />
       ) : showAltView ? (
         <div className="grid gap-3 lg:grid-cols-[1fr_360px]">
           {surface.altView}
@@ -570,7 +612,7 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
           >
             {/* V1.123 P4 Task 3 — semantic zoom bridge. Mounts inside
                 CanvasShell so it lives within the ReactFlowProvider; observes
-                viewport zoom and fires `setLayerOverride` when the user
+                viewport zoom and fires `handleLayerChange` when the user
                 crosses the architect-locked 0.55–0.70 hysteresis band
                 (layer-feel-differentiation.md §3.2). The bridge renders
                 nothing visible — purely a hook host. Coexists with the
@@ -578,7 +620,7 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
                 per plan Global Constraints §"Semantic zoom feasibility"). */}
             <SemanticZoomBridge
               activeLayer={activeLayer}
-              onLayerChange={setLayerOverride}
+              onLayerChange={handleLayerChange}
               chain={{ coarseLayer: 'brief', fineLayer: 'narrative' }}
             />
             {surface.inspector ? (
@@ -661,6 +703,30 @@ function TimelineCanvasHeader({
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
+        {/* V1.123 P4 Task 5 — layer breadcrumb. Shows the layer path
+            (Brief, or Brief > Narrative when drilled). The parent segment
+            is a clickable zoom-out affordance; the active segment is
+            static text. Renders only on the non-empty branch (the
+            empty-state branch owns its own surface). */}
+        {showLayerSwitcher ? (
+          <LayerBreadcrumb
+            surfaceKey="timeline"
+            coarseSegment={{
+              layer: 'brief',
+              labelKey: 'timeline.layerSwitcher.brief',
+              defaultValue: 'Brief',
+            }}
+            fineSegment={{
+              layer: 'narrative',
+              labelKey: 'timeline.layerSwitcher.narrative',
+              defaultValue: 'Narrative',
+            }}
+            activeLayer={activeLayer}
+            onLayerChange={onLayerChange}
+            ariaLabelKey="timeline.breadcrumb.ariaLabel"
+            ariaLabelDefaultValue="Timeline layer path"
+          />
+        ) : null}
         {/* V1.123 P1 T3 — Brief ↔ Narrative layer switcher (layer-feel §3.2).
             Hidden when the empty-state branch owns the surface. */}
         {showLayerSwitcher ? (

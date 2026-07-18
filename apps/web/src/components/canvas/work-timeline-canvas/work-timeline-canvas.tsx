@@ -30,12 +30,13 @@
  * registration; Task 2 ships the canvas facade with the `workId` prop
  * contract ready).
  */
-import { useMemo, useRef, useState } from 'react';
+import { useMemo, useRef } from 'react';
 import { useCallback } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 
 import { CanvasShell } from '@/components/canvas/canvas-shell';
+import { LayerBreadcrumb } from '@/components/canvas/layer-breadcrumb';
 import {
   useCanvasSurface,
   type CanvasSurfaceQueryResult,
@@ -74,7 +75,8 @@ export interface WorkTimelineCanvasProps {
  *
  * Task 2 shipped the minimal facade (loading / error / empty / CanvasShell
  * + adapter wiring with a fixed `'narrative'` active layer). Task 4 adds:
- *   - `useState<WorkTimelineLayer>` active layer (default `'narrative'`).
+ *   - `useState<WorkTimelineLayer>` active layer (default `'narrative'`;
+ *     V1.123 P4 Task 6 — now URL-driven via `?layer=` search param).
  *   - `WorkTimelineLayerSwitcher` inline component (segmented control).
  *   - `data-active-layer` testability hook on the root container.
  *   - Layer switcher hidden on the empty-state branch (Task 7 owns the
@@ -114,7 +116,7 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
     );
   }, [boundWorldId, navigate]);
 
-  // ── V1.123 P2 Task 4 — layer state + default-layer logic ────────────────
+  // ── V1.123 P2 Task 4 + P4 Task 6 — layer state + URL persistence ────────
   //
   // Architect §7.3 UX-risk override: default = 'narrative' UNCONDITIONALLY
   // in V1.123. Unlike the V1.122 World Timeline (which flips Brief↔Narrative
@@ -123,15 +125,44 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
   // the surface stays Narrative-default so the UX does not flip between
   // real Works (no wire-scene/beat data today) and fixture-driven tests.
   //
-  // When the WorkOutline wire extends to expose scenes/beats (V1.124+
-  // `DF-V1123-MOMENT-WIRE`), this default MAY flip to Moment; the architect
-  // §7.3 lock will be revisited at that time. For V1.123, Narrative is the
-  // unconditional entry layer.
+  // V1.123 P4 Task 6 — layer-state persistence. The user-chosen layer is
+  // encoded in the URL search param `?layer=narrative|moment`
+  // (layer-feel-differentiation.md §5). The URL survives Work Timeline →
+  // Outline → back round-trips + refresh. Invalid layer values for the
+  // surface (`?layer=brief` — Brief is World-only) are ignored.
   //
-  // We track the layer via a single `useState` (no `useMemo` default
-  // derivation needed because the default is constant in V1.123). The
-  // initial value is `'narrative'` per the override.
-  const [activeLayer, setActiveLayer] = useState<WorkTimelineLayer>('narrative');
+  // When the user swaps back to the default Narrative layer, the URL param
+  // is dropped so the URL stays minimal.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlLayerRaw = searchParams.get('layer');
+  const activeLayer: WorkTimelineLayer = useMemo(() => {
+    if (urlLayerRaw === 'narrative' || urlLayerRaw === 'moment') {
+      return urlLayerRaw;
+    }
+    // Invalid / absent → fall back to Narrative default. `brief` is
+    // World-Timeline-only and is silently ignored here.
+    return 'narrative';
+  }, [urlLayerRaw]);
+
+  const handleLayerChange = useCallback(
+    (layer: WorkTimelineLayer) => {
+      if (layer === 'narrative') {
+        // Default layer — drop the URL param if present so the URL stays
+        // minimal and the surface can resume tracking the (future)
+        // architect-override default.
+        if (searchParams.has('layer')) {
+          const next = new URLSearchParams(searchParams);
+          next.delete('layer');
+          setSearchParams(next, { replace: false });
+        }
+      } else {
+        const next = new URLSearchParams(searchParams);
+        next.set('layer', layer);
+        setSearchParams(next, { replace: false });
+      }
+    },
+    [searchParams, setSearchParams],
+  );
 
   const surfaceQuery = useMemo<CanvasSurfaceQueryResult<NonNullable<typeof outlineQuery.data>>>(
     () => ({
@@ -224,7 +255,7 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
       <WorkTimelineCanvasHeader
         workId={workId}
         activeLayer={activeLayer}
-        onLayerChange={setActiveLayer}
+        onLayerChange={handleLayerChange}
         showLayerSwitcher={!isEmpty}
       />
 
@@ -239,7 +270,7 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
           })}
         />
       ) : isMomentEmpty ? (
-        <MomentEmptyState onSwitchToNarrative={() => setActiveLayer('narrative')} />
+        <MomentEmptyState onSwitchToNarrative={() => handleLayerChange('narrative')} />
       ) : (
         // V1.123 P4 Task 4 — layer transition animation. The `key` forces a
         // remount on layer swap so the CSS keyframe animation replays; the
@@ -266,7 +297,7 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
           >
             {/* V1.123 P4 Task 3 — semantic zoom bridge. Mounts inside
                 CanvasShell so it lives within the ReactFlowProvider; observes
-                viewport zoom and fires `setActiveLayer` when the user crosses
+                viewport zoom and fires `handleLayerChange` when the user crosses
                 the architect-locked 0.55–0.70 hysteresis band
                 (layer-feel-differentiation.md §3.3). The bridge renders
                 nothing visible — purely a hook host. Coexists with the
@@ -274,7 +305,7 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
                 affordance per plan Global Constraints). */}
             <SemanticZoomBridge
               activeLayer={activeLayer}
-              onLayerChange={setActiveLayer}
+              onLayerChange={handleLayerChange}
               chain={{ coarseLayer: 'narrative', fineLayer: 'moment' }}
             />
             {/* Task 6 — Work Timeline inspector overlay. Renders when
@@ -329,6 +360,28 @@ function WorkTimelineCanvasHeader({
         </p>
       </div>
       <div className="flex flex-wrap items-center gap-2">
+        {/* V1.123 P4 Task 5 — layer breadcrumb. Shows the layer path
+            (Narrative, or Narrative > Moment when drilled). Mirrors the
+            Timeline surface's Brief ↔ Narrative breadcrumb pattern. */}
+        {showLayerSwitcher ? (
+          <LayerBreadcrumb
+            surfaceKey="work-timeline"
+            coarseSegment={{
+              layer: 'narrative',
+              labelKey: 'workTimeline.layerSwitcher.narrative',
+              defaultValue: 'Narrative',
+            }}
+            fineSegment={{
+              layer: 'moment',
+              labelKey: 'workTimeline.layerSwitcher.moment',
+              defaultValue: 'Moment',
+            }}
+            activeLayer={activeLayer}
+            onLayerChange={onLayerChange}
+            ariaLabelKey="workTimeline.breadcrumb.ariaLabel"
+            ariaLabelDefaultValue="Work Timeline layer path"
+          />
+        ) : null}
         {showLayerSwitcher ? (
           <WorkTimelineLayerSwitcher
             activeLayer={activeLayer}
