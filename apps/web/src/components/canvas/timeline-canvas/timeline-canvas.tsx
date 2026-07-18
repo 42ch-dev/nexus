@@ -373,6 +373,22 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
   const isEmpty =
     !graph.data || (graph.data.entities ?? []).length === 0;
 
+  // V1.123 P1 T5 — Brief-empty detection. The active layer is Brief but the
+  // graph carries zero `block_type=era` entities (the user clicked the Brief
+  // tab on a World that has no era data; Batch A T3's default-layer memo
+  // defaults such Worlds to Narrative, so this branch only triggers via an
+  // explicit user override). Per `layer-feel-differentiation.md` §2.2 + §7,
+  // the surface renders an honest Brief-empty panel with a CTA back to
+  // Narrative instead of an empty spatial canvas.
+  //
+  // The graph itself is NOT globally empty here (the global empty branch
+  // below owns zero-entity graphs). The Brief-empty branch only fires when
+  // there are non-era entities to show on the Narrative layer.
+  const eraCount = (graph.data?.entities ?? []).filter(
+    (e) => e.block_type === 'era',
+  ).length;
+  const isBriefEmpty = !isEmpty && activeLayer === 'brief' && eraCount === 0;
+
   // Visible ordering-disclaimer gate (PR #156 fix 3 — Greptile P1). Mirrors
   // the adapter's `summarizeTimelineGraph` a11y-disclaimer condition: present
   // whenever any `block_type=event` entity is rendered, omitted for zero-event
@@ -431,6 +447,8 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
           title={t('timeline.empty.title')}
           description={t('timeline.empty.description')}
         />
+      ) : isBriefEmpty ? (
+        <BriefEmptyState onSwitchToNarrative={() => setLayerOverride('narrative')} />
       ) : showAltView ? (
         <div className="grid gap-3 lg:grid-cols-[1fr_360px]">
           {surface.altView}
@@ -641,6 +659,51 @@ function TimelineLayerSwitcher({
           </button>
         );
       })}
+    </div>
+  );
+}
+
+/**
+ * V1.123 P1 T5 — Brief-layer honest empty-state.
+ *
+ * Renders when the active layer is Brief but the graph has zero
+ * `block_type=era` entities (the user clicked the Brief tab on a World that
+ * has no era data; the default layer for such Worlds is Narrative per Batch
+ * A T3's memo). The panel surfaces the layer-feel §7 copy + a CTA back to
+ * Narrative — the actionable escape hatch from an empty Brief world.
+ *
+ * Built on the shared `EmptyState` primitive (DESIGN.md §Voice & Content —
+ * empty-state headlines on authoring surfaces) so the visual treatment
+ * matches every other authoring empty-state in the app. The CTA uses a
+ * primary-action button so keyboard + SR users have a direct escape hatch.
+ *
+ * Reuses the V1.121 header button styling so the CTA reads as part of the
+ * Timeline chrome family (not a generic link). The `action` slot on
+ * `EmptyState` keeps the CTA semantically grouped with the empty-state
+ * copy.
+ */
+function BriefEmptyState({
+  onSwitchToNarrative,
+}: {
+  onSwitchToNarrative: () => void;
+}) {
+  const { t } = useTranslation('canvas');
+  return (
+    <div data-testid="timeline-brief-empty-state" className="rounded-card border border-gray-alpha-400 bg-background-100">
+      <EmptyState
+        title={t('timeline.brief.emptyState.title')}
+        description={t('timeline.brief.emptyState.message')}
+        action={
+          <button
+            type="button"
+            data-testid="timeline-brief-empty-cta"
+            onClick={onSwitchToNarrative}
+            className="rounded-control bg-blue-700 px-4 py-2 text-button-14 font-semibold text-white-100 shadow-elevation-2 hover:bg-blue-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2"
+          >
+            {t('timeline.brief.emptyState.cta')}
+          </button>
+        }
+      />
     </div>
   );
 }

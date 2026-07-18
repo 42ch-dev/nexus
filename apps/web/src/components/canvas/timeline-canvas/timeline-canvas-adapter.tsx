@@ -68,6 +68,7 @@ import type {
 
 import type { WorldKbEdgeData } from '../world-kb/types';
 import { TimelineInspector } from './timeline-inspector';
+import { TimelineBriefEraInspector } from './timeline-brief-era-inspector';
 import { TimelineAltView } from './timeline-alt-view';
 import { timelineNodeTypes } from './timeline-node-types';
 
@@ -314,6 +315,36 @@ const TEMPORAL_UNKNOWN_Y = 220;
 const ORIGIN_X = 40;
 const EVENT_STEP_X = 280;
 const CONTEXT_STEP_X = 220;
+
+/**
+ * V1.123 P1 T4 — per-layer dagre layout options.
+ *
+ * `layer-feel-differentiation.md` §2.2 locks the Brief feel as a "horizontal
+ * era sweep": wider inter-rank spacing (`rankSep`) makes the era sweep read
+ * as sparse landmarks, and tighter intra-rank spacing (`nodeSep`) keeps the
+ * temporal-unknown era cluster compact. Narrative (V1.122) leaves both
+ * undefined so `useAutoLayout`'s internal defaults (80/80) apply — V1.122
+ * regression preserved verbatim.
+ *
+ * The `hasSuppliedPositions: true` flag is preserved on both layers so the
+ * adapter's temporal-sorted positions survive first open (Batch 1 reviewer
+ * note + Batch A T2); these `rankSep` / `nodeSep` values only take effect
+ * on an explicit `relayout()`.
+ *
+ * `simplify:` static metrics — `dagre` is invoked at most a couple of times
+ * per surface entry (first open is supplied-positions; explicit relayout on
+ * user action). No measurable cost to deriving these inline.
+ */
+const BRIEF_LAYOUT_OPTIONS = {
+  direction: 'LR' as const,
+  rankSep: 240,
+  nodeSep: 40,
+  hasSuppliedPositions: true,
+};
+const NARRATIVE_LAYOUT_OPTIONS = {
+  direction: 'LR' as const,
+  hasSuppliedPositions: true,
+};
 
 const NODE_ID_PREFIX = 'entity:';
 
@@ -821,7 +852,14 @@ export function createTimelineCanvasAdapter(
     // for post-MVP edge components; the architect lock forbids
     // ForeshadowEdge / RealizesEdge / ForkFromEdge (Work-outline kinds).
     edgeTypes: undefined,
-    layoutOptions: { direction: 'LR', hasSuppliedPositions: true },
+    // V1.123 P1 T4 — layer-dependent dagre options. Brief carries wider
+    // `rankSep` + smaller `nodeSep` than the V1.122 Narrative default so
+    // an explicit `relayout()` produces the horizontal era sweep feel
+    // (layer-feel §2.2). The supplied era positions win on first open
+    // (`hasSuppliedPositions: true`); these options only kick in on
+    // explicit relayout.
+    layoutOptions:
+      activeLayer === 'brief' ? BRIEF_LAYOUT_OPTIONS : NARRATIVE_LAYOUT_OPTIONS,
 
     projectGraph(graph) {
       // V1.123 P1 T2 — delegates to the active layer. Default `'narrative'`
@@ -843,6 +881,17 @@ export function createTimelineCanvasAdapter(
     },
 
     renderInspector(node) {
+      // V1.123 P1 T4 — Brief-era nodes dispatch to a dedicated Brief-era
+      // inspector that surfaces the era markers (`eraId`, `startHint`,
+      // `endHint`, `worldSummary`) prominently. The generic Narrative
+      // inspector (title + body JSON editor) remains the path for event
+      // + context nodes (V1.122 regression). The dispatch discriminates
+      // on `layoutHint` rather than `node.type` so the inspector stays
+      // decoupled from the React Flow node-type registry.
+      const data = node.data as TimelineNodeData;
+      if (data.layoutHint === 'brief') {
+        return <TimelineBriefEraInspector node={node} ctxRef={ctxRef} />;
+      }
       return <TimelineInspector node={node} ctxRef={ctxRef} />;
     },
 
