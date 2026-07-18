@@ -624,5 +624,22 @@
   "source": "Source",
   "target": "Target",
   "type": "Type",
-  "confidence": "Confidence"
+  "confidence": "Confidence",
+  "timeline": {
+    "eventNode": {
+      "unnamed": "(unnamed event)",
+      "temporalUnknown": "Temporal signal unknown",
+      "selected": "Selected timeline event",
+      "sourceAnchorCount_one": "{{count}} source anchor",
+      "sourceAnchorCount_other": "{{count}} source anchors",
+      "aria": "Timeline event: {{name}}"
+    },
+    "keyBlockNode": {
+      "unnamed": "(unnamed entity)",
+      "selected": "Selected context entity",
+      "sourceAnchorCount_one": "{{count}} source anchor",
+      "sourceAnchorCount_other": "{{count}} source anchors",
+      "aria": "Context entity: {{name}}"
+    }
+  }
 }

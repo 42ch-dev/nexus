@@ -613,5 +613,22 @@
   "source": "来源",
   "target": "目标",
   "type": "类型",
-  "confidence": "置信度"
+  "confidence": "置信度",
+  "timeline": {
+    "eventNode": {
+      "unnamed": "(未命名事件)",
+      "temporalUnknown": "时间信号未知",
+      "selected": "已选中时间线事件",
+      "sourceAnchorCount_one": "{{count}} 个来源锚点",
+      "sourceAnchorCount_other": "{{count}} 个来源锚点",
+      "aria": "时间线事件：{{name}}"
+    },
+    "keyBlockNode": {
+      "unnamed": "(未命名实体)",
+      "selected": "已选中上下文实体",
+      "sourceAnchorCount_one": "{{count}} 个来源锚点",
+      "sourceAnchorCount_other": "{{count}} 个来源锚点",
+      "aria": "上下文实体：{{name}}"
+    }
+  }
 }

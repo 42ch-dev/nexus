@@ -7,7 +7,12 @@ export type CanvasSurfaceKind =
   | 'strategy'
   | 'outline'
   | 'world-kb-entities'
-  | 'world-kb-relationships';
+  | 'world-kb-relationships'
+  // V1.122 P1 T1 — additive peer surface. The Timeline hero surface projects
+  // a World's `WorldKbGraphResponse` onto a left-to-right when-axis. Reuses
+  // the V1.73/V1.74 World KB DTOs verbatim (wire_contracts_changed: false);
+  // see `timeline-canvas/` + `iterations/v1.122/specs/timeline-canvas-architecture.md`.
+  | 'timeline';
 
 export interface CanvasSurfaceLayoutOptions {
   direction?: 'TB' | 'LR';

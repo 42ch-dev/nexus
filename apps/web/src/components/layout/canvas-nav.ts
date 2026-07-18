@@ -26,8 +26,9 @@ import type { ShellNavItem } from './presentational/shell-sidebar-chrome';
 /** The canvas surfaces. Only `outline` + `world-kb` are in {@link CANVAS_ITEMS};
  * `strategy` is still a canvas surface for {@link resolveActiveCanvasSurface}
  * (command palette / future surfaces); the Orchestrator tab owns the `/strategies`
- * link. */
-export type CanvasSurfaceId = 'outline' | 'world-kb' | 'strategy';
+ * link. `timeline` (V1.122 P1 T1) is registered for resolver routing; its
+ * sidebar entry / default-World-entry redirect land in T3. */
+export type CanvasSurfaceId = 'outline' | 'world-kb' | 'strategy' | 'timeline';
 
 /**
  * A {@link ShellNavItem} that also knows which canvas surface it represents.
@@ -75,12 +76,19 @@ export const CANVAS_ITEMS: CanvasNavItem[] = [
 /**
  * Resolve the active canvas surface from a router pathname via route-pattern
  * matching (architect lock, plan § Architecture locks #1):
- * - Outline  → `/works/:workId/outline`     — `startsWith('/works/') && includes('/outline')`
- * - World KB → `/worlds/:worldId/kb`        — `startsWith('/worlds/') && includes('/kb')`
- * - Strategy → `/strategies/:presetId`      — `startsWith('/strategies/')`
+ * - Outline   → `/works/:workId/outline`     — `startsWith('/works/') && includes('/outline')`
+ * - World KB  → `/worlds/:worldId/kb`        — `startsWith('/worlds/') && includes('/kb')`
+ * - Timeline  → `/worlds/:worldId/timeline`  — `startsWith('/worlds/') && includes('/timeline')` (V1.122 P1 T1)
+ * - Strategy  → `/strategies/:presetId`      — `startsWith('/strategies/')`
  *
  * Returns `null` for non-canvas paths and for the canvas **list** routes
- * (`/works`, `/strategies`) — those are pickers, not canvas surfaces.
+ * (`/works`, `/strategies`, `/worlds`) — those are pickers, not canvas surfaces.
+ *
+ * Timeline + World KB share the `/worlds/` prefix — the resolver distinguishes
+ * them by the trailing segment (`/timeline` vs `/kb`), mirroring the World KB
+ * rule. The Timeline route itself is wired in T3; this resolver branch lets
+ * active-surface highlighting + command palette routing recognise it the
+ * moment T3 mounts the route.
  *
  * Pure: no React, no router, no side effects. Expects a bare pathname as
  * produced by `useLocation().pathname` (no query string / hash).
@@ -94,6 +102,9 @@ export function resolveActiveCanvasSurface(pathname: string): CanvasSurfaceId | 
   }
   if (pathname.startsWith('/worlds/') && pathname.includes('/kb')) {
     return 'world-kb';
+  }
+  if (pathname.startsWith('/worlds/') && pathname.includes('/timeline')) {
+    return 'timeline';
   }
   // `/strategies` (list) does not start with `/strategies/` and correctly
   // resolves to null; only `/strategies/:presetId` matches.
@@ -125,6 +136,10 @@ export interface CanvasNavContext {
  * - **World KB**  → `/worlds/:worldId/kb` when a `worldId` is present;
  *   otherwise `/worlds` (the World picker — registered in V1.115 T3). The
  *   item is always focusable; it never renders disabled.
+ * - **Timeline**  → `/worlds/:worldId/timeline` when a `worldId` is present;
+ *   otherwise `/worlds` (V1.122 P1 T1 — same World picker fallback as World KB).
+ *   The Timeline surface is World-scoped (peer of World KB); the route itself
+ *   is mounted in T3.
  * - **Strategy**  → `/strategies` always (the list is the always-valid entry
  *   point to the Strategy canvas).
  *
@@ -146,6 +161,12 @@ export function resolveCanvasNavTarget(
       // No worldId in the URL → fall back to the `/worlds` picker (registered
       // in V1.115 T3). The item is always focusable; it never returns null.
       return ctx.worldId ? `/worlds/${encodeURIComponent(ctx.worldId)}/kb` : '/worlds';
+    case 'timeline':
+      // V1.122 P1 T1 — Timeline is a World-scoped peer of World KB. Same
+      // picker fallback when no worldId is in the URL. T3 wires the route.
+      return ctx.worldId
+        ? `/worlds/${encodeURIComponent(ctx.worldId)}/timeline`
+        : '/worlds';
     case 'strategy':
       return '/strategies';
   }
