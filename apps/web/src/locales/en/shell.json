@@ -21,6 +21,8 @@
     "timeline": "Timeline",
     "works": "Works",
     "allWorks": "All Works",
+    "workTimelines": "Work Timelines",
+    "workTimelineEntry": "{{title}} Timeline",
     "worlds": "Worlds",
     "memories": "Memories",
     "runtime": "Runtime",
