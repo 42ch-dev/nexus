@@ -586,6 +586,23 @@ components:
     # spine is its own token so retuning one does not bleed into the others.
     canvas-outline-accent: "{colors.amber-700}"
     canvas-worldkb-accent: "{colors.teal-700}"
+    # V1.123 P3 T2: Timeline accent spine. Timeline is the central instrument
+    # (iterations/v1.123/specs/three-layer-product-spec.md); brand-blue per the
+    # Canvas/SOUL invariant. Mirror the per-surface pattern.
+    canvas-timeline-accent: "{colors.blue-700}"
+    # V1.123 P4 Task 2: per-layer feel accents (layer-feel-differentiation.md
+    # §6.1 — three-layer feel contract for AC-V1123-20 "three feels
+    # perceptibly different"). Brief=gold-bronze age tone (amber-700 alias —
+    # Outline lives on a separate surface so the shared hue does not collide);
+    # Narrative=brand blue (aliases the V1.123 P3 Timeline accent — Narrative
+    # is the shared V1.122 baseline within the Timeline surface family);
+    # Moment=ink-on-paper manuscript tone (gray-900 alias — gray-900 projects
+    # to #e0e0e0 in dark theme so the ink hue stays legible on inverted dark
+    # canvas). No new palette color invented; tuning later is a token-only
+    # edit, not a node-component sweep.
+    canvas-layer-brief-accent: "{colors.amber-700}"
+    canvas-layer-narrative-accent: "{colors.blue-700}"
+    canvas-layer-moment-accent: "{colors.gray-900}"
     canvas-write-dirty: "{colors.amber-700}"
     canvas-write-conflict: "{colors.red-700}"
     canvas-write-success: "{colors.green-700}"

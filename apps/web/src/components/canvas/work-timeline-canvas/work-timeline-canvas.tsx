@@ -40,6 +40,7 @@ import {
   useCanvasSurface,
   type CanvasSurfaceQueryResult,
 } from '@/components/canvas/use-canvas-surface';
+import { SemanticZoomBridge } from '@/components/canvas/use-semantic-zoom';
 import { useWorkOutline } from '@/lib/canvas/use-outline-data';
 import { useWork } from '@/api/queries';
 import { LoadingState, ErrorState, EmptyState } from '@/components/ui/states';
@@ -240,29 +241,53 @@ export function WorkTimelineCanvas({ workId, sceneBeatFixture }: WorkTimelineCan
       ) : isMomentEmpty ? (
         <MomentEmptyState onSwitchToNarrative={() => setActiveLayer('narrative')} />
       ) : (
-        <CanvasShell
-          nodes={surface.nodes}
-          edges={surface.edges}
-          nodeTypes={surface.nodeTypes}
-          onNodesChange={surface.onNodesChange}
-          summaryText={surface.summaryText}
-          ariaLabel={t('workTimeline.canvasAriaLabel', {
-            defaultValue: 'Work timeline canvas',
-          })}
-          surfaceKey="work-timeline"
-          surfaceKind="work-timeline"
-          relayout={surface.relayout}
-        >
-          {/* Task 6 — Work Timeline inspector overlay. Renders when
-              `useCanvasSurface`'s selection state resolves to a node; the
-              adapter's `renderInspector` dispatches by `nodeKind`
-              (event / scene / beat). Read-only in V1.123 (architect §6). */}
-          {surface.inspector ? (
-            <div className="pointer-events-auto absolute right-3 top-3 w-[340px] max-w-[calc(100%-1.5rem)] rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-popover">
-              {surface.inspector}
-            </div>
-          ) : null}
-        </CanvasShell>
+        // V1.123 P4 Task 4 — layer transition animation. The `key` forces a
+        // remount on layer swap so the CSS keyframe animation replays; the
+        // `nexus-layer-enter` class carries the keyframe (fade + subtle scale
+        // per layer-feel-differentiation.md §4 "changing instrument"). The
+        // global `prefers-reduced-motion` rule in `apps/web/src/index.css`
+        // collapses animation-duration to 0.01ms so reduced-motion users get
+        // an instant swap. Viewport continuity survives via
+        // `useCanvasViewport`'s module-level cache (surfaceKey="work-timeline"
+        // is constant across layers).
+        <div key={activeLayer} className="nexus-layer-enter" data-testid="work-timeline-canvas-layer-transition">
+          <CanvasShell
+            nodes={surface.nodes}
+            edges={surface.edges}
+            nodeTypes={surface.nodeTypes}
+            onNodesChange={surface.onNodesChange}
+            summaryText={surface.summaryText}
+            ariaLabel={t('workTimeline.canvasAriaLabel', {
+              defaultValue: 'Work timeline canvas',
+            })}
+            surfaceKey="work-timeline"
+            surfaceKind="work-timeline"
+            relayout={surface.relayout}
+          >
+            {/* V1.123 P4 Task 3 — semantic zoom bridge. Mounts inside
+                CanvasShell so it lives within the ReactFlowProvider; observes
+                viewport zoom and fires `setActiveLayer` when the user crosses
+                the architect-locked 0.55–0.70 hysteresis band
+                (layer-feel-differentiation.md §3.3). The bridge renders
+                nothing visible — purely a hook host. Coexists with the
+                explicit Narrative ↔ Moment layer tabs (the primary
+                affordance per plan Global Constraints). */}
+            <SemanticZoomBridge
+              activeLayer={activeLayer}
+              onLayerChange={setActiveLayer}
+              chain={{ coarseLayer: 'narrative', fineLayer: 'moment' }}
+            />
+            {/* Task 6 — Work Timeline inspector overlay. Renders when
+                `useCanvasSurface`'s selection state resolves to a node; the
+                adapter's `renderInspector` dispatches by `nodeKind`
+                (event / scene / beat). Read-only in V1.123 (architect §6). */}
+            {surface.inspector ? (
+              <div className="pointer-events-auto absolute right-3 top-3 w-[340px] max-w-[calc(100%-1.5rem)] rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-popover">
+                {surface.inspector}
+              </div>
+            ) : null}
+          </CanvasShell>
+        </div>
       )}
     </div>
   );

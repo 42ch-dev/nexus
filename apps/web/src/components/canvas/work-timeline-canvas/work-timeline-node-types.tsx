@@ -34,9 +34,17 @@
  * scene/beat cards — Work Timeline Moment is Work-scoped outline-projection,
  * so the outline spine signals "Outline-derived data" to the author.
  *
- * P4 may introduce dedicated layer accent tokens
- * (`--color-canvas-layer-{narrative,moment}-accent`) per
- * `layer-feel-differentiation.md` §6.1; V1.123 P2 reuses existing tokens.
+ * V1.123 P4 Task 2 — per-layer feel accent migration (layer-feel-
+ * differentiation.md §6.1 + AC-V1123-20): the Moment scene + beat nodes now
+ * carry the dedicated `--color-canvas-layer-moment-accent` token
+ * (ink-on-paper manuscript tone — alias gray-900 per layer-feel §6.1)
+ * instead of the outline amber spine. This is the per-LAYER accent within
+ * the Work Timeline surface — the scene-icon + beat-pin + manuscript-anchor
+ * badges all read against the ink-on-paper hue so a screenshot of Moment
+ * vs Narrative reads as a different instrument without reading chrome
+ * labels. The card's surface spine stays `accent="outline"` because the
+ * Work Timeline surface identity is still outline-derived (the layer accent
+ * is an INTRA-surface differentiator, not a surface identity override).
  */
 import { memo } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -157,10 +165,12 @@ export const WorkTimelineNarrativeEventNode = memo(function WorkTimelineNarrativ
  *
  * Visual differentiation from the Narrative event node (layer-feel §2.4):
  * the `BookMarked` icon (literary manuscript tone via
- * `text-canvas-outline-accent`) leads the card; the manuscript-anchor
+ * `text-canvas-layer-moment-accent`) leads the card; the manuscript-anchor
  * badge is prominent (chapter/scene link). The card reads as "scene-level
  * reading distance" — denser and manuscript-anchored, distinct from the
- * Narrative LR event timeline.
+ * Narrative LR event timeline. The Moment layer accent is the dedicated
+ * `--color-canvas-layer-moment-accent` token (P4 Task 2 — alias gray-900
+ * ink-on-paper per layer-feel §6.1).
  */
 export const WorkTimelineMomentSceneNode = memo(function WorkTimelineMomentSceneNode({
   data,
@@ -187,7 +197,7 @@ export const WorkTimelineMomentSceneNode = memo(function WorkTimelineMomentScene
       />
       <div className="flex items-center gap-2">
         <BookMarked
-          className="h-4 w-4 flex-shrink-0 text-canvas-outline-accent"
+          className="h-4 w-4 flex-shrink-0 text-canvas-layer-moment-accent"
           aria-hidden
         />
         <span
@@ -204,7 +214,7 @@ export const WorkTimelineMomentSceneNode = memo(function WorkTimelineMomentScene
           {d.sceneId}
         </span>
         {d.manuscriptAnchor ? (
-          <span className="rounded-pill border border-canvas-outline-accent/30 bg-canvas-outline-accent/15 px-1.5 py-0.5 text-label-12 text-canvas-outline-accent">
+          <span className="rounded-pill border border-canvas-layer-moment-accent/30 bg-canvas-layer-moment-accent/15 px-1.5 py-0.5 text-label-12 text-canvas-layer-moment-accent">
             {t('workTimeline.momentSceneNode.anchor', {
               chapter: d.manuscriptAnchor.chapterId,
               scene: d.manuscriptAnchor.sceneId,
@@ -241,10 +251,12 @@ export const WorkTimelineMomentSceneNode = memo(function WorkTimelineMomentScene
  * Renders the beat's title + beat-id pill + manuscript-anchor badge
  * (chapter/scene/beat link) + optional beat status chip.
  *
- * The `Milestone` icon (beat-pin tone via `text-canvas-outline-accent`)
+ * The `Milestone` icon (beat-pin tone via `text-canvas-layer-moment-accent`)
  * leads the card; the manuscript-anchor badge is prominent. Reads as
  * "beat precision — inside the scene", distinct from the Scene card
- * (one level up) and the Narrative event (one layer up).
+ * (one level up) and the Narrative event (one layer up). The Moment layer
+ * accent is the dedicated `--color-canvas-layer-moment-accent` token
+ * (P4 Task 2 — alias gray-900 ink-on-paper).
  */
 export const WorkTimelineMomentBeatNode = memo(function WorkTimelineMomentBeatNode({
   data,
@@ -271,7 +283,7 @@ export const WorkTimelineMomentBeatNode = memo(function WorkTimelineMomentBeatNo
       />
       <div className="flex items-center gap-2">
         <Milestone
-          className="h-3.5 w-3.5 flex-shrink-0 text-canvas-outline-accent"
+          className="h-3.5 w-3.5 flex-shrink-0 text-canvas-layer-moment-accent"
           aria-hidden
         />
         <span
@@ -285,7 +297,7 @@ export const WorkTimelineMomentBeatNode = memo(function WorkTimelineMomentBeatNo
       </div>
       <div className="mt-0.5 flex flex-wrap items-center gap-1">
         {d.manuscriptAnchor ? (
-          <span className="rounded-pill border border-canvas-outline-accent/30 bg-canvas-outline-accent/15 px-1.5 py-0.5 text-label-12 text-canvas-outline-accent">
+          <span className="rounded-pill border border-canvas-layer-moment-accent/30 bg-canvas-layer-moment-accent/15 px-1.5 py-0.5 text-label-12 text-canvas-layer-moment-accent">
             {t('workTimeline.momentBeatNode.anchor', {
               chapter: d.manuscriptAnchor.chapterId,
               scene: d.manuscriptAnchor.sceneId,

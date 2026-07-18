@@ -53,6 +53,7 @@ import { Info } from 'lucide-react';
 
 import { CanvasShell } from '@/components/canvas/canvas-shell';
 import { useCanvasSurface, type CanvasSurfaceQueryResult } from '@/components/canvas/use-canvas-surface';
+import { SemanticZoomBridge } from '@/components/canvas/use-semantic-zoom';
 import { useWorldKbGraph, usePatchWorldKbEntity } from '@/lib/canvas/use-world-kb-data';
 import { flattenPages, useWorks } from '@/api/queries';
 import { useNexusClient } from '@/lib/client-context';
@@ -547,23 +548,46 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
           ) : null}
         </div>
       ) : (
-        <CanvasShell
-          nodes={surface.nodes}
-          edges={surface.edges}
-          nodeTypes={surface.nodeTypes}
-          onNodesChange={surface.onNodesChange}
-          summaryText={surface.summaryText}
-          ariaLabel={t('timeline.canvasAriaLabel')}
-          surfaceKey="timeline"
-          surfaceKind="timeline"
-          relayout={surface.relayout}
-        >
-          {surface.inspector ? (
-            <div className="pointer-events-auto absolute right-3 top-3 w-[340px] max-w-[calc(100%-1.5rem)] rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-popover">
-              {surface.inspector}
-            </div>
-          ) : null}
-        </CanvasShell>
+        // V1.123 P4 Task 4 — layer transition animation. The `key` forces a
+        // remount on layer swap so the CSS keyframe animation replays; the
+        // `nexus-layer-enter` class carries the keyframe (fade + subtle scale
+        // per layer-feel-differentiation.md §4 "changing instrument"). The
+        // global `prefers-reduced-motion` rule in `apps/web/src/index.css`
+        // collapses animation-duration to 0.01ms so reduced-motion users get
+        // an instant swap. Viewport continuity survives via `useCanvasViewport`'s
+        // module-level cache (surfaceKey="timeline" is constant across layers).
+        <div key={activeLayer} className="nexus-layer-enter" data-testid="timeline-canvas-layer-transition">
+          <CanvasShell
+            nodes={surface.nodes}
+            edges={surface.edges}
+            nodeTypes={surface.nodeTypes}
+            onNodesChange={surface.onNodesChange}
+            summaryText={surface.summaryText}
+            ariaLabel={t('timeline.canvasAriaLabel')}
+            surfaceKey="timeline"
+            surfaceKind="timeline"
+            relayout={surface.relayout}
+          >
+            {/* V1.123 P4 Task 3 — semantic zoom bridge. Mounts inside
+                CanvasShell so it lives within the ReactFlowProvider; observes
+                viewport zoom and fires `setLayerOverride` when the user
+                crosses the architect-locked 0.55–0.70 hysteresis band
+                (layer-feel-differentiation.md §3.2). The bridge renders
+                nothing visible — purely a hook host. Coexists with the
+                explicit Brief ↔ Narrative layer tabs (the primary affordance
+                per plan Global Constraints §"Semantic zoom feasibility"). */}
+            <SemanticZoomBridge
+              activeLayer={activeLayer}
+              onLayerChange={setLayerOverride}
+              chain={{ coarseLayer: 'brief', fineLayer: 'narrative' }}
+            />
+            {surface.inspector ? (
+              <div className="pointer-events-auto absolute right-3 top-3 w-[340px] max-w-[calc(100%-1.5rem)] rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-popover">
+                {surface.inspector}
+              </div>
+            ) : null}
+          </CanvasShell>
+        </div>
       )}
 
       {conflictInfo && conflictInfo.kind === 'conflict' && conflictNode ? (
