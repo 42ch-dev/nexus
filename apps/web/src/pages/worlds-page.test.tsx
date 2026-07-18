@@ -1,9 +1,12 @@
 /**
- * WorldsPage render tests (V1.115 T3 — R-V1111P1-WORLDS-PICKER).
+ * WorldsPage render tests (V1.115 T3 — R-V1111P1-WORLDS-PICKER; V1.122 P1 T3
+ * retarget).
  *
  * Verifies the picker UX: the page lists worlds from the existing
  * `GET /v1/daemon/narrative/worlds` endpoint, picking a world navigates to
- * `/worlds/<id>/kb`, and an honest empty state renders when the list is empty.
+ * `/worlds/<id>/timeline` (V1.122 P1 T3 retarget — Timeline is the default
+ * World entry; World KB stays reachable as a peer surface), and an honest
+ * empty state renders when the list is empty.
  */
 import { http, HttpResponse } from 'msw';
 import { beforeEach, describe, expect, it } from 'vitest';
@@ -35,6 +38,8 @@ function renderWorldsAt(initialPath = '/worlds') {
       <LocationDisplay />
       <Routes>
         <Route path="worlds" element={<WorldsPage />} />
+        {/* V1.122 P1 T3 — pick target is now the Timeline route. */}
+        <Route path="worlds/:worldId/timeline" element={<div data-testid="timeline-outlet" />} />
         <Route path="worlds/:worldId/kb" element={<div data-testid="world-kb-outlet" />} />
       </Routes>
     </>,
@@ -85,7 +90,7 @@ describe('WorldsPage', () => {
     expect(screen.getByText('Solara')).toBeInTheDocument();
   });
 
-  it('navigates to /worlds/<id>/kb when a world is picked', async () => {
+  it('navigates to /worlds/<id>/timeline when a world is picked (V1.122 P1 T3 retarget)', async () => {
     const user = userEvent.setup();
 
     useHandlers(
@@ -97,10 +102,10 @@ describe('WorldsPage', () => {
     renderWorldsAt();
 
     await screen.findByText('Eryndor');
-    await user.click(screen.getByRole('button', { name: 'Open knowledge base' }));
+    await user.click(screen.getByRole('button', { name: 'Open timeline' }));
 
     await waitFor(() => {
-      expect(screen.getByTestId('location')).toHaveTextContent('/worlds/eryndor/kb');
+      expect(screen.getByTestId('location')).toHaveTextContent('/worlds/eryndor/timeline');
     });
   });
 
@@ -116,10 +121,10 @@ describe('WorldsPage', () => {
     renderWorldsAt();
 
     await screen.findByText('Spaced');
-    await user.click(screen.getByRole('button', { name: 'Open knowledge base' }));
+    await user.click(screen.getByRole('button', { name: 'Open timeline' }));
 
     await waitFor(() => {
-      expect(screen.getByTestId('location')).toHaveTextContent('/worlds/w%207/kb');
+      expect(screen.getByTestId('location')).toHaveTextContent('/worlds/w%207/timeline');
     });
   });
 
@@ -248,7 +253,7 @@ describe('WorldsPage voice-split (V1.121 v0.4)', () => {
 
     // Page description stays sans. (The description string appears on both the
     // page header and the card description — both stay interface voice.)
-    const descriptions = screen.getAllByText('Choose a world to open its knowledge base.');
+    const descriptions = screen.getAllByText('Choose a world to open its timeline.');
     for (const d of descriptions) {
       expect(d.className).not.toMatch(/\bfont-display\b/);
     }

@@ -1,24 +1,51 @@
 {
   "version": 1,
   "updated_at": "2026-07-18",
-  "plans": [],
+  "plans": [
+    {
+      "plan_id": "2026-07-18-v1.122-three-pillar-spec-refactor",
+      "status": "Done",
+      "iteration_refs": [
+        "V1.122"
+      ],
+      "metadata": {
+        "primary_spec": ".mstar/specs/canvas-strategy-surface.md",
+        "spec_integration_branch": "iteration/v1.122",
+        "merge_target": "iteration/v1.122",
+        "working_branch": "feature/v1.122-three-pillar-spec-refactor"
+      }
+    },
+    {
+      "plan_id": "2026-07-18-v1.122-timeline-first-canvas",
+      "status": "Done",
+      "iteration_refs": [
+        "V1.122"
+      ],
+      "metadata": {
+        "primary_spec": ".mstar/specs/canvas-strategy-surface.md",
+        "spec_integration_branch": "iteration/v1.122",
+        "merge_target": "iteration/v1.122",
+        "working_branch": "feature/v1.122-timeline-first-canvas"
+      }
+    }
+  ],
   "metadata": {
     "integration_branch_retired": false,
     "iteration_base_branch": "main",
     "last_integration_branch": "iteration/v1.121",
-    "latest_active_compass": "v1.121/delivery-compass.md",
-    "latest_active_iteration": "V1.121",
+    "latest_active_compass": "v1.122/delivery-compass.md",
+    "latest_active_iteration": "V1.122",
     "latest_ship": {
-      "iteration": "V1.121",
-      "compass": "v1.121/delivery-compass.md",
+      "iteration": "V1.122",
+      "compass": "v1.122/delivery-compass.md",
       "shipped_at": "2026-07-18",
-      "pr": "https://github.com/42ch-dev/nexus/pull/155",
-      "merge_commit": "bf3d59f0"
+      "pr": null,
+      "merge_commit": null
     },
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "pre_iteration_hotfix": null,
-    "spec_integration_branch": "iteration/v1.121",
+    "spec_integration_branch": "iteration/v1.122",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {
@@ -87,7 +114,7 @@
         "2026-07-12-v1.113-i18n-completion": 4
       }
     },
-    "updated_at": "2026-07-15"
+    "updated_at": "2026-07-18"
   },
   "residual_findings": {
     "2026-07-15-v1.119-setup-continue-unblock": [
@@ -2130,6 +2157,114 @@
         "created_at": "2026-07-18",
         "source": "P3 T4 observation O1 - recommended separate contrast-tuning plan",
         "tracking_link": ".mstar/plans/2026-07-17-v1.121-canvas-reading-elevation.md"
+      }
+    ],
+    "2026-07-18-v1.122-three-pillar-spec-refactor": [
+      {
+        "id": "R-V1122P0QC3-W001",
+        "severity": "low",
+        "source": "QC3 W-001",
+        "lifecycle": "open",
+        "description": "Large-graph projection performance guidance not cross-referenced in Draft overlay §3.3.2",
+        "tracking_link": ".mstar/plans/2026-07-18-v1.122-three-pillar-spec-refactor.md#review-gate-summary"
+      },
+      {
+        "id": "R-V1122P0QC1-S001",
+        "severity": "nit",
+        "source": "QC1 S-1",
+        "lifecycle": "open",
+        "description": "§1 surface-count dissonance in canvas-strategy-surface.md",
+        "tracking_link": ".mstar/plans/2026-07-18-v1.122-three-pillar-spec-refactor.md#review-gate-summary"
+      },
+      {
+        "id": "R-V1122P0QC1-S002",
+        "severity": "nit",
+        "source": "QC1 S-2",
+        "lifecycle": "open",
+        "description": "§4.5->§4.6 anchor renumbering (file-local)",
+        "tracking_link": ".mstar/plans/2026-07-18-v1.122-three-pillar-spec-refactor.md#review-gate-summary"
+      },
+      {
+        "id": "R-V1122P0QC1-S003",
+        "severity": "nit",
+        "source": "QC1 S-3",
+        "lifecycle": "open",
+        "description": "Route prefix divergence /v1/local/ vs /v1/daemon/ - informational for P1",
+        "tracking_link": ".mstar/plans/2026-07-18-v1.122-three-pillar-spec-refactor.md#review-gate-summary"
+      },
+      {
+        "id": "R-V1122P0QC3-S001",
+        "severity": "nit",
+        "source": "QC3 S-001",
+        "lifecycle": "open",
+        "description": "Draft overlay lacks explicit P5 merge path",
+        "tracking_link": ".mstar/plans/2026-07-18-v1.122-three-pillar-spec-refactor.md#review-gate-summary"
+      },
+      {
+        "id": "R-V1122P0QC3-S002",
+        "severity": "nit",
+        "source": "QC3 S-002",
+        "lifecycle": "open",
+        "description": "DF-V1122-COMPUTE-ON-TIMELINE compound Pillar value",
+        "tracking_link": ".mstar/plans/2026-07-18-v1.122-three-pillar-spec-refactor.md#review-gate-summary"
+      },
+      {
+        "id": "R-V1122P0QC3-S003",
+        "severity": "nit",
+        "source": "QC3 S-003",
+        "lifecycle": "open",
+        "description": "12 shipped DTOs/routes count in §3.3.2 - maintenance liability",
+        "tracking_link": ".mstar/plans/2026-07-18-v1.122-three-pillar-spec-refactor.md#review-gate-summary"
+      }
+    ],
+    "2026-07-18-v1.122-timeline-first-canvas": [
+      {
+        "id": "R-V1122P1QC2-W001",
+        "severity": "low",
+        "source": "QC2 W-001",
+        "lifecycle": "open",
+        "description": "Missing OCC version doc in TimelineInspector.handleSubmit (behavior correct)",
+        "tracking_link": ".mstar/plans/2026-07-18-v1.122-timeline-first-canvas.md#review-gate-summary"
+      },
+      {
+        "id": "R-V1122P1QC3-W001",
+        "severity": "low",
+        "source": "QC3 W-001",
+        "lifecycle": "open",
+        "description": "No visible-node cap/lazy-expand for large World KB graphs (mitigated by hasSuppliedPositions + LAYOUT_WARN_MS)",
+        "tracking_link": ".mstar/plans/2026-07-18-v1.122-timeline-first-canvas.md#review-gate-summary"
+      },
+      {
+        "id": "R-V1122P1QC3-W002",
+        "severity": "low",
+        "source": "QC3 W-002",
+        "lifecycle": "open",
+        "description": "TimelineAltView not virtualized (MVP < 100 entities; DF-V1122-ALT-VIEW-VIRTUAL)",
+        "tracking_link": ".mstar/plans/2026-07-18-v1.122-timeline-first-canvas.md#review-gate-summary"
+      },
+      {
+        "id": "R-V1122P1QC3-W003",
+        "severity": "low",
+        "source": "QC3 W-003",
+        "lifecycle": "open",
+        "description": "In-app dirty-state guard deferred (BrowserRouter); useBeforeUnload covers tab close only (DF-V1122-DIRTY-GUARD-INAPP)",
+        "tracking_link": ".mstar/plans/2026-07-18-v1.122-timeline-first-canvas.md#review-gate-summary"
+      },
+      {
+        "id": "R-V1122P1QC3-S001",
+        "severity": "nit",
+        "source": "QC3 S-001",
+        "lifecycle": "open",
+        "description": "Per-row Date.now() in formatUpdated (minor re-render cost)",
+        "tracking_link": ".mstar/plans/2026-07-18-v1.122-timeline-first-canvas.md#review-gate-summary"
+      },
+      {
+        "id": "R-V1122P1QC3-S002",
+        "severity": "nit",
+        "source": "QC3 S-002",
+        "lifecycle": "open",
+        "description": "Minor stroke-color mapping extraction in edge types",
+        "tracking_link": ".mstar/plans/2026-07-18-v1.122-timeline-first-canvas.md#review-gate-summary"
       }
     ]
   }

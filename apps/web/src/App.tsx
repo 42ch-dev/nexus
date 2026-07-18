@@ -45,6 +45,13 @@ const WorldKbPage = lazy(() =>
   import('@/pages/world-kb-page').then((m) => ({ default: m.WorldKbPage })),
 );
 
+// Route-split: the Timeline canvas (V1.122 P1 T3) is the default World entry.
+// Lazy-loaded alongside the other canvas routes so React Flow stays out of the
+// Control Room bootstrap chunk (canvas-strategy-surface.md §3.1).
+const TimelinePage = lazy(() =>
+  import('@/pages/timeline-page').then((m) => ({ default: m.TimelinePage })),
+);
+
 /**
  * App routes — Control Room + Setup shell.
  *
@@ -87,14 +94,34 @@ function AppRoutes() {
           path="worlds"
           element={<WorldsPage />}
         />
-        <Route
-          path="worlds/:worldId/kb"
-          element={
-            <Suspense fallback={<LoadingState label="Loading World KB…" />}>
-              <WorldKbPage />
-            </Suspense>
-          }
-        />
+        {/* V1.122 P1 T3 — Timeline is the default World entry. The index
+            redirect sends `/worlds/:worldId` to `/worlds/:worldId/timeline`
+            (the World-building hero surface). Peer surfaces (World KB at
+            `/kb`, Strategy via `/strategies`) stay reachable as siblings.
+            Work entry is unchanged — `/works/:workId` still redirects to
+            `outline` (V1.118 regression gate). */}
+        <Route path="worlds/:worldId">
+          <Route
+            index
+            element={<Navigate to="timeline" replace />}
+          />
+          <Route
+            path="timeline"
+            element={
+              <Suspense fallback={<LoadingState label="Loading Timeline…" />}>
+                <TimelinePage />
+              </Suspense>
+            }
+          />
+          <Route
+            path="kb"
+            element={
+              <Suspense fallback={<LoadingState label="Loading World KB…" />}>
+                <WorldKbPage />
+              </Suspense>
+            }
+          />
+        </Route>
         <Route path="sessions" element={<SessionsPage />} />
         <Route path="schedule" element={<SchedulePage />} />
         <Route path="capabilities" element={<Navigate to="/sessions" replace />} />

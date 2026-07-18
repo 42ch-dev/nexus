@@ -613,5 +613,86 @@
   "source": "来源",
   "target": "目标",
   "type": "类型",
-  "confidence": "置信度"
+  "confidence": "置信度",
+  "timeline": {
+    "loading": "正在加载时间轴…",
+    "loadError": "无法加载世界时间轴。",
+    "canvasAriaLabel": "世界时间轴画布",
+    "orderingDisclaimer": "时间轴顺序根据可用事件数据推断，并非权威年表。",
+    "empty": {
+      "title": "该世界的时间轴为空",
+      "description": "通过世界知识库或章节抽取添加的事件将显示在此处。"
+    },
+    "header": {
+      "title": "时间轴",
+      "description": "世界的 when 轴。切换到世界知识库以编辑实体。",
+      "peerNavAria": "同级面板",
+      "worldKbLink": "世界知识库",
+      "strategyLink": "策略",
+      "showGraph": "显示图形",
+      "showList": "显示列表视图"
+    },
+    "inspector": {
+      "title": "时间轴实体",
+      "description": "编辑此实体的标题与正文。变更通过世界知识库写入边界提交。",
+      "aria": "{{name}} 的时间轴实体检查器",
+      "version": "v{{version}}",
+      "noChanges": "无更改",
+      "editing": "正在编辑 {{fields}}",
+      "saving": "保存中…",
+      "save": "保存",
+      "bodyJsonError": "正文必须是有效的 JSON。",
+      "bodyJsonObjectError": "正文必须是 JSON 对象。",
+      "bodyPlaceholder": "自由格式的正文 JSON…",
+      "field": {
+        "title": "标题",
+        "body": "正文",
+        "blockType": "块类型",
+        "aliases": "别名"
+      }
+    },
+    "eventNode": {
+      "unnamed": "(未命名事件)",
+      "temporalUnknown": "时间信号未知",
+      "selected": "已选中时间线事件",
+      "sourceAnchorCount_one": "{{count}} 个来源锚点",
+      "sourceAnchorCount_other": "{{count}} 个来源锚点",
+      "aria": "时间线事件：{{name}}"
+    },
+    "keyBlockNode": {
+      "unnamed": "(未命名实体)",
+      "selected": "已选中上下文实体",
+      "sourceAnchorCount_one": "{{count}} 个来源锚点",
+      "sourceAnchorCount_other": "{{count}} 个来源锚点",
+      "aria": "上下文实体：{{name}}"
+    },
+    "altView": {
+      "ariaLabel": "时间轴实体（可排序列表视图）",
+      "caption": "时间轴事件与实体，按{{sortKey}}（{{sortDir}}）排序。在行上按 Enter 可打开其检查器。",
+      "empty": "尚无时间轴实体。",
+      "unnamed": "(未命名)",
+      "listView": "列表视图",
+      "entryCount_one": "{{count}} 个实体",
+      "entryCount_other": "{{count}} 个实体",
+      "column": {
+        "title": "标题",
+        "kind": "类型",
+        "occurredAt": "发生时间",
+        "anchors": "锚点",
+        "updated": "更新时间"
+      },
+      "occurredAtUnknown": "—",
+      "sortKey": {
+        "title": "标题",
+        "kind": "类型",
+        "occurredAt": "发生时间",
+        "anchors": "锚点",
+        "updated": "更新时间"
+      },
+      "sortDir": {
+        "asc": "升序",
+        "desc": "降序"
+      }
+    }
+  }
 }
