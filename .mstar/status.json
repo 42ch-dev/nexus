@@ -82,7 +82,7 @@
     },
     {
       "plan_id": "2026-07-18-v1.123-three-layer-zoom-experience",
-      "status": "Todo",
+      "status": "Done",
       "iteration_refs": [
         "V1.123"
       ],
@@ -2838,6 +2838,107 @@
         "id": "R-V1123P3QC3-S003",
         "severity": "nit",
         "title": "Global Timeline staleTime (5s) vs per-World graph staleTime (0) undocumented",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": null
+      }
+    ],
+    "2026-07-18-v1.123-three-layer-zoom-experience": [
+      {
+        "id": "R-V1123P4QC1-S001",
+        "severity": "low",
+        "title": "key={activeLayer} remount destroys RF selection state on layer swap (medium future-risk; documented trade-off)",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": "P5+ selection-persistence candidate"
+      },
+      {
+        "id": "R-V1123P4QC1-S002",
+        "severity": "nit",
+        "title": "--color-canvas-layer-narrative-accent defined but dormant (spec §6.1 allowance; future tuning knob)",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P4QC1-S003",
+        "severity": "low",
+        "title": "URL-write logic duplicated between Timeline + Work Timeline orchestrators (~30 LOC × 2); suggest P5+ extraction to useLayerUrlState",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": "P5+ refactor candidate"
+      },
+      {
+        "id": "R-V1123P4QC1-S004",
+        "severity": "nit",
+        "title": "LayerBreadcrumb is binary (coarse/fine); 3-level chain would need API evolution (V1.124+ if relevant)",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P4QC1-S005",
+        "severity": "nit",
+        "title": "Tailwind-merge safety for new color utilities verified (negative finding — no bug; V1.94 risk doesn't apply to plain text-color tokens)",
+        "lifecycle": "open",
+        "source": "qc1",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P4QC3-S001",
+        "severity": "low",
+        "title": "useViewport() unbounded re-render cost; consider throttling for very large graphs",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": "P5+ perf polish"
+      },
+      {
+        "id": "R-V1123P4QC3-S002",
+        "severity": "low",
+        "title": "Semantic zoom history pollution (browser back button through layer swaps)",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": "P5+ UX polish"
+      },
+      {
+        "id": "R-V1123P4QC3-S003",
+        "severity": "nit",
+        "title": "URL state read/write overhead acceptable for V1.123; document for future scale",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P4QC3-S004",
+        "severity": "low",
+        "title": "CSS transition ceiling when Framer Motion arrives (P5+ if richer animation needed)",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": "P5+ animation upgrade"
+      },
+      {
+        "id": "R-V1123P4QC3-S005",
+        "severity": "nit",
+        "title": "React Flow v12 stable APIs used; future version risk low",
+        "lifecycle": "open",
+        "source": "qc3",
+        "closure_note": null,
+        "tracking_link": null
+      },
+      {
+        "id": "R-V1123P4QC3-S006",
+        "severity": "nit",
+        "title": "Residual surface mapped; P0-P3 residuals unaffected (observation; not actionable)",
         "lifecycle": "open",
         "source": "qc3",
         "closure_note": null,
