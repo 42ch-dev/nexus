@@ -624,5 +624,85 @@
   "source": "Source",
   "target": "Target",
   "type": "Type",
-  "confidence": "Confidence"
+  "confidence": "Confidence",
+  "timeline": {
+    "loading": "Loading Timeline…",
+    "loadError": "Could not load the world timeline.",
+    "canvasAriaLabel": "World timeline canvas",
+    "empty": {
+      "title": "This World's timeline is empty",
+      "description": "Events you add through World KB or chapter extraction will appear here."
+    },
+    "header": {
+      "title": "Timeline",
+      "description": "The world's when-axis. Pivots to World KB for entity edits.",
+      "peerNavAria": "Peer surfaces",
+      "worldKbLink": "World KB",
+      "strategyLink": "Strategy",
+      "showGraph": "Show graph",
+      "showList": "Show list view"
+    },
+    "inspector": {
+      "title": "Timeline entity",
+      "description": "Edit this entity's title and body. Routes through the World KB write boundary.",
+      "aria": "Timeline entity inspector for {{name}}",
+      "version": "v{{version}}",
+      "noChanges": "No changes",
+      "editing": "Editing {{fields}}",
+      "saving": "Saving…",
+      "save": "Save",
+      "bodyJsonError": "Body must be valid JSON.",
+      "bodyJsonObjectError": "Body must be a JSON object.",
+      "bodyPlaceholder": "Free-form body JSON…",
+      "field": {
+        "title": "Title",
+        "body": "Body",
+        "blockType": "Block Type",
+        "aliases": "Aliases"
+      }
+    },
+    "eventNode": {
+      "unnamed": "(unnamed event)",
+      "temporalUnknown": "Temporal signal unknown",
+      "selected": "Selected timeline event",
+      "sourceAnchorCount_one": "{{count}} source anchor",
+      "sourceAnchorCount_other": "{{count}} source anchors",
+      "aria": "Timeline event: {{name}}"
+    },
+    "keyBlockNode": {
+      "unnamed": "(unnamed entity)",
+      "selected": "Selected context entity",
+      "sourceAnchorCount_one": "{{count}} source anchor",
+      "sourceAnchorCount_other": "{{count}} source anchors",
+      "aria": "Context entity: {{name}}"
+    },
+    "altView": {
+      "ariaLabel": "Timeline entities (sortable list view)",
+      "caption": "Timeline events and entities sorted by {{sortKey}} ({{sortDir}}). Press Enter on a row to open its inspector.",
+      "empty": "No Timeline entities yet.",
+      "unnamed": "(unnamed)",
+      "listView": "list view",
+      "entryCount_one": "{{count}} entity",
+      "entryCount_other": "{{count}} entities",
+      "column": {
+        "title": "Title",
+        "kind": "Kind",
+        "occurredAt": "Occurred At",
+        "anchors": "Anchors",
+        "updated": "Updated"
+      },
+      "occurredAtUnknown": "—",
+      "sortKey": {
+        "title": "title",
+        "kind": "kind",
+        "occurredAt": "occurred at",
+        "anchors": "anchors",
+        "updated": "updated"
+      },
+      "sortDir": {
+        "asc": "ascending",
+        "desc": "descending"
+      }
+    }
+  }
 }

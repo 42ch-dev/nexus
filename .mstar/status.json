@@ -17,7 +17,7 @@
     },
     {
       "plan_id": "2026-07-18-v1.122-timeline-first-canvas",
-      "status": "Todo",
+      "status": "Done",
       "iteration_refs": [
         "V1.122"
       ],
@@ -2215,6 +2215,56 @@
         "lifecycle": "open",
         "description": "12 shipped DTOs/routes count in §3.3.2 - maintenance liability",
         "tracking_link": ".mstar/plans/2026-07-18-v1.122-three-pillar-spec-refactor.md#review-gate-summary"
+      }
+    ],
+    "2026-07-18-v1.122-timeline-first-canvas": [
+      {
+        "id": "R-V1122P1QC2-W001",
+        "severity": "low",
+        "source": "QC2 W-001",
+        "lifecycle": "open",
+        "description": "Missing OCC version doc in TimelineInspector.handleSubmit (behavior correct)",
+        "tracking_link": ".mstar/plans/2026-07-18-v1.122-timeline-first-canvas.md#review-gate-summary"
+      },
+      {
+        "id": "R-V1122P1QC3-W001",
+        "severity": "low",
+        "source": "QC3 W-001",
+        "lifecycle": "open",
+        "description": "No visible-node cap/lazy-expand for large World KB graphs (mitigated by hasSuppliedPositions + LAYOUT_WARN_MS)",
+        "tracking_link": ".mstar/plans/2026-07-18-v1.122-timeline-first-canvas.md#review-gate-summary"
+      },
+      {
+        "id": "R-V1122P1QC3-W002",
+        "severity": "low",
+        "source": "QC3 W-002",
+        "lifecycle": "open",
+        "description": "TimelineAltView not virtualized (MVP < 100 entities; DF-V1122-ALT-VIEW-VIRTUAL)",
+        "tracking_link": ".mstar/plans/2026-07-18-v1.122-timeline-first-canvas.md#review-gate-summary"
+      },
+      {
+        "id": "R-V1122P1QC3-W003",
+        "severity": "low",
+        "source": "QC3 W-003",
+        "lifecycle": "open",
+        "description": "In-app dirty-state guard deferred (BrowserRouter); useBeforeUnload covers tab close only (DF-V1122-DIRTY-GUARD-INAPP)",
+        "tracking_link": ".mstar/plans/2026-07-18-v1.122-timeline-first-canvas.md#review-gate-summary"
+      },
+      {
+        "id": "R-V1122P1QC3-S001",
+        "severity": "nit",
+        "source": "QC3 S-001",
+        "lifecycle": "open",
+        "description": "Per-row Date.now() in formatUpdated (minor re-render cost)",
+        "tracking_link": ".mstar/plans/2026-07-18-v1.122-timeline-first-canvas.md#review-gate-summary"
+      },
+      {
+        "id": "R-V1122P1QC3-S002",
+        "severity": "nit",
+        "source": "QC3 S-002",
+        "lifecycle": "open",
+        "description": "Minor stroke-color mapping extraction in edge types",
+        "tracking_link": ".mstar/plans/2026-07-18-v1.122-timeline-first-canvas.md#review-gate-summary"
       }
     ]
   }
