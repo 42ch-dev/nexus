@@ -643,6 +643,18 @@
       "showGraph": "Show graph",
       "showList": "Show list view"
     },
+    "layerSwitcher": {
+      "ariaLabel": "Timeline layer",
+      "brief": "Brief",
+      "narrative": "Narrative"
+    },
+    "brief": {
+      "emptyState": {
+        "title": "No era markers yet",
+        "message": "Brief shows the world's shape across ages. Switch to Narrative to browse events, or add era markers when the Brief carrier is ready.",
+        "cta": "Switch to Narrative"
+      }
+    },
     "inspector": {
       "title": "Timeline entity",
       "description": "Edit this entity's title and body. Routes through the World KB write boundary.",
@@ -669,6 +681,26 @@
       "sourceAnchorCount_one": "{{count}} source anchor",
       "sourceAnchorCount_other": "{{count}} source anchors",
       "aria": "Timeline event: {{name}}"
+    },
+    "briefEraNode": {
+      "unnamed": "(unnamed era)",
+      "temporalUnknown": "Era time span unknown",
+      "selected": "Selected Brief era",
+      "sourceAnchorCount_one": "{{count}} source anchor",
+      "sourceAnchorCount_other": "{{count}} source anchors",
+      "aria": "Brief era: {{name}}",
+      "span": "{{start}} → {{end}}"
+    },
+    "briefEraInspector": {
+      "title": "Brief era",
+      "description": "Era markers from the world-shape Brief carrier. Edit title or body JSON; structured era fields are read-only until the Brief carrier lands.",
+      "aria": "Brief-era inspector for {{name}}",
+      "identityAria": "Era identity markers",
+      "field": {
+        "eraId": "Era id",
+        "span": "Time span",
+        "worldSummary": "World summary"
+      }
     },
     "keyBlockNode": {
       "unnamed": "(unnamed entity)",

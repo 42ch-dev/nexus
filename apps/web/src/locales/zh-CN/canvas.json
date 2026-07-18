@@ -632,6 +632,18 @@
       "showGraph": "显示图形",
       "showList": "显示列表视图"
     },
+    "layerSwitcher": {
+      "ariaLabel": "时间轴图层",
+      "brief": "概览",
+      "narrative": "叙事"
+    },
+    "brief": {
+      "emptyState": {
+        "title": "尚无纪元标记",
+        "message": "概览展示世界跨越时代的形态。切换到叙事以浏览事件，或在概览载体就绪后添加纪元标记。",
+        "cta": "切换到叙事"
+      }
+    },
     "inspector": {
       "title": "时间轴实体",
       "description": "编辑此实体的标题与正文。变更通过世界知识库写入边界提交。",
@@ -658,6 +670,26 @@
       "sourceAnchorCount_one": "{{count}} 个来源锚点",
       "sourceAnchorCount_other": "{{count}} 个来源锚点",
       "aria": "时间线事件：{{name}}"
+    },
+    "briefEraNode": {
+      "unnamed": "(未命名纪元)",
+      "temporalUnknown": "纪元时间跨度未知",
+      "selected": "已选中概览纪元",
+      "sourceAnchorCount_one": "{{count}} 个来源锚点",
+      "sourceAnchorCount_other": "{{count}} 个来源锚点",
+      "aria": "概览纪元：{{name}}",
+      "span": "{{start}} → {{end}}"
+    },
+    "briefEraInspector": {
+      "title": "概览纪元",
+      "description": "来自世界形态概览载体的纪元标记。可编辑标题或正文 JSON；结构化纪元字段在概览载体落地前为只读。",
+      "aria": "{{name}} 的概览纪元检查器",
+      "identityAria": "纪元身份标记",
+      "field": {
+        "eraId": "纪元 ID",
+        "span": "时间跨度",
+        "worldSummary": "世界概述"
+      }
     },
     "keyBlockNode": {
       "unnamed": "(未命名实体)",

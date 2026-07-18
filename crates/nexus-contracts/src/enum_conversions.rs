@@ -92,7 +92,8 @@ impl SubscriptionTier {
     }
 }
 
-// V1.54 P1: BlockType as_str — supports novel, game-bible, and script (V1.55 P3) variants.
+// V1.54 P1: BlockType as_str — supports novel, game-bible, script (V1.55 P3),
+// and era (V1.123 P1) variants.
 impl BlockType {
     #[must_use]
     pub const fn as_str(&self) -> &'static str {
@@ -116,6 +117,8 @@ impl BlockType {
             Self::Dialogue => "dialogue",
             Self::Beat => "beat",
             Self::Act => "act",
+            // V1.123 P1: Brief-era cross-profile world-shape marker
+            Self::Era => "era",
         }
     }
 }
