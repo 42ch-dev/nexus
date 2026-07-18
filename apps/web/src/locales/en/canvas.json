@@ -638,7 +638,9 @@
       "description": "The world's when-axis. Pivots to World KB for entity edits.",
       "peerNavAria": "Peer surfaces",
       "worldKbLink": "World KB",
-      "strategyLink": "Strategy"
+      "strategyLink": "Strategy",
+      "showGraph": "Show graph",
+      "showList": "Show list view"
     },
     "inspector": {
       "title": "Timeline entity",
@@ -673,6 +675,34 @@
       "sourceAnchorCount_one": "{{count}} source anchor",
       "sourceAnchorCount_other": "{{count}} source anchors",
       "aria": "Context entity: {{name}}"
+    },
+    "altView": {
+      "ariaLabel": "Timeline entities (sortable list view)",
+      "caption": "Timeline events and entities sorted by {{sortKey}} ({{sortDir}}). Press Enter on a row to open its inspector.",
+      "empty": "No Timeline entities yet.",
+      "unnamed": "(unnamed)",
+      "listView": "list view",
+      "entryCount_one": "{{count}} entity",
+      "entryCount_other": "{{count}} entities",
+      "column": {
+        "title": "Title",
+        "kind": "Kind",
+        "occurredAt": "Occurred At",
+        "anchors": "Anchors",
+        "updated": "Updated"
+      },
+      "occurredAtUnknown": "—",
+      "sortKey": {
+        "title": "title",
+        "kind": "kind",
+        "occurredAt": "occurred at",
+        "anchors": "anchors",
+        "updated": "updated"
+      },
+      "sortDir": {
+        "asc": "ascending",
+        "desc": "descending"
+      }
     }
   }
 }

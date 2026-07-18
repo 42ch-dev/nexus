@@ -50,6 +50,7 @@ import type {
 
 import type { WorldKbEdgeData } from '../world-kb/types';
 import { TimelineInspector } from './timeline-inspector';
+import { TimelineAltView } from './timeline-alt-view';
 import { timelineNodeTypes } from './timeline-node-types';
 
 // ─── Public types (architect-locked §3.1) ───────────────────────────────────
@@ -190,6 +191,28 @@ export interface TimelineCanvasAdapterContext {
    * the canonical graph. Undefined when no write hook is wired.
    */
   onConflict?: (info: TimelineConflictInfo) => void;
+  /**
+   * Projected Timeline nodes (T5 — alt-view companion). The orchestrator
+   * supplies the post-projection, post-layout node array so the alt-view
+   * table reads the same rows the canvas renders. Mirrors the V1.114 World
+   * KB ctxRef pattern (`ctx.nodes`). Optional in T2/T4 tests that don't
+   * render the alt-view; the wrapper treats `undefined` as an empty list.
+   */
+  nodes?: Node<TimelineNodeData>[];
+  /**
+   * Currently-selected node id (T5 — alt-view row highlight). The
+   * orchestrator owns selection state (it surfaces from `useCanvasSurface`)
+   * and passes the id through so the alt-view highlights the matching row.
+   */
+  selectedNodeId?: string | null;
+  /**
+   * Selection hand-off (T5 — alt-view → inspector). Fires when the user
+   * clicks / keyboard-activates an alt-view row. The orchestrator selects
+   * the matching React Flow node so the inspector that owns the
+   * `kb.patch_entity` write path opens. The alt-view performs NO writes
+   * itself (architect-locked §4.2 — selection-only, inspector-owned writes).
+   */
+  onSelectNode?: (nodeId: string) => void;
 }
 
 export type TimelineCanvasAdapter = CanvasSurfaceAdapter<
@@ -517,6 +540,20 @@ export function summarizeTimelineGraph(graph: TimelineGraph): string {
  *     (`ConflictModalProps`) is Strategy-specific and does not fit world-kb-
  *     flavored conflicts. Conflict UX is orchestrator-owned (mirrors World
  *     KB). Use `extractConflict(error)` for the typed parse.
+ *
+ * T5 extensions over T4:
+ *   - `renderAltView()` — renders the non-spatial sortable Timeline entity
+ *     table via `TimelineAltView` (mirrors the V1.114 World KB alt-view
+ *     pattern). Reads projected nodes + selection from the ctxRef. The
+ *     alt-view is selection-only: row click / Enter fires
+ *     `ctxRef.current.onSelectNode(nodeId)`, which the orchestrator routes
+ *     to a React Flow selection. The inspector that opens as a result owns
+ *     the `kb.patch_entity` write — the alt-view itself performs NO writes
+ *     (architect-locked §4.2 — `timeline.patch_event` is forbidden).
+ *   - `summarizeGraph(graph)` — verified/strengthened for the a11y live
+ *     region: non-empty for every graph state (empty + dense + partial
+ *     temporal signal); emits the ordering disclaimer whenever temporal
+ *     signals are partial OR absent (Batch 1 shipped this; T5 re-tests it).
  */
 export function createTimelineCanvasAdapter(
   ctxRef: MutableRefObject<TimelineCanvasAdapterContext>,
@@ -550,12 +587,42 @@ export function createTimelineCanvasAdapter(
       return <TimelineInspector node={node} ctxRef={ctxRef} />;
     },
 
-    // renderAltView is T5 scope.
+    renderAltView() {
+      return <TimelineAltViewWrapper ctxRef={ctxRef} />;
+    },
 
     summarizeGraph(graph) {
       return summarizeTimelineGraph(graph);
-    },
+     },
   };
+}
+
+// ─── Alt-view wrapper (T5 — non-spatial sortable table) ─────────────────────
+
+/**
+ * Adapter-driven alt view; reads the projected nodes + selection state from
+ * the orchestrator-owned ctxRef at render time. Mirrors the V1.114 World KB
+ * `WorldKbAltViewWrapper` recipe.
+ *
+ * Selection hand-off: row click / Enter invokes `ctxRef.current.onSelectNode`,
+ * which the orchestrator wires to a React Flow node selection. The inspector
+ * that opens as a result owns the `kb.patch_entity` write path — the alt-view
+ * performs NO writes (architect-locked §4.2 — `timeline.patch_event` is
+ * forbidden from this surface).
+ */
+function TimelineAltViewWrapper({
+  ctxRef,
+}: {
+  ctxRef: MutableRefObject<TimelineCanvasAdapterContext>;
+}) {
+  const ctx = ctxRef.current;
+  return (
+    <TimelineAltView
+      nodes={ctx.nodes ?? []}
+      selectedNodeId={ctx.selectedNodeId ?? null}
+      onSelectNode={(nodeId) => ctx.onSelectNode?.(nodeId)}
+    />
+  );
 }
 
 // ─── Conflict extraction (T4 — world-kb-flavored, reused DTOs) ──────────────

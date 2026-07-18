@@ -259,12 +259,40 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
     );
   }
 
+  // T5 — alt-view toggle. Mirrors the V1.114 World KB `showList` pattern: a
+  // header button flips between the spatial when-axis canvas and the
+  // non-spatial sortable table companion. The toggle is hidden on the
+  // empty-state branch (there are no rows to list).
+  const [showAltView, setShowAltView] = useState(false);
+
   // Keep the adapter context current. The adapter object stays referentially
   // stable; only the values inside ctxRef.current change.
+  //
+  // T5: the context also carries the projected `nodes` + `selectedNodeId` +
+  // `onSelectNode` so the alt-view table reads the same rows the canvas
+  // renders and can drive React Flow selection from row clicks. Selection
+  // opens the inspector that owns the `kb.patch_entity` write path — the
+  // alt-view itself performs NO writes (architect-locked §4.2).
   ctxRef.current = {
     worldId,
     onPatchEntity: handlePatchEntity,
     onConflict: (info) => setConflictInfo(info),
+    nodes: surface.nodes,
+    selectedNodeId: surface.selectedNodeId,
+    onSelectNode: (nodeId) => {
+      // T5 — alt-view row → React Flow selection. Dispatch a `select` change
+      // for every node (matching id → selected, others → deselected) so the
+      // `useCanvasSurface` derived `selectedNode` updates and the inspector
+      // opens. This is exactly how a canvas node click flows through RF.
+      // `simplify:` if selection semantics grow (range / multi), lift into
+      // `useCanvasSurface` (DF-V1122-ALT-VIEW-SELECT).
+      const changes = surface.nodes.map((n) => ({
+        type: 'select' as const,
+        id: n.id,
+        selected: n.id === nodeId,
+      }));
+      surface.onNodesChange(changes);
+    },
   };
 
   // When the user navigates to a different node, clear a stale validation
@@ -292,7 +320,11 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
 
   return (
     <div className="flex flex-col gap-3" data-testid="timeline-canvas">
-      <TimelineCanvasHeader worldId={worldId} />
+      <TimelineCanvasHeader
+        worldId={worldId}
+        showAltView={showAltView}
+        onToggleView={() => setShowAltView((v) => !v)}
+      />
 
       {validationBanner && validationBanner.length > 0 ? (
         <ul
@@ -311,6 +343,15 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
           title={t('timeline.empty.title')}
           description={t('timeline.empty.description')}
         />
+      ) : showAltView ? (
+        <div className="grid gap-3 lg:grid-cols-[1fr_360px]">
+          {surface.altView}
+          {surface.inspector ? (
+            <div className="rounded-card border border-gray-alpha-400 bg-background-100 p-4 shadow-popover">
+              {surface.inspector}
+            </div>
+          ) : null}
+        </div>
       ) : (
         <CanvasShell
           nodes={surface.nodes}
@@ -359,8 +400,20 @@ export function TimelineCanvas({ worldId }: TimelineCanvasProps) {
  *
  * The Work entry is intentionally NOT linked from here — Work entry stays
  * Outline (V1.118 regression gate), and Timeline is the World-entry hero.
+ *
+ * T5: the header also surfaces the spatial ↔ list toggle (mirrors the V1.73
+ * World KB `WorldKbHeader` show-list button). Hidden when the Timeline has
+ * zero entities (the empty-state branch owns its own CTA).
  */
-function TimelineCanvasHeader({ worldId }: { worldId: string }) {
+function TimelineCanvasHeader({
+  worldId,
+  showAltView,
+  onToggleView,
+}: {
+  worldId: string;
+  showAltView: boolean;
+  onToggleView: () => void;
+}) {
   const { t } = useTranslation('canvas');
   return (
     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -372,23 +425,33 @@ function TimelineCanvasHeader({ worldId }: { worldId: string }) {
           {t('timeline.header.description')}
         </p>
       </div>
-      <nav
-        className="flex flex-wrap items-center gap-2"
-        aria-label={t('timeline.header.peerNavAria')}
-      >
-        <Link
-          to={`/worlds/${encodeURIComponent(worldId)}/kb`}
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={onToggleView}
           className="rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-1.5 text-button-12 text-gray-900 shadow-elevation-2 hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2"
+          aria-pressed={showAltView}
         >
-          {t('timeline.header.worldKbLink')}
-        </Link>
-        <Link
-          to="/strategies"
-          className="rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-1.5 text-button-12 text-gray-900 shadow-elevation-2 hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2"
+          {showAltView ? t('timeline.header.showGraph') : t('timeline.header.showList')}
+        </button>
+        <nav
+          className="flex flex-wrap items-center gap-2"
+          aria-label={t('timeline.header.peerNavAria')}
         >
-          {t('timeline.header.strategyLink')}
-        </Link>
-      </nav>
+          <Link
+            to={`/worlds/${encodeURIComponent(worldId)}/kb`}
+            className="rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-1.5 text-button-12 text-gray-900 shadow-elevation-2 hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2"
+          >
+            {t('timeline.header.worldKbLink')}
+          </Link>
+          <Link
+            to="/strategies"
+            className="rounded-control border border-gray-alpha-400 bg-background-100 px-3 py-1.5 text-button-12 text-gray-900 shadow-elevation-2 hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2"
+          >
+            {t('timeline.header.strategyLink')}
+          </Link>
+        </nav>
+      </div>
     </div>
   );
 }

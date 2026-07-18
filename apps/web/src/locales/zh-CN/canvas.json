@@ -627,7 +627,9 @@
       "description": "世界的 when 轴。切换到世界知识库以编辑实体。",
       "peerNavAria": "同级面板",
       "worldKbLink": "世界知识库",
-      "strategyLink": "策略"
+      "strategyLink": "策略",
+      "showGraph": "显示图形",
+      "showList": "显示列表视图"
     },
     "inspector": {
       "title": "时间轴实体",
@@ -662,6 +664,34 @@
       "sourceAnchorCount_one": "{{count}} 个来源锚点",
       "sourceAnchorCount_other": "{{count}} 个来源锚点",
       "aria": "上下文实体：{{name}}"
+    },
+    "altView": {
+      "ariaLabel": "时间轴实体（可排序列表视图）",
+      "caption": "时间轴事件与实体，按{{sortKey}}（{{sortDir}}）排序。在行上按 Enter 可打开其检查器。",
+      "empty": "尚无时间轴实体。",
+      "unnamed": "(未命名)",
+      "listView": "列表视图",
+      "entryCount_one": "{{count}} 个实体",
+      "entryCount_other": "{{count}} 个实体",
+      "column": {
+        "title": "标题",
+        "kind": "类型",
+        "occurredAt": "发生时间",
+        "anchors": "锚点",
+        "updated": "更新时间"
+      },
+      "occurredAtUnknown": "—",
+      "sortKey": {
+        "title": "标题",
+        "kind": "类型",
+        "occurredAt": "发生时间",
+        "anchors": "锚点",
+        "updated": "更新时间"
+      },
+      "sortDir": {
+        "asc": "升序",
+        "desc": "降序"
+      }
     }
   }
 }
