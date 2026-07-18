@@ -615,6 +615,39 @@
   "type": "类型",
   "confidence": "置信度",
   "timeline": {
+    "loading": "正在加载时间轴…",
+    "loadError": "无法加载世界时间轴。",
+    "canvasAriaLabel": "世界时间轴画布",
+    "empty": {
+      "title": "该世界的时间轴为空",
+      "description": "通过世界知识库或章节抽取添加的事件将显示在此处。"
+    },
+    "header": {
+      "title": "时间轴",
+      "description": "世界的 when 轴。切换到世界知识库以编辑实体。",
+      "peerNavAria": "同级面板",
+      "worldKbLink": "世界知识库",
+      "strategyLink": "策略"
+    },
+    "inspector": {
+      "title": "时间轴实体",
+      "description": "编辑此实体的标题与正文。变更通过世界知识库写入边界提交。",
+      "aria": "{{name}} 的时间轴实体检查器",
+      "version": "v{{version}}",
+      "noChanges": "无更改",
+      "editing": "正在编辑 {{fields}}",
+      "saving": "保存中…",
+      "save": "保存",
+      "bodyJsonError": "正文必须是有效的 JSON。",
+      "bodyJsonObjectError": "正文必须是 JSON 对象。",
+      "bodyPlaceholder": "自由格式的正文 JSON…",
+      "field": {
+        "title": "标题",
+        "body": "正文",
+        "blockType": "块类型",
+        "aliases": "别名"
+      }
+    },
     "eventNode": {
       "unnamed": "(未命名事件)",
       "temporalUnknown": "时间信号未知",

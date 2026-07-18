@@ -8,15 +8,18 @@ import { EmptyState, ErrorState, LoadingState } from '@/components/ui/states';
 import { useNarrativeWorlds } from '@/api/queries';
 
 /**
- * Worlds picker (V1.115 T3 — R-V1111P1-WORLDS-PICKER).
+ * Worlds picker (V1.115 T3 — R-V1111P1-WORLDS-PICKER; V1.122 P1 T3 retarget).
  *
- * Entry point for the World KB canvas when no `worldId` is in the URL. Reuses
- * the existing `useNarrativeWorlds` query (`GET /v1/daemon/narrative/worlds`)
- * — the same source the SOUL selector consumes — so there is exactly one
- * world-list fetch path in the app.
+ * Entry point for the World KB / Timeline canvas when no `worldId` is in the
+ * URL. Reuses the existing `useNarrativeWorlds` query
+ * (`GET /v1/daemon/narrative/worlds`) — the same source the SOUL selector
+ * consumes — so there is exactly one world-list fetch path in the app.
  *
- * Picking a world navigates to `/worlds/<id>/kb` (the existing World KB
- * route). The first world is **never** auto-selected — the author chooses.
+ * V1.122 P1 T3: picking a world now navigates to
+ * `/worlds/<id>/timeline` (the World-entry hero surface — architect lock +
+ * compass AC-V1122-5). World KB is reachable from the Timeline header as a
+ * peer surface. The first world is **never** auto-selected — the author
+ * chooses.
  */
 export function WorldsPage() {
   const { t } = useTranslation('worlds');
@@ -67,8 +70,8 @@ export function WorldsPage() {
                   <li key={world.world_id}>
                     <button
                       type="button"
-                      onClick={() => navigate(`/worlds/${encodeURIComponent(world.world_id)}/kb`)}
-                      aria-label={t('openKb')}
+                      onClick={() => navigate(`/worlds/${encodeURIComponent(world.world_id)}/timeline`)}
+                      aria-label={t('openTimeline')}
                       className="flex w-full items-center gap-3 rounded-card border border-gray-alpha-400 p-3 text-left transition-colors duration-state ease-standard hover:bg-gray-alpha-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-700 focus-visible:ring-offset-2"
                     >
                       <Globe className="h-5 w-5 shrink-0 text-blue-700" aria-hidden />

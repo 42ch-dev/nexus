@@ -626,6 +626,39 @@
   "type": "Type",
   "confidence": "Confidence",
   "timeline": {
+    "loading": "Loading Timeline…",
+    "loadError": "Could not load the world timeline.",
+    "canvasAriaLabel": "World timeline canvas",
+    "empty": {
+      "title": "This World's timeline is empty",
+      "description": "Events you add through World KB or chapter extraction will appear here."
+    },
+    "header": {
+      "title": "Timeline",
+      "description": "The world's when-axis. Pivots to World KB for entity edits.",
+      "peerNavAria": "Peer surfaces",
+      "worldKbLink": "World KB",
+      "strategyLink": "Strategy"
+    },
+    "inspector": {
+      "title": "Timeline entity",
+      "description": "Edit this entity's title and body. Routes through the World KB write boundary.",
+      "aria": "Timeline entity inspector for {{name}}",
+      "version": "v{{version}}",
+      "noChanges": "No changes",
+      "editing": "Editing {{fields}}",
+      "saving": "Saving…",
+      "save": "Save",
+      "bodyJsonError": "Body must be valid JSON.",
+      "bodyJsonObjectError": "Body must be a JSON object.",
+      "bodyPlaceholder": "Free-form body JSON…",
+      "field": {
+        "title": "Title",
+        "body": "Body",
+        "blockType": "Block Type",
+        "aliases": "Aliases"
+      }
+    },
     "eventNode": {
       "unnamed": "(unnamed event)",
       "temporalUnknown": "Temporal signal unknown",

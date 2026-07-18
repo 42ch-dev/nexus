@@ -1,5 +1,5 @@
 /**
- * Timeline canvas adapter — V1.122 P1 T2.
+ * Timeline canvas adapter — V1.122 P1 T2 (projection) + T4 (write boundary).
  *
  * Projects a World's `WorldKbGraphResponse` onto a left-to-right when-axis
  * (the World-building hero surface, `CanvasSurfaceKind = "timeline"`).
@@ -18,10 +18,22 @@
  *     verbatim (V1.74). No `ForeshadowEdge` / `RealizesEdge` / `ForkFromEdge`.
  *   - No Fork marker nodes (Fork data renders as optional header chrome in T3).
  *
- * Write boundary: T2 ships the READ projection only.
- * `worldKb.patchEntity` (T4) is the sole write path; `timeline.patch_event`
- * (Work-scoped) and `world_kb.patch_relationship` MUST NOT be invoked from
- * this surface in V1.122.
+ * Write boundary (T4 — architect-locked §4): the Timeline surface edits
+ * World-scoped KeyBlock entities through `NexusClient.worldKbPatchEntity`
+ * (the V1.73 `POST .../kb/patch-entity` route) ONLY. The orchestrator owns
+ * the React Query mutation hook; the adapter receives the write callback via
+ * `TimelineCanvasAdapterContext` (mirrors the V1.114 World KB ctxRef pattern).
+ * Forbidden in V1.122: `timeline.patch_event` (Work-scoped),
+ * `world_kb.patch_relationship` (relationships read-only on Timeline),
+ * `kb.promote_candidate` (World KB surface), raw-file writes.
+ *
+ * Conflict policy (T4 — architect-locked §5): reuses `WorldKbConflictError`
+ * (HTTP 409) + `WorldKbValidationError` (HTTP 422); no Timeline-specific
+ * conflict DTO. `extractConflict` parses the canonical `ErrorResponse`
+ * envelope into a `TimelineConflictInfo`; `adaptConflict` (the inherited
+ * interface method) stays `null` — the modal is orchestrator-owned, mirroring
+ * the World KB adapter (the Strategy-specific `ConflictModalProps` return type
+ * does not fit world-kb-flavored conflicts).
  *
  * `wire_contracts_changed: false` — the adapter reuses 12 shipped DTOs/routes
  * verbatim; only the frontend enum + this module are new.
@@ -37,6 +49,7 @@ import type {
 } from '@42ch/nexus-contracts';
 
 import type { WorldKbEdgeData } from '../world-kb/types';
+import { TimelineInspector } from './timeline-inspector';
 import { timelineNodeTypes } from './timeline-node-types';
 
 // ─── Public types (architect-locked §3.1) ───────────────────────────────────
@@ -78,27 +91,105 @@ export type TimelineEdgeData = WorldKbEdgeData;
 // ─── Adapter context ────────────────────────────────────────────────────────
 
 /**
+ * Patchable fields on a `WorldKbEntityProjection` (V1.73 `WorldKbEntityPatch`).
+ * The Timeline surface's write boundary is limited to these four fields via
+ * `kb.patch_entity` (architect-locked §4.1).
+ */
+export type TimelinePatchField = 'title' | 'body' | 'aliases' | 'block_type';
+
+/**
+ * The patch payload the Timeline adapter emits — a subset of the V1.73
+ * `WorldKbEntityPatch` wire shape. The field set is identical so the
+ * orchestrator can forward `patch` straight into `worldKbPatchEntity` without
+ * a remap. At least one property is required by the schema; the
+ * orchestrator's submit handler skips no-op patches.
+ */
+export type TimelineEntityPatch = {
+  title?: string;
+  body?: Record<string, unknown>;
+  aliases?: string[];
+  block_type?: WorldKbEntityProjection['block_type'];
+};
+
+/**
+ * Structured conflict info extracted from a daemon `ErrorResponse` that
+ * matches the V1.73 `WorldKbConflictError` (409) or `WorldKbValidationError`
+ * (422) detail shape. The orchestrator renders the existing
+ * `WorldKbEntityConflictModal` (world-kb-flavored copy) from this info — no
+ * Timeline-specific conflict DTO is introduced (architect-locked §5).
+ */
+export type TimelineConflictInfo =
+  | {
+      kind: 'conflict';
+      /** Canonical version the daemon now holds (OCC). */
+      currentVersion: number;
+      /** Entity id the patch targeted. */
+      entityId: string;
+      /** Field path the daemon reports as conflicting (free-form). */
+      conflictingPath: string;
+      /** The user's pending patch (kept so "Reapply" can re-submit). */
+      draftPatch: TimelineEntityPatch;
+      /** Fields the user touched (drives overlap detection in the modal). */
+      dirtyFields: TimelinePatchField[];
+    }
+  | {
+      kind: 'validation';
+      /** Field-level validation messages from `validation_summary.errors[]`. */
+      errors: string[];
+    };
+
+/**
  * Mutable context supplied by the orchestrator so the adapter can render
- * inspectors / alt-view / wire write operations (T4) without closing over
- * stale values. Read at render time from the ref; the adapter object itself
- * stays stable across renders (V1.114 §3.3.1 "stable factory that reads from
- * a mutable `React.RefObject` context").
+ * inspectors / wire write operations without closing over stale values. Read
+ * at render time from the ref; the adapter object itself stays stable across
+ * renders (V1.114 §3.3.1 "stable factory that reads from a mutable
+ * `React.RefObject` context").
  *
- * T2 ships the minimal shape — `worldId` for projection + an optional
- * `client` slot the T2 write-boundary isolation test uses for negative
- * assertions. T4 will extend this with `patchEntity` callbacks + conflict
- * handlers when it wires the legitimate `worldKb.patchEntity` write path.
+ * T2 shipped the minimal shape — `worldId` + an optional `client` slot for the
+ * T2 isolation test. T4 extends this with the write callbacks the inspector
+ * routes through:
+ *   - `onPatchEntity` — the ONLY legitimate write path. The orchestrator
+ *     wires it to `usePatchWorldKbEntity(worldId).mutate(...)`, which calls
+ *     `client.worldKbPatchEntity(worldId, request)` (V1.73). It MUST NOT be
+ *     wired to `client.patchTimelineEvent` (Work-scoped) or any other surface.
+ *   - `onConflict` — fired when the daemon returns 409 / 422 so the
+ *     orchestrator can open the world-kb-flavored conflict modal and refetch
+ *     the canonical graph.
+ *
+ * The `client` slot stays for forward-compatibility and for the write-
+ * boundary isolation tests (T2/T4) to assert negative invocation.
  */
 export interface TimelineCanvasAdapterContext {
   worldId: string;
   /**
    * Optional client reference. T2 does NOT invoke any client method from
-   * `projectGraph` / `summarizeGraph` / `adaptConflict` (the projection is a
-   * pure function of the graph). The slot exists so T4 can extend the
-   * adapter with `patchEntity` routing without changing the factory
-   * signature, AND so the T2 isolation test can assert non-invocation.
+   * `projectGraph` / `summarizeGraph` (the projection is a pure function of
+   * the graph). T4 routes writes through `onPatchEntity` (which the
+   * orchestrator wires to `usePatchWorldKbEntity`) — the client object is
+   * not read directly from this slot at write time. The slot exists so the
+   * T2/T4 isolation tests can assert negative invocation against every
+   * forbidden method on a single mocked client.
    */
   client?: unknown;
+  /**
+   * Write callback — routes a Timeline patch through
+   * `NexusClient.worldKbPatchEntity` (V1.73) only. The orchestrator owns the
+   * React Query mutation; the adapter calls this from the inspector's submit
+   * handler. Undefined in T2 (projection-only) and in tests that don't wire
+   * writes.
+   */
+  onPatchEntity?: (
+    node: Node<TimelineNodeData>,
+    patch: TimelineEntityPatch,
+    dirtyFields: TimelinePatchField[],
+  ) => void;
+  /**
+   * Conflict hand-off — fired by the orchestrator's mutation `onError` when
+   * the daemon returns 409 / 422. The orchestrator renders the
+   * world-kb-flavored conflict modal from the structured info and refetches
+   * the canonical graph. Undefined when no write hook is wired.
+   */
+  onConflict?: (info: TimelineConflictInfo) => void;
 }
 
 export type TimelineCanvasAdapter = CanvasSurfaceAdapter<
@@ -110,15 +201,22 @@ export type TimelineCanvasAdapter = CanvasSurfaceAdapter<
 // ─── Projection constants ───────────────────────────────────────────────────
 
 /**
- * Initial-position metrics. `useAutoLayout` runs dagre LR on first open
- * (the adapter does not set `hasSuppliedPositions`), so these are starting
- * hints dagre refines. The temporal sort + axis separation is what survives
- * dagre — events with `occurred_at` feed the LR rank, others fall to a
- * temporal-unknown cluster, and Context entities cluster off-axis.
+ * Initial-position metrics. The adapter sets `layoutOptions.hasSuppliedPositions`
+ * (T4 — Batch 1 reviewer note), so `useAutoLayout` honors these positions on
+ * first open and does NOT collapse the chronology onto dagre's generic graph
+ * layout. The author can still trigger an explicit `relayout()` to re-run
+ * dagre LR (e.g. when the graph grows too dense to read on the supplied
+ * lanes).
  *
- * `simplify:` these are deterministic lane metrics mirroring the World KB
- * adapter's `LANE_X` / `ROW_Y` constants; replace with a temporal-aware
- * layout plugin if dagre LR ever stops surfacing chronology acceptably.
+ * The metrics encode a deliberate three-lane layout:
+ *   - WHEN_AXIS_Y (0)        — dated events, sorted left→right by `occurred_at`.
+ *   - CONTEXT_CLUSTER_Y (-)  — non-event entities (characters / scenes / ...).
+ *   - TEMPORAL_UNKNOWN_Y (+) — events whose body lacks `occurred_at`.
+ *
+ * `simplify:` deterministic lane metrics mirroring the World KB adapter's
+ * `LANE_X` / `ROW_Y` constants. Replace with a temporal-aware layout plugin
+ * if the three-lane scheme stops scaling (e.g. > 50 dated events need a
+ * scroll-snap calendar rail rather than a wider X axis).
  */
 const WHEN_AXIS_Y = 0;
 const CONTEXT_CLUSTER_Y = -220;
@@ -405,16 +503,23 @@ export function summarizeTimelineGraph(graph: TimelineGraph): string {
  * every orchestrator state change. The factory is therefore called once per
  * orchestrator mount (e.g. via `useMemo([], ...)` or a `useRef`).
  *
- * T2 ships the READ projection only — `projectGraph` + `summarizeGraph` are
- * pure functions of the supplied graph and do not consult the context. The
- * `ctxRef` parameter is a forward-compatible slot: T4 will route
- * `patchEntity` callbacks + `adaptConflict` resolution through it (mirroring
- * the World KB adapter), at which point the projection methods will read
- * `ctxRef.current` for write callbacks without changing this factory's
- * signature.
+ * T4 extensions over T2:
+ *   - `layoutOptions.hasSuppliedPositions = true` — preserves the temporal-
+ *     sorted node positions on first open so dagre LR does NOT collapse the
+ *     chronology onto a generic graph layout (Batch 1 reviewer note). An
+ *     explicit `relayout()` remains available via `useCanvasSurface`.
+ *   - `renderInspector(node)` — renders the inline title/body editor via
+ *     `TimelineInspector`, which routes the patch through
+ *     `ctxRef.current.onPatchEntity` (the orchestrator-owned write callback).
+ *     The inspector receives the full ctxRef so it stays decoupled from
+ *     stale closures.
+ *   - `adaptConflict` is intentionally `null` — the inherited return type
+ *     (`ConflictModalProps`) is Strategy-specific and does not fit world-kb-
+ *     flavored conflicts. Conflict UX is orchestrator-owned (mirrors World
+ *     KB). Use `extractConflict(error)` for the typed parse.
  */
 export function createTimelineCanvasAdapter(
-  _ctxRef: MutableRefObject<TimelineCanvasAdapterContext>,
+  ctxRef: MutableRefObject<TimelineCanvasAdapterContext>,
 ): TimelineCanvasAdapter {
   return {
     surfaceKind: 'timeline',
@@ -426,24 +531,132 @@ export function createTimelineCanvasAdapter(
     // for post-MVP edge components; the architect lock forbids
     // ForeshadowEdge / RealizesEdge / ForkFromEdge (Work-outline kinds).
     edgeTypes: undefined,
-    layoutOptions: { direction: 'LR' },
+    layoutOptions: { direction: 'LR', hasSuppliedPositions: true },
 
     projectGraph(graph) {
       return projectTimelineGraph(graph);
     },
 
     adaptConflict(_error) {
-      // T2 stub — conflict UX (WorldKbConflictError 409 +
-      // WorldKbValidationError 422) is T4 scope. Returning null keeps the
-      // orchestrator's conflict modal closed until T4 lands.
+      // Orchestrator-owned — see `extractConflict` + module doc. Returning
+      // null is consistent with the V1.74 World KB adapter: the Strategy-
+      // specific `ConflictModalProps` shape does not fit world-kb-flavored
+      // conflicts, so the orchestrator renders `WorldKbEntityConflictModal`
+      // directly from the structured info.
       return null;
     },
 
-    // renderInspector / renderAltView are T3 / T5 scope. T2 ships the READ
-    // projection only; the adapter interface leaves both optional.
+    renderInspector(node) {
+      return <TimelineInspector node={node} ctxRef={ctxRef} />;
+    },
+
+    // renderAltView is T5 scope.
 
     summarizeGraph(graph) {
       return summarizeTimelineGraph(graph);
     },
   };
+}
+
+// ─── Conflict extraction (T4 — world-kb-flavored, reused DTOs) ──────────────
+
+/**
+ * Parsed shape of the canonical `ErrorResponse.details` payload the daemon
+ * returns under `world_kb_conflict` (HTTP 409). Mirrors the V1.73 contract
+ * reused verbatim (no Timeline-specific DTO).
+ */
+interface WorldKbConflictDetailsShape {
+  current_version?: number;
+  entity_id?: string;
+  conflicting_path?: string;
+  recovery_hint?: string;
+}
+
+/**
+ * Parsed shape of the canonical `ErrorResponse.details` payload the daemon
+ * returns under `world_kb_validation_failed` (HTTP 422).
+ */
+interface WorldKbValidationDetailsShape {
+  validation_summary?: { errors?: string[] };
+}
+
+/**
+ * The two daemon error codes the Timeline surface recognises. Both are V1.73
+ * reused verbatim — no new code is introduced.
+ */
+type WorldKbErrorCode =
+  | 'world_kb_conflict'
+  | 'world_kb_validation_failed';
+
+interface NexusClientErrorLike {
+  status?: number;
+  code?: string;
+  details?: unknown;
+}
+
+/**
+ * Narrow an unknown error into a recognisable NexusClient error shape. Kept
+ * loose (no `instanceof` coupling) so the extractor is pure and trivially
+ * testable against plain object fixtures.
+ */
+function asNexusClientError(error: unknown): NexusClientErrorLike | null {
+  if (typeof error !== 'object' || error === null) return null;
+  const e = error as Record<string, unknown>;
+  if (typeof e.status !== 'number' && typeof e.code !== 'string') return null;
+  return {
+    status: typeof e.status === 'number' ? e.status : undefined,
+    code: typeof e.code === 'string' ? (e.code as WorldKbErrorCode) : undefined,
+    details: e.details,
+  };
+}
+
+/**
+ * Project a daemon error into a `TimelineConflictInfo`, reusing the V1.73
+ * `WorldKbConflictError` (409) + `WorldKbValidationError` (422) DTOs
+ * verbatim (architect-locked §5 — no Timeline-specific conflict DTO).
+ *
+ * Returns `null` for every other error shape (500, dropped network, etc.) —
+ * those are surfaced as toasts by the orchestrator's mutation `onError`,
+ * matching the V1.73 World KB path.
+ *
+ * Pure: no React, no side effects. The orchestrator renders the modal from
+ * the structured info; this function only narrows the error.
+ */
+export function extractTimelineConflict(
+  error: unknown,
+  context?: {
+    /** The patch the user was attempting (kept so "Reapply" can re-submit). */
+    draftPatch?: TimelineEntityPatch;
+    /** Fields the user touched (drives overlap detection in the modal). */
+    dirtyFields?: TimelinePatchField[];
+  },
+): TimelineConflictInfo | null {
+  const parsed = asNexusClientError(error);
+  if (!parsed) return null;
+
+  if (parsed.status === 409 && parsed.code === 'world_kb_conflict') {
+    const details = (parsed.details ?? {}) as WorldKbConflictDetailsShape;
+    return {
+      kind: 'conflict',
+      currentVersion:
+        typeof details.current_version === 'number'
+          ? details.current_version
+          : 0,
+      entityId: details.entity_id ?? '',
+      conflictingPath: details.conflicting_path ?? '',
+      draftPatch: context?.draftPatch ?? {},
+      dirtyFields: context?.dirtyFields ?? [],
+    };
+  }
+
+  if (parsed.status === 422 && parsed.code === 'world_kb_validation_failed') {
+    const details = (parsed.details ?? {}) as WorldKbValidationDetailsShape;
+    const errors = details.validation_summary?.errors ?? [];
+    return {
+      kind: 'validation',
+      errors: errors.length > 0 ? errors : [],
+    };
+  }
+
+  return null;
 }
