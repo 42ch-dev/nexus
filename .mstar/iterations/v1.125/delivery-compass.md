@@ -1,10 +1,11 @@
 ---
 iteration_id: V1.125
 start_date: 2026-07-19
-status: locked
+status: completed
 iteration_base_branch: main
 target_branch: main
 spec_integration_branch: iteration/v1.125
+end_date: 2026-07-19
 plans:
   - 2026-07-19-v1.125-shell-daemon-agent
   - 2026-07-19-v1.125-orchestration-repair-memory
@@ -52,7 +53,7 @@ Make Control Room trustworthy again (daemon wait, agent apply/footer, orchestrat
 |---------|------|--------|-------|
 | `2026-07-19-v1.125-shell-daemon-agent` | P0 — Shell daemon gate + agent instant-apply | Done | Must |
 | `2026-07-19-v1.125-orchestration-repair-memory` | P1 — Orchestration repair + Memory move | Done | Must |
-| `2026-07-19-v1.125-creation-world-first-ia` | P2 — Creation World-first IA first slice | Todo | Must |
+| `2026-07-19-v1.125-creation-world-first-ia` | P2 — Creation World-first IA first slice | Done | Must |
 
 ## Milestones
 
@@ -129,8 +130,15 @@ Plans: [`.mstar/plans/2026-07-19-v1.125-shell-daemon-agent.md`](../../plans/2026
 
 ## Quality Gate Summary
 
-> Filled at iteration-close.
+| plan_id | QC decision | QA gate | Residuals | Durable summary |
+|---------|-------------|---------|-----------|-----------------|
+| 2026-07-19-v1.125-shell-daemon-agent | Approve with residuals | pm-acceptance | Studio/name match low | plan Review Gate |
+| 2026-07-19-v1.125-orchestration-repair-memory | Approve | pm-acceptance | test coverage suggestions | plan Review Gate |
+| 2026-07-19-v1.125-creation-world-first-ia | Approve | pm-acceptance | EmptyCreateCard Studio gap | plan Review Gate |
+
 
 ## Compound Round Summary
 
-> Filled at iteration-close.
+- Crystallized: none this round (dogfood UX fixes; patterns already covered by existing shell/IA knowledge).
+- Roadmap next: V1.126 selection→submenu shell; canvas Brief/Narrative axis; Schedule→cron; Fork UI.
+

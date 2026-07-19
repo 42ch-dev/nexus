@@ -179,7 +179,7 @@
     },
     {
       "plan_id": "2026-07-19-v1.125-creation-world-first-ia",
-      "status": "InProgress",
+      "status": "Done",
       "iteration_refs": [
         "V1.125"
       ],
@@ -188,7 +188,9 @@
         "spec_integration_branch": "iteration/v1.125",
         "merge_target": "iteration/v1.125",
         "working_branch": "feature/v1.125-creation-world-first-ia",
-        "description": "Worlds-first Creation IA + Settings beside theme"
+        "description": "Worlds-first Creation IA + Settings beside theme",
+        "qa_gate": "pm-acceptance",
+        "qc_decision": "approve"
       }
     }
   ],
