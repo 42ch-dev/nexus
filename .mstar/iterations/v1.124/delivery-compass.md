@@ -104,7 +104,7 @@ V1.123 shipped three-layer Timeline **feel** in `apps/web`. The product bet alre
 | `2026-07-19-v1.124-p0-studio-timeline-fixtures` | P0 — Studio-first Timeline fixtures + AGENTS.md policy land | Todo | Must; foundation; no upstream |
 | `2026-07-19-v1.124-p1-studio-tokens-gallery-completion` | P1 — Studio Tokens gallery completion | Todo | Must; disjoint files from P0 |
 | `2026-07-19-v1.124-p2-unrepresented-surface-audit` | P2 — Unrepresented surface audit + fixtures | Todo | Should; disjoint from P0/P1 |
-| `2026-07-19-v1.124-p3-promotion-classification-audit` | P3 — Promotion classification audit + decisions | Todo | Stretch; benefits from P0/P1/P2 evidence |
+| `2026-07-19-v1.124-p3-promotion-classification-audit` | P3 — Promotion classification audit + decisions | Done | Stretch; benefits from P0/P1/P2 evidence |
 
 Status values: `Todo` | `InProgress` | `InReview` | `Done` | `Blocked`
 
