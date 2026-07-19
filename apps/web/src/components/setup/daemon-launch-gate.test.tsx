@@ -101,7 +101,7 @@ describe('DaemonLaunchGate', () => {
     expect(startDaemon).not.toHaveBeenCalled();
   });
 
-  it('desktop passes gate when initial status is degraded', async () => {
+  it('desktop keeps splash when initial status is degraded (V1.125)', async () => {
     healthUnavailable();
     const startDaemon = vi.fn(() => Promise.resolve());
     const getDaemonStatus = vi.fn(() =>
@@ -116,7 +116,9 @@ describe('DaemonLaunchGate', () => {
       }),
     });
 
-    await waitFor(() => expect(screen.getByTestId('routes')).toBeInTheDocument());
+    await waitFor(() => expect(getDaemonStatus).toHaveBeenCalled());
+    expect(screen.getByText('Starting daemon…')).toBeInTheDocument();
+    expect(screen.queryByTestId('routes')).not.toBeInTheDocument();
     expect(startDaemon).not.toHaveBeenCalled();
   });
 
