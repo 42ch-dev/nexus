@@ -1857,8 +1857,8 @@ describe('Tokens page — Canvas token gallery (V1.121 P3)', () => {
     );
   });
 
-  it('renders every canvas token group (ambient / node chrome / edges / accents)', () => {
-    for (const idx of ['0', '1', '2', '3']) {
+  it('renders every canvas token group (ambient / node chrome / edges / accents + V1.124 groups)', () => {
+    for (const idx of ['0', '1', '2', '3', '4', '5', '6', '7']) {
       expect(
         screen.getByTestId(`canvas-token-group-${idx}`),
       ).toBeInTheDocument();
@@ -1913,6 +1913,110 @@ describe('Tokens page — Canvas token gallery (V1.121 P3)', () => {
     const swatches = accentsGroup.querySelectorAll('[style*="border-left: 3px"]');
     // All three spine swatches use the spine shape.
     expect(swatches.length).toBe(3);
+  });
+
+  /* ---- V1.124 P1 — Timeline / Layer / Outline pins / Soul Viz axes -------- */
+
+  it('renders Canvas — Timeline accent spine token', () => {
+    const group = screen.getByTestId('canvas-token-group-4');
+    expect(within(group).getByText('Canvas — Timeline accent spine')).toBeInTheDocument();
+    expect(within(group).getByText('canvas-timeline-accent')).toBeInTheDocument();
+    const spineSwatches = group.querySelectorAll('[style*="border-left: 3px"]');
+    expect(spineSwatches.length).toBe(1);
+  });
+
+  it('renders Canvas — Layer accents tokens (brief / narrative / moment)', () => {
+    const group = screen.getByTestId('canvas-token-group-5');
+    expect(within(group).getByText('Canvas — Layer accents')).toBeInTheDocument();
+    expect(within(group).getByText('canvas-layer-brief-accent')).toBeInTheDocument();
+    expect(within(group).getByText('canvas-layer-narrative-accent')).toBeInTheDocument();
+    expect(within(group).getByText('canvas-layer-moment-accent')).toBeInTheDocument();
+  });
+
+  it('renders Canvas — Outline Timeline pins tokens', () => {
+    const group = screen.getByTestId('canvas-token-group-6');
+    expect(within(group).getByText('Canvas — Outline Timeline pins')).toBeInTheDocument();
+    expect(
+      within(group).getByText('canvas-outline-timeline-event-pin'),
+    ).toBeInTheDocument();
+    expect(
+      within(group).getByText('canvas-outline-timeline-marker'),
+    ).toBeInTheDocument();
+  });
+
+  it('renders Soul Viz — Timeline axes tokens', () => {
+    const group = screen.getByTestId('canvas-token-group-7');
+    expect(within(group).getByText('Soul Viz — Timeline axes')).toBeInTheDocument();
+    expect(within(group).getByText('soul-viz-timeline-axis-line')).toBeInTheDocument();
+    expect(within(group).getByText('soul-viz-timeline-axis-tick')).toBeInTheDocument();
+    expect(within(group).getByText('soul-viz-timeline-axis-label')).toBeInTheDocument();
+  });
+
+  it('keeps V1.124 gallery tokens in the DOM across light + dark theme toggle', () => {
+    const labels = [
+      'canvas-timeline-accent',
+      'canvas-layer-brief-accent',
+      'canvas-layer-narrative-accent',
+      'canvas-layer-moment-accent',
+      'canvas-outline-timeline-event-pin',
+      'canvas-outline-timeline-marker',
+      'soul-viz-timeline-axis-line',
+      'soul-viz-timeline-axis-tick',
+      'soul-viz-timeline-axis-label',
+    ];
+
+    for (const label of labels) {
+      expect(screen.getByText(label)).toBeInTheDocument();
+    }
+
+    expect(document.documentElement.classList.contains('dark')).toBe(false);
+    act(() => screen.getByLabelText(/Switch to dark theme/).click());
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
+
+    for (const label of labels) {
+      expect(screen.getByText(label)).toBeInTheDocument();
+    }
+  });
+
+  it('V1.124 P1 - CSS-variable bindings: swatch styles reference the expected var(--color-*) names', () => {
+    // Verify that the rendered swatch elements have style attributes referencing
+    // the correct CSS custom properties. jsdom cannot resolve the actual color
+    // values, but asserting the var() binding is present confirms the wiring
+    // between tokens.tsx entries and the CSS variable names in tokens.css.
+    const groups = [
+      { testId: 'canvas-token-group-4', vars: ['var(--color-canvas-timeline-accent)'] },
+      {
+        testId: 'canvas-token-group-5',
+        vars: [
+          'var(--color-canvas-layer-brief-accent)',
+          'var(--color-canvas-layer-narrative-accent)',
+          'var(--color-canvas-layer-moment-accent)',
+        ],
+      },
+      {
+        testId: 'canvas-token-group-6',
+        vars: [
+          'var(--color-canvas-outline-timeline-event-pin)',
+          'var(--color-canvas-outline-timeline-marker)',
+        ],
+      },
+      {
+        testId: 'canvas-token-group-7',
+        vars: [
+          'var(--color-soul-viz-timeline-axis-line)',
+          'var(--color-soul-viz-timeline-axis-tick)',
+          'var(--color-soul-viz-timeline-axis-label)',
+        ],
+      },
+    ];
+
+    for (const { testId, vars } of groups) {
+      const group = screen.getByTestId(testId);
+      const groupHTML = group.innerHTML;
+      for (const v of vars) {
+        expect(groupHTML).toContain(v);
+      }
+    }
   });
 });
 
