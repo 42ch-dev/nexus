@@ -233,7 +233,7 @@
     },
     {
       "plan_id": "2026-07-20-v1.126-p2-composite-timeline-endpoint",
-      "status": "InProgress",
+      "status": "Done",
       "iteration_refs": [
         "V1.126"
       ],
@@ -242,7 +242,12 @@
         "spec_integration_branch": "iteration/v1.126",
         "merge_target": "iteration/v1.126",
         "working_branch": "feature/v1.126-p2-composite-timeline-endpoint",
-        "wire_contracts_changed": true
+        "wire_contracts_changed": true,
+        "done_at": "2026-07-20",
+        "qc_verdict": "Approve with residuals",
+        "qa_verdict": "Pass (mandatory, post-sqlx-cache-fix)",
+        "residuals_open_count": 11,
+        "merge_commit": "merged into iteration/v1.126"
       }
     },
     {
@@ -281,13 +286,13 @@
     "target_branch": "main",
     "tech_debt_summary": {
       "updated_at": "2026-07-20",
-      "total_open": 266,
+      "total_open": 277,
       "by_severity": {
         "critical": 0,
         "high": 1,
         "medium": 3,
-        "low": 102,
-        "nit": 160
+        "low": 104,
+        "nit": 169
       },
       "by_target": {
         "V1.96": 8,
@@ -3390,6 +3395,134 @@
         "closure_note": null,
         "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p1-canvas-directed-axis/review/qc-consolidated.md",
         "notes": "qc3 S-1; V1.127+ polish; 1000-event stress test."
+      }
+    ],
+    "2026-07-20-v1.126-p2-composite-timeline-endpoint": [
+      {
+        "id": "R-V1126P2-QC-W-001",
+        "severity": "low",
+        "title": "sqlx runtime macro for static COUNT (qc1 W-1)",
+        "lifecycle": "closed",
+        "closure_note": "Fixed in V1.126 P2 QC fix wave (commit 702f9790)",
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p2-composite-timeline-endpoint/review/qc-consolidated.md",
+        "notes": "qc1 W-1 resolved; converted to sqlx::query_scalar! macro."
+      },
+      {
+        "id": "R-V1126P2-QC-W-002",
+        "severity": "low",
+        "title": "Cursor length validation missing (qc2 W-2)",
+        "lifecycle": "closed",
+        "closure_note": "Fixed in V1.126 P2 QC fix wave (commit 702f9790)",
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p2-composite-timeline-endpoint/review/qc-consolidated.md",
+        "notes": "qc2 W-2 resolved; 256-char limit + test."
+      },
+      {
+        "id": "R-V1126P2-QC-W-003",
+        "severity": "low",
+        "title": "3 sub-queries for aggregation (qc3 W-1)",
+        "lifecycle": "closed",
+        "closure_note": "Fixed in V1.126 P2 QC fix wave (commit 702f9790)",
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p2-composite-timeline-endpoint/review/qc-consolidated.md",
+        "notes": "qc3 W-1 resolved; consolidated to conditional aggregation."
+      },
+      {
+        "id": "R-V1126P2-QC-W-004",
+        "severity": "low",
+        "title": "Single-commit policy: 4 commits instead of 1 (qc1 W-2)",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p2-composite-timeline-endpoint/review/qc-consolidated.md",
+        "notes": "qc1 W-2; resolved at PR squash-merge."
+      },
+      {
+        "id": "R-V1126P2-QC-W-005",
+        "severity": "low",
+        "title": "total_worlds re-counted per page (qc3 W-2)",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p2-composite-timeline-endpoint/review/qc-consolidated.md",
+        "notes": "qc3 W-2; V1.127+ polish."
+      },
+      {
+        "id": "R-V1126P2-QC-S-001",
+        "severity": "nit",
+        "title": "Schema cursor not in required array (qc1 S-1)",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p2-composite-timeline-endpoint/review/qc-consolidated.md",
+        "notes": "qc1 S-1; spec drift; V1.127+ polish."
+      },
+      {
+        "id": "R-V1126P2-QC-S-002",
+        "severity": "nit",
+        "title": "Aggregation bypasses NarrativeGateway (qc1 S-2)",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p2-composite-timeline-endpoint/review/qc-consolidated.md",
+        "notes": "qc1 S-2; V1.127+ polish."
+      },
+      {
+        "id": "R-V1126P2-QC-S-003",
+        "severity": "nit",
+        "title": "No explicit one-network-call assertion (qc1 S-5)",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p2-composite-timeline-endpoint/review/qc-consolidated.md",
+        "notes": "qc1 S-5; V1.127+ polish."
+      },
+      {
+        "id": "R-V1126P2-QC-S-004",
+        "severity": "nit",
+        "title": "No dedicated worlds-page.test.tsx (qc1 S-6)",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p2-composite-timeline-endpoint/review/qc-consolidated.md",
+        "notes": "qc1 S-6; V1.127+ polish."
+      },
+      {
+        "id": "R-V1126P2-QC-S-005",
+        "severity": "nit",
+        "title": "Cursor malformed 'tl:' prefix test (qc2 S-7)",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p2-composite-timeline-endpoint/review/qc-consolidated.md",
+        "notes": "qc2 S-7; V1.127+ polish."
+      },
+      {
+        "id": "R-V1126P2-QC-S-006",
+        "severity": "nit",
+        "title": "No cursor pagination UI for >20 worlds (qc3 S-1)",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p2-composite-timeline-endpoint/review/qc-consolidated.md",
+        "notes": "qc3 S-1; V1.127+ polish."
+      },
+      {
+        "id": "R-V1126P2-QC-S-007",
+        "severity": "nit",
+        "title": "No explicit N+1 assertion (qc3 S-2)",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p2-composite-timeline-endpoint/review/qc-consolidated.md",
+        "notes": "qc3 S-2; V1.127+ polish."
+      },
+      {
+        "id": "R-V1126P2-QC-S-008",
+        "severity": "nit",
+        "title": "WorldsPage overview fetch no error state (qc3 S-3)",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p2-composite-timeline-endpoint/review/qc-consolidated.md",
+        "notes": "qc3 S-3; V1.127+ polish."
+      },
+      {
+        "id": "R-V1126P2-QC-S-009",
+        "severity": "nit",
+        "title": "Dynamic SQL prevents prepared statement caching (qc3 S-4)",
+        "lifecycle": "open",
+        "closure_note": null,
+        "tracking_link": ".mstar/sdd/2026-07-20-v1.126-p2-composite-timeline-endpoint/review/qc-consolidated.md",
+        "notes": "qc3 S-4; V1.127+ polish."
       }
     ]
   }
