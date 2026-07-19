@@ -144,3 +144,4 @@ Implementation-detail SSOT that is not iteration-scoped stays in [`.mstar/knowle
 | V1.123 | [v1.123/](v1.123/) | completed | 3 spec(s) |
 | V1.124 | [v1.124/](v1.124/) | completed | compass + 4 plans (Studio-first gap closure) |
 | V1.125 | [v1.125/](v1.125/) | completed | Control Room dogfood + World-first IA |
+| V1.126 | [v1.126/](v1.126/) | active | Shell + Canvas deepening + Tech-debt gate |

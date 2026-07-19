@@ -192,14 +192,70 @@
         "qa_gate": "pm-acceptance",
         "qc_decision": "approve"
       }
+    },
+    {
+      "plan_id": "2026-07-20-v1.126-p0-shell-selection-submenu",
+      "status": "Todo",
+      "iteration_refs": [
+        "V1.126"
+      ],
+      "metadata": {
+        "primary_spec": ".mstar/iterations/v1.126/specs/shell-selection-submenu.md",
+        "spec_integration_branch": "iteration/v1.126",
+        "merge_target": "iteration/v1.126",
+        "working_branch": "feature/v1.126-p0-shell-selection-submenu",
+        "wire_contracts_changed": false
+      }
+    },
+    {
+      "plan_id": "2026-07-20-v1.126-p1-canvas-directed-axis",
+      "status": "Todo",
+      "iteration_refs": [
+        "V1.126"
+      ],
+      "metadata": {
+        "primary_spec": ".mstar/iterations/v1.126/specs/canvas-directed-axis.md",
+        "spec_integration_branch": "iteration/v1.126",
+        "merge_target": "iteration/v1.126",
+        "working_branch": "feature/v1.126-p1-canvas-directed-axis",
+        "wire_contracts_changed": false
+      }
+    },
+    {
+      "plan_id": "2026-07-20-v1.126-p2-composite-timeline-endpoint",
+      "status": "Todo",
+      "iteration_refs": [
+        "V1.126"
+      ],
+      "metadata": {
+        "primary_spec": ".mstar/iterations/v1.126/specs/composite-timeline-endpoint.md",
+        "spec_integration_branch": "iteration/v1.126",
+        "merge_target": "iteration/v1.126",
+        "working_branch": "feature/v1.126-p2-composite-timeline-endpoint",
+        "wire_contracts_changed": true
+      }
+    },
+    {
+      "plan_id": "2026-07-20-v1.126-p3-status-compaction-residual-cleanup",
+      "status": "Todo",
+      "iteration_refs": [
+        "V1.126"
+      ],
+      "metadata": {
+        "primary_spec": ".mstar/iterations/v1.126/specs/status-compaction-residual-cleanup.md",
+        "spec_integration_branch": "iteration/v1.126",
+        "merge_target": "iteration/v1.126",
+        "working_branch": "feature/v1.126-p3-status-compaction-residual-cleanup",
+        "wire_contracts_changed": false
+      }
     }
   ],
   "metadata": {
     "integration_branch_retired": false,
     "iteration_base_branch": "main",
     "last_integration_branch": "iteration/v1.123",
-    "latest_active_compass": "v1.125/delivery-compass.md",
-    "latest_active_iteration": "V1.125",
+    "latest_active_compass": "v1.126/delivery-compass.md",
+    "latest_active_iteration": "V1.126",
     "latest_ship": {
       "iteration": "V1.123",
       "compass": "v1.123/delivery-compass.md",
@@ -210,7 +266,7 @@
     "platform_integration": "paused — local-only until further notice",
     "pre_implement_gate": null,
     "pre_iteration_hotfix": null,
-    "spec_integration_branch": "iteration/v1.125",
+    "spec_integration_branch": "iteration/v1.126",
     "spec_refs_index": ".mstar/specs/README.md",
     "target_branch": "main",
     "tech_debt_summary": {
