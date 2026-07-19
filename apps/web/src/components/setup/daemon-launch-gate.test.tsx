@@ -162,7 +162,11 @@ describe('DaemonLaunchGate', () => {
       if (statusCalls === 1) {
         return Promise.resolve({ state: 'starting', port: 8420 } as DaemonStatus);
       }
-      return Promise.resolve({ state: 'running', port: 8420, version: 'test' });
+      return Promise.resolve({
+        state: 'running',
+        port: 8420,
+        version: 'test',
+      } satisfies DaemonStatus);
     });
 
     vi.useFakeTimers({ shouldAdvanceTime: true });
