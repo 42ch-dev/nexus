@@ -11,8 +11,8 @@
       "iteration": "V1.126",
       "compass": "v1.126/delivery-compass.md",
       "shipped_at": "2026-07-20",
-      "pr": "pending",
-      "merge_commit": "pending"
+      "pr": "https://github.com/42ch-dev/nexus/pull/160",
+      "merge_commit": "pending squash-merge"
     },
     "platform_integration": "paused — local-only until further notice",
     "spec_integration_branch": "iteration/v1.126",
