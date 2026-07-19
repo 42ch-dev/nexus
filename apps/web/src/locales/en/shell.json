@@ -147,12 +147,6 @@
     "agent": "Agent",
     "unassigned": "Unassigned",
     "rename": "Rename",
-    "delete": "Delete",
-    "deleteConfirmTitle": "Delete {{name}}",
-    "deleteConfirmDescription": "This action cannot be undone. The {{type}} and all its data will be permanently deleted.",
-    "deleteConfirmAction": "Delete",
-    "deleteConfirmCancel": "Cancel",
-    "renameFailed": "Failed to rename. Please try again.",
-    "deleteFailed": "Failed to delete. Please try again."
+    "renameFailed": "Failed to rename. Please try again."
   }
 }

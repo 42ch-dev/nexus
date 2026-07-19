@@ -25,7 +25,7 @@ Today the Creator-tab sidebar row only navigates — clicking a World row naviga
    | 2 | Open KB / Open Outline | World: `/worlds/<id>/kb`; Work: `/works/<id>/outline` | World XOR Work (conditional copy + target — single menu slot) |
    | 3 | Agent: `<current agent or "Unassigned">` › | Opens `AgentPicker` in dialog mode; on apply → `setAgentProfile` IPC + invalidation (V1.125 P0 T2 contract) | World + Work |
    | 4 | Rename | Inline-edit the row label; persists via `PATCH /v1/daemon/works/{id}` (Work) or World KB patch (World) | World + Work |
-   | 5 | Delete | Confirmation dialog (`Delete <World Name>` / `Delete <Work Name>` per DESIGN.md §Voice — name the changed object); existing delete flows | World + Work |
+   **Delete deferred** — no DELETE route exists for works/worlds (ND-A5 violation). Tracked in `R-V1126P0-T2-001` + V1.127+ roadmap.
 4. **Transient state.** Submenu open/close is **not** URL-persisted — it is transient UI state (popover open/close). The active World/Work selection itself is already URL-derived.
 5. **Keyboard contract.** Row focused → `Enter` / `⌘.` opens; arrow keys move within submenu; `Esc` closes and returns focus to the row; `Tab` out closes. **Dismiss triggers:** outside-click, Esc, route change, blur to outside the submenu.
 6. **i18n + Voice.** Verb-only action labels (`Open`, `Rename`, `Delete`) per DESIGN.md §Voice & Content; entity name in dialog title (`Delete <World Name>`, `Rename <World Name>`). All keys in the `shell` namespace; en + zh-CN.
@@ -97,7 +97,7 @@ Today the Creator-tab sidebar row only navigates — clicking a World row naviga
 
 ### ND-A5 — Wire contracts verdict
 
-- **`wire_contracts_changed: false` — CONFIRMED.** Submenu is frontend chrome only. Agent assignment reuses existing `setAgentProfile` IPC. Rename/delete reuse existing `PATCH /v1/daemon/works/{id}` + World KB patch routes. No new schemas, no codegen, no daemon Rust changes. No PATCH route additions.
+- **`wire_contracts_changed: false` — CONFIRMED.** Submenu is frontend chrome only. Agent assignment reuses existing `setAgentProfile` IPC. Rename reuses existing `PATCH /v1/daemon/works/{id}` + World KB patch routes. Delete is **deferred** (V1.127+) since no DELETE route exists for works or worlds — tracked in `R-V1126P0-T2-001`. No new schemas, no codegen, no daemon Rust changes. No PATCH route additions.
 
 ## Architecture notes (implementer)
 
@@ -115,7 +115,7 @@ Today the Creator-tab sidebar row only navigates — clicking a World row naviga
 ### Architecture locks
 
 - **T1 (trigger + dismiss):** `Enter` primary trigger (ND-A1); test matrix update in same task. Files: `sidebar.tsx` (Enter handler + chord handler), `shell-sidebar-chrome.tsx` (`renderSubmenu` prop), new `selection-submenu.tsx` (app wrapper), new `selection-submenu.test.tsx`, `sidebar.test.tsx` (updated matrix).
-- **T2 (contents):** `AgentPicker` reused as-is — no component edits (ND-A4). Agent assignment persists via `setAgentProfile` IPC. Rename inline edit → `PATCH /v1/daemon/works/{id}` (Work) / World KB patch (World). Delete confirm dialog titled `Delete <World Name>` / `Delete <Work Name>`.
+- **T2 (contents):** `AgentPicker` reused as-is — no component edits (ND-A4). Agent assignment persists via `setAgentProfile` IPC. Rename inline edit → `PATCH /v1/daemon/works/{id}` (Work) / World KB patch (World). Delete deferred (V1.127+) — no DELETE route exists (see `R-V1126P0-T2-001`).
 - **T3 (a11y + i18n):** ARIA `menu`/`menuitem` roles on the extracted `SelectionSubmenu`; focus trap within submenu. All visible strings via `t()` in `shell` namespace.
 - **T4 (Studio fixture):** Consume the extracted `@web-shell/selection-submenu` presentational component (ND-A2). Light + dark, all variants. `wire_contracts_changed: false` (ND-A5).
 
@@ -123,7 +123,7 @@ Today the Creator-tab sidebar row only navigates — clicking a World row naviga
 
 | ID | Author sees / does |
 |----|-------------------|
-| AC-V1126-1 | Sidebar row opens submenu via `Enter` (primary keyboard path), `⌘.`/`Ctrl+.` (power-user chord — pending architect ratification per Concerns), or `•••` button (mouse + touch); submenu has Timeline/KB (World) / Outline (Work) entry, agent assignment, rename, delete; keyboard complete (arrow keys + Esc + Tab-out dismiss); i18n complete (en + zh-CN); a11y complete (ARIA menu roles + focus trap); Studio fixture shipped (all variants, light + dark) |
+| AC-V1126-1 | Sidebar row opens submenu via `Enter` (primary keyboard path), `⌘.`/`Ctrl+.` (power-user chord — pending architect ratification per Concerns), or `•••` button (mouse + touch); submenu has Timeline/KB (World) / Outline (Work) entry, agent assignment, rename; keyboard complete (arrow keys + Esc + Tab-out dismiss); i18n complete (en + zh-CN); a11y complete (ARIA menu roles + focus trap); Studio fixture shipped (all variants, light + dark). **Note: V1.126 ships Rename; Delete tracked in R-V1126P0-T2-001 for V1.127+.** |
 
 ## Out of scope
 

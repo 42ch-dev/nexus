@@ -826,7 +826,7 @@ describe('Sidebar — submenu contents (V1.126 P0 T2)', () => {
     });
   });
 
-  it('shows Agent, Rename, and Delete items on Work submenu', async () => {
+  it('shows Agent and Rename items on Work submenu', async () => {
     const user = userEvent.setup();
     renderWithWork();
 
@@ -840,11 +840,10 @@ describe('Sidebar — submenu contents (V1.126 P0 T2)', () => {
     await waitFor(() => {
       expect(screen.getByRole('menuitem', { name: /Agent:/i })).toBeInTheDocument();
       expect(screen.getByRole('menuitem', { name: /Rename/i })).toBeInTheDocument();
-      expect(screen.getByRole('menuitem', { name: /Delete/i })).toBeInTheDocument();
     });
   });
 
-  it('does not show Agent, Rename, Delete on World group-level submenu', async () => {
+  it('does not show Agent, Rename on World group-level submenu', async () => {
     const user = userEvent.setup();
     renderWithWork();
 
@@ -857,7 +856,6 @@ describe('Sidebar — submenu contents (V1.126 P0 T2)', () => {
 
     expect(screen.queryByRole('menuitem', { name: /Agent:/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('menuitem', { name: /Rename/i })).not.toBeInTheDocument();
-    expect(screen.queryByRole('menuitem', { name: /Delete/i })).not.toBeInTheDocument();
   });
 
   it('Rename item triggers inline edit on Work submenu', async () => {
@@ -883,7 +881,15 @@ describe('Sidebar — submenu contents (V1.126 P0 T2)', () => {
     );
   });
 
-  it('Delete item shows confirmation dialog on Work submenu', async () => {
+  it('Rename mutation calls PATCH with correct title on Enter', async () => {
+    let patchPayload: unknown;
+    useHandlers(
+      http.patch('/v1/daemon/works/:workId', async ({ request, params }) => {
+        patchPayload = { workId: params.workId, body: await request.json() };
+        return HttpResponse.json({});
+      }),
+    );
+
     const user = userEvent.setup();
     renderWithWork();
 
@@ -895,39 +901,65 @@ describe('Sidebar — submenu contents (V1.126 P0 T2)', () => {
     await user.click(menuBtn);
 
     await waitFor(() =>
-      expect(screen.getByRole('menuitem', { name: /Delete/i })).toBeInTheDocument(),
+      expect(screen.getByRole('menuitem', { name: /Rename/i })).toBeInTheDocument(),
     );
 
-    const deleteItem = screen.getByRole('menuitem', { name: /Delete/i });
-    await user.click(deleteItem);
+    await user.click(screen.getByRole('menuitem', { name: /Rename/i }));
 
     await waitFor(() =>
-      expect(screen.getByRole('dialog', { name: /Delete Alpha Novel/i })).toBeInTheDocument(),
-    );
-  });
-
-  it('Delete confirmation dialog has Cancel and Delete buttons', async () => {
-    const user = userEvent.setup();
-    renderWithWork();
-
-    await waitFor(() =>
-      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+      expect(screen.getByTestId('sidebar-rename-input')).toBeInTheDocument(),
     );
 
-    const menuBtn = screen.getByRole('button', { name: /Open menu for Alpha Novel/i });
-    await user.click(menuBtn);
-
-    await waitFor(() =>
-      expect(screen.getByRole('menuitem', { name: /Delete/i })).toBeInTheDocument(),
-    );
-
-    const deleteItem = screen.getByRole('menuitem', { name: /Delete/i });
-    await user.click(deleteItem);
+    const input = screen.getByTestId('sidebar-rename-input');
+    await user.clear(input);
+    await user.type(input, 'Beta Novel');
+    await user.keyboard('{Enter}');
 
     await waitFor(() => {
-      expect(screen.getByRole('dialog', { name: /Delete Alpha Novel/i })).toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /Cancel/i })).toBeInTheDocument();
-      expect(screen.getByTestId('sidebar-delete-confirm-btn')).toBeInTheDocument();
+      expect(patchPayload).toEqual({
+        workId: 'work-alpha',
+        body: { title: 'Beta Novel' },
+      });
+    });
+  });
+
+  it('Rename failure shows error toast', async () => {
+    useHandlers(
+      http.patch('/v1/daemon/works/:workId', () =>
+        HttpResponse.json(
+          { success: false, error: { code: 'INTERNAL_ERROR', message: 'Server error' } },
+          { status: 500 },
+        ),
+      ),
+    );
+
+    const user = userEvent.setup();
+    renderWithWork();
+
+    await waitFor(() =>
+      expect(screen.getByRole('link', { name: 'Alpha Novel' })).toBeInTheDocument(),
+    );
+
+    const menuBtn = screen.getByRole('button', { name: /Open menu for Alpha Novel/i });
+    await user.click(menuBtn);
+
+    await waitFor(() =>
+      expect(screen.getByRole('menuitem', { name: /Rename/i })).toBeInTheDocument(),
+    );
+
+    await user.click(screen.getByRole('menuitem', { name: /Rename/i }));
+
+    await waitFor(() =>
+      expect(screen.getByTestId('sidebar-rename-input')).toBeInTheDocument(),
+    );
+
+    const input = screen.getByTestId('sidebar-rename-input');
+    await user.clear(input);
+    await user.type(input, 'Beta Novel');
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => {
+      expect(screen.getByText(/Could not update Work/i)).toBeInTheDocument();
     });
   });
 });

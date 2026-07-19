@@ -11,14 +11,11 @@ import {
   ListChecks,
   Pencil,
   Sparkles,
-  Trash2,
   User,
 } from 'lucide-react';
 
-import { flattenPages, usePatchWork, useDeleteWork, useWorks } from '@/api/queries';
+import { flattenPages, usePatchWork, useWorks } from '@/api/queries';
 import { NexusLogo } from '@/components/brand/nexus-logo';
-import { Dialog, DialogContent, DialogClose } from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
 import { FooterProfiles } from '@/components/layout/footer-profiles';
 import { useAgentPickerDialog } from '@/components/layout/use-agent-picker-dialog';
 import {
@@ -73,12 +70,10 @@ export function Sidebar() {
   const worksQuery = useWorks({ limit: 12 });
   const works = useMemo(() => flattenPages(worksQuery.data), [worksQuery.data]);
   const patchWork = usePatchWork();
-  const deleteWork = useDeleteWork();
   const agentDialog = useAgentPickerDialog();
 
   const [renamingItem, setRenamingItem] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState('');
-  const [deletingItem, setDeletingItem] = useState<ShellNavItem | null>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -116,15 +111,6 @@ export function Sidebar() {
       patchWork.mutate({ workId: wid, request: { title: renameValue.trim() } });
     }
     setRenamingItem(null);
-  }
-
-  function handleDeleteConfirm() {
-    if (!deletingItem) return;
-    const workId = extractWorkId(deletingItem);
-    if (workId) {
-      deleteWork.mutate(workId);
-    }
-    setDeletingItem(null);
   }
 
   const creatorGroups: ShellNavGroup[] = useMemo(
@@ -250,16 +236,6 @@ export function Sidebar() {
                         close();
                       },
                     },
-                    {
-                      id: 'delete',
-                      label: t('submenu.delete'),
-                      icon: Trash2,
-                      variant: 'danger' as const,
-                      onSelect: () => {
-                        setDeletingItem(item);
-                        close();
-                      },
-                    },
                   ]
                 : []),
             ]}
@@ -338,37 +314,6 @@ export function Sidebar() {
           );
         }}
       />
-
-      {/* Delete confirmation dialog */}
-      <Dialog
-        open={deletingItem !== null}
-        onOpenChange={(open) => {
-          if (!open) setDeletingItem(null);
-        }}
-      >
-        <DialogContent
-          title={t('submenu.deleteConfirmTitle', { name: deletingItem?.label ?? '' })}
-          description={t('submenu.deleteConfirmDescription', {
-            type: deletingItem?.to.startsWith('/worlds') ? 'world' : 'work',
-          })}
-        >
-          <div className="flex justify-end gap-2">
-            <DialogClose asChild>
-              <Button variant="secondary" size="small">
-                {t('submenu.deleteConfirmCancel')}
-              </Button>
-            </DialogClose>
-            <Button
-              variant="destructive"
-              size="small"
-              onClick={() => handleDeleteConfirm()}
-              data-testid="sidebar-delete-confirm-btn"
-            >
-              {t('submenu.deleteConfirmAction')}
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </nav>
   );
 }
