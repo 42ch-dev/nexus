@@ -332,8 +332,7 @@ mod tests {
         let (tmp, nexus_home, db_path) = create_test_workspace().await;
         let state = WorkspaceState::new_for_testing(nexus_home, db_path, None).await;
         let long_cursor = format!("tl:{}", "a".repeat(1000));
-        let result =
-            get_timeline_overview(State(state), make_query(Some(long_cursor))).await;
+        let result = get_timeline_overview(State(state), make_query(Some(long_cursor))).await;
         assert!(result.is_err());
         match result.unwrap_err() {
             NexusApiError::InvalidInput { field, reason } => {
